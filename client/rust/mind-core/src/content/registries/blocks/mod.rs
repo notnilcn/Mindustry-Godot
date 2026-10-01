@@ -42,11 +42,11 @@ use super::super::bundle::BundleView;
 use super::super::category::Category;
 use super::super::color::Rgba;
 use super::super::ctype::{Content, Mappable, ModContentInfo, UnlockFields, Unlockable};
-use super::super::id::{BlockId, ItemId, LiquidId, PlanetId};
+use super::super::id::{BlockId, ItemId, LiquidId, PlanetId, UnitTypeId};
 pub use super::super::registries::planets::EnvFlag;
 use super::super::settings_store::UnlockStore;
-use super::super::stacks::{ItemStack, LiquidStack, round_to_i32};
-use super::super::{ContentError, ContentType};
+use super::super::stacks::{ItemStack, LiquidStack, PayloadStack, round_to_i32};
+use super::super::{ContentError, ContentRef, ContentType};
 use super::ContentRegistry;
 
 /// Base tile size constant (`Block.tilesize`).
@@ -853,6 +853,101 @@ pub const fn stack(item: &'static str, amount: i32) -> StackSpec {
     StackSpec { item, amount }
 }
 
+/// Generated unit-factory plan input (`new UnitPlan(unit, time, requirements)`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnitPlanSpec {
+    /// Produced unit name.
+    pub unit: &'static str,
+    /// Build time in ticks.
+    pub time: f32,
+    /// Item requirements.
+    pub requirements: Vec<StackSpec>,
+}
+
+/// Builds a unit plan spec.
+pub fn unit_plan(unit: &'static str, time: f32, requirements: Vec<StackSpec>) -> UnitPlanSpec {
+    UnitPlanSpec {
+        unit,
+        time,
+        requirements,
+    }
+}
+
+/// Payload stack input (`PayloadStack.list(...)`; block or unit name).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PayloadStackSpec {
+    /// Content name (parity ABI).
+    pub name: &'static str,
+    /// Whether the payload is a block (else a unit).
+    pub block: bool,
+    /// Amount.
+    pub amount: i32,
+}
+
+/// Builds a payload stack spec for a block.
+pub const fn payload_block(name: &'static str, amount: i32) -> PayloadStackSpec {
+    PayloadStackSpec {
+        name,
+        block: true,
+        amount,
+    }
+}
+
+/// Builds a payload stack spec for a unit.
+pub const fn payload_unit(name: &'static str, amount: i32) -> PayloadStackSpec {
+    PayloadStackSpec {
+        name,
+        block: false,
+        amount,
+    }
+}
+
+/// Generated assembler plan input (`new AssemblerUnitPlan(unit, time, payloads)`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssemblerUnitPlanSpec {
+    /// Produced unit name.
+    pub unit: &'static str,
+    /// Build time in ticks.
+    pub time: f32,
+    /// Payload requirements.
+    pub payloads: Vec<PayloadStackSpec>,
+}
+
+/// Builds an assembler plan spec.
+pub fn assembler_plan(
+    unit: &'static str,
+    time: f32,
+    payloads: Vec<PayloadStackSpec>,
+) -> AssemblerUnitPlanSpec {
+    AssemblerUnitPlanSpec {
+        unit,
+        time,
+        payloads,
+    }
+}
+
+/// `UnitFactory.UnitPlan` resolved to content ids.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnitPlanDef {
+    /// Produced unit.
+    pub unit: UnitTypeId,
+    /// Build time in ticks.
+    pub time: f32,
+    /// Item requirements.
+    pub requirements: Vec<ItemStack>,
+}
+
+/// `UnitAssembler.AssemblerUnitPlan` resolved to content ids.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssemblerUnitPlanDef {
+    /// Produced unit.
+    pub unit: UnitTypeId,
+    /// Build time in ticks.
+    pub time: f32,
+    /// Payload requirements.
+    pub payloads: Vec<PayloadStack>,
+}
+
 /// Input liquid stack (liquid name-based) used by generated block waves.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LiquidStackSpec {
@@ -1078,6 +1173,12 @@ pub struct BlockSpec {
     pub flags: Vec<BlockFlag>,
     /// Consumers.
     pub consumes: Vec<ConsumeDef>,
+    /// Unit factory plans (`UnitFactory.plans`).
+    pub unit_plans: Vec<UnitPlanSpec>,
+    /// Reconstructor upgrade pairs (`Reconstructor.upgrades`).
+    pub upgrades: Vec<(&'static str, &'static str)>,
+    /// Assembler plans (`UnitAssembler.plans`).
+    pub assembler_plans: Vec<AssemblerUnitPlanSpec>,
     /// Item capacity.
     pub item_capacity: Option<i32>,
     /// Liquid capacity.
@@ -1179,6 +1280,9 @@ impl Default for BlockSpec {
             unit_cap_modifier: None,
             flags: Vec::new(),
             consumes: Vec::new(),
+            unit_plans: Vec::new(),
+            upgrades: Vec::new(),
+            assembler_plans: Vec::new(),
             item_capacity: None,
             liquid_capacity: None,
             has_items: None,
@@ -1607,6 +1711,12 @@ pub struct BlockDef {
     pub flags: Vec<BlockFlag>,
     /// Consumers in declaration order.
     pub consumes: Vec<ConsumeSpec>,
+    /// Unit factory plans (`UnitFactory.plans`).
+    pub unit_plans: Vec<UnitPlanDef>,
+    /// Reconstructor upgrade pairs (`Reconstructor.upgrades`).
+    pub reconstructor_upgrades: Vec<(UnitTypeId, UnitTypeId)>,
+    /// Assembler plans (`UnitAssembler.plans`).
+    pub assembler_plans: Vec<AssemblerUnitPlanDef>,
     /// Indices of optional, non-ignored consumers.
     pub optional_consumers: Vec<usize>,
     /// Indices of non-optional, non-ignored consumers.
@@ -1758,6 +1868,57 @@ impl BlockDef {
             ),
             None => None,
         };
+        let mut unit_plans = Vec::with_capacity(spec.unit_plans.len());
+        for plan in &spec.unit_plans {
+            let unit = registry
+                .unit_id(plan.unit)
+                .ok_or_else(|| ContentError::UnknownName(plan.unit.to_owned()))?;
+            let mut requirements = Vec::with_capacity(plan.requirements.len());
+            for stack in &plan.requirements {
+                requirements.push(resolve_item(registry, stack)?);
+            }
+            unit_plans.push(UnitPlanDef {
+                unit,
+                time: plan.time,
+                requirements,
+            });
+        }
+        let mut reconstructor_upgrades = Vec::with_capacity(spec.upgrades.len());
+        for (from, to) in &spec.upgrades {
+            let from = registry
+                .unit_id(from)
+                .ok_or_else(|| ContentError::UnknownName((*from).to_owned()))?;
+            let to = registry
+                .unit_id(to)
+                .ok_or_else(|| ContentError::UnknownName((*to).to_owned()))?;
+            reconstructor_upgrades.push((from, to));
+        }
+        let mut assembler_plans = Vec::with_capacity(spec.assembler_plans.len());
+        for plan in &spec.assembler_plans {
+            let unit = registry
+                .unit_id(plan.unit)
+                .ok_or_else(|| ContentError::UnknownName(plan.unit.to_owned()))?;
+            let mut payloads = Vec::with_capacity(plan.payloads.len());
+            for payload in &plan.payloads {
+                let item = if payload.block {
+                    let id = registry
+                        .block_id(payload.name)
+                        .ok_or_else(|| ContentError::UnknownName(payload.name.to_owned()))?;
+                    ContentRef::block(id)
+                } else {
+                    let id = registry
+                        .unit_id(payload.name)
+                        .ok_or_else(|| ContentError::UnknownName(payload.name.to_owned()))?;
+                    ContentRef::of(ContentType::Unit, id)
+                };
+                payloads.push(PayloadStack::new(item, payload.amount));
+            }
+            assembler_plans.push(AssemblerUnitPlanDef {
+                unit,
+                time: plan.time,
+                payloads,
+            });
+        }
         let region = spec
             .region
             .map(str::to_owned)
@@ -1785,6 +1946,9 @@ impl BlockDef {
             unit_cap_modifier: spec.unit_cap_modifier.unwrap_or(BASE_UNIT_CAP_MODIFIER),
             flags: spec.flags,
             consumes,
+            unit_plans,
+            reconstructor_upgrades,
+            assembler_plans,
             optional_consumers: Vec::new(),
             non_optional_consumers: Vec::new(),
             update_consumers: Vec::new(),

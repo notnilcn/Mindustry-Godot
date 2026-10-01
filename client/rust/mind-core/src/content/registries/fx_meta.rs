@@ -2193,3 +2193,184 @@ pub fn effect_by_name(name: &str) -> Option<EffectId> {
         .position(|meta| meta.name == name)
         .map(|index| EffectId(index as u16))
 }
+
+/// Inline (anonymous) effect class tag used inside content definitions
+/// (`entities/effect/*` + composite `Effect`s; append-only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum InlineEffectKind {
+    /// Plain `new Effect(lifetime[, clip], renderer)`.
+    #[default]
+    Effect = 0,
+    /// `MultiEffect` (parallel children).
+    MultiEffect = 1,
+    /// `ExplosionEffect`.
+    ExplosionEffect = 2,
+    /// `WaveEffect`.
+    WaveEffect = 3,
+    /// `WrapEffect` (recolored child).
+    WrapEffect = 4,
+}
+
+impl InlineEffectKind {
+    /// Java class name.
+    pub const fn name(self) -> &'static str {
+        match self {
+            InlineEffectKind::Effect => "Effect",
+            InlineEffectKind::MultiEffect => "MultiEffect",
+            InlineEffectKind::ExplosionEffect => "ExplosionEffect",
+            InlineEffectKind::WaveEffect => "WaveEffect",
+            InlineEffectKind::WrapEffect => "WrapEffect",
+        }
+    }
+}
+
+/// Inline effect metadata (constructor arguments + assigned fields).
+///
+/// Ported from `entities/effect/{MultiEffect,ExplosionEffect,WaveEffect,
+/// WrapEffect}.java` (fields only). The renderer lambda bodies are draw code
+/// owned by plan 17; this record preserves the parameterized data (lifetime,
+/// clip, subclass fields, composite children).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct EffectSpec {
+    /// Effect class tag.
+    pub kind: InlineEffectKind,
+    /// `Effect.lifetime` (ticks).
+    pub lifetime: f32,
+    /// `Effect.clip` (radius; `Effect(lifetime, clip, ...)` when set at
+    /// construction).
+    pub clip: f32,
+    /// Composite children (`MultiEffect`/`WrapEffect`).
+    pub children: Vec<EffectRef>,
+    /// `WrapEffect.color` (nullable upstream).
+    pub color: Option<crate::content::color::Rgba>,
+    /// `ExplosionEffect.waveStroke`.
+    pub wave_stroke: f32,
+    /// `ExplosionEffect.waveColor` / `WaveEffect.colorFrom`.
+    pub wave_color: Option<crate::content::color::Rgba>,
+    /// `ExplosionEffect.waveLife`.
+    pub wave_life: f32,
+    /// `ExplosionEffect.waveRad`.
+    pub wave_rad: f32,
+    /// `ExplosionEffect.waveRadBase`.
+    pub wave_rad_base: f32,
+    /// `ExplosionEffect.sparkColor`.
+    pub spark_color: Option<crate::content::color::Rgba>,
+    /// `ExplosionEffect.sparkRad`.
+    pub spark_rad: f32,
+    /// `ExplosionEffect.sparks`.
+    pub sparks: i32,
+    /// `ExplosionEffect.sparkLen`.
+    pub spark_len: f32,
+    /// `ExplosionEffect.sparkStroke`.
+    pub spark_stroke: f32,
+    /// `ExplosionEffect.smokeColor`.
+    pub smoke_color: Option<crate::content::color::Rgba>,
+    /// `ExplosionEffect.smokes`.
+    pub smokes: i32,
+    /// `ExplosionEffect.smokeSize`.
+    pub smoke_size: f32,
+    /// `ExplosionEffect.smokeSizeBase`.
+    pub smoke_size_base: f32,
+    /// `WaveEffect.colorTo`.
+    pub color_to: Option<crate::content::color::Rgba>,
+    /// `WaveEffect.sizeFrom`.
+    pub size_from: f32,
+    /// `WaveEffect.sizeTo`.
+    pub size_to: f32,
+    /// `WaveEffect.strokeFrom`.
+    pub stroke_from: f32,
+    /// `WaveEffect.strokeTo`.
+    pub stroke_to: f32,
+}
+
+impl EffectSpec {
+    /// `new Effect(lifetime, renderer)` (renderer body is plan 17).
+    pub fn plain(lifetime: f32) -> Self {
+        Self {
+            lifetime,
+            ..Self::default()
+        }
+    }
+
+    /// `new Effect(lifetime, clip, renderer)`.
+    pub fn plain_clip(lifetime: f32, clip: f32) -> Self {
+        Self {
+            lifetime,
+            clip,
+            ..Self::default()
+        }
+    }
+
+    /// `new MultiEffect(children...)` (lifetime derived: max of children,
+    /// resolved by the generator from the source).
+    pub fn multi(lifetime: f32, children: Vec<EffectRef>) -> Self {
+        Self {
+            kind: InlineEffectKind::MultiEffect,
+            lifetime,
+            children,
+            ..Self::default()
+        }
+    }
+
+    /// `new ExplosionEffect(){{...}}` (fields applied by the caller).
+    pub fn explosion() -> Self {
+        Self {
+            kind: InlineEffectKind::ExplosionEffect,
+            ..Self::default()
+        }
+    }
+
+    /// `new WaveEffect(){{...}}`.
+    pub fn wave() -> Self {
+        Self {
+            kind: InlineEffectKind::WaveEffect,
+            ..Self::default()
+        }
+    }
+
+    /// `new WrapEffect(child, color)`.
+    pub fn wrap(child: EffectRef, color: crate::content::color::Rgba, lifetime: f32) -> Self {
+        Self {
+            kind: InlineEffectKind::WrapEffect,
+            lifetime,
+            children: vec![child],
+            color: Some(color),
+            ..Self::default()
+        }
+    }
+}
+
+/// Effect reference: a named `Fx` entry or an inline anonymous effect.
+///
+/// Vanilla unit/turret definitions construct anonymous effects inline
+/// (`shootEffect = new ExplosionEffect(){{...}}`); plan 17 replays both kinds.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EffectRef {
+    /// `Fx.<name>` from the seed table.
+    Named(EffectId),
+    /// An inline `new Effect`/`ExplosionEffect`/... construction (data kept
+    /// verbatim; renderer bodies are plan 17).
+    Inline(Box<EffectSpec>),
+}
+
+impl EffectRef {
+    /// Lifetime in ticks (inline effects carry their own).
+    pub fn lifetime(&self) -> f32 {
+        match self {
+            EffectRef::Named(id) => id.meta().lifetime,
+            EffectRef::Inline(spec) => spec.lifetime,
+        }
+    }
+}
+
+impl Default for EffectRef {
+    fn default() -> Self {
+        EffectRef::Named(EffectId::NONE)
+    }
+}
+
+impl From<EffectId> for EffectRef {
+    fn from(id: EffectId) -> Self {
+        EffectRef::Named(id)
+    }
+}

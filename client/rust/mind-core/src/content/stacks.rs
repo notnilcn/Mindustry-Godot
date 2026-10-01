@@ -173,6 +173,23 @@ impl ItemSeq {
     pub fn total(&self) -> i64 {
         self.counts.iter().map(|value| i64::from(*value)).sum()
     }
+
+    /// `ItemSeq.add(ItemStack[])`: adds every stack.
+    pub fn add_stacks(&mut self, stacks: &[ItemStack]) {
+        for stack in stacks {
+            self.add(stack.item, stack.amount);
+        }
+    }
+
+    /// `ItemSeq.toArray`: nonzero counts as stacks, in id order.
+    pub fn to_array(&self) -> Vec<ItemStack> {
+        self.counts
+            .iter()
+            .enumerate()
+            .filter(|(_, amount)| **amount > 0)
+            .map(|(index, amount)| ItemStack::new(ItemId::new(index as u16), *amount))
+            .collect()
+    }
 }
 
 /// `PayloadSeq`: dense id-indexed payload counts (per block/unit space).

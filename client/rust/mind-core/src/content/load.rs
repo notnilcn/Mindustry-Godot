@@ -14,13 +14,13 @@
 use std::collections::BTreeMap;
 
 use super::ctype::{Content, ErrorContent, Mappable, ModId};
-use super::id::{BlockId, BulletId, ItemId, LiquidId, PlanetId, StatusId, TeamEntryId};
+use super::id::{BlockId, BulletId, ItemId, LiquidId, PlanetId, StatusId, TeamEntryId, UnitTypeId};
 use super::names::{self, NameMaps};
 use super::parser_hooks::ModErrorSink;
 use super::registries::{
     blocks::BlockDef, bullets::BulletDef, commands::UnitCommandDef, items::Item, liquids::Liquid,
     loadouts::LoadoutDef, planets::PlanetDef, sectors::SectorPresetDef, stances::UnitStanceDef,
-    statuses::StatusEffect, teams::TeamEntry, weathers::WeatherDef,
+    statuses::StatusEffect, teams::TeamEntry, units::UnitTypeDef, weathers::WeatherDef,
 };
 use super::snapshot::RegistryIndexSnapshot;
 use super::tech::{TechNodeRef, TechStore, TreeId};
@@ -132,6 +132,7 @@ pub struct ContentRegistry {
     pub(crate) bullets: Vec<BulletDef>,
     pub(crate) liquids: Vec<Liquid>,
     pub(crate) statuses: Vec<StatusEffect>,
+    pub(crate) units: Vec<UnitTypeDef>,
     pub(crate) unit_commands: Vec<UnitCommandDef>,
     pub(crate) unit_stances: Vec<UnitStanceDef>,
     pub(crate) weathers: Vec<WeatherDef>,
@@ -164,6 +165,7 @@ impl ContentRegistry {
             bullets: Vec::new(),
             liquids: Vec::new(),
             statuses: Vec::new(),
+            units: Vec::new(),
             unit_commands: Vec::new(),
             unit_stances: Vec::new(),
             weathers: Vec::new(),
@@ -257,6 +259,7 @@ impl ContentRegistry {
             ContentType::Bullet => self.bullets.len(),
             ContentType::Liquid => self.liquids.len(),
             ContentType::Status => self.statuses.len(),
+            ContentType::Unit => self.units.len(),
             ContentType::UnitCommand => self.unit_commands.len(),
             ContentType::UnitStance => self.unit_stances.len(),
             ContentType::Weather => self.weathers.len(),
@@ -287,6 +290,7 @@ impl ContentRegistry {
             ContentType::Block => push_mappable!(blocks),
             ContentType::Liquid => push_mappable!(liquids),
             ContentType::Status => push_mappable!(statuses),
+            ContentType::Unit => push_mappable!(units),
             ContentType::UnitCommand => push_mappable!(unit_commands),
             ContentType::UnitStance => push_mappable!(unit_stances),
             ContentType::Weather => push_mappable!(weathers),
@@ -322,9 +326,11 @@ impl ContentRegistry {
             return Ok(());
         }
         self.sweep(LifecyclePhase::Init)?;
+        super::registries::bullets::link(self)?;
         super::registries::statuses::link(self)?;
         super::registries::stances::link(self)?;
         super::registries::sectors::link(self)?;
+        super::registries::units::link(self)?;
         self.phases.init = true;
         Ok(())
     }
@@ -371,6 +377,9 @@ impl ContentRegistry {
             record.after_patch()?;
         }
         for record in self.statuses.iter_mut() {
+            record.after_patch()?;
+        }
+        for record in self.units.iter_mut() {
             record.after_patch()?;
         }
         Ok(())
@@ -422,6 +431,7 @@ impl ContentRegistry {
                 ContentType::Bullet => self.bullets.truncate(len),
                 ContentType::Liquid => self.liquids.truncate(len),
                 ContentType::Status => self.statuses.truncate(len),
+                ContentType::Unit => self.units.truncate(len),
                 ContentType::UnitCommand => self.unit_commands.truncate(len),
                 ContentType::UnitStance => self.unit_stances.truncate(len),
                 ContentType::Weather => self.weathers.truncate(len),
@@ -468,6 +478,12 @@ impl ContentRegistry {
             }
             ContentType::Status => {
                 if let Some(mut record) = take_record(&mut self.statuses, content.id) {
+                    record.remove_content();
+                    self.rebuild_names();
+                }
+            }
+            ContentType::Unit => {
+                if let Some(mut record) = take_record(&mut self.units, content.id) {
                     record.remove_content();
                     self.rebuild_names();
                 }
@@ -585,6 +601,11 @@ impl ContentRegistry {
     /// Convenience lookup: block id by name.
     pub fn block_id(&self, name: &str) -> Option<BlockId> {
         self.block_by_name(name).map(|record| record.id)
+    }
+
+    /// Convenience lookup: unit type id by name.
+    pub fn unit_id(&self, name: &str) -> Option<UnitTypeId> {
+        self.unit_by_name(name).map(|record| record.id)
     }
 
     /// Convenience lookup: planet id by name.
@@ -707,6 +728,7 @@ impl ContentRegistry {
         sweep_type!(bullets, BulletDef);
         sweep_type!(liquids, Liquid);
         sweep_type!(statuses, StatusEffect);
+        sweep_type!(units, UnitTypeDef);
         sweep_type!(unit_commands, UnitCommandDef);
         sweep_type!(unit_stances, UnitStanceDef);
         sweep_type!(weathers, WeatherDef);
@@ -734,6 +756,7 @@ impl ContentRegistry {
         insert_names!(blocks, ContentType::Block);
         insert_names!(liquids, ContentType::Liquid);
         insert_names!(statuses, ContentType::Status);
+        insert_names!(units, ContentType::Unit);
         insert_names!(unit_commands, ContentType::UnitCommand);
         insert_names!(unit_stances, ContentType::UnitStance);
         insert_names!(weathers, ContentType::Weather);
@@ -888,6 +911,17 @@ impl ContentRegistry {
         statuses,
         StatusEffect,
         StatusId
+    );
+    mappable_accessors!(
+        add_unit,
+        units,
+        units_mut,
+        unit,
+        unit_mut,
+        unit_by_name,
+        units,
+        UnitTypeDef,
+        UnitTypeId
     );
     mappable_accessors!(
         add_unit_command,
