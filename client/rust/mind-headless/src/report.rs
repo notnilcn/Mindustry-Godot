@@ -75,7 +75,6 @@ pub struct SimReport {
     pub per_tick: Option<Vec<String>>,
 }
 
-<<<<<<< HEAD
 /// `content load` report (per-type counts, plan 02 §7b).
 #[derive(Debug, Clone, Serialize)]
 pub struct ContentLoadReport {
