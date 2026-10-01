@@ -335,6 +335,7 @@ impl ContentRegistry {
             return Ok(());
         }
         self.sweep(LifecyclePhase::PostInit)?;
+        super::registries::blocks::post_init_link(self)?;
         self.phases.post_init = true;
         Ok(())
     }

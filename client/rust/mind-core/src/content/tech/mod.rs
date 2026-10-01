@@ -730,15 +730,18 @@ mod tests {
         // Serpulo: root + 202 node + 20 nodeProduce (223). Erekir: root + 133
         // node + 18 nodeProduce (152). `missing` counts unresolved content names
         // across nodes and objectives, so it exceeds `unresolved_nodes`.
+        // M3 (blocks B1-B2) raises resolution from items/liquids/sectors (M2) to
+        // also cover environment/ore/crafting/defense blocks; M4/M5 drive this to
+        // zero (assert `missing.is_empty()` there).
         assert_eq!(
-            reports[0].1.resolved_nodes, 49,
-            "items/liquids/sectors resolve at M2"
+            reports[0].1.resolved_nodes, 91,
+            "items/liquids/sectors + B1-B2 blocks resolve at M3"
         );
-        assert_eq!(reports[0].1.unresolved_nodes, 174);
-        assert_eq!(reports[0].1.missing.len(), 273);
-        assert_eq!(reports[1].1.resolved_nodes, 35);
-        assert_eq!(reports[1].1.unresolved_nodes, 117);
-        assert_eq!(reports[1].1.missing.len(), 150);
+        assert_eq!(reports[0].1.unresolved_nodes, 132);
+        assert_eq!(reports[0].1.missing.len(), 217);
+        assert_eq!(reports[1].1.resolved_nodes, 64);
+        assert_eq!(reports[1].1.unresolved_nodes, 88);
+        assert_eq!(reports[1].1.missing.len(), 114);
         assert_eq!(registry.tech().trees.len(), 2);
         let serpulo_tree = registry.tech().trees[0].root;
         assert_eq!(

@@ -41,7 +41,10 @@ pub use load::{
     ContentEntry, ContentRegistry, LifecyclePhase, MappedId, TemporaryMapper, content_counts,
 };
 pub use names::{NameMaps, mod_content_name_map, transform_name};
-pub use registries::blocks::{BlockDef, Blocks};
+pub use registries::blocks::{
+    BlockDef, BlockFlag, BlockGroup, BlockKind, BlockSpec, Blocks, BuildVisibility, Consume,
+    ConsumeSpec, EnvMask,
+};
 pub use registries::bullets::{BulletDef, BulletKind};
 pub use registries::commands::{ControllerKind, UnitCommandDef};
 pub use registries::create_base_content;

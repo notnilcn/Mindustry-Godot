@@ -1,0 +1,452 @@
+# Ledger — blocks (upstream `content/Blocks.java`, 441 entries)
+
+> Source-derived fingerprint (`golden_sha` = sha256/12 of the canonical metadata spec).
+> The JVM golden (`parity/golden_content.json`) is pending (NUD-10); this ledger is the
+> M3/M4 mechanical audit per plan 02 §6.2/§9.
+
+| pos | name | kind | ported | golden_sha | wave | notes |
+|-----|------|------|--------|-----------|------|-------|
+| 0 | air | AirBlock | [x] | 7616d2bbbd10 | B1 |  |
+| 1 | spawn | SpawnBlock | [x] | 38bae12570ce | B1 |  |
+| 2 | remove-wall | RemoveWall | [x] | c2373d4ea635 | B1 |  |
+| 3 | remove-ore | RemoveOre | [x] | fef165500f93 | B1 |  |
+| 4 | cliff | Cliff | [x] | 556e9c260f0f | B1 |  |
+| 5 | build1 | ConstructBlock | [x] | aa0d5691ee0d | B1 |  |
+| 6 | build2 | ConstructBlock | [x] | 5cefa82bbf97 | B1 |  |
+| 7 | build3 | ConstructBlock | [x] | 5803323f8237 | B1 |  |
+| 8 | build4 | ConstructBlock | [x] | 043785e9b0a9 | B1 |  |
+| 9 | build5 | ConstructBlock | [x] | 39faba7a13b5 | B1 |  |
+| 10 | build6 | ConstructBlock | [x] | 76176c3a05a4 | B1 |  |
+| 11 | build7 | ConstructBlock | [x] | a9d90f5cce51 | B1 |  |
+| 12 | build8 | ConstructBlock | [x] | b5a727296557 | B1 |  |
+| 13 | build9 | ConstructBlock | [x] | 8b1bc6a60987 | B1 |  |
+| 14 | build10 | ConstructBlock | [x] | 19425088659c | B1 |  |
+| 15 | build11 | ConstructBlock | [x] | 8cefcc547414 | B1 |  |
+| 16 | build12 | ConstructBlock | [x] | 0a033595ca42 | B1 |  |
+| 17 | build13 | ConstructBlock | [x] | 5f500f72a8df | B1 |  |
+| 18 | build14 | ConstructBlock | [x] | 30e292690ae3 | B1 |  |
+| 19 | build15 | ConstructBlock | [x] | b47c99c93360 | B1 |  |
+| 20 | build16 | ConstructBlock | [x] | b0642509e773 | B1 |  |
+| 21 | shallow-water | Floor | [x] | bc8edd993859 | B1 |  |
+| 22 | tainted-water | Floor | [x] | d51c0d86680f | B1 |  |
+| 23 | deep-tainted-water | Floor | [x] | 1021514846e1 | B1 |  |
+| 24 | darksand-tainted-water | ShallowLiquid | [x] | e34ac2ec2584 | B1 |  |
+| 25 | sand-water | ShallowLiquid | [x] | d10219ee0f5f | B1 |  |
+| 26 | darksand-water | ShallowLiquid | [x] | cdb11f5a3042 | B1 |  |
+| 27 | tar | Floor | [x] | 385cdad4ef7b | B1 |  |
+| 28 | pooled-cryofluid | Floor | [x] | fcfdd4c4376b | B1 |  |
+| 29 | molten-slag | Floor | [x] | b33e8dfd6367 | B1 |  |
+| 30 | space | Floor | [x] | c1a304a424d8 | B1 |  |
+| 31 | empty | EmptyFloor | [x] | 3383f28e6c23 | B1 |  |
+| 32 | stone | Floor | [x] | abcd588e64ee | B1 |  |
+| 33 | crater-stone | Floor | [x] | efce50daaf94 | B1 |  |
+| 34 | char | Floor | [x] | 5e35fd32370f | B1 |  |
+| 35 | basalt | Floor | [x] | 716d48b6fc96 | B1 |  |
+| 36 | hotrock | Floor | [x] | 9753ed80bfef | B1 |  |
+| 37 | magmarock | Floor | [x] | 5884e85e33ae | B1 |  |
+| 38 | sand-floor | Floor | [x] | ad6202318851 | B1 |  |
+| 39 | darksand | Floor | [x] | fe2e1dadd10b | B1 |  |
+| 40 | dirt | Floor | [x] | 1752f49d4d68 | B1 |  |
+| 41 | mud | Floor | [x] | 412ccdc25d62 | B1 |  |
+| 42 | dacite | Floor | [x] | 73ad381bdeb5 | B1 |  |
+| 43 | rhyolite | Floor | [x] | f19205b397f8 | B1 |  |
+| 44 | rhyolite-crater | Floor | [x] | 00388afe94d1 | B1 |  |
+| 45 | rough-rhyolite | Floor | [x] | 5557daaecc0e | B1 |  |
+| 46 | regolith | Floor | [x] | 9edbd4265be4 | B1 |  |
+| 47 | yellow-stone | Floor | [x] | 20eb7a20ad7b | B1 |  |
+| 48 | carbon-stone | Floor | [x] | 9ce712f50687 | B1 |  |
+| 49 | ferric-stone | Floor | [x] | 0ae8161953e3 | B1 |  |
+| 50 | ferric-craters | Floor | [x] | a96e50631a5c | B1 |  |
+| 51 | beryllic-stone | Floor | [x] | 90eeb9b847cb | B1 |  |
+| 52 | crystalline-stone | Floor | [x] | 43be478a8839 | B1 |  |
+| 53 | crystal-floor | Floor | [x] | 9fdffcaae081 | B1 |  |
+| 54 | yellow-stone-plates | Floor | [x] | 0248ebc77d9b | B1 |  |
+| 55 | red-stone | Floor | [x] | 6ecd4f07674f | B1 |  |
+| 56 | dense-red-stone | Floor | [x] | 61415f989cb5 | B1 |  |
+| 57 | red-ice | Floor | [x] | 43fb8e2be1ef | B1 |  |
+| 58 | arkycite-floor | Floor | [x] | c5261218af5a | B1 |  |
+| 59 | arkyic-stone | Floor | [x] | 45934676cf84 | B1 |  |
+| 60 | rhyolite-vent | SteamVent | [x] | 5d20119a04c2 | B1 |  |
+| 61 | carbon-vent | SteamVent | [x] | 3b1643ab7070 | B1 |  |
+| 62 | arkyic-vent | SteamVent | [x] | 7f9e17d987bb | B1 |  |
+| 63 | yellow-stone-vent | SteamVent | [x] | c0742b784365 | B1 |  |
+| 64 | red-stone-vent | SteamVent | [x] | 53380d835e55 | B1 |  |
+| 65 | crystalline-vent | SteamVent | [x] | 2e6dd134c2f9 | B1 |  |
+| 66 | stone-vent | SteamVent | [x] | 22e39300c63b | B1 |  |
+| 67 | basalt-vent | SteamVent | [x] | d4f7f63343bc | B1 |  |
+| 68 | redmat | Floor | [x] | b25756ca76ac | B1 |  |
+| 69 | bluemat | Floor | [x] | f0a55e5853e2 | B1 |  |
+| 70 | grass | Floor | [x] | 2abe250984b0 | B1 |  |
+| 71 | salt | Floor | [x] | ba069e8d4338 | B1 |  |
+| 72 | snow | Floor | [x] | 34c676a5c332 | B1 |  |
+| 73 | ice | Floor | [x] | 2a69f9ca91fa | B1 |  |
+| 74 | ice-snow | Floor | [x] | fec38e1b44b5 | B1 |  |
+| 75 | shale | Floor | [x] | 65f335b216fe | B1 |  |
+| 76 | moss | Floor | [x] | 610efb8dc20e | B1 |  |
+| 77 | core-zone | Floor | [x] | d47db017d0dd | B1 |  |
+| 78 | spore-moss | Floor | [x] | f13752f18dc8 | B1 |  |
+| 79 | stone-wall | StaticWall | [x] | d3ab6ccaeb11 | B1 |  |
+| 80 | spore-wall | StaticWall | [x] | 6424cf8ffef4 | B1 |  |
+| 81 | dirt-wall | StaticWall | [x] | c13797e68f4e | B1 |  |
+| 82 | dacite-wall | StaticWall | [x] | bfb1950c7cd5 | B1 |  |
+| 83 | ice-wall | StaticWall | [x] | 399dfe0023f9 | B1 |  |
+| 84 | snow-wall | StaticWall | [x] | ffce0ac1b116 | B1 |  |
+| 85 | dune-wall | StaticWall | [x] | 05820cc54f8f | B1 |  |
+| 86 | regolith-wall | StaticWall | [x] | d13a7ba6e21c | B1 |  |
+| 87 | yellow-stone-wall | StaticWall | [x] | f01154a54fee | B1 |  |
+| 88 | rhyolite-wall | StaticWall | [x] | 22cbc2616b59 | B1 |  |
+| 89 | carbon-wall | StaticWall | [x] | 1c002c2af895 | B1 |  |
+| 90 | ferric-stone-wall | StaticWall | [x] | fb4a7b12ec57 | B1 |  |
+| 91 | beryllic-stone-wall | StaticWall | [x] | 178f728ac648 | B1 |  |
+| 92 | arkyic-wall | StaticWall | [x] | d12cd1b464b6 | B1 |  |
+| 93 | crystalline-stone-wall | StaticWall | [x] | fbd84bcd31f0 | B1 |  |
+| 94 | red-ice-wall | StaticWall | [x] | d95d52f02b20 | B1 |  |
+| 95 | red-stone-wall | StaticWall | [x] | 7beeace8076f | B1 |  |
+| 96 | red-diamond-wall | StaticTree | [x] | 5224cb99c9f8 | B1 |  |
+| 97 | sand-wall | StaticWall | [x] | 79770c97c5a5 | B1 |  |
+| 98 | salt-wall | StaticWall | [x] | 9a3114fad31f | B1 |  |
+| 99 | shrubs | StaticWall | [x] | 49e9fc45e440 | B1 |  |
+| 100 | shale-wall | StaticWall | [x] | fea665284afa | B1 |  |
+| 101 | spore-pine | StaticTree | [x] | 9e1ec9774bc5 | B1 |  |
+| 102 | snow-pine | StaticTree | [x] | 579733b57c35 | B1 |  |
+| 103 | pine | StaticTree | [x] | 1fb7e9666418 | B1 |  |
+| 104 | white-tree-dead | TreeBlock | [x] | 960d3fb6b9c6 | B1 |  |
+| 105 | white-tree | TreeBlock | [x] | d12742a0f875 | B1 |  |
+| 106 | spore-cluster | Prop | [x] | c35aea5a4da3 | B1 |  |
+| 107 | redweed | Seaweed | [x] | e5f9372c3237 | B1 |  |
+| 108 | pur-bush | SeaBush | [x] | 4a68f9bb3667 | B1 |  |
+| 109 | yellowcoral | SeaBush | [x] | 3f565a4661f5 | B1 |  |
+| 110 | boulder | StaticProp | [x] | df821abc33d5 | B1 |  |
+| 111 | snow-boulder | StaticProp | [x] | 3b94f55c264a | B1 |  |
+| 112 | shale-boulder | StaticProp | [x] | 379dd55ea363 | B1 |  |
+| 113 | sand-boulder | StaticProp | [x] | e90b93e4aacf | B1 |  |
+| 114 | dacite-boulder | StaticProp | [x] | 55179b51c7a0 | B1 |  |
+| 115 | basalt-boulder | StaticProp | [x] | cb70a2d4b6f3 | B1 |  |
+| 116 | carbon-boulder | StaticProp | [x] | bbe48d8342a8 | B1 |  |
+| 117 | ferric-boulder | StaticProp | [x] | 96b7704c380e | B1 |  |
+| 118 | beryllic-boulder | StaticProp | [x] | d73230b336c7 | B1 |  |
+| 119 | yellow-stone-boulder | StaticProp | [x] | df4b1e2c014c | B1 |  |
+| 120 | arkyic-boulder | Prop | [x] | 63cb90f71864 | B1 |  |
+| 121 | crystal-cluster | TallBlock | [x] | c0abe9f4ba3c | B1 |  |
+| 122 | vibrant-crystal-cluster | TallBlock | [x] | 16b4dc09b80f | B1 |  |
+| 123 | crystal-blocks | TallBlock | [x] | fd9352dc0b46 | B1 |  |
+| 124 | crystal-orbs | TallBlock | [x] | af361609977f | B1 |  |
+| 125 | crystalline-boulder | StaticProp | [x] | 94908affdbe9 | B1 |  |
+| 126 | red-ice-boulder | StaticProp | [x] | c10b062550cd | B1 |  |
+| 127 | rhyolite-boulder | StaticProp | [x] | 05addf4607b3 | B1 |  |
+| 128 | red-stone-boulder | StaticProp | [x] | 0331f2b293c4 | B1 |  |
+| 129 | metal-floor | Floor | [x] | ce6d5d1f92fe | B1 |  |
+| 130 | metal-floor-damaged | Floor | [x] | 7f17ebcf5346 | B1 |  |
+| 131 | metal-floor-2 | Floor | [x] | ef954f7f7d43 | B1 |  |
+| 132 | metal-floor-3 | Floor | [x] | 8bef92cea77b | B1 |  |
+| 133 | metal-floor-4 | Floor | [x] | b7f651cce0c9 | B1 |  |
+| 134 | metal-floor-5 | Floor | [x] | 25f43e5fe70d | B1 |  |
+| 135 | dark-panel-1 | Floor | [x] | 12b199b8d0e0 | B1 |  |
+| 136 | dark-panel-2 | Floor | [x] | 5ccf5452a4c1 | B1 |  |
+| 137 | dark-panel-3 | Floor | [x] | 29ec35b20294 | B1 |  |
+| 138 | dark-panel-4 | Floor | [x] | 05307cb16752 | B1 |  |
+| 139 | dark-panel-5 | Floor | [x] | a8df8020d9a3 | B1 |  |
+| 140 | dark-panel-6 | Floor | [x] | 647ef8c846bb | B1 |  |
+| 141 | dark-metal | StaticWall | [x] | dcfde3bd1f7d | B1 |  |
+| 142 | metal-tiles-1 | Floor | [x] | 44596c38cb95 | B1 |  |
+| 143 | metal-tiles-2 | Floor | [x] | 434f02578518 | B1 |  |
+| 144 | metal-tiles-3 | Floor | [x] | 0b9607534557 | B1 |  |
+| 145 | metal-tiles-4 | Floor | [x] | b25bc186325c | B1 |  |
+| 146 | metal-tiles-5 | Floor | [x] | 123b3f5ccbe0 | B1 |  |
+| 147 | metal-tiles-6 | Floor | [x] | c3db1ee5574a | B1 |  |
+| 148 | metal-tiles-7 | Floor | [x] | 540c3008afc2 | B1 |  |
+| 149 | metal-tiles-8 | Floor | [x] | 13ca80ed7749 | B1 |  |
+| 150 | metal-tiles-9 | Floor | [x] | e3f965f5ef64 | B1 |  |
+| 151 | metal-tiles-10 | Floor | [x] | a5d5d8ecd8e5 | B1 |  |
+| 152 | metal-tiles-11 | Floor | [x] | c91424bc0651 | B1 |  |
+| 153 | metal-tiles-12 | Floor | [x] | abbac917f9cc | B1 |  |
+| 154 | metal-tiles-13 | Floor | [x] | fcb86716f7f8 | B1 |  |
+| 155 | metal-wall-1 | StaticWall | [x] | 825b2cab792f | B1 |  |
+| 156 | metal-wall-2 | StaticWall | [x] | 97dd85eead62 | B1 |  |
+| 157 | metal-wall-3 | StaticWall | [x] | a11d91d9e41c | B1 |  |
+| 158 | colored-floor | ColoredFloor | [x] | 3d68cd77ef17 | B1 |  |
+| 159 | colored-wall | ColoredWall | [x] | f9dd5f645686 | B1 |  |
+| 160 | character-overlay | CharacterOverlay | [x] | b98c7b089381 | B1 |  |
+| 161 | character-overlay-white | CharacterOverlay | [x] | cc5d0a06a37d | B1 |  |
+| 162 | rune-overlay | RuneOverlay | [x] | 6bedf2e86fb4 | B1 |  |
+| 163 | rune-overlay-crux | RuneOverlay | [x] | 7a956084047c | B1 |  |
+| 164 | pebbles | OverlayFloor | [x] | 6f8f58e70eab | B1 |  |
+| 165 | tendrils | OverlayFloor | [x] | 773c9d230da6 | B1 |  |
+| 166 | ore-copper | OreBlock | [x] | 78f01ac0f465 | B1 |  |
+| 167 | ore-lead | OreBlock | [x] | 1f47d06f3049 | B1 |  |
+| 168 | ore-scrap | OreBlock | [x] | 99b7d9549b58 | B1 |  |
+| 169 | ore-coal | OreBlock | [x] | 28dc960bf142 | B1 |  |
+| 170 | ore-titanium | OreBlock | [x] | 19e457038582 | B1 |  |
+| 171 | ore-thorium | OreBlock | [x] | 5ca1392c45c5 | B1 |  |
+| 172 | ore-beryllium | OreBlock | [x] | bb02ed38f0b9 | B1 |  |
+| 173 | ore-tungsten | OreBlock | [x] | 7ed39f8453a1 | B1 |  |
+| 174 | ore-crystal-thorium | OreBlock | [x] | 7e087d98c461 | B1 |  |
+| 175 | ore-wall-thorium | OreBlock | [x] | 1eca9749c01f | B1 |  |
+| 176 | ore-wall-beryllium | OreBlock | [x] | 7903bd617d9c | B1 |  |
+| 177 | graphitic-wall | StaticWall | [x] | 313e087893ea | B1 |  |
+| 178 | ore-wall-graphite | OreBlock | [x] | 1dcf5065e6cc | B1 |  |
+| 179 | ore-wall-tungsten | OreBlock | [x] | f83eaef2a140 | B1 |  |
+| 180 | graphite-press | GenericCrafter | [x] | afe8a244348f | B2 |  |
+| 181 | multi-press | GenericCrafter | [x] | 409da781717c | B2 |  |
+| 182 | silicon-smelter | GenericCrafter | [x] | 91e6683601ce | B2 |  |
+| 183 | silicon-crucible | AttributeCrafter | [x] | 109cfbc452d2 | B2 |  |
+| 184 | kiln | GenericCrafter | [x] | c0e9ff0ce7d5 | B2 |  |
+| 185 | plastanium-compressor | GenericCrafter | [x] | 2fda27e6b8d0 | B2 |  |
+| 186 | phase-weaver | GenericCrafter | [x] | c9a9147be9e0 | B2 |  |
+| 187 | surge-smelter | GenericCrafter | [x] | 948610e4ea77 | B2 |  |
+| 188 | cryofluid-mixer | GenericCrafter | [x] | 1dbee3db4b98 | B2 |  |
+| 189 | pyratite-mixer | GenericCrafter | [x] | 7a48a27e7f54 | B2 |  |
+| 190 | blast-mixer | GenericCrafter | [x] | 0b17a3ded032 | B2 |  |
+| 191 | melter | GenericCrafter | [x] | e513dd0ff823 | B2 |  |
+| 192 | separator | Separator | [x] | ce43a7d014a1 | B2 |  |
+| 193 | disassembler | Separator | [x] | 21788bde30d5 | B2 |  |
+| 194 | spore-press | GenericCrafter | [x] | 04104796db44 | B2 |  |
+| 195 | pulverizer | GenericCrafter | [x] | fe4aed38924a | B2 |  |
+| 196 | coal-centrifuge | GenericCrafter | [x] | 7c1ebd368d54 | B2 |  |
+| 197 | incinerator | Incinerator | [x] | 8c071ff2b290 | B2 |  |
+| 198 | silicon-arc-furnace | GenericCrafter | [x] | 28afe47b4abd | B2 |  |
+| 199 | electrolyzer | GenericCrafter | [x] | 0db1fddac770 | B2 |  |
+| 200 | atmospheric-concentrator | HeatCrafter | [x] | 8eb8e8d154ff | B2 |  |
+| 201 | oxidation-chamber | HeatProducer | [x] | 855e0aad175b | B2 |  |
+| 202 | electric-heater | HeatProducer | [x] | 8ae385b59782 | B2 |  |
+| 203 | slag-heater | HeatProducer | [x] | c514ee104021 | B2 |  |
+| 204 | phase-heater | HeatProducer | [x] | ecebf660dfc8 | B2 |  |
+| 205 | heat-redirector | HeatConductor | [x] | 7717decc3687 | B2 |  |
+| 206 | small-heat-redirector | HeatConductor | [x] | 1f19d469dfc6 | B2 |  |
+| 207 | heat-router | HeatConductor | [x] | 9c944832a572 | B2 |  |
+| 208 | slag-incinerator | ItemIncinerator | [x] | 4dba531e8be0 | B2 |  |
+| 209 | carbide-crucible | HeatCrafter | [x] | 9ef964ddec47 | B2 |  |
+| 210 | slag-centrifuge | GenericCrafter | [x] | f12bf0fda73d | B2 |  |
+| 211 | surge-crucible | HeatCrafter | [x] | f6458e347062 | B2 |  |
+| 212 | cyanogen-synthesizer | HeatCrafter | [x] | 8ada4039224c | B2 |  |
+| 213 | phase-synthesizer | HeatCrafter | [x] | a619794afb22 | B2 |  |
+| 214 | heat-reactor | HeatProducer | [x] | 802521be1682 | B2 |  |
+| 215 | copper-wall | Wall | [x] | d3a2f6eec2be | B2 |  |
+| 216 | copper-wall-large | Wall | [x] | fff7f04f34d5 | B2 |  |
+| 217 | titanium-wall | Wall | [x] | c3ac488a1fcb | B2 |  |
+| 218 | titanium-wall-large | Wall | [x] | fc190eb971f1 | B2 |  |
+| 219 | plastanium-wall | Wall | [x] | e48d1f25b31e | B2 |  |
+| 220 | plastanium-wall-large | Wall | [x] | 7e0129f884e1 | B2 |  |
+| 221 | thorium-wall | Wall | [x] | b954bedcf1e2 | B2 |  |
+| 222 | thorium-wall-large | Wall | [x] | b2a897565c43 | B2 |  |
+| 223 | phase-wall | Wall | [x] | b231acb54fec | B2 |  |
+| 224 | phase-wall-large | Wall | [x] | e359ac8bf1be | B2 |  |
+| 225 | surge-wall | Wall | [x] | 0e99dc980104 | B2 |  |
+| 226 | surge-wall-large | Wall | [x] | 07929e8b7e55 | B2 |  |
+| 227 | door | Door | [x] | b30bfef50d34 | B2 |  |
+| 228 | door-large | Door | [x] | da1253e27b1d | B2 |  |
+| 229 | scrap-wall | Wall | [x] | 82b80cbb94c4 | B2 |  |
+| 230 | scrap-wall-large | Wall | [x] | 7493a486d765 | B2 |  |
+| 231 | scrap-wall-huge | Wall | [x] | 94aca0e6d733 | B2 |  |
+| 232 | scrap-wall-gigantic | Wall | [x] | 407a1ffa72b2 | B2 |  |
+| 233 | thruster | Thruster | [x] | bc5a72062610 | B2 |  |
+| 234 | beryllium-wall | Wall | [x] | 56fcd4fa0368 | B2 |  |
+| 235 | beryllium-wall-large | Wall | [x] | f33ad41908d0 | B2 |  |
+| 236 | tungsten-wall | Wall | [x] | 2e2f7c6a9d31 | B2 |  |
+| 237 | tungsten-wall-large | Wall | [x] | 94d05047a616 | B2 |  |
+| 238 | blast-door | AutoDoor | [x] | ab93998c9a51 | B2 |  |
+| 239 | reinforced-surge-wall | Wall | [x] | 6a9793d7d5ea | B2 |  |
+| 240 | reinforced-surge-wall-large | Wall | [x] | fe45338e10c2 | B2 |  |
+| 241 | carbide-wall | Wall | [x] | 19fd8f964098 | B2 |  |
+| 242 | carbide-wall-large | Wall | [x] | d552315c0eb0 | B2 |  |
+| 243 | shielded-wall | ShieldWall | [x] | 4c027f88fa09 | B2 |  |
+| 244 | mender | MendProjector | [x] | 0395c83f1d38 | B2 |  |
+| 245 | mend-projector | MendProjector | [x] | 8d995bc0016c | B2 |  |
+| 246 | overdrive-projector | OverdriveProjector | [x] | dd7a76233310 | B2 |  |
+| 247 | overdrive-dome | OverdriveProjector | [x] | a15b18a7847c | B2 |  |
+| 248 | force-projector | ForceProjector | [x] | 074046af40a0 | B2 |  |
+| 249 | shock-mine | ShockMine | [x] | 61bd2afe77ee | B2 |  |
+| 250 | radar | Radar | [x] | 4b43b102ee92 | B2 |  |
+| 251 | build-tower | BuildTurret | [x] | cafb0f76f08d | B2 |  |
+| 252 | regen-projector | RegenProjector | [x] | feeadc3580eb | B2 |  |
+| 253 | shockwave-tower | ShockwaveTower | [x] | c4fd16d26924 | B2 |  |
+| 254 | shield-projector | BaseShield | [x] | b298583c93c6 | B2 |  |
+| 255 | large-shield-projector | BaseShield | [x] | 1dad9dd65930 | B2 |  |
+| 256 | conveyor | Conveyor | [ ] | 0b1604b6e9f9 | B3 |  |
+| 257 | titanium-conveyor | Conveyor | [ ] | 5ba19363fe5f | B3 |  |
+| 258 | plastanium-conveyor | StackConveyor | [ ] | 3888b15e7531 | B3 |  |
+| 259 | armored-conveyor | ArmoredConveyor | [ ] | 78c1582fee8a | B3 |  |
+| 260 | junction | Junction | [ ] | d5766b51fad1 | B3 |  |
+| 261 | bridge-conveyor | BufferedItemBridge | [ ] | 539bc9884222 | B3 |  |
+| 262 | phase-conveyor | ItemBridge | [ ] | ce026577a3fc | B3 |  |
+| 263 | sorter | Sorter | [ ] | b56450e73147 | B3 |  |
+| 264 | inverted-sorter | Sorter | [ ] | 7f4c451e884e | B3 |  |
+| 265 | router | Router | [ ] | 781bd139dc3e | B3 |  |
+| 266 | distributor | Router | [ ] | 3794cfbdc0a7 | B3 |  |
+| 267 | overflow-gate | OverflowGate | [ ] | 12c341cbcf74 | B3 |  |
+| 268 | underflow-gate | OverflowGate | [ ] | 269383a5fa72 | B3 |  |
+| 269 | unloader | Unloader | [ ] | 2f1bf239506e | B3 |  |
+| 270 | mass-driver | MassDriver | [ ] | 1f7baf86c9d9 | B3 |  |
+| 271 | duct | Duct | [ ] | e00a0a1d0da6 | B3 |  |
+| 272 | armored-duct | Duct | [ ] | 6a913ff99ee6 | B3 |  |
+| 273 | duct-router | DuctRouter | [ ] | 8f7f9fae3428 | B3 |  |
+| 274 | overflow-duct | OverflowDuct | [ ] | 63cbd8916e34 | B3 |  |
+| 275 | underflow-duct | OverflowDuct | [ ] | 85483c75e689 | B3 |  |
+| 276 | duct-bridge | DuctBridge | [ ] | c6dfc0ec37fe | B3 |  |
+| 277 | duct-unloader | DirectionalUnloader | [ ] | 2ab62bb79448 | B3 |  |
+| 278 | surge-conveyor | StackConveyor | [ ] | 8c76e801355d | B3 |  |
+| 279 | surge-router | StackRouter | [ ] | bfc664a6843b | B3 |  |
+| 280 | unit-cargo-loader | UnitCargoLoader | [ ] | ef53aedecb6f | B3 |  |
+| 281 | unit-cargo-unload-point | UnitCargoUnloadPoint | [ ] | 99add7af62ec | B3 |  |
+| 282 | mechanical-pump | Pump | [ ] | 95ca42df8981 | B3 |  |
+| 283 | rotary-pump | Pump | [ ] | e27eb69319cf | B3 |  |
+| 284 | impulse-pump | Pump | [ ] | 9d56806440fa | B3 |  |
+| 285 | conduit | Conduit | [ ] | d4dad1271c84 | B3 |  |
+| 286 | pulse-conduit | Conduit | [ ] | 4dc0c0be3819 | B3 |  |
+| 287 | plated-conduit | ArmoredConduit | [ ] | 9ee73b777f12 | B3 |  |
+| 288 | liquid-router | LiquidRouter | [ ] | 0fe843fd8c56 | B3 |  |
+| 289 | liquid-container | LiquidRouter | [ ] | 291825bb35dd | B3 |  |
+| 290 | liquid-tank | LiquidRouter | [ ] | 5d81af83923c | B3 |  |
+| 291 | liquid-junction | LiquidJunction | [ ] | 6300d10eb77c | B3 |  |
+| 292 | bridge-conduit | LiquidBridge | [ ] | c405fcb84b61 | B3 |  |
+| 293 | phase-conduit | LiquidBridge | [ ] | 2b116946872c | B3 |  |
+| 294 | reinforced-pump | Pump | [ ] | 22058f57a136 | B3 |  |
+| 295 | reinforced-conduit | ArmoredConduit | [ ] | 222666af7cfc | B3 |  |
+| 296 | reinforced-liquid-junction | LiquidJunction | [ ] | a7bfd6f60c20 | B3 |  |
+| 297 | reinforced-bridge-conduit | DirectionLiquidBridge | [ ] | 71e1e66ecbb3 | B3 |  |
+| 298 | reinforced-liquid-router | LiquidRouter | [ ] | 6f5ce074ead9 | B3 |  |
+| 299 | reinforced-liquid-container | LiquidRouter | [ ] | 3f6e4f1f8129 | B3 |  |
+| 300 | reinforced-liquid-tank | LiquidRouter | [ ] | 2f57c8878017 | B3 |  |
+| 301 | power-node | PowerNode | [ ] | 4bee48690491 | B3 |  |
+| 302 | power-node-large | PowerNode | [ ] | f15311f30afe | B3 |  |
+| 303 | surge-tower | PowerNode | [ ] | fed49da09481 | B3 |  |
+| 304 | diode | PowerDiode | [ ] | 5ec3b4863b97 | B3 |  |
+| 305 | battery | Battery | [ ] | 6b954710fa85 | B3 |  |
+| 306 | battery-large | Battery | [ ] | ee6482e02c31 | B3 |  |
+| 307 | combustion-generator | ConsumeGenerator | [ ] | 8fd0d0d28899 | B3 |  |
+| 308 | thermal-generator | ThermalGenerator | [ ] | 52089e544942 | B3 |  |
+| 309 | steam-generator | ConsumeGenerator | [ ] | ab12ce2677b1 | B3 |  |
+| 310 | differential-generator | ConsumeGenerator | [ ] | b6eb99e5c7bf | B3 |  |
+| 311 | rtg-generator | ConsumeGenerator | [ ] | 53a0a0e71f52 | B3 |  |
+| 312 | solar-panel | SolarGenerator | [ ] | fe9e89cd6135 | B3 |  |
+| 313 | solar-panel-large | SolarGenerator | [ ] | 5b1195645bc2 | B3 |  |
+| 314 | thorium-reactor | NuclearReactor | [ ] | d9c6696c1eb9 | B3 | unparsed `heating / coolantPower`: unknown identifier 'heating' |
+| 315 | impact-reactor | ImpactReactor | [ ] | f00e582b24ea | B3 |  |
+| 316 | beam-node | BeamNode | [ ] | 3625394823d4 | B3 |  |
+| 317 | beam-tower | BeamNode | [ ] | 69b36e30db13 | B3 |  |
+| 318 | beam-link | LongPowerNode | [ ] | b19f3ceb29fb | B3 |  |
+| 319 | turbine-condenser | ThermalGenerator | [ ] | cdd8bb8674a5 | B3 |  |
+| 320 | chemical-combustion-chamber | ConsumeGenerator | [ ] | 96ffd19d053d | B3 |  |
+| 321 | pyrolysis-generator | ConsumeGenerator | [ ] | cc68a7b42c98 | B3 |  |
+| 322 | flux-reactor | VariableReactor | [ ] | 1e0c94188248 | B3 |  |
+| 323 | neoplasia-reactor | HeaterGenerator | [ ] | 485f8577f82d | B3 |  |
+| 324 | mechanical-drill | Drill | [ ] | 0d556f8b91f5 | B4 |  |
+| 325 | pneumatic-drill | Drill | [ ] | 2e8b8d31b282 | B4 |  |
+| 326 | laser-drill | Drill | [ ] | a511d804806e | B4 |  |
+| 327 | blast-drill | Drill | [ ] | a5c78181b002 | B4 |  |
+| 328 | water-extractor | SolidPump | [ ] | b0219ad8335c | B4 |  |
+| 329 | cultivator | AttributeCrafter | [ ] | a259215fc7b0 | B4 |  |
+| 330 | oil-extractor | Fracker | [ ] | 2efd0bda7762 | B4 |  |
+| 331 | vent-condenser | AttributeCrafter | [ ] | 39d0ce507b0c | B4 |  |
+| 332 | cliff-crusher | WallCrafter | [ ] | fed822d31032 | B4 |  |
+| 333 | large-cliff-crusher | WallCrafter | [ ] | 145adf7fae62 | B4 |  |
+| 334 | plasma-bore | BeamDrill | [ ] | e5c9dd3b8e4c | B4 |  |
+| 335 | large-plasma-bore | BeamDrill | [ ] | 23acab48733c | B4 |  |
+| 336 | impact-drill | BurstDrill | [ ] | 917e332c5fe0 | B4 |  |
+| 337 | eruption-drill | BurstDrill | [ ] | 32082c3f0de4 | B4 |  |
+| 338 | core-shard | CoreBlock | [ ] | 632667e4e58f | B4 |  |
+| 339 | core-foundation | CoreBlock | [ ] | 5ed5ce5896bb | B4 |  |
+| 340 | core-nucleus | CoreBlock | [ ] | a3ceaea2a553 | B4 |  |
+| 341 | core-bastion | CoreBlock | [ ] | 362b802babc4 | B4 |  |
+| 342 | core-citadel | CoreBlock | [ ] | 0b8ddf798298 | B4 |  |
+| 343 | core-acropolis | CoreBlock | [ ] | acc9e22d6b71 | B4 |  |
+| 344 | container | StorageBlock | [ ] | 8dbe0945cf46 | B4 |  |
+| 345 | vault | StorageBlock | [ ] | 3ba3b939bd04 | B4 |  |
+| 346 | reinforced-container | StorageBlock | [ ] | bb6ec1abb9c0 | B4 |  |
+| 347 | reinforced-vault | StorageBlock | [ ] | 33a5d868fb62 | B4 |  |
+| 348 | duo | ItemTurret | [ ] | e80d51fd4872 | B5 |  |
+| 349 | scatter | ItemTurret | [ ] | 6e48546731a9 | B5 |  |
+| 350 | scorch | ItemTurret | [ ] | ea1a36d5dc60 | B5 |  |
+| 351 | hail | ItemTurret | [ ] | 1315c870d2fe | B5 |  |
+| 352 | wave | LiquidTurret | [ ] | dbb3d8c80381 | B5 |  |
+| 353 | lancer | PowerTurret | [ ] | 4c5beb68cd8d | B5 |  |
+| 354 | arc | PowerTurret | [ ] | b83af8f68e25 | B5 |  |
+| 355 | parallax | TractorBeamTurret | [ ] | 813eda2488e5 | B5 |  |
+| 356 | swarmer | ItemTurret | [ ] | eaf5149a5441 | B5 |  |
+| 357 | salvo | ItemTurret | [ ] | c39d61a49b62 | B5 |  |
+| 358 | segment | PointDefenseTurret | [ ] | 886ab3f95b33 | B5 |  |
+| 359 | tsunami | LiquidTurret | [ ] | 157d1079dc03 | B5 |  |
+| 360 | fuse | ItemTurret | [ ] | 1a5303ba0056 | B5 |  |
+| 361 | ripple | ItemTurret | [ ] | 46dfe3cdbbc7 | B5 |  |
+| 362 | cyclone | ItemTurret | [ ] | 5f236b3dc9a3 | B5 |  |
+| 363 | foreshadow | ItemTurret | [ ] | 8a2bd0d760f0 | B5 |  |
+| 364 | spectre | ItemTurret | [ ] | f0b92bda6358 | B5 |  |
+| 365 | meltdown | LaserTurret | [ ] | 00a9ed457d06 | B5 |  |
+| 366 | breach | ItemTurret | [ ] | 6e2811ba8627 | B5 |  |
+| 367 | diffuse | ItemTurret | [ ] | 1dbddc97ddbb | B5 |  |
+| 368 | sublimate | ContinuousLiquidTurret | [ ] | c19d9b1f3a74 | B5 |  |
+| 369 | titan | ItemTurret | [ ] | 4cbe62f5001c | B5 |  |
+| 370 | disperse | ItemTurret | [ ] | 6446e94de5dc | B5 |  |
+| 371 | afflict | PowerTurret | [ ] | ee80f46e88b7 | B5 |  |
+| 372 | lustre | ContinuousTurret | [ ] | 2e502a2f577f | B5 |  |
+| 373 | scathe | ItemTurret | [ ] | a55a03ebe65c | B5 |  |
+| 374 | smite | ItemTurret | [ ] | 5bf6f3c22161 | B5 |  |
+| 375 | malign | PowerTurret | [ ] | 7308a3d2bb6a | B5 |  |
+| 376 | ground-factory | UnitFactory | [ ] | 8de9f9f1a88b | B5 |  |
+| 377 | air-factory | UnitFactory | [ ] | eda77466fe1d | B5 |  |
+| 378 | naval-factory | UnitFactory | [ ] | 1eb67a291a39 | B5 |  |
+| 379 | additive-reconstructor | Reconstructor | [ ] | 52e0bc5480dd | B5 |  |
+| 380 | multiplicative-reconstructor | Reconstructor | [ ] | e196f38cb8ad | B5 |  |
+| 381 | exponential-reconstructor | Reconstructor | [ ] | 1274dbe99f60 | B5 |  |
+| 382 | tetrative-reconstructor | Reconstructor | [ ] | b3d87505a8d0 | B5 |  |
+| 383 | repair-point | RepairTurret | [ ] | 2528c9dbd315 | B5 |  |
+| 384 | repair-turret | RepairTurret | [ ] | af084b6a5d45 | B5 |  |
+| 385 | tank-fabricator | UnitFactory | [ ] | c3e50a0c3a96 | B5 |  |
+| 386 | ship-fabricator | UnitFactory | [ ] | ee0272eb67ca | B5 |  |
+| 387 | mech-fabricator | UnitFactory | [ ] | 6abf33771bc8 | B5 |  |
+| 388 | tank-refabricator | Reconstructor | [ ] | a64f17ed21cb | B5 |  |
+| 389 | ship-refabricator | Reconstructor | [ ] | 01d900f90357 | B5 |  |
+| 390 | mech-refabricator | Reconstructor | [ ] | 2b988c48eb0b | B5 |  |
+| 391 | prime-refabricator | Reconstructor | [ ] | 96d92a48ef54 | B5 |  |
+| 392 | tank-assembler | UnitAssembler | [ ] | 922a7a4583e8 | B5 |  |
+| 393 | ship-assembler | UnitAssembler | [ ] | 77e537bcddbe | B5 |  |
+| 394 | mech-assembler | UnitAssembler | [ ] | bad9511e3213 | B5 |  |
+| 395 | basic-assembler-module | UnitAssemblerModule | [ ] | 591bfe770b0a | B5 |  |
+| 396 | unit-repair-tower | RepairTower | [ ] | b82f74a13de6 | B5 |  |
+| 397 | payload-conveyor | PayloadConveyor | [ ] | 1a86ec0c6075 | B5 |  |
+| 398 | payload-router | PayloadRouter | [ ] | c425fa0e9679 | B5 |  |
+| 399 | reinforced-payload-conveyor | PayloadConveyor | [ ] | 278b60e1a38f | B5 |  |
+| 400 | reinforced-payload-router | PayloadRouter | [ ] | 6b7383e782fc | B5 |  |
+| 401 | payload-mass-driver | PayloadMassDriver | [ ] | bf156ea9de58 | B5 |  |
+| 402 | large-payload-mass-driver | PayloadMassDriver | [ ] | f6615cc041c4 | B5 |  |
+| 403 | small-deconstructor | PayloadDeconstructor | [ ] | c970557944ad | B5 |  |
+| 404 | deconstructor | PayloadDeconstructor | [ ] | dcb09cc17f5e | B5 |  |
+| 405 | constructor | Constructor | [ ] | 3b37aeb7ad11 | B5 |  |
+| 406 | large-constructor | Constructor | [ ] | ae169e23cdbc | B5 |  |
+| 407 | payload-loader | PayloadLoader | [ ] | 4c075620d691 | B5 |  |
+| 408 | payload-unloader | PayloadUnloader | [ ] | af2fb09cf527 | B5 |  |
+| 409 | power-source | PowerSource | [ ] | c402273be9f3 | B6 |  |
+| 410 | power-void | PowerVoid | [ ] | 2283a9d1f086 | B6 |  |
+| 411 | item-source | ItemSource | [ ] | 345810e2e026 | B6 |  |
+| 412 | item-void | ItemVoid | [ ] | 9cebb7f3d73a | B6 |  |
+| 413 | liquid-source | LiquidSource | [ ] | 0f63c275b4b0 | B6 |  |
+| 414 | liquid-void | LiquidVoid | [ ] | 10230a62853e | B6 |  |
+| 415 | payload-source | PayloadSource | [ ] | 44fac3089ea7 | B6 |  |
+| 416 | payload-void | PayloadVoid | [ ] | 7ad6ad4d6f7c | B6 |  |
+| 417 | heat-source | HeatProducer | [ ] | af66a89f27d1 | B6 |  |
+| 418 | target-dummy | TargetDummy | [ ] | 0aadb092be47 | B6 |  |
+| 419 | illuminator | LightBlock | [ ] | 2d99fd787874 | B6 |  |
+| 420 | launch-pad | LaunchPad | [ ] | 54dc1462fda6 | B6 |  |
+| 421 | advanced-launch-pad | LaunchPad | [ ] | 622aed8fa074 | B6 |  |
+| 422 | landing-pad | LandingPad | [ ] | f69fd2b67e61 | B6 |  |
+| 423 | interplanetary-accelerator | Accelerator | [ ] | 80daec3c9be4 | B6 |  |
+| 424 | message | MessageBlock | [ ] | 6e6360ccc640 | B6 |  |
+| 425 | switch | SwitchBlock | [ ] | ea1da3e2bc7d | B6 |  |
+| 426 | micro-processor | LogicBlock | [ ] | e740b9ef6cd2 | B6 |  |
+| 427 | logic-processor | LogicBlock | [ ] | 1ce5b7b10600 | B6 |  |
+| 428 | hyper-processor | LogicBlock | [ ] | 81245a80bacd | B6 |  |
+| 429 | memory-cell | MemoryBlock | [ ] | 8fcbe0351941 | B6 |  |
+| 430 | memory-bank | MemoryBlock | [ ] | 6aade31721e1 | B6 |  |
+| 431 | logic-display | LogicDisplay | [ ] | bd5e7494ac8e | B6 |  |
+| 432 | large-logic-display | LogicDisplay | [ ] | 9e73479fcf74 | B6 |  |
+| 433 | tile-logic-display | TileableLogicDisplay | [ ] | e46a57b31352 | B6 |  |
+| 434 | canvas | CanvasBlock | [ ] | bb168a456872 | B6 |  |
+| 435 | large-canvas | CanvasBlock | [ ] | 04ee805f3958 | B6 |  |
+| 436 | reinforced-message | MessageBlock | [ ] | 96b6f7515b9c | B6 |  |
+| 437 | world-processor | LogicBlock | [ ] | d270acd6c0a9 | B6 |  |
+| 438 | world-cell | MemoryBlock | [ ] | 922ffb60090d | B6 |  |
+| 439 | world-message | MessageBlock | [ ] | f95ed67adb8f | B6 |  |
+| 440 | world-switch | SwitchBlock | [ ] | 84776eecfc03 | B6 |  |
+
+- Unported: 185
+- Parsed: 441

@@ -46,7 +46,8 @@ pub fn create_base_content(
     statuses::load(&mut registry, bundle, store)?;
     liquids::load(&mut registry, bundle, store)?;
     bullets::load(&mut registry)?;
-    // UnitTypes (M5) and Blocks (M3) land here in upstream order.
+    // UnitTypes (M5) lands before Blocks in upstream order.
+    blocks::load_into(&mut registry, bundle, store)?;
     loadouts::load(&mut registry)?;
     weathers::load(&mut registry, bundle, store)?;
     planets::load(&mut registry, bundle, store)?;
