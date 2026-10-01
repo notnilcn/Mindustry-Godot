@@ -1,6 +1,6 @@
 # HIGH_LEVEL_PLAN — Mindustry → Godot 4.7 full-parity port
 
-> Status: **decisions locked 2026-10-01** (§0). Source of intent: [`PRELIMINARY_PLAN.md`](PRELIMINARY_PLAN.md) (kept as history — where it conflicts with this file, this file wins).
+> Status: **decisions locked 2026-10-01** (§0). **Execution: P0 (plan 00) COMPLETE; plan 01 M0–M6 COMPLETE (merged); plan 02 M1–M4 complete (M1–M2 merged, M3–M4 on `lane/02-m3` pending merge)** — see §13. Source of intent: [`PRELIMINARY_PLAN.md`](PRELIMINARY_PLAN.md) (kept as history — where it conflicts with this file, this file wins).
 > This document is the **index and constitution** for the `{nn}_{SYSTEM}_IMPLEMENTATION_PLAN.md` set in §3. Every plan inherits §0, §2, §4 (template) and §6–§9. Read order for any agent: **this file → the target system plan → the Mindustry `AGENTS.md` files named by that plan**.
 
 ---
@@ -111,9 +111,9 @@ Phase keys: P0 foundation · P1 platform/content · P2 sim core · P3 world/syst
 
 | File | Phase | Scope (what it delivers) | Depends on |
 |---|---|---|---|
-| `00_FOUNDATION_IMPLEMENTATION_PLAN.md` | P0 | Workspace layout; Godot project reset (drop C#, target non-mono 4.7); `gdext` + `bevy_ecs` wiring; fixed-step runner; event bus; logging; **minimal spine** (window, camera, one tile grid, place/break one block, state inspector overlay); `mind-headless` harness; MCP bridge bring-up; `LICENSE`/`THIRD_PARTY_NOTICES.md`; build scripts; CI (`cargo fmt/check/clippy/test` + headless golden run). | — |
-| `01_PLATFORM_STDB_IMPLEMENTATION_PLAN.md` | P1 | Rust rewrite of `sstdbsdk` semantics (`mind-stdb`): connector autoload, token/identity, subscription waves (base/lobby/game), per-table binder API (Rust analog of `TableBinderComponent`), frame pump; `server/spacetimedb` skeleton (identity/lobby/settings/log tables + seeds); `spacetime generate --lang rust` workflow; **command-relay skeleton with cheap validation**; room for future authoritative sim. | 00 |
-| `02_CONTENT_IMPLEMENTATION_PLAN.md` | P1 | `ctype`/`type` equivalents in Rust: `Content`/`ContentType`/`MappableContent`/`UnlockableContent`; ID spaces + append-only ordering; `ContentLoader` lifecycle (`createBaseContent`/`init`/`postInit`/`load`/`afterPatch`); content classes (`Item`, `Liquid`, `CellLiquid`, `StatusEffect`, `UnitType` skeletons, `Block` metadata, `Planet`, `SectorPreset`, `Weather`, `TeamEntry`, `UnitCommand`, `UnitStance`); tech-tree definitions; **all vanilla content ported to parity** (content/`*` registries); content JSON parser hooks live in 20. | 00 |
+| `00_FOUNDATION_IMPLEMENTATION_PLAN.md` | P0 | ✅ **COMPLETE 2026-10-01 (M0–M8, P0 gate passed).** Workspace layout; Godot project reset (C# deleted, non-mono 4.7, `mobile` renderer); `gdext` + `bevy_ecs` wiring; fixed-step runner; event bus; logging; **minimal spine** (window, camera, one tile grid, place/break one block, state inspector overlay); `mind-headless` harness; MCP bridge bring-up; `LICENSE`/`THIRD_PARTY_NOTICES.md`; build scripts; CI (`cargo fmt/check/clippy/test` + headless golden run). | — |
+| `01_PLATFORM_STDB_IMPLEMENTATION_PLAN.md` | P1 | ✅ **COMPLETE 2026-10-01 (M0–M6, merged to `main`).** Rust rewrite of `sstdbsdk` semantics (`mind-stdb`): connector core (config/identity/token/protocol, offline-first pump), subscription waves (base/lobby/game), typed per-table binder API, frame pump; `server/spacetimedb` skeleton grown to identity/session/profile/settings/audit + relay (`relay_match`/`relay_member`/`match_command`, per-caller views, cheap validation); `spacetime generate --lang rust` workflow; **command-relay foundation with `CommandStream` ordering + two-client ping round-trip IT**; `StdbConnector` autoload + `StdbBinder` node + inspector net page; plan-21 handoff notes. Two deferrals: in-engine §7.3 MCP run on the merged tree, relay-throughput bench (plan 21 owns the load harness). | 00 |
+| `02_CONTENT_IMPLEMENTATION_PLAN.md` | P1 | 🔶 **IN PROGRESS — M1–M4 complete 2026-10-01 (M1–M2 merged; M3–M4 on `lane/02-m3`, pending merge).** `ctype`/`type` equivalents in Rust (framework, dense IDs, lifecycle, name maps, bundles, unlocks); vanilla registries landed: Items (22), Liquids (11), StatusEffects (23), Bullets (6), `fx_meta` (267), commands/stances/weathers/planets/sectors/loadouts, Serpulo (223) + Erekir (152) tech trees, **all 441 `Blocks.java` entries (B1–B6, 0 unported)** with `BlockDef` metadata + `BlockKind` audit + ledger `parity/ledgers/blocks.md`. M3 re-recorded the P0 goldens (block IDs now upstream: `spine_place_break` → `375c68a53e861948`). Remaining: M5 (units), M6–M7 (audit, JVM golden — NUD-10 blocker). Content JSON parser hooks live in 20. | 00 |
 | `03_ASSETS_IMPLEMENTATION_PLAN.md` | P1 | Asset pipeline: `tools:pack` equivalent (sprite atlas + autotile/outline/icon generation), icon font + `Icon`/`Iconc`, bundle/localization loading and fallback chain, `Sounds`/`Musics` registration, `FileTree` (mods-first) equivalent, runtime atlas region lookup (`@Load` equivalent), sprite region naming parity. | 00, 02 |
 | `04_IO_SERIALIZATION_IMPLEMENTATION_PLAN.md` | P1 | `SaveIO`/`SaveVersion` chain, `TypeIO` object codec, `JsonIO` (rules/settings/stats), entity revision I/O (Rust equivalent of `revisions/*.json`), `.msav` map/save read/write (format compatibility decision §10 OD2), settings persistence, backups, save slots. | 02 |
 | `05_SIM_CORE_IMPLEMENTATION_PLAN.md` | P2 | `Vars`/`GameState`/`Logic` module split; fixed 60 Hz loop; Bevy schedule ordering mirroring `Logic.updateEntities()` exactly (pool cleanup → physics → players → effects → Groups → units → power graph → buildings → bullets → collisions); `Events`/`EventType`; `EntityGroup`/`EntityIndexer`/`Groups`; pooling + queue-free; `Time`; async worker physics/avoidance; reset/play flows. | 02, 04 |
@@ -165,7 +165,7 @@ Plans are living documents: check off milestones and append a short `## Changelo
 
 | Phase | Plans | Gate (must be demonstrable before the next phase) |
 |---|---|---|
-| P0 Foundation | 00 | Headless harness passes; in-engine spine runs (camera + grid + place/break); MCP can drive it; CI green. |
+| P0 Foundation | 00 | ✅ **GATE PASSED 2026-10-01.** Headless harness passes; in-engine spine runs (camera + grid + place/break); MCP can drive it; CI green. |
 | P1 Platform & content | 01–04 | STDB connection + waves + relay skeleton; base content loads; assets pack/load; a save round-trips. |
 | P2 Sim core | 05 | Deterministic 60 Hz tick runs N frames headless; event bus; entity groups; reset/play. |
 | P3 World & systems | 06–09 | Generated world renders; blocks place/construct; conveyor moves an item; drill feeds; power/liquid flow. |
@@ -189,7 +189,7 @@ Branches are not optional — they are parallel prerequisites that must be green
 
 | Group | Ready when | Run concurrently | Join / reason |
 |---|---|---|---|
-| F1 | 00 green | `01` + `02` (+ `23` harness lane) | different crates: server/`mind-stdb` vs `mind-core` |
+| F1 | 00 green | ✅ **DONE 2026-10-01:** `01` M0–M6 merged; `02` M1–M2 merged, M3–M4 on `lane/02-m3` pending merge (+ `23` harness lane still open) | different crates: server/`mind-stdb` vs `mind-core` |
 | F2 | 02 green | `03` + `04` | `04` may start against 02 stubs |
 | F3 | 03 green → `18`; 03+04 → `20` | `18` + `20` alongside `05` | pull-forward lanes; `20` gates 14/19/21/22 pieces |
 | F4 | 04 green | `05` | critical |
@@ -365,4 +365,16 @@ The 24 plans were written in parallel, so cross-plan conflicts were expected. Th
 
 **Canonical node paths** (plan 00 §3.5/§5; new nodes register in plan 00’s extension contract before use): root `/root/Spine`, scene `res://scenes/spine.tscn`; `/root/Spine/SimHost`, `/root/Spine/World/{TileGrid,Camera2D,Renderer}`, `/root/Spine/Ui/StateInspector/*`, `/root/Spine/{Input,MindUnits,MindCampaign,MindRender,MindFx,MindAudio,MindEditor}`; autoloads `/root/StdbConnector`, `/root/MindUi`, `/root/MindIo`.
 
-**Plan-set status:** all 24 plans exist and follow §4. Execution starts at `00_FOUNDATION_IMPLEMENTATION_PLAN.md`; the first action is resolving the six foundation `NEEDS USER DECISION` items (00 §8, incl. OD-R1 git init/tag before deleting the old C# tree, OD-R2 renderer choice, OD-R3 standard Godot 4.7 host) plus the headlining NUDs in 23 §8.
+**Plan-set status (updated 2026-10-01):** all 24 plans exist and follow §4. Plans 18–22 are now on disk (23 §8's "not on disk" note and 14/22's parallel-authorship notes are stale — the assumed interfaces should be reconciled against the real files at execution). All `NEEDS USER DECISION` items were resolved 2026-10-01 (register: 23 §8.1.1). Execution order from here is §13; the next actions are: merge `lane/02-m3` (02 M3–M4) with golden/MCP re-record, then dispatch F2 (`03` + `04`).
+
+---
+
+## 13. Execution log (append-only; newest last)
+
+**2026-10-01 — P0 COMPLETE (plan 00 M0–M8).** Spine, headless oracle (`mind-headless` + 4 canonical scenarios), STDB skeleton publishable locally, C# tree deleted, CI + repo playtest skill. Evidence in `00_FOUNDATION_IMPLEMENTATION_PLAN.md` Changelog. P0 goldens at that time: `spine_place_break` → `e53c9277bb8c28d1`, `spine_determinism` → `e435247bbe23afb1`.
+
+**2026-10-01 — Plan 01 M0–M6 COMPLETE, merged to `main`** (branch `lane/01-stdb`). `mind-stdb` connector/waves/binders/relay client, server identity + relay schema (11 tables, 7 views), `StdbConnector` autoload (single pump per process; sim-host `--db` facade removed), `StdbBinder`, inspector net page, `stdb_*` headless scenarios, `mind-stdb/AGENTS.md` + plan-21 handoff. `mind-stdb` tests: 23 passed + doc-test; 3 ignored ITs pass with `MIND_STDB_IT=1`. Local DB is `mindustry` (integration `mindustry-it`); STDB 2.10.1 rejects underscores in *database* names, crate/module stays `mindustry_godot`. **Plan 01's own header still reads "Draft, not started" — stale; this log wins.** Deferred to the integrator: §7.3 MCP two-instance run on the merged tree; relay-throughput bench (plan 21 load harness).
+
+**2026-10-01 — Plan 02 M1–M2 complete, merged to `main`** (branch `lane/02-content`); **M3–M4 complete on `lane/02-m3`, NOT yet merged.** M1: content framework + Items/Liquids/Statuses/Bullets/`fx_meta` (49 `mind-core` tests). M2: commands/stances/weathers/planets/sectors/loadouts + both tech trees verbatim via `parity/tools/gen_trees.py` (62 tests). M3: `BlockDef` framework + B1–B2 blocks (256) via `parity/tools/gen_blocks.py` + ledger `parity/ledgers/blocks.md`; **P0 goldens re-recorded** (`spine_place_break` → `375c68a53e861948`, `spine_determinism` → `52edd459bfa28b41`, `spine_many_commands` → `086e7c26935c2acb`) — in-engine MCP scenarios and `AGENTS.md`'s golden still quote the old values until re-recorded after merge. M4: all B3–B6 waves — **441/441 blocks, 0 unported** (68 tests); goldens stable across M4. Remaining: M5 (units), M6–M7; JVM golden still pending (NUD-10, M7 blocker).
+
+**Open integration items (working tree, uncommitted):** `mind-gdext/src/stdb.rs` renames Godot-visible `connect`/`disconnect` to Rust `connect_db`/`disconnect_db` (`Object::connect` collision; Godot names pinned via `#[func(rename)]`); `client/project.godot` has a re-added `[dotnet] project/assembly_name` block (likely editor artifact — violates 00 M6, remove before commit).
