@@ -157,8 +157,8 @@ pub type UnitStanceId = ContentId<UnitStanceDef>;
 impl BlockId {
     /// The always-present empty block (`air`, id `0`).
     pub const AIR: BlockId = BlockId::new(0);
-    /// P0 placeholder wall block (`stone-wall`, id `1`, plan 02 M3 re-registers blocks).
-    pub const STONE_WALL: BlockId = BlockId::new(1);
+    /// Upstream `stone-wall` id in `Blocks.java` order (pinned by a test).
+    pub const STONE_WALL: BlockId = BlockId::new(79);
 }
 
 impl ItemId {
