@@ -298,11 +298,12 @@ Rejections return `Err(String)` (rolled back) and log via `log::warn!`; successf
 Ordered; each milestone ends with its verification commands. **Smallest vertical slice first** (M1–M2): a headless `Connector` in offline mode that boots, pumps, and reports `Offline`, with `mind-headless run stdb_offline_boot` green — before any network or schema work.
 
 ### M0 — Workspace, crate skeletons, bindings pipeline
-- [ ] Add `client/rust/mind-stdb` to the plan-00 workspace; `Cargo.toml` with pins (`spacetimedb-sdk = "=2.10.1"`, `serde`, `serde_json`, `log`).
-- [ ] Create `server/spacetimedb/` crate (`mindustry_godot`, edition 2024, cdylib, `spacetimedb = "=2.10.1"`), `src/lib.rs` module skeleton (§3.7).
-- [ ] `server/spacetime.json` with a `rust` generate entry into `../client/rust/mind-stdb/src/module_bindings`; `server/build.sh` + `build.ps1` (`spacetime generate --lang rust ...`; `spacetime publish mindustry -y --delete-data` with `--server`/`--db` overrides; `--check` drift mode).
-- [ ] Commit generated bindings; add the never-hand-edit header note to `mind-stdb/AGENTS.md`.
-- [ ] `project.godot`: autoload `StdbConnector="*res://scenes/autoloads/stdb_connector.tscn"`.
+- [x] Add `client/rust/mind-stdb` to the plan-00 workspace; `Cargo.toml` with pins (`spacetimedb-sdk = "=2.10.1"`, `serde`, `serde_json`, `log`).
+- [x] Create `server/spacetimedb/` crate (`mindustry_godot`, edition 2024, cdylib, `spacetimedb = "=2.10.1"`), `src/lib.rs` module skeleton (§3.7).
+- [x] `server/spacetime.json` with a `rust` generate entry into `../client/rust/mind-stdb/src/module_bindings`; `server/build.sh` + `build.ps1` (`spacetime generate --lang rust ...`; `spacetime publish mindustry -y --delete-data` with `--server`/`--db` overrides; `--check` drift mode).
+- [x] Commit generated bindings; add the never-hand-edit header note to `mind-stdb/AGENTS.md`.
+- [x] `client/scenes/autoloads/stdb_connector.tscn` committed (native `StdbConnector` root; `.tscn`-first).
+- [ ] `project.godot`: autoload `StdbConnector="*res://scenes/autoloads/stdb_connector.tscn"` — **deferred to M5** so the project never boots with a missing native class (the scene alone is inert).
 - **Verify:** `cargo check -p mind-stdb`; `cargo check --manifest-path server/spacetimedb/Cargo.toml`; `server/build.sh --check` reports no drift; `spacetime --version` reports 2.10.1.
 
 ### M1 — Server skeleton (identity/session/profile/settings/audit)
@@ -529,3 +530,21 @@ Deleted at M6 (NUD-05=C, no archive): `client/Scripts/Components/` (`IComponent.
 - **Reconnect/backoff**: C# had no retry loop or backoff — `OnDisconnected` emitted `Disconnected` unless `_shuttingDown` (set by `_ExitTree`); consumers called `Connect()` again and rebuilt the scene (C# rule 10) because binders stayed attached to the dead `DbConnection`. New behavior (`ConnectPolicy { auto_reconnect, backoff }`, connector-owned rebind + `Resync`, no scene rebuild) already covered by 01 §2.4 + §3.4; preserve the "no `Disconnected` event on deliberate `disconnect()`" suppression in `connector.rs`.
 - **Component framework → Bevy ECS**: `IComponent`/`IEntity` interfaces; `EntityRegistry` (component list + Type→component cache, first match wins, order-dependent); `ComponentRegistration.Register` (nearest-ancestor walk, `PushError` when none) / `ValidateRequired`; six bases (`Component`:Node, `AreaComponent`:Area2D, `Node2DComponent`:Node2D, `Node3DComponent`:Node3D, `ControlComponent`:Control, `VisualComponent`:AnimatedSprite2D) enforcing `_Ready` register + deferred `OnEntityReady` (after all siblings — the guarantee `ReplayExistingRows` fires after parent signal wiring) + `_ExitTree` unregister, with virtual `OnRegistered`/`GetRequiredComponents`/`GetSibling<T>`; `NodeExtensions.GetAncestor<T>` for cross-scene lookup. Bevy ECS (plan 00) replaces this with entity IDs + component data in `mind-core`: no node-ancestor coupling, no type-cache registry, no per-native-root base duplication, no sibling lookup; only GDScript-authored static scene structure remains in Godot. `sstdbsdk` drops `: Component`/`IEntity` per 01 §4 + §3.5; Rust owners `mind-stdb/src/{connector,waves,binder}.rs` (networking) and `mind-core` ECS (gameplay).
 - **STDB 2.10.1 deltas recorded by the M5 lane (not yet in 01):** `ctx.db.<table>()` accessors require their accessor-trait imports; publish wipe is `--delete-data=always`; schema inspection is `spacetime describe <db> --json`; `spacetime generate` requires the `wasm32-unknown-unknown` target; database names reject underscores (`^[a-z0-9]+(-[a-z0-9]+)*$`), so the final names are local db **`mindustry`** and integration db **`mindustry-it`** while crate/module stays `mindustry_godot` — supersedes 01 §3.11/§6.5/§6.7/R3 literals; token file layout per the token bullet above. Apply when executing 01 M0/M2.
+
+## Changelog
+
+### 2026-10-01 — lane 01 (worktree `mindustry-godot-lane01`, branch `lane/01-stdb`)
+
+#### M0 — Workspace, crate skeletons, bindings pipeline (commit `01-M0`)
+
+- Verified the plan-00 skeleton against §3.1/§3.2: workspace member `mind-stdb` with `spacetimedb-sdk = "=2.10.1"` pin, separate `server/spacetimedb` crate (`mindustry_godot`, cdylib, `spacetimedb = "=2.10.1"`), `server/spacetime.json` generate entry, `build.sh`/`build.ps1` (`--check`/`-Check` drift mode), checked-in `module_bindings/`.
+- Added `client/rust/mind-stdb/AGENTS.md`: generated-bindings never-hand-edit rule + drift gate, the five-step recipe (table → reducer → wave entry → binder + handler → reducer call), the ported C# rules and `stdb_*` verify commands.
+- Added `client/scenes/autoloads/stdb_connector.tscn` (native `StdbConnector` root node; scene is inert until the class lands in M5). The `project.godot` autoload registration deliberately moves to M5: registering a scene whose native class does not exist yet would break boot before mind-gdext M5 lands.
+- Removed the unused direct `tokio` dependency from `mind-stdb` (§3.2: no tokio in the public API; the SDK owns its runtime).
+- Evidence:
+  - `cargo check --manifest-path client/rust/Cargo.toml -p mind-stdb` → `Finished dev profile`
+  - `cargo check --manifest-path server/spacetimedb/Cargo.toml` → `Finished dev profile`
+  - `server/build.sh --check` → `== check: bindings are drift-clean ==`
+  - `spacetime --version` → `spacetimedb tool version 2.10.1; spacetimedb-lib version 2.10.1`; `wasm32-unknown-unknown` target installed.
+
+
