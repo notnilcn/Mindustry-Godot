@@ -130,6 +130,26 @@ pub enum Command {
         #[command(subcommand)]
         command: ContentCommand,
     },
+
+    /// IO engine inspection (plan 04).
+    Io {
+        /// IO subcommand.
+        #[command(subcommand)]
+        command: IoCommand,
+    },
+}
+
+/// `io` subcommands (plan 04 §7b).
+#[derive(Debug, Subcommand)]
+pub enum IoCommand {
+    /// Meta-only read of a save/map file (`SaveIO.getMeta`).
+    DumpMeta {
+        /// Save/map file path.
+        file: PathBuf,
+        /// Emit a machine-readable JSON report.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// `content` subcommands (plan 02 §7b).

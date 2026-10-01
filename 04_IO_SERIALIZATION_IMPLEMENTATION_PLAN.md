@@ -7,7 +7,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Draft — ready for execution after plan 02 lands |
+| **Status** | In progress — M0 complete 2026-10-02 (`lane/04-io`) |
 | **Phase** | P1 (Platform & content) |
 | **Depends on** | `02_CONTENT_IMPLEMENTATION_PLAN.md` (content registry, `ContentType` ordering, `MappableContent`, content-name lookups). Interfaces are written now against a stub registry so most of this plan can land in parallel. |
 | **Blocks** | `05_SIM_CORE_IMPLEMENTATION_PLAN.md` (entity IO interface + `IoSet` schedule slots), `06_WORLD_TERRAIN_IMPLEMENTATION_PLAN.md` (`WorldContext` impl, tile data hooks), `12_CAMPAIGN_IMPLEMENTATION_PLAN.md` (`Saves` policy, `SectorInfo`/`Rules`/markers persistence), `19_MAPS_EDITOR_IMPLEMENTATION_PLAN.md` (map registry, previews, image maps), `21_MULTIPLAYER_IMPLEMENTATION_PLAN.md` (TypeIO for `@Remote` params, custom-chunk net subset, `NetworkIO` world streaming, `@SyncField` interpolation metadata). |
@@ -97,6 +97,7 @@ mind-core/src/io/
   mod.rs                # re-exports; IoPlugin registration entry point
   fs.rs                 # FileSystem trait, NativeFs, MockFs, Paths (dir layout)
   error.rs              # IoError (thiserror): Header, Version, Region, Chunk, Revision, Bounds, Json...
+  wire.rs               # WireWriter/WireReader big-endian primitives (Arc Writes/Reads) — added at M0, not in the original sketch
   save/
     mod.rs              # SaveIo: write/save/load/get_meta/is_save_valid/file_for/backup_file_for
     version.rs          # SaveVersion trait; VERSIONS registry (OnceLock<Vec<Arc<dyn SaveVersion>>>)
@@ -296,8 +297,8 @@ pub trait EntityCodec: Sized {
 
 Each milestone ends with evidence (test output / dump path / screenshot) appended to the Changelog.
 
-- **M0 — Chunk primitives + container (smallest vertical slice).**
-  `io/fs.rs`, `io/error.rs`, `save/chunk.rs`, `save/version.rs`, `save/mod.rs`, `save/versions/v1.rs` writing **only `meta`** (empty world), `save/meta.rs`, `save/options.rs`.
+- **M0 — Chunk primitives + container (smallest vertical slice).** ✅ **COMPLETE 2026-10-02**
+  `io/fs.rs`, `io/error.rs`, `io/wire.rs` (wire primitives; layout addition, see Changelog), `save/chunk.rs`, `save/version.rs`, `save/mod.rs`, `save/versions/v1.rs` writing **only `meta`** (empty world), `save/meta.rs`, `save/options.rs`, `save/state.rs` (`SaveReadState` + `WorldContext` trait, C10).
   *Verify*: `cargo test -p mind-core io::save::chunk` (region round-trip, length-mismatch error, nested chunk, string map, backup restore) + `mind-headless io dump-meta` on a file written by M0.
 - **M1 — FS + settings + directories.**
   `io/settings.rs`, `io/fs.rs` `Paths`, atomic flush, mock backend.
@@ -539,3 +540,4 @@ CI treats budgets as recording-only until plan 23 wires hard gates.
 ## Changelog
 
 - 2026-10-01 — initial draft; OD2 default recorded (native `MGRS` v1, importer off); R1/R3 flagged.
+- 2026-10-02 — **M0 complete (`lane/04-io`).** Native `MGRS` container + chunk primitives landed in `mind-core::io`: `error.rs` (upstream message text kept), `wire.rs` (big-endian Arc-style primitives; **layout addition** — the §3.1 sketch had no home for them), `fs.rs` (`FileSystem`/`NativeFs`/`MockFs`/`Paths`, atomic writes, read-only fault injection), `save/chunk.rs` (named regions, 2-deep chunk nesting, 128 MiB region cap, 512 MiB inflate cap, full `SaveFileReader.fallback` table), `save/version.rs` (append-only chain, exact unknown-version message), `save/versions/v1.rs` (all 7 regions written; empty world), `save/meta.rs`, `save/options.rs`, `save/state.rs` (`SaveReadState` + `WorldContext` trait per C10), `save/mod.rs` (`SaveIo`: tmp+sync+rename, backup rotation + restore-on-error, backup fallback on load/meta, legacy `MSAV` sniff → unknown-version error via `io/legacy.rs` stub). `msav-import` feature declared (default-off, declined stub). Workspace `Cargo.toml`: added `flate2` (rust_backend, R5) — additive, flagged for merge. `version.rs`: added `BUILD = 0` const (upstream dev-build default). Evidence: `cargo test -p mind-core` 100 passed (36 io), `cargo clippy -p mind-core -p mind-headless --all-targets -D warnings` clean, `cargo fmt --check` clean; `mind-headless io dump-meta /tmp/mind-io-fixtures/m0_empty.msav --json` reads back format 1 / wave 2 / 8×8 / all 21 §6.2 meta keys; `spine_place_break` golden still `375c68a53e861948`. Plan-text fixes: §3.1 gained `wire.rs`; M0 file list gained `save/state.rs` (trait needed by `SaveVersion` signature). Events (`SaveWriteEvent`/`SaveLoadEvent`) deferred to M4 when load applies to a world.

@@ -20,6 +20,7 @@ log = "0.4"
 indexmap = "2"
 smallvec = "1"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }

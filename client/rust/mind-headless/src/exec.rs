@@ -17,12 +17,12 @@ use mind_core::scenario::{Scenario, ScenarioPlayer, read_command_log, write_comm
 use mind_core::sim::{Sim, StateDump};
 use mind_core::world::TilePos;
 
-use crate::cli::{Cli, Command, ContentCommand};
+use crate::cli::{Cli, Command, ContentCommand, IoCommand};
 use crate::paths;
 use crate::registry;
 use crate::report::{
     BenchReport, ContentBenchReport, ContentIdEntry, ContentIdsReport, ContentLoadReport,
-    ContentTypeCount, ContentTypeEntries, RunReport, SimReport, TileCheck,
+    ContentTypeCount, ContentTypeEntries, IoDumpMetaReport, RunReport, SimReport, TileCheck,
 };
 use crate::stdb_scenarios::StdbScenario;
 
@@ -125,7 +125,53 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             ContentCommand::Bench { runs, json } => cmd_content_bench(*runs, *json),
             ContentCommand::LoadOrderBad => cmd_content_load_order_bad(),
         },
+        Command::Io { command } => match command {
+            IoCommand::DumpMeta { file, json } => cmd_io_dump_meta(file, *json),
+        },
     }
+}
+
+/// Plan 04 M0: meta-only read of a save file written by the IO engine.
+fn cmd_io_dump_meta(file: &Path, json: bool) -> anyhow::Result<i32> {
+    use mind_core::io::{NativeFs, SaveIo};
+
+    let fs = NativeFs;
+    let meta = SaveIo::get_meta(&fs, file)
+        .with_context(|| format!("reading meta of `{}`", file.display()))?;
+    let report = IoDumpMetaReport {
+        file: file.display().to_string(),
+        format_version: meta.version,
+        build: meta.build,
+        timestamp: meta.timestamp,
+        time_played: meta.time_played,
+        map_name: meta.map_name.clone(),
+        wave: meta.wave,
+        width: meta.width(),
+        height: meta.height(),
+        is_map: meta.is_map(),
+        mods: meta.mods.clone(),
+        tags: meta
+            .tags
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect(),
+    };
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "meta: format={} build={} map={} wave={} {}x{} is_map={} mods={}",
+            report.format_version,
+            report.build,
+            report.map_name,
+            report.wave,
+            report.width,
+            report.height,
+            report.is_map,
+            report.mods.len()
+        );
+    }
+    Ok(EXIT_PASS)
 }
 
 fn load_scenario(cli: &Cli, name: &str) -> anyhow::Result<Scenario> {

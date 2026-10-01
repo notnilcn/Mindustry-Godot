@@ -15,6 +15,13 @@ smallvec.workspace = true
 log.workspace = true
 thiserror.workspace = true
 xxhash-rust.workspace = true
+flate2.workspace = true
 
 [lints]
 workspace = true
+
+[features]
+# OD2 / NUD-02: one-way legacy `MSAV` importer. Default-off; currently a
+# declined stub (`io::legacy` errors with the upstream unknown-version message)
+# until an explicit user opt-in lands `legacy::java` readers (plan 04 M7).
+msav-import = []

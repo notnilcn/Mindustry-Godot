@@ -224,3 +224,32 @@ pub struct BenchReport {
     /// Whether the baseline was exceeded by < 20% (warning) or more (failure).
     pub baseline_status: String,
 }
+
+/// `io dump-meta` report (plan 04 M0): meta-only read of one save/map file.
+#[derive(Debug, Clone, Serialize)]
+pub struct IoDumpMetaReport {
+    /// File that was read.
+    pub file: String,
+    /// Save format version from the container header.
+    pub format_version: i32,
+    /// Build tag.
+    pub build: i32,
+    /// Save timestamp (millis).
+    pub timestamp: i64,
+    /// Accumulated playtime (millis).
+    pub time_played: i64,
+    /// `mapname` tag.
+    pub map_name: String,
+    /// `wave` tag.
+    pub wave: i32,
+    /// `width` tag.
+    pub width: i32,
+    /// `height` tag.
+    pub height: i32,
+    /// `SaveMeta.isMap` (tags contain `name`).
+    pub is_map: bool,
+    /// Parsed `mods` list.
+    pub mods: Vec<String>,
+    /// All meta tags in file order.
+    pub tags: Vec<(String, String)>,
+}

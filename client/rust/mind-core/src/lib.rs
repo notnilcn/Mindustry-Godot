@@ -16,6 +16,7 @@ pub mod content;
 pub mod ecs;
 pub mod event;
 pub mod game;
+pub mod io;
 pub mod log;
 pub mod random;
 pub mod scenario;
