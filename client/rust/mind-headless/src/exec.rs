@@ -22,8 +22,8 @@ use crate::paths;
 use crate::registry;
 use crate::report::{
     BenchReport, ContentBenchReport, ContentIdEntry, ContentIdsReport, ContentLoadReport,
-    ContentTypeCount, ContentTypeEntries, IoDumpMetaReport, IoSettingsReport, RunReport, SimReport,
-    TileCheck,
+    ContentTypeCount, ContentTypeEntries, IoCheckClassIdsReport, IoCheckRevisionsReport,
+    IoDefRevisionReport, IoDumpMetaReport, IoSettingsReport, RunReport, SimReport, TileCheck,
 };
 use crate::stdb_scenarios::StdbScenario;
 
@@ -129,8 +129,137 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
         Command::Io { command } => match command {
             IoCommand::DumpMeta { file, json } => cmd_io_dump_meta(file, *json),
             IoCommand::Settings { json } => cmd_io_settings(&cli, *json),
+            IoCommand::CheckRevisions {
+                update,
+                mind_core_dir,
+                json,
+            } => cmd_io_check_revisions(*update, mind_core_dir.as_deref(), *json),
+            IoCommand::CheckClassIds {
+                update,
+                mind_core_dir,
+                json,
+            } => cmd_io_check_class_ids(*update, mind_core_dir.as_deref(), *json),
         },
     }
+}
+
+/// Plan 04 M3 (§7b): revision drift check for every `EntityDefs!` def.
+fn cmd_io_check_revisions(
+    update: bool,
+    mind_core_dir: Option<&Path>,
+    json: bool,
+) -> anyhow::Result<i32> {
+    use mind_core::io::entity::registry::entity_defs;
+    use mind_core::io::entity::revisions::{RevisionCheck, check_all};
+    use mind_core::io::fs::NativeFs;
+
+    let dir = paths::find_mind_core_dir(mind_core_dir)?;
+    let root = dir.join("revisions");
+    let reports = check_all(&NativeFs, &root, entity_defs(), update)?;
+    let mut pass = true;
+    let mut def_reports = Vec::new();
+    for report in &reports {
+        let (status, details) = match &report.outcome {
+            RevisionCheck::UpToDate => (String::from("up-to-date"), Vec::new()),
+            RevisionCheck::Missing => {
+                if update {
+                    (String::from("written"), Vec::new())
+                } else {
+                    pass = false;
+                    (
+                        String::from("missing"),
+                        vec![String::from("no manifests committed")],
+                    )
+                }
+            }
+            RevisionCheck::Drift { details, .. } => {
+                if update {
+                    (String::from("updated"), details.clone())
+                } else {
+                    pass = false;
+                    (String::from("drift"), details.clone())
+                }
+            }
+        };
+        if !json {
+            println!("{}: {status}", report.name);
+            for detail in &details {
+                println!("  - {detail}");
+            }
+        }
+        def_reports.push(IoDefRevisionReport {
+            name: report.name.clone(),
+            status,
+            updated_to: report.updated_to,
+            details,
+        });
+    }
+    let report = IoCheckRevisionsReport {
+        revisions_root: root.display().to_string(),
+        update,
+        pass,
+        defs: def_reports,
+    };
+    print_report(&report, json)?;
+    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+}
+
+/// Plan 04 M3: class-ID drift gate (`entity_class_ids.toml` ↔ registry ↔
+/// generated `class_ids.rs`).
+fn cmd_io_check_class_ids(
+    update: bool,
+    mind_core_dir: Option<&Path>,
+    json: bool,
+) -> anyhow::Result<i32> {
+    use mind_core::io::entity::idfile::ClassIdFile;
+    use mind_core::io::entity::registry::entity_defs;
+    use mind_core::io::fs::{FileSystem, NativeFs};
+
+    let dir = paths::find_mind_core_dir(mind_core_dir)?;
+    let toml_path = dir.join("entity_class_ids.toml");
+    let rs_path = dir.join("src/io/entity/class_ids.rs");
+    let fs = NativeFs;
+
+    let text = String::from_utf8(fs.read(&toml_path)?)
+        .map_err(|_| anyhow!("`{}` is not UTF-8", toml_path.display()))?;
+    let file = ClassIdFile::parse(&text)?;
+    let mut problems = file.problems(entity_defs());
+
+    // The generated constants file must match the TOML exactly (drift gate).
+    let expected_rs = file.render_rs();
+    let committed_rs = fs
+        .read(&rs_path)
+        .ok()
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+        .unwrap_or_default();
+    if committed_rs != expected_rs {
+        problems.push(String::from(
+            "src/io/entity/class_ids.rs is stale (run `io check-class-ids --update`)",
+        ));
+    }
+
+    let mut updated = false;
+    if update && !problems.is_empty() {
+        let with_new = file.with_new_defs(entity_defs());
+        fs.write(&toml_path, with_new.render_toml().as_bytes())?;
+        fs.write(&rs_path, with_new.render_rs().as_bytes())?;
+        updated = true;
+        // Re-validate after regeneration.
+        problems = with_new.problems(entity_defs());
+    }
+
+    let pass = problems.is_empty();
+    let report = IoCheckClassIdsReport {
+        toml: toml_path.display().to_string(),
+        generated: rs_path.display().to_string(),
+        entries: file.entries.len(),
+        update,
+        updated,
+        problems,
+        pass,
+    };
+    print_report(&report, json)?;
+    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
 }
 
 /// Plan 04 M1 (§7b): settings set → flush → reload equality, corrupt file →

@@ -1,0 +1,41 @@
+{
+  "version": 0,
+  "fields": [
+    {
+      "name": "pos",
+      "type": "TilePos",
+      "size": 4,
+      "flags": [
+        "save",
+        "sync"
+      ]
+    },
+    {
+      "name": "block",
+      "type": "BlockId",
+      "size": 2,
+      "flags": [
+        "save",
+        "sync"
+      ]
+    },
+    {
+      "name": "team",
+      "type": "TeamId",
+      "size": 1,
+      "flags": [
+        "save",
+        "sync"
+      ]
+    },
+    {
+      "name": "rot",
+      "type": "u8",
+      "size": 1,
+      "flags": [
+        "save",
+        "sync"
+      ]
+    }
+  ]
+}

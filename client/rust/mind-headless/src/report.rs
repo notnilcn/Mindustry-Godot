@@ -270,3 +270,49 @@ pub struct IoSettingsReport {
     /// Overall pass/fail.
     pub pass: bool,
 }
+
+/// One def row in the `io check-revisions` report (plan 04 M3).
+#[derive(Debug, Clone, Serialize)]
+pub struct IoDefRevisionReport {
+    /// Def name.
+    pub name: String,
+    /// `up-to-date` / `missing` / `drift` / `written` / `updated`.
+    pub status: String,
+    /// Version appended by `--update`, when applied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_to: Option<u32>,
+    /// Drift details (empty when clean).
+    pub details: Vec<String>,
+}
+
+/// `io check-revisions` report (plan 04 M3 §7b).
+#[derive(Debug, Clone, Serialize)]
+pub struct IoCheckRevisionsReport {
+    /// Manifest root that was checked.
+    pub revisions_root: String,
+    /// Whether `--update` ran.
+    pub update: bool,
+    /// Overall pass/fail (check mode).
+    pub pass: bool,
+    /// Per-def rows.
+    pub defs: Vec<IoDefRevisionReport>,
+}
+
+/// `io check-class-ids` report (plan 04 M3).
+#[derive(Debug, Clone, Serialize)]
+pub struct IoCheckClassIdsReport {
+    /// TOML file checked.
+    pub toml: String,
+    /// Generated constants file checked.
+    pub generated: String,
+    /// Number of ID entries.
+    pub entries: usize,
+    /// Whether `--update` ran.
+    pub update: bool,
+    /// Whether files were rewritten.
+    pub updated: bool,
+    /// Problems found (empty when clean).
+    pub problems: Vec<String>,
+    /// Overall pass/fail.
+    pub pass: bool,
+}

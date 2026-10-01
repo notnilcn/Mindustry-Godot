@@ -159,6 +159,35 @@ pub enum IoCommand {
         #[arg(long)]
         json: bool,
     },
+
+    /// Revision-manifest drift check for all entity defs (plan 04 M3 §7b):
+    /// `EntityDefs!` codec fields vs committed `revisions/<NAME>/<N>.json`.
+    CheckRevisions {
+        /// Append the next `<N>.json` on drift instead of failing
+        /// (old manifests are never touched).
+        #[arg(long)]
+        update: bool,
+        /// `mind-core` crate directory (default: discovered upward from cwd).
+        #[arg(long)]
+        mind_core_dir: Option<PathBuf>,
+        /// Emit a machine-readable JSON report.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Class-ID drift check (`entity_class_ids.toml` vs registry vs generated
+    /// `class_ids.rs`; append-only discipline).
+    CheckClassIds {
+        /// Regenerate `class_ids.rs` and append missing defs at max+1.
+        #[arg(long)]
+        update: bool,
+        /// `mind-core` crate directory (default: discovered upward from cwd).
+        #[arg(long)]
+        mind_core_dir: Option<PathBuf>,
+        /// Emit a machine-readable JSON report.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// `content` subcommands (plan 02 §7b).

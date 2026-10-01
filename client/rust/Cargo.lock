@@ -1576,11 +1576,21 @@ dependencies = [
  "flate2",
  "indexmap 2.14.2",
  "log",
+ "mind-derive",
  "serde",
  "serde_json",
  "smallvec",
  "thiserror 2.0.21",
  "xxhash-rust",
+]
+
+[[package]]
+name = "mind-derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]

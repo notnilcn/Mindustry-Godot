@@ -28,7 +28,12 @@ impl TeamId {
 pub struct EntitySeq(pub u64);
 
 /// A placed block.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
+///
+/// Save/network IO is derived (`plan 04 M3`); revision manifests live in
+/// `mind-core/revisions/BuildingComp/`. Field changes are serialization
+/// changes (HLP §6.2): append `#[entity(since = N)]` fields, never reorder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Component, mind_derive::EntityIo)]
+#[entity(name = "BuildingComp")]
 pub struct BuildingComp {
     /// Tile the block occupies.
     pub pos: TilePos,

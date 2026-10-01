@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["mind-core", "mind-headless", "mind-gdext", "mind-stdb"]
+members = ["mind-core", "mind-derive", "mind-headless", "mind-gdext", "mind-stdb"]
 default-members = ["mind-core", "mind-headless", "mind-stdb"]
 
 [workspace.package]
@@ -21,6 +21,9 @@ indexmap = { version = "2", features = ["serde"] }
 smallvec = "1"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }

@@ -51,3 +51,42 @@ pub fn find_scenarios_dir(explicit: Option<&Path>) -> anyhow::Result<PathBuf> {
         }
     }
 }
+
+/// Marker file that identifies the `mind-core` crate directory (plan 04).
+const MIND_CORE_MARKER: &str = "entity_class_ids.toml";
+
+/// Finds the `mind-core` crate directory: explicit flag first, then walking up
+/// from the current directory until `client/rust/mind-core/<MARKER>` exists.
+pub fn find_mind_core_dir(explicit: Option<&Path>) -> anyhow::Result<PathBuf> {
+    if let Some(dir) = explicit {
+        if dir.join(MIND_CORE_MARKER).is_file() {
+            return Ok(dir.to_path_buf());
+        }
+        return Err(anyhow!(
+            "mind-core dir `{}` does not contain {MIND_CORE_MARKER}",
+            dir.display()
+        ));
+    }
+
+    let start = std::env::current_dir().context("resolving current directory")?;
+    let mut current = start.as_path();
+    loop {
+        let candidate = current.join("client/rust/mind-core");
+        if candidate.join(MIND_CORE_MARKER).is_file() {
+            return Ok(candidate);
+        }
+        // Also allow running from inside the crate tree itself.
+        if current.join(MIND_CORE_MARKER).is_file() && current.ends_with("mind-core") {
+            return Ok(current.to_path_buf());
+        }
+        match current.parent() {
+            Some(parent) => current = parent,
+            None => {
+                return Err(anyhow!(
+                    "could not find `client/rust/mind-core/{MIND_CORE_MARKER}` above `{}`; pass --mind-core-dir",
+                    start.display()
+                ));
+            }
+        }
+    }
+}
