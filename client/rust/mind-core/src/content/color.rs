@@ -55,6 +55,16 @@ impl Rgba {
         }
     }
 
+    /// Packs to `0xRRGGBBAA` (`Color.rgba()`); channels truncate like the
+    /// upstream float→byte casts.
+    pub fn to_rgba8888(self) -> u32 {
+        let r = (self.r * 255.0) as u32 & 0xff;
+        let g = (self.g * 255.0) as u32 & 0xff;
+        let b = (self.b * 255.0) as u32 & 0xff;
+        let a = (self.a * 255.0) as u32 & 0xff;
+        (r << 24) | (g << 16) | (b << 8) | a
+    }
+
     /// Parses a Mindustry hex color string (`"d99d73"` or `"d99d73ff"`).
     ///
     /// Returns `None` for malformed input; call sites use [`Option::unwrap_or`]
