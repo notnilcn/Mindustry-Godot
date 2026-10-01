@@ -13,6 +13,7 @@ crate-type = ["cdylib"]
 godot.workspace = true
 mind-core = { path = "../mind-core" }
 mind-stdb = { path = "../mind-stdb" }
+serde_json.workspace = true
 log.workspace = true
 
 [lints.rust]

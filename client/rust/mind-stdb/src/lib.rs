@@ -25,6 +25,7 @@ pub mod identity;
 pub mod module_bindings;
 pub mod protocol;
 pub mod relay;
+pub mod rows;
 pub mod token;
 pub mod waves;
 

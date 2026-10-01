@@ -12,7 +12,7 @@
 layout_mode = 3
 anchors_preset = 0
 offset_right = 320.0
-offset_bottom = 132.0
+offset_bottom = 200.0
 mouse_filter = 2
 script = ExtResource("1_inspector")
 
@@ -34,3 +34,12 @@ offset_right = 310.0
 offset_bottom = 124.0
 mouse_filter = 2
 text = "tick: 0"
+
+[node name="NetLabel" type="Label" parent="."]
+layout_mode = 1
+offset_left = 10.0
+offset_top = 132.0
+offset_right = 310.0
+offset_bottom = 192.0
+mouse_filter = 2
+text = "net: -"

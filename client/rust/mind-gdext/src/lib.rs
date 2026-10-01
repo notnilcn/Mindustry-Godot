@@ -12,10 +12,12 @@ mod hello;
 mod log_bridge;
 mod settings;
 mod sim_host;
+mod stdb;
 mod tile_grid;
 
 pub use camera::MindCamera2D;
 pub use sim_host::MindSimHost;
+pub use stdb::{StdbBinder, StdbConnector};
 pub use tile_grid::MindTileGrid;
 
 use godot::prelude::*;

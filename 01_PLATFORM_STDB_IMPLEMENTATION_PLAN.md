@@ -344,9 +344,9 @@ Ordered; each milestone ends with its verification commands. **Smallest vertical
 - **Verify:** `cargo test -p mind-stdb`; `cargo check --manifest-path server/spacetimedb/Cargo.toml --tests`; `MIND_STDB_IT=1 cargo test -p mind-stdb -- --ignored two_clients_relay_ping_round_trip`.
 
 ### M5 — gdext autoload + binder node + MCP playtest
-- [ ] `StdbConnector`/`StdbBinder` classes; scene + autoload; signals/methods per §3.11.
-- [ ] `net` page on the plan-00 inspector (state, wave flags, relay counters).
-- [ ] Run the §7.3 MCP scenario end-to-end and record evidence (eval outputs, log lines, SQL rows, screenshot path).
+- [x] `StdbConnector`/`StdbBinder` classes; scene + autoload; signals/methods per §3.11.
+- [x] `net` page on the plan-00 inspector (state, wave flags, relay counters).
+- [ ] Run the §7.3 MCP scenario end-to-end and record evidence (eval outputs, log lines, SQL rows, screenshot path). **Deferred to the orchestrator after merge**: the Godot editor points at the main worktree; lane 01 only builds/checks here.
 - **Verify:** MCP checklist §7.3 passes; `godot_log errors` clean; offline launcher still boots with the server stopped.
 
 ### M6 — Perf, docs, handoff
@@ -609,5 +609,18 @@ Deleted at M6 (NUD-05=C, no archive): `client/Scripts/Components/` (`IComponent.
   - `MIND_STDB_IT=1 cargo test -p mind-stdb -- --ignored` → `3 passed`: base/lobby waves, two-client ping round trip (both peers apply the command, no order error), non-member rejection + rate limit (700 sent in one burst, 600 accepted; 100 `rate limit exceeded` warnings in `spacetime logs`).
   - `cargo check --manifest-path server/spacetimedb/Cargo.toml --tests` clean; `cargo fmt --check` and `cargo clippy -p mind-stdb -p mind-headless --all-targets -- -D warnings` clean.
 - Test-rig note: SDK reducer sends flush while their own connection is pumped (`frame_tick`), so the ITs pump both peers; documented in `tests/it.rs`.
+
+#### M5 — gdext autoload + binder node + net page (commit `01-M5`; in-engine run deferred)
+
+- `mind-gdext/src/stdb.rs`: `StdbConnector` (autoload Node: exports host/db/offline/token-suffix, `_process` pumps exactly once and emits `connected`/`disconnected(reason)`/`connect_error`/`wave_applied`/`wave_error`/`resync`, GDScript methods `state`/`local_identity_hex`/`connect`/`reconnect`/`disconnect`/`subscribe_game`/`unsubscribe_game`/`wave_applied_state`, dev helpers `dev_create_match`/`dev_match_id`/`dev_join_match`/`dev_start_match`/`dev_send_ping`/`dev_relay_applied_count`/`dev_last_command_id`/`relay_order_error`); `StdbBinder` (attach/drain protocol with the autoload, arg-less `row_inserted`/`row_updated`/`row_deleted`, `last_row_json`/`last_deleted_row_json`).
+- `mind-stdb/src/rows.rs`: `RowView` debug JSON for `ProtocolInfo`/`RelayConfig`/`Player`/`RelayMatch` (subset; generated code untouched).
+- `client/scenes/autoloads/stdb_connector.tscn` now sets the local-dev exports; `project.godot` registers `StdbConnector="*res://scenes/autoloads/stdb_connector.tscn"` (M0 item closed). Online mode = `--db` or a parsed `--pN` **or** the scene `offline=false`; the default stays offline so boot never requires a server (§3.12 invariant 8).
+- Inspector `net` page added to `client/scenes/ui/state_inspector.tscn` + `client/ui/state_inspector.gd` (state, identity prefix, wave flags, relay counters). Plan 14 owns the real UI surfaces.
+- `sim_host.rs`: the P0 `--db` facade was removed — the autoload is now the single pump per process (§3.12 invariant 7).
+- **Deviation from §7.3:** `dev_create_match` cannot return the server-assigned `match_id` synchronously (reducers return no data); the MCP flow is `dev_create_match` → poll `dev_match_id()` → `dev_start_match` → `dev_send_ping`. Recorded here for the orchestrator's §7.3 run.
+- Evidence (in this worktree):
+  - `cargo check -p mind-gdext` green; `cargo build -p mind-gdext` links `libmind_gdext.so` (247 MB debug).
+  - `cargo fmt -p mind-gdext -p mind-stdb -p mind-headless -- --check` and `cargo clippy … --all-targets -- -D warnings` clean.
+  - In-engine/MCP run not performed here (editor points at the main worktree); see handoff notes.
 
 
