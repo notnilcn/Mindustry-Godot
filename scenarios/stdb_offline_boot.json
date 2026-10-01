@@ -1,0 +1,11 @@
+{
+  "format": 1,
+  "name": "stdb_offline_boot",
+  "mode": "offline",
+  "pumps": 64,
+  "expect": {
+    "state": "offline",
+    "frames": 64,
+    "pump_p99_us": 200
+  }
+}

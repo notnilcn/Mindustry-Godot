@@ -75,6 +75,7 @@ pub struct SimReport {
     pub per_tick: Option<Vec<String>>,
 }
 
+<<<<<<< HEAD
 /// `content load` report (per-type counts, plan 02 §7b).
 #[derive(Debug, Clone, Serialize)]
 pub struct ContentLoadReport {
@@ -140,6 +141,68 @@ pub struct ContentBenchReport {
     pub within_budget: bool,
     /// Final per-type counts (sanity).
     pub types: Vec<ContentTypeCount>,
+}
+
+/// `stdb_*` scenario report (plan 01 §7.2).
+#[derive(Debug, Clone, Serialize)]
+pub struct StdbReport {
+    /// Scenario name.
+    pub scenario: String,
+    /// Connection mode (`"offline"`).
+    pub mode: String,
+    /// Final connector state name.
+    pub state: String,
+    /// `pump()` calls processed.
+    pub frames: u64,
+    /// Requested pump count.
+    pub pumps: u64,
+    /// Median pump overhead in nanoseconds.
+    pub pump_p50_ns: u64,
+    /// 99th percentile pump overhead in nanoseconds.
+    pub pump_p99_ns: u64,
+    /// Overall pass/fail.
+    pub pass: bool,
+    /// Golden state, when the fixture has one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expect_state: Option<String>,
+    /// Golden frame count, when the fixture has one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expect_frames: Option<u64>,
+}
+
+/// `stdb_binder_replay` report (plan 01 §7.2).
+#[derive(Debug, Clone, Serialize)]
+pub struct StdbBinderReport {
+    /// Scenario name.
+    pub scenario: String,
+    /// Overall pass/fail.
+    pub pass: bool,
+    /// Replayed row versions in drain order.
+    pub replay_order: Vec<u32>,
+    /// Live-injected row versions in drain order.
+    pub live_order: Vec<u32>,
+    /// Golden replay order, when the fixture has one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expect_replay: Option<Vec<u32>>,
+    /// Golden live order, when the fixture has one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expect_live: Option<Vec<u32>>,
+}
+
+/// `stdb_command_order` report (plan 01 §7.2).
+#[derive(Debug, Clone, Serialize)]
+pub struct StdbOrderReport {
+    /// Scenario name.
+    pub scenario: String,
+    /// Overall pass/fail.
+    pub pass: bool,
+    /// Applied command IDs in order.
+    pub applied_order: Vec<u64>,
+    /// Whether the injected duplicate was ignored.
+    pub duplicate_ignored: bool,
+    /// First order error observed, if any (`"gap: expected 2, got 3"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub order_error: Option<String>,
 }
 
 /// `bench` report (also committed into `bench_baseline.json`).

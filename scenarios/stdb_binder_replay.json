@@ -1,0 +1,10 @@
+{
+  "format": 1,
+  "name": "stdb_binder_replay",
+  "cached_rows": [1, 2],
+  "live_row": 3,
+  "expect": {
+    "replay_order": [1, 2],
+    "live_order": [3]
+  }
+}

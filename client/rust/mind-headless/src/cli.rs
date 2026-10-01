@@ -105,7 +105,8 @@ pub enum Command {
         /// Number of timed ticks.
         #[arg(long, default_value_t = 100_000)]
         ticks: u64,
-        /// Benchmark scenario/profile (`spine` maps to `bench_baseline`).
+        /// Benchmark scenario/profile (`spine` maps to `bench_baseline`;
+        /// `stdb_pump` measures connector pump overhead, plan 01 §7.4).
         #[arg(long, default_value = "spine")]
         scenario: String,
     },

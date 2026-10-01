@@ -15,12 +15,15 @@ const POLL_INTERVAL := 0.25
 @export var host_path: NodePath = ^"../../SimHost"
 ## Path to the camera used for the cursor-tile readout.
 @export var camera_path: NodePath = ^"../../World/Camera2D"
+## Path to the STDB autoload whose `net` page this inspector renders.
+@export var net_path: NodePath = ^"/root/StdbConnector"
 
 var _host: Node = null
 var _camera: Node = null
 var _elapsed := 0.0
 
 @onready var _label: Label = $Label
+@onready var _net_label: Label = $NetLabel
 
 
 func _ready() -> void:
@@ -62,6 +65,37 @@ func _refresh() -> void:
 	lines.append("cursor: %s" % _cursor_tile_text())
 	lines.append("checksum: %s" % str(state.get("checksum", "")))
 	_label.text = "\n".join(lines)
+	_refresh_net()
+
+
+## `net` page (plan 01 §3.11): connector state, wave flags, relay counters.
+## Read-only: every value comes from the StdbConnector autoload.
+func _refresh_net() -> void:
+	var connector := get_node_or_null(net_path)
+	if connector == null or not is_instance_valid(connector):
+		_net_label.text = "net: no StdbConnector autoload"
+		return
+	var lines := PackedStringArray()
+	var identity: String = str(connector.call("local_identity_hex"))
+	lines.append("net: %s  %s" % [
+		str(connector.call("state")),
+		identity.substr(0, 8) if not identity.is_empty() else "-",
+	])
+	lines.append("waves: base=%s lobby=%s game=%s" % [
+		_wave_text(connector, "base"),
+		_wave_text(connector, "lobby"),
+		_wave_text(connector, "game"),
+	])
+	lines.append("relay: applied=%d last=%d err=%s" % [
+		int(connector.call("dev_relay_applied_count")),
+		int(connector.call("dev_last_command_id")),
+		str(connector.call("relay_order_error")) if not str(connector.call("relay_order_error")).is_empty() else "-",
+	])
+	_net_label.text = "\n".join(lines)
+
+
+func _wave_text(connector: Node, wave: String) -> String:
+	return "on" if bool(connector.call("wave_applied_state", wave)) else "off"
 
 
 func _cursor_tile_text() -> String:

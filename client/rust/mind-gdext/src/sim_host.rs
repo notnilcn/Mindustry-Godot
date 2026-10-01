@@ -13,14 +13,12 @@ use godot::global::MouseButton;
 use godot::obj::{Base, Singleton};
 use godot::prelude::*;
 
+use crate::camera::MindCamera2D;
+use crate::settings;
 use mind_core::command::Command;
 use mind_core::content::BlockId;
 use mind_core::scenario::{Scenario, ScenarioPlayer};
 use mind_core::sim::{FixedStepRunner, Sim};
-use mind_stdb::{ConnectionConfig, MindDb};
-
-use crate::camera::MindCamera2D;
-use crate::settings;
 
 /// Maximum ticks accepted by one `step()` call (defensive; UI/MCP only).
 const MAX_STEP_TICKS: i64 = 1_000_000;
@@ -43,9 +41,6 @@ pub struct MindSimHost {
     player: Option<ScenarioPlayer>,
     runner: FixedStepRunner,
     capture: Option<CaptureRequest>,
-    /// Present only with `-- --db`: P0 constructs the facade and pumps it; plan 01
-    /// implements the live connector (OD-R4 keeps it on the main thread).
-    db: Option<MindDb>,
     /// Set whenever the world changed since the last `world_changed` emission.
     world_dirty: bool,
 }
@@ -61,7 +56,6 @@ impl INode for MindSimHost {
             player: None,
             runner: FixedStepRunner::new(),
             capture: None,
-            db: None,
             world_dirty: false,
         }
     }
@@ -75,17 +69,8 @@ impl INode for MindSimHost {
         }
 
         self.capture = parse_capture_args();
-        self.db = parse_db_args();
-        if let Some(db) = &mut self.db {
-            // P0: `connect` returns NotImplemented and stays Offline; log, never gate boot.
-            if let Err(err) = db.connect() {
-                log::info!(
-                    "mind-stdb facade created for {} (state {}): {err}",
-                    db.config().db_name,
-                    db.state().name()
-                );
-            }
-        }
+        // The STDB connection is owned by the `StdbConnector` autoload (plan 01
+        // M5, exactly one pump per process); the sim host no longer connects.
         self.world_dirty = true;
         self.emit_state();
         self.emit_world_changed();
@@ -101,11 +86,6 @@ impl INode for MindSimHost {
     }
 
     fn process(&mut self, delta: f64) {
-        // The net pump runs exactly once per Godot frame, independent of sim pause
-        // (`mind-stdb` `frame_tick`, plan 00 §3.7 / OD-R4).
-        if let Some(db) = &mut self.db {
-            let _ = db.frame_tick();
-        }
         if self.capture.is_some() {
             self.process_capture();
             return;
@@ -163,9 +143,6 @@ impl INode for MindSimHost {
     }
 
     fn exit_tree(&mut self) {
-        if let Some(db) = &mut self.db {
-            db.disconnect();
-        }
         // Minimal P0 client settings (§6.5); plan 04 replaces this with Settings.
         let zoom = self
             .base()
@@ -512,34 +489,4 @@ fn parse_capture_args() -> Option<CaptureRequest> {
         index += 1;
     }
     None
-}
-
-/// Parses `--db [--db-host <host>] [--db-name <name>]` from the user args (after `--`).
-///
-/// Presence of `--db` opts the client into the `mind-stdb` facade; P0's facade is
-/// offline-only (plan 01 implements the live connector).
-fn parse_db_args() -> Option<MindDb> {
-    let args = Os::singleton().get_cmdline_user_args();
-    let slice = args.as_slice();
-    if !slice.iter().any(|arg| *arg == "--db") {
-        return None;
-    }
-    let mut config = ConnectionConfig::local();
-    let mut index = 0;
-    while index < slice.len() {
-        let arg = slice[index].to_string();
-        if arg == "--db-host"
-            && let Some(host) = slice.get(index + 1)
-        {
-            config.host = host.to_string();
-            index += 1;
-        } else if arg == "--db-name"
-            && let Some(name) = slice.get(index + 1)
-        {
-            config.db_name = name.to_string();
-            index += 1;
-        }
-        index += 1;
-    }
-    Some(MindDb::new(config))
 }

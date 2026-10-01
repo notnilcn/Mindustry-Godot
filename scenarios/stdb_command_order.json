@@ -1,0 +1,21 @@
+{
+  "format": 1,
+  "name": "stdb_command_order",
+  "match_id": 7,
+  "rows": [
+    { "command_id": 9, "sender": 1, "sender_seq": 3, "client_tick": 30 },
+    { "command_id": 7, "sender": 1, "sender_seq": 1, "client_tick": 10 },
+    { "command_id": 8, "sender": 1, "sender_seq": 2, "client_tick": 20 }
+  ],
+  "duplicate": { "command_id": 8, "sender": 1, "sender_seq": 2, "client_tick": 20 },
+  "gap_rows": [
+    { "command_id": 10, "sender": 2, "sender_seq": 1, "client_tick": 1 },
+    { "command_id": 11, "sender": 2, "sender_seq": 3, "client_tick": 2 }
+  ],
+  "expect": {
+    "applied_order": [7, 8, 9],
+    "duplicate_ignored": true,
+    "gap_expected": 2,
+    "gap_got": 3
+  }
+}

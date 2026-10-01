@@ -6,13 +6,87 @@
 #![allow(unused, clippy::all)]
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
+pub mod all_players_table;
+pub mod audit_kind_type;
+pub mod audit_log_type;
+pub mod authority_mode_type;
+pub mod break_block_type;
+pub mod client_settings_table;
+pub mod client_settings_type;
+pub mod command_kind_type;
+pub mod command_rate_type;
+pub mod config_block_type;
+pub mod create_match_reducer;
+pub mod create_profile_reducer;
+pub mod join_match_reducer;
+pub mod leave_match_reducer;
+pub mod local_client_settings_table;
+pub mod local_player_profile_table;
+pub mod local_player_table;
+pub mod match_command_type;
+pub mod match_status_type;
+pub mod my_match_commands_table;
+pub mod my_match_table;
+pub mod my_matches_table;
+pub mod place_block_type;
+pub mod player_profile_table;
+pub mod player_profile_type;
+pub mod player_session_table;
+pub mod player_session_type;
 pub mod player_table;
 pub mod player_type;
+pub mod protocol_info_table;
+pub mod protocol_info_type;
+pub mod relay_config_table;
+pub mod relay_config_type;
+pub mod relay_match_table;
+pub mod relay_match_type;
+pub mod relay_member_type;
+pub mod send_match_command_reducer;
 pub mod set_username_reducer;
+pub mod start_match_reducer;
+pub mod update_client_settings_reducer;
 
+pub use all_players_table::*;
+pub use audit_kind_type::AuditKind;
+pub use audit_log_type::AuditLog;
+pub use authority_mode_type::AuthorityMode;
+pub use break_block_type::BreakBlock;
+pub use client_settings_table::*;
+pub use client_settings_type::ClientSettings;
+pub use command_kind_type::CommandKind;
+pub use command_rate_type::CommandRate;
+pub use config_block_type::ConfigBlock;
+pub use create_match_reducer::create_match;
+pub use create_profile_reducer::create_profile;
+pub use join_match_reducer::join_match;
+pub use leave_match_reducer::leave_match;
+pub use local_client_settings_table::*;
+pub use local_player_profile_table::*;
+pub use local_player_table::*;
+pub use match_command_type::MatchCommand;
+pub use match_status_type::MatchStatus;
+pub use my_match_commands_table::*;
+pub use my_match_table::*;
+pub use my_matches_table::*;
+pub use place_block_type::PlaceBlock;
+pub use player_profile_table::*;
+pub use player_profile_type::PlayerProfile;
+pub use player_session_table::*;
+pub use player_session_type::PlayerSession;
 pub use player_table::*;
 pub use player_type::Player;
+pub use protocol_info_table::*;
+pub use protocol_info_type::ProtocolInfo;
+pub use relay_config_table::*;
+pub use relay_config_type::RelayConfig;
+pub use relay_match_table::*;
+pub use relay_match_type::RelayMatch;
+pub use relay_member_type::RelayMember;
+pub use send_match_command_reducer::send_match_command;
 pub use set_username_reducer::set_username;
+pub use start_match_reducer::start_match;
+pub use update_client_settings_reducer::update_client_settings;
 
 #[derive(Clone, PartialEq, Debug)]
 
@@ -22,7 +96,37 @@ pub use set_username_reducer::set_username;
 /// to indicate which reducer caused the event.
 
 pub enum Reducer {
-    SetUsername { username: String },
+    CreateMatch {
+        map_id: String,
+        map_seed: u64,
+    },
+    CreateProfile {
+        name: String,
+    },
+    JoinMatch {
+        match_id: u64,
+    },
+    LeaveMatch {
+        match_id: u64,
+    },
+    SendMatchCommand {
+        match_id: u64,
+        client_tick: u64,
+        kind: CommandKind,
+    },
+    SetUsername {
+        username: String,
+    },
+    StartMatch {
+        match_id: u64,
+    },
+    UpdateClientSettings {
+        ui_scale: f32,
+        language: String,
+        music_volume: f32,
+        sfx_volume: f32,
+        keybinds_json: String,
+    },
 }
 
 impl __sdk::InModule for Reducer {
@@ -32,18 +136,73 @@ impl __sdk::InModule for Reducer {
 impl __sdk::Reducer for Reducer {
     fn reducer_name(&self) -> &'static str {
         match self {
+            Reducer::CreateMatch { .. } => "create_match",
+            Reducer::CreateProfile { .. } => "create_profile",
+            Reducer::JoinMatch { .. } => "join_match",
+            Reducer::LeaveMatch { .. } => "leave_match",
+            Reducer::SendMatchCommand { .. } => "send_match_command",
             Reducer::SetUsername { .. } => "set_username",
+            Reducer::StartMatch { .. } => "start_match",
+            Reducer::UpdateClientSettings { .. } => "update_client_settings",
             _ => unreachable!(),
         }
     }
     #[allow(clippy::clone_on_copy)]
     fn args_bsatn(&self) -> Result<Vec<u8>, __sats::bsatn::EncodeError> {
         match self {
+            Reducer::CreateMatch { map_id, map_seed } => {
+                __sats::bsatn::to_vec(&create_match_reducer::CreateMatchArgs {
+                    map_id: map_id.clone(),
+                    map_seed: map_seed.clone(),
+                })
+            }
+            Reducer::CreateProfile { name } => {
+                __sats::bsatn::to_vec(&create_profile_reducer::CreateProfileArgs {
+                    name: name.clone(),
+                })
+            }
+            Reducer::JoinMatch { match_id } => {
+                __sats::bsatn::to_vec(&join_match_reducer::JoinMatchArgs {
+                    match_id: match_id.clone(),
+                })
+            }
+            Reducer::LeaveMatch { match_id } => {
+                __sats::bsatn::to_vec(&leave_match_reducer::LeaveMatchArgs {
+                    match_id: match_id.clone(),
+                })
+            }
+            Reducer::SendMatchCommand {
+                match_id,
+                client_tick,
+                kind,
+            } => __sats::bsatn::to_vec(&send_match_command_reducer::SendMatchCommandArgs {
+                match_id: match_id.clone(),
+                client_tick: client_tick.clone(),
+                kind: kind.clone(),
+            }),
             Reducer::SetUsername { username } => {
                 __sats::bsatn::to_vec(&set_username_reducer::SetUsernameArgs {
                     username: username.clone(),
                 })
             }
+            Reducer::StartMatch { match_id } => {
+                __sats::bsatn::to_vec(&start_match_reducer::StartMatchArgs {
+                    match_id: match_id.clone(),
+                })
+            }
+            Reducer::UpdateClientSettings {
+                ui_scale,
+                language,
+                music_volume,
+                sfx_volume,
+                keybinds_json,
+            } => __sats::bsatn::to_vec(&update_client_settings_reducer::UpdateClientSettingsArgs {
+                ui_scale: ui_scale.clone(),
+                language: language.clone(),
+                music_volume: music_volume.clone(),
+                sfx_volume: sfx_volume.clone(),
+                keybinds_json: keybinds_json.clone(),
+            }),
             _ => unreachable!(),
         }
     }
@@ -53,7 +212,20 @@ impl __sdk::Reducer for Reducer {
 #[allow(non_snake_case)]
 #[doc(hidden)]
 pub struct DbUpdate {
+    all_players: __sdk::TableUpdate<Player>,
+    client_settings: __sdk::TableUpdate<ClientSettings>,
+    local_client_settings: __sdk::TableUpdate<ClientSettings>,
+    local_player: __sdk::TableUpdate<Player>,
+    local_player_profile: __sdk::TableUpdate<PlayerProfile>,
+    my_match: __sdk::TableUpdate<RelayMatch>,
+    my_match_commands: __sdk::TableUpdate<MatchCommand>,
+    my_matches: __sdk::TableUpdate<RelayMatch>,
     player: __sdk::TableUpdate<Player>,
+    player_profile: __sdk::TableUpdate<PlayerProfile>,
+    player_session: __sdk::TableUpdate<PlayerSession>,
+    protocol_info: __sdk::TableUpdate<ProtocolInfo>,
+    relay_config: __sdk::TableUpdate<RelayConfig>,
+    relay_match: __sdk::TableUpdate<RelayMatch>,
 }
 
 impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
@@ -62,9 +234,48 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_update in __sdk::transaction_update_iter_table_updates(raw) {
             match &table_update.table_name[..] {
+                "all_players" => db_update
+                    .all_players
+                    .append(all_players_table::parse_table_update(table_update)?),
+                "client_settings" => db_update
+                    .client_settings
+                    .append(client_settings_table::parse_table_update(table_update)?),
+                "local_client_settings" => db_update.local_client_settings.append(
+                    local_client_settings_table::parse_table_update(table_update)?,
+                ),
+                "local_player" => db_update
+                    .local_player
+                    .append(local_player_table::parse_table_update(table_update)?),
+                "local_player_profile" => db_update.local_player_profile.append(
+                    local_player_profile_table::parse_table_update(table_update)?,
+                ),
+                "my_match" => db_update
+                    .my_match
+                    .append(my_match_table::parse_table_update(table_update)?),
+                "my_match_commands" => db_update
+                    .my_match_commands
+                    .append(my_match_commands_table::parse_table_update(table_update)?),
+                "my_matches" => db_update
+                    .my_matches
+                    .append(my_matches_table::parse_table_update(table_update)?),
                 "player" => db_update
                     .player
                     .append(player_table::parse_table_update(table_update)?),
+                "player_profile" => db_update
+                    .player_profile
+                    .append(player_profile_table::parse_table_update(table_update)?),
+                "player_session" => db_update
+                    .player_session
+                    .append(player_session_table::parse_table_update(table_update)?),
+                "protocol_info" => db_update
+                    .protocol_info
+                    .append(protocol_info_table::parse_table_update(table_update)?),
+                "relay_config" => db_update
+                    .relay_config
+                    .append(relay_config_table::parse_table_update(table_update)?),
+                "relay_match" => db_update
+                    .relay_match
+                    .append(relay_match_table::parse_table_update(table_update)?),
 
                 unknown => {
                     return Err(__sdk::InternalError::unknown_name(
@@ -91,9 +302,43 @@ impl __sdk::DbUpdate for DbUpdate {
     ) -> AppliedDiff<'_> {
         let mut diff = AppliedDiff::default();
 
+        diff.client_settings = cache
+            .apply_diff_to_table::<ClientSettings>("client_settings", &self.client_settings)
+            .with_updates_by_pk(|row| &row.identity);
         diff.player = cache
             .apply_diff_to_table::<Player>("player", &self.player)
             .with_updates_by_pk(|row| &row.identity);
+        diff.player_profile = cache
+            .apply_diff_to_table::<PlayerProfile>("player_profile", &self.player_profile)
+            .with_updates_by_pk(|row| &row.profile_id);
+        diff.player_session = cache
+            .apply_diff_to_table::<PlayerSession>("player_session", &self.player_session)
+            .with_updates_by_pk(|row| &row.session_id);
+        diff.protocol_info = cache
+            .apply_diff_to_table::<ProtocolInfo>("protocol_info", &self.protocol_info)
+            .with_updates_by_pk(|row| &row.id);
+        diff.relay_config = cache
+            .apply_diff_to_table::<RelayConfig>("relay_config", &self.relay_config)
+            .with_updates_by_pk(|row| &row.id);
+        diff.relay_match = cache
+            .apply_diff_to_table::<RelayMatch>("relay_match", &self.relay_match)
+            .with_updates_by_pk(|row| &row.match_id);
+        diff.all_players = cache
+            .apply_diff_to_table::<Player>("all_players", &self.all_players)
+            .with_updates_by_pk(|row| &row.identity);
+        diff.local_client_settings = cache.apply_diff_to_table::<ClientSettings>(
+            "local_client_settings",
+            &self.local_client_settings,
+        );
+        diff.local_player = cache.apply_diff_to_table::<Player>("local_player", &self.local_player);
+        diff.local_player_profile = cache.apply_diff_to_table::<PlayerProfile>(
+            "local_player_profile",
+            &self.local_player_profile,
+        );
+        diff.my_match = cache.apply_diff_to_table::<RelayMatch>("my_match", &self.my_match);
+        diff.my_match_commands =
+            cache.apply_diff_to_table::<MatchCommand>("my_match_commands", &self.my_match_commands);
+        diff.my_matches = cache.apply_diff_to_table::<RelayMatch>("my_matches", &self.my_matches);
 
         diff
     }
@@ -101,8 +346,47 @@ impl __sdk::DbUpdate for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_rows in raw.tables {
             match &table_rows.table[..] {
+                "all_players" => db_update
+                    .all_players
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "client_settings" => db_update
+                    .client_settings
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "local_client_settings" => db_update
+                    .local_client_settings
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "local_player" => db_update
+                    .local_player
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "local_player_profile" => db_update
+                    .local_player_profile
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "my_match" => db_update
+                    .my_match
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "my_match_commands" => db_update
+                    .my_match_commands
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "my_matches" => db_update
+                    .my_matches
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "player" => db_update
                     .player
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "player_profile" => db_update
+                    .player_profile
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "player_session" => db_update
+                    .player_session
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "protocol_info" => db_update
+                    .protocol_info
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "relay_config" => db_update
+                    .relay_config
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "relay_match" => db_update
+                    .relay_match
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 unknown => {
                     return Err(
@@ -117,8 +401,47 @@ impl __sdk::DbUpdate for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_rows in raw.tables {
             match &table_rows.table[..] {
+                "all_players" => db_update
+                    .all_players
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "client_settings" => db_update
+                    .client_settings
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "local_client_settings" => db_update
+                    .local_client_settings
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "local_player" => db_update
+                    .local_player
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "local_player_profile" => db_update
+                    .local_player_profile
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "my_match" => db_update
+                    .my_match
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "my_match_commands" => db_update
+                    .my_match_commands
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "my_matches" => db_update
+                    .my_matches
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "player" => db_update
                     .player
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "player_profile" => db_update
+                    .player_profile
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "player_session" => db_update
+                    .player_session
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "protocol_info" => db_update
+                    .protocol_info
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "relay_config" => db_update
+                    .relay_config
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "relay_match" => db_update
+                    .relay_match
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 unknown => {
                     return Err(
@@ -135,7 +458,20 @@ impl __sdk::DbUpdate for DbUpdate {
 #[allow(non_snake_case)]
 #[doc(hidden)]
 pub struct AppliedDiff<'r> {
+    all_players: __sdk::TableAppliedDiff<'r, Player>,
+    client_settings: __sdk::TableAppliedDiff<'r, ClientSettings>,
+    local_client_settings: __sdk::TableAppliedDiff<'r, ClientSettings>,
+    local_player: __sdk::TableAppliedDiff<'r, Player>,
+    local_player_profile: __sdk::TableAppliedDiff<'r, PlayerProfile>,
+    my_match: __sdk::TableAppliedDiff<'r, RelayMatch>,
+    my_match_commands: __sdk::TableAppliedDiff<'r, MatchCommand>,
+    my_matches: __sdk::TableAppliedDiff<'r, RelayMatch>,
     player: __sdk::TableAppliedDiff<'r, Player>,
+    player_profile: __sdk::TableAppliedDiff<'r, PlayerProfile>,
+    player_session: __sdk::TableAppliedDiff<'r, PlayerSession>,
+    protocol_info: __sdk::TableAppliedDiff<'r, ProtocolInfo>,
+    relay_config: __sdk::TableAppliedDiff<'r, RelayConfig>,
+    relay_match: __sdk::TableAppliedDiff<'r, RelayMatch>,
     __unused: std::marker::PhantomData<&'r ()>,
 }
 
@@ -149,7 +485,52 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         event: &EventContext,
         callbacks: &mut __sdk::DbCallbacks<RemoteModule>,
     ) {
+        callbacks.invoke_table_row_callbacks::<Player>("all_players", &self.all_players, event);
+        callbacks.invoke_table_row_callbacks::<ClientSettings>(
+            "client_settings",
+            &self.client_settings,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<ClientSettings>(
+            "local_client_settings",
+            &self.local_client_settings,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<Player>("local_player", &self.local_player, event);
+        callbacks.invoke_table_row_callbacks::<PlayerProfile>(
+            "local_player_profile",
+            &self.local_player_profile,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<RelayMatch>("my_match", &self.my_match, event);
+        callbacks.invoke_table_row_callbacks::<MatchCommand>(
+            "my_match_commands",
+            &self.my_match_commands,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<RelayMatch>("my_matches", &self.my_matches, event);
         callbacks.invoke_table_row_callbacks::<Player>("player", &self.player, event);
+        callbacks.invoke_table_row_callbacks::<PlayerProfile>(
+            "player_profile",
+            &self.player_profile,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<PlayerSession>(
+            "player_session",
+            &self.player_session,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<ProtocolInfo>(
+            "protocol_info",
+            &self.protocol_info,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<RelayConfig>(
+            "relay_config",
+            &self.relay_config,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<RelayMatch>("relay_match", &self.relay_match, event);
     }
 }
 
@@ -810,7 +1191,35 @@ impl __sdk::SpacetimeModule for RemoteModule {
     type QueryBuilder = __sdk::QueryBuilder;
 
     fn register_tables(client_cache: &mut __sdk::ClientCache<Self>) {
+        all_players_table::register_table(client_cache);
+        client_settings_table::register_table(client_cache);
+        local_client_settings_table::register_table(client_cache);
+        local_player_table::register_table(client_cache);
+        local_player_profile_table::register_table(client_cache);
+        my_match_table::register_table(client_cache);
+        my_match_commands_table::register_table(client_cache);
+        my_matches_table::register_table(client_cache);
         player_table::register_table(client_cache);
+        player_profile_table::register_table(client_cache);
+        player_session_table::register_table(client_cache);
+        protocol_info_table::register_table(client_cache);
+        relay_config_table::register_table(client_cache);
+        relay_match_table::register_table(client_cache);
     }
-    const ALL_TABLE_NAMES: &'static [&'static str] = &["player"];
+    const ALL_TABLE_NAMES: &'static [&'static str] = &[
+        "all_players",
+        "client_settings",
+        "local_client_settings",
+        "local_player",
+        "local_player_profile",
+        "my_match",
+        "my_match_commands",
+        "my_matches",
+        "player",
+        "player_profile",
+        "player_session",
+        "protocol_info",
+        "relay_config",
+        "relay_match",
+    ];
 }

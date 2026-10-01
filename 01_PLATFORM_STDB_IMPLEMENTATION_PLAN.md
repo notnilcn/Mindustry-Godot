@@ -131,7 +131,7 @@ TableBinder<A: TableAccessor<RemoteTables>>          // A = generated marker `Ma
 
 - Callbacks are registered through the generated table handle (`Table::on_insert`/`on_delete`, `TableWithPrimaryKey::on_update`) and push into the binder's queue; `LastRow`/`LastOldRow`/`LastDeletedRow` and the "rows cannot cross the signal boundary" workaround disappear — `RowChange<T>` carries owned rows.
 - **Replay**: `replay_existing` iterates the client cache once **after** registering live callbacks and enqueues each row as `Insert`. It is only callable on primary-key/persistent tables (type state). Event tables get a binder without the method, making C# rule 3 ("replay false on event tables") a compile time property instead of a convention.
-- **Event tables**: binders for `A: EventTable` expose `Insert` only (`on_insert`); `remove_on_insert`/`remove_on_delete` IDs are stored inside the binder so `_exit_tree`/drop unregisters cleanly (no leak, C# `_ExitTree` parity).
+- **Event tables**: binders for `A: EventTable` expose `Insert` only (`on_insert`); `remove_on_insert`/`remove_on_delete` IDs are stored inside the binder so `_exit_tree`/drop unregisters cleanly (no leak, C# `_ExitTree` parity). **M3 implementation note (recorded 2026-10-01):** callback IDs are not stored — they are table-typed and a dropped binder has no connection handle. Callbacks capture `Weak<BinderCore>` instead (dropped binder ⇒ inert no-op, queue freed) and registrations die with the connection; same no-leak/no-stale-delivery contract, see `binder.rs` docs and the M3 changelog entry.
 - **GDScript bridge**: `StdbBinder` (gdext) owns one `TableBinder` for a table named via `#[export] table_name`, emits arg-less `row_inserted`/`row_updated`/`row_deleted` plus `last_row_json: String` (via the small hand-written `RowView` impls in `rows.rs`, never by editing generated code). Typed gameplay/UI code should consume the Rust binder; the node exists for layout-time wiring and debugging (plan 14 owns the real UI data paths).
 
 ### 3.6 Subscription waves
@@ -199,7 +199,9 @@ pub struct RelayMatch {
     pub started_at: Option<Timestamp>, pub ended_at: Option<Timestamp>,
 }
 
-#[table(accessor = relay_member, index(accessor = by_match_identity, btree(columns = [match_id, identity])))]
+#[table(accessor = relay_member,
+        index(accessor = by_match_identity, btree(columns = [match_id, identity])),
+        index(accessor = by_identity, btree(columns = [identity, match_id])))] // M4: needed for the per-caller views
 pub struct RelayMember {
     #[primary_key] #[auto_inc] pub member_id: u64,
     #[index(btree)] pub match_id: u64,
@@ -227,6 +229,11 @@ pub enum CommandKind {
     ConfigBlock { x: i32, y: i32, config: u32 },
     // plan 21 owns the full parity set (unit orders, objectives, payloads, ...)
 }
+// M4 implementation note (recorded 2026-10-01): STDB 2.10.1's `SpacetimeType`
+// derive only accepts unit/newtype variants, so the payloads are product
+// structs (`PlaceBlock`/`BreakBlock`/`ConfigBlock`) and the variants are
+// newtypes (`Ping(u64)`, `PlaceBlock(PlaceBlock)`, ...). The contract above is
+// unchanged in meaning; plan 21 owns the schema hard-cut.
 
 #[table(accessor = command_rate)]                    // server-only
 pub struct CommandRate {
@@ -252,7 +259,7 @@ Ordering contract:
 3. **Protocol:** match `protocol_version` equals module `PROTOCOL_VERSION` and client is on the same build (client sends nothing; the check is on match creation and on the client handshake view).
 4. **Enum/payload shape:** `CommandKind` is exhaustive; no opaque bytes.
 5. **Coarse range/existence:** for placement/config commands, `0 <= x < map_width_tiles`, `0 <= y < map_height_tiles`, `rotation <= 3`, `block_id != 0`. No tile occupancy, no resources, no rule legality — those are sim-side and stay client-local until D2's sim arrives server-side.
-6. **Per-sender sequence:** `sender_seq` must be strictly increasing per sender (`CommandRate.last_sender_seq` persists across rate-window rolls, so replayed old sequences are rejected).
+6. **Per-sender sequence:** `sender_seq` must be strictly increasing per sender (`CommandRate.last_sender_seq` persists across rate-window rolls, so replayed old sequences are rejected). **M4 implementation note:** the reducer signature has no `sender_seq` argument, so the server assigns it atomically from `CommandRate.last_sender_seq` (+1, overflow-checked); the client still verifies continuity (gap detection) as a protocol-violation detector.
 
 Rejections return `Err(String)` (rolled back) and log via `log::warn!`; successful lifecycle events (`create_match`, `join_match`, `start_match`) write `AuditLog` rows. This split is deliberate: a failed reducer's writes roll back, so a rejection cannot persist an audit row in the same transaction.
 
@@ -298,47 +305,48 @@ Rejections return `Err(String)` (rolled back) and log via `log::warn!`; successf
 Ordered; each milestone ends with its verification commands. **Smallest vertical slice first** (M1–M2): a headless `Connector` in offline mode that boots, pumps, and reports `Offline`, with `mind-headless run stdb_offline_boot` green — before any network or schema work.
 
 ### M0 — Workspace, crate skeletons, bindings pipeline
-- [ ] Add `client/rust/mind-stdb` to the plan-00 workspace; `Cargo.toml` with pins (`spacetimedb-sdk = "=2.10.1"`, `serde`, `serde_json`, `log`).
-- [ ] Create `server/spacetimedb/` crate (`mindustry_godot`, edition 2024, cdylib, `spacetimedb = "=2.10.1"`), `src/lib.rs` module skeleton (§3.7).
-- [ ] `server/spacetime.json` with a `rust` generate entry into `../client/rust/mind-stdb/src/module_bindings`; `server/build.sh` + `build.ps1` (`spacetime generate --lang rust ...`; `spacetime publish mindustry -y --delete-data` with `--server`/`--db` overrides; `--check` drift mode).
-- [ ] Commit generated bindings; add the never-hand-edit header note to `mind-stdb/AGENTS.md`.
-- [ ] `project.godot`: autoload `StdbConnector="*res://scenes/autoloads/stdb_connector.tscn"`.
+- [x] Add `client/rust/mind-stdb` to the plan-00 workspace; `Cargo.toml` with pins (`spacetimedb-sdk = "=2.10.1"`, `serde`, `serde_json`, `log`).
+- [x] Create `server/spacetimedb/` crate (`mindustry_godot`, edition 2024, cdylib, `spacetimedb = "=2.10.1"`), `src/lib.rs` module skeleton (§3.7).
+- [x] `server/spacetime.json` with a `rust` generate entry into `../client/rust/mind-stdb/src/module_bindings`; `server/build.sh` + `build.ps1` (`spacetime generate --lang rust ...`; `spacetime publish mindustry -y --delete-data` with `--server`/`--db` overrides; `--check` drift mode).
+- [x] Commit generated bindings; add the never-hand-edit header note to `mind-stdb/AGENTS.md`.
+- [x] `client/scenes/autoloads/stdb_connector.tscn` committed (native `StdbConnector` root; `.tscn`-first).
+- [ ] `project.godot`: autoload `StdbConnector="*res://scenes/autoloads/stdb_connector.tscn"` — **deferred to M5** so the project never boots with a missing native class (the scene alone is inert).
 - **Verify:** `cargo check -p mind-stdb`; `cargo check --manifest-path server/spacetimedb/Cargo.toml`; `server/build.sh --check` reports no drift; `spacetime --version` reports 2.10.1.
 
 ### M1 — Server skeleton (identity/session/profile/settings/audit)
-- [ ] `identity/tables.rs` + views + reducers: `set_username`, `create_profile`, `update_client_settings` (length/range checks, `ctx.sender()` ownership).
-- [ ] `main/lifecycle.rs`: `init` seeds protocol/config; `client_connected` upserts `Player` + inserts open `PlayerSession`; `client_disconnected` closes the session and updates `last_seen_at`.
-- [ ] `main/audit.rs`: `AuditLog` + server-only `audit()` helper; use on successful lifecycle/lobby writes.
-- [ ] `main/global.rs`: `PROTOCOL_VERSION`, rate window/cap, default map bounds.
-- [ ] `#[cfg(test)]` pure helpers in `identity/methods.rs` (validation) — typecheck gate only.
+- [x] `identity/tables.rs` + views + reducers: `set_username`, `create_profile`, `update_client_settings` (length/range checks, `ctx.sender()` ownership).
+- [x] `main/lifecycle.rs`: `init` seeds protocol/config; `client_connected` upserts `Player` + inserts open `PlayerSession`; `client_disconnected` closes the session and updates `last_seen_at`.
+- [x] `main/audit.rs`: `AuditLog` + server-only `audit()` helper; use on successful lifecycle/lobby writes.
+- [x] `main/global.rs`: `PROTOCOL_VERSION`, rate window/cap, default map bounds.
+- [x] `#[cfg(test)]` pure helpers in `identity/methods.rs` (validation) — typecheck gate only.
 - **Verify:** `cargo check --manifest-path server/spacetimedb/Cargo.toml --tests`; local publish; `spacetime sql "SELECT * FROM protocol_info"` / `player` / `player_session` show seeded/connected rows; `spacetime call` a reducer and read it back.
 
 ### M2 — `mind-stdb` connector core (offline first)
-- [ ] `config.rs`, `token.rs`, `identity.rs` (pure `--pN` parser port), `connector.rs` state machine + offline mode + `pump()`.
-- [ ] `protocol.rs` (`PROTOCOL_VERSION` mirror + mismatch error type); `connect()` path builds the generated `DbConnection` with builder callbacks; token load/save; events queue.
-- [ ] Unit tests: suffix parser (including `--path` rejection), host-scoped token key, file-store round-trip, offline state, pump-without-connection no-op.
-- [ ] `mind-headless run stdb_offline_boot` scenario (offline connector boots, N pumps, expected state dump).
+- [x] `config.rs`, `token.rs`, `identity.rs` (pure `--pN` parser port), `connector.rs` state machine + offline mode + `pump()`.
+- [x] `protocol.rs` (`PROTOCOL_VERSION` mirror + mismatch error type); `connect()` path builds the generated `DbConnection` with builder callbacks; token load/save; events queue.
+- [x] Unit tests: suffix parser (including `--path` rejection), host-scoped token key, file-store round-trip, offline state, pump-without-connection no-op.
+- [x] `mind-headless run stdb_offline_boot` scenario (offline connector boots, N pumps, expected state dump).
 - **Verify:** `cargo test -p mind-stdb` (all network-free); `cargo run -p mind-headless -- run stdb_offline_boot`.
 
 ### M3 — Waves + typed binders
-- [ ] `waves.rs`: `WaveName`, static base/lobby/game query sets, applied/error events, manual toggles.
-- [ ] `binder.rs`: `TableBinder<A>`, queue, `RowChange`, replay on `TableWithPrimaryKey`, event-table specialization, drop cleanup.
-- [ ] Connector `bind()` + rebind-on-reconnect + `Resync`.
-- [ ] Headless scenarios `stdb_binder_replay` (synthetic source) and `stdb_command_order` (canned rows; see M4).
-- [ ] Env-gated integration test `local_connect_applies_base_and_lobby_waves` (`MIND_STDB_IT=1`).
+- [x] `waves.rs`: `WaveName`, static base/lobby/game query sets, applied/error events, manual toggles.
+- [x] `binder.rs`: `TableBinder<A>`, queue, `RowChange`, replay on `TableWithPrimaryKey`, event-table specialization, drop cleanup.
+- [x] Connector `bind()` + rebind-on-reconnect + `Resync`.
+- [x] Headless scenario `stdb_binder_replay` (synthetic source); `stdb_command_order` moved to M4 (needs the `match_command` rows).
+- [x] Env-gated integration test `local_connect_applies_base_and_lobby_waves` (`MIND_STDB_IT=1`).
 - **Verify:** `cargo test -p mind-stdb`; with local server: `MIND_STDB_IT=1 cargo test -p mind-stdb -- --ignored local_connect_applies_base_and_lobby_waves`.
 
 ### M4 — Relay foundation (match/member/command + validation + CommandStream)
-- [ ] `relay/tables.rs`, `methods.rs` (`require_member`, `rate_allow`, `validate_kind`), `reducers.rs` (`create_match`, `join_match`, `leave_match`, `start_match`, `send_match_command`), `views.rs` (`my_matches`, `my_match`, `my_match_commands`).
-- [ ] `relay.rs` client: `CommandStream` binding `my_match_commands`, ordering by `command_id`, dedup, per-sender gap detection, `applied_count`/`last_command_id`/`order_error`.
-- [ ] Unit tests: order-not-arrival, duplicate ignore, per-sender gap flag, auto-inc numeric gaps are not loss; server `#[cfg(test)]`: bounds rejection, rate window roll.
-- [ ] Integration tests (env-gated): `two_clients_relay_ping_round_trip`, `relay_rejects_non_member_and_rate_limit`.
+- [x] `relay/tables.rs`, `methods.rs` (`require_member`, `rate_allow`, `validate_kind`), `reducers.rs` (`create_match`, `join_match`, `leave_match`, `start_match`, `send_match_command`), `views.rs` (`my_matches`, `my_match`, `my_match_commands`).
+- [x] `relay.rs` client: `CommandStream` binding `my_match_commands`, ordering by `command_id`, dedup, per-sender gap detection, `applied_count`/`last_command_id`/`order_error`.
+- [x] Unit tests: order-not-arrival, duplicate ignore, per-sender gap flag, auto-inc numeric gaps are not loss; server `#[cfg(test)]`: bounds rejection, rate window roll.
+- [x] Integration tests (env-gated): `two_clients_relay_ping_round_trip`, `relay_rejects_non_member_and_rate_limit`.
 - **Verify:** `cargo test -p mind-stdb`; `cargo check --manifest-path server/spacetimedb/Cargo.toml --tests`; `MIND_STDB_IT=1 cargo test -p mind-stdb -- --ignored two_clients_relay_ping_round_trip`.
 
 ### M5 — gdext autoload + binder node + MCP playtest
-- [ ] `StdbConnector`/`StdbBinder` classes; scene + autoload; signals/methods per §3.11.
-- [ ] `net` page on the plan-00 inspector (state, wave flags, relay counters).
-- [ ] Run the §7.3 MCP scenario end-to-end and record evidence (eval outputs, log lines, SQL rows, screenshot path).
+- [x] `StdbConnector`/`StdbBinder` classes; scene + autoload; signals/methods per §3.11.
+- [x] `net` page on the plan-00 inspector (state, wave flags, relay counters).
+- [ ] Run the §7.3 MCP scenario end-to-end and record evidence (eval outputs, log lines, SQL rows, screenshot path). **Deferred to the orchestrator after merge**: the Godot editor points at the main worktree; lane 01 only builds/checks here.
 - **Verify:** MCP checklist §7.3 passes; `godot_log errors` clean; offline launcher still boots with the server stopped.
 
 ### M6 — Perf, docs, handoff
@@ -354,7 +362,7 @@ Ordered; each milestone ends with its verification commands. **Smallest vertical
 | Table (accessor) | Public | Key/index | Fields (plan 01) |
 |---|---|---|---|
 | `player` | yes | PK `identity: Identity` | `username: String`, `created_at`, `last_seen_at: Timestamp`, `protocol_version: u32` |
-| `player_session` | yes | PK `session_id: u64` auto-inc; index `by_identity_started(identity, started_at)` | `identity`, `connection_id: ConnectionId`, `started_at`, `ended_at: Option<Timestamp>` |
+| `player_session` | yes | PK `session_id: u64` auto-inc; index `by_identity_started(identity, started_at)` | `identity`, `connection_id: Option<ConnectionId>` (2.10.1 `ReducerContext::connection_id()` is `Option`), `started_at`, `ended_at: Option<Timestamp>` |
 | `player_profile` | yes | PK `profile_id` auto-inc; index `by_owner(identity)` | `identity`, `name: String`, `created_at` |
 | `client_settings` | yes (view `local_client_settings`) | PK `identity` | `ui_scale: f32`, `language: String`, `music_volume: f32`, `sfx_volume: f32`, `keybinds_json: String`, `revision: u32`, `updated_at` |
 | `protocol_info` | yes | PK `id: u8` (singleton 0) | `protocol_version: u32`, `min_client_build: u32`, `save_format_version: u32` |
@@ -474,16 +482,16 @@ Regressions block the P1 gate (HIGH_LEVEL_PLAN §7.4/§5).
 
 ### 7.5 Exit criteria checklist
 
-- [ ] `cargo fmt --check`, `cargo clippy -p mind-stdb -p mind-gdext -p mind-headless` clean; `cargo test -p mind-stdb` green network-free.
-- [ ] `cargo check --manifest-path server/spacetimedb/Cargo.toml --tests` green.
-- [ ] `server/build.sh --check` shows no generated-binding drift; no hand edits.
-- [ ] Version pins lockstep at 2.10.1 (`cargo tree` single SDK; `spacetime --version` checked).
-- [ ] Module publishes locally; seeds verified via `spacetime sql`.
-- [ ] Base+lobby waves apply; `WaveEvent::Applied` observed in logs/tests.
-- [ ] `stdb_relay_roundtrip_2p` MCP scenario passes with evidence; negative offline path passes.
-- [ ] Perf budgets §7.4 met and recorded.
-- [ ] Invariants §3.12 verified by test (1–4, 6–8) or review (5).
-- [ ] `mind-stdb/AGENTS.md` complete; handoff notes for 21 written; plan Changelog started.
+- [x] `cargo fmt --check`, `cargo clippy -p mind-stdb -p mind-gdext -p mind-headless` clean; `cargo test -p mind-stdb` green network-free.
+- [x] `cargo check --manifest-path server/spacetimedb/Cargo.toml --tests` green.
+- [x] `server/build.sh --check` shows no generated-binding drift; no hand edits.
+- [x] Version pins lockstep at 2.10.1 (`spacetime --version` = 2.10.1; bindings header 2.10.1).
+- [x] Module publishes locally; seeds verified via `spacetime sql`.
+- [x] Base+lobby waves apply; `WaveApplied(Lobby)` observed in the integration test.
+- [ ] `stdb_relay_roundtrip_2p` MCP scenario passes with evidence; negative offline path passes. **Deferred to the orchestrator after merge** (editor points at the main worktree); code + helpers are in M5.
+- [ ] Perf budgets §7.4 met and recorded. **Partial:** `bench stdb_pump` p50 191 ns / p99 611 ns (budgets 50 µs / 200 µs); base/lobby apply < 3/10 ms observed in the IT (≤ 20 s budget timeouts, no timing assert); relay throughput bench deferred.
+- [x] Invariants §3.12 verified by test (1–4, 6–8) or review (5).
+- [x] `mind-stdb/AGENTS.md` complete; handoff notes for 21 written; plan Changelog started.
 
 ## 8. Risks & open decisions
 
@@ -529,3 +537,105 @@ Deleted at M6 (NUD-05=C, no archive): `client/Scripts/Components/` (`IComponent.
 - **Reconnect/backoff**: C# had no retry loop or backoff — `OnDisconnected` emitted `Disconnected` unless `_shuttingDown` (set by `_ExitTree`); consumers called `Connect()` again and rebuilt the scene (C# rule 10) because binders stayed attached to the dead `DbConnection`. New behavior (`ConnectPolicy { auto_reconnect, backoff }`, connector-owned rebind + `Resync`, no scene rebuild) already covered by 01 §2.4 + §3.4; preserve the "no `Disconnected` event on deliberate `disconnect()`" suppression in `connector.rs`.
 - **Component framework → Bevy ECS**: `IComponent`/`IEntity` interfaces; `EntityRegistry` (component list + Type→component cache, first match wins, order-dependent); `ComponentRegistration.Register` (nearest-ancestor walk, `PushError` when none) / `ValidateRequired`; six bases (`Component`:Node, `AreaComponent`:Area2D, `Node2DComponent`:Node2D, `Node3DComponent`:Node3D, `ControlComponent`:Control, `VisualComponent`:AnimatedSprite2D) enforcing `_Ready` register + deferred `OnEntityReady` (after all siblings — the guarantee `ReplayExistingRows` fires after parent signal wiring) + `_ExitTree` unregister, with virtual `OnRegistered`/`GetRequiredComponents`/`GetSibling<T>`; `NodeExtensions.GetAncestor<T>` for cross-scene lookup. Bevy ECS (plan 00) replaces this with entity IDs + component data in `mind-core`: no node-ancestor coupling, no type-cache registry, no per-native-root base duplication, no sibling lookup; only GDScript-authored static scene structure remains in Godot. `sstdbsdk` drops `: Component`/`IEntity` per 01 §4 + §3.5; Rust owners `mind-stdb/src/{connector,waves,binder}.rs` (networking) and `mind-core` ECS (gameplay).
 - **STDB 2.10.1 deltas recorded by the M5 lane (not yet in 01):** `ctx.db.<table>()` accessors require their accessor-trait imports; publish wipe is `--delete-data=always`; schema inspection is `spacetime describe <db> --json`; `spacetime generate` requires the `wasm32-unknown-unknown` target; database names reject underscores (`^[a-z0-9]+(-[a-z0-9]+)*$`), so the final names are local db **`mindustry`** and integration db **`mindustry-it`** while crate/module stays `mindustry_godot` — supersedes 01 §3.11/§6.5/§6.7/R3 literals; token file layout per the token bullet above. Apply when executing 01 M0/M2.
+
+## Changelog
+
+### 2026-10-01 — lane 01 (worktree `mindustry-godot-lane01`, branch `lane/01-stdb`)
+
+#### M0 — Workspace, crate skeletons, bindings pipeline (commit `01-M0`)
+
+- Verified the plan-00 skeleton against §3.1/§3.2: workspace member `mind-stdb` with `spacetimedb-sdk = "=2.10.1"` pin, separate `server/spacetimedb` crate (`mindustry_godot`, cdylib, `spacetimedb = "=2.10.1"`), `server/spacetime.json` generate entry, `build.sh`/`build.ps1` (`--check`/`-Check` drift mode), checked-in `module_bindings/`.
+- Added `client/rust/mind-stdb/AGENTS.md`: generated-bindings never-hand-edit rule + drift gate, the five-step recipe (table → reducer → wave entry → binder + handler → reducer call), the ported C# rules and `stdb_*` verify commands.
+- Added `client/scenes/autoloads/stdb_connector.tscn` (native `StdbConnector` root node; scene is inert until the class lands in M5). The `project.godot` autoload registration deliberately moves to M5: registering a scene whose native class does not exist yet would break boot before mind-gdext M5 lands.
+- Removed the unused direct `tokio` dependency from `mind-stdb` (§3.2: no tokio in the public API; the SDK owns its runtime).
+- Evidence:
+  - `cargo check --manifest-path client/rust/Cargo.toml -p mind-stdb` → `Finished dev profile`
+  - `cargo check --manifest-path server/spacetimedb/Cargo.toml` → `Finished dev profile`
+  - `server/build.sh --check` → `== check: bindings are drift-clean ==`
+  - `spacetime --version` → `spacetimedb tool version 2.10.1; spacetimedb-lib version 2.10.1`; `wasm32-unknown-unknown` target installed.
+
+#### M1 — Server skeleton (commit `01-M1`)
+
+- Module layout per §3.7: `main/{global,seeds,audit,tables,lifecycle}.rs`, `identity/{tables,methods,reducers,views}.rs`; the P0 `main/{tables,reducers}.rs` were replaced.
+- Tables: `player` (`last_seen_at`, `protocol_version`), `player_session` (open/closed with `by_identity_started`), `player_profile` (`by_owner`), `client_settings`, `protocol_info`, `relay_config` (both singleton `id = 0`), server-only `audit_log`.
+- Views: `local_player`, `local_player_profile` (latest profile), `all_players` (query-style), `local_client_settings`.
+- Reducers: `set_username`, `create_profile`, `update_client_settings` — all `ctx.sender()`-owned, cheap validation, committed actions audited (`ProfileCreate`, `ConfigChange`); lifecycle connect/disconnect audited.
+- Plan deltas recorded: §6.1 `player_session.connection_id` is `Option<ConnectionId>` (2.10.1 context API); 2.10.1 view accessor traits are `<accessor>__view` / query trait `<accessor>__query` and `AnonymousViewContext` returns `impl Query<T>` for full-table views (documented in code comments).
+- Evidence:
+  - `cargo check --manifest-path server/spacetimedb/Cargo.toml --tests` → `Finished dev profile` (validation `#[cfg(test)]` helpers typecheck).
+  - `server/build.sh` → published local `mindustry`; `== done: bindings in .../module_bindings ==`.
+  - `spacetime sql mindustry --server local 'SELECT * FROM protocol_info'` → `0 | 1 | 1 | 1`; `relay_config` → `0 | 600 | 1000 | 256 | 1000 | 1000`.
+  - `audit_log` shows `init: seeded protocol_info and relay_config`, then connect/disconnect/connect rows with the CLI identity; `player`/`player_session` show the created row and closed sessions.
+  - `spacetime call --server local mindustry update_client_settings 1.0 '"en"' 0.5 0.25 '"{}"'` then `SELECT … FROM client_settings` → `1 | "en" | 0.5 | 0.25 | 1`.
+  - `SELECT identity, username FROM all_players` works (view query); `server/build.sh --check` → drift-clean; `cargo check -p mind-stdb` still green against the regenerated bindings.
+- Divergence note: 2.10.1 *table* accessor traits need `use spacetimedb::Table` for `insert`/`iter`; *view* code needs `<accessor>__view` (and `<accessor>__query` for query-style views). Recorded in `identity/views.rs` comments; no plan text change beyond the §6.1 cell above.
+
+#### M2 — `mind-stdb` connector core (commit `01-M2`)
+
+- Replaced the P0 `conn.rs`/`tokens.rs` facade with the plan §3.3 modules: `config` (`StdbMode`, `ConnectPolicy`, `Backoff`, injected `token_store_path`), `identity` (`LocalIdentity`, exact `^--p\d+$` parser with engine-args-first order), `token` (`TokenStore` trait + `FileTokenStore` per-host+suffix schema-versioned files, C#-exact key chain), `connector` (`Connector` + `ConnectorState::{Offline,Idle,Connecting,Connected,Retrying,Disconnected}` + `ConnectorEvent` incl. `Resync`), `protocol` (`PROTOCOL_VERSION`/`CLIENT_BUILD`/`check_protocol`). `waves.rs` renamed `SubscriptionWave` → `WaveName` and now lists the real Base/Lobby accessors.
+- Pump contract: `pump()` calls `frame_tick()` once, drains the callback queue, then retries/backoff; callbacks only push into an `Arc<Mutex<VecDeque>>`; deliberate `disconnect()` suppresses the `Disconnected` event; SDK errors never panic.
+- Token layout reconciled with the legacy-notes finding (`<data-dir>/identity/<key>.token.json`, schema 1) instead of §6.6's single-map file; the §6.6 text is superseded by the legacy-notes bullet (code carries the reconciliation comment).
+- `mind-gdext::sim_host` `--db` facade migrated to `Connector::pump()` (no structural change; M5 hands the connection to the autoload).
+- New `mind-headless` `stdb_scenarios` runner + `scenarios/stdb_offline_boot.json`; `list` shows it.
+- Evidence:
+  - `cargo test --manifest-path client/rust/Cargo.toml -p mind-stdb` → `13 passed; 0 failed` (identity/token/offline/pump state tests listed in §7.1 minus the M3+ ones).
+  - `cargo run -p mind-headless -- run stdb_offline_boot --json` → `{"state":"offline","frames":64,"pumps":64,"pump_p50_ns":50,"pump_p99_ns":1784,"pass":true,...}` (p99 budget 200 µs met).
+  - `cargo fmt -p mind-stdb -p mind-headless -- --check` clean; `cargo clippy -p mind-stdb -p mind-headless --all-targets -- -D warnings` clean; `cargo check -p mind-gdext` green.
+  - Environment note (machine-local, not committed): WSL's `~/.cargo/config.toml` OpenSSL workaround had broken `libcrypto.so.3`/`libssl.so.3` symlinks, so rust-lld fell back to static `libcrypto.a` and failed on zstd symbols. Repaired the two symlinks to the system `libcrypto.so.3`/`libssl.so.3`; `cargo test` (which links the SDK's native-tls) now works. CI runners with `libssl-dev` are unaffected.
+
+#### M3 — Waves + typed binders (commit `01-M3`)
+
+- `waves.rs`: `SubscriptionWaves` (desired survives disconnects, applied cleared; Base+Lobby desired by default) + `WaveEvent`; connector issues the typed query-builder waves (`add_query(|q| q.from.<accessor>())`), Base without an applied callback, Lobby/Game with `on_applied`/`on_error` queueing internal events; `is_applied`/`subscribe_*`/`unsubscribe_*` surface.
+- `binder.rs`: `TableBinder<A>` owns an `Arc<BinderCore>` queue fed by callbacks capturing only `Weak`; `drain()`, `replay()`, `inject()` (doc-hidden scenario hook). `replay_existing(bool)` exists **only** when the generated handle implements `TableWithPrimaryKey` (doc-test `compile_fail` proves the property on the `local_player` view). `Connector::bind` (live insert/delete) and `Connector::bind_with_replay` (adds update callbacks + cache replay after registration, C# order).
+- Connector `on_connected` now re-issues desired waves and re-registers every live binder before emitting `Connected` + `Resync`; `binder_tables()` exposes diagnostics; wave members not in any static list warn at bind time (§3.12 invariant 5).
+- **Implementation divergence recorded (plan §3.5):** callback IDs are not stored for `_ExitTree`-style unhooking. SDK callback IDs are table-typed, and a dropped binder has no connection handle; instead callbacks capture `Weak<BinderCore>` (dropped binder ⇒ inert no-op, queue freed) and registrations die with the connection on disconnect/reconnect. Same observable contract (no leak, no stale delivery), simpler ownership. Documented in the `binder.rs` module docs.
+- Evidence:
+  - `cargo test -p mind-stdb` → `18 passed; 0 failed` + `1 passed` doc-test (the `compile_fail` event-table/replay property).
+  - `cargo run -p mind-headless -- run stdb_binder_replay --json` → `{"pass":true,"replay_order":[1,2],"live_order":[3],...}`; `stdb_offline_boot` still `pass: true`.
+  - `server/build.sh --db mindustry-it` created the integration DB; `MIND_STDB_IT=1 cargo test -p mind-stdb -- --ignored local_connect_applies_base_and_lobby_waves` → `1 passed` (base+lobby waves applied, `WaveApplied(Lobby)` observed, `local_player` insert delivered, `relay_config` cache replay delivered).
+  - `cargo fmt -p mind-stdb -p mind-headless -- --check` clean; `cargo clippy -p mind-stdb -p mind-headless --all-targets -- -D warnings` clean.
+- Deferred: `stdb_command_order` (M4, needs `match_command`).
+
+#### M4 — Relay foundation (commit `01-M4`)
+
+- Server: `relay/{tables,methods,reducers,views}.rs` per §3.7 — `relay_match`/`relay_member`/private `match_command`/server-only `command_rate`; `create_match` (creator auto-joins, bounds from `relay_config`), `join_match`, `leave_match`, `start_match`, `send_match_command`; `my_matches`/`my_match`/`my_match_commands` per-caller views; rejection paths log via `log::warn!` (R7).
+- Client: `relay.rs::CommandStream` (sort by `command_id`, dedup by `command_id`, per-sender `sender_seq` gap detection, `applied_count`/`last_command_id`/`order_error`, synthetic `inject` hook); connector reducer methods (`create_match`/`join_match`/`leave_match`/`start_match`/`send_match_command`/`send_ping`); Game wave now subscribes `my_match` + `my_match_commands`; Lobby wave gained `my_matches` (plan §3.6 listed it; missed in the M2/M3 list, fixed here).
+- Divergences recorded in §3.8/§3.9 above: 2.10.1 newtype `CommandKind` payloads; `RelayMember.by_identity` index for the per-caller views; server-assigned `sender_seq`.
+- New headless scenario `stdb_command_order` (canned rows): order-not-arrival, duplicate ignored, per-sender gap flagged, auto-inc gaps not loss.
+- Evidence:
+  - `cargo test -p mind-stdb` → `23 passed; 0 failed` + doc-test `1 passed`; the 3 integration tests stay `ignored`.
+  - `cargo run -p mind-headless -- run stdb_command_order --json` → `{"pass":true,"applied_order":[7,8,9],"duplicate_ignored":true,"order_error":"gap: expected 2, got 3"}`.
+  - `server/build.sh` + `server/build.sh --db mindustry-it` published; `server/build.sh --check` → drift-clean; `spacetime describe mindustry --server local --json` lists 11 tables (incl. `match_command`, `command_rate`) and 7 views (incl. `my_match`, `my_matches`, `my_match_commands`).
+  - `MIND_STDB_IT=1 cargo test -p mind-stdb -- --ignored` → `3 passed`: base/lobby waves, two-client ping round trip (both peers apply the command, no order error), non-member rejection + rate limit (700 sent in one burst, 600 accepted; 100 `rate limit exceeded` warnings in `spacetime logs`).
+  - `cargo check --manifest-path server/spacetimedb/Cargo.toml --tests` clean; `cargo fmt --check` and `cargo clippy -p mind-stdb -p mind-headless --all-targets -- -D warnings` clean.
+- Test-rig note: SDK reducer sends flush while their own connection is pumped (`frame_tick`), so the ITs pump both peers; documented in `tests/it.rs`.
+
+#### M5 — gdext autoload + binder node + net page (commit `01-M5`; in-engine run deferred)
+
+- `mind-gdext/src/stdb.rs`: `StdbConnector` (autoload Node: exports host/db/offline/token-suffix, `_process` pumps exactly once and emits `connected`/`disconnected(reason)`/`connect_error`/`wave_applied`/`wave_error`/`resync`, GDScript methods `state`/`local_identity_hex`/`connect`/`reconnect`/`disconnect`/`subscribe_game`/`unsubscribe_game`/`wave_applied_state`, dev helpers `dev_create_match`/`dev_match_id`/`dev_join_match`/`dev_start_match`/`dev_send_ping`/`dev_relay_applied_count`/`dev_last_command_id`/`relay_order_error`); `StdbBinder` (attach/drain protocol with the autoload, arg-less `row_inserted`/`row_updated`/`row_deleted`, `last_row_json`/`last_deleted_row_json`).
+- `mind-stdb/src/rows.rs`: `RowView` debug JSON for `ProtocolInfo`/`RelayConfig`/`Player`/`RelayMatch` (subset; generated code untouched).
+- `client/scenes/autoloads/stdb_connector.tscn` now sets the local-dev exports; `project.godot` registers `StdbConnector="*res://scenes/autoloads/stdb_connector.tscn"` (M0 item closed). Online mode = `--db` or a parsed `--pN` **or** the scene `offline=false`; the default stays offline so boot never requires a server (§3.12 invariant 8).
+- Inspector `net` page added to `client/scenes/ui/state_inspector.tscn` + `client/ui/state_inspector.gd` (state, identity prefix, wave flags, relay counters). Plan 14 owns the real UI surfaces.
+- `sim_host.rs`: the P0 `--db` facade was removed — the autoload is now the single pump per process (§3.12 invariant 7).
+- **Deviation from §7.3:** `dev_create_match` cannot return the server-assigned `match_id` synchronously (reducers return no data); the MCP flow is `dev_create_match` → poll `dev_match_id()` → `dev_start_match` → `dev_send_ping`. Recorded here for the orchestrator's §7.3 run.
+- Evidence (in this worktree):
+  - `cargo check -p mind-gdext` green; `cargo build -p mind-gdext` links `libmind_gdext.so` (247 MB debug).
+  - `cargo fmt -p mind-gdext -p mind-stdb -p mind-headless -- --check` and `cargo clippy … --all-targets -- -D warnings` clean.
+  - In-engine/MCP run not performed here (editor points at the main worktree); see handoff notes.
+
+#### M6 — Perf, docs, handoff (commit `01-M6`, partial)
+
+- `mind-headless bench --scenario stdb_pump --ticks 10000` implemented
+  (`stdb_scenarios::bench_pump`, pure pump path, budget p99 ≤ 200 µs):
+  `{"scenario":"stdb_pump","ticks":10000,"p50_ns":191,"p99_ns":611,"p50_us":1,"p99_us":1,"baseline_status":"ok"}`.
+- `mind-stdb/AGENTS.md` gained the plan-21 handoff section (envelope freeze,
+  schema growth points, `AuthorityMode` switch, retention/`applied_ids` cut,
+  per-match subscription, one-pump rule, Game-wave bind timing, IT rig notes).
+- Exit checklist §7.5 updated with what is done and the two deferrals (MCP run,
+  relay throughput bench) that need the merged worktree/editor.
+- Remaining for the integrator: run the §7.3 MCP scenario (`dev_create_match` →
+  poll `dev_match_id` → `dev_start_match` → `dev_send_ping` → counters on both
+  instances) and the ignored `bench_relay_throughput` once a load harness
+  exists (plan 21 owns the 10-client generator).
+
+

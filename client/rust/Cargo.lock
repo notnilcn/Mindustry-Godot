@@ -1590,6 +1590,7 @@ dependencies = [
  "log",
  "mind-core",
  "mind-stdb",
+ "serde_json",
 ]
 
 [[package]]
@@ -1600,8 +1601,10 @@ dependencies = [
  "clap",
  "log",
  "mind-core",
+ "mind-stdb",
  "serde",
  "serde_json",
+ "spacetimedb-sdk",
 ]
 
 [[package]]
@@ -1613,7 +1616,6 @@ dependencies = [
  "serde_json",
  "spacetimedb-sdk",
  "thiserror 2.0.21",
- "tokio",
 ]
 
 [[package]]

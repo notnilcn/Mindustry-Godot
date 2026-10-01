@@ -1,50 +1,99 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Lifecycle reducers. Plan 01 extends `init` with real seeds (`protocol_info`,
-//! `relay_config`) and adds `player_session` bookkeeping to connect/disconnect.
+//! Lifecycle reducers (plan 01 §3.7): `init` seeds the singletons,
+//! `client_connected` upserts the player and opens a session,
+//! `client_disconnected` stamps `last_seen_at` and closes the open session(s).
 
 use spacetimedb::{ReducerContext, Table, reducer};
 
-// 2.10.1 generates the `player` accessor trait; it must be in scope for `ctx.db.player()`.
-use super::tables::{Player, player};
+use super::audit::audit;
+use super::global::PROTOCOL_VERSION;
+use super::seeds::{seed_protocol_info, seed_relay_config};
+use super::tables::AuditKind;
+use crate::identity::tables::{
+    Player, PlayerSession, player, player_session,
+};
 
-/// Seed marker. P0 has no seed tables yet; plan 01 seeds `protocol_info` and
-/// `relay_config` here (seeds re-run on every publish, which wipes dev data).
+/// Seeds protocol/config singletons on publish. Publishing wipes dev data, so
+/// seeds must be self-contained (main/server rule).
 #[reducer(init)]
-pub fn init(_ctx: &ReducerContext) {
-    log::info!("mindustry_godot P0 skeleton initialized");
+pub fn init(ctx: &ReducerContext) {
+    seed_protocol_info(ctx);
+    seed_relay_config(ctx);
+    audit(
+        ctx,
+        None,
+        AuditKind::ConfigChange,
+        "init: seeded protocol_info and relay_config",
+    );
+    log::info!("mindustry_godot initialized (protocol {PROTOCOL_VERSION})");
 }
 
-/// Creates the `player` row on first connect and refreshes `last_seen` afterwards.
+/// Creates the `player` row on first connect, refreshes `last_seen_at`
+/// afterwards, and opens a `player_session` row.
 #[reducer(client_connected)]
 pub fn client_connected(ctx: &ReducerContext) {
     let identity = ctx.sender();
+    let now = ctx.timestamp;
     match ctx.db.player().identity().find(identity) {
-        Some(player) => {
+        Some(player_row) => {
             ctx.db.player().identity().update(Player {
-                last_seen: ctx.timestamp,
-                ..player
+                last_seen_at: now,
+                protocol_version: PROTOCOL_VERSION,
+                ..player_row
             });
         }
         None => {
             ctx.db.player().insert(Player {
                 identity,
                 username: String::new(),
-                last_seen: ctx.timestamp,
+                created_at: now,
+                last_seen_at: now,
+                protocol_version: PROTOCOL_VERSION,
             });
             log::info!("new player connected: {identity}");
         }
     }
+    ctx.db.player_session().insert(PlayerSession {
+        session_id: 0,
+        identity,
+        connection_id: ctx.connection_id(),
+        started_at: now,
+        ended_at: None,
+    });
+    audit(ctx, Some(identity), AuditKind::Connect, "client connected");
 }
 
-/// Stamps `last_seen` for the disconnecting identity (row is never deleted so the
-/// identity keeps its username across sessions).
+/// Stamps `last_seen_at` and closes every still-open session for the caller.
+/// Player rows are never deleted so usernames survive across sessions.
 #[reducer(client_disconnected)]
 pub fn client_disconnected(ctx: &ReducerContext) {
-    if let Some(player) = ctx.db.player().identity().find(ctx.sender()) {
+    let identity = ctx.sender();
+    if let Some(player_row) = ctx.db.player().identity().find(identity) {
         ctx.db.player().identity().update(Player {
-            last_seen: ctx.timestamp,
-            ..player
+            last_seen_at: ctx.timestamp,
+            ..player_row
         });
     }
+    // Collect before mutating: the index iterator borrows the table.
+    for session in ctx
+        .db
+        .player_session()
+        .by_identity_started()
+        .filter(identity)
+        .collect::<Vec<_>>()
+    {
+        if session.ended_at.is_none() {
+            ctx.db.player_session().session_id().update(PlayerSession {
+                ended_at: Some(ctx.timestamp),
+                ..session
+            });
+        }
+    }
+    audit(
+        ctx,
+        Some(identity),
+        AuditKind::Disconnect,
+        "client disconnected",
+    );
 }
