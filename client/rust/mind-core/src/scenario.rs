@@ -271,7 +271,7 @@ pub fn block_name(blocks: &Blocks, id: BlockId) -> Result<String, ScenarioError>
     blocks
         .name(id)
         .map(str::to_owned)
-        .map_err(|_| ScenarioError::UnknownContent(format!("block id {}", id.0)))
+        .map_err(|_| ScenarioError::UnknownContent(format!("block id {}", id.raw())))
 }
 
 impl Scenario {

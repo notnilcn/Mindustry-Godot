@@ -44,9 +44,7 @@ impl From<ContentError> for SimError {
     fn from(error: ContentError) -> Self {
         match error {
             ContentError::UnknownId(id) => SimError::UnknownBlock(id),
-            ContentError::UnknownName(_)
-            | ContentError::DuplicateName(_)
-            | ContentError::IdSpaceExhausted => SimError::UnknownBlock(u16::MAX),
+            _ => SimError::UnknownBlock(u16::MAX),
         }
     }
 }
@@ -158,7 +156,7 @@ impl Sim {
                 } else {
                     log::debug!(
                         "place command rejected at ({x}, {y}): tile already holds block {}",
-                        current.0
+                        current.raw()
                     );
                 }
             }
@@ -205,7 +203,7 @@ impl Sim {
         bytes.push(self.state.phase.as_u8());
 
         for (_pos, index) in self.grid.iter_row_major() {
-            bytes.extend_from_slice(&self.grid.blocks[index].0.to_le_bytes());
+            bytes.extend_from_slice(&self.grid.blocks[index].raw().to_le_bytes());
             bytes.push(self.grid.teams[index]);
             bytes.push(self.grid.rots[index]);
             match self.grid.tiles[index].and_then(|entity| self.ecs.seq_of(entity)) {
@@ -223,7 +221,7 @@ impl Sim {
         for (seq, _entity, comp) in self.ecs.entities_by_seq() {
             bytes.extend_from_slice(&seq.to_le_bytes());
             bytes.push(KIND_BUILDING);
-            bytes.extend_from_slice(&comp.block.0.to_le_bytes());
+            bytes.extend_from_slice(&comp.block.raw().to_le_bytes());
             bytes.push(comp.team.0);
             bytes.push(comp.rot);
             bytes.extend_from_slice(&comp.pos.x().to_le_bytes());
@@ -326,7 +324,7 @@ impl Sim {
     pub fn block_name_of(&self, block: BlockId) -> String {
         match self.content.name(block) {
             Ok(name) => name.to_owned(),
-            Err(_) => format!("?{}", block.0),
+            Err(_) => format!("?{}", block.raw()),
         }
     }
 

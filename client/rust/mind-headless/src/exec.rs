@@ -10,15 +10,20 @@ use anyhow::{Context, anyhow};
 use log::LevelFilter;
 use mind_core::command::CommandRecord;
 use mind_core::config::MindConfig;
-use mind_core::content::Blocks;
+use mind_core::content::{
+    Blocks, ContentRegistry, MemoryBundle, MemoryUnlockStore, content_counts, create_base_content,
+};
 use mind_core::scenario::{Scenario, ScenarioPlayer, read_command_log, write_command_log};
 use mind_core::sim::{Sim, StateDump};
 use mind_core::world::TilePos;
 
-use crate::cli::{Cli, Command};
+use crate::cli::{Cli, Command, ContentCommand};
 use crate::paths;
 use crate::registry;
-use crate::report::{BenchReport, RunReport, SimReport, TileCheck};
+use crate::report::{
+    BenchReport, ContentBenchReport, ContentIdEntry, ContentIdsReport, ContentLoadReport,
+    ContentTypeCount, ContentTypeEntries, RunReport, SimReport, TileCheck,
+};
 
 /// Exit code: success.
 const EXIT_PASS: i32 = 0;
@@ -113,6 +118,12 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             out,
             all_tiles,
         } => cmd_dump(&cli, scenario, out, *all_tiles),
+        Command::Content { command } => match command {
+            ContentCommand::Load { json } => cmd_content_load(*json),
+            ContentCommand::Ids { json, out } => cmd_content_ids(*json, out.as_deref()),
+            ContentCommand::Bench { runs, json } => cmd_content_bench(*runs, *json),
+            ContentCommand::LoadOrderBad => cmd_content_load_order_bad(),
+        },
     }
 }
 
@@ -450,4 +461,153 @@ fn percentile(samples: &[u64], percent: usize) -> u64 {
     debug_assert!(!samples.is_empty());
     let index = (samples.len() * percent / 100).min(samples.len().saturating_sub(1));
     samples.get(index).copied().unwrap_or(0)
+}
+
+/// Boots base content (create + init + postInit + load), the `content` harness
+/// path. Assets/bundle are in-memory; headless skips icon/region loading.
+fn boot_content() -> anyhow::Result<ContentRegistry> {
+    let bundle = MemoryBundle::new();
+    let store = MemoryUnlockStore::new();
+    let mut registry = create_base_content(&bundle, &store, true)?;
+    registry.init()?;
+    registry.post_init()?;
+    registry.load()?;
+    registry.log_content()?;
+    Ok(registry)
+}
+
+fn type_counts(registry: &ContentRegistry) -> Vec<ContentTypeCount> {
+    let counts = content_counts(registry);
+    registry::LIVE_CONTENT_TYPES
+        .iter()
+        .map(|type_| ContentTypeCount {
+            type_: *type_,
+            count: counts.get(type_).copied().unwrap_or(0),
+        })
+        .collect()
+}
+
+/// Plan 02 §7b negative scenario: `Liquids` before `StatusEffects` must fail
+/// with the missing-status error naming the load-order violation.
+fn cmd_content_load_order_bad() -> anyhow::Result<i32> {
+    match mind_core::content::registries::create_base_content_bad_order(
+        &MemoryBundle::new(),
+        &MemoryUnlockStore::new(),
+        true,
+    ) {
+        Err(error) => {
+            println!("content load-order-bad: failed as expected: {error}");
+            Ok(EXIT_PASS)
+        }
+        Ok(_) => {
+            log::error!("content load-order-bad: content loaded, expected a load-order error");
+            Ok(EXIT_FAIL)
+        }
+    }
+}
+
+fn cmd_content_load(json: bool) -> anyhow::Result<i32> {
+    let registry = boot_content()?;
+    let types = type_counts(&registry);
+    let total: usize = types.iter().map(|entry| entry.count).sum();
+    if json {
+        let report = ContentLoadReport { types, total };
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        for entry in &types {
+            println!("{:>12}: {}", entry.type_.name(), entry.count);
+        }
+        println!("       total: {total}");
+    }
+    Ok(EXIT_PASS)
+}
+
+fn cmd_content_ids(json: bool, out: Option<&Path>) -> anyhow::Result<i32> {
+    let registry = boot_content()?;
+    let types: Vec<ContentTypeEntries> = registry::LIVE_CONTENT_TYPES
+        .iter()
+        .map(|type_| ContentTypeEntries {
+            type_: *type_,
+            entries: registry
+                .entries(*type_)
+                .into_iter()
+                .map(|entry| ContentIdEntry {
+                    id: entry.id,
+                    name: entry.name.map(str::to_owned),
+                    kind: entry.kind.to_owned(),
+                })
+                .collect(),
+        })
+        .collect();
+    let report = ContentIdsReport { format: 1, types };
+    let text = format!("{}\n", serde_json::to_string_pretty(&report)?);
+    if let Some(path) = out {
+        // Schema round-trip before writing (same rule as state dumps).
+        let _decoded: serde_json::Value = serde_json::from_str(&text).with_context(|| {
+            format!(
+                "content ids failed schema round-trip for `{}`",
+                path.display()
+            )
+        })?;
+        std::fs::write(path, &text).with_context(|| format!("writing `{}`", path.display()))?;
+    }
+    if json {
+        print!("{text}");
+    } else {
+        for entry in &report.types {
+            println!("{:>12}: {}", entry.type_.name(), entry.entries.len());
+        }
+        if out.is_none() {
+            log::info!("pass --out <path> to write the deterministic content_ids.json dump");
+        }
+    }
+    Ok(EXIT_PASS)
+}
+
+fn cmd_content_bench(runs: usize, json: bool) -> anyhow::Result<i32> {
+    if runs == 0 {
+        return Err(anyhow!("--runs must be greater than zero"));
+    }
+    let mut samples_ns: Vec<u64> = Vec::with_capacity(runs);
+    let mut last: Option<ContentRegistry> = None;
+    for _ in 0..runs {
+        let start = Instant::now();
+        let registry = boot_content()?;
+        samples_ns.push(start.elapsed().as_nanos() as u64);
+        last = Some(registry);
+    }
+    let types = last.as_ref().map(type_counts).unwrap_or_default();
+    samples_ns.sort_unstable();
+    let pick = |index: usize| samples_ns.get(index).copied().unwrap_or(0);
+    let median_ns = {
+        let index = samples_ns.len() / 2;
+        pick(index)
+    };
+    let min_ns = pick(0);
+    let max_ns = pick(samples_ns.len().saturating_sub(1));
+    let to_ms = |ns: u64| ns as f64 / 1_000_000.0;
+    let median_ms = to_ms(median_ns);
+    let within_budget = median_ms <= 200.0;
+    if !within_budget {
+        log::warn!(
+            "content load median {median_ms:.1}ms exceeds the 200ms budget (release budget; debug builds are slower)"
+        );
+    }
+    let report = ContentBenchReport {
+        runs,
+        median_ms,
+        min_ms: to_ms(min_ns),
+        max_ms: to_ms(max_ns),
+        within_budget,
+        types,
+    };
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "content bench: runs={} median={:.2}ms min={:.2}ms max={:.2}ms within_budget={}",
+            report.runs, report.median_ms, report.min_ms, report.max_ms, report.within_budget
+        );
+    }
+    Ok(EXIT_PASS)
 }

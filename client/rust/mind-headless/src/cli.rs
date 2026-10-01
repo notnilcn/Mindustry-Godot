@@ -122,4 +122,45 @@ pub enum Command {
         #[arg(long)]
         all_tiles: bool,
     },
+
+    /// Content registry inspection (plan 02).
+    Content {
+        /// Content subcommand.
+        #[command(subcommand)]
+        command: ContentCommand,
+    },
+}
+
+/// `content` subcommands (plan 02 §7b).
+#[derive(Debug, Subcommand)]
+pub enum ContentCommand {
+    /// Boot the content registry and print per-type counts.
+    Load {
+        /// Emit a machine-readable JSON report.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Dump the ordered per-type name/id list (`content_ids.json` shape).
+    Ids {
+        /// Emit the full JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Write the deterministic JSON dump here.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+
+    /// Benchmark `createBaseContent` + `init` + `postInit`.
+    Bench {
+        /// Number of timed runs.
+        #[arg(long, default_value_t = 20)]
+        runs: usize,
+        /// Emit a machine-readable JSON report.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Negative load-order scenario (liquids before statuses) — must fail.
+    LoadOrderBad,
 }

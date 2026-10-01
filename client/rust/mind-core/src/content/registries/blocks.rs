@@ -1,68 +1,113 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Placeholder content registry.
+//! Block registry — P0 placeholder view (plan 02 M3 replaces it).
 //!
-//! Ported from `core/src/mindustry/ctype/ContentType.java` and `Content.java`.
-//! Plan 02 replaces the internals; names and IDs are parity/mod ABI and stay
-//! valid (append-only, never reordered).
+//! Ported from `core/src/mindustry/content/Blocks.java` (metadata half; behavior
+//! in plan 07). Until M3 ships the ~418 vanilla block records, this module keeps
+//! the P0 registry that `Sim` and the scenarios use: `air = 0`, `stone-wall = 1`.
+//! Names/IDs stay valid across the M3 replacement (append-only parity ABI).
 
 use indexmap::IndexMap;
-use serde::{Deserialize, Serialize};
 
-/// Placeholder content type. Variants are append-only.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ContentType {
-    Block,
+use super::super::bundle::BundleView;
+use super::super::ctype::{Content, Mappable, ModContentInfo, UnlockFields, Unlockable};
+use super::super::id::BlockId;
+use super::super::settings_store::UnlockStore;
+use super::super::{ContentError, ContentType};
+
+/// Block content record (identity subset until M3 expands the metadata half).
+#[derive(Debug, Clone, PartialEq)]
+pub struct BlockDef {
+    /// Dense id in the block content space.
+    pub id: BlockId,
+    /// Content name (parity ABI).
+    pub name: String,
+    /// Mod/provenance info.
+    pub minfo: ModContentInfo,
+    /// Whether removed by a data patch.
+    pub removed: bool,
+    /// Unlock/database fields.
+    pub unlock: UnlockFields,
 }
 
-/// Per-type content id. Append-only per `ContentType` (parity ABI).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct ContentId(pub u16);
-
-/// Id of a block in the block content space.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct BlockId(pub u16);
-
-impl BlockId {
-    /// The always-present empty block (`0`).
-    pub const AIR: BlockId = BlockId(0);
-    /// Placeholder wall block (`1`).
-    pub const STONE_WALL: BlockId = BlockId(1);
-
-    /// Raw numeric id.
-    pub const fn get(self) -> u16 {
-        self.0
+impl BlockDef {
+    /// Creates a block record (M3 fills the full field set).
+    pub fn new(name: &str, bundle: &dyn BundleView, store: &dyn UnlockStore) -> Self {
+        Self {
+            id: BlockId::new(0),
+            name: name.to_owned(),
+            minfo: ModContentInfo::default(),
+            removed: false,
+            unlock: UnlockFields::new(ContentType::Block, name, bundle, store),
+        }
     }
 }
 
-impl Default for BlockId {
-    fn default() -> Self {
-        BlockId::AIR
+impl Content for BlockDef {
+    const TYPE: ContentType = ContentType::Block;
+
+    fn content_id(&self) -> u16 {
+        self.id.raw()
+    }
+
+    fn set_content_id(&mut self, id: u16) {
+        self.id = BlockId::new(id);
+    }
+
+    fn minfo(&self) -> &ModContentInfo {
+        &self.minfo
+    }
+
+    fn minfo_mut(&mut self) -> &mut ModContentInfo {
+        &mut self.minfo
+    }
+
+    fn removed(&self) -> bool {
+        self.removed
+    }
+
+    fn set_removed(&mut self, removed: bool) {
+        self.removed = removed;
+    }
+
+    fn kind_name(&self) -> &'static str {
+        "Block"
+    }
+
+    fn content_name(&self) -> Option<&str> {
+        Some(&self.name)
+    }
+
+    fn unlock_fields(&self) -> Option<&UnlockFields> {
+        Some(&self.unlock)
+    }
+
+    fn post_init(&mut self) -> Result<(), ContentError> {
+        self.unlock.post_init();
+        Ok(())
     }
 }
 
-/// Errors raised by the content registry.
-#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
-pub enum ContentError {
-    /// A content name may only be registered once.
-    #[error("content name `{0}` is already registered")]
-    DuplicateName(String),
-    /// The requested name does not exist.
-    #[error("content name `{0}` is unknown")]
-    UnknownName(String),
-    /// The requested id does not exist.
-    #[error("content id {0} is out of range")]
-    UnknownId(u16),
-    /// The registry exceeded its `u16` id space.
-    #[error("content registry exhausted its 16-bit id space")]
-    IdSpaceExhausted,
+impl Mappable for BlockDef {
+    fn name(&self) -> &str {
+        &self.name
+    }
 }
 
-/// Block registry.
+impl Unlockable for BlockDef {
+    fn unlock(&self) -> &UnlockFields {
+        &self.unlock
+    }
+
+    fn unlock_mut(&mut self) -> &mut UnlockFields {
+        &mut self.unlock
+    }
+}
+
+/// P0 block registry view (`air = 0`, `stone-wall = 1`).
 ///
-/// P0 contents: `air = 0`, `stone-wall = 1`. Registration is append-only: ids are
-/// assigned in registration order and existing names can never be re-registered.
+/// Registration is append-only: ids are assigned in registration order and
+/// existing names can never be re-registered.
 #[derive(Debug, Clone, Default)]
 pub struct Blocks {
     names: Vec<String>,
@@ -72,14 +117,14 @@ pub struct Blocks {
 impl Blocks {
     /// Creates the P0 registry (`air = 0`, `stone-wall = 1`).
     ///
-    /// Placeholder for `core/src/mindustry/content/Blocks.java`; plan 02 replaces
-    /// it with the real vanilla content load.
+    /// Placeholder for `core/src/mindustry/content/Blocks.java`; plan 02 M3
+    /// replaces it with the real vanilla content load.
     pub fn new() -> Self {
         let mut blocks = Self::default();
         let air = blocks.push("air");
         let wall = blocks.push("stone-wall");
-        debug_assert_eq!(air, BlockId::AIR.get());
-        debug_assert_eq!(wall, BlockId::STONE_WALL.get());
+        debug_assert_eq!(air, BlockId::AIR.raw());
+        debug_assert_eq!(wall, BlockId::STONE_WALL.raw());
         debug_assert!(blocks.assert_invariants().is_ok());
         blocks
     }
@@ -97,16 +142,16 @@ impl Blocks {
     /// Name for an id (parity ABI).
     pub fn name(&self, id: BlockId) -> Result<&str, ContentError> {
         self.names
-            .get(id.0 as usize)
+            .get(id.index())
             .map(String::as_str)
-            .ok_or(ContentError::UnknownId(id.0))
+            .ok_or(ContentError::UnknownId(id.raw()))
     }
 
     /// Id for a name (parity ABI).
     pub fn id(&self, name: &str) -> Result<BlockId, ContentError> {
         self.by_name
             .get(name)
-            .map(|id| BlockId(*id))
+            .map(|id| BlockId::new(*id))
             .ok_or_else(|| ContentError::UnknownName(name.to_owned()))
     }
 
@@ -124,7 +169,7 @@ impl Blocks {
         let raw = u16::try_from(self.names.len()).map_err(|_| ContentError::IdSpaceExhausted)?;
         self.names.push(name.to_owned());
         self.by_name.insert(name.to_owned(), raw);
-        Ok(BlockId(raw))
+        Ok(BlockId::new(raw))
     }
 
     /// Asserts the append-only invariants of the P0 registry.
@@ -181,11 +226,14 @@ mod tests {
             blocks.id("does-not-exist"),
             Err(ContentError::UnknownName("does-not-exist".to_owned()))
         );
-        assert_eq!(blocks.name(BlockId(99)), Err(ContentError::UnknownId(99)));
+        assert_eq!(
+            blocks.name(BlockId::new(99)),
+            Err(ContentError::UnknownId(99))
+        );
 
         // Append-only: new registrations take the next id and never move existing names.
         let appended = blocks.register("spine-test").unwrap();
-        assert_eq!(appended, BlockId(2));
+        assert_eq!(appended, BlockId::new(2));
         assert_eq!(blocks.name(BlockId::AIR).unwrap(), "air");
         assert_eq!(blocks.name(BlockId::STONE_WALL).unwrap(), "stone-wall");
         assert_eq!(

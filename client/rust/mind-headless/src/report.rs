@@ -75,6 +75,73 @@ pub struct SimReport {
     pub per_tick: Option<Vec<String>>,
 }
 
+/// `content load` report (per-type counts, plan 02 §7b).
+#[derive(Debug, Clone, Serialize)]
+pub struct ContentLoadReport {
+    /// Per-type counts in `ContentType.all` order (live types only).
+    pub types: Vec<ContentTypeCount>,
+    /// Sum of all reported counts.
+    pub total: usize,
+}
+
+/// One per-type count entry.
+#[derive(Debug, Clone, Serialize)]
+pub struct ContentTypeCount {
+    /// Content type (serialized as its Java enum identifier).
+    #[serde(rename = "type")]
+    pub type_: mind_core::content::ContentType,
+    /// Number of registered records.
+    pub count: usize,
+}
+
+/// `content ids` report: the `content_ids.json` `types` block (plan 02 §6.2).
+#[derive(Debug, Clone, Serialize)]
+pub struct ContentIdsReport {
+    /// Dump format (1).
+    pub format: u32,
+    /// Per-type ordered entries in `ContentType.all` order.
+    pub types: Vec<ContentTypeEntries>,
+}
+
+/// Ordered entries for one content type.
+#[derive(Debug, Clone, Serialize)]
+pub struct ContentTypeEntries {
+    /// Content type.
+    #[serde(rename = "type")]
+    pub type_: mind_core::content::ContentType,
+    /// Entries in dense id order.
+    pub entries: Vec<ContentIdEntry>,
+}
+
+/// One content id/name/kind entry.
+#[derive(Debug, Clone, Serialize)]
+pub struct ContentIdEntry {
+    /// Dense id.
+    pub id: u16,
+    /// Mappable name (omitted for non-mappable kinds such as bullets).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Java class-ish kind tag.
+    pub kind: String,
+}
+
+/// `content bench` report (plan 02 §7d).
+#[derive(Debug, Clone, Serialize)]
+pub struct ContentBenchReport {
+    /// Timed runs.
+    pub runs: usize,
+    /// Median wall time in milliseconds.
+    pub median_ms: f64,
+    /// Minimum wall time in milliseconds.
+    pub min_ms: f64,
+    /// Maximum wall time in milliseconds.
+    pub max_ms: f64,
+    /// Whether the median is within the 200 ms budget.
+    pub within_budget: bool,
+    /// Final per-type counts (sanity).
+    pub types: Vec<ContentTypeCount>,
+}
+
 /// `bench` report (also committed into `bench_baseline.json`).
 #[derive(Debug, Clone, Serialize)]
 pub struct BenchReport {

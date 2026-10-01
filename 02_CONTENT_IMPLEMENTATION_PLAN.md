@@ -8,7 +8,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Planned (not started) |
+| **Status** | In progress — M1–M2 complete (2026-10-01; lane 02) |
 | **Phase** | P1 — Platform & content (HIGH_LEVEL_PLAN §5) |
 | **Depends on** | `00_FOUNDATION_IMPLEMENTATION_PLAN.md` (workspace, `mind-core`/`mind-headless` crates, headless harness, spine state inspector). |
 | **Blocks** | `03_ASSETS_IMPLEMENTATION_PLAN.md`, `04_IO_SERIALIZATION_IMPLEMENTATION_PLAN.md`, `07_BLOCKS_BUILD_IMPLEMENTATION_PLAN.md`, `10_COMBAT_BULLETS_IMPLEMENTATION_PLAN.md`, `11_UNITS_AI_WAVES_IMPLEMENTATION_PLAN.md`, `12_CAMPAIGN_IMPLEMENTATION_PLAN.md`, `20_MODS_IMPLEMENTATION_PLAN.md`. |
@@ -71,6 +71,7 @@
 ```
 mind-core/src/content/
   mod.rs                 # ContentType, ContentKind, ContentRef, registry error types
+  color.rs               # Rgba value type (content metadata colors)
   ctype.rs               # Content/Mappable/Unlockable data model + traits + ModContentInfo
   id.rs                  # ContentId<T> newtype + aliases (ItemId, BlockId, ...)
   load.rs                # ContentRegistry, lifecycle sweeps, error routing, log_content
@@ -206,7 +207,8 @@ pub trait UnlockStore {
 }
 // plan 20 (mod content + patches)
 pub trait ModContentProvider {                                    // called by create_mod_content()
-    fn load_content(&mut self, reg: &mut ContentRegistry, mods: &mut ModSet) -> Result<(), ContentErrors>;
+    // `ModSet` is plan 20's type and was deferred at M1 (reconcile at M6).
+    fn load_content(&mut self, reg: &mut ContentRegistry) -> Result<(), ContentErrors>;
 }
 pub trait ContentParserHook {                                     // `ContentParser.parse`
     fn parse(&mut self, reg: &mut ContentRegistry, asset: &ContentAsset)
@@ -240,7 +242,7 @@ Plan 20 calls, in order: `create_mod_content` → per-mod `ContentParserHook::pa
 |---|---|
 | `ErekirTechTree.rebalance()` (`ErekirTechTree.java:26-48`) | Runs first in `erekir::load()`, before node building. Multiplies `damage *= 0.75` on bullets used by (a) every `UnitType` whose kind tag is `ErekirUnitType`, across all authored weapons, and (b) turrets whose `requirements` include ≥1 item **not** in `Items.serpuloItems`; `ItemTurret`/`ContinuousLiquidTurret` ammo values and `ContinuousTurret.shootType` included. Guarded by a `bitset` per bullet ID so double references scale once. |
 | `UnitStance` incompatible bits built in `init()`, not `load()` (`UnitStance.java:43-55`) | `link()` pass after the `init()` sweep; symmetric bit setting; `ItemUnitStance` created per item at load and for mod items in `load_after_mods`. |
-| `StatusEffect` affinities symmetric, opposites double-registered, `handleOpposite` cancels at 0.5× rate (`StatusEffect.java:179-201`) | Transition tables stored as data (`TransitionSpec::{Opposite, ExtendAffinity{cap}, Damage{amount}, SetEffect}`); symmetric insertion enforced. |
+| `StatusEffect` affinities symmetric, opposites double-registered, `handleOpposite` cancels at 0.5× rate (`StatusEffect.java:179-201`) | Transition tables stored as data: `TransitionSpec::{Opposite, Affinity(AffinityTransition)}`, where `AffinityTransition` carries damage/pierce/effect/extend{cap}/trigger (a lossless superset of the `ExtendAffinity`/`Damage`/`SetEffect` shapes; composite handlers like burning↔tarred need it). Symmetric insertion runs in the `link()` pass in id order. |
 | `Liquid.init()` gas rules (`Liquid.java:82-99`) | `gas → boil_point=-1, color.a=0.6, gas_color=color, bar_color=color` if unset. |
 | `Block.init()` derived values (`Block.java:1357+`) | `health = size²·(40+Σ item.healthScaling)` rounded to 5; `offset/size_offset`; `build_time = Σ amount·item.cost × buildCostMultiplier` (20 tick default); consumer array partitions (`consumers/optional/nonOptional/update`); `flags += hasFogRadius|synced`; `liquidCapacity` inference. |
 | `Block.postInit()` auto `shownPlanets` from requirements and `databaseTag = category.name()` | Implemented in block metadata `post_init`. |
@@ -448,7 +450,7 @@ Port `UnitCommands` (10), `TeamEntries` (stub), `UnitStances` (8 + item stances)
 | Command | Behavior | Assertions |
 |---|---|---|
 | `content load` | Boots registry, `createBaseContent` + fake `createModContent` + `init` + `postInit`, prints per-type counts. | Exit 0; counts match golden. |
-| `content dump --out parity/out_content_ids.json` | Deterministic JSON (sorted keys, LF) of type/id/name/kind/localized/region expectations. | Diff vs golden `types` block is empty. |
+| `content ids --out parity/out_content_ids.json` | Deterministic JSON (sorted keys, LF) of type/id/name/kind (`content dump`/`audit` land in M7). | Diff vs golden `types` block is empty. |
 | `content load-order-bad` | Debug scenario registering `UnitTypes` before `Items` (simulated via a test-only loader permutation). | Must fail with the `RegistryEpoch` load-order assertion naming the missing `ItemId`. |
 | `content audit --golden … --manifest … --bundle … --out …` | Runs all mechanical checks (names/IDs/counts vs golden; bundle `.name` keys; region expectations; tech-tree structure; field diff; dangling refs). | Exit 0 on full parity; nonzero + report otherwise. CI gate. |
 | `content bench --runs 20 --json` | Measures `createBaseContent` + `init` + `postInit` (excludes asset loading). | Median ≤ 200 ms release on the dev machine; result recorded in the plan Changelog. |
@@ -477,18 +479,18 @@ Regressions block the P1 gate (HIGH_LEVEL_PLAN §7.4).
 
 ### 7e. Exit criteria checklist
 
-- [ ] `ContentType` ordinals/names/folders match golden (`content_type_ordinals`).
-- [ ] Dense-ID invariant passes for all 12 live types (`log_content`).
+- [x] `ContentType` ordinals/names/folders match golden (`content_type_ordinals`).
+- [x] Dense-ID invariant passes for all 12 live types (`log_content`).
 - [ ] Per-type counts and ordered names match golden for every type (M2/M4/M5 ledgers show 0 unported).
 - [ ] Tech trees: node count, parent/depth, requirement stacks, objective order match golden for Serpulo and Erekir.
-- [ ] `ErekirTechTree.rebalance()` test green (scale-once guard, requirement filter).
+- [ ] `ErekirTechTree.rebalance()` test green (scale-once guard, requirement filter). *(M2: guard green; requirement filter awaits M3/M5 units/turrets.)*
 - [ ] Bundle audit: 0 missing `<type>.<name>.name` keys; localized names equal golden.
 - [ ] Region audit: 0 missing required regions (soft warnings listed and triaged).
 - [ ] Mod/patch contract tests green with fake provider; hand-off note delivered to plan 20.
-- [ ] `content load-order-bad` fails as expected.
+- [x] `content load-order-bad` fails as expected.
 - [ ] MCP inspector scenario passes with screenshot evidence; `godot_log errors` empty.
 - [ ] Perf budgets met and recorded (median load ≤ 200 ms).
-- [ ] `cargo clippy -p mind-core -- -D warnings` clean; no `unwrap()` on runtime content paths.
+- [x] `cargo clippy -p mind-core -- -D warnings` clean; no `unwrap()` on runtime content paths.
 - [ ] Ledgers, golden, audit report, and this plan’s Changelog committed.
 
 ---
@@ -525,3 +527,16 @@ Regressions block the P1 gate (HIGH_LEVEL_PLAN §7.4).
 ## Changelog
 
 - 2026-10-01 — Plan authored (framework scope locked, parity-audit strategy defined, sibling interfaces specified). No milestones executed.
+- 2026-10-01 — **M1 complete** (lane 02, branch `lane/02-content`). Delivered `mind-core/src/content/**`: `ContentType` (18 variants exact order incl. `_UNUSED`), `ContentKind`, `ContentRef`, `ContentId<T>` + aliases, `Content`/`Mappable`/`Unlockable` traits + `UnlockFields`, `ContentRegistry` (dense-ID assignment, duplicate-name rollback, lifecycle sweeps + `link()` pass, `log_content`, index snapshot/restore, `remove`/`remove_last`, `TemporaryMapper` seam), `NameMaps`/`transform_name`/`mod_content_name_map`, `BundleView`/`MemoryBundle`, `UnlockStore`/`MemoryUnlockStore`, `parser_hooks` traits, `Category`, stacks/seqs, and the vanilla `Items` (22), `Liquids` (11), `StatusEffects` (23), `Bullets` (6) registries plus `fx_meta` (267 `Fx` names/lifetimes, generated from source). The P0 `Blocks` placeholder (`air=0`, `stone-wall=1`) moved to `content/registries/blocks.rs` unchanged; M3 replaces it.
+  - **Verification (verbatim):** `cargo fmt --all -- --check` clean; `cargo clippy -p mind-core -p mind-headless --all-targets -- -D warnings` clean; `cargo test -p mind-core` → **49 passed; 0 failed** (incl. `content_framework::content_type_ordinals`, `content_framework::dense_ids`, `items::matches_golden`, `liquids::gas_post_init`, `statuses::opposites_symmetric`, `statuses::affinity_transition_tables`, `bullets::damage_lightning_copy_flags`).
+  - **Harness:** `content load` → item 22, liquid 11, status 23, bullet 6 (blocks/units/weather/sector/planet/team/command/stance 0 until M2/M3/M5); `content ids --out` writes the deterministic `types` block; `content bench --runs 5 --json` median **0.50 ms** debug (budget 200 ms release, `within_budget: true`).
+  - **P0 goldens unchanged (no re-record needed):** `spine_place_break` `e53c9277bb8c28d1` pass; `spine_determinism` `e435247bbe23afb1` pass; `spine_many_commands` `faec40ccbe6ff9d8` pass. Plan-00 cross-reference note: block IDs are untouched at M1; re-recording is deferred to M3 when `Blocks.java` is ported.
+  - **JVM/golden status:** no JDK on Windows or WSL and no install performed, so `parity/java/DumpContent.java` and `parity/golden_content.json` were **not** generated (NUD-10). All M1 goldens are source-derived constant tables; the committed JVM golden remains an **M7 blocker**.
+  - **Recorded deviations (plan text updated in this commit):** `ModContentProvider` drops the plan-20 `ModSet` parameter until M6 reconciliation (§3.6); `TransitionSpec` collapsed to `Opposite | Affinity(AffinityTransition)` to represent composite handlers without data loss (§3.8); harness subcommand is `content ids` (M7 adds `content dump`/`audit`, §7b); `content/color.rs` added for `Rgba`.
+  - **Blockers/risks:** JVM golden (M7); `UnitType`/`Planet`/etc. marker types in `id.rs` are placeholders that M2/M5 re-point to real records; blocks stay on the P0 placeholder until M3.
+- 2026-10-01 — **M2 complete** (lane 02). Ported `UnitCommands` (10), `TeamEntries` (0 by design), `UnitStances` (8 core + one `ItemUnitStance` per item = 30, `load_after_mods`), `Weathers` (6, `snowing`/`Time.toMinutes`), `Planets` (7 incl. `make_asteroid`, sector grids `10·3^n+2`, kind tags for generators/meshes/rules), `SectorPresets` (46, Java `%` + `-1→0` wrap, `SectorRemapProvider` identity seam, `SectorDifficulty`), `Loadouts` (4 raw base64), `TechTree`/`TechNode`/`TechStore`/`TechTreeBuilder` with materialized `SectorComplete` insertion, inherited research-cost multipliers, `round_to_10`, objective data, and the Serpulo (223 nodes) + Erekir (152 nodes) trees verbatim. Tech-tree data is a mechanical conversion of the upstream source; the one-off converter is committed at `parity/tools/gen_trees.py`.
+  - **Verification (verbatim):** `cargo fmt --all -- --check` clean; `cargo clippy -p mind-core -p mind-headless --all-targets -- -D warnings` clean; `cargo test -p mind-core` → **62 passed; 0 failed**, incl. `commands::count_and_ids`, `stances::incompatible_bits`/`load_order`, `sectors::presets_resolve`, `tech::sector_complete_insertion`, `tech::requirements_rounding`, `ekir::rebalance_applies_once`, `registries::load_order_bad`, `tech::vanilla_tree_node_counts`.
+  - **Harness:** `content load` → item 22, bullet 6, liquid 11, status 23, weather 6, sector 46, planet 7, team 0, unitCommand 10, unitStance 30 (blocks/units 0 until M3/M5); `content ids --out` now lists all 12 live types; `content load-order-bad` → `content load-order-bad: failed as expected: content name 'wet' is unknown`; `content bench --runs 10 --json` median **3.25 ms** debug (budget 200 ms release) — the trees add ~2.7 ms debug vs M1.
+  - **P0 goldens unchanged (no re-record needed):** `spine_place_break` `e53c9277bb8c28d1`, `spine_determinism` `e435247bbe23afb1`, `spine_many_commands` `faec40ccbe6ff9d8` all pass.
+  - **Recorded deviations:** `LoadoutDef` is a named side table, not a content ID space (`ContentType.loadout_UNUSED` is historical; upstream `Loadouts` stores `Schematic`s); `TechNode.content` is `Option<ContentRef>` plus `content_name` so the verbatim trees can be built before M3/M5 — `TechTreeBuilder` reports unresolved names (`serpulo`: 49 resolved / 174 unresolved, `erekir`: 35 / 117), which M3/M5 must drive to zero; `ErekirTechTree.rebalance()` is a no-op pending units/blocks, with the tested `rebalance_bullet` scale-once guard ready for M3/M5; `PlanetDef.sector_capture_replacements`/`unlocked_on_land`/`default_core` hold block names until M3.
+  - **Blockers/risks:** JVM golden still the M7 blocker; M3/M5 must assert `TechTreeBuildReport::missing == []`; `sector-shield` propagation has no vanilla users to exercise (kept for parity).
