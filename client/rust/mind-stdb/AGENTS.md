@@ -101,3 +101,28 @@ cargo clippy -p mind-stdb --all-targets -- -D warnings
 10. Token key = `host.replace("://","_").replace(":","_").replace("/","_")` +
     suffix (`--pN`). The `--pN` parser is exact (`^--p\d+$`) — it must reject
     Godot's `--path` (regression test).
+
+## Handoff notes for plan 21 (21_MULTIPLAYER_IMPLEMENTATION_PLAN.md)
+
+- **Envelope freeze.** `CommandKind`'s variant set and meaning are the plan-01
+  contract. STDB 2.10.1 only derives unit/newtype variants, so payloads are
+  product structs (`PlaceBlock` etc.); adding variants is a schema hard cut that
+  plan 21 owns (dev wipes expected).
+- **Schema growth.** Append tables/views; never rename accessors/fields. The
+  command envelope is authority-neutral: `RelayMatch.authority` selects
+  relay-replay vs authoritative mirroring without new command fields;
+  `sender_seq` is server-assigned and `command_id` is global commit order.
+- **Retention.** None in plan 01 (R8): `match_command` grows unbounded
+  (~2 KB/row cap) and `CommandStream::applied_ids` grows with it. Plan 21 adds
+  snapshot rows + a prune pass and must reset `applied_ids` at the cut.
+- **Per-match subscription.** `my_match_commands` returns the caller's commands
+  across all their matches (R13); plan 21 may add a parameterized per-match view
+  (OD3 transport work).
+- **One pump per process.** The `StdbConnector` autoload owns the only
+  `Connector`; plan 21 must not create a second connection.
+- **Game-wave timing.** `CommandStream::subscribe` binds before the Game wave
+  applies; a later subscriber must bind first (no view replay without a primary
+  key) or accept the next transaction.
+- **Integration tests.** `MIND_STDB_IT=1 cargo test -p mind-stdb -- --ignored`
+  against db `mindustry-it`; reducer sends only flush while the sender's
+  connection is pumped (`frame_tick`).

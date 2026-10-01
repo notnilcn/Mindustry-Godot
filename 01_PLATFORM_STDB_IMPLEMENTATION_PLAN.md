@@ -482,16 +482,16 @@ Regressions block the P1 gate (HIGH_LEVEL_PLAN §7.4/§5).
 
 ### 7.5 Exit criteria checklist
 
-- [ ] `cargo fmt --check`, `cargo clippy -p mind-stdb -p mind-gdext -p mind-headless` clean; `cargo test -p mind-stdb` green network-free.
-- [ ] `cargo check --manifest-path server/spacetimedb/Cargo.toml --tests` green.
-- [ ] `server/build.sh --check` shows no generated-binding drift; no hand edits.
-- [ ] Version pins lockstep at 2.10.1 (`cargo tree` single SDK; `spacetime --version` checked).
-- [ ] Module publishes locally; seeds verified via `spacetime sql`.
-- [ ] Base+lobby waves apply; `WaveEvent::Applied` observed in logs/tests.
-- [ ] `stdb_relay_roundtrip_2p` MCP scenario passes with evidence; negative offline path passes.
-- [ ] Perf budgets §7.4 met and recorded.
-- [ ] Invariants §3.12 verified by test (1–4, 6–8) or review (5).
-- [ ] `mind-stdb/AGENTS.md` complete; handoff notes for 21 written; plan Changelog started.
+- [x] `cargo fmt --check`, `cargo clippy -p mind-stdb -p mind-gdext -p mind-headless` clean; `cargo test -p mind-stdb` green network-free.
+- [x] `cargo check --manifest-path server/spacetimedb/Cargo.toml --tests` green.
+- [x] `server/build.sh --check` shows no generated-binding drift; no hand edits.
+- [x] Version pins lockstep at 2.10.1 (`spacetime --version` = 2.10.1; bindings header 2.10.1).
+- [x] Module publishes locally; seeds verified via `spacetime sql`.
+- [x] Base+lobby waves apply; `WaveApplied(Lobby)` observed in the integration test.
+- [ ] `stdb_relay_roundtrip_2p` MCP scenario passes with evidence; negative offline path passes. **Deferred to the orchestrator after merge** (editor points at the main worktree); code + helpers are in M5.
+- [ ] Perf budgets §7.4 met and recorded. **Partial:** `bench stdb_pump` p50 191 ns / p99 611 ns (budgets 50 µs / 200 µs); base/lobby apply < 3/10 ms observed in the IT (≤ 20 s budget timeouts, no timing assert); relay throughput bench deferred.
+- [x] Invariants §3.12 verified by test (1–4, 6–8) or review (5).
+- [x] `mind-stdb/AGENTS.md` complete; handoff notes for 21 written; plan Changelog started.
 
 ## 8. Risks & open decisions
 
@@ -622,5 +622,20 @@ Deleted at M6 (NUD-05=C, no archive): `client/Scripts/Components/` (`IComponent.
   - `cargo check -p mind-gdext` green; `cargo build -p mind-gdext` links `libmind_gdext.so` (247 MB debug).
   - `cargo fmt -p mind-gdext -p mind-stdb -p mind-headless -- --check` and `cargo clippy … --all-targets -- -D warnings` clean.
   - In-engine/MCP run not performed here (editor points at the main worktree); see handoff notes.
+
+#### M6 — Perf, docs, handoff (commit `01-M6`, partial)
+
+- `mind-headless bench --scenario stdb_pump --ticks 10000` implemented
+  (`stdb_scenarios::bench_pump`, pure pump path, budget p99 ≤ 200 µs):
+  `{"scenario":"stdb_pump","ticks":10000,"p50_ns":191,"p99_ns":611,"p50_us":1,"p99_us":1,"baseline_status":"ok"}`.
+- `mind-stdb/AGENTS.md` gained the plan-21 handoff section (envelope freeze,
+  schema growth points, `AuthorityMode` switch, retention/`applied_ids` cut,
+  per-match subscription, one-pump rule, Game-wave bind timing, IT rig notes).
+- Exit checklist §7.5 updated with what is done and the two deferrals (MCP run,
+  relay throughput bench) that need the merged worktree/editor.
+- Remaining for the integrator: run the §7.3 MCP scenario (`dev_create_match` →
+  poll `dev_match_id` → `dev_start_match` → `dev_send_ping` → counters on both
+  instances) and the ignored `bench_relay_throughput` once a load harness
+  exists (plan 21 owns the 10-client generator).
 
 

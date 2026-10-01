@@ -359,6 +359,31 @@ fn cmd_bench(cli: &Cli, ticks: u64, scenario_name: &str) -> anyhow::Result<i32> 
         return Err(anyhow!("--ticks must be greater than zero"));
     }
     let ticks_usize = usize::try_from(ticks).context("--ticks does not fit in memory")?;
+    // Plan 01 §7.4: STDB pump overhead is not a sim scenario.
+    if scenario_name == "stdb_pump" {
+        const P99_BUDGET_NS: u64 = 200_000;
+        let (p50_ns, p99_ns) = crate::stdb_scenarios::bench_pump(ticks);
+        let report = BenchReport {
+            scenario: String::from("stdb_pump"),
+            ticks,
+            p50_ns,
+            p99_ns,
+            p50_us: p50_ns.div_ceil(1_000),
+            p99_us: p99_ns.div_ceil(1_000),
+            checksum: String::from("n/a"),
+            baseline_status: if p99_ns <= P99_BUDGET_NS {
+                String::from("ok")
+            } else {
+                String::from("fail")
+            },
+        };
+        println!("{}", serde_json::to_string(&report)?);
+        return Ok(if p99_ns <= P99_BUDGET_NS {
+            EXIT_PASS
+        } else {
+            EXIT_FAIL
+        });
+    }
     let name = registry::bench_alias(scenario_name);
     let scenario = load_scenario(cli, name)?;
 

@@ -459,6 +459,28 @@ fn run_offline_boot(cli: &Cli, dump: Option<&Path>, json: bool) -> anyhow::Resul
     Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
 }
 
+/// Measures idle `Connector::pump()` overhead (plan §7.4 `stdb_pump`).
+///
+/// Uses an online-mode connector that never connects, so the measurement is
+/// the pure per-frame pump path (state check + callback-queue drain), which is
+/// also the offline single-player path.
+pub fn bench_pump(ticks: u64) -> (u64, u64) {
+    let config = ConnectionConfig {
+        mode: StdbMode::Online,
+        token_store_path: Some(std::env::temp_dir().join("mind-headless-stdb")),
+        ..ConnectionConfig::local()
+    };
+    let mut connector = Connector::new(config);
+    let mut samples = Vec::with_capacity(usize::try_from(ticks).unwrap_or(0));
+    for _ in 0..ticks {
+        let start = Instant::now();
+        connector.pump();
+        samples.push(start.elapsed().as_nanos() as u64);
+    }
+    samples.sort_unstable();
+    (percentile(&samples, 50), percentile(&samples, 99))
+}
+
 fn fixture_file(cli: &Cli, kind: StdbScenario) -> anyhow::Result<std::path::PathBuf> {
     let fixture = crate::registry::find(kind.name())
         .ok_or_else(|| anyhow!("`{}` is not registered", kind.name()))?;
