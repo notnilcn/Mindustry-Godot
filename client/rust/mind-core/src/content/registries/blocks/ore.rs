@@ -125,5 +125,6 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         map_color: Some(rgba_hex("768a9a")),
         ..spec("ore-wall-tungsten", BlockKind::OreBlock)
     })?;
+    let _ = sink;
     Ok(())
 }

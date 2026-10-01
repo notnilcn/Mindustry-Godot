@@ -262,191 +262,191 @@
 | 253 | shockwave-tower | ShockwaveTower | [x] | c4fd16d26924 | B2 |  |
 | 254 | shield-projector | BaseShield | [x] | b298583c93c6 | B2 |  |
 | 255 | large-shield-projector | BaseShield | [x] | 1dad9dd65930 | B2 |  |
-| 256 | conveyor | Conveyor | [ ] | 0b1604b6e9f9 | B3 |  |
-| 257 | titanium-conveyor | Conveyor | [ ] | 5ba19363fe5f | B3 |  |
-| 258 | plastanium-conveyor | StackConveyor | [ ] | 3888b15e7531 | B3 |  |
-| 259 | armored-conveyor | ArmoredConveyor | [ ] | 78c1582fee8a | B3 |  |
-| 260 | junction | Junction | [ ] | d5766b51fad1 | B3 |  |
-| 261 | bridge-conveyor | BufferedItemBridge | [ ] | 539bc9884222 | B3 |  |
-| 262 | phase-conveyor | ItemBridge | [ ] | ce026577a3fc | B3 |  |
-| 263 | sorter | Sorter | [ ] | b56450e73147 | B3 |  |
-| 264 | inverted-sorter | Sorter | [ ] | 7f4c451e884e | B3 |  |
-| 265 | router | Router | [ ] | 781bd139dc3e | B3 |  |
-| 266 | distributor | Router | [ ] | 3794cfbdc0a7 | B3 |  |
-| 267 | overflow-gate | OverflowGate | [ ] | 12c341cbcf74 | B3 |  |
-| 268 | underflow-gate | OverflowGate | [ ] | 269383a5fa72 | B3 |  |
-| 269 | unloader | Unloader | [ ] | 2f1bf239506e | B3 |  |
-| 270 | mass-driver | MassDriver | [ ] | 1f7baf86c9d9 | B3 |  |
-| 271 | duct | Duct | [ ] | e00a0a1d0da6 | B3 |  |
-| 272 | armored-duct | Duct | [ ] | 6a913ff99ee6 | B3 |  |
-| 273 | duct-router | DuctRouter | [ ] | 8f7f9fae3428 | B3 |  |
-| 274 | overflow-duct | OverflowDuct | [ ] | 63cbd8916e34 | B3 |  |
-| 275 | underflow-duct | OverflowDuct | [ ] | 85483c75e689 | B3 |  |
-| 276 | duct-bridge | DuctBridge | [ ] | c6dfc0ec37fe | B3 |  |
-| 277 | duct-unloader | DirectionalUnloader | [ ] | 2ab62bb79448 | B3 |  |
-| 278 | surge-conveyor | StackConveyor | [ ] | 8c76e801355d | B3 |  |
-| 279 | surge-router | StackRouter | [ ] | bfc664a6843b | B3 |  |
-| 280 | unit-cargo-loader | UnitCargoLoader | [ ] | ef53aedecb6f | B3 |  |
-| 281 | unit-cargo-unload-point | UnitCargoUnloadPoint | [ ] | 99add7af62ec | B3 |  |
-| 282 | mechanical-pump | Pump | [ ] | 95ca42df8981 | B3 |  |
-| 283 | rotary-pump | Pump | [ ] | e27eb69319cf | B3 |  |
-| 284 | impulse-pump | Pump | [ ] | 9d56806440fa | B3 |  |
-| 285 | conduit | Conduit | [ ] | d4dad1271c84 | B3 |  |
-| 286 | pulse-conduit | Conduit | [ ] | 4dc0c0be3819 | B3 |  |
-| 287 | plated-conduit | ArmoredConduit | [ ] | 9ee73b777f12 | B3 |  |
-| 288 | liquid-router | LiquidRouter | [ ] | 0fe843fd8c56 | B3 |  |
-| 289 | liquid-container | LiquidRouter | [ ] | 291825bb35dd | B3 |  |
-| 290 | liquid-tank | LiquidRouter | [ ] | 5d81af83923c | B3 |  |
-| 291 | liquid-junction | LiquidJunction | [ ] | 6300d10eb77c | B3 |  |
-| 292 | bridge-conduit | LiquidBridge | [ ] | c405fcb84b61 | B3 |  |
-| 293 | phase-conduit | LiquidBridge | [ ] | 2b116946872c | B3 |  |
-| 294 | reinforced-pump | Pump | [ ] | 22058f57a136 | B3 |  |
-| 295 | reinforced-conduit | ArmoredConduit | [ ] | 222666af7cfc | B3 |  |
-| 296 | reinforced-liquid-junction | LiquidJunction | [ ] | a7bfd6f60c20 | B3 |  |
-| 297 | reinforced-bridge-conduit | DirectionLiquidBridge | [ ] | 71e1e66ecbb3 | B3 |  |
-| 298 | reinforced-liquid-router | LiquidRouter | [ ] | 6f5ce074ead9 | B3 |  |
-| 299 | reinforced-liquid-container | LiquidRouter | [ ] | 3f6e4f1f8129 | B3 |  |
-| 300 | reinforced-liquid-tank | LiquidRouter | [ ] | 2f57c8878017 | B3 |  |
-| 301 | power-node | PowerNode | [ ] | 4bee48690491 | B3 |  |
-| 302 | power-node-large | PowerNode | [ ] | f15311f30afe | B3 |  |
-| 303 | surge-tower | PowerNode | [ ] | fed49da09481 | B3 |  |
-| 304 | diode | PowerDiode | [ ] | 5ec3b4863b97 | B3 |  |
-| 305 | battery | Battery | [ ] | 6b954710fa85 | B3 |  |
-| 306 | battery-large | Battery | [ ] | ee6482e02c31 | B3 |  |
-| 307 | combustion-generator | ConsumeGenerator | [ ] | 8fd0d0d28899 | B3 |  |
-| 308 | thermal-generator | ThermalGenerator | [ ] | 52089e544942 | B3 |  |
-| 309 | steam-generator | ConsumeGenerator | [ ] | ab12ce2677b1 | B3 |  |
-| 310 | differential-generator | ConsumeGenerator | [ ] | b6eb99e5c7bf | B3 |  |
-| 311 | rtg-generator | ConsumeGenerator | [ ] | 53a0a0e71f52 | B3 |  |
-| 312 | solar-panel | SolarGenerator | [ ] | fe9e89cd6135 | B3 |  |
-| 313 | solar-panel-large | SolarGenerator | [ ] | 5b1195645bc2 | B3 |  |
-| 314 | thorium-reactor | NuclearReactor | [ ] | d9c6696c1eb9 | B3 | unparsed `heating / coolantPower`: unknown identifier 'heating' |
-| 315 | impact-reactor | ImpactReactor | [ ] | f00e582b24ea | B3 |  |
-| 316 | beam-node | BeamNode | [ ] | 3625394823d4 | B3 |  |
-| 317 | beam-tower | BeamNode | [ ] | 69b36e30db13 | B3 |  |
-| 318 | beam-link | LongPowerNode | [ ] | b19f3ceb29fb | B3 |  |
-| 319 | turbine-condenser | ThermalGenerator | [ ] | cdd8bb8674a5 | B3 |  |
-| 320 | chemical-combustion-chamber | ConsumeGenerator | [ ] | 96ffd19d053d | B3 |  |
-| 321 | pyrolysis-generator | ConsumeGenerator | [ ] | cc68a7b42c98 | B3 |  |
-| 322 | flux-reactor | VariableReactor | [ ] | 1e0c94188248 | B3 |  |
-| 323 | neoplasia-reactor | HeaterGenerator | [ ] | 485f8577f82d | B3 |  |
-| 324 | mechanical-drill | Drill | [ ] | 0d556f8b91f5 | B4 |  |
-| 325 | pneumatic-drill | Drill | [ ] | 2e8b8d31b282 | B4 |  |
-| 326 | laser-drill | Drill | [ ] | a511d804806e | B4 |  |
-| 327 | blast-drill | Drill | [ ] | a5c78181b002 | B4 |  |
-| 328 | water-extractor | SolidPump | [ ] | b0219ad8335c | B4 |  |
-| 329 | cultivator | AttributeCrafter | [ ] | a259215fc7b0 | B4 |  |
-| 330 | oil-extractor | Fracker | [ ] | 2efd0bda7762 | B4 |  |
-| 331 | vent-condenser | AttributeCrafter | [ ] | 39d0ce507b0c | B4 |  |
-| 332 | cliff-crusher | WallCrafter | [ ] | fed822d31032 | B4 |  |
-| 333 | large-cliff-crusher | WallCrafter | [ ] | 145adf7fae62 | B4 |  |
-| 334 | plasma-bore | BeamDrill | [ ] | e5c9dd3b8e4c | B4 |  |
-| 335 | large-plasma-bore | BeamDrill | [ ] | 23acab48733c | B4 |  |
-| 336 | impact-drill | BurstDrill | [ ] | 917e332c5fe0 | B4 |  |
-| 337 | eruption-drill | BurstDrill | [ ] | 32082c3f0de4 | B4 |  |
-| 338 | core-shard | CoreBlock | [ ] | 632667e4e58f | B4 |  |
-| 339 | core-foundation | CoreBlock | [ ] | 5ed5ce5896bb | B4 |  |
-| 340 | core-nucleus | CoreBlock | [ ] | a3ceaea2a553 | B4 |  |
-| 341 | core-bastion | CoreBlock | [ ] | 362b802babc4 | B4 |  |
-| 342 | core-citadel | CoreBlock | [ ] | 0b8ddf798298 | B4 |  |
-| 343 | core-acropolis | CoreBlock | [ ] | acc9e22d6b71 | B4 |  |
-| 344 | container | StorageBlock | [ ] | 8dbe0945cf46 | B4 |  |
-| 345 | vault | StorageBlock | [ ] | 3ba3b939bd04 | B4 |  |
-| 346 | reinforced-container | StorageBlock | [ ] | bb6ec1abb9c0 | B4 |  |
-| 347 | reinforced-vault | StorageBlock | [ ] | 33a5d868fb62 | B4 |  |
-| 348 | duo | ItemTurret | [ ] | e80d51fd4872 | B5 |  |
-| 349 | scatter | ItemTurret | [ ] | 6e48546731a9 | B5 |  |
-| 350 | scorch | ItemTurret | [ ] | ea1a36d5dc60 | B5 |  |
-| 351 | hail | ItemTurret | [ ] | 1315c870d2fe | B5 |  |
-| 352 | wave | LiquidTurret | [ ] | dbb3d8c80381 | B5 |  |
-| 353 | lancer | PowerTurret | [ ] | 4c5beb68cd8d | B5 |  |
-| 354 | arc | PowerTurret | [ ] | b83af8f68e25 | B5 |  |
-| 355 | parallax | TractorBeamTurret | [ ] | 813eda2488e5 | B5 |  |
-| 356 | swarmer | ItemTurret | [ ] | eaf5149a5441 | B5 |  |
-| 357 | salvo | ItemTurret | [ ] | c39d61a49b62 | B5 |  |
-| 358 | segment | PointDefenseTurret | [ ] | 886ab3f95b33 | B5 |  |
-| 359 | tsunami | LiquidTurret | [ ] | 157d1079dc03 | B5 |  |
-| 360 | fuse | ItemTurret | [ ] | 1a5303ba0056 | B5 |  |
-| 361 | ripple | ItemTurret | [ ] | 46dfe3cdbbc7 | B5 |  |
-| 362 | cyclone | ItemTurret | [ ] | 5f236b3dc9a3 | B5 |  |
-| 363 | foreshadow | ItemTurret | [ ] | 8a2bd0d760f0 | B5 |  |
-| 364 | spectre | ItemTurret | [ ] | f0b92bda6358 | B5 |  |
-| 365 | meltdown | LaserTurret | [ ] | 00a9ed457d06 | B5 |  |
-| 366 | breach | ItemTurret | [ ] | 6e2811ba8627 | B5 |  |
-| 367 | diffuse | ItemTurret | [ ] | 1dbddc97ddbb | B5 |  |
-| 368 | sublimate | ContinuousLiquidTurret | [ ] | c19d9b1f3a74 | B5 |  |
-| 369 | titan | ItemTurret | [ ] | 4cbe62f5001c | B5 |  |
-| 370 | disperse | ItemTurret | [ ] | 6446e94de5dc | B5 |  |
-| 371 | afflict | PowerTurret | [ ] | ee80f46e88b7 | B5 |  |
-| 372 | lustre | ContinuousTurret | [ ] | 2e502a2f577f | B5 |  |
-| 373 | scathe | ItemTurret | [ ] | a55a03ebe65c | B5 |  |
-| 374 | smite | ItemTurret | [ ] | 5bf6f3c22161 | B5 |  |
-| 375 | malign | PowerTurret | [ ] | 7308a3d2bb6a | B5 |  |
-| 376 | ground-factory | UnitFactory | [ ] | 8de9f9f1a88b | B5 |  |
-| 377 | air-factory | UnitFactory | [ ] | eda77466fe1d | B5 |  |
-| 378 | naval-factory | UnitFactory | [ ] | 1eb67a291a39 | B5 |  |
-| 379 | additive-reconstructor | Reconstructor | [ ] | 52e0bc5480dd | B5 |  |
-| 380 | multiplicative-reconstructor | Reconstructor | [ ] | e196f38cb8ad | B5 |  |
-| 381 | exponential-reconstructor | Reconstructor | [ ] | 1274dbe99f60 | B5 |  |
-| 382 | tetrative-reconstructor | Reconstructor | [ ] | b3d87505a8d0 | B5 |  |
-| 383 | repair-point | RepairTurret | [ ] | 2528c9dbd315 | B5 |  |
-| 384 | repair-turret | RepairTurret | [ ] | af084b6a5d45 | B5 |  |
-| 385 | tank-fabricator | UnitFactory | [ ] | c3e50a0c3a96 | B5 |  |
-| 386 | ship-fabricator | UnitFactory | [ ] | ee0272eb67ca | B5 |  |
-| 387 | mech-fabricator | UnitFactory | [ ] | 6abf33771bc8 | B5 |  |
-| 388 | tank-refabricator | Reconstructor | [ ] | a64f17ed21cb | B5 |  |
-| 389 | ship-refabricator | Reconstructor | [ ] | 01d900f90357 | B5 |  |
-| 390 | mech-refabricator | Reconstructor | [ ] | 2b988c48eb0b | B5 |  |
-| 391 | prime-refabricator | Reconstructor | [ ] | 96d92a48ef54 | B5 |  |
-| 392 | tank-assembler | UnitAssembler | [ ] | 922a7a4583e8 | B5 |  |
-| 393 | ship-assembler | UnitAssembler | [ ] | 77e537bcddbe | B5 |  |
-| 394 | mech-assembler | UnitAssembler | [ ] | bad9511e3213 | B5 |  |
-| 395 | basic-assembler-module | UnitAssemblerModule | [ ] | 591bfe770b0a | B5 |  |
-| 396 | unit-repair-tower | RepairTower | [ ] | b82f74a13de6 | B5 |  |
-| 397 | payload-conveyor | PayloadConveyor | [ ] | 1a86ec0c6075 | B5 |  |
-| 398 | payload-router | PayloadRouter | [ ] | c425fa0e9679 | B5 |  |
-| 399 | reinforced-payload-conveyor | PayloadConveyor | [ ] | 278b60e1a38f | B5 |  |
-| 400 | reinforced-payload-router | PayloadRouter | [ ] | 6b7383e782fc | B5 |  |
-| 401 | payload-mass-driver | PayloadMassDriver | [ ] | bf156ea9de58 | B5 |  |
-| 402 | large-payload-mass-driver | PayloadMassDriver | [ ] | f6615cc041c4 | B5 |  |
-| 403 | small-deconstructor | PayloadDeconstructor | [ ] | c970557944ad | B5 |  |
-| 404 | deconstructor | PayloadDeconstructor | [ ] | dcb09cc17f5e | B5 |  |
-| 405 | constructor | Constructor | [ ] | 3b37aeb7ad11 | B5 |  |
-| 406 | large-constructor | Constructor | [ ] | ae169e23cdbc | B5 |  |
-| 407 | payload-loader | PayloadLoader | [ ] | 4c075620d691 | B5 |  |
-| 408 | payload-unloader | PayloadUnloader | [ ] | af2fb09cf527 | B5 |  |
-| 409 | power-source | PowerSource | [ ] | c402273be9f3 | B6 |  |
-| 410 | power-void | PowerVoid | [ ] | 2283a9d1f086 | B6 |  |
-| 411 | item-source | ItemSource | [ ] | 345810e2e026 | B6 |  |
-| 412 | item-void | ItemVoid | [ ] | 9cebb7f3d73a | B6 |  |
-| 413 | liquid-source | LiquidSource | [ ] | 0f63c275b4b0 | B6 |  |
-| 414 | liquid-void | LiquidVoid | [ ] | 10230a62853e | B6 |  |
-| 415 | payload-source | PayloadSource | [ ] | 44fac3089ea7 | B6 |  |
-| 416 | payload-void | PayloadVoid | [ ] | 7ad6ad4d6f7c | B6 |  |
-| 417 | heat-source | HeatProducer | [ ] | af66a89f27d1 | B6 |  |
-| 418 | target-dummy | TargetDummy | [ ] | 0aadb092be47 | B6 |  |
-| 419 | illuminator | LightBlock | [ ] | 2d99fd787874 | B6 |  |
-| 420 | launch-pad | LaunchPad | [ ] | 54dc1462fda6 | B6 |  |
-| 421 | advanced-launch-pad | LaunchPad | [ ] | 622aed8fa074 | B6 |  |
-| 422 | landing-pad | LandingPad | [ ] | f69fd2b67e61 | B6 |  |
-| 423 | interplanetary-accelerator | Accelerator | [ ] | 80daec3c9be4 | B6 |  |
-| 424 | message | MessageBlock | [ ] | 6e6360ccc640 | B6 |  |
-| 425 | switch | SwitchBlock | [ ] | ea1da3e2bc7d | B6 |  |
-| 426 | micro-processor | LogicBlock | [ ] | e740b9ef6cd2 | B6 |  |
-| 427 | logic-processor | LogicBlock | [ ] | 1ce5b7b10600 | B6 |  |
-| 428 | hyper-processor | LogicBlock | [ ] | 81245a80bacd | B6 |  |
-| 429 | memory-cell | MemoryBlock | [ ] | 8fcbe0351941 | B6 |  |
-| 430 | memory-bank | MemoryBlock | [ ] | 6aade31721e1 | B6 |  |
-| 431 | logic-display | LogicDisplay | [ ] | bd5e7494ac8e | B6 |  |
-| 432 | large-logic-display | LogicDisplay | [ ] | 9e73479fcf74 | B6 |  |
-| 433 | tile-logic-display | TileableLogicDisplay | [ ] | e46a57b31352 | B6 |  |
-| 434 | canvas | CanvasBlock | [ ] | bb168a456872 | B6 |  |
-| 435 | large-canvas | CanvasBlock | [ ] | 04ee805f3958 | B6 |  |
-| 436 | reinforced-message | MessageBlock | [ ] | 96b6f7515b9c | B6 |  |
-| 437 | world-processor | LogicBlock | [ ] | d270acd6c0a9 | B6 |  |
-| 438 | world-cell | MemoryBlock | [ ] | 922ffb60090d | B6 |  |
-| 439 | world-message | MessageBlock | [ ] | f95ed67adb8f | B6 |  |
-| 440 | world-switch | SwitchBlock | [ ] | 84776eecfc03 | B6 |  |
+| 256 | conveyor | Conveyor | [x] | 0b1604b6e9f9 | B3 |  |
+| 257 | titanium-conveyor | Conveyor | [x] | 5ba19363fe5f | B3 |  |
+| 258 | plastanium-conveyor | StackConveyor | [x] | 3888b15e7531 | B3 |  |
+| 259 | armored-conveyor | ArmoredConveyor | [x] | 78c1582fee8a | B3 |  |
+| 260 | junction | Junction | [x] | d5766b51fad1 | B3 |  |
+| 261 | bridge-conveyor | BufferedItemBridge | [x] | 539bc9884222 | B3 |  |
+| 262 | phase-conveyor | ItemBridge | [x] | ce026577a3fc | B3 |  |
+| 263 | sorter | Sorter | [x] | b56450e73147 | B3 |  |
+| 264 | inverted-sorter | Sorter | [x] | 7f4c451e884e | B3 |  |
+| 265 | router | Router | [x] | 781bd139dc3e | B3 |  |
+| 266 | distributor | Router | [x] | 3794cfbdc0a7 | B3 |  |
+| 267 | overflow-gate | OverflowGate | [x] | 12c341cbcf74 | B3 |  |
+| 268 | underflow-gate | OverflowGate | [x] | 269383a5fa72 | B3 |  |
+| 269 | unloader | Unloader | [x] | 2f1bf239506e | B3 |  |
+| 270 | mass-driver | MassDriver | [x] | 1f7baf86c9d9 | B3 |  |
+| 271 | duct | Duct | [x] | e00a0a1d0da6 | B3 |  |
+| 272 | armored-duct | Duct | [x] | 6a913ff99ee6 | B3 |  |
+| 273 | duct-router | DuctRouter | [x] | 8f7f9fae3428 | B3 |  |
+| 274 | overflow-duct | OverflowDuct | [x] | 63cbd8916e34 | B3 |  |
+| 275 | underflow-duct | OverflowDuct | [x] | 85483c75e689 | B3 |  |
+| 276 | duct-bridge | DuctBridge | [x] | c6dfc0ec37fe | B3 |  |
+| 277 | duct-unloader | DirectionalUnloader | [x] | 2ab62bb79448 | B3 |  |
+| 278 | surge-conveyor | StackConveyor | [x] | 8c76e801355d | B3 |  |
+| 279 | surge-router | StackRouter | [x] | bfc664a6843b | B3 |  |
+| 280 | unit-cargo-loader | UnitCargoLoader | [x] | ef53aedecb6f | B3 |  |
+| 281 | unit-cargo-unload-point | UnitCargoUnloadPoint | [x] | 99add7af62ec | B3 |  |
+| 282 | mechanical-pump | Pump | [x] | 95ca42df8981 | B3 |  |
+| 283 | rotary-pump | Pump | [x] | e27eb69319cf | B3 |  |
+| 284 | impulse-pump | Pump | [x] | 9d56806440fa | B3 |  |
+| 285 | conduit | Conduit | [x] | d4dad1271c84 | B3 |  |
+| 286 | pulse-conduit | Conduit | [x] | 4dc0c0be3819 | B3 |  |
+| 287 | plated-conduit | ArmoredConduit | [x] | 9ee73b777f12 | B3 |  |
+| 288 | liquid-router | LiquidRouter | [x] | 0fe843fd8c56 | B3 |  |
+| 289 | liquid-container | LiquidRouter | [x] | 291825bb35dd | B3 |  |
+| 290 | liquid-tank | LiquidRouter | [x] | 5d81af83923c | B3 |  |
+| 291 | liquid-junction | LiquidJunction | [x] | 6300d10eb77c | B3 |  |
+| 292 | bridge-conduit | LiquidBridge | [x] | c405fcb84b61 | B3 |  |
+| 293 | phase-conduit | LiquidBridge | [x] | 2b116946872c | B3 |  |
+| 294 | reinforced-pump | Pump | [x] | 22058f57a136 | B3 |  |
+| 295 | reinforced-conduit | ArmoredConduit | [x] | 222666af7cfc | B3 |  |
+| 296 | reinforced-liquid-junction | LiquidJunction | [x] | a7bfd6f60c20 | B3 |  |
+| 297 | reinforced-bridge-conduit | DirectionLiquidBridge | [x] | 71e1e66ecbb3 | B3 |  |
+| 298 | reinforced-liquid-router | LiquidRouter | [x] | 6f5ce074ead9 | B3 |  |
+| 299 | reinforced-liquid-container | LiquidRouter | [x] | 3f6e4f1f8129 | B3 |  |
+| 300 | reinforced-liquid-tank | LiquidRouter | [x] | 2f57c8878017 | B3 |  |
+| 301 | power-node | PowerNode | [x] | 4bee48690491 | B3 |  |
+| 302 | power-node-large | PowerNode | [x] | f15311f30afe | B3 |  |
+| 303 | surge-tower | PowerNode | [x] | fed49da09481 | B3 |  |
+| 304 | diode | PowerDiode | [x] | 5ec3b4863b97 | B3 |  |
+| 305 | battery | Battery | [x] | 6b954710fa85 | B3 |  |
+| 306 | battery-large | Battery | [x] | ee6482e02c31 | B3 |  |
+| 307 | combustion-generator | ConsumeGenerator | [x] | 8fd0d0d28899 | B3 |  |
+| 308 | thermal-generator | ThermalGenerator | [x] | 52089e544942 | B3 |  |
+| 309 | steam-generator | ConsumeGenerator | [x] | ab12ce2677b1 | B3 |  |
+| 310 | differential-generator | ConsumeGenerator | [x] | b6eb99e5c7bf | B3 |  |
+| 311 | rtg-generator | ConsumeGenerator | [x] | 53a0a0e71f52 | B3 |  |
+| 312 | solar-panel | SolarGenerator | [x] | fe9e89cd6135 | B3 |  |
+| 313 | solar-panel-large | SolarGenerator | [x] | 5b1195645bc2 | B3 |  |
+| 314 | thorium-reactor | NuclearReactor | [x] | ef9b57f39320 | B3 |  |
+| 315 | impact-reactor | ImpactReactor | [x] | f00e582b24ea | B3 |  |
+| 316 | beam-node | BeamNode | [x] | 3625394823d4 | B3 |  |
+| 317 | beam-tower | BeamNode | [x] | 69b36e30db13 | B3 |  |
+| 318 | beam-link | LongPowerNode | [x] | b19f3ceb29fb | B3 |  |
+| 319 | turbine-condenser | ThermalGenerator | [x] | cdd8bb8674a5 | B3 |  |
+| 320 | chemical-combustion-chamber | ConsumeGenerator | [x] | 96ffd19d053d | B3 |  |
+| 321 | pyrolysis-generator | ConsumeGenerator | [x] | cc68a7b42c98 | B3 |  |
+| 322 | flux-reactor | VariableReactor | [x] | 1e0c94188248 | B3 |  |
+| 323 | neoplasia-reactor | HeaterGenerator | [x] | 485f8577f82d | B3 |  |
+| 324 | mechanical-drill | Drill | [x] | 0d556f8b91f5 | B4 |  |
+| 325 | pneumatic-drill | Drill | [x] | 2e8b8d31b282 | B4 |  |
+| 326 | laser-drill | Drill | [x] | a511d804806e | B4 |  |
+| 327 | blast-drill | Drill | [x] | a5c78181b002 | B4 |  |
+| 328 | water-extractor | SolidPump | [x] | b0219ad8335c | B4 |  |
+| 329 | cultivator | AttributeCrafter | [x] | a259215fc7b0 | B4 |  |
+| 330 | oil-extractor | Fracker | [x] | 2efd0bda7762 | B4 |  |
+| 331 | vent-condenser | AttributeCrafter | [x] | 39d0ce507b0c | B4 |  |
+| 332 | cliff-crusher | WallCrafter | [x] | fed822d31032 | B4 |  |
+| 333 | large-cliff-crusher | WallCrafter | [x] | 145adf7fae62 | B4 |  |
+| 334 | plasma-bore | BeamDrill | [x] | e5c9dd3b8e4c | B4 |  |
+| 335 | large-plasma-bore | BeamDrill | [x] | 23acab48733c | B4 |  |
+| 336 | impact-drill | BurstDrill | [x] | 917e332c5fe0 | B4 |  |
+| 337 | eruption-drill | BurstDrill | [x] | 32082c3f0de4 | B4 |  |
+| 338 | core-shard | CoreBlock | [x] | 632667e4e58f | B4 |  |
+| 339 | core-foundation | CoreBlock | [x] | 5ed5ce5896bb | B4 |  |
+| 340 | core-nucleus | CoreBlock | [x] | a3ceaea2a553 | B4 |  |
+| 341 | core-bastion | CoreBlock | [x] | 362b802babc4 | B4 |  |
+| 342 | core-citadel | CoreBlock | [x] | 0b8ddf798298 | B4 |  |
+| 343 | core-acropolis | CoreBlock | [x] | acc9e22d6b71 | B4 |  |
+| 344 | container | StorageBlock | [x] | 8dbe0945cf46 | B4 |  |
+| 345 | vault | StorageBlock | [x] | 3ba3b939bd04 | B4 |  |
+| 346 | reinforced-container | StorageBlock | [x] | bb6ec1abb9c0 | B4 |  |
+| 347 | reinforced-vault | StorageBlock | [x] | 33a5d868fb62 | B4 |  |
+| 348 | duo | ItemTurret | [x] | e80d51fd4872 | B5 |  |
+| 349 | scatter | ItemTurret | [x] | 6e48546731a9 | B5 |  |
+| 350 | scorch | ItemTurret | [x] | ea1a36d5dc60 | B5 |  |
+| 351 | hail | ItemTurret | [x] | 1315c870d2fe | B5 |  |
+| 352 | wave | LiquidTurret | [x] | dbb3d8c80381 | B5 |  |
+| 353 | lancer | PowerTurret | [x] | 4c5beb68cd8d | B5 |  |
+| 354 | arc | PowerTurret | [x] | b83af8f68e25 | B5 |  |
+| 355 | parallax | TractorBeamTurret | [x] | 813eda2488e5 | B5 |  |
+| 356 | swarmer | ItemTurret | [x] | eaf5149a5441 | B5 |  |
+| 357 | salvo | ItemTurret | [x] | c39d61a49b62 | B5 |  |
+| 358 | segment | PointDefenseTurret | [x] | 886ab3f95b33 | B5 |  |
+| 359 | tsunami | LiquidTurret | [x] | 157d1079dc03 | B5 |  |
+| 360 | fuse | ItemTurret | [x] | 1a5303ba0056 | B5 |  |
+| 361 | ripple | ItemTurret | [x] | 46dfe3cdbbc7 | B5 |  |
+| 362 | cyclone | ItemTurret | [x] | 5f236b3dc9a3 | B5 |  |
+| 363 | foreshadow | ItemTurret | [x] | 8a2bd0d760f0 | B5 |  |
+| 364 | spectre | ItemTurret | [x] | f0b92bda6358 | B5 |  |
+| 365 | meltdown | LaserTurret | [x] | 00a9ed457d06 | B5 |  |
+| 366 | breach | ItemTurret | [x] | 6e2811ba8627 | B5 |  |
+| 367 | diffuse | ItemTurret | [x] | 1dbddc97ddbb | B5 |  |
+| 368 | sublimate | ContinuousLiquidTurret | [x] | c19d9b1f3a74 | B5 |  |
+| 369 | titan | ItemTurret | [x] | 4cbe62f5001c | B5 |  |
+| 370 | disperse | ItemTurret | [x] | 6446e94de5dc | B5 |  |
+| 371 | afflict | PowerTurret | [x] | ee80f46e88b7 | B5 |  |
+| 372 | lustre | ContinuousTurret | [x] | 2e502a2f577f | B5 |  |
+| 373 | scathe | ItemTurret | [x] | a55a03ebe65c | B5 |  |
+| 374 | smite | ItemTurret | [x] | 5bf6f3c22161 | B5 |  |
+| 375 | malign | PowerTurret | [x] | 7308a3d2bb6a | B5 |  |
+| 376 | ground-factory | UnitFactory | [x] | 8de9f9f1a88b | B5 |  |
+| 377 | air-factory | UnitFactory | [x] | eda77466fe1d | B5 |  |
+| 378 | naval-factory | UnitFactory | [x] | 1eb67a291a39 | B5 |  |
+| 379 | additive-reconstructor | Reconstructor | [x] | 52e0bc5480dd | B5 |  |
+| 380 | multiplicative-reconstructor | Reconstructor | [x] | e196f38cb8ad | B5 |  |
+| 381 | exponential-reconstructor | Reconstructor | [x] | 1274dbe99f60 | B5 |  |
+| 382 | tetrative-reconstructor | Reconstructor | [x] | b3d87505a8d0 | B5 |  |
+| 383 | repair-point | RepairTurret | [x] | 2528c9dbd315 | B5 |  |
+| 384 | repair-turret | RepairTurret | [x] | af084b6a5d45 | B5 |  |
+| 385 | tank-fabricator | UnitFactory | [x] | c3e50a0c3a96 | B5 |  |
+| 386 | ship-fabricator | UnitFactory | [x] | ee0272eb67ca | B5 |  |
+| 387 | mech-fabricator | UnitFactory | [x] | 6abf33771bc8 | B5 |  |
+| 388 | tank-refabricator | Reconstructor | [x] | a64f17ed21cb | B5 |  |
+| 389 | ship-refabricator | Reconstructor | [x] | 01d900f90357 | B5 |  |
+| 390 | mech-refabricator | Reconstructor | [x] | 2b988c48eb0b | B5 |  |
+| 391 | prime-refabricator | Reconstructor | [x] | 96d92a48ef54 | B5 |  |
+| 392 | tank-assembler | UnitAssembler | [x] | 922a7a4583e8 | B5 |  |
+| 393 | ship-assembler | UnitAssembler | [x] | 77e537bcddbe | B5 |  |
+| 394 | mech-assembler | UnitAssembler | [x] | bad9511e3213 | B5 |  |
+| 395 | basic-assembler-module | UnitAssemblerModule | [x] | 591bfe770b0a | B5 |  |
+| 396 | unit-repair-tower | RepairTower | [x] | b82f74a13de6 | B5 |  |
+| 397 | payload-conveyor | PayloadConveyor | [x] | 1a86ec0c6075 | B5 |  |
+| 398 | payload-router | PayloadRouter | [x] | c425fa0e9679 | B5 |  |
+| 399 | reinforced-payload-conveyor | PayloadConveyor | [x] | 278b60e1a38f | B5 |  |
+| 400 | reinforced-payload-router | PayloadRouter | [x] | 6b7383e782fc | B5 |  |
+| 401 | payload-mass-driver | PayloadMassDriver | [x] | bf156ea9de58 | B5 |  |
+| 402 | large-payload-mass-driver | PayloadMassDriver | [x] | f6615cc041c4 | B5 |  |
+| 403 | small-deconstructor | PayloadDeconstructor | [x] | c970557944ad | B5 |  |
+| 404 | deconstructor | PayloadDeconstructor | [x] | dcb09cc17f5e | B5 |  |
+| 405 | constructor | Constructor | [x] | 3b37aeb7ad11 | B5 |  |
+| 406 | large-constructor | Constructor | [x] | ae169e23cdbc | B5 |  |
+| 407 | payload-loader | PayloadLoader | [x] | 4c075620d691 | B5 |  |
+| 408 | payload-unloader | PayloadUnloader | [x] | af2fb09cf527 | B5 |  |
+| 409 | power-source | PowerSource | [x] | c402273be9f3 | B6 |  |
+| 410 | power-void | PowerVoid | [x] | 2283a9d1f086 | B6 |  |
+| 411 | item-source | ItemSource | [x] | 345810e2e026 | B6 |  |
+| 412 | item-void | ItemVoid | [x] | 9cebb7f3d73a | B6 |  |
+| 413 | liquid-source | LiquidSource | [x] | 0f63c275b4b0 | B6 |  |
+| 414 | liquid-void | LiquidVoid | [x] | 10230a62853e | B6 |  |
+| 415 | payload-source | PayloadSource | [x] | 44fac3089ea7 | B6 |  |
+| 416 | payload-void | PayloadVoid | [x] | 7ad6ad4d6f7c | B6 |  |
+| 417 | heat-source | HeatProducer | [x] | af66a89f27d1 | B6 |  |
+| 418 | target-dummy | TargetDummy | [x] | 0aadb092be47 | B6 |  |
+| 419 | illuminator | LightBlock | [x] | 2d99fd787874 | B6 |  |
+| 420 | launch-pad | LaunchPad | [x] | 54dc1462fda6 | B6 |  |
+| 421 | advanced-launch-pad | LaunchPad | [x] | 622aed8fa074 | B6 |  |
+| 422 | landing-pad | LandingPad | [x] | f69fd2b67e61 | B6 |  |
+| 423 | interplanetary-accelerator | Accelerator | [x] | 80daec3c9be4 | B6 |  |
+| 424 | message | MessageBlock | [x] | 6e6360ccc640 | B6 |  |
+| 425 | switch | SwitchBlock | [x] | ea1da3e2bc7d | B6 |  |
+| 426 | micro-processor | LogicBlock | [x] | e740b9ef6cd2 | B6 |  |
+| 427 | logic-processor | LogicBlock | [x] | 1ce5b7b10600 | B6 |  |
+| 428 | hyper-processor | LogicBlock | [x] | 81245a80bacd | B6 |  |
+| 429 | memory-cell | MemoryBlock | [x] | 8fcbe0351941 | B6 |  |
+| 430 | memory-bank | MemoryBlock | [x] | 6aade31721e1 | B6 |  |
+| 431 | logic-display | LogicDisplay | [x] | bd5e7494ac8e | B6 |  |
+| 432 | large-logic-display | LogicDisplay | [x] | 9e73479fcf74 | B6 |  |
+| 433 | tile-logic-display | TileableLogicDisplay | [x] | e46a57b31352 | B6 |  |
+| 434 | canvas | CanvasBlock | [x] | bb168a456872 | B6 |  |
+| 435 | large-canvas | CanvasBlock | [x] | 04ee805f3958 | B6 |  |
+| 436 | reinforced-message | MessageBlock | [x] | 96b6f7515b9c | B6 |  |
+| 437 | world-processor | LogicBlock | [x] | d270acd6c0a9 | B6 |  |
+| 438 | world-cell | MemoryBlock | [x] | 922ffb60090d | B6 |  |
+| 439 | world-message | MessageBlock | [x] | f95ed67adb8f | B6 |  |
+| 440 | world-switch | SwitchBlock | [x] | 84776eecfc03 | B6 |  |
 
-- Unported: 185
+- Unported: 0
 - Parsed: 441

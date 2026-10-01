@@ -38,7 +38,13 @@ WAVES = {
     "turrets": "B5", "units": "B5", "units - erekir": "B5", "payloads": "B5",
     "sandbox": "B6", "legacy": "B6", "campaign": "B6", "logic": "B6",
 }
-PORTED_REGIONS = ("environment", "ore", "crafting", "defense")
+PORTED_REGIONS = (
+    "environment", "ore", "crafting", "defense",
+    "distribution", "liquid", "power",
+    "production", "storage",
+    "turrets", "units", "units - erekir", "payloads",
+    "sandbox", "legacy", "campaign", "logic",
+)
 
 
 def field_map(path):
@@ -153,6 +159,32 @@ def extract_class_defaults(cname, field):
 
 
 CLASS_DEFAULTS_CACHE = {}
+NUMERIC_CONSTANTS_CACHE = {}
+
+
+def class_numeric_constants(cname):
+    """Simple numeric field initializers along the chain (e.g. reactor heating)."""
+    cached = NUMERIC_CONSTANTS_CACHE.get(cname)
+    if cached is not None:
+        return cached
+    constants = {}
+    chain = []
+    cur = cname
+    while cur and cur not in chain:
+        chain.append(cur)
+        cur = class_super.get(cur)
+    for cls in reversed(chain):
+        text = class_body_text(cls)
+        for m in re.finditer(
+            r"(?:public|protected|private)\s+(?:static\s+)?(?:final\s+)?(?:float|int|double)\s+(\w+)\s*=\s*([-+]?\d+(?:\.\d+)?[fFdD]?)\s*;",
+            text,
+        ):
+            try:
+                constants[m.group(1)] = float(m.group(2).rstrip("fFdD"))
+            except ValueError:
+                continue
+    NUMERIC_CONSTANTS_CACHE[cname] = constants
+    return constants
 
 
 def class_defaults_for(cname):
@@ -171,6 +203,9 @@ def class_defaults_for(cname):
             continue
         if isinstance(value, tuple) and value and value[0] == "unknown":
             continue
+        if isinstance(value, tuple) and value:
+            if value[0] in ("stacklist", "flaglist"):
+                value = value[1]
         snake = CAMEL_TO_SNAKE.get(camel, camel)
         defaults[snake] = value
     CLASS_DEFAULTS_CACHE[cname] = defaults
@@ -955,6 +990,9 @@ def try_eval(text, env, block):
             return ("consume",)
     if text.startswith("//"):
         return None
+    if block is not None:
+        for name, value in class_numeric_constants(block.cls).items():
+            env.setdefault(name, value)
     try:
         return eval_text(text, env)
     except EvalError as error:
@@ -1457,6 +1495,9 @@ def main():
         print(f"WARN: {len(problems)} blocks with unparsed statements", file=sys.stderr)
         for b in problems[:40]:
             print(f"  {b.name}: {b.notes[:2]}", file=sys.stderr)
+    unknown_classes = sorted({b.cls for b in parsed if b.cls not in class_files})
+    if unknown_classes:
+        print(f"WARN: classes with no source file found: {unknown_classes}", file=sys.stderr)
 
     OUT.mkdir(parents=True, exist_ok=True)
     for region in PORTED_REGIONS:
@@ -1480,6 +1521,7 @@ use crate::content::{{Category, ContentError}};
 /// Loads the `{region}` region in upstream order.
 pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {{
 {body}
+    let _ = sink;
     Ok(())
 }}
 """

@@ -446,6 +446,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         category: Some(Category::Effect),
         requirements: vec![stack("lead", 30), stack("copper", 25)],
         group: Some(BlockGroup::Projectors),
+        flags: vec![BlockFlag::BlockRepair],
         has_items: Some(true),
         has_power: Some(true),
         solid: Some(true),
@@ -468,6 +469,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
             stack("copper", 50),
         ],
         group: Some(BlockGroup::Projectors),
+        flags: vec![BlockFlag::BlockRepair],
         has_items: Some(true),
         has_power: Some(true),
         solid: Some(true),
@@ -531,6 +533,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
             stack("silicon", 125),
         ],
         group: Some(BlockGroup::Projectors),
+        flags: vec![BlockFlag::Shield],
         has_items: Some(true),
         has_liquids: Some(true),
         has_power: Some(true),
@@ -556,6 +559,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
             stack("beryllium", 10),
         ],
         research_cost: Some(vec![stack("silicon", 70), stack("graphite", 70)]),
+        flags: vec![BlockFlag::HasFogRadius],
         build_visibility: Some(BuildVisibility::FogOnly),
         fog_radius: Some(34),
         consumes: vec![consume_power(0.6f32)],
@@ -572,6 +576,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         ],
         group: Some(BlockGroup::Turrets),
         priority: Some(TARGET_PRIORITY_TURRET),
+        flags: vec![BlockFlag::Turret],
         solid: Some(true),
         update: Some(true),
         consumes: vec![consume_power(3.0f32), consume_liquid("nitrogen", 0.05f32)],
@@ -588,6 +593,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
             stack("beryllium", 80),
         ],
         group: Some(BlockGroup::Projectors),
+        flags: vec![BlockFlag::BlockRepair],
         has_items: Some(true),
         has_power: Some(true),
         solid: Some(true),
@@ -632,5 +638,6 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         consumes: vec![consume_power(5.0f32)],
         ..spec("large-shield-projector", BlockKind::BaseShield)
     })?;
+    let _ = sink;
     Ok(())
 }

@@ -18,10 +18,23 @@
 //! * waves [`environment`], [`ore`], [`crafting`], [`defense`] (M3) and the
 //!   B3–B6 modules (M4) — generated from `Blocks.java` in upstream order.
 
+pub mod campaign;
 pub mod crafting;
 pub mod defense;
+pub mod distribution;
 pub mod environment;
+pub mod legacy;
+pub mod liquid;
+pub mod logic;
 pub mod ore;
+pub mod payloads;
+pub mod power;
+pub mod production;
+pub mod sandbox;
+pub mod storage;
+pub mod turrets;
+pub mod units;
+pub mod units_erekir;
 
 use indexmap::IndexMap;
 
@@ -144,6 +157,180 @@ pub enum BlockKind {
     ShockwaveTower = 45,
     /// `mindustry.world.blocks.defense.Thruster`.
     Thruster = 46,
+    /// `mindustry.world.blocks.*` (Conveyor).
+    Conveyor = 47,
+    /// `mindustry.world.blocks.*` (StackConveyor).
+    StackConveyor = 48,
+    /// `mindustry.world.blocks.*` (ArmoredConveyor).
+    ArmoredConveyor = 49,
+    /// `mindustry.world.blocks.*` (Junction).
+    Junction = 50,
+    /// `mindustry.world.blocks.*` (BufferedItemBridge).
+    BufferedItemBridge = 51,
+    /// `mindustry.world.blocks.*` (ItemBridge).
+    ItemBridge = 52,
+    /// `mindustry.world.blocks.*` (Sorter).
+    Sorter = 53,
+    /// `mindustry.world.blocks.*` (Router).
+    Router = 54,
+    /// `mindustry.world.blocks.*` (OverflowGate).
+    OverflowGate = 55,
+    /// `mindustry.world.blocks.*` (Unloader).
+    Unloader = 56,
+    /// `mindustry.world.blocks.*` (MassDriver).
+    MassDriver = 57,
+    /// `mindustry.world.blocks.*` (Duct).
+    Duct = 58,
+    /// `mindustry.world.blocks.*` (DuctRouter).
+    DuctRouter = 59,
+    /// `mindustry.world.blocks.*` (OverflowDuct).
+    OverflowDuct = 60,
+    /// `mindustry.world.blocks.*` (DuctBridge).
+    DuctBridge = 61,
+    /// `mindustry.world.blocks.*` (DirectionalUnloader).
+    DirectionalUnloader = 62,
+    /// `mindustry.world.blocks.*` (StackRouter).
+    StackRouter = 63,
+    /// `mindustry.world.blocks.*` (UnitCargoLoader).
+    UnitCargoLoader = 64,
+    /// `mindustry.world.blocks.*` (UnitCargoUnloadPoint).
+    UnitCargoUnloadPoint = 65,
+    /// `mindustry.world.blocks.*` (Pump).
+    Pump = 66,
+    /// `mindustry.world.blocks.*` (Conduit).
+    Conduit = 67,
+    /// `mindustry.world.blocks.*` (ArmoredConduit).
+    ArmoredConduit = 68,
+    /// `mindustry.world.blocks.*` (LiquidRouter).
+    LiquidRouter = 69,
+    /// `mindustry.world.blocks.*` (LiquidJunction).
+    LiquidJunction = 70,
+    /// `mindustry.world.blocks.*` (LiquidBridge).
+    LiquidBridge = 71,
+    /// `mindustry.world.blocks.*` (DirectionLiquidBridge).
+    DirectionLiquidBridge = 72,
+    /// `mindustry.world.blocks.*` (PowerNode).
+    PowerNode = 73,
+    /// `mindustry.world.blocks.*` (PowerDiode).
+    PowerDiode = 74,
+    /// `mindustry.world.blocks.*` (Battery).
+    Battery = 75,
+    /// `mindustry.world.blocks.*` (ConsumeGenerator).
+    ConsumeGenerator = 76,
+    /// `mindustry.world.blocks.*` (ThermalGenerator).
+    ThermalGenerator = 77,
+    /// `mindustry.world.blocks.*` (SolarGenerator).
+    SolarGenerator = 78,
+    /// `mindustry.world.blocks.*` (NuclearReactor).
+    NuclearReactor = 79,
+    /// `mindustry.world.blocks.*` (ImpactReactor).
+    ImpactReactor = 80,
+    /// `mindustry.world.blocks.*` (BeamNode).
+    BeamNode = 81,
+    /// `mindustry.world.blocks.*` (LongPowerNode).
+    LongPowerNode = 82,
+    /// `mindustry.world.blocks.*` (VariableReactor).
+    VariableReactor = 83,
+    /// `mindustry.world.blocks.*` (HeaterGenerator).
+    HeaterGenerator = 84,
+    /// `mindustry.world.blocks.*` (Drill).
+    Drill = 85,
+    /// `mindustry.world.blocks.*` (SolidPump).
+    SolidPump = 86,
+    /// `mindustry.world.blocks.*` (Fracker).
+    Fracker = 87,
+    /// `mindustry.world.blocks.*` (WallCrafter).
+    WallCrafter = 88,
+    /// `mindustry.world.blocks.*` (BeamDrill).
+    BeamDrill = 89,
+    /// `mindustry.world.blocks.*` (BurstDrill).
+    BurstDrill = 90,
+    /// `mindustry.world.blocks.*` (CoreBlock).
+    CoreBlock = 91,
+    /// `mindustry.world.blocks.*` (StorageBlock).
+    StorageBlock = 92,
+    /// `mindustry.world.blocks.*` (ItemTurret).
+    ItemTurret = 93,
+    /// `mindustry.world.blocks.*` (LiquidTurret).
+    LiquidTurret = 94,
+    /// `mindustry.world.blocks.*` (PowerTurret).
+    PowerTurret = 95,
+    /// `mindustry.world.blocks.*` (TractorBeamTurret).
+    TractorBeamTurret = 96,
+    /// `mindustry.world.blocks.*` (PointDefenseTurret).
+    PointDefenseTurret = 97,
+    /// `mindustry.world.blocks.*` (LaserTurret).
+    LaserTurret = 98,
+    /// `mindustry.world.blocks.*` (ContinuousLiquidTurret).
+    ContinuousLiquidTurret = 99,
+    /// `mindustry.world.blocks.*` (ContinuousTurret).
+    ContinuousTurret = 100,
+    /// `mindustry.world.blocks.*` (UnitFactory).
+    UnitFactory = 101,
+    /// `mindustry.world.blocks.*` (Reconstructor).
+    Reconstructor = 102,
+    /// `mindustry.world.blocks.*` (RepairTurret).
+    RepairTurret = 103,
+    /// `mindustry.world.blocks.*` (UnitAssembler).
+    UnitAssembler = 104,
+    /// `mindustry.world.blocks.*` (UnitAssemblerModule).
+    UnitAssemblerModule = 105,
+    /// `mindustry.world.blocks.*` (RepairTower).
+    RepairTower = 106,
+    /// `mindustry.world.blocks.*` (PayloadConveyor).
+    PayloadConveyor = 107,
+    /// `mindustry.world.blocks.*` (PayloadRouter).
+    PayloadRouter = 108,
+    /// `mindustry.world.blocks.*` (PayloadMassDriver).
+    PayloadMassDriver = 109,
+    /// `mindustry.world.blocks.*` (PayloadDeconstructor).
+    PayloadDeconstructor = 110,
+    /// `mindustry.world.blocks.*` (Constructor).
+    Constructor = 111,
+    /// `mindustry.world.blocks.*` (PayloadLoader).
+    PayloadLoader = 112,
+    /// `mindustry.world.blocks.*` (PayloadUnloader).
+    PayloadUnloader = 113,
+    /// `mindustry.world.blocks.*` (PowerSource).
+    PowerSource = 114,
+    /// `mindustry.world.blocks.*` (PowerVoid).
+    PowerVoid = 115,
+    /// `mindustry.world.blocks.*` (ItemSource).
+    ItemSource = 116,
+    /// `mindustry.world.blocks.*` (ItemVoid).
+    ItemVoid = 117,
+    /// `mindustry.world.blocks.*` (LiquidSource).
+    LiquidSource = 118,
+    /// `mindustry.world.blocks.*` (LiquidVoid).
+    LiquidVoid = 119,
+    /// `mindustry.world.blocks.*` (PayloadSource).
+    PayloadSource = 120,
+    /// `mindustry.world.blocks.*` (PayloadVoid).
+    PayloadVoid = 121,
+    /// `mindustry.world.blocks.*` (TargetDummy).
+    TargetDummy = 122,
+    /// `mindustry.world.blocks.*` (LightBlock).
+    LightBlock = 123,
+    /// `mindustry.world.blocks.*` (LaunchPad).
+    LaunchPad = 124,
+    /// `mindustry.world.blocks.*` (LandingPad).
+    LandingPad = 125,
+    /// `mindustry.world.blocks.*` (Accelerator).
+    Accelerator = 126,
+    /// `mindustry.world.blocks.*` (MessageBlock).
+    MessageBlock = 127,
+    /// `mindustry.world.blocks.*` (SwitchBlock).
+    SwitchBlock = 128,
+    /// `mindustry.world.blocks.*` (LogicBlock).
+    LogicBlock = 129,
+    /// `mindustry.world.blocks.*` (MemoryBlock).
+    MemoryBlock = 130,
+    /// `mindustry.world.blocks.*` (LogicDisplay).
+    LogicDisplay = 131,
+    /// `mindustry.world.blocks.*` (TileableLogicDisplay).
+    TileableLogicDisplay = 132,
+    /// `mindustry.world.blocks.*` (CanvasBlock).
+    CanvasBlock = 133,
 }
 
 impl BlockKind {
@@ -196,6 +383,93 @@ impl BlockKind {
         BlockKind::RegenProjector,
         BlockKind::ShockwaveTower,
         BlockKind::Thruster,
+        BlockKind::Conveyor,
+        BlockKind::StackConveyor,
+        BlockKind::ArmoredConveyor,
+        BlockKind::Junction,
+        BlockKind::BufferedItemBridge,
+        BlockKind::ItemBridge,
+        BlockKind::Sorter,
+        BlockKind::Router,
+        BlockKind::OverflowGate,
+        BlockKind::Unloader,
+        BlockKind::MassDriver,
+        BlockKind::Duct,
+        BlockKind::DuctRouter,
+        BlockKind::OverflowDuct,
+        BlockKind::DuctBridge,
+        BlockKind::DirectionalUnloader,
+        BlockKind::StackRouter,
+        BlockKind::UnitCargoLoader,
+        BlockKind::UnitCargoUnloadPoint,
+        BlockKind::Pump,
+        BlockKind::Conduit,
+        BlockKind::ArmoredConduit,
+        BlockKind::LiquidRouter,
+        BlockKind::LiquidJunction,
+        BlockKind::LiquidBridge,
+        BlockKind::DirectionLiquidBridge,
+        BlockKind::PowerNode,
+        BlockKind::PowerDiode,
+        BlockKind::Battery,
+        BlockKind::ConsumeGenerator,
+        BlockKind::ThermalGenerator,
+        BlockKind::SolarGenerator,
+        BlockKind::NuclearReactor,
+        BlockKind::ImpactReactor,
+        BlockKind::BeamNode,
+        BlockKind::LongPowerNode,
+        BlockKind::VariableReactor,
+        BlockKind::HeaterGenerator,
+        BlockKind::Drill,
+        BlockKind::SolidPump,
+        BlockKind::Fracker,
+        BlockKind::WallCrafter,
+        BlockKind::BeamDrill,
+        BlockKind::BurstDrill,
+        BlockKind::CoreBlock,
+        BlockKind::StorageBlock,
+        BlockKind::ItemTurret,
+        BlockKind::LiquidTurret,
+        BlockKind::PowerTurret,
+        BlockKind::TractorBeamTurret,
+        BlockKind::PointDefenseTurret,
+        BlockKind::LaserTurret,
+        BlockKind::ContinuousLiquidTurret,
+        BlockKind::ContinuousTurret,
+        BlockKind::UnitFactory,
+        BlockKind::Reconstructor,
+        BlockKind::RepairTurret,
+        BlockKind::UnitAssembler,
+        BlockKind::UnitAssemblerModule,
+        BlockKind::RepairTower,
+        BlockKind::PayloadConveyor,
+        BlockKind::PayloadRouter,
+        BlockKind::PayloadMassDriver,
+        BlockKind::PayloadDeconstructor,
+        BlockKind::Constructor,
+        BlockKind::PayloadLoader,
+        BlockKind::PayloadUnloader,
+        BlockKind::PowerSource,
+        BlockKind::PowerVoid,
+        BlockKind::ItemSource,
+        BlockKind::ItemVoid,
+        BlockKind::LiquidSource,
+        BlockKind::LiquidVoid,
+        BlockKind::PayloadSource,
+        BlockKind::PayloadVoid,
+        BlockKind::TargetDummy,
+        BlockKind::LightBlock,
+        BlockKind::LaunchPad,
+        BlockKind::LandingPad,
+        BlockKind::Accelerator,
+        BlockKind::MessageBlock,
+        BlockKind::SwitchBlock,
+        BlockKind::LogicBlock,
+        BlockKind::MemoryBlock,
+        BlockKind::LogicDisplay,
+        BlockKind::TileableLogicDisplay,
+        BlockKind::CanvasBlock,
     ];
 
     /// Stable ordinal (content/audit ABI).
@@ -253,6 +527,93 @@ impl BlockKind {
             BlockKind::RegenProjector => "RegenProjector",
             BlockKind::ShockwaveTower => "ShockwaveTower",
             BlockKind::Thruster => "Thruster",
+            BlockKind::Conveyor => "Conveyor",
+            BlockKind::StackConveyor => "StackConveyor",
+            BlockKind::ArmoredConveyor => "ArmoredConveyor",
+            BlockKind::Junction => "Junction",
+            BlockKind::BufferedItemBridge => "BufferedItemBridge",
+            BlockKind::ItemBridge => "ItemBridge",
+            BlockKind::Sorter => "Sorter",
+            BlockKind::Router => "Router",
+            BlockKind::OverflowGate => "OverflowGate",
+            BlockKind::Unloader => "Unloader",
+            BlockKind::MassDriver => "MassDriver",
+            BlockKind::Duct => "Duct",
+            BlockKind::DuctRouter => "DuctRouter",
+            BlockKind::OverflowDuct => "OverflowDuct",
+            BlockKind::DuctBridge => "DuctBridge",
+            BlockKind::DirectionalUnloader => "DirectionalUnloader",
+            BlockKind::StackRouter => "StackRouter",
+            BlockKind::UnitCargoLoader => "UnitCargoLoader",
+            BlockKind::UnitCargoUnloadPoint => "UnitCargoUnloadPoint",
+            BlockKind::Pump => "Pump",
+            BlockKind::Conduit => "Conduit",
+            BlockKind::ArmoredConduit => "ArmoredConduit",
+            BlockKind::LiquidRouter => "LiquidRouter",
+            BlockKind::LiquidJunction => "LiquidJunction",
+            BlockKind::LiquidBridge => "LiquidBridge",
+            BlockKind::DirectionLiquidBridge => "DirectionLiquidBridge",
+            BlockKind::PowerNode => "PowerNode",
+            BlockKind::PowerDiode => "PowerDiode",
+            BlockKind::Battery => "Battery",
+            BlockKind::ConsumeGenerator => "ConsumeGenerator",
+            BlockKind::ThermalGenerator => "ThermalGenerator",
+            BlockKind::SolarGenerator => "SolarGenerator",
+            BlockKind::NuclearReactor => "NuclearReactor",
+            BlockKind::ImpactReactor => "ImpactReactor",
+            BlockKind::BeamNode => "BeamNode",
+            BlockKind::LongPowerNode => "LongPowerNode",
+            BlockKind::VariableReactor => "VariableReactor",
+            BlockKind::HeaterGenerator => "HeaterGenerator",
+            BlockKind::Drill => "Drill",
+            BlockKind::SolidPump => "SolidPump",
+            BlockKind::Fracker => "Fracker",
+            BlockKind::WallCrafter => "WallCrafter",
+            BlockKind::BeamDrill => "BeamDrill",
+            BlockKind::BurstDrill => "BurstDrill",
+            BlockKind::CoreBlock => "CoreBlock",
+            BlockKind::StorageBlock => "StorageBlock",
+            BlockKind::ItemTurret => "ItemTurret",
+            BlockKind::LiquidTurret => "LiquidTurret",
+            BlockKind::PowerTurret => "PowerTurret",
+            BlockKind::TractorBeamTurret => "TractorBeamTurret",
+            BlockKind::PointDefenseTurret => "PointDefenseTurret",
+            BlockKind::LaserTurret => "LaserTurret",
+            BlockKind::ContinuousLiquidTurret => "ContinuousLiquidTurret",
+            BlockKind::ContinuousTurret => "ContinuousTurret",
+            BlockKind::UnitFactory => "UnitFactory",
+            BlockKind::Reconstructor => "Reconstructor",
+            BlockKind::RepairTurret => "RepairTurret",
+            BlockKind::UnitAssembler => "UnitAssembler",
+            BlockKind::UnitAssemblerModule => "UnitAssemblerModule",
+            BlockKind::RepairTower => "RepairTower",
+            BlockKind::PayloadConveyor => "PayloadConveyor",
+            BlockKind::PayloadRouter => "PayloadRouter",
+            BlockKind::PayloadMassDriver => "PayloadMassDriver",
+            BlockKind::PayloadDeconstructor => "PayloadDeconstructor",
+            BlockKind::Constructor => "Constructor",
+            BlockKind::PayloadLoader => "PayloadLoader",
+            BlockKind::PayloadUnloader => "PayloadUnloader",
+            BlockKind::PowerSource => "PowerSource",
+            BlockKind::PowerVoid => "PowerVoid",
+            BlockKind::ItemSource => "ItemSource",
+            BlockKind::ItemVoid => "ItemVoid",
+            BlockKind::LiquidSource => "LiquidSource",
+            BlockKind::LiquidVoid => "LiquidVoid",
+            BlockKind::PayloadSource => "PayloadSource",
+            BlockKind::PayloadVoid => "PayloadVoid",
+            BlockKind::TargetDummy => "TargetDummy",
+            BlockKind::LightBlock => "LightBlock",
+            BlockKind::LaunchPad => "LaunchPad",
+            BlockKind::LandingPad => "LandingPad",
+            BlockKind::Accelerator => "Accelerator",
+            BlockKind::MessageBlock => "MessageBlock",
+            BlockKind::SwitchBlock => "SwitchBlock",
+            BlockKind::LogicBlock => "LogicBlock",
+            BlockKind::MemoryBlock => "MemoryBlock",
+            BlockKind::LogicDisplay => "LogicDisplay",
+            BlockKind::TileableLogicDisplay => "TileableLogicDisplay",
+            BlockKind::CanvasBlock => "CanvasBlock",
         }
     }
 }
@@ -1094,6 +1455,8 @@ impl BlockSpec {
                 spec.solid = Some(true);
                 spec.update = Some(true);
             }
+            // B3-B6 kinds carry their class defaults in the generated waves.
+            _ => {}
         }
         spec
     }
@@ -1984,13 +2347,26 @@ impl Blocks {
 
 /// Runs every ported block wave into `sink` in upstream order.
 ///
-/// M3 loads the `environment`, `ore`, `crafting` and `defense` regions; M4
-/// appends the remaining regions at the end of this function.
+/// M3 loads `environment`/`ore`/`crafting`/`defense`; M4 appends the remaining
+/// regions (`Blocks.java` region order).
 pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
     environment::load(sink)?;
     ore::load(sink)?;
     crafting::load(sink)?;
     defense::load(sink)?;
+    distribution::load(sink)?;
+    liquid::load(sink)?;
+    power::load(sink)?;
+    production::load(sink)?;
+    storage::load(sink)?;
+    turrets::load(sink)?;
+    units::load(sink)?;
+    units_erekir::load(sink)?;
+    payloads::load(sink)?;
+    sandbox::load(sink)?;
+    legacy::load(sink)?;
+    campaign::load(sink)?;
+    logic::load(sink)?;
     Ok(())
 }
 
@@ -2097,7 +2473,7 @@ mod tests {
         let blocks = Blocks::new();
         assert_eq!(blocks.id("stone-wall").unwrap(), BlockId::STONE_WALL);
         assert_eq!(blocks.name(BlockId::STONE_WALL).unwrap(), "stone-wall");
-        assert_eq!(blocks.len(), 256, "M3 block count (B1-B2)");
+        assert_eq!(blocks.len(), 441, "M4 block count (B1-B6)");
     }
 
     /// Plan 02 §7a: `blocks::health_and_buildtime_derivation` — `Block.init()`
@@ -2171,7 +2547,7 @@ mod tests {
     #[test]
     fn all_metadata_valid() {
         let registry = test_registry();
-        assert_eq!(registry.blocks().len(), 256);
+        assert_eq!(registry.blocks().len(), 441);
         for block in registry.blocks() {
             assert!(block.health > 0, "{} has no health", block.name);
             assert!(
@@ -2196,6 +2572,91 @@ mod tests {
             assert!(!block.region.is_empty(), "{} region", block.name);
             assert!(!block.name.is_empty());
         }
+    }
+
+    /// Plan 02 §7a: `blocks::ergonomic_flags_match_golden` — behavior-facing
+    /// flags/groups/priorities for representative B1–B6 blocks match the
+    /// upstream constructors (source-derived golden; JVM golden pending NUD-10).
+    #[test]
+    fn ergonomic_flags_match_golden() {
+        let registry = test_registry();
+        let get = |name: &str| registry.block_by_name(name).expect("block present");
+
+        let conveyor = get("conveyor");
+        assert_eq!(conveyor.kind, BlockKind::Conveyor);
+        assert_eq!(conveyor.group, BlockGroup::Transportation);
+        assert!(conveyor.update && conveyor.has_items && !conveyor.solid);
+        assert!(conveyor.accepts_items);
+        assert_eq!(conveyor.priority, TARGET_PRIORITY_TRANSPORT);
+
+        let router = get("router");
+        assert_eq!(router.group, BlockGroup::Transportation);
+        assert!(router.update && router.has_items && !router.solid);
+        assert_eq!(router.item_capacity, 1);
+
+        let sorter = get("sorter");
+        assert!(!sorter.update && sorter.destructible && sorter.configurable && sorter.save_config);
+        assert_eq!(sorter.group, BlockGroup::Transportation);
+
+        let drill = get("mechanical-drill");
+        assert!(drill.flags.contains(&BlockFlag::Drill));
+        assert!(drill.update && drill.solid && drill.has_items && drill.has_liquids);
+        assert_eq!(drill.group, BlockGroup::Drills);
+        assert_eq!(drill.category, Category::Production);
+
+        let generator = get("combustion-generator");
+        assert!(generator.outputs_power && !generator.consumes_power && generator.has_power);
+        assert!(generator.update && generator.solid);
+        assert_eq!(generator.group, BlockGroup::Power);
+
+        let battery = get("battery");
+        assert!(battery.flags.contains(&BlockFlag::Battery));
+        assert!(battery.outputs_power && battery.consumes_power && battery.has_power);
+        assert!(battery.destructible && !battery.update);
+
+        let core = get("core-shard");
+        assert!(core.flags.contains(&BlockFlag::Core));
+        assert_eq!(core.priority, TARGET_PRIORITY_CORE);
+        assert_eq!(core.unit_cap_modifier, 8);
+        assert!(core.solid && core.update && core.has_items);
+
+        let duo = get("duo");
+        assert!(duo.flags.contains(&BlockFlag::Turret));
+        assert_eq!(duo.group, BlockGroup::Turrets);
+        assert_eq!(duo.priority, TARGET_PRIORITY_TURRET);
+        assert!(duo.has_items && duo.solid && duo.update);
+
+        let factory = get("ground-factory");
+        assert_eq!(factory.group, BlockGroup::Units);
+        assert!(factory.update && factory.solid && factory.has_items && factory.has_power);
+        assert!(factory.configurable);
+
+        let payload = get("payload-conveyor");
+        assert_eq!(payload.group, BlockGroup::Payloads);
+        assert_eq!(payload.size, 3);
+        assert!(payload.update);
+        assert_eq!(payload.priority, TARGET_PRIORITY_TRANSPORT);
+
+        let power_source = get("power-source");
+        assert!(power_source.outputs_power && !power_source.consumes_power);
+        assert_eq!(power_source.build_visibility, BuildVisibility::SandboxOnly);
+        assert!(power_source.destructible && power_source.configurable);
+
+        let processor = get("world-processor");
+        assert_eq!(processor.group, BlockGroup::Logic);
+        assert_eq!(
+            processor.build_visibility,
+            BuildVisibility::WorldProcessorOnly
+        );
+        assert!(processor.update && processor.solid && processor.configurable);
+
+        let launch = get("launch-pad");
+        assert!(launch.flags.contains(&BlockFlag::LaunchPad));
+        assert!(launch.has_items && launch.solid && launch.update && launch.configurable);
+
+        let message = get("message");
+        assert_eq!(message.group, BlockGroup::Logic);
+        assert!(message.solid && message.destructible && message.configurable);
     }
 
     /// Generated item references resolve and `get_dependencies` covers inputs.

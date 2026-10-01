@@ -286,21 +286,45 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
 
     sink.push(spec("arkyic-stone", BlockKind::Floor))?;
 
-    sink.push(spec("rhyolite-vent", BlockKind::SteamVent))?;
+    sink.push(BlockSpec {
+        flags: vec![BlockFlag::SteamVent],
+        ..spec("rhyolite-vent", BlockKind::SteamVent)
+    })?;
 
-    sink.push(spec("carbon-vent", BlockKind::SteamVent))?;
+    sink.push(BlockSpec {
+        flags: vec![BlockFlag::SteamVent],
+        ..spec("carbon-vent", BlockKind::SteamVent)
+    })?;
 
-    sink.push(spec("arkyic-vent", BlockKind::SteamVent))?;
+    sink.push(BlockSpec {
+        flags: vec![BlockFlag::SteamVent],
+        ..spec("arkyic-vent", BlockKind::SteamVent)
+    })?;
 
-    sink.push(spec("yellow-stone-vent", BlockKind::SteamVent))?;
+    sink.push(BlockSpec {
+        flags: vec![BlockFlag::SteamVent],
+        ..spec("yellow-stone-vent", BlockKind::SteamVent)
+    })?;
 
-    sink.push(spec("red-stone-vent", BlockKind::SteamVent))?;
+    sink.push(BlockSpec {
+        flags: vec![BlockFlag::SteamVent],
+        ..spec("red-stone-vent", BlockKind::SteamVent)
+    })?;
 
-    sink.push(spec("crystalline-vent", BlockKind::SteamVent))?;
+    sink.push(BlockSpec {
+        flags: vec![BlockFlag::SteamVent],
+        ..spec("crystalline-vent", BlockKind::SteamVent)
+    })?;
 
-    sink.push(spec("stone-vent", BlockKind::SteamVent))?;
+    sink.push(BlockSpec {
+        flags: vec![BlockFlag::SteamVent],
+        ..spec("stone-vent", BlockKind::SteamVent)
+    })?;
 
-    sink.push(spec("basalt-vent", BlockKind::SteamVent))?;
+    sink.push(BlockSpec {
+        flags: vec![BlockFlag::SteamVent],
+        ..spec("basalt-vent", BlockKind::SteamVent)
+    })?;
 
     sink.push(spec("redmat", BlockKind::Floor))?;
 
@@ -660,5 +684,6 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
     sink.push(spec("pebbles", BlockKind::OverlayFloor))?;
 
     sink.push(spec("tendrils", BlockKind::OverlayFloor))?;
+    let _ = sink;
     Ok(())
 }
