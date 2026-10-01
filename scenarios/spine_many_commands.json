@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "name": "spine_many_commands",
+  "seed": 3,
+  "world": { "generator": "flat", "width": 32, "height": 32, "floor": "stone", "wall": "air" },
+  "rules": { "waves": false, "infinite_resources": true },
+  "commands": [],
+  "command_generator": { "type": "seeded_ops", "count": 10000, "steps": 10000, "mode": "mixed" },
+  "steps": 10000,
+  "expect": {
+    "checksum": "faec40ccbe6ff9d8",
+    "tiles": []
+  }
+}

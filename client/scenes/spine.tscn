@@ -1,0 +1,35 @@
+; SPDX-License-Identifier: GPL-3.0-only
+;
+; The M4 spine scene (plan 00 §3.5, D4 rig). All nodes are declared here
+; (tscn-first, editor-navigable); nothing is instantiated from code.
+;
+; Spine (Node)
+; ├── SimHost (MindSimHost)      Rust: sim owner, fixed-step pump, input/API
+; ├── World (Node2D)
+; │   ├── TileGrid (MindTileGrid)
+; │   └── Camera2D (MindCamera2D)
+; └── Ui (CanvasLayer)
+;     └── StateInspector (state_inspector.tscn instance)
+
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/ui/state_inspector.tscn" id="1_inspector"]
+
+[node name="Spine" type="Node"]
+
+[node name="SimHost" type="MindSimHost" parent="."]
+
+[node name="World" type="Node2D" parent="."]
+
+[node name="TileGrid" type="MindTileGrid" parent="World"]
+
+[node name="Camera2D" type="MindCamera2D" parent="World"]
+position = Vector2(128, 128)
+zoom = Vector2(2, 2)
+
+[node name="Ui" type="CanvasLayer" parent="."]
+
+[node name="StateInspector" parent="Ui" instance=ExtResource("1_inspector")]
+
+[connection signal="world_changed" from="SimHost" to="World/TileGrid" method="redraw_requested"]
+[connection signal="state_changed" from="SimHost" to="Ui/StateInspector" method="_on_state_changed"]

@@ -1,0 +1,25 @@
+# Build outputs and caches
+client/.godot/
+client/bin/
+client/rust/target/
+server/spacetimedb/target/
+
+# Generated scenario mirror (canonical files live in scenarios/)
+client/scenarios/
+
+# Godot Android export output (merged from the legacy client/.gitignore)
+client/android/
+
+# Logs and local state
+*.log
+last_log.txt
+
+# Editor workspace state
+.obsidian/
+
+# OS shell metadata (junk inside vendored addon trees)
+desktop.ini
+.DS_Store
+
+# SpacetimeDB token/identity files
+client/**/identity/

@@ -1,0 +1,545 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
+//! `MindSimHost` — owns the `mind-core::Sim`, pumps it at a fixed 60 Hz and
+//! exposes the MCP-visible test API (`00_FOUNDATION_IMPLEMENTATION_PLAN.md`
+//! §3.5/§7c). Contains no game rules: every mutation goes through `mind_core`.
+//!
+//! Ported from `core/src/mindustry/ClientLauncher.java` (boot order) and
+//! `core/src/mindustry/core/Logic.java` (fixed step pump); the fixed-step
+//! accumulator itself lives in `mind_core::sim::FixedStepRunner` (D8).
+
+use godot::classes::{INode, InputEvent, InputEventMouseButton, Os, ProjectSettings};
+use godot::global::MouseButton;
+use godot::obj::{Base, Singleton};
+use godot::prelude::*;
+
+use mind_core::command::Command;
+use mind_core::content::BlockId;
+use mind_core::scenario::{Scenario, ScenarioPlayer};
+use mind_core::sim::{FixedStepRunner, Sim};
+use mind_stdb::{ConnectionConfig, MindDb};
+
+use crate::camera::MindCamera2D;
+use crate::settings;
+
+/// Maximum ticks accepted by one `step()` call (defensive; UI/MCP only).
+const MAX_STEP_TICKS: i64 = 1_000_000;
+
+/// Frames to wait before reading the viewport (the texture is one frame late).
+const CAPTURE_WARMUP_FRAMES: u32 = 3;
+
+/// One scripted `-- --capture <path>` request.
+struct CaptureRequest {
+    path: String,
+    frames_waited: u32,
+}
+
+/// Sim owner, fixed-step pump and input/API surface of the spine.
+#[derive(GodotClass)]
+#[class(base=Node)]
+pub struct MindSimHost {
+    base: Base<Node>,
+    sim: Sim,
+    player: Option<ScenarioPlayer>,
+    runner: FixedStepRunner,
+    capture: Option<CaptureRequest>,
+    /// Present only with `-- --db`: P0 constructs the facade and pumps it; plan 01
+    /// implements the live connector (OD-R4 keeps it on the main thread).
+    db: Option<MindDb>,
+    /// Set whenever the world changed since the last `world_changed` emission.
+    world_dirty: bool,
+}
+
+#[godot_api]
+impl INode for MindSimHost {
+    fn init(base: Base<Node>) -> Self {
+        Self {
+            base,
+            // Default spine world: 32x32 flat, seed 1, `stone-wall` selected
+            // (matches `scenarios/spine_place_break.json` aside from commands).
+            sim: Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR),
+            player: None,
+            runner: FixedStepRunner::new(),
+            capture: None,
+            db: None,
+            world_dirty: false,
+        }
+    }
+
+    fn ready(&mut self) {
+        if let Some(saved) = settings::read()
+            && let Some(name) = saved.selected_block
+            && let Ok(id) = self.sim.content().id(&name)
+        {
+            let _ = self.sim.set_selected_block(id);
+        }
+
+        self.capture = parse_capture_args();
+        self.db = parse_db_args();
+        if let Some(db) = &mut self.db {
+            // P0: `connect` returns NotImplemented and stays Offline; log, never gate boot.
+            if let Err(err) = db.connect() {
+                log::info!(
+                    "mind-stdb facade created for {} (state {}): {err}",
+                    db.config().db_name,
+                    db.state().name()
+                );
+            }
+        }
+        self.world_dirty = true;
+        self.emit_state();
+        self.emit_world_changed();
+
+        log::info!(
+            "MindSimHost ready ({}x{} seed {} selected `{}`, mind-core {})",
+            self.sim.grid.width,
+            self.sim.grid.height,
+            self.sim.seed(),
+            self.sim.block_name_of(self.sim.selected_block()),
+            mind_core::MIND_VERSION
+        );
+    }
+
+    fn process(&mut self, delta: f64) {
+        // The net pump runs exactly once per Godot frame, independent of sim pause
+        // (`mind-stdb` `frame_tick`, plan 00 §3.7 / OD-R4).
+        if let Some(db) = &mut self.db {
+            let _ = db.frame_tick();
+        }
+        if self.capture.is_some() {
+            self.process_capture();
+            return;
+        }
+        if self.sim.is_paused() {
+            return;
+        }
+        let steps = self.runner.advance(delta);
+        if steps == 0 {
+            return;
+        }
+        self.advance_steps(steps);
+        self.emit_state();
+        self.emit_world_changed();
+    }
+
+    fn input(&mut self, event: Gd<InputEvent>) {
+        let Ok(mouse) = event.try_cast::<InputEventMouseButton>() else {
+            return;
+        };
+        if !mouse.is_pressed() {
+            return;
+        }
+        let button = mouse.get_button_index();
+        if button != MouseButton::LEFT && button != MouseButton::RIGHT {
+            return;
+        }
+        let position = mouse.get_position();
+
+        let Some(camera) = self
+            .base()
+            .try_get_node_as::<MindCamera2D>("../World/Camera2D")
+        else {
+            log::warn!("MindSimHost input ignored: no MindCamera2D at ../World/Camera2D");
+            return;
+        };
+        let tile = camera
+            .bind()
+            .screen_to_tile(position.x as f64, position.y as f64);
+        let (Ok(x), Ok(y)) = (i16::try_from(tile.x), i16::try_from(tile.y)) else {
+            return;
+        };
+
+        let applied = if button == MouseButton::LEFT {
+            let block = self.sim.selected_block();
+            self.apply_command(Command::Place { x, y, block })
+        } else {
+            self.apply_command(Command::Break { x, y })
+        };
+        if applied {
+            log::debug!("mouse tile ({x}, {y}) applied ({button:?})");
+            self.emit_state();
+            self.emit_world_changed();
+        }
+    }
+
+    fn exit_tree(&mut self) {
+        if let Some(db) = &mut self.db {
+            db.disconnect();
+        }
+        // Minimal P0 client settings (§6.5); plan 04 replaces this with Settings.
+        let zoom = self
+            .base()
+            .try_get_node_as::<MindCamera2D>("../World/Camera2D")
+            .map(|camera| camera.bind().zoom_value())
+            .unwrap_or(1.0);
+        let selected = self.sim.block_name_of(self.sim.selected_block());
+        if !settings::write(&selected, zoom) {
+            log::warn!("failed to write user://settings.json");
+        }
+    }
+}
+
+#[godot_api]
+impl MindSimHost {
+    /// Emitted after every tick/API mutation: `(tick, checksum)`.
+    #[signal]
+    fn state_changed(tick: i64, checksum: GString);
+
+    /// Emitted when place/break/load changed the tile grid (view redraw hint).
+    #[signal]
+    fn world_changed();
+
+    /// Places a block at `(x, y)` immediately (API path; MCP §7c step 5).
+    #[func]
+    pub fn place_block(&mut self, x: i32, y: i32, block: GString) -> bool {
+        let name = block.to_string();
+        let id = match self.sim.content().id(&name) {
+            Ok(id) => id,
+            Err(_) => {
+                log::warn!("place_block: unknown block `{name}`");
+                return false;
+            }
+        };
+        let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
+            log::warn!("place_block: ({x}, {y}) does not fit in i16");
+            return false;
+        };
+        let applied = self.apply_command(Command::Place { x, y, block: id });
+        if applied {
+            self.emit_state();
+            self.emit_world_changed();
+        }
+        applied
+    }
+
+    /// Breaks the block at `(x, y)` immediately (API path; MCP §7c step 5).
+    #[func]
+    pub fn break_block(&mut self, x: i32, y: i32) -> bool {
+        let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
+            log::warn!("break_block: ({x}, {y}) does not fit in i16");
+            return false;
+        };
+        let applied = self.apply_command(Command::Break { x, y });
+        if applied {
+            self.emit_state();
+            self.emit_world_changed();
+        }
+        applied
+    }
+
+    /// Canonical sparse state dump as pretty JSON (same schema as `mind-headless`).
+    #[func]
+    pub fn get_state_json(&self) -> GString {
+        match self.sim.dump_json(false) {
+            Ok(json) => GString::from(json.as_str()),
+            Err(err) => {
+                log::error!("get_state_json: dump failed: {err}");
+                GString::from("{}")
+            }
+        }
+    }
+
+    /// Current checksum as 16 lowercase hex digits.
+    #[func]
+    pub fn get_checksum(&self) -> GString {
+        GString::from(self.sim.checksum_hex().as_str())
+    }
+
+    /// Completed sim ticks.
+    #[func]
+    pub fn get_tick(&self) -> i64 {
+        self.sim.tick_count() as i64
+    }
+
+    /// Whether the fixed-step pump is halted.
+    #[func]
+    pub fn is_paused(&self) -> bool {
+        self.sim.is_paused()
+    }
+
+    /// Pauses/resumes the fixed-step pump (resets the accumulator).
+    #[func]
+    pub fn set_paused(&mut self, paused: bool) {
+        self.sim.set_paused(paused);
+        self.runner = FixedStepRunner::new();
+        self.emit_state();
+    }
+
+    /// Runs `ticks` sim steps synchronously and returns the new tick count.
+    #[func]
+    pub fn step(&mut self, ticks: i64) -> i64 {
+        let count = ticks.clamp(0, MAX_STEP_TICKS) as u32;
+        if count > 0 {
+            self.advance_steps(count);
+            self.emit_state();
+            self.emit_world_changed();
+        }
+        self.get_tick()
+    }
+
+    /// Loads a scenario (path may be `res://`, `user://` or native) and resets
+    /// the sim; returns `false` on read/parse/apply failure.
+    #[func]
+    pub fn load_scenario(&mut self, path: GString) -> bool {
+        let requested = path.to_string();
+        let native = ProjectSettings::singleton().globalize_path(&requested);
+        let scenario = match Scenario::read(native.to_string()) {
+            Ok(scenario) => scenario,
+            Err(err) => {
+                log::error!("load_scenario `{requested}` failed: {err}");
+                return false;
+            }
+        };
+        let sim = match Sim::from_scenario(&scenario) {
+            Ok(sim) => sim,
+            Err(err) => {
+                log::error!("load_scenario `{requested}`: sim build failed: {err}");
+                return false;
+            }
+        };
+        let player = match ScenarioPlayer::new(&scenario, sim.content()) {
+            Ok(player) => player,
+            Err(err) => {
+                log::error!("load_scenario `{requested}`: command resolve failed: {err}");
+                return false;
+            }
+        };
+
+        log::info!(
+            "loaded scenario `{}` ({} steps, seed {}) from `{requested}`",
+            scenario.name,
+            player.total_steps(),
+            scenario.seed
+        );
+        self.sim = sim;
+        self.player = Some(player);
+        self.runner = FixedStepRunner::new();
+        self.world_dirty = true;
+        self.emit_state();
+        self.emit_world_changed();
+        true
+    }
+
+    /// Name of the currently selected block.
+    #[func]
+    pub fn selected_block(&self) -> GString {
+        GString::from(self.sim.block_name_of(self.sim.selected_block()).as_str())
+    }
+
+    /// Selects a block by name; `false` when the name is unknown.
+    #[func]
+    pub fn select_block(&mut self, name: GString) -> bool {
+        let name = name.to_string();
+        match self.sim.content().id(&name) {
+            Ok(id) => match self.sim.set_selected_block(id) {
+                Ok(()) => {
+                    self.emit_state();
+                    true
+                }
+                Err(err) => {
+                    log::warn!("select_block `{name}` failed: {err}");
+                    false
+                }
+            },
+            Err(_) => {
+                log::warn!("select_block: unknown block `{name}`");
+                false
+            }
+        }
+    }
+
+    /// Writes a PNG of the running viewport to `path` (native or `user://`).
+    #[func]
+    pub fn capture(&mut self, path: GString) -> bool {
+        let requested = path.to_string();
+        match self.capture_to(&requested) {
+            true => {
+                log::info!("capture written to `{requested}`");
+                true
+            }
+            false => {
+                log::error!("capture to `{requested}` failed (no viewport image?)");
+                false
+            }
+        }
+    }
+
+    /// Tile rows for the view: `(x, y, block_id)` for every non-air tile.
+    ///
+    /// Plain accessor (not `#[func]`) consumed by `MindTileGrid::draw`.
+    pub fn tile_blocks(&self) -> Vec<(i16, i16, u16)> {
+        self.sim
+            .grid
+            .iter_row_major()
+            .filter_map(|(pos, index)| {
+                let block = self.sim.grid.blocks[index];
+                (block != BlockId::AIR).then_some((pos.x(), pos.y(), block.get()))
+            })
+            .collect()
+    }
+
+    /// World size in tiles `(width, height)`; used to draw the grid border.
+    pub fn world_size(&self) -> (i32, i32) {
+        (self.sim.grid.width, self.sim.grid.height)
+    }
+
+    /// Applies one immediate command; `false` when `mind-core` rejects it.
+    fn apply_command(&mut self, command: Command) -> bool {
+        match self.sim.apply(command) {
+            Ok(()) => {
+                self.world_dirty = true;
+                true
+            }
+            Err(err) => {
+                log::warn!("command rejected: {err}");
+                false
+            }
+        }
+    }
+
+    /// Runs `steps` fixed steps, applying scenario commands before each tick.
+    fn advance_steps(&mut self, steps: u32) {
+        for _ in 0..steps {
+            let applied_before = self.sim.commands_applied();
+            let result = if let Some(player) = self.player.as_mut() {
+                player.step(&mut self.sim)
+            } else {
+                self.sim.tick().map(|()| true)
+            };
+            match result {
+                // A finished scenario keeps ticking without further commands.
+                Ok(false) => {
+                    if let Err(err) = self.sim.tick() {
+                        log::error!("sim tick failed after scenario end: {err}");
+                        break;
+                    }
+                }
+                Ok(true) => {}
+                Err(err) => {
+                    log::error!("sim tick failed: {err}");
+                    break;
+                }
+            }
+            if self.sim.commands_applied() != applied_before {
+                self.world_dirty = true;
+            }
+        }
+    }
+
+    fn emit_state(&mut self) {
+        let tick = self.sim.tick_count() as i64;
+        let checksum = GString::from(self.sim.checksum_hex().as_str());
+        let _ = self
+            .base_mut()
+            .emit_signal("state_changed", &[tick.to_variant(), checksum.to_variant()]);
+    }
+
+    fn emit_world_changed(&mut self) {
+        if self.world_dirty {
+            self.world_dirty = false;
+            let _ = self.base_mut().emit_signal("world_changed", &[]);
+        }
+    }
+
+    /// Captures the viewport texture to a PNG.
+    ///
+    /// Uses `get_viewport().get_texture().get_image()` — the canonical Godot 4
+    /// path (works in windowed and embedded runs; a dummy/headless renderer has
+    /// no readable image, which is reported as `false`).
+    fn capture_to(&self, path: &str) -> bool {
+        let Some(viewport) = self.base().get_viewport() else {
+            return false;
+        };
+        let Some(texture) = viewport.get_texture() else {
+            return false;
+        };
+        let Some(image) = texture.get_image() else {
+            return false;
+        };
+        if image.is_empty() {
+            return false;
+        }
+        let native = ProjectSettings::singleton().globalize_path(path);
+        image.save_png(&native) == godot::global::Error::OK
+    }
+
+    /// Processes a pending `-- --capture <path>` request (quit code 0 on success).
+    fn process_capture(&mut self) {
+        let Some(mut request) = self.capture.take() else {
+            return;
+        };
+        request.frames_waited += 1;
+        if request.frames_waited < CAPTURE_WARMUP_FRAMES {
+            self.capture = Some(request);
+            return;
+        }
+
+        let ok = self.capture_to(&request.path);
+        if ok {
+            log::info!("capture written to `{}`", request.path);
+        } else {
+            log::error!(
+                "capture to `{}` failed (headless/dummy renderer has no viewport image)",
+                request.path
+            );
+        }
+        if let Some(mut tree) = self.base().get_tree_or_null() {
+            tree.quit_ex().exit_code(i32::from(!ok)).done();
+        }
+    }
+}
+
+/// Parses `--capture <path>` / `--capture=<path>` from the user args (after `--`).
+fn parse_capture_args() -> Option<CaptureRequest> {
+    let args = Os::singleton().get_cmdline_user_args();
+    let slice = args.as_slice();
+    let mut index = 0;
+    while index < slice.len() {
+        let arg = slice[index].to_string();
+        if arg == "--capture" {
+            let path = slice.get(index + 1)?.to_string();
+            return Some(CaptureRequest {
+                path,
+                frames_waited: 0,
+            });
+        }
+        if let Some(path) = arg.strip_prefix("--capture=") {
+            return Some(CaptureRequest {
+                path: path.to_owned(),
+                frames_waited: 0,
+            });
+        }
+        index += 1;
+    }
+    None
+}
+
+/// Parses `--db [--db-host <host>] [--db-name <name>]` from the user args (after `--`).
+///
+/// Presence of `--db` opts the client into the `mind-stdb` facade; P0's facade is
+/// offline-only (plan 01 implements the live connector).
+fn parse_db_args() -> Option<MindDb> {
+    let args = Os::singleton().get_cmdline_user_args();
+    let slice = args.as_slice();
+    if !slice.iter().any(|arg| *arg == "--db") {
+        return None;
+    }
+    let mut config = ConnectionConfig::local();
+    let mut index = 0;
+    while index < slice.len() {
+        let arg = slice[index].to_string();
+        if arg == "--db-host"
+            && let Some(host) = slice.get(index + 1)
+        {
+            config.host = host.to_string();
+            index += 1;
+        } else if arg == "--db-name"
+            && let Some(name) = slice.get(index + 1)
+        {
+            config.db_name = name.to_string();
+            index += 1;
+        }
+        index += 1;
+    }
+    Some(MindDb::new(config))
+}

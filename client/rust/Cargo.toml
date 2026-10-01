@@ -1,0 +1,33 @@
+[workspace]
+resolver = "3"
+members = ["mind-core", "mind-headless", "mind-gdext", "mind-stdb"]
+default-members = ["mind-core", "mind-headless", "mind-stdb"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-only"
+rust-version = "1.95"
+
+[workspace.dependencies]
+bevy_ecs = "=0.19.1"
+godot = { version = "0.5.5", features = ["api-4-7"] }
+spacetimedb-sdk = "=2.10.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+log = "0.4"
+indexmap = "2"
+smallvec = "1"
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+all = "deny"
+unwrap_used = "deny"
+expect_used = "deny"

@@ -1,0 +1,15 @@
+{
+  "format": 1,
+  "name": "spine_determinism",
+  "seed": 2,
+  "world": { "generator": "flat", "width": 64, "height": 64, "floor": "stone", "wall": "air" },
+  "rules": { "waves": false, "infinite_resources": true },
+  "commands": [],
+  "command_generator": { "type": "seeded_ops", "count": 200, "steps": 600, "mode": "mixed" },
+  "steps": 600,
+  "emit_per_tick": true,
+  "expect": {
+    "checksum": "e435247bbe23afb1",
+    "tiles": []
+  }
+}

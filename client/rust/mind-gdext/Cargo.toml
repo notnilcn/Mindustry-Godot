@@ -1,0 +1,24 @@
+[package]
+name = "mind-gdext"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Godot 4.7 GDExtension (view drivers, input, frame pump) for Mindustry-Godot."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+godot.workspace = true
+mind-core = { path = "../mind-core" }
+mind-stdb = { path = "../mind-stdb" }
+log.workspace = true
+
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+all = "deny"
+unwrap_used = "deny"
+expect_used = "deny"

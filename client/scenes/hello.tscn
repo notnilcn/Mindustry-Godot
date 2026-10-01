@@ -1,0 +1,7 @@
+; SPDX-License-Identifier: GPL-3.0-only
+
+[gd_scene format=3]
+
+[node name="Hello" type="Node"]
+
+[node name="MindHello" type="MindHello" parent="."]

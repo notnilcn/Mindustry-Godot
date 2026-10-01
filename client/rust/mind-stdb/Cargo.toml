@@ -1,0 +1,18 @@
+[package]
+name = "mind-stdb"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Rust port of the sstdbsdk SpacetimeDB client (connection, waves, binders)."
+
+[dependencies]
+spacetimedb-sdk.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

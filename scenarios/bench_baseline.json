@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "name": "bench_baseline",
+  "seed": 0,
+  "world": { "generator": "flat", "width": 64, "height": 64, "floor": "stone", "wall": "air" },
+  "rules": { "waves": false, "infinite_resources": true },
+  "commands": [],
+  "command_generator": { "type": "fill", "x": 0, "y": 0, "width": 16, "height": 16 },
+  "steps": 1,
+  "expect": {
+    "tiles": [],
+    "bench": { "p50_us": 1, "p99_us": 1 }
+  }
+}

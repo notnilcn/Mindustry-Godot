@@ -1,0 +1,10 @@
+{
+  "server": "local",
+  "module-path": "./spacetimedb",
+  "generate": [
+    {
+      "language": "rust",
+      "out-dir": "../client/rust/mind-stdb/src/module_bindings"
+    }
+  ]
+}

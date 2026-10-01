@@ -1,0 +1,20 @@
+[package]
+name = "mind-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Godot-free, tokio-free Mindustry simulation core (content, world, io, campaign)."
+
+[dependencies]
+bevy_ecs.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+indexmap.workspace = true
+smallvec.workspace = true
+log.workspace = true
+thiserror.workspace = true
+xxhash-rust.workspace = true
+
+[lints]
+workspace = true

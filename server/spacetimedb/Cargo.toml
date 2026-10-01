@@ -1,0 +1,18 @@
+[package]
+name = "mindustry_godot"
+version = "0.1.0"
+edition = "2024"
+description = "Mindustry-Godot SpacetimeDB module (P0 skeleton; plan 01 grows the schema)."
+license = "GPL-3.0-only"
+publish = false
+
+# Keep the STDB module its own workspace so a future root manifest never absorbs
+# it (wasm build profile isolation; mirrors main/server/spacetimedb).
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+spacetimedb = "=2.10.1"
+log = "0.4"

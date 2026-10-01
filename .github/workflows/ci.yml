@@ -1,0 +1,181 @@
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# P0 CI (`00_FOUNDATION_IMPLEMENTATION_PLAN.md` §3.8):
+#   rust       fmt / clippy / check / mind-core tests / headless goldens /
+#              bench budget / boundary greps (ubuntu + windows)
+#   spacetimedb STDB module typecheck + generated-bindings drift gate
+#   godot-import build the GDExtension, download pinned Godot 4.7.2, run the
+#              headless editor import/parse check
+#
+# The interactive MCP smoke (`tools/mcp-smoke.sh`) is local-only: it needs a
+# running editor + WSLg window and is never run here. No secrets are used.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  rust:
+    name: rust (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.1
+          components: rustfmt, clippy
+
+      - name: Install Linux build deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev ripgrep
+
+      - name: cargo fmt (workspace --check)
+        shell: bash
+        run: cargo fmt --manifest-path client/rust/Cargo.toml --all -- --check
+
+      - name: cargo clippy (workspace --all-targets -- -D warnings)
+        shell: bash
+        run: cargo clippy --manifest-path client/rust/Cargo.toml --workspace --all-targets -- -D warnings
+
+      - name: cargo check (workspace)
+        shell: bash
+        run: cargo check --manifest-path client/rust/Cargo.toml --workspace
+
+      - name: cargo test -p mind-core
+        shell: bash
+        run: cargo test --manifest-path client/rust/Cargo.toml -p mind-core
+
+      - name: headless goldens
+        shell: bash
+        run: |
+          cargo run -q --manifest-path client/rust/Cargo.toml -p mind-headless -- run spine_place_break --json > /dev/null
+          cargo run -q --manifest-path client/rust/Cargo.toml -p mind-headless -- run spine_determinism --json > /dev/null
+          cargo run -q --manifest-path client/rust/Cargo.toml -p mind-headless -- run spine_many_commands --json > /dev/null
+
+      - name: bench budget (+20% warn / +50% fail vs 101/240 ns)
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_P50_NS=101
+          BASE_P99_NS=240
+          FAIL_P50_NS=$((BASE_P50_NS * 150 / 100))
+          FAIL_P99_NS=$((BASE_P99_NS * 150 / 100))
+          BENCH_JSON="$(cargo run -q --release --manifest-path client/rust/Cargo.toml -p mind-headless -- bench --ticks 100000 --scenario bench_baseline || true)"
+          echo "$BENCH_JSON"
+          P50_NS="$(printf '%s' "$BENCH_JSON" | sed -n 's/.*"p50_ns":\([0-9][0-9]*\).*/\1/p')"
+          P99_NS="$(printf '%s' "$BENCH_JSON" | sed -n 's/.*"p99_ns":\([0-9][0-9]*\).*/\1/p')"
+          STATUS="$(printf '%s' "$BENCH_JSON" | sed -n 's/.*"baseline_status":"\([a-z-]*\)".*/\1/p')"
+          if [ -z "$P50_NS" ] || [ -z "$P99_NS" ]; then
+            echo "FAIL: could not parse bench JSON" >&2
+            exit 1
+          fi
+          if [ "$STATUS" = "fail" ] || [ "$P50_NS" -gt "$FAIL_P50_NS" ] || [ "$P99_NS" -gt "$FAIL_P99_NS" ]; then
+            echo "FAIL: bench regression beyond +50% (p50 ${P50_NS}ns, p99 ${P99_NS}ns)" >&2
+            exit 1
+          fi
+          if [ "$P50_NS" -gt $((BASE_P50_NS * 120 / 100)) ] || [ "$P99_NS" -gt $((BASE_P99_NS * 120 / 100)) ]; then
+            echo "WARN: bench regression beyond +20% (p50 ${P50_NS}ns, p99 ${P99_NS}ns)"
+          fi
+
+      - name: boundary greps (mind-core is godot-free and tokio-free)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if cargo tree --manifest-path client/rust/Cargo.toml -p mind-core --prefix none | grep -Eq '^(godot|tokio)( |$)'; then
+            echo "FAIL: mind-core dependency tree contains godot/tokio" >&2
+            exit 1
+          fi
+          if grep -RnE 'use (godot|tokio)' client/rust/mind-core; then
+            echo "FAIL: mind-core source imports godot/tokio" >&2
+            exit 1
+          fi
+
+      - name: scenario mirror sync check (scenarios/ -> client/scenarios/)
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tools/sync_scenarios.sh
+          diff -r scenarios client/scenarios
+
+  spacetimedb:
+    name: spacetimedb
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.1
+          targets: wasm32-unknown-unknown
+
+      - name: Install SpacetimeDB CLI 2.10.1
+        run: |
+          curl -sSf https://install.spacetimedb.com | sh -s -- -y
+          "$HOME/.local/bin/spacetime" version install 2.10.1 --use -y
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: cargo check server/spacetimedb (--tests)
+        run: cargo check --manifest-path server/spacetimedb/Cargo.toml --tests
+
+      - name: bindings drift gate (server/build.sh --check, no publish)
+        run: bash server/build.sh --check
+
+  godot-import:
+    name: godot-import
+    runs-on: ubuntu-latest
+    env:
+      GODOT_VERSION: 4.7.2
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.1
+
+      - name: Install Linux build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev unzip
+
+      # mind.gdextension expects res://bin/rust/<profile>/libmind_gdext.so on
+      # Linux; building here (debug profile) is what makes the editor import
+      # below load the extension successfully.
+      - name: Build GDExtension (client/bin/rust/debug/libmind_gdext.so)
+        run: cargo build --manifest-path client/rust/Cargo.toml -p mind-gdext --target-dir client/bin/rust
+
+      - name: Download pinned Godot 4.7.2 (standard)
+        run: |
+          set -euo pipefail
+          URL="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          curl -sSL -o /tmp/godot.zip "$URL"
+          unzip -q /tmp/godot.zip -d /tmp/godot
+          BIN="$(find /tmp/godot -maxdepth 1 -type f -name 'Godot_v*' | head -n 1)"
+          chmod +x "$BIN"
+          echo "GODOT_BIN=$BIN" >> "$GITHUB_ENV"
+          "$BIN" --version
+
+      - name: Godot headless editor import/parse check
+        run: |
+          set -euo pipefail
+          LOG="$(mktemp)"
+          "$GODOT_BIN" --headless --editor --quit --path client >"$LOG" 2>&1
+          cat "$LOG"
+          if grep -nE 'SCRIPT ERROR|SHADER ERROR|Parse Error|Failed to load|Cannot open|Can.t open|ERROR:' "$LOG"; then
+            echo "FAIL: Godot headless import logged parse/load errors" >&2
+            exit 1
+          fi
