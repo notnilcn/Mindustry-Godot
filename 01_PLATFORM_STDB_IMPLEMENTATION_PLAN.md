@@ -315,10 +315,10 @@ Ordered; each milestone ends with its verification commands. **Smallest vertical
 - **Verify:** `cargo check --manifest-path server/spacetimedb/Cargo.toml --tests`; local publish; `spacetime sql "SELECT * FROM protocol_info"` / `player` / `player_session` show seeded/connected rows; `spacetime call` a reducer and read it back.
 
 ### M2 — `mind-stdb` connector core (offline first)
-- [ ] `config.rs`, `token.rs`, `identity.rs` (pure `--pN` parser port), `connector.rs` state machine + offline mode + `pump()`.
-- [ ] `protocol.rs` (`PROTOCOL_VERSION` mirror + mismatch error type); `connect()` path builds the generated `DbConnection` with builder callbacks; token load/save; events queue.
-- [ ] Unit tests: suffix parser (including `--path` rejection), host-scoped token key, file-store round-trip, offline state, pump-without-connection no-op.
-- [ ] `mind-headless run stdb_offline_boot` scenario (offline connector boots, N pumps, expected state dump).
+- [x] `config.rs`, `token.rs`, `identity.rs` (pure `--pN` parser port), `connector.rs` state machine + offline mode + `pump()`.
+- [x] `protocol.rs` (`PROTOCOL_VERSION` mirror + mismatch error type); `connect()` path builds the generated `DbConnection` with builder callbacks; token load/save; events queue.
+- [x] Unit tests: suffix parser (including `--path` rejection), host-scoped token key, file-store round-trip, offline state, pump-without-connection no-op.
+- [x] `mind-headless run stdb_offline_boot` scenario (offline connector boots, N pumps, expected state dump).
 - **Verify:** `cargo test -p mind-stdb` (all network-free); `cargo run -p mind-headless -- run stdb_offline_boot`.
 
 ### M3 — Waves + typed binders
@@ -562,5 +562,18 @@ Deleted at M6 (NUD-05=C, no archive): `client/Scripts/Components/` (`IComponent.
   - `spacetime call --server local mindustry update_client_settings 1.0 '"en"' 0.5 0.25 '"{}"'` then `SELECT … FROM client_settings` → `1 | "en" | 0.5 | 0.25 | 1`.
   - `SELECT identity, username FROM all_players` works (view query); `server/build.sh --check` → drift-clean; `cargo check -p mind-stdb` still green against the regenerated bindings.
 - Divergence note: 2.10.1 *table* accessor traits need `use spacetimedb::Table` for `insert`/`iter`; *view* code needs `<accessor>__view` (and `<accessor>__query` for query-style views). Recorded in `identity/views.rs` comments; no plan text change beyond the §6.1 cell above.
+
+#### M2 — `mind-stdb` connector core (commit `01-M2`)
+
+- Replaced the P0 `conn.rs`/`tokens.rs` facade with the plan §3.3 modules: `config` (`StdbMode`, `ConnectPolicy`, `Backoff`, injected `token_store_path`), `identity` (`LocalIdentity`, exact `^--p\d+$` parser with engine-args-first order), `token` (`TokenStore` trait + `FileTokenStore` per-host+suffix schema-versioned files, C#-exact key chain), `connector` (`Connector` + `ConnectorState::{Offline,Idle,Connecting,Connected,Retrying,Disconnected}` + `ConnectorEvent` incl. `Resync`), `protocol` (`PROTOCOL_VERSION`/`CLIENT_BUILD`/`check_protocol`). `waves.rs` renamed `SubscriptionWave` → `WaveName` and now lists the real Base/Lobby accessors.
+- Pump contract: `pump()` calls `frame_tick()` once, drains the callback queue, then retries/backoff; callbacks only push into an `Arc<Mutex<VecDeque>>`; deliberate `disconnect()` suppresses the `Disconnected` event; SDK errors never panic.
+- Token layout reconciled with the legacy-notes finding (`<data-dir>/identity/<key>.token.json`, schema 1) instead of §6.6's single-map file; the §6.6 text is superseded by the legacy-notes bullet (code carries the reconciliation comment).
+- `mind-gdext::sim_host` `--db` facade migrated to `Connector::pump()` (no structural change; M5 hands the connection to the autoload).
+- New `mind-headless` `stdb_scenarios` runner + `scenarios/stdb_offline_boot.json`; `list` shows it.
+- Evidence:
+  - `cargo test --manifest-path client/rust/Cargo.toml -p mind-stdb` → `13 passed; 0 failed` (identity/token/offline/pump state tests listed in §7.1 minus the M3+ ones).
+  - `cargo run -p mind-headless -- run stdb_offline_boot --json` → `{"state":"offline","frames":64,"pumps":64,"pump_p50_ns":50,"pump_p99_ns":1784,"pass":true,...}` (p99 budget 200 µs met).
+  - `cargo fmt -p mind-stdb -p mind-headless -- --check` clean; `cargo clippy -p mind-stdb -p mind-headless --all-targets -- -D warnings` clean; `cargo check -p mind-gdext` green.
+  - Environment note (machine-local, not committed): WSL's `~/.cargo/config.toml` OpenSSL workaround had broken `libcrypto.so.3`/`libssl.so.3` symlinks, so rust-lld fell back to static `libcrypto.a` and failed on zstd symbols. Repaired the two symlinks to the system `libcrypto.so.3`/`libssl.so.3`; `cargo test` (which links the SDK's native-tls) now works. CI runners with `libssl-dev` are unaffected.
 
 

@@ -52,11 +52,7 @@ pub struct BinderHandle {
 }
 
 impl BinderHandle {
-    pub(crate) fn new(index: usize, table: &'static str) -> Self {
-        Self { index, table }
-    }
-
-    /// Registration index (stable for the life of the `MindDb`).
+    /// Registration index (stable for the life of the connector).
     pub fn index(self) -> usize {
         self.index
     }

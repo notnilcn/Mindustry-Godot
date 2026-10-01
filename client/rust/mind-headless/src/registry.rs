@@ -39,6 +39,10 @@ pub static SCENARIOS: &[ScenarioFixture] = &[
         name: "bench_baseline",
         file: "bench_baseline.json",
     },
+    ScenarioFixture {
+        name: "stdb_offline_boot",
+        file: "stdb_offline_boot.json",
+    },
 ];
 
 /// Registered scenario names.

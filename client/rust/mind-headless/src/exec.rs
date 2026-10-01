@@ -19,6 +19,7 @@ use crate::cli::{Cli, Command};
 use crate::paths;
 use crate::registry;
 use crate::report::{BenchReport, RunReport, SimReport, TileCheck};
+use crate::stdb_scenarios::StdbScenario;
 
 /// Exit code: success.
 const EXIT_PASS: i32 = 0;
@@ -165,6 +166,14 @@ fn cmd_run(
     json: bool,
     emit_commands: Option<&Path>,
 ) -> anyhow::Result<i32> {
+    // `stdb_*` scenarios (plan 01 §7.2) are connector tests, not sim scenarios:
+    // they have their own fixture schema and never run `mind-core`.
+    if let Some(kind) = StdbScenario::from_name(name) {
+        if emit_commands.is_some() {
+            log::warn!("--emit-commands is ignored for `{name}` (no sim commands)");
+        }
+        return crate::stdb_scenarios::run(cli, kind, dump, json);
+    }
     let scenario = load_scenario(cli, name)?;
     let collect = scenario.emit_per_tick;
 

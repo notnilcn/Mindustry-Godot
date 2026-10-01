@@ -8,6 +8,7 @@ description = "Headless test-rig binary for the mind-core simulation (scenarios,
 
 [dependencies]
 mind-core = { path = "../mind-core" }
+mind-stdb = { path = "../mind-stdb" }
 clap.workspace = true
 anyhow.workspace = true
 log.workspace = true

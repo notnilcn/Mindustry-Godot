@@ -75,6 +75,33 @@ pub struct SimReport {
     pub per_tick: Option<Vec<String>>,
 }
 
+/// `stdb_*` scenario report (plan 01 §7.2).
+#[derive(Debug, Clone, Serialize)]
+pub struct StdbReport {
+    /// Scenario name.
+    pub scenario: String,
+    /// Connection mode (`"offline"`).
+    pub mode: String,
+    /// Final connector state name.
+    pub state: String,
+    /// `pump()` calls processed.
+    pub frames: u64,
+    /// Requested pump count.
+    pub pumps: u64,
+    /// Median pump overhead in nanoseconds.
+    pub pump_p50_ns: u64,
+    /// 99th percentile pump overhead in nanoseconds.
+    pub pump_p99_ns: u64,
+    /// Overall pass/fail.
+    pub pass: bool,
+    /// Golden state, when the fixture has one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expect_state: Option<String>,
+    /// Golden frame count, when the fixture has one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expect_frames: Option<u64>,
+}
+
 /// `bench` report (also committed into `bench_baseline.json`).
 #[derive(Debug, Clone, Serialize)]
 pub struct BenchReport {

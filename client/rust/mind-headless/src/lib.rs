@@ -2,9 +2,11 @@
 
 //! `mind-headless` — the headless test-rig.
 //!
-//! Loads `mind-core`, runs scenarios/dumps/benchmarks and never links Godot or
-//! opens a socket. `main.rs` is a thin wrapper over this library so plan 22 can
-//! reuse the same harness as its dedicated `server` mode (§12 C8).
+//! Loads `mind-core`, runs scenarios/dumps/benchmarks and never links Godot.
+//! Sockets are only opened by env-gated (`MIND_STDB_IT=1`) integration paths;
+//! the default `stdb_*` scenarios are offline. `main.rs` is a thin wrapper over
+//! this library so plan 22 can reuse the same harness as its dedicated
+//! `server` mode (§12 C8).
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
@@ -13,6 +15,7 @@ pub mod exec;
 pub mod paths;
 pub mod registry;
 pub mod report;
+pub mod stdb_scenarios;
 
 use clap::Parser;
 

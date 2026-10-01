@@ -1600,6 +1600,7 @@ dependencies = [
  "clap",
  "log",
  "mind-core",
+ "mind-stdb",
  "serde",
  "serde_json",
 ]

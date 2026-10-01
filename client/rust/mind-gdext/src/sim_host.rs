@@ -17,7 +17,7 @@ use mind_core::command::Command;
 use mind_core::content::BlockId;
 use mind_core::scenario::{Scenario, ScenarioPlayer};
 use mind_core::sim::{FixedStepRunner, Sim};
-use mind_stdb::{ConnectionConfig, MindDb};
+use mind_stdb::{ConnectionConfig, Connector, StdbMode};
 
 use crate::camera::MindCamera2D;
 use crate::settings;
@@ -43,9 +43,10 @@ pub struct MindSimHost {
     player: Option<ScenarioPlayer>,
     runner: FixedStepRunner,
     capture: Option<CaptureRequest>,
-    /// Present only with `-- --db`: P0 constructs the facade and pumps it; plan 01
-    /// implements the live connector (OD-R4 keeps it on the main thread).
-    db: Option<MindDb>,
+    /// Present only with `-- --db`: legacy P0 facade kept for the MCP smoke path
+    /// until the M5 `StdbConnector` autoload owns the connection. Plan 01 keeps
+    /// the pump on the main thread (OD-R4).
+    db: Option<Connector>,
     /// Set whenever the world changed since the last `world_changed` emission.
     world_dirty: bool,
 }
@@ -77,7 +78,7 @@ impl INode for MindSimHost {
         self.capture = parse_capture_args();
         self.db = parse_db_args();
         if let Some(db) = &mut self.db {
-            // P0: `connect` returns NotImplemented and stays Offline; log, never gate boot.
+            // Log, never gate boot: a failed connect leaves the connector retrying.
             if let Err(err) = db.connect() {
                 log::info!(
                     "mind-stdb facade created for {} (state {}): {err}",
@@ -102,9 +103,9 @@ impl INode for MindSimHost {
 
     fn process(&mut self, delta: f64) {
         // The net pump runs exactly once per Godot frame, independent of sim pause
-        // (`mind-stdb` `frame_tick`, plan 00 §3.7 / OD-R4).
+        // (`mind-stdb::Connector::pump`, plan 01 §3.4 / OD-R4).
         if let Some(db) = &mut self.db {
-            let _ = db.frame_tick();
+            db.pump();
         }
         if self.capture.is_some() {
             self.process_capture();
@@ -516,15 +517,16 @@ fn parse_capture_args() -> Option<CaptureRequest> {
 
 /// Parses `--db [--db-host <host>] [--db-name <name>]` from the user args (after `--`).
 ///
-/// Presence of `--db` opts the client into the `mind-stdb` facade; P0's facade is
-/// offline-only (plan 01 implements the live connector).
-fn parse_db_args() -> Option<MindDb> {
+/// Presence of `--db` opts the client into an online `mind-stdb` connector;
+/// without it the game stays fully offline (plan §3.12 invariant 8).
+fn parse_db_args() -> Option<Connector> {
     let args = Os::singleton().get_cmdline_user_args();
     let slice = args.as_slice();
     if !slice.iter().any(|arg| *arg == "--db") {
         return None;
     }
     let mut config = ConnectionConfig::local();
+    config.mode = StdbMode::Online;
     let mut index = 0;
     while index < slice.len() {
         let arg = slice[index].to_string();
@@ -541,5 +543,5 @@ fn parse_db_args() -> Option<MindDb> {
         }
         index += 1;
     }
-    Some(MindDb::new(config))
+    Some(Connector::new(config))
 }
