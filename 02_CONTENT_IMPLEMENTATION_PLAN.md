@@ -8,7 +8,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | In progress — M1 complete (2026-10-01; lane 02) |
+| **Status** | In progress — M1–M2 complete (2026-10-01; lane 02) |
 | **Phase** | P1 — Platform & content (HIGH_LEVEL_PLAN §5) |
 | **Depends on** | `00_FOUNDATION_IMPLEMENTATION_PLAN.md` (workspace, `mind-core`/`mind-headless` crates, headless harness, spine state inspector). |
 | **Blocks** | `03_ASSETS_IMPLEMENTATION_PLAN.md`, `04_IO_SERIALIZATION_IMPLEMENTATION_PLAN.md`, `07_BLOCKS_BUILD_IMPLEMENTATION_PLAN.md`, `10_COMBAT_BULLETS_IMPLEMENTATION_PLAN.md`, `11_UNITS_AI_WAVES_IMPLEMENTATION_PLAN.md`, `12_CAMPAIGN_IMPLEMENTATION_PLAN.md`, `20_MODS_IMPLEMENTATION_PLAN.md`. |
@@ -479,18 +479,18 @@ Regressions block the P1 gate (HIGH_LEVEL_PLAN §7.4).
 
 ### 7e. Exit criteria checklist
 
-- [ ] `ContentType` ordinals/names/folders match golden (`content_type_ordinals`).
-- [ ] Dense-ID invariant passes for all 12 live types (`log_content`).
+- [x] `ContentType` ordinals/names/folders match golden (`content_type_ordinals`).
+- [x] Dense-ID invariant passes for all 12 live types (`log_content`).
 - [ ] Per-type counts and ordered names match golden for every type (M2/M4/M5 ledgers show 0 unported).
 - [ ] Tech trees: node count, parent/depth, requirement stacks, objective order match golden for Serpulo and Erekir.
-- [ ] `ErekirTechTree.rebalance()` test green (scale-once guard, requirement filter).
+- [ ] `ErekirTechTree.rebalance()` test green (scale-once guard, requirement filter). *(M2: guard green; requirement filter awaits M3/M5 units/turrets.)*
 - [ ] Bundle audit: 0 missing `<type>.<name>.name` keys; localized names equal golden.
 - [ ] Region audit: 0 missing required regions (soft warnings listed and triaged).
 - [ ] Mod/patch contract tests green with fake provider; hand-off note delivered to plan 20.
-- [ ] `content load-order-bad` fails as expected.
+- [x] `content load-order-bad` fails as expected.
 - [ ] MCP inspector scenario passes with screenshot evidence; `godot_log errors` empty.
 - [ ] Perf budgets met and recorded (median load ≤ 200 ms).
-- [ ] `cargo clippy -p mind-core -- -D warnings` clean; no `unwrap()` on runtime content paths.
+- [x] `cargo clippy -p mind-core -- -D warnings` clean; no `unwrap()` on runtime content paths.
 - [ ] Ledgers, golden, audit report, and this plan’s Changelog committed.
 
 ---
@@ -534,3 +534,9 @@ Regressions block the P1 gate (HIGH_LEVEL_PLAN §7.4).
   - **JVM/golden status:** no JDK on Windows or WSL and no install performed, so `parity/java/DumpContent.java` and `parity/golden_content.json` were **not** generated (NUD-10). All M1 goldens are source-derived constant tables; the committed JVM golden remains an **M7 blocker**.
   - **Recorded deviations (plan text updated in this commit):** `ModContentProvider` drops the plan-20 `ModSet` parameter until M6 reconciliation (§3.6); `TransitionSpec` collapsed to `Opposite | Affinity(AffinityTransition)` to represent composite handlers without data loss (§3.8); harness subcommand is `content ids` (M7 adds `content dump`/`audit`, §7b); `content/color.rs` added for `Rgba`.
   - **Blockers/risks:** JVM golden (M7); `UnitType`/`Planet`/etc. marker types in `id.rs` are placeholders that M2/M5 re-point to real records; blocks stay on the P0 placeholder until M3.
+- 2026-10-01 — **M2 complete** (lane 02). Ported `UnitCommands` (10), `TeamEntries` (0 by design), `UnitStances` (8 core + one `ItemUnitStance` per item = 30, `load_after_mods`), `Weathers` (6, `snowing`/`Time.toMinutes`), `Planets` (7 incl. `make_asteroid`, sector grids `10·3^n+2`, kind tags for generators/meshes/rules), `SectorPresets` (46, Java `%` + `-1→0` wrap, `SectorRemapProvider` identity seam, `SectorDifficulty`), `Loadouts` (4 raw base64), `TechTree`/`TechNode`/`TechStore`/`TechTreeBuilder` with materialized `SectorComplete` insertion, inherited research-cost multipliers, `round_to_10`, objective data, and the Serpulo (223 nodes) + Erekir (152 nodes) trees verbatim. Tech-tree data is a mechanical conversion of the upstream source; the one-off converter is committed at `parity/tools/gen_trees.py`.
+  - **Verification (verbatim):** `cargo fmt --all -- --check` clean; `cargo clippy -p mind-core -p mind-headless --all-targets -- -D warnings` clean; `cargo test -p mind-core` → **62 passed; 0 failed**, incl. `commands::count_and_ids`, `stances::incompatible_bits`/`load_order`, `sectors::presets_resolve`, `tech::sector_complete_insertion`, `tech::requirements_rounding`, `ekir::rebalance_applies_once`, `registries::load_order_bad`, `tech::vanilla_tree_node_counts`.
+  - **Harness:** `content load` → item 22, bullet 6, liquid 11, status 23, weather 6, sector 46, planet 7, team 0, unitCommand 10, unitStance 30 (blocks/units 0 until M3/M5); `content ids --out` now lists all 12 live types; `content load-order-bad` → `content load-order-bad: failed as expected: content name 'wet' is unknown`; `content bench --runs 10 --json` median **3.25 ms** debug (budget 200 ms release) — the trees add ~2.7 ms debug vs M1.
+  - **P0 goldens unchanged (no re-record needed):** `spine_place_break` `e53c9277bb8c28d1`, `spine_determinism` `e435247bbe23afb1`, `spine_many_commands` `faec40ccbe6ff9d8` all pass.
+  - **Recorded deviations:** `LoadoutDef` is a named side table, not a content ID space (`ContentType.loadout_UNUSED` is historical; upstream `Loadouts` stores `Schematic`s); `TechNode.content` is `Option<ContentRef>` plus `content_name` so the verbatim trees can be built before M3/M5 — `TechTreeBuilder` reports unresolved names (`serpulo`: 49 resolved / 174 unresolved, `erekir`: 35 / 117), which M3/M5 must drive to zero; `ErekirTechTree.rebalance()` is a no-op pending units/blocks, with the tested `rebalance_bullet` scale-once guard ready for M3/M5; `PlanetDef.sector_capture_replacements`/`unlocked_on_land`/`default_core` hold block names until M3.
+  - **Blockers/risks:** JVM golden still the M7 blocker; M3/M5 must assert `TechTreeBuildReport::missing == []`; `sector-shield` propagation has no vanilla users to exercise (kept for parity).

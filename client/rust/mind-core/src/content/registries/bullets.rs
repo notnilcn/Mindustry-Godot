@@ -343,7 +343,10 @@ impl Content for BulletDef {
 
 /// Loads the 6 shared internal bullets in `Bullets.load()` order.
 pub fn load(registry: &mut ContentRegistry) -> Result<(), ContentError> {
-    let shocked = registry.status_id("shocked");
+    // Status effects load before bullets (upstream order).
+    let shocked = registry
+        .status_id("shocked")
+        .ok_or_else(|| ContentError::UnknownName(String::from("shocked")))?;
 
     // Not allowed in weapons - used only to prevent NullPointerExceptions.
     registry.add_bullet({
@@ -366,7 +369,7 @@ pub fn load(registry: &mut ContentRegistry) -> Result<(), ContentError> {
         bullet.lifetime = EffectId::LIGHTNING.meta().lifetime;
         bullet.hit_effect = EffectId::HIT_LANCER;
         bullet.despawn_effect = EffectId::NONE;
-        bullet.status = shocked.unwrap_or(StatusId::NONE);
+        bullet.status = shocked;
         bullet.status_duration = 10.0;
         bullet.hittable = false;
         bullet.light_color = Rgba::WHITE;

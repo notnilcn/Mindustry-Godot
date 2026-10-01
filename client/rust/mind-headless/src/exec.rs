@@ -122,6 +122,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             ContentCommand::Load { json } => cmd_content_load(*json),
             ContentCommand::Ids { json, out } => cmd_content_ids(*json, out.as_deref()),
             ContentCommand::Bench { runs, json } => cmd_content_bench(*runs, *json),
+            ContentCommand::LoadOrderBad => cmd_content_load_order_bad(),
         },
     }
 }
@@ -484,6 +485,25 @@ fn type_counts(registry: &ContentRegistry) -> Vec<ContentTypeCount> {
             count: counts.get(type_).copied().unwrap_or(0),
         })
         .collect()
+}
+
+/// Plan 02 §7b negative scenario: `Liquids` before `StatusEffects` must fail
+/// with the missing-status error naming the load-order violation.
+fn cmd_content_load_order_bad() -> anyhow::Result<i32> {
+    match mind_core::content::registries::create_base_content_bad_order(
+        &MemoryBundle::new(),
+        &MemoryUnlockStore::new(),
+        true,
+    ) {
+        Err(error) => {
+            println!("content load-order-bad: failed as expected: {error}");
+            Ok(EXIT_PASS)
+        }
+        Ok(_) => {
+            log::error!("content load-order-bad: content loaded, expected a load-order error");
+            Ok(EXIT_FAIL)
+        }
+    }
 }
 
 fn cmd_content_load(json: bool) -> anyhow::Result<i32> {

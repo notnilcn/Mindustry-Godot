@@ -263,15 +263,24 @@ pub fn load(
     bundle: &dyn BundleView,
     store: &dyn UnlockStore,
 ) -> Result<(), ContentError> {
-    let wet = registry.status_id("wet");
-    let melting = registry.status_id("melting");
-    let tarred = registry.status_id("tarred");
-    let freezing = registry.status_id("freezing");
+    // Status effects load before liquids (upstream order); a missing status is a
+    // load-order error, not a silent fallback.
+    let missing = |name: &str| ContentError::UnknownName(name.to_owned());
+    let wet = registry.status_id("wet").ok_or_else(|| missing("wet"))?;
+    let melting = registry
+        .status_id("melting")
+        .ok_or_else(|| missing("melting"))?;
+    let tarred = registry
+        .status_id("tarred")
+        .ok_or_else(|| missing("tarred"))?;
+    let freezing = registry
+        .status_id("freezing")
+        .ok_or_else(|| missing("freezing"))?;
 
     registry.add_liquid({
         let mut liquid = Liquid::new("water", hex("596ab8"), bundle, store);
         liquid.heat_capacity = 0.4;
-        liquid.effect = wet.unwrap_or(StatusId::NONE);
+        liquid.effect = wet;
         liquid.boil_point = 0.5;
         liquid.gas_color = Rgba::new(0.9, 0.9, 0.9, 1.0);
         liquid.unlock.always_unlocked = true;
@@ -282,7 +291,7 @@ pub fn load(
         let mut liquid = Liquid::new("slag", hex("ffa166"), bundle, store);
         liquid.temperature = 1.0;
         liquid.viscosity = 0.7;
-        liquid.effect = melting.unwrap_or(StatusId::NONE);
+        liquid.effect = melting;
         liquid.light_color = hex("f0511d").with_alpha(0.4);
         liquid
     })?;
@@ -294,7 +303,7 @@ pub fn load(
         liquid.explosiveness = 1.2;
         liquid.heat_capacity = 0.7;
         liquid.bar_color = Some(hex("6b675f"));
-        liquid.effect = tarred.unwrap_or(StatusId::NONE);
+        liquid.effect = tarred;
         liquid.boil_point = 0.65;
         liquid.gas_color = Rgba::new(0.4, 0.4, 0.4, 1.0);
         liquid.add_can_stay_on(LiquidId::WATER);
@@ -305,7 +314,7 @@ pub fn load(
         let mut liquid = Liquid::new("cryofluid", hex("6ecdec"), bundle, store);
         liquid.heat_capacity = 0.9;
         liquid.temperature = 0.25;
-        liquid.effect = freezing.unwrap_or(StatusId::NONE);
+        liquid.effect = freezing;
         liquid.light_color = hex("0097f5").with_alpha(0.2);
         liquid.boil_point = 0.55;
         liquid.gas_color = hex("c1e8f5");

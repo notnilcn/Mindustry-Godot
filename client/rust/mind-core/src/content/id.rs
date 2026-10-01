@@ -17,33 +17,23 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::registries::blocks::BlockDef;
 use super::registries::bullets::BulletDef;
+use super::registries::commands::UnitCommandDef;
 use super::registries::items::Item;
 use super::registries::liquids::Liquid;
+use super::registries::planets::PlanetDef;
+use super::registries::sectors::SectorPresetDef;
+use super::registries::stances::UnitStanceDef;
 use super::registries::statuses::StatusEffect;
+use super::registries::teams::TeamEntry;
+use super::registries::weathers::WeatherDef;
 
 /// Marker types for content kinds whose records land in later milestones.
 ///
-/// M2+ replaces each marker with the real record type in `registries/`; the
-/// alias definitions below are the only place that changes.
+/// M5 replaces the unit marker with the real record type in `registries/units/`;
+/// the alias definitions below are the only place that changes.
 pub mod markers {
     /// Placeholder for `registries::units::UnitTypeDef` (plan 02 M5).
     pub enum UnitType {}
-    /// Placeholder for `registries::weathers::WeatherDef` (plan 02 M2).
-    pub enum Weather {}
-    /// Placeholder for `registries::sectors::SectorPresetDef` (plan 02 M2).
-    pub enum SectorPreset {}
-    /// Placeholder for `registries::planets::PlanetDef` (plan 02 M2).
-    pub enum Planet {}
-    /// Placeholder for `registries::teams::TeamEntry` (plan 02 M2).
-    pub enum TeamEntry {}
-    /// Placeholder for `registries::commands::UnitCommandDef` (plan 02 M2).
-    pub enum UnitCommand {}
-    /// Placeholder for `registries::stances::UnitStanceDef` (plan 02 M2).
-    pub enum UnitStance {}
-    /// Placeholder for `registries::loadouts::LoadoutDef` (plan 02 M2).
-    pub enum Loadout {}
-    /// Placeholder for plan 17's full effect record (seed table lives in `fx_meta`).
-    pub enum EffectRecord {}
 }
 
 /// A dense, per-`ContentType` content id (`short` upstream), tagged with its
@@ -152,19 +142,17 @@ pub type StatusId = ContentId<StatusEffect>;
 /// Id of a unit type in the unit content space (`ContentType.unit`).
 pub type UnitTypeId = ContentId<markers::UnitType>;
 /// Id of a weather in the weather content space (`ContentType.weather`).
-pub type WeatherId = ContentId<markers::Weather>;
+pub type WeatherId = ContentId<WeatherDef>;
 /// Id of a sector preset in the sector content space (`ContentType.sector`).
-pub type SectorId = ContentId<markers::SectorPreset>;
+pub type SectorId = ContentId<SectorPresetDef>;
 /// Id of a planet in the planet content space (`ContentType.planet`).
-pub type PlanetId = ContentId<markers::Planet>;
+pub type PlanetId = ContentId<PlanetDef>;
 /// Id of a team entry in the team content space (`ContentType.team`).
-pub type TeamEntryId = ContentId<markers::TeamEntry>;
+pub type TeamEntryId = ContentId<TeamEntry>;
 /// Id of a unit command in the unit command content space.
-pub type UnitCommandId = ContentId<markers::UnitCommand>;
+pub type UnitCommandId = ContentId<UnitCommandDef>;
 /// Id of a unit stance in the unit stance content space.
-pub type UnitStanceId = ContentId<markers::UnitStance>;
-/// Id of a loadout in the loadout content space (`ContentType.loadout_UNUSED`).
-pub type LoadoutId = ContentId<markers::Loadout>;
+pub type UnitStanceId = ContentId<UnitStanceDef>;
 
 impl BlockId {
     /// The always-present empty block (`air`, id `0`).

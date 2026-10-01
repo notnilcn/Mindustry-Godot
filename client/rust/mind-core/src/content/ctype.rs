@@ -10,6 +10,7 @@ use super::bundle::BundleView;
 use super::id::PlanetId;
 use super::parser_hooks::ContentAsset;
 use super::settings_store::UnlockStore;
+use super::tech::TechNodeRef;
 use super::{ContentError, ContentType};
 
 /// Mod identifier (folder name without extension).
@@ -67,10 +68,6 @@ impl ModContentInfo {
             .is_some_and(|mod_id| mod_id.name() == "dp")
     }
 }
-
-/// Reference to a tech-tree node (index into the owning tree's node vector).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct TechNodeRef(pub u32);
 
 /// `UnlockableContent` common fields, factored out so each record type does not
 /// duplicate ~20 fields. Localized strings are captured at construction from the

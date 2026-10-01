@@ -160,4 +160,7 @@ pub enum ContentCommand {
         #[arg(long)]
         json: bool,
     },
+
+    /// Negative load-order scenario (liquids before statuses) — must fail.
+    LoadOrderBad,
 }

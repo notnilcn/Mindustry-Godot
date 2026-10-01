@@ -14,13 +14,16 @@
 use std::collections::BTreeMap;
 
 use super::ctype::{Content, ErrorContent, Mappable, ModId};
-use super::id::{BlockId, BulletId, ItemId, LiquidId, StatusId};
+use super::id::{BlockId, BulletId, ItemId, LiquidId, PlanetId, StatusId, TeamEntryId};
 use super::names::{self, NameMaps};
 use super::parser_hooks::ModErrorSink;
 use super::registries::{
-    blocks::BlockDef, bullets::BulletDef, items::Item, liquids::Liquid, statuses::StatusEffect,
+    blocks::BlockDef, bullets::BulletDef, commands::UnitCommandDef, items::Item, liquids::Liquid,
+    loadouts::LoadoutDef, planets::PlanetDef, sectors::SectorPresetDef, stances::UnitStanceDef,
+    statuses::StatusEffect, teams::TeamEntry, weathers::WeatherDef,
 };
 use super::snapshot::RegistryIndexSnapshot;
+use super::tech::{TechNodeRef, TechStore, TreeId};
 use super::{ContentError, ContentRef, ContentType};
 
 /// Lifecycle phases mirrored from `ContentLoader` (`init`, `postInit`,
@@ -129,6 +132,12 @@ pub struct ContentRegistry {
     pub(crate) bullets: Vec<BulletDef>,
     pub(crate) liquids: Vec<Liquid>,
     pub(crate) statuses: Vec<StatusEffect>,
+    pub(crate) unit_commands: Vec<UnitCommandDef>,
+    pub(crate) unit_stances: Vec<UnitStanceDef>,
+    pub(crate) weathers: Vec<WeatherDef>,
+    pub(crate) sectors: Vec<SectorPresetDef>,
+    pub(crate) planets: Vec<PlanetDef>,
+    pub(crate) teams: Vec<TeamEntry>,
     pub(crate) errors: Vec<ErrorContent>,
     pub(crate) names: NameMaps,
     pub(crate) last_added: Option<ContentRef>,
@@ -137,6 +146,9 @@ pub struct ContentRegistry {
     pub(crate) arr_epoch: u32,
     pub(crate) headless: bool,
     pub(crate) mod_error_sink: Option<Box<dyn ModErrorSink>>,
+    pub(crate) tech: TechStore,
+    tech_reports: Vec<(String, super::tech::TechTreeBuildReport)>,
+    loadouts: Vec<LoadoutDef>,
     items_serpulo: Vec<ItemId>,
     items_erekir: Vec<ItemId>,
     items_erekir_only: Vec<ItemId>,
@@ -152,6 +164,12 @@ impl ContentRegistry {
             bullets: Vec::new(),
             liquids: Vec::new(),
             statuses: Vec::new(),
+            unit_commands: Vec::new(),
+            unit_stances: Vec::new(),
+            weathers: Vec::new(),
+            sectors: Vec::new(),
+            planets: Vec::new(),
+            teams: Vec::new(),
             errors: Vec::new(),
             names: NameMaps::new(),
             last_added: None,
@@ -160,6 +178,9 @@ impl ContentRegistry {
             arr_epoch: 0,
             headless,
             mod_error_sink: None,
+            tech: TechStore::default(),
+            tech_reports: Vec::new(),
+            loadouts: Vec::new(),
             items_serpulo: Vec::new(),
             items_erekir: Vec::new(),
             items_erekir_only: Vec::new(),
@@ -236,6 +257,12 @@ impl ContentRegistry {
             ContentType::Bullet => self.bullets.len(),
             ContentType::Liquid => self.liquids.len(),
             ContentType::Status => self.statuses.len(),
+            ContentType::UnitCommand => self.unit_commands.len(),
+            ContentType::UnitStance => self.unit_stances.len(),
+            ContentType::Weather => self.weathers.len(),
+            ContentType::Sector => self.sectors.len(),
+            ContentType::Planet => self.planets.len(),
+            ContentType::Team => self.teams.len(),
             ContentType::Error => self.errors.len(),
             _ => 0,
         }
@@ -244,48 +271,33 @@ impl ContentRegistry {
     /// Ordered audit entries for one content type.
     pub fn entries(&self, type_: ContentType) -> Vec<ContentEntry<'_>> {
         let mut out = Vec::new();
+        macro_rules! push_mappable {
+            ($field:ident) => {
+                for record in &self.$field {
+                    out.push(ContentEntry {
+                        id: record.id.raw(),
+                        name: Some(&record.name),
+                        kind: record.kind_name(),
+                    });
+                }
+            };
+        }
         match type_ {
-            ContentType::Item => {
-                for record in &self.items {
-                    out.push(ContentEntry {
-                        id: record.id.raw(),
-                        name: Some(&record.name),
-                        kind: record.kind_name(),
-                    });
-                }
-            }
-            ContentType::Block => {
-                for record in &self.blocks {
-                    out.push(ContentEntry {
-                        id: record.id.raw(),
-                        name: Some(&record.name),
-                        kind: record.kind_name(),
-                    });
-                }
-            }
+            ContentType::Item => push_mappable!(items),
+            ContentType::Block => push_mappable!(blocks),
+            ContentType::Liquid => push_mappable!(liquids),
+            ContentType::Status => push_mappable!(statuses),
+            ContentType::UnitCommand => push_mappable!(unit_commands),
+            ContentType::UnitStance => push_mappable!(unit_stances),
+            ContentType::Weather => push_mappable!(weathers),
+            ContentType::Sector => push_mappable!(sectors),
+            ContentType::Planet => push_mappable!(planets),
+            ContentType::Team => push_mappable!(teams),
             ContentType::Bullet => {
                 for record in &self.bullets {
                     out.push(ContentEntry {
                         id: record.id.raw(),
                         name: None,
-                        kind: record.kind_name(),
-                    });
-                }
-            }
-            ContentType::Liquid => {
-                for record in &self.liquids {
-                    out.push(ContentEntry {
-                        id: record.id.raw(),
-                        name: Some(&record.name),
-                        kind: record.kind_name(),
-                    });
-                }
-            }
-            ContentType::Status => {
-                for record in &self.statuses {
-                    out.push(ContentEntry {
-                        id: record.id.raw(),
-                        name: Some(&record.name),
                         kind: record.kind_name(),
                     });
                 }
@@ -311,6 +323,8 @@ impl ContentRegistry {
         }
         self.sweep(LifecyclePhase::Init)?;
         super::registries::statuses::link(self)?;
+        super::registries::stances::link(self)?;
+        super::registries::sectors::link(self)?;
         self.phases.init = true;
         Ok(())
     }
@@ -407,6 +421,12 @@ impl ContentRegistry {
                 ContentType::Bullet => self.bullets.truncate(len),
                 ContentType::Liquid => self.liquids.truncate(len),
                 ContentType::Status => self.statuses.truncate(len),
+                ContentType::UnitCommand => self.unit_commands.truncate(len),
+                ContentType::UnitStance => self.unit_stances.truncate(len),
+                ContentType::Weather => self.weathers.truncate(len),
+                ContentType::Sector => self.sectors.truncate(len),
+                ContentType::Planet => self.planets.truncate(len),
+                ContentType::Team => self.teams.truncate(len),
                 ContentType::Error => self.errors.truncate(len),
                 _ => {}
             }
@@ -447,6 +467,42 @@ impl ContentRegistry {
             }
             ContentType::Status => {
                 if let Some(mut record) = take_record(&mut self.statuses, content.id) {
+                    record.remove_content();
+                    self.rebuild_names();
+                }
+            }
+            ContentType::UnitCommand => {
+                if let Some(mut record) = take_record(&mut self.unit_commands, content.id) {
+                    record.remove_content();
+                    self.rebuild_names();
+                }
+            }
+            ContentType::UnitStance => {
+                if let Some(mut record) = take_record(&mut self.unit_stances, content.id) {
+                    record.remove_content();
+                    self.rebuild_names();
+                }
+            }
+            ContentType::Weather => {
+                if let Some(mut record) = take_record(&mut self.weathers, content.id) {
+                    record.remove_content();
+                    self.rebuild_names();
+                }
+            }
+            ContentType::Sector => {
+                if let Some(mut record) = take_record(&mut self.sectors, content.id) {
+                    record.remove_content();
+                    self.rebuild_names();
+                }
+            }
+            ContentType::Planet => {
+                if let Some(mut record) = take_record(&mut self.planets, content.id) {
+                    record.remove_content();
+                    self.rebuild_names();
+                }
+            }
+            ContentType::Team => {
+                if let Some(mut record) = take_record(&mut self.teams, content.id) {
                     record.remove_content();
                     self.rebuild_names();
                 }
@@ -530,6 +586,100 @@ impl ContentRegistry {
         self.block_by_name(name).map(|record| record.id)
     }
 
+    /// Convenience lookup: planet id by name.
+    pub fn planet_id(&self, name: &str) -> Option<PlanetId> {
+        self.planet_by_name(name).map(|record| record.id)
+    }
+
+    /// Starting loadouts (`Loadouts.java`; not a content ID space).
+    pub fn loadouts(&self) -> &[LoadoutDef] {
+        &self.loadouts
+    }
+
+    /// Installs the loadout table (`Loadouts.load`).
+    pub fn set_loadouts(&mut self, loadouts: Vec<LoadoutDef>) {
+        self.loadouts = loadouts;
+    }
+
+    /// Tech store (`Vars.content.techTree` equivalent).
+    pub fn tech(&self) -> &TechStore {
+        &self.tech
+    }
+
+    /// Per-tree build reports (missing names pending later registries).
+    pub fn tech_build_reports(&self) -> &[(String, super::tech::TechTreeBuildReport)] {
+        &self.tech_reports
+    }
+
+    /// Records a tree build report (called by `create_base_content`).
+    pub(crate) fn push_tech_report(
+        &mut self,
+        tree: &str,
+        report: super::tech::TechTreeBuildReport,
+    ) {
+        self.tech_reports.push((tree.to_owned(), report));
+    }
+
+    /// Registers `content.techNode`/`techNodes` (`TechNode` constructor).
+    pub(crate) fn set_tech_node(&mut self, content: ContentRef, node: TechNodeRef) {
+        super::tech::set_unlock_tech_node(self, content, node);
+    }
+
+    /// `Planets.<x>.techTree = tree`: assigns the tree and its planet to every node.
+    pub fn set_planet_tech_tree(&mut self, planet: PlanetId, tree: TreeId) {
+        if let Some(record) = self.planet_mut(planet) {
+            record.tech_tree = Some(tree);
+        }
+        let Some(root) = self.tech.tree(tree).map(|record| record.root) else {
+            return;
+        };
+        let mut nodes = Vec::new();
+        self.tech.each(root, &mut |node| nodes.push(node));
+        for node_ref in nodes {
+            if let Some(node) = self.tech.node_mut(node_ref) {
+                node.planet = Some(planet);
+            }
+        }
+    }
+
+    /// `TechNode.addPlanet`: adds `planet` to `shownPlanets` of the whole tree.
+    pub fn add_planet_to_tree(&mut self, tree: TreeId, planet: PlanetId) {
+        let Some(root) = self.tech.tree(tree).map(|record| record.root) else {
+            return;
+        };
+        let mut nodes = Vec::new();
+        self.tech.each(root, &mut |node| nodes.push(node));
+        for node_ref in nodes {
+            let content = self.tech.node(node_ref).and_then(|node| node.content);
+            if let Some(content) = content {
+                super::tech::with_unlock_fields(self, content, |fields| {
+                    if !fields.shown_planets.contains(&planet) {
+                        fields.shown_planets.push(planet);
+                    }
+                });
+            }
+        }
+    }
+
+    /// `TechNode.addDatabaseTab`: adds `tab` to `databaseTabs` of the whole tree.
+    pub fn add_database_tab_to_tree(&mut self, tree: TreeId, tab: ContentRef) {
+        let Some(root) = self.tech.tree(tree).map(|record| record.root) else {
+            return;
+        };
+        let mut nodes = Vec::new();
+        self.tech.each(root, &mut |node| nodes.push(node));
+        for node_ref in nodes {
+            let content = self.tech.node(node_ref).and_then(|node| node.content);
+            if let Some(content) = content {
+                super::tech::with_unlock_fields(self, content, |fields| {
+                    if !fields.database_tabs.contains(&tab) {
+                        fields.database_tabs.push(tab);
+                    }
+                });
+            }
+        }
+    }
+
     fn sweep(&mut self, phase: LifecyclePhase) -> Result<(), ContentError> {
         let mut mod_errors: Vec<(ContentType, u16, ContentError)> = Vec::new();
         macro_rules! sweep_type {
@@ -556,6 +706,12 @@ impl ContentRegistry {
         sweep_type!(bullets, BulletDef);
         sweep_type!(liquids, Liquid);
         sweep_type!(statuses, StatusEffect);
+        sweep_type!(unit_commands, UnitCommandDef);
+        sweep_type!(unit_stances, UnitStanceDef);
+        sweep_type!(weathers, WeatherDef);
+        sweep_type!(sectors, SectorPresetDef);
+        sweep_type!(planets, PlanetDef);
+        sweep_type!(teams, TeamEntry);
         for (type_, id, error) in &mod_errors {
             if let Some(sink) = self.mod_error_sink.as_mut() {
                 sink.handle_content_error(ContentRef::new(*type_, *id), error);
@@ -566,18 +722,23 @@ impl ContentRegistry {
 
     fn rebuild_names(&mut self) {
         let mut names = NameMaps::new();
-        for record in &self.items {
-            names.insert(ContentType::Item, &record.name, record.id.raw());
+        macro_rules! insert_names {
+            ($field:ident, $type_:expr) => {
+                for record in &self.$field {
+                    names.insert($type_, &record.name, record.id.raw());
+                }
+            };
         }
-        for record in &self.blocks {
-            names.insert(ContentType::Block, &record.name, record.id.raw());
-        }
-        for record in &self.liquids {
-            names.insert(ContentType::Liquid, &record.name, record.id.raw());
-        }
-        for record in &self.statuses {
-            names.insert(ContentType::Status, &record.name, record.id.raw());
-        }
+        insert_names!(items, ContentType::Item);
+        insert_names!(blocks, ContentType::Block);
+        insert_names!(liquids, ContentType::Liquid);
+        insert_names!(statuses, ContentType::Status);
+        insert_names!(unit_commands, ContentType::UnitCommand);
+        insert_names!(unit_stances, ContentType::UnitStance);
+        insert_names!(weathers, ContentType::Weather);
+        insert_names!(sectors, ContentType::Sector);
+        insert_names!(planets, ContentType::Planet);
+        insert_names!(teams, ContentType::Team);
         self.names = names;
     }
 }
@@ -726,6 +887,72 @@ impl ContentRegistry {
         statuses,
         StatusEffect,
         StatusId
+    );
+    mappable_accessors!(
+        add_unit_command,
+        unit_commands,
+        unit_commands_mut,
+        unit_command,
+        unit_command_mut,
+        unit_command_by_name,
+        unit_commands,
+        UnitCommandDef,
+        super::id::UnitCommandId
+    );
+    mappable_accessors!(
+        add_unit_stance,
+        unit_stances,
+        unit_stances_mut,
+        unit_stance,
+        unit_stance_mut,
+        unit_stance_by_name,
+        unit_stances,
+        UnitStanceDef,
+        super::id::UnitStanceId
+    );
+    mappable_accessors!(
+        add_weather,
+        weathers,
+        weathers_mut,
+        weather,
+        weather_mut,
+        weather_by_name,
+        weathers,
+        WeatherDef,
+        super::id::WeatherId
+    );
+    mappable_accessors!(
+        add_sector,
+        sectors,
+        sectors_mut,
+        sector,
+        sector_mut,
+        sector_by_name,
+        sectors,
+        SectorPresetDef,
+        super::id::SectorId
+    );
+    mappable_accessors!(
+        add_planet,
+        planets,
+        planets_mut,
+        planet,
+        planet_mut,
+        planet_by_name,
+        planets,
+        PlanetDef,
+        PlanetId
+    );
+    mappable_accessors!(
+        add_team,
+        teams,
+        teams_mut,
+        team,
+        team_mut,
+        team_by_name,
+        teams,
+        TeamEntry,
+        TeamEntryId
     );
 
     /// Adds a bullet record (non-mappable).

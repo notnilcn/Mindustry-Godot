@@ -25,6 +25,7 @@ pub mod registries;
 pub mod settings_store;
 pub mod snapshot;
 pub mod stacks;
+pub mod tech;
 
 use serde::{Deserialize, Serialize};
 
@@ -33,8 +34,8 @@ pub use category::Category;
 pub use color::Rgba;
 pub use ctype::{Content, ErrorContent, Mappable, ModContentInfo, ModId, UnlockFields, Unlockable};
 pub use id::{
-    BlockId, BulletId, ContentId, ItemId, LiquidId, LoadoutId, PlanetId, SectorId, StatusId,
-    TeamEntryId, UnitCommandId, UnitStanceId, UnitTypeId, WeatherId,
+    BlockId, BulletId, ContentId, ItemId, LiquidId, PlanetId, SectorId, StatusId, TeamEntryId,
+    UnitCommandId, UnitStanceId, UnitTypeId, WeatherId,
 };
 pub use load::{
     ContentEntry, ContentRegistry, LifecyclePhase, MappedId, TemporaryMapper, content_counts,
@@ -42,14 +43,32 @@ pub use load::{
 pub use names::{NameMaps, mod_content_name_map, transform_name};
 pub use registries::blocks::{BlockDef, Blocks};
 pub use registries::bullets::{BulletDef, BulletKind};
+pub use registries::commands::{ControllerKind, UnitCommandDef};
 pub use registries::create_base_content;
 pub use registries::fx_meta::{EFFECT_COUNT, EFFECTS, EffectId, EffectMeta, effect_by_name};
 pub use registries::items::Item;
 pub use registries::liquids::{CellLiquidFields, Liquid};
+pub use registries::loadouts::LoadoutDef;
+pub use registries::planets::{
+    AsteroidSpec, CampaignRuleDefaults, CloudMeshKind, EnvFlag, GeneratorKind, MeshKind, PlanetDef,
+    RuleSetterKind, Sector,
+};
+pub use registries::sectors::{
+    IdentityRemap, RuleOverrideKind, SectorPresetDef, SectorRemapProvider,
+};
+pub use registries::stances::UnitStanceDef;
 pub use registries::statuses::{
     AffinityTransition, StatusEffect, TransitionSpec, TransitionTrigger,
 };
+pub use registries::teams::TeamEntry;
+pub use registries::weathers::{
+    Attribute, ParticleWeatherFields, RainWeatherFields, WeatherDef, WeatherKind,
+};
 pub use settings_store::{MemoryUnlockStore, UnlockStore};
+pub use tech::{
+    NodeObjective, ObjectiveSpec, TechNode, TechNodeRef, TechStore, TechTreeBuildReport,
+    TechTreeBuilder, TreeId, round_to_10,
+};
 
 /// Content type enum. Ported from `ctype/ContentType.java`.
 ///
