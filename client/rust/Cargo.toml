@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
-members = ["mind-core", "mind-headless", "mind-gdext", "mind-stdb"]
-default-members = ["mind-core", "mind-headless", "mind-stdb"]
+members = ["mind-atlas", "mind-core", "mind-headless", "mind-gdext", "mind-stdb", "mind-tools"]
+default-members = ["mind-core", "mind-headless", "mind-stdb", "mind-tools"]
 
 [workspace.package]
 version = "0.1.0"
@@ -23,6 +23,9 @@ xxhash-rust = { version = "0.8", features = ["xxh3"] }
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
+# plan 03 (assets): pinned for bit-reproducible pack output (R2)
+png = "=0.17.16"
+sha2 = "=0.10.8"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

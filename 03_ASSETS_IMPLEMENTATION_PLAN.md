@@ -9,7 +9,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Draft — not started. Executable only after `00_FOUNDATION_IMPLEMENTATION_PLAN.md` and `02_CONTENT_IMPLEMENTATION_PLAN.md` milestones are green. |
+| **Status** | 🔶 In progress on `lane/03-assets` — M0 complete 2026-10-02 (workspace, migration, provenance). Executable only after `00_FOUNDATION_IMPLEMENTATION_PLAN.md` and `02_CONTENT_IMPLEMENTATION_PLAN.md` milestones are green. |
 | **Phase** | P1 (Platform & content) |
 | **Depends on** | `00_FOUNDATION_IMPLEMENTATION_PLAN.md` (workspace, spine, `mind-headless`, MCP bridge, CI), `02_CONTENT_IMPLEMENTATION_PLAN.md` (`ContentType`, content registry, `Block`/`UnitType`/`Item`/`Team`/`SectorPreset` metadata needed by generators and `@Load`). |
 | **Blocks** | `07_BLOCKS_BUILD_IMPLEMENTATION_PLAN.md`, `10_COMBAT_BULLETS_IMPLEMENTATION_PLAN.md`, `11_UNITS_AI_WAVES_IMPLEMENTATION_PLAN.md`, `14_UI_IMPLEMENTATION_PLAN.md`, `16_RENDER_WORLD_IMPLEMENTATION_PLAN.md`, `17_FX_PARTS_IMPLEMENTATION_PLAN.md`, `18_AUDIO_IMPLEMENTATION_PLAN.md`, `20_MODS_IMPLEMENTATION_PLAN.md` — every consumer of sprites/regions/bundles/sounds/icons. |
@@ -280,11 +280,11 @@ pub struct OverlaySprite { pub path: String, pub name: String, pub png: Vec<u8>,
 Smallest vertical slice first: one authored sprite (`copper-wall`) flowing source → staging → atlas page → JSON manifest → headless lookup, before any generator exists.
 
 ### M0 — Workspace, migration, provenance
-- [ ] Add `mind-atlas`, `mind-tools` crates; wire into `client/rust/Cargo.toml`; `mind-core/src/assets/` skeleton.
-- [ ] `mind-tools migrate --from <Mindustry> --to .`: copy `core/assets` → `assets/`, `core/assets-raw` → `assets-raw/`, keep every path/name; write `assets/ASSET_PROVENANCE.md` (upstream commit hash, input-tree sha256, GPL-3.0 notice) and `build/assets/migration_manifest.json`.
-- [ ] Trim: no `logicids.dat`, no `sprites_out/`, no `build/`, no `sprites.aatls`, no `version.properties`/`locales`/`basepartnames` from upstream (regenerated).
-- [ ] `tools/pack.sh` / `tools/pack.ps1` wrappers; CI job `assets-pack` (skipped when cache hit).
-- **Verify:** cleaned tree contains only hand-authored/runtime inputs; migration manifest stable across two runs.
+- [x] Add `mind-atlas`, `mind-tools` crates; wire into `client/rust/Cargo.toml`; `mind-core/src/assets/` skeleton.
+- [x] `mind-tools migrate --from <Mindustry> --to .`: copy `core/assets` → `assets/`, `core/assets-raw` → `assets-raw/`, keep every path/name; write `assets/ASSET_PROVENANCE.md` (upstream commit hash, input-tree sha256, GPL-3.0 notice) and `build/assets/migration_manifest.json`.
+- [x] Trim: no `logicids.dat`, no `sprites_out/`, no `build/`, no `sprites.aatls`, no `version.properties`/`locales`/`basepartnames` from upstream (regenerated).
+- [x] `tools/pack.sh` / `tools/pack.ps1` wrappers; CI job `assets-pack` (skipped when cache hit). — **scripts done; CI job deferred to orchestrator (HLP §5.2-1: orchestrator owns CI edits), see Changelog.**
+- **Verify:** cleaned tree contains only hand-authored/runtime inputs; migration manifest stable across two runs. ✅ (`f3a333652b…` identical both runs; `mind-headless assets migrate-check` OK)
 
 ### M1 — Packer core + vertical slice
 - [ ] `mind-atlas`: `pack.json` loading/inheritance, page allocator, `duplicatePadding`, `flattenPaths`, `stripWhitespaceCenter` (splits/offsets), ninepatch split detection, whitespace/bleed, deterministic PNG writer, `PageType` caps.
@@ -644,4 +644,5 @@ Arc classes referenced as oracles (must be fetched/attributed at execution): `ar
 
 ## Changelog
 
+- **2026-10-02 — M0 (lane/03-assets).** Workspace + migration landed. New crates `mind-atlas` (packing library; `manifest`, `migrate` trim rules) and `mind-tools` (`migrate` subcommand); `mind-core::assets` doc skeleton; `mind-headless assets migrate-check` + `paths::find_repo_root`. Vendored upstream `core/assets` (662 files) + `core/assets-raw` (2315 files) at commit `2cd7aeecf1378b3db456be9bfde8691b3cdc1bcc` → `assets/` + `assets-raw/` (2977 files, 61M+4.2M); trim rules in `mind-atlas/src/migrate.rs` (no `logicids.dat`/`sprites.aatls`/`version.properties`/`locales`/`basepartnames`/generated pages). Provenance at `assets/ASSET_PROVENANCE.md` (tree hash `cc949a8c…e264`); manifest `build/assets/migration_manifest.json` (gitignored) byte-identical across two runs (`f3a333652b…`). Evidence: `cargo test -p mind-atlas` 3/3, `cargo clippy -p mind-atlas -p mind-tools -p mind-headless --all-targets -D warnings` clean, `cargo fmt --check` clean, `mind-headless assets migrate-check` OK. Plan-text corrections: (a) CI `assets-pack` job deferred to the orchestrator (HLP §5.2-1 reserves CI edits); `tools/pack.sh`/`.ps1` wrappers landed instead. (b) §6.1 `sprites/loose/` dropped — loose textures keep upstream paths `assets/sprites/*.png` (`sprites/error.png` is FileTree parity ABI); gitignore selects only generated `sprites*.png` pages. (c) Arc fetched at pinned `archash=7445105cd2` (R1) as a sibling reference checkout for porting oracles; attribution to land with the pixmap/packer ports (M1).
 - (not started) — generated 2026-10-01 as part of the initial plan set.

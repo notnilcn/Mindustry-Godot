@@ -1,0 +1,18 @@
+[package]
+name = "mind-atlas"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Pure-Rust sprite atlas packing library (pixmaps, packer, manifest) for the Mindustry-Godot asset pipeline."
+
+[dependencies]
+png.workspace = true
+sha2.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+indexmap.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

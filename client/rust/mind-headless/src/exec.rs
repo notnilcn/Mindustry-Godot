@@ -17,7 +17,7 @@ use mind_core::scenario::{Scenario, ScenarioPlayer, read_command_log, write_comm
 use mind_core::sim::{Sim, StateDump};
 use mind_core::world::TilePos;
 
-use crate::cli::{Cli, Command, ContentCommand};
+use crate::cli::{AssetsCommand, Cli, Command, ContentCommand};
 use crate::paths;
 use crate::registry;
 use crate::report::{
@@ -125,6 +125,32 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             ContentCommand::Bench { runs, json } => cmd_content_bench(*runs, *json),
             ContentCommand::LoadOrderBad => cmd_content_load_order_bad(),
         },
+        Command::Assets { command } => match command {
+            AssetsCommand::MigrateCheck { repo, manifest } => {
+                cmd_assets_migrate_check(repo.as_deref(), manifest.as_deref())
+            }
+        },
+    }
+}
+
+/// Plan 03 §7.1b `assets migrate-check`: the vendored trees match
+/// `build/assets/migration_manifest.json` and forbidden generated files are absent.
+fn cmd_assets_migrate_check(repo: Option<&Path>, manifest: Option<&Path>) -> anyhow::Result<i32> {
+    let root = paths::find_repo_root(repo)?;
+    let manifest_path = manifest
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| root.join("build/assets/migration_manifest.json"));
+    let problems = mind_atlas::migrate::MigrationManifest::read(&manifest_path)
+        .with_context(|| format!("reading {}", manifest_path.display()))?
+        .verify(&root)?;
+    if problems.is_empty() {
+        println!("assets migrate-check: OK (repo {})", root.display());
+        Ok(EXIT_PASS)
+    } else {
+        for problem in &problems {
+            log::error!("assets migrate-check: {problem}");
+        }
+        Ok(EXIT_FAIL)
     }
 }
 

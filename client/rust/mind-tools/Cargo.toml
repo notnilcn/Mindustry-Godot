@@ -1,0 +1,21 @@
+[package]
+name = "mind-tools"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Offline asset pipeline CLI (migrate/pack/generators/ids) — the `tools:pack` replacement."
+
+[dependencies]
+mind-atlas = { path = "../mind-atlas" }
+mind-core = { path = "../mind-core" }
+clap.workspace = true
+anyhow.workspace = true
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+indexmap.workspace = true
+
+[lints]
+workspace = true

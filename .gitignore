@@ -4,6 +4,18 @@ client/bin/
 client/rust/target/
 server/spacetimedb/target/
 
+# Plan 03 asset pipeline outputs (03_ASSETS_IMPLEMENTATION_PLAN.md §6.9)
+build/
+assets/sprites/sprites*.png
+assets/sprites/sprites.atlas.json
+assets/sprites/fallback/
+assets/sprites/block_colors.png
+assets/icons/icon_codes.json
+assets/sounds.index.json
+assets/locales
+assets/shaders/godot/
+assets/shaders/shader.index.json
+
 # Generated scenario mirror (canonical files live in scenarios/)
 client/scenarios/
 
