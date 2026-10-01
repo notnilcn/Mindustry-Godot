@@ -23,3 +23,10 @@ desktop.ini
 
 # SpacetimeDB token/identity files
 client/**/identity/
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Windows temp droppings committed inside vendored addon bin dirs
+*.TMP
