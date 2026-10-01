@@ -1613,7 +1613,6 @@ dependencies = [
  "serde_json",
  "spacetimedb-sdk",
  "thiserror 2.0.21",
- "tokio",
 ]
 
 [[package]]

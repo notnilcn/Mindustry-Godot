@@ -307,11 +307,11 @@ Ordered; each milestone ends with its verification commands. **Smallest vertical
 - **Verify:** `cargo check -p mind-stdb`; `cargo check --manifest-path server/spacetimedb/Cargo.toml`; `server/build.sh --check` reports no drift; `spacetime --version` reports 2.10.1.
 
 ### M1 — Server skeleton (identity/session/profile/settings/audit)
-- [ ] `identity/tables.rs` + views + reducers: `set_username`, `create_profile`, `update_client_settings` (length/range checks, `ctx.sender()` ownership).
-- [ ] `main/lifecycle.rs`: `init` seeds protocol/config; `client_connected` upserts `Player` + inserts open `PlayerSession`; `client_disconnected` closes the session and updates `last_seen_at`.
-- [ ] `main/audit.rs`: `AuditLog` + server-only `audit()` helper; use on successful lifecycle/lobby writes.
-- [ ] `main/global.rs`: `PROTOCOL_VERSION`, rate window/cap, default map bounds.
-- [ ] `#[cfg(test)]` pure helpers in `identity/methods.rs` (validation) — typecheck gate only.
+- [x] `identity/tables.rs` + views + reducers: `set_username`, `create_profile`, `update_client_settings` (length/range checks, `ctx.sender()` ownership).
+- [x] `main/lifecycle.rs`: `init` seeds protocol/config; `client_connected` upserts `Player` + inserts open `PlayerSession`; `client_disconnected` closes the session and updates `last_seen_at`.
+- [x] `main/audit.rs`: `AuditLog` + server-only `audit()` helper; use on successful lifecycle/lobby writes.
+- [x] `main/global.rs`: `PROTOCOL_VERSION`, rate window/cap, default map bounds.
+- [x] `#[cfg(test)]` pure helpers in `identity/methods.rs` (validation) — typecheck gate only.
 - **Verify:** `cargo check --manifest-path server/spacetimedb/Cargo.toml --tests`; local publish; `spacetime sql "SELECT * FROM protocol_info"` / `player` / `player_session` show seeded/connected rows; `spacetime call` a reducer and read it back.
 
 ### M2 — `mind-stdb` connector core (offline first)
@@ -355,7 +355,7 @@ Ordered; each milestone ends with its verification commands. **Smallest vertical
 | Table (accessor) | Public | Key/index | Fields (plan 01) |
 |---|---|---|---|
 | `player` | yes | PK `identity: Identity` | `username: String`, `created_at`, `last_seen_at: Timestamp`, `protocol_version: u32` |
-| `player_session` | yes | PK `session_id: u64` auto-inc; index `by_identity_started(identity, started_at)` | `identity`, `connection_id: ConnectionId`, `started_at`, `ended_at: Option<Timestamp>` |
+| `player_session` | yes | PK `session_id: u64` auto-inc; index `by_identity_started(identity, started_at)` | `identity`, `connection_id: Option<ConnectionId>` (2.10.1 `ReducerContext::connection_id()` is `Option`), `started_at`, `ended_at: Option<Timestamp>` |
 | `player_profile` | yes | PK `profile_id` auto-inc; index `by_owner(identity)` | `identity`, `name: String`, `created_at` |
 | `client_settings` | yes (view `local_client_settings`) | PK `identity` | `ui_scale: f32`, `language: String`, `music_volume: f32`, `sfx_volume: f32`, `keybinds_json: String`, `revision: u32`, `updated_at` |
 | `protocol_info` | yes | PK `id: u8` (singleton 0) | `protocol_version: u32`, `min_client_build: u32`, `save_format_version: u32` |
@@ -546,5 +546,21 @@ Deleted at M6 (NUD-05=C, no archive): `client/Scripts/Components/` (`IComponent.
   - `cargo check --manifest-path server/spacetimedb/Cargo.toml` → `Finished dev profile`
   - `server/build.sh --check` → `== check: bindings are drift-clean ==`
   - `spacetime --version` → `spacetimedb tool version 2.10.1; spacetimedb-lib version 2.10.1`; `wasm32-unknown-unknown` target installed.
+
+#### M1 — Server skeleton (commit `01-M1`)
+
+- Module layout per §3.7: `main/{global,seeds,audit,tables,lifecycle}.rs`, `identity/{tables,methods,reducers,views}.rs`; the P0 `main/{tables,reducers}.rs` were replaced.
+- Tables: `player` (`last_seen_at`, `protocol_version`), `player_session` (open/closed with `by_identity_started`), `player_profile` (`by_owner`), `client_settings`, `protocol_info`, `relay_config` (both singleton `id = 0`), server-only `audit_log`.
+- Views: `local_player`, `local_player_profile` (latest profile), `all_players` (query-style), `local_client_settings`.
+- Reducers: `set_username`, `create_profile`, `update_client_settings` — all `ctx.sender()`-owned, cheap validation, committed actions audited (`ProfileCreate`, `ConfigChange`); lifecycle connect/disconnect audited.
+- Plan deltas recorded: §6.1 `player_session.connection_id` is `Option<ConnectionId>` (2.10.1 context API); 2.10.1 view accessor traits are `<accessor>__view` / query trait `<accessor>__query` and `AnonymousViewContext` returns `impl Query<T>` for full-table views (documented in code comments).
+- Evidence:
+  - `cargo check --manifest-path server/spacetimedb/Cargo.toml --tests` → `Finished dev profile` (validation `#[cfg(test)]` helpers typecheck).
+  - `server/build.sh` → published local `mindustry`; `== done: bindings in .../module_bindings ==`.
+  - `spacetime sql mindustry --server local 'SELECT * FROM protocol_info'` → `0 | 1 | 1 | 1`; `relay_config` → `0 | 600 | 1000 | 256 | 1000 | 1000`.
+  - `audit_log` shows `init: seeded protocol_info and relay_config`, then connect/disconnect/connect rows with the CLI identity; `player`/`player_session` show the created row and closed sessions.
+  - `spacetime call --server local mindustry update_client_settings 1.0 '"en"' 0.5 0.25 '"{}"'` then `SELECT … FROM client_settings` → `1 | "en" | 0.5 | 0.25 | 1`.
+  - `SELECT identity, username FROM all_players` works (view query); `server/build.sh --check` → drift-clean; `cargo check -p mind-stdb` still green against the regenerated bindings.
+- Divergence note: 2.10.1 *table* accessor traits need `use spacetimedb::Table` for `insert`/`iter`; *view* code needs `<accessor>__view` (and `<accessor>__query` for query-style views). Recorded in `identity/views.rs` comments; no plan text change beyond the §6.1 cell above.
 
 

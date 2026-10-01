@@ -9,7 +9,9 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 pub struct Player {
     pub identity: __sdk::Identity,
     pub username: String,
-    pub last_seen: __sdk::Timestamp,
+    pub created_at: __sdk::Timestamp,
+    pub last_seen_at: __sdk::Timestamp,
+    pub protocol_version: u32,
 }
 
 impl __sdk::InModule for Player {
@@ -22,7 +24,9 @@ impl __sdk::InModule for Player {
 pub struct PlayerCols {
     pub identity: __sdk::__query_builder::Col<Player, __sdk::Identity>,
     pub username: __sdk::__query_builder::Col<Player, String>,
-    pub last_seen: __sdk::__query_builder::Col<Player, __sdk::Timestamp>,
+    pub created_at: __sdk::__query_builder::Col<Player, __sdk::Timestamp>,
+    pub last_seen_at: __sdk::__query_builder::Col<Player, __sdk::Timestamp>,
+    pub protocol_version: __sdk::__query_builder::Col<Player, u32>,
 }
 
 impl __sdk::__query_builder::HasCols for Player {
@@ -31,7 +35,9 @@ impl __sdk::__query_builder::HasCols for Player {
         PlayerCols {
             identity: __sdk::__query_builder::Col::new(table_name, "identity"),
             username: __sdk::__query_builder::Col::new(table_name, "username"),
-            last_seen: __sdk::__query_builder::Col::new(table_name, "last_seen"),
+            created_at: __sdk::__query_builder::Col::new(table_name, "created_at"),
+            last_seen_at: __sdk::__query_builder::Col::new(table_name, "last_seen_at"),
+            protocol_version: __sdk::__query_builder::Col::new(table_name, "protocol_version"),
         }
     }
 }

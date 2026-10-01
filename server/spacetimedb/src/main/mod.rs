@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! P0 skeleton modules. Plan 01 adds `identity/`, `relay/`, `global.rs`, `seeds.rs`
-//! and `audit.rs` per `01_PLATFORM_STDB_IMPLEMENTATION_PLAN.md` §3.7.
+//! Module-wide skeleton (plan 01 §3.7): constants, seeds, audit and lifecycle.
+//! Subsystem modules (`identity/`, later `relay/`) own their own tables,
+//! reducers and views.
 
+pub mod audit;
+pub mod global;
 pub mod lifecycle;
-pub mod reducers;
+pub mod seeds;
 pub mod tables;
