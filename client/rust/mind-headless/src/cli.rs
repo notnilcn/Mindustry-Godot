@@ -150,6 +150,15 @@ pub enum IoCommand {
         #[arg(long)]
         json: bool,
     },
+
+    /// Settings persistence self-check (plan 04 M1 §7b): set → flush → reload
+    /// equality, then a corrupted settings file falling back to defaults.
+    /// Uses the global `--data-dir` as the settings root.
+    Settings {
+        /// Emit a machine-readable JSON report.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// `content` subcommands (plan 02 §7b).

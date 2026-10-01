@@ -22,7 +22,8 @@ use crate::paths;
 use crate::registry;
 use crate::report::{
     BenchReport, ContentBenchReport, ContentIdEntry, ContentIdsReport, ContentLoadReport,
-    ContentTypeCount, ContentTypeEntries, IoDumpMetaReport, RunReport, SimReport, TileCheck,
+    ContentTypeCount, ContentTypeEntries, IoDumpMetaReport, IoSettingsReport, RunReport, SimReport,
+    TileCheck,
 };
 use crate::stdb_scenarios::StdbScenario;
 
@@ -127,8 +128,87 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
         },
         Command::Io { command } => match command {
             IoCommand::DumpMeta { file, json } => cmd_io_dump_meta(file, *json),
+            IoCommand::Settings { json } => cmd_io_settings(&cli, *json),
         },
     }
+}
+
+/// Plan 04 M1 (§7b): settings set → flush → reload equality, corrupt file →
+/// defaults, no panic. Uses NativeFs against `--data-dir` (a scratch dir).
+fn cmd_io_settings(cli: &Cli, json: bool) -> anyhow::Result<i32> {
+    use mind_core::io::fs::NativeFs;
+    use mind_core::io::settings::{
+        KEY_LAST_SECTOR_SAVE, KEY_SAVE_INTERVAL, KEY_UI_SCALE, slot_autosave_key, slot_name_key,
+    };
+    use mind_core::io::{FileSystem, Paths, SettingsStore};
+
+    let fs = NativeFs;
+    let paths = Paths::resolve(cli.data_dir.as_deref());
+    fs.mkdirs(&paths.config())?;
+    // Deterministic start: the scenario owns this data-dir.
+    let _ = fs.delete(&paths.settings_file());
+
+    // Phase 1: set + flush.
+    let mut store = SettingsStore::new();
+    store.put_string(&slot_name_key("0"), "m1-base");
+    store.put_bool(&slot_autosave_key("0"), false);
+    store.put_i32(KEY_SAVE_INTERVAL, 7);
+    store.put_i32(KEY_UI_SCALE, 150);
+    store.put_string(KEY_LAST_SECTOR_SAVE, "sector-serpulo-12");
+    store.put_json("controlGroups", &vec![vec![1i32, 2], vec![3]])?;
+    store.force_save(&fs, &paths)?;
+
+    // Phase 2: reload → equality.
+    let reloaded = SettingsStore::load(&fs, &paths);
+    let checks: Vec<(&str, bool)> = vec![
+        (
+            "slot-name",
+            reloaded.get_string(&slot_name_key("0"), "?") == "m1-base",
+        ),
+        (
+            "slot-autosave",
+            !reloaded.get_bool(&slot_autosave_key("0"), true),
+        ),
+        ("saveinterval", reloaded.get_i32(KEY_SAVE_INTERVAL, 2) == 7),
+        ("uiscale", reloaded.get_i32(KEY_UI_SCALE, 100) == 150),
+        (
+            "last-sector-save",
+            reloaded.get_string(KEY_LAST_SECTOR_SAVE, "<none>") == "sector-serpulo-12",
+        ),
+        (
+            "json",
+            reloaded.get_json::<Vec<Vec<i32>>>("controlGroups")? == Some(vec![vec![1, 2], vec![3]]),
+        ),
+    ];
+    let persisted = checks.iter().all(|(_, ok)| *ok);
+    for (name, ok) in &checks {
+        if !ok {
+            log::error!("settings persistence check failed: {name}");
+        }
+    }
+
+    // Phase 3: corrupt the file → defaults, no panic.
+    fs.write(&paths.settings_file(), b"garbage-not-settings")?;
+    let corrupt = SettingsStore::load(&fs, &paths);
+    let corrupt_fallback = corrupt.is_empty() && corrupt.get_i32(KEY_SAVE_INTERVAL, 2) == 2;
+
+    // Phase 4: the store recovers (rewrites a valid file).
+    let mut recovered = corrupt;
+    recovered.put_i32(KEY_SAVE_INTERVAL, 3);
+    recovered.force_save(&fs, &paths)?;
+    let recovered_ok = SettingsStore::load(&fs, &paths).get_i32(KEY_SAVE_INTERVAL, 2) == 3;
+
+    let pass = persisted && corrupt_fallback && recovered_ok;
+    let report = IoSettingsReport {
+        data_dir: paths.root().display().to_string(),
+        persisted,
+        corrupt_fallback,
+        recovered: recovered_ok,
+        keys_checked: checks.iter().map(|(name, _)| (*name).to_owned()).collect(),
+        pass,
+    };
+    print_report(&report, json)?;
+    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
 }
 
 /// Plan 04 M0: meta-only read of a save file written by the IO engine.

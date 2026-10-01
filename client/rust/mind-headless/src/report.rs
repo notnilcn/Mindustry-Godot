@@ -253,3 +253,20 @@ pub struct IoDumpMetaReport {
     /// All meta tags in file order.
     pub tags: Vec<(String, String)>,
 }
+
+/// `io settings` report (plan 04 M1 §7b).
+#[derive(Debug, Clone, Serialize)]
+pub struct IoSettingsReport {
+    /// Data root the scenario ran against.
+    pub data_dir: String,
+    /// Set → flush → reload equality held for every key.
+    pub persisted: bool,
+    /// Corrupted settings file fell back to defaults without a panic.
+    pub corrupt_fallback: bool,
+    /// The store rewrote a valid file after the corruption.
+    pub recovered: bool,
+    /// Keys exercised in the persistence phase.
+    pub keys_checked: Vec<String>,
+    /// Overall pass/fail.
+    pub pass: bool,
+}
