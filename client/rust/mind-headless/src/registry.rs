@@ -5,6 +5,25 @@
 //! Every plan contributes scenarios named `{system}_{case}` (§7b); this registry is
 //! the Rust side of `mind-headless list`/`run`.
 
+use mind_core::content::ContentType;
+
+/// Content types reported by `content load`/`content ids` (plan 02 §7b): the 12
+/// live ID spaces in `ContentType.all` order (`_UNUSED`/`error` excluded).
+pub static LIVE_CONTENT_TYPES: &[ContentType] = &[
+    ContentType::Item,
+    ContentType::Block,
+    ContentType::Bullet,
+    ContentType::Liquid,
+    ContentType::Status,
+    ContentType::Unit,
+    ContentType::Weather,
+    ContentType::Sector,
+    ContentType::Planet,
+    ContentType::Team,
+    ContentType::UnitCommand,
+    ContentType::UnitStance,
+];
+
 /// One registered scenario.
 #[derive(Debug, Clone, Copy)]
 pub struct ScenarioFixture {

@@ -143,7 +143,7 @@ fn invalid_commands_are_noops_or_errors() {
         sim.apply(Command::Place {
             x: 0,
             y: 0,
-            block: BlockId(999)
+            block: BlockId::new(999)
         }),
         Err(SimError::UnknownBlock(999))
     ));
