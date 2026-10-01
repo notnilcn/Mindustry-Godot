@@ -121,6 +121,22 @@ pub struct StdbBinderReport {
     pub expect_live: Option<Vec<u32>>,
 }
 
+/// `stdb_command_order` report (plan 01 §7.2).
+#[derive(Debug, Clone, Serialize)]
+pub struct StdbOrderReport {
+    /// Scenario name.
+    pub scenario: String,
+    /// Overall pass/fail.
+    pub pass: bool,
+    /// Applied command IDs in order.
+    pub applied_order: Vec<u64>,
+    /// Whether the injected duplicate was ignored.
+    pub duplicate_ignored: bool,
+    /// First order error observed, if any (`"gap: expected 2, got 3"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub order_error: Option<String>,
+}
+
 /// `bench` report (also committed into `bench_baseline.json`).
 #[derive(Debug, Clone, Serialize)]
 pub struct BenchReport {

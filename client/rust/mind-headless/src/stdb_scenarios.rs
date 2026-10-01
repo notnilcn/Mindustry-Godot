@@ -12,13 +12,16 @@ use std::path::Path;
 use std::time::Instant;
 
 use anyhow::{Context, anyhow};
-use mind_stdb::module_bindings::{ProtocolInfo, ProtocolInfoTableAccessor};
-use mind_stdb::{ConnectionConfig, Connector, RowChange, StdbMode};
+use mind_stdb::module_bindings::{
+    CommandKind, MatchCommand, ProtocolInfo, ProtocolInfoTableAccessor,
+};
+use mind_stdb::{CommandStream, ConnectionConfig, Connector, OrderError, RowChange, StdbMode};
 use serde::{Deserialize, Serialize};
+use spacetimedb_sdk::{Identity, Timestamp};
 
 use crate::cli::Cli;
 use crate::paths;
-use crate::report::{StdbBinderReport, StdbReport};
+use crate::report::{StdbBinderReport, StdbOrderReport, StdbReport};
 
 /// Exit code: success.
 const EXIT_PASS: i32 = 0;
@@ -32,6 +35,8 @@ pub enum StdbScenario {
     OfflineBoot,
     /// Binder replay/order contract against a synthetic row source.
     BinderReplay,
+    /// CommandStream ordering/dedup/gap contract with canned command rows.
+    CommandOrder,
 }
 
 impl StdbScenario {
@@ -40,6 +45,7 @@ impl StdbScenario {
         match self {
             Self::OfflineBoot => "stdb_offline_boot",
             Self::BinderReplay => "stdb_binder_replay",
+            Self::CommandOrder => "stdb_command_order",
         }
     }
 
@@ -48,6 +54,7 @@ impl StdbScenario {
         match name {
             "stdb_offline_boot" => Some(Self::OfflineBoot),
             "stdb_binder_replay" => Some(Self::BinderReplay),
+            "stdb_command_order" => Some(Self::CommandOrder),
             _ => None,
         }
     }
@@ -82,7 +89,154 @@ pub fn run(cli: &Cli, kind: StdbScenario, dump: Option<&Path>, json: bool) -> an
     match kind {
         StdbScenario::OfflineBoot => run_offline_boot(cli, dump, json),
         StdbScenario::BinderReplay => run_binder_replay(cli, dump, json),
+        StdbScenario::CommandOrder => run_command_order(cli, dump, json),
     }
+}
+
+/// `stdb_command_order` fixture (`scenarios/stdb_command_order.json`).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CommandOrderScenario {
+    /// Scenario name (must match the registry).
+    pub name: String,
+    /// Match both the stream and canned rows use.
+    pub match_id: u64,
+    /// Rows injected out of arrival order.
+    pub rows: Vec<CannedCommand>,
+    /// An already-delivered row injected again (must be ignored).
+    pub duplicate: CannedCommand,
+    /// Rows with a per-sender sequence gap.
+    pub gap_rows: Vec<CannedCommand>,
+    /// Golden expectations.
+    #[serde(default)]
+    pub expect: Option<CommandOrderExpect>,
+}
+
+/// One canned command row (subset of `MatchCommand`).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CannedCommand {
+    /// Global commit order.
+    pub command_id: u64,
+    /// Sender selector (repeated as a byte array identity).
+    pub sender: u8,
+    /// Per-sender sequence.
+    pub sender_seq: u64,
+    /// Sender's sim tick.
+    pub client_tick: u64,
+}
+
+impl CannedCommand {
+    fn to_row(&self, match_id: u64) -> MatchCommand {
+        MatchCommand {
+            command_id: self.command_id,
+            match_id,
+            sender: Identity::from_byte_array([self.sender; 32]),
+            sender_seq: self.sender_seq,
+            client_tick: self.client_tick,
+            kind: CommandKind::Ping(self.command_id),
+            sent_at: Timestamp::UNIX_EPOCH,
+        }
+    }
+}
+
+/// Golden expectations for [`CommandOrderScenario`].
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CommandOrderExpect {
+    /// Expected applied `command_id` order after the first batch.
+    pub applied_order: Vec<u64>,
+    /// Whether [`CommandOrderScenario::duplicate`] must be ignored.
+    pub duplicate_ignored: bool,
+    /// Expected `sender_seq` in the gap error.
+    pub gap_expected: u64,
+    /// Received `sender_seq` in the gap error.
+    pub gap_got: u64,
+}
+
+fn run_command_order(cli: &Cli, dump: Option<&Path>, json: bool) -> anyhow::Result<i32> {
+    let fixture_path =
+        fixture_file(cli, StdbScenario::CommandOrder).context("resolving stdb fixture")?;
+    let text = std::fs::read_to_string(&fixture_path)
+        .with_context(|| format!("reading `{}`", fixture_path.display()))?;
+    let scenario: CommandOrderScenario = serde_json::from_str(&text)
+        .with_context(|| format!("parsing `{}`", fixture_path.display()))?;
+
+    let config = ConnectionConfig {
+        mode: StdbMode::Offline,
+        token_store_path: Some(std::env::temp_dir().join("mind-headless-stdb")),
+        ..ConnectionConfig::local()
+    };
+    let mut connector = Connector::new(config);
+    let mut stream = CommandStream::subscribe(&mut connector, scenario.match_id);
+
+    for canned in &scenario.rows {
+        stream.inject(canned.to_row(scenario.match_id));
+    }
+    let applied_order: Vec<u64> = stream
+        .drain()
+        .into_iter()
+        .map(|row| row.command_id)
+        .collect();
+
+    stream.inject(scenario.duplicate.to_row(scenario.match_id));
+    let duplicate_ignored = stream.drain().is_empty();
+
+    for canned in &scenario.gap_rows {
+        stream.inject(canned.to_row(scenario.match_id));
+    }
+    let _ = stream.drain();
+    let order_error = stream.order_error().map(|error| match error {
+        OrderError::Gap { expected, got, .. } => format!("gap: expected {expected}, got {got}"),
+        OrderError::Regression { previous, incoming } => {
+            format!("regression: {previous} -> {incoming}")
+        }
+    });
+
+    let mut pass = true;
+    if let Some(expect) = &scenario.expect {
+        if applied_order != expect.applied_order {
+            log::error!(
+                "stdb_command_order: applied {applied_order:?} != {:?}",
+                expect.applied_order
+            );
+            pass = false;
+        }
+        if duplicate_ignored != expect.duplicate_ignored {
+            log::error!("stdb_command_order: duplicate was not ignored");
+            pass = false;
+        }
+        let expect_error = format!(
+            "gap: expected {}, got {}",
+            expect.gap_expected, expect.gap_got
+        );
+        if order_error.as_deref() != Some(expect_error.as_str()) {
+            log::error!("stdb_command_order: order error {order_error:?} != `{expect_error}`");
+            pass = false;
+        }
+    }
+
+    if let Some(path) = dump {
+        let dump_json = serde_json::json!({
+            "scenario": scenario.name,
+            "applied_order": applied_order,
+            "duplicate_ignored": duplicate_ignored,
+            "order_error": order_error,
+        });
+        std::fs::write(path, serde_json::to_string_pretty(&dump_json)?)
+            .with_context(|| format!("writing dump `{}`", path.display()))?;
+    }
+
+    let report = StdbOrderReport {
+        scenario: scenario.name,
+        pass,
+        applied_order,
+        duplicate_ignored,
+        order_error,
+    };
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("{}", serde_json::to_string(&report)?);
+    }
+    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
 }
 
 /// `stdb_binder_replay` fixture (`scenarios/stdb_binder_replay.json`).

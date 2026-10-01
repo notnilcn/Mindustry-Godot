@@ -12,11 +12,15 @@
 pub const BASE_TABLES: &[&str] = &["protocol_info", "relay_config", "local_client_settings"];
 
 /// Lobby wave: player roster/profile selection before joining a match.
-pub const LOBBY_TABLES: &[&str] = &["local_player", "local_player_profile", "all_players"];
+pub const LOBBY_TABLES: &[&str] = &[
+    "local_player",
+    "local_player_profile",
+    "all_players",
+    "my_matches",
+];
 
-/// Game wave: the live match (M4 adds `my_match`/`my_match_commands`); raised
-/// explicitly on join and dropped on leave.
-pub const GAME_TABLES: &[&str] = &[];
+/// Game wave: the live match; raised explicitly on join and dropped on leave.
+pub const GAME_TABLES: &[&str] = &["my_match", "my_match_commands"];
 
 /// One of the three subscription waves (plan 01 §3.6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -162,7 +166,7 @@ mod tests {
     fn wave_tables_are_unique_and_all_known() {
         let mut seen: Vec<&str> = Vec::new();
         for wave in WaveName::ALL {
-            assert!(!wave.tables().is_empty() || wave == WaveName::Game);
+            assert!(!wave.tables().is_empty());
             for table in wave.tables() {
                 assert!(
                     !seen.contains(table),

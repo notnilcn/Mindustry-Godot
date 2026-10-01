@@ -47,6 +47,10 @@ pub static SCENARIOS: &[ScenarioFixture] = &[
         name: "stdb_binder_replay",
         file: "stdb_binder_replay.json",
     },
+    ScenarioFixture {
+        name: "stdb_command_order",
+        file: "stdb_command_order.json",
+    },
 ];
 
 /// Registered scenario names.

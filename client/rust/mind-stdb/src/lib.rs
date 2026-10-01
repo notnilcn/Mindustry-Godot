@@ -24,6 +24,7 @@ pub mod identity;
 #[rustfmt::skip]
 pub mod module_bindings;
 pub mod protocol;
+pub mod relay;
 pub mod token;
 pub mod waves;
 
@@ -32,6 +33,7 @@ pub use config::{Backoff, ConnectPolicy, ConnectionConfig, StdbMode};
 pub use connector::{Connector, ConnectorError, ConnectorEvent, ConnectorState};
 pub use identity::{LocalIdentity, is_player_arg, parse_player_suffix, parse_player_suffix_from};
 pub use protocol::{CLIENT_BUILD, PROTOCOL_VERSION, ProtocolError, check_protocol};
+pub use relay::{CommandStream, OrderError};
 pub use token::{FileTokenStore, TokenStore, token_key};
 pub use waves::{SubscriptionWaves, WaveEvent, WaveName};
 

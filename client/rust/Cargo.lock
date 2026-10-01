@@ -1603,6 +1603,7 @@ dependencies = [
  "mind-stdb",
  "serde",
  "serde_json",
+ "spacetimedb-sdk",
 ]
 
 [[package]]

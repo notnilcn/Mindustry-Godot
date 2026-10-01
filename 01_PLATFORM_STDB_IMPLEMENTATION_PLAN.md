@@ -199,7 +199,9 @@ pub struct RelayMatch {
     pub started_at: Option<Timestamp>, pub ended_at: Option<Timestamp>,
 }
 
-#[table(accessor = relay_member, index(accessor = by_match_identity, btree(columns = [match_id, identity])))]
+#[table(accessor = relay_member,
+        index(accessor = by_match_identity, btree(columns = [match_id, identity])),
+        index(accessor = by_identity, btree(columns = [identity, match_id])))] // M4: needed for the per-caller views
 pub struct RelayMember {
     #[primary_key] #[auto_inc] pub member_id: u64,
     #[index(btree)] pub match_id: u64,
@@ -227,6 +229,11 @@ pub enum CommandKind {
     ConfigBlock { x: i32, y: i32, config: u32 },
     // plan 21 owns the full parity set (unit orders, objectives, payloads, ...)
 }
+// M4 implementation note (recorded 2026-10-01): STDB 2.10.1's `SpacetimeType`
+// derive only accepts unit/newtype variants, so the payloads are product
+// structs (`PlaceBlock`/`BreakBlock`/`ConfigBlock`) and the variants are
+// newtypes (`Ping(u64)`, `PlaceBlock(PlaceBlock)`, ...). The contract above is
+// unchanged in meaning; plan 21 owns the schema hard-cut.
 
 #[table(accessor = command_rate)]                    // server-only
 pub struct CommandRate {
@@ -252,7 +259,7 @@ Ordering contract:
 3. **Protocol:** match `protocol_version` equals module `PROTOCOL_VERSION` and client is on the same build (client sends nothing; the check is on match creation and on the client handshake view).
 4. **Enum/payload shape:** `CommandKind` is exhaustive; no opaque bytes.
 5. **Coarse range/existence:** for placement/config commands, `0 <= x < map_width_tiles`, `0 <= y < map_height_tiles`, `rotation <= 3`, `block_id != 0`. No tile occupancy, no resources, no rule legality — those are sim-side and stay client-local until D2's sim arrives server-side.
-6. **Per-sender sequence:** `sender_seq` must be strictly increasing per sender (`CommandRate.last_sender_seq` persists across rate-window rolls, so replayed old sequences are rejected).
+6. **Per-sender sequence:** `sender_seq` must be strictly increasing per sender (`CommandRate.last_sender_seq` persists across rate-window rolls, so replayed old sequences are rejected). **M4 implementation note:** the reducer signature has no `sender_seq` argument, so the server assigns it atomically from `CommandRate.last_sender_seq` (+1, overflow-checked); the client still verifies continuity (gap detection) as a protocol-violation detector.
 
 Rejections return `Err(String)` (rolled back) and log via `log::warn!`; successful lifecycle events (`create_match`, `join_match`, `start_match`) write `AuditLog` rows. This split is deliberate: a failed reducer's writes roll back, so a rejection cannot persist an audit row in the same transaction.
 
@@ -330,10 +337,10 @@ Ordered; each milestone ends with its verification commands. **Smallest vertical
 - **Verify:** `cargo test -p mind-stdb`; with local server: `MIND_STDB_IT=1 cargo test -p mind-stdb -- --ignored local_connect_applies_base_and_lobby_waves`.
 
 ### M4 — Relay foundation (match/member/command + validation + CommandStream)
-- [ ] `relay/tables.rs`, `methods.rs` (`require_member`, `rate_allow`, `validate_kind`), `reducers.rs` (`create_match`, `join_match`, `leave_match`, `start_match`, `send_match_command`), `views.rs` (`my_matches`, `my_match`, `my_match_commands`).
-- [ ] `relay.rs` client: `CommandStream` binding `my_match_commands`, ordering by `command_id`, dedup, per-sender gap detection, `applied_count`/`last_command_id`/`order_error`.
-- [ ] Unit tests: order-not-arrival, duplicate ignore, per-sender gap flag, auto-inc numeric gaps are not loss; server `#[cfg(test)]`: bounds rejection, rate window roll.
-- [ ] Integration tests (env-gated): `two_clients_relay_ping_round_trip`, `relay_rejects_non_member_and_rate_limit`.
+- [x] `relay/tables.rs`, `methods.rs` (`require_member`, `rate_allow`, `validate_kind`), `reducers.rs` (`create_match`, `join_match`, `leave_match`, `start_match`, `send_match_command`), `views.rs` (`my_matches`, `my_match`, `my_match_commands`).
+- [x] `relay.rs` client: `CommandStream` binding `my_match_commands`, ordering by `command_id`, dedup, per-sender gap detection, `applied_count`/`last_command_id`/`order_error`.
+- [x] Unit tests: order-not-arrival, duplicate ignore, per-sender gap flag, auto-inc numeric gaps are not loss; server `#[cfg(test)]`: bounds rejection, rate window roll.
+- [x] Integration tests (env-gated): `two_clients_relay_ping_round_trip`, `relay_rejects_non_member_and_rate_limit`.
 - **Verify:** `cargo test -p mind-stdb`; `cargo check --manifest-path server/spacetimedb/Cargo.toml --tests`; `MIND_STDB_IT=1 cargo test -p mind-stdb -- --ignored two_clients_relay_ping_round_trip`.
 
 ### M5 — gdext autoload + binder node + MCP playtest
@@ -588,5 +595,19 @@ Deleted at M6 (NUD-05=C, no archive): `client/Scripts/Components/` (`IComponent.
   - `server/build.sh --db mindustry-it` created the integration DB; `MIND_STDB_IT=1 cargo test -p mind-stdb -- --ignored local_connect_applies_base_and_lobby_waves` → `1 passed` (base+lobby waves applied, `WaveApplied(Lobby)` observed, `local_player` insert delivered, `relay_config` cache replay delivered).
   - `cargo fmt -p mind-stdb -p mind-headless -- --check` clean; `cargo clippy -p mind-stdb -p mind-headless --all-targets -- -D warnings` clean.
 - Deferred: `stdb_command_order` (M4, needs `match_command`).
+
+#### M4 — Relay foundation (commit `01-M4`)
+
+- Server: `relay/{tables,methods,reducers,views}.rs` per §3.7 — `relay_match`/`relay_member`/private `match_command`/server-only `command_rate`; `create_match` (creator auto-joins, bounds from `relay_config`), `join_match`, `leave_match`, `start_match`, `send_match_command`; `my_matches`/`my_match`/`my_match_commands` per-caller views; rejection paths log via `log::warn!` (R7).
+- Client: `relay.rs::CommandStream` (sort by `command_id`, dedup by `command_id`, per-sender `sender_seq` gap detection, `applied_count`/`last_command_id`/`order_error`, synthetic `inject` hook); connector reducer methods (`create_match`/`join_match`/`leave_match`/`start_match`/`send_match_command`/`send_ping`); Game wave now subscribes `my_match` + `my_match_commands`; Lobby wave gained `my_matches` (plan §3.6 listed it; missed in the M2/M3 list, fixed here).
+- Divergences recorded in §3.8/§3.9 above: 2.10.1 newtype `CommandKind` payloads; `RelayMember.by_identity` index for the per-caller views; server-assigned `sender_seq`.
+- New headless scenario `stdb_command_order` (canned rows): order-not-arrival, duplicate ignored, per-sender gap flagged, auto-inc gaps not loss.
+- Evidence:
+  - `cargo test -p mind-stdb` → `23 passed; 0 failed` + doc-test `1 passed`; the 3 integration tests stay `ignored`.
+  - `cargo run -p mind-headless -- run stdb_command_order --json` → `{"pass":true,"applied_order":[7,8,9],"duplicate_ignored":true,"order_error":"gap: expected 2, got 3"}`.
+  - `server/build.sh` + `server/build.sh --db mindustry-it` published; `server/build.sh --check` → drift-clean; `spacetime describe mindustry --server local --json` lists 11 tables (incl. `match_command`, `command_rate`) and 7 views (incl. `my_match`, `my_matches`, `my_match_commands`).
+  - `MIND_STDB_IT=1 cargo test -p mind-stdb -- --ignored` → `3 passed`: base/lobby waves, two-client ping round trip (both peers apply the command, no order error), non-member rejection + rate limit (700 sent in one burst, 600 accepted; 100 `rate limit exceeded` warnings in `spacetime logs`).
+  - `cargo check --manifest-path server/spacetimedb/Cargo.toml --tests` clean; `cargo fmt --check` and `cargo clippy -p mind-stdb -p mind-headless --all-targets -- -D warnings` clean.
+- Test-rig note: SDK reducer sends flush while their own connection is pumped (`frame_tick`), so the ITs pump both peers; documented in `tests/it.rs`.
 
 
