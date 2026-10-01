@@ -72,6 +72,88 @@ pub fn all_tables() -> Vec<&'static str> {
     tables
 }
 
+/// Per-connection wave bookkeeping (plan §3.6).
+///
+/// `desired` survives disconnects (the connector re-issues desired waves on
+/// every connect); `applied` is cleared on disconnect.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubscriptionWaves {
+    applied: [bool; 3],
+    desired: [bool; 3],
+}
+
+impl Default for SubscriptionWaves {
+    fn default() -> Self {
+        let mut desired = [false; 3];
+        // Base + Lobby are auto-subscribed on connect; Game is explicit.
+        desired[wave_index(WaveName::Base)] = true;
+        desired[wave_index(WaveName::Lobby)] = true;
+        Self {
+            applied: [false; 3],
+            desired,
+        }
+    }
+}
+
+impl SubscriptionWaves {
+    /// New state with Base+Lobby desired and nothing applied.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Whether `wave` has applied on the current connection.
+    pub fn is_applied(&self, wave: WaveName) -> bool {
+        self.applied[wave_index(wave)]
+    }
+
+    /// Whether `wave` should be subscribed whenever connected.
+    pub fn is_desired(&self, wave: WaveName) -> bool {
+        self.desired[wave_index(wave)]
+    }
+
+    /// Sets the desired flag (does not touch `applied`).
+    pub fn set_desired(&mut self, wave: WaveName, desired: bool) {
+        self.desired[wave_index(wave)] = desired;
+    }
+
+    /// Records that `wave` applied.
+    pub fn mark_applied(&mut self, wave: WaveName) {
+        self.applied[wave_index(wave)] = true;
+    }
+
+    /// Records that `wave` is no longer active.
+    pub fn mark_dropped(&mut self, wave: WaveName) {
+        self.applied[wave_index(wave)] = false;
+    }
+
+    /// Clears every applied flag (connection dropped); desired flags survive.
+    pub fn clear(&mut self) {
+        self.applied = [false; 3];
+    }
+}
+
+/// Wave lifecycle event (public mirror of the connector's internal callback).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WaveEvent {
+    /// The wave's rows are in the client cache.
+    Applied(WaveName),
+    /// The wave failed to subscribe.
+    Error {
+        /// Failed wave.
+        wave: WaveName,
+        /// Human-readable reason.
+        message: String,
+    },
+}
+
+fn wave_index(wave: WaveName) -> usize {
+    match wave {
+        WaveName::Base => 0,
+        WaveName::Lobby => 1,
+        WaveName::Game => 2,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -91,5 +173,26 @@ mod tests {
             }
         }
         assert_eq!(all_tables().len(), seen.len());
+    }
+
+    #[test]
+    fn subscription_waves_track_desired_and_applied() {
+        let mut waves = SubscriptionWaves::new();
+        assert!(waves.is_desired(WaveName::Base));
+        assert!(waves.is_desired(WaveName::Lobby));
+        assert!(!waves.is_desired(WaveName::Game));
+        assert!(!waves.is_applied(WaveName::Base));
+
+        waves.set_desired(WaveName::Game, true);
+        waves.mark_applied(WaveName::Game);
+        assert!(waves.is_applied(WaveName::Game));
+
+        // Disconnect clears applied but keeps desired.
+        waves.clear();
+        assert!(!waves.is_applied(WaveName::Game));
+        assert!(waves.is_desired(WaveName::Game));
+
+        waves.mark_dropped(WaveName::Base);
+        assert!(!waves.is_applied(WaveName::Base));
     }
 }

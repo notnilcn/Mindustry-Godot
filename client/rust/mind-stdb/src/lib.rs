@@ -27,13 +27,13 @@ pub mod protocol;
 pub mod token;
 pub mod waves;
 
-pub use binder::{BinderHandle, RowChange, TableBinder};
+pub use binder::{BinderOptions, RowChange, TableBinder};
 pub use config::{Backoff, ConnectPolicy, ConnectionConfig, StdbMode};
 pub use connector::{Connector, ConnectorError, ConnectorEvent, ConnectorState};
 pub use identity::{LocalIdentity, is_player_arg, parse_player_suffix, parse_player_suffix_from};
 pub use protocol::{CLIENT_BUILD, PROTOCOL_VERSION, ProtocolError, check_protocol};
 pub use token::{FileTokenStore, TokenStore, token_key};
-pub use waves::WaveName;
+pub use waves::{SubscriptionWaves, WaveEvent, WaveName};
 
 /// Version of the `mind-stdb` crate, taken from `Cargo.toml`.
 pub const MIND_VERSION: &str = env!("CARGO_PKG_VERSION");

@@ -1,25 +1,38 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 //! [`Connector`] — the Rust replacement for the C# `DatabaseConnector` +
-//! `TableSubscriber` lifecycle (plan 01 §3.3/§3.4).
+//! `TableSubscriber` lifecycle (plan 01 §3.3/§3.4/§3.6).
 //!
 //! The pump contract: [`Connector::pump`] calls `DbConnection::frame_tick`
 //! exactly once per frame, then drains the callback queue and emits typed
 //! [`ConnectorEvent`]s. SDK callbacks only push into a shared queue, so the
 //! same queue contract works for the `run_threaded` fallback (§3.4). Offline
 //! mode never builds a `DbConnection` and `pump()` is a no-op.
+//!
+//! Reconnect is connector-owned: on every successful connect the connector
+//! re-issues the desired subscription waves and re-registers every live binder,
+//! then emits [`ConnectorEvent::Resync`] so consumers drop stale mirrors.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use spacetimedb_sdk::{DbContext as _, Identity};
+use spacetimedb_sdk::{
+    DbContext as _, Identity, SubscriptionHandle as _, Table as SdkTable, TableAccessor,
+    TableWithPrimaryKey,
+};
 
+use crate::binder::{self, BinderCore, BinderOptions, TableBinder};
 use crate::config::{ConnectionConfig, StdbMode};
 use crate::identity::LocalIdentity;
-use crate::module_bindings::DbConnection;
+use crate::module_bindings::{
+    DbConnection, RemoteTables, SubscriptionHandle, all_playersQueryTableAccess,
+    local_client_settingsQueryTableAccess, local_player_profileQueryTableAccess,
+    local_playerQueryTableAccess, protocol_infoQueryTableAccess, relay_configQueryTableAccess,
+    set_username as _,
+};
 use crate::token::{FileTokenStore, TokenStore};
-use crate::waves::WaveName;
+use crate::waves::{SubscriptionWaves, WaveName};
 
 /// Connection state of a [`Connector`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,6 +121,8 @@ enum InternalEvent {
     Connected { identity: Identity, token: String },
     ConnectError { message: String },
     Disconnected { reason: String },
+    WaveApplied(WaveName),
+    WaveError { wave: WaveName, message: String },
 }
 
 /// Shared callback queue (SDK callbacks require `Send + 'static`).
@@ -134,6 +149,15 @@ impl SharedQueue {
     }
 }
 
+/// Type-erased binder registration, re-invoked on every reconnect.
+struct ErasedBinder {
+    table: &'static str,
+    register: Box<dyn Fn(&RemoteTables)>,
+}
+
+/// A typed callback-registration step for one row type, boxed for erasure.
+type TypedRegister<Row> = Box<dyn Fn(&Arc<BinderCore<Row>>, &RemoteTables)>;
+
 /// The one connection facade `mind-gdext`/`mind-headless` talk to.
 pub struct Connector {
     config: ConnectionConfig,
@@ -148,6 +172,9 @@ pub struct Connector {
     retry_at: Option<Instant>,
     events: Vec<ConnectorEvent>,
     frames: u64,
+    waves: SubscriptionWaves,
+    wave_handles: [Option<SubscriptionHandle>; 3],
+    binders: Vec<ErasedBinder>,
 }
 
 impl Connector {
@@ -175,6 +202,9 @@ impl Connector {
             retry_at: None,
             events: Vec::new(),
             frames: 0,
+            waves: SubscriptionWaves::new(),
+            wave_handles: [None, None, None],
+            binders: Vec::new(),
         }
     }
 
@@ -206,6 +236,21 @@ impl Connector {
     /// Number of [`Connector::pump`] calls processed.
     pub fn frame_count(&self) -> u64 {
         self.frames
+    }
+
+    /// Number of live binder registrations.
+    pub fn binder_count(&self) -> usize {
+        self.binders.len()
+    }
+
+    /// Table names of every live binder registration (diagnostics).
+    pub fn binder_tables(&self) -> Vec<&'static str> {
+        self.binders.iter().map(|binder| binder.table).collect()
+    }
+
+    /// Whether `wave` has applied on the current connection.
+    pub fn is_applied(&self, wave: WaveName) -> bool {
+        self.waves.is_applied(wave)
     }
 
     /// Opens the connection (offline: a no-op that keeps [`ConnectorState::Offline`]).
@@ -254,6 +299,7 @@ impl Connector {
         }
         self.identity = None;
         self.retry_at = None;
+        self.clear_waves();
         self.state = match self.config.mode {
             StdbMode::Offline => ConnectorState::Offline,
             StdbMode::Online => ConnectorState::Disconnected,
@@ -288,6 +334,99 @@ impl Connector {
         } else {
             Some(self.events.remove(0))
         }
+    }
+
+    /// Re-issues the Base wave (it is auto-desired; manual re-issue is a repair).
+    pub fn subscribe_base(&mut self) {
+        self.subscribe_wave(WaveName::Base);
+    }
+
+    /// Ensures the Lobby wave is desired and issued.
+    pub fn subscribe_lobby(&mut self) {
+        self.subscribe_wave(WaveName::Lobby);
+    }
+
+    /// Desires and issues the Game wave (plan §3.6; populated in M4).
+    pub fn subscribe_game(&mut self) {
+        self.subscribe_wave(WaveName::Game);
+    }
+
+    /// Drops the Lobby wave subscription.
+    pub fn unsubscribe_lobby(&mut self) {
+        self.unsubscribe_wave(WaveName::Lobby);
+    }
+
+    /// Drops the Game wave subscription.
+    pub fn unsubscribe_game(&mut self) {
+        self.unsubscribe_wave(WaveName::Game);
+    }
+
+    /// Binds a consumer to one table (insert/delete changes only).
+    ///
+    /// `table_name` is the generated accessor name and is checked against the
+    /// static wave lists (plan §3.12 invariant 5).
+    pub fn bind<A>(&mut self, table_name: &'static str) -> TableBinder<A>
+    where
+        A: TableAccessor<RemoteTables>,
+        for<'db> A::Handle<'db>: SdkTable<Row = A::Row>,
+        A::Row: Clone + Send,
+    {
+        let typed = Box::new(|core: &Arc<BinderCore<A::Row>>, db: &RemoteTables| {
+            binder::bind_live::<A>(core, db);
+        });
+        self.bind_erased::<A>(table_name, BinderOptions::default(), typed)
+    }
+
+    /// Binds a consumer to one primary-key table: insert/delete/update changes,
+    /// plus a client-cache replay when `options.replay_existing` is set.
+    pub fn bind_with_replay<A>(
+        &mut self,
+        table_name: &'static str,
+        options: BinderOptions,
+    ) -> TableBinder<A>
+    where
+        A: TableAccessor<RemoteTables>,
+        for<'db> A::Handle<'db>: SdkTable<Row = A::Row> + TableWithPrimaryKey,
+        A::Row: Clone + Send,
+    {
+        let replay = options.replay_existing;
+        let typed = Box::new(move |core: &Arc<BinderCore<A::Row>>, db: &RemoteTables| {
+            binder::bind_live_with_updates::<A>(core, db, replay);
+        });
+        self.bind_erased::<A>(table_name, options, typed)
+    }
+
+    /// Calls the `set_username` reducer (identity smoke path / MCP helper).
+    pub fn set_username(&mut self, username: &str) -> Result<(), ConnectorError> {
+        let Some(conn) = &self.conn else {
+            return Err(ConnectorError::Offline);
+        };
+        conn.reducers
+            .set_username(username.to_string())
+            .map_err(|error| ConnectorError::Connect(error.to_string()))
+    }
+
+    /// Test hook: simulate the SDK `on_connect` callback without a network.
+    #[cfg(test)]
+    pub(crate) fn inject_connected_for_test(&self, identity: Identity, token: &str) {
+        self.queue.push(InternalEvent::Connected {
+            identity,
+            token: token.to_string(),
+        });
+    }
+
+    /// Test hook: simulate the SDK `on_disconnect` callback without a network.
+    #[cfg(test)]
+    pub(crate) fn inject_disconnected_for_test(&self, reason: &str) {
+        self.queue.push(InternalEvent::Disconnected {
+            reason: reason.to_string(),
+        });
+    }
+
+    /// Test hook: simulate a `WaveApplied` subscription callback.
+    #[cfg(test)]
+    pub(crate) fn inject_wave_applied_for_test(&self, wave: WaveName) {
+        self.queue.push(InternalEvent::WaveApplied(wave));
     }
 
     /// Builds the SDK connection and registers the lifecycle callbacks.
@@ -350,11 +489,21 @@ impl Connector {
                 InternalEvent::Disconnected { reason } => {
                     self.on_disconnected_internal(reason);
                 }
+                InternalEvent::WaveApplied(wave) => {
+                    self.waves.mark_applied(wave);
+                    self.events.push(ConnectorEvent::WaveApplied(wave));
+                }
+                InternalEvent::WaveError { wave, message } => {
+                    self.waves.mark_dropped(wave);
+                    self.events
+                        .push(ConnectorEvent::WaveError { wave, message });
+                }
             }
         }
     }
 
-    /// Session established: save the token, adopt the identity, emit events.
+    /// Session established: save the token, adopt the identity, re-issue every
+    /// desired wave and re-register every live binder, then emit events.
     fn on_connected(&mut self, identity: Identity, token: &str) {
         self.state = ConnectorState::Connected;
         self.retry_attempts = 0;
@@ -362,8 +511,8 @@ impl Connector {
         self.token_store.save(&self.config.token_key(), token);
         let local = LocalIdentity::new(identity, self.config.token_append.clone());
         self.identity = Some(local.clone());
-        // M3 re-subscribes active waves and re-registers binders here, before
-        // consumers see `Resync`.
+        self.reissue_waves();
+        self.rebind_all();
         self.events
             .push(ConnectorEvent::Connected { identity: local });
         self.events.push(ConnectorEvent::Resync);
@@ -376,6 +525,7 @@ impl Connector {
         }
         self.conn = None;
         self.identity = None;
+        self.clear_waves();
         if self.intentional_disconnect {
             self.intentional_disconnect = false;
             self.state = ConnectorState::Disconnected;
@@ -437,21 +587,141 @@ impl Connector {
         }
     }
 
-    /// Test hook: simulate the SDK `on_connect` callback without a network.
-    #[cfg(test)]
-    pub(crate) fn inject_connected_for_test(&self, identity: Identity, token: &str) {
-        self.queue.push(InternalEvent::Connected {
-            identity,
-            token: token.to_string(),
-        });
+    /// Sets the desired flag and, when connected, issues the wave.
+    fn subscribe_wave(&mut self, wave: WaveName) {
+        self.waves.set_desired(wave, true);
+        if self.conn.is_none() || self.waves.is_applied(wave) {
+            return;
+        }
+        let index = wave_index(wave);
+        if self.wave_handles[index].is_some() {
+            return;
+        }
+        if let Some(handle) = self.issue_wave(wave) {
+            self.wave_handles[index] = Some(handle);
+        }
     }
 
-    /// Test hook: simulate the SDK `on_disconnect` callback without a network.
-    #[cfg(test)]
-    pub(crate) fn inject_disconnected_for_test(&self, reason: &str) {
-        self.queue.push(InternalEvent::Disconnected {
-            reason: reason.to_string(),
+    /// Clears the desired flag and drops the handle (if any).
+    fn unsubscribe_wave(&mut self, wave: WaveName) {
+        self.waves.set_desired(wave, false);
+        let index = wave_index(wave);
+        if let Some(handle) = self.wave_handles[index].take()
+            && let Err(error) = handle.unsubscribe()
+        {
+            log::warn!("unsubscribe {} failed: {error}", wave.name());
+        }
+        self.waves.mark_dropped(wave);
+    }
+
+    /// Issues every desired, non-empty wave after a connect.
+    fn reissue_waves(&mut self) {
+        self.wave_handles = [None, None, None];
+        for wave in WaveName::ALL {
+            if !self.waves.is_desired(wave) || wave.tables().is_empty() {
+                continue;
+            }
+            if let Some(handle) = self.issue_wave(wave) {
+                self.wave_handles[wave_index(wave)] = Some(handle);
+            }
+        }
+    }
+
+    /// Builds and sends one subscription with its typed queries (plan §3.6).
+    fn issue_wave(&mut self, wave: WaveName) -> Option<SubscriptionHandle> {
+        let conn = self.conn.as_ref()?;
+        if wave.tables().is_empty() {
+            log::warn!("{} wave has no tables yet; not subscribing", wave.name());
+            return None;
+        }
+        let queue = self.queue.clone();
+        let builder = conn.subscription_builder();
+        let handle = match wave {
+            // Base has no applied callback by design: late binders replay the cache.
+            WaveName::Base => builder
+                .add_query(|q| q.from.protocol_info())
+                .add_query(|q| q.from.relay_config())
+                .add_query(|q| q.from.local_client_settings())
+                .subscribe(),
+            WaveName::Lobby => {
+                let applied_queue = queue.clone();
+                let error_queue = queue.clone();
+                builder
+                    .on_applied(move |_ctx| {
+                        applied_queue.push(InternalEvent::WaveApplied(WaveName::Lobby));
+                    })
+                    .on_error(move |_ctx, error| {
+                        error_queue.push(InternalEvent::WaveError {
+                            wave: WaveName::Lobby,
+                            message: error.to_string(),
+                        });
+                    })
+                    .add_query(|q| q.from.local_player())
+                    .add_query(|q| q.from.local_player_profile())
+                    .add_query(|q| q.from.all_players())
+                    .subscribe()
+            }
+            // M4 fills the Game wave tables (`my_match`/`my_match_commands`).
+            WaveName::Game => return None,
+        };
+        log::debug!("subscribed {} wave", wave.name());
+        Some(handle)
+    }
+
+    /// Re-registers every live binder against the current connection.
+    fn rebind_all(&mut self) {
+        if let Some(conn) = &self.conn {
+            for erased in &self.binders {
+                (erased.register)(&conn.db);
+            }
+        }
+    }
+
+    /// Drops wave handles and applied flags (connection gone).
+    fn clear_waves(&mut self) {
+        self.wave_handles = [None, None, None];
+        self.waves.clear();
+    }
+
+    fn bind_erased<A>(
+        &mut self,
+        table_name: &'static str,
+        options: BinderOptions,
+        typed_register: TypedRegister<A::Row>,
+    ) -> TableBinder<A>
+    where
+        A: TableAccessor<RemoteTables>,
+        A::Row: Clone + Send,
+    {
+        if WaveName::for_table(table_name).is_none() {
+            log::warn!("binder for `{table_name}` is not listed in any subscription wave");
+        }
+        let core = Arc::new(BinderCore::new(table_name, options));
+        let weak = Arc::downgrade(&core);
+        let register = Box::new(move |db: &RemoteTables| {
+            if let Some(core) = weak.upgrade() {
+                typed_register(&core, db);
+            }
         });
+        self.binders.push(ErasedBinder {
+            table: table_name,
+            register,
+        });
+        if let Some(conn) = &self.conn
+            && let Some(erased) = self.binders.last()
+        {
+            (erased.register)(&conn.db);
+        }
+        TableBinder::new(core)
+    }
+}
+
+/// Wave state helper kept on the connector: index into `wave_handles`.
+fn wave_index(wave: WaveName) -> usize {
+    match wave {
+        WaveName::Base => 0,
+        WaveName::Lobby => 1,
+        WaveName::Game => 2,
     }
 }
 
@@ -585,5 +855,23 @@ mod tests {
             events.first(),
             Some(ConnectorEvent::Disconnected { .. })
         ));
+    }
+
+    #[test]
+    fn wave_events_update_wave_state() {
+        let config = online_config("waves");
+        let mut connector = Connector::new(config);
+        assert!(!connector.is_applied(WaveName::Lobby));
+
+        connector.inject_connected_for_test(Identity::from_byte_array([5u8; 32]), "token");
+        connector.inject_wave_applied_for_test(WaveName::Lobby);
+        connector.pump();
+        let events = connector.drain_events();
+        assert!(connector.is_applied(WaveName::Lobby));
+        assert!(events.contains(&ConnectorEvent::WaveApplied(WaveName::Lobby)));
+
+        connector.inject_disconnected_for_test("drop");
+        connector.pump();
+        assert!(!connector.is_applied(WaveName::Lobby));
     }
 }

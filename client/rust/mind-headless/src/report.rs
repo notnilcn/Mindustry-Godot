@@ -102,6 +102,25 @@ pub struct StdbReport {
     pub expect_frames: Option<u64>,
 }
 
+/// `stdb_binder_replay` report (plan 01 §7.2).
+#[derive(Debug, Clone, Serialize)]
+pub struct StdbBinderReport {
+    /// Scenario name.
+    pub scenario: String,
+    /// Overall pass/fail.
+    pub pass: bool,
+    /// Replayed row versions in drain order.
+    pub replay_order: Vec<u32>,
+    /// Live-injected row versions in drain order.
+    pub live_order: Vec<u32>,
+    /// Golden replay order, when the fixture has one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expect_replay: Option<Vec<u32>>,
+    /// Golden live order, when the fixture has one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expect_live: Option<Vec<u32>>,
+}
+
 /// `bench` report (also committed into `bench_baseline.json`).
 #[derive(Debug, Clone, Serialize)]
 pub struct BenchReport {

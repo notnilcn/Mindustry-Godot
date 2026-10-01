@@ -131,7 +131,7 @@ TableBinder<A: TableAccessor<RemoteTables>>          // A = generated marker `Ma
 
 - Callbacks are registered through the generated table handle (`Table::on_insert`/`on_delete`, `TableWithPrimaryKey::on_update`) and push into the binder's queue; `LastRow`/`LastOldRow`/`LastDeletedRow` and the "rows cannot cross the signal boundary" workaround disappear — `RowChange<T>` carries owned rows.
 - **Replay**: `replay_existing` iterates the client cache once **after** registering live callbacks and enqueues each row as `Insert`. It is only callable on primary-key/persistent tables (type state). Event tables get a binder without the method, making C# rule 3 ("replay false on event tables") a compile time property instead of a convention.
-- **Event tables**: binders for `A: EventTable` expose `Insert` only (`on_insert`); `remove_on_insert`/`remove_on_delete` IDs are stored inside the binder so `_exit_tree`/drop unregisters cleanly (no leak, C# `_ExitTree` parity).
+- **Event tables**: binders for `A: EventTable` expose `Insert` only (`on_insert`); `remove_on_insert`/`remove_on_delete` IDs are stored inside the binder so `_exit_tree`/drop unregisters cleanly (no leak, C# `_ExitTree` parity). **M3 implementation note (recorded 2026-10-01):** callback IDs are not stored — they are table-typed and a dropped binder has no connection handle. Callbacks capture `Weak<BinderCore>` instead (dropped binder ⇒ inert no-op, queue freed) and registrations die with the connection; same no-leak/no-stale-delivery contract, see `binder.rs` docs and the M3 changelog entry.
 - **GDScript bridge**: `StdbBinder` (gdext) owns one `TableBinder` for a table named via `#[export] table_name`, emits arg-less `row_inserted`/`row_updated`/`row_deleted` plus `last_row_json: String` (via the small hand-written `RowView` impls in `rows.rs`, never by editing generated code). Typed gameplay/UI code should consume the Rust binder; the node exists for layout-time wiring and debugging (plan 14 owns the real UI data paths).
 
 ### 3.6 Subscription waves
@@ -322,11 +322,11 @@ Ordered; each milestone ends with its verification commands. **Smallest vertical
 - **Verify:** `cargo test -p mind-stdb` (all network-free); `cargo run -p mind-headless -- run stdb_offline_boot`.
 
 ### M3 — Waves + typed binders
-- [ ] `waves.rs`: `WaveName`, static base/lobby/game query sets, applied/error events, manual toggles.
-- [ ] `binder.rs`: `TableBinder<A>`, queue, `RowChange`, replay on `TableWithPrimaryKey`, event-table specialization, drop cleanup.
-- [ ] Connector `bind()` + rebind-on-reconnect + `Resync`.
-- [ ] Headless scenarios `stdb_binder_replay` (synthetic source) and `stdb_command_order` (canned rows; see M4).
-- [ ] Env-gated integration test `local_connect_applies_base_and_lobby_waves` (`MIND_STDB_IT=1`).
+- [x] `waves.rs`: `WaveName`, static base/lobby/game query sets, applied/error events, manual toggles.
+- [x] `binder.rs`: `TableBinder<A>`, queue, `RowChange`, replay on `TableWithPrimaryKey`, event-table specialization, drop cleanup.
+- [x] Connector `bind()` + rebind-on-reconnect + `Resync`.
+- [x] Headless scenario `stdb_binder_replay` (synthetic source); `stdb_command_order` moved to M4 (needs the `match_command` rows).
+- [x] Env-gated integration test `local_connect_applies_base_and_lobby_waves` (`MIND_STDB_IT=1`).
 - **Verify:** `cargo test -p mind-stdb`; with local server: `MIND_STDB_IT=1 cargo test -p mind-stdb -- --ignored local_connect_applies_base_and_lobby_waves`.
 
 ### M4 — Relay foundation (match/member/command + validation + CommandStream)
@@ -575,5 +575,18 @@ Deleted at M6 (NUD-05=C, no archive): `client/Scripts/Components/` (`IComponent.
   - `cargo run -p mind-headless -- run stdb_offline_boot --json` → `{"state":"offline","frames":64,"pumps":64,"pump_p50_ns":50,"pump_p99_ns":1784,"pass":true,...}` (p99 budget 200 µs met).
   - `cargo fmt -p mind-stdb -p mind-headless -- --check` clean; `cargo clippy -p mind-stdb -p mind-headless --all-targets -- -D warnings` clean; `cargo check -p mind-gdext` green.
   - Environment note (machine-local, not committed): WSL's `~/.cargo/config.toml` OpenSSL workaround had broken `libcrypto.so.3`/`libssl.so.3` symlinks, so rust-lld fell back to static `libcrypto.a` and failed on zstd symbols. Repaired the two symlinks to the system `libcrypto.so.3`/`libssl.so.3`; `cargo test` (which links the SDK's native-tls) now works. CI runners with `libssl-dev` are unaffected.
+
+#### M3 — Waves + typed binders (commit `01-M3`)
+
+- `waves.rs`: `SubscriptionWaves` (desired survives disconnects, applied cleared; Base+Lobby desired by default) + `WaveEvent`; connector issues the typed query-builder waves (`add_query(|q| q.from.<accessor>())`), Base without an applied callback, Lobby/Game with `on_applied`/`on_error` queueing internal events; `is_applied`/`subscribe_*`/`unsubscribe_*` surface.
+- `binder.rs`: `TableBinder<A>` owns an `Arc<BinderCore>` queue fed by callbacks capturing only `Weak`; `drain()`, `replay()`, `inject()` (doc-hidden scenario hook). `replay_existing(bool)` exists **only** when the generated handle implements `TableWithPrimaryKey` (doc-test `compile_fail` proves the property on the `local_player` view). `Connector::bind` (live insert/delete) and `Connector::bind_with_replay` (adds update callbacks + cache replay after registration, C# order).
+- Connector `on_connected` now re-issues desired waves and re-registers every live binder before emitting `Connected` + `Resync`; `binder_tables()` exposes diagnostics; wave members not in any static list warn at bind time (§3.12 invariant 5).
+- **Implementation divergence recorded (plan §3.5):** callback IDs are not stored for `_ExitTree`-style unhooking. SDK callback IDs are table-typed, and a dropped binder has no connection handle; instead callbacks capture `Weak<BinderCore>` (dropped binder ⇒ inert no-op, queue freed) and registrations die with the connection on disconnect/reconnect. Same observable contract (no leak, no stale delivery), simpler ownership. Documented in the `binder.rs` module docs.
+- Evidence:
+  - `cargo test -p mind-stdb` → `18 passed; 0 failed` + `1 passed` doc-test (the `compile_fail` event-table/replay property).
+  - `cargo run -p mind-headless -- run stdb_binder_replay --json` → `{"pass":true,"replay_order":[1,2],"live_order":[3],...}`; `stdb_offline_boot` still `pass: true`.
+  - `server/build.sh --db mindustry-it` created the integration DB; `MIND_STDB_IT=1 cargo test -p mind-stdb -- --ignored local_connect_applies_base_and_lobby_waves` → `1 passed` (base+lobby waves applied, `WaveApplied(Lobby)` observed, `local_player` insert delivered, `relay_config` cache replay delivered).
+  - `cargo fmt -p mind-stdb -p mind-headless -- --check` clean; `cargo clippy -p mind-stdb -p mind-headless --all-targets -- -D warnings` clean.
+- Deferred: `stdb_command_order` (M4, needs `match_command`).
 
 

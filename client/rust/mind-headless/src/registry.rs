@@ -43,6 +43,10 @@ pub static SCENARIOS: &[ScenarioFixture] = &[
         name: "stdb_offline_boot",
         file: "stdb_offline_boot.json",
     },
+    ScenarioFixture {
+        name: "stdb_binder_replay",
+        file: "stdb_binder_replay.json",
+    },
 ];
 
 /// Registered scenario names.
