@@ -204,6 +204,19 @@ pub struct PumpState {
     pub warmup: f32,
 }
 
+/// `Accelerator`/`LandingPad`/`LaunchPad` build state.
+#[derive(Debug, Clone, Default, PartialEq, Component)]
+pub struct CampaignState {
+    /// Accelerator heat `0..1`.
+    pub heat: f32,
+    /// Landing-pad cooldown.
+    pub cooldown: f32,
+    /// Launch-pad accumulated launch time.
+    pub launch_time: f32,
+    /// Configured item (landing pad).
+    pub item: Option<ItemId>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

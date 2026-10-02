@@ -22,8 +22,11 @@ use super::config::ConfigValue;
 use super::modules::PowerGraphId;
 use super::stats::Stats;
 
+pub mod campaign;
 pub mod defense;
 pub mod environment;
+pub mod helpers;
+pub mod legacy;
 pub mod production;
 pub mod sandbox;
 
@@ -389,6 +392,12 @@ pub fn default_behavior(def: &BlockDef) -> Arc<dyn BuildingBehavior> {
         K::Pump => Arc::new(production::PumpBehavior),
         K::SolidPump | K::Fracker => Arc::new(production::SolidPumpBehavior),
         K::Incinerator => Arc::new(production::IncineratorBehavior),
+        K::Accelerator => Arc::new(campaign::AcceleratorBehavior),
+        K::LandingPad => Arc::new(campaign::LandingPadBehavior),
+        K::LaunchPad => Arc::new(campaign::LaunchPadBehavior),
+        K::LegacyMechPad | K::LegacyUnitFactory | K::LegacyCommandCenter => {
+            Arc::new(legacy::LegacyBehavior)
+        }
         _ => match super::block_kind_data::BlockKindData::from_def(def).family() {
             super::block_kind_data::BlockFamily::Sandbox => Arc::new(sandbox::SandboxBehavior),
             super::block_kind_data::BlockFamily::Environment => {

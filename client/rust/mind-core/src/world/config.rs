@@ -15,6 +15,7 @@ use bevy_ecs::world::World;
 use smallvec::SmallVec;
 
 use crate::content::{BlockId, ContentType, ItemId, LiquidId, UnitTypeId};
+use crate::io::typeio::{EntityRef, TypeValue};
 
 /// One configuration value (`Object` in Java).
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -166,6 +167,72 @@ pub fn read_config(world: &World, entity: Entity) -> ConfigValue {
     inst.behavior.config(world, entity)
 }
 
+/// Configures a building from a `TypeIO` value (network/plan path).
+pub fn configure_type_value(
+    world: &mut World,
+    entity: Entity,
+    player: Option<Entity>,
+    value: &TypeValue,
+) -> bool {
+    let config = type_value_to_config(value);
+    configure(world, entity, player, config)
+}
+
+/// Lowers a [`ConfigValue`] to plan-04's `TypeIO` [`TypeValue`] (plan 07 §6.3).
+///
+/// `Building` references keep the raw entity index; the precise id mapping is
+/// plan 21's (config-copy is save-only, never network).
+pub fn config_to_type_value(value: &ConfigValue) -> TypeValue {
+    match value {
+        ConfigValue::None => TypeValue::Null,
+        ConfigValue::Item(id) => TypeValue::Content(ContentType::Item, id.raw()),
+        ConfigValue::Liquid(id) => TypeValue::Content(ContentType::Liquid, id.raw()),
+        ConfigValue::Block(id) => TypeValue::Content(ContentType::Block, id.raw()),
+        ConfigValue::Unit(id) => TypeValue::Content(ContentType::Unit, id.raw()),
+        ConfigValue::Content(content, id) => TypeValue::Content(*content, *id),
+        ConfigValue::Point2(x, y) => TypeValue::Point2(*x, *y),
+        ConfigValue::Point2Array(points) => {
+            TypeValue::Point2Array(points.iter().copied().collect())
+        }
+        ConfigValue::Number(number) => TypeValue::Double(*number),
+        ConfigValue::Bool(flag) => TypeValue::Bool(*flag),
+        // Building config-copy is save-only; the entity-id mapping is plan 21's.
+        ConfigValue::Building(_entity) => TypeValue::Building(EntityRef::Id(0)),
+        ConfigValue::Bytes(bytes) => TypeValue::ByteArray(bytes.to_vec()),
+        ConfigValue::String(text) => TypeValue::Str(Some(text.clone())),
+    }
+}
+
+/// Reads a [`ConfigValue`] back from a `TypeIO` value (plan 07 §6.3).
+pub fn type_value_to_config(value: &TypeValue) -> ConfigValue {
+    match value {
+        TypeValue::Null => ConfigValue::None,
+        TypeValue::Content(content, id) => match content {
+            ContentType::Item => ConfigValue::Item(ItemId::new(*id)),
+            ContentType::Liquid => ConfigValue::Liquid(LiquidId::new(*id)),
+            ContentType::Block => ConfigValue::Block(BlockId::new(*id)),
+            ContentType::Unit => ConfigValue::Unit(UnitTypeId::new(*id)),
+            other => ConfigValue::Content(*other, *id),
+        },
+        TypeValue::Int(number) => ConfigValue::Number(*number as f64),
+        TypeValue::Long(number) => ConfigValue::Number(*number as f64),
+        TypeValue::Float(number) => ConfigValue::Number(*number as f64),
+        TypeValue::Double(number) => ConfigValue::Number(*number),
+        TypeValue::Bool(flag) => ConfigValue::Bool(*flag),
+        TypeValue::Point2(x, y) => ConfigValue::Point2(*x, *y),
+        TypeValue::Point2Array(points) => {
+            ConfigValue::Point2Array(points.iter().copied().collect())
+        }
+        TypeValue::ByteArray(bytes) => ConfigValue::Bytes(bytes.iter().copied().collect()),
+        TypeValue::Str(Some(text)) => ConfigValue::String(text.clone()),
+        TypeValue::Str(None) => ConfigValue::None,
+        other => {
+            let _ = other;
+            ConfigValue::None
+        }
+    }
+}
+
 /// Per-block config handler table (`Block.configurations`).
 #[derive(Debug, Clone, Default)]
 pub struct ConfigHandlers {
@@ -215,6 +282,31 @@ mod tests {
         assert!(ConfigValue::Item(ItemId::COPPER).network_allowed());
         assert!(!ConfigValue::String(String::from("x")).network_allowed());
         assert!(!ConfigValue::Point2(1, 2).network_allowed());
+    }
+
+    #[test]
+    fn config_value_typeio_roundtrip() {
+        let values = vec![
+            ConfigValue::None,
+            ConfigValue::Item(ItemId::COPPER),
+            ConfigValue::Liquid(LiquidId::WATER),
+            ConfigValue::Block(BlockId::STONE_WALL),
+            ConfigValue::Unit(UnitTypeId::new(3)),
+            // Item/Liquid/Block/Unit normalize to their typed variants; a
+            // non-typed content kind stays `Content(...)`.
+            ConfigValue::Content(ContentType::Status, 2),
+            ConfigValue::Point2(-2, 9),
+            ConfigValue::Point2Array(smallvec::smallvec![1, 2, 3]),
+            ConfigValue::Number(3.5),
+            ConfigValue::Bool(true),
+            ConfigValue::Bytes(smallvec::smallvec![1, 2, 3]),
+            ConfigValue::String(String::from("hi")),
+        ];
+        for value in values {
+            let encoded = config_to_type_value(&value);
+            let decoded = type_value_to_config(&encoded);
+            assert_eq!(decoded, value, "roundtrip failed for {value:?}");
+        }
     }
 
     #[test]

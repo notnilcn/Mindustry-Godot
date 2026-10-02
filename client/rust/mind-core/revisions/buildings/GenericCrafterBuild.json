@@ -1,0 +1,9 @@
+{
+  "kind": "GenericCrafterBuild",
+  "revision": 0,
+  "base": "building-base-v4",
+  "fields": [
+    { "name": "progress", "type": "f32" },
+    { "name": "warmup", "type": "f32" }
+  ]
+}
