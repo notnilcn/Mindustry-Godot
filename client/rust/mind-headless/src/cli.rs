@@ -34,8 +34,22 @@ pub struct Cli {
 /// `mind-headless` subcommands.
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// List registered scenarios.
-    List,
+    /// List catalogued scenarios (optionally filtered by tier).
+    List {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Only list scenarios in this tier (`T0`..`T3`).
+        #[arg(long)]
+        tier: Option<String>,
+    },
+
+    /// Run every file-backed scenario (optionally filtered by tier).
+    RunAll {
+        /// Only run scenarios in this tier (`T0`..`T3`).
+        #[arg(long)]
+        tier: Option<String>,
+    },
 
     /// Print the build report (`Version.java` port; plan 22 M0).
     Version {

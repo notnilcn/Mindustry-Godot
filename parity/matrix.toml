@@ -344,10 +344,10 @@ oracle = "all payload blocks update/round-trip; plan 11 partial"
 upstream = "ApplicationTests.testSectorValidity"
 owner = "12_CAMPAIGN_IMPLEMENTATION_PLAN.md"
 phase = "P4"
-rust = "campaign::tests::presets_rule_validity"
+rust = "game::play::tests::sector_capture_flags"
 primary = true
-status = "planned"
-oracle = "plan 12 not landed; plan 02 content::registries::sectors::tests::presets_resolve + plan 11 wave tests partially cover"
+status = "landed"
+oracle = "campaign sector rule validity after capture (waves off, attack off, world processors disabled, markers/objectives cleared); plan 02 content::registries::sectors::tests::presets_resolve + plan 06 world::tests::sector_rules_hooks_called + plan 11 waves::tests::sector_spawns_nonempty_to_boss compose as secondary coverage. Plan 12's aspirational `campaign::tests::presets_rule_validity` was not ported as a distinct test."
 
 # ── DataAssetTests.java ───────────────────────────────────────────────────────
 [[row]]
@@ -684,141 +684,141 @@ primary = true
 status = "landed"
 oracle = "multi-file patch application"
 
-# ── LogicTests.java (plan 13 — system not landed) ─────────────────────────────
+# ── LogicTests.java (plan 13 — all 15 groups landed in `logic::tests`) ────────
 [[row]]
 upstream = "LogicTests.parsesStringEscapes"
 owner = "13_LOGIC_MLOG_IMPLEMENTATION_PLAN.md"
 phase = "P5"
-rust = "logic::parser::tests::string_escapes"
+rust = "logic::tests::string_escapes"
 primary = true
-status = "planned"
-oracle = "plan 13 not landed"
+status = "landed"
+oracle = "12-case escape table; plan-13 aspirational name was logic::parser::tests::string_escapes"
 
 [[row]]
 upstream = "LogicTests.plainNumberIsNotTreatedAsAString"
 owner = "13_LOGIC_MLOG_IMPLEMENTATION_PLAN.md"
 phase = "P5"
-rust = "logic::parser::tests::plain_number_not_a_string"
+rust = "logic::tests::plain_number_is_not_a_string"
 primary = true
-status = "planned"
-oracle = "plan 13 not landed"
+status = "landed"
+oracle = "`set result 5` -> numeric, not object; aspirational name was logic::parser::tests::plain_number_not_a_string"
 
 [[row]]
 upstream = "LogicTests.sanitizesInput"
 owner = "13_LOGIC_MLOG_IMPLEMENTATION_PLAN.md"
 phase = "P5"
-rust = "logic::statement::tests::sanitize"
+rust = "logic::statement::tests::sanitize_table"
 primary = true
-status = "planned"
-oracle = "plan 13 not landed"
+status = "landed"
+oracle = "20-case sanitize table; aspirational name was logic::statement::tests::sanitize"
 
 [[row]]
 upstream = "LogicTests.sanitizedQuotedValuesRoundTripThroughTheParser"
 owner = "13_LOGIC_MLOG_IMPLEMENTATION_PLAN.md"
 phase = "P5"
-rust = "logic::statement::tests::sanitize_roundtrip"
+rust = "logic::tests::sanitized_quoted_values_roundtrip"
 primary = true
-status = "planned"
-oracle = "plan 13 not landed"
+status = "landed"
+oracle = "10 quoted cases decode + write(read(stmt)) round-trip; aspirational name was logic::statement::tests::sanitize_roundtrip"
 
 [[row]]
 upstream = "LogicTests.parseVarValues"
 owner = "13_LOGIC_MLOG_IMPLEMENTATION_PLAN.md"
 phase = "P5"
-rust = "logic::value::tests::parse_var_values"
+rust = "logic::tests::parse_var_values"
 primary = true
-status = "planned"
-oracle = "plan 13 not landed"
+status = "landed"
+oracle = "decimal/scientific/hex/binary/null; aspirational name was logic::value::tests::parse_var_values"
 
 [[row]]
 upstream = "LogicTests.parseColorValues"
 owner = "13_LOGIC_MLOG_IMPLEMENTATION_PLAN.md"
 phase = "P5"
-rust = "logic::value::tests::parse_colors"
+rust = "logic::tests::parse_color_values"
 primary = true
-status = "planned"
-oracle = "plan 13 not landed"
+status = "landed"
+oracle = "`%ffffff`/`%ff000080`/`%[red]` exact double bits; aspirational name was logic::value::tests::parse_colors"
 
 [[row]]
 upstream = "LogicTests.parseInvalidNumbers"
 owner = "13_LOGIC_MLOG_IMPLEMENTATION_PLAN.md"
 phase = "P5"
-rust = "logic::value::tests::parse_invalid_numbers"
+rust = "logic::tests::parse_invalid_numbers"
 primary = true
-status = "planned"
-oracle = "plan 13 not landed"
+status = "landed"
+oracle = "invalid + 64-bit overflow cases stay variables; aspirational name was logic::value::tests::parse_invalid_numbers"
 
 [[row]]
 upstream = "LogicTests.unterminatedStringsThrow"
 owner = "13_LOGIC_MLOG_IMPLEMENTATION_PLAN.md"
 phase = "P5"
-rust = "logic::parser::tests::unterminated_strings_throw"
+rust = "logic::tests::unterminated_strings_throw"
 primary = true
-status = "planned"
-oracle = "plan 13 not landed"
+status = "landed"
+oracle = "9 malformed-string cases error; aspirational name was logic::parser::tests::unterminated_strings_throw"
 
 [[row]]
 upstream = "LogicTests.varWithProperlyQuotedEmptyString"
 owner = "13_LOGIC_MLOG_IMPLEMENTATION_PLAN.md"
 phase = "P5"
-rust = "logic::value::tests::empty_string_const"
+rust = "logic::assembler::tests::empty_string_const"
 primary = true
-status = "planned"
-oracle = "plan 13 not landed"
+status = "landed"
+oracle = "`\"\"` -> empty object const; aspirational name was logic::value::tests::empty_string_const"
 
 [[row]]
 upstream = "LogicTests.quoteInVariableNameThrows"
 owner = "13_LOGIC_MLOG_IMPLEMENTATION_PLAN.md"
 phase = "P5"
-rust = "logic::parser::tests::quote_in_token_throws"
+rust = "logic::tests::quote_in_variable_name_throws"
 primary = true
-status = "planned"
-oracle = "plan 13 not landed"
+status = "landed"
+oracle = "quote in/at-end variable token errors; aspirational name was logic::parser::tests::quote_in_token_throws"
 
 [[row]]
 upstream = "LogicTests.quoteAtEndOfVariableNameThrows"
 owner = "13_LOGIC_MLOG_IMPLEMENTATION_PLAN.md"
 phase = "P5"
-rust = "logic::parser::tests::quote_in_token_throws"
+rust = "logic::tests::quote_in_variable_name_throws"
 primary = true
-status = "planned"
-oracle = "plan 13 not landed"
+status = "landed"
+oracle = "shares the combined quote-position test with quoteInVariableNameThrows"
 
 [[row]]
 upstream = "LogicTests.crlfAfterUnquotedTokenDoesNotCorruptTheToken"
 owner = "13_LOGIC_MLOG_IMPLEMENTATION_PLAN.md"
 phase = "P5"
-rust = "logic::parser::tests::crlf_token_identity"
+rust = "logic::tests::crlf_does_not_corrupt_tokens"
 primary = true
-status = "planned"
-oracle = "plan 13 not landed"
+status = "landed"
+oracle = "combined CRLF token/quote/label cases; aspirational name was logic::parser::tests::crlf_token_identity"
 
 [[row]]
 upstream = "LogicTests.crlfAfterQuotedStringParsesCleanly"
 owner = "13_LOGIC_MLOG_IMPLEMENTATION_PLAN.md"
 phase = "P5"
-rust = "logic::parser::tests::crlf_quoted_string"
+rust = "logic::tests::crlf_does_not_corrupt_tokens"
 primary = true
-status = "planned"
-oracle = "plan 13 not landed"
+status = "landed"
+oracle = "combined CRLF test covers quoted-string parsing; aspirational name was logic::parser::tests::crlf_quoted_string"
 
 [[row]]
 upstream = "LogicTests.loneCarriageReturnActsAsALineEnding"
 owner = "13_LOGIC_MLOG_IMPLEMENTATION_PLAN.md"
 phase = "P5"
-rust = "logic::parser::tests::lone_cr"
+rust = "logic::tests::crlf_does_not_corrupt_tokens"
 primary = true
-status = "planned"
-oracle = "plan 13 not landed"
+status = "landed"
+oracle = "combined CRLF test covers lone-CR line endings; aspirational name was logic::parser::tests::lone_cr"
 
 [[row]]
 upstream = "LogicTests.crlfLabelsResolveToTheSameJumpLocationAsLfLabels"
 owner = "13_LOGIC_MLOG_IMPLEMENTATION_PLAN.md"
 phase = "P5"
-rust = "logic::parser::tests::crlf_labels"
+rust = "logic::tests::crlf_does_not_corrupt_tokens"
 primary = true
-status = "planned"
-oracle = "plan 13 not landed"
+status = "landed"
+oracle = "combined CRLF test covers CRLF label resolution; aspirational name was logic::parser::tests::crlf_labels"
 
 # ── power/*.java (plan 09) ────────────────────────────────────────────────────
 [[row]]

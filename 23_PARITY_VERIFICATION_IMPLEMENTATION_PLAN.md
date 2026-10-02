@@ -7,7 +7,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Draft v1 — continuous program. 40 aggregated `NEEDS USER DECISION` items are owned by sibling plans (none block this plan's harness milestones). Authored 2026-10-01 against plans 00–17; plans 18–22 are **not on disk** (matrix/catalog rows marked `TBD by {plan}`). |
+| **Status** | Draft v1 — continuous program. 40 aggregated `NEEDS USER DECISION` items are owned by sibling plans (none block this plan's harness milestones). Authored 2026-10-01 against plans 00–17; plans 18–22 are **not on disk** (matrix/catalog rows marked `TBD by {plan}`). **F17 lane (`lane/f17-23`, 2026-10-03):** matrix planned rows for plans 12/13 filled in — **100 rows, 91 landed / 9 no-equivalent / 0 planned**; `scenario_catalog.json` **107** entries with `tier`+`plan`; `golden_manifest.json` **64** (`oracle`+`scenario`+`harness` sha256); `bench_budgets.json` **40** rows; `checksum_registry` reviewed; `mind-headless list --json`/`run-all` landed; `parity check` 6/6 PASS. |
 | **Phase** | Continuous (cont.) — starts at plan 00 M3 (harness exists) and runs through every phase gate P0–P8. |
 | **Depends on** | All plans: `00`–`17` on disk (read in full); `18`–`22` by filename from `HIGH_LEVEL_PLAN.md` §3 (not yet on disk); `HIGH_LEVEL_PLAN.md`; `PRELIMINARY_PLAN.md`. Continuous: picks up each plan's §7 as it lands. |
 | **Blocks** | Every phase gate (`HIGH_LEVEL_PLAN.md` §5): P0…P8 each require a green `parity gate --phase Pn` report. No implementation plan is considered complete without a matrix row and a gate entry here. |
@@ -205,10 +205,10 @@ Continuous plan: milestones overlap sibling execution; M0 may start once plan 00
 - [x] Create the `parity/` tree; `parity/README.md`; `parity/upstream.lock` (`mindustry_commit` = `2cd7aeecf1378b3db456be9bfde8691b3cdc1bcc`, JDK 17.0.20).
 - [x] Ingest `parity/matrix.toml` from plans 00–22 §7a tables (this file's §7a is the rendered view); every row has `phase`, `owner`, `rust`, `status`, `oracle`. Landed rows carry the **actual** resolving `rust` name; the plan's §7a name is preserved in `oracle` when it differed.
 - [x] Ingest `parity/mcp_catalog.json` from plans 00–22 §7c (this file's §7c is the rendered view).
-- [x] Add `parity check`, `parity matrix`, `parity registry`, `parity goldens`, `parity budgets`, `parity scenarios`, `parity mcp`, `parity soak`, `parity report`, `parity gate`, `parity bench-gate` (`mind-headless parity …`, plan §3.7). `list --json` / `run-all` / registry `tier`+`plan` fields remain outstanding (below).
-- [ ] Scenario registry gains `tier` + `plan` fields; `mind-headless list --json`, `run-all`.
+- [x] Add `parity check`, `parity matrix`, `parity registry`, `parity goldens`, `parity budgets`, `parity scenarios`, `parity mcp`, `parity soak`, `parity report`, `parity gate`, `parity bench-gate` (`mind-headless parity …`, plan §3.7). `list --json` / `run-all` / catalog `tier`+`plan` fields landed at the F17 lane (below); `parity run --suite` remains.
+- [x] Scenario registry (`parity/scenario_catalog.json`) carries `tier` + `plan` for every entry; `mind-headless list [--json] [--tier T0|T1|T2]` and `run-all [--tier T]` landed (`list --json` is the tier source of truth; `run-all` runs the file-backed tier). `parity run --suite smoke|gate|full` remains outstanding (embedded reporters print; a clean suite JSON needs the nightly runner / child-process capture).
 - [ ] `tools/ci.sh` gains `parity matrix check`; `ci.yml` gains `matrix-check` (orchestrator-owned — proposed patch in §7f).
-- **Verify:** `cargo run -p mind-headless -- parity check --tests out/tests.txt` exit 0 (matrix **100 rows, 75 landed resolved**); `parity report` roll-up green; `list --tier T0 --json` / `parity run --suite smoke` outstanding.
+- **Verify:** `cargo run -p mind-headless -- parity check --tests out/tests.txt` exit 0 (matrix **100 rows, 91 landed resolved / 9 no-equivalent**); `parity report` roll-up green; `list --tier T0 --json` (18) and `run-all --tier T0` (4/4) green.
 
 ### M1 — Determinism harness
 
@@ -229,8 +229,8 @@ Continuous plan: milestones overlap sibling execution; M0 may start once plan 00
 
 ### M3 — Scenario catalog complete for landed plans; gate command
 
-- [ ] Every landed plan's scenarios registered with tier/plan metadata; `parity::scenarios::tests::{all_registered_names_follow_system_case, every_plan_scenario_present, golden_or_reason}`.
-- [ ] `parity run --suite gate` runs T1; `parity gate --phase Pn` implemented (all seven steps, report JSON).
+- [x] Every landed plan's scenarios registered with tier/plan metadata (`scenario_catalog.json`, 107 entries; file entries cross-checked by `parity::scenario::tests::every_registered_file_scenario_is_catalogued`); `parity::scenario::tests::committed_catalog_is_consistent` green.
+- [~] `parity gate --phase Pn` implemented (seven steps + report JSON, runnable steps green, T1/checksum/MCP/bench steps reported `deferred` per NUD-40/A); `parity run --suite gate` outstanding.
 - [ ] Scenario mirror check: `tools/sync_scenarios` output matches repo `scenarios/` (CI asserts).
 - **Verify:** `parity gate --phase P0` passes and writes `reports/gate_P0.json`; a deliberately broken golden fails the gate with exit 1.
 
@@ -296,15 +296,17 @@ Rules: `status = "tbd"` requires `tbd_by = "<plan file>"`; `rust` names resolve 
 { "format": 1,
   "upstream": { "repo": "https://github.com/Anuken/Mindustry", "commit": "<40-hex>" },
   "goldens": [
-    { "id": "content_ids", "path": "parity/golden/content/golden_content.json",
-      "generator": "parity/java/DumpContent.java", "args": ["--java"],
-      "owner_plan": "02", "format": 1, "sha256": "<64-hex>",
-      "regen": "tools/regen_goldens.sh --only content_ids",
-      "guards": ["content audit", "content::tests::parity"] }
+    { "id": "content_ids", "kind": "oracle",
+      "path": "parity/golden/content/golden_content.json",
+      "owner_plan": "02", "sha256": "<64-hex>",
+      "regen": "tools/regen_goldens.sh --only content_ids" },
+    { "id": "harness_campaign_play", "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/campaign/play.json",
+      "owner_plan": "12", "sha256": "<64-hex>" }
   ] }
 ```
 
-Rules: every oracle golden has an entry; `sha256` is verified by `parity goldens verify`; `upstream.commit` is the checkout the JVM ran against. Harness goldens are NOT in this manifest; they are discovered from `client/rust/mind-core/tests/golden/**` + scenario `expect` blocks and verified by the scenarios themselves. A golden edit must touch both the file and its manifest hash in one commit.
+Rules: every oracle golden has an entry (`kind = "oracle"`); every committed `scenarios/*.json` has an entry (`kind = "scenario"`); every Rust self-recorded golden under `client/rust/*/tests/golden(s)/**` is pinned with `kind = "harness"` for sha256 drift **in addition to** being verified by its owning scenario. `sha256` is verified by `parity goldens verify`; `upstream.commit` is the checkout the JVM ran against (harness goldens inherit it). A golden edit must touch both the file and its manifest hash in one commit.
 
 ### 6.3 `bench/baselines.json` (`format: 1`)
 
@@ -962,7 +964,9 @@ mkdir -p out
 cargo test -p mind-core    -- --list > out/tests-core.txt
 cargo test -p mind-headless -- --list > out/tests-headless.txt
 cat out/tests-core.txt out/tests-headless.txt > out/tests.txt
-cargo run -q -p mind-headless -- parity check --tests out/tests.txt
+cargo run -q -p mind-headless -- parity check --tests out/tests.txt   # matrix + all registries (harness goldens pinned)
+cargo run -q -p mind-headless -- parity goldens                       # sha256 drift, no JVM
+cargo run -q -p mind-headless -- run-all --tier T0                    # T0 smoke scenarios (catalog-driven)
 ```
 
 `tools/ci.ps1`:
@@ -973,6 +977,8 @@ cargo test -p mind-core     -- --list | Out-File out/tests-core.txt
 cargo test -p mind-headless -- --list | Out-File out/tests-headless.txt
 Get-Content out/tests-core.txt, out/tests-headless.txt | Set-Content out/tests.txt
 cargo run -q -p mind-headless -- parity check --tests out/tests.txt
+cargo run -q -p mind-headless -- parity goldens
+cargo run -q -p mind-headless -- run-all --tier T0
 ```
 
 `.github/workflows/ci.yml` — a `matrix-check` job (needs the rust toolchain + cache
@@ -991,13 +997,21 @@ already defined for `rust-lint`):
           cargo test -p mind-headless -- --list > tests-headless.txt
           cat tests-core.txt tests-headless.txt > tests.txt
           cargo run -q -p mind-headless -- parity check --tests tests.txt
+          cargo run -q -p mind-headless -- parity goldens
+          cargo run -q -p mind-headless -- run-all --tier T0
         working-directory: client/rust
 ```
 
 Notes:
 - `parity check` is read-only and needs no Godot/GPU; safe on shared runners.
 - `--tests` is what turns on the "every `status = \"landed\"` row resolves" gate;
-  without it, the check is structural only.
+  without it, the check is structural only. At the F17 lane that is **91/91 landed**
+  rows resolved (9 `no-equivalent` rows carry substitute oracles).
+- `parity goldens` now verifies **oracle + scenario + harness** sha256 (64 entries):
+  a re-recorded harness golden must update `parity/golden_manifest.json` in the same
+  commit.
+- `run-all --tier T0` is the catalog-driven smoke suite (4 file-backed T0 scenarios);
+  the full T1/T2 suite stays on the nightly runner.
 - `parity gate Pn --out parity/reports/gate_Pn.json` is the phase-gate entry point;
   steps 2–5 are nightly-owned and reported as `deferred` until the perf/GPU runners
   are wired (NUD-40/A).
@@ -1220,4 +1234,6 @@ Every open risk from a sibling that requires another plan to act, consolidated b
 > Append entries here when execution starts. Every gate claim carries the `parity/reports/gate_Pn.json` path, the T1 report path and screenshot paths.
 
 - 2026-10-01 — Plan authored (v1). Matrix ingested from plans 00–17 §7a; scenario catalog from §7b; MCP catalog from §7c; budgets from §7d; 40 aggregated `NEEDS USER DECISION` rows; 35 cross-plan reconciliation rows; 18 tracked deviations. No milestones executed.
+- 2026-10-03 — **lane 23 F17 (`lane/f17-23`) advanced M0/M3 after plans 12/13/14/17 landed.** (1) **Matrix:** moved the 16 `planned` rows to `landed` with the real resolving names — the 15 `LogicTests` groups now point at the ported `logic::tests`/`logic::statement::tests::sanitize_table`/`logic::assembler::tests::empty_string_const` (the CRLF/quoted/lone-CR/label tests share `logic::tests::crlf_does_not_corrupt_tokens`), and `ApplicationTests.testSectorValidity` points at `game::play::tests::sector_capture_flags` (plan 12's aspirational `campaign::tests::presets_rule_validity` was never ported; oracle records the 02/06/11 composition). Result: **100 rows, 91 landed / 9 no-equivalent / 0 planned**, `resolved 91/91 landed` against 1404 test names. (2) **Catalogs:** `scenario_catalog.json` **60 → 107** entries (moved `rules_roundtrip`/`campaign_sector_cycle`/`logic_arith`/`logic_draw`/`ui_text`/`fx_lifecycle` from `planned` to `embedded`, added campaign `objectives_completion`/`play`/`tech`/`turn`/`schematic`/`fog`/`bench`, all M5 logic scenarios (`logic_sensor_access`/`logic_radar_filters`/`logic_unit_control_gating`/`logic_link_sensor`/`logic_save_load`/`logic_draw_headless`), `world_gen_{serpulo,erekir,asteroid,tantros}`, all `ui/*`, `render_darkness_radius`, `audio_policy`, `mods_*`); `golden_manifest.json` **15 → 64** (oracle + scenario + **49 harness** goldens pinned by sha256, including `campaign/*`, `logic`/`ui` goldens, `world_gen_*.checksum`, `fx/*`, `render/*`, `units/*`, `network/*`, `audio/*`); `bench_budgets.json` **30 → 40** rows (added plan 12 campaign p99s, plan 17 fx, plan 06 serpulo/erekir/asteroid world-gen); `checksum_registry.json` reviewed (no contributor change → v1 stays; `rules`/`logic_rng` still unfolded, notes updated). (3) **CLI:** `mind-headless list [--json] [--tier T]` (catalog-driven; 18 T0 entries) and `run-all [--tier T]` (T0: 4/4) landed; new `parity::scenario::tests::every_registered_file_scenario_is_catalogued`. `bench-gate`/gate nightly steps unchanged (deferred per NUD-40/A). **Evidence:** `parity check --tests /tmp/tests.txt` → 6/6 PASS; `cargo test -p mind-headless` **75 lib** + 4 integration (1 logistics + 2 fx + 1 audio) = 79 passed; workspace clippy `-D warnings` + fmt clean. CI wiring proposal refreshed in §7f. **Deferred:** `parity run --suite`, nightly T1/checksum/MCP/bench jobs, MCP editor runs (single-editor mutex), plan-15 matrix/catalog rows.
+
 - 2026-10-03 — **lane 23 M0 harness landed (branch `lane/23-parity`).** Added the `parity/` registry set: `matrix.toml` (**100 upstream-test rows** for `ApplicationTests`/`DataAssetTests`/`PatcherTests`/`LogicTests`/`power/*`/network-gated mod tests; **75 landed** resolved against the 966 `mind-core` lib tests, **9 `no-equivalent`** with substitute oracles, **16 `planned`** for unlanded systems 12/13), `checksum_registry.json` (v1, mirrors `CHECKSUM_VERSION=1`), `scenario_catalog.json` (**60 entries**: 11 file + 38 embedded + 11 planned), `golden_manifest.json` (**15 sha256-pinned** oracle/scenario goldens), `bench_budgets.json` (**30 rows** across 15 plans, canonical `sim_core_mid.tick_p95_ms ≤ 4.0 ms`, NUD-39/A), `mcp_catalog.json` (**22 phase-grouped** entries), `soak.toml` (mid/stress/windowed/multiplayer), `upstream.lock` (commit `2cd7aeec…`, JDK 17.0.20), `README.md` + `system_checklist.md`, `reports/.gitignore`. Harness: `mind-headless parity {check,matrix,registry,goldens,budgets,scenarios,mcp,soak,report,gate,bench-gate}` (`client/rust/mind-headless/src/parity/**`, 23 unit tests). **Resolved the plan-09 `liquidRouterOutputAll` TBD** → `world::blocks::liquid::tests::router_dumps_current`. Additive shared edits: `mind-headless/Cargo.toml` (`sha2.workspace = true`), `mind-headless/src/lib.rs` (`pub mod parity;`), `src/cli.rs` (+`ParityCommand`), `src/exec.rs` (+dispatch). CI wiring is proposed (not applied) in §7f. **Evidence:** `parity check --tests out/tests.txt` → 6/6 checks PASS; `cargo test -p mind-headless` 59 passed; full `cargo clippy --workspace --all-targets -- -D warnings` + `cargo fmt --all -- --check` clean. **Deferred:** `list --json`/`run-all`/registry tier+plan fields; nightly T1/checksum/MCP/bench gate steps; MCP editor runs (single-editor mutex); porting LogicTests/DataAsset end-to-end rows to real tests (systems 13/12 not landed).

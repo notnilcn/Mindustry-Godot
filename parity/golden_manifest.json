@@ -4,22 +4,459 @@
     "repo": "https://github.com/Anuken/Mindustry",
     "commit": "2cd7aeecf1378b3db456be9bfde8691b3cdc1bcc"
   },
-  "note": "Committed oracle + scenario goldens. Harness goldens under client/rust/*/tests/golden/** are verified by the scenarios themselves (plan 23 §6.2). A golden edit must update this hash in the same commit.",
+  "note": "Committed oracle + scenario + harness goldens. Oracle goldens are JVM-derived (parity/java/*): CI never needs a JVM. Scenario goldens back scenarios/*.json. Harness goldens under client/rust/*/tests/golden(s)/** are pinned here for sha256 drift in addition to being verified by their owning scenarios (plan 23 §6.2). A golden edit must update this hash in the same commit.",
   "goldens": [
-    { "id": "content_ids", "kind": "oracle", "path": "parity/golden_content.json", "owner_plan": "02", "sha256": "86b9cacb14b86291625042e088525e4148f7af0ac68ff01ed1ca0f289fed5f01", "regen": "cargo run -p mind-headless -- content dump" },
-    { "id": "bundle_keys", "kind": "oracle", "path": "parity/bundle_keys.json", "owner_plan": "02/03", "sha256": "8c6e048da19675bf4bfad579442e17bd47c69f3fad320a8d4bddae3a3f36611c", "regen": "mind-tools pack (bundle index)" },
-    { "id": "asset_manifest", "kind": "oracle", "path": "parity/asset_manifest.json", "owner_plan": "03", "sha256": "88c8f5449dbdceb572aea2476aca79aaef6a0ad5bae1435de28e8e1e3672e541", "regen": "mind-tools pack (asset manifest)" },
-    { "id": "mod_classmap", "kind": "oracle", "path": "parity/mod_classmap.json", "owner_plan": "20", "sha256": "fecceb7bf966e76ed3e4723b025d6203734626aed4c21caeab3cca68c109dde9", "regen": "mind-tools mods classmap" },
-    { "id": "scenario_spine_place_break", "kind": "scenario", "path": "scenarios/spine_place_break.json", "owner_plan": "00", "sha256": "08efdd874239045359c907f4cdec3c6b2c31f979432b590d5fb0281b4ec5f8c5" },
-    { "id": "scenario_spine_determinism", "kind": "scenario", "path": "scenarios/spine_determinism.json", "owner_plan": "00", "sha256": "081b653c4bea89a2e38fb11c5c307891000d1afea35384abc3b71582e497a4a5" },
-    { "id": "scenario_spine_many_commands", "kind": "scenario", "path": "scenarios/spine_many_commands.json", "owner_plan": "00", "sha256": "846f38a9356e8370016fe0e1288dd1c7003c53bc0e72215d949b5401a57d44f4" },
-    { "id": "scenario_bench_baseline", "kind": "scenario", "path": "scenarios/bench_baseline.json", "owner_plan": "00", "sha256": "8ffe171c2ba48ecf8af3ce080e1922bba9b311d8156befc47d21d7a822a086d9" },
-    { "id": "scenario_sim_core_boot", "kind": "scenario", "path": "scenarios/sim_core_boot.json", "owner_plan": "05", "sha256": "3be7e0cf4e4d79c12fb57b0805e409b720beabfca0b48dda9bacedab92da5128" },
-    { "id": "scenario_sim_core_determinism", "kind": "scenario", "path": "scenarios/sim_core_determinism.json", "owner_plan": "05", "sha256": "8d413688bfbe53aa40d02ed2eb26ea5d81ecc22abbf84b648f5328bc5ad411f3" },
-    { "id": "scenario_sim_core_many_commands", "kind": "scenario", "path": "scenarios/sim_core_many_commands.json", "owner_plan": "05", "sha256": "95b76263a8b3277cb35ade5413d6177afd3f72b79962f018068284fe53fb7559" },
-    { "id": "scenario_sim_core_reset_play_cycle", "kind": "scenario", "path": "scenarios/sim_core_reset_play_cycle.json", "owner_plan": "05", "sha256": "17ebacc75a23cb83094f9df56ff98eaf8675c5fc4c6d6e932b66c2788d961b2a" },
-    { "id": "scenario_stdb_offline_boot", "kind": "scenario", "path": "scenarios/stdb_offline_boot.json", "owner_plan": "01", "sha256": "f0e31a7dc0f545b3b566fdb2fb85ba8e3544e522228390be8d203384df0be186" },
-    { "id": "scenario_stdb_binder_replay", "kind": "scenario", "path": "scenarios/stdb_binder_replay.json", "owner_plan": "01", "sha256": "e356e927a66d8004089e0e2e2e1c79c6f3f7c20f7b0c514b56588df9f9ef93d9" },
-    { "id": "scenario_stdb_command_order", "kind": "scenario", "path": "scenarios/stdb_command_order.json", "owner_plan": "01", "sha256": "7b0b446bb27250f872780e4546c212888dda7228d874cc5a9510f178b70a439f" }
+    {
+      "id": "asset_manifest",
+      "kind": "oracle",
+      "path": "parity/asset_manifest.json",
+      "owner_plan": "03",
+      "sha256": "88c8f5449dbdceb572aea2476aca79aaef6a0ad5bae1435de28e8e1e3672e541",
+      "regen": "mind-tools pack (asset manifest)"
+    },
+    {
+      "id": "bundle_keys",
+      "kind": "oracle",
+      "path": "parity/bundle_keys.json",
+      "owner_plan": "02/03",
+      "sha256": "8c6e048da19675bf4bfad579442e17bd47c69f3fad320a8d4bddae3a3f36611c",
+      "regen": "mind-tools pack (bundle index)"
+    },
+    {
+      "id": "content_ids",
+      "kind": "oracle",
+      "path": "parity/golden_content.json",
+      "owner_plan": "02",
+      "sha256": "86b9cacb14b86291625042e088525e4148f7af0ac68ff01ed1ca0f289fed5f01",
+      "regen": "cargo run -p mind-headless -- content dump"
+    },
+    {
+      "id": "harness_audio_events_blocks",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/audio/events_blocks.json",
+      "owner_plan": "18",
+      "sha256": "ebd1d926d51ea248b10d41530f59358d592b31145fb623165bbe83ae3e4c7f35"
+    },
+    {
+      "id": "harness_audio_events_sim",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/audio/events_sim.json",
+      "owner_plan": "18",
+      "sha256": "0db9af07eb018976cea9da8499d3624859af84bfe87c64bd064b4ceb2cff2192"
+    },
+    {
+      "id": "harness_audio_loops_aggregate",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/audio/loops_aggregate.json",
+      "owner_plan": "18",
+      "sha256": "1a44e02607e5e104e66dda97026f90338b89cc165812008d0e6ee8f3f23ed8d6"
+    },
+    {
+      "id": "harness_audio_music_select",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/audio/music_select.json",
+      "owner_plan": "18",
+      "sha256": "9aae8ab32e94db94d65001bc89d9e9569e7255d0c92b3a0b30463dc10b150cd1"
+    },
+    {
+      "id": "harness_audio_policy",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/audio/policy.json",
+      "owner_plan": "18",
+      "sha256": "1fa175a4d055db7eb27cb3b056fd65e3aaeb19ffe3dafdf0b70b12f02071a876"
+    },
+    {
+      "id": "harness_blocks_families",
+      "kind": "harness",
+      "path": "client/rust/mind-core/tests/golden/blocks_families.json",
+      "owner_plan": "02",
+      "sha256": "bddcecea0af8d5f8219e56e8d4081e85399901bcfe9024b22291cb4fbddcd48b"
+    },
+    {
+      "id": "harness_campaign_fog",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/campaign/fog.json",
+      "owner_plan": "12",
+      "sha256": "5a80922967e3c1689cfe4f80b683c6427c036bc3a5e19001dbff8e1d255d8ebd"
+    },
+    {
+      "id": "harness_campaign_objectives_completion",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/campaign/objectives_completion.json",
+      "owner_plan": "12",
+      "sha256": "9bb186177f5e9bd260df7ef7fd40d09fa31360050e4193da3f8a4de25d551c13"
+    },
+    {
+      "id": "harness_campaign_play",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/campaign/play.json",
+      "owner_plan": "12",
+      "sha256": "c1f7291517e70ba3826fb6bcb1db416be38dc835be17a8532e88f504f0df336f"
+    },
+    {
+      "id": "harness_campaign_rules_roundtrip",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/campaign/rules_roundtrip.json",
+      "owner_plan": "12",
+      "sha256": "f1ea157866e7eec41ebe15688c2b9332cd770cd72c8d14e9854c8b9e7f776d0f"
+    },
+    {
+      "id": "harness_campaign_schematic",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/campaign/schematic.json",
+      "owner_plan": "12",
+      "sha256": "f9f00d5f57d21f10284adabeb37fb6f8a7ccff9f16313229842c1eb4ff1f6a0b"
+    },
+    {
+      "id": "harness_campaign_sector_cycle",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/campaign/sector_cycle.json",
+      "owner_plan": "12",
+      "sha256": "ae2dc11899667c3b22a806b884d547b72a221a7b504adf091cec6b636b36a594"
+    },
+    {
+      "id": "harness_campaign_tech_unlock_gating",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/campaign/tech_unlock_gating.json",
+      "owner_plan": "12",
+      "sha256": "e692c1a61e4e23a21afd4b19c81fc64d80d6a7a232cc4c4b1cae7009e975edba"
+    },
+    {
+      "id": "harness_campaign_turn",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/campaign/turn.json",
+      "owner_plan": "12",
+      "sha256": "e78b4cee66a108f64c5b74ccfc14afdf10d83cd54c8ef4dfaf2d6e0993c6cc91"
+    },
+    {
+      "id": "harness_combat",
+      "kind": "harness",
+      "path": "client/rust/mind-core/tests/golden/combat.json",
+      "owner_plan": "10",
+      "sha256": "2ebdf8ac48fe290f72d4140b7d7759ac72af32cee08733dc6c7d2c045f48924e"
+    },
+    {
+      "id": "harness_entitymeta",
+      "kind": "harness",
+      "path": "client/rust/mind-core/tests/golden/entitymeta.json",
+      "owner_plan": "05",
+      "sha256": "cd5e8e3b5ecaabb57d1012d648c8da74c1cbdeadc98db516a8e52a046eb14bf4"
+    },
+    {
+      "id": "harness_fx_fx_lifecycle",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/fx/fx_lifecycle.json",
+      "owner_plan": "17",
+      "sha256": "861043df7a3d0c9c4512227274fa9f3eb8be046045a8036e3412c72ac6284520"
+    },
+    {
+      "id": "harness_fx_fx_program_explosion",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/fx/fx_program_explosion.json",
+      "owner_plan": "17",
+      "sha256": "d8c35f2b00dcdddfd85cce0f466a9aea2a18cc767687c911e823ba3197a3159d"
+    },
+    {
+      "id": "harness_fx_fx_program_hitBulletSmall",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/fx/fx_program_hitBulletSmall.json",
+      "owner_plan": "17",
+      "sha256": "3d245493e2bb3054792d6ec126e6feab9a3bb52ff0be5cbee767bab3fa99ae13"
+    },
+    {
+      "id": "harness_fx_fx_trail",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/fx/fx_trail.json",
+      "owner_plan": "17",
+      "sha256": "28db00f020242736f5d63d218704ef99832d6e29115f4c0116a81977b04971a4"
+    },
+    {
+      "id": "harness_logistics",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/logistics.json",
+      "owner_plan": "23",
+      "sha256": "8bd682c3a5b5c663226fe99ffe0730f50e910eb592cdd4eaac249a080b535a0b"
+    },
+    {
+      "id": "harness_network_heat_network_equilibrium",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/network/heat_network_equilibrium.json",
+      "owner_plan": "09",
+      "sha256": "cdc57843b56e7f14b13c6bdc0aa4c2e3736f7bdae46e90e1166b981895f4a31a"
+    },
+    {
+      "id": "harness_network_liquid_conduit_transfer",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/network/liquid_conduit_transfer.json",
+      "owner_plan": "09",
+      "sha256": "6576a74022334ed8cf4ef1165e4b92cf3ad1d0d284d47fd43961de41313fad6f"
+    },
+    {
+      "id": "harness_network_power_battery_cycle",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/network/power_battery_cycle.json",
+      "owner_plan": "09",
+      "sha256": "169dba98d365ca74194b3491dcbbe647c3b66f75d71aa78db45ee59e44782c32"
+    },
+    {
+      "id": "harness_network_power_graph_split_merge",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/network/power_graph_split_merge.json",
+      "owner_plan": "09",
+      "sha256": "1e5e212485b224ffb7d3e14763a08991ca0791e7d3a319c9fd15052f9b0bde38"
+    },
+    {
+      "id": "harness_network_power_network_determinism",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/network/power_network_determinism.checksums",
+      "owner_plan": "09",
+      "sha256": "650f9b9d82f0b45f4710e11b4d0643a96cc4bf3d60346fee5e2327d7febbc937"
+    },
+    {
+      "id": "harness_render_render_block_change",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/render/render_block_change.json",
+      "owner_plan": "16",
+      "sha256": "1729f2d708b6c992f746c0abd3a1432557a929830f04a5dcbe17c1b5f06bfaf8"
+    },
+    {
+      "id": "harness_render_render_darkness_radius",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/render/render_darkness_radius.json",
+      "owner_plan": "16",
+      "sha256": "a73d1cb10e57efa1e254b7883506134e293afef917d0009e86f519767674dfd9"
+    },
+    {
+      "id": "harness_render_render_flat_floor",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/render/render_flat_floor.json",
+      "owner_plan": "16",
+      "sha256": "069b699a76bdec927889c31b52855f179d33bfccc5535f14e1addbf511c07680"
+    },
+    {
+      "id": "harness_render_render_layer_order",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/render/render_layer_order.json",
+      "owner_plan": "16",
+      "sha256": "c86d3661671f5da1c0744329f9788604d1169c18be359303dd14c97c97815880"
+    },
+    {
+      "id": "harness_sim_core_determinism",
+      "kind": "harness",
+      "path": "client/rust/mind-core/tests/golden/sim_core_determinism.checksums",
+      "owner_plan": "05",
+      "sha256": "4c8326ce662925cb2976eeae0455e8f753a25cca2ed8b0b2d5e6bda60bae9093"
+    },
+    {
+      "id": "harness_sim_core_schedule_order",
+      "kind": "harness",
+      "path": "client/rust/mind-core/tests/golden/sim_core_schedule_order.txt",
+      "owner_plan": "05",
+      "sha256": "77879cab54e747b7eac1ba1c07bf3f2222ccf779eaf38ed8b8cf9dfd0ceda1fb"
+    },
+    {
+      "id": "harness_ui_dsl",
+      "kind": "harness",
+      "path": "client/rust/mind-core/tests/goldens/ui/dsl.json",
+      "owner_plan": "14",
+      "sha256": "ceae808a5bf533ea163e39dbd7296c32d69cf0517f3098e7834a71a01c2114bb"
+    },
+    {
+      "id": "harness_ui_hud_text",
+      "kind": "harness",
+      "path": "client/rust/mind-core/tests/goldens/ui/hud_text.json",
+      "owner_plan": "14",
+      "sha256": "7230ea2467581c66c30fa70c6b2c5e8b906f82f8d7ed2fb1092bf054ef685849"
+    },
+    {
+      "id": "harness_ui_menu_tree",
+      "kind": "harness",
+      "path": "client/rust/mind-core/tests/goldens/ui/menu_tree.json",
+      "owner_plan": "14",
+      "sha256": "ae2b7da4cd2da2d33284a6d2ae57078f4522eb3ea94616965238748c35b90b9a"
+    },
+    {
+      "id": "harness_ui_text",
+      "kind": "harness",
+      "path": "client/rust/mind-core/tests/goldens/ui/text.json",
+      "owner_plan": "14",
+      "sha256": "7fcffb280bc20c672d68beec845de04c2362b6278c71e6b09f692e860efc1185"
+    },
+    {
+      "id": "harness_ui_ui_keys",
+      "kind": "harness",
+      "path": "client/rust/mind-core/tests/goldens/ui/ui_keys.txt",
+      "owner_plan": "14",
+      "sha256": "8cc9bb3ffc0359bb66acb6d1a3a3ebbeb650eedac131097841d919722e217b03"
+    },
+    {
+      "id": "harness_units_units_formation",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/units/units_formation.json",
+      "owner_plan": "11",
+      "sha256": "80c0e74e9efe2f30a707430e3dcda3e835d42a0b16df0460a7abd2c8ee8cdbde"
+    },
+    {
+      "id": "harness_units_units_legs_ik",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/units/units_legs_ik.json",
+      "owner_plan": "11",
+      "sha256": "baaa59e0142851868f5b0900c5b43059087b777f03ee9ba65e83b5d0bf9119a5"
+    },
+    {
+      "id": "harness_units_units_spawn_group",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/units/units_spawn_group.json",
+      "owner_plan": "11",
+      "sha256": "6247db8aa817e7f2f5c8331a6d752e7d1f37f234686e146a3734f6f696404015"
+    },
+    {
+      "id": "harness_units_units_spawn_path_arrive",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/units/units_spawn_path_arrive.json",
+      "owner_plan": "11",
+      "sha256": "db6e4ad0884002fad842c78e70d3fd6196a49283298fd9a0289936f49de012f9"
+    },
+    {
+      "id": "harness_units_units_waves_difficulty",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/units/units_waves_difficulty.json",
+      "owner_plan": "11",
+      "sha256": "3ce17ec86530cb365fb6b61837dfd6a4260a17ce0a7bbbd2edea5c0bc9cbf40e"
+    },
+    {
+      "id": "harness_units_units_weapon_fire",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/units/units_weapon_fire.json",
+      "owner_plan": "11",
+      "sha256": "d019ffcb1e11bbb3ba613323bfff51e4490cdbbc01ded7f7a8a7a7ee43de36b8"
+    },
+    {
+      "id": "harness_units_wave_generate",
+      "kind": "harness",
+      "path": "client/rust/mind-core/tests/golden/units/wave_generate.json",
+      "owner_plan": "11",
+      "sha256": "c411f2878b62d7e3dde1bc34e77db777a707a074f65aaf551bd7063856840fa2"
+    },
+    {
+      "id": "harness_world_gen_asteroid",
+      "kind": "harness",
+      "path": "client/rust/mind-core/tests/golden/world_gen_asteroid.checksum",
+      "owner_plan": "06",
+      "sha256": "4572c30dc0b74f116fc4fc04e5a474cea6bd2d570740561b700069eacc51997c"
+    },
+    {
+      "id": "harness_world_gen_erekir",
+      "kind": "harness",
+      "path": "client/rust/mind-core/tests/golden/world_gen_erekir.checksum",
+      "owner_plan": "06",
+      "sha256": "0e1cb47e30bcc85543c696c1a8312b1fbb4cdf819436fe0ee65334ab432ef74d"
+    },
+    {
+      "id": "harness_world_gen_serpulo",
+      "kind": "harness",
+      "path": "client/rust/mind-core/tests/golden/world_gen_serpulo.checksum",
+      "owner_plan": "06",
+      "sha256": "bf8908beb10b4d511b36b22ce5f5f9b24e2a030f8cba11f7be7b44b58f946c0a"
+    },
+    {
+      "id": "harness_world_gen_simplex",
+      "kind": "harness",
+      "path": "client/rust/mind-core/tests/golden/world_gen_simplex.checksum",
+      "owner_plan": "06",
+      "sha256": "719332ee31155ed6e6a97acf796e326df7d1bd5e7cab29db18ef555e91acf8e7"
+    },
+    {
+      "id": "harness_world_gen_tantros",
+      "kind": "harness",
+      "path": "client/rust/mind-core/tests/golden/world_gen_tantros.checksum",
+      "owner_plan": "06",
+      "sha256": "3c9b168b263393a3165148ace4f8ebff0066ec9f8cf72c0d8d995d7826301034"
+    },
+    {
+      "id": "mod_classmap",
+      "kind": "oracle",
+      "path": "parity/mod_classmap.json",
+      "owner_plan": "20",
+      "sha256": "fecceb7bf966e76ed3e4723b025d6203734626aed4c21caeab3cca68c109dde9",
+      "regen": "mind-tools mods classmap"
+    },
+    {
+      "id": "scenario_bench_baseline",
+      "kind": "scenario",
+      "path": "scenarios/bench_baseline.json",
+      "owner_plan": "00",
+      "sha256": "8ffe171c2ba48ecf8af3ce080e1922bba9b311d8156befc47d21d7a822a086d9"
+    },
+    {
+      "id": "scenario_sim_core_boot",
+      "kind": "scenario",
+      "path": "scenarios/sim_core_boot.json",
+      "owner_plan": "05",
+      "sha256": "3be7e0cf4e4d79c12fb57b0805e409b720beabfca0b48dda9bacedab92da5128"
+    },
+    {
+      "id": "scenario_sim_core_determinism",
+      "kind": "scenario",
+      "path": "scenarios/sim_core_determinism.json",
+      "owner_plan": "05",
+      "sha256": "8d413688bfbe53aa40d02ed2eb26ea5d81ecc22abbf84b648f5328bc5ad411f3"
+    },
+    {
+      "id": "scenario_sim_core_many_commands",
+      "kind": "scenario",
+      "path": "scenarios/sim_core_many_commands.json",
+      "owner_plan": "05",
+      "sha256": "95b76263a8b3277cb35ade5413d6177afd3f72b79962f018068284fe53fb7559"
+    },
+    {
+      "id": "scenario_sim_core_reset_play_cycle",
+      "kind": "scenario",
+      "path": "scenarios/sim_core_reset_play_cycle.json",
+      "owner_plan": "05",
+      "sha256": "17ebacc75a23cb83094f9df56ff98eaf8675c5fc4c6d6e932b66c2788d961b2a"
+    },
+    {
+      "id": "scenario_spine_determinism",
+      "kind": "scenario",
+      "path": "scenarios/spine_determinism.json",
+      "owner_plan": "00",
+      "sha256": "081b653c4bea89a2e38fb11c5c307891000d1afea35384abc3b71582e497a4a5"
+    },
+    {
+      "id": "scenario_spine_many_commands",
+      "kind": "scenario",
+      "path": "scenarios/spine_many_commands.json",
+      "owner_plan": "00",
+      "sha256": "846f38a9356e8370016fe0e1288dd1c7003c53bc0e72215d949b5401a57d44f4"
+    },
+    {
+      "id": "scenario_spine_place_break",
+      "kind": "scenario",
+      "path": "scenarios/spine_place_break.json",
+      "owner_plan": "00",
+      "sha256": "08efdd874239045359c907f4cdec3c6b2c31f979432b590d5fb0281b4ec5f8c5"
+    },
+    {
+      "id": "scenario_stdb_binder_replay",
+      "kind": "scenario",
+      "path": "scenarios/stdb_binder_replay.json",
+      "owner_plan": "01",
+      "sha256": "e356e927a66d8004089e0e2e2e1c79c6f3f7c20f7b0c514b56588df9f9ef93d9"
+    },
+    {
+      "id": "scenario_stdb_command_order",
+      "kind": "scenario",
+      "path": "scenarios/stdb_command_order.json",
+      "owner_plan": "01",
+      "sha256": "7b0b446bb27250f872780e4546c212888dda7228d874cc5a9510f178b70a439f"
+    },
+    {
+      "id": "scenario_stdb_offline_boot",
+      "kind": "scenario",
+      "path": "scenarios/stdb_offline_boot.json",
+      "owner_plan": "01",
+      "sha256": "f0e31a7dc0f545b3b566fdb2fb85ba8e3544e522228390be8d203384df0be186"
+    }
   ]
 }
