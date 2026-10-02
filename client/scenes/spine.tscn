@@ -15,6 +15,7 @@
 ; │   ├── LowRes (Node2D)                  NEW: pixelator host (plan 16 M6)
 ; │   └── MinimapProvider (Node2D)         NEW: minimap provider (plan 16 M6)
 ; ├── MindRender (MindRender)   NEW (plan 16): stable MCP/debug facade
+; ├── MindFx (MindFx)           NEW (plan 17): effect/decal/trail pool + FX draw
 ; ├── Planet (CanvasLayer)      NEW: g3d planet host (plan 16 M7)
 ; └── Ui (CanvasLayer)
 ;     └── StateInspector (state_inspector.tscn instance)
@@ -47,6 +48,8 @@ zoom = Vector2(2, 2)
 [node name="MinimapProvider" type="MindMinimap" parent="World"]
 
 [node name="MindRender" type="MindRender" parent="."]
+
+[node name="MindFx" type="MindFx" parent="."]
 
 [node name="Planet" type="CanvasLayer" parent="."]
 

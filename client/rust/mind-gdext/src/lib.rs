@@ -10,6 +10,7 @@
 mod assets;
 mod audio;
 mod camera;
+mod fx;
 mod hello;
 mod log_bridge;
 mod mods;
@@ -23,6 +24,7 @@ mod tile_grid;
 pub use assets::MindAssets;
 pub use audio::MindAudio;
 pub use camera::MindCamera2D;
+pub use fx::MindFx;
 pub use mods::MindMods;
 pub use platform::MindPlatform;
 pub use render::{MindMinimap, MindRender, MindWorldRenderer};

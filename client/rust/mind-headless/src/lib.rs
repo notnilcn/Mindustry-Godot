@@ -16,6 +16,7 @@ pub mod blocks_scenarios;
 pub mod cli;
 pub mod combat_scenarios;
 pub mod exec;
+pub mod fx_scenarios;
 pub mod network_scenarios;
 pub mod paths;
 pub mod registry;

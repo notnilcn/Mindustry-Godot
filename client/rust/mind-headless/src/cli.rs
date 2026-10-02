@@ -279,6 +279,13 @@ pub enum Command {
         command: RenderCommand,
     },
 
+    /// FX/effect/draw-part scenarios (plan 17 §7b).
+    Fx {
+        /// FX subcommand.
+        #[command(subcommand)]
+        command: FxCommand,
+    },
+
     /// Power-network scenarios/benches (plan 09 §7b).
     Power {
         /// Power subcommand.
@@ -390,6 +397,99 @@ pub enum RenderCommand {
         #[arg(long, default_value_t = 20)]
         warmup: usize,
         /// Emit the machine-readable JSON report.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+/// `fx` subcommands (plan 17 §7b).
+#[derive(Debug, Subcommand)]
+pub enum FxCommand {
+    /// Audit the catalogue: length/order/name drift, classification counts and
+    /// (with `--strict`) unported entries.
+    Audit {
+        /// Restrict to one wave (`F1`..`F6`).
+        #[arg(long)]
+        wave: Option<String>,
+        /// Fail when any entry is unported.
+        #[arg(long)]
+        strict: bool,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Run the scripted effect lifecycle trace and write/check its golden JSON.
+    Lifecycle {
+        /// Deterministic view seed.
+        #[arg(long, default_value_t = 5)]
+        seed: u64,
+        /// Ticks to run.
+        #[arg(long, default_value_t = 600)]
+        ticks: u32,
+        /// Write the trace JSON here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+        /// Compare the trace JSON against this golden.
+        #[arg(long)]
+        check: Option<PathBuf>,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Build the sorted `DrawPrim` program for one catalogue entry at a fixed
+    /// time and write/check its golden JSON.
+    Program {
+        /// Effect name (`Fx.<name>`).
+        name: String,
+        /// Fixed time in ticks.
+        #[arg(long, default_value_t = 3.0)]
+        tick: f32,
+        /// Write the program JSON here.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Compare the program JSON against this golden.
+        #[arg(long)]
+        check: Option<PathBuf>,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Deterministic trail update/detach/fade trace.
+    Trail {
+        /// Deterministic seed.
+        #[arg(long, default_value_t = 3)]
+        seed: u64,
+        /// Write the trace JSON here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+        /// Compare the trace JSON against this golden.
+        #[arg(long)]
+        check: Option<PathBuf>,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Benchmark program resolution for N live states over M frames.
+    Bench {
+        /// Live states.
+        #[arg(long, default_value_t = 2000)]
+        states: usize,
+        /// Frames to resolve.
+        #[arg(long, default_value_t = 360)]
+        frames: u32,
+        /// Emit the machine-readable JSON report.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Vertical-slice check: spawn one effect, build its program, assert pixels
+    /// are emitted.
+    Smoke {
+        /// Emit a machine-readable JSON report.
         #[arg(long)]
         json: bool,
     },

@@ -273,6 +273,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
         Command::Combat { command } => crate::combat_scenarios::run(command),
         Command::Units { command } => crate::units_scenarios::run(command),
         Command::Render { command } => crate::render_scenarios::run(command),
+        Command::Fx { command } => crate::fx_scenarios::run(command),
         Command::Power { command } => {
             crate::network_scenarios::run(crate::network_scenarios::NetworkKind::Power, command)
         }
