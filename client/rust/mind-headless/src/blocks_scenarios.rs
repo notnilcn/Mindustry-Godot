@@ -910,13 +910,14 @@ fn bench(profile: &str, buildings: usize, ticks: u64, json: bool) -> Result<()> 
         }
     }
 
-    let (p50_us, p99_us) = percentiles(samples);
+    let (p50_us, p95_us, p99_us) = percentiles(samples);
     let report = serde_json::json!({
         "scenario": "blocks_bench",
         "profile": profile,
         "buildings": placed,
         "ticks": ticks,
         "p50_us": p50_us,
+        "p95_us": p95_us,
         "p99_us": p99_us,
         "checksum": harness.checksum_hex(),
         "detail": detail,
@@ -933,12 +934,11 @@ fn time_ticks(harness: &mut BuildHarness, ticks: u64, samples: &mut Vec<u64>) {
     }
 }
 
-fn percentiles(mut samples: Vec<u64>) -> (u64, u64) {
+fn percentiles(mut samples: Vec<u64>) -> (u64, u64, u64) {
     if samples.is_empty() {
-        return (0, 0);
+        return (0, 0, 0);
     }
     samples.sort_unstable();
-    let p50 = samples[samples.len() * 50 / 100];
-    let p99 = samples[(samples.len() * 99 / 100).min(samples.len() - 1)];
-    (p50, p99)
+    let pick = |pct: usize| samples[(samples.len() * pct / 100).min(samples.len() - 1)];
+    (pick(50), pick(95), pick(99))
 }

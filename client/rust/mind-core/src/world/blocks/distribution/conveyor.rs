@@ -17,7 +17,7 @@ use crate::entities::comp::Building;
 use crate::world::behavior::BuildingBehavior;
 use crate::world::block::BlockTable;
 use crate::world::modules::ItemModule;
-use crate::world::{TilePos, edelta, no_sleep, sleep};
+use crate::world::{TilePos, no_sleep, sleep};
 
 use super::super::autotiler::{
     BlendNeighbor, BlendWorld, blends_armored, build_blending, looking_at, looking_at_either,
@@ -290,27 +290,30 @@ impl BuildingBehavior for ConveyorBehavior {
     }
 
     fn update_tile(&self, world: &mut World, e: Entity) {
-        let (len, aligned, nextc, next_minitem, next_insert) = {
-            let Some(belt) = world.get::<ConveyorBuild>(e) else {
-                return;
-            };
-            let next_belt = belt.nextc.and_then(|next| world.get::<ConveyorBuild>(next));
-            (
-                belt.len,
-                belt.aligned,
-                belt.nextc,
-                next_belt.map(|next| next.minitem).unwrap_or(1.0),
-                next_belt.map(|next| next.last_inserted).unwrap_or(0),
-            )
+        // Copy the belt state into stack locals, run the whole motion loop, and
+        // write it back once: the Java loop touches the belt 5-6 times per tick;
+        // one ECS access instead of one-per-item is the §7.4 hot-path win. The
+        // observable state transition is identical (`pass` never mutates `e`).
+        let Some(mut belt) = world.get::<ConveyorBuild>(e).cloned() else {
+            return;
         };
+        let next = belt.next;
+        let nextc = belt.nextc;
+        let aligned = belt.aligned;
+        let (next_minitem, next_insert) =
+            match nextc.and_then(|next| world.get::<ConveyorBuild>(next)) {
+                Some(next_belt) => (next_belt.minitem, next_belt.last_inserted),
+                None => (1.0, 0),
+            };
 
-        let time_scale = world
+        let (time_scale, efficiency) = world
             .get::<Building>(e)
-            .map(|b| b.time_scale)
-            .unwrap_or(1.0);
-        if len == 0 && (time_scale - 1.0).abs() <= 1e-6 {
-            if let Some(mut belt) = world.get_mut::<ConveyorBuild>(e) {
-                belt.clog_heat = 0.0;
+            .map(|b| (b.time_scale, b.efficiency))
+            .unwrap_or((1.0, 0.0));
+        if belt.len == 0 && (time_scale - 1.0).abs() <= 1e-6 {
+            belt.clog_heat = 0.0;
+            if let Some(mut current) = world.get_mut::<ConveyorBuild>(e) {
+                *current = belt;
             }
             sleep(world, e);
             return;
@@ -321,71 +324,58 @@ impl BuildingBehavior for ConveyorBehavior {
         } else {
             1.0
         };
-        let moved = self.speed * edelta(world, e);
-        let original_len = len as usize;
+        let moved = self.speed * efficiency * time_scale;
+        let original_len = belt.len as usize;
         let mut minitem = 1.0f32;
         let mut mid = 0u8;
-        let mut current_len = len as i32;
+        let mut current_len = belt.len as i32;
 
         for i in (0..original_len).rev() {
-            let (item, y_i, x_i) = {
-                let Some(mut belt) = world.get_mut::<ConveyorBuild>(e) else {
-                    return;
-                };
-                let previous = if i == original_len - 1 {
-                    100.0
-                } else {
-                    belt.ys[i + 1]
-                };
-                let nextpos = previous - ITEM_SPACE;
-                let maxmove = (nextpos - belt.ys[i]).clamp(0.0, moved);
-                belt.ys[i] += maxmove;
-                if belt.ys[i] > next_max {
-                    belt.ys[i] = next_max;
-                }
-                if belt.ys[i] > 0.5 && i > 0 {
-                    mid = (i - 1) as u8;
-                }
-                belt.xs[i] = approach(belt.xs[i], 0.0, moved * 2.0);
-                (belt.ids[i], belt.ys[i], belt.xs[i])
+            let previous = if i == original_len - 1 {
+                100.0
+            } else {
+                belt.ys[i + 1]
             };
+            let nextpos = previous - ITEM_SPACE;
+            let maxmove = (nextpos - belt.ys[i]).clamp(0.0, moved);
+            belt.ys[i] += maxmove;
+            if belt.ys[i] > next_max {
+                belt.ys[i] = next_max;
+            }
+            if belt.ys[i] > 0.5 && i > 0 {
+                mid = (i - 1) as u8;
+            }
+            belt.xs[i] = approach(belt.xs[i], 0.0, moved * 2.0);
+            let item = belt.ids[i];
 
-            if y_i >= 1.0 && pass(world, e, item) {
+            if belt.ys[i] >= 1.0 && pass(world, e, next, item) {
                 if aligned
                     && let Some(next) = nextc
                     && let Some(mut next_belt) = world.get_mut::<ConveyorBuild>(next)
                 {
-                    next_belt.xs[next_insert as usize] = x_i;
+                    next_belt.xs[next_insert as usize] = belt.xs[i];
                 }
                 if let Some(mut items) = world.get_mut::<ItemModule>(e) {
                     items.remove(item, (current_len - i as i32).max(0));
                 }
-                if let Some(mut belt) = world.get_mut::<ConveyorBuild>(e) {
-                    belt.remove(i);
-                    belt.len = (i as u8).min(belt.len);
-                    current_len = belt.len as i32;
-                }
-            } else if y_i < minitem {
-                minitem = y_i;
+                belt.remove(i);
+                belt.len = (i as u8).min(belt.len);
+                current_len = belt.len as i32;
+            } else if belt.ys[i] < minitem {
+                minitem = belt.ys[i];
             }
         }
 
-        let (blend_bits, clog_heat) = {
-            let Some(mut belt) = world.get_mut::<ConveyorBuild>(e) else {
-                return;
-            };
-            belt.mid = mid;
-            (belt.blend_bits, belt.clog_heat)
-        };
-        let threshold = ITEM_SPACE + if blend_bits == 1 { 0.3 } else { 0.0 };
-        let new_heat = if minitem < threshold {
-            approach(clog_heat, 1.0, 1.0 / 60.0)
+        belt.mid = mid;
+        belt.minitem = minitem;
+        let threshold = ITEM_SPACE + if belt.blend_bits == 1 { 0.3 } else { 0.0 };
+        belt.clog_heat = if minitem < threshold {
+            approach(belt.clog_heat, 1.0, 1.0 / 60.0)
         } else {
             0.0
         };
-        if let Some(mut belt) = world.get_mut::<ConveyorBuild>(e) {
-            belt.minitem = minitem;
-            belt.clog_heat = new_heat;
+        if let Some(mut current) = world.get_mut::<ConveyorBuild>(e) {
+            *current = belt;
         }
 
         no_sleep(world, e);
@@ -634,8 +624,7 @@ impl BuildingBehavior for ConveyorBehavior {
 }
 
 /// `ConveyorBuild.pass(item)`.
-fn pass(world: &mut World, e: Entity, item: ItemId) -> bool {
-    let next = world.get::<ConveyorBuild>(e).and_then(|belt| belt.next);
+fn pass(world: &mut World, e: Entity, next: Option<Entity>, item: ItemId) -> bool {
     let Some(next) = next else {
         return false;
     };

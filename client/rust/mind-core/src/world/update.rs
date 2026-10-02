@@ -10,6 +10,7 @@
 //! then call the registered behavior.
 
 use bevy_ecs::entity::Entity;
+use bevy_ecs::query::{QueryState, With};
 use bevy_ecs::world::World;
 
 use crate::content::{ItemId, LiquidId};
@@ -70,26 +71,45 @@ impl BlockInstance {
     }
 }
 
+/// Cached query over `Building` entities (plan 08 §7.4: avoid the per-tick
+/// `iter_entities` + doubled component probe).
+pub type BuildingOrderQuery = QueryState<(Entity, &'static EntitySeq), With<Building>>;
+
 /// Iterator order key: sequence then entity index (stable, deterministic).
-fn fill_building_order(world: &World, order: &mut Vec<(u64, Entity)>) {
+///
+/// Uses a cached [`QueryState`] so each tick reads the `EntitySeq` column
+/// directly instead of probing every entity for `Building` and `EntitySeq`.
+/// `seq` is a unique per-building spawn sequence, so an unstable sort yields the
+/// same total order as a stable one while avoiding the stable sort's per-tick
+/// scratch allocation; the sort is skipped when query iteration is already
+/// ordered (the common steady-state case).
+fn fill_building_order(
+    world: &mut World,
+    order: &mut Vec<(u64, Entity)>,
+    query: &mut Option<BuildingOrderQuery>,
+) {
     order.clear();
-    order.extend(world.iter_entities().filter_map(|entity_ref| {
-        entity_ref.get::<Building>()?;
-        let seq = entity_ref
-            .get::<EntitySeq>()
-            .map(|seq| seq.0)
-            .unwrap_or(u64::MAX);
-        Some((seq, entity_ref.id()))
-    }));
-    order.sort_by_key(|(seq, entity)| (*seq, entity.index()));
+    let mut state = query.take().unwrap_or_else(|| QueryState::new(world));
+    for (entity, seq) in state.iter(&*world) {
+        order.push((seq.0, entity));
+    }
+    *query = Some(state);
+    if !order
+        .windows(2)
+        .all(|w| (w[0].0, w[0].1.index()) <= (w[1].0, w[1].1.index()))
+    {
+        order.sort_unstable_by_key(|(seq, entity)| (*seq, entity.index()));
+    }
 }
 
 /// Reusable scratch buffer so `update_buildings` allocates nothing after warmup
 /// (plan 07 §7d alloc-audit).
-#[derive(Debug, Default, bevy_ecs::prelude::Resource)]
+#[derive(Default, bevy_ecs::prelude::Resource)]
 pub struct BuildScratch {
     /// Building iteration order.
     pub order: Vec<(u64, Entity)>,
+    /// Cached building query (see [`fill_building_order`]).
+    pub query: Option<BuildingOrderQuery>,
 }
 
 /// Sim clock tracked for building updates (`Time.time` subset, `+1.0`/tick).
@@ -125,23 +145,26 @@ pub fn update_buildings(world: &mut World) {
     if let Some(mut clock) = world.get_resource_mut::<BuildClock>() {
         clock.time += 1.0;
     }
-    let mut order = match world.get_resource_mut::<BuildScratch>() {
-        Some(mut scratch) => std::mem::take(&mut scratch.order),
-        None => Vec::new(),
+    let (mut order, mut query) = match world.get_resource_mut::<BuildScratch>() {
+        Some(mut scratch) => (std::mem::take(&mut scratch.order), scratch.query.take()),
+        None => (Vec::new(), None),
     };
-    fill_building_order(world, &mut order);
+    fill_building_order(world, &mut order, &mut query);
     for (_, entity) in order.iter().copied() {
         building_update(world, entity);
     }
     if let Some(mut scratch) = world.get_resource_mut::<BuildScratch>() {
         scratch.order = order;
+        scratch.query = query;
     }
 }
 
 /// One building's `update()` (`BuildingComp.update`).
 pub fn building_update(world: &mut World, entity: Entity) {
     // `(timeScaleDuration -= Time.delta) <= 0 -> timeScale = 1`.
-    {
+    // The block id is read in the same borrow so the common path needs one
+    // `Building` access instead of two (plan 08 §7.4 hot path).
+    let block_id = {
         let Some(mut building) = world.get_mut::<Building>(entity) else {
             return;
         };
@@ -149,10 +172,7 @@ pub fn building_update(world: &mut World, entity: Entity) {
         if building.time_scale_duration <= 0.0 {
             building.time_scale = 1.0;
         }
-    }
-
-    let Some(block_id) = world.get::<Building>(entity).map(|building| building.block) else {
-        return;
+        building.block
     };
     let Some(inst) = world
         .get_resource::<BlockTable>()
@@ -163,23 +183,18 @@ pub fn building_update(world: &mut World, entity: Entity) {
 
     update_consumption(world, entity, &inst);
 
-    let (enabled, behaviour) = {
-        let enabled = world
-            .get::<Building>(entity)
-            .is_some_and(|building| building.enabled);
-        (enabled, inst.behavior.clone())
-    };
-    if enabled || behaviour.always_update_when_disabled() {
-        behaviour.update_tile(world, entity);
+    let enabled = world
+        .get::<Building>(entity)
+        .is_some_and(|building| building.enabled);
+    if enabled || inst.behavior.always_update_when_disabled() {
+        // Clone only the behavior handle (single atomic) instead of cloning the
+        // whole `Arc<BlockInstance>` again.
+        inst.behavior.clone().update_tile(world, entity);
     }
 }
 
 /// `BuildingComp.updateConsumption` (verbatim pass structure).
 pub fn update_consumption(world: &mut World, entity: Entity, inst: &BlockInstance) {
-    let cheating = world
-        .get_resource::<BuildRules>()
-        .is_some_and(|rules| rules.cheat);
-
     let Some((enabled, time_scale)) = world
         .get::<Building>(entity)
         .map(|building| (building.enabled, building.time_scale))
@@ -189,7 +204,20 @@ pub fn update_consumption(world: &mut World, entity: Entity, inst: &BlockInstanc
     let scale = inst.behavior.efficiency_scale(world, entity);
     let delta = time_scale;
 
-    if inst.consumers.is_empty() || cheating {
+    // No consumers: `cheat` does not change the result, so the `BuildRules`
+    // resource lookup is skipped on this (belt/router/wall) hot path.
+    if inst.consumers.is_empty() {
+        let potential = if enabled { 1.0 } else { 0.0 };
+        let eff = potential * scale;
+        set_efficiency(world, entity, potential, eff, eff, true);
+        return;
+    }
+
+    let cheating = world
+        .get_resource::<BuildRules>()
+        .is_some_and(|rules| rules.cheat);
+
+    if cheating {
         let potential = if enabled { 1.0 } else { 0.0 };
         let eff = potential * scale;
         set_efficiency(world, entity, potential, eff, eff, true);
