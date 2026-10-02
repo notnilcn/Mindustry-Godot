@@ -612,7 +612,7 @@ Regressions block the P6 gate; `bench/render_baseline.json` stores committed num
 
 ### 7.5 Exit criteria checklist
 
-- [ ] `cargo fmt --check`, `clippy -D warnings`, `cargo check`, `cargo test -p mind-core` green; `mind-core::render` boundary grep empty (no `godot`/`tokio`).
+- [x] `cargo fmt --check`, `clippy -D warnings`, `cargo check`, `cargo test -p mind-core` green; `mind-core::render` boundary grep empty (no `godot`/`tokio`). *(2026-10-02, `lane/16-render`: 550 lib + 2 + 2 + 1 pass / 2 ignored; boundary grep empty.)*
 - [ ] §7.1 tests pass and are listed in plan 23's port inventory.
 - [ ] `mind-headless render-list` scenarios pass with committed goldens; `--no-sort` emission-order test passes.
 - [ ] `render_block_change` proves dirty-set minimality and cold-rebuild equality.
