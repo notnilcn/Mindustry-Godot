@@ -85,6 +85,10 @@ impl SectorRect {
 }
 
 /// A campaign sector view (plan 12 `Sector`); defaults give a flat plane.
+///
+/// The vanilla planet generators read `id`/`threat`/`tile_v`/enemy-base flags;
+/// plan 12 supplies a real implementation, while [`FlatSectorView`] covers the
+/// headless harness and tests.
 pub trait SectorView {
     /// Sector id (`Sector.id`).
     fn id(&self) -> u32;
@@ -92,9 +96,44 @@ pub trait SectorView {
     /// The projected sector plane (`Sector.rect`).
     fn rect(&self) -> SectorRect;
 
+    /// Sector difficulty 0..1 (`Sector.threat`).
+    fn threat(&self) -> f32 {
+        0.0
+    }
+
+    /// Sector center on the planet sphere (`Sector.tile.v`).
+    fn tile_v(&self) -> [f32; 3] {
+        [0.0, 0.0, 0.0]
+    }
+
+    /// Whether this sector generates an enemy base (`Sector.hasEnemyBase`).
+    fn has_enemy_base(&self) -> bool {
+        false
+    }
+
+    /// Whether the player owns a base here (`Sector.hasBase`).
+    fn has_base(&self) -> bool {
+        false
+    }
+
+    /// Whether the sector is under attack (`Sector.isAttacked`).
+    fn is_attacked(&self) -> bool {
+        false
+    }
+
+    /// Whether the sector is captured (`Sector.isCaptured`).
+    fn is_captured(&self) -> bool {
+        false
+    }
+
     /// Whether the sector allows a launch loadout (`Sector.allowLaunchLoadout`).
     fn allow_launch_loadout(&self) -> bool {
         false
+    }
+
+    /// Owning planet content name (`Sector.planet.name`).
+    fn planet_name(&self) -> Option<&str> {
+        None
     }
 }
 
@@ -105,11 +144,26 @@ pub struct FlatSectorView {
     pub id: u32,
     /// Optional radius override.
     pub radius: f32,
+    /// Sector difficulty (`Sector.threat`).
+    pub threat: f32,
+    /// Sector center on the planet sphere (`Sector.tile.v`).
+    pub tile_v: [f32; 3],
+    /// Whether this sector generates an enemy base.
+    pub has_enemy_base: bool,
+    /// Whether the player owns a base here.
+    pub has_base: bool,
 }
 
 impl Default for FlatSectorView {
     fn default() -> Self {
-        Self { id: 0, radius: 1.0 }
+        Self {
+            id: 0,
+            radius: 1.0,
+            threat: 0.0,
+            tile_v: [0.0, 0.0, 0.0],
+            has_enemy_base: false,
+            has_base: false,
+        }
     }
 }
 
@@ -123,6 +177,22 @@ impl SectorView for FlatSectorView {
             radius: self.radius,
             ..SectorRect::default()
         }
+    }
+
+    fn threat(&self) -> f32 {
+        self.threat
+    }
+
+    fn tile_v(&self) -> [f32; 3] {
+        self.tile_v
+    }
+
+    fn has_enemy_base(&self) -> bool {
+        self.has_enemy_base
+    }
+
+    fn has_base(&self) -> bool {
+        self.has_base
     }
 }
 
@@ -147,6 +217,13 @@ impl GenNoise for PlanetNoise {
     }
 }
 
+/// Builds a per-run noise source from the resolved seed and sector plane.
+///
+/// The default (`None`) mirrors upstream `PlanetGenerator.noise` (seed `0`).
+/// `SerpuloPlanetGenerator` overrides `noise` with the planet seed and a `5x`
+/// projection, so it installs a factory here.
+pub type NoiseFactory = fn(i32, SectorRect) -> Box<dyn GenNoise>;
+
 /// The planet generation base (`PlanetGenerator`).
 pub struct PlanetGenerator {
     /// Shared helper library.
@@ -159,6 +236,8 @@ pub struct PlanetGenerator {
     pub sector: Option<SectorRect>,
     /// Sector-rect scale (`getSizeScl`).
     pub size_scl: f32,
+    /// Optional subclass noise-source factory (Serpulo's `noise` override).
+    pub noise_factory: Option<NoiseFactory>,
 }
 
 impl std::fmt::Debug for PlanetGenerator {
@@ -181,7 +260,13 @@ impl PlanetGenerator {
             seed: 0,
             sector: None,
             size_scl: 3200.0,
+            noise_factory: None,
         }
+    }
+
+    /// Installs a subclass noise-source factory (Serpulo's `noise` override).
+    pub fn set_noise_factory(&mut self, factory: NoiseFactory) {
+        self.noise_factory = Some(factory);
     }
 
     /// `PlanetGenerator.getSizeScl`.
@@ -205,6 +290,24 @@ impl PlanetGenerator {
         self.base.noise_oct(x, y, octaves, falloff, scl, mag)
     }
 
+    /// Seeds the generator and installs the per-run noise source without
+    /// running the tile loop (Asteroid/Serpulo subclasses that build the grid
+    /// with `pass` rather than `genTile`).
+    pub fn prepare(&mut self, tiles: &Tiles, params: &WorldParams, sector: &dyn SectorView) {
+        let rect = sector.rect();
+        self.seed = self.seed_formula(params.seed_offset);
+        self.sector = Some(rect);
+        self.base.width = tiles.width;
+        self.base.height = tiles.height;
+        self.base
+            .set_seed(sector.id() as u64 + params.seed_offset + self.base_seed as u64);
+        let source = match self.noise_factory {
+            Some(factory) => factory(self.seed, rect),
+            None => Box::new(PlanetNoise { rect }),
+        };
+        self.base.set_noise_source(source);
+    }
+
     /// Runs the per-tile generation loop, calling `gen_tile` for each tile.
     ///
     /// This is the Rust equivalent of `PlanetGenerator.generate(Tiles, sector,
@@ -220,14 +323,8 @@ impl PlanetGenerator {
     ) where
         F: FnMut(&mut PlanetGenerator, [f32; 3], &mut TileGen),
     {
+        self.prepare(tiles, params, sector);
         let rect = sector.rect();
-        self.seed = self.seed_formula(params.seed_offset);
-        self.sector = Some(rect);
-        self.base.width = tiles.width;
-        self.base.height = tiles.height;
-        self.base
-            .set_seed(sector.id() as u64 + params.seed_offset + self.base_seed as u64);
-        self.base.set_noise_source(Box::new(PlanetNoise { rect }));
 
         let width = tiles.width;
         let height = tiles.height;

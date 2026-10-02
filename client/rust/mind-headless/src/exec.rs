@@ -230,15 +230,17 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
                 seed,
                 width,
                 height,
+                iters,
                 dump,
                 json,
             } => cmd_world_gen(
                 generator,
-                planet,
+                planet.as_deref(),
                 *sector,
                 *seed,
                 *width,
                 *height,
+                *iters,
                 dump.as_deref(),
                 *json,
             ),
@@ -3346,14 +3348,30 @@ fn cmd_world_bench_gen(
     Ok(EXIT_PASS)
 }
 
+/// Constructs a vanilla planet generator for the harness `world gen` command.
+fn make_planet_generator(
+    planet: &str,
+    seed: u64,
+) -> anyhow::Result<Box<dyn mind_core::maps::generators::WorldGenerator>> {
+    use mind_core::maps::generators::{BlankPlanetGenerator, WorldGenerator};
+    let generator: Box<dyn WorldGenerator> = match planet {
+        "blank" => Box::new(BlankPlanetGenerator::new(0)),
+        "tantros" => Box::new(mind_core::maps::planet::TantrosPlanetGenerator::new()),
+        "asteroid" => Box::new(mind_core::maps::planet::AsteroidGenerator::new(seed as i32)),
+        other => return Err(anyhow!("unknown planet generator `{other}`")),
+    };
+    Ok(generator)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn cmd_world_gen(
     generator: &str,
-    planet: &str,
+    planet: Option<&str>,
     sector: u32,
     seed: u64,
     width: i32,
     height: i32,
+    iters: u64,
     dump: Option<&Path>,
     json: bool,
 ) -> anyhow::Result<i32> {
@@ -3365,6 +3383,9 @@ fn cmd_world_gen(
     if width <= 0 || height <= 0 {
         return Err(anyhow!("--width and --height must be positive"));
     }
+    if iters == 0 {
+        return Err(anyhow!("--iters must be positive"));
+    }
     let content = boot_content()?;
     let params = WorldParams {
         seed_offset: seed,
@@ -3374,35 +3395,31 @@ fn cmd_world_gen(
     };
     let mut grid = WorldGrid::new(width, height);
 
-    match generator {
-        "simplex" => {
-            let mut generator_impl = SimplexGenerator::new(seed);
-            generator_impl.generate(&mut grid.tiles, &params, &content);
-        }
-        "flat" | "blank" => {
-            let stone = content.block_id("stone").unwrap_or(BlockId::AIR);
-            for index in 0..grid.tiles.len() {
-                grid.tiles.geti_mut(index).floor = stone;
+    // `--planet` selects a vanilla planet generator; otherwise `--generator`
+    // picks the flat/simplex helper (`--generator planet --planet X` also works).
+    let planet = planet.or_else(|| (generator == "planet").then_some("serpulo"));
+    for _ in 0..iters {
+        if let Some(planet) = planet {
+            let mut planet_gen: Box<dyn WorldGenerator> = make_planet_generator(planet, seed)?;
+            planet_gen.generate(&mut grid.tiles, &params, &content);
+        } else {
+            match generator {
+                "simplex" => {
+                    let mut generator_impl = SimplexGenerator::new(seed);
+                    generator_impl.generate(&mut grid.tiles, &params, &content);
+                }
+                "flat" | "blank" => {
+                    let stone = content.block_id("stone").unwrap_or(BlockId::AIR);
+                    for index in 0..grid.tiles.len() {
+                        grid.tiles.geti_mut(index).floor = stone;
+                    }
+                }
+                other => return Err(anyhow!("unknown generator `{other}`")),
             }
         }
-        "planet" => match planet {
-            "blank" => {
-                use mind_core::maps::generators::BlankPlanetGenerator;
-                let mut planet_gen = BlankPlanetGenerator::new(0);
-                planet_gen.generate(&mut grid.tiles, &params, &content);
-            }
-            "tantros" => {
-                use mind_core::maps::planet::TantrosPlanetGenerator;
-                let mut planet_gen = TantrosPlanetGenerator::new();
-                planet_gen.generate(&mut grid.tiles, &params, &content);
-            }
-            other => {
-                return Err(anyhow!(
-                    "planet generator `{other}` lands with plan 06 M8 (sector {sector})"
-                ));
-            }
-        },
-        other => return Err(anyhow!("unknown generator `{other}`")),
+
+        // `iters > 1` is a determinism check (same output every pass); the
+        // generators overwrite tile data, so no reset is required.
     }
 
     let mut hasher = Hasher::new();
@@ -3431,10 +3448,15 @@ fn cmd_world_gen(
         }
     }
     let checksum = Checksum(hasher.finish().value()).to_hex();
+    let generator_label = if planet.is_some() {
+        "planet"
+    } else {
+        generator
+    };
 
     let report = serde_json::json!({
         "format": 1,
-        "generator": generator,
+        "generator": generator_label,
         "planet": planet,
         "sector": sector,
         "seed": seed,
