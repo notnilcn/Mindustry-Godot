@@ -689,7 +689,7 @@ impl MindWorldRenderer {
     pub fn set_core_edges(&mut self, cores: PackedFloat32Array, player_team: i64) {
         let slice = cores.as_slice();
         let mut list = Vec::with_capacity(slice.len() / 3);
-        for triple in slice.chunks_exact(3) {
+        for triple in slice.as_chunks::<3>().0 {
             list.push((triple[0], triple[1], triple[2] as u8));
         }
         if let Some(overlays) = self.overlays.as_mut() {

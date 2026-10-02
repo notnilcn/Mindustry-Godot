@@ -39,6 +39,15 @@ impl RegionIdTable {
         RegionId(id)
     }
 
+    /// Interns a borrowed name without allocating on a cache hit (the render
+    /// build path uses this to avoid per-tile `String` clones; plan 16 §7.4).
+    pub fn intern_str(&mut self, name: &str) -> RegionId {
+        if let Some(id) = self.by_name.get(name) {
+            return RegionId(*id);
+        }
+        self.intern(name)
+    }
+
     /// Resolves an id back to its name.
     pub fn name(&self, id: RegionId) -> Option<&str> {
         self.names.get(id.0 as usize).map(String::as_str)
@@ -82,5 +91,14 @@ mod tests {
         assert_eq!(table.name(b), Some("copper-wall"));
         assert_eq!(table.get("grass"), Some(a));
         assert_eq!(table.get("missing"), None);
+    }
+
+    #[test]
+    fn intern_str_matches_intern_without_alloc() {
+        let mut table = RegionIdTable::new();
+        let a = table.intern("grass");
+        assert_eq!(table.intern_str("grass"), a);
+        assert_eq!(table.intern_str("new"), RegionId(1));
+        assert_eq!(table.len(), 2);
     }
 }

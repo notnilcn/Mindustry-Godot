@@ -56,6 +56,7 @@ impl EnvRenderer {
     }
 
     /// `Renderer.addEnvRenderer(env, pass)` (plan 17 re-registration seam).
+    #[allow(dead_code)]
     pub fn add(&mut self, env: u32, pass: &'static str) {
         self.registry.add(env, pass);
     }

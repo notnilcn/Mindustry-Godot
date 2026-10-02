@@ -17,19 +17,10 @@ use mind_core::render::g3d::mesh_data::build_planet_grid;
 use mind_core::render::g3d::{PlanetGrid, PlanetParams};
 
 /// `PlanetRenderer` host state.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct PlanetRenderer {
     params: PlanetParams,
     grids: HashMap<usize, PlanetGrid>,
-}
-
-impl Default for PlanetRenderer {
-    fn default() -> Self {
-        Self {
-            params: PlanetParams::default(),
-            grids: HashMap::new(),
-        }
-    }
 }
 
 impl PlanetRenderer {

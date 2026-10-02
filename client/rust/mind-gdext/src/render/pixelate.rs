@@ -41,6 +41,7 @@ impl Pixelator {
     }
 
     /// Recomputes the target when enabled.
+    #[allow(clippy::too_many_arguments)]
     pub fn update(
         &mut self,
         scale: f32,

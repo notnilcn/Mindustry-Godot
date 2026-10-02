@@ -138,7 +138,7 @@ pub fn build_entries(
             if tile.floor != BlockId::AIR
                 && let Some(def) = content.block(tile.floor)
             {
-                let region = ids.intern(def.region.clone());
+                let region = ids.intern_str(&def.region);
                 entries.push(RenderEntry {
                     seq,
                     z: Layer::Floor.z(),
@@ -158,7 +158,7 @@ pub fn build_entries(
             if tile.overlay != BlockId::AIR
                 && let Some(def) = content.block(tile.overlay)
             {
-                let region = ids.intern(def.region.clone());
+                let region = ids.intern_str(&def.region);
                 entries.push(RenderEntry {
                     seq,
                     z: Layer::Floor.z(),
@@ -186,7 +186,7 @@ pub fn build_entries(
                 } else {
                     (Layer::Block, Layer::Block.z())
                 };
-                let region = ids.intern(def.region.clone());
+                let region = ids.intern_str(&def.region);
                 let w = def.size as f32 * size;
                 let offset = def.offset;
                 entries.push(RenderEntry {

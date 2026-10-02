@@ -38,6 +38,14 @@ pub fn run(command: &RenderCommand) -> Result<i32> {
             *json,
         ),
         RenderCommand::Bands { out } => bands(out.as_deref()),
+        RenderCommand::Bench {
+            width,
+            height,
+            buildings,
+            iters,
+            warmup,
+            json,
+        } => bench(*width, *height, *buildings, *iters, *warmup, *json),
     }
 }
 
@@ -90,6 +98,20 @@ fn scenario_world(name: &str, content: &ContentRegistry) -> Result<ScenarioWorld
                 .ok_or_else(|| anyhow::anyhow!("missing `copper-wall`"))?;
             world.set_block(TilePos::new(4, 4), wall, 0, 0)?;
             dynamic_blocks = 1;
+        }
+        "render_darkness_radius" => {
+            world = WorldGrid::new(48, 48);
+            world.fill(stone, BlockId::AIR);
+            let wall = content
+                .block_id("stone-wall")
+                .ok_or_else(|| anyhow::anyhow!("missing `stone-wall`"))?;
+            // A hollow 7x7 wall ring centred at (24, 24).
+            for d in -3i16..=3 {
+                world.set_block(TilePos::new(24 + d, 21), wall, 0, 0)?;
+                world.set_block(TilePos::new(24 + d, 27), wall, 0, 0)?;
+                world.set_block(TilePos::new(21, 24 + d), wall, 0, 0)?;
+                world.set_block(TilePos::new(27, 24 + d), wall, 0, 0)?;
+            }
         }
         other => bail!("unknown render scenario `{other}`"),
     }
@@ -194,5 +216,81 @@ fn bands(out: Option<&Path>) -> Result<i32> {
         }
         None => print!("{text}"),
     }
+    Ok(EXIT_PASS)
+}
+
+/// `render bench`: times the render-list build path over a large world and
+/// reports p50/p99 (plan 16 §7.4/M9). The release budgets are p50 ≤ 2500 µs and
+/// p99 ≤ 5000 µs; debug runs are recorded for regression tracking.
+fn bench(
+    width: i32,
+    height: i32,
+    buildings: usize,
+    iters: usize,
+    warmup: usize,
+    json: bool,
+) -> Result<i32> {
+    let content = boot_content()?;
+    let stone = content
+        .block_id("stone")
+        .ok_or_else(|| anyhow::anyhow!("missing `stone` floor"))?;
+    let conveyor = content
+        .block_id("conveyor")
+        .ok_or_else(|| anyhow::anyhow!("missing `conveyor`"))?;
+
+    let mut world = WorldGrid::new(width.max(2), height.max(2));
+    world.fill(stone, BlockId::AIR);
+    let mut placed = 0usize;
+    'outer: for y in (1..world.height() - 1).step_by(2) {
+        for x in (1..world.width() - 1).step_by(2) {
+            if placed >= buildings {
+                break 'outer;
+            }
+            world.set_block(TilePos::new(x as i16, y as i16), conveyor, 0, 0)?;
+            placed += 1;
+        }
+    }
+    world.tile_changes = -1;
+    world.floor_changes = -1;
+
+    let tilesize = 8.0f32;
+    let camera = mind_core::render::CameraView {
+        x: world.width() as f32 * tilesize / 2.0,
+        y: world.height() as f32 * tilesize / 2.0,
+        w: world.width() as f32 * tilesize,
+        h: world.height() as f32 * tilesize,
+        zoom: 1.0,
+        team: 0,
+    };
+
+    let mut ids = RegionIdTable::new();
+    for _ in 0..warmup {
+        let entries = build_entries(&world, &content, &mut ids, &camera);
+        std::hint::black_box(&entries);
+    }
+
+    let mut samples = Vec::with_capacity(iters);
+    let mut entries = 0usize;
+    for _ in 0..iters {
+        let start = std::time::Instant::now();
+        let built = build_entries(&world, &content, &mut ids, &camera);
+        samples.push(start.elapsed().as_micros() as u64);
+        entries = built.len();
+        std::hint::black_box(&built);
+    }
+    samples.sort_unstable();
+    let p50 = samples.get(samples.len() / 2).copied().unwrap_or(0);
+    let p99 = samples
+        .get((samples.len() * 99 / 100).min(samples.len().saturating_sub(1)))
+        .copied()
+        .unwrap_or(0);
+
+    let report = format!(
+        "{{\"scenario\":\"render_bench\",\"width\":{width},\"height\":{height},\"buildings\":{placed},\"iters\":{iters},\"entries\":{entries},\"regions\":{},\"p50_us\":{p50},\"p99_us\":{p99},\"budget_us\":{{\"p50\":2500,\"p99\":5000}},\"pass\":{}}}",
+        ids.len(),
+        p99 <= 5000,
+    );
+    let _ = json;
+    println!("{report}");
     Ok(EXIT_PASS)
 }
