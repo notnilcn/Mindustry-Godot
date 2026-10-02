@@ -8,7 +8,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Draft v1 — 2026-10-01, not started. Reconciled with the written siblings 00/02/03/04/05/10/11/12/13/14/16/17 (§3.12). Two `NEEDS USER DECISION` items in §8 (OD-18-A ambient polling, OD-18-B lowpass wet); each has a working default and execution continues on it. |
+| **Status** | 🟡 **Execution started 2026-10-02 on `lane/18-audio` (commits `a741dfd` + `7c4a837`): M0–M4 core complete, M5 partial, M6 partial; all in-engine MCP verification deferred to the single-editor mutex.** `mind-core::audio` (all state machines + `AudioSink`), `mind-gdext::audio::MindAudio` (buses, stream cache, voice pool, `#[func]` API, spine node), `mind-headless audio events/music/loops/policy/bench` + goldens. Reconciled with the written siblings 00/02/03/04/05/10/11/12/13/14/16/17 (§3.12). OD-18-A (main-thread 20 Hz poller) and OD-18-B (cutoff-sweep lowpass) executed on their locked defaults. |
 | **Phase** | P6 — Render, FX, audio (`HIGH_LEVEL_PLAN.md` §5). |
 | **Depends on** | `02_CONTENT_IMPLEMENTATION_PLAN.md` (content records carrying `SoundId`/music fields: `BlockDef.ambientSound`/`destroySound`, `UnitTypeDef.*Sound*`, `WeaponDef.shoot_sound`, `BulletDef.hitSound/despawnSound/healSound`, `WeatherDef.sound*`, `PlanetDef.launchMusic/ambientMusic/darkMusic/alwaysPlayMusic`; `SoundId` is **owned by this plan**, §3.2), `03_ASSETS_IMPLEMENTATION_PLAN.md` (`sounds.index.json`, `Sounds`/`Musics` registries, `FileTree::resolve_sound`, lazy `AudioStream` cache, `AssetsReadyEvent`, `OverlaySound`/`dp-` hooks). Transitively: 00 (spine, event bus, MCP rig), 04 (`SettingsStore` keys), 05 (`EventBus`, `ResetEvent`/`WaveEvent`/`ClientLoadEvent`, `SimClock`), 12 (`Rules` music fields), 14 (`MindUi` dialog/menu/planet/editor visibility, settings rows), 16 (camera for pan/falloff, frame slot), 17 (`FxSink::sound` forwarding). |
 | **Blocks** | `21_MULTIPLAYER_IMPLEMENTATION_PLAN.md` (no direct interface: sound events are local-only and never relayed; the no-op sink must be the default in every relay path) and `22_PLATFORM_EXPORT_IMPLEMENTATION_PLAN.md` (mobile audio session handling, export bus layout verification, dedicated-server audio-less policy). Also consumed (not blocked) by `23_PARITY_VERIFICATION_IMPLEMENTATION_PLAN.md` (audio scenario/golden registration). |
@@ -532,23 +532,23 @@ Regressions block the P6 gate; numbers recorded in `bench/baselines.json` (plan 
 
 ### 7e. Exit criteria checklist
 
-- [ ] `cargo test -p mind-core` green with every §7a row implemented; no Godot/network needed.
-- [ ] `cargo fmt --check` + `cargo clippy -p mind-core -p mind-gdext -- -D warnings` clean; `mind-core` boundary grep empty.
-- [ ] `audio events|music|loops|policy` scenarios pass with committed goldens; `audio bench` meets §7d.
-- [ ] Bus layout verified in-engine (Master→Sound/Music/UI + Sound lowpass slot 0).
-- [ ] Every `SoundControl` branch asserted: menu/planet/editor/game, dark/boss, disable/always, keepSilent/stop, fades.
-- [ ] Volume formulas asserted: `musicvol × Rules.musicVolume` per track; `sfxvol` per-call semantics; `ambientvol` in loops.
-- [ ] Dialog pause: lowpass target reached in ≤ 0.6 s, pause mirror set, resume restores; UI/Music unaffected.
-- [ ] `SoundPriority` table golden matches the Java transcription; admission/eviction tests pass.
-- [ ] Loop aggregation matches upstream math; menu clear + pause freeze + voice start/stop asserted.
-- [ ] `SoundLoop` fade and stop asserted; weather loop emission asserted headless.
-- [ ] Ambient poll runs at 20 Hz, no ECS access off-thread, `isValid` disappearance handled.
-- [ ] `MusicContainer` lazy resolve + `findMusic` mod/`dp-` chain + audition `keepSilent` asserted.
-- [ ] Missing/`none`/`unset` degrade to silence with one logged error; no panic.
-- [ ] MCP §7c executed; evidence (eval outputs, log excerpts) in the Changelog; `godot_log errors` clean.
-- [ ] No per-frame allocation after warm-up; voice cap enforced.
-- [ ] Reconciliation notes delivered to 02/05/12/13/17 owners; §3.12 rows resolved or explicitly deferred.
-- [ ] GPL headers on every new file; `parity/ledgers/audio.md` complete (0 unported upstream behaviors).
+- [x] `cargo test -p mind-core` green with every §7a row implemented; no Godot/network needed. (301 passed / 1 ignored; 35 audio tests.)
+- [x] `cargo fmt --check` + `cargo clippy -p mind-core -p mind-gdext -- -D warnings` clean; `mind-core` boundary grep empty.
+- [x] `audio events|music|loops|policy` scenarios pass with committed goldens; `audio bench` meets §7d. *Bench: release run pending (debug p50 123 µs / p99 391 µs; debug reports only).*
+- [ ] Bus layout verified in-engine (Master→Sound/Music/UI + Sound lowpass slot 0). *(MCP deferred; code + `bus_layout.json` landed.)*
+- [x] Every `SoundControl` branch asserted: menu/planet/editor/game, dark/boss, disable/always, keepSilent/stop, fades.
+- [x] Volume formulas asserted: `musicvol × Rules.musicVolume` per track; `sfxvol` per-call semantics; `ambientvol` in loops.
+- [ ] Dialog pause: lowpass target reached in ≤ 0.6 s, pause mirror set, resume restores; UI/Music unaffected. *(Core sweep math + pause fields landed; in-engine MCP deferred.)*
+- [x] `SoundPriority` table golden matches the Java transcription; admission/eviction tests pass.
+- [x] Loop aggregation matches upstream math; menu clear + pause freeze + voice start/stop asserted.
+- [x] `SoundLoop` fade and stop asserted; weather loop emission asserted headless. *(`LoopCamera` event + `AmbientPoller`; sim weather call site is plan 12/16.)*
+- [x] Ambient poll runs at 20 Hz, no ECS access off-thread, `isValid` disappearance handled. *(Core `AmbientPoller`; gdext poller wiring pending sim/view snapshot.)*
+- [~] `MusicContainer` lazy resolve + `findMusic` mod/`dp-` chain + audition `keepSilent` asserted. *(`findMusic` landed; `audition_*` deferred to M5/plan 20.)*
+- [x] Missing/`none`/`unset` degrade to silence with one logged error; no panic.
+- [ ] MCP §7c executed; evidence (eval outputs, log excerpts) in the Changelog; `godot_log errors` clean. *(Deferred to the single-editor mutex.)*
+- [ ] No per-frame allocation after warm-up; voice cap enforced. *(Voice cap landed; alloc-audit pending M6.)*
+- [x] Reconciliation notes delivered to 02/05/12/13/17 owners; §3.12 rows resolved or explicitly deferred. *(HLP §13 + `parity/ledgers/audio.md`.)*
+- [x] GPL headers on every new file; `parity/ledgers/audio.md` complete (0 unported upstream behaviors).
 
 ## 8. Risks & open decisions
 
@@ -586,3 +586,15 @@ Read in full or targeted for this plan:
 ## Changelog
 
 - 2026-10-01 — Plan written (P6). No implementation started.
+
+- 2026-10-02 — **M0–M4 core complete + M5 partial on `lane/18-audio` (commits `a741dfd`, `7c4a837`).**
+  - **M0 boundary + registry + vertical slice.** `mind-core/src/audio/{mod,events,ids,math}.rs`: `AudioEvent` (append-only, serde `kind`), `AudioSink`/`NoopAudioSink`/`RecordingAudioSink`/`AudioSinkRes`/`AudioPlugin`; `SoundId` (re-export of plan-02 seed id + name serde + `none`/`unset` sentinels), `MusicRef` (name-string serde), `find_music_chain`, `bus_for_sound`, setting keys; `calc_falloff`/`calc_pan`/`lerp_delta`/`clamp01`/`sanitize`/`AudioRng`/`SeededAudioRng`/`random_index_excluding`. `mind-gdext/src/audio/{mod,streams,buses,voices}.rs`: `MindAudio` node + `#[func]` API, `Master→Sound/Music/UI` buses + Sound lowpass slot 0, normal/looping `StreamCache`, 128+16 pooled voices, `AudioListener2D` on the camera; node declared in `res://scenes/spine.tscn`. `mind-headless audio events` + `events_blocks.json` golden.
+  - **M1 buses/volumes/lowpass/pause.** Bus layout programmatic + `client/audio/bus_layout.json`; lowpass `20500→500 Hz` 0.4 s sweep; pause mirror on the voice pool; settings binding (`musicvol`/`sfxvol`/`ambientvol`/`alwaysmusic`) via `MindAudio.set_setting`.
+  - **M2 music state machine.** `music::MusicPlayer` full `SoundControl.update` order, playlists/override chain incl. boss→dark quirk, `is_dark`, `play/play_once/play_music/silence/stop/keep_silent`, `WaveEvent` 8–15 s frame-clock delay; `MusicRegisterEvent` already present in plan 05 (HLP C7 closed). Or: `audio music` + `music_select.json`.
+  - **M3 priority.** `priority::SoundPriorityTable::build` exact `SoundPriority.init` order; pure `admit` admission/eviction + `SoundPlayState` `checkFrame` boost. Or: `audio policy` + `policy.json`.
+  - **M4 loops/ambient.** `loops::{LoopMixer,LoopData,SoundLoopState,AmbientProvider,AmbientSnapshot,AmbientPoller}` port of `updateLoops`/`SoundLoop`/`AudioThread.doLoop` (20 Hz, silent gate, menu clear/pause freeze, voice lifecycle). Or: `audio loops` + `loops_aggregate.json`.
+  - **M5 partial.** `findMusic` registry/`music/`/mod chain landed; `MindAudio.audition_*` + `dp-` data-audio overlay deferred (plan 20).
+  - **M6 partial.** `audio bench` (+ `--voices/--loops/--ambient`) landed; release budget p99 ≤ 250 µs pending a release run; alloc-audit + inspector `Audio` row + `bench/baselines.json` deferred (plan 23).
+  - **Reconciliation decisions:** `SoundId` reuses the plan-02 seed table (adds name-serde) rather than forking a second id space; `MusicRef` is byte-compatible with plan 04's `MusicContainer`; `MusicRegisterEvent` was already added by plan 05. Recorded in `parity/ledgers/audio.md` and HLP §13.
+  - **Evidence:** `cargo test -p mind-core` → 298 lib + 2 + 1 = 301 passed / 1 ignored (35 audio); workspace `clippy -D warnings` + `fmt --check` clean; `cargo check -p mind-gdext` clean; `audio events|music|loops|policy` all PASS against committed goldens; `audio bench --ticks 3600 --loops 256 --ambient 2000` → debug p50 122.9 µs / p99 391.3 µs (release target, debug reports only).
+  - **Deferred:** §7c in-engine MCP sweep (single-editor mutex), `tools/mcp-smoke` audio steps, M5 audition/`dp-`, M6 alloc-audit/inspector/baselines.

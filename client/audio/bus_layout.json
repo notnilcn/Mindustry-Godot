@@ -1,0 +1,25 @@
+{
+  "format": 1,
+  "source": "programmatic (plan 18 §3.5; client/rust/mind-gdext/src/audio/buses.rs)",
+  "note": "Master is Godot's project bus; Sound/Music/UI are created on MindAudio._ready if absent. plan 22 validates exports against this table.",
+  "buses": [
+    { "name": "Master", "send": "", "volume_db": 0.0, "effects": [] },
+    { "name": "Music", "send": "Master", "volume_db": 0.0, "effects": [] },
+    {
+      "name": "Sound",
+      "send": "Master",
+      "volume_db": 0.0,
+      "effects": [
+        {
+          "slot": 0,
+          "type": "AudioEffectLowPassFilter",
+          "class": "FILTER_12DB",
+          "cutoff_hz": 20500.0,
+          "wet_cutoff_hz": 500.0,
+          "resonance": 1.0
+        }
+      ]
+    },
+    { "name": "UI", "send": "Master", "volume_db": 0.0, "effects": [] }
+  ]
+}

@@ -1,0 +1,120 @@
+{
+  "format": 1,
+  "frames": 600,
+  "scenario": "audio_music_select",
+  "seed": 7,
+  "trace": [
+    {
+      "action": "set_paused",
+      "frame": 0,
+      "paused": false
+    },
+    {
+      "action": "play",
+      "frame": 0,
+      "looping": true,
+      "track": "menu",
+      "volume": 0.0
+    },
+    {
+      "action": "stop",
+      "frame": 0
+    },
+    {
+      "action": "game_state",
+      "frame": 60,
+      "playing": true
+    },
+    {
+      "action": "set_paused",
+      "frame": 60,
+      "paused": false
+    },
+    {
+      "action": "play",
+      "frame": 60,
+      "looping": false,
+      "track": "game1",
+      "volume": 1.0
+    },
+    {
+      "action": "stop",
+      "frame": 60
+    },
+    {
+      "action": "play",
+      "frame": 60,
+      "looping": false,
+      "track": "game4",
+      "volume": 1.0
+    },
+    {
+      "action": "stop",
+      "frame": 60
+    },
+    {
+      "action": "play",
+      "frame": 60,
+      "looping": false,
+      "track": "game2",
+      "volume": 1.0
+    },
+    {
+      "action": "stop",
+      "frame": 60
+    },
+    {
+      "action": "play",
+      "frame": 60,
+      "looping": false,
+      "track": "boss1",
+      "volume": 1.0
+    },
+    {
+      "action": "game_state",
+      "frame": 300,
+      "playing": false
+    },
+    {
+      "action": "set_paused",
+      "frame": 300,
+      "paused": false
+    },
+    {
+      "action": "set_paused",
+      "frame": 330,
+      "paused": false
+    },
+    {
+      "action": "set_paused",
+      "frame": 360,
+      "paused": false
+    },
+    {
+      "action": "set_paused",
+      "frame": 420,
+      "paused": true
+    },
+    {
+      "action": "set_paused",
+      "frame": 480,
+      "paused": false
+    },
+    {
+      "action": "stop",
+      "frame": 480
+    },
+    {
+      "action": "set_paused",
+      "frame": 540,
+      "paused": false
+    },
+    {
+      "action": "play",
+      "frame": 540,
+      "looping": true,
+      "track": "menu",
+      "volume": 0.0
+    }
+  ]
+}
