@@ -117,13 +117,18 @@ impl DataPatcher {
         self.after_patch_calls = 0;
 
         for patch in patches {
-            let value: Value = serde_json::from_str(&patch.json)
-                .map_err(|error| ContentError::Parse(format!("{}: {error}", patch.name)))?;
+            // `PatcherTests.gibberish`: malformed patch JSON is a per-asset
+            // warning, never fatal to the whole apply.
+            let value: Value = match serde_json::from_str(&patch.json) {
+                Ok(value) => value,
+                Err(error) => {
+                    self.warn(format!("{}: {error}", patch.name));
+                    continue;
+                }
+            };
             let Some(object) = value.as_object() else {
-                return Err(ContentError::Parse(format!(
-                    "{}: patch must be a JSON object",
-                    patch.name
-                )));
+                self.warn(format!("{}: patch must be a JSON object", patch.name));
+                continue;
             };
             if Self::planet_gated(object, registry, active_planet) {
                 continue;
@@ -307,6 +312,7 @@ impl DataPatcher {
             "requirements" => {
                 self.edit_item_requirements(registry, reference, id.raw(), mode, value)
             }
+            "plans" => self.edit_unit_plans(registry, reference, id.raw(), mode, value),
             "consumes" => self.edit_consumes(registry, reference, id, mode, value),
             field if field == "attributes" || field.starts_with("attributes.") => {
                 self.edit_attributes(registry, reference, id.raw(), field, value)
@@ -431,6 +437,50 @@ impl DataPatcher {
         mode: FieldMode,
         value: &Value,
     ) {
+        // Object-index form (`PatcherTests.specificArrayRequirements`):
+        // `{"0": "surge-alloy/10"}` assigns by index.
+        if mode == FieldMode::Set
+            && let Value::Object(map) = value
+            && !map.is_empty()
+            && map.keys().all(|key| key.parse::<usize>().is_ok())
+        {
+            let mut edits: Vec<(usize, ItemStack)> = Vec::new();
+            for (key, entry) in map {
+                let Ok(index) = key.parse::<usize>() else {
+                    continue;
+                };
+                match self.parse_item_stacks(registry, entry) {
+                    Ok(stacks) if !stacks.is_empty() => edits.push((index, stacks[0])),
+                    Ok(_) => {}
+                    Err(message) => {
+                        self.warn(message);
+                        return;
+                    }
+                }
+            }
+            let Some(original) = registry
+                .block(BlockId::new(raw))
+                .map(|b| b.requirements.clone())
+            else {
+                return;
+            };
+            if self.mark_used(reference, "requirements") {
+                self.resetters
+                    .push(Box::new(move |r: &mut ContentRegistry| {
+                        if let Some(block) = r.block_mut(BlockId::new(raw)) {
+                            block.requirements = original;
+                        }
+                    }));
+            }
+            if let Some(block) = registry.block_mut(BlockId::new(raw)) {
+                for (index, stack) in edits {
+                    if index < block.requirements.len() {
+                        block.requirements[index] = stack;
+                    }
+                }
+            }
+            return;
+        }
         let stacks = match self.parse_item_stacks(registry, value) {
             Ok(stacks) => stacks,
             Err(message) => {
@@ -459,6 +509,98 @@ impl DataPatcher {
                 FieldMode::Index(index) => {
                     if index < block.requirements.len() {
                         block.requirements[index] = stacks[0];
+                    }
+                }
+            }
+        }
+    }
+
+    /// Edits `block.<name>.plans` (`Seq<UnitPlan>`): whole replace, `+` append
+    /// (single or array) and numeric index (`PatcherTests.unitFactoryPlans`).
+    fn edit_unit_plans(
+        &mut self,
+        registry: &mut ContentRegistry,
+        reference: ContentRef,
+        raw: u16,
+        mode: FieldMode,
+        value: &Value,
+    ) {
+        use crate::content::registries::blocks::UnitPlanDef;
+        let entries: Vec<&Map<String, Value>> = match value {
+            Value::Object(map) => vec![map],
+            Value::Array(items) => {
+                let mut out = Vec::with_capacity(items.len());
+                for item in items {
+                    match item.as_object() {
+                        Some(map) => out.push(map),
+                        None => {
+                            self.warn("plan entries must be objects");
+                            return;
+                        }
+                    }
+                }
+                out
+            }
+            _ => {
+                self.warn("`plans` must be an object or array");
+                return;
+            }
+        };
+        let mut created = Vec::with_capacity(entries.len());
+        for map in entries {
+            let Some(unit_name) = map.get("unit").and_then(Value::as_str) else {
+                self.warn("plan is missing `unit`");
+                return;
+            };
+            let Some(unit) = registry
+                .unit_id(unit_name)
+                .or_else(|| registry.unit_id(&registry.transform_name(unit_name)))
+            else {
+                self.warn(format!("unknown unit `{unit_name}`"));
+                return;
+            };
+            let requirements = match map.get("requirements") {
+                Some(value) => match self.parse_item_stacks(registry, value) {
+                    Ok(stacks) => stacks,
+                    Err(message) => {
+                        self.warn(message);
+                        return;
+                    }
+                },
+                None => Vec::new(),
+            };
+            let time = map
+                .get("time")
+                .and_then(Value::as_f64)
+                .map(|v| v as f32)
+                .unwrap_or(0.0);
+            created.push(UnitPlanDef {
+                unit,
+                time,
+                requirements,
+            });
+        }
+        let Some(original) = registry
+            .block(BlockId::new(raw))
+            .map(|b| b.unit_plans.clone())
+        else {
+            return;
+        };
+        if self.mark_used(reference, "plans") {
+            self.resetters
+                .push(Box::new(move |r: &mut ContentRegistry| {
+                    if let Some(block) = r.block_mut(BlockId::new(raw)) {
+                        block.unit_plans = original;
+                    }
+                }));
+        }
+        if let Some(block) = registry.block_mut(BlockId::new(raw)) {
+            match mode {
+                FieldMode::Set => block.unit_plans = created,
+                FieldMode::Append => block.unit_plans.extend(created),
+                FieldMode::Index(index) => {
+                    if index < block.unit_plans.len() && !created.is_empty() {
+                        block.unit_plans[index] = created.swap_remove(0);
                     }
                 }
             }
@@ -2400,6 +2542,102 @@ mod tests {
         );
         patcher.unapply(&mut registry);
         assert_eq!(registry.unit(id).expect("unit").abilities, original);
+    }
+
+    /// PatcherTests.unitFactoryPlans (flat): `block.ground-factory.plans.+`.
+    #[test]
+    fn unit_factory_plans_flat() {
+        let mut registry = test_registry();
+        let id = registry.block_id("ground-factory").expect("ground-factory");
+        let flare = registry.unit_id("flare").expect("flare");
+        let surge = registry.item_id("surge-alloy").expect("surge-alloy");
+        let original = registry.block(id).expect("block").unit_plans.clone();
+        let mut patcher = DataPatcher::new();
+        patcher
+            .apply(
+                &mut registry,
+                &[patch(
+                    r#"{"block.ground-factory.plans.+":{"unit":"flare","requirements":["surge-alloy/10"],"time":100}}"#,
+                )],
+            )
+            .expect("add plan");
+        assert!(patcher.warnings().is_empty(), "{:?}", patcher.warnings());
+        let plan = registry
+            .block(id)
+            .expect("block")
+            .unit_plans
+            .last()
+            .expect("plan");
+        assert_eq!(plan.unit, flare);
+        assert_eq!(plan.time, 100.0);
+        assert_eq!(plan.requirements.len(), 1);
+        assert_eq!(plan.requirements[0].item, surge);
+        assert_eq!(plan.requirements[0].amount, 10);
+        patcher.unapply(&mut registry);
+        assert_eq!(registry.block(id).expect("block").unit_plans, original);
+    }
+
+    /// PatcherTests.unitFactoryPlans (nested): `block.{ground-factory:{plans.+}}`.
+    #[test]
+    fn unit_factory_plans_nested() {
+        let mut registry = test_registry();
+        let id = registry.block_id("ground-factory").expect("ground-factory");
+        let original = registry.block(id).expect("block").unit_plans.clone();
+        let mut patcher = DataPatcher::new();
+        patcher
+            .apply(
+                &mut registry,
+                &[patch(
+                    r#"{"block":{"ground-factory":{"plans.+":{"unit":"flare","requirements":["surge-alloy/10"],"time":100}}}}"#,
+                )],
+            )
+            .expect("add plan");
+        assert!(patcher.warnings().is_empty(), "{:?}", patcher.warnings());
+        assert_eq!(
+            registry.block(id).expect("block").unit_plans.len(),
+            original.len() + 1
+        );
+        patcher.unapply(&mut registry);
+        assert_eq!(registry.block(id).expect("block").unit_plans, original);
+    }
+
+    /// PatcherTests.specificArrayRequirements (object-index form).
+    #[test]
+    fn array_requirements_object_index() {
+        let mut registry = test_registry();
+        let id = registry.block_id("scatter").expect("scatter");
+        let original = registry.block(id).expect("block").requirements.clone();
+        let mut patcher = DataPatcher::new();
+        patcher
+            .apply(
+                &mut registry,
+                &[patch(
+                    r#"{"block.scatter.requirements":{"0":"titanium/99"}}"#,
+                )],
+            )
+            .expect("index edit");
+        assert!(patcher.warnings().is_empty(), "{:?}", patcher.warnings());
+        assert_eq!(
+            registry.block(id).expect("block").requirements[0].amount,
+            99
+        );
+        assert_eq!(
+            registry.block(id).expect("block").requirements[1],
+            original[1]
+        );
+        patcher.unapply(&mut registry);
+        assert_eq!(registry.block(id).expect("block").requirements, original);
+    }
+
+    /// PatcherTests.gibberish: malformed JSON warns, never panics.
+    #[test]
+    fn malformed_patch_warns() {
+        let mut registry = test_registry();
+        let mut patcher = DataPatcher::new();
+        patcher
+            .apply(&mut registry, &[patch("}[35209509()jfkjhadsf,\n,,,,[][]{")])
+            .expect("no panic");
+        assert_eq!(patcher.warnings().len(), 1);
     }
 
     /// PatcherTests.unitTypeObject: `{"unit.dagger": {"type": "legs"}}` form.
