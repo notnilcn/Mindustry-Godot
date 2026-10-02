@@ -22,5 +22,6 @@ pub mod bundle;
 pub mod file_tree;
 pub mod generated;
 pub mod icons;
+pub mod overlay;
 pub mod regions;
 pub mod sounds;
