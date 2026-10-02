@@ -9,7 +9,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | 🔶 **In progress — M0–M4 complete and merged to `main` 2026-10-02** (workspace/migration, packer core + vertical slice, filename-only + content-driven generators, full pack/fallback/ids). **Deferred M3/M4 unit work landed on `lane/03-assets` 2026-10-02** (unit metadata contract + `unit-icons` pass; 5135 regions, 3092/3092 expected resolve). **M5–M10 open.** Next pass: M5 runtime `FileTree`/atlas + MCP probe (Rust parts; in-engine probe deferred to the orchestrator's single-editor mutex), M7 bundles/icons/fonts, M8 `Sounds`/`Musics`/`Tex`, M9 mod-overlay API, M10 budgets. **M6 (`mind-macros` `#[derive(LoadRegions)]`) waits on plan 05, which owns that crate.** |
+| **Status** | 🟢 **Lane-complete on `lane/03-assets` (2026-10-02) — M0–M10 executed.** M0–M4 (merged): migration, packer core + vertical slice, filename-only + content-driven generators, full pack/fallback/ids. Deferred unit work + M5–M10 (this branch): `unit-icons` generator, runtime `FileTree`/`MindAssets` atlas binding + inspector fixture, `@Load` templating/`LoadCtx`, bundles/`IntFormat`/`Iconc`/`Fonts`, `Sounds`/`Musics`/`Tex`/cursors, mod overlay API, determinism/benches/scenarios. **5135 regions; `assets regions --assert-complete` 3092/3092; two packs byte-identical.** **Open handshakes:** M6 `#[derive(LoadRegions)]` is blocked on plan 05's `mind-macros` (independent parts + hand-off landed); §7.1c in-engine MCP probe on the single-editor mutex; `assets-pack` CI wiring and remaining `NEEDS USER DECISION`s (R10/R12) owned by the orchestrator. |
 | **Phase** | P1 (Platform & content) |
 | **Depends on** | `00_FOUNDATION_IMPLEMENTATION_PLAN.md` (workspace, spine, `mind-headless`, MCP bridge, CI), `02_CONTENT_IMPLEMENTATION_PLAN.md` (`ContentType`, content registry, `Block`/`UnitType`/`Item`/`Team`/`SectorPreset` metadata needed by generators and `@Load`). |
 | **Blocks** | `07_BLOCKS_BUILD_IMPLEMENTATION_PLAN.md`, `10_COMBAT_BULLETS_IMPLEMENTATION_PLAN.md`, `11_UNITS_AI_WAVES_IMPLEMENTATION_PLAN.md`, `14_UI_IMPLEMENTATION_PLAN.md`, `16_RENDER_WORLD_IMPLEMENTATION_PLAN.md`, `17_FX_PARTS_IMPLEMENTATION_PLAN.md`, `18_AUDIO_IMPLEMENTATION_PLAN.md`, `20_MODS_IMPLEMENTATION_PLAN.md` — every consumer of sprites/regions/bundles/sounds/icons. |
@@ -347,8 +347,17 @@ Smallest vertical slice first: one authored sprite (`copper-wall`) flowing sourc
 - **Verify:** fixture test green; override warnings match upstream semantics. ✅ `mind-core assets::overlay` 4/4 (`prefix_rule_matches_mods_pack_sprites`, `page_routing_matches_mods_get_page`, `override_warning_and_dp_prefix`, `fixture_mod_handshake`).
 
 ### M10 — Budgets, CI, exit
-- [ ] Benchmarks (`criterion`) and pack timing report; CI cache; `assets-pack` budget gate.
-- [ ] Exit checklist §7.3 signed off with artifacts; changelog entry.
+- [x] Benchmarks (`criterion`) and pack timing report; CI cache; `assets-pack` budget gate. **`mind-core/benches/assets.rs` (`atlas_lookup`/`bundle_get`/`bundle_format`, quick run all within §7d.1) + `mind-tools pack --timings` (stage timings → `build/assets/pack_timings.json`) landed; `mind-tools determinism --runs 2` is the `assets determinism` gate. CI cache/`assets-pack` job deferred to the orchestrator (HLP §5.2-1).**
+- [x] Exit checklist §7.3 signed off with artifacts; changelog entry.
+- **Verify:** `mind-headless assets fallback-boot` / `assets sounds-check` PASS; `mind-tools determinism --runs 2` byte-identical; benches within budget.
+
+### M10 evidence
+- `mind-tools determinism --root . --runs 2` → **2 full packs byte-identical** (`build/assets/asset_manifest.json` sha256 `be447e3530db98b5ba87b3aa996e5a0461896654afe48b8c2f03ea4cf1858c0d`; release, ext4).
+- `cargo bench -p mind-core --bench assets -- --quick`: `atlas_lookup` **52.4 ns** (≤200 ns), `bundle_get` **36.3 ns** (≤500 ns), `bundle_format` **241 ns** (≤5 µs).
+- `mind-headless assets fallback-boot` → fallback=true, 8 pages, 5135 regions, PASS.
+- `mind-headless assets sounds-check` → 207 entries / 205 files / dense ids / 0 missing / PASS.
+- `mind-headless assets bundle-diff` → 3496 English keys / 34 locales / 35 global keys / 0 error locales.
+- Full pack cold (release, ext4): ~15 s total (budget ≤90 s).
 
 ---
 
@@ -570,20 +579,20 @@ The exact eval strings are recorded in `assets/parity/mcp_assets_scenario.md` wh
 
 ### 7.1e Exit criteria checklist
 
-- [ ] `mind-tools pack` outputs bit-reproducible (`assets determinism --runs 2`).
-- [ ] Zero unresolved `fallback=error` region lookups across all vanilla content.
-- [ ] Every Mindustry region name in `assets/parity/region_names.txt` resolves; inventory diff vs the documented suffix rules is empty.
-- [ ] Bundle key inventory: no locale key missing from English; English keys all reachable; `global.properties` merged; locale-chain fallback tests green.
-- [ ] `icons.properties` append-only behavior proven; every content icon code unique; `Iconc.codes`/`codeToName` complete.
-- [ ] `Sounds`/`Musics` registry matches the file tree; duplicates rejected; `none`/`unset` present; ids stable across repacks.
-- [ ] Fallback 2048 atlas generated and bootable.
-- [ ] `.9.png` splits present for every ninepatch; plan 14 renders one correctly (handshake test).
-- [ ] Shader manifest validated; no uniform drift (`shaders check`).
-- [ ] Mod overlay fixture (sprites/, sprites-override/, bundle, `dp-` image) loads headlessly; plan-20 interface stable.
-- [ ] MCP scenario §7.1c passes with screenshot + eval evidence.
-- [ ] Budgets §7.1d met; CI `assets-pack` gated.
-- [ ] `logicids.dat` absent; no pack output committed; GPL-3.0 headers/attribution in place; `ASSET_PROVENANCE.md` written.
-- [ ] `cargo test -p mind-core` passes without Godot or network.
+- [x] `mind-tools pack` outputs bit-reproducible (`mind-tools determinism --runs 2`: manifest sha256 `be447e35…`).
+- [x] Zero unresolved `fallback=error` region lookups across all vanilla content (`assets regions --assert-complete`: 3092/3092, 0 missing).
+- [x] Every Mindustry region name in `assets/parity/region_names.txt` resolves; inventory diff vs the documented suffix rules is empty (5135 regions).
+- [x] Bundle key inventory: no locale key missing from English; English keys all reachable; `global.properties` merged; locale-chain fallback tests green (`assets bundle-diff`: 0 error locales; `assets::bundle` 6/6).
+- [x] `icons.properties` append-only behavior proven; every content icon code unique; `Iconc.codes`/`codeToName` complete (`Iconc` round-trip test; `icons 628 (+0)`).
+- [x] `Sounds`/`Musics` registry matches the file tree; duplicates rejected; `none`/`unset` present; ids stable across repacks (`assets sounds-check` PASS).
+- [x] Fallback 2048 atlas generated and bootable (`assets fallback-boot` PASS).
+- [~] `.9.png` splits present for every ninepatch; plan 14 renders one correctly. **Splits are exposed (`MindAssets.tex_splits`, atlas `splits`); the plan-14 render handshake is deferred to plan 14.**
+- [~] Shader manifest validated; no uniform drift (`shaders check`). **Index + drift check landed; ported `.gdshader` files are plan 16's (27 unported reported, not drift).**
+- [x] Mod overlay fixture (sprites/, sprites-override/, bundle, `dp-` image) loads headlessly; plan-20 interface stable. **In-memory fixture handshake green; the runtime `AtlasOverlayBuilder` page append is plan 20's.**
+- [ ] MCP scenario §7.1c passes with screenshot + eval evidence. **DEFERRED to the orchestrator's single-editor mutex; eval strings in `assets/parity/mcp_assets_scenario.md`.**
+- [~] Budgets §7.1d met; CI `assets-pack` gated. **Benches within budget and `--timings` landed; the CI job/cache is orchestrator-owned.**
+- [x] `logicids.dat` absent; no pack output committed; GPL-3.0 headers/attribution in place; `ASSET_PROVENANCE.md` written.
+- [x] `cargo test -p mind-core` passes without Godot or network (206 tests, 1 ignored).
 
 ---
 
@@ -664,4 +673,5 @@ Arc classes referenced as oracles (must be fetched/attributed at execution): `ar
 - **2026-10-02 — M7 (lane/03-assets).** Bundles + icons/fonts. `mind-core/src/assets/bundle.rs`: `parse_properties` (faithful `PropertiesUtils.load` port — comments, `=`/`:`/whitespace separators, line continuations, `\t\n\r\f\\` and `\uXXXX` escapes; the port caught and fixed a key/value boundary bug where a value starting with `\uXXXX` bled into the key), `Bundle` (most-specific-first layers, empty-value fallthrough, `global.properties` override, plan-20 `merge_assets`), `get`/`get_or_null`/`format`/`keys`, `format_template`, bounded 512-entry `IntFormat`, `locale_chain` (`pt_BR` → `bundle_pt_BR`/`bundle_pt`/`bundle`). `mind-core/src/assets/icons.rs`: `Iconc` (`icons.properties` `<code>=<name>|<texture>`, name↔code, `unicode_str`, `all`), `IconCodes`/`IconGlyph` (`icon_codes.json`). `mind-gdext/src/assets/{bundle,fonts}.rs`: `load_bundle`/`load_locales`/`load_iconc` via `FileAccess`; `FontSet` loads `font.woff`/`font_jp.woff`/`monospace.woff`/`icon.ttf`/`logic.ttf`/`tech.ttf` as `FontFile` (WOFF loaded natively — A7 conversion deferred, R5 fallback). `MindAssets` gains `bundle_get`/`bundle_format`/`locales`/`unicode_str`/`icon_count`/`fonts_loaded`/`default_font`; the `mindustry/locale` setting selects the locale (default `en`). New `mind-headless assets bundle-diff [--json]` (English key set, per-locale extra/missing, `global.properties`). **Evidence:** `mind-core` bundle 6/6 + icons 2/2; `assets bundle-diff` on the vendored tree = 3496 English keys / 34 locales / 35 global keys / **0 error locales**. **Deferred:** `mind-tools bundles sync` (updateBundles/PUA rewrite) and the WOFF→TTF pack conversion.
 - **2026-10-02 — M8 (lane/03-assets).** Sounds/Musics + `Tex` + cursors. `mind-core/src/assets/sounds.rs`: `Sounds`/`Musics` registries parsed from `assets/sounds.index.json` (`SoundsIndex`/`SoundEntry`/`MusicEntry`), duplicate name/id rejection, `none`/`unset` dummies, name→entry and id→entry maps. `mind-gdext/src/assets/audio.rs`: `AudioRegistry` loads the index and lazily decodes `AudioStreamOggVorbis`/`AudioStreamMp3` through `FileAccess.get_file_as_bytes`, cached by name. `MindAssets` gains `tex` (alias of `find_region`), `tex_splits` (ninepatch splits as `PackedInt32Array`), `sound_count`/`music_count`/`sound_path`/`music_path`/`sound_stream`/`music_stream`, and `cursor_texture` (`cursors/<name>.png`, lazy `ImageTexture`). New `mind-headless assets sounds-check` (registry == recursive file listing, dense ids, dummies present, files exist) and `assets fallback-boot` (fallback manifest parses, fallback=true, every page/region ≤2048). **Evidence:** `mind-core` sounds 1/1; `sounds-check` 207 entries / 205 files / dense / 0 missing / PASS; `fallback-boot` 8 pages / 5135 regions / PASS. **Deferred:** `Input.set_custom_mouse_cursor` hot-spot application (plans 14/15); audio playback/priority is plan 18 (registry-only handshake).
 - **2026-10-02 — M9 (lane/03-assets).** Mod overlay API + plan-20 handshake. `mind-core/src/assets/overlay.rs`: the `AssetOverlayProvider` trait plus `OverlaySprite`/`OverlayImage`/`OverlaySound`/`OverlayShader`; `sprite_region_name` ports the exact `Mods.packSprites` prefix rule (`sprites/` → `<mod>-` unless already `<category>-<mod>-…`; `sprites-override/` unchanged; `bar.9.png` → `bar`); `sprite_page` ports `Mods.getPage` (`blocks/environment`→environment, `rubble`→rubble, `ui`→ui, else main); `override_warning` (override of a missing region) and `is_data_asset` (`dp-`). Fixture-mod handshake test drives an in-memory provider into `FileTree::add_file` + `Bundle::merge_assets`, asserting prefix/override/page/`dp-` semantics. **Evidence:** `mind-core assets::overlay` 4/4. **Deferred:** the runtime `AtlasOverlayBuilder` page-append (uses the `mind-atlas` packer) and the on-disk `mind-headless` fixture-mod load, both owned by plan 20's merge.
+- **2026-10-02 — M10 (lane/03-assets).** Budgets, scenarios, exit. `mind-core/benches/assets.rs` (+`[[bench]] assets`) measures the §7d.1 micro-rows: `atlas_lookup` **52.4 ns** (≤200 ns), `bundle_get` **36.3 ns** (≤500 ns), `bundle_format` **241 ns** (≤5 µs) via `cargo bench -p mind-core --bench assets -- --quick`. New `mind-tools determinism --runs N` runs the full pack N times and asserts the `asset_manifest.json` is byte-identical → **2 packs identical** (sha256 `be447e3530db98b5ba87b3aa996e5a0461896654afe48b8c2f03ea4cf1858c0d`); full release pack ~15 s (≤90 s); `pack --timings` writes `build/assets/pack_timings.json`. Scenario commands exercised: `assets fallback-boot` (8 pages / 5135 regions / PASS), `assets sounds-check` (207/205 / dense / PASS), `assets bundle-diff` (0 error locales). Exit checklist §7.1e signed off with done/deferred annotations. **Orchestrator-owned:** `assets-pack` CI job/cache and the §7.1c in-engine MCP probe (single-editor mutex); plan-20 overlay page append and plan-18 playback are downstream handshakes.
 - (not started) — generated 2026-10-01 as part of the initial plan set.

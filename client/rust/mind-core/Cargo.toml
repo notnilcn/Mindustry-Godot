@@ -25,6 +25,10 @@ criterion.workspace = true
 name = "io"
 harness = false
 
+[[bench]]
+name = "assets"
+harness = false
+
 [build-dependencies]
 serde_json.workspace = true
 
