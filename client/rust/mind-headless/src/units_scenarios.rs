@@ -36,6 +36,7 @@ pub fn names() -> &'static [&'static str] {
         "units_spawn_group",
         "units_weapon_fire",
         "units_waves_difficulty",
+        "units_legs_ik",
     ]
 }
 
@@ -85,8 +86,93 @@ pub fn run_scenario(name: &str) -> Result<ScenarioOutput> {
         "units_spawn_group" => spawn_group(),
         "units_weapon_fire" => weapon_fire(),
         "units_waves_difficulty" => waves_difficulty(),
+        "units_legs_ik" => legs_ik(),
         other => bail!("unknown units scenario `{other}`"),
     }
+}
+
+/// `units_legs_ik`: a `corvus` crosses stepped terrain; every leg knee is placed
+/// by `InverseKinematics` within `legMinLength..legMaxLength` and never NaNs
+/// (plan 11 §7b).
+fn legs_ik() -> Result<ScenarioOutput> {
+    use mind_core::entities::comp::unit::LegsComp;
+
+    let mut harness = UnitHarness::new(64, 64, 11);
+    let wall = harness
+        .content()
+        .block_id("copper-wall")
+        .ok_or_else(|| anyhow::anyhow!("copper-wall missing"))?;
+    for x in [20, 28, 36, 44] {
+        assert!(harness.build.place(x, 32, wall, 0, true));
+    }
+    let unit = harness
+        .spawn("corvus", 0, 44.0, 44.0, 0.0)
+        .ok_or_else(|| anyhow::anyhow!("corvus missing from content"))?;
+    harness.command_move(unit, 60, 60);
+    for _ in 0..600 {
+        harness.tick();
+    }
+    let def = harness
+        .content()
+        .unit_by_name("corvus")
+        .ok_or_else(|| anyhow::anyhow!("corvus def missing"))?
+        .clone();
+    let legs = harness
+        .build
+        .world
+        .get::<LegsComp>(unit)
+        .ok_or_else(|| anyhow::anyhow!("no legs component"))?;
+    let base_len = if def.leg_length > 0.0 {
+        def.leg_length
+    } else {
+        def.hit_size
+    };
+    let max_len = if def.leg_max_length > 0.0 {
+        base_len * def.leg_max_length
+    } else {
+        base_len
+    };
+    let min_len = if def.leg_min_length > 0.0 {
+        base_len * def.leg_min_length
+    } else {
+        max_len * 0.5
+    };
+    let mut checksummer = Checksummer::new();
+    let mut pass = true;
+    let mut entries = Vec::new();
+    for leg in &legs.legs {
+        let a = ((leg.joint_x - leg.base_x).powi(2) + (leg.joint_y - leg.base_y).powi(2)).sqrt();
+        let b = ((leg.foot_x - leg.joint_x).powi(2) + (leg.foot_y - leg.joint_y).powi(2)).sqrt();
+        let finite = leg.joint_x.is_finite()
+            && leg.joint_y.is_finite()
+            && leg.foot_x.is_finite()
+            && leg.foot_y.is_finite();
+        pass &= finite && a <= max_len + 1.0 && b <= max_len + 1.0 && b >= min_len - 1.0;
+        checksummer.part(&leg.joint_x);
+        checksummer.part(&leg.joint_y);
+        checksummer.part(&leg.foot_x);
+        checksummer.part(&leg.foot_y);
+        entries.push(serde_json::json!({
+            "index": leg.index,
+            "joint_x": round3(leg.joint_x),
+            "joint_y": round3(leg.joint_y),
+            "foot_x": round3(leg.foot_x),
+            "foot_y": round3(leg.foot_y),
+            "first_segment": round3(a),
+            "second_segment": round3(b),
+        }));
+    }
+    let report = serde_json::json!({
+        "scenario": "units_legs_ik",
+        "pass": pass && !entries.is_empty(),
+        "unit": "corvus",
+        "ticks": 600,
+        "leg_count": legs.leg_count,
+        "legs": entries,
+        "checksum": checksummer.finish().to_hex(),
+    });
+    let dump = canonical(&report)?;
+    Ok(ScenarioOutput { report, dump })
 }
 
 /// `units_waves_difficulty`: `Waves.generate` ground/air/boss counts per wave

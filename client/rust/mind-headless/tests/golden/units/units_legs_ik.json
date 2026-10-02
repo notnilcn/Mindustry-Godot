@@ -1,0 +1,46 @@
+{
+  "scenario": "units_legs_ik",
+  "pass": true,
+  "unit": "corvus",
+  "ticks": 600,
+  "leg_count": 4,
+  "legs": [
+    {
+      "index": 0,
+      "joint_x": 78.0780029296875,
+      "joint_y": 35.775001525878906,
+      "foot_x": 69.0,
+      "foot_y": 44.0,
+      "first_segment": 24.5,
+      "second_segment": 12.25
+    },
+    {
+      "index": 1,
+      "joint_x": 35.775001525878906,
+      "joint_y": 78.0780029296875,
+      "foot_x": 44.0,
+      "foot_y": 69.0,
+      "first_segment": 24.5,
+      "second_segment": 12.25
+    },
+    {
+      "index": 2,
+      "joint_x": 9.92199993133545,
+      "joint_y": 52.224998474121094,
+      "foot_x": 19.0,
+      "foot_y": 44.0,
+      "first_segment": 24.5,
+      "second_segment": 12.25
+    },
+    {
+      "index": 3,
+      "joint_x": 52.224998474121094,
+      "joint_y": 9.92199993133545,
+      "foot_x": 44.0,
+      "foot_y": 19.0,
+      "first_segment": 24.5,
+      "second_segment": 12.25
+    }
+  ],
+  "checksum": "ae74e427c4773103"
+}

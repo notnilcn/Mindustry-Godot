@@ -8,14 +8,22 @@
 //! path; [`queries`] ports the `entities/Units.java` set helpers.
 
 pub mod comp;
+pub mod crawl;
 pub mod defs;
+pub mod inverse_kinematics;
+pub mod legs;
 pub mod lifecycle;
+pub mod mech;
+pub mod movement;
 pub mod queries;
+pub mod tank;
+pub mod tether;
+pub mod water_move;
 pub mod weapon_mount;
 
 pub use comp::{
     BlockUnitComp, BuilderComp, BuildingTetherComp, ChildComp, CrawlComp, ElevationMoveComp,
-    HitboxComp, ItemsComp, LegsComp, MechComp, MinerComp, OwnerComp, PayloadComp, PhysicsComp,
+    HitboxComp, ItemsComp, Leg, LegsComp, MechComp, MinerComp, OwnerComp, PayloadComp, PhysicsComp,
     SegmentComp, ShieldComp, StatusComp, StatusEntry, TankComp, TargetDummyComp, TimedComp,
     TimedKillComp, UnitCore, UnitTetherComp, UnitTypeComp, WaterMoveComp,
 };

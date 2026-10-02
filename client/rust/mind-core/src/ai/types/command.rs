@@ -205,6 +205,89 @@ impl CommandAiState {
     pub fn is_idle(&self) -> bool {
         self.command_queue.is_empty() && self.target_pos.is_none() && self.attack_target.is_none()
     }
+
+    /// `CommandAI.defaultBehavior`: move toward the current command target.
+    ///
+    /// Consumes `targetPos`/`commandQueue`/`attackTarget`, honours the
+    /// `holdposition` stance (halt) and the `patrol` stance (loop the queue).
+    /// Formation offsets (`UnitGroup`) and unit-id resolution are plan 15/21;
+    /// the plan-12 build/payload commands are not installed here. Returns
+    /// `true` when the current waypoint was reached this tick.
+    pub fn default_behavior(
+        &mut self,
+        ctx: &mut super::super::ai_controller::AiCtx,
+        unit: bevy_ecs::entity::Entity,
+    ) -> bool {
+        use crate::world::{TilePos, WorldGrid};
+
+        if let Some(hold_position) = ctx
+            .content
+            .unit_stance_by_name("holdposition")
+            .map(|s| s.id)
+            && self.stances.get(hold_position)
+        {
+            ctx.stop_shooting(unit);
+            return true;
+        }
+
+        let arrive = ctx
+            .world
+            .get::<crate::entities::comp::unit::HitboxComp>(unit)
+            .map(|hitbox| hitbox.hit_size.max(4.0))
+            .unwrap_or(4.0);
+
+        // Attack targets take priority over movement.
+        if let Some(attack) = self.attack_target {
+            let tile = match attack {
+                AttackTarget::Building(packed) => WorldGrid::unpack(packed),
+                AttackTarget::Unit(_unit_id) => {
+                    // Unit-id -> entity mapping is plan 21's relay state.
+                    return false;
+                }
+            };
+            return ctx.pathfind(unit, tile, arrive);
+        }
+
+        let next = if let Some(entry) = self.next_waypoint() {
+            Some((entry, true))
+        } else {
+            self.target_pos
+                .map(|(x, y)| (CommandQueueEntry::Position(x, y), false))
+        };
+        let Some((entry, from_queue)) = next else {
+            ctx.stop_shooting(unit);
+            return false;
+        };
+
+        let tile = match entry {
+            CommandQueueEntry::Position(x, y) => {
+                TilePos::new(WorldGrid::to_tile(x) as i16, WorldGrid::to_tile(y) as i16)
+            }
+            CommandQueueEntry::Building(packed) => WorldGrid::unpack(packed),
+            CommandQueueEntry::Unit(_unit_id) => {
+                // Unresolved unit-id entry: drop it (plan 21 resolves topology).
+                self.advance_queue(false);
+                return false;
+            }
+        };
+
+        let (cx, cy) = super::ground::tile_center(tile.x() as i32, tile.y() as i32);
+        ctx.face_target(unit, cx, cy);
+        let arrived = ctx.pathfind(unit, tile, arrive);
+        if arrived {
+            if from_queue {
+                let patrol = ctx
+                    .content
+                    .unit_stance_by_name("patrol")
+                    .map(|s| s.id)
+                    .is_some_and(|id| self.stances.get(id));
+                self.advance_queue(patrol);
+            } else if self.stop_at_target {
+                self.target_pos = None;
+            }
+        }
+        arrived
+    }
 }
 
 /// Maps a command's `ControllerKind` to the runtime [`AiKind`].
@@ -328,5 +411,35 @@ mod tests {
             ai_kind_from_controller(ControllerKind::BuilderAssist),
             AiKind::Builder
         );
+    }
+
+    #[test]
+    fn default_behavior_moves_and_finishes() {
+        use crate::ai::UnitHarness;
+        use crate::ai::ai_controller::AiCtx;
+
+        let ts = crate::config::TILESIZE as f32;
+        let mut harness = UnitHarness::new(64, 64, 7);
+        let unit = harness.spawn("dagger", 0, 44.0, 44.0, 0.0).expect("dagger");
+        let mut state = CommandAiState::new();
+        state.command_position((60.5) * ts, (60.5) * ts);
+        let mut arrived = false;
+        for _ in 0..1500 {
+            let mut ctx = AiCtx {
+                world: &mut harness.build.world,
+                grid: &harness.build.grid,
+                content: &harness.build.content,
+                pathfinder: &mut harness.pathfinder,
+                team: 0,
+            };
+            if state.default_behavior(&mut ctx, unit) {
+                arrived = true;
+                break;
+            }
+        }
+        assert!(arrived, "CommandAI default behavior reached the target");
+        let snap = harness.snapshot(unit).expect("alive");
+        let dist = ((snap.x - (60.5) * ts).powi(2) + (snap.y - (60.5) * ts).powi(2)).sqrt();
+        assert!(dist <= snap.hit_size.max(4.0) + 0.001);
     }
 }
