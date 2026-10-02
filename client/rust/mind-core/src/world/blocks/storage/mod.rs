@@ -7,6 +7,7 @@
 //! `linkedCore` forwarding, the core inventory algorithm and the full unloader
 //! comparator land in milestones M4/M5.
 
+pub mod core_block;
 pub mod storage_block;
 pub mod unloader;
 
@@ -15,6 +16,9 @@ use std::sync::Arc;
 use crate::content::ContentRegistry;
 use crate::world::behavior::BehaviorRegistry;
 
+pub use core_block::{
+    CoreBehavior, CoreBuild, CoreCampaignHooks, CoreHooks, NoopCoreCampaignHooks,
+};
 pub use storage_block::{StorageBehavior, StorageBuild};
 pub use unloader::{ContainerStat, UnloaderBehavior, UnloaderBuild};
 
@@ -29,4 +33,14 @@ pub fn register(registry: &mut BehaviorRegistry, _content: &ContentRegistry) {
         registry.register_named(name, Arc::new(StorageBehavior));
     }
     registry.register_named("unloader", Arc::new(UnloaderBehavior::VANILLA));
+    for name in [
+        "core-shard",
+        "core-foundation",
+        "core-nucleus",
+        "core-bastion",
+        "core-citadel",
+        "core-acropolis",
+    ] {
+        registry.register_named(name, Arc::new(CoreBehavior));
+    }
 }

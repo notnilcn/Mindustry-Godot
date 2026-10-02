@@ -453,6 +453,43 @@ fn scenario(name: &str, json: bool) -> Result<()> {
                 bail!("scenario {name} failed");
             }
         }
+        "logistics_core_inventory" => {
+            let core = block(&harness, "core-shard")?;
+            let container = block(&harness, "container")?;
+            let _ = harness.place(6, 6, core, 0, true);
+            let _ = harness.place(8, 6, container, 0, true);
+            let _ = harness.place(14, 6, core, 0, true);
+            let core_e = harness.build_at(6, 6);
+            let capacity = core_e
+                .and_then(|e| {
+                    harness
+                        .world
+                        .get::<mind_core::world::blocks::storage::CoreBuild>(e)
+                })
+                .map(|c| c.storage_capacity)
+                .unwrap_or(0);
+            let linked = harness
+                .build_at(8, 6)
+                .and_then(|e| {
+                    harness
+                        .world
+                        .get::<mind_core::world::blocks::storage::StorageBuild>(e)
+                })
+                .and_then(|s| s.linked_core);
+            // 2 core-shards (4000 each) + one container (300).
+            let pass = capacity == 8300 && linked == core_e;
+            let report = serde_json::json!({
+                "scenario": name,
+                "pass": pass,
+                "storage_capacity": capacity,
+                "linked": linked.is_some(),
+                "checksum": mind_core::world::fixtures::logistics::logistics_checksum(&harness.world).to_hex(),
+            });
+            print_json(&report, json, !json);
+            if !pass {
+                bail!("scenario {name} failed");
+            }
+        }
         "proximity_multiblock" => {
             let wall = block(&harness, "copper-wall")?;
             let _ = harness.place(4, 4, wall, 0, true);
