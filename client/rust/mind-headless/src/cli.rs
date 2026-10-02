@@ -279,6 +279,13 @@ pub enum Command {
         command: RenderCommand,
     },
 
+    /// Campaign rules/tech scenarios (plan 12 §7b).
+    Campaign {
+        /// Campaign subcommand.
+        #[command(subcommand)]
+        command: CampaignCommand,
+    },
+
     /// Power-network scenarios/benches (plan 09 §7b).
     Power {
         /// Power subcommand.
@@ -392,6 +399,32 @@ pub enum RenderCommand {
         /// Emit the machine-readable JSON report.
         #[arg(long)]
         json: bool,
+    },
+}
+
+/// `campaign` subcommands (plan 12 §7b).
+#[derive(Debug, Subcommand)]
+pub enum CampaignCommand {
+    /// `campaign_rules_roundtrip`: JSON → Rules → TypeIO → JSON equality,
+    /// `mode()`/checksum and one `RulesLoadEvent` (`from_save=false`).
+    Rules {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Write the canonical golden dump here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+    },
+
+    /// `campaign_tech_unlock_gating`: locked→unlock gating, item spend,
+    /// `req-` persistence, auto-unlocks and MP `Rules.researched`.
+    Tech {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Write the canonical golden dump here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
     },
 }
 
