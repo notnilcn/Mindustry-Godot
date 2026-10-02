@@ -201,6 +201,14 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
                 dump.as_deref(),
                 *json,
             ),
+            WorldCommand::BenchGen {
+                generator,
+                seed,
+                width,
+                height,
+                iters,
+                json,
+            } => cmd_world_bench_gen(generator, *seed, *width, *height, *iters, *json),
             WorldCommand::Filters {
                 seed,
                 width,
@@ -2443,6 +2451,75 @@ fn cmd_world_tile_ops(
         );
         Ok(EXIT_FAIL)
     }
+}
+
+fn cmd_world_bench_gen(
+    generator: &str,
+    seed: u64,
+    width: i32,
+    height: i32,
+    iters: u64,
+    json: bool,
+) -> anyhow::Result<i32> {
+    use mind_core::maps::generators::{BlankPlanetGenerator, SimplexGenerator, WorldGenerator};
+    use mind_core::world::{WorldGrid, WorldParams};
+
+    if width <= 0 || height <= 0 || iters == 0 {
+        return Err(anyhow!("--width/--height/--iters must be positive"));
+    }
+    let content = boot_content()?;
+    let params = WorldParams {
+        seed_offset: seed,
+        width,
+        height,
+        ..WorldParams::default()
+    };
+    let mut grid = WorldGrid::new(width, height);
+    let mut samples = Vec::with_capacity(iters as usize);
+    for _ in 0..iters {
+        let start = Instant::now();
+        match generator {
+            "simplex" => {
+                let mut g = SimplexGenerator::new(seed);
+                g.generate(&mut grid.tiles, &params, &content);
+            }
+            "tantros" => {
+                let mut g = mind_core::maps::planet::TantrosPlanetGenerator::new();
+                g.generate(&mut grid.tiles, &params, &content);
+            }
+            "blank" => {
+                let mut g = BlankPlanetGenerator::new(0);
+                g.generate(&mut grid.tiles, &params, &content);
+            }
+            other => return Err(anyhow!("unknown generator `{other}`")),
+        }
+        samples.push(start.elapsed().as_nanos() as u64);
+    }
+    samples.sort_unstable();
+    let p = |q: f64| -> f64 {
+        let index = ((samples.len() as f64 - 1.0) * q).round() as usize;
+        samples[index] as f64 / 1_000_000.0
+    };
+    let report = serde_json::json!({
+        "format": 1,
+        "generator": generator,
+        "seed": seed,
+        "width": width,
+        "height": height,
+        "iters": iters,
+        "p50_ms": p(0.50),
+        "p95_ms": p(0.95),
+    });
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "world gen bench: generator={generator} {width}x{height} iters={iters} p50={:.2}ms p95={:.2}ms",
+            p(0.50),
+            p(0.95)
+        );
+    }
+    Ok(EXIT_PASS)
 }
 
 #[allow(clippy::too_many_arguments)]

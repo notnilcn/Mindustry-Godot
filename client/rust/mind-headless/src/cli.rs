@@ -242,6 +242,28 @@ pub enum WorldCommand {
         json: bool,
     },
 
+    /// Time world generation (plan 06 §7d).
+    BenchGen {
+        /// Generator tag (`simplex`, `tantros`, `blank`).
+        #[arg(long, default_value = "simplex")]
+        generator: String,
+        /// Generation seed.
+        #[arg(long, default_value_t = 42)]
+        seed: u64,
+        /// Grid width in tiles.
+        #[arg(long, default_value_t = 256)]
+        width: i32,
+        /// Grid height in tiles.
+        #[arg(long, default_value_t = 256)]
+        height: i32,
+        /// Timed iterations.
+        #[arg(long, default_value_t = 20)]
+        iters: u64,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Apply a generation-filter stack to a deterministic base grid and dump
     /// the result checksum/histogram (plan 06 M5 §7b).
     Filters {
