@@ -251,6 +251,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
         Command::Maps { command } => match command {
             MapsCommand::List { dir, json } => cmd_maps_list(dir, *json),
         },
+        Command::Blocks { command } => crate::blocks_scenarios::run(command).map(|()| EXIT_PASS),
         Command::Audio { command } => crate::audio_scenarios::run(command),
         Command::Mods { command } => match command {
             ModsCommand::List { dir, json, check } => cmd_mods_list(dir, *json, *check),

@@ -11,6 +11,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 pub mod audio_scenarios;
+pub mod blocks_scenarios;
 pub mod cli;
 pub mod exec;
 pub mod paths;

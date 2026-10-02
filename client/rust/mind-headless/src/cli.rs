@@ -205,6 +205,13 @@ pub enum Command {
         command: MapsCommand,
     },
 
+    /// Block/building runtime scenarios (plan 07 §7b).
+    Blocks {
+        /// Blocks subcommand.
+        #[command(subcommand)]
+        command: BlocksCommand,
+    },
+
     /// Audio state-machine and event inspection (plan 18).
     Audio {
         /// Audio subcommand.
@@ -349,6 +356,38 @@ pub enum MapsCommand {
         /// Directory to list.
         #[arg(long, default_value = "tests/fixtures/maps")]
         dir: PathBuf,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+/// `blocks` subcommands (plan 07 §7b).
+#[derive(Debug, Subcommand)]
+pub enum BlocksCommand {
+    /// Dump per-block `kind`/`building`/`family`/`consumers` for every block.
+    Audit {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Run a deterministic block/building scenario.
+    Scenario {
+        /// Scenario name: `place_construct_destroy`, `multiblock_cover_clear`,
+        /// `spawn_update`, `config_roundtrip`, `proximity_multiblock`.
+        name: String,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Time the building update loop over N buildings.
+    Bench {
+        /// Number of buildings to place.
+        #[arg(long, default_value_t = 2000)]
+        buildings: usize,
+        /// Timed ticks.
+        #[arg(long, default_value_t = 3600)]
+        ticks: u64,
         /// Emit a machine-readable JSON report on stdout.
         #[arg(long)]
         json: bool,
