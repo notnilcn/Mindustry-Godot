@@ -25,6 +25,9 @@ use super::registries::{
 use super::snapshot::RegistryIndexSnapshot;
 use super::tech::{TechNodeRef, TechStore, TreeId};
 use super::{ContentError, ContentRef, ContentType};
+use crate::assets::atlas::AtlasIndex;
+use crate::assets::content_regions::audit_block_regions;
+use crate::assets::regions::RegionAudit;
 
 /// Lifecycle phases mirrored from `ContentLoader` (`init`, `postInit`,
 /// `loadIcon`, `load`).
@@ -154,6 +157,7 @@ pub struct ContentRegistry {
     items_erekir: Vec<ItemId>,
     items_erekir_only: Vec<ItemId>,
     temporary_mapper: Option<TemporaryMapper>,
+    region_audit: Option<RegionAudit>,
 }
 
 impl ContentRegistry {
@@ -187,6 +191,7 @@ impl ContentRegistry {
             items_erekir: Vec::new(),
             items_erekir_only: Vec::new(),
             temporary_mapper: None,
+            region_audit: None,
         }
     }
 
@@ -362,6 +367,35 @@ impl ContentRegistry {
         Ok(())
     }
 
+    /// Plan 03 §3.2 stage 8a / M6: resolves every block's `@Load` region fields
+    /// against `atlas` and records misses in a [`RegionAudit`].
+    ///
+    /// This is the `LoadRegions` half of `ContentLoader.load()`: the client boot
+    /// calls it after [`init`](Self::init)/[`post_init`](Self::post_init) and
+    /// before [`load`](Self::load) to populate render slots (plan 07); headless
+    /// tests call it directly because [`load`](Self::load) is skipped there. The
+    /// audit is cached and returned; a `fallback=error` miss is fatal for the
+    /// `mind-headless assets regions --assert-complete` oracle.
+    pub fn load_regions(&mut self, atlas: &AtlasIndex) -> RegionAudit {
+        let audit = audit_block_regions(&self.blocks, atlas);
+        self.region_audit = Some(audit.clone());
+        audit
+    }
+
+    /// The most recent [`load_regions`](Self::load_regions) result, if any.
+    pub fn region_audit(&self) -> Option<&RegionAudit> {
+        self.region_audit.as_ref()
+    }
+
+    /// Client boot stage 8 fusion: resolve `@Load` regions (plan 03 M6) and then
+    /// run the `loadIcon`/`load` sweeps. [`load`](Self::load) is a headless
+    /// no-op, so headless callers use [`load_regions`](Self::load_regions)
+    /// directly.
+    pub fn load_with_regions(&mut self, atlas: &AtlasIndex) -> Result<(), ContentError> {
+        self.load_regions(atlas);
+        self.load()
+    }
+
     /// `ContentLoader.afterPatch()` sweep (plan 20 patches).
     pub fn after_patch(&mut self) -> Result<(), ContentError> {
         for record in self.items.iter_mut() {
@@ -451,6 +485,7 @@ impl ContentRegistry {
         self.current_mod = snapshot.current_mod().cloned();
         self.temporary_mapper = snapshot.temporary_mapper().cloned();
         self.last_added = None;
+        self.region_audit = None;
         self.arr_epoch = self.arr_epoch.wrapping_add(1);
     }
 

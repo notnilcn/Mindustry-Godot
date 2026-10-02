@@ -9,7 +9,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | 🟢 **Lane-complete on `lane/03-assets` (2026-10-02) — M0–M10 executed.** M0–M4 (merged): migration, packer core + vertical slice, filename-only + content-driven generators, full pack/fallback/ids. Deferred unit work + M5–M10 (this branch): `unit-icons` generator, runtime `FileTree`/`MindAssets` atlas binding + inspector fixture, `@Load` templating/`LoadCtx`, bundles/`IntFormat`/`Iconc`/`Fonts`, `Sounds`/`Musics`/`Tex`/cursors, mod overlay API, determinism/benches/scenarios. **5135 regions; `assets regions --assert-complete` 3092/3092; two packs byte-identical.** **Open handshakes:** M6 `#[derive(LoadRegions)]` is blocked on plan 05's `mind-macros` (independent parts + hand-off landed); §7.1c in-engine MCP probe on the single-editor mutex; `assets-pack` CI wiring and remaining `NEEDS USER DECISION`s (R10/R12) owned by the orchestrator. |
+| **Status** | 🟢 **Lane-complete on `lane/03-assets` (2026-10-02) — M0–M10 executed; M6 closed (2026-10-02).** M0–M4 (merged): migration, packer core + vertical slice, filename-only + content-driven generators, full pack/fallback/ids. M5–M10 + M6 (this branch): unit metadata/`unit-icons`, runtime `FileTree`/`MindAssets` atlas binding + inspector fixture, `#[derive(LoadRegions)]` + `content_regions` audit + `ContentRegistry` fusion, bundles/`IntFormat`/`Iconc`/`Fonts`, `Sounds`/`Musics`/`Tex`/cursors, mod overlay API, determinism/benches/scenarios. **5135 regions; `assets regions --assert-complete` 3092/3092, `@Load` audit 0 fatal; two packs byte-identical.** **Open handshakes:** §7.1c in-engine MCP probe on the single-editor mutex; `assets-pack` CI wiring and remaining `NEEDS USER DECISION`s (R10/R12) owned by the orchestrator. |
 | **Phase** | P1 (Platform & content) |
 | **Depends on** | `00_FOUNDATION_IMPLEMENTATION_PLAN.md` (workspace, spine, `mind-headless`, MCP bridge, CI), `02_CONTENT_IMPLEMENTATION_PLAN.md` (`ContentType`, content registry, `Block`/`UnitType`/`Item`/`Team`/`SectorPreset` metadata needed by generators and `@Load`). |
 | **Blocks** | `07_BLOCKS_BUILD_IMPLEMENTATION_PLAN.md`, `10_COMBAT_BULLETS_IMPLEMENTATION_PLAN.md`, `11_UNITS_AI_WAVES_IMPLEMENTATION_PLAN.md`, `14_UI_IMPLEMENTATION_PLAN.md`, `16_RENDER_WORLD_IMPLEMENTATION_PLAN.md`, `17_FX_PARTS_IMPLEMENTATION_PLAN.md`, `18_AUDIO_IMPLEMENTATION_PLAN.md`, `20_MODS_IMPLEMENTATION_PLAN.md` — every consumer of sprites/regions/bundles/sounds/icons. |
@@ -150,10 +150,21 @@ impl Bundle {
 }
 pub struct Iconc { /* name -> char, char -> name, all: String */ }
 pub struct Sounds { /* field_name -> (file, id), id -> field_name; none/unset dummies */ }
-pub struct LoadCtx<'a> { pub atlas: &'a AtlasIndex, pub content_name: String, pub size: u32,
+pub struct LoadCtx<'a> { pub atlas: &'a AtlasIndex, pub content_name: &'a str, pub size: u32,
                          pub indices: [usize; 2] }
-pub trait LoadRegions { fn load_regions(&mut self, ctx: &LoadCtx); }
+pub trait LoadRegions { fn load_regions(&mut self, ctx: &mut LoadCtx, audit: &mut RegionAudit); }
 ```
+
+M6 refinement (2026-10-02): the derive targets **owned** `Option<Region>`/`Vec`
+fields (a transient `*Regions` audit view per upstream block class, never stored
+on the content records), so the holder needs no lifetime; `RegionAudit` is passed
+in explicitly and the `#[derive(LoadRegions)]` impl emits
+`audit.load(ctx, pattern, fallback).cloned()` plus the nested `#1`/`#2` loops.
+The client boot fuses it with the lifecycle via
+`ContentRegistry::load_with_regions(atlas)` (after `init`/`post_init`, before
+`Content::load`), while headless callers use `ContentRegistry::load_regions`.
+The `pub content_name: &'a str` tightening (was `String`) avoids per-content
+allocation and matches the derive call site.
 
 `Region` deliberately carries `splits`/`pads`/`offsets` so plan 14 (`NinePatchRect`) and plan 16 (stretched drawers, turret regions) need no further metadata. `find()` on a missing name returns `None`; only `find_or(name, "error")` bridges to the always-present `error` region — this makes accidental missing regions a load error rather than a silent `error.png` (verified in §7).
 
@@ -317,17 +328,38 @@ Smallest vertical slice first: one authored sprite (`copper-wall`) flowing sourc
 
 ### M6 — `@Load` + `loadIcon` integration
 - [x] **Independent parts landed:** `mind-core/src/assets/regions.rs` (`LoadCtx`, `LoadRegions`, [`template`] exact `@size`→`@`→`#1`→`#2`→`#` order, `RegionAudit` explicit-fallback vs `fallback=error` separation); `loadIcon` chain (`AtlasIndex::find_full_icon`/`find_ui_icon`) already present from M1.
-- [ ] `mind-macros` `#[derive(LoadRegions)]`; plan 02 content structs annotated; `ContentLoader.load()` calls `load_regions`. **BLOCKED on plan 05 owning `mind-macros` (not on this branch).**
+- [x] `mind-macros` `#[derive(LoadRegions)]` (helper `#[load(...)]`: positional/`value`, `fallback`, `length`, `lengths`); `ContentRegistry::load_regions(atlas)` + `load_with_regions(atlas)` fusion (stage 8) and the full `@Load` audit. **Landed 2026-10-02 (see Changelog).**
 - [x] `loadIcon` chain + `uiIcon`; error-fallback auditing (`RegionAudit`).
-- **Verify:** headless boot of full content with zero error-fallbacks; unit tests §7.1a. **`mind-core::assets::regions::tests::{templating_matches_processor, find_uses_atlas_semantics, audit_separates_explicit_fallback_from_errors}` green; the derived-macro + content-load fusion boot is deferred with the hand-off below.**
+- **Verify:** ✅ `cargo run -p mind-headless -- assets regions --assert-complete` → **0** `fallback=error` misses (`3092/3092` inventory regions resolve; `@Load` audit reports 0 fatal, 941 explicit fallbacks, 92 upstream not-found); `mind-core::assets::content_regions::tests::derive_loads_scalars_arrays_and_records_audit` plus `regions::{templating_matches_processor, find_uses_atlas_semantics, audit_separates_explicit_fallback_from_errors}` green.
 
-#### M6 hand-off (once `mind-macros` is available on `main`)
+#### M6 completion notes (2026-10-02)
 
-1. **Crate.** `mind-macros` is owned/created by plan 05 (`lane/05-sim`). Do not create it here. When it lands, add it as a `proc-macro` workspace member and as a `mind-core` dependency.
-2. **Macro.** `#[derive(LoadRegions)]` over structs whose fields carry `#[load("pattern", fallback = "…", length = N, lengths = [..])]`. It must generate `impl mind_core::assets::regions::LoadRegions for <T> { fn load_regions(&mut self, ctx: &LoadCtx) { … } }`: scalar field = `self.f = ctx.atlas.find(&ctx.resolve("pattern"))` (`None` when the annotation default `fallback = "error"` misses — record via `RegionAudit` at the caller); array field = nested `for i in 0..len { ctx.indices[k] = i; … }` exactly per `LoadRegionProcessor`. Replacement order is ABI — reuse `regions::template`, do not re-implement.
-3. **Annotations.** Annotate the plan-02 content structs' `@Load` fields (`BlockDef.region`/team/`-top`/`-heat`/…, `UnitTypeDef` weapon/part regions, `Item`/`Liquid`/`StatusEffect` icons). Field set is the union of every `@Load` in `core/src/mindustry/content/*.java`.
-4. **Load order.** Add the stage in `ContentRegistry`/`ContentLoader` after content init and before `Content::load()` (plan 03 §3.2 stage 8), gated by `Vars.headless`-style flags; the audit result feeds `mind-headless assets regions --assert-complete`.
-5. **Oracle.** Run `mind-headless assets regions --assert-complete` (expect **0** `fallback=error` misses) and the §7.1a tests; add a `load_icon_chain` test under `mind-core::content::unlockable` if a wrapper is introduced.
+1. **Macro.** `#[proc_macro_derive(LoadRegions, attributes(load))]` in `mind-macros` emits
+   `impl ::mind_core::assets::regions::LoadRegions for <T>`; scalar fields become
+   `audit.load(ctx, pattern, fallback).cloned()`, array fields emit the same nested
+   `for` loops as `LoadRegionProcessor` (outer loop = `#1`, inner = `#2`), and
+   templating is delegated to `regions::template` (order stays ABI). The derive targets
+   owned `Option<Region>`/`Vec` fields so holders are lifetime-free audit views.
+2. **Annotations.** A scan of upstream shows **all 137 `@Load` fields live in
+   `world/blocks/**/*.java` + `world/Block.java`** (there are none under
+   `core/src/mindustry/content/*.java`), and they are declared per concrete block
+   class. Rather than mutate the plan-02 flat `BlockDef`/`UnitTypeDef` records (plan 07
+   owns render-time `RegionSlots`), `mind-core/src/assets/content_regions.rs` carries one
+   `#[derive(LoadRegions)]` struct per declaring class and `load_block_regions` walks the
+   Java class chain (`content instanceof X` semantics), so inherited fields
+   (`Block.teamRegion`/`customShadowRegion`, `Drill` fields on `BeamDrill`, …) load for
+   every applicable block.
+3. **Load order.** `ContentRegistry::load_with_regions(atlas)` runs `load_regions` after
+   `init`/`post_init` and before `Content::load()`; `load()` stays the headless no-op and
+   the audit is exposed via `region_audit()`. The oracle calls `load_regions` directly.
+4. **Audit semantics.** Arc `find(name)` with no explicit fallback returns the `error`
+   region (`found() == false`), so many vanilla `@Load` fields are legitimately absent
+   (e.g. `Conveyor.regions[5..7]`, `StaticWall.large` on walls without a large sprite).
+   `RegionAudit` keeps the strict fatal split, and `assets regions --assert-complete`
+   treats a default miss as fatal only when the resolved name is in the generated
+   inventory (a region the pack promises), reporting the rest as upstream not-found.
+5. **Oracle.** `mind-headless assets regions --assert-complete` → 0 fatal; the
+   `loadIcon`/`uiIcon` contract is covered by `assets::atlas::tests::load_icon_chain`.
 
 ### M7 — Bundles + icons/fonts
 - [x] Properties parser (UTF-8, escapes, continuations, ordered), chain fallback, `global.properties`, external bundle, `locales`, `IntFormat`, `format`. (`mind-core/src/assets/bundle.rs`: `parse_properties` is a faithful `PropertiesUtils.load` state-machine port; `Bundle` chain + `merge_global`/`merge_assets` + `format_template` + bounded `IntFormat`; `locale_chain`.)
@@ -513,6 +545,7 @@ pub mod iconc { /* name -> char from icons.properties + config.json */ }
 | `ApplicationTests.launchApplication` asset bootstrap | `mind-headless assets boot` + `cargo test -p mind-headless assets_boot` |
 | `AssetsProcess` sound name mangling/duplicates | `mind-core::assets::sounds::tests::names_ids_and_duplicates` |
 | `LoadRegionProcessor` templating | `mind-core::assets::regions::tests::templating_matches_processor` (`@`, `@size`, `#`, `#1`, `#2`, fallback) |
+| `LoadRegionProcessor` generated field load (`ContentRegions.loadRegions`) | `mind-core::assets::content_regions::tests::derive_loads_scalars_arrays_and_records_audit` (derive: scalar, 1-D `length`, 2-D `lengths`, positional/`value`, explicit fallback, `RegionAudit`) |
 | `UnlockableContent.loadIcon` contract | `mind-core::content::unlockable::tests::load_icon_chain` |
 | `ImagePacker` icons allocation | `mind-tools::generated_assets::tests::icons_properties_append_only` |
 | `ImageTileGenerator` (47 slices) | `mind-tools::generate::autotile::tests::slice_layout_and_hash` |
@@ -674,4 +707,5 @@ Arc classes referenced as oracles (must be fetched/attributed at execution): `ar
 - **2026-10-02 — M8 (lane/03-assets).** Sounds/Musics + `Tex` + cursors. `mind-core/src/assets/sounds.rs`: `Sounds`/`Musics` registries parsed from `assets/sounds.index.json` (`SoundsIndex`/`SoundEntry`/`MusicEntry`), duplicate name/id rejection, `none`/`unset` dummies, name→entry and id→entry maps. `mind-gdext/src/assets/audio.rs`: `AudioRegistry` loads the index and lazily decodes `AudioStreamOggVorbis`/`AudioStreamMp3` through `FileAccess.get_file_as_bytes`, cached by name. `MindAssets` gains `tex` (alias of `find_region`), `tex_splits` (ninepatch splits as `PackedInt32Array`), `sound_count`/`music_count`/`sound_path`/`music_path`/`sound_stream`/`music_stream`, and `cursor_texture` (`cursors/<name>.png`, lazy `ImageTexture`). New `mind-headless assets sounds-check` (registry == recursive file listing, dense ids, dummies present, files exist) and `assets fallback-boot` (fallback manifest parses, fallback=true, every page/region ≤2048). **Evidence:** `mind-core` sounds 1/1; `sounds-check` 207 entries / 205 files / dense / 0 missing / PASS; `fallback-boot` 8 pages / 5135 regions / PASS. **Deferred:** `Input.set_custom_mouse_cursor` hot-spot application (plans 14/15); audio playback/priority is plan 18 (registry-only handshake).
 - **2026-10-02 — M9 (lane/03-assets).** Mod overlay API + plan-20 handshake. `mind-core/src/assets/overlay.rs`: the `AssetOverlayProvider` trait plus `OverlaySprite`/`OverlayImage`/`OverlaySound`/`OverlayShader`; `sprite_region_name` ports the exact `Mods.packSprites` prefix rule (`sprites/` → `<mod>-` unless already `<category>-<mod>-…`; `sprites-override/` unchanged; `bar.9.png` → `bar`); `sprite_page` ports `Mods.getPage` (`blocks/environment`→environment, `rubble`→rubble, `ui`→ui, else main); `override_warning` (override of a missing region) and `is_data_asset` (`dp-`). Fixture-mod handshake test drives an in-memory provider into `FileTree::add_file` + `Bundle::merge_assets`, asserting prefix/override/page/`dp-` semantics. **Evidence:** `mind-core assets::overlay` 4/4. **Deferred:** the runtime `AtlasOverlayBuilder` page-append (uses the `mind-atlas` packer) and the on-disk `mind-headless` fixture-mod load, both owned by plan 20's merge.
 - **2026-10-02 — M10 (lane/03-assets).** Budgets, scenarios, exit. `mind-core/benches/assets.rs` (+`[[bench]] assets`) measures the §7d.1 micro-rows: `atlas_lookup` **52.4 ns** (≤200 ns), `bundle_get` **36.3 ns** (≤500 ns), `bundle_format` **241 ns** (≤5 µs) via `cargo bench -p mind-core --bench assets -- --quick`. New `mind-tools determinism --runs N` runs the full pack N times and asserts the `asset_manifest.json` is byte-identical → **2 packs identical** (sha256 `be447e3530db98b5ba87b3aa996e5a0461896654afe48b8c2f03ea4cf1858c0d`); full release pack ~15 s (≤90 s); `pack --timings` writes `build/assets/pack_timings.json`. Scenario commands exercised: `assets fallback-boot` (8 pages / 5135 regions / PASS), `assets sounds-check` (207/205 / dense / PASS), `assets bundle-diff` (0 error locales). Exit checklist §7.1e signed off with done/deferred annotations. **Orchestrator-owned:** `assets-pack` CI job/cache and the §7.1c in-engine MCP probe (single-editor mutex); plan-20 overlay page append and plan-18 playback are downstream handshakes.
+- **2026-10-02 — M6 completion (lane/03-assets).** `@Load` + `loadIcon` fused. **Macro:** `mind-macros` gains `#[proc_macro_derive(LoadRegions, attributes(load))]` (proc-macro-only; no runtime deps) parsing `#[load("pattern" | value = "…", fallback = "…", length = N, lengths = [..])]` and emitting `impl ::mind_core::assets::regions::LoadRegions for T` — scalar = `audit.load(ctx, pattern, fallback).cloned()`, arrays = the exact nested `#1`/`#2` `for` loops; templating delegates to `regions::template` (order ABI). `LoadRegions` now takes `(&mut self, ctx: &mut LoadCtx, audit: &mut RegionAudit)` and the holders own `Option<Region>`/`Vec` (lifetime-free audit views). **Annotations:** a full scan of upstream shows all **137 `@Load` fields across 67 classes live in `world/blocks/**` + `world/Block.java`** (none under `content/*.java`); `mind-core/src/assets/content_regions.rs` is generated (`#[derive(LoadRegions)]` struct per declaring class, fields sorted by name per `LoadRegionProcessor`) and `load_block_regions` walks the Java class chain (`content instanceof X`), so inherited fields load everywhere; `audit_block_regions` folds a whole registry. **Fusion:** `ContentRegistry::load_regions(atlas)`/`load_with_regions(atlas)` runs after `init`/`post_init` and before `Content::load()` (headless `load()` stays a no-op), audit cached in `region_audit()`. **Oracle:** `mind-headless assets regions --assert-complete` now also runs the `@Load` audit → **`3092/3092` inventory resolve + 0 `fallback=error` misses** (941 explicit fallbacks, 92 upstream not-found). The 92 are Arc `find(name)`→`error` (`found()==false`) optional fields (e.g. `Conveyor.regions[5..7]`, `StaticWall.large` on walls without a large sprite), so `--assert-complete` treats a default miss as fatal only when the name is in the generated inventory (reconciliation of the §7.1b strict rule). **Evidence:** `mind-core` `assets::content_regions::tests::derive_loads_scalars_arrays_and_records_audit` + `assets::regions` 3/3 green; `mind-core` 264 passed (+2 `sim_core_meta` +1 `sim_core_schedule`, 1 ignored), `mind-tools` 24 + 2 integration; workspace fmt/clippy `-D warnings` clean. **HLP §3 row + §13 updated; plan-05 hand-off consumed.**
 - (not started) — generated 2026-10-01 as part of the initial plan set.

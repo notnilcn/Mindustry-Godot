@@ -19,6 +19,7 @@
 
 pub mod atlas;
 pub mod bundle;
+pub mod content_regions;
 pub mod file_tree;
 pub mod generated;
 pub mod icons;
