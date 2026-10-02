@@ -1,0 +1,1125 @@
+{
+  "format": 1,
+  "classes": [
+    {
+      "alias": "Ability",
+      "scope": "Ability",
+      "tag": "Ability"
+    },
+    {
+      "alias": "BuildSpeedAbility",
+      "scope": "Ability",
+      "tag": "BuildSpeedAbility"
+    },
+    {
+      "alias": "EnergyFieldAbility",
+      "scope": "Ability",
+      "tag": "EnergyFieldAbility"
+    },
+    {
+      "alias": "ForceFieldAbility",
+      "scope": "Ability",
+      "tag": "ForceFieldAbility"
+    },
+    {
+      "alias": "HealAbility",
+      "scope": "Ability",
+      "tag": "HealAbility"
+    },
+    {
+      "alias": "LiquidExplodeAbility",
+      "scope": "Ability",
+      "tag": "LiquidExplodeAbility"
+    },
+    {
+      "alias": "LiquidRegenAbility",
+      "scope": "Ability",
+      "tag": "LiquidRegenAbility"
+    },
+    {
+      "alias": "MineSpeedAbility",
+      "scope": "Ability",
+      "tag": "MineSpeedAbility"
+    },
+    {
+      "alias": "MoveEffectAbility",
+      "scope": "Ability",
+      "tag": "MoveEffectAbility"
+    },
+    {
+      "alias": "MoveLightningAbility",
+      "scope": "Ability",
+      "tag": "MoveLightningAbility"
+    },
+    {
+      "alias": "RegenAbility",
+      "scope": "Ability",
+      "tag": "RegenAbility"
+    },
+    {
+      "alias": "RepairFieldAbility",
+      "scope": "Ability",
+      "tag": "RepairFieldAbility"
+    },
+    {
+      "alias": "ShieldArcAbility",
+      "scope": "Ability",
+      "tag": "ShieldArcAbility"
+    },
+    {
+      "alias": "ShieldRegenFieldAbility",
+      "scope": "Ability",
+      "tag": "ShieldRegenFieldAbility"
+    },
+    {
+      "alias": "SpawnDeathAbility",
+      "scope": "Ability",
+      "tag": "SpawnDeathAbility"
+    },
+    {
+      "alias": "StatusFieldAbility",
+      "scope": "Ability",
+      "tag": "StatusFieldAbility"
+    },
+    {
+      "alias": "SuppressionFieldAbility",
+      "scope": "Ability",
+      "tag": "SuppressionFieldAbility"
+    },
+    {
+      "alias": "UnitSpawnAbility",
+      "scope": "Ability",
+      "tag": "UnitSpawnAbility"
+    },
+    {
+      "alias": "Accelerator",
+      "scope": "Block",
+      "tag": "Accelerator"
+    },
+    {
+      "alias": "AirBlock",
+      "scope": "Block",
+      "tag": "AirBlock"
+    },
+    {
+      "alias": "ArmoredConduit",
+      "scope": "Block",
+      "tag": "ArmoredConduit"
+    },
+    {
+      "alias": "ArmoredConveyor",
+      "scope": "Block",
+      "tag": "ArmoredConveyor"
+    },
+    {
+      "alias": "AttributeCrafter",
+      "scope": "Block",
+      "tag": "AttributeCrafter"
+    },
+    {
+      "alias": "AutoDoor",
+      "scope": "Block",
+      "tag": "AutoDoor"
+    },
+    {
+      "alias": "BaseShield",
+      "scope": "Block",
+      "tag": "BaseShield"
+    },
+    {
+      "alias": "Battery",
+      "scope": "Block",
+      "tag": "Battery"
+    },
+    {
+      "alias": "BeamDrill",
+      "scope": "Block",
+      "tag": "BeamDrill"
+    },
+    {
+      "alias": "BeamNode",
+      "scope": "Block",
+      "tag": "BeamNode"
+    },
+    {
+      "alias": "Block",
+      "scope": "Block",
+      "tag": "Block"
+    },
+    {
+      "alias": "BufferedItemBridge",
+      "scope": "Block",
+      "tag": "BufferedItemBridge"
+    },
+    {
+      "alias": "BuildTurret",
+      "scope": "Block",
+      "tag": "BuildTurret"
+    },
+    {
+      "alias": "BurstDrill",
+      "scope": "Block",
+      "tag": "BurstDrill"
+    },
+    {
+      "alias": "CanvasBlock",
+      "scope": "Block",
+      "tag": "CanvasBlock"
+    },
+    {
+      "alias": "CharacterOverlay",
+      "scope": "Block",
+      "tag": "CharacterOverlay"
+    },
+    {
+      "alias": "Cliff",
+      "scope": "Block",
+      "tag": "Cliff"
+    },
+    {
+      "alias": "ColoredFloor",
+      "scope": "Block",
+      "tag": "ColoredFloor"
+    },
+    {
+      "alias": "ColoredWall",
+      "scope": "Block",
+      "tag": "ColoredWall"
+    },
+    {
+      "alias": "Conduit",
+      "scope": "Block",
+      "tag": "Conduit"
+    },
+    {
+      "alias": "ConstructBlock",
+      "scope": "Block",
+      "tag": "ConstructBlock"
+    },
+    {
+      "alias": "Constructor",
+      "scope": "Block",
+      "tag": "Constructor"
+    },
+    {
+      "alias": "ConsumeGenerator",
+      "scope": "Block",
+      "tag": "ConsumeGenerator"
+    },
+    {
+      "alias": "ContinuousLiquidTurret",
+      "scope": "Block",
+      "tag": "ContinuousLiquidTurret"
+    },
+    {
+      "alias": "ContinuousTurret",
+      "scope": "Block",
+      "tag": "ContinuousTurret"
+    },
+    {
+      "alias": "Conveyor",
+      "scope": "Block",
+      "tag": "Conveyor"
+    },
+    {
+      "alias": "CoreBlock",
+      "scope": "Block",
+      "tag": "CoreBlock"
+    },
+    {
+      "alias": "DirectionLiquidBridge",
+      "scope": "Block",
+      "tag": "DirectionLiquidBridge"
+    },
+    {
+      "alias": "DirectionalUnloader",
+      "scope": "Block",
+      "tag": "DirectionalUnloader"
+    },
+    {
+      "alias": "Door",
+      "scope": "Block",
+      "tag": "Door"
+    },
+    {
+      "alias": "Drill",
+      "scope": "Block",
+      "tag": "Drill"
+    },
+    {
+      "alias": "Duct",
+      "scope": "Block",
+      "tag": "Duct"
+    },
+    {
+      "alias": "DuctBridge",
+      "scope": "Block",
+      "tag": "DuctBridge"
+    },
+    {
+      "alias": "DuctRouter",
+      "scope": "Block",
+      "tag": "DuctRouter"
+    },
+    {
+      "alias": "EmptyFloor",
+      "scope": "Block",
+      "tag": "EmptyFloor"
+    },
+    {
+      "alias": "Floor",
+      "scope": "Block",
+      "tag": "Floor"
+    },
+    {
+      "alias": "ForceProjector",
+      "scope": "Block",
+      "tag": "ForceProjector"
+    },
+    {
+      "alias": "Fracker",
+      "scope": "Block",
+      "tag": "Fracker"
+    },
+    {
+      "alias": "GenericCrafter",
+      "scope": "Block",
+      "tag": "GenericCrafter"
+    },
+    {
+      "alias": "HeatConductor",
+      "scope": "Block",
+      "tag": "HeatConductor"
+    },
+    {
+      "alias": "HeatCrafter",
+      "scope": "Block",
+      "tag": "HeatCrafter"
+    },
+    {
+      "alias": "HeatProducer",
+      "scope": "Block",
+      "tag": "HeatProducer"
+    },
+    {
+      "alias": "HeaterGenerator",
+      "scope": "Block",
+      "tag": "HeaterGenerator"
+    },
+    {
+      "alias": "ImpactReactor",
+      "scope": "Block",
+      "tag": "ImpactReactor"
+    },
+    {
+      "alias": "Incinerator",
+      "scope": "Block",
+      "tag": "Incinerator"
+    },
+    {
+      "alias": "ItemBridge",
+      "scope": "Block",
+      "tag": "ItemBridge"
+    },
+    {
+      "alias": "ItemIncinerator",
+      "scope": "Block",
+      "tag": "ItemIncinerator"
+    },
+    {
+      "alias": "ItemSource",
+      "scope": "Block",
+      "tag": "ItemSource"
+    },
+    {
+      "alias": "ItemTurret",
+      "scope": "Block",
+      "tag": "ItemTurret"
+    },
+    {
+      "alias": "ItemVoid",
+      "scope": "Block",
+      "tag": "ItemVoid"
+    },
+    {
+      "alias": "Junction",
+      "scope": "Block",
+      "tag": "Junction"
+    },
+    {
+      "alias": "LandingPad",
+      "scope": "Block",
+      "tag": "LandingPad"
+    },
+    {
+      "alias": "LaserTurret",
+      "scope": "Block",
+      "tag": "LaserTurret"
+    },
+    {
+      "alias": "LaunchPad",
+      "scope": "Block",
+      "tag": "LaunchPad"
+    },
+    {
+      "alias": "LegacyCommandCenter",
+      "scope": "Block",
+      "tag": "LegacyCommandCenter"
+    },
+    {
+      "alias": "LegacyMechPad",
+      "scope": "Block",
+      "tag": "LegacyMechPad"
+    },
+    {
+      "alias": "LegacyUnitFactory",
+      "scope": "Block",
+      "tag": "LegacyUnitFactory"
+    },
+    {
+      "alias": "LightBlock",
+      "scope": "Block",
+      "tag": "LightBlock"
+    },
+    {
+      "alias": "LiquidBridge",
+      "scope": "Block",
+      "tag": "LiquidBridge"
+    },
+    {
+      "alias": "LiquidJunction",
+      "scope": "Block",
+      "tag": "LiquidJunction"
+    },
+    {
+      "alias": "LiquidRouter",
+      "scope": "Block",
+      "tag": "LiquidRouter"
+    },
+    {
+      "alias": "LiquidSource",
+      "scope": "Block",
+      "tag": "LiquidSource"
+    },
+    {
+      "alias": "LiquidTurret",
+      "scope": "Block",
+      "tag": "LiquidTurret"
+    },
+    {
+      "alias": "LiquidVoid",
+      "scope": "Block",
+      "tag": "LiquidVoid"
+    },
+    {
+      "alias": "LogicBlock",
+      "scope": "Block",
+      "tag": "LogicBlock"
+    },
+    {
+      "alias": "LogicDisplay",
+      "scope": "Block",
+      "tag": "LogicDisplay"
+    },
+    {
+      "alias": "LongPowerNode",
+      "scope": "Block",
+      "tag": "LongPowerNode"
+    },
+    {
+      "alias": "MassDriver",
+      "scope": "Block",
+      "tag": "MassDriver"
+    },
+    {
+      "alias": "MemoryBlock",
+      "scope": "Block",
+      "tag": "MemoryBlock"
+    },
+    {
+      "alias": "MendProjector",
+      "scope": "Block",
+      "tag": "MendProjector"
+    },
+    {
+      "alias": "MessageBlock",
+      "scope": "Block",
+      "tag": "MessageBlock"
+    },
+    {
+      "alias": "NuclearReactor",
+      "scope": "Block",
+      "tag": "NuclearReactor"
+    },
+    {
+      "alias": "OreBlock",
+      "scope": "Block",
+      "tag": "OreBlock"
+    },
+    {
+      "alias": "OverdriveProjector",
+      "scope": "Block",
+      "tag": "OverdriveProjector"
+    },
+    {
+      "alias": "OverflowDuct",
+      "scope": "Block",
+      "tag": "OverflowDuct"
+    },
+    {
+      "alias": "OverflowGate",
+      "scope": "Block",
+      "tag": "OverflowGate"
+    },
+    {
+      "alias": "OverlayFloor",
+      "scope": "Block",
+      "tag": "OverlayFloor"
+    },
+    {
+      "alias": "PayloadConveyor",
+      "scope": "Block",
+      "tag": "PayloadConveyor"
+    },
+    {
+      "alias": "PayloadDeconstructor",
+      "scope": "Block",
+      "tag": "PayloadDeconstructor"
+    },
+    {
+      "alias": "PayloadLoader",
+      "scope": "Block",
+      "tag": "PayloadLoader"
+    },
+    {
+      "alias": "PayloadMassDriver",
+      "scope": "Block",
+      "tag": "PayloadMassDriver"
+    },
+    {
+      "alias": "PayloadRouter",
+      "scope": "Block",
+      "tag": "PayloadRouter"
+    },
+    {
+      "alias": "PayloadSource",
+      "scope": "Block",
+      "tag": "PayloadSource"
+    },
+    {
+      "alias": "PayloadUnloader",
+      "scope": "Block",
+      "tag": "PayloadUnloader"
+    },
+    {
+      "alias": "PayloadVoid",
+      "scope": "Block",
+      "tag": "PayloadVoid"
+    },
+    {
+      "alias": "PointDefenseTurret",
+      "scope": "Block",
+      "tag": "PointDefenseTurret"
+    },
+    {
+      "alias": "PowerDiode",
+      "scope": "Block",
+      "tag": "PowerDiode"
+    },
+    {
+      "alias": "PowerNode",
+      "scope": "Block",
+      "tag": "PowerNode"
+    },
+    {
+      "alias": "PowerSource",
+      "scope": "Block",
+      "tag": "PowerSource"
+    },
+    {
+      "alias": "PowerTurret",
+      "scope": "Block",
+      "tag": "PowerTurret"
+    },
+    {
+      "alias": "PowerVoid",
+      "scope": "Block",
+      "tag": "PowerVoid"
+    },
+    {
+      "alias": "Prop",
+      "scope": "Block",
+      "tag": "Prop"
+    },
+    {
+      "alias": "Pump",
+      "scope": "Block",
+      "tag": "Pump"
+    },
+    {
+      "alias": "Radar",
+      "scope": "Block",
+      "tag": "Radar"
+    },
+    {
+      "alias": "Reconstructor",
+      "scope": "Block",
+      "tag": "Reconstructor"
+    },
+    {
+      "alias": "RegenProjector",
+      "scope": "Block",
+      "tag": "RegenProjector"
+    },
+    {
+      "alias": "RemoveOre",
+      "scope": "Block",
+      "tag": "RemoveOre"
+    },
+    {
+      "alias": "RemoveWall",
+      "scope": "Block",
+      "tag": "RemoveWall"
+    },
+    {
+      "alias": "RepairTower",
+      "scope": "Block",
+      "tag": "RepairTower"
+    },
+    {
+      "alias": "RepairTurret",
+      "scope": "Block",
+      "tag": "RepairTurret"
+    },
+    {
+      "alias": "Router",
+      "scope": "Block",
+      "tag": "Router"
+    },
+    {
+      "alias": "RuneOverlay",
+      "scope": "Block",
+      "tag": "RuneOverlay"
+    },
+    {
+      "alias": "SeaBush",
+      "scope": "Block",
+      "tag": "SeaBush"
+    },
+    {
+      "alias": "Seaweed",
+      "scope": "Block",
+      "tag": "Seaweed"
+    },
+    {
+      "alias": "Separator",
+      "scope": "Block",
+      "tag": "Separator"
+    },
+    {
+      "alias": "ShallowLiquid",
+      "scope": "Block",
+      "tag": "ShallowLiquid"
+    },
+    {
+      "alias": "ShieldWall",
+      "scope": "Block",
+      "tag": "ShieldWall"
+    },
+    {
+      "alias": "ShockMine",
+      "scope": "Block",
+      "tag": "ShockMine"
+    },
+    {
+      "alias": "ShockwaveTower",
+      "scope": "Block",
+      "tag": "ShockwaveTower"
+    },
+    {
+      "alias": "SolarGenerator",
+      "scope": "Block",
+      "tag": "SolarGenerator"
+    },
+    {
+      "alias": "SolidPump",
+      "scope": "Block",
+      "tag": "SolidPump"
+    },
+    {
+      "alias": "Sorter",
+      "scope": "Block",
+      "tag": "Sorter"
+    },
+    {
+      "alias": "SpawnBlock",
+      "scope": "Block",
+      "tag": "SpawnBlock"
+    },
+    {
+      "alias": "StackConveyor",
+      "scope": "Block",
+      "tag": "StackConveyor"
+    },
+    {
+      "alias": "StackRouter",
+      "scope": "Block",
+      "tag": "StackRouter"
+    },
+    {
+      "alias": "StaticProp",
+      "scope": "Block",
+      "tag": "StaticProp"
+    },
+    {
+      "alias": "StaticTree",
+      "scope": "Block",
+      "tag": "StaticTree"
+    },
+    {
+      "alias": "StaticWall",
+      "scope": "Block",
+      "tag": "StaticWall"
+    },
+    {
+      "alias": "SteamVent",
+      "scope": "Block",
+      "tag": "SteamVent"
+    },
+    {
+      "alias": "StorageBlock",
+      "scope": "Block",
+      "tag": "StorageBlock"
+    },
+    {
+      "alias": "SwitchBlock",
+      "scope": "Block",
+      "tag": "SwitchBlock"
+    },
+    {
+      "alias": "TallBlock",
+      "scope": "Block",
+      "tag": "TallBlock"
+    },
+    {
+      "alias": "TargetDummy",
+      "scope": "Block",
+      "tag": "TargetDummy"
+    },
+    {
+      "alias": "ThermalGenerator",
+      "scope": "Block",
+      "tag": "ThermalGenerator"
+    },
+    {
+      "alias": "Thruster",
+      "scope": "Block",
+      "tag": "Thruster"
+    },
+    {
+      "alias": "TileableLogicDisplay",
+      "scope": "Block",
+      "tag": "TileableLogicDisplay"
+    },
+    {
+      "alias": "TractorBeamTurret",
+      "scope": "Block",
+      "tag": "TractorBeamTurret"
+    },
+    {
+      "alias": "TreeBlock",
+      "scope": "Block",
+      "tag": "TreeBlock"
+    },
+    {
+      "alias": "UnitAssembler",
+      "scope": "Block",
+      "tag": "UnitAssembler"
+    },
+    {
+      "alias": "UnitAssemblerModule",
+      "scope": "Block",
+      "tag": "UnitAssemblerModule"
+    },
+    {
+      "alias": "UnitCargoLoader",
+      "scope": "Block",
+      "tag": "UnitCargoLoader"
+    },
+    {
+      "alias": "UnitCargoUnloadPoint",
+      "scope": "Block",
+      "tag": "UnitCargoUnloadPoint"
+    },
+    {
+      "alias": "UnitFactory",
+      "scope": "Block",
+      "tag": "UnitFactory"
+    },
+    {
+      "alias": "Unloader",
+      "scope": "Block",
+      "tag": "Unloader"
+    },
+    {
+      "alias": "VariableReactor",
+      "scope": "Block",
+      "tag": "VariableReactor"
+    },
+    {
+      "alias": "Wall",
+      "scope": "Block",
+      "tag": "Wall"
+    },
+    {
+      "alias": "WallCrafter",
+      "scope": "Block",
+      "tag": "WallCrafter"
+    },
+    {
+      "alias": "ArtilleryBulletType",
+      "scope": "BulletType",
+      "tag": "ArtilleryBulletType"
+    },
+    {
+      "alias": "BasicBulletType",
+      "scope": "BulletType",
+      "tag": "BasicBulletType"
+    },
+    {
+      "alias": "BombBulletType",
+      "scope": "BulletType",
+      "tag": "BombBulletType"
+    },
+    {
+      "alias": "BulletType",
+      "scope": "BulletType",
+      "tag": "BulletType"
+    },
+    {
+      "alias": "ContinuousLaserBulletType",
+      "scope": "BulletType",
+      "tag": "ContinuousLaserBulletType"
+    },
+    {
+      "alias": "EmpBulletType",
+      "scope": "BulletType",
+      "tag": "EmpBulletType"
+    },
+    {
+      "alias": "ExplosionBulletType",
+      "scope": "BulletType",
+      "tag": "ExplosionBulletType"
+    },
+    {
+      "alias": "FireBulletType",
+      "scope": "BulletType",
+      "tag": "FireBulletType"
+    },
+    {
+      "alias": "FlakBulletType",
+      "scope": "BulletType",
+      "tag": "FlakBulletType"
+    },
+    {
+      "alias": "LaserBoltBulletType",
+      "scope": "BulletType",
+      "tag": "LaserBoltBulletType"
+    },
+    {
+      "alias": "LaserBulletType",
+      "scope": "BulletType",
+      "tag": "LaserBulletType"
+    },
+    {
+      "alias": "LightningBulletType",
+      "scope": "BulletType",
+      "tag": "LightningBulletType"
+    },
+    {
+      "alias": "LiquidBulletType",
+      "scope": "BulletType",
+      "tag": "LiquidBulletType"
+    },
+    {
+      "alias": "MissileBulletType",
+      "scope": "BulletType",
+      "tag": "MissileBulletType"
+    },
+    {
+      "alias": "RailBulletType",
+      "scope": "BulletType",
+      "tag": "RailBulletType"
+    },
+    {
+      "alias": "SapBulletType",
+      "scope": "BulletType",
+      "tag": "SapBulletType"
+    },
+    {
+      "alias": "ShrapnelBulletType",
+      "scope": "BulletType",
+      "tag": "ShrapnelBulletType"
+    },
+    {
+      "alias": "SpaceLiquidBulletType",
+      "scope": "BulletType",
+      "tag": "SpaceLiquidBulletType"
+    },
+    {
+      "alias": "DrawArc",
+      "scope": "DrawPart",
+      "tag": "DrawArc"
+    },
+    {
+      "alias": "DrawBlurSpin",
+      "scope": "DrawPart",
+      "tag": "DrawBlurSpin"
+    },
+    {
+      "alias": "DrawGlowRegion",
+      "scope": "DrawPart",
+      "tag": "DrawGlowRegion"
+    },
+    {
+      "alias": "DrawParticle",
+      "scope": "DrawPart",
+      "tag": "DrawParticle"
+    },
+    {
+      "alias": "DrawRegion",
+      "scope": "DrawPart",
+      "tag": "DrawRegion"
+    },
+    {
+      "alias": "DrawRegionSpin",
+      "scope": "DrawPart",
+      "tag": "DrawRegionSpin"
+    },
+    {
+      "alias": "DrawShape",
+      "scope": "DrawPart",
+      "tag": "DrawShape"
+    },
+    {
+      "alias": "DrawSideRegion",
+      "scope": "DrawPart",
+      "tag": "DrawSideRegion"
+    },
+    {
+      "alias": "DrawSoftShadow",
+      "scope": "DrawPart",
+      "tag": "DrawSoftShadow"
+    },
+    {
+      "alias": "DrawTurret",
+      "scope": "DrawPart",
+      "tag": "DrawTurret"
+    },
+    {
+      "alias": "DrawWarmupRegion",
+      "scope": "DrawPart",
+      "tag": "DrawWarmupRegion"
+    },
+    {
+      "alias": "DrawWeapon",
+      "scope": "DrawPart",
+      "tag": "DrawWeapon"
+    },
+    {
+      "alias": "Effect",
+      "scope": "Effect",
+      "tag": "Effect"
+    },
+    {
+      "alias": "ExplosionEffect",
+      "scope": "Effect",
+      "tag": "ExplosionEffect"
+    },
+    {
+      "alias": "MultiEffect",
+      "scope": "Effect",
+      "tag": "MultiEffect"
+    },
+    {
+      "alias": "WaveEffect",
+      "scope": "Effect",
+      "tag": "WaveEffect"
+    },
+    {
+      "alias": "WrapEffect",
+      "scope": "Effect",
+      "tag": "WrapEffect"
+    },
+    {
+      "alias": "Item",
+      "scope": "Item",
+      "tag": "Item"
+    },
+    {
+      "alias": "CellLiquid",
+      "scope": "Liquid",
+      "tag": "CellLiquid"
+    },
+    {
+      "alias": "Liquid",
+      "scope": "Liquid",
+      "tag": "Liquid"
+    },
+    {
+      "alias": "Planet",
+      "scope": "Planet",
+      "tag": "Planet"
+    },
+    {
+      "alias": "SectorPreset",
+      "scope": "Sector",
+      "tag": "SectorPreset"
+    },
+    {
+      "alias": "ShootAlternate",
+      "scope": "ShootPattern",
+      "tag": "ShootAlternate"
+    },
+    {
+      "alias": "ShootBarrel",
+      "scope": "ShootPattern",
+      "tag": "ShootBarrel"
+    },
+    {
+      "alias": "ShootHelix",
+      "scope": "ShootPattern",
+      "tag": "ShootHelix"
+    },
+    {
+      "alias": "ShootMulti",
+      "scope": "ShootPattern",
+      "tag": "ShootMulti"
+    },
+    {
+      "alias": "ShootPattern",
+      "scope": "ShootPattern",
+      "tag": "ShootPattern"
+    },
+    {
+      "alias": "ShootSequence",
+      "scope": "ShootPattern",
+      "tag": "ShootSequence"
+    },
+    {
+      "alias": "ShootSpread",
+      "scope": "ShootPattern",
+      "tag": "ShootSpread"
+    },
+    {
+      "alias": "StatusEffect",
+      "scope": "Status",
+      "tag": "StatusEffect"
+    },
+    {
+      "alias": "TeamEntry",
+      "scope": "Team",
+      "tag": "TeamEntry"
+    },
+    {
+      "alias": "AssemblerAI",
+      "scope": "UnitController",
+      "tag": "AssemblerAI"
+    },
+    {
+      "alias": "BuilderAI",
+      "scope": "UnitController",
+      "tag": "BuilderAI"
+    },
+    {
+      "alias": "CargoAI",
+      "scope": "UnitController",
+      "tag": "CargoAI"
+    },
+    {
+      "alias": "CommandAI",
+      "scope": "UnitController",
+      "tag": "CommandAI"
+    },
+    {
+      "alias": "DefenderAI",
+      "scope": "UnitController",
+      "tag": "DefenderAI"
+    },
+    {
+      "alias": "FlyingFollowAI",
+      "scope": "UnitController",
+      "tag": "FlyingFollowAI"
+    },
+    {
+      "alias": "HugAI",
+      "scope": "UnitController",
+      "tag": "HugAI"
+    },
+    {
+      "alias": "MissileAI",
+      "scope": "UnitController",
+      "tag": "MissileAI"
+    },
+    {
+      "alias": "NoAI",
+      "scope": "UnitController",
+      "tag": "NoAI"
+    },
+    {
+      "alias": "SuicideAI",
+      "scope": "UnitController",
+      "tag": "SuicideAI"
+    },
+    {
+      "alias": "ErekirUnitType",
+      "scope": "UnitType",
+      "tag": "ErekirUnitType"
+    },
+    {
+      "alias": "MissileUnitType",
+      "scope": "UnitType",
+      "tag": "MissileUnitType"
+    },
+    {
+      "alias": "NeoplasmUnitType",
+      "scope": "UnitType",
+      "tag": "NeoplasmUnitType"
+    },
+    {
+      "alias": "TankUnitType",
+      "scope": "UnitType",
+      "tag": "TankUnitType"
+    },
+    {
+      "alias": "UnitType",
+      "scope": "UnitType",
+      "tag": "UnitType"
+    },
+    {
+      "alias": "MagneticStorm",
+      "scope": "Weather",
+      "tag": "MagneticStorm"
+    },
+    {
+      "alias": "ParticleWeather",
+      "scope": "Weather",
+      "tag": "ParticleWeather"
+    },
+    {
+      "alias": "RainWeather",
+      "scope": "Weather",
+      "tag": "RainWeather"
+    },
+    {
+      "alias": "SolarFlare",
+      "scope": "Weather",
+      "tag": "SolarFlare"
+    },
+    {
+      "alias": "Weather",
+      "scope": "Weather",
+      "tag": "Weather"
+    }
+  ]
+}

@@ -4,7 +4,7 @@ Tracks accepted JSON field names per content kind. Unknown fields warn and are
 ignored (`ignoreUnknownFields = true`); this ledger records the implemented set
 so drift from upstream Java fields is visible.
 
-Status as of 2026-10-02 (lane/20-mods): **M1 item + block core fields implemented; M2 all nine top-level kinds + unit weapons/bullets parsed (subset below).**
+Status as of 2026-10-02 (lane/20-mods): **M1 item + block core fields implemented; M2 all nine top-level kinds + unit weapons/bullets/abilities/shoot patterns parsed; M2b nested frag/interval/spawn bullets + `mind-tools mods classmap --check`; M3b patch surface (`drillMultipliers`, `attributes`, deep weapon/bullet paths, abilities).**
 
 ## Item (`mindustry.type.Item`)
 
@@ -42,7 +42,9 @@ Status as of 2026-10-02 (lane/20-mods): **M1 item + block core fields implemente
 | `placeablePlayer`, `placeableLiquid`, `placeableOn` | `BlockSpec` | implemented |
 | `buildVisibility`, `category` | `BlockSpec` | implemented |
 | `requirements` | `BlockSpec.requirements` | implemented |
-| `consumes` | `BlockDef.consumes` | TODO (M3) |
+| `consumes` | `BlockDef.consumes` | implemented (patch merge; JSON parse TODO) |
+| `drillMultipliers` | `BlockDef.drill_multipliers` | implemented (parse TODO; patch M3b) |
+| `attributes` | `BlockDef.attributes` (name-keyed) | implemented (patch M3b) |
 | `unit_plans*`, `upgrades`, `assembler plans` | `BlockDef` | TODO (M2/M3) |
 
 ## M2 top-level kinds
@@ -61,15 +63,29 @@ Status as of 2026-10-02 (lane/20-mods): **M1 item + block core fields implemente
 
 | Nested kind | Implemented fields | Notes |
 |---|---|---|
-| `bullet` (unit weapon) | `type` (ClassMap `BulletType`), `damage`, `speed`, `lifetime`, `hitSize`, `drawSize`, `splashDamage`, `splashDamageRadius`, `pierce`, `pierceBuilding`, `keepVelocity`, `collides`, `lightning`/`lightningLength`/`lightningLengthRand`, `status` | registered as non-mappable `BulletDef`; frag/interval/spawn bullets TODO |
-| `weapon` | `name`, `mirror`, `reload`, `x`, `y`, `alternate`, `rotate`, `shootOnDeath`, `bullet` | `WeaponDef::from_spec`; effect/draw parts TODO |
+| `bullet` (unit weapon) | `type` (ClassMap `BulletType`), `damage`, `speed`, `lifetime`, `hitSize`, `drawSize`, `width`, `height`, `length`, `splashDamage`, `splashDamageRadius`, `ammoMultiplier`, `reloadMultiplier`, `pierceCap`, `pierceDamageFactor`, `pierce`, `pierceBuilding`, `keepVelocity`, `collides`, `frontColor`/`backColor`/`colors`, `lightning`/`lightningLength`/`lightningLengthRand`, `status`, `frag`, `intervalBullet`, `spawnBullets` | registered recursively as non-mappable `BulletDef`; `spawnUnit` TODO (plan 11) |
+| `weapon` | `name`, `mirror`, `reload`, `x`, `y`, `alternate`, `rotate`, `shootOnDeath`, `shoot`, `bullet` | `WeaponDef::from_spec`; effect/draw parts TODO |
+| `shoot` | `type` (ClassMap `ShootPattern`: ShootPattern/Alternate/Spread/Helix/Barrel/Multi/Sine/Summon), `shots`, `barrels`, `barrelOffset`, `firstShotDelay`, `shotDelay`, `spread`, `scl`, `mag`, `offset`, `sineScl`, `sineMag`, `x`, `y`, `radius`, `mirror` | `ShootPatternSpec` |
+| `ability` | `type` (ClassMap `Ability`), `amount`, `max`, `reload`, `range`, `healPercent`, `sameTypeHealMult`, `smartDowntime`, `rotation`, `regen`, `cooldown`, `duration`, `orbRadius`, `particleSize`, `x`, `y`, `angle`, `width`, `chanceDeflect`, `minVelocity`, `interval`, `spread`, `percentAmount`, `particles`, `maxTargets`, `sides`, `randAmount`, `smartHeal`, `active`, `whenShooting`, `teamColor`, `color`/`effectColor`/`particleColor`, `status`, `effect`, `unit`, `liquid` | `AbilitySpec`; `ShieldArcAbility`/`SuppressionFieldAbility` aliases added |
 | `effect` | string names via `effect_by_name` (`effect`/`applyEffect`/`particleEffect`/`vaporEffect`) | inline `MultiEffect`/array forms TODO (plan 17 registry) |
-| `ability`/`draw`/`shoot` | not yet parsed | TODO (M2b; plans 11/17) |
+| `draw` | not yet parsed | TODO (M2b; plan 17) |
 
 ## ClassMap replacement (M2)
 
 `mods/json/classmap_gen.rs` (committed, **generated — do not edit**) holds
 non-block aliases; block aliases derive from `BlockKind::ALL`. `ClassTagMap::resolve`
 accepts both simple names and FQCNs (package-stripped) and enforces the scope
-(`scope_mismatch` test). Runtime `register_kind!` factories for plans 07/10/11/17
-and `mind-tools mods classmap --check` drift remain TODO.
+(`scope_mismatch` test). `mind-tools mods classmap [--check]` writes and verifies
+`parity/mod_classmap.json` (224 entries) and `ClassTagMap::audit()` guards
+duplicates/round-trip. Runtime `register_kind!` factories for plans 07/10/11/17
+remain TODO.
+
+## Patch surface (M3/M3b)
+
+`DataPatcher` supports the nine top-level kinds, `Seq`/array (`Set`/`+`/index),
+`ObjectSet` `+` (`immunities`), `ObjectFloatMap` (`drillMultipliers`), `Attributes`
+(`attributes`, name-keyed incl. custom), `consumes` merge, deep
+`weapons.<i>.bullet.<field>` edits, `targetFlags`, `unit.type`, `requiredPlanets`
+gating, `afterPatch`, `unapply` resets and `fix_content_arrays` growth.
+Remaining: reconstructor `upgrades` array model, block `drawer` parts,
+created-object `postInit/load` (client), full 28-case `PatcherTests` parity.

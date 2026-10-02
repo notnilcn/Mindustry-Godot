@@ -47,6 +47,29 @@ pub enum ClassScope {
     Team,
 }
 
+impl ClassScope {
+    /// Stable manifest name (plan 20 §6.7).
+    pub const fn name(self) -> &'static str {
+        match self {
+            ClassScope::Block => "Block",
+            ClassScope::BulletType => "BulletType",
+            ClassScope::Effect => "Effect",
+            ClassScope::Ability => "Ability",
+            ClassScope::DrawPart => "DrawPart",
+            ClassScope::ShootPattern => "ShootPattern",
+            ClassScope::UnitController => "UnitController",
+            ClassScope::UnitType => "UnitType",
+            ClassScope::Weather => "Weather",
+            ClassScope::Liquid => "Liquid",
+            ClassScope::Status => "Status",
+            ClassScope::Item => "Item",
+            ClassScope::Sector => "Sector",
+            ClassScope::Planet => "Planet",
+            ClassScope::Team => "Team",
+        }
+    }
+}
+
 /// One alias → class tag mapping.
 #[derive(Debug, Clone, Copy)]
 pub struct ClassTag {
@@ -124,9 +147,43 @@ impl ClassTagMap {
             .any(|entry| entry.alias == alias || entry.alias == short)
     }
 
+    /// Committed entries in resolution order (manifest generation/audit).
+    pub fn entries(&self) -> &[ClassTag] {
+        &self.entries
+    }
+
     /// Number of entries (test/audit helper).
     pub fn len(&self) -> usize {
         self.entries.len()
+    }
+
+    /// Validates the committed table: no duplicate `(alias, scope)` pairs and
+    /// every entry round-trips through [`Self::resolve`]. Returns one message
+    /// per issue (empty = clean); used by `mind-tools mods classmap --check`.
+    pub fn audit(&self) -> Vec<String> {
+        let mut issues = Vec::new();
+        let mut seen: std::collections::HashSet<(&str, ClassScope)> =
+            std::collections::HashSet::new();
+        for entry in &self.entries {
+            if !seen.insert((entry.alias, entry.scope)) {
+                issues.push(format!(
+                    "duplicate alias `{}` for scope {}",
+                    entry.alias,
+                    entry.scope.name()
+                ));
+            }
+            if entry.tag.is_empty() {
+                issues.push(format!("empty tag for alias `{}`", entry.alias));
+            }
+            if self.resolve(entry.alias, entry.scope) != Some(entry.tag) {
+                issues.push(format!(
+                    "alias `{}` (scope {}) does not round-trip",
+                    entry.alias,
+                    entry.scope.name()
+                ));
+            }
+        }
+        issues
     }
 
     /// Whether the table is empty.
@@ -176,6 +233,34 @@ mod tests {
         let map = ClassTagMap::committed();
         assert_eq!(map.resolve("NoSuchKind", ClassScope::Block), None);
         assert!(!map.is_known("NoSuchKind"));
+    }
+
+    #[test]
+    fn committed_table_is_consistent() {
+        let map = ClassTagMap::committed();
+        assert_eq!(map.audit(), Vec::<String>::new());
+        assert!(map.len() > 100);
+    }
+
+    #[test]
+    fn ability_shoot_and_draw_aliases() {
+        let map = ClassTagMap::committed();
+        assert_eq!(
+            map.resolve("ShieldArcAbility", ClassScope::Ability),
+            Some("ShieldArcAbility")
+        );
+        assert_eq!(
+            map.resolve("SuppressionFieldAbility", ClassScope::Ability),
+            Some("SuppressionFieldAbility")
+        );
+        assert_eq!(
+            map.resolve("ShootAlternate", ClassScope::ShootPattern),
+            Some("ShootAlternate")
+        );
+        assert_eq!(
+            map.resolve("DrawRegion", ClassScope::DrawPart),
+            Some("DrawRegion")
+        );
     }
 
     #[test]

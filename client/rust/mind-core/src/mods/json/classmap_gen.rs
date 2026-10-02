@@ -180,6 +180,12 @@ pub static ENTRIES: &[ClassTag] = &[
         ClassScope::Ability,
         "MoveEffectAbility",
     ),
+    ClassTag::new("ShieldArcAbility", ClassScope::Ability, "ShieldArcAbility"),
+    ClassTag::new(
+        "SuppressionFieldAbility",
+        ClassScope::Ability,
+        "SuppressionFieldAbility",
+    ),
     // ---- DrawPart ----
     ClassTag::new("DrawRegion", ClassScope::DrawPart, "DrawRegion"),
     ClassTag::new("DrawRegionSpin", ClassScope::DrawPart, "DrawRegionSpin"),

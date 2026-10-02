@@ -839,11 +839,20 @@ pub enum ModsCommand {
         json: bool,
     },
 
-    /// Time mod discovery + metadata + dependency resolution (plan 20 M9 §7d).
+    /// Time a mod pipeline scene (plan 20 M9 §7d).
     Bench {
-        /// Mod directory (defaults to `parity/mod_fixtures`).
+        /// Scene to time: `discover`, `parse`, `patch`, `cache`, `overlay`.
+        #[arg(long, default_value = "discover")]
+        scene: String,
+        /// Mod directory (discover; defaults to `parity/mod_fixtures`).
         #[arg(long, default_value = "parity/mod_fixtures")]
         dir: PathBuf,
+        /// Fixture name under `parity/mod_fixtures/` (parse/patch/overlay).
+        #[arg(long)]
+        fixture: Option<String>,
+        /// Repo root override (defaults to discovery from cwd).
+        #[arg(long)]
+        repo: Option<PathBuf>,
         /// Timed iterations.
         #[arg(long, default_value_t = 20)]
         runs: usize,

@@ -117,13 +117,18 @@ impl DataPatcher {
         self.after_patch_calls = 0;
 
         for patch in patches {
-            let value: Value = serde_json::from_str(&patch.json)
-                .map_err(|error| ContentError::Parse(format!("{}: {error}", patch.name)))?;
+            // `PatcherTests.gibberish`: malformed patch JSON is a per-asset
+            // warning, never fatal to the whole apply.
+            let value: Value = match serde_json::from_str(&patch.json) {
+                Ok(value) => value,
+                Err(error) => {
+                    self.warn(format!("{}: {error}", patch.name));
+                    continue;
+                }
+            };
             let Some(object) = value.as_object() else {
-                return Err(ContentError::Parse(format!(
-                    "{}: patch must be a JSON object",
-                    patch.name
-                )));
+                self.warn(format!("{}: patch must be a JSON object", patch.name));
+                continue;
             };
             if Self::planet_gated(object, registry, active_planet) {
                 continue;
@@ -307,7 +312,14 @@ impl DataPatcher {
             "requirements" => {
                 self.edit_item_requirements(registry, reference, id.raw(), mode, value)
             }
+            "plans" => self.edit_unit_plans(registry, reference, id.raw(), mode, value),
             "consumes" => self.edit_consumes(registry, reference, id, mode, value),
+            field if field == "attributes" || field.starts_with("attributes.") => {
+                self.edit_attributes(registry, reference, id.raw(), field, value)
+            }
+            field if field == "drillMultipliers" || field.starts_with("drillMultipliers.") => {
+                self.edit_drill_multipliers(registry, reference, id.raw(), field, value)
+            }
             "health" => self.set_i32(
                 registry,
                 reference,
@@ -425,6 +437,50 @@ impl DataPatcher {
         mode: FieldMode,
         value: &Value,
     ) {
+        // Object-index form (`PatcherTests.specificArrayRequirements`):
+        // `{"0": "surge-alloy/10"}` assigns by index.
+        if mode == FieldMode::Set
+            && let Value::Object(map) = value
+            && !map.is_empty()
+            && map.keys().all(|key| key.parse::<usize>().is_ok())
+        {
+            let mut edits: Vec<(usize, ItemStack)> = Vec::new();
+            for (key, entry) in map {
+                let Ok(index) = key.parse::<usize>() else {
+                    continue;
+                };
+                match self.parse_item_stacks(registry, entry) {
+                    Ok(stacks) if !stacks.is_empty() => edits.push((index, stacks[0])),
+                    Ok(_) => {}
+                    Err(message) => {
+                        self.warn(message);
+                        return;
+                    }
+                }
+            }
+            let Some(original) = registry
+                .block(BlockId::new(raw))
+                .map(|b| b.requirements.clone())
+            else {
+                return;
+            };
+            if self.mark_used(reference, "requirements") {
+                self.resetters
+                    .push(Box::new(move |r: &mut ContentRegistry| {
+                        if let Some(block) = r.block_mut(BlockId::new(raw)) {
+                            block.requirements = original;
+                        }
+                    }));
+            }
+            if let Some(block) = registry.block_mut(BlockId::new(raw)) {
+                for (index, stack) in edits {
+                    if index < block.requirements.len() {
+                        block.requirements[index] = stack;
+                    }
+                }
+            }
+            return;
+        }
         let stacks = match self.parse_item_stacks(registry, value) {
             Ok(stacks) => stacks,
             Err(message) => {
@@ -453,6 +509,98 @@ impl DataPatcher {
                 FieldMode::Index(index) => {
                     if index < block.requirements.len() {
                         block.requirements[index] = stacks[0];
+                    }
+                }
+            }
+        }
+    }
+
+    /// Edits `block.<name>.plans` (`Seq<UnitPlan>`): whole replace, `+` append
+    /// (single or array) and numeric index (`PatcherTests.unitFactoryPlans`).
+    fn edit_unit_plans(
+        &mut self,
+        registry: &mut ContentRegistry,
+        reference: ContentRef,
+        raw: u16,
+        mode: FieldMode,
+        value: &Value,
+    ) {
+        use crate::content::registries::blocks::UnitPlanDef;
+        let entries: Vec<&Map<String, Value>> = match value {
+            Value::Object(map) => vec![map],
+            Value::Array(items) => {
+                let mut out = Vec::with_capacity(items.len());
+                for item in items {
+                    match item.as_object() {
+                        Some(map) => out.push(map),
+                        None => {
+                            self.warn("plan entries must be objects");
+                            return;
+                        }
+                    }
+                }
+                out
+            }
+            _ => {
+                self.warn("`plans` must be an object or array");
+                return;
+            }
+        };
+        let mut created = Vec::with_capacity(entries.len());
+        for map in entries {
+            let Some(unit_name) = map.get("unit").and_then(Value::as_str) else {
+                self.warn("plan is missing `unit`");
+                return;
+            };
+            let Some(unit) = registry
+                .unit_id(unit_name)
+                .or_else(|| registry.unit_id(&registry.transform_name(unit_name)))
+            else {
+                self.warn(format!("unknown unit `{unit_name}`"));
+                return;
+            };
+            let requirements = match map.get("requirements") {
+                Some(value) => match self.parse_item_stacks(registry, value) {
+                    Ok(stacks) => stacks,
+                    Err(message) => {
+                        self.warn(message);
+                        return;
+                    }
+                },
+                None => Vec::new(),
+            };
+            let time = map
+                .get("time")
+                .and_then(Value::as_f64)
+                .map(|v| v as f32)
+                .unwrap_or(0.0);
+            created.push(UnitPlanDef {
+                unit,
+                time,
+                requirements,
+            });
+        }
+        let Some(original) = registry
+            .block(BlockId::new(raw))
+            .map(|b| b.unit_plans.clone())
+        else {
+            return;
+        };
+        if self.mark_used(reference, "plans") {
+            self.resetters
+                .push(Box::new(move |r: &mut ContentRegistry| {
+                    if let Some(block) = r.block_mut(BlockId::new(raw)) {
+                        block.unit_plans = original;
+                    }
+                }));
+        }
+        if let Some(block) = registry.block_mut(BlockId::new(raw)) {
+            match mode {
+                FieldMode::Set => block.unit_plans = created,
+                FieldMode::Append => block.unit_plans.extend(created),
+                FieldMode::Index(index) => {
+                    if index < block.unit_plans.len() && !created.is_empty() {
+                        block.unit_plans[index] = created.swap_remove(0);
                     }
                 }
             }
@@ -509,6 +657,126 @@ impl DataPatcher {
                     ignore: false,
                 });
                 block.has_power = true;
+            }
+        }
+    }
+
+    /// Edits `block.<name>.attributes` (`Attributes` map; plan 20 M3b). Accepts
+    /// an object form (`{oil: 99}`) and the dotted field form
+    /// (`block.grass.attributes.heat: 77`), including custom names.
+    fn edit_attributes(
+        &mut self,
+        registry: &mut ContentRegistry,
+        reference: ContentRef,
+        raw: u16,
+        field: &str,
+        value: &Value,
+    ) {
+        let Some(original) = registry
+            .block(BlockId::new(raw))
+            .map(|block| block.attributes.clone())
+        else {
+            return;
+        };
+        if self.mark_used(reference, "attributes") {
+            self.resetters
+                .push(Box::new(move |r: &mut ContentRegistry| {
+                    if let Some(block) = r.block_mut(BlockId::new(raw)) {
+                        block.attributes = original;
+                    }
+                }));
+        }
+        let mut updates: Vec<(String, f32)> = Vec::new();
+        if let Some(key) = field.strip_prefix("attributes.") {
+            if let Some(value) = value.as_f64() {
+                updates.push((key.to_owned(), value as f32));
+            }
+        } else if let Some(map) = value.as_object() {
+            for (key, entry) in map {
+                if let Some(value) = entry.as_f64() {
+                    updates.push((key.clone(), value as f32));
+                }
+            }
+        }
+        if let Some(block) = registry.block_mut(BlockId::new(raw)) {
+            for (key, value) in updates {
+                match block.attributes.iter_mut().find(|(name, _)| *name == key) {
+                    Some(entry) => entry.1 = value,
+                    None => block.attributes.push((key, value)),
+                }
+            }
+        }
+    }
+
+    /// Edits `block.<name>.drillMultipliers` (`ObjectFloatMap<Item>`; plan 20
+    /// M3b). Object and dotted forms, `"-"` removes a key.
+    fn edit_drill_multipliers(
+        &mut self,
+        registry: &mut ContentRegistry,
+        reference: ContentRef,
+        raw: u16,
+        field: &str,
+        value: &Value,
+    ) {
+        let Some(original) = registry
+            .block(BlockId::new(raw))
+            .map(|block| block.drill_multipliers.clone())
+        else {
+            return;
+        };
+        if self.mark_used(reference, "drillMultipliers") {
+            self.resetters
+                .push(Box::new(move |r: &mut ContentRegistry| {
+                    if let Some(block) = r.block_mut(BlockId::new(raw)) {
+                        block.drill_multipliers = original;
+                    }
+                }));
+        }
+        let mut updates: Vec<(ItemId, f32)> = Vec::new();
+        let mut removals: Vec<ItemId> = Vec::new();
+        let mut apply = |name: &str,
+                         value: &Value,
+                         updates: &mut Vec<(ItemId, f32)>,
+                         removals: &mut Vec<ItemId>| {
+            let Some(item) = registry
+                .item_id(name)
+                .or_else(|| registry.item_id(&registry.transform_name(name)))
+            else {
+                self.warn(format!("unknown item `{name}`"));
+                return;
+            };
+            if value.as_str() == Some("-") {
+                removals.push(item);
+            } else if let Some(value) = value.as_f64() {
+                updates.push((item, value as f32));
+            } else {
+                self.warn(format!(
+                    "drillMultipliers `{name}` must be a number or \"-\""
+                ));
+            }
+        };
+        if let Some(key) = field.strip_prefix("drillMultipliers.") {
+            apply(key, value, &mut updates, &mut removals);
+        } else if let Some(map) = value.as_object() {
+            for (key, entry) in map {
+                apply(key, entry, &mut updates, &mut removals);
+            }
+        }
+        if let Some(block) = registry.block_mut(BlockId::new(raw)) {
+            for item in removals {
+                block
+                    .drill_multipliers
+                    .retain(|(existing, _)| *existing != item);
+            }
+            for (item, value) in updates {
+                match block
+                    .drill_multipliers
+                    .iter_mut()
+                    .find(|(existing, _)| *existing == item)
+                {
+                    Some(entry) => entry.1 = value,
+                    None => block.drill_multipliers.push((item, value)),
+                }
             }
         }
     }
@@ -838,6 +1106,10 @@ impl DataPatcher {
         match field {
             "immunities" => self.edit_immunities(registry, reference, id.raw(), mode, value),
             "weapons" => self.edit_weapons(registry, reference, id.raw(), mode, value),
+            field if field.starts_with("weapons.") => {
+                self.edit_weapon_path(registry, id.raw(), field, value)
+            }
+            "abilities" => self.edit_abilities(registry, reference, id.raw(), mode, value),
             "targetFlags" => self.edit_target_flags(registry, reference, id.raw(), mode, value),
             "type" => self.edit_unit_entity(registry, reference, id.raw(), value),
             "health" => self.set_f32(
@@ -1045,6 +1317,199 @@ impl DataPatcher {
                     }
                 }
             }
+        }
+    }
+
+    /// Edits `unit.abilities` (`Seq<Ability>`): whole replace and `+` append
+    /// (single or array); `PatcherTests.unitAbilities{,Array}`.
+    fn edit_abilities(
+        &mut self,
+        registry: &mut ContentRegistry,
+        reference: ContentRef,
+        raw: u16,
+        mode: FieldMode,
+        value: &Value,
+    ) {
+        let entries: Vec<&Map<String, Value>> = match value {
+            Value::Object(map) => vec![map],
+            Value::Array(items) => {
+                let mut out = Vec::with_capacity(items.len());
+                for item in items {
+                    match item.as_object() {
+                        Some(map) => out.push(map),
+                        None => {
+                            self.warn("ability entries must be objects");
+                            return;
+                        }
+                    }
+                }
+                out
+            }
+            _ => {
+                self.warn("`abilities` must be an object or array");
+                return;
+            }
+        };
+        let Some(original) = registry
+            .unit(UnitTypeId::new(raw))
+            .map(|unit| unit.abilities.clone())
+        else {
+            return;
+        };
+        if self.mark_used(reference, "abilities") {
+            self.resetters
+                .push(Box::new(move |r: &mut ContentRegistry| {
+                    if let Some(unit) = r.unit_mut(UnitTypeId::new(raw)) {
+                        unit.abilities = original;
+                    }
+                }));
+        }
+        let mut parser = crate::mods::json::ContentJsonParser::new();
+        let mut created = Vec::with_capacity(entries.len());
+        for object in &entries {
+            match parser.parse_ability("patch", registry, object) {
+                Ok(ability) => created.push(ability),
+                Err(error) => {
+                    self.warn(error.message);
+                    return;
+                }
+            }
+        }
+        if let Some(unit) = registry.unit_mut(UnitTypeId::new(raw)) {
+            match mode {
+                FieldMode::Set => unit.abilities = created,
+                FieldMode::Append => unit.abilities.extend(created),
+                FieldMode::Index(_) => {}
+            }
+        }
+    }
+
+    /// Edits a deep weapon path (`weapons.<index>.bullet.<field>` /
+    /// `weapons.<index>.<field>`; `PatcherTests.indexAccess`). Bullet fields
+    /// resolve through the weapon's registered [`crate::content::BulletId`].
+    fn edit_weapon_path(
+        &mut self,
+        registry: &mut ContentRegistry,
+        raw: u16,
+        field: &str,
+        value: &Value,
+    ) {
+        let path = field.strip_prefix("weapons.").unwrap_or(field);
+        let Some((index, rest)) = path.split_once('.') else {
+            self.warn(format!("invalid weapon path `{field}`"));
+            return;
+        };
+        let Ok(index) = index.parse::<usize>() else {
+            self.warn(format!("invalid weapon index `{index}`"));
+            return;
+        };
+        let Some(unit) = registry.unit(UnitTypeId::new(raw)) else {
+            return;
+        };
+        let Some(weapon) = unit.weapons.get(index) else {
+            self.warn(format!("weapon index {index} out of range"));
+            return;
+        };
+        let bullet_id = weapon.bullet.id;
+        if let Some(bullet_field) = rest.strip_prefix("bullet.") {
+            self.edit_bullet_field(registry, raw, index, bullet_id, bullet_field, value);
+        } else {
+            self.warn(format!("unknown weapon field `{rest}`"));
+        }
+    }
+
+    /// Applies one bullet field edit with a reverse reset (`PatcherTests`).
+    fn edit_bullet_field(
+        &mut self,
+        registry: &mut ContentRegistry,
+        unit_raw: u16,
+        weapon_index: usize,
+        bullet: crate::content::BulletId,
+        field: &str,
+        value: &Value,
+    ) {
+        let key = || format!("weapons.{weapon_index}.bullet.{field}");
+        macro_rules! set_f32 {
+            ($f:ident) => {{
+                let Some(original) = registry.bullet(bullet).map(|b| b.$f) else {
+                    return;
+                };
+                let Some(new) = value.as_f64().map(|v| v as f32) else {
+                    return;
+                };
+                if self.mark_used(ContentRef::new(ContentType::Unit, unit_raw), &key()) {
+                    self.resetters
+                        .push(Box::new(move |r: &mut ContentRegistry| {
+                            if let Some(bullet) = r.bullet_mut(bullet) {
+                                bullet.$f = original;
+                            }
+                        }));
+                }
+                if let Some(bullet) = registry.bullet_mut(bullet) {
+                    bullet.$f = new;
+                }
+            }};
+        }
+        macro_rules! set_i32 {
+            ($f:ident) => {{
+                let Some(original) = registry.bullet(bullet).map(|b| b.$f) else {
+                    return;
+                };
+                let Some(new) = value.as_i64().map(|v| v as i32) else {
+                    return;
+                };
+                if self.mark_used(ContentRef::new(ContentType::Unit, unit_raw), &key()) {
+                    self.resetters
+                        .push(Box::new(move |r: &mut ContentRegistry| {
+                            if let Some(bullet) = r.bullet_mut(bullet) {
+                                bullet.$f = original;
+                            }
+                        }));
+                }
+                if let Some(bullet) = registry.bullet_mut(bullet) {
+                    bullet.$f = new;
+                }
+            }};
+        }
+        macro_rules! set_bool {
+            ($f:ident) => {{
+                let Some(original) = registry.bullet(bullet).map(|b| b.$f) else {
+                    return;
+                };
+                let Some(new) = value.as_bool() else {
+                    return;
+                };
+                if self.mark_used(ContentRef::new(ContentType::Unit, unit_raw), &key()) {
+                    self.resetters
+                        .push(Box::new(move |r: &mut ContentRegistry| {
+                            if let Some(bullet) = r.bullet_mut(bullet) {
+                                bullet.$f = original;
+                            }
+                        }));
+                }
+                if let Some(bullet) = registry.bullet_mut(bullet) {
+                    bullet.$f = new;
+                }
+            }};
+        }
+        match field {
+            "damage" => set_f32!(damage),
+            "speed" => set_f32!(speed),
+            "lifetime" => set_f32!(lifetime),
+            "hitSize" => set_f32!(hit_size),
+            "drawSize" => set_f32!(draw_size),
+            "splashDamage" => set_f32!(splash_damage),
+            "splashDamageRadius" => set_f32!(splash_damage_radius),
+            "ammoMultiplier" => set_f32!(ammo_multiplier),
+            "reloadMultiplier" => set_f32!(reload_multiplier),
+            "lightningLength" => set_i32!(lightning_length),
+            "lightningLengthRand" => set_i32!(lightning_length_rand),
+            "lightning" => set_i32!(lightning),
+            "pierce" => set_bool!(pierce),
+            "pierceBuilding" => set_bool!(pierce_building),
+            "keepVelocity" => set_bool!(keep_velocity),
+            "collides" => set_bool!(collides),
+            _ => self.warn(format!("unknown bullet field `{field}`")),
         }
     }
 
@@ -1440,10 +1905,30 @@ impl DataPatcher {
 /// editor tile references after patch content added new content (plan 09/19).
 ///
 /// The registry rebuilds its arrays from `arr_epoch` consumers in plans 07/09;
-/// this hook exists so M3 callers keep the upstream call site. Growth of the
-/// concrete `ItemSeq`/`ItemModule` tables lands with plans 07/09 when those
+/// this hook grows the per-item `BlockDef` arrays (`item_costs`/
+/// `item_health_scaling`) so newly added items have dense entries. Growth of
+/// runtime `ItemSeq`/`ItemModule` tables lands with plans 07/09 when those
 /// arrays exist in the port.
-pub fn fix_content_arrays(_registry: &mut ContentRegistry) {}
+pub fn fix_content_arrays(registry: &mut ContentRegistry) {
+    let item_count = registry.items().len();
+    if item_count == 0 {
+        return;
+    }
+    let costs: Vec<f32> = registry.items().iter().map(|item| item.cost).collect();
+    let scaling: Vec<f32> = registry
+        .items()
+        .iter()
+        .map(|item| item.health_scaling)
+        .collect();
+    for block in registry.blocks_mut() {
+        if block.item_costs.len() < item_count {
+            block.item_costs = costs.clone();
+        }
+        if block.item_health_scaling.len() < item_count {
+            block.item_health_scaling = scaling.clone();
+        }
+    }
+}
 
 /// `Mods.loadModPatches`: applies each enabled mod's `patches/**.json` with a
 /// fresh [`DataPatcher`] (so mods never reset each other), files sorted.
@@ -1869,5 +2354,311 @@ mod tests {
         assert_eq!(registry.block(id).expect("block").health, 4242);
         patcher.unapply(&mut registry);
         assert_eq!(registry.block(id).expect("block").health, original);
+    }
+
+    /// PatcherTests.objectFloatMap: `ObjectFloatMap<Item>` edits (object form,
+    /// nested-object form, dotted key) with reset.
+    #[test]
+    fn object_float_map_edit() {
+        let mut registry = test_registry();
+        let id = registry.block_id("mechanical-drill").expect("drill");
+        let titanium = registry.item_id("titanium").expect("titanium");
+        let copper = registry.item_id("copper").expect("copper");
+        let surge = registry.item_id("surge-alloy").expect("surge-alloy");
+        let original = registry.block(id).expect("block").drill_multipliers.clone();
+        let mut patcher = DataPatcher::new();
+        patcher
+            .apply(
+                &mut registry,
+                &[patch(
+                    r#"{
+                        "block.mechanical-drill.drillMultipliers": {"titanium": 2.0},
+                        "block.mechanical-drill": {"drillMultipliers": {"copper": 3.0}},
+                        "block.mechanical-drill.drillMultipliers.surge-alloy": 10
+                    }"#,
+                )],
+            )
+            .expect("drill multipliers");
+        let block = registry.block(id).expect("block");
+        let get = |item| {
+            block
+                .drill_multipliers
+                .iter()
+                .find(|(existing, _)| *existing == item)
+                .map(|(_, value)| *value)
+        };
+        assert_eq!(get(titanium), Some(2.0));
+        assert_eq!(get(copper), Some(3.0));
+        assert_eq!(get(surge), Some(10.0));
+        assert!(patcher.warnings().is_empty(), "{:?}", patcher.warnings());
+        patcher.unapply(&mut registry);
+        assert_eq!(
+            registry.block(id).expect("block").drill_multipliers,
+            original
+        );
+    }
+
+    /// PatcherTests.attributes: `Attributes` object + dotted-key edits with reset.
+    #[test]
+    fn attributes_edit() {
+        let mut registry = test_registry();
+        let id = registry.block_id("grass").expect("grass");
+        let original = registry.block(id).expect("block").attributes.clone();
+        let mut patcher = DataPatcher::new();
+        patcher
+            .apply(
+                &mut registry,
+                &[patch(
+                    r#"{"block.grass.attributes": {"oil": 99}, "block.grass.attributes.heat": 77}"#,
+                )],
+            )
+            .expect("attributes");
+        let block = registry.block(id).expect("block");
+        let get = |name: &str| {
+            block
+                .attributes
+                .iter()
+                .find(|(key, _)| key == name)
+                .map(|(_, value)| *value)
+        };
+        assert_eq!(get("oil"), Some(99.0));
+        assert_eq!(get("heat"), Some(77.0));
+        assert!(patcher.warnings().is_empty(), "{:?}", patcher.warnings());
+        patcher.unapply(&mut registry);
+        assert_eq!(registry.block(id).expect("block").attributes, original);
+    }
+
+    /// PatcherTests.customAttribute: a custom attribute name is added and removed
+    /// by reset (the dynamic `Attribute` registry itself is plan 02/06).
+    #[test]
+    fn custom_attribute_add_remove() {
+        let mut registry = test_registry();
+        let id = registry.block_id("grass").expect("grass");
+        let original = registry.block(id).expect("block").attributes.clone();
+        let mut patcher = DataPatcher::new();
+        patcher
+            .apply(
+                &mut registry,
+                &[patch(r#"{"block.grass.attributes": {"frogs": 10}}"#)],
+            )
+            .expect("custom attribute");
+        assert!(
+            registry
+                .block(id)
+                .expect("block")
+                .attributes
+                .iter()
+                .any(|(key, value)| key == "frogs" && (*value - 10.0).abs() < 1e-6)
+        );
+        patcher.unapply(&mut registry);
+        assert_eq!(registry.block(id).expect("block").attributes, original);
+    }
+
+    /// PatcherTests.indexAccess: `weapons.0.bullet.damage` deep field edit + reset.
+    #[test]
+    fn weapon_index_field_edit() {
+        let mut registry = test_registry();
+        let id = registry.unit_id("dagger").expect("dagger");
+        let weapon_bullet = registry
+            .unit(id)
+            .expect("unit")
+            .weapons
+            .first()
+            .expect("weapon")
+            .bullet
+            .id;
+        let original = registry.bullet(weapon_bullet).expect("bullet").damage;
+        let mut patcher = DataPatcher::new();
+        patcher
+            .apply(
+                &mut registry,
+                &[patch(r#"{"unit.dagger.weapons.0.bullet.damage": 100}"#)],
+            )
+            .expect("deep bullet edit");
+        assert_eq!(
+            registry.bullet(weapon_bullet).expect("bullet").damage,
+            100.0
+        );
+        patcher.unapply(&mut registry);
+        assert_eq!(
+            registry.bullet(weapon_bullet).expect("bullet").damage,
+            original
+        );
+    }
+
+    /// PatcherTests.unitAbilities: single `+` ability with reset.
+    #[test]
+    fn unit_abilities_single() {
+        let mut registry = test_registry();
+        let id = registry.unit_id("dagger").expect("dagger");
+        let original = registry.unit(id).expect("unit").abilities.clone();
+        let mut patcher = DataPatcher::new();
+        patcher
+            .apply(
+                &mut registry,
+                &[patch(
+                    r#"{"unit.dagger.abilities.+": {"type":"ShieldArcAbility","max":1000}}"#,
+                )],
+            )
+            .expect("append ability");
+        assert!(patcher.warnings().is_empty(), "{:?}", patcher.warnings());
+        let abilities = registry.unit(id).expect("unit").abilities.clone();
+        assert_eq!(abilities.len(), original.len() + 1);
+        let added = abilities.last().expect("ability");
+        assert_eq!(added.kind.name(), "ShieldArcAbility");
+        assert_eq!(added.max, 1000.0);
+        patcher.unapply(&mut registry);
+        assert_eq!(registry.unit(id).expect("unit").abilities, original);
+    }
+
+    /// PatcherTests.unitAbilitiesArray: `+` with an array of abilities.
+    #[test]
+    fn unit_abilities_array() {
+        let mut registry = test_registry();
+        let id = registry.unit_id("dagger").expect("dagger");
+        let original = registry.unit(id).expect("unit").abilities.clone();
+        let mut patcher = DataPatcher::new();
+        patcher
+            .apply(
+                &mut registry,
+                &[patch(
+                    r#"{"unit.dagger.abilities.+": [
+                        {"type":"ShieldArcAbility","max":1000},
+                        {"type":"MoveEffectAbility","amount":10}
+                    ]}"#,
+                )],
+            )
+            .expect("append abilities");
+        assert!(patcher.warnings().is_empty(), "{:?}", patcher.warnings());
+        let abilities = registry.unit(id).expect("unit").abilities.clone();
+        assert_eq!(abilities.len(), original.len() + 2);
+        assert_eq!(
+            abilities[abilities.len() - 2].kind.name(),
+            "ShieldArcAbility"
+        );
+        assert_eq!(
+            abilities[abilities.len() - 1].kind.name(),
+            "MoveEffectAbility"
+        );
+        patcher.unapply(&mut registry);
+        assert_eq!(registry.unit(id).expect("unit").abilities, original);
+    }
+
+    /// PatcherTests.unitFactoryPlans (flat): `block.ground-factory.plans.+`.
+    #[test]
+    fn unit_factory_plans_flat() {
+        let mut registry = test_registry();
+        let id = registry.block_id("ground-factory").expect("ground-factory");
+        let flare = registry.unit_id("flare").expect("flare");
+        let surge = registry.item_id("surge-alloy").expect("surge-alloy");
+        let original = registry.block(id).expect("block").unit_plans.clone();
+        let mut patcher = DataPatcher::new();
+        patcher
+            .apply(
+                &mut registry,
+                &[patch(
+                    r#"{"block.ground-factory.plans.+":{"unit":"flare","requirements":["surge-alloy/10"],"time":100}}"#,
+                )],
+            )
+            .expect("add plan");
+        assert!(patcher.warnings().is_empty(), "{:?}", patcher.warnings());
+        let plan = registry
+            .block(id)
+            .expect("block")
+            .unit_plans
+            .last()
+            .expect("plan");
+        assert_eq!(plan.unit, flare);
+        assert_eq!(plan.time, 100.0);
+        assert_eq!(plan.requirements.len(), 1);
+        assert_eq!(plan.requirements[0].item, surge);
+        assert_eq!(plan.requirements[0].amount, 10);
+        patcher.unapply(&mut registry);
+        assert_eq!(registry.block(id).expect("block").unit_plans, original);
+    }
+
+    /// PatcherTests.unitFactoryPlans (nested): `block.{ground-factory:{plans.+}}`.
+    #[test]
+    fn unit_factory_plans_nested() {
+        let mut registry = test_registry();
+        let id = registry.block_id("ground-factory").expect("ground-factory");
+        let original = registry.block(id).expect("block").unit_plans.clone();
+        let mut patcher = DataPatcher::new();
+        patcher
+            .apply(
+                &mut registry,
+                &[patch(
+                    r#"{"block":{"ground-factory":{"plans.+":{"unit":"flare","requirements":["surge-alloy/10"],"time":100}}}}"#,
+                )],
+            )
+            .expect("add plan");
+        assert!(patcher.warnings().is_empty(), "{:?}", patcher.warnings());
+        assert_eq!(
+            registry.block(id).expect("block").unit_plans.len(),
+            original.len() + 1
+        );
+        patcher.unapply(&mut registry);
+        assert_eq!(registry.block(id).expect("block").unit_plans, original);
+    }
+
+    /// PatcherTests.specificArrayRequirements (object-index form).
+    #[test]
+    fn array_requirements_object_index() {
+        let mut registry = test_registry();
+        let id = registry.block_id("scatter").expect("scatter");
+        let original = registry.block(id).expect("block").requirements.clone();
+        let mut patcher = DataPatcher::new();
+        patcher
+            .apply(
+                &mut registry,
+                &[patch(
+                    r#"{"block.scatter.requirements":{"0":"titanium/99"}}"#,
+                )],
+            )
+            .expect("index edit");
+        assert!(patcher.warnings().is_empty(), "{:?}", patcher.warnings());
+        assert_eq!(
+            registry.block(id).expect("block").requirements[0].amount,
+            99
+        );
+        assert_eq!(
+            registry.block(id).expect("block").requirements[1],
+            original[1]
+        );
+        patcher.unapply(&mut registry);
+        assert_eq!(registry.block(id).expect("block").requirements, original);
+    }
+
+    /// PatcherTests.gibberish: malformed JSON warns, never panics.
+    #[test]
+    fn malformed_patch_warns() {
+        let mut registry = test_registry();
+        let mut patcher = DataPatcher::new();
+        patcher
+            .apply(&mut registry, &[patch("}[35209509()jfkjhadsf,\n,,,,[][]{")])
+            .expect("no panic");
+        assert_eq!(patcher.warnings().len(), 1);
+    }
+
+    /// PatcherTests.unitTypeObject: `{"unit.dagger": {"type": "legs"}}` form.
+    #[test]
+    fn unit_type_object_syntax() {
+        let mut registry = test_registry();
+        let id = registry.unit_id("dagger").expect("dagger");
+        let original = registry.unit(id).expect("unit").entity_def;
+        let mut patcher = DataPatcher::new();
+        patcher
+            .apply(
+                &mut registry,
+                &[patch(r#"{"unit.dagger": {"type": "legs"}}"#)],
+            )
+            .expect("object syntax");
+        assert!(patcher.warnings().is_empty(), "{:?}", patcher.warnings());
+        assert_eq!(
+            registry.unit(id).expect("unit").entity_def,
+            crate::mods::json::resolve_entity_def("legs").expect("legs")
+        );
+        patcher.unapply(&mut registry);
+        assert_eq!(registry.unit(id).expect("unit").entity_def, original);
     }
 }

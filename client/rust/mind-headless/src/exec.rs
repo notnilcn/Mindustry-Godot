@@ -297,7 +297,21 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
                 probe,
                 json,
             } => cmd_mods_overlay(fixture, repo.as_deref(), probe, *json),
-            ModsCommand::Bench { dir, runs, json } => cmd_mods_bench(dir, *runs, *json),
+            ModsCommand::Bench {
+                scene,
+                dir,
+                fixture,
+                repo,
+                runs,
+                json,
+            } => cmd_mods_bench(
+                scene,
+                dir,
+                fixture.as_deref(),
+                repo.as_deref(),
+                *runs,
+                *json,
+            ),
             ModsCommand::Patch {
                 fixture,
                 repo,
@@ -1788,49 +1802,188 @@ fn cmd_mods_assets(fixture: &str, repo: Option<&Path>, json: bool) -> anyhow::Re
     Ok(EXIT_PASS)
 }
 
-/// Plan 20 M9 (`mods bench`): discovery + metadata + dependency timing.
-fn cmd_mods_bench(dir: &Path, runs: usize, json: bool) -> anyhow::Result<i32> {
-    use mind_core::io::SettingsStore;
-    use mind_core::io::fs::NativeFs;
-    use mind_core::mods::Mods;
-
+/// Plan 20 M9 (`mods bench`): times one pipeline scene (§7d).
+fn cmd_mods_bench(
+    scene: &str,
+    dir: &Path,
+    fixture: Option<&str>,
+    repo: Option<&Path>,
+    runs: usize,
+    json: bool,
+) -> anyhow::Result<i32> {
     if runs == 0 {
         return Err(anyhow!("mods bench --runs must be greater than 0"));
     }
-    let dir = if dir.is_absolute() {
-        dir.to_path_buf()
-    } else {
-        paths::find_repo_root(None)?.join(dir)
-    };
-    let fs = NativeFs;
-    let settings = SettingsStore::new();
     let mut samples = Vec::with_capacity(runs);
-    let mut mod_count = 0;
-    for _ in 0..runs {
-        let mut mods = Mods::new(true, &dir);
-        let start = Instant::now();
-        let report = mods
-            .load(&fs, &dir, &settings)
-            .with_context(|| format!("loading mods from `{}`", dir.display()))?;
-        samples.push(start.elapsed().as_nanos() as u64);
-        mod_count = report.mods.len();
+    let mut detail = serde_json::Map::new();
+
+    match scene {
+        "discover" => {
+            use mind_core::io::SettingsStore;
+            use mind_core::io::fs::NativeFs;
+            use mind_core::mods::Mods;
+            let dir = if dir.is_absolute() {
+                dir.to_path_buf()
+            } else {
+                paths::find_repo_root(None)?.join(dir)
+            };
+            let fs = NativeFs;
+            let settings = SettingsStore::new();
+            let mut mod_count = 0;
+            for _ in 0..runs {
+                let mut mods = Mods::new(true, &dir);
+                let start = Instant::now();
+                let report = mods
+                    .load(&fs, &dir, &settings)
+                    .with_context(|| format!("loading mods from `{}`", dir.display()))?;
+                samples.push(start.elapsed().as_nanos() as u64);
+                mod_count = report.mods.len();
+            }
+            detail.insert("mods".into(), serde_json::json!(mod_count));
+        }
+        "parse" => {
+            use mind_core::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+            use mind_core::io::SettingsStore;
+            use mind_core::io::fs::NativeFs;
+            use mind_core::mods::{Mods, provider::ModsContentProvider};
+            let root = paths::find_repo_root(repo)?;
+            let fixture = fixture.ok_or_else(|| anyhow!("bench parse needs --fixture"))?;
+            let dir = root.join("parity/mod_fixtures").join(fixture);
+            let fs = NativeFs;
+            let mut mods = Mods::new(true, &dir);
+            mods.load_single(&fs, &dir, &SettingsStore::new())
+                .with_context(|| format!("loading fixture `{fixture}`"))?;
+            let files = mods.collect_content_files(&fs);
+            let file_count = files.len();
+            for _ in 0..runs {
+                let mut provider = ModsContentProvider::new(files.clone());
+                let bundle = MemoryBundle::new();
+                let store = MemoryUnlockStore::new();
+                let mut registry = create_base_content(&bundle, &store, true)
+                    .map_err(|error| anyhow!("base content: {error}"))?;
+                registry.init().map_err(|error| anyhow!("init: {error}"))?;
+                let start = Instant::now();
+                let parsed = registry.create_mod_content(&mut provider);
+                samples.push(start.elapsed().as_nanos() as u64);
+                if let Err(errors) = parsed {
+                    return Err(anyhow!("mod content errors: {errors:?}"));
+                }
+            }
+            detail.insert("files".into(), serde_json::json!(file_count));
+        }
+        "patch" => {
+            use mind_core::content::parser_hooks::PatchAsset;
+            use mind_core::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+            use mind_core::io::FileSystem;
+            use mind_core::io::fs::NativeFs;
+            use mind_core::mods::Mods;
+            use mind_core::mods::patch::DataPatcher;
+            let root = paths::find_repo_root(repo)?;
+            let fixture = fixture.ok_or_else(|| anyhow!("bench patch needs --fixture"))?;
+            let dir = root.join("parity/mod_fixtures").join(fixture);
+            let fs = NativeFs;
+            let mut mods = Mods::new(true, &dir);
+            mods.load_single(&fs, &dir, &mind_core::io::SettingsStore::new())
+                .with_context(|| format!("loading fixture `{fixture}`"))?;
+            let patch_dir = dir.join("patches");
+            let mut patches = Vec::new();
+            if let Ok(files) = fs.walk(&patch_dir) {
+                let mut files: Vec<_> = files
+                    .into_iter()
+                    .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+                    .collect();
+                files.sort();
+                for file in files {
+                    let text = String::from_utf8(fs.read(&file)?)
+                        .map_err(|_| anyhow!("`{}` is not UTF-8", file.display()))?;
+                    patches.push(PatchAsset {
+                        name: file.display().to_string(),
+                        json: text,
+                    });
+                }
+            }
+            let patch_count = patches.len();
+            for _ in 0..runs {
+                let bundle = MemoryBundle::new();
+                let store = MemoryUnlockStore::new();
+                let mut registry = create_base_content(&bundle, &store, true)
+                    .map_err(|error| anyhow!("base content: {error}"))?;
+                registry.init().map_err(|error| anyhow!("init: {error}"))?;
+                let start = Instant::now();
+                let mut patcher = DataPatcher::new();
+                patcher
+                    .apply(&mut registry, &patches)
+                    .map_err(|error| anyhow!("apply: {error}"))?;
+                patcher.unapply(&mut registry);
+                samples.push(start.elapsed().as_nanos() as u64);
+            }
+            detail.insert("patches".into(), serde_json::json!(patch_count));
+        }
+        "cache" => {
+            use mind_core::io::MockFs;
+            use mind_core::mods::assets::DataAssetCache;
+            let fs = MockFs::new();
+            let mut cache = DataAssetCache::load("/cache");
+            let payload = vec![0xABu8; 1024 * 1024];
+            for _ in 0..runs {
+                let start = Instant::now();
+                cache
+                    .add(&fs, &payload)
+                    .map_err(|e| anyhow!("cache add: {e}"))?;
+                samples.push(start.elapsed().as_nanos() as u64);
+            }
+            detail.insert("bytes".into(), serde_json::json!(payload.len()));
+        }
+        "overlay" => {
+            use mind_core::assets::atlas::AtlasIndex;
+            use mind_core::assets::overlay::AssetOverlayProvider;
+            use mind_core::io::SettingsStore;
+            use mind_core::io::fs::NativeFs;
+            use mind_core::mods::Mods;
+            let root = paths::find_repo_root(repo)?;
+            let fixture = fixture.ok_or_else(|| anyhow!("bench overlay needs --fixture"))?;
+            let dir = root.join("parity/mod_fixtures").join(fixture);
+            let fs = NativeFs;
+            let mut mods = Mods::new(true, &dir);
+            mods.load_single(&fs, &dir, &SettingsStore::new())
+                .with_context(|| format!("loading fixture `{fixture}`"))?;
+            let atlas = std::fs::read_to_string(root.join("assets/sprites/sprites.atlas.json"))
+                .ok()
+                .and_then(|text| AtlasIndex::from_manifest_json(&text).ok());
+            let atlas_has = |name: &str| atlas.as_ref().is_some_and(|i| i.find(name).is_some());
+            for _ in 0..runs {
+                let start = Instant::now();
+                let overlay = mods.build_overlay(&fs, &atlas_has);
+                samples.push(start.elapsed().as_nanos() as u64);
+                detail.insert("sprites".into(), serde_json::json!(overlay.sprites().len()));
+            }
+        }
+        other => {
+            return Err(anyhow!(
+                "unknown mods bench scene `{other}` (discover/parse/patch/cache/overlay)"
+            ));
+        }
     }
+
     samples.sort_unstable();
     let p50 = samples[samples.len() / 2];
     let p99 = samples[samples.len() - 1];
-    let report = serde_json::json!({
-        "scene": "discover",
-        "dir": dir.display().to_string(),
+    let mut report = serde_json::json!({
+        "scene": scene,
         "runs": runs,
-        "mods": mod_count,
         "p50_us": p50.div_ceil(1_000),
         "p99_us": p99.div_ceil(1_000),
     });
+    if let Some(object) = report.as_object_mut() {
+        for (key, value) in detail {
+            object.insert(key, value);
+        }
+    }
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
         println!(
-            "mods bench discover: {mod_count} mods, p50 {}us, p99 {}us over {runs} runs",
+            "mods bench {scene}: p50 {}us, p99 {}us over {runs} runs",
             p50.div_ceil(1_000),
             p99.div_ceil(1_000)
         );

@@ -55,6 +55,14 @@ impl SaveVersion for SaveV1 {
         for (key, value) in &w.ctx.tags {
             tags.insert(key.clone(), value.clone());
         }
+        // `SaveVersion.writeDataPatches`: the meta tag reflects the patch set's
+        // external assets (plan 20 §6.8).
+        if let Some(patches) = w.ctx.patches {
+            tags.insert(
+                "hasExternalAssets".to_owned(),
+                patches.has_external_assets().to_string(),
+            );
+        }
         w.write_region(REGION_META, |wire, _scratch| wire.string_map(&tags))?;
 
         let patches = w.ctx.patches;
@@ -145,7 +153,8 @@ impl SaveVersion for SaveV1 {
                 REGION_PATCHES => {
                     let expected = r.payload().len();
                     let mut wire = r.wire();
-                    read_data_patches(&mut wire).map_err(|e| IoError::region_read(&name, e))?;
+                    read_data_patches(&mut wire, state)
+                        .map_err(|e| IoError::region_read(&name, e))?;
                     require_consumed(&name, expected, wire.pos())?;
                 }
                 REGION_CONTENT => {
@@ -251,9 +260,10 @@ fn read_rules(state: &mut SaveReadState) -> Result<(), IoError> {
     Ok(())
 }
 
-/// `SaveVersion.readDataPatches` (stub): reads the header; patch entries are
-/// plan 20 payloads, tolerated + skipped for now.
-fn read_data_patches(wire: &mut WireReader) -> Result<(), IoError> {
+/// `SaveVersion.readDataPatches`: reads the `i32` format version + count, then
+/// decodes the plan-20 asset records into [`SaveReadState::patches`] (the
+/// caller feeds them to `DataAssets::load`; §6.8).
+fn read_data_patches(wire: &mut WireReader, state: &mut SaveReadState) -> Result<(), IoError> {
     let _format_version = wire.i()?; // ignored upstream too
     let total = wire.i()?;
     if total < 0 {
@@ -261,10 +271,11 @@ fn read_data_patches(wire: &mut WireReader) -> Result<(), IoError> {
             "invalid data patch count: {total}"
         )));
     }
-    if total > 0 {
-        log::warn!("skipping {total} data patch(es): patch payloads are plan 20");
-        wire.skip_to_end();
+    if total == 0 {
+        return Ok(());
     }
+    let assets = crate::mods::assets::read_asset_records(wire, total as usize)?;
+    state.patches = Some(assets);
     Ok(())
 }
 
@@ -811,6 +822,40 @@ mod tests {
         // The temporary mapper is installed and maps vanilla IDs to themselves.
         let mapped = registry2.get_by_id(ContentType::Block, 5).unwrap();
         assert_eq!(mapped.id, 5);
+    }
+
+    #[test]
+    fn patches_region_roundtrip_plan20_assets() {
+        use crate::mods::assets::{DataAsset, DataAssetType, DataAssets, ModDataManager};
+        let mut manager = ModDataManager::new();
+        manager.push(DataAsset::patch(
+            "patches/a.json",
+            "{\"block.router.health\": 7}".to_owned(),
+        ));
+        manager.push(DataAsset::bundle("bundles/bundle.properties", "key=value"));
+        manager.push(DataAsset::blob(
+            "sprites/external.png",
+            DataAssetType::Image,
+            vec![1, 2, 3, 4],
+            false,
+        ));
+        assert_eq!(manager.all_external_assets().len(), 2);
+
+        let tags = base_meta_tags(0, 0, 0, "empty");
+        let mut ctx = WriteContext::meta_only(tags);
+        ctx.patches = Some(&manager);
+        let bytes = SaveIo::write_to_vec(&ctx, &SaveOptions::new()).unwrap();
+
+        let meta = SaveIo::get_meta_bytes(&bytes).unwrap();
+        assert_eq!(meta.tags.get("hasExternalAssets").unwrap(), "true");
+
+        let mut state = SaveReadState::default();
+        SaveIo::load_bytes(&bytes, &mut state).unwrap();
+        let decoded = state.patches.expect("patches decoded");
+        assert_eq!(decoded.len(), 3);
+        assert_eq!(decoded[0].path, "patches/a.json");
+        assert_eq!(decoded[1].path, "bundles/bundle.properties");
+        assert_eq!(decoded[2].path, "sprites/external.png");
     }
 
     #[test]

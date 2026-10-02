@@ -109,6 +109,31 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+
+    /// Mod tooling (plan 20): `ClassMap` replacement manifest + drift gate.
+    Mods {
+        /// Subcommand to run.
+        #[command(subcommand)]
+        command: ModsCommand,
+    },
+}
+
+/// `mind-tools mods` actions (plan 20 §3.5/§6.7).
+#[derive(Debug, Subcommand)]
+enum ModsCommand {
+    /// Regenerate or verify `parity/mod_classmap.json` against the committed
+    /// alias table (`--check` fails on drift or an inconsistent table).
+    Classmap {
+        /// Repo root (defaults to the current directory).
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        /// Compare against the committed manifest instead of writing it.
+        #[arg(long)]
+        check: bool,
+        /// Emit the manifest on stdout.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// `mind-tools icons` actions.
@@ -226,7 +251,66 @@ fn dispatch(command: &Command) -> anyhow::Result<()> {
             }
         },
         Command::Determinism { root, runs, json } => run_determinism(root, *runs, *json),
+        Command::Mods { command } => match command {
+            ModsCommand::Classmap { root, check, json } => run_mods_classmap(root, *check, *json),
+        },
     }
+}
+
+/// Plan 20 §3.5/§6.7: writes (or `--check`s) the committed `ClassMap`
+/// replacement manifest and validates the alias table.
+fn run_mods_classmap(root: &std::path::Path, check: bool, json: bool) -> anyhow::Result<()> {
+    use mind_core::mods::json::classmap::ClassTagMap;
+
+    let map = ClassTagMap::committed();
+    let issues = map.audit();
+    let mut entries: Vec<_> = map.entries().iter().collect();
+    entries.sort_by(|a, b| (a.scope.name(), a.alias).cmp(&(b.scope.name(), b.alias)));
+    let classes: Vec<serde_json::Value> = entries
+        .iter()
+        .map(|entry| {
+            serde_json::json!({
+                "alias": entry.alias,
+                "scope": entry.scope.name(),
+                "tag": entry.tag,
+            })
+        })
+        .collect();
+    let manifest = serde_json::json!({ "format": 1, "classes": classes });
+    let text = format!("{}\n", serde_json::to_string_pretty(&manifest)?);
+    let path = root.join("parity/mod_classmap.json");
+
+    if check {
+        let existing = std::fs::read_to_string(&path)
+            .with_context(|| format!("reading {}", path.display()))?;
+        if existing != text {
+            anyhow::bail!(
+                "parity/mod_classmap.json is out of date (run `mind-tools mods classmap`)"
+            );
+        }
+        if !issues.is_empty() {
+            for issue in &issues {
+                eprintln!("mods classmap: {issue}");
+            }
+            anyhow::bail!("{} ClassMap issue(s)", issues.len());
+        }
+        if json {
+            println!("{}", serde_json::to_string_pretty(&manifest)?);
+        } else {
+            println!("mods classmap check: {} entries, 0 issues", map.len());
+        }
+    } else {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&path, &text).with_context(|| format!("writing {}", path.display()))?;
+        if json {
+            print!("{text}");
+        } else {
+            println!("mods classmap: {} entries -> {}", map.len(), path.display());
+        }
+    }
+    Ok(())
 }
 
 /// Runs the full pack `runs` times and asserts the output manifest is
