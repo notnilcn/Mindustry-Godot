@@ -15,6 +15,8 @@ pub mod conveyor;
 pub mod direction_bridge;
 pub mod duct;
 pub mod duct_bridge;
+pub mod duct_junction;
+pub mod duct_router;
 pub mod item_bridge;
 pub mod junction;
 pub mod overflow_duct;
@@ -22,6 +24,7 @@ pub mod overflow_gate;
 pub mod router;
 pub mod sorter;
 pub mod stack_conveyor;
+pub mod stack_router;
 pub mod transfer;
 
 use std::sync::Arc;
@@ -35,6 +38,8 @@ pub use conveyor::{CAPACITY as CONVEYOR_CAPACITY, ConveyorBehavior, ConveyorBuil
 pub use direction_bridge::{DirectionBridgeBuild, find_link as direction_find_link};
 pub use duct::{DuctBehavior, DuctBuild};
 pub use duct_bridge::{DuctBridgeBehavior, DuctBridgeBuild};
+pub use duct_junction::{DuctJunctionBehavior, DuctJunctionBuild};
+pub use duct_router::{DuctRouterBehavior, DuctRouterBuild};
 pub use item_bridge::{ItemBridgeBehavior, ItemBridgeBuild};
 pub use junction::{JunctionBehavior, JunctionBuild};
 pub use overflow_duct::{OverflowDuctBehavior, OverflowDuctBuild};
@@ -42,6 +47,7 @@ pub use overflow_gate::OverflowGateBehavior;
 pub use router::{RouterBehavior, RouterBuild};
 pub use sorter::{SorterBehavior, SorterBuild};
 pub use stack_conveyor::{StackConveyorBehavior, StackConveyorBuild};
+pub use stack_router::{StackRouterBehavior, StackRouterBuild};
 
 /// Registers every item-distribution behavior available at this milestone.
 pub fn register(registry: &mut BehaviorRegistry, _content: &ContentRegistry) {
@@ -56,6 +62,9 @@ pub fn register(registry: &mut BehaviorRegistry, _content: &ContentRegistry) {
     );
     registry.register_named("surge-conveyor", Arc::new(StackConveyorBehavior::SURGE));
     registry.register_named("junction", Arc::new(JunctionBehavior::VANILLA));
+    registry.register_named("duct-router", Arc::new(DuctRouterBehavior::VANILLA));
+    registry.register_named("surge-router", Arc::new(StackRouterBehavior::SURGE));
+    registry.register_named("duct-junction", Arc::new(DuctJunctionBehavior::VANILLA));
     registry.register_named("router", Arc::new(RouterBehavior::VANILLA));
     registry.register_named("distributor", Arc::new(RouterBehavior::VANILLA));
     registry.register_named("sorter", Arc::new(SorterBehavior::NORMAL));
