@@ -6,10 +6,12 @@
 //! Plan 05 did not land a `math/` module, so `noise` is hosted here (the plan's
 //! additive-file intent); generators import `crate::math::noise`.
 
+pub mod interp;
 pub mod noise;
 pub mod rand_arc;
 pub mod ridged;
 pub mod windowed_mean;
 
+pub use interp::{Interp, curve, curve_offset, slope};
 pub use rand_arc::ArcRand;
 pub use windowed_mean::WindowedMean;

@@ -1,0 +1,1540 @@
+{
+  "format": 1,
+  "ticks": 120,
+  "spawned": 3,
+  "dropped": 0,
+  "frames": [
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 0.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "hitBulletSmall",
+          "time": 0.0,
+          "lifetime": 14.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 1.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "hitBulletSmall",
+          "time": 1.0,
+          "lifetime": 14.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 2.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "hitBulletSmall",
+          "time": 2.0,
+          "lifetime": 14.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 3.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "hitBulletSmall",
+          "time": 3.0,
+          "lifetime": 14.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 4.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "hitBulletSmall",
+          "time": 4.0,
+          "lifetime": 14.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 5.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "hitBulletSmall",
+          "time": 5.0,
+          "lifetime": 14.0
+        },
+        {
+          "name": "smoke",
+          "time": 1.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 6.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "hitBulletSmall",
+          "time": 6.0,
+          "lifetime": 14.0
+        },
+        {
+          "name": "smoke",
+          "time": 2.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 7.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "hitBulletSmall",
+          "time": 7.0,
+          "lifetime": 14.0
+        },
+        {
+          "name": "smoke",
+          "time": 3.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 8.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "hitBulletSmall",
+          "time": 8.0,
+          "lifetime": 14.0
+        },
+        {
+          "name": "smoke",
+          "time": 4.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 9.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "hitBulletSmall",
+          "time": 9.0,
+          "lifetime": 14.0
+        },
+        {
+          "name": "smoke",
+          "time": 5.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 10.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "hitBulletSmall",
+          "time": 10.0,
+          "lifetime": 14.0
+        },
+        {
+          "name": "smoke",
+          "time": 6.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 11.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "hitBulletSmall",
+          "time": 11.0,
+          "lifetime": 14.0
+        },
+        {
+          "name": "smoke",
+          "time": 7.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 12.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "hitBulletSmall",
+          "time": 12.0,
+          "lifetime": 14.0
+        },
+        {
+          "name": "smoke",
+          "time": 8.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 13.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "hitBulletSmall",
+          "time": 13.0,
+          "lifetime": 14.0
+        },
+        {
+          "name": "smoke",
+          "time": 9.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 14.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 10.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 15.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 11.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 16.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 12.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 17.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 13.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 18.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 14.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 19.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 15.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 20.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 16.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 21.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 17.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 22.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 18.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 23.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 19.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 24.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 20.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 25.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 21.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 26.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 22.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 27.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 23.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 28.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 24.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 29.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 25.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 30.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 26.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 31.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 27.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 32.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 28.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 33.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 29.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 34.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 30.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 35.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 31.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 36.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 32.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 37.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 33.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 38.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 34.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 39.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 35.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 40.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 36.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 41.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 37.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 42.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 38.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 43.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 39.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 44.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 40.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 45.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 41.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 46.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 42.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 47.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 43.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 48.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 44.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 49.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 45.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 50.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 46.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 51.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 47.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 52.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 48.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 53.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 49.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 54.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 50.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 55.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 51.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 56.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 52.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 57.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 53.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 58.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 54.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 59.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 55.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 60.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 56.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 61.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 57.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 62.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 58.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 63.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 59.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 64.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 60.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 65.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 61.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 66.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 62.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 67.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 63.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 68.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 64.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 69.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 65.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 70.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 66.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 71.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 67.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 72.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 68.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 73.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 69.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 74.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 70.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 75.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 71.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 76.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 72.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 77.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 73.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 78.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 74.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 79.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 75.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 80.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 76.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 81.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 77.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 82.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 78.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 83.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 79.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 84.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 80.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 85.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 81.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 86.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 82.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 87.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 83.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 88.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 84.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 89.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 85.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 90.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 86.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 91.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 87.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 92.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 88.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 93.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 89.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 94.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 90.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 95.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 91.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 96.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 92.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 97.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 93.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 98.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 94.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 99.0,
+          "lifetime": 100.0
+        },
+        {
+          "name": "smoke",
+          "time": 95.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 96.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 97.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 98.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": [
+        {
+          "name": "smoke",
+          "time": 99.0,
+          "lifetime": 100.0
+        }
+      ]
+    },
+    {
+      "live": []
+    },
+    {
+      "live": []
+    },
+    {
+      "live": []
+    },
+    {
+      "live": []
+    },
+    {
+      "live": []
+    },
+    {
+      "live": []
+    },
+    {
+      "live": []
+    },
+    {
+      "live": []
+    },
+    {
+      "live": []
+    },
+    {
+      "live": []
+    },
+    {
+      "live": []
+    },
+    {
+      "live": []
+    },
+    {
+      "live": []
+    },
+    {
+      "live": []
+    },
+    {
+      "live": []
+    },
+    {
+      "live": []
+    },
+    {
+      "live": []
+    }
+  ]
+}

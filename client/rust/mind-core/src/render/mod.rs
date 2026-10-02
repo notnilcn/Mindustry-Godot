@@ -15,6 +15,7 @@ pub mod block_cache;
 pub mod bloom;
 pub mod commands;
 pub mod cutscene;
+pub mod draw;
 pub mod draw_meta;
 pub mod drawf;
 pub mod env;
@@ -45,6 +46,10 @@ pub use block_cache::BuildingCacheGrid;
 pub use bloom::{capture_z as bloom_capture_z, render_z as bloom_render_z};
 pub use commands::{Blend, CommandBuffer, DrawCmd, FillKind, LineKind, ShapeKind};
 pub use cutscene::{Cutscene, LaunchAnimator};
+pub use draw::{
+    Blending, DrawPrim, DrawProgram, GPUPARTICLES_THRESHOLD, MAX_DRAW_CALLS_TARGET,
+    MULTIMESH_THRESHOLD, PrimKind, RegionKey, ShaderKey, TextureKey,
+};
 pub use draw_meta::BlockDrawMeta;
 pub use drawf::{lerp as lerp_color, pal, to_bits, with_alpha};
 pub use env::{
