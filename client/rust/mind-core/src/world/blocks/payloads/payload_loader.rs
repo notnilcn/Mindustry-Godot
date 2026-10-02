@@ -202,10 +202,11 @@ pub fn loader_update(world: &mut World, e: Entity, behavior: &PayloadLoaderBehav
             }
         }
     }
-    if !accepted_any && !world.get::<ItemModule>(e).is_some_and(|m| m.any()) {
-        if let Some(mut state) = world.get_mut::<PayloadLoaderBuild>(e) {
-            state.exporting = true;
-        }
+    if !accepted_any
+        && !world.get::<ItemModule>(e).is_some_and(|m| m.any())
+        && let Some(mut state) = world.get_mut::<PayloadLoaderBuild>(e)
+    {
+        state.exporting = true;
     }
 }
 

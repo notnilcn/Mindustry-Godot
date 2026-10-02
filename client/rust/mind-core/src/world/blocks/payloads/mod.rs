@@ -330,14 +330,12 @@ pub fn payload_destroyed(world: &mut World, payload: PayloadRef) {
     if let Some(block) = world
         .get::<crate::entities::comp::Building>(entity)
         .map(|b| b.block)
-    {
-        if let Some(inst) = world
+        && let Some(inst) = world
             .get_resource::<crate::world::block::BlockTable>()
             .and_then(|table| table.instance(block))
-        {
-            inst.behavior.on_destroyed(world, entity);
-            inst.behavior.after_destroyed(world, entity);
-        }
+    {
+        inst.behavior.on_destroyed(world, entity);
+        inst.behavior.after_destroyed(world, entity);
     }
     world.entity_mut(entity).despawn();
 }

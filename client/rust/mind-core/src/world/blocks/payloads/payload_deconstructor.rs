@@ -294,11 +294,7 @@ impl BuildingBehavior for PayloadDeconstructorBehavior {
             state.accum.push(r.f().unwrap_or(0.0));
         }
         state.deconstructing = None;
-        if world.get::<PayloadDeconstructorBuild>(e).is_none() {
-            world.entity_mut(e).insert(state);
-        } else {
-            world.entity_mut(e).insert(state);
-        }
+        world.entity_mut(e).insert(state);
     }
 }
 

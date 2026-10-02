@@ -189,8 +189,10 @@ impl BuildingBehavior for PayloadRouterBehavior {
     fn create_state(&self, world: &mut World, e: Entity) {
         self.conveyor.create_state(world, e);
         if world.get::<PayloadRouterBuild>(e).is_none() {
-            let mut state = PayloadRouterBuild::default();
-            state.rec_dir = world.get::<Building>(e).map(|b| b.rotation).unwrap_or(0);
+            let state = PayloadRouterBuild {
+                rec_dir: world.get::<Building>(e).map(|b| b.rotation).unwrap_or(0),
+                ..Default::default()
+            };
             world.entity_mut(e).insert(state);
         }
     }
@@ -224,10 +226,10 @@ impl BuildingBehavior for PayloadRouterBehavior {
             crate::world::blocks::distribution::transfer::relative_dir(world, e, source)
                 .rem_euclid(4) as u8
         };
-        if let Some(mut state) = world.get_mut::<PayloadRouterBuild>(e) {
-            if state.control_time < 0.0 {
-                state.rec_dir = rec_dir;
-            }
+        if let Some(mut state) = world.get_mut::<PayloadRouterBuild>(e)
+            && state.control_time < 0.0
+        {
+            state.rec_dir = rec_dir;
         }
         self.check_match(world, e);
         self.pick_next(world, e);

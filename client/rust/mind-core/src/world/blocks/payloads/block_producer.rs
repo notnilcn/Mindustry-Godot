@@ -100,9 +100,7 @@ pub fn producer_tick(world: &mut World, e: Entity, build_speed: f32) -> Option<P
     let occupied = world
         .get::<PayloadHolder>(e)
         .is_some_and(|h| h.payload.is_some());
-    let Some(recipe) = recipe else {
-        return None;
-    };
+    let recipe = recipe?;
     let produce = efficiency > 0.0 && !occupied;
 
     if produce {

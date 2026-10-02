@@ -358,12 +358,12 @@ impl BuildingBehavior for PayloadMassDriverBehavior {
                 .get::<PayloadHolder>(target)
                 .is_some_and(|h| h.payload.is_some());
             let current = self.current_shooter(world, e);
-            if !target_has_payload && current.is_none() {
-                if let Some(mut other) = world.get_mut::<PayloadDriverBuild>(target)
-                    && !other.waiting_shooters.contains(&e)
-                {
-                    other.waiting_shooters.push(e);
-                }
+            if !target_has_payload
+                && current.is_none()
+                && let Some(mut other) = world.get_mut::<PayloadDriverBuild>(target)
+                && !other.waiting_shooters.contains(&e)
+            {
+                other.waiting_shooters.push(e);
             }
             if build.reload_counter <= 0.0 {
                 build.turret_rotation = move_toward(

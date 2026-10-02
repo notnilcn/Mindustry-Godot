@@ -126,11 +126,11 @@ impl BuildingBehavior for ConstructorBehavior {
             _ => return,
         };
         let previous = world.get::<BlockProducerBuild>(e).and_then(|s| s.recipe);
-        if previous != recipe {
-            if let Some(mut state) = world.get_mut::<BlockProducerBuild>(e) {
-                state.recipe = recipe;
-                state.progress = 0.0;
-            }
+        if previous != recipe
+            && let Some(mut state) = world.get_mut::<BlockProducerBuild>(e)
+        {
+            state.recipe = recipe;
+            state.progress = 0.0;
         }
     }
 
