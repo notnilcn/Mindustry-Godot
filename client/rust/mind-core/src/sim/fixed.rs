@@ -36,6 +36,19 @@ impl FixedStepRunner {
         }
     }
 
+    /// Creates a runner matching a `SimConfig` (`Logic.maxDeltaClient = 4`).
+    pub fn for_rate(hz: u32, max_catchup: u32) -> Self {
+        Self {
+            accumulator: 0.0,
+            step: if hz == 0 {
+                SIM_STEP
+            } else {
+                1.0 / f64::from(hz)
+            },
+            max_catchup: max_catchup.max(1),
+        }
+    }
+
     /// Adds `frame_dt` seconds and returns how many sim steps to run now.
     ///
     /// Non-finite/negative deltas are ignored; the backlog is capped at

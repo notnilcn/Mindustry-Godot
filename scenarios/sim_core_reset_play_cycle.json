@@ -1,0 +1,9 @@
+{
+  "format": 1,
+  "name": "sim_core_reset_play_cycle",
+  "seed": 3,
+  "world": { "generator": "flat", "width": 32, "height": 32, "floor": "stone", "wall": "air" },
+  "rules": { "waves": false, "infinite_resources": true },
+  "commands": [],
+  "steps": 120
+}

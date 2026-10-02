@@ -55,13 +55,16 @@ pub struct MindSimHost {
 #[godot_api]
 impl INode for MindSimHost {
     fn init(base: Base<Node>) -> Self {
+        // Default spine world: 32x32 flat, seed 1, `stone-wall` selected
+        // (matches `scenarios/spine_place_break.json` aside from commands).
+        let sim = Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR);
+        let runner =
+            FixedStepRunner::for_rate(sim.config().fixed_hz, sim.config().max_ticks_per_frame);
         Self {
             base,
-            // Default spine world: 32x32 flat, seed 1, `stone-wall` selected
-            // (matches `scenarios/spine_place_break.json` aside from commands).
-            sim: Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR),
+            sim,
             player: None,
-            runner: FixedStepRunner::new(),
+            runner,
             capture: None,
             world_dirty: false,
             content_snapshot: None,
@@ -288,17 +291,146 @@ impl MindSimHost {
         self.sim.tick_count() as i64
     }
 
+    /// Monotonic update counter (`GameState.updateId`).
+    #[func]
+    pub fn get_update_id(&self) -> i64 {
+        self.sim.update_id() as i64
+    }
+
+    /// Phase name (`menu` / `playing` / `paused`).
+    #[func]
+    pub fn get_state(&self) -> GString {
+        GString::from(self.sim.state_name())
+    }
+
+    /// Live per-group entity counts for the inspector (plan 05 M9).
+    #[func]
+    pub fn get_group_counts(&self) -> Dictionary<GString, i64> {
+        let mut out = Dictionary::<GString, i64>::new();
+        for (name, count) in self.sim.group_counts() {
+            out.set(&GString::from(name), count as i64);
+        }
+        out
+    }
+
+    /// One group count by name (`0` when the group is unknown).
+    #[func]
+    pub fn get_group_count(&self, name: GString) -> i64 {
+        let requested = name.to_string();
+        self.sim
+            .group_counts()
+            .get(requested.as_str())
+            .copied()
+            .unwrap_or(0) as i64
+    }
+
     /// Whether the fixed-step pump is halted.
     #[func]
     pub fn is_paused(&self) -> bool {
         self.sim.is_paused()
     }
 
+    // ---- IoSet seam (plan 05 M9 / plan 04 §3.10; MindIo wiring placeholder) ----
+    //
+    // The orchestrator wires the plan-04 `MindIo` autoload to these funcs and
+    // satisfies requests at the tick boundary. Copy-pasteable MCP evals (do NOT
+    // launch the editor from this lane; the single-editor mutex is orchestrator-
+    // owned):
+    //
+    //   godot_exec eval: "var h=Engine.get_main_loop().current_scene.get_node('/root/Spine/SimHost'); print('MCP_TICK=',h.get_tick(),' STATE=',h.get_state(),' UP=',h.get_update_id())"
+    //   godot_exec eval: "print('MCP_GROUPS=',Engine.get_main_loop().current_scene.get_node('/root/Spine/SimHost').get_group_counts())"
+    //   godot_exec eval: "Engine.get_main_loop().current_scene.get_node('/root/Spine/SimHost').request_save('user://mcp.msav', false); print('MCP_PENDING=',Engine.get_main_loop().current_scene.get_node('/root/Spine/SimHost').io_pending())"
+    //   godot_exec eval: "print('MCP_REQ=',Engine.get_main_loop().current_scene.get_node('/root/Spine/SimHost').take_io_requests_json())"
+
+    /// Queues a save at the next `IoSet::Capture` boundary.
+    #[func]
+    pub fn request_save(&mut self, path: GString, as_map: bool) {
+        self.sim.request_save(path.to_string(), as_map);
+    }
+
+    /// Queues a load at the next `IoSet::Apply` boundary.
+    #[func]
+    pub fn request_load(&mut self, path: GString) {
+        self.sim.request_load(path.to_string());
+    }
+
+    /// Number of queued IO requests.
+    #[func]
+    pub fn io_pending(&self) -> i64 {
+        self.sim.io_pending() as i64
+    }
+
+    /// Drains queued IO requests as JSON (`[{kind,path,as_map?}]`) for `MindIo`.
+    #[func]
+    pub fn take_io_requests_json(&mut self) -> GString {
+        let value: Vec<serde_json::Value> = self
+            .sim
+            .take_io_requests()
+            .iter()
+            .map(|request| match request {
+                mind_core::sim::IoRequest::Save { path, as_map } => serde_json::json!({
+                    "kind": "save",
+                    "path": path.display().to_string(),
+                    "as_map": as_map,
+                }),
+                mind_core::sim::IoRequest::Load { path } => serde_json::json!({
+                    "kind": "load",
+                    "path": path.display().to_string(),
+                }),
+            })
+            .collect();
+        GString::from(
+            serde_json::to_string(&value)
+                .unwrap_or_else(|_| String::from("[]"))
+                .as_str(),
+        )
+    }
+
+    /// Delivers a `MindIo` result as JSON (`{kind,path,as_map?,error?}`).
+    #[func]
+    pub fn deliver_io_response_json(&mut self, json: GString) -> bool {
+        let text = json.to_string();
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+            log::warn!("deliver_io_response_json: invalid JSON");
+            return false;
+        };
+        let kind = value.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+        let path = value.get("path").and_then(|v| v.as_str()).unwrap_or("");
+        if path.is_empty() {
+            log::warn!("deliver_io_response_json: missing path");
+            return false;
+        }
+        let request = match kind {
+            "save" => mind_core::sim::IoRequest::Save {
+                path: path.into(),
+                as_map: value
+                    .get("as_map")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+            },
+            "load" => mind_core::sim::IoRequest::Load { path: path.into() },
+            other => {
+                log::warn!("deliver_io_response_json: unknown kind `{other}`");
+                return false;
+            }
+        };
+        let status = match value.get("error").and_then(|v| v.as_str()) {
+            Some(error) => mind_core::sim::IoStatus::Failed(error.to_owned()),
+            None => mind_core::sim::IoStatus::Ok,
+        };
+        self.sim
+            .deliver_io_response(mind_core::sim::IoResponse { request, status });
+        true
+    }
+
     /// Pauses/resumes the fixed-step pump (resets the accumulator).
     #[func]
     pub fn set_paused(&mut self, paused: bool) {
         self.sim.set_paused(paused);
-        self.runner = FixedStepRunner::new();
+        self.runner = FixedStepRunner::for_rate(
+            self.sim.config().fixed_hz,
+            self.sim.config().max_ticks_per_frame,
+        );
         self.emit_state();
     }
 
@@ -348,9 +480,10 @@ impl MindSimHost {
             player.total_steps(),
             scenario.seed
         );
+        self.runner =
+            FixedStepRunner::for_rate(sim.config().fixed_hz, sim.config().max_ticks_per_frame);
         self.sim = sim;
         self.player = Some(player);
-        self.runner = FixedStepRunner::new();
         self.world_dirty = true;
         self.emit_state();
         self.emit_world_changed();
