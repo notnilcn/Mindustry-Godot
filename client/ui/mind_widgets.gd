@@ -57,13 +57,6 @@ static func image(region_name: String) -> TextureRect:
 	return result
 
 
-static func check(text_value: String = "") -> CheckBox:
-	var result := CheckBox.new()
-	result.text = text_value
-	result.theme_type_variation = "defaultCheck"
-	return result
-
-
 static func field(placeholder: String = "") -> LineEdit:
 	var result := LineEdit.new()
 	result.placeholder_text = placeholder
