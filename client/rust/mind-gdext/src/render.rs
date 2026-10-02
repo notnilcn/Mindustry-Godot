@@ -27,9 +27,11 @@ use crate::sim_host::MindSimHost;
 mod atlas_bind;
 mod blocks;
 mod floor;
+mod shaders;
 
 pub use blocks::BlockRenderer;
 pub use floor::FloorRenderer;
+pub use shaders::ShaderRegistry;
 
 /// Per-frame render counters exposed through `MindRender.get_render_stats()`.
 #[derive(Debug, Default, Clone)]
@@ -52,6 +54,10 @@ pub struct RenderStats {
     pub dynamic_sprites: i64,
     /// Regions that fell back to `error`/placeholder this frame.
     pub missing_regions: i64,
+    /// Shaders loaded by the `ShaderRegistry` (plan 16 M8).
+    pub shaders_loaded: i64,
+    /// Missing-shader neutral substitutions (plan 16 M8).
+    pub shader_substitutions: i64,
     /// Last frame build time in microseconds.
     pub build_us: i64,
     /// Current sim tick (updated by the facade).
@@ -80,6 +86,11 @@ impl RenderStats {
         dict.set(&key("mesh_rebuilds"), &self.mesh_rebuilds.to_variant());
         dict.set(&key("dynamic_sprites"), &self.dynamic_sprites.to_variant());
         dict.set(&key("missing_regions"), &self.missing_regions.to_variant());
+        dict.set(&key("shaders_loaded"), &self.shaders_loaded.to_variant());
+        dict.set(
+            &key("shader_substitutions"),
+            &self.shader_substitutions.to_variant(),
+        );
         dict.set(&key("build_us"), &self.build_us.to_variant());
         dict.set(&key("tick"), &self.tick.to_variant());
         let mut trace = PackedStringArray::new();
@@ -106,6 +117,7 @@ pub struct MindWorldRenderer {
     visibility_dirty: bool,
     floor: Option<FloorRenderer>,
     blocks: Option<BlockRenderer>,
+    shaders: ShaderRegistry,
 }
 
 #[godot_api]
@@ -123,6 +135,7 @@ impl INode2D for MindWorldRenderer {
             visibility_dirty: false,
             floor: None,
             blocks: None,
+            shaders: ShaderRegistry::new(),
         }
     }
 
@@ -194,6 +207,18 @@ impl MindWorldRenderer {
         if assets.is_none() {
             log::warn!("MindWorldRenderer: no MindAssets autoload; atlas disabled");
         }
+        let assets_dir = assets
+            .as_ref()
+            .map(|assets| assets.bind().assets_dir().to_string());
+        let manifest_loaded = self.shaders.load(assets_dir.as_deref());
+        self.stats.shaders_loaded = self.shaders.loaded() as i64;
+        self.stats.shader_substitutions = self.shaders.substitutions();
+        log::info!(
+            "[render] shaders loaded={} substitutions={} manifest={}",
+            self.stats.shaders_loaded,
+            self.stats.shader_substitutions,
+            manifest_loaded
+        );
         let band_nodes = self.floor_band_nodes();
         self.floor = Some(FloorRenderer::new(host.clone(), assets.clone(), band_nodes));
         if let Some(block_band) = self.band_node_at(BandKey::base(Layer::Block)) {
@@ -336,6 +361,30 @@ impl MindWorldRenderer {
         self.stats.to_dict()
     }
 
+    /// Shader registry status (plan 16 M8 oracle).
+    #[func]
+    pub fn shader_status(&self) -> VarDictionary {
+        let mut dict = VarDictionary::new();
+        dict.set(
+            &GString::from("manifest_loaded"),
+            &self.shaders.manifest_loaded().to_variant(),
+        );
+        dict.set(
+            &GString::from("loaded"),
+            &(self.shaders.loaded() as i64).to_variant(),
+        );
+        dict.set(
+            &GString::from("substitutions"),
+            &self.shaders.substitutions().to_variant(),
+        );
+        let mut missing = PackedStringArray::new();
+        for name in self.shaders.missing() {
+            missing.push(&GString::from(name));
+        }
+        dict.set(&GString::from("missing"), &missing.to_variant());
+        dict
+    }
+
     /// Forces a full chunk rebuild; returns the number of rebuilt chunks.
     #[func]
     pub fn rebuild_chunks(&mut self) -> i64 {
@@ -410,6 +459,14 @@ impl MindRender {
         self.renderer()
             .map(|renderer| renderer.bind().layer_visible(name))
             .unwrap_or(true)
+    }
+
+    /// Shader registry status (plan 16 M8).
+    #[func]
+    pub fn shader_status(&mut self) -> VarDictionary {
+        self.renderer()
+            .map(|renderer| renderer.bind().shader_status())
+            .unwrap_or_default()
     }
 
     /// Pins the camera at tile `(x, y)` with `zoom`.

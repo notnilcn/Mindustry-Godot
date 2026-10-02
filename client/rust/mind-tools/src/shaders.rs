@@ -3,13 +3,14 @@
 // `core/src/mindustry/graphics/Shaders.java` (asset-facing parts) and
 // `tools/build.gradle` (shader asset copy). Plan 03 §3.7 / §6.7.
 
-//! Shader asset preparation and drift check (plan 03 M4).
+//! Shader asset preparation and drift check (plan 03 M4 + plan 16 M8).
 
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use mind_core::render::shaders::{self, Uniforms};
 use serde::{Deserialize, Serialize};
 
 /// One shader manifest entry (§6.7).
@@ -23,7 +24,7 @@ pub struct ShaderEntry {
     /// Upstream GLSL vertex source, when present.
     #[serde(rename = "glslVert", skip_serializing_if = "Option::is_none", default)]
     pub glsl_vert: Option<String>,
-    /// Expected ported Godot shader path.
+    /// Generated ported Godot shader path.
     pub gdshader: String,
     /// Uniform names declared by the upstream GLSL (non-sampler).
     #[serde(default)]
@@ -44,59 +45,28 @@ pub struct ShaderIndex {
     pub shaders: Vec<ShaderEntry>,
 }
 
-/// Result of `shaders check`.
+/// Result of `shaders check` (plan 03 forward + plan 16 M8 reverse).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ShaderCheckReport {
     /// Shaders with a ported `.gdshader`.
     pub ported: usize,
-    /// Shaders without a ported `.gdshader` yet.
+    /// Required shaders without a ported `.gdshader`.
     pub unported: Vec<String>,
-    /// `(shader, upstream-only uniform/texture)` pairs.
+    /// Upstream-disabled shaders intentionally not ported (`shockwave`).
+    pub unported_ok: Vec<String>,
+    /// `(shader, upstream-only uniform/texture)` pairs (forward drift).
     pub drift: Vec<String>,
+    /// `(shader, ported-only uniform/texture)` pairs (reverse drift, M8).
+    pub reverse_drift: Vec<String>,
 }
 
-/// Parsed uniform declarations.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Uniforms {
-    /// Non-sampler uniform names.
-    pub uniforms: Vec<String>,
-    /// Sampler uniform names.
-    pub textures: Vec<String>,
-}
-
-/// Parses GLSL uniform declarations (`uniform <type> <name>[;|=]`, comments
-/// stripped, samplers collected separately).
-pub fn parse_uniforms(source: &str) -> Uniforms {
-    let mut result = Uniforms::default();
-    for raw in source.lines() {
-        let line = raw.split("//").next().unwrap_or("").trim();
-        if !line.starts_with("uniform") {
-            continue;
-        }
-        let rest = line.trim_start_matches("uniform").trim();
-        let mut parts = rest.split_whitespace();
-        let Some(kind) = parts.next() else { continue };
-        let Some(name) = parts.next() else { continue };
-        let name = name
-            .trim_end_matches(';')
-            .split(['[', '=', ','])
-            .next()
-            .unwrap_or(name)
-            .trim();
-        if name.is_empty() {
-            continue;
-        }
-        if kind.starts_with("sampler") {
-            result.textures.push(name.to_owned());
-        } else {
-            result.uniforms.push(name.to_owned());
-        }
+impl ShaderCheckReport {
+    /// Whether the report is clean (no required-unported, no drift).
+    pub fn is_clean(&self, reverse: bool) -> bool {
+        self.unported.is_empty()
+            && self.drift.is_empty()
+            && (!reverse || self.reverse_drift.is_empty())
     }
-    result.uniforms.sort();
-    result.uniforms.dedup();
-    result.textures.sort();
-    result.textures.dedup();
-    result
 }
 
 /// Builds the shader index over `assets/shaders` and copies any ported
@@ -140,7 +110,7 @@ pub fn build(root: &Path) -> Result<ShaderIndex> {
             .replace('\\', "/");
         let source =
             fs::read_to_string(&file).with_context(|| format!("reading {}", file.display()))?;
-        let uniforms = parse_uniforms(&source);
+        let uniforms = shaders::parse_uniforms(&source);
         let is_vert = file.extension().is_some_and(|ext| ext == "vert");
         let entry = entries.entry(stem.clone()).or_insert_with(|| ShaderEntry {
             name: stem.clone(),
@@ -181,7 +151,12 @@ pub fn build(root: &Path) -> Result<ShaderIndex> {
 }
 
 /// Reads `shader.index.json` and checks every ported shader for uniform drift.
-pub fn check(root: &Path) -> Result<ShaderCheckReport> {
+///
+/// The forward direction (plan 03) asserts every upstream uniform/texture is
+/// declared by the ported `.gdshader`. When `reverse` is set (plan 16 M8), the
+/// reverse direction additionally flags `.gdshader` uniforms with no upstream
+/// counterpart (typos/leftovers the `apply()` equivalent never feeds).
+pub fn check(root: &Path, reverse: bool) -> Result<ShaderCheckReport> {
     let path = root.join("assets/shaders/shader.index.json");
     let text = fs::read_to_string(&path).with_context(|| {
         format!(
@@ -193,7 +168,16 @@ pub fn check(root: &Path) -> Result<ShaderCheckReport> {
         serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
 
     let mut report = ShaderCheckReport::default();
+    let mut seen: Vec<&str> = Vec::new();
     for shader in &index.shaders {
+        seen.push(shader.name.as_str());
+        if !shaders::requires_port(&shader.name) {
+            // Upstream-disabled (e.g. `shockwave`): must not be ported.
+            if !root.join("assets").join(&shader.gdshader).is_file() {
+                report.unported_ok.push(shader.name.clone());
+            }
+            continue;
+        }
         let godot_path = root.join("assets").join(&shader.gdshader);
         if !godot_path.is_file() {
             report.unported.push(shader.name.clone());
@@ -202,15 +186,32 @@ pub fn check(root: &Path) -> Result<ShaderCheckReport> {
         report.ported += 1;
         let source = fs::read_to_string(&godot_path)
             .with_context(|| format!("reading {}", godot_path.display()))?;
-        let ported = parse_uniforms(&source);
-        for name in shader.uniforms.iter().chain(shader.textures.iter()) {
-            if !ported.uniforms.contains(name) && !ported.textures.contains(name) {
+        let upstream = Uniforms {
+            uniforms: shader.uniforms.clone(),
+            textures: shader.textures.clone(),
+        };
+        let ported = shaders::parse_uniforms(&source);
+        for name in shaders::forward_drift(&upstream, &ported) {
+            report
+                .drift
+                .push(format!("{}: {name} (upstream-only)", shader.name));
+        }
+        if reverse {
+            for name in shaders::reverse_drift(&upstream, &ported) {
                 report
-                    .drift
-                    .push(format!("{}: {name} (upstream-only)", shader.name));
+                    .reverse_drift
+                    .push(format!("{}: {name} (ported-only)", shader.name));
             }
         }
     }
+    // Every plan-16 registry key must exist in the index.
+    for entry in shaders::EXPECTED {
+        if !seen.contains(&entry.name) {
+            report.unported.push(entry.name.to_owned());
+        }
+    }
+    report.unported.sort();
+    report.unported.dedup();
     Ok(report)
 }
 
@@ -265,7 +266,7 @@ mod tests {
             uniform sampler2D u_texture;
             uniform samplerCube noise;
         "#;
-        let parsed = parse_uniforms(source);
+        let parsed = shaders::parse_uniforms(source);
         assert_eq!(parsed.uniforms, vec!["u_proj", "u_time"]);
         assert_eq!(parsed.textures, vec!["noise", "u_texture"]);
     }

@@ -21,6 +21,7 @@ pub mod list;
 pub mod lod;
 pub mod queue;
 pub mod scan;
+pub mod shaders;
 
 pub use bands::{BandEntry, BandKey, BandPlan};
 pub use block_cache::BuildingCacheGrid;
@@ -39,3 +40,4 @@ pub use scan::{
     CameraView, ChunkSet, ProcessBlocksOut, ScanError, VisibleBlock, floor_layers_in_view,
     process_blocks, visible_blocks,
 };
+pub use shaders::{ExpectedShader, ShaderStage, Uniforms};
