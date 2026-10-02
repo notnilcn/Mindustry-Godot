@@ -258,6 +258,95 @@ fn scenario(name: &str, json: bool) -> Result<()> {
                 bail!("scenario {name} failed");
             }
         }
+        "logistics_router_fairness" => {
+            let copper = harness
+                .content()
+                .item_id("copper")
+                .ok_or_else(|| anyhow::anyhow!("copper item missing"))?;
+            harness.register_behavior(
+                "item-source",
+                std::sync::Arc::new(mind_core::world::fixtures::logistics::SourceBehavior {
+                    item: copper,
+                    per_tick: 1,
+                }),
+            );
+            let source = block(&harness, "item-source")?;
+            let belt = block(&harness, "conveyor")?;
+            let router = block(&harness, "router")?;
+            let container = block(&harness, "container")?;
+            let _ = harness.place(5, 2, source, 1, true);
+            let _ = harness.place(5, 3, belt, 1, true);
+            let _ = harness.place(5, 4, router, 0, true);
+            let _ = harness.place(3, 3, container, 0, true);
+            let _ = harness.place(6, 3, container, 0, true);
+            let _ = harness.place(5, 5, container, 0, true);
+            for _ in 0..300 {
+                harness.tick();
+            }
+            let counts: Vec<i32> = [(3, 3), (6, 3), (5, 5)]
+                .iter()
+                .map(|(x, y)| {
+                    harness
+                        .build_at(*x, *y)
+                        .and_then(|e| harness.world.get::<mind_core::world::ItemModule>(e))
+                        .map(|items| items.total)
+                        .unwrap_or(0)
+                })
+                .collect();
+            let pass = counts.iter().all(|count| *count > 0);
+            let report = serde_json::json!({
+                "scenario": name,
+                "pass": pass,
+                "outputs": counts,
+                "checksum": mind_core::world::fixtures::logistics::logistics_checksum(&harness.world).to_hex(),
+            });
+            print_json(&report, json, !json);
+            if !pass {
+                bail!("scenario {name} failed");
+            }
+        }
+        "logistics_bridge_latency" => {
+            let copper = harness
+                .content()
+                .item_id("copper")
+                .ok_or_else(|| anyhow::anyhow!("copper item missing"))?;
+            harness.register_behavior(
+                "item-source",
+                std::sync::Arc::new(mind_core::world::fixtures::logistics::SourceBehavior {
+                    item: copper,
+                    per_tick: 1,
+                }),
+            );
+            let source = block(&harness, "item-source")?;
+            let bridge = block(&harness, "bridge-conveyor")?;
+            let belt = block(&harness, "conveyor")?;
+            let container = block(&harness, "container")?;
+            let _ = harness.place(4, 4, source, 0, true);
+            let _ = harness.place(5, 4, bridge, 0, true);
+            let _ = harness.place(8, 4, bridge, 0, true);
+            let _ = harness.place(9, 4, belt, 0, true);
+            let _ = harness.place(10, 4, container, 0, true);
+            let _ = harness.configure(5, 4, ConfigValue::Point2(3, 0));
+            for _ in 0..900 {
+                harness.tick();
+            }
+            let delivered = harness
+                .build_at(10, 4)
+                .and_then(|e| harness.world.get::<mind_core::world::ItemModule>(e))
+                .map(|items| items.total)
+                .unwrap_or(0);
+            let pass = delivered > 0;
+            let report = serde_json::json!({
+                "scenario": name,
+                "pass": pass,
+                "delivered": delivered,
+                "checksum": mind_core::world::fixtures::logistics::logistics_checksum(&harness.world).to_hex(),
+            });
+            print_json(&report, json, !json);
+            if !pass {
+                bail!("scenario {name} failed");
+            }
+        }
         "proximity_multiblock" => {
             let wall = block(&harness, "copper-wall")?;
             let _ = harness.place(4, 4, wall, 0, true);

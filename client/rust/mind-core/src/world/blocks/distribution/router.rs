@@ -244,9 +244,11 @@ mod tests {
             }),
         );
         let source = harness.content().block_id("item-source").expect("source");
+        let belt = harness.content().block_id("conveyor").expect("conveyor");
         let router = harness.content().block_id("router").expect("router");
         let container = harness.content().block_id("container").expect("container");
-        assert!(harness.place(5, 3, source, 1, true));
+        assert!(harness.place(5, 2, source, 1, true));
+        assert!(harness.place(5, 3, belt, 1, true));
         assert!(harness.place(5, 4, router, 0, true));
         // 2x2 containers whose footprints touch the router's left/right/up tiles.
         assert!(harness.place(3, 3, container, 0, true));
@@ -265,8 +267,10 @@ mod tests {
                     .unwrap_or(0)
             })
             .collect();
+        let max = counts.iter().copied().max().unwrap_or(0);
+        let min = counts.iter().copied().min().unwrap_or(0);
         assert!(
-            counts.iter().all(|count| *count > 0),
+            counts.iter().all(|count| *count > 0) && max - min <= 2,
             "router outputs: {counts:?}"
         );
     }

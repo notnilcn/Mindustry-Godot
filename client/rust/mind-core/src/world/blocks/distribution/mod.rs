@@ -9,9 +9,13 @@
 //! [`crate::world::blocks::autotiler`] and the 47-slice table is
 //! [`crate::world::blocks::tile_bitmask`] (both consumed by plan 09).
 
+pub mod buffered_item_bridge;
 pub mod chained_building;
 pub mod conveyor;
+pub mod direction_bridge;
 pub mod duct;
+pub mod duct_bridge;
+pub mod item_bridge;
 pub mod junction;
 pub mod overflow_duct;
 pub mod overflow_gate;
@@ -25,9 +29,13 @@ use std::sync::Arc;
 use crate::content::ContentRegistry;
 use crate::world::behavior::BehaviorRegistry;
 
+pub use buffered_item_bridge::{BufferedItemBridgeBehavior, BufferedItemBridgeBuild};
 pub use chained_building::ChainedBuilding;
 pub use conveyor::{CAPACITY as CONVEYOR_CAPACITY, ConveyorBehavior, ConveyorBuild};
+pub use direction_bridge::{DirectionBridgeBuild, find_link as direction_find_link};
 pub use duct::{DuctBehavior, DuctBuild};
+pub use duct_bridge::{DuctBridgeBehavior, DuctBridgeBuild};
+pub use item_bridge::{ItemBridgeBehavior, ItemBridgeBuild};
 pub use junction::{JunctionBehavior, JunctionBuild};
 pub use overflow_duct::{OverflowDuctBehavior, OverflowDuctBuild};
 pub use overflow_gate::OverflowGateBehavior;
@@ -56,4 +64,13 @@ pub fn register(registry: &mut BehaviorRegistry, _content: &ContentRegistry) {
     registry.register_named("underflow-gate", Arc::new(OverflowGateBehavior::UNDERFLOW));
     registry.register_named("overflow-duct", Arc::new(OverflowDuctBehavior::NORMAL));
     registry.register_named("underflow-duct", Arc::new(OverflowDuctBehavior::UNDERFLOW));
+    registry.register_named(
+        "phase-conveyor",
+        Arc::new(ItemBridgeBehavior::PHASE_CONVEYOR),
+    );
+    registry.register_named(
+        "bridge-conveyor",
+        Arc::new(ItemBridgeBehavior::BRIDGE_CONVEYOR),
+    );
+    registry.register_named("duct-bridge", Arc::new(DuctBridgeBehavior::VANILLA));
 }
