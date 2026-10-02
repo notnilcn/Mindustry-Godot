@@ -1,8 +1,16 @@
 {
-  "components": 16,
+  "format": 1,
+  "components": 18,
   "defs": [
     {
+      "name": "Unit",
       "classId": 1000,
+      "groups": [
+        "unit",
+        "sync"
+      ],
+      "pooled": false,
+      "serialize": true,
       "components": [
         "BaseEntity",
         "SimId",
@@ -14,122 +22,286 @@
       ],
       "fields": [
         {
-          "kind": "Transient",
           "name": "added",
-          "since": 0,
-          "type": "bool"
+          "kind": "Transient",
+          "type": "bool",
+          "since": 0
         },
         {
-          "kind": "Transient",
           "name": "id",
-          "since": 0,
-          "type": "int"
-        },
-        {
           "kind": "Transient",
+          "type": "int",
+          "since": 0
+        },
+        {
           "name": "def",
-          "since": 0,
-          "type": "object"
+          "kind": "Transient",
+          "type": "object",
+          "since": 0
         },
         {
-          "kind": "Plain",
           "name": "x",
-          "since": 0,
-          "type": "float"
+          "kind": "Plain",
+          "type": "float",
+          "since": 0
         },
         {
-          "kind": "Plain",
           "name": "y",
-          "since": 0,
-          "type": "float"
+          "kind": "Plain",
+          "type": "float",
+          "since": 0
         },
         {
-          "kind": "Plain",
           "name": "x",
-          "since": 0,
-          "type": "float"
+          "kind": "Plain",
+          "type": "float",
+          "since": 0
         },
         {
-          "kind": "Plain",
           "name": "y",
-          "since": 0,
-          "type": "float"
+          "kind": "Plain",
+          "type": "float",
+          "since": 0
         },
         {
-          "kind": "Plain",
           "name": "team",
-          "since": 0,
-          "type": "ubyte"
+          "kind": "Plain",
+          "type": "ubyte",
+          "since": 0
         }
       ],
-      "groups": [
-        "unit",
-        "sync"
-      ],
-      "methods": [],
-      "name": "Unit",
-      "pooled": false,
-      "serialize": true
+      "methods": []
     },
     {
+      "name": "BuildingComp",
       "classId": 6,
+      "groups": [
+        "build",
+        "sync"
+      ],
+      "pooled": false,
+      "serialize": true,
       "components": [
         "BaseEntity",
         "SimId",
         "DefId",
         "Pos",
         "TeamComp",
-        "Building"
+        "Health",
+        "Building",
+        "Timers"
       ],
       "fields": [
         {
-          "kind": "Transient",
           "name": "added",
-          "since": 0,
-          "type": "bool"
+          "kind": "Transient",
+          "type": "bool",
+          "since": 0
         },
         {
-          "kind": "Transient",
           "name": "id",
-          "since": 0,
-          "type": "int"
-        },
-        {
           "kind": "Transient",
+          "type": "int",
+          "since": 0
+        },
+        {
           "name": "def",
-          "since": 0,
-          "type": "object"
+          "kind": "Transient",
+          "type": "object",
+          "since": 0
         },
         {
-          "kind": "Plain",
           "name": "x",
-          "since": 0,
-          "type": "float"
+          "kind": "Plain",
+          "type": "float",
+          "since": 0
         },
         {
-          "kind": "Plain",
           "name": "y",
-          "since": 0,
-          "type": "float"
+          "kind": "Plain",
+          "type": "float",
+          "since": 0
         },
         {
-          "kind": "Plain",
           "name": "team",
-          "since": 0,
-          "type": "ubyte"
+          "kind": "Plain",
+          "type": "ubyte",
+          "since": 0
+        },
+        {
+          "name": "health",
+          "kind": "Plain",
+          "type": "float",
+          "since": 0
+        },
+        {
+          "name": "max_health",
+          "kind": "Plain",
+          "type": "float",
+          "since": 0
+        },
+        {
+          "name": "dead",
+          "kind": "Plain",
+          "type": "bool",
+          "since": 0
+        },
+        {
+          "name": "tile",
+          "kind": "Plain",
+          "type": "object",
+          "since": 0
+        },
+        {
+          "name": "block",
+          "kind": "Plain",
+          "type": "content",
+          "since": 0
+        },
+        {
+          "name": "rotation",
+          "kind": "Plain",
+          "type": "ubyte",
+          "since": 0
+        },
+        {
+          "name": "enabled",
+          "kind": "Plain",
+          "type": "bool",
+          "since": 0
+        },
+        {
+          "name": "last_disabler",
+          "kind": "Plain",
+          "type": "entity",
+          "since": 0
+        },
+        {
+          "name": "efficiency",
+          "kind": "Plain",
+          "type": "float",
+          "since": 0
+        },
+        {
+          "name": "optional_efficiency",
+          "kind": "Plain",
+          "type": "float",
+          "since": 0
+        },
+        {
+          "name": "potential_efficiency",
+          "kind": "Plain",
+          "type": "float",
+          "since": 0
+        },
+        {
+          "name": "should_consume_power",
+          "kind": "Plain",
+          "type": "bool",
+          "since": 0
+        },
+        {
+          "name": "time_scale",
+          "kind": "Plain",
+          "type": "float",
+          "since": 0
+        },
+        {
+          "name": "time_scale_duration",
+          "kind": "Plain",
+          "type": "float",
+          "since": 0
+        },
+        {
+          "name": "proximity",
+          "kind": "Plain",
+          "type": "object",
+          "since": 0
+        },
+        {
+          "name": "cdump",
+          "kind": "Plain",
+          "type": "ubyte",
+          "since": 0
+        },
+        {
+          "name": "dump_accum",
+          "kind": "Plain",
+          "type": "float",
+          "since": 0
+        },
+        {
+          "name": "last_accessed",
+          "kind": "Plain",
+          "type": "object",
+          "since": 0
+        },
+        {
+          "name": "visible_flags",
+          "kind": "Plain",
+          "type": "ulong",
+          "since": 0
+        },
+        {
+          "name": "was_visible",
+          "kind": "Plain",
+          "type": "bool",
+          "since": 0
+        },
+        {
+          "name": "was_damaged",
+          "kind": "Plain",
+          "type": "bool",
+          "since": 0
+        },
+        {
+          "name": "sleeping",
+          "kind": "Plain",
+          "type": "bool",
+          "since": 0
+        },
+        {
+          "name": "sleep_time",
+          "kind": "Plain",
+          "type": "float",
+          "since": 0
+        },
+        {
+          "name": "initialized",
+          "kind": "Plain",
+          "type": "bool",
+          "since": 0
+        },
+        {
+          "name": "heal_suppression_time",
+          "kind": "Plain",
+          "type": "float",
+          "since": 0
+        },
+        {
+          "name": "last_heal_time",
+          "kind": "Plain",
+          "type": "float",
+          "since": 0
+        },
+        {
+          "name": "last_damage_time",
+          "kind": "Plain",
+          "type": "float",
+          "since": 0
         }
       ],
-      "groups": [
-        "build",
-        "sync"
-      ],
-      "methods": [],
-      "name": "BuildingComp",
-      "pooled": false,
-      "serialize": true
+      "methods": []
     },
     {
+      "name": "BulletComp",
       "classId": 7,
+      "groups": [
+        "bullet",
+        "sync"
+      ],
+      "pooled": true,
+      "serialize": true,
       "components": [
         "BaseEntity",
         "SimId",
@@ -140,59 +312,59 @@
       ],
       "fields": [
         {
-          "kind": "Transient",
           "name": "added",
-          "since": 0,
-          "type": "bool"
+          "kind": "Transient",
+          "type": "bool",
+          "since": 0
         },
         {
-          "kind": "Transient",
           "name": "id",
-          "since": 0,
-          "type": "int"
-        },
-        {
           "kind": "Transient",
+          "type": "int",
+          "since": 0
+        },
+        {
           "name": "def",
-          "since": 0,
-          "type": "object"
+          "kind": "Transient",
+          "type": "object",
+          "since": 0
         },
         {
-          "kind": "Plain",
           "name": "x",
-          "since": 0,
-          "type": "float"
+          "kind": "Plain",
+          "type": "float",
+          "since": 0
         },
         {
-          "kind": "Plain",
           "name": "y",
-          "since": 0,
-          "type": "float"
+          "kind": "Plain",
+          "type": "float",
+          "since": 0
         },
         {
-          "kind": "Plain",
           "name": "x",
-          "since": 0,
-          "type": "float"
+          "kind": "Plain",
+          "type": "float",
+          "since": 0
         },
         {
-          "kind": "Plain",
           "name": "y",
-          "since": 0,
-          "type": "float"
+          "kind": "Plain",
+          "type": "float",
+          "since": 0
         }
       ],
-      "groups": [
-        "bullet",
-        "sync"
-      ],
-      "methods": [],
-      "name": "BulletComp",
-      "pooled": true,
-      "serialize": true
+      "methods": []
     },
     {
+      "name": "PlayerComp",
       "classId": 12,
+      "groups": [
+        "player",
+        "sync"
+      ],
+      "pooled": false,
+      "serialize": true,
       "components": [
         "BaseEntity",
         "SimId",
@@ -203,53 +375,53 @@
       ],
       "fields": [
         {
-          "kind": "Transient",
           "name": "added",
-          "since": 0,
-          "type": "bool"
+          "kind": "Transient",
+          "type": "bool",
+          "since": 0
         },
         {
-          "kind": "Transient",
           "name": "id",
-          "since": 0,
-          "type": "int"
-        },
-        {
           "kind": "Transient",
+          "type": "int",
+          "since": 0
+        },
+        {
           "name": "def",
-          "since": 0,
-          "type": "object"
+          "kind": "Transient",
+          "type": "object",
+          "since": 0
         },
         {
-          "kind": "Plain",
           "name": "x",
-          "since": 0,
-          "type": "float"
+          "kind": "Plain",
+          "type": "float",
+          "since": 0
         },
         {
-          "kind": "Plain",
           "name": "y",
-          "since": 0,
-          "type": "float"
+          "kind": "Plain",
+          "type": "float",
+          "since": 0
         },
         {
-          "kind": "Plain",
           "name": "team",
-          "since": 0,
-          "type": "ubyte"
+          "kind": "Plain",
+          "type": "ubyte",
+          "since": 0
         }
       ],
-      "groups": [
-        "player",
-        "sync"
-      ],
-      "methods": [],
-      "name": "PlayerComp",
-      "pooled": false,
-      "serialize": true
+      "methods": []
     },
     {
+      "name": "EffectStateComp",
       "classId": 9,
+      "groups": [
+        "effect",
+        "sync"
+      ],
+      "pooled": true,
+      "serialize": true,
       "components": [
         "BaseEntity",
         "SimId",
@@ -259,47 +431,48 @@
       ],
       "fields": [
         {
-          "kind": "Transient",
           "name": "added",
-          "since": 0,
-          "type": "bool"
+          "kind": "Transient",
+          "type": "bool",
+          "since": 0
         },
         {
-          "kind": "Transient",
           "name": "id",
-          "since": 0,
-          "type": "int"
-        },
-        {
           "kind": "Transient",
+          "type": "int",
+          "since": 0
+        },
+        {
           "name": "def",
-          "since": 0,
-          "type": "object"
+          "kind": "Transient",
+          "type": "object",
+          "since": 0
         },
         {
-          "kind": "Plain",
           "name": "x",
-          "since": 0,
-          "type": "float"
+          "kind": "Plain",
+          "type": "float",
+          "since": 0
         },
         {
-          "kind": "Plain",
           "name": "y",
-          "since": 0,
-          "type": "float"
+          "kind": "Plain",
+          "type": "float",
+          "since": 0
         }
       ],
-      "groups": [
-        "effect",
-        "sync"
-      ],
-      "methods": [],
-      "name": "EffectStateComp",
-      "pooled": true,
-      "serialize": true
+      "methods": []
     },
     {
+      "name": "WeatherStateComp",
       "classId": 14,
+      "groups": [
+        "all",
+        "weather",
+        "sync"
+      ],
+      "pooled": false,
+      "serialize": true,
       "components": [
         "BaseEntity",
         "SimId",
@@ -308,36 +481,35 @@
       ],
       "fields": [
         {
-          "kind": "Transient",
           "name": "added",
-          "since": 0,
-          "type": "bool"
+          "kind": "Transient",
+          "type": "bool",
+          "since": 0
         },
         {
-          "kind": "Transient",
           "name": "id",
-          "since": 0,
-          "type": "int"
+          "kind": "Transient",
+          "type": "int",
+          "since": 0
         },
         {
-          "kind": "Transient",
           "name": "def",
-          "since": 0,
-          "type": "object"
+          "kind": "Transient",
+          "type": "object",
+          "since": 0
         }
       ],
-      "groups": [
-        "all",
-        "weather",
-        "sync"
-      ],
-      "methods": [],
-      "name": "WeatherStateComp",
-      "pooled": false,
-      "serialize": true
+      "methods": []
     },
     {
+      "name": "PowerGraphUpdaterComp",
       "classId": 42,
+      "groups": [
+        "powerGraph",
+        "sync"
+      ],
+      "pooled": false,
+      "serialize": true,
       "components": [
         "BaseEntity",
         "SimId",
@@ -346,35 +518,36 @@
       ],
       "fields": [
         {
-          "kind": "Transient",
           "name": "added",
-          "since": 0,
-          "type": "bool"
+          "kind": "Transient",
+          "type": "bool",
+          "since": 0
         },
         {
-          "kind": "Transient",
           "name": "id",
-          "since": 0,
-          "type": "int"
+          "kind": "Transient",
+          "type": "int",
+          "since": 0
         },
         {
-          "kind": "Transient",
           "name": "def",
-          "since": 0,
-          "type": "object"
+          "kind": "Transient",
+          "type": "object",
+          "since": 0
         }
       ],
-      "groups": [
-        "powerGraph",
-        "sync"
-      ],
-      "methods": [],
-      "name": "PowerGraphUpdaterComp",
-      "pooled": false,
-      "serialize": true
+      "methods": []
     },
     {
+      "name": "DrawComp",
       "classId": 1007,
+      "groups": [
+        "all",
+        "sync",
+        "draw"
+      ],
+      "pooled": false,
+      "serialize": true,
       "components": [
         "BaseEntity",
         "SimId",
@@ -383,34 +556,25 @@
       ],
       "fields": [
         {
-          "kind": "Transient",
           "name": "added",
-          "since": 0,
-          "type": "bool"
+          "kind": "Transient",
+          "type": "bool",
+          "since": 0
         },
         {
-          "kind": "Transient",
           "name": "id",
-          "since": 0,
-          "type": "int"
+          "kind": "Transient",
+          "type": "int",
+          "since": 0
         },
         {
-          "kind": "Transient",
           "name": "def",
-          "since": 0,
-          "type": "object"
+          "kind": "Transient",
+          "type": "object",
+          "since": 0
         }
       ],
-      "groups": [
-        "all",
-        "sync",
-        "draw"
-      ],
-      "methods": [],
-      "name": "DrawComp",
-      "pooled": false,
-      "serialize": true
+      "methods": []
     }
-  ],
-  "format": 1
+  ]
 }

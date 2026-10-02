@@ -403,6 +403,9 @@ pub fn build_sim_schedule() -> Schedule {
     // One no-op placeholder system so the schedule is runnable from M6 onward;
     // later plans register into the named sets (HLP §2.2 boundary).
     schedule.add_systems(stub_system);
+    // Plan 07: building runtime. No-op unless a `world::block::BlockTable`
+    // resource is present, so the P0 `Sim` checksum/golden is unchanged.
+    schedule.add_systems(crate::world::update::update_buildings.in_set(EntitySet::UpdateBuildings));
     schedule
 }
 

@@ -15,10 +15,9 @@ use mind_macros::SimComponent;
 #[sim(component, base)]
 pub struct Unit;
 
-/// `Groups.build` / `excludeGroups={"all"}` key.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Component, SimComponent)]
-#[sim(component, base)]
-pub struct Building;
+// NOTE: `Building` (the `Groups.build` membership key) is plan 07's data
+// component in `entities/comp/building.rs`; it replaced the plan-05 marker so
+// the archetype key and the building runtime state are the same component.
 
 /// `Groups.bullet` key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Component, SimComponent)]

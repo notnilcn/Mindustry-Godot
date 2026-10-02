@@ -22,6 +22,14 @@ pub struct Context<'a> {
     pub content: &'a ContentRegistry,
     /// Owning sector, when the load is a campaign sector (plan 12 write-back).
     pub sector: Option<SectorId>,
+    /// Decoded tile-entity payloads awaiting spawn by the ECS-owning host.
+    ///
+    /// Plan 07 §3.10: `read_building` decodes `writeBase` byte-for-byte. Spawning
+    /// the `Building` entity (and applying [`super::building_io::DecodedBase`])
+    /// needs the ECS world, which plan 06's `Context` deliberately does not own;
+    /// the host drains this queue via [`Context::take_pending_buildings`] after
+    /// `end()`. This replaces the plan-06 placeholder error.
+    pub pending_buildings: Vec<(usize, super::building_io::DecodedBase)>,
 }
 
 impl<'a> Context<'a> {
@@ -31,6 +39,7 @@ impl<'a> Context<'a> {
             grid,
             content,
             sector: None,
+            pending_buildings: Vec::new(),
         }
     }
 
@@ -40,7 +49,18 @@ impl<'a> Context<'a> {
             grid,
             content,
             sector: Some(sector),
+            pending_buildings: Vec::new(),
         }
+    }
+
+    /// Drains decoded building payloads (`(tile index, base)`).
+    pub fn take_pending_buildings(&mut self) -> Vec<(usize, super::building_io::DecodedBase)> {
+        std::mem::take(&mut self.pending_buildings)
+    }
+
+    /// Read-only view of the decoded building payloads.
+    pub fn pending_buildings(&self) -> &[(usize, super::building_io::DecodedBase)] {
+        &self.pending_buildings
     }
 }
 
@@ -109,15 +129,16 @@ impl WorldContext for Context<'_> {
 
     fn read_building(
         &mut self,
-        _index: usize,
-        _reader: &mut WireReader,
-        _version: u8,
+        index: usize,
+        reader: &mut WireReader,
+        version: u8,
     ) -> Result<(), IoError> {
-        // Building entity decode requires plan 07's `Building` runtime (the
-        // plan-04 fixture is the interim consumer). Deferred (plan 06 §2.4).
-        Err(IoError::corrupt(
-            "building chunks are decoded by plan 07 (building runtime)",
-        ))
+        // Plan 07 decodes `BuildingComp.writeBase`; the ECS-owning host drains
+        // `pending_buildings` and spawns/applies the entity after `end()`.
+        let mut decoded = super::building_io::DecodedBase::default();
+        super::building_io::read_base(&mut decoded, reader, version)?;
+        self.pending_buildings.push((index, decoded));
+        Ok(())
     }
 }
 
@@ -275,5 +296,30 @@ mod tests {
             ),
             (3, 4, 5, 6)
         );
+    }
+
+    /// Plan 07 M3: `read_building` decodes the base body into the pending queue
+    /// instead of erroring.
+    #[test]
+    fn read_building_queues_decoded_base() {
+        let content = crate::content::test_support::test_registry();
+        let mut grid = WorldGrid::new(2, 2);
+        let mut ctx = Context::new(&mut grid, &content);
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&10.0f32.to_be_bytes());
+        bytes.push(0x80);
+        bytes.push(0);
+        bytes.push(1); // enabled
+        bytes.push(0); // module bits
+        bytes.push(255); // efficiency
+        bytes.push(255); // optional efficiency
+        let mut reader = crate::io::wire::WireReader::new(&bytes);
+        ctx.read_building(1, &mut reader, 3).expect("decode");
+        let pending = ctx.pending_buildings();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].0, 1);
+        assert_eq!(pending[0].1.health, 10.0);
+        assert_eq!(ctx.take_pending_buildings().len(), 1);
+        assert_eq!(ctx.pending_buildings().len(), 0);
     }
 }
