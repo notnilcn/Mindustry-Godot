@@ -284,6 +284,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
         Command::Heat { command } => {
             crate::network_scenarios::run(crate::network_scenarios::NetworkKind::Heat, command)
         }
+        Command::Parity { command } => crate::parity::run(command),
         Command::Audio { command } => crate::audio_scenarios::run(command),
         Command::Mods { command } => match command {
             ModsCommand::List { dir, json, check } => cmd_mods_list(dir, *json, *check),

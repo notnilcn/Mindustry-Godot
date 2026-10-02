@@ -1,0 +1,67 @@
+{
+  "format": 1,
+  "note": "Aggregated performance budget registry (plan 23 §7d). Numbers are copied from each owning plan; `measure` is the producing mind-headless command. Per-plan baseline files remain the recording source of truth (`sources`); this file is the cross-crate coverage/gate registry.",
+  "machine": {
+    "id": "dev-wsl-amd860m",
+    "os": "Ubuntu in WSL2 (Windows 11 host, WSLg)",
+    "gpu": "llvmpipe (software Vulkan; GPU budgets use dev-win-amd860m on Windows)",
+    "godot": "4.7.2.stable",
+    "profile": "release"
+  },
+  "canonical": {
+    "scenario": "sim_core_mid",
+    "metric": "tick_p95_ms",
+    "budget": 4.0,
+    "warn_pct": 5,
+    "fail_pct": 10,
+    "regression_rule": ">10% canonical-tick regression blocks a phase gate (NUD-39/A)"
+  },
+  "sources": [
+    { "plan": "05", "path": "client/rust/mind-core/bench/baselines.json", "present": false, "note": "plan 05 benches are emitted by `bench sim_core`; baseline rows recorded at plan-23 M4" },
+    { "plan": "07", "path": "client/rust/mind-core/bench/baselines.json", "present": true },
+    { "plan": "09", "path": "client/rust/mind-headless/bench/bench_power.json", "present": true },
+    { "plan": "09", "path": "client/rust/mind-headless/bench/bench_liquid.json", "present": true },
+    { "plan": "09", "path": "client/rust/mind-headless/bench/bench_heat.json", "present": true },
+    { "plan": "18", "path": "client/rust/mind-core/bench/baselines.json", "present": true, "note": "audio section" }
+  ],
+  "entries": [
+    { "id": "spine_tick_p99", "plan": "00", "measure": "bench --scenario spine --json", "metric": "p99_us", "budget": 250 },
+    { "id": "spine_checksum_dump", "plan": "00", "measure": "bench --scenario spine --json", "metric": "ms", "budget": 5 },
+    { "id": "stdb_pump_idle_p99", "plan": "01", "measure": "bench --scenario stdb_pump --json", "metric": "p99_us", "budget": 200 },
+    { "id": "stdb_binder_replay_100k", "plan": "01", "measure": "stdb binder-replay --json", "metric": "ms", "budget": 100 },
+    { "id": "assets_pack_full", "plan": "03", "measure": "mind-tools pack", "metric": "s", "budget": 90 },
+    { "id": "assets_ready", "plan": "03", "measure": "assets index --atlas assets/sprites", "metric": "ms", "budget": 1500 },
+    { "id": "core_sim_empty_p99", "plan": "05", "measure": "bench sim_core --profile empty --json", "metric": "p99_ms", "budget": 0.5 },
+    { "id": "core_sim_mid_p99", "plan": "05", "measure": "bench sim_core --profile mid --json", "metric": "p99_ms", "budget": 4.0 },
+    { "id": "core_sim_stress_p99", "plan": "05", "measure": "bench sim_core --profile stress --json", "metric": "p99_ms", "budget": 10.0 },
+    { "id": "blocks_buildings_p50", "plan": "07", "measure": "blocks bench --profile buildings --buildings 2000 --ticks 3600 --json", "metric": "p50_us", "budget": 600 },
+    { "id": "blocks_buildings_p99", "plan": "07", "measure": "blocks bench --profile buildings --buildings 2000 --ticks 3600 --json", "metric": "p99_us", "budget": 1500 },
+    { "id": "blocks_place_p99", "plan": "07", "measure": "blocks bench --profile place --buildings 2000 --json", "metric": "p99_us", "budget": 250 },
+    { "id": "blocks_construct_p99", "plan": "07", "measure": "blocks bench --profile construct --buildings 1000 --ticks 1 --json", "metric": "p99_us", "budget": 300 },
+    { "id": "logistics_conveyor_throughput", "plan": "08", "measure": "blocks bench --profile logistics --json", "metric": "updates_per_sec", "budget": 20000000, "comparison": "gte" },
+    { "id": "logistics_slice_p95", "plan": "08", "measure": "blocks bench --profile logistics --json", "metric": "p95_ms", "budget": 0.35 },
+    { "id": "power_update_p95", "plan": "09", "measure": "power bench --buildings 2000 --ticks 3600 --json", "metric": "p95_ms", "budget": 0.30 },
+    { "id": "liquid_update_p95", "plan": "09", "measure": "liquid bench --buildings 2000 --ticks 3600 --json", "metric": "p95_ms", "budget": 0.20 },
+    { "id": "heat_update_p95", "plan": "09", "measure": "heat bench --buildings 2000 --ticks 3600 --json", "metric": "p95_ms", "budget": 0.50 },
+    { "id": "combat_bullets_p95", "plan": "10", "measure": "combat bench --bullets 2000 --turrets 400 --ticks 3600 --json", "metric": "p95_ms", "budget": 1.2 },
+    { "id": "units_mid_p95", "plan": "11", "measure": "units bench --units 300 --ticks 600 --json", "metric": "p95_ms", "budget": 1.5 },
+    { "id": "units_stress_p95", "plan": "11", "measure": "units bench --units 1000 --ticks 600 --json", "metric": "p95_ms", "budget": 5.0 },
+    { "id": "render_build_p50", "plan": "16", "measure": "render bench --json", "metric": "p50_us", "budget": 2500 },
+    { "id": "render_build_p99", "plan": "16", "measure": "render bench --json", "metric": "p99_us", "budget": 5000 },
+    { "id": "audio_mix_p50", "plan": "18", "measure": "audio bench --ticks 3600 --loops 256 --voices 32 --json", "metric": "p50_us", "budget": 100 },
+    { "id": "audio_mix_p99", "plan": "18", "measure": "audio bench --ticks 3600 --loops 256 --voices 32 --json", "metric": "p99_us", "budget": 250 },
+    { "id": "mods_parse", "plan": "20", "measure": "mods bench --scene parse --fixture allkinds --json", "metric": "us", "budget": 2000 },
+    { "id": "content_base_load", "plan": "02", "measure": "content bench --runs 20 --json", "metric": "median_ms", "budget": 200 },
+    { "id": "io_save_p95", "plan": "04", "measure": "io bench-save --map synthetic --iters 50 --json", "metric": "p95_ms", "budget": 50 },
+    { "id": "io_load_p95", "plan": "04", "measure": "io bench-save --map synthetic --iters 50 --json", "metric": "p95_ms", "budget": 100 },
+    { "id": "world_gen_256_p95", "plan": "06", "measure": "world bench-gen --generator simplex --width 256 --height 256 --json", "metric": "p95_ms", "budget": 250 }
+  ],
+  "alloc": {
+    "assert_zero_profiles": ["sim_core", "blocks", "logistics", "power", "liquid", "heat", "combat", "units", "render", "audio", "fx"],
+    "feature": "alloc-audit"
+  },
+  "soak": {
+    "profiles": ["mid", "stress", "windowed", "multiplayer"],
+    "file": "parity/soak.toml"
+  }
+}

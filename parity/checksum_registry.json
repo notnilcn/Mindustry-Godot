@@ -1,0 +1,20 @@
+{
+  "format": 1,
+  "checksum_version": 1,
+  "algorithm": "fnv1a64",
+  "owner": "05_SIM_CORE_IMPLEMENTATION_PLAN.md",
+  "contributors": [
+    { "id": "game_state", "owner": "05", "status": "active" },
+    { "id": "clock_rng", "owner": "05", "status": "active" },
+    { "id": "groups", "owner": "05", "status": "active" },
+    { "id": "world_grid", "owner": "06", "status": "active", "note": "world::checksum" },
+    { "id": "rules", "owner": "12", "status": "planned", "note": "Rules::checksum_part" },
+    { "id": "logic_rng", "owner": "13", "status": "planned", "note": "reserved stream" },
+    { "id": "content_hash", "owner": "02", "status": "header" }
+  ],
+  "excluded": [
+    { "id": "render", "owner": "16", "reason": "view-only (HLP §2.4)" },
+    { "id": "fx", "owner": "17", "reason": "view-only (HLP §2.4)" }
+  ],
+  "bump_rule": "Any contributor change bumps CHECKSUM_VERSION and re-records every golden in the same commit (plan 00 §6.4, plan 23 R-02)."
+}

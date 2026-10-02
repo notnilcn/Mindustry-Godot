@@ -1,0 +1,36 @@
+# parity/soak.toml (format: 1) — soak profiles (plan 23 §6.7).
+format = 1
+
+[profiles.mid]
+minutes = 60
+world = 256
+buildings = 600
+units = 300
+bullets = 3000
+belt_items = 4000
+checksum_every_ticks = 600
+max_rss_growth_pct = 5
+max_alloc_delta = 0
+
+[profiles.stress]
+minutes = 10
+world = 512
+buildings = 2000
+units = 1000
+bullets = 10000
+belt_items = 0
+checksum_every_ticks = 600
+max_rss_growth_pct = 5
+max_alloc_delta = 0
+
+[profiles.windowed]
+minutes = 30
+checksum_every_ticks = 600
+max_rss_growth_pct = 5
+max_alloc_delta = 0
+
+[profiles.multiplayer]
+minutes = 30
+clients = 3
+checksum_every_ticks = 600
+desync_tolerance = 0

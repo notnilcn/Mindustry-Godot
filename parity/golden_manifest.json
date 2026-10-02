@@ -1,0 +1,25 @@
+{
+  "format": 1,
+  "upstream": {
+    "repo": "https://github.com/Anuken/Mindustry",
+    "commit": "2cd7aeecf1378b3db456be9bfde8691b3cdc1bcc"
+  },
+  "note": "Committed oracle + scenario goldens. Harness goldens under client/rust/*/tests/golden/** are verified by the scenarios themselves (plan 23 §6.2). A golden edit must update this hash in the same commit.",
+  "goldens": [
+    { "id": "content_ids", "kind": "oracle", "path": "parity/golden_content.json", "owner_plan": "02", "sha256": "86b9cacb14b86291625042e088525e4148f7af0ac68ff01ed1ca0f289fed5f01", "regen": "cargo run -p mind-headless -- content dump" },
+    { "id": "bundle_keys", "kind": "oracle", "path": "parity/bundle_keys.json", "owner_plan": "02/03", "sha256": "8c6e048da19675bf4bfad579442e17bd47c69f3fad320a8d4bddae3a3f36611c", "regen": "mind-tools pack (bundle index)" },
+    { "id": "asset_manifest", "kind": "oracle", "path": "parity/asset_manifest.json", "owner_plan": "03", "sha256": "88c8f5449dbdceb572aea2476aca79aaef6a0ad5bae1435de28e8e1e3672e541", "regen": "mind-tools pack (asset manifest)" },
+    { "id": "mod_classmap", "kind": "oracle", "path": "parity/mod_classmap.json", "owner_plan": "20", "sha256": "fecceb7bf966e76ed3e4723b025d6203734626aed4c21caeab3cca68c109dde9", "regen": "mind-tools mods classmap" },
+    { "id": "scenario_spine_place_break", "kind": "scenario", "path": "scenarios/spine_place_break.json", "owner_plan": "00", "sha256": "08efdd874239045359c907f4cdec3c6b2c31f979432b590d5fb0281b4ec5f8c5" },
+    { "id": "scenario_spine_determinism", "kind": "scenario", "path": "scenarios/spine_determinism.json", "owner_plan": "00", "sha256": "081b653c4bea89a2e38fb11c5c307891000d1afea35384abc3b71582e497a4a5" },
+    { "id": "scenario_spine_many_commands", "kind": "scenario", "path": "scenarios/spine_many_commands.json", "owner_plan": "00", "sha256": "846f38a9356e8370016fe0e1288dd1c7003c53bc0e72215d949b5401a57d44f4" },
+    { "id": "scenario_bench_baseline", "kind": "scenario", "path": "scenarios/bench_baseline.json", "owner_plan": "00", "sha256": "8ffe171c2ba48ecf8af3ce080e1922bba9b311d8156befc47d21d7a822a086d9" },
+    { "id": "scenario_sim_core_boot", "kind": "scenario", "path": "scenarios/sim_core_boot.json", "owner_plan": "05", "sha256": "3be7e0cf4e4d79c12fb57b0805e409b720beabfca0b48dda9bacedab92da5128" },
+    { "id": "scenario_sim_core_determinism", "kind": "scenario", "path": "scenarios/sim_core_determinism.json", "owner_plan": "05", "sha256": "8d413688bfbe53aa40d02ed2eb26ea5d81ecc22abbf84b648f5328bc5ad411f3" },
+    { "id": "scenario_sim_core_many_commands", "kind": "scenario", "path": "scenarios/sim_core_many_commands.json", "owner_plan": "05", "sha256": "95b76263a8b3277cb35ade5413d6177afd3f72b79962f018068284fe53fb7559" },
+    { "id": "scenario_sim_core_reset_play_cycle", "kind": "scenario", "path": "scenarios/sim_core_reset_play_cycle.json", "owner_plan": "05", "sha256": "17ebacc75a23cb83094f9df56ff98eaf8675c5fc4c6d6e932b66c2788d961b2a" },
+    { "id": "scenario_stdb_offline_boot", "kind": "scenario", "path": "scenarios/stdb_offline_boot.json", "owner_plan": "01", "sha256": "f0e31a7dc0f545b3b566fdb2fb85ba8e3544e522228390be8d203384df0be186" },
+    { "id": "scenario_stdb_binder_replay", "kind": "scenario", "path": "scenarios/stdb_binder_replay.json", "owner_plan": "01", "sha256": "e356e927a66d8004089e0e2e2e1c79c6f3f7c20f7b0c514b56588df9f9ef93d9" },
+    { "id": "scenario_stdb_command_order", "kind": "scenario", "path": "scenarios/stdb_command_order.json", "owner_plan": "01", "sha256": "7b0b446bb27250f872780e4546c212888dda7228d874cc5a9510f178b70a439f" }
+  ]
+}

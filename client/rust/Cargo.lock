@@ -1789,6 +1789,7 @@ dependencies = [
  "mind-stdb",
  "serde",
  "serde_json",
+ "sha2",
  "spacetimedb-sdk",
 ]
 
