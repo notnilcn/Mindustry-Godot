@@ -15,9 +15,9 @@ classification totals, and the order hash).
 | `none` | 1 (id 0, rejected by `shouldCreate`) |
 | Declarative kinds | 0 in the **vanilla** catalogue (see note) |
 | Composite kinds | 0 in the **vanilla** catalogue (see note) |
-| Custom Rust bodies | 34 |
-| Unported | 232 |
-| Ported | 34/267 |
+| Custom Rust bodies | 90 |
+| Unported | 176 |
+| Ported | 90/267 |
 
 **Note (upstream fact, plan 17 R-17-11):** every field in `content/Fx.java` is a
 plain `new Effect(lifetime, Cons)` construction — a grep for
@@ -67,7 +67,34 @@ in `mind-core::fx::resolve` / `fx::pool`.
 | 160 | shootBig | Custom | — | tri pair |
 | 190 | casing1 | Custom | — | seeded rotating rect |
 
-## Unported (232)
+### Batch F3/F4 (plan 17 M3, 56 more bodies)
+
+Transcribed 1:1 from `content/Fx.java`; all emit deterministically (asserted by
+`fx::resolve::tests::every_ported_custom_body_emits_deterministically`).
+
+| name | notes |
+|------|-------|
+| commandSend | accent circle, `finpow * rotation` |
+| upgradeCoreBloom | accent square, tile-scaled |
+| coreLaunchConstruct | square + seeded debris |
+| fallSmoke / rocketSmoke / rocketSmokeLarge / magmasmoke | gray circles |
+| spawn / padlaunch | accent poly rings |
+| breakProp | `e.color * 1.1` seeded circles (debris layer) |
+| unitDrop / unitLand / unitDust / unitLandSmall / unitPickup / crawlDust / landShock / pickup | unit dust/pickup family (debris layer; `Lines.spikes`) |
+| sparkExplosion | ring + 16 `lineAngle(offset)` rays |
+| titanExplosion / titanExplosionLarge / titanExplosionSmall / titanExplosionFrag | ring + ray/tri fans |
+| coreExplosion | dual 30-ray fan |
+| smokeAoeCloud | 80-particle clamp-window cloud |
+| scatheExplosion / scatheExplosionSmall / scatheSlash | ring + tri fans |
+| scatheLight / scatheLightSmall / titanLightSmall | fill lights (`Layer.bullet + 2`) |
+| dynamicSpikes / greenBomb | ring + 4 tri spikes |
+| greenLaserCharge / greenLaserChargeSmall | heal charge ring/dots |
+| greenCloud | `randLenVectors(fin)` dots |
+| healWaveDynamic / heal / dynamicWave / shieldWave / shieldApply | wave rings |
+| hitSquaresColor / hitFuse / hitFlamePlasma / hitLaserBlast / hitEmpSpark / hitLancer / hitLancerLow / hitBeam / hitFlameBeam / hitMeltdown / hitMeltHeal | hit family |
+| instBomb / instTrail / instShoot / instHit | instigator bullet family |
+
+## Unported (176)
 
 Waves F3–F6 remain. Each is currently `EffectKind::Unported` (emits nothing and
 is counted by `fx audit`). They are **not** silently dropped: `fx audit --strict`

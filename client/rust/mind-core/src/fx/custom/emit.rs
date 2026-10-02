@@ -279,6 +279,29 @@ impl<'a> FxEmit<'a> {
         self.line(x, y, x + dx, y + dy, true);
     }
 
+    /// `Lines.lineAngle(x, y, angle, length, offset)` — the segment starts
+    /// `offset` along the direction and extends `length` beyond it.
+    pub fn line_angle_offset(&mut self, x: f32, y: f32, angle: f32, length: f32, offset: f32) {
+        let ox = trnsx(angle, offset);
+        let oy = trnsy(angle, offset);
+        let ex = trnsx(angle, length + offset);
+        let ey = trnsy(angle, length + offset);
+        self.line(x + ox, y + oy, x + ex, y + ey, false);
+    }
+
+    /// `Lines.spikes(x, y, radius, length, spikes)`.
+    pub fn spikes(&mut self, x: f32, y: f32, radius: f32, length: f32, spikes: i32) {
+        let step = 360.0 / spikes as f32;
+        for i in 0..spikes {
+            let a = i as f32 * step;
+            let x1 = trnsx(a, radius);
+            let y1 = trnsy(a, radius);
+            let x2 = trnsx(a, radius + length);
+            let y2 = trnsy(a, radius + length);
+            self.line(x + x1, y + y1, x + x2, y + y2, false);
+        }
+    }
+
     /// `Drawf.light(x, y, radius, color, opacity)`.
     pub fn light(&mut self, x: f32, y: f32, radius: f32, color: impl Into<Rgba>, opacity: f32) {
         self.push(PrimKind::Light {

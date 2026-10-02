@@ -109,6 +109,12 @@ impl EffectContainer {
         Interp::Pow3Out.apply(self.fin())
     }
 
+    /// `Scaled.foutpow()` (`Interp.pow3Out` of `fout`).
+    #[inline]
+    pub fn foutpow(&self) -> f32 {
+        Interp::Pow3Out.apply(self.fout())
+    }
+
     /// `Scaled.fslope()`.
     #[inline]
     pub fn fslope(&self) -> f32 {

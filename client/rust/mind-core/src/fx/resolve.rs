@@ -464,6 +464,35 @@ mod tests {
     }
 
     #[test]
+    fn every_ported_custom_body_emits_deterministically() {
+        let reg = registry();
+        let mut ported = 0;
+        for def in reg.iter() {
+            if !matches!(def.kind, EffectKind::Custom(..)) {
+                continue;
+            }
+            ported += 1;
+            let mut a = DrawProgram::new();
+            let id = def.id;
+            let mut st = state(id);
+            st.time = (def.lifetime * 0.5).max(0.0);
+            build_program(def, &st, &EmptySnapshot, &mut a);
+            let mut b = DrawProgram::new();
+            build_program(def, &st, &EmptySnapshot, &mut b);
+            assert_eq!(
+                a.hash(),
+                b.hash(),
+                "non-deterministic body for {}",
+                def.name
+            );
+        }
+        assert!(
+            ported >= 80,
+            "expected >=80 ported custom bodies, got {ported}"
+        );
+    }
+
+    #[test]
     fn first_effect_program() {
         let def = registry().get(EffectId::HIT_BULLET_SMALL);
         let mut program = DrawProgram::new();

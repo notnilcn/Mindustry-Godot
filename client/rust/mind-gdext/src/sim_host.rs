@@ -57,6 +57,8 @@ pub struct MindSimHost {
     /// The plan-16 renderer uses it to invalidate chunk meshes without wiring
     /// raw tile coords across the view boundary (plan 16 §3.5).
     revision: u64,
+    /// Plan-17 `MindFx` sibling (`../MindFx`); the one-way sim→view tick hook.
+    fx_host: Option<Gd<Node>>,
 }
 
 #[godot_api]
@@ -76,6 +78,7 @@ impl INode for MindSimHost {
             world_dirty: false,
             content_snapshot: None,
             revision: 0,
+            fx_host: None,
         }
     }
 
@@ -107,6 +110,11 @@ impl INode for MindSimHost {
         self.world_dirty = true;
         self.emit_state();
         self.emit_world_changed();
+
+        // Plan-17 sim→view hook: the FX host advances one fixed view tick per
+        // sim tick (one-way; the sim never reads the view). Optional: absent in
+        // headless/no-FX scenes.
+        self.fx_host = self.base().try_get_node_as::<Node>("../MindFx");
 
         log::info!(
             "MindSimHost ready ({}x{} seed {} selected `{}`, mind-core {})",
@@ -734,6 +742,16 @@ impl MindSimHost {
             if self.sim.commands_applied() != applied_before {
                 self.world_dirty = true;
             }
+            self.tick_fx_view();
+        }
+    }
+
+    /// Advances the plan-17 `MindFx` view by one fixed tick (sim→view hook).
+    fn tick_fx_view(&mut self) {
+        if let Some(node) = self.fx_host.as_mut()
+            && node.has_method("tick_view")
+        {
+            let _ = node.call("tick_view", &[]);
         }
     }
 

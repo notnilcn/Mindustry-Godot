@@ -15,13 +15,16 @@ use godot::classes::{INode2D, Node2D};
 use godot::obj::{Base, WithBaseField};
 use godot::prelude::*;
 
-use mind_core::content::{EffectId, Rgba};
-use mind_core::fx::{DecalPool, ShakeState, TrailRegistry};
+use smallvec::SmallVec;
+
+use mind_core::content::{EffectId, Rgba, WeatherId};
+use mind_core::fx::{Decal, DecalPool, ShakeState, TrailRegistry};
 use mind_core::fx::{
     DrawProgram, EffectData, EffectKind, EmptySnapshot, FxBus, FxEvent, FxPool, FxSettings,
-    build_program_into, registry,
+    WeatherFx, WeatherKind, WeatherStateView, WeatherView, build_program_into, registry,
 };
 use mind_core::render::draw::PrimKind;
+use mind_core::render::layer::Layer;
 
 /// Converts a core `Rgba` to a Godot `Color`.
 fn to_color(color: Rgba) -> Color {
@@ -43,6 +46,8 @@ pub struct MindFx {
     view_tick: u64,
     draw_calls: i64,
     missed_events: i64,
+    weather: Option<(WeatherFx, WeatherStateView)>,
+    view_rect: WeatherView,
 }
 
 #[godot_api]
@@ -60,6 +65,8 @@ impl INode2D for MindFx {
             view_tick: 0,
             draw_calls: 0,
             missed_events: 0,
+            weather: None,
+            view_rect: WeatherView::centered(0.0, 0.0, 1.0, 1.0, 0.0),
         }
     }
 
@@ -75,6 +82,7 @@ impl INode2D for MindFx {
             let def = registry().get(state.def);
             build_program_into(def, state, &snapshot, &mut program);
         }
+        self.append_view_prims(&mut program);
         program.sort();
 
         let mut calls = 0i64;
@@ -244,6 +252,88 @@ impl MindFx {
             PrimKind::NoiseLayer { .. }
             | PrimKind::ShaderBlit { .. }
             | PrimKind::Polyline { .. } => false,
+        }
+    }
+
+    /// Appends decal/trail/weather view prims to the frame program (plan 17 M6).
+    fn append_view_prims(&self, program: &mut DrawProgram) {
+        // Decals (`Layer.scorch`, fade `1 - curve(fin, 0.98)`).
+        for decal in self.decals.iter_live() {
+            let alpha = decal.alpha();
+            if alpha <= 0.0 {
+                continue;
+            }
+            program.push(mind_core::render::draw::DrawPrim::at(
+                Decal::LAYER,
+                PrimKind::Region {
+                    region: decal.region,
+                    x: decal.x,
+                    y: decal.y,
+                    w: 32.0,
+                    h: 32.0,
+                    rotation_deg: decal.rotation,
+                    origin: (0.5, 0.5),
+                    color: decal.color.with_alpha(decal.color.a * alpha),
+                    mix: None,
+                    wrap: false,
+                },
+            ));
+        }
+
+        // Trails (ribbon quads + cap).
+        let mut quads: Vec<[f32; 8]> = Vec::new();
+        for (_, trail) in self.trails.iter_live() {
+            quads.clear();
+            trail.draw(1.0, &mut quads);
+            for q in &quads {
+                let mut points: SmallVec<[(f32, f32); 12]> = SmallVec::new();
+                points.push((q[0], q[1]));
+                points.push((q[2], q[3]));
+                points.push((q[4], q[5]));
+                points.push((q[6], q[7]));
+                program.push(mind_core::render::draw::DrawPrim::at(
+                    Layer::Effect.z(),
+                    PrimKind::Polygon {
+                        points,
+                        fill: true,
+                        stroke: 0.0,
+                        color: Rgba::WHITE,
+                    },
+                ));
+            }
+            if let Some((cx, cy, w, _rot)) = trail.draw_cap(1.0) {
+                program.push(mind_core::render::draw::DrawPrim::at(
+                    Layer::Effect.z(),
+                    PrimKind::Circle {
+                        x: cx,
+                        y: cy,
+                        r: w / 2.0,
+                        fill: true,
+                        stroke: 0.0,
+                        color: Rgba::WHITE,
+                    },
+                ));
+            }
+        }
+
+        // Weather particle/rain field (state frozen by plan 12).
+        if let Some((fx, state)) = &self.weather {
+            match fx.kind {
+                WeatherKind::Particle => fx.build_particles(
+                    state,
+                    self.view_rect,
+                    self.view_rect,
+                    self.view_tick as f32,
+                    &mut program.prims,
+                ),
+                WeatherKind::Rain => fx.build_rain(
+                    state,
+                    self.view_rect,
+                    self.view_rect,
+                    self.view_tick as f32,
+                    &mut program.prims,
+                ),
+            }
         }
     }
 }
@@ -471,6 +561,59 @@ impl MindFx {
     #[func]
     pub fn deferred_prim_count(&self) -> i64 {
         self.missed_events
+    }
+
+    /// Dev control: sets the weather view (`rain` or any other name = particles).
+    /// Weather state is owned by plan 12; this is the plan-17 draw probe.
+    #[allow(clippy::too_many_arguments)]
+    #[func]
+    pub fn set_weather(
+        &mut self,
+        kind: GString,
+        intensity: f32,
+        opacity: f32,
+        wind_x: f32,
+        wind_y: f32,
+        life: f32,
+        view_x: f32,
+        view_y: f32,
+        view_w: f32,
+        view_h: f32,
+    ) {
+        let mut fx = WeatherFx::default();
+        if kind.to_string().eq_ignore_ascii_case("rain") {
+            fx.kind = WeatherKind::Rain;
+        }
+        self.weather = Some((
+            fx,
+            WeatherStateView {
+                weather: WeatherId::new(0),
+                intensity,
+                opacity,
+                wind_vector: (wind_x, wind_y),
+                life,
+            },
+        ));
+        self.view_rect = WeatherView {
+            x: view_x,
+            y: view_y,
+            w: view_w.max(1.0),
+            h: view_h.max(1.0),
+        };
+        self.base_mut().queue_redraw();
+    }
+
+    /// Clears the weather view probe.
+    #[func]
+    pub fn clear_weather(&mut self) {
+        self.weather = None;
+        self.base_mut().queue_redraw();
+    }
+
+    /// Whether a weather view is active.
+    #[func]
+    pub fn weather_active(&self) -> bool {
+        self.weather.is_some()
     }
 
     /// Whether effects are enabled.

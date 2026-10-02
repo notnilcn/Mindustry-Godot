@@ -87,6 +87,118 @@ pub enum CustomFxId {
     Explosion,
     /// `Fx.hitLaser`.
     HitLaser,
+    /// `Fx.commandSend`.
+    CommandSend,
+    /// `Fx.upgradeCoreBloom`.
+    UpgradeCoreBloom,
+    /// `Fx.coreLaunchConstruct`.
+    CoreLaunchConstruct,
+    /// `Fx.fallSmoke`.
+    FallSmoke,
+    /// `Fx.rocketSmoke`.
+    RocketSmoke,
+    /// `Fx.rocketSmokeLarge`.
+    RocketSmokeLarge,
+    /// `Fx.magmasmoke`.
+    MagmaSmoke,
+    /// `Fx.spawn`.
+    Spawn,
+    /// `Fx.padlaunch`.
+    Padlaunch,
+    /// `Fx.breakProp`.
+    BreakProp,
+    /// `Fx.unitDrop`.
+    UnitDrop,
+    /// `Fx.unitLand`.
+    UnitLand,
+    /// `Fx.unitDust`.
+    UnitDust,
+    /// `Fx.unitLandSmall`.
+    UnitLandSmall,
+    /// `Fx.unitPickup`.
+    UnitPickup,
+    /// `Fx.crawlDust`.
+    CrawlDust,
+    /// `Fx.landShock`.
+    LandShock,
+    /// `Fx.pickup`.
+    Pickup,
+    /// `Fx.sparkExplosion`.
+    SparkExplosion,
+    /// `Fx.titanExplosion`.
+    TitanExplosion,
+    /// `Fx.titanExplosionLarge`.
+    TitanExplosionLarge,
+    /// `Fx.titanExplosionSmall`.
+    TitanExplosionSmall,
+    /// `Fx.titanExplosionFrag`.
+    TitanExplosionFrag,
+    /// `Fx.coreExplosion`.
+    CoreExplosion,
+    /// `Fx.smokeAoeCloud`.
+    SmokeAoeCloud,
+    /// `Fx.scatheExplosion`.
+    ScatheExplosion,
+    /// `Fx.scatheExplosionSmall`.
+    ScatheExplosionSmall,
+    /// `Fx.scatheLight`.
+    ScatheLight,
+    /// `Fx.scatheLightSmall`.
+    ScatheLightSmall,
+    /// `Fx.titanLightSmall`.
+    TitanLightSmall,
+    /// `Fx.scatheSlash`.
+    ScatheSlash,
+    /// `Fx.dynamicSpikes`.
+    DynamicSpikes,
+    /// `Fx.greenBomb`.
+    GreenBomb,
+    /// `Fx.greenLaserCharge`.
+    GreenLaserCharge,
+    /// `Fx.greenLaserChargeSmall`.
+    GreenLaserChargeSmall,
+    /// `Fx.greenCloud`.
+    GreenCloud,
+    /// `Fx.healWaveDynamic`.
+    HealWaveDynamic,
+    /// `Fx.heal`.
+    Heal,
+    /// `Fx.dynamicWave`.
+    DynamicWave,
+    /// `Fx.shieldWave`.
+    ShieldWave,
+    /// `Fx.shieldApply`.
+    ShieldApply,
+    /// `Fx.hitSquaresColor`.
+    HitSquaresColor,
+    /// `Fx.hitFuse`.
+    HitFuse,
+    /// `Fx.hitFlamePlasma`.
+    HitFlamePlasma,
+    /// `Fx.hitLaserBlast`.
+    HitLaserBlast,
+    /// `Fx.hitEmpSpark`.
+    HitEmpSpark,
+    /// `Fx.hitLancer`.
+    HitLancer,
+    /// `Fx.hitLancerLow`.
+    HitLancerLow,
+    /// `Fx.hitBeam`.
+    HitBeam,
+    /// `Fx.hitFlameBeam`.
+    HitFlameBeam,
+    /// `Fx.hitMeltdown`.
+    HitMeltdown,
+    /// `Fx.hitMeltHeal`.
+    HitMeltHeal,
+    /// `Fx.instBomb`.
+    InstBomb,
+    /// `Fx.instTrail`.
+    InstTrail,
+    /// `Fx.instShoot`.
+    InstShoot,
+    /// `Fx.instHit`.
+    InstHit,
 }
 
 /// A custom body function.
@@ -129,6 +241,62 @@ pub fn dispatch(id: CustomFxId) -> CustomBody {
         CustomFxId::Smoke => basic::smoke,
         CustomFxId::Explosion => basic::explosion,
         CustomFxId::HitLaser => basic::hit_laser,
+        CustomFxId::CommandSend => basic::command_send,
+        CustomFxId::UpgradeCoreBloom => basic::upgrade_core_bloom,
+        CustomFxId::CoreLaunchConstruct => basic::core_launch_construct,
+        CustomFxId::FallSmoke => basic::fall_smoke,
+        CustomFxId::RocketSmoke => basic::rocket_smoke,
+        CustomFxId::RocketSmokeLarge => basic::rocket_smoke_large,
+        CustomFxId::MagmaSmoke => basic::magma_smoke,
+        CustomFxId::Spawn => basic::spawn,
+        CustomFxId::Padlaunch => basic::padlaunch,
+        CustomFxId::BreakProp => basic::break_prop,
+        CustomFxId::UnitDrop => basic::unit_drop,
+        CustomFxId::UnitLand => basic::unit_land,
+        CustomFxId::UnitDust => basic::unit_dust,
+        CustomFxId::UnitLandSmall => basic::unit_land_small,
+        CustomFxId::UnitPickup => basic::unit_pickup,
+        CustomFxId::CrawlDust => basic::crawl_dust,
+        CustomFxId::LandShock => basic::land_shock,
+        CustomFxId::Pickup => basic::pickup,
+        CustomFxId::SparkExplosion => basic::spark_explosion,
+        CustomFxId::TitanExplosion => basic::titan_explosion,
+        CustomFxId::TitanExplosionLarge => basic::titan_explosion_large,
+        CustomFxId::TitanExplosionSmall => basic::titan_explosion_small,
+        CustomFxId::TitanExplosionFrag => basic::titan_explosion_frag,
+        CustomFxId::CoreExplosion => basic::core_explosion,
+        CustomFxId::SmokeAoeCloud => basic::smoke_aoe_cloud,
+        CustomFxId::ScatheExplosion => basic::scathe_explosion,
+        CustomFxId::ScatheExplosionSmall => basic::scathe_explosion_small,
+        CustomFxId::ScatheLight => basic::scathe_light,
+        CustomFxId::ScatheLightSmall => basic::scathe_light_small,
+        CustomFxId::TitanLightSmall => basic::titan_light_small,
+        CustomFxId::ScatheSlash => basic::scathe_slash,
+        CustomFxId::DynamicSpikes => basic::dynamic_spikes,
+        CustomFxId::GreenBomb => basic::green_bomb,
+        CustomFxId::GreenLaserCharge => basic::green_laser_charge,
+        CustomFxId::GreenLaserChargeSmall => basic::green_laser_charge_small,
+        CustomFxId::GreenCloud => basic::green_cloud,
+        CustomFxId::HealWaveDynamic => basic::heal_wave_dynamic,
+        CustomFxId::Heal => basic::heal,
+        CustomFxId::DynamicWave => basic::dynamic_wave,
+        CustomFxId::ShieldWave => basic::shield_wave,
+        CustomFxId::ShieldApply => basic::shield_apply,
+        CustomFxId::HitSquaresColor => basic::hit_squares_color,
+        CustomFxId::HitFuse => basic::hit_fuse,
+        CustomFxId::HitFlamePlasma => basic::hit_flame_plasma,
+        CustomFxId::HitLaserBlast => basic::hit_laser_blast,
+        CustomFxId::HitEmpSpark => basic::hit_emp_spark,
+        CustomFxId::HitLancer => basic::hit_lancer,
+        CustomFxId::HitLancerLow => basic::hit_lancer_low,
+        CustomFxId::HitBeam => basic::hit_beam,
+        CustomFxId::HitFlameBeam => basic::hit_flame_beam,
+        CustomFxId::HitMeltdown => basic::hit_meltdown,
+        CustomFxId::HitMeltHeal => basic::hit_melt_heal,
+        CustomFxId::InstBomb => basic::inst_bomb,
+        CustomFxId::InstTrail => basic::inst_trail,
+        CustomFxId::InstShoot => basic::inst_shoot,
+        CustomFxId::InstHit => basic::inst_hit,
     }
 }
 
