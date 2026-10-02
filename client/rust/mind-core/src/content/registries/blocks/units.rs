@@ -9,7 +9,8 @@
 #![allow(unused_imports)]
 
 use super::{
-    BlockFlag, BlockKind, BlockSink, BlockSpec, BuildVisibility, liquid_stack, spec, stack,
+    BlockFlag, BlockKind, BlockSink, BlockSpec, BuildVisibility, assembler_plan, liquid_stack,
+    payload_block, payload_unit, spec, stack, unit_plan,
 };
 use super::{
     BlockGroup, EnvFlag, EnvMask, TARGET_PRIORITY_BASE, TARGET_PRIORITY_CORE,
@@ -38,6 +39,27 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         configurable: Some(true),
+        unit_plans: vec![
+            unit_plan(
+                "dagger",
+                9e+02f32,
+                vec![stack("silicon", 10), stack("lead", 10)],
+            ),
+            unit_plan(
+                "crawler",
+                6e+02f32,
+                vec![stack("silicon", 8), stack("coal", 10)],
+            ),
+            unit_plan(
+                "nova",
+                2.4e+03f32,
+                vec![
+                    stack("silicon", 30),
+                    stack("lead", 20),
+                    stack("titanium", 20),
+                ],
+            ),
+        ],
         consumes: vec![consume_power(1.2f32)],
         ..spec("ground-factory", BlockKind::UnitFactory)
     })?;
@@ -53,6 +75,14 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         configurable: Some(true),
+        unit_plans: vec![
+            unit_plan("flare", 9e+02f32, vec![stack("silicon", 15)]),
+            unit_plan(
+                "mono",
+                2.1e+03f32,
+                vec![stack("silicon", 30), stack("lead", 15)],
+            ),
+        ],
         consumes: vec![consume_power(1.2f32)],
         ..spec("air-factory", BlockKind::UnitFactory)
     })?;
@@ -72,6 +102,18 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         floating: Some(true),
         update: Some(true),
         configurable: Some(true),
+        unit_plans: vec![
+            unit_plan(
+                "risso",
+                2.7e+03f32,
+                vec![stack("silicon", 20), stack("metaglass", 35)],
+            ),
+            unit_plan(
+                "retusa",
+                2.1e+03f32,
+                vec![stack("silicon", 15), stack("titanium", 20)],
+            ),
+        ],
         consumes: vec![consume_power(1.2f32)],
         ..spec("naval-factory", BlockKind::UnitFactory)
     })?;
@@ -88,6 +130,15 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         configurable: Some(true),
+        upgrades: vec![
+            ("nova", "pulsar"),
+            ("dagger", "mace"),
+            ("crawler", "atrax"),
+            ("flare", "horizon"),
+            ("mono", "poly"),
+            ("risso", "minke"),
+            ("retusa", "oxynoe"),
+        ],
         consumes: vec![
             consume_power(3.0f32),
             consume_items(vec![stack("silicon", 40), stack("graphite", 40)]),
@@ -108,6 +159,15 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         configurable: Some(true),
+        upgrades: vec![
+            ("horizon", "zenith"),
+            ("mace", "fortress"),
+            ("poly", "mega"),
+            ("minke", "bryde"),
+            ("pulsar", "quasar"),
+            ("atrax", "spiroct"),
+            ("oxynoe", "cyerce"),
+        ],
         consumes: vec![
             consume_power(6.0f32),
             consume_items(vec![
@@ -134,6 +194,15 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         configurable: Some(true),
+        upgrades: vec![
+            ("zenith", "antumbra"),
+            ("spiroct", "arkyid"),
+            ("fortress", "scepter"),
+            ("bryde", "sei"),
+            ("mega", "quad"),
+            ("quasar", "vela"),
+            ("cyerce", "aegires"),
+        ],
         consumes: vec![
             consume_power(13.0f32),
             consume_items(vec![
@@ -161,6 +230,15 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         configurable: Some(true),
+        upgrades: vec![
+            ("antumbra", "eclipse"),
+            ("arkyid", "toxopid"),
+            ("scepter", "reign"),
+            ("sei", "omura"),
+            ("quad", "oct"),
+            ("vela", "corvus"),
+            ("aegires", "navanax"),
+        ],
         consumes: vec![
             consume_power(25.0f32),
             consume_items(vec![

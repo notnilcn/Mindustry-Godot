@@ -20,6 +20,7 @@ pub mod ctype;
 pub mod id;
 pub mod load;
 pub mod names;
+pub mod parity;
 pub mod parser_hooks;
 pub mod registries;
 pub mod settings_store;
@@ -41,6 +42,7 @@ pub use load::{
     ContentEntry, ContentRegistry, LifecyclePhase, MappedId, TemporaryMapper, content_counts,
 };
 pub use names::{NameMaps, mod_content_name_map, transform_name};
+pub use parity::{AssetManifest, AuditReport, BundleKeysFile, GoldenContent, audit, dump_golden};
 pub use registries::blocks::{
     BlockDef, BlockFlag, BlockGroup, BlockKind, BlockSpec, Blocks, BuildVisibility, Consume,
     ConsumeSpec, EnvMask,
@@ -540,7 +542,11 @@ mod content_framework {
         assert_eq!(registry.items().len(), 22);
         assert_eq!(registry.liquids().len(), 11);
         assert_eq!(registry.statuses().len(), 23);
-        assert_eq!(registry.bullets().len(), 6);
+        // M5: 6 internal bullets + 106 `UnitTypes.java` weapon bullets (turret
+        // ammo from `Blocks.java` lands with plan 10, keeping this an
+        // upstream-prefix id space).
+        assert_eq!(registry.bullets().len(), 112);
+        assert_eq!(registry.units().len(), 65);
     }
 
     /// Serialization of `ContentType` must match `name()` (used by harness dumps).

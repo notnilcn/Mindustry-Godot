@@ -14,13 +14,13 @@
 use std::collections::BTreeMap;
 
 use super::ctype::{Content, ErrorContent, Mappable, ModId};
-use super::id::{BlockId, BulletId, ItemId, LiquidId, PlanetId, StatusId, TeamEntryId};
+use super::id::{BlockId, BulletId, ItemId, LiquidId, PlanetId, StatusId, TeamEntryId, UnitTypeId};
 use super::names::{self, NameMaps};
-use super::parser_hooks::ModErrorSink;
+use super::parser_hooks::{ContentErrors, ModContentProvider, ModErrorSink};
 use super::registries::{
     blocks::BlockDef, bullets::BulletDef, commands::UnitCommandDef, items::Item, liquids::Liquid,
     loadouts::LoadoutDef, planets::PlanetDef, sectors::SectorPresetDef, stances::UnitStanceDef,
-    statuses::StatusEffect, teams::TeamEntry, weathers::WeatherDef,
+    statuses::StatusEffect, teams::TeamEntry, units::UnitTypeDef, weathers::WeatherDef,
 };
 use super::snapshot::RegistryIndexSnapshot;
 use super::tech::{TechNodeRef, TechStore, TreeId};
@@ -132,6 +132,7 @@ pub struct ContentRegistry {
     pub(crate) bullets: Vec<BulletDef>,
     pub(crate) liquids: Vec<Liquid>,
     pub(crate) statuses: Vec<StatusEffect>,
+    pub(crate) units: Vec<UnitTypeDef>,
     pub(crate) unit_commands: Vec<UnitCommandDef>,
     pub(crate) unit_stances: Vec<UnitStanceDef>,
     pub(crate) weathers: Vec<WeatherDef>,
@@ -164,6 +165,7 @@ impl ContentRegistry {
             bullets: Vec::new(),
             liquids: Vec::new(),
             statuses: Vec::new(),
+            units: Vec::new(),
             unit_commands: Vec::new(),
             unit_stances: Vec::new(),
             weathers: Vec::new(),
@@ -257,6 +259,7 @@ impl ContentRegistry {
             ContentType::Bullet => self.bullets.len(),
             ContentType::Liquid => self.liquids.len(),
             ContentType::Status => self.statuses.len(),
+            ContentType::Unit => self.units.len(),
             ContentType::UnitCommand => self.unit_commands.len(),
             ContentType::UnitStance => self.unit_stances.len(),
             ContentType::Weather => self.weathers.len(),
@@ -287,6 +290,7 @@ impl ContentRegistry {
             ContentType::Block => push_mappable!(blocks),
             ContentType::Liquid => push_mappable!(liquids),
             ContentType::Status => push_mappable!(statuses),
+            ContentType::Unit => push_mappable!(units),
             ContentType::UnitCommand => push_mappable!(unit_commands),
             ContentType::UnitStance => push_mappable!(unit_stances),
             ContentType::Weather => push_mappable!(weathers),
@@ -322,9 +326,11 @@ impl ContentRegistry {
             return Ok(());
         }
         self.sweep(LifecyclePhase::Init)?;
+        super::registries::bullets::link(self)?;
         super::registries::statuses::link(self)?;
         super::registries::stances::link(self)?;
         super::registries::sectors::link(self)?;
+        super::registries::units::link(self)?;
         self.phases.init = true;
         Ok(())
     }
@@ -373,6 +379,9 @@ impl ContentRegistry {
         for record in self.statuses.iter_mut() {
             record.after_patch()?;
         }
+        for record in self.units.iter_mut() {
+            record.after_patch()?;
+        }
         Ok(())
     }
 
@@ -408,7 +417,12 @@ impl ContentRegistry {
         for type_ in ContentType::ALL {
             lengths[type_.ordinal()] = self.type_len(type_);
         }
-        RegistryIndexSnapshot::new(lengths, self.current_mod.clone())
+        RegistryIndexSnapshot::new(
+            lengths,
+            self.names.clone(),
+            self.current_mod.clone(),
+            self.temporary_mapper.clone(),
+        )
     }
 
     /// Restores registry membership from a snapshot; payload rollback is plan
@@ -422,6 +436,7 @@ impl ContentRegistry {
                 ContentType::Bullet => self.bullets.truncate(len),
                 ContentType::Liquid => self.liquids.truncate(len),
                 ContentType::Status => self.statuses.truncate(len),
+                ContentType::Unit => self.units.truncate(len),
                 ContentType::UnitCommand => self.unit_commands.truncate(len),
                 ContentType::UnitStance => self.unit_stances.truncate(len),
                 ContentType::Weather => self.weathers.truncate(len),
@@ -432,80 +447,43 @@ impl ContentRegistry {
                 _ => {}
             }
         }
-        self.rebuild_names();
+        self.names = snapshot.names().clone();
         self.current_mod = snapshot.current_mod().cloned();
+        self.temporary_mapper = snapshot.temporary_mapper().cloned();
         self.last_added = None;
         self.arr_epoch = self.arr_epoch.wrapping_add(1);
     }
 
     /// `ContentLoader.remove`: removes a record and its names, then runs
     /// `removeContent()`.
+    ///
+    /// Rust note (plan 02 M6 deviation): like upstream, this shifts later
+    /// records down without rewriting their stored ids, so the dense-ID
+    /// invariant is only guaranteed again after a full re-creation
+    /// (`create_base_content`) or `restore_index`. Remove is therefore a
+    /// mod-unload/error path, not a live-patch operation.
     pub fn remove(&mut self, content: ContentRef) {
         match content.type_ {
-            ContentType::Item => {
-                if let Some(mut record) = take_record(&mut self.items, content.id) {
-                    record.remove_content();
-                    self.rebuild_names();
-                }
+            ContentType::Item => remove_mappable(&mut self.items, &mut self.names, content.id),
+            ContentType::Block => remove_mappable(&mut self.blocks, &mut self.names, content.id),
+            ContentType::Liquid => remove_mappable(&mut self.liquids, &mut self.names, content.id),
+            ContentType::Status => remove_mappable(&mut self.statuses, &mut self.names, content.id),
+            ContentType::Unit => remove_mappable(&mut self.units, &mut self.names, content.id),
+            ContentType::UnitCommand => {
+                remove_mappable(&mut self.unit_commands, &mut self.names, content.id)
             }
-            ContentType::Block => {
-                if let Some(mut record) = take_record(&mut self.blocks, content.id) {
-                    record.remove_content();
-                    self.rebuild_names();
-                }
+            ContentType::UnitStance => {
+                remove_mappable(&mut self.unit_stances, &mut self.names, content.id)
             }
+            ContentType::Weather => {
+                remove_mappable(&mut self.weathers, &mut self.names, content.id)
+            }
+            ContentType::Sector => remove_mappable(&mut self.sectors, &mut self.names, content.id),
+            ContentType::Planet => remove_mappable(&mut self.planets, &mut self.names, content.id),
+            ContentType::Team => remove_mappable(&mut self.teams, &mut self.names, content.id),
             ContentType::Bullet => {
                 if let Some(mut record) = take_record(&mut self.bullets, content.id) {
                     record.remove_content();
-                    self.rebuild_names();
-                }
-            }
-            ContentType::Liquid => {
-                if let Some(mut record) = take_record(&mut self.liquids, content.id) {
-                    record.remove_content();
-                    self.rebuild_names();
-                }
-            }
-            ContentType::Status => {
-                if let Some(mut record) = take_record(&mut self.statuses, content.id) {
-                    record.remove_content();
-                    self.rebuild_names();
-                }
-            }
-            ContentType::UnitCommand => {
-                if let Some(mut record) = take_record(&mut self.unit_commands, content.id) {
-                    record.remove_content();
-                    self.rebuild_names();
-                }
-            }
-            ContentType::UnitStance => {
-                if let Some(mut record) = take_record(&mut self.unit_stances, content.id) {
-                    record.remove_content();
-                    self.rebuild_names();
-                }
-            }
-            ContentType::Weather => {
-                if let Some(mut record) = take_record(&mut self.weathers, content.id) {
-                    record.remove_content();
-                    self.rebuild_names();
-                }
-            }
-            ContentType::Sector => {
-                if let Some(mut record) = take_record(&mut self.sectors, content.id) {
-                    record.remove_content();
-                    self.rebuild_names();
-                }
-            }
-            ContentType::Planet => {
-                if let Some(mut record) = take_record(&mut self.planets, content.id) {
-                    record.remove_content();
-                    self.rebuild_names();
-                }
-            }
-            ContentType::Team => {
-                if let Some(mut record) = take_record(&mut self.teams, content.id) {
-                    record.remove_content();
-                    self.rebuild_names();
                 }
             }
             ContentType::Error => {
@@ -516,12 +494,42 @@ impl ContentRegistry {
             _ => {}
         }
         self.last_added = None;
+        self.arr_epoch = self.arr_epoch.wrapping_add(1);
     }
 
-    /// `ContentLoader.removeLast`: removes the most recently added record.
+    /// `ContentLoader.removeLast`: removes the last added record only when it is
+    /// still the last element of its type list (`peek() == lastAdded`).
     pub fn remove_last(&mut self) {
-        if let Some(last) = self.last_added.take() {
+        let Some(last) = self.last_added else {
+            return;
+        };
+        let len = self.type_len(last.type_);
+        if last.id as usize + 1 == len {
             self.remove(last);
+        }
+    }
+
+    /// `mods.loadContent()` equivalent (plan 20 drives the provider): loads mod
+    /// content into the registry, then materializes item stances for new items
+    /// (`UnitStances.loadAfterMods`). Per-content failures inside the provider are
+    /// its own concern; a bulk failure is returned to the caller.
+    pub fn create_mod_content(
+        &mut self,
+        provider: &mut dyn ModContentProvider,
+    ) -> Result<(), ContentErrors> {
+        let mut errors = Vec::new();
+        if let Err(mut provider_errors) = provider.load_content(self) {
+            errors.append(&mut provider_errors);
+        }
+        // Upstream runs `UnitStances.loadAfterMods` after `loadContent` even
+        // when individual assets produced warnings.
+        if let Err(error) = super::registries::stances::load_after_mods(self) {
+            errors.push(error);
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
         }
     }
 
@@ -585,6 +593,11 @@ impl ContentRegistry {
     /// Convenience lookup: block id by name.
     pub fn block_id(&self, name: &str) -> Option<BlockId> {
         self.block_by_name(name).map(|record| record.id)
+    }
+
+    /// Convenience lookup: unit type id by name.
+    pub fn unit_id(&self, name: &str) -> Option<UnitTypeId> {
+        self.unit_by_name(name).map(|record| record.id)
     }
 
     /// Convenience lookup: planet id by name.
@@ -707,6 +720,7 @@ impl ContentRegistry {
         sweep_type!(bullets, BulletDef);
         sweep_type!(liquids, Liquid);
         sweep_type!(statuses, StatusEffect);
+        sweep_type!(units, UnitTypeDef);
         sweep_type!(unit_commands, UnitCommandDef);
         sweep_type!(unit_stances, UnitStanceDef);
         sweep_type!(weathers, WeatherDef);
@@ -720,28 +734,6 @@ impl ContentRegistry {
         }
         Ok(())
     }
-
-    fn rebuild_names(&mut self) {
-        let mut names = NameMaps::new();
-        macro_rules! insert_names {
-            ($field:ident, $type_:expr) => {
-                for record in &self.$field {
-                    names.insert($type_, &record.name, record.id.raw());
-                }
-            };
-        }
-        insert_names!(items, ContentType::Item);
-        insert_names!(blocks, ContentType::Block);
-        insert_names!(liquids, ContentType::Liquid);
-        insert_names!(statuses, ContentType::Status);
-        insert_names!(unit_commands, ContentType::UnitCommand);
-        insert_names!(unit_stances, ContentType::UnitStance);
-        insert_names!(weathers, ContentType::Weather);
-        insert_names!(sectors, ContentType::Sector);
-        insert_names!(planets, ContentType::Planet);
-        insert_names!(teams, ContentType::Team);
-        self.names = names;
-    }
 }
 
 /// Removes and returns the record at raw `id` (`None` when out of range).
@@ -751,6 +743,16 @@ fn take_record<T>(records: &mut Vec<T>, id: u16) -> Option<T> {
         Some(records.remove(index))
     } else {
         None
+    }
+}
+
+/// Removes a mappable record and drops its name (`ContentLoader.remove`).
+fn remove_mappable<T: Mappable>(records: &mut Vec<T>, names: &mut NameMaps, id: u16) {
+    if let Some(mut record) = take_record(records, id) {
+        let name = record.name().to_owned();
+        let raw = record.content_id();
+        names.remove(T::TYPE, &name, raw);
+        record.remove_content();
     }
 }
 
@@ -888,6 +890,17 @@ impl ContentRegistry {
         statuses,
         StatusEffect,
         StatusId
+    );
+    mappable_accessors!(
+        add_unit,
+        units,
+        units_mut,
+        unit,
+        unit_mut,
+        unit_by_name,
+        units,
+        UnitTypeDef,
+        UnitTypeId
     );
     mappable_accessors!(
         add_unit_command,

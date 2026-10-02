@@ -16,7 +16,7 @@ use super::{NodeObjective as obj, TechTreeBuilder};
 
 /// Loads the tree into `t`.
 pub fn load(t: &mut TechTreeBuilder<'_>) {
-    t.root("Erekir", "core-bastion", true);
+    t.root("erekir", "core-bastion", true);
     t.set_cost_multipliers(&[
         ("copper", 0.9),
         ("lead", 0.9),
@@ -377,22 +377,32 @@ pub fn rebalance_bullet(
     }
 }
 
-/// `ErekirTechTree.rebalance()`.
+/// `ErekirTechTree.rebalance()` (`ErekirTechTree.java:26-48`).
 ///
-/// Upstream scales every bullet used by (a) `ErekirUnitType` units and (b)
-/// turrets whose requirements include at least one item outside
-/// `Items.serpuloItems`. Those registries land in M5/M3; until then this is a
-/// no-op and [`rebalance_bullet`] carries the tested scale-once guard. The
-/// iteration is re-enabled by the plans that add units/blocks (plan 02 M2 note).
+/// Scales `damage *= 0.75` once per bullet id for (a) every weapon bullet of
+/// `ErekirUnitType` units (which includes `TankUnitType` by inheritance, but
+/// not `MissileUnitType`/`NeoplasmUnitType`), and (b) turret ammo bullets of
+/// turrets with non-Serpulo requirements. Part (b) stays a documented no-op
+/// until turret ammo lands with plan 10 (`Blocks.java` inline ammo bullets are
+/// not registered yet; see the plan-02 M5 changelog).
 pub fn rebalance(registry: &mut ContentRegistry) {
     let mut balanced = RebalanceSet::new();
-    // Reserved iteration (M3/M5):
-    //   for unit in registry.units() if unit.kind is ErekirUnitType:
-    //       for weapon in unit.weapons: rebalance_bullet(registry, weapon.bullet, &mut balanced)
-    //   for block in registry.blocks() if turret and requirements outside serpulo_items:
-    //       for bullet in block.turret_bullets(): rebalance_bullet(registry, bullet, &mut balanced)
-    let _ = &mut balanced;
-    let _ = registry;
+    let mut bullets: Vec<BulletId> = Vec::new();
+    for unit in registry.units() {
+        if !matches!(
+            unit.kind,
+            super::super::registries::units::UnitKind::ErekirUnitType
+                | super::super::registries::units::UnitKind::TankUnitType
+        ) {
+            continue;
+        }
+        for weapon in &unit.weapons {
+            bullets.push(weapon.bullet.id);
+        }
+    }
+    for bullet in bullets {
+        rebalance_bullet(registry, bullet, &mut balanced);
+    }
 }
 
 #[cfg(test)]

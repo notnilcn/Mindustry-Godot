@@ -25,16 +25,8 @@ use super::registries::sectors::SectorPresetDef;
 use super::registries::stances::UnitStanceDef;
 use super::registries::statuses::StatusEffect;
 use super::registries::teams::TeamEntry;
+use super::registries::units::UnitTypeDef;
 use super::registries::weathers::WeatherDef;
-
-/// Marker types for content kinds whose records land in later milestones.
-///
-/// M5 replaces the unit marker with the real record type in `registries/units/`;
-/// the alias definitions below are the only place that changes.
-pub mod markers {
-    /// Placeholder for `registries::units::UnitTypeDef` (plan 02 M5).
-    pub enum UnitType {}
-}
 
 /// A dense, per-`ContentType` content id (`short` upstream), tagged with its
 /// record type so IDs never mix across content kinds.
@@ -140,7 +132,7 @@ pub type LiquidId = ContentId<Liquid>;
 /// Id of a status effect in the status content space (`ContentType.status`).
 pub type StatusId = ContentId<StatusEffect>;
 /// Id of a unit type in the unit content space (`ContentType.unit`).
-pub type UnitTypeId = ContentId<markers::UnitType>;
+pub type UnitTypeId = ContentId<UnitTypeDef>;
 /// Id of a weather in the weather content space (`ContentType.weather`).
 pub type WeatherId = ContentId<WeatherDef>;
 /// Id of a sector preset in the sector content space (`ContentType.sector`).
@@ -158,7 +150,7 @@ impl BlockId {
     /// The always-present empty block (`air`, id `0`).
     pub const AIR: BlockId = BlockId::new(0);
     /// Upstream `stone-wall` id in `Blocks.java` order (pinned by a test).
-    pub const STONE_WALL: BlockId = BlockId::new(79);
+    pub const STONE_WALL: BlockId = BlockId::new(80);
 }
 
 impl ItemId {

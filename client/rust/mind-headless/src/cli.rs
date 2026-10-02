@@ -164,4 +164,36 @@ pub enum ContentCommand {
 
     /// Negative load-order scenario (liquids before statuses) — must fail.
     LoadOrderBad,
+
+    /// Dump the parity golden snapshot (`parity/golden_content.json` shape).
+    Dump {
+        /// Write the deterministic golden JSON here.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Bundle keys file used to capture localized names.
+        #[arg(long)]
+        bundle: Option<PathBuf>,
+        /// Emit the JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Run the mechanical parity audit (plan 02 §7b).
+    Audit {
+        /// Golden file (default `parity/golden_content.json`).
+        #[arg(long)]
+        golden: Option<PathBuf>,
+        /// Bundle keys file (default `parity/bundle_keys.json` when present).
+        #[arg(long)]
+        bundle: Option<PathBuf>,
+        /// Asset manifest (default `parity/asset_manifest.json` when present).
+        #[arg(long)]
+        manifest: Option<PathBuf>,
+        /// Write the markdown audit report here.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Emit the JSON audit report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
 }

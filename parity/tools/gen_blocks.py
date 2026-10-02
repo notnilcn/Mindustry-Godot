@@ -496,6 +496,19 @@ def expand_stack_list(value):
 
 def call_function(name, args, env):
     base = name.split(".")[-1]
+    if name.startswith("PayloadStack") and base == "list":
+        pairs = []
+        index = 0
+        while index + 1 < len(args):
+            ref, amount = args[index], args[index + 1]
+            if isinstance(ref, tuple) and ref and ref[0] == "content":
+                pairs.append((ref[2], False, int(num(amount))))
+            elif isinstance(ref, tuple) and ref and ref[0] == "block":
+                pairs.append((ref[1], True, int(num(amount))))
+            else:
+                raise EvalError(f"bad payload ref {ref!r}")
+            index += 2
+        return ("payloadlist", pairs)
     if base == "with":
         pairs = []
         index = 0
@@ -634,6 +647,7 @@ CURATED_FIELDS = {
     "inEditor", "placeablePlayer", "placeableLiquid", "placeableOn", "insulated", "absorbLasers",
     "allowCorePlacement", "playerUnmineable", "wallOre", "itemDrop", "oreDefault", "oreThreshold",
     "oreScale", "fogRadius", "region", "generateIcons", "mapColor", "hasColor", "squareSprite",
+    "plans", "upgrades",
 }
 
 CAMEL_TO_SNAKE = {
@@ -809,6 +823,14 @@ def chain_assign(block, lvalue_text, rhs_text, env):
 
 
 def handle_assignment(block, lvalue, rhs, env):
+    seq_with = re.match(r"^(?:Seq\.)?with\s*\((.*)\)\s*$", rhs.strip(), re.S)
+    if seq_with is not None and lvalue in ("plans", "upgrades"):
+        for arg in split_args(seq_with.group(1)):
+            if lvalue == "plans":
+                add_plan_arg(block, arg, env)
+            else:
+                add_upgrade_arg(block, arg, env)
+        return
     chain_assign(block, lvalue, rhs, env)
 
 
@@ -907,7 +929,55 @@ def apply_consume_modifiers(block, consume):
     block.consumes.append(consume)
 
 
+def add_plan_arg(block, arg, env):
+    arg = arg.strip()
+    m = re.match(r"new\s+(UnitPlan|AssemblerUnitPlan)\s*\((.*)\)\s*$", arg, re.S)
+    if not m:
+        block.notes.append(f"unparsed plan `{arg[:60]}`")
+        return
+    kind = m.group(1)
+    inner = split_args(m.group(2))
+    unit = try_eval(inner[0], env, block)
+    time = float(num(try_eval(inner[1], env, block)))
+    if not (isinstance(unit, tuple) and unit and unit[0] == "content"):
+        block.notes.append(f"unparsed plan unit `{inner[0][:60]}`")
+        return
+    if kind == "UnitPlan":
+        stacks = expand_stack_list(try_eval(inner[2], env, block))
+        block.overrides.setdefault("unit_plans", []).append((unit[2], time, stacks))
+    else:
+        payloads = try_eval(inner[2], env, block)
+        if not (isinstance(payloads, tuple) and payloads[0] == "payloadlist"):
+            block.notes.append(f"unparsed assembler payloads `{inner[2][:60]}`")
+            return
+        block.overrides.setdefault("assembler_plans", []).append((unit[2], time, payloads[1]))
+
+
+def add_upgrade_arg(block, arg, env):
+    arg = arg.strip()
+    m = re.match(r"new\s+UnitType\[\]\s*\{(.*)\}\s*$", arg, re.S)
+    if not m:
+        block.notes.append(f"unparsed upgrade `{arg[:60]}`")
+        return
+    pair = split_args(m.group(1))
+    from_u = try_eval(pair[0], env, block)
+    to_u = try_eval(pair[1], env, block)
+    if (isinstance(from_u, tuple) and from_u[0] == "content"
+            and isinstance(to_u, tuple) and to_u[0] == "content"):
+        block.overrides.setdefault("upgrades", []).append((from_u[2], to_u[2]))
+    else:
+        block.notes.append(f"unparsed upgrade pair `{arg[:60]}`")
+
+
 def handle_mutation(block, target, method, args_text, env):
+    if target == "plans" and method == "add":
+        for arg in split_args(args_text):
+            add_plan_arg(block, arg, env)
+        return
+    if target == "upgrades" and method == "addAll":
+        for arg in split_args(args_text):
+            add_upgrade_arg(block, arg, env)
+        return
     if target == "researchCostMultipliers" and method == "put":
         args = split_args(args_text)
         item = try_eval(args[0], env, block)
@@ -1141,12 +1211,39 @@ def parse_top_statement(parsed, statement, region, env):  # noqa: F811
                 raw.set("generateIcons", False)
                 parse_body(raw, raw.body_text, env)
                 parsed.append(raw)
-            return
-        for sub in split_statements(inner):
-            parse_top_statement(parsed, sub, region, env)
+        else:
+            for sub in split_statements(inner):
+                parse_top_statement(parsed, sub, region, env)
+        # `split_statements` only breaks on `;`, so a `for(...){...}` loop with
+        # no trailing semicolon swallows the next declaration (e.g. `deepwater`
+        # after the `ConstructBlock` loop). Parse the remainder after `}`.
+        remainder = s[brace + len(inner) + 2:].strip()
+        if remainder:
+            parse_top_statement(parsed, remainder, region, env)
         return
     m = re.match(r"^(?:this\.)?([A-Za-z_$][\w$]*)\s*=\s*new\s+([\w.]+)\s*(\(.*)$", s, re.S)
     if not m:
+        # Free construction (`new LegacyMechPad("legacy-mech-pad");`) registers a
+        # content record without a field assignment.
+        bare = re.match(r"^new\s+([\w.]+)\s*(\(.*)$", s, re.S)
+        if bare:
+            cls = bare.group(1).split(".")[-1]
+            rest = bare.group(2)
+            close = find_matching(rest, "(", ")")
+            arg_text = rest[1:close]
+            after = rest[close + 1:]
+            body = ""
+            if "{{" in after:
+                body = balanced(after, after.index("{{") + 1)
+            name = None
+            if arg_text.strip().startswith('"'):
+                end = arg_text.index('"', 1)
+                name = arg_text[1:end]
+            if name is not None:
+                raw = RawBlock(name.replace("-", "_"), cls, name, region, body)
+                parse_body(raw, body, env)
+                parsed.append(raw)
+                return
         local = re.match(r"^(?:var|[A-Za-z_][\w<>\[\], .]*)\s+([A-Za-z_$][\w$]*)\s*=\s*(.*)$", s, re.S)
         if local:
             try:
@@ -1222,6 +1319,7 @@ RUST_FIELD_ORDER = [
     "insulated", "absorb_lasers", "allow_core_placement", "player_unmineable", "wall_ore",
     "item_drop", "ore_default", "ore_threshold", "ore_scale", "fog_radius", "region",
     "generate_icons", "map_color", "has_color", "square_sprite",
+    "unit_plans", "upgrades", "assembler_plans",
 ]
 
 BOOL_FIELDS = {
@@ -1445,6 +1543,29 @@ def render_fields(merged):
         elif field == "region":
             if isinstance(value, tuple) and value[0] == "string":
                 lines.append(f'        region: Some("{value[1]}"),')
+        elif field == "unit_plans":
+            if not isinstance(value, list) or not value:
+                continue
+            plans = []
+            for unit, time, stacks in value:
+                inner = ", ".join(f'stack("{item}", {amount})' for item, amount in stacks)
+                plans.append(f'unit_plan("{unit}", {fmt_num(time, f32=True)}, vec![{inner}])')
+            lines.append(f"        unit_plans: vec![{', '.join(plans)}],")
+        elif field == "upgrades":
+            if not isinstance(value, list) or not value:
+                continue
+            pairs = ", ".join(f'("{from_u}", "{to_u}")' for from_u, to_u in value)
+            lines.append(f"        upgrades: vec![{pairs}],")
+        elif field == "assembler_plans":
+            if not isinstance(value, list) or not value:
+                continue
+            plans = []
+            for unit, time, payloads in value:
+                inner = ", ".join(
+                    (f'payload_block("{name}", {amount})' if is_block else f'payload_unit("{name}", {amount})')
+                    for name, is_block, amount in payloads)
+                plans.append(f'assembler_plan("{unit}", {fmt_num(time, f32=True)}, vec![{inner}])')
+            lines.append(f"        assembler_plans: vec![{', '.join(plans)}],")
         elif field in BOOL_FIELDS:
             lines.append(f"        {field}: Some({'true' if truthy(value) else 'false'}),")
         elif field in INT_FIELDS:
@@ -1513,7 +1634,7 @@ def main():
 
 #![allow(unused_imports)]
 
-use super::{{spec, stack, liquid_stack, BlockFlag, BlockKind, BlockSink, BlockSpec, BuildVisibility}};
+use super::{{spec, stack, liquid_stack, unit_plan, assembler_plan, payload_block, payload_unit, BlockFlag, BlockKind, BlockSink, BlockSpec, BuildVisibility}};
 use super::{{consume_coolant, consume_item, consume_items, consume_liquid, consume_liquids, consume_optional, consume_power, consume_power_buffered, rgba_hex}};
 use super::{{BlockGroup, EnvFlag, EnvMask, TARGET_PRIORITY_BASE, TARGET_PRIORITY_CORE, TARGET_PRIORITY_TRANSPORT, TARGET_PRIORITY_TURRET, TARGET_PRIORITY_UNDER, TARGET_PRIORITY_WALL}};
 use crate::content::{{Category, ContentError}};

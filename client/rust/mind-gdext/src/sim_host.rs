@@ -16,7 +16,10 @@ use godot::prelude::*;
 use crate::camera::MindCamera2D;
 use crate::settings;
 use mind_core::command::Command;
-use mind_core::content::BlockId;
+use mind_core::content::{
+    BlockId, ContentRegistry, ContentType, MemoryBundle, MemoryUnlockStore, content_counts,
+    create_base_content,
+};
 use mind_core::scenario::{Scenario, ScenarioPlayer};
 use mind_core::sim::{FixedStepRunner, Sim};
 
@@ -43,6 +46,10 @@ pub struct MindSimHost {
     capture: Option<CaptureRequest>,
     /// Set whenever the world changed since the last `world_changed` emission.
     world_dirty: bool,
+    /// Read-only content registry snapshot for the inspector `Content` tab
+    /// (plan 02 §3.7). Plan 05 makes the sim own the `Content` resource; this
+    /// view-side copy is dropped when that lands.
+    content_snapshot: Option<ContentRegistry>,
 }
 
 #[godot_api]
@@ -57,10 +64,25 @@ impl INode for MindSimHost {
             runner: FixedStepRunner::new(),
             capture: None,
             world_dirty: false,
+            content_snapshot: None,
         }
     }
 
     fn ready(&mut self) {
+        self.content_snapshot =
+            match create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+                .and_then(|mut registry| {
+                    registry.init()?;
+                    registry.post_init()?;
+                    Ok(registry)
+                }) {
+                Ok(registry) => Some(registry),
+                Err(error) => {
+                    log::warn!("content snapshot unavailable: {error}");
+                    None
+                }
+            };
+
         if let Some(saved) = settings::read()
             && let Some(name) = saved.selected_block
             && let Ok(id) = self.sim.content().id(&name)
@@ -220,6 +242,44 @@ impl MindSimHost {
     #[func]
     pub fn get_checksum(&self) -> GString {
         GString::from(self.sim.checksum_hex().as_str())
+    }
+
+    /// Per-type content counts for the inspector `Content` tab (plan 02 §3.7).
+    /// Read-only; plan 05 moves this to the sim-owned `Content` resource.
+    #[func]
+    pub fn content_counts(&self) -> Dictionary<GString, i64> {
+        let mut out = Dictionary::<GString, i64>::new();
+        let Some(registry) = self.content_snapshot.as_ref() else {
+            return out;
+        };
+        for (type_, count) in content_counts(registry) {
+            out.set(&GString::from(type_.name()), count as i64);
+        }
+        out
+    }
+
+    /// Ordered content names of `type_name` (`content_list("item")`, plan 02
+    /// §3.7). Unknown types return an empty array; read-only.
+    #[func]
+    pub fn content_list(&self, type_name: GString) -> PackedStringArray {
+        let mut out = PackedStringArray::new();
+        let Some(registry) = self.content_snapshot.as_ref() else {
+            return out;
+        };
+        let requested = type_name.to_string();
+        let Some(type_) = ContentType::ALL
+            .iter()
+            .copied()
+            .find(|type_| type_.name() == requested)
+        else {
+            return out;
+        };
+        for entry in registry.entries(type_) {
+            if let Some(name) = entry.name {
+                out.push(&GString::from(name));
+            }
+        }
+        out
     }
 
     /// Completed sim ticks.

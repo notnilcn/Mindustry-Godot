@@ -4,8 +4,8 @@
 //!
 //! Ported from `core/src/mindustry/content/*.java`. `create_base_content` follows
 //! the upstream `ContentLoader.createBaseContent()` order; M1 ports
-//! items/statuses/liquids/bullets, M2 the small registries + tech trees, M3/M5
-//! blocks/units.
+//! items/statuses/liquids/bullets, M2 the small registries + tech trees, M3/M4
+//! blocks, M5 units.
 
 pub mod blocks;
 pub mod bullets;
@@ -14,11 +14,14 @@ pub mod fx_meta;
 pub mod items;
 pub mod liquids;
 pub mod loadouts;
+pub mod pal;
 pub mod planets;
 pub mod sectors;
+pub mod sound_meta;
 pub mod stances;
 pub mod statuses;
 pub mod teams;
+pub mod units;
 pub mod weathers;
 
 use super::ContentError;
@@ -46,7 +49,7 @@ pub fn create_base_content(
     statuses::load(&mut registry, bundle, store)?;
     liquids::load(&mut registry, bundle, store)?;
     bullets::load(&mut registry)?;
-    // UnitTypes (M5) lands before Blocks in upstream order.
+    units::load_into(&mut registry, bundle, store)?;
     blocks::load_into(&mut registry, bundle, store)?;
     loadouts::load(&mut registry)?;
     weathers::load(&mut registry, bundle, store)?;

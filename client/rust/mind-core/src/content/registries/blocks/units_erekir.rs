@@ -9,7 +9,8 @@
 #![allow(unused_imports)]
 
 use super::{
-    BlockFlag, BlockKind, BlockSink, BlockSpec, BuildVisibility, liquid_stack, spec, stack,
+    BlockFlag, BlockKind, BlockSink, BlockSpec, BuildVisibility, assembler_plan, liquid_stack,
+    payload_block, payload_unit, spec, stack, unit_plan,
 };
 use super::{
     BlockGroup, EnvFlag, EnvMask, TARGET_PRIORITY_BASE, TARGET_PRIORITY_CORE,
@@ -38,6 +39,11 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         fog_radius: Some(3),
+        unit_plans: vec![unit_plan(
+            "stell",
+            2.1e+03f32,
+            vec![stack("beryllium", 40), stack("silicon", 50)],
+        )],
         consumes: vec![consume_power(1.5f32)],
         ..spec("tank-fabricator", BlockKind::UnitFactory)
     })?;
@@ -53,6 +59,11 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         fog_radius: Some(3),
+        unit_plans: vec![unit_plan(
+            "elude",
+            2.4e+03f32,
+            vec![stack("graphite", 50), stack("silicon", 70)],
+        )],
         consumes: vec![consume_power(1.5f32)],
         ..spec("ship-fabricator", BlockKind::UnitFactory)
     })?;
@@ -72,6 +83,11 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         fog_radius: Some(3),
+        unit_plans: vec![unit_plan(
+            "merui",
+            2.4e+03f32,
+            vec![stack("beryllium", 50), stack("silicon", 70)],
+        )],
         consumes: vec![consume_power(1.5f32)],
         ..spec("mech-fabricator", BlockKind::UnitFactory)
     })?;
@@ -89,6 +105,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         configurable: Some(true),
+        upgrades: vec![("stell", "locus")],
         consumes: vec![
             consume_power(3.0f32),
             consume_liquid("hydrogen", 0.05f32),
@@ -116,6 +133,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         configurable: Some(true),
+        upgrades: vec![("elude", "avert")],
         consumes: vec![
             consume_power(2.5f32),
             consume_liquid("hydrogen", 0.05f32),
@@ -137,6 +155,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         configurable: Some(true),
+        upgrades: vec![("merui", "cleroi")],
         consumes: vec![
             consume_power(2.5f32),
             consume_liquid("hydrogen", 0.05f32),
@@ -159,6 +178,11 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         configurable: Some(true),
+        upgrades: vec![
+            ("locus", "precept"),
+            ("cleroi", "anthicus"),
+            ("avert", "obviate"),
+        ],
         consumes: vec![
             consume_power(4.5f32),
             consume_liquid("nitrogen", 0.16666667f32),
@@ -179,6 +203,24 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         research_cost_multiplier: Some(0.4f32),
         group: Some(BlockGroup::Units),
         flags: vec![BlockFlag::UnitAssembler],
+        assembler_plans: vec![
+            assembler_plan(
+                "vanquish",
+                3e+03f32,
+                vec![
+                    payload_unit("stell", 4),
+                    payload_block("tungsten-wall-large", 10),
+                ],
+            ),
+            assembler_plan(
+                "conquer",
+                1.08e+04f32,
+                vec![
+                    payload_unit("locus", 6),
+                    payload_block("carbide-wall-large", 20),
+                ],
+            ),
+        ],
         consumes: vec![consume_power(2.5f32), consume_liquid("cyanogen", 0.15f32)],
         ..spec("tank-assembler", BlockKind::UnitAssembler)
     })?;
@@ -195,6 +237,24 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         ],
         group: Some(BlockGroup::Units),
         flags: vec![BlockFlag::UnitAssembler],
+        assembler_plans: vec![
+            assembler_plan(
+                "quell",
+                3.6e+03f32,
+                vec![
+                    payload_unit("elude", 4),
+                    payload_block("beryllium-wall-large", 12),
+                ],
+            ),
+            assembler_plan(
+                "disrupt",
+                1.08e+04f32,
+                vec![
+                    payload_unit("avert", 6),
+                    payload_block("carbide-wall-large", 20),
+                ],
+            ),
+        ],
         consumes: vec![consume_power(2.5f32), consume_liquid("cyanogen", 0.2f32)],
         ..spec("ship-assembler", BlockKind::UnitAssembler)
     })?;
@@ -211,6 +271,24 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         ],
         group: Some(BlockGroup::Units),
         flags: vec![BlockFlag::UnitAssembler],
+        assembler_plans: vec![
+            assembler_plan(
+                "tecta",
+                4.2e+03f32,
+                vec![
+                    payload_unit("merui", 5),
+                    payload_block("tungsten-wall-large", 12),
+                ],
+            ),
+            assembler_plan(
+                "collaris",
+                1.08e+04f32,
+                vec![
+                    payload_unit("cleroi", 6),
+                    payload_block("carbide-wall-large", 20),
+                ],
+            ),
+        ],
         consumes: vec![consume_power(3.0f32), consume_liquid("cyanogen", 0.2f32)],
         ..spec("mech-assembler", BlockKind::UnitAssembler)
     })?;

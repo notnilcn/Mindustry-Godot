@@ -9,7 +9,8 @@
 #![allow(unused_imports)]
 
 use super::{
-    BlockFlag, BlockKind, BlockSink, BlockSpec, BuildVisibility, liquid_stack, spec, stack,
+    BlockFlag, BlockKind, BlockSink, BlockSpec, BuildVisibility, assembler_plan, liquid_stack,
+    payload_block, payload_unit, spec, stack, unit_plan,
 };
 use super::{
     BlockGroup, EnvFlag, EnvMask, TARGET_PRIORITY_BASE, TARGET_PRIORITY_CORE,
@@ -23,6 +24,48 @@ use crate::content::{Category, ContentError};
 
 /// Loads the `legacy` region in upstream order.
 pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
+    sink.push(BlockSpec {
+        has_power: Some(true),
+        update: Some(true),
+        in_editor: Some(false),
+        generate_icons: Some(false),
+        ..spec("legacy-mech-pad", BlockKind::LegacyMechPad)
+    })?;
+
+    sink.push(BlockSpec {
+        has_items: Some(true),
+        has_power: Some(true),
+        update: Some(true),
+        in_editor: Some(false),
+        generate_icons: Some(false),
+        ..spec("legacy-unit-factory", BlockKind::LegacyUnitFactory)
+    })?;
+
+    sink.push(BlockSpec {
+        has_items: Some(true),
+        has_power: Some(true),
+        update: Some(true),
+        in_editor: Some(false),
+        generate_icons: Some(false),
+        ..spec("legacy-unit-factory-air", BlockKind::LegacyUnitFactory)
+    })?;
+
+    sink.push(BlockSpec {
+        has_items: Some(true),
+        has_power: Some(true),
+        update: Some(true),
+        in_editor: Some(false),
+        generate_icons: Some(false),
+        ..spec("legacy-unit-factory-ground", BlockKind::LegacyUnitFactory)
+    })?;
+
+    sink.push(BlockSpec {
+        size: Some(2),
+        update: Some(true),
+        in_editor: Some(false),
+        generate_icons: Some(false),
+        ..spec("command-center", BlockKind::LegacyCommandCenter)
+    })?;
     let _ = sink;
     Ok(())
 }
