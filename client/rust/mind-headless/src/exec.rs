@@ -2490,6 +2490,11 @@ fn cmd_world_gen(
                 let mut planet_gen = BlankPlanetGenerator::new(0);
                 planet_gen.generate(&mut grid.tiles, &params, &content);
             }
+            "tantros" => {
+                use mind_core::maps::planet::TantrosPlanetGenerator;
+                let mut planet_gen = TantrosPlanetGenerator::new();
+                planet_gen.generate(&mut grid.tiles, &params, &content);
+            }
             other => {
                 return Err(anyhow!(
                     "planet generator `{other}` lands with plan 06 M8 (sector {sector})"

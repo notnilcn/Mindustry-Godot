@@ -157,6 +157,8 @@ pub struct PlanetGenerator {
     pub seed: i32,
     /// Current sector plane.
     pub sector: Option<SectorRect>,
+    /// Sector-rect scale (`getSizeScl`).
+    pub size_scl: f32,
 }
 
 impl std::fmt::Debug for PlanetGenerator {
@@ -178,12 +180,13 @@ impl PlanetGenerator {
             base_seed,
             seed: 0,
             sector: None,
+            size_scl: 3200.0,
         }
     }
 
     /// `PlanetGenerator.getSizeScl`.
     pub fn get_size_scl(&self) -> f32 {
-        3200.0
+        self.size_scl
     }
 
     /// `PlanetGenerator.getSectorSize` (always even).
