@@ -50,6 +50,10 @@ pub struct MindSimHost {
     /// (plan 02 §3.7). Plan 05 makes the sim own the `Content` resource; this
     /// view-side copy is dropped when that lands.
     content_snapshot: Option<ContentRegistry>,
+    /// Monotonic world-mutation counter (incremented by `emit_world_changed`).
+    /// The plan-16 renderer uses it to invalidate chunk meshes without wiring
+    /// raw tile coords across the view boundary (plan 16 §3.5).
+    revision: u64,
 }
 
 #[godot_api]
@@ -68,6 +72,7 @@ impl INode for MindSimHost {
             capture: None,
             world_dirty: false,
             content_snapshot: None,
+            revision: 0,
         }
     }
 
@@ -289,6 +294,12 @@ impl MindSimHost {
     #[func]
     pub fn get_tick(&self) -> i64 {
         self.sim.tick_count() as i64
+    }
+
+    /// Monotonic world-mutation counter (renderer chunk invalidation).
+    #[func]
+    pub fn world_revision(&self) -> i64 {
+        self.revision as i64
     }
 
     /// Monotonic update counter (`GameState.updateId`).
@@ -553,6 +564,16 @@ impl MindSimHost {
         (self.sim.grid.width(), self.sim.grid.height())
     }
 
+    /// Read-only world grid for the plan-16 floor/block bakers.
+    pub fn grid(&self) -> &mind_core::world::WorldGrid {
+        &self.sim.grid
+    }
+
+    /// Read-only content registry snapshot for block draw metadata.
+    pub fn content_registry(&self) -> Option<&ContentRegistry> {
+        self.content_snapshot.as_ref()
+    }
+
     /// Applies one immediate command; `false` when `mind-core` rejects it.
     fn apply_command(&mut self, command: Command) -> bool {
         match self.sim.apply(command) {
@@ -607,6 +628,7 @@ impl MindSimHost {
     fn emit_world_changed(&mut self) {
         if self.world_dirty {
             self.world_dirty = false;
+            self.revision = self.revision.wrapping_add(1);
             let _ = self.base_mut().emit_signal("world_changed", &[]);
         }
     }

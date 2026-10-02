@@ -244,6 +244,33 @@ impl MindAssets {
         self.find_region(name)
     }
 
+    /// Page texture by index (plan 16 floor/block mesh ownership).
+    ///
+    /// Read-only companion to [`find_region`](Self::find_region): the mesh bake
+    /// needs the raw page texture plus normalized UVs, not an `AtlasTexture`.
+    #[func]
+    pub fn page_texture(&self, page: i64) -> Option<Gd<ImageTexture>> {
+        usize::try_from(page)
+            .ok()
+            .and_then(|index| self.pages.get(index).cloned())
+    }
+
+    /// `[x, y, w, h, page]` geometry for a region, or empty when absent.
+    ///
+    /// Read-only; the caller applies the plan-16 `error` fallback.
+    #[func]
+    pub fn region_geometry(&self, name: GString) -> PackedInt32Array {
+        let mut out = PackedInt32Array::new();
+        if let Some(region) = self.index.find(&name.to_string()) {
+            out.push(region.x);
+            out.push(region.y);
+            out.push(region.w);
+            out.push(region.h);
+            out.push(region.page as i32);
+        }
+        out
+    }
+
     /// Ninepatch splits for a region (`[]` when absent).
     #[func]
     pub fn tex_splits(&self, name: GString) -> PackedInt32Array {
