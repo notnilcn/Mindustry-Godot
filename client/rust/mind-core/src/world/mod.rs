@@ -11,6 +11,8 @@ use bevy_ecs::entity::Entity;
 
 use crate::content::BlockId;
 
+pub mod blocks;
+
 /// Integer tile position.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TilePos(pub i16, pub i16);
