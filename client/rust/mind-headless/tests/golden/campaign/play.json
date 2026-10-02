@@ -1,0 +1,26 @@
+{
+  "format": 1,
+  "scenario": "campaign_play",
+  "planet": "serpulo",
+  "sector": "groundZero",
+  "events": [
+    "RulesLoad { from_save: false, rules_epoch: 1 }",
+    "Play",
+    "SectorLaunch { planet: ContentId(5), sector: 15 }",
+    "NewGame",
+    "Wave",
+    "Wave",
+    "SectorCapture { planet: ContentId(5), sector: 15, initial: true }"
+  ],
+  "lose_events": [
+    "GameOver { winner: 2 }"
+  ],
+  "markers_before": 1,
+  "markers_cleared": true,
+  "objectives_cleared": true,
+  "captured": true,
+  "set_rules_open_ok": true,
+  "set_rules_campaign_rejected": true,
+  "checksum": "141964dccb5232e7",
+  "pass": true
+}

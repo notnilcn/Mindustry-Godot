@@ -634,6 +634,51 @@ pub enum CampaignCommand {
         #[arg(long)]
         dump: Option<PathBuf>,
     },
+
+    /// `objectives_completion`: all 13 in-map objective types complete under a
+    /// scripted env, flags apply, and map markers add/control/round-trip.
+    Objectives {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Write the canonical golden dump here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+    },
+
+    /// `campaign_play`: launch a sector, run waves, capture, and exercise the
+    /// game-over/lose variants + the `set_rules` campaign guard.
+    Play {
+        /// Planet content name.
+        #[arg(long, default_value = "serpulo")]
+        planet: String,
+        /// Sector preset name.
+        #[arg(long, default_value = "groundZero")]
+        sector: String,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Write the canonical golden dump here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+    },
+
+    /// `campaign_bench` (plan 12 §7d): per-system timings + deterministic
+    /// checksums for the campaign budget profiles.
+    Bench {
+        /// Comma-separated profiles (`rules,teams,fog,turn,objectives,schematic`).
+        #[arg(long, default_value = "rules,teams,fog,turn,objectives,schematic")]
+        profile: String,
+        /// Fixed ticks per profile (proportional scaling inside each).
+        #[arg(long, default_value_t = 3600)]
+        ticks: u32,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Write the canonical golden dump here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+    },
 }
 
 /// `fx` subcommands (plan 17 §7b).

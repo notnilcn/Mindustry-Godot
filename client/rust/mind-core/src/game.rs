@@ -8,8 +8,11 @@ pub mod attack_indicators;
 pub mod campaign_rules;
 pub mod fog;
 pub mod gamemode;
+pub mod map_markers;
+pub mod map_objectives;
 pub mod objectives;
 pub mod planet;
+pub mod play;
 pub mod quad_tree;
 pub mod rules;
 pub mod rules_event;
@@ -24,6 +27,7 @@ pub mod teams;
 pub mod tech_tree;
 pub mod universe;
 pub mod waves;
+pub mod world_reloader;
 
 use serde::{Deserialize, Serialize};
 
