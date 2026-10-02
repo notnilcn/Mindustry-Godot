@@ -55,6 +55,25 @@ pub struct BlockBrokenEvent {
     pub block: BlockId,
 }
 
+/// Event fired when the simulation is reset to the menu (`EventType.ResetEvent`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResetEvent;
+
+/// Event fired when a game begins (`EventType.PlayEvent`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlayEvent;
+
+/// Event fired when a wave is triggered (`EventType.WaveEvent`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WaveEvent {
+    /// Wave number.
+    pub wave: i32,
+}
+
+/// Event fired after music registration (`EventType.MusicRegisterEvent`, HLP C7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MusicRegisterEvent;
+
 /// Event fired before a save is written (`EventType.SaveWriteEvent`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SaveWriteEvent;
@@ -167,6 +186,10 @@ define_events! {
         StateChangeEvent => state_change : on_state_change, fire_state_change,
         BlockPlacedEvent => block_placed : on_block_placed, fire_block_placed,
         BlockBrokenEvent => block_broken : on_block_broken, fire_block_broken,
+        ResetEvent => reset : on_reset, fire_reset,
+        PlayEvent => play : on_play, fire_play,
+        WaveEvent => wave : on_wave, fire_wave,
+        MusicRegisterEvent => music_register : on_music_register, fire_music_register,
         SaveWriteEvent => save_write : on_save_write, fire_save_write,
         SaveLoadEvent => save_load : on_save_load, fire_save_load,
         RulesLoadEvent => rules_load : on_rules_load, fire_rules_load,

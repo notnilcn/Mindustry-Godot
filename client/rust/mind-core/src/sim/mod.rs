@@ -5,17 +5,25 @@
 //! Ported from `core/src/mindustry/core/Logic.java` (`update`, `updateEntities`)
 //! and `GameState`; the reserved slot order lives in [`crate::schedule`].
 
+pub mod boot;
+pub mod clock;
+pub mod config;
 pub mod dump;
+pub mod events;
 pub mod fixed;
+pub mod logic;
+pub mod reset;
 
 use bevy_ecs::schedule::Schedule;
 use serde_json::Error as JsonError;
 
 use crate::command::Command;
 use crate::content::{BlockId, Blocks, ContentError};
+use crate::determinism::SimRng;
 use crate::ecs::{BuildingComp, EntitySequencer, MindWorld, TeamId};
 use crate::event::{BlockBrokenEvent, BlockPlacedEvent, Events, SimEvent, StateChangeEvent};
 use crate::game::{GameState, State};
+use crate::platform::{HeadlessPlatform, Platform};
 use crate::random::JavaRandom;
 use crate::scenario::{Scenario, ScenarioError, resolve_block};
 use crate::schedule::build_p0_schedule;
@@ -23,7 +31,11 @@ use crate::time::Time;
 use crate::version::DUMP_FORMAT;
 use crate::world::{TilePos, WorldError, WorldGrid};
 
+pub use boot::{BootError, SimBuilder, TickReport};
+pub use clock::SimClock;
+pub use config::SimConfig;
 pub use dump::StateDump;
+pub use events::{ALL_TRIGGERS, Trigger, TriggerRegistry};
 pub use fixed::{FixedStepRunner, SIM_STEP};
 
 /// Errors raised by simulation operations.
@@ -65,8 +77,18 @@ pub struct Sim {
     pub rng: JavaRandom,
     /// Content registry.
     pub content: Blocks,
-    /// Arc-style clock/delayed-run queue.
+    /// Arc-style clock/delayed-run queue (P0).
     pub time: Time,
+    /// Deterministic fixed-step clock (plan 05 M1; owns `Time.run` semantics).
+    pub clock: SimClock,
+    /// Trigger registry (plan 05 M2).
+    pub triggers: TriggerRegistry,
+    /// Deterministic RNG streams (plan 05 M1).
+    pub rng_streams: SimRng,
+    /// Fixed-step/determinism configuration.
+    pub config: SimConfig,
+    /// Host capability seam (headless by default).
+    pub platform: Box<dyn Platform>,
 
     seed: u64,
     selected_block: BlockId,
@@ -90,6 +112,11 @@ impl Sim {
             rng: JavaRandom::new(seed),
             content: Blocks::new(),
             time: Time::new(),
+            clock: SimClock::new(),
+            triggers: TriggerRegistry::new(),
+            rng_streams: SimRng::new(seed),
+            config: SimConfig::new().with_seed(seed),
+            platform: Box::new(HeadlessPlatform::with_default_dir()),
             seed,
             selected_block: BlockId::STONE_WALL,
             entity_seq: EntitySequencer::default(),
@@ -183,13 +210,35 @@ impl Sim {
         Ok(())
     }
 
-    /// Advances the simulation by one tick and flushes queued events.
+    /// Advances the simulation by one fixed step and flushes queued events.
+    ///
+    /// Schedule order follows `Logic.update()` (plan 05 §3.4): `Trigger.update`
+    /// → set chain → delayed runs (`Time.update`) → `Trigger.afterGameUpdate`.
     pub fn tick(&mut self) -> Result<(), SimError> {
+        self.triggers.fire(Trigger::Update, &mut self.ecs.0);
         self.schedule.run(&mut self.ecs.0);
         self.flush_events();
         self.time.update();
+        self.clock.update(&mut self.ecs.0);
         self.state.advance();
+        self.triggers
+            .fire(Trigger::AfterGameUpdate, &mut self.ecs.0);
         Ok(())
+    }
+
+    /// The deterministic fixed-step clock.
+    pub fn clock(&self) -> &SimClock {
+        &self.clock
+    }
+
+    /// The simulation configuration.
+    pub fn config(&self) -> &SimConfig {
+        &self.config
+    }
+
+    /// The host platform seam.
+    pub fn platform(&self) -> &dyn Platform {
+        self.platform.as_ref()
     }
 
     /// Canonical deterministic checksum (§6.4): LE byte stream hashed with xxh3-64.
