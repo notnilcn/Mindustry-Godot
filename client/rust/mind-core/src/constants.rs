@@ -22,3 +22,6 @@ pub const CHECKSUM_VERSION: u32 = 1;
 
 /// Half-extent of the final playable world bounds (`Vars.finalWorldBounds`).
 pub const FINAL_WORLD_BOUNDS: f32 = 250.0;
+
+/// Edge-darkness BFS radius (`Vars.darkRadius`).
+pub const DARK_RADIUS: u8 = 4;

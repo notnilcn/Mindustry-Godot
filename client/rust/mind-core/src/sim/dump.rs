@@ -106,8 +106,9 @@ pub struct DumpEvent {
 pub(crate) fn build(sim: &Sim, all_tiles: bool) -> StateDump {
     let mut tiles = Vec::new();
     for (pos, index) in sim.grid.iter_row_major() {
-        let block = sim.grid.blocks[index];
-        let entity = sim.grid.tiles[index];
+        let tile = sim.grid.tile_ref(index);
+        let block = tile.block;
+        let entity = tile.build;
         if !all_tiles && block == BlockId::AIR && entity.is_none() {
             continue;
         }
@@ -115,8 +116,8 @@ pub(crate) fn build(sim: &Sim, all_tiles: bool) -> StateDump {
             x: pos.x(),
             y: pos.y(),
             block: sim.block_name_of(block),
-            team: sim.grid.teams[index],
-            rot: sim.grid.rots[index],
+            team: 0,
+            rot: 0,
             build_id: entity.and_then(|handle| sim.ecs.seq_of(handle)),
         });
     }
@@ -143,8 +144,8 @@ pub(crate) fn build(sim: &Sim, all_tiles: bool) -> StateDump {
         phase: sim.phase(),
         checksum: sim.checksum_hex(),
         world: DumpWorld {
-            width: sim.grid.width,
-            height: sim.grid.height,
+            width: sim.grid.width(),
+            height: sim.grid.height(),
             sparse: !all_tiles,
             tiles,
         },

@@ -20,7 +20,7 @@ use mind_core::sim::{Sim, StateDump};
 use mind_core::world::TilePos;
 
 use crate::cli::{
-    AssetsCommand, Cli, Command, ContentCommand, IoCommand, MetaCommand, TraceCommand,
+    AssetsCommand, Cli, Command, ContentCommand, IoCommand, MetaCommand, TraceCommand, WorldCommand,
 };
 use crate::paths;
 use crate::registry;
@@ -171,6 +171,22 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             TraceCommand::Order { ticks, out, json } => {
                 cmd_trace_order(*ticks, out.as_deref(), *json)
             }
+        },
+        Command::World { command } => match command {
+            WorldCommand::TileOps {
+                seed,
+                width,
+                height,
+                ops,
+                dump,
+                json,
+            } => cmd_world_tile_ops(*seed, *width, *height, *ops, dump.as_deref(), *json),
+            WorldCommand::Multiblock {
+                size,
+                block,
+                dump,
+                json,
+            } => cmd_world_multiblock(*size, block, dump.as_deref(), *json),
         },
         Command::Io { command } => match command {
             IoCommand::DumpMeta { file, json } => cmd_io_dump_meta(file, *json),
@@ -1797,6 +1813,256 @@ fn cmd_content_ids(json: bool, out: Option<&Path>) -> anyhow::Result<i32> {
         }
     }
     Ok(EXIT_PASS)
+}
+
+/// Deterministic hooks that spawn a bare building entity (plan 06 M3 oracle
+/// until plan 07 provides the real building runtime).
+struct BareBuildingHooks;
+
+impl mind_core::world::WorldHooks for BareBuildingHooks {
+    fn new_building(
+        &self,
+        world: &mut bevy_ecs::world::World,
+        request: mind_core::world::NewBuilding,
+    ) -> Option<bevy_ecs::entity::Entity> {
+        use mind_core::ecs::{BuildingComp, EntitySeq, TeamId};
+        Some(
+            world
+                .spawn((
+                    EntitySeq(0),
+                    BuildingComp {
+                        pos: TilePos::new(request.x, request.y),
+                        block: request.block,
+                        team: TeamId(request.team),
+                        rot: request.rot,
+                    },
+                ))
+                .id(),
+        )
+    }
+}
+
+fn cmd_world_tile_ops(
+    seed: u64,
+    width: i32,
+    height: i32,
+    ops: u64,
+    dump: Option<&Path>,
+    json: bool,
+) -> anyhow::Result<i32> {
+    use mind_core::determinism::{RngStream, SimRng};
+    use mind_core::world::ops::{WorldCtx, WorldEventLog};
+    use mind_core::world::{NoopRenderHooks, NoopWorldHooks, WorldGrid};
+
+    if width <= 0 || height <= 0 {
+        return Err(anyhow!("--width and --height must be positive"));
+    }
+    let content = boot_content()?;
+    let mut grid = WorldGrid::new(width, height);
+    let mut ecs = bevy_ecs::world::World::new();
+    let hooks = NoopWorldHooks;
+    let render = NoopRenderHooks;
+    let mut log = WorldEventLog::default();
+    let mut rng = SimRng::new(seed);
+
+    let pick = |names: &[&str]| -> Vec<mind_core::content::BlockId> {
+        names
+            .iter()
+            .filter_map(|name| content.block_id(name))
+            .collect()
+    };
+    let floors = pick(&["stone", "sand-floor", "grass", "dirt", "ice", "moss"]);
+    let overlays = pick(&["ore-copper", "ore-lead", "air"]);
+    let walls = pick(&["stone-wall", "sand-wall", "air"]);
+
+    {
+        let mut ctx = WorldCtx {
+            grid: &mut grid,
+            content: &content,
+            ecs: &mut ecs,
+            hooks: &hooks,
+            render: &render,
+            log: &mut log,
+        };
+        for _ in 0..ops {
+            let x = rng.random(RngStream::MapGen, width) as i16;
+            let y = rng.random(RngStream::MapGen, height) as i16;
+            match rng.random(RngStream::MapGen, 4) {
+                0 => {
+                    if !floors.is_empty() {
+                        let floor =
+                            floors[rng.random(RngStream::MapGen, floors.len() as i32) as usize];
+                        ctx.set_floor(x, y, floor);
+                    }
+                }
+                1 => {
+                    if !overlays.is_empty() {
+                        let overlay =
+                            overlays[rng.random(RngStream::MapGen, overlays.len() as i32) as usize];
+                        ctx.set_overlay(x, y, overlay);
+                    }
+                }
+                2 => {
+                    if !walls.is_empty() {
+                        let wall =
+                            walls[rng.random(RngStream::MapGen, walls.len() as i32) as usize];
+                        ctx.set_block(x, y, wall, 0, 0);
+                    }
+                }
+                _ => ctx.set_air(x, y),
+            }
+        }
+    }
+
+    // Counter == event-count invariant (M0 §7b).
+    let tile_events = log.tile_changes.len() as i32;
+    let floor_events = log.floor_changes.len() as i32;
+    let counters_ok =
+        grid.tile_changes == 1 + tile_events && grid.floor_changes == 1 + floor_events;
+
+    // Histograms (BTreeMap → deterministic).
+    let mut blocks: BTreeMap<String, u64> = BTreeMap::new();
+    let mut floors_hist: BTreeMap<String, u64> = BTreeMap::new();
+    for tile in grid.tiles.iter() {
+        *blocks
+            .entry(tile.block_name(&content).to_owned())
+            .or_default() += 1;
+        *floors_hist
+            .entry(
+                content
+                    .block(tile.floor)
+                    .map(|def| def.name.clone())
+                    .unwrap_or_else(|| "air".to_owned()),
+            )
+            .or_default() += 1;
+    }
+
+    let report = serde_json::json!({
+        "format": 1,
+        "generator": "tile_ops",
+        "seed": seed,
+        "width": width,
+        "height": height,
+        "ops": ops,
+        "tile_changes": grid.tile_changes,
+        "floor_changes": grid.floor_changes,
+        "tile_events": tile_events,
+        "floor_events": floor_events,
+        "counters_ok": counters_ok,
+        "counts": { "blocks": blocks, "floors": floors_hist },
+    });
+    let text = serde_json::to_string_pretty(&report)?;
+    if let Some(path) = dump {
+        std::fs::write(path, &text).with_context(|| format!("writing `{}`", path.display()))?;
+    }
+    if json || dump.is_none() {
+        println!("{text}");
+    }
+    if counters_ok {
+        Ok(EXIT_PASS)
+    } else {
+        log::error!(
+            "counter/event mismatch: tile_changes={} tile_events={} floor_changes={} floor_events={}",
+            grid.tile_changes,
+            tile_events,
+            grid.floor_changes,
+            floor_events
+        );
+        Ok(EXIT_FAIL)
+    }
+}
+
+fn cmd_world_multiblock(
+    size: i32,
+    block_name: &str,
+    dump: Option<&Path>,
+    json: bool,
+) -> anyhow::Result<i32> {
+    use mind_core::world::ops::{WorldCtx, WorldEventLog};
+    use mind_core::world::{NoopRenderHooks, WorldGrid};
+
+    if size < 1 {
+        return Err(anyhow!("--size must be positive"));
+    }
+    let content = boot_content()?;
+    let block = content
+        .block_id(block_name)
+        .ok_or_else(|| anyhow!("unknown block `{block_name}`"))?;
+    let actual_size = content.block(block).map(|def| def.size).unwrap_or(1);
+    if actual_size != size {
+        return Err(anyhow!(
+            "block `{block_name}` has size {actual_size}, expected {size}"
+        ));
+    }
+
+    let mut grid = WorldGrid::new(8, 8);
+    let mut ecs = bevy_ecs::world::World::new();
+    let hooks = BareBuildingHooks;
+    let render = NoopRenderHooks;
+    let mut log = WorldEventLog::default();
+
+    let mut linked = true;
+    let mut first_overlap_cleared = true;
+    let mut broke_air = true;
+
+    {
+        let mut ctx = WorldCtx {
+            grid: &mut grid,
+            content: &content,
+            ecs: &mut ecs,
+            hooks: &hooks,
+            render: &render,
+            log: &mut log,
+        };
+        // First multiblock at (1,1).
+        ctx.set_block(1, 1, block, 0, 0);
+        let first = ctx.grid.tiles.get(1, 1).build;
+        let offset = -(size - 1) / 2;
+        for dx in 0..size {
+            for dy in 0..size {
+                let tile = ctx.grid.tiles.get(1 + offset + dx, 1 + offset + dy);
+                if tile.build != first || tile.block != block {
+                    linked = false;
+                }
+            }
+        }
+        // Overlapping second multiblock at (2,2) must clear the first.
+        ctx.set_block(2, 2, block, 0, 0);
+        if ctx.grid.tiles.get(0, 0).block != mind_core::content::BlockId::AIR {
+            first_overlap_cleared = false;
+        }
+        // Break the (center) block: its whole footprint returns to air.
+        ctx.remove_block(2, 2);
+        for dx in 0..size {
+            for dy in 0..size {
+                if ctx.grid.tiles.get(2 + offset + dx, 2 + offset + dy).block
+                    != mind_core::content::BlockId::AIR
+                {
+                    broke_air = false;
+                }
+            }
+        }
+    }
+
+    let pass = linked && first_overlap_cleared && broke_air;
+    let report = serde_json::json!({
+        "format": 1,
+        "generator": "multiblock",
+        "block": block_name,
+        "size": size,
+        "linked": linked,
+        "first_overlap_cleared": first_overlap_cleared,
+        "break_clears_footprint": broke_air,
+        "pass": pass,
+    });
+    let text = serde_json::to_string_pretty(&report)?;
+    if let Some(path) = dump {
+        std::fs::write(path, &text).with_context(|| format!("writing `{}`", path.display()))?;
+    }
+    if json || dump.is_none() {
+        println!("{text}");
+    }
+    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
 }
 
 fn cmd_content_bench(runs: usize, json: bool) -> anyhow::Result<i32> {

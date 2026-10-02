@@ -158,6 +158,57 @@ pub enum Command {
         #[command(subcommand)]
         command: TraceCommand,
     },
+
+    /// World/terrain inspection (plan 06 §7b).
+    World {
+        /// World subcommand.
+        #[command(subcommand)]
+        command: WorldCommand,
+    },
+}
+
+/// `world` subcommands (plan 06 §7b).
+#[derive(Debug, Subcommand)]
+pub enum WorldCommand {
+    /// Deterministic interleaved floor/overlay/block/air operations on a fresh
+    /// grid; asserts counters equal event counts (plan 06 M0 §7b).
+    TileOps {
+        /// Simulation seed.
+        #[arg(long, default_value_t = 1)]
+        seed: u64,
+        /// Grid width in tiles.
+        #[arg(long, default_value_t = 64)]
+        width: i32,
+        /// Grid height in tiles.
+        #[arg(long, default_value_t = 64)]
+        height: i32,
+        /// Number of operations.
+        #[arg(long, default_value_t = 10_000)]
+        ops: u64,
+        /// Write the final JSON report here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Place overlapping multiblocks and break the center; asserts shared-entity
+    /// linkage and overlap clearing (plan 06 M3 §7b).
+    Multiblock {
+        /// Multiblock size in tiles.
+        #[arg(long, default_value_t = 3)]
+        size: i32,
+        /// Block name to place (must have the requested size).
+        #[arg(long, default_value = "core-shard")]
+        block: String,
+        /// Write the final JSON report here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// `trace` subcommands (plan 05 M6).
