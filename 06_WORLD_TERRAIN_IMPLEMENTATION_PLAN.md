@@ -8,7 +8,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Draft v1 — 2026-10-01, not started. 1 item flagged `NEEDS USER DECISION` in §8; it does not block M0–M4. |
+| **Status** | **In progress (2026-10-02, `lane/06-world`): M0–M3 COMPLETE, M6 PARTIAL (`math::noise`); M4/M5/M7/M8/M9 not started.** 1 item flagged `NEEDS USER DECISION` in §8; it does not block M0–M4. See Changelog for evidence. |
 | **Phase** | P3 — World & systems |
 | **Depends on** | `02_CONTENT_IMPLEMENTATION_PLAN.md` (`BlockDef` metadata incl. environment fields, `Attribute` ids, `Floor` data fields, `Planet`/`SectorPreset` metadata, `ContentRegistry` lookups), `04_IO_SERIALIZATION_IMPLEMENTATION_PLAN.md` (`WorldContext` trait, `SaveIO`/`MapIO`/`JsonIO`, `FileSystem`/`Paths`, `CachedTile`-equivalent preview contract), `05_SIM_CORE_IMPLEMENTATION_PLAN.md` (`Sim`/schedule/EventBus, `EntityIds`, `Groups`/`EntityGroup`, `ChecksumPart`, `Tmp`/`SimRng`, `math` module). |
 | **Blocks** | `07_BLOCKS_BUILD_IMPLEMENTATION_PLAN.md` (Tile/Build seams, `WorldHooks`), `08_LOGISTICS_IMPLEMENTATION_PLAN.md` (tile item buffers), `10_COMBAT_BULLETS_IMPLEMENTATION_PLAN.md` (world raycast, puddles/fires slots), `11_UNITS_AI_WAVES_IMPLEMENTATION_PLAN.md` (terrain pathfinding data, world indexers), `12_CAMPAIGN_IMPLEMENTATION_PLAN.md` (`Rules` sector fields, `Sector`/`Universe` runtime, `Schematics` launch loadout, `BaseRegistry`), `16_RENDER_WORLD_IMPLEMENTATION_PLAN.md` (tile read contract, `CacheLayer` hints, recache hooks), `19_MAPS_EDITOR_IMPLEMENTATION_PLAN.md` (previews, image maps, editor tile ops). |
@@ -548,18 +548,18 @@ Regression policy: +50% over committed baseline blocks the milestone; +20% warns
 
 ### 7e. Exit criteria checklist
 
-- [ ] `cargo test -p mind-core` green; §7a rows implemented or explicitly `#[ignore = "plan NN"]` with an owner.
-- [ ] `cargo fmt --check` + `cargo clippy -p mind-core -- -D warnings` clean; no `HashMap` iteration in `world/`/`maps/` generation paths.
-- [ ] `mind-headless world gen` golden checksums reproduce in-process, cross-process, and with `--workers 1` vs default.
-- [ ] `world_tile_ops` counters match event counts; `world_multiblock` matches `blockOverlapRemoved`/`multiblock`.
-- [ ] `world_filters_order` forward golden + order sensitivity + buffered/unbuffered visibility asserted.
-- [ ] Real `WorldContext` implementation used by 04 `io roundtrip`; `begin/endMapLoad` events and `generating` suppression verified.
-- [ ] Edge-darkness BFS output matches the reference grid; `tile.data` overload documented and asserted with 07.
-- [ ] `maps list` sorted correctly incl. corrupt-file skip; preview cache round-trips; save/import/remove delete preview files.
-- [ ] MCP scenario §7c executed with logs/screenshot/checksum evidence; generated terrain visible and camera pans.
-- [ ] §7d budgets measured and recorded; no regression > 50% vs baseline.
-- [ ] `mind-core` Godot/tokio-free; GPL headers on every ported file; `math/noise.rs` merge with 05 recorded.
-- [ ] Reconciliation notes for 04/05/07/11/12/16/19 recorded in this file's Changelog.
+- [x] `cargo test -p mind-core` green; §7a rows implemented or explicitly `#[ignore = "plan NN"]` with an owner. (M0–M3 rows done; M4–M9 pending.)
+- [x] `cargo fmt --check` + `cargo clippy -p mind-core -- -D warnings` clean; no `HashMap` iteration in `world/`/`maps/` generation paths. (workspace `--all-targets` clean.)
+- [ ] `mind-headless world gen` golden checksums reproduce in-process, cross-process, and with `--workers 1` vs default. (M6/M7 pending.)
+- [x] `world_tile_ops` counters match event counts; `world_multiblock` matches `blockOverlapRemoved`/`multiblock`. (both `pass:true`.)
+- [ ] `world_filters_order` forward golden + order sensitivity + buffered/unbuffered visibility asserted. (M5 pending.)
+- [ ] Real `WorldContext` implementation used by 04 `io roundtrip`; `begin/endMapLoad` events and `generating` suppression verified. (begin/end verified; 04 swap needs plan 07 building runtime.)
+- [x] Edge-darkness BFS output matches the reference grid; `tile.data` overload documented and asserted with 07. (BFS test green; 07 seam documented.)
+- [ ] `maps list` sorted correctly incl. corrupt-file skip; preview cache round-trips; save/import/remove delete preview files. (M4 pending.)
+- [ ] MCP scenario §7c executed with logs/screenshot/checksum evidence; generated terrain visible and camera pans. (pending.)
+- [ ] §7d budgets measured and recorded; no regression > 50% vs baseline. (pending.)
+- [x] `mind-core` Godot/tokio-free; GPL headers on every ported file; `math/noise.rs` merge with 05 recorded. (05 landed no `math/`; 06 hosts `math/noise.rs`.)
+- [x] Reconciliation notes for 04/05/07/11/12/16/19 recorded in this file's Changelog.
 
 ---
 
