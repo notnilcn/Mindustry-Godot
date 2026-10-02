@@ -225,6 +225,11 @@ impl BasicGenerator {
 
         let width = tiles.width;
         self.pass(tiles, content, |_, draw, x, y| {
+            // Upstream `median` skips tiles outside the target floor (the Rust
+            // port previously wrote their scratch default `air` back).
+            if target_floor != BlockId::AIR && draw.floor != target_floor {
+                return;
+            }
             let index = (x + y * width) as usize;
             draw.block = BlockId::new(blocks[index]);
             draw.floor = BlockId::new(floors[index]);
@@ -725,11 +730,7 @@ impl BasicGenerator {
             if !read[index] {
                 tiles.geti_mut(index).block = BlockId::AIR;
             } else {
-                let wall = content
-                    .block(tiles.geti(index).floor)
-                    .and_then(|def| content.block_by_name(&format!("{}-wall", def.name)))
-                    .map(|def| def.id)
-                    .unwrap_or(BlockId::AIR);
+                let wall = planet_wall(content, tiles.geti(index).floor);
                 tiles.geti_mut(index).block = wall;
             }
         }
@@ -948,11 +949,7 @@ impl BasicGenerator {
                 }
             }
             if any {
-                let wall = content
-                    .block(tiles.geti(index).floor)
-                    .and_then(|def| content.block_by_name(&format!("{}-wall", def.name)))
-                    .map(|def| def.id)
-                    .unwrap_or(BlockId::AIR);
+                let wall = planet_wall(content, tiles.geti(index).floor);
                 tiles.geti_mut(index).block = wall;
             }
             let _ = (width, height);
@@ -989,11 +986,7 @@ impl BasicGenerator {
         }
         for index in 0..len {
             if !used[index] && tiles.geti(index).block == BlockId::AIR {
-                let wall = content
-                    .block(tiles.geti(index).floor)
-                    .and_then(|def| content.block_by_name(&format!("{}-wall", def.name)))
-                    .map(|def| def.id)
-                    .unwrap_or(BlockId::AIR);
+                let wall = planet_wall(content, tiles.geti(index).floor);
                 tiles.geti_mut(index).block = wall;
             }
         }
@@ -1024,6 +1017,62 @@ pub const D8: [(i32, i32); 8] = [
 /// `Mathf.within(x, y, radius)`.
 pub fn within(x: i32, y: i32, radius: i32) -> bool {
     (x * x + y * y) <= radius * radius
+}
+
+/// `Mathf.within(x, y, cx, cy, dist)` with a float radius.
+pub fn within_f(x: i32, y: i32, cx: i32, cy: i32, dist: f32) -> bool {
+    let dx = (x - cx) as f32;
+    let dy = (y - cy) as f32;
+    dx * dx + dy * dy <= dist * dist
+}
+
+/// `Mathf.dst(x1, y1, x2, y2)`.
+pub fn dst(x1: f32, y1: f32, x2: f32, y2: f32) -> f32 {
+    let dx = x1 - x2;
+    let dy = y1 - y2;
+    (dx * dx + dy * dy).sqrt()
+}
+
+/// The default wall for a floor (`Floor.wall`, resolved at `Floor.init`).
+///
+/// Mirrors upstream `Floor.init` (`name + "-wall"`, the `darksand -> dune`
+/// fallback) plus the explicit wall assignments in `Blocks.java`. Used by
+/// `trimDark`/`inverseFloodFill`/`cells` and the vanilla planet generators.
+pub fn planet_wall(content: &ContentRegistry, floor: BlockId) -> BlockId {
+    let Some(def) = content.block(floor) else {
+        return BlockId::AIR;
+    };
+    let name = def.name.as_str();
+    let explicit = match name {
+        "tainted-water" | "deep-tainted-water" | "spore-moss" => content.block_id("spore-wall"),
+        "hotrock" | "magmarock" | "basalt" | "darksand-water" | "darksand-tainted-water" => {
+            content.block_id("dune-wall")
+        }
+        "ice-snow" => content.block_id("ice-wall"),
+        "sand-floor" | "shallow-water" | "deep-water" | "sand-water" => {
+            content.block_id("sand-wall")
+        }
+        "moss" => content.block_id("spore-pine"),
+        "molten-slag" | "yellow-stone-plates" => content.block_id("yellow-stone-wall"),
+        "crystal-floor" => content.block_id("crystalline-stone-wall"),
+        "carbon-stone" => content.block_id("carbon-wall"),
+        "arkycite-floor" | "arkyic-stone" => content.block_id("arkyic-wall"),
+        "red-stone" | "dense-red-stone" => content.block_id("red-stone-wall"),
+        "red-ice" => content.block_id("red-ice-wall"),
+        _ => None,
+    };
+    explicit
+        .or_else(|| content.block_by_name(&format!("{name}-wall")).map(|b| b.id))
+        .or_else(|| {
+            name.contains("darksand")
+                .then(|| {
+                    content
+                        .block_by_name(&format!("{}-wall", name.replace("darksand", "dune")))
+                        .map(|b| b.id)
+                })
+                .flatten()
+        })
+        .unwrap_or(BlockId::AIR)
 }
 
 /// `Geometry.circle`: iterate the clamped disc around `(cx, cy)`.

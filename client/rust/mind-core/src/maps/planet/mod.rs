@@ -8,6 +8,12 @@
 //! (OD6-B): goldens are Rust-recorded. Serpulo/Erekir/Asteroid depend on plan
 //! 11/12 data (bases, schematics, rules, attributes) and land incrementally.
 
+pub mod asteroid;
+pub mod erekir;
+pub mod serpulo;
 pub mod tantros;
 
+pub use asteroid::AsteroidGenerator;
+pub use erekir::ErekirPlanetGenerator;
+pub use serpulo::SerpuloPlanetGenerator;
 pub use tantros::TantrosPlanetGenerator;

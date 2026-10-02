@@ -760,9 +760,10 @@ pub enum WorldCommand {
         /// Generator tag (`simplex`, `flat`, `planet`).
         #[arg(long, default_value = "simplex")]
         generator: String,
-        /// Planet content name (for `--generator planet`).
-        #[arg(long, default_value = "serpulo")]
-        planet: String,
+        /// Planet content name; selects the vanilla planet generator when set
+        /// (`serpulo`, `erekir`, `tantros`, `asteroid`, `blank`).
+        #[arg(long)]
+        planet: Option<String>,
         /// Sector id (for `--generator planet`).
         #[arg(long, default_value_t = 0)]
         sector: u32,
@@ -775,6 +776,9 @@ pub enum WorldCommand {
         /// Grid height in tiles.
         #[arg(long, default_value_t = 128)]
         height: i32,
+        /// Number of generations to run (goldens use 1; determinism runs >1).
+        #[arg(long, default_value_t = 1)]
+        iters: u64,
         /// Write the final JSON report here.
         #[arg(long)]
         dump: Option<PathBuf>,
@@ -785,7 +789,8 @@ pub enum WorldCommand {
 
     /// Time world generation (plan 06 §7d).
     BenchGen {
-        /// Generator tag (`simplex`, `tantros`, `blank`).
+        /// Generator tag (`simplex`, `tantros`, `blank`, `serpulo`, `erekir`,
+        /// `asteroid`).
         #[arg(long, default_value = "simplex")]
         generator: String,
         /// Generation seed.
