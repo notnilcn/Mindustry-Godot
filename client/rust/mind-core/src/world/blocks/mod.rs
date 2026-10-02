@@ -15,6 +15,7 @@ pub mod payloads;
 pub mod power;
 pub mod storage;
 pub mod tile_bitmask;
+pub mod units;
 
 use crate::content::ContentRegistry;
 use crate::world::behavior::BehaviorRegistry;
