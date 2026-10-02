@@ -20,8 +20,12 @@ use crate::logic::executor::Executor;
 use crate::logic::value::{LVar, LogicObject, VarRef};
 use crate::world::TilePos;
 
+use super::display::LogicDisplayState;
 use super::memory::MemoryBlockState;
-use super::{LogicBlockState, block_kind_of, build_at, is_valid_building, privileged_of};
+use super::message::MessageBlockState;
+use super::{
+    LogicBlockState, block_kind_of, build_at, is_valid_building, message_def_of, privileged_of,
+};
 
 /// A logic cell value used by the read/write path.
 #[derive(Clone, Debug, PartialEq)]
@@ -286,5 +290,48 @@ pub fn write_target(
             }
         }
         _ => {}
+    }
+}
+
+/// DrawFlushI: appends the graphics buffer to an LDrawable (LogicDisplay).
+pub fn flush_draw(world: &mut World, exec: &Executor, target: Option<&LogicObject>) {
+    let Some(LogicObject::Building(e)) = target else {
+        return;
+    };
+    let e = *e;
+    if !readable(world, exec, e) {
+        return;
+    }
+    if !matches!(
+        block_kind_of(world, e),
+        Some(BlockKind::LogicDisplay) | Some(BlockKind::TileableLogicDisplay)
+    ) {
+        return;
+    }
+    let Some(mut state) = world.get_mut::<LogicDisplayState>(e) else {
+        return;
+    };
+    let cap = crate::logic::executor::MAX_DISPLAY_BUFFER.saturating_sub(state.commands.len());
+    let added = exec.graphics_buffer.len().min(cap);
+    for command in exec.graphics_buffer.iter().take(added) {
+        state.commands.push_back(*command);
+    }
+    state.operations += 1;
+}
+
+/// PrintFlushI: writes the text buffer to an LPrintable (MessageBlock).
+pub fn flush_print(world: &mut World, exec: &Executor, target: Option<&LogicObject>) {
+    let Some(LogicObject::Building(e)) = target else {
+        return;
+    };
+    let e = *e;
+    if !readable(world, exec, e) || block_kind_of(world, e) != Some(BlockKind::MessageBlock) {
+        return;
+    }
+    let max_text = message_def_of(world, e)
+        .map(|def| def.max_text.max(0) as usize)
+        .unwrap_or(400);
+    if let Some(mut state) = world.get_mut::<MessageBlockState>(e) {
+        state.print(&exec.text_buffer, max_text);
     }
 }

@@ -496,10 +496,15 @@ pub fn default_behavior(def: &BlockDef) -> Arc<dyn BuildingBehavior> {
         K::LegacyMechPad | K::LegacyUnitFactory | K::LegacyCommandCenter => {
             Arc::new(legacy::LegacyBehavior)
         }
-        // Plan 13 logic blocks (M3). Message/display/canvas land in M4.
+        // Plan 13 logic blocks (M3/M4).
         K::LogicBlock => Arc::new(crate::logic::blocks::LogicBlockBehavior),
         K::MemoryBlock => Arc::new(crate::logic::blocks::MemoryBehavior),
         K::SwitchBlock => Arc::new(crate::logic::blocks::SwitchBehavior),
+        K::MessageBlock => Arc::new(crate::logic::blocks::MessageBehavior),
+        K::LogicDisplay | K::TileableLogicDisplay => {
+            Arc::new(crate::logic::blocks::DisplayBehavior)
+        }
+        K::CanvasBlock => Arc::new(crate::logic::blocks::CanvasBehavior),
         _ => match super::block_kind_data::BlockKindData::from_def(def).family() {
             super::block_kind_data::BlockFamily::Sandbox => Arc::new(sandbox::SandboxBehavior),
             super::block_kind_data::BlockFamily::Environment => {

@@ -372,6 +372,48 @@ pub struct SwitchDef {
     pub privileged: bool,
 }
 
+/// `MessageBlock` family knobs.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct MessageDef {
+    /// `MessageBlock.maxTextLength`.
+    pub max_text: i32,
+    /// `MessageBlock.maxNewlines`.
+    pub max_newlines: i32,
+    /// Whether this is the privileged `world-message`.
+    pub privileged: bool,
+}
+
+/// `LogicDisplay` family knobs.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct DisplayDef {
+    /// `LogicDisplay.displaySize`.
+    pub display_size: i32,
+    /// `LogicDisplay.scaleFactor`.
+    pub scale_factor: f32,
+}
+
+/// `TileableLogicDisplay` family knobs.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct TileableDisplayDef {
+    /// Per-tile `displaySize`.
+    pub display_size: i32,
+    /// `TileableLogicDisplay.frameSize`.
+    pub frame_size: i32,
+    /// `TileableLogicDisplay.maxDisplayDimensions`.
+    pub max_dimensions: i32,
+}
+
+/// `CanvasBlock` family knobs.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct CanvasDef {
+    /// `CanvasBlock.canvasSize`.
+    pub canvas_size: i32,
+    /// `CanvasBlock.padding`.
+    pub padding: f32,
+    /// `CanvasBlock.bitsPerPixel`.
+    pub bits_per_pixel: u8,
+}
+
 /// Typed family data for one block (plan 07 §6.1).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum BlockKindData {
@@ -456,6 +498,14 @@ pub enum BlockKindData {
     Memory(MemoryDef),
     /// `SwitchBlock` (plan 13).
     Switch(SwitchDef),
+    /// `MessageBlock` (plan 13).
+    Message(MessageDef),
+    /// `LogicDisplay` (plan 13).
+    Display(DisplayDef),
+    /// `TileableLogicDisplay` (plan 13).
+    TileableDisplay(TileableDisplayDef),
+    /// `CanvasBlock` (plan 13).
+    Canvas(CanvasDef),
     /// A plain `Block`/family owned by another plan.
     #[default]
     None,
@@ -536,6 +586,12 @@ impl BlockKindData {
             BlockKind::LogicBlock => BlockKindData::Logic(LogicBlockDef::default()),
             BlockKind::MemoryBlock => BlockKindData::Memory(MemoryDef::default()),
             BlockKind::SwitchBlock => BlockKindData::Switch(SwitchDef::default()),
+            BlockKind::MessageBlock => BlockKindData::Message(MessageDef::default()),
+            BlockKind::LogicDisplay => BlockKindData::Display(DisplayDef::default()),
+            BlockKind::TileableLogicDisplay => {
+                BlockKindData::TileableDisplay(TileableDisplayDef::default())
+            }
+            BlockKind::CanvasBlock => BlockKindData::Canvas(CanvasDef::default()),
             _ => BlockKindData::None,
         }
     }
@@ -686,6 +742,19 @@ impl BlockKindData {
                     def.privileged = true;
                 }
             }
+            "message" | "reinforced-message" => self.set_message(400, 24, false),
+            "world-message" => self.set_message(400, 24, true),
+            "logic-display" => self.set_display(80, 1.0),
+            "large-logic-display" => self.set_display(176, 1.0),
+            "tile-logic-display" => {
+                if let BlockKindData::TileableDisplay(def) = self {
+                    def.display_size = 32;
+                    def.frame_size = 6;
+                    def.max_dimensions = 16;
+                }
+            }
+            "canvas" => self.set_canvas(12, 3.5, 3),
+            "large-canvas" => self.set_canvas(24, 3.5, 4),
             _ => {}
         }
     }
@@ -737,6 +806,29 @@ impl BlockKindData {
         }
     }
 
+    fn set_message(&mut self, max_text: i32, max_newlines: i32, privileged: bool) {
+        if let BlockKindData::Message(def) = self {
+            def.max_text = max_text;
+            def.max_newlines = max_newlines;
+            def.privileged = privileged;
+        }
+    }
+
+    fn set_display(&mut self, display_size: i32, scale_factor: f32) {
+        if let BlockKindData::Display(def) = self {
+            def.display_size = display_size;
+            def.scale_factor = scale_factor;
+        }
+    }
+
+    fn set_canvas(&mut self, canvas_size: i32, padding: f32, bits_per_pixel: u8) {
+        if let BlockKindData::Canvas(def) = self {
+            def.canvas_size = canvas_size;
+            def.padding = padding;
+            def.bits_per_pixel = bits_per_pixel;
+        }
+    }
+
     /// Coarse family for dispatch/dumps.
     pub fn family(&self) -> BlockFamily {
         match self {
@@ -776,9 +868,13 @@ impl BlockKindData {
             | BlockKindData::LandingPad(_)
             | BlockKindData::LaunchPad(_) => BlockFamily::Campaign,
             BlockKindData::Legacy(_) => BlockFamily::Legacy,
-            BlockKindData::Logic(_) | BlockKindData::Memory(_) | BlockKindData::Switch(_) => {
-                BlockFamily::Logic
-            }
+            BlockKindData::Logic(_)
+            | BlockKindData::Memory(_)
+            | BlockKindData::Switch(_)
+            | BlockKindData::Message(_)
+            | BlockKindData::Display(_)
+            | BlockKindData::TileableDisplay(_)
+            | BlockKindData::Canvas(_) => BlockFamily::Logic,
             BlockKindData::None => BlockFamily::Other,
         }
     }

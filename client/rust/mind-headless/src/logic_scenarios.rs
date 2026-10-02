@@ -14,7 +14,7 @@ use mind_core::io::wire::{WireReader, WireWriter};
 use mind_core::logic::assembler::Assembler;
 use mind_core::logic::blocks::io::CellValue;
 use mind_core::logic::blocks::logic_block::compress;
-use mind_core::logic::blocks::{LogicBlockState, MemoryBlockState};
+use mind_core::logic::blocks::{LogicBlockState, LogicDisplayState, MemoryBlockState};
 use mind_core::logic::executor::Executor;
 use mind_core::logic::statement::Statement;
 use mind_core::world::ConfigValue;
@@ -309,6 +309,100 @@ fn run_save_load(ticks: u64, json: bool) -> Result<i32> {
     Ok(0)
 }
 
+/// `logic_draw`/`logic_draw_headless` report.
+pub struct DrawReport {
+    /// Deterministic checksum.
+    pub checksum: String,
+    /// Command count.
+    pub commands: usize,
+    /// `operations` counter.
+    pub operations: u64,
+    /// Text buffer (should be empty after `drawflush`).
+    pub text: String,
+}
+
+/// Runs the draw scenario (`capture` disables the headless skip flag).
+pub fn draw_report(capture: bool, ticks: u64) -> Result<DrawReport> {
+    let mut harness = BuildHarness::new(16, 16, 1);
+    let processor = harness
+        .content()
+        .block_id("micro-processor")
+        .context("micro-processor content")?;
+    let display = harness
+        .content()
+        .block_id("logic-display")
+        .context("logic-display content")?;
+    assert!(harness.place(4, 4, processor, 0, true));
+    assert!(harness.place(8, 4, display, 0, true));
+    let pe = harness.build_at(4, 4).context("processor entity")?;
+    let de = harness.build_at(8, 4).context("display entity")?;
+
+    let code = "draw clear 0 0 0\ndraw col %ff0000\ndraw stroke 2\ndraw line 0 0 80 80\ndraw rect 10 10 20 20\ndraw poly 40 40 3 10 0\nprint \"hi\"\ndraw print 20 20 @center\ndraw rotate 45\ndraw scale 2 2\ndrawflush display1\nstop\n";
+    assert!(harness.configure(4, 4, ConfigValue::Bytes(compress(code, &[]).into())));
+    assert!(harness.configure(4, 4, ConfigValue::Point2(8, 4)));
+    if !capture && let Some(mut state) = harness.world.get_mut::<LogicBlockState>(pe) {
+        state.executor.skip_draw_pack = true;
+    }
+    for _ in 0..ticks {
+        harness.tick();
+    }
+
+    let display_state = harness
+        .world
+        .get::<LogicDisplayState>(de)
+        .context("display state")?;
+    let commands = display_state.commands.len();
+    let operations = display_state.operations;
+    let text = harness
+        .world
+        .get::<LogicBlockState>(pe)
+        .map(|state| state.executor.text_buffer.clone())
+        .unwrap_or_default();
+
+    let mut hasher = mind_core::determinism::Hasher::new();
+    for command in &display_state.commands {
+        hasher.write_u64(*command);
+    }
+    hasher.write_u64(operations);
+    let checksum = hasher.finish().to_hex();
+    Ok(DrawReport {
+        checksum,
+        commands,
+        operations,
+        text,
+    })
+}
+
+/// Prints the draw scenario.
+fn run_draw(capture: bool, ticks: u64, json: bool) -> Result<i32> {
+    let name = if capture {
+        "logic_draw"
+    } else {
+        "logic_draw_headless"
+    };
+    let report = draw_report(capture, ticks)?;
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "scenario": name,
+                "ticks": ticks,
+                "capture": capture,
+                "checksum": report.checksum,
+                "commands": report.commands,
+                "operations": report.operations,
+                "text": report.text,
+            })
+        );
+    } else {
+        println!(
+            "{name}: checksum={} commands={} operations={}",
+            report.checksum, report.commands, report.operations
+        );
+    }
+    Ok(0)
+}
+
 fn cell_json(cell: &CellValue) -> serde_json::Value {
     match cell {
         CellValue::Num(n) => {
@@ -386,6 +480,8 @@ fn run_named(name: &str, ticks: Option<u64>, json: bool) -> Result<i32> {
     match name {
         "logic_link_sensor" => return run_link_sensor(ticks.unwrap_or(10), json),
         "logic_save_load" => return run_save_load(ticks.unwrap_or(20), json),
+        "logic_draw" => return run_draw(true, ticks.unwrap_or(3), json),
+        "logic_draw_headless" => return run_draw(false, ticks.unwrap_or(3), json),
         _ => {}
     }
     let scenario = scenario(name).with_context(|| format!("unknown logic scenario: {name}"))?;
@@ -491,6 +587,17 @@ mod tests {
         assert_eq!(save.checksum, "8f4d87c924126091");
         assert_eq!(save.done, 1.0);
         assert_eq!(save.code, "wait 1.5\nset done 1\n");
+
+        let draw = draw_report(true, 30).expect("logic_draw");
+        assert_eq!(draw.checksum, "82572433be79fab9");
+        assert_eq!(draw.commands, 10);
+        assert_eq!(draw.operations, 1);
+        assert_eq!(draw.text, "");
+
+        let headless = draw_report(false, 30).expect("logic_draw_headless");
+        assert_eq!(headless.checksum, "89cd31291d2aefa4");
+        assert_eq!(headless.commands, 0);
+        assert_eq!(headless.operations, 1);
     }
 
     #[test]

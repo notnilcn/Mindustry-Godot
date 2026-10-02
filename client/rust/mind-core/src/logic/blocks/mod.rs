@@ -8,13 +8,19 @@
 //! the shared state types, the plan-12 rules seam and the tile→building link
 //! resolvers used by the VM's read/write instructions.
 
+pub mod canvas;
+pub mod display;
 pub mod io;
 pub mod logic_block;
 pub mod memory;
+pub mod message;
 pub mod switch;
 
+pub use canvas::{CanvasBehavior, CanvasBlockState};
+pub use display::{DisplayBehavior, LogicDisplayState};
 pub use logic_block::{LogicBlockBehavior, LogicBlockState};
 pub use memory::{MemSlot, MemoryBehavior, MemoryBlockState};
+pub use message::{MessageBehavior, MessageBlockState};
 pub use switch::SwitchBehavior;
 
 use bevy_ecs::component::Component;
@@ -30,7 +36,10 @@ use crate::logic::executor::Executor;
 use crate::logic::value::{LogicObject, VarRef};
 use crate::world::TileBuilds;
 use crate::world::block::BlockTable;
-use crate::world::block_kind_data::{BlockKindData, LogicBlockDef, MemoryDef, SwitchDef};
+use crate::world::block_kind_data::{
+    BlockKindData, CanvasDef, DisplayDef, LogicBlockDef, MemoryDef, MessageDef, SwitchDef,
+    TileableDisplayDef,
+};
 
 /// `LogicBlock.LogicLink`.
 #[derive(Clone, Debug, PartialEq)]
@@ -169,7 +178,7 @@ impl LogicTimeouts {
 }
 
 /// `LogicDisplay.displays` arena.
-#[derive(Clone, Debug, Default, Component)]
+#[derive(Clone, Debug, Default, Resource)]
 pub struct LogicDisplays {
     /// Display slots (`None` = free).
     pub slots: Vec<Option<Entity>>,
@@ -246,6 +255,7 @@ pub fn privileged_of(world: &World, e: Entity) -> bool {
         BlockKindData::Logic(def) => def.privileged,
         BlockKindData::Memory(def) => def.privileged,
         BlockKindData::Switch(def) => def.privileged,
+        BlockKindData::Message(def) => def.privileged,
         _ => false,
     }
 }
@@ -273,6 +283,42 @@ pub fn switch_def_of(world: &World, e: Entity) -> Option<SwitchDef> {
     let block = world.get::<Building>(e)?.block;
     match &world.get_resource::<BlockTable>()?.get(block)?.kind_data {
         BlockKindData::Switch(def) => Some(def.clone()),
+        _ => None,
+    }
+}
+
+/// `MessageBlock` family knobs for a building.
+pub fn message_def_of(world: &World, e: Entity) -> Option<MessageDef> {
+    let block = world.get::<Building>(e)?.block;
+    match &world.get_resource::<BlockTable>()?.get(block)?.kind_data {
+        BlockKindData::Message(def) => Some(def.clone()),
+        _ => None,
+    }
+}
+
+/// `LogicDisplay` family knobs for a building.
+pub fn display_def_of(world: &World, e: Entity) -> Option<DisplayDef> {
+    let block = world.get::<Building>(e)?.block;
+    match &world.get_resource::<BlockTable>()?.get(block)?.kind_data {
+        BlockKindData::Display(def) => Some(def.clone()),
+        _ => None,
+    }
+}
+
+/// `TileableLogicDisplay` family knobs for a building.
+pub fn tileable_def_of(world: &World, e: Entity) -> Option<TileableDisplayDef> {
+    let block = world.get::<Building>(e)?.block;
+    match &world.get_resource::<BlockTable>()?.get(block)?.kind_data {
+        BlockKindData::TileableDisplay(def) => Some(def.clone()),
+        _ => None,
+    }
+}
+
+/// `CanvasBlock` family knobs for a building.
+pub fn canvas_def_of(world: &World, e: Entity) -> Option<CanvasDef> {
+    let block = world.get::<Building>(e)?.block;
+    match &world.get_resource::<BlockTable>()?.get(block)?.kind_data {
+        BlockKindData::Canvas(def) => Some(def.clone()),
         _ => None,
     }
 }
@@ -508,6 +554,104 @@ mod integration_tests {
         );
         // Out of range reads null.
         assert_eq!(state.read(9999), CellValue::Obj(None));
+    }
+
+    #[test]
+    fn draw_flush_appends_commands() {
+        let mut harness = BuildHarness::new(16, 16, 1);
+        let processor = harness
+            .content()
+            .block_id("micro-processor")
+            .expect("micro-processor");
+        let display = harness
+            .content()
+            .block_id("logic-display")
+            .expect("logic-display");
+        assert!(harness.place(4, 4, processor, 0, true));
+        assert!(harness.place(8, 4, display, 0, true));
+        let de = harness.build_at(8, 4).expect("display entity");
+        let code = "draw clear 0 0 0\ndraw line 0 0 8 8\ndrawflush display1\nstop\n";
+        assert!(harness.configure(
+            4,
+            4,
+            ConfigValue::Bytes(logic_block::compress(code, &[]).into())
+        ));
+        assert!(harness.configure(4, 4, ConfigValue::Point2(8, 4)));
+        for _ in 0..20 {
+            harness.tick();
+        }
+        let state = harness
+            .world
+            .get::<LogicDisplayState>(de)
+            .expect("display state");
+        assert_eq!(state.commands.len(), 2);
+        assert_eq!(state.operations, 1);
+        assert_eq!(
+            crate::logic::executor::draw::cmd_type(state.commands[0]),
+            crate::logic::executor::draw::COMMAND_CLEAR
+        );
+        assert_eq!(
+            crate::logic::executor::draw::cmd_type(state.commands[1]),
+            crate::logic::executor::draw::COMMAND_LINE
+        );
+    }
+
+    #[test]
+    fn message_config_and_revision() {
+        let mut harness = BuildHarness::new(16, 16, 1);
+        let message = harness.content().block_id("message").expect("message");
+        assert!(harness.place(3, 3, message, 0, true));
+        let me = harness.build_at(3, 3).expect("message entity");
+        assert!(harness.configure(3, 3, ConfigValue::String("hello\nworld".to_owned())));
+        let state = harness
+            .world
+            .get::<MessageBlockState>(me)
+            .expect("message state");
+        assert_eq!(state.message, "hello\nworld");
+
+        let inst = harness
+            .world
+            .get_resource::<BlockTable>()
+            .expect("table")
+            .get_named("message")
+            .expect("message instance")
+            .clone();
+        let mut buf = Vec::new();
+        {
+            let mut writer = WireWriter::new(&mut buf);
+            inst.behavior.write(&harness.world, me, &mut writer);
+        }
+        assert!(harness.place(4, 4, message, 0, true));
+        let me2 = harness.build_at(4, 4).expect("message 2");
+        let mut reader = WireReader::new(&buf);
+        inst.behavior.read(&mut harness.world, me2, &mut reader, 0);
+        assert_eq!(
+            harness
+                .world
+                .get::<MessageBlockState>(me2)
+                .expect("message state 2")
+                .message,
+            "hello\nworld"
+        );
+    }
+
+    #[test]
+    fn canvas_pixel_roundtrip() {
+        let mut harness = BuildHarness::new(16, 16, 1);
+        let canvas = harness.content().block_id("canvas").expect("canvas");
+        assert!(harness.place(3, 3, canvas, 0, true));
+        let ce = harness.build_at(3, 3).expect("canvas entity");
+        let mut state = harness
+            .world
+            .get_mut::<CanvasBlockState>(ce)
+            .expect("canvas state");
+        assert_eq!(state.bits_per_pixel, 3);
+        state.set_pixel(0, 0, 5);
+        state.set_pixel(1, 0, 3);
+        assert_eq!(state.get_pixel(0, 0), 5.0);
+        assert_eq!(state.get_pixel(1, 0), 3.0);
+        assert!(state.get_pixel(-1, 0).is_nan());
+        assert!(state.get_pixel(12, 0).is_nan());
     }
 
     #[test]

@@ -8,6 +8,8 @@
 //! arithmetic/control/IO instruction subset; the world/unit instructions land in
 //! later milestones behind the same [`Instruction`] enum.
 
+pub mod draw;
+
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 use indexmap::IndexSet;
@@ -161,6 +163,33 @@ pub enum Instruction {
         output: VarRef,
         /// Link index.
         index: VarRef,
+    },
+    /// `DrawI` (`type` is the `GraphicsType` ordinal).
+    Draw {
+        /// Graphics type byte.
+        type_: u8,
+        /// X.
+        x: VarRef,
+        /// Y.
+        y: VarRef,
+        /// Parameter 1.
+        p1: VarRef,
+        /// Parameter 2.
+        p2: VarRef,
+        /// Parameter 3.
+        p3: VarRef,
+        /// Parameter 4.
+        p4: VarRef,
+    },
+    /// `DrawFlushI`.
+    DrawFlush {
+        /// Target display.
+        target: VarRef,
+    },
+    /// `PrintFlushI`.
+    PrintFlush {
+        /// Target message block.
+        target: VarRef,
     },
 }
 
@@ -328,6 +357,27 @@ impl Instruction {
                     *input,
                 );
             }
+            Instruction::Draw {
+                type_,
+                x,
+                y,
+                p1,
+                p2,
+                p3,
+                p4,
+            } => {
+                draw::pack_draw(exec, *type_, *x, *y, *p1, *p2, *p3, *p4);
+            }
+            Instruction::DrawFlush { target } => {
+                let target_obj = exec.arena.get(target.id()).value_obj().cloned();
+                crate::logic::blocks::io::flush_draw(world, exec, target_obj.as_ref());
+                exec.graphics_buffer.clear();
+            }
+            Instruction::PrintFlush { target } => {
+                let target_obj = exec.arena.get(target.id()).value_obj().cloned();
+                crate::logic::blocks::io::flush_print(world, exec, target_obj.as_ref());
+                exec.text_buffer.clear();
+            }
         }
     }
 }
@@ -379,6 +429,8 @@ pub struct Executor {
     pub stopped: bool,
     /// Packed draw command buffer (cap 256).
     pub graphics_buffer: Vec<u64>,
+    /// Deviation 7: when set, `draw` packing is skipped (headless default).
+    pub skip_draw_pack: bool,
     /// Text print buffer (cap 400).
     pub text_buffer: String,
     /// Global logic RNG stream.
@@ -417,6 +469,7 @@ impl Executor {
             yielded: false,
             stopped: false,
             graphics_buffer: Vec::new(),
+            skip_draw_pack: false,
             text_buffer: String::new(),
             rng: ArcRand::new(0),
             build: None,
@@ -754,6 +807,37 @@ pub fn build_statement(statement: &Statement, asm: &mut Assembler) -> Option<Ins
             let index = asm.var(address);
             Instruction::GetLink { output, index }
         }
+        Statement::Draw {
+            type_,
+            x,
+            y,
+            p1,
+            p2,
+            p3,
+            p4,
+        } => {
+            let x = asm.var(x);
+            let y = asm.var(y);
+            let p1 = asm.var(p1);
+            let p2 = asm.var(p2);
+            let p3 = asm.var(p3);
+            let p4 = asm.var(p4);
+            Instruction::Draw {
+                type_: type_.ordinal() as u8,
+                x,
+                y,
+                p1,
+                p2,
+                p3,
+                p4,
+            }
+        }
+        Statement::DrawFlush { target } => Instruction::DrawFlush {
+            target: asm.var(target),
+        },
+        Statement::PrintFlush { target } => Instruction::PrintFlush {
+            target: asm.var(target),
+        },
         // Later-milestone instructions compile to a no-op for now so program
         // structure (indices/jumps) is preserved.
         _ => Instruction::Noop,

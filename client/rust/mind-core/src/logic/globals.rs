@@ -170,11 +170,10 @@ impl GlobalVars {
         ] {
             let value = crate::logic::statement::name_to_align(name).unwrap_or(0);
             let key = format!("@{name}");
-            let mut var = LVar::new(&key);
-            var.constant = true;
-            var.is_obj = true;
-            var.obj = Some(LogicObject::Align(value));
-            self.cells.insert(key, var);
+            // Upstream `GlobalVars.init`: `put("@" + name, align)` where `align`
+            // is an `Integer`; `DrawI` reads it with `p1.numi()`.
+            let var = LVar::num_const(key, value as f64);
+            self.cells.insert(var.name.clone(), var);
         }
 
         // named colors: @color<Name> where Name = capitalize(lowercased name)
