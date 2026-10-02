@@ -8,7 +8,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Draft — 2026-10-01, not started. Executable only after `07_BLOCKS_BUILD_IMPLEMENTATION_PLAN.md` milestones are green. Two `NEEDS USER DECISION` items in §8 (R2, R3); neither blocks M0. |
+| **Status** | 🟡 **In progress — 2026-10-02 (`lane/08-logistics`): M0 complete; M1 Autotiler/`TileBitmask` + `Conveyor`/`ArmoredConveyor` landed; `Duct`/`StackConveyor` + M2–M8 open.** Executable after `07_BLOCKS_BUILD_IMPLEMENTATION_PLAN.md` M0–M3 (green). R2 (core inventory sharing) and R3 (carried payload entity model) remain `NEEDS USER DECISION` defaults; neither blocks M0. See `## Changelog`. |
 | **Phase** | P3 — World & systems |
 | **Depends on** | `07_BLOCKS_BUILD_IMPLEMENTATION_PLAN.md` (Block/Building framework, `BuildingBehavior` dispatch, `Building` base component, `ItemModule`, proximity/`Edges`, placement/config, revisioned building IO, `RotBlock`/`ControlBlock` hooks), `06_WORLD_TERRAIN_IMPLEMENTATION_PLAN.md` (tile grid/`Edges`), `05_SIM_CORE_IMPLEMENTATION_PLAN.md` (schedule slots, groups, pooling, `Time.run`, RNG, checksum), `02_CONTENT_IMPLEMENTATION_PLAN.md` (`BlockDef`/`BlockKind`, `Item`, `PayloadStack`/`PayloadSeq`, `UnitType` payload fields), `04_IO_SERIALIZATION_IMPLEMENTATION_PLAN.md` (building chunk reader/writer, `TypeIO` configs), `03_ASSETS_IMPLEMENTATION_PLAN.md` (autotile/bridge/payload region names, resolved by name at M1). |
 | **Blocks** | `09_POWER_LIQUIDS_HEAT_IMPLEMENTATION_PLAN.md` (reuses `Autotiler`, `TileBitmask`, `DirectionBridgeBuild.occupied`), `10_COMBAT_BULLETS_IMPLEMENTATION_PLAN.md` (`MassDriverBolt`, `PayloadAmmoTurret` consumes `Payload` API, `Puddles` for deconstructor), `11_UNITS_AI_WAVES_IMPLEMENTATION_PLAN.md` (`CargoAI`, `UnitCargoLoader`/`UnitCargoUnloadPoint`, block units/`ControlBlock`, payload carrying by units), `12_CAMPAIGN_IMPLEMENTATION_PLAN.md` (core inventory sharing, `handleCoreItem`, core capture/unlock), `15_INPUT_RTS_IMPLEMENTATION_PLAN.md` (conveyor/bridge placement, config dialogs), `16_RENDER_WORLD_IMPLEMENTATION_PLAN.md` (belt/duct/bridge/payload draw), `17_FX_PARTS_IMPLEMENTATION_PLAN.md` (payload/driver effects). |
@@ -732,3 +732,38 @@ Method: `cargo bench -p mind-core --bench logistics` (criterion; port of `convey
 
 - `mindustry-godot/HIGH_LEVEL_PLAN.md`, `PRELIMINARY_PLAN.md`, `00_FOUNDATION_IMPLEMENTATION_PLAN.md`, `02_CONTENT_IMPLEMENTATION_PLAN.md`, `03_ASSETS_IMPLEMENTATION_PLAN.md`, `04_IO_SERIALIZATION_IMPLEMENTATION_PLAN.md`, `05_SIM_CORE_IMPLEMENTATION_PLAN.md`
 - Sibling plans that do not exist at authoring time and must reconcile by filename: `06_WORLD_TERRAIN_IMPLEMENTATION_PLAN.md` (tile/`Edges` order), `07_BLOCKS_BUILD_IMPLEMENTATION_PLAN.md` (§3.2 freeze), `09`, `10`, `11`, `12`, `15`, `16`, `17`, `20`, `21`, `23`.
+
+---
+
+## Changelog
+
+> Newest last. Evidence is the actual test/scenario output (plan 08 §7); never tick on intent.
+
+**2026-10-02 — M0 complete (`lane/08-logistics`, base `81177fa`).**
+
+- **Buffers.** `world/item_buffer.rs`: `ItemBuffer` + `DirectionalItemBuffer` with the exact Java `@Struct` bit layouts (`BufferItem`, `BufferItemLegacy`, `TimeItem`; §6.2 / L4), f32 `Time.time` comparison incl. the `now < time` wraparound branch (L5), and legacy 1-byte-item reads (`read_legacy`). Capacity preallocated once (L3). Tests: `world::item_buffer::tests::{pack_literals_match_java_structs, poll_latency_and_wraparound, buffer_write_read_roundtrip, directional_legacy_read_upgrades_items, directional_accept_poll_remove}` — **5 passed**.
+- **Transfer API.** `world/blocks/distribution/transfer.rs` ports the `BuildingComp` transfer region: `accept_item`/`handle_item`/`accept_stack`/`handle_stack`/`remove_stack` defaults, `get_maximum_accepted`, `dump`/`dump_accumulate`/`offload`/`move_forward`, `increment_dump`, `front`, and `dispatch_accept_item`/`dispatch_handle_item`/`dispatch_can_dump` for behavior overrides. `BuildingBehavior` gained the matching default hooks (append-only). Tests: `transfer::tests::{dump_moves_item_to_accepting_neighbor, move_forward_uses_facing_neighbor}`.
+- **Conveyor vertical slice.** `world/blocks/distribution/conveyor.rs`: fixed `[3]` parallel arrays, the Java `updateTile` motion loop / `minitem` / `mid` / `clogHeat`, `acceptItem`/`handleItem`/`acceptStack`/`handleStack`/`removeStack`/`pass`, `overwrote`, rev 1 write + rev 0/1 read. `ConveyorBehavior::{BASE, TITANIUM, ARMORED}` carry the exact speeds (`0.035`/`0.0801`/`0.08`). Test `belt_moves_item_at_exact_speed` asserts exactly `speed` tiles/tick; `titanium_belt_speed`; `adjacent_belts_pass_isolated`; `terminal_passes_to_container_isolated`; `harness_chain_delivers_to_container`.
+- **Storage (deposit half).** `world/blocks/storage/storage_block.rs` `StorageBehavior` for `container`/`vault`/`reinforced-container`/`reinforced-vault` (linked-core forwarding is M4/M5).
+- **Registration + fixtures.** `world/blocks/mod.rs::default_registry` is now used by `BlockTable::build_default`; `BuildHarness::register_behavior` lets fixtures override a name; `world/fixtures/logistics.rs` provides `SourceBehavior` + a logistics state checksum.
+- **Oracle.** `mind-headless blocks scenario logistics_smoke` (1 source → 5 belts → 2×2 `container`; 400 ticks) → **pass**, `sink_items=22`, `belt_items=12`, checksum `f5c005f78e993ac1` (identical across two runs). `cargo test -p mind-core` lib **540 passed / 2 ignored** (baseline 526), workspace clippy `-D warnings` + `cargo fmt --check` clean, `cargo check -p mind-gdext` clean, `cargo tree -p mind-core` Godot/tokio-free.
+
+**2026-10-02 — M1 partial: Autotiler + TileBitmask + full Conveyor/ArmoredConveyor (08↔09 freeze).**
+
+- **`world/blocks/autotiler.rs`.** Ported `Autotiler.java`: `build_blending`, `transform_case`, `blends` (world + plan-directional), `blends_armored`, `facing`, `not_looking_at`, `looking_at_either`, `looking_at`, `d4/d4x/d4y`, `BlendNeighbor`, `SliceMode`/`slice_span`. The draw-time slice logic is a data descriptor (plan 16 draws). Tests: `d4_order_matches_geometry`, `transform_case_matrix`, `blend_matrix_all_sides`, `blend_matrix_one_side`, `facing_matches_geometry`.
+- **`world/blocks/tile_bitmask.rs`.** The 47-slice `[u8; 256]` `VALUES` table + `load`/`load_variants` name resolution is retained as the single shared owner for plans 09/16 (no fork; plan 03 §7.1a test kept green).
+- **Conveyor family.** `on_proximity_update` computes `blend_bits`/`blending`/`blend_sclx`/`blend_scly`, `next`/`nextc`/`aligned`; `ArmoredConveyor` uses `blends_armored` + the armored `accept_item` (source-is-conveyor or edge == rotation) in `ConveyorBehavior::ARMORED`.
+- **Oracle.** `mind-headless blocks scenario logistics_conveyor_lane` (32 belts + a 3/tick source, 1600 ticks) → **pass**, `delivered=59` (matches `speed/itemSpace = 0.0875` items/tick × ~670 delivery ticks), checksum `5d627616f619347c`.
+
+**08↔09 frozen API (also recorded in `HIGH_LEVEL_PLAN.md` §13):**
+
+- `mind_core::world::blocks::autotiler`:
+  - `pub trait BlendWorld { fn blends_block(&self, source: TilePos, rotation: u8, other_x: i32, other_y: i32, other_rot: u8, other_block: BlockId) -> bool; fn near_build(&self, direction: u8, source: TilePos) -> Option<BlendNeighbor>; fn square_sprite(&self, block: BlockId) -> bool; fn rotated_output(&self, block: BlockId) -> bool; fn block_size(&self, block: BlockId) -> i32; }`
+  - `pub fn build_blending(world: &dyn BlendWorld, tile: TilePos, rotation: u8, directional: &[Option<BlendNeighbor>; 4], check_world: bool) -> [i32; 5]` (`[case, scale_x, scale_y, bits, non_square_bits]`).
+  - `pub struct BlendNeighbor { pub x: i32, pub y: i32, pub rotation: u8, pub block: BlockId }`
+  - `pub fn blends_directional(...)`, `blends_world(...)`, `blends_armored(...)`, `looking_at(...)`, `looking_at_either(...)`, `not_looking_at(...)`, `facing(...)`, `d4/d4x/d4y`, `mod_i`, `relative_to`, `SliceMode`/`slice_span`.
+- `mind_core::world::blocks::tile_bitmask`: `pub const VALUES: [u8; 256]`, `SLICE_COUNT`, `load(&AtlasIndex, &str) -> [Option<&Region>; 47]`, `load_variants(&AtlasIndex, &str, usize)`.
+- `mind_core::world::blocks::distribution::transfer`: `dispatch_accept_item`/`dispatch_handle_item`/`dispatch_can_dump`, `dump`/`offload`/`move_forward`, `get_maximum_accepted`, `item_capacity`, `proximity`/`front`/`increment_dump`.
+- `ConveyorBuild` component fields for plan 16: `ids: [ItemId;3]`, `xs/ys: [f32;3]`, `len: u8`, `next/nextc`, `aligned`, `mid`, `minitem`, `clog_heat`, `blend_bits`, `blending`, `blend_sclx`, `blend_scly`.
+
+**Open (next milestones).** M1 `Duct`/`DuctJunction` + `StackConveyor` state machine; M2 `Router`/`Sorter`/`Junction`/`OverflowGate`/`OverflowDuct` + configs; M3 `ItemBridge`/`BufferedItemBridge`/`DirectionBridge`/`DuctBridge`/`MassDriver`; M4 `StorageBlock` core-link + `Unloader`/`DirectionalUnloader`; M5 `CoreBlock`; M6–M7 payloads; M8 integration/MCP/budgets. In-engine MCP run is deferred to the orchestrator's single-editor mutex.

@@ -182,7 +182,7 @@ pub enum BlockError {
 ///
 /// Instances are stored behind `Arc` so behavior code can hold block data across
 /// a mutable ECS borrow without cloning per tick.
-#[derive(Resource)]
+#[derive(Resource, Clone)]
 pub struct BlockTable {
     instances: Vec<Option<Arc<BlockInstance>>>,
     by_name: indexmap::IndexMap<String, BlockId>,
@@ -228,9 +228,9 @@ impl BlockTable {
         })
     }
 
-    /// Builds with no behavior overrides.
+    /// Builds with the default plan-07/08 behavior registry (logistics families).
     pub fn build_default(content: &ContentRegistry) -> Result<Self, BlockError> {
-        Self::build(content, &BehaviorRegistry::new())
+        Self::build(content, &super::blocks::default_registry(content))
     }
 
     /// Instance by id.

@@ -18,6 +18,7 @@ pub mod attributes;
 pub mod behavior;
 pub mod block;
 pub mod block_kind_data;
+pub mod blocks;
 pub mod build;
 pub mod building_io;
 pub mod cached;
@@ -31,11 +32,13 @@ pub mod darkness;
 pub mod draw;
 pub mod edges;
 pub mod events;
+pub mod fixtures;
 // The harness is deterministic test/scenario infrastructure; panicking on a
 // broken content bootstrap is intentional (plan 07 §7b).
 #[allow(clippy::expect_used)]
 pub mod harness;
 pub mod hooks;
+pub mod item_buffer;
 pub mod limits;
 pub mod modules;
 pub mod ops;
@@ -79,6 +82,7 @@ pub use hooks::{
     MapGenHooks, NewBuilding, NoopMapGenHooks, NoopRenderHooks, NoopWorldHooks, RenderHooks,
     WorldHooks,
 };
+pub use item_buffer::{DirectionalItemBuffer, ItemBuffer, packed};
 pub use limits::{BlockCounter, BuildRules};
 pub use modules::{FlowWindow, ItemModule, LiquidModule, PowerGraphId, PowerModule};
 pub use ops::{WorldCtx, WorldEventLog};

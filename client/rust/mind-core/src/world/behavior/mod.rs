@@ -210,6 +210,52 @@ pub trait BuildingBehavior: Send + Sync {
         let _ = (world, e, src, item);
     }
 
+    /// Stack acceptance hook (`BuildingComp.acceptStack`; 08 overrides).
+    fn accept_stack(
+        &self,
+        world: &World,
+        e: Entity,
+        item: ItemId,
+        amount: i32,
+        source: Option<Entity>,
+    ) -> i32 {
+        let _ = (world, e, item, amount, source);
+        0
+    }
+
+    /// Stack handling hook (`BuildingComp.handleStack`; 08 overrides).
+    fn handle_stack(&self, world: &mut World, e: Entity, item: ItemId, amount: i32) {
+        let _ = (world, e, item, amount);
+    }
+
+    /// Stack removal hook (`BuildingComp.removeStack`; 08 overrides).
+    fn remove_stack(&self, world: &mut World, e: Entity, item: ItemId, amount: i32) -> i32 {
+        let _ = (world, e, item, amount);
+        0
+    }
+
+    /// Maximum accepted amount (`BuildingComp.getMaximumAccepted`; 08 overrides).
+    fn get_maximum_accepted(&self, world: &World, e: Entity, item: ItemId) -> i32 {
+        let _ = (world, e, item);
+        0
+    }
+
+    /// Unload hook (`BuildingComp.canUnload`; 08 overrides).
+    fn can_unload(&self, world: &World, e: Entity) -> bool {
+        let _ = (world, e);
+        false
+    }
+
+    /// Item-taken notification (`BuildingComp.itemTaken`; 08/12 overrides).
+    fn item_taken(&self, world: &mut World, e: Entity, item: ItemId) {
+        let _ = (world, e, item);
+    }
+
+    /// Production stat hook (`BuildingComp.produced`; 12 overrides).
+    fn produced(&self, world: &mut World, e: Entity, item: ItemId, amount: i32) {
+        let _ = (world, e, item, amount);
+    }
+
     /// Liquid acceptance hook (08/09 override).
     fn accept_liquid(&self, world: &World, e: Entity, src: Entity, liquid: LiquidId) -> bool {
         let _ = (world, e, src, liquid);
