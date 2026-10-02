@@ -21,8 +21,9 @@ use crate::entities::comp::unit::queries::{UnitSnapshot, snapshot};
 use crate::entities::comp::{Health, Pos, TeamComp};
 use crate::world::{BuildHarness, TilePos, WorldGrid};
 
-use super::controller::ControllerSlot;
+use super::controller::{AiKind, ControllerSlot};
 use super::pathfinder::{Cost, Pathfinder};
+use super::types::flying::update_flying;
 use super::types::ground::update_ground;
 
 /// Deterministic unit/AI test harness.
@@ -133,22 +134,24 @@ impl UnitHarness {
         let entities = self.units.clone();
         let team = self.path_team;
         for entity in entities {
-            let Some(target) = self
-                .build
-                .world
-                .get::<ControllerSlot>(entity)
-                .and_then(|slot| slot.target)
-            else {
+            let Some(slot) = self.build.world.get::<ControllerSlot>(entity).copied() else {
                 continue;
             };
-            let arrived = update_ground(
-                &mut self.build.world,
-                &self.build.grid,
-                &mut self.pathfinder,
-                team,
-                entity,
-                target,
-            );
+            let Some(target) = slot.target else {
+                continue;
+            };
+            let arrived = if slot.kind == AiKind::Flying {
+                update_flying(&mut self.build.world, entity, target)
+            } else {
+                update_ground(
+                    &mut self.build.world,
+                    &self.build.grid,
+                    &mut self.pathfinder,
+                    team,
+                    entity,
+                    target,
+                )
+            };
             if arrived && let Some(mut slot) = self.build.world.get_mut::<ControllerSlot>(entity) {
                 slot.target = None;
             }

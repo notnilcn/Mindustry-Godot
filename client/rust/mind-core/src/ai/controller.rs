@@ -48,6 +48,8 @@ pub enum AiKind {
     Assembler,
     /// Experimental wave pre-build controller (`PrebuildAI`).
     Prebuild,
+    /// Repair/rebuild-assist controller (`RepairAI`; append-only).
+    Repair,
 }
 
 impl AiKind {
@@ -68,6 +70,7 @@ impl AiKind {
             AiKind::Boost => "BoostAI",
             AiKind::Assembler => "AssemblerAI",
             AiKind::Prebuild => "PrebuildAI",
+            AiKind::Repair => "RepairAI",
         }
     }
 }
@@ -153,6 +156,7 @@ mod tests {
             AiKind::Boost,
             AiKind::Assembler,
             AiKind::Prebuild,
+            AiKind::Repair,
         ];
         for (i, a) in kinds.iter().enumerate() {
             for b in &kinds[i + 1..] {
