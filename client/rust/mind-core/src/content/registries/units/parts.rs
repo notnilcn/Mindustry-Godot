@@ -220,6 +220,21 @@ pub struct DrawPartSpec {
     pub layer_offset: f32,
     /// `RegionPart.heatLayerOffset`.
     pub heat_layer_offset: f32,
+    /// `RegionPart.outlineLayerOffset` (plan 17 additive field).
+    pub outline_layer_offset: f32,
+    /// `RegionPart.turretHeatLayer` (plan 17 additive field; boolean, uses
+    /// `Layer.turretHeat` when set).
+    pub turret_heat_layer: bool,
+    /// `RegionPart.originX` (plan 17 additive field).
+    pub origin_x: f32,
+    /// `RegionPart.originY` (plan 17 additive field).
+    pub origin_y: f32,
+    /// `DrawPart.PartProgress.getClamp` gate (`clampProgress`; plan 17 additive).
+    pub clamp_progress: bool,
+    /// `RegionPart.replaceOutline` (plan 17 additive field).
+    pub replace_outline: bool,
+    /// `RegionPart.heatLightOpacity` (plan 17 additive field).
+    pub heat_light_opacity: f32,
     /// X offset.
     pub x: f32,
     /// Y offset.
@@ -313,6 +328,13 @@ impl DrawPartSpec {
             layer: -1.0,
             layer_offset: 0.0,
             heat_layer_offset: 1.0,
+            outline_layer_offset: -0.001,
+            turret_heat_layer: false,
+            origin_x: 0.0,
+            origin_y: 0.0,
+            clamp_progress: true,
+            replace_outline: false,
+            heat_light_opacity: 0.3,
             x: 0.0,
             y: 0.0,
             x_scl: 1.0,

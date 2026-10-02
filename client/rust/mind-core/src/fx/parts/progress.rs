@@ -70,6 +70,8 @@ pub enum PartProgressSpec {
     SinScl(Box<PartProgressSpec>, f32, f32),
     /// `absin(scl, mag)`.
     Absin(Box<PartProgressSpec>, f32, f32),
+    /// `p -> Mathf.absin(Time.time + offset, scl, mag)` (content `AbsinTime`).
+    AbsinTime(Box<PartProgressSpec>, f32, f32, f32),
     /// `mod(amount)`.
     Mod(Box<PartProgressSpec>, f32),
     /// `loop(time)`.
@@ -140,6 +142,9 @@ impl PartProgressSpec {
             }
             PartProgressSpec::Absin(inner, scl, mag) => {
                 inner.get(p, time) + (sin_scl_mag(time, scl * 2.0, *mag) + mag) / 2.0
+            }
+            PartProgressSpec::AbsinTime(inner, offset, scl, mag) => {
+                inner.get(p, time) + (sin_scl_mag(time + offset, scl * 2.0, *mag) + mag) / 2.0
             }
             PartProgressSpec::Mod(inner, amount) => fmod(inner.get(p, time), *amount),
             PartProgressSpec::Loop(inner, time_amount) => {

@@ -37,6 +37,10 @@ pub use def::{
     CustomParams, EffectDef, EffectKind, EffectRegistry, ExplosionParams, NoiseParams,
     ParticleParams, RadialParams, SoundParams, TriangleParams, WaveParams, WrapParams, registry,
 };
+pub use parts::draw::{
+    AllRegions, MapRegions, PartEmit, RegionInfo, RegionLookup, RegionNames, SpawnerState,
+    convert_progress, draw_named_parts, draw_parts, draw_spawner, get_outlines, intern_region,
+};
 pub use parts::{
     EffectSpawnerPartSpec, FlarePartSpec, HaloPartSpec, HoverPartSpec, PartMove, PartParams,
     PartProgressSpec, PartSpec, RegionPartSpec, ShapePartSpec,

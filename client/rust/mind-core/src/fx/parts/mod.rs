@@ -8,6 +8,7 @@
 //! `mind-gdext` (parts program) and is filled in with the M5 weapons pass; the
 //! spec fields below mirror the Java classes so content data is lossless.
 
+pub mod draw;
 pub mod params;
 pub mod progress;
 
@@ -176,41 +177,63 @@ impl Default for ShapePartSpec {
     }
 }
 
-/// `HaloPart` fields.
+/// `HaloPart` fields (`entities/part/HaloPart.java`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct HaloPartSpec {
-    /// Color.
-    pub color: Rgba,
-    /// Color to.
-    pub color_to: Rgba,
-    /// Radius.
+    /// `hollow`.
+    pub hollow: bool,
+    /// `tri`.
+    pub tri: bool,
+    /// Shape count (`shapes`).
+    pub shapes: i32,
+    /// Shape sides (`sides`).
+    pub sides: i32,
+    /// Shape radius.
     pub radius: f32,
-    /// Radius to.
+    /// Shape radius target (`<0` = none).
     pub radius_to: f32,
     /// Stroke.
     pub stroke: f32,
-    /// Stroke to.
+    /// Stroke target (`<0` = none).
     pub stroke_to: f32,
-    /// Shapes (orbit count).
-    pub shapes: i32,
-    /// Shape sides.
-    pub shape_sides: i32,
-    /// Shape radius.
-    pub shape_radius: f32,
-    /// Shape radius to.
-    pub shape_radius_to: f32,
-    /// Shape rotate speed.
-    pub shape_rotate_speed: f32,
-    /// Rotation.
-    pub rotation: f32,
-    /// Halo rotate speed.
-    pub halo_rotate_speed: f32,
+    /// Tri length.
+    pub tri_length: f32,
+    /// Tri length target (`<0` = none).
+    pub tri_length_to: f32,
+    /// Halo radius.
+    pub halo_radius: f32,
+    /// Halo radius target (`<0` = none).
+    pub halo_radius_to: f32,
     /// X.
     pub x: f32,
     /// Y.
     pub y: f32,
+    /// Shape rotation.
+    pub shape_rotation: f32,
+    /// Move x.
+    pub move_x: f32,
+    /// Move y.
+    pub move_y: f32,
+    /// Shape move rotation.
+    pub shape_move_rot: f32,
+    /// Halo rotate speed.
+    pub halo_rotate_speed: f32,
+    /// Halo rotation.
+    pub halo_rotation: f32,
+    /// Shape rotate speed.
+    pub rotate_speed: f32,
+    /// Color.
+    pub color: Rgba,
+    /// Color to.
+    pub color_to: Option<Rgba>,
+    /// Mirror.
+    pub mirror: bool,
+    /// Clamp progress.
+    pub clamp_progress: bool,
     /// Layer.
     pub layer: f32,
+    /// Layer offset.
+    pub layer_offset: f32,
     /// Progress.
     pub progress: PartProgressSpec,
     /// Children.
@@ -220,22 +243,33 @@ pub struct HaloPartSpec {
 impl Default for HaloPartSpec {
     fn default() -> Self {
         Self {
-            color: Rgba::WHITE,
-            color_to: Rgba::WHITE,
+            hollow: false,
+            tri: false,
+            shapes: 3,
+            sides: 3,
             radius: 3.0,
-            radius_to: 3.0,
+            radius_to: -1.0,
             stroke: 1.0,
-            stroke_to: 1.0,
-            shapes: 0,
-            shape_sides: 0,
-            shape_radius: 2.0,
-            shape_radius_to: 2.0,
-            shape_rotate_speed: 0.0,
-            rotation: 0.0,
-            halo_rotate_speed: 0.0,
+            stroke_to: -1.0,
+            tri_length: 1.0,
+            tri_length_to: -1.0,
+            halo_radius: 10.0,
+            halo_radius_to: -1.0,
             x: 0.0,
             y: 0.0,
-            layer: crate::render::layer::Layer::Effect.z(),
+            shape_rotation: 0.0,
+            move_x: 0.0,
+            move_y: 0.0,
+            shape_move_rot: 0.0,
+            halo_rotate_speed: 0.0,
+            halo_rotation: 0.0,
+            rotate_speed: 0.0,
+            color: Rgba::WHITE,
+            color_to: None,
+            mirror: false,
+            clamp_progress: true,
+            layer: -1.0,
+            layer_offset: 0.0,
             progress: PartProgressSpec::Warmup,
             children: Vec::new(),
         }
@@ -344,41 +378,62 @@ impl Default for FlarePartSpec {
     }
 }
 
-/// `EffectSpawnerPart` fields.
+/// `EffectSpawnerPart` fields (`entities/part/EffectSpawnerPart.java`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct EffectSpawnerPartSpec {
-    /// Effect id.
-    pub effect: crate::content::EffectId,
     /// X.
     pub x: f32,
     /// Y.
     pub y: f32,
+    /// Spawn rect width.
+    pub width: f32,
+    /// Spawn rect height.
+    pub height: f32,
     /// Rotation offset.
     pub rotation: f32,
-    /// Interval in ticks.
-    pub interval: f32,
-    /// Effect lifetime.
-    pub effect_life: f32,
-    /// Chance.
-    pub chance: f32,
-    /// Chance delta per tick.
-    pub chance_delta: f32,
-    /// Mirror the x offset.
+    /// Mirror across the center.
     pub mirror: bool,
+    /// Effect rotation offset.
+    pub effect_rot: f32,
+    /// Effect rotation random range.
+    pub effect_rand_rot: f32,
+    /// Interval in ticks (`>0` = timed).
+    pub effect_interval: f32,
+    /// Interval at zero progress (`>0` overrides `effect_interval`).
+    pub effect_interval_from: f32,
+    /// Spawn chance per tick.
+    pub effect_chance: f32,
+    /// Effect id.
+    pub effect: crate::content::EffectId,
+    /// Effect color.
+    pub effect_color: Rgba,
+    /// Scale chance by progress.
+    pub use_progress: bool,
+    /// Progress source.
+    pub progress: PartProgressSpec,
+    /// Debug rect.
+    pub debug_draw: bool,
 }
 
 impl Default for EffectSpawnerPartSpec {
     fn default() -> Self {
         Self {
-            effect: crate::content::EffectId::NONE,
             x: 0.0,
             y: 0.0,
+            width: 0.0,
+            height: 0.0,
             rotation: 0.0,
-            interval: 5.0,
-            effect_life: 30.0,
-            chance: 1.0,
-            chance_delta: 0.0,
             mirror: false,
+            effect_rot: 0.0,
+            effect_rand_rot: 0.0,
+            effect_interval: 0.0,
+            effect_interval_from: 0.0,
+            effect_chance: 0.1,
+            effect: crate::content::EffectId::NONE,
+            effect_color: Rgba::WHITE,
+            use_progress: true,
+            progress: PartProgressSpec::Warmup,
+            debug_draw: false,
         }
     }
 }
@@ -397,6 +452,7 @@ mod tests {
         assert_eq!(region.progress, PartProgressSpec::Warmup);
         let part = PartSpec::Shape(ShapePartSpec::default());
         assert!(matches!(part, PartSpec::Shape(_)));
-        assert_eq!(EffectSpawnerPartSpec::default().interval, 5.0);
+        assert_eq!(EffectSpawnerPartSpec::default().effect_chance, 0.1);
+        assert_eq!(HaloPartSpec::default().halo_radius, 10.0);
     }
 }
