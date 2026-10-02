@@ -4,7 +4,9 @@
 //! Scratch/pooling utilities (plan 05 §3.9).
 
 pub mod pools;
+pub mod strings;
 pub mod tmp;
 
 pub use pools::VecPool;
+pub use strings::{sanitize_filename, strip_colors};
 pub use tmp::{TempVec, Tmp, with_temp_vec};

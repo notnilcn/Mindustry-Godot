@@ -77,4 +77,28 @@ mod tests {
         let mapper = ColorMapper::new();
         assert_eq!(mapper.get(0x1234_5678), BlockId::AIR);
     }
+
+    #[test]
+    fn rgba_lookup_after_load() {
+        let content = crate::content::test_support::test_registry();
+        let mut mapper = ColorMapper::new();
+        mapper.load(&content);
+        // The transparent-black → air seed always exists.
+        assert_eq!(
+            mapper.get(rgba8888(&Rgba::new(0.0, 0.0, 0.0, 1.0))),
+            BlockId::AIR
+        );
+        // Every block with a map color resolves back to a block of that color.
+        for def in content.blocks() {
+            let Some(color) = def.map_color else {
+                continue;
+            };
+            let key = rgba8888(&color);
+            let resolved = mapper.get(key);
+            assert!(
+                content.block(resolved).is_some(),
+                "color {key:#010x} unresolved"
+            );
+        }
+    }
 }
