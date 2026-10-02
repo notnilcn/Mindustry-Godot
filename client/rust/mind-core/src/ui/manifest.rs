@@ -425,12 +425,18 @@ mod tests {
                 "M3 dialog '{name}' missing from dialogs_manifest.json"
             );
         }
+        for name in ["menu", "hud", "placement", "minimap", "block_config"] {
+            assert!(
+                manifest.fragments.iter().any(|entry| entry.name == name),
+                "fragment '{name}' missing from dialogs_manifest.json"
+            );
+        }
         assert!(
             manifest
                 .fragments
                 .iter()
                 .any(|entry| entry.name == "menu" && entry.group == "menu"),
-            "menu fragment missing"
+            "menu fragment group wrong"
         );
     }
 

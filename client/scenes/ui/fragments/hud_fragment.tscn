@@ -1,0 +1,141 @@
+; SPDX-License-Identifier: GPL-3.0-only
+;
+; HUD fragment (plan 14 §3.5, M4): the named regions from the plan table are
+; declared here (tscn-first) so the layout is editor-navigable. Labels bind to
+; the read-only `MindHud` surface in hud_fragment.gd; no sim reads in GDScript.
+;
+; Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
+; Source: core/src/mindustry/ui/fragments/HudFragment.java
+
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://ui/fragments/hud_fragment.gd" id="1_hud"]
+[ext_resource type="PackedScene" path="res://scenes/ui/widgets/mind_minimap.tscn" id="2_minimap"]
+
+[node name="HudFragment" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1
+script = ExtResource("1_hud")
+
+[node name="WavesStack" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+grow_horizontal = 2
+theme_override_constants/separation = 4
+
+[node name="WavesMain" type="VBoxContainer" parent="WavesStack"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="Status" type="Label" parent="WavesStack/WavesMain"]
+layout_mode = 2
+text = ""
+horizontal_alignment = 1
+
+[node name="Info" type="Label" parent="WavesStack/WavesMain"]
+layout_mode = 2
+text = ""
+horizontal_alignment = 1
+
+[node name="FpsBox" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -120.0
+grow_horizontal = 0
+theme_override_constants/separation = 0
+
+[node name="Fps" type="Label" parent="FpsBox"]
+layout_mode = 2
+text = "FPS: 0"
+horizontal_alignment = 2
+
+[node name="Memory" type="Label" parent="FpsBox"]
+layout_mode = 2
+text = "0 MB"
+horizontal_alignment = 2
+
+[node name="Ping" type="Label" parent="FpsBox"]
+layout_mode = 2
+text = "0 ms"
+horizontal_alignment = 2
+
+[node name="CoreInfo" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 7
+anchor_left = 0.5
+anchor_right = 0.5
+anchor_top = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_constants/separation = 2
+
+[node name="CoreItems" type="Control" parent="CoreInfo"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 32)
+
+[node name="HudText" type="Label" parent="CoreInfo"]
+layout_mode = 2
+text = ""
+horizontal_alignment = 1
+
+[node name="MinimapBox" type="Control" parent="."]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -160.0
+offset_top = -186.0
+grow_horizontal = 0
+grow_vertical = 0
+
+[node name="Minimap" parent="MinimapBox" instance=ExtResource("2_minimap")]
+layout_mode = 0
+offset_right = 140.0
+offset_bottom = 140.0
+
+[node name="Position" type="Label" parent="MinimapBox"]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 0
+grow_vertical = 0
+text = ""
+
+[node name="PausedBanner" type="Label" parent="."]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+grow_horizontal = 2
+grow_vertical = 2
+text = "Paused"
+horizontal_alignment = 1
+
+[node name="WaitingBanner" type="Label" parent="."]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+grow_horizontal = 2
+grow_vertical = 2
+text = "Waiting for players"
+horizontal_alignment = 1

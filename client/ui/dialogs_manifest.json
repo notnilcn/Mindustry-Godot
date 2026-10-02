@@ -31,8 +31,14 @@
     {"name": "menu", "scene": "res://scenes/ui/fragments/menu_fragment.tscn", "group": "menu"},
     {"name": "loading", "scene": "res://scenes/ui/fragments/loading_fragment.tscn", "group": "loading"},
     {"name": "fade_in", "scene": "res://scenes/ui/fragments/fade_in_fragment.tscn", "group": "overlay"},
+    {"name": "hud", "scene": "res://scenes/ui/fragments/hud_fragment.tscn", "group": "hud"},
     {"name": "performance", "scene": "res://scenes/ui/fragments/performance_fragment.tscn", "group": "hud"},
-    {"name": "hints", "scene": "res://scenes/ui/fragments/hints_fragment.tscn", "group": "hud"}
+    {"name": "hints", "scene": "res://scenes/ui/fragments/hints_fragment.tscn", "group": "hud"},
+    {"name": "placement", "scene": "res://scenes/ui/fragments/placement_fragment.tscn", "group": "hud"},
+    {"name": "minimap", "scene": "res://scenes/ui/fragments/minimap_fragment.tscn", "group": "hud", "hidden": true},
+    {"name": "block_config", "scene": "res://scenes/ui/fragments/block_config_fragment.tscn", "group": "overlay", "hidden": true},
+    {"name": "block_inventory", "scene": "res://scenes/ui/fragments/block_inventory_fragment.tscn", "group": "overlay", "hidden": true},
+    {"name": "plan_config", "scene": "res://scenes/ui/fragments/plan_config_fragment.tscn", "group": "overlay", "hidden": true}
   ],
   "prompts": ["show_info", "show_text", "show_confirm", "show_text_input", "show_info_toast", "announce", "toast"]
 }

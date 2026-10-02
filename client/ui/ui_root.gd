@@ -75,7 +75,10 @@ func _instantiate(entry: Dictionary, parent: Control, is_fragment: bool) -> void
 	instance.name = dialog_name
 	parent.add_child(instance)
 	if is_fragment:
-		instance.visible = true
+		# Manifest `hidden: true` marks fragments that are shown on demand
+		# (fullscreen minimap, config/inventory popups); everything else is a
+		# persistent HUD/menu element.
+		instance.visible = not bool(entry.get("hidden", false))
 		return
 	_dialogs[dialog_name] = instance
 	var ui := _ui()

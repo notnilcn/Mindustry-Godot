@@ -1,0 +1,41 @@
+; SPDX-License-Identifier: GPL-3.0-only
+;
+; BlockConfig fragment (plan 14 §3.5, M4): static scale-in panel frame; rows are
+; built by block_config_fragment.gd from a plan-07 ConfigUiSpec.
+;
+; Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
+; Source: core/src/mindustry/ui/fragments/BlockConfigFragment.java
+
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://ui/fragments/block_config_fragment.gd" id="1_config"]
+
+[node name="BlockConfigFragment" type="Control"]
+layout_mode = 1
+anchors_preset = 0
+offset_right = 300.0
+offset_bottom = 220.0
+mouse_filter = 1
+visible = false
+script = ExtResource("1_config")
+
+[node name="Panel" type="PanelContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_type_variation = &"defaultPane"
+
+[node name="Layout" type="VBoxContainer" parent="Panel"]
+layout_mode = 2
+
+[node name="Title" type="Label" parent="Panel/Layout"]
+layout_mode = 2
+text = ""
+horizontal_alignment = 1
+
+[node name="Body" type="VBoxContainer" parent="Panel/Layout"]
+layout_mode = 2
+size_flags_vertical = 3
