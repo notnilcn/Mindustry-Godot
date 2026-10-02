@@ -8,11 +8,15 @@
 //! systems never read platform state to make simulation decisions; the trait is
 //! for logging/data-dir/settings only (plan 05 §3.3 invariant 3).
 
+pub mod args;
+pub mod caps;
 pub mod hooks;
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+pub use args::{LaunchArgs, data_root, parse as parse_launch_args};
+pub use caps::{PerformanceTier, PlatformCaps, PlatformKind};
 pub use hooks::{ClientHooks, ClientHooksHandle, NoopClientHooks};
 
 /// Log severity (mirrors Arc `Log.LogLevel`).

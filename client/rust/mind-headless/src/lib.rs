@@ -10,6 +10,7 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod args;
 pub mod audio_scenarios;
 pub mod blocks_scenarios;
 pub mod cli;
@@ -17,6 +18,7 @@ pub mod exec;
 pub mod paths;
 pub mod registry;
 pub mod report;
+pub mod server;
 pub mod stdb_scenarios;
 
 use clap::Parser;
