@@ -47,6 +47,28 @@ pub enum Command {
         file: Option<PathBuf>,
     },
 
+    /// Run the dedicated server (`ServerLauncher`/`ServerControl` port; plan 22 M2).
+    Server {
+        /// Server data root (default `./config`).
+        #[arg(long)]
+        config_dir: Option<PathBuf>,
+        /// Startup commands; comma-separated and/or repeatable (`--commands "a,b"`).
+        #[arg(long = "commands", value_delimiter = ',')]
+        commands: Vec<String>,
+        /// Socket port override (`--socket-port 0` picks an ephemeral test port).
+        #[arg(long)]
+        socket_port: Option<u16>,
+        /// SpacetimeDB mode (`online` connects; `offline` disables admin/host delegation).
+        #[arg(long, default_value = "online")]
+        stdb: String,
+        /// Write boot timings JSON here.
+        #[arg(long)]
+        boot_timing_json: Option<PathBuf>,
+        /// Write the tick profile JSON here (accepted; implemented with plan 23).
+        #[arg(long)]
+        profile_json: Option<PathBuf>,
+    },
+
     /// Run a registered scenario and verify its golden expectations.
     Run {
         /// Scenario name (see `list`).

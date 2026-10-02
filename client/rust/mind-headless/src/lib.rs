@@ -17,6 +17,7 @@ pub mod exec;
 pub mod paths;
 pub mod registry;
 pub mod report;
+pub mod server;
 pub mod stdb_scenarios;
 
 use clap::Parser;

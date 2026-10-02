@@ -83,6 +83,23 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             Ok(EXIT_PASS)
         }
         Command::Version { json, file } => cmd_version(*json, file.as_deref()),
+        Command::Server {
+            config_dir,
+            commands,
+            socket_port,
+            stdb,
+            boot_timing_json,
+            profile_json,
+        } => Ok(crate::server::run(crate::server::ServerOptions {
+            config_dir: config_dir
+                .clone()
+                .unwrap_or_else(|| PathBuf::from("config")),
+            commands: commands.clone(),
+            socket_port: *socket_port,
+            offline: stdb.eq_ignore_ascii_case("offline"),
+            boot_timing_json: boot_timing_json.clone(),
+            profile_json: profile_json.clone(),
+        })),
         Command::Run {
             scenario,
             dump,
