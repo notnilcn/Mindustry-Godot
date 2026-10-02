@@ -70,6 +70,7 @@ pub fn run(command: &CampaignCommand) -> Result<i32> {
         CampaignCommand::Fog { .. } => campaign_fog()?,
         CampaignCommand::Objectives { .. } => objectives_completion()?,
         CampaignCommand::Play { planet, sector, .. } => campaign_play(planet, sector)?,
+        CampaignCommand::Bench { profile, ticks, .. } => campaign_bench(profile, *ticks)?,
     };
     match command {
         CampaignCommand::Rules { json, dump: path }
@@ -90,6 +91,9 @@ pub fn run(command: &CampaignCommand) -> Result<i32> {
             json, dump: path, ..
         }
         | CampaignCommand::Play {
+            json, dump: path, ..
+        }
+        | CampaignCommand::Bench {
             json, dump: path, ..
         } => {
             if let Some(path) = path {
@@ -1060,6 +1064,300 @@ fn campaign_play(planet_name: &str, sector_name: &str) -> Result<(Value, Value)>
     Ok((report, dump))
 }
 
+/// `campaign bench` — plan 12 §7d budget profiles (measurement, not a gate).
+fn campaign_bench(profile: &str, ticks: u32) -> Result<(Value, Value)> {
+    use std::time::Instant;
+
+    use bevy_ecs::entity::Entity;
+    use mind_core::content::BlockId;
+    use mind_core::game::fog::{FogControl, FogSource};
+    use mind_core::game::map_objectives::{MapObjectivesRuntime, ObjectiveEnv, ObjectiveRunParams};
+    use mind_core::game::teams::{BuildingRecord, Teams, UnitRecord};
+
+    let profiles: Vec<String> = profile
+        .split(',')
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .collect();
+    let mut checksums: serde_json::Map<String, Value> = serde_json::Map::new();
+    let mut timing: serde_json::Map<String, Value> = serde_json::Map::new();
+    let mut budget_ok = serde_json::Map::new();
+    let mut correctness = true;
+
+    // -- rules: JSON round-trip throughput (budget: persistence path only) --
+    if profiles.iter().any(|name| name == "rules") {
+        let rules = Rules::default();
+        let json = serde_json::to_string(&rules)?;
+        let ops = ticks.max(1) as u64 * 50;
+        let start = Instant::now();
+        let mut acc = 0u64;
+        for _ in 0..ops {
+            let back: Rules = serde_json::from_str(&json)?;
+            acc = acc.wrapping_add(back.win_wave as u64);
+        }
+        let elapsed = start.elapsed();
+        checksums.insert("rules".to_owned(), json!(format!("{acc:016x}")));
+        timing.insert(
+            "rules".to_owned(),
+            json!(elapsed.as_micros() as f64 / ops as f64),
+        );
+        budget_ok.insert("rules".to_owned(), json!(true));
+    }
+
+    // -- teams: 8 teams x 600 buildings x 300 units per tick --
+    if profiles.iter().any(|name| name == "teams") {
+        let rules = Rules {
+            waves: false,
+            ..Rules::default()
+        };
+        // Plan §7d profile: 8 teams, 600 buildings, 300 units *total*.
+        let mut buildings = Vec::new();
+        let mut units = Vec::new();
+        let mut raw = 1u32;
+        for team in 0..8u8 {
+            for i in 0..75u32 {
+                raw += 1;
+                buildings.push(BuildingRecord {
+                    entity: Entity::from_raw_u32(raw).ok_or_else(|| anyhow::anyhow!("entity"))?,
+                    team,
+                    block: BlockId::new((i % 32) as u16 + 1),
+                    x: (i % 30) as f32 * 8.0,
+                    y: (i / 30) as f32 * 8.0,
+                    is_core: i == 0,
+                    is_turret: i % 5 == 0,
+                    turret_range: 0.0,
+                    privileged: false,
+                });
+            }
+            for i in 0..37u32 {
+                raw += 1;
+                units.push(UnitRecord {
+                    entity: Entity::from_raw_u32(raw).ok_or_else(|| anyhow::anyhow!("entity"))?,
+                    team,
+                    type_id: (i % 16) as u16,
+                    type_name: format!("unit-{}", i % 16),
+                    x: (i % 25) as f32 * 8.0,
+                    y: (i / 25) as f32 * 8.0,
+                    is_boss: false,
+                    is_flying: i % 3 == 0,
+                    payload_types: Vec::new(),
+                });
+            }
+        }
+        let mut teams = Teams::new();
+        let start = Instant::now();
+        for _ in 0..ticks.max(1) {
+            teams.update_team_stats(&buildings, &units, &[], &rules);
+        }
+        let elapsed = start.elapsed();
+        let counts: i64 = teams
+            .present
+            .iter()
+            .filter_map(|team| teams.get_or_null(*team))
+            .map(|data| data.unit_count as i64)
+            .sum();
+        checksums.insert("teams".to_owned(), json!(format!("{counts:016x}")));
+        let ms = elapsed.as_secs_f64() * 1000.0 / ticks.max(1) as f64;
+        timing.insert("teams".to_owned(), json!(ms));
+        budget_ok.insert("teams".to_owned(), json!(ms <= 0.35));
+        correctness &= counts > 0;
+    }
+
+    // -- fog: 2000 buildings + 400 units per tick --
+    if profiles.iter().any(|name| name == "fog") {
+        let blocks: Vec<FogSource> = (0..2000)
+            .map(|i| FogSource {
+                x: i % 50,
+                y: i / 50,
+                radius: 6,
+                team: (i % 2) as u8,
+            })
+            .collect();
+        let units: Vec<FogSource> = (0..400)
+            .map(|i| FogSource {
+                x: i % 25 + 50,
+                y: i / 25,
+                radius: 4,
+                team: (i % 2) as u8,
+            })
+            .collect();
+        let mut fog = FogControl::new();
+        fog.on_world_load(128, 128, true, true, &blocks);
+        let start = Instant::now();
+        for tick in 0..ticks.max(1) {
+            fog.update(tick as u64, &[0, 1], &blocks, &units, true, true, false);
+        }
+        let elapsed = start.elapsed();
+        let chunk = fog.write();
+        checksums.insert("fog".to_owned(), json!(fnv_hex(&chunk)));
+        let ms = elapsed.as_secs_f64() * 1000.0 / ticks.max(1) as f64;
+        timing.insert("fog".to_owned(), json!(ms));
+        budget_ok.insert("fog".to_owned(), json!(ms <= 0.60));
+        correctness &= !chunk.is_empty();
+    }
+
+    // -- turn: production across two owned sectors --
+    if profiles.iter().any(|name| name == "turn") {
+        let registry = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+            .map_err(|error| anyhow::anyhow!("content boot failed: {error}"))?;
+        let mut campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
+        let planet = campaign
+            .planet_id_by_name("serpulo")
+            .ok_or_else(|| anyhow::anyhow!("serpulo missing"))?;
+        let source_id = registry
+            .sector_by_name("groundZero")
+            .ok_or_else(|| anyhow::anyhow!("groundZero missing"))?
+            .sector;
+        let dest_id = registry
+            .sector_by_name("saltFlats")
+            .ok_or_else(|| anyhow::anyhow!("saltFlats missing"))?
+            .sector;
+        for id in [source_id, dest_id] {
+            let sector = campaign
+                .sector_mut(planet, id)
+                .ok_or_else(|| anyhow::anyhow!("sector missing"))?;
+            sector.save = Some(format!("sector-serpulo-{id}"));
+            sector.info.info.has_core = true;
+            sector.info.info.storage_capacity = 1_000_000;
+            sector.info.info.waves = false;
+        }
+        campaign
+            .sector_mut(planet, source_id)
+            .ok_or_else(|| anyhow::anyhow!("sector missing"))?
+            .info
+            .info
+            .production
+            .insert("copper".to_owned(), ExportStat { mean: 1.0 });
+        let turns = ticks.clamp(1, 1000) as usize;
+        let mut settings = mind_core::io::settings::SettingsStore::new();
+        let mut rand = JavaRandom::new(3);
+        let start = Instant::now();
+        for _ in 0..turns {
+            campaign.run_turn(&registry, &mut settings, &TurnContext::default(), &mut rand);
+        }
+        let elapsed = start.elapsed();
+        let copper = campaign
+            .sector(planet, source_id)
+            .and_then(|sector| sector.info.info.items.get("copper").copied())
+            .unwrap_or(0);
+        checksums.insert("turn".to_owned(), json!(format!("{copper:016x}")));
+        let ms = elapsed.as_secs_f64() * 1000.0 / turns as f64;
+        timing.insert("turn".to_owned(), json!(ms));
+        budget_ok.insert("turn".to_owned(), json!(ms <= 0.50));
+        correctness &= campaign.universe.turn as usize == turns;
+    }
+
+    // -- objectives: 32 running objectives per tick --
+    if profiles.iter().any(|name| name == "objectives") {
+        struct BenchEnv;
+        impl ObjectiveEnv for BenchEnv {
+            fn is_content_unlocked(&self, _content: &str) -> bool {
+                false
+            }
+            fn team_has_item(&self, _team: u8, _item: &str, _amount: i32) -> bool {
+                false
+            }
+            fn core_item_count(&self, _item: &str) -> i32 {
+                0
+            }
+            fn placed_block_count(&self, _block: &str) -> i32 {
+                0
+            }
+            fn unit_count(&self, _team: u8, _unit: &str) -> i32 {
+                0
+            }
+            fn enemy_units_destroyed(&self) -> i32 {
+                0
+            }
+            fn objective_flag(&self, _flag: &str) -> bool {
+                false
+            }
+            fn core_count(&self, _team: u8) -> usize {
+                1
+            }
+            fn block_at(&self, _x: i32, _y: i32) -> Option<(&str, u8)> {
+                None
+            }
+            fn headless(&self) -> bool {
+                false
+            }
+            fn command_mode_satisfied(&self) -> bool {
+                false
+            }
+        }
+        let running: Vec<String> = (0..32)
+            .map(|_| r#"{"class":"DestroyUnits","count":1000000000}"#.to_owned())
+            .collect();
+        let json = format!("[{}]", running.join(","));
+        let data = mind_core::io::json::objectives::MapObjectives::from_json(&json)?;
+        let mut runtime = MapObjectivesRuntime::from_data(data);
+        let env = BenchEnv;
+        let params = ObjectiveRunParams::default();
+        let start = Instant::now();
+        for _ in 0..ticks.max(1) {
+            let _ = runtime.update(&env, &params, 1.0 / 60.0);
+        }
+        let elapsed = start.elapsed();
+        checksums.insert(
+            "objectives".to_owned(),
+            json!(format!("{:016x}", runtime.len())),
+        );
+        let ms = elapsed.as_secs_f64() * 1000.0 / ticks.max(1) as f64;
+        timing.insert("objectives".to_owned(), json!(ms));
+        budget_ok.insert("objectives".to_owned(), json!(ms <= 0.10));
+        correctness &= runtime.len() == 32;
+    }
+
+    // -- schematic: read+write the max 64x64 loadout --
+    if profiles.iter().any(|name| name == "schematic") {
+        let registry = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+            .map_err(|error| anyhow::anyhow!("content boot failed: {error}"))?;
+        let mut schematics = mind_core::game::schematics::Schematics::new();
+        schematics.load_loadouts(&registry);
+        let basic = schematics
+            .all
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("loadout missing"))?;
+        let ops = ticks.max(1) as u64;
+        let start = Instant::now();
+        let mut tiles = 0usize;
+        for _ in 0..ops {
+            let encoded = mind_core::game::schematics::write_base64(basic, &registry)?;
+            let back = mind_core::game::schematics::read_base64(&encoded, &registry)?;
+            tiles += back.tiles.len();
+        }
+        let elapsed = start.elapsed();
+        checksums.insert("schematic".to_owned(), json!(format!("{tiles:016x}")));
+        let ms = elapsed.as_secs_f64() * 1000.0 / ops as f64;
+        timing.insert("schematic".to_owned(), json!(ms));
+        budget_ok.insert("schematic".to_owned(), json!(ms <= 1.0));
+        correctness &= tiles >= ops as usize;
+    }
+
+    let all_within = budget_ok
+        .values()
+        .all(|value| value.as_bool().unwrap_or(false));
+    let pass = correctness;
+    let dump = json!({
+        "format": 1,
+        "scenario": "campaign_bench",
+        "ticks": ticks,
+        "profiles": profiles,
+        "timing_ms": timing,
+        "budget_ok": budget_ok,
+        "all_within_budget": all_within,
+        "checksums": checksums,
+        "pass": pass,
+    });
+    let report = json!({
+        "scenario": "campaign_bench",
+        "profiles": profiles,
+        "all_within_budget": all_within,
+        "pass": pass,
+    });
+    Ok((report, dump))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1122,5 +1420,13 @@ mod tests {
     fn play_golden_matches() {
         let (_, dump) = campaign_play("serpulo", "groundZero").unwrap();
         assert_eq!(golden("play.json"), canonical(&dump));
+    }
+
+    #[test]
+    fn bench_profiles_are_deterministic_and_pass() {
+        let (_, first) = campaign_bench("rules,teams,fog,turn,objectives,schematic", 30).unwrap();
+        let (_, second) = campaign_bench("rules,teams,fog,turn,objectives,schematic", 30).unwrap();
+        assert!(first["pass"].as_bool().unwrap());
+        assert_eq!(first["checksums"], second["checksums"]);
     }
 }

@@ -662,6 +662,23 @@ pub enum CampaignCommand {
         #[arg(long)]
         dump: Option<PathBuf>,
     },
+
+    /// `campaign_bench` (plan 12 §7d): per-system timings + deterministic
+    /// checksums for the campaign budget profiles.
+    Bench {
+        /// Comma-separated profiles (`rules,teams,fog,turn,objectives,schematic`).
+        #[arg(long, default_value = "rules,teams,fog,turn,objectives,schematic")]
+        profile: String,
+        /// Fixed ticks per profile (proportional scaling inside each).
+        #[arg(long, default_value_t = 3600)]
+        ticks: u32,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Write the canonical golden dump here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+    },
 }
 
 /// `fx` subcommands (plan 17 §7b).
