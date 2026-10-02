@@ -10,6 +10,9 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+// Lets `mind_derive` output reference `::mind_core` inside this crate itself.
+extern crate self as mind_core;
+
 pub mod assets;
 pub mod command;
 pub mod config;
@@ -17,6 +20,7 @@ pub mod content;
 pub mod ecs;
 pub mod event;
 pub mod game;
+pub mod io;
 pub mod log;
 pub mod random;
 pub mod scenario;

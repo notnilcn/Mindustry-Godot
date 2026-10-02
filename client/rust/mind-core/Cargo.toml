@@ -8,6 +8,7 @@ description = "Godot-free, tokio-free Mindustry simulation core (content, world,
 
 [dependencies]
 bevy_ecs.workspace = true
+mind-derive = { path = "../mind-derive" }
 serde.workspace = true
 serde_json.workspace = true
 indexmap.workspace = true
@@ -15,9 +16,23 @@ smallvec.workspace = true
 log.workspace = true
 thiserror.workspace = true
 xxhash-rust.workspace = true
+flate2.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "io"
+harness = false
 
 [build-dependencies]
 serde_json.workspace = true
 
 [lints]
 workspace = true
+
+[features]
+# OD2 / NUD-02: one-way legacy `MSAV` importer. Default-off; currently a
+# declined stub (`io::legacy` errors with the upstream unknown-version message)
+# until an explicit user opt-in lands `legacy::java` readers (plan 04 M7).
+msav-import = []

@@ -19,3 +19,7 @@ pub const SCENARIO_FORMAT: u32 = 1;
 
 /// Format version of command-log JSONL files (§6.2).
 pub const COMMAND_LOG_FORMAT: u32 = 1;
+
+/// Build number written into save meta tags (`Version.build`; 0 = dev build,
+/// matching the upstream default when no build is stamped).
+pub const BUILD: i32 = 0;

@@ -224,3 +224,196 @@ pub struct BenchReport {
     /// Whether the baseline was exceeded by < 20% (warning) or more (failure).
     pub baseline_status: String,
 }
+
+/// `io dump-meta` report (plan 04 M0): meta-only read of one save/map file.
+#[derive(Debug, Clone, Serialize)]
+pub struct IoDumpMetaReport {
+    /// File that was read.
+    pub file: String,
+    /// Save format version from the container header.
+    pub format_version: i32,
+    /// Build tag.
+    pub build: i32,
+    /// Save timestamp (millis).
+    pub timestamp: i64,
+    /// Accumulated playtime (millis).
+    pub time_played: i64,
+    /// `mapname` tag.
+    pub map_name: String,
+    /// `wave` tag.
+    pub wave: i32,
+    /// `width` tag.
+    pub width: i32,
+    /// `height` tag.
+    pub height: i32,
+    /// `SaveMeta.isMap` (tags contain `name`).
+    pub is_map: bool,
+    /// Parsed `mods` list.
+    pub mods: Vec<String>,
+    /// All meta tags in file order.
+    pub tags: Vec<(String, String)>,
+}
+
+/// `io settings` report (plan 04 M1 §7b).
+#[derive(Debug, Clone, Serialize)]
+pub struct IoSettingsReport {
+    /// Data root the scenario ran against.
+    pub data_dir: String,
+    /// Set → flush → reload equality held for every key.
+    pub persisted: bool,
+    /// Corrupted settings file fell back to defaults without a panic.
+    pub corrupt_fallback: bool,
+    /// The store rewrote a valid file after the corruption.
+    pub recovered: bool,
+    /// Keys exercised in the persistence phase.
+    pub keys_checked: Vec<String>,
+    /// Overall pass/fail.
+    pub pass: bool,
+}
+
+/// One def row in the `io check-revisions` report (plan 04 M3).
+#[derive(Debug, Clone, Serialize)]
+pub struct IoDefRevisionReport {
+    /// Def name.
+    pub name: String,
+    /// `up-to-date` / `missing` / `drift` / `written` / `updated`.
+    pub status: String,
+    /// Version appended by `--update`, when applied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_to: Option<u32>,
+    /// Drift details (empty when clean).
+    pub details: Vec<String>,
+}
+
+/// `io check-revisions` report (plan 04 M3 §7b).
+#[derive(Debug, Clone, Serialize)]
+pub struct IoCheckRevisionsReport {
+    /// Manifest root that was checked.
+    pub revisions_root: String,
+    /// Whether `--update` ran.
+    pub update: bool,
+    /// Overall pass/fail (check mode).
+    pub pass: bool,
+    /// Per-def rows.
+    pub defs: Vec<IoDefRevisionReport>,
+}
+
+/// `io check-class-ids` report (plan 04 M3).
+#[derive(Debug, Clone, Serialize)]
+pub struct IoCheckClassIdsReport {
+    /// TOML file checked.
+    pub toml: String,
+    /// Generated constants file checked.
+    pub generated: String,
+    /// Number of ID entries.
+    pub entries: usize,
+    /// Whether `--update` ran.
+    pub update: bool,
+    /// Whether files were rewritten.
+    pub updated: bool,
+    /// Problems found (empty when clean).
+    pub problems: Vec<String>,
+    /// Overall pass/fail.
+    pub pass: bool,
+}
+
+/// `io roundtrip` report (plan 04 M4 §7b).
+#[derive(Debug, Clone, Serialize)]
+pub struct IoRoundtripReport {
+    /// Map that was round-tripped.
+    pub map: String,
+    /// World width.
+    pub width: u16,
+    /// World height.
+    pub height: u16,
+    /// Ticks simulated before saving.
+    pub ticks: u64,
+    /// Save file written.
+    pub out: String,
+    /// Save file size in bytes.
+    pub bytes: u64,
+    /// Buildings read back from the map region.
+    pub buildings: usize,
+    /// Fixture checksum before save.
+    pub checksum_before: String,
+    /// Fixture checksum after load.
+    pub checksum_after: String,
+    /// `checksum_before == checksum_after`.
+    pub pass: bool,
+}
+
+/// One entry in the `io map-list` report (plan 04 M5 §7b).
+#[derive(Debug, Clone, Serialize)]
+pub struct IoMapListEntry {
+    /// File path.
+    pub file: String,
+    /// Display name (map `name` tag or save `mapname`).
+    pub name: String,
+    /// Width in tiles.
+    pub width: i32,
+    /// Height in tiles.
+    pub height: i32,
+    /// Wave.
+    pub wave: i32,
+    /// Build that wrote the file.
+    pub build: i32,
+    /// Save format version.
+    pub format_version: i32,
+    /// Whether the file is a map (`SaveMeta.isMap`).
+    pub is_map: bool,
+    /// Mod count.
+    pub mods: usize,
+}
+
+/// `io map-list` report (plan 04 M5 §7b).
+#[derive(Debug, Clone, Serialize)]
+pub struct IoMapListReport {
+    /// Directory listed.
+    pub dir: String,
+    /// Entries with readable meta.
+    pub listed: usize,
+    /// Entries skipped as corrupt.
+    pub skipped: usize,
+    /// The listing (sorted by file name).
+    pub entries: Vec<IoMapListEntry>,
+}
+
+/// One phase timing distribution in milliseconds (plan 04 M8 §7d).
+#[derive(Debug, Clone, Serialize)]
+pub struct IoBenchStat {
+    /// 50th percentile.
+    pub p50_ms: f64,
+    /// 95th percentile.
+    pub p95_ms: f64,
+    /// Fastest sample.
+    pub min_ms: f64,
+    /// Slowest sample.
+    pub max_ms: f64,
+}
+
+/// `io bench-save` report (plan 04 M8 §7b/§7d).
+#[derive(Debug, Clone, Serialize)]
+pub struct IoBenchSaveReport {
+    /// Map profile (only `synthetic` until plan 06).
+    pub map: String,
+    /// World width.
+    pub width: u16,
+    /// World height.
+    pub height: u16,
+    /// Ticks simulated before saving.
+    pub ticks: u64,
+    /// Timed iterations per phase.
+    pub iters: u64,
+    /// Save file size in bytes.
+    pub bytes: u64,
+    /// Save (serialize + deflate + file write).
+    pub save: IoBenchStat,
+    /// Load (read + inflate + apply regions).
+    pub load: IoBenchStat,
+    /// Meta-only read.
+    pub meta: IoBenchStat,
+    /// Load verification (checksum equality on the last timed load).
+    pub pass: bool,
+    /// Budget note (the §7d groundZero baseline needs plan 06 real maps).
+    pub note: String,
+}
