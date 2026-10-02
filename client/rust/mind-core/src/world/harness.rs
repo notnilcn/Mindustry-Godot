@@ -124,6 +124,8 @@ impl BuildHarness {
         world.insert_resource(table);
         world.insert_resource(BuildRules::default());
         world.insert_resource(BlockCounter::new());
+        world.insert_resource(crate::world::update::BuildClock::default());
+        world.insert_resource(crate::world::TileBuilds::default());
         let mut grid = WorldGrid::new(width, height);
         grid.fill(BlockId::AIR, BlockId::AIR);
         Self {

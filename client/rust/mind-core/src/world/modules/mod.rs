@@ -121,6 +121,37 @@ impl ItemModule {
         self.total
     }
 
+    /// `ItemModule.first()`: the first non-zero item in id order.
+    pub fn first(&self) -> Option<ItemId> {
+        self.items
+            .iter()
+            .position(|amount| *amount > 0)
+            .map(|index| ItemId::new(index as u16))
+    }
+
+    /// Whether any amount of `item` is stored (`ItemModule.has`).
+    pub fn has(&self, item: ItemId) -> bool {
+        self.get(item) > 0
+    }
+
+    /// Whether the module holds at least one item (`any`).
+    pub fn any(&self) -> bool {
+        self.total > 0
+    }
+
+    /// `ItemModule.take()`: removes one of the first non-zero item (id order).
+    pub fn take(&mut self) -> Option<ItemId> {
+        let item = self.first()?;
+        self.remove(item, 1);
+        Some(item)
+    }
+
+    /// `ItemModule.clear()`.
+    pub fn clear(&mut self) {
+        self.items.iter_mut().for_each(|amount| *amount = 0);
+        self.total = 0;
+    }
+
     /// All non-zero stacks in item-id order.
     pub fn stacks(&self) -> impl Iterator<Item = (ItemId, i32)> + '_ {
         self.items

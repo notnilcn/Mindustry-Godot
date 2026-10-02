@@ -184,6 +184,90 @@ pub fn front(world: &World, e: Entity) -> Option<Entity> {
     None
 }
 
+/// Direction from `e` toward `other` (`Building.relativeTo(Building)`), or `-1`.
+pub fn relative_dir(world: &World, e: Entity, other: Entity) -> i8 {
+    let (Some(a), Some(b)) = (world.get::<Building>(e), world.get::<Building>(other)) else {
+        return -1;
+    };
+    relative_to(
+        a.tile.x() as i32,
+        a.tile.y() as i32,
+        b.tile.x() as i32,
+        b.tile.y() as i32,
+    )
+}
+
+/// `Building.nearby(dir)`: the adjacent building in absolute direction `dir`.
+///
+/// Adjacency comes from the same-team `proximity` list (team-only linking),
+/// which matches upstream for all same-team transfer paths; cross-team neighbors
+/// are rejected by the callers' team checks regardless.
+pub fn nearby(world: &World, e: Entity, dir: u8) -> Option<Entity> {
+    let building = world.get::<Building>(e)?;
+    let (dx, dy) = super::super::autotiler::d4(dir);
+    if let Some(index) = world.get_resource::<crate::world::TileBuilds>()
+        && !index.cells.is_empty()
+    {
+        return index.get(building.tile.x() as i32 + dx, building.tile.y() as i32 + dy);
+    }
+    // Fallback (no grid mirror): same-team proximity center scan.
+    for other in &building.proximity {
+        if relative_dir(world, e, *other) == dir as i8 {
+            return Some(*other);
+        }
+    }
+    None
+}
+
+/// `Building.front()` (the `rotation` neighbor).
+pub fn back(world: &World, e: Entity) -> Option<Entity> {
+    let rotation = world.get::<Building>(e)?.rotation;
+    nearby(world, e, (rotation + 2) % 4)
+}
+
+/// `Building.relativeToEdge(Tile other)`: direction from the facing edge of
+/// `other`'s footprint toward `e`, or `-1`.
+pub fn relative_to_edge(world: &World, e: Entity, other: Entity) -> i8 {
+    let (Some(a), Some(b)) = (world.get::<Building>(e), world.get::<Building>(other)) else {
+        return -1;
+    };
+    let other_size = world
+        .get_resource::<BlockTable>()
+        .and_then(|table| table.get(b.block))
+        .map(|inst| inst.def.size)
+        .unwrap_or(1)
+        .max(1);
+    let edge =
+        crate::world::edges::facing_edge(other_size, b.tile.x() as i32, b.tile.y() as i32, a.tile);
+    relative_to(
+        edge.x() as i32,
+        edge.y() as i32,
+        a.tile.x() as i32,
+        a.tile.y() as i32,
+    )
+}
+
+/// `Edges.getFacingEdge(source.tile, e.tile)` as a direction relative to `e`.
+pub fn facing_edge_dir(world: &World, e: Entity, source: Entity) -> i8 {
+    relative_to_edge(world, e, source)
+}
+
+/// `Building.relativeToEdge(source)`: direction from `e` toward the facing edge
+/// of `source` (inverse of [`relative_to_edge`] for size-1 blocks).
+pub fn self_to_source(world: &World, e: Entity, source: Entity) -> i8 {
+    match relative_to_edge(world, e, source) {
+        dir if dir >= 0 => (dir + 2) % 4,
+        _ => -1,
+    }
+}
+
+/// First stored item (`ItemModule.first()`); id order in the Rust module port.
+pub fn first_item(world: &World, e: Entity) -> Option<ItemId> {
+    world
+        .get::<ItemModule>(e)
+        .and_then(|module| module.stacks().next().map(|(item, _)| item))
+}
+
 /// `Building.incrementDump(prox)`.
 pub fn increment_dump(world: &mut World, e: Entity, prox: usize) {
     if prox == 0 {

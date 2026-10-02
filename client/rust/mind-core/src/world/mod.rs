@@ -50,6 +50,7 @@ pub mod raycast;
 pub mod stats;
 pub mod status;
 pub mod tile;
+pub mod tile_index;
 pub mod tiles;
 pub mod update;
 
@@ -93,6 +94,7 @@ pub use proximity::{ProximityUpdateEvent, remove_from_proximity, update_proximit
 pub use stats::{BarDisplay, StatCat, StatEntry, StatValue, Stats};
 pub use status::{BlockStatus, block_status};
 pub use tile::{PACK_DATA_LAYOUT, Tile};
+pub use tile_index::TileBuilds;
 pub use tiles::Tiles;
 pub use update::{
     building_update, delta, edelta, get_progress_increase, no_sleep, sleep, update_buildings,
