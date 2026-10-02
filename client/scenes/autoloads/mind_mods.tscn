@@ -1,0 +1,11 @@
+; SPDX-License-Identifier: GPL-3.0-only
+;
+; MindMods autoload (plan 20 M6/§3.9). The root node is the native `MindMods`
+; GDExtension class (mind-gdext), not a script: it scans `user://mods`, persists
+; enable flags and exposes the list/import/set_enabled/remove/errors/mod_strings
+; API plus `mods_changed`/`mod_error` signals for the plan-14 ModsDialog.
+; Declared as a scene so it is editor-navigable and matches the autoload name.
+
+[gd_scene format=3]
+
+[node name="MindMods" type="MindMods"]

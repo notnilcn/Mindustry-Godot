@@ -14,6 +14,7 @@ pub mod assets;
 pub mod deps;
 pub mod discovery;
 pub mod json;
+pub mod listing;
 pub mod loaded;
 pub mod meta;
 pub mod overlay;
@@ -34,6 +35,7 @@ pub use discovery::{
     ModCandidate, ModEntry, ModRoot, ModSource, config_file, config_folder, find_meta, read_zip,
     scan_mod_directory,
 };
+pub use listing::{ModListing, ModRelease, matches_game_version, parse_version, parse_version_tag};
 pub use loaded::{LoadedMod, UnsupportedReason};
 pub use meta::{
     BLACKLISTED_MODS, MAX_MOD_SUBTITLE_LENGTH, META_FILES, MIN_JAVA_MOD_GAME_VERSION,
