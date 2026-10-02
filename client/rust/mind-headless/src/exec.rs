@@ -272,6 +272,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
         Command::Blocks { command } => crate::blocks_scenarios::run(command).map(|()| EXIT_PASS),
         Command::Combat { command } => crate::combat_scenarios::run(command),
         Command::Units { command } => crate::units_scenarios::run(command),
+        Command::Logic { command } => crate::logic_scenarios::run(command),
         Command::Render { command } => crate::render_scenarios::run(command),
         Command::Campaign { command } => crate::campaign_scenarios::run(command),
         Command::Fx { command } => crate::fx_scenarios::run(command),
