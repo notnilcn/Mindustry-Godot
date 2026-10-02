@@ -9,12 +9,16 @@
 //! later milestones behind the same [`Instruction`] enum.
 
 pub mod draw;
+pub mod radar;
+pub mod unit_control;
 
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 use indexmap::IndexSet;
 
+use crate::logic::access::LAccess;
 use crate::logic::assembler::Assembler;
+use crate::logic::enums::{BlockFlag, LLocate, LUnitControl, RadarSort, RadarTarget};
 use crate::logic::ops::{ConditionOp, LogicOp};
 use crate::logic::statement::Statement;
 use crate::logic::value::{LVar, LogicObject, VarArena, VarId, VarRef};
@@ -190,6 +194,91 @@ pub enum Instruction {
     PrintFlush {
         /// Target message block.
         target: VarRef,
+    },
+    /// `SensorI`.
+    Sensor {
+        /// Output (numeric or object).
+        to: VarRef,
+        /// Target object.
+        from: VarRef,
+        /// Sensor selector (`LAccess` enum object or `Content` object).
+        type_: VarRef,
+    },
+    /// `ControlI`.
+    Control {
+        /// Controlled accessor.
+        type_: LAccess,
+        /// Target object.
+        target: VarRef,
+        /// Parameter 1.
+        p1: VarRef,
+        /// Parameter 2.
+        p2: VarRef,
+        /// Parameter 3.
+        p3: VarRef,
+        /// Parameter 4.
+        p4: VarRef,
+    },
+    /// `SetPropI`.
+    SetProp {
+        /// Property selector (`LAccess` or `Content` object).
+        type_: VarRef,
+        /// Target object.
+        of: VarRef,
+        /// Assigned value.
+        value: VarRef,
+    },
+    /// `RadarI`.
+    Radar {
+        /// Target filters.
+        targets: [RadarTarget; 3],
+        /// Sort key.
+        sort: RadarSort,
+        /// Base `Ranged` object.
+        radar: VarRef,
+        /// Ascending flag.
+        sort_order: VarRef,
+        /// Output object.
+        output: VarRef,
+    },
+    /// `UnitBindI`.
+    UnitBind {
+        /// Unit type `Content` object.
+        type_: VarRef,
+    },
+    /// `UnitControlI`.
+    UnitControl {
+        /// Command.
+        type_: LUnitControl,
+        /// Parameter 1.
+        p1: VarRef,
+        /// Parameter 2.
+        p2: VarRef,
+        /// Parameter 3.
+        p3: VarRef,
+        /// Parameter 4.
+        p4: VarRef,
+        /// Parameter 5.
+        p5: VarRef,
+    },
+    /// `UnitLocateI`.
+    UnitLocate {
+        /// Locate mode.
+        locate: LLocate,
+        /// Building flag filter.
+        flag: BlockFlag,
+        /// Enemy flag.
+        enemy: VarRef,
+        /// Ore content.
+        ore: VarRef,
+        /// Output x.
+        out_x: VarRef,
+        /// Output y.
+        out_y: VarRef,
+        /// Output found flag.
+        out_found: VarRef,
+        /// Output building.
+        out_build: VarRef,
     },
 }
 
@@ -378,7 +467,206 @@ impl Instruction {
                 crate::logic::blocks::io::flush_print(world, exec, target_obj.as_ref());
                 exec.text_buffer.clear();
             }
+            Instruction::Sensor { to, from, type_ } => {
+                let target = exec.arena.get(from.id()).value_obj().cloned();
+                let selector = exec.arena.get(type_.id()).clone();
+                let sensed = match (&target, selector.value_obj()) {
+                    (Some(t), Some(LogicObject::Enum(name))) => LAccess::from_name(name)
+                        .map(|a| crate::logic::access::sense(world, t, a))
+                        .unwrap_or(crate::logic::access::Sensed::Obj(None)),
+                    (Some(t), Some(LogicObject::Content(c))) => crate::logic::access::Sensed::Num(
+                        crate::logic::access::sense_content(world, t, *c),
+                    ),
+                    _ => crate::logic::access::Sensed::Obj(None),
+                };
+                let to = to.id();
+                if exec.is_constant(to) {
+                    return;
+                }
+                match sensed {
+                    crate::logic::access::Sensed::Num(n) => exec.arena.get_mut(to).set_num(n),
+                    crate::logic::access::Sensed::Obj(o) => exec.arena.get_mut(to).set_obj(o),
+                }
+            }
+            Instruction::Control {
+                type_,
+                target,
+                p1,
+                p2,
+                p3,
+                p4,
+            } => {
+                let target_obj = exec.arena.get(target.id()).value_obj().cloned();
+                let Some(target_obj) = target_obj else { return };
+                let params = [
+                    exec.arena.get(p1.id()).clone(),
+                    exec.arena.get(p2.id()).clone(),
+                    exec.arena.get(p3.id()).clone(),
+                    exec.arena.get(p4.id()).clone(),
+                ];
+                let refs: Vec<&LVar> = params.iter().collect();
+                crate::logic::access::control(world, &target_obj, *type_, &refs);
+            }
+            Instruction::SetProp { type_, of, value } => {
+                let target = exec.arena.get(of.id()).value_obj().cloned();
+                let selector = exec.arena.get(type_.id()).clone();
+                let Some(target) = target else { return };
+                match selector.value_obj() {
+                    Some(LogicObject::Enum(name)) => {
+                        if let Some(a) = LAccess::from_name(name) {
+                            let value = exec.arena.get(value.id()).clone();
+                            if let Some(obj) = value.value_obj().cloned() {
+                                crate::logic::access::set_prop_obj(world, &target, a, &obj);
+                            } else {
+                                crate::logic::access::set_prop_num(world, &target, a, value.num());
+                            }
+                        }
+                    }
+                    Some(LogicObject::Content(c)) => {
+                        let amount = exec.arena.get(value.id()).num();
+                        crate::logic::access::set_prop_content(world, &target, *c, amount);
+                    }
+                    _ => {}
+                }
+            }
+            Instruction::Radar {
+                targets,
+                sort,
+                radar,
+                sort_order,
+                output,
+            } => {
+                let base = exec.arena.get(radar.id()).value_obj().cloned();
+                let (base_x, base_y, team) = base_team_pos(world, base.as_ref());
+                let order = exec.arena.get(sort_order.id()).as_bool();
+                let found = radar::find(
+                    &radar::candidates(world),
+                    team,
+                    *targets,
+                    *sort,
+                    order,
+                    base_x,
+                    base_y,
+                );
+                let output = output.id();
+                if !exec.is_constant(output) {
+                    exec.arena
+                        .get_mut(output)
+                        .set_obj(found.map(LogicObject::Unit));
+                }
+            }
+            Instruction::UnitBind { type_ } => {
+                let selector = exec.arena.get(type_.id()).clone();
+                let type_id = match selector.value_obj() {
+                    Some(LogicObject::Content(c)) => Some(c.id),
+                    _ => None,
+                };
+                let bound = type_id.and_then(|id| {
+                    let index = id as usize;
+                    if exec.binds.len() <= index {
+                        exec.binds.resize(index + 1, 0);
+                    }
+                    let cursor = &mut exec.binds[index];
+                    let team = exec.team;
+                    unit_control::bind_next(world, id, team, cursor)
+                });
+                let unit_var = exec.unit;
+                if !exec.is_constant(unit_var) {
+                    exec.arena
+                        .get_mut(unit_var)
+                        .set_obj(bound.map(LogicObject::Unit));
+                }
+            }
+            Instruction::UnitControl {
+                type_,
+                p1,
+                p2,
+                p3,
+                p4,
+                p5: _,
+            } => {
+                if !unit_control::logic_unit_control_enabled(crate::logic::blocks::rules_ref(world))
+                {
+                    return;
+                }
+                let bound = exec.arena.get(exec.unit).value_obj().cloned();
+                let Some(LogicObject::Unit(unit)) = bound else {
+                    return;
+                };
+                let privileged = exec.privileged;
+                let team = exec.team;
+                if unit_control::check_logic_ai(world, team, privileged, unit, Some(unit), true)
+                    .is_none()
+                {
+                    return;
+                }
+                unit_control::refresh_control_timer(world, unit);
+                let params: Vec<LVar> = [*p1, *p2, *p3, *p4]
+                    .iter()
+                    .map(|v| exec.arena.get(v.id()).clone())
+                    .collect();
+                unit_control::apply_control(world, unit, *type_, &params);
+            }
+            Instruction::UnitLocate {
+                out_x,
+                out_y,
+                out_found,
+                out_build,
+                ..
+            } => {
+                // Ore/building/spawn/damaged scans need plan 06/11 world queries
+                // (quadtree/ore index); report "not found" until those land.
+                set_output_num(exec, *out_x, 0.0);
+                set_output_num(exec, *out_y, 0.0);
+                set_output_num(exec, *out_found, 0.0);
+                set_output_obj(exec, *out_build, None);
+            }
         }
+    }
+}
+
+/// Base `(x, y, team)` for a radar/locate instruction.
+fn base_team_pos(world: &World, base: Option<&LogicObject>) -> (f32, f32, u8) {
+    match base {
+        Some(LogicObject::Building(e)) => {
+            let pos = world.get::<crate::entities::comp::Pos>(*e);
+            let team = world
+                .get::<crate::entities::comp::TeamComp>(*e)
+                .map(|t| t.team)
+                .unwrap_or(0);
+            (
+                pos.map(|p| p.x).unwrap_or(0.0),
+                pos.map(|p| p.y).unwrap_or(0.0),
+                team,
+            )
+        }
+        Some(LogicObject::Unit(e)) => {
+            let pos = world.get::<crate::entities::comp::Pos>(*e);
+            let team = world
+                .get::<crate::entities::comp::TeamComp>(*e)
+                .map(|t| t.team)
+                .unwrap_or(0);
+            (
+                pos.map(|p| p.x).unwrap_or(0.0),
+                pos.map(|p| p.y).unwrap_or(0.0),
+                team,
+            )
+        }
+        _ => (0.0, 0.0, 0),
+    }
+}
+
+fn set_output_num(exec: &mut Executor, var: VarRef, value: f64) {
+    let id = var.id();
+    if !exec.is_constant(id) {
+        exec.arena.get_mut(id).set_num(value);
+    }
+}
+
+fn set_output_obj(exec: &mut Executor, var: VarRef, value: Option<LogicObject>) {
+    let id = var.id();
+    if !exec.is_constant(id) {
+        exec.arena.get_mut(id).set_obj(value);
     }
 }
 
@@ -445,6 +733,8 @@ pub struct Executor {
     pub links: Vec<Entity>,
     /// Building ids of valid links (`LogicBuild.executor.linkIds`).
     pub link_ids: IndexSet<i32>,
+    /// Per-unit-type binding cursor (`LExecutor.binds`).
+    pub binds: Vec<u32>,
 }
 
 impl Default for Executor {
@@ -477,6 +767,7 @@ impl Executor {
             team: 0,
             links: Vec::new(),
             link_ids: IndexSet::new(),
+            binds: Vec::new(),
         }
     }
 
@@ -494,6 +785,7 @@ impl Executor {
         self.yielded = false;
         self.text_buffer.clear();
         self.graphics_buffer.clear();
+        self.binds.clear();
 
         // Keep non-constant vars plus link constants (names not starting with `_`/`@`).
         self.var_ids = self
@@ -837,6 +1129,92 @@ pub fn build_statement(statement: &Statement, asm: &mut Assembler) -> Option<Ins
         },
         Statement::PrintFlush { target } => Instruction::PrintFlush {
             target: asm.var(target),
+        },
+        Statement::Sensor { to, from, type_ } => Instruction::Sensor {
+            to: asm.var(to),
+            from: asm.var(from),
+            type_: asm.var(type_),
+        },
+        Statement::Control {
+            type_,
+            target,
+            p1,
+            p2,
+            p3,
+            p4,
+        } => Instruction::Control {
+            type_: *type_,
+            target: asm.var(target),
+            p1: asm.var(p1),
+            p2: asm.var(p2),
+            p3: asm.var(p3),
+            p4: asm.var(p4),
+        },
+        Statement::SetProp { type_, of, value } => Instruction::SetProp {
+            type_: asm.var(type_),
+            of: asm.var(of),
+            value: asm.var(value),
+        },
+        Statement::Radar {
+            target1,
+            target2,
+            target3,
+            sort,
+            radar,
+            sort_order,
+            output,
+        }
+        | Statement::UnitRadar {
+            target1,
+            target2,
+            target3,
+            sort,
+            radar,
+            sort_order,
+            output,
+        } => Instruction::Radar {
+            targets: [*target1, *target2, *target3],
+            sort: *sort,
+            radar: asm.var(radar),
+            sort_order: asm.var(sort_order),
+            output: asm.var(output),
+        },
+        Statement::UnitBind { type_ } => Instruction::UnitBind {
+            type_: asm.var(type_),
+        },
+        Statement::UnitControl {
+            type_,
+            p1,
+            p2,
+            p3,
+            p4,
+            p5,
+        } => Instruction::UnitControl {
+            type_: *type_,
+            p1: asm.var(p1),
+            p2: asm.var(p2),
+            p3: asm.var(p3),
+            p4: asm.var(p4),
+            p5: asm.var(p5),
+        },
+        Statement::UnitLocate {
+            locate,
+            flag,
+            enemy,
+            ore,
+            out_x,
+            out_y,
+            out_found,
+            out_build,
+        } => Instruction::UnitLocate {
+            locate: *locate,
+            flag: *flag,
+            enemy: asm.var(enemy),
+            ore: asm.var(ore),
+            out_x: asm.var(out_x),
+            out_y: asm.var(out_y),
+            out_found: asm.var(out_found),
+            out_build: asm.var(out_build),
         },
         // Later-milestone instructions compile to a no-op for now so program
         // structure (indices/jumps) is preserved.

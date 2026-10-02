@@ -111,6 +111,22 @@ pub trait LogicRulesApi {
     fn allow_edit_world_processors(&self) -> bool;
     /// `state.rules.disableWorldProcessors`.
     fn disable_world_processors(&self) -> bool;
+    /// `state.rules.logicUnitControl` (plan 12; defaults true).
+    fn logic_unit_control(&self) -> bool {
+        true
+    }
+    /// `state.rules.logicUnitBuild` (plan 12; defaults true).
+    fn logic_unit_build(&self) -> bool {
+        true
+    }
+    /// `state.rules.logicUnitDeconstruct` (plan 12; defaults false).
+    fn logic_unit_deconstruct(&self) -> bool {
+        false
+    }
+    /// `state.rules.allowLogicData` (plan 12; defaults false).
+    fn allow_logic_data(&self) -> bool {
+        false
+    }
     /// `state.rules.worldProcessorPlayerLink`.
     fn world_processor_player_link(&self) -> bool {
         true
@@ -144,6 +160,15 @@ impl LogicRulesApi for DefaultLogicRules {
 /// Rules seam resource (plan 12 reconciliation); optional.
 #[derive(Resource)]
 pub struct LogicRulesRes(pub Box<dyn LogicRulesApi + Send + Sync>);
+
+/// Borrows the installed rules seam, falling back to upstream defaults.
+pub fn rules_ref(world: &World) -> &dyn LogicRulesApi {
+    static DEFAULT: DefaultLogicRules = DefaultLogicRules;
+    match world.get_resource::<LogicRulesRes>() {
+        Some(rules) => rules.0.as_ref(),
+        None => &DEFAULT,
+    }
+}
 
 /// `LogicBuild.accessible()`.
 pub fn accessible(privileged: bool, rules: &dyn LogicRulesApi) -> bool {
