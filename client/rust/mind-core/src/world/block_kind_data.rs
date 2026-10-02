@@ -58,6 +58,8 @@ pub struct CrafterDef {
 /// `AttributeCrafter` family knobs.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct AttributeCrafterDef {
+    /// Base `GenericCrafter` knobs (`AttributeCrafter extends GenericCrafter`).
+    pub crafter: CrafterDef,
     /// Attribute index boosted, `-1` = none.
     pub attribute: i16,
     /// `baseEfficiency`.
@@ -134,6 +136,10 @@ pub struct SolidPumpDef {
 pub struct FrackerDef {
     /// `Fracker.itemUseTime`.
     pub item_use_time: f32,
+    /// `SolidPump.pumpAmount`.
+    pub pump_amount: f32,
+    /// Resulting liquid, if any.
+    pub result: Option<u16>,
     /// `Fracker.attribute` index, `-1` = none.
     pub attribute: i16,
 }
@@ -145,6 +151,8 @@ pub struct WallCrafterDef {
     pub drill_time: f32,
     /// `WallCrafter.attribute` index, `-1` = none.
     pub attribute: i16,
+    /// Item output (`WallCrafter.output`).
+    pub output: Option<u16>,
 }
 
 /// `Separator` family knobs.
@@ -166,6 +174,8 @@ pub struct IncineratorDef {
 /// `Wall` family knobs.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct WallDef {
+    /// `Wall.autotile`.
+    pub autotile: bool,
     /// `Wall.baseExplosiveness`/`lightningChance` etc. are 10-hook data.
     pub lightning_chance: f32,
     /// `Wall.lightningDamage`.
@@ -476,6 +486,174 @@ impl BlockKindData {
             | BlockKind::LegacyUnitFactory
             | BlockKind::LegacyCommandCenter => BlockKindData::Legacy(LegacyDef::default()),
             _ => BlockKindData::None,
+        }
+    }
+
+    /// Applies 07-owned interim vanilla family knobs.
+    ///
+    /// Plan 02's generated `BlockSpec`/`BlockDef` does not yet carry the
+    /// per-family knob fields (plan 07 §8 R2, orchestrator action). Until it
+    /// does, this table supplies the numeric knobs for the vanilla blocks this
+    /// plan's behaviors and scenarios exercise. It is **07-owned** and does not
+    /// mutate plan-02 metadata; when `BlockDef` grows the fields, this becomes a
+    /// no-op and behavior code is unchanged.
+    pub fn apply_vanilla_knobs(&mut self, content: &crate::content::ContentRegistry, name: &str) {
+        let item = |n: &str| content.item_id(n).map(|id| id.raw()).unwrap_or(0);
+        let liquid = |n: &str| content.liquid_id(n).map(|id| id.raw()).unwrap_or(0);
+        let craft = |craft_time: f32,
+                     items: Vec<(u16, i32)>,
+                     liquids: Vec<(u16, f32)>,
+                     ignore: bool| CrafterDef {
+            craft_time,
+            output_items: items,
+            output_liquids: liquids,
+            ignore_liquid_fullness: ignore,
+        };
+        match name {
+            "silicon-smelter" => {
+                self.set_crafter(craft(40.0, vec![(item("silicon"), 1)], vec![], false))
+            }
+            "surge-smelter" => {
+                self.set_crafter(craft(75.0, vec![(item("surge-alloy"), 1)], vec![], false))
+            }
+            "spore-press" => self.set_crafter(craft(
+                20.0,
+                vec![],
+                vec![(liquid("oil"), 18.0 / 60.0)],
+                false,
+            )),
+            "coal-centrifuge" => {
+                self.set_crafter(craft(30.0, vec![(item("coal"), 1)], vec![], false))
+            }
+            "kiln" => self.set_crafter(craft(30.0, vec![(item("metaglass"), 1)], vec![], false)),
+            "melter" => self.set_crafter(craft(
+                10.0,
+                vec![],
+                vec![(liquid("slag"), 12.0 / 60.0)],
+                false,
+            )),
+            "pulverizer" => self.set_crafter(craft(40.0, vec![(item("sand"), 1)], vec![], false)),
+            "separator" => {
+                if let BlockKindData::Separator(def) = self {
+                    def.craft_time = 35.0;
+                    def.results = vec![
+                        (item("copper"), 5),
+                        (item("lead"), 3),
+                        (item("graphite"), 2),
+                        (item("titanium"), 2),
+                    ];
+                }
+            }
+            "disassembler" => {
+                if let BlockKindData::Separator(def) = self {
+                    def.craft_time = 15.0;
+                    def.results = vec![
+                        (item("sand"), 2),
+                        (item("graphite"), 1),
+                        (item("titanium"), 1),
+                        (item("thorium"), 1),
+                    ];
+                }
+            }
+            "mechanical-drill" => self.set_drill(600.0, 2, None),
+            "pneumatic-drill" => self.set_drill(400.0, 3, None),
+            "laser-drill" => self.set_drill(280.0, 4, None),
+            "blast-drill" => self.set_drill(280.0, 5, None),
+            "impact-drill" => {
+                if let BlockKindData::BurstDrill(def) = self {
+                    def.drill.drill_time = 720.0;
+                    def.drill.tier = 6;
+                    def.drill.blocked_items = vec![item("thorium")];
+                    def.drill_multiplier = 1.0;
+                    def.burst_time = 60.0 * 5.0;
+                }
+            }
+            "plasma-bore" => {
+                if let BlockKindData::BeamDrill(def) = self {
+                    def.range = 5;
+                    def.drill_time = 160.0;
+                    def.tier = 3;
+                }
+            }
+            "large-plasma-bore" => {
+                if let BlockKindData::BeamDrill(def) = self {
+                    def.range = 6;
+                    def.drill_time = 100.0;
+                    def.tier = 5;
+                }
+            }
+            "water-extractor" => {
+                if let BlockKindData::SolidPump(def) = self {
+                    def.pump_amount = 0.11;
+                    def.attribute = -1;
+                    def.base_efficiency = 1.0;
+                }
+            }
+            "oil-extractor" => {
+                if let BlockKindData::Fracker(def) = self {
+                    def.pump_amount = 0.25;
+                    def.item_use_time = 60.0;
+                    def.result = Some(liquid("oil"));
+                    def.attribute = -1;
+                }
+            }
+            "cultivator" => {
+                if let BlockKindData::AttributeCrafter(def) = self {
+                    def.crafter = craft(100.0, vec![(item("spore-pod"), 1)], vec![], false);
+                    def.attribute = -1;
+                    def.base_efficiency = 0.0;
+                    def.max_boost = 2.0;
+                    def.min_efficiency = 0.0;
+                }
+            }
+            "vent-condenser" => {
+                if let BlockKindData::AttributeCrafter(def) = self {
+                    def.crafter = craft(120.0, vec![], vec![(liquid("water"), 30.0 / 60.0)], false);
+                    def.attribute = -1;
+                    def.base_efficiency = 0.0;
+                    def.min_efficiency = 9.0 - 0.0001;
+                    def.boost_scale = 1.0 / 9.0;
+                }
+            }
+            "cliff-crusher" => self.set_wall_crafter(110.0, Some(item("sand"))),
+            "large-cliff-crusher" => self.set_wall_crafter(48.0, Some(item("sand"))),
+            "incinerator" => {
+                if let BlockKindData::Incinerator(def) = self {
+                    def.power_usage = 0.5;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn set_crafter(&mut self, crafter: CrafterDef) {
+        match self {
+            BlockKindData::Crafter(def) => *def = crafter,
+            BlockKindData::AttributeCrafter(def) => def.crafter = crafter,
+            _ => {}
+        }
+    }
+
+    fn set_drill(&mut self, drill_time: f32, tier: i32, blocked: Option<u16>) {
+        let apply = |def: &mut DrillDef| {
+            def.drill_time = drill_time;
+            def.tier = tier;
+            if let Some(item) = blocked {
+                def.blocked_items.push(item);
+            }
+        };
+        match self {
+            BlockKindData::Drill(def) => apply(def),
+            BlockKindData::BurstDrill(def) => apply(&mut def.drill),
+            _ => {}
+        }
+    }
+
+    fn set_wall_crafter(&mut self, drill_time: f32, output: Option<u16>) {
+        if let BlockKindData::WallCrafter(def) = self {
+            def.drill_time = drill_time;
+            def.output = output;
+            def.attribute = -1;
         }
     }
 

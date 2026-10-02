@@ -326,6 +326,63 @@ pub fn kind_revision(kind: crate::world::BuildingKind) -> u8 {
     kind.revision()
 }
 
+/// Manual entity codec for `Building` (upstream `@EntityDef(genio=false,
+/// serialize=false)`; plan 07 §3.10 R3). Registered with plan 04 as the
+/// `BuildingComp` class; writes `writeBase` then the per-kind behavior fields.
+pub struct BuildingCodec;
+
+impl BuildingCodec {
+    /// Def name (`revisions/buildings/` + class-id registry).
+    pub const NAME: &'static str = "BuildingComp";
+    /// Newest base revision (`fog-visibility` layout).
+    pub const REVISION: u8 = 4;
+
+    /// Writes a full building entity (base + per-kind).
+    pub fn write(
+        world: &World,
+        entity: Entity,
+        w: &mut EntityWriter,
+        fog: bool,
+    ) -> Result<(), IoError> {
+        write_base(world, entity, w, fog)?;
+        if let Some(inst) = behavior_instance(world, entity) {
+            inst.behavior.write(world, entity, w);
+        }
+        Ok(())
+    }
+
+    /// Reads a full building entity after the save version byte (base then
+    /// per-kind using the kind's revision).
+    pub fn read(
+        world: &mut World,
+        entity: Entity,
+        r: &mut EntityReader,
+        version: u8,
+    ) -> Result<(), IoError> {
+        let mut decoded = DecodedBase::default();
+        read_base(&mut decoded, r, version)?;
+        let max_health = behavior_instance(world, entity)
+            .map(|inst| inst.def.health.max(0) as f32)
+            .unwrap_or(f32::MAX);
+        apply_base(world, entity, &decoded, max_health);
+        if let Some(inst) = behavior_instance(world, entity) {
+            let revision = inst.building.revision();
+            inst.behavior.read(world, entity, r, revision);
+        }
+        Ok(())
+    }
+}
+
+fn behavior_instance(
+    world: &World,
+    entity: Entity,
+) -> Option<std::sync::Arc<crate::world::block::BlockInstance>> {
+    let block = world.get::<Building>(entity)?.block;
+    world
+        .get_resource::<crate::world::block::BlockTable>()?
+        .instance(block)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -396,5 +453,81 @@ mod tests {
         read_base(&mut decoded, &mut reader, 2).expect("read legacy");
         assert_eq!(decoded.health, 10.0);
         assert!(decoded.enabled);
+    }
+
+    #[test]
+    fn building_codec_base_plus_kind_roundtrip() {
+        let content = test_registry();
+        let table = BlockTable::build_default(&content).expect("table");
+        let inst = table
+            .get_named("silicon-smelter")
+            .expect("silicon-smelter")
+            .clone();
+        let mut world = EcsWorld::new();
+        world.insert_resource(BuildRules::default());
+        let src = inst.spawn(
+            &mut world,
+            0,
+            TilePos::new(3, 3),
+            0,
+            0,
+            content.items().len(),
+            content.liquids().len(),
+        );
+        inst.behavior.create_state(&mut world, src);
+        world.insert_resource(table);
+        {
+            let mut state = world
+                .get_mut::<crate::entities::comp::CrafterState>(src)
+                .expect("crafter state");
+            state.progress = 0.5;
+            state.warmup = 0.25;
+        }
+        let mut bytes = Vec::new();
+        {
+            let mut writer = WireWriter::new(&mut bytes);
+            BuildingCodec::write(&world, src, &mut writer, false).expect("write");
+        }
+        let inst = world
+            .get_resource::<BlockTable>()
+            .expect("table")
+            .get_named("silicon-smelter")
+            .expect("smelter")
+            .clone();
+        let dst = inst.spawn(
+            &mut world,
+            1,
+            TilePos::new(4, 4),
+            0,
+            0,
+            content.items().len(),
+            content.liquids().len(),
+        );
+        inst.behavior.create_state(&mut world, dst);
+        let mut reader = WireReader::new(&bytes);
+        BuildingCodec::read(&mut world, dst, &mut reader, 3).expect("read");
+        let state = world
+            .get::<crate::entities::comp::CrafterState>(dst)
+            .expect("state");
+        assert_eq!(state.progress, 0.5);
+        assert_eq!(state.warmup, 0.25);
+    }
+
+    #[test]
+    fn building_revision_manifests_parse() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("revisions/buildings");
+        let mut count = 0;
+        for entry in std::fs::read_dir(&dir).expect("revisions/buildings") {
+            let path = entry.expect("dir entry").path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).expect("read manifest");
+            let value: serde_json::Value = serde_json::from_str(&text).expect("parse manifest");
+            assert!(value["kind"].is_string(), "{}", path.display());
+            assert!(value["revision"].is_u64(), "{}", path.display());
+            count += 1;
+        }
+        assert_eq!(count, 9, "unexpected building revision manifest count");
     }
 }

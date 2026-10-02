@@ -1,0 +1,8 @@
+{
+  "kind": "AcceleratorBuild",
+  "revision": 1,
+  "base": "building-base-v4",
+  "fields": [
+    { "name": "heat", "type": "f32" }
+  ]
+}

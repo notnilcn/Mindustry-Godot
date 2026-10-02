@@ -225,6 +225,7 @@ impl BuildHarness {
         }
         // Recompute proximity for the new building.
         self.refresh_proximity_at(x, y);
+        self.refresh_drill_ore_at(x, y);
         self.events.push(BuildEventRecord::Begin {
             x: x as i16,
             y: y as i16,
@@ -328,6 +329,7 @@ impl BuildHarness {
             crate::world::proximity::remove_from_proximity(&mut self.world, entity, &self.content);
         self.with_ctx(|ctx| ctx.set_block(tile.x(), tile.y(), target, team, 0));
         self.refresh_proximity_at(tile.x() as i32, tile.y() as i32);
+        self.refresh_drill_ore_at(tile.x() as i32, tile.y() as i32);
         if !deconstruct {
             self.counter.add(team, block, 1);
         }
@@ -485,6 +487,18 @@ impl BuildHarness {
                     entity,
                 );
             }
+        }
+    }
+
+    /// Recomputes a drill's dominant ore from the grid (`Drill.countOre`).
+    pub fn refresh_drill_ore_at(&mut self, x: i32, y: i32) {
+        if let Some(entity) = self.build_at(x, y) {
+            crate::world::behavior::production::refresh_drill_ore(
+                &mut self.world,
+                &self.grid,
+                &self.content,
+                entity,
+            );
         }
     }
 

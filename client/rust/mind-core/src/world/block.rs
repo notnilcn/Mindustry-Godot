@@ -216,7 +216,9 @@ impl BlockTable {
         let mut by_name = indexmap::IndexMap::new();
         let mut count = 0;
         for def in defs {
-            let instance = Arc::new(BlockInstance::from_def(def, registry)?);
+            let mut instance = BlockInstance::from_def(def, registry)?;
+            instance.kind_data.apply_vanilla_knobs(content, &def.name);
+            let instance = Arc::new(instance);
             by_name.insert(def.name.clone(), def.id);
             instances[def.id.index()] = Some(instance);
             count += 1;

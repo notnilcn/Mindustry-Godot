@@ -1,0 +1,8 @@
+{
+  "kind": "ConstructBuild",
+  "revision": 1,
+  "base": "building-base-v4",
+  "fields": [
+    { "name": "progress", "type": "f32" }
+  ]
+}

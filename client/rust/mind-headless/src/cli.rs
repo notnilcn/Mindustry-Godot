@@ -414,6 +414,10 @@ pub enum BlocksCommand {
     },
     /// Time the building update loop over N buildings.
     Bench {
+        /// Benchmark profile: `buildings` (idle), `active` (producing
+        /// crafters), `place` (`valid_place`+place), `construct` (progress).
+        #[arg(long, default_value = "buildings")]
+        profile: String,
         /// Number of buildings to place.
         #[arg(long, default_value_t = 2000)]
         buildings: usize,

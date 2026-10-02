@@ -131,6 +131,8 @@ pub struct CrafterState {
     pub total_progress: f32,
     /// Output liquid accumulator (`outputAccumulator`).
     pub output_accumulator: SmallVec<[f32; 2]>,
+    /// Deterministic RNG state used by `Separator` weighted output.
+    pub rng: u64,
 }
 
 /// `Drill`/`BurstDrill` build state.
@@ -175,6 +177,8 @@ pub struct WallState {
 pub struct DoorState {
     /// Whether the door is open (`open`).
     pub open: bool,
+    /// Connected doors (`DoorBuild.chained`); unused by `AutoDoor`.
+    pub chained: SmallVec<[Entity; 6]>,
 }
 
 /// `Radar` build state.
@@ -198,6 +202,19 @@ pub struct SandboxState {
 pub struct PumpState {
     /// Warmup (`warmup`).
     pub warmup: f32,
+}
+
+/// `Accelerator`/`LandingPad`/`LaunchPad` build state.
+#[derive(Debug, Clone, Default, PartialEq, Component)]
+pub struct CampaignState {
+    /// Accelerator heat `0..1`.
+    pub heat: f32,
+    /// Landing-pad cooldown.
+    pub cooldown: f32,
+    /// Launch-pad accumulated launch time.
+    pub launch_time: f32,
+    /// Configured item (landing pad).
+    pub item: Option<ItemId>,
 }
 
 #[cfg(test)]

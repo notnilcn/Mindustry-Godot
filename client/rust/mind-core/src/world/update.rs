@@ -71,20 +71,25 @@ impl BlockInstance {
 }
 
 /// Iterator order key: sequence then entity index (stable, deterministic).
-fn building_order(world: &World) -> Vec<(u64, Entity)> {
-    let mut order: Vec<(u64, Entity)> = world
-        .iter_entities()
-        .filter_map(|entity_ref| {
-            entity_ref.get::<Building>()?;
-            let seq = entity_ref
-                .get::<EntitySeq>()
-                .map(|seq| seq.0)
-                .unwrap_or(u64::MAX);
-            Some((seq, entity_ref.id()))
-        })
-        .collect();
+fn fill_building_order(world: &World, order: &mut Vec<(u64, Entity)>) {
+    order.clear();
+    order.extend(world.iter_entities().filter_map(|entity_ref| {
+        entity_ref.get::<Building>()?;
+        let seq = entity_ref
+            .get::<EntitySeq>()
+            .map(|seq| seq.0)
+            .unwrap_or(u64::MAX);
+        Some((seq, entity_ref.id()))
+    }));
     order.sort_by_key(|(seq, entity)| (*seq, entity.index()));
-    order
+}
+
+/// Reusable scratch buffer so `update_buildings` allocates nothing after warmup
+/// (plan 07 §7d alloc-audit).
+#[derive(Debug, Default, bevy_ecs::prelude::Resource)]
+pub struct BuildScratch {
+    /// Building iteration order.
+    pub order: Vec<(u64, Entity)>,
 }
 
 /// `EntitySet::UpdateBuildings` system (no-op when no [`BlockTable`] exists, so
@@ -93,9 +98,19 @@ pub fn update_buildings(world: &mut World) {
     if !world.contains_resource::<BlockTable>() {
         return;
     }
-    let order = building_order(world);
-    for (_, entity) in order {
+    if !world.contains_resource::<BuildScratch>() {
+        world.insert_resource(BuildScratch::default());
+    }
+    let mut order = match world.get_resource_mut::<BuildScratch>() {
+        Some(mut scratch) => std::mem::take(&mut scratch.order),
+        None => Vec::new(),
+    };
+    fill_building_order(world, &mut order);
+    for (_, entity) in order.iter().copied() {
         building_update(world, entity);
+    }
+    if let Some(mut scratch) = world.get_resource_mut::<BuildScratch>() {
+        scratch.order = order;
     }
 }
 
@@ -359,6 +374,24 @@ pub fn get_progress_increase(world: &World, entity: Entity, base_time: f32) -> f
     }
 }
 
+/// `Building.timer(index, interval)`: returns `true` when the interval elapsed
+/// and resets it (`Timer`/`Interval`). Timers tick once per fixed-step update.
+pub fn run_timer(world: &mut World, entity: Entity, index: usize, interval: f32) -> bool {
+    let Some(mut timers) = world.get_mut::<Timers>(entity) else {
+        return false;
+    };
+    if timers.0.len() <= index {
+        timers.0.resize(index + 1, 0.0);
+    }
+    if timers.0[index] <= 0.0 {
+        timers.0[index] = interval;
+        true
+    } else {
+        timers.0[index] -= 1.0;
+        false
+    }
+}
+
 /// Puts a building to sleep (`Building.sleep`): flagged and skipped while asleep.
 pub fn sleep(world: &mut World, entity: Entity) {
     if let Some(mut building) = world.get_mut::<Building>(entity) {
@@ -495,5 +528,37 @@ mod tests {
         // No liquid -> efficiency 0.
         update_consumption(&mut world, entity, &inst);
         assert_eq!(world.get::<Building>(entity).expect("b").efficiency, 0.0);
+    }
+
+    #[cfg(feature = "alloc-audit")]
+    #[test]
+    fn update_buildings_alloc_free_after_warmup() {
+        use crate::util::alloc::alloc_count;
+        let content = test_registry();
+        let table = BlockTable::build_default(&content).expect("table");
+        let inst = table.get_named("copper-wall").expect("wall").clone();
+        let mut world = World::new();
+        world.insert_resource(BuildRules::default());
+        for i in 0..200u64 {
+            inst.spawn(
+                &mut world,
+                i,
+                TilePos::new((i % 20) as i16, (i / 20) as i16),
+                0,
+                0,
+                content.items().len(),
+                content.liquids().len(),
+            );
+        }
+        world.insert_resource(table);
+        for _ in 0..60 {
+            update_buildings(&mut world);
+        }
+        let before = alloc_count();
+        for _ in 0..600 {
+            update_buildings(&mut world);
+        }
+        let after = alloc_count();
+        assert_eq!(after, before, "update_buildings allocated after warmup");
     }
 }
