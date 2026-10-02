@@ -38,8 +38,87 @@ pub fn run(command: &UiCommand) -> Result<()> {
             menu_tree(*json, dump.as_deref(), golden.as_deref())
         }
         UiCommand::Manifest { json, repo } => manifest(*json, repo.as_deref()),
+        UiCommand::HudText { json, dump, golden } => {
+            hud_text(*json, dump.as_deref(), golden.as_deref())
+        }
     }
 }
+
+fn hud_text(json_out: bool, dump: Option<&Path>, golden: Option<&Path>) -> Result<()> {
+    use mind_core::assets::bundle::{Bundle, parse_properties};
+    use mind_core::ui::hud_text::{HudStatus, status_text};
+
+    let bundle = Bundle::from_layers(vec![parse_properties(HUD_TEXT_BUNDLE)]);
+    let iconc = Iconc::from_properties(FIXTURE_ICONS);
+    let cases: Vec<(&str, HudStatus)> = vec![
+        (
+            "wave_timer",
+            HudStatus {
+                waves: true,
+                wave: 5,
+                win_wave: 0,
+                enemies: 0,
+                wave_timer: true,
+                wavetime_ticks: 300.0,
+                ..Default::default()
+            },
+        ),
+        (
+            "wave_cap_enemies",
+            HudStatus {
+                waves: true,
+                wave: 3,
+                win_wave: 10,
+                enemies: 4,
+                wave_timer: false,
+                ..Default::default()
+            },
+        ),
+        (
+            "attack_mode",
+            HudStatus {
+                waves: false,
+                attack_mode: true,
+                enemy_cores: 3,
+                ..Default::default()
+            },
+        ),
+        (
+            "objectives",
+            HudStatus {
+                objectives: vec!["build a core".to_owned(), "defend :spawn:".to_owned()],
+                ..Default::default()
+            },
+        ),
+        (
+            "mission",
+            HudStatus {
+                mission: "Hold the line".to_owned(),
+                ..Default::default()
+            },
+        ),
+        (
+            "unit_activation",
+            HudStatus {
+                unit_activation_remaining: Some(3600.0),
+                ..Default::default()
+            },
+        ),
+    ];
+    let results: Vec<Value> = cases
+        .iter()
+        .map(|(name, status)| json!({"name": name, "text": status_text(status, &bundle, &iconc)}))
+        .collect();
+    finish(
+        json!({"format": 1, "cases": results}),
+        json_out,
+        dump,
+        golden,
+    )
+}
+
+/// Inline bundle fixture for `ui hud-text` (upstream `bundle.properties` keys).
+const HUD_TEXT_BUNDLE: &str = "wave=Wave {0}\nwave.cap=Wave {0} / {1}\nwave.enemy=Enemy {0}\nwave.enemies=Enemies {0}\nwave.enemycore=Enemy Core {0}\nwave.enemycores=Enemy Cores {0}\nwave.waiting=Next wave in {0}\nwave.waveInProgress=Wave in progress\nwaiting=Waiting\nsector.curcapture=Capturing sector\nrules.unitfactoryactivation.objective=Activate a unit factory in {0}\n";
 
 fn text(json_out: bool, dump: Option<&Path>, golden: Option<&Path>) -> Result<()> {
     let iconc = Iconc::from_properties(FIXTURE_ICONS);

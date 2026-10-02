@@ -387,6 +387,19 @@ pub enum UiCommand {
         #[arg(long)]
         repo: Option<PathBuf>,
     },
+
+    /// Compose HUD status/objective text across wave/mission/attack fixtures.
+    HudText {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Write the composed-text JSON here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+        /// Compare the composed text against this golden.
+        #[arg(long)]
+        golden: Option<PathBuf>,
+    },
 }
 
 /// `parity` subcommands (plan 23 §3.7/§7).

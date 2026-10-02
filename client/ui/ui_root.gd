@@ -80,7 +80,8 @@ func _instantiate(entry: Dictionary, parent: Control, is_fragment: bool) -> void
 	_dialogs[dialog_name] = instance
 	var ui := _ui()
 	if ui != null:
-		ui.call("register_dialog", dialog_name, instance)
+		var should_pause := bool(entry.get("pause", false))
+		ui.call("register_dialog", dialog_name, instance, should_pause)
 
 
 func _group_for(group_name: String) -> Control:
@@ -110,6 +111,12 @@ func _connect_prompts() -> void:
 		ui.connect("toast", Callable(self, "_on_toast"))
 	if ui.has_signal("announce") and not ui.is_connected("announce", Callable(self, "_on_announce")):
 		ui.connect("announce", Callable(self, "_on_announce"))
+	if ui.has_signal("show_text") and not ui.is_connected("show_text", Callable(self, "_on_show_text")):
+		ui.connect("show_text", Callable(self, "_on_show_text"))
+	if ui.has_signal("show_confirm") and not ui.is_connected("show_confirm", Callable(self, "_on_show_confirm")):
+		ui.connect("show_confirm", Callable(self, "_on_show_confirm"))
+	if ui.has_signal("text_input_request") and not ui.is_connected("text_input_request", Callable(self, "_on_text_input_request")):
+		ui.connect("text_input_request", Callable(self, "_on_text_input_request"))
 
 
 func _on_show_info(text: String) -> void:
@@ -133,3 +140,99 @@ func _toast_label(text: String, duration: float) -> void:
 	tween.tween_interval(duration)
 	tween.tween_property(label, "modulate:a", 0.0, 0.4)
 	tween.tween_callback(label.queue_free)
+
+
+func _on_show_text(title: String, text: String) -> void:
+	var prompt := _build_prompt(title, text, false)
+	_add_prompt_button(prompt.buttons, "OK", func() -> void: prompt.root.queue_free())
+
+
+func _on_show_confirm(text: String) -> void:
+	var prompt := _build_prompt("", text, false)
+	_add_prompt_button(prompt.buttons, "Yes", func() -> void:
+		var ui := _ui()
+		if ui != null:
+			ui.call("resolve_confirm", true)
+		prompt.root.queue_free())
+	_add_prompt_button(prompt.buttons, "No", func() -> void:
+		var ui := _ui()
+		if ui != null:
+			ui.call("resolve_confirm", false)
+		prompt.root.queue_free())
+
+
+func _on_text_input_request(title: String, message: String, max_length: int, default_text: String, numeric: bool, allow_empty: bool) -> void:
+	var prompt := _build_prompt(title, message, true)
+	var field: LineEdit = prompt.field
+	field.text = default_text
+	if max_length > 0:
+		field.max_length = max_length
+	var ok_button := _add_prompt_button(prompt.buttons, "OK", func() -> void:
+		var ui := _ui()
+		if ui != null:
+			ui.call("resolve_text_input", field.text)
+		prompt.root.queue_free())
+	_add_prompt_button(prompt.buttons, "Cancel", func() -> void:
+		var ui := _ui()
+		if ui != null:
+			ui.call("resolve_text_input", "")
+		prompt.root.queue_free())
+	ok_button.disabled = not allow_empty and default_text.is_empty()
+	if numeric:
+		field.text_changed.connect(func(value: String) -> void:
+			var filtered := ""
+			for ch in value:
+				if ch >= "0" and ch <= "9":
+					filtered += ch
+			if filtered != value:
+				field.text = filtered
+				field.caret_column = filtered.length())
+	field.text_changed.connect(func(value: String) -> void:
+		ok_button.disabled = not allow_empty and value.is_empty())
+	field.grab_focus()
+
+
+## Builds a transient prompt panel (`showTextInput`/`showConfirm`/`showText`).
+## code-instantiated: prompts are one-off transient overlays; their structure is
+## parameterized by the request (field/no-field) and has no static scene.
+func _build_prompt(title_text: String, message: String, with_field: bool) -> Dictionary:
+	var root := ColorRect.new()
+	root.color = Color(0.0, 0.0, 0.0, 0.55)
+	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.mouse_filter = Control.MOUSE_FILTER_STOP
+	overlay_layer.add_child(root)
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(center)
+	var panel := PanelContainer.new()
+	panel.theme_type_variation = "defaultDialog"
+	panel.custom_minimum_size = Vector2(420, 0)
+	center.add_child(panel)
+	var layout := VBoxContainer.new()
+	panel.add_child(layout)
+	if not title_text.is_empty():
+		var title := Label.new()
+		title.text = title_text
+		title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		layout.add_child(title)
+	var body := Label.new()
+	body.text = message
+	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	layout.add_child(body)
+	var field := LineEdit.new()
+	if with_field:
+		layout.add_child(field)
+	var buttons := HBoxContainer.new()
+	buttons.alignment = BoxContainer.ALIGNMENT_CENTER
+	layout.add_child(buttons)
+	return {"root": root, "field": field, "buttons": buttons}
+
+
+func _add_prompt_button(container: Container, text: String, callback: Callable) -> Button:
+	var button := Button.new()
+	button.text = text
+	button.theme_type_variation = "defaultt"
+	button.pressed.connect(callback)
+	container.add_child(button)
+	return button

@@ -20,6 +20,9 @@ use godot::classes::{INode, Node as GdNode, Os};
 use godot::obj::{Base, Singleton};
 use godot::prelude::*;
 
+/// Path to the sim owner that the pause governor drives.
+const SIM_HOST_PATH: &str = "/root/Spine/SimHost";
+
 /// `MindUi` — the UI registry/prompt singleton (`/root/MindUi`).
 #[derive(GodotClass)]
 #[class(base=Node)]
@@ -33,6 +36,12 @@ pub struct MindUi {
     margin_bottom: i32,
     hud_visible: bool,
     mobile: bool,
+    /// Manifest `pause` flags keyed by dialog name (plan 14 §3.4).
+    pause_flags: HashMap<String, bool>,
+    /// Reference count of currently-open pause dialogs.
+    pause_depth: u32,
+    /// Whether the game was already paused before the governor took over.
+    was_paused: bool,
 }
 
 #[godot_api]
@@ -48,6 +57,9 @@ impl INode for MindUi {
             margin_bottom: 0,
             hud_visible: true,
             mobile: Os::singleton().has_feature("mobile"),
+            pause_flags: HashMap::new(),
+            pause_depth: 0,
+            was_paused: false,
         }
     }
 
@@ -82,10 +94,40 @@ impl MindUi {
     #[signal]
     fn dialog_stack_changed();
 
-    /// Registers a dialog node under a manifest name (`UiRoot` boot).
+    /// Emitted for a text dialog prompt (`showText`).
+    #[signal]
+    fn show_text(title: GString, text: GString);
+
+    /// Emitted for a confirm prompt (`showConfirm`).
+    #[signal]
+    fn show_confirm(text: GString);
+
+    /// Emitted with the confirm prompt result.
+    #[signal]
+    fn confirm_result(confirmed: bool);
+
+    /// Emitted when a text-input prompt should be shown (`showTextInput`).
+    #[signal]
+    fn text_input_request(
+        title: GString,
+        message: GString,
+        max_length: i64,
+        default_text: GString,
+        numeric: bool,
+        allow_empty: bool,
+    );
+
+    /// Emitted with the text-input result (empty string = cancelled).
+    #[signal]
+    fn text_input_result(text: GString);
+
+    /// Registers a dialog node under a manifest name (`UiRoot` boot) and records
+    /// its manifest `pause` flag for the governor.
     #[func]
-    pub fn register_dialog(&mut self, name: GString, node: Gd<GdNode>) {
-        self.dialogs.insert(name.to_string(), node);
+    pub fn register_dialog(&mut self, name: GString, node: Gd<GdNode>, should_pause: bool) {
+        let key = name.to_string();
+        self.pause_flags.insert(key.clone(), should_pause);
+        self.dialogs.insert(key, node);
     }
 
     /// Opens a registered dialog, hiding any currently active one first.
@@ -107,8 +149,12 @@ impl MindUi {
             let _ = node.call("set_context_json", &[ctx_json.to_variant()]);
         }
         let _ = node.call("show_dialog", &[]);
+        let should_pause = self.pause_flags.get(&key).copied().unwrap_or(false);
         self.stack.retain(|entry| entry != &key);
         self.stack.push(key);
+        if should_pause {
+            self.push_pause();
+        }
         let _ = self.base_mut().emit_signal("dialog_stack_changed", &[]);
         true
     }
@@ -125,6 +171,9 @@ impl MindUi {
         let before = self.stack.len();
         self.stack.retain(|entry| entry != &key);
         if self.stack.len() != before {
+            if self.pause_flags.get(&key).copied().unwrap_or(false) {
+                self.pop_pause();
+            }
             let _ = self.base_mut().emit_signal("dialog_stack_changed", &[]);
             return true;
         }
@@ -141,6 +190,9 @@ impl MindUi {
             && node.has_method("hide_dialog")
         {
             let _ = node.call("hide_dialog", &[]);
+        }
+        if self.pause_flags.get(&key).copied().unwrap_or(false) {
+            self.pop_pause();
         }
         let _ = self.base_mut().emit_signal("dialog_stack_changed", &[]);
         true
@@ -234,6 +286,63 @@ impl MindUi {
             .emit_signal("play_ui_sound", &[name.to_variant()]);
     }
 
+    /// Shows a text popup (`UI.showText`).
+    #[func]
+    pub fn show_text(&mut self, title: GString, text: GString) {
+        let _ = self
+            .base_mut()
+            .emit_signal("show_text", &[title.to_variant(), text.to_variant()]);
+    }
+
+    /// Shows a confirm prompt (`UI.showConfirm`); completes via [`Self::resolve_confirm`].
+    #[func]
+    pub fn show_confirm(&mut self, text: GString) {
+        let _ = self
+            .base_mut()
+            .emit_signal("show_confirm", &[text.to_variant()]);
+    }
+
+    /// Delivers a confirm-prompt answer.
+    #[func]
+    pub fn resolve_confirm(&mut self, confirmed: bool) {
+        let _ = self
+            .base_mut()
+            .emit_signal("confirm_result", &[confirmed.to_variant()]);
+    }
+
+    /// Shows a text-input prompt (`UI.showTextInput`); completes via
+    /// [`Self::resolve_text_input`] (empty string = cancelled).
+    #[func]
+    pub fn show_text_input(
+        &mut self,
+        title: GString,
+        message: GString,
+        max_length: i64,
+        default_text: GString,
+        numeric: bool,
+        allow_empty: bool,
+    ) {
+        let _ = self.base_mut().emit_signal(
+            "text_input_request",
+            &[
+                title.to_variant(),
+                message.to_variant(),
+                max_length.to_variant(),
+                default_text.to_variant(),
+                numeric.to_variant(),
+                allow_empty.to_variant(),
+            ],
+        );
+    }
+
+    /// Delivers a text-input answer (`""` = cancelled).
+    #[func]
+    pub fn resolve_text_input(&mut self, text: GString) {
+        let _ = self
+            .base_mut()
+            .emit_signal("text_input_result", &[text.to_variant()]);
+    }
+
     /// Shows/hides the HUD group.
     #[func]
     pub fn hud_set_visible(&mut self, visible: bool) {
@@ -274,5 +383,49 @@ impl MindUi {
     #[func]
     pub fn is_mobile(&self) -> bool {
         self.mobile
+    }
+}
+
+impl MindUi {
+    /// Resolves the sim owner the governor drives, if present.
+    fn sim_host(&self) -> Option<Gd<GdNode>> {
+        self.base().get_node_or_null(SIM_HOST_PATH)
+    }
+
+    /// Whether the sim is currently paused (false when no host is up).
+    fn sim_paused(&self) -> bool {
+        let Some(mut host) = self.sim_host() else {
+            return false;
+        };
+        host.call("is_paused", &[])
+            .try_to::<bool>()
+            .unwrap_or(false)
+    }
+
+    /// Drives `SimHost.set_paused` (the only place the game is paused).
+    fn set_sim_paused(&self, paused: bool) {
+        let Some(mut host) = self.sim_host() else {
+            return;
+        };
+        let _ = host.call("set_paused", &[paused.to_variant()]);
+    }
+
+    /// Reference-counted pause acquire (records `wasPaused` on the first entry).
+    fn push_pause(&mut self) {
+        if self.pause_depth == 0 {
+            self.was_paused = self.sim_paused();
+            if !self.was_paused {
+                self.set_sim_paused(true);
+            }
+        }
+        self.pause_depth += 1;
+    }
+
+    /// Reference-counted pause release (restores only if we paused it).
+    fn pop_pause(&mut self) {
+        self.pause_depth = self.pause_depth.saturating_sub(1);
+        if self.pause_depth == 0 && !self.was_paused {
+            self.set_sim_paused(false);
+        }
     }
 }
