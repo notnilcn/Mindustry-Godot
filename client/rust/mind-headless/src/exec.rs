@@ -1964,9 +1964,52 @@ fn cmd_mods_bench(
                 detail.insert("sprites".into(), serde_json::json!(overlay.sprites().len()));
             }
         }
+        "save-patches" => {
+            use mind_core::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+            use mind_core::io::save::versions::v1::base_meta_tags;
+            use mind_core::io::save::{SaveIo, SaveOptions, SaveReadState, WriteContext};
+            use mind_core::mods::assets::{DataAsset, DataAssetType, DataAssets, ModDataManager};
+            for _ in 0..runs {
+                let bundle = MemoryBundle::new();
+                let store = MemoryUnlockStore::new();
+                let mut registry = create_base_content(&bundle, &store, true)
+                    .map_err(|error| anyhow!("base content: {error}"))?;
+                registry
+                    .init()
+                    .map_err(|error| anyhow!("content init: {error}"))?;
+                let mut manager = ModDataManager::new();
+                manager.push(DataAsset::patch(
+                    "patches/a.json",
+                    "{\"block.router.health\": 7}".to_owned(),
+                ));
+                manager.push(DataAsset::bundle("bundles/bundle.properties", "key=value"));
+                manager.push(DataAsset::blob(
+                    "sprites/external.png",
+                    DataAssetType::Image,
+                    vec![0xAB; 4096],
+                    false,
+                ));
+
+                let start = Instant::now();
+                let mut ctx = WriteContext::meta_only(base_meta_tags(0, 0, 0, "bench"));
+                ctx.patches = Some(&manager);
+                let bytes = SaveIo::write_to_vec(&ctx, &SaveOptions::new())
+                    .map_err(|error| anyhow!("save write: {error}"))?;
+                let mut state = SaveReadState::default();
+                SaveIo::load_bytes(&bytes, &mut state)
+                    .map_err(|error| anyhow!("save read: {error}"))?;
+                let decoded = state.patches.clone().unwrap_or_default();
+                let mut loaded = ModDataManager::new();
+                loaded
+                    .load(decoded, &mut registry)
+                    .map_err(|error| anyhow!("asset load: {error}"))?;
+                samples.push(start.elapsed().as_nanos() as u64);
+            }
+            detail.insert("bytes".into(), serde_json::json!(4096 + 64));
+        }
         other => {
             return Err(anyhow!(
-                "unknown mods bench scene `{other}` (discover/parse/patch/cache/overlay)"
+                "unknown mods bench scene `{other}` (discover/parse/patch/cache/overlay/save-patches)"
             ));
         }
     }
