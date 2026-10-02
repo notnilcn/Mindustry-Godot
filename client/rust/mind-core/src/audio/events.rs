@@ -8,6 +8,8 @@
 //! tests/`mind-headless audio *` use [`RecordingAudioSink`] as the deterministic
 //! oracle. Event variants are **append-only**.
 
+use std::sync::{Arc, Mutex};
+
 use serde::{Deserialize, Serialize};
 
 use super::ids::{MusicRef, SoundId, VoiceKey};
@@ -273,6 +275,74 @@ impl AudioSink for RecordingAudioSink {
             order,
             event,
         });
+    }
+}
+
+/// Shared, cheaply-cloneable [`RecordingAudioSink`].
+///
+/// The harness installs one clone as the active [`AudioSink`] and keeps another
+/// to drain the recorded events after a scenario runs (plan 18 §3.3/§7b). The
+/// interior `Mutex` also lets the ECS resource and the sim call sites share one
+/// log without changing the [`AudioSink`] trait.
+#[derive(Debug, Clone, Default)]
+pub struct SharedAudioLog(Arc<Mutex<RecordingAudioSink>>);
+
+impl SharedAudioLog {
+    /// Creates an empty shared log.
+    pub fn new() -> Self {
+        SharedAudioLog(Arc::new(Mutex::new(RecordingAudioSink::new())))
+    }
+
+    fn with<R>(&self, f: impl FnOnce(&RecordingAudioSink) -> R) -> Option<R> {
+        self.0.lock().ok().map(|guard| f(&guard))
+    }
+
+    /// Snapshot of recorded events in emission order.
+    pub fn events(&self) -> Vec<TickedAudioEvent> {
+        self.with(|sink| sink.events.clone()).unwrap_or_default()
+    }
+
+    /// Number of recorded events.
+    pub fn len(&self) -> usize {
+        self.with(|sink| sink.events.len()).unwrap_or(0)
+    }
+
+    /// Whether nothing has been recorded.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Clears recorded events.
+    pub fn clear(&self) {
+        if let Ok(mut guard) = self.0.lock() {
+            guard.clear();
+        }
+    }
+
+    /// Sets the tick stamped on subsequent emissions.
+    pub fn set_tick(&self, tick: u64) {
+        if let Ok(mut guard) = self.0.lock() {
+            guard.set_tick(tick);
+        }
+    }
+
+    /// Distinct missing-audio names recorded so far.
+    pub fn missing(&self) -> Vec<String> {
+        self.with(|sink| sink.missing.clone()).unwrap_or_default()
+    }
+
+    /// Serializes the recorded events in the `audio events` dump format.
+    pub fn dump_json(&self) -> String {
+        self.with(RecordingAudioSink::dump_json)
+            .unwrap_or_else(|| String::from("{}"))
+    }
+}
+
+impl AudioSink for SharedAudioLog {
+    fn emit(&mut self, event: AudioEvent) {
+        if let Ok(mut guard) = self.0.lock() {
+            guard.emit(event);
+        }
     }
 }
 

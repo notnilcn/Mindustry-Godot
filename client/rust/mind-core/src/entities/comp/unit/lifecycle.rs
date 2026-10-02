@@ -158,6 +158,12 @@ fn spawn_single(
             rotation,
             ..crate::weapons::UnitState::default()
         },
+        UnitAudioComp {
+            death_sound: unit.death_sound,
+            death_volume: unit.death_sound_volume,
+            wreck_sound: unit.wreck_sound,
+            wreck_volume: unit.wreck_sound_volume,
+        },
     ));
 
     insert_kind_components(world, entity, unit, rotation);
@@ -245,9 +251,33 @@ pub fn remove_unit(world: &mut World, entity: Entity) -> bool {
 }
 
 /// Flags a unit dead and removes it (`UnitComp.kill`/`destroy` minimal path).
+///
+/// Emits `UnitType.deathSound`/`wreckSound` through the installed
+/// [`crate::audio::AudioSinkRes`] when present (plan 18 §2.3); the no-op sink
+/// keeps headless silent.
 pub fn kill_unit(world: &mut World, entity: Entity) -> bool {
+    let audio = world.get::<UnitAudioComp>(entity).copied();
+    let pos = world.get::<Pos>(entity).map(|p| (p.x, p.y));
     if let Some(mut core) = world.get_mut::<UnitCore>(entity) {
         core.dead = true;
+    }
+    if let (Some(audio_data), Some((x, y))) = (audio, pos)
+        && let Some(sink) = world.get_resource::<crate::audio::AudioSinkRes>()
+    {
+        crate::audio::sim::emit_unit_death(
+            sink,
+            audio_data.death_sound,
+            x,
+            y,
+            audio_data.death_volume,
+        );
+        crate::audio::sim::emit_unit_wreck(
+            sink,
+            audio_data.wreck_sound,
+            x,
+            y,
+            audio_data.wreck_volume,
+        );
     }
     remove_unit(world, entity)
 }

@@ -27,17 +27,26 @@
 | `SoundControl.findMusic` chain | `audio::ids::find_music_chain` | `audio::ids::tests::find_music_chain_resolution` |
 | `SoundId` by-name ABI + `none`/`unset` sentinels | `content::registries::sound_meta::SoundId` | `audio::events::tests::sound_id_serde_by_name` |
 | UI-bus routing (`sounds/ui/*`, forced `coreLaunch`) | `audio::ids::bus_for_sound` + `priority` table | `audio::ids::tests::bus_routing` |
+| `Block.init` place/break/destroy sound defaults | `audio::sim::{block_place_sound,block_break_sound,block_destroy_sound}` | `audio::sim::tests::block_defaults_match_block_init` |
+| `ConstructBlock.{construct,deconstruct}Finish` `placeSound`/`breakSound` | `world::BuildHarness::finish` → `AudioSinkRes` | `audio events --scenario audio_events_sim` |
+| `Turret.bullet` `(type.shootSound ≠ none ? … : shootSound)` | `turrets::shoot` → `audio::sim::emit_turret_shoot` | `audio events --scenario audio_events_sim` |
+| `BulletType.hit`/`despawned` `hitSound`/`despawnSound` | `combat::bullet::{hit_bullet,despawn_bullet}` → `audio::sim::emit_bullet_*` | `audio events --scenario audio_events_sim` |
+| `UnitComp.kill` `deathSound`/`wreckSound` | `entities::comp::unit::lifecycle::kill_unit` → `AudioSinkRes` | `audio::sim::tests::emits_expected_event_shapes` |
+| `MapAudioView` audition `dp-` overlay preference | `audio::ids::audition_name` + `MindAudio.audition_*` | `audio::ids::tests::audition_prefers_dp_overlay` |
 | Godot bus layout + Sound lowpass slot 0 | `mind_gdext::audio::buses` | MCP §7c (deferred) |
 | Music stream cache (normal/looping variants) | `mind_gdext::audio::streams::StreamCache` | MCP §7c (deferred) |
 | Pooled one-shot/loop voices (128+16) | `mind_gdext::audio::voices::VoicePool` | MCP §7c (deferred) |
+| Steady-state mix/poll allocation | `audio::tests::steady_state_audio_allocates_nothing` | `alloc-audit` feature (0 allocs) |
 
 ## Headless goldens (plan 18 §7b)
 
-- `audio events` → `client/rust/mind-headless/tests/golden/audio/events_blocks.json`
+- `audio events` (`audio_events_blocks`) → `client/rust/mind-headless/tests/golden/audio/events_blocks.json`
+- `audio events` (`audio_events_sim`) → `events_sim.json` (real plan-07/10 sim call sites)
 - `audio music` → `music_select.json`
 - `audio loops` → `loops_aggregate.json`
 - `audio policy` → `policy.json`
 - `audio bench` → informational (`--json`); release budget p99 ≤ 250 µs, debug reports only.
+- Integration gate: `mind-headless/tests/audio_golden.rs` runs all five oracles.
 
 ## Deliberate deviations
 
@@ -51,7 +60,12 @@
 
 ## Deferred / open
 
-- **M5 complete:** `findMusic` mod/`dp-` chain is landed; **audition** (`MindAudio.audition_*`) and data-audio overlay (plan 20) are **not** implemented in `mind-gdext` yet.
-- **M6:** `audio bench` exists; alloc-audit + inspector `Audio` row + `bench/baselines.json` registration (plan 23) deferred.
+- **M5:** `findMusic` mod/`dp-` chain and `audition_name` overlay preference landed; `MindAudio.audition_*` and the `dp-` stream registration are client-side (plan 20 `AudioApplier` owns the streams) and verified by the §7c MCP sweep (deferred).
+- **M6:** `audio bench`, alloc-audit (`steady_state_audio_allocates_nothing`), inspector `Audio` row, and `bench/baselines.json` audio budgets landed; release budget run and plan-23 CI registration remain.
 - **MCP §7c:** all in-engine checks deferred to the orchestrator's single-editor mutex. Copy-pasteable evals live in the plan §7c.
 - Content sound/music fields on `BlockDef`/`UnitTypeDef`/`WeaponDef`/`BulletDef`/`WeatherDef`/`PlanetDef` are plan 02/12 ownership; plan 18 consumes them via adapters (`MusicRules`/`PlanetMusic`) and the `AudioEvent` constructors.
+- **`BulletType.despawned` `despawnSound`:** the call site is ported (`audio::sim::emit_bullet_despawn`) and `false` is emitted for the
+  `BulletType.despawned` hook; the current plan-10 HIT gate skips `despawned` for lifetime/pierce removals, so the headless `audio_events_sim`
+  golden exercises `hitSound` (not `despawnSound`). Wiring the emit for HIT removals is a plan-10 lifecycle follow-up (would touch frag counts).
+- **Alternate `RandomSound` variants** (`blockExplode2Alt`/`blockExplode1Alt`) are deterministic primary variants here; sim-RNG alternate
+  selection is deferred (do not consume the sim stream from audio).

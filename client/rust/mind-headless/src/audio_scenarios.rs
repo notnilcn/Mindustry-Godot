@@ -13,9 +13,12 @@ use mind_core::audio::math::Listener;
 use mind_core::audio::{
     ActiveVoice, Admission, AmbientPoller, AmbientProvider, AmbientSnapshot, AudioEvent, AudioSink,
     LoopMixer, LoopOutput, MusicContext, MusicOutput, MusicPlayer, MusicRef, MusicRules,
-    PlanetMusic, RecordingAudioSink, SeededAudioRng, SoundId, SoundLoopState, SoundPriorityTable,
-    admit,
+    PlanetMusic, RecordingAudioSink, SeededAudioRng, SharedAudioLog, SoundId, SoundLoopState,
+    SoundPriorityTable, admit,
 };
+use mind_core::combat::CombatHarness;
+use mind_core::world::blocks::defense::turrets;
+use mind_core::world::update::BuildClock;
 
 use crate::cli::AudioCommand;
 use crate::paths;
@@ -137,9 +140,12 @@ fn events(
     golden: Option<&Path>,
     json: bool,
 ) -> anyhow::Result<i32> {
+    if scenario == "audio_events_sim" {
+        return events_sim(dump, golden, json);
+    }
     if scenario != "audio_events_blocks" {
         return Err(anyhow!(
-            "audio events --scenario {scenario}: only `audio_events_blocks` is defined"
+            "audio events --scenario {scenario}: `audio_events_blocks` or `audio_events_sim`"
         ));
     }
 
@@ -205,6 +211,96 @@ fn events(
         &format!("audio events: {} events", sink.events.len()),
     );
     Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+}
+
+/// `audio events --scenario audio_events_sim`: runs the real plan-07/10
+/// build/combat harness with a [`SharedAudioLog`] installed and dumps the
+/// events emitted by the sim call sites (plan 18 §7b / M5).
+///
+/// Phases: instant place, construction finish, deconstruct finish, turret
+/// shoot, bullet hit, bullet despawn. `BuildClock` is advanced between finish
+/// phases so `ConstructBlock.shouldPlay` (32 ms) admits each block sound.
+fn events_sim(dump: Option<&Path>, golden: Option<&Path>, json: bool) -> anyhow::Result<i32> {
+    let log = SharedAudioLog::new();
+    let mut harness = CombatHarness::new(48, 16, 37);
+    harness.build.set_audio_sink(log.clone());
+
+    let wall = harness
+        .content()
+        .block_id("copper-wall")
+        .ok_or_else(|| anyhow!("copper-wall missing"))?;
+
+    // Phase 1: instant place -> `ConstructBlock.constructFinish` place sound.
+    set_build_clock(&mut harness, 0.0);
+    log.set_tick(0);
+    harness.place(8, 8, wall, 0, true);
+
+    // Phase 2: construction finish -> place sound (clock advanced past 32 ms).
+    set_build_clock(&mut harness, 4.0);
+    log.set_tick(1);
+    harness.place(10, 8, wall, 0, false);
+    harness.build.construct_tick(10_000.0);
+
+    // Phase 3: deconstruct finish -> break sound (advance the clock between the
+    // instant place and the finish so the 32 ms gate admits the break).
+    set_build_clock(&mut harness, 8.0);
+    log.set_tick(2);
+    harness.place(12, 8, wall, 0, true);
+    set_build_clock(&mut harness, 12.0);
+    harness.build.break_block(12, 8, false);
+    harness.build.construct_tick(10_000.0);
+
+    // Phase 4: turret shoot sounds (`duo` ammo has `shootSound`).
+    set_build_clock(&mut harness, 16.0);
+    log.set_tick(3);
+    let (tx, ty) = CombatHarness::tile_center(4, 8);
+    let turret = harness
+        .spawn_test_turret("duo", tx, ty, 1)
+        .ok_or_else(|| anyhow!("duo turret missing"))?;
+    let copper = harness
+        .content()
+        .item_id("copper")
+        .ok_or_else(|| anyhow!("copper missing"))?;
+    for _ in 0..10 {
+        turrets::handle_item(&mut harness.build.world, turret, copper);
+    }
+    for _ in 0..30 {
+        harness.tick();
+    }
+
+    // Phase 5: bullet hit sound (`fuse` carries a hit sound).
+    set_build_clock(&mut harness, 80.0);
+    log.set_tick(4);
+    let _ = harness.spawn_bullet("fuse", tx, ty, 0.0, 1);
+    // Step until the fuse hits the wall.
+    for _ in 0..40 {
+        harness.step_bullets_only();
+    }
+
+    let text = log.dump_json();
+    let pass = persist_and_check("events_sim", &text, dump, golden)?;
+    let events = log.len();
+    let value: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+    report(
+        pass,
+        json,
+        serde_json::json!({
+            "scenario": "audio_events_sim",
+            "events": events,
+            "pass": pass,
+            "dump": value,
+        }),
+        &format!("audio events sim: {events} events"),
+    );
+    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+}
+
+/// Rewinds/advances the harness `BuildClock` (ticks) so the block-sound rate
+/// gate sees a >32 ms delta between phases.
+fn set_build_clock(harness: &mut CombatHarness, ticks: f32) {
+    if let Some(mut clock) = harness.build.world.get_resource_mut::<BuildClock>() {
+        clock.time = ticks;
+    }
 }
 
 #[derive(Default)]

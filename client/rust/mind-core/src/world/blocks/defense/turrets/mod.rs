@@ -385,6 +385,7 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
     };
 
     // `duo` ammo (Blocks.java `duo`): copper/graphite/silicon.
+    let shoot = crate::content::registries::sound_meta::SoundId::SHOOT_DUO;
     add("duo_copper", BulletKind::Basic, &|def| {
         def.speed = 2.5;
         def.lifetime = 60.0;
@@ -392,6 +393,7 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
         def.ammo_multiplier = 2.0;
         def.hit_size = 4.0;
         def.drag = 0.0;
+        def.shoot_sound = shoot;
     });
     add("duo_graphite", BulletKind::Basic, &|def| {
         def.speed = 3.5;
@@ -401,6 +403,7 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
         def.reload_multiplier = 0.8;
         def.hit_size = 4.0;
         def.drag = 0.0;
+        def.shoot_sound = shoot;
     });
     add("duo_silicon", BulletKind::Basic, &|def| {
         def.speed = 3.0;
@@ -411,6 +414,7 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
         def.homing_power = 0.2;
         def.hit_size = 4.0;
         def.drag = 0.0;
+        def.shoot_sound = shoot;
     });
 
     // M5/M6 remainder: the rest of the vanilla turret ammo tables (`Blocks.java`).
@@ -1151,6 +1155,10 @@ fn shoot(ctx: &mut CombatCtx<'_>, e: Entity, state: &mut TurretState, bullet: Bu
         .bullet(bullet)
         .map(|def| def.range)
         .unwrap_or(0.0);
+    // `Turret.bullet`: `(type.shootSound != none ? type.shootSound : shootSound)`
+    // played per spawned bullet (plan 18 §2.3). Pitch is fixed for determinism;
+    // the audio layer never consumes the sim RNG.
+    let shoot_sound = ctx.content.bullet(bullet).map(|def| def.shoot_sound);
 
     for shot in &buffer.shots {
         if !config.consume_ammo_once && !has_ammo_state(state, ctx.world, e) {
@@ -1211,6 +1219,9 @@ fn shoot(ctx: &mut CombatCtx<'_>, e: Entity, state: &mut TurretState, bullet: Bu
             ..BulletSpawn::default()
         };
         let _ = ctx.spawn(&spawn);
+        if let Some(sound) = shoot_sound {
+            crate::audio::sim::emit_turret_shoot(ctx.audio, sound, bx, by, 1.0, 1.0);
+        }
         state.total_shots += 1;
         if !config.consume_ammo_once {
             let _ = use_ammo(state, ctx.world, e);

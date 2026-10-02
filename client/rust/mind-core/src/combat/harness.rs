@@ -178,6 +178,7 @@ impl CombatHarness {
                 grid: &self.build.grid,
                 rng: &mut self.rng,
                 fx: self.fx.as_ref(),
+                audio: &self.build.audio,
                 seq: &mut self.seq,
                 spawned: &mut spawned,
             };
@@ -246,6 +247,7 @@ impl CombatHarness {
                 grid: &self.build.grid,
                 rng: &mut self.rng,
                 fx: self.fx.as_ref(),
+                audio: &self.build.audio,
                 seq: &mut self.seq,
                 spawned: &mut spawned,
             };
@@ -356,6 +358,7 @@ impl CombatHarness {
                 grid: &self.build.grid,
                 rng: &mut self.rng,
                 fx: self.fx.as_ref(),
+                audio: &self.build.audio,
                 seq: &mut self.seq,
                 spawned: &mut spawned,
             };
@@ -593,6 +596,7 @@ impl CombatHarness {
                 grid: &self.build.grid,
                 rng: &mut self.rng,
                 fx: self.fx.as_ref(),
+                audio: &self.build.audio,
                 seq: &mut self.seq,
                 spawned: &mut spawned,
             };
@@ -729,6 +733,7 @@ impl CombatHarness {
             grid: &self.build.grid,
             rng: &mut self.rng,
             fx: self.fx.as_ref(),
+            audio: &self.build.audio,
             seq: &mut self.seq,
             spawned: &mut self.scratch_spawned,
         }
@@ -788,6 +793,9 @@ fn register_fixture_bullets(content: &mut ContentRegistry) -> BTreeMap<String, B
         def.hit_size = 4.0;
         def.building_damage_multiplier = 1.0;
         def.drag = 0.0;
+        // Plan-18 call-site fixture: exercise `hit`/`despawned` sounds.
+        def.hit_sound = crate::content::registries::sound_meta::SoundId::EXPLOSION_ARTILLERY;
+        def.despawn_sound = crate::content::registries::sound_meta::SoundId::EXPLOSION;
     });
     add("fuse_slow", BulletKind::Basic, &|def| {
         def.speed = 1.0;

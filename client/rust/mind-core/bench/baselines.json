@@ -24,5 +24,29 @@
   },
   "building_io_ns_per_building": 200,
   "mcp_frame_cpu_ms": 2,
-  "scenario_consumer_efficiency_ms": 400
+  "scenario_consumer_efficiency_ms": 400,
+  "audio": {
+    "note": "Plan 18 §7d budgets (dev machine, release build); plan 23 owns the CI gate.",
+    "budget_us": {
+      "mix_p50": 100,
+      "mix_p99": 250,
+      "burst_drain": 50,
+      "ambient_poll": 100
+    },
+    "commands": {
+      "mix": "audio bench --ticks 3600 --loops 256 --voices 32 --json",
+      "ambient": "audio bench --ticks 3600 --loops 256 --ambient 2000 --json"
+    },
+    "alloc_audit": {
+      "feature": "alloc-audit",
+      "steady_state_mix_and_poll": 0,
+      "test": "audio::tests::steady_state_audio_allocates_nothing"
+    },
+    "voices": {
+      "world": 128,
+      "ui": 16,
+      "music": 1,
+      "audition": 1
+    }
+  }
 }

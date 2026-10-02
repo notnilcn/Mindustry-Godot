@@ -139,6 +139,21 @@ pub fn find_music_chain(
     None
 }
 
+/// Resolves an editor `MapAudioView` audition name through the plan-20
+/// `dp-` data-audio overlay (plan 18 §3.9 / OD-18-D).
+///
+/// `overlay_has` reports whether a `dp-` entry is registered (`AudioApplier`
+/// entries). The `dp-<name>` overlay name wins; otherwise the bare name is used
+/// and normal `findMusic` resolution applies.
+pub fn audition_name(name: &str, overlay_has: impl Fn(&str) -> bool) -> String {
+    let dp = format!("dp-{}", name.to_ascii_lowercase());
+    if overlay_has(&dp) {
+        dp
+    } else {
+        name.to_owned()
+    }
+}
+
 /// `Core.settings` music/sound keys (plan 18 §6.4; names are ABI).
 pub mod settings_keys {
     /// Music volume, int 0..100.
@@ -214,5 +229,18 @@ mod tests {
             BusKind::Sound
         );
         assert_eq!(bus_for_sound("none", None), BusKind::Sound);
+    }
+
+    #[test]
+    fn audition_prefers_dp_overlay() {
+        let overlays = ["dp-beta".to_owned()];
+        assert_eq!(
+            audition_name("Beta", |n| overlays.iter().any(|o| o == n)),
+            "dp-beta"
+        );
+        assert_eq!(
+            audition_name("Game1", |n| overlays.iter().any(|o| o == n)),
+            "Game1"
+        );
     }
 }

@@ -20,6 +20,7 @@ use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 use smallvec::SmallVec;
 
+use crate::audio::{AudioSinkRes, sim as audio_sim};
 use crate::content::{BulletId, ContentRegistry};
 use crate::determinism::{RngStream, SimRng};
 use crate::entities::comp::{Health, Pos, TeamComp, Vel};
@@ -172,6 +173,8 @@ pub struct CombatCtx<'a> {
     pub rng: &'a mut SimRng,
     /// FX sink seam (plan 17).
     pub fx: &'a dyn crate::combat::view::FxSink,
+    /// Plan-18 audio sink (sim call sites emit `Sound.at` here).
+    pub audio: &'a AudioSinkRes,
     /// Monotonic bullet entity sequence.
     pub seq: &'a mut u64,
     /// Newly spawned bullets (appended by the harness after the pass).
@@ -544,6 +547,15 @@ pub(crate) fn hit_bullet(
     if def.hit_shake > 0.0 {
         ctx.fx.shake(def.hit_shake);
     }
+    // `BulletType.hit`: `hitSound.at(x, y, ...)` (plan 18 §2.3).
+    audio_sim::emit_bullet_hit(
+        ctx.audio,
+        def.hit_sound,
+        x,
+        y,
+        def.hit_sound_volume,
+        def.hit_sound_pitch,
+    );
     if create_frags && def.frag_on_hit {
         create_frags_of(ctx, bullet, x, y);
     }
@@ -575,6 +587,7 @@ pub(crate) fn despawn_bullet(ctx: &mut CombatCtx<'_>, bullet: Entity) {
     let despawn_effect = def.despawn_effect.clone();
     let hit_color = def.hit_color;
     let despawn_shake = def.despawn_shake;
+    let despawn_sound = def.despawn_sound;
     let (x, y) = ctx.pos(bullet).unwrap_or((state.last.0, state.last.1));
     if despawn_hit {
         behavior_hit(ctx, bullet, x, y, false);
@@ -586,6 +599,8 @@ pub(crate) fn despawn_bullet(ctx: &mut CombatCtx<'_>, bullet: Entity) {
     if despawn_shake > 0.0 {
         ctx.fx.shake(despawn_shake);
     }
+    // `BulletType.despawned`: `despawnSound.at(x, y)` (plan 18 §2.3).
+    audio_sim::emit_bullet_despawn(ctx.audio, despawn_sound, x, y, 1.0, 1.0);
 }
 
 /// `BulletType.removed`.
