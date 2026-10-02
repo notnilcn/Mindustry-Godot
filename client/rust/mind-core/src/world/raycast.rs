@@ -9,9 +9,9 @@ use crate::config::TILESIZE;
 
 use super::TilePos;
 
-/// World pixel coordinate to tile coordinate (`World.toTile`).
+/// World pixel coordinate to tile coordinate (`World.toTile`; rounded).
 pub fn to_tile(pixel: f32) -> i32 {
-    (pixel / TILESIZE as f32).floor() as i32
+    (pixel / TILESIZE as f32).round() as i32
 }
 
 /// Visits every tile on the line, stopping when the callback returns `true`

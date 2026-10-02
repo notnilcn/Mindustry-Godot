@@ -88,6 +88,8 @@ pub struct WorldGrid {
     pub floor_changes: i32,
     /// Seed used by generation filters (`OD6-A`).
     pub generator_seed: u64,
+    /// Optional map-area limit `(x, y, w, h)` (`Rules.limitMapArea`, plan 12).
+    pub limit_area: Option<(i32, i32, i32, i32)>,
 }
 
 impl Default for WorldGrid {
@@ -106,6 +108,7 @@ impl WorldGrid {
             tile_changes: 1,
             floor_changes: 1,
             generator_seed: 0,
+            limit_area: None,
         }
     }
 
@@ -161,9 +164,76 @@ impl WorldGrid {
         Tiles::pos_of(x, y)
     }
 
+    /// Flat `x + y*width` index (`World.packArray`).
+    pub fn flat_index(&self, x: i32, y: i32) -> i32 {
+        x + y * self.tiles.width
+    }
+
     /// Unpacks an Arc `Point2` position (`World.unpack`).
     pub fn unpack(packed: i32) -> TilePos {
         TilePos::from_pack(packed)
+    }
+
+    /// World pixels → logic tile coordinates (`World.conv`; unrounded).
+    pub fn conv(coord: f32) -> f32 {
+        coord / crate::config::TILESIZE as f32
+    }
+
+    /// Logic tile coordinates → world pixels (`World.unconv`).
+    pub fn unconv(coord: f32) -> f32 {
+        coord * crate::config::TILESIZE as f32
+    }
+
+    /// World pixel → nearest tile coordinate (`World.toTile`; rounded).
+    pub fn to_tile(coord: f32) -> i32 {
+        (coord / crate::config::TILESIZE as f32).round() as i32
+    }
+
+    /// Whether `(x, y)` lies inside the defined map limit rect
+    /// (`World.isInMapArea`); `limit_area` is plan 12's `Rules.limitMapArea`.
+    pub fn is_in_map_area(&self, x: i32, y: i32) -> bool {
+        if !self.tiles.in_bounds(x, y) {
+            return false;
+        }
+        match self.limit_area {
+            Some((lx, ly, w, h)) => x >= lx && y >= ly && x < lx + w && y < ly + h,
+            None => true,
+        }
+    }
+
+    /// Begins a map load; tile events are suppressed until
+    /// [`end_map_load`](Self::end_map_load) (`World.beginMapLoad`).
+    pub fn begin_map_load(&mut self) {
+        self.generating = true;
+    }
+
+    /// Ends a map load: darkness BFS, proximity (07 hook), counters reset to
+    /// `-1` (`World.endMapLoad` + `WorldLoadEvent` listener). Legacy-block
+    /// removal and building proximity are plan 07 hooks.
+    pub fn end_map_load(&mut self, content: &ContentRegistry) {
+        // Building proximity + legacy-block removal are plan 07 hooks; the
+        // darkness BFS and counter reset are this plan's.
+        darkness::add_darkness(self, content);
+        self.generating = false;
+        // `WorldLoadEvent` listener resets the counters.
+        self.tile_changes = -1;
+        self.floor_changes = -1;
+    }
+
+    /// Explicitly toggles the generating flag (`World.setGenerating`).
+    pub fn set_generating(&mut self, generating: bool) {
+        self.generating = generating;
+    }
+
+    /// World/scene quad bounds `[x, y, w, h]` in pixels (`World.getQuadBounds`).
+    pub fn get_quad_bounds(&self) -> [f32; 4] {
+        let b = crate::constants::FINAL_WORLD_BOUNDS;
+        [
+            -b,
+            -b,
+            self.tiles.width as f32 * crate::config::TILESIZE as f32 + b * 2.0,
+            self.tiles.height as f32 * crate::config::TILESIZE as f32 + b * 2.0,
+        ]
     }
 
     /// Tile at `(x, y)` (`World.tile`).
@@ -428,5 +498,120 @@ mod tests {
                 .iter()
                 .all(|tile| tile.floor == BlockId::STONE_WALL)
         );
+    }
+
+    #[test]
+    fn begin_end_map_load_events() {
+        let content = crate::content::test_support::test_registry();
+        let mut grid = WorldGrid::new(4, 4);
+        grid.begin_map_load();
+        assert!(grid.is_generating());
+        // A floor change while generating fires no events and bumps no counter.
+        grid.generating = true;
+        let before = grid.floor_changes;
+        grid.tiles.get_mut(1, 1).floor = BlockId::STONE_WALL;
+        assert_eq!(grid.floor_changes, before);
+        grid.end_map_load(&content);
+        assert!(!grid.is_generating());
+        // `WorldLoadEvent` listener resets the counters to -1.
+        assert_eq!(grid.tile_changes, -1);
+        assert_eq!(grid.floor_changes, -1);
+    }
+
+    #[test]
+    fn raycast_dda_hits_first_block() {
+        let mut grid = WorldGrid::new(8, 8);
+        grid.tiles.get_mut(4, 0).block = BlockId::STONE_WALL;
+        let hit = raycast::raycast_first(&grid, 0, 0, 7, 0);
+        assert_eq!(hit, Some(TilePos::new(4, 0)));
+        assert_eq!(raycast::raycast_first(&grid, 0, 5, 7, 5), None);
+    }
+
+    #[test]
+    fn is_in_map_area_with_limit() {
+        let mut grid = WorldGrid::new(8, 8);
+        assert!(grid.is_in_map_area(7, 7));
+        assert!(!grid.is_in_map_area(8, 0));
+        grid.limit_area = Some((2, 2, 3, 3));
+        assert!(grid.is_in_map_area(2, 2));
+        assert!(grid.is_in_map_area(4, 4));
+        assert!(!grid.is_in_map_area(5, 5));
+        assert!(!grid.is_in_map_area(1, 1));
+    }
+
+    /// Test hooks that spawn a bare building entity (plan-07 fallback).
+    struct TestHooks(std::sync::atomic::AtomicU64);
+
+    impl WorldHooks for TestHooks {
+        fn new_building(&self, world: &mut World, request: NewBuilding) -> Option<Entity> {
+            let seq = self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            spawn_bare_building(world, request, seq)
+        }
+    }
+
+    fn multiblock_ctx<'a>(
+        grid: &'a mut WorldGrid,
+        content: &'a ContentRegistry,
+        ecs: &'a mut World,
+        hooks: &'a TestHooks,
+        render: &'a NoopRenderHooks,
+        log: &'a mut crate::world::ops::WorldEventLog,
+    ) -> crate::world::ops::WorldCtx<'a> {
+        crate::world::ops::WorldCtx {
+            grid,
+            content,
+            ecs,
+            hooks,
+            render,
+            log,
+        }
+    }
+
+    /// Ported from `ApplicationTests.multiblock`.
+    #[test]
+    fn multiblock_linkage() {
+        let content = crate::content::test_support::test_registry();
+        let Some(core) = content.block_id("core-shard") else {
+            return;
+        };
+        let mut grid = WorldGrid::new(8, 8);
+        let mut ecs = World::new();
+        let hooks = TestHooks(std::sync::atomic::AtomicU64::new(0));
+        let render = NoopRenderHooks;
+        let mut log = crate::world::ops::WorldEventLog::default();
+        let mut ctx = multiblock_ctx(&mut grid, &content, &mut ecs, &hooks, &render, &mut log);
+
+        ctx.set_block(4, 4, core, 0, 0);
+        let entity = ctx.grid.tiles.get(4, 4).build;
+        assert!(entity.is_some());
+        for x in 3..=5 {
+            for y in 3..=5 {
+                let tile = ctx.grid.tiles.get(x, y);
+                assert_eq!(tile.block, core);
+                assert_eq!(tile.build, entity);
+            }
+        }
+    }
+
+    /// Ported from `ApplicationTests.blockOverlapRemoved`.
+    #[test]
+    fn multiblock_overlap_removed() {
+        let content = crate::content::test_support::test_registry();
+        let Some(core) = content.block_id("core-shard") else {
+            return;
+        };
+        let mut grid = WorldGrid::new(8, 8);
+        let mut ecs = World::new();
+        let hooks = TestHooks(std::sync::atomic::AtomicU64::new(0));
+        let render = NoopRenderHooks;
+        let mut log = crate::world::ops::WorldEventLog::default();
+        let mut ctx = multiblock_ctx(&mut grid, &content, &mut ecs, &hooks, &render, &mut log);
+
+        // Edge block covers (0,0)..(2,2).
+        ctx.set_block(1, 1, core, 0, 0);
+        assert_eq!(ctx.grid.tiles.get(0, 0).block, core);
+        // Overlapping placement at (2,2) must clear the first block's footprint.
+        ctx.set_block(2, 2, core, 0, 0);
+        assert_eq!(ctx.grid.tiles.get(0, 0).block, BlockId::AIR);
     }
 }
