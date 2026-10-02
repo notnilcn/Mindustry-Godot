@@ -837,6 +837,9 @@ impl DataPatcher {
         let reference = ContentRef::new(ContentType::Unit, id.raw());
         match field {
             "immunities" => self.edit_immunities(registry, reference, id.raw(), mode, value),
+            "weapons" => self.edit_weapons(registry, reference, id.raw(), mode, value),
+            "targetFlags" => self.edit_target_flags(registry, reference, id.raw(), mode, value),
+            "type" => self.edit_unit_entity(registry, reference, id.raw(), value),
             "health" => self.set_f32(
                 registry,
                 reference,
@@ -972,6 +975,161 @@ impl DataPatcher {
                 }
                 FieldMode::Index(_) => {}
             }
+        }
+    }
+
+    /// Edits `unit.weapons` (`Seq<Weapon>`): whole replace, `+` append (single
+    /// or array) and numeric index replacement. Created weapons register their
+    /// inline bullet and run the created-object `init()` callback
+    /// (`PatcherTests.unitWeapons`, `uUnitWeaponReassign`, `addWeapon`).
+    fn edit_weapons(
+        &mut self,
+        registry: &mut ContentRegistry,
+        reference: ContentRef,
+        raw: u16,
+        mode: FieldMode,
+        value: &Value,
+    ) {
+        let entries: Vec<&Map<String, Value>> = match value {
+            Value::Object(map) => vec![map],
+            Value::Array(items) => {
+                let mut out = Vec::with_capacity(items.len());
+                for item in items {
+                    match item.as_object() {
+                        Some(map) => out.push(map),
+                        None => {
+                            self.warn("weapon entries must be objects");
+                            return;
+                        }
+                    }
+                }
+                out
+            }
+            _ => {
+                self.warn("`weapons` must be an object or array");
+                return;
+            }
+        };
+        let Some(original) = registry
+            .unit(UnitTypeId::new(raw))
+            .map(|unit| unit.weapons.clone())
+        else {
+            return;
+        };
+        if self.mark_used(reference, "weapons") {
+            self.resetters
+                .push(Box::new(move |r: &mut ContentRegistry| {
+                    if let Some(unit) = r.unit_mut(UnitTypeId::new(raw)) {
+                        unit.weapons = original;
+                    }
+                }));
+        }
+        let mut parser = crate::mods::json::ContentJsonParser::new();
+        let mut created = Vec::with_capacity(entries.len());
+        for (index, object) in entries.iter().enumerate() {
+            match parser.parse_weapon_object(registry, "patch", object, index) {
+                Ok(weapon) => created.push(weapon),
+                Err(error) => {
+                    self.warn(error.message);
+                    return;
+                }
+            }
+        }
+        if let Some(unit) = registry.unit_mut(UnitTypeId::new(raw)) {
+            match mode {
+                FieldMode::Set => unit.weapons = created,
+                FieldMode::Append => unit.weapons.extend(created),
+                FieldMode::Index(index) => {
+                    if index < unit.weapons.len() && !created.is_empty() {
+                        unit.weapons[index] = created.swap_remove(0);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Edits `unit.targetFlags` (`Seq<BlockFlag>`): whole replace, `+` append
+    /// (single or array). `PatcherTests.unitFlags{,Array}`.
+    fn edit_target_flags(
+        &mut self,
+        registry: &mut ContentRegistry,
+        reference: ContentRef,
+        raw: u16,
+        mode: FieldMode,
+        value: &Value,
+    ) {
+        let names: Vec<&str> = match value {
+            Value::String(name) => vec![name.as_str()],
+            Value::Array(items) => items.iter().filter_map(Value::as_str).collect(),
+            _ => {
+                self.warn("`targetFlags` must be a string or array");
+                return;
+            }
+        };
+        let mut flags = Vec::with_capacity(names.len());
+        for name in names {
+            match resolve_block_flag(name) {
+                Some(flag) => flags.push(Some(flag)),
+                None => {
+                    self.warn(format!("unknown block flag `{name}`"));
+                    return;
+                }
+            }
+        }
+        let Some(original) = registry
+            .unit(UnitTypeId::new(raw))
+            .map(|unit| unit.target_flags.clone())
+        else {
+            return;
+        };
+        if self.mark_used(reference, "targetFlags") {
+            self.resetters
+                .push(Box::new(move |r: &mut ContentRegistry| {
+                    if let Some(unit) = r.unit_mut(UnitTypeId::new(raw)) {
+                        unit.target_flags = original;
+                    }
+                }));
+        }
+        if let Some(unit) = registry.unit_mut(UnitTypeId::new(raw)) {
+            match mode {
+                FieldMode::Set => unit.target_flags = flags,
+                FieldMode::Append => unit.target_flags.extend(flags),
+                FieldMode::Index(_) => {}
+            }
+        }
+    }
+
+    /// Edits `unit.type` (entity/constructor keyword, `PatcherTests.unitType`).
+    fn edit_unit_entity(
+        &mut self,
+        registry: &mut ContentRegistry,
+        reference: ContentRef,
+        raw: u16,
+        value: &Value,
+    ) {
+        let Some(name) = value.as_str() else {
+            return;
+        };
+        let Some(def) = crate::mods::json::resolve_entity_def(name) else {
+            self.warn(format!("unknown unit type `{name}`"));
+            return;
+        };
+        let Some(original) = registry
+            .unit(UnitTypeId::new(raw))
+            .map(|unit| unit.entity_def)
+        else {
+            return;
+        };
+        if self.mark_used(reference, "type") {
+            self.resetters
+                .push(Box::new(move |r: &mut ContentRegistry| {
+                    if let Some(unit) = r.unit_mut(UnitTypeId::new(raw)) {
+                        unit.entity_def = original;
+                    }
+                }));
+        }
+        if let Some(unit) = registry.unit_mut(UnitTypeId::new(raw)) {
+            unit.entity_def = def;
         }
     }
 
@@ -1355,6 +1513,32 @@ fn content_type_from_name(name: &str) -> Option<ContentType> {
     }
 }
 
+/// Resolves a `unit.targetFlags` name to a [`BlockFlag`] keyword.
+fn resolve_block_flag(name: &str) -> Option<crate::content::registries::blocks::BlockFlag> {
+    use crate::content::registries::blocks::BlockFlag;
+    Some(match name {
+        "core" => BlockFlag::Core,
+        "storage" => BlockFlag::Storage,
+        "generator" => BlockFlag::Generator,
+        "turret" => BlockFlag::Turret,
+        "factory" => BlockFlag::Factory,
+        "repair" => BlockFlag::Repair,
+        "battery" => BlockFlag::Battery,
+        "reactor" => BlockFlag::Reactor,
+        "extinguisher" => BlockFlag::Extinguisher,
+        "drill" => BlockFlag::Drill,
+        "shield" => BlockFlag::Shield,
+        "launchPad" => BlockFlag::LaunchPad,
+        "unitCargoUnloadPoint" => BlockFlag::UnitCargoUnloadPoint,
+        "unitAssembler" => BlockFlag::UnitAssembler,
+        "hasFogRadius" => BlockFlag::HasFogRadius,
+        "steamVent" => BlockFlag::SteamVent,
+        "blockRepair" => BlockFlag::BlockRepair,
+        "synced" => BlockFlag::Synced,
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1572,6 +1756,95 @@ mod tests {
             registry.block_by_name("router").expect("router").health,
             777
         );
+    }
+
+    /// PatcherTests.unitWeapons: append a weapon with an inline
+    /// `LightningBulletType`; `unapply` restores the list and drops the bullet.
+    #[test]
+    fn unit_weapons_append() {
+        let mut registry = test_registry();
+        let id = registry.unit_id("dagger").expect("dagger");
+        let original = registry.unit(id).expect("unit").weapons.clone();
+        let bullets_before = registry.bullets().len();
+        let mut patcher = DataPatcher::new();
+        patcher
+            .apply(
+                &mut registry,
+                &[patch(
+                    r#"{"unit.dagger.weapons.+": {"name":"navanax-weapon","bullet":{"type":"LightningBulletType","lightningLength":999}}}"#,
+                )],
+            )
+            .expect("append weapon");
+        let unit = registry.unit(id).expect("unit");
+        assert_eq!(unit.weapons.len(), original.len() + 1);
+        let created = unit.weapons.last().expect("created weapon");
+        assert_eq!(created.name, "navanax-weapon");
+        assert!(registry.bullets().len() > bullets_before);
+        patcher.unapply(&mut registry);
+        assert_eq!(registry.unit(id).expect("unit").weapons, original);
+        assert_eq!(registry.bullets().len(), bullets_before);
+    }
+
+    /// PatcherTests.uUnitWeaponReassign: whole-array replace, reset restores.
+    #[test]
+    fn unit_weapons_reassign() {
+        let mut registry = test_registry();
+        let id = registry.unit_id("dagger").expect("dagger");
+        let original = registry.unit(id).expect("unit").weapons.clone();
+        let mut patcher = DataPatcher::new();
+        patcher
+            .apply(
+                &mut registry,
+                &[patch(
+                    r#"{"unit.dagger.weapons": [{"name":"megapoop","bullet":{"type":"RailBulletType","lightningLength":999}}]}"#,
+                )],
+            )
+            .expect("reassign weapons");
+        let weapons = &registry.unit(id).expect("unit").weapons;
+        assert_eq!(weapons.len(), 1);
+        assert_eq!(weapons[0].name, "megapoop");
+        patcher.unapply(&mut registry);
+        assert_eq!(registry.unit(id).expect("unit").weapons, original);
+    }
+
+    /// PatcherTests.unitFlagsArray: `targetFlags.+` array append + reset.
+    #[test]
+    fn unit_target_flags_append() {
+        let mut registry = test_registry();
+        let id = registry.unit_id("dagger").expect("dagger");
+        let original = registry.unit(id).expect("unit").target_flags.clone();
+        let mut patcher = DataPatcher::new();
+        patcher
+            .apply(
+                &mut registry,
+                &[patch(
+                    r#"{"unit.dagger.targetFlags.+": ["shield", "drill"]}"#,
+                )],
+            )
+            .expect("append flags");
+        let flags = registry.unit(id).expect("unit").target_flags.clone();
+        assert_eq!(flags.len(), original.len() + 2);
+        patcher.unapply(&mut registry);
+        assert_eq!(registry.unit(id).expect("unit").target_flags, original);
+    }
+
+    /// PatcherTests.unitType: `type` changes the unit entity def; reset restores.
+    #[test]
+    fn unit_type_controller_change() {
+        let mut registry = test_registry();
+        let id = registry.unit_id("dagger").expect("dagger");
+        let original = registry.unit(id).expect("unit").entity_def;
+        let mut patcher = DataPatcher::new();
+        patcher
+            .apply(&mut registry, &[patch(r#"{"unit.dagger.type": "legs"}"#)])
+            .expect("change type");
+        assert_ne!(registry.unit(id).expect("unit").entity_def, original);
+        assert_eq!(
+            registry.unit(id).expect("unit").entity_def,
+            crate::mods::json::resolve_entity_def("legs").expect("legs")
+        );
+        patcher.unapply(&mut registry);
+        assert_eq!(registry.unit(id).expect("unit").entity_def, original);
     }
 
     /// PatcherTests.requiredPlanets gating (see plan 20 §3.6).

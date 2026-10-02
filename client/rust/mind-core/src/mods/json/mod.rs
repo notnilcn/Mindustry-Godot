@@ -917,77 +917,95 @@ impl ContentJsonParser {
                 self.warn(file, "weapon entries must be objects; skipped");
                 continue;
             };
-            let weapon_name: &'static str = weapon
-                .get("name")
-                .and_then(Value::as_str)
-                .map(|name| Box::leak(name.to_owned().into_boxed_str()) as &'static str)
-                .unwrap_or_else(|| Box::leak(format!("weapon{index}").into_boxed_str()));
-            let mut spec = WeaponSpec {
-                name: weapon_name,
-                ..WeaponSpec::default()
-            };
-            if let Some(value) = field_bool(weapon, "mirror") {
-                spec.mirror = Some(value);
-            }
-            if let Some(value) = field_f32(weapon, "reload") {
-                spec.reload = Some(value);
-            }
-            if let Some(value) = field_f32(weapon, "x") {
-                spec.x = Some(value);
-            }
-            if let Some(value) = field_f32(weapon, "y") {
-                spec.y = Some(value);
-            }
-            if let Some(value) = field_bool(weapon, "alternate") {
-                spec.alternate = Some(value);
-            }
-            if let Some(value) = field_bool(weapon, "rotate") {
-                spec.rotate = Some(value);
-            }
-            if let Some(value) = field_bool(weapon, "shootOnDeath") {
-                spec.shoot_on_death = Some(value);
-            }
-            match weapon.get("bullet") {
-                Some(Value::Object(bullet)) => {
-                    let bullet_spec = self.parse_bullet(file, bullet)?;
-                    spec.bullet = BulletRef::Inline(Box::new(bullet_spec));
-                }
-                Some(Value::String(_)) => {
-                    self.warn(file, "named bullet references are not supported yet (M2b)");
-                }
-                _ => {}
-            }
-            let bullet_resolved = match &spec.bullet {
-                BulletRef::Inline(bullet_spec) => {
-                    let def = BulletDef::from_spec(bullet_spec, registry)
-                        .map_err(|error| ContentParseError::new(format!("{file}: {error}")))?;
-                    let id = registry
-                        .add_bullet(def)
-                        .map_err(|error| ContentParseError::new(format!("{file}: {error}")))?;
-                    let record = registry
-                        .bullet(id)
-                        .ok_or_else(|| ContentParseError::new(format!("{file}: bullet lost")))?;
-                    ResolvedBullet {
-                        id,
-                        range: record.compute_range(),
-                        heals: record.heals(),
-                        kill_shooter: record.kill_shooter,
-                        dps: 0.0,
-                    }
-                }
-                _ => ResolvedBullet {
-                    id: crate::content::BulletId::new(0),
-                    range: 0.0,
-                    heals: false,
-                    kill_shooter: false,
-                    dps: 0.0,
-                },
-            };
-            let def = WeaponDef::from_spec(spec, bullet_resolved, registry)
-                .map_err(|error| ContentParseError::new(format!("{file}: {error}")))?;
-            out.push(def);
+            out.push(self.parse_weapon_object(registry, file, weapon, index)?);
         }
         Ok(out)
+    }
+
+    /// Parses a single weapon object (`Weapon{}`), registering its inline bullet
+    /// and running the created-object `init()` callback (plan 20 M3b).
+    ///
+    /// Shared by unit-content parsing and the `DataPatcher` created-object
+    /// callback path (`PatcherTests.unitWeapons`/`addWeapon`).
+    pub fn parse_weapon_object(
+        &mut self,
+        registry: &mut ContentRegistry,
+        file: &str,
+        weapon: &Map<String, Value>,
+        index: usize,
+    ) -> Result<WeaponDef, ContentParseError> {
+        let weapon_name: &'static str = weapon
+            .get("name")
+            .and_then(Value::as_str)
+            .map(|name| Box::leak(name.to_owned().into_boxed_str()) as &'static str)
+            .unwrap_or_else(|| Box::leak(format!("weapon{index}").into_boxed_str()));
+        let mut spec = WeaponSpec {
+            name: weapon_name,
+            ..WeaponSpec::default()
+        };
+        if let Some(value) = field_bool(weapon, "mirror") {
+            spec.mirror = Some(value);
+        }
+        if let Some(value) = field_f32(weapon, "reload") {
+            spec.reload = Some(value);
+        }
+        if let Some(value) = field_f32(weapon, "x") {
+            spec.x = Some(value);
+        }
+        if let Some(value) = field_f32(weapon, "y") {
+            spec.y = Some(value);
+        }
+        if let Some(value) = field_bool(weapon, "alternate") {
+            spec.alternate = Some(value);
+        }
+        if let Some(value) = field_bool(weapon, "rotate") {
+            spec.rotate = Some(value);
+        }
+        if let Some(value) = field_bool(weapon, "shootOnDeath") {
+            spec.shoot_on_death = Some(value);
+        }
+        match weapon.get("bullet") {
+            Some(Value::Object(bullet)) => {
+                let bullet_spec = self.parse_bullet(file, bullet)?;
+                spec.bullet = BulletRef::Inline(Box::new(bullet_spec));
+            }
+            Some(Value::String(_)) => {
+                self.warn(file, "named bullet references are not supported yet (M2b)");
+            }
+            _ => {}
+        }
+        let bullet_resolved = match &spec.bullet {
+            BulletRef::Inline(bullet_spec) => {
+                let def = BulletDef::from_spec(bullet_spec, registry)
+                    .map_err(|error| ContentParseError::new(format!("{file}: {error}")))?;
+                let id = registry
+                    .add_bullet(def)
+                    .map_err(|error| ContentParseError::new(format!("{file}: {error}")))?;
+                let record = registry
+                    .bullet(id)
+                    .ok_or_else(|| ContentParseError::new(format!("{file}: bullet lost")))?;
+                ResolvedBullet {
+                    id,
+                    range: record.compute_range(),
+                    heals: record.heals(),
+                    kill_shooter: record.kill_shooter,
+                    dps: 0.0,
+                }
+            }
+            _ => ResolvedBullet {
+                id: crate::content::BulletId::new(0),
+                range: 0.0,
+                heals: false,
+                kill_shooter: false,
+                dps: 0.0,
+            },
+        };
+        let mut def = WeaponDef::from_spec(spec, bullet_resolved, registry)
+            .map_err(|error| ContentParseError::new(format!("{file}: {error}")))?;
+        // Created-object lifecycle: upstream calls `init()`/`postInit()` on the
+        // freshly constructed weapon before attaching it.
+        def.init();
+        Ok(def)
     }
 
     /// Parses an inline `bullet` object into a [`BulletSpec`] (M2 subset).
