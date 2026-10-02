@@ -45,6 +45,8 @@ pub struct CombatHarness {
     total_damage: f32,
     /// Fixture bullet names → ids.
     names: BTreeMap<String, BulletId>,
+    /// Reusable spawn scratch used by `combat_ctx`/`lightning`.
+    scratch_spawned: Vec<Entity>,
 }
 
 impl CombatHarness {
@@ -63,6 +65,7 @@ impl CombatHarness {
             bullets_removed: 0,
             total_damage: 0.0,
             names,
+            scratch_spawned: Vec::new(),
         }
     }
 
@@ -283,6 +286,46 @@ impl CombatHarness {
         self.fx = fx;
     }
 
+    /// Builds a borrow bundle for direct kind/system calls (tests).
+    pub fn combat_ctx(&mut self) -> bullet::CombatCtx<'_> {
+        bullet::CombatCtx {
+            world: &mut self.build.world,
+            content: &self.build.content,
+            grid: &self.build.grid,
+            rng: &mut self.rng,
+            fx: self.fx.as_ref(),
+            seq: &mut self.seq,
+            spawned: &mut self.scratch_spawned,
+        }
+    }
+
+    /// Drains bullets spawned through [`Self::combat_ctx`] into the live list.
+    pub fn claim_scratch_spawned(&mut self) {
+        let spawned = std::mem::take(&mut self.scratch_spawned);
+        self.bullets_created += spawned.len() as u64;
+        self.bullets.extend(spawned);
+    }
+
+    /// Creates a lightning branch via the combat context (M3 tests/scenarios).
+    #[allow(clippy::too_many_arguments)]
+    pub fn lightning(
+        &mut self,
+        team: u8,
+        color: crate::content::Rgba,
+        damage: f32,
+        x: f32,
+        y: f32,
+        rotation: f32,
+        length: i32,
+    ) -> super::lightning::LightningResult {
+        let result = {
+            let mut ctx = self.combat_ctx();
+            super::lightning::create(&mut ctx, team, color, damage, x, y, rotation, length)
+        };
+        self.claim_scratch_spawned();
+        result
+    }
+
     /// A cloneable handle to the default no-op sink.
     pub fn noop_fx() -> FxHandle {
         Arc::new(super::view::NoopFx)
@@ -330,6 +373,7 @@ fn register_fixture_bullets(content: &mut ContentRegistry) -> BTreeMap<String, B
         def.lifetime = 40.0;
         def.damage = 60.0;
         def.hit_size = 2.0;
+        def.collides = true;
         def.pierce = true;
         def.pierce_building = true;
         def.pierce_cap = 3;
@@ -427,6 +471,78 @@ fn register_fixture_bullets(content: &mut ContentRegistry) -> BTreeMap<String, B
         def.splash_damage_radius = 24.0;
         def.drag = 0.0;
     });
+    add("point", BulletKind::Point, &|def| {
+        def.speed = 4.0;
+        def.lifetime = 20.0;
+        def.damage = 40.0;
+        def.hit_size = 2.0;
+        def.collides = true;
+        def.drag = 0.0;
+    });
+    add("multi", BulletKind::Multi, &|def| {
+        def.lifetime = 1.0;
+        def.multi_repeat = 2;
+        def.damage = 10.0;
+        def.drag = 0.0;
+    });
+    add("emp", BulletKind::Emp, &|def| {
+        def.speed = 5.0;
+        def.lifetime = 30.0;
+        def.damage = 20.0;
+        def.emp_radius = 24.0;
+        def.unit_damage_scl = 0.7;
+        def.power_damage_scl = 2.0;
+        def.drag = 0.0;
+    });
+    add("flak", BulletKind::Flak, &|def| {
+        def.speed = 4.0;
+        def.lifetime = 60.0;
+        def.damage = 5.0;
+        def.splash_damage = 30.0;
+        def.splash_damage_radius = 24.0;
+        def.explode_range = 20.0;
+        def.explode_delay = 3.0;
+        def.flak_delay = 0.0;
+        def.drag = 0.0;
+    });
+    add("sap", BulletKind::Sap, &|def| {
+        def.speed = 0.0;
+        def.lifetime = 30.0;
+        def.damage = 20.0;
+        def.length = 60.0;
+        def.sap_strength = 0.5;
+    });
+    add("shrapnel", BulletKind::Shrapnel, &|def| {
+        def.speed = 0.0;
+        def.lifetime = 10.0;
+        def.damage = 25.0;
+        def.length = 60.0;
+    });
+    add("interceptor", BulletKind::Interceptor, &|def| {
+        def.speed = 6.0;
+        def.lifetime = 40.0;
+        def.damage = 15.0;
+        def.hit_size = 4.0;
+        def.drag = 0.0;
+    });
+    add("mass_driver", BulletKind::MassDriver, &|def| {
+        def.speed = 8.0;
+        def.lifetime = 60.0;
+        def.damage = 75.0;
+        def.hit_size = 4.0;
+        def.drag = 0.0;
+    });
+    add("continuous", BulletKind::ContinuousLaser, &|def| {
+        def.speed = 0.0;
+        def.lifetime = 60.0;
+        def.damage = 10.0;
+        def.damage_interval = 5.0;
+        def.length = 80.0;
+    });
+    add("empty", BulletKind::Empty, &|def| {
+        def.lifetime = 40.0;
+        def.damage = 5.0;
+    });
     // Cross-references (child defs must exist first).
     if let (Some(parent), Some(child)) = (names.get("frag"), names.get("fuse_frag"))
         && let Some(def) = content.bullet_mut(*parent)
@@ -437,6 +553,11 @@ fn register_fixture_bullets(content: &mut ContentRegistry) -> BTreeMap<String, B
         && let Some(def) = content.bullet_mut(*parent)
     {
         def.interval_bullet = Some(*child);
+    }
+    if let (Some(parent), Some(child)) = (names.get("multi"), names.get("fuse_frag"))
+        && let Some(def) = content.bullet_mut(*parent)
+    {
+        def.spawn_bullets.push(*child);
     }
     names
 }

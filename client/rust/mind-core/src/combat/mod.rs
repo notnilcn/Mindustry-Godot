@@ -12,6 +12,7 @@
 pub mod bullet;
 pub mod damage;
 pub mod harness;
+pub mod lightning;
 pub mod view;
 
 pub use bullet::{Bullet, BulletData, BulletSpawn, create};

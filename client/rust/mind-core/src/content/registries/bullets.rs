@@ -83,6 +83,22 @@ pub enum BulletKind {
     Emp = 16,
     /// `BombBulletType`.
     Bomb = 17,
+    /// `ContinuousBulletType` (base of the continuous kinds; plan 10 §2.1).
+    Continuous = 18,
+    /// `MultiBulletType` (spawns several child bullets at init).
+    Multi = 19,
+    /// `PointBulletType` (instant teleport-then-hit).
+    Point = 20,
+    /// `PointLaserBulletType` (continuous point beam).
+    PointLaser = 21,
+    /// `ContinuousFlameBulletType`.
+    ContinuousFlame = 22,
+    /// `InterceptorBulletType` (point-defense interceptor).
+    Interceptor = 23,
+    /// `MassDriverBolt` (mass-driver payload carrier).
+    MassDriver = 24,
+    /// `EmptyBulletType` (visual-only no-op).
+    Empty = 25,
 }
 
 impl BulletKind {
@@ -107,6 +123,14 @@ impl BulletKind {
             BulletKind::Liquid => "LiquidBulletType",
             BulletKind::Emp => "EmpBulletType",
             BulletKind::Bomb => "BombBulletType",
+            BulletKind::Continuous => "ContinuousBulletType",
+            BulletKind::Multi => "MultiBulletType",
+            BulletKind::Point => "PointBulletType",
+            BulletKind::PointLaser => "PointLaserBulletType",
+            BulletKind::ContinuousFlame => "ContinuousFlameBulletType",
+            BulletKind::Interceptor => "InterceptorBulletType",
+            BulletKind::MassDriver => "MassDriverBolt",
+            BulletKind::Empty => "EmptyBulletType",
         }
     }
 }
@@ -136,6 +160,22 @@ pub struct BulletDef {
     pub hit_size: f32,
     /// Clipping hitbox (derived with trail length).
     pub draw_size: f32,
+    /// Angle offset applied to the bullet when spawned (`BulletType.angleOffset`).
+    pub angle_offset: f32,
+    /// Random ± angle offset applied when spawned (`randomAngleOffset`).
+    pub random_angle_offset: f32,
+    /// Chance for the bullet to actually be created (`createChance`).
+    pub create_chance: f32,
+    /// Whether the spawn angle is forced to `0` (`ignoreSpawnAngle`).
+    pub ignore_spawn_angle: bool,
+    /// Min velocity scale randomization (`velocityScaleRandMin`).
+    pub velocity_scale_rand_min: f32,
+    /// Max velocity scale randomization (`velocityScaleRandMax`).
+    pub velocity_scale_rand_max: f32,
+    /// Min lifetime scale randomization (`lifeScaleRandMin`).
+    pub life_scale_rand_min: f32,
+    /// Max lifetime scale randomization (`lifeScaleRandMax`).
+    pub life_scale_rand_max: f32,
     /// Drag as a fraction of velocity.
     pub drag: f32,
     /// Acceleration per frame.
@@ -156,6 +196,9 @@ pub struct BulletDef {
     pub pierce_damage_factor: f32,
     /// Whether the bullet is removed after `pierceCap` is exceeded.
     pub remove_after_pierce: bool,
+    /// If positive, limits non-splash damage to a fraction of the target's max
+    /// health (`BulletType.maxDamageFraction`).
+    pub max_damage_fraction: f32,
     /// Absorbed by plastanium walls (piercing lasers).
     pub laser_absorb: bool,
     /// Whether this counts as a laser bullet for wall absorption.
@@ -204,6 +247,10 @@ pub struct BulletDef {
     pub block_armor_multiplier: f32,
     /// Whether the bullet can be hit by point defense.
     pub hittable: bool,
+    /// Turret-only: whether blocks are targeted (`targetBlocks`).
+    pub target_blocks: bool,
+    /// Turret-only: whether missiles are targeted (`targetMissiles`).
+    pub target_missiles: bool,
     /// Whether the bullet can be reflected.
     pub reflectable: bool,
     /// Whether the projectile can be absorbed by shields.
@@ -222,6 +269,10 @@ pub struct BulletDef {
     pub collide_floor: bool,
     /// Whether the bullet collides with terrain walls.
     pub collide_terrain: bool,
+    /// Whether the bullet sticks to the first target it hits (`sticky`).
+    pub sticky: bool,
+    /// Extra lifetime added while stuck (`stickyExtraLifetime`).
+    pub sticky_extra_lifetime: f32,
     /// Extra inaccuracy when firing.
     pub inaccuracy: f32,
     /// Effect shown on direct hit.
@@ -340,6 +391,8 @@ pub struct BulletDef {
     pub spawn_bullets: Vec<BulletId>,
     /// Spawn bullet random spread.
     pub spawn_bullet_random_spread: f32,
+    /// `MultiBulletType.repeat` (how many times `spawn_bullets` repeats).
+    pub multi_repeat: i32,
     /// Number of puddles created.
     pub puddles: i32,
     /// Range of puddles around the bullet.
@@ -541,6 +594,14 @@ impl BulletDef {
             damage: 1.0,
             hit_size: 4.0,
             draw_size: 40.0,
+            angle_offset: 0.0,
+            random_angle_offset: 0.0,
+            create_chance: 1.0,
+            ignore_spawn_angle: false,
+            velocity_scale_rand_min: 1.0,
+            velocity_scale_rand_max: 1.0,
+            life_scale_rand_min: 1.0,
+            life_scale_rand_max: 1.0,
             drag: 0.0,
             accel: 0.0,
             keep_velocity: true,
@@ -551,6 +612,7 @@ impl BulletDef {
             pierce_cap: -1,
             pierce_damage_factor: 0.0,
             remove_after_pierce: true,
+            max_damage_fraction: -1.0,
             laser_absorb: true,
             laser_bullet: false,
             optimal_life_fract: 0.0,
@@ -575,6 +637,8 @@ impl BulletDef {
             armor_multiplier: 1.0,
             block_armor_multiplier: 1.0,
             hittable: true,
+            target_blocks: true,
+            target_missiles: true,
             reflectable: true,
             absorbable: true,
             collides: true,
@@ -584,6 +648,8 @@ impl BulletDef {
             collides_team: false,
             collide_floor: false,
             collide_terrain: false,
+            sticky: false,
+            sticky_extra_lifetime: 0.0,
             inaccuracy: 0.0,
             hit_effect: EffectRef::Named(EffectId::HIT_BULLET_SMALL),
             despawn_effect: EffectRef::Named(EffectId::HIT_BULLET_SMALL),
@@ -643,6 +709,7 @@ impl BulletDef {
             lightning_color: pal::SURGE,
             spawn_bullets: Vec::new(),
             spawn_bullet_random_spread: 0.0,
+            multi_repeat: 1,
             puddles: 0,
             puddle_range: 0.0,
             puddle_amount: 5.0,
@@ -949,6 +1016,106 @@ impl BulletDef {
                 bullet.collides_air = false;
                 bullet.hit_sound = SoundId::EXPLOSION;
             }
+            BulletKind::Continuous => {
+                // `ContinuousBulletType` initializer.
+                bullet.length = 220.0;
+                bullet.shake = 0.0;
+                bullet.damage_interval = 5.0;
+                bullet.remove_after_pierce = false;
+                bullet.pierce_cap = -1;
+                bullet.speed = 0.0;
+                bullet.despawn_effect = EffectRef::Named(EffectId::NONE);
+                bullet.shoot_effect = EffectRef::Named(EffectId::NONE);
+                bullet.lifetime = 16.0;
+                bullet.impact = true;
+                bullet.keep_velocity = false;
+                bullet.collides = false;
+                bullet.pierce = true;
+                bullet.hittable = false;
+                bullet.absorbable = false;
+            }
+            BulletKind::Multi => {
+                // `MultiBulletType` carries no field initializer beyond defaults.
+            }
+            BulletKind::Point => {
+                // `PointBulletType()` constructor.
+                bullet.scale_life = true;
+                bullet.lifetime = 100.0;
+                bullet.collides = false;
+                bullet.reflectable = false;
+                bullet.keep_velocity = false;
+                // `trailSpacing = 10f` (view-only; kept in the def for plan 16/17).
+            }
+            BulletKind::PointLaser => {
+                // `PointLaserBulletType()` constructor.
+                bullet.remove_after_pierce = false;
+                bullet.speed = 0.0;
+                bullet.despawn_effect = EffectRef::Named(EffectId::NONE);
+                bullet.lifetime = 20.0;
+                bullet.impact = true;
+                bullet.keep_velocity = false;
+                bullet.collides = false;
+                bullet.pierce = true;
+                bullet.hittable = false;
+                bullet.absorbable = false;
+                bullet.optimal_life_fract = 0.5;
+                bullet.shoot_effect = EffectRef::Named(EffectId::NONE);
+                bullet.smoke_effect = EffectRef::Named(EffectId::NONE);
+                bullet.draw_size = 1000.0;
+            }
+            BulletKind::ContinuousFlame => {
+                // `ContinuousBulletType` + `ContinuousFlameBulletType` initializers.
+                bullet.optimal_life_fract = 0.5;
+                bullet.length = 120.0;
+                bullet.hit_effect = EffectRef::Named(EffectId::HIT_FLAME_BEAM);
+                bullet.hit_size = 4.0;
+                bullet.draw_size = 420.0;
+                bullet.lifetime = 16.0;
+                bullet.hit_color = Rgba::from_rgba8888(0xe189f5ff);
+                bullet.light_color = Rgba::from_rgba8888(0xe189f5ff);
+                bullet.light_opacity = 0.7;
+                bullet.laser_absorb = false;
+                bullet.ammo_multiplier = 1.0;
+                bullet.pierce_armor = true;
+                // ContinuousBulletType initializer.
+                bullet.remove_after_pierce = false;
+                bullet.pierce_cap = -1;
+                bullet.speed = 0.0;
+                bullet.despawn_effect = EffectRef::Named(EffectId::NONE);
+                bullet.shoot_effect = EffectRef::Named(EffectId::NONE);
+                bullet.impact = true;
+                bullet.keep_velocity = false;
+                bullet.collides = false;
+                bullet.pierce = true;
+                bullet.hittable = false;
+                bullet.absorbable = false;
+            }
+            BulletKind::Interceptor => {
+                // `InterceptorBulletType` extends `BasicBulletType` (defaults).
+                bullet.sprite = Some(String::from("bullet"));
+            }
+            BulletKind::MassDriver => {
+                // `MassDriverBolt()` (`super(1f, 75)`).
+                bullet.speed = 1.0;
+                bullet.damage = 75.0;
+                bullet.collides_tiles = false;
+                bullet.lifetime = 1.0;
+                bullet.width = 11.0;
+                bullet.height = 13.0;
+                bullet.shrink_y = 0.0;
+                bullet.sprite = Some(String::from("shell"));
+                bullet.despawn_effect = EffectRef::Named(EffectId::SMELTSMOKE);
+                bullet.hit_effect = EffectRef::Named(EffectId::HIT_BULLET_BIG);
+            }
+            BulletKind::Empty => {
+                // `EmptyBulletType()` constructor.
+                bullet.hittable = false;
+                bullet.collides_ground = false;
+                bullet.collides_air = false;
+                bullet.collides_tiles = false;
+                bullet.speed = 0.0;
+                bullet.keep_velocity = false;
+            }
         }
         bullet
     }
@@ -999,6 +1166,14 @@ impl BulletDef {
             damage,
             hit_size,
             draw_size,
+            angle_offset,
+            random_angle_offset,
+            create_chance,
+            ignore_spawn_angle,
+            velocity_scale_rand_min,
+            velocity_scale_rand_max,
+            life_scale_rand_min,
+            life_scale_rand_max,
             drag,
             accel,
             keep_velocity,
@@ -1009,6 +1184,7 @@ impl BulletDef {
             pierce_cap,
             pierce_damage_factor,
             remove_after_pierce,
+            max_damage_fraction,
             laser_absorb,
             laser_bullet,
             optimal_life_fract,
@@ -1032,6 +1208,8 @@ impl BulletDef {
             armor_multiplier,
             block_armor_multiplier,
             hittable,
+            target_blocks,
+            target_missiles,
             reflectable,
             absorbable,
             collides,
@@ -1041,6 +1219,8 @@ impl BulletDef {
             collides_team,
             collide_floor,
             collide_terrain,
+            sticky,
+            sticky_extra_lifetime,
             inaccuracy,
             hit_sound_volume,
             hit_sound_pitch,
@@ -1087,6 +1267,7 @@ impl BulletDef {
             lightning_angle,
             lightning_color,
             spawn_bullet_random_spread,
+            multi_repeat,
             puddles,
             puddle_range,
             puddle_amount,
@@ -1365,6 +1546,22 @@ pub struct BulletSpec {
     pub hit_size: Option<f32>,
     /// Draw size.
     pub draw_size: Option<f32>,
+    /// Angle offset.
+    pub angle_offset: Option<f32>,
+    /// Random angle offset.
+    pub random_angle_offset: Option<f32>,
+    /// Create chance.
+    pub create_chance: Option<f32>,
+    /// Ignore spawn angle.
+    pub ignore_spawn_angle: Option<bool>,
+    /// Min velocity scale randomization.
+    pub velocity_scale_rand_min: Option<f32>,
+    /// Max velocity scale randomization.
+    pub velocity_scale_rand_max: Option<f32>,
+    /// Min lifetime scale randomization.
+    pub life_scale_rand_min: Option<f32>,
+    /// Max lifetime scale randomization.
+    pub life_scale_rand_max: Option<f32>,
     /// Drag.
     pub drag: Option<f32>,
     /// Accel.
@@ -1385,6 +1582,8 @@ pub struct BulletSpec {
     pub pierce_damage_factor: Option<f32>,
     /// Remove after pierce.
     pub remove_after_pierce: Option<bool>,
+    /// Max damage fraction.
+    pub max_damage_fraction: Option<f32>,
     /// Laser absorb.
     pub laser_absorb: Option<bool>,
     /// Laser bullet.
@@ -1433,6 +1632,10 @@ pub struct BulletSpec {
     pub block_armor_multiplier: Option<f32>,
     /// Hittable.
     pub hittable: Option<bool>,
+    /// Target blocks (turret).
+    pub target_blocks: Option<bool>,
+    /// Target missiles (turret).
+    pub target_missiles: Option<bool>,
     /// Reflectable.
     pub reflectable: Option<bool>,
     /// Absorbable.
@@ -1451,6 +1654,10 @@ pub struct BulletSpec {
     pub collide_floor: Option<bool>,
     /// Collide terrain.
     pub collide_terrain: Option<bool>,
+    /// Sticky.
+    pub sticky: Option<bool>,
+    /// Sticky extra lifetime.
+    pub sticky_extra_lifetime: Option<f32>,
     /// Inaccuracy.
     pub inaccuracy: Option<f32>,
     /// Hit effect.
@@ -1569,6 +1776,8 @@ pub struct BulletSpec {
     pub spawn_bullets: Vec<BulletSpec>,
     /// Spawn bullet random spread.
     pub spawn_bullet_random_spread: Option<f32>,
+    /// Multi repeat.
+    pub multi_repeat: Option<i32>,
     /// Puddles.
     pub puddles: Option<i32>,
     /// Puddle range.

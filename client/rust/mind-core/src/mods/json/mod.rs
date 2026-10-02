@@ -1265,6 +1265,14 @@ pub fn resolve_bullet_kind(tag: &str) -> Option<BulletKind> {
         "LiquidBulletType" => BulletKind::Liquid,
         "EmpBulletType" => BulletKind::Emp,
         "BombBulletType" => BulletKind::Bomb,
+        "ContinuousBulletType" => BulletKind::Continuous,
+        "MultiBulletType" => BulletKind::Multi,
+        "PointBulletType" => BulletKind::Point,
+        "PointLaserBulletType" => BulletKind::PointLaser,
+        "ContinuousFlameBulletType" => BulletKind::ContinuousFlame,
+        "InterceptorBulletType" => BulletKind::Interceptor,
+        "MassDriverBolt" => BulletKind::MassDriver,
+        "EmptyBulletType" => BulletKind::Empty,
         _ => return None,
     })
 }

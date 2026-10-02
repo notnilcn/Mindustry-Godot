@@ -191,43 +191,17 @@ pub fn bullet_bundle(
 
 /// Runs the kind-specific `init(Bullet)` half (`BulletType.init` overrides).
 ///
-/// Laser bullets deal their line damage immediately at spawn and are removed
-/// (`LaserBulletType.init` runs `Damage.collideLaser` and sets `time = lifetime`).
+/// Vanilla laser bullets deal their line damage immediately at spawn and are
+/// removed (`LaserBulletType.init`); point/multi kinds teleport/spawn children.
 pub fn apply_kind_init(ctx: &mut CombatCtx<'_>, entity: Entity) {
-    let Some(state) = ctx.bullet(entity).cloned() else {
+    let Some(kind) = ctx
+        .bullet(entity)
+        .and_then(|state| ctx.content.bullet(state.def))
+        .map(|def| def.kind)
+    else {
         return;
     };
-    let Some(def) = ctx.content.bullet(state.def) else {
-        return;
-    };
-    if def.kind != crate::content::BulletKind::Laser {
-        return;
-    }
-    let team = ctx.team(entity);
-    let (x, y) = ctx.pos(entity).unwrap_or((state.origin.0, state.origin.1));
-    let length = if def.length > 0.0 {
-        def.length
-    } else {
-        def.speed * state.lifetime
-    };
-    let _ = super::damage::line::collide_line(
-        ctx.world,
-        ctx.content,
-        ctx.grid,
-        team,
-        x,
-        y,
-        state.rotation,
-        length,
-        def.pierce_cap,
-        state.damage,
-        def.pierce_armor,
-        def.armor_multiplier,
-    );
-    if let Some(mut bullet) = ctx.world.get_mut::<Bullet>(entity) {
-        bullet.fdata = length;
-        bullet.set(HIT);
-    }
+    behavior_for(kind).init(ctx, entity);
 }
 
 /// Advances one bullet (`BulletComp.update` + `BulletType.update`).
@@ -371,6 +345,20 @@ pub fn update_bullet(ctx: &mut CombatCtx<'_>, entity: Entity) -> bool {
         }
     }
 
+    // Kind-specific `BulletType.update(b)` (after `super.update`).
+    {
+        let kind = ctx
+            .bullet(entity)
+            .and_then(|b| ctx.content.bullet(b.def))
+            .map(|def| def.kind);
+        if let Some(kind) = kind {
+            behavior_for(kind).update(ctx, entity);
+            if !bullet_alive(ctx.world, entity) {
+                return false;
+            }
+        }
+    }
+
     // Interval bullets.
     if let Some(child) = interval_bullet
         && bullet_interval > 0.0
@@ -485,8 +473,15 @@ pub fn hit_building(ctx: &mut CombatCtx<'_>, bullet: Entity, target: Entity) -> 
     applied
 }
 
-/// `BulletType.hit` effect pipeline (frags/splash; puddles/incend/units in 10/11).
-fn hit(ctx: &mut CombatCtx<'_>, bullet: Entity, x: f32, y: f32, create_frags: bool) {
+/// `BulletType.hit` effect pipeline (frags/splash; kind-specific overrides via
+/// [`BulletBehavior::hit`]).
+pub(crate) fn hit_bullet(
+    ctx: &mut CombatCtx<'_>,
+    bullet: Entity,
+    x: f32,
+    y: f32,
+    create_frags: bool,
+) {
     let Some(state) = ctx.bullet(bullet).cloned() else {
         return;
     };
@@ -504,32 +499,48 @@ fn hit(ctx: &mut CombatCtx<'_>, bullet: Entity, x: f32, y: f32, create_frags: bo
         create_frags_of(ctx, bullet, x, y);
     }
     create_splash_damage(ctx, bullet, x, y);
-    // createPuddles/createIncend/createUnits/suppression/lightning: M2/M3/11.
+    // createPuddles/createIncend/createUnits/suppression: M3/11.
+}
+
+/// Calls the kind-specific `BulletType.hit` override (or the base pipeline).
+fn behavior_hit(ctx: &mut CombatCtx<'_>, bullet: Entity, x: f32, y: f32, create_frags: bool) {
+    let Some(kind) = ctx
+        .bullet(bullet)
+        .and_then(|state| ctx.content.bullet(state.def))
+        .map(|def| def.kind)
+    else {
+        return;
+    };
+    behavior_for(kind).hit(ctx, bullet, x, y, create_frags);
 }
 
 /// `BulletType.despawned`.
-fn despawned(ctx: &mut CombatCtx<'_>, bullet: Entity) {
+pub(crate) fn despawn_bullet(ctx: &mut CombatCtx<'_>, bullet: Entity) {
     let Some(state) = ctx.bullet(bullet).cloned() else {
         return;
     };
     let Some(def) = ctx.content.bullet(state.def) else {
         return;
     };
+    let despawn_hit = def.despawn_hit;
+    let despawn_effect = def.despawn_effect.clone();
+    let hit_color = def.hit_color;
+    let despawn_shake = def.despawn_shake;
     let (x, y) = ctx.pos(bullet).unwrap_or((state.last.0, state.last.1));
-    if def.despawn_hit {
-        hit(ctx, bullet, x, y, false);
+    if despawn_hit {
+        behavior_hit(ctx, bullet, x, y, false);
     }
-    if def.despawn_effect != crate::content::registries::fx_meta::EffectRef::default() {
+    if despawn_effect != crate::content::registries::fx_meta::EffectRef::default() {
         ctx.fx
-            .effect(&def.despawn_effect, x, y, state.rotation, def.hit_color);
+            .effect(&despawn_effect, x, y, state.rotation, hit_color);
     }
-    if def.despawn_shake > 0.0 {
-        ctx.fx.shake(def.despawn_shake);
+    if despawn_shake > 0.0 {
+        ctx.fx.shake(despawn_shake);
     }
 }
 
 /// `BulletType.removed`.
-fn removed(ctx: &mut CombatCtx<'_>, bullet: Entity) {
+pub(crate) fn remove_bullet_hook(ctx: &mut CombatCtx<'_>, bullet: Entity) {
     let Some(state) = ctx.bullet(bullet).cloned() else {
         return;
     };
@@ -638,6 +649,7 @@ pub fn collide_bullet(ctx: &mut CombatCtx<'_>, bullet: Entity) -> CollisionOutco
     let Some(def) = ctx.content.bullet(state.def) else {
         return CollisionOutcome::None;
     };
+    let collides = def.collides;
     let collide_team = def.collides_team;
     let collide_terrain = def.collide_terrain;
     let collide_floor = def.collide_floor;
@@ -645,9 +657,17 @@ pub fn collide_bullet(ctx: &mut CombatCtx<'_>, bullet: Entity) -> CollisionOutco
     let pierce_damage_factor = def.pierce_damage_factor;
     let remove_after_pierce = def.remove_after_pierce;
     let pierce_cap = def.pierce_cap;
+    let def_sticky = def.sticky;
+    let max_damage_fraction = def.max_damage_fraction;
+    let building_damage_multiplier = def.building_damage_multiplier;
+    let _ = (max_damage_fraction, building_damage_multiplier);
     let sticky = state.sticky;
     let bullet_team = ctx.team(bullet);
     let tile_size = crate::config::TILESIZE as f32;
+    // `!collides` bullets (fire, liquid, lasers, empty) never hit buildings.
+    if !collides && !collide_terrain && !collide_floor {
+        return CollisionOutcome::None;
+    }
 
     let to_tile = |v: f32| (v / tile_size).floor() as i32;
     let start_x = to_tile(state.last.0);
@@ -681,13 +701,15 @@ pub fn collide_bullet(ctx: &mut CombatCtx<'_>, bullet: Entity) -> CollisionOutco
             return true;
         }
         if let Some(target) = tile.build {
-            // Sticky bullets attach instead of hitting.
-            if sticky == Some(target) {
+            // Sticky bullets attach instead of hitting (`BulletType.sticky` or a
+            // pre-assigned sticky target).
+            if sticky == Some(target) || (def_sticky && sticky.is_none()) {
                 let offset = (
                     ctx.pos(bullet).unwrap_or((0.0, 0.0)).0 - tx as f32 * tile_size,
                     ctx.pos(bullet).unwrap_or((0.0, 0.0)).1 - ty as f32 * tile_size,
                 );
                 if let Some(mut b) = ctx.world.get_mut::<Bullet>(bullet) {
+                    b.sticky = Some(target);
                     b.sticky_x = offset.0;
                     b.sticky_y = offset.1;
                 }
@@ -713,7 +735,7 @@ pub fn collide_bullet(ctx: &mut CombatCtx<'_>, bullet: Entity) -> CollisionOutco
             // Direct enemy hit runs the effect pipeline (splash/frags).
             if !same_team {
                 let (x, y) = ctx.pos(bullet).unwrap_or(state.last);
-                hit(ctx, bullet, x, y, true);
+                behavior_hit(ctx, bullet, x, y, true);
             }
             if pierce_building {
                 let sub = if pierce_damage_factor == 0.0 {
@@ -776,7 +798,7 @@ pub fn collide_bullet(ctx: &mut CombatCtx<'_>, bullet: Entity) -> CollisionOutco
             if !same_team || collide_team {
                 hit_building(ctx, bullet, target);
                 let (x, y) = ctx.pos(bullet).unwrap_or(state.last);
-                hit(ctx, bullet, x, y, true);
+                behavior_hit(ctx, bullet, x, y, true);
                 if let Some(mut b) = ctx.world.get_mut::<Bullet>(bullet) {
                     b.set(HIT);
                 }
@@ -792,9 +814,21 @@ pub fn finish_bullet(ctx: &mut CombatCtx<'_>, entity: Entity) {
     if let Some(state) = ctx.bullet(entity).cloned()
         && !state.has(HIT)
     {
-        despawned(ctx, entity);
+        let kind = ctx
+            .bullet(entity)
+            .and_then(|s| ctx.content.bullet(s.def))
+            .map(|d| d.kind);
+        if let Some(kind) = kind {
+            behavior_for(kind).despawned(ctx, entity);
+        }
     }
-    removed(ctx, entity);
+    let kind = ctx
+        .bullet(entity)
+        .and_then(|s| ctx.content.bullet(s.def))
+        .map(|d| d.kind);
+    if let Some(kind) = kind {
+        behavior_for(kind).removed(ctx, entity);
+    }
     let _ = ctx.world.despawn(entity);
 }
 
@@ -984,5 +1018,154 @@ mod tests {
             harness.step_bullets_only();
         }
         assert!(harness.build.world.get_entity(e).is_err());
+    }
+
+    fn wall(h: &CombatHarness) -> crate::content::BlockId {
+        h.content().block_id("copper-wall").expect("wall")
+    }
+
+    #[test]
+    fn point_bullet_teleports_and_hits() {
+        let mut harness = CombatHarness::new(32, 16, 7);
+        let wall = wall(&harness);
+        // speed 4 * lifetime 20 = 80 px from x=36 -> x=116 (tile 14).
+        assert!(harness.place(14, 8, wall, 0, true));
+        let before = harness.building_health_at(14, 8);
+        let (x, y) = CombatHarness::tile_center(4, 8);
+        let e = harness.spawn_bullet("point", x, y, 0.0, 1).expect("spawn");
+        assert!(
+            harness.building_health_at(14, 8) < before,
+            "point bullet hit the endpoint building at spawn"
+        );
+        assert!(!bullet_alive(&harness.build.world, e));
+    }
+
+    #[test]
+    fn multi_spawns_children() {
+        let mut harness = CombatHarness::new(16, 16, 7);
+        let before = harness.bullets_created;
+        let (x, y) = CombatHarness::tile_center(4, 4);
+        let _ = harness.spawn_bullet("multi", x, y, 0.0, 1).expect("spawn");
+        // 1 multi marker + 1 child * repeat 2.
+        assert!(
+            harness.bullets_created >= before + 3,
+            "multi spawned children (created={})",
+            harness.bullets_created
+        );
+    }
+
+    #[test]
+    fn emp_area_damages_neighbor_building() {
+        let mut harness = CombatHarness::new(32, 16, 7);
+        let wall = wall(&harness);
+        assert!(harness.place(10, 10, wall, 0, true));
+        assert!(harness.place(12, 10, wall, 0, true));
+        let (x, y) = CombatHarness::tile_center(8, 10);
+        let _ = harness.spawn_bullet("emp", x, y, 0.0, 1).expect("spawn");
+        for _ in 0..20 {
+            harness.tick();
+        }
+        assert!(harness.building_health_at(10, 10) < 320.0, "direct hit");
+        assert!(
+            harness.building_health_at(12, 10) < 320.0,
+            "EMP area damage reached the neighbor"
+        );
+    }
+
+    #[test]
+    fn flak_airburst_explodes() {
+        let mut harness = CombatHarness::new(32, 16, 7);
+        let wall = wall(&harness);
+        assert!(harness.place(10, 10, wall, 0, true));
+        let (x, y) = CombatHarness::tile_center(8, 10);
+        let _ = harness.spawn_bullet("flak", x, y, 0.0, 1).expect("spawn");
+        for _ in 0..40 {
+            harness.tick();
+        }
+        assert!(harness.building_health_at(10, 10) < 320.0);
+    }
+
+    #[test]
+    fn sap_instant_line_hit() {
+        let mut harness = CombatHarness::new(32, 16, 3);
+        let wall = wall(&harness);
+        assert!(harness.place(10, 8, wall, 0, true));
+        let before = harness.building_health_at(10, 8);
+        let (x, y) = CombatHarness::tile_center(4, 8);
+        let e = harness.spawn_bullet("sap", x, y, 0.0, 1).expect("spawn");
+        assert!(harness.building_health_at(10, 8) < before, "sap damaged");
+        assert!(!bullet_alive(&harness.build.world, e));
+    }
+
+    #[test]
+    fn shrapnel_instant_line_damages_all() {
+        let mut harness = CombatHarness::new(32, 16, 3);
+        let wall = wall(&harness);
+        assert!(harness.place(8, 8, wall, 0, true));
+        assert!(harness.place(10, 8, wall, 0, true));
+        let (x, y) = CombatHarness::tile_center(4, 8);
+        let _ = harness
+            .spawn_bullet("shrapnel", x, y, 0.0, 1)
+            .expect("spawn");
+        assert!(harness.building_health_at(8, 8) < 320.0);
+        assert!(harness.building_health_at(10, 8) < 320.0);
+    }
+
+    #[test]
+    fn interceptor_removes_target_bullet() {
+        let mut harness = CombatHarness::new(16, 16, 7);
+        let (x, y) = CombatHarness::tile_center(4, 4);
+        let interceptor = harness
+            .spawn_bullet("interceptor", x, y, 0.0, 1)
+            .expect("spawn");
+        let target = harness.spawn_bullet("fuse", x, y, 0.0, 1).expect("spawn");
+        // Freeze both so the overlap test is deterministic.
+        for e in [interceptor, target] {
+            if let Some(mut vel) = harness.build.world.get_mut::<Vel>(e) {
+                vel.x = 0.0;
+                vel.y = 0.0;
+            }
+        }
+        harness
+            .build
+            .world
+            .get_mut::<Bullet>(interceptor)
+            .expect("bullet")
+            .data = BulletData::Bullet(target);
+        harness.step_bullets_only();
+        // 40 - 15 = 25 remaining damage.
+        assert_eq!(
+            harness.build.world.get::<Bullet>(target).map(|b| b.damage),
+            Some(25.0)
+        );
+    }
+
+    #[test]
+    fn continuous_line_damages_each_interval() {
+        let mut harness = CombatHarness::new(32, 16, 7);
+        let wall = wall(&harness);
+        assert!(harness.place(10, 8, wall, 0, true));
+        let (x, y) = CombatHarness::tile_center(4, 8);
+        let _ = harness
+            .spawn_bullet("continuous", x, y, 0.0, 1)
+            .expect("spawn");
+        for _ in 0..6 {
+            harness.step_bullets_only();
+        }
+        assert!(harness.building_health_at(10, 8) < 320.0);
+    }
+
+    #[test]
+    fn empty_bullet_ignores_buildings() {
+        let mut harness = CombatHarness::new(32, 16, 7);
+        let wall = wall(&harness);
+        assert!(harness.place(10, 8, wall, 0, true));
+        let before = harness.building_health_at(10, 8);
+        let (x, y) = CombatHarness::tile_center(8, 8);
+        let _ = harness.spawn_bullet("empty", x, y, 0.0, 1).expect("spawn");
+        for _ in 0..30 {
+            harness.step_bullets_only();
+        }
+        assert_eq!(harness.building_health_at(10, 8), before);
     }
 }
