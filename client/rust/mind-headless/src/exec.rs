@@ -172,6 +172,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
                 cmd_trace_order(*ticks, out.as_deref(), *json)
             }
         },
+        Command::Audio { command } => crate::audio_scenarios::run(command),
         Command::Io { command } => match command {
             IoCommand::DumpMeta { file, json } => cmd_io_dump_meta(file, *json),
             IoCommand::Settings { json } => cmd_io_settings(&cli, *json),

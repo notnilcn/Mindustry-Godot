@@ -667,6 +667,32 @@ impl SoundId {
             .position(|meta| meta.name == name)
             .map(|index| SoundId(index as u16))
     }
+
+    /// Canonical name of this sound (parity ABI; `none`/`unset` included).
+    pub fn name(self) -> &'static str {
+        self.meta().name
+    }
+
+    /// Whether this id is `none`/`unset` (the silent sentinels; plan 18 §3.2).
+    pub fn is_none_or_unset(self) -> bool {
+        self == SoundId::NONE || self == SoundId::UNSET
+    }
+}
+
+/// `SoundId` serializes **by name** (plan 18 §3.2): content JSON and mods stay
+/// name-stable even if the dense id space is ever regenerated.
+impl serde::Serialize for SoundId {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.name())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for SoundId {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let name = <std::string::String as serde::Deserialize>::deserialize(deserializer)?;
+        SoundId::by_name(&name)
+            .ok_or_else(|| serde::de::Error::custom(format!("unknown sound `{name}`")))
+    }
 }
 
 /// Seed sound table (`none`, `unset`, then `core/assets/sounds/**/*.ogg` in

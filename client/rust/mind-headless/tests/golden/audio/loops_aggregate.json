@@ -1,0 +1,3247 @@
+{
+  "format": 1,
+  "rows": [
+    {
+      "cur_volume": 0.10999999940395355,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 0,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.08799999952316284,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 0,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.03849999979138374,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 0,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.20789998769760132,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 1,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.16631999611854553,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 1,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.07276499271392822,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 1,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.29503098130226135,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 2,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.23602479696273804,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 2,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.10326084494590759,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 2,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.37257757782936096,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 3,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.2980620861053467,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 3,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.13040214776992798,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 3,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.44159406423568726,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 4,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.35327526926994324,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 4,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.15455791354179382,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 4,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.5030187368392944,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 5,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.4024149775505066,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 5,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.17605653405189514,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 5,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.5576866865158081,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 6,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.4461493194103241,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 6,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.19519031047821045,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 6,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.6063411235809326,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 7,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.48507291078567505,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 7,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.21221937239170074,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 7,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.64964359998703,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 8,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.519714891910553,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 8,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.22737523913383484,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 8,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.6881828308105469,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 9,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.5505462288856506,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 9,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.24086396396160126,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 9,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7224827408790588,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 10,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.5779861211776733,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 10,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.2528689205646515,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 10,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7530096173286438,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 11,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.6024076342582703,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 11,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.26355335116386414,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 11,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7801785469055176,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 12,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.6241427659988403,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 12,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.27306246757507324,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 12,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.8043588995933533,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 13,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.6434870362281799,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 13,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.281525582075119,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 13,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.8258793950080872,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 14,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.6607034802436829,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 14,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.28905776143074036,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 14,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.8450326919555664,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 15,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.6760261058807373,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 15,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.2957614064216614,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 15,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.8620790839195251,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 16,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.6896632313728333,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 16,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.30172765254974365,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 16,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.8772503733634949,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 17,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7018002867698669,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 17,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3070376217365265,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 17,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.8907528519630432,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 18,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7126022577285767,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 18,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3117634952068329,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 18,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9027700424194336,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 19,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.722216010093689,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 19,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3159694969654083,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 19,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9134653210639954,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 20,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7307722568511963,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 20,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3197128474712372,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 20,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9229841232299805,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 21,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7383872866630554,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 21,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.32304441928863525,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 21,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9314558506011963,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 22,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.745164692401886,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 22,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3260095417499542,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 22,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9389957189559937,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 23,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.751196563243866,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 23,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.32864847779273987,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 23,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9457061886787415,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 24,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7565649151802063,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 24,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.33099713921546936,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 24,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9516785144805908,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 25,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7613427639007568,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 25,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3330874443054199,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 25,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9569938778877258,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 26,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7655950784683228,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 26,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3349478244781494,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 26,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.961724579334259,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 27,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7693796157836914,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 27,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3366035521030426,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 27,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9659348726272583,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 28,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7727478742599487,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 28,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3380771577358246,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 28,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9696820378303528,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 29,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7757456302642822,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 29,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3393886685371399,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 29,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9730170369148254,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 30,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7784135937690735,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 30,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34055590629577637,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 30,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9759851694107056,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 31,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7807881236076355,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 31,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34159475564956665,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 31,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9786267876625061,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 32,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.782901406288147,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 32,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3425193428993225,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 32,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9809778332710266,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 33,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7847822308540344,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 33,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34334221482276917,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 33,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9830702543258667,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 34,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7864561676979065,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 34,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3440745770931244,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 34,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.984932541847229,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 35,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7879459857940674,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 35,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3447263836860657,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 35,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9865899682044983,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 36,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7892719507217407,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 36,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34530648589134216,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 36,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9880650639533997,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 37,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7904520630836487,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 37,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3458227813243866,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 37,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9893779158592224,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 38,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7915023565292358,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 38,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3462822735309601,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 38,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9905463457107544,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 39,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7924370765686035,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 39,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34669122099876404,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 39,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9915862679481506,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 40,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7932689785957336,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 40,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34705519676208496,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 40,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9925117492675781,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 41,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7940093874931335,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 41,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3473791182041168,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 41,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.993335485458374,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 42,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7946683764457703,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 42,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3476674258708954,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 42,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9940685629844666,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 43,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7952548265457153,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 43,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34792399406433105,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 43,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.994720995426178,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 44,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7957767844200134,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 44,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3481523394584656,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 44,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9953016638755798,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 45,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7962413430213928,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 45,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34835559129714966,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 45,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9958184957504272,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 46,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7966548204421997,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 46,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3485364615917206,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 46,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9962784647941589,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 47,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.797022819519043,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 47,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3486974537372589,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 47,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9966878294944763,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 48,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.797350287437439,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 48,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34884074330329895,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 48,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9970521926879883,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 49,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7976417541503906,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 49,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3489682674407959,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 49,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9973764419555664,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 50,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7979011535644531,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 50,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34908175468444824,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 50,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9976650476455688,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 51,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7981320023536682,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 51,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34918275475502014,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 51,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.997921884059906,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 52,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.798337459564209,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 52,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34927263855934143,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 52,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9981504678726196,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 53,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7985203266143799,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 53,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3493526577949524,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 53,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.998353898525238,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 54,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7986831068992615,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 54,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3494238555431366,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 54,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9985349774360657,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 55,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7988279461860657,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 55,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3494872450828552,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 55,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9986961483955383,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 56,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7989568710327148,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 56,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34954366087913513,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 56,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9988395571708679,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 57,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7990716099739075,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 57,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.349593847990036,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 57,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9989672303199768,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 58,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7991737127304077,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 58,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34963852167129517,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 58,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.9990808367729187,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 59,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7992646098136902,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 59,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34967827796936035,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 59,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.8891819715499878,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 60,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7993454933166504,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 60,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34971365332603455,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 60,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7913719415664673,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 61,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7994174957275391,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 61,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34974515438079834,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 61,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.704321026802063,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 62,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7994815707206726,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 62,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34977319836616516,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 62,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.6268457174301147,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 63,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7995386123657227,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 63,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34979814291000366,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 63,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.5578926801681519,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 64,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7995893955230713,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 64,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3498203456401825,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 64,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.49652448296546936,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 65,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.799634575843811,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 65,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34984010457992554,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 65,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.44190678000450134,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 66,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7996747493743896,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 66,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3498576879501343,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 66,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3932970464229584,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 67,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7997105121612549,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 67,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3498733341693878,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 67,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.35003435611724854,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 68,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7997423410415649,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 68,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34988725185394287,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 68,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.31153059005737305,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 69,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.799770712852478,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 69,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34989964962005615,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 69,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.27726221084594727,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 70,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.799795925617218,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 70,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3499106764793396,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 70,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.24676336348056793,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 71,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7998183965682983,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 71,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34992051124572754,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 71,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.21961939334869385,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 72,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7998383641242981,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 72,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34992924332618713,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 72,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.19546125829219818,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 73,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7998561263084412,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 73,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3499370217323303,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 73,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.17396052181720734,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 74,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7998719811439514,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 74,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34994393587112427,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 74,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.1548248678445816,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 75,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7998860478401184,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 75,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3499501049518585,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 75,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.1377941370010376,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 76,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7998985648155212,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 76,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34995558857917786,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 76,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.12263678014278412,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 77,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999097108840942,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 77,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34996047616004944,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 77,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.10914673656225204,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 78,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999196648597717,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 78,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34996482729911804,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 78,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.0971405953168869,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 79,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999284863471985,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 79,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34996870160102844,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 79,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.08645512908697128,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 80,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999363541603088,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 80,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.349972128868103,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 80,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.07694506645202637,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 81,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999433279037476,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 81,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34997519850730896,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 81,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.06848111003637314,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 82,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.799949586391449,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 82,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34997794032096863,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 82,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.06094818934798241,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 83,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999551296234131,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 83,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34998035430908203,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 83,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.05424388870596886,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 84,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999600768089294,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 84,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34998250007629395,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 84,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.04827706143260002,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 85,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999644875526428,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 85,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34998443722724915,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 85,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.042966585606336594,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 86,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.799968421459198,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 86,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34998613595962524,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 86,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.03824026137590408,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 87,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.799971878528595,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 87,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.349987655878067,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 87,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.03403383120894432,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 88,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999749779701233,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 88,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34998902678489685,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 88,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.030290110036730766,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 89,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.799977719783783,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 89,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34999021887779236,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 89,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.026958197355270386,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 90,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999801635742188,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 90,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3499912917613983,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 90,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.02399279549717903,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 91,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999823689460754,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 91,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3499922454357147,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 91,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.0213535875082016,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 92,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.799984335899353,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 92,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34999310970306396,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 92,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.019004693254828453,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 93,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999860644340515,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 93,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34999385476112366,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 93,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.01691417768597603,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 94,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999876141548157,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 94,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3499945402145386,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 94,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.015053617767989635,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 95,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999889850616455,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 95,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34999513626098633,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 95,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.013397719711065292,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 96,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.799990177154541,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 96,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3499956727027893,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 96,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.01192397065460682,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 97,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.799991250038147,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 97,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3499961495399475,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 97,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.010612334124743938,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 98,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999922037124634,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 98,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34999656677246094,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 98,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.009444977156817913,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 99,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999930381774902,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 99,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.349996954202652,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 99,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.008406030014157295,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 100,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999938130378723,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 100,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34999728202819824,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 100,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.007481366861611605,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 101,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999944686889648,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 101,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3499975800514221,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 101,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.006658416707068682,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 102,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999950647354126,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 102,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3499978482723236,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 102,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.005925990641117096,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 103,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999956011772156,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 103,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3499980866909027,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 103,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.005274131894111633,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 104,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999960780143738,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 104,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3499982953071594,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 104,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.004693977534770966,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 105,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999964952468872,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 105,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34999847412109375,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 105,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.004177640192210674,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 106,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999968528747559,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 106,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3499986529350281,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 106,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.0037180997896939516,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 107,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999972105026245,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 107,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34999880194664,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 107,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.0033091087825596333,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 108,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999975085258484,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 108,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34999892115592957,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 108,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.002945106942206621,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 109,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999978065490723,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 109,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3499990403652191,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 109,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.0026211452204734087,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 110,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999980449676514,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 110,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34999915957450867,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 110,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.0023328191600739956,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 111,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999982833862305,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 111,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34999924898147583,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 111,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.002076209057122469,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 112,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999984622001648,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 112,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.349999338388443,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 112,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.0018478260608389974,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 113,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999986410140991,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 113,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34999939799308777,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 113,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.0016445652581751347,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 114,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999988198280334,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 114,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34999945759773254,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 114,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.0014636630658060312,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 115,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.799998939037323,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 115,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3499995172023773,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 115,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.0013026600936427712,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 116,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999990582466125,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 116,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.3499995768070221,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 116,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.0011593675008043647,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 117,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999991774559021,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 117,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34999963641166687,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 117,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.0010318370768800378,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 118,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999992966651917,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 118,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34999966621398926,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 118,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.0009183349902741611,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopConveyor",
+      "tick": 119,
+      "voice": "none",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.7999993562698364,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "loopDrill",
+      "tick": 119,
+      "voice": "live",
+      "volume_raw": 0.0
+    },
+    {
+      "cur_volume": 0.34999969601631165,
+      "pan": 0.0,
+      "pitch": 1.0,
+      "sound": "rain",
+      "tick": 119,
+      "voice": "live",
+      "volume_raw": 0.0
+    }
+  ],
+  "scenario": "audio_loop_aggregate",
+  "ticks": 120
+}

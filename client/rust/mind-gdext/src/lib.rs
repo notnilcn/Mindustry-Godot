@@ -8,6 +8,7 @@
 //! screen↔tile) and `MindTileGrid` (`_draw` grid/quads) per plan §3.5.
 
 mod assets;
+mod audio;
 mod camera;
 mod hello;
 mod log_bridge;
@@ -17,6 +18,7 @@ mod stdb;
 mod tile_grid;
 
 pub use assets::MindAssets;
+pub use audio::MindAudio;
 pub use camera::MindCamera2D;
 pub use sim_host::MindSimHost;
 pub use stdb::{StdbBinder, StdbConnector};
