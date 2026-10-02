@@ -15,25 +15,46 @@
 //! avoids the aliasing constraints of re-entrant hook spawning.
 
 pub mod attributes;
+pub mod behavior;
+pub mod block;
+pub mod block_kind_data;
 pub mod cached;
 pub mod checksum;
 pub mod color_mapper;
+pub mod config;
+pub mod consumers;
 pub mod context;
 pub mod darkness;
+pub mod draw;
 pub mod edges;
 pub mod events;
 pub mod hooks;
+pub mod modules;
 pub mod ops;
 pub mod params;
 pub mod pos;
 pub mod raycast;
+pub mod stats;
+pub mod status;
 pub mod tile;
 pub mod tiles;
 
 pub use attributes::Attributes;
+pub use behavior::{
+    BehaviorRegistry, BuildingBehavior, BuildingKind, BuildingReader, BuildingWriter, NoopBehavior,
+    PayloadRef,
+};
+pub use block::{BlockInstance, BlockTable, BlockView, Blocks};
+pub use block_kind_data::{BlockFamily, BlockKindData};
 pub use cached::{CachedBuild, CachedTile, CachedTiles, TileGen};
 pub use color_mapper::ColorMapper;
+pub use config::{ConfigHandlers, ConfigKind, ConfigValue};
+pub use consumers::{ConsumeInstance, ConsumeInstanceKind, Consumers};
 pub use context::{Context, FilterContext};
+pub use draw::{
+    BlockLoadCtx, BuildDrawData, BuildPlanDrawData, DrawBlock, DrawCommands, DrawDefault, DrawSpec,
+    RegionName, SpecDraw,
+};
 pub use edges::Edges;
 pub use events::{
     TileChangeEvent, TileFloorChangeEvent, TileOverlayChangeEvent, TilePreChangeEvent,
@@ -43,9 +64,12 @@ pub use hooks::{
     MapGenHooks, NewBuilding, NoopMapGenHooks, NoopRenderHooks, NoopWorldHooks, RenderHooks,
     WorldHooks,
 };
+pub use modules::{FlowWindow, ItemModule, LiquidModule, PowerGraphId, PowerModule};
 pub use ops::{WorldCtx, WorldEventLog};
 pub use params::WorldParams;
 pub use pos::TilePos;
+pub use stats::{BarDisplay, StatCat, StatEntry, StatValue, Stats};
+pub use status::{BlockStatus, block_status};
 pub use tile::{PACK_DATA_LAYOUT, Tile};
 pub use tiles::Tiles;
 

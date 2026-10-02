@@ -44,8 +44,8 @@ pub use load::{
 pub use names::{NameMaps, mod_content_name_map, transform_name};
 pub use parity::{AssetManifest, AuditReport, BundleKeysFile, GoldenContent, audit, dump_golden};
 pub use registries::blocks::{
-    BlockDef, BlockFlag, BlockGroup, BlockKind, BlockSpec, Blocks, BuildVisibility, Consume,
-    ConsumeSpec, EnvMask,
+    BarSpec, BlockDef, BlockFlag, BlockGroup, BlockKind, BlockSpec, Blocks, BuildVisibility,
+    Consume, ConsumeSpec, EnvMask, StatSpec, TILE_SIZE,
 };
 pub use registries::bullets::{BulletDef, BulletKind};
 pub use registries::commands::{ControllerKind, UnitCommandDef};
@@ -70,6 +70,7 @@ pub use registries::weathers::{
     Attribute, ParticleWeatherFields, RainWeatherFields, WeatherDef, WeatherKind,
 };
 pub use settings_store::{MemoryUnlockStore, UnlockStore};
+pub use stacks::{ItemStack, LiquidStack, PayloadStack};
 pub use tech::{
     NodeObjective, ObjectiveSpec, TechNode, TechNodeRef, TechStore, TechTreeBuildReport,
     TechTreeBuilder, TreeId, round_to_10,

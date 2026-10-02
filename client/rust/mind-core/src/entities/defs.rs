@@ -20,7 +20,7 @@ use super::meta::{EntityRegistry, RegistryError, SimComponentMeta};
 // (e.g. `mace=4`) and has no single class id; its id falls back to the mod range.
 entity_def! {
     Unit = [BaseEntity, SimId, DefId, Pos, Vel, TeamComp, comp::Unit];
-    BuildingComp = [BaseEntity, SimId, DefId, Pos, TeamComp, comp::Building];
+    BuildingComp = [BaseEntity, SimId, DefId, Pos, TeamComp, Health, Building, Timers];
     BulletComp = [BaseEntity, SimId, DefId, Pos, Vel, comp::Bullet];
     PlayerComp = [BaseEntity, SimId, DefId, Pos, TeamComp, comp::Player];
     EffectStateComp = [BaseEntity, SimId, DefId, Pos, comp::EffectState];
@@ -37,6 +37,8 @@ pub fn register_base_components(registry: &mut EntityRegistry) {
     registry.register_component(Pos::component_meta());
     registry.register_component(Vel::component_meta());
     registry.register_component(TeamComp::component_meta());
+    registry.register_component(comp::Health::component_meta());
+    registry.register_component(comp::Timers::component_meta());
     registry.register_component(comp::Local::component_meta());
     registry.register_component(comp::Remote::component_meta());
     registry.register_component(comp::Unit::component_meta());
