@@ -14,9 +14,12 @@ use mind_core::io::wire::{WireReader, WireWriter};
 use mind_core::logic::assembler::Assembler;
 use mind_core::logic::blocks::io::CellValue;
 use mind_core::logic::blocks::logic_block::compress;
-use mind_core::logic::blocks::{LogicBlockState, LogicDisplayState, MemoryBlockState};
+use mind_core::logic::blocks::{
+    LogicBlockState, LogicDisplayState, LogicRulesApi, LogicRulesRes, MemoryBlockState,
+};
 use mind_core::logic::executor::Executor;
 use mind_core::logic::statement::Statement;
+use mind_core::logic::world::{LogicWorldEvent, LogicWorldState};
 use mind_core::world::ConfigValue;
 use mind_core::world::building_io::BuildingCodec;
 use mind_core::world::harness::BuildHarness;
@@ -777,6 +780,9 @@ fn run_named(name: &str, ticks: Option<u64>, json: bool) -> Result<i32> {
         "logic_sensor_access" => return run_sensor_access(ticks.unwrap_or(20), json),
         "logic_radar_filters" => return run_radar_filters(json),
         "logic_unit_control_gating" => return run_unit_control_gating(json),
+        "logic_privileged_world" => return run_privileged_world(ticks.unwrap_or(10), json),
+        "logic_markers_smoke" => return run_markers_smoke(json),
+        "logic_sync_event" => return run_sync_event(ticks.unwrap_or(13), json),
         _ => {}
     }
     let scenario = scenario(name).with_context(|| format!("unknown logic scenario: {name}"))?;
@@ -826,6 +832,337 @@ fn dump(file: &Path, json: bool) -> Result<i32> {
         for statement in &statements {
             println!("{}", statement.registered_name());
         }
+    }
+    Ok(0)
+}
+
+/// Rules seam that permits configuring a world processor in tests.
+struct PermissiveRules;
+
+impl LogicRulesApi for PermissiveRules {
+    fn editor(&self) -> bool {
+        true
+    }
+    fn allow_edit_world_processors(&self) -> bool {
+        true
+    }
+    fn disable_world_processors(&self) -> bool {
+        false
+    }
+}
+
+/// Installs the world state + permissive rules and returns the processor entity.
+fn world_processor_rig(
+    code: &str,
+    width: i32,
+    height: i32,
+) -> Result<(BuildHarness, bevy_ecs::entity::Entity)> {
+    let mut harness = BuildHarness::new(width, height, 1);
+    harness
+        .world
+        .insert_resource(LogicRulesRes(Box::new(PermissiveRules)));
+    let mut state = LogicWorldState::new();
+    state.map_width = width;
+    state.map_height = height;
+    harness.world.insert_resource(state);
+    let processor = harness
+        .content()
+        .block_id("world-processor")
+        .context("world-processor content")?;
+    assert!(harness.place(4, 4, processor, 0, true));
+    let pe = harness.build_at(4, 4).context("processor entity")?;
+    assert!(harness.configure(4, 4, ConfigValue::Bytes(compress(code, &[]).into())));
+    Ok((harness, pe))
+}
+
+/// `logic_privileged_world` report.
+pub struct PrivilegedWorldReport {
+    /// Deterministic checksum.
+    pub checksum: String,
+    /// `rules.waves` after `setrule`.
+    pub waves: bool,
+    /// `rules.waveSpacing` after `setrule`.
+    pub wave_spacing: f32,
+    /// `rules.objectiveFlags` contains `captured`.
+    pub captured: bool,
+    /// `rules.mission`.
+    pub mission: String,
+    /// `getblock block` result key.
+    pub block_result: String,
+    /// Event counts by kind.
+    pub counts: Vec<(&'static str, usize)>,
+}
+
+/// Runs the privileged world-instruction scenario.
+#[allow(clippy::expect_used)]
+pub fn privileged_world(ticks: u64) -> Result<PrivilegedWorldReport> {
+    let code = "print \"missiontext\"\n\
+        message mission 3 @wait\n\
+        setrule waves false\n\
+        setrule waveSpacing 4 0 0 100 100\n\
+        setflag \"captured\" true\n\
+        getflag captured_flag \"captured\"\n\
+        setblock block @copper-wall 7 7 0 0\n\
+        getblock block block_result 6 6\n\
+        spawn @dagger 40 40 90 0 spawned true\n\
+        bullet bullet_result @dagger 0 40 40 0 0 null -1 1 1 -1 -1\n\
+        spawnwave 10 10 false\n\
+        effect warn 10 10 2 %ffaaff \"\"\n\
+        explosion 0 40 40 3 20 true true false true\n\
+        query circle unit 0 40 40 20 20\n\
+        fetch unitCount fetch_result 0 0 @conveyor\n\
+        playsound false @sfx-shoot 1 1 0 40 40 true\n\
+        playmusic \"game1\" true\n\
+        localeprint \"name\"\n\
+        set x 5\n\
+        sync x\n\
+        stop\n";
+    let (mut harness, pe) = world_processor_rig(code, 16, 16)?;
+    for _ in 0..ticks {
+        harness.tick();
+    }
+
+    let executor = &harness
+        .world
+        .get::<LogicBlockState>(pe)
+        .context("processor state")?
+        .executor;
+    let block_result = executor
+        .optional_var("block_result")
+        .and_then(|id| executor.arena.get(id).obj.clone())
+        .map(|obj| mind_core::logic::world::object_key(&obj))
+        .unwrap_or_default();
+
+    let state = harness
+        .world
+        .get_resource::<LogicWorldState>()
+        .context("world state")?;
+    let kinds = [
+        "setblock",
+        "spawn",
+        "bullet",
+        "spawnwave",
+        "effect",
+        "explosion",
+        "query",
+        "fetch",
+        "playsound",
+        "playmusic",
+        "localeprint",
+        "sync",
+    ];
+    let counts: Vec<(&'static str, usize)> = kinds
+        .iter()
+        .map(|kind| (*kind, state.count(kind)))
+        .collect();
+
+    let mut hasher = mind_core::determinism::Hasher::new();
+    hasher.write_u8(u8::from(state.rules.waves));
+    hasher.write_f32(state.rules.wave_spacing);
+    hasher.write_u8(u8::from(state.rules.objective_flags.contains("captured")));
+    hasher.write(state.rules.mission.clone().unwrap_or_default().as_bytes());
+    hasher.write(block_result.as_bytes());
+    for (kind, count) in &counts {
+        hasher.write(kind.as_bytes());
+        hasher.write_u64(*count as u64);
+    }
+    Ok(PrivilegedWorldReport {
+        checksum: hasher.finish().to_hex(),
+        waves: state.rules.waves,
+        wave_spacing: state.rules.wave_spacing,
+        captured: state.rules.objective_flags.contains("captured"),
+        mission: state.rules.mission.clone().unwrap_or_default(),
+        block_result,
+        counts,
+    })
+}
+
+/// Prints the privileged world scenario.
+fn run_privileged_world(ticks: u64, json: bool) -> Result<i32> {
+    let report = privileged_world(ticks)?;
+    let counts: serde_json::Map<String, serde_json::Value> = report
+        .counts
+        .iter()
+        .map(|(kind, count)| ((*kind).to_owned(), serde_json::json!(*count)))
+        .collect();
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "scenario": "logic_privileged_world",
+                "ticks": ticks,
+                "checksum": report.checksum,
+                "waves": report.waves,
+                "waveSpacing": report.wave_spacing,
+                "captured": report.captured,
+                "mission": report.mission,
+                "blockResult": report.block_result,
+                "counts": counts,
+            })
+        );
+    } else {
+        println!(
+            "logic_privileged_world: checksum={} waves={} captured={}",
+            report.checksum, report.waves, report.captured
+        );
+    }
+    Ok(0)
+}
+
+/// `logic_markers_smoke` report.
+pub struct MarkersSmokeReport {
+    /// Deterministic checksum.
+    pub checksum: String,
+    /// Marker count.
+    pub size: usize,
+    /// Marker 1 present.
+    pub has_one: bool,
+    /// World index vector contains marker 1.
+    pub world_visible: bool,
+    /// Point x (world pixels).
+    pub x: f32,
+    /// Point y (world pixels).
+    pub y: f32,
+    /// Point radius.
+    pub radius: f32,
+}
+
+/// Runs the markers scenario (plan 12 `MapMarkers`).
+#[allow(clippy::expect_used)]
+pub fn markers_smoke() -> Result<MarkersSmokeReport> {
+    let code = "makemarker shape 1 10 10 true\n\
+        setmarker pos 1 3 4 0\n\
+        setmarker radius 1 7 -1 -1\n\
+        setmarker world 1 1 -1 -1\n\
+        stop\n";
+    let (mut harness, _pe) = world_processor_rig(code, 16, 16)?;
+    for _ in 0..8 {
+        harness.tick();
+    }
+    let state = harness
+        .world
+        .get_resource::<LogicWorldState>()
+        .context("world state")?;
+    let has_one = state.markers.has(1);
+    let world_visible = state.markers.world_markers.contains(&1);
+    let (x, y, radius) = match state.markers.get(1) {
+        Some(mind_core::io::json::objectives::ObjectiveMarker::Shape(shape)) => {
+            (shape.pos.x, shape.pos.y, shape.radius)
+        }
+        _ => (0.0, 0.0, 0.0),
+    };
+    let mut hasher = mind_core::determinism::Hasher::new();
+    hasher.write_u64(state.markers.size() as u64);
+    hasher.write_u8(u8::from(has_one));
+    hasher.write_u8(u8::from(world_visible));
+    hasher.write_f32(x);
+    hasher.write_f32(y);
+    hasher.write_f32(radius);
+    Ok(MarkersSmokeReport {
+        checksum: hasher.finish().to_hex(),
+        size: state.markers.size(),
+        has_one,
+        world_visible,
+        x,
+        y,
+        radius,
+    })
+}
+
+/// Prints the markers scenario.
+fn run_markers_smoke(json: bool) -> Result<i32> {
+    let report = markers_smoke()?;
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "scenario": "logic_markers_smoke",
+                "checksum": report.checksum,
+                "size": report.size,
+                "hasOne": report.has_one,
+                "worldVisible": report.world_visible,
+                "x": report.x,
+                "y": report.y,
+                "radius": report.radius,
+            })
+        );
+    } else {
+        println!(
+            "logic_markers_smoke: checksum={} size={}",
+            report.checksum, report.size
+        );
+    }
+    Ok(0)
+}
+
+/// `logic_sync_event` report.
+pub struct SyncEventReport {
+    /// Deterministic checksum.
+    pub checksum: String,
+    /// `sync` event count.
+    pub events: usize,
+    /// First event variable name.
+    pub var_name: String,
+    /// First event object flag.
+    pub is_obj: bool,
+}
+
+/// Runs the `sync` throttle scenario (deviation 4: every 3 ticks).
+#[allow(clippy::expect_used)]
+pub fn sync_event(ticks: u64) -> Result<SyncEventReport> {
+    let code = "loop:\nop add x x 1\nsync x\njump loop always\n";
+    let (mut harness, _pe) = world_processor_rig(code, 8, 8)?;
+    for tick in 0..ticks {
+        if let Some(mut state) = harness.world.get_resource_mut::<LogicWorldState>() {
+            state.tick = tick;
+        }
+        harness.tick();
+    }
+    let state = harness
+        .world
+        .get_resource::<LogicWorldState>()
+        .context("world state")?;
+    let events = state.count("sync");
+    let (var_name, is_obj) = state
+        .events
+        .iter()
+        .find_map(|event| match event {
+            LogicWorldEvent::Sync(sync) => Some((sync.var_name.clone(), sync.is_obj)),
+            _ => None,
+        })
+        .unwrap_or_default();
+    let mut hasher = mind_core::determinism::Hasher::new();
+    hasher.write_u64(events as u64);
+    hasher.write(var_name.as_bytes());
+    hasher.write_u8(u8::from(is_obj));
+    Ok(SyncEventReport {
+        checksum: hasher.finish().to_hex(),
+        events,
+        var_name,
+        is_obj,
+    })
+}
+
+/// Prints the sync scenario.
+fn run_sync_event(ticks: u64, json: bool) -> Result<i32> {
+    let report = sync_event(ticks)?;
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "scenario": "logic_sync_event",
+                "ticks": ticks,
+                "checksum": report.checksum,
+                "events": report.events,
+                "varName": report.var_name,
+                "isObj": report.is_obj,
+            })
+        );
+    } else {
+        println!(
+            "logic_sync_event: checksum={} events={}",
+            report.checksum, report.events
+        );
     }
     Ok(0)
 }
@@ -914,6 +1251,39 @@ mod tests {
         assert!(gating.blocked);
         assert!(gating.installed);
         assert_eq!(gating.bind_count, 2);
+    }
+
+    #[test]
+    fn privileged_scenario_goldens() {
+        let world = privileged_world(10).expect("privileged_world");
+        assert_eq!(world.checksum, "90f42f956b9be89b");
+        assert!(!world.waves);
+        assert_eq!(world.wave_spacing, 240.0);
+        assert!(world.captured);
+        assert_eq!(world.mission, "missiontext");
+        assert_eq!(world.block_result, "content:block:0");
+        for (kind, count) in &world.counts {
+            if *kind == "sync" {
+                assert_eq!(*count, 0, "sync should not fire before tick 3");
+            } else {
+                assert_eq!(*count, 1, "expected one {kind} event");
+            }
+        }
+
+        let markers = markers_smoke().expect("markers_smoke");
+        assert_eq!(markers.checksum, "d6e1700a676796c7");
+        assert_eq!(markers.size, 1);
+        assert!(markers.has_one);
+        assert!(markers.world_visible);
+        assert_eq!(markers.x, 24.0);
+        assert_eq!(markers.y, 32.0);
+        assert_eq!(markers.radius, 7.0);
+
+        let sync = sync_event(13).expect("sync_event");
+        assert_eq!(sync.checksum, "072353be139f4d21");
+        assert_eq!(sync.events, 4);
+        assert_eq!(sync.var_name, "x");
+        assert!(!sync.is_obj);
     }
 
     #[test]

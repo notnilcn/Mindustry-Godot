@@ -519,10 +519,10 @@ impl BuildingBehavior for LogicBlockBehavior {
         value: ConfigValue,
     ) {
         let privileged = privileged_of(world, e);
-        let rules = super::DefaultLogicRules;
+        let accessible = super::accessible(privileged, super::rules_ref(world));
         match value {
             ConfigValue::Bytes(data) => {
-                if !super::accessible(privileged, &rules) {
+                if !accessible {
                     return;
                 }
                 if let Some(mut state) = world.entity_mut(e).take::<LogicBlockState>() {
@@ -531,7 +531,7 @@ impl BuildingBehavior for LogicBlockBehavior {
                 }
             }
             ConfigValue::String(tag) => {
-                if !super::accessible(privileged, &rules) || !privileged {
+                if !accessible || !privileged {
                     return;
                 }
                 if tag.len() < MAX_NAME_LENGTH
@@ -541,7 +541,7 @@ impl BuildingBehavior for LogicBlockBehavior {
                 }
             }
             ConfigValue::Number(number) => {
-                if !super::accessible(privileged, &rules) || !privileged {
+                if !accessible || !privileged {
                     return;
                 }
                 if let Some(mut state) = world.get_mut::<LogicBlockState>(e) {
@@ -549,7 +549,7 @@ impl BuildingBehavior for LogicBlockBehavior {
                 }
             }
             ConfigValue::Point2(x, y) => {
-                if !super::accessible(privileged, &rules) {
+                if !accessible {
                     return;
                 }
                 if let Some(target) = build_at(world, x, y)
@@ -560,7 +560,7 @@ impl BuildingBehavior for LogicBlockBehavior {
                 }
             }
             ConfigValue::Building(target) => {
-                if !super::accessible(privileged, &rules) {
+                if !accessible {
                     return;
                 }
                 if let Some(mut state) = world.entity_mut(e).take::<LogicBlockState>() {

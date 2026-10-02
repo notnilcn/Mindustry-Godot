@@ -13,7 +13,7 @@
 
 use indexmap::{IndexMap, IndexSet};
 
-use crate::content::{ContentRef, ContentType};
+use crate::content::{ContentRef, ContentRegistry, ContentType};
 use crate::logic::access::LAccess;
 use crate::logic::value::{LVar, LogicObject, VarArena};
 use crate::math::ArcRand;
@@ -53,6 +53,35 @@ pub struct VarEntry {
     pub icon: String,
     /// Privileged.
     pub privileged: bool,
+}
+
+/// Per-tick inputs to [`GlobalVars::update`] (`GlobalVars.update`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct GlobalUpdate {
+    /// `state.tick` (fixed 60 Hz).
+    pub tick: u64,
+    /// `state.wave`.
+    pub wave: i32,
+    /// `state.wavetime` (ticks).
+    pub wavetime: f32,
+    /// `world.width()`.
+    pub map_width: i32,
+    /// `world.height()`.
+    pub map_height: i32,
+    /// `net.server() || !net.active()`.
+    pub server: bool,
+    /// `net.client()`.
+    pub client: bool,
+    /// `player.locale()`.
+    pub client_locale: Option<String>,
+    /// `player.team().id`.
+    pub client_team: u8,
+    /// `mobile`.
+    pub client_mobile: bool,
+    /// `control.sound.isPlaying()`.
+    pub client_music_playing: bool,
+    /// `state.data.getAudioName(music.file)` or the file stem.
+    pub client_current_music: Option<String>,
 }
 
 /// `GlobalVars` — logic constant/variable table.
@@ -146,6 +175,29 @@ impl GlobalVars {
         self.put_num("@ctrlPlayer", CTRL_PLAYER as f64, false);
         self.put_num("@ctrlCommand", CTRL_COMMAND as f64, false);
 
+        // time / map state (mutable; `update` refreshes from sim time)
+        self.put_num("@time", 0.0, false);
+        self.put_num("@tick", 0.0, false);
+        self.put_num("@second", 0.0, false);
+        self.put_num("@minute", 0.0, false);
+        self.put_num("@waveNumber", 0.0, false);
+        self.put_num("@wave", 0.0, false);
+        self.put_num("@waveTime", 0.0, false);
+        self.put_num("@mapw", 0.0, false);
+        self.put_num("@maph", 0.0, false);
+        self.put_entry("@wait", None, true);
+
+        // network / client variables (privileged, desynced-client values)
+        self.put_num("@server", 1.0, true);
+        self.put_num("@client", 0.0, true);
+        self.put_entry("@clientLocale", None, true);
+        self.put_entry("@clientUnit", None, true);
+        self.put_entry("@clientName", None, true);
+        self.put_num("@clientTeam", 0.0, true);
+        self.put_num("@clientMobile", 0.0, true);
+        self.put_num("@clientMusicPlaying", 0.0, true);
+        self.put_entry("@clientCurrentMusic", None, true);
+
         // sensor constants
         for sensor in LAccess::ALL {
             let name = format!("@{}", sensor.name());
@@ -181,6 +233,123 @@ impl GlobalVars {
             let capitalized = capitalize(name);
             let key = format!("@color{capitalized}");
             self.put_num(&key, rgba_to_double_bits(*color), false);
+        }
+    }
+
+    /// Registers `@<name>` content constants (`GlobalVars.init` tail).
+    ///
+    /// Items/liquids/blocks/units/weathers register under `@<name>`; status
+    /// effects under `@status-<name>`; teams under `@<name>` by index. Blocks
+    /// that share an item name are skipped (upstream sand special-case). Sound
+    /// constants (`@sfx-*`) need plan 18's `SoundId` table and are omitted; the
+    /// `@<type>Count` constants are absent without `logicids.dat` (HLP §9).
+    pub fn init_content(&mut self, content: &ContentRegistry) {
+        for team in crate::game::team::Team::base_teams() {
+            let key = format!("@{}", team.name);
+            let mut var = LVar::new(&key);
+            var.constant = true;
+            var.is_obj = true;
+            var.obj = Some(LogicObject::Team(team.id));
+            self.cells.insert(key, var);
+        }
+        for type_ in [
+            ContentType::Item,
+            ContentType::Liquid,
+            ContentType::Block,
+            ContentType::Unit,
+            ContentType::Weather,
+        ] {
+            for entry in content.entries(type_) {
+                let Some(name) = entry.name else { continue };
+                if type_ == ContentType::Block
+                    && content.get_by_name(ContentType::Item, name).is_some()
+                {
+                    continue;
+                }
+                let key = format!("@{name}");
+                self.put_content(&key, type_, entry.id, false);
+            }
+        }
+        for entry in content.entries(ContentType::Status) {
+            let Some(name) = entry.name else { continue };
+            let key = format!("@status-{name}");
+            self.put_content(&key, ContentType::Status, entry.id, false);
+        }
+    }
+
+    /// Convenience: static constants plus content constants.
+    pub fn with_content(content: &ContentRegistry) -> Self {
+        let mut globals = Self::new();
+        globals.init_content(content);
+        globals
+    }
+
+    /// Registers a content constant object under `name`.
+    fn put_content(&mut self, name: &str, type_: ContentType, id: u16, privileged: bool) {
+        let mut var = LVar::new(name);
+        var.constant = true;
+        var.is_obj = true;
+        var.obj = Some(LogicObject::Content(ContentRef::new(type_, id)));
+        self.cells.insert(name.to_owned(), var);
+        if privileged {
+            self.privileged_names.insert(name.to_owned());
+        }
+    }
+
+    /// `GlobalVars.update` — refreshes the tick/map/network/client variables.
+    ///
+    /// Purely a table update: executors copy constants at `load` time, so a
+    /// running VM does **not** observe this until the global-arena (`VarRef::
+    /// Global`) refactor lands (plan 13 §3.2 deviation 2, M7 follow-up).
+    pub fn update(&mut self, update: &GlobalUpdate) {
+        self.set_num_raw("@time", update.tick as f64 / 60.0 * 1000.0);
+        self.set_num_raw("@tick", update.tick as f64);
+        self.set_num_raw("@second", update.tick as f64 / 60.0);
+        self.set_num_raw("@minute", update.tick as f64 / 3600.0);
+        self.set_num_raw("@waveNumber", update.wave as f64);
+        self.set_num_raw("@wave", update.wave as f64);
+        self.set_num_raw("@waveTime", update.wavetime as f64 / 60.0);
+        self.set_num_raw("@mapw", update.map_width as f64);
+        self.set_num_raw("@maph", update.map_height as f64);
+        self.set_num_raw("@server", if update.server { 1.0 } else { 0.0 });
+        self.set_num_raw("@client", if update.client { 1.0 } else { 0.0 });
+        self.set_obj_raw(
+            "@clientLocale",
+            update.client_locale.clone().map(LogicObject::Str),
+        );
+        self.set_num_raw("@clientTeam", update.client_team as f64);
+        self.set_num_raw(
+            "@clientMobile",
+            if update.client_mobile { 1.0 } else { 0.0 },
+        );
+        self.set_num_raw(
+            "@clientMusicPlaying",
+            if update.client_music_playing {
+                1.0
+            } else {
+                0.0
+            },
+        );
+        self.set_obj_raw(
+            "@clientCurrentMusic",
+            update.client_current_music.clone().map(LogicObject::Str),
+        );
+    }
+
+    /// Sets a numeric constant's raw value regardless of the `constant` flag.
+    fn set_num_raw(&mut self, name: &str, value: f64) {
+        if let Some(cell) = self.cells.get_mut(name) {
+            cell.is_obj = false;
+            cell.obj = None;
+            cell.num = value;
+        }
+    }
+
+    /// Sets an object constant's raw value regardless of the `constant` flag.
+    fn set_obj_raw(&mut self, name: &str, value: Option<LogicObject>) {
+        if let Some(cell) = self.cells.get_mut(name) {
+            cell.is_obj = true;
+            cell.obj = value;
         }
     }
 
@@ -324,6 +493,50 @@ mod tests {
         let red = named_color("red").unwrap();
         assert_eq!(red, (229, 84, 84, 255));
         assert_eq!(rgba_to_double_bits(red), f64::from_bits(0xe5_54_54_ff_u64));
+    }
+
+    #[test]
+    fn content_constants_register() {
+        use crate::world::harness::BuildHarness;
+        let content = BuildHarness::load_content();
+        let g = GlobalVars::with_content(&content);
+        let copper = g.get("@copper", false).expect("@copper");
+        assert!(
+            matches!(copper.obj, Some(LogicObject::Content(c)) if c.type_ == ContentType::Item)
+        );
+        assert!(g.get("@dagger", false).is_some());
+        assert!(g.get("@rain", false).is_some());
+        assert!(g.get("@status-wet", false).is_some());
+        assert!(g.get("@sharded", false).is_some());
+        // Deviation 9: no `@<type>Count` constants without `logicids.dat`.
+        assert!(g.get("@itemCount", false).is_none());
+    }
+
+    #[test]
+    fn update_math_matches_upstream() {
+        let mut g = GlobalVars::new();
+        let update = GlobalUpdate {
+            tick: 180,
+            wave: 4,
+            wavetime: 300.0,
+            map_width: 16,
+            map_height: 24,
+            server: true,
+            ..GlobalUpdate::default()
+        };
+        g.update(&update);
+        assert_eq!(g.get("@time", false).unwrap().num, 3000.0);
+        assert_eq!(g.get("@tick", false).unwrap().num, 180.0);
+        assert_eq!(g.get("@second", false).unwrap().num, 3.0);
+        assert_eq!(g.get("@minute", false).unwrap().num, 0.05);
+        assert_eq!(g.get("@waveNumber", false).unwrap().num, 4.0);
+        assert_eq!(g.get("@wave", false).unwrap().num, 4.0);
+        assert_eq!(g.get("@waveTime", false).unwrap().num, 5.0);
+        assert_eq!(g.get("@mapw", false).unwrap().num, 16.0);
+        assert_eq!(g.get("@maph", false).unwrap().num, 24.0);
+        // Privileged fallback: non-privileged `@server` resolves to null.
+        assert_eq!(g.get("@server", true).unwrap().num, 1.0);
+        assert_eq!(g.get("@server", false).unwrap().obj, None);
     }
 
     #[test]

@@ -64,7 +64,7 @@ impl BuildingBehavior for MessageBehavior {
         let ConfigValue::String(text) = value else {
             return;
         };
-        if !super::accessible(def.privileged, &super::DefaultLogicRules) {
+        if !super::accessible(def.privileged, super::rules_ref(world)) {
             return;
         }
         if text.chars().count() > def.max_text.max(0) as usize {

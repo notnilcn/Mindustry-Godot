@@ -199,9 +199,9 @@ impl LVar {
         self.num() as f32
     }
 
-    /// `LVar.numfWorld()`.
+    /// `LVar.numfWorld()` — converts the mlog tile value to world pixels.
     pub fn numf_world(&self) -> f32 {
-        unconv(self.numf())
+        conv(self.numf())
     }
 
     /// `LVar.numfOrNan()`.

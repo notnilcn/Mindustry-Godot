@@ -11,6 +11,88 @@
 use crate::game::rules::Rules;
 use crate::logic::statement::LogicRule;
 use crate::logic::value::LVar;
+use crate::logic::world::{LogicWorldState, color_from_double};
+
+/// Applies one `setrule` entry against the live world state.
+///
+/// Handles the state-backed rules (`wave`, `currentWaveTime`, `mapArea`,
+/// `lighting`, `ambientLight`, `unitLight`, `musicVolume`) and delegates the
+/// remaining pure-`Rules` fields to [`apply_to_rules`]. `ban`/`unban` still
+/// return `false`: they key on content *names*, and the VM has only content ids
+/// (no registry); the owning host applies the ban from the emitted instruction.
+pub fn apply_to_state(
+    state: &mut LogicWorldState,
+    rule: LogicRule,
+    value: &LVar,
+    p1: &LVar,
+    p2: &LVar,
+    p3: &LVar,
+    p4: &LVar,
+) -> bool {
+    let numf = value.numf();
+    match rule {
+        LogicRule::Wave => state.wave = value.numi().max(1),
+        LogicRule::CurrentWaveTime => state.wavetime = (numf * 60.0).max(0.0),
+        LogicRule::MapArea => {
+            check_map_area(state, p1.numi(), p2.numi(), p3.numi(), p4.numi());
+            return true;
+        }
+        LogicRule::Lighting => state.rules.lighting = value.as_bool(),
+        LogicRule::AmbientLight => state.rules.ambient_light = color_from_double(value.num()),
+        LogicRule::UnitLight => state.rules.unit_light = value.as_bool(),
+        LogicRule::MusicVolume => state.rules.music_volume = numf.clamp(0.0, 1.0),
+        LogicRule::Ban | LogicRule::Unban => return false,
+        _ => return apply_to_rules(&mut state.rules, rule, value, p1, p2, p3, p4),
+    }
+    true
+}
+
+/// `LExecutor.checkMapArea(x, y, w, h, set)` map-area clamp/enable.
+///
+/// The renderer darkness update and `world.checkMapArea` are plan 06/16; this
+/// owns the rule bookkeeping (disable when the whole map is selected).
+fn check_map_area(state: &mut LogicWorldState, x: i32, y: i32, w: i32, h: i32) {
+    let x = x.max(0);
+    let y = y.max(0);
+    let w = if state.map_width > 0 {
+        w.min(state.map_width)
+    } else {
+        w
+    };
+    let h = if state.map_height > 0 {
+        h.min(state.map_height)
+    } else {
+        h
+    };
+    let full = x == 0
+        && y == 0
+        && (state.map_width <= 0 || w == state.map_width)
+        && (state.map_height <= 0 || h == state.map_height);
+
+    if state.rules.limit_map_area {
+        if state.rules.limit_x == x
+            && state.rules.limit_y == y
+            && state.rules.limit_width == w
+            && state.rules.limit_height == h
+        {
+            return;
+        }
+        if full {
+            // Covers the whole map: disable the rule.
+            state.rules.limit_map_area = false;
+            return;
+        }
+    } else if full {
+        // Already disabled, nothing to change.
+        return;
+    }
+
+    state.rules.limit_map_area = true;
+    state.rules.limit_x = x;
+    state.rules.limit_y = y;
+    state.rules.limit_width = w;
+    state.rules.limit_height = h;
+}
 
 /// Applies one `setrule` entry. Returns whether the rule was applied here.
 pub fn apply_to_rules(
@@ -112,6 +194,51 @@ mod tests {
             &n(0.0),
         ));
         assert!(rules.waves);
+    }
+
+    #[test]
+    fn state_backed_rules_apply() {
+        let mut state = LogicWorldState::new();
+        assert!(apply_to_state(
+            &mut state,
+            LogicRule::Wave,
+            &n(7.0),
+            &n(0.0),
+            &n(0.0),
+            &n(0.0),
+            &n(0.0),
+        ));
+        assert_eq!(state.wave, 7);
+        assert!(apply_to_state(
+            &mut state,
+            LogicRule::CurrentWaveTime,
+            &n(2.0),
+            &n(0.0),
+            &n(0.0),
+            &n(0.0),
+            &n(0.0),
+        ));
+        assert_eq!(state.wavetime, 120.0);
+        assert!(apply_to_state(
+            &mut state,
+            LogicRule::Lighting,
+            &n(1.0),
+            &n(0.0),
+            &n(0.0),
+            &n(0.0),
+            &n(0.0),
+        ));
+        assert!(state.rules.lighting);
+        // `ban`/`unban` key on content names and stay unapplied.
+        assert!(!apply_to_state(
+            &mut state,
+            LogicRule::Ban,
+            &n(0.0),
+            &n(0.0),
+            &n(0.0),
+            &n(0.0),
+            &n(0.0),
+        ));
     }
 
     #[test]

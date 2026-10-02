@@ -18,9 +18,13 @@ use indexmap::IndexSet;
 
 use crate::logic::access::LAccess;
 use crate::logic::assembler::Assembler;
-use crate::logic::enums::{BlockFlag, LLocate, LUnitControl, RadarSort, RadarTarget};
+use crate::logic::enums::{
+    BlockFlag, CutsceneAction, FetchType, LLocate, LMarkerControl, LUnitControl, MessageType,
+    QueryShape, QueryType, RadarSort, RadarTarget, TileLayer,
+};
+use crate::logic::fx::EffectEntry;
 use crate::logic::ops::{ConditionOp, LogicOp};
-use crate::logic::statement::Statement;
+use crate::logic::statement::{LogicRule, Statement};
 use crate::logic::value::{LVar, LogicObject, VarArena, VarId, VarRef};
 use crate::math::ArcRand;
 
@@ -279,6 +283,300 @@ pub enum Instruction {
         out_found: VarRef,
         /// Output building.
         out_build: VarRef,
+    },
+    /// `QueryI` (privileged).
+    Query {
+        /// Query shape.
+        shape: QueryShape,
+        /// Query type.
+        type_: QueryType,
+        /// Team filter.
+        team: VarRef,
+        /// World x.
+        x: VarRef,
+        /// World y.
+        y: VarRef,
+        /// Width/radius.
+        w: VarRef,
+        /// Height.
+        h: VarRef,
+    },
+    /// `FetchI` (privileged).
+    Fetch {
+        /// Fetch kind.
+        type_: FetchType,
+        /// Output.
+        result: VarRef,
+        /// Team.
+        team: VarRef,
+        /// Index.
+        index: VarRef,
+        /// Content filter.
+        extra: VarRef,
+    },
+    /// `GetBlockI` (privileged).
+    GetBlock {
+        /// Layer.
+        layer: TileLayer,
+        /// Output.
+        result: VarRef,
+        /// Tile x.
+        x: VarRef,
+        /// Tile y.
+        y: VarRef,
+    },
+    /// `SetBlockI` (privileged, host-gated).
+    SetBlock {
+        /// Layer.
+        layer: TileLayer,
+        /// Target block.
+        block: VarRef,
+        /// Tile x.
+        x: VarRef,
+        /// Tile y.
+        y: VarRef,
+        /// Team.
+        team: VarRef,
+        /// Rotation.
+        rotation: VarRef,
+    },
+    /// `SpawnUnitI` (privileged, host-gated).
+    SpawnUnit {
+        /// Unit type.
+        type_: VarRef,
+        /// World x.
+        x: VarRef,
+        /// World y.
+        y: VarRef,
+        /// Facing degrees.
+        rotation: VarRef,
+        /// Team.
+        team: VarRef,
+        /// Output unit.
+        result: VarRef,
+        /// Spawn-effect toggle.
+        effect: VarRef,
+    },
+    /// `SpawnBulletI` (privileged).
+    SpawnBullet {
+        /// Output bullet.
+        result: VarRef,
+        /// Bullet source.
+        from: VarRef,
+        /// Weapon/ammo selector.
+        index: VarRef,
+        /// World x.
+        x: VarRef,
+        /// World y.
+        y: VarRef,
+        /// Facing degrees.
+        rotation: VarRef,
+        /// Team.
+        team: VarRef,
+        /// Owner.
+        owner: VarRef,
+        /// Damage override.
+        damage: VarRef,
+        /// Velocity scale.
+        velocity_scl: VarRef,
+        /// Lifetime scale.
+        life_scl: VarRef,
+        /// Aim x.
+        aim_x: VarRef,
+        /// Aim y.
+        aim_y: VarRef,
+    },
+    /// `ApplyEffectI` (privileged, host-gated).
+    ApplyStatus {
+        /// Clear instead of apply.
+        clear: bool,
+        /// Status effect.
+        effect: VarRef,
+        /// Target unit.
+        unit: VarRef,
+        /// Duration seconds.
+        duration: VarRef,
+    },
+    /// `SenseWeatherI` (privileged).
+    WeatherSense {
+        /// Output flag.
+        to: VarRef,
+        /// Weather content.
+        weather: VarRef,
+    },
+    /// `SetWeatherI` (privileged).
+    WeatherSet {
+        /// Weather content.
+        weather: VarRef,
+        /// Desired state.
+        state: VarRef,
+    },
+    /// `SpawnWaveI` (privileged, host-gated).
+    SpawnWave {
+        /// Tile x.
+        x: VarRef,
+        /// Tile y.
+        y: VarRef,
+        /// Natural (skip-wave) toggle.
+        natural: VarRef,
+    },
+    /// `SetRuleI` (privileged).
+    SetRule {
+        /// Rule.
+        rule: LogicRule,
+        /// Value.
+        value: VarRef,
+        /// Param 1.
+        p1: VarRef,
+        /// Param 2.
+        p2: VarRef,
+        /// Param 3.
+        p3: VarRef,
+        /// Param 4.
+        p4: VarRef,
+    },
+    /// `FlushMessageI` (privileged).
+    FlushMessage {
+        /// Message kind.
+        type_: MessageType,
+        /// Duration seconds.
+        duration: VarRef,
+        /// Success output (`1`/`0`).
+        out_success: VarRef,
+    },
+    /// `CutsceneI` (privileged).
+    Cutscene {
+        /// Action.
+        action: CutsceneAction,
+        /// Param 1.
+        p1: VarRef,
+        /// Param 2.
+        p2: VarRef,
+        /// Param 3.
+        p3: VarRef,
+        /// Param 4.
+        p4: VarRef,
+    },
+    /// `EffectI` (privileged).
+    Effect {
+        /// Resolved `LogicFx` entry (`None` = no-op).
+        effect: Option<EffectEntry>,
+        /// World x.
+        x: VarRef,
+        /// World y.
+        y: VarRef,
+        /// Rotation.
+        rotation: VarRef,
+        /// Color bits.
+        color: VarRef,
+        /// Data object.
+        data: VarRef,
+    },
+    /// `ExplosionI` (privileged, host-gated).
+    Explosion {
+        /// Team.
+        team: VarRef,
+        /// World x.
+        x: VarRef,
+        /// World y.
+        y: VarRef,
+        /// Radius.
+        radius: VarRef,
+        /// Damage.
+        damage: VarRef,
+        /// Air toggle.
+        air: VarRef,
+        /// Ground toggle.
+        ground: VarRef,
+        /// Pierce toggle.
+        pierce: VarRef,
+        /// Effect toggle.
+        effect: VarRef,
+    },
+    /// `GetFlagI` (privileged).
+    GetFlag {
+        /// Output flag.
+        result: VarRef,
+        /// Flag key.
+        flag: VarRef,
+    },
+    /// `SetFlagI` (privileged).
+    SetFlag {
+        /// Flag key.
+        flag: VarRef,
+        /// Value.
+        value: VarRef,
+    },
+    /// `SetMarkerI` (privileged).
+    SetMarker {
+        /// Control.
+        type_: LMarkerControl,
+        /// Marker id.
+        id: VarRef,
+        /// Param 1.
+        p1: VarRef,
+        /// Param 2.
+        p2: VarRef,
+        /// Param 3.
+        p3: VarRef,
+    },
+    /// `MakeMarkerI` (privileged).
+    MakeMarker {
+        /// Marker type name (compile-time string).
+        type_: String,
+        /// Marker id.
+        id: VarRef,
+        /// Tile x.
+        x: VarRef,
+        /// Tile y.
+        y: VarRef,
+        /// Replace toggle.
+        replace: VarRef,
+    },
+    /// `PlaySoundI` (privileged).
+    PlaySound {
+        /// Positional toggle.
+        positional: bool,
+        /// Sound id.
+        id: VarRef,
+        /// Volume.
+        volume: VarRef,
+        /// Pitch.
+        pitch: VarRef,
+        /// Pan.
+        pan: VarRef,
+        /// World x.
+        x: VarRef,
+        /// World y.
+        y: VarRef,
+        /// Limit toggle.
+        limit: VarRef,
+    },
+    /// `PlayMusicI` (privileged).
+    PlayMusic {
+        /// Music name.
+        name: VarRef,
+        /// Interrupt toggle.
+        interrupt: VarRef,
+    },
+    /// `LocalePrintI` (privileged).
+    LocalePrint {
+        /// Key.
+        name: VarRef,
+    },
+    /// `SyncI` (privileged).
+    Sync {
+        /// Variable.
+        variable: VarRef,
+    },
+    /// `ClientDataI` (privileged, gated by `allow_logic_data` at build).
+    ClientData {
+        /// Channel.
+        channel: VarRef,
+        /// Value.
+        value: VarRef,
+        /// Reliable toggle.
+        reliable: VarRef,
     },
 }
 
@@ -621,6 +919,233 @@ impl Instruction {
                 set_output_num(exec, *out_found, 0.0);
                 set_output_obj(exec, *out_build, None);
             }
+            Instruction::Query {
+                shape,
+                type_,
+                team,
+                x,
+                y,
+                w,
+                h,
+            } => {
+                crate::logic::world::run_query(exec, world, *shape, *type_, *team, *x, *y, *w, *h);
+            }
+            Instruction::Fetch {
+                type_,
+                result,
+                team,
+                index,
+                extra,
+            } => {
+                crate::logic::world::run_fetch(exec, world, *type_, *result, *team, *index, *extra);
+            }
+            Instruction::GetBlock {
+                layer,
+                result,
+                x,
+                y,
+            } => {
+                crate::logic::world::run_get_block(exec, world, *layer, *result, *x, *y);
+            }
+            Instruction::SetBlock {
+                layer,
+                block,
+                x,
+                y,
+                team,
+                rotation,
+            } => {
+                crate::logic::world::run_set_block(
+                    exec, world, *layer, *block, *x, *y, *team, *rotation,
+                );
+            }
+            Instruction::SpawnUnit {
+                type_,
+                x,
+                y,
+                rotation,
+                team,
+                result,
+                effect,
+            } => {
+                crate::logic::world::run_spawn_unit(
+                    exec, world, *type_, *x, *y, *rotation, *team, *result, *effect,
+                );
+            }
+            Instruction::SpawnBullet {
+                result,
+                from,
+                index,
+                x,
+                y,
+                rotation,
+                team,
+                owner,
+                damage,
+                velocity_scl,
+                life_scl,
+                aim_x,
+                aim_y,
+            } => {
+                crate::logic::world::run_spawn_bullet(
+                    exec,
+                    world,
+                    *result,
+                    *from,
+                    *index,
+                    *x,
+                    *y,
+                    *rotation,
+                    *team,
+                    *owner,
+                    *damage,
+                    *velocity_scl,
+                    *life_scl,
+                    *aim_x,
+                    *aim_y,
+                );
+            }
+            Instruction::ApplyStatus {
+                clear,
+                effect,
+                unit,
+                duration,
+            } => {
+                crate::logic::world::run_apply_status(
+                    exec, world, *clear, *effect, *unit, *duration,
+                );
+            }
+            Instruction::WeatherSense { to, weather } => {
+                crate::logic::world::run_weather_sense(exec, world, *to, *weather);
+            }
+            Instruction::WeatherSet { weather, state } => {
+                crate::logic::world::run_weather_set(exec, world, *weather, *state);
+            }
+            Instruction::SpawnWave { x, y, natural } => {
+                crate::logic::world::run_spawn_wave(exec, world, *x, *y, *natural);
+            }
+            Instruction::SetRule {
+                rule,
+                value,
+                p1,
+                p2,
+                p3,
+                p4,
+            } => {
+                crate::logic::world::run_set_rule(exec, world, *rule, *value, *p1, *p2, *p3, *p4);
+            }
+            Instruction::FlushMessage {
+                type_,
+                duration,
+                out_success,
+            } => {
+                crate::logic::world::run_flush_message(
+                    exec,
+                    world,
+                    *type_,
+                    *duration,
+                    *out_success,
+                );
+            }
+            Instruction::Cutscene {
+                action,
+                p1,
+                p2,
+                p3,
+                p4,
+            } => {
+                crate::logic::world::run_cutscene(exec, world, *action, *p1, *p2, *p3, *p4);
+            }
+            Instruction::Effect {
+                effect,
+                x,
+                y,
+                rotation,
+                color,
+                data,
+            } => {
+                crate::logic::world::run_effect(
+                    exec, world, *effect, *x, *y, *rotation, *color, *data,
+                );
+            }
+            Instruction::Explosion {
+                team,
+                x,
+                y,
+                radius,
+                damage,
+                air,
+                ground,
+                pierce,
+                effect,
+            } => {
+                crate::logic::world::run_explosion(
+                    exec, world, *team, *x, *y, *radius, *damage, *air, *ground, *pierce, *effect,
+                );
+            }
+            Instruction::GetFlag { result, flag } => {
+                crate::logic::world::run_get_flag(exec, world, *result, *flag);
+            }
+            Instruction::SetFlag { flag, value } => {
+                crate::logic::world::run_set_flag(exec, world, *flag, *value);
+            }
+            Instruction::SetMarker {
+                type_,
+                id,
+                p1,
+                p2,
+                p3,
+            } => {
+                crate::logic::world::run_set_marker(exec, world, *type_, *id, *p1, *p2, *p3);
+            }
+            Instruction::MakeMarker {
+                type_,
+                id,
+                x,
+                y,
+                replace,
+            } => {
+                crate::logic::world::run_make_marker(exec, world, type_, *id, *x, *y, *replace);
+            }
+            Instruction::PlaySound {
+                positional,
+                id,
+                volume,
+                pitch,
+                pan,
+                x,
+                y,
+                limit,
+            } => {
+                crate::logic::world::run_play_sound(
+                    exec,
+                    world,
+                    *positional,
+                    *id,
+                    *volume,
+                    *pitch,
+                    *pan,
+                    *x,
+                    *y,
+                    *limit,
+                );
+            }
+            Instruction::PlayMusic { name, interrupt } => {
+                crate::logic::world::run_play_music(exec, world, *name, *interrupt);
+            }
+            Instruction::LocalePrint { name } => {
+                crate::logic::world::run_locale_print(exec, world, *name);
+            }
+            Instruction::Sync { variable } => {
+                crate::logic::world::run_sync(exec, world, *variable);
+            }
+            Instruction::ClientData {
+                channel,
+                value,
+                reliable,
+            } => {
+                crate::logic::world::run_client_data(exec, world, *channel, *value, *reliable);
+            }
         }
     }
 }
@@ -735,6 +1260,8 @@ pub struct Executor {
     pub link_ids: IndexSet<i32>,
     /// Per-unit-type binding cursor (`LExecutor.binds`).
     pub binds: Vec<u32>,
+    /// `@queries` result arenas (deviation 3); index 0 is the privileged arena.
+    pub queries: Vec<Vec<LogicObject>>,
 }
 
 impl Default for Executor {
@@ -768,6 +1295,7 @@ impl Executor {
             links: Vec::new(),
             link_ids: IndexSet::new(),
             binds: Vec::new(),
+            queries: Vec::new(),
         }
     }
 
@@ -786,6 +1314,8 @@ impl Executor {
         self.text_buffer.clear();
         self.graphics_buffer.clear();
         self.binds.clear();
+        self.queries.clear();
+        self.queries.push(Vec::new());
 
         // Keep non-constant vars plus link constants (names not starting with `_`/`@`).
         self.var_ids = self
@@ -812,19 +1342,23 @@ impl Executor {
         let ipt_value = self.build_ipt as f64;
         self.ipt = self.arena.put_num_const("@ipt", ipt_value);
         if self.privileged {
-            self.query_result = Some(self.arena.put_num_const("@queries", 0.0));
+            self.query_result = Some(
+                self.arena
+                    .put_obj_const("@queries", Some(LogicObject::Query(0))),
+            );
         }
     }
 
-    fn is_constant(&self, id: VarId) -> bool {
+    /// Whether a variable id is constant (`LVar.constant`).
+    pub(crate) fn is_constant(&self, id: VarId) -> bool {
         self.arena.get(id).constant
     }
 
-    fn set_num(&mut self, id: VarId, value: f64) {
+    pub(crate) fn set_num(&mut self, id: VarId, value: f64) {
         self.arena.get_mut(id).set_num(value);
     }
 
-    fn set_obj(&mut self, id: VarId, value: Option<LogicObject>) {
+    pub(crate) fn set_obj(&mut self, id: VarId, value: Option<LogicObject>) {
         self.arena.get_mut(id).set_obj(value);
     }
 
@@ -1216,8 +1750,279 @@ pub fn build_statement(statement: &Statement, asm: &mut Assembler) -> Option<Ins
             out_found: asm.var(out_found),
             out_build: asm.var(out_build),
         },
-        // Later-milestone instructions compile to a no-op for now so program
-        // structure (indices/jumps) is preserved.
+        Statement::Query {
+            shape,
+            type_,
+            team,
+            x,
+            y,
+            w,
+            h,
+        } => Instruction::Query {
+            shape: *shape,
+            type_: *type_,
+            team: asm.var(team),
+            x: asm.var(x),
+            y: asm.var(y),
+            w: asm.var(w),
+            h: asm.var(h),
+        },
+        Statement::Fetch {
+            type_,
+            result,
+            team,
+            index,
+            extra,
+        } => Instruction::Fetch {
+            type_: *type_,
+            result: asm.var(result),
+            team: asm.var(team),
+            index: asm.var(index),
+            extra: asm.var(extra),
+        },
+        Statement::GetBlock {
+            layer,
+            result,
+            x,
+            y,
+        } => Instruction::GetBlock {
+            layer: *layer,
+            result: asm.var(result),
+            x: asm.var(x),
+            y: asm.var(y),
+        },
+        Statement::SetBlock {
+            layer,
+            block,
+            x,
+            y,
+            team,
+            rotation,
+        } => Instruction::SetBlock {
+            layer: *layer,
+            block: asm.var(block),
+            x: asm.var(x),
+            y: asm.var(y),
+            team: asm.var(team),
+            rotation: asm.var(rotation),
+        },
+        Statement::SpawnUnit {
+            type_,
+            x,
+            y,
+            rotation,
+            team,
+            result,
+            effect,
+        } => Instruction::SpawnUnit {
+            type_: asm.var(type_),
+            x: asm.var(x),
+            y: asm.var(y),
+            rotation: asm.var(rotation),
+            team: asm.var(team),
+            result: asm.var(result),
+            effect: asm.var(effect),
+        },
+        Statement::SpawnBullet {
+            result,
+            from,
+            index,
+            x,
+            y,
+            rotation,
+            team,
+            owner,
+            damage,
+            velocity_scl,
+            life_scl,
+            aim_x,
+            aim_y,
+        } => Instruction::SpawnBullet {
+            result: asm.var(result),
+            from: asm.var(from),
+            index: asm.var(index),
+            x: asm.var(x),
+            y: asm.var(y),
+            rotation: asm.var(rotation),
+            team: asm.var(team),
+            owner: asm.var(owner),
+            damage: asm.var(damage),
+            velocity_scl: asm.var(velocity_scl),
+            life_scl: asm.var(life_scl),
+            aim_x: asm.var(aim_x),
+            aim_y: asm.var(aim_y),
+        },
+        Statement::ApplyStatus {
+            clear,
+            effect,
+            unit,
+            duration,
+        } => Instruction::ApplyStatus {
+            clear: *clear,
+            effect: asm.var(effect),
+            unit: asm.var(unit),
+            duration: asm.var(duration),
+        },
+        Statement::WeatherSense { to, weather } => Instruction::WeatherSense {
+            to: asm.var(to),
+            weather: asm.var(weather),
+        },
+        Statement::WeatherSet { weather, state } => Instruction::WeatherSet {
+            weather: asm.var(weather),
+            state: asm.var(state),
+        },
+        Statement::SpawnWave { x, y, natural } => Instruction::SpawnWave {
+            x: asm.var(x),
+            y: asm.var(y),
+            natural: asm.var(natural),
+        },
+        Statement::SetRule {
+            rule,
+            value,
+            p1,
+            p2,
+            p3,
+            p4,
+        } => Instruction::SetRule {
+            rule: *rule,
+            value: asm.var(value),
+            p1: asm.var(p1),
+            p2: asm.var(p2),
+            p3: asm.var(p3),
+            p4: asm.var(p4),
+        },
+        Statement::FlushMessage {
+            type_,
+            duration,
+            out_success,
+        } => Instruction::FlushMessage {
+            type_: *type_,
+            duration: asm.var(duration),
+            out_success: asm.var(out_success),
+        },
+        Statement::Cutscene {
+            action,
+            p1,
+            p2,
+            p3,
+            p4,
+        } => Instruction::Cutscene {
+            action: *action,
+            p1: asm.var(p1),
+            p2: asm.var(p2),
+            p3: asm.var(p3),
+            p4: asm.var(p4),
+        },
+        Statement::Effect {
+            type_,
+            x,
+            y,
+            sizerot,
+            color,
+            data,
+        } => Instruction::Effect {
+            effect: crate::logic::fx::get(type_).copied(),
+            x: asm.var(x),
+            y: asm.var(y),
+            rotation: asm.var(sizerot),
+            color: asm.var(color),
+            data: asm.var(data),
+        },
+        Statement::Explosion {
+            team,
+            x,
+            y,
+            radius,
+            damage,
+            air,
+            ground,
+            pierce,
+            effect,
+        } => Instruction::Explosion {
+            team: asm.var(team),
+            x: asm.var(x),
+            y: asm.var(y),
+            radius: asm.var(radius),
+            damage: asm.var(damage),
+            air: asm.var(air),
+            ground: asm.var(ground),
+            pierce: asm.var(pierce),
+            effect: asm.var(effect),
+        },
+        Statement::GetFlag { result, flag } => Instruction::GetFlag {
+            result: asm.var(result),
+            flag: asm.var(flag),
+        },
+        Statement::SetFlag { flag, value } => Instruction::SetFlag {
+            flag: asm.var(flag),
+            value: asm.var(value),
+        },
+        Statement::SetMarker {
+            type_,
+            id,
+            p1,
+            p2,
+            p3,
+        } => Instruction::SetMarker {
+            type_: *type_,
+            id: asm.var(id),
+            p1: asm.var(p1),
+            p2: asm.var(p2),
+            p3: asm.var(p3),
+        },
+        Statement::MakeMarker {
+            type_,
+            id,
+            x,
+            y,
+            replace,
+        } => Instruction::MakeMarker {
+            type_: type_.clone(),
+            id: asm.var(id),
+            x: asm.var(x),
+            y: asm.var(y),
+            replace: asm.var(replace),
+        },
+        Statement::PlaySound {
+            positional,
+            id,
+            volume,
+            pitch,
+            pan,
+            x,
+            y,
+            limit,
+        } => Instruction::PlaySound {
+            positional: *positional,
+            id: asm.var(id),
+            volume: asm.var(volume),
+            pitch: asm.var(pitch),
+            pan: asm.var(pan),
+            x: asm.var(x),
+            y: asm.var(y),
+            limit: asm.var(limit),
+        },
+        Statement::PlayMusic { name, interrupt } => Instruction::PlayMusic {
+            name: asm.var(name),
+            interrupt: asm.var(interrupt),
+        },
+        Statement::LocalePrint { value } => Instruction::LocalePrint {
+            name: asm.var(value),
+        },
+        Statement::Sync { variable } => Instruction::Sync {
+            variable: asm.var(variable),
+        },
+        Statement::ClientData {
+            channel,
+            value,
+            reliable,
+        } => Instruction::ClientData {
+            channel: asm.var(channel),
+            value: asm.var(value),
+            reliable: asm.var(reliable),
+        },
+        // Remaining unregistered/unbuilt statements compile to a no-op so
+        // program structure (indices/jumps) is preserved.
         _ => Instruction::Noop,
     })
 }
