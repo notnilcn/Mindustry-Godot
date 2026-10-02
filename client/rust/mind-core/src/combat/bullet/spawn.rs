@@ -98,8 +98,36 @@ pub fn create(
         spawn.damage
     } * spawn.damage_multiplier;
 
-    let speed = def.speed * spawn.velocity_scl;
-    // Deterministic inaccuracy from the combat stream (view-only angle jitter
+    // `BulletType.create`: angle offset, random offset, create chance.
+    let mut angle = spawn.angle + def.angle_offset;
+    if def.random_angle_offset != 0.0 {
+        angle += rng.range(
+            crate::determinism::RngStream::Sim,
+            -def.random_angle_offset,
+            def.random_angle_offset,
+        );
+    }
+    if def.create_chance < 1.0
+        && !rng.chance(crate::determinism::RngStream::Sim, def.create_chance as f64)
+    {
+        return None;
+    }
+    if def.ignore_spawn_angle {
+        angle = 0.0;
+    }
+
+    let velocity_rand = if def.velocity_scale_rand_min != 1.0 || def.velocity_scale_rand_max != 1.0
+    {
+        rng.range(
+            crate::determinism::RngStream::Sim,
+            def.velocity_scale_rand_min,
+            def.velocity_scale_rand_max,
+        )
+    } else {
+        1.0
+    };
+    let speed = def.speed * spawn.velocity_scl * velocity_rand;
+    // Deterministic inaccuracy from the sim stream (view-only angle jitter
     // beyond the def's `inaccuracy` is applied by the weapon layer).
     let jitter = if def.inaccuracy > 0.0 {
         rng.range(
@@ -110,11 +138,20 @@ pub fn create(
     } else {
         0.0
     };
-    let angle = spawn.angle + jitter;
+    let angle = angle + jitter;
     let rad = angle.to_radians();
     let vel = (rad.cos() * speed, rad.sin() * speed);
 
-    let lifetime = def.lifetime * spawn.lifetime_scl;
+    let life_rand = if def.life_scale_rand_min != 1.0 || def.life_scale_rand_max != 1.0 {
+        rng.range(
+            crate::determinism::RngStream::Sim,
+            def.life_scale_rand_min,
+            def.life_scale_rand_max,
+        )
+    } else {
+        1.0
+    };
+    let lifetime = def.lifetime * spawn.lifetime_scl * life_rand;
 
     let bullet = Bullet {
         def: spawn.def,

@@ -200,6 +200,16 @@ impl Tiles {
         }
     }
 
+    /// Clears every fire slot (combat re-registers live fires each tick).
+    pub fn clear_fire_slots(&mut self) {
+        self.fires.fill(None);
+    }
+
+    /// Clears every puddle slot (combat re-registers live puddles each tick).
+    pub fn clear_puddle_slots(&mut self) {
+        self.puddles.fill(None);
+    }
+
     /// Lazily sizes the floor scratch to the grid (`Tiles.tmpFloorState`).
     pub fn tmp_floor_state(&mut self) -> &mut [i64] {
         if self.tmp_floor_state.len() != self.array.len() {

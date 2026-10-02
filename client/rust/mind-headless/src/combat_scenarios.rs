@@ -109,6 +109,117 @@ fn scenario(name: &str, json: bool) -> Result<i32> {
             print_json(&report, json);
             Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
         }
+        "combat_damage_matrix" => {
+            let mut harness = CombatHarness::new(48, 32, 13);
+            let wall = harness
+                .content()
+                .block_id("copper-wall")
+                .ok_or_else(|| anyhow::anyhow!("copper-wall missing"))?;
+            for (x, y) in [
+                (14, 4),
+                (10, 8),
+                (10, 12),
+                (12, 12),
+                (10, 16),
+                (12, 16),
+                (10, 20),
+                (10, 24),
+            ] {
+                let _ = harness.place(x, y, wall, 0, true);
+            }
+            let created_before = harness.bullets_created;
+            let lanes = [
+                ("point", 4),
+                ("multi", 6),
+                ("sap", 8),
+                ("shrapnel", 12),
+                ("emp", 16),
+                ("flak", 20),
+                ("continuous", 24),
+            ];
+            for (kind, ty) in lanes {
+                let (x, y) = CombatHarness::tile_center(4, ty);
+                let _ = harness.spawn_bullet(kind, x, y, 0.0, 1);
+            }
+            for _ in 0..200 {
+                harness.tick();
+            }
+            let probes = [
+                (14, 4),
+                (10, 8),
+                (10, 12),
+                (12, 12),
+                (10, 16),
+                (12, 16),
+                (10, 20),
+                (10, 24),
+            ];
+            let damaged = probes
+                .iter()
+                .map(|(x, y)| harness.building_health_at(*x, *y) < 320.0)
+                .collect::<Vec<_>>();
+            let pass = damaged.iter().all(|d| *d);
+            let report = serde_json::json!({
+                "scenario": name,
+                "seed": 13,
+                "pass": pass,
+                "created": harness.bullets_created - created_before,
+                "damaged": damaged,
+                "checksum": bullet_checksum(&harness),
+            });
+            print_json(&report, json);
+            Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+        }
+        "combat_fire_puddle_tick" => {
+            use mind_core::combat::{fires, puddles};
+            use mind_core::determinism::SimRng;
+            let mut harness = CombatHarness::new(32, 32, 23);
+            let oil = harness
+                .content()
+                .liquid_id("oil")
+                .ok_or_else(|| anyhow::anyhow!("oil missing"))?;
+            let mut rng = SimRng::new(23);
+            let _ = puddles::deposit(
+                &mut harness.build.world,
+                &harness.build.content,
+                10,
+                10,
+                oil,
+                70.0,
+                &mut rng,
+            );
+            let _ = fires::create(&mut harness.build.world, 10, 10, &mut rng);
+            for _ in 0..200 {
+                let _ = puddles::deposit(
+                    &mut harness.build.world,
+                    &harness.build.content,
+                    10,
+                    10,
+                    oil,
+                    70.0,
+                    &mut rng,
+                );
+                harness.tick();
+            }
+            let fire = fires::has(&harness.build.world, 10, 10);
+            let puddle = puddles::find_at(&harness.build.world, 10, 10).is_some();
+            let spread = [(9, 10), (11, 10), (10, 9), (10, 11)]
+                .iter()
+                .filter(|(x, y)| fires::has(&harness.build.world, *x, *y))
+                .count();
+            let pass = fire && puddle && spread >= 1;
+            let report = serde_json::json!({
+                "scenario": name,
+                "seed": 23,
+                "pass": pass,
+                "fire": fire,
+                "puddle": puddle,
+                "spread_neighbors": spread,
+                "checksum": bullet_checksum(&harness),
+            });
+            print_json(&report, json);
+            Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+        }
         "combat_determinism" => {
             let first = sample_swarm(29, 360, 60);
             let second = sample_swarm(29, 360, 60);
