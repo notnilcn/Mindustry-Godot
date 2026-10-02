@@ -11,6 +11,7 @@ pub mod planet;
 pub mod quad_tree;
 pub mod rules;
 pub mod rules_event;
+pub mod saves;
 pub mod sector;
 pub mod spawn_group;
 pub mod stats;
