@@ -1,0 +1,15 @@
+; SPDX-License-Identifier: GPL-3.0-only
+;
+; ModBrowser dialog (plan 14 §3.4, M3). Inherits the shared frame; the search and
+; results are built by mod_browser_dialog.gd.
+;
+; Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
+; Source: core/src/mindustry/ui/dialogs/ModBrowserDialog.java
+
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/ui/dialogs/mind_dialog_base.tscn" id="1_base"]
+[ext_resource type="Script" path="res://ui/dialogs/mod_browser_dialog.gd" id="2_mod_browser"]
+
+[node name="ModBrowserDialog" instance=ExtResource("1_base")]
+script = ExtResource("2_mod_browser")
