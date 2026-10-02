@@ -48,6 +48,7 @@ use super::super::settings_store::UnlockStore;
 use super::super::stacks::{ItemStack, LiquidStack, PayloadStack, round_to_i32};
 use super::super::{ContentError, ContentRef, ContentType};
 use super::ContentRegistry;
+use crate::render::layer::{BuildingCacheLayer, CacheLayerId};
 
 /// Base tile size constant (`Block.tilesize`).
 pub const TILE_SIZE: f32 = 8.0;
@@ -1269,6 +1270,26 @@ pub struct BlockSpec {
     pub has_color: Option<bool>,
     /// Square sprite.
     pub square_sprite: Option<bool>,
+    /// `Block.cacheLayer` (default `normal`; walls set `walls`, liquids their layer).
+    pub cache_layer: Option<CacheLayerId>,
+    /// `Block.drawCached` (`drawCached()` is baked into the building cache).
+    pub draw_cached: Option<bool>,
+    /// `Block.drawDynamic` (`draw()` runs every frame).
+    pub draw_dynamic: Option<bool>,
+    /// `Block.buildingCacheLayer` (`BuildingCacheLayer.under`/`normal`).
+    pub building_cache_layer: Option<f32>,
+    /// `Block.fillsTile` (floor is hidden under this block; darkness owner).
+    pub fills_tile: Option<bool>,
+    /// `Block.hasShadow`.
+    pub has_shadow: Option<bool>,
+    /// `Block.customShadow` (implies `hasShadow = false` unless re-enabled).
+    pub custom_shadow: Option<bool>,
+    /// `Block.obstructsLight` (excluded from light quads; `drawNonLayer`).
+    pub obstructs_light: Option<bool>,
+    /// `Block.emitLight` (`drawLight()` is called).
+    pub emit_light: Option<bool>,
+    /// `Block.drawTeamOverlay` (team corner is drawn).
+    pub draw_team_overlay: Option<bool>,
 }
 
 impl Default for BlockSpec {
@@ -1334,6 +1355,16 @@ impl Default for BlockSpec {
             map_color: None,
             has_color: None,
             square_sprite: None,
+            cache_layer: None,
+            draw_cached: None,
+            draw_dynamic: None,
+            building_cache_layer: None,
+            fills_tile: None,
+            has_shadow: None,
+            custom_shadow: None,
+            obstructs_light: None,
+            emit_light: None,
+            draw_team_overlay: None,
         }
     }
 }
@@ -1346,12 +1377,74 @@ impl BlockSpec {
             kind,
             ..Self::default()
         };
+        // Draw-flag class defaults (plan-02 reconciliation; plan 16 §3.13). Base
+        // `Block` values: `cacheLayer=normal`, `drawDynamic=true`,
+        // `drawCached=false`, `buildingCacheLayer=normal`, `fillsTile=true`,
+        // `hasShadow=true`, `customShadow=false`, `obstructsLight=true`,
+        // `emitLight=false`, `drawTeamOverlay=true`.
+        match kind {
+            BlockKind::StaticProp => {
+                spec.draw_cached = Some(true);
+                spec.draw_dynamic = Some(false);
+            }
+            BlockKind::StorageBlock
+            | BlockKind::Unloader
+            | BlockKind::LogicBlock
+            | BlockKind::MemoryBlock
+            | BlockKind::SwitchBlock
+            | BlockKind::LogicDisplay
+            | BlockKind::TileableLogicDisplay
+            | BlockKind::CanvasBlock
+            | BlockKind::MessageBlock
+            | BlockKind::Router
+            | BlockKind::Sorter
+            | BlockKind::Junction
+            | BlockKind::OverflowGate
+            | BlockKind::OverflowDuct
+            | BlockKind::DuctRouter
+            | BlockKind::DirectionalUnloader
+            | BlockKind::ItemSource
+            | BlockKind::LiquidJunction => {
+                spec.draw_cached = Some(true);
+                spec.draw_dynamic = Some(false);
+            }
+            BlockKind::Conduit
+            | BlockKind::ArmoredConduit
+            | BlockKind::Duct
+            | BlockKind::StackConveyor => {
+                spec.draw_cached = Some(true);
+                spec.building_cache_layer = Some(BuildingCacheLayer::UNDER);
+            }
+            BlockKind::PowerNode
+            | BlockKind::LongPowerNode
+            | BlockKind::ItemBridge
+            | BlockKind::BufferedItemBridge
+            | BlockKind::DuctBridge
+            | BlockKind::LiquidBridge
+            | BlockKind::DirectionLiquidBridge => {
+                spec.draw_cached = Some(true);
+            }
+            BlockKind::CoreBlock
+            | BlockKind::ConsumeGenerator
+            | BlockKind::ThermalGenerator
+            | BlockKind::NuclearReactor
+            | BlockKind::ImpactReactor
+            | BlockKind::LightBlock
+            | BlockKind::LandingPad
+            | BlockKind::Accelerator => {
+                spec.emit_light = Some(true);
+            }
+            _ => {}
+        }
         match kind {
             BlockKind::Block => {}
             BlockKind::AirBlock => {
                 // extends Floor
                 spec.placeable_liquid = Some(true);
                 spec.generate_icons = Some(false);
+                spec.has_shadow = Some(false);
+                spec.draw_cached = Some(false);
+                spec.draw_dynamic = Some(false);
             }
             BlockKind::SpawnBlock => spec.placeable_liquid = Some(true),
             BlockKind::RemoveWall => {
@@ -1362,7 +1455,12 @@ impl BlockSpec {
                 spec.placeable_liquid = Some(true);
                 spec.in_editor = Some(false);
             }
-            BlockKind::Cliff => spec.solid = Some(true),
+            BlockKind::Cliff => {
+                spec.solid = Some(true);
+                spec.cache_layer = Some(CacheLayerId::Walls);
+                spec.fills_tile = Some(false);
+                spec.has_shadow = Some(false);
+            }
             BlockKind::ConstructBlock => {
                 spec.update = Some(true);
                 spec.health = Some(10);
@@ -1394,17 +1492,29 @@ impl BlockSpec {
             BlockKind::StaticWall => {
                 spec.solid = Some(true);
                 spec.placeable_liquid = Some(true);
+                spec.cache_layer = Some(CacheLayerId::Walls);
             }
-            BlockKind::StaticProp => {}
+            BlockKind::StaticProp => {
+                spec.draw_cached = Some(true);
+                spec.draw_dynamic = Some(false);
+            }
             BlockKind::StaticTree => {
                 spec.solid = Some(true);
                 spec.placeable_liquid = Some(true);
+                spec.cache_layer = Some(CacheLayerId::Walls);
             }
             BlockKind::Prop => {}
-            BlockKind::TreeBlock => spec.solid = Some(true),
-            BlockKind::TallBlock => spec.solid = Some(true),
-            BlockKind::SeaBush => {}
-            BlockKind::Seaweed => {}
+            BlockKind::TreeBlock => {
+                spec.solid = Some(true);
+                spec.custom_shadow = Some(true);
+            }
+            BlockKind::TallBlock => {
+                spec.solid = Some(true);
+                spec.custom_shadow = Some(true);
+                spec.has_shadow = Some(true);
+            }
+            BlockKind::SeaBush => spec.obstructs_light = Some(false),
+            BlockKind::Seaweed => spec.obstructs_light = Some(false),
             BlockKind::SteamVent => {
                 spec.placeable_liquid = Some(true);
                 spec.ore_threshold = Some(0.828);
@@ -1415,6 +1525,9 @@ impl BlockSpec {
                 spec.placeable_liquid = Some(true);
                 spec.ore_threshold = Some(0.828);
                 spec.ore_scale = Some(24.0);
+                // `ShallowLiquid` copies the liquid base's cache layer; the
+                // generated waves carry water-family liquids, default water.
+                spec.cache_layer = Some(CacheLayerId::Water);
             }
             BlockKind::CharacterOverlay => {
                 spec.placeable_liquid = Some(true);
@@ -1442,6 +1555,7 @@ impl BlockSpec {
                 spec.placeable_liquid = Some(true);
                 spec.save_data = Some(true);
                 spec.save_config = Some(true);
+                spec.cache_layer = Some(CacheLayerId::Walls);
             }
             BlockKind::GenericCrafter => {
                 spec.update = Some(true);
@@ -1482,6 +1596,9 @@ impl BlockSpec {
                 spec.build_cost_multiplier = Some(6.0);
                 spec.priority = Some(TARGET_PRIORITY_WALL);
                 spec.env_enabled = Some(EnvMask::any());
+                // `Wall.init()`: drawCached = true; drawDynamic = false unless flashHit.
+                spec.draw_cached = Some(true);
+                spec.draw_dynamic = Some(false);
             }
             BlockKind::ShieldWall => {
                 spec.solid = Some(true);
@@ -1491,6 +1608,9 @@ impl BlockSpec {
                 spec.build_cost_multiplier = Some(6.0);
                 spec.priority = Some(TARGET_PRIORITY_WALL);
                 spec.env_enabled = Some(EnvMask::any());
+                // `ShieldWall.init()` re-enables dynamic drawing for the shield glow.
+                spec.draw_cached = Some(true);
+                spec.draw_dynamic = Some(true);
             }
             BlockKind::Door => {
                 spec.solid = Some(false);
@@ -1499,6 +1619,8 @@ impl BlockSpec {
                 spec.build_cost_multiplier = Some(6.0);
                 spec.priority = Some(TARGET_PRIORITY_WALL);
                 spec.env_enabled = Some(EnvMask::any());
+                spec.draw_cached = Some(true);
+                spec.draw_dynamic = Some(false);
             }
             BlockKind::AutoDoor => {
                 spec.solid = Some(false);
@@ -1508,6 +1630,8 @@ impl BlockSpec {
                 spec.build_cost_multiplier = Some(6.0);
                 spec.priority = Some(TARGET_PRIORITY_WALL);
                 spec.env_enabled = Some(EnvMask::any());
+                spec.draw_cached = Some(true);
+                spec.draw_dynamic = Some(false);
             }
             BlockKind::MendProjector => {
                 spec.solid = Some(true);
@@ -1516,6 +1640,8 @@ impl BlockSpec {
                 spec.has_power = Some(true);
                 spec.has_items = Some(true);
                 spec.flags.push(BlockFlag::BlockRepair);
+                spec.emit_light = Some(true);
+                spec.draw_cached = Some(true);
             }
             BlockKind::OverdriveProjector => {
                 spec.solid = Some(true);
@@ -1523,6 +1649,7 @@ impl BlockSpec {
                 spec.group = Some(BlockGroup::Projectors);
                 spec.has_power = Some(true);
                 spec.has_items = Some(true);
+                spec.emit_light = Some(true);
             }
             BlockKind::ForceProjector => {
                 spec.solid = Some(true);
@@ -1562,6 +1689,7 @@ impl BlockSpec {
                 spec.has_power = Some(true);
                 spec.has_items = Some(true);
                 spec.flags.push(BlockFlag::BlockRepair);
+                spec.emit_light = Some(true);
             }
             BlockKind::ShockwaveTower => {
                 spec.solid = Some(true);
@@ -1822,6 +1950,28 @@ pub struct BlockDef {
     pub has_color: bool,
     /// Square sprite.
     pub square_sprite: bool,
+    /// `Block.cacheLayer` (floor/wall draw band; `normal` = dynamic block pass).
+    pub cache_layer: CacheLayerId,
+    /// `Block.drawCached` (baked into the per-chunk building cache).
+    pub draw_cached: bool,
+    /// `Block.drawDynamic` (`draw()` runs every frame).
+    pub draw_dynamic: bool,
+    /// `Block.buildingCacheLayer` (`Layer.block - 0.5` / `Layer.block`).
+    pub building_cache_layer: f32,
+    /// `Block.fillsTile` (floor hidden under this block; darkness owner).
+    pub fills_tile: bool,
+    /// `Block.hasShadow`.
+    pub has_shadow: bool,
+    /// `Block.customShadow`.
+    pub custom_shadow: bool,
+    /// `Block.displayShadow(tile)` (base: `hasShadow`).
+    pub display_shadow: bool,
+    /// `Block.obstructsLight` (excluded from the light quadtree).
+    pub obstructs_light: bool,
+    /// `Block.emitLight` (`drawLight()` is called).
+    pub emit_light: bool,
+    /// `Block.drawTeamOverlay` (team corner is drawn for enemy buildings).
+    pub draw_team_overlay: bool,
     /// Item base costs indexed by item id (`Item.cost`; used by `init`).
     pub(crate) item_costs: Vec<f32>,
     /// Item health scaling indexed by item id (`Item.healthScaling`; used by `init`).
@@ -1934,6 +2084,14 @@ impl BlockDef {
             .region
             .map(str::to_owned)
             .unwrap_or_else(|| spec.name.to_owned());
+        // `Block.init()`: `customShadow` disables the standard shadow unless the
+        // wave explicitly re-enables `hasShadow` (e.g. `TallBlock`).
+        let custom_shadow = spec.custom_shadow.unwrap_or(false);
+        let has_shadow = if custom_shadow && spec.has_shadow.is_none() {
+            false
+        } else {
+            spec.has_shadow.unwrap_or(true)
+        };
         let mut def = Self {
             id: BlockId::new(0),
             name: spec.name.to_owned(),
@@ -2009,6 +2167,20 @@ impl BlockDef {
             map_color: spec.map_color,
             has_color: spec.has_color.unwrap_or(false),
             square_sprite: spec.square_sprite.unwrap_or(true),
+            cache_layer: spec.cache_layer.unwrap_or(CacheLayerId::Normal),
+            draw_cached: spec.draw_cached.unwrap_or(false),
+            draw_dynamic: spec.draw_dynamic.unwrap_or(true),
+            building_cache_layer: spec
+                .building_cache_layer
+                .unwrap_or(BuildingCacheLayer::NORMAL),
+            fills_tile: spec.fills_tile.unwrap_or(true),
+            has_shadow,
+            custom_shadow,
+            // `displayShadow` is derived from `hasShadow`.
+            display_shadow: has_shadow,
+            obstructs_light: spec.obstructs_light.unwrap_or(true),
+            emit_light: spec.emit_light.unwrap_or(false),
+            draw_team_overlay: spec.draw_team_overlay.unwrap_or(true),
             item_costs,
             item_health_scaling,
         };
@@ -2233,6 +2405,10 @@ impl Content for BlockDef {
 
     /// `Block.init()` metadata derivations (`world/Block.java:1357+`).
     fn init_self(&mut self) -> Result<(), ContentError> {
+        // `Block.displayShadow(tile)` is `hasShadow` for every vanilla block
+        // (no overrides), kept as a field for the render/metadata ABI.
+        self.display_shadow = self.has_shadow;
+
         if self.fog_radius > 0 && !self.flags.contains(&BlockFlag::HasFogRadius) {
             self.flags.push(BlockFlag::HasFogRadius);
         }
@@ -2344,6 +2520,11 @@ impl Content for BlockDef {
                 }
                 _ => {}
             }
+        }
+
+        // `Block.init()`: every liquid block with `drawLiquidLight` emits light.
+        if self.has_liquids {
+            self.emit_light = true;
         }
         Ok(())
     }

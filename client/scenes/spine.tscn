@@ -44,7 +44,7 @@ zoom = Vector2(2, 2)
 
 [node name="LowRes" type="Node2D" parent="World"]
 
-[node name="MinimapProvider" type="Node2D" parent="World"]
+[node name="MinimapProvider" type="MindMinimap" parent="World"]
 
 [node name="MindRender" type="MindRender" parent="."]
 

@@ -11,13 +11,12 @@
 use std::fmt::Write as _;
 
 use crate::config::TILESIZE;
-use crate::content::{BlockDef, BlockId, BlockKind, ContentRegistry};
+use crate::content::{BlockDef, BlockId, ContentRegistry};
 use crate::render::commands::Blend;
 use crate::render::ids::{RegionId, RegionIdTable};
 use crate::render::layer::{CacheLayerId, Layer};
 use crate::render::scan::CameraView;
 use crate::world::WorldGrid;
-use crate::world::tile::is_static_kind;
 
 /// Render-list JSON format version.
 pub const FORMAT: u32 = 1;
@@ -80,30 +79,35 @@ pub struct RenderList {
     pub regions: usize,
 }
 
-/// The cache layer a floor bakes into.
+/// The cache layer a floor bakes into (`Block.cacheLayer`).
 pub fn floor_cache_layer(def: &BlockDef) -> CacheLayerId {
-    match def.kind {
-        BlockKind::ShallowLiquid => CacheLayerId::Water,
-        _ => CacheLayerId::Normal,
-    }
+    def.cache_layer
 }
 
 /// The cache layer a wall/block bakes into (`Block.cacheLayer`).
 pub fn block_cache_layer(def: &BlockDef) -> CacheLayerId {
-    if is_static_kind(def.kind) {
-        CacheLayerId::Walls
-    } else {
-        CacheLayerId::Normal
-    }
+    def.cache_layer
 }
 
-/// Whether a tile is accessible for the floor-accessibility rule
-/// (`World.isAccessible` approximation: solid full walls block access).
+/// `World.isAccessible(x, y)`: a tile is accessible when at least one cardinal
+/// neighbour is not solid (out-of-bounds counts as solid). Ported exactly
+/// (`core/World.java:86`).
 pub fn is_accessible(world: &WorldGrid, content: &ContentRegistry, x: i32, y: i32) -> bool {
-    let Some(def) = content.block(world.tile(x, y).block) else {
-        return true;
-    };
-    !def.solid || !is_static_kind(def.kind)
+    for (dx, dy) in [(0i32, -1), (0, 1), (-1, 0), (1, 0)] {
+        let nx = x + dx;
+        let ny = y + dy;
+        let solid = if nx < 0 || ny < 0 || nx >= world.width() || ny >= world.height() {
+            true
+        } else {
+            content
+                .block(world.tile(nx, ny).block)
+                .is_some_and(|def| def.solid)
+        };
+        if !solid {
+            return true;
+        }
+    }
+    false
 }
 
 /// Builds the ordered entries for the world, culled to the camera grow(2 tiles)
@@ -175,7 +179,9 @@ pub fn build_entries(
             if tile.block != BlockId::AIR
                 && let Some(def) = content.block(tile.block)
             {
-                let (layer, z) = if is_static_kind(def.kind) {
+                // Walls (non-`normal` cache layer) bake into the floor pass;
+                // every other block draws at `Layer.block` (dynamic or cached).
+                let (layer, z) = if def.cache_layer != CacheLayerId::Normal {
                     (Layer::Floor, Layer::Floor.z())
                 } else {
                     (Layer::Block, Layer::Block.z())

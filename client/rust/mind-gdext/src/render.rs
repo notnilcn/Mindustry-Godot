@@ -18,6 +18,7 @@ use godot::prelude::*;
 use mind_core::config::TILESIZE;
 use mind_core::render::Layer;
 use mind_core::render::bands::{BandEntry, BandKey, BandPlan};
+use mind_core::render::lod::Lod;
 use mind_core::render::queue::RenderQueue;
 use mind_core::render::scan::CameraView;
 
@@ -26,12 +27,20 @@ use crate::sim_host::MindSimHost;
 
 mod atlas_bind;
 mod blocks;
+mod building_cache;
+mod debug;
 mod floor;
+mod light;
+mod minimap;
 mod shaders;
 mod shadow;
 
 pub use blocks::BlockRenderer;
+pub use building_cache::BuildingCacheRenderer;
+pub use debug::DebugCollisionRenderer;
 pub use floor::FloorRenderer;
+pub use light::LightRenderer;
+pub use minimap::MindMinimap;
 pub use shaders::ShaderRegistry;
 pub use shadow::ShadowRenderer;
 
@@ -54,6 +63,8 @@ pub struct RenderStats {
     pub mesh_rebuilds: i64,
     /// Dynamic sprites emitted this frame.
     pub dynamic_sprites: i64,
+    /// Cached-building sprites emitted this frame.
+    pub cached_sprites: i64,
     /// Regions that fell back to `error`/placeholder this frame.
     pub missing_regions: i64,
     /// Shaders loaded by the `ShaderRegistry` (plan 16 M8).
@@ -66,6 +77,16 @@ pub struct RenderStats {
     pub darkness_rebuilds: i64,
     /// Shadow events recorded in the last rebuild.
     pub shadow_events: i64,
+    /// Light-map rebuilds since boot (plan 16 M5).
+    pub light_rebuilds: i64,
+    /// Live circle lights in the last light rebuild.
+    pub light_circles: i64,
+    /// Debug hitbox quads in the last rebuild (plan 16 M6).
+    pub debug_hitboxes: i64,
+    /// `Lod.l1` (plan 16 M6).
+    pub lod_l1: bool,
+    /// `Lod.l2` (plan 16 M6).
+    pub lod_l2: bool,
     /// Last frame build time in microseconds.
     pub build_us: i64,
     /// Current sim tick (updated by the facade).
@@ -93,6 +114,7 @@ impl RenderStats {
         );
         dict.set(&key("mesh_rebuilds"), &self.mesh_rebuilds.to_variant());
         dict.set(&key("dynamic_sprites"), &self.dynamic_sprites.to_variant());
+        dict.set(&key("cached_sprites"), &self.cached_sprites.to_variant());
         dict.set(&key("missing_regions"), &self.missing_regions.to_variant());
         dict.set(&key("shaders_loaded"), &self.shaders_loaded.to_variant());
         dict.set(
@@ -105,6 +127,11 @@ impl RenderStats {
             &self.darkness_rebuilds.to_variant(),
         );
         dict.set(&key("shadow_events"), &self.shadow_events.to_variant());
+        dict.set(&key("light_rebuilds"), &self.light_rebuilds.to_variant());
+        dict.set(&key("light_circles"), &self.light_circles.to_variant());
+        dict.set(&key("debug_hitboxes"), &self.debug_hitboxes.to_variant());
+        dict.set(&key("lod_l1"), &self.lod_l1.to_variant());
+        dict.set(&key("lod_l2"), &self.lod_l2.to_variant());
         dict.set(&key("build_us"), &self.build_us.to_variant());
         dict.set(&key("tick"), &self.tick.to_variant());
         let mut trace = PackedStringArray::new();
@@ -131,7 +158,13 @@ pub struct MindWorldRenderer {
     visibility_dirty: bool,
     floor: Option<FloorRenderer>,
     blocks: Option<BlockRenderer>,
+    building_cache: Option<BuildingCacheRenderer>,
     shadow: Option<ShadowRenderer>,
+    light: Option<LightRenderer>,
+    debug: Option<DebugCollisionRenderer>,
+    lod: Lod,
+    draw_light: bool,
+    draw_hitboxes: bool,
     shaders: ShaderRegistry,
 }
 
@@ -150,7 +183,13 @@ impl INode2D for MindWorldRenderer {
             visibility_dirty: false,
             floor: None,
             blocks: None,
+            building_cache: None,
             shadow: None,
+            light: None,
+            debug: None,
+            lod: Lod::default(),
+            draw_light: true,
+            draw_hitboxes: false,
             shaders: ShaderRegistry::new(),
         }
     }
@@ -248,8 +287,25 @@ impl MindWorldRenderer {
                 &self.shaders,
             ));
         }
+        if let (Some(under_band), Some(block_band)) = (
+            self.band_node_at(BandKey::base(Layer::BlockUnder)),
+            self.band_node_at(BandKey::base(Layer::Block)),
+        ) {
+            self.building_cache = Some(BuildingCacheRenderer::new(
+                host.clone(),
+                assets.clone(),
+                under_band,
+                block_band,
+            ));
+        }
         if let Some(block_band) = self.band_node_at(BandKey::base(Layer::Block)) {
-            self.blocks = Some(BlockRenderer::new(host, assets, block_band));
+            self.blocks = Some(BlockRenderer::new(host.clone(), assets, block_band));
+        }
+        if let Some(light_band) = self.band_node_at(BandKey::base(Layer::Light)) {
+            self.light = Some(LightRenderer::new(host.clone(), light_band, &self.shaders));
+        }
+        if let Some(overlay_band) = self.band_node_at(BandKey::base(Layer::OverlayUi)) {
+            self.debug = Some(DebugCollisionRenderer::new(host, overlay_band));
         }
     }
 
@@ -311,21 +367,37 @@ impl MindWorldRenderer {
         self.queue.clear();
         // Stage 9/12: frame-alpha view, chunk invalidation + floor bake.
         let view = self.camera_view();
+        // Stage 4: `Lod.update()` — `scale = screen_width / camera.width`.
+        self.lod.update(view.w * view.zoom, view.w);
+        self.stats.lod_l1 = self.lod.l1;
+        self.stats.lod_l2 = self.lod.l2;
+        // `mesh_rebuilds` is cumulative per pass; each pass reports its own boot
+        // total, so the frame total is the sum (never an accumulation).
+        let mut mesh_rebuilds = 0i64;
         if let Some(floor) = self.floor.as_mut() {
             floor.update(&view);
             let floor_stats = floor.stats();
-            self.stats.mesh_rebuilds = floor_stats.mesh_rebuilds as i64;
+            mesh_rebuilds += floor_stats.mesh_rebuilds as i64;
             self.stats.floor_chunks_dirty = floor_stats.dirty;
             self.stats.missing_regions = floor_stats.missing_regions as i64;
         }
         self.stats.stage_trace.push(String::from("floor"));
+        if let Some(cache) = self.building_cache.as_mut() {
+            cache.update(&view);
+            let cache_stats = cache.stats();
+            self.stats.cached_sprites = cache_stats.sprites;
+            mesh_rebuilds += cache_stats.mesh_rebuilds as i64;
+            self.stats.missing_regions += cache_stats.missing_regions as i64;
+        }
+        self.stats.stage_trace.push(String::from("building_cache"));
         if let Some(blocks) = self.blocks.as_mut() {
             blocks.update(&view);
             let block_stats = blocks.stats();
             self.stats.dynamic_sprites = block_stats.dynamic_sprites;
-            self.stats.mesh_rebuilds += block_stats.mesh_rebuilds as i64;
+            mesh_rebuilds += block_stats.mesh_rebuilds as i64;
             self.stats.missing_regions += block_stats.missing_regions as i64;
         }
+        self.stats.mesh_rebuilds = mesh_rebuilds;
         self.stats.stage_trace.push(String::from("blocks"));
         if let Some(shadow) = self.shadow.as_mut() {
             shadow.update(false);
@@ -335,6 +407,20 @@ impl MindWorldRenderer {
             self.stats.shadow_events = shadow_stats.shadow_events;
         }
         self.stats.stage_trace.push(String::from("shadows"));
+        let draw_light = self.draw_light;
+        if let Some(light) = self.light.as_mut() {
+            light.update(&view, draw_light, 0.01, true);
+            let light_stats = light.stats();
+            self.stats.light_rebuilds = light_stats.rebuilds;
+            self.stats.light_circles = light_stats.lights;
+        }
+        self.stats.stage_trace.push(String::from("light"));
+        let draw_hitboxes = self.draw_hitboxes;
+        if let Some(debug) = self.debug.as_mut() {
+            debug.update(&view, draw_hitboxes);
+            self.stats.debug_hitboxes = debug.stats().hitboxes;
+        }
+        self.stats.stage_trace.push(String::from("debug"));
         self.queue.set_sort(true);
         self.stats.stage_trace.push(String::from("sort"));
         self.queue.flush();
@@ -396,6 +482,13 @@ impl MindWorldRenderer {
         self.stats.to_dict()
     }
 
+    /// Whether the nullable `shield` shader resolved (plan 16 §3.9,
+    /// `Renderer.java:403`; `false` skips the shield band bracket).
+    #[func]
+    pub fn shield_available(&self) -> bool {
+        self.shaders.get("shield").is_some()
+    }
+
     /// Shader registry status (plan 16 M8 oracle).
     #[func]
     pub fn shader_status(&self) -> VarDictionary {
@@ -418,6 +511,18 @@ impl MindWorldRenderer {
         }
         dict.set(&GString::from("missing"), &missing.to_variant());
         dict
+    }
+
+    /// Enables/disables the `LightRenderer` composite (plan 16 M5).
+    #[func]
+    pub fn set_draw_light(&mut self, enabled: bool) {
+        self.draw_light = enabled;
+    }
+
+    /// Enables/disables the `DebugCollisionRenderer` overlay (plan 16 M6).
+    #[func]
+    pub fn set_draw_hitboxes(&mut self, enabled: bool) {
+        self.draw_hitboxes = enabled;
     }
 
     /// Forces a full chunk rebuild; returns the number of rebuilt chunks.
@@ -502,6 +607,30 @@ impl MindRender {
         self.renderer()
             .map(|renderer| renderer.bind().shader_status())
             .unwrap_or_default()
+    }
+
+    /// Whether the nullable `shield` shader resolved (plan 16 §3.9).
+    #[func]
+    pub fn shield_available(&mut self) -> bool {
+        self.renderer()
+            .map(|renderer| renderer.bind().shield_available())
+            .unwrap_or(false)
+    }
+
+    /// Toggles the light composite (plan 16 M5 / §7c-1 `light` layer).
+    #[func]
+    pub fn set_draw_light(&mut self, enabled: bool) {
+        if let Some(mut renderer) = self.renderer() {
+            renderer.bind_mut().set_draw_light(enabled);
+        }
+    }
+
+    /// Toggles the debug hitbox overlay (plan 16 M6 / §7c).
+    #[func]
+    pub fn set_draw_hitboxes(&mut self, enabled: bool) {
+        if let Some(mut renderer) = self.renderer() {
+            renderer.bind_mut().set_draw_hitboxes(enabled);
+        }
     }
 
     /// Pins the camera at tile `(x, y)` with `zoom`.

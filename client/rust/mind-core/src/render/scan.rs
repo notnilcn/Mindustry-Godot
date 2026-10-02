@@ -14,7 +14,6 @@ use crate::content::{BlockId, ContentRegistry};
 use crate::render::floor_cache::{CHUNK_UNITS, FloorChunkGrid};
 use crate::render::layer::CacheLayerId;
 use crate::world::WorldGrid;
-use crate::world::tile::is_static_kind;
 
 /// The camera view used for culling (world pixels + team).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -227,7 +226,9 @@ pub fn visible_blocks(
             let Some(def) = content.block(tile.block) else {
                 continue;
             };
-            if is_static_kind(def.kind) {
+            // `BlockRenderer.indexBlock` + `processBlocks` `tileview`: only
+            // `cacheLayer == normal` blocks that redraw every frame.
+            if def.cache_layer != CacheLayerId::Normal || !def.draw_dynamic {
                 continue;
             }
             out.push(VisibleBlock {
@@ -365,15 +366,17 @@ mod tests {
 
         let stone = content.block_id("stone").expect("stone");
         let wall = content.block_id("stone-wall").expect("stone-wall");
-        let router = content.block_id("router").expect("router");
+        // A conveyor is `drawDynamic` and `cacheLayer == normal`; routers are
+        // cached (`drawCached`, `!drawDynamic`) after the plan-02 reconciliation.
+        let conveyor = content.block_id("conveyor").expect("conveyor");
         let mut world = WorldGrid::new(16, 16);
         world.fill(stone, BlockId::AIR);
         world
             .set_block(TilePos::new(4, 4), wall, 0, 0)
             .expect("wall");
         world
-            .set_block(TilePos::new(5, 5), router, 0, 0)
-            .expect("router");
+            .set_block(TilePos::new(5, 5), conveyor, 0, 0)
+            .expect("conveyor");
 
         let view = CameraView {
             x: 64.0,
@@ -387,7 +390,7 @@ mod tests {
         assert!(
             blocks
                 .iter()
-                .any(|b| b.block == router && b.x == 5 && b.y == 5)
+                .any(|b| b.block == conveyor && b.x == 5 && b.y == 5)
         );
         assert!(!blocks.iter().any(|b| b.block == wall));
         assert!(!blocks.iter().any(|b| b.block == BlockId::AIR));

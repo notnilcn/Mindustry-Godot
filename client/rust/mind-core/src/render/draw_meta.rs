@@ -12,11 +12,12 @@
 //! static walls fill/shadow/obstruct.
 
 use crate::content::BlockDef;
-use crate::render::layer::{BuildingCacheLayer, CacheLayerId};
-use crate::render::list::block_cache_layer;
-use crate::world::tile::is_static_kind;
+use crate::render::layer::CacheLayerId;
 
 /// The draw-relevant `Block` flags (plan 16 §3.13, plan 02 §3.6).
+///
+/// These are read straight from the plan-02 [`BlockDef`] fields (reconciled
+/// 2026-10-02): the earlier `is_static_kind` derivation is gone.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BlockDrawMeta {
     /// `Block.cacheLayer`.
@@ -40,23 +41,18 @@ pub struct BlockDrawMeta {
 }
 
 impl BlockDrawMeta {
-    /// Derives the metadata from a `BlockDef`.
-    ///
-    /// **Plan 02 gap:** `draw_cached`/`emit_light`/`draw_team_overlay` default
-    /// to `false` and `draw_dynamic` to `!is_static`, matching the M2 dynamic
-    /// pass; flip these when `BlockDef` carries the upstream fields.
+    /// Reads the metadata from a [`BlockDef`] (plan-02 fields).
     pub fn from_def(def: &BlockDef) -> Self {
-        let static_kind = is_static_kind(def.kind);
         Self {
-            cache_layer: block_cache_layer(def),
-            draw_cached: false,
-            draw_dynamic: !static_kind,
-            display_shadow: static_kind,
-            fills_tile: static_kind,
-            obstructs_light: static_kind,
-            emit_light: false,
-            draw_team_overlay: false,
-            building_cache_layer: BuildingCacheLayer::NORMAL,
+            cache_layer: def.cache_layer,
+            draw_cached: def.draw_cached,
+            draw_dynamic: def.draw_dynamic,
+            display_shadow: def.display_shadow,
+            fills_tile: def.fills_tile,
+            obstructs_light: def.obstructs_light,
+            emit_light: def.emit_light,
+            draw_team_overlay: def.draw_team_overlay,
+            building_cache_layer: def.building_cache_layer,
         }
     }
 }
@@ -65,6 +61,7 @@ impl BlockDrawMeta {
 mod tests {
     use super::*;
     use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+    use crate::render::layer::BuildingCacheLayer;
 
     fn registry() -> crate::content::ContentRegistry {
         let mut registry =
@@ -76,7 +73,7 @@ mod tests {
     }
 
     #[test]
-    fn wall_is_static_and_shadowcasting() {
+    fn wall_is_cached_wall_layer_and_shadowcasting() {
         let content = registry();
         let wall = content.block_id("stone-wall").expect("stone-wall");
         let def = content.block(wall).expect("def");
@@ -84,18 +81,46 @@ mod tests {
         assert!(meta.display_shadow);
         assert!(meta.fills_tile);
         assert!(meta.obstructs_light);
-        assert!(!meta.draw_dynamic);
         assert_eq!(meta.cache_layer, CacheLayerId::Walls);
     }
 
     #[test]
-    fn router_is_dynamic_by_default() {
+    fn router_is_cached_and_hidden_from_dynamic_pass() {
         let content = registry();
         let router = content.block_id("router").expect("router");
         let def = content.block(router).expect("def");
         let meta = BlockDrawMeta::from_def(def);
-        assert!(meta.draw_dynamic);
-        assert!(!meta.display_shadow);
+        assert!(!meta.draw_dynamic);
+        assert!(meta.draw_cached);
         assert_eq!(meta.cache_layer, CacheLayerId::Normal);
+        assert_eq!(meta.building_cache_layer, BuildingCacheLayer::NORMAL);
+    }
+
+    #[test]
+    fn container_is_cached() {
+        let content = registry();
+        let container = content.block_id("container").expect("container");
+        let def = content.block(container).expect("def");
+        let meta = BlockDrawMeta::from_def(def);
+        assert!(meta.draw_cached);
+        assert!(!meta.draw_dynamic);
+    }
+
+    #[test]
+    fn emitter_is_flagged() {
+        let content = registry();
+        let light = content.block_id("illuminator").expect("illuminator");
+        let def = content.block(light).expect("def");
+        assert!(BlockDrawMeta::from_def(def).emit_light);
+    }
+
+    #[test]
+    fn duct_uses_under_cache_layer() {
+        let content = registry();
+        let duct = content.block_id("duct").expect("duct");
+        let def = content.block(duct).expect("def");
+        let meta = BlockDrawMeta::from_def(def);
+        assert!(meta.draw_cached);
+        assert_eq!(meta.building_cache_layer, BuildingCacheLayer::UNDER);
     }
 }
