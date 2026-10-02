@@ -67,6 +67,7 @@ pub fn run(command: &CampaignCommand) -> Result<i32> {
         } => campaign_sector_cycle(planet, sector, *ticks)?,
         CampaignCommand::Turn { turns, .. } => campaign_turn(*turns)?,
         CampaignCommand::Schematic { .. } => campaign_schematic()?,
+        CampaignCommand::Fog { .. } => campaign_fog()?,
     };
     match command {
         CampaignCommand::Rules { json, dump: path }
@@ -78,6 +79,9 @@ pub fn run(command: &CampaignCommand) -> Result<i32> {
             json, dump: path, ..
         }
         | CampaignCommand::Schematic {
+            json, dump: path, ..
+        }
+        | CampaignCommand::Fog {
             json, dump: path, ..
         } => {
             if let Some(path) = path {
@@ -621,6 +625,87 @@ fn campaign_schematic() -> Result<(Value, Value)> {
     Ok((report, dump))
 }
 
+/// `campaign fog` — plan 12 §7b M7 (`fog_reveal` + attack indicators).
+fn campaign_fog() -> Result<(Value, Value)> {
+    use mind_core::game::attack_indicators::AttackIndicators;
+    use mind_core::game::fog::{FogControl, FogSource};
+
+    let mut fog = FogControl::new();
+    let blocks = vec![FogSource {
+        x: 32,
+        y: 32,
+        radius: 8,
+        team: 0,
+    }];
+    let units = vec![FogSource {
+        x: 40,
+        y: 40,
+        radius: 6,
+        team: 0,
+    }];
+    fog.on_world_load(64, 64, true, true, &blocks);
+    fog.update(40, &[0], &blocks, &units, true, true, false);
+    fog.update(120, &[0], &blocks, &units, true, true, false);
+
+    // Static discovery around the building; dynamic visibility around the unit.
+    let discovered_center = fog.is_discovered(0, 32, 32, true, true, false);
+    let discovered_unit = fog.is_discovered(0, 40, 40, true, true, false);
+    let visible_unit = fog.is_visible_tile(0, 40, 40, true, false);
+    let undiscovered_far = !fog.is_discovered(0, 2, 2, true, true, false);
+    let discovery_differs = discovered_unit != visible_unit || visible_unit;
+    let edge_clip = !fog.is_discovered(0, 63, 63, true, true, false);
+
+    // RLE chunk round-trip.
+    let chunk = fog.write();
+    let mut restored = FogControl::new();
+    restored.read(&chunk);
+    let chunk_roundtrip = restored.fog[0].as_ref().map(|d| &d.static_data)
+        == fog.fog[0].as_ref().map(|d| &d.static_data);
+
+    // Attack indicators: add/dedupe/timeout.
+    let mut indicators = AttackIndicators::new();
+    indicators.add(10, 10);
+    indicators.add(10, 10);
+    let dedup = indicators.len() == 1;
+    indicators.update(900.0);
+    let expired = indicators.is_empty();
+
+    let checksum = fnv_hex(&chunk);
+    let pass = discovered_center
+        && discovered_unit
+        && visible_unit
+        && undiscovered_far
+        && discovery_differs
+        && edge_clip
+        && chunk_roundtrip
+        && dedup
+        && expired;
+
+    let dump = json!({
+        "format": 1,
+        "scenario": "campaign_fog",
+        "chunk_bytes": chunk.len(),
+        "discovered_center": discovered_center,
+        "discovered_unit": discovered_unit,
+        "visible_unit": visible_unit,
+        "undiscovered_far": undiscovered_far,
+        "edge_clip": edge_clip,
+        "chunk_roundtrip": chunk_roundtrip,
+        "indicator_dedup": dedup,
+        "indicator_expired": expired,
+        "checksum": checksum,
+        "pass": pass,
+    });
+    let report = json!({
+        "scenario": "campaign_fog",
+        "chunk_bytes": chunk.len(),
+        "chunk_roundtrip": chunk_roundtrip,
+        "checksum": checksum,
+        "pass": pass,
+    });
+    Ok((report, dump))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -665,5 +750,11 @@ mod tests {
     fn schematic_golden_matches() {
         let (_, dump) = campaign_schematic().unwrap();
         assert_eq!(golden("schematic.json"), canonical(&dump));
+    }
+
+    #[test]
+    fn fog_golden_matches() {
+        let (_, dump) = campaign_fog().unwrap();
+        assert_eq!(golden("fog.json"), canonical(&dump));
     }
 }

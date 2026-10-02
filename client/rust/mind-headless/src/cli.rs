@@ -616,6 +616,17 @@ pub enum CampaignCommand {
         #[arg(long)]
         dump: Option<PathBuf>,
     },
+
+    /// `campaign_fog`: static exploration vs dynamic visibility + RLE chunk
+    /// round-trip and attack-indicator lifecycle.
+    Fog {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Write the canonical golden dump here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+    },
 }
 
 /// `fx` subcommands (plan 17 §7b).
