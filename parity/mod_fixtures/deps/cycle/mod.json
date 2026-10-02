@@ -1,0 +1,6 @@
+{
+  "name": "Mod Cycle",
+  "version": "1.0",
+  "minGameVersion": "146",
+  "dependencies": ["mod-cycle"]
+}

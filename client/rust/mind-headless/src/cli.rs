@@ -172,6 +172,13 @@ pub enum Command {
         #[command(subcommand)]
         command: AudioCommand,
     },
+
+    /// Mod discovery/content/patch/asset inspection (plan 20).
+    Mods {
+        /// Mods subcommand.
+        #[command(subcommand)]
+        command: ModsCommand,
+    },
 }
 
 /// `world` subcommands (plan 06 §7b).
@@ -312,6 +319,86 @@ pub enum AudioCommand {
         /// Ambient candidate count (0 disables).
         #[arg(long, default_value_t = 0)]
         ambient: usize,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+/// `mods` subcommands (plan 20 §7b).
+#[derive(Debug, Subcommand)]
+pub enum ModsCommand {
+    /// Discover mods under a directory, resolve dependency states and print the
+    /// report JSON. With `--check`, compare against
+    /// `<dir>/expected_list.json` (normalized fields).
+    List {
+        /// Mod directory (defaults to `parity/mod_fixtures`).
+        #[arg(long, default_value = "parity/mod_fixtures")]
+        dir: PathBuf,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Compare the normalized mod list against `<dir>/expected_list.json`.
+        #[arg(long)]
+        check: bool,
+    },
+
+    /// Boot base content + one fixture mod's JSON content and dump the mod
+    /// content records (plan 20 M1+).
+    Content {
+        /// Fixture name under `parity/mod_fixtures/`.
+        #[arg(long)]
+        fixture: String,
+        /// Base content directory override (defaults to the repo root).
+        #[arg(long)]
+        repo: Option<PathBuf>,
+        /// Write the content dump JSON here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Build a fixture mod's sprite/bundle overlay and probe region names
+    /// (plan 20 M5).
+    Overlay {
+        /// Fixture name under `parity/mod_fixtures/`.
+        #[arg(long)]
+        fixture: String,
+        /// Repo root override (defaults to discovery from cwd).
+        #[arg(long)]
+        repo: Option<PathBuf>,
+        /// Region name to probe (repeatable).
+        #[arg(long)]
+        probe: Vec<String>,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Time mod discovery + metadata + dependency resolution (plan 20 M9 §7d).
+    Bench {
+        /// Mod directory (defaults to `parity/mod_fixtures`).
+        #[arg(long, default_value = "parity/mod_fixtures")]
+        dir: PathBuf,
+        /// Timed iterations.
+        #[arg(long, default_value_t = 20)]
+        runs: usize,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Apply a fixture mod's `patches/*.json` and verify `unapply` restores the
+    /// baseline (plan 20 M3).
+    Patch {
+        /// Fixture name under `parity/mod_fixtures/`.
+        #[arg(long)]
+        fixture: String,
+        /// Repo root override (defaults to discovery from cwd).
+        #[arg(long)]
+        repo: Option<PathBuf>,
         /// Emit a machine-readable JSON report on stdout.
         #[arg(long)]
         json: bool,

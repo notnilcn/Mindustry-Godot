@@ -28,6 +28,7 @@ pub mod game;
 pub mod io;
 pub mod log;
 pub mod math;
+pub mod mods;
 pub mod platform;
 pub mod random;
 pub mod scenario;

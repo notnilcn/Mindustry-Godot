@@ -1,0 +1,6 @@
+{
+  "name": "Test Ingot",
+  "description": "A test ingot.",
+  "hardness": 3,
+  "cost": 1.5
+}
