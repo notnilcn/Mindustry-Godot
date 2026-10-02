@@ -467,6 +467,8 @@ pub struct AsyncCore { processes: Vec<Box<dyn AsyncProcess>>, pool: WorkerPool, 
 
 Each milestone is verifiable through the plan-00 spine and `mind-headless`; evidence goes in the Changelog. Order is strict.
 
+> **Milestone status (2026-10-02, `lane/05-sim`):** M0 ✅ · M1 ✅ · M2 ✅ · M3 ✅ · M4 ✅ · M5 ✅ (core + committed `entitymeta` golden; `classids.properties` parity) · M6 ✅ · M7 ✅ · **M8 🔶 partial** — canonical FNV-1a `Checksum`, `SimCommand`/`CommandLog`, `Sim::snapshot` and the one-time P0 golden re-record are done; the `sim_core_*` scenario fixtures, `.simlog` binary form, `bench sim_core --profile {empty,mid,stress}` and the `alloc-audit` flag are deferred. **M9 ⏸ deferred** to the orchestrator's single-editor MCP mutex. Evidence per milestone is in the Changelog.
+
 **M0 — Crate skeleton + boot (smallest vertical slice).**
 - Create `mind-core` crate, `mind-macros` crate (empty macro), module tree §3.1.
 - `Sim`, `SimBuilder`, `SimConfig`, `GameState`, `State`, empty `SimSchedule` with `TickSet` chain and a `tick()` that runs it.
