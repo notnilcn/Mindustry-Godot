@@ -7,14 +7,15 @@
     { "id": "game_state", "owner": "05", "status": "active" },
     { "id": "clock_rng", "owner": "05", "status": "active" },
     { "id": "groups", "owner": "05", "status": "active" },
-    { "id": "world_grid", "owner": "06", "status": "active", "note": "world::checksum" },
-    { "id": "rules", "owner": "12", "status": "planned", "note": "Rules::checksum_part" },
-    { "id": "logic_rng", "owner": "13", "status": "planned", "note": "reserved stream" },
+    { "id": "world_grid", "owner": "06", "status": "active", "note": "world::checksum; active since plan 06 landed" },
+    { "id": "rules", "owner": "12", "status": "planned", "note": "Rules::checksum_part exists (plan 12 game::rules::tests::checksum_part_is_stable_and_sensitive); Sim::checksum fold still pending the 05/23 reconcile (plan 12 open item)" },
+    { "id": "logic_rng", "owner": "13", "status": "planned", "note": "logic landed (13); the reserved RNG stream is not folded into Sim::checksum yet" },
     { "id": "content_hash", "owner": "02", "status": "header" }
   ],
   "excluded": [
     { "id": "render", "owner": "16", "reason": "view-only (HLP §2.4)" },
     { "id": "fx", "owner": "17", "reason": "view-only (HLP §2.4)" }
   ],
+  "note": "Reviewed at the F15/F16 golden expansion: the campaign/logic/world-harness goldens are all recorded at CHECKSUM_VERSION 1; no contributor composition changed, so no version bump. `world_grid` is active; `rules`/`logic_rng` remain unfolded.",
   "bump_rule": "Any contributor change bumps CHECKSUM_VERSION and re-records every golden in the same commit (plan 00 §6.4, plan 23 R-02)."
 }

@@ -54,7 +54,17 @@
     { "id": "content_base_load", "plan": "02", "measure": "content bench --runs 20 --json", "metric": "median_ms", "budget": 200 },
     { "id": "io_save_p95", "plan": "04", "measure": "io bench-save --map synthetic --iters 50 --json", "metric": "p95_ms", "budget": 50 },
     { "id": "io_load_p95", "plan": "04", "measure": "io bench-save --map synthetic --iters 50 --json", "metric": "p95_ms", "budget": 100 },
-    { "id": "world_gen_256_p95", "plan": "06", "measure": "world bench-gen --generator simplex --width 256 --height 256 --json", "metric": "p95_ms", "budget": 250 }
+    { "id": "world_gen_256_p95", "plan": "06", "measure": "world bench-gen --generator simplex --width 256 --height 256 --json", "metric": "p95_ms", "budget": 250 },
+    { "id": "world_gen_serpulo_p95", "plan": "06", "measure": "world bench-gen --generator serpulo --width 128 --height 128 --json", "metric": "p95_ms", "budget": 250 },
+    { "id": "world_gen_erekir_p95", "plan": "06", "measure": "world bench-gen --generator erekir --width 128 --height 128 --json", "metric": "p95_ms", "budget": 250 },
+    { "id": "world_gen_asteroid_p95", "plan": "06", "measure": "world bench-gen --generator asteroid --width 500 --height 500 --json", "metric": "p95_ms", "budget": 180 },
+    { "id": "campaign_teams_p99", "plan": "12", "measure": "campaign bench --profile teams --ticks 3600 --json", "metric": "p99_ms", "budget": 0.35 },
+    { "id": "campaign_fog_p99", "plan": "12", "measure": "campaign bench --profile fog --ticks 3600 --json", "metric": "p99_ms", "budget": 0.60 },
+    { "id": "campaign_turn_p99", "plan": "12", "measure": "campaign bench --profile turn --ticks 3600 --json", "metric": "p99_ms", "budget": 0.50 },
+    { "id": "campaign_objectives_p99", "plan": "12", "measure": "campaign bench --profile objectives --ticks 3600 --json", "metric": "p99_ms", "budget": 0.10 },
+    { "id": "campaign_schematic_p99", "plan": "12", "measure": "campaign bench --profile schematic --ticks 3600 --json", "metric": "p99_ms", "budget": 1.0 },
+    { "id": "fx_program_resolve_p95", "plan": "17", "measure": "fx bench --states 2000 --frames 360 --json", "metric": "p95_ms", "budget": 1.5 },
+    { "id": "fx_program_light_p95", "plan": "17", "measure": "fx bench --states 2000 --frames 360 --json", "metric": "light_p95_ms", "budget": 0.25 }
   ],
   "alloc": {
     "assert_zero_profiles": ["sim_core", "blocks", "logistics", "power", "liquid", "heat", "combat", "units", "render", "audio", "fx"],
