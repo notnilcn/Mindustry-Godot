@@ -36,5 +36,6 @@ pub use list::{
 pub use lod::Lod;
 pub use queue::{QueueEntry, RenderQueue};
 pub use scan::{
-    CameraView, ChunkSet, ProcessBlocksOut, ScanError, floor_layers_in_view, process_blocks,
+    CameraView, ChunkSet, ProcessBlocksOut, ScanError, VisibleBlock, floor_layers_in_view,
+    process_blocks, visible_blocks,
 };

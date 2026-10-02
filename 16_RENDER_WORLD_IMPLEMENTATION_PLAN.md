@@ -677,6 +677,14 @@ Tooling: `/mnt/c/Users/Clinton/g/.opencode/skills/godot-compositor-testing/SKILL
   - **Oracle evidence.** `cargo fmt --check` clean; `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo check -p mind-gdext -p mind-headless` clean; `bash tools/build.sh` succeeds; `bash tools/godot.sh --headless --editor --quit --path client` **exit 0**; `cargo test -p mind-core --lib render::` **29 passed**; goldens `render_flat_floor` (1120 entries), `render_block_change`/`render_layer_order` (897) PASS. In-engine screenshot/MCP §7c deferred to the orchestrator's single-editor mutex.
   - **Open (M2 → M9).** `BlockRenderer` 5 quadtrees + dynamic draws, shadows/darkness FBOs, cached buildings/`BuildingCacheLayer`, overlays/lights/bloom/shields, fog/minimap provider/pixelator/Lod/env/debug, menu/loading/g3d/cutscene/screenshots, `.gdshader` port + drift check, MCP §7c and §7d budgets.
 
+- **2026-10-02 — M2 slice (`lane/16-render`): dynamic `BlockRenderer` pass.**
+  - `mind-core::render::scan::visible_blocks` (+ `VisibleBlock` export): deterministic row-major visible set of non-static, non-air blocks with the `processBlocks` `camera.bounds.grow(tilesize*2)` cull; test `visible_blocks_excludes_static_walls_and_air` (stone-wall excluded, router included). This is the headless-assertable `tileview` slice.
+  - `mind-gdext/src/render/atlas_bind.rs`: shared `RegionResolver` (page texture + normalized UVs, `env-error`/`error` fallback, missing counter) and `build_mesh`/`Quad`/`color_from`, used by the block pass.
+  - `mind-gdext/src/render/blocks.rs`: `BlockRenderer` rebuilds a per-atlas-page `ArrayMesh` of the visible dynamic blocks and assigns it to pooled `MeshInstance2D` nodes under the `Layer.block` band; `processBlocks`-style early-out on `(CameraKey, world_revision)`; multiblocks deduped by center entity. `dynamic_sprites`/`mesh_rebuilds`/`missing_regions` feed `get_render_stats`.
+  - **Deviations.** Cached (`drawCached`) buildings, cracks, team overlays, destroyed plans, status bars, shadows/darkness and the 5 quadtrees are deferred to M3/M4/M9 (this slice draws every dynamic block each rebuild). `MindTileGrid` remains off.
+  - **Oracle evidence.** fmt + workspace clippy `-D warnings` clean; `cargo check -p mind-gdext -p mind-headless` clean; `cargo test -p mind-core --lib render::` **30 passed**; goldens PASS; `bash tools/build.sh` + `bash tools/godot.sh --headless --editor --quit --path client` **exit 0**. MCP §7c (place crafter+router screenshot / `dynamic_sprites > 0`) deferred to the orchestrator's single-editor mutex.
+
+
 
 
 

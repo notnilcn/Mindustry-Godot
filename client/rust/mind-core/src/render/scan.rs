@@ -10,8 +10,11 @@
 
 use smallvec::SmallVec;
 
+use crate::content::{BlockId, ContentRegistry};
 use crate::render::floor_cache::{CHUNK_UNITS, FloorChunkGrid};
 use crate::render::layer::CacheLayerId;
+use crate::world::WorldGrid;
+use crate::world::tile::is_static_kind;
 
 /// The camera view used for culling (world pixels + team).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -184,6 +187,59 @@ pub fn process_blocks(
     (true, ProcessBlocksOut::default())
 }
 
+/// A dynamic (non-static) block tile in view (`processBlocks` `tileview`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VisibleBlock {
+    /// Tile x.
+    pub x: i32,
+    /// Tile y.
+    pub y: i32,
+    /// Block content id.
+    pub block: BlockId,
+}
+
+/// The dynamic block tiles in view, in row-major order (`processBlocks`
+/// `tileview`). Static walls bake into the floor pass and are excluded.
+///
+/// This is the deterministic visible set the headless oracle asserts; the
+/// in-engine `BlockRenderer` consumes it to emit dynamic sprites at
+/// `Layer::block` every frame (plan 16 §3.6).
+pub fn visible_blocks(
+    world: &WorldGrid,
+    content: &ContentRegistry,
+    view: &CameraView,
+) -> Vec<VisibleBlock> {
+    let size = crate::config::TILESIZE as f32;
+    let grow = size * 2.0;
+    let [bx, by, bw, bh] = view.bounds();
+    let min_x = ((bx - grow) / size).floor().max(0.0) as i32;
+    let min_y = ((by - grow) / size).floor().max(0.0) as i32;
+    let max_x = (((bx + bw + grow) / size).ceil() as i32).min(world.width() - 1);
+    let max_y = (((by + bh + grow) / size).ceil() as i32).min(world.height() - 1);
+
+    let mut out = Vec::new();
+    for y in min_y..=max_y {
+        for x in min_x..=max_x {
+            let tile = world.tile(x, y);
+            if tile.block == BlockId::AIR {
+                continue;
+            }
+            let Some(def) = content.block(tile.block) else {
+                continue;
+            };
+            if is_static_kind(def.kind) {
+                continue;
+            }
+            out.push(VisibleBlock {
+                x,
+                y,
+                block: tile.block,
+            });
+        }
+    }
+    out
+}
+
 /// `FloorRenderer.drawFloor` preliminary pass: the cache layers present in
 /// view, sorted by id, skipping `walls` (walls draw with the block pass).
 pub fn floor_layers_in_view(grid: &FloorChunkGrid, view: &CameraView) -> Vec<CacheLayerId> {
@@ -253,6 +309,48 @@ mod tests {
         state.invalidate();
         let (changed4, _) = process_blocks(&mut state, &view, 8.0);
         assert!(changed4);
+    }
+
+    #[test]
+    fn visible_blocks_excludes_static_walls_and_air() {
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+        use crate::world::TilePos;
+
+        let mut content =
+            create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+                .expect("content");
+        content.init().expect("init");
+        content.post_init().expect("post_init");
+        content.load().expect("load");
+
+        let stone = content.block_id("stone").expect("stone");
+        let wall = content.block_id("stone-wall").expect("stone-wall");
+        let router = content.block_id("router").expect("router");
+        let mut world = WorldGrid::new(16, 16);
+        world.fill(stone, BlockId::AIR);
+        world
+            .set_block(TilePos::new(4, 4), wall, 0, 0)
+            .expect("wall");
+        world
+            .set_block(TilePos::new(5, 5), router, 0, 0)
+            .expect("router");
+
+        let view = CameraView {
+            x: 64.0,
+            y: 64.0,
+            w: 320.0,
+            h: 180.0,
+            zoom: 1.0,
+            team: 0,
+        };
+        let blocks = visible_blocks(&world, &content, &view);
+        assert!(
+            blocks
+                .iter()
+                .any(|b| b.block == router && b.x == 5 && b.y == 5)
+        );
+        assert!(!blocks.iter().any(|b| b.block == wall));
+        assert!(!blocks.iter().any(|b| b.block == BlockId::AIR));
     }
 
     #[test]

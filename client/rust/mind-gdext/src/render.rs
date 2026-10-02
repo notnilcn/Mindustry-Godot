@@ -24,8 +24,11 @@ use mind_core::render::scan::CameraView;
 use crate::assets::MindAssets;
 use crate::sim_host::MindSimHost;
 
+mod atlas_bind;
+mod blocks;
 mod floor;
 
+pub use blocks::BlockRenderer;
 pub use floor::FloorRenderer;
 
 /// Per-frame render counters exposed through `MindRender.get_render_stats()`.
@@ -102,6 +105,7 @@ pub struct MindWorldRenderer {
     layer_visible: HashMap<String, bool>,
     visibility_dirty: bool,
     floor: Option<FloorRenderer>,
+    blocks: Option<BlockRenderer>,
 }
 
 #[godot_api]
@@ -118,6 +122,7 @@ impl INode2D for MindWorldRenderer {
             layer_visible: HashMap::new(),
             visibility_dirty: false,
             floor: None,
+            blocks: None,
         }
     }
 
@@ -173,27 +178,27 @@ impl MindWorldRenderer {
             .cloned()
     }
 
-    /// Constructs the plan-16 floor pass over the floor band nodes.
+    /// Constructs the plan-16 floor + dynamic block passes.
     fn build_floor(&mut self) {
         let Some(host) = self.host.clone() else {
             return;
         };
-        let Some(mut assets) = self
+        let mut assets = self
             .base()
-            .try_get_node_as::<MindAssets>("/root/MindAssets")
-        else {
-            log::warn!("MindWorldRenderer: no MindAssets autoload; floor atlas disabled");
-            // Still build the floor pass so placeholder quads render.
-            let band_nodes = self.floor_band_nodes();
-            self.floor = Some(FloorRenderer::new(host, None, band_nodes));
-            return;
-        };
-        // Ensure the atlas is loaded before the first bake.
-        if !assets.bind_mut().load_assets() {
+            .try_get_node_as::<MindAssets>("/root/MindAssets");
+        if let Some(assets) = assets.as_mut()
+            && !assets.bind_mut().load_assets()
+        {
             log::warn!("MindWorldRenderer: atlas manifest unavailable; using placeholder quads");
         }
+        if assets.is_none() {
+            log::warn!("MindWorldRenderer: no MindAssets autoload; atlas disabled");
+        }
         let band_nodes = self.floor_band_nodes();
-        self.floor = Some(FloorRenderer::new(host, Some(assets), band_nodes));
+        self.floor = Some(FloorRenderer::new(host.clone(), assets.clone(), band_nodes));
+        if let Some(block_band) = self.band_node_at(BandKey::base(Layer::Block)) {
+            self.blocks = Some(BlockRenderer::new(host, assets, block_band));
+        }
     }
 
     /// The floor band nodes in `CacheLayerId::ALL` order.
@@ -262,6 +267,14 @@ impl MindWorldRenderer {
             self.stats.missing_regions = floor_stats.missing_regions as i64;
         }
         self.stats.stage_trace.push(String::from("floor"));
+        if let Some(blocks) = self.blocks.as_mut() {
+            blocks.update(&view);
+            let block_stats = blocks.stats();
+            self.stats.dynamic_sprites = block_stats.dynamic_sprites;
+            self.stats.mesh_rebuilds += block_stats.mesh_rebuilds as i64;
+            self.stats.missing_regions += block_stats.missing_regions as i64;
+        }
+        self.stats.stage_trace.push(String::from("blocks"));
         self.queue.set_sort(true);
         self.stats.stage_trace.push(String::from("sort"));
         self.queue.flush();
