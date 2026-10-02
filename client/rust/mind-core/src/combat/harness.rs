@@ -105,10 +105,35 @@ impl CombatHarness {
             .unwrap_or(0.0)
     }
 
-    /// Advances one combat tick: buildings then bullets.
+    /// Advances one combat tick: buildings, bullets, then fires/puddles.
     pub fn tick(&mut self) {
         self.build.tick();
         self.step_bullets_only();
+        self.fire_tick(0.0);
+        self.puddle_tick();
+    }
+
+    /// Updates the fire system one tick with a water attribute multiplier.
+    pub fn fire_tick(&mut self, water_attr: f32) {
+        super::fires::update_fires(
+            &mut self.build.world,
+            &mut self.build.grid.tiles,
+            &self.build.content,
+            &mut self.rng,
+            self.fx.as_ref(),
+            water_attr,
+        );
+    }
+
+    /// Updates the puddle system one tick.
+    pub fn puddle_tick(&mut self) {
+        super::puddles::update_puddles(
+            &mut self.build.world,
+            &mut self.build.grid.tiles,
+            &self.build.content,
+            &mut self.rng,
+            self.fx.as_ref(),
+        );
     }
 
     /// Advances only the bullet systems (motion + collision + cull).
@@ -272,6 +297,39 @@ impl CombatHarness {
         for (seq, health) in buildings {
             c.part(&seq);
             c.part(&health);
+        }
+        // Fires/puddles contribute by tile order (plan 10 §6.4).
+        let mut fires: Vec<((i16, i16), f32, f32)> = self
+            .build
+            .world
+            .iter_entities()
+            .filter_map(|entity_ref| {
+                let fire = entity_ref.get::<super::fires::FireState>()?;
+                Some((fire.tile, fire.time, fire.lifetime))
+            })
+            .collect();
+        fires.sort_by_key(|entry| entry.0);
+        for (tile, time, lifetime) in fires {
+            c.part(&tile.0);
+            c.part(&tile.1);
+            c.part(&time);
+            c.part(&lifetime);
+        }
+        let mut puddles: Vec<((i16, i16), u16, f32)> = self
+            .build
+            .world
+            .iter_entities()
+            .filter_map(|entity_ref| {
+                let puddle = entity_ref.get::<super::puddles::PuddleState>()?;
+                Some((puddle.tile, puddle.liquid.raw(), puddle.amount))
+            })
+            .collect();
+        puddles.sort_by_key(|entry| entry.0);
+        for (tile, liquid, amount) in puddles {
+            c.part(&tile.0);
+            c.part(&tile.1);
+            c.part(&liquid);
+            c.part(&amount);
         }
         c.finish()
     }

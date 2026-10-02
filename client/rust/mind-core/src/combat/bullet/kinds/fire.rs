@@ -20,10 +20,6 @@ impl BulletBehavior for FireBehavior {
     fn init(&self, ctx: &mut CombatCtx<'_>, b: Entity) {
         // `FireBulletType.init`: randomize velocity magnitude within
         // `[velMin, velMax]` (defaults `0.6..2.6`).
-        let Some(lifetime) = ctx.bullet(b).map(|bullet| bullet.lifetime) else {
-            return;
-        };
-        let _ = lifetime;
         let speed = ctx.rng.range(crate::determinism::RngStream::Sim, 0.6, 2.6);
         let Some(vel) = ctx
             .world
@@ -39,6 +35,19 @@ impl BulletBehavior for FireBehavior {
             vel.x = vel.x / len * speed;
             vel.y = vel.y / len * speed;
         }
+    }
+
+    fn update(&self, ctx: &mut CombatCtx<'_>, b: Entity) {
+        // `FireBulletType.update`: trail fire creation (`fireTrailChance = 0.04`).
+        if !ctx.rng.chance(crate::determinism::RngStream::Sim, 0.04) {
+            return;
+        }
+        let Some(pos) = ctx.pos(b) else {
+            return;
+        };
+        let ts = crate::config::TILESIZE as f32;
+        let (tx, ty) = ((pos.0 / ts).floor() as i16, (pos.1 / ts).floor() as i16);
+        let _ = crate::combat::fires::create(ctx.world, tx, ty, ctx.rng);
     }
 }
 
