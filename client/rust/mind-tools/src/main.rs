@@ -88,6 +88,9 @@ enum Command {
         /// `check` reports unported shaders and uniform/texture drift.
         #[arg(value_enum)]
         command: ShadersCommand,
+        /// Also fail on ported-only uniforms/textures (plan 16 M8 reverse check).
+        #[arg(long)]
+        reverse: bool,
         /// Repo root (defaults to the current directory).
         #[arg(long, default_value = ".")]
         root: PathBuf,
@@ -178,7 +181,11 @@ fn dispatch(command: &Command) -> anyhow::Result<()> {
                 Ok(())
             }
         },
-        Command::Shaders { command, root } => match command {
+        Command::Shaders {
+            command,
+            reverse,
+            root,
+        } => match command {
             ShadersCommand::Build => {
                 let index = mind_tools::shaders::build(root)?;
                 println!(
@@ -188,22 +195,32 @@ fn dispatch(command: &Command) -> anyhow::Result<()> {
                 Ok(())
             }
             ShadersCommand::Check => {
-                let report = mind_tools::shaders::check(root)?;
+                let report = mind_tools::shaders::check(root, *reverse)?;
                 println!(
-                    "shaders check: {} ported, {} unported, {} drift",
+                    "shaders check: {} ported, {} unported ({} ok), {} drift, {} reverse drift",
                     report.ported,
                     report.unported.len(),
-                    report.drift.len()
+                    report.unported_ok.len(),
+                    report.drift.len(),
+                    report.reverse_drift.len()
                 );
+                for name in &report.unported {
+                    eprintln!("shaders check: unported: {name}");
+                }
                 for drift in &report.drift {
                     eprintln!("shaders check: drift: {drift}");
                 }
-                if report.drift.is_empty() {
+                for drift in &report.reverse_drift {
+                    eprintln!("shaders check: reverse drift: {drift}");
+                }
+                if report.is_clean(*reverse) {
                     Ok(())
                 } else {
                     anyhow::bail!(
-                        "{} shader uniform/texture drift entries",
-                        report.drift.len()
+                        "{} unported + {} forward + {} reverse shader drift entries",
+                        report.unported.len(),
+                        report.drift.len(),
+                        report.reverse_drift.len()
                     )
                 }
             }
@@ -415,20 +432,24 @@ fn run_pack(
     if run("shaders") {
         let start = Instant::now();
         let index = mind_tools::shaders::build(root)?;
-        let report = mind_tools::shaders::check(root)?;
+        let report = mind_tools::shaders::check(root, true)?;
         timings_map.insert(String::from("shaders"), start.elapsed().as_secs_f64());
         println!(
-            "pack: shaders {} indexed ({} ported, {} unported, {} drift)",
+            "pack: shaders {} indexed ({} ported, {} unported, {} drift, {} reverse drift)",
             index.shaders.len(),
             report.ported,
             report.unported.len(),
-            report.drift.len()
+            report.drift.len(),
+            report.reverse_drift.len()
         );
         for name in &report.unported {
             eprintln!("mind-tools: shader `{name}` is not ported to .gdshader yet");
         }
         for drift in &report.drift {
             eprintln!("mind-tools: shader drift: {drift}");
+        }
+        for drift in &report.reverse_drift {
+            eprintln!("mind-tools: shader reverse drift: {drift}");
         }
     }
 

@@ -240,8 +240,48 @@ pub fn visible_blocks(
     out
 }
 
-/// `FloorRenderer.drawFloor` preliminary pass: the cache layers present in
-/// view, sorted by id, skipping `walls` (walls draw with the block pass).
+/// Cached (`drawCached`) center tiles in view (`processBlocks`
+/// `tileExtraCachedView`). `is_cached` is the plan-02 `draw_cached` predicate
+/// ([`crate::render::draw_meta::BlockDrawMeta::draw_cached`] once it lands);
+/// multiblocks are indexed once at their center (`Tile.isCenter`).
+pub fn visible_cached_blocks(
+    world: &WorldGrid,
+    content: &ContentRegistry,
+    view: &CameraView,
+    is_cached: impl Fn(&crate::content::BlockDef) -> bool,
+) -> Vec<VisibleBlock> {
+    let size = crate::config::TILESIZE as f32;
+    let grow = size * 2.0;
+    let [bx, by, bw, bh] = view.bounds();
+    let min_x = ((bx - grow) / size).floor().max(0.0) as i32;
+    let min_y = ((by - grow) / size).floor().max(0.0) as i32;
+    let max_x = (((bx + bw + grow) / size).ceil() as i32).min(world.width() - 1);
+    let max_y = (((by + bh + grow) / size).ceil() as i32).min(world.height() - 1);
+
+    let mut out = Vec::new();
+    for y in min_y..=max_y {
+        for x in min_x..=max_x {
+            let tile = world.tile(x, y);
+            if tile.block == BlockId::AIR {
+                continue;
+            }
+            let Some(def) = content.block(tile.block) else {
+                continue;
+            };
+            if !is_cached(def) || !tile.is_center_with(tile.pos()) {
+                continue;
+            }
+            out.push(VisibleBlock {
+                x,
+                y,
+                block: tile.block,
+            });
+        }
+    }
+    out
+}
+
+/// `FloorRenderer.drawFloor` preliminary pass: the cache layers present in/// view, sorted by id, skipping `walls` (walls draw with the block pass).
 pub fn floor_layers_in_view(grid: &FloorChunkGrid, view: &CameraView) -> Vec<CacheLayerId> {
     let min_x = ((view.x - view.w / 2.0 - 4.0) / CHUNK_UNITS)
         .floor()
@@ -351,6 +391,43 @@ mod tests {
         );
         assert!(!blocks.iter().any(|b| b.block == wall));
         assert!(!blocks.iter().any(|b| b.block == BlockId::AIR));
+    }
+
+    #[test]
+    fn visible_cached_blocks_uses_predicate() {
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+        use crate::world::TilePos;
+
+        let mut content =
+            create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+                .expect("content");
+        content.init().expect("init");
+        content.post_init().expect("post_init");
+        content.load().expect("load");
+
+        let stone = content.block_id("stone").expect("stone");
+        let router = content.block_id("router").expect("router");
+        let mut world = WorldGrid::new(16, 16);
+        world.fill(stone, BlockId::AIR);
+        world
+            .set_block(TilePos::new(5, 5), router, 0, 0)
+            .expect("router");
+
+        let view = CameraView {
+            x: 64.0,
+            y: 64.0,
+            w: 320.0,
+            h: 180.0,
+            zoom: 1.0,
+            team: 0,
+        };
+        // A predicate that matches routers selects the tile.
+        let cached = visible_cached_blocks(&world, &content, &view, |def| def.name == "router");
+        assert_eq!(cached.len(), 1);
+        assert_eq!((cached[0].x, cached[0].y), (5, 5));
+        // A predicate that matches nothing yields an empty set.
+        let none = visible_cached_blocks(&world, &content, &view, |_| false);
+        assert!(none.is_empty());
     }
 
     #[test]

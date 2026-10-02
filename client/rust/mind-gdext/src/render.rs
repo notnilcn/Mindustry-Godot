@@ -27,9 +27,13 @@ use crate::sim_host::MindSimHost;
 mod atlas_bind;
 mod blocks;
 mod floor;
+mod shaders;
+mod shadow;
 
 pub use blocks::BlockRenderer;
 pub use floor::FloorRenderer;
+pub use shaders::ShaderRegistry;
+pub use shadow::ShadowRenderer;
 
 /// Per-frame render counters exposed through `MindRender.get_render_stats()`.
 #[derive(Debug, Default, Clone)]
@@ -52,6 +56,16 @@ pub struct RenderStats {
     pub dynamic_sprites: i64,
     /// Regions that fell back to `error`/placeholder this frame.
     pub missing_regions: i64,
+    /// Shaders loaded by the `ShaderRegistry` (plan 16 M8).
+    pub shaders_loaded: i64,
+    /// Missing-shader neutral substitutions (plan 16 M8).
+    pub shader_substitutions: i64,
+    /// Shadow-map rebuilds since boot (plan 16 M3).
+    pub shadow_rebuilds: i64,
+    /// Darkness-map rebuilds since boot (plan 16 M3).
+    pub darkness_rebuilds: i64,
+    /// Shadow events recorded in the last rebuild.
+    pub shadow_events: i64,
     /// Last frame build time in microseconds.
     pub build_us: i64,
     /// Current sim tick (updated by the facade).
@@ -80,6 +94,17 @@ impl RenderStats {
         dict.set(&key("mesh_rebuilds"), &self.mesh_rebuilds.to_variant());
         dict.set(&key("dynamic_sprites"), &self.dynamic_sprites.to_variant());
         dict.set(&key("missing_regions"), &self.missing_regions.to_variant());
+        dict.set(&key("shaders_loaded"), &self.shaders_loaded.to_variant());
+        dict.set(
+            &key("shader_substitutions"),
+            &self.shader_substitutions.to_variant(),
+        );
+        dict.set(&key("shadow_rebuilds"), &self.shadow_rebuilds.to_variant());
+        dict.set(
+            &key("darkness_rebuilds"),
+            &self.darkness_rebuilds.to_variant(),
+        );
+        dict.set(&key("shadow_events"), &self.shadow_events.to_variant());
         dict.set(&key("build_us"), &self.build_us.to_variant());
         dict.set(&key("tick"), &self.tick.to_variant());
         let mut trace = PackedStringArray::new();
@@ -106,6 +131,8 @@ pub struct MindWorldRenderer {
     visibility_dirty: bool,
     floor: Option<FloorRenderer>,
     blocks: Option<BlockRenderer>,
+    shadow: Option<ShadowRenderer>,
+    shaders: ShaderRegistry,
 }
 
 #[godot_api]
@@ -123,6 +150,8 @@ impl INode2D for MindWorldRenderer {
             visibility_dirty: false,
             floor: None,
             blocks: None,
+            shadow: None,
+            shaders: ShaderRegistry::new(),
         }
     }
 
@@ -194,8 +223,31 @@ impl MindWorldRenderer {
         if assets.is_none() {
             log::warn!("MindWorldRenderer: no MindAssets autoload; atlas disabled");
         }
+        let assets_dir = assets
+            .as_ref()
+            .map(|assets| assets.bind().assets_dir().to_string());
+        let manifest_loaded = self.shaders.load(assets_dir.as_deref());
+        self.stats.shaders_loaded = self.shaders.loaded() as i64;
+        self.stats.shader_substitutions = self.shaders.substitutions();
+        log::info!(
+            "[render] shaders loaded={} substitutions={} manifest={}",
+            self.stats.shaders_loaded,
+            self.stats.shader_substitutions,
+            manifest_loaded
+        );
         let band_nodes = self.floor_band_nodes();
         self.floor = Some(FloorRenderer::new(host.clone(), assets.clone(), band_nodes));
+        if let (Some(shadow_band), Some(dark_band)) = (
+            self.band_node_at(BandKey::base(Layer::BlockUnder)),
+            self.band_node_at(BandKey::base(Layer::Darkness)),
+        ) {
+            self.shadow = Some(ShadowRenderer::new(
+                host.clone(),
+                shadow_band,
+                dark_band,
+                &self.shaders,
+            ));
+        }
         if let Some(block_band) = self.band_node_at(BandKey::base(Layer::Block)) {
             self.blocks = Some(BlockRenderer::new(host, assets, block_band));
         }
@@ -275,6 +327,14 @@ impl MindWorldRenderer {
             self.stats.missing_regions += block_stats.missing_regions as i64;
         }
         self.stats.stage_trace.push(String::from("blocks"));
+        if let Some(shadow) = self.shadow.as_mut() {
+            shadow.update(false);
+            let shadow_stats = shadow.stats();
+            self.stats.shadow_rebuilds = shadow_stats.shadow_rebuilds;
+            self.stats.darkness_rebuilds = shadow_stats.darkness_rebuilds;
+            self.stats.shadow_events = shadow_stats.shadow_events;
+        }
+        self.stats.stage_trace.push(String::from("shadows"));
         self.queue.set_sort(true);
         self.stats.stage_trace.push(String::from("sort"));
         self.queue.flush();
@@ -334,6 +394,30 @@ impl MindWorldRenderer {
     #[func]
     pub fn get_stats(&self) -> VarDictionary {
         self.stats.to_dict()
+    }
+
+    /// Shader registry status (plan 16 M8 oracle).
+    #[func]
+    pub fn shader_status(&self) -> VarDictionary {
+        let mut dict = VarDictionary::new();
+        dict.set(
+            &GString::from("manifest_loaded"),
+            &self.shaders.manifest_loaded().to_variant(),
+        );
+        dict.set(
+            &GString::from("loaded"),
+            &(self.shaders.loaded() as i64).to_variant(),
+        );
+        dict.set(
+            &GString::from("substitutions"),
+            &self.shaders.substitutions().to_variant(),
+        );
+        let mut missing = PackedStringArray::new();
+        for name in self.shaders.missing() {
+            missing.push(&GString::from(name));
+        }
+        dict.set(&GString::from("missing"), &missing.to_variant());
+        dict
     }
 
     /// Forces a full chunk rebuild; returns the number of rebuilt chunks.
@@ -410,6 +494,14 @@ impl MindRender {
         self.renderer()
             .map(|renderer| renderer.bind().layer_visible(name))
             .unwrap_or(true)
+    }
+
+    /// Shader registry status (plan 16 M8).
+    #[func]
+    pub fn shader_status(&mut self) -> VarDictionary {
+        self.renderer()
+            .map(|renderer| renderer.bind().shader_status())
+            .unwrap_or_default()
     }
 
     /// Pins the camera at tile `(x, y)` with `zoom`.

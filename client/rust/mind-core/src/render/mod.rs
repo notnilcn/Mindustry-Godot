@@ -13,6 +13,7 @@
 pub mod bands;
 pub mod block_cache;
 pub mod commands;
+pub mod draw_meta;
 pub mod floor_cache;
 pub mod hooks;
 pub mod ids;
@@ -21,10 +22,13 @@ pub mod list;
 pub mod lod;
 pub mod queue;
 pub mod scan;
+pub mod shaders;
+pub mod shadow;
 
 pub use bands::{BandEntry, BandKey, BandPlan};
 pub use block_cache::BuildingCacheGrid;
 pub use commands::{Blend, CommandBuffer, DrawCmd, FillKind, LineKind, ShapeKind};
+pub use draw_meta::BlockDrawMeta;
 pub use floor_cache::{CHUNK_SIZE, CHUNK_UNITS, FloorChunkGrid};
 pub use hooks::RenderInvalidation;
 pub use ids::{RegionId, RegionIdTable};
@@ -37,5 +41,9 @@ pub use lod::Lod;
 pub use queue::{QueueEntry, RenderQueue};
 pub use scan::{
     CameraView, ChunkSet, ProcessBlocksOut, ScanError, VisibleBlock, floor_layers_in_view,
-    process_blocks, visible_blocks,
+    process_blocks, visible_blocks, visible_cached_blocks,
+};
+pub use shaders::{ExpectedShader, ShaderStage, Uniforms};
+pub use shadow::{
+    BLEND_SHADOW_COLOR, darkness_value, in_limited_rect, shadow_tile_color, wall_data_update,
 };
