@@ -17,6 +17,8 @@ const POLL_INTERVAL := 0.25
 @export var camera_path: NodePath = ^"../../World/Camera2D"
 ## Path to the STDB autoload whose `net` page this inspector renders.
 @export var net_path: NodePath = ^"/root/StdbConnector"
+## Content type listed in `ContentList` (plan 02 §3.7), e.g. `item`, `block`.
+@export var content_type: String = "item"
 
 var _host: Node = null
 var _camera: Node = null
@@ -24,6 +26,8 @@ var _elapsed := 0.0
 
 @onready var _label: Label = $Label
 @onready var _net_label: Label = $NetLabel
+@onready var _content_counts: Label = $ContentCounts
+@onready var _content_list: ItemList = $ContentList
 
 
 func _ready() -> void:
@@ -37,6 +41,7 @@ func _ready() -> void:
 	if _camera == null:
 		_camera = get_node_or_null("/root/Spine/World/Camera2D")
 	_refresh()
+	_refresh_content()
 
 
 func _process(delta: float) -> void:
@@ -96,6 +101,27 @@ func _refresh_net() -> void:
 
 func _wave_text(connector: Node, wave: String) -> String:
 	return "on" if bool(connector.call("wave_applied_state", wave)) else "off"
+
+
+## Content registry readout (plan 02 §3.7): per-type counts plus the ordered
+## entries of `content_type`. Read-only; sourced from MindSimHost (the plan's
+## `MindCore` singleton lands with plan 00's extension contract).
+func _refresh_content() -> void:
+	if _host == null or not is_instance_valid(_host):
+		return
+	var counts: Dictionary = _host.call("content_counts")
+	if counts.is_empty():
+		_content_counts.text = "content: -"
+		_content_list.clear()
+		return
+	var lines := PackedStringArray(["content"])
+	for key in counts.keys():
+		lines.append("%s: %d" % [str(key), int(counts[key])])
+	_content_counts.text = "\n".join(lines)
+	var names: PackedStringArray = _host.call("content_list", content_type)
+	_content_list.clear()
+	for name in names:
+		_content_list.add_item(str(name))
 
 
 func _cursor_tile_text() -> String:

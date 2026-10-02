@@ -16,7 +16,7 @@ use super::{NodeObjective as obj, TechTreeBuilder};
 
 /// Loads the tree into `t`.
 pub fn load(t: &mut TechTreeBuilder<'_>) {
-    t.root("Erekir", "core-bastion", true);
+    t.root("erekir", "core-bastion", true);
     t.set_cost_multipliers(&[
         ("copper", 0.9),
         ("lead", 0.9),

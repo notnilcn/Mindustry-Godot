@@ -20,6 +20,7 @@ pub mod ctype;
 pub mod id;
 pub mod load;
 pub mod names;
+pub mod parity;
 pub mod parser_hooks;
 pub mod registries;
 pub mod settings_store;
@@ -41,6 +42,7 @@ pub use load::{
     ContentEntry, ContentRegistry, LifecyclePhase, MappedId, TemporaryMapper, content_counts,
 };
 pub use names::{NameMaps, mod_content_name_map, transform_name};
+pub use parity::{AssetManifest, AuditReport, BundleKeysFile, GoldenContent, audit, dump_golden};
 pub use registries::blocks::{
     BlockDef, BlockFlag, BlockGroup, BlockKind, BlockSpec, Blocks, BuildVisibility, Consume,
     ConsumeSpec, EnvMask,

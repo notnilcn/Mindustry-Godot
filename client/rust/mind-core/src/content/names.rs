@@ -36,6 +36,11 @@ pub fn mod_content_name_map(name: &str) -> Option<&'static str> {
         .map(|(_, new)| *new)
 }
 
+/// All legacy fallbacks in declaration order (parity audit golden input).
+pub fn mod_content_name_map_entries() -> &'static [(&'static str, &'static str)] {
+    MOD_CONTENT_NAME_MAP
+}
+
 /// Per-type name maps plus the global `nameMap` (`ContentLoader`).
 ///
 /// Iteration is insertion-ordered (`IndexMap`) — no `HashMap` iteration anywhere

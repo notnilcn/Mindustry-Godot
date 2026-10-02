@@ -43,3 +43,24 @@ offset_right = 310.0
 offset_bottom = 192.0
 mouse_filter = 2
 text = "net: -"
+
+[node name="ContentCounts" type="Label" parent="."]
+layout_mode = 1
+offset_left = 10.0
+offset_top = 200.0
+offset_right = 310.0
+offset_bottom = 320.0
+mouse_filter = 2
+text = "content: -"
+
+[node name="ContentList" type="ItemList" parent="."]
+layout_mode = 1
+offset_left = 10.0
+offset_top = 328.0
+offset_right = 310.0
+offset_bottom = 468.0
+mouse_filter = 2
+auto_height = true
+max_text_lines = 1
+same_column_width = true
+fixed_column_width = 280

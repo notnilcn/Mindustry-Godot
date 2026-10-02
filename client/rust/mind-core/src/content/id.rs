@@ -150,7 +150,7 @@ impl BlockId {
     /// The always-present empty block (`air`, id `0`).
     pub const AIR: BlockId = BlockId::new(0);
     /// Upstream `stone-wall` id in `Blocks.java` order (pinned by a test).
-    pub const STONE_WALL: BlockId = BlockId::new(79);
+    pub const STONE_WALL: BlockId = BlockId::new(80);
 }
 
 impl ItemId {

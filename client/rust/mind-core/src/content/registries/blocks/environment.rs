@@ -193,6 +193,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         ..spec("build16", BlockKind::ConstructBlock)
     })?;
 
+    sink.push(spec("deep-water", BlockKind::Floor))?;
+
     sink.push(spec("shallow-water", BlockKind::Floor))?;
 
     sink.push(spec("tainted-water", BlockKind::Floor))?;

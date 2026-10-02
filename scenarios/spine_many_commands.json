@@ -8,7 +8,7 @@
   "command_generator": { "type": "seeded_ops", "count": 10000, "steps": 10000, "mode": "mixed" },
   "steps": 10000,
   "expect": {
-    "checksum": "086e7c26935c2acb",
+    "checksum": "37cc80ef11cfec1e",
     "tiles": []
   }
 }

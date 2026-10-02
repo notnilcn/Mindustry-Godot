@@ -9,7 +9,7 @@
   "steps": 600,
   "emit_per_tick": true,
   "expect": {
-    "checksum": "52edd459bfa28b41",
+    "checksum": "791592fab6a00469",
     "tiles": []
   }
 }

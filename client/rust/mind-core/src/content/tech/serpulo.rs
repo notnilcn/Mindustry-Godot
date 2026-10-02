@@ -14,7 +14,7 @@ use super::{NodeObjective as obj, TechTreeBuilder};
 
 /// Loads the tree into `t`.
 pub fn load(t: &mut TechTreeBuilder<'_>) {
-    t.root("Serpulo", "core-shard", false);
+    t.root("serpulo", "core-shard", false);
     t.at(1, "conveyor");
     t.at(2, "junction");
     t.at(3, "router");

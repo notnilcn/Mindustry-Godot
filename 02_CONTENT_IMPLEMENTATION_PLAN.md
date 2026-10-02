@@ -8,7 +8,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | In progress — M1–M4 complete (2026-10-01; lane 02) |
+| **Status** | Complete — M1–M7 (M1–M4 merged from `lane/02-content`/`lane/02-m3`; M5–M7 on `lane/02-m5`, 2026-10-02) |
 | **Phase** | P1 — Platform & content (HIGH_LEVEL_PLAN §5) |
 | **Depends on** | `00_FOUNDATION_IMPLEMENTATION_PLAN.md` (workspace, `mind-core`/`mind-headless` crates, headless harness, spine state inspector). |
 | **Blocks** | `03_ASSETS_IMPLEMENTATION_PLAN.md`, `04_IO_SERIALIZATION_IMPLEMENTATION_PLAN.md`, `07_BLOCKS_BUILD_IMPLEMENTATION_PLAN.md`, `10_COMBAT_BULLETS_IMPLEMENTATION_PLAN.md`, `11_UNITS_AI_WAVES_IMPLEMENTATION_PLAN.md`, `12_CAMPAIGN_IMPLEMENTATION_PLAN.md`, `20_MODS_IMPLEMENTATION_PLAN.md`. |
@@ -358,7 +358,7 @@ Port `UnitCommands` (10), `TeamEntries` (stub), `UnitStances` (8 + item stances)
 
 **M6 — Mod/patch registry hooks.** `RegistryIndexSnapshot`, `remove`/`remove_last`/`set_current_mod`, `transform_name`, `parser_hooks.rs`, `arr_epoch` growth. Contract tests with a fake provider/parser replicating `DataAssetTests` + `PatcherTests` reset semantics (plan 20 replaces the fake). Deliver the written hand-off note in §3.6 to `20_MODS_IMPLEMENTATION_PLAN.md`. **(done — hand-off note is §3.6.1; plan 20 untouched, orchestrator reconciles)**
 
-**M7 — Parity audit tooling, MCP integration, perf gate.** `mind-headless content audit` with bundle + region-manifest checks; golden dump committed; CI job; MCP inspector `Content` tab; ledgers finalized with zero unported rows; §7 checklist green.
+**M7 — Parity audit tooling, MCP integration, perf gate.** `mind-headless content audit` with bundle + region-manifest checks; golden dump committed; CI job; MCP inspector `Content` tab; ledgers finalized with zero unported rows; §7 checklist green. **(done — source-derived gate + JVM golden both committed; blocks ledger 441→447 via JVM audit; MCP in-engine run deferred to the orchestrator; see Changelog)**
 
 ---
 
@@ -492,17 +492,27 @@ Regressions block the P1 gate (HIGH_LEVEL_PLAN §7.4).
 
 - [x] `ContentType` ordinals/names/folders match golden (`content_type_ordinals`).
 - [x] Dense-ID invariant passes for all 12 live types (`log_content`).
-- [ ] Per-type counts and ordered names match golden for every type (M2/M4/M5 ledgers show 0 unported).
-- [ ] Tech trees: node count, parent/depth, requirement stacks, objective order match golden for Serpulo and Erekir.
-- [ ] `ErekirTechTree.rebalance()` test green (scale-once guard, requirement filter). *(M2: guard green; requirement filter awaits M3/M5 units/turrets.)*
-- [ ] Bundle audit: 0 missing `<type>.<name>.name` keys; localized names equal golden.
-- [ ] Region audit: 0 missing required regions (soft warnings listed and triaged).
-- [ ] Mod/patch contract tests green with fake provider; hand-off note delivered to plan 20.
+- [x] Per-type counts and ordered names match golden for every type (M2/M4/M5 ledgers show 0 unported; `content audit` counts/names/fields green; `parity::tests::names_ids_match_golden`).
+- [x] Tech trees: node count, parent/depth, requirement stacks, objective order match golden for Serpulo and Erekir (`content audit` tech_trees green; `parity::tests::field_diff`).
+- [x] `ErekirTechTree.rebalance()` test green (scale-once guard + Erekir unit bullets; turret-ammo half is plan 10 because those bullets register there — recorded deviation).
+- [x] Bundle audit: 0 missing `<type>.<name>.name` keys outside the 46 upstream-absent exemptions (internal `air`/`build*`, ore blocks, 5 legacy/campaign blocks, hidden planets/units, `status.none`, `weather.suspend-particles`); localized names equal golden (`parent` booted from `parity/bundle_keys.json`; `parity::tests::bundle_keys`).
+- [x] Region audit: 0 manifest region failures over the source-derived `parity/asset_manifest.json` (2208 regions, 33 item/liquid expectations, 0 soft misses); the packed manifest stays plan 03's artifact.
+- [x] Mod/patch contract tests green with fake provider; hand-off note delivered as §3.6.1 (plan 20 owns reconciliation).
 - [x] `content load-order-bad` fails as expected.
-- [ ] MCP inspector scenario passes with screenshot evidence; `godot_log errors` empty.
-- [ ] Perf budgets met and recorded (median load ≤ 200 ms).
+- [ ] MCP inspector scenario passes with screenshot evidence; `godot_log errors` empty. **DEFERRED (orchestrator):** the single-editor mutex is held by another lane; the additive `ContentCounts`/`ContentList` nodes and `MindSimHost.content_counts()/content_list()` are landed but not driven in-engine here.
+- [x] Perf budgets met and recorded (median load 12.32 ms debug ≤ 200 ms release; audit ≪ 2 s).
 - [x] `cargo clippy -p mind-core -- -D warnings` clean; no `unwrap()` on runtime content paths.
-- [ ] Ledgers, golden, audit report, and this plan’s Changelog committed.
+- [x] Ledgers, golden, audit report, and this plan’s Changelog committed.
+
+### 7f. CI integration (orchestrator-owned; not edited by lane 02)
+
+Add a `content-audit` job/step after the Rust test job:
+
+```
+cargo run -q -p mind-headless --manifest-path client/rust/Cargo.toml -- content audit --out parity/reports/content_audit.md
+```
+
+Exit code is the gate (0 errors; bundle exemptions and soft region warnings are triaged in `parity/bundle_keys.json` / this plan). `cargo test -p mind-core` already runs the same audit via `content::parity::tests::{names_ids_match_golden, bundle_keys, regions, field_diff}` against the committed `parity/{golden_content,bundle_keys,asset_manifest}.json`.
 
 ---
 
@@ -510,7 +520,7 @@ Regressions block the P1 gate (HIGH_LEVEL_PLAN §7.4).
 
 | # | Risk / decision | Default taken | Status |
 |---|---|---|---|
-| R1 | Golden dump provenance: generating `golden_content.json` requires a one-off JVM run (JDK 17 + upstream `:core` classpath) on the dev machine. | Ship `parity/java/DumpContent.java`; run manually per upstream content change; commit the JSON. It never writes into the Mindustry checkout. Fallback if no JVM: source-order parser + bundle/asset cross-check (weaker, flagged). | **NEEDS USER DECISION** (is a one-off JVM parity run acceptable?) |
+| R1 | Golden dump provenance: generating `golden_content.json` requires a one-off JVM run (JDK 17 + upstream `:core` classpath) on the dev machine. | Ship `parity/java/DumpContent.java`; run manually per upstream content change; commit the JSON. It never writes into the Mindustry checkout. Fallback if no JVM: source-order parser + bundle/asset cross-check (weaker, flagged). | **RESOLVED at M7 (NUD-10 answer A):** JDK 17 + network were available; the dump ran against a temp Gradle copy of `Mindustry`+`Arc` and produced `parity/java/jvm_golden_content.json` (`parity/java/run.sh`). The CI gate stays source-derived (`parity/golden_content.json`) pending reconciliation of the 56 documented block-field diffs / plan-10/19 count deltas (`parity/reports/jvm_golden_diff.md`). |
 | R2 | ObjectSet iteration order differs from Java. | Use insertion-ordered sets everywhere; sort where upstream sorts; UI lists re-sort. Any visible ordering mismatch is a bug against golden. | Resolved by design |
 | R3 | Blocks.java split across behavior vs metadata may cause churn when plan 07 lands. | Contract: plan 07 reads `BlockDef` and never re-registers; behavior side tables keyed by `BlockId` live in 07. Orchestrator to reconcile field ownership at plan-07 kickoff. | Needs cross-plan reconciliation |
 | R4 | `BulletDef` shape must anticipate plan 10 (behavior) and plan 20 (JSON `type` field). | Ship data-faithful fields + `kind` tag; plan 10 extends via behavior side table, not by editing records. Reconcile with 10 before both ship. | Needs cross-plan reconciliation |
@@ -573,3 +583,11 @@ Regressions block the P1 gate (HIGH_LEVEL_PLAN §7.4).
 - 2026-10-02 — **M6 complete** (lane 02, branch `lane/02-m5`). Finished the mod/patch registry contract. `ContentRegistry::create_mod_content(&mut dyn ModContentProvider)` now drives the plan-20 seam: provider load, then `UnitStances::load_after_mods` even when per-asset errors are reported (returns merged `ContentErrors`). `remove(ContentRef)` mirrors `ContentLoader.remove` (take record, drop exactly its name, run `remove_content()`); `remove_last()` gained the upstream `peek() == lastAdded` guard; both bump `arr_epoch`. `RegistryIndexSnapshot` now carries the full index the plan requires (per-type lengths + `NameMaps` + `current_mod` + `TemporaryMapper`) and `restore_index` restores all four, clears `last_added` and bumps `arr_epoch`. Contract tests: `parser_hooks::tests::provider_contract` (fake `dp` provider: add → resolve `dp-testitem` + localized name from an in-memory bundle + `is_patch_content` + auto item stance; failed asset adds no content/name while the good asset still loads; `remove`/`remove_last` semantics) and `parser_hooks::tests::index_snapshot_restore` (`PatcherTests.unitWeapons` append + `specificArrayRequirements` array edit + mod content added, then `restore_index` + `ResetAction`s restore weapons/requirements and the exact ID set). Written hand-off note delivered as §3.6.1 (plan 20 not edited).
   - **Verification (verbatim):** `cargo fmt --all -- --check` clean; `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo test -p mind-core` → **79 passed; 0 failed** (adds `parser_hooks::tests::{provider_contract, index_snapshot_restore}`). `content load` unchanged (773 total: `item 22, block 441, bullet 112, liquid 11, status 23, unit 65, weather 6, sector 46, planet 7, team 0, unitCommand 10, unitStance 30`). Goldens unchanged (`375c68a53e861948` / `52edd459bfa28b41` / `086e7c26935c2acb`).
   - **Recorded deviations:** (a) `remove` in an index-based registry cannot keep Java object-identity semantics for later records; it removes the exact record + name and leaves later stored ids stale exactly like upstream `ContentLoader.remove` (ids are only validated at startup `logContent`), documented at the API; (b) `RegistryIndexSnapshot` is now `!PartialEq` (holds cloned name maps/mapper) — no caller compared snapshots; (c) the deferred `ModSet` parameter stays out of the trait (`§3.6.1` item 1) until plan 20's reconcile.
+- 2026-10-02 — **M7 complete** (lane 02, branch `lane/02-m5`). Delivered the parity audit toolchain and closed it against the JVM.
+  - **Tooling:** `content/parity.rs` (`GoldenContent`/`BundleKeysFile`/`AssetManifest`/`AuditReport`, `dump_golden`, `audit`), harness subcommands `content dump` (`--bundle`, `--out`) and `content audit` (`--golden`, `--bundle`, `--manifest`, `--out` markdown report, `--json`), committed gate `parity/golden_content.json` + source-derived inputs `parity/bundle_keys.json` (3496 keys, 46 verified upstream-absent exemptions), `parity/asset_manifest.json` (2208 source sprite regions, 33 item/liquid expectations), generators `parity/tools/gen_audit_inputs.py`, `parity/tools/jvm_golden_diff.py`, the standalone JVM dump `parity/java/DumpContent.java` + `run.sh`, and evidence `parity/reports/{content_audit.md,jvm_golden_diff.md}`. `cargo test` runs the same audit via `content::parity::tests::{names_ids_match_golden, bundle_keys, regions, field_diff}` over the committed inputs (`include_str!`).
+  - **JVM golden (NUD-10, answer A) — produced.** JDK 17 + network were available; a temp copy of upstream `Mindustry`+`Arc` was built with `./gradlew --no-daemon :core:jar :tests:testClasses` (2m23s) and `parity/java/run.sh` ran `DumpContent` through `ApplicationTests.launchApplication(false)`; `parity/java/jvm_golden_content.json` is committed. The JVM dump found and the lane fixed: 6 missing `Blocks.java` records (`deep-water` swallowed by the `ConstructBlock` `for` loop in the generator's statement splitter; 5 bare `new Legacy*`/`LegacyCommandCenter` constructions without field assignment) → **447/447 blocks, 0 unported**; tree roots were capitalized (`Serpulo`/`Erekir`) vs upstream lowercase; `Mathf.round(value, step)` truncates rather than rounds-to-nearest (fixed `round_to`, `UI.roundAmount` research costs e.g. graphite-press 2400/900); consumer-derived `hasLiquids`/`hasPower` (`Consume.apply`); `Thruster.update` preset was wrong. Remaining JVM deltas are documented and owned: bullets 112→202 and units 65→70 (plan 10 turret ammo/missiles), sectors 46→95 (plan 19 `SectorSubmissions`), localized names (JVM harness never initializes `Core.bundle`), 56 block field-diff rows (generator class-default reconciliation; `air` is a JVM `@OverrideCallSuper` codegen artifact — bytecode verified), all listed in `parity/reports/jvm_golden_diff.md`.
+  - **Verification (verbatim):** `cargo fmt --all -- --check` clean; `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo test -p mind-core` → **83 passed; 0 failed**, incl. `content::parity::tests::{names_ids_match_golden, bundle_keys, regions, field_diff}`. `content load` → **block 447**, unit 65, bullet 112, total **779**. `content audit` → `counts pass / names_ids_fields pass / tech_trees pass / mod_content_name_map pass / dangling_refs pass / bundle_keys pass (667 checked, 46 exemptions, 0 missing) / regions pass (33 manifest entries, 2208 regions, 0 soft misses)`, exit 0, 0 errors/0 warnings. `content bench --runs 10` median **12.53 ms** debug (budget met). Ledgers: `blocks.md` **447 ported / 0 unported**, `units.md` **65 ported / 0 unported**.
+  - **Goldens re-recorded (block IDs shifted when `deep-water` was restored at upstream id 21; `stone-wall` 79 → 80):** `spine_place_break` `375c68a53e861948` → **`2033eb5b4ec1206d`**, `spine_determinism` `52edd459bfa28b41` → **`791592fab6a00469`**, `spine_many_commands` `086e7c26935c2acb` → **`37cc80ef11cfec1e`** (all pass; `AGENTS.md` golden reference updated; `stdb_*` scenarios pass unchanged). `BlockId::STONE_WALL` updated to 80.
+  - **Inspector `Content` tab (additive, in-engine run deferred):** `state_inspector.tscn` gains `ContentCounts` (Label) + `ContentList` (ItemList); `state_inspector.gd` populates them from `MindSimHost.content_counts() -> Dictionary<GString,i64>` / `content_list(type) -> PackedStringArray` (read-only; `MindSimHost` keeps a content snapshot until plan 05 moves `Content` into the sim). The plan's `MindCore` singleton does not exist yet, so the methods live on `MindSimHost`. MCP steps §7c are **DEFERRED to the orchestrator** (single-editor mutex).
+  - **Files outside mind-core/mind-headless/parity/plan docs:** `client/rust/mind-gdext/src/sim_host.rs`, `client/scenes/ui/state_inspector.tscn`, `client/ui/state_inspector.gd`, `scenarios/{spine_place_break,spine_determinism,spine_many_commands}.json`, `AGENTS.md`.
+  - **Blockers/risks:** the remaining JVM-vs-Rust deltas above (plan-10/19 counts, 56 block field rows) are the audit's triaged follow-up list; the CI gate intentionally stays source-derived until they close. In-engine MCP re-record/verification is the orchestrator's merge step.

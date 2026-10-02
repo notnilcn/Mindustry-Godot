@@ -331,6 +331,12 @@ pub enum BlockKind {
     TileableLogicDisplay = 132,
     /// `mindustry.world.blocks.*` (CanvasBlock).
     CanvasBlock = 133,
+    /// `mindustry.world.blocks.campaign.LegacyMechPad` (content name `legacy-mech-pad`).
+    LegacyMechPad = 134,
+    /// `mindustry.world.blocks.units.LegacyUnitFactory` (3 legacy variants).
+    LegacyUnitFactory = 135,
+    /// `mindustry.world.blocks.campaign.LegacyCommandCenter` (`command-center`).
+    LegacyCommandCenter = 136,
 }
 
 impl BlockKind {
@@ -470,6 +476,9 @@ impl BlockKind {
         BlockKind::LogicDisplay,
         BlockKind::TileableLogicDisplay,
         BlockKind::CanvasBlock,
+        BlockKind::LegacyMechPad,
+        BlockKind::LegacyUnitFactory,
+        BlockKind::LegacyCommandCenter,
     ];
 
     /// Stable ordinal (content/audit ABI).
@@ -614,6 +623,9 @@ impl BlockKind {
             BlockKind::LogicDisplay => "LogicDisplay",
             BlockKind::TileableLogicDisplay => "TileableLogicDisplay",
             BlockKind::CanvasBlock => "CanvasBlock",
+            BlockKind::LegacyMechPad => "LegacyMechPad",
+            BlockKind::LegacyUnitFactory => "LegacyUnitFactory",
+            BlockKind::LegacyCommandCenter => "LegacyCommandCenter",
         }
     }
 }
@@ -1557,7 +1569,6 @@ impl BlockSpec {
             }
             BlockKind::Thruster => {
                 spec.solid = Some(true);
-                spec.update = Some(true);
             }
             // B3-B6 kinds carry their class defaults in the generated waves.
             _ => {}
@@ -2319,6 +2330,21 @@ impl Content for BlockDef {
             .consumes
             .iter()
             .position(|spec| matches!(spec.consume, Consume::Power { .. }));
+
+        // `Consume.apply(Block)` flags: liquid consumers imply `hasLiquids`
+        // (`ConsumeLiquidBase`/`ConsumeLiquids`/`ConsumeLiquidFilter`) and
+        // `ConsumePower` implies `hasPower`.
+        for spec in &self.consumes {
+            match &spec.consume {
+                Consume::Liquid { .. } | Consume::Liquids(_) | Consume::Coolant { .. } => {
+                    self.has_liquids = true;
+                }
+                Consume::Power { .. } => {
+                    self.has_power = true;
+                }
+                _ => {}
+            }
+        }
         Ok(())
     }
 
@@ -2380,9 +2406,10 @@ pub fn ui_round_amount(number: i32) -> i32 {
     }
 }
 
-/// `Mathf.round(value, step)`.
+/// `Mathf.round(value, step)` — Arc truncates toward zero
+/// (`(int)(value / step) * step`), it does **not** round to nearest.
 pub fn round_to(value: f32, step: f32) -> f32 {
-    ((value / step) + 0.5).floor() * step
+    ((value / step) as i32) as f32 * step
 }
 
 /// Sink for generated block waves.
@@ -2637,7 +2664,7 @@ mod tests {
         let blocks = Blocks::new();
         assert_eq!(blocks.id("stone-wall").unwrap(), BlockId::STONE_WALL);
         assert_eq!(blocks.name(BlockId::STONE_WALL).unwrap(), "stone-wall");
-        assert_eq!(blocks.len(), 441, "M4 block count (B1-B6)");
+        assert_eq!(blocks.len(), 447, "M4 block count + M7 JVM-golden fix");
     }
 
     /// Plan 02 §7a: `blocks::health_and_buildtime_derivation` — `Block.init()`
@@ -2683,11 +2710,12 @@ mod tests {
         let lead = registry.item_id("lead").unwrap();
 
         let press = registry.block_by_name("graphite-press").unwrap();
-        // round_to(60 + 75^1.11*20, 10) = 2470 -> roundAmount(1000 step) -> 2500
-        // round_to(60 + 30^1.11*20, 10) = 930  -> roundAmount(100 step)  -> 900
+        // Arc `Mathf.round` truncates: round(60 + 75^1.11*20, 10) = 2470,
+        // then `UI.roundAmount` truncates to 2400 (JVM golden confirms).
+        // round(60 + 30^1.11*20, 10) = 930 -> `roundAmount` 900.
         assert_eq!(
             press.research_requirements(),
-            vec![ItemStack::new(copper, 2500), ItemStack::new(lead, 900)]
+            vec![ItemStack::new(copper, 2400), ItemStack::new(lead, 900)]
         );
 
         // Explicit `researchCost` overrides the formula (radar).
@@ -2711,7 +2739,7 @@ mod tests {
     #[test]
     fn all_metadata_valid() {
         let registry = test_registry();
-        assert_eq!(registry.blocks().len(), 441);
+        assert_eq!(registry.blocks().len(), 447);
         for block in registry.blocks() {
             assert!(block.health > 0, "{} has no health", block.name);
             assert!(

@@ -1211,12 +1211,39 @@ def parse_top_statement(parsed, statement, region, env):  # noqa: F811
                 raw.set("generateIcons", False)
                 parse_body(raw, raw.body_text, env)
                 parsed.append(raw)
-            return
-        for sub in split_statements(inner):
-            parse_top_statement(parsed, sub, region, env)
+        else:
+            for sub in split_statements(inner):
+                parse_top_statement(parsed, sub, region, env)
+        # `split_statements` only breaks on `;`, so a `for(...){...}` loop with
+        # no trailing semicolon swallows the next declaration (e.g. `deepwater`
+        # after the `ConstructBlock` loop). Parse the remainder after `}`.
+        remainder = s[brace + len(inner) + 2:].strip()
+        if remainder:
+            parse_top_statement(parsed, remainder, region, env)
         return
     m = re.match(r"^(?:this\.)?([A-Za-z_$][\w$]*)\s*=\s*new\s+([\w.]+)\s*(\(.*)$", s, re.S)
     if not m:
+        # Free construction (`new LegacyMechPad("legacy-mech-pad");`) registers a
+        # content record without a field assignment.
+        bare = re.match(r"^new\s+([\w.]+)\s*(\(.*)$", s, re.S)
+        if bare:
+            cls = bare.group(1).split(".")[-1]
+            rest = bare.group(2)
+            close = find_matching(rest, "(", ")")
+            arg_text = rest[1:close]
+            after = rest[close + 1:]
+            body = ""
+            if "{{" in after:
+                body = balanced(after, after.index("{{") + 1)
+            name = None
+            if arg_text.strip().startswith('"'):
+                end = arg_text.index('"', 1)
+                name = arg_text[1:end]
+            if name is not None:
+                raw = RawBlock(name.replace("-", "_"), cls, name, region, body)
+                parse_body(raw, body, env)
+                parsed.append(raw)
+                return
         local = re.match(r"^(?:var|[A-Za-z_][\w<>\[\], .]*)\s+([A-Za-z_$][\w$]*)\s*=\s*(.*)$", s, re.S)
         if local:
             try:

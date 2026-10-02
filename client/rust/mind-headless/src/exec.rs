@@ -2,6 +2,7 @@
 
 //! Command implementations.
 
+use std::collections::BTreeMap;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -11,7 +12,8 @@ use log::LevelFilter;
 use mind_core::command::CommandRecord;
 use mind_core::config::MindConfig;
 use mind_core::content::{
-    Blocks, ContentRegistry, MemoryBundle, MemoryUnlockStore, content_counts, create_base_content,
+    AssetManifest, Blocks, BundleKeysFile, ContentRegistry, GoldenContent, MemoryBundle,
+    MemoryUnlockStore, audit, content_counts, create_base_content, dump_golden,
 };
 use mind_core::scenario::{Scenario, ScenarioPlayer, read_command_log, write_command_log};
 use mind_core::sim::{Sim, StateDump};
@@ -124,6 +126,22 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             ContentCommand::Ids { json, out } => cmd_content_ids(*json, out.as_deref()),
             ContentCommand::Bench { runs, json } => cmd_content_bench(*runs, *json),
             ContentCommand::LoadOrderBad => cmd_content_load_order_bad(),
+            ContentCommand::Dump { out, bundle, json } => {
+                cmd_content_dump(out.as_deref(), bundle.as_deref(), *json)
+            }
+            ContentCommand::Audit {
+                golden,
+                bundle,
+                manifest,
+                out,
+                json,
+            } => cmd_content_audit(
+                golden.as_deref(),
+                bundle.as_deref(),
+                manifest.as_deref(),
+                out.as_deref(),
+                *json,
+            ),
         },
     }
 }
@@ -500,7 +518,17 @@ fn percentile(samples: &[u64], percent: usize) -> u64 {
 /// Boots base content (create + init + postInit + load), the `content` harness
 /// path. Assets/bundle are in-memory; headless skips icon/region loading.
 fn boot_content() -> anyhow::Result<ContentRegistry> {
-    let bundle = MemoryBundle::new();
+    boot_content_with(None)
+}
+
+/// Boots base content with an optional bundle key map (localized names).
+fn boot_content_with(keys: Option<&BTreeMap<String, String>>) -> anyhow::Result<ContentRegistry> {
+    let bundle = match keys {
+        Some(keys) => {
+            MemoryBundle::with_pairs(keys.iter().map(|(key, value)| (key.clone(), value.clone())))
+        }
+        None => MemoryBundle::new(),
+    };
     let store = MemoryUnlockStore::new();
     let mut registry = create_base_content(&bundle, &store, true)?;
     registry.init()?;
@@ -508,6 +536,36 @@ fn boot_content() -> anyhow::Result<ContentRegistry> {
     registry.load()?;
     registry.log_content()?;
     Ok(registry)
+}
+
+/// Loads a `parity/bundle_keys.json` file, if the path exists.
+fn load_bundle_keys(path: Option<&Path>) -> anyhow::Result<Option<BundleKeysFile>> {
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    if !path.exists() {
+        return Ok(None);
+    }
+    let text =
+        std::fs::read_to_string(path).with_context(|| format!("reading `{}`", path.display()))?;
+    let file: BundleKeysFile = serde_json::from_str(&text)
+        .with_context(|| format!("parsing bundle keys `{}`", path.display()))?;
+    Ok(Some(file))
+}
+
+/// Loads an `asset_manifest.json` file, if the path exists.
+fn load_manifest(path: Option<&Path>) -> anyhow::Result<Option<AssetManifest>> {
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    if !path.exists() {
+        return Ok(None);
+    }
+    let text =
+        std::fs::read_to_string(path).with_context(|| format!("reading `{}`", path.display()))?;
+    let manifest: AssetManifest = serde_json::from_str(&text)
+        .with_context(|| format!("parsing manifest `{}`", path.display()))?;
+    Ok(Some(manifest))
 }
 
 fn type_counts(registry: &ContentRegistry) -> Vec<ContentTypeCount> {
@@ -538,6 +596,109 @@ fn cmd_content_load_order_bad() -> anyhow::Result<i32> {
             Ok(EXIT_FAIL)
         }
     }
+}
+
+/// `content dump`: writes the parity golden snapshot (plan 02 §6.2/§7b).
+fn cmd_content_dump(out: Option<&Path>, bundle: Option<&Path>, json: bool) -> anyhow::Result<i32> {
+    let bundle_file = load_bundle_keys(bundle)?;
+    let registry = boot_content_with(bundle_file.as_ref().map(|file| &file.keys))?;
+    let golden = dump_golden(&registry);
+    let text = format!("{}\n", serde_json::to_string_pretty(&golden)?);
+    if let Some(path) = out {
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating `{}`", parent.display()))?;
+        }
+        std::fs::write(path, &text).with_context(|| format!("writing `{}`", path.display()))?;
+    }
+    if json || out.is_none() {
+        print!("{text}");
+    } else if let Some(path) = out {
+        log::info!("content dump written to {}", path.display());
+    }
+    Ok(EXIT_PASS)
+}
+
+/// `content audit`: mechanical parity gate (plan 02 §7b/§7e).
+fn cmd_content_audit(
+    golden: Option<&Path>,
+    bundle: Option<&Path>,
+    manifest: Option<&Path>,
+    out: Option<&Path>,
+    json: bool,
+) -> anyhow::Result<i32> {
+    let golden_path = golden.unwrap_or_else(|| Path::new("parity/golden_content.json"));
+    let text = std::fs::read_to_string(golden_path).with_context(|| {
+        format!(
+            "reading golden `{}` (run `content dump --out` to create it)",
+            golden_path.display()
+        )
+    })?;
+    let golden: GoldenContent = serde_json::from_str(&text)
+        .with_context(|| format!("parsing golden `{}`", golden_path.display()))?;
+
+    let bundle_path = bundle.unwrap_or_else(|| Path::new("parity/bundle_keys.json"));
+    let manifest_path = manifest.unwrap_or_else(|| Path::new("parity/asset_manifest.json"));
+    let bundle_file = load_bundle_keys(Some(bundle_path))?;
+    let manifest = load_manifest(Some(manifest_path))?;
+
+    let registry = boot_content_with(bundle_file.as_ref().map(|file| &file.keys))?;
+    let report = audit(&registry, &golden, bundle_file.as_ref(), manifest.as_ref());
+
+    if let Some(path) = out {
+        let mut markdown = String::new();
+        markdown.push_str("# Content audit report\n\n");
+        markdown.push_str(&format!("- Golden: `{}`\n", golden_path.display()));
+        markdown.push_str(&format!(
+            "- Status: **{}**\n\n",
+            if report.pass() { "PASS" } else { "FAIL" }
+        ));
+        markdown.push_str("| check | status | detail |\n|---|---|---|\n");
+        for check in &report.checks {
+            markdown.push_str(&format!(
+                "| {} | {} | {} |\n",
+                check.name, check.status, check.detail
+            ));
+        }
+        if !report.errors.is_empty() {
+            markdown.push_str("\n## Errors\n\n");
+            for error in &report.errors {
+                markdown.push_str(&format!("- {error}\n"));
+            }
+        }
+        if !report.warnings.is_empty() {
+            markdown.push_str("\n## Warnings\n\n");
+            for warning in &report.warnings {
+                markdown.push_str(&format!("- {warning}\n"));
+            }
+        }
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating `{}`", parent.display()))?;
+        }
+        std::fs::write(path, markdown).with_context(|| format!("writing `{}`", path.display()))?;
+    }
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        for check in &report.checks {
+            println!("{:>16}: {} ({})", check.name, check.status, check.detail);
+        }
+        println!(
+            "content audit: {} errors, {} warnings",
+            report.errors.len(),
+            report.warnings.len()
+        );
+        for error in report.errors.iter().take(10) {
+            println!("  error: {error}");
+        }
+    }
+    Ok(if report.pass() { EXIT_PASS } else { EXIT_FAIL })
 }
 
 fn cmd_content_load(json: bool) -> anyhow::Result<i32> {
