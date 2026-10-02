@@ -13,6 +13,7 @@
 // Lets `mind_derive` output reference `::mind_core` inside this crate itself.
 extern crate self as mind_core;
 
+pub mod ai;
 pub mod assets;
 pub mod async_work;
 pub mod audio;

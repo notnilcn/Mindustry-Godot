@@ -1,0 +1,17 @@
+{
+  "scenario": "units_spawn_path_arrive",
+  "seed": 7,
+  "pass": true,
+  "spawned": true,
+  "ticks": 1500,
+  "arrived": true,
+  "distance": 7.763999938964844,
+  "hit_size": 8.0,
+  "x": 478.510009765625,
+  "y": 478.510009765625,
+  "rotation": 45.0,
+  "unit_count": 1,
+  "units_created": 1,
+  "units_removed": 0,
+  "checksum": "e17325bcf75b8637"
+}
