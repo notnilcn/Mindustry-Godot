@@ -363,6 +363,21 @@ impl BuildHarness {
         update_buildings(&mut self.world);
     }
 
+    /// Rebuilds the block table with an extra named behavior override.
+    ///
+    /// Fixtures use this to install test-only source/sink behaviors on vanilla
+    /// block names without touching the default registry.
+    pub fn register_behavior(
+        &mut self,
+        name: &str,
+        behavior: std::sync::Arc<dyn crate::world::behavior::BuildingBehavior>,
+    ) {
+        let mut registry = crate::world::blocks::default_registry(&self.content);
+        registry.register_named(name, behavior);
+        let table = BlockTable::build(&self.content, &registry).expect("block table");
+        self.world.insert_resource(table);
+    }
+
     /// Deterministic checksum over the grid + buildings (FNV-1a-64).
     pub fn checksum_value(&self) -> crate::determinism::Checksum {
         let mut c = Checksummer::new();

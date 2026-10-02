@@ -153,6 +153,111 @@ fn scenario(name: &str, json: bool) -> Result<()> {
                 bail!("scenario {name} failed");
             }
         }
+        "logistics_smoke" => {
+            let copper = harness
+                .content()
+                .item_id("copper")
+                .ok_or_else(|| anyhow::anyhow!("copper item missing"))?;
+            harness.register_behavior(
+                "item-source",
+                std::sync::Arc::new(mind_core::world::fixtures::logistics::SourceBehavior {
+                    item: copper,
+                    per_tick: 1,
+                }),
+            );
+            let source = block(&harness, "item-source")?;
+            let conveyor = block(&harness, "conveyor")?;
+            // `container` is 2x2; its min corner at (10,4) leaves (9,4) free.
+            let sink = block(&harness, "container")?;
+            let placed = harness.place(4, 4, source, 0, true);
+            for x in 5..=9 {
+                let _ = harness.place(x, 4, conveyor, 0, true);
+            }
+            let sink_placed = harness.place(10, 4, sink, 0, true);
+            // ~6 tiles at 0.035 tiles/tick needs ~172 ticks; allow margin.
+            for _ in 0..400 {
+                harness.tick();
+            }
+            let sink_total = harness
+                .build_at(10, 4)
+                .and_then(|e| harness.world.get::<mind_core::world::ItemModule>(e))
+                .map(|items| items.total)
+                .unwrap_or(0);
+            let belt_items: i32 = (5..=9)
+                .filter_map(|x| harness.build_at(x, 4))
+                .filter_map(|e| {
+                    harness
+                        .world
+                        .get::<mind_core::world::blocks::distribution::conveyor::ConveyorBuild>(e)
+                })
+                .map(|belt| belt.len as i32)
+                .sum();
+            let pass = placed && sink_placed && sink_total > 0;
+            let report = serde_json::json!({
+                "scenario": name,
+                "pass": pass,
+                "sink_items": sink_total,
+                "belt_items": belt_items,
+                "checksum": mind_core::world::fixtures::logistics::logistics_checksum(&harness.world).to_hex(),
+            });
+            print_json(&report, json, !json);
+            if !pass {
+                bail!("scenario {name} failed");
+            }
+        }
+        "logistics_conveyor_lane" => {
+            // Dedicated 64-wide map so the 32-tile lane fits.
+            let mut harness = BuildHarness::new(64, 64, 7);
+            let copper = harness
+                .content()
+                .item_id("copper")
+                .ok_or_else(|| anyhow::anyhow!("copper item missing"))?;
+            harness.register_behavior(
+                "item-source",
+                std::sync::Arc::new(mind_core::world::fixtures::logistics::SourceBehavior {
+                    item: copper,
+                    per_tick: 3,
+                }),
+            );
+            let source = block(&harness, "item-source")?;
+            let conveyor = block(&harness, "conveyor")?;
+            let sink = block(&harness, "container")?;
+            let _ = harness.place(2, 8, source, 0, true);
+            for x in 3..=34 {
+                let _ = harness.place(x, 8, conveyor, 0, true);
+            }
+            let _ = harness.place(35, 8, sink, 0, true);
+            // 32 tiles at 0.035 tiles/tick needs ~915 ticks; allow margin.
+            for _ in 0..1600 {
+                harness.tick();
+            }
+            let delivered = harness
+                .build_at(35, 8)
+                .and_then(|e| harness.world.get::<mind_core::world::ItemModule>(e))
+                .map(|items| items.total)
+                .unwrap_or(0);
+            let belt_items: i32 = (3..=34)
+                .filter_map(|x| harness.build_at(x, 8))
+                .filter_map(|e| {
+                    harness
+                        .world
+                        .get::<mind_core::world::blocks::distribution::conveyor::ConveyorBuild>(e)
+                })
+                .map(|belt| belt.len as i32)
+                .sum();
+            let pass = delivered > 0;
+            let report = serde_json::json!({
+                "scenario": name,
+                "pass": pass,
+                "delivered": delivered,
+                "belt_items": belt_items,
+                "checksum": mind_core::world::fixtures::logistics::logistics_checksum(&harness.world).to_hex(),
+            });
+            print_json(&report, json, !json);
+            if !pass {
+                bail!("scenario {name} failed");
+            }
+        }
         "proximity_multiblock" => {
             let wall = block(&harness, "copper-wall")?;
             let _ = harness.place(4, 4, wall, 0, true);
