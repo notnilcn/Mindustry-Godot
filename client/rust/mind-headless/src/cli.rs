@@ -37,6 +37,16 @@ pub enum Command {
     /// List registered scenarios.
     List,
 
+    /// Print the build report (`Version.java` port; plan 22 M0).
+    Version {
+        /// Emit a machine-readable JSON object.
+        #[arg(long)]
+        json: bool,
+        /// Read `version.properties` from this path instead of the embedded copy.
+        #[arg(long)]
+        file: Option<PathBuf>,
+    },
+
     /// Run a registered scenario and verify its golden expectations.
     Run {
         /// Scenario name (see `list`).

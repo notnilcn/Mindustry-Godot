@@ -19,6 +19,9 @@ assets/shaders/shader.index.json
 # Generated scenario mirror (canonical files live in scenarios/)
 client/scenarios/
 
+# Generated build report (plan 22 M0; tools/version.sh)
+client/assets/version.properties
+
 # Godot Android export output (merged from the legacy client/.gitignore)
 client/android/
 

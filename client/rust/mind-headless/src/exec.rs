@@ -82,6 +82,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             }
             Ok(EXIT_PASS)
         }
+        Command::Version { json, file } => cmd_version(*json, file.as_deref()),
         Command::Run {
             scenario,
             dump,
@@ -1796,6 +1797,33 @@ fn print_report<T: serde::Serialize>(report: &T, json: bool) -> anyhow::Result<(
         println!("{}", serde_json::to_string(report)?);
     }
     Ok(())
+}
+
+/// Plan 22 M0 §3.2/§7b: `mind-headless version [--json] [--file <path>]`.
+fn cmd_version(json: bool, file: Option<&Path>) -> anyhow::Result<i32> {
+    let info = match file {
+        Some(path) => {
+            let text = std::fs::read_to_string(path)
+                .with_context(|| format!("reading `{}`", path.display()))?;
+            mind_core::version::BuildInfo::init_from(&text)?
+        }
+        None => mind_core::version::BuildInfo::embedded().clone(),
+    };
+    if json {
+        println!("{}", serde_json::to_string_pretty(&info.to_json())?);
+    } else {
+        println!("[Mindustry] Version: {}", info.build_string());
+        println!("  combined: {}", info.combined());
+        println!("  type: {}", info.r#type);
+        println!("  modifier: {}", info.modifier);
+        println!("  commitHash: {}", info.commit_hash);
+        println!("  buildDate: {}", info.build_date);
+        println!("  number: {}", info.number);
+        println!("  build: {}", info.build);
+        println!("  revision: {}", info.revision);
+        println!("  isSteam: {}", info.is_steam);
+    }
+    Ok(EXIT_PASS)
 }
 
 #[allow(clippy::too_many_arguments)]
