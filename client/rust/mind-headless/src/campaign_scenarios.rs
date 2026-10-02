@@ -66,6 +66,7 @@ pub fn run(command: &CampaignCommand) -> Result<i32> {
             ..
         } => campaign_sector_cycle(planet, sector, *ticks)?,
         CampaignCommand::Turn { turns, .. } => campaign_turn(*turns)?,
+        CampaignCommand::Schematic { .. } => campaign_schematic()?,
     };
     match command {
         CampaignCommand::Rules { json, dump: path }
@@ -74,6 +75,9 @@ pub fn run(command: &CampaignCommand) -> Result<i32> {
             json, dump: path, ..
         }
         | CampaignCommand::Turn {
+            json, dump: path, ..
+        }
+        | CampaignCommand::Schematic {
             json, dump: path, ..
         } => {
             if let Some(path) = path {
@@ -558,6 +562,65 @@ fn campaign_turn(turns: u32) -> Result<(Value, Value)> {
     Ok((report, dump))
 }
 
+/// `campaign schematic` — plan 12 §7b M5 (`.msch`/base64 round-trip + rotate).
+fn campaign_schematic() -> Result<(Value, Value)> {
+    let registry = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+        .map_err(|error| anyhow::anyhow!("content boot failed: {error}"))?;
+    let mut schematics = mind_core::game::schematics::Schematics::new();
+    schematics.load_loadouts(&registry);
+    let decoded = schematics.all.len();
+
+    let basic = schematics
+        .all
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("basicShard loadout missing"))?;
+    let has_core = basic.has_core(&registry);
+    let roundtrip = mind_core::game::schematics::write_base64(basic, &registry)
+        .map(|encoded| {
+            encoded.starts_with("bXNjaA")
+                && mind_core::game::schematics::read_base64(&encoded, &registry)
+                    .map(|back| back.tiles.len() == basic.tiles.len())
+                    .unwrap_or(false)
+        })
+        .unwrap_or(false);
+
+    // Rotate 4 times returns to the original dimensions + tile count.
+    let rotated = mind_core::game::schematics::Schematics::rotate(basic, 4, &registry);
+    let rotation_stable = rotated.width == basic.width && rotated.height == basic.height;
+
+    let checksum = fnv_hex(
+        serde_json::to_string(&json!({
+            "tiles": basic.tiles.len(),
+            "width": basic.width,
+            "height": basic.height,
+        }))?
+        .as_bytes(),
+    );
+    let pass = decoded == 4 && has_core && roundtrip && rotation_stable;
+
+    let dump = json!({
+        "format": 1,
+        "scenario": "campaign_schematic",
+        "loaded": decoded,
+        "name": basic.name(),
+        "has_core": has_core,
+        "base64_prefix": "bXNjaA",
+        "roundtrip": roundtrip,
+        "rotation_stable": rotation_stable,
+        "checksum": checksum,
+        "pass": pass,
+    });
+    let report = json!({
+        "scenario": "campaign_schematic",
+        "loaded": decoded,
+        "has_core": has_core,
+        "roundtrip": roundtrip,
+        "checksum": checksum,
+        "pass": pass,
+    });
+    Ok((report, dump))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -596,5 +659,11 @@ mod tests {
     fn turn_golden_matches() {
         let (_, dump) = campaign_turn(10).unwrap();
         assert_eq!(golden("turn.json"), canonical(&dump));
+    }
+
+    #[test]
+    fn schematic_golden_matches() {
+        let (_, dump) = campaign_schematic().unwrap();
+        assert_eq!(golden("schematic.json"), canonical(&dump));
     }
 }

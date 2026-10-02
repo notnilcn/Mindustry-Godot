@@ -605,6 +605,17 @@ pub enum CampaignCommand {
         #[arg(long)]
         dump: Option<PathBuf>,
     },
+
+    /// `campaign_schematic`: `.msch`/base64 round-trip, loadout decode and
+    /// rotation of the vanilla starting schematics.
+    Schematic {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Write the canonical golden dump here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+    },
 }
 
 /// `fx` subcommands (plan 17 §7b).
