@@ -24,6 +24,7 @@ pub mod determinism;
 pub mod ecs;
 pub mod entities;
 pub mod event;
+pub mod fixtures;
 pub mod game;
 pub mod io;
 pub mod log;

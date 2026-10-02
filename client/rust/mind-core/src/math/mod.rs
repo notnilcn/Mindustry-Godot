@@ -8,3 +8,6 @@
 
 pub mod noise;
 pub mod ridged;
+pub mod windowed_mean;
+
+pub use windowed_mean::WindowedMean;

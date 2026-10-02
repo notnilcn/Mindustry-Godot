@@ -18,6 +18,7 @@ pub mod attributes;
 pub mod behavior;
 pub mod block;
 pub mod block_kind_data;
+pub mod blocks;
 pub mod build;
 pub mod building_io;
 pub mod cached;
