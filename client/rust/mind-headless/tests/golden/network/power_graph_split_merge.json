@@ -1,0 +1,20 @@
+{
+  "tick": 2,
+  "graphs": [
+    {
+      "id": 7,
+      "producers": 1,
+      "consumers": 1,
+      "batteries": 0,
+      "satisfaction": 1.0,
+      "produced": 10.0,
+      "needed": 5.0,
+      "stored": 0.0,
+      "capacity": 0.0,
+      "balance": 8.3333,
+      "energy_delta": 0.0
+    }
+  ],
+  "liquids": [],
+  "heat": []
+}

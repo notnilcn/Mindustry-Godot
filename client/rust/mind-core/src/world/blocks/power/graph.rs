@@ -451,6 +451,13 @@ impl PowerGrids {
         self.graphs()
     }
 
+    /// Iterates every live graph in arena slot order (stable).
+    pub fn iter_graphs(&self) -> impl Iterator<Item = &PowerGraph> {
+        self.graphs
+            .iter()
+            .filter_map(|slot| slot.as_ref().map(|(_, graph)| graph))
+    }
+
     /// Whether there are no live graphs.
     pub fn is_empty(&self) -> bool {
         self.graph_count() == 0

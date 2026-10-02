@@ -1,0 +1,28 @@
+{
+  "tick": 600,
+  "graphs": [],
+  "liquids": [],
+  "heat": [
+    {
+      "x": 0,
+      "y": 0,
+      "name": "heat-producer",
+      "amount": 10.0,
+      "extra": 10.0
+    },
+    {
+      "x": 1,
+      "y": 0,
+      "name": "heat-conductor",
+      "amount": 0.0,
+      "extra": 0.0
+    },
+    {
+      "x": 2,
+      "y": 0,
+      "name": "heat-crafter",
+      "amount": 0.0,
+      "extra": 0.0
+    }
+  ]
+}

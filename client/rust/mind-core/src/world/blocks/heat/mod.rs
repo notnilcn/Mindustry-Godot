@@ -33,16 +33,28 @@ pub struct HeatState {
 }
 
 /// `HeatConductorBuild` memoization/cycle state.
-#[derive(Debug, Clone, Default, Component)]
+#[derive(Debug, Clone, Component)]
 pub struct HeatConductor {
     /// `HeatConductor.splitHeat` (routers split across 3 surfaces).
     pub split_heat: bool,
-    /// Last `GameState.update_id` this conductor was pulled.
+    /// Last `GameState.update_id` this conductor was pulled (`lastHeatUpdate`;
+    /// upstream initializes to `-1` so the first pull always computes).
     pub update_id: u64,
     /// Traversed cycle guard (`cameFrom`).
     pub came_from: IdSet,
     /// Per-side heat from the last computation.
     pub side_heat: [f32; 4],
+}
+
+impl Default for HeatConductor {
+    fn default() -> Self {
+        Self {
+            split_heat: false,
+            update_id: u64::MAX,
+            came_from: IdSet::new(),
+            side_heat: [0.0; 4],
+        }
+    }
 }
 
 /// `HeatCrafter` knobs (`HeatCrafter` / `HeatConsumer`).
@@ -90,7 +102,9 @@ pub fn calculate_heat(
     let self_size = block_size(world, entity);
     let self_id = entity.index_u32();
 
-    let proximity: Vec<Entity> = self_building.proximity.iter().copied().collect();
+    // `self_building` is an owned clone, so its inline `proximity` SmallVec can
+    // be iterated directly; no per-call heap buffer (plan 09 §3.10).
+    let proximity = self_building.proximity.clone();
     let mut total = 0.0;
 
     for other in proximity {
@@ -100,6 +114,12 @@ pub fn calculate_heat(
         let Some(other_state) = world.get::<HeatState>(other).copied() else {
             continue;
         };
+        // Upstream's proximity loop only considers `HeatBlock` instances; a
+        // `HeatCrafter` exposes `heat` but is a consumer, not a source (it is
+        // never traversed and never contributes `cameFrom`).
+        if world.get::<HeatCrafter>(other).is_some() {
+            continue;
+        }
         let other_team = world
             .get::<crate::entities::comp::TeamComp>(other)
             .map(|team| team.team);
@@ -130,25 +150,25 @@ pub fn calculate_heat(
             continue;
         }
 
-        // Cycle gate: a conductor that already visited us is skipped.
-        if is_conductor
+        // Cycle gate: a conductor that already traversed us contributes no
+        // heat this frame. Crucially (upstream `calculateHeat`), the conductor
+        // is still recursed and still contributes to `cameFrom`.
+        let cycle = is_conductor
             && world
                 .get::<HeatConductor>(other)
-                .is_some_and(|conductor| conductor.came_from.contains(self_id))
-        {
-            continue;
+                .is_some_and(|conductor| conductor.came_from.contains(self_id));
+        if !cycle {
+            let contact = contact_points(self_size, other_size, diff);
+            let mut add = other_state.heat / other_size as f32 * contact as f32;
+            if split {
+                add /= 3.0;
+            }
+            side_heat[(relative % 4) as usize] += add;
+            total += add;
         }
-
-        let contact = contact_points(self_size, other_size, diff);
-        let mut add = other_state.heat / other_size as f32 * contact as f32;
-        if split {
-            add /= 3.0;
-        }
-        side_heat[(relative % 4) as usize] += add;
-        total += add;
 
         came_from.add(other_id);
-        if is_conductor && let Some(conductor) = world.get::<HeatConductor>(other) {
+        if let Some(conductor) = world.get::<HeatConductor>(other) {
             came_from.union_with(&conductor.came_from);
         }
 
