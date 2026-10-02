@@ -22,6 +22,7 @@ pub mod lod;
 pub mod queue;
 pub mod scan;
 pub mod shaders;
+pub mod shadow;
 
 pub use bands::{BandEntry, BandKey, BandPlan};
 pub use block_cache::BuildingCacheGrid;
@@ -41,3 +42,6 @@ pub use scan::{
     process_blocks, visible_blocks,
 };
 pub use shaders::{ExpectedShader, ShaderStage, Uniforms};
+pub use shadow::{
+    BLEND_SHADOW_COLOR, darkness_value, in_limited_rect, shadow_tile_color, wall_data_update,
+};
