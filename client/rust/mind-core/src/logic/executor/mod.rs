@@ -8,7 +8,11 @@
 //! arithmetic/control/IO instruction subset; the world/unit instructions land in
 //! later milestones behind the same [`Instruction`] enum.
 
+pub mod draw;
+
 use bevy_ecs::entity::Entity;
+use bevy_ecs::world::World;
+use indexmap::IndexSet;
 
 use crate::logic::assembler::Assembler;
 use crate::logic::ops::{ConditionOp, LogicOp};
@@ -135,11 +139,66 @@ pub enum Instruction {
         /// Packed color.
         value: VarRef,
     },
+    /// `ReadI` (`LReadable` target, string char or query index fallback).
+    Read {
+        /// Output.
+        output: VarRef,
+        /// Target object.
+        target: VarRef,
+        /// Address/position.
+        address: VarRef,
+    },
+    /// `WriteI` (`LWritable` target).
+    Write {
+        /// Input.
+        input: VarRef,
+        /// Target object.
+        target: VarRef,
+        /// Address/position.
+        address: VarRef,
+    },
+    /// `GetLinkI`.
+    GetLink {
+        /// Output.
+        output: VarRef,
+        /// Link index.
+        index: VarRef,
+    },
+    /// `DrawI` (`type` is the `GraphicsType` ordinal).
+    Draw {
+        /// Graphics type byte.
+        type_: u8,
+        /// X.
+        x: VarRef,
+        /// Y.
+        y: VarRef,
+        /// Parameter 1.
+        p1: VarRef,
+        /// Parameter 2.
+        p2: VarRef,
+        /// Parameter 3.
+        p3: VarRef,
+        /// Parameter 4.
+        p4: VarRef,
+    },
+    /// `DrawFlushI`.
+    DrawFlush {
+        /// Target display.
+        target: VarRef,
+    },
+    /// `PrintFlushI`.
+    PrintFlush {
+        /// Target message block.
+        target: VarRef,
+    },
 }
 
 impl Instruction {
     /// Executes one instruction against `exec`.
-    pub fn run(&self, exec: &mut Executor) {
+    ///
+    /// Takes `&mut self` because `WaitI.cur_time` is per-instruction mutable
+    /// state (upstream keeps it on the instruction instance).
+    pub fn run(&mut self, exec: &mut Executor, world: &mut World) {
         match self {
             Instruction::Noop => {}
             Instruction::End => {
@@ -205,14 +264,22 @@ impl Instruction {
             Instruction::Wait { value, cur_time } => {
                 let wait_for = exec.arena.get(value.id()).num();
                 if wait_for <= 0.0 {
-                    // yield exactly once
+                    // Just yield without executing the wait again.
+                    let counter = exec.counter;
+                    let cur = exec.arena.get(counter).num;
+                    exec.set_num(counter, cur - 1.0);
                     exec.yielded = true;
-                    exec.set_num(exec.counter, exec.arena.get(exec.counter).num - 1.0);
+                    *cur_time = 0.0;
                 } else if *cur_time >= wait_for {
-                    // done; fall through (counter was already advanced)
+                    *cur_time = 0.0;
                 } else {
+                    // Skip back to self.
+                    let counter = exec.counter;
+                    let cur = exec.arena.get(counter).num;
+                    exec.set_num(counter, cur - 1.0);
                     exec.yielded = true;
-                    exec.set_num(exec.counter, exec.arena.get(exec.counter).num - 1.0);
+                    // `Time.delta / 60f` with `Time.delta == 1` at the fixed step.
+                    *cur_time += 1.0 / 60.0;
                 }
             }
             Instruction::Print { value } => {
@@ -249,6 +316,67 @@ impl Instruction {
                 exec.set_num(g.id(), gg);
                 exec.set_num(b.id(), bb);
                 exec.set_num(a.id(), aa);
+            }
+            Instruction::GetLink { output, index } => {
+                let address = exec.arena.get(index.id()).numi();
+                let linked = if address >= 0 {
+                    exec.links.get(address as usize).copied()
+                } else {
+                    None
+                };
+                exec.set_obj(
+                    output.id(),
+                    linked.map(crate::logic::value::LogicObject::Building),
+                );
+            }
+            Instruction::Read {
+                output,
+                target,
+                address,
+            } => {
+                let target_obj = exec.arena.get(target.id()).value_obj().cloned();
+                crate::logic::blocks::io::read_target(
+                    world,
+                    exec,
+                    target_obj.as_ref(),
+                    *address,
+                    *output,
+                );
+            }
+            Instruction::Write {
+                input,
+                target,
+                address,
+            } => {
+                let target_obj = exec.arena.get(target.id()).value_obj().cloned();
+                crate::logic::blocks::io::write_target(
+                    world,
+                    exec,
+                    target_obj.as_ref(),
+                    *address,
+                    *input,
+                );
+            }
+            Instruction::Draw {
+                type_,
+                x,
+                y,
+                p1,
+                p2,
+                p3,
+                p4,
+            } => {
+                draw::pack_draw(exec, *type_, *x, *y, *p1, *p2, *p3, *p4);
+            }
+            Instruction::DrawFlush { target } => {
+                let target_obj = exec.arena.get(target.id()).value_obj().cloned();
+                crate::logic::blocks::io::flush_draw(world, exec, target_obj.as_ref());
+                exec.graphics_buffer.clear();
+            }
+            Instruction::PrintFlush { target } => {
+                let target_obj = exec.arena.get(target.id()).value_obj().cloned();
+                crate::logic::blocks::io::flush_print(world, exec, target_obj.as_ref());
+                exec.text_buffer.clear();
             }
         }
     }
@@ -301,14 +429,22 @@ pub struct Executor {
     pub stopped: bool,
     /// Packed draw command buffer (cap 256).
     pub graphics_buffer: Vec<u64>,
+    /// Deviation 7: when set, `draw` packing is skipped (headless default).
+    pub skip_draw_pack: bool,
     /// Text print buffer (cap 400).
     pub text_buffer: String,
     /// Global logic RNG stream.
     pub rng: ArcRand,
     /// Owning build (for `@this`/ipt).
     pub build: Option<Entity>,
-    /// Links.
+    /// Owning build's instructions-per-tick (`build.ipt`).
+    pub build_ipt: i32,
+    /// Team of the owning build (`LogicBuild.team`).
+    pub team: u8,
+    /// Links (valid only), in link declaration order.
     pub links: Vec<Entity>,
+    /// Building ids of valid links (`LogicBuild.executor.linkIds`).
+    pub link_ids: IndexSet<i32>,
 }
 
 impl Default for Executor {
@@ -333,10 +469,14 @@ impl Executor {
             yielded: false,
             stopped: false,
             graphics_buffer: Vec::new(),
+            skip_draw_pack: false,
             text_buffer: String::new(),
             rng: ArcRand::new(0),
             build: None,
+            build_ipt: 0,
+            team: 0,
             links: Vec::new(),
+            link_ids: IndexSet::new(),
         }
     }
 
@@ -376,7 +516,8 @@ impl Executor {
             Some(id) => id,
             None => self.arena.put_obj_const("@this", None),
         };
-        let ipt_value = 0.0;
+        // `ipt = builder.putConst("@ipt", build != null ? build.ipt : 0)`.
+        let ipt_value = self.build_ipt as f64;
         self.ipt = self.arena.put_num_const("@ipt", ipt_value);
         if self.privileged {
             self.query_result = Some(self.arena.put_num_const("@queries", 0.0));
@@ -391,13 +532,17 @@ impl Executor {
         self.arena.get_mut(id).set_num(value);
     }
 
+    fn set_obj(&mut self, id: VarId, value: Option<LogicObject>) {
+        self.arena.get_mut(id).set_obj(value);
+    }
+
     /// Reads the numeric program counter.
     pub fn counter_value(&self) -> f64 {
         self.arena.get(self.counter).num
     }
 
     /// `LExecutor.runOnce`.
-    pub fn run_once(&mut self) {
+    pub fn run_once(&mut self, world: &mut World) {
         let len = self.instructions.len() as f64;
         let mut counter = self.arena.get(self.counter).num;
         if counter >= len || counter < 0.0 {
@@ -407,13 +552,17 @@ impl Executor {
             self.arena.get_mut(self.counter).is_obj = false;
             let index = counter as usize;
             self.arena.get_mut(self.counter).num = counter + 1.0;
-            let instruction = self.instructions[index].clone();
-            instruction.run(self);
+            // Swap the instruction out so its per-instance mutable state
+            // (`WaitI.cur_time`) can be updated without aliasing `self`.
+            let mut instruction =
+                std::mem::replace(&mut self.instructions[index], Instruction::Noop);
+            instruction.run(self, world);
+            self.instructions[index] = instruction;
         }
     }
 
     /// Runs up to `max` instructions (bounded).
-    pub fn run(&mut self, max: usize) {
+    pub fn run(&mut self, world: &mut World, max: usize) {
         for _ in 0..max {
             let counter = self.arena.get(self.counter).num;
             if self.stopped
@@ -423,18 +572,18 @@ impl Executor {
             {
                 break;
             }
-            self.run_once();
+            self.run_once(world);
         }
     }
 
     /// Instruction-budget driver (`LogicBuild.updateTile` inner loop).
-    pub fn run_budget(&mut self, accumulator: &mut f32, edelta: f32, ipt: f32) {
+    pub fn run_budget(&mut self, world: &mut World, accumulator: &mut f32, edelta: f32, ipt: f32) {
         let max_scale = MAX_INSTRUCTION_SCALE;
         if *accumulator > max_scale * ipt {
             *accumulator = max_scale * ipt;
         }
         while *accumulator >= 1.0 {
-            self.run_once();
+            self.run_once(world);
             if self.yielded {
                 self.yielded = false;
                 break;
@@ -625,6 +774,70 @@ pub fn build_statement(statement: &Statement, asm: &mut Assembler) -> Option<Ins
             let value = asm.var(value);
             Instruction::UnpackColor { r, g, b, a, value }
         }
+        Statement::Read {
+            output,
+            target,
+            address,
+        } => {
+            let output = asm.var(output);
+            let target = asm.var(target);
+            let address = asm.var(address);
+            Instruction::Read {
+                output,
+                target,
+                address,
+            }
+        }
+        Statement::Write {
+            input,
+            target,
+            address,
+        } => {
+            let input = asm.var(input);
+            let target = asm.var(target);
+            let address = asm.var(address);
+            Instruction::Write {
+                input,
+                target,
+                address,
+            }
+        }
+        Statement::GetLink { output, address } => {
+            let output = asm.var(output);
+            let index = asm.var(address);
+            Instruction::GetLink { output, index }
+        }
+        Statement::Draw {
+            type_,
+            x,
+            y,
+            p1,
+            p2,
+            p3,
+            p4,
+        } => {
+            let x = asm.var(x);
+            let y = asm.var(y);
+            let p1 = asm.var(p1);
+            let p2 = asm.var(p2);
+            let p3 = asm.var(p3);
+            let p4 = asm.var(p4);
+            Instruction::Draw {
+                type_: type_.ordinal() as u8,
+                x,
+                y,
+                p1,
+                p2,
+                p3,
+                p4,
+            }
+        }
+        Statement::DrawFlush { target } => Instruction::DrawFlush {
+            target: asm.var(target),
+        },
+        Statement::PrintFlush { target } => Instruction::PrintFlush {
+            target: asm.var(target),
+        },
         // Later-milestone instructions compile to a no-op for now so program
         // structure (indices/jumps) is preserved.
         _ => Instruction::Noop,
@@ -648,10 +861,15 @@ mod tests {
             .unwrap_or(f64::NAN)
     }
 
+    fn run(e: &mut Executor, max: usize) {
+        let mut world = World::new();
+        e.run(&mut world, max);
+    }
+
     #[test]
     fn set_op_select_jump_run() {
         let mut e = exec("set result 5\nop add result result 2\n");
-        e.run(10);
+        run(&mut e, 10);
         assert_eq!(var_num(&e, "result"), 7.0);
     }
 
@@ -659,7 +877,7 @@ mod tests {
     fn jump_skips() {
         let mut e = exec("set x 0\njump skip always\nset x 1\nskip:\nset x 2\n");
         // label `skip` is statement index 3
-        e.run(20);
+        run(&mut e, 20);
         assert_eq!(var_num(&e, "x"), 2.0);
     }
 
@@ -672,7 +890,8 @@ mod tests {
         }
         let mut e = exec(&code);
         let mut acc = 1000.0f32;
-        e.run_budget(&mut acc, 0.0, 2.0);
+        let mut world = World::new();
+        e.run_budget(&mut world, &mut acc, 0.0, 2.0);
         // <= 5 * 2 = 10 instructions executed
         assert!(var_num(&e, "n") <= 10.0);
         assert!(acc <= 5.0 * 2.0 + 0.0);
@@ -681,7 +900,7 @@ mod tests {
     #[test]
     fn pack_unpack_color_roundtrip() {
         let mut e = exec("packcolor c 1 0 0 1\nunpackcolor r g b a c\n");
-        e.run(10);
+        run(&mut e, 10);
         assert!((var_num(&e, "r") - 1.0).abs() < 1e-9);
         assert!((var_num(&e, "g") - 0.0).abs() < 1e-9);
         assert!((var_num(&e, "a") - 1.0).abs() < 1e-9);
@@ -690,7 +909,7 @@ mod tests {
     #[test]
     fn print_and_format() {
         let mut e = exec("print 5\nprint \"x\"\n");
-        e.run(10);
+        run(&mut e, 10);
         assert_eq!(e.text_buffer, "5x");
     }
 }

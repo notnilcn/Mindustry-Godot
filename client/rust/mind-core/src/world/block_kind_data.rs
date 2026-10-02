@@ -37,6 +37,8 @@ pub enum BlockFamily {
     Legacy,
     /// `ConstructBlock` size singletons.
     Construct,
+    /// Logic family (`LogicBlock`/`MemoryBlock`/`SwitchBlock`; plan 13).
+    Logic,
     /// Families owned by other plans (08/09/10/11) or a plain `Block`.
     #[default]
     Other,
@@ -330,6 +332,88 @@ pub struct LegacyDef {
     pub replacement: Option<u16>,
 }
 
+/// `LogicBlock` family knobs (plan 13 §3.6).
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicBlockDef {
+    /// `LogicBlock.instructionsPerTick`.
+    pub ipt: i32,
+    /// `LogicBlock.maxInstructionsPerTick` (privileged only).
+    pub max_ipt: i32,
+    /// `LogicBlock.range` (world units).
+    pub range: f32,
+    /// `LogicBlock.privileged` (world processor).
+    pub privileged: bool,
+}
+
+impl Default for LogicBlockDef {
+    fn default() -> Self {
+        Self {
+            ipt: 1,
+            max_ipt: 40,
+            range: 8.0 * 10.0,
+            privileged: false,
+        }
+    }
+}
+
+/// `MemoryBlock` family knobs (`MemoryBlock.memoryCapacity`).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct MemoryDef {
+    /// `MemoryBlock.memoryCapacity`.
+    pub capacity: i32,
+    /// Whether this is the privileged `world-cell`.
+    pub privileged: bool,
+}
+
+/// `SwitchBlock` family data (privileged flag for `world-switch`).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SwitchDef {
+    /// Whether this is the privileged `world-switch`.
+    pub privileged: bool,
+}
+
+/// `MessageBlock` family knobs.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct MessageDef {
+    /// `MessageBlock.maxTextLength`.
+    pub max_text: i32,
+    /// `MessageBlock.maxNewlines`.
+    pub max_newlines: i32,
+    /// Whether this is the privileged `world-message`.
+    pub privileged: bool,
+}
+
+/// `LogicDisplay` family knobs.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct DisplayDef {
+    /// `LogicDisplay.displaySize`.
+    pub display_size: i32,
+    /// `LogicDisplay.scaleFactor`.
+    pub scale_factor: f32,
+}
+
+/// `TileableLogicDisplay` family knobs.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct TileableDisplayDef {
+    /// Per-tile `displaySize`.
+    pub display_size: i32,
+    /// `TileableLogicDisplay.frameSize`.
+    pub frame_size: i32,
+    /// `TileableLogicDisplay.maxDisplayDimensions`.
+    pub max_dimensions: i32,
+}
+
+/// `CanvasBlock` family knobs.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct CanvasDef {
+    /// `CanvasBlock.canvasSize`.
+    pub canvas_size: i32,
+    /// `CanvasBlock.padding`.
+    pub padding: f32,
+    /// `CanvasBlock.bitsPerPixel`.
+    pub bits_per_pixel: u8,
+}
+
 /// Typed family data for one block (plan 07 §6.1).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum BlockKindData {
@@ -408,6 +492,20 @@ pub enum BlockKindData {
     LaunchPad(LaunchPadDef),
     /// `LegacyBlock` + subclasses.
     Legacy(LegacyDef),
+    /// `LogicBlock` (plan 13).
+    Logic(LogicBlockDef),
+    /// `MemoryBlock` (plan 13).
+    Memory(MemoryDef),
+    /// `SwitchBlock` (plan 13).
+    Switch(SwitchDef),
+    /// `MessageBlock` (plan 13).
+    Message(MessageDef),
+    /// `LogicDisplay` (plan 13).
+    Display(DisplayDef),
+    /// `TileableLogicDisplay` (plan 13).
+    TileableDisplay(TileableDisplayDef),
+    /// `CanvasBlock` (plan 13).
+    Canvas(CanvasDef),
     /// A plain `Block`/family owned by another plan.
     #[default]
     None,
@@ -485,6 +583,15 @@ impl BlockKindData {
             BlockKind::LegacyMechPad
             | BlockKind::LegacyUnitFactory
             | BlockKind::LegacyCommandCenter => BlockKindData::Legacy(LegacyDef::default()),
+            BlockKind::LogicBlock => BlockKindData::Logic(LogicBlockDef::default()),
+            BlockKind::MemoryBlock => BlockKindData::Memory(MemoryDef::default()),
+            BlockKind::SwitchBlock => BlockKindData::Switch(SwitchDef::default()),
+            BlockKind::MessageBlock => BlockKindData::Message(MessageDef::default()),
+            BlockKind::LogicDisplay => BlockKindData::Display(DisplayDef::default()),
+            BlockKind::TileableLogicDisplay => {
+                BlockKindData::TileableDisplay(TileableDisplayDef::default())
+            }
+            BlockKind::CanvasBlock => BlockKindData::Canvas(CanvasDef::default()),
             _ => BlockKindData::None,
         }
     }
@@ -622,6 +729,32 @@ impl BlockKindData {
                     def.power_usage = 0.5;
                 }
             }
+            // Plan 13 §3.6: `Blocks.java` logic region values.
+            "micro-processor" => self.set_logic(2, 40, 8.0 * 10.0, false),
+            "logic-processor" => self.set_logic(8, 40, 8.0 * 22.0, false),
+            "hyper-processor" => self.set_logic(25, 40, 8.0 * 42.0, false),
+            "world-processor" => self.set_logic(8, 1000, f32::MAX, true),
+            "memory-cell" => self.set_memory(64, false),
+            "memory-bank" => self.set_memory(512, false),
+            "world-cell" => self.set_memory(512, true),
+            "world-switch" => {
+                if let BlockKindData::Switch(def) = self {
+                    def.privileged = true;
+                }
+            }
+            "message" | "reinforced-message" => self.set_message(400, 24, false),
+            "world-message" => self.set_message(400, 24, true),
+            "logic-display" => self.set_display(80, 1.0),
+            "large-logic-display" => self.set_display(176, 1.0),
+            "tile-logic-display" => {
+                if let BlockKindData::TileableDisplay(def) = self {
+                    def.display_size = 32;
+                    def.frame_size = 6;
+                    def.max_dimensions = 16;
+                }
+            }
+            "canvas" => self.set_canvas(12, 3.5, 3),
+            "large-canvas" => self.set_canvas(24, 3.5, 4),
             _ => {}
         }
     }
@@ -654,6 +787,45 @@ impl BlockKindData {
             def.drill_time = drill_time;
             def.output = output;
             def.attribute = -1;
+        }
+    }
+
+    fn set_logic(&mut self, ipt: i32, max_ipt: i32, range: f32, privileged: bool) {
+        if let BlockKindData::Logic(def) = self {
+            def.ipt = ipt;
+            def.max_ipt = max_ipt;
+            def.range = range;
+            def.privileged = privileged;
+        }
+    }
+
+    fn set_memory(&mut self, capacity: i32, privileged: bool) {
+        if let BlockKindData::Memory(def) = self {
+            def.capacity = capacity;
+            def.privileged = privileged;
+        }
+    }
+
+    fn set_message(&mut self, max_text: i32, max_newlines: i32, privileged: bool) {
+        if let BlockKindData::Message(def) = self {
+            def.max_text = max_text;
+            def.max_newlines = max_newlines;
+            def.privileged = privileged;
+        }
+    }
+
+    fn set_display(&mut self, display_size: i32, scale_factor: f32) {
+        if let BlockKindData::Display(def) = self {
+            def.display_size = display_size;
+            def.scale_factor = scale_factor;
+        }
+    }
+
+    fn set_canvas(&mut self, canvas_size: i32, padding: f32, bits_per_pixel: u8) {
+        if let BlockKindData::Canvas(def) = self {
+            def.canvas_size = canvas_size;
+            def.padding = padding;
+            def.bits_per_pixel = bits_per_pixel;
         }
     }
 
@@ -696,6 +868,13 @@ impl BlockKindData {
             | BlockKindData::LandingPad(_)
             | BlockKindData::LaunchPad(_) => BlockFamily::Campaign,
             BlockKindData::Legacy(_) => BlockFamily::Legacy,
+            BlockKindData::Logic(_)
+            | BlockKindData::Memory(_)
+            | BlockKindData::Switch(_)
+            | BlockKindData::Message(_)
+            | BlockKindData::Display(_)
+            | BlockKindData::TileableDisplay(_)
+            | BlockKindData::Canvas(_) => BlockFamily::Logic,
             BlockKindData::None => BlockFamily::Other,
         }
     }
@@ -710,6 +889,7 @@ impl BlockKindData {
             BlockFamily::Campaign => "campaign",
             BlockFamily::Legacy => "legacy",
             BlockFamily::Construct => "construct",
+            BlockFamily::Logic => "logic",
             BlockFamily::Other => "other",
         }
     }

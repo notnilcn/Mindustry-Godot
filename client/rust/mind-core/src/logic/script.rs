@@ -32,6 +32,7 @@ pub fn run_logic_script(code: &str, max_instructions: u32, loop_: bool) -> Optio
     executor.load(asm);
 
     let mut executed = 0u32;
+    let mut world = bevy_ecs::world::World::new();
     // Start at 1 like upstream `for(int i = 1; i < maxInstructions; i++)`.
     while executed + 1 < max_instructions {
         let counter = executor.counter_value();
@@ -42,7 +43,7 @@ pub fn run_logic_script(code: &str, max_instructions: u32, loop_: bool) -> Optio
         if executor.instructions.len() > MAX_INSTRUCTIONS && !loop_ {
             break;
         }
-        executor.run_once();
+        executor.run_once(&mut world);
         executed += 1;
     }
     Some(executor)

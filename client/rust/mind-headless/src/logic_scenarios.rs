@@ -10,9 +10,16 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use mind_core::io::wire::{WireReader, WireWriter};
 use mind_core::logic::assembler::Assembler;
+use mind_core::logic::blocks::io::CellValue;
+use mind_core::logic::blocks::logic_block::compress;
+use mind_core::logic::blocks::{LogicBlockState, LogicDisplayState, MemoryBlockState};
 use mind_core::logic::executor::Executor;
 use mind_core::logic::statement::Statement;
+use mind_core::world::ConfigValue;
+use mind_core::world::building_io::BuildingCodec;
+use mind_core::world::harness::BuildHarness;
 
 use crate::cli::LogicCommand;
 
@@ -82,8 +89,9 @@ pub fn run_scenario(scenario: &Scenario, ticks: u64) -> Executor {
     // the accumulator only after the run loop, so the first tick executes nothing.
     let edelta = 1.0f32;
     let mut accumulator = 0.0f32;
+    let mut world = bevy_ecs::world::World::new();
     for _ in 0..ticks {
-        exec.run_budget(&mut accumulator, edelta, ipt);
+        exec.run_budget(&mut world, &mut accumulator, edelta, ipt);
     }
     exec
 }
@@ -114,6 +122,299 @@ pub fn checksum(exec: &Executor) -> String {
         hasher.write_u64(*value);
     }
     hasher.finish().to_hex()
+}
+
+/// `logic_link_sensor` report.
+pub struct LinkSensorReport {
+    /// Deterministic checksum.
+    pub checksum: String,
+    /// Cell slots 0 and 1.
+    pub memory: [CellValue; 2],
+    /// `r` variable value.
+    pub result: f64,
+    /// Valid link count.
+    pub links: u64,
+}
+
+/// Runs the link/sensor scenario.
+pub fn link_sensor(ticks: u64) -> Result<LinkSensorReport> {
+    let mut harness = BuildHarness::new(16, 16, 1);
+    let processor = harness
+        .content()
+        .block_id("micro-processor")
+        .context("micro-processor content")?;
+    let memory = harness
+        .content()
+        .block_id("memory-cell")
+        .context("memory-cell content")?;
+    assert!(harness.place(4, 4, processor, 0, true));
+    assert!(harness.place(5, 4, memory, 0, true));
+    let pe = harness.build_at(4, 4).context("processor entity")?;
+    let me = harness.build_at(5, 4).context("memory entity")?;
+
+    let code =
+        "write 123 cell1 0\nwrite 1 cell1 1\nread r cell1 0\nop add r r 1\nwrite r cell1 1\nstop\n";
+    assert!(harness.configure(4, 4, ConfigValue::Bytes(compress(code, &[]).into())));
+    assert!(harness.configure(4, 4, ConfigValue::Point2(5, 4)));
+    for _ in 0..ticks {
+        harness.tick();
+    }
+
+    let state = harness
+        .world
+        .get::<LogicBlockState>(pe)
+        .context("processor state")?;
+    let mem_state = harness
+        .world
+        .get::<MemoryBlockState>(me)
+        .context("memory state")?;
+    let mem0 = mem_state.read(0);
+    let mem1 = mem_state.read(1);
+    let result = state
+        .executor
+        .optional_var("r")
+        .map(|id| state.executor.arena.get(id).num())
+        .unwrap_or(f64::NAN);
+    let links = state.executor.links.len() as u64;
+
+    let mut hasher = mind_core::determinism::Hasher::new();
+    hasher.write_f64(mem0.num());
+    hasher.write_u8(u8::from(mem0.is_obj()));
+    hasher.write_f64(mem1.num());
+    hasher.write_u8(u8::from(mem1.is_obj()));
+    hasher.write_f64(result);
+    hasher.write_u64(links);
+    let checksum = hasher.finish().to_hex();
+    Ok(LinkSensorReport {
+        checksum,
+        memory: [mem0, mem1],
+        result,
+        links,
+    })
+}
+
+/// Prints the link/sensor scenario.
+fn run_link_sensor(ticks: u64, json: bool) -> Result<i32> {
+    let report = link_sensor(ticks)?;
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "scenario": "logic_link_sensor",
+                "ticks": ticks,
+                "checksum": report.checksum,
+                "memory": [cell_json(&report.memory[0]), cell_json(&report.memory[1])],
+                "result": report.result,
+                "links": report.links,
+            })
+        );
+    } else {
+        println!(
+            "logic_link_sensor: checksum={} memory=({:?}, {:?}) result={} links={}",
+            report.checksum, report.memory[0], report.memory[1], report.result, report.links
+        );
+    }
+    Ok(0)
+}
+
+/// `logic_save_load` report.
+pub struct SaveLoadReport {
+    /// Deterministic checksum.
+    pub checksum: String,
+    /// `done` variable value.
+    pub done: f64,
+    /// Accumulator after the final run.
+    pub accumulator: f32,
+    /// Restored code.
+    pub code: String,
+}
+
+/// Runs the save/load scenario.
+pub fn save_load(ticks: u64) -> Result<SaveLoadReport> {
+    let mut harness = BuildHarness::new(16, 16, 1);
+    let processor = harness
+        .content()
+        .block_id("micro-processor")
+        .context("micro-processor content")?;
+    assert!(harness.place(4, 4, processor, 0, true));
+    let pe = harness.build_at(4, 4).context("processor entity")?;
+
+    let code = "wait 1.5\nset done 1\n";
+    assert!(harness.configure(4, 4, ConfigValue::Bytes(compress(code, &[]).into())));
+    for _ in 0..ticks {
+        harness.tick();
+    }
+
+    let mut buf = Vec::new();
+    {
+        let mut writer = WireWriter::new(&mut buf);
+        BuildingCodec::write(&harness.world, pe, &mut writer, false)?;
+    }
+
+    assert!(harness.place(8, 8, processor, 0, true));
+    let pe2 = harness.build_at(8, 8).context("processor entity 2")?;
+    let mut reader = WireReader::new(&buf);
+    BuildingCodec::read(&mut harness.world, pe2, &mut reader, 3)?;
+
+    // Run long enough for the preserved wait plus its remainder.
+    for _ in 0..(ticks + 200) {
+        harness.tick();
+    }
+
+    let state = harness
+        .world
+        .get::<LogicBlockState>(pe2)
+        .context("processor state 2")?;
+    let done = state
+        .executor
+        .optional_var("done")
+        .map(|id| state.executor.arena.get(id).num())
+        .unwrap_or(f64::NAN);
+    let accumulator = state.accumulator;
+
+    let mut hasher = mind_core::determinism::Hasher::new();
+    hasher.write_f64(done);
+    hasher.write_f32(accumulator);
+    hasher.write(state.code.as_bytes());
+    let checksum = hasher.finish().to_hex();
+    Ok(SaveLoadReport {
+        checksum,
+        done,
+        accumulator,
+        code: state.code.clone(),
+    })
+}
+
+/// Prints the save/load scenario.
+fn run_save_load(ticks: u64, json: bool) -> Result<i32> {
+    let report = save_load(ticks)?;
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "scenario": "logic_save_load",
+                "ticks": ticks,
+                "checksum": report.checksum,
+                "done": report.done,
+                "accumulator": report.accumulator,
+                "code": report.code,
+            })
+        );
+    } else {
+        println!(
+            "logic_save_load: checksum={} done={}",
+            report.checksum, report.done
+        );
+    }
+    Ok(0)
+}
+
+/// `logic_draw`/`logic_draw_headless` report.
+pub struct DrawReport {
+    /// Deterministic checksum.
+    pub checksum: String,
+    /// Command count.
+    pub commands: usize,
+    /// `operations` counter.
+    pub operations: u64,
+    /// Text buffer (should be empty after `drawflush`).
+    pub text: String,
+}
+
+/// Runs the draw scenario (`capture` disables the headless skip flag).
+pub fn draw_report(capture: bool, ticks: u64) -> Result<DrawReport> {
+    let mut harness = BuildHarness::new(16, 16, 1);
+    let processor = harness
+        .content()
+        .block_id("micro-processor")
+        .context("micro-processor content")?;
+    let display = harness
+        .content()
+        .block_id("logic-display")
+        .context("logic-display content")?;
+    assert!(harness.place(4, 4, processor, 0, true));
+    assert!(harness.place(8, 4, display, 0, true));
+    let pe = harness.build_at(4, 4).context("processor entity")?;
+    let de = harness.build_at(8, 4).context("display entity")?;
+
+    let code = "draw clear 0 0 0\ndraw col %ff0000\ndraw stroke 2\ndraw line 0 0 80 80\ndraw rect 10 10 20 20\ndraw poly 40 40 3 10 0\nprint \"hi\"\ndraw print 20 20 @center\ndraw rotate 45\ndraw scale 2 2\ndrawflush display1\nstop\n";
+    assert!(harness.configure(4, 4, ConfigValue::Bytes(compress(code, &[]).into())));
+    assert!(harness.configure(4, 4, ConfigValue::Point2(8, 4)));
+    if !capture && let Some(mut state) = harness.world.get_mut::<LogicBlockState>(pe) {
+        state.executor.skip_draw_pack = true;
+    }
+    for _ in 0..ticks {
+        harness.tick();
+    }
+
+    let display_state = harness
+        .world
+        .get::<LogicDisplayState>(de)
+        .context("display state")?;
+    let commands = display_state.commands.len();
+    let operations = display_state.operations;
+    let text = harness
+        .world
+        .get::<LogicBlockState>(pe)
+        .map(|state| state.executor.text_buffer.clone())
+        .unwrap_or_default();
+
+    let mut hasher = mind_core::determinism::Hasher::new();
+    for command in &display_state.commands {
+        hasher.write_u64(*command);
+    }
+    hasher.write_u64(operations);
+    let checksum = hasher.finish().to_hex();
+    Ok(DrawReport {
+        checksum,
+        commands,
+        operations,
+        text,
+    })
+}
+
+/// Prints the draw scenario.
+fn run_draw(capture: bool, ticks: u64, json: bool) -> Result<i32> {
+    let name = if capture {
+        "logic_draw"
+    } else {
+        "logic_draw_headless"
+    };
+    let report = draw_report(capture, ticks)?;
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "scenario": name,
+                "ticks": ticks,
+                "capture": capture,
+                "checksum": report.checksum,
+                "commands": report.commands,
+                "operations": report.operations,
+                "text": report.text,
+            })
+        );
+    } else {
+        println!(
+            "{name}: checksum={} commands={} operations={}",
+            report.checksum, report.commands, report.operations
+        );
+    }
+    Ok(0)
+}
+
+fn cell_json(cell: &CellValue) -> serde_json::Value {
+    match cell {
+        CellValue::Num(n) => {
+            if n.fract() == 0.0 && n.is_finite() {
+                serde_json::json!(*n as i64)
+            } else {
+                serde_json::json!(*n)
+            }
+        }
+        CellValue::Obj(None) => serde_json::Value::Null,
+        CellValue::Obj(Some(obj)) => serde_json::Value::String(obj.display()),
+    }
 }
 
 fn var_report(exec: &Executor) -> serde_json::Value {
@@ -176,6 +477,13 @@ fn assemble(file: &Path, out: Option<&Path>, privileged: bool, json: bool) -> Re
 }
 
 fn run_named(name: &str, ticks: Option<u64>, json: bool) -> Result<i32> {
+    match name {
+        "logic_link_sensor" => return run_link_sensor(ticks.unwrap_or(10), json),
+        "logic_save_load" => return run_save_load(ticks.unwrap_or(20), json),
+        "logic_draw" => return run_draw(true, ticks.unwrap_or(3), json),
+        "logic_draw_headless" => return run_draw(false, ticks.unwrap_or(3), json),
+        _ => {}
+    }
     let scenario = scenario(name).with_context(|| format!("unknown logic scenario: {name}"))?;
     let ticks = ticks.unwrap_or(scenario.ticks);
     let exec = run_scenario(scenario, ticks);
@@ -264,6 +572,32 @@ mod tests {
         let scenario = scenario("logic_strings").unwrap();
         let exec = run_scenario(scenario, scenario.ticks);
         assert_eq!(exec.text_buffer, "value: 5!");
+    }
+
+    #[test]
+    fn harness_scenario_goldens() {
+        let link = link_sensor(10).expect("link_sensor");
+        assert_eq!(link.checksum, "ef79a8557eadddb4");
+        assert_eq!(link.result, 124.0);
+        assert_eq!(link.links, 1);
+        assert_eq!(link.memory[0], CellValue::Num(123.0));
+        assert_eq!(link.memory[1], CellValue::Num(124.0));
+
+        let save = save_load(20).expect("save_load");
+        assert_eq!(save.checksum, "8f4d87c924126091");
+        assert_eq!(save.done, 1.0);
+        assert_eq!(save.code, "wait 1.5\nset done 1\n");
+
+        let draw = draw_report(true, 30).expect("logic_draw");
+        assert_eq!(draw.checksum, "82572433be79fab9");
+        assert_eq!(draw.commands, 10);
+        assert_eq!(draw.operations, 1);
+        assert_eq!(draw.text, "");
+
+        let headless = draw_report(false, 30).expect("logic_draw_headless");
+        assert_eq!(headless.checksum, "89cd31291d2aefa4");
+        assert_eq!(headless.commands, 0);
+        assert_eq!(headless.operations, 1);
     }
 
     #[test]

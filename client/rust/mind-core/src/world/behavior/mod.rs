@@ -72,6 +72,20 @@ impl BuildingKind {
     pub const WALL: BuildingKind = BuildingKind(8);
     /// `DoorBuild`.
     pub const DOOR: BuildingKind = BuildingKind(9);
+    /// `LogicBuild` (plan 13; revision 5).
+    pub const LOGIC: BuildingKind = BuildingKind(10);
+    /// `MemoryBuild` (plan 13; revision 1).
+    pub const MEMORY: BuildingKind = BuildingKind(11);
+    /// `MessageBuild` (plan 13; revision 0).
+    pub const MESSAGE: BuildingKind = BuildingKind(12);
+    /// `SwitchBuild` (plan 13; revision 1).
+    pub const SWITCH: BuildingKind = BuildingKind(13);
+    /// `LogicDisplayBuild` (plan 13; revision 1).
+    pub const DISPLAY: BuildingKind = BuildingKind(14);
+    /// `TileableLogicDisplayBuild` (plan 13; revision 0).
+    pub const TILEABLE_DISPLAY: BuildingKind = BuildingKind(15);
+    /// `CanvasBuild` (plan 13; revision 0).
+    pub const CANVAS: BuildingKind = BuildingKind(16);
 
     /// IO revision (`ConstructBuild=1`, `DrillBuild=1`, …; default 0).
     pub const fn revision(self) -> u8 {
@@ -79,6 +93,10 @@ impl BuildingKind {
             // ConstructBuild=1, DrillBuild=1, SeparatorBuild=1,
             // LiquidSourceBuild=1, AcceleratorBuild=1, LaunchPadBuild=1.
             1 | 3 | 4 | 5 | 6 | 7 => 1,
+            // LogicBuild revision 5 (plan 13 §6.5).
+            10 => 5,
+            // MemoryBuild / SwitchBuild / LogicDisplayBuild revision 1.
+            11 | 13 | 14 => 1,
             _ => 0,
         }
     }
@@ -96,6 +114,13 @@ impl BuildingKind {
             7 => "LaunchPadBuild",
             8 => "WallBuild",
             9 => "DoorBuild",
+            10 => "LogicBuild",
+            11 => "MemoryBuild",
+            12 => "MessageBuild",
+            13 => "SwitchBuild",
+            14 => "LogicDisplayBuild",
+            15 => "TileableLogicDisplayBuild",
+            16 => "CanvasBuild",
             _ => "BuildingComp",
         }
     }
@@ -471,6 +496,15 @@ pub fn default_behavior(def: &BlockDef) -> Arc<dyn BuildingBehavior> {
         K::LegacyMechPad | K::LegacyUnitFactory | K::LegacyCommandCenter => {
             Arc::new(legacy::LegacyBehavior)
         }
+        // Plan 13 logic blocks (M3/M4).
+        K::LogicBlock => Arc::new(crate::logic::blocks::LogicBlockBehavior),
+        K::MemoryBlock => Arc::new(crate::logic::blocks::MemoryBehavior),
+        K::SwitchBlock => Arc::new(crate::logic::blocks::SwitchBehavior),
+        K::MessageBlock => Arc::new(crate::logic::blocks::MessageBehavior),
+        K::LogicDisplay | K::TileableLogicDisplay => {
+            Arc::new(crate::logic::blocks::DisplayBehavior)
+        }
+        K::CanvasBlock => Arc::new(crate::logic::blocks::CanvasBehavior),
         _ => match super::block_kind_data::BlockKindData::from_def(def).family() {
             super::block_kind_data::BlockFamily::Sandbox => Arc::new(sandbox::SandboxBehavior),
             super::block_kind_data::BlockFamily::Environment => {
