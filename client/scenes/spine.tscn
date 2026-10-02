@@ -32,6 +32,7 @@
 [node name="World" type="Node2D" parent="."]
 
 [node name="TileGrid" type="MindTileGrid" parent="World"]
+visible = false
 
 [node name="Camera2D" type="MindCamera2D" parent="World"]
 position = Vector2(128, 128)

@@ -17,10 +17,16 @@ use godot::prelude::*;
 
 use mind_core::config::TILESIZE;
 use mind_core::render::Layer;
-use mind_core::render::bands::{BandEntry, BandPlan};
+use mind_core::render::bands::{BandEntry, BandKey, BandPlan};
 use mind_core::render::queue::RenderQueue;
+use mind_core::render::scan::CameraView;
 
+use crate::assets::MindAssets;
 use crate::sim_host::MindSimHost;
+
+mod floor;
+
+pub use floor::FloorRenderer;
 
 /// Per-frame render counters exposed through `MindRender.get_render_stats()`.
 #[derive(Debug, Default, Clone)]
@@ -41,6 +47,8 @@ pub struct RenderStats {
     pub mesh_rebuilds: i64,
     /// Dynamic sprites emitted this frame.
     pub dynamic_sprites: i64,
+    /// Regions that fell back to `error`/placeholder this frame.
+    pub missing_regions: i64,
     /// Last frame build time in microseconds.
     pub build_us: i64,
     /// Current sim tick (updated by the facade).
@@ -68,6 +76,7 @@ impl RenderStats {
         );
         dict.set(&key("mesh_rebuilds"), &self.mesh_rebuilds.to_variant());
         dict.set(&key("dynamic_sprites"), &self.dynamic_sprites.to_variant());
+        dict.set(&key("missing_regions"), &self.missing_regions.to_variant());
         dict.set(&key("build_us"), &self.build_us.to_variant());
         dict.set(&key("tick"), &self.tick.to_variant());
         let mut trace = PackedStringArray::new();
@@ -87,10 +96,12 @@ pub struct MindWorldRenderer {
     host: Option<Gd<MindSimHost>>,
     band_plan: BandPlan,
     band_nodes: Vec<Gd<Node2D>>,
+    band_index: HashMap<BandKey, usize>,
     queue: RenderQueue,
     stats: RenderStats,
     layer_visible: HashMap<String, bool>,
     visibility_dirty: bool,
+    floor: Option<FloorRenderer>,
 }
 
 #[godot_api]
@@ -101,10 +112,12 @@ impl INode2D for MindWorldRenderer {
             host: None,
             band_plan: BandPlan::new(),
             band_nodes: Vec::new(),
+            band_index: HashMap::new(),
             queue: RenderQueue::new(),
             stats: RenderStats::default(),
             layer_visible: HashMap::new(),
             visibility_dirty: false,
+            floor: None,
         }
     }
 
@@ -115,6 +128,7 @@ impl INode2D for MindWorldRenderer {
             log::warn!("MindWorldRenderer: no MindSimHost at ../../SimHost");
         }
         self.build_bands();
+        self.build_floor();
         log::info!("MindWorldRenderer ready ({} bands)", self.band_nodes.len());
     }
 
@@ -138,8 +152,78 @@ impl MindWorldRenderer {
             node.set_z_as_relative(false);
             let node = node;
             self.base_mut().add_child(&node);
+            let index = self.band_nodes.len();
+            self.band_index.insert(
+                BandKey {
+                    layer: entry.layer,
+                    sub: entry.sub,
+                    blend: entry.blend,
+                },
+                index,
+            );
             self.band_nodes.push(node);
         }
+    }
+
+    /// Resolves the `Node2D` for a band key (append-only band plan).
+    fn band_node_at(&self, key: BandKey) -> Option<Gd<Node2D>> {
+        self.band_index
+            .get(&key)
+            .and_then(|index| self.band_nodes.get(*index))
+            .cloned()
+    }
+
+    /// Constructs the plan-16 floor pass over the floor band nodes.
+    fn build_floor(&mut self) {
+        let Some(host) = self.host.clone() else {
+            return;
+        };
+        let Some(mut assets) = self
+            .base()
+            .try_get_node_as::<MindAssets>("/root/MindAssets")
+        else {
+            log::warn!("MindWorldRenderer: no MindAssets autoload; floor atlas disabled");
+            // Still build the floor pass so placeholder quads render.
+            let band_nodes = self.floor_band_nodes();
+            self.floor = Some(FloorRenderer::new(host, None, band_nodes));
+            return;
+        };
+        // Ensure the atlas is loaded before the first bake.
+        if !assets.bind_mut().load_assets() {
+            log::warn!("MindWorldRenderer: atlas manifest unavailable; using placeholder quads");
+        }
+        let band_nodes = self.floor_band_nodes();
+        self.floor = Some(FloorRenderer::new(host, Some(assets), band_nodes));
+    }
+
+    /// The floor band nodes in `CacheLayerId::ALL` order.
+    fn floor_band_nodes(&self) -> Vec<Gd<Node2D>> {
+        use mind_core::render::layer::CacheLayerId;
+        CacheLayerId::ALL
+            .iter()
+            .filter_map(|cache| self.band_node_at(BandKey::floor(*cache)))
+            .collect()
+    }
+
+    /// Current camera as a `mind-core` [`CameraView`] for culling.
+    fn camera_view(&self) -> CameraView {
+        let mut view = CameraView::default();
+        let Some(camera) = self.base().try_get_node_as::<Camera2D>("../Camera2D") else {
+            return view;
+        };
+        let position = camera.get_position();
+        let zoom = camera.get_zoom().x.max(0.01);
+        let size = self
+            .base()
+            .get_viewport()
+            .map(|viewport| viewport.get_visible_rect().size)
+            .unwrap_or(Vector2::new(320.0, 180.0));
+        view.x = position.x;
+        view.y = position.y;
+        view.w = size.x / zoom;
+        view.h = size.y / zoom;
+        view.zoom = zoom;
+        view
     }
 
     /// Applies queued layer-visibility toggles to the band nodes.
@@ -168,6 +252,16 @@ impl MindWorldRenderer {
         self.stats.stage_trace.clear();
         self.stats.stage_trace.push(String::from("frame_begin"));
         self.queue.clear();
+        // Stage 9/12: frame-alpha view, chunk invalidation + floor bake.
+        let view = self.camera_view();
+        if let Some(floor) = self.floor.as_mut() {
+            floor.update(&view);
+            let floor_stats = floor.stats();
+            self.stats.mesh_rebuilds = floor_stats.mesh_rebuilds as i64;
+            self.stats.floor_chunks_dirty = floor_stats.dirty;
+            self.stats.missing_regions = floor_stats.missing_regions as i64;
+        }
+        self.stats.stage_trace.push(String::from("floor"));
         self.queue.set_sort(true);
         self.stats.stage_trace.push(String::from("sort"));
         self.queue.flush();
@@ -283,6 +377,17 @@ impl MindRender {
     pub fn set_layer_visible(&mut self, name: GString, visible: bool) {
         if let Some(mut renderer) = self.renderer() {
             renderer.bind_mut().set_layer_visible(name, visible);
+        }
+    }
+
+    /// Toggles the plan-00 debug tile grid (default hidden after M1).
+    #[func]
+    pub fn set_tile_grid_visible(&mut self, visible: bool) {
+        if let Some(mut grid) = self
+            .base()
+            .try_get_node_as::<crate::tile_grid::MindTileGrid>("../World/TileGrid")
+        {
+            grid.set_visible(visible);
         }
     }
 

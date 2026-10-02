@@ -1773,6 +1773,7 @@ dependencies = [
  "mind-core",
  "mind-stdb",
  "serde_json",
+ "smallvec",
 ]
 
 [[package]]
