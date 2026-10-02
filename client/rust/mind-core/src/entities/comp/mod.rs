@@ -8,6 +8,7 @@ pub mod base;
 pub mod building;
 pub mod health;
 pub mod markers;
+pub mod unit;
 
 pub use base::{BaseEntity, DefId, Local, Pos, Remote, SimId, TeamComp, Vel};
 pub use building::{

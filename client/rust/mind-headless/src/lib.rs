@@ -23,6 +23,7 @@ pub mod render_scenarios;
 pub mod report;
 pub mod server;
 pub mod stdb_scenarios;
+pub mod units_scenarios;
 
 use clap::Parser;
 
