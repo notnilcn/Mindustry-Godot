@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
+use crate::audio::{AudioSink, AudioSinkRes, sim as audio_sim};
 use crate::content::{BlockId, ContentRegistry, MemoryBundle, MemoryUnlockStore};
 use crate::determinism::{Checksummer, SimRng};
 use crate::ecs::EntitySeq;
@@ -107,10 +108,14 @@ pub struct BuildHarness {
     pub events: Vec<BuildEventRecord>,
     /// Deterministic RNG (plan-03 style seeded stream).
     pub rng: SimRng,
+    /// Plan-18 audio sink (sim call sites emit into it; no-op by default).
+    pub audio: AudioSinkRes,
     log: WorldEventLog,
     hooks: HarnessHooks,
     item_count: usize,
     liquid_count: usize,
+    /// `ConstructBlock.shouldPlay` rate gate (`Time.millis` of the last sound).
+    audio_last_ms: f64,
 }
 
 impl BuildHarness {
@@ -140,6 +145,7 @@ impl BuildHarness {
             counter: BlockCounter::new(),
             events: Vec::new(),
             rng: SimRng::new(seed),
+            audio: AudioSinkRes::noop(),
             log: WorldEventLog::default(),
             hooks: HarnessHooks {
                 seq: AtomicU64::new(0),
@@ -148,7 +154,18 @@ impl BuildHarness {
             },
             item_count,
             liquid_count,
+            audio_last_ms: f64::MIN,
         }
+    }
+
+    /// Installs the active audio sink (called by the scenario/client host).
+    pub fn set_audio_sink(&mut self, sink: impl AudioSink + 'static) {
+        self.audio = AudioSinkRes::new(sink);
+    }
+
+    /// The active audio sink boundary (`Sound.at` call sites emit here).
+    pub fn audio(&self) -> &AudioSinkRes {
+        &self.audio
     }
 
     /// Builds the full vanilla registry (init + post-init).
@@ -247,6 +264,9 @@ impl BuildHarness {
                 breaking: false,
                 has_config: false,
             });
+            // `ConstructBlock.constructFinish`: `block.placeSound.at(tile)`.
+            let (cx, cy) = Self::tile_center(x, y);
+            self.play_block_sound(def.size, cx, cy, true);
         }
         true
     }
@@ -346,6 +366,25 @@ impl BuildHarness {
             breaking: deconstruct,
             has_config: false,
         });
+        // `ConstructBlock.constructFinish`/`deconstructFinish` sounds.
+        let size = self.content.block(block).map(|def| def.size).unwrap_or(1);
+        let (cx, cy) = Self::tile_center(tile.x() as i32, tile.y() as i32);
+        self.play_block_sound(size, cx, cy, !deconstruct);
+    }
+
+    /// Emits the block place/break sound honouring `ConstructBlock.shouldPlay`
+    /// (a global 32 ms rate gate).
+    fn play_block_sound(&mut self, size: i32, x: f32, y: f32, place: bool) {
+        let now_ms = f64::from(crate::world::update::build_time(&self.world)) * (1000.0 / 60.0);
+        if now_ms - self.audio_last_ms < 32.0 {
+            return;
+        }
+        self.audio_last_ms = now_ms;
+        if place {
+            audio_sim::emit_block_place(&self.audio, size, x, y, 1.0);
+        } else {
+            audio_sim::emit_block_break(&self.audio, size, x, y, 1.0);
+        }
     }
 
     /// Applies a config value to the building at `(x, y)`.

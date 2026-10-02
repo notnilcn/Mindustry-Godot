@@ -50,6 +50,34 @@ pub struct UnitTypeComp {
     pub type_id: UnitTypeId,
 }
 
+/// Audio call-site data copied from `UnitTypeDef` at spawn (plan 18 §2.3).
+///
+/// `UnitComp.kill` reads this to emit `deathSound`/`wreckSound` through the
+/// installed [`crate::audio::AudioSinkRes`] without needing the content registry
+/// in the `&mut World` kill path.
+#[derive(Debug, Clone, Copy, PartialEq, Component)]
+pub struct UnitAudioComp {
+    /// `UnitType.deathSound` (`none`/`unset` = silent).
+    pub death_sound: crate::content::registries::sound_meta::SoundId,
+    /// `UnitType.deathSoundVolume`.
+    pub death_volume: f32,
+    /// `UnitType.wreckSound` (`none`/`unset` = silent).
+    pub wreck_sound: crate::content::registries::sound_meta::SoundId,
+    /// `UnitType.wreckSoundVolume`.
+    pub wreck_volume: f32,
+}
+
+impl Default for UnitAudioComp {
+    fn default() -> Self {
+        UnitAudioComp {
+            death_sound: crate::content::registries::sound_meta::SoundId::UNSET,
+            death_volume: 1.0,
+            wreck_sound: crate::content::registries::sound_meta::SoundId::UNSET,
+            wreck_volume: 1.0,
+        }
+    }
+}
+
 /// Movement physics derived from `UnitType`.
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct PhysicsComp {
