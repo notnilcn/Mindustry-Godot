@@ -22,8 +22,8 @@ use super::TilePos;
 use super::block::{BlockInstance, BlockTable};
 use super::limits::BuildRules;
 
-/// Rust-only `ProximityUpdateEvent` sink hook placeholder (plan 07 §3.8).
-pub use self::proximity_placeholder::ProximityUpdateEvent;
+/// Rust-only `ProximityUpdateEvent` observable (plan 07 §3.8).
+pub use super::proximity::ProximityUpdateEvent;
 
 impl BlockInstance {
     /// Spawns a building entity for this block (`BuildingComp.create`/`init`).
@@ -383,19 +383,6 @@ pub fn block_config(table: &BlockTable, entity: Entity, world: &World) -> Config
         return ConfigValue::None;
     };
     inst.behavior.config(world, entity)
-}
-
-/// Placeholder module holding the Rust-only proximity event type until plan 07
-/// M3 lands `world::proximity` (keeps `update.rs` links stable).
-pub mod proximity_placeholder {
-    use bevy_ecs::entity::Entity;
-
-    /// Rust-only observable fired after `onProximityUpdate` (plan 07 §3.8).
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct ProximityUpdateEvent {
-        /// Building whose proximity changed.
-        pub entity: Entity,
-    }
 }
 
 /// Scratch item list used by tests (`ItemModule` sizes).

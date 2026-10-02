@@ -65,3 +65,68 @@ pub struct WorldLoadEndEvent;
 /// Fired when a world load fully completes (`WorldLoadEvent`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct WorldLoadEvent;
+
+/// A build/deconstruct action began (`BlockBuildBeginEvent`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BlockBuildBeginEvent {
+    /// Tile x.
+    pub x: i16,
+    /// Tile y.
+    pub y: i16,
+    /// Team performing the action.
+    pub team: u8,
+    /// Whether this is a deconstruction.
+    pub breaking: bool,
+}
+
+/// A build/deconstruct action ended (`BlockBuildEndEvent`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BlockBuildEndEvent {
+    /// Tile x.
+    pub x: i16,
+    /// Tile y.
+    pub y: i16,
+    /// Team performing the action.
+    pub team: u8,
+    /// Whether this was a deconstruction.
+    pub breaking: bool,
+    /// Config carried through the finish, if any.
+    pub has_config: bool,
+}
+
+/// A building rotated (`BuildRotateEvent`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BuildRotateEvent {
+    /// Tile x.
+    pub x: i16,
+    /// Tile y.
+    pub y: i16,
+    /// Previous rotation.
+    pub previous: u8,
+    /// New rotation.
+    pub rotation: u8,
+}
+
+/// A building's team changed (`BuildTeamChangeEvent`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BuildTeamChangeEvent {
+    /// Tile x.
+    pub x: i16,
+    /// Tile y.
+    pub y: i16,
+    /// Previous team.
+    pub previous: u8,
+    /// New team.
+    pub team: u8,
+}
+
+/// A building took damage (`BuildDamageEvent`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BuildDamageEvent {
+    /// Tile x.
+    pub x: i16,
+    /// Tile y.
+    pub y: i16,
+    /// Damage amount.
+    pub amount: f32,
+}

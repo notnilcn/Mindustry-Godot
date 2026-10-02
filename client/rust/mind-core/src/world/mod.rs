@@ -18,22 +18,30 @@ pub mod attributes;
 pub mod behavior;
 pub mod block;
 pub mod block_kind_data;
+pub mod build;
 pub mod cached;
 pub mod checksum;
 pub mod color_mapper;
 pub mod config;
+pub mod construct;
 pub mod consumers;
 pub mod context;
 pub mod darkness;
 pub mod draw;
 pub mod edges;
 pub mod events;
+// The harness is deterministic test/scenario infrastructure; panicking on a
+// broken content bootstrap is intentional (plan 07 §7b).
+#[allow(clippy::expect_used)]
+pub mod harness;
 pub mod hooks;
 pub mod limits;
 pub mod modules;
 pub mod ops;
 pub mod params;
+pub mod plan;
 pub mod pos;
+pub mod proximity;
 pub mod raycast;
 pub mod stats;
 pub mod status;
@@ -51,6 +59,7 @@ pub use block_kind_data::{BlockFamily, BlockKindData};
 pub use cached::{CachedBuild, CachedTile, CachedTiles, TileGen};
 pub use color_mapper::ColorMapper;
 pub use config::{ConfigHandlers, ConfigKind, ConfigValue};
+pub use construct::ConstructState;
 pub use consumers::{ConsumeInstance, ConsumeInstanceKind, Consumers};
 pub use context::{Context, FilterContext};
 pub use draw::{
@@ -59,9 +68,11 @@ pub use draw::{
 };
 pub use edges::Edges;
 pub use events::{
-    TileChangeEvent, TileFloorChangeEvent, TileOverlayChangeEvent, TilePreChangeEvent,
-    WorldLoadBeginEvent, WorldLoadEndEvent, WorldLoadEvent,
+    BlockBuildBeginEvent, BlockBuildEndEvent, BuildDamageEvent, BuildRotateEvent,
+    BuildTeamChangeEvent, TileChangeEvent, TileFloorChangeEvent, TileOverlayChangeEvent,
+    TilePreChangeEvent, WorldLoadBeginEvent, WorldLoadEndEvent, WorldLoadEvent,
 };
+pub use harness::{BuildEventRecord, BuildHarness};
 pub use hooks::{
     MapGenHooks, NewBuilding, NoopMapGenHooks, NoopRenderHooks, NoopWorldHooks, RenderHooks,
     WorldHooks,
@@ -70,14 +81,16 @@ pub use limits::{BlockCounter, BuildRules};
 pub use modules::{FlowWindow, ItemModule, LiquidModule, PowerGraphId, PowerModule};
 pub use ops::{WorldCtx, WorldEventLog};
 pub use params::WorldParams;
+pub use plan::BuildPlan;
 pub use pos::TilePos;
+pub use proximity::{ProximityUpdateEvent, remove_from_proximity, update_proximity};
 pub use stats::{BarDisplay, StatCat, StatEntry, StatValue, Stats};
 pub use status::{BlockStatus, block_status};
 pub use tile::{PACK_DATA_LAYOUT, Tile};
 pub use tiles::Tiles;
 pub use update::{
-    ProximityUpdateEvent, building_update, delta, edelta, get_progress_increase, no_sleep, sleep,
-    update_buildings, update_consumption,
+    building_update, delta, edelta, get_progress_increase, no_sleep, sleep, update_buildings,
+    update_consumption,
 };
 
 use bevy_ecs::entity::Entity;
