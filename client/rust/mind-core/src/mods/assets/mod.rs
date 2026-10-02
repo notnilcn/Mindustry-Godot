@@ -328,10 +328,30 @@ impl DataAsset {
 pub fn write_assets(writer: &mut WireWriter, assets: &[DataAsset]) -> Result<(), IoError> {
     writer.u(PATCH_FORMAT_VERSION);
     writer.i(assets.len() as i32);
+    write_asset_records(writer, assets)
+}
+
+/// Writes only the per-asset records (no version/count header). Used by plan
+/// 04's `patches` region, which frames the `i32` format version + count itself
+/// (plan 20 §6.8 `PatchSetIo`).
+pub fn write_asset_records(writer: &mut WireWriter, assets: &[DataAsset]) -> Result<(), IoError> {
     for asset in assets {
         asset.write(writer)?;
     }
     Ok(())
+}
+
+/// Reads `count` per-asset records (no header). Counterpart of
+/// [`write_asset_records`].
+pub fn read_asset_records(
+    reader: &mut WireReader,
+    count: usize,
+) -> Result<Vec<DataAsset>, IoError> {
+    let mut out = Vec::with_capacity(count);
+    for _ in 0..count {
+        out.push(DataAsset::read(reader)?);
+    }
+    Ok(out)
 }
 
 /// Reads the `patches` region body written by [`write_assets`].
@@ -348,11 +368,7 @@ pub fn read_assets(reader: &mut WireReader) -> Result<Vec<DataAsset>, IoError> {
     if count < 0 {
         return Err(IoError::corrupt("negative data asset count"));
     }
-    let mut out = Vec::with_capacity(count as usize);
-    for _ in 0..count {
-        out.push(DataAsset::read(reader)?);
-    }
-    Ok(out)
+    read_asset_records(reader, count as usize)
 }
 
 /// sha256 digest.
@@ -913,6 +929,22 @@ fn content_stem(json: &str) -> String {
                 .map(str::to_owned)
         })
         .unwrap_or_else(|| String::from("content"))
+}
+
+/// Plan 20 §6.8 / plan 04 `PatchSetIo`: writes the manager's asset records into
+/// the `patches` region (the region framing writes the format version + count).
+impl crate::io::save::state::PatchSetIo for ModDataManager {
+    fn write_patches(&self, w: &mut WireWriter, _embed: bool) -> Result<(), IoError> {
+        write_asset_records(w, &self.assets)
+    }
+
+    fn patch_count(&self) -> usize {
+        self.assets.len()
+    }
+
+    fn has_external_assets(&self) -> bool {
+        self.assets.iter().any(DataAsset::is_external)
+    }
 }
 
 impl DataAssets for ModDataManager {

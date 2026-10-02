@@ -56,6 +56,10 @@ pub struct SaveReadState<'a> {
     /// Entity references read before their target was loaded
     /// (`TypeIO` entity fallback); resolved by the `after_read_all` pass.
     pub pending_entity_refs: Vec<PendingEntityRef>,
+    /// Data assets decoded from the `patches` region (plan 20 §6.8). The caller
+    /// feeds these to `DataAssets::load`; `None` means the region was absent or
+    /// had no sink.
+    pub patches: Option<Vec<crate::mods::assets::DataAsset>>,
 }
 
 /// One unresolved entity reference recorded during load (plan 04 §3.4).
@@ -77,6 +81,7 @@ impl SaveReadState<'_> {
         self.all_buildings.clear();
         self.team_plans.clear();
         self.pending_entity_refs.clear();
+        self.patches = None;
     }
 }
 
@@ -97,6 +102,7 @@ impl Default for SaveReadState<'_> {
             all_buildings: Vec::new(),
             team_plans: Vec::new(),
             pending_entity_refs: Vec::new(),
+            patches: None,
         }
     }
 }
@@ -297,4 +303,9 @@ pub trait PatchSetIo {
     fn write_patches(&self, w: &mut WireWriter, embed: bool) -> IoResult<()>;
     /// Number of patches.
     fn patch_count(&self) -> usize;
+    /// Whether the asset set has external (non-embedded) payloads; drives the
+    /// `hasExternalAssets` meta tag (plan 20 §6.8/§7e).
+    fn has_external_assets(&self) -> bool {
+        false
+    }
 }
