@@ -125,6 +125,47 @@ pub enum ConfigKind {
 /// A configuration handler (`Block.configured` closure body).
 pub type ConfigureFn = fn(&mut World, Entity, Option<Entity>, &ConfigValue);
 
+/// Dispatches `configure(e, value)` to the block's registered behavior
+/// (`Building.configure`). Returns whether the building existed.
+pub fn configure(
+    world: &mut World,
+    entity: Entity,
+    player: Option<Entity>,
+    value: ConfigValue,
+) -> bool {
+    let Some(block) = world
+        .get::<crate::entities::comp::Building>(entity)
+        .map(|building| building.block)
+    else {
+        return false;
+    };
+    let Some(inst) = world
+        .get_resource::<crate::world::block::BlockTable>()
+        .and_then(|table| table.instance(block))
+    else {
+        return false;
+    };
+    inst.behavior.configured(world, entity, player, value);
+    true
+}
+
+/// Reads the current config (`Building.config()`).
+pub fn read_config(world: &World, entity: Entity) -> ConfigValue {
+    let Some(block) = world
+        .get::<crate::entities::comp::Building>(entity)
+        .map(|building| building.block)
+    else {
+        return ConfigValue::None;
+    };
+    let Some(inst) = world
+        .get_resource::<crate::world::block::BlockTable>()
+        .and_then(|table| table.instance(block))
+    else {
+        return ConfigValue::None;
+    };
+    inst.behavior.config(world, entity)
+}
+
 /// Per-block config handler table (`Block.configurations`).
 #[derive(Debug, Clone, Default)]
 pub struct ConfigHandlers {

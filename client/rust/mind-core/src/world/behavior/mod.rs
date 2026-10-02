@@ -22,6 +22,8 @@ use super::config::ConfigValue;
 use super::modules::PowerGraphId;
 use super::stats::Stats;
 
+pub mod sandbox;
+
 /// Plan-07 alias for plan 04's entity writer (`BuildingWriter`).
 pub type BuildingWriter<'a> = EntityWriter<'a>;
 /// Plan-07 alias for plan 04's entity reader (`BuildingReader`).
@@ -361,7 +363,10 @@ pub fn resolve_behavior(def: &BlockDef, registry: &BehaviorRegistry) -> Arc<dyn 
     if let Some(behavior) = registry.get_named(&def.name) {
         return behavior;
     }
-    Arc::new(NoopBehavior)
+    match super::block_kind_data::BlockKindData::from_def(def).family() {
+        super::block_kind_data::BlockFamily::Sandbox => Arc::new(sandbox::SandboxBehavior),
+        _ => Arc::new(NoopBehavior),
+    }
 }
 
 #[cfg(test)]

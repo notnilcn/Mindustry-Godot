@@ -19,6 +19,7 @@ pub mod behavior;
 pub mod block;
 pub mod block_kind_data;
 pub mod build;
+pub mod building_io;
 pub mod cached;
 pub mod checksum;
 pub mod color_mapper;
@@ -56,6 +57,7 @@ pub use behavior::{
 };
 pub use block::{BlockInstance, BlockTable, BlockView, Blocks};
 pub use block_kind_data::{BlockFamily, BlockKindData};
+pub use building_io::{DecodedBase, MODULE_CONSUME, MODULE_ITEM, MODULE_LIQUID, MODULE_POWER};
 pub use cached::{CachedBuild, CachedTile, CachedTiles, TileGen};
 pub use color_mapper::ColorMapper;
 pub use config::{ConfigHandlers, ConfigKind, ConfigValue};
