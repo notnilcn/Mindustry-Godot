@@ -18,6 +18,7 @@ pub mod custom;
 pub mod data;
 pub mod decal;
 pub mod def;
+pub mod parts;
 pub mod pool;
 pub mod pool_spec;
 pub mod resolve;
@@ -35,6 +36,10 @@ pub use decal::{Decal, DecalPool};
 pub use def::{
     CustomParams, EffectDef, EffectKind, EffectRegistry, ExplosionParams, NoiseParams,
     ParticleParams, RadialParams, SoundParams, TriangleParams, WaveParams, WrapParams, registry,
+};
+pub use parts::{
+    EffectSpawnerPartSpec, FlarePartSpec, HaloPartSpec, HoverPartSpec, PartMove, PartParams,
+    PartProgressSpec, PartSpec, RegionPartSpec, ShapePartSpec,
 };
 pub use pool::{EffectState, FxGate, FxPool, PendingSpawn, in_camera};
 pub use pool_spec::{DECAL_CAPACITY, DECAL_LIFETIME, DELAYED_SPAWN_CAPACITY, EFFECT_POOL_CAPACITY};
