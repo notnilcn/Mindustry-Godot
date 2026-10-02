@@ -14,11 +14,13 @@ pub mod generators;
 pub mod map;
 pub mod planet;
 pub mod preview;
+pub mod sector_damage;
 pub mod shuffle;
 
 pub use error::{MapError, MapException};
 pub use map::{ENV_SCORCHING, Map, UNKNOWN};
 pub use preview::{PreviewCache, PreviewQueue, cache_file, preview_file};
+pub use sector_damage::{DamageBuilding, DamageFx, NoopDamageFx, SectorDamageState};
 pub use shuffle::{GameMode, MapProvider, ShuffleMode};
 
 use std::path::{Path, PathBuf};
