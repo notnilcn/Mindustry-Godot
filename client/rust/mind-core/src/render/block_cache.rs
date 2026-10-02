@@ -109,6 +109,25 @@ impl BuildingCacheGrid {
         }
     }
 
+    /// Marks every tile's chunk dirty; returns the number of chunk/layer pairs
+    /// that flipped from clean to dirty (`recache_building` batching).
+    pub fn recache_tiles(&mut self, layer: usize, tiles: &[(i32, i32)]) -> usize {
+        if layer >= BUILDING_CACHE_LAYERS {
+            return 0;
+        }
+        let mut newly_dirty = 0;
+        for (x, y) in tiles {
+            let (cx, cy) = Self::chunk_of(*x, *y);
+            if let Some(i) = self.index(cx, cy)
+                && !self.chunks[i].dirty[layer]
+            {
+                self.chunks[i].dirty[layer] = true;
+                newly_dirty += 1;
+            }
+        }
+        newly_dirty
+    }
+
     /// Whether a chunk/layer needs a rebuild.
     pub fn is_dirty(&self, layer: usize, cx: i32, cy: i32) -> bool {
         self.index(cx, cy)
@@ -205,6 +224,24 @@ mod tests {
         assert!(tiles.contains(&(2, 2)));
         // A 1×1 block at (5,6) covers itself.
         assert_eq!(update_shadow_tiles(5, 6, 1, 0).as_slice(), &[(5, 6)]);
+    }
+
+    #[test]
+    fn recache_tiles_batches_per_chunk() {
+        let mut grid = BuildingCacheGrid::new(60, 30);
+        // Bake both chunks of layer 1 so they start clean.
+        for cx in 0..2 {
+            grid.mark_baked(1, cx, 0);
+        }
+        assert_eq!(grid.dirty_count(), 2, "layer 0 chunks are still dirty");
+        // Two tiles in chunk (0,0) dirty it once.
+        assert_eq!(grid.recache_tiles(1, &[(3, 3), (10, 10)]), 1);
+        // Re-dirtying is idempotent.
+        assert_eq!(grid.recache_tiles(1, &[(3, 3)]), 0);
+        // A tile in the second chunk dirties it once.
+        assert_eq!(grid.recache_tiles(1, &[(31, 3), (40, 10)]), 1);
+        // Out-of-bounds tiles are ignored.
+        assert_eq!(grid.recache_tiles(1, &[(9999, 9999)]), 0);
     }
 
     #[test]

@@ -18,9 +18,9 @@ use godot::obj::NewGd;
 use godot::prelude::*;
 
 use mind_core::config::TILESIZE;
+use mind_core::render::BlockDrawMeta;
 use mind_core::render::shadow::{build_darkness_map, build_shadow_map, shadow_tile_color};
 use mind_core::world::darkness::get_static_darkness;
-use mind_core::world::tile::is_static_kind;
 
 use crate::sim_host::MindSimHost;
 
@@ -122,7 +122,7 @@ impl ShadowRenderer {
                 let Some(def) = content.block(tile.block) else {
                     continue;
                 };
-                if !is_static_kind(def.kind) {
+                if !BlockDrawMeta::from_def(def).display_shadow {
                     continue;
                 }
                 let color =
