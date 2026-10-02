@@ -180,6 +180,12 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
                 dump,
                 json,
             } => cmd_mods_content(fixture, repo.as_deref(), dump.as_deref(), *json),
+            ModsCommand::Overlay {
+                fixture,
+                repo,
+                probe,
+                json,
+            } => cmd_mods_overlay(fixture, repo.as_deref(), probe, *json),
         },
         Command::Io { command } => match command {
             IoCommand::DumpMeta { file, json } => cmd_io_dump_meta(file, *json),
@@ -1325,6 +1331,79 @@ fn cmd_mods_content(
         log::error!("mods content: {} content error(s)", errors.len());
         Ok(EXIT_FAIL)
     }
+}
+
+/// Plan 20 M5 (`mods overlay`): build a fixture mod's overlay and probe region
+/// names against the resolved prefix/override/page rules.
+fn cmd_mods_overlay(
+    fixture: &str,
+    repo: Option<&Path>,
+    probes: &[String],
+    json: bool,
+) -> anyhow::Result<i32> {
+    use mind_core::assets::atlas::AtlasIndex;
+    use mind_core::assets::overlay::AssetOverlayProvider;
+    use mind_core::io::SettingsStore;
+    use mind_core::io::fs::NativeFs;
+    use mind_core::mods::Mods;
+
+    let root = paths::find_repo_root(repo)?;
+    let dir = root.join("parity/mod_fixtures").join(fixture);
+    let fs = NativeFs;
+    let mut mods = Mods::new(true, &dir);
+    mods.load_single(&fs, &dir, &SettingsStore::new())
+        .with_context(|| format!("loading fixture `{fixture}`"))?;
+
+    let atlas_path = root.join("assets/sprites/sprites.atlas.json");
+    let atlas = std::fs::read_to_string(&atlas_path)
+        .ok()
+        .and_then(|text| AtlasIndex::from_manifest_json(&text).ok());
+    let atlas_has = |name: &str| {
+        atlas
+            .as_ref()
+            .is_some_and(|index| index.find(name).is_some())
+    };
+
+    let overlay = mods.build_overlay(&fs, &atlas_has);
+    let mut pass = true;
+    let probe_reports: Vec<serde_json::Value> = probes
+        .iter()
+        .map(|name| match overlay.probe(name) {
+            Some((path, page)) => serde_json::json!({
+                "name": name,
+                "found": true,
+                "path": path,
+                "page": page.name(),
+            }),
+            None => {
+                pass = false;
+                serde_json::json!({"name": name, "found": false})
+            }
+        })
+        .collect();
+
+    let report = serde_json::json!({
+        "fixture": fixture,
+        "sprites": overlay.sprites().len(),
+        "bundles": overlay.bundles().len(),
+        "pregenerated": overlay.pregenerated,
+        "warnings": overlay.warnings,
+        "probes": probe_reports,
+    });
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "mods overlay: {} sprites, {} bundles, {} warning(s)",
+            overlay.sprites().len(),
+            overlay.bundles().len(),
+            overlay.warnings.len()
+        );
+        for probe in &probe_reports {
+            println!("{probe}");
+        }
+    }
+    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
 }
 
 /// Normalizes a mod report to the stable `expected_list.json` fields.

@@ -201,6 +201,23 @@ pub enum ModsCommand {
         #[arg(long)]
         json: bool,
     },
+
+    /// Build a fixture mod's sprite/bundle overlay and probe region names
+    /// (plan 20 M5).
+    Overlay {
+        /// Fixture name under `parity/mod_fixtures/`.
+        #[arg(long)]
+        fixture: String,
+        /// Repo root override (defaults to discovery from cwd).
+        #[arg(long)]
+        repo: Option<PathBuf>,
+        /// Region name to probe (repeatable).
+        #[arg(long)]
+        probe: Vec<String>,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// `trace` subcommands (plan 05 M6).
