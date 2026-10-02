@@ -11,6 +11,8 @@ pub mod generated_assets;
 pub mod migrate;
 pub mod pack_atlas;
 pub mod pack_pipeline;
+pub mod shaders;
+pub mod sounds;
 pub mod staging;
 
 use anyhow::Result;

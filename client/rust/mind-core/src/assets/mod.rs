@@ -18,3 +18,4 @@
 //! Godot-free and tokio-free (HLP §2.2).
 
 pub mod atlas;
+pub mod generated;

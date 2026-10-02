@@ -406,6 +406,28 @@ fn collect_config_dirs(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
     Ok(())
 }
 
+/// Writes `assets/parity/region_names.txt` (plan 03 §6.9/M4 verify): the
+/// sorted region-name golden of a packed atlas.
+pub fn write_region_names(atlas_dir: &Path, out: &Path) -> Result<usize> {
+    let manifest = AtlasManifest::read(&atlas_dir.join("sprites.atlas.json"))?;
+    let mut names: Vec<&str> = manifest
+        .regions
+        .iter()
+        .map(|region| region.name.as_str())
+        .collect();
+    names.sort_unstable();
+    let mut text = String::with_capacity(names.iter().map(|n| n.len() + 1).sum());
+    for name in &names {
+        text.push_str(name);
+        text.push('\n');
+    }
+    if let Some(parent) = out.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(out, text).with_context(|| format!("writing {}", out.display()))?;
+    Ok(names.len())
+}
+
 /// Guards against a `flattenPaths` collision (plan 03 §3.4).
 pub fn assert_no_duplicate_region_names(manifest: &AtlasManifest) -> Result<()> {
     let mut seen = std::collections::BTreeSet::new();

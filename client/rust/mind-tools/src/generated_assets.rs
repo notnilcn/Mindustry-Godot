@@ -113,6 +113,40 @@ pub fn sync_icons_properties(root: &Path, registry: &ContentRegistry) -> Result<
     })
 }
 
+/// Writes `assets/locales` (`build.gradle` `generateLocales`): `en` first,
+/// then every `bundle_<code>.properties` in file-name order.
+pub fn write_locales(root: &Path) -> Result<usize> {
+    let bundles = root.join("assets/bundles");
+    let mut names: Vec<String> = fs::read_dir(&bundles)
+        .with_context(|| format!("reading {}", bundles.display()))?
+        .map(|entry| {
+            entry
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .map_err(anyhow::Error::from)
+        })
+        .collect::<Result<_>>()?;
+    names.sort();
+
+    let mut out = String::from("en\n");
+    let mut count = 1usize;
+    for name in names {
+        if name == "bundle.properties" || name == "global.properties" {
+            continue;
+        }
+        if let Some(code) = name
+            .strip_prefix("bundle_")
+            .and_then(|rest| rest.strip_suffix(".properties"))
+        {
+            out.push_str(code);
+            out.push('\n');
+            count += 1;
+        }
+    }
+    let path = root.join("assets/locales");
+    fs::write(&path, out).with_context(|| format!("writing {}", path.display()))?;
+    Ok(count)
+}
+
 /// One `Icon` glyph from `fontgen/config.json`.
 #[derive(Debug, Clone, Serialize)]
 pub struct IconGlyph {
