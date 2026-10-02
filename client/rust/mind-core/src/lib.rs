@@ -27,6 +27,7 @@ pub mod event;
 pub mod game;
 pub mod io;
 pub mod log;
+pub mod maps;
 pub mod math;
 pub mod mods;
 pub mod platform;

@@ -198,6 +198,13 @@ pub enum Command {
         command: WorldCommand,
     },
 
+    /// Map registry inspection (plan 06 §7b).
+    Maps {
+        /// Map subcommand.
+        #[command(subcommand)]
+        command: MapsCommand,
+    },
+
     /// Audio state-machine and event inspection (plan 18).
     Audio {
         /// Audio subcommand.
@@ -239,6 +246,82 @@ pub enum WorldCommand {
         json: bool,
     },
 
+    /// Generate a world and dump its checksum/histogram (plan 06 M6/M7 §7b).
+    Gen {
+        /// Generator tag (`simplex`, `flat`, `planet`).
+        #[arg(long, default_value = "simplex")]
+        generator: String,
+        /// Planet content name (for `--generator planet`).
+        #[arg(long, default_value = "serpulo")]
+        planet: String,
+        /// Sector id (for `--generator planet`).
+        #[arg(long, default_value_t = 0)]
+        sector: u32,
+        /// Generation seed.
+        #[arg(long, default_value_t = 7)]
+        seed: u64,
+        /// Grid width in tiles.
+        #[arg(long, default_value_t = 128)]
+        width: i32,
+        /// Grid height in tiles.
+        #[arg(long, default_value_t = 128)]
+        height: i32,
+        /// Write the final JSON report here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Time world generation (plan 06 §7d).
+    BenchGen {
+        /// Generator tag (`simplex`, `tantros`, `blank`).
+        #[arg(long, default_value = "simplex")]
+        generator: String,
+        /// Generation seed.
+        #[arg(long, default_value_t = 42)]
+        seed: u64,
+        /// Grid width in tiles.
+        #[arg(long, default_value_t = 256)]
+        width: i32,
+        /// Grid height in tiles.
+        #[arg(long, default_value_t = 256)]
+        height: i32,
+        /// Timed iterations.
+        #[arg(long, default_value_t = 20)]
+        iters: u64,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Apply a generation-filter stack to a deterministic base grid and dump
+    /// the result checksum/histogram (plan 06 M5 §7b).
+    Filters {
+        /// Simulation seed.
+        #[arg(long, default_value_t = 1)]
+        seed: u64,
+        /// Grid width in tiles.
+        #[arg(long, default_value_t = 64)]
+        width: i32,
+        /// Grid height in tiles.
+        #[arg(long, default_value_t = 64)]
+        height: i32,
+        /// Comma-separated filter class tags (default `scatter,ore,median,blend`).
+        #[arg(long, default_value = "scatter,ore,median,blend")]
+        stack: String,
+        /// Apply order (`forward` or `reverse`).
+        #[arg(long, default_value = "forward")]
+        order: String,
+        /// Write the final JSON report here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Place overlapping multiblocks and break the center; asserts shared-entity
     /// linkage and overlap clearing (plan 06 M3 §7b).
     Multiblock {
@@ -251,6 +334,21 @@ pub enum WorldCommand {
         /// Write the final JSON report here.
         #[arg(long)]
         dump: Option<PathBuf>,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+/// `maps` subcommands (plan 06 §7b).
+#[derive(Debug, Subcommand)]
+pub enum MapsCommand {
+    /// Meta-only listing of a map/save directory, sorted per `Map.compareTo`
+    /// (corrupt entries skipped with a warning).
+    List {
+        /// Directory to list.
+        #[arg(long, default_value = "tests/fixtures/maps")]
+        dir: PathBuf,
         /// Emit a machine-readable JSON report on stdout.
         #[arg(long)]
         json: bool,

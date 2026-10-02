@@ -21,8 +21,8 @@ use mind_core::util::alloc::{alloc_count, enabled as alloc_audit_enabled};
 use mind_core::world::TilePos;
 
 use crate::cli::{
-    AssetsCommand, Cli, Command, ContentCommand, IoCommand, MetaCommand, ModsCommand, TraceCommand,
-    WorldCommand,
+    AssetsCommand, Cli, Command, ContentCommand, IoCommand, MapsCommand, MetaCommand, ModsCommand,
+    TraceCommand, WorldCommand,
 };
 use crate::paths;
 use crate::registry;
@@ -205,12 +205,51 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
                 dump,
                 json,
             } => cmd_world_tile_ops(*seed, *width, *height, *ops, dump.as_deref(), *json),
+            WorldCommand::Gen {
+                generator,
+                planet,
+                sector,
+                seed,
+                width,
+                height,
+                dump,
+                json,
+            } => cmd_world_gen(
+                generator,
+                planet,
+                *sector,
+                *seed,
+                *width,
+                *height,
+                dump.as_deref(),
+                *json,
+            ),
+            WorldCommand::BenchGen {
+                generator,
+                seed,
+                width,
+                height,
+                iters,
+                json,
+            } => cmd_world_bench_gen(generator, *seed, *width, *height, *iters, *json),
+            WorldCommand::Filters {
+                seed,
+                width,
+                height,
+                stack,
+                order,
+                dump,
+                json,
+            } => cmd_world_filters(*seed, *width, *height, stack, order, dump.as_deref(), *json),
             WorldCommand::Multiblock {
                 size,
                 block,
                 dump,
                 json,
             } => cmd_world_multiblock(*size, block, dump.as_deref(), *json),
+        },
+        Command::Maps { command } => match command {
+            MapsCommand::List { dir, json } => cmd_maps_list(dir, *json),
         },
         Command::Audio { command } => crate::audio_scenarios::run(command),
         Command::Mods { command } => match command {
@@ -2812,6 +2851,352 @@ fn cmd_world_tile_ops(
         );
         Ok(EXIT_FAIL)
     }
+}
+
+fn cmd_world_bench_gen(
+    generator: &str,
+    seed: u64,
+    width: i32,
+    height: i32,
+    iters: u64,
+    json: bool,
+) -> anyhow::Result<i32> {
+    use mind_core::maps::generators::{BlankPlanetGenerator, SimplexGenerator, WorldGenerator};
+    use mind_core::world::{WorldGrid, WorldParams};
+
+    if width <= 0 || height <= 0 || iters == 0 {
+        return Err(anyhow!("--width/--height/--iters must be positive"));
+    }
+    let content = boot_content()?;
+    let params = WorldParams {
+        seed_offset: seed,
+        width,
+        height,
+        ..WorldParams::default()
+    };
+    let mut grid = WorldGrid::new(width, height);
+    let mut samples = Vec::with_capacity(iters as usize);
+    for _ in 0..iters {
+        let start = Instant::now();
+        match generator {
+            "simplex" => {
+                let mut g = SimplexGenerator::new(seed);
+                g.generate(&mut grid.tiles, &params, &content);
+            }
+            "tantros" => {
+                let mut g = mind_core::maps::planet::TantrosPlanetGenerator::new();
+                g.generate(&mut grid.tiles, &params, &content);
+            }
+            "blank" => {
+                let mut g = BlankPlanetGenerator::new(0);
+                g.generate(&mut grid.tiles, &params, &content);
+            }
+            other => return Err(anyhow!("unknown generator `{other}`")),
+        }
+        samples.push(start.elapsed().as_nanos() as u64);
+    }
+    samples.sort_unstable();
+    let p = |q: f64| -> f64 {
+        let index = ((samples.len() as f64 - 1.0) * q).round() as usize;
+        samples[index] as f64 / 1_000_000.0
+    };
+    let report = serde_json::json!({
+        "format": 1,
+        "generator": generator,
+        "seed": seed,
+        "width": width,
+        "height": height,
+        "iters": iters,
+        "p50_ms": p(0.50),
+        "p95_ms": p(0.95),
+    });
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "world gen bench: generator={generator} {width}x{height} iters={iters} p50={:.2}ms p95={:.2}ms",
+            p(0.50),
+            p(0.95)
+        );
+    }
+    Ok(EXIT_PASS)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn cmd_world_gen(
+    generator: &str,
+    planet: &str,
+    sector: u32,
+    seed: u64,
+    width: i32,
+    height: i32,
+    dump: Option<&Path>,
+    json: bool,
+) -> anyhow::Result<i32> {
+    use mind_core::content::BlockId;
+    use mind_core::determinism::{Checksum, Hasher};
+    use mind_core::maps::generators::{SimplexGenerator, WorldGenerator};
+    use mind_core::world::{WorldGrid, WorldParams};
+
+    if width <= 0 || height <= 0 {
+        return Err(anyhow!("--width and --height must be positive"));
+    }
+    let content = boot_content()?;
+    let params = WorldParams {
+        seed_offset: seed,
+        width,
+        height,
+        ..WorldParams::default()
+    };
+    let mut grid = WorldGrid::new(width, height);
+
+    match generator {
+        "simplex" => {
+            let mut generator_impl = SimplexGenerator::new(seed);
+            generator_impl.generate(&mut grid.tiles, &params, &content);
+        }
+        "flat" | "blank" => {
+            let stone = content.block_id("stone").unwrap_or(BlockId::AIR);
+            for index in 0..grid.tiles.len() {
+                grid.tiles.geti_mut(index).floor = stone;
+            }
+        }
+        "planet" => match planet {
+            "blank" => {
+                use mind_core::maps::generators::BlankPlanetGenerator;
+                let mut planet_gen = BlankPlanetGenerator::new(0);
+                planet_gen.generate(&mut grid.tiles, &params, &content);
+            }
+            "tantros" => {
+                use mind_core::maps::planet::TantrosPlanetGenerator;
+                let mut planet_gen = TantrosPlanetGenerator::new();
+                planet_gen.generate(&mut grid.tiles, &params, &content);
+            }
+            other => {
+                return Err(anyhow!(
+                    "planet generator `{other}` lands with plan 06 M8 (sector {sector})"
+                ));
+            }
+        },
+        other => return Err(anyhow!("unknown generator `{other}`")),
+    }
+
+    let mut hasher = Hasher::new();
+    hasher.write_u32(width as u32);
+    hasher.write_u32(height as u32);
+    let mut floors: BTreeMap<String, u64> = BTreeMap::new();
+    let mut blocks: BTreeMap<String, u64> = BTreeMap::new();
+    let mut overlays: BTreeMap<String, u64> = BTreeMap::new();
+    for index in 0..grid.tiles.len() {
+        let tile = grid.tiles.geti(index);
+        hasher.write_u16(tile.block.raw());
+        hasher.write_u16(tile.floor.raw());
+        hasher.write_u16(tile.overlay.raw());
+        for (map, id) in [
+            (&mut floors, tile.floor),
+            (&mut blocks, tile.block),
+            (&mut overlays, tile.overlay),
+        ] {
+            *map.entry(
+                content
+                    .block(id)
+                    .map(|def| def.name.clone())
+                    .unwrap_or_else(|| "air".to_owned()),
+            )
+            .or_default() += 1;
+        }
+    }
+    let checksum = Checksum(hasher.finish().value()).to_hex();
+
+    let report = serde_json::json!({
+        "format": 1,
+        "generator": generator,
+        "planet": planet,
+        "sector": sector,
+        "seed": seed,
+        "width": width,
+        "height": height,
+        "checksum": checksum,
+        "counts": { "floors": floors, "blocks": blocks, "overlays": overlays },
+    });
+    let text = serde_json::to_string_pretty(&report)?;
+    if let Some(path) = dump {
+        std::fs::write(path, &text).with_context(|| format!("writing `{}`", path.display()))?;
+    }
+    if json || dump.is_none() {
+        println!("{text}");
+    }
+    Ok(EXIT_PASS)
+}
+
+fn cmd_world_filters(
+    seed: u64,
+    width: i32,
+    height: i32,
+    stack: &str,
+    order: &str,
+    dump: Option<&Path>,
+    json: bool,
+) -> anyhow::Result<i32> {
+    use mind_core::determinism::{Checksum, Hasher, SimRng};
+    use mind_core::maps::filters::{FilterRegistry, apply_stack};
+    use mind_core::world::WorldGrid;
+
+    if width <= 0 || height <= 0 {
+        return Err(anyhow!("--width and --height must be positive"));
+    }
+    let content = boot_content()?;
+    let registry = FilterRegistry::vanilla();
+
+    let mut tags: Vec<String> = stack
+        .split(',')
+        .map(|tag| tag.trim().to_owned())
+        .filter(|tag| !tag.is_empty())
+        .collect();
+    if order == "reverse" {
+        tags.reverse();
+    } else if order != "forward" {
+        return Err(anyhow!("--order must be `forward` or `reverse`"));
+    }
+
+    let mut filters = Vec::with_capacity(tags.len());
+    for tag in &tags {
+        let payload = serde_json::json!({ "class": tag });
+        let filter = registry
+            .from_json(&content, &payload)
+            .with_context(|| format!("building filter `{tag}`"))?;
+        filters.push(filter);
+    }
+
+    // Deterministic base grid: stone floor, scattered walls.
+    let mut grid = WorldGrid::new(width, height);
+    let stone = content
+        .block_id("stone")
+        .unwrap_or(mind_core::content::BlockId::AIR);
+    let sand = content
+        .block_id("sand-floor")
+        .unwrap_or(mind_core::content::BlockId::AIR);
+    let wall = content
+        .block_id("stone-wall")
+        .unwrap_or(mind_core::content::BlockId::AIR);
+    let mut base_rng = SimRng::new(seed);
+    let n = (width * height) as usize;
+    for index in 0..n {
+        let noise_wall = base_rng.chance(mind_core::determinism::RngStream::MapGen, 0.05);
+        let noise_sand = base_rng.chance(mind_core::determinism::RngStream::MapGen, 0.3);
+        let tile = grid.tiles.geti_mut(index);
+        tile.floor = if noise_sand { sand } else { stone };
+        if noise_wall {
+            tile.block = wall;
+        }
+    }
+
+    let mut filter_rng = SimRng::new(seed ^ 0x5EED);
+    apply_stack(&mut grid.tiles, &mut filters, &content, &mut filter_rng);
+
+    // FNV over the resulting tiles (order contract: flat `x + y*width`).
+    let mut hasher = Hasher::new();
+    hasher.write_u32(width as u32);
+    hasher.write_u32(height as u32);
+    let mut floors: BTreeMap<String, u64> = BTreeMap::new();
+    let mut blocks: BTreeMap<String, u64> = BTreeMap::new();
+    for index in 0..n {
+        let tile = grid.tiles.geti(index);
+        hasher.write_u16(tile.block.raw());
+        hasher.write_u16(tile.floor.raw());
+        hasher.write_u16(tile.overlay.raw());
+        *floors
+            .entry(
+                content
+                    .block(tile.floor)
+                    .map(|def| def.name.clone())
+                    .unwrap_or_else(|| "air".to_owned()),
+            )
+            .or_default() += 1;
+        *blocks
+            .entry(
+                content
+                    .block(tile.block)
+                    .map(|def| def.name.clone())
+                    .unwrap_or_else(|| "air".to_owned()),
+            )
+            .or_default() += 1;
+    }
+    let checksum = Checksum(hasher.finish().value()).to_hex();
+
+    let report = serde_json::json!({
+        "format": 1,
+        "generator": "filters",
+        "seed": seed,
+        "width": width,
+        "height": height,
+        "stack": tags,
+        "order": order,
+        "checksum": checksum,
+        "counts": { "floors": floors, "blocks": blocks },
+    });
+    let text = serde_json::to_string_pretty(&report)?;
+    if let Some(path) = dump {
+        std::fs::write(path, &text).with_context(|| format!("writing `{}`", path.display()))?;
+    }
+    if json || dump.is_none() {
+        println!("{text}");
+    }
+    Ok(EXIT_PASS)
+}
+
+fn cmd_maps_list(dir: &Path, json: bool) -> anyhow::Result<i32> {
+    use mind_core::io::fs::NativeFs;
+    use mind_core::maps::Maps;
+
+    if !dir.is_dir() {
+        return Err(anyhow!("`{}` is not a directory", dir.display()));
+    }
+    let fs = NativeFs;
+    let mut maps = Maps::new();
+    let loaded = maps.load_from_dir(&fs, dir, true);
+
+    let entries: Vec<serde_json::Value> = maps
+        .all()
+        .iter()
+        .map(|map| {
+            serde_json::json!({
+                "name": map.name(),
+                "author": map.author(),
+                "description": map.description(),
+                "custom": map.custom,
+                "width": map.width,
+                "height": map.height,
+                "version": map.version,
+                "build": map.build,
+                "file": map.file.display().to_string(),
+            })
+        })
+        .collect();
+
+    let report = serde_json::json!({
+        "format": 1,
+        "generator": "maps_list",
+        "dir": dir.display().to_string(),
+        "count": loaded,
+        "maps": entries,
+    });
+    let text = serde_json::to_string_pretty(&report)?;
+    if json {
+        println!("{text}");
+    } else {
+        for map in maps.all() {
+            println!(
+                "{} ({}x{}, custom={})",
+                map.name(),
+                map.width,
+                map.height,
+                map.custom
+            );
+        }
+        println!("{} maps", maps.len());
+    }
+    Ok(EXIT_PASS)
 }
 
 fn cmd_world_multiblock(

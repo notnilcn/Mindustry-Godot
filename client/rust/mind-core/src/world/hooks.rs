@@ -12,6 +12,8 @@ use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
 use crate::content::BlockId;
+use crate::io::json::SpawnGroup;
+use crate::maps::{GameMode, Map};
 
 /// Request to create a building entity for a placed multiblock/single block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,3 +100,26 @@ impl WorldHooks for NoopWorldHooks {}
 pub struct NoopRenderHooks;
 
 impl RenderHooks for NoopRenderHooks {}
+
+/// Map-registry/generation hooks (plan 06 §3.9/§3.10, risk R3).
+///
+/// Plan 11 supplies the default wave groups (`Waves.get()`) and plan 12 owns
+/// gamemode validity (`Gamemode.valid`). The defaults keep 06 runnable before
+/// those plans land (no waves; the upstream `ShuffleMode.valid` rule).
+pub trait MapGenHooks: Send + Sync {
+    /// Default wave groups for maps without explicit spawns (`Waves.get`).
+    fn wave_groups(&self) -> Vec<SpawnGroup> {
+        Vec::new()
+    }
+
+    /// Whether `map` is valid for `mode` (`ShuffleMode.valid`).
+    fn valid_for_mode(&self, mode: GameMode, map: &Map) -> bool {
+        crate::maps::shuffle::default_valid(mode, map)
+    }
+}
+
+/// A no-op [`MapGenHooks`] (core default).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct NoopMapGenHooks;
+
+impl MapGenHooks for NoopMapGenHooks {}

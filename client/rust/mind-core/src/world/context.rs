@@ -123,21 +123,44 @@ impl WorldContext for Context<'_> {
 
 /// Filter context (`WorldContext` whose `end()` applies the map filter stack).
 ///
-/// Ported from `WorldContext.FilterContext`; the filter stack is applied in
-/// `end()` when plan 06 M5 lands. Until then this is a thin wrapper.
+/// Ported from `WorldContext.FilterContext`: `end()` runs `Maps.applyFilters`
+/// (plan 06 §3.5/§3.8) before the normal end-map-load step. The filter stack is
+/// resolved by the caller (`Map::filters`); `seed` feeds the `MapGen` stream for
+/// `randomize()` (OD6-A).
 pub struct FilterContext<'a> {
     /// Inner default context.
     pub inner: Context<'a>,
     /// The map identity used for filter randomization (`OD6-A`).
     pub map_name: String,
+    /// The resolved filter stack.
+    pub filters: Vec<Box<dyn crate::maps::filters::GenerateFilter>>,
+    /// Deterministic generation seed.
+    pub seed: u64,
 }
 
 impl<'a> FilterContext<'a> {
-    /// Wraps a context with a map name.
+    /// Wraps a context with a map name and an empty filter stack.
     pub fn new(inner: Context<'a>, map_name: impl Into<String>) -> Self {
         Self {
             inner,
             map_name: map_name.into(),
+            filters: Vec::new(),
+            seed: 0,
+        }
+    }
+
+    /// Wraps a context with a resolved filter stack and seed.
+    pub fn with_filters(
+        inner: Context<'a>,
+        map_name: impl Into<String>,
+        filters: Vec<Box<dyn crate::maps::filters::GenerateFilter>>,
+        seed: u64,
+    ) -> Self {
+        Self {
+            inner,
+            map_name: map_name.into(),
+            filters,
+            seed,
         }
     }
 }
@@ -164,9 +187,24 @@ impl WorldContext for FilterContext<'_> {
     }
 
     fn end(&mut self) {
-        // Java `FilterContext.end`: `Maps.applyFilters(tiles, map.filters(), ...)`
-        // then `super.end()`. Filter application is plan 06 M5.
-        self.inner.end();
+        // Java `FilterContext.end`: `Maps.applyFilters(tiles, map.filters())`
+        // then `super.end()`.
+        let FilterContext {
+            inner,
+            filters,
+            seed,
+            ..
+        } = self;
+        if !filters.is_empty() {
+            let mut rng = crate::determinism::SimRng::new(*seed);
+            crate::maps::filters::apply_stack(
+                &mut inner.grid.tiles,
+                filters,
+                inner.content,
+                &mut rng,
+            );
+        }
+        inner.end();
     }
 
     fn set_block(&mut self, index: usize, block: u16) {
