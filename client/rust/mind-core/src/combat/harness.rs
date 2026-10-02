@@ -55,6 +55,29 @@ impl CombatHarness {
     pub fn new(width: i32, height: i32, seed: u64) -> Self {
         let mut build = BuildHarness::new(width, height, seed);
         let names = register_fixture_bullets(&mut build.content);
+        // M5 logistics seam: register a `TurretBehavior` for every ported
+        // vanilla turret so a *placed* turret owns `TurretState` and accepts
+        // items/liquids through plan 08's transfer path (plan 10 §3.2). Plan
+        // 07's `register_behavior` keeps only the last named override, so the
+        // table is rebuilt once here with all turret overrides via the public
+        // `BlockTable::build` API.
+        {
+            use crate::world::block::BlockTable;
+            use crate::world::blocks::default_registry;
+            use crate::world::blocks::defense::turrets::{behavior::TurretBehavior, config_for};
+            let mut registry = default_registry(&build.content);
+            for name in [
+                "duo", "scatter", "scorch", "hail", "salvo", "swarmer", "fuse", "ripple", "wave",
+                "tsunami", "lancer", "arc", "parallax", "segment",
+            ] {
+                if let Some(config) = config_for(&build.content, name, &names) {
+                    registry.register_named(name, Arc::new(TurretBehavior::new(config)));
+                }
+            }
+            if let Ok(table) = BlockTable::build(&build.content, &registry) {
+                build.world.insert_resource(table);
+            }
+        }
         Self {
             build,
             bullets: Vec::new(),

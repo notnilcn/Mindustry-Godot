@@ -40,6 +40,7 @@ use crate::weapons::pattern::{self, ShotBuffer};
 use crate::world::modules::{LiquidModule, PowerModule};
 
 pub mod advanced;
+pub mod behavior;
 pub mod save;
 
 /// One resolved item-ammo entry (`ItemTurret.ItemEntry` + `ammoTypes`).
