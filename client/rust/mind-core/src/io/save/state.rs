@@ -38,6 +38,13 @@ pub struct SaveReadState<'a> {
     /// Raw rules JSON stashed by the meta region; parsed after data patches
     /// (upstream `ruleString`, `SaveVersion.readRules`).
     pub rule_string: Option<String>,
+    /// Parsed rules (native v1 parses the stashed JSON after all regions;
+    /// upstream v13+ semantics). Plan 12 applies sector/planet overrides.
+    pub rules: Option<crate::io::json::Rules>,
+    /// Parsed per-game stats from the `meta` region (`GameStats`).
+    pub stats: Option<crate::io::json::GameStats>,
+    /// Parsed map locales from the `meta` region (`MapLocales`).
+    pub locales: Option<crate::io::json::MapLocales>,
     /// Meta tags as read (upstream keeps them in `state.map`/`SaveMeta`).
     pub tags: StringMap,
     /// Buildings read from the map, as tile indices (`SaveReadState.allBuildings`);
@@ -63,6 +70,9 @@ impl SaveReadState<'_> {
     pub fn reset(&mut self) {
         self.preview = false;
         self.rule_string = None;
+        self.rules = None;
+        self.stats = None;
+        self.locales = None;
         self.tags.clear();
         self.all_buildings.clear();
         self.team_plans.clear();
@@ -80,6 +90,9 @@ impl Default for SaveReadState<'_> {
             custom_chunks: None,
             preview: false,
             rule_string: None,
+            rules: None,
+            stats: None,
+            locales: None,
             tags: StringMap::new(),
             all_buildings: Vec::new(),
             team_plans: Vec::new(),

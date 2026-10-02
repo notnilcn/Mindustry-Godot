@@ -10,22 +10,21 @@
 //! capped (safe-read semantics).
 //!
 //! Deferred by owner plan (recorded in plan 04 §8/Changelog):
-//! - `writeObjectives`/`writeObjectiveMarker` → M6 (needs `MapObjectives`).
 //! - `writeUiBuilder`/`writeMenuResult` → plan 14 payload types.
 //! - `writePayload`/`writeMounts`/`writeAbilities`/`writeController` → plans 11/21.
 
 use super::super::wire::{WireReader, WireWriter};
 use super::super::{IoError, IoResult};
 use super::{
-    MAX_PLAYER_PREVIEW_PLANS, MAX_RULES_BYTES, MAX_SYNCED_PLANS, TypeValue, pack_point2,
-    read_object_safe, tags, write_object,
+    MAX_BYTE_ARRAY, MAX_OBJECTIVES_BYTES, MAX_PLAYER_PREVIEW_PLANS, MAX_RULES_BYTES,
+    MAX_SYNCED_PLANS, TypeValue, pack_point2, read_object_safe, tags, write_object,
 };
 use crate::content::stacks::{ItemStack, LiquidStack};
 use crate::content::{
     BlockId, BulletId, ContentRef, ContentRegistry, ContentType, EffectId, ItemId, LiquidId, Rgba,
     StatusId, UnitCommandId, UnitStanceId, UnitTypeId, WeatherId,
 };
-use crate::io::json::Rules;
+use crate::io::json::{JsonIo, MapObjectives, ObjectiveMarker, Rules};
 
 /// `TypeIO.writeString`: existence byte + UTF-8 string.
 pub fn write_string(w: &mut WireWriter, value: Option<&str>) -> IoResult<()> {
@@ -565,6 +564,46 @@ pub fn read_rules(r: &mut WireReader) -> IoResult<Rules> {
     Ok(serde_json::from_slice(r.bytes(len as usize)?)?)
 }
 
+/// `TypeIO.writeObjectives`: length-prefixed objectives JSON bytes.
+pub fn write_objectives(w: &mut WireWriter, executor: &MapObjectives) -> IoResult<()> {
+    let bytes = executor.to_json()?.into_bytes();
+    w.i(bytes.len() as i32);
+    w.bytes(&bytes);
+    Ok(())
+}
+
+/// `TypeIO.readObjectives` ([`MAX_OBJECTIVES_BYTES`] cap; `Objectives bytes
+/// too long: N`).
+pub fn read_objectives(r: &mut WireReader) -> IoResult<MapObjectives> {
+    let length = r.i()?;
+    if length < 0 || length as usize >= MAX_OBJECTIVES_BYTES {
+        return Err(IoError::corrupt(format!(
+            "Objectives bytes too long: {length}"
+        )));
+    }
+    let string = std::str::from_utf8(r.bytes(length as usize)?)?;
+    JsonIo::read::<MapObjectives>(string)
+}
+
+/// `TypeIO.writeObjectiveMarker`: class-tagged marker JSON bytes.
+pub fn write_objective_marker(w: &mut WireWriter, marker: &ObjectiveMarker) -> IoResult<()> {
+    let bytes = JsonIo::write(marker)?.into_bytes();
+    w.i(bytes.len() as i32);
+    w.bytes(&bytes);
+    Ok(())
+}
+
+/// `TypeIO.readObjectiveMarker` ([`MAX_BYTE_ARRAY`] cap; `Objective marker
+/// too long`).
+pub fn read_objective_marker(r: &mut WireReader) -> IoResult<ObjectiveMarker> {
+    let length = r.i()?;
+    if length < 0 || length as usize > MAX_BYTE_ARRAY {
+        return Err(IoError::corrupt("Objective marker too long"));
+    }
+    let string = std::str::from_utf8(r.bytes(length as usize)?)?;
+    JsonIo::read::<ObjectiveMarker>(string)
+}
+
 /// One build plan (`mindustry.entities.units.BuildPlan`).
 ///
 /// Wire shape only; plan 07 owns the runtime type (reconstruction/removal
@@ -979,6 +1018,52 @@ mod tests {
         assert_eq!(read_unit_type(&mut r).unwrap(), UnitTypeId::new(9));
         assert_eq!(read_bullet_type(&mut r).unwrap(), BulletId::new(3));
         assert_eq!(r.remaining(), 0);
+    }
+
+    #[test]
+    fn objectives_and_markers_roundtrip_with_caps() {
+        use crate::io::json::{MapObjective, MapObjectives, ObjectiveMarker, PointMarker, Vec2};
+
+        let mut executor = MapObjectives::new();
+        executor.all.push(MapObjective::Flag(Default::default()));
+        executor
+            .all
+            .push(MapObjective::DestroyUnits(Default::default()));
+        executor.all[1].common_mut().parents = vec![0];
+
+        let buf = buf_with(|w| write_objectives(w, &executor).unwrap());
+        let mut r = WireReader::new(&buf);
+        let out = read_objectives(&mut r).unwrap();
+        assert_eq!(out, executor);
+        assert_eq!(out.all[1].common().parents, vec![0]);
+
+        // Oversized objectives blob is rejected.
+        let buf = buf_with(|w| w.i(MAX_OBJECTIVES_BYTES as i32));
+        let mut r = WireReader::new(&buf);
+        assert!(
+            read_objectives(&mut r)
+                .unwrap_err()
+                .to_string()
+                .contains("Objectives bytes too long")
+        );
+
+        let marker = ObjectiveMarker::Point(PointMarker {
+            pos: Vec2 { x: 3.0, y: 4.0 },
+            radius: 7.0,
+            ..Default::default()
+        });
+        let buf = buf_with(|w| write_objective_marker(w, &marker).unwrap());
+        let mut r = WireReader::new(&buf);
+        assert_eq!(read_objective_marker(&mut r).unwrap(), marker);
+
+        let buf = buf_with(|w| w.i(MAX_BYTE_ARRAY as i32 + 1));
+        let mut r = WireReader::new(&buf);
+        assert!(
+            read_objective_marker(&mut r)
+                .unwrap_err()
+                .to_string()
+                .contains("Objective marker too long")
+        );
     }
 
     #[test]

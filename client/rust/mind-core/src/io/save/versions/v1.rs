@@ -30,6 +30,7 @@ use super::super::version::SaveVersion;
 use crate::content::load::TemporaryMapper;
 use crate::content::{BlockId, ContentRegistry, ContentType};
 use crate::io::entity::EntityIdMap;
+use crate::io::json::JsonIo;
 use crate::io::typeio;
 use crate::io::wire::{WireReader, WireWriter};
 use crate::io::{IoError, StringMap};
@@ -200,6 +201,9 @@ impl SaveVersion for SaveV1 {
         if !saw_meta {
             return Err(IoError::corrupt("save is missing the \"meta\" region"));
         }
+        // `SaveVersion.readRules`: native v1 follows upstream v13+ and parses
+        // the rules JSON after patches/content/map landed.
+        read_rules(state)?;
         Ok(())
     }
 
@@ -219,12 +223,31 @@ impl SaveVersion for SaveV1 {
     }
 }
 
-/// `SaveVersion.readMeta`: the rules JSON is stashed and parsed after data
-/// patches land (plan 04 M6 wires the `JsonIo` parse).
+/// `SaveVersion.readMeta`: parses stats/locales eagerly and stashes the rules
+/// JSON (parsed by [`read_rules`] after the other regions).
 fn read_meta(wire: &mut WireReader, state: &mut SaveReadState) -> Result<(), IoError> {
     let map = wire.string_map()?;
     state.rule_string = Some(map.get("rules").cloned().unwrap_or_else(|| "{}".to_owned()));
+    state.stats = Some(JsonIo::read(
+        map.get("stats").map(String::as_str).unwrap_or("{}"),
+    )?);
+    state.locales = Some(JsonIo::read(
+        map.get("locales").map(String::as_str).unwrap_or("{}"),
+    )?);
     state.tags = map;
+    Ok(())
+}
+
+/// `SaveVersion.readRules`: parse the stashed rules JSON.
+///
+/// Upstream then fills empty spawns from the generated wave table and applies
+/// sector/planet overrides; those are plan 11/12 behavior and stay out of the
+/// IO layer.
+fn read_rules(state: &mut SaveReadState) -> Result<(), IoError> {
+    let Some(text) = state.rule_string.as_deref() else {
+        return Ok(());
+    };
+    state.rules = Some(JsonIo::read(text)?);
     Ok(())
 }
 

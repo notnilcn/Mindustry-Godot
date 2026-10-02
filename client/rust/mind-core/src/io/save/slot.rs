@@ -79,8 +79,8 @@ impl SaveSlot {
     }
 
     /// Whether the slot is a sector save (`SaveSlot.isSector`): the loaded
-    /// rules reference a sector. Until plan 12's `Rules` lands this inspects
-    /// the raw rules JSON for a non-null `sector` field.
+    /// rules reference a sector. Uses the typed `Rules.sector` field, with a
+    /// raw-JSON fallback for malformed/unknown shapes.
     pub fn is_sector(&self) -> bool {
         self.meta
             .as_ref()
@@ -208,6 +208,10 @@ impl SaveSlot {
 
 /// Whether the raw rules JSON references a sector (non-null `sector` field).
 fn rules_json_has_sector(rules_json: &str) -> bool {
+    // Typed parse first (`Rules.sector`), raw-JSON fallback for unknown shapes.
+    if let Ok(rules) = crate::io::json::JsonIo::read::<crate::io::json::Rules>(rules_json) {
+        return rules.sector.is_some();
+    }
     serde_json::from_str::<serde_json::Value>(rules_json)
         .ok()
         .and_then(|value| value.get("sector").cloned())
