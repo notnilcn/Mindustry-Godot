@@ -154,6 +154,10 @@ fn spawn_single(
         MinerComp::default(),
         BuilderComp::default(),
         setup_weapons(unit, rotation),
+        crate::weapons::UnitState {
+            rotation,
+            ..crate::weapons::UnitState::default()
+        },
     ));
 
     insert_kind_components(world, entity, unit, rotation);
@@ -272,4 +276,24 @@ pub fn set_move_target(world: &mut World, entity: Entity, target: crate::world::
 /// The active AI kind of a unit.
 pub fn ai_kind_of(world: &World, entity: Entity) -> Option<AiKind> {
     world.get::<ControllerSlot>(entity).map(|slot| slot.kind)
+}
+
+/// Re-syncs the plan-10 [`crate::weapons::UnitState`] from the unit core and
+/// velocity (`Unit.rotation` -> `UnitState.rotation`, `deltaLen` -> speed).
+///
+/// Called once per tick before the weapon update pass so the plan-10 engine sees
+/// the same values upstream's `Unit.update`/`WeaponsComp.update` would.
+pub fn sync_weapon_state(world: &mut World, entity: Entity) {
+    let rotation = world
+        .get::<UnitCore>(entity)
+        .map(|core| core.rotation)
+        .unwrap_or(0.0);
+    let delta_len = world
+        .get::<Vel>(entity)
+        .map(|vel| (vel.x * vel.x + vel.y * vel.y).sqrt())
+        .unwrap_or(0.0);
+    if let Some(mut state) = world.get_mut::<crate::weapons::UnitState>(entity) {
+        state.rotation = rotation;
+        state.delta_len = delta_len;
+    }
 }

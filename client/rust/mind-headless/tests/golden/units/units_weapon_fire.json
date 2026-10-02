@@ -1,0 +1,13 @@
+{
+  "scenario": "units_weapon_fire",
+  "pass": true,
+  "unit": "dagger",
+  "mounts": 2,
+  "ticks": 240,
+  "wall_health_before": 320.0,
+  "wall_health_after": 176.0,
+  "bullets_created": 18,
+  "bullets_removed": 16,
+  "bullets_live": 2,
+  "checksum": "87d2434853c0abdc"
+}

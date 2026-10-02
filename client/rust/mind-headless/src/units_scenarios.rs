@@ -34,6 +34,7 @@ pub fn names() -> &'static [&'static str] {
         "units_spawn_path_arrive",
         "units_formation",
         "units_spawn_group",
+        "units_weapon_fire",
     ]
 }
 
@@ -81,8 +82,55 @@ pub fn run_scenario(name: &str) -> Result<ScenarioOutput> {
         "units_spawn_path_arrive" => spawn_path_arrive(),
         "units_formation" => formation(),
         "units_spawn_group" => spawn_group(),
+        "units_weapon_fire" => weapon_fire(),
         other => bail!("unknown units scenario `{other}`"),
     }
+}
+
+/// `units_weapon_fire`: a real `dagger` fires its plan-10 weapon mounts at a
+/// wall and damages it (plan 11 §5 M2 weapon-mount wiring).
+fn weapon_fire() -> Result<ScenarioOutput> {
+    let mut harness = UnitHarness::new(32, 16, 7);
+    let wall = harness
+        .content()
+        .block_id("copper-wall")
+        .ok_or_else(|| anyhow::anyhow!("copper-wall missing from content"))?;
+    harness.build.rules.default_team = 1;
+    assert!(harness.build.place(12, 8, wall, 0, true), "wall placed");
+    let (ux, uy) = tile_center(4, 8);
+    let unit = harness
+        .spawn("dagger", 0, ux, uy, 0.0)
+        .ok_or_else(|| anyhow::anyhow!("dagger missing from content"))?;
+    let aim = tile_center(12, 8);
+    let mount_count = harness
+        .unit_weapons(unit)
+        .map(|w| w.mounts.len())
+        .unwrap_or(0);
+    for index in 0..mount_count {
+        harness.set_weapon_aim(unit, index, aim);
+        harness.set_weapon_shoot(unit, index, true);
+    }
+    let before = round3(harness.building_health_at(12, 8));
+    for _ in 0..240 {
+        harness.tick();
+    }
+    let after = round3(harness.building_health_at(12, 8));
+    let pass = mount_count > 0 && harness.bullets_created > 0 && after < before;
+    let report = serde_json::json!({
+        "scenario": "units_weapon_fire",
+        "pass": pass,
+        "unit": "dagger",
+        "mounts": mount_count,
+        "ticks": 240,
+        "wall_health_before": before,
+        "wall_health_after": after,
+        "bullets_created": harness.bullets_created,
+        "bullets_removed": harness.bullets_removed,
+        "bullets_live": harness.bullets.len(),
+        "checksum": harness.checksum_hex(),
+    });
+    let dump = canonical(&report)?;
+    Ok(ScenarioOutput { report, dump })
 }
 
 /// `units_spawn_path_arrive`: one dagger spawns, paths corner-to-corner, arrives.

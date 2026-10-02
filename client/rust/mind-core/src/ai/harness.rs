@@ -10,11 +10,13 @@
 
 use bevy_ecs::entity::Entity;
 
+use crate::combat::bullet::{self, CombatCtx};
+use crate::combat::view::{FxHandle, noop_fx};
 use crate::content::ContentRegistry;
 use crate::determinism::{Checksum, Checksummer, SimRng};
 use crate::ecs::EntitySeq;
 use crate::entities::comp::unit::comp::{PhysicsComp, UnitCore};
-use crate::entities::comp::unit::lifecycle::{set_move_target, spawn_unit};
+use crate::entities::comp::unit::lifecycle::{set_move_target, spawn_unit, sync_weapon_state};
 use crate::entities::comp::unit::queries::{UnitSnapshot, snapshot};
 use crate::entities::comp::{Health, Pos, TeamComp};
 use crate::world::{BuildHarness, TilePos, WorldGrid};
@@ -41,6 +43,14 @@ pub struct UnitHarness {
     pub units_removed: u64,
     /// Team whose path tiles are built (`Pathfinder` is per-team upstream).
     pub path_team: u8,
+    /// Live bullet entities in spawn order (plan-10 weapon fire).
+    pub bullets: Vec<Entity>,
+    /// FX sink seam (plan 17; no-op in headless).
+    pub fx: FxHandle,
+    /// Total bullets created by unit weapons.
+    pub bullets_created: u64,
+    /// Total bullets removed by unit weapons.
+    pub bullets_removed: u64,
 }
 
 impl UnitHarness {
@@ -58,6 +68,10 @@ impl UnitHarness {
             units_created: 0,
             units_removed: 0,
             path_team: 0,
+            bullets: Vec::new(),
+            fx: noop_fx(),
+            bullets_created: 0,
+            bullets_removed: 0,
         }
     }
 
@@ -114,20 +128,13 @@ impl UnitHarness {
         snapshot(&self.build.world, entity)
     }
 
-    /// Advances one AI + movement tick.
+    /// Advances one AI + movement + weapon + bullet tick.
     pub fn tick(&mut self) {
         let entities = self.units.clone();
-        let UnitHarness {
-            build,
-            pathfinder,
-            rng,
-            path_team,
-            ..
-        } = self;
-        let _ = &rng;
-        let team = *path_team;
+        let team = self.path_team;
         for entity in entities {
-            let Some(target) = build
+            let Some(target) = self
+                .build
                 .world
                 .get::<ControllerSlot>(entity)
                 .and_then(|slot| slot.target)
@@ -135,17 +142,142 @@ impl UnitHarness {
                 continue;
             };
             let arrived = update_ground(
-                &mut build.world,
-                &build.grid,
-                pathfinder,
+                &mut self.build.world,
+                &self.build.grid,
+                &mut self.pathfinder,
                 team,
                 entity,
                 target,
             );
-            if arrived && let Some(mut slot) = build.world.get_mut::<ControllerSlot>(entity) {
+            if arrived && let Some(mut slot) = self.build.world.get_mut::<ControllerSlot>(entity) {
                 slot.target = None;
             }
         }
+        self.sync_weapon_states();
+        self.update_weapons_only();
+        self.step_bullets_only();
+    }
+
+    /// Re-syncs every unit's plan-10 weapon state from its core/velocity.
+    pub fn sync_weapon_states(&mut self) {
+        let entities = self.units.clone();
+        for entity in entities {
+            if self.is_alive(entity) {
+                sync_weapon_state(&mut self.build.world, entity);
+            }
+        }
+    }
+
+    /// The plan-10 weapon/mount storage of `entity`.
+    pub fn unit_weapons(&self, entity: Entity) -> Option<&crate::weapons::UnitWeapons> {
+        self.build.world.get::<crate::weapons::UnitWeapons>(entity)
+    }
+
+    /// Mutable weapon/mount storage of `entity`.
+    pub fn unit_weapons_mut(
+        &mut self,
+        entity: Entity,
+    ) -> Option<bevy_ecs::change_detection::Mut<'_, crate::weapons::UnitWeapons>> {
+        self.build
+            .world
+            .get_mut::<crate::weapons::UnitWeapons>(entity)
+    }
+
+    /// Sets a mount's target entity (`mount.target`).
+    pub fn set_weapon_target(&mut self, entity: Entity, index: usize, target: Option<Entity>) {
+        if let Some(mut weapons) = self.unit_weapons_mut(entity)
+            && let Some(mount) = weapons.mounts.get_mut(index)
+        {
+            mount.target = target;
+        }
+    }
+
+    /// Sets a mount's `shoot` flag.
+    pub fn set_weapon_shoot(&mut self, entity: Entity, index: usize, shoot: bool) {
+        if let Some(mut weapons) = self.unit_weapons_mut(entity)
+            && let Some(mount) = weapons.mounts.get_mut(index)
+        {
+            mount.shoot = shoot;
+        }
+    }
+
+    /// Sets a mount's world aim point.
+    pub fn set_weapon_aim(&mut self, entity: Entity, index: usize, aim: (f32, f32)) {
+        if let Some(mut weapons) = self.unit_weapons_mut(entity)
+            && let Some(mount) = weapons.mounts.get_mut(index)
+        {
+            mount.aim_x = aim.0;
+            mount.aim_y = aim.1;
+        }
+    }
+
+    /// Building health at a tile (`0` when empty).
+    pub fn building_health_at(&self, x: i32, y: i32) -> f32 {
+        self.build
+            .build_at(x, y)
+            .and_then(|entity| self.build.world.get::<Health>(entity))
+            .map(|health| health.health)
+            .unwrap_or(0.0)
+    }
+
+    /// Runs the plan-10 weapon update pass over every unit with mounts.
+    pub fn update_weapons_only(&mut self) {
+        let mut spawned: Vec<Entity> = Vec::new();
+        {
+            let mut ctx = CombatCtx {
+                world: &mut self.build.world,
+                content: &self.build.content,
+                grid: &self.build.grid,
+                rng: &mut self.rng,
+                fx: self.fx.as_ref(),
+                seq: &mut self.seq,
+                spawned: &mut spawned,
+            };
+            crate::weapons::update_weapons(&mut ctx);
+        }
+        self.bullets_created += spawned.len() as u64;
+        self.bullets.extend(spawned);
+    }
+
+    /// Advances only the bullet systems (motion + collision + cull).
+    pub fn step_bullets_only(&mut self) {
+        let list = std::mem::take(&mut self.bullets);
+        let mut spawned: Vec<Entity> = Vec::new();
+        {
+            let mut ctx = CombatCtx {
+                world: &mut self.build.world,
+                content: &self.build.content,
+                grid: &self.build.grid,
+                rng: &mut self.rng,
+                fx: self.fx.as_ref(),
+                seq: &mut self.seq,
+                spawned: &mut spawned,
+            };
+            for &entity in &list {
+                if ctx.world.get_entity(entity).is_ok() {
+                    let _ = bullet::update_bullet(&mut ctx, entity);
+                }
+            }
+            for &entity in &list {
+                if bullet::bullet_alive(ctx.world, entity) {
+                    bullet::collide_bullet(&mut ctx, entity);
+                }
+            }
+            let mut alive: Vec<Entity> = Vec::with_capacity(list.len());
+            for entity in list {
+                if ctx.world.get_entity(entity).is_err() {
+                    self.bullets_removed += 1;
+                } else if bullet::bullet_alive(ctx.world, entity) {
+                    alive.push(entity);
+                } else {
+                    bullet::finish_bullet(&mut ctx, entity);
+                    self.bullets_removed += 1;
+                }
+            }
+            self.bullets = alive;
+        }
+        self.bullets_created += spawned.len() as u64;
+        self.bullets.extend(spawned);
     }
 
     /// Updates the pathfinding tile layer (call after placing/breaking blocks).
@@ -260,5 +392,41 @@ mod tests {
 
     fn ground_tile_center(x: i32, y: i32) -> (f32, f32) {
         super::super::types::ground::tile_center(x, y)
+    }
+
+    #[test]
+    fn unit_weapon_fires_at_building_target() {
+        let mut harness = UnitHarness::new(32, 16, 7);
+        let wall = harness
+            .content()
+            .block_id("copper-wall")
+            .expect("copper-wall");
+        harness.build.rules.default_team = 1;
+        assert!(harness.build.place(12, 8, wall, 0, true));
+        assert!(harness.build.build_at(12, 8).is_some(), "wall placed");
+        let (ux, uy) = ground_tile_center(4, 8);
+        let unit = harness.spawn("dagger", 0, ux, uy, 0.0).expect("dagger");
+        let mount_count = harness
+            .unit_weapons(unit)
+            .map(|w| w.mounts.len())
+            .unwrap_or(0);
+        assert!(mount_count > 0, "dagger has weapon mounts");
+        let aim = ground_tile_center(12, 8);
+        // Dagger carries an alternating mirrored weapon pair: every mount must
+        // be told to fire so the pair alternates (plan-10 `Weapon.alternate`).
+        for index in 0..mount_count {
+            harness.set_weapon_aim(unit, index, aim);
+            harness.set_weapon_shoot(unit, index, true);
+        }
+        let before = harness.building_health_at(12, 8);
+        for _ in 0..240 {
+            harness.tick();
+        }
+        let after = harness.building_health_at(12, 8);
+        assert!(harness.bullets_created > 0, "a bullet was created");
+        assert!(
+            after < before,
+            "unit weapon fired and damaged the target (before={before} after={after})"
+        );
     }
 }
