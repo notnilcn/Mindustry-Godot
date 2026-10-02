@@ -77,6 +77,20 @@ impl IdSet {
         self.len -= 1;
         true
     }
+
+    /// Unions `other` into this set (`IntSet.addAll`).
+    pub fn union_with(&mut self, other: &IdSet) {
+        if other.words.len() > self.words.len() {
+            self.words.resize(other.words.len(), 0);
+        }
+        self.len = 0;
+        for (index, bits) in self.words.iter_mut().enumerate() {
+            if let Some(other_bits) = other.words.get(index) {
+                *bits |= other_bits;
+            }
+            self.len += bits.count_ones() as usize;
+        }
+    }
 }
 
 #[cfg(test)]

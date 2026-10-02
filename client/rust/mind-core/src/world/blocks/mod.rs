@@ -5,6 +5,7 @@
 //! Plan 06 owns the tile-grid implementation; plan 03 contributes
 //! [`tile_bitmask`] (the 47-slice autotile table).
 
+pub mod heat;
 pub mod liquid;
 pub mod power;
 pub mod tile_bitmask;
