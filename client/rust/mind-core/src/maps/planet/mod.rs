@@ -9,7 +9,9 @@
 //! 11/12 data (bases, schematics, rules, attributes) and land incrementally.
 
 pub mod asteroid;
+pub mod erekir;
 pub mod tantros;
 
 pub use asteroid::AsteroidGenerator;
+pub use erekir::ErekirPlanetGenerator;
 pub use tantros::TantrosPlanetGenerator;

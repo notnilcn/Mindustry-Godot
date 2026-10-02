@@ -3358,6 +3358,7 @@ fn make_planet_generator(
         "blank" => Box::new(BlankPlanetGenerator::new(0)),
         "tantros" => Box::new(mind_core::maps::planet::TantrosPlanetGenerator::new()),
         "asteroid" => Box::new(mind_core::maps::planet::AsteroidGenerator::new(seed as i32)),
+        "erekir" => Box::new(mind_core::maps::planet::ErekirPlanetGenerator::new()),
         other => return Err(anyhow!("unknown planet generator `{other}`")),
     };
     Ok(generator)
