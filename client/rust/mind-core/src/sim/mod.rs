@@ -13,22 +13,21 @@ pub mod events;
 pub mod fixed;
 pub mod logic;
 pub mod reset;
+pub mod schedule;
 
 use bevy_ecs::schedule::Schedule;
 use serde_json::Error as JsonError;
 
 use crate::command::Command;
 use crate::content::{BlockId, Blocks, ContentError};
-use crate::determinism::SimRng;
+use crate::determinism::{Checksum, Checksummer, SimRng};
 use crate::ecs::{BuildingComp, EntitySequencer, MindWorld, TeamId};
 use crate::event::{BlockBrokenEvent, BlockPlacedEvent, Events, SimEvent, StateChangeEvent};
 use crate::game::{GameState, State};
 use crate::platform::{HeadlessPlatform, Platform};
 use crate::random::JavaRandom;
 use crate::scenario::{Scenario, ScenarioError, resolve_block};
-use crate::schedule::build_p0_schedule;
 use crate::time::Time;
-use crate::version::DUMP_FORMAT;
 use crate::world::{TilePos, WorldError, WorldGrid};
 
 pub use boot::{BootError, SimBuilder, TickReport};
@@ -59,6 +58,19 @@ impl From<ContentError> for SimError {
             _ => SimError::UnknownBlock(u16::MAX),
         }
     }
+}
+
+/// Minimal deterministic snapshot header (plan 21 `Sim::snapshot` hook).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SimSnapshot {
+    /// Completed ticks.
+    pub tick: u64,
+    /// Update counter.
+    pub update_id: u64,
+    /// Current phase.
+    pub phase: State,
+    /// Canonical checksum.
+    pub checksum: u64,
 }
 
 /// The P0 simulation container.
@@ -105,7 +117,7 @@ impl Sim {
         grid.fill(floor, wall);
         Self {
             ecs: MindWorld::new(),
-            schedule: build_p0_schedule(),
+            schedule: self::schedule::build_sim_schedule(),
             grid,
             state: GameState::new(State::Playing),
             events: Events::new(),
@@ -241,48 +253,82 @@ impl Sim {
         self.platform.as_ref()
     }
 
-    /// Canonical deterministic checksum (§6.4): LE byte stream hashed with xxh3-64.
+    /// Canonical deterministic checksum (§6.5; HLP C2): FNV-1a-64 over the
+    /// versioned stream — `GameState` scalars → clock time/runs → `Sim` RNG
+    /// state → grid row-major → entities in stable seq order.
     pub fn checksum(&self) -> u64 {
-        let tiles = self.grid.len();
-        let entities = self.ecs.entities_by_seq().len();
-        let mut bytes = Vec::with_capacity(25 + tiles * 13 + entities * 17);
-        bytes.extend_from_slice(&DUMP_FORMAT.to_le_bytes());
-        bytes.extend_from_slice(&self.state.tick.to_le_bytes());
-        bytes.extend_from_slice(&self.seed.to_le_bytes());
-        bytes.push(self.state.phase.as_u8());
+        self.checksum_value().value()
+    }
+
+    /// The strongly-typed [`Checksum`].
+    pub fn checksum_value(&self) -> Checksum {
+        let mut c = Checksummer::new();
+        c.part(&self.state.phase.as_u8());
+        c.part(&self.state.tick);
+        c.part(&self.state.update_id);
+        c.part(&self.clock.time_units());
+        c.part(&(self.clock.runs_len() as u64));
+        c.part(&self.rng_streams.sim_state());
+        c.part(&self.seed);
 
         for (_pos, index) in self.grid.iter_row_major() {
-            bytes.extend_from_slice(&self.grid.blocks[index].raw().to_le_bytes());
-            bytes.push(self.grid.teams[index]);
-            bytes.push(self.grid.rots[index]);
+            c.part(&self.grid.blocks[index].raw());
+            c.part(&self.grid.teams[index]);
+            c.part(&self.grid.rots[index]);
             match self.grid.tiles[index].and_then(|entity| self.ecs.seq_of(entity)) {
                 Some(build_id) => {
-                    bytes.push(1u8);
-                    bytes.extend_from_slice(&build_id.to_le_bytes());
+                    c.part(&1u8);
+                    c.part(&build_id);
                 }
                 None => {
-                    bytes.push(0u8);
-                    bytes.extend_from_slice(&0u64.to_le_bytes());
+                    c.part(&0u8);
+                    c.part(&0u64);
                 }
             }
         }
 
         for (seq, _entity, comp) in self.ecs.entities_by_seq() {
-            bytes.extend_from_slice(&seq.to_le_bytes());
-            bytes.push(KIND_BUILDING);
-            bytes.extend_from_slice(&comp.block.raw().to_le_bytes());
-            bytes.push(comp.team.0);
-            bytes.push(comp.rot);
-            bytes.extend_from_slice(&comp.pos.x().to_le_bytes());
-            bytes.extend_from_slice(&comp.pos.y().to_le_bytes());
+            c.part(&seq);
+            c.part(&comp.block.raw());
+            c.part(&comp.team.0);
+            c.part(&comp.rot);
+            c.part(&comp.pos.x());
+            c.part(&comp.pos.y());
         }
 
-        xxhash_rust::xxh3::xxh3_64(&bytes)
+        c.finish()
     }
 
     /// Checksum as 16 lowercase hex digits (golden format).
     pub fn checksum_hex(&self) -> String {
-        format!("{:016x}", self.checksum())
+        self.checksum_value().to_hex()
+    }
+
+    /// Applies a canonical [`SimCommand`] through the same path the relay uses
+    /// (plan 05 §6.4). Unsupported/unknown commands are structured errors.
+    pub fn command(
+        &mut self,
+        command: crate::determinism::SimCommand,
+    ) -> Result<(), crate::determinism::CommandError> {
+        use crate::determinism::CommandError;
+        let op = command.op_name();
+        match command.to_p0() {
+            Some(p0) => self.apply(p0).map_err(|error| match error {
+                SimError::UnknownBlock(id) => CommandError::UnknownContent(id),
+                SimError::World(_) | SimError::CannotPlaceAir => CommandError::InvalidTarget,
+            }),
+            None => Err(CommandError::Unsupported(op)),
+        }
+    }
+
+    /// Captures the minimal deterministic snapshot header (plan 21 restore hook).
+    pub fn snapshot(&self) -> SimSnapshot {
+        SimSnapshot {
+            tick: self.state.tick,
+            update_id: self.state.update_id,
+            phase: self.state.phase,
+            checksum: self.checksum(),
+        }
     }
 
     /// Canonical sparse state dump (§6.3).

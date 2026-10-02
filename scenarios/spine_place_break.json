@@ -12,7 +12,7 @@
   ],
   "steps": 60,
   "expect": {
-    "checksum": "2033eb5b4ec1206d",
+    "checksum": "a1a7b96167c9718d",
     "tiles": [
       { "x": 4, "y": 4, "block": "air" },
       { "x": 5, "y": 4, "block": "stone-wall" }

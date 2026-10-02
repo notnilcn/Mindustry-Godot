@@ -6,6 +6,10 @@
 //! Plan 05 §3.11/§6.4/§6.5. The checksum module is the canonical
 //! `Checksum` (HLP §12 C2) that replaces the P0 xxh3 dump hash at M8.
 
+pub mod checksum;
+pub mod command;
 pub mod rng;
 
+pub use checksum::{Checksum, ChecksumPart, Checksummer, Hasher};
+pub use command::{CommandError, CommandLog, ConfigValue, LogHeader, SimCommand};
 pub use rng::{ALL_STREAMS, RngStream, SimRng};

@@ -14,6 +14,7 @@
 extern crate self as mind_core;
 
 pub mod assets;
+pub mod async_work;
 pub mod command;
 pub mod config;
 pub mod constants;
