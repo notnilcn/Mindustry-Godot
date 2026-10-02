@@ -1976,6 +1976,13 @@ pub struct BlockDef {
     pub(crate) item_costs: Vec<f32>,
     /// Item health scaling indexed by item id (`Item.healthScaling`; used by `init`).
     pub(crate) item_health_scaling: Vec<f32>,
+    /// Floor/environment attributes keyed by attribute name (`Floor.attributes`;
+    /// the name-keyed half mirrors upstream's dynamic `Attribute` registry; plan
+    /// 20 M3b patches this via `block.<name>.attributes.<attr>`).
+    pub attributes: Vec<(String, f32)>,
+    /// `Drill.drillMultipliers` (`ObjectFloatMap<Item>`); plan 20 M3b patches this
+    /// via `block.<name>.drillMultipliers`.
+    pub drill_multipliers: Vec<(ItemId, f32)>,
 }
 
 impl BlockDef {
@@ -2183,6 +2190,8 @@ impl BlockDef {
             draw_team_overlay: spec.draw_team_overlay.unwrap_or(true),
             item_costs,
             item_health_scaling,
+            attributes: Vec::new(),
+            drill_multipliers: Vec::new(),
         };
         if let Some(generate) = generate_icons {
             def.unlock.generate_icons = generate;

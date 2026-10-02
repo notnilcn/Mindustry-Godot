@@ -26,7 +26,10 @@ use crate::content::registries::bullets::{BulletDef, BulletKind, BulletSpec};
 use crate::content::registries::fx_meta::effect_by_name;
 use crate::content::registries::planets::{CloudMeshKind, GeneratorKind, MeshKind, PlanetDef};
 use crate::content::registries::sectors::SectorPresetDef;
-use crate::content::registries::units::weapon::{BulletRef, WeaponDef, WeaponSpec};
+use crate::content::registries::units::ability::{AbilityKind, AbilitySpec};
+use crate::content::registries::units::weapon::{
+    BulletRef, ShootPatternKind, ShootPatternSpec, WeaponDef, WeaponSpec,
+};
 use crate::content::registries::units::{
     AiControllerKind, ControllerKind, EntityDefSpec, ResolvedBullet, UnitKind, UnitSpec,
     UnitTypeDef,
@@ -882,6 +885,18 @@ impl ContentJsonParser {
             spec.immunities = leaked.to_vec();
         }
 
+        if let Some(Value::Array(entries)) = object.get("abilities") {
+            let mut abilities = Vec::with_capacity(entries.len());
+            for entry in entries {
+                let Some(map) = entry.as_object() else {
+                    self.warn(file, "ability entries must be objects; skipped");
+                    continue;
+                };
+                abilities.push(self.parse_ability(file, registry, map)?);
+            }
+            spec.abilities = abilities;
+        }
+
         let def = UnitTypeDef::from_spec(&spec, registry, &self.bundle, &self.store)
             .map_err(|error| ContentParseError::new(format!("{file}: {error}")))?;
         let unit_id = registry
@@ -920,6 +935,113 @@ impl ContentJsonParser {
             out.push(self.parse_weapon_object(registry, file, weapon, index)?);
         }
         Ok(out)
+    }
+
+    /// Parses one `abilities` entry (`Ability{}`) into an [`AbilitySpec`]
+    /// (plan 20 M2b; `PatcherTests.unitAbilities{,Array}`).
+    pub fn parse_ability(
+        &mut self,
+        file: &str,
+        registry: &ContentRegistry,
+        object: &Map<String, Value>,
+    ) -> Result<AbilitySpec, ContentParseError> {
+        let class = object
+            .get("type")
+            .and_then(Value::as_str)
+            .ok_or_else(|| ContentParseError::new(format!("{file}: ability is missing `type`")))?;
+        let kind = self
+            .classmap
+            .resolve(class, ClassScope::Ability)
+            .and_then(resolve_ability_kind)
+            .ok_or_else(|| ContentParseError::new(format!("{file}: unknown ability `{class}`")))?;
+        let mut spec = AbilitySpec::for_kind(kind);
+        for (field, target) in [
+            ("amount", &mut spec.amount),
+            ("max", &mut spec.max),
+            ("reload", &mut spec.reload),
+            ("range", &mut spec.range),
+            ("healPercent", &mut spec.heal_percent),
+            ("sameTypeHealMult", &mut spec.same_type_heal_mult),
+            ("smartDowntime", &mut spec.smart_downtime),
+            ("rotation", &mut spec.rotation),
+            ("regen", &mut spec.regen),
+            ("cooldown", &mut spec.cooldown),
+            ("duration", &mut spec.duration),
+            ("orbRadius", &mut spec.orb_radius),
+            ("particleSize", &mut spec.particle_size),
+            ("x", &mut spec.x),
+            ("y", &mut spec.y),
+            ("angle", &mut spec.angle),
+            ("width", &mut spec.width),
+            ("chanceDeflect", &mut spec.chance_deflect),
+            ("minVelocity", &mut spec.min_velocity),
+            ("interval", &mut spec.interval),
+            ("spread", &mut spec.spread),
+            ("percentAmount", &mut spec.percent_amount),
+        ] {
+            if let Some(value) = field_f32(object, field) {
+                *target = value;
+            }
+        }
+        for (field, target) in [
+            ("particles", &mut spec.particles),
+            ("maxTargets", &mut spec.max_targets),
+            ("sides", &mut spec.sides),
+            ("randAmount", &mut spec.rand_amount),
+        ] {
+            if let Some(value) = field_i32(object, field) {
+                *target = value;
+            }
+        }
+        for (field, target) in [
+            ("smartHeal", &mut spec.smart_heal),
+            ("active", &mut spec.active),
+            ("whenShooting", &mut spec.when_shooting),
+            ("teamColor", &mut spec.team_color),
+        ] {
+            if let Some(value) = field_bool(object, field) {
+                *target = value;
+            }
+        }
+        if let Some(color) = object.get("color").and_then(parse_color) {
+            spec.color = Some(color);
+        }
+        if let Some(color) = object.get("effectColor").and_then(parse_color) {
+            spec.effect_color = Some(color);
+        }
+        if let Some(color) = object.get("particleColor").and_then(parse_color) {
+            spec.particle_color = Some(color);
+        }
+        if let Some(status) = object.get("status").and_then(Value::as_str) {
+            spec.status = Some(Box::leak(status.to_owned().into_boxed_str()));
+        }
+        if let Some(status) = object.get("effect").and_then(Value::as_str) {
+            spec.effect = Some(Box::leak(status.to_owned().into_boxed_str()));
+        }
+        if let Some(unit) = object.get("unit").and_then(Value::as_str) {
+            let resolved = self
+                .resolve_prefixed(registry, ContentType::Unit, unit)
+                .map(|reference| reference.id)
+                .unwrap_or(0);
+            // Keep the resolved unit name for later binding.
+            let name = registry
+                .unit(crate::content::UnitTypeId::new(resolved))
+                .map(|record| record.name.clone())
+                .unwrap_or_else(|| unit.to_owned());
+            spec.unit = Some(Box::leak(name.into_boxed_str()));
+        }
+        if let Some(liquid) = object.get("liquid").and_then(Value::as_str) {
+            let resolved = self
+                .resolve_prefixed(registry, ContentType::Liquid, liquid)
+                .map(|reference| reference.id)
+                .unwrap_or(0);
+            let name = registry
+                .liquid(crate::content::LiquidId::new(resolved))
+                .map(|record| record.name.clone())
+                .unwrap_or_else(|| liquid.to_owned());
+            spec.liquid = Some(Box::leak(name.into_boxed_str()));
+        }
+        Ok(spec)
     }
 
     /// Parses a single weapon object (`Weapon{}`), registering its inline bullet
@@ -974,13 +1096,12 @@ impl ContentJsonParser {
             }
             _ => {}
         }
+        if let Some(Value::Object(shoot)) = weapon.get("shoot") {
+            spec.shoot = Some(self.parse_shoot_pattern(file, shoot)?);
+        }
         let bullet_resolved = match &spec.bullet {
             BulletRef::Inline(bullet_spec) => {
-                let def = BulletDef::from_spec(bullet_spec, registry)
-                    .map_err(|error| ContentParseError::new(format!("{file}: {error}")))?;
-                let id = registry
-                    .add_bullet(def)
-                    .map_err(|error| ContentParseError::new(format!("{file}: {error}")))?;
+                let id = self.register_bullet_spec(registry, (**bullet_spec).clone())?;
                 let record = registry
                     .bullet(id)
                     .ok_or_else(|| ContentParseError::new(format!("{file}: bullet lost")))?;
@@ -1006,6 +1127,62 @@ impl ContentJsonParser {
         // freshly constructed weapon before attaching it.
         def.init();
         Ok(def)
+    }
+
+    /// Parses a weapon `shoot` pattern object (`ShootPattern` subclass)
+    /// (plan 20 M2b; `PatcherTests.bigPatch` `shoot:{type:ShootAlternate}`).
+    fn parse_shoot_pattern(
+        &mut self,
+        file: &str,
+        object: &Map<String, Value>,
+    ) -> Result<ShootPatternSpec, ContentParseError> {
+        let kind = object
+            .get("type")
+            .and_then(Value::as_str)
+            .map(|class| {
+                self.classmap
+                    .resolve(class, ClassScope::ShootPattern)
+                    .and_then(resolve_shoot_kind)
+                    .ok_or_else(|| {
+                        ContentParseError::new(format!("{file}: unknown shoot pattern `{class}`"))
+                    })
+            })
+            .transpose()?
+            .unwrap_or(ShootPatternKind::ShootPattern);
+        let mut spec = ShootPatternSpec {
+            kind,
+            ..ShootPatternSpec::default()
+        };
+        for (field, target) in [
+            ("shots", &mut spec.shots),
+            ("barrels", &mut spec.barrels),
+            ("barrelOffset", &mut spec.barrel_offset),
+        ] {
+            if let Some(value) = field_i32(object, field) {
+                *target = value;
+            }
+        }
+        for (field, target) in [
+            ("firstShotDelay", &mut spec.first_shot_delay),
+            ("shotDelay", &mut spec.shot_delay),
+            ("spread", &mut spec.spread),
+            ("scl", &mut spec.scl),
+            ("mag", &mut spec.mag),
+            ("offset", &mut spec.offset),
+            ("sineScl", &mut spec.sine_scl),
+            ("sineMag", &mut spec.sine_mag),
+            ("x", &mut spec.summon_x),
+            ("y", &mut spec.summon_y),
+            ("radius", &mut spec.summon_radius),
+        ] {
+            if let Some(value) = field_f32(object, field) {
+                *target = value;
+            }
+        }
+        if let Some(value) = field_bool(object, "mirror") {
+            spec.mirror = value;
+        }
+        Ok(spec)
     }
 
     /// Parses an inline `bullet` object into a [`BulletSpec`] (M2 subset).
@@ -1063,11 +1240,105 @@ impl ContentJsonParser {
                 *target = Some(value);
             }
         }
+        for (field, target) in [
+            ("width", &mut spec.width),
+            ("height", &mut spec.height),
+            ("length", &mut spec.length),
+            ("ammoMultiplier", &mut spec.ammo_multiplier),
+            ("reloadMultiplier", &mut spec.reload_multiplier),
+            ("pierceDamageFactor", &mut spec.pierce_damage_factor),
+        ] {
+            if let Some(value) = field_f32(object, field) {
+                *target = Some(value);
+            }
+        }
+        if let Some(value) = field_i32(object, "pierceCap") {
+            spec.pierce_cap = Some(value);
+        }
+        if let Some(color) = object.get("frontColor").and_then(parse_color) {
+            spec.front_color = Some(color);
+        }
+        if let Some(color) = object.get("backColor").and_then(parse_color) {
+            spec.back_color = Some(color);
+        }
+        if let Some(Value::Array(entries)) = object.get("colors") {
+            let mut colors = Vec::with_capacity(entries.len());
+            for entry in entries {
+                if let Some(color) = parse_color(entry) {
+                    colors.push(color);
+                }
+            }
+            spec.colors = Some(colors);
+        }
         if let Some(status) = object.get("status").and_then(Value::as_str) {
             // Bullet status is a name resolved during the unit load pass; keep raw.
             spec.status = Some(Box::leak(status.to_owned().into_boxed_str()));
         }
+        // Nested bullets (`frag`/`intervalBullet`/`spawnBullets`); plan 20 M2b.
+        if let Some(Value::Object(frag)) = object.get("frag") {
+            spec.frag_bullet = Some(Box::new(self.parse_bullet(file, frag)?));
+        }
+        if let Some(Value::Object(interval)) = object.get("intervalBullet") {
+            spec.interval_bullet = Some(Box::new(self.parse_bullet(file, interval)?));
+        }
+        if let Some(Value::Array(entries)) = object.get("spawnBullets") {
+            let mut bullets = Vec::with_capacity(entries.len());
+            for entry in entries {
+                if let Some(map) = entry.as_object() {
+                    bullets.push(self.parse_bullet(file, map)?);
+                }
+            }
+            spec.spawn_bullets = bullets;
+        }
         Ok(spec)
+    }
+
+    /// Registers one [`BulletSpec`] and its nested `frag`/`intervalBullet`/
+    /// `spawnBullets` recursively, patching the resolved ids into the record
+    /// (upstream initializer order; plan 20 M2b). `lightning` nested types are
+    /// registered the same way. `spawnUnit` is plan 11 and warns.
+    fn register_bullet_spec(
+        &mut self,
+        registry: &mut ContentRegistry,
+        spec: BulletSpec,
+    ) -> Result<crate::content::BulletId, ContentParseError> {
+        let mut spec = spec;
+        let frag = spec.frag_bullet.take();
+        let interval = spec.interval_bullet.take();
+        let lightning = spec.lightning_type.take();
+        let spawns = std::mem::take(&mut spec.spawn_bullets);
+        if spec.spawn_unit.is_some() {
+            self.warn("bullet", "bullet `spawnUnit` is plan 11 and ignored");
+            spec.spawn_unit = None;
+        }
+        let def = BulletDef::from_spec(&spec, registry)
+            .map_err(|error| ContentParseError::new(format!("bullet: {error}")))?;
+        let id = registry
+            .add_bullet(def)
+            .map_err(|error| ContentParseError::new(format!("bullet: {error}")))?;
+        let frag_id = match frag {
+            Some(nested) => Some(self.register_bullet_spec(registry, *nested)?),
+            None => None,
+        };
+        let interval_id = match interval {
+            Some(nested) => Some(self.register_bullet_spec(registry, *nested)?),
+            None => None,
+        };
+        let lightning_id = match lightning {
+            Some(nested) => Some(self.register_bullet_spec(registry, *nested)?),
+            None => None,
+        };
+        let mut spawned = Vec::with_capacity(spawns.len());
+        for nested in spawns {
+            spawned.push(self.register_bullet_spec(registry, nested)?);
+        }
+        if let Some(bullet) = registry.bullet_mut(id) {
+            bullet.frag_bullet = frag_id;
+            bullet.interval_bullet = interval_id;
+            bullet.lightning_type = lightning_id;
+            bullet.spawn_bullets = spawned;
+        }
+        Ok(id)
     }
 
     // ---- shared helpers ----
@@ -1273,6 +1544,40 @@ pub fn resolve_bullet_kind(tag: &str) -> Option<BulletKind> {
         "InterceptorBulletType" => BulletKind::Interceptor,
         "MassDriverBolt" => BulletKind::MassDriver,
         "EmptyBulletType" => BulletKind::Empty,
+        _ => return None,
+    })
+}
+
+/// Resolves an ability class tag to an [`AbilityKind`].
+pub fn resolve_ability_kind(tag: &str) -> Option<AbilityKind> {
+    Some(match tag {
+        "ShieldRegenFieldAbility" => AbilityKind::ShieldRegenField,
+        "RepairFieldAbility" => AbilityKind::RepairField,
+        "ForceFieldAbility" => AbilityKind::ForceField,
+        "StatusFieldAbility" => AbilityKind::StatusField,
+        "EnergyFieldAbility" => AbilityKind::EnergyField,
+        "SuppressionFieldAbility" => AbilityKind::SuppressionField,
+        "ShieldArcAbility" => AbilityKind::ShieldArc,
+        "MoveEffectAbility" => AbilityKind::MoveEffect,
+        "SpawnDeathAbility" => AbilityKind::SpawnDeath,
+        "RegenAbility" => AbilityKind::Regen,
+        "LiquidExplodeAbility" => AbilityKind::LiquidExplode,
+        "LiquidRegenAbility" => AbilityKind::LiquidRegen,
+        _ => return None,
+    })
+}
+
+/// Resolves a shoot-pattern class tag to a [`ShootPatternKind`].
+pub fn resolve_shoot_kind(tag: &str) -> Option<ShootPatternKind> {
+    Some(match tag {
+        "ShootPattern" => ShootPatternKind::ShootPattern,
+        "ShootAlternate" => ShootPatternKind::ShootAlternate,
+        "ShootSpread" => ShootPatternKind::ShootSpread,
+        "ShootHelix" => ShootPatternKind::ShootHelix,
+        "ShootBarrel" => ShootPatternKind::ShootBarrel,
+        "ShootMulti" => ShootPatternKind::ShootMulti,
+        "ShootSine" => ShootPatternKind::ShootSine,
+        "ShootSummon" => ShootPatternKind::ShootSummon,
         _ => return None,
     })
 }
@@ -1774,6 +2079,70 @@ mod tests {
         assert_eq!(unit.weapons.len(), 1);
         assert_eq!(unit.weapons[0].name, "test-gun");
         assert!(unit.weapons[0].bullet.id.raw() >= 112);
+    }
+
+    #[test]
+    fn unit_abilities_nested() {
+        let mut reg = registry();
+        let (_, result) = parse(
+            &mut reg,
+            ContentType::Unit,
+            "test-ability-mech",
+            r#"{"name":"Test Ability Mech","type":"mech","health":100,
+                "abilities":[
+                    {"type":"ShieldArcAbility","max":1000},
+                    {"type":"MoveEffectAbility","amount":10}
+                ]}"#,
+        );
+        assert!(result.is_ok(), "{result:?}");
+        let unit = reg.unit_by_name("mods-test-ability-mech").expect("unit");
+        assert_eq!(unit.abilities.len(), 2);
+        assert_eq!(unit.abilities[0].kind.name(), "ShieldArcAbility");
+        assert_eq!(unit.abilities[0].max, 1000.0);
+        assert_eq!(unit.abilities[1].kind.name(), "MoveEffectAbility");
+        assert_eq!(unit.abilities[1].amount, 10.0);
+    }
+
+    #[test]
+    fn weapon_shoot_pattern() {
+        let mut reg = registry();
+        let (_, result) = parse(
+            &mut reg,
+            ContentType::Unit,
+            "test-shooter",
+            r#"{"name":"Test Shooter","type":"mech","weapons":[
+                {"name":"w","shoot":{"type":"ShootAlternate","spread":3.5},
+                 "bullet":{"type":"BasicBulletType","damage":1}}]}"#,
+        );
+        assert!(result.is_ok(), "{result:?}");
+        let unit = reg.unit_by_name("mods-test-shooter").expect("unit");
+        assert_eq!(unit.weapons.len(), 1);
+        assert_eq!(unit.weapons[0].shoot.kind, ShootPatternKind::ShootAlternate);
+        assert!((unit.weapons[0].shoot.spread - 3.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn bullet_frag_and_interval() {
+        let mut reg = registry();
+        let (_, result) = parse(
+            &mut reg,
+            ContentType::Unit,
+            "test-frag",
+            r#"{"name":"Test Frag","type":"mech","weapons":[
+                {"name":"w","bullet":{"type":"BasicBulletType","damage":1,
+                    "frag":{"type":"BasicBulletType","damage":5},
+                    "intervalBullet":{"type":"BasicBulletType","damage":2}}}]}"#,
+        );
+        assert!(result.is_ok(), "{result:?}");
+        let unit = reg.unit_by_name("mods-test-frag").expect("unit");
+        let bullet_id = unit.weapons[0].bullet.id;
+        let bullet = reg.bullet(bullet_id).expect("bullet");
+        assert!(bullet.frag_bullet.is_some(), "frag registered");
+        assert!(bullet.interval_bullet.is_some(), "interval registered");
+        let frag = reg
+            .bullet(bullet.frag_bullet.unwrap())
+            .expect("frag bullet");
+        assert_eq!(frag.damage, 5.0);
     }
 
     #[test]
