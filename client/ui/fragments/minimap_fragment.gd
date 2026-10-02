@@ -8,7 +8,7 @@
 
 extends Control
 
-@onready var minimap: MindMinimap = get_node_or_null("Center/Minimap")
+@onready var minimap: MindMinimapWidget = get_node_or_null("Center/Minimap")
 
 
 func _ready() -> void:

@@ -7,7 +7,10 @@
 ## 16's renderer; this widget paints a placeholder grid and emits the pan/zoom
 ## intents so the renderer hook and plan-15 camera stay in their lanes.
 
-class_name MindMinimap
+## Named `MindMinimapWidget` (not `MindMinimap`) because plan 16 already
+## registers the native `MindMinimap` provider node (render/minimap.rs); this is
+## the plan-14 interactive control that consumes it.
+class_name MindMinimapWidget
 extends Control
 
 signal pan_requested(world_delta: Vector2)
