@@ -24,6 +24,7 @@ use crate::cli::{
     AssetsCommand, Cli, Command, ContentCommand, IoCommand, MapsCommand, MetaCommand, ModsCommand,
     TraceCommand, WorldCommand,
 };
+use crate::parity::scenario::ScenarioCatalog;
 use crate::paths;
 use crate::registry;
 use crate::report::{
@@ -76,12 +77,8 @@ fn init_logging(cli: &Cli) {
 
 fn dispatch(cli: Cli) -> anyhow::Result<i32> {
     match &cli.command {
-        Command::List => {
-            for name in registry::names() {
-                println!("{name}");
-            }
-            Ok(EXIT_PASS)
-        }
+        Command::List { json, tier } => cmd_list(*json, tier.as_deref()),
+        Command::RunAll { tier } => cmd_run_all(&cli, tier.as_deref()),
         Command::Version { json, file } => cmd_version(*json, file.as_deref()),
         Command::Server {
             config_dir,
@@ -2142,6 +2139,93 @@ fn load_scenario(cli: &Cli, name: &str) -> anyhow::Result<Scenario> {
     let dir = paths::find_scenarios_dir(cli.scenarios_dir.as_deref())?;
     let path = dir.join(fixture.file_name());
     Scenario::read(&path).with_context(|| format!("loading scenario `{}`", path.display()))
+}
+
+/// Loads `parity/scenario_catalog.json` from the discovered repo root.
+fn load_scenario_catalog() -> anyhow::Result<ScenarioCatalog> {
+    let repo = crate::parity::find_repo(None)?;
+    ScenarioCatalog::load(&repo.join("parity/scenario_catalog.json"))
+}
+
+/// `list [--json] [--tier <T>]`: catalogued scenarios (plan 23 §3.2).
+fn cmd_list(json: bool, tier: Option<&str>) -> anyhow::Result<i32> {
+    let catalog = load_scenario_catalog()?;
+    let entries: Vec<&crate::parity::scenario::ScenarioEntry> = catalog
+        .entries
+        .iter()
+        .filter(|entry| tier.is_none_or(|tier| entry.tier == tier))
+        .collect();
+    if json {
+        let scenarios: Vec<serde_json::Value> = entries
+            .iter()
+            .map(|entry| {
+                serde_json::json!({
+                    "name": entry.name,
+                    "plan": entry.plan,
+                    "phase": entry.phase,
+                    "tier": entry.tier,
+                    "kind": entry.kind,
+                    "runnable": entry.kind == "file",
+                    "path": entry.path,
+                    "command": entry.command,
+                    "expect_checksum": entry.expect_checksum,
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "format": 1,
+                "tier": tier,
+                "count": scenarios.len(),
+                "scenarios": scenarios,
+            }))?
+        );
+    } else {
+        for entry in &entries {
+            println!("{}", entry.name);
+        }
+    }
+    Ok(EXIT_PASS)
+}
+
+/// `run-all [--tier <T>]`: run every file-backed scenario in the tier
+/// (plan 23 §3.2). Embedded/planned entries are catalogued but not run.
+fn cmd_run_all(cli: &Cli, tier: Option<&str>) -> anyhow::Result<i32> {
+    let catalog = load_scenario_catalog()?;
+    let entries: Vec<&crate::parity::scenario::ScenarioEntry> = catalog
+        .entries
+        .iter()
+        .filter(|entry| entry.kind == "file")
+        .filter(|entry| tier.is_none_or(|tier| entry.tier == tier))
+        .collect();
+    if entries.is_empty() {
+        return Err(anyhow!(
+            "no file-backed scenarios match tier `{}`",
+            tier.unwrap_or("all")
+        ));
+    }
+    let mut failed = 0;
+    for entry in &entries {
+        let name = entry.name.as_str();
+        let code = if let Some(kind) = StdbScenario::from_name(name) {
+            crate::stdb_scenarios::run(cli, kind, None, false)?
+        } else if name == "sim_core_reset_play_cycle" {
+            cmd_sim_core_reset_play_cycle(cli, 20, false)?
+        } else {
+            cmd_run(cli, name, None, false, None, None, 20, 0, None, None)?
+        };
+        if code != EXIT_PASS {
+            failed += 1;
+        }
+    }
+    println!(
+        "run-all ({}): {}/{} passed",
+        tier.unwrap_or("all tiers"),
+        entries.len() - failed,
+        entries.len()
+    );
+    Ok(if failed == 0 { EXIT_PASS } else { EXIT_FAIL })
 }
 
 /// Runs a scenario to completion; optionally collects per-tick checksums.

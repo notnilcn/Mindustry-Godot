@@ -193,6 +193,30 @@ mod tests {
     }
 
     #[test]
+    fn every_registered_file_scenario_is_catalogued() {
+        let repo = crate::paths::find_repo_root(None).expect("repo root");
+        let catalog =
+            ScenarioCatalog::load(&repo.join("parity/scenario_catalog.json")).expect("catalog");
+        for fixture in crate::registry::SCENARIOS {
+            let entry = catalog
+                .entries
+                .iter()
+                .find(|entry| entry.name == fixture.name)
+                .unwrap_or_else(|| {
+                    panic!("registry scenario `{}` is not catalogued", fixture.name)
+                });
+            assert_eq!(entry.kind, "file", "{} must be a file entry", fixture.name);
+            assert_eq!(
+                entry.path.as_deref(),
+                Some(format!("scenarios/{}", fixture.file_name()).as_str()),
+                "{} path mismatch",
+                fixture.name
+            );
+            assert!(!entry.tier.is_empty(), "{} has no tier", fixture.name);
+        }
+    }
+
+    #[test]
     fn uncatalogued_file_is_flagged() {
         let repo = crate::paths::find_repo_root(None).expect("repo root");
         let mut catalog =
