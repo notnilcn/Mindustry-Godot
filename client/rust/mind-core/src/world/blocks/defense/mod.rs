@@ -8,4 +8,5 @@
 //! Turrets are the first family landed (M5); the projector/shield family (M7)
 //! is still open.
 
+pub mod shields;
 pub mod turrets;
