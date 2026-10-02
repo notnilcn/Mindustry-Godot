@@ -9,6 +9,7 @@ description = "Godot-free, tokio-free Mindustry simulation core (content, world,
 [dependencies]
 bevy_ecs.workspace = true
 mind-derive = { path = "../mind-derive" }
+mind-macros = { path = "../mind-macros" }
 serde.workspace = true
 serde_json.workspace = true
 indexmap.workspace = true

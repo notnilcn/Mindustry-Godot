@@ -73,7 +73,7 @@ Expect an object with `pid`, a `project` path containing `mindustry-godot`, a gr
 godot_exec {"action":"eval","params":{"code":"var host = get_node(\"/root/Spine/SimHost\")\nvar loaded = host.load_scenario(\"res://scenarios/spine_place_break.json\")\nvar tick = host.step(60)\nreturn {\"pid\": OS.get_process_id(), \"loaded\": loaded, \"tick\": tick, \"checksum\": str(host.get_checksum())}"}}
 ```
 
-Require `loaded: true`, `tick: 60`, and `checksum == "e53c9277bb8c28d1"` (recorded in `scenarios/spine_place_break.json`). Then pause: `godot_exec {"action":"call","params":{"node_path":"/root/Spine/SimHost","method":"set_paused","args":[true]}}`.
+Require `loaded: true`, `tick: 60`, and `checksum == "a1a7b96167c9718d"` (recorded in `scenarios/spine_place_break.json`; canonical FNV-1a `Checksum`, plan 05 M8). Then pause: `godot_exec {"action":"call","params":{"node_path":"/root/Spine/SimHost","method":"set_paused","args":[true]}}`.
 
 ### 3. API place/break (Rust `#[func]` path)
 

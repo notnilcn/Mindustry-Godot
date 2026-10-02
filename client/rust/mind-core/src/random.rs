@@ -94,6 +94,16 @@ impl JavaRandom {
     pub fn next_double(&mut self) -> f64 {
         (((self.next(26) as i64) << 27) + self.next(27) as i64) as f64 * NORM_DOUBLE
     }
+
+    /// The raw 48-bit LCG state (checksum/snapshot input).
+    pub const fn state(&self) -> u64 {
+        self.seed
+    }
+
+    /// Restores the raw 48-bit LCG state (snapshot restore).
+    pub fn set_state(&mut self, state: u64) {
+        self.seed = state & Self::MASK;
+    }
 }
 
 /// `arc.math.Rand` helper subset: `random()`, `range`, `chance`.

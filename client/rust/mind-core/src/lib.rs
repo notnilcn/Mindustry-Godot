@@ -14,19 +14,25 @@
 extern crate self as mind_core;
 
 pub mod assets;
+pub mod async_work;
 pub mod command;
 pub mod config;
+pub mod constants;
 pub mod content;
+pub mod determinism;
 pub mod ecs;
+pub mod entities;
 pub mod event;
 pub mod game;
 pub mod io;
 pub mod log;
+pub mod platform;
 pub mod random;
 pub mod scenario;
 pub mod schedule;
 pub mod sim;
 pub mod time;
+pub mod util;
 pub mod version;
 pub mod world;
 

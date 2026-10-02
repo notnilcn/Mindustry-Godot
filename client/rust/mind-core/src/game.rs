@@ -36,12 +36,18 @@ impl State {
 }
 
 /// Simulation state header.
+///
+/// Ported from `core/src/mindustry/core/GameState.java` (`tick`, `updateId`,
+/// `isGame`/`isPaused`/`isMenu`/`isEditor` helpers). `tick` is kept as `u64`
+/// (one per fixed step; plan 05 §3.4 clamps `state.tick` to `f64` at M8).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GameState {
     /// Current phase.
     pub phase: State,
     /// Number of completed ticks.
     pub tick: u64,
+    /// Monotonic update counter (`GameState.updateId`).
+    pub update_id: u64,
 }
 
 impl Default for GameState {
@@ -49,6 +55,7 @@ impl Default for GameState {
         Self {
             phase: State::Menu,
             tick: 0,
+            update_id: 0,
         }
     }
 }
@@ -56,7 +63,11 @@ impl Default for GameState {
 impl GameState {
     /// Creates a state at tick 0 in the given phase.
     pub fn new(phase: State) -> Self {
-        Self { phase, tick: 0 }
+        Self {
+            phase,
+            tick: 0,
+            update_id: 0,
+        }
     }
 
     /// Changes the phase, returning `true` when it actually changed.
@@ -69,8 +80,29 @@ impl GameState {
         }
     }
 
-    /// Advances the tick counter by one.
+    /// Advances the tick and update counters by one.
     pub fn advance(&mut self) {
         self.tick = self.tick.saturating_add(1);
+        self.update_id = self.update_id.wrapping_add(1);
+    }
+
+    /// `isGame()` — a world is loaded (playing or paused).
+    pub const fn is_game(&self) -> bool {
+        self.phase.is_game()
+    }
+
+    /// `isPlaying()`.
+    pub const fn is_playing(&self) -> bool {
+        matches!(self.phase, State::Playing)
+    }
+
+    /// `isPaused()`.
+    pub const fn is_paused(&self) -> bool {
+        matches!(self.phase, State::Paused)
+    }
+
+    /// `isMenu()`.
+    pub const fn is_menu(&self) -> bool {
+        matches!(self.phase, State::Menu)
     }
 }

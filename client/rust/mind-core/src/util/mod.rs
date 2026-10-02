@@ -1,0 +1,10 @@
+// Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
+// SPDX-License-Identifier: GPL-3.0-only
+
+//! Scratch/pooling utilities (plan 05 §3.9).
+
+pub mod pools;
+pub mod tmp;
+
+pub use pools::VecPool;
+pub use tmp::{TempVec, Tmp, with_temp_vec};

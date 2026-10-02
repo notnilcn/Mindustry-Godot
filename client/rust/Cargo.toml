@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["mind-atlas", "mind-core", "mind-derive", "mind-headless", "mind-gdext", "mind-stdb", "mind-tools"]
+members = ["mind-atlas", "mind-core", "mind-derive", "mind-headless", "mind-macros", "mind-gdext", "mind-stdb", "mind-tools"]
 default-members = ["mind-core", "mind-headless", "mind-stdb", "mind-tools"]
 
 [workspace.package]

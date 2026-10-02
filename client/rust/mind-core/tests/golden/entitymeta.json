@@ -1,0 +1,416 @@
+{
+  "components": 16,
+  "defs": [
+    {
+      "classId": 1000,
+      "components": [
+        "BaseEntity",
+        "SimId",
+        "DefId",
+        "Pos",
+        "Vel",
+        "TeamComp",
+        "Unit"
+      ],
+      "fields": [
+        {
+          "kind": "Transient",
+          "name": "added",
+          "since": 0,
+          "type": "bool"
+        },
+        {
+          "kind": "Transient",
+          "name": "id",
+          "since": 0,
+          "type": "int"
+        },
+        {
+          "kind": "Transient",
+          "name": "def",
+          "since": 0,
+          "type": "object"
+        },
+        {
+          "kind": "Plain",
+          "name": "x",
+          "since": 0,
+          "type": "float"
+        },
+        {
+          "kind": "Plain",
+          "name": "y",
+          "since": 0,
+          "type": "float"
+        },
+        {
+          "kind": "Plain",
+          "name": "x",
+          "since": 0,
+          "type": "float"
+        },
+        {
+          "kind": "Plain",
+          "name": "y",
+          "since": 0,
+          "type": "float"
+        },
+        {
+          "kind": "Plain",
+          "name": "team",
+          "since": 0,
+          "type": "ubyte"
+        }
+      ],
+      "groups": [
+        "unit",
+        "sync"
+      ],
+      "methods": [],
+      "name": "Unit",
+      "pooled": false,
+      "serialize": true
+    },
+    {
+      "classId": 6,
+      "components": [
+        "BaseEntity",
+        "SimId",
+        "DefId",
+        "Pos",
+        "TeamComp",
+        "Building"
+      ],
+      "fields": [
+        {
+          "kind": "Transient",
+          "name": "added",
+          "since": 0,
+          "type": "bool"
+        },
+        {
+          "kind": "Transient",
+          "name": "id",
+          "since": 0,
+          "type": "int"
+        },
+        {
+          "kind": "Transient",
+          "name": "def",
+          "since": 0,
+          "type": "object"
+        },
+        {
+          "kind": "Plain",
+          "name": "x",
+          "since": 0,
+          "type": "float"
+        },
+        {
+          "kind": "Plain",
+          "name": "y",
+          "since": 0,
+          "type": "float"
+        },
+        {
+          "kind": "Plain",
+          "name": "team",
+          "since": 0,
+          "type": "ubyte"
+        }
+      ],
+      "groups": [
+        "build",
+        "sync"
+      ],
+      "methods": [],
+      "name": "BuildingComp",
+      "pooled": false,
+      "serialize": true
+    },
+    {
+      "classId": 7,
+      "components": [
+        "BaseEntity",
+        "SimId",
+        "DefId",
+        "Pos",
+        "Vel",
+        "Bullet"
+      ],
+      "fields": [
+        {
+          "kind": "Transient",
+          "name": "added",
+          "since": 0,
+          "type": "bool"
+        },
+        {
+          "kind": "Transient",
+          "name": "id",
+          "since": 0,
+          "type": "int"
+        },
+        {
+          "kind": "Transient",
+          "name": "def",
+          "since": 0,
+          "type": "object"
+        },
+        {
+          "kind": "Plain",
+          "name": "x",
+          "since": 0,
+          "type": "float"
+        },
+        {
+          "kind": "Plain",
+          "name": "y",
+          "since": 0,
+          "type": "float"
+        },
+        {
+          "kind": "Plain",
+          "name": "x",
+          "since": 0,
+          "type": "float"
+        },
+        {
+          "kind": "Plain",
+          "name": "y",
+          "since": 0,
+          "type": "float"
+        }
+      ],
+      "groups": [
+        "bullet",
+        "sync"
+      ],
+      "methods": [],
+      "name": "BulletComp",
+      "pooled": true,
+      "serialize": true
+    },
+    {
+      "classId": 12,
+      "components": [
+        "BaseEntity",
+        "SimId",
+        "DefId",
+        "Pos",
+        "TeamComp",
+        "Player"
+      ],
+      "fields": [
+        {
+          "kind": "Transient",
+          "name": "added",
+          "since": 0,
+          "type": "bool"
+        },
+        {
+          "kind": "Transient",
+          "name": "id",
+          "since": 0,
+          "type": "int"
+        },
+        {
+          "kind": "Transient",
+          "name": "def",
+          "since": 0,
+          "type": "object"
+        },
+        {
+          "kind": "Plain",
+          "name": "x",
+          "since": 0,
+          "type": "float"
+        },
+        {
+          "kind": "Plain",
+          "name": "y",
+          "since": 0,
+          "type": "float"
+        },
+        {
+          "kind": "Plain",
+          "name": "team",
+          "since": 0,
+          "type": "ubyte"
+        }
+      ],
+      "groups": [
+        "player",
+        "sync"
+      ],
+      "methods": [],
+      "name": "PlayerComp",
+      "pooled": false,
+      "serialize": true
+    },
+    {
+      "classId": 9,
+      "components": [
+        "BaseEntity",
+        "SimId",
+        "DefId",
+        "Pos",
+        "EffectState"
+      ],
+      "fields": [
+        {
+          "kind": "Transient",
+          "name": "added",
+          "since": 0,
+          "type": "bool"
+        },
+        {
+          "kind": "Transient",
+          "name": "id",
+          "since": 0,
+          "type": "int"
+        },
+        {
+          "kind": "Transient",
+          "name": "def",
+          "since": 0,
+          "type": "object"
+        },
+        {
+          "kind": "Plain",
+          "name": "x",
+          "since": 0,
+          "type": "float"
+        },
+        {
+          "kind": "Plain",
+          "name": "y",
+          "since": 0,
+          "type": "float"
+        }
+      ],
+      "groups": [
+        "effect",
+        "sync"
+      ],
+      "methods": [],
+      "name": "EffectStateComp",
+      "pooled": true,
+      "serialize": true
+    },
+    {
+      "classId": 14,
+      "components": [
+        "BaseEntity",
+        "SimId",
+        "DefId",
+        "WeatherState"
+      ],
+      "fields": [
+        {
+          "kind": "Transient",
+          "name": "added",
+          "since": 0,
+          "type": "bool"
+        },
+        {
+          "kind": "Transient",
+          "name": "id",
+          "since": 0,
+          "type": "int"
+        },
+        {
+          "kind": "Transient",
+          "name": "def",
+          "since": 0,
+          "type": "object"
+        }
+      ],
+      "groups": [
+        "all",
+        "weather",
+        "sync"
+      ],
+      "methods": [],
+      "name": "WeatherStateComp",
+      "pooled": false,
+      "serialize": true
+    },
+    {
+      "classId": 42,
+      "components": [
+        "BaseEntity",
+        "SimId",
+        "DefId",
+        "PowerGraphUpdater"
+      ],
+      "fields": [
+        {
+          "kind": "Transient",
+          "name": "added",
+          "since": 0,
+          "type": "bool"
+        },
+        {
+          "kind": "Transient",
+          "name": "id",
+          "since": 0,
+          "type": "int"
+        },
+        {
+          "kind": "Transient",
+          "name": "def",
+          "since": 0,
+          "type": "object"
+        }
+      ],
+      "groups": [
+        "powerGraph",
+        "sync"
+      ],
+      "methods": [],
+      "name": "PowerGraphUpdaterComp",
+      "pooled": false,
+      "serialize": true
+    },
+    {
+      "classId": 1007,
+      "components": [
+        "BaseEntity",
+        "SimId",
+        "DefId",
+        "Draw"
+      ],
+      "fields": [
+        {
+          "kind": "Transient",
+          "name": "added",
+          "since": 0,
+          "type": "bool"
+        },
+        {
+          "kind": "Transient",
+          "name": "id",
+          "since": 0,
+          "type": "int"
+        },
+        {
+          "kind": "Transient",
+          "name": "def",
+          "since": 0,
+          "type": "object"
+        }
+      ],
+      "groups": [
+        "all",
+        "sync",
+        "draw"
+      ],
+      "methods": [],
+      "name": "DrawComp",
+      "pooled": false,
+      "serialize": true
+    }
+  ],
+  "format": 1
+}

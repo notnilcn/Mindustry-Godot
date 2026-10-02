@@ -176,6 +176,10 @@ pub(crate) fn block_event_record(sim: &Sim, event: &SimEvent) -> Option<DumpEven
         | SimEvent::ClientLoadEvent(_)
         | SimEvent::ContentInitEvent(_)
         | SimEvent::StateChangeEvent(_)
+        | SimEvent::ResetEvent(_)
+        | SimEvent::PlayEvent(_)
+        | SimEvent::WaveEvent(_)
+        | SimEvent::MusicRegisterEvent(_)
         | SimEvent::SaveWriteEvent(_)
         | SimEvent::SaveLoadEvent(_)
         | SimEvent::RulesLoadEvent(_) => None,
