@@ -41,6 +41,7 @@ pub mod hooks;
 pub mod item_buffer;
 pub mod limits;
 pub mod modules;
+pub mod network_state;
 pub mod ops;
 pub mod params;
 pub mod plan;
@@ -85,6 +86,7 @@ pub use hooks::{
 pub use item_buffer::{DirectionalItemBuffer, ItemBuffer, packed};
 pub use limits::{BlockCounter, BuildRules};
 pub use modules::{FlowWindow, ItemModule, LiquidModule, PowerGraphId, PowerModule};
+pub use network_state::{BuildingState, GraphState, NetworkState};
 pub use ops::{WorldCtx, WorldEventLog};
 pub use params::WorldParams;
 pub use plan::BuildPlan;

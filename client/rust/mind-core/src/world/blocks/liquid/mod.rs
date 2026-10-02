@@ -9,6 +9,7 @@
 //! become one Resource). Conduit/router/junction behaviors are the M3 files.
 //! (`movement.rs` is the plan's `move.rs`; `move` is a Rust keyword.)
 
+pub mod bridge;
 pub mod movement;
 
 use bevy_ecs::component::Component;
@@ -18,6 +19,11 @@ use smallvec::SmallVec;
 use crate::content::LiquidId;
 use crate::math::WindowedMean;
 
+pub use bridge::{
+    DirectionLiquidBridgeLink, LiquidBridgeLink, dump_liquid_bridge, first_occupied,
+    positions_valid, resolve_link, update_direction_liquid_bridge, update_liquid_bridge,
+    update_liquid_bridge_tile,
+};
 pub use movement::{
     accept_liquid, can_dump_liquid, dump_liquid, get_liquid_destination, handle_liquid,
     move_liquid, move_liquid_forward, transfer_liquid,

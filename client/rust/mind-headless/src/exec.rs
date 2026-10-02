@@ -271,6 +271,15 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
         },
         Command::Blocks { command } => crate::blocks_scenarios::run(command).map(|()| EXIT_PASS),
         Command::Render { command } => crate::render_scenarios::run(command),
+        Command::Power { command } => {
+            crate::network_scenarios::run(crate::network_scenarios::NetworkKind::Power, command)
+        }
+        Command::Liquid { command } => {
+            crate::network_scenarios::run(crate::network_scenarios::NetworkKind::Liquid, command)
+        }
+        Command::Heat { command } => {
+            crate::network_scenarios::run(crate::network_scenarios::NetworkKind::Heat, command)
+        }
         Command::Audio { command } => crate::audio_scenarios::run(command),
         Command::Mods { command } => match command {
             ModsCommand::List { dir, json, check } => cmd_mods_list(dir, *json, *check),

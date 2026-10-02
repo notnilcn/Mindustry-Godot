@@ -13,8 +13,8 @@ use crate::util::IdSet;
 use crate::world::TilePos;
 
 use super::{
-    HeatConductor, HeatState, calculate_heat, contact_points, crafter_efficiency_scale,
-    orientation_allows,
+    HeatConductor, HeatCrafter, HeatState, calculate_heat, contact_points,
+    crafter_efficiency_scale, crafter_heat, orientation_allows,
 };
 
 struct HeatFixture {
@@ -102,29 +102,31 @@ fn split_heat_thirds() {
 
 #[test]
 fn cycle_guard() {
-    let mut fixture = HeatFixture::new();
-    let a = fixture.spawn(0, 0, 0.0, Some(false));
-    let b = fixture.spawn(1, 0, 9.0, Some(false));
-    fixture.link(a, b);
-    // B already came from A -> A must ignore B's heat.
+    // Guarded: B already traversed A, so A ignores B's heat (upstream
+    // `calculateHeat` cycle branch). B is still recursed/memoized, which is why
+    // the two cases use separate fixtures (a conductor's own heat is a cached
+    // derivation, not a source).
+    let mut guarded = HeatFixture::new();
+    let a = guarded.spawn(0, 0, 0.0, Some(false));
+    let b = guarded.spawn(1, 0, 9.0, Some(false));
+    guarded.link(a, b);
     {
         let mut came = IdSet::new();
         came.add(a.index_u32());
-        fixture
+        guarded
             .world
             .get_mut::<HeatConductor>(b)
             .expect("b")
             .came_from = came;
     }
-    assert_eq!(fixture.heat_from(a), 0.0);
-    // Without the guard, heat flows.
-    fixture
-        .world
-        .get_mut::<HeatConductor>(b)
-        .expect("b")
-        .came_from
-        .clear();
-    let heat = fixture.heat_from(a);
+    assert_eq!(guarded.heat_from(a), 0.0);
+
+    // Without the guard, B's pre-recursion heat flows into A.
+    let mut unguarded = HeatFixture::new();
+    let a = unguarded.spawn(0, 0, 0.0, Some(false));
+    let b = unguarded.spawn(1, 0, 9.0, Some(false));
+    unguarded.link(a, b);
+    let heat = unguarded.heat_from(a);
     assert!((heat - 9.0).abs() < f32::EPSILON);
 }
 
@@ -146,4 +148,32 @@ fn producer_conducts_contact_heat() {
     fixture.link(consumer, producer);
     let heat = fixture.heat_from(consumer);
     assert!((heat - 7.0).abs() < f32::EPSILON);
+}
+
+/// Regression: a `HeatCrafter` (consumer, not `HeatBlock`) must never be
+/// traversed as a heat source, so a conductor between a producer and a crafter
+/// keeps delivering heat frame after frame (upstream `calculateHeat`).
+#[test]
+fn crafter_pull_keeps_conductor_hot_across_frames() {
+    let mut fixture = HeatFixture::new();
+    let producer = fixture.spawn(0, 0, 10.0, None);
+    let conductor = fixture.spawn(1, 0, 0.0, Some(false));
+    let crafter = fixture.spawn(2, 0, 0.0, None);
+    fixture.world.entity_mut(crafter).insert(HeatCrafter {
+        requirement: 5.0,
+        overheat_scale: 1.0,
+        max_efficiency: 3.0,
+    });
+    fixture.link(producer, conductor);
+    fixture.link(conductor, crafter);
+
+    let first = crafter_heat(&mut fixture.world, crafter, 1);
+    let second = crafter_heat(&mut fixture.world, crafter, 2);
+    assert!(second > first, "first={first} second={second}");
+    assert!((second - 10.0).abs() < 0.1, "second={second}");
+    let came = fixture
+        .world
+        .get::<HeatConductor>(conductor)
+        .expect("conductor");
+    assert!(!came.came_from.contains(crafter.index_u32()));
 }
