@@ -244,6 +244,13 @@ pub enum Command {
         command: BlocksCommand,
     },
 
+    /// Combat/bullets/defense scenarios (plan 10 §7b).
+    Combat {
+        /// Combat subcommand.
+        #[command(subcommand)]
+        command: CombatCommand,
+    },
+
     /// Audio state-machine and event inspection (plan 18).
     Audio {
         /// Audio subcommand.
@@ -521,6 +528,59 @@ pub enum BlocksCommand {
         /// Number of buildings to place.
         #[arg(long, default_value_t = 2000)]
         buildings: usize,
+        /// Timed ticks.
+        #[arg(long, default_value_t = 3600)]
+        ticks: u64,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+/// `combat` subcommands (plan 10 §7b).
+#[derive(Debug, Subcommand)]
+pub enum CombatCommand {
+    /// Run a deterministic combat scenario and print its report/checksum.
+    Scenario {
+        /// Scenario name (`combat_basic`, `combat_bullet_pierce`,
+        /// `combat_determinism`).
+        name: String,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Dump live bullets for the state inspector.
+    Dump {
+        /// Only list live bullets.
+        #[arg(long)]
+        bullets_live: bool,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Trace one bullet kind's position over N ticks.
+    Trace {
+        /// Fixture bullet kind/name (`fuse`, `rail`, `laser`, ...).
+        #[arg(long)]
+        kind: String,
+        /// Ticks to trace.
+        #[arg(long, default_value_t = 40)]
+        ticks: u64,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Benchmark bullet update/collision.
+    Bench {
+        /// Live traveling bullets.
+        #[arg(long, default_value_t = 2000)]
+        bullets: usize,
+        /// Turrets (accepted; implemented with plan-10 M5).
+        #[arg(long, default_value_t = 0)]
+        turrets: usize,
         /// Timed ticks.
         #[arg(long, default_value_t = 3600)]
         ticks: u64,

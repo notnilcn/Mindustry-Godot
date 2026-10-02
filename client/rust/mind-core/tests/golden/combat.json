@@ -1,0 +1,7 @@
+{
+  "scenarios": {
+    "combat_basic": "377ce4f14c84b621",
+    "combat_bullet_pierce": "3e09539ab47e0fd0",
+    "combat_determinism_first": "076bed2100b7b27c"
+  }
+}

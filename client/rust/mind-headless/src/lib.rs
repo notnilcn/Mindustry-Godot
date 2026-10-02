@@ -14,6 +14,7 @@ pub mod args;
 pub mod audio_scenarios;
 pub mod blocks_scenarios;
 pub mod cli;
+pub mod combat_scenarios;
 pub mod exec;
 pub mod network_scenarios;
 pub mod paths;
