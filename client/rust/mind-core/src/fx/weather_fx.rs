@@ -258,6 +258,167 @@ pub fn splash_visible(state: &WeatherStateView) -> bool {
     curve(state.intensity, 0.0, 1.0) > 0.0 && state.opacity > 0.0001
 }
 
+/// The world surface under a splash sample (`Weather.drawSplashes` branch).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SplashGround {
+    /// No floor (`tile == null`): skip.
+    None,
+    /// A non-liquid, non-solid floor: draw the spark lines.
+    Clear,
+    /// A liquid floor: draw the splash frame tinted by `color`.
+    Liquid(Rgba),
+    /// A solid floor: skip.
+    Solid,
+}
+
+impl WeatherFx {
+    /// `Weather.drawSplashes` (`Weather.java:191-235`): the splash frame field
+    /// plus the ground spark lines. `view` is the padded camera rect, `cam` the
+    /// camera bounds; `ground` resolves the tile floor at world `(x, y)`.
+    ///
+    /// `view_tick` replaces `Time.time` (deviation #7). `splash_regions` are the
+    /// ordered splash frames; `splash_size` is their native pixel size.
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_splashes(
+        &self,
+        state: &WeatherStateView,
+        view: WeatherView,
+        cam: WeatherView,
+        view_tick: f32,
+        density: f32,
+        time_scale: f32,
+        stroke: f32,
+        splash_regions: &[RegionKey],
+        splash_size: f32,
+        ground: impl Fn(f32, f32) -> SplashGround,
+        out: &mut Vec<DrawPrim>,
+    ) {
+        if !splash_visible(state) || splash_regions.is_empty() || density <= 0.0 {
+            return;
+        }
+        let total = (view.w * view.h / density * state.intensity) as i32 / 2;
+        let t = view_tick / time_scale.max(1e-6);
+        let mut rand = ArcRand::new(WEATHER_SEED);
+        let layer = crate::render::layer::Layer::Weather.z();
+        for _ in 0..total {
+            let offset = rand.random_float(1.0);
+            let time = t + offset;
+            let pos = time as i32;
+            let life = time.rem_euclid(1.0);
+            let mut x = rand.random_float(BOUND_MAX) + pos as f32 * 953.0;
+            let mut y = rand.random_float(BOUND_MAX) - pos as f32 * 453.0;
+            x -= view.x;
+            y -= view.y;
+            x = x.rem_euclid(view.w.max(1.0));
+            y = y.rem_euclid(view.h.max(1.0));
+            x += view.x;
+            y += view.y;
+
+            // `Tmp.r3.setCentered(x, y, life * 4).overlaps(cam)`.
+            let r3 = life * 4.0;
+            if (x - cam.x).abs() > (r3 + cam.w) / 2.0 || (y - cam.y).abs() > (r3 + cam.h) / 2.0 {
+                continue;
+            }
+            match ground(x, y) {
+                SplashGround::Liquid(floor_color) => {
+                    let idx = (life * (splash_regions.len() - 1) as f32) as usize;
+                    let region = splash_regions[idx.min(splash_regions.len() - 1)];
+                    out.push(DrawPrim::at(
+                        layer,
+                        PrimKind::Region {
+                            region,
+                            x,
+                            y,
+                            w: splash_size,
+                            h: splash_size,
+                            rotation_deg: 0.0,
+                            origin: (0.5, 0.5),
+                            color: floor_color.with_alpha(state.opacity),
+                            mix: None,
+                            wrap: false,
+                        },
+                    ));
+                }
+                SplashGround::Clear => {
+                    // `Mathf.slope(life)`: triangular ramp `0 -> 1 -> 0`.
+                    let alpha = (1.0 - (2.0 * life - 1.0).abs()) * state.opacity;
+                    let color = self.color.with_alpha(alpha);
+                    for sign in [-1.0f32, 1.0] {
+                        let a = 90.0 + sign * 45.0;
+                        let len = 1.0 + 5.0 * life;
+                        let sx = x + trnsx(a, len);
+                        let sy = y + crate::fx::angles::trnsy(a, len);
+                        out.push(DrawPrim::at(
+                            layer,
+                            PrimKind::Line {
+                                x1: sx,
+                                y1: sy,
+                                x2: sx + trnsx(a, 3.0 * (1.0 - life)),
+                                y2: sy + crate::fx::angles::trnsy(a, 3.0 * (1.0 - life)),
+                                stroke,
+                                color,
+                                cap: true,
+                            },
+                        ));
+                    }
+                }
+                SplashGround::None | SplashGround::Solid => {}
+            }
+        }
+    }
+
+    /// `Weather.drawNoiseLayers` (`Weather.java:238-241` ->
+    /// `NoiseEffect.drawNoiseLayers`): the layer chain with per-layer speed,
+    /// alpha, scale and color multipliers. `view_tick` replaces `Time.time`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_noise_layers(
+        &self,
+        texture: crate::render::draw::TextureKey,
+        color: Rgba,
+        opacity: f32,
+        base_speed: f32,
+        intensity: f32,
+        wind: (f32, f32),
+        layers: i32,
+        layer_speed_mul: f32,
+        layer_alpha_mul: f32,
+        layer_scl_mul: f32,
+        layer_color_mul: f32,
+        out: &mut Vec<DrawPrim>,
+    ) {
+        let mut sspeed = 1.0f32;
+        let mut salpha = 1.0f32;
+        let mut _sscl = 1.0f32;
+        let mut offset = 0.0f32;
+        let mut col = color;
+        for _ in 0..layers {
+            let speed = sspeed * base_speed * intensity;
+            let scroll = [-(wind.0 * speed), -(wind.1 * speed)];
+            out.push(DrawPrim::at(
+                crate::render::layer::Layer::Weather.z(),
+                PrimKind::NoiseLayer {
+                    texture,
+                    rect: [0.0, 0.0, 0.0, 0.0],
+                    tint: col,
+                    opacity: salpha * opacity,
+                    scroll,
+                    offset,
+                },
+            ));
+            sspeed *= layer_speed_mul;
+            salpha *= layer_alpha_mul;
+            _sscl *= layer_scl_mul;
+            offset += 0.29;
+            col = Rgba::new(
+                col.r * layer_color_mul,
+                col.g * layer_color_mul,
+                col.b * layer_color_mul,
+                col.a,
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -301,5 +462,119 @@ mod tests {
         assert!(splash_visible(&state));
         state.opacity = 0.0;
         assert!(!splash_visible(&state));
+    }
+
+    #[test]
+    fn noise_layers_emit_one_prim_per_layer() {
+        let fx = WeatherFx::default();
+        let mut out = Vec::new();
+        fx.build_noise_layers(
+            crate::render::draw::TextureKey("distortAlpha"),
+            Rgba::new(1.0, 0.14, 0.14, 1.0),
+            0.24,
+            0.4,
+            1.0,
+            (1.0, 0.0),
+            4,
+            -1.3,
+            0.7,
+            0.8,
+            0.9,
+            &mut out,
+        );
+        assert_eq!(out.len(), 4);
+        assert!(
+            out.iter()
+                .all(|p| matches!(p.kind, PrimKind::NoiseLayer { .. }))
+        );
+        // Alpha decays by `layerAlphaMul` each layer.
+        let first = match &out[0].kind {
+            PrimKind::NoiseLayer { opacity, .. } => *opacity,
+            _ => unreachable!(),
+        };
+        let second = match &out[1].kind {
+            PrimKind::NoiseLayer { opacity, .. } => *opacity,
+            _ => unreachable!(),
+        };
+        assert!(second < first);
+    }
+
+    #[test]
+    fn splashes_branch_on_ground() {
+        let fx = WeatherFx::default();
+        let state = WeatherStateView {
+            intensity: 1.0,
+            opacity: 1.0,
+            ..Default::default()
+        };
+        let view = WeatherView {
+            x: 0.0,
+            y: 0.0,
+            w: 1000.0,
+            h: 1000.0,
+        };
+        let cam = WeatherView {
+            x: 500.0,
+            y: 500.0,
+            w: 1000.0,
+            h: 1000.0,
+        };
+        let splashes = [RegionKey("splash-0"), RegionKey("splash-1")];
+
+        let mut liquid = Vec::new();
+        fx.build_splashes(
+            &state,
+            view,
+            cam,
+            0.0,
+            1000.0,
+            1.0,
+            1.0,
+            &splashes,
+            16.0,
+            |_, _| SplashGround::Liquid(Rgba::WHITE),
+            &mut liquid,
+        );
+        assert!(
+            liquid
+                .iter()
+                .any(|p| matches!(p.kind, PrimKind::Region { .. }))
+        );
+
+        let mut clear = Vec::new();
+        fx.build_splashes(
+            &state,
+            view,
+            cam,
+            0.0,
+            1000.0,
+            1.0,
+            1.0,
+            &splashes,
+            16.0,
+            |_, _| SplashGround::Clear,
+            &mut clear,
+        );
+        assert!(
+            clear
+                .iter()
+                .any(|p| matches!(p.kind, PrimKind::Line { .. }))
+        );
+
+        let mut solid = Vec::new();
+        fx.build_splashes(
+            &state,
+            view,
+            cam,
+            0.0,
+            1000.0,
+            1.0,
+            1.0,
+            &splashes,
+            16.0,
+            |_, _| SplashGround::Solid,
+            &mut solid,
+        );
+        assert!(solid.is_empty());
     }
 }

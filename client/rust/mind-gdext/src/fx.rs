@@ -17,12 +17,19 @@ use godot::prelude::*;
 
 use smallvec::SmallVec;
 
+use mind_core::combat::view::TurretDrawState;
 use mind_core::content::{EffectId, Rgba, WeatherId};
-use mind_core::fx::{Decal, DecalPool, ShakeState, TrailRegistry};
+use mind_core::fx::{AllRegions, Decal, DecalPool, ShakeState, TrailRegistry};
 use mind_core::fx::{
     DrawProgram, EffectData, EffectKind, EmptySnapshot, FxBus, FxEvent, FxPool, FxSettings,
     WeatherFx, WeatherKind, WeatherStateView, WeatherView, build_program_into, registry,
 };
+
+pub mod draw_turret;
+pub mod env;
+
+use draw_turret::TurretDrawInput;
+use env::EnvFxInput;
 use mind_core::render::draw::PrimKind;
 use mind_core::render::layer::Layer;
 
@@ -48,6 +55,11 @@ pub struct MindFx {
     missed_events: i64,
     weather: Option<(WeatherFx, WeatherStateView)>,
     view_rect: WeatherView,
+    /// Owned turret draw snapshots (plan 17 M5 `DrawTurret` adapter).
+    turrets: Vec<TurretDrawInput>,
+    next_turret_handle: i64,
+    /// Active env pass (plan 17 M6 `EnvRenderers` bodies).
+    env: Option<EnvFxInput>,
 }
 
 #[godot_api]
@@ -67,6 +79,9 @@ impl INode2D for MindFx {
             missed_events: 0,
             weather: None,
             view_rect: WeatherView::centered(0.0, 0.0, 1.0, 1.0, 0.0),
+            turrets: Vec::new(),
+            next_turret_handle: 1,
+            env: None,
         }
     }
 
@@ -83,6 +98,10 @@ impl INode2D for MindFx {
             build_program_into(def, state, &snapshot, &mut program);
         }
         self.append_view_prims(&mut program);
+        self.append_turret_prims(&mut program);
+        if let Some(input) = self.env {
+            env::build_env_prims(&mut program, self.view_tick as f32, &input);
+        }
         program.sort();
 
         let mut calls = 0i64;
@@ -282,7 +301,7 @@ impl MindFx {
 
         // Trails (ribbon quads + cap).
         let mut quads: Vec<[f32; 8]> = Vec::new();
-        for (_, trail) in self.trails.iter_live() {
+        for (_, trail, color) in self.trails.iter_live_colored() {
             quads.clear();
             trail.draw(1.0, &mut quads);
             for q in &quads {
@@ -297,7 +316,7 @@ impl MindFx {
                         points,
                         fill: true,
                         stroke: 0.0,
-                        color: Rgba::WHITE,
+                        color,
                     },
                 ));
             }
@@ -310,7 +329,7 @@ impl MindFx {
                         r: w / 2.0,
                         fill: true,
                         stroke: 0.0,
-                        color: Rgba::WHITE,
+                        color,
                     },
                 ));
             }
@@ -334,6 +353,27 @@ impl MindFx {
                     &mut program.prims,
                 ),
             }
+        }
+    }
+
+    /// Appends owned turret draw snapshots at the block band (plan 17 M5).
+    ///
+    /// Region binding is plan 03/16; `AllRegions` treats every name as a found
+    /// 32-px region so the draw order/layers are visible in-engine until the
+    /// atlas executor lands (same interim policy as `draw_prim`).
+    fn append_turret_prims(&self, program: &mut DrawProgram) {
+        if self.turrets.is_empty() {
+            return;
+        }
+        let lookup = AllRegions::new(32.0);
+        for input in &self.turrets {
+            draw_turret::build_turret(
+                program,
+                &lookup,
+                self.view_tick as f32,
+                Layer::Block.z(),
+                input,
+            );
         }
     }
 }
@@ -616,13 +656,55 @@ impl MindFx {
         self.weather.is_some()
     }
 
+    /// Dev control: sets the active env pass (`Rules.env` + camera/world bounds).
+    /// Bodies are plan 17; registration/selection is plan 16.
+    #[allow(clippy::too_many_arguments)]
+    #[func]
+    pub fn set_env(
+        &mut self,
+        rules_env: i64,
+        cam_x: f32,
+        cam_y: f32,
+        cam_w: f32,
+        cam_h: f32,
+        world_w: f32,
+        world_h: f32,
+        ray_w: f32,
+        ray_h: f32,
+        fog: bool,
+    ) {
+        self.env = Some(EnvFxInput {
+            rules_env: rules_env as u32,
+            cam: (cam_x, cam_y, cam_w, cam_h),
+            world: (world_w, world_h),
+            ray_size: (ray_w, ray_h),
+            fog,
+        });
+        self.base_mut().queue_redraw();
+    }
+
+    /// Dev control: clears the active env pass.
+    #[func]
+    pub fn clear_env(&mut self) {
+        self.env = None;
+        self.base_mut().queue_redraw();
+    }
+
+    /// Whether an env pass is active.
+    #[func]
+    pub fn env_active(&self) -> bool {
+        self.env.is_some()
+    }
+
     /// Whether effects are enabled.
     #[func]
     pub fn fx_enabled(&self) -> bool {
         self.settings.effects
     }
 
-    /// Part animation probe (plan 17 M4/M5; returns a status note for now).
+    /// Part animation probe (plan 17 M4/M5). Returns the [`PartParams`] the
+    /// turret snapshot with `unit_id` would evaluate; `status` is `missing`
+    /// when no such snapshot exists (MCP §7c step 7).
     #[func]
     pub fn sample_part(&self, unit_id: i64, weapon_index: i64, part_index: i64) -> VarDictionary {
         let mut dict = VarDictionary::new();
@@ -630,10 +712,77 @@ impl MindFx {
         dict.set(&key("unit"), &unit_id.to_variant());
         dict.set(&key("weapon"), &weapon_index.to_variant());
         dict.set(&key("part"), &part_index.to_variant());
-        dict.set(
-            &key("status"),
-            &GString::from("plan17-parts-deferred").to_variant(),
-        );
+        match self.turrets.iter().find(|t| t.handle == unit_id) {
+            Some(turret) => {
+                let p = turret.part_params();
+                dict.set(&key("warmup"), &p.warmup.to_variant());
+                dict.set(&key("reload"), &p.reload.to_variant());
+                dict.set(&key("smooth_reload"), &p.smooth_reload.to_variant());
+                dict.set(&key("heat"), &p.heat.to_variant());
+                dict.set(&key("recoil"), &p.recoil.to_variant());
+                dict.set(&key("charge"), &p.charge.to_variant());
+                dict.set(&key("status"), &GString::from("ok").to_variant());
+            }
+            None => {
+                dict.set(&key("status"), &GString::from("missing").to_variant());
+            }
+        }
         dict
+    }
+
+    /// Dev/MCP probe: registers an owned turret draw snapshot from plan-10 draw
+    /// state and returns its handle (`<= 0` rejected). Region execution is
+    /// plan 03/16; this exercises the DrawTurret adapter in-engine.
+    #[allow(clippy::too_many_arguments)]
+    #[func]
+    pub fn spawn_turret_draw(
+        &mut self,
+        name: GString,
+        x: f32,
+        y: f32,
+        rotation: f32,
+        heat: f32,
+        warmup: f32,
+        recoil: f32,
+        charge: f32,
+        ammo_fraction: f32,
+        progress: f32,
+    ) -> i64 {
+        let handle = self.next_turret_handle;
+        self.next_turret_handle += 1;
+        let state = TurretDrawState {
+            rotation,
+            recoil,
+            heat,
+            warmup,
+            charge,
+            ammo_fraction,
+        };
+        self.turrets.push(TurretDrawInput::from_state(
+            handle,
+            name.to_string(),
+            x,
+            y,
+            state,
+            progress,
+            0.0,
+            Rgba::WHITE,
+            Rgba::WHITE,
+        ));
+        self.base_mut().queue_redraw();
+        handle
+    }
+
+    /// Dev/MCP probe: removes every registered turret draw snapshot.
+    #[func]
+    pub fn clear_turrets(&mut self) {
+        self.turrets.clear();
+        self.base_mut().queue_redraw();
+    }
+
+    /// Live turret draw-snapshot count.
+    #[func]
+    pub fn live_turret_count(&self) -> i64 {
+        self.turrets.len() as i64
     }
 }
