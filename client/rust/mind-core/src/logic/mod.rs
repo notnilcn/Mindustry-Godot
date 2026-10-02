@@ -21,6 +21,7 @@ pub mod rules;
 pub mod script;
 pub mod statement;
 pub mod textio;
+pub mod world;
 
 pub use access::LAccess;
 pub use assembler::Assembler;

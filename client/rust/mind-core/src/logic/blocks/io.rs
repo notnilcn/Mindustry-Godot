@@ -207,9 +207,17 @@ pub fn read_target(
             };
             apply_output(exec, output, CellValue::Num(value));
         }
-        Some(LogicObject::Query(_)) => {
-            // `@queries` arena lives in the executor; the query type is deferred.
-            apply_output(exec, output, CellValue::Obj(None));
+        Some(LogicObject::Query(id)) => {
+            // `@queries` arena (plan 13 M6; deviation 3).
+            let index = exec.arena.get(address.id()).numi();
+            let obj = exec.queries.get(*id as usize).and_then(|arena| {
+                if index < 0 {
+                    None
+                } else {
+                    arena.get(index as usize).cloned()
+                }
+            });
+            apply_output(exec, output, CellValue::Obj(obj));
         }
         _ => apply_output(exec, output, CellValue::Obj(None)),
     }
