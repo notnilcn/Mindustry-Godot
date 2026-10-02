@@ -94,6 +94,44 @@ pub struct Bullet {
     pub flags: u16,
     /// Frag groups already created (`Bullet.frags`).
     pub frags: i32,
+    /// Deterministic per-tick mover (`BulletComp.mover`; e.g. `ShootHelix`).
+    pub mover: Option<ShotMover>,
+}
+
+/// Per-tick bullet mover (`BulletComp.mover` lambda replacements).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ShotMover {
+    /// `ShootHelix` mover: `b.moveRelative(0, Mathf.sin(b.time + offset, scl, mag * sign))`.
+    Helix {
+        /// Time scale.
+        scl: f32,
+        /// Displacement magnitude.
+        mag: f32,
+        /// Phase offset.
+        offset: f32,
+        /// `+1`/`-1` twin direction (`Mathf.signs`).
+        sign: f32,
+    },
+}
+
+impl ShotMover {
+    /// Applies the mover to a bullet position for one tick (`BulletComp.moveRelative`).
+    pub fn apply(&self, pos: &mut Pos, rotation: f32, time: f32) {
+        match *self {
+            ShotMover::Helix {
+                scl,
+                mag,
+                offset,
+                sign,
+            } => {
+                let rel = ((time + offset) * scl).sin() * mag * sign;
+                let rad = rotation.to_radians();
+                // `Angles.trnsx(rot, 0, rel)` / `Angles.trnsy(rot, 0, rel)`.
+                pos.x += rel * rad.sin();
+                pos.y += -rel * rad.cos();
+            }
+        }
+    }
 }
 
 impl Bullet {
@@ -266,6 +304,17 @@ pub fn update_bullet(ctx: &mut CombatCtx<'_>, entity: Entity) -> bool {
             let s = (1.0 - drag).max(0.0);
             vel.x *= s;
             vel.y *= s;
+        }
+    }
+
+    // Per-tick mover (`BulletComp.mover`; e.g. `ShootHelix`).
+    if let Some(mover) = ctx.bullet(entity).and_then(|b| b.mover) {
+        let (time, rotation) = ctx
+            .bullet(entity)
+            .map(|b| (b.time, b.rotation))
+            .unwrap_or((0.0, 0.0));
+        if let Some(mut pos) = ctx.world.get_mut::<Pos>(entity) {
+            mover.apply(&mut pos, rotation, time);
         }
     }
 

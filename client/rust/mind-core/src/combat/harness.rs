@@ -105,9 +105,11 @@ impl CombatHarness {
             .unwrap_or(0.0)
     }
 
-    /// Advances one combat tick: buildings, bullets, then fires/puddles.
+    /// Advances one combat tick: buildings, units, bullets, then fires/puddles.
     pub fn tick(&mut self) {
         self.build.tick();
+        self.update_weapons_only();
+        self.update_turrets_only();
         self.step_bullets_only();
         self.fire_tick(0.0);
         self.puddle_tick();
@@ -223,6 +225,173 @@ impl CombatHarness {
         self.bullets_created += spawned.len() as u64;
         self.bullets.extend(spawned);
         entity
+    }
+
+    /// Spawns a plan-11 stand-in unit carrying `weapons` (M4 weapon fixture).
+    ///
+    /// Plan 11 replaces this with `UnitType`/`Unit` construction; until then the
+    /// harness owns a minimal unit with position/velocity/team/health and the
+    /// [`crate::weapons::UnitWeapons`] mount list.
+    pub fn spawn_test_unit(
+        &mut self,
+        x: f32,
+        y: f32,
+        team: u8,
+        weapons: Vec<crate::content::registries::units::weapon::WeaponDef>,
+    ) -> Entity {
+        use crate::entities::comp::{BaseEntity, Health, Pos, TeamComp, Unit, Vel};
+        use crate::weapons::{UnitState, UnitWeapons};
+
+        let unit_weapons = UnitWeapons::from_defs(&weapons);
+        let seq = self.seq;
+        self.seq = self.seq.wrapping_add(1);
+        self.build
+            .world
+            .spawn((
+                crate::ecs::EntitySeq(seq),
+                BaseEntity::new(),
+                Unit,
+                Pos { x, y },
+                Vel { x: 0.0, y: 0.0 },
+                TeamComp { team },
+                Health::new(1_000.0),
+                UnitState::default(),
+                unit_weapons,
+            ))
+            .id()
+    }
+
+    /// A test unit's weapon/mount state.
+    pub fn unit_weapons(&self, entity: Entity) -> Option<&crate::weapons::UnitWeapons> {
+        self.build.world.get::<crate::weapons::UnitWeapons>(entity)
+    }
+
+    /// Mutable test unit weapon/mount state.
+    pub fn unit_weapons_mut(
+        &mut self,
+        entity: Entity,
+    ) -> Option<bevy_ecs::change_detection::Mut<'_, crate::weapons::UnitWeapons>> {
+        self.build
+            .world
+            .get_mut::<crate::weapons::UnitWeapons>(entity)
+    }
+
+    /// Sets a mount's world aim point.
+    pub fn set_unit_aim(&mut self, entity: Entity, index: usize, aim: (f32, f32)) {
+        if let Some(mut weapons) = self.unit_weapons_mut(entity)
+            && let Some(mount) = weapons.mounts.get_mut(index)
+        {
+            mount.aim_x = aim.0;
+            mount.aim_y = aim.1;
+        }
+    }
+
+    /// Sets a mount's `shoot` flag.
+    pub fn set_unit_shoot(&mut self, entity: Entity, index: usize, shoot: bool) {
+        if let Some(mut weapons) = self.unit_weapons_mut(entity)
+            && let Some(mount) = weapons.mounts.get_mut(index)
+        {
+            mount.shoot = shoot;
+        }
+    }
+
+    /// Sets a test unit's rotation.
+    pub fn set_unit_rotation(&mut self, entity: Entity, rotation: f32) {
+        if let Some(mut state) = self
+            .build
+            .world
+            .get_mut::<crate::weapons::UnitState>(entity)
+        {
+            state.rotation = rotation;
+        }
+    }
+
+    /// Sets a test unit's movement delta length (shoot-velocity gate).
+    pub fn set_unit_delta_len(&mut self, entity: Entity, delta_len: f32) {
+        if let Some(mut state) = self
+            .build
+            .world
+            .get_mut::<crate::weapons::UnitState>(entity)
+        {
+            state.delta_len = delta_len;
+        }
+    }
+
+    /// Runs only the weapon update pass (unit fixtures).
+    pub fn update_weapons_only(&mut self) {
+        let mut spawned: Vec<Entity> = Vec::new();
+        {
+            let mut ctx = bullet::CombatCtx {
+                world: &mut self.build.world,
+                content: &self.build.content,
+                grid: &self.build.grid,
+                rng: &mut self.rng,
+                fx: self.fx.as_ref(),
+                seq: &mut self.seq,
+                spawned: &mut spawned,
+            };
+            crate::weapons::update_weapons(&mut ctx);
+        }
+        self.bullets_created += spawned.len() as u64;
+        self.bullets.extend(spawned);
+    }
+
+    /// Spawns a plan-10 turret fixture for a supported config name (`duo`,
+    /// `test-item`, `test-liquid`, `test-power`).
+    ///
+    /// The fixture carries `Pos`/`TeamComp`/`TurretState` plus the liquid and
+    /// power modules so turret behavior can be driven by
+    /// [`Self::update_turrets_only`] from the harness (plan 10 §3.2 fallback;
+    /// plan 07's `BuildingBehavior::update_tile` has no content handle yet).
+    pub fn spawn_test_turret(&mut self, name: &str, x: f32, y: f32, team: u8) -> Option<Entity> {
+        use crate::entities::comp::{Pos, TeamComp};
+        use crate::world::blocks::defense::turrets::{self, TurretState};
+        use crate::world::modules::{LiquidModule, PowerModule};
+
+        let config = turrets::config_for(&self.build.content, name, &self.names)?;
+        let seq = self.seq;
+        self.seq = self.seq.wrapping_add(1);
+        let liquid_count = self.build.content.liquids().len();
+        let entity = self
+            .build
+            .world
+            .spawn((
+                crate::ecs::EntitySeq(seq),
+                Pos { x, y },
+                TeamComp { team },
+                TurretState::new(std::sync::Arc::new(config)),
+                LiquidModule::with_liquids(liquid_count),
+                PowerModule::new(),
+            ))
+            .id();
+        Some(entity)
+    }
+
+    /// A test turret's state.
+    pub fn turret_state(
+        &self,
+        entity: Entity,
+    ) -> Option<&crate::world::blocks::defense::turrets::TurretState> {
+        self.build.world.get(entity)
+    }
+
+    /// Runs only the turret update pass (M5 fixtures).
+    pub fn update_turrets_only(&mut self) {
+        let mut spawned: Vec<Entity> = Vec::new();
+        {
+            let mut ctx = bullet::CombatCtx {
+                world: &mut self.build.world,
+                content: &self.build.content,
+                grid: &self.build.grid,
+                rng: &mut self.rng,
+                fx: self.fx.as_ref(),
+                seq: &mut self.seq,
+                spawned: &mut spawned,
+            };
+            crate::world::blocks::defense::turrets::update_turrets(&mut ctx);
+        }
+        self.bullets_created += spawned.len() as u64;
+        self.bullets.extend(spawned);
     }
 
     /// Applies area damage to buildings at `(x, y)` (return applied total).
@@ -426,6 +595,14 @@ fn register_fixture_bullets(content: &mut ContentRegistry) -> BTreeMap<String, B
         def.hit_size = 3.0;
         def.drag = 0.0;
     });
+    add("fuse_scale", BulletKind::Basic, &|def| {
+        def.speed = 4.0;
+        def.lifetime = 100.0;
+        def.damage = 10.0;
+        def.hit_size = 4.0;
+        def.scale_life = true;
+        def.drag = 0.0;
+    });
     add("rail", BulletKind::Rail, &|def| {
         def.speed = 12.0;
         def.lifetime = 40.0;
@@ -601,6 +778,9 @@ fn register_fixture_bullets(content: &mut ContentRegistry) -> BTreeMap<String, B
         def.lifetime = 40.0;
         def.damage = 5.0;
     });
+    // Plan 10 owns turret ammo (`Blocks.java` `ammoTypes`); register the M5
+    // `duo` ammo set (the closure above must be dropped first).
+    crate::world::blocks::defense::turrets::register_bullets(content, &mut names);
     // Cross-references (child defs must exist first).
     if let (Some(parent), Some(child)) = (names.get("frag"), names.get("fuse_frag"))
         && let Some(def) = content.bullet_mut(*parent)

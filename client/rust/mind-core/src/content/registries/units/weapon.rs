@@ -69,6 +69,14 @@ pub enum ShootPatternKind {
     ShootSpread = 2,
     /// `ShootHelix` (sine-wave shots).
     ShootHelix = 3,
+    /// `ShootBarrel` (barrel table shots; plan 10 M4 append).
+    ShootBarrel = 4,
+    /// `ShootMulti` (one source pattern driving several dest patterns; plan 10 M4 append).
+    ShootMulti = 5,
+    /// `ShootSine` (sine angle-offset shots; plan 10 M4 append).
+    ShootSine = 6,
+    /// `ShootSummon` (random summon-position shots; plan 10 M4 append).
+    ShootSummon = 7,
 }
 
 impl ShootPatternKind {
@@ -79,6 +87,10 @@ impl ShootPatternKind {
             ShootPatternKind::ShootAlternate => "ShootAlternate",
             ShootPatternKind::ShootSpread => "ShootSpread",
             ShootPatternKind::ShootHelix => "ShootHelix",
+            ShootPatternKind::ShootBarrel => "ShootBarrel",
+            ShootPatternKind::ShootMulti => "ShootMulti",
+            ShootPatternKind::ShootSine => "ShootSine",
+            ShootPatternKind::ShootSummon => "ShootSummon",
         }
     }
 }
@@ -109,6 +121,24 @@ pub struct ShootPatternSpec {
     pub mag: f32,
     /// `ShootHelix.offset` (defaults to `Mathf.PI * 1.25f`).
     pub offset: f32,
+    /// `ShootBarrel.barrels` (`[x, y, rotation]` triples).
+    pub barrel_list: Vec<[f32; 3]>,
+    /// `ShootSine.scl`.
+    pub sine_scl: f32,
+    /// `ShootSine.mag`.
+    pub sine_mag: f32,
+    /// `ShootSummon.x`.
+    pub summon_x: f32,
+    /// `ShootSummon.y`.
+    pub summon_y: f32,
+    /// `ShootSummon.radius`.
+    pub summon_radius: f32,
+    /// `ShootSummon.spread`.
+    pub summon_spread: f32,
+    /// `ShootMulti.source`.
+    pub multi_source: Option<Box<ShootPatternSpec>>,
+    /// `ShootMulti.dest`.
+    pub multi_dest: Vec<ShootPatternSpec>,
 }
 
 impl Default for ShootPatternSpec {
@@ -125,6 +155,15 @@ impl Default for ShootPatternSpec {
             scl: 2.0,
             mag: 1.5,
             offset: std::f32::consts::PI * 1.25,
+            barrel_list: vec![[0.0, 0.0, 0.0]],
+            sine_scl: 4.0,
+            sine_mag: 20.0,
+            summon_x: 0.0,
+            summon_y: 0.0,
+            summon_radius: 0.0,
+            summon_spread: 0.0,
+            multi_source: None,
+            multi_dest: Vec::new(),
         }
     }
 }
@@ -172,11 +211,68 @@ impl ShootPatternSpec {
         }
     }
 
+    /// `new ShootBarrel()` with a barrel table and offset.
+    pub fn barrel(barrels: Vec<[f32; 3]>, barrel_offset: i32) -> Self {
+        Self {
+            kind: ShootPatternKind::ShootBarrel,
+            barrel_list: barrels,
+            barrel_offset,
+            ..Self::default()
+        }
+    }
+
+    /// `new ShootSine(scl, mag)`.
+    pub fn sine(scl: f32, mag: f32) -> Self {
+        Self {
+            kind: ShootPatternKind::ShootSine,
+            sine_scl: scl,
+            sine_mag: mag,
+            ..Self::default()
+        }
+    }
+
+    /// `new ShootSummon(x, y, radius, spread)`.
+    pub fn summon(x: f32, y: f32, radius: f32, spread: f32) -> Self {
+        Self {
+            kind: ShootPatternKind::ShootSummon,
+            summon_x: x,
+            summon_y: y,
+            summon_radius: radius,
+            summon_spread: spread,
+            ..Self::default()
+        }
+    }
+
+    /// `new ShootMulti(source, dest...)`.
+    pub fn multi(source: ShootPatternSpec, dest: Vec<ShootPatternSpec>) -> Self {
+        Self {
+            kind: ShootPatternKind::ShootMulti,
+            multi_source: Some(Box::new(source)),
+            multi_dest: dest,
+            ..Self::default()
+        }
+    }
+
     /// `ShootPattern.flip()` (mirrored weapons): `ShootAlternate` toggles
     /// `mirror`; other vanilla-unit patterns flip nothing (`ShootPattern.java:29`).
     pub fn flip(&mut self) {
-        if self.kind == ShootPatternKind::ShootAlternate {
-            self.mirror = !self.mirror;
+        match self.kind {
+            ShootPatternKind::ShootAlternate => self.mirror = !self.mirror,
+            ShootPatternKind::ShootBarrel => {
+                for barrel in &mut self.barrel_list {
+                    barrel[0] *= -1.0;
+                    barrel[2] *= -1.0;
+                }
+            }
+            ShootPatternKind::ShootMulti => {
+                if let Some(source) = &mut self.multi_source {
+                    source.flip();
+                }
+                for dest in &mut self.multi_dest {
+                    dest.flip();
+                }
+            }
+            _ => {}
         }
     }
 }

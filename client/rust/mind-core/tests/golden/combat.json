@@ -2,6 +2,8 @@
   "scenarios": {
     "combat_basic": "377ce4f14c84b621",
     "combat_bullet_pierce": "3e09539ab47e0fd0",
-    "combat_determinism_first": "076bed2100b7b27c"
+    "combat_determinism_first": "076bed2100b7b27c",
+    "combat_weapon_volley": "8bb803a5e97dc72b",
+    "combat_turret_ammo": "9a62579a5f3d90e5"
   }
 }

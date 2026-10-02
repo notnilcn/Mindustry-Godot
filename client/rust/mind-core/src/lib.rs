@@ -41,6 +41,7 @@ pub mod sim;
 pub mod time;
 pub mod util;
 pub mod version;
+pub mod weapons;
 pub mod world;
 
 /// Version of the `mind-core` crate, taken from `Cargo.toml`.
