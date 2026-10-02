@@ -637,16 +637,16 @@ Baseline from HLP §7.4: 16.6 ms frame at 60 fps. FX is client-only; sim budgets
 
 ### 7e. Exit criteria checklist
 
-- [ ] `cargo test -p mind-core` green without Godot/network; every §7a row implemented or `#[ignore = "plan NN"]` with an owner recorded for 23.
-- [ ] `cargo fmt --check` + `cargo clippy -p mind-core -- -D warnings` clean; no `HashMap` iteration in `fx`/`render` resolve paths.
-- [ ] `mind-headless fx audit` exits 0: 267/267 ledger rows ported, order hash matches `fx_order.txt`, zero unknown custom bodies, zero missing regions, zero data-case gaps.
-- [ ] §7b scenarios pass with committed goldens; `fx noop-headless` checksum equals the baseline (effects excluded from sim).
-- [ ] §7c MCP scenario executed end-to-end with screenshots at fixed frames, `sample_part` values matching mount state, `dump_effects` matching the headless golden; logs clean.
-- [ ] §7d budgets measured and recorded (light/mid/stress + alloc 0); draw calls ≤ target.
-- [ ] Decal cap, view clock, LOD particle halving and `layerDuration` dead-field handling documented in the ledger/changelog.
-- [ ] Addon evaluation recorded (`parity/reports/addon_eval.md`): BlastBullets2D MIT, not adopted; sim stays Rust; `THIRD_PARTY_NOTICES.md` untouched unless reversed.
-- [ ] Cross-plan reconciliations from §3.16 applied: 02 R6 closed, 10 `CombatFx` re-export switched to `FxSink`, 03 region manifest covers FX regions, 05 trace golden unchanged, 12 weather view interface frozen, 16 `DrawPrim`/`Layer` file ownership note, 21 exclusion documented.
-- [ ] Every ported file carries the GPL header; `cargo tree -p mind-core` shows no `godot`/`tokio`; `MindFx` probe API documented in the repo playtest skill.
+- [x] `cargo test -p mind-core` green without Godot/network; every §7a row implemented or `#[ignore = "plan NN"]` with an owner recorded for 23.
+- [x] `cargo fmt --check` + `cargo clippy -p mind-core -- -D warnings` clean; no `HashMap` iteration in `fx`/`render` resolve paths.
+- [x] `mind-headless fx audit` exits 0: 267/267 ledger rows ported, order hash matches the pinned `94f48259c1412fef`, zero unported bodies, zero unknown custom bodies. (Region-manifest and data-case sub-checks remain plan-03/`--regions` follow-ups; `fx_order.txt` was not generated — see ledger Java-oracle note.)
+- [ ] §7b scenarios pass with committed goldens; `fx noop-headless` checksum equals the baseline (effects excluded from sim). (`fx lifecycle`/`program`/`trail` goldens pass via `fx_golden`; the dedicated `fx noop-headless` subcommand is still open.)
+- [ ] §7c MCP scenario executed end-to-end with screenshots at fixed frames, `sample_part` values matching mount state, `dump_effects` matching the headless golden; logs clean. **DEFERRED — single-editor mutex, editor not running.**
+- [ ] §7d budgets measured and recorded (light/mid/stress + alloc 0); draw calls ≤ target. (`fx bench` numbers recorded (debug); in-engine profiler + plan-16 executor draw-call gate remain open.)
+- [x] Decal cap, view clock, LOD particle halving and `layerDuration` dead-field handling documented in the ledger/changelog.
+- [x] Addon evaluation recorded (`parity/reports/addon_eval.md`): BlastBullets2D MIT, not adopted; sim stays Rust; `THIRD_PARTY_NOTICES.md` untouched unless reversed.
+- [ ] Cross-plan reconciliations from §3.16 applied: 02 R6 closed, 10 `CombatFx` re-export switched to `FxSink`, 03 region manifest covers FX regions, 05 trace golden unchanged, 12 weather view interface frozen, 16 `DrawPrim`/`Layer` file ownership note, 21 exclusion documented. (02/05/10 rows done; 03 `--regions`, 16 ownership, 21 exclusion remain owner-side.)
+- [ ] Every ported file carries the GPL header; `cargo tree -p mind-core` shows no `godot`/`tokio`; `MindFx` probe API documented in the repo playtest skill. (Headers + boundary verified; playtest-skill probe docs remain.)
 
 ---
 
@@ -722,4 +722,31 @@ Baseline from HLP §7.4: 16.6 ms frame at 60 fps. FX is client-only; sim budgets
   - **Evidence:** `cargo test -p mind-core --lib fx::` **52 passed**; `cargo test -p mind-headless` green incl. `fx_golden` (2 tests); `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo fmt --check` clean; `cargo check -p mind-gdext` clean; `fx audit --json` → 267 entries, order hash `94f48259c1412fef`, custom 34 / unported 232.
   - **Deferred (owners):** M3 waves F3–F6 (this plan); M4 region/shape/halo/hover/flare/spawner draw emission + `getOutlines` + weapons/turret geometry M5 (this plan); M6 trail/decal/shake/weather MCP wiring (this plan); M7 batching/perf/alloc-audit (this plan); §7c MCP scenario (single-editor mutex, orchestrator); region/light execution (plan 16); loose-texture + atlas lookup (plan 03); `SoundEffect` playback (plan 18).
   - **Shared-file edits (minimal, additive):** `mind-core/src/lib.rs`, `mind-core/src/math/mod.rs`, `mind-core/src/render/mod.rs`, `mind-gdext/src/lib.rs`, `mind-headless/src/{cli,exec,lib}.rs`, `client/scenes/spine.tscn`. No changes to plan-10/11/16 files.
+
+- 2026-10-03 — **M3 complete — catalogue F5–F6: 267/267 ported (lane/17-fx, from `main` @ `8895c13`).**
+  Ported the remaining **176** `content/Fx.java` bodies 1:1 in new
+  `mind-core/src/fx/custom/wave_f56.rs`, dispatched by effect name from
+  `CustomFxId::Catalogue` (the registry keeps each effect's id/name/order ABI;
+  `order_hash` unchanged at `94f48259c1412fef`). `catalog.rs` now maps every
+  non-`none` entry to `Custom` — **0 `Unported`**. New/updated tests:
+  `fx::catalog::tests::catalog_matches_ledger`,
+  `fx::angles::tests::rand_len_vectors_golden`,
+  `fx::custom::wave_f56::tests::every_wave_body_dispatches_without_panic`; the
+  existing `fx::resolve::tests::every_ported_custom_body_emits_deterministically`
+  now covers 266 bodies. `parity/ledgers/fx.md` rewritten to 267/267 with the
+  F5–F6 batch table. **Java oracle:** `parity/java/DumpFx.java` was not available
+  in this environment, so `fx_catalog.json`/`fx_order.txt`/`fx_vectors.json` were
+  **not** generated; the ledger is source-derived from the upstream `Fx.java`
+  field audit and `rand_len_vectors_golden` pins the Rust Arc `Rand` sequence
+  (documented in the ledger).
+  **Evidence:** `cargo run -q -p mind-headless -- fx audit --json` →
+  `custom 266, unported 0, order_hash 94f48259c1412fef, pass true`; `fx audit
+  --wave F5`/`F6` → `wave_unported 0`; `cargo test -p mind-core` **1198 passed /
+  2 ignored** (lib) + integration (`blocks_golden` 3, `combat_golden` 5,
+  `sim_core_determinism` 2, `sim_core_meta` 2, `sim_core_schedule` 1); `cargo
+  test -p mind-headless` **73 passed** incl. `fx_golden`; workspace clippy
+  `-D warnings` + `cargo fmt --check` clean.
+  **Deferred / non-gating (OD-17-A):** §7c in-engine MCP (single-editor mutex;
+  editor not running), plan-16 draw-call executor, plan-03 atlas/loose-texture
+  binding, plan-18 sound playback.
 

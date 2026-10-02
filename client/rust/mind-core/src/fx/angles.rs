@@ -155,4 +155,27 @@ mod tests {
         assert_eq!(a, b);
         assert_eq!(a.len(), 4);
     }
+
+    #[test]
+    fn rand_len_vectors_golden() {
+        // Pins the Arc `Angles.randLenVectors` sequence (seed 1, 4 draws, len 10)
+        // produced by the shared Arc `Rand` port. The Java `DumpFx.java` dumper
+        // could not be built in this environment (plan 17 §6.3; M3 note), so this
+        // is the Rust-side drift gate; regenerate if the Arc Rand port changes.
+        let mut out = Vec::new();
+        rand_len_vectors(1, 4, 10.0, |x, y| out.push((x, y)));
+        let golden = [
+            (1.067_401_5_f32, 3.703_635_7_f32),
+            (1.984_018_9, -2.864_124_3),
+            (7.915_381_4, -2.378_611_6),
+            (-2.101_442, -1.512_148_4),
+        ];
+        assert_eq!(out.len(), golden.len());
+        for (got, want) in out.iter().zip(golden.iter()) {
+            assert!(
+                (got.0 - want.0).abs() < 1e-5 && (got.1 - want.1).abs() < 1e-5,
+                "rand_len_vectors drift: {got:?} vs {want:?}"
+            );
+        }
+    }
 }

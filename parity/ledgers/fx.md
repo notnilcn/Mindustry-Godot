@@ -15,9 +15,9 @@ classification totals, and the order hash).
 | `none` | 1 (id 0, rejected by `shouldCreate`) |
 | Declarative kinds | 0 in the **vanilla** catalogue (see note) |
 | Composite kinds | 0 in the **vanilla** catalogue (see note) |
-| Custom Rust bodies | 90 |
-| Unported | 176 |
-| Ported | 90/267 |
+| Custom Rust bodies | 266 |
+| Unported | 0 |
+| Ported | 267/267 |
 
 **Note (upstream fact, plan 17 R-17-11):** every field in `content/Fx.java` is a
 plain `new Effect(lifetime, Cons)` construction — a grep for
@@ -94,11 +94,32 @@ Transcribed 1:1 from `content/Fx.java`; all emit deterministically (asserted by
 | hitSquaresColor / hitFuse / hitFlamePlasma / hitLaserBlast / hitEmpSpark / hitLancer / hitLancerLow / hitBeam / hitFlameBeam / hitMeltdown / hitMeltHeal | hit family |
 | instBomb / instTrail / instShoot / instHit | instigator bullet family |
 
-## Unported (176)
+## Batch F5–F6 (plan 17 M3, 176 more bodies)
 
-Waves F3–F6 remain. Each is currently `EffectKind::Unported` (emits nothing and
-is counted by `fx audit`). They are **not** silently dropped: `fx audit --strict`
-fails while any remain, and `MindFx.effect_kind_counts()` reports the count.
+All remaining vanilla effects are ported in
+`mind-core::fx::custom::wave_f56` (dispatched by effect name from
+`CustomFxId::Catalogue`; the registry keeps each effect's id/name). Transcribed
+1:1 from `content/Fx.java`, grouped by shape: unit cap/env kill, core upgrade,
+wreck/assemble, the `*Smoke` / `*Vapor` / `*Trail` particle families, the status
+overlays (`freezing`…`overclocked`), the shockwave family, the three
+dynamic/reactor/impact explosions, the `shoot*` muzzle family, the casing
+family, rail/lancer/lightning/spark shots, the production block bodies
+(`smelt`/`pulverize`/`mine*`/`door*`/`generate`), teleport/ripple/bubble,
+heal/overdrive/shield blocks, dust, `shieldBreak`/`arcShieldBreak`/
+`unitShieldBreak`, `chainLightning`/`chainEmp`, `legDestroy`, and
+`debugLine`/`debugRect`.
+
+Determinism is asserted for every ported custom body by
+`fx::resolve::tests::every_ported_custom_body_emits_deterministically` (≥80
+bodies; currently 266) and dispatch safety by
+`fx::custom::wave_f56::tests::every_wave_body_dispatches_without_panic`.
+
+**Java oracle note:** `parity/java/DumpFx.java`/`fx_catalog.json`/
+`fx_vectors.json` were not generated — the dumper was not available in this
+environment (no runnable upstream/Mindustry Java harness here). The committed
+`fx` ledger and the image is derived from the upstream `Fx.java` field audit
+(267 fields, source-read) and pinned by `catalog_matches_ledger` +
+`rand_len_vectors_golden` (Rust Arc `Rand` drift gate).
 
 ## Deliberate deviations (recorded)
 

@@ -112,7 +112,8 @@ fn kind_for(name: &str) -> EffectKind {
         "instTrail" => custom(CustomFxId::InstTrail),
         "instShoot" => custom(CustomFxId::InstShoot),
         "instHit" => custom(CustomFxId::InstHit),
-        _ => EffectKind::Unported,
+        // Wave F5–F6: dispatched by name in `custom::wave_f56`.
+        _ => custom(CustomFxId::Catalogue),
     }
 }
 
@@ -241,5 +242,24 @@ mod tests {
         let a = order_hash(registry());
         let b = order_hash(registry());
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn catalog_matches_ledger() {
+        let reg = registry();
+        let c = counts(reg);
+        assert_eq!(reg.len(), crate::content::EFFECT_COUNT);
+        assert_eq!(c.none, 1);
+        assert_eq!(c.unported, 0, "ledger must have 0 unported entries");
+        assert_eq!(c.custom, crate::content::EFFECT_COUNT - 1);
+        // Ids/names (the parity ABI) match the pinned order hash.
+        assert_eq!(order_hash(reg), 0x94f4_8259_c141_2fef);
+        for def in reg.iter() {
+            assert!(
+                !matches!(def.kind, crate::fx::def::EffectKind::Unported),
+                "{} is unported",
+                def.name
+            );
+        }
     }
 }

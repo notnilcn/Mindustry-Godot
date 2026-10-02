@@ -9,6 +9,7 @@
 
 pub mod basic;
 mod emit;
+pub mod wave_f56;
 
 pub use emit::FxEmit;
 
@@ -199,6 +200,10 @@ pub enum CustomFxId {
     InstShoot,
     /// `Fx.instHit`.
     InstHit,
+    /// Wave F5–F6 dispatcher: the body is selected by effect name at render
+    /// time (`wave_f56::dispatch`). Keeps the registry id/name ABI while sharing
+    /// one function-pointer entry for the remaining one-off bodies.
+    Catalogue,
 }
 
 /// A custom body function.
@@ -297,7 +302,14 @@ pub fn dispatch(id: CustomFxId) -> CustomBody {
         CustomFxId::InstTrail => basic::inst_trail,
         CustomFxId::InstShoot => basic::inst_shoot,
         CustomFxId::InstHit => basic::inst_hit,
+        CustomFxId::Catalogue => catalogue_body,
     }
+}
+
+/// Dispatches a wave F5–F6 body by the live effect's catalogue name.
+pub fn catalogue_body(emit: &mut FxEmit, e: &EffectContainer, snap: &dyn ViewSnapshot) {
+    let name = super::def::registry().get(e.id).name;
+    wave_f56::dispatch(name, emit, e, snap);
 }
 
 #[cfg(test)]
