@@ -166,6 +166,13 @@ pub enum Command {
         command: WorldCommand,
     },
 
+    /// Map registry inspection (plan 06 §7b).
+    Maps {
+        /// Map subcommand.
+        #[command(subcommand)]
+        command: MapsCommand,
+    },
+
     /// Audio state-machine and event inspection (plan 18).
     Audio {
         /// Audio subcommand.
@@ -219,6 +226,21 @@ pub enum WorldCommand {
         /// Write the final JSON report here.
         #[arg(long)]
         dump: Option<PathBuf>,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+/// `maps` subcommands (plan 06 §7b).
+#[derive(Debug, Subcommand)]
+pub enum MapsCommand {
+    /// Meta-only listing of a map/save directory, sorted per `Map.compareTo`
+    /// (corrupt entries skipped with a warning).
+    List {
+        /// Directory to list.
+        #[arg(long, default_value = "tests/fixtures/maps")]
+        dir: PathBuf,
         /// Emit a machine-readable JSON report on stdout.
         #[arg(long)]
         json: bool,

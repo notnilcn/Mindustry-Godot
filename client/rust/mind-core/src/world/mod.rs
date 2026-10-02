@@ -39,7 +39,10 @@ pub use events::{
     TileChangeEvent, TileFloorChangeEvent, TileOverlayChangeEvent, TilePreChangeEvent,
     WorldLoadBeginEvent, WorldLoadEndEvent, WorldLoadEvent,
 };
-pub use hooks::{NewBuilding, NoopRenderHooks, NoopWorldHooks, RenderHooks, WorldHooks};
+pub use hooks::{
+    MapGenHooks, NewBuilding, NoopMapGenHooks, NoopRenderHooks, NoopWorldHooks, RenderHooks,
+    WorldHooks,
+};
 pub use ops::{WorldCtx, WorldEventLog};
 pub use params::WorldParams;
 pub use pos::TilePos;

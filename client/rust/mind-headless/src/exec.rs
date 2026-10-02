@@ -20,8 +20,8 @@ use mind_core::sim::{Sim, StateDump};
 use mind_core::world::TilePos;
 
 use crate::cli::{
-    AssetsCommand, Cli, Command, ContentCommand, IoCommand, MetaCommand, ModsCommand, TraceCommand,
-    WorldCommand,
+    AssetsCommand, Cli, Command, ContentCommand, IoCommand, MapsCommand, MetaCommand, ModsCommand,
+    TraceCommand, WorldCommand,
 };
 use crate::paths;
 use crate::registry;
@@ -188,6 +188,9 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
                 dump,
                 json,
             } => cmd_world_multiblock(*size, block, dump.as_deref(), *json),
+        },
+        Command::Maps { command } => match command {
+            MapsCommand::List { dir, json } => cmd_maps_list(dir, *json),
         },
         Command::Audio { command } => crate::audio_scenarios::run(command),
         Command::Mods { command } => match command {
@@ -2412,6 +2415,60 @@ fn cmd_world_tile_ops(
         );
         Ok(EXIT_FAIL)
     }
+}
+
+fn cmd_maps_list(dir: &Path, json: bool) -> anyhow::Result<i32> {
+    use mind_core::io::fs::NativeFs;
+    use mind_core::maps::Maps;
+
+    if !dir.is_dir() {
+        return Err(anyhow!("`{}` is not a directory", dir.display()));
+    }
+    let fs = NativeFs;
+    let mut maps = Maps::new();
+    let loaded = maps.load_from_dir(&fs, dir, true);
+
+    let entries: Vec<serde_json::Value> = maps
+        .all()
+        .iter()
+        .map(|map| {
+            serde_json::json!({
+                "name": map.name(),
+                "author": map.author(),
+                "description": map.description(),
+                "custom": map.custom,
+                "width": map.width,
+                "height": map.height,
+                "version": map.version,
+                "build": map.build,
+                "file": map.file.display().to_string(),
+            })
+        })
+        .collect();
+
+    let report = serde_json::json!({
+        "format": 1,
+        "generator": "maps_list",
+        "dir": dir.display().to_string(),
+        "count": loaded,
+        "maps": entries,
+    });
+    let text = serde_json::to_string_pretty(&report)?;
+    if json {
+        println!("{text}");
+    } else {
+        for map in maps.all() {
+            println!(
+                "{} ({}x{}, custom={})",
+                map.name(),
+                map.width,
+                map.height,
+                map.custom
+            );
+        }
+        println!("{} maps", maps.len());
+    }
+    Ok(EXIT_PASS)
 }
 
 fn cmd_world_multiblock(
