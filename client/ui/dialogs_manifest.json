@@ -1,7 +1,8 @@
 {
   "format": 1,
   "dialogs": [
-    {"name": "about", "scene": "res://scenes/ui/dialogs/about_dialog.tscn", "pause": false, "menu_openable": true, "args": []}
+    {"name": "about", "scene": "res://scenes/ui/dialogs/about_dialog.tscn", "pause": false, "menu_openable": true, "args": []},
+    {"name": "widget_gallery", "scene": "res://scenes/ui/dialogs/widget_gallery.tscn", "pause": false, "menu_openable": false, "args": []}
   ],
   "fragments": [
     {"name": "menu", "scene": "res://scenes/ui/fragments/menu_fragment.tscn", "group": "menu"}

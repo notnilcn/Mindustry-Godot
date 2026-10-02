@@ -87,6 +87,70 @@ static func space(width: float, height: float) -> Control:
 	return result
 
 
+static func bar(bar_name: String, color: Color, fraction: float) -> MindBar:
+	var result := MindBar.new()
+	result.setup(bar_name, color, fraction)
+	return result
+
+
+static func warning_bar() -> MindWarningBar:
+	return MindWarningBar.new()
+
+
+static func grid_image(w: int, h: int) -> MindGridImage:
+	return MindGridImage.new(w, h)
+
+
+static func border_image(region_name: String) -> MindBorderImage:
+	var result := MindBorderImage.new()
+	result.texture = icon_texture(region_name)
+	return result
+
+
+static func check(text_value: String, is_checked: bool, listener: Callable = Callable()) -> MindCheck:
+	var result := MindCheck.new()
+	result.setup(text_value, is_checked, listener)
+	return result
+
+
+static func mobile_button(icon_region: String, text_value: String, listener: Callable) -> MindMobileButton:
+	var result := MindMobileButton.new()
+	result.setup(icon_region, text_value, listener)
+	return result
+
+
+static func req_image(image: Control, valid: Callable) -> MindReqImage:
+	var result := MindReqImage.new()
+	result.setup(image, valid)
+	return result
+
+
+static func items_display() -> ItemsDisplay:
+	return ItemsDisplay.new()
+
+
+static func core_items_display() -> CoreItemsDisplay:
+	return CoreItemsDisplay.new()
+
+
+## Tween helpers (`arc.scene.actions.Actions` equivalents).
+static func fade_in(node: CanvasItem, duration: float = 0.1) -> void:
+	node.modulate.a = 0.0
+	var tween := node.create_tween()
+	tween.tween_property(node, "modulate:a", 1.0, duration)
+
+
+static func fade_out(node: CanvasItem, duration: float = 0.1) -> void:
+	var tween := node.create_tween()
+	tween.tween_property(node, "modulate:a", 0.0, duration)
+
+
+static func remove_after(node: Node, delay: float) -> void:
+	var tween := node.create_tween()
+	tween.tween_interval(delay)
+	tween.tween_callback(node.queue_free)
+
+
 ## Resolves an atlas region through the `MindAssets` autoload (null when absent).
 static func icon_texture(region_name: String) -> Texture2D:
 	var assets := assets()
