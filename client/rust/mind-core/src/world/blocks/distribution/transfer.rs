@@ -213,12 +213,48 @@ pub fn proximity(world: &World, e: Entity) -> Vec<Entity> {
 
 /// The same-team building adjacent in direction `rotation` via the tile index.
 ///
-/// `Building.front()` is the building occupying the tile in the facing
-/// direction; using [`nearby`] here handles multiblock neighbors whose center
-/// tile is not itself adjacent (their footprint edge is).
+/// `Building.front()` (`BuildingComp.java:556`) offsets by `size/2 + 1` tiles
+/// from the center, so multiblock fronts (e.g. the 3x3 payload loader) land on
+/// the actual facing edge rather than inside their own footprint. Size-1 blocks
+/// are unchanged.
 pub fn front(world: &World, e: Entity) -> Option<Entity> {
-    let rotation = world.get::<Building>(e)?.rotation;
-    nearby(world, e, rotation)
+    edge_neighbor(world, e, 0)
+}
+
+/// The building at `size/2 + 1` tiles from `e`'s center, looking along `rel`
+/// (`0 = front`, `2 = back`).
+fn edge_neighbor(world: &World, e: Entity, rel: u8) -> Option<Entity> {
+    let building = world.get::<Building>(e)?;
+    let trns = edge_offset(world, e);
+    let dir = (building.rotation + rel) % 4;
+    let (dx, dy) = super::super::autotiler::d4(dir);
+    let x = building.tile.x() as i32 + dx * trns;
+    let y = building.tile.y() as i32 + dy * trns;
+    if let Some(index) = world.get_resource::<crate::world::TileBuilds>()
+        && !index.cells.is_empty()
+    {
+        return index.get(x, y).filter(|other| *other != e);
+    }
+    // Fallback (no grid mirror): nearest proximity center in that direction.
+    building
+        .proximity
+        .iter()
+        .copied()
+        .find(|other| relative_dir(world, e, *other) == dir as i8)
+}
+
+/// `Building.offset` in tiles from the center to a facing edge (`size/2 + 1`).
+fn edge_offset(world: &World, e: Entity) -> i32 {
+    let Some(block) = world.get::<Building>(e).map(|b| b.block) else {
+        return 1;
+    };
+    world
+        .get_resource::<BlockTable>()
+        .and_then(|table| table.get(block).map(|inst| inst.def.size))
+        .unwrap_or(1)
+        .max(1)
+        / 2
+        + 1
 }
 
 /// Direction from `e` toward `other` (`Building.relativeTo(Building)`), or `-1`.
@@ -256,10 +292,9 @@ pub fn nearby(world: &World, e: Entity, dir: u8) -> Option<Entity> {
     None
 }
 
-/// `Building.front()` (the `rotation` neighbor).
+/// `Building.back()` (the `rotation + 2` neighbor at the facing-edge distance).
 pub fn back(world: &World, e: Entity) -> Option<Entity> {
-    let rotation = world.get::<Building>(e)?.rotation;
-    nearby(world, e, (rotation + 2) % 4)
+    edge_neighbor(world, e, 2)
 }
 
 /// `Building.relativeToEdge(Tile other)`: direction from the facing edge of

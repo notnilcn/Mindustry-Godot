@@ -546,6 +546,159 @@ fn scenario(name: &str, json: bool) -> Result<()> {
                 bail!("scenario {name} failed");
             }
         }
+        "logistics_payload_load_unload" => {
+            use mind_core::world::blocks::payloads::{
+                PayloadHolder, create_build_payload, handle_payload,
+            };
+            // `--assume-power`: cheat rules give full consumer efficiency
+            // without a power graph (plan 08 M7 verify).
+            if let Some(mut rules) = harness
+                .world
+                .get_resource_mut::<mind_core::world::limits::BuildRules>()
+            {
+                rules.cheat = true;
+            }
+            let container = block(&harness, "container")?;
+            let loader = block(&harness, "payload-loader")?;
+            let unloader = block(&harness, "payload-unloader")?;
+            let copper = harness.content().item_id("copper");
+            let _ = harness.place(6, 6, loader, 0, true);
+            let _ = harness.place(6, 18, unloader, 0, true);
+            let loader_e = harness.build_at(6, 6);
+            let unloader_e = harness.build_at(6, 18);
+            let payload_entity = create_build_payload(&mut harness.world, container, 0);
+            let mut attached = false;
+            if let (Some(load_e), Some(entity), Some(copper)) = (loader_e, payload_entity, copper) {
+                if let Some(mut items) = harness
+                    .world
+                    .get_mut::<mind_core::world::modules::ItemModule>(load_e)
+                {
+                    items.add(copper, 20, 1000);
+                }
+                let payload = mind_core::world::behavior::PayloadRef {
+                    entity: Some(entity),
+                    content: container.raw(),
+                    is_block: true,
+                };
+                handle_payload(&mut harness.world, load_e, load_e, payload);
+                attached = true;
+            }
+            for _ in 0..600 {
+                harness.tick();
+            }
+            let loaded_payload_total = payload_entity
+                .and_then(|e| {
+                    harness
+                        .world
+                        .get::<mind_core::world::modules::ItemModule>(e)
+                })
+                .map(|m| m.total())
+                .unwrap_or(0);
+            let loader_total = loader_e
+                .and_then(|e| {
+                    harness
+                        .world
+                        .get::<mind_core::world::modules::ItemModule>(e)
+                })
+                .map(|m| m.total())
+                .unwrap_or(0);
+
+            // Hand the (now item-filled) payload to the unloader and drain it.
+            let held = loader_e
+                .and_then(|e| harness.world.get::<PayloadHolder>(e))
+                .and_then(|h| h.payload);
+            if let (Some(load_e), Some(unload_e), Some(payload)) = (loader_e, unloader_e, held) {
+                if let Some(mut holder) = harness.world.get_mut::<PayloadHolder>(load_e) {
+                    holder.payload = None;
+                }
+                handle_payload(&mut harness.world, unload_e, unload_e, payload);
+            }
+            for _ in 0..600 {
+                harness.tick();
+            }
+            let unloader_total = unloader_e
+                .and_then(|e| {
+                    harness
+                        .world
+                        .get::<mind_core::world::modules::ItemModule>(e)
+                })
+                .map(|m| m.total())
+                .unwrap_or(0);
+            let payload_after = payload_entity
+                .and_then(|e| {
+                    harness
+                        .world
+                        .get::<mind_core::world::modules::ItemModule>(e)
+                })
+                .map(|m| m.total())
+                .unwrap_or(0);
+            let loaded = attached && loaded_payload_total == 20 && loader_total == 0;
+            let unloaded = unloader_total + payload_after == 20 && payload_after == 0;
+            let pass = loaded && unloaded;
+            let report = serde_json::json!({
+                "scenario": name,
+                "pass": pass,
+                "loaded_payload_total": loaded_payload_total,
+                "loader_total": loader_total,
+                "unloader_total": unloader_total,
+                "payload_after": payload_after,
+                "checksum": mind_core::world::fixtures::logistics::logistics_checksum(&harness.world).to_hex(),
+            });
+            print_json(&report, json, !json);
+            if !pass {
+                bail!("scenario {name} failed");
+            }
+        }
+        "logistics_payload_driver_throw" => {
+            use mind_core::world::blocks::payloads::{
+                PayloadHolder, create_build_payload, handle_payload,
+            };
+            if let Some(mut rules) = harness
+                .world
+                .get_resource_mut::<mind_core::world::limits::BuildRules>()
+            {
+                rules.cheat = true;
+            }
+            let container = block(&harness, "container")?;
+            let driver = block(&harness, "payload-mass-driver")?;
+            let placed_from = harness.place(6, 6, driver, 0, true);
+            let placed_to = harness.place(18, 6, driver, 0, true);
+            let linked_from = harness.configure(6, 6, ConfigValue::Point2(12, 0));
+            let linked_to = harness.configure(18, 6, ConfigValue::Point2(-12, 0));
+            let from = harness.build_at(6, 6);
+            let to = harness.build_at(18, 6);
+            let payload_entity = create_build_payload(&mut harness.world, container, 0);
+            if let (Some(from), Some(entity)) = (from, payload_entity) {
+                let payload = mind_core::world::behavior::PayloadRef {
+                    entity: Some(entity),
+                    content: container.raw(),
+                    is_block: true,
+                };
+                handle_payload(&mut harness.world, from, from, payload);
+            }
+            for _ in 0..3000 {
+                harness.tick();
+            }
+            let delivered = to
+                .and_then(|e| harness.world.get::<PayloadHolder>(e))
+                .is_some_and(|h| h.payload.is_some());
+            let consumed = from
+                .and_then(|e| harness.world.get::<PayloadHolder>(e))
+                .is_some_and(|h| h.payload.is_none());
+            let pass =
+                placed_from && placed_to && linked_from && linked_to && delivered && consumed;
+            let report = serde_json::json!({
+                "scenario": name,
+                "pass": pass,
+                "delivered": delivered,
+                "source_empty": consumed,
+                "checksum": mind_core::world::fixtures::logistics::logistics_checksum(&harness.world).to_hex(),
+            });
+            print_json(&report, json, !json);
+            if !pass {
+                bail!("scenario {name} failed");
+            }
+        }
         "proximity_multiblock" => {
             let wall = block(&harness, "copper-wall")?;
             let _ = harness.place(4, 4, wall, 0, true);
@@ -695,6 +848,27 @@ fn bench(profile: &str, buildings: usize, ticks: u64, json: bool) -> Result<()> 
                 samples.push(start.elapsed().as_nanos() as u64 / 1000);
             }
             detail = serde_json::json!({ "placed": placed });
+        }
+        "logistics" => {
+            let conveyor = block(&harness, "conveyor")?;
+            let router = block(&harness, "router")?;
+            let copper = harness.content().item_id("copper");
+            for i in 0..buildings {
+                let x = (i % 45) as i32 * 2;
+                let y = (i / 45) as i32 * 2;
+                let block_id = if i % 8 == 7 { router } else { conveyor };
+                if harness.place(x, y, block_id, 0, true) {
+                    placed += 1;
+                    if let Some(e) = harness.build_at(x, y)
+                        && let Some(copper) = copper
+                        && let Some(mut items) = harness.world.get_mut::<ItemModule>(e)
+                    {
+                        items.add(copper, 3, 1000);
+                    }
+                }
+            }
+            time_ticks(&mut harness, ticks, &mut samples);
+            detail = serde_json::json!({ "placed": placed, "logistics": true });
         }
         "active" => {
             let smelter = block(&harness, "silicon-smelter")?;

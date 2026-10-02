@@ -1,0 +1,12 @@
+{
+  "logistics_smoke": "f5c005f78e993ac1",
+  "logistics_conveyor_lane": "5d627616f619347c",
+  "logistics_router_fairness": "15a253134aa28a4b",
+  "logistics_bridge_latency": "ddf710e6fbd2337a",
+  "logistics_mass_driver_roundtrip": "7a04dfa9cb8c13e1",
+  "logistics_unloader_drain": "b76379c35ecbbede",
+  "logistics_core_inventory": "b1fcddb3aec86f29",
+  "logistics_payload_move": "08a186a649b693e7",
+  "logistics_payload_load_unload": "08303498b697ea6e",
+  "logistics_payload_driver_throw": "a60fa1bc8cd3af62"
+}

@@ -80,6 +80,35 @@ pub fn logistics_checksum(world: &World) -> Checksum {
         } else {
             c.part(&0u8);
         }
+        if let Some(holder) = world.get::<crate::world::blocks::payloads::PayloadHolder>(entity) {
+            c.part(&3u8);
+            match holder.payload {
+                Some(payload) => {
+                    c.part(&1u8);
+                    c.part(&payload.is_block);
+                    c.part(&payload.content);
+                    c.part(&payload.entity.map(|e| e.to_bits()).unwrap_or(u64::MAX));
+                }
+                None => c.part(&0u8),
+            }
+            c.part(&holder.pay_vector.0.to_bits());
+            c.part(&holder.pay_vector.1.to_bits());
+            c.part(&holder.pay_rotation.to_bits());
+            c.part(&holder.carried);
+        }
+        if let Some(driver) =
+            world.get::<crate::world::blocks::payloads::payload_mass_driver::PayloadDriverBuild>(
+                entity,
+            )
+        {
+            c.part(&4u8);
+            c.part(&driver.link);
+            c.part(&driver.turret_rotation.to_bits());
+            c.part(&driver.reload_counter.to_bits());
+            c.part(&driver.charge.to_bits());
+            c.part(&driver.loaded);
+            c.part(&(driver.state as u8));
+        }
     }
     c.finish()
 }

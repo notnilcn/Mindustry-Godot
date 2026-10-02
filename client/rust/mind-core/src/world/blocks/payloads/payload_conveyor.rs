@@ -58,17 +58,23 @@ impl PayloadConveyorBehavior {
         move_time: 45.0,
         payload_limit: 3.0,
     };
+    /// `reinforced-payload-conveyor` (`moveTime = 35`).
+    pub const REINFORCED: PayloadConveyorBehavior = PayloadConveyorBehavior {
+        move_time: 35.0,
+        payload_limit: 3.0,
+    };
 }
 
-fn tile_entity(world: &World, x: i32, y: i32) -> Option<Entity> {
+pub(crate) fn tile_entity(world: &World, x: i32, y: i32) -> Option<Entity> {
     world.get_resource::<TileBuilds>()?.get(x, y)
 }
 
-fn ntrns(size: i32) -> i32 {
+pub(crate) fn ntrns(size: i32) -> i32 {
     size / 2 + 1
 }
 
-fn resolve_next(world: &World, e: Entity) -> Option<Entity> {
+/// Resolves the aligned `next` payload conveyor (`PayloadConveyor.onProximityUpdate`).
+pub(crate) fn resolve_next(world: &World, e: Entity) -> Option<Entity> {
     let building = world.get::<Building>(e)?;
     let table = world.get_resource::<BlockTable>()?;
     let size = table.get(building.block)?.def.size.max(1);
