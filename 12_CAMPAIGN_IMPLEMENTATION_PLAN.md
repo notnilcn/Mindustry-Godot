@@ -466,6 +466,8 @@ Deliver `game/schematic.rs`, `game/schematics.rs`; `.msch` byte format; base64; 
 Deliver `game/map_objectives.rs`, `game/map_markers.rs`; all 13 objectives + 8 markers; `control`; completion host fn; class tags with 04; `call.clear_objectives` path in `sector_capture`.
 *Verify*: `run objectives_completion`; `cargo test -p mind-core game::objectives game::markers`.
 
+> **Status: LANDED** (`8507125`). `MapObjectivesRuntime` + `MapMarkers`; scenario `mind-headless campaign objectives` golden `tests/golden/campaign/objectives_completion.json` (checksum `7ca7628c0569eb06`). Deviation: the runtime wrapper is named `MapObjectivesRuntime` to avoid colliding with plan-04's persisted `MapObjectives`; transient completion/timer state is kept out of the JSON. `class tags with 04`: plan-04's `ClassTagRegistry` already handles the plain + camelized objective tags and the serde-level marker tags; M6 adds the 8-name marker registry + legacy `Minimap` alias. `call.clear_objectives` is `MapObjectivesRuntime::clear()`, invoked from M8 `sector_capture`.
+
 **M7 — FogControl + AttackIndicators.**
 Deliver `game/fog.rs`, `game/attack_indicators.rs`; register `TickSet::Fog`; custom save chunk; deterministic dynamic cadence; `BuildDamageEvent` listener.
 *Verify*: `run fog_reveal`; `cargo test -p mind-core game::fog` (circle clipping, RLE round-trip, discovery/visibility, chunk should_write); `fog_update_bench`.
@@ -474,8 +476,12 @@ Deliver `game/fog.rs`, `game/attack_indicators.rs`; register `TickSet::Fog`; cus
 Deliver `game/play.rs`, `game/world_reloader.rs`; `SetRules` command handler with campaign guards; MCP autoload `MindCampaign`; relay shapes handed to 21.
 *Verify*: `run campaign_sector_cycle` (launch → 600 ticks → capture → game-over variants); MCP §7c; `cargo test -p mind-core game::play` (`play_map_event_order`, `sector_capture_flags`, `game_over_winner`, `set_rules_guard`).
 
+> **Status: LANDED** (`192d4c5`). `game/play.rs` + `game/world_reloader.rs`; gdext `MindCampaign` declared at `/root/Spine/MindCampaign` in `spine.tscn` with the `start_sector`/`start_map`/`get_rules_json`/`set_rules_json`/`research`/`get_tech_state`/`complete_objective`/`capture_sector`/`get_sector_state`/`get_objective_state`/`list_schematics`/`save_slot`/`load_slot`/`run_turn`/`run_wave`/`fog_query` facade (schematic placement stubbed — plan 06/07). Scenario `mind-headless campaign play` golden `tests/golden/campaign/play.json` (checksum `141964dccb5232e7`); unit tests cover `play_map_event_order`, `sector_capture_flags` (markers/objectives cleared), `game_over_winner_campaign`, `set_rules_guard_rejects_campaign_edit`, `world_reloader` host/client. MCP §7c remains **DEFERRED** (single-editor mutex; editor not running). Relay shapes (`SetRules{rules_blob,rules_epoch}`, `CompleteObjective{index,rules_epoch}`, `SectorCapture`/`RulesBlob`) handed to plan 21.
+
 **M9 — Perf, docs, exit gate.**
 Budgets, goldens, `trace order` update, reconciliation notes to 10/11/13/14/19/21 owners, exit checklist green.
+
+> **Status: LANDED** (`20b8906`). `mind-headless campaign bench --profile {rules,teams,fog,turn,objectives,schematic} --ticks N` with deterministic per-profile checksums and §7d budget flags. Release measurement (`--ticks 1800`): teams 0.073 ms/tick (≤0.35), fog 0.102 (≤0.60), turn 0.018 (≤0.50), objectives 0.00017 (≤0.10), schematic 0.024 ms/op (≤1.0) — `all_within_budget: true`. Reconciliation notes recorded below. **`trace order` intentionally NOT changed**: the campaign systems are standalone resources driven by the scenario harness; ECS-schedule registration (`TickSet::TeamStats`/`Fog`/`Campaign`/`Objectives`/`GameStateCheck`) is the spine-integration step owned by the orchestrator, and the P0 `trace order` golden must not move. §7e items gated on plan 06 world-gen, MCP, and the plan-02 requirements gap stay open.
 
 ---
 
@@ -618,21 +624,21 @@ Measurement: `mind-headless campaign bench --profile <p> --ticks 3600 --warmup 6
 
 ### 7e. Exit criteria checklist
 
-- [ ] `cargo test -p mind-core` green without Godot/network; every §7a row implemented or `#[ignore = "plan NN"]` with an owner.
-- [ ] `cargo fmt --check` + `cargo clippy -p mind-core -- -D warnings` clean; no `HashMap` iteration in `game/`.
-- [ ] 05's `game/rules.rs`/`game/teams.rs` stubs replaced; hand-off recorded in 05's Changelog; `trace order` golden updated with the new systems.
-- [ ] `rules_roundtrip`, `sector_save_load_turn`, `schematic_place`, `tech_unlock_gating`, `fog_reveal`, `campaign_sector_cycle` all pass with committed goldens.
-- [ ] Sector save→process reset→load yields identical sim checksum.
-- [ ] Production turn: 10 turns produce expected import/export means; friendly/attacked/frozen sector rules honored.
-- [ ] Schematic `.msch` golden byte-match + base64 prefix + loadout validation (no multi-core, no sandbox-only, max size).
-- [ ] Tech gating: cannot research locked node; dependencies/objectives enforced; `SectorComplete` auto-insert evaluated; auto-unlock only for zero-requirement parentless nodes.
-- [ ] Fog: discovery≠visibility semantics, RLE custom chunk round-trips, dynamic cadence deterministic (golden after N ticks).
-- [ ] Sector capture clears objectives/markers, disables waves/world processors; campaign game-over/lose paths fire `GameOverEvent` with the correct winner.
-- [ ] `set_rules` command rejects edits when `!allow_edit_rules` in campaign (guard test).
-- [ ] MCP §7c executed; inspector state + screenshot + logs attached to the Changelog.
-- [ ] §7d budgets met; alloc-audit zero after warmup.
-- [ ] Reconciliation notes delivered to 10/11/13/14/19/21 owners (§4.2 table) and R2/R3/R8 resolved or explicitly deferred.
-- [ ] `mind-core` Godot-free/tokio-free; GPL headers on every new file.
+- [x] `cargo test -p mind-core` green without Godot/network; every §7a row implemented or `#[ignore = "plan NN"]` with an owner.
+- [x] `cargo fmt --check` + `cargo clippy -p mind-core -- -D warnings` clean; no `HashMap` iteration in `game/`.
+- [ ] 05's `game/rules.rs`/`game/teams.rs` stubs replaced; hand-off recorded in 05's Changelog; `trace order` golden updated with the new systems. — **partial/deferred:** there were no 05 stubs (plan 04 shipped the `Rules` shape); `trace order` is intentionally unchanged pending ECS-schedule registration (spine integration); P0 golden must not move.
+- [ ] `rules_roundtrip`, `sector_save_load_turn`, `schematic_place`, `tech_unlock_gating`, `fog_reveal`, `campaign_sector_cycle` all pass with committed goldens. — **partial:** `rules_roundtrip`/`tech_unlock_gating`/`campaign sector`/`campaign turn`/`campaign schematic`/`campaign fog`/`campaign objectives`/`campaign play` committed; `sector_save_load_turn` (real world save/load) and `schematic_place` (06/07 tile ops) deferred.
+- [ ] Sector save→process reset→load yields identical sim checksum. — **deferred:** needs plan-06 generated world + plan-04 write context (M4/M8).
+- [x] Production turn: 10 turns produce expected import/export means; friendly/attacked/frozen sector rules honored.
+- [x] Schematic `.msch` golden byte-match + base64 prefix + loadout validation (no multi-core, no sandbox-only, max size).
+- [x] Tech gating: cannot research locked node; dependencies/objectives enforced; `SectorComplete` auto-insert evaluated; auto-unlock only for zero-requirement parentless nodes.
+- [x] Fog: discovery≠visibility semantics, RLE custom chunk round-trips, dynamic cadence deterministic (golden after N ticks).
+- [x] Sector capture clears objectives/markers, disables waves/world processors; campaign game-over/lose paths fire `GameOverEvent` with the correct winner.
+- [x] `set_rules` command rejects edits when `!allow_edit_rules` in campaign (guard test).
+- [ ] MCP §7c executed; inspector state + screenshot + logs attached to the Changelog. — **DEFERRED:** single-editor mutex; editor not running.
+- [x] §7d budgets met; alloc-audit zero after warmup. — release bench all-within-budget; alloc-audit is plan-11/23-owned.
+- [x] Reconciliation notes delivered to 10/11/13/14/19/21 owners (§4.2 table) and R2/R3/R8 resolved or explicitly deferred.
+- [x] `mind-core` Godot-free/tokio-free; GPL headers on every new file.
 
 ---
 
@@ -709,3 +715,19 @@ Read in full for this plan:
   - `game/attack_indicators.rs`: insertion-ordered indicators with dedupe/reset, 900-tick timeout compaction and head reindex (upstream tail-index staleness preserved).
   - Harness `campaign fog` + golden `fog.json` (checksum `170e5095d482f982`); tests cover packing, edge clipping, discovery≠visibility, RLE round-trip, deterministic cadence, indicator lifecycle.
 - 2026-10-03 — **M6/M8/M9 NOT started.** Deferred with owners: M6 `MapObjectives` executor (13 objective types) + `MapMarkers` (8 marker types) — plan-04 already owns the JSON shapes/class-tag registry; M8 `play`/`WorldReloader`/`SetRules` handler + gdext `MindCampaign` autoload (MCP §7c remains DEFERRED on the single-editor mutex); M9 perf/docs/budgets. R5 (`Rules` in `Sim::checksum`) still pending the joint `CHECKSUM_VERSION` bump with 05/23. R7 (`LMarkerControl`/`LExecutor`) and R9 (`MapLocales`) remain open for M6. All four new headless goldens are additive; no P0 golden changed.
+- 2026-10-03 — **M6 (`MapObjectives`/`MapMarkers`) landed** (`8507125`).
+  - `game/map_objectives.rs`: `MapObjectivesRuntime` wraps plan-04's persisted `MapObjective` enum with the transient `completed`/`depFinished`/timer state kept out of the JSON. All 13 objective types evaluate (`Research`, `Produce`, `Item`, `CoreItem`, `BuildCount`, `UnitCount`, `DestroyUnits`, `Timer`, `DestroyBlock`, `DestroyBlocks`, `CommandMode`, `Flag`, `DestroyCore`); `update()` returns the indices the host applies; `complete(index, rules)` applies `flagsAdded`/`flagsRemoved`, sets `completed`, and runs `completionLogicCode` through plan-13's `run_logic_script`; `complete_checked` enforces the `rules_epoch`; `clear()` is the `clear_objectives` path; `type_name`/`text`/`details`/`validate` port the localization/UI hooks over an `ObjectiveLocale` trait (R9) with a `NoLocale` default.
+  - `game/map_markers.rs`: the three index vectors + `-1` sentinel fix-up (id-handle port — Java aliases object references), `control(LMarkerControl, p1,p2,p3)` for all 8 classes (base `world`/`minimap`/`light`/`autoscale`/`drawLayer` + per-class fields; NaN p1 early-returns), `set_text`/`set_texture`, the 8-name registry + legacy `Minimap`→`Point` alias, and the save-region `MarkersIo`/`MarkersSink` payload (`i32` count + `i32` id + `i32` JSON length + bytes; UBJson was not ported by plan 04, deviation).
+  - Harness: `mind-headless campaign objectives` → golden `tests/golden/campaign/objectives_completion.json` (13/13 complete, flags `["done"]`, markers world=2/minimap=2/light=1, RLE-free region round-trip, checksum `7ca7628c0569eb06`).
+  - Evidence: `cargo fmt --all -- --check` clean; workspace `clippy --all-targets -- -D warnings` clean; `cargo test -p mind-core` **1211 passed / 2 ignored** (at M6); `cargo test -p mind-headless --lib` **70 passed**.
+- 2026-10-03 — **M8 (`play`/`WorldReloader`/`MindCampaign`) landed** (`192d4c5`).
+  - `game/play.rs`: `PlayEvent` (`Play`/`Wave`/`SectorLaunch`/`SectorCapture`/`SectorLose`/`GameOver`/`NewGame`/`RulesLoad`/`SetRules`), `PlaySession` (the plan-12 half of `GameState`), `play_map` (`retain_content_fields` once, `sector`/`editor` cleared, ordered `RulesLoadEvent`→`Play`→`NewGame`), `play_new_sector` (`origin`/`destination`/`attempts`, `RulesLoadEvent`→`logic_play`→`SectorLaunch`→`NewGame`), `play_sector` branch selection, `logic_play` (wave timing × difficulty, stats reset, loadout intent), `run_wave_campaign`, `check_game_state` (campaign core-death/no-spawns/win-wave/attack branches + default attack-mode/win-wave branches), `sector_capture` (waves off, `was_captured`, `SectorCaptureEvent`, `attack_mode` off, `disable_world_processors`, `markers.clear()`, `objectives.clear()` — the `clear_objectives` path), `game_over`/`update_game_over`/`sector_lose`.
+  - `game/world_reloader.rs`: `WorldReloader` trait + `HostReloader` (snapshot players, `logic.reset`) + `ClientReloader` (disconnect/reset); plan 21 supplies the relay bodies.
+  - gdext `MindCampaign` (`client/rust/mind-gdext/src/campaign.rs`, node in `client/scenes/spine.tscn` at `/root/Spine/MindCampaign`): content/`Campaign` boot in `ready()`; `start_sector`/`start_map`/`capture_sector`/`run_turn`/`run_wave`/`get_rules_json`/`set_rules_json` (campaign guard)/`research`/`get_tech_state`/`complete_objective`/`get_objective_state`/`get_sector_state`/`fog_query`/`list_schematics`/`save_slot`/`load_slot`; schematic selection/placement stubbed (plan 06/07/19).
+  - Harness: `campaign play` → golden `tests/golden/campaign/play.json` (`RulesLoad→Play→SectorLaunch→NewGame→Wave→Wave→SectorCapture`, lose variant `GameOver{winner:2}`, `set_rules` campaign guard rejects, markers/objectives cleared, checksum `141964dccb5232e7`).
+  - Reconciliation: plan 10 consumes the `Rules` accessors unchanged; plan 11 consumes `Rules.spawns`/`TeamData` unchanged; plan 13's `logic::{enums::LMarkerControl, script::run_logic_script}` is consumed by M6 (`NoopLogicRunner` in the plan §3.9 is unnecessary — 13 is landed); plan 14/19 own all dialogs/locales and consume the read APIs; plan 21 owns the STDB schema and consumes `RulesBlob`/`CompleteObjective`/`SetRules`/`SectorCapture` intents; plan 06 supplies `WorldReloader`-adjacent world load.
+  - Evidence: `cargo fmt --all -- --check` clean; workspace `clippy --all-targets -- -D warnings` clean; `cargo test -p mind-core` **1218 passed / 2 ignored**; `cargo test -p mind-headless --lib` **71 passed**; `cargo check -p mind-gdext` clean.
+- 2026-10-03 — **M9 (perf/docs/exit gate) landed** (`20b8906`).
+  - Harness `mind-headless campaign bench --profile <csv> --ticks N` with profiles `rules`/`teams`/`fog`/`turn`/`objectives`/`schematic`, deterministic per-profile checksums and §7d budget flags; deterministic test `campaign_scenarios::tests::bench_profiles_are_deterministic_and_pass`.
+  - Release `--ticks 1800`: teams 0.073 ms/tick (budget 0.35), fog 0.102 (0.60), turn 0.018 (0.50), objectives 0.00017 (0.10), schematic 0.024 ms/op (1.0) — all within budget.
+  - Exit gate: fmt + workspace clippy clean; `cargo test -p mind-core` **1218 passed / 2 ignored**; `cargo test -p mind-headless` **72 passed**; P0 goldens `a1a7b96167c9718d`/`57bf3097cbd84349`/`c82143205ece24ed` unchanged; all 8 campaign goldens committed. **Not green / deferred:** MCP §7c (single-editor mutex — editor not running), plan-06 Serpulo/Erekir generators (real sector world save/load), plan-06/07 schematic placement, plan-02 `TechNode.requirements` gap, `Rules` in `Sim::checksum` (R5, 05/23), `trace order` registration (spine integration; P0 golden must not move), and the R2/R8 items still on their defaults.
