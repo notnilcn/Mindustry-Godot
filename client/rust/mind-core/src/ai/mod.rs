@@ -3,15 +3,19 @@
 
 //! Unit AI, pathfinding and the headless unit harness (plan 11).
 //!
-//! M0 ships the movement/pathfinding core: the controller framework, `GroundAI`,
-//! `Pathfinder` cost-ground flowfields, and [`UnitHarness`]. M3 adds `Astar` and
-//! the `ControlPathfinder` bit packing; M4 adds `UnitCommand`/`UnitStance`
-//! runtime helpers and `UnitGroup` formation. RTS `CommandAI`, team AI and waves
-//! land with M4–M6.
+//! M0 shipped the movement/pathfinding core: the controller framework,
+//! `GroundAI`, `Pathfinder` cost-ground flowfields and [`UnitHarness`]. M3 added
+//! `Astar` and the `ControlPathfinder` bit packing; M4 added
+//! `UnitCommand`/`UnitStance` runtime helpers and `UnitGroup` formation. This
+//! milestone adds the remaining `ai/types/*` controllers, the `AIController`
+//! helper set ([`ai_controller`]) and controller selection
+//! ([`controller_registry`]).
 
+pub mod ai_controller;
 pub mod astar;
 pub mod control_structs;
 pub mod controller;
+pub mod controller_registry;
 pub mod harness;
 pub mod pathfinder;
 pub mod types;
@@ -19,9 +23,11 @@ pub mod unit_command_runtime;
 pub mod unit_group;
 pub mod unit_stance_runtime;
 
+pub use ai_controller::AiCtx;
 pub use astar::{AstarScratch, DistanceHeuristic, TileHeuristic, manhattan};
 pub use control_structs::{FieldIndex, IntraEdge, NodeIndex};
 pub use controller::{AiKind, ControllerSlot, UnitController, select_ai};
+pub use controller_registry::{is_logic_controllable, keep_state, select_controller};
 pub use harness::UnitHarness;
 pub use pathfinder::{Cost, Flowfield, PathTile, Pathfinder};
 pub use types::command::{AttackTarget, CommandAiState, CommandQueueEntry};

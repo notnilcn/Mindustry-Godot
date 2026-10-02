@@ -23,9 +23,13 @@ pub enum AiKind {
     NoAi,
     /// Ground pathfinding controller (`GroundAI`, default for walkers).
     Ground,
+    /// Melee "hug" controller (`HugAI`; raycast approach, closes to contact).
+    Hug,
     /// Flying flag controller (`FlyingAI`, default for air units).
     #[default]
     Flying,
+    /// Flying follow controller (`FlyingFollowAI`; follows an allied unit).
+    FlyingFollow,
     /// RTS command controller (`CommandAI`).
     Command,
     /// Logic controller (`LogicAI`).
@@ -50,6 +54,8 @@ pub enum AiKind {
     Prebuild,
     /// Repair/rebuild-assist controller (`RepairAI`; append-only).
     Repair,
+    /// Player possession bridge (`Player`; plan 15 owns input).
+    Player,
 }
 
 impl AiKind {
@@ -58,7 +64,9 @@ impl AiKind {
         match self {
             AiKind::NoAi => "NoAI",
             AiKind::Ground => "GroundAI",
+            AiKind::Hug => "HugAI",
             AiKind::Flying => "FlyingAI",
+            AiKind::FlyingFollow => "FlyingFollowAI",
             AiKind::Command => "CommandAI",
             AiKind::Logic => "LogicAI",
             AiKind::Missile => "MissileAI",
@@ -71,6 +79,7 @@ impl AiKind {
             AiKind::Assembler => "AssemblerAI",
             AiKind::Prebuild => "PrebuildAI",
             AiKind::Repair => "RepairAI",
+            AiKind::Player => "Player",
         }
     }
 }
@@ -116,22 +125,34 @@ pub trait UnitController: Send {
 
 /// Selects the AI controller for a unit type (`UnitType.aiController`).
 ///
-/// Mirrors `UnitType.controller`/`aiController`: the content `AiControllerKind`
-/// wins; otherwise `flying` selects `FlyingAI` vs `GroundAI`.
+/// Mirrors `UnitType.controller`/`aiController`: an explicit content
+/// `ControllerKind` (assembler/builder/cargo/no/missile) wins; otherwise the
+/// `AiControllerKind` preset selects the AI, defaulting to `FlyingAI` for air
+/// units and `GroundAI` for walkers.
 pub fn select_ai(unit: &UnitTypeDef) -> AiKind {
-    match unit.ai_controller {
-        AiControllerKind::Defender => AiKind::Defender,
-        AiControllerKind::FlyingFollow => AiKind::Flying,
-        AiControllerKind::Hug => AiKind::Ground,
-        AiControllerKind::Suicide => AiKind::Suicide,
-        AiControllerKind::Default => {
-            // `MissileUnitType`/naval/mech payload presets map through kind.
-            if unit.flying {
-                AiKind::Flying
-            } else {
-                AiKind::Ground
+    use crate::content::registries::units::ControllerKind;
+    match unit.controller {
+        ControllerKind::Assembler => AiKind::Assembler,
+        ControllerKind::Builder { .. } => AiKind::Builder,
+        // AI team default (`BuilderOrCommand` resolves to `CommandAI` for player
+        // teams; the harness spawns AI teams, so use the builder behavior).
+        ControllerKind::BuilderOrCommand => AiKind::Builder,
+        ControllerKind::Cargo => AiKind::Cargo,
+        ControllerKind::No => AiKind::NoAi,
+        ControllerKind::Missile => AiKind::Missile,
+        ControllerKind::Default => match unit.ai_controller {
+            AiControllerKind::Defender => AiKind::Defender,
+            AiControllerKind::FlyingFollow => AiKind::FlyingFollow,
+            AiControllerKind::Hug => AiKind::Hug,
+            AiControllerKind::Suicide => AiKind::Suicide,
+            AiControllerKind::Default => {
+                if unit.flying {
+                    AiKind::Flying
+                } else {
+                    AiKind::Ground
+                }
             }
-        }
+        },
     }
 }
 
@@ -144,7 +165,9 @@ mod tests {
         let kinds = [
             AiKind::NoAi,
             AiKind::Ground,
+            AiKind::Hug,
             AiKind::Flying,
+            AiKind::FlyingFollow,
             AiKind::Command,
             AiKind::Logic,
             AiKind::Missile,
@@ -157,6 +180,7 @@ mod tests {
             AiKind::Assembler,
             AiKind::Prebuild,
             AiKind::Repair,
+            AiKind::Player,
         ];
         for (i, a) in kinds.iter().enumerate() {
             for b in &kinds[i + 1..] {
