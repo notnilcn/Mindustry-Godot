@@ -34,7 +34,7 @@ pub use render::{MindMinimap, MindRender, MindWorldRenderer};
 pub use sim_host::MindSimHost;
 pub use stdb::{StdbBinder, StdbConnector};
 pub use tile_grid::MindTileGrid;
-pub use ui::MindUi;
+pub use ui::{MindHud, MindUi};
 
 use godot::prelude::*;
 
