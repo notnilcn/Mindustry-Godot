@@ -20,7 +20,7 @@ use mind_core::content::{BlockId, LiquidId};
 use mind_core::entities::comp::{Building, PowerGraphUpdater, TeamComp};
 use mind_core::fixtures::power::PowerHarness;
 use mind_core::world::blocks::heat::{
-    HeatConductor, HeatCrafter, HeatState, crafter_efficiency_scale, crafter_heat,
+    HeatConductor, HeatCrafter, HeatState, calculate_heat, crafter_efficiency_scale, crafter_heat,
     heat_producer_step,
 };
 use mind_core::world::blocks::liquid::{LiquidFlowCache, LiquidNode, update_conduit};
@@ -943,22 +943,33 @@ fn bench_heat(buildings: usize, ticks: u64, warmup: u64) -> (Vec<u64>, serde_jso
         link(&mut world, producer, conductor);
         pairs.push((producer, conductor));
     }
+    // Reused scratch mirrors `HeatScratch` (capacity retained across ticks);
+    // using `crafter_heat` per call would allocate an `IdSet` every tick.
+    let mut side = [0.0f32; 4];
+    let mut scratch = mind_core::util::IdSet::new();
     for tick in 0..warmup {
         for &(_, conductor) in &pairs {
-            crafter_heat(&mut world, conductor, tick);
+            calculate_heat(&mut world, conductor, &mut side, &mut scratch, tick, 0);
         }
     }
     let mut samples = Vec::with_capacity(ticks as usize);
     for tick in 0..ticks {
         let start = Instant::now();
         for &(_, conductor) in &pairs {
-            crafter_heat(&mut world, conductor, warmup + tick);
+            calculate_heat(
+                &mut world,
+                conductor,
+                &mut side,
+                &mut scratch,
+                warmup + tick,
+                0,
+            );
         }
         samples.push(start.elapsed().as_nanos() as u64 / 1000);
     }
     (
         samples,
-        serde_json::json!({"placed": buildings * 2, "method": "calculate_heat (producer -> conductor)"}),
+        serde_json::json!({"placed": buildings * 2, "method": "calculate_heat (producer -> conductor, reused scratch)"}),
     )
 }
 

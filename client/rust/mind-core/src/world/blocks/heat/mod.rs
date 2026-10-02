@@ -102,7 +102,9 @@ pub fn calculate_heat(
     let self_size = block_size(world, entity);
     let self_id = entity.index_u32();
 
-    let proximity: Vec<Entity> = self_building.proximity.iter().copied().collect();
+    // `self_building` is an owned clone, so its inline `proximity` SmallVec can
+    // be iterated directly; no per-call heap buffer (plan 09 §3.10).
+    let proximity = self_building.proximity.clone();
     let mut total = 0.0;
 
     for other in proximity {
