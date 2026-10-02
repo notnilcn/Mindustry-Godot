@@ -182,11 +182,11 @@ impl RouterBehavior {
         if controlled {
             return None; // L8: block units are plan 11.
         }
-        let proximity: Vec<Entity> = world
+        let len = world
             .get::<Building>(e)
-            .map(|b| b.proximity.iter().copied().collect())
-            .unwrap_or_default();
-        if proximity.is_empty() {
+            .map(|b| b.proximity.len())
+            .unwrap_or(0);
+        if len == 0 {
             return None;
         }
         let counter = world
@@ -201,14 +201,23 @@ impl RouterBehavior {
                     .map(|table| is_overflow_gate(b.block, table))
             })
             .unwrap_or(false);
-        for i in 0..proximity.len() {
-            let other = proximity[(i + counter) % proximity.len()];
+        for i in 0..len {
+            // Index the proximity list in place instead of collecting it into a
+            // `Vec` per call (two allocations per router per tick before; plan
+            // 08 §7.4 alloc-audit). `proximity` is short, so re-reading it is
+            // cheaper than the heap traffic.
+            let Some(other) = world
+                .get::<Building>(e)
+                .and_then(|b| b.proximity.get((i + counter) % len).copied())
+            else {
+                continue;
+            };
             if set
                 && let Some(mut router) = world.get_mut::<RouterBuild>(e)
                 && item.index() < router.cycles.len()
             {
                 router.cycles[item.index()] =
-                    ((router.cycles[item.index()] as usize + 1) % proximity.len()) as u8;
+                    ((router.cycles[item.index()] as usize + 1) % len) as u8;
             }
             if from_is_overflow && from == Some(other) {
                 continue;
