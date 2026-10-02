@@ -202,6 +202,27 @@ pub enum AssetsCommand {
         #[arg(long)]
         json: bool,
     },
+
+    /// `sounds.index.json` registry equals the recursive sound file listing, ids
+    /// are dense/append-only and duplicates are rejected (M8/M10 §7.1b).
+    SoundsCheck {
+        /// Repo root override.
+        #[arg(long)]
+        root: Option<PathBuf>,
+        /// Emit a machine-readable JSON report.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Fallback atlas boots and every region fits within 2048 (M4/M10 §7.1b).
+    FallbackBoot {
+        /// Directory containing the fallback `sprites.atlas.json`.
+        #[arg(long, default_value = "assets/sprites/fallback")]
+        atlas: PathBuf,
+        /// Emit a machine-readable JSON report.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// `io` subcommands (plan 04 §7b).

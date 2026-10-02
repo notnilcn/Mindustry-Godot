@@ -9,6 +9,7 @@
 //! later milestones (M7/M8) — see `03_ASSETS_IMPLEMENTATION_PLAN.md`.
 
 mod atlas;
+mod audio;
 mod bundle;
 mod fonts;
 mod loader;

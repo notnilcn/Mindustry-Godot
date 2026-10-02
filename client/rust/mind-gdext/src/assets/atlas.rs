@@ -16,8 +16,8 @@
 
 use std::collections::HashMap;
 
-use godot::builtin::{Array, GString, Rect2, VarDictionary, Vector2};
-use godot::classes::{AtlasTexture, FileAccess, INode, Image, ImageTexture, Node};
+use godot::builtin::{Array, GString, PackedInt32Array, Rect2, VarDictionary, Vector2};
+use godot::classes::{AtlasTexture, AudioStream, FileAccess, INode, Image, ImageTexture, Node};
 use godot::global::Error;
 use godot::obj::{Base, NewGd};
 use godot::prelude::*;
@@ -27,6 +27,7 @@ use mind_core::assets::bundle::Bundle;
 use mind_core::assets::file_tree::FileTree;
 use mind_core::assets::icons::Iconc;
 
+use crate::assets::audio::AudioRegistry;
 use crate::assets::bundle::{load_bundle, load_iconc, load_locales};
 use crate::assets::fonts::FontSet;
 use crate::assets::loader::{resolve_assets_dir, resolve_locale};
@@ -56,6 +57,10 @@ pub struct MindAssets {
     locales: Vec<String>,
     /// Loaded dynamic fonts.
     fonts: FontSet,
+    /// Sounds/Musics registry + lazy audio stream cache.
+    audio: AudioRegistry,
+    /// Loose cursor textures (`cursors/<name>.png`).
+    cursors: HashMap<String, Gd<ImageTexture>>,
     /// Whether [`MindAssets::load_assets`] completed.
     loaded: bool,
 }
@@ -75,6 +80,8 @@ impl INode for MindAssets {
             iconc: Iconc::default(),
             locales: Vec::new(),
             fonts: FontSet::default(),
+            audio: AudioRegistry::default(),
+            cursors: HashMap::new(),
             loaded: false,
         }
     }
@@ -82,12 +89,13 @@ impl INode for MindAssets {
     fn ready(&mut self) {
         let ok = self.load_assets();
         log::info!(
-            "[assets] ready ok={ok} dir={} pages={} regions={} icons={} fonts={}",
+            "[assets] ready ok={ok} dir={} pages={} regions={} icons={} fonts={} sounds={}",
             self.assets_dir,
             self.pages.len(),
             self.index.len(),
             self.iconc.len(),
-            self.fonts.loaded()
+            self.fonts.loaded(),
+            self.audio.sound_count()
         );
     }
 }
@@ -138,6 +146,7 @@ impl MindAssets {
         self.iconc = load_iconc(&self.assets_dir);
         self.locales = load_locales(&self.assets_dir);
         self.fonts = FontSet::load(&self.assets_dir);
+        self.audio = AudioRegistry::load(&self.assets_dir);
         self.loaded = true;
         true
     }
@@ -227,6 +236,93 @@ impl MindAssets {
     #[func]
     pub fn assets_dir(&self) -> GString {
         GString::from(self.assets_dir.as_str())
+    }
+
+    /// `Tex.get(name)` alias for [`MindAssets::find_region`].
+    #[func]
+    pub fn tex(&mut self, name: GString) -> Option<Gd<AtlasTexture>> {
+        self.find_region(name)
+    }
+
+    /// Ninepatch splits for a region (`[]` when absent).
+    #[func]
+    pub fn tex_splits(&self, name: GString) -> PackedInt32Array {
+        let mut out = PackedInt32Array::new();
+        if let Some(region) = self.index.find(&name.to_string())
+            && let Some(splits) = region.splits
+        {
+            for value in splits {
+                out.push(value);
+            }
+        }
+        out
+    }
+
+    /// Number of sound entries (including `none`/`unset` dummies).
+    #[func]
+    pub fn sound_count(&self) -> i64 {
+        self.audio.sound_count() as i64
+    }
+
+    /// Number of music entries.
+    #[func]
+    pub fn music_count(&self) -> i64 {
+        self.audio.music_count() as i64
+    }
+
+    /// Resolved sound file path (empty when absent).
+    #[func]
+    pub fn sound_path(&self, name: GString) -> GString {
+        match self
+            .audio
+            .sound(&name.to_string())
+            .and_then(|e| e.file.as_ref())
+        {
+            Some(file) => GString::from(file.as_str()),
+            None => GString::new(),
+        }
+    }
+
+    /// Resolved music file path (empty when absent).
+    #[func]
+    pub fn music_path(&self, name: GString) -> GString {
+        match self.audio.music(&name.to_string()) {
+            Some(entry) => GString::from(entry.file.as_str()),
+            None => GString::new(),
+        }
+    }
+
+    /// Lazily decoded `AudioStream` for a sound (plan 18 consumes).
+    #[func]
+    pub fn sound_stream(&mut self, name: GString) -> Option<Gd<AudioStream>> {
+        self.audio.sound_stream(&name.to_string())
+    }
+
+    /// Lazily decoded `AudioStream` for a music.
+    #[func]
+    pub fn music_stream(&mut self, name: GString) -> Option<Gd<AudioStream>> {
+        self.audio.music_stream(&name.to_string())
+    }
+
+    /// Loads and caches a cursor texture (`cursors/<name>.png`).
+    #[func]
+    pub fn cursor_texture(&mut self, name: GString) -> Option<Gd<ImageTexture>> {
+        let key = name.to_string();
+        if let Some(texture) = self.cursors.get(&key) {
+            return Some(texture.clone());
+        }
+        let path = format!("{}/cursors/{key}.png", self.assets_dir);
+        if !FileAccess::file_exists(&path) {
+            return None;
+        }
+        let bytes = FileAccess::get_file_as_bytes(&path);
+        let mut image = Image::new_gd();
+        if image.load_png_from_buffer(&bytes) != Error::OK {
+            return None;
+        }
+        let texture = ImageTexture::create_from_image(&image)?;
+        self.cursors.insert(key, texture.clone());
+        Some(texture)
     }
 
     /// `Core.bundle.get(key)` — the key itself when missing.

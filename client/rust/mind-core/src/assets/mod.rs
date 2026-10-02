@@ -23,3 +23,4 @@ pub mod file_tree;
 pub mod generated;
 pub mod icons;
 pub mod regions;
+pub mod sounds;
