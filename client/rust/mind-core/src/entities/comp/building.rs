@@ -175,6 +175,8 @@ pub struct WallState {
 pub struct DoorState {
     /// Whether the door is open (`open`).
     pub open: bool,
+    /// Connected doors (`DoorBuild.chained`); unused by `AutoDoor`.
+    pub chained: SmallVec<[Entity; 6]>,
 }
 
 /// `Radar` build state.

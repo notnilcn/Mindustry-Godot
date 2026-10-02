@@ -173,6 +173,36 @@ fn scenario(name: &str, json: bool) -> Result<()> {
                 bail!("scenario {name} failed");
             }
         }
+        "wall_door" => {
+            let wall = block(&harness, "copper-wall")?;
+            let door = block(&harness, "door")?;
+            let wall_placed = harness.place(4, 4, wall, 0, true);
+            let door_placed = harness.place(5, 4, door, 0, false);
+            harness.construct_tick(10_000.0);
+            let door_built = harness.block_at(5, 4) == door;
+            let opened = harness.configure(5, 4, ConfigValue::Bool(true));
+            let read_back = harness
+                .build_at(5, 4)
+                .map(|e| mind_core::world::config::read_config(&harness.world, e));
+            let closed = harness.configure(5, 4, ConfigValue::Bool(false));
+            let pass = wall_placed
+                && door_placed
+                && door_built
+                && opened
+                && closed
+                && matches!(read_back, Some(ConfigValue::Bool(true)));
+            let report = serde_json::json!({
+                "scenario": name,
+                "pass": pass,
+                "door_built": door_built,
+                "door_open_roundtrip": matches!(read_back, Some(ConfigValue::Bool(true))),
+                "checksum": harness.checksum_hex(),
+            });
+            print_json(&report, json, !json);
+            if !pass {
+                bail!("scenario {name} failed");
+            }
+        }
         other => bail!("unknown blocks scenario `{other}`"),
     }
     Ok(())

@@ -22,6 +22,8 @@ use super::config::ConfigValue;
 use super::modules::PowerGraphId;
 use super::stats::Stats;
 
+pub mod defense;
+pub mod environment;
 pub mod sandbox;
 
 /// Plan-07 alias for plan 04's entity writer (`BuildingWriter`).
@@ -363,9 +365,26 @@ pub fn resolve_behavior(def: &BlockDef, registry: &BehaviorRegistry) -> Arc<dyn 
     if let Some(behavior) = registry.get_named(&def.name) {
         return behavior;
     }
-    match super::block_kind_data::BlockKindData::from_def(def).family() {
-        super::block_kind_data::BlockFamily::Sandbox => Arc::new(sandbox::SandboxBehavior),
-        _ => Arc::new(NoopBehavior),
+    default_behavior(def)
+}
+
+/// Built-in behavior for a block with no registered override (plan 07 §3.12).
+pub fn default_behavior(def: &BlockDef) -> Arc<dyn BuildingBehavior> {
+    use crate::content::BlockKind as K;
+    match def.kind {
+        K::Door => Arc::new(defense::DoorBehavior),
+        K::AutoDoor => Arc::new(defense::AutoDoorBehavior),
+        K::Wall | K::ShieldWall => Arc::new(defense::WallBehavior),
+        K::Radar => Arc::new(defense::RadarBehavior),
+        K::Thruster => Arc::new(defense::ThrusterBehavior),
+        K::TargetDummy => Arc::new(defense::TargetDummyBehavior),
+        _ => match super::block_kind_data::BlockKindData::from_def(def).family() {
+            super::block_kind_data::BlockFamily::Sandbox => Arc::new(sandbox::SandboxBehavior),
+            super::block_kind_data::BlockFamily::Environment => {
+                Arc::new(environment::EnvironmentBehavior)
+            }
+            _ => Arc::new(NoopBehavior),
+        },
     }
 }
 
@@ -388,5 +407,67 @@ mod tests {
         registry.register_named("copper-wall", Arc::new(NoopBehavior));
         assert!(registry.get_named("copper-wall").is_some());
         assert!(!registry.is_empty());
+    }
+
+    /// Ported `ApplicationTests.allBlockTest` (update half): every block in this
+    /// plan's owned families spawns, updates once, and reports its own
+    /// block/health. Families owned by 08/09/10/11 are excluded.
+    #[test]
+    fn all_blocks_update_without_panic() {
+        use crate::content::test_support::test_registry;
+        use crate::entities::comp::{Building, Health};
+        use crate::world::TilePos;
+        use crate::world::block::BlockTable;
+        use crate::world::limits::BuildRules;
+        use crate::world::update::update_buildings;
+        use bevy_ecs::world::World;
+
+        let content = test_registry();
+        let table = BlockTable::build_default(&content).expect("table");
+        let candidates: Vec<_> = table
+            .iter()
+            .filter(|inst| {
+                matches!(
+                    inst.kind_data.family(),
+                    super::super::block_kind_data::BlockFamily::Defense
+                        | super::super::block_kind_data::BlockFamily::Production
+                        | super::super::block_kind_data::BlockFamily::Sandbox
+                        | super::super::block_kind_data::BlockFamily::Campaign
+                )
+            })
+            .cloned()
+            .collect();
+        let mut world = World::new();
+        world.insert_resource(BuildRules::default());
+        world.insert_resource(table);
+        let mut spawned = Vec::new();
+        for inst in &candidates {
+            let entity = inst.spawn(
+                &mut world,
+                0,
+                TilePos::new(2, 2),
+                0,
+                0,
+                content.items().len(),
+                content.liquids().len(),
+            );
+            spawned.push((inst.clone(), entity));
+        }
+        update_buildings(&mut world);
+        for (inst, entity) in &spawned {
+            let building = world.get::<Building>(*entity).expect("building");
+            assert_eq!(
+                building.block, inst.def.id,
+                "block mismatch for {}",
+                inst.name
+            );
+            let health = world.get::<Health>(*entity).expect("health");
+            assert_eq!(
+                health.health, inst.def.health as f32,
+                "health for {}",
+                inst.name
+            );
+        }
+        assert!(!spawned.is_empty(), "no owned-family blocks checked");
     }
 }

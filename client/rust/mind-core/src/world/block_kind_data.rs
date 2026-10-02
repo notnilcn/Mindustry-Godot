@@ -166,6 +166,8 @@ pub struct IncineratorDef {
 /// `Wall` family knobs.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct WallDef {
+    /// `Wall.autotile`.
+    pub autotile: bool,
     /// `Wall.baseExplosiveness`/`lightningChance` etc. are 10-hook data.
     pub lightning_chance: f32,
     /// `Wall.lightningDamage`.

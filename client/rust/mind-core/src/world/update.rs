@@ -359,6 +359,24 @@ pub fn get_progress_increase(world: &World, entity: Entity, base_time: f32) -> f
     }
 }
 
+/// `Building.timer(index, interval)`: returns `true` when the interval elapsed
+/// and resets it (`Timer`/`Interval`). Timers tick once per fixed-step update.
+pub fn run_timer(world: &mut World, entity: Entity, index: usize, interval: f32) -> bool {
+    let Some(mut timers) = world.get_mut::<Timers>(entity) else {
+        return false;
+    };
+    if timers.0.len() <= index {
+        timers.0.resize(index + 1, 0.0);
+    }
+    if timers.0[index] <= 0.0 {
+        timers.0[index] = interval;
+        true
+    } else {
+        timers.0[index] -= 1.0;
+        false
+    }
+}
+
 /// Puts a building to sleep (`Building.sleep`): flagged and skipped while asleep.
 pub fn sleep(world: &mut World, entity: Entity) {
     if let Some(mut building) = world.get_mut::<Building>(entity) {
