@@ -1,0 +1,6 @@
+{
+  "name": "Mod Soft",
+  "version": "1.0",
+  "minGameVersion": "146",
+  "softDependencies": ["does-not-exist"]
+}

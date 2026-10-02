@@ -31,6 +31,9 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
 png = "=0.17.16"
 sha2 = "=0.10.8"
 criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+# plan 20 (mods): mod zip container + sha256-addressed asset cache (R6/§6.6)
+zip = { version = "2", default-features = false, features = ["deflate"] }
+data-encoding = "2"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

@@ -1,0 +1,8 @@
+{
+  "mods": [
+    {"name": "assets-mod", "state": "enabled", "enabled": true, "version": "1.0", "texturescale": 1.0},
+    {"name": "basic-mod", "state": "enabled", "enabled": true, "version": "1.0", "texturescale": 1.0},
+    {"name": "error-mod", "state": "enabled", "enabled": true, "version": "1.0", "texturescale": 1.0},
+    {"name": "patch-mod", "state": "enabled", "enabled": true, "version": "1.0", "texturescale": 1.0}
+  ]
+}

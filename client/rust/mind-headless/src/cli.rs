@@ -158,6 +158,32 @@ pub enum Command {
         #[command(subcommand)]
         command: TraceCommand,
     },
+
+    /// Mod discovery/content/patch/asset inspection (plan 20).
+    Mods {
+        /// Mods subcommand.
+        #[command(subcommand)]
+        command: ModsCommand,
+    },
+}
+
+/// `mods` subcommands (plan 20 §7b).
+#[derive(Debug, Subcommand)]
+pub enum ModsCommand {
+    /// Discover mods under a directory, resolve dependency states and print the
+    /// report JSON. With `--check`, compare against
+    /// `<dir>/expected_list.json` (normalized fields).
+    List {
+        /// Mod directory (defaults to `parity/mod_fixtures`).
+        #[arg(long, default_value = "parity/mod_fixtures")]
+        dir: PathBuf,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Compare the normalized mod list against `<dir>/expected_list.json`.
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 /// `trace` subcommands (plan 05 M6).

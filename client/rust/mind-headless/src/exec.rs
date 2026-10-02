@@ -20,7 +20,7 @@ use mind_core::sim::{Sim, StateDump};
 use mind_core::world::TilePos;
 
 use crate::cli::{
-    AssetsCommand, Cli, Command, ContentCommand, IoCommand, MetaCommand, TraceCommand,
+    AssetsCommand, Cli, Command, ContentCommand, IoCommand, MetaCommand, ModsCommand, TraceCommand,
 };
 use crate::paths;
 use crate::registry;
@@ -171,6 +171,9 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             TraceCommand::Order { ticks, out, json } => {
                 cmd_trace_order(*ticks, out.as_deref(), *json)
             }
+        },
+        Command::Mods { command } => match command {
+            ModsCommand::List { dir, json, check } => cmd_mods_list(dir, *json, *check),
         },
         Command::Io { command } => match command {
             IoCommand::DumpMeta { file, json } => cmd_io_dump_meta(file, *json),
@@ -1171,6 +1174,81 @@ fn cmd_trace_order(ticks: u64, out: Option<&Path>, json: bool) -> anyhow::Result
         print!("{text}");
     }
     Ok(EXIT_PASS)
+}
+
+/// Plan 20 M0 (`mods list`): discover fixture/server mods and resolve states.
+fn cmd_mods_list(dir: &Path, json: bool, check: bool) -> anyhow::Result<i32> {
+    use mind_core::io::SettingsStore;
+    use mind_core::io::fs::NativeFs;
+    use mind_core::mods::Mods;
+
+    let dir = if dir.is_absolute() {
+        dir.to_path_buf()
+    } else {
+        paths::find_repo_root(None)?.join(dir)
+    };
+    let fs = NativeFs;
+    let settings = SettingsStore::new();
+    let mut mods = Mods::new(true, &dir);
+    let report = mods
+        .load(&fs, &dir, &settings)
+        .with_context(|| format!("loading mods from `{}`", dir.display()))?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        for entry in &report.mods {
+            println!(
+                "{}: {:?} enabled={} v{} source={}",
+                entry.name, entry.state, entry.enabled, entry.version, entry.source
+            );
+        }
+        println!("{} mod(s) discovered", report.mods.len());
+    }
+
+    if !check {
+        return Ok(EXIT_PASS);
+    }
+
+    let expected_path = dir.join("expected_list.json");
+    let text = std::fs::read_to_string(&expected_path)
+        .with_context(|| format!("reading `{}`", expected_path.display()))?;
+    let expected: serde_json::Value = serde_json::from_str(&text)
+        .with_context(|| format!("parsing `{}`", expected_path.display()))?;
+    let actual = normalized_mod_list(&serde_json::to_value(&report)?);
+    let expected_mods = expected
+        .get("mods")
+        .cloned()
+        .unwrap_or(serde_json::Value::Array(Vec::new()));
+    if expected_mods != actual {
+        log::error!("mods list mismatch");
+        log::error!("expected: {expected_mods}");
+        log::error!("actual:   {actual}");
+        return Ok(EXIT_FAIL);
+    }
+    Ok(EXIT_PASS)
+}
+
+/// Normalizes a mod report to the stable `expected_list.json` fields.
+fn normalized_mod_list(report: &serde_json::Value) -> serde_json::Value {
+    let mods = report
+        .get("mods")
+        .and_then(|value| value.as_array())
+        .map(|mods| {
+            mods.iter()
+                .map(|entry| {
+                    serde_json::json!({
+                        "name": entry.get("name"),
+                        "state": entry.get("state"),
+                        "enabled": entry.get("enabled"),
+                        "version": entry.get("version"),
+                        "texturescale": entry.get("texturescale"),
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    serde_json::Value::Array(mods)
 }
 
 fn load_scenario(cli: &Cli, name: &str) -> anyhow::Result<Scenario> {
