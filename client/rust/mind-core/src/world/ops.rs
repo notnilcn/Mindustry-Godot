@@ -183,6 +183,17 @@ impl WorldCtx<'_> {
         self.render.recache_wall(x, y);
         self.hooks.block_changed(block, x, y);
         self.grid.tiles.geti_mut(index).changing = false;
+        self.sync_tile_index();
+    }
+
+    /// Rebuilds the tile→building mirror when a [`TileBuilds`] resource exists.
+    fn sync_tile_index(&mut self) {
+        use super::tile_index::TileBuilds;
+        if self.ecs.contains_resource::<TileBuilds>()
+            && let Some(mut index) = self.ecs.get_resource_mut::<TileBuilds>()
+        {
+            index.rebuild(self.grid);
+        }
     }
 
     /// Removes a block, setting the tile to `air` (`Tile.remove`).
@@ -207,6 +218,7 @@ impl WorldCtx<'_> {
             self.grid.tile_changes = self.grid.tile_changes.wrapping_add(1);
             self.log.tile_changes.push(TileChangeEvent { x, y });
         }
+        self.sync_tile_index();
     }
 
     /// Assigns `block`/`build` across a block's footprint

@@ -12,6 +12,11 @@
 pub mod chained_building;
 pub mod conveyor;
 pub mod duct;
+pub mod junction;
+pub mod overflow_duct;
+pub mod overflow_gate;
+pub mod router;
+pub mod sorter;
 pub mod stack_conveyor;
 pub mod transfer;
 
@@ -23,6 +28,11 @@ use crate::world::behavior::BehaviorRegistry;
 pub use chained_building::ChainedBuilding;
 pub use conveyor::{CAPACITY as CONVEYOR_CAPACITY, ConveyorBehavior, ConveyorBuild};
 pub use duct::{DuctBehavior, DuctBuild};
+pub use junction::{JunctionBehavior, JunctionBuild};
+pub use overflow_duct::{OverflowDuctBehavior, OverflowDuctBuild};
+pub use overflow_gate::OverflowGateBehavior;
+pub use router::{RouterBehavior, RouterBuild};
+pub use sorter::{SorterBehavior, SorterBuild};
 pub use stack_conveyor::{StackConveyorBehavior, StackConveyorBuild};
 
 /// Registers every item-distribution behavior available at this milestone.
@@ -37,4 +47,13 @@ pub fn register(registry: &mut BehaviorRegistry, _content: &ContentRegistry) {
         Arc::new(StackConveyorBehavior::PLASTANIUM),
     );
     registry.register_named("surge-conveyor", Arc::new(StackConveyorBehavior::SURGE));
+    registry.register_named("junction", Arc::new(JunctionBehavior::VANILLA));
+    registry.register_named("router", Arc::new(RouterBehavior::VANILLA));
+    registry.register_named("distributor", Arc::new(RouterBehavior::VANILLA));
+    registry.register_named("sorter", Arc::new(SorterBehavior::NORMAL));
+    registry.register_named("inverted-sorter", Arc::new(SorterBehavior::INVERTED));
+    registry.register_named("overflow-gate", Arc::new(OverflowGateBehavior::NORMAL));
+    registry.register_named("underflow-gate", Arc::new(OverflowGateBehavior::UNDERFLOW));
+    registry.register_named("overflow-duct", Arc::new(OverflowDuctBehavior::NORMAL));
+    registry.register_named("underflow-duct", Arc::new(OverflowDuctBehavior::UNDERFLOW));
 }

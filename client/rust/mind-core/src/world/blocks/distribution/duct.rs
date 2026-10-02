@@ -372,7 +372,7 @@ impl BuildingBehavior for DuctBehavior {
     }
 
     fn handle_item(&self, world: &mut World, e: Entity, source: Entity, item: ItemId) {
-        let rec_dir = transfer::relative_to_edge(world, e, source).max(0) as u8;
+        let rec_dir = transfer::self_to_source(world, e, source).max(0) as u8;
         if let Some(mut items) = world.get_mut::<ItemModule>(e) {
             items.add(item, 1, i32::MAX / 2);
         }

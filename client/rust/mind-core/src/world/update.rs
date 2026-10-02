@@ -92,6 +92,27 @@ pub struct BuildScratch {
     pub order: Vec<(u64, Entity)>,
 }
 
+/// Sim clock tracked for building updates (`Time.time` subset, `+1.0`/tick).
+///
+/// Plan 05 owns the authoritative `SimClock`; this lightweight accumulating
+/// resource is the value logistics time-delayed queues read as `now` during
+/// `update_tile` (plan 08 L5). Hosts/harnesses insert it; systems that do not
+/// advance it observe a constant `0.0` (buffers then release immediately,
+/// matching a `now == 0` upstream frame).
+#[derive(Debug, Clone, Copy, Default, bevy_ecs::prelude::Resource)]
+pub struct BuildClock {
+    /// Accumulated sim time in ticks.
+    pub time: f32,
+}
+
+/// `Time.time` for logistics buffers, or `0.0` when no clock is installed.
+pub fn build_time(world: &World) -> f32 {
+    world
+        .get_resource::<BuildClock>()
+        .map(|clock| clock.time)
+        .unwrap_or(0.0)
+}
+
 /// `EntitySet::UpdateBuildings` system (no-op when no [`BlockTable`] exists, so
 /// the P0 `Sim` schedule/golden is untouched).
 pub fn update_buildings(world: &mut World) {
@@ -100,6 +121,9 @@ pub fn update_buildings(world: &mut World) {
     }
     if !world.contains_resource::<BuildScratch>() {
         world.insert_resource(BuildScratch::default());
+    }
+    if let Some(mut clock) = world.get_resource_mut::<BuildClock>() {
+        clock.time += 1.0;
     }
     let mut order = match world.get_resource_mut::<BuildScratch>() {
         Some(mut scratch) => std::mem::take(&mut scratch.order),

@@ -204,6 +204,13 @@ pub fn relative_dir(world: &World, e: Entity, other: Entity) -> i8 {
 /// are rejected by the callers' team checks regardless.
 pub fn nearby(world: &World, e: Entity, dir: u8) -> Option<Entity> {
     let building = world.get::<Building>(e)?;
+    let (dx, dy) = super::super::autotiler::d4(dir);
+    if let Some(index) = world.get_resource::<crate::world::TileBuilds>()
+        && !index.cells.is_empty()
+    {
+        return index.get(building.tile.x() as i32 + dx, building.tile.y() as i32 + dy);
+    }
+    // Fallback (no grid mirror): same-team proximity center scan.
     for other in &building.proximity {
         if relative_dir(world, e, *other) == dir as i8 {
             return Some(*other);
@@ -243,6 +250,15 @@ pub fn relative_to_edge(world: &World, e: Entity, other: Entity) -> i8 {
 /// `Edges.getFacingEdge(source.tile, e.tile)` as a direction relative to `e`.
 pub fn facing_edge_dir(world: &World, e: Entity, source: Entity) -> i8 {
     relative_to_edge(world, e, source)
+}
+
+/// `Building.relativeToEdge(source)`: direction from `e` toward the facing edge
+/// of `source` (inverse of [`relative_to_edge`] for size-1 blocks).
+pub fn self_to_source(world: &World, e: Entity, source: Entity) -> i8 {
+    match relative_to_edge(world, e, source) {
+        dir if dir >= 0 => (dir + 2) % 4,
+        _ => -1,
+    }
 }
 
 /// First stored item (`ItemModule.first()`); id order in the Rust module port.
