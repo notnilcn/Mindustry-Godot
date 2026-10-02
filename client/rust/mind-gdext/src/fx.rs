@@ -26,8 +26,10 @@ use mind_core::fx::{
 };
 
 pub mod draw_turret;
+pub mod env;
 
 use draw_turret::TurretDrawInput;
+use env::EnvFxInput;
 use mind_core::render::draw::PrimKind;
 use mind_core::render::layer::Layer;
 
@@ -56,6 +58,8 @@ pub struct MindFx {
     /// Owned turret draw snapshots (plan 17 M5 `DrawTurret` adapter).
     turrets: Vec<TurretDrawInput>,
     next_turret_handle: i64,
+    /// Active env pass (plan 17 M6 `EnvRenderers` bodies).
+    env: Option<EnvFxInput>,
 }
 
 #[godot_api]
@@ -77,6 +81,7 @@ impl INode2D for MindFx {
             view_rect: WeatherView::centered(0.0, 0.0, 1.0, 1.0, 0.0),
             turrets: Vec::new(),
             next_turret_handle: 1,
+            env: None,
         }
     }
 
@@ -94,6 +99,9 @@ impl INode2D for MindFx {
         }
         self.append_view_prims(&mut program);
         self.append_turret_prims(&mut program);
+        if let Some(input) = self.env {
+            env::build_env_prims(&mut program, self.view_tick as f32, &input);
+        }
         program.sort();
 
         let mut calls = 0i64;
@@ -293,7 +301,7 @@ impl MindFx {
 
         // Trails (ribbon quads + cap).
         let mut quads: Vec<[f32; 8]> = Vec::new();
-        for (_, trail) in self.trails.iter_live() {
+        for (_, trail, color) in self.trails.iter_live_colored() {
             quads.clear();
             trail.draw(1.0, &mut quads);
             for q in &quads {
@@ -308,7 +316,7 @@ impl MindFx {
                         points,
                         fill: true,
                         stroke: 0.0,
-                        color: Rgba::WHITE,
+                        color,
                     },
                 ));
             }
@@ -321,7 +329,7 @@ impl MindFx {
                         r: w / 2.0,
                         fill: true,
                         stroke: 0.0,
-                        color: Rgba::WHITE,
+                        color,
                     },
                 ));
             }
@@ -646,6 +654,46 @@ impl MindFx {
     #[func]
     pub fn weather_active(&self) -> bool {
         self.weather.is_some()
+    }
+
+    /// Dev control: sets the active env pass (`Rules.env` + camera/world bounds).
+    /// Bodies are plan 17; registration/selection is plan 16.
+    #[allow(clippy::too_many_arguments)]
+    #[func]
+    pub fn set_env(
+        &mut self,
+        rules_env: i64,
+        cam_x: f32,
+        cam_y: f32,
+        cam_w: f32,
+        cam_h: f32,
+        world_w: f32,
+        world_h: f32,
+        ray_w: f32,
+        ray_h: f32,
+        fog: bool,
+    ) {
+        self.env = Some(EnvFxInput {
+            rules_env: rules_env as u32,
+            cam: (cam_x, cam_y, cam_w, cam_h),
+            world: (world_w, world_h),
+            ray_size: (ray_w, ray_h),
+            fog,
+        });
+        self.base_mut().queue_redraw();
+    }
+
+    /// Dev control: clears the active env pass.
+    #[func]
+    pub fn clear_env(&mut self) {
+        self.env = None;
+        self.base_mut().queue_redraw();
+    }
+
+    /// Whether an env pass is active.
+    #[func]
+    pub fn env_active(&self) -> bool {
+        self.env.is_some()
     }
 
     /// Whether effects are enabled.

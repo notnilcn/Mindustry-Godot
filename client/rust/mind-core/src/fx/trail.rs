@@ -9,12 +9,16 @@
 
 pub use crate::render::trail::Trail;
 
+use crate::content::Rgba;
+
 use super::data::TrailChannelId;
 
 /// Fixed-capacity trail channel registry.
 #[derive(Debug, Default)]
 pub struct TrailRegistry {
     channels: Vec<Option<Trail>>,
+    /// Per-channel ribbon tint (`BulletType.trailColor`/`UnitType.trailColor`).
+    colors: Vec<Rgba>,
     free: Vec<u32>,
 }
 
@@ -24,17 +28,32 @@ impl TrailRegistry {
         Self::default()
     }
 
-    /// Allocates a channel with a trail of `length` points.
+    /// Allocates a channel with a trail of `length` points (white tint).
     pub fn create(&mut self, length: usize) -> TrailChannelId {
+        self.create_colored(length, Rgba::WHITE)
+    }
+
+    /// Allocates a channel with a trail of `length` points and a ribbon tint.
+    pub fn create_colored(&mut self, length: usize, color: Rgba) -> TrailChannelId {
         let index = if let Some(index) = self.free.pop() {
             self.channels[index as usize] = Some(Trail::new(length));
+            self.colors[index as usize] = color;
             index
         } else {
             let index = self.channels.len() as u32;
             self.channels.push(Some(Trail::new(length)));
+            self.colors.push(color);
             index
         };
         TrailChannelId(index)
+    }
+
+    /// The ribbon tint for a channel (`white` when unknown).
+    pub fn color(&self, id: TrailChannelId) -> Rgba {
+        self.colors
+            .get(id.0 as usize)
+            .copied()
+            .unwrap_or(Rgba::WHITE)
     }
 
     /// Number of live channels.
@@ -48,6 +67,19 @@ impl TrailRegistry {
             .iter()
             .enumerate()
             .filter_map(|(i, c)| c.as_ref().map(|t| (TrailChannelId(i as u32), t)))
+    }
+
+    /// Iterates live channels with their ribbon tint, in slot order.
+    pub fn iter_live_colored(&self) -> impl Iterator<Item = (TrailChannelId, &Trail, Rgba)> {
+        self.channels.iter().enumerate().filter_map(|(i, c)| {
+            c.as_ref().map(|t| {
+                (
+                    TrailChannelId(i as u32),
+                    t,
+                    self.color(TrailChannelId(i as u32)),
+                )
+            })
+        })
     }
 
     /// Trait for a channel.
@@ -97,6 +129,7 @@ impl TrailRegistry {
     /// Clears all channels.
     pub fn clear(&mut self) {
         self.channels.clear();
+        self.colors.clear();
         self.free.clear();
     }
 }
@@ -126,6 +159,17 @@ mod tests {
         let trail = reg.detach(id).unwrap();
         assert!(trail.size() >= 1);
         assert_eq!(reg.count(), 0);
+    }
+
+    #[test]
+    fn channels_carry_ribbon_color() {
+        let mut reg = TrailRegistry::new();
+        let red = Rgba::new(1.0, 0.0, 0.0, 1.0);
+        let id = reg.create_colored(8, red);
+        assert_eq!(reg.color(id), red);
+        let seen: Vec<Rgba> = reg.iter_live_colored().map(|(_, _, c)| c).collect();
+        assert_eq!(seen, vec![red]);
+        assert_eq!(reg.color(TrailChannelId(999)), Rgba::WHITE);
     }
 
     #[test]

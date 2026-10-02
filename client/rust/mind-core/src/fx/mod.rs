@@ -19,6 +19,7 @@ pub mod custom;
 pub mod data;
 pub mod decal;
 pub mod def;
+pub mod env_fx;
 pub mod parts;
 pub mod pool;
 pub mod pool_spec;
@@ -41,6 +42,9 @@ pub use def::{
     CustomParams, EffectDef, EffectKind, EffectRegistry, ExplosionParams, NoiseParams,
     ParticleParams, RadialParams, SoundParams, TriangleParams, WaveParams, WrapParams, registry,
 };
+pub use env_fx::{
+    CAUSTICS_SHADER, PARTICLE_REGION, RAYS_TEXTURE, scorching_prims, underwater_prims,
+};
 pub use parts::draw::{
     AllRegions, MapRegions, PartEmit, RegionInfo, RegionLookup, RegionNames, SpawnerState,
     convert_progress, draw_named_parts, draw_parts, draw_spawner, get_outlines, intern_region,
@@ -61,7 +65,9 @@ pub use resolve::{build_program, build_program_into};
 pub use shake::{ShakeState, shake_falloff, shake_visible};
 pub use sink::{FxBus, FxEvent, FxSettings, FxSink, NoopFxSink, emit_named};
 pub use trail::TrailRegistry;
-pub use weather_fx::{WeatherFx, WeatherKind, WeatherStateView, WeatherView, splash_visible};
+pub use weather_fx::{
+    SplashGround, WeatherFx, WeatherKind, WeatherStateView, WeatherView, splash_visible,
+};
 
 /// Converts a plan-16 `Pal`/`Drawf` `[f32; 4]` color to [`crate::content::Rgba`].
 impl From<[f32; 4]> for crate::content::Rgba {
