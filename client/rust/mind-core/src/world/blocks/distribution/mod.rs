@@ -13,6 +13,7 @@ pub mod buffered_item_bridge;
 pub mod chained_building;
 pub mod conveyor;
 pub mod direction_bridge;
+pub mod directional_unloader;
 pub mod duct;
 pub mod duct_bridge;
 pub mod duct_junction;
@@ -37,6 +38,7 @@ pub use buffered_item_bridge::{BufferedItemBridgeBehavior, BufferedItemBridgeBui
 pub use chained_building::ChainedBuilding;
 pub use conveyor::{CAPACITY as CONVEYOR_CAPACITY, ConveyorBehavior, ConveyorBuild};
 pub use direction_bridge::{DirectionBridgeBuild, find_link as direction_find_link};
+pub use directional_unloader::{DirectionalUnloaderBehavior, DirectionalUnloaderBuild};
 pub use duct::{DuctBehavior, DuctBuild};
 pub use duct_bridge::{DuctBridgeBehavior, DuctBridgeBuild};
 pub use duct_junction::{DuctJunctionBehavior, DuctJunctionBuild};
@@ -88,4 +90,8 @@ pub fn register(registry: &mut BehaviorRegistry, _content: &ContentRegistry) {
         Arc::new(ItemBridgeBehavior::BRIDGE_CONVEYOR),
     );
     registry.register_named("duct-bridge", Arc::new(DuctBridgeBehavior::VANILLA));
+    registry.register_named(
+        "duct-unloader",
+        Arc::new(DirectionalUnloaderBehavior::VANILLA),
+    );
 }

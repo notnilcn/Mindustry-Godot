@@ -405,6 +405,54 @@ fn scenario(name: &str, json: bool) -> Result<()> {
                 bail!("scenario {name} failed");
             }
         }
+        "logistics_unloader_drain" => {
+            let copper = harness
+                .content()
+                .item_id("copper")
+                .ok_or_else(|| anyhow::anyhow!("copper item missing"))?;
+            let container = block(&harness, "container")?;
+            let unloader = block(&harness, "unloader")?;
+            let conveyor = block(&harness, "conveyor")?;
+            let vault = block(&harness, "vault")?;
+            let _ = harness.place(4, 4, container, 0, true);
+            let _ = harness.place(6, 4, unloader, 0, true);
+            // `vault` is size 3 centered at (11,4) -> covers (10,4)..(12,6).
+            let _ = harness.place(11, 4, vault, 0, true);
+            for x in 7..=9 {
+                let _ = harness.place(x, 4, conveyor, 0, true);
+            }
+            let source = harness.build_at(4, 4);
+            if let Some(source) = source
+                && let Some(mut items) = harness
+                    .world
+                    .get_mut::<mind_core::world::modules::ItemModule>(source)
+            {
+                items.add(copper, 100, 300);
+            }
+            for _ in 0..600 {
+                harness.tick();
+            }
+            let drained = harness
+                .build_at(11, 4)
+                .and_then(|e| {
+                    harness
+                        .world
+                        .get::<mind_core::world::modules::ItemModule>(e)
+                })
+                .map(|items| items.total)
+                .unwrap_or(0);
+            let pass = drained > 0;
+            let report = serde_json::json!({
+                "scenario": name,
+                "pass": pass,
+                "drained": drained,
+                "checksum": mind_core::world::fixtures::logistics::logistics_checksum(&harness.world).to_hex(),
+            });
+            print_json(&report, json, !json);
+            if !pass {
+                bail!("scenario {name} failed");
+            }
+        }
         "proximity_multiblock" => {
             let wall = block(&harness, "copper-wall")?;
             let _ = harness.place(4, 4, wall, 0, true);

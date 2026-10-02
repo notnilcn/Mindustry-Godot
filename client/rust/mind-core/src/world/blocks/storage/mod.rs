@@ -8,13 +8,15 @@
 //! comparator land in milestones M4/M5.
 
 pub mod storage_block;
+pub mod unloader;
 
 use std::sync::Arc;
 
 use crate::content::ContentRegistry;
 use crate::world::behavior::BehaviorRegistry;
 
-pub use storage_block::StorageBehavior;
+pub use storage_block::{StorageBehavior, StorageBuild};
+pub use unloader::{ContainerStat, UnloaderBehavior, UnloaderBuild};
 
 /// Registers the storage-family behaviors available at this milestone.
 pub fn register(registry: &mut BehaviorRegistry, _content: &ContentRegistry) {
@@ -26,4 +28,5 @@ pub fn register(registry: &mut BehaviorRegistry, _content: &ContentRegistry) {
     ] {
         registry.register_named(name, Arc::new(StorageBehavior));
     }
+    registry.register_named("unloader", Arc::new(UnloaderBehavior::VANILLA));
 }
