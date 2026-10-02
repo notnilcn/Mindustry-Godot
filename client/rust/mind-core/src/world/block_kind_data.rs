@@ -37,6 +37,8 @@ pub enum BlockFamily {
     Legacy,
     /// `ConstructBlock` size singletons.
     Construct,
+    /// Logic family (`LogicBlock`/`MemoryBlock`/`SwitchBlock`; plan 13).
+    Logic,
     /// Families owned by other plans (08/09/10/11) or a plain `Block`.
     #[default]
     Other,
@@ -330,6 +332,46 @@ pub struct LegacyDef {
     pub replacement: Option<u16>,
 }
 
+/// `LogicBlock` family knobs (plan 13 §3.6).
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicBlockDef {
+    /// `LogicBlock.instructionsPerTick`.
+    pub ipt: i32,
+    /// `LogicBlock.maxInstructionsPerTick` (privileged only).
+    pub max_ipt: i32,
+    /// `LogicBlock.range` (world units).
+    pub range: f32,
+    /// `LogicBlock.privileged` (world processor).
+    pub privileged: bool,
+}
+
+impl Default for LogicBlockDef {
+    fn default() -> Self {
+        Self {
+            ipt: 1,
+            max_ipt: 40,
+            range: 8.0 * 10.0,
+            privileged: false,
+        }
+    }
+}
+
+/// `MemoryBlock` family knobs (`MemoryBlock.memoryCapacity`).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct MemoryDef {
+    /// `MemoryBlock.memoryCapacity`.
+    pub capacity: i32,
+    /// Whether this is the privileged `world-cell`.
+    pub privileged: bool,
+}
+
+/// `SwitchBlock` family data (privileged flag for `world-switch`).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SwitchDef {
+    /// Whether this is the privileged `world-switch`.
+    pub privileged: bool,
+}
+
 /// Typed family data for one block (plan 07 §6.1).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum BlockKindData {
@@ -408,6 +450,12 @@ pub enum BlockKindData {
     LaunchPad(LaunchPadDef),
     /// `LegacyBlock` + subclasses.
     Legacy(LegacyDef),
+    /// `LogicBlock` (plan 13).
+    Logic(LogicBlockDef),
+    /// `MemoryBlock` (plan 13).
+    Memory(MemoryDef),
+    /// `SwitchBlock` (plan 13).
+    Switch(SwitchDef),
     /// A plain `Block`/family owned by another plan.
     #[default]
     None,
@@ -485,6 +533,9 @@ impl BlockKindData {
             BlockKind::LegacyMechPad
             | BlockKind::LegacyUnitFactory
             | BlockKind::LegacyCommandCenter => BlockKindData::Legacy(LegacyDef::default()),
+            BlockKind::LogicBlock => BlockKindData::Logic(LogicBlockDef::default()),
+            BlockKind::MemoryBlock => BlockKindData::Memory(MemoryDef::default()),
+            BlockKind::SwitchBlock => BlockKindData::Switch(SwitchDef::default()),
             _ => BlockKindData::None,
         }
     }
@@ -622,6 +673,19 @@ impl BlockKindData {
                     def.power_usage = 0.5;
                 }
             }
+            // Plan 13 §3.6: `Blocks.java` logic region values.
+            "micro-processor" => self.set_logic(2, 40, 8.0 * 10.0, false),
+            "logic-processor" => self.set_logic(8, 40, 8.0 * 22.0, false),
+            "hyper-processor" => self.set_logic(25, 40, 8.0 * 42.0, false),
+            "world-processor" => self.set_logic(8, 1000, f32::MAX, true),
+            "memory-cell" => self.set_memory(64, false),
+            "memory-bank" => self.set_memory(512, false),
+            "world-cell" => self.set_memory(512, true),
+            "world-switch" => {
+                if let BlockKindData::Switch(def) = self {
+                    def.privileged = true;
+                }
+            }
             _ => {}
         }
     }
@@ -654,6 +718,22 @@ impl BlockKindData {
             def.drill_time = drill_time;
             def.output = output;
             def.attribute = -1;
+        }
+    }
+
+    fn set_logic(&mut self, ipt: i32, max_ipt: i32, range: f32, privileged: bool) {
+        if let BlockKindData::Logic(def) = self {
+            def.ipt = ipt;
+            def.max_ipt = max_ipt;
+            def.range = range;
+            def.privileged = privileged;
+        }
+    }
+
+    fn set_memory(&mut self, capacity: i32, privileged: bool) {
+        if let BlockKindData::Memory(def) = self {
+            def.capacity = capacity;
+            def.privileged = privileged;
         }
     }
 
@@ -696,6 +776,9 @@ impl BlockKindData {
             | BlockKindData::LandingPad(_)
             | BlockKindData::LaunchPad(_) => BlockFamily::Campaign,
             BlockKindData::Legacy(_) => BlockFamily::Legacy,
+            BlockKindData::Logic(_) | BlockKindData::Memory(_) | BlockKindData::Switch(_) => {
+                BlockFamily::Logic
+            }
             BlockKindData::None => BlockFamily::Other,
         }
     }
@@ -710,6 +793,7 @@ impl BlockKindData {
             BlockFamily::Campaign => "campaign",
             BlockFamily::Legacy => "legacy",
             BlockFamily::Construct => "construct",
+            BlockFamily::Logic => "logic",
             BlockFamily::Other => "other",
         }
     }

@@ -494,6 +494,9 @@ pub fn building_kind(data: &BlockKindData) -> BuildingKind {
         D::LaunchPad(_) => BuildingKind::LAUNCH_PAD,
         D::Wall(_) => BuildingKind::WALL,
         D::Door(_) => BuildingKind::DOOR,
+        D::Logic(_) => BuildingKind::LOGIC,
+        D::Memory(_) => BuildingKind::MEMORY,
+        D::Switch(_) => BuildingKind::SWITCH,
         _ => BuildingKind::GENERIC,
     }
 }
