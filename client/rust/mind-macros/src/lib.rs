@@ -13,8 +13,11 @@
 //!   of `::mind_core::entities::meta::SimComponentMeta`.
 //! - `entity_def! { Name = [Comp, ...]; ... }` emits
 //!   `::mind_core::entities::meta::ENTITY_DEF_SPECS`.
+//! - `#[derive(LoadRegions)]` with `#[load(...)]` field attributes emits an impl
+//!   of `::mind_core::assets::regions::LoadRegions` (plan 03 M6, the Rust
+//!   `LoadRegionProcessor` replacement).
 //!
-//! Adding a new derive (e.g. plan 03's `LoadRegions`) is purely additive: add a
+//! Adding a new derive is purely additive: add a
 //! `#[proc_macro_derive(Name, attributes(...))]` fn below that emits an impl of a
 //! trait owned by the consuming crate (see the hand-off note in
 //! `05_SIM_CORE_IMPLEMENTATION_PLAN.md` Changelog).
@@ -365,4 +368,189 @@ pub fn entity_def(input: TokenStream) -> TokenStream {
             &[#(#specs),*];
     };
     output.into()
+}
+
+/// Parsed `#[load(...)]` options for one field (plan 03 M6).
+struct LoadOptions {
+    /// Region pattern (`@`, `@size`, `#`/`#1`/`#2` templating; ABI order).
+    value: String,
+    /// Explicit missing-region fallback; `None` = annotation default `"error"`.
+    fallback: Option<String>,
+    /// Array dimensions and their lengths (`length`/`lengths`); empty = scalar.
+    lengths: Vec<syn::Expr>,
+}
+
+impl Parse for LoadOptions {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut value: Option<String> = None;
+        let mut fallback: Option<String> = None;
+        let mut lengths: Vec<syn::Expr> = Vec::new();
+
+        // Optional positional pattern: `#[load("@-top", ...)]`.
+        if input.cursor().literal().is_some() {
+            value = Some(input.parse::<syn::LitStr>()?.value());
+        }
+        while !input.is_empty() {
+            if input.peek(Token![,]) {
+                input.parse::<Token![,]>()?;
+            }
+            if input.is_empty() {
+                break;
+            }
+            let key: Ident = input.parse()?;
+            input.parse::<Token![=]>()?;
+            match key.to_string().as_str() {
+                "value" => value = Some(input.parse::<syn::LitStr>()?.value()),
+                "fallback" => fallback = Some(input.parse::<syn::LitStr>()?.value()),
+                "length" => lengths = vec![input.parse::<syn::Expr>()?],
+                "lengths" => {
+                    let content;
+                    syn::bracketed!(content in input);
+                    lengths = Punctuated::<syn::Expr, Token![,]>::parse_terminated(&content)?
+                        .into_iter()
+                        .collect();
+                }
+                other => {
+                    return Err(syn::Error::new(
+                        key.span(),
+                        format!("unknown `load` option `{other}`"),
+                    ));
+                }
+            }
+        }
+
+        let value = value.ok_or_else(|| {
+            syn::Error::new(
+                input.span(),
+                "`#[load(...)]` requires a region pattern (positional string or `value = \"...\"`)",
+            )
+        })?;
+        if lengths.len() > 2 {
+            return Err(syn::Error::new(
+                input.span(),
+                "`#[load(...)]` supports at most 2 array dimensions",
+            ));
+        }
+        Ok(Self {
+            value,
+            fallback,
+            lengths,
+        })
+    }
+}
+
+/// Derives `LoadRegions` for a struct of `Option<Region>` / `Vec` fields.
+///
+/// ```ignore
+/// #[derive(Default, LoadRegions)]
+/// pub struct ConveyorRegions {
+///     #[load("@-#1-#2", lengths = [7, 4])] pub regions: Vec<Vec<Option<Region>>>,
+/// }
+/// ```
+///
+/// A scalar field becomes `audit.load(ctx, pattern, fallback).cloned()`; an array
+/// field emits the same nested `for` loops as `LoadRegionProcessor` (outer loop =
+/// `#1`, inner = `#2`). Templating is delegated to `regions::template` through
+/// `RegionAudit::load`, keeping the `@size` → `@` → `#1` → `#2` → `#` order ABI.
+/// Fields without `#[load(...)]` are ignored.
+#[proc_macro_derive(LoadRegions, attributes(load))]
+pub fn derive_load_regions(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match expand_load_regions(&input) {
+        Ok(tokens) => tokens.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
+fn expand_load_regions(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
+    let ident = &input.ident;
+    let Data::Struct(data) = &input.data else {
+        return Err(syn::Error::new_spanned(
+            ident,
+            "LoadRegions can only be derived for structs",
+        ));
+    };
+    let Fields::Named(fields) = &data.fields else {
+        return Err(syn::Error::new_spanned(
+            ident,
+            "LoadRegions requires named fields",
+        ));
+    };
+
+    // Upstream `LoadRegionProcessor` sorts fields by name before emission.
+    let mut parsed: Vec<(&Ident, LoadOptions)> = Vec::new();
+    for field in &fields.named {
+        let Some(field_ident) = &field.ident else {
+            continue;
+        };
+        let attr = field.attrs.iter().find(|attr| attr.path().is_ident("load"));
+        let Some(attr) = attr else {
+            continue;
+        };
+        let options = attr.parse_args::<LoadOptions>()?;
+        parsed.push((field_ident, options));
+    }
+    parsed.sort_by_key(|a| a.0.to_string());
+
+    let statements = parsed.iter().map(|(field, options)| {
+        let pattern = syn::LitStr::new(&options.value, field.span());
+        let fallback = match &options.fallback {
+            Some(fallback) => {
+                let fallback = syn::LitStr::new(fallback, field.span());
+                quote!(::core::option::Option::Some(#fallback))
+            }
+            None => quote!(::core::option::Option::None),
+        };
+        let load = quote!(audit.load(&*ctx, #pattern, #fallback).cloned());
+        match options.lengths.len() {
+            0 => quote! {
+                self.#field = #load;
+            },
+            1 => {
+                let len0 = &options.lengths[0];
+                quote! {
+                    {
+                        let mut __values = ::std::vec::Vec::with_capacity(#len0);
+                        for __index0 in 0..#len0 {
+                            ctx.indices[0] = __index0;
+                            __values.push(#load);
+                        }
+                        self.#field = __values;
+                    }
+                }
+            }
+            2 => {
+                let len0 = &options.lengths[0];
+                let len1 = &options.lengths[1];
+                quote! {
+                    {
+                        let mut __values = ::std::vec::Vec::with_capacity(#len0);
+                        for __index0 in 0..#len0 {
+                            ctx.indices[0] = __index0;
+                            let mut __inner = ::std::vec::Vec::with_capacity(#len1);
+                            for __index1 in 0..#len1 {
+                                ctx.indices[1] = __index1;
+                                __inner.push(#load);
+                            }
+                            __values.push(__inner);
+                        }
+                        self.#field = __values;
+                    }
+                }
+            }
+            _ => unreachable!("validated in LoadOptions::parse"),
+        }
+    });
+
+    Ok(quote! {
+        impl ::mind_core::assets::regions::LoadRegions for #ident {
+            fn load_regions(
+                &mut self,
+                ctx: &mut ::mind_core::assets::regions::LoadCtx,
+                audit: &mut ::mind_core::assets::regions::RegionAudit,
+            ) {
+                #(#statements)*
+            }
+        }
+    })
 }

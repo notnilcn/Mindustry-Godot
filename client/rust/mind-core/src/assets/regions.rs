@@ -53,15 +53,17 @@ impl<'a> LoadCtx<'a> {
     }
 }
 
-/// Implemented by content records that carry `@Load` region fields.
+/// Implemented by region-holder structs whose fields carry `@Load` annotations.
 ///
-/// The `#[derive(LoadRegions)]` macro (plan 05 `mind-macros`) generates this
-/// impl: each annotated field becomes `ctx.find(...)` (scalar),
-/// `ctx.atlas.find(template)` with fallback, or the corresponding nested loops
-/// for array dimensions.
+/// The `#[derive(LoadRegions)]` macro (`mind-macros`) generates this impl: each
+/// annotated scalar field becomes `audit.load(ctx, pattern, fallback).cloned()`
+/// and each array field emits the same nested `for` loops as
+/// `LoadRegionProcessor` (setting `ctx.indices`), so the templating order stays
+/// ABI. The resolved [`Region`]s are owned (`Option<Region>`) so the holder can
+/// be a transient audit view and never needs a lifetime.
 pub trait LoadRegions {
-    /// Populates every `@Load` field from `ctx`.
-    fn load_regions(&mut self, ctx: &LoadCtx);
+    /// Populates every `@Load` field from `ctx`, folding misses into `audit`.
+    fn load_regions(&mut self, ctx: &mut LoadCtx, audit: &mut RegionAudit);
 }
 
 /// `LoadRegionProcessor.parse` replacement order:

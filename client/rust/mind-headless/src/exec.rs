@@ -307,6 +307,27 @@ fn cmd_assets_regions(
         .map(String::as_str)
         .collect();
 
+    // M6 runtime half: resolve every `@Load` block field through the derive
+    // macro and fold misses into a `RegionAudit`.
+    //
+    // Arc `find(name)` with no explicit `fallback` returns the `error` region
+    // (`found() == false`) rather than failing, so several vanilla `@Load`
+    // fields (e.g. `Conveyor.regions[5..7]`, `StaticWall.large` for walls with
+    // no large sprite) are legitimately absent. The port keeps the strict
+    // `fallback=error` audit *for regions the pack promises*: a default miss is
+    // fatal only when the resolved name is in the generated inventory.
+    let mut registry = boot_content()?;
+    let audit = registry.load_regions(&index);
+    let expected: std::collections::BTreeSet<&str> =
+        inventory.regions.iter().map(String::as_str).collect();
+    let runtime_errors: Vec<&str> = audit
+        .errors
+        .iter()
+        .map(String::as_str)
+        .filter(|name| expected.contains(name))
+        .collect();
+    let upstream_not_found = audit.errors.len() - runtime_errors.len();
+
     if json {
         let report = serde_json::json!({
             "atlas": manifest_path.display().to_string(),
@@ -315,6 +336,11 @@ fn cmd_assets_regions(
             "resolved": inventory.regions.len() - missing.len(),
             "missing": missing,
             "missingInSources": inventory.missing_in_sources,
+            "loadRegions": {
+                "fatal": runtime_errors,
+                "explicitFallbacks": audit.explicit_fallbacks,
+                "upstreamNotFound": upstream_not_found,
+            },
         });
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
@@ -324,12 +350,23 @@ fn cmd_assets_regions(
             inventory.regions.len(),
             missing.len()
         );
+        println!(
+            "assets regions: @Load audit {} fallback=error miss(es), {} explicit fallback(s), {} upstream not-found",
+            runtime_errors.len(),
+            audit.explicit_fallbacks.len(),
+            upstream_not_found
+        );
         for name in &missing {
             log::error!("assets regions: missing region `{name}`");
         }
+        for name in &runtime_errors {
+            log::error!("assets regions: @Load fallback=error miss `{name}`");
+        }
     }
 
-    if inventory.missing_in_sources.is_empty() && (missing.is_empty() || !assert_complete) {
+    let inventory_ok =
+        inventory.missing_in_sources.is_empty() && (missing.is_empty() || !assert_complete);
+    if inventory_ok && runtime_errors.is_empty() {
         Ok(EXIT_PASS)
     } else {
         if !inventory.missing_in_sources.is_empty() {
