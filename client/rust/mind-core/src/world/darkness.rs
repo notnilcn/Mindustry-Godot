@@ -134,11 +134,12 @@ mod tests {
     #[test]
     fn darkness_bfs_marks_fully_enclosed_walls() {
         let content = crate::content::test_support::test_registry();
-        // Find any static-kind block (plan 02's environment registrations).
+        // Find a static, solid, floor-filling block (`Tile.staticDarkness`
+        // after the plan-02 `fillsTile` reconciliation).
         let Some(block) = content
             .blocks()
             .iter()
-            .find(|def| crate::world::tile::is_static_kind(def.kind))
+            .find(|def| def.solid && def.fills_tile && crate::world::tile::is_static_kind(def.kind))
             .map(|def| def.id)
         else {
             return;

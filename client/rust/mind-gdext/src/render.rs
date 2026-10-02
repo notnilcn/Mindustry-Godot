@@ -26,11 +26,13 @@ use crate::sim_host::MindSimHost;
 
 mod atlas_bind;
 mod blocks;
+mod building_cache;
 mod floor;
 mod shaders;
 mod shadow;
 
 pub use blocks::BlockRenderer;
+pub use building_cache::BuildingCacheRenderer;
 pub use floor::FloorRenderer;
 pub use shaders::ShaderRegistry;
 pub use shadow::ShadowRenderer;
@@ -54,6 +56,8 @@ pub struct RenderStats {
     pub mesh_rebuilds: i64,
     /// Dynamic sprites emitted this frame.
     pub dynamic_sprites: i64,
+    /// Cached-building sprites emitted this frame.
+    pub cached_sprites: i64,
     /// Regions that fell back to `error`/placeholder this frame.
     pub missing_regions: i64,
     /// Shaders loaded by the `ShaderRegistry` (plan 16 M8).
@@ -93,6 +97,7 @@ impl RenderStats {
         );
         dict.set(&key("mesh_rebuilds"), &self.mesh_rebuilds.to_variant());
         dict.set(&key("dynamic_sprites"), &self.dynamic_sprites.to_variant());
+        dict.set(&key("cached_sprites"), &self.cached_sprites.to_variant());
         dict.set(&key("missing_regions"), &self.missing_regions.to_variant());
         dict.set(&key("shaders_loaded"), &self.shaders_loaded.to_variant());
         dict.set(
@@ -131,6 +136,7 @@ pub struct MindWorldRenderer {
     visibility_dirty: bool,
     floor: Option<FloorRenderer>,
     blocks: Option<BlockRenderer>,
+    building_cache: Option<BuildingCacheRenderer>,
     shadow: Option<ShadowRenderer>,
     shaders: ShaderRegistry,
 }
@@ -150,6 +156,7 @@ impl INode2D for MindWorldRenderer {
             visibility_dirty: false,
             floor: None,
             blocks: None,
+            building_cache: None,
             shadow: None,
             shaders: ShaderRegistry::new(),
         }
@@ -248,6 +255,17 @@ impl MindWorldRenderer {
                 &self.shaders,
             ));
         }
+        if let (Some(under_band), Some(block_band)) = (
+            self.band_node_at(BandKey::base(Layer::BlockUnder)),
+            self.band_node_at(BandKey::base(Layer::Block)),
+        ) {
+            self.building_cache = Some(BuildingCacheRenderer::new(
+                host.clone(),
+                assets.clone(),
+                under_band,
+                block_band,
+            ));
+        }
         if let Some(block_band) = self.band_node_at(BandKey::base(Layer::Block)) {
             self.blocks = Some(BlockRenderer::new(host, assets, block_band));
         }
@@ -319,6 +337,14 @@ impl MindWorldRenderer {
             self.stats.missing_regions = floor_stats.missing_regions as i64;
         }
         self.stats.stage_trace.push(String::from("floor"));
+        if let Some(cache) = self.building_cache.as_mut() {
+            cache.update(&view);
+            let cache_stats = cache.stats();
+            self.stats.cached_sprites = cache_stats.sprites;
+            self.stats.mesh_rebuilds += cache_stats.mesh_rebuilds as i64;
+            self.stats.missing_regions += cache_stats.missing_regions as i64;
+        }
+        self.stats.stage_trace.push(String::from("building_cache"));
         if let Some(blocks) = self.blocks.as_mut() {
             blocks.update(&view);
             let block_stats = blocks.stats();

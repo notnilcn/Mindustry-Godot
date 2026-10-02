@@ -121,11 +121,13 @@ impl Tile {
         false
     }
 
-    /// Whether the block contributes static darkness (`Block.isStatic`-shaped).
+    /// Whether the block contributes static darkness (`Tile.staticDarkness`:
+    /// `block.solid && block.fillsTile && !block.synthetic()`).
     pub fn static_darkness(&self, content: &ContentRegistry) -> bool {
-        content
-            .block(self.block)
-            .is_some_and(|def| is_static_kind(def.kind))
+        self.build.is_none()
+            && content
+                .block(self.block)
+                .is_some_and(|def| def.solid && def.fills_tile)
     }
 
     /// The item dropped when this tile is mined (`Block.drop`).
