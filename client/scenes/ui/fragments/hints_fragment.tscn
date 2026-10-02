@@ -1,0 +1,41 @@
+; SPDX-License-Identifier: GPL-3.0-only
+;
+; Hints overlay (plan 14 §3.5/M2). Catalogue data + display; sector gating is
+; plan 12's runtime.
+;
+; Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
+
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://ui/fragments/hints_fragment.gd" id="1_hints"]
+
+[node name="HintsFragment" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("1_hints")
+
+[node name="Panel" type="PanelContainer" parent="."]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -220.0
+offset_top = -60.0
+offset_right = 220.0
+offset_bottom = 60.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_type_variation = &"defaultDialog"
+
+[node name="Label" type="Label" parent="Panel"]
+layout_mode = 2
+text = ""
+autowrap_mode = 3
+horizontal_alignment = 1

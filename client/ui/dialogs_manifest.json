@@ -1,0 +1,15 @@
+{
+  "format": 1,
+  "dialogs": [
+    {"name": "about", "scene": "res://scenes/ui/dialogs/about_dialog.tscn", "pause": false, "menu_openable": true, "args": []},
+    {"name": "widget_gallery", "scene": "res://scenes/ui/dialogs/widget_gallery.tscn", "pause": false, "menu_openable": false, "args": []}
+  ],
+  "fragments": [
+    {"name": "menu", "scene": "res://scenes/ui/fragments/menu_fragment.tscn", "group": "menu"},
+    {"name": "loading", "scene": "res://scenes/ui/fragments/loading_fragment.tscn", "group": "loading"},
+    {"name": "fade_in", "scene": "res://scenes/ui/fragments/fade_in_fragment.tscn", "group": "overlay"},
+    {"name": "performance", "scene": "res://scenes/ui/fragments/performance_fragment.tscn", "group": "hud"},
+    {"name": "hints", "scene": "res://scenes/ui/fragments/hints_fragment.tscn", "group": "hud"}
+  ],
+  "prompts": ["show_info", "show_text", "show_confirm", "show_text_input", "show_info_toast", "announce", "toast"]
+}

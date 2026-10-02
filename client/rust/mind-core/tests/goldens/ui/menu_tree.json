@@ -1,0 +1,85 @@
+{
+  "format": 1,
+  "wire_len": 106,
+  "wire_hex": "0100010000000300050014000009006772617950616e656c0d0002010300030302000e00000200486916000005007469746c650900030904000e00000300766f6c1600000300766f6c1a0001000000001b00010000803f04000304010010000008006e65742d69636f6e",
+  "tree": {
+    "tree": {
+      "type": "table",
+      "props": [],
+      "defaults": [],
+      "children": [
+        {
+          "type": "table",
+          "props": [
+            {
+              "key": "background",
+              "value": "grayPanel"
+            },
+            {
+              "row": true
+            }
+          ],
+          "defaults": [],
+          "children": [
+            {
+              "type": "label",
+              "props": [
+                {
+                  "key": "text",
+                  "value": "Hi"
+                },
+                {
+                  "key": "id",
+                  "value": "title"
+                }
+              ],
+              "defaults": [],
+              "children": []
+            },
+            {
+              "type": "slider",
+              "props": [
+                {
+                  "key": "text",
+                  "value": "vol"
+                },
+                {
+                  "key": "id",
+                  "value": "vol"
+                },
+                {
+                  "key": "min",
+                  "value": 0.0
+                },
+                {
+                  "key": "max",
+                  "value": 1.0
+                }
+              ],
+              "defaults": [],
+              "children": []
+            },
+            {
+              "type": "image",
+              "props": [
+                {
+                  "key": "region",
+                  "value": "net-icon"
+                }
+              ],
+              "defaults": [],
+              "children": []
+            }
+          ]
+        }
+      ]
+    },
+    "ids": [
+      "title",
+      "vol"
+    ],
+    "images": [
+      "net-icon"
+    ]
+  }
+}

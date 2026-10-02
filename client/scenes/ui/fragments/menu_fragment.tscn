@@ -1,0 +1,50 @@
+; SPDX-License-Identifier: GPL-3.0-only
+;
+; Menu fragment shell (plan 14 §3.5, M0): title panel + About button wired to
+; `MindUi.open_dialog("about")`. Full desktop/mobile menu lands in M3.
+;
+; Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
+
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://ui/fragments/menu_fragment.gd" id="1_menu"]
+
+[node name="MenuFragment" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1
+script = ExtResource("1_menu")
+
+[node name="Center" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1
+
+[node name="Panel" type="PanelContainer" parent="Center"]
+layout_mode = 2
+theme_type_variation = &"defaultDialog"
+
+[node name="Layout" type="VBoxContainer" parent="Center/Panel"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="Center/Panel/Layout"]
+layout_mode = 2
+text = "Mindustry-Godot"
+horizontal_alignment = 1
+
+[node name="Buttons" type="VBoxContainer" parent="Center/Panel/Layout"]
+layout_mode = 2
+
+[node name="AboutButton" type="Button" parent="Center/Panel/Layout/Buttons"]
+layout_mode = 2
+theme_type_variation = &"defaultt"
+text = "About"

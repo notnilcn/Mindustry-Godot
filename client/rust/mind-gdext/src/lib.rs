@@ -21,6 +21,7 @@ mod settings;
 mod sim_host;
 mod stdb;
 mod tile_grid;
+mod ui;
 
 pub use assets::MindAssets;
 pub use audio::MindAudio;
@@ -33,6 +34,7 @@ pub use render::{MindMinimap, MindRender, MindWorldRenderer};
 pub use sim_host::MindSimHost;
 pub use stdb::{StdbBinder, StdbConnector};
 pub use tile_grid::MindTileGrid;
+pub use ui::MindUi;
 
 use godot::prelude::*;
 

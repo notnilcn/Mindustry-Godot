@@ -1,0 +1,25 @@
+{
+  "format": 1,
+  "fixtures": [
+    {
+      "name": "shorthand",
+      "source": "label: \"Hello\"\nspace\nbutton: @ok\n",
+      "normalized": "label: Hello\nspace\nbutton: @ok\n"
+    },
+    {
+      "name": "table_block",
+      "source": "table {\n  background: grayPanel\n  margin: 4\n  row\n  label: \"a b\"\n}\n",
+      "normalized": "table{\n  background: grayPanel\n  margin: 4\n  row\n  label: \"a b\"\n}\n"
+    },
+    {
+      "name": "button_block",
+      "source": "button: @ok {\n  clicked: \"yes\"\n  width: 100\n}\n",
+      "normalized": "button: @ok {\n  clicked: yes\n  width: 100\n}\n"
+    },
+    {
+      "name": "slider",
+      "source": "slider: \"vol\" {\n  min: 0\n  max: 1\n  step: 0.1\n}\n",
+      "normalized": "slider: vol {\n  min: 0\n  max: 1\n  step: 0.1\n}\n"
+    }
+  ]
+}

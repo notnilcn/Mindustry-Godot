@@ -321,11 +321,84 @@ pub enum Command {
         command: NetworkCommand,
     },
 
+    /// UI text/builder/manifest scenarios (plan 14 §7b).
+    Ui {
+        /// UI subcommand.
+        #[command(subcommand)]
+        command: UiCommand,
+    },
+
     /// Parity/verification registries, catalogs and gate reports (plan 23).
     Parity {
         /// Parity subcommand.
         #[command(subcommand)]
         command: ParityCommand,
+    },
+}
+
+/// `ui` subcommands (plan 14 §7b).
+#[derive(Debug, Subcommand)]
+pub enum UiCommand {
+    /// Render the text/markup corpus and compare against a golden.
+    Text {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Write the rendered corpus JSON here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+        /// Compare the rendered corpus against this golden.
+        #[arg(long)]
+        golden: Option<PathBuf>,
+    },
+
+    /// Parse → write → parse every DSL fixture and compare the normalized output.
+    Dsl {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Write the normalized fixture JSON here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+        /// Compare the normalized output against this golden.
+        #[arg(long)]
+        golden: Option<PathBuf>,
+    },
+
+    /// Encode/decode a menu tree and dump it.
+    MenuTree {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Write the menu-tree JSON here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+        /// Compare the menu-tree JSON against this golden.
+        #[arg(long)]
+        golden: Option<PathBuf>,
+    },
+
+    /// Validate `dialogs_manifest.json` + `styles_manifest.json`.
+    Manifest {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Repo root override (defaults to discovery from cwd).
+        #[arg(long)]
+        repo: Option<PathBuf>,
+    },
+
+    /// Compose HUD status/objective text across wave/mission/attack fixtures.
+    HudText {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Write the composed-text JSON here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+        /// Compare the composed text against this golden.
+        #[arg(long)]
+        golden: Option<PathBuf>,
     },
 }
 

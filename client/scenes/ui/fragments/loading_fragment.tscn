@@ -1,0 +1,61 @@
+; SPDX-License-Identifier: GPL-3.0-only
+;
+; Loading overlay fragment (plan 14 §3.5/M2). Static structure; loading_fragment.gd
+; drives progress/text. Inserted under UiRoot/LoadingLayer from the manifest.
+;
+; Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
+
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://ui/fragments/loading_fragment.gd" id="1_loading"]
+
+[node name="LoadingFragment" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_loading")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.7)
+
+[node name="Panel" type="PanelContainer" parent="."]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -200.0
+offset_top = -60.0
+offset_right = 200.0
+offset_bottom = 60.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_type_variation = &"defaultDialog"
+
+[node name="Layout" type="VBoxContainer" parent="Panel"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Text" type="Label" parent="Panel/Layout"]
+layout_mode = 2
+text = "Loading..."
+horizontal_alignment = 1
+
+[node name="Bar" type="ProgressBar" parent="Panel/Layout"]
+layout_mode = 2
+value = 0.0
+
+[node name="Button" type="Button" parent="Panel/Layout"]
+layout_mode = 2
+theme_type_variation = &"defaultt"
+text = "Cancel"

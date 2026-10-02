@@ -19,11 +19,13 @@
 ; ├── MindCampaign (MindCampaign) NEW (plan 12): campaign/sector/rules/objectives facade
 ; ├── Planet (CanvasLayer)      NEW: g3d planet host (plan 16 M7)
 ; └── Ui (CanvasLayer)
+;     ├── UiRoot (ui_root.tscn instance)   NEW (plan 14): menus/HUD/dialogs
 ;     └── StateInspector (state_inspector.tscn instance)
 
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="PackedScene" path="res://scenes/ui/state_inspector.tscn" id="1_inspector"]
+[ext_resource type="PackedScene" path="res://scenes/ui/ui_root.tscn" id="2_uiroot"]
 
 [node name="Spine" type="Node"]
 
@@ -57,6 +59,8 @@ zoom = Vector2(2, 2)
 [node name="Planet" type="CanvasLayer" parent="."]
 
 [node name="Ui" type="CanvasLayer" parent="."]
+
+[node name="UiRoot" parent="Ui" instance=ExtResource("2_uiroot")]
 
 [node name="StateInspector" parent="Ui" instance=ExtResource("1_inspector")]
 
