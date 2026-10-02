@@ -11,6 +11,7 @@ use std::time::Instant;
 use anyhow::{Result, bail};
 use bevy_ecs::entity::Entity;
 use mind_core::ai::UnitHarness;
+use mind_core::determinism::Checksummer;
 
 use crate::cli::UnitsCommand;
 
@@ -29,7 +30,11 @@ pub struct ScenarioOutput {
 
 /// Scenario names registered for the `units` subcommand (append-only).
 pub fn names() -> &'static [&'static str] {
-    &["units_spawn_path_arrive"]
+    &[
+        "units_spawn_path_arrive",
+        "units_formation",
+        "units_spawn_group",
+    ]
 }
 
 /// Runs a `units` subcommand.
@@ -74,6 +79,8 @@ fn round3(value: f32) -> f32 {
 pub fn run_scenario(name: &str) -> Result<ScenarioOutput> {
     match name {
         "units_spawn_path_arrive" => spawn_path_arrive(),
+        "units_formation" => formation(),
+        "units_spawn_group" => spawn_group(),
         other => bail!("unknown units scenario `{other}`"),
     }
 }
@@ -119,6 +126,97 @@ fn spawn_path_arrive() -> Result<ScenarioOutput> {
 fn tile_center(x: i32, y: i32) -> (f32, f32) {
     let ts = mind_core::config::TILESIZE as f32;
     ((x as f32 + 0.5) * ts, (y as f32 + 0.5) * ts)
+}
+
+/// `units_formation`: deterministic `UnitGroup` packing for a 10-unit squad.
+///
+/// Exercises plan 11 §3.8 deviation 5 (synchronous, join-free formation). The
+/// per-unit `ControlPathfinder` raycast clamp is not on this branch, so the
+/// dump covers the compression/physics result only.
+fn formation() -> Result<ScenarioOutput> {
+    use mind_core::ai::UnitGroup;
+    use mind_core::ai::unit_group::FormationUnit;
+
+    let units: Vec<FormationUnit> = (0..10)
+        .map(|i| {
+            FormationUnit::new(
+                200.0 + (i % 3) as f32 * 0.75,
+                200.0 + (i / 3) as f32 * 0.75,
+                8.0,
+            )
+        })
+        .collect();
+    let mut group = UnitGroup::new();
+    group.set_units(units);
+    group.calculate_formation(0);
+    let mut checksummer = Checksummer::new();
+    let offsets: Vec<serde_json::Value> = group
+        .positions
+        .iter()
+        .map(|(x, y)| {
+            checksummer.part(x);
+            checksummer.part(y);
+            serde_json::json!({ "x": round3(*x), "y": round3(*y) })
+        })
+        .collect();
+    let pass = group.valid && group.positions.len() == 10;
+    let report = serde_json::json!({
+        "scenario": "units_formation",
+        "pass": pass,
+        "unit_count": group.positions.len(),
+        "offsets": offsets,
+        "checksum": checksummer.finish().to_hex(),
+    });
+    let dump = canonical(&report)?;
+    Ok(ScenarioOutput { report, dump })
+}
+
+/// `units_spawn_group`: `SpawnGroup` scaling math across waves (plan 11 §3.10).
+///
+/// Runs the `getSpawned`/`getShield` formulas for a scaling group and a boss
+/// group, dumping per-wave counts and shields plus a determinism checksum.
+fn spawn_group() -> Result<ScenarioOutput> {
+    use mind_core::game::spawn_group::SpawnGroup;
+
+    let mut scaling = SpawnGroup::new("dagger");
+    scaling.unit_scaling = 2.0;
+    scaling.max = 20;
+
+    let mut boss = SpawnGroup::new("mace");
+    boss.begin = 10;
+    boss.spacing = 5;
+    boss.unit_amount = 1;
+    boss.shields = 500.0;
+    boss.shield_scaling = 100.0;
+
+    let mut checksummer = Checksummer::new();
+    let mut waves = Vec::new();
+    let mut pass = true;
+    for wave in 0..25 {
+        let scaling_count = scaling.get_spawned(wave);
+        let boss_count = boss.get_spawned(wave);
+        let boss_shield = boss.get_shield(wave);
+        pass &= (0..=scaling.max).contains(&scaling_count)
+            && (0..=boss.max).contains(&boss_count)
+            && boss_shield >= 0.0;
+        checksummer.part(&scaling_count);
+        checksummer.part(&boss_count);
+        checksummer.part(&boss_shield);
+        waves.push(serde_json::json!({
+            "wave": wave,
+            "dagger": scaling_count,
+            "mace": boss_count,
+            "mace_shield": round3(boss_shield),
+        }));
+    }
+    let report = serde_json::json!({
+        "scenario": "units_spawn_group",
+        "pass": pass,
+        "waves": waves,
+        "checksum": checksummer.finish().to_hex(),
+    });
+    let dump = canonical(&report)?;
+    Ok(ScenarioOutput { report, dump })
 }
 
 fn spawn_report(unit: &str, team: u8, x: f32, y: f32, ticks: u64, json: bool) -> Result<i32> {
@@ -243,12 +341,11 @@ mod tests {
     #[test]
     fn committed_goldens_match() {
         let base = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/units");
-        let out = run_scenario("units_spawn_path_arrive").expect("scenario");
-        let golden = std::fs::read_to_string(format!("{base}/units_spawn_path_arrive.json"))
-            .expect("units golden");
-        assert_eq!(
-            out.dump, golden,
-            "golden mismatch for units_spawn_path_arrive"
-        );
+        for name in names() {
+            let out = run_scenario(name).expect("scenario");
+            let golden = std::fs::read_to_string(format!("{base}/{name}.json"))
+                .unwrap_or_else(|_| panic!("missing units golden for {name}"));
+            assert_eq!(out.dump, golden, "golden mismatch for {name}");
+        }
     }
 }

@@ -118,21 +118,15 @@ impl Pathfinder {
         match self.fields.entry(key) {
             Entry::Occupied(mut entry) => {
                 if entry.get().targets != target_indices {
-                    let field = build_field(
-                        &self.tiles,
-                        self.width,
-                        self.height,
-                        cost,
-                        target_indices,
-                    );
+                    let field =
+                        build_field(&self.tiles, self.width, self.height, cost, target_indices);
                     entry.insert(field);
                     self.updates = self.updates.wrapping_add(1);
                 }
                 entry.into_mut()
             }
             Entry::Vacant(entry) => {
-                let field =
-                    build_field(&self.tiles, self.width, self.height, cost, target_indices);
+                let field = build_field(&self.tiles, self.width, self.height, cost, target_indices);
                 self.updates = self.updates.wrapping_add(1);
                 entry.insert(field)
             }

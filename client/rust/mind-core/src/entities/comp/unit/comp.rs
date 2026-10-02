@@ -10,8 +10,10 @@
 //! `meta entities` golden.
 
 use bevy_ecs::component::Component;
+use bevy_ecs::entity::Entity;
 
-use crate::content::UnitTypeId;
+use crate::content::{ItemId, StatusId, UnitTypeId};
+use crate::world::TilePos;
 
 /// Core unit state (`UnitComp` fields not owned by a base component).
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
@@ -187,7 +189,119 @@ pub struct TargetDummyComp;
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct SegmentComp {
     /// Parent entity for non-head segments.
-    pub parent: Option<bevy_ecs::entity::Entity>,
+    pub parent: Option<Entity>,
     /// Segment index (`0` = head).
     pub index: u8,
+}
+
+/// Item inventory (`ItemsComp.stack`). A unit carries one item type at a time.
+#[derive(Debug, Clone, Copy, PartialEq, Component, Default)]
+pub struct ItemsComp {
+    /// Held item + amount (`ItemStack`).
+    pub item: Option<(ItemId, i32)>,
+}
+
+impl ItemsComp {
+    /// Adds `amount` of `item` (`UnitComp.addItem`).
+    pub fn add_item(&mut self, item: ItemId, amount: i32) {
+        if amount <= 0 {
+            return;
+        }
+        match self.item {
+            Some((existing, current)) if existing == item => {
+                self.item = Some((item, current.saturating_add(amount)));
+            }
+            _ => self.item = Some((item, amount)),
+        }
+    }
+
+    /// Clears the inventory (`UnitComp.clearItem`).
+    pub fn clear_item(&mut self) {
+        self.item = None;
+    }
+}
+
+/// Shield pool (`ShieldComp`).
+#[derive(Debug, Clone, Copy, PartialEq, Component, Default)]
+pub struct ShieldComp {
+    /// Current shield points (`shield`).
+    pub shield: f32,
+}
+
+/// One active status effect (`StatusEntry`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StatusEntry {
+    /// Effect content id.
+    pub effect: StatusId,
+    /// Remaining duration in ticks (`time`).
+    pub duration: f32,
+}
+
+/// Status effect list (`StatusComp`); application/extend/cancel from plan 10.
+#[derive(Debug, Clone, PartialEq, Component, Default)]
+pub struct StatusComp {
+    /// Active entries, in application order.
+    pub statuses: Vec<StatusEntry>,
+}
+
+impl StatusComp {
+    /// Applies `entry`, extending an existing same-effect duration (`StatusComp.apply`).
+    pub fn apply(&mut self, entry: StatusEntry) {
+        if let Some(existing) = self
+            .statuses
+            .iter_mut()
+            .find(|status| status.effect == entry.effect)
+        {
+            existing.duration = existing.duration.max(entry.duration);
+        } else {
+            self.statuses.push(entry);
+        }
+    }
+
+    /// Whether any status is active.
+    pub fn has_effect(&self) -> bool {
+        !self.statuses.is_empty()
+    }
+
+    /// Cancels every entry for `effect`.
+    pub fn remove(&mut self, effect: StatusId) {
+        self.statuses.retain(|status| status.effect != effect);
+    }
+}
+
+/// Mining state (`MinerComp.mineTile`); mining logic lands with M2's `MinerAI`.
+#[derive(Debug, Clone, Copy, PartialEq, Component, Default)]
+pub struct MinerComp {
+    /// Tile being mined (`mineTile`).
+    pub mine_tile: Option<TilePos>,
+    /// Whether the unit is actively mining this tick (`mining`).
+    pub mining: bool,
+}
+
+/// Build plan queue size (`BuilderComp`); plans are plan 11 M2/M5.
+#[derive(Debug, Clone, Copy, PartialEq, Component, Default)]
+pub struct BuilderComp {
+    /// Number of queued build plans (`plans.size`).
+    pub plan_count: u32,
+}
+
+/// Spawner tether (`UnitTetherComp.spawnerUnit`).
+#[derive(Debug, Clone, Copy, PartialEq, Component, Default)]
+pub struct UnitTetherComp {
+    /// Spawning building entity, if resolved.
+    pub spawner: Option<Entity>,
+}
+
+/// Parent link for segmented/child units (`ChildComp`).
+#[derive(Debug, Clone, Copy, PartialEq, Component, Default)]
+pub struct ChildComp {
+    /// Parent entity.
+    pub parent: Option<Entity>,
+}
+
+/// Ownership link (`OwnerComp.owner`).
+#[derive(Debug, Clone, Copy, PartialEq, Component, Default)]
+pub struct OwnerComp {
+    /// Owning entity, if any.
+    pub owner: Option<Entity>,
 }

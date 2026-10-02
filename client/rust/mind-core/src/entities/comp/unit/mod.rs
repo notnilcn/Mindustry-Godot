@@ -11,11 +11,13 @@ pub mod comp;
 pub mod defs;
 pub mod lifecycle;
 pub mod queries;
+pub mod weapon_mount;
 
 pub use comp::{
-    BlockUnitComp, BuildingTetherComp, CrawlComp, ElevationMoveComp, HitboxComp, LegsComp,
-    MechComp, PayloadComp, PhysicsComp, SegmentComp, TankComp, TargetDummyComp, TimedComp,
-    TimedKillComp, UnitCore, UnitTypeComp, WaterMoveComp,
+    BlockUnitComp, BuilderComp, BuildingTetherComp, ChildComp, CrawlComp, ElevationMoveComp,
+    HitboxComp, ItemsComp, LegsComp, MechComp, MinerComp, OwnerComp, PayloadComp, PhysicsComp,
+    SegmentComp, ShieldComp, StatusComp, StatusEntry, TankComp, TargetDummyComp, TimedComp,
+    TimedKillComp, UnitCore, UnitTetherComp, UnitTypeComp, WaterMoveComp,
 };
 pub use defs::{
     ALL_KINDS, BASE_CLOSURE, ComponentKind, KIND_COUNT, UNIT_DEFS, UnitDefSpec, def_by_name,
@@ -25,7 +27,10 @@ pub use lifecycle::{
     ai_kind_of, controller_of, kill_unit, remove_unit, set_move_target, spawn_unit, spawn_unit_def,
     unit_type_of,
 };
-pub use queries::{UnitSnapshot, all, closest, count, in_radius, snapshot};
+pub use queries::{
+    UnitSnapshot, all, best, can_create, closest, count, get_cap, in_radius, snapshot,
+};
+pub use weapon_mount::{WeaponMount, WeaponsComp, setup_weapons};
 
 #[cfg(test)]
 mod tests {
@@ -62,5 +67,36 @@ mod tests {
         assert_eq!(near, Some(a));
         let radius = queries::in_radius(&mut harness.build.world, 40.0, 40.0, 32.0, None);
         assert_eq!(radius, vec![a]);
+    }
+
+    #[test]
+    fn segmented_spawn_builds_a_linked_chain() {
+        use crate::content::registries::units::UnitTypeDef;
+        use crate::entities::comp::unit::lifecycle::spawn_unit_def;
+
+        let mut harness = UnitHarness::new(64, 64, 9);
+        // Vanilla `segmentUnits` is 1; synthesize a 3-child chain to exercise the
+        // Java `UnitType.spawn` segmented branch (plan 11 §3.4).
+        let mut def: UnitTypeDef = harness
+            .content()
+            .unit_by_name("latum")
+            .expect("latum")
+            .clone();
+        def.segment_units = 3;
+        def.segment_spacing = 12.0;
+        let head = spawn_unit_def(&mut harness.build.world, 500, &def, 0, 128.0, 128.0, 0.0);
+
+        assert!(harness.build.world.get::<SegmentComp>(head).is_none());
+        // Count the chain children directly (deterministic entity-order scan).
+        let children: Vec<_> = crate::entities::comp::unit::queries::all(&mut harness.build.world)
+            .into_iter()
+            .filter(|e| harness.build.world.get::<ChildComp>(*e).is_some())
+            .collect();
+        assert_eq!(children.len(), 3, "head + 3 segment units");
+        for (index, child) in children.iter().enumerate() {
+            let segment = harness.build.world.get::<SegmentComp>(*child).unwrap();
+            assert_eq!(segment.index as usize, index + 1);
+            assert!(segment.parent.is_some());
+        }
     }
 }

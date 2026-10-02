@@ -1,0 +1,157 @@
+{
+  "scenario": "units_spawn_group",
+  "pass": true,
+  "waves": [
+    {
+      "wave": 0,
+      "dagger": 1,
+      "mace": 0,
+      "mace_shield": 0.0
+    },
+    {
+      "wave": 1,
+      "dagger": 1,
+      "mace": 0,
+      "mace_shield": 0.0
+    },
+    {
+      "wave": 2,
+      "dagger": 2,
+      "mace": 0,
+      "mace_shield": 0.0
+    },
+    {
+      "wave": 3,
+      "dagger": 2,
+      "mace": 0,
+      "mace_shield": 0.0
+    },
+    {
+      "wave": 4,
+      "dagger": 3,
+      "mace": 0,
+      "mace_shield": 0.0
+    },
+    {
+      "wave": 5,
+      "dagger": 3,
+      "mace": 0,
+      "mace_shield": 0.0
+    },
+    {
+      "wave": 6,
+      "dagger": 4,
+      "mace": 0,
+      "mace_shield": 100.0
+    },
+    {
+      "wave": 7,
+      "dagger": 4,
+      "mace": 0,
+      "mace_shield": 200.0
+    },
+    {
+      "wave": 8,
+      "dagger": 5,
+      "mace": 0,
+      "mace_shield": 300.0
+    },
+    {
+      "wave": 9,
+      "dagger": 5,
+      "mace": 0,
+      "mace_shield": 400.0
+    },
+    {
+      "wave": 10,
+      "dagger": 6,
+      "mace": 1,
+      "mace_shield": 500.0
+    },
+    {
+      "wave": 11,
+      "dagger": 6,
+      "mace": 0,
+      "mace_shield": 600.0
+    },
+    {
+      "wave": 12,
+      "dagger": 7,
+      "mace": 0,
+      "mace_shield": 700.0
+    },
+    {
+      "wave": 13,
+      "dagger": 7,
+      "mace": 0,
+      "mace_shield": 800.0
+    },
+    {
+      "wave": 14,
+      "dagger": 8,
+      "mace": 0,
+      "mace_shield": 900.0
+    },
+    {
+      "wave": 15,
+      "dagger": 8,
+      "mace": 1,
+      "mace_shield": 1000.0
+    },
+    {
+      "wave": 16,
+      "dagger": 9,
+      "mace": 0,
+      "mace_shield": 1100.0
+    },
+    {
+      "wave": 17,
+      "dagger": 9,
+      "mace": 0,
+      "mace_shield": 1200.0
+    },
+    {
+      "wave": 18,
+      "dagger": 10,
+      "mace": 0,
+      "mace_shield": 1300.0
+    },
+    {
+      "wave": 19,
+      "dagger": 10,
+      "mace": 0,
+      "mace_shield": 1400.0
+    },
+    {
+      "wave": 20,
+      "dagger": 11,
+      "mace": 1,
+      "mace_shield": 1500.0
+    },
+    {
+      "wave": 21,
+      "dagger": 11,
+      "mace": 0,
+      "mace_shield": 1600.0
+    },
+    {
+      "wave": 22,
+      "dagger": 12,
+      "mace": 0,
+      "mace_shield": 1700.0
+    },
+    {
+      "wave": 23,
+      "dagger": 12,
+      "mace": 0,
+      "mace_shield": 1800.0
+    },
+    {
+      "wave": 24,
+      "dagger": 13,
+      "mace": 0,
+      "mace_shield": 1900.0
+    }
+  ],
+  "checksum": "d38aaf2f726bbee5"
+}

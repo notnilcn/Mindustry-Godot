@@ -4,6 +4,8 @@
 //!
 //! Ported from `core/src/mindustry/core/GameState.java` (P0 subset: phase + tick).
 
+pub mod spawn_group;
+
 use serde::{Deserialize, Serialize};
 
 /// The coarse game phase.

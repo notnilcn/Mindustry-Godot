@@ -114,3 +114,57 @@ pub fn snapshot(world: &World, entity: Entity) -> Option<UnitSnapshot> {
         hit_size: hitbox.hit_size,
     })
 }
+
+/// The lowest-cost unit within `radius` (`Units.best`), scored by `score`.
+///
+/// Candidates are collected first so `score` can read the world; ties break by
+/// entity index for determinism. `score` is the port of upstream's `Floatf`
+/// target-priority function.
+pub fn best(
+    world: &mut World,
+    x: f32,
+    y: f32,
+    radius: f32,
+    team: Option<u8>,
+    score: impl Fn(&World, Entity) -> f32,
+) -> Option<Entity> {
+    let radius2 = radius * radius;
+    let candidates: Vec<Entity> = {
+        let mut query =
+            world.query_filtered::<(Entity, &Pos, &TeamComp), bevy_ecs::query::With<Unit>>();
+        query
+            .iter(world)
+            .filter(|(_, pos, t)| {
+                let dx = pos.x - x;
+                let dy = pos.y - y;
+                dx * dx + dy * dy <= radius2 && team.is_none_or(|want| t.team == want)
+            })
+            .map(|(entity, _, _)| entity)
+            .collect()
+    };
+    let mut best: Option<(f32, Entity)> = None;
+    for entity in candidates {
+        let value = score(world, entity);
+        match best {
+            Some((best_score, best_entity))
+                if value > best_score
+                    || (value == best_score && best_entity.index() <= entity.index()) => {}
+            _ => best = Some((value, entity)),
+        }
+    }
+    best.map(|(_, entity)| entity)
+}
+
+/// `Units.getCap(team)`: `None` = uncapped.
+///
+/// TODO(plan 12): read `Rules.disableUnitCap`, `team.ignoreUnitCap`,
+/// `unitCapVariable`/`TeamData.unitCap` and the campaign/PvP flags. Until plan
+/// 12 owns `Rules`/`Team`, the default is uncapped.
+pub const fn get_cap(_team: u8) -> Option<usize> {
+    None
+}
+
+/// `Units.canCreate(team, type)`: cap check + ban flag (plan 11 §3.4).
+pub fn can_create(world: &mut World, team: u8, cap: Option<usize>, banned: bool) -> bool {
+    !banned && cap.is_none_or(|limit| count(world, Some(team)) < limit)
+}
