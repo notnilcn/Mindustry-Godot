@@ -30,6 +30,10 @@ var _elapsed := 0.0
 @onready var _content_counts: Label = $ContentCounts
 @onready var _content_list: ItemList = $ContentList
 @onready var _region_preview: TextureRect = $RegionPreview
+@onready var _audio_label: Label = $Audio
+
+## Path to the plan-18 audio driver (`/root/Spine/MindAudio`).
+@export var audio_path: NodePath = ^"/root/Spine/MindAudio"
 
 
 func _ready() -> void:
@@ -77,7 +81,25 @@ func _refresh() -> void:
 	lines.append("checksum: %s" % str(state.get("checksum", "")))
 	lines.append("groups: %s" % _group_counts_text())
 	_label.text = "\n".join(lines)
+	_refresh_audio()
 	_refresh_net()
+
+
+## Plan-18 §3.10 `Audio` row: bus/music/lowpass/voice state from `MindAudio.stats()`.
+## Read-only; sourced from the `/root/Spine/MindAudio` driver.
+func _refresh_audio() -> void:
+	var audio := get_node_or_null(audio_path)
+	if audio == null or not is_instance_valid(audio):
+		_audio_label.text = "audio: -"
+		return
+	var stats: Dictionary = audio.call("stats")
+	_audio_label.text = "audio: %s  track=%s  wet=%.2f  voices=%d  loops=%d" % [
+		"paused" if bool(stats.get("sound_paused", false)) else "play",
+		("none" if str(stats.get("current_track", "")).is_empty() else str(stats.get("current_track", ""))),
+		float(stats.get("lowpass_wet", 0.0)),
+		int(stats.get("voices", 0)),
+		int(stats.get("loop_sounds", 0)),
+	]
 
 
 ## Live per-group entity counts (plan 05 M9 inspector surface); read-only.
