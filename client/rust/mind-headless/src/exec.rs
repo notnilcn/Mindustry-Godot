@@ -270,6 +270,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             MapsCommand::List { dir, json } => cmd_maps_list(dir, *json),
         },
         Command::Blocks { command } => crate::blocks_scenarios::run(command).map(|()| EXIT_PASS),
+        Command::Combat { command } => crate::combat_scenarios::run(command),
         Command::Render { command } => crate::render_scenarios::run(command),
         Command::Audio { command } => crate::audio_scenarios::run(command),
         Command::Mods { command } => match command {

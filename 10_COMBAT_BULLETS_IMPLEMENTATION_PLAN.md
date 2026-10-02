@@ -578,6 +578,19 @@ Each milestone ends with `cargo fmt`, `cargo clippy -p mind-core -- -D warnings`
 
 ---
 
+### 5.1 Milestone status (append-only; updated at each milestone)
+
+- [x] **M0 — Vertical slice: damage math + one bullet kind** (2026-10-02): `combat/{mod,harness,view}.rs`, `combat/damage/{mod,armor,area}.rs`, `combat/bullet/{mod,spawn,behavior,raycast}.rs` + `kinds/{mod,basic}.rs`. `apply_armor`, area/complete damage, `Bullet` component + lifecycle, `fuse`/`rail`/`laser`/… fixture bullets, tile-raycast collision, insertion-ordered harness, `FxSink`/`CombatFx` seam, `mind-headless combat scenario|dump|trace|bench`, golden `tests/golden/combat.json`. Tests: `combat::tests::*` + `tests/combat_golden.rs` (3). Scenarios: `combat_basic` (`377ce4f14c84b621`), `combat_bullet_pierce` (`3e09539ab47e0fd0`), `combat_determinism` (first `076bed2100b7b27c`).
+- [ ] **M1 — Full bullet framework**
+- [ ] **M2 — All behavior kinds**
+- [ ] **M3 — Lightning + Fires + Puddles**
+- [ ] **M4 — Weapon engine + patterns**
+- [ ] **M5 — Core turrets (Item/Liquid/Power) + consumers**
+- [ ] **M6 — Advanced turrets**
+- [ ] **M7 — Defense blocks + shields**
+- [ ] **M8 — View seams, MCP, inspector**
+- [ ] **M9 — Perf, parity audit, exit**
+
 ## 6. Data & formats
 
 ### 6.1 `BulletDef` field ownership / addendum to plan 02
@@ -762,3 +775,4 @@ CI treats budgets as recording-only until plan 23 wires hard gates; regressions 
 ## Changelog
 
 - 2026-10-01 — Draft v1 written (this file). No milestones started. Orchestrator notes: plans 07/08/09/11/16/17/21 were not present at write time; §3.14 freezes the interfaces this plan needs from them.
+- 2026-10-02 — **M0 complete** on `lane/10-combat`. Delivered `mind-core::combat` (harness, view/FX seam, damage armor/area, bullet component/spawn/behavior/raycast, `basic` kind), the `combat` headless subcommand (`scenario|dump|trace|bench`), and `tests/golden/combat.json`. Verification: `cargo fmt --check` clean; `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo test -p mind-core` 644 lib tests + 3 `combat_golden` integration tests pass; scenarios `combat_basic`/`combat_bullet_pierce`/`combat_determinism` pass. Notes/gaps: (a) vanilla bullets have no name lookup (upstream bullets are anonymous/weapon-inline), so headless scenarios use named fixture bullets registered on the harness; (b) `BulletDef` lacks the §6.1 fields `angleOffset`, `randomAngleOffset`, `createChance`, `ignoreSpawnAngle`, `velocityScaleRand*`, `lifeScaleRand*` — spawn uses def `speed`/`lifetime` directly and the gap is recorded for plan 02 reconciliation; (c) plan 05's schedule is left untouched (plan 10 owns a host-driven `CombatHarness`/`CombatPlugin` seam) so the P0 golden is unchanged.
