@@ -17,6 +17,7 @@ use crate::determinism::{Checksum, Checksummer, SimRng};
 use crate::ecs::EntitySeq;
 use crate::entities::comp::unit::comp::{PhysicsComp, UnitCore};
 use crate::entities::comp::unit::lifecycle::{set_move_target, spawn_unit, sync_weapon_state};
+use crate::entities::comp::unit::movement;
 use crate::entities::comp::unit::queries::{UnitSnapshot, snapshot};
 use crate::entities::comp::{Health, Pos, TeamComp};
 use crate::world::{BuildHarness, TilePos, WorldGrid};
@@ -134,26 +135,39 @@ impl UnitHarness {
         let entities = self.units.clone();
         let team = self.path_team;
         for entity in entities {
-            let Some(slot) = self.build.world.get::<ControllerSlot>(entity).copied() else {
-                continue;
-            };
-            let Some(target) = slot.target else {
-                continue;
-            };
-            let arrived = if slot.kind == AiKind::Flying {
-                update_flying(&mut self.build.world, entity, target)
-            } else {
-                update_ground(
+            let before = self.build.world.get::<Pos>(entity).map(|p| (p.x, p.y));
+            let slot = self.build.world.get::<ControllerSlot>(entity).copied();
+            if let Some(target) = slot.and_then(|slot| slot.target) {
+                let arrived = if slot.is_some_and(|slot| slot.kind == AiKind::Flying) {
+                    update_flying(&mut self.build.world, entity, target)
+                } else {
+                    update_ground(
+                        &mut self.build.world,
+                        &self.build.grid,
+                        &mut self.pathfinder,
+                        team,
+                        entity,
+                        target,
+                    )
+                };
+                if arrived
+                    && let Some(mut slot) = self.build.world.get_mut::<ControllerSlot>(entity)
+                {
+                    slot.target = None;
+                }
+            }
+            if self.build.world.get_entity(entity).is_ok() {
+                let after = self.build.world.get::<Pos>(entity).map(|p| (p.x, p.y));
+                let delta = match (before, after) {
+                    (Some(before), Some(after)) => (after.0 - before.0, after.1 - before.1),
+                    _ => (0.0, 0.0),
+                };
+                movement::update_kinematics(
                     &mut self.build.world,
-                    &self.build.grid,
-                    &mut self.pathfinder,
-                    team,
+                    &self.build.content,
                     entity,
-                    target,
-                )
-            };
-            if arrived && let Some(mut slot) = self.build.world.get_mut::<ControllerSlot>(entity) {
-                slot.target = None;
+                    delta,
+                );
             }
         }
         self.sync_weapon_states();

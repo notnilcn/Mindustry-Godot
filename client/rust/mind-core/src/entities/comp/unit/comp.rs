@@ -137,11 +137,50 @@ impl MechComp {
     }
 }
 
-/// Legs state (`LegsComp`; the `Leg[]` IK array lands with M1/M3 work).
-#[derive(Debug, Clone, Copy, PartialEq, Component)]
+/// One leg (`entities/Leg.java`; transient IK state, not serialized).
+///
+/// Positions are world-space; `base` is the hip, `joint` the knee, `foot` the
+/// planted endpoint. `LegsComp::reset_legs` initializes them and
+/// [`super::legs::update_legs`] steps them.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Leg {
+    /// Hip x.
+    pub base_x: f32,
+    /// Hip y.
+    pub base_y: f32,
+    /// Knee x (`InverseKinematics` joint).
+    pub joint_x: f32,
+    /// Knee y.
+    pub joint_y: f32,
+    /// Foot x (planted endpoint).
+    pub foot_x: f32,
+    /// Foot y.
+    pub foot_y: f32,
+    /// Leg index.
+    pub index: u8,
+    /// Whether this leg is mid-step.
+    pub moving: bool,
+    /// Step interpolation `0..1`.
+    pub step: f32,
+    /// Whether the leg is on the right side (`flip_leg_side`).
+    pub side: bool,
+    /// Leg group index (`legGroupSize`).
+    pub group: u8,
+    /// World-space angle of the hip from the body center, in degrees.
+    pub angle: f32,
+}
+
+/// Legs state (`LegsComp`): the `Leg[]` IK array plus walk animation.
+#[derive(Debug, Clone, PartialEq, Component)]
 pub struct LegsComp {
     /// Number of legs (`legs.length`).
     pub leg_count: u8,
+    /// Leg IK state, in leg order.
+    pub legs: Vec<Leg>,
+    /// Base rotation decoupled from the body (`baseRotation`, legs variant).
+    pub base_rotation: f32,
+    /// Walk animation timer.
+    pub walk_time: f32,
 }
 
 /// Hover/elevation movement marker (`ElevationMoveComp`).

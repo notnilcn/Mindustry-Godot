@@ -166,7 +166,7 @@ fn spawn_single(
         },
     ));
 
-    insert_kind_components(world, entity, unit, rotation);
+    insert_kind_components(world, entity, unit, x, y, rotation);
     entity
 }
 
@@ -175,6 +175,8 @@ pub fn insert_kind_components(
     world: &mut World,
     entity: Entity,
     unit: &UnitTypeDef,
+    x: f32,
+    y: f32,
     rotation: f32,
 ) {
     let components = unit.entity_def.components;
@@ -183,7 +185,11 @@ pub fn insert_kind_components(
         world.entity_mut(entity).insert(MechComp::new(rotation));
     }
     if has(UnitComponent::Legs) {
-        world.entity_mut(entity).insert(LegsComp { leg_count: 4 });
+        world
+            .entity_mut(entity)
+            .insert(crate::entities::comp::unit::legs::reset_legs(
+                unit, x, y, rotation,
+            ));
     }
     if has(UnitComponent::Tank) {
         world
