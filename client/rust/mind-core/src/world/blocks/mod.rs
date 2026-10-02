@@ -10,6 +10,7 @@ pub mod autotiler;
 pub mod distribution;
 pub mod heat;
 pub mod liquid;
+pub mod payloads;
 pub mod power;
 pub mod storage;
 pub mod tile_bitmask;
@@ -22,5 +23,6 @@ pub fn default_registry(content: &ContentRegistry) -> BehaviorRegistry {
     let mut registry = BehaviorRegistry::new();
     distribution::register(&mut registry, content);
     storage::register(&mut registry, content);
+    payloads::register(&mut registry, content);
     registry
 }

@@ -258,6 +258,16 @@ impl Default for PowerModule {
     }
 }
 
+/// Content slot counts used when spawning module components (plan 08 payloads
+/// need them to create carried buildings through `BlockInstance::spawn`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, bevy_ecs::prelude::Resource)]
+pub struct ModuleDims {
+    /// Number of item slots (`content.items().len()`).
+    pub items: usize,
+    /// Number of liquid slots (`content.liquids().len()`).
+    pub liquids: usize,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

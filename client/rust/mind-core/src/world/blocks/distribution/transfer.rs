@@ -147,6 +147,62 @@ pub fn dispatch_can_dump(world: &World, target: Entity, src: Entity, item: ItemI
     }
 }
 
+/// Dispatches `getMaximumAccepted` to `target`'s registered behavior.
+pub fn dispatch_get_maximum_accepted(world: &World, target: Entity, item: ItemId) -> i32 {
+    let Some(block) = world.get::<Building>(target).map(|b| b.block) else {
+        return 0;
+    };
+    match world
+        .get_resource::<BlockTable>()
+        .and_then(|table| table.instance(block))
+    {
+        Some(inst) => inst.behavior.get_maximum_accepted(world, target, item),
+        None => 0,
+    }
+}
+
+/// Dispatches `canUnload` to `target`'s registered behavior.
+pub fn dispatch_can_unload(world: &World, target: Entity) -> bool {
+    let Some(block) = world.get::<Building>(target).map(|b| b.block) else {
+        return false;
+    };
+    match world
+        .get_resource::<BlockTable>()
+        .and_then(|table| table.instance(block))
+    {
+        Some(inst) => inst.behavior.can_unload(world, target),
+        None => false,
+    }
+}
+
+/// Dispatches `removeStack` to `target`'s registered behavior.
+pub fn dispatch_remove_stack(world: &mut World, target: Entity, item: ItemId, amount: i32) -> i32 {
+    let Some(block) = world.get::<Building>(target).map(|b| b.block) else {
+        return 0;
+    };
+    let Some(inst) = world
+        .get_resource::<BlockTable>()
+        .and_then(|table| table.instance(block))
+    else {
+        return 0;
+    };
+    inst.behavior.remove_stack(world, target, item, amount)
+}
+
+/// Dispatches `itemTaken` to `target`'s registered behavior.
+pub fn dispatch_item_taken(world: &mut World, target: Entity, item: ItemId) {
+    let Some(block) = world.get::<Building>(target).map(|b| b.block) else {
+        return;
+    };
+    let Some(inst) = world
+        .get_resource::<BlockTable>()
+        .and_then(|table| table.instance(block))
+    else {
+        return;
+    };
+    inst.behavior.item_taken(world, target, item)
+}
+
 /// Cloned proximity list of a building.
 pub fn proximity(world: &World, e: Entity) -> Vec<Entity> {
     world
@@ -155,33 +211,14 @@ pub fn proximity(world: &World, e: Entity) -> Vec<Entity> {
         .unwrap_or_default()
 }
 
-/// The same-team building adjacent in direction `rotation` via proximity.
+/// The same-team building adjacent in direction `rotation` via the tile index.
 ///
-/// Mirrors `Building.front()` for size-1 buildings, which is all that uses this
-/// path in the belt family; configured links bypass it entirely.
+/// `Building.front()` is the building occupying the tile in the facing
+/// direction; using [`nearby`] here handles multiblock neighbors whose center
+/// tile is not itself adjacent (their footprint edge is).
 pub fn front(world: &World, e: Entity) -> Option<Entity> {
-    let building = world.get::<Building>(e)?;
-    let tile = building.tile;
-    let rotation = building.rotation;
-    let team = world.get::<crate::entities::comp::TeamComp>(e)?.team;
-    for other in &building.proximity {
-        let Some(other_building) = world.get::<Building>(*other) else {
-            continue;
-        };
-        if relative_to(
-            tile.x() as i32,
-            tile.y() as i32,
-            other_building.tile.x() as i32,
-            other_building.tile.y() as i32,
-        ) == rotation as i8
-            && world
-                .get::<crate::entities::comp::TeamComp>(*other)
-                .is_some_and(|t| t.team == team)
-        {
-            return Some(*other);
-        }
-    }
-    None
+    let rotation = world.get::<Building>(e)?.rotation;
+    nearby(world, e, rotation)
 }
 
 /// Direction from `e` toward `other` (`Building.relativeTo(Building)`), or `-1`.

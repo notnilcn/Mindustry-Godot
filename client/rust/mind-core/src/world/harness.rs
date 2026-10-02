@@ -126,6 +126,10 @@ impl BuildHarness {
         world.insert_resource(BlockCounter::new());
         world.insert_resource(crate::world::update::BuildClock::default());
         world.insert_resource(crate::world::TileBuilds::default());
+        world.insert_resource(crate::world::modules::ModuleDims {
+            items: item_count,
+            liquids: liquid_count,
+        });
         let mut grid = WorldGrid::new(width, height);
         grid.fill(BlockId::AIR, BlockId::AIR);
         Self {
