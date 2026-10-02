@@ -14,8 +14,9 @@ use serde_json::{Value, json};
 use mind_core::content::EffectId;
 use mind_core::content::effect_by_name;
 use mind_core::fx::{
-    EffectData, EffectKind, EffectState, EmptySnapshot, FxPool, build_program, build_program_into,
-    catalog_counts, draw_call_count, order_hash, registry,
+    BatchBackend, EffectData, EffectKind, EffectState, EmptySnapshot, FxPool, batching_runs,
+    build_program, build_program_into, build_program_into_lod, catalog_counts, draw_call_count,
+    order_hash, registry,
 };
 use mind_core::render::draw::{Blending, DrawPrim, DrawProgram, MAX_DRAW_CALLS_TARGET, PrimKind};
 
@@ -412,7 +413,11 @@ fn bench(states: usize, frames: u32, json: bool) -> Result<i32> {
     let mut program = DrawProgram::new();
     let started = std::time::Instant::now();
     let mut total_prims: u64 = 0;
+    let mut total_lod2_prims: u64 = 0;
     let mut max_draw_calls: usize = 0;
+    let mut single_runs: u64 = 0;
+    let mut multimesh_runs: u64 = 0;
+    let mut gpu_runs: u64 = 0;
     for _ in 0..frames {
         program.clear();
         for i in 0..states {
@@ -423,6 +428,26 @@ fn bench(states: usize, frames: u32, json: bool) -> Result<i32> {
         program.sort();
         total_prims += program.len() as u64;
         max_draw_calls = max_draw_calls.max(draw_call_count(&program.prims));
+        let runs = batching_runs(&program.prims);
+        let mut region_prims = 0u64;
+        for run in &runs {
+            region_prims += run.count as u64;
+            match run.backend {
+                BatchBackend::Single => single_runs += 1,
+                BatchBackend::MultiMesh => multimesh_runs += 1,
+                BatchBackend::GpuParticles => gpu_runs += 1,
+            }
+        }
+        // Every non-region prim is an immediate `Single` draw.
+        single_runs += program.len() as u64 - region_prims;
+        // LOD L2 pass (plan 17 §3.14): particle/explosion counts halve.
+        let mut l2 = DrawProgram::new();
+        for i in 0..states {
+            let id = ids[i % ids.len()];
+            let state = synthetic_state(id, ((i % 17) as f32) * 0.5);
+            build_program_into_lod(registry().get(id), &state, &EmptySnapshot, &mut l2, true);
+        }
+        total_lod2_prims += l2.len() as u64;
     }
     let elapsed = started.elapsed();
     let per_frame_ms = elapsed.as_secs_f64() * 1000.0 / frames as f64;
@@ -436,10 +461,16 @@ fn bench(states: usize, frames: u32, json: bool) -> Result<i32> {
         "states": states,
         "frames": frames,
         "total_prims": total_prims,
+        "total_lod2_prims": total_lod2_prims,
         "ms_per_frame": per_frame_ms,
         "draw_calls": max_draw_calls,
         "draw_call_target": MAX_DRAW_CALLS_TARGET,
         "draw_calls_ok": draw_ok,
+        "backend_runs": {
+            "single": single_runs,
+            "multimesh": multimesh_runs,
+            "gpu_particles": gpu_runs,
+        },
         "pass": pass,
     });
     emit(&value, json)?;

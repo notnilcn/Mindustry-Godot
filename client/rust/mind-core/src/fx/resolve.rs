@@ -41,6 +41,18 @@ pub fn build_program_into(
     snapshot: &dyn ViewSnapshot,
     program: &mut DrawProgram,
 ) {
+    build_program_into_lod(def, state, snapshot, program, false);
+}
+
+/// LOD-aware [`build_program_into`] (plan 17 §3.14): at `l2`, particle counts
+/// halve (floor 1). Quality-only; gameplay is unaffected.
+pub fn build_program_into_lod(
+    def: &EffectDef,
+    state: &EffectState,
+    snapshot: &dyn ViewSnapshot,
+    program: &mut DrawProgram,
+    l2: bool,
+) {
     let container = EffectContainer {
         id: def.id,
         x: state.x,
@@ -52,7 +64,7 @@ pub fn build_program_into(
         data: state.data.clone(),
         inner: None,
     };
-    render_def(def, &container, snapshot, program);
+    render_def(def, &container, snapshot, program, l2);
 }
 
 fn render_def(
@@ -60,6 +72,7 @@ fn render_def(
     e: &EffectContainer,
     snapshot: &dyn ViewSnapshot,
     program: &mut DrawProgram,
+    l2: bool,
 ) {
     match &def.kind {
         EffectKind::None | EffectKind::Multi(_) | EffectKind::Radial(_) | EffectKind::Wrap(_) => {}
@@ -68,8 +81,8 @@ fn render_def(
             let mut emit = FxEmit::new(program, def.layer);
             dispatch(*id)(&mut emit, e, snapshot);
         }
-        EffectKind::Particle(params) => particle(params, e, program, def.layer),
-        EffectKind::Explosion(params) => explosion(params, e, program, def.layer),
+        EffectKind::Particle(params) => particle(params, e, program, def.layer, l2),
+        EffectKind::Explosion(params) => explosion(params, e, program, def.layer, l2),
         EffectKind::Wave(params) => wave(params, e, program, def.layer),
         EffectKind::Triangle(params) => triangle(params, e, program, def.layer),
         EffectKind::Noise(params) => noise(params, e, program),
@@ -77,9 +90,9 @@ fn render_def(
             // Sound playback is a one-way sink call (plan 18); the render half
             // is the child effect.
             let child = super::def::registry().get(params.effect);
-            render_def(child, e, snapshot, program);
+            render_def(child, e, snapshot, program, l2);
         }
-        EffectKind::Seq(children) => seq(children, e, snapshot, program),
+        EffectKind::Seq(children) => seq(children, e, snapshot, program, l2),
     }
 }
 
@@ -89,6 +102,7 @@ fn seq(
     e: &EffectContainer,
     snapshot: &dyn ViewSnapshot,
     program: &mut DrawProgram,
+    l2: bool,
 ) {
     let life = e.time;
     let mut sum = 0.0f32;
@@ -100,14 +114,20 @@ fn seq(
             inner.time = life - sum;
             inner.lifetime = child.lifetime;
             inner.inner = None;
-            render_def(child, &inner, snapshot, program);
+            render_def(child, &inner, snapshot, program, l2);
             return;
         }
         sum += child.lifetime;
     }
 }
 
-fn particle(params: &ParticleParams, e: &EffectContainer, program: &mut DrawProgram, layer: f32) {
+fn particle(
+    params: &ParticleParams,
+    e: &EffectContainer,
+    program: &mut DrawProgram,
+    layer: f32,
+    l2: bool,
+) {
     let real_rotation = if params.use_rotation {
         if params.casing_flip {
             e.rotation.abs()
@@ -179,6 +199,7 @@ fn particle(params: &ParticleParams, e: &EffectContainer, program: &mut DrawProg
     let light_color = params.light_color.unwrap_or(color);
 
     let mut rand = ArcRand::new(e.id.raw() as u64);
+    let particles = super::batch::lod_particle_count(params.particles, l2);
     if params.line {
         let stroke = params
             .size_interp
@@ -186,7 +207,7 @@ fn particle(params: &ParticleParams, e: &EffectContainer, program: &mut DrawProg
         let len = params
             .size_interp
             .apply_range(params.len_from, params.len_to, rawfin);
-        for _ in 0..params.particles {
+        for _ in 0..particles {
             let l = params.length * fin + params.base_length;
             let a = real_rotation + rand.range_float(params.cone);
             let dist = if params.rand_length {
@@ -220,7 +241,7 @@ fn particle(params: &ParticleParams, e: &EffectContainer, program: &mut DrawProg
             ));
         }
     } else {
-        for _ in 0..params.particles {
+        for _ in 0..particles {
             let l = params.length * fin + params.base_length;
             let a = real_rotation + rand.range_float(params.cone);
             let dist = if params.rand_length {
@@ -259,7 +280,13 @@ fn particle(params: &ParticleParams, e: &EffectContainer, program: &mut DrawProg
     }
 }
 
-fn explosion(params: &ExplosionParams, e: &EffectContainer, program: &mut DrawProgram, layer: f32) {
+fn explosion(
+    params: &ExplosionParams,
+    e: &EffectContainer,
+    program: &mut DrawProgram,
+    layer: f32,
+    l2: bool,
+) {
     let mut emit = FxEmit::new(program, layer);
     emit.color(params.wave_color);
     e.scaled_view(params.wave_life, |s| {
@@ -270,7 +297,7 @@ fn explosion(params: &ExplosionParams, e: &EffectContainer, program: &mut DrawPr
     if params.smoke_size > 0.0 {
         rand_len_vectors(
             e.id.raw() as u64,
-            params.smokes,
+            super::batch::lod_particle_count(params.smokes, l2),
             2.0 + params.smoke_rad * e.finpow(),
             |x, y| {
                 emit.circle(
@@ -285,7 +312,7 @@ fn explosion(params: &ExplosionParams, e: &EffectContainer, program: &mut DrawPr
     emit.stroke(e.fout() * params.spark_stroke);
     rand_len_vectors(
         e.id.raw() as u64 + 1,
-        params.sparks,
+        super::batch::lod_particle_count(params.sparks, l2),
         1.0 + params.spark_rad * e.finpow(),
         |x, y| {
             emit.line_angle(
@@ -643,6 +670,24 @@ mod tests {
                 .iter()
                 .any(|p| matches!(p.kind, PrimKind::Light { .. }))
         );
+    }
+
+    #[test]
+    fn lod_halves_particle_prims() {
+        let params = crate::fx::def::ParticleParams {
+            particles: 8,
+            length: 10.0,
+            ..Default::default()
+        };
+        let def = decl_def(EffectKind::Particle(params));
+        let state = state_of(&def, 5.0);
+
+        let mut full = DrawProgram::new();
+        build_program_into_lod(&def, &state, &EmptySnapshot, &mut full, false);
+        let mut l2 = DrawProgram::new();
+        build_program_into_lod(&def, &state, &EmptySnapshot, &mut l2, true);
+        assert_eq!(full.len(), 16); // 8 regions + 8 lights
+        assert_eq!(l2.len(), 8); // 4 regions + 4 lights
     }
 
     #[test]

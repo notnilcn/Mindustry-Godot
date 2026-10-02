@@ -61,7 +61,7 @@ pub use parts::{
 };
 pub use pool::{EffectState, FxGate, FxPool, PendingSpawn, in_camera};
 pub use pool_spec::{DECAL_CAPACITY, DECAL_LIFETIME, DELAYED_SPAWN_CAPACITY, EFFECT_POOL_CAPACITY};
-pub use resolve::{build_program, build_program_into};
+pub use resolve::{build_program, build_program_into, build_program_into_lod};
 pub use shake::{ShakeState, shake_falloff, shake_visible};
 pub use sink::{FxBus, FxEvent, FxSettings, FxSink, NoopFxSink, emit_named};
 pub use trail::TrailRegistry;
