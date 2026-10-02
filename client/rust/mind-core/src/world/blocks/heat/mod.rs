@@ -10,6 +10,10 @@
 //! guard (plan 09 §3.9). This file is the plan's `heat/{mod,calculate,producer,
 //! conductor}.rs` consolidated; explosion/effect hooks stay plan 10/17.
 
+pub mod behavior;
+
+pub use behavior::register;
+
 use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
 use bevy_ecs::prelude::Resource;
