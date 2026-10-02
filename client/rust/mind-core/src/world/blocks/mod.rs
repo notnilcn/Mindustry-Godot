@@ -8,6 +8,9 @@
 
 pub mod autotiler;
 pub mod distribution;
+pub mod heat;
+pub mod liquid;
+pub mod power;
 pub mod storage;
 pub mod tile_bitmask;
 
