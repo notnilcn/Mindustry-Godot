@@ -11,6 +11,8 @@
 pub mod draw;
 pub mod params;
 pub mod progress;
+pub mod turret;
+pub mod weapons;
 
 pub use params::{PartMove, PartParams};
 pub use progress::{PartFunc, PartProgressSpec};

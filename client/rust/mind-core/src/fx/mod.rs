@@ -41,6 +41,11 @@ pub use parts::draw::{
     AllRegions, MapRegions, PartEmit, RegionInfo, RegionLookup, RegionNames, SpawnerState,
     convert_progress, draw_named_parts, draw_parts, draw_spawner, get_outlines, intern_region,
 };
+pub use parts::turret::{TurretDraw, draw_turret, draw_turret_plan};
+pub use parts::weapons::{
+    WeaponPose, beams as weapon_beams, draw_bullet_parts, draw_weapon, draw_weapon_outline,
+    draw_weapon_outlines, part_recoil, weapon_pose,
+};
 pub use parts::{
     EffectSpawnerPartSpec, FlarePartSpec, HaloPartSpec, HoverPartSpec, PartMove, PartParams,
     PartProgressSpec, PartSpec, RegionPartSpec, ShapePartSpec,

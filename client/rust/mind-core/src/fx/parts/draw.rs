@@ -151,12 +151,12 @@ pub struct PartEmit<'a> {
     pub lookup: &'a dyn RegionLookup,
     /// Fixed view tick (`Time.time`, deviation #7).
     pub tick: f32,
-    z: f32,
-    xscl: f32,
-    yscl: f32,
-    color: Rgba,
-    mix: Option<Rgba>,
-    blend: Blending,
+    pub(crate) z: f32,
+    pub(crate) xscl: f32,
+    pub(crate) yscl: f32,
+    pub(crate) color: Rgba,
+    pub(crate) mix: Option<Rgba>,
+    pub(crate) blend: Blending,
 }
 
 impl<'a> PartEmit<'a> {
@@ -180,12 +180,33 @@ impl<'a> PartEmit<'a> {
         self.z
     }
 
-    fn push(&mut self, kind: PrimKind) {
+    pub(crate) fn push(&mut self, kind: PrimKind) {
         self.program.push(DrawPrim {
             z: self.z,
             blend: self.blend,
             kind,
         });
+    }
+
+    /// Pushes a primitive at an explicit layer (does not change `self.z`).
+    pub fn push_at(&mut self, z: f32, kind: PrimKind, blend: Blending) {
+        self.program.push(DrawPrim { z, blend, kind });
+    }
+
+    /// Draws a named region centered at `(x, y)` if found; returns found-ness.
+    pub fn region(&mut self, name: &str, x: f32, y: f32, rot: f32) -> bool {
+        let info = self.lookup.region(name);
+        if info.found {
+            self.emit_region(info, x, y, rot, 0.0, 0.0);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Looks up region info without emitting.
+    pub fn lookup(&self, name: &str) -> RegionInfo {
+        self.lookup.region(name)
     }
 
     fn emit_region(&mut self, info: RegionInfo, x: f32, y: f32, rot: f32, ox: f32, oy: f32) {
