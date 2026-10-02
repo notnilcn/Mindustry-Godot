@@ -272,6 +272,11 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
                 repo,
                 json,
             } => cmd_mods_patch(fixture, repo.as_deref(), *json),
+            ModsCommand::Assets {
+                fixture,
+                repo,
+                json,
+            } => cmd_mods_assets(fixture, repo.as_deref(), *json),
         },
         Command::Io { command } => match command {
             IoCommand::DumpMeta { file, json } => cmd_io_dump_meta(file, *json),
@@ -1609,6 +1614,147 @@ fn cmd_mods_patch(fixture: &str, repo: Option<&Path>, json: bool) -> anyhow::Res
         );
     }
     Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+}
+
+/// Plan 20 M4 (`mods assets`): load a fixture mod's data assets headlessly and
+/// report `dp-` image names, sound ids, bundle merges and external assets.
+fn cmd_mods_assets(fixture: &str, repo: Option<&Path>, json: bool) -> anyhow::Result<i32> {
+    use mind_core::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+    use mind_core::io::fs::NativeFs;
+    use mind_core::mods::Mods;
+    use mind_core::mods::assets::{DataAsset, DataAssetType, DataAssets, ModDataManager};
+
+    let root = paths::find_repo_root(repo)?;
+    let dir = root.join("parity/mod_fixtures").join(fixture);
+    let fs = NativeFs;
+    let mut mods = Mods::new(true, &dir);
+    mods.load_single(&fs, &dir, &mind_core::io::SettingsStore::new())
+        .with_context(|| format!("loading fixture `{fixture}`"))?;
+
+    let mut assets = Vec::new();
+    for file in mods.collect_content_files(&fs) {
+        assets.push(DataAsset::content(file.path, file.type_, file.json));
+    }
+    let listed: Vec<(DataAssetType, String)> = {
+        let mod_ = mods
+            .mod_at(0)
+            .ok_or_else(|| anyhow!("fixture `{fixture}` has no mod record"))?;
+        let mut out = Vec::new();
+        for (folder, ty) in [
+            ("patches", DataAssetType::Patch),
+            ("bundles", DataAssetType::Bundle),
+            ("sprites", DataAssetType::Image),
+            ("sounds", DataAssetType::Sound),
+            ("music", DataAssetType::Music),
+        ] {
+            if let Ok(files) = mod_.root.walk(&fs, folder) {
+                for path in files {
+                    out.push((ty, path));
+                }
+            }
+        }
+        out
+    };
+    {
+        let mod_ = mods
+            .mod_at(0)
+            .ok_or_else(|| anyhow!("fixture `{fixture}` has no mod record"))?;
+        for (ty, path) in listed {
+            match ty {
+                DataAssetType::Patch => {
+                    if let Ok(text) = mod_.root.read_to_string(&fs, &path) {
+                        assets.push(DataAsset::patch(path, text));
+                    }
+                }
+                DataAssetType::Bundle => {
+                    if let Ok(text) = mod_.root.read_to_string(&fs, &path) {
+                        assets.push(DataAsset::bundle(path, &text));
+                    }
+                }
+                _ => {
+                    if let Ok(bytes) = mod_.root.read(&fs, &path) {
+                        assets.push(DataAsset::blob(path, ty, bytes, false));
+                    }
+                }
+            }
+        }
+    }
+
+    let bundle = MemoryBundle::new();
+    let store = MemoryUnlockStore::new();
+    let mut registry = create_base_content(&bundle, &store, true)
+        .map_err(|error| anyhow!("base content: {error}"))?;
+    registry
+        .init()
+        .map_err(|error| anyhow!("content init: {error}"))?;
+
+    let mut manager = ModDataManager::new();
+    manager
+        .load(assets, &mut registry)
+        .map_err(|error| anyhow!("asset load: {error}"))?;
+    manager.regenerate_content_sprites(false);
+
+    let images: Vec<serde_json::Value> = manager
+        .image_applier()
+        .entries()
+        .iter()
+        .map(|entry| {
+            serde_json::json!({
+                "name": entry.name,
+                "page": entry.page.name(),
+                "generated": entry.generated,
+            })
+        })
+        .collect();
+    let audio: Vec<serde_json::Value> = manager
+        .audio_applier()
+        .entries()
+        .iter()
+        .map(|entry| {
+            serde_json::json!({
+                "name": entry.name,
+                "id": entry.id,
+                "streaming": entry.streaming,
+                "music": entry.music,
+            })
+        })
+        .collect();
+    let external: Vec<&str> = manager
+        .ordered_external_assets()
+        .iter()
+        .map(|asset| asset.path.as_str())
+        .collect();
+    let missing: Vec<&str> = manager
+        .get_missing_assets()
+        .iter()
+        .map(|asset| asset.path.as_str())
+        .collect();
+    let bundles: Vec<&str> = manager.bundle_applier().files().collect();
+
+    let report = serde_json::json!({
+        "fixture": fixture,
+        "assets": manager.all_assets().len(),
+        "external": external,
+        "missing": missing,
+        "bundles": bundles,
+        "images": images,
+        "audio": audio,
+        "logicVars": manager.audio_applier().logic_vars(),
+        "contentErrors": manager.content_errors(),
+    });
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "mods assets: {} assets ({} external), {} images, {} audio, {} bundle(s): PASS",
+            report["assets"],
+            external.len(),
+            images.len(),
+            audio.len(),
+            bundles.len()
+        );
+    }
+    Ok(EXIT_PASS)
 }
 
 /// Plan 20 M9 (`mods bench`): discovery + metadata + dependency timing.
