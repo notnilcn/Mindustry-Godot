@@ -67,12 +67,29 @@ func _refresh() -> void:
 
 	var lines := PackedStringArray()
 	lines.append("tick: %d" % int(state.get("tick", 0)))
+	lines.append("update: %d  state: %s" % [
+		int(_host.call("get_update_id")),
+		str(_host.call("get_state")),
+	])
 	lines.append("paused: %s" % ("true" if bool(_host.call("is_paused")) else "false"))
 	lines.append("selected: %s" % str(_host.call("selected_block")))
 	lines.append("cursor: %s" % _cursor_tile_text())
 	lines.append("checksum: %s" % str(state.get("checksum", "")))
+	lines.append("groups: %s" % _group_counts_text())
 	_label.text = "\n".join(lines)
 	_refresh_net()
+
+
+## Live per-group entity counts (plan 05 M9 inspector surface); read-only.
+func _group_counts_text() -> String:
+	if _host == null or not is_instance_valid(_host):
+		return "-"
+	var counts: Dictionary = _host.call("get_group_counts")
+	var parts := PackedStringArray()
+	for key in ["all", "build", "unit", "bullet", "player"]:
+		if counts.has(key):
+			parts.append("%s=%d" % [key, int(counts[key])])
+	return " ".join(parts)
 
 
 ## `net` page (plan 01 §3.11): connector state, wave flags, relay counters.
