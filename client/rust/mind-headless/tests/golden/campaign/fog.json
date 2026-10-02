@@ -1,0 +1,15 @@
+{
+  "format": 1,
+  "scenario": "campaign_fog",
+  "chunk_bytes": 73,
+  "discovered_center": true,
+  "discovered_unit": true,
+  "visible_unit": true,
+  "undiscovered_far": true,
+  "edge_clip": true,
+  "chunk_roundtrip": true,
+  "indicator_dedup": true,
+  "indicator_expired": true,
+  "checksum": "170e5095d482f982",
+  "pass": true
+}

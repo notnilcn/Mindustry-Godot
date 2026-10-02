@@ -1,0 +1,20 @@
+{
+  "format": 1,
+  "scenario": "campaign_sector_cycle",
+  "planet": "serpulo",
+  "sector": "groundZero",
+  "sector_id": 15,
+  "preset_on_planet": true,
+  "ticks": 600,
+  "turn": 1,
+  "has_core": true,
+  "wave": 1,
+  "storage_capacity": 4000,
+  "best_core_type": "core-shard",
+  "copper": 120,
+  "rules_epoch": 1,
+  "fog": false,
+  "checksum": "4a50a31cbecba179",
+  "rules_checksum": "613fa92157ae0537",
+  "pass": true
+}

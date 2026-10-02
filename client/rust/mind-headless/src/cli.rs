@@ -572,6 +572,61 @@ pub enum CampaignCommand {
         #[arg(long)]
         dump: Option<PathBuf>,
     },
+
+    /// `campaign_sector_cycle`: planet/sector runtime, campaign rules + one
+    /// production turn for a vanilla sector.
+    Sector {
+        /// Planet content name.
+        #[arg(long, default_value = "serpulo")]
+        planet: String,
+        /// Sector preset name.
+        #[arg(long, default_value = "groundZero")]
+        sector: String,
+        /// Fixed ticks to advance before the turn.
+        #[arg(long, default_value_t = 600)]
+        ticks: u64,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Write the canonical golden dump here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+    },
+
+    /// `campaign_turn`: deterministic multi-turn production/export means.
+    Turn {
+        /// Number of turns to run.
+        #[arg(long, default_value_t = 10)]
+        turns: u32,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Write the canonical golden dump here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+    },
+
+    /// `campaign_schematic`: `.msch`/base64 round-trip, loadout decode and
+    /// rotation of the vanilla starting schematics.
+    Schematic {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Write the canonical golden dump here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+    },
+
+    /// `campaign_fog`: static exploration vs dynamic visibility + RLE chunk
+    /// round-trip and attack-indicator lifecycle.
+    Fog {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Write the canonical golden dump here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+    },
 }
 
 /// `fx` subcommands (plan 17 §7b).

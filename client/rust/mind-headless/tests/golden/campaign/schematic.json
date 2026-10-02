@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "scenario": "campaign_schematic",
+  "loaded": 4,
+  "name": "basicShard",
+  "has_core": true,
+  "base64_prefix": "bXNjaA",
+  "roundtrip": true,
+  "rotation_stable": true,
+  "checksum": "e7d30b25b03690c2",
+  "pass": true
+}
