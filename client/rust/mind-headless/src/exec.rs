@@ -2021,6 +2021,16 @@ fn cmd_sim(
     Ok(EXIT_PASS)
 }
 
+/// One replay entry. Legacy JSONL commands stay on the P0 path (`Sim::apply`)
+/// so `select_block` keeps its exact behavior; binary `.simlog` commands use the
+/// canonical `SimCommand` path (plan 05 §6.4).
+enum ReplayCommand {
+    /// P0 `Command` from a JSONL log.
+    P0(mind_core::command::Command),
+    /// Canonical `SimCommand` from a binary `.simlog`.
+    Sim(SimCommand),
+}
+
 #[allow(clippy::too_many_arguments)]
 fn cmd_replay(
     _cli: &Cli,
@@ -2039,10 +2049,18 @@ fn cmd_replay(
     let bytes = std::fs::read(commands)
         .with_context(|| format!("reading command log `{}`", commands.display()))?;
     // Binary `.simlog` (plan 05 M8) or legacy JSONL text (`scenario` module).
-    let (format, log_seed, entries): (String, u64, Vec<(u64, SimCommand)>) =
+    let (format, log_seed, entries): (String, u64, Vec<(u64, ReplayCommand)>) =
         if CommandLog::is_binary(&bytes) {
             let log = CommandLog::from_bytes(&bytes).map_err(|error| anyhow!("{error}"))?;
-            (String::from("binary"), log.header.seed, log.entries.clone())
+            let seed = log.header.seed;
+            (
+                String::from("binary"),
+                seed,
+                log.entries
+                    .into_iter()
+                    .map(|(tick, command)| (tick, ReplayCommand::Sim(command)))
+                    .collect(),
+            )
         } else {
             let text = String::from_utf8(bytes)
                 .map_err(|_| anyhow!("`{}` is not UTF-8", commands.display()))?;
@@ -2054,7 +2072,7 @@ fn cmd_replay(
                 seed,
                 records
                     .into_iter()
-                    .map(|record| (record.tick, SimCommand::from_p0(record.command)))
+                    .map(|record| (record.tick, ReplayCommand::P0(record.command)))
                     .collect(),
             )
         };
@@ -2083,15 +2101,19 @@ fn cmd_replay(
     let mut all_checksums = Vec::new();
     for tick in 0..ticks {
         while next < entries.len() && entries[next].0 <= tick {
-            match sim.command(entries[next].1.clone()) {
-                Ok(()) => {}
-                Err(CommandError::Unsupported(op)) => {
-                    // Later plans register the entity/unit paths; recording is
-                    // still deterministic (the no-op is the same on every peer).
-                    debug_assert!(!op.is_empty());
-                    unsupported += 1;
-                }
-                Err(error) => log::warn!("replay command rejected: {error}"),
+            match &entries[next].1 {
+                ReplayCommand::P0(command) => sim.apply(*command)?,
+                ReplayCommand::Sim(command) => match sim.command(command.clone()) {
+                    Ok(()) => {}
+                    Err(CommandError::Unsupported(op)) => {
+                        // Later plans register the entity/unit paths; recording
+                        // is still deterministic (the no-op is the same on every
+                        // peer).
+                        debug_assert!(!op.is_empty());
+                        unsupported += 1;
+                    }
+                    Err(error) => log::warn!("replay command rejected: {error}"),
+                },
             }
             next += 1;
         }
