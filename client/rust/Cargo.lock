@@ -1724,6 +1724,7 @@ dependencies = [
  "indexmap 2.14.2",
  "log",
  "mind-derive",
+ "mind-macros",
  "serde",
  "serde_json",
  "smallvec",
@@ -1764,6 +1765,15 @@ dependencies = [
  "serde",
  "serde_json",
  "spacetimedb-sdk",
+]
+
+[[package]]
+name = "mind-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]

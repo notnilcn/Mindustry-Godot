@@ -18,6 +18,7 @@ pub mod command;
 pub mod config;
 pub mod content;
 pub mod ecs;
+pub mod entities;
 pub mod event;
 pub mod game;
 pub mod io;

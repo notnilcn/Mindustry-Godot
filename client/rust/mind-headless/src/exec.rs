@@ -19,7 +19,7 @@ use mind_core::scenario::{Scenario, ScenarioPlayer, read_command_log, write_comm
 use mind_core::sim::{Sim, StateDump};
 use mind_core::world::TilePos;
 
-use crate::cli::{AssetsCommand, Cli, Command, ContentCommand, IoCommand};
+use crate::cli::{AssetsCommand, Cli, Command, ContentCommand, IoCommand, MetaCommand};
 use crate::paths;
 use crate::registry;
 use crate::report::{
@@ -156,6 +156,9 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
                 assert_complete,
                 json,
             } => cmd_assets_regions(atlas, inventory.as_deref(), *assert_complete, *json),
+        },
+        Command::Meta { command } => match command {
+            MetaCommand::Entities { out, json } => cmd_meta_entities(out.as_deref(), *json),
         },
         Command::Io { command } => match command {
             IoCommand::DumpMeta { file, json } => cmd_io_dump_meta(file, *json),
@@ -849,6 +852,34 @@ fn cmd_io_dump_meta(file: &Path, json: bool) -> anyhow::Result<i32> {
             report.height,
             report.is_map,
             report.mods.len()
+        );
+    }
+    Ok(EXIT_PASS)
+}
+
+/// Plan 05 M5: stable entity/component metadata JSON (`entitymeta.json`).
+fn cmd_meta_entities(out: Option<&Path>, json: bool) -> anyhow::Result<i32> {
+    let registry = mind_core::entities::vanilla_registry()
+        .map_err(|error| anyhow!("building entity registry: {error}"))?;
+    let value = registry.metadata_json();
+    let text = format!("{}\n", serde_json::to_string_pretty(&value)?);
+    if let Some(path) = out {
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating `{}`", parent.display()))?;
+        }
+        std::fs::write(path, &text).with_context(|| format!("writing `{}`", path.display()))?;
+    }
+    if json || out.is_none() {
+        print!("{text}");
+    } else if let Some(path) = out {
+        log::info!(
+            "meta entities: {} defs / {} components written to {}",
+            registry.defs_len(),
+            registry.components_len(),
+            path.display()
         );
     }
     Ok(EXIT_PASS)
