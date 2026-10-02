@@ -187,6 +187,11 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
                 json,
             } => cmd_mods_overlay(fixture, repo.as_deref(), probe, *json),
             ModsCommand::Bench { dir, runs, json } => cmd_mods_bench(dir, *runs, *json),
+            ModsCommand::Patch {
+                fixture,
+                repo,
+                json,
+            } => cmd_mods_patch(fixture, repo.as_deref(), *json),
         },
         Command::Io { command } => match command {
             IoCommand::DumpMeta { file, json } => cmd_io_dump_meta(file, *json),
@@ -1332,6 +1337,98 @@ fn cmd_mods_content(
         log::error!("mods content: {} content error(s)", errors.len());
         Ok(EXIT_FAIL)
     }
+}
+
+/// Plan 20 M3 (`mods patch`): apply a fixture mod's patches and assert that
+/// `unapply` restores the baseline field values.
+fn cmd_mods_patch(fixture: &str, repo: Option<&Path>, json: bool) -> anyhow::Result<i32> {
+    use mind_core::content::parser_hooks::PatchAsset;
+    use mind_core::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+    use mind_core::io::FileSystem;
+    use mind_core::io::fs::NativeFs;
+    use mind_core::mods::Mods;
+    use mind_core::mods::patch::DataPatcher;
+
+    let root = paths::find_repo_root(repo)?;
+    let dir = root.join("parity/mod_fixtures").join(fixture);
+    let fs = NativeFs;
+    let mut mods = Mods::new(true, &dir);
+    mods.load_single(&fs, &dir, &mind_core::io::SettingsStore::new())
+        .with_context(|| format!("loading fixture `{fixture}`"))?;
+    let patch_dir = dir.join("patches");
+    let mut patches = Vec::new();
+    if let Ok(files) = fs.walk(&patch_dir) {
+        let mut files: Vec<_> = files
+            .into_iter()
+            .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+            .collect();
+        files.sort();
+        for file in files {
+            let text = fs
+                .read(&file)
+                .with_context(|| format!("reading `{}`", file.display()))?;
+            let text = String::from_utf8(text)
+                .map_err(|_| anyhow!("`{}` is not UTF-8", file.display()))?;
+            patches.push(PatchAsset {
+                name: file.display().to_string(),
+                json: text,
+            });
+        }
+    }
+
+    let bundle = MemoryBundle::new();
+    let store = MemoryUnlockStore::new();
+    let mut registry = create_base_content(&bundle, &store, true)
+        .map_err(|error| anyhow!("base content: {error}"))?;
+    registry
+        .init()
+        .map_err(|error| anyhow!("content init: {error}"))?;
+    let baseline_health = registry
+        .block_id("router")
+        .and_then(|id| registry.block(id))
+        .map(|block| block.health)
+        .unwrap_or(0);
+
+    let mut patcher = DataPatcher::new();
+    patcher
+        .apply(&mut registry, &patches)
+        .map_err(|error| anyhow!("apply: {error}"))?;
+    let patched_health = registry
+        .block_id("router")
+        .and_then(|id| registry.block(id))
+        .map(|block| block.health)
+        .unwrap_or(0);
+    let applied = patcher.is_applied();
+    patcher.unapply(&mut registry);
+    let restored_health = registry
+        .block_id("router")
+        .and_then(|id| registry.block(id))
+        .map(|block| block.health)
+        .unwrap_or(0);
+
+    let pass = applied && restored_health == baseline_health && patched_health != baseline_health;
+    let report = serde_json::json!({
+        "fixture": fixture,
+        "patches": patches.len(),
+        "baselineHealth": baseline_health,
+        "patchedHealth": patched_health,
+        "restoredHealth": restored_health,
+        "warnings": patcher.warnings(),
+        "pass": pass,
+    });
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "mods patch: {} patch(es), router health {} -> {} -> {}: {}",
+            report["patches"],
+            baseline_health,
+            patched_health,
+            restored_health,
+            if pass { "PASS" } else { "FAIL" }
+        );
+    }
+    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
 }
 
 /// Plan 20 M9 (`mods bench`): discovery + metadata + dependency timing.

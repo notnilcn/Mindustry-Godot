@@ -17,6 +17,7 @@ pub mod json;
 pub mod loaded;
 pub mod meta;
 pub mod overlay;
+pub mod patch;
 pub mod provider;
 pub mod script;
 pub mod server;

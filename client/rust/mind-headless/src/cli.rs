@@ -231,6 +231,20 @@ pub enum ModsCommand {
         #[arg(long)]
         json: bool,
     },
+
+    /// Apply a fixture mod's `patches/*.json` and verify `unapply` restores the
+    /// baseline (plan 20 M3).
+    Patch {
+        /// Fixture name under `parity/mod_fixtures/`.
+        #[arg(long)]
+        fixture: String,
+        /// Repo root override (defaults to discovery from cwd).
+        #[arg(long)]
+        repo: Option<PathBuf>,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// `trace` subcommands (plan 05 M6).
