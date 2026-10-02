@@ -10,6 +10,7 @@
 
 pub mod access;
 pub mod assembler;
+pub mod blocks;
 pub mod enums;
 pub mod executor;
 pub mod fx;
