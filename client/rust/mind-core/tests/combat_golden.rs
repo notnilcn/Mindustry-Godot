@@ -77,3 +77,52 @@ fn determinism_samples_are_identical_and_match_golden() {
     assert_eq!(first, sample(29));
     assert_eq!(first[0], scenario("combat_determinism_first"));
 }
+
+#[test]
+fn weapon_volley_matches_golden() {
+    use mind_core::content::registries::units::ResolvedBullet;
+    use mind_core::content::registries::units::weapon::{ShootPatternSpec, WeaponDef, WeaponSpec};
+
+    let mut harness = CombatHarness::new(48, 16, 31);
+    let wall = harness.content().block_id("copper-wall").expect("wall");
+    for x in 12..=13 {
+        assert!(harness.place(x, 8, wall, 0, true));
+    }
+    let bullet = harness.bullet_id("fuse").expect("fuse");
+    let registry = harness.content();
+    let weapon = WeaponDef::from_spec(
+        WeaponSpec {
+            name: "volley",
+            reload: Some(10.0),
+            x: Some(0.0),
+            shoot_y: Some(0.0),
+            recoil: Some(0.0),
+            rotate: Some(false),
+            mirror: Some(false),
+            alternate: Some(false),
+            shoot: Some(ShootPatternSpec::plain(1, 0.0, 0.0)),
+            ..WeaponSpec::default()
+        },
+        ResolvedBullet {
+            id: bullet,
+            range: 200.0,
+            heals: false,
+            kill_shooter: false,
+            dps: 0.0,
+        },
+        registry,
+    )
+    .expect("weapon");
+    let (ux, uy) = CombatHarness::tile_center(4, 8);
+    let unit = harness.spawn_test_unit(ux, uy, 1, vec![weapon]);
+    harness.set_unit_aim(unit, 0, CombatHarness::tile_center(12, 8));
+    harness.set_unit_shoot(unit, 0, true);
+    for _ in 0..120 {
+        harness.tick();
+    }
+    assert_eq!(
+        harness.unit_weapons(unit).unwrap().mounts[0].total_shots,
+        12
+    );
+    assert_eq!(harness.checksum_hex(), scenario("combat_weapon_volley"));
+}

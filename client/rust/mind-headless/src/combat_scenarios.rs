@@ -235,6 +235,70 @@ fn scenario(name: &str, json: bool) -> Result<i32> {
             print_json(&report, json);
             Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
         }
+        "combat_weapon_volley" => {
+            use mind_core::content::registries::units::ResolvedBullet;
+            use mind_core::content::registries::units::weapon::{ShootPatternSpec, WeaponSpec};
+            let mut harness = CombatHarness::new(48, 16, 31);
+            let wall = harness
+                .content()
+                .block_id("copper-wall")
+                .ok_or_else(|| anyhow::anyhow!("copper-wall missing"))?;
+            for x in 12..=13 {
+                let _ = harness.place(x, 8, wall, 0, true);
+            }
+            let registry = harness.content();
+            let bullet = harness
+                .bullet_id("fuse")
+                .ok_or_else(|| anyhow::anyhow!("fuse bullet missing"))?;
+            let weapon = mind_core::content::registries::units::weapon::WeaponDef::from_spec(
+                WeaponSpec {
+                    name: "volley",
+                    reload: Some(10.0),
+                    x: Some(0.0),
+                    shoot_y: Some(0.0),
+                    recoil: Some(0.0),
+                    rotate: Some(false),
+                    mirror: Some(false),
+                    alternate: Some(false),
+                    shoot: Some(ShootPatternSpec::plain(1, 0.0, 0.0)),
+                    ..WeaponSpec::default()
+                },
+                ResolvedBullet {
+                    id: bullet,
+                    range: 200.0,
+                    heals: false,
+                    kill_shooter: false,
+                    dps: 0.0,
+                },
+                registry,
+            )?;
+            let (ux, uy) = CombatHarness::tile_center(4, 8);
+            let unit = harness.spawn_test_unit(ux, uy, 1, vec![weapon]);
+            harness.set_unit_aim(unit, 0, CombatHarness::tile_center(12, 8));
+            harness.set_unit_shoot(unit, 0, true);
+            let before = harness.building_health_at(12, 8);
+            for _ in 0..120 {
+                harness.tick();
+            }
+            let after = harness.building_health_at(12, 8);
+            let shots = harness
+                .unit_weapons(unit)
+                .map(|weapons| weapons.mounts[0].total_shots)
+                .unwrap_or(0);
+            let pass = before > after && shots >= 5;
+            let report = serde_json::json!({
+                "scenario": name,
+                "seed": 31,
+                "pass": pass,
+                "shots_fired": shots,
+                "wall_before": before,
+                "wall_after": after,
+                "damage": before - after,
+                "checksum": bullet_checksum(&harness),
+            });
+            print_json(&report, json);
+            Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+        }
         other => bail!("unknown combat scenario `{other}`"),
     }
 }

@@ -51,6 +51,8 @@ pub struct BulletSpawn {
     pub aim_tile: Option<(i16, i16)>,
     /// Sticky target (plan 10 §3.3).
     pub target: Option<Entity>,
+    /// Deterministic per-tick mover (`BulletComp.mover`; plan 10 M4).
+    pub mover: Option<super::ShotMover>,
 }
 
 impl Default for BulletSpawn {
@@ -72,6 +74,7 @@ impl Default for BulletSpawn {
             aim_y: -1.0,
             aim_tile: None,
             target: None,
+            mover: None,
         }
     }
 }
@@ -173,6 +176,7 @@ pub fn create(
         sticky_y: 0.0,
         flags: JUST_SPAWNED,
         frags: 0,
+        mover: spawn.mover,
     };
 
     let entity = world
