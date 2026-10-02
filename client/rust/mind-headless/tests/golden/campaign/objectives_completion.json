@@ -1,0 +1,32 @@
+{
+  "format": 1,
+  "scenario": "campaign_objectives_completion",
+  "objective_types": 13,
+  "completed": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12
+  ],
+  "all_done": true,
+  "flags": [
+    "done"
+  ],
+  "markers": {
+    "world": 2,
+    "minimap": 2,
+    "light": 1
+  },
+  "marker_roundtrip": true,
+  "checksum": "7ca7628c0569eb06",
+  "pass": true
+}

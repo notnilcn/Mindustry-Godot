@@ -68,6 +68,7 @@ pub fn run(command: &CampaignCommand) -> Result<i32> {
         CampaignCommand::Turn { turns, .. } => campaign_turn(*turns)?,
         CampaignCommand::Schematic { .. } => campaign_schematic()?,
         CampaignCommand::Fog { .. } => campaign_fog()?,
+        CampaignCommand::Objectives { .. } => objectives_completion()?,
     };
     match command {
         CampaignCommand::Rules { json, dump: path }
@@ -82,6 +83,9 @@ pub fn run(command: &CampaignCommand) -> Result<i32> {
             json, dump: path, ..
         }
         | CampaignCommand::Fog {
+            json, dump: path, ..
+        }
+        | CampaignCommand::Objectives {
             json, dump: path, ..
         } => {
             if let Some(path) = path {
@@ -706,6 +710,158 @@ fn campaign_fog() -> Result<(Value, Value)> {
     Ok((report, dump))
 }
 
+/// `campaign objectives` — plan 12 §7b M6 `objectives_completion`.
+fn objectives_completion() -> Result<(Value, Value)> {
+    use mind_core::game::map_markers::{MapMarkers, MarkerKind};
+    use mind_core::game::map_objectives::{MapObjectivesRuntime, ObjectiveEnv, ObjectiveRunParams};
+    use mind_core::io::json::objectives::{
+        MapObjectives, ObjectiveMarker, PointMarker, TextureMarker,
+    };
+
+    /// Env where every predicate is already satisfied.
+    struct ScriptedEnv;
+
+    impl ObjectiveEnv for ScriptedEnv {
+        fn is_content_unlocked(&self, _content: &str) -> bool {
+            true
+        }
+        fn team_has_item(&self, _team: u8, _item: &str, _amount: i32) -> bool {
+            true
+        }
+        fn core_item_count(&self, _item: &str) -> i32 {
+            999
+        }
+        fn placed_block_count(&self, _block: &str) -> i32 {
+            999
+        }
+        fn unit_count(&self, _team: u8, _unit: &str) -> i32 {
+            999
+        }
+        fn enemy_units_destroyed(&self) -> i32 {
+            999
+        }
+        fn objective_flag(&self, _flag: &str) -> bool {
+            true
+        }
+        fn core_count(&self, _team: u8) -> usize {
+            0
+        }
+        fn block_at(&self, _x: i32, _y: i32) -> Option<(&str, u8)> {
+            None
+        }
+        fn headless(&self) -> bool {
+            true
+        }
+        fn command_mode_satisfied(&self) -> bool {
+            false
+        }
+    }
+
+    let json = r#"[
+        {"class":"Research","content":"alpha"},
+        {"class":"Produce","content":"alpha"},
+        {"class":"Item","item":"copper","amount":1},
+        {"class":"CoreItem","item":"lead","amount":5},
+        {"class":"BuildCount","block":"conveyor","count":2},
+        {"class":"UnitCount","unit":"dagger","count":1},
+        {"class":"DestroyUnits","count":3},
+        {"class":"Timer","duration":1.0},
+        {"class":"DestroyBlock","team":2,"block":"router","pos":{"x":0,"y":0}},
+        {"class":"DestroyBlocks","team":2,"block":"router","positions":[{"x":1,"y":1}]},
+        {"class":"CommandMode"},
+        {"class":"Flag","flag":"captured","flagsAdded":["done"]},
+        {"class":"DestroyCore"}
+    ]"#;
+    let data = MapObjectives::from_json(json)?;
+    assert_eq!(data.len(), 13, "all 13 objective classes present");
+    let mut runtime = MapObjectivesRuntime::from_data(data);
+    let env = ScriptedEnv;
+    let params = ObjectiveRunParams::default();
+    let ready = runtime.update(&env, &params, 1.0);
+
+    let mut rules = Rules::default();
+    for index in &ready {
+        runtime.complete(*index, &mut rules);
+    }
+    let all_done = (0..13).all(|index| runtime.is_completed(index));
+    let flags: Vec<String> = rules.objective_flags.iter().cloned().collect();
+
+    // Markers: add a point + texture, toggle via control, round-trip the region.
+    let mut markers = MapMarkers::new();
+    markers.add(
+        1,
+        ObjectiveMarker::Point(PointMarker {
+            world: 1,
+            minimap: 1,
+            light: 1,
+            ..Default::default()
+        }),
+    );
+    markers.add(
+        2,
+        ObjectiveMarker::Texture(TextureMarker {
+            world: -1,
+            minimap: 1,
+            light: -1,
+            ..Default::default()
+        }),
+    );
+    markers.update_marker(MarkerKind::World, 2, true);
+    let counts = (
+        markers.world_count(),
+        markers.map_count(),
+        markers.light_count(),
+    );
+
+    let mut buffer = Vec::new();
+    {
+        let mut writer = mind_core::io::WireWriter::new(&mut buffer);
+        mind_core::io::save::state::MarkersIo::write_markers(&markers, &mut writer)?;
+    }
+    let mut restored = MapMarkers::new();
+    {
+        let mut reader = mind_core::io::WireReader::new(&buffer);
+        mind_core::io::save::state::MarkersSink::read_markers(&mut restored, &mut reader)?;
+    }
+    let marker_roundtrip = restored == markers;
+
+    let checksum = fnv_hex(
+        serde_json::to_string(&json!({
+            "completed": ready,
+            "flags": flags,
+            "markers": counts,
+        }))?
+        .as_bytes(),
+    );
+    let pass = all_done
+        && ready.len() == 13
+        && flags == vec!["done".to_owned()]
+        && counts == (2, 2, 1)
+        && marker_roundtrip;
+
+    let dump = json!({
+        "format": 1,
+        "scenario": "campaign_objectives_completion",
+        "objective_types": 13,
+        "completed": ready,
+        "all_done": all_done,
+        "flags": flags,
+        "markers": { "world": counts.0, "minimap": counts.1, "light": counts.2 },
+        "marker_roundtrip": marker_roundtrip,
+        "checksum": checksum,
+        "pass": pass,
+    });
+    let report = json!({
+        "scenario": "campaign_objectives_completion",
+        "objective_types": 13,
+        "completed": ready.len(),
+        "marker_roundtrip": marker_roundtrip,
+        "checksum": checksum,
+        "pass": pass,
+    });
+    Ok((report, dump))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -756,5 +912,11 @@ mod tests {
     fn fog_golden_matches() {
         let (_, dump) = campaign_fog().unwrap();
         assert_eq!(golden("fog.json"), canonical(&dump));
+    }
+
+    #[test]
+    fn objectives_golden_matches() {
+        let (_, dump) = objectives_completion().unwrap();
+        assert_eq!(golden("objectives_completion.json"), canonical(&dump));
     }
 }
