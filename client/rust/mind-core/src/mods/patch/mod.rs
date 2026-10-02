@@ -17,7 +17,7 @@ use serde_json::{Map, Value};
 
 use crate::content::parser_hooks::{PatchAsset, ResetAction};
 use crate::content::snapshot::RegistryIndexSnapshot;
-use crate::content::stacks::ItemStack;
+use crate::content::stacks::{ItemStack, LiquidStack};
 use crate::content::{
     BlockId, Consume, ConsumeSpec, ContentError, ContentRef, ContentRegistry, ContentType, ItemId,
     PlanetId, StatusId, UnitTypeId,
@@ -85,6 +85,12 @@ impl DataPatcher {
     /// Number of `afterPatch` sweeps run (test/audit helper).
     pub fn after_patch_calls(&self) -> usize {
         self.after_patch_calls
+    }
+
+    /// Content references touched by the last apply (upstream `DataManager`
+    /// copies `DataPatcher.used` into its `patched` set for `isPatched`).
+    pub fn touched_contents(&self) -> Vec<ContentRef> {
+        self.used.iter().map(|(reference, _)| *reference).collect()
     }
 
     /// Applies patches with no active planet (`requiredPlanets` never gates).
@@ -185,11 +191,14 @@ impl DataPatcher {
     /// Handles one top-level patch key (flat dotted or nested type form).
     fn apply_key(&mut self, registry: &mut ContentRegistry, key: &str, value: &Value) {
         let Some((type_name, rest)) = key.split_once('.') else {
-            // Nested form: `{ "block": { "<name>": { "<field>": v } } }`.
+            // Nested form: `{ "block": { "<name>": { "<field>": v } } }` or the
+            // scalar sugar `{ "block": { "<name>.<field>": v } }`.
             if let Some(map) = value.as_object() {
                 for (name, fields) in map {
                     if let Some(fields) = fields.as_object() {
                         self.apply_fields(registry, key, name, fields);
+                    } else if let Some((content, field)) = name.split_once('.') {
+                        self.apply_path(registry, key, content, field, fields);
                     } else {
                         self.warn(format!("patch `{key}.{name}` must be an object"));
                     }
@@ -313,6 +322,9 @@ impl DataPatcher {
                 self.edit_item_requirements(registry, reference, id.raw(), mode, value)
             }
             "plans" => self.edit_unit_plans(registry, reference, id.raw(), mode, value),
+            field if field == "upgrades" || field.starts_with("upgrades.") => {
+                self.edit_reconstructor_upgrades(registry, reference, id.raw(), field, mode, value)
+            }
             "consumes" => self.edit_consumes(registry, reference, id, mode, value),
             field if field == "attributes" || field.starts_with("attributes.") => {
                 self.edit_attributes(registry, reference, id.raw(), field, value)
@@ -607,7 +619,192 @@ impl DataPatcher {
         }
     }
 
-    /// Merges a `consumes` object (power + `remove` semantics; M3 subset).
+    /// Edits `block.<name>.upgrades` (`Seq<UnitType[]>`: reconstructor upgrade
+    /// pairs; `PatcherTests.reconstructorPlans`, `reconstructorPlansEditSpecific`,
+    /// `reconstructorPlansAdd`, `nestedArrays`, `nestedArrays2`).
+    ///
+    /// The trailing `.N` / `.+` was peeled into `mode` by [`Self::apply_path`];
+    /// `field`'s suffix after `upgrades` is the optional outer index used by
+    /// inner-pair edits (`upgrades.0.1`).
+    fn edit_reconstructor_upgrades(
+        &mut self,
+        registry: &mut ContentRegistry,
+        reference: ContentRef,
+        raw: u16,
+        field: &str,
+        mode: FieldMode,
+        value: &Value,
+    ) {
+        let suffix = field.strip_prefix("upgrades").unwrap_or(field);
+        let suffix = suffix.strip_prefix('.').unwrap_or(suffix);
+
+        let Some(original) = registry
+            .block(BlockId::new(raw))
+            .map(|block| block.reconstructor_upgrades.clone())
+        else {
+            return;
+        };
+
+        let mut replace: Option<Vec<(UnitTypeId, UnitTypeId)>> = None;
+        let mut append: Option<Vec<(UnitTypeId, UnitTypeId)>> = None;
+        let mut replace_index: Option<(usize, (UnitTypeId, UnitTypeId))> = None;
+        let mut set_component: Option<(usize, usize, UnitTypeId)> = None;
+
+        if suffix.is_empty() {
+            match mode {
+                FieldMode::Set => match self.parse_upgrade_pairs(registry, value) {
+                    Ok(pairs) => replace = Some(pairs),
+                    Err(message) => {
+                        self.warn(message);
+                        return;
+                    }
+                },
+                FieldMode::Append => match self.parse_upgrade_pairs(registry, value) {
+                    Ok(pairs) => append = Some(pairs),
+                    Err(message) => {
+                        self.warn(message);
+                        return;
+                    }
+                },
+                FieldMode::Index(index) => match self.parse_upgrade_pair(registry, value) {
+                    Ok(pair) => replace_index = Some((index, pair)),
+                    Err(message) => {
+                        self.warn(message);
+                        return;
+                    }
+                },
+            }
+        } else {
+            let Ok(outer) = suffix.parse::<usize>() else {
+                self.warn(format!("invalid upgrades index `{suffix}`"));
+                return;
+            };
+            match mode {
+                FieldMode::Index(inner) => {
+                    let Some(name) = value.as_str() else {
+                        self.warn("upgrade component must be a unit name");
+                        return;
+                    };
+                    let Some(unit) = self.resolve_unit(registry, name) else {
+                        self.warn(format!("unknown unit `{name}`"));
+                        return;
+                    };
+                    set_component = Some((outer, inner, unit));
+                }
+                _ => {
+                    self.warn(format!("invalid upgrades path `{field}`"));
+                    return;
+                }
+            }
+        }
+
+        if self.mark_used(reference, "upgrades") {
+            self.resetters
+                .push(Box::new(move |r: &mut ContentRegistry| {
+                    if let Some(block) = r.block_mut(BlockId::new(raw)) {
+                        block.reconstructor_upgrades = original;
+                    }
+                }));
+        }
+        if let Some(block) = registry.block_mut(BlockId::new(raw)) {
+            if let Some(pairs) = replace {
+                block.reconstructor_upgrades = pairs;
+            }
+            if let Some(pairs) = append {
+                block.reconstructor_upgrades.extend(pairs);
+            }
+            if let Some((index, pair)) = replace_index
+                && index < block.reconstructor_upgrades.len()
+            {
+                block.reconstructor_upgrades[index] = pair;
+            }
+            if let Some((outer, inner, unit)) = set_component
+                && let Some(pair) = block.reconstructor_upgrades.get_mut(outer)
+            {
+                match inner {
+                    0 => pair.0 = unit,
+                    1 => pair.1 = unit,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    /// Resolves a unit name (raw, then `<mod>-`-prefixed).
+    fn resolve_unit(&self, registry: &ContentRegistry, name: &str) -> Option<UnitTypeId> {
+        registry
+            .unit_id(name)
+            .or_else(|| registry.unit_id(&registry.transform_name(name)))
+    }
+
+    /// Parses one `[from, to]` upgrade pair (array or `{"0":…,"1":…}` object).
+    fn parse_upgrade_pair(
+        &self,
+        registry: &ContentRegistry,
+        value: &Value,
+    ) -> Result<(UnitTypeId, UnitTypeId), String> {
+        let units = match value {
+            Value::Array(items) => {
+                let mut out = Vec::with_capacity(items.len());
+                for item in items {
+                    let name = item
+                        .as_str()
+                        .ok_or("upgrade pair entries must be strings")?;
+                    out.push(
+                        self.resolve_unit(registry, name)
+                            .ok_or_else(|| format!("unknown unit `{name}`"))?,
+                    );
+                }
+                out
+            }
+            Value::Object(map) => {
+                let mut out = Vec::with_capacity(2);
+                for key in ["0", "1"] {
+                    let Some(name) = map.get(key).and_then(Value::as_str) else {
+                        return Err(format!("upgrade pair is missing index `{key}`"));
+                    };
+                    out.push(
+                        self.resolve_unit(registry, name)
+                            .ok_or_else(|| format!("unknown unit `{name}`"))?,
+                    );
+                }
+                out
+            }
+            _ => return Err("upgrade pair must be an array or object".to_owned()),
+        };
+        if units.len() < 2 {
+            return Err("upgrade pair needs exactly two units".to_owned());
+        }
+        Ok((units[0], units[1]))
+    }
+
+    /// Parses a `Seq<UnitType[]>` value: a list of pairs, a single flat pair,
+    /// or an empty array (clear).
+    fn parse_upgrade_pairs(
+        &self,
+        registry: &ContentRegistry,
+        value: &Value,
+    ) -> Result<Vec<(UnitTypeId, UnitTypeId)>, String> {
+        let Value::Array(items) = value else {
+            if value.is_object() {
+                return Ok(vec![self.parse_upgrade_pair(registry, value)?]);
+            }
+            return Err("`upgrades` must be an array of pairs".to_owned());
+        };
+        if items.is_empty() {
+            return Ok(Vec::new());
+        }
+        if items.iter().all(Value::is_string) {
+            return Ok(vec![self.parse_upgrade_pair(registry, value)?]);
+        }
+        let mut out = Vec::with_capacity(items.len());
+        for entry in items {
+            out.push(self.parse_upgrade_pair(registry, entry)?);
+        }
+        Ok(out)
+    }
+
+    /// Merges a `consumes` object (typed adds + `remove` semantics; M3 subset).
     fn edit_consumes(
         &mut self,
         registry: &mut ContentRegistry,
@@ -620,10 +817,15 @@ impl DataPatcher {
             self.warn("`consumes` must be an object");
             return;
         };
-        let Some(original) = registry
-            .block(id)
-            .map(|b| (b.consumes.clone(), b.has_power))
-        else {
+        let Some(original) = registry.block(id).map(|b| {
+            (
+                b.consumes.clone(),
+                b.has_power,
+                b.has_items,
+                b.accepts_items,
+                b.has_liquids,
+            )
+        }) else {
             return;
         };
         let raw = id.raw();
@@ -633,29 +835,89 @@ impl DataPatcher {
                     if let Some(block) = r.block_mut(BlockId::new(raw)) {
                         block.consumes = original.0.clone();
                         block.has_power = original.1;
+                        block.has_items = original.2;
+                        block.accepts_items = original.3;
+                        block.has_liquids = original.4;
                     }
                 }));
         }
-        let remove_all = map.get("remove").and_then(Value::as_str) == Some("all");
+        let remove = map.get("remove").and_then(Value::as_str);
         let power = map.get("power").and_then(Value::as_f64).map(|v| v as f32);
         let buffered = map
             .get("powerBuffered")
             .and_then(Value::as_f64)
             .map(|v| v as f32);
+        let coolant = map.get("coolant").and_then(Value::as_f64).map(|v| v as f32);
+        // `readBlockConsumers` typed entries (`item`/`items`, `liquid`/`liquids`).
+        let items = match map.get("items").or_else(|| map.get("item")) {
+            Some(value) => match self.parse_item_stacks(registry, value) {
+                Ok(stacks) => Some(stacks),
+                Err(message) => {
+                    self.warn(message);
+                    None
+                }
+            },
+            None => None,
+        };
+        let liquids = match map.get("liquids").or_else(|| map.get("liquid")) {
+            Some(value) => match parse_liquid_stacks(registry, value) {
+                Ok(stacks) => Some(stacks),
+                Err(message) => {
+                    self.warn(message);
+                    None
+                }
+            },
+            None => None,
+        };
         if let Some(block) = registry.block_mut(id) {
-            if remove_all {
-                block.consumes.clear();
+            match remove {
+                Some("all") => block.consumes.clear(),
+                Some("items" | "item") => block
+                    .consumes
+                    .retain(|spec| !matches!(spec.consume, Consume::Items(_))),
+                Some("liquids" | "liquid") => block.consumes.retain(|spec| {
+                    !matches!(spec.consume, Consume::Liquid { .. } | Consume::Liquids(_))
+                }),
+                Some("power") => block
+                    .consumes
+                    .retain(|spec| !matches!(spec.consume, Consume::Power { .. })),
+                Some("coolant") => block
+                    .consumes
+                    .retain(|spec| !matches!(spec.consume, Consume::Coolant { .. })),
+                _ => {}
+            }
+            let spec = |consume| ConsumeSpec {
+                consume,
+                optional: false,
+                update: false,
+                ignore: false,
+            };
+            if let Some(items) = items {
+                block.has_items = true;
+                block.accepts_items = true;
+                block.consumes.push(spec(Consume::Items(items)));
+            }
+            if let Some(liquids) = liquids {
+                block.has_liquids = true;
+                for stack in liquids {
+                    block.consumes.push(spec(Consume::Liquid {
+                        liquid: stack.liquid,
+                        amount: stack.amount,
+                    }));
+                }
+            }
+            if let Some(amount) = coolant {
+                block.consumes.push(spec(Consume::Coolant {
+                    amount,
+                    allow_liquid: true,
+                    allow_gas: true,
+                }));
             }
             if power.is_some() || buffered.is_some() {
-                block.consumes.push(ConsumeSpec {
-                    consume: Consume::Power {
-                        usage: power.unwrap_or(0.0),
-                        buffered: buffered.unwrap_or(0.0),
-                    },
-                    optional: false,
-                    update: false,
-                    ignore: false,
-                });
+                block.consumes.push(spec(Consume::Power {
+                    usage: power.unwrap_or(0.0),
+                    buffered: buffered.unwrap_or(0.0),
+                }));
                 block.has_power = true;
             }
         }
@@ -1998,6 +2260,57 @@ fn content_type_from_name(name: &str) -> Option<ContentType> {
     }
 }
 
+/// Parses typed `liquid`/`liquids` consume entries: `["water/10"]`,
+/// `{"water": 10}`, or a single `"water/10"` string.
+fn parse_liquid_stacks(
+    registry: &ContentRegistry,
+    value: &Value,
+) -> Result<Vec<LiquidStack>, String> {
+    let resolve = |name: &str| {
+        registry
+            .liquid_id(name)
+            .or_else(|| registry.liquid_id(&registry.transform_name(name)))
+            .ok_or_else(|| format!("unknown liquid `{name}`"))
+    };
+    let entries: Vec<&Value> = match value {
+        Value::Array(items) => items.iter().collect(),
+        Value::String(_) => vec![value],
+        Value::Object(map) => {
+            let mut out = Vec::with_capacity(map.len());
+            for (name, amount) in map {
+                out.push(LiquidStack::new(
+                    resolve(name)?,
+                    amount.as_f64().unwrap_or(0.0) as f32,
+                ));
+            }
+            return Ok(out);
+        }
+        _ => return Err("`liquids` must be an array/object/string".to_owned()),
+    };
+    let mut out = Vec::with_capacity(entries.len());
+    for entry in entries {
+        match entry {
+            Value::String(text) => {
+                let (name, amount) = text
+                    .split_once('/')
+                    .map(|(name, amount)| (name, amount.parse::<f32>().unwrap_or(0.0)))
+                    .unwrap_or((text.as_str(), 0.0));
+                out.push(LiquidStack::new(resolve(name)?, amount));
+            }
+            Value::Object(map) => {
+                let name = map
+                    .get("liquid")
+                    .and_then(Value::as_str)
+                    .ok_or("liquid stack missing `liquid`")?;
+                let amount = map.get("amount").and_then(Value::as_f64).unwrap_or(0.0) as f32;
+                out.push(LiquidStack::new(resolve(name)?, amount));
+            }
+            _ => return Err("invalid liquid entry".to_owned()),
+        }
+    }
+    Ok(out)
+}
+
 /// Resolves a `unit.targetFlags` name to a [`BlockFlag`] keyword.
 fn resolve_block_flag(name: &str) -> Option<crate::content::registries::blocks::BlockFlag> {
     use crate::content::registries::blocks::BlockFlag;
@@ -2660,5 +2973,293 @@ mod tests {
         );
         patcher.unapply(&mut registry);
         assert_eq!(registry.unit(id).expect("unit").entity_def, original);
+    }
+
+    /// PatcherTests.reconstructorPlans: `Seq<UnitType[]>` replace + typed
+    /// `consumes` items merge, both restored on unapply.
+    #[test]
+    fn reconstructor_plans_and_consumes() {
+        let mut registry = test_registry();
+        let id = registry
+            .block_id("additive-reconstructor")
+            .expect("additive-reconstructor");
+        let dagger = registry.unit_id("dagger").expect("dagger");
+        let flare = registry.unit_id("flare").expect("flare");
+        let surge = registry.item_id("surge-alloy").expect("surge-alloy");
+        let copper = registry.item_id("copper").expect("copper");
+        let original = registry
+            .block(id)
+            .expect("block")
+            .reconstructor_upgrades
+            .clone();
+        let original_consumes = registry.block(id).expect("block").consumes.clone();
+        let mut patcher = DataPatcher::new();
+        patcher
+            .apply(
+                &mut registry,
+                &[patch(
+                    r#"{
+                        "block.additive-reconstructor.upgrades": [["dagger", "flare"]],
+                        "block.additive-reconstructor.consumes": {
+                            "remove": "items",
+                            "items": ["surge-alloy/10", "copper/20"]
+                        }
+                    }"#,
+                )],
+            )
+            .expect("reconstructor patch");
+        assert!(patcher.warnings().is_empty(), "{:?}", patcher.warnings());
+        let block = registry.block(id).expect("block");
+        assert_eq!(block.reconstructor_upgrades, vec![(dagger, flare)]);
+        let items = block
+            .consumes
+            .iter()
+            .find_map(|spec| match &spec.consume {
+                Consume::Items(stacks) => Some(stacks.clone()),
+                _ => None,
+            })
+            .expect("items consumer");
+        assert_eq!(
+            items,
+            vec![ItemStack::new(surge, 10), ItemStack::new(copper, 20)]
+        );
+        patcher.unapply(&mut registry);
+        let block = registry.block(id).expect("block");
+        assert_eq!(block.reconstructor_upgrades, original);
+        assert_eq!(block.consumes, original_consumes);
+    }
+
+    /// PatcherTests.reconstructorPlansEditSpecific: index form `upgrades.1`.
+    #[test]
+    fn reconstructor_index_edit() {
+        let mut registry = test_registry();
+        let id = registry
+            .block_id("additive-reconstructor")
+            .expect("additive-reconstructor");
+        let dagger = registry.unit_id("dagger").expect("dagger");
+        let flare = registry.unit_id("flare").expect("flare");
+        let original = registry
+            .block(id)
+            .expect("block")
+            .reconstructor_upgrades
+            .clone();
+        let mut patcher = DataPatcher::new();
+        patcher
+            .apply(
+                &mut registry,
+                &[patch(
+                    r#"{"block.additive-reconstructor.upgrades.1": ["dagger", "flare"]}"#,
+                )],
+            )
+            .expect("index edit");
+        assert!(patcher.warnings().is_empty(), "{:?}", patcher.warnings());
+        assert_eq!(
+            registry.block(id).expect("block").reconstructor_upgrades[1],
+            (dagger, flare)
+        );
+        patcher.unapply(&mut registry);
+        assert_eq!(
+            registry.block(id).expect("block").reconstructor_upgrades,
+            original
+        );
+    }
+
+    /// PatcherTests.reconstructorPlansAdd: `+` append form.
+    #[test]
+    fn reconstructor_append() {
+        let mut registry = test_registry();
+        let id = registry
+            .block_id("additive-reconstructor")
+            .expect("additive-reconstructor");
+        let dagger = registry.unit_id("dagger").expect("dagger");
+        let flare = registry.unit_id("flare").expect("flare");
+        let original_len = registry
+            .block(id)
+            .expect("block")
+            .reconstructor_upgrades
+            .len();
+        let mut patcher = DataPatcher::new();
+        patcher
+            .apply(
+                &mut registry,
+                &[patch(
+                    r#"{"block.additive-reconstructor.upgrades.+": [["dagger", "flare"]]}"#,
+                )],
+            )
+            .expect("append upgrade");
+        assert!(patcher.warnings().is_empty(), "{:?}", patcher.warnings());
+        let ups = registry
+            .block(id)
+            .expect("block")
+            .reconstructor_upgrades
+            .clone();
+        assert_eq!(ups.len(), original_len + 1);
+        assert_eq!(*ups.last().expect("upgrade"), (dagger, flare));
+        patcher.unapply(&mut registry);
+        assert_eq!(
+            registry
+                .block(id)
+                .expect("block")
+                .reconstructor_upgrades
+                .len(),
+            original_len
+        );
+    }
+
+    /// PatcherTests.nestedArrays / nestedArrays2: object-index and dotted
+    /// nested forms both set one `UnitType[]` pair element.
+    #[test]
+    fn nested_array_edit_forms() {
+        for json in [
+            r#"{"block.ship-refabricator.upgrades.0": {"0": "dagger", "1": "mace"}}"#,
+            r#"{"block": {"ship-refabricator": {"upgrades.0.0": "dagger", "upgrades.0.1": "mace"}}}"#,
+        ] {
+            let mut registry = test_registry();
+            let id = registry
+                .block_id("ship-refabricator")
+                .expect("ship-refabricator");
+            let dagger = registry.unit_id("dagger").expect("dagger");
+            let mace = registry.unit_id("mace").expect("mace");
+            let original = registry
+                .block(id)
+                .expect("block")
+                .reconstructor_upgrades
+                .clone();
+            let mut patcher = DataPatcher::new();
+            patcher
+                .apply(&mut registry, &[patch(json)])
+                .expect("nested edit");
+            assert!(
+                patcher.warnings().is_empty(),
+                "{json}: {:?}",
+                patcher.warnings()
+            );
+            assert_eq!(
+                registry.block(id).expect("block").reconstructor_upgrades[0],
+                (dagger, mace)
+            );
+            patcher.unapply(&mut registry);
+            assert_eq!(
+                registry.block(id).expect("block").reconstructor_upgrades,
+                original
+            );
+        }
+    }
+
+    /// PatcherTests.unitFlags: `targetFlags.+` single-string append + reset.
+    #[test]
+    fn unit_target_flags_single() {
+        use crate::content::registries::blocks::BlockFlag;
+        let mut registry = test_registry();
+        let id = registry.unit_id("dagger").expect("dagger");
+        let original = registry.unit(id).expect("unit").target_flags.clone();
+        let mut patcher = DataPatcher::new();
+        patcher
+            .apply(
+                &mut registry,
+                &[patch(r#"{"unit.dagger.targetFlags.+": "shield"}"#)],
+            )
+            .expect("append flag");
+        let flags = registry.unit(id).expect("unit").target_flags.clone();
+        assert_eq!(flags.len(), original.len() + 1);
+        assert_eq!(*flags.last().expect("flag"), Some(BlockFlag::Shield));
+        patcher.unapply(&mut registry);
+        assert_eq!(registry.unit(id).expect("unit").target_flags, original);
+    }
+
+    /// PatcherTests.assignStringToObject: a string assigned to `weapons` warns
+    /// and leaves the array unchanged.
+    #[test]
+    fn string_to_object_warns() {
+        let mut registry = test_registry();
+        let id = registry.unit_id("dagger").expect("dagger");
+        let original = registry.unit(id).expect("unit").weapons.clone();
+        let mut patcher = DataPatcher::new();
+        patcher
+            .apply(
+                &mut registry,
+                &[patch(r#"{"unit.dagger.weapons": ["frog"]}"#)],
+            )
+            .expect("string to object");
+        assert_eq!(patcher.warnings().len(), 1);
+        assert_eq!(registry.unit(id).expect("unit").weapons, original);
+    }
+
+    /// PatcherTests.noIdAssign: `id` is `@NoPatch`.
+    #[test]
+    fn id_not_patchable() {
+        let mut registry = test_registry();
+        let mut patcher = DataPatcher::new();
+        patcher
+            .apply(&mut registry, &[patch(r#"{"block.router.id": 9231}"#)])
+            .expect("id patch");
+        assert_eq!(patcher.warnings().len(), 1);
+    }
+
+    /// PatcherTests.noResolution: an unresolvable class in the patcher parser
+    /// warns (the arbitrary-FQCN fallback is disabled).
+    #[test]
+    fn no_class_resolution_in_patcher() {
+        let mut registry = test_registry();
+        let mut patcher = DataPatcher::new();
+        patcher
+            .apply(
+                &mut registry,
+                &[patch(
+                    r#"{"block.conveyor.lastConfig": {"class": "mindustry.ai.Pathfinder"}}"#,
+                )],
+            )
+            .expect("no resolution");
+        assert_eq!(patcher.warnings().len(), 1);
+    }
+
+    /// PatcherTests.singleValue: nested `{"block": {"<name>.<field>": v}}`
+    /// scalar form.
+    #[test]
+    fn nested_type_single_value() {
+        let mut registry = test_registry();
+        let id = registry.block_id("router").expect("router");
+        let original = registry.block(id).expect("block").health;
+        let mut patcher = DataPatcher::new();
+        patcher
+            .apply(
+                &mut registry,
+                &[patch(r#"{"block": {"router.health": 9}}"#)],
+            )
+            .expect("single value");
+        assert!(patcher.warnings().is_empty(), "{:?}", patcher.warnings());
+        assert_eq!(registry.block(id).expect("block").health, 9);
+        patcher.unapply(&mut registry);
+        assert_eq!(registry.block(id).expect("block").health, original);
+    }
+
+    /// PatcherTests.addWeapon: append a fully-formed weapon to `flare`.
+    #[test]
+    fn weapon_append_object() {
+        let mut registry = test_registry();
+        let id = registry.unit_id("flare").expect("flare");
+        let original = registry.unit(id).expect("unit").weapons.clone();
+        let mut patcher = DataPatcher::new();
+        patcher
+            .apply(
+                &mut registry,
+                &[patch(
+                    r#"{"unit.flare.weapons.+": {
+                        "x": 0, "y": 0, "reload": 10,
+                        "bullet": {"type": "LaserBulletType", "damage": 100}
+                    }}"#,
+                )],
+            )
+            .expect("append weapon");
+        assert!(patcher.warnings().is_empty(), "{:?}", patcher.warnings());
+        let weapons = registry.unit(id).expect("unit").weapons.clone();
+        assert_eq!(weapons.len(), original.len() + 1);
+        let added = weapons.last().expect("weapon");
+        assert_eq!(
+            registry.bullet(added.bullet.id).expect("bullet").damage,
+            100.0
+        );
+        patcher.unapply(&mut registry);
+        assert_eq!(registry.unit(id).expect("unit").weapons, original);
     }
 }

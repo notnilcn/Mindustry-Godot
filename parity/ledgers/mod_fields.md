@@ -4,7 +4,7 @@ Tracks accepted JSON field names per content kind. Unknown fields warn and are
 ignored (`ignoreUnknownFields = true`); this ledger records the implemented set
 so drift from upstream Java fields is visible.
 
-Status as of 2026-10-02 (lane/20-mods): **M1 item + block core fields implemented; M2 all nine top-level kinds + unit weapons/bullets/abilities/shoot patterns parsed; M2b nested frag/interval/spawn bullets + `mind-tools mods classmap --check`; M3b patch surface (`drillMultipliers`, `attributes`, deep weapon/bullet paths, abilities).**
+Status as of 2026-10-03 (lane/f16-20): **M1 item + block core fields implemented; M2 all nine top-level kinds + unit weapons/bullets/abilities/shoot patterns parsed; M2b nested frag/interval/spawn bullets + `mind-tools mods classmap --check`; M3b patch surface (`drillMultipliers`, `attributes`, deep weapon/bullet paths, abilities, reconstructor `upgrades`, typed `consumes`).**
 
 ## Item (`mindustry.type.Item`)
 
@@ -45,7 +45,9 @@ Status as of 2026-10-02 (lane/20-mods): **M1 item + block core fields implemente
 | `consumes` | `BlockDef.consumes` | implemented (patch merge; JSON parse TODO) |
 | `drillMultipliers` | `BlockDef.drill_multipliers` | implemented (parse TODO; patch M3b) |
 | `attributes` | `BlockDef.attributes` (name-keyed) | implemented (patch M3b) |
-| `unit_plans*`, `upgrades`, `assembler plans` | `BlockDef` | TODO (M2/M3) |
+| `unit_plans*` | `BlockDef.unit_plans` | implemented (patch M3) |
+| `upgrades` | `BlockDef.reconstructor_upgrades` | implemented (patch M3b) |
+| `assembler plans` | `BlockDef.assembler_plans` | TODO (M2/M3) |
 
 ## M2 top-level kinds
 
@@ -84,8 +86,20 @@ remain TODO.
 
 `DataPatcher` supports the nine top-level kinds, `Seq`/array (`Set`/`+`/index),
 `ObjectSet` `+` (`immunities`), `ObjectFloatMap` (`drillMultipliers`), `Attributes`
-(`attributes`, name-keyed incl. custom), `consumes` merge, deep
-`weapons.<i>.bullet.<field>` edits, `targetFlags`, `unit.type`, `requiredPlanets`
-gating, `afterPatch`, `unapply` resets and `fix_content_arrays` growth.
-Remaining: reconstructor `upgrades` array model, block `drawer` parts,
-created-object `postInit/load` (client), full 28-case `PatcherTests` parity.
+(`attributes`, name-keyed incl. custom), `consumes` merge (typed
+`item`/`items`/`liquid`/`liquids`/`power`/`powerBuffered`/`coolant` adds +
+`remove: <type|all>`), deep `weapons.<i>.bullet.<field>` edits, `weapons`
+objects (append/replace/index), `abilities`, reconstructor `upgrades`
+(`Seq<UnitType[]>`: replace/append/index + nested `upgrades.0.1` forms),
+`targetFlags`, `unit.type`, `plans`, `requiredPlanets` gating, `afterPatch`,
+`unapply` resets and `fix_content_arrays` growth. Nested scalar sugar
+(`{"block":{"router.health":9}}`) is handled. `isPatched` reflects the
+patcher's touched content for plan 19.
+
+Blocked (other plans): block `drawer` draw parts (plan 17) and `craftTime`
+(plan 07 behavior field) block the `bigPatch`/`singleValue` cases; created-object
+`postInit/load` (client) and `fix_content_arrays` runtime `ItemSeq`/`ItemModule`
+tables remain. 10 of the 30 upstream `PatcherTests` cases beyond the earlier
+slice are ported here (`reconstructorPlans{,EditSpecific,Add}`,
+`nestedArrays{,2}`, `unitFlags`, `assignStringToObject`, `noIdAssign`,
+`noResolution`, `singleValue` form (via `health`), `addWeapon`).
