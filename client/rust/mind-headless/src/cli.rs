@@ -130,6 +130,60 @@ pub enum Command {
         #[command(subcommand)]
         command: ContentCommand,
     },
+
+    /// Asset pipeline verification (plan 03 §7b).
+    Assets {
+        /// Assets subcommand.
+        #[command(subcommand)]
+        command: AssetsCommand,
+    },
+}
+
+/// `assets` subcommands (plan 03 §7.1b).
+#[derive(Debug, Subcommand)]
+pub enum AssetsCommand {
+    /// Verify the vendored `assets/` + `assets-raw/` trees against
+    /// `build/assets/migration_manifest.json` (M0).
+    MigrateCheck {
+        /// Repo root override (defaults to the nearest ancestor containing
+        /// `assets-raw/sprites/pack.json`).
+        #[arg(long)]
+        repo: Option<PathBuf>,
+        /// Manifest path override (defaults to
+        /// `build/assets/migration_manifest.json` under the repo root).
+        #[arg(long)]
+        manifest: Option<PathBuf>,
+    },
+
+    /// Load a `sprites.atlas.json` manifest and dump the index summary as
+    /// JSON (M1). With `--region`, probe specific regions; exits non-zero
+    /// when any probe misses.
+    Index {
+        /// Directory containing `sprites.atlas.json` (e.g. `assets/sprites`).
+        #[arg(long)]
+        atlas: PathBuf,
+        /// Region name to probe (repeatable).
+        #[arg(long)]
+        region: Vec<String>,
+    },
+
+    /// Assert the content-driven region inventory resolves in the packed
+    /// atlas (M3/M4). `--assert-complete` fails on any missing name.
+    Regions {
+        /// Directory containing `sprites.atlas.json` (e.g. `assets/sprites`).
+        #[arg(long, default_value = "assets/sprites")]
+        atlas: PathBuf,
+        /// Inventory produced by `mind-tools pack`
+        /// (defaults to `build/assets/region_inventory.json`).
+        #[arg(long)]
+        inventory: Option<PathBuf>,
+        /// Fail (non-zero exit) when any expected region is missing.
+        #[arg(long)]
+        assert_complete: bool,
+        /// Emit a machine-readable JSON report.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// `content` subcommands (plan 02 §7b).

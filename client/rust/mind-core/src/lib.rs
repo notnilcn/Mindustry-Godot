@@ -10,6 +10,7 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod assets;
 pub mod command;
 pub mod config;
 pub mod content;
