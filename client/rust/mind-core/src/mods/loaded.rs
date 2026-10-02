@@ -23,6 +23,8 @@ pub enum UnsupportedReason {
     VersionTooNew,
     /// Script/Java code hooks are unavailable (OD1).
     ScriptsUnsupported,
+    /// Java class mod code cannot run without a JVM (OD1; JSON/assets still load).
+    JavaModUnsupported,
 }
 
 impl UnsupportedReason {
@@ -33,6 +35,9 @@ impl UnsupportedReason {
             UnsupportedReason::Blacklisted => "mod is blacklisted",
             UnsupportedReason::VersionTooNew => "mod requires a newer game version",
             UnsupportedReason::ScriptsUnsupported => "script mods are not supported in this build",
+            UnsupportedReason::JavaModUnsupported => {
+                "Java class mod code is not supported; JSON content and assets still load"
+            }
         }
     }
 }

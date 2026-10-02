@@ -10,6 +10,7 @@
 //! `mind-core::mods` is Godot-free and tokio-free; file access goes through
 //! plan 04's [`FileSystem`](crate::io::FileSystem).
 
+pub mod assets;
 pub mod deps;
 pub mod discovery;
 pub mod json;
@@ -18,6 +19,7 @@ pub mod meta;
 pub mod overlay;
 pub mod provider;
 pub mod script;
+pub mod server;
 
 use std::path::{Path, PathBuf};
 
@@ -309,6 +311,16 @@ impl Mods {
         }
         for index in disabled {
             self.mods[index].state = ModState::Disabled;
+        }
+        // Java-class code hooks are unavailable (OD1): surface the reason but
+        // keep the mod enabled so its JSON content/assets still load.
+        for mod_ in &mut self.mods {
+            if mod_.state == ModState::Enabled
+                && mod_.is_java()
+                && mod_.unsupported_reason.is_none()
+            {
+                mod_.unsupported_reason = Some(UnsupportedReason::JavaModUnsupported);
+            }
         }
 
         self.sort_mods();
