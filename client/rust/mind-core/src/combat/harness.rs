@@ -79,6 +79,11 @@ impl CombatHarness {
         self.names.get(name).copied()
     }
 
+    /// The fixture bullet-name map (`fuse`, `scatter_scrap`, ...; turret tests).
+    pub fn names_map(&self) -> &BTreeMap<String, BulletId> {
+        &self.names
+    }
+
     /// Places a block (delegates to plan 07).
     pub fn place(
         &mut self,
@@ -364,6 +369,10 @@ impl CombatHarness {
                 PowerModule::new(),
             ))
             .id();
+        // Fixture turrets are treated as powered unless a test un-powers them.
+        if let Some(mut power) = self.build.world.get_mut::<PowerModule>(entity) {
+            power.status = 1.0;
+        }
         Some(entity)
     }
 
