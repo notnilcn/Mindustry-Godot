@@ -212,6 +212,17 @@ pub enum IoCommand {
         #[arg(long)]
         json: bool,
     },
+
+    /// Parallel meta-only listing of a map/save directory (plan 04 M5 §7b):
+    /// corrupt entries are skipped with a warning.
+    MapList {
+        /// Directory to list (maps or saves).
+        #[arg(long)]
+        dir: PathBuf,
+        /// Emit a machine-readable JSON report.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// `content` subcommands (plan 02 §7b).

@@ -18,6 +18,7 @@ pub mod error;
 pub mod fs;
 pub mod json;
 pub mod legacy;
+pub mod map;
 pub mod save;
 pub mod settings;
 pub mod typeio;

@@ -23,8 +23,8 @@ use crate::registry;
 use crate::report::{
     BenchReport, ContentBenchReport, ContentIdEntry, ContentIdsReport, ContentLoadReport,
     ContentTypeCount, ContentTypeEntries, IoCheckClassIdsReport, IoCheckRevisionsReport,
-    IoDefRevisionReport, IoDumpMetaReport, IoRoundtripReport, IoSettingsReport, RunReport,
-    SimReport, TileCheck,
+    IoDefRevisionReport, IoDumpMetaReport, IoMapListEntry, IoMapListReport, IoRoundtripReport,
+    IoSettingsReport, RunReport, SimReport, TileCheck,
 };
 use crate::stdb_scenarios::StdbScenario;
 
@@ -148,8 +148,71 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
                 out,
                 json,
             } => cmd_io_roundtrip(map, *width, *height, *ticks, out.as_deref(), *json),
+            IoCommand::MapList { dir, json } => cmd_io_map_list(dir, *json),
         },
     }
+}
+
+/// Plan 04 M5 (§7b): parallel meta-only listing of one map/save directory.
+fn cmd_io_map_list(dir: &Path, json: bool) -> anyhow::Result<i32> {
+    use mind_core::io::fs::{FileSystem, NativeFs};
+    use mind_core::io::save::slot::list_files_meta;
+
+    let fs = NativeFs;
+    let candidates = fs
+        .ls(dir)?
+        .into_iter()
+        .filter(|path| {
+            path.extension().and_then(|ext| ext.to_str()) == Some("msav")
+                && !path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().contains("backup"))
+                    .unwrap_or(false)
+        })
+        .count();
+    let entries: Vec<IoMapListEntry> = list_files_meta(&fs, dir)
+        .into_iter()
+        .map(|(file, meta)| IoMapListEntry {
+            file: file.display().to_string(),
+            name: if meta.is_map() {
+                meta.tags.get("name").cloned().unwrap_or_default()
+            } else {
+                meta.map_name.clone()
+            },
+            width: meta.width(),
+            height: meta.height(),
+            wave: meta.wave,
+            build: meta.build,
+            format_version: meta.version,
+            is_map: meta.is_map(),
+            mods: meta.mods.len(),
+        })
+        .collect();
+    let skipped = candidates.saturating_sub(entries.len());
+    if !json {
+        for entry in &entries {
+            println!(
+                "{}: {} {}x{} wave={} build={} v={}{}",
+                entry.file,
+                entry.name,
+                entry.width,
+                entry.height,
+                entry.wave,
+                entry.build,
+                entry.format_version,
+                if entry.is_map { " [map]" } else { "" }
+            );
+        }
+        println!("{} listed, {skipped} skipped (corrupt)", entries.len());
+    }
+    let report = IoMapListReport {
+        dir: dir.display().to_string(),
+        listed: entries.len(),
+        skipped,
+        entries,
+    };
+    print_report(&report, json)?;
+    Ok(EXIT_PASS)
 }
 
 /// Plan 04 M4 (§7b): the native v1 map/entities round-trip on the synthetic

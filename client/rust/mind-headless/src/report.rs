@@ -341,3 +341,39 @@ pub struct IoRoundtripReport {
     /// `checksum_before == checksum_after`.
     pub pass: bool,
 }
+
+/// One entry in the `io map-list` report (plan 04 M5 §7b).
+#[derive(Debug, Clone, Serialize)]
+pub struct IoMapListEntry {
+    /// File path.
+    pub file: String,
+    /// Display name (map `name` tag or save `mapname`).
+    pub name: String,
+    /// Width in tiles.
+    pub width: i32,
+    /// Height in tiles.
+    pub height: i32,
+    /// Wave.
+    pub wave: i32,
+    /// Build that wrote the file.
+    pub build: i32,
+    /// Save format version.
+    pub format_version: i32,
+    /// Whether the file is a map (`SaveMeta.isMap`).
+    pub is_map: bool,
+    /// Mod count.
+    pub mods: usize,
+}
+
+/// `io map-list` report (plan 04 M5 §7b).
+#[derive(Debug, Clone, Serialize)]
+pub struct IoMapListReport {
+    /// Directory listed.
+    pub dir: String,
+    /// Entries with readable meta.
+    pub listed: usize,
+    /// Entries skipped as corrupt.
+    pub skipped: usize,
+    /// The listing (sorted by file name).
+    pub entries: Vec<IoMapListEntry>,
+}

@@ -18,6 +18,7 @@ pub mod chunk;
 pub mod fixture;
 pub mod meta;
 pub mod options;
+pub mod slot;
 pub mod state;
 pub mod version;
 pub mod versions;
