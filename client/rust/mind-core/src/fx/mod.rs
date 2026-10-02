@@ -47,8 +47,9 @@ pub use parts::draw::{
 };
 pub use parts::turret::{TurretDraw, draw_turret, draw_turret_plan};
 pub use parts::weapons::{
-    WeaponPose, beams as weapon_beams, draw_bullet_parts, draw_weapon, draw_weapon_outline,
-    draw_weapon_outlines, part_recoil, weapon_pose,
+    UnitWeapon, WeaponPose, beams as weapon_beams, cell_color, draw_bullet_parts,
+    draw_unit_weapons, draw_weapon, draw_weapon_outline, draw_weapon_outlines, part_recoil,
+    weapon_pose,
 };
 pub use parts::{
     EffectSpawnerPartSpec, FlarePartSpec, HaloPartSpec, HoverPartSpec, PartMove, PartParams,

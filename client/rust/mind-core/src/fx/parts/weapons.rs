@@ -69,6 +69,32 @@ pub fn part_recoil(part: &DrawPartSpec, mount: &WeaponMount) -> f32 {
     }
 }
 
+/// One weapon + its live mount/pose, read from a unit draw state (plan 17 M5).
+#[derive(Clone, Copy, Debug)]
+pub struct UnitWeapon<'a> {
+    /// Weapon definition.
+    pub def: &'a WeaponDef,
+    /// Live mount state (`UnitType.applyColor`/`cellColor` read-only).
+    pub mount: &'a WeaponMount,
+    /// World mount transform (`weapon_pose`).
+    pub pose: WeaponPose,
+}
+
+/// `UnitType.cellColor` (`UnitType.java:1795-1798`):
+/// `black.lerp(team, f + absin(Time.time, max(f*5, 1), 1 - f))`.
+pub fn cell_color(health_fraction: f32, team_color: Rgba, time: f32) -> Rgba {
+    let f = health_fraction.clamp(0.0, 1.0);
+    // `Mathf.absin(time, scl, mag) = (sin(time / scl) * 0.5 + 0.5) * mag`.
+    let osc = (time / (f * 5.0).max(1.0)).sin() * (1.0 - f) * 0.5 + (1.0 - f) * 0.5;
+    let a = f + osc;
+    Rgba::new(
+        Rgba::BLACK.r + (team_color.r - Rgba::BLACK.r) * a,
+        Rgba::BLACK.g + (team_color.g - Rgba::BLACK.g) * a,
+        Rgba::BLACK.b + (team_color.b - Rgba::BLACK.b) * a,
+        team_color.a,
+    )
+}
+
 /// `-Mathf.sign(flipSprite)` (`Weapon.java:213,254`).
 #[inline]
 fn flip_sign(flip_sprite: bool) -> f32 {
@@ -185,14 +211,44 @@ fn base_params(pose: WeaponPose, mount: &WeaponMount, weapon: &WeaponDef) -> Par
     params
 }
 
-/// `UnitType.drawWeaponOutlines`: outlines for every non-`top` weapon before
-/// the unit body (`UnitType.java`).
-pub fn draw_weapon_outlines(emit: &mut PartEmit, weapons: &[(&WeaponDef, WeaponPose)]) {
-    for (weapon, pose) in weapons {
-        if !weapon.top {
-            draw_weapon_outline(emit, *pose, weapon);
+/// `UnitType.drawWeaponOutlines` (`UnitType.java:1744-1763`): outlines for every
+/// non-`top` weapon, drawn before the unit body, at `z + weapon.layerOffset`.
+/// `outline_color` is `applyColor`/`applyOutlineColor` (white unless drowning).
+pub fn draw_weapon_outlines(emit: &mut PartEmit, weapons: &[UnitWeapon], outline_color: Rgba) {
+    let saved_color = emit.color;
+    emit.color = outline_color;
+    for w in weapons {
+        if !w.def.top {
+            let z = emit.z;
+            emit.z += w.def.layer_offset;
+            draw_weapon_outline(emit, w.pose, w.def);
+            emit.z = z;
         }
     }
+    emit.color = saved_color;
+}
+
+/// `UnitType.drawWeapons` (`UnitType.java:1734-1742`): applies the body color
+/// once, then draws every weapon (`Weapon.draw`). Top-weapon outlines are drawn
+/// here (after the body) by `Weapon.draw`.
+pub fn draw_unit_weapons(
+    emit: &mut PartEmit,
+    weapons: &[UnitWeapon],
+    unit_color: Rgba,
+    cell: Option<Rgba>,
+    outline_color: Rgba,
+) {
+    let saved_color = emit.color;
+    let saved_mix = emit.mix;
+    emit.mix = None;
+    for w in weapons {
+        // `Weapon.draw` draws the top outline with the current color before
+        // re-applying the body color for the region.
+        emit.color = outline_color;
+        draw_weapon(emit, w.pose, w.def, w.mount, unit_color, cell);
+    }
+    emit.color = saved_color;
+    emit.mix = saved_mix;
 }
 
 /// Bullet `parts` (`Weapon.java`/`BulletType.parts`): parts driven by `life`.
@@ -455,5 +511,107 @@ mod tests {
     fn shadow_region_constant_matches_drawf() {
         assert_eq!(SHADOW_REGION.0, "circle-shadow");
         assert_eq!(WEAPON_LAYER, 110.0);
+    }
+
+    #[test]
+    fn unit_weapon_layer_order_outlines_before_body_weapons_after() {
+        let low = weapon();
+        let mut top = weapon();
+        top.name = "top-weapon".to_owned();
+        top.top = true;
+
+        let low_mount = WeaponMount::new(&low);
+        let top_mount = WeaponMount::new(&top);
+        let low_pose = weapon_pose(0.0, 0.0, 90.0, &low_mount, &low);
+        let top_pose = weapon_pose(0.0, 0.0, 90.0, &top_mount, &top);
+        let weapons = [
+            UnitWeapon {
+                def: &low,
+                mount: &low_mount,
+                pose: low_pose,
+            },
+            UnitWeapon {
+                def: &top,
+                mount: &top_mount,
+                pose: top_pose,
+            },
+        ];
+
+        let lookup = AllRegions::new(32.0);
+        let mut program = DrawProgram::new();
+        {
+            let mut emit = PartEmit::new(&mut program, &lookup, 0.0);
+            emit.z = Layer::Block.z();
+            draw_weapon_outlines(&mut emit, &weapons, Rgba::WHITE);
+            // plan 16 draws the unit body/cell between the two weapon passes.
+            emit.region("unit-body", 0.0, 0.0, 0.0);
+            draw_unit_weapons(
+                &mut emit,
+                &weapons,
+                Rgba::WHITE,
+                Some(Rgba::BLACK),
+                Rgba::WHITE,
+            );
+        }
+        let names: Vec<&str> = program
+            .prims
+            .iter()
+            .filter_map(|p| match &p.kind {
+                PrimKind::Region { region, .. } => Some(region.0),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                "test-weapon-outline",
+                "unit-body",
+                "test-weapon",
+                "test-weapon-cell",
+                "top-weapon-outline",
+                "top-weapon",
+                "top-weapon-cell",
+            ]
+        );
+    }
+
+    #[test]
+    fn cell_color_matches_java() {
+        let team = Rgba::new(1.0, 0.0, 0.0, 1.0);
+        // f = 1 collapses the oscillator: exactly the team color.
+        let full = cell_color(1.0, team, 12.34);
+        assert!((full.r - 1.0).abs() < 1e-6);
+        assert!(full.g.abs() < 1e-6);
+        // f = 0, t = 0 -> `absin` midpoint -> half-blended black/team.
+        let empty = cell_color(0.0, team, 0.0);
+        assert!((empty.r - 0.5).abs() < 1e-6);
+        // f = 0, t = pi/2 -> `absin` peak -> full team color.
+        let peak = cell_color(0.0, team, std::f32::consts::FRAC_PI_2);
+        assert!((peak.r - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn bullet_parts_drive_from_life_fin() {
+        use crate::content::registries::units::parts::PartProgressSpec as ContentProgress;
+        use crate::fx::parts::draw::MapRegions;
+
+        let mut part = DrawPartSpec::shape();
+        part.circle = true;
+        part.radius = 0.0;
+        part.radius_to = 10.0;
+        part.progress = ContentProgress::Life;
+        part.color = Some(Rgba::WHITE);
+
+        let lookup = MapRegions::new();
+        let mut program = DrawProgram::new();
+        {
+            let mut emit = PartEmit::new(&mut program, &lookup, 0.0);
+            draw_bullet_parts(&mut emit, std::slice::from_ref(&part), 0.0, 0.0, 0.0, 0.5);
+        }
+        // `radius` lerps `0 -> 10` by `life = fin = 0.5` -> 5.
+        match &program.prims[0].kind {
+            PrimKind::Circle { r, .. } => assert!((r - 5.0).abs() < 1e-5),
+            _ => panic!("expected circle"),
+        }
     }
 }

@@ -180,6 +180,12 @@ impl<'a> PartEmit<'a> {
         self.z
     }
 
+    /// Sets the current z (plan-16 callers push the block band before drawing a
+    /// turret/weapon at its own layer).
+    pub fn set_z(&mut self, z: f32) {
+        self.z = z;
+    }
+
     pub(crate) fn push(&mut self, kind: PrimKind) {
         self.program.push(DrawPrim {
             z: self.z,

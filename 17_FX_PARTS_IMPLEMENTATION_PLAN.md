@@ -701,6 +701,11 @@ Baseline from HLP §7.4: 16.6 ms frame at 60 fps. FX is client-only; sim budgets
 
 ## Changelog
 
+- 2026-10-03 — **M5 completion — gdext turret adapter + unit weapon layer order (lane/17-fx).**
+  - `mind-core::fx::parts::weapons`: added `UnitWeapon` + `cell_color` (exact `UnitType.cellColor` `black.lerp(team, f + absin(time, max(f*5,1), 1-f))`), rewrote `draw_weapon_outlines` to `UnitType.drawWeaponOutlines` semantics (per-weapon `z + layerOffset`, `applyColor`/`applyOutlineColor` tint), and added `draw_unit_weapons` (`UnitType.drawWeapons`: apply body color once, then `Weapon.draw` per mount). `PartEmit::set_z` added so non-core callers can push a band layer. New tests `unit_weapon_layer_order_outlines_before_body_weapons_after`, `cell_color_matches_java`, `bullet_parts_drive_from_life_fin` → `fx::parts` **27 passed**.
+  - `mind-gdext/src/fx/draw_turret.rs` (new): `TurretDrawInput` (owned snapshot of `TurretDraw` + plan-10 `TurretDrawState`), `as_draw()`, `part_params()`, and `build_turret` (appends the exact `DrawTurret.draw` prims). `MindFx` now owns `turrets: Vec<TurretDrawInput>`, renders them each `_draw` at `Layer::Block` via `AllRegions`, and exposes `spawn_turret_draw`/`clear_turrets`/`live_turret_count`; `sample_part` returns real `PartParams` (`warmup`/`reload`/`smooth_reload`/`heat`/`recoil`/`charge`, `status: ok|missing`) instead of the placeholder.
+  - **Evidence:** `cargo test -p mind-core` **1250 lib** (+ integrations) / 2 ignored; `cargo test -p mind-headless` green; `cargo check -p mind-gdext` clean; workspace clippy `-D warnings` + `cargo fmt` clean; `fx audit` 267/267, `order_hash 94f48259c1412fef`. **Deferred (unchanged):** region/atlas execution (03/16), live plan-10 push into `MindFx` (MCP mutex).
+
 - 2026-10-01 — Draft v1 written (this file). No milestones started. Open decisions OD-17-A (visual parity tolerance) and OD-17-B (custom-body location) require user input before M3/M4 respectively; R-17-1/2/3 need orchestrator reconciliation with 16/02/12.
 
 - 2026-10-03 — **M6 — gdext trail/decal/weather wiring + M7 — batching/alloc/budgets (lane/17-fx).**
