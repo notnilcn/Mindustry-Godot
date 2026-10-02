@@ -10,7 +10,7 @@
 
 use std::collections::HashMap;
 
-use godot::builtin::{GString, PackedStringArray, VarDictionary};
+use godot::builtin::{GString, PackedFloat32Array, PackedStringArray, VarDictionary};
 use godot::classes::{Camera2D, INode, INode2D, Image, Node, Node2D, Viewport};
 use godot::obj::{Base, WithBaseField};
 use godot::prelude::*;
@@ -20,6 +20,7 @@ use mind_core::render::Layer;
 use mind_core::render::bands::{BandEntry, BandKey, BandPlan};
 use mind_core::render::lod::Lod;
 use mind_core::render::queue::RenderQueue;
+use mind_core::render::rules::RulesRenderView;
 use mind_core::render::scan::CameraView;
 
 use crate::assets::MindAssets;
@@ -29,18 +30,32 @@ mod atlas_bind;
 mod blocks;
 mod building_cache;
 mod debug;
+mod env;
 mod floor;
+mod fog;
+mod g3d;
 mod light;
+mod load;
+mod menu;
 mod minimap;
+mod overlays;
+mod pixelate;
 mod shaders;
 mod shadow;
 
 pub use blocks::BlockRenderer;
 pub use building_cache::BuildingCacheRenderer;
 pub use debug::DebugCollisionRenderer;
+pub use env::EnvRenderer;
 pub use floor::FloorRenderer;
+pub use fog::FogRenderer;
+pub use g3d::PlanetRenderer;
 pub use light::LightRenderer;
+pub use load::LoadRenderer;
+pub use menu::MenuRenderer;
 pub use minimap::MindMinimap;
+pub use overlays::OverlayRenderer;
+pub use pixelate::Pixelator;
 pub use shaders::ShaderRegistry;
 pub use shadow::ShadowRenderer;
 
@@ -83,6 +98,28 @@ pub struct RenderStats {
     pub light_circles: i64,
     /// Debug hitbox quads in the last rebuild (plan 16 M6).
     pub debug_hitboxes: i64,
+    /// Whether the env pass drew this frame (plan 16 M6).
+    pub env_underwater: bool,
+    /// Whether the fog composite drew this frame (plan 16 M6).
+    pub fog_active: bool,
+    /// Queued fog events (plan 16 M6).
+    pub fog_events: i64,
+    /// Displayed core-protection edges (plan 16 M5).
+    pub overlay_edges: i64,
+    /// Whether the pixelator is enabled (plan 16 M6).
+    pub pixelate: bool,
+    /// Low-res target width (plan 16 M6).
+    pub pixel_w: i64,
+    /// Low-res target height (plan 16 M6).
+    pub pixel_h: i64,
+    /// Whether the menu world is generated (plan 16 M7).
+    pub menu_ready: bool,
+    /// Menu tiles (plan 16 M7).
+    pub menu_tiles: i64,
+    /// Menu flyers (plan 16 M7).
+    pub menu_flyers: i64,
+    /// Planet sector count at the loading subdivision (plan 16 M7).
+    pub planet_sectors: i64,
     /// `Lod.l1` (plan 16 M6).
     pub lod_l1: bool,
     /// `Lod.l2` (plan 16 M6).
@@ -130,6 +167,17 @@ impl RenderStats {
         dict.set(&key("light_rebuilds"), &self.light_rebuilds.to_variant());
         dict.set(&key("light_circles"), &self.light_circles.to_variant());
         dict.set(&key("debug_hitboxes"), &self.debug_hitboxes.to_variant());
+        dict.set(&key("env_underwater"), &self.env_underwater.to_variant());
+        dict.set(&key("fog_active"), &self.fog_active.to_variant());
+        dict.set(&key("fog_events"), &self.fog_events.to_variant());
+        dict.set(&key("overlay_edges"), &self.overlay_edges.to_variant());
+        dict.set(&key("pixelate"), &self.pixelate.to_variant());
+        dict.set(&key("pixel_w"), &self.pixel_w.to_variant());
+        dict.set(&key("pixel_h"), &self.pixel_h.to_variant());
+        dict.set(&key("menu_ready"), &self.menu_ready.to_variant());
+        dict.set(&key("menu_tiles"), &self.menu_tiles.to_variant());
+        dict.set(&key("menu_flyers"), &self.menu_flyers.to_variant());
+        dict.set(&key("planet_sectors"), &self.planet_sectors.to_variant());
         dict.set(&key("lod_l1"), &self.lod_l1.to_variant());
         dict.set(&key("lod_l2"), &self.lod_l2.to_variant());
         dict.set(&key("build_us"), &self.build_us.to_variant());
@@ -162,6 +210,14 @@ pub struct MindWorldRenderer {
     shadow: Option<ShadowRenderer>,
     light: Option<LightRenderer>,
     debug: Option<DebugCollisionRenderer>,
+    env: Option<EnvRenderer>,
+    fog: Option<FogRenderer>,
+    overlays: Option<OverlayRenderer>,
+    pixelator: Pixelator,
+    planet: PlanetRenderer,
+    menu: MenuRenderer,
+    load: LoadRenderer,
+    rules: RulesRenderView,
     lod: Lod,
     draw_light: bool,
     draw_hitboxes: bool,
@@ -187,6 +243,14 @@ impl INode2D for MindWorldRenderer {
             shadow: None,
             light: None,
             debug: None,
+            env: None,
+            fog: None,
+            overlays: None,
+            pixelator: Pixelator::new(),
+            planet: PlanetRenderer::new(),
+            menu: MenuRenderer::new(),
+            load: LoadRenderer::new(),
+            rules: RulesRenderView::default(),
             lod: Lod::default(),
             draw_light: true,
             draw_hitboxes: false,
@@ -304,6 +368,15 @@ impl MindWorldRenderer {
         if let Some(light_band) = self.band_node_at(BandKey::base(Layer::Light)) {
             self.light = Some(LightRenderer::new(host.clone(), light_band, &self.shaders));
         }
+        if let Some(light_band) = self.band_node_at(BandKey::base(Layer::Light)) {
+            self.env = Some(EnvRenderer::new(light_band));
+        }
+        if let Some(fog_band) = self.band_node_at(BandKey::base(Layer::FogOfWar)) {
+            self.fog = Some(FogRenderer::new(fog_band));
+        }
+        if let Some(overlay_band) = self.band_node_at(BandKey::base(Layer::OverlayUi)) {
+            self.overlays = Some(OverlayRenderer::new(overlay_band.clone()));
+        }
         if let Some(overlay_band) = self.band_node_at(BandKey::base(Layer::OverlayUi)) {
             self.debug = Some(DebugCollisionRenderer::new(host, overlay_band));
         }
@@ -364,6 +437,8 @@ impl MindWorldRenderer {
         self.stats.frames += 1;
         self.stats.stage_trace.clear();
         self.stats.stage_trace.push(String::from("frame_begin"));
+        self.stats.stage_trace.push(String::from("pre_draw"));
+        self.stats.stage_trace.push(String::from("cutscene"));
         self.queue.clear();
         // Stage 9/12: frame-alpha view, chunk invalidation + floor bake.
         let view = self.camera_view();
@@ -371,6 +446,8 @@ impl MindWorldRenderer {
         self.lod.update(view.w * view.zoom, view.w);
         self.stats.lod_l1 = self.lod.l1;
         self.stats.lod_l2 = self.lod.l2;
+        self.stats.stage_trace.push(String::from("lod"));
+        self.stats.stage_trace.push(String::from("process_blocks"));
         // `mesh_rebuilds` is cumulative per pass; each pass reports its own boot
         // total, so the frame total is the sum (never an accumulation).
         let mut mesh_rebuilds = 0i64;
@@ -407,6 +484,14 @@ impl MindWorldRenderer {
             self.stats.shadow_events = shadow_stats.shadow_events;
         }
         self.stats.stage_trace.push(String::from("shadows"));
+        self.stats.stage_trace.push(String::from("blockbuild"));
+        if let Some(env) = self.env.as_mut() {
+            env.set_rules_env(self.rules.env);
+            env.update(&view);
+            self.stats.env_underwater = env.stats().underwater;
+        }
+        self.stats.stage_trace.push(String::from("env"));
+        self.stats.stage_trace.push(String::from("markers"));
         let draw_light = self.draw_light;
         if let Some(light) = self.light.as_mut() {
             light.update(&view, draw_light, 0.01, true);
@@ -415,16 +500,58 @@ impl MindWorldRenderer {
             self.stats.light_circles = light_stats.lights;
         }
         self.stats.stage_trace.push(String::from("light"));
+        self.stats.stage_trace.push(String::from("darkness"));
+        self.stats.stage_trace.push(String::from("bloom"));
         let draw_hitboxes = self.draw_hitboxes;
         if let Some(debug) = self.debug.as_mut() {
             debug.update(&view, draw_hitboxes);
             self.stats.debug_hitboxes = debug.stats().hitboxes;
         }
         self.stats.stage_trace.push(String::from("debug"));
+        self.stats.stage_trace.push(String::from("plans"));
+        self.stats.stage_trace.push(String::from("overlay_ui"));
+        if let Some(overlays) = self.overlays.as_mut() {
+            overlays.update(&view);
+            self.stats.overlay_edges = overlays.stats().edges;
+        }
+        self.stats.stage_trace.push(String::from("overlays"));
+        if let Some(fog) = self.fog.as_mut() {
+            fog.update(&view, &self.rules);
+            let fog_stats = fog.stats();
+            self.stats.fog_active = fog_stats.active;
+            self.stats.fog_events = fog_stats.events;
+        }
+        self.stats.stage_trace.push(String::from("fog"));
+        self.stats.stage_trace.push(String::from("space"));
+        self.stats.stage_trace.push(String::from("draw_over"));
+        self.menu.update(1.0 / 60.0);
+        self.stats.menu_ready = self.menu.is_ready();
+        self.stats.menu_tiles = self.menu.tile_count() as i64;
+        self.stats.menu_flyers = self.menu.flyers() as i64;
+        self.stats.planet_sectors = self.planet.sector_counts(2).0 as i64;
+        self.stats.stage_trace.push(String::from("menu_planet"));
+        let screen = self
+            .base()
+            .get_viewport()
+            .map(|viewport| viewport.get_visible_rect().size)
+            .unwrap_or(Vector2::new(1280.0, 720.0));
+        self.pixelator.update(
+            view.zoom,
+            view.w,
+            view.h,
+            screen.x as i32,
+            screen.y as i32,
+            false,
+            1.0,
+        );
+        self.stats.pixelate = self.pixelator.enabled();
+        self.stats.pixel_w = self.pixelator.size().0 as i64;
+        self.stats.pixel_h = self.pixelator.size().1 as i64;
         self.queue.set_sort(true);
         self.stats.stage_trace.push(String::from("sort"));
         self.queue.flush();
         self.stats.stage_trace.push(String::from("flush"));
+        self.stats.stage_trace.push(String::from("post_draw"));
         self.apply_visibility();
         self.stats.entries = self.queue.len();
         self.stats.queue_max = self.stats.queue_max.max(self.queue.max_seq() as usize);
@@ -523,6 +650,96 @@ impl MindWorldRenderer {
     #[func]
     pub fn set_draw_hitboxes(&mut self, enabled: bool) {
         self.draw_hitboxes = enabled;
+    }
+
+    /// Enables/disables the pixelator (plan 16 M6).
+    #[func]
+    pub fn set_pixelate(&mut self, enabled: bool) {
+        self.pixelator.set_enabled(enabled);
+    }
+
+    /// Enables/disables the fog composite (plan 16 M6 / plan 12 `Rules.fog`).
+    #[func]
+    pub fn set_fog_enabled(&mut self, enabled: bool) {
+        self.rules.fog = enabled;
+    }
+
+    /// Sets `Rules.staticFog`.
+    #[func]
+    pub fn set_static_fog(&mut self, enabled: bool) {
+        self.rules.static_fog = enabled;
+    }
+
+    /// Sets the active `Rules.env` mask (plan 16 §3.12).
+    #[func]
+    pub fn set_rules_env(&mut self, mask: i64) {
+        self.rules.env = mask as u32;
+    }
+
+    /// Queues a packed fog event (plan 12 `ClientHooks::fog_handle_event`).
+    #[func]
+    pub fn push_fog_event(&mut self, x: i32, y: i32, radius: i32, team: i64) {
+        if let Some(fog) = self.fog.as_mut() {
+            fog.push_event(x, y, radius, team as u8);
+        }
+    }
+
+    /// Replaces the protected-core list as flat `(x, y, team)` triples.
+    #[func]
+    pub fn set_core_edges(&mut self, cores: PackedFloat32Array, player_team: i64) {
+        let slice = cores.as_slice();
+        let mut list = Vec::with_capacity(slice.len() / 3);
+        for triple in slice.as_chunks::<3>().0 {
+            list.push((triple[0], triple[1], triple[2] as u8));
+        }
+        if let Some(overlays) = self.overlays.as_mut() {
+            overlays.set_player_team(player_team as u8);
+            overlays.set_cores(list);
+        }
+    }
+
+    /// Generates the menu world with a pinned seed (plan 16 M7 / OD16-F).
+    #[func]
+    pub fn generate_menu(&mut self, seed: i64, mobile: bool) {
+        self.menu.generate(seed as i32, mobile);
+    }
+
+    /// Planet/g3d sector + mesh info (plan 16 M7).
+    #[func]
+    pub fn planet_info(&mut self) -> VarDictionary {
+        let (tiles, corners, edges) = self.planet.sector_counts(2);
+        let mut dict = VarDictionary::new();
+        dict.set(&GString::from("tiles"), &(tiles as i64).to_variant());
+        dict.set(&GString::from("corners"), &(corners as i64).to_variant());
+        dict.set(&GString::from("edges"), &(edges as i64).to_variant());
+        dict.set(
+            &GString::from("zoomed"),
+            &self.planet.params().zoom.to_variant(),
+        );
+        dict.set(
+            &GString::from("mesh_vertices"),
+            &(self.planet.mesh_vertex_count(2) as i64).to_variant(),
+        );
+        dict
+    }
+
+    /// Loading-screen mesh info (plan 16 M7).
+    #[func]
+    pub fn load_info(&self) -> VarDictionary {
+        let mut dict = VarDictionary::new();
+        dict.set(
+            &GString::from("grid_size"),
+            &(self.load.grid_size() as i64).to_variant(),
+        );
+        dict.set(
+            &GString::from("color_red"),
+            &(self.load.color_red() as i64).to_variant(),
+        );
+        dict.set(
+            &GString::from("mesh_vertices"),
+            &(self.load.mesh_vertex_count() as i64).to_variant(),
+        );
+        dict
     }
 
     /// Forces a full chunk rebuild; returns the number of rebuilt chunks.
@@ -631,6 +848,46 @@ impl MindRender {
         if let Some(mut renderer) = self.renderer() {
             renderer.bind_mut().set_draw_hitboxes(enabled);
         }
+    }
+
+    /// Toggles the pixelator (plan 16 M6 / §7c).
+    #[func]
+    pub fn set_pixelate(&mut self, enabled: bool) {
+        if let Some(mut renderer) = self.renderer() {
+            renderer.bind_mut().set_pixelate(enabled);
+        }
+    }
+
+    /// Toggles the fog composite (plan 16 M6 / §7c `fogOfWar`).
+    #[func]
+    pub fn set_fog_enabled(&mut self, enabled: bool) {
+        if let Some(mut renderer) = self.renderer() {
+            renderer.bind_mut().set_fog_enabled(enabled);
+        }
+    }
+
+    /// Sets the active `Rules.env` mask.
+    #[func]
+    pub fn set_rules_env(&mut self, mask: i64) {
+        if let Some(mut renderer) = self.renderer() {
+            renderer.bind_mut().set_rules_env(mask);
+        }
+    }
+
+    /// Generates the menu world with a pinned seed (plan 16 M7).
+    #[func]
+    pub fn generate_menu(&mut self, seed: i64, mobile: bool) {
+        if let Some(mut renderer) = self.renderer() {
+            renderer.bind_mut().generate_menu(seed, mobile);
+        }
+    }
+
+    /// Planet/g3d sector + mesh info (plan 16 M7).
+    #[func]
+    pub fn planet_info(&mut self) -> VarDictionary {
+        self.renderer()
+            .map(|mut renderer| renderer.bind_mut().planet_info())
+            .unwrap_or_default()
     }
 
     /// Pins the camera at tile `(x, y)` with `zoom`.

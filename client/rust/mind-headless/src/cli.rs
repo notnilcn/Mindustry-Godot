@@ -371,6 +371,28 @@ pub enum RenderCommand {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+
+    /// Benchmark the render-list build path (plan 16 §7.4/M9).
+    Bench {
+        /// Grid width in tiles.
+        #[arg(long, default_value_t = 250)]
+        width: i32,
+        /// Grid height in tiles.
+        #[arg(long, default_value_t = 250)]
+        height: i32,
+        /// Buildings to place.
+        #[arg(long, default_value_t = 5000)]
+        buildings: usize,
+        /// Measured iterations.
+        #[arg(long, default_value_t = 200)]
+        iters: usize,
+        /// Warmup iterations.
+        #[arg(long, default_value_t = 20)]
+        warmup: usize,
+        /// Emit the machine-readable JSON report.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// `world` subcommands (plan 06 §7b).

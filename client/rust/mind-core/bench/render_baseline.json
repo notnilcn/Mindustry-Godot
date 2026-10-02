@@ -1,0 +1,24 @@
+{
+  "note": "Plan 16 §7.4 render performance budgets (dev host, release build). Measured with `mind-headless render bench --width 250 --height 250 --buildings 5000 --iters 300 --json`; plan 23 owns the CI gate. The render build path interns region names via `RegionIdTable::intern_str` (no per-tile String clone), so the 250x250 build fits the p50/p99 CPU budget.",
+  "format": 1,
+  "scenario": "render_bench",
+  "world": { "width": 250, "height": 250, "floor": "stone", "buildings": 5000, "entries": 67500, "regions": 2 },
+  "budget_us": { "p50": 2500, "p99": 5000 },
+  "measured_us": {
+    "release": { "p50": 2240, "p99": 3745, "pass": true, "command": "cargo run --release -p mind-headless -- render bench --width 250 --height 250 --buildings 5000 --iters 300 --json" },
+    "debug": { "p50": 33860, "p99": 52864, "pass": false, "command": "cargo run -p mind-headless -- render bench --width 250 --height 250 --buildings 5000 --iters 200 --json" }
+  },
+  "frame_budget_ms": { "full_frame": 16.6, "headroom": 0.25 },
+  "gpu_budget_ms": { "frame": 8 },
+  "floor_chunk_cold_bake_ms": { "budget_total": 250 },
+  "single_chunk_recache_ms": { "budget": 2 },
+  "draw_calls": { "typical": 4000, "worst": 8000 },
+  "triangles": { "typical": 80000 },
+  "texture_mem_mb": { "budget": 512 },
+  "alloc_audit": {
+    "render_command_buffer_steady_state": 0,
+    "render_list_intern_str": "no per-tile allocation on hit",
+    "feature": "alloc-audit",
+    "tests": ["render::commands::tests::no_alloc_after_warmup", "render::ids::tests::intern_str_matches_intern_without_alloc"]
+  }
+}
