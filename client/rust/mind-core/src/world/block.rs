@@ -59,6 +59,8 @@ pub struct BlockInstance {
     pub id: BlockId,
     /// Content name (parity ABI).
     pub name: String,
+    /// Owned metadata snapshot (so behaviors never need the full registry).
+    pub def: Arc<BlockDef>,
     /// Building family tag (grouping/IO/revision).
     pub building: BuildingKind,
     /// Registered behavior.
@@ -128,6 +130,7 @@ impl BlockInstance {
         Ok(Self {
             id: def.id,
             name: def.name.clone(),
+            def: Arc::new(def.clone()),
             building,
             behavior,
             kind_data,
@@ -176,9 +179,13 @@ pub enum BlockError {
 }
 
 /// Per-block runtime table (`Blocks` resource; plan 07 §3.2).
+///
+/// Instances are stored behind `Arc` so behavior code can hold block data across
+/// a mutable ECS borrow without cloning per tick.
 #[derive(Resource)]
 pub struct BlockTable {
-    instances: Vec<Option<BlockInstance>>,
+    instances: Vec<Option<Arc<BlockInstance>>>,
+    by_name: indexmap::IndexMap<String, BlockId>,
     count: usize,
 }
 
@@ -205,14 +212,20 @@ impl BlockTable {
         }
         // Dense id order: `BlockDef.id.index()` is the raw content id.
         let max = defs.iter().map(|def| def.id.index()).max().unwrap_or(0);
-        let mut instances: Vec<Option<BlockInstance>> = (0..=max).map(|_| None).collect();
+        let mut instances: Vec<Option<Arc<BlockInstance>>> = (0..=max).map(|_| None).collect();
+        let mut by_name = indexmap::IndexMap::new();
         let mut count = 0;
         for def in defs {
-            let instance = BlockInstance::from_def(def, registry)?;
+            let instance = Arc::new(BlockInstance::from_def(def, registry)?);
+            by_name.insert(def.name.clone(), def.id);
             instances[def.id.index()] = Some(instance);
             count += 1;
         }
-        Ok(Self { instances, count })
+        Ok(Self {
+            instances,
+            by_name,
+            count,
+        })
     }
 
     /// Builds with no behavior overrides.
@@ -221,20 +234,24 @@ impl BlockTable {
     }
 
     /// Instance by id.
-    pub fn get(&self, id: BlockId) -> Option<&BlockInstance> {
+    pub fn get(&self, id: BlockId) -> Option<&Arc<BlockInstance>> {
         self.instances.get(id.index()).and_then(Option::as_ref)
     }
 
-    /// Instance by content name (`content` resolves the name).
-    pub fn get_named<'a>(
-        &self,
-        content: &'a ContentRegistry,
-        name: &str,
-    ) -> Option<(&'a BlockDef, &BlockInstance)> {
-        let id = content.block_id(name)?;
-        let def = content.block(id)?;
-        let inst = self.get(id)?;
-        Some((def, inst))
+    /// Cloned instance handle (cheap `Arc` clone) for use across mutable borrows.
+    pub fn instance(&self, id: BlockId) -> Option<Arc<BlockInstance>> {
+        self.get(id).cloned()
+    }
+
+    /// Resolves a content name to an id.
+    pub fn id_of(&self, name: &str) -> Option<BlockId> {
+        self.by_name.get(name).copied()
+    }
+
+    /// Instance by content name.
+    pub fn get_named(&self, name: &str) -> Option<&Arc<BlockInstance>> {
+        let id = self.id_of(name)?;
+        self.get(id)
     }
 
     /// Number of blocks in the table.
@@ -248,7 +265,7 @@ impl BlockTable {
     }
 
     /// Iterates instances in id order.
-    pub fn iter(&self) -> impl Iterator<Item = &BlockInstance> + '_ {
+    pub fn iter(&self) -> impl Iterator<Item = &Arc<BlockInstance>> + '_ {
         self.instances.iter().filter_map(Option::as_ref)
     }
 
@@ -259,10 +276,12 @@ impl BlockTable {
     }
 
     /// Returns a [`BlockView`] combining metadata + runtime.
-    pub fn view<'a>(&'a self, content: &'a ContentRegistry, id: BlockId) -> Option<BlockView<'a>> {
-        let def = content.block(id)?;
+    pub fn view(&self, id: BlockId) -> Option<BlockView<'_>> {
         let inst = self.get(id)?;
-        Some(BlockView { def, inst })
+        Some(BlockView {
+            def: inst.def.as_ref(),
+            inst,
+        })
     }
 }
 
@@ -601,7 +620,7 @@ mod tests {
         let (content, table) = table();
         assert_eq!(table.len(), content.blocks().len());
         let wall = content.block_id("copper-wall").expect("copper-wall");
-        let view = table.view(&content, wall).expect("view");
+        let view = table.view(wall).expect("view");
         assert_eq!(view.size(), 1);
         assert!(!view.has_items());
         assert!(view.solid());
@@ -633,7 +652,7 @@ mod tests {
         let smelter = content
             .block_id("silicon-smelter")
             .expect("silicon-smelter");
-        let view = table.view(&content, smelter).expect("view");
+        let view = table.view(smelter).expect("view");
         assert!(!view.consumers().is_empty());
         assert!(view.consumers().cons_power.is_some());
     }

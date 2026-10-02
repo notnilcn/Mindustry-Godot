@@ -29,6 +29,7 @@ pub mod draw;
 pub mod edges;
 pub mod events;
 pub mod hooks;
+pub mod limits;
 pub mod modules;
 pub mod ops;
 pub mod params;
@@ -38,6 +39,7 @@ pub mod stats;
 pub mod status;
 pub mod tile;
 pub mod tiles;
+pub mod update;
 
 pub use attributes::Attributes;
 pub use behavior::{
@@ -64,6 +66,7 @@ pub use hooks::{
     MapGenHooks, NewBuilding, NoopMapGenHooks, NoopRenderHooks, NoopWorldHooks, RenderHooks,
     WorldHooks,
 };
+pub use limits::{BlockCounter, BuildRules};
 pub use modules::{FlowWindow, ItemModule, LiquidModule, PowerGraphId, PowerModule};
 pub use ops::{WorldCtx, WorldEventLog};
 pub use params::WorldParams;
@@ -72,6 +75,10 @@ pub use stats::{BarDisplay, StatCat, StatEntry, StatValue, Stats};
 pub use status::{BlockStatus, block_status};
 pub use tile::{PACK_DATA_LAYOUT, Tile};
 pub use tiles::Tiles;
+pub use update::{
+    ProximityUpdateEvent, building_update, delta, edelta, get_progress_increase, no_sleep, sleep,
+    update_buildings, update_consumption,
+};
 
 use bevy_ecs::entity::Entity;
 use bevy_ecs::prelude::Resource;
