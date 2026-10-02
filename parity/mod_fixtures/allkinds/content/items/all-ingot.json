@@ -1,0 +1,11 @@
+{
+  "name": "All Ingot",
+  "description": "A fixture ingot.",
+  "color": "ffaa00",
+  "hardness": 3,
+  "cost": 1.5,
+  "explosiveness": 0.1,
+  "flammability": 0.2,
+  "charge": 0.3,
+  "buildable": true
+}

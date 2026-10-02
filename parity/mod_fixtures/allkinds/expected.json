@@ -1,0 +1,68 @@
+{
+  "fixture": "allkinds",
+  "items": [
+    {
+      "name": "all-kinds-all-ingot",
+      "id": 22
+    }
+  ],
+  "blocks": [
+    {
+      "name": "all-kinds-all-wall",
+      "id": 447,
+      "kind": "Wall"
+    }
+  ],
+  "liquids": [
+    {
+      "name": "all-kinds-all-fluid",
+      "id": 11,
+      "gas": false
+    }
+  ],
+  "statuses": [
+    {
+      "name": "all-kinds-all-aura",
+      "id": 23
+    }
+  ],
+  "units": [
+    {
+      "name": "all-kinds-all-mech",
+      "id": 65,
+      "kind": "UnitType",
+      "weapons": 1
+    }
+  ],
+  "weathers": [
+    {
+      "name": "all-kinds-all-storm",
+      "id": 6,
+      "kind": "ParticleWeather"
+    }
+  ],
+  "planets": [
+    {
+      "name": "all-kinds-all-world",
+      "id": 7,
+      "radius": 2.0,
+      "sectors": 92
+    }
+  ],
+  "sectors": [
+    {
+      "name": "all-kinds-all-landing",
+      "id": 46,
+      "planet": 7
+    }
+  ],
+  "teams": [
+    {
+      "name": "all-kinds-all-crew",
+      "id": 0,
+      "team": "all-crew"
+    }
+  ],
+  "warnings": [],
+  "errors": []
+}

@@ -1,0 +1,7 @@
+{
+  "name": "All Fluid",
+  "color": "66ccff",
+  "temperature": 0.3,
+  "viscosity": 0.6,
+  "effect": "wet"
+}

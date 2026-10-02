@@ -1,0 +1,18 @@
+{
+  "name": "All Kinds",
+  "version": "1.0",
+  "minGameVersion": "146",
+  "author": "fixture",
+  "description": "Every parser kind + nested definables (plan 20 M2).",
+  "contentOrder": [
+    "all-world",
+    "all-landing",
+    "all-crew",
+    "all-ingot",
+    "all-wall",
+    "all-fluid",
+    "all-aura",
+    "all-mech",
+    "all-storm"
+  ]
+}

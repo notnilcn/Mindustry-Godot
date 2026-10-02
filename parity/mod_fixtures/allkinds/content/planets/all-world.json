@@ -1,0 +1,8 @@
+{
+  "name": "All World",
+  "radius": 2.0,
+  "sectorSize": 2,
+  "mesh": "hexSphere",
+  "accessible": true,
+  "visible": true
+}

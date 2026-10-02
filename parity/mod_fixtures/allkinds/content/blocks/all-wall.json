@@ -1,0 +1,8 @@
+{
+  "name": "All Wall",
+  "type": "Wall",
+  "size": 2,
+  "health": 250,
+  "armor": 2,
+  "requirements": ["all-ingot/20"]
+}
