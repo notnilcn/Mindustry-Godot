@@ -162,6 +162,11 @@ impl IoQueue {
     pub fn take_responses(&mut self) -> Vec<IoResponse> {
         std::mem::take(&mut self.responses)
     }
+
+    /// Records a host-fulfilled response (host-poll path).
+    pub fn push_response(&mut self, response: IoResponse) {
+        self.responses.push(response);
+    }
 }
 
 impl Sim {
@@ -196,6 +201,16 @@ impl Sim {
     /// Drains IO responses (host/MindIo).
     pub fn take_io_responses(&mut self) -> Vec<IoResponse> {
         self.io.take_responses()
+    }
+
+    /// Drains queued IO requests for the host-poll path (no handler registered).
+    pub fn take_io_requests(&mut self) -> Vec<IoRequest> {
+        self.io.take_pending()
+    }
+
+    /// Records a host-fulfilled response so `take_io_responses` can report it.
+    pub fn deliver_io_response(&mut self, response: IoResponse) {
+        self.io.push_response(response);
     }
 
     /// Runs the named IO boundary. Called by [`Sim::tick`] at the exact Java
