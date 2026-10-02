@@ -49,6 +49,7 @@ pub struct MindAudio {
     lowpass_target: f32,
     lowpass_wet: f32,
     sound_paused: bool,
+    audition: bool,
     pending: Vec<AudioEvent>,
     log: Vec<String>,
     missing: Vec<String>,
@@ -93,6 +94,7 @@ impl INode for MindAudio {
             lowpass_target: 0.0,
             lowpass_wet: 0.0,
             sound_paused: false,
+            audition: false,
             pending: Vec::new(),
             log: Vec::new(),
             missing: Vec::new(),
@@ -479,6 +481,7 @@ impl MindAudio {
         dict.set(&key("current_track"), &self.current_track().to_variant());
         dict.set(&key("lowpass_wet"), &self.lowpass_wet.to_variant());
         dict.set(&key("sound_paused"), &self.sound_paused.to_variant());
+        dict.set(&key("audition"), &self.audition.to_variant());
         dict.set(&key("musicvol"), &self.settings.musicvol.to_variant());
         dict.set(&key("sfxvol"), &self.settings.sfxvol.to_variant());
         dict.set(&key("ambientvol"), &self.settings.ambientvol.to_variant());
@@ -505,10 +508,65 @@ impl MindAudio {
         }
     }
 
-    /// Sets the Sound-bus pause mirror (plan 18 §7c step 5).
+    /// Sets the Sound-bus pause pause mirror (plan 18 §7c step 5).
     #[func]
     pub fn set_sound_paused(&mut self, paused: bool) {
         self.sound_paused = paused;
+    }
+
+    /// Starts an editor audition (`MapAudioView`); `dp-` prefix falls back to the
+    /// bare name until plan 20's `DataAudioLoader` overlay lands.
+    #[func]
+    pub fn audition_play(&mut self, name: GString) -> bool {
+        let raw = name.to_string();
+        let candidate = raw.strip_prefix("dp-").unwrap_or(raw.as_str()).to_owned();
+        let Some(stream) = self.streams.music(&candidate) else {
+            self.log_missing(&candidate);
+            return false;
+        };
+        self.stop_music();
+        if let Some(player) = &self.music_player {
+            let mut player = player.clone();
+            player.set_stream(&stream);
+            player.set_volume_linear(1.0);
+            player.play();
+        }
+        self.audition = true;
+        self.music_override = true;
+        true
+    }
+
+    /// Stops an editor audition.
+    #[func]
+    pub fn audition_stop(&mut self) {
+        self.audition = false;
+        self.music_override = false;
+        if let Some(player) = &self.music_player {
+            player.clone().stop();
+        }
+    }
+
+    /// Whether an audition is playing.
+    #[func]
+    pub fn audition_playing(&self) -> bool {
+        self.music_player.as_ref().is_some_and(|p| p.is_playing())
+    }
+
+    /// Audition playback position (seconds).
+    #[func]
+    pub fn audition_position(&self) -> f64 {
+        self.music_player
+            .as_ref()
+            .map_or(0.0, |player| player.get_playback_position() as f64)
+    }
+
+    /// Audition length (seconds).
+    #[func]
+    pub fn audition_length(&self) -> f64 {
+        self.music_player
+            .as_ref()
+            .and_then(|player| player.get_stream())
+            .map_or(0.0, |stream| stream.get_length())
     }
 
     /// Priority spec summary for a sound (inspection helper).
