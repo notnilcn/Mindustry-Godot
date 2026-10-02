@@ -12,9 +12,12 @@
 //! generation-checked arena handles; static BFS scratch becomes the shared
 //! [`graph::PowerScratch`]; `update` takes an explicit `delta` (D8).
 
+pub mod generator;
 pub mod graph;
 pub mod module;
 pub mod nodes;
+pub mod reactors;
+pub mod sandbox;
 
 use bevy_ecs::component::Component;
 
@@ -164,5 +167,7 @@ pub fn make_battery_balance(graph: &PowerGraph, world: &bevy_ecs::world::World) 
     }
 }
 
+#[cfg(test)]
+mod generator_tests;
 #[cfg(test)]
 mod tests;
