@@ -35,6 +35,7 @@ pub fn names() -> &'static [&'static str] {
         "units_formation",
         "units_spawn_group",
         "units_weapon_fire",
+        "units_waves_difficulty",
     ]
 }
 
@@ -83,8 +84,76 @@ pub fn run_scenario(name: &str) -> Result<ScenarioOutput> {
         "units_formation" => formation(),
         "units_spawn_group" => spawn_group(),
         "units_weapon_fire" => weapon_fire(),
+        "units_waves_difficulty" => waves_difficulty(),
         other => bail!("unknown units scenario `{other}`"),
     }
+}
+
+/// `units_waves_difficulty`: `Waves.generate` ground/air/boss counts per wave
+/// for three difficulties (plan 11 §7b).
+fn waves_difficulty() -> Result<ScenarioOutput> {
+    use mind_core::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+    use mind_core::game::waves::Waves;
+    use mind_core::math::ArcRand;
+
+    let mut registry = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)?;
+    registry.init()?;
+
+    let mut checksummer = Checksummer::new();
+    let mut difficulties = Vec::new();
+    let mut pass = true;
+    for difficulty in [0.0f32, 0.5, 1.0] {
+        let groups = Waves::generate_with(difficulty, &mut ArcRand::new(42), false, false, false);
+        pass &= !groups.is_empty();
+        let mut waves = Vec::new();
+        for wave in 0..50 {
+            let mut ground = 0;
+            let mut air = 0;
+            let mut boss = false;
+            for group in &groups {
+                let count = group.get_spawned(wave);
+                if count <= 0 {
+                    continue;
+                }
+                let flying = registry
+                    .unit_by_name(&group.unit)
+                    .map(|unit| unit.flying)
+                    .unwrap_or(false);
+                if flying {
+                    air += count;
+                } else {
+                    ground += count;
+                }
+                if group.effect.as_deref() == Some("boss") {
+                    boss = true;
+                }
+            }
+            checksummer.part(&wave);
+            checksummer.part(&ground);
+            checksummer.part(&air);
+            checksummer.part(&u8::from(boss));
+            waves.push(serde_json::json!({
+                "wave": wave,
+                "ground": ground,
+                "air": air,
+                "boss": boss,
+            }));
+        }
+        difficulties.push(serde_json::json!({
+            "difficulty": difficulty,
+            "groups": groups.len(),
+            "waves": waves,
+        }));
+    }
+    let report = serde_json::json!({
+        "scenario": "units_waves_difficulty",
+        "pass": pass,
+        "seed": 42,
+        "difficulties": difficulties,
+        "checksum": checksummer.finish().to_hex(),
+    });
+    let dump = canonical(&report)?;
+    Ok(ScenarioOutput { report, dump })
 }
 
 /// `units_weapon_fire`: a real `dagger` fires its plan-10 weapon mounts at a

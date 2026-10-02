@@ -7,7 +7,9 @@
 //! additive-file intent); generators import `crate::math::noise`.
 
 pub mod noise;
+pub mod rand_arc;
 pub mod ridged;
 pub mod windowed_mean;
 
+pub use rand_arc::ArcRand;
 pub use windowed_mean::WindowedMean;
