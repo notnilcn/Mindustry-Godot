@@ -1,0 +1,78 @@
+{
+  "format": 1,
+  "cases": [
+    {
+      "name": "text",
+      "rows": [
+        {
+          "left": " holds",
+          "right": ""
+        }
+      ]
+    },
+    {
+      "name": "number",
+      "rows": [
+        {
+          "left": ":power: 2.5 Power/sec",
+          "right": ""
+        }
+      ]
+    },
+    {
+      "name": "multiplier",
+      "rows": [
+        {
+          "left": "[negstat]0.5 Multiplier",
+          "right": ""
+        }
+      ]
+    },
+    {
+      "name": "percent",
+      "rows": [
+        {
+          "left": "[stat]+10 Percent",
+          "right": ""
+        }
+      ]
+    },
+    {
+      "name": "squared",
+      "rows": [
+        {
+          "left": "2x2 Tiles",
+          "right": ""
+        }
+      ]
+    },
+    {
+      "name": "items",
+      "rows": [
+        {
+          "left": ":copper: :lead:",
+          "right": "1.5[gray]k[] 12"
+        }
+      ]
+    },
+    {
+      "name": "status",
+      "rows": [
+        {
+          "left": ":spawn:",
+          "right": "120"
+        }
+      ]
+    }
+  ],
+  "mixed": [
+    {
+      "left": "Copper Wall",
+      "right": ""
+    },
+    {
+      "left": "Health",
+      "right": "75%"
+    }
+  ]
+}

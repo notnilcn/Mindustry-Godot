@@ -7,6 +7,8 @@
 //! prompt/toast signals). `hud` (the `MindHud` read-only HUD surface) and the
 //! MSUI `dsl_factory` bridge land with plan 14 M2/M4/M6.
 
+pub mod hud;
 pub mod ui_host;
 
+pub use hud::MindHud;
 pub use ui_host::MindUi;

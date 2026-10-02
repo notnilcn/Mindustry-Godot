@@ -22,6 +22,7 @@ MindAssets="*res://scenes/autoloads/mind_assets.tscn"
 MindMods="*res://scenes/autoloads/mind_mods.tscn"
 StdbConnector="*res://scenes/autoloads/stdb_connector.tscn"
 MindUi="*res://scenes/autoloads/mind_ui.tscn"
+MindHud="*res://scenes/autoloads/mind_hud.tscn"
 
 [display]
 

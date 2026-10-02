@@ -9,6 +9,8 @@
 //! `client/scenes/ui`.
 
 pub mod builder;
+pub mod display;
 pub mod hud_text;
 pub mod manifest;
+pub mod stat_display;
 pub mod text;

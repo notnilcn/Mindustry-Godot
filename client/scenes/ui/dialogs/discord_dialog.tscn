@@ -1,0 +1,15 @@
+; SPDX-License-Identifier: GPL-3.0-only
+;
+; Discord dialog (plan 14 §3.4, M3). Inherits the shared frame; banner/buttons
+; are built by discord_dialog.gd.
+;
+; Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
+; Source: core/src/mindustry/ui/dialogs/DiscordDialog.java
+
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/ui/dialogs/mind_dialog_base.tscn" id="1_base"]
+[ext_resource type="Script" path="res://ui/dialogs/discord_dialog.gd" id="2_discord"]
+
+[node name="DiscordDialog" instance=ExtResource("1_base")]
+script = ExtResource("2_discord")

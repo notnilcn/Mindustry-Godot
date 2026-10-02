@@ -77,13 +77,40 @@ func add_close_button(width: float = 210.0) -> Button:
 	# code-instantiated: the close button is added by the dialog's own script at
 	# runtime (button row contents vary per dialog).
 	var button := Button.new()
-	button.text = "Back"
+	button.text = _t("@back")
 	button.theme_type_variation = "defaultt"
 	button.pressed.connect(hide_dialog)
 	button.custom_minimum_size.x = width
 	if buttons != null:
 		buttons.add_child(button)
 	return button
+
+
+## Bundle lookup with the key echoed back when assets are absent (plan 03
+## `Bundle.get` semantics; all user-visible strings must go through a key).
+func _t(key: String) -> String:
+	var resolved := key.trim_prefix("@")
+	var assets := MindWidgets.assets()
+	if assets == null:
+		return resolved
+	return str(assets.call("bundle_get", resolved))
+
+
+## Sets the title from a bundle key and applies the accent title color.
+func set_title_key(key: String) -> void:
+	title_text = _t(key)
+	title_color = MindStyles.ACCENT
+	_apply_title()
+
+
+## The dialog's content column as a fresh `MindTable` (clears prior content).
+## code-instantiated: dialog bodies are data-driven and rebuilt on `shown()`.
+func content_table() -> MindTable:
+	var table := MindTable.new()
+	table.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if cont != null:
+		cont.add_child(table)
+	return table
 
 
 ## Hook for subclasses to rebuild dynamic content when shown (BaseDialog.shown).

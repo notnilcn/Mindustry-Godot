@@ -313,6 +313,36 @@ pub const EXPECTED_STYLES: &[&str] = &[
     "defaultTree",
 ];
 
+/// Dialog names required by plan 14 M3 (menus + standalone dialogs). Later
+/// milestones append to this list; a name missing from
+/// `client/ui/dialogs_manifest.json` fails [`tests::repo_dialogs_manifest_complete`].
+pub const EXPECTED_M3_DIALOGS: &[&str] = &[
+    "about",
+    "settings",
+    "language",
+    "controls",
+    "database",
+    "content",
+    "icon_select",
+    "palette",
+    "picker",
+    "full_text",
+    "discord",
+    "mods",
+    "mod_browser",
+    "join",
+    "host",
+    "load",
+    "save",
+    "restart",
+    "custom_rules",
+    "campaign_rules",
+    "campaign_complete",
+    "admins",
+    "bans",
+    "traces",
+];
+
 /// Pause flag for a dialog from `UI.init()` (§3.4).
 pub fn expected_pause(name: &str) -> Option<bool> {
     Some(match name {
@@ -374,6 +404,39 @@ mod tests {
         assert_eq!(
             bad.validate(None),
             Err(ManifestError::PauseMismatch("settings".into()))
+        );
+    }
+
+    /// Validates the committed `client/ui/dialogs_manifest.json` against the M3
+    /// catalogue and on-disk scenes (plan 14 §7a/§7b `ui manifest`).
+    #[test]
+    fn repo_dialogs_manifest_complete() {
+        let client = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let manifest_path = client.join("ui/dialogs_manifest.json");
+        let text = std::fs::read_to_string(&manifest_path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", manifest_path.display()));
+        let manifest = DialogsManifest::from_json(&text).expect("parse dialogs_manifest.json");
+        manifest
+            .validate(Some(&client))
+            .expect("validate dialogs_manifest.json (scene paths + pause flags)");
+        for name in EXPECTED_M3_DIALOGS {
+            assert!(
+                manifest.dialog(name).is_some(),
+                "M3 dialog '{name}' missing from dialogs_manifest.json"
+            );
+        }
+        for name in ["menu", "hud", "placement", "minimap", "block_config"] {
+            assert!(
+                manifest.fragments.iter().any(|entry| entry.name == name),
+                "fragment '{name}' missing from dialogs_manifest.json"
+            );
+        }
+        assert!(
+            manifest
+                .fragments
+                .iter()
+                .any(|entry| entry.name == "menu" && entry.group == "menu"),
+            "menu fragment group wrong"
         );
     }
 
