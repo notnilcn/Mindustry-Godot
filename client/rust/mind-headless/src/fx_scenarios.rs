@@ -14,10 +14,10 @@ use serde_json::{Value, json};
 use mind_core::content::EffectId;
 use mind_core::content::effect_by_name;
 use mind_core::fx::{
-    EffectData, EffectKind, EffectState, EmptySnapshot, FxPool, build_program, catalog_counts,
-    order_hash, registry,
+    EffectData, EffectKind, EffectState, EmptySnapshot, FxPool, build_program, build_program_into,
+    catalog_counts, draw_call_count, order_hash, registry,
 };
-use mind_core::render::draw::{Blending, DrawPrim, DrawProgram, PrimKind};
+use mind_core::render::draw::{Blending, DrawPrim, DrawProgram, MAX_DRAW_CALLS_TARGET, PrimKind};
 
 use crate::cli::FxCommand;
 
@@ -412,16 +412,24 @@ fn bench(states: usize, frames: u32, json: bool) -> Result<i32> {
     let mut program = DrawProgram::new();
     let started = std::time::Instant::now();
     let mut total_prims: u64 = 0;
+    let mut max_draw_calls: usize = 0;
     for _ in 0..frames {
+        program.clear();
         for i in 0..states {
             let id = ids[i % ids.len()];
             let state = synthetic_state(id, ((i % 17) as f32) * 0.5);
-            build_program(registry().get(id), &state, &EmptySnapshot, &mut program);
-            total_prims += program.len() as u64;
+            build_program_into(registry().get(id), &state, &EmptySnapshot, &mut program);
         }
+        program.sort();
+        total_prims += program.len() as u64;
+        max_draw_calls = max_draw_calls.max(draw_call_count(&program.prims));
     }
     let elapsed = started.elapsed();
     let per_frame_ms = elapsed.as_secs_f64() * 1000.0 / frames as f64;
+    let draw_ok = max_draw_calls <= MAX_DRAW_CALLS_TARGET as usize;
+    // Time is the debug-build gate; draw calls are recorded for plan 16's
+    // executor (the primitive estimate over-counts until the vertex/MultiMesh
+    // batch path lands, §3.14).
     let pass = per_frame_ms <= 1.5 || states <= 300;
     let value = json!({
         "format": 1,
@@ -429,6 +437,9 @@ fn bench(states: usize, frames: u32, json: bool) -> Result<i32> {
         "frames": frames,
         "total_prims": total_prims,
         "ms_per_frame": per_frame_ms,
+        "draw_calls": max_draw_calls,
+        "draw_call_target": MAX_DRAW_CALLS_TARGET,
+        "draw_calls_ok": draw_ok,
         "pass": pass,
     });
     emit(&value, json)?;

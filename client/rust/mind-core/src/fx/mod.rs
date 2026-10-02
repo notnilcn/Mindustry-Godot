@@ -12,6 +12,7 @@
 //! synced (HLP §12 C6, plan 17 §2.5).
 
 pub mod angles;
+pub mod batch;
 pub mod catalog;
 pub mod container;
 pub mod custom;
@@ -28,6 +29,9 @@ pub mod trail;
 pub mod weather_fx;
 
 pub use crate::render::draw::DrawProgram;
+pub use batch::{
+    BatchBackend, RegionBatch, batching_runs, choose_backend, draw_call_count, lod_particle_count,
+};
 pub use catalog::{CatalogCounts, build_registry, counts as catalog_counts, order_hash};
 pub use container::EffectContainer;
 pub use custom::{CustomFxId, FxEmit};
@@ -56,7 +60,7 @@ pub use resolve::{build_program, build_program_into};
 pub use shake::{ShakeState, shake_falloff, shake_visible};
 pub use sink::{FxBus, FxEvent, FxSettings, FxSink, NoopFxSink, emit_named};
 pub use trail::TrailRegistry;
-pub use weather_fx::{WeatherFx, WeatherKind, WeatherStateView};
+pub use weather_fx::{WeatherFx, WeatherKind, WeatherStateView, WeatherView, splash_visible};
 
 /// Converts a plan-16 `Pal`/`Drawf` `[f32; 4]` color to [`crate::content::Rgba`].
 impl From<[f32; 4]> for crate::content::Rgba {

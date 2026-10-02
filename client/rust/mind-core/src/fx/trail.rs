@@ -42,6 +42,14 @@ impl TrailRegistry {
         self.channels.iter().filter(|c| c.is_some()).count()
     }
 
+    /// Iterates live channels in slot order (additive helper for plan 17 M6).
+    pub fn iter_live(&self) -> impl Iterator<Item = (TrailChannelId, &Trail)> {
+        self.channels
+            .iter()
+            .enumerate()
+            .filter_map(|(i, c)| c.as_ref().map(|t| (TrailChannelId(i as u32), t)))
+    }
+
     /// Trait for a channel.
     pub fn get(&self, id: TrailChannelId) -> Option<&Trail> {
         self.channels.get(id.0 as usize).and_then(|c| c.as_ref())
