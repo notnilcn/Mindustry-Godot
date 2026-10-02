@@ -858,6 +858,41 @@ mod tests {
         assert_eq!(decoded[2].path, "sprites/external.png");
     }
 
+    /// Plan 20 §6.8 end-to-end: the decoded `patches` region feeds
+    /// `DataAssets::load`, applying patches to a live registry; `unload`
+    /// restores it. This is the host-side wiring plan 12/19 performs.
+    #[test]
+    fn patches_region_roundtrip_loads_and_applies() {
+        use crate::mods::assets::{DataAsset, DataAssets, ModDataManager};
+        let mut manager = ModDataManager::new();
+        manager.push(DataAsset::patch(
+            "patches/a.json",
+            "{\"block.router.health\": 7}".to_owned(),
+        ));
+
+        let tags = base_meta_tags(0, 0, 0, "empty");
+        let mut ctx = WriteContext::meta_only(tags);
+        ctx.patches = Some(&manager);
+        let bytes = SaveIo::write_to_vec(&ctx, &SaveOptions::new()).unwrap();
+
+        let mut state = SaveReadState::default();
+        SaveIo::load_bytes(&bytes, &mut state).unwrap();
+        let decoded = state.patches.expect("patches decoded");
+
+        let mut registry = crate::content::test_support::test_registry();
+        let id = registry.block_id("router").expect("router");
+        let original = registry.block(id).expect("block").health;
+        assert_ne!(original, 7);
+
+        let mut loaded = ModDataManager::new();
+        loaded.load(decoded, &mut registry).expect("load patch set");
+        assert_eq!(registry.block(id).expect("block").health, 7);
+        assert!(loaded.is_patched(crate::content::ContentRef::block(id)));
+
+        loaded.unload(&mut registry);
+        assert_eq!(registry.block(id).expect("block").health, original);
+    }
+
     #[test]
     fn meta_roundtrip_preserves_tags() {
         let mut tags = base_meta_tags(16, 24, 9, "groundZero");

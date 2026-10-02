@@ -814,7 +814,14 @@ impl ModDataManager {
     ) -> Result<(), ModError> {
         self.patcher
             .apply(registry, patches)
-            .map_err(|error| ModError::Invalid(error.to_string()))
+            .map_err(|error| ModError::Invalid(error.to_string()))?;
+        // `DataManager.load`: record the patcher's touched content so
+        // `isPatched` (plan 19 editor) reflects the applied set.
+        self.patched.clear();
+        for reference in self.patcher.touched_contents() {
+            self.mark_patched(reference);
+        }
+        Ok(())
     }
 
     /// `DataManager.reloadContent`: parse content records with the restricted

@@ -87,6 +87,12 @@ impl DataPatcher {
         self.after_patch_calls
     }
 
+    /// Content references touched by the last apply (upstream `DataManager`
+    /// copies `DataPatcher.used` into its `patched` set for `isPatched`).
+    pub fn touched_contents(&self) -> Vec<ContentRef> {
+        self.used.iter().map(|(reference, _)| *reference).collect()
+    }
+
     /// Applies patches with no active planet (`requiredPlanets` never gates).
     pub fn apply(
         &mut self,
