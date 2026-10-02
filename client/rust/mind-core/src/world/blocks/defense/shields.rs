@@ -129,6 +129,25 @@ impl ForceProjectorState {
         (self.radius + self.phase_heat * self.phase_radius_boost) * self.radscl
     }
 
+    /// Plan-16 draw state (`Layer::shields`); view-only.
+    pub fn draw_state(
+        &self,
+        x: f32,
+        y: f32,
+        color: crate::content::Rgba,
+    ) -> crate::combat::view::ShieldDrawState {
+        crate::combat::view::ShieldDrawState {
+            x,
+            y,
+            radius: self.real_radius(),
+            sides: self.sides,
+            rotation: self.shield_rotation,
+            color,
+            hit: self.hit > 0.0,
+            broken: self.broken,
+        }
+    }
+
     /// `ForceBuild.absorbExplosion` (`ExplosionShield`).
     pub fn absorb_explosion(&mut self, x: f32, y: f32, ex: f32, ey: f32, damage: f32) -> bool {
         let absorb = !self.broken

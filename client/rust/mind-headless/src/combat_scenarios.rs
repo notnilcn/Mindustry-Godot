@@ -433,33 +433,61 @@ fn trace(kind: &str, ticks: u64, json: bool) -> Result<i32> {
     Ok(EXIT_PASS)
 }
 
-/// Benchmarks bullet update/collision over `bullets` live entities.
+/// Benchmarks the full combat tick (turrets + bullets + defense) over
+/// `bullets` live entities and `turrets` firing `test-item` fixtures (plan 10
+/// §7d; `2_000 / 400 / 3600` is the recorded profile).
 fn bench(bullets: usize, turrets: usize, ticks: u64, json: bool) -> Result<i32> {
-    let _ = turrets;
+    use mind_core::world::blocks::defense::turrets;
+
     let mut harness = CombatHarness::new(128, 128, 7);
+    // A durable target row the turrets can shoot without destroying it quickly.
+    if let Some(wall) = harness.content().block_id("copper-wall") {
+        for tx in 2..60 {
+            let _ = harness.place(tx, 60, wall, 0, true);
+        }
+    }
+    for i in 0..turrets {
+        let tx = 2 + (i % 58) as i32;
+        let ty = 4 + (i / 58) as i32 * 2;
+        let (x, y) = CombatHarness::tile_center(tx, ty);
+        if let Some(turret) = harness.spawn_test_turret("test-item", x, y, 1)
+            && let Some(copper) = harness.content().item_id("copper")
+        {
+            for _ in 0..30 {
+                turrets::handle_item(&mut harness.build.world, turret, copper);
+            }
+        }
+    }
     for i in 0..bullets {
         let (x, y) = CombatHarness::tile_center(2 + (i % 60) as i32, 2 + (i / 60) as i32 % 60);
         let angle = (i as f32 * 13.0) % 360.0;
-        let _ = harness.spawn_bullet("fuse", x, y, angle, 1);
+        let _ = harness.spawn_bullet("fuse", x, y, angle, 2);
+    }
+    // Warmup (pool/content lazy init) then measured ticks.
+    for _ in 0..10 {
+        harness.tick();
     }
     let mut samples: Vec<u64> = Vec::with_capacity(ticks as usize);
     for _ in 0..ticks {
         let start = Instant::now();
-        harness.step_bullets_only();
+        harness.tick();
         samples.push(start.elapsed().as_nanos() as u64 / 1000);
     }
     samples.sort_unstable();
-    let p50 = samples.get(samples.len() * 50 / 100).copied().unwrap_or(0);
-    let p99 = samples
-        .get((samples.len() * 99 / 100).min(samples.len().saturating_sub(1)))
-        .copied()
-        .unwrap_or(0);
+    let percentile = |p: usize| {
+        samples
+            .get((samples.len() * p / 100).min(samples.len().saturating_sub(1)))
+            .copied()
+            .unwrap_or(0)
+    };
     let report = serde_json::json!({
         "scenario": "combat_bench",
         "bullets": bullets,
+        "turrets": turrets,
         "ticks": ticks,
-        "p50_us": p50,
-        "p99_us": p99,
+        "p50_us": percentile(50),
+        "p95_us": percentile(95),
+        "p99_us": percentile(99),
         "checksum": bullet_checksum(&harness),
     });
     print_json(&report, json);

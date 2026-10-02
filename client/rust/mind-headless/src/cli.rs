@@ -586,7 +586,7 @@ pub enum CombatCommand {
         /// Live traveling bullets.
         #[arg(long, default_value_t = 2000)]
         bullets: usize,
-        /// Turrets (accepted; implemented with plan-10 M5).
+        /// Firing `test-item` turrets included in the tick.
         #[arg(long, default_value_t = 0)]
         turrets: usize,
         /// Timed ticks.

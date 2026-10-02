@@ -311,6 +311,26 @@ pub struct AmmoEntry {
 }
 
 impl TurretState {
+    /// Plan-16 draw state (`Layer::turret`); view-only, computed from sim state.
+    pub fn draw_state(&self) -> crate::combat::view::TurretDrawState {
+        use crate::combat::view::TurretDrawState;
+        let ammo_fraction = if self.config.max_ammo > 0 {
+            (self.total_ammo as f32 / self.config.max_ammo as f32).clamp(0.0, 1.0)
+        } else if self.config.kind == TurretKind::Power {
+            1.0
+        } else {
+            0.0
+        };
+        TurretDrawState {
+            rotation: self.rotation,
+            recoil: self.cur_recoil,
+            heat: self.heat,
+            warmup: self.shoot_warmup,
+            charge: self.charge,
+            ammo_fraction,
+        }
+    }
+
     /// Creates the initial state for a config.
     pub fn new(config: Arc<TurretConfig>) -> Self {
         let activation = config.activation_time;
