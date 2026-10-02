@@ -21,14 +21,27 @@ use crate::world::modules::ModuleDims;
 
 pub use crate::world::behavior::PayloadRef;
 
+pub mod block_producer;
+pub mod build_payload;
+pub mod constructor;
+pub mod payload_block;
 pub mod payload_conveyor;
+pub mod payload_deconstructor;
+pub mod payload_loader;
+pub mod payload_mass_driver;
+pub mod payload_router;
+pub mod payload_source;
+pub mod payload_unloader;
+pub mod payload_void;
 
 use std::sync::Arc;
 
 use crate::content::ContentRegistry;
 use crate::world::behavior::BehaviorRegistry;
 
+pub use payload_block::{PayloadPlaceHook, PayloadPlacement};
 pub use payload_conveyor::{PayloadConveyorBehavior, PayloadConveyorBuild};
+pub use payload_conveyor::{dispatch_accept_payload, dispatch_handle_payload};
 
 /// Registers the payload-family behaviors available at this milestone.
 pub fn register(registry: &mut BehaviorRegistry, _content: &ContentRegistry) {
@@ -38,7 +51,55 @@ pub fn register(registry: &mut BehaviorRegistry, _content: &ContentRegistry) {
     );
     registry.register_named(
         "reinforced-payload-conveyor",
-        Arc::new(PayloadConveyorBehavior::VANILLA),
+        Arc::new(PayloadConveyorBehavior::REINFORCED),
+    );
+    registry.register_named(
+        "payload-router",
+        Arc::new(payload_router::PayloadRouterBehavior::VANILLA),
+    );
+    registry.register_named(
+        "reinforced-payload-router",
+        Arc::new(payload_router::PayloadRouterBehavior::REINFORCED),
+    );
+    registry.register_named(
+        "payload-mass-driver",
+        Arc::new(payload_mass_driver::PayloadMassDriverBehavior::VANILLA),
+    );
+    registry.register_named(
+        "large-payload-mass-driver",
+        Arc::new(payload_mass_driver::PayloadMassDriverBehavior::LARGE),
+    );
+    registry.register_named(
+        "small-deconstructor",
+        Arc::new(payload_deconstructor::PayloadDeconstructorBehavior::SMALL),
+    );
+    registry.register_named(
+        "deconstructor",
+        Arc::new(payload_deconstructor::PayloadDeconstructorBehavior::LARGE),
+    );
+    registry.register_named(
+        "constructor",
+        Arc::new(constructor::ConstructorBehavior::VANILLA),
+    );
+    registry.register_named(
+        "large-constructor",
+        Arc::new(constructor::ConstructorBehavior::LARGE),
+    );
+    registry.register_named(
+        "payload-loader",
+        Arc::new(payload_loader::PayloadLoaderBehavior::VANILLA),
+    );
+    registry.register_named(
+        "payload-unloader",
+        Arc::new(payload_unloader::PayloadUnloaderBehavior::VANILLA),
+    );
+    registry.register_named(
+        "payload-source",
+        Arc::new(payload_source::PayloadSourceBehavior::VANILLA),
+    );
+    registry.register_named(
+        "payload-void",
+        Arc::new(payload_void::PayloadVoidBehavior::VANILLA),
     );
 }
 
@@ -225,9 +286,60 @@ impl PayloadRef {
     }
 }
 
-/// Item requirements of a payload (empty until plan 02 recipe metadata).
-pub fn payload_requirements(_world: &World, _payload: PayloadRef) -> Vec<(ItemId, i32)> {
-    Vec::new()
+/// Item requirements of a payload (`BuildPayload.requirements()` = the carried
+/// block's `requirements`; unit requirements are plan 11's `UnitType`).
+pub fn payload_requirements(world: &World, payload: PayloadRef) -> Vec<(ItemId, i32)> {
+    if !payload.is_block {
+        return Vec::new();
+    }
+    let Some(block) = payload
+        .entity
+        .and_then(|e| world.get::<crate::entities::comp::Building>(e))
+        .map(|b| b.block)
+    else {
+        return Vec::new();
+    };
+    world
+        .get_resource::<crate::world::block::BlockTable>()
+        .and_then(|table| table.get(block).map(|inst| inst.def.requirements.clone()))
+        .map(|reqs| reqs.into_iter().map(|s| (s.item, s.amount)).collect())
+        .unwrap_or_default()
+}
+
+/// `Payload.buildTime()` (`BuildPayload` = carried block `buildTime`).
+pub fn payload_build_time(world: &World, payload: PayloadRef) -> f32 {
+    if !payload.is_block {
+        return 0.0;
+    }
+    payload
+        .entity
+        .and_then(|e| world.get::<crate::entities::comp::Building>(e))
+        .and_then(|b| {
+            world
+                .get_resource::<crate::world::block::BlockTable>()
+                .and_then(|table| table.get(b.block).map(|inst| inst.def.build_time))
+        })
+        .unwrap_or(0.0)
+}
+
+/// `Payload.destroyed()` (`BuildPayload`: mark dead + run destroy hooks).
+pub fn payload_destroyed(world: &mut World, payload: PayloadRef) {
+    let Some(entity) = payload.entity else {
+        return;
+    };
+    if let Some(block) = world
+        .get::<crate::entities::comp::Building>(entity)
+        .map(|b| b.block)
+    {
+        if let Some(inst) = world
+            .get_resource::<crate::world::block::BlockTable>()
+            .and_then(|table| table.instance(block))
+        {
+            inst.behavior.on_destroyed(world, entity);
+            inst.behavior.after_destroyed(world, entity);
+        }
+    }
+    world.entity_mut(entity).despawn();
 }
 
 /// `Payload.fits` limit helper: `size / tilesize`.
