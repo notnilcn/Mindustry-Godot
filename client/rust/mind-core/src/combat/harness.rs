@@ -179,18 +179,22 @@ impl CombatHarness {
             team,
             ..BulletSpawn::default()
         };
-        let seq = self.seq;
-        self.seq += 1;
-        let entity = bullet::create(
-            &mut self.build.world,
-            &self.build.content,
-            &mut self.rng,
-            seq,
-            &spawn,
-        )?;
-        self.bullets.push(entity);
-        self.bullets_created += 1;
-        Some(entity)
+        let mut spawned: Vec<Entity> = Vec::new();
+        let entity = {
+            let mut ctx = bullet::CombatCtx {
+                world: &mut self.build.world,
+                content: &self.build.content,
+                grid: &self.build.grid,
+                rng: &mut self.rng,
+                fx: self.fx.as_ref(),
+                seq: &mut self.seq,
+                spawned: &mut spawned,
+            };
+            ctx.spawn(&spawn)
+        };
+        self.bullets_created += spawned.len() as u64;
+        self.bullets.extend(spawned);
+        entity
     }
 
     /// Applies area damage to buildings at `(x, y)` (return applied total).
@@ -339,6 +343,7 @@ fn register_fixture_bullets(content: &mut ContentRegistry) -> BTreeMap<String, B
         def.damage = 30.0;
         def.hit_size = 2.0;
         def.collides = false;
+        def.length = 200.0;
         def.drag = 0.0;
     });
     add("fire_bullet", BulletKind::Fire, &|def| {

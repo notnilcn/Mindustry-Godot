@@ -146,6 +146,7 @@ impl CombatCtx<'_> {
         let seq = *self.seq;
         *self.seq = seq.wrapping_add(1);
         let entity = spawn::create(self.world, self.content, self.rng, seq, spawn)?;
+        apply_kind_init(self, entity);
         self.spawned.push(entity);
         Some(entity)
     }
@@ -186,6 +187,47 @@ pub fn bullet_bundle(
         TeamComp { team },
         bullet,
     )
+}
+
+/// Runs the kind-specific `init(Bullet)` half (`BulletType.init` overrides).
+///
+/// Laser bullets deal their line damage immediately at spawn and are removed
+/// (`LaserBulletType.init` runs `Damage.collideLaser` and sets `time = lifetime`).
+pub fn apply_kind_init(ctx: &mut CombatCtx<'_>, entity: Entity) {
+    let Some(state) = ctx.bullet(entity).cloned() else {
+        return;
+    };
+    let Some(def) = ctx.content.bullet(state.def) else {
+        return;
+    };
+    if def.kind != crate::content::BulletKind::Laser {
+        return;
+    }
+    let team = ctx.team(entity);
+    let (x, y) = ctx.pos(entity).unwrap_or((state.origin.0, state.origin.1));
+    let length = if def.length > 0.0 {
+        def.length
+    } else {
+        def.speed * state.lifetime
+    };
+    let _ = super::damage::line::collide_line(
+        ctx.world,
+        ctx.content,
+        ctx.grid,
+        team,
+        x,
+        y,
+        state.rotation,
+        length,
+        def.pierce_cap,
+        state.damage,
+        def.pierce_armor,
+        def.armor_multiplier,
+    );
+    if let Some(mut bullet) = ctx.world.get_mut::<Bullet>(entity) {
+        bullet.fdata = length;
+        bullet.set(HIT);
+    }
 }
 
 /// Advances one bullet (`BulletComp.update` + `BulletType.update`).
@@ -878,6 +920,21 @@ mod tests {
             "frag children spawned (created={})",
             harness.bullets_created
         );
+    }
+
+    #[test]
+    fn laser_instant_collide() {
+        let mut harness = CombatHarness::new(48, 16, 2);
+        let wall = harness.content().block_id("copper-wall").expect("wall");
+        assert!(harness.place(12, 8, wall, 0, true));
+        let before = harness.building_health_at(12, 8);
+        let (x, y) = CombatHarness::tile_center(6, 8);
+        let e = harness.spawn_bullet("laser", x, y, 0.0, 1).expect("spawn");
+        assert!(
+            harness.building_health_at(12, 8) < before,
+            "laser dealt damage on spawn"
+        );
+        assert!(!bullet_alive(&harness.build.world, e));
     }
 
     #[test]

@@ -188,6 +188,22 @@ pub fn complete_damage(
     total
 }
 
+/// Applies a single-target damage instance (armor-aware). Used by line/laser and
+/// splash hits where the source is not a bullet entity.
+pub fn damage_entity(
+    world: &mut World,
+    content: &ContentRegistry,
+    entity: Entity,
+    damage: f32,
+    pierce_armor: bool,
+    armor_multiplier: f32,
+) -> f32 {
+    let armor = armor_of(content, world, entity) * armor_multiplier;
+    let applied = apply_armor_opt(damage, armor, pierce_armor);
+    apply_health(world, entity, applied);
+    applied
+}
+
 /// Subtracts `amount` from an entity's health, clamping at zero (`damage()` core).
 pub fn apply_health(world: &mut World, entity: Entity, amount: f32) {
     let Some(mut health) = world.get_mut::<Health>(entity) else {
