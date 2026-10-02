@@ -99,8 +99,8 @@ impl INode for MindSimHost {
 
         log::info!(
             "MindSimHost ready ({}x{} seed {} selected `{}`, mind-core {})",
-            self.sim.grid.width,
-            self.sim.grid.height,
+            self.sim.grid.width(),
+            self.sim.grid.height(),
             self.sim.seed(),
             self.sim.block_name_of(self.sim.selected_block()),
             mind_core::MIND_VERSION
@@ -409,7 +409,7 @@ impl MindSimHost {
             .grid
             .iter_row_major()
             .filter_map(|(pos, index)| {
-                let block = self.sim.grid.blocks[index];
+                let block = self.sim.grid.block_id_at(index);
                 (block != BlockId::AIR).then_some((pos.x(), pos.y(), block.get()))
             })
             .collect()
@@ -417,7 +417,7 @@ impl MindSimHost {
 
     /// World size in tiles `(width, height)`; used to draw the grid border.
     pub fn world_size(&self) -> (i32, i32) {
-        (self.sim.grid.width, self.sim.grid.height)
+        (self.sim.grid.width(), self.sim.grid.height())
     }
 
     /// Applies one immediate command; `false` when `mind-core` rejects it.

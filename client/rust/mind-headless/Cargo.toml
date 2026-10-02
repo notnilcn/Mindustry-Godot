@@ -10,6 +10,7 @@ description = "Headless test-rig binary for the mind-core simulation (scenarios,
 mind-atlas = { path = "../mind-atlas" }
 mind-core = { path = "../mind-core" }
 mind-stdb = { path = "../mind-stdb" }
+bevy_ecs.workspace = true
 spacetimedb-sdk.workspace = true
 clap.workspace = true
 anyhow.workspace = true

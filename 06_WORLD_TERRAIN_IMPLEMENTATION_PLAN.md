@@ -8,7 +8,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Draft v1 — 2026-10-01, not started. 1 item flagged `NEEDS USER DECISION` in §8; it does not block M0–M4. |
+| **Status** | **In progress (2026-10-02, `lane/06-world`): M0–M3 COMPLETE, M6 PARTIAL (`math::noise`); M4/M5/M7/M8/M9 not started.** 1 item flagged `NEEDS USER DECISION` in §8; it does not block M0–M4. See Changelog for evidence. |
 | **Phase** | P3 — World & systems |
 | **Depends on** | `02_CONTENT_IMPLEMENTATION_PLAN.md` (`BlockDef` metadata incl. environment fields, `Attribute` ids, `Floor` data fields, `Planet`/`SectorPreset` metadata, `ContentRegistry` lookups), `04_IO_SERIALIZATION_IMPLEMENTATION_PLAN.md` (`WorldContext` trait, `SaveIO`/`MapIO`/`JsonIO`, `FileSystem`/`Paths`, `CachedTile`-equivalent preview contract), `05_SIM_CORE_IMPLEMENTATION_PLAN.md` (`Sim`/schedule/EventBus, `EntityIds`, `Groups`/`EntityGroup`, `ChecksumPart`, `Tmp`/`SimRng`, `math` module). |
 | **Blocks** | `07_BLOCKS_BUILD_IMPLEMENTATION_PLAN.md` (Tile/Build seams, `WorldHooks`), `08_LOGISTICS_IMPLEMENTATION_PLAN.md` (tile item buffers), `10_COMBAT_BULLETS_IMPLEMENTATION_PLAN.md` (world raycast, puddles/fires slots), `11_UNITS_AI_WAVES_IMPLEMENTATION_PLAN.md` (terrain pathfinding data, world indexers), `12_CAMPAIGN_IMPLEMENTATION_PLAN.md` (`Rules` sector fields, `Sector`/`Universe` runtime, `Schematics` launch loadout, `BaseRegistry`), `16_RENDER_WORLD_IMPLEMENTATION_PLAN.md` (tile read contract, `CacheLayer` hints, recache hooks), `19_MAPS_EDITOR_IMPLEMENTATION_PLAN.md` (previews, image maps, editor tile ops). |
@@ -548,18 +548,18 @@ Regression policy: +50% over committed baseline blocks the milestone; +20% warns
 
 ### 7e. Exit criteria checklist
 
-- [ ] `cargo test -p mind-core` green; §7a rows implemented or explicitly `#[ignore = "plan NN"]` with an owner.
-- [ ] `cargo fmt --check` + `cargo clippy -p mind-core -- -D warnings` clean; no `HashMap` iteration in `world/`/`maps/` generation paths.
-- [ ] `mind-headless world gen` golden checksums reproduce in-process, cross-process, and with `--workers 1` vs default.
-- [ ] `world_tile_ops` counters match event counts; `world_multiblock` matches `blockOverlapRemoved`/`multiblock`.
-- [ ] `world_filters_order` forward golden + order sensitivity + buffered/unbuffered visibility asserted.
-- [ ] Real `WorldContext` implementation used by 04 `io roundtrip`; `begin/endMapLoad` events and `generating` suppression verified.
-- [ ] Edge-darkness BFS output matches the reference grid; `tile.data` overload documented and asserted with 07.
-- [ ] `maps list` sorted correctly incl. corrupt-file skip; preview cache round-trips; save/import/remove delete preview files.
-- [ ] MCP scenario §7c executed with logs/screenshot/checksum evidence; generated terrain visible and camera pans.
-- [ ] §7d budgets measured and recorded; no regression > 50% vs baseline.
-- [ ] `mind-core` Godot/tokio-free; GPL headers on every ported file; `math/noise.rs` merge with 05 recorded.
-- [ ] Reconciliation notes for 04/05/07/11/12/16/19 recorded in this file's Changelog.
+- [x] `cargo test -p mind-core` green; §7a rows implemented or explicitly `#[ignore = "plan NN"]` with an owner. (M0–M3 rows done; M4–M9 pending.)
+- [x] `cargo fmt --check` + `cargo clippy -p mind-core -- -D warnings` clean; no `HashMap` iteration in `world/`/`maps/` generation paths. (workspace `--all-targets` clean.)
+- [ ] `mind-headless world gen` golden checksums reproduce in-process, cross-process, and with `--workers 1` vs default. (M6/M7 pending.)
+- [x] `world_tile_ops` counters match event counts; `world_multiblock` matches `blockOverlapRemoved`/`multiblock`. (both `pass:true`.)
+- [ ] `world_filters_order` forward golden + order sensitivity + buffered/unbuffered visibility asserted. (M5 pending.)
+- [ ] Real `WorldContext` implementation used by 04 `io roundtrip`; `begin/endMapLoad` events and `generating` suppression verified. (begin/end verified; 04 swap needs plan 07 building runtime.)
+- [x] Edge-darkness BFS output matches the reference grid; `tile.data` overload documented and asserted with 07. (BFS test green; 07 seam documented.)
+- [ ] `maps list` sorted correctly incl. corrupt-file skip; preview cache round-trips; save/import/remove delete preview files. (M4 pending.)
+- [ ] MCP scenario §7c executed with logs/screenshot/checksum evidence; generated terrain visible and camera pans. (pending.)
+- [ ] §7d budgets measured and recorded; no regression > 50% vs baseline. (pending.)
+- [x] `mind-core` Godot/tokio-free; GPL headers on every ported file; `math/noise.rs` merge with 05 recorded. (05 landed no `math/`; 06 hosts `math/noise.rs`.)
+- [x] Reconciliation notes for 04/05/07/11/12/16/19 recorded in this file's Changelog.
 
 ---
 
@@ -616,3 +616,13 @@ Each item has the default this plan proceeds with. Items marked **NEEDS USER DEC
 > Append entries here when execution starts. Every "done" claim carries evidence (command, dump path, screenshot path, checksum).
 
 - 2026-10-01 — Draft v1 written. No implementation started. OD6-A (generation RNG determinism) requires user input before M5; R1–R4, R6–R10 require orchestrator reconciliation with plans 04/05/07/11/12/16/19/23 as noted.
+
+- 2026-10-02 — **M0 COMPLETE (`lane/06-world`, commit `4e83423`).** Real `Tile`/`Tiles`/`WorldGrid` replaces the P0 placeholder (`world/{pos,tile,tiles,events,hooks,params,cached,ops,attributes,color_mapper,edges,darkness,raycast,context,checksum}.rs`). `WorldGrid` owns `Tiles` and the `tile_changes`/`floor_changes` counters; tile ops are centralised in `world::ops::WorldCtx` (floor/overlay/block/air) with upstream counter semantics (`tileChanges` only on `TileChangeEvent`, `floorChanges` only on `TileFloorChangeEvent`). `Sim`/dump/gdext were migrated to the new storage API and the P0 canonical stream is byte-identical: `spine_place_break` → `a1a7b96167c9718d` (goldens preserved, R10 not triggered). New `mind-headless world tile-ops` (counters == event counts, `tile-ops` seed 1: `tile_changes=4165`, `tile_events=4164`) and `world multiblock` (`pass:true`). Tests: `world::tests::{create_map_resize_fill,tile_get_getn_getc_geti_in,fill_resets_grid}`, `world::tiles`, `world::tile`, `world::ops`, `world::darkness`, `world::raycast`, `world::context`, `world::checksum`. Evidence: `cargo test -p mind-core` 287 lib + 2 + 1 passed / 1 ignored; `cargo fmt --all -- --check` + `cargo clippy -p mind-core -p mind-headless --all-targets -- -D warnings` clean.
+
+- 2026-10-02 — **M2/M3 COMPLETE (`lane/06-world`).** M2: `WorldGrid::{conv,unconv,to_tile,flat_index,is_in_map_area,begin_map_load,end_map_load,set_generating,get_quad_bounds,clear_buildings}` (`World.java`); `world/context.rs` implements plan 04's `WorldContext` for `Context`/`FilterContext`/sector context (tile create/resize/begin/end/set_block/set_tile_data); the `FilterContext.end()` filter-apply step is deferred to M5. `end_map_load` runs the darkness BFS and resets counters to `-1` (`WorldLoadEvent` listener). Tests: `world::tests::{begin_end_map_load_events,raycast_dda_hits_first_block,is_in_map_area_with_limit}`; raycast `to_tile` corrected to `Math.round`. M3: `WorldHooks`/`RenderHooks` traits with no-op defaults, `world::ops` `set_block`/`changeBuild`/multiblock two-pass/overlap removal, `clear_building`, `legacy_remove_self`/`update_proximity`/`block_changed`/`floor_changed` seams, `add_darkness`/`get_wall_darkness`/`get_static_darkness`. Tests: `world::tests::{multiblock_linkage,multiblock_overlap_removed}` (ported `ApplicationTests.multiblock`/`blockOverlapRemoved`) and `mind-headless world multiblock` (`pass:true`). **Deferred:** the 04 §5 M4 fixture→real-context swap for `io roundtrip` (building-entity decode needs plan 07's `Building` runtime; `Context::read_building` returns a structured error naming plan 07) and plan-07 legacy/proximity bodies. Evidence: `cargo test -p mind-core` 291 lib + 2 + 1 passed / 1 ignored; fmt + clippy `-D warnings` clean.
+
+- 2026-10-02 — **M1 COMPLETE (`lane/06-world`).** `world/edges.rs` ports `Edges` (bot/top formulas, `Mathf.angle` sort; `edge_order` == `ApplicationTests.edges`, `edges(2).len()==8`), `world/attributes.rs` (`Attributes` float vector + name-keyed JSON), `world/color_mapper.rs` (`rgba8888` + `load`/`get` with the `0,0,0,1`→air seed), counter increments (M0 ops), and `util/strings.rs` (`strip_colors`, `sanitize_filename` ported from `arc.util.Strings`). Tests: `world::edges::tests::edge_order`, `world::attributes::tests::json_roundtrip_names`, `world::color_mapper::tests::rgba_lookup_after_load`, `util::strings::tests::{strip_colors_removes_tags,sanitize_filename_ports_arc}`. Deviation recorded: named color tags are accepted structurally (Arc's full `Colors` table is a view concern); `ATTRIBUTE_COUNT = 4` matches plan 02's current `Attribute` set (heat/spores/water/light) until mod attributes append.
+
+- 2026-10-02 — **M6 PARTIAL (`lane/06-world`): `math::noise` (Simplex) port.** `mind-core/src/math/{mod,noise}.rs` ports Arc `Simplex` exactly (stateless `perm` hash, `raw2d`/`raw3d`, `noise2d`/`noise3d` octave normalization to `[0,1]`); `lib.rs` gains `pub mod math`. Tests: `math::noise::tests::{noise_is_seeded_stable,noise2d_is_bounded_and_not_constant,raw3d_is_seeded_stable}`. **Deferred (with owners):** `Ridged` (needed only by the M8 vanilla planet generators; the port map keeps it in `math/noise.rs`), `maps/generators/*` (`WorldGenerator`/`BasicGenerator`/`BaseGenerator`/`astar`), the `world gen` headless subcommand + golden checksums, and M7 `PlanetGenerator`/`BlankPlanetGenerator`/`HexMesher`. M4 `Maps`/`Map` registry, M5 generation filters, M8 vanilla planets, and M9 polish are not started. Evidence: `cargo test -p mind-core` 298 lib + 2 + 1 passed / 1 ignored; workspace `cargo clippy --all-targets -- -D warnings` + `cargo fmt --all -- --check` clean.
+
+- 2026-10-02 — **M6 PARTIAL ():  (Simplex) port.**  ports Arc  exactly (stateless  hash, /, / octave normalization to );  gains . Tests: . **Deferred (with owners):**  (needed only by the M8 vanilla planet generators, Port map keeps it in ),  (///), the  headless subcommand + golden checksums, and M7 //. M4 / registry, M5 generation filters, M8 vanilla planets, and M9 polish are not started. Evidence:  298 lib + 2 + 1 passed / 1 ignored; workspace  +  clean.

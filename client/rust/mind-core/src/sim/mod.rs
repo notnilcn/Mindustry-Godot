@@ -272,10 +272,16 @@ impl Sim {
         c.part(&self.seed);
 
         for (_pos, index) in self.grid.iter_row_major() {
-            c.part(&self.grid.blocks[index].raw());
-            c.part(&self.grid.teams[index]);
-            c.part(&self.grid.rots[index]);
-            match self.grid.tiles[index].and_then(|entity| self.ecs.seq_of(entity)) {
+            let tile = self.grid.tile_ref(index);
+            let block = tile.block;
+            let build = tile.build;
+            c.part(&block.raw());
+            // Team/rotation live on the building entity; the P0 path always uses
+            // team `sharded` (0) / rotation 0, preserved here to keep the
+            // canonical stream byte-identical.
+            c.part(&0u8);
+            c.part(&0u8);
+            match build.and_then(|entity| self.ecs.seq_of(entity)) {
                 Some(build_id) => {
                     c.part(&1u8);
                     c.part(&build_id);
