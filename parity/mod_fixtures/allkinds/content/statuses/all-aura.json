@@ -1,0 +1,7 @@
+{
+  "name": "All Aura",
+  "speedMultiplier": 1.4,
+  "damageMultiplier": 1.1,
+  "color": "00ff00",
+  "opposites": ["wet"]
+}

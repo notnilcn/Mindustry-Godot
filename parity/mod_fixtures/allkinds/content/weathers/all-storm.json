@@ -1,0 +1,7 @@
+{
+  "name": "All Storm",
+  "type": "ParticleWeather",
+  "duration": 120,
+  "hidden": true,
+  "status": "wet"
+}

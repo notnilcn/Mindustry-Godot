@@ -1359,6 +1359,62 @@ fn cmd_mods_content(
             })
         })
         .collect();
+    let liquids: Vec<serde_json::Value> = registry
+        .liquids()
+        .iter()
+        .filter(|record| record.minfo.is_modded())
+        .map(|record| serde_json::json!({"name": record.name, "id": record.id.raw(), "gas": record.gas}))
+        .collect();
+    let statuses: Vec<serde_json::Value> = registry
+        .statuses()
+        .iter()
+        .filter(|record| record.minfo.is_modded())
+        .map(|record| serde_json::json!({"name": record.name, "id": record.id.raw()}))
+        .collect();
+    let units: Vec<serde_json::Value> = registry
+        .units()
+        .iter()
+        .filter(|record| record.minfo.is_modded())
+        .map(|record| {
+            serde_json::json!({
+                "name": record.name,
+                "id": record.id.raw(),
+                "kind": record.kind.name(),
+                "weapons": record.weapons.len(),
+            })
+        })
+        .collect();
+    let weathers: Vec<serde_json::Value> = registry
+        .weathers()
+        .iter()
+        .filter(|record| record.minfo.is_modded())
+        .map(|record| serde_json::json!({"name": record.name, "id": record.id.raw(), "kind": record.kind.name()}))
+        .collect();
+    let planets: Vec<serde_json::Value> = registry
+        .planets()
+        .iter()
+        .filter(|record| record.minfo.is_modded())
+        .map(|record| {
+            serde_json::json!({
+                "name": record.name,
+                "id": record.id.raw(),
+                "radius": record.radius,
+                "sectors": record.sector_count,
+            })
+        })
+        .collect();
+    let sectors: Vec<serde_json::Value> = registry
+        .sectors()
+        .iter()
+        .filter(|record| record.minfo.is_modded())
+        .map(|record| serde_json::json!({"name": record.name, "id": record.id.raw(), "planet": record.planet.raw()}))
+        .collect();
+    let teams: Vec<serde_json::Value> = registry
+        .teams()
+        .iter()
+        .filter(|record| record.minfo.is_modded())
+        .map(|record| serde_json::json!({"name": record.name, "id": record.id.raw(), "team": record.team}))
+        .collect();
     let warnings: Vec<String> = provider
         .parser()
         .warnings
@@ -1370,6 +1426,13 @@ fn cmd_mods_content(
         "fixture": fixture,
         "items": items,
         "blocks": blocks,
+        "liquids": liquids,
+        "statuses": statuses,
+        "units": units,
+        "weathers": weathers,
+        "planets": planets,
+        "sectors": sectors,
+        "teams": teams,
         "warnings": warnings,
         "errors": errors,
     });
