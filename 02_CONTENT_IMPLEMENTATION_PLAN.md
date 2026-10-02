@@ -8,7 +8,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Complete — M1–M7 (M1–M4 merged from `lane/02-content`/`lane/02-m3`; M5–M7 on `lane/02-m5`, 2026-10-02) |
+| **Status** | ✅ **Complete — M1–M7 merged to `main` 2026-10-02** (M1–M4 from `lane/02-content`/`lane/02-m3`; M5–M7 from `lane/02-m5`). JVM golden generated (NUD-10 answer A, `parity/java/jvm_golden_content.json`); goldens re-recorded (`2033eb5b4ec1206d`/`791592fab6a00469`/`37cc80ef11cfec1e`). |
 | **Phase** | P1 — Platform & content (HIGH_LEVEL_PLAN §5) |
 | **Depends on** | `00_FOUNDATION_IMPLEMENTATION_PLAN.md` (workspace, `mind-core`/`mind-headless` crates, headless harness, spine state inspector). |
 | **Blocks** | `03_ASSETS_IMPLEMENTATION_PLAN.md`, `04_IO_SERIALIZATION_IMPLEMENTATION_PLAN.md`, `07_BLOCKS_BUILD_IMPLEMENTATION_PLAN.md`, `10_COMBAT_BULLETS_IMPLEMENTATION_PLAN.md`, `11_UNITS_AI_WAVES_IMPLEMENTATION_PLAN.md`, `12_CAMPAIGN_IMPLEMENTATION_PLAN.md`, `20_MODS_IMPLEMENTATION_PLAN.md`. |

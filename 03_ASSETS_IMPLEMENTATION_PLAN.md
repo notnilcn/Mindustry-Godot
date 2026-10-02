@@ -9,7 +9,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | 🔶 In progress on `lane/03-assets` — M0–M2 complete 2026-10-02 (workspace/migration, packer core + vertical slice, filename-only generators). Executable only after `00_FOUNDATION_IMPLEMENTATION_PLAN.md` and `02_CONTENT_IMPLEMENTATION_PLAN.md` milestones are green. |
+| **Status** | 🔶 **In progress — M0–M4 complete and merged to `main` 2026-10-02** (workspace/migration, packer core + vertical slice, filename-only + content-driven generators, full pack/fallback/ids). **M5–M10 open.** Next pass: finish the deferred `unit-icons`/unit metadata (blocked earlier on plan 02 M5, now merged), then M5 runtime `FileTree`/atlas + MCP probe, M7 bundles/icons/fonts, M8 `Sounds`/`Musics`/`Tex`, M9 mod-overlay API, M10 budgets. **M6 (`mind-macros` `#[derive(LoadRegions)]`) waits on plan 05, which owns that crate.** |
 | **Phase** | P1 (Platform & content) |
 | **Depends on** | `00_FOUNDATION_IMPLEMENTATION_PLAN.md` (workspace, spine, `mind-headless`, MCP bridge, CI), `02_CONTENT_IMPLEMENTATION_PLAN.md` (`ContentType`, content registry, `Block`/`UnitType`/`Item`/`Team`/`SectorPreset` metadata needed by generators and `@Load`). |
 | **Blocks** | `07_BLOCKS_BUILD_IMPLEMENTATION_PLAN.md`, `10_COMBAT_BULLETS_IMPLEMENTATION_PLAN.md`, `11_UNITS_AI_WAVES_IMPLEMENTATION_PLAN.md`, `14_UI_IMPLEMENTATION_PLAN.md`, `16_RENDER_WORLD_IMPLEMENTATION_PLAN.md`, `17_FX_PARTS_IMPLEMENTATION_PLAN.md`, `18_AUDIO_IMPLEMENTATION_PLAN.md`, `20_MODS_IMPLEMENTATION_PLAN.md` — every consumer of sprites/regions/bundles/sounds/icons. |

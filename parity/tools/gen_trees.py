@@ -5,7 +5,7 @@ One-off conversion used for plan 02 M2; node data is committed and re-run only
 when upstream content changes.
 
 Usage: gen_trees.py [upstream_mindustry_src] [output_dir]
-  upstream_mindustry_src defaults to /mnt/c/Users/Clinton/g/code_examples/Mindustry/core/src/mindustry
+  upstream_mindustry_src defaults to /home/c/g/code_examples/Mindustry/core/src/mindustry
   output_dir defaults to the current directory
 """
 import re
@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(
     sys.argv[1]
     if len(sys.argv) > 1
-    else "/mnt/c/Users/Clinton/g/code_examples/Mindustry/core/src/mindustry"
+    else "/home/c/g/code_examples/Mindustry/core/src/mindustry"
 )
 OUT = Path(sys.argv[2] if len(sys.argv) > 2 else ".")
 

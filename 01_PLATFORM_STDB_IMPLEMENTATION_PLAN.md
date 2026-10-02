@@ -4,7 +4,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Draft, not started. Authored 2026-10-01 against `HIGH_LEVEL_PLAN.md` §0/§2/§4/§6–§9. |
+| **Status** | ✅ **Complete — M0–M6 merged to `main` 2026-10-01** (branch `lane/01-stdb`; see `HIGH_LEVEL_PLAN.md` §13). Deferred: the in-engine §7.3 two-instance MCP run and the relay-throughput bench (plan 21's load harness). |
 | **Phase** | P1 — Platform & content. |
 | **Depends on** | `00_FOUNDATION_IMPLEMENTATION_PLAN.md` (workspace, gdext bring-up, `mind-headless` harness, build scripts, MCP bridge). This plan must not start before plan 00's workspace + headless + MCP gates are green. |
 | **Blocks** | `21_MULTIPLAYER_IMPLEMENTATION_PLAN.md` (full schema, relay authority, snapshots); the lobby/identity parts of `12_CAMPAIGN_IMPLEMENTATION_PLAN.md` (profiles, campaign identity) and `14_UI_IMPLEMENTATION_PLAN.md` (settings dialog, join/lobby UI, connection-lost UI). |

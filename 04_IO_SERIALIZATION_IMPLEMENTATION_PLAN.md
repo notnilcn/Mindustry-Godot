@@ -7,7 +7,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | In progress — M0–M5 complete 2026-10-02 (`lane/04-io`) |
+| **Status** | ✅ **Merged to `main` 2026-10-02 — M0–M6 + M8 budgets complete. M7 (legacy `.msav` importer) explicitly declined per OD2/NUD-02; the M8 `MindIo` autoload + `save_current`/`load_current` dev actions and the §7c in-engine MCP run are deferred to plan 05 (live world/`IoSet`) + the single-editor mutex.** |
 | **Phase** | P1 (Platform & content) |
 | **Depends on** | `02_CONTENT_IMPLEMENTATION_PLAN.md` (content registry, `ContentType` ordering, `MappableContent`, content-name lookups). Interfaces are written now against a stub registry so most of this plan can land in parallel. |
 | **Blocks** | `05_SIM_CORE_IMPLEMENTATION_PLAN.md` (entity IO interface + `IoSet` schedule slots), `06_WORLD_TERRAIN_IMPLEMENTATION_PLAN.md` (`WorldContext` impl, tile data hooks), `12_CAMPAIGN_IMPLEMENTATION_PLAN.md` (`Saves` policy, `SectorInfo`/`Rules`/markers persistence), `19_MAPS_EDITOR_IMPLEMENTATION_PLAN.md` (map registry, previews, image maps), `21_MULTIPLAYER_IMPLEMENTATION_PLAN.md` (TypeIO for `@Remote` params, custom-chunk net subset, `NetworkIO` world streaming, `@SyncField` interpolation metadata). |

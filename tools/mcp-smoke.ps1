@@ -7,7 +7,7 @@
 #
 # The editor must already be running -- see the repo playtest skill:
 #   wsl -d Ubuntu -e bash -lc "nohup godot4 --editor \
-#     --path /mnt/c/Users/Clinton/g/code_examples/mindustry-godot/client \
+#     --path /home/c/g/code_examples/mindustry-godot/client \
 #     >/tmp/mind-editor.log 2>&1 &"
 
 $ErrorActionPreference = "Stop"

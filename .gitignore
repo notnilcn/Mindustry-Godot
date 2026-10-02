@@ -42,3 +42,10 @@ __pycache__/
 
 # Windows temp droppings committed inside vendored addon bin dirs
 *.TMP
+
+# Windows NTFS alternate-data-stream droppings surfaced by WSL
+*:Zone.Identifier
+
+# Local agent/orchestrator session state (not part of the project)
+session.json
+.kimi-code/

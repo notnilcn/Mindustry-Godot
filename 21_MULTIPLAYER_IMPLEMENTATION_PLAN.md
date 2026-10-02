@@ -1027,7 +1027,7 @@ All are network-free except `mp_relay_live` (opt-in) and run under `cargo run -p
 
 ### 7c. MCP playtest scenarios (concrete; open-godot-mcp)
 
-Preconditions for all: `spacetime start`; `server/build.sh` published; the editor/game launched per the repo playtest skill (plan 00's analog; if `godot_health check` reports `BRIDGE_NOT_CONNECTED`, launch `nohup godot4 --editor --path /mnt/c/Users/Clinton/g/code_examples/mindustry-godot/client >/tmp/mind-editor.log 2>&1 &` in the background, wait ~20 s, `godot_instance list`). Two instances run via the project's per-instance launch args (`--p1`/`--p2`); **all runtime calls are sequential per instance** and **pid-stamped** (`"pid": OS.get_process_id()`, compared against `godot_game instances`). New pids ⇒ re-establish state. Every scenario ends with `godot_log errors` (clean) and a recorded screenshot path.
+Preconditions for all: `spacetime start`; `server/build.sh` published; the editor/game launched per the repo playtest skill (plan 00's analog; if `godot_health check` reports `BRIDGE_NOT_CONNECTED`, launch `nohup godot4 --editor --path /home/c/g/code_examples/mindustry-godot/client >/tmp/mind-editor.log 2>&1 &` in the background, wait ~20 s, `godot_instance list`). Two instances run via the project's per-instance launch args (`--p1`/`--p2`); **all runtime calls are sequential per instance** and **pid-stamped** (`"pid": OS.get_process_id()`, compared against `godot_game instances`). New pids ⇒ re-establish state. Every scenario ends with `godot_log errors` (clean) and a recorded screenshot path.
 
 **`mp_two_client_build_visible`** (the primary scenario):
 1. `godot_health check`; `godot_game instances` → record pid1/pid2; `godot_game play` (spine scene) with both instances.

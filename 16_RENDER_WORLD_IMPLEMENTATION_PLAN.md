@@ -574,7 +574,7 @@ New command `mind-headless render-list <scenario> [--out <path>] [--no-sort] [--
 
 ### 7.3 MCP playtest scenarios (concrete, pid-stamped)
 
-Preconditions follow plan 00 §7c / the repo playtest skill: `godot_health check`; if `BRIDGE_NOT_CONNECTED`, launch the editor (`nohup godot4 --editor --path /mnt/c/Users/Clinton/g/code_examples/mindustry-godot/client >/tmp/mind-editor.log 2>&1 &`), wait ~20 s, `godot_instance list`. Every eval returns `{"pid": OS.get_process_id(), …}` and is compared with `godot_game instances`.
+Preconditions follow plan 00 §7c / the repo playtest skill: `godot_health check`; if `BRIDGE_NOT_CONNECTED`, launch the editor (`nohup godot4 --editor --path /home/c/g/code_examples/mindustry-godot/client >/tmp/mind-editor.log 2>&1 &`), wait ~20 s, `godot_instance list`. Every eval returns `{"pid": OS.get_process_id(), …}` and is compared with `godot_game instances`.
 
 **7c-1 — Fixed-pose layer screenshot sweep (per-layer oracle).**
 1. `godot_editor_edit open_scene res://scenes/spine.tscn`; `godot_game play` with the scene passed explicitly.

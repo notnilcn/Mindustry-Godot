@@ -6,7 +6,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Ready to execute — all §8 decision items were resolved by the user on 2026-10-01 (answers: `23_PARITY_VERIFICATION_IMPLEMENTATION_PLAN.md` §8.1.1). |
+| **Status** | ✅ **COMPLETE 2026-10-01 (M0–M8; P0 gate passed).** See `HIGH_LEVEL_PLAN.md` §13 and this plan's Changelog. |
 | **Phase** | P0 Foundation. |
 | **Depends on** | none. Requires: `HIGH_LEVEL_PLAN.md`; WSL2 Ubuntu 26.04 (login shell; Windows 11 host, WSLg for GUI); Godot 4.7.2 on PATH (`godot4` standard, `godot4-mono` fallback); Rust stable 1.98.1 (installed); `spacetime` CLI 2.10.1 (installed; 2.10.2 available via `spacetime version upgrade`); `rg` (ripgrep) for boundary greps (`sudo apt install ripgrep` — currently missing); git identity configured in WSL (`git config --global user.name/user.email` — currently unset; M0 commits need it); open-godot-mcp bridge. |
 | **Blocks** | `01_PLATFORM_STDB_IMPLEMENTATION_PLAN.md`, `02_CONTENT_IMPLEMENTATION_PLAN.md`, `03_ASSETS_IMPLEMENTATION_PLAN.md`, `04_IO_SERIALIZATION_IMPLEMENTATION_PLAN.md`, `05_SIM_CORE_IMPLEMENTATION_PLAN.md` directly; `06`–`23` indirectly (D9). |
@@ -415,7 +415,7 @@ Exact ordered steps:
 
 - `tools/ci.sh`/`.ps1`, `tools/mcp-smoke.sh`, `.github/workflows/ci.yml`; `client/AGENTS.md` and `server/AGENTS.md` stubs pointing at the conventions.
 - Create the repo skill `mindustry-godot/.opencode/skills/playtest/SKILL.md`, mirroring the existing skill’s structure (frontmatter `name`/`description`/`whenToUse`; “which tool for what”; Part 1 Godot MCP recipes; Part 2 `spacetime` CLI), with these mindustry-godot specifics:
-  - launch (when `godot_health check` reports BRIDGE_NOT_CONNECTED): from WSL, `nohup godot4 --editor --path /mnt/c/Users/Clinton/g/code_examples/mindustry-godot/client >/tmp/mind-editor.log 2>&1 &`; wait ~20 s; `godot_instance list`; bridge port 6970. WSLg hosts the window; if driving from a Windows terminal, prefix `wsl -d Ubuntu -e bash -lc '...'`.
+  - launch (when `godot_health check` reports BRIDGE_NOT_CONNECTED): from WSL, `nohup godot4 --editor --path /home/c/g/code_examples/mindustry-godot/client >/tmp/mind-editor.log 2>&1 &`; wait ~20 s; `godot_instance list`; bridge port 6970. WSLg hosts the window; if driving from a Windows terminal, prefix `wsl -d Ubuntu -e bash -lc '...'`.
   - preflight identity: the bridge is 127.0.0.1:6970 — close any other editor holding that port (the sibling `main/` project is Windows-side), then verify `godot_exec eval {"code":"return ProjectSettings.globalize_path(\"res://\")"}` contains `mindustry-godot` before any `godot_game` call.
   - always run `res://scenes/spine.tscn`; node map: `/root/Spine/SimHost`, `/root/Spine/World/TileGrid`, `/root/Spine/World/Camera2D`, `/root/Spine/Ui/StateInspector/Label`.
   - pid-stamp rule: every eval returns `"pid": OS.get_process_id()`, compared against `godot_game instances`; re-establish assumed state if the pid changes.
@@ -550,7 +550,7 @@ Ad-hoc runs: `mind-headless sim 600 --seed 1 --dump out.json` (schema smoke) and
 
 ### 7c. MCP playtest scenario (concrete)
 
-Preconditions: build via `tools/build.sh`; `godot_health check`; if BRIDGE_NOT_CONNECTED, launch the editor per the repo skill (background: `nohup godot4 --editor --path /mnt/c/Users/Clinton/g/code_examples/mindustry-godot/client >/tmp/mind-editor.log 2>&1 &`), wait ~20 s, `godot_instance list`. The bridge binds **127.0.0.1:6970**: if another Godot editor (e.g. the sibling `main/` project, Windows-side) already holds 6970, the MCP server will keep talking to *that* editor. Close the other editor before launching, then verify identity in step 0 — `godot_exec eval {"code":"return ProjectSettings.globalize_path(\"res://\")"}` must contain `mindustry-godot` — before any `godot_game` call.
+Preconditions: build via `tools/build.sh`; `godot_health check`; if BRIDGE_NOT_CONNECTED, launch the editor per the repo skill (background: `nohup godot4 --editor --path /home/c/g/code_examples/mindustry-godot/client >/tmp/mind-editor.log 2>&1 &`), wait ~20 s, `godot_instance list`. The bridge binds **127.0.0.1:6970**: if another Godot editor (e.g. the sibling `main/` project, Windows-side) already holds 6970, the MCP server will keep talking to *that* editor. Close the other editor before launching, then verify identity in step 0 — `godot_exec eval {"code":"return ProjectSettings.globalize_path(\"res://\")"}` must contain `mindustry-godot` — before any `godot_game` call.
 
 1. `godot_editor_edit open_scene res://scenes/spine.tscn`; `godot_game play` with `scene: "res://scenes/spine.tscn"` passed explicitly.
 2. Pid-stamp + liveness: `godot_exec eval {"code": "return {\"pid\": OS.get_process_id(), \"tick\": get_node(\"/root/Spine/SimHost\").get_tick(), \"checksum\": str(get_node(\"/root/Spine/SimHost\").get_checksum())}"}` — record pid; compare with `godot_game instances`.
