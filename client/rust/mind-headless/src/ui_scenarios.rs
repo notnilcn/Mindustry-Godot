@@ -41,8 +41,111 @@ pub fn run(command: &UiCommand) -> Result<()> {
         UiCommand::HudText { json, dump, golden } => {
             hud_text(*json, dump.as_deref(), golden.as_deref())
         }
+        UiCommand::Display { json, dump, golden } => {
+            display(*json, dump.as_deref(), golden.as_deref())
+        }
     }
 }
+
+/// `ui display`: renders the `StatValues`/`Displayable` display kinds to
+/// `(left, right)` rows using an inline bundle + iconc fixture (plan §7a).
+fn display(json_out: bool, dump: Option<&Path>, golden: Option<&Path>) -> Result<()> {
+    use mind_core::assets::bundle::{Bundle, parse_properties};
+    use mind_core::ui::display::{DisplayRow, Displayable, HoverInfo};
+    use mind_core::ui::stat_display::{StatDisplay, StatUnit, display_rows};
+
+    let bundle = Bundle::from_layers(vec![parse_properties(DISPLAY_BUNDLE)]);
+    let iconc = Iconc::from_properties(FIXTURE_ICONS);
+
+    let cases: Vec<(&str, StatDisplay)> = vec![
+        ("text", StatDisplay::Text(String::from(":copper: holds"))),
+        (
+            "number",
+            StatDisplay::Number {
+                value: 2.5,
+                unit: StatUnit::PowerSecond,
+            },
+        ),
+        (
+            "multiplier",
+            StatDisplay::Multiplier {
+                value: 0.5,
+                unit: StatUnit::Multiplier,
+            },
+        ),
+        (
+            "percent",
+            StatDisplay::Percent {
+                value: 1.1,
+                unit: StatUnit::Percent,
+            },
+        ),
+        (
+            "squared",
+            StatDisplay::Squared {
+                value: 2.0,
+                unit: StatUnit::Tiles,
+            },
+        ),
+        (
+            "items",
+            StatDisplay::Items {
+                items: vec![(String::from("copper"), 1500), (String::from("lead"), 12)],
+            },
+        ),
+        (
+            "status",
+            StatDisplay::Status {
+                statuses: vec![(String::from("spawn"), 120.0)],
+            },
+        ),
+    ];
+    let results: Vec<Value> = cases
+        .iter()
+        .map(|(name, stat)| {
+            let info = display_rows(stat, &bundle, &iconc);
+            let rows: Vec<Value> = info
+                .to_text_rows(&bundle, &iconc)
+                .into_iter()
+                .map(|(left, right)| json!({"left": left, "right": right}))
+                .collect();
+            json!({"name": name, "rows": rows})
+        })
+        .collect();
+
+    // Also exercise the `Displayable` trait with a mixed-rows fixture.
+    struct Fixture;
+    impl Displayable for Fixture {
+        fn hover_info(&self) -> HoverInfo {
+            HoverInfo {
+                rows: vec![
+                    DisplayRow::Text(String::from("Copper Wall")),
+                    DisplayRow::Bar {
+                        label: String::from("Health"),
+                        color: [1.0, 0.0, 0.0, 1.0],
+                        fraction: 0.75,
+                    },
+                ],
+            }
+        }
+    }
+    let mixed: Vec<Value> = Fixture
+        .hover_info()
+        .to_text_rows(&bundle, &iconc)
+        .into_iter()
+        .map(|(left, right)| json!({"left": left, "right": right}))
+        .collect();
+
+    finish(
+        json!({"format": 1, "cases": results, "mixed": mixed}),
+        json_out,
+        dump,
+        golden,
+    )
+}
+
+/// Inline bundle fixture for `ui display` (`StatUnit` labels).
+const DISPLAY_BUNDLE: &str = "unit.power=Power\nunit.powersec=Power/sec\nunit.tiles=Tiles\nunit.percent=Percent\nunit.multiplier=Multiplier\nunit.seconds=Seconds\nunit.billions=B\nunit.millions=M\nunit.thousands=k\n";
 
 fn hud_text(json_out: bool, dump: Option<&Path>, golden: Option<&Path>) -> Result<()> {
     use mind_core::assets::bundle::{Bundle, parse_properties};

@@ -400,6 +400,19 @@ pub enum UiCommand {
         #[arg(long)]
         golden: Option<PathBuf>,
     },
+
+    /// Render `Displayable`/`StatValues` rows across display-kind fixtures.
+    Display {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Write the rendered-rows JSON here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+        /// Compare the rendered rows against this golden.
+        #[arg(long)]
+        golden: Option<PathBuf>,
+    },
 }
 
 /// `parity` subcommands (plan 23 §3.7/§7).
