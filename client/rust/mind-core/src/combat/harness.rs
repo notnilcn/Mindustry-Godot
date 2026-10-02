@@ -55,6 +55,29 @@ impl CombatHarness {
     pub fn new(width: i32, height: i32, seed: u64) -> Self {
         let mut build = BuildHarness::new(width, height, seed);
         let names = register_fixture_bullets(&mut build.content);
+        // M5 logistics seam: register a `TurretBehavior` for every ported
+        // vanilla turret so a *placed* turret owns `TurretState` and accepts
+        // items/liquids through plan 08's transfer path (plan 10 §3.2). Plan
+        // 07's `register_behavior` keeps only the last named override, so the
+        // table is rebuilt once here with all turret overrides via the public
+        // `BlockTable::build` API.
+        {
+            use crate::world::block::BlockTable;
+            use crate::world::blocks::default_registry;
+            use crate::world::blocks::defense::turrets::{behavior::TurretBehavior, config_for};
+            let mut registry = default_registry(&build.content);
+            for name in [
+                "duo", "scatter", "scorch", "hail", "salvo", "swarmer", "fuse", "ripple", "wave",
+                "tsunami", "lancer", "arc", "parallax", "segment",
+            ] {
+                if let Some(config) = config_for(&build.content, name, &names) {
+                    registry.register_named(name, Arc::new(TurretBehavior::new(config)));
+                }
+            }
+            if let Ok(table) = BlockTable::build(&build.content, &registry) {
+                build.world.insert_resource(table);
+            }
+        }
         Self {
             build,
             bullets: Vec::new(),
@@ -77,6 +100,11 @@ impl CombatHarness {
     /// Resolves a fixture bullet name (`fuse`, `rail`, `laser`, ...).
     pub fn bullet_id(&self, name: &str) -> Option<BulletId> {
         self.names.get(name).copied()
+    }
+
+    /// The fixture bullet-name map (`fuse`, `scatter_scrap`, ...; turret tests).
+    pub fn names_map(&self) -> &BTreeMap<String, BulletId> {
+        &self.names
     }
 
     /// Places a block (delegates to plan 07).
@@ -110,6 +138,7 @@ impl CombatHarness {
         self.build.tick();
         self.update_weapons_only();
         self.update_turrets_only();
+        self.update_defense_only();
         self.step_bullets_only();
         self.fire_tick(0.0);
         self.puddle_tick();
@@ -364,6 +393,10 @@ impl CombatHarness {
                 PowerModule::new(),
             ))
             .id();
+        // Fixture turrets are treated as powered unless a test un-powers them.
+        if let Some(mut power) = self.build.world.get_mut::<PowerModule>(entity) {
+            power.status = 1.0;
+        }
         Some(entity)
     }
 
@@ -373,6 +406,181 @@ impl CombatHarness {
         entity: Entity,
     ) -> Option<&crate::world::blocks::defense::turrets::TurretState> {
         self.build.world.get(entity)
+    }
+
+    /// Spawns a plan-10 `ForceProjector` fixture (M7).
+    pub fn spawn_test_force_projector(
+        &mut self,
+        tile_x: i32,
+        tile_y: i32,
+        team: u8,
+        radius: f32,
+    ) -> Entity {
+        use crate::entities::comp::{Pos, TeamComp};
+        use crate::world::blocks::defense::shields::ForceProjectorState;
+
+        let (x, y) = Self::tile_center(tile_x, tile_y);
+        let seq = self.seq;
+        self.seq = self.seq.wrapping_add(1);
+        let state = ForceProjectorState {
+            radius,
+            ..Default::default()
+        };
+        self.build
+            .world
+            .spawn((
+                crate::ecs::EntitySeq(seq),
+                Pos { x, y },
+                TeamComp { team },
+                state,
+            ))
+            .id()
+    }
+
+    /// Spawns a plan-10 `MendProjector` fixture (M7).
+    pub fn spawn_test_mend_projector(&mut self, tile_x: i32, tile_y: i32, team: u8) -> Entity {
+        use crate::entities::comp::{Pos, TeamComp};
+        use crate::world::blocks::defense::shields::MendProjectorState;
+
+        let (x, y) = Self::tile_center(tile_x, tile_y);
+        let seq = self.seq;
+        self.seq = self.seq.wrapping_add(1);
+        self.build
+            .world
+            .spawn((
+                crate::ecs::EntitySeq(seq),
+                Pos { x, y },
+                TeamComp { team },
+                MendProjectorState::default(),
+            ))
+            .id()
+    }
+
+    /// Spawns a plan-10 `ShockMine` fixture (M7).
+    pub fn spawn_test_shock_mine(&mut self, tile_x: i32, tile_y: i32, team: u8) -> Entity {
+        use crate::entities::comp::{Pos, TeamComp};
+        use crate::world::blocks::defense::shields::ShockMineState;
+
+        let (x, y) = Self::tile_center(tile_x, tile_y);
+        let seq = self.seq;
+        self.seq = self.seq.wrapping_add(1);
+        self.build
+            .world
+            .spawn((
+                crate::ecs::EntitySeq(seq),
+                Pos { x, y },
+                TeamComp { team },
+                ShockMineState::default(),
+            ))
+            .id()
+    }
+
+    /// Spawns a plan-10 `TargetDummy` fixture (M7).
+    pub fn spawn_test_target_dummy(
+        &mut self,
+        tile_x: i32,
+        tile_y: i32,
+        team: u8,
+        health: f32,
+    ) -> Entity {
+        use crate::entities::comp::{Health, Pos, TeamComp};
+        use crate::world::blocks::defense::shields::TargetDummyState;
+
+        let (x, y) = Self::tile_center(tile_x, tile_y);
+        let seq = self.seq;
+        self.seq = self.seq.wrapping_add(1);
+        self.build
+            .world
+            .spawn((
+                crate::ecs::EntitySeq(seq),
+                Pos { x, y },
+                TeamComp { team },
+                Health::new(health),
+                TargetDummyState::default(),
+            ))
+            .id()
+    }
+
+    /// Runs the M7 defense pass (projectors/mend/shield-wall/dummy) before the
+    /// bullet pass, mirroring `Groups.build.update` before `Groups.bullet.update`.
+    pub fn update_defense_only(&mut self) {
+        use crate::world::blocks::defense::shields::{
+            ForceProjectorState, MendProjectorState, ShieldWallState, TargetDummyState,
+            update_force_projector, update_mend_projector, update_shield_wall, update_target_dummy,
+        };
+        let projectors: Vec<Entity> = self
+            .build
+            .world
+            .iter_entities()
+            .filter(|entity_ref| entity_ref.contains::<ForceProjectorState>())
+            .map(|entity_ref| entity_ref.id())
+            .collect();
+        let mends: Vec<Entity> = self
+            .build
+            .world
+            .iter_entities()
+            .filter(|entity_ref| entity_ref.contains::<MendProjectorState>())
+            .map(|entity_ref| entity_ref.id())
+            .collect();
+        let walls: Vec<Entity> = self
+            .build
+            .world
+            .iter_entities()
+            .filter(|entity_ref| entity_ref.contains::<ShieldWallState>())
+            .map(|entity_ref| entity_ref.id())
+            .collect();
+        let dummies: Vec<Entity> = self
+            .build
+            .world
+            .iter_entities()
+            .filter(|entity_ref| entity_ref.contains::<TargetDummyState>())
+            .map(|entity_ref| entity_ref.id())
+            .collect();
+
+        let mut spawned: Vec<Entity> = Vec::new();
+        {
+            let mut ctx = bullet::CombatCtx {
+                world: &mut self.build.world,
+                content: &self.build.content,
+                grid: &self.build.grid,
+                rng: &mut self.rng,
+                fx: self.fx.as_ref(),
+                seq: &mut self.seq,
+                spawned: &mut spawned,
+            };
+            for entity in projectors {
+                let team = ctx
+                    .world
+                    .get::<crate::entities::comp::TeamComp>(entity)
+                    .map(|t| t.team)
+                    .unwrap_or(0);
+                if let Some(mut state) = ctx.world.entity_mut(entity).take::<ForceProjectorState>()
+                {
+                    update_force_projector(&mut ctx, entity, &mut state, team, 1.0, false, 0.0);
+                    ctx.world.entity_mut(entity).insert(state);
+                }
+            }
+            for entity in mends {
+                if let Some(mut state) = ctx.world.entity_mut(entity).take::<MendProjectorState>() {
+                    update_mend_projector(&mut ctx, entity, &mut state, 1.0, true, false);
+                    ctx.world.entity_mut(entity).insert(state);
+                }
+            }
+            for entity in walls {
+                if let Some(mut state) = ctx.world.entity_mut(entity).take::<ShieldWallState>() {
+                    update_shield_wall(&mut state, 1.0, true);
+                    ctx.world.entity_mut(entity).insert(state);
+                }
+            }
+            for entity in dummies {
+                if let Some(mut state) = ctx.world.entity_mut(entity).take::<TargetDummyState>() {
+                    update_target_dummy(&mut state);
+                    ctx.world.entity_mut(entity).insert(state);
+                }
+            }
+        }
+        self.bullets_created += spawned.len() as u64;
+        self.bullets.extend(spawned);
     }
 
     /// Runs only the turret update pass (M5 fixtures).

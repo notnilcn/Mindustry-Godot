@@ -39,6 +39,10 @@ use crate::entities::comp::{Health, Pos, TeamComp};
 use crate::weapons::pattern::{self, ShotBuffer};
 use crate::world::modules::{LiquidModule, PowerModule};
 
+pub mod advanced;
+pub mod behavior;
+pub mod save;
+
 /// One resolved item-ammo entry (`ItemTurret.ItemEntry` + `ammoTypes`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ItemAmmo {
@@ -70,6 +74,30 @@ pub enum TurretAmmo {
     Liquid(Vec<LiquidAmmo>),
     /// `PowerTurret.shootType`.
     Power(BulletId),
+}
+
+/// Turret behavior class (`BaseTurret` subclass dispatch, M5/M6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TurretKind {
+    /// `ItemTurret` (`Turret` core + item ammo stacks).
+    #[default]
+    Item,
+    /// `LiquidTurret` (`Turret` core + liquid ammo).
+    Liquid,
+    /// `PowerTurret` (`Turret` core + power gate).
+    Power,
+    /// `ContinuousTurret`/`ContinuousLiquidTurret` (always-firing keep-alive beam).
+    Continuous,
+    /// `LaserTurret` (continuous beam gated by a coolant-fueled reload).
+    Laser,
+    /// `PointDefenseTurret` (intercepts enemy bullets).
+    PointDefense,
+    /// `TractorBeamTurret` (pulls/status/damages a single unit).
+    TractorBeam,
+    /// `PayloadAmmoTurret` (fires accepted payloads; plan 08 hook).
+    PayloadAmmo,
+    /// `BuildTurret` (proxy build plan; plan 11/15 hook).
+    Build,
 }
 
 /// Resolved turret knobs (`BaseTurret` + `ReloadTurret` + `Turret` fields).
@@ -149,6 +177,34 @@ pub struct TurretConfig {
     pub heat_requirement: f32,
     /// `Turret.maxHeatEfficiency`.
     pub max_heat_efficiency: f32,
+    /// Behavior class (M5/M6 dispatch).
+    pub kind: TurretKind,
+    /// `PointDefenseTurret.retargetTime` / `TractorBeamTurret.retargetTime`.
+    pub retarget_time: f32,
+    /// `PointDefenseTurret.shootLength` / `TractorBeamTurret.shootLength`.
+    pub shoot_length: f32,
+    /// `ContinuousTurret.aimChangeSpeed`.
+    pub aim_change_speed: f32,
+    /// `ContinuousTurret.scaleDamageEfficiency`.
+    pub scale_damage_efficiency: bool,
+    /// `PointDefenseTurret.bulletDamage`.
+    pub bullet_damage: f32,
+    /// `TractorBeamTurret.force`.
+    pub force: f32,
+    /// `TractorBeamTurret.scaledForce`.
+    pub scaled_force: f32,
+    /// `TractorBeamTurret.damage` (per tick).
+    pub beam_damage: f32,
+    /// `TractorBeamTurret.status`.
+    pub status: crate::content::StatusId,
+    /// `TractorBeamTurret.statusDuration`.
+    pub status_duration: f32,
+    /// `TractorBeamTurret.statusChance`.
+    pub status_chance: f32,
+    /// `LaserTurret.shootDuration` (beam lifetime after firing).
+    pub shoot_duration: f32,
+    /// `LaserTurret.firingMoveFract` (rotation speed scale while firing).
+    pub firing_move_fract: f32,
 }
 
 impl TurretConfig {
@@ -212,6 +268,36 @@ pub struct TurretState {
     pub logic_control_time: f32,
     /// `TurretBuild.logicShooting`.
     pub logic_shooting: bool,
+    /// `ContinuousTurretBuild.bullets` / `LaserTurretBuild.bullets`: live beam
+    /// bullets owned by this turret, with their per-entry offsets/life.
+    pub bullets: SmallVec<[BeamEntry; 2]>,
+    /// `ContinuousTurretBuild.lastLength`.
+    pub last_length: f32,
+    /// Retarget timer for `PointDefenseTurret`/`TractorBeamTurret`.
+    pub retarget_timer: f32,
+    /// `TractorBeamBuild.strength` (beam fade).
+    pub strength: f32,
+    /// `TractorBeamBuild.target` (unit being pulled).
+    pub unit_target: Option<Entity>,
+    /// `PointDefenseBuild.target` (enemy bullet being intercepted).
+    pub bullet_target: Option<Entity>,
+    /// `TractorBeamBuild.any` (beam is active this tick).
+    pub any: bool,
+}
+
+/// One continuous/laser beam bullet entry (`Turret.BulletEntry`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BeamEntry {
+    /// Beam bullet entity.
+    pub bullet: Entity,
+    /// Barrel x offset.
+    pub x: f32,
+    /// Barrel y offset.
+    pub y: f32,
+    /// Barrel angle offset.
+    pub rotation: f32,
+    /// Remaining life (laser turret).
+    pub life: f32,
 }
 
 /// One item-ammo stack (`ItemTurret.ItemEntry`).
@@ -226,6 +312,26 @@ pub struct AmmoEntry {
 }
 
 impl TurretState {
+    /// Plan-16 draw state (`Layer::turret`); view-only, computed from sim state.
+    pub fn draw_state(&self) -> crate::combat::view::TurretDrawState {
+        use crate::combat::view::TurretDrawState;
+        let ammo_fraction = if self.config.max_ammo > 0 {
+            (self.total_ammo as f32 / self.config.max_ammo as f32).clamp(0.0, 1.0)
+        } else if self.config.kind == TurretKind::Power {
+            1.0
+        } else {
+            0.0
+        };
+        TurretDrawState {
+            rotation: self.rotation,
+            recoil: self.cur_recoil,
+            heat: self.heat,
+            warmup: self.shoot_warmup,
+            charge: self.charge,
+            ammo_fraction,
+        }
+    }
+
     /// Creates the initial state for a config.
     pub fn new(config: Arc<TurretConfig>) -> Self {
         let activation = config.activation_time;
@@ -253,6 +359,13 @@ impl TurretState {
             activation_timer: activation,
             logic_control_time: -1.0,
             logic_shooting: false,
+            bullets: SmallVec::new(),
+            last_length: 0.0,
+            retarget_timer: 0.0,
+            strength: 0.0,
+            unit_target: None,
+            bullet_target: None,
+            any: false,
         }
     }
 }
@@ -299,6 +412,9 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
         def.hit_size = 4.0;
         def.drag = 0.0;
     });
+
+    // M5/M6 remainder: the rest of the vanilla turret ammo tables (`Blocks.java`).
+    advanced::register_bullets(content, names);
 }
 
 /// Builds the resolved [`TurretConfig`] for a supported block name.
@@ -378,6 +494,20 @@ pub fn config_for(
                 coolant_amount: 0.1,
                 heat_requirement: -1.0,
                 max_heat_efficiency: 3.0,
+                kind: TurretKind::Item,
+                retarget_time: 5.0,
+                shoot_length: 0.0,
+                aim_change_speed: f32::INFINITY,
+                scale_damage_efficiency: false,
+                bullet_damage: 0.0,
+                force: 0.0,
+                scaled_force: 0.0,
+                beam_damage: 0.0,
+                status: crate::content::StatusId::NONE,
+                status_duration: 0.0,
+                status_chance: 0.0,
+                shoot_duration: 0.0,
+                firing_move_fract: 1.0,
             })
         }
         "test-item" => {
@@ -420,6 +550,20 @@ pub fn config_for(
                 coolant_amount: 0.1,
                 heat_requirement: -1.0,
                 max_heat_efficiency: 3.0,
+                kind: TurretKind::Item,
+                retarget_time: 5.0,
+                shoot_length: 0.0,
+                aim_change_speed: f32::INFINITY,
+                scale_damage_efficiency: false,
+                bullet_damage: 0.0,
+                force: 0.0,
+                scaled_force: 0.0,
+                beam_damage: 0.0,
+                status: crate::content::StatusId::NONE,
+                status_duration: 0.0,
+                status_chance: 0.0,
+                shoot_duration: 0.0,
+                firing_move_fract: 1.0,
             })
         }
         "test-liquid" => {
@@ -462,6 +606,20 @@ pub fn config_for(
                 coolant_amount: 0.0,
                 heat_requirement: -1.0,
                 max_heat_efficiency: 3.0,
+                kind: TurretKind::Item,
+                retarget_time: 5.0,
+                shoot_length: 0.0,
+                aim_change_speed: f32::INFINITY,
+                scale_damage_efficiency: false,
+                bullet_damage: 0.0,
+                force: 0.0,
+                scaled_force: 0.0,
+                beam_damage: 0.0,
+                status: crate::content::StatusId::NONE,
+                status_duration: 0.0,
+                status_chance: 0.0,
+                shoot_duration: 0.0,
+                firing_move_fract: 1.0,
             })
         }
         "test-power" => {
@@ -504,9 +662,23 @@ pub fn config_for(
                 coolant_amount: 0.0,
                 heat_requirement: -1.0,
                 max_heat_efficiency: 3.0,
+                kind: TurretKind::Item,
+                retarget_time: 5.0,
+                shoot_length: 0.0,
+                aim_change_speed: f32::INFINITY,
+                scale_damage_efficiency: false,
+                bullet_damage: 0.0,
+                force: 0.0,
+                scaled_force: 0.0,
+                beam_damage: 0.0,
+                status: crate::content::StatusId::NONE,
+                status_duration: 0.0,
+                status_chance: 0.0,
+                shoot_duration: 0.0,
+                firing_move_fract: 1.0,
             })
         }
-        _ => None,
+        _ => advanced::config_for(content, name, names),
     }
 }
 
@@ -838,6 +1010,29 @@ fn update_turret(ctx: &mut CombatCtx<'_>, e: Entity, state: &mut TurretState) {
     if state.activation_timer > 0.0 {
         state.activation_timer -= 1.0;
         return;
+    }
+
+    // M6 advanced turret classes dispatch before the generic item/liquid/power
+    // shooting pipeline (`PointDefenseTurret`/`TractorBeamTurret`/
+    // `ContinuousTurret`/`LaserTurret`).
+    match config.kind {
+        TurretKind::PointDefense => {
+            advanced::update_point_defense(ctx, e, state, &config, x, y, team, eff);
+            return;
+        }
+        TurretKind::TractorBeam => {
+            advanced::update_tractor(ctx, e, state, &config, x, y, team, eff);
+            return;
+        }
+        TurretKind::Continuous => {
+            advanced::update_continuous(ctx, e, state, &config, x, y, team, eff);
+            return;
+        }
+        TurretKind::Laser => {
+            advanced::update_laser(ctx, e, state, &config, x, y, team, eff);
+            return;
+        }
+        _ => {}
     }
 
     if !has_ammo_state(state, ctx.world, e) {
