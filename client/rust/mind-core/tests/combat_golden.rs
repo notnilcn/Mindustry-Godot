@@ -60,8 +60,7 @@ fn determinism_samples_are_identical_and_match_golden() {
     fn sample(seed: u64) -> Vec<String> {
         let mut harness = CombatHarness::new(64, 64, seed);
         for i in 0..32u32 {
-            let (x, y) =
-                CombatHarness::tile_center(2 + (i % 8) as i32 * 6, 2 + (i / 8) as i32 * 6);
+            let (x, y) = CombatHarness::tile_center(2 + (i % 8) as i32 * 6, 2 + (i / 8) as i32 * 6);
             let angle = (i as f32 * 37.0) % 360.0;
             let _ = harness.spawn_bullet("fuse_slow", x, y, angle, 1);
         }

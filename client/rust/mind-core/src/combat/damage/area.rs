@@ -63,11 +63,14 @@ fn targets_in_radius(
         if entity_ref.get::<Health>().is_none() {
             continue;
         }
-        if let Some(filter) = team {
-            match entity_ref.get::<TeamComp>() {
-                Some(t) if t.team == filter => {}
-                _ => continue,
-            }
+        // `source_team` is the attacker's team: its allies are not damaged
+        // (`Damage.damage(team, ...)` hits enemies only).
+        if let Some(source) = team
+            && entity_ref
+                .get::<TeamComp>()
+                .is_some_and(|t| t.team == source)
+        {
+            continue;
         }
         let dx = pos.x - x;
         let dy = pos.y - y;

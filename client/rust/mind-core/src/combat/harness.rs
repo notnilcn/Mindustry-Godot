@@ -111,40 +111,42 @@ impl CombatHarness {
     /// Advances only the bullet systems (motion + collision + cull).
     pub fn step_bullets_only(&mut self) {
         let list = std::mem::take(&mut self.bullets);
-        for &entity in &list {
-            if self.build.world.get_entity(entity).is_err() {
-                continue;
+        let mut spawned: Vec<Entity> = Vec::new();
+        {
+            let mut ctx = bullet::CombatCtx {
+                world: &mut self.build.world,
+                content: &self.build.content,
+                grid: &self.build.grid,
+                rng: &mut self.rng,
+                fx: self.fx.as_ref(),
+                seq: &mut self.seq,
+                spawned: &mut spawned,
+            };
+            for &entity in &list {
+                if ctx.world.get_entity(entity).is_ok() {
+                    let _ = bullet::update_bullet(&mut ctx, entity);
+                }
             }
-            let _ = bullet::update_bullet(
-                &mut self.build.world,
-                &self.build.content,
-                entity,
-                self.fx.as_ref(),
-            );
-        }
-        for &entity in &list {
-            if bullet::bullet_alive(&self.build.world, entity) {
-                bullet::collide_bullet(
-                    &mut self.build.world,
-                    &self.build.content,
-                    &self.build.grid,
-                    entity,
-                );
+            for &entity in &list {
+                if bullet::bullet_alive(ctx.world, entity) {
+                    bullet::collide_bullet(&mut ctx, entity);
+                }
             }
-        }
-        let mut alive = Vec::with_capacity(list.len());
-        for entity in list {
-            let exists = self.build.world.get_entity(entity).is_ok();
-            if !exists {
-                self.bullets_removed += 1;
-            } else if bullet::bullet_alive(&self.build.world, entity) {
-                alive.push(entity);
-            } else {
-                bullet::remove_bullet(&mut self.build.world, entity);
-                self.bullets_removed += 1;
+            let mut alive: Vec<Entity> = Vec::with_capacity(list.len());
+            for entity in list {
+                if ctx.world.get_entity(entity).is_err() {
+                    self.bullets_removed += 1;
+                } else if bullet::bullet_alive(ctx.world, entity) {
+                    alive.push(entity);
+                } else {
+                    bullet::finish_bullet(&mut ctx, entity);
+                    self.bullets_removed += 1;
+                }
             }
+            self.bullets = alive;
         }
-        self.bullets = alive;
+        self.bullets_created += spawned.len() as u64;
+        self.bullets.extend(spawned);
     }
 
     /// Spawns a fixture bullet by name.
@@ -370,6 +372,67 @@ fn register_fixture_bullets(content: &mut ContentRegistry) -> BTreeMap<String, B
         def.splash_damage_radius = 32.0;
         def.hit_size = 1.0;
     });
+    add("frag", BulletKind::Basic, &|def| {
+        def.speed = 4.0;
+        def.lifetime = 60.0;
+        def.damage = 20.0;
+        def.hit_size = 4.0;
+        def.frag_bullets = 3;
+        def.frag_on_hit = true;
+        def.frag_on_despawn = true;
+        def.frag_random_spread = 60.0;
+        def.frag_spread = 25.0;
+        def.frag_velocity_min = 2.0;
+        def.frag_velocity_max = 4.0;
+        def.frag_life_min = 0.5;
+        def.frag_life_max = 1.0;
+        def.drag = 0.0;
+    });
+    add("sticky", BulletKind::Basic, &|def| {
+        def.speed = 3.0;
+        def.lifetime = 200.0;
+        def.damage = 5.0;
+        def.hit_size = 5.0;
+        def.drag = 0.0;
+    });
+    add("terrain", BulletKind::Basic, &|def| {
+        def.speed = 6.0;
+        def.lifetime = 60.0;
+        def.damage = 5.0;
+        def.hit_size = 3.0;
+        def.collide_terrain = true;
+        def.drag = 0.0;
+    });
+    add("interval", BulletKind::Basic, &|def| {
+        def.speed = 4.0;
+        def.lifetime = 80.0;
+        def.damage = 5.0;
+        def.hit_size = 3.0;
+        def.bullet_interval = 10.0;
+        def.interval_bullets = 1;
+        def.interval_random_spread = 20.0;
+        def.drag = 0.0;
+    });
+    add("splash", BulletKind::Basic, &|def| {
+        def.speed = 4.0;
+        def.lifetime = 80.0;
+        def.damage = 5.0;
+        def.hit_size = 4.0;
+        def.splash_damage = 30.0;
+        def.splash_damage_radius = 24.0;
+        def.drag = 0.0;
+    });
+    // Cross-references (child defs must exist first).
+    if let (Some(parent), Some(child)) = (names.get("frag"), names.get("fuse_frag"))
+        && let Some(def) = content.bullet_mut(*parent)
+    {
+        def.frag_bullet = Some(*child);
+    }
+    if let (Some(parent), Some(child)) = (names.get("interval"), names.get("fuse_frag"))
+        && let Some(def) = content.bullet_mut(*parent)
+    {
+        def.interval_bullet = Some(*child);
+    }
     names
 }
 
@@ -390,6 +453,11 @@ mod tests {
             "liquid_bullet",
             "artillery",
             "explosion_marker",
+            "frag",
+            "sticky",
+            "terrain",
+            "interval",
+            "splash",
         ] {
             assert!(harness.bullet_id(name).is_some(), "missing {name}");
         }

@@ -132,6 +132,8 @@ pub fn create(
         lifetime,
         collided: smallvec::SmallVec::new(),
         sticky: spawn.target,
+        sticky_x: 0.0,
+        sticky_y: 0.0,
         flags: JUST_SPAWNED,
         frags: 0,
     };
