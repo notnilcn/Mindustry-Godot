@@ -166,6 +166,24 @@ pub enum AssetsCommand {
         #[arg(long)]
         region: Vec<String>,
     },
+
+    /// Assert the content-driven region inventory resolves in the packed
+    /// atlas (M3/M4). `--assert-complete` fails on any missing name.
+    Regions {
+        /// Directory containing `sprites.atlas.json` (e.g. `assets/sprites`).
+        #[arg(long, default_value = "assets/sprites")]
+        atlas: PathBuf,
+        /// Inventory produced by `mind-tools pack`
+        /// (defaults to `build/assets/region_inventory.json`).
+        #[arg(long)]
+        inventory: Option<PathBuf>,
+        /// Fail (non-zero exit) when any expected region is missing.
+        #[arg(long)]
+        assert_complete: bool,
+        /// Emit a machine-readable JSON report.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// `content` subcommands (plan 02 §7b).

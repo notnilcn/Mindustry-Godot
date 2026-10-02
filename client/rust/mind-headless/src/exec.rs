@@ -130,6 +130,12 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
                 cmd_assets_migrate_check(repo.as_deref(), manifest.as_deref())
             }
             AssetsCommand::Index { atlas, region } => cmd_assets_index(atlas, region),
+            AssetsCommand::Regions {
+                atlas,
+                inventory,
+                assert_complete,
+                json,
+            } => cmd_assets_regions(atlas, inventory.as_deref(), *assert_complete, *json),
         },
     }
 }
@@ -186,6 +192,88 @@ fn cmd_assets_index(atlas: &Path, probes: &[String]) -> anyhow::Result<i32> {
     });
     println!("{}", serde_json::to_string_pretty(&report)?);
     Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+}
+
+/// Minimal shape of `build/assets/region_inventory.json` (plan 03 M3).
+#[derive(Debug, serde::Deserialize)]
+struct RegionInventoryFile {
+    #[serde(default)]
+    regions: Vec<String>,
+    #[serde(default, rename = "missingInSources")]
+    missing_in_sources: Vec<String>,
+}
+
+/// Plan 03 §7.1b `assets regions`: every content-driven expected region must
+/// resolve in the packed atlas. `--assert-complete` turns misses into a
+/// non-zero exit; misses are always listed.
+fn cmd_assets_regions(
+    atlas: &Path,
+    inventory: Option<&Path>,
+    assert_complete: bool,
+    json: bool,
+) -> anyhow::Result<i32> {
+    let manifest_path = atlas.join("sprites.atlas.json");
+    let text = std::fs::read_to_string(&manifest_path)
+        .with_context(|| format!("reading {}", manifest_path.display()))?;
+    let index = mind_core::assets::atlas::AtlasIndex::from_manifest_json(&text)
+        .map_err(|error| anyhow!("{error}"))?;
+
+    let inventory_path = match inventory {
+        Some(path) => path.to_path_buf(),
+        None => paths::find_repo_root(None)?.join("build/assets/region_inventory.json"),
+    };
+    let inventory_text = std::fs::read_to_string(&inventory_path)
+        .with_context(|| format!("reading {}", inventory_path.display()))?;
+    let inventory: RegionInventoryFile = serde_json::from_str(&inventory_text)
+        .with_context(|| format!("parsing {}", inventory_path.display()))?;
+
+    // `block_colors` is a loose texture next to the pages, not an atlas region.
+    let missing: Vec<&str> = inventory
+        .regions
+        .iter()
+        .filter(|name| {
+            if name.as_str() == "block_colors" {
+                !atlas.join("block_colors.png").is_file()
+            } else {
+                index.find(name).is_none()
+            }
+        })
+        .map(String::as_str)
+        .collect();
+
+    if json {
+        let report = serde_json::json!({
+            "atlas": manifest_path.display().to_string(),
+            "inventory": inventory_path.display().to_string(),
+            "expected": inventory.regions.len(),
+            "resolved": inventory.regions.len() - missing.len(),
+            "missing": missing,
+            "missingInSources": inventory.missing_in_sources,
+        });
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "assets regions: {}/{} expected regions resolve ({} missing)",
+            inventory.regions.len() - missing.len(),
+            inventory.regions.len(),
+            missing.len()
+        );
+        for name in &missing {
+            log::error!("assets regions: missing region `{name}`");
+        }
+    }
+
+    if inventory.missing_in_sources.is_empty() && (missing.is_empty() || !assert_complete) {
+        Ok(EXIT_PASS)
+    } else {
+        if !inventory.missing_in_sources.is_empty() {
+            log::error!(
+                "assets regions: {} expected regions were missing in the source atlas",
+                inventory.missing_in_sources.len()
+            );
+        }
+        Ok(EXIT_FAIL)
+    }
 }
 
 /// Plan 03 §7.1b `assets migrate-check`: the vendored trees match

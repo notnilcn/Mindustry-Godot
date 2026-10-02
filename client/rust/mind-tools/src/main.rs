@@ -10,7 +10,9 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use clap::{Parser, Subcommand};
-use mind_tools::{antialias, generate, migrate, pack_pipeline, staging};
+use mind_tools::{
+    antialias, base_content, generate, generated_assets, migrate, pack_pipeline, staging,
+};
 
 /// Offline asset pipeline for the Mindustry-Godot port.
 #[derive(Debug, Parser)]
@@ -133,18 +135,56 @@ fn run_pack(
         println!("pack: staged {copied} files -> {}", staging_dir.display());
     }
 
+    let mut generated: Option<generate::GenCtx> = None;
     if run("generate") {
         let start = Instant::now();
+        let registry = base_content()?;
         let mut ctx = generate::GenCtx::new(&staging_dir)?;
-        let pass_timings = generate::run_filename_passes(&mut ctx, &mut |name, elapsed| {
+        let pass_timings = generate::run_passes(&mut ctx, &registry, &mut |name, elapsed| {
             println!("pack: generate {name}: {elapsed:.2}s");
         })?;
+        // Upstream writes icons.properties at the end of `ImagePacker.main`
+        // and regenerates the Icon/Iconc code tables from it.
+        let report = generated_assets::sync_icons_properties(root, &registry)?;
+        let glyphs = generated_assets::write_icon_codes(root)?;
+        println!(
+            "pack: icons.properties {} entries (+{}), {} font glyphs",
+            report.entries, report.added, glyphs
+        );
+        // Content-driven region inventory (plan 03 §7.1b).
+        let inventory = generate::inventory::build(&ctx, &registry);
+        let inventory_path = root.join("build/assets/region_inventory.json");
+        if let Some(parent) = inventory_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(
+            &inventory_path,
+            format!("{}\n", serde_json::to_string_pretty(&inventory)?),
+        )?;
+        println!(
+            "pack: region inventory {} expected, {} missing in sources",
+            inventory.len(),
+            inventory.missing_in_sources.len()
+        );
+        if !inventory.missing_in_sources.is_empty() {
+            anyhow::bail!(
+                "region inventory has {} missing source regions (first: {})",
+                inventory.missing_in_sources.len(),
+                inventory.missing_in_sources[0]
+            );
+        }
         let elapsed = start.elapsed().as_secs_f64();
         timings_map.insert(String::from("generate"), elapsed);
         for (pass, seconds) in pass_timings {
             timings_map.insert(format!("generate/{pass}"), seconds);
         }
+        generated = Some(ctx);
     }
+    let no_extras: BTreeMap<String, mind_atlas::pixmaps::Pixmap> = BTreeMap::new();
+    let extras = generated
+        .as_ref()
+        .map(|ctx| &ctx.extras)
+        .unwrap_or(&no_extras);
 
     if run("move-ui-icons") {
         let start = Instant::now();
@@ -164,7 +204,7 @@ fn run_pack(
 
     if run("pack") {
         let start = Instant::now();
-        let output = pack_pipeline::pack(&staging_dir, &out_dir, false)?;
+        let output = pack_pipeline::pack(&staging_dir, &out_dir, false, extras)?;
         timings_map.insert(String::from("pack"), start.elapsed().as_secs_f64());
         println!(
             "pack: {} regions on {} page(s) -> {} (inputsHash {})",
@@ -178,7 +218,7 @@ fn run_pack(
 
     if run("pack-fallback") && !no_fallback {
         let start = Instant::now();
-        let output = pack_pipeline::pack(&staging_dir, &fallback_dir, true)?;
+        let output = pack_pipeline::pack(&staging_dir, &fallback_dir, true, extras)?;
         timings_map.insert(String::from("pack-fallback"), start.elapsed().as_secs_f64());
         println!(
             "pack: fallback: {} regions on {} page(s) -> {}",

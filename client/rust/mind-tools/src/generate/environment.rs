@@ -5,13 +5,17 @@
 
 //! Environment generator passes (plan 03 M2).
 
+use std::rc::Rc;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use mind_atlas::mathf;
 use mind_atlas::noise::{self, Rand};
 use mind_atlas::pixmaps::{self, Pixmap, WHITE, ai, blend, rgba8888f};
+use mind_core::content::load::ContentRegistry;
+use mind_core::content::registries::blocks::BlockKind;
 
+use crate::generate::metadata::{self, IconCtx};
 use crate::generate::{CRACK_REGIONS, GenCtx, MAX_CRACK_SIZE};
 
 fn dst(x0: f32, y0: f32, x1: f32, y1: f32) -> f32 {
@@ -365,25 +369,106 @@ impl ScorchGenerator {
     }
 }
 
-/// `Generators.edges` (M2 skeleton): floors with an autotile preview in
-/// `gens` get `<name>-edge` from the `edge-stencil`. The content-driven
-/// variant set lands with M3's metadata contract.
-pub fn edges(ctx: &mut GenCtx) -> Result<()> {
+/// `Generators.shallows`: blend the `liquidBase` over every `floorBase`
+/// variant into `<shallow>1..N` and register the result in `gens`.
+pub fn shallows(ctx: &mut GenCtx, registry: &ContentRegistry) -> Result<()> {
+    for block in registry.blocks().iter() {
+        if block.kind != BlockKind::ShallowLiquid {
+            continue;
+        }
+        let meta = metadata::block_meta(&block.name, block.kind);
+        let (Some(liquid), Some(floor)) = (meta.shallow_liquid_base, meta.shallow_floor_base)
+        else {
+            continue;
+        };
+        let overlay = ctx.atlas.get(liquid)?.as_ref().clone();
+
+        // `floorBase.variantRegions()`: `<floor>1..N`, or `[floor]` when 0.
+        let floor_variants = registry
+            .block_by_name(floor)
+            .map(|def| metadata::block_meta(&def.name, def.kind).variants)
+            .unwrap_or(0);
+        let regions: Vec<String> = if floor_variants > 0 {
+            (1..=floor_variants)
+                .map(|i| format!("{floor}{i}"))
+                .collect()
+        } else {
+            vec![floor.to_owned()]
+        };
+
+        for (offset, region) in regions.iter().enumerate() {
+            let mut res = ctx.atlas.get(region)?.as_ref().clone();
+            for y in 0..res.height {
+                for x in 0..res.width {
+                    let overlay_pixel = (overlay.get_raw(x % overlay.width, y % overlay.height)
+                        & 0xffff_ff00)
+                        | (meta.shallow_liquid_opacity * 255.0) as u32;
+                    res.set_raw(x, y, blend(overlay_pixel, res.get_raw(x, y)));
+                }
+            }
+            let name = format!("{}{}", block.name, offset + 1);
+            ctx.atlas
+                .save(&res, &format!("blocks/environment/{name}"))?;
+            ctx.gens.insert(block.name.clone(), Rc::new(res));
+        }
+    }
+    Ok(())
+}
+
+/// `Generators.edges` (content-driven): every `Floor` that is not an
+/// overlay, has no explicit edge, no blend group and `drawEdgeOut` gets
+/// `<name>-edge` from the `edge-stencil` × its first generated icon (or the
+/// `gens` preview).
+pub fn edges(ctx: &mut GenCtx, registry: &ContentRegistry) -> Result<()> {
     let edge = ctx
         .atlas
         .get("edge-stencil")
         .context("edges: `edge-stencil` source missing")?;
-    let floors: Vec<String> = ctx.gens.keys().cloned().collect();
-    for floor in floors {
-        let out_name = format!("{floor}-edge");
+    for block in registry.blocks().iter() {
+        if !metadata::is_floor_kind(block.kind)
+            || matches!(
+                block.kind,
+                BlockKind::OverlayFloor
+                    | BlockKind::OreBlock
+                    | BlockKind::SpawnBlock
+                    | BlockKind::RemoveOre
+                    | BlockKind::CharacterOverlay
+                    | BlockKind::RuneOverlay
+                    | BlockKind::AirBlock
+            )
+        {
+            continue;
+        }
+        let meta = metadata::block_meta(&block.name, block.kind);
+        if !meta.blend_group.is_empty() || !meta.draw_edge_out {
+            continue;
+        }
+        let out_name = format!("{}-edge", block.name);
         if ctx.atlas.has(&out_name) {
             continue;
         }
-        let image = ctx
-            .gens
-            .get(&floor)
-            .cloned()
-            .with_context(|| format!("edges: no gens entry for {floor}"))?;
+
+        let image = if let Some(preview) = ctx.gens.get(&block.name) {
+            preview.clone()
+        } else {
+            let first = {
+                let ctx_icons = IconCtx {
+                    name: &block.name,
+                    region: &block.region,
+                    kind: block.kind,
+                    size: block.size,
+                    variants: meta.variants,
+                    has: &|name: &str| ctx.atlas.has(name),
+                };
+                metadata::generated_icons(&ctx_icons).into_iter().next()
+            };
+            let Some(first) = first else { continue };
+            if !ctx.atlas.has(&first) {
+                continue;
+            }
+            ctx.atlas.get(&first)?
+        };
+
         let mut result = Pixmap::new(edge.width, edge.height);
         for y in 0..edge.height {
             for x in 0..edge.width {
@@ -396,11 +481,6 @@ pub fn edges(ctx: &mut GenCtx) -> Result<()> {
             .save(&result, &format!("blocks/environment/{out_name}"))?;
     }
     Ok(())
-}
-
-/// `Generators.shallows` blend helper (`Pixmap.blend` re-export for M3).
-pub fn shallow_blend(overlay: u32, base: u32) -> u32 {
-    blend(overlay, base)
 }
 
 #[cfg(test)]

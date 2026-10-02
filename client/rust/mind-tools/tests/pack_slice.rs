@@ -86,7 +86,8 @@ fn pack_fixture(name: &str) -> (PathBuf, PathBuf) {
     let staging = root.join("staging");
     mind_tools::staging::stage(&sprites, &staging).unwrap();
     let out = root.join("out");
-    mind_tools::pack_pipeline::pack(&staging, &out, false).unwrap();
+    mind_tools::pack_pipeline::pack(&staging, &out, false, &std::collections::BTreeMap::new())
+        .unwrap();
     (root, out)
 }
 

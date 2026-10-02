@@ -42,8 +42,15 @@ struct Pass {
 
 /// Runs the full pack over `staging` into `out_dir`. When `fallback`, page
 /// caps above 2048 are rewritten to 2048 (the upstream in-place `pack.json`
-/// rewrite) and the manifest is marked `fallback: true`.
-pub fn pack(staging: &Path, out_dir: &Path, fallback: bool) -> Result<PackOutput> {
+/// rewrite) and the manifest is marked `fallback: true`. `extras` are
+/// generator outputs that live outside the staging tree (e.g.
+/// `block_colors`) and are written straight into `out_dir`.
+pub fn pack(
+    staging: &Path,
+    out_dir: &Path,
+    fallback: bool,
+    extras: &BTreeMap<String, mind_atlas::pixmaps::Pixmap>,
+) -> Result<PackOutput> {
     let passes = discover_passes(staging, fallback)?;
     let inputs_hash = staged_inputs_hash(staging)?;
 
@@ -51,6 +58,12 @@ pub fn pack(staging: &Path, out_dir: &Path, fallback: bool) -> Result<PackOutput
         fs::remove_dir_all(out_dir).with_context(|| format!("wiping {}", out_dir.display()))?;
     }
     fs::create_dir_all(out_dir).with_context(|| format!("creating {}", out_dir.display()))?;
+
+    for (name, pixmap) in extras {
+        let file = out_dir.join(format!("{name}.png"));
+        fs::write(&file, png_io::write_png(pixmap)?)
+            .with_context(|| format!("writing {}", file.display()))?;
+    }
 
     let mut page_types: Vec<PageType> = Vec::new();
     let mut pngs: Vec<Vec<u8>> = Vec::new();
