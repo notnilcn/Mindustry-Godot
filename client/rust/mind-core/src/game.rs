@@ -5,6 +5,7 @@
 //! Ported from `core/src/mindustry/core/GameState.java` (P0 subset: phase + tick).
 
 pub mod spawn_group;
+pub mod waves;
 
 use serde::{Deserialize, Serialize};
 

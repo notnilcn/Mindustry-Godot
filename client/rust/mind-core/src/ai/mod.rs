@@ -24,6 +24,7 @@ pub use control_structs::{FieldIndex, IntraEdge, NodeIndex};
 pub use controller::{AiKind, ControllerSlot, UnitController, select_ai};
 pub use harness::UnitHarness;
 pub use pathfinder::{Cost, Flowfield, PathTile, Pathfinder};
+pub use types::command::{AttackTarget, CommandAiState, CommandQueueEntry};
 pub use unit_command_runtime::{
     allows_command, command_controller, default_command, extra_stances, get_unit_stances,
 };

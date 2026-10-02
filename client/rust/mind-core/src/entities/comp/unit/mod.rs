@@ -25,7 +25,7 @@ pub use defs::{
 };
 pub use lifecycle::{
     ai_kind_of, controller_of, kill_unit, remove_unit, set_move_target, spawn_unit, spawn_unit_def,
-    unit_type_of,
+    sync_weapon_state, unit_type_of,
 };
 pub use queries::{
     UnitSnapshot, all, best, can_create, closest, count, get_cap, in_radius, snapshot,

@@ -1,0 +1,926 @@
+{
+  "scenario": "units_waves_difficulty",
+  "pass": true,
+  "seed": 42,
+  "difficulties": [
+    {
+      "difficulty": 0.0,
+      "groups": 62,
+      "waves": [
+        {
+          "wave": 0,
+          "ground": 0,
+          "air": 1,
+          "boss": false
+        },
+        {
+          "wave": 1,
+          "ground": 0,
+          "air": 1,
+          "boss": false
+        },
+        {
+          "wave": 2,
+          "ground": 0,
+          "air": 1,
+          "boss": false
+        },
+        {
+          "wave": 3,
+          "ground": 0,
+          "air": 1,
+          "boss": false
+        },
+        {
+          "wave": 4,
+          "ground": 0,
+          "air": 1,
+          "boss": false
+        },
+        {
+          "wave": 5,
+          "ground": 0,
+          "air": 2,
+          "boss": false
+        },
+        {
+          "wave": 6,
+          "ground": 1,
+          "air": 2,
+          "boss": false
+        },
+        {
+          "wave": 7,
+          "ground": 0,
+          "air": 2,
+          "boss": false
+        },
+        {
+          "wave": 8,
+          "ground": 1,
+          "air": 2,
+          "boss": false
+        },
+        {
+          "wave": 9,
+          "ground": 0,
+          "air": 2,
+          "boss": false
+        },
+        {
+          "wave": 10,
+          "ground": 1,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 11,
+          "ground": 0,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 12,
+          "ground": 1,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 13,
+          "ground": 0,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 14,
+          "ground": 1,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 15,
+          "ground": 0,
+          "air": 4,
+          "boss": false
+        },
+        {
+          "wave": 16,
+          "ground": 2,
+          "air": 4,
+          "boss": false
+        },
+        {
+          "wave": 17,
+          "ground": 0,
+          "air": 4,
+          "boss": false
+        },
+        {
+          "wave": 18,
+          "ground": 2,
+          "air": 4,
+          "boss": false
+        },
+        {
+          "wave": 19,
+          "ground": 0,
+          "air": 7,
+          "boss": false
+        },
+        {
+          "wave": 20,
+          "ground": 2,
+          "air": 5,
+          "boss": false
+        },
+        {
+          "wave": 21,
+          "ground": 0,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 22,
+          "ground": 2,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 23,
+          "ground": 0,
+          "air": 6,
+          "boss": false
+        },
+        {
+          "wave": 24,
+          "ground": 2,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 25,
+          "ground": 3,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 26,
+          "ground": 3,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 27,
+          "ground": 3,
+          "air": 6,
+          "boss": false
+        },
+        {
+          "wave": 28,
+          "ground": 0,
+          "air": 5,
+          "boss": false
+        },
+        {
+          "wave": 29,
+          "ground": 6,
+          "air": 5,
+          "boss": false
+        },
+        {
+          "wave": 30,
+          "ground": 0,
+          "air": 5,
+          "boss": false
+        },
+        {
+          "wave": 31,
+          "ground": 3,
+          "air": 5,
+          "boss": false
+        },
+        {
+          "wave": 32,
+          "ground": 0,
+          "air": 5,
+          "boss": false
+        },
+        {
+          "wave": 33,
+          "ground": 3,
+          "air": 6,
+          "boss": false
+        },
+        {
+          "wave": 34,
+          "ground": 0,
+          "air": 7,
+          "boss": false
+        },
+        {
+          "wave": 35,
+          "ground": 3,
+          "air": 7,
+          "boss": false
+        },
+        {
+          "wave": 36,
+          "ground": 0,
+          "air": 7,
+          "boss": false
+        },
+        {
+          "wave": 37,
+          "ground": 3,
+          "air": 7,
+          "boss": false
+        },
+        {
+          "wave": 38,
+          "ground": 0,
+          "air": 8,
+          "boss": false
+        },
+        {
+          "wave": 39,
+          "ground": 3,
+          "air": 8,
+          "boss": false
+        },
+        {
+          "wave": 40,
+          "ground": 0,
+          "air": 9,
+          "boss": false
+        },
+        {
+          "wave": 41,
+          "ground": 3,
+          "air": 10,
+          "boss": false
+        },
+        {
+          "wave": 42,
+          "ground": 0,
+          "air": 12,
+          "boss": false
+        },
+        {
+          "wave": 43,
+          "ground": 6,
+          "air": 4,
+          "boss": false
+        },
+        {
+          "wave": 44,
+          "ground": 2,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 45,
+          "ground": 4,
+          "air": 1,
+          "boss": false
+        },
+        {
+          "wave": 46,
+          "ground": 5,
+          "air": 6,
+          "boss": false
+        },
+        {
+          "wave": 47,
+          "ground": 4,
+          "air": 0,
+          "boss": false
+        },
+        {
+          "wave": 48,
+          "ground": 4,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 49,
+          "ground": 5,
+          "air": 1,
+          "boss": false
+        }
+      ]
+    },
+    {
+      "difficulty": 0.5,
+      "groups": 90,
+      "waves": [
+        {
+          "wave": 0,
+          "ground": 0,
+          "air": 1,
+          "boss": false
+        },
+        {
+          "wave": 1,
+          "ground": 0,
+          "air": 1,
+          "boss": false
+        },
+        {
+          "wave": 2,
+          "ground": 0,
+          "air": 2,
+          "boss": false
+        },
+        {
+          "wave": 3,
+          "ground": 0,
+          "air": 2,
+          "boss": false
+        },
+        {
+          "wave": 4,
+          "ground": 0,
+          "air": 2,
+          "boss": false
+        },
+        {
+          "wave": 5,
+          "ground": 1,
+          "air": 2,
+          "boss": false
+        },
+        {
+          "wave": 6,
+          "ground": 0,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 7,
+          "ground": 1,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 8,
+          "ground": 0,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 9,
+          "ground": 1,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 10,
+          "ground": 0,
+          "air": 4,
+          "boss": false
+        },
+        {
+          "wave": 11,
+          "ground": 1,
+          "air": 4,
+          "boss": false
+        },
+        {
+          "wave": 12,
+          "ground": 0,
+          "air": 4,
+          "boss": false
+        },
+        {
+          "wave": 13,
+          "ground": 2,
+          "air": 4,
+          "boss": false
+        },
+        {
+          "wave": 14,
+          "ground": 3,
+          "air": 8,
+          "boss": false
+        },
+        {
+          "wave": 15,
+          "ground": 2,
+          "air": 5,
+          "boss": false
+        },
+        {
+          "wave": 16,
+          "ground": 3,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 17,
+          "ground": 6,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 18,
+          "ground": 3,
+          "air": 6,
+          "boss": false
+        },
+        {
+          "wave": 19,
+          "ground": 3,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 20,
+          "ground": 6,
+          "air": 4,
+          "boss": false
+        },
+        {
+          "wave": 21,
+          "ground": 3,
+          "air": 4,
+          "boss": false
+        },
+        {
+          "wave": 22,
+          "ground": 3,
+          "air": 7,
+          "boss": false
+        },
+        {
+          "wave": 23,
+          "ground": 6,
+          "air": 5,
+          "boss": false
+        },
+        {
+          "wave": 24,
+          "ground": 4,
+          "air": 5,
+          "boss": false
+        },
+        {
+          "wave": 25,
+          "ground": 4,
+          "air": 5,
+          "boss": false
+        },
+        {
+          "wave": 26,
+          "ground": 5,
+          "air": 5,
+          "boss": false
+        },
+        {
+          "wave": 27,
+          "ground": 5,
+          "air": 6,
+          "boss": false
+        },
+        {
+          "wave": 28,
+          "ground": 5,
+          "air": 6,
+          "boss": false
+        },
+        {
+          "wave": 29,
+          "ground": 6,
+          "air": 6,
+          "boss": false
+        },
+        {
+          "wave": 30,
+          "ground": 6,
+          "air": 7,
+          "boss": false
+        },
+        {
+          "wave": 31,
+          "ground": 4,
+          "air": 7,
+          "boss": false
+        },
+        {
+          "wave": 32,
+          "ground": 2,
+          "air": 7,
+          "boss": false
+        },
+        {
+          "wave": 33,
+          "ground": 6,
+          "air": 8,
+          "boss": false
+        },
+        {
+          "wave": 34,
+          "ground": 3,
+          "air": 8,
+          "boss": false
+        },
+        {
+          "wave": 35,
+          "ground": 7,
+          "air": 0,
+          "boss": false
+        },
+        {
+          "wave": 36,
+          "ground": 5,
+          "air": 0,
+          "boss": false
+        },
+        {
+          "wave": 37,
+          "ground": 11,
+          "air": 1,
+          "boss": false
+        },
+        {
+          "wave": 38,
+          "ground": 6,
+          "air": 0,
+          "boss": false
+        },
+        {
+          "wave": 39,
+          "ground": 7,
+          "air": 0,
+          "boss": false
+        },
+        {
+          "wave": 40,
+          "ground": 2,
+          "air": 0,
+          "boss": false
+        },
+        {
+          "wave": 41,
+          "ground": 10,
+          "air": 1,
+          "boss": false
+        },
+        {
+          "wave": 42,
+          "ground": 2,
+          "air": 0,
+          "boss": false
+        },
+        {
+          "wave": 43,
+          "ground": 7,
+          "air": 0,
+          "boss": false
+        },
+        {
+          "wave": 44,
+          "ground": 2,
+          "air": 0,
+          "boss": false
+        },
+        {
+          "wave": 45,
+          "ground": 7,
+          "air": 1,
+          "boss": true
+        },
+        {
+          "wave": 46,
+          "ground": 3,
+          "air": 0,
+          "boss": false
+        },
+        {
+          "wave": 47,
+          "ground": 9,
+          "air": 0,
+          "boss": false
+        },
+        {
+          "wave": 48,
+          "ground": 4,
+          "air": 0,
+          "boss": false
+        },
+        {
+          "wave": 49,
+          "ground": 9,
+          "air": 0,
+          "boss": false
+        }
+      ]
+    },
+    {
+      "difficulty": 1.0,
+      "groups": 148,
+      "waves": [
+        {
+          "wave": 0,
+          "ground": 1,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 1,
+          "ground": 2,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 2,
+          "ground": 2,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 3,
+          "ground": 2,
+          "air": 4,
+          "boss": false
+        },
+        {
+          "wave": 4,
+          "ground": 5,
+          "air": 4,
+          "boss": false
+        },
+        {
+          "wave": 5,
+          "ground": 4,
+          "air": 7,
+          "boss": false
+        },
+        {
+          "wave": 6,
+          "ground": 3,
+          "air": 4,
+          "boss": false
+        },
+        {
+          "wave": 7,
+          "ground": 1,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 8,
+          "ground": 6,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 9,
+          "ground": 2,
+          "air": 6,
+          "boss": false
+        },
+        {
+          "wave": 10,
+          "ground": 3,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 11,
+          "ground": 2,
+          "air": 4,
+          "boss": false
+        },
+        {
+          "wave": 12,
+          "ground": 3,
+          "air": 4,
+          "boss": false
+        },
+        {
+          "wave": 13,
+          "ground": 4,
+          "air": 7,
+          "boss": false
+        },
+        {
+          "wave": 14,
+          "ground": 3,
+          "air": 5,
+          "boss": false
+        },
+        {
+          "wave": 15,
+          "ground": 4,
+          "air": 5,
+          "boss": false
+        },
+        {
+          "wave": 16,
+          "ground": 4,
+          "air": 5,
+          "boss": true
+        },
+        {
+          "wave": 17,
+          "ground": 6,
+          "air": 5,
+          "boss": false
+        },
+        {
+          "wave": 18,
+          "ground": 7,
+          "air": 6,
+          "boss": false
+        },
+        {
+          "wave": 19,
+          "ground": 6,
+          "air": 6,
+          "boss": false
+        },
+        {
+          "wave": 20,
+          "ground": 13,
+          "air": 6,
+          "boss": false
+        },
+        {
+          "wave": 21,
+          "ground": 3,
+          "air": 7,
+          "boss": false
+        },
+        {
+          "wave": 22,
+          "ground": 11,
+          "air": 11,
+          "boss": false
+        },
+        {
+          "wave": 23,
+          "ground": 2,
+          "air": 10,
+          "boss": false
+        },
+        {
+          "wave": 24,
+          "ground": 16,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 25,
+          "ground": 5,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 26,
+          "ground": 10,
+          "air": 4,
+          "boss": false
+        },
+        {
+          "wave": 27,
+          "ground": 7,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 28,
+          "ground": 13,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 29,
+          "ground": 6,
+          "air": 4,
+          "boss": false
+        },
+        {
+          "wave": 30,
+          "ground": 13,
+          "air": 5,
+          "boss": true
+        },
+        {
+          "wave": 31,
+          "ground": 8,
+          "air": 4,
+          "boss": false
+        },
+        {
+          "wave": 32,
+          "ground": 12,
+          "air": 4,
+          "boss": false
+        },
+        {
+          "wave": 33,
+          "ground": 8,
+          "air": 4,
+          "boss": false
+        },
+        {
+          "wave": 34,
+          "ground": 14,
+          "air": 4,
+          "boss": false
+        },
+        {
+          "wave": 35,
+          "ground": 10,
+          "air": 5,
+          "boss": false
+        },
+        {
+          "wave": 36,
+          "ground": 16,
+          "air": 6,
+          "boss": false
+        },
+        {
+          "wave": 37,
+          "ground": 14,
+          "air": 5,
+          "boss": false
+        },
+        {
+          "wave": 38,
+          "ground": 17,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 39,
+          "ground": 15,
+          "air": 2,
+          "boss": false
+        },
+        {
+          "wave": 40,
+          "ground": 14,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 41,
+          "ground": 18,
+          "air": 2,
+          "boss": false
+        },
+        {
+          "wave": 42,
+          "ground": 10,
+          "air": 5,
+          "boss": false
+        },
+        {
+          "wave": 43,
+          "ground": 20,
+          "air": 3,
+          "boss": false
+        },
+        {
+          "wave": 44,
+          "ground": 13,
+          "air": 5,
+          "boss": true
+        },
+        {
+          "wave": 45,
+          "ground": 24,
+          "air": 4,
+          "boss": false
+        },
+        {
+          "wave": 46,
+          "ground": 13,
+          "air": 4,
+          "boss": false
+        },
+        {
+          "wave": 47,
+          "ground": 18,
+          "air": 4,
+          "boss": false
+        },
+        {
+          "wave": 48,
+          "ground": 10,
+          "air": 5,
+          "boss": false
+        },
+        {
+          "wave": 49,
+          "ground": 15,
+          "air": 5,
+          "boss": false
+        }
+      ]
+    }
+  ],
+  "checksum": "0b911ed83f3ee72a"
+}
