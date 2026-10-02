@@ -572,6 +572,21 @@ pub enum ModsCommand {
         #[arg(long)]
         json: bool,
     },
+
+    /// Load a fixture mod's data assets (patches/content/bundles/images/audio)
+    /// headlessly and report `dp-` names, sound ids and external assets
+    /// (plan 20 M4).
+    Assets {
+        /// Fixture name under `parity/mod_fixtures/`.
+        #[arg(long)]
+        fixture: String,
+        /// Repo root override (defaults to discovery from cwd).
+        #[arg(long)]
+        repo: Option<PathBuf>,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// `trace` subcommands (plan 05 M6).

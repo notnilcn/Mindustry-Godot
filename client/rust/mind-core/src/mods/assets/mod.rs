@@ -11,14 +11,25 @@
 //! The binary record codec here matches plan 04's `patches` region framing
 //! (plan 20 §6.5): `u32 version = 2` → `i32 count` → per-asset records.
 
+pub mod audio;
+pub mod bundle;
+pub mod image;
+
 use std::path::{Path, PathBuf};
 
 use indexmap::IndexMap;
 use sha2::{Digest, Sha256};
 
 use crate::assets::bundle::parse_properties;
-use crate::content::{ContentRef, ContentType};
+use crate::content::parser_hooks::PatchAsset;
+use crate::content::{ContentRef, ContentRegistry, ContentType, ModId};
 use crate::io::{FileSystem, IoError, WireReader, WireWriter};
+
+use self::audio::{AudioApplier, AudioAsset};
+use self::bundle::{BundleApplier, BundleMap};
+use self::image::ImageApplier;
+
+use super::ModError;
 
 /// `patches` region format version (`DataPatcher.patchFormatVersion`).
 pub const PATCH_FORMAT_VERSION: u32 = 2;
@@ -312,6 +323,38 @@ impl DataAsset {
     }
 }
 
+/// Writes the `patches` region body: `u32 version = 2` → `i32 count` →
+/// per-asset records (plan 20 §6.5, owned by plan 04's region framing).
+pub fn write_assets(writer: &mut WireWriter, assets: &[DataAsset]) -> Result<(), IoError> {
+    writer.u(PATCH_FORMAT_VERSION);
+    writer.i(assets.len() as i32);
+    for asset in assets {
+        asset.write(writer)?;
+    }
+    Ok(())
+}
+
+/// Reads the `patches` region body written by [`write_assets`].
+///
+/// A version mismatch is a hard error (upstream `SaveVersion` behavior).
+pub fn read_assets(reader: &mut WireReader) -> Result<Vec<DataAsset>, IoError> {
+    let version = reader.u()?;
+    if version != PATCH_FORMAT_VERSION {
+        return Err(IoError::corrupt(format!(
+            "patches region version {version} unsupported (expected {PATCH_FORMAT_VERSION})"
+        )));
+    }
+    let count = reader.i()?;
+    if count < 0 {
+        return Err(IoError::corrupt("negative data asset count"));
+    }
+    let mut out = Vec::with_capacity(count as usize);
+    for _ in 0..count {
+        out.push(DataAsset::read(reader)?);
+    }
+    Ok(out)
+}
+
 /// sha256 digest.
 pub fn sha256(bytes: &[u8]) -> [u8; 32] {
     Sha256::digest(bytes).into()
@@ -445,7 +488,12 @@ impl DataAssetCache {
 }
 
 /// `mod/DataManager.java` API consumed by plans 04/12/19/21.
-pub trait DataAssets: Send + Sync {
+///
+/// Rust note: plan 20 §3.7 originally specified `Send + Sync`, but the patch
+/// reset actions are `Box<dyn FnOnce>` closures (plan 02 `ResetAction`) which
+/// are neither. The trait therefore carries no auto-trait bound; hosts that
+/// need cross-thread sharing wrap the concrete manager themselves.
+pub trait DataAssets {
     /// All assets in insertion order.
     fn all_assets(&self) -> &[DataAsset];
     /// External (non-embedded) assets.
@@ -464,18 +512,93 @@ pub trait DataAssets: Send + Sync {
     fn add_texture(&mut self, name: &str, png: Vec<u8>);
     /// Removes a `net-` runtime texture.
     fn remove_texture(&mut self, name: &str);
+
+    /// `DataManager.load`: replace-record load of a full asset set.
+    ///
+    /// Default is a no-op so record-only hosts can ignore the lifecycle; the
+    /// real implementation lives on [`ModDataManager`].
+    fn load(
+        &mut self,
+        assets: Vec<DataAsset>,
+        registry: &mut ContentRegistry,
+    ) -> Result<(), ModError> {
+        let _ = (assets, registry);
+        Ok(())
+    }
+
+    /// `DataManager.unload`: unapply patches and drop records.
+    fn unload(&mut self, registry: &mut ContentRegistry) {
+        let _ = registry;
+    }
+
+    /// `DataManager.reloadPatches`.
+    fn reload_patches(
+        &mut self,
+        patches: &[PatchAsset],
+        registry: &mut ContentRegistry,
+    ) -> Result<(), ModError> {
+        let _ = (patches, registry);
+        Ok(())
+    }
+
+    /// `DataManager.reloadContent`.
+    fn reload_content(
+        &mut self,
+        content: &[ContentRecord],
+        registry: &mut ContentRegistry,
+        reload_arrays: bool,
+    ) -> Result<(), ModError> {
+        let _ = (content, registry, reload_arrays);
+        Ok(())
+    }
+
+    /// `DataManager.reloadImages`.
+    fn reload_images(&mut self, images: &[DataAsset]) {
+        let _ = images;
+    }
+
+    /// `DataManager.reloadAudio`.
+    fn reload_audio(&mut self, sounds: &[AudioAsset], music: &[AudioAsset]) {
+        let _ = (sounds, music);
+    }
+
+    /// `DataManager.regenerateContentSprites`.
+    fn regenerate_content_sprites(&mut self, force_pack: bool) {
+        let _ = force_pack;
+    }
+
+    /// `DataManager.clearGeneratedImages`.
+    fn clear_generated_images(&mut self) {}
 }
 
-/// In-memory `DataManager` implementing record bookkeeping/ordering. Patch
-/// application, image packing and audio loading are plan 20 M3/M4 follow-ups
-/// and plan 03/18 drivers; this type owns the records those drivers consume.
-#[derive(Debug, Default)]
+/// In-memory `DataManager` implementing record bookkeeping/ordering, the
+/// `load`/`unload`/`reload_*` lifecycle, bundle merge/restore, the audio/image
+/// record drivers and `regenerate_content_sprites`. Actual atlas/audio effects
+/// are applied by the `mind-gdext` decorator from these records (plan 03/18).
+#[derive(Default)]
 pub struct ModDataManager {
     assets: Vec<DataAsset>,
-    missing: Vec<usize>,
     patched: Vec<ContentRef>,
     runtime_textures: IndexMap<String, Vec<u8>>,
     bundle_originals: IndexMap<String, IndexMap<String, String>>,
+    merged_bundles: IndexMap<String, BundleMap>,
+    bundle_applier: BundleApplier,
+    audio_applier: AudioApplier,
+    image_applier: ImageApplier,
+    patcher: crate::mods::patch::DataPatcher,
+    content_errors: Vec<String>,
+    patched_content: Vec<ContentRef>,
+}
+
+impl std::fmt::Debug for ModDataManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ModDataManager")
+            .field("assets", &self.assets.len())
+            .field("external", &self.all_external_assets().len())
+            .field("patched", &self.patched.len())
+            .field("runtime_textures", &self.runtime_textures.len())
+            .finish()
+    }
 }
 
 impl ModDataManager {
@@ -514,13 +637,19 @@ impl ModDataManager {
         }
     }
 
-    /// Removes all records.
+    /// Removes all records and unloads every applier (without a registry; the
+    /// `DataAssets::unload` override handles patch rollback).
     pub fn clear(&mut self) {
         self.assets.clear();
-        self.missing.clear();
         self.patched.clear();
+        self.patched_content.clear();
         self.runtime_textures.clear();
         self.bundle_originals.clear();
+        self.merged_bundles.clear();
+        self.bundle_applier.clear();
+        self.audio_applier.unload();
+        self.image_applier.unload();
+        self.content_errors.clear();
     }
 
     /// Records a bundle snapshot for restore-on-unload (`DataBundleLoader`).
@@ -539,6 +668,251 @@ impl ModDataManager {
     pub fn runtime_textures(&self) -> &IndexMap<String, Vec<u8>> {
         &self.runtime_textures
     }
+
+    /// Merge/restore driver for mod bundles.
+    pub fn bundle_applier(&self) -> &BundleApplier {
+        &self.bundle_applier
+    }
+
+    /// `dp-` audio driver records.
+    pub fn audio_applier(&self) -> &AudioApplier {
+        &self.audio_applier
+    }
+
+    /// `dp-` image driver records.
+    pub fn image_applier(&self) -> &ImageApplier {
+        &self.image_applier
+    }
+
+    /// The merged per-file bundle map (headless record of the client `Bundle`).
+    pub fn merged_bundle(&self, file: &str) -> Option<&BundleMap> {
+        self.merged_bundles.get(file)
+    }
+
+    /// Per-asset content parse errors from the last `reload_content`
+    /// (upstream error isolation: one bad asset does not abort the rest).
+    pub fn content_errors(&self) -> &[String] {
+        &self.content_errors
+    }
+
+    /// Content references registered from the last `reload_content`.
+    pub fn patched_content(&self) -> &[ContentRef] {
+        &self.patched_content
+    }
+
+    /// `DataManager.load`: replace-only full load.
+    ///
+    /// Order matches upstream §3.7: drop the previous set, record assets, load
+    /// audio records, merge bundles, pack images, then apply patches/content.
+    pub fn load_assets(
+        &mut self,
+        assets: Vec<DataAsset>,
+        registry: &mut ContentRegistry,
+    ) -> Result<(), ModError> {
+        self.unload_assets(registry);
+        self.assets = assets;
+
+        // Audio: sounds first (dense ids), then music.
+        let sounds: Vec<AudioAsset> = self
+            .assets
+            .iter()
+            .filter(|asset| asset.type_ == DataAssetType::Sound)
+            .filter_map(blob_len)
+            .collect();
+        let music: Vec<AudioAsset> = self
+            .assets
+            .iter()
+            .filter(|asset| asset.type_ == DataAssetType::Music)
+            .filter_map(blob_len)
+            .collect();
+        let base_count = self.audio_applier.len();
+        self.audio_applier.load_sounds(&sounds, base_count);
+        self.audio_applier.load_music(&music);
+
+        // Bundles: merge into the recorded per-file maps with snapshot/restore.
+        let bundle_assets: Vec<(String, IndexMap<String, String>)> = self
+            .assets
+            .iter()
+            .filter_map(|asset| match &asset.data {
+                DataAssetData::Bundle(map) => Some((asset.path.clone(), map.clone())),
+                _ => None,
+            })
+            .collect();
+        for (path, props) in bundle_assets {
+            let existing = self.merged_bundles.get(&path).cloned().unwrap_or_default();
+            self.snapshot_bundle(&path, existing);
+            let target = self.merged_bundles.entry(path.clone()).or_default();
+            self.bundle_applier.merge(&path, target, &props);
+        }
+
+        // Images.
+        let images: Vec<(String, bool)> = self
+            .assets
+            .iter()
+            .filter(|asset| asset.type_ == DataAssetType::Image)
+            .map(|asset| (asset.path.clone(), false))
+            .collect();
+        self.image_applier.load_images(&images, 1.0);
+
+        // Patches.
+        let patches: Vec<PatchAsset> = self
+            .assets
+            .iter()
+            .filter_map(|asset| match &asset.data {
+                DataAssetData::Patch(text) => Some(PatchAsset {
+                    name: asset.path.clone(),
+                    json: text.clone(),
+                }),
+                _ => None,
+            })
+            .collect();
+        self.reload_patches(&patches, registry)?;
+
+        // Content records.
+        let content: Vec<ContentRecord> = self
+            .assets
+            .iter()
+            .filter_map(|asset| match &asset.data {
+                DataAssetData::Content(record) => Some(record.clone()),
+                _ => None,
+            })
+            .collect();
+        self.reload_content(&content, registry, true)?;
+        Ok(())
+    }
+
+    /// `DataManager.unload`: unapply patches and drop every record.
+    pub fn unload_assets(&mut self, registry: &mut ContentRegistry) {
+        self.patcher.unapply(registry);
+        self.audio_applier.unload();
+        self.image_applier.unload();
+        self.bundle_applier.clear();
+        self.clear();
+    }
+
+    /// `DataManager.reloadPatches`: unapply the previous set, then apply.
+    pub fn reload_patches(
+        &mut self,
+        patches: &[PatchAsset],
+        registry: &mut ContentRegistry,
+    ) -> Result<(), ModError> {
+        self.patcher
+            .apply(registry, patches)
+            .map_err(|error| ModError::Invalid(error.to_string()))
+    }
+
+    /// `DataManager.reloadContent`: parse content records with the restricted
+    /// patch parser and the `dp` pseudo-mod identity; per-asset errors are
+    /// isolated into [`content_errors`](Self::content_errors).
+    pub fn reload_content(
+        &mut self,
+        content: &[ContentRecord],
+        registry: &mut ContentRegistry,
+        reload_arrays: bool,
+    ) -> Result<(), ModError> {
+        self.content_errors.clear();
+        let previous = registry.current_mod().cloned();
+        registry.set_current_mod(Some(ModId(String::from("dp"))));
+        let mut parser = crate::mods::json::ContentJsonParser::restricted();
+        for record in content {
+            let stem = content_stem(&record.json);
+            match parser.parse(registry, &stem, &stem, &record.json, record.type_) {
+                Ok(reference) => {
+                    if !self.patched_content.contains(&reference) {
+                        self.patched_content.push(reference);
+                    }
+                }
+                Err(error) => self.content_errors.push(error.message),
+            }
+        }
+        registry.set_current_mod(previous);
+        if reload_arrays {
+            crate::mods::patch::fix_content_arrays(registry);
+        }
+        Ok(())
+    }
+
+    /// `DataManager.reloadImages`: replace the recorded image set.
+    pub fn reload_images(&mut self, images: &[DataAsset]) {
+        self.image_applier.unload();
+        let entries: Vec<(String, bool)> = images
+            .iter()
+            .map(|asset| {
+                (
+                    asset.path.clone(),
+                    matches!(asset.data, DataAssetData::Blob(_))
+                        && asset.path.contains("generated/"),
+                )
+            })
+            .collect();
+        self.image_applier.load_images(&entries, 1.0);
+    }
+
+    /// `DataManager.reloadAudio`: replace the recorded audio set.
+    pub fn reload_audio(&mut self, sounds: &[AudioAsset], music: &[AudioAsset]) {
+        self.audio_applier.unload();
+        self.audio_applier.load_sounds(sounds, 0);
+        self.audio_applier.load_music(music);
+    }
+
+    /// `DataManager.regenerateContentSprites`: create one generated icon record
+    /// per content asset, skipping content whose hash is already generated
+    /// unless `force_pack`.
+    pub fn regenerate_content_sprites(&mut self, force_pack: bool) {
+        if force_pack {
+            self.image_applier.clear_generated();
+        }
+        let content: Vec<(String, String, String)> = self
+            .assets
+            .iter()
+            .filter_map(|asset| match &asset.data {
+                DataAssetData::Content(record) => Some((
+                    record.type_.name().to_owned(),
+                    record.json.clone(),
+                    asset.path.clone(),
+                )),
+                _ => None,
+            })
+            .collect();
+        for (type_name, json, path) in content {
+            let base = image::image_stem(&path);
+            self.image_applier.add_generated(&type_name, &json, &base);
+        }
+    }
+
+    /// `DataManager.clearGeneratedImages`: drop generated records/hashes.
+    pub fn clear_generated_images(&mut self) {
+        self.image_applier.clear_generated();
+    }
+}
+
+/// Byte length of a blob asset (`None` for non-blobs).
+fn blob_len(asset: &DataAsset) -> Option<AudioAsset> {
+    match &asset.data {
+        DataAssetData::Blob(bytes) => Some(AudioAsset::new(asset.path.clone(), bytes.len())),
+        _ => None,
+    }
+}
+
+/// Whether an external asset has no resolved payload.
+fn blob_is_empty(asset: &DataAsset) -> bool {
+    match &asset.data {
+        DataAssetData::Blob(bytes) => bytes.is_empty(),
+        _ => false,
+    }
+}
+
+/// Content name stem: the JSON `name` field when present, else `content`.
+fn content_stem(json: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(json)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| String::from("content"))
 }
 
 impl DataAssets for ModDataManager {
@@ -572,9 +946,9 @@ impl DataAssets for ModDataManager {
     }
 
     fn get_missing_assets(&self) -> Vec<&DataAsset> {
-        self.missing
+        self.assets
             .iter()
-            .filter_map(|index| self.assets.get(*index))
+            .filter(|asset| asset.is_external() && blob_is_empty(asset))
             .collect()
     }
 
@@ -592,6 +966,51 @@ impl DataAssets for ModDataManager {
     fn remove_texture(&mut self, name: &str) {
         self.runtime_textures
             .shift_remove(&format!("{SERVER_PREFIX}{name}"));
+    }
+
+    fn load(
+        &mut self,
+        assets: Vec<DataAsset>,
+        registry: &mut ContentRegistry,
+    ) -> Result<(), ModError> {
+        self.load_assets(assets, registry)
+    }
+
+    fn unload(&mut self, registry: &mut ContentRegistry) {
+        self.unload_assets(registry);
+    }
+
+    fn reload_patches(
+        &mut self,
+        patches: &[PatchAsset],
+        registry: &mut ContentRegistry,
+    ) -> Result<(), ModError> {
+        ModDataManager::reload_patches(self, patches, registry)
+    }
+
+    fn reload_content(
+        &mut self,
+        content: &[ContentRecord],
+        registry: &mut ContentRegistry,
+        reload_arrays: bool,
+    ) -> Result<(), ModError> {
+        ModDataManager::reload_content(self, content, registry, reload_arrays)
+    }
+
+    fn reload_images(&mut self, images: &[DataAsset]) {
+        ModDataManager::reload_images(self, images);
+    }
+
+    fn reload_audio(&mut self, sounds: &[AudioAsset], music: &[AudioAsset]) {
+        ModDataManager::reload_audio(self, sounds, music);
+    }
+
+    fn regenerate_content_sprites(&mut self, force_pack: bool) {
+        ModDataManager::regenerate_content_sprites(self, force_pack);
+    }
+
+    fn clear_generated_images(&mut self) {
+        ModDataManager::clear_generated_images(self);
     }
 }
 
@@ -757,5 +1176,132 @@ mod tests {
         assert!(manager.runtime_textures().contains_key("net-ping"));
         manager.remove_texture("ping");
         assert!(manager.runtime_textures().is_empty());
+    }
+
+    /// Plan 20 M4: `assets::write_read_assets_region` — the `patches` region
+    /// framing round-trips a mixed asset list (version + count + records).
+    #[test]
+    fn write_read_assets_region() {
+        let assets = vec![
+            DataAsset::patch("p", r#"{"block.router.health":9}"#),
+            DataAsset::content("content/items/x.json", ContentType::Item, r#"{"name":"X"}"#),
+            DataAsset::bundle("bundles/bundle.properties", "a=b\n"),
+            DataAsset::blob("sprites/x.png", DataAssetType::Image, vec![1, 2], false),
+        ];
+        let mut bytes = Vec::new();
+        write_assets(&mut WireWriter::new(&mut bytes), &assets).expect("write");
+        assert_eq!(&bytes[..4], &PATCH_FORMAT_VERSION.to_be_bytes());
+        let decoded = read_assets(&mut WireReader::new(&bytes)).expect("read");
+        assert_eq!(decoded.len(), assets.len());
+        for (original, back) in assets.iter().zip(&decoded) {
+            assert_eq!(original.path, back.path);
+            assert_eq!(original.type_, back.type_);
+            assert_eq!(original.embedded, back.embedded);
+            if original.embedded {
+                assert_eq!(original.data, back.data, "embedded payload round-trips");
+            } else {
+                // External assets keep only addressing (bytes resolve from cache).
+                assert!(back.byte_hash.is_some(), "external record carries a hash");
+                if original.byte_hash.is_some() {
+                    assert_eq!(original.byte_hash, back.byte_hash);
+                }
+                assert!(blob_is_empty(back));
+            }
+        }
+    }
+
+    #[test]
+    fn read_assets_rejects_bad_version() {
+        let mut bytes = Vec::new();
+        {
+            let mut writer = WireWriter::new(&mut bytes);
+            writer.u(99);
+            writer.i(0);
+        }
+        assert!(read_assets(&mut WireReader::new(&bytes)).is_err());
+    }
+
+    /// Plan 20 M4: `assets::load_unload_lifecycle` — bundle merge is restored,
+    /// applied patches are rolled back and external assets are reported.
+    #[test]
+    fn load_unload_lifecycle() {
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+
+        let bundle = MemoryBundle::new();
+        let store = MemoryUnlockStore::new();
+        let mut registry = create_base_content(&bundle, &store, true).expect("base content");
+        registry.init().expect("init");
+        let baseline = registry.block_by_name("router").expect("router").health;
+
+        let mut manager = ModDataManager::new();
+        let assets = vec![
+            DataAsset::patch("patches/health.json", r#"{"block.router.health":4242}"#),
+            DataAsset::bundle("bundles/bundle.properties", "mod.key=Value\n"),
+            DataAsset::blob("sprites/x.png", DataAssetType::Image, vec![7], false),
+            DataAsset::blob("sounds/s.ogg", DataAssetType::Sound, vec![0; 5], false),
+        ];
+        assert!(manager.load_assets(assets, &mut registry).is_ok());
+        assert!(manager.has_external_assets());
+        assert_eq!(
+            registry.block_by_name("router").expect("router").health,
+            4242
+        );
+        let merged = manager
+            .merged_bundle("bundles/bundle.properties")
+            .expect("merged bundle");
+        assert_eq!(merged.get("mod.key").map(String::as_str), Some("Value"));
+        assert_eq!(manager.image_applier().len(), 1);
+        assert_eq!(manager.audio_applier().len(), 1);
+        assert_eq!(manager.audio_applier().entries()[0].id, SOUND_ID_OFFSET);
+
+        manager.unload_assets(&mut registry);
+        assert_eq!(
+            registry.block_by_name("router").expect("router").health,
+            baseline
+        );
+        assert!(manager.image_applier().is_empty());
+        assert!(manager.bundle_applier().files().next().is_none());
+        assert!(manager.content_errors().is_empty());
+    }
+
+    /// Plan 20 M4: external assets with no resolved payload are `missing`.
+    #[test]
+    fn missing_external_assets() {
+        let mut manager = ModDataManager::new();
+        // An external asset decoded from a save has only its hash (empty blob).
+        let external = DataAsset::blob("sprites/gone.png", DataAssetType::Image, Vec::new(), false);
+        manager.push(external);
+        manager.push(DataAsset::patch("p", "{}"));
+        let missing = manager.get_missing_assets();
+        assert_eq!(missing.len(), 1);
+        assert_eq!(missing[0].path, "sprites/gone.png");
+    }
+
+    /// Plan 20 M4: `assets::regenerate_content_sprites` creates one generated
+    /// icon per content asset and skips unchanged hashes unless forced.
+    #[test]
+    fn regenerate_content_sprites_skips_unchanged() {
+        let mut manager = ModDataManager::new();
+        manager.push(DataAsset::content(
+            "content/blocks/test-wall.json",
+            ContentType::Block,
+            r#"{"name":"Test Wall"}"#,
+        ));
+        manager.regenerate_content_sprites(false);
+        assert_eq!(manager.image_applier().entries().len(), 1);
+        let first = manager.image_applier().entries()[0].clone();
+        assert_eq!(first.name, "dp-test-wall");
+        assert!(first.generated);
+
+        // Same hash: skipped.
+        manager.regenerate_content_sprites(false);
+        assert_eq!(manager.image_applier().entries().len(), 1);
+
+        // Force regenerates.
+        manager.regenerate_content_sprites(true);
+        assert_eq!(manager.image_applier().entries().len(), 1);
+
+        manager.clear_generated_images();
+        assert!(manager.image_applier().is_empty());
     }
 }
