@@ -299,6 +299,145 @@ pub enum Command {
         #[command(subcommand)]
         command: NetworkCommand,
     },
+
+    /// Parity/verification registries, catalogs and gate reports (plan 23).
+    Parity {
+        /// Parity subcommand.
+        #[command(subcommand)]
+        command: ParityCommand,
+    },
+}
+
+/// `parity` subcommands (plan 23 §3.7/§7).
+#[derive(Debug, Subcommand)]
+pub enum ParityCommand {
+    /// Run every structural check (matrix, checksums, scenarios, goldens,
+    /// budgets, MCP catalog) and exit non-zero on any failure.
+    Check {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Repo root override (defaults to discovery from cwd).
+        #[arg(long)]
+        repo: Option<PathBuf>,
+        /// A `cargo test -- --list` dump used to resolve `status = "landed"` rows.
+        #[arg(long)]
+        tests: Option<PathBuf>,
+    },
+
+    /// Validate `parity/matrix.toml` (the upstream-test mapping registry).
+    Matrix {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Repo root override (defaults to discovery from cwd).
+        #[arg(long)]
+        repo: Option<PathBuf>,
+        /// A `cargo test -- --list` dump used to resolve `status = "landed"` rows.
+        #[arg(long)]
+        tests: Option<PathBuf>,
+        /// Only check rows whose phase is at or before this phase (`P0`..`P8`).
+        #[arg(long)]
+        phase: Option<String>,
+    },
+
+    /// Validate `parity/checksum_registry.json` against `CHECKSUM_VERSION`.
+    Registry {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Repo root override (defaults to discovery from cwd).
+        #[arg(long)]
+        repo: Option<PathBuf>,
+    },
+
+    /// Verify committed goldens in `parity/golden_manifest.json` (sha256).
+    Goldens {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Repo root override (defaults to discovery from cwd).
+        #[arg(long)]
+        repo: Option<PathBuf>,
+    },
+
+    /// Validate the aggregated performance-budget registry.
+    Budgets {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Repo root override (defaults to discovery from cwd).
+        #[arg(long)]
+        repo: Option<PathBuf>,
+    },
+
+    /// Validate the MCP scenario catalog.
+    Mcp {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Repo root override (defaults to discovery from cwd).
+        #[arg(long)]
+        repo: Option<PathBuf>,
+    },
+
+    /// Validate the golden-scenario catalog and its backing files.
+    Scenarios {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Repo root override (defaults to discovery from cwd).
+        #[arg(long)]
+        repo: Option<PathBuf>,
+    },
+
+    /// Emit the execution plan for a soak profile (skeleton; nightly runs it).
+    Soak {
+        /// Profile name (`mid`, `stress`, `windowed`, `multiplayer`).
+        #[arg(long, default_value = "mid")]
+        profile: String,
+        /// Override the profile duration in minutes.
+        #[arg(long)]
+        minutes: Option<u64>,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Roll up the parity registries into a program status report.
+    Report {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Repo root override (defaults to discovery from cwd).
+        #[arg(long)]
+        repo: Option<PathBuf>,
+    },
+
+    /// Run the runnable steps of the phase-gate protocol and write its report.
+    Gate {
+        /// Phase key (`P0`..`P8`).
+        phase: String,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Repo root override (defaults to discovery from cwd).
+        #[arg(long)]
+        repo: Option<PathBuf>,
+        /// Write the gate report JSON here.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+
+    /// Validate the benchmark-budget registry (recording is nightly-owned).
+    BenchGate {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Repo root override (defaults to discovery from cwd).
+        #[arg(long)]
+        repo: Option<PathBuf>,
+    },
 }
 
 /// `power`/`liquid`/`heat` subcommands (plan 09 §7b).

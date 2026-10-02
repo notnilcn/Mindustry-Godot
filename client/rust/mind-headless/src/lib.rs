@@ -17,6 +17,7 @@ pub mod cli;
 pub mod combat_scenarios;
 pub mod exec;
 pub mod network_scenarios;
+pub mod parity;
 pub mod paths;
 pub mod registry;
 pub mod render_scenarios;

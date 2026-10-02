@@ -1,0 +1,4 @@
+# Generated parity reports; committed phase-gate evidence is allow-listed.
+*
+!gate_P*.json
+!.gitignore

@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "repo": "https://github.com/Anuken/Mindustry",
+  "mindustry_commit": "2cd7aeecf1378b3db456be9bfde8691b3cdc1bcc",
+  "captured": "2026-10-01",
+  "jdk": "17.0.20.1+1-1-26.04-Ubuntu",
+  "dump_args": {
+    "content": "parity/java/run.sh",
+    "notes": "One-off JVM oracle dumps (NUD-10 answer A). Outputs are committed under parity/; CI never needs a JVM."
+  },
+  "msav_fixtures": ["77", "85", "108", "114", "152", "152_be"]
+}
