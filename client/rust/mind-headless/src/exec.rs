@@ -182,6 +182,15 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
                 dump,
                 json,
             } => cmd_world_tile_ops(*seed, *width, *height, *ops, dump.as_deref(), *json),
+            WorldCommand::Filters {
+                seed,
+                width,
+                height,
+                stack,
+                order,
+                dump,
+                json,
+            } => cmd_world_filters(*seed, *width, *height, stack, order, dump.as_deref(), *json),
             WorldCommand::Multiblock {
                 size,
                 block,
@@ -2415,6 +2424,122 @@ fn cmd_world_tile_ops(
         );
         Ok(EXIT_FAIL)
     }
+}
+
+fn cmd_world_filters(
+    seed: u64,
+    width: i32,
+    height: i32,
+    stack: &str,
+    order: &str,
+    dump: Option<&Path>,
+    json: bool,
+) -> anyhow::Result<i32> {
+    use mind_core::determinism::{Checksum, Hasher, SimRng};
+    use mind_core::maps::filters::{FilterRegistry, apply_stack};
+    use mind_core::world::WorldGrid;
+
+    if width <= 0 || height <= 0 {
+        return Err(anyhow!("--width and --height must be positive"));
+    }
+    let content = boot_content()?;
+    let registry = FilterRegistry::vanilla();
+
+    let mut tags: Vec<String> = stack
+        .split(',')
+        .map(|tag| tag.trim().to_owned())
+        .filter(|tag| !tag.is_empty())
+        .collect();
+    if order == "reverse" {
+        tags.reverse();
+    } else if order != "forward" {
+        return Err(anyhow!("--order must be `forward` or `reverse`"));
+    }
+
+    let mut filters = Vec::with_capacity(tags.len());
+    for tag in &tags {
+        let payload = serde_json::json!({ "class": tag });
+        let filter = registry
+            .from_json(&content, &payload)
+            .with_context(|| format!("building filter `{tag}`"))?;
+        filters.push(filter);
+    }
+
+    // Deterministic base grid: stone floor, scattered walls.
+    let mut grid = WorldGrid::new(width, height);
+    let stone = content
+        .block_id("stone")
+        .unwrap_or(mind_core::content::BlockId::AIR);
+    let sand = content
+        .block_id("sand-floor")
+        .unwrap_or(mind_core::content::BlockId::AIR);
+    let wall = content
+        .block_id("stone-wall")
+        .unwrap_or(mind_core::content::BlockId::AIR);
+    let mut base_rng = SimRng::new(seed);
+    let n = (width * height) as usize;
+    for index in 0..n {
+        let noise_wall = base_rng.chance(mind_core::determinism::RngStream::MapGen, 0.05);
+        let noise_sand = base_rng.chance(mind_core::determinism::RngStream::MapGen, 0.3);
+        let tile = grid.tiles.geti_mut(index);
+        tile.floor = if noise_sand { sand } else { stone };
+        if noise_wall {
+            tile.block = wall;
+        }
+    }
+
+    let mut filter_rng = SimRng::new(seed ^ 0x5EED);
+    apply_stack(&mut grid.tiles, &mut filters, &content, &mut filter_rng);
+
+    // FNV over the resulting tiles (order contract: flat `x + y*width`).
+    let mut hasher = Hasher::new();
+    hasher.write_u32(width as u32);
+    hasher.write_u32(height as u32);
+    let mut floors: BTreeMap<String, u64> = BTreeMap::new();
+    let mut blocks: BTreeMap<String, u64> = BTreeMap::new();
+    for index in 0..n {
+        let tile = grid.tiles.geti(index);
+        hasher.write_u16(tile.block.raw());
+        hasher.write_u16(tile.floor.raw());
+        hasher.write_u16(tile.overlay.raw());
+        *floors
+            .entry(
+                content
+                    .block(tile.floor)
+                    .map(|def| def.name.clone())
+                    .unwrap_or_else(|| "air".to_owned()),
+            )
+            .or_default() += 1;
+        *blocks
+            .entry(
+                content
+                    .block(tile.block)
+                    .map(|def| def.name.clone())
+                    .unwrap_or_else(|| "air".to_owned()),
+            )
+            .or_default() += 1;
+    }
+    let checksum = Checksum(hasher.finish().value()).to_hex();
+
+    let report = serde_json::json!({
+        "format": 1,
+        "generator": "filters",
+        "seed": seed,
+        "width": width,
+        "height": height,
+        "stack": tags,
+        "order": order,
+        "checksum": checksum,
+        "counts": { "floors": floors, "blocks": blocks },
+    });
+    let text = serde_json::to_string_pretty(&report)?;
+    if let Some(path) = dump {
+        std::fs::write(path, &text).with_context(|| format!("writing `{}`", path.display()))?;
+    }
+    if json || dump.is_none() {
+        println!("{text}");
+    }
+    Ok(EXIT_PASS)
 }
 
 fn cmd_maps_list(dir: &Path, json: bool) -> anyhow::Result<i32> {

@@ -214,6 +214,32 @@ pub enum WorldCommand {
         json: bool,
     },
 
+    /// Apply a generation-filter stack to a deterministic base grid and dump
+    /// the result checksum/histogram (plan 06 M5 §7b).
+    Filters {
+        /// Simulation seed.
+        #[arg(long, default_value_t = 1)]
+        seed: u64,
+        /// Grid width in tiles.
+        #[arg(long, default_value_t = 64)]
+        width: i32,
+        /// Grid height in tiles.
+        #[arg(long, default_value_t = 64)]
+        height: i32,
+        /// Comma-separated filter class tags (default `scatter,ore,median,blend`).
+        #[arg(long, default_value = "scatter,ore,median,blend")]
+        stack: String,
+        /// Apply order (`forward` or `reverse`).
+        #[arg(long, default_value = "forward")]
+        order: String,
+        /// Write the final JSON report here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Place overlapping multiblocks and break the center; asserts shared-entity
     /// linkage and overlap clearing (plan 06 M3 §7b).
     Multiblock {

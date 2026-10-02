@@ -7,3 +7,4 @@
 //! additive-file intent); generators import `crate::math::noise`.
 
 pub mod noise;
+pub mod ridged;

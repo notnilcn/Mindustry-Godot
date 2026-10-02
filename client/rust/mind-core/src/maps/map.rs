@@ -13,6 +13,7 @@ use std::path::PathBuf;
 
 use indexmap::IndexMap;
 
+use crate::content::ContentRegistry;
 use crate::io::json::{JsonIo, Rules};
 use crate::util::strings::strip_colors;
 use crate::world::MapGenHooks;
@@ -182,6 +183,22 @@ impl Map {
         result
     }
 
+    /// `Map.filters()`: the generation filters used on load.
+    ///
+    /// Maps with a `build` tag in `1..83` and no `genfilters` use an empty
+    /// stack (upstream legacy rule); otherwise the `genfilters` JSON (or the
+    /// default stack when absent) is parsed.
+    pub fn filters(
+        &self,
+        content: &ContentRegistry,
+    ) -> Vec<Box<dyn super::filters::GenerateFilter>> {
+        if self.build_lt_83() && self.genfilters_json().is_none() {
+            Vec::new()
+        } else {
+            super::filters::read_filters(content, self.genfilters_json().unwrap_or(""))
+        }
+    }
+
     /// `Map.compareTo`: workshop, then custom, then PvP, then plain name.
     pub fn compare_to(&self, other: &Map) -> Ordering {
         // `-Boolean.compare(a, b)` == `b.cmp(a)`.
@@ -323,6 +340,33 @@ mod tests {
             -1,
         );
         assert_eq!(builtin.compare_to(&veins), Ordering::Less);
+    }
+
+    /// `maps::tests::build_lt_83_filters_empty`.
+    #[test]
+    fn build_lt_83_filters_empty() {
+        let content = crate::content::test_support::test_registry();
+        let legacy = Map::new(
+            PathBuf::from("/maps/old.msav"),
+            1,
+            1,
+            tags(&[("name", "Old"), ("build", "82")]),
+            true,
+            1,
+            82,
+        );
+        assert!(legacy.filters(&content).is_empty());
+        // A modern map with no genfilters gets the default stack.
+        let modern = Map::new(
+            PathBuf::from("/maps/new.msav"),
+            1,
+            1,
+            tags(&[("name", "New"), ("build", "100")]),
+            true,
+            1,
+            100,
+        );
+        assert!(!modern.filters(&content).is_empty());
     }
 
     #[test]
