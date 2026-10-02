@@ -14,6 +14,7 @@ pub mod bands;
 pub mod block_cache;
 pub mod commands;
 pub mod floor_cache;
+pub mod hooks;
 pub mod ids;
 pub mod layer;
 pub mod list;
@@ -25,6 +26,7 @@ pub use bands::{BandEntry, BandKey, BandPlan};
 pub use block_cache::BuildingCacheGrid;
 pub use commands::{Blend, CommandBuffer, DrawCmd, FillKind, LineKind, ShapeKind};
 pub use floor_cache::{CHUNK_SIZE, CHUNK_UNITS, FloorChunkGrid};
+pub use hooks::RenderInvalidation;
 pub use ids::{RegionId, RegionIdTable};
 pub use layer::{BuildingCacheLayer, CacheLayerId, Layer};
 pub use list::{
