@@ -298,6 +298,29 @@ pub trait BuildingBehavior: Send + Sync {
         None
     }
 
+    /// Payload acceptance hook (`Building.acceptPayload`; 08 override).
+    fn accept_payload(
+        &self,
+        world: &World,
+        e: Entity,
+        source: Entity,
+        payload: PayloadRef,
+    ) -> bool {
+        let _ = (world, e, source, payload);
+        false
+    }
+
+    /// Payload handling hook (`Building.handlePayload`; 08 override).
+    fn handle_payload(&self, world: &mut World, e: Entity, source: Entity, payload: PayloadRef) {
+        let _ = (world, e, source, payload);
+    }
+
+    /// Payload readback (`Building.getPayload`; 08 override).
+    fn get_payload(&self, world: &World, e: Entity) -> Option<PayloadRef> {
+        let _ = (world, e);
+        None
+    }
+
     /// Dump one item (`Building.dump`).
     fn dump(&self, world: &mut World, e: Entity, item: Option<ItemId>) -> bool {
         let _ = (world, e, item);

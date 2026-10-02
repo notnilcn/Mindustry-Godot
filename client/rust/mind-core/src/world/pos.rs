@@ -12,6 +12,10 @@
 pub struct TilePos(pub i16, pub i16);
 
 impl TilePos {
+    /// The empty/detached tile sentinel used by carried build payloads
+    /// (Java `emptyTile`; deviation plan 08 L2).
+    pub const EMPTY: TilePos = TilePos(i16::MIN, i16::MIN);
+
     /// Creates a tile position.
     pub const fn new(x: i16, y: i16) -> Self {
         Self(x, y)
