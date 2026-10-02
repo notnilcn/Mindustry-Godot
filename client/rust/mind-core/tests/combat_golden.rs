@@ -121,8 +121,31 @@ fn weapon_volley_matches_golden() {
         harness.tick();
     }
     assert_eq!(
-        harness.unit_weapons(unit).unwrap().mounts[0].total_shots,
+        harness.unit_weapons(unit).expect("unit weapons").mounts[0].total_shots,
         12
     );
     assert_eq!(harness.checksum_hex(), scenario("combat_weapon_volley"));
+}
+
+#[test]
+fn turret_ammo_fire_matches_golden() {
+    let mut harness = CombatHarness::new(48, 16, 37);
+    let wall = harness.content().block_id("copper-wall").expect("wall");
+    assert!(harness.place(12, 8, wall, 0, true));
+    let (tx, ty) = CombatHarness::tile_center(4, 8);
+    let turret = harness
+        .spawn_test_turret("duo", tx, ty, 1)
+        .expect("duo turret");
+    let copper = harness.content().item_id("copper").expect("copper");
+    for _ in 0..10 {
+        mind_core::world::blocks::defense::turrets::handle_item(
+            &mut harness.build.world,
+            turret,
+            copper,
+        );
+    }
+    for _ in 0..120 {
+        harness.tick();
+    }
+    assert_eq!(harness.checksum_hex(), scenario("combat_turret_ammo"));
 }

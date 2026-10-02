@@ -109,6 +109,7 @@ impl CombatHarness {
     pub fn tick(&mut self) {
         self.build.tick();
         self.update_weapons_only();
+        self.update_turrets_only();
         self.step_bullets_only();
         self.fire_tick(0.0);
         self.puddle_tick();
@@ -330,6 +331,64 @@ impl CombatHarness {
                 spawned: &mut spawned,
             };
             crate::weapons::update_weapons(&mut ctx);
+        }
+        self.bullets_created += spawned.len() as u64;
+        self.bullets.extend(spawned);
+    }
+
+    /// Spawns a plan-10 turret fixture for a supported config name (`duo`,
+    /// `test-item`, `test-liquid`, `test-power`).
+    ///
+    /// The fixture carries `Pos`/`TeamComp`/`TurretState` plus the liquid and
+    /// power modules so turret behavior can be driven by
+    /// [`Self::update_turrets_only`] from the harness (plan 10 §3.2 fallback;
+    /// plan 07's `BuildingBehavior::update_tile` has no content handle yet).
+    pub fn spawn_test_turret(&mut self, name: &str, x: f32, y: f32, team: u8) -> Option<Entity> {
+        use crate::entities::comp::{Pos, TeamComp};
+        use crate::world::blocks::defense::turrets::{self, TurretState};
+        use crate::world::modules::{LiquidModule, PowerModule};
+
+        let config = turrets::config_for(&self.build.content, name, &self.names)?;
+        let seq = self.seq;
+        self.seq = self.seq.wrapping_add(1);
+        let liquid_count = self.build.content.liquids().len();
+        let entity = self
+            .build
+            .world
+            .spawn((
+                crate::ecs::EntitySeq(seq),
+                Pos { x, y },
+                TeamComp { team },
+                TurretState::new(std::sync::Arc::new(config)),
+                LiquidModule::with_liquids(liquid_count),
+                PowerModule::new(),
+            ))
+            .id();
+        Some(entity)
+    }
+
+    /// A test turret's state.
+    pub fn turret_state(
+        &self,
+        entity: Entity,
+    ) -> Option<&crate::world::blocks::defense::turrets::TurretState> {
+        self.build.world.get(entity)
+    }
+
+    /// Runs only the turret update pass (M5 fixtures).
+    pub fn update_turrets_only(&mut self) {
+        let mut spawned: Vec<Entity> = Vec::new();
+        {
+            let mut ctx = bullet::CombatCtx {
+                world: &mut self.build.world,
+                content: &self.build.content,
+                grid: &self.build.grid,
+                rng: &mut self.rng,
+                fx: self.fx.as_ref(),
+                seq: &mut self.seq,
+                spawned: &mut spawned,
+            };
+            crate::world::blocks::defense::turrets::update_turrets(&mut ctx);
         }
         self.bullets_created += spawned.len() as u64;
         self.bullets.extend(spawned);
@@ -719,6 +778,9 @@ fn register_fixture_bullets(content: &mut ContentRegistry) -> BTreeMap<String, B
         def.lifetime = 40.0;
         def.damage = 5.0;
     });
+    // Plan 10 owns turret ammo (`Blocks.java` `ammoTypes`); register the M5
+    // `duo` ammo set (the closure above must be dropped first).
+    crate::world::blocks::defense::turrets::register_bullets(content, &mut names);
     // Cross-references (child defs must exist first).
     if let (Some(parent), Some(child)) = (names.get("frag"), names.get("fuse_frag"))
         && let Some(def) = content.bullet_mut(*parent)
