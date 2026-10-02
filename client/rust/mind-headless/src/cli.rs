@@ -645,6 +645,23 @@ pub enum CampaignCommand {
         #[arg(long)]
         dump: Option<PathBuf>,
     },
+
+    /// `campaign_play`: launch a sector, run waves, capture, and exercise the
+    /// game-over/lose variants + the `set_rules` campaign guard.
+    Play {
+        /// Planet content name.
+        #[arg(long, default_value = "serpulo")]
+        planet: String,
+        /// Sector preset name.
+        #[arg(long, default_value = "groundZero")]
+        sector: String,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Write the canonical golden dump here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+    },
 }
 
 /// `fx` subcommands (plan 17 §7b).

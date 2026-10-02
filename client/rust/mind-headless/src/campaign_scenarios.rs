@@ -69,6 +69,7 @@ pub fn run(command: &CampaignCommand) -> Result<i32> {
         CampaignCommand::Schematic { .. } => campaign_schematic()?,
         CampaignCommand::Fog { .. } => campaign_fog()?,
         CampaignCommand::Objectives { .. } => objectives_completion()?,
+        CampaignCommand::Play { planet, sector, .. } => campaign_play(planet, sector)?,
     };
     match command {
         CampaignCommand::Rules { json, dump: path }
@@ -86,6 +87,9 @@ pub fn run(command: &CampaignCommand) -> Result<i32> {
             json, dump: path, ..
         }
         | CampaignCommand::Objectives {
+            json, dump: path, ..
+        }
+        | CampaignCommand::Play {
             json, dump: path, ..
         } => {
             if let Some(path) = path {
@@ -862,6 +866,200 @@ fn objectives_completion() -> Result<(Value, Value)> {
     Ok((report, dump))
 }
 
+/// `campaign play` — plan 12 §7b M8 (`campaign_sector_cycle` capture/game-over).
+fn campaign_play(planet_name: &str, sector_name: &str) -> Result<(Value, Value)> {
+    use bevy_ecs::entity::Entity;
+    use mind_core::ecs::TeamId;
+    use mind_core::game::play::{
+        PlayEvent, PlaySession, check_game_state, play_new_sector, run_wave_campaign,
+    };
+    use mind_core::game::rules_event::RulesEpoch;
+    use mind_core::game::world_reloader::HostReloader;
+    use mind_core::io::json::objectives::{MapObjective, ObjectiveMarker, PointMarker};
+
+    let registry = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+        .map_err(|error| anyhow::anyhow!("content boot failed: {error}"))?;
+    let mut campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
+    let planet = campaign
+        .planet_id_by_name(planet_name)
+        .ok_or_else(|| anyhow::anyhow!("unknown planet `{planet_name}`"))?;
+    let sector_id = registry
+        .sector_by_name(sector_name)
+        .ok_or_else(|| anyhow::anyhow!("unknown sector `{sector_name}`"))?
+        .sector;
+    // Seed an owned sector with a core so the launch is a normal campaign play.
+    {
+        let sector = campaign
+            .sector_mut(planet, sector_id)
+            .ok_or_else(|| anyhow::anyhow!("sector missing"))?;
+        sector.save = Some(format!("sector-{planet_name}-{sector_id}"));
+        sector.info.info.has_core = true;
+        sector.info.info.waves = true;
+    }
+
+    let mut rules = Rules {
+        waves: true,
+        win_wave: 2,
+        wave_spacing: 10.0,
+        default_team: 1,
+        wave_team: 2,
+        ..Rules::default()
+    };
+    rules.team_rule_mut(1);
+    let mut session = PlaySession::new(rules);
+
+    let mut epoch = RulesEpoch::new();
+    let mut reloader = HostReloader::default();
+    let mut events = play_new_sector(
+        &mut session,
+        &mut campaign,
+        &registry,
+        planet,
+        sector_id,
+        None,
+        &mut epoch,
+        &mut reloader,
+    );
+
+    // Live match state is created after the world reload (the reloader resets
+    // the transient match, exactly like upstream `WorldReloader.begin`).
+    session.teams.register_core(
+        Entity::from_raw_u32(1).ok_or_else(|| anyhow::anyhow!("invalid entity index"))?,
+        TeamId(1),
+        &session.rules,
+    );
+    session.markers.add(
+        1,
+        ObjectiveMarker::Point(PointMarker {
+            world: 1,
+            minimap: 1,
+            light: -1,
+            ..Default::default()
+        }),
+    );
+    session.objectives.add([MapObjective::DestroyUnits(
+        mind_core::io::json::objectives::DestroyUnitsObjective {
+            count: 1,
+            ..Default::default()
+        },
+    )]);
+    let markers_before = session.markers.size();
+    let objectives_before = session.objectives.len();
+
+    events.push(run_wave_campaign(&mut session));
+    events.push(run_wave_campaign(&mut session));
+    // A real sector has enemy spawn points; keep waves enabled so the win-wave
+    // capture path (not the no-spawns disable path) is exercised.
+    session.spawn_count = 1;
+    session.enemies = 0;
+    events.extend(check_game_state(&mut session, &mut campaign));
+
+    let captured = campaign
+        .sector(planet, sector_id)
+        .map(|sector| sector.info.info.was_captured)
+        .unwrap_or(false);
+    let markers_cleared = session.markers.size() == 0;
+    let objectives_cleared = session.objectives.is_empty();
+    assert_eq!(markers_before, 1);
+    assert_eq!(objectives_before, 1);
+
+    // Lose variant: a fresh campaign session with no player core.
+    let mut lose_session = PlaySession::new(Rules {
+        waves: true,
+        win_wave: 0,
+        default_team: 1,
+        wave_team: 2,
+        ..Rules::default()
+    });
+    lose_session.sector = Some((planet, sector_id));
+    let lose_events = check_game_state(&mut lose_session, &mut campaign);
+
+    // `set_rules` campaign guard.
+    use mind_core::game::rules_event::{SetRulesError, apply_set_rules};
+    let mut open = PlaySession::new(Rules::default());
+    let open_is_campaign = open.is_campaign();
+    let mut set_epoch = RulesEpoch::new();
+    let open_ok = apply_set_rules(
+        &mut open.rules,
+        Rules::default(),
+        open_is_campaign,
+        Some(0),
+        &mut set_epoch,
+    )
+    .is_ok();
+    let campaign_is = session.is_campaign();
+    let guard_rejects = matches!(
+        apply_set_rules(
+            &mut session.rules,
+            Rules::default(),
+            campaign_is,
+            Some(set_epoch.0),
+            &mut set_epoch,
+        ),
+        Err(SetRulesError::CampaignReadOnly)
+    );
+
+    let event_names: Vec<String> = events.iter().map(|event| format!("{event:?}")).collect();
+    let lose_names: Vec<String> = lose_events
+        .iter()
+        .map(|event| format!("{event:?}"))
+        .collect();
+    let has_capture = events
+        .iter()
+        .any(|event| matches!(event, PlayEvent::SectorCapture { .. }));
+    let passed = reloader.began
+        && session.phase == mind_core::game::State::Playing
+        && has_capture
+        && !session.rules.waves
+        && !session.rules.attack_mode
+        && session.rules.disable_world_processors
+        && markers_cleared
+        && objectives_cleared
+        && captured
+        && lose_names
+            == vec![format!(
+                "{:?}",
+                PlayEvent::GameOver {
+                    winner: lose_session.wave_team()
+                }
+            )]
+        && open_ok
+        && guard_rejects;
+
+    let checksum = fnv_hex(
+        serde_json::to_string(&json!({
+            "events": event_names,
+            "lose": lose_names,
+        }))?
+        .as_bytes(),
+    );
+    let dump = json!({
+        "format": 1,
+        "scenario": "campaign_play",
+        "planet": planet_name,
+        "sector": sector_name,
+        "events": event_names,
+        "lose_events": lose_names,
+        "markers_before": markers_before,
+        "markers_cleared": markers_cleared,
+        "objectives_cleared": objectives_cleared,
+        "captured": captured,
+        "set_rules_open_ok": open_ok,
+        "set_rules_campaign_rejected": guard_rejects,
+        "checksum": checksum,
+        "pass": passed,
+    });
+    let report = json!({
+        "scenario": "campaign_play",
+        "events": event_names.len(),
+        "captured": captured,
+        "guard_rejects": guard_rejects,
+        "checksum": checksum,
+        "pass": passed,
+    });
+    Ok((report, dump))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -918,5 +1116,11 @@ mod tests {
     fn objectives_golden_matches() {
         let (_, dump) = objectives_completion().unwrap();
         assert_eq!(golden("objectives_completion.json"), canonical(&dump));
+    }
+
+    #[test]
+    fn play_golden_matches() {
+        let (_, dump) = campaign_play("serpulo", "groundZero").unwrap();
+        assert_eq!(golden("play.json"), canonical(&dump));
     }
 }
