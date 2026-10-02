@@ -20,3 +20,4 @@
 pub mod atlas;
 pub mod file_tree;
 pub mod generated;
+pub mod regions;
