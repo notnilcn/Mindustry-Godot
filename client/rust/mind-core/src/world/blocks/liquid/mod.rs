@@ -20,9 +20,8 @@ use crate::content::LiquidId;
 use crate::math::WindowedMean;
 
 pub use bridge::{
-    DirectionLiquidBridgeLink, LiquidBridgeLink, dump_liquid_bridge, first_occupied,
-    positions_valid, resolve_link, update_direction_liquid_bridge, update_liquid_bridge,
-    update_liquid_bridge_tile,
+    direction_bridge_accepts, dump_liquid_bridge, positions_valid, resolve_link,
+    update_direction_liquid_bridge, update_liquid_bridge, update_liquid_bridge_tile,
 };
 pub use movement::{
     accept_liquid, can_dump_liquid, dump_liquid, get_liquid_destination, handle_liquid,
