@@ -233,6 +233,7 @@ impl UnitHarness {
                 grid: &self.build.grid,
                 rng: &mut self.rng,
                 fx: self.fx.as_ref(),
+                audio: &self.build.audio,
                 seq: &mut self.seq,
                 spawned: &mut spawned,
             };
@@ -253,6 +254,7 @@ impl UnitHarness {
                 grid: &self.build.grid,
                 rng: &mut self.rng,
                 fx: self.fx.as_ref(),
+                audio: &self.build.audio,
                 seq: &mut self.seq,
                 spawned: &mut spawned,
             };
