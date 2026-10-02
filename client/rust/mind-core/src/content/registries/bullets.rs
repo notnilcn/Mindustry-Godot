@@ -236,6 +236,8 @@ pub struct BulletDef {
     pub charge_effect: EffectRef,
     /// Trail effect spawned behind the bullet.
     pub trail_effect: EffectRef,
+    /// Overrides the shoot sound in turrets (unused by units).
+    pub shoot_sound: SoundId,
     /// Sound made when hitting something.
     pub hit_sound: SoundId,
     /// Sound made when despawning.
@@ -390,6 +392,8 @@ pub struct BulletDef {
     pub length: f32,
     /// `ContinuousBulletType.damageInterval`.
     pub damage_interval: f32,
+    /// `ContinuousBulletType.shake`.
+    pub shake: f32,
     /// Large hitbox display (`Laser.largeHit`).
     pub large_hit: bool,
     /// Laser side ray length.
@@ -456,6 +460,20 @@ pub struct BulletDef {
     pub end_effect: EffectRef,
     /// `RailBulletType.pointEffectSpace`.
     pub point_effect_space: f32,
+    /// Draw layer (`BulletType.layer = Layer.bullet`).
+    pub layer: f32,
+    /// `ArtilleryBulletType.trailMult`.
+    pub trail_mult: f32,
+    /// `ArtilleryBulletType.trailSize`.
+    pub trail_size: f32,
+    /// `FlakBulletType.explodeRange`.
+    pub explode_range: f32,
+    /// `FlakBulletType.explodeDelay`.
+    pub explode_delay: f32,
+    /// `FlakBulletType.flakDelay`.
+    pub flak_delay: f32,
+    /// `FlakBulletType.flakInterval`.
+    pub flak_interval: f32,
     /// Range cap (`<0` none).
     pub max_range: f32,
     /// Range override (`<0` none; `ExplosionBulletType` sets it in the ctor).
@@ -573,6 +591,7 @@ impl BulletDef {
             smoke_effect: EffectRef::Named(EffectId::SHOOT_SMALL_SMOKE),
             charge_effect: EffectRef::Named(EffectId::NONE),
             trail_effect: EffectRef::Named(EffectId::MISSILE_TRAIL),
+            shoot_sound: SoundId::NONE,
             hit_sound: SoundId::NONE,
             despawn_sound: SoundId::NONE,
             hit_sound_volume: 1.0,
@@ -650,6 +669,7 @@ impl BulletDef {
             colors: Vec::new(),
             length: 0.0,
             damage_interval: 5.0,
+            shake: 0.0,
             large_hit: false,
             side_length: 29.0,
             side_width: 0.7,
@@ -683,6 +703,13 @@ impl BulletDef {
             line_effect: EffectRef::Named(EffectId::NONE),
             end_effect: EffectRef::Named(EffectId::NONE),
             point_effect_space: 20.0,
+            layer: 100.0,
+            trail_mult: 1.0,
+            trail_size: 4.0,
+            explode_range: 30.0,
+            explode_delay: 5.0,
+            flak_delay: 0.0,
+            flak_interval: 6.0,
             max_range: -1.0,
             range_override: -1.0,
             range: 0.0,
@@ -1171,6 +1198,9 @@ impl BulletDef {
         if let Some(effect) = &spec.end_effect {
             bullet.end_effect = effect.clone();
         }
+        if let Some(sound) = spec.shoot_sound {
+            bullet.shoot_sound = sound;
+        }
         if let Some(sound) = spec.hit_sound {
             bullet.hit_sound = sound;
         }
@@ -1435,6 +1465,8 @@ pub struct BulletSpec {
     pub charge_effect: Option<EffectRef>,
     /// Trail effect.
     pub trail_effect: Option<EffectRef>,
+    /// Shoot sound (`BulletType.shootSound`).
+    pub shoot_sound: Option<SoundId>,
     /// Hit sound.
     pub hit_sound: Option<SoundId>,
     /// Despawn sound.
@@ -1587,6 +1619,8 @@ pub struct BulletSpec {
     pub length: Option<f32>,
     /// Damage interval.
     pub damage_interval: Option<f32>,
+    /// Shake (`ContinuousBulletType.shake`).
+    pub shake: Option<f32>,
     /// Large hit.
     pub large_hit: Option<bool>,
     /// Side length.
@@ -1653,6 +1687,20 @@ pub struct BulletSpec {
     pub end_effect: Option<EffectRef>,
     /// Point effect space.
     pub point_effect_space: Option<f32>,
+    /// Draw layer.
+    pub layer: Option<f32>,
+    /// Trail multiplier (`ArtilleryBulletType.trailMult`).
+    pub trail_mult: Option<f32>,
+    /// Trail size (`ArtilleryBulletType.trailSize`).
+    pub trail_size: Option<f32>,
+    /// Explode range (`FlakBulletType.explodeRange`).
+    pub explode_range: Option<f32>,
+    /// Explode delay (`FlakBulletType.explodeDelay`).
+    pub explode_delay: Option<f32>,
+    /// Flak delay (`FlakBulletType.flakDelay`).
+    pub flak_delay: Option<f32>,
+    /// Flak interval (`FlakBulletType.flakInterval`).
+    pub flak_interval: Option<f32>,
     /// Max range.
     pub max_range: Option<f32>,
     /// Range override.

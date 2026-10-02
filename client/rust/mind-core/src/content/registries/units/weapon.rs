@@ -367,6 +367,8 @@ pub struct WeaponSpec {
     pub width_sin_scl: Option<f32>,
     /// `RepairBeamWeapon.laserColor`.
     pub laser_color: Option<Rgba>,
+    /// `RepairBeamWeapon.healColor` (block heals only).
+    pub heal_color: Option<Rgba>,
 }
 
 /// Weapon metadata record (`mindustry.type.Weapon` data half).
@@ -542,6 +544,8 @@ pub struct WeaponDef {
     pub width_sin_scl: f32,
     /// `RepairBeamWeapon.laserColor`.
     pub laser_color: Rgba,
+    /// `RepairBeamWeapon.healColor` (block heals only).
+    pub heal_color: Rgba,
 }
 
 impl WeaponDef {
@@ -639,6 +643,7 @@ impl WeaponDef {
             width_sin_mag: 0.0,
             width_sin_scl: 4.0,
             laser_color: pal::REPAIR_LASER,
+            heal_color: pal::HEAL,
         };
         // Class-tag instance-initializer overrides (`weapons/*.java` `{...}`).
         match spec.kind {
@@ -749,6 +754,7 @@ impl WeaponDef {
             width_sin_mag,
             width_sin_scl,
             laser_color,
+            heal_color,
         );
         if let Some(shoot) = spec.shoot {
             def.shoot = shoot;

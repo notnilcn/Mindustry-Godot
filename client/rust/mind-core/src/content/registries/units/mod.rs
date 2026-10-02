@@ -100,7 +100,7 @@ impl UnitKind {
 
 /// Entity component tag from `@EntityDef` component lists
 /// (`entities/comp/*`; the `c` suffix is part of the Java interface name).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum UnitComponent {
     /// `Unitc`.
     Unit,
@@ -499,6 +499,12 @@ pub struct UnitSpec {
     pub accel: Option<f32>,
     /// Hitbox side.
     pub hit_size: Option<f32>,
+    /// Clipping size (`<0` = derive).
+    pub clip_size: Option<f32>,
+    /// Always unlocked in the tech tree (`UnlockableContent.alwaysUnlocked`).
+    pub always_unlocked: Option<bool>,
+    /// Hide details in custom games when locked (`UnlockableContent.hideDetails`).
+    pub hide_details: Option<bool>,
     /// Death screen shake (`<0` = derive).
     pub death_shake: Option<f32>,
     /// Step shake (`<0` = derive).
@@ -637,6 +643,8 @@ pub struct UnitSpec {
     pub low_altitude: Option<bool>,
     /// Looks at buildings while building.
     pub rotate_to_building: Option<bool>,
+    /// Explicit leg-step override (derived from the entity def in `init`).
+    pub allow_leg_step: Option<bool>,
     /// Leg physics layer flag.
     pub leg_physics_layer: Option<bool>,
     /// Hovers (ignores floor).
@@ -1511,7 +1519,7 @@ impl UnitTypeDef {
             crash_damage_multiplier: spec.crash_damage_multiplier.unwrap_or(1.0),
             wreck_health_multiplier: spec.wreck_health_multiplier.unwrap_or(0.25),
             dps_estimate: -1.0,
-            clip_size: -1.0,
+            clip_size: spec.clip_size.unwrap_or(-1.0),
             drown_time_multiplier: spec.drown_time_multiplier.unwrap_or(1.0),
             strafe_penalty: spec.strafe_penalty.unwrap_or(0.5),
             research_cost_multiplier: spec.research_cost_multiplier.unwrap_or(50.0),
@@ -1566,7 +1574,7 @@ impl UnitTypeDef {
             create_scorch: spec.create_scorch.unwrap_or(true),
             low_altitude: spec.low_altitude.unwrap_or(false),
             rotate_to_building: spec.rotate_to_building.unwrap_or(true),
-            allow_leg_step: false,
+            allow_leg_step: spec.allow_leg_step.unwrap_or(false),
             leg_physics_layer: spec.leg_physics_layer.unwrap_or(true),
             hovering: spec.hovering.unwrap_or(false),
             omni_movement: spec.omni_movement.unwrap_or(true),
@@ -1717,6 +1725,12 @@ impl UnitTypeDef {
             flowfield_path_type: -1,
             path_cost_id: 0,
         };
+        if let Some(always_unlocked) = spec.always_unlocked {
+            def.unlock.always_unlocked = always_unlocked;
+        }
+        if let Some(hide_details) = spec.hide_details {
+            def.unlock.hide_details = hide_details;
+        }
         // Explicit command/stance lists resolve at load (names).
         if !spec.commands.is_empty() {
             def.commands = spec
@@ -2489,4 +2503,278 @@ pub(crate) fn link(registry: &mut ContentRegistry) -> Result<(), ContentError> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::content::test_support::test_registry;
+
+    fn get<'a>(registry: &'a ContentRegistry, name: &str) -> &'a UnitTypeDef {
+        registry.unit_by_name(name).expect("unit present")
+    }
+
+    /// Plan 02 §5 M5: `units::entity_def_table_covers_all_units` — every unit has
+    /// an `EntityDefSpec` with a known component vocabulary, and all 19
+    /// declaration groups are represented.
+    #[test]
+    fn entity_def_table_covers_all_units() {
+        let registry = test_registry();
+        assert_eq!(registry.units().len(), 65, "65 unit records");
+        let mut groups = std::collections::BTreeSet::new();
+        for unit in registry.units() {
+            assert!(
+                !unit.entity_def.components.is_empty(),
+                "{} components",
+                unit.name
+            );
+            assert!(
+                !unit.entity_def.class_name.is_empty(),
+                "{} class name",
+                unit.name
+            );
+            groups.insert((unit.entity_def.components, unit.entity_def.legacy));
+        }
+        assert_eq!(groups.len(), 16, "19 declarations over 16 distinct groups");
+
+        let dagger = get(&registry, "dagger");
+        assert_eq!(dagger.entity_def.class_name, "MechUnit");
+        assert!(!dagger.entity_def.legacy);
+        let risso = get(&registry, "risso");
+        assert!(risso.entity_def.is_naval());
+        let mega = get(&registry, "mega");
+        assert!(mega.entity_def.is_payload());
+        let latum = get(&registry, "latum");
+        assert!(latum.entity_def.allow_leg_step());
+        let mono = get(&registry, "mono");
+        assert_eq!(mono.entity_def.class_name, "UnitEntityLegacyMono");
+        assert!(mono.entity_def.legacy);
+    }
+
+    /// Plan 02 §5 M5: `units::mirrored_weapon_reload_doubled` — `mirror = true`
+    /// weapons yield a flipped copy with doubled reload/recoil (`UnitType.java:1037-1061`).
+    #[test]
+    fn mirrored_weapon_reload_doubled() {
+        let registry = test_registry();
+        let scepter = get(&registry, "scepter");
+        // 3 authored weapons, all mirrored -> 6.
+        assert_eq!(scepter.weapons.len(), 6);
+        let base = &scepter.weapons[0];
+        let copy = &scepter.weapons[1];
+        assert_eq!(base.name, "scepter-weapon");
+        assert_eq!(copy.name, "scepter-weapon");
+        assert_eq!(base.reload, 90.0, "authored 45 doubled");
+        assert_eq!(copy.reload, 90.0);
+        assert_eq!(base.recoil_time, 90.0, "recoilTime <- reload 45, doubled");
+        assert_eq!(copy.recoil_time, 90.0);
+        assert_eq!(base.other_side, 1);
+        assert_eq!(copy.other_side, 0);
+        assert_eq!(base.x, 16.0);
+        assert_eq!(copy.x, -16.0, "flip negates x");
+        assert!(copy.flip_sprite);
+
+        // The two scepter-mounts share the local `smallBullet` bullet id.
+        assert_eq!(scepter.weapons[2].bullet.id, scepter.weapons[4].bullet.id);
+        assert_ne!(scepter.weapons[2].bullet.id, scepter.weapons[0].bullet.id);
+
+        // Unmirrored weapons stay single (mono has no weapons at all).
+        let mono = get(&registry, "mono");
+        assert_eq!(mono.weapons.len(), 0);
+    }
+
+    /// Plan 02 §5 M5: `units::research_requirements_derived` —
+    /// `UnitType.researchRequirements()` from factory/reconstructor plans
+    /// (`UnitType.java:1405-1427`).
+    #[test]
+    fn research_requirements_derived() {
+        let registry = test_registry();
+        let silicon = registry.item_id("silicon").unwrap();
+        let lead = registry.item_id("lead").unwrap();
+        let beryllium = registry.item_id("beryllium").unwrap();
+
+        // dagger: ground-factory plan (silicon 10, lead 10) x 0.5 multiplier.
+        let dagger = get(&registry, "dagger");
+        assert_eq!(
+            dagger.research_requirements(&registry),
+            vec![ItemStack::new(silicon, 5), ItemStack::new(lead, 5)]
+        );
+
+        // nova: plan (silicon 30, lead 20, titanium 20) x 50.
+        let nova = get(&registry, "nova");
+        let titanium = registry.item_id("titanium").unwrap();
+        assert_eq!(
+            nova.research_requirements(&registry),
+            vec![
+                ItemStack::new(silicon, 1500),
+                ItemStack::new(lead, 1000),
+                ItemStack::new(titanium, 1000)
+            ]
+        );
+
+        // stell: tank-fabricator plan resolves, but the authored
+        // `researchCostMultiplier = 0f` zeroes every stack and
+        // `researchRequirements()` filters zeros out (`UnitTypes.java:2664`).
+        let stell = get(&registry, "stell");
+        assert_eq!(stell.research_cost_multiplier, 0.0);
+        assert!(stell.research_requirements(&registry).is_empty());
+        assert_eq!(
+            first_requirements(stell, &registry),
+            Some(vec![
+                ItemStack::new(beryllium, 40),
+                ItemStack::new(silicon, 50)
+            ])
+        );
+
+        // pulsar: additive-reconstructor upgrade (nova -> pulsar), consume
+        // items of the reconstructor x 50.
+        let pulsar = get(&registry, "pulsar");
+        let reqs = pulsar.research_requirements(&registry);
+        assert!(!reqs.is_empty(), "reconstructor requirements derive");
+        let (blocks, _) = pulsar.get_dependencies(&registry);
+        assert!(
+            blocks
+                .iter()
+                .any(|id| registry.block(*id).unwrap().name == "additive-reconstructor"),
+            "pulsar depends on the additive reconstructor"
+        );
+
+        // Units with no producer get the base (empty) requirements.
+        let dummy = get(&registry, "dummy");
+        assert!(dummy.research_requirements(&registry).is_empty());
+    }
+
+    /// Plan 02 §5 M5: `units::hidden_flags` — `UnitType.hidden` + the
+    /// `MissileUnitType` preset hidden rule.
+    #[test]
+    fn hidden_flags() {
+        let registry = test_registry();
+        for name in [
+            "renale",
+            "latum",
+            "block",
+            "manifold",
+            "assembly-drone",
+            "dummy",
+        ] {
+            assert!(get(&registry, name).hidden, "{name} hidden");
+            assert!(get(&registry, name).is_hidden(), "{name} is_hidden");
+        }
+        for name in ["anthicus-missile", "quell-missile", "disrupt-missile"] {
+            assert!(get(&registry, name).hidden, "{name} hidden by preset");
+        }
+        assert!(!get(&registry, "dagger").hidden);
+        assert!(!get(&registry, "flare").hidden);
+    }
+
+    /// `UnitType.init()` derived metadata (`type/UnitType.java:915-1127`):
+    /// range/maxRange from weapon ranges, fog radius, item capacity, aim dst,
+    /// death/wreck sound defaults, naval preset.
+    #[test]
+    fn derived_metadata() {
+        let registry = test_registry();
+        let dagger = get(&registry, "dagger");
+        // bullet 2.5 speed x 60 lifetime = 150, minus the 4 margin.
+        assert_eq!(dagger.range, 146.0);
+        assert_eq!(dagger.max_range, 146.0);
+        assert_eq!(dagger.fog_radius, 174.0 / 8.0);
+        assert_eq!(dagger.item_capacity, 30);
+        assert_eq!(dagger.aim_dst, 16.0, "non-rotating weapon -> hitSize*2");
+        assert_eq!(dagger.step_shake, 0.0);
+        assert!(!dagger.mech_step_particles);
+        assert_eq!(dagger.death_sound, SoundId::UNIT_EXPLODE1);
+        assert_eq!(dagger.wreck_sound, SoundId::WRECK_FALL);
+        assert_eq!(dagger.commands.len(), 2, "move + enterPayload");
+        assert_eq!(
+            dagger.stances.len(),
+            5,
+            "stop/holdfire/pursuetarget/patrol/ram"
+        );
+        assert!(!dagger.naval);
+
+        // Naval preset (`UnitType.java:925-934`).
+        let risso = get(&registry, "risso");
+        assert!(risso.naval);
+        assert!(!risso.can_drown);
+        assert!(!risso.omni_movement);
+        assert_eq!(risso.shadow_elevation, 0.11);
+        let wet = registry.status_id("wet").unwrap();
+        assert!(risso.immunities.contains(&wet));
+
+        // Erekir fog radius override + flying env rule.
+        let anthicus = get(&registry, "anthicus");
+        assert!(anthicus.env_enabled.contains(EnvFlag::Space) || !anthicus.flying);
+
+        // Reign is big: death sound by hit size, mech particles.
+        let reign = get(&registry, "reign");
+        assert!(reign.mech_step_particles);
+        assert_eq!(reign.death_sound, SoundId::UNIT_EXPLODE3);
+        assert_eq!(reign.wreck_sound, SoundId::WRECK_FALL_BIG);
+    }
+
+    /// `ErekirTechTree.rebalance()` wiring (M5): weapon bullets of
+    /// `ErekirUnitType`/`TankUnitType` units are scaled once by 0.75.
+    #[test]
+    fn rebalance_scales_erekir_unit_bullets() {
+        let registry = test_registry();
+        let stell = get(&registry, "stell");
+        assert_eq!(stell.kind, UnitKind::TankUnitType);
+        let stell_bullet = registry.bullet(stell.weapons[0].bullet.id).unwrap();
+        assert_eq!(stell_bullet.damage, 30.0, "authored 40 x 0.75");
+
+        // Serpulo units are untouched.
+        let dagger = get(&registry, "dagger");
+        let dagger_bullet = registry.bullet(dagger.weapons[0].bullet.id).unwrap();
+        assert_eq!(dagger_bullet.damage, 9.0);
+
+        // Every Erekir/Tank unit's weapon bullets are scaled; spot-check merui.
+        let merui = get(&registry, "merui");
+        assert_eq!(merui.kind, UnitKind::ErekirUnitType);
+        for weapon in &merui.weapons {
+            let bullet = registry.bullet(weapon.bullet.id).unwrap();
+            assert!(
+                bullet.damage < 1000.0,
+                "merui weapon bullet {} damage {}",
+                bullet.id.raw(),
+                bullet.damage
+            );
+        }
+    }
+
+    /// Bullet metadata: internal bullets keep their ids (prefix), and the
+    /// derived `range`/`despawnHit`/`lightningType` init rules hold.
+    #[test]
+    fn bullet_ids_and_derivations() {
+        let registry = test_registry();
+        // The 6 internal bullets keep upstream ids (upstream-prefix space).
+        assert_eq!(registry.bullets().len(), 112);
+        let placeholder = registry
+            .bullet(crate::content::registries::bullets::PLACEHOLDER)
+            .unwrap();
+        assert_eq!(placeholder.sprite.as_deref(), Some("ohno"));
+
+        // Lightning bullet defaults (`BulletType.init` + `bullets::link`).
+        let scepter = get(&registry, "scepter");
+        let main = registry.bullet(scepter.weapons[0].bullet.id).unwrap();
+        assert!(main.despawn_hit, "lightning > 0 -> despawnHit");
+        assert_eq!(main.lightning, 2);
+        let shocked = registry.status_id("shocked").unwrap();
+        // status was already set? scepter bullet has no explicit status -> shocked.
+        assert_eq!(main.status, shocked);
+        assert_eq!(
+            main.lightning_type,
+            Some(crate::content::registries::bullets::DAMAGE_LIGHTNING),
+            "collides air+ground -> damageLightning"
+        );
+
+        // Zenith missile bullet: drag changes the range formula.
+        let zenith = get(&registry, "zenith");
+        let zb = registry.bullet(zenith.weapons[0].bullet.id).unwrap();
+        let expected = 3.0 * (1.0 - (1.0_f32 - -0.003).powf(50.0)) / -0.003;
+        assert!(
+            (zb.range - expected).abs() < 0.01,
+            "{} vs {}",
+            zb.range,
+            expected
+        );
+    }
 }

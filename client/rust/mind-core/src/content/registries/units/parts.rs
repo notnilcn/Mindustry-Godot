@@ -150,6 +150,16 @@ pub enum PartProgressSpec {
     Mod(Box<PartProgressSpec>, f32),
     /// `base.loop(time)`.
     Loop(Box<PartProgressSpec>, f32),
+    /// `p -> Mathf.absin(Time.time + offset, scl, mag)` (custom time-wave
+    /// progress used by the anthicus blades).
+    AbsinTime {
+        /// Time offset.
+        offset: f32,
+        /// Period scale.
+        scl: f32,
+        /// Amplitude.
+        mag: f32,
+    },
 }
 
 /// One entry of `RegionPart.moves` (`DrawPart.PartMove`).
