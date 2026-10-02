@@ -141,7 +141,11 @@ impl Instruction {
     /// Executes one instruction against `exec`.
     pub fn run(&self, exec: &mut Executor) {
         match self {
-            Instruction::Noop | Instruction::End => {}
+            Instruction::Noop => {}
+            Instruction::End => {
+                let len = exec.instructions.len() as f64;
+                exec.set_num(exec.counter, len);
+            }
             Instruction::Stop => {
                 let counter = exec.counter;
                 let cur = exec.arena.get(counter).num as i32;

@@ -159,10 +159,7 @@ pub fn unescape(s: &str) -> String {
                 continue;
             } else if next == 'u' && i + 5 < chars.len() {
                 let hex: String = chars[i + 2..i + 6].iter().collect();
-                if let Some(ch) = u32::from_str_radix(&hex, 16)
-                    .ok()
-                    .and_then(char::from_u32)
-                {
+                if let Some(ch) = u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32) {
                     out.push(ch);
                 }
                 i += 6;
