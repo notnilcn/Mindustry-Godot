@@ -18,6 +18,13 @@ thiserror.workspace = true
 xxhash-rust.workspace = true
 flate2.workspace = true
 
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "io"
+harness = false
+
 [lints]
 workspace = true
 

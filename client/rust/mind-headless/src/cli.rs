@@ -223,6 +223,29 @@ pub enum IoCommand {
         #[arg(long)]
         json: bool,
     },
+
+    /// Save/load/meta timings on the synthetic fixture (plan 04 M8 §7b/§7d):
+    /// records P50/P95 per phase. `serpulo/groundZero` waits for plan 06.
+    BenchSave {
+        /// Map profile. Only `synthetic` (64×64 fixture) exists until plan 06.
+        #[arg(long, default_value = "synthetic")]
+        map: String,
+        /// Synthetic world width.
+        #[arg(long, default_value_t = 64)]
+        width: u16,
+        /// Synthetic world height.
+        #[arg(long, default_value_t = 64)]
+        height: u16,
+        /// Ticks simulated before saving (mid-game-ish fixture state).
+        #[arg(long, default_value_t = 600)]
+        ticks: u64,
+        /// Timed iterations per phase.
+        #[arg(long, default_value_t = 50)]
+        iters: u64,
+        /// Emit a machine-readable JSON report.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// `content` subcommands (plan 02 §7b).

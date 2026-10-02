@@ -377,3 +377,43 @@ pub struct IoMapListReport {
     /// The listing (sorted by file name).
     pub entries: Vec<IoMapListEntry>,
 }
+
+/// One phase timing distribution in milliseconds (plan 04 M8 §7d).
+#[derive(Debug, Clone, Serialize)]
+pub struct IoBenchStat {
+    /// 50th percentile.
+    pub p50_ms: f64,
+    /// 95th percentile.
+    pub p95_ms: f64,
+    /// Fastest sample.
+    pub min_ms: f64,
+    /// Slowest sample.
+    pub max_ms: f64,
+}
+
+/// `io bench-save` report (plan 04 M8 §7b/§7d).
+#[derive(Debug, Clone, Serialize)]
+pub struct IoBenchSaveReport {
+    /// Map profile (only `synthetic` until plan 06).
+    pub map: String,
+    /// World width.
+    pub width: u16,
+    /// World height.
+    pub height: u16,
+    /// Ticks simulated before saving.
+    pub ticks: u64,
+    /// Timed iterations per phase.
+    pub iters: u64,
+    /// Save file size in bytes.
+    pub bytes: u64,
+    /// Save (serialize + deflate + file write).
+    pub save: IoBenchStat,
+    /// Load (read + inflate + apply regions).
+    pub load: IoBenchStat,
+    /// Meta-only read.
+    pub meta: IoBenchStat,
+    /// Load verification (checksum equality on the last timed load).
+    pub pass: bool,
+    /// Budget note (the §7d groundZero baseline needs plan 06 real maps).
+    pub note: String,
+}

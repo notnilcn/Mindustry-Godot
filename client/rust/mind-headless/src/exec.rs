@@ -22,9 +22,9 @@ use crate::paths;
 use crate::registry;
 use crate::report::{
     BenchReport, ContentBenchReport, ContentIdEntry, ContentIdsReport, ContentLoadReport,
-    ContentTypeCount, ContentTypeEntries, IoCheckClassIdsReport, IoCheckRevisionsReport,
-    IoDefRevisionReport, IoDumpMetaReport, IoMapListEntry, IoMapListReport, IoRoundtripReport,
-    IoSettingsReport, RunReport, SimReport, TileCheck,
+    ContentTypeCount, ContentTypeEntries, IoBenchSaveReport, IoBenchStat, IoCheckClassIdsReport,
+    IoCheckRevisionsReport, IoDefRevisionReport, IoDumpMetaReport, IoMapListEntry, IoMapListReport,
+    IoRoundtripReport, IoSettingsReport, RunReport, SimReport, TileCheck,
 };
 use crate::stdb_scenarios::StdbScenario;
 
@@ -149,6 +149,14 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
                 json,
             } => cmd_io_roundtrip(map, *width, *height, *ticks, out.as_deref(), *json),
             IoCommand::MapList { dir, json } => cmd_io_map_list(dir, *json),
+            IoCommand::BenchSave {
+                map,
+                width,
+                height,
+                ticks,
+                iters,
+                json,
+            } => cmd_io_bench_save(map, *width, *height, *ticks, *iters, *json),
         },
     }
 }
@@ -294,6 +302,126 @@ fn cmd_io_roundtrip(
         checksum_before,
         checksum_after,
         pass,
+    };
+    print_report(&report, json)?;
+    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+}
+
+/// Plan 04 M8 (§7b/§7d): P50/P95 timings for save/load/meta on the synthetic
+/// fixture world (the §7d `serpulo/groundZero` baseline needs plan 06 maps).
+fn cmd_io_bench_save(
+    map: &str,
+    width: u16,
+    height: u16,
+    ticks: u64,
+    iters: u64,
+    json: bool,
+) -> anyhow::Result<i32> {
+    use mind_core::io::fs::{FileSystem, NativeFs};
+    use mind_core::io::save::fixture::{FixtureContext, FixtureSink, FixtureWorld};
+    use mind_core::io::save::versions::v1::base_meta_tags;
+    use mind_core::io::save::{SaveIo, SaveOptions, SaveReadState, WriteContext};
+
+    if map != "synthetic" {
+        return Err(anyhow!(
+            "io bench-save --map {map}: real maps need plan 06 (world/generators); use `--map synthetic`"
+        ));
+    }
+    if iters == 0 {
+        return Err(anyhow!("io bench-save --iters must be greater than 0"));
+    }
+    let fs = NativeFs;
+    let path = std::env::temp_dir().join("mind-io-bench.msav");
+    let backup = SaveIo::backup_file_for(&path);
+    let registry = boot_content()?;
+
+    // Mid-game-ish fixture: build + tick once (outside the timed regions).
+    let mut world = FixtureWorld::synthetic(&registry, width, height);
+    for _ in 0..ticks {
+        world.tick();
+    }
+    let checksum_before = world.checksum_hex();
+    let mut tags = base_meta_tags(width, height, world.wave, "synthetic");
+    tags.insert("tick".to_owned(), world.tick.to_string());
+
+    // Save: serialize + deflate + atomic file write (fresh file every run).
+    let mut save_samples = Vec::with_capacity(iters as usize);
+    for _ in 0..iters {
+        let _ = fs.delete(&path);
+        let _ = fs.delete(&backup);
+        let mut ctx = WriteContext::meta_only(tags.clone());
+        ctx.content = Some(&registry);
+        ctx.map = Some(&world);
+        ctx.entities = Some(&world);
+        let start = Instant::now();
+        SaveIo::save(&fs, &path, &ctx, &SaveOptions::new())?;
+        save_samples.push(start.elapsed().as_nanos() as u64);
+    }
+    let bytes = fs.len(&path).unwrap_or(0);
+
+    // Load: read + inflate + apply regions into a fresh fixture world.
+    let mut load_registry = boot_content()?;
+    let mut load_samples = Vec::with_capacity(iters as usize);
+    for _ in 0..iters {
+        let cell = std::cell::RefCell::new(FixtureWorld::new(&registry, 0, 0));
+        let mut context = FixtureContext(&cell);
+        let mut sink = FixtureSink(&cell);
+        let mut state = SaveReadState {
+            context: Some(&mut context),
+            content: Some(&mut load_registry),
+            entities: Some(&mut sink),
+            ..SaveReadState::default()
+        };
+        let start = Instant::now();
+        SaveIo::load(&fs, &path, &mut state)?;
+        load_samples.push(start.elapsed().as_nanos() as u64);
+    }
+
+    // Meta-only read.
+    let mut meta_samples = Vec::with_capacity(iters as usize);
+    for _ in 0..iters {
+        let start = Instant::now();
+        let _ = SaveIo::get_meta(&fs, &path)?;
+        meta_samples.push(start.elapsed().as_nanos() as u64);
+    }
+
+    // Load verification (not timed): last read applies meta + plans and must
+    // reproduce the save-side checksum.
+    let cell = std::cell::RefCell::new(FixtureWorld::new(&registry, 0, 0));
+    let mut context = FixtureContext(&cell);
+    let mut sink = FixtureSink(&cell);
+    let mut state = SaveReadState {
+        context: Some(&mut context),
+        content: Some(&mut load_registry),
+        entities: Some(&mut sink),
+        ..SaveReadState::default()
+    };
+    SaveIo::load(&fs, &path, &mut state)?;
+    let state_tags = state.tags.clone();
+    let state_team_plans = state.team_plans.clone();
+    drop(state);
+    let mut loaded = cell.into_inner();
+    loaded.apply_meta(&state_tags);
+    loaded.apply_team_plans(state_team_plans);
+    let pass = checksum_before == loaded.checksum_hex();
+    if !pass {
+        log::error!("io bench-save load verification failed: checksums differ");
+    }
+
+    let report = IoBenchSaveReport {
+        map: map.to_owned(),
+        width,
+        height,
+        ticks,
+        iters,
+        bytes,
+        save: io_bench_stat(&mut save_samples),
+        load: io_bench_stat(&mut load_samples),
+        meta: io_bench_stat(&mut meta_samples),
+        pass,
+        note: String::from(
+            "synthetic 64x64 fixture; the 7d groundZero baseline needs plan 06 real maps",
+        ),
     };
     print_report(&report, json)?;
     Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
@@ -906,6 +1034,19 @@ fn percentile(samples: &[u64], percent: usize) -> u64 {
     debug_assert!(!samples.is_empty());
     let index = (samples.len() * percent / 100).min(samples.len().saturating_sub(1));
     samples.get(index).copied().unwrap_or(0)
+}
+
+/// Sorts nanosecond samples and reports the P50/P95/min/max in milliseconds.
+fn io_bench_stat(samples: &mut [u64]) -> IoBenchStat {
+    samples.sort_unstable();
+    let millis = |value: u64| value as f64 / 1_000_000.0;
+    let last = samples.last().copied().unwrap_or(0);
+    IoBenchStat {
+        p50_ms: millis(percentile(samples, 50)),
+        p95_ms: millis(percentile(samples, 95)),
+        min_ms: millis(samples.first().copied().unwrap_or(0)),
+        max_ms: millis(last),
+    }
 }
 
 /// Boots base content (create + init + postInit + load), the `content` harness
