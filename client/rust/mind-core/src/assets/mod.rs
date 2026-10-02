@@ -16,3 +16,5 @@
 //! parity ABI — never reordered, auto-cased or path-qualified. This module tree
 //! never reads the filesystem outside an injected `FileTree` and stays
 //! Godot-free and tokio-free (HLP §2.2).
+
+pub mod atlas;

@@ -129,8 +129,63 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             AssetsCommand::MigrateCheck { repo, manifest } => {
                 cmd_assets_migrate_check(repo.as_deref(), manifest.as_deref())
             }
+            AssetsCommand::Index { atlas, region } => cmd_assets_index(atlas, region),
         },
     }
+}
+
+/// Plan 03 M1 `assets index`: manifest summary + region probes as JSON.
+fn cmd_assets_index(atlas: &Path, probes: &[String]) -> anyhow::Result<i32> {
+    let manifest_path = atlas.join("sprites.atlas.json");
+    let text = std::fs::read_to_string(&manifest_path)
+        .with_context(|| format!("reading {}", manifest_path.display()))?;
+    let index = mind_core::assets::atlas::AtlasIndex::from_manifest_json(&text)
+        .map_err(|error| anyhow!("{error}"))?;
+
+    let mut pass = true;
+    let probe_reports: Vec<serde_json::Value> = probes
+        .iter()
+        .map(|name| {
+            let found = index.find(name);
+            if found.is_none() {
+                log::error!("assets index: region `{name}` not found");
+                pass = false;
+            }
+            match found {
+                Some(region) => serde_json::json!({
+                    "name": name,
+                    "found": true,
+                    "page": region.page,
+                    "x": region.x,
+                    "y": region.y,
+                    "w": region.w,
+                    "h": region.h,
+                    "splits": region.splits,
+                    "pads": region.pads,
+                    "offsets": region.offsets,
+                    "pageType": region.page_type.name(),
+                }),
+                None => serde_json::json!({"name": name, "found": false}),
+            }
+        })
+        .collect();
+
+    let report = serde_json::json!({
+        "atlas": manifest_path.display().to_string(),
+        "fallback": index.fallback,
+        "inputsHash": index.inputs_hash,
+        "pages": index.pages().iter().map(|page| serde_json::json!({
+            "index": page.index,
+            "type": page.type_.name(),
+            "file": page.file,
+            "width": page.width,
+            "height": page.height,
+        })).collect::<Vec<_>>(),
+        "regions": index.len(),
+        "probes": probe_reports,
+    });
+    println!("{}", serde_json::to_string_pretty(&report)?);
+    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
 }
 
 /// Plan 03 §7.1b `assets migrate-check`: the vendored trees match

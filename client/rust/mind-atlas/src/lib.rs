@@ -13,8 +13,21 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod atlas_json;
+pub mod autotile;
 pub mod error;
+pub mod hash;
 pub mod manifest;
+pub mod mathf;
 pub mod migrate;
+pub mod ninepatch;
+pub mod noise;
+pub mod pack;
+pub mod pack_json;
+pub mod page;
+pub mod pixmaps;
+pub mod png_io;
+pub mod vector_table;
+pub mod whitespace;
 
 pub use error::AtlasError;

@@ -142,20 +142,47 @@ pub fn combined_hash(files: &[FileHash]) -> String {
     out
 }
 
-/// Deterministic sorted hash walk over `root`.
+/// Deterministic sorted hash walk over `root`. Reads fan out across threads;
+/// results are collected back in sorted path order (§3.5/§3.9 determinism).
 pub fn hash_tree(root: &Path, exclude: &impl Fn(&str, bool) -> bool) -> Result<Vec<FileHash>> {
     let mut paths = Vec::new();
     walk(root, root, exclude, &mut paths)?;
     paths.sort();
+
+    let threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .min(8);
+    let mut hashed: Vec<Option<std::result::Result<(String, u64), String>>> = Vec::new();
+    hashed.resize_with(paths.len(), || None);
+    std::thread::scope(|scope| {
+        let chunk = paths.len().div_ceil(threads).max(1);
+        let mut slots = hashed.as_mut_slice();
+        for shard in paths.chunks(chunk) {
+            let (head, tail) = slots.split_at_mut(shard.len().min(slots.len()));
+            slots = tail;
+            scope.spawn(move || {
+                for (rel, slot) in shard.iter().zip(head.iter_mut()) {
+                    let full = root.join(rel);
+                    *slot = Some(
+                        std::fs::read(&full)
+                            .map_err(|error| format!("reading {}: {error}", full.display()))
+                            .map(|bytes| (sha256_hex(&bytes), bytes.len() as u64)),
+                    );
+                }
+            });
+        }
+    });
+
     let mut out = Vec::with_capacity(paths.len());
-    for rel in paths {
-        let full = root.join(&rel);
-        let meta = fs::metadata(&full)?;
-        let normalized = rel.to_string_lossy().replace('\\', "/");
+    for (rel, slot) in paths.iter().zip(hashed) {
+        let (hash, len) = slot
+            .ok_or_else(|| AtlasError::Invalid(format!("missing hash for {}", rel.display())))?
+            .map_err(AtlasError::Invalid)?;
         out.push(FileHash {
-            path: normalized,
-            sha256: sha256_file(&full)?,
-            len: meta.len(),
+            path: rel.to_string_lossy().replace('\\', "/"),
+            sha256: hash,
+            len,
         });
     }
     Ok(out)

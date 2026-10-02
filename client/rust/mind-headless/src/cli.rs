@@ -154,6 +154,18 @@ pub enum AssetsCommand {
         #[arg(long)]
         manifest: Option<PathBuf>,
     },
+
+    /// Load a `sprites.atlas.json` manifest and dump the index summary as
+    /// JSON (M1). With `--region`, probe specific regions; exits non-zero
+    /// when any probe misses.
+    Index {
+        /// Directory containing `sprites.atlas.json` (e.g. `assets/sprites`).
+        #[arg(long)]
+        atlas: PathBuf,
+        /// Region name to probe (repeatable).
+        #[arg(long)]
+        region: Vec<String>,
+    },
 }
 
 /// `content` subcommands (plan 02 §7b).
