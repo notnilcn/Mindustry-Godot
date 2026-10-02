@@ -19,10 +19,11 @@ pub fn run(command: &BlocksCommand) -> Result<()> {
         BlocksCommand::Audit { json } => audit(*json),
         BlocksCommand::Scenario { name, json } => scenario(name, *json),
         BlocksCommand::Bench {
+            profile,
             buildings,
             ticks,
             json,
-        } => bench(*buildings, *ticks, *json),
+        } => bench(profile, *buildings, *ticks, *json),
     }
 }
 
@@ -265,34 +266,112 @@ fn name_of(harness: &BuildHarness, block: BlockId) -> String {
         .unwrap_or_else(|| format!("?{}", block.raw()))
 }
 
-fn bench(buildings: usize, ticks: u64, json: bool) -> Result<()> {
-    let mut harness = BuildHarness::new(64, 64, 7);
-    let wall = block(&harness, "copper-wall")?;
+fn bench(profile: &str, buildings: usize, ticks: u64, json: bool) -> Result<()> {
+    let mut harness = BuildHarness::new(96, 96, 7);
+    let mut samples: Vec<u64> = Vec::new();
+    let mut detail = serde_json::json!({});
     let mut placed = 0usize;
-    'outer: for y in 0..64 {
-        for x in 0..64 {
-            if placed >= buildings {
-                break 'outer;
+
+    match profile {
+        "place" => {
+            let large = block(&harness, "copper-wall-large")?;
+            for i in 0..buildings {
+                let x = (i % 45) as i32 * 2;
+                let y = (i / 45) as i32 * 2;
+                let start = Instant::now();
+                let ok = harness.place(x, y, large, 0, true);
+                samples.push(start.elapsed().as_nanos() as u64 / 1000);
+                if ok {
+                    placed += 1;
+                }
             }
-            if harness.place(x, y, wall, 0, true) {
+            detail = serde_json::json!({ "placed": placed });
+        }
+        "construct" => {
+            let large = block(&harness, "copper-wall-large")?;
+            for i in 0..buildings {
+                let x = (i % 45) as i32 * 2;
+                let y = (i / 45) as i32 * 2;
+                if harness.place(x, y, large, 0, false) {
+                    placed += 1;
+                }
+            }
+            for _ in 0..ticks.max(1) {
+                let start = Instant::now();
+                harness.construct_tick(0.05);
+                samples.push(start.elapsed().as_nanos() as u64 / 1000);
+            }
+            detail = serde_json::json!({ "placed": placed });
+        }
+        "active" => {
+            let smelter = block(&harness, "silicon-smelter")?;
+            let coal = harness.content().item_id("coal");
+            let sand = harness.content().item_id("sand");
+            for i in 0..buildings {
+                let x = (i % 30) as i32 * 3;
+                let y = (i / 30) as i32 * 3;
+                if !harness.place(x, y, smelter, 0, true) {
+                    continue;
+                }
                 placed += 1;
+                if let Some(e) = harness.build_at(x, y) {
+                    if let (Some(coal), Some(sand)) = (coal, sand)
+                        && let Some(mut items) = harness.world.get_mut::<ItemModule>(e)
+                    {
+                        items.add(coal, 1000, 1000);
+                        items.add(sand, 1000, 1000);
+                    }
+                    if let Some(mut power) = harness.world.get_mut::<PowerModule>(e) {
+                        power.status = 1.0;
+                    }
+                }
             }
+            time_ticks(&mut harness, ticks, &mut samples);
+            detail = serde_json::json!({ "placed": placed, "active": true });
+        }
+        _ => {
+            let wall = block(&harness, "copper-wall")?;
+            for i in 0..buildings {
+                let x = (i % 90) as i32;
+                let y = (i / 90) as i32;
+                if harness.place(x, y, wall, 0, true) {
+                    placed += 1;
+                }
+            }
+            time_ticks(&mut harness, ticks, &mut samples);
+            detail = serde_json::json!({ "placed": placed });
         }
     }
-    let start = Instant::now();
-    for _ in 0..ticks {
-        harness.tick();
-    }
-    let elapsed = start.elapsed();
-    let per_tick_us = elapsed.as_secs_f64() * 1_000_000.0 / ticks as f64;
+
+    let (p50_us, p99_us) = percentiles(samples);
     let report = serde_json::json!({
         "scenario": "blocks_bench",
+        "profile": profile,
         "buildings": placed,
         "ticks": ticks,
-        "total_ms": elapsed.as_secs_f64() * 1000.0,
-        "per_tick_us": per_tick_us,
+        "p50_us": p50_us,
+        "p99_us": p99_us,
         "checksum": harness.checksum_hex(),
+        "detail": detail,
     });
     print_json(&report, json, !json);
     Ok(())
+}
+
+fn time_ticks(harness: &mut BuildHarness, ticks: u64, samples: &mut Vec<u64>) {
+    for _ in 0..ticks {
+        let start = Instant::now();
+        harness.tick();
+        samples.push(start.elapsed().as_nanos() as u64 / 1000);
+    }
+}
+
+fn percentiles(mut samples: Vec<u64>) -> (u64, u64) {
+    if samples.is_empty() {
+        return (0, 0);
+    }
+    samples.sort_unstable();
+    let p50 = samples[samples.len() * 50 / 100];
+    let p99 = samples[(samples.len() * 99 / 100).min(samples.len() - 1)];
+    (p50, p99)
 }

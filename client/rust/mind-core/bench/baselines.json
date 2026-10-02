@@ -1,0 +1,28 @@
+{
+  "note": "Plan 07 §7d performance budgets (dev machine, release build). Measured with `mind-headless blocks bench --profile <p> --json`; plan 23 owns the CI gate.",
+  "profiles": {
+    "buildings": {
+      "budget_us": { "p50": 600, "p99": 1500 },
+      "command": "blocks bench --profile buildings --buildings 2000 --ticks 3600 --warmup 600"
+    },
+    "active": {
+      "budget_us": { "p99": 2000 },
+      "command": "blocks bench --profile active --buildings 500 --ticks 3600"
+    },
+    "place": {
+      "budget_us": { "p99": 250 },
+      "command": "blocks bench --profile place --buildings 2000"
+    },
+    "construct": {
+      "budget_us": { "p99": 300 },
+      "command": "blocks bench --profile construct --buildings 1000 --ticks 1"
+    }
+  },
+  "alloc_audit": {
+    "update_buildings_steady_state": 0,
+    "feature": "alloc-audit"
+  },
+  "building_io_ns_per_building": 200,
+  "mcp_frame_cpu_ms": 2,
+  "scenario_consumer_efficiency_ms": 400
+}

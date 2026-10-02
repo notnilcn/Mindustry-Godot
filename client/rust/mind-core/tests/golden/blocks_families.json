@@ -1,0 +1,20 @@
+{
+  "scenario": "blocks_families",
+  "blocks": 447,
+  "families": {
+    "campaign": 4,
+    "construct": 16,
+    "defense": 31,
+    "environment": 159,
+    "legacy": 5,
+    "other": 181,
+    "production": 45,
+    "sandbox": 6
+  },
+  "rotating": 96,
+  "with_consumers": 121,
+  "scenarios": {
+    "wall_door": "11cdd10ecd9904db",
+    "consumer_efficiency": "4354ab6b84c2293d"
+  }
+}
