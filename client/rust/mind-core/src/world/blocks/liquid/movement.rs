@@ -8,6 +8,11 @@
 //! The differing-liquid reaction branch dispatches to plan-10 `Fx`/damage hooks
 //! (no-op here, recorded as R10). `liquidPressure` defaults to `1.0`; conduit
 //! overrides are M3 block knobs.
+//!
+//! Two neighbor-lookup modes are provided: the original `WorldGrid`-taking
+//! functions (unit tests/scenarios) and `*_proximity` variants that walk
+//! `Building.proximity`, required because plan 07's `updateTile` behavior API
+//! does not hand out a `WorldGrid`.
 
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
@@ -38,7 +43,7 @@ pub fn relative_to_dir(world: &World, entity: Entity, cx: i16, cy: i16) -> u8 {
     }
 }
 
-/// `Building.nearby(dir)`: the building one tile in `dir`.
+/// `Building.nearby(dir)`: the building one tile in `dir` (grid lookup).
 pub fn nearby(world: &World, grid: &WorldGrid, entity: Entity, dir: u8) -> Option<Entity> {
     let building = world.get::<Building>(entity)?;
     let (dx, dy) = match dir {
@@ -56,14 +61,53 @@ pub fn nearby(world: &World, grid: &WorldGrid, entity: Entity, dir: u8) -> Optio
     grid.tile(x, y).build
 }
 
+/// `Building.nearby(dir)` resolved from `Building.proximity` (no grid needed).
+///
+/// Plan 07's `updateTile` behavior API does not hand out a `WorldGrid`, so
+/// conduit/router/junction behaviors use this. Multi-tile neighbors are matched
+/// by anchor tile (exact for the 1x1 conduit/junction/router family).
+pub fn nearby_proximity(world: &World, entity: Entity, dir: u8) -> Option<Entity> {
+    let building = world.get::<Building>(entity)?;
+    let (dx, dy) = match dir {
+        0 => (1, 0),
+        1 => (0, 1),
+        2 => (-1, 0),
+        3 => (0, -1),
+        _ => return None,
+    };
+    let tx = building.tile.x() as i32 + dx;
+    let ty = building.tile.y() as i32 + dy;
+    building.proximity.iter().copied().find(|other| {
+        world
+            .get::<Building>(*other)
+            .is_some_and(|b| b.tile.x() as i32 == tx && b.tile.y() as i32 == ty)
+    })
+}
+
+fn lookup(world: &World, grid: Option<&WorldGrid>, entity: Entity, dir: u8) -> Option<Entity> {
+    match grid {
+        Some(grid) => nearby(world, grid, entity, dir),
+        None => nearby_proximity(world, entity, dir),
+    }
+}
+
 /// `LiquidBlock`/`Building.acceptLiquid` using the plan-09 [`LiquidNode`] seam.
 pub fn accept_liquid(world: &World, entity: Entity, source: Entity, liquid: LiquidId) -> bool {
-    let _ = source;
     let Some(node) = world.get::<LiquidNode>(entity) else {
         return false;
     };
     if !node.accepts {
         return false;
+    }
+    if node.reject_from_output
+        && let (Some(building), Some(_)) =
+            (world.get::<Building>(entity), world.get::<Building>(source))
+    {
+        // `ConduitBuild.acceptLiquid`: reject input arriving from the output side.
+        let relative = relative_to_dir(world, source, building.tile.x(), building.tile.y());
+        if (relative + 2) % 4 == building.rotation {
+            return false;
+        }
     }
     node.filter.is_empty() || node.filter.contains(&liquid)
 }
@@ -87,6 +131,26 @@ pub fn get_liquid_destination(
     from: Entity,
     liquid: LiquidId,
 ) -> Entity {
+    get_liquid_destination_impl(world, entity, from, liquid, Some(grid))
+}
+
+/// [`get_liquid_destination`] with a proximity neighbor lookup.
+pub fn get_liquid_destination_proximity(
+    world: &World,
+    entity: Entity,
+    from: Entity,
+    liquid: LiquidId,
+) -> Entity {
+    get_liquid_destination_impl(world, entity, from, liquid, None)
+}
+
+fn get_liquid_destination_impl(
+    world: &World,
+    entity: Entity,
+    from: Entity,
+    liquid: LiquidId,
+    grid: Option<&WorldGrid>,
+) -> Entity {
     let junction = world
         .get::<LiquidNode>(entity)
         .is_some_and(|node| node.junction);
@@ -105,7 +169,7 @@ pub fn get_liquid_destination(
         None => return entity,
     };
     let dir = relative_to_dir(world, from, jx, jy);
-    let Some(next) = nearby(world, grid, entity, dir) else {
+    let Some(next) = lookup(world, grid, entity, dir) else {
         return entity;
     };
     let next_is_junction = world
@@ -114,7 +178,7 @@ pub fn get_liquid_destination(
     if !accept_liquid(world, next, entity, liquid) && !next_is_junction {
         return entity;
     }
-    get_liquid_destination(world, grid, next, entity, liquid)
+    get_liquid_destination_impl(world, next, entity, liquid, grid)
 }
 
 /// `Building.transferLiquid`.
@@ -166,6 +230,28 @@ pub fn dump_liquid(
     scaling: f32,
     output_dir: i32,
 ) {
+    dump_liquid_impl(world, entity, liquid, scaling, output_dir, Some(grid));
+}
+
+/// [`dump_liquid`] with a proximity neighbor lookup.
+pub fn dump_liquid_proximity(
+    world: &mut World,
+    entity: Entity,
+    liquid: LiquidId,
+    scaling: f32,
+    output_dir: i32,
+) {
+    dump_liquid_impl(world, entity, liquid, scaling, output_dir, None);
+}
+
+fn dump_liquid_impl(
+    world: &mut World,
+    entity: Entity,
+    liquid: LiquidId,
+    scaling: f32,
+    output_dir: i32,
+    grid: Option<&WorldGrid>,
+) {
     let Some(capacity) = world.get::<LiquidNode>(entity).map(|node| node.capacity) else {
         return;
     };
@@ -206,7 +292,7 @@ pub fn dump_liquid(
                 continue;
             }
         }
-        let destination = get_liquid_destination(world, grid, other, entity, liquid);
+        let destination = get_liquid_destination_impl(&*world, other, entity, liquid, grid);
         if destination == entity {
             continue;
         }
@@ -241,10 +327,30 @@ pub fn move_liquid(
     next: Entity,
     liquid: LiquidId,
 ) -> f32 {
+    move_liquid_impl(world, entity, next, liquid, Some(grid))
+}
+
+/// [`move_liquid`] with a proximity neighbor lookup.
+pub fn move_liquid_proximity(
+    world: &mut World,
+    entity: Entity,
+    next: Entity,
+    liquid: LiquidId,
+) -> f32 {
+    move_liquid_impl(world, entity, next, liquid, None)
+}
+
+fn move_liquid_impl(
+    world: &mut World,
+    entity: Entity,
+    next: Entity,
+    liquid: LiquidId,
+    grid: Option<&WorldGrid>,
+) -> f32 {
     if next == entity {
         return 0.0;
     }
-    let next = get_liquid_destination(world, grid, next, entity, liquid);
+    let next = get_liquid_destination_impl(&*world, next, entity, liquid, grid);
     let Some(capacity) = world.get::<LiquidNode>(entity).map(|node| node.capacity) else {
         return 0.0;
     };
@@ -299,8 +405,30 @@ pub fn move_liquid_forward(
     leaks: bool,
     liquid: LiquidId,
 ) -> (f32, f32) {
+    move_liquid_forward_impl(world, entity, next, leaks, liquid, Some(grid))
+}
+
+/// [`move_liquid_forward`] with a proximity neighbor lookup.
+pub fn move_liquid_forward_proximity(
+    world: &mut World,
+    entity: Entity,
+    next: Option<Entity>,
+    leaks: bool,
+    liquid: LiquidId,
+) -> (f32, f32) {
+    move_liquid_forward_impl(world, entity, next, leaks, liquid, None)
+}
+
+fn move_liquid_forward_impl(
+    world: &mut World,
+    entity: Entity,
+    next: Option<Entity>,
+    leaks: bool,
+    liquid: LiquidId,
+    grid: Option<&WorldGrid>,
+) -> (f32, f32) {
     if let Some(next) = next {
-        return (move_liquid(world, grid, entity, next, liquid), 0.0);
+        return (move_liquid_impl(world, entity, next, liquid, grid), 0.0);
     }
     if !leaks {
         return (0.0, 0.0);
