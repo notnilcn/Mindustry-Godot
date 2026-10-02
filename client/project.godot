@@ -18,6 +18,7 @@ config/icon="res://icon.svg"
 [autoload]
 
 McpRuntimeAutoload="*res://addons/open_godot_mcp/runtime/runtime_autoload.gd"
+MindAssets="*res://scenes/autoloads/mind_assets.tscn"
 StdbConnector="*res://scenes/autoloads/stdb_connector.tscn"
 
 [display]

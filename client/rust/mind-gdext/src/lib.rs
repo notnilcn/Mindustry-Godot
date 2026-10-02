@@ -7,6 +7,7 @@
 //! (sim owner + fixed 60 Hz pump + input/API), `MindCamera2D` (pan/zoom,
 //! screen↔tile) and `MindTileGrid` (`_draw` grid/quads) per plan §3.5.
 
+mod assets;
 mod camera;
 mod hello;
 mod log_bridge;
@@ -15,6 +16,7 @@ mod sim_host;
 mod stdb;
 mod tile_grid;
 
+pub use assets::MindAssets;
 pub use camera::MindCamera2D;
 pub use sim_host::MindSimHost;
 pub use stdb::{StdbBinder, StdbConnector};
