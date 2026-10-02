@@ -1,120 +1,120 @@
 {
   "format": 1,
-  "frames": 600,
   "scenario": "audio_music_select",
+  "frames": 600,
   "seed": 7,
   "trace": [
     {
-      "action": "set_paused",
       "frame": 0,
+      "action": "set_paused",
       "paused": false
     },
     {
-      "action": "play",
       "frame": 0,
-      "looping": true,
+      "action": "play",
       "track": "menu",
-      "volume": 0.0
+      "volume": 0.0,
+      "looping": true
     },
     {
-      "action": "stop",
-      "frame": 0
+      "frame": 0,
+      "action": "stop"
     },
     {
-      "action": "game_state",
       "frame": 60,
+      "action": "game_state",
       "playing": true
     },
     {
-      "action": "set_paused",
       "frame": 60,
+      "action": "set_paused",
       "paused": false
     },
     {
-      "action": "play",
       "frame": 60,
-      "looping": false,
+      "action": "play",
       "track": "game1",
-      "volume": 1.0
+      "volume": 1.0,
+      "looping": false
     },
     {
-      "action": "stop",
-      "frame": 60
-    },
-    {
-      "action": "play",
       "frame": 60,
-      "looping": false,
+      "action": "stop"
+    },
+    {
+      "frame": 60,
+      "action": "play",
       "track": "game4",
-      "volume": 1.0
+      "volume": 1.0,
+      "looping": false
     },
     {
-      "action": "stop",
-      "frame": 60
-    },
-    {
-      "action": "play",
       "frame": 60,
-      "looping": false,
+      "action": "stop"
+    },
+    {
+      "frame": 60,
+      "action": "play",
       "track": "game2",
-      "volume": 1.0
+      "volume": 1.0,
+      "looping": false
     },
     {
-      "action": "stop",
-      "frame": 60
-    },
-    {
-      "action": "play",
       "frame": 60,
-      "looping": false,
-      "track": "boss1",
-      "volume": 1.0
+      "action": "stop"
     },
     {
-      "action": "game_state",
+      "frame": 60,
+      "action": "play",
+      "track": "boss1",
+      "volume": 1.0,
+      "looping": false
+    },
+    {
       "frame": 300,
+      "action": "game_state",
       "playing": false
     },
     {
-      "action": "set_paused",
       "frame": 300,
+      "action": "set_paused",
       "paused": false
     },
     {
-      "action": "set_paused",
       "frame": 330,
+      "action": "set_paused",
       "paused": false
     },
     {
-      "action": "set_paused",
       "frame": 360,
+      "action": "set_paused",
       "paused": false
     },
     {
-      "action": "set_paused",
       "frame": 420,
+      "action": "set_paused",
       "paused": true
     },
     {
-      "action": "set_paused",
       "frame": 480,
-      "paused": false
-    },
-    {
-      "action": "stop",
-      "frame": 480
-    },
-    {
       "action": "set_paused",
-      "frame": 540,
       "paused": false
     },
     {
-      "action": "play",
+      "frame": 480,
+      "action": "stop"
+    },
+    {
       "frame": 540,
-      "looping": true,
+      "action": "set_paused",
+      "paused": false
+    },
+    {
+      "frame": 540,
+      "action": "play",
       "track": "menu",
-      "volume": 0.0
+      "volume": 0.0,
+      "looping": true
     }
   ]
 }

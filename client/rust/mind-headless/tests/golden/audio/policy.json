@@ -1,91 +1,91 @@
 {
+  "format": 1,
+  "scenario": "audio_policy",
+  "requests": 14,
   "decisions": [
     {
-      "active": 1,
-      "decision": "play",
       "frame": 0,
-      "sound": "beamPlasma"
+      "sound": "beamPlasma",
+      "decision": "play",
+      "active": 1
     },
     {
-      "active": 2,
-      "decision": "play",
       "frame": 1,
-      "sound": "beamPlasma"
+      "sound": "beamPlasma",
+      "decision": "play",
+      "active": 2
     },
     {
-      "active": 3,
-      "decision": "play",
       "frame": 2,
-      "sound": "beamPlasma"
+      "sound": "beamPlasma",
+      "decision": "play",
+      "active": 3
     },
     {
-      "active": 4,
-      "decision": "play",
       "frame": 3,
-      "sound": "beamPlasma"
+      "sound": "beamPlasma",
+      "decision": "play",
+      "active": 4
     },
     {
-      "active": 5,
-      "decision": "play",
       "frame": 4,
-      "sound": "beamPlasma"
+      "sound": "beamPlasma",
+      "decision": "play",
+      "active": 5
     },
     {
-      "active": 6,
-      "decision": "play",
       "frame": 5,
-      "sound": "beamPlasma"
+      "sound": "beamPlasma",
+      "decision": "play",
+      "active": 6
     },
     {
-      "active": 7,
-      "decision": "play",
       "frame": 6,
-      "sound": "beamPlasma"
+      "sound": "beamPlasma",
+      "decision": "play",
+      "active": 7
     },
     {
-      "active": 7,
-      "decision": "deny",
       "frame": 7,
-      "sound": "beamPlasma"
+      "sound": "beamPlasma",
+      "decision": "deny",
+      "active": 7
     },
     {
-      "active": 8,
-      "decision": "play",
       "frame": 8,
-      "sound": "shootFlame"
+      "sound": "shootFlame",
+      "decision": "play",
+      "active": 8
     },
     {
-      "active": 9,
-      "decision": "play",
       "frame": 9,
-      "sound": "shootFlamePlasma"
+      "sound": "shootFlamePlasma",
+      "decision": "play",
+      "active": 9
     },
     {
-      "active": 10,
-      "decision": "play",
       "frame": 10,
-      "sound": "shootMissile"
+      "sound": "shootMissile",
+      "decision": "play",
+      "active": 10
     },
     {
-      "active": 11,
-      "decision": "play",
       "frame": 11,
-      "sound": "mechStep"
+      "sound": "mechStep",
+      "decision": "play",
+      "active": 11
     },
     {
-      "active": 12,
-      "decision": "play",
       "frame": 12,
-      "sound": "mechStep"
+      "sound": "mechStep",
+      "decision": "play",
+      "active": 12
     },
     {
-      "active": 13,
-      "decision": "play",
       "frame": 13,
-      "sound": "mechStep"
+      "sound": "mechStep",
+      "decision": "play",
+      "active": 13
     }
-  ],
-  "format": 1,
-  "requests": 14,
-  "scenario": "audio_policy"
+  ]
 }
