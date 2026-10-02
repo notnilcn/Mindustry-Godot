@@ -9,6 +9,8 @@
 //! later milestones (M7/M8) — see `03_ASSETS_IMPLEMENTATION_PLAN.md`.
 
 mod atlas;
+mod bundle;
+mod fonts;
 mod loader;
 
 pub use atlas::MindAssets;

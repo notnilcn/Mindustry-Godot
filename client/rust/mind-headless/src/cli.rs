@@ -191,6 +191,17 @@ pub enum AssetsCommand {
         #[arg(long)]
         json: bool,
     },
+
+    /// Bundle key inventory (M7 §7.1b): no locale may contain keys absent from
+    /// English; reports per-locale missing keys and confirms `global.properties`.
+    BundleDiff {
+        /// Directory containing `bundle.properties` / `bundle_<locale>.properties`.
+        #[arg(long, default_value = "assets/bundles")]
+        dir: PathBuf,
+        /// Emit a machine-readable JSON report.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// `io` subcommands (plan 04 §7b).

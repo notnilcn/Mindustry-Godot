@@ -14,6 +14,20 @@ use godot::prelude::*;
 /// `ProjectSettings` key overriding the asset root (absolute or `res://`).
 pub const ASSETS_DIR_SETTING: &str = "mindustry/assets_dir";
 
+/// `ProjectSettings` key selecting the locale (`en`, `pt_BR`, `default`).
+pub const LOCALE_SETTING: &str = "mindustry/locale";
+
+/// Resolves the active locale (`mindustry/locale`, default `en`).
+pub fn resolve_locale() -> String {
+    ProjectSettings::singleton()
+        .get_setting(LOCALE_SETTING)
+        .try_to::<GString>()
+        .ok()
+        .map(|value| value.to_string())
+        .filter(|value| !value.is_empty() && value != "default")
+        .unwrap_or_else(|| String::from("en"))
+}
+
 /// Resolves the directory containing `sprites/sprites.atlas.json`.
 pub fn resolve_assets_dir() -> String {
     let configured = ProjectSettings::singleton()

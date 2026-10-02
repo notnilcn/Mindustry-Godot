@@ -156,6 +156,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
                 assert_complete,
                 json,
             } => cmd_assets_regions(atlas, inventory.as_deref(), *assert_complete, *json),
+            AssetsCommand::BundleDiff { dir, json } => cmd_assets_bundle_diff(dir, *json),
         },
         Command::Io { command } => match command {
             IoCommand::DumpMeta { file, json } => cmd_io_dump_meta(file, *json),
@@ -325,6 +326,97 @@ fn cmd_assets_regions(
         }
         Ok(EXIT_FAIL)
     }
+}
+
+/// Plan 03 M7 `assets bundle-diff`: no locale may contain keys absent from
+/// English; reports per-locale missing keys and confirms the `global.properties`
+/// overlay. Locales are allowed to be partial (report only).
+fn cmd_assets_bundle_diff(dir: &Path, json: bool) -> anyhow::Result<i32> {
+    use mind_core::assets::bundle::parse_properties;
+
+    let base_path = dir.join("bundle.properties");
+    let base_text = std::fs::read_to_string(&base_path)
+        .with_context(|| format!("reading {}", base_path.display()))?;
+    let base = parse_properties(&base_text);
+    let base_keys: std::collections::BTreeSet<String> = base.keys().cloned().collect();
+
+    let mut locales: Vec<(String, std::path::PathBuf)> = Vec::new();
+    for entry in std::fs::read_dir(dir)
+        .with_context(|| format!("reading {}", dir.display()))?
+        .flatten()
+    {
+        let path = entry.path();
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let Some(locale) = stem.strip_prefix("bundle_") else {
+            continue;
+        };
+        if path.extension().is_some_and(|ext| ext == "properties") {
+            locales.push((locale.to_owned(), path));
+        }
+    }
+    locales.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut errors = 0usize;
+    let mut reports = Vec::new();
+    for (locale, path) in &locales {
+        let text =
+            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+        let properties = parse_properties(&text);
+        let extra: Vec<&str> = properties
+            .keys()
+            .filter(|key| !base_keys.contains(key.as_str()))
+            .map(String::as_str)
+            .collect();
+        let missing: Vec<&str> = base_keys
+            .iter()
+            .filter(|key| !properties.contains_key(key.as_str()))
+            .map(String::as_str)
+            .collect();
+        if !extra.is_empty() {
+            errors += 1;
+            log::error!(
+                "assets bundle-diff: locale `{locale}` has {} key(s) absent from English",
+                extra.len()
+            );
+        }
+        reports.push(serde_json::json!({
+            "locale": locale,
+            "keys": properties.len(),
+            "extra": extra,
+            "missing": missing,
+        }));
+    }
+
+    let global_path = dir.join("global.properties");
+    let global_keys = if global_path.is_file() {
+        let text = std::fs::read_to_string(&global_path)
+            .with_context(|| format!("reading {}", global_path.display()))?;
+        parse_properties(&text).len()
+    } else {
+        0
+    };
+
+    if json {
+        let report = serde_json::json!({
+            "dir": dir.display().to_string(),
+            "englishKeys": base_keys.len(),
+            "globalKeys": global_keys,
+            "locales": reports,
+            "errors": errors,
+        });
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "assets bundle-diff: {} english keys, {} locales, {} global keys, {} error locale(s)",
+            base_keys.len(),
+            locales.len(),
+            global_keys,
+            errors
+        );
+    }
+    Ok(if errors == 0 { EXIT_PASS } else { EXIT_FAIL })
 }
 
 /// Plan 03 §7.1b `assets migrate-check`: the vendored trees match

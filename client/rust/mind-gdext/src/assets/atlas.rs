@@ -23,9 +23,13 @@ use godot::obj::{Base, NewGd};
 use godot::prelude::*;
 
 use mind_core::assets::atlas::{AtlasIndex, Region};
+use mind_core::assets::bundle::Bundle;
 use mind_core::assets::file_tree::FileTree;
+use mind_core::assets::icons::Iconc;
 
-use crate::assets::loader::resolve_assets_dir;
+use crate::assets::bundle::{load_bundle, load_iconc, load_locales};
+use crate::assets::fonts::FontSet;
+use crate::assets::loader::{resolve_assets_dir, resolve_locale};
 
 /// Runtime atlas binding + probe singleton.
 #[derive(GodotClass)]
@@ -44,6 +48,14 @@ pub struct MindAssets {
     region_textures: HashMap<String, Gd<AtlasTexture>>,
     /// Loose textures (`sprites/<name>.png` not in the atlas).
     loose_textures: HashMap<String, Gd<ImageTexture>>,
+    /// Locale bundle (`Core.bundle`).
+    bundle: Bundle,
+    /// Content icon code table (`Iconc`).
+    iconc: Iconc,
+    /// Selectable locales (`assets/locales`).
+    locales: Vec<String>,
+    /// Loaded dynamic fonts.
+    fonts: FontSet,
     /// Whether [`MindAssets::load_assets`] completed.
     loaded: bool,
 }
@@ -59,6 +71,10 @@ impl INode for MindAssets {
             pages: Vec::new(),
             region_textures: HashMap::new(),
             loose_textures: HashMap::new(),
+            bundle: Bundle::new(),
+            iconc: Iconc::default(),
+            locales: Vec::new(),
+            fonts: FontSet::default(),
             loaded: false,
         }
     }
@@ -66,10 +82,12 @@ impl INode for MindAssets {
     fn ready(&mut self) {
         let ok = self.load_assets();
         log::info!(
-            "[assets] ready ok={ok} dir={} pages={} regions={}",
+            "[assets] ready ok={ok} dir={} pages={} regions={} icons={} fonts={}",
             self.assets_dir,
             self.pages.len(),
-            self.index.len()
+            self.index.len(),
+            self.iconc.len(),
+            self.fonts.loaded()
         );
     }
 }
@@ -115,6 +133,11 @@ impl MindAssets {
 
         self.index = index;
         self.pages = pages;
+        let locale = resolve_locale();
+        self.bundle = load_bundle(&self.assets_dir, &locale);
+        self.iconc = load_iconc(&self.assets_dir);
+        self.locales = load_locales(&self.assets_dir);
+        self.fonts = FontSet::load(&self.assets_dir);
         self.loaded = true;
         true
     }
@@ -204,6 +227,63 @@ impl MindAssets {
     #[func]
     pub fn assets_dir(&self) -> GString {
         GString::from(self.assets_dir.as_str())
+    }
+
+    /// `Core.bundle.get(key)` — the key itself when missing.
+    #[func]
+    pub fn bundle_get(&self, key: GString) -> GString {
+        let key = key.to_string();
+        GString::from(self.bundle.get(&key))
+    }
+
+    /// `Core.bundle.format(key, args)` (`{0}` placeholders).
+    #[func]
+    pub fn bundle_format(&self, key: GString, args: PackedStringArray) -> GString {
+        let key = key.to_string();
+        let owned: Vec<String> = args
+            .as_slice()
+            .iter()
+            .map(|value| value.to_string())
+            .collect();
+        let refs: Vec<&str> = owned.iter().map(String::as_str).collect();
+        GString::from(self.bundle.format(&key, &refs).as_str())
+    }
+
+    /// Selectable locales (`assets/locales`).
+    #[func]
+    pub fn locales(&self) -> PackedStringArray {
+        let mut out = PackedStringArray::new();
+        for locale in &self.locales {
+            out.push(&GString::from(locale.as_str()));
+        }
+        out
+    }
+
+    /// `Iconc` content name → PUA char string (`Fonts.getUnicodeStr`).
+    #[func]
+    pub fn unicode_str(&self, name: GString) -> GString {
+        match self.iconc.unicode_str(&name.to_string()) {
+            Some(value) => GString::from(value.as_str()),
+            None => GString::new(),
+        }
+    }
+
+    /// Number of content icons in the code table.
+    #[func]
+    pub fn icon_count(&self) -> i64 {
+        self.iconc.len() as i64
+    }
+
+    /// Number of loaded dynamic fonts.
+    #[func]
+    pub fn fonts_loaded(&self) -> i64 {
+        self.fonts.loaded() as i64
+    }
+
+    /// Default UI `FontFile`, when loaded.
+    #[func]
+    pub fn default_font(&self) -> Option<Gd<godot::classes::FontFile>> {
+        self.fonts.default_font()
     }
 
     /// Mods-first virtual FS (plan 20 hook); vanilla reads stay on disk.
