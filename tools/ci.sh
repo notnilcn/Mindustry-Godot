@@ -23,12 +23,15 @@ cd "$REPO_ROOT"
 
 MANIFEST="client/rust/Cargo.toml"
 
-# M3 evidence (2026-10-01): bench_baseline release truth is p50 101 ns / p99
-# 240 ns, but the scenario file only stores the rounded `p50_us: 1` / `p99_us: 1`
-# that `mind-headless bench` compares against. Compare the JSON's ns fields
-# against the ns truth so the regression gate stays honest.
-BASE_P50_NS=101
-BASE_P99_NS=240
+# Baseline refresh (2026-10-02, F2+05/03 join): plan 05 replaced the P0
+# placeholder pump with the real fixed 60 Hz `sim::schedule`, so `bench_baseline`
+# now pays the full per-tick schedule cost. Re-measured release truth on the
+# merged tree is p50 130 ns / p99 301 ns (was 101/240 at M3). The scenario file
+# only stores the rounded `p50_us` / `p99_us` that `mind-headless bench` compares
+# against; compare the JSON's ns fields against the ns truth so the regression
+# gate stays honest.
+BASE_P50_NS=130
+BASE_P99_NS=301
 WARN_P50_NS=$((BASE_P50_NS * 120 / 100))
 WARN_P99_NS=$((BASE_P99_NS * 120 / 100))
 FAIL_P50_NS=$((BASE_P50_NS * 150 / 100))
