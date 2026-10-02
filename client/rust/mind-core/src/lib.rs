@@ -31,6 +31,7 @@ pub mod fx;
 pub mod game;
 pub mod io;
 pub mod log;
+pub mod logic;
 pub mod maps;
 pub mod math;
 pub mod mods;
