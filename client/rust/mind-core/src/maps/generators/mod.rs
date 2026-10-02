@@ -12,6 +12,7 @@ pub mod astar;
 pub mod base;
 pub mod basic;
 pub mod file_map;
+pub mod planet;
 pub mod simplex;
 
 use crate::content::ContentRegistry;
@@ -21,6 +22,7 @@ use crate::world::tiles::Tiles;
 pub use base::{BaseGenerator, BaseRegistryView, SchematicHooks};
 pub use basic::{BasicGenerator, Draw, GenNoise, SimplexNoise};
 pub use file_map::FileMapGenerator;
+pub use planet::{BlankPlanetGenerator, HexMesher, PlanetGenerator, SectorRect, SectorView};
 pub use simplex::SimplexGenerator;
 
 /// A world generator (`WorldGenerator`).

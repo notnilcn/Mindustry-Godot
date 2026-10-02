@@ -110,6 +110,11 @@ impl BasicGenerator {
         self.rand = SimRng::new(seed);
     }
 
+    /// Replaces the noise source (planet generators swap in sector-projected noise).
+    pub fn set_noise_source(&mut self, noise_source: Box<dyn GenNoise>) {
+        self.noise_source = noise_source;
+    }
+
     /// `BasicGenerator.noise(x, y, octaves, falloff, scl, mag)`.
     pub fn noise_oct(&self, x: f32, y: f32, octaves: f64, falloff: f64, scl: f64, mag: f64) -> f32 {
         self.noise_source.noise(x, y, octaves, falloff, scl, mag)

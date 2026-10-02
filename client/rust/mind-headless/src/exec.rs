@@ -2484,11 +2484,18 @@ fn cmd_world_gen(
                 grid.tiles.geti_mut(index).floor = stone;
             }
         }
-        "planet" => {
-            return Err(anyhow!(
-                "the `planet` generator lands with plan 06 M7 (planet `{planet}`, sector {sector})"
-            ));
-        }
+        "planet" => match planet {
+            "blank" => {
+                use mind_core::maps::generators::BlankPlanetGenerator;
+                let mut planet_gen = BlankPlanetGenerator::new(0);
+                planet_gen.generate(&mut grid.tiles, &params, &content);
+            }
+            other => {
+                return Err(anyhow!(
+                    "planet generator `{other}` lands with plan 06 M8 (sector {sector})"
+                ));
+            }
+        },
         other => return Err(anyhow!("unknown generator `{other}`")),
     }
 
