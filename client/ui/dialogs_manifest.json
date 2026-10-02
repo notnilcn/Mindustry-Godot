@@ -1,0 +1,10 @@
+{
+  "format": 1,
+  "dialogs": [
+    {"name": "about", "scene": "res://scenes/ui/dialogs/about_dialog.tscn", "pause": false, "menu_openable": true, "args": []}
+  ],
+  "fragments": [
+    {"name": "menu", "scene": "res://scenes/ui/fragments/menu_fragment.tscn", "group": "menu"}
+  ],
+  "prompts": ["show_info", "show_text", "show_confirm", "show_text_input", "show_info_toast", "announce", "toast"]
+}

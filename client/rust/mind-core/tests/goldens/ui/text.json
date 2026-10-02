@@ -1,0 +1,121 @@
+{
+  "format": 1,
+  "icons": [
+    {
+      "input": "no icons here",
+      "output": "no icons here"
+    },
+    {
+      "input": ":spawn:",
+      "output": ""
+    },
+    {
+      "input": "use :spawn: now",
+      "output": "use  now"
+    },
+    {
+      "input": "a :nope: b",
+      "output": "a :nope: b"
+    },
+    {
+      "input": "http://x",
+      "output": "http://x"
+    }
+  ],
+  "markup": [
+    {
+      "input": "[accent]hello[]",
+      "output": "[color=#ffd37fff]hello[/color]"
+    },
+    {
+      "input": "[red]a[gray]b[]c",
+      "output": "[color=#ff0000ff]a[/color][color=#7f7f7fff]b[/color][color=#ff0000ff]c[/color]"
+    },
+    {
+      "input": "[bogus]x",
+      "output": "[lb]bogus]x"
+    },
+    {
+      "input": ":copper: x",
+      "output": "[icon name=\"copper\"] x"
+    }
+  ],
+  "time": [
+    {
+      "ticks": 0.0,
+      "output": "0:00"
+    },
+    {
+      "ticks": 60.0,
+      "output": "0:01"
+    },
+    {
+      "ticks": 3660.0,
+      "output": "1:01"
+    },
+    {
+      "ticks": 221160.0,
+      "output": "1:01:26"
+    }
+  ],
+  "amount": [
+    {
+      "number": 0,
+      "output": "0"
+    },
+    {
+      "number": 999,
+      "output": "999"
+    },
+    {
+      "number": 1500,
+      "output": "1.5[gray]k[]"
+    },
+    {
+      "number": 12345,
+      "output": "12[gray]k[]"
+    },
+    {
+      "number": 1500000,
+      "output": "1.5[gray]M[]"
+    },
+    {
+      "number": 2000000000,
+      "output": "2.0[gray]B[]"
+    },
+    {
+      "number": 9223372036854775807,
+      "output": "∞"
+    }
+  ],
+  "round": [
+    {
+      "number": 0,
+      "output": 0
+    },
+    {
+      "number": 9,
+      "output": 9
+    },
+    {
+      "number": 12,
+      "output": 10
+    },
+    {
+      "number": 150,
+      "output": 200
+    },
+    {
+      "number": 1234,
+      "output": 1200
+    },
+    {
+      "number": 12345,
+      "output": 12000
+    },
+    {
+      "number": 1234567,
+      "output": 1200000
+    }
+  ]
+}

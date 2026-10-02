@@ -1,0 +1,135 @@
+## SPDX-License-Identifier: GPL-3.0-only
+## Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
+## Source: core/src/mindustry/core/UI.java (`init`, `updateMargins`, groups).
+##
+## The Godot-side UI root under `Spine/Ui`. It owns the layer groups, eagerly
+## instantiates every manifest dialog/fragment (parity with `UI.init()`), builds
+## the theme, and registers dialogs with the Rust `MindUi` singleton. Layout and
+## lifecycle only — no game rules or sim reads (plan 14 §3.2/§3.10).
+
+class_name MindUiRoot
+extends Control
+
+const DIALOGS_MANIFEST := "res://ui/dialogs_manifest.json"
+
+@onready var menu_group: Control = $MenuGroup
+@onready var hud_group: Control = $HudGroup
+@onready var dialog_layer: Control = $DialogLayer
+@onready var overlay_layer: Control = $OverlayLayer
+@onready var loading_layer: Control = $LoadingLayer
+
+## Theme build time in milliseconds (plan 14 §7d budget probe).
+var theme_build_ms := 0
+
+var _dialogs: Dictionary = {}
+
+
+func _ready() -> void:
+	_apply_theme()
+	_load_manifest()
+	_connect_prompts()
+
+
+func _ui() -> Node:
+	return get_node_or_null("/root/MindUi")
+
+
+func _apply_theme() -> void:
+	var assets := MindWidgets.assets()
+	var started := Time.get_ticks_msec()
+	var theme := MindThemeBuilder.build(assets)
+	theme_build_ms = int(Time.get_ticks_msec() - started)
+	var manifest := MindThemeBuilder.load_manifest()
+	if not MindThemeBuilder.verify(theme, manifest):
+		push_warning("[ui] theme verification failed (styles_manifest)")
+	self.theme = theme
+
+
+func _load_manifest() -> void:
+	if not FileAccess.file_exists(DIALOGS_MANIFEST):
+		push_warning("[ui] missing %s" % DIALOGS_MANIFEST)
+		return
+	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(DIALOGS_MANIFEST))
+	if not (parsed is Dictionary):
+		push_warning("[ui] dialogs_manifest is not an object")
+		return
+	var manifest: Dictionary = parsed
+	for entry in manifest.get("dialogs", []):
+		_instantiate(entry, dialog_layer, false)
+	for entry in manifest.get("fragments", []):
+		_instantiate(entry, _group_for(str(entry.get("group", ""))), true)
+
+
+func _instantiate(entry: Dictionary, parent: Control, is_fragment: bool) -> void:
+	var dialog_name := str(entry.get("name", ""))
+	var scene_path := str(entry.get("scene", ""))
+	if dialog_name.is_empty() or scene_path.is_empty():
+		return
+	# code-instantiated: dialogs/fragments are manifest-driven (name -> scene
+	# path is data), so the scene tree cannot declare them statically.
+	var packed: PackedScene = load(scene_path)
+	if packed == null:
+		push_warning("[ui] could not load %s" % scene_path)
+		return
+	var instance: Node = packed.instantiate()
+	instance.name = dialog_name
+	parent.add_child(instance)
+	if is_fragment:
+		instance.visible = true
+		return
+	_dialogs[dialog_name] = instance
+	var ui := _ui()
+	if ui != null:
+		ui.call("register_dialog", dialog_name, instance)
+
+
+func _group_for(group_name: String) -> Control:
+	match group_name:
+		"menu":
+			return menu_group
+		"hud":
+			return hud_group
+		"loading":
+			return loading_layer
+		_:
+			return overlay_layer
+
+
+## The instantiated dialog node by manifest name (null when absent).
+func dialog(name: String) -> Node:
+	return _dialogs.get(name)
+
+
+func _connect_prompts() -> void:
+	var ui := _ui()
+	if ui == null:
+		return
+	if ui.has_signal("show_info") and not ui.is_connected("show_info", Callable(self, "_on_show_info")):
+		ui.connect("show_info", Callable(self, "_on_show_info"))
+	if ui.has_signal("toast") and not ui.is_connected("toast", Callable(self, "_on_toast")):
+		ui.connect("toast", Callable(self, "_on_toast"))
+	if ui.has_signal("announce") and not ui.is_connected("announce", Callable(self, "_on_announce")):
+		ui.connect("announce", Callable(self, "_on_announce"))
+
+
+func _on_show_info(text: String) -> void:
+	_toast_label(text, 2.0)
+
+
+func _on_toast(text: String, _icon: String) -> void:
+	_toast_label(text, 3.5)
+
+
+func _on_announce(text: String, duration: float) -> void:
+	_toast_label(text, maxf(1.0, duration))
+
+
+func _toast_label(text: String, duration: float) -> void:
+	# code-instantiated: toasts are transient, high-churn overlay labels.
+	var label := MindWidgets.label(text)
+	label.position = Vector2(24, 24)
+	overlay_layer.add_child(label)
+	var tween := create_tween()
+	tween.tween_interval(duration)
+	tween.tween_property(label, "modulate:a", 0.0, 0.4)
+	tween.tween_callback(label.queue_free)

@@ -42,6 +42,7 @@ pub mod scenario;
 pub mod schedule;
 pub mod sim;
 pub mod time;
+pub mod ui;
 pub mod util;
 pub mod version;
 pub mod weapons;
