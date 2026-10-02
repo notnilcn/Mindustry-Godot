@@ -3287,7 +3287,7 @@ fn cmd_world_bench_gen(
     iters: u64,
     json: bool,
 ) -> anyhow::Result<i32> {
-    use mind_core::maps::generators::{BlankPlanetGenerator, SimplexGenerator, WorldGenerator};
+    use mind_core::maps::generators::{SimplexGenerator, WorldGenerator};
     use mind_core::world::{WorldGrid, WorldParams};
 
     if width <= 0 || height <= 0 || iters == 0 {
@@ -3309,12 +3309,8 @@ fn cmd_world_bench_gen(
                 let mut g = SimplexGenerator::new(seed);
                 g.generate(&mut grid.tiles, &params, &content);
             }
-            "tantros" => {
-                let mut g = mind_core::maps::planet::TantrosPlanetGenerator::new();
-                g.generate(&mut grid.tiles, &params, &content);
-            }
-            "blank" => {
-                let mut g = BlankPlanetGenerator::new(0);
+            "tantros" | "blank" | "serpulo" | "erekir" | "asteroid" => {
+                let mut g = make_planet_generator(generator, seed)?;
                 g.generate(&mut grid.tiles, &params, &content);
             }
             other => return Err(anyhow!("unknown generator `{other}`")),

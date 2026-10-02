@@ -789,7 +789,8 @@ pub enum WorldCommand {
 
     /// Time world generation (plan 06 §7d).
     BenchGen {
-        /// Generator tag (`simplex`, `tantros`, `blank`).
+        /// Generator tag (`simplex`, `tantros`, `blank`, `serpulo`, `erekir`,
+        /// `asteroid`).
         #[arg(long, default_value = "simplex")]
         generator: String,
         /// Generation seed.

@@ -139,6 +139,8 @@ pub struct ErekirPlanetGenerator {
     pub planet: PlanetGenerator,
     /// Sector view.
     pub sector: FlatSectorView,
+    /// Player spawn (`spawnX`, `spawnY`).
+    pub spawn: (i32, i32),
     ids: Ids,
     /// Height scale (`heightScl`).
     pub height_scl: f32,
@@ -166,6 +168,7 @@ impl ErekirPlanetGenerator {
         Self {
             planet,
             sector: FlatSectorView::default(),
+            spawn: (0, 0),
             ids: Ids::default(),
             height_scl: 0.9,
             octaves: 8,
@@ -381,6 +384,7 @@ impl WorldGenerator for ErekirPlanetGenerator {
         let spawn_y = (trns_y + height as f32 / 2.0) as i32;
         let end_x = (-trns_x + width as f32 / 2.0) as i32;
         let end_y = (-trns_y + height as f32 / 2.0) as i32;
+        self.spawn = (spawn_x, spawn_y);
         let center_x = width as f32 / 2.0;
         let center_y = height as f32 / 2.0;
         let maxd = (center_x * center_x + center_y * center_y).sqrt();
@@ -897,6 +901,45 @@ mod tests {
         assert_ne!(ids.rhyolite, BlockId::AIR);
         assert_ne!(ids.carbon_stone, BlockId::AIR);
         assert_ne!(ids.rhyolite_vent, BlockId::AIR);
+    }
+
+    #[test]
+    fn erekir_has_core_region() {
+        let content = registry();
+        let mut tiles = Tiles::new(128, 128);
+        let mut generator = ErekirPlanetGenerator::new();
+        generator.generate(&mut tiles, &WorldParams::default(), &content);
+
+        let (sx, sy) = generator.spawn;
+        let mut clear = 0;
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                let x = (sx + dx).clamp(0, 127);
+                let y = (sy + dy).clamp(0, 127);
+                if !tiles.get(x, y).solid(&content) {
+                    clear += 1;
+                }
+            }
+        }
+        assert!(clear >= 5, "spawn corridor should be cleared");
+    }
+
+    #[test]
+    fn erekir_ore_present() {
+        let content = registry();
+        let mut tiles = Tiles::new(128, 128);
+        let mut generator = ErekirPlanetGenerator::new();
+        generator.generate(&mut tiles, &WorldParams::default(), &content);
+
+        let ids = Ids::load(&content);
+        assert!(
+            tiles
+                .iter()
+                .any(|tile| tile.overlay == ids.wall_ore_beryllium
+                    || tile.overlay == ids.ore_tungsten
+                    || tile.overlay == ids.ore_crystal_thorium),
+            "at least one Erekir ore overlay"
+        );
     }
 
     #[test]

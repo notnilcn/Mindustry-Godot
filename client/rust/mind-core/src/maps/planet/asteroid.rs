@@ -459,6 +459,23 @@ mod tests {
         );
     }
 
+    #[test]
+    fn asteroid_ore_present() {
+        let content = registry();
+        let mut tiles = Tiles::new(128, 128);
+        let mut generator = AsteroidGenerator::new(7);
+        generator.generate(&mut tiles, &WorldParams::default(), &content);
+
+        let copper = content.block_id("ore-copper").unwrap();
+        let lead = content.block_id("ore-lead").unwrap();
+        assert!(
+            tiles
+                .iter()
+                .any(|tile| tile.overlay == copper || tile.overlay == lead),
+            "copper/lead ore should be generated"
+        );
+    }
+
     /// M8 golden (Rust-recorded, OD6-B): `world gen --planet asteroid --seed 7
     /// --width 128 --height 128`.
     #[test]
