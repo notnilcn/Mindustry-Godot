@@ -8,8 +8,8 @@
 //!
 //! Pass order matches upstream exactly. Filename-only passes land in M2;
 //! content-driven passes (M3) are driven by the metadata contract in
-//! [`crate::generate::metadata`]. Unit passes are deferred until plan 02 M5
-//! metadata merges (lane note, recorded in the plan changelog).
+//! [`crate::generate::metadata`]. Unit passes consume the plan 02 M5 metadata
+//! (see [`units`]).
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -29,6 +29,7 @@ pub mod icons;
 pub mod inventory;
 pub mod metadata;
 pub mod ore;
+pub mod units;
 
 /// `BlockRenderer.maxCrackSize`.
 pub const MAX_CRACK_SIZE: usize = 7;
@@ -84,9 +85,6 @@ pub const PASS_ORDER: &[&str] = &[
 
 /// Runs every generator pass in upstream `Generators.run()` order. Returns
 /// per-pass timings (seconds).
-///
-/// `unit-icons` is deferred until plan 02 M5 metadata merges (see
-/// [`metadata::UNIT_METADATA_DEFERRED`]); its slot is preserved in the order.
 pub fn run_passes(
     ctx: &mut GenCtx,
     registry: &ContentRegistry,
@@ -123,10 +121,7 @@ pub fn run_passes(
     content_pass!("item-icons", icons::item_icons);
     content_pass!("sector-icons", icons::sector_icons);
     content_pass!("team-icons", icons::team_icons);
-    // Deferred: unit icons require plan 02 M5
-    // (`UnitType.getRegionsToOutline`/parts/weapons/treads/segments).
-    log(metadata::UNIT_METADATA_DEFERRED, 0.0);
-    timings.insert("unit-icons".to_owned(), 0.0);
+    content_pass!("unit-icons", units::run);
     content_pass!("ore-icons", ore::run);
     content_pass!("edges", environment::edges);
     plain_pass!("scorches", environment::scorches);

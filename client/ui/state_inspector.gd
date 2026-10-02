@@ -22,12 +22,14 @@ const POLL_INTERVAL := 0.25
 
 var _host: Node = null
 var _camera: Node = null
+var _assets: Node = null
 var _elapsed := 0.0
 
 @onready var _label: Label = $Label
 @onready var _net_label: Label = $NetLabel
 @onready var _content_counts: Label = $ContentCounts
 @onready var _content_list: ItemList = $ContentList
+@onready var _region_preview: TextureRect = $RegionPreview
 
 
 func _ready() -> void:
@@ -132,3 +134,31 @@ func _cursor_tile_text() -> String:
 	var mouse := get_viewport().get_mouse_position()
 	var tile: Vector2i = _camera.call("screen_to_tile", mouse.x, mouse.y)
 	return "(%d, %d)" % [tile.x, tile.y]
+
+
+## Resolves the `MindAssets` autoload (plan 03 M5).
+func _assets_node() -> Node:
+	if _assets == null or not is_instance_valid(_assets):
+		_assets = get_node_or_null("/root/MindAssets")
+	return _assets
+
+
+## M5 inspector fixture: displays an atlas region's texture (plan 03 §7.1c
+## step 6). Returns `true` when the region resolved. Read-only.
+func show_region(region_name: String) -> bool:
+	var assets := _assets_node()
+	if assets == null:
+		return false
+	var texture: Texture2D = assets.call("find_region", region_name)
+	_region_preview.texture = texture
+	return texture != null
+
+
+## M5 inspector fixture: displays a content UI icon by looking up the generated
+## `ui/<type>-<name>-ui` region. The `Iconc` font-glyph rendering path lands
+## with plan 03 M7.
+func show_icon(icon_name: String) -> bool:
+	for prefix in ["block", "unit", "item", "liquid", "status"]:
+		if show_region("ui/%s-%s-ui" % [prefix, icon_name]):
+			return true
+	return false

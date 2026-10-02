@@ -18,4 +18,10 @@
 //! Godot-free and tokio-free (HLP §2.2).
 
 pub mod atlas;
+pub mod bundle;
+pub mod file_tree;
 pub mod generated;
+pub mod icons;
+pub mod overlay;
+pub mod regions;
+pub mod sounds;

@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Instant;
 
+use anyhow::Context;
 use clap::{Parser, Subcommand};
 use mind_tools::{
     antialias, base_content, generate, generated_assets, migrate, pack_pipeline, staging,
@@ -90,6 +91,20 @@ enum Command {
         /// Repo root (defaults to the current directory).
         #[arg(long, default_value = ".")]
         root: PathBuf,
+    },
+
+    /// Determinism gate (plan 03 §7.1b `assets determinism`): run the full pack
+    /// `--runs` times and assert every run is byte-identical.
+    Determinism {
+        /// Repo root (defaults to the current directory).
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        /// Number of full packs to compare (≥ 2).
+        #[arg(long, default_value_t = 2)]
+        runs: u32,
+        /// Emit a machine-readable JSON report.
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -193,7 +208,53 @@ fn dispatch(command: &Command) -> anyhow::Result<()> {
                 }
             }
         },
+        Command::Determinism { root, runs, json } => run_determinism(root, *runs, *json),
     }
+}
+
+/// Runs the full pack `runs` times and asserts the output manifest is
+/// byte-identical across runs (`assets determinism`, plan 03 §2.2/§7.1b).
+fn run_determinism(root: &std::path::Path, runs: u32, json: bool) -> anyhow::Result<()> {
+    if runs < 2 {
+        anyhow::bail!("determinism needs at least 2 runs (got {runs})");
+    }
+    let manifest_path = root.join("build/assets/asset_manifest.json");
+    let mut reference: Option<Vec<u8>> = None;
+    let mut hashes: Vec<String> = Vec::new();
+    for run in 0..runs {
+        run_pack(root, &[], false, false)?;
+        let bytes = std::fs::read(&manifest_path)
+            .with_context(|| format!("reading {}", manifest_path.display()))?;
+        hashes.push(mind_atlas::manifest::sha256_hex(&bytes));
+        match &reference {
+            None => reference = Some(bytes),
+            Some(expected) => {
+                if *expected != bytes {
+                    anyhow::bail!(
+                        "pack output differs between run 1 and run {} (manifest sha256 {})",
+                        run + 1,
+                        hashes[run as usize]
+                    );
+                }
+            }
+        }
+    }
+    if json {
+        let report = serde_json::json!({
+            "root": root.display().to_string(),
+            "runs": runs,
+            "manifest": manifest_path.display().to_string(),
+            "hashes": hashes,
+            "deterministic": true,
+        });
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "determinism: {runs} full packs byte-identical (manifest sha256 {})",
+            hashes[0]
+        );
+    }
+    Ok(())
 }
 
 /// Implemented pack stages (§3.5). Unknown names error; known-but-later

@@ -10,17 +10,15 @@
 // `DrawBlock` drawer framework (see the plan Changelog for the handshake).
 //
 // Unit metadata (`UnitType.getRegionsToOutline`, weapon/part/tread/segment
-// tables) is deferred until plan 02 M5 merges — see [`UNIT_METADATA_DEFERRED`].
+// tables) was completed once plan 02 M5 merged (see [`part_outline_regions`],
+// [`unit_region_expectations`], and `generate::units`).
 
 use mind_core::content::registries::blocks::BlockKind;
+use mind_core::content::registries::units::UnitTypeDef;
+use mind_core::content::registries::units::parts::{DrawPartKind, DrawPartSpec};
 
 /// `Vars.tilesize`.
 pub const TILE_SIZE: i32 = 8;
-
-/// Deferral marker: unit icon metadata needs plan 02 M5 (`UnitDef` regions,
-/// parts, weapons, treads, segments). `unit-icons` is skipped until then.
-pub const UNIT_METADATA_DEFERRED: &str =
-    "plan 02 M5 (UnitDef regions/parts/weapons/treads/segments) not merged";
 
 /// Static team data for generators (`game/Team.java`).
 #[derive(Debug, Clone, Copy)]
@@ -815,6 +813,186 @@ pub fn outline_icon_index(kind: BlockKind, icon_count: usize) -> Option<usize> {
     } else {
         icon_count - 1
     })
+}
+
+/// Unit team-cell recolor magic colors (`Generators.java` unit-icons:
+/// `0xffffffff → 0xffa664ff`, `0xdcc6c6ff`/`0xdcc5c5ff → 0xd06b53ff`).
+pub const UNIT_CELL_WHITE: u32 = 0xffff_ffff;
+/// Unit cell recolor target for [`UNIT_CELL_WHITE`].
+pub const UNIT_CELL_ORANGE: u32 = 0xffa6_64ff;
+/// Unit cell recolor source grays.
+pub const UNIT_CELL_GRAY: [u32; 2] = [0xdcc6_c6ff, 0xdcc5_c5ff];
+/// Unit cell recolor target for the grays.
+pub const UNIT_CELL_DARK_ORANGE: u32 = 0xd06b_53ff;
+
+/// `RegionPart.getOutlines` region names for a draw-part subtree.
+///
+/// `RegionPart.load(name)` resolves `realName = name + suffix` (no vanilla part
+/// sets an explicit `name`); `getOutlines` emits `regions` when
+/// `outline && drawRegion`. No vanilla unit part sets `turretShading`, so the
+/// mirrored `-r`/`-l` branch never triggers for vanilla; it is still modelled.
+pub fn part_outline_regions(parts: &[DrawPartSpec], name: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    walk_part_outlines(parts, name, &mut out);
+    out
+}
+
+fn walk_part_outlines(parts: &[DrawPartSpec], name: &str, out: &mut Vec<String>) {
+    for part in parts {
+        if part.kind == DrawPartKind::RegionPart && part.outline && part.draw_region {
+            let real = format!("{name}{}", part.suffix);
+            if part.mirror && part.turret_shading {
+                out.push(format!("{real}-r"));
+                out.push(format!("{real}-l"));
+            } else {
+                out.push(real);
+            }
+        }
+        walk_part_outlines(&part.children, name, out);
+    }
+}
+
+/// `UnitType.load()` region-name resolution (name-based; `has` is the pack-time
+/// `Core.atlas.has` predicate). Mirrors the `Core.atlas.find(name, fallback)`
+/// chain exactly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnitRegions {
+    /// `region = find(name)`.
+    pub region: String,
+    /// `previewRegion = find(name + "-preview", name)`.
+    pub preview: String,
+    /// `legRegion = find(name + "-leg")`.
+    pub leg: Option<String>,
+    /// `jointRegion = find(name + "-joint")`.
+    pub joint: Option<String>,
+    /// `baseJointRegion = find(name + "-joint-base")`.
+    pub base_joint: Option<String>,
+    /// `footRegion = find(name + "-foot")`.
+    pub foot: Option<String>,
+    /// `treadRegion = find(name + "-treads")`.
+    pub tread: Option<String>,
+    /// `legBaseRegion = find(name + "-leg-base", name + "-leg")`.
+    pub leg_base: Option<String>,
+    /// `baseRegion = find(name + "-base")`.
+    pub base: Option<String>,
+    /// `cellRegion = find(name + "-cell", find("power-cell"))`.
+    pub cell: Option<String>,
+    /// `outlineRegion = find(name + "-outline")`.
+    pub outline: Option<String>,
+    /// `segmentRegions[i] = find(name + "-segment" + i)`.
+    pub segments: Vec<String>,
+    /// `wreckRegions[i] = find(name + "-wreck" + i)`.
+    pub wrecks: [String; 3],
+    /// `treadRegions[r][i] = find(name + "-treads" + r + "-" + i)`.
+    pub tread_slices: Vec<Vec<String>>,
+}
+
+/// Resolves [`UnitRegions`] for `unit` against the pack-time `has` predicate.
+pub fn unit_regions(unit: &UnitTypeDef, has: &dyn Fn(&str) -> bool) -> UnitRegions {
+    let find = |candidate: &str| has(candidate).then(|| candidate.to_owned());
+    let name = &unit.name;
+    let preview = if has(&format!("{name}-preview")) {
+        format!("{name}-preview")
+    } else {
+        name.clone()
+    };
+    let cell = find(&format!("{name}-cell")).or_else(|| find("power-cell"));
+    let leg = find(&format!("{name}-leg"));
+    let segments = (0..unit.segments)
+        .map(|i| format!("{name}-segment{i}"))
+        .collect();
+    let wrecks = [
+        format!("{name}-wreck0"),
+        format!("{name}-wreck1"),
+        format!("{name}-wreck2"),
+    ];
+    let tread_slices = if find(&format!("{name}-treads")).is_some() {
+        (0..unit.tread_rects.len())
+            .map(|r| {
+                (0..unit.tread_frames)
+                    .map(|i| format!("{name}-treads{r}-{i}"))
+                    .collect()
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    UnitRegions {
+        region: name.clone(),
+        preview,
+        leg_base: find(&format!("{name}-leg-base")).or(leg.clone()),
+        leg,
+        joint: find(&format!("{name}-joint")),
+        base_joint: find(&format!("{name}-joint-base")),
+        foot: find(&format!("{name}-foot")),
+        tread: find(&format!("{name}-treads")),
+        base: find(&format!("{name}-base")),
+        cell,
+        outline: find(&format!("{name}-outline")),
+        segments,
+        wrecks,
+        tread_slices,
+    }
+}
+
+/// Every region name the `unit-icons` pass can create for `unit` *if* its
+/// prerequisite source regions exist (used by the region inventory audit).
+pub fn unit_region_expectations(unit: &UnitTypeDef, has: &dyn Fn(&str) -> bool) -> Vec<String> {
+    let regions = unit_regions(unit, has);
+    let mut out = Vec::new();
+
+    // `type.getRegionsToOutline(toOutline)` → `<region>-outline`.
+    for region in part_outline_regions(&unit.parts, &unit.name) {
+        if has(&region) {
+            out.push(format!("{region}-outline"));
+        }
+    }
+    for weapon in &unit.weapons {
+        for region in part_outline_regions(&weapon.parts, &weapon.name) {
+            if has(&region) {
+                out.push(format!("{region}-outline"));
+            }
+        }
+        // Weapon body outline: saved as `<name>-outline` when under/top, else
+        // the weapon region is replaced in place (same region name).
+        if !weapon.name.is_empty()
+            && has(&weapon.name)
+            && (!weapon.top || weapon.parts.iter().any(|part| part.under))
+        {
+            out.push(format!("{}-outline", weapon.name));
+        }
+    }
+
+    // Tank tread slices.
+    for slices in &regions.tread_slices {
+        out.extend(slices.iter().cloned());
+    }
+
+    // Crawl segment outlines + composite body.
+    if unit.segments > 0 {
+        for i in 0..unit.segments {
+            if has(&format!("{}-segment{i}", unit.name)) {
+                out.push(format!("{}-segment-outline{i}", unit.name));
+            }
+        }
+        out.push(unit.name.clone());
+    }
+
+    // Composed body (`unit-<name>-full`) + fit-scaled UI icon.
+    if unit.generate_full_icon && has(&regions.preview) {
+        out.push(format!("unit-{}-full", unit.name));
+    }
+    if has(&regions.preview) {
+        out.push(format!("unit-{}-ui", unit.name));
+    }
+
+    // Wrecks (only emitted when a body image was composed).
+    if has(&regions.preview) {
+        for wreck in &regions.wrecks {
+            out.push(wreck.clone());
+        }
+    }
+    out
 }
 
 #[cfg(test)]
