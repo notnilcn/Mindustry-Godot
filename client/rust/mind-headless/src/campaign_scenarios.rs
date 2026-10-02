@@ -20,11 +20,15 @@ use mind_core::content::{
     BlockId, ContentRef, ContentType, MemoryBundle, MemoryUnlockStore, create_base_content,
 };
 use mind_core::game::objectives::{ObjectiveContext, SectorStatus};
+use mind_core::game::planet::EmptyNeighborhood;
 use mind_core::game::rules::Rules;
 use mind_core::game::rules_event::{RulesEpoch, apply_rules_load};
 use mind_core::game::tech_tree;
+use mind_core::game::universe::{Campaign, TurnContext};
+use mind_core::io::json::rules::ExportStat;
 use mind_core::io::typeio::codecs::{read_rules, write_rules};
 use mind_core::io::{WireReader, WireWriter};
+use mind_core::random::JavaRandom;
 use mind_core::world::modules::ItemModule;
 
 use crate::cli::CampaignCommand;
@@ -55,10 +59,23 @@ pub fn run(command: &CampaignCommand) -> Result<i32> {
     let (report, dump) = match command {
         CampaignCommand::Rules { .. } => rules_roundtrip()?,
         CampaignCommand::Tech { .. } => tech_unlock_gating()?,
+        CampaignCommand::Sector {
+            planet,
+            sector,
+            ticks,
+            ..
+        } => campaign_sector_cycle(planet, sector, *ticks)?,
+        CampaignCommand::Turn { turns, .. } => campaign_turn(*turns)?,
     };
     match command {
         CampaignCommand::Rules { json, dump: path }
-        | CampaignCommand::Tech { json, dump: path } => {
+        | CampaignCommand::Tech { json, dump: path }
+        | CampaignCommand::Sector {
+            json, dump: path, ..
+        }
+        | CampaignCommand::Turn {
+            json, dump: path, ..
+        } => {
             if let Some(path) = path {
                 write_dump(path, &dump)?;
             }
@@ -282,6 +299,265 @@ fn find_gated_node(
     None
 }
 
+/// FNV-1a hex over bytes (canonical checksum helper).
+fn fnv_hex(bytes: &[u8]) -> String {
+    let mut hasher = mind_core::determinism::Hasher::new();
+    hasher.write(bytes);
+    hasher.finish().to_hex()
+}
+
+/// `campaign sector` — plan 12 §7b `campaign_sector_cycle` (M3 half).
+fn campaign_sector_cycle(
+    planet_name: &str,
+    sector_name: &str,
+    ticks: u64,
+) -> Result<(Value, Value)> {
+    let bundle = MemoryBundle::new();
+    let store = MemoryUnlockStore::new();
+    let registry = create_base_content(&bundle, &store, true)
+        .map_err(|error| anyhow::anyhow!("content boot failed: {error}"))?;
+    let mut campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
+
+    let planet_id = campaign
+        .planet_id_by_name(planet_name)
+        .ok_or_else(|| anyhow::anyhow!("unknown planet `{planet_name}`"))?;
+    let preset = registry
+        .sector_by_name(sector_name)
+        .ok_or_else(|| anyhow::anyhow!("unknown sector preset `{sector_name}`"))?;
+    let sector_id = preset.sector;
+    let preset_on_planet = preset.planet == planet_id;
+    let planet_def = registry
+        .planet(planet_id)
+        .ok_or_else(|| anyhow::anyhow!("planet record missing"))?;
+
+    // Launch (play-flow seam): mark the sector owned and seed a core.
+    {
+        let sector = campaign
+            .sector_mut(planet_id, sector_id)
+            .ok_or_else(|| anyhow::anyhow!("sector {sector_id} out of range"))?;
+        sector.save = Some(format!("sector-{planet_name}-{sector_id}"));
+        sector.info.info.has_core = true;
+        sector.info.info.storage_capacity = 4000;
+        sector.info.info.waves = false;
+        sector.info.info.attack = false;
+        sector.info.info.wave = 1;
+        sector.info.info.best_core_type = planet_def
+            .default_core
+            .clone()
+            .unwrap_or_else(|| "core-shard".to_owned());
+        sector
+            .info
+            .info
+            .production
+            .insert("copper".to_owned(), ExportStat { mean: 1.0 });
+    }
+
+    // Campaign rules fold (fog/hideSpawns/enemy multipliers) + RulesLoadEvent.
+    let mut rules = Rules {
+        attack_mode: false,
+        wave_team: 2,
+        ..Rules::default()
+    };
+    let apply = campaign
+        .planet(planet_id)
+        .ok_or_else(|| anyhow::anyhow!("planet runtime missing"))?
+        .apply_rules(&registry, &mut rules, false, false);
+    let mut epoch = RulesEpoch::new();
+    let mut active = Rules::default();
+    let rules_load = apply_rules_load(&mut active, rules.clone(), false, &mut epoch);
+
+    // Fixed-step advance (600 ticks -> 10 s by default).
+    let _due = campaign.advance_time(ticks);
+
+    let mut settings = mind_core::io::settings::SettingsStore::new();
+    let report = campaign.run_turn(
+        &registry,
+        &mut settings,
+        &TurnContext::default(),
+        &mut JavaRandom::new(1),
+    );
+
+    // Persist + reload the sector info.
+    let planet_label = campaign
+        .planet(planet_id)
+        .ok_or_else(|| anyhow::anyhow!("planet runtime missing"))?
+        .name
+        .clone();
+    let saved = {
+        let sector = campaign
+            .sector(planet_id, sector_id)
+            .ok_or_else(|| anyhow::anyhow!("sector missing"))?;
+        sector.save_info(&mut settings, &planet_label).is_ok()
+    };
+    let mut reloaded = campaign
+        .sector(planet_id, sector_id)
+        .ok_or_else(|| anyhow::anyhow!("sector missing"))?
+        .clone();
+    reloaded.load_info(&settings, &planet_label);
+    let info_roundtrip = reloaded.info.info
+        == campaign
+            .sector(planet_id, sector_id)
+            .ok_or_else(|| anyhow::anyhow!("sector missing"))?
+            .info
+            .info;
+
+    let info = &campaign
+        .sector(planet_id, sector_id)
+        .ok_or_else(|| anyhow::anyhow!("sector missing"))?
+        .info
+        .info;
+    let checksum = fnv_hex(serde_json::to_string(info)?.as_bytes());
+    let rules_checksum = rules.checksum_part().to_hex();
+
+    let pass = preset_on_planet
+        && info.has_core
+        && info.wave == 1
+        && info.items.get("copper").copied().unwrap_or(0) > 0
+        && saved
+        && info_roundtrip
+        && report.turn == 1
+        && !rules_load.from_save
+        && rules_load.rules_epoch == 1
+        && !apply.rts_enabled;
+
+    let dump = json!({
+        "format": 1,
+        "scenario": "campaign_sector_cycle",
+        "planet": planet_label,
+        "sector": sector_name,
+        "sector_id": sector_id,
+        "preset_on_planet": preset_on_planet,
+        "ticks": ticks,
+        "turn": report.turn,
+        "has_core": info.has_core,
+        "wave": info.wave,
+        "storage_capacity": info.storage_capacity,
+        "best_core_type": info.best_core_type,
+        "copper": info.items.get("copper").copied().unwrap_or(0),
+        "rules_epoch": rules_load.rules_epoch,
+        "fog": rules.fog,
+        "checksum": checksum,
+        "rules_checksum": rules_checksum,
+        "pass": pass,
+    });
+    let report = json!({
+        "scenario": "campaign_sector_cycle",
+        "planet": planet_label,
+        "sector": sector_name,
+        "turn": report.turn,
+        "has_core": info.has_core,
+        "checksum": checksum,
+        "pass": pass,
+    });
+    let _ = store;
+    Ok((report, dump))
+}
+
+/// `campaign turn` — plan 12 §7b `campaign_turn` (M3 production/export means).
+fn campaign_turn(turns: u32) -> Result<(Value, Value)> {
+    let bundle = MemoryBundle::new();
+    let registry = create_base_content(&bundle, &MemoryUnlockStore::new(), true)
+        .map_err(|error| anyhow::anyhow!("content boot failed: {error}"))?;
+    let mut campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
+    let planet = campaign
+        .planet_id_by_name("serpulo")
+        .ok_or_else(|| anyhow::anyhow!("serpulo missing"))?;
+
+    let source_id = registry
+        .sector_by_name("groundZero")
+        .map(|preset| preset.sector)
+        .ok_or_else(|| anyhow::anyhow!("groundZero missing"))?;
+    let dest_id = registry
+        .sector_by_name("saltFlats")
+        .map(|preset| preset.sector)
+        .ok_or_else(|| anyhow::anyhow!("saltFlats missing"))?;
+
+    for id in [source_id, dest_id] {
+        let sector = campaign
+            .sector_mut(planet, id)
+            .ok_or_else(|| anyhow::anyhow!("sector {id} out of range"))?;
+        sector.save = Some(format!("sector-serpulo-{id}"));
+        sector.info.info.has_core = true;
+        sector.info.info.storage_capacity = 1_000_000;
+        sector.info.info.waves = false;
+        sector.info.info.attack = false;
+    }
+    {
+        let source = campaign
+            .sector_mut(planet, source_id)
+            .ok_or_else(|| anyhow::anyhow!("source sector missing"))?;
+        source
+            .info
+            .info
+            .production
+            .insert("silicon".to_owned(), ExportStat { mean: 2.5 });
+        source
+            .info
+            .info
+            .export
+            .insert("silicon".to_owned(), ExportStat { mean: 2.5 });
+        source.info.info.destination = Some(mind_core::io::json::content_serde::SectorKey::format(
+            "serpulo", dest_id,
+        ));
+    }
+    campaign
+        .planet_mut(planet)
+        .ok_or_else(|| anyhow::anyhow!("serpulo runtime missing"))?
+        .campaign_rules
+        .legacy_launch_pads = true;
+
+    let mut settings = mind_core::io::settings::SettingsStore::new();
+    let mut rand = JavaRandom::new(7);
+    let mut turn_report = None;
+    for _ in 0..turns {
+        turn_report =
+            Some(campaign.run_turn(&registry, &mut settings, &TurnContext::default(), &mut rand));
+    }
+    let turn = turn_report.map(|report| report.turn).unwrap_or(0);
+
+    let source = campaign
+        .sector(planet, source_id)
+        .ok_or_else(|| anyhow::anyhow!("source sector missing"))?;
+    let dest = campaign
+        .sector(planet, dest_id)
+        .ok_or_else(|| anyhow::anyhow!("destination sector missing"))?;
+    let expected = (2.5 * 120.0 * turns as f32) as i32;
+    let source_items = source.info.info.items.get("silicon").copied().unwrap_or(0);
+    let dest_items = dest.info.info.items.get("silicon").copied().unwrap_or(0);
+    let checksum = fnv_hex(
+        serde_json::to_string(&json!({
+            "turn": turn,
+            "source": source_items,
+            "dest": dest_items,
+        }))?
+        .as_bytes(),
+    );
+    let pass = turn == turns as i32 && source_items == expected && dest_items == expected;
+
+    let dump = json!({
+        "format": 1,
+        "scenario": "campaign_turn",
+        "turns": turns,
+        "turn": turn,
+        "production_mean": 2.5,
+        "seconds_passed": 120.0,
+        "expected_items": expected,
+        "source_items": source_items,
+        "dest_items": dest_items,
+        "checksum": checksum,
+        "pass": pass,
+    });
+    let report = json!({
+        "scenario": "campaign_turn",
+        "turns": turns,
+        "source_items": source_items,
+        "dest_items": dest_items,
+        "checksum": checksum,
+        "pass": pass,
+    });
+    Ok((report, dump))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -308,5 +584,17 @@ mod tests {
     fn tech_golden_matches() {
         let (_, dump) = tech_unlock_gating().unwrap();
         assert_eq!(golden("tech_unlock_gating.json"), canonical(&dump));
+    }
+
+    #[test]
+    fn sector_golden_matches() {
+        let (_, dump) = campaign_sector_cycle("serpulo", "groundZero", 600).unwrap();
+        assert_eq!(golden("sector_cycle.json"), canonical(&dump));
+    }
+
+    #[test]
+    fn turn_golden_matches() {
+        let (_, dump) = campaign_turn(10).unwrap();
+        assert_eq!(golden("turn.json"), canonical(&dump));
     }
 }

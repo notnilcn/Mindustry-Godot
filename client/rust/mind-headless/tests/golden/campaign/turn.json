@@ -1,0 +1,13 @@
+{
+  "format": 1,
+  "scenario": "campaign_turn",
+  "turns": 10,
+  "turn": 10,
+  "production_mean": 2.5,
+  "seconds_passed": 120.0,
+  "expected_items": 3000,
+  "source_items": 3000,
+  "dest_items": 3000,
+  "checksum": "b02c01ef73ded6da",
+  "pass": true
+}
