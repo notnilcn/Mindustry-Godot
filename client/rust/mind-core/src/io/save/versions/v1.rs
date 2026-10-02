@@ -6,17 +6,18 @@
 //! Ported from `core/src/mindustry/io/SaveVersion.java` (region layout and
 //! read/write logic). Native v1 always writes all seven regions; readers
 //! tolerate unknown region names and missing trailing regions for forward
-//! growth. M0 writes an empty world (`0×0` map, no entities); the tile/entity
-//! payload writers land in M4 against [`super::super::state::WorldContext`].
+//! growth.
 //!
 //! Framing (plan 04 §6.1):
 //! - `meta`: `i16` count + (`u16`-len UTF-8 key, value) pairs.
-//! - `patches`: `i32` patch format version + `i32` asset count (empty until 20).
+//! - `patches`: `i32` patch format version + `i32` asset count (payload plan 20).
 //! - `content`: `u8` mapped types + per type (`u8` ordinal, `u16` count, names).
-//! - `map`: `u16` width, `u16` height, then tile passes (M4).
-//! - `entities`: `u16` id-map count, `i32` team count, `i32` entity count (M4).
-//! - `markers`: `i32` count (payload owned by plan 12).
-//! - `custom`: `i32` chunk count + (name, chunk) pairs (registry owned by 20).
+//! - `map`: `u16` width, `u16` height, floor/overlay RLE pass, then the block
+//!   pass (`u16` block, packed entity/data byte, optional 7-byte tile data,
+//!   center flag + nested tile-entity chunk, `u8` RLE run).
+//! - `entities`: `u16` custom-ID map + names, team build plans, entity chunks.
+//! - `markers`: plan 12 `MapMarkers` payload.
+//! - `custom`: `i32` chunk count + (name, chunk) pairs (registry plan 20).
 
 use super::super::chunk::{
     REGION_CONTENT, REGION_CUSTOM, REGION_ENTITIES, REGION_MAP, REGION_MARKERS, REGION_META,
@@ -24,10 +25,12 @@ use super::super::chunk::{
 };
 use super::super::meta::SaveMeta;
 use super::super::options::SaveOptions;
-use super::super::state::SaveReadState;
+use super::super::state::{SaveReadState, TeamPlan};
 use super::super::version::SaveVersion;
 use crate::content::load::TemporaryMapper;
-use crate::content::{ContentRegistry, ContentType};
+use crate::content::{BlockId, ContentRegistry, ContentType};
+use crate::io::entity::EntityIdMap;
+use crate::io::typeio;
 use crate::io::wire::{WireReader, WireWriter};
 use crate::io::{IoError, StringMap};
 
@@ -53,9 +56,17 @@ impl SaveVersion for SaveV1 {
         }
         w.write_region(REGION_META, |wire, _scratch| wire.string_map(&tags))?;
 
+        let patches = w.ctx.patches;
+        let embed = options.embed_assets;
         w.write_region(REGION_PATCHES, |wire, _scratch| {
             wire.i(PATCH_FORMAT_VERSION);
-            wire.i(0);
+            match patches {
+                Some(set) => {
+                    wire.i(set.patch_count() as i32);
+                    set.write_patches(wire, embed)?;
+                }
+                None => wire.i(0),
+            }
             Ok(())
         })?;
 
@@ -64,34 +75,61 @@ impl SaveVersion for SaveV1 {
             write_content_header(wire, content)
         })?;
 
-        // M0 empty world: 0x0 map, no entities/markers/custom chunks.
-        w.write_region(REGION_MAP, |wire, _scratch| {
-            wire.us(0);
-            wire.us(0);
-            Ok(())
+        let map = w.ctx.map;
+        w.write_region(REGION_MAP, |wire, scratch| match map {
+            Some(map) => write_map(wire, scratch, map),
+            None => {
+                // Empty world (meta-only saves).
+                wire.us(0);
+                wire.us(0);
+                Ok(())
+            }
         })?;
 
-        w.write_region(REGION_ENTITIES, |wire, _scratch| {
-            wire.us(0); // entity ID mapping
-            wire.i(0); // team build plans
-            wire.i(0); // world entities
-            Ok(())
+        let entities = w.ctx.entities;
+        w.write_region(REGION_ENTITIES, |wire, scratch| match entities {
+            Some(entities) => write_entities(wire, scratch, entities),
+            None => {
+                wire.us(0); // entity ID mapping
+                wire.i(0); // team build plans
+                wire.i(0); // world entities
+                Ok(())
+            }
         })?;
 
-        w.write_region(REGION_MARKERS, |wire, _scratch| {
-            wire.i(0);
-            Ok(())
+        let markers = w.ctx.markers;
+        w.write_region(REGION_MARKERS, |wire, _scratch| match markers {
+            Some(markers) => markers.write_markers(wire),
+            None => {
+                wire.i(0);
+                Ok(())
+            }
         })?;
 
-        w.write_region(REGION_CUSTOM, |wire, _scratch| {
-            wire.i(0);
+        let custom = w.ctx.custom_chunks;
+        w.write_region(REGION_CUSTOM, |wire, scratch| {
+            let chunks: Vec<(
+                &String,
+                &std::sync::Arc<dyn super::super::state::CustomChunk>,
+            )> = match custom {
+                Some(registry) => registry
+                    .iter()
+                    .filter(|(_, chunk)| chunk.should_write())
+                    .collect(),
+                None => Vec::new(),
+            };
+            wire.i(chunks.len() as i32);
+            for (name, chunk) in chunks {
+                wire.str(name)?;
+                scratch.write_chunk(wire, |chunk_writer| chunk.write(chunk_writer))?;
+            }
             Ok(())
         })?;
 
         Ok(())
     }
 
-    fn read(&self, r: &mut SaveReader<'_>, state: &mut SaveReadState) -> Result<(), IoError> {
+    fn read(&self, r: &mut SaveReader, state: &mut SaveReadState) -> Result<(), IoError> {
         state.reset();
         let mut saw_meta = false;
         while let Some(name) = r.next_region()? {
@@ -117,32 +155,39 @@ impl SaveVersion for SaveV1 {
                     require_consumed(&name, expected, wire.pos())?;
                     if let (Some(mapper), Some(content)) = (mapper, state.content.as_deref_mut()) {
                         // Upstream `content.setTemporaryMapper(map)`; cleared by
-                        // the load epilogue (`SaveIO.load` finally block).
+                        // the `SaveIo::load` epilogue (`finally`).
                         content.set_temporary_mapper(Some(mapper));
                     }
                 }
                 REGION_MAP => {
                     let expected = r.payload().len();
                     let mut wire = r.wire();
-                    read_map_stub(&mut wire).map_err(|e| IoError::region_read(&name, e))?;
+                    read_map(&mut wire, state).map_err(|e| IoError::region_read(&name, e))?;
                     require_consumed(&name, expected, wire.pos())?;
                 }
                 REGION_ENTITIES => {
                     let expected = r.payload().len();
                     let mut wire = r.wire();
-                    read_entities_stub(&mut wire).map_err(|e| IoError::region_read(&name, e))?;
+                    read_entities(&mut wire, state).map_err(|e| IoError::region_read(&name, e))?;
                     require_consumed(&name, expected, wire.pos())?;
                 }
                 REGION_MARKERS => {
                     let expected = r.payload().len();
                     let mut wire = r.wire();
-                    read_markers_stub(&mut wire).map_err(|e| IoError::region_read(&name, e))?;
+                    match &mut state.markers {
+                        Some(sink) => sink
+                            .read_markers(&mut wire)
+                            .map_err(|e| IoError::region_read(&name, e))?,
+                        None => read_markers_stub(&mut wire)
+                            .map_err(|e| IoError::region_read(&name, e))?,
+                    }
                     require_consumed(&name, expected, wire.pos())?;
                 }
                 REGION_CUSTOM => {
                     let expected = r.payload().len();
                     let mut wire = r.wire();
-                    read_custom_chunks(&mut wire).map_err(|e| IoError::region_read(&name, e))?;
+                    read_custom_chunks(&mut wire, state)
+                        .map_err(|e| IoError::region_read(&name, e))?;
                     require_consumed(&name, expected, wire.pos())?;
                 }
                 other => {
@@ -158,7 +203,7 @@ impl SaveVersion for SaveV1 {
         Ok(())
     }
 
-    fn get_meta(&self, r: &mut SaveReader<'_>) -> Result<SaveMeta, IoError> {
+    fn get_meta(&self, r: &mut SaveReader) -> Result<SaveMeta, IoError> {
         // Upstream reads the first chunk as the meta string map.
         let Some(name) = r.next_region()? else {
             return Err(IoError::UnexpectedEof);
@@ -174,12 +219,10 @@ impl SaveVersion for SaveV1 {
     }
 }
 
-/// `SaveVersion.writeMeta`: the caller computes the standard tag set (plan 04
-/// §6.2); the writer only merges + serializes.
+/// `SaveVersion.readMeta`: the rules JSON is stashed and parsed after data
+/// patches land (plan 04 M6 wires the `JsonIo` parse).
 fn read_meta(wire: &mut WireReader, state: &mut SaveReadState) -> Result<(), IoError> {
     let map = wire.string_map()?;
-    // `SaveVersion.readMeta`: the rules JSON is stashed and parsed after data
-    // patches land (plan 04 M6 wires the `JsonIo` parse).
     state.rule_string = Some(map.get("rules").cloned().unwrap_or_else(|| "{}".to_owned()));
     state.tags = map;
     Ok(())
@@ -279,32 +322,361 @@ fn read_content_header(
     Ok(content.map(|_| mapper))
 }
 
-/// M0 map stub: reads the size; tile passes land in M4.
-fn read_map_stub(wire: &mut WireReader) -> Result<(), IoError> {
+/// Maps a save-side block id through the temporary mapper
+/// (`content.block(id)`); invalid/unknown ids become `air` (0).
+fn map_block_id(registry: &ContentRegistry, raw: i32) -> u16 {
+    registry
+        .get_by_id(ContentType::Block, raw)
+        .map(|content| content.id)
+        .unwrap_or(0)
+}
+
+/// `SaveVersion.writeMap`: world size, floor/overlay RLE pass, block pass with
+/// per-tile data + nested tile-entity chunks at multiblock centers.
+fn write_map(
+    wire: &mut WireWriter,
+    scratch: &mut super::super::chunk::SaveScratch,
+    map: &dyn super::super::state::MapSource,
+) -> Result<(), IoError> {
+    let width = map.width();
+    let height = map.height();
+    wire.us(width);
+    wire.us(height);
+    let len = width as usize * height as usize;
+
+    // Floor + overlay pass.
+    let mut i = 0;
+    while i < len {
+        let floor = map.floor_id(i);
+        let overlay = map.overlay_id(i);
+        wire.us(floor);
+        wire.us(overlay);
+        let mut consecutives = 0usize;
+        while i + 1 + consecutives < len && consecutives < 255 {
+            let j = i + 1 + consecutives;
+            if map.floor_id(j) != floor || map.overlay_id(j) != overlay {
+                break;
+            }
+            consecutives += 1;
+        }
+        wire.ub(consecutives as u8);
+        i += consecutives + 1;
+    }
+
+    // Block pass.
+    let mut i = 0;
+    while i < len {
+        let block = map.block_id(i);
+        wire.us(block);
+
+        let has_building = map.has_building(i);
+        let save_data = map.should_save_data(i);
+        // bit0: entity present; bit2: 7-byte tile data present (upstream layout).
+        let packed = u8::from(has_building) | if save_data { 4 } else { 0 };
+        wire.ub(packed);
+
+        if save_data {
+            let (data, floor_data, overlay_data, extra_data) = map.tile_data(i);
+            wire.ub(data);
+            wire.ub(floor_data);
+            wire.ub(overlay_data);
+            wire.i(extra_data);
+        }
+
+        if has_building {
+            // Only multiblock centers carry the entity chunk.
+            if map.is_center(i) {
+                wire.bool(true);
+                scratch.write_chunk(wire, |chunk| map.write_building(i, chunk))?;
+            } else {
+                wire.bool(false);
+            }
+        } else if !save_data {
+            // Run of identical non-entity, non-data blocks (upstream compares
+            // block id + shouldSaveData only; build-ness follows from the block).
+            let mut consecutives = 0usize;
+            while i + 1 + consecutives < len && consecutives < 255 {
+                let j = i + 1 + consecutives;
+                if map.block_id(j) != block || map.should_save_data(j) != save_data {
+                    break;
+                }
+                consecutives += 1;
+            }
+            wire.ub(consecutives as u8);
+            i += consecutives;
+        }
+        i += 1;
+    }
+    Ok(())
+}
+
+/// `SaveVersion.readMap` (ported against [`super::super::state::WorldContext`]).
+fn read_map(wire: &mut WireReader, state: &mut SaveReadState) -> Result<(), IoError> {
     let width = wire.us()?;
     let height = wire.us()?;
-    if width > 0 || height > 0 {
-        log::warn!("skipping {width}x{height} map region: tile data lands in M4");
+    if width == 0 && height == 0 {
+        return Ok(());
+    }
+    let len = width as usize * height as usize;
+    let preview = state.preview;
+    let all_buildings = &mut state.all_buildings;
+    let Some(context) = state.context.as_deref_mut() else {
+        log::warn!("skipping {width}x{height} map region: no world context");
         wire.skip_to_end();
+        return Ok(());
+    };
+    let Some(registry) = state.content.as_deref() else {
+        return Err(IoError::corrupt("map region requires a content registry"));
+    };
+
+    let generating = context.is_generating();
+    if !generating {
+        context.begin();
+    }
+    let result = read_map_body(
+        wire,
+        preview,
+        all_buildings,
+        context,
+        registry,
+        width,
+        height,
+        len,
+    );
+    if !generating {
+        context.end();
+    }
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+fn read_map_body(
+    wire: &mut WireReader,
+    preview: bool,
+    all_buildings: &mut Vec<usize>,
+    context: &mut dyn super::super::state::WorldContext,
+    registry: &ContentRegistry,
+    width: u16,
+    height: u16,
+    len: usize,
+) -> Result<(), IoError> {
+    let stone = registry
+        .block_id("stone")
+        .map(|id| id.raw())
+        .ok_or_else(|| IoError::corrupt("registry is missing the `stone` floor"))?;
+    context.resize(width, height);
+    let width = width as usize;
+
+    // Floor pass: `air` floors become `stone` (`Blocks.stone.id`).
+    let mut i = 0usize;
+    while i < len {
+        let floor_raw = i32::from(wire.s()?);
+        let ore_raw = i32::from(wire.s()?);
+        let consecutives = wire.ub()? as usize;
+        if i + consecutives >= len {
+            return Err(IoError::corrupt("floor RLE run exceeds the tile count"));
+        }
+        let mut floor = map_block_id(registry, floor_raw);
+        if floor == 0 {
+            floor = stone;
+        }
+        let ore = map_block_id(registry, ore_raw);
+        for j in 0..=consecutives {
+            let index = i + j;
+            context.create(
+                (index % width) as u16,
+                (index / width) as u16,
+                floor,
+                ore,
+                0,
+            );
+        }
+        i += consecutives + 1;
+    }
+
+    // Block pass.
+    let mut i = 0usize;
+    while i < len {
+        let block_raw = i32::from(wire.s()?);
+        let block = map_block_id(registry, block_raw);
+        let packed = wire.ub()?;
+        let had_entity = packed & 1 != 0;
+        let had_data = packed & 4 != 0;
+
+        let mut data = 0u8;
+        let mut floor_data = 0u8;
+        let mut overlay_data = 0u8;
+        let mut extra_data = 0i32;
+        if had_data {
+            data = wire.ub()?;
+            floor_data = wire.ub()?;
+            overlay_data = wire.ub()?;
+            extra_data = wire.i()?;
+        }
+
+        let is_center = !had_entity || wire.bool()?;
+
+        if is_center {
+            context.set_block(i, block);
+            if context.has_building(i) && !preview {
+                all_buildings.push(i);
+            }
+        }
+        if had_data {
+            // Assigned after set_block (it can reset data upstream).
+            context.set_tile_data(i, data, floor_data, overlay_data, extra_data);
+            context.on_read_tile_data(i);
+        }
+        if had_entity {
+            if is_center {
+                if context.block_has_building_io(i) {
+                    let chunk_len = wire.u()? as usize;
+                    let payload = wire.bytes(chunk_len)?;
+                    let mut chunk = WireReader::new(payload);
+                    let version = chunk.ub()?;
+                    context.read_building(i, &mut chunk, version).map_err(|e| {
+                        IoError::corrupt(format!(
+                            "Failed to read tile entity of block: {block}: {e}"
+                        ))
+                    })?;
+                } else {
+                    // The block lost its building IO (removed/changed): skip.
+                    let chunk_len = wire.u()? as usize;
+                    wire.skip(chunk_len)?;
+                }
+                context.on_read_building(i);
+            }
+        } else if !had_data {
+            let consecutives = wire.ub()? as usize;
+            if i + consecutives >= len {
+                return Err(IoError::corrupt("block RLE run exceeds the tile count"));
+            }
+            for j in 1..=consecutives {
+                context.set_block(i + j, block);
+            }
+            i += consecutives;
+        }
+        i += 1;
     }
     Ok(())
 }
 
-/// M0 entities stub: reads the three section counts; payload lands in M4.
-fn read_entities_stub(wire: &mut WireReader) -> Result<(), IoError> {
-    let id_map = wire.us()?;
-    let teams = wire.i()?;
-    let entities = wire.i()?;
-    if id_map > 0 || teams > 0 || entities > 0 {
-        log::warn!(
-            "skipping entities region ({id_map} mapped, {teams} teams, {entities} entities): entity IO lands in M4"
-        );
-        wire.skip_to_end();
+/// `SaveVersion.writeEntities`: custom ID mapping, team build plans, then the
+/// entity chunks.
+fn write_entities(
+    wire: &mut WireWriter,
+    scratch: &mut super::super::chunk::SaveScratch,
+    entities: &dyn super::super::state::EntitySource,
+) -> Result<(), IoError> {
+    // `writeEntityMapping`.
+    let id_map = entities.entity_id_map();
+    wire.us(id_map.len() as u16);
+    for (id, name) in id_map.iter() {
+        wire.us(id);
+        wire.str(name)?;
+    }
+
+    // `writeTeamBlocks`.
+    let teams = entities.team_plans();
+    wire.i(teams.len() as i32);
+    for (team, plans) in &teams {
+        wire.i(*team);
+        wire.i(plans.len() as i32);
+        for plan in plans {
+            wire.s(plan.x);
+            wire.s(plan.y);
+            wire.s(plan.rotation);
+            wire.us(plan.block.raw());
+            typeio::write_object(wire, &plan.config)?;
+        }
+    }
+
+    // `writeWorldEntities`.
+    wire.i(entities.entity_count() as i32);
+    entities.write_entities(wire, scratch)?;
+    Ok(())
+}
+
+/// `SaveVersion.readEntities`.
+fn read_entities(wire: &mut WireReader, state: &mut SaveReadState) -> Result<(), IoError> {
+    // `readEntityMapping`: custom ids override the global mapping by name.
+    let mut custom = EntityIdMap::new();
+    let mapped = wire.us()?;
+    for _ in 0..mapped {
+        let id = wire.us()?;
+        let name = wire.str()?;
+        custom.insert(id, &name);
+    }
+
+    // `readTeamBlocks`.
+    let team_count = wire.i()?;
+    if team_count < 0 {
+        return Err(IoError::corrupt(format!(
+            "invalid team count: {team_count}"
+        )));
+    }
+    for _ in 0..team_count {
+        let team = wire.i()?;
+        let blocks = wire.i()?;
+        if blocks < 0 {
+            return Err(IoError::corrupt(format!(
+                "invalid team plan count: {blocks}"
+            )));
+        }
+        let mut plans = Vec::with_capacity((blocks as usize).min(1000));
+        let mut seen = std::collections::BTreeSet::new();
+        for _ in 0..blocks {
+            let x = wire.s()?;
+            let y = wire.s()?;
+            let rotation = wire.s()?;
+            let block = wire.us()?;
+            let config = typeio::read_object(wire)?;
+            // Two plans cannot share a position (`IntSet.add(Point2.pack)`).
+            if seen.insert(typeio::pack_point2(i32::from(x), i32::from(y))) {
+                plans.push(TeamPlan {
+                    x,
+                    y,
+                    rotation,
+                    block: BlockId::new(block),
+                    config,
+                });
+            }
+        }
+        state.team_plans.push((team, plans));
+    }
+
+    // `readWorldEntities`: unknown class IDs are skipped by length; the
+    // `afterReadAll` pass runs at the end.
+    let amount = wire.i()?;
+    if amount < 0 {
+        return Err(IoError::corrupt(format!("invalid entity count: {amount}")));
+    }
+    for _ in 0..amount {
+        let chunk_len = wire.u()? as usize;
+        let payload = wire.bytes(chunk_len)?;
+        let mut chunk = WireReader::new(payload);
+        let class_id = chunk.ub()?;
+        let custom_name = custom.name_of(u16::from(class_id));
+        let supported = state
+            .entities
+            .as_deref()
+            .map(|sink| sink.supports_class(class_id, custom_name))
+            .unwrap_or(false);
+        if supported {
+            let id = chunk.i()?;
+            if let Some(sink) = state.entities.as_deref_mut() {
+                sink.read_entity(class_id, custom_name, id, &mut chunk)?;
+            }
+        }
+        // Unknown/no-sink chunks are discarded (payload already sliced).
+    }
+    if let Some(sink) = state.entities.as_deref_mut() {
+        sink.after_read_all();
     }
     Ok(())
 }
 
-/// M0 markers stub (`MapMarkers.write` payload is plan 12's).
+/// Markers stub for reads without a plan-12 sink (`MapMarkers` payload).
 fn read_markers_stub(wire: &mut WireReader) -> Result<(), IoError> {
     let count = wire.i()?;
     if count < 0 {
@@ -318,8 +690,8 @@ fn read_markers_stub(wire: &mut WireReader) -> Result<(), IoError> {
 }
 
 /// `SaveVersion.readCustomChunks`: unknown names are skipped by length, never
-/// fatal. No chunks are registered before plan 20.
-fn read_custom_chunks(wire: &mut WireReader) -> Result<(), IoError> {
+/// fatal.
+fn read_custom_chunks(wire: &mut WireReader, state: &mut SaveReadState) -> Result<(), IoError> {
     let amount = wire.i()?;
     if amount < 0 {
         return Err(IoError::corrupt(format!(
@@ -329,8 +701,20 @@ fn read_custom_chunks(wire: &mut WireReader) -> Result<(), IoError> {
     for _ in 0..amount {
         let name = wire.str()?;
         let len = wire.u()? as usize;
-        wire.skip(len)?;
-        log::debug!("skipped custom chunk `{name}` ({len} bytes): none registered");
+        let registered = state
+            .custom_chunks
+            .and_then(|registry| registry.get(&name).cloned());
+        match registered {
+            Some(chunk) => {
+                let payload = wire.bytes(len)?;
+                let mut reader = WireReader::new(payload);
+                chunk.read(&mut reader, len)?;
+            }
+            None => {
+                wire.skip(len)?;
+                log::debug!("skipped custom chunk `{name}` ({len} bytes): not registered");
+            }
+        }
     }
     Ok(())
 }

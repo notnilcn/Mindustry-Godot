@@ -144,6 +144,10 @@ pub trait EntityCodec: Sized {
     /// Reads sync fields for one revision.
     fn read_sync(&mut self, r: &mut EntityReader, revision: u16) -> IoResult<()>;
 
+    /// Building IO format byte written at the start of a tile-entity chunk
+    /// (`entity.version()`; `BuildingComp.version()` returns 0 upstream).
+    const TILE_VERSION: u8 = 0;
+
     /// Interpolation hook for plans 16/21 (`EntityIO.interpolate`).
     ///
     /// Plan 04 exports metadata only (R11); the default is a no-op until the

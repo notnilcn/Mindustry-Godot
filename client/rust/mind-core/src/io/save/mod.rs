@@ -15,6 +15,7 @@
 //! standard unknown-version message.
 
 pub mod chunk;
+pub mod fixture;
 pub mod meta;
 pub mod options;
 pub mod state;
@@ -142,7 +143,13 @@ impl SaveIo {
     pub fn load_bytes(bytes: &[u8], state: &mut SaveReadState) -> Result<(), IoError> {
         let (format, mut reader) = Self::open_native(bytes)?;
         let writer = version::get_writer(format).ok_or(IoError::UnknownVersion(format))?;
-        writer.read(&mut reader, state)
+        let result = writer.read(&mut reader, state);
+        // Upstream `finally { content.setTemporaryMapper(null) }` (SaveIO.load):
+        // the temporary mapper never escapes a load attempt.
+        if let Some(content) = state.content.as_deref_mut() {
+            content.set_temporary_mapper(None);
+        }
+        result
     }
 
     /// Meta-only read with backup fallback (`SaveIO.getMeta(Fi)`).

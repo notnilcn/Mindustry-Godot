@@ -15,7 +15,7 @@ use super::super::{IoError, StringMap};
 use super::chunk::{SaveReader, SaveWriter};
 use super::meta::SaveMeta;
 use super::options::SaveOptions;
-use super::state::SaveReadState;
+use super::state::{CustomChunk, EntitySource, MapSource, MarkersIo, PatchSetIo, SaveReadState};
 use super::versions::v1::SaveV1;
 use crate::content::ContentRegistry;
 
@@ -51,6 +51,16 @@ pub struct WriteContext<'a> {
     /// Content registry for the `content` header; `None` writes an empty
     /// header (M0 empty world).
     pub content: Option<&'a ContentRegistry>,
+    /// Tile data for the `map` region; `None` writes a `0×0` map.
+    pub map: Option<&'a dyn MapSource>,
+    /// Entity data for the `entities` region; `None` writes empty sections.
+    pub entities: Option<&'a dyn EntitySource>,
+    /// Map markers (plan 12); `None` writes an empty `markers` region.
+    pub markers: Option<&'a dyn MarkersIo>,
+    /// Data patches (plan 20); `None` writes an empty `patches` region.
+    pub patches: Option<&'a dyn PatchSetIo>,
+    /// Mod custom chunks (plan 20); `None` writes an empty `custom` region.
+    pub custom_chunks: Option<&'a indexmap::IndexMap<String, std::sync::Arc<dyn CustomChunk>>>,
 }
 
 impl WriteContext<'_> {
@@ -59,6 +69,11 @@ impl WriteContext<'_> {
         Self {
             tags,
             content: None,
+            map: None,
+            entities: None,
+            markers: None,
+            patches: None,
+            custom_chunks: None,
         }
     }
 }

@@ -23,7 +23,8 @@ use crate::registry;
 use crate::report::{
     BenchReport, ContentBenchReport, ContentIdEntry, ContentIdsReport, ContentLoadReport,
     ContentTypeCount, ContentTypeEntries, IoCheckClassIdsReport, IoCheckRevisionsReport,
-    IoDefRevisionReport, IoDumpMetaReport, IoSettingsReport, RunReport, SimReport, TileCheck,
+    IoDefRevisionReport, IoDumpMetaReport, IoRoundtripReport, IoSettingsReport, RunReport,
+    SimReport, TileCheck,
 };
 use crate::stdb_scenarios::StdbScenario;
 
@@ -139,8 +140,100 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
                 mind_core_dir,
                 json,
             } => cmd_io_check_class_ids(*update, mind_core_dir.as_deref(), *json),
+            IoCommand::Roundtrip {
+                map,
+                width,
+                height,
+                ticks,
+                out,
+                json,
+            } => cmd_io_roundtrip(map, *width, *height, *ticks, out.as_deref(), *json),
         },
     }
+}
+
+/// Plan 04 M4 (§7b): the native v1 map/entities round-trip on the synthetic
+/// fixture world (stands in for `serpulo/groundZero` until plan 06 lands).
+fn cmd_io_roundtrip(
+    map: &str,
+    width: u16,
+    height: u16,
+    ticks: u64,
+    out: Option<&Path>,
+    json: bool,
+) -> anyhow::Result<i32> {
+    use mind_core::io::fs::{FileSystem, NativeFs};
+    use mind_core::io::save::fixture::{FixtureContext, FixtureSink, FixtureWorld};
+    use mind_core::io::save::versions::v1::base_meta_tags;
+    use mind_core::io::save::{SaveIo, SaveOptions, SaveReadState, WriteContext};
+
+    if map != "synthetic" {
+        return Err(anyhow!(
+            "io roundtrip --map {map}: real maps need plan 06 (world/generators); use `--map synthetic`"
+        ));
+    }
+    let out = out
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::env::temp_dir().join("mind-io-roundtrip.msav"));
+    let fs = NativeFs;
+    let registry = boot_content()?;
+
+    // Build + simulate.
+    let mut world = FixtureWorld::synthetic(&registry, width, height);
+    for _ in 0..ticks {
+        world.tick();
+    }
+    let checksum_before = world.checksum_hex();
+
+    // Save.
+    let mut tags = base_meta_tags(width, height, world.wave, "synthetic");
+    tags.insert("tick".to_owned(), world.tick.to_string());
+    let mut ctx = WriteContext::meta_only(tags);
+    ctx.content = Some(&registry);
+    ctx.map = Some(&world);
+    ctx.entities = Some(&world);
+    SaveIo::save(&fs, &out, &ctx, &SaveOptions::new())?;
+    let bytes = fs.len(&out).unwrap_or(0);
+
+    // Load into a fresh world.
+    let cell = std::cell::RefCell::new(FixtureWorld::new(&registry, 0, 0));
+    let mut context = FixtureContext(&cell);
+    let mut sink = FixtureSink(&cell);
+    let mut load_registry = boot_content()?;
+    let mut state = SaveReadState {
+        context: Some(&mut context),
+        content: Some(&mut load_registry),
+        entities: Some(&mut sink),
+        ..SaveReadState::default()
+    };
+    SaveIo::load(&fs, &out, &mut state)?;
+    let state_tags = state.tags.clone();
+    let state_team_plans = state.team_plans.clone();
+    let all_buildings = state.all_buildings.len();
+    drop(state);
+    let mut loaded = cell.into_inner();
+    loaded.apply_meta(&state_tags);
+    loaded.apply_team_plans(state_team_plans);
+    let checksum_after = loaded.checksum_hex();
+
+    let pass = checksum_before == checksum_after;
+    if !pass {
+        log::error!("io roundtrip checksum mismatch: {checksum_before} != {checksum_after}");
+    }
+    let report = IoRoundtripReport {
+        map: map.to_owned(),
+        width,
+        height,
+        ticks,
+        out: out.display().to_string(),
+        bytes,
+        buildings: all_buildings,
+        checksum_before,
+        checksum_after,
+        pass,
+    };
+    print_report(&report, json)?;
+    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
 }
 
 /// Plan 04 M3 (§7b): revision drift check for every `EntityDefs!` def.

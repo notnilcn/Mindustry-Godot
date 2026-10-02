@@ -175,7 +175,10 @@ pub(crate) fn block_event_record(sim: &Sim, event: &SimEvent) -> Option<DumpEven
         SimEvent::ClientCreateEvent(_)
         | SimEvent::ClientLoadEvent(_)
         | SimEvent::ContentInitEvent(_)
-        | SimEvent::StateChangeEvent(_) => None,
+        | SimEvent::StateChangeEvent(_)
+        | SimEvent::SaveWriteEvent(_)
+        | SimEvent::SaveLoadEvent(_)
+        | SimEvent::RulesLoadEvent(_) => None,
     }
 }
 

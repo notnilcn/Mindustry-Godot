@@ -316,3 +316,28 @@ pub struct IoCheckClassIdsReport {
     /// Overall pass/fail.
     pub pass: bool,
 }
+
+/// `io roundtrip` report (plan 04 M4 §7b).
+#[derive(Debug, Clone, Serialize)]
+pub struct IoRoundtripReport {
+    /// Map that was round-tripped.
+    pub map: String,
+    /// World width.
+    pub width: u16,
+    /// World height.
+    pub height: u16,
+    /// Ticks simulated before saving.
+    pub ticks: u64,
+    /// Save file written.
+    pub out: String,
+    /// Save file size in bytes.
+    pub bytes: u64,
+    /// Buildings read back from the map region.
+    pub buildings: usize,
+    /// Fixture checksum before save.
+    pub checksum_before: String,
+    /// Fixture checksum after load.
+    pub checksum_after: String,
+    /// `checksum_before == checksum_after`.
+    pub pass: bool,
+}

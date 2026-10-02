@@ -188,6 +188,30 @@ pub enum IoCommand {
         #[arg(long)]
         json: bool,
     },
+
+    /// Save round-trip on the synthetic world fixture (plan 04 M4 §7b):
+    /// build → tick → checksum C0 → save → reset → load → assert C1 == C0.
+    Roundtrip {
+        /// Map to load. Only `synthetic` (the 64×64 fixture) exists until
+        /// plan 06 lands real maps/generators.
+        #[arg(long, default_value = "synthetic")]
+        map: String,
+        /// Synthetic world width.
+        #[arg(long, default_value_t = 64)]
+        width: u16,
+        /// Synthetic world height.
+        #[arg(long, default_value_t = 64)]
+        height: u16,
+        /// Ticks to simulate before saving.
+        #[arg(long, default_value_t = 600)]
+        ticks: u64,
+        /// Save file path (`<out>-backup.msav` rotates on the next run).
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Emit a machine-readable JSON report.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// `content` subcommands (plan 02 §7b).

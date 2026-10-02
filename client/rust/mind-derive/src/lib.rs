@@ -40,6 +40,7 @@ struct StructAttrs {
     name: Option<String>,
     no_serialize: bool,
     no_sync: bool,
+    version: u8,
 }
 
 #[derive(Default)]
@@ -121,6 +122,7 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
 
     let serialize = !struct_attrs.no_serialize;
     let sync = !struct_attrs.no_sync;
+    let tile_version = struct_attrs.version;
 
     // Save fields at the newest revision (declaration order, plan 04 §3.5).
     let save_fields: Vec<&FieldInfo> = fields
@@ -241,6 +243,7 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             const SERIALIZE: bool = #serialize;
             const SYNC: bool = #sync;
             const NEWEST_REVISION: u16 = #newest;
+            const TILE_VERSION: u8 = #tile_version;
 
             fn fields() -> &'static [::mind_core::io::entity::FieldDesc] {
                 static FIELDS: &[::mind_core::io::entity::FieldDesc] = &[
@@ -349,6 +352,11 @@ fn parse_struct_attrs(input: &DeriveInput) -> syn::Result<StructAttrs> {
             }
             if meta.path.is_ident("no_sync") {
                 out.no_sync = true;
+                return Ok(());
+            }
+            if meta.path.is_ident("version") {
+                let value: syn::LitInt = meta.value()?.parse()?;
+                out.version = value.base10_parse()?;
                 return Ok(());
             }
             Err(meta.error("unsupported entity attribute"))

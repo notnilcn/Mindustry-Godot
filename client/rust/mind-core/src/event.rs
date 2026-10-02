@@ -55,6 +55,28 @@ pub struct BlockBrokenEvent {
     pub block: BlockId,
 }
 
+/// Event fired before a save is written (`EventType.SaveWriteEvent`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SaveWriteEvent;
+
+/// Event fired after a save is loaded (`EventType.SaveLoadEvent`); `is_map`
+/// marks a new map load (`WorldContext.isMap`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SaveLoadEvent {
+    /// Whether the load counts as a new map load.
+    pub is_map: bool,
+}
+
+/// Event fired when rules are (re)assigned from a save
+/// (`EventType.RulesLoadEvent`). The rules payload is plan 12's type; for now
+/// only the origin flag is modeled (upstream fires it only for non-map,
+/// non-campaign loads).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RulesLoadEvent {
+    /// Whether the rules came from a save (`fromSave`).
+    pub from_save: bool,
+}
+
 /// Generates an event bus with one listener vector per event type.
 ///
 /// Ported from Arc `Events` (per-type listener lists + registration-order fire).
@@ -145,6 +167,9 @@ define_events! {
         StateChangeEvent => state_change : on_state_change, fire_state_change,
         BlockPlacedEvent => block_placed : on_block_placed, fire_block_placed,
         BlockBrokenEvent => block_broken : on_block_broken, fire_block_broken,
+        SaveWriteEvent => save_write : on_save_write, fire_save_write,
+        SaveLoadEvent => save_load : on_save_load, fire_save_load,
+        RulesLoadEvent => rules_load : on_rules_load, fire_rules_load,
     }
 }
 
