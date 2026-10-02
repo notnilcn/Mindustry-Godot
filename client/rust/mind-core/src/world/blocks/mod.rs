@@ -25,6 +25,7 @@ pub fn default_registry(content: &ContentRegistry) -> BehaviorRegistry {
     distribution::register(&mut registry, content);
     storage::register(&mut registry, content);
     payloads::register(&mut registry, content);
+    liquid::register(&mut registry, content);
     heat::register(&mut registry, content);
     power::register(&mut registry, content);
     registry

@@ -9,8 +9,14 @@
 //! become one Resource). Conduit/router/junction behaviors are the M3 files.
 //! (`movement.rs` is the plan's `move.rs`; `move` is a Rust keyword.)
 
+pub mod behavior;
 pub mod bridge;
 pub mod movement;
+
+pub use behavior::register;
+pub use behavior::{
+    LiquidConduitBehavior, LiquidConduitState, LiquidJunctionBehavior, LiquidRouterBehavior,
+};
 
 use bevy_ecs::component::Component;
 use bevy_ecs::prelude::Resource;
@@ -41,6 +47,9 @@ pub struct LiquidNode {
     pub junction: bool,
     /// `LiquidRouter` dumps its current liquid each tick.
     pub router: bool,
+    /// `Conduit` rejects liquid arriving from its output side
+    /// (`ConduitBuild.acceptLiquid`).
+    pub reject_from_output: bool,
     /// `liquidPressure` multiplier (default `1.0`).
     pub pressure: f32,
     /// Accepted liquid filter (`Block.liquidFilter`); empty = accept all.
@@ -55,6 +64,7 @@ impl Default for LiquidNode {
             leakable: false,
             junction: false,
             router: false,
+            reject_from_output: false,
             pressure: 1.0,
             filter: SmallVec::new(),
         }

@@ -1,0 +1,17 @@
+{
+  "scenario": "bench_power",
+  "network": "power",
+  "buildings": 2000,
+  "ticks": 3600,
+  "warmup": 600,
+  "p50_us": 242,
+  "p99_us": 616,
+  "p99_ms": 0.616,
+  "budget_ms": 0.3,
+  "within_budget": false,
+  "detail": {
+    "placed": 2000,
+    "graphs": 200,
+    "method": "PowerGrids::update_all"
+  }
+}
