@@ -10,6 +10,7 @@
 
 pub mod error;
 pub mod filters;
+pub mod generators;
 pub mod map;
 pub mod preview;
 pub mod shuffle;

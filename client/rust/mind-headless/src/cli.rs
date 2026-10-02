@@ -214,6 +214,34 @@ pub enum WorldCommand {
         json: bool,
     },
 
+    /// Generate a world and dump its checksum/histogram (plan 06 M6/M7 §7b).
+    Gen {
+        /// Generator tag (`simplex`, `flat`, `planet`).
+        #[arg(long, default_value = "simplex")]
+        generator: String,
+        /// Planet content name (for `--generator planet`).
+        #[arg(long, default_value = "serpulo")]
+        planet: String,
+        /// Sector id (for `--generator planet`).
+        #[arg(long, default_value_t = 0)]
+        sector: u32,
+        /// Generation seed.
+        #[arg(long, default_value_t = 7)]
+        seed: u64,
+        /// Grid width in tiles.
+        #[arg(long, default_value_t = 128)]
+        width: i32,
+        /// Grid height in tiles.
+        #[arg(long, default_value_t = 128)]
+        height: i32,
+        /// Write the final JSON report here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Apply a generation-filter stack to a deterministic base grid and dump
     /// the result checksum/histogram (plan 06 M5 §7b).
     Filters {

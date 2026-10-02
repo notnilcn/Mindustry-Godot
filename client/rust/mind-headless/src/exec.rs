@@ -182,6 +182,25 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
                 dump,
                 json,
             } => cmd_world_tile_ops(*seed, *width, *height, *ops, dump.as_deref(), *json),
+            WorldCommand::Gen {
+                generator,
+                planet,
+                sector,
+                seed,
+                width,
+                height,
+                dump,
+                json,
+            } => cmd_world_gen(
+                generator,
+                planet,
+                *sector,
+                *seed,
+                *width,
+                *height,
+                dump.as_deref(),
+                *json,
+            ),
             WorldCommand::Filters {
                 seed,
                 width,
@@ -2424,6 +2443,101 @@ fn cmd_world_tile_ops(
         );
         Ok(EXIT_FAIL)
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn cmd_world_gen(
+    generator: &str,
+    planet: &str,
+    sector: u32,
+    seed: u64,
+    width: i32,
+    height: i32,
+    dump: Option<&Path>,
+    json: bool,
+) -> anyhow::Result<i32> {
+    use mind_core::content::BlockId;
+    use mind_core::determinism::{Checksum, Hasher};
+    use mind_core::maps::generators::{SimplexGenerator, WorldGenerator};
+    use mind_core::world::{WorldGrid, WorldParams};
+
+    if width <= 0 || height <= 0 {
+        return Err(anyhow!("--width and --height must be positive"));
+    }
+    let content = boot_content()?;
+    let params = WorldParams {
+        seed_offset: seed,
+        width,
+        height,
+        ..WorldParams::default()
+    };
+    let mut grid = WorldGrid::new(width, height);
+
+    match generator {
+        "simplex" => {
+            let mut generator_impl = SimplexGenerator::new(seed);
+            generator_impl.generate(&mut grid.tiles, &params, &content);
+        }
+        "flat" | "blank" => {
+            let stone = content.block_id("stone").unwrap_or(BlockId::AIR);
+            for index in 0..grid.tiles.len() {
+                grid.tiles.geti_mut(index).floor = stone;
+            }
+        }
+        "planet" => {
+            return Err(anyhow!(
+                "the `planet` generator lands with plan 06 M7 (planet `{planet}`, sector {sector})"
+            ));
+        }
+        other => return Err(anyhow!("unknown generator `{other}`")),
+    }
+
+    let mut hasher = Hasher::new();
+    hasher.write_u32(width as u32);
+    hasher.write_u32(height as u32);
+    let mut floors: BTreeMap<String, u64> = BTreeMap::new();
+    let mut blocks: BTreeMap<String, u64> = BTreeMap::new();
+    let mut overlays: BTreeMap<String, u64> = BTreeMap::new();
+    for index in 0..grid.tiles.len() {
+        let tile = grid.tiles.geti(index);
+        hasher.write_u16(tile.block.raw());
+        hasher.write_u16(tile.floor.raw());
+        hasher.write_u16(tile.overlay.raw());
+        for (map, id) in [
+            (&mut floors, tile.floor),
+            (&mut blocks, tile.block),
+            (&mut overlays, tile.overlay),
+        ] {
+            *map.entry(
+                content
+                    .block(id)
+                    .map(|def| def.name.clone())
+                    .unwrap_or_else(|| "air".to_owned()),
+            )
+            .or_default() += 1;
+        }
+    }
+    let checksum = Checksum(hasher.finish().value()).to_hex();
+
+    let report = serde_json::json!({
+        "format": 1,
+        "generator": generator,
+        "planet": planet,
+        "sector": sector,
+        "seed": seed,
+        "width": width,
+        "height": height,
+        "checksum": checksum,
+        "counts": { "floors": floors, "blocks": blocks, "overlays": overlays },
+    });
+    let text = serde_json::to_string_pretty(&report)?;
+    if let Some(path) = dump {
+        std::fs::write(path, &text).with_context(|| format!("writing `{}`", path.display()))?;
+    }
+    if json || dump.is_none() {
+        println!("{text}");
+    }
+    Ok(EXIT_PASS)
 }
 
 fn cmd_world_filters(
