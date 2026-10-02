@@ -10,8 +10,10 @@
 
 pub mod asteroid;
 pub mod erekir;
+pub mod serpulo;
 pub mod tantros;
 
 pub use asteroid::AsteroidGenerator;
 pub use erekir::ErekirPlanetGenerator;
+pub use serpulo::SerpuloPlanetGenerator;
 pub use tantros::TantrosPlanetGenerator;
