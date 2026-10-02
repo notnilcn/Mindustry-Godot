@@ -131,6 +131,8 @@ pub struct CrafterState {
     pub total_progress: f32,
     /// Output liquid accumulator (`outputAccumulator`).
     pub output_accumulator: SmallVec<[f32; 2]>,
+    /// Deterministic RNG state used by `Separator` weighted output.
+    pub rng: u64,
 }
 
 /// `Drill`/`BurstDrill` build state.

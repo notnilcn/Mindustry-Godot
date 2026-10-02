@@ -24,6 +24,7 @@ use super::stats::Stats;
 
 pub mod defense;
 pub mod environment;
+pub mod production;
 pub mod sandbox;
 
 /// Plan-07 alias for plan 04's entity writer (`BuildingWriter`).
@@ -378,6 +379,16 @@ pub fn default_behavior(def: &BlockDef) -> Arc<dyn BuildingBehavior> {
         K::Radar => Arc::new(defense::RadarBehavior),
         K::Thruster => Arc::new(defense::ThrusterBehavior),
         K::TargetDummy => Arc::new(defense::TargetDummyBehavior),
+        K::GenericCrafter
+        | K::HeatCrafter
+        | K::AttributeCrafter
+        | K::Separator
+        | K::ItemIncinerator => Arc::new(production::CrafterBehavior),
+        K::Drill | K::BurstDrill | K::WallCrafter => Arc::new(production::DrillBehavior),
+        K::BeamDrill => Arc::new(production::BeamDrillBehavior),
+        K::Pump => Arc::new(production::PumpBehavior),
+        K::SolidPump | K::Fracker => Arc::new(production::SolidPumpBehavior),
+        K::Incinerator => Arc::new(production::IncineratorBehavior),
         _ => match super::block_kind_data::BlockKindData::from_def(def).family() {
             super::block_kind_data::BlockFamily::Sandbox => Arc::new(sandbox::SandboxBehavior),
             super::block_kind_data::BlockFamily::Environment => {

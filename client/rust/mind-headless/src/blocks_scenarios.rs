@@ -9,6 +9,7 @@ use anyhow::{Result, bail};
 use mind_core::content::BlockId;
 use mind_core::world::BuildHarness;
 use mind_core::world::config::ConfigValue;
+use mind_core::world::modules::{ItemModule, PowerModule};
 
 use crate::cli::BlocksCommand;
 
@@ -196,6 +197,47 @@ fn scenario(name: &str, json: bool) -> Result<()> {
                 "pass": pass,
                 "door_built": door_built,
                 "door_open_roundtrip": matches!(read_back, Some(ConfigValue::Bool(true))),
+                "checksum": harness.checksum_hex(),
+            });
+            print_json(&report, json, !json);
+            if !pass {
+                bail!("scenario {name} failed");
+            }
+        }
+        "consumer_efficiency" => {
+            let smelter = block(&harness, "silicon-smelter")?;
+            let placed = harness.place(4, 4, smelter, 0, true);
+            let entity = harness.build_at(4, 4);
+            if let Some(e) = entity {
+                let coal = harness.content().item_id("coal");
+                let sand = harness.content().item_id("sand");
+                if let (Some(coal), Some(sand)) = (coal, sand)
+                    && let Some(mut items) = harness.world.get_mut::<ItemModule>(e)
+                {
+                    items.add(coal, 100, 100);
+                    items.add(sand, 100, 100);
+                }
+                if let Some(mut power) = harness.world.get_mut::<PowerModule>(e) {
+                    power.status = 1.0;
+                }
+            }
+            for _ in 0..90 {
+                harness.tick();
+            }
+            let silicon = harness.content().item_id("silicon");
+            let produced = match (entity, silicon) {
+                (Some(e), Some(silicon)) => harness
+                    .world
+                    .get::<ItemModule>(e)
+                    .map(|items| items.get(silicon))
+                    .unwrap_or(0),
+                _ => 0,
+            };
+            let pass = placed && entity.is_some() && produced >= 2;
+            let report = serde_json::json!({
+                "scenario": name,
+                "pass": pass,
+                "silicon": produced,
                 "checksum": harness.checksum_hex(),
             });
             print_json(&report, json, !json);
