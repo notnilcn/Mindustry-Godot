@@ -347,6 +347,64 @@ fn scenario(name: &str, json: bool) -> Result<()> {
                 bail!("scenario {name} failed");
             }
         }
+        "logistics_mass_driver_roundtrip" => {
+            let copper = harness
+                .content()
+                .item_id("copper")
+                .ok_or_else(|| anyhow::anyhow!("copper item missing"))?;
+            // `--assume-power`: cheat rules give full consumer efficiency
+            // without a power graph (plan 08 M3 verify).
+            if let Some(mut rules) = harness
+                .world
+                .get_resource_mut::<mind_core::world::limits::BuildRules>()
+            {
+                rules.cheat = true;
+            }
+            let driver = block(&harness, "mass-driver")?;
+            let _ = harness.place(8, 8, driver, 0, true);
+            let _ = harness.place(20, 8, driver, 0, true);
+            let _ = harness.configure(8, 8, ConfigValue::Point2(12, 0));
+            let from = harness.build_at(8, 8);
+            if let Some(from) = from
+                && let Some(mut items) = harness
+                    .world
+                    .get_mut::<mind_core::world::modules::ItemModule>(from)
+            {
+                items.add(copper, 120, 120);
+            }
+            for _ in 0..1200 {
+                harness.tick();
+            }
+            let received = harness
+                .build_at(20, 8)
+                .and_then(|e| {
+                    harness
+                        .world
+                        .get::<mind_core::world::modules::ItemModule>(e)
+                })
+                .map(|items| items.total)
+                .unwrap_or(0);
+            let live_bolts = harness
+                .world
+                .iter_entities()
+                .filter(|e| {
+                    e.get::<mind_core::world::blocks::distribution::DriverBulletData>()
+                        .is_some()
+                })
+                .count();
+            let pass = received == 120 && live_bolts == 0;
+            let report = serde_json::json!({
+                "scenario": name,
+                "pass": pass,
+                "received": received,
+                "live_bolts": live_bolts,
+                "checksum": mind_core::world::fixtures::logistics::logistics_checksum(&harness.world).to_hex(),
+            });
+            print_json(&report, json, !json);
+            if !pass {
+                bail!("scenario {name} failed");
+            }
+        }
         "proximity_multiblock" => {
             let wall = block(&harness, "copper-wall")?;
             let _ = harness.place(4, 4, wall, 0, true);

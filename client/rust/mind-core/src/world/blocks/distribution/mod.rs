@@ -19,6 +19,7 @@ pub mod duct_junction;
 pub mod duct_router;
 pub mod item_bridge;
 pub mod junction;
+pub mod mass_driver;
 pub mod overflow_duct;
 pub mod overflow_gate;
 pub mod router;
@@ -42,6 +43,10 @@ pub use duct_junction::{DuctJunctionBehavior, DuctJunctionBuild};
 pub use duct_router::{DuctRouterBehavior, DuctRouterBuild};
 pub use item_bridge::{ItemBridgeBehavior, ItemBridgeBuild};
 pub use junction::{JunctionBehavior, JunctionBuild};
+pub use mass_driver::{
+    DriverBulletData, DriverState, MassDriverBehavior, MassDriverBuild, MassDriverCarrier,
+    MassDriverPayloadCarrier, TestBoltCarrier,
+};
 pub use overflow_duct::{OverflowDuctBehavior, OverflowDuctBuild};
 pub use overflow_gate::OverflowGateBehavior;
 pub use router::{RouterBehavior, RouterBuild};
@@ -65,6 +70,7 @@ pub fn register(registry: &mut BehaviorRegistry, _content: &ContentRegistry) {
     registry.register_named("duct-router", Arc::new(DuctRouterBehavior::VANILLA));
     registry.register_named("surge-router", Arc::new(StackRouterBehavior::SURGE));
     registry.register_named("duct-junction", Arc::new(DuctJunctionBehavior::VANILLA));
+    registry.register_named("mass-driver", Arc::new(MassDriverBehavior::VANILLA));
     registry.register_named("router", Arc::new(RouterBehavior::VANILLA));
     registry.register_named("distributor", Arc::new(RouterBehavior::VANILLA));
     registry.register_named("sorter", Arc::new(SorterBehavior::NORMAL));
