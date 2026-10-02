@@ -218,6 +218,19 @@ pub enum ModsCommand {
         #[arg(long)]
         json: bool,
     },
+
+    /// Time mod discovery + metadata + dependency resolution (plan 20 M9 §7d).
+    Bench {
+        /// Mod directory (defaults to `parity/mod_fixtures`).
+        #[arg(long, default_value = "parity/mod_fixtures")]
+        dir: PathBuf,
+        /// Timed iterations.
+        #[arg(long, default_value_t = 20)]
+        runs: usize,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// `trace` subcommands (plan 05 M6).

@@ -186,6 +186,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
                 probe,
                 json,
             } => cmd_mods_overlay(fixture, repo.as_deref(), probe, *json),
+            ModsCommand::Bench { dir, runs, json } => cmd_mods_bench(dir, *runs, *json),
         },
         Command::Io { command } => match command {
             IoCommand::DumpMeta { file, json } => cmd_io_dump_meta(file, *json),
@@ -1331,6 +1332,56 @@ fn cmd_mods_content(
         log::error!("mods content: {} content error(s)", errors.len());
         Ok(EXIT_FAIL)
     }
+}
+
+/// Plan 20 M9 (`mods bench`): discovery + metadata + dependency timing.
+fn cmd_mods_bench(dir: &Path, runs: usize, json: bool) -> anyhow::Result<i32> {
+    use mind_core::io::SettingsStore;
+    use mind_core::io::fs::NativeFs;
+    use mind_core::mods::Mods;
+
+    if runs == 0 {
+        return Err(anyhow!("mods bench --runs must be greater than 0"));
+    }
+    let dir = if dir.is_absolute() {
+        dir.to_path_buf()
+    } else {
+        paths::find_repo_root(None)?.join(dir)
+    };
+    let fs = NativeFs;
+    let settings = SettingsStore::new();
+    let mut samples = Vec::with_capacity(runs);
+    let mut mod_count = 0;
+    for _ in 0..runs {
+        let mut mods = Mods::new(true, &dir);
+        let start = Instant::now();
+        let report = mods
+            .load(&fs, &dir, &settings)
+            .with_context(|| format!("loading mods from `{}`", dir.display()))?;
+        samples.push(start.elapsed().as_nanos() as u64);
+        mod_count = report.mods.len();
+    }
+    samples.sort_unstable();
+    let p50 = samples[samples.len() / 2];
+    let p99 = samples[samples.len() - 1];
+    let report = serde_json::json!({
+        "scene": "discover",
+        "dir": dir.display().to_string(),
+        "runs": runs,
+        "mods": mod_count,
+        "p50_us": p50.div_ceil(1_000),
+        "p99_us": p99.div_ceil(1_000),
+    });
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "mods bench discover: {mod_count} mods, p50 {}us, p99 {}us over {runs} runs",
+            p50.div_ceil(1_000),
+            p99.div_ceil(1_000)
+        );
+    }
+    Ok(EXIT_PASS)
 }
 
 /// Plan 20 M5 (`mods overlay`): build a fixture mod's overlay and probe region
