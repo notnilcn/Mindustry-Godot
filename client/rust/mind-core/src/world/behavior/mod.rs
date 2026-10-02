@@ -351,7 +351,11 @@ pub trait BuildingBehavior: Send + Sync {
     }
 
     /// Efficiency scale hook.
-    fn efficiency_scale(&self, world: &World, e: Entity) -> f32 {
+    ///
+    /// `&mut World` so heat-pull blocks (plan 09 `HeatCrafter`) can run
+    /// `calculate_heat` during `updateConsumption`, exactly where upstream
+    /// applies `efficiencyScale()`.
+    fn efficiency_scale(&self, world: &mut World, e: Entity) -> f32 {
         let _ = (world, e);
         1.0
     }

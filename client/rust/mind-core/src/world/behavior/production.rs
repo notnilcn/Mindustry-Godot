@@ -154,7 +154,7 @@ impl BuildingBehavior for CrafterBehavior {
         }
     }
 
-    fn efficiency_scale(&self, world: &World, e: Entity) -> f32 {
+    fn efficiency_scale(&self, world: &mut World, e: Entity) -> f32 {
         let Some(inst) = instance(world, e) else {
             return 1.0;
         };

@@ -12,12 +12,15 @@
 //! generation-checked arena handles; static BFS scratch becomes the shared
 //! [`graph::PowerScratch`]; `update` takes an explicit `delta` (D8).
 
+pub mod behavior;
 pub mod generator;
 pub mod graph;
 pub mod module;
 pub mod nodes;
 pub mod reactors;
 pub mod sandbox;
+
+pub use behavior::register;
 
 use bevy_ecs::component::Component;
 

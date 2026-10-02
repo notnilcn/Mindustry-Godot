@@ -85,7 +85,7 @@ impl BuildingBehavior for SandboxBehavior {
             .unwrap_or(ConfigValue::None)
     }
 
-    fn efficiency_scale(&self, _world: &World, _e: Entity) -> f32 {
+    fn efficiency_scale(&self, _world: &mut World, _e: Entity) -> f32 {
         1.0
     }
 }

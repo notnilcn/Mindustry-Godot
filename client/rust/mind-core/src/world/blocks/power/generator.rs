@@ -112,41 +112,53 @@ fn lerp_delta(from: f32, to: f32, progress: f32, delta: f32) -> f32 {
     from + (to - from) * (progress * delta).clamp(0.0, 1.0)
 }
 
+/// Item flammabilities indexed by `ItemId` (content order), for behaviors.
+pub fn item_flammabilities(content: &ContentRegistry) -> Vec<f32> {
+    content
+        .items()
+        .iter()
+        .map(|item| item.flammability)
+        .collect()
+}
+
+/// Liquid flammabilities indexed by `LiquidId` (content order), for behaviors.
+pub fn liquid_flammabilities(content: &ContentRegistry) -> Vec<f32> {
+    content
+        .liquids()
+        .iter()
+        .map(|liquid| liquid.flammability)
+        .collect()
+}
+
 /// First item in ascending id order accepted by `filter` and stored.
 pub fn consumed_item(
-    content: &ContentRegistry,
+    flammability: &[f32],
     module: &ItemModule,
     filter: GeneratorFilter,
 ) -> Option<ItemId> {
     let GeneratorFilter::ItemFlammable { min } = filter else {
         return None;
     };
-    content
-        .items()
+    flammability
         .iter()
         .enumerate()
-        .find(|(index, item)| {
-            module.get(ItemId::new(*index as u16)) > 0 && item.flammability >= min
-        })
+        .find(|(index, value)| module.get(ItemId::new(*index as u16)) > 0 && **value >= min)
         .map(|(index, _)| ItemId::new(index as u16))
 }
 
 /// First liquid in ascending id order accepted by `filter` and stored.
 pub fn consumed_liquid(
-    content: &ContentRegistry,
+    flammability: &[f32],
     module: &LiquidModule,
     filter: GeneratorFilter,
 ) -> Option<LiquidId> {
     let GeneratorFilter::LiquidFlammable { min, .. } = filter else {
         return None;
     };
-    content
-        .liquids()
+    flammability
         .iter()
         .enumerate()
-        .find(|(index, liquid)| {
-            module.get(LiquidId::new(*index as u16)) > 0.0 && liquid.flammability >= min
-        })
+        .find(|(index, value)| module.get(LiquidId::new(*index as u16)) > 0.0 && **value >= min)
         .map(|(index, _)| LiquidId::new(index as u16))
 }
 
@@ -195,6 +207,26 @@ pub fn should_explode(world: &World, entity: Entity) -> bool {
 /// `delta` is `Time.delta` (D8); the building `timeScale` is applied as in
 /// `Building.delta()` where the Java code calls `delta()`.
 pub fn update_generator(world: &mut World, entity: Entity, delta: f32, content: &ContentRegistry) {
+    let item_flammability = item_flammabilities(content);
+    let liquid_flammability = liquid_flammabilities(content);
+    update_generator_with(
+        world,
+        entity,
+        delta,
+        &item_flammability,
+        &liquid_flammability,
+    );
+}
+
+/// [`update_generator`] with precomputed flammability tables (behaviors avoid
+/// rebuilding them per tick).
+pub fn update_generator_with(
+    world: &mut World,
+    entity: Entity,
+    delta: f32,
+    item_flammability: &[f32],
+    liquid_flammability: &[f32],
+) {
     let Some(config) = world.get::<GeneratorConfig>(entity).cloned() else {
         return;
     };
@@ -219,7 +251,7 @@ pub fn update_generator(world: &mut World, entity: Entity, delta: f32, content: 
             efficiency = world
                 .get::<LiquidModule>(entity)
                 .and_then(|module| {
-                    consumed_liquid(content, module, filter).map(|liquid| {
+                    consumed_liquid(liquid_flammability, module, filter).map(|liquid| {
                         if amount > 0.0 && delta > 0.000_000_1 {
                             (module.get(liquid) / (amount * delta)).min(1.0)
                         } else {
@@ -231,7 +263,7 @@ pub fn update_generator(world: &mut World, entity: Entity, delta: f32, content: 
         } else if let Some(filter) = config.filter_item {
             let module = world.get::<ItemModule>(entity);
             let has_item = module
-                .and_then(|module| consumed_item(content, module, filter))
+                .and_then(|module| consumed_item(item_flammability, module, filter))
                 .is_some();
             efficiency = if has_item || state.generate_time > 0.0 {
                 1.0
@@ -250,9 +282,8 @@ pub fn update_generator(world: &mut World, entity: Entity, delta: f32, content: 
     if let Some(filter) = config.filter_item {
         let multiplier = world
             .get::<ItemModule>(entity)
-            .and_then(|module| consumed_item(content, module, filter))
-            .and_then(|item| content.item(item))
-            .map(|item| item.flammability)
+            .and_then(|module| consumed_item(item_flammability, module, filter))
+            .and_then(|item| item_flammability.get(item.index()).copied())
             .unwrap_or(0.0);
         if multiplier > 0.0 {
             state.efficiency_multiplier = multiplier;
@@ -260,9 +291,8 @@ pub fn update_generator(world: &mut World, entity: Entity, delta: f32, content: 
     } else if let Some(filter) = config.filter_liquid {
         let multiplier = world
             .get::<LiquidModule>(entity)
-            .and_then(|module| consumed_liquid(content, module, filter))
-            .and_then(|liquid| content.liquid(liquid))
-            .map(|liquid| liquid.flammability)
+            .and_then(|module| consumed_liquid(liquid_flammability, module, filter))
+            .and_then(|liquid| liquid_flammability.get(liquid.index()).copied())
             .unwrap_or(0.0);
         if multiplier > 0.0 {
             state.efficiency_multiplier = multiplier;
@@ -286,7 +316,7 @@ pub fn update_generator(world: &mut World, entity: Entity, delta: f32, content: 
     {
         let consumed = world
             .get::<ItemModule>(entity)
-            .and_then(|module| consumed_item(content, module, filter));
+            .and_then(|module| consumed_item(item_flammability, module, filter));
         if let Some(item) = consumed
             && let Some(mut module) = world.get_mut::<ItemModule>(entity)
         {
@@ -299,7 +329,7 @@ pub fn update_generator(world: &mut World, entity: Entity, delta: f32, content: 
     if let Some(GeneratorFilter::LiquidFlammable { amount, .. }) = config.filter_liquid {
         let consumed = world.get::<LiquidModule>(entity).and_then(|module| {
             consumed_liquid(
-                content,
+                liquid_flammability,
                 module,
                 GeneratorFilter::LiquidFlammable { amount, min: 0.0 },
             )

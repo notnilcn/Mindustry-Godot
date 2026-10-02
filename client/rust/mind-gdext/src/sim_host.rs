@@ -22,6 +22,9 @@ use mind_core::content::{
 };
 use mind_core::scenario::{Scenario, ScenarioPlayer};
 use mind_core::sim::{FixedStepRunner, Sim};
+use mind_core::world::blocks::heat::HeatState;
+use mind_core::world::blocks::power::PowerGrids;
+use mind_core::world::modules::{LiquidModule, PowerModule};
 
 /// Maximum ticks accepted by one `step()` call (defensive; UI/MCP only).
 const MAX_STEP_TICKS: i64 = 1_000_000;
@@ -339,6 +342,123 @@ impl MindSimHost {
     #[func]
     pub fn is_paused(&self) -> bool {
         self.sim.is_paused()
+    }
+
+    // ---- Plan 09 networks debug API (data side; §7c MCP run deferred) ----
+
+    /// Whole-network projection as pretty JSON (plan 09 §3.11).
+    #[func]
+    pub fn network_state(&self) -> GString {
+        let tick = self.sim.tick_count();
+        let state = mind_core::world::NetworkState::capture(&self.sim.ecs.0, tick);
+        GString::from(state.to_json().as_str())
+    }
+
+    /// Live network counts `{graphs, liquids, heat_buildings}` (plan 09 §3.12).
+    #[func]
+    pub fn network_counts(&self) -> Dictionary<GString, i64> {
+        let world = &self.sim.ecs.0;
+        let graphs = world
+            .get_resource::<PowerGrids>()
+            .map(|grids| grids.graph_count())
+            .unwrap_or(0);
+        let mut liquids = 0i64;
+        let mut heat = 0i64;
+        for entity in world.iter_entities() {
+            if entity.get::<LiquidModule>().is_some() {
+                liquids += 1;
+            }
+            if entity.get::<HeatState>().is_some() {
+                heat += 1;
+            }
+        }
+        let mut out = Dictionary::<GString, i64>::new();
+        out.set(&GString::from("graphs"), graphs as i64);
+        out.set(&GString::from("liquids"), liquids);
+        out.set(&GString::from("heat_buildings"), heat);
+        out
+    }
+
+    /// Power network values at `(x, y)` (`{graph_id, status, stored, init}`).
+    #[func]
+    pub fn power_debug(&self, x: i32, y: i32) -> Dictionary<GString, f64> {
+        let mut out = Dictionary::<GString, f64>::new();
+        let entity = self
+            .sim
+            .grid
+            .tiles
+            .in_bounds(x, y)
+            .then(|| self.sim.grid.tile(x, y).build)
+            .flatten();
+        let Some(entity) = entity else {
+            return out;
+        };
+        let world = &self.sim.ecs.0;
+        if let Some(module) = world.get::<PowerModule>(entity) {
+            out.set(&GString::from("status"), module.status as f64);
+            out.set(&GString::from("stored"), module.stored as f64);
+            out.set(&GString::from("init"), if module.init { 1.0 } else { 0.0 });
+            if let Some(graph) = world
+                .get_resource::<PowerGrids>()
+                .and_then(|grids| grids.graph(module.graph))
+            {
+                out.set(&GString::from("graph_id"), graph.debug_id as f64);
+                out.set(
+                    &GString::from("satisfaction"),
+                    graph.get_satisfaction() as f64,
+                );
+            }
+        }
+        out
+    }
+
+    /// Liquid values at `(x, y)` (`{current, has_any}`).
+    #[func]
+    pub fn liquid_debug(&self, x: i32, y: i32) -> Dictionary<GString, f64> {
+        let mut out = Dictionary::<GString, f64>::new();
+        let entity = self
+            .sim
+            .grid
+            .tiles
+            .in_bounds(x, y)
+            .then(|| self.sim.grid.tile(x, y).build)
+            .flatten();
+        let Some(entity) = entity else {
+            return out;
+        };
+        if let Some(module) = self.sim.ecs.0.get::<LiquidModule>(entity) {
+            out.set(&GString::from("current"), module.current_amount as f64);
+            out.set(
+                &GString::from("has_any"),
+                if module.has_any() { 1.0 } else { 0.0 },
+            );
+        }
+        out
+    }
+
+    /// Heat values at `(x, y)` (`{heat, heat_output, frac}`).
+    #[func]
+    pub fn heat_debug(&self, x: i32, y: i32) -> Dictionary<GString, f64> {
+        let mut out = Dictionary::<GString, f64>::new();
+        let entity = self
+            .sim
+            .grid
+            .tiles
+            .in_bounds(x, y)
+            .then(|| self.sim.grid.tile(x, y).build)
+            .flatten();
+        let Some(entity) = entity else {
+            return out;
+        };
+        if let Some(heat) = self.sim.ecs.0.get::<HeatState>(entity) {
+            out.set(&GString::from("heat"), heat.heat as f64);
+            out.set(&GString::from("heat_output"), heat.heat_output as f64);
+            out.set(
+                &GString::from("frac"),
+                mind_core::world::blocks::heat::heat_frac(heat.heat, heat.heat_output) as f64,
+            );
+        }
+        out
     }
 
     // ---- IoSet seam (plan 05 M9 / plan 04 §3.10; MindIo wiring placeholder) ----

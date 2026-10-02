@@ -12,7 +12,10 @@
 use bevy_ecs::world::World;
 use serde::Serialize;
 
-use crate::world::blocks::power::PowerGraph;
+use crate::entities::comp::Building;
+use crate::world::blocks::heat::HeatState;
+use crate::world::blocks::power::{PowerGraph, PowerGrids};
+use crate::world::modules::LiquidModule;
 
 /// Rounds to four decimals and normalizes `-0.0` to `0.0`.
 fn round4(value: f32) -> f32 {
@@ -126,6 +129,49 @@ impl NetworkState {
         }
     }
 
+    /// Captures the whole three-network projection from a plan-07 world
+    /// (MCP `network_state` / inspector Networks tab; plan 09 §3.11/§3.12).
+    ///
+    /// Read-only and allocation-tolerant (debug path only). Buildings without a
+    /// live network are skipped; graphs are read from the [`PowerGrids`] resource
+    /// when present.
+    pub fn capture(world: &World, tick: u64) -> Self {
+        let mut state = Self::new(tick);
+        if let Some(grids) = world.get_resource::<PowerGrids>() {
+            for graph in grids.iter_graphs() {
+                state.push_graph(graph, world, 1.0);
+            }
+        }
+        for entity_ref in world.iter_entities() {
+            let Some(building) = entity_ref.get::<Building>() else {
+                continue;
+            };
+            let x = building.tile.x();
+            let y = building.tile.y();
+            if let Some(module) = entity_ref.get::<LiquidModule>()
+                && module.current_amount > 0.0
+            {
+                state.push_liquid(BuildingState::new(
+                    x,
+                    y,
+                    "liquid",
+                    module.current_amount,
+                    0.0,
+                ));
+            }
+            if let Some(heat) = entity_ref.get::<HeatState>() {
+                state.push_heat(BuildingState::new(
+                    x,
+                    y,
+                    "heat",
+                    heat.heat,
+                    heat.heat_output,
+                ));
+            }
+        }
+        state
+    }
+
     /// Appends a captured graph.
     pub fn push_graph(&mut self, graph: &PowerGraph, world: &World, delta: f32) {
         self.graphs.push(GraphState::capture(graph, world, delta));
@@ -197,5 +243,35 @@ mod tests {
         assert_eq!(json["graphs"][1]["id"], 2);
         assert_eq!(json["liquids"][0]["name"], "b");
         assert_eq!(json["liquids"][1]["name"], "a");
+    }
+
+    #[test]
+    fn capture_reads_liquid_and_heat_buildings() {
+        use crate::content::{BlockId, LiquidId};
+        use crate::world::TilePos;
+        use bevy_ecs::world::World as EcsWorld;
+
+        let mut world = EcsWorld::new();
+        world.insert_resource(PowerGrids::new());
+        world.spawn((
+            Building::new(TilePos::new(1, 2), BlockId::AIR, 0),
+            {
+                let mut module = LiquidModule::with_liquids(2);
+                module.add(LiquidId::WATER, 12.5, 100.0);
+                module
+            },
+            HeatState {
+                heat: 7.0,
+                heat_output: 10.0,
+                ..Default::default()
+            },
+        ));
+        let state = NetworkState::capture(&world, 5);
+        assert_eq!(state.tick, 5);
+        assert_eq!(state.liquids.len(), 1);
+        assert_eq!(state.liquids[0].amount, 12.5);
+        assert_eq!(state.heat.len(), 1);
+        assert_eq!(state.heat[0].amount, 7.0);
+        assert_eq!(state.heat[0].extra, 10.0);
     }
 }
