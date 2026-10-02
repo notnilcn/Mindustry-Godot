@@ -184,6 +184,23 @@ pub enum ModsCommand {
         #[arg(long)]
         check: bool,
     },
+
+    /// Boot base content + one fixture mod's JSON content and dump the mod
+    /// content records (plan 20 M1+).
+    Content {
+        /// Fixture name under `parity/mod_fixtures/`.
+        #[arg(long)]
+        fixture: String,
+        /// Base content directory override (defaults to the repo root).
+        #[arg(long)]
+        repo: Option<PathBuf>,
+        /// Write the content dump JSON here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// `trace` subcommands (plan 05 M6).

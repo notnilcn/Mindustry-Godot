@@ -12,8 +12,10 @@
 
 pub mod deps;
 pub mod discovery;
+pub mod json;
 pub mod loaded;
 pub mod meta;
+pub mod provider;
 pub mod script;
 
 use std::path::{Path, PathBuf};

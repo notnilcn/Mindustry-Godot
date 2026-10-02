@@ -174,6 +174,12 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
         },
         Command::Mods { command } => match command {
             ModsCommand::List { dir, json, check } => cmd_mods_list(dir, *json, *check),
+            ModsCommand::Content {
+                fixture,
+                repo,
+                dump,
+                json,
+            } => cmd_mods_content(fixture, repo.as_deref(), dump.as_deref(), *json),
         },
         Command::Io { command } => match command {
             IoCommand::DumpMeta { file, json } => cmd_io_dump_meta(file, *json),
@@ -1227,6 +1233,98 @@ fn cmd_mods_list(dir: &Path, json: bool, check: bool) -> anyhow::Result<i32> {
         return Ok(EXIT_FAIL);
     }
     Ok(EXIT_PASS)
+}
+
+/// Plan 20 M1 (`mods content`): boot base content + one fixture mod's JSON
+/// content and dump the resulting mod content records.
+fn cmd_mods_content(
+    fixture: &str,
+    repo: Option<&Path>,
+    dump: Option<&Path>,
+    json: bool,
+) -> anyhow::Result<i32> {
+    use mind_core::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+    use mind_core::io::SettingsStore;
+    use mind_core::io::fs::NativeFs;
+    use mind_core::mods::{Mods, provider::ModsContentProvider};
+
+    let root = paths::find_repo_root(repo)?;
+    let dir = root.join("parity/mod_fixtures").join(fixture);
+    let fs = NativeFs;
+    let settings = SettingsStore::new();
+    let mut mods = Mods::new(true, &dir);
+    mods.load_single(&fs, &dir, &settings)
+        .with_context(|| format!("loading fixture `{fixture}`"))?;
+    let files = mods.collect_content_files(&fs);
+    let mut provider = ModsContentProvider::new(files);
+
+    let bundle = MemoryBundle::new();
+    let store = MemoryUnlockStore::new();
+    let mut registry = create_base_content(&bundle, &store, true)
+        .map_err(|error| anyhow!("base content: {error}"))?;
+    registry
+        .init()
+        .map_err(|error| anyhow!("content init: {error}"))?;
+    registry
+        .post_init()
+        .map_err(|error| anyhow!("content post-init: {error}"))?;
+    let content_result = registry.create_mod_content(&mut provider);
+    let errors: Vec<String> = match &content_result {
+        Ok(()) => Vec::new(),
+        Err(errors) => errors.iter().map(|error| error.to_string()).collect(),
+    };
+
+    let items: Vec<serde_json::Value> = registry
+        .items()
+        .iter()
+        .filter(|item| item.minfo.is_modded())
+        .map(|item| serde_json::json!({"name": item.name, "id": item.id.raw()}))
+        .collect();
+    let blocks: Vec<serde_json::Value> = registry
+        .blocks()
+        .iter()
+        .filter(|block| block.minfo.is_modded())
+        .map(|block| {
+            serde_json::json!({
+                "name": block.name,
+                "id": block.id.raw(),
+                "kind": block.kind.name(),
+            })
+        })
+        .collect();
+    let warnings: Vec<String> = provider
+        .parser()
+        .warnings
+        .iter()
+        .map(|warning| format!("{}: {}", warning.file, warning.message))
+        .collect();
+
+    let report = serde_json::json!({
+        "fixture": fixture,
+        "items": items,
+        "blocks": blocks,
+        "warnings": warnings,
+        "errors": errors,
+    });
+    let text = format!("{}\n", serde_json::to_string_pretty(&report)?);
+    if let Some(path) = dump {
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating `{}`", parent.display()))?;
+        }
+        std::fs::write(path, &text).with_context(|| format!("writing `{}`", path.display()))?;
+    }
+    if json || dump.is_none() {
+        print!("{text}");
+    }
+    if errors.is_empty() {
+        Ok(EXIT_PASS)
+    } else {
+        log::error!("mods content: {} content error(s)", errors.len());
+        Ok(EXIT_FAIL)
+    }
 }
 
 /// Normalizes a mod report to the stable `expected_list.json` fields.
