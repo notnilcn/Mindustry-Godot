@@ -373,6 +373,298 @@ pub fn draw_report(capture: bool, ticks: u64) -> Result<DrawReport> {
     })
 }
 
+/// `logic_sensor_access` report (M5: `sensor`/`control`/`setprop`).
+pub struct SensorAccessReport {
+    /// Deterministic checksum.
+    pub checksum: String,
+    /// `enabled` after `control enabled switch1 0`.
+    pub disabled: f64,
+    /// `enabled` after `control enabled switch1 1`.
+    pub enabled: f64,
+    /// `sensor @size`.
+    pub size: f64,
+    /// `sensor @type` object display, if any.
+    pub type_name: String,
+}
+
+/// Runs the sensor/control scenario against a linked processor + switch.
+pub fn sensor_access(ticks: u64) -> Result<SensorAccessReport> {
+    let mut harness = BuildHarness::new(16, 16, 1);
+    let processor = harness
+        .content()
+        .block_id("micro-processor")
+        .context("micro-processor content")?;
+    let switch = harness
+        .content()
+        .block_id("switch")
+        .context("switch content")?;
+    assert!(harness.place(4, 4, processor, 0, true));
+    assert!(harness.place(5, 4, switch, 0, true));
+    let pe = harness.build_at(4, 4).context("processor entity")?;
+
+    let code = "control enabled switch1 0\nsensor disabled switch1 @enabled\ncontrol enabled switch1 1\nsensor enabled switch1 @enabled\nsensor size switch1 @size\nsensor type switch1 @type\nstop\n";
+    assert!(harness.configure(4, 4, ConfigValue::Bytes(compress(code, &[]).into())));
+    assert!(harness.configure(4, 4, ConfigValue::Point2(5, 4)));
+    for _ in 0..ticks {
+        harness.tick();
+    }
+
+    let state = harness
+        .world
+        .get::<LogicBlockState>(pe)
+        .context("processor state")?;
+    let value = |name: &str| {
+        state
+            .executor
+            .optional_var(name)
+            .map(|id| state.executor.arena.get(id).num())
+            .unwrap_or(f64::NAN)
+    };
+    let type_name = state
+        .executor
+        .optional_var("type")
+        .and_then(|id| state.executor.arena.get(id).obj.clone())
+        .map(|obj| obj.display())
+        .unwrap_or_default();
+    let disabled = value("disabled");
+    let enabled = value("enabled");
+    let size = value("size");
+
+    let mut hasher = mind_core::determinism::Hasher::new();
+    hasher.write_f64(disabled);
+    hasher.write_f64(enabled);
+    hasher.write_f64(size);
+    hasher.write(type_name.as_bytes());
+    let checksum = hasher.finish().to_hex();
+    Ok(SensorAccessReport {
+        checksum,
+        disabled,
+        enabled,
+        size,
+        type_name,
+    })
+}
+
+/// Prints the sensor scenario.
+fn run_sensor_access(ticks: u64, json: bool) -> Result<i32> {
+    let report = sensor_access(ticks)?;
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "scenario": "logic_sensor_access",
+                "ticks": ticks,
+                "checksum": report.checksum,
+                "disabled": report.disabled,
+                "enabled": report.enabled,
+                "size": report.size,
+                "type": report.type_name,
+            })
+        );
+    } else {
+        println!(
+            "logic_sensor_access: checksum={} disabled={} enabled={} size={}",
+            report.checksum, report.disabled, report.enabled, report.size
+        );
+    }
+    Ok(0)
+}
+
+/// `logic_radar_filters` report (M5 radar filter/sort table).
+pub struct RadarFiltersReport {
+    /// Deterministic checksum.
+    pub checksum: String,
+    /// Enemy nearest entity index.
+    pub enemy: Option<u32>,
+    /// Ground enemy entity index.
+    pub ground: Option<u32>,
+    /// Farthest-by-health enemy entity index.
+    pub farthest: Option<u32>,
+}
+
+/// Runs the radar filter scenario over a fixed candidate fixture.
+#[allow(clippy::expect_used)]
+pub fn radar_filters() -> RadarFiltersReport {
+    use mind_core::logic::enums::{RadarSort, RadarTarget};
+    use mind_core::logic::executor::radar::{self, RadarCandidate};
+    let candidate = |entity: u32, team: u8, x: f32, flying: bool, health: f32| RadarCandidate {
+        entity: bevy_ecs::entity::Entity::from_raw_u32(entity).expect("entity"),
+        team,
+        x,
+        y: 0.0,
+        hit_size: 1.0,
+        health,
+        max_health: health,
+        shield: 0.0,
+        armor: 0.0,
+        flying,
+        player: false,
+        dead: false,
+    };
+    let derelict = mind_core::game::team::DERELICT.0;
+    let list = vec![
+        candidate(1, 0, 5.0, false, 10.0),
+        candidate(2, derelict, 1.0, false, 10.0),
+        candidate(3, 1, 8.0, true, 30.0),
+        candidate(4, 1, 2.0, false, 40.0),
+        candidate(5, 1, 20.0, false, 20.0),
+    ];
+    let any = [RadarTarget::Enemy, RadarTarget::Any, RadarTarget::Any];
+    let enemy = radar::find(&list, 0, any, RadarSort::Distance, true, 0.0, 0.0);
+    let ground = radar::find(
+        &list,
+        0,
+        [RadarTarget::Enemy, RadarTarget::Ground, RadarTarget::Any],
+        RadarSort::Distance,
+        true,
+        0.0,
+        0.0,
+    );
+    let farthest = radar::find(&list, 0, any, RadarSort::Health, false, 0.0, 0.0);
+    let mut hasher = mind_core::determinism::Hasher::new();
+    hasher.write_u64(enemy.map(|e| e.index().index() as u64).unwrap_or(u64::MAX));
+    hasher.write_u64(ground.map(|e| e.index().index() as u64).unwrap_or(u64::MAX));
+    hasher.write_u64(
+        farthest
+            .map(|e| e.index().index() as u64)
+            .unwrap_or(u64::MAX),
+    );
+    RadarFiltersReport {
+        checksum: hasher.finish().to_hex(),
+        enemy: enemy.map(|e| e.index().index()),
+        ground: ground.map(|e| e.index().index()),
+        farthest: farthest.map(|e| e.index().index()),
+    }
+}
+
+/// Prints the radar filter scenario.
+fn run_radar_filters(json: bool) -> Result<i32> {
+    let report = radar_filters();
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "scenario": "logic_radar_filters",
+                "checksum": report.checksum,
+                "enemy": report.enemy,
+                "ground": report.ground,
+                "farthest": report.farthest,
+            })
+        );
+    } else {
+        println!("logic_radar_filters: checksum={}", report.checksum);
+    }
+    Ok(0)
+}
+
+/// `logic_unit_control_gating` report (M5 `ubind`/`checkLogicAI` gating).
+pub struct UnitGatingReport {
+    /// Deterministic checksum.
+    pub checksum: String,
+    /// Whether `logicUnitControl=false` blocks installation.
+    pub blocked: bool,
+    /// Whether `logicUnitControl=true` installs the logic controller.
+    pub installed: bool,
+    /// Number of units the binding cursor can cycle.
+    pub bind_count: usize,
+}
+
+/// Custom rules seam exercising the unit-control gates.
+struct GatingRules {
+    control: bool,
+}
+
+impl mind_core::logic::blocks::LogicRulesApi for GatingRules {
+    fn editor(&self) -> bool {
+        false
+    }
+    fn allow_edit_world_processors(&self) -> bool {
+        false
+    }
+    fn disable_world_processors(&self) -> bool {
+        false
+    }
+    fn logic_unit_control(&self) -> bool {
+        self.control
+    }
+}
+
+/// Runs the unit-control gating scenario.
+#[allow(clippy::unwrap_used)]
+pub fn unit_control_gating() -> UnitGatingReport {
+    use bevy_ecs::world::World;
+    use mind_core::ai::{AiKind, ControllerSlot};
+    use mind_core::entities::comp::unit::{UnitCore, UnitTypeComp};
+    use mind_core::entities::comp::{TeamComp, Unit};
+    use mind_core::logic::blocks::LogicRulesRes;
+    use mind_core::logic::executor::unit_control::{bind_next, check_logic_ai};
+
+    let mut world = World::new();
+    let unit = world
+        .spawn((
+            Unit,
+            TeamComp { team: 0 },
+            UnitCore::new(0.0),
+            UnitTypeComp {
+                type_id: mind_core::content::UnitTypeId::new(1),
+            },
+            ControllerSlot::new(AiKind::Ground),
+        ))
+        .id();
+
+    // Gate closed: the VM skips `ubind`/`ucontrol` entirely (no install).
+    world.insert_resource(LogicRulesRes(Box::new(GatingRules { control: false })));
+    let gate = mind_core::logic::blocks::rules_ref(&world).logic_unit_control();
+    let blocked = if !gate {
+        true
+    } else {
+        check_logic_ai(&mut world, 0, false, unit, Some(unit), true).is_none()
+    };
+    // Reset the slot and retry with the gate open.
+    world.get_mut::<ControllerSlot>(unit).unwrap().kind = AiKind::Ground;
+    world.insert_resource(LogicRulesRes(Box::new(GatingRules { control: true })));
+    let gate = mind_core::logic::blocks::rules_ref(&world).logic_unit_control();
+    let installed = gate
+        && check_logic_ai(&mut world, 0, false, unit, Some(unit), true).is_some()
+        && world.get::<ControllerSlot>(unit).unwrap().kind == AiKind::Logic;
+
+    let mut cursor = 0u32;
+    let first = bind_next(&mut world, 1, 0, &mut cursor);
+    let second = bind_next(&mut world, 1, 0, &mut cursor);
+    let bind_count = [first, second].iter().filter(|u| u.is_some()).count();
+
+    let mut hasher = mind_core::determinism::Hasher::new();
+    hasher.write_u8(u8::from(blocked));
+    hasher.write_u8(u8::from(installed));
+    hasher.write_u64(bind_count as u64);
+    UnitGatingReport {
+        checksum: hasher.finish().to_hex(),
+        blocked,
+        installed,
+        bind_count,
+    }
+}
+
+/// Prints the unit-control gating scenario.
+fn run_unit_control_gating(json: bool) -> Result<i32> {
+    let report = unit_control_gating();
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "scenario": "logic_unit_control_gating",
+                "checksum": report.checksum,
+                "blocked": report.blocked,
+                "installed": report.installed,
+                "bind_count": report.bind_count,
+            })
+        );
+    } else {
+        println!("logic_unit_control_gating: checksum={}", report.checksum);
+    }
+    Ok(0)
+}
+
 /// Prints the draw scenario.
 fn run_draw(capture: bool, ticks: u64, json: bool) -> Result<i32> {
     let name = if capture {
@@ -482,6 +774,9 @@ fn run_named(name: &str, ticks: Option<u64>, json: bool) -> Result<i32> {
         "logic_save_load" => return run_save_load(ticks.unwrap_or(20), json),
         "logic_draw" => return run_draw(true, ticks.unwrap_or(3), json),
         "logic_draw_headless" => return run_draw(false, ticks.unwrap_or(3), json),
+        "logic_sensor_access" => return run_sensor_access(ticks.unwrap_or(20), json),
+        "logic_radar_filters" => return run_radar_filters(json),
+        "logic_unit_control_gating" => return run_unit_control_gating(json),
         _ => {}
     }
     let scenario = scenario(name).with_context(|| format!("unknown logic scenario: {name}"))?;
@@ -598,6 +893,27 @@ mod tests {
         assert_eq!(headless.checksum, "89cd31291d2aefa4");
         assert_eq!(headless.commands, 0);
         assert_eq!(headless.operations, 1);
+    }
+
+    #[test]
+    fn capability_scenario_goldens() {
+        let sensor = sensor_access(20).expect("sensor_access");
+        assert_eq!(sensor.checksum, "bec7f9853c77e02a");
+        assert_eq!(sensor.disabled, 0.0);
+        assert_eq!(sensor.enabled, 1.0);
+        assert_eq!(sensor.size, 1.0);
+
+        let radar = radar_filters();
+        assert_eq!(radar.checksum, "a740d5e42b2bb201");
+        assert_eq!(radar.enemy, Some(4));
+        assert_eq!(radar.ground, Some(4));
+        assert_eq!(radar.farthest, Some(4));
+
+        let gating = unit_control_gating();
+        assert_eq!(gating.checksum, "a6a2ae141c632f15");
+        assert!(gating.blocked);
+        assert!(gating.installed);
+        assert_eq!(gating.bind_count, 2);
     }
 
     #[test]
