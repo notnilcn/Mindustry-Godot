@@ -1,0 +1,13 @@
+{
+  "format": 1,
+  "scenario": "campaign_rules_roundtrip",
+  "mode": "attack",
+  "checksum": "69fff976f239bfd9",
+  "json_equal": true,
+  "typeio_equal": true,
+  "rules_load": {
+    "rules_epoch": 1,
+    "from_save": false
+  },
+  "pass": true
+}

@@ -5,12 +5,14 @@
 //! Ported from `core/src/mindustry/core/GameState.java` (P0 subset: phase + tick).
 
 pub mod gamemode;
+pub mod objectives;
 pub mod quad_tree;
 pub mod rules;
 pub mod rules_event;
 pub mod spawn_group;
 pub mod team;
 pub mod teams;
+pub mod tech_tree;
 pub mod waves;
 
 use serde::{Deserialize, Serialize};
