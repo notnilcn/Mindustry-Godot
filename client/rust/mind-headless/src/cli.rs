@@ -257,6 +257,47 @@ pub enum Command {
         #[command(subcommand)]
         command: ModsCommand,
     },
+
+    /// World render pipeline inspection (plan 16 §7.2).
+    Render {
+        /// Render subcommand.
+        #[command(subcommand)]
+        command: RenderCommand,
+    },
+}
+
+/// `render` subcommands (plan 16 §7.2).
+#[derive(Debug, Subcommand)]
+pub enum RenderCommand {
+    /// Extract the deterministic render list for a registered `render_*`
+    /// scenario and write/check its golden JSON.
+    List {
+        /// Scenario name (`render_flat_floor`, `render_block_change`,
+        /// `render_layer_order`).
+        scenario: String,
+        /// Write the render-list JSON here.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Compare the produced JSON against this golden file.
+        #[arg(long)]
+        check: Option<PathBuf>,
+        /// Emit the raw emission order (no `(z, seq)` sort).
+        #[arg(long)]
+        no_sort: bool,
+        /// Emit every chunk instead of only the camera's dirty set.
+        #[arg(long)]
+        all_chunks: bool,
+        /// Emit a machine-readable JSON summary on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Write the append-only band table audit (`build/render/bands.json`).
+    Bands {
+        /// Output path (defaults to stdout).
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
 }
 
 /// `world` subcommands (plan 06 §7b).

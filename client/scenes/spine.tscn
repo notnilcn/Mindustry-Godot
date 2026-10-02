@@ -1,14 +1,21 @@
 ; SPDX-License-Identifier: GPL-3.0-only
 ;
-; The M4 spine scene (plan 00 §3.5, D4 rig). All nodes are declared here
-; (tscn-first, editor-navigable); nothing is instantiated from code.
+; The M4 spine scene (plan 00 §3.5, D4 rig). All static nodes are declared here
+; (tscn-first, editor-navigable); only high-churn, data-driven band nodes are
+; instantiated from code (plan 16 §6.6).
 ;
 ; Spine (Node)
 ; ├── SimHost (MindSimHost)      Rust: sim owner, fixed-step pump, input/API
 ; ├── MindAudio (MindAudio)      Rust: buses, voice pool, music/loop drivers (plan 18)
 ; ├── World (Node2D)
-; │   ├── TileGrid (MindTileGrid)
-; │   └── Camera2D (MindCamera2D)
+; │   ├── TileGrid (MindTileGrid)          debug-only grid/quads (plan 00)
+; │   ├── Camera2D (MindCamera2D)
+; │   ├── Renderer (MindWorldRenderer)     NEW (plan 16): frame pipeline + bands
+; │   ├── Bloom (Node2D)                   NEW: bloom SubViewport host (plan 16 M5)
+; │   ├── LowRes (Node2D)                  NEW: pixelator host (plan 16 M6)
+; │   └── MinimapProvider (Node2D)         NEW: minimap provider (plan 16 M6)
+; ├── MindRender (MindRender)   NEW (plan 16): stable MCP/debug facade
+; ├── Planet (CanvasLayer)      NEW: g3d planet host (plan 16 M7)
 ; └── Ui (CanvasLayer)
 ;     └── StateInspector (state_inspector.tscn instance)
 
@@ -29,6 +36,18 @@
 [node name="Camera2D" type="MindCamera2D" parent="World"]
 position = Vector2(128, 128)
 zoom = Vector2(2, 2)
+
+[node name="Renderer" type="MindWorldRenderer" parent="World"]
+
+[node name="Bloom" type="Node2D" parent="World"]
+
+[node name="LowRes" type="Node2D" parent="World"]
+
+[node name="MinimapProvider" type="Node2D" parent="World"]
+
+[node name="MindRender" type="MindRender" parent="."]
+
+[node name="Planet" type="CanvasLayer" parent="."]
 
 [node name="Ui" type="CanvasLayer" parent="."]
 

@@ -32,6 +32,7 @@ pub mod math;
 pub mod mods;
 pub mod platform;
 pub mod random;
+pub mod render;
 pub mod scenario;
 pub mod schedule;
 pub mod sim;
