@@ -58,6 +58,23 @@ pub static SCENARIOS: &[ScenarioFixture] = &[
         name: "bench_baseline",
         file: "bench_baseline.json",
     },
+    // Plan 05 M8 sim-core fixtures (§7.2).
+    ScenarioFixture {
+        name: "sim_core_boot",
+        file: "sim_core_boot.json",
+    },
+    ScenarioFixture {
+        name: "sim_core_determinism",
+        file: "sim_core_determinism.json",
+    },
+    ScenarioFixture {
+        name: "sim_core_reset_play_cycle",
+        file: "sim_core_reset_play_cycle.json",
+    },
+    ScenarioFixture {
+        name: "sim_core_many_commands",
+        file: "sim_core_many_commands.json",
+    },
     ScenarioFixture {
         name: "stdb_offline_boot",
         file: "stdb_offline_boot.json",

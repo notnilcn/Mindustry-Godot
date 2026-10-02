@@ -9,14 +9,15 @@ use std::time::Instant;
 
 use anyhow::{Context, anyhow};
 use log::LevelFilter;
-use mind_core::command::CommandRecord;
 use mind_core::config::MindConfig;
 use mind_core::content::{
     AssetManifest, Blocks, BundleKeysFile, ContentRegistry, GoldenContent, MemoryBundle,
     MemoryUnlockStore, audit, content_counts, create_base_content, dump_golden,
 };
-use mind_core::scenario::{Scenario, ScenarioPlayer, read_command_log, write_command_log};
+use mind_core::determinism::{CommandError, CommandLog, LogHeader, SimCommand};
+use mind_core::scenario::{Scenario, ScenarioPlayer, write_command_log};
 use mind_core::sim::{Sim, StateDump};
+use mind_core::util::alloc::{alloc_count, enabled as alloc_audit_enabled};
 use mind_core::world::TilePos;
 
 use crate::cli::{
@@ -27,9 +28,10 @@ use crate::paths;
 use crate::registry;
 use crate::report::{
     BenchReport, ContentBenchReport, ContentIdEntry, ContentIdsReport, ContentLoadReport,
-    ContentTypeCount, ContentTypeEntries, IoBenchSaveReport, IoBenchStat, IoCheckClassIdsReport,
-    IoCheckRevisionsReport, IoDefRevisionReport, IoDumpMetaReport, IoMapListEntry, IoMapListReport,
-    IoRoundtripReport, IoSettingsReport, RunReport, SimReport, TileCheck,
+    ContentTypeCount, ContentTypeEntries, GroupCount, IoBenchSaveReport, IoBenchStat,
+    IoCheckClassIdsReport, IoCheckRevisionsReport, IoDefRevisionReport, IoDumpMetaReport,
+    IoMapListEntry, IoMapListReport, IoRoundtripReport, IoSettingsReport, RunReport,
+    SimCoreCycleReport, SimCoreProfileReport, SimCoreReplayReport, SimReport, TileCheck,
 };
 use crate::stdb_scenarios::StdbScenario;
 
@@ -85,12 +87,22 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             dump,
             json,
             emit_commands,
+            emit_simlog,
+            cycles,
+            checksum_every,
+            golden,
+            emit_checksums,
         } => cmd_run(
             &cli,
             scenario,
             dump.as_deref(),
             *json,
             emit_commands.as_deref(),
+            emit_simlog.as_deref(),
+            *cycles,
+            *checksum_every,
+            golden.as_deref(),
+            emit_checksums.as_deref(),
         ),
         Command::Sim {
             ticks,
@@ -109,6 +121,9 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             dump,
             json,
             per_tick,
+            checksum_every,
+            workers,
+            golden,
         } => cmd_replay(
             &cli,
             commands,
@@ -119,8 +134,16 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             dump.as_deref(),
             *json,
             *per_tick,
+            *checksum_every,
+            *workers,
+            golden.as_deref(),
         ),
-        Command::Bench { ticks, scenario } => cmd_bench(&cli, *ticks, scenario),
+        Command::Bench {
+            ticks,
+            scenario,
+            profile,
+            assert_alloc,
+        } => cmd_bench(&cli, *ticks, scenario, profile.as_deref(), *assert_alloc),
         Command::Dump {
             scenario,
             out,
@@ -1673,27 +1696,39 @@ fn print_report<T: serde::Serialize>(report: &T, json: bool) -> anyhow::Result<(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cmd_run(
     cli: &Cli,
     name: &str,
     dump: Option<&Path>,
     json: bool,
     emit_commands: Option<&Path>,
+    emit_simlog: Option<&Path>,
+    cycles: u64,
+    checksum_every: u64,
+    golden: Option<&Path>,
+    emit_checksums: Option<&Path>,
 ) -> anyhow::Result<i32> {
     // `stdb_*` scenarios (plan 01 §7.2) are connector tests, not sim scenarios:
     // they have their own fixture schema and never run `mind-core`.
     if let Some(kind) = StdbScenario::from_name(name) {
-        if emit_commands.is_some() {
-            log::warn!("--emit-commands is ignored for `{name}` (no sim commands)");
+        if emit_commands.is_some() || emit_simlog.is_some() {
+            log::warn!("--emit-commands/--emit-simlog are ignored for `{name}` (no sim commands)");
         }
         return crate::stdb_scenarios::run(cli, kind, dump, json);
     }
+    // Plan 05 M8 §7.2: the reset/play cycle needs the `reset()`/`play()` flows.
+    if name == "sim_core_reset_play_cycle" {
+        return cmd_sim_core_reset_play_cycle(cli, cycles, json);
+    }
+
     let scenario = load_scenario(cli, name)?;
     let collect = scenario.emit_per_tick;
 
     // Two in-process runs: the determinism assertion of §7b.
-    let (sim, per_tick) = run_scenario(&scenario, collect)?;
-    let (second, second_per_tick) = run_scenario(&scenario, collect)?;
+    let collect_ticks = collect || checksum_every > 0;
+    let (mut sim, per_tick) = run_scenario(&scenario, collect_ticks)?;
+    let (second, second_per_tick) = run_scenario(&scenario, collect_ticks)?;
     let in_process_stable = sim.checksum() == second.checksum() && per_tick == second_per_tick;
     if !in_process_stable {
         log::error!("scenario `{name}` produced different checksums across two in-process runs");
@@ -1736,6 +1771,41 @@ fn cmd_run(
         }
     }
 
+    // Sampled checksum checkpoints (`sim_core_determinism`) + golden.
+    let sampled = (checksum_every > 0).then(|| sample_checksums(&per_tick, checksum_every));
+    if let Some(golden_path) = golden {
+        match &sampled {
+            Some(actual) => {
+                let expected = read_golden_checksums(golden_path)?;
+                if *actual != expected {
+                    log::error!(
+                        "sampled checksum golden mismatch for `{name}` ({} vs {} checkpoints)",
+                        actual.len(),
+                        expected.len()
+                    );
+                    pass = false;
+                }
+            }
+            None => {
+                log::error!("--golden requires --checksum-every for `{name}`");
+                pass = false;
+            }
+        }
+    }
+    if let Some(path) = emit_checksums {
+        let text = sampled
+            .as_ref()
+            .map(|checksums| checksums.join("\n") + "\n")
+            .unwrap_or_default();
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating `{}`", parent.display()))?;
+        }
+        std::fs::write(path, text).with_context(|| format!("writing `{}`", path.display()))?;
+    }
+
     if let Some(path) = dump {
         write_dump(&sim, path, false)?;
     }
@@ -1747,7 +1817,22 @@ fn cmd_run(
         }
         None => None,
     };
+    let simlog_emitted = match emit_simlog {
+        Some(path) => {
+            write_simlog(&scenario, &mut sim, path)?;
+            Some(path.display().to_string())
+        }
+        None => None,
+    };
 
+    let group_counts: Vec<GroupCount> = sim
+        .group_counts()
+        .into_iter()
+        .map(|(name, count)| GroupCount {
+            name: name.to_owned(),
+            count,
+        })
+        .collect();
     let report = RunReport {
         scenario: scenario.name.clone(),
         format: scenario.format,
@@ -1763,8 +1848,134 @@ fn cmd_run(
         in_process_stable,
         commands_applied: sim.commands_applied(),
         tiles: tile_checks,
-        per_tick: if collect { Some(per_tick) } else { None },
+        per_tick: if checksum_every > 0 {
+            sampled.clone()
+        } else if collect {
+            Some(per_tick)
+        } else {
+            None
+        },
         commands_emitted,
+        simlog_emitted,
+        state: sim.state_name().to_owned(),
+        update_id: sim.update_id(),
+        unimplemented_stub: 0,
+        group_counts,
+    };
+    print_report(&report, json)?;
+    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+}
+
+/// Every `every`-th per-tick checksum plus the final tick (deterministic).
+fn sample_checksums(per_tick: &[String], every: u64) -> Vec<String> {
+    let every = every.max(1) as usize;
+    let mut out = Vec::new();
+    for (index, checksum) in per_tick.iter().enumerate() {
+        if (index + 1) % every == 0 {
+            out.push(checksum.clone());
+        }
+    }
+    if let Some(last) = per_tick.last()
+        && out.last() != Some(last)
+    {
+        out.push(last.clone());
+    }
+    out
+}
+
+/// Reads one hex checksum per non-empty line (`sim_core_*.checksums`).
+fn read_golden_checksums(path: &Path) -> anyhow::Result<Vec<String>> {
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("reading golden `{}`", path.display()))?;
+    Ok(text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(str::to_owned)
+        .collect())
+}
+
+/// Writes the scenario's resolved commands as a binary `.simlog`.
+fn write_simlog(scenario: &Scenario, sim: &mut Sim, path: &Path) -> anyhow::Result<()> {
+    let records = scenario.resolve_commands(sim.content())?;
+    let mut log = CommandLog::new(LogHeader::new(scenario.seed, &scenario.name));
+    for record in &records {
+        log.push(record.tick, SimCommand::from_p0(record.command));
+    }
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating `{}`", parent.display()))?;
+    }
+    std::fs::write(path, log.to_bytes())
+        .with_context(|| format!("writing `{}`", path.display()))?;
+    Ok(())
+}
+
+/// Plan 05 §7.2: `sim_core_reset_play_cycle` — groups/clock/entities must return
+/// to baseline on every `reset`, and `play` must resume the fixed step.
+fn cmd_sim_core_reset_play_cycle(cli: &Cli, cycles: u64, json: bool) -> anyhow::Result<i32> {
+    if cycles == 0 {
+        return Err(anyhow!("--cycles must be greater than zero"));
+    }
+    let scenario = load_scenario(cli, "sim_core_reset_play_cycle")?;
+    let ticks = scenario.steps;
+    let mut sim = Sim::new(
+        scenario.seed,
+        scenario.world.width,
+        scenario.world.height,
+        mind_core::content::BlockId::AIR,
+        mind_core::content::BlockId::AIR,
+    );
+    // Seed a building so the reset has something to clear.
+    sim.apply(mind_core::command::Command::Place {
+        x: 1,
+        y: 1,
+        block: mind_core::content::BlockId::STONE_WALL,
+    })?;
+
+    let mut reset_clean = true;
+    let mut play_advances = true;
+    for _ in 0..cycles {
+        sim.reset();
+        if sim.phase() != mind_core::game::State::Menu {
+            reset_clean = false;
+        }
+        if sim.clock().time != 0.0 || sim.clock().update_id != 0 {
+            reset_clean = false;
+        }
+        if sim.group_counts().get("all").copied().unwrap_or(0) != 0 {
+            reset_clean = false;
+        }
+        if sim
+            .grid
+            .iter_row_major()
+            .any(|(_, index)| sim.grid.block_id_at(index) != mind_core::content::BlockId::AIR)
+        {
+            reset_clean = false;
+        }
+
+        if !sim.play() {
+            play_advances = false;
+        }
+        for _ in 0..ticks {
+            sim.tick()?;
+        }
+        if sim.phase() != mind_core::game::State::Playing || sim.tick_count() != ticks {
+            play_advances = false;
+        }
+    }
+
+    let pass = reset_clean && play_advances;
+    let report = SimCoreCycleReport {
+        cycles,
+        ticks,
+        reset_clean,
+        play_advances,
+        entity_baseline: 0,
+        checksum: sim.checksum_hex(),
+        pass,
     };
     print_report(&report, json)?;
     Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
@@ -1821,56 +2032,131 @@ fn cmd_replay(
     dump: Option<&Path>,
     json: bool,
     per_tick: bool,
+    checksum_every: u64,
+    workers: usize,
+    golden: Option<&Path>,
 ) -> anyhow::Result<i32> {
-    let blocks = Blocks::new();
-    let records: Vec<CommandRecord> = read_command_log(&blocks, commands)
+    let bytes = std::fs::read(commands)
         .with_context(|| format!("reading command log `{}`", commands.display()))?;
+    // Binary `.simlog` (plan 05 M8) or legacy JSONL text (`scenario` module).
+    let (format, log_seed, entries): (String, u64, Vec<(u64, SimCommand)>) =
+        if CommandLog::is_binary(&bytes) {
+            let log = CommandLog::from_bytes(&bytes).map_err(|error| anyhow!("{error}"))?;
+            (String::from("binary"), log.header.seed, log.entries.clone())
+        } else {
+            let text = String::from_utf8(bytes)
+                .map_err(|_| anyhow!("`{}` is not UTF-8", commands.display()))?;
+            let blocks = Blocks::new();
+            let records = mind_core::scenario::parse_command_log(&blocks, &text)
+                .with_context(|| format!("parsing command log `{}`", commands.display()))?;
+            (
+                String::from("text"),
+                seed,
+                records
+                    .into_iter()
+                    .map(|record| (record.tick, SimCommand::from_p0(record.command)))
+                    .collect(),
+            )
+        };
+    // A binary header carries the authoritative seed; `--seed` overrides it.
+    let effective_seed = if format == "binary" && seed == 0 {
+        log_seed
+    } else {
+        seed
+    };
     let ticks = ticks.unwrap_or_else(|| {
-        records
+        entries
             .last()
-            .map(|record| record.tick.saturating_add(1))
+            .map(|(tick, _)| tick.saturating_add(1))
             .unwrap_or(0)
     });
 
     let mut sim = Sim::new(
-        seed,
+        effective_seed,
         width,
         height,
         mind_core::content::BlockId::AIR,
         mind_core::content::BlockId::AIR,
     );
     let mut next = 0usize;
-    let mut checksums = Vec::new();
+    let mut unsupported = 0usize;
+    let mut all_checksums = Vec::new();
     for tick in 0..ticks {
-        while next < records.len() && records[next].tick <= tick {
-            sim.apply(records[next].command)?;
+        while next < entries.len() && entries[next].0 <= tick {
+            match sim.command(entries[next].1.clone()) {
+                Ok(()) => {}
+                Err(CommandError::Unsupported(op)) => {
+                    // Later plans register the entity/unit paths; recording is
+                    // still deterministic (the no-op is the same on every peer).
+                    debug_assert!(!op.is_empty());
+                    unsupported += 1;
+                }
+                Err(error) => log::warn!("replay command rejected: {error}"),
+            }
             next += 1;
         }
         sim.tick()?;
-        if per_tick {
-            checksums.push(sim.checksum_hex());
-        }
+        all_checksums.push(sim.checksum_hex());
     }
+    let sampled = if checksum_every > 0 {
+        Some(sample_checksums(&all_checksums, checksum_every))
+    } else if per_tick {
+        Some(all_checksums.clone())
+    } else {
+        None
+    };
+    let expect_checksums = golden.map(read_golden_checksums).transpose()?;
+    let pass = match (&sampled, &expect_checksums) {
+        (Some(actual), Some(expected)) if actual == expected => true,
+        (Some(_), Some(expected)) => {
+            log::error!(
+                "replay checksum golden mismatch (`{}` vs `{}` checkpoints)",
+                sampled.as_ref().map(Vec::len).unwrap_or(0),
+                expected.len()
+            );
+            false
+        }
+        (None, Some(_)) => {
+            log::error!("--golden requires --checksum-every");
+            false
+        }
+        _ => true,
+    };
+
     if let Some(path) = dump {
         write_dump(&sim, path, false)?;
     }
-    let report = SimReport {
-        mode: String::from("replay"),
-        seed,
+    let report = SimCoreReplayReport {
+        file: commands.display().to_string(),
+        format,
+        seed: effective_seed,
         width,
         height,
         tick: sim.tick_count(),
+        workers,
         checksum: sim.checksum_hex(),
-        commands_applied: sim.commands_applied(),
-        per_tick: if per_tick { Some(checksums) } else { None },
+        unsupported_commands: unsupported,
+        checksums: sampled,
+        expect_checksums,
+        pass,
     };
     print_report(&report, json)?;
-    Ok(EXIT_PASS)
+    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
 }
 
-fn cmd_bench(cli: &Cli, ticks: u64, scenario_name: &str) -> anyhow::Result<i32> {
+fn cmd_bench(
+    cli: &Cli,
+    ticks: u64,
+    scenario_name: &str,
+    profile: Option<&str>,
+    assert_alloc: Option<u64>,
+) -> anyhow::Result<i32> {
     if ticks == 0 {
         return Err(anyhow!("--ticks must be greater than zero"));
+    }
+    // Plan 05 M8 §7.4: `bench sim_core --profile {empty,mid,stress}`.
+    if scenario_name == "sim_core" || profile.is_some() {
+        return cmd_bench_sim_core(ticks, profile.unwrap_or("mid"), assert_alloc);
     }
     let ticks_usize = usize::try_from(ticks).context("--ticks does not fit in memory")?;
     // Plan 01 §7.4: STDB pump overhead is not a sim scenario.
@@ -1969,6 +2255,98 @@ fn cmd_bench(cli: &Cli, ticks: u64, scenario_name: &str) -> anyhow::Result<i32> 
     };
     println!("{}", serde_json::to_string(&report)?);
     Ok(if failed { EXIT_FAIL } else { EXIT_PASS })
+}
+
+/// Plan 05 M8 §7.4: `bench sim_core --profile {empty,mid,stress}`.
+///
+/// Builds a flat grid and `buildings` placed blocks (units/bullets/items arrive
+/// with plans 08–11 and extend these same profiles), warms the schedule, then
+/// measures `Sim::tick`. The p99 budget is recording-only (plan 23 owns the hard
+/// gate); `--assert-alloc N` fails when the timed region allocates more than `N`
+/// times (requires `--features alloc-audit`).
+fn cmd_bench_sim_core(ticks: u64, profile: &str, assert_alloc: Option<u64>) -> anyhow::Result<i32> {
+    let (width, height, buildings, budget_us) = match profile {
+        "empty" => (128i32, 128i32, 0usize, 500u64),
+        "mid" => (256, 256, 600, 4_000),
+        "stress" => (512, 512, 2_000, 10_000),
+        other => {
+            return Err(anyhow!(
+                "unknown sim_core profile `{other}` (expected empty|mid|stress)"
+            ));
+        }
+    };
+    let mut sim = Sim::new(
+        1,
+        width,
+        height,
+        mind_core::content::BlockId::AIR,
+        mind_core::content::BlockId::AIR,
+    );
+    let mut placed = 0usize;
+    'place: for y in 0..height {
+        for x in 0..width {
+            if placed >= buildings {
+                break 'place;
+            }
+            sim.apply(mind_core::command::Command::Place {
+                x: x as i16,
+                y: y as i16,
+                block: mind_core::content::BlockId::STONE_WALL,
+            })?;
+            placed += 1;
+        }
+    }
+
+    const WARMUP: u64 = 600;
+    for _ in 0..WARMUP {
+        sim.tick()?;
+    }
+    // A settling tick excludes process-level lazy initialization (dependency
+    // threads, clock/time sources). `samples` is reserved before the baseline so
+    // its allocation is not attributed to the timed region.
+    sim.tick()?;
+    let mut samples: Vec<u64> = Vec::with_capacity(ticks as usize);
+    let allocs_before = alloc_count();
+    for _ in 0..ticks {
+        let start = Instant::now();
+        sim.tick()?;
+        samples.push(start.elapsed().as_nanos() as u64);
+    }
+    let allocs = alloc_count().saturating_sub(allocs_before);
+    samples.sort_unstable();
+    let p50_ns = percentile(&samples, 50);
+    let p95_ns = percentile(&samples, 95);
+    let p99_ns = percentile(&samples, 99);
+    let within_budget = p99_ns.div_ceil(1_000) <= budget_us;
+    let pass = assert_alloc.is_none_or(|limit| allocs <= limit);
+    if !pass {
+        log::error!(
+            "sim_core/{profile} alloc audit failed: {allocs} allocation(s) across {ticks} ticks"
+        );
+    }
+    if assert_alloc.is_some() && !alloc_audit_enabled() {
+        log::warn!("--assert-alloc is a no-op without `--features alloc-audit`");
+    }
+
+    let report = SimCoreProfileReport {
+        profile: profile.to_owned(),
+        width,
+        height,
+        buildings: placed,
+        ticks,
+        p50_ns,
+        p95_ns,
+        p99_ns,
+        checksum: sim.checksum_hex(),
+        budget_us,
+        within_budget,
+        allocs,
+        alloc_audit: alloc_audit_enabled(),
+        assert_alloc,
+        pass,
+    };
+    println!("{}", serde_json::to_string(&report)?);
+    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
 }
 
 fn cmd_dump(cli: &Cli, scenario_name: &str, out: &Path, all_tiles: bool) -> anyhow::Result<i32> {

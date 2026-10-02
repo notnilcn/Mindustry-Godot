@@ -18,5 +18,10 @@ log.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
+[features]
+# Plan 05 M8 §7.4: forwards the counting global allocator to `mind-core` for
+# `bench --assert-alloc`. Default-off; CI/bench builds opt in.
+alloc-audit = ["mind-core/alloc-audit"]
+
 [lints]
 workspace = true

@@ -1,0 +1,11 @@
+{
+  "format": 1,
+  "name": "sim_core_many_commands",
+  "seed": 42,
+  "world": { "generator": "flat", "width": 48, "height": 48, "floor": "stone", "wall": "air" },
+  "rules": { "waves": false, "infinite_resources": true },
+  "commands": [],
+  "command_generator": { "type": "seeded_ops", "count": 5000, "steps": 600, "mode": "mixed" },
+  "steps": 600,
+  "expect": { "checksum": "8a70be60e3dec0ca" }
+}

@@ -1,0 +1,11 @@
+{
+  "format": 1,
+  "name": "sim_core_determinism",
+  "seed": 777,
+  "world": { "generator": "flat", "width": 64, "height": 64, "floor": "stone", "wall": "air" },
+  "rules": { "waves": false, "infinite_resources": true },
+  "commands": [],
+  "command_generator": { "type": "seeded_ops", "count": 60, "steps": 3600, "mode": "mixed" },
+  "steps": 3600,
+  "expect": { "checksum": "155716ca1b7b210f" }
+}

@@ -1,0 +1,21 @@
+{
+  "format": 1,
+  "name": "sim_core_boot",
+  "seed": 12345,
+  "world": { "generator": "flat", "width": 64, "height": 64, "floor": "stone", "wall": "air" },
+  "rules": { "waves": false, "infinite_resources": true },
+  "commands": [
+    { "tick": 0, "op": { "type": "select_block", "block": "stone-wall" } },
+    { "tick": 0, "op": { "type": "place", "x": 8, "y": 8, "block": "stone-wall" } },
+    { "tick": 120, "op": { "type": "place", "x": 9, "y": 8, "block": "stone-wall" } },
+    { "tick": 240, "op": { "type": "break", "x": 8, "y": 8 } }
+  ],
+  "steps": 600,
+  "expect": {
+    "checksum": "eaf9472d8cf4dfd5",
+    "tiles": [
+      { "x": 8, "y": 8, "block": "air" },
+      { "x": 9, "y": 8, "block": "stone-wall" }
+    ]
+  }
+}

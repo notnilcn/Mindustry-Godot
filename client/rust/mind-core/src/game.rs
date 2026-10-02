@@ -33,6 +33,15 @@ impl State {
     pub const fn is_game(self) -> bool {
         matches!(self, State::Playing | State::Paused)
     }
+
+    /// Parity name used by inspector reports (`menu`/`playing`/`paused`).
+    pub const fn name(self) -> &'static str {
+        match self {
+            State::Menu => "menu",
+            State::Playing => "playing",
+            State::Paused => "paused",
+        }
+    }
 }
 
 /// Simulation state header.

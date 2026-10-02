@@ -11,6 +11,7 @@ pub mod config;
 pub mod dump;
 pub mod events;
 pub mod fixed;
+pub mod io_set;
 pub mod logic;
 pub mod reset;
 pub mod schedule;
@@ -36,6 +37,7 @@ pub use config::SimConfig;
 pub use dump::StateDump;
 pub use events::{ALL_TRIGGERS, Trigger, TriggerRegistry};
 pub use fixed::{FixedStepRunner, SIM_STEP};
+pub use io_set::{DeferringIoHandler, IoHandler, IoQueue, IoRequest, IoResponse, IoSet, IoStatus};
 
 /// Errors raised by simulation operations.
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
@@ -101,6 +103,8 @@ pub struct Sim {
     pub config: SimConfig,
     /// Host capability seam (headless by default).
     pub platform: Box<dyn Platform>,
+    /// Save/load boundary queue (plan 05 M9; plan 04 §3.10).
+    pub io: IoQueue,
 
     seed: u64,
     selected_block: BlockId,
@@ -129,6 +133,7 @@ impl Sim {
             rng_streams: SimRng::new(seed),
             config: SimConfig::new().with_seed(seed),
             platform: Box::new(HeadlessPlatform::with_default_dir()),
+            io: IoQueue::new(),
             seed,
             selected_block: BlockId::STONE_WALL,
             entity_seq: EntitySequencer::default(),
@@ -227,6 +232,9 @@ impl Sim {
     /// Schedule order follows `Logic.update()` (plan 05 §3.4): `Trigger.update`
     /// → set chain → delayed runs (`Time.update`) → `Trigger.afterGameUpdate`.
     pub fn tick(&mut self) -> Result<(), SimError> {
+        // `IoSet::Apply` is the pre-tick boundary (plan 04 §3.10): no load may
+        // mutate the world mid-tick.
+        self.pump_io(IoSet::Apply);
         self.triggers.fire(Trigger::Update, &mut self.ecs.0);
         self.schedule.run(&mut self.ecs.0);
         self.flush_events();
@@ -235,7 +243,53 @@ impl Sim {
         self.state.advance();
         self.triggers
             .fire(Trigger::AfterGameUpdate, &mut self.ecs.0);
+        // `IoSet::Capture` is the post-update boundary.
+        self.pump_io(IoSet::Capture);
         Ok(())
+    }
+
+    /// Monotonic update counter (`GameState.updateId`).
+    pub fn update_id(&self) -> u64 {
+        self.state.update_id
+    }
+
+    /// Current phase name (inspector/parity).
+    pub fn state_name(&self) -> &'static str {
+        self.state.phase.name()
+    }
+
+    /// Per-group live entity counts (plan 05 M9 inspector surface).
+    ///
+    /// At the P0/M9 stage only the `build` group carries entities; the remaining
+    /// groups report `0` until their plans (08–11) register membership. The map
+    /// is a `BTreeMap` so the inspector dictionary is deterministic.
+    pub fn group_counts(&self) -> std::collections::BTreeMap<&'static str, usize> {
+        // `all` counts real sim entities (`EntitySeq`); Bevy's raw entity slots
+        // can include internal/reserved ids that are not sim entities.
+        let all = self
+            .ecs
+            .0
+            .iter_entities()
+            .filter(|entity| entity.get::<crate::ecs::EntitySeq>().is_some())
+            .count();
+        let build = self
+            .ecs
+            .0
+            .iter_entities()
+            .filter(|entity| entity.get::<crate::ecs::BuildingComp>().is_some())
+            .count();
+        let mut counts = std::collections::BTreeMap::new();
+        counts.insert("all", all);
+        counts.insert("unit", 0);
+        counts.insert("build", build);
+        counts.insert("bullet", 0);
+        counts.insert("player", 0);
+        counts.insert("effect", 0);
+        counts.insert("weather", 0);
+        counts.insert("power_graph", 0);
+        counts.insert("sync", 0);
+        counts.insert("draw", 0);
+        counts
     }
 
     /// The deterministic fixed-step clock.

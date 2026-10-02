@@ -36,6 +36,17 @@ pub struct RunReport {
     /// Path of the emitted command log, when requested.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub commands_emitted: Option<String>,
+    /// Path of the emitted binary `.simlog`, when requested.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub simlog_emitted: Option<String>,
+    /// Phase name after the run (plan 05 M9 inspector surface).
+    pub state: String,
+    /// Monotonic update counter.
+    pub update_id: u64,
+    /// Number of `// plan NN` stub systems that ran this tick.
+    pub unimplemented_stub: u32,
+    /// Live per-group entity counts.
+    pub group_counts: Vec<GroupCount>,
 }
 
 /// One tile assertion result.
@@ -51,6 +62,101 @@ pub struct TileCheck {
     pub actual: String,
     /// Whether they matched.
     pub ok: bool,
+}
+
+/// One group count row (plan 05 M9 inspector surface).
+#[derive(Debug, Clone, Serialize)]
+pub struct GroupCount {
+    /// Group name.
+    pub name: String,
+    /// Live entity count.
+    pub count: usize,
+}
+
+/// Binary/text `.simlog` replay report (plan 05 M8 §7.2).
+#[derive(Debug, Clone, Serialize)]
+pub struct SimCoreReplayReport {
+    /// Command log that was replayed.
+    pub file: String,
+    /// `binary` or `text`.
+    pub format: String,
+    /// Seed used.
+    pub seed: u64,
+    /// World width.
+    pub width: i32,
+    /// World height.
+    pub height: i32,
+    /// Completed ticks.
+    pub tick: u64,
+    /// Worker count requested (determinism harness; identical output expected).
+    pub workers: usize,
+    /// Final checksum.
+    pub checksum: String,
+    /// Per-command errors that the current build does not represent (never fatal).
+    pub unsupported_commands: usize,
+    /// Sampled checksums (`--checksum-every`), if requested.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checksums: Option<Vec<String>>,
+    /// Golden checksums read from `--golden`, when provided.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expect_checksums: Option<Vec<String>>,
+    /// Overall pass/fail (golden comparison; no golden = pass).
+    pub pass: bool,
+}
+
+/// One per-profile budget row for `bench sim_core`.
+#[derive(Debug, Clone, Serialize)]
+pub struct SimCoreProfileReport {
+    /// Profile name (`empty`/`mid`/`stress`).
+    pub profile: String,
+    /// World width.
+    pub width: i32,
+    /// World height.
+    pub height: i32,
+    /// Buildings placed before timing.
+    pub buildings: usize,
+    /// Timed ticks.
+    pub ticks: u64,
+    /// Median ns/tick.
+    pub p50_ns: u64,
+    /// 95th percentile ns/tick.
+    pub p95_ns: u64,
+    /// 99th percentile ns/tick.
+    pub p99_ns: u64,
+    /// Final checksum (sanity).
+    pub checksum: String,
+    /// p99 budget in microseconds (plan 05 §7.4).
+    pub budget_us: u64,
+    /// Whether p99 is within budget.
+    pub within_budget: bool,
+    /// Allocations observed across the timed region.
+    pub allocs: u64,
+    /// Whether the alloc counters were compiled in.
+    pub alloc_audit: bool,
+    /// `--assert-alloc` limit, when provided.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assert_alloc: Option<u64>,
+    /// Overall pass/fail (alloc assertion only; budgets are recording-only).
+    pub pass: bool,
+}
+
+/// `sim_core_reset_play_cycle` report (plan 05 §7.2).
+#[derive(Debug, Clone, Serialize)]
+pub struct SimCoreCycleReport {
+    /// Cycles run.
+    pub cycles: u64,
+    /// Ticks simulated after each `play`.
+    pub ticks: u64,
+    /// Every cycle returned to `menu` with empty groups/grid and zero clock.
+    pub reset_clean: bool,
+    /// Every `play` produced `playing` and advanced the clock.
+    pub play_advances: bool,
+    /// Entity count baseline (0) held across resets.
+    pub entity_baseline: usize,
+    /// Final checksum (determinism sanity).
+    pub checksum: String,
+    /// Overall pass/fail.
+    pub pass: bool,
 }
 
 /// `sim`/`replay --json` report.

@@ -50,6 +50,21 @@ pub enum Command {
         /// Write the applied command log (JSONL) here.
         #[arg(long)]
         emit_commands: Option<PathBuf>,
+        /// Write the applied command log in binary `.simlog` form here.
+        #[arg(long)]
+        emit_simlog: Option<PathBuf>,
+        /// Reset/play cycles for `sim_core_reset_play_cycle`.
+        #[arg(long, default_value_t = 20)]
+        cycles: u64,
+        /// Collect a checksum every N ticks (0 = off) for `sim_core_determinism`.
+        #[arg(long, default_value_t = 0)]
+        checksum_every: u64,
+        /// Compare sampled checksums against this golden file (one hex per line).
+        #[arg(long)]
+        golden: Option<PathBuf>,
+        /// Write the sampled checksums (one hex per line) here.
+        #[arg(long)]
+        emit_checksums: Option<PathBuf>,
     },
 
     /// Run a fresh flat world for N ticks.
@@ -98,6 +113,15 @@ pub enum Command {
         /// Include every per-tick checksum in the JSON report.
         #[arg(long)]
         per_tick: bool,
+        /// Collect a checksum every N ticks (0 = off).
+        #[arg(long, default_value_t = 0)]
+        checksum_every: u64,
+        /// Worker count recorded for determinism runs (does not change output).
+        #[arg(long, default_value_t = 1)]
+        workers: usize,
+        /// Compare sampled checksums against this golden file (one hex per line).
+        #[arg(long)]
+        golden: Option<PathBuf>,
     },
 
     /// Benchmark `Sim::tick` on a scenario (emits `{p50_us,p99_us}` JSON).
@@ -106,9 +130,17 @@ pub enum Command {
         #[arg(long, default_value_t = 100_000)]
         ticks: u64,
         /// Benchmark scenario/profile (`spine` maps to `bench_baseline`;
-        /// `stdb_pump` measures connector pump overhead, plan 01 §7.4).
+        /// `stdb_pump` measures connector pump overhead, plan 01 §7.4;
+        /// `sim_core` selects the `--profile` sim-core benchmark).
         #[arg(long, default_value = "spine")]
         scenario: String,
+        /// Sim-core profile (`empty`/`mid`/`stress`; plan 05 §7.4).
+        #[arg(long)]
+        profile: Option<String>,
+        /// Fail when more than N allocations occur across the timed region
+        /// (requires `--features alloc-audit`).
+        #[arg(long)]
+        assert_alloc: Option<u64>,
     },
 
     /// Run a scenario and write its state dump.

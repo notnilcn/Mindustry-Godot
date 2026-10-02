@@ -44,3 +44,6 @@ workspace = true
 # declined stub (`io::legacy` errors with the upstream unknown-version message)
 # until an explicit user opt-in lands `legacy::java` readers (plan 04 M7).
 msav-import = []
+# Plan 05 M8 §7.4: installs a counting global allocator so the harness can
+# prove steady-state ticks are allocation-free. Default-off (test/bench only).
+alloc-audit = []
