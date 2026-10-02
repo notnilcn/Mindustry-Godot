@@ -25,7 +25,7 @@ pub use audio::MindAudio;
 pub use camera::MindCamera2D;
 pub use mods::MindMods;
 pub use platform::MindPlatform;
-pub use render::{MindRender, MindWorldRenderer};
+pub use render::{MindMinimap, MindRender, MindWorldRenderer};
 pub use sim_host::MindSimHost;
 pub use stdb::{StdbBinder, StdbConnector};
 pub use tile_grid::MindTileGrid;
