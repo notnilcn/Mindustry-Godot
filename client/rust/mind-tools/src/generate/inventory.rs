@@ -156,7 +156,15 @@ pub fn build(ctx: &GenCtx, registry: &ContentRegistry) -> RegionInventory {
         }
     }
 
-    // --- unit-icons (deferred, plan 02 M5) ---
+    // --- unit-icons (plan 02 M5 metadata) ---
+    for unit in registry.units() {
+        if unit.internal && !unit.internal_generate_sprites {
+            continue;
+        }
+        for region in metadata::unit_region_expectations(unit, &has) {
+            add(region);
+        }
+    }
 
     // --- ore-icons ---
     for block in registry.blocks().iter() {
