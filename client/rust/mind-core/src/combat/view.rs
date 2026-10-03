@@ -15,6 +15,7 @@
 use crate::content::registries::fx_meta::EffectRef;
 use crate::content::registries::sound_meta::SoundId;
 use crate::content::{EffectId, Rgba};
+use crate::fx::TrailChannelId;
 
 /// Combat effect sink (plan-17 playback boundary; no-op in headless).
 pub trait FxSink: Send + Sync {
@@ -41,6 +42,24 @@ pub trait FxSink: Send + Sync {
     /// Appends a bullet/weapon trail point (plan 17 owns `Trail`).
     fn trail(&self, x: f32, y: f32, rotation: f32, color: Rgba, width: f32, length: f32) {
         let _ = (x, y, rotation, color, width, length);
+    }
+
+    /// Appends a trail point to a known channel (plan 17 §3.9). The default
+    /// forwards to [`FxSink::trail`] so existing sinks keep their behavior; a
+    /// channel-aware sink can resolve the per-channel `TrailRegistry` tint.
+    #[allow(clippy::too_many_arguments)]
+    fn trail_channel(
+        &self,
+        channel: TrailChannelId,
+        x: f32,
+        y: f32,
+        rotation: f32,
+        color: Rgba,
+        width: f32,
+        length: f32,
+    ) {
+        let _ = channel;
+        self.trail(x, y, rotation, color, width, length);
     }
 }
 

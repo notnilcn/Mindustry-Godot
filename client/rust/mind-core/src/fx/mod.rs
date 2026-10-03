@@ -36,7 +36,7 @@ pub use batch::{
 pub use catalog::{CatalogCounts, build_registry, counts as catalog_counts, order_hash};
 pub use container::EffectContainer;
 pub use custom::{CustomFxId, FxEmit};
-pub use data::{EffectData, EmptySnapshot, Pose, ViewEntityId, ViewSnapshot};
+pub use data::{EffectData, EmptySnapshot, Pose, TrailChannelId, ViewEntityId, ViewSnapshot};
 pub use decal::{Decal, DecalPool};
 pub use def::{
     CustomParams, EffectDef, EffectKind, EffectRegistry, ExplosionParams, NoiseParams,

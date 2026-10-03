@@ -8,7 +8,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Draft v1 — 2026-10-01, not started |
+| **Status** | Draft v1 — 2026-10-01, not started. **F25 (`lane/f25-audio`, 2026-10-03): the plan-10 trail channel id landed** (`FxSink::trail_channel` + `FxEvent::Trail.channel`; `combat::bullet` keys trails by `EntitySeq`), closing the last plan-10→17 seam. In-engine region/atlas execution + §7c MCP remain deferred. |
 | **Phase** | P6 — Render, FX, audio (HIGH_LEVEL_PLAN §5) |
 | **Depends on** | `10_COMBAT_BULLETS_IMPLEMENTATION_PLAN.md` (`CombatFx` call sites, weapon/turret mount state, `BulletDrawState`/`LaserDrawState`/`ShieldDrawState`), `11_UNITS_AI_WAVES_IMPLEMENTATION_PLAN.md` (unit/mount state, `WeaponDef.parts`, unit trail fields, controller/trail hooks), `16_RENDER_WORLD_IMPLEMENTATION_PLAN.md` (**not written at plan-write time** — `Layer`, frame pipeline, draw-pass registration, light queue, Textures/atlas binding; interfaces frozen in §3.16). Also consumes `02_CONTENT_IMPLEMENTATION_PLAN.md` (`EffectId`/`fx_meta` R6, `DrawPartSpec`, `WeaponDef`, `UnitTypeDef`, `BulletDef`, `WeatherDef`), `03_ASSETS_IMPLEMENTATION_PLAN.md` (atlas region lookup, loose textures, region manifest), `05_SIM_CORE_IMPLEMENTATION_PLAN.md` (`UpdateEffects` slot, `Time`/`Tmp`, `ClientHooks`, tick clock, `RngStream::Fx`), `12_CAMPAIGN_IMPLEMENTATION_PLAN.md` (weather state; **not written** — view interface frozen in §3.12), `14_UI_IMPLEMENTATION_PLAN.md` (settings rows only; **not written** — no UI code here). |
 | **Blocks** | `21_MULTIPLAYER_IMPLEMENTATION_PLAN.md` (visual verification only — effects are never synced/serialized), `23_PARITY_VERIFICATION_IMPLEMENTATION_PLAN.md` (scenario + bench registration). |
@@ -767,4 +767,20 @@ Baseline from HLP §7.4: 16.6 ms frame at 60 fps. FX is client-only; sim budgets
   **Deferred / non-gating (OD-17-A):** §7c in-engine MCP (single-editor mutex;
   editor not running), plan-16 draw-call executor, plan-03 atlas/loose-texture
   binding, plan-18 sound playback.
+
+- 2026-10-03 — **F25 lane `lane/f25-audio` (base `main` @ `e3c5174`): plan-10
+  trail channel id CLOSED.** The frozen plan-10 `FxSink::trail(x, y, rotation,
+  color, width, length)` now has an append-only, defaulted companion
+  `trail_channel(channel: TrailChannelId, …)` (the default forwards to `trail`,
+  so every existing sink keeps its behavior). `FxEvent::Trail` gained
+  `channel: Option<TrailChannelId>`, and `combat::bullet::update_bullet` keys
+  each bullet trail by its stable `EntitySeq`, so the event can resolve the
+  plan-17 `TrailRegistry` per-channel tint (registered via
+  `TrailRegistry::create_colored`). `NoopFx`/`NoopFxSink` inherit the default;
+  `FxBus` overrides it to record `Some(channel)`. Test
+  `fx::sink::tests::trail_channel_is_carried`. All `fx_*` goldens stay
+  byte-identical (`fx_golden` PASS — the `fx trail` scenario drives
+  `TrailRegistry` directly, not `FxEvent`). **Deferred (unchanged):** live
+  plan-10 push into `MindFx` (MCP mutex) and the plan-18 sound drain (landed on
+  this lane's plan-18 half).
 

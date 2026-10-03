@@ -31,7 +31,12 @@
 | `ConstructBlock.{construct,deconstruct}Finish` `placeSound`/`breakSound` | `world::BuildHarness::finish` → `AudioSinkRes` | `audio events --scenario audio_events_sim` |
 | `Turret.bullet` `(type.shootSound ≠ none ? … : shootSound)` | `turrets::shoot` → `audio::sim::emit_turret_shoot` | `audio events --scenario audio_events_sim` |
 | `BulletType.hit`/`despawned` `hitSound`/`despawnSound` | `combat::bullet::{hit_bullet,despawn_bullet}` → `audio::sim::emit_bullet_*` | `audio events --scenario audio_events_sim` |
+| `BulletComp.remove` `despawned`→`removed` ordering (lifetime, `!hit`) | `combat::bullet::EXPIRED` + `finish_bullet` | `combat::bullet::tests::despawn_sound_fires_on_lifetime_not_hit` |
+| `UnitComp.kill`/`destroy` sound order (death before wreck) | `audio::sim::{emit_unit_death,emit_unit_wreck}` | `audio::sim::tests::unit_despawn_sound_order_is_death_then_wreck` |
 | `UnitComp.kill` `deathSound`/`wreckSound` | `entities::comp::unit::lifecycle::kill_unit` → `AudioSinkRes` | `audio::sim::tests::emits_expected_event_shapes` |
+| Arc `RandomSound.play` alternate selection | `audio::sim::{block_destroy_alternates,pick_random_sound,block_destroy_sound}` + `FxAudioRng` (`RngStream::Fx`) | `audio::sim::tests::{random_sound_alternates_are_both_reachable,random_sound_reads_fx_stream_not_gameplay_rng}` |
+| Plan-10→17 trail channel (`FxEvent::Trail` → `TrailRegistry`) | `combat::view::FxSink::trail_channel` + `fx::sink::FxEvent::Trail.channel` | `fx::sink::tests::trail_channel_is_carried` |
+| Client sim-audio drain + live `MusicContext` | `mind_gdext::audio::MindAudio::{apply_events,music_context}` + `SharedAudioLog::take_events` | MCP §7c (deferred; `SharedAudioLog::take_events` unit-tested) |
 | `MapAudioView` audition `dp-` overlay preference | `audio::ids::audition_name` + `MindAudio.audition_*` | `audio::ids::tests::audition_prefers_dp_overlay` |
 | Godot bus layout + Sound lowpass slot 0 | `mind_gdext::audio::buses` | MCP §7c (deferred) |
 | Music stream cache (normal/looping variants) | `mind_gdext::audio::streams::StreamCache` | MCP §7c (deferred) |
@@ -64,8 +69,14 @@
 - **M6:** `audio bench`, alloc-audit (`steady_state_audio_allocates_nothing`), inspector `Audio` row, and `bench/baselines.json` audio budgets landed; release budget run and plan-23 CI registration remain.
 - **MCP §7c:** all in-engine checks deferred to the orchestrator's single-editor mutex. Copy-pasteable evals live in the plan §7c.
 - Content sound/music fields on `BlockDef`/`UnitTypeDef`/`WeaponDef`/`BulletDef`/`WeatherDef`/`PlanetDef` are plan 02/12 ownership; plan 18 consumes them via adapters (`MusicRules`/`PlanetMusic`) and the `AudioEvent` constructors.
-- **`BulletType.despawned` `despawnSound`:** the call site is ported (`audio::sim::emit_bullet_despawn`) and `false` is emitted for the
-  `BulletType.despawned` hook; the current plan-10 HIT gate skips `despawned` for lifetime/pierce removals, so the headless `audio_events_sim`
-  golden exercises `hitSound` (not `despawnSound`). Wiring the emit for HIT removals is a plan-10 lifecycle follow-up (would touch frag counts).
-- **Alternate `RandomSound` variants** (`blockExplode2Alt`/`blockExplode1Alt`) are deterministic primary variants here; sim-RNG alternate
-  selection is deferred (do not consume the sim stream from audio).
+- **`BulletType.despawned` `despawnSound` — CLOSED (F25, 2026-10-03).** Bullet lifetime expiry now sets the plan-10 `EXPIRED` flag instead of
+  `HIT`, so `finish_bullet` runs `despawned` (emitting `despawnSound`) before `removed`, matching `BulletComp.remove`. Collisions/terrain/pierce
+  keep `HIT` and skip `despawned`. Asserted by `combat::bullet::tests::despawn_sound_fires_on_lifetime_not_hit`; the `audio_events_sim` golden is
+  unchanged (it exercises the collision `hitSound` path).
+- **`RandomSound` alternates — CLOSED (F25, 2026-10-03).** `blockExplode2Alt`/`blockExplode1Alt` are selected by `audio::sim::block_destroy_sound`
+  from `FxAudioRng` over the sim `RngStream::Fx` (deterministic per seed, never the gameplay `RngStream::Sim`).
+- **Client `GodotAudioSink` drain + `MusicContext` — Rust side landed (F25); in-engine deferred.** `MindSimHost` installs the shared
+  `SharedAudioLog`; `MindAudio::apply_events` plays one-shots/music and aggregates loops; `music_context` derives the live phase. Persistent loop
+  voices and the §7c MCP assertions run under the single-editor mutex.
+- **Plan-10 trail channel id — CLOSED (F25, 2026-10-03).** `FxSink::trail_channel` + `FxEvent::Trail.channel`; bullet trails are keyed by
+  `EntitySeq` so the plan-17 `TrailRegistry` per-channel tint is resolvable.

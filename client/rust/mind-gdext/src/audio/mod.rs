@@ -19,10 +19,10 @@ use godot::classes::{
 use godot::obj::{Base, Singleton};
 use godot::prelude::*;
 
-use mind_core::audio::math::Listener;
+use mind_core::audio::math::{Listener, MIN_PLAY_VOLUME, calc_falloff, calc_pan};
 use mind_core::audio::{
     AudioEvent, LoopMixer, MusicContext, MusicOutput, MusicPlayer, MusicRef, SeededAudioRng,
-    SoundId, SoundPriorityTable, bus_for_sound, settings_keys,
+    SharedAudioLog, SoundId, SoundPriorityTable, TickedAudioEvent, bus_for_sound, settings_keys,
 };
 
 use buses::{BusLayout, LOWPASS_DRY_HZ, LOWPASS_WET_HZ};
@@ -50,7 +50,10 @@ pub struct MindAudio {
     lowpass_wet: f32,
     sound_paused: bool,
     audition: bool,
-    pending: Vec<AudioEvent>,
+    /// Plan-18 sim→client sink, fetched from `/root/Spine/SimHost`.
+    audio_log: Option<SharedAudioLog>,
+    /// Events applied through the sink drain (inspector stat).
+    events_applied: u64,
     log: Vec<String>,
     missing: Vec<String>,
 }
@@ -95,7 +98,8 @@ impl INode for MindAudio {
             lowpass_wet: 0.0,
             sound_paused: false,
             audition: false,
-            pending: Vec::new(),
+            audio_log: None,
+            events_applied: 0,
             log: Vec::new(),
             missing: Vec::new(),
         }
@@ -170,19 +174,23 @@ impl INode for MindAudio {
             pool.set_paused(self.sound_paused);
         }
 
+        // Plan-18 sink drain: fetch the sim log lazily (the `SimHost` may
+        // finish `_ready` after `MindAudio`) and apply every queued event.
+        if self.audio_log.is_none() {
+            self.audio_log = self.sim_host().map(|host| host.bind().audio_log());
+        }
+        let events = self
+            .audio_log
+            .as_ref()
+            .map(SharedAudioLog::take_events)
+            .unwrap_or_default();
+        self.apply_events(&events, now_ms, delta_frames);
+
         if self.music_override {
             return;
         }
 
-        let context = MusicContext {
-            is_menu: true,
-            is_game: false,
-            musicvol_setting: self.settings.musicvol,
-            always_music_setting: self.settings.alwaysmusic,
-            now_ms,
-            delta_frames,
-            ..MusicContext::default()
-        };
+        let context = self.music_context(now_ms, delta_frames);
         let Some(player) = self.music_player.clone() else {
             return;
         };
@@ -198,10 +206,175 @@ impl INode for MindAudio {
 }
 
 impl MindAudio {
+    fn sim_host(&self) -> Option<Gd<crate::sim_host::MindSimHost>> {
+        let base = self.base();
+        let node = base.get_node_or_null("../SimHost")?;
+        node.try_cast::<crate::sim_host::MindSimHost>().ok()
+    }
+
     fn find_camera(&self) -> Option<Gd<Camera2D>> {
         let base = self.base();
-        let node = base.get_node_or_null("World/Camera2D")?;
+        let node = base.get_node_or_null("../World/Camera2D")?;
         node.try_cast::<Camera2D>().ok()
+    }
+
+    /// Current camera listener (`calcFalloff`/`calcPan` frame).
+    fn listener(&self) -> Listener {
+        let width = self
+            .base()
+            .get_viewport()
+            .map(|viewport| viewport.get_visible_rect().size.x)
+            .filter(|width| *width > 0.0)
+            .unwrap_or(1.0);
+        let (x, y) = self
+            .find_camera()
+            .map(|camera| {
+                let position = camera.get_global_position();
+                (position.x, position.y)
+            })
+            .unwrap_or((0.0, 0.0));
+        Listener::new(x, y, width)
+    }
+
+    /// Derives the plan-18 `MusicContext` from the live `MindSimHost` phase.
+    ///
+    /// `dialog` is approximated from the paused phase until plan 14 exposes
+    /// `hasDialog()` (the MCP §7c step-5 lowpass check).
+    fn music_context(&self, now_ms: f64, delta_frames: f32) -> MusicContext {
+        let (state, paused) = match self.sim_host() {
+            Some(host) => {
+                let host = host.bind();
+                (host.get_state().to_string(), host.is_paused())
+            }
+            None => (String::from("menu"), false),
+        };
+        let is_menu = state == "menu";
+        MusicContext {
+            is_menu,
+            is_game: !is_menu,
+            paused,
+            dialog: paused,
+            musicvol_setting: self.settings.musicvol,
+            always_music_setting: self.settings.alwaysmusic,
+            now_ms,
+            delta_frames,
+            ..MusicContext::default()
+        }
+    }
+
+    fn sfx_scale(&self) -> f32 {
+        self.settings.sfxvol as f32 / 100.0
+    }
+
+    /// Applies the drained sim events (plan 18 §3.3): one-shots to the voice
+    /// pool, loop aggregation into the `LoopMixer`, and music control through
+    /// the `MusicPlayer`. Persistent loop voices and the in-engine §7c sweep
+    /// are the documented deferred half.
+    fn apply_events(&mut self, events: &[TickedAudioEvent], now_ms: f64, delta_frames: f32) {
+        if events.is_empty() {
+            return;
+        }
+        let listener = self.listener();
+        for ticked in events {
+            self.events_applied = self.events_applied.wrapping_add(1);
+            match &ticked.event {
+                AudioEvent::At {
+                    sound,
+                    x,
+                    y,
+                    pitch,
+                    volume,
+                    ..
+                } => {
+                    let scaled = calc_falloff(*x, *y, listener, 0.0) * self.sfx_scale() * *volume;
+                    if scaled < MIN_PLAY_VOLUME {
+                        continue;
+                    }
+                    self.play_sound(sound.name(), scaled, *pitch, calc_pan(*x, listener));
+                }
+                AudioEvent::Play {
+                    sound,
+                    volume,
+                    pitch,
+                    pan,
+                    ..
+                } => {
+                    self.play_sound(sound.name(), *volume, *pitch, *pan);
+                }
+                AudioEvent::LoopAdd {
+                    sound,
+                    x,
+                    y,
+                    volume,
+                    pitch,
+                } => {
+                    self.mixer
+                        .accumulate(*sound, *x, *y, *volume, *pitch, listener);
+                }
+                AudioEvent::LoopInstance {
+                    sound,
+                    x,
+                    y,
+                    volume_scl,
+                    ..
+                } => {
+                    // SoundLoop instances accumulate into the same mix; their
+                    // per-key fade voices are the deferred in-engine half.
+                    self.mixer
+                        .accumulate(*sound, *x, *y, *volume_scl, 1.0, listener);
+                }
+                AudioEvent::LoopCamera { sound, volume } => {
+                    self.mixer
+                        .accumulate(*sound, listener.x, listener.y, *volume, 1.0, listener);
+                }
+                AudioEvent::MusicPlay { name, interrupt } => {
+                    let context = self.music_context(now_ms, delta_frames);
+                    let Some(player) = self.music_player.clone() else {
+                        continue;
+                    };
+                    let mut output = GodotMusicOutput {
+                        player,
+                        streams: &mut self.streams,
+                        current: &mut self.current,
+                        lowpass_target: &mut self.lowpass_target,
+                        sound_paused: self.sound_paused,
+                    };
+                    self.music
+                        .play_music(Some(name.clone()), *interrupt, &context, &mut output);
+                    self.music_override = true;
+                }
+                AudioEvent::MusicStop => self.stop_music(),
+                AudioEvent::KeepSilent => self.music.keep_silent(),
+                AudioEvent::StopLoops => {
+                    self.mixer = LoopMixer::new();
+                }
+            }
+        }
+    }
+
+    /// Plays one one-shot through the UI or world voice pool.
+    fn play_sound(&mut self, name: &str, volume: f32, pitch: f32, pan: f32) {
+        let Some(stream) = self.streams.sound(name, false) else {
+            self.log_missing(name);
+            return;
+        };
+        let ui = bus_for_sound(name, None) == mind_core::audio::BusKind::Ui;
+        let listener = self.listener();
+        let Some(pool) = self.pool.as_mut() else {
+            return;
+        };
+        if ui {
+            let _ = pool.play_ui(stream, volume, pitch);
+        } else {
+            let _ = pool.play_world(
+                stream,
+                volume,
+                pitch,
+                pan,
+                (listener.x, listener.y),
+                listener.width,
+            );
+        }
     }
 
     fn apply_lowpass(&mut self) {
@@ -404,10 +577,10 @@ impl MindAudio {
             .map_or(0, |data| i64::from(data.voice.is_some()))
     }
 
-    /// Pending drained events (no sim sink is attached yet).
+    /// Un-drained events still queued in the sim audio sink.
     #[func]
     pub fn pending_events(&self) -> i64 {
-        self.pending.len() as i64
+        self.audio_log.as_ref().map_or(0, |log| log.len() as i64)
     }
 
     /// Missing-audio + error log lines.
@@ -472,7 +645,11 @@ impl MindAudio {
         let key = |name: &str| GString::from(name);
         dict.set(&key("voices"), &(self.voice_count().to_variant()));
         dict.set(&key("loop_sounds"), &(self.mixer.len() as i64).to_variant());
-        dict.set(&key("events"), &(self.pending.len() as i64).to_variant());
+        dict.set(&key("events"), &(self.pending_events().to_variant()));
+        dict.set(
+            &key("events_applied"),
+            &(self.events_applied as i64).to_variant(),
+        );
         dict.set(&key("allocs"), &0i64.to_variant());
         dict.set(
             &key("tracks_played"),

@@ -319,6 +319,15 @@ impl SharedAudioLog {
         }
     }
 
+    /// Drains the recorded events (the client `GodotAudioSink` drain, plan 18
+    /// §3.3). Returns them in emission order and resets the queue.
+    pub fn take_events(&self) -> Vec<TickedAudioEvent> {
+        match self.0.lock() {
+            Ok(mut guard) => std::mem::take(&mut guard.events),
+            Err(_) => Vec::new(),
+        }
+    }
+
     /// Sets the tick stamped on subsequent emissions.
     pub fn set_tick(&self, tick: u64) {
         if let Ok(mut guard) = self.0.lock() {
@@ -379,6 +388,26 @@ mod tests {
         assert_eq!(value["events"][0]["kind"], "at");
         assert_eq!(value["events"][0]["sound"], "shootDuo");
         assert_eq!(value["events"][1]["kind"], "loop_add");
+    }
+
+    #[test]
+    fn shared_log_take_events_drains_once() {
+        let log = SharedAudioLog::new();
+        let mut sink = log.clone();
+        sink.set_tick(3);
+        sink.emit(AudioEvent::loop_add(
+            SoundId::LOOP_CONVEYOR,
+            1.0,
+            2.0,
+            0.5,
+            1.0,
+        ));
+        sink.emit(AudioEvent::KeepSilent);
+        let drained = log.take_events();
+        assert_eq!(drained.len(), 2);
+        assert_eq!(drained[0].tick, 3);
+        assert!(log.is_empty());
+        assert!(log.take_events().is_empty());
     }
 
     #[test]

@@ -17,6 +17,7 @@ use godot::prelude::*;
 
 use crate::camera::MindCamera2D;
 use crate::settings;
+use mind_core::audio::{AudioSinkRes, SharedAudioLog};
 use mind_core::command::Command;
 use mind_core::content::{
     BlockId, ContentRegistry, ContentType, MemoryBundle, MemoryUnlockStore, content_counts,
@@ -66,6 +67,9 @@ pub struct MindSimHost {
     /// start (never mid-frame). Populated by `MindNet`/MCP via
     /// `enqueue_sim_command`/`apply_sim_command_json`.
     pending_commands: VecDeque<SimCommand>,
+    /// Plan-18 sim→client audio log; installed as an `AudioSinkRes` resource
+    /// and drained by `/root/Spine/MindAudio` (plan 18 §3.3/§3.10).
+    audio_log: SharedAudioLog,
 }
 
 #[godot_api]
@@ -87,6 +91,7 @@ impl INode for MindSimHost {
             revision: 0,
             fx_host: None,
             pending_commands: VecDeque::new(),
+            audio_log: SharedAudioLog::new(),
         }
     }
 
@@ -110,6 +115,13 @@ impl INode for MindSimHost {
         if let Some(registry) = self.content_snapshot.as_ref() {
             mind_core::logic::globals::GlobalVars::install_world(&mut self.sim.ecs.0, registry);
         }
+
+        // Plan-18: install the sim audio sink. Sim systems emit `AudioEvent`s
+        // unconditionally; `MindAudio` drains this log once per frame.
+        self.sim
+            .ecs
+            .0
+            .insert_resource(AudioSinkRes::new(self.audio_log.clone()));
 
         if let Some(saved) = settings::read()
             && let Some(name) = saved.selected_block
@@ -895,6 +907,11 @@ impl MindSimHost {
     /// Read-only world grid for the plan-16 floor/block bakers.
     pub fn grid(&self) -> &mind_core::world::WorldGrid {
         &self.sim.grid
+    }
+
+    /// Plan-18 sim audio log (`MindAudio` drains it; Rust-only seam).
+    pub fn audio_log(&self) -> SharedAudioLog {
+        self.audio_log.clone()
     }
 
     /// Read-only content registry snapshot for block draw metadata.
