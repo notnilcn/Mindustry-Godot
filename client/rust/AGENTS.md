@@ -53,7 +53,8 @@ in `../` owns scenes and GDScript UI; behavior lives here. Read the root
 
 - **`mind-core` stays Godot-free and tokio-free.** The dependency tree must not contain `godot` or
   `tokio`, and no source under `client/rust/mind-core` may `use godot`/`use tokio`. CI enforces both
-  via `cargo tree -p mind-core` and `grep -RnE 'use (godot|tokio)' client/rust/mind-core`
+  via `cargo tree -p mind-core` and
+  `grep -RnE --include='*.rs' 'use (godot|tokio)' client/rust/mind-core`
   (`.github/workflows/ci.yml`).
 - Workspace lints deny `unsafe_code`, clippy `all`, `unwrap_used` and `expect_used`.
   `mind-gdext` allows `unsafe` only for GDExtension glue; unit tests opt out of `unwrap`/`expect`

@@ -101,7 +101,7 @@ jobs:
             echo "FAIL: mind-core dependency tree contains godot/tokio" >&2
             exit 1
           fi
-          if grep -RnE 'use (godot|tokio)' client/rust/mind-core; then
+          if grep -RnE --include='*.rs' 'use (godot|tokio)' client/rust/mind-core; then
             echo "FAIL: mind-core source imports godot/tokio" >&2
             exit 1
           fi

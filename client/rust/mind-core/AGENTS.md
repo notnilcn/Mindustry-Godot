@@ -93,7 +93,7 @@ The workspace map is [`client/rust/AGENTS.md`](../AGENTS.md).
 
 - **Godot-free and tokio-free.** The dependency tree must not contain `godot` or `tokio`, and no
   source under `client/rust/mind-core` may `use godot`/`use tokio`; CI enforces both with
-  `cargo tree -p mind-core` and `grep -RnE 'use (godot|tokio)' client/rust/mind-core`.
+  `cargo tree -p mind-core` and `grep -RnE --include='*.rs' 'use (godot|tokio)' client/rust/mind-core`.
 - **View never feeds sim.** `render`, `fx`, `audio` and `combat::view` output is excluded from
   saves/sync/checksum (`ChecksumScope::include_view` is always `false`).
 - **Content IDs are append-only.** Construction order defines dense per-type IDs; `ContentType`
@@ -133,7 +133,7 @@ cargo fmt --all -- --check
 
 # boundary gate (must print nothing / find nothing)
 cargo tree -p mind-core --prefix none | grep -Eq '^(godot|tokio)( |$)' && echo FAIL
-grep -RnE 'use (godot|tokio)' client/rust/mind-core && echo FAIL
+grep -RnE --include='*.rs' 'use (godot|tokio)' client/rust/mind-core && echo FAIL
 
 # headless oracle golden: spine_place_break -> e53c9277bb8c28d1
 cargo run -p mind-headless -- run spine_place_break --json

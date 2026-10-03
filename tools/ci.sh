@@ -134,7 +134,7 @@ if cargo tree --manifest-path "$MANIFEST" -p mind-core --prefix none | grep -Eq 
   echo "FAIL: mind-core dependency tree contains godot/tokio" >&2
   exit 1
 fi
-if rg -n 'use godot|use tokio' client/rust/mind-core; then
+if rg -n -g '*.rs' 'use godot|use tokio' client/rust/mind-core; then
   echo "FAIL: mind-core source imports godot/tokio" >&2
   exit 1
 fi
