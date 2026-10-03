@@ -837,6 +837,7 @@ impl ModDataManager {
         let previous = registry.current_mod().cloned();
         registry.set_current_mod(Some(ModId(String::from("dp"))));
         let mut parser = crate::mods::json::ContentJsonParser::restricted();
+        let mut created: Vec<ContentRef> = Vec::new();
         for record in content {
             let stem = content_stem(&record.json);
             match parser.parse(registry, &stem, &stem, &record.json, record.type_) {
@@ -844,11 +845,30 @@ impl ModDataManager {
                     if !self.patched_content.contains(&reference) {
                         self.patched_content.push(reference);
                     }
+                    created.push(reference);
                 }
                 Err(error) => self.content_errors.push(error.message),
             }
         }
         registry.set_current_mod(previous);
+        // `DataPatcher.created`: init then postInit on each new record, then the
+        // client `loadIcon`/`load` half (headless no-op). Per-content failures
+        // are isolated into `content_errors` exactly like parse errors.
+        for reference in &created {
+            if let Err(error) = registry.init_created(*reference) {
+                self.content_errors.push(error.to_string());
+            }
+        }
+        for reference in &created {
+            if let Err(error) = registry.post_init_created(*reference) {
+                self.content_errors.push(error.to_string());
+            }
+        }
+        for reference in &created {
+            if let Err(error) = registry.load_created(*reference) {
+                self.content_errors.push(error.to_string());
+            }
+        }
         if reload_arrays {
             crate::mods::patch::fix_content_arrays(registry);
         }

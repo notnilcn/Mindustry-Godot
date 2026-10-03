@@ -51,6 +51,9 @@ pub struct DataPatcher {
     used: IndexSet<(ContentRef, String)>,
     warnings: Vec<String>,
     after_patch_calls: usize,
+    /// Content records created during this apply (`DataPatcher.created`); their
+    /// `init`/`postInit`/client `load` run once after traversal.
+    created: Vec<ContentRef>,
 }
 
 impl Default for DataPatcher {
@@ -69,6 +72,14 @@ impl DataPatcher {
             used: IndexSet::new(),
             warnings: Vec::new(),
             after_patch_calls: 0,
+            created: Vec::new(),
+        }
+    }
+
+    /// Records a content reference constructed by this apply (`created`).
+    pub(crate) fn mark_created(&mut self, reference: ContentRef) {
+        if !self.created.contains(&reference) {
+            self.created.push(reference);
         }
     }
 
@@ -120,6 +131,7 @@ impl DataPatcher {
         self.warnings.clear();
         self.used.clear();
         self.resetters.clear();
+        self.created.clear();
         self.after_patch_calls = 0;
 
         for patch in patches {
@@ -151,6 +163,24 @@ impl DataPatcher {
             .after_patch()
             .map_err(|error| ContentError::Parse(error.to_string()))?;
         self.after_patch_calls += 1;
+        // `DataPatcher.created`: init then postInit on each new record, and the
+        // client `loadIcon`/`load` half (headless no-op).
+        let created = std::mem::take(&mut self.created);
+        for reference in &created {
+            registry
+                .init_created(*reference)
+                .map_err(|error| ContentError::Parse(error.to_string()))?;
+        }
+        for reference in &created {
+            registry
+                .post_init_created(*reference)
+                .map_err(|error| ContentError::Parse(error.to_string()))?;
+        }
+        for reference in &created {
+            registry
+                .load_created(*reference)
+                .map_err(|error| ContentError::Parse(error.to_string()))?;
+        }
         fix_content_arrays(registry);
         self.applied = true;
         Ok(())
@@ -184,6 +214,7 @@ impl DataPatcher {
         for resetter in self.resetters.drain(..).rev() {
             resetter(registry);
         }
+        self.created.clear();
         self.used.clear();
         self.applied = false;
     }
@@ -1569,6 +1600,11 @@ impl DataPatcher {
                 }
             }
         }
+        // `DataPatcher.created`: each inline bullet is a freshly constructed
+        // non-mappable content record that must run its lifecycle.
+        for weapon in &created {
+            self.mark_created(ContentRef::new(ContentType::Bullet, weapon.bullet.id.raw()));
+        }
         if let Some(unit) = registry.unit_mut(UnitTypeId::new(raw)) {
             match mode {
                 FieldMode::Set => unit.weapons = created,
@@ -2189,6 +2225,24 @@ pub fn fix_content_arrays(registry: &mut ContentRegistry) {
         if block.item_health_scaling.len() < item_count {
             block.item_health_scaling = scaling.clone();
         }
+    }
+}
+
+/// `DataPatcher.fixContentArrays` world half: grows every live building's
+/// [`ItemModule`](crate::world::ItemModule)/[`LiquidModule`](crate::world::LiquidModule)
+/// to the dense content counts. Upstream only does this for the editor world
+/// (`!Vars.headless && ui.editor.isShown()`); the port exposes it as a hook for
+/// plan 09/19 instead of reaching into `Vars.world`.
+pub fn fix_world_content_arrays(world: &mut bevy_ecs::world::World, registry: &ContentRegistry) {
+    let items = registry.items().len();
+    let liquids = registry.liquids().len();
+    let mut item_query = world.query::<&mut crate::world::ItemModule>();
+    for mut module in item_query.iter_mut(world) {
+        module.check_array_capacity(items);
+    }
+    let mut liquid_query = world.query::<&mut crate::world::LiquidModule>();
+    for mut module in liquid_query.iter_mut(world) {
+        module.check_array_capacity(liquids);
     }
 }
 

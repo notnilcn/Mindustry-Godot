@@ -419,6 +419,67 @@ impl ContentRegistry {
         Ok(())
     }
 
+    /// Runs one lifecycle phase on a single record (`DataPatcher.created`).
+    ///
+    /// Upstream constructs content during a data patch after the registry
+    /// lifecycle sweeps have already run, so each new record is initialized in
+    /// place instead of through [`sweep`](Self::sweep). `loadIcon`/`load` are
+    /// client-only and a no-op headless (matching `!Vars.headless`).
+    pub fn run_content_phase(
+        &mut self,
+        reference: ContentRef,
+        phase: LifecyclePhase,
+    ) -> Result<(), ContentError> {
+        if self.headless && matches!(phase, LifecyclePhase::LoadIcon | LifecyclePhase::Load) {
+            return Ok(());
+        }
+        let index = reference.id as usize;
+        macro_rules! run {
+            ($field:ident) => {{
+                if let Some(record) = self.$field.get_mut(index) {
+                    return match phase {
+                        LifecyclePhase::Init => record.init_self(),
+                        LifecyclePhase::PostInit => record.post_init(),
+                        LifecyclePhase::LoadIcon => record.load_icon(),
+                        LifecyclePhase::Load => record.load(),
+                    };
+                }
+            }};
+        }
+        match reference.type_ {
+            ContentType::Item => run!(items),
+            ContentType::Block => run!(blocks),
+            ContentType::Bullet => run!(bullets),
+            ContentType::Liquid => run!(liquids),
+            ContentType::Status => run!(statuses),
+            ContentType::Unit => run!(units),
+            ContentType::UnitCommand => run!(unit_commands),
+            ContentType::UnitStance => run!(unit_stances),
+            ContentType::Weather => run!(weathers),
+            ContentType::Sector => run!(sectors),
+            ContentType::Planet => run!(planets),
+            ContentType::Team => run!(teams),
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// `created` callback server half: `init()` for one created record.
+    pub fn init_created(&mut self, reference: ContentRef) -> Result<(), ContentError> {
+        self.run_content_phase(reference, LifecyclePhase::Init)
+    }
+
+    /// `created` callback server half: `postInit()` for one created record.
+    pub fn post_init_created(&mut self, reference: ContentRef) -> Result<(), ContentError> {
+        self.run_content_phase(reference, LifecyclePhase::PostInit)
+    }
+
+    /// `created` callback client half: `loadIcon()` + `load()` (headless no-op).
+    pub fn load_created(&mut self, reference: ContentRef) -> Result<(), ContentError> {
+        self.run_content_phase(reference, LifecyclePhase::LoadIcon)?;
+        self.run_content_phase(reference, LifecyclePhase::Load)
+    }
+
     /// `ContentLoader.logContent()`: dense-ID validation + per-type counts.
     pub fn log_content(&self) -> Result<(), ContentError> {
         for type_ in ContentType::ALL {

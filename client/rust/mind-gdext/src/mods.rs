@@ -19,7 +19,7 @@ use godot::obj::{Base, Singleton};
 use godot::prelude::*;
 
 use mind_core::io::{NativeFs, SettingsStore};
-use mind_core::mods::{ModListEntry, Mods};
+use mind_core::mods::{ModListEntry, ModListing, Mods};
 
 /// Mods directory in Godot user space (`<data>/mods/`).
 const MODS_PATH: &str = "user://mods";
@@ -68,6 +68,13 @@ impl MindMods {
     #[signal]
     fn mod_error(name: GString, details: GString);
 
+    /// Emitted around an import (`path`, `ratio` 0.0→1.0). The Rust import is
+    /// synchronous (`Mods::import_mod`); the two endpoints are the honest
+    /// progress a local import can report. The browser's streaming download
+    /// progress lives in `mod_browser_dialog.gd` (`HTTPRequest`).
+    #[signal]
+    fn mod_import_progress(path: GString, ratio: f32);
+
     /// Serialized mod rows (`ModListEntry`), sorted like the dialog list.
     #[func]
     pub fn list(&self) -> Array<VarDictionary> {
@@ -103,9 +110,15 @@ impl MindMods {
     #[func]
     pub fn import_mod(&mut self, path: GString) -> VarDictionary {
         let source = PathBuf::from(path.to_string());
+        let _ = self
+            .base_mut()
+            .emit_signal("mod_import_progress", &[path.to_variant(), 0.0f32.to_variant()]);
         let result = self
             .mods
             .import_mod(&NativeFs, &source, false, &mut self.settings);
+        let _ = self
+            .base_mut()
+            .emit_signal("mod_import_progress", &[path.to_variant(), 1.0f32.to_variant()]);
         let mut out = VarDictionary::new();
         match result {
             Ok(_name) => {
@@ -208,15 +221,154 @@ impl MindMods {
     pub fn mods_dir(&self) -> GString {
         GString::from(mods_dir().display().to_string().as_str())
     }
+
+    /// Full detail row for the ModsDialog details pane (`showMod`).
+    #[func]
+    pub fn details(&self, name: GString) -> VarDictionary {
+        let target = name.to_string();
+        let report = self.mods.report();
+        let Some(entry) = report.mods.iter().find(|entry| entry.name == target) else {
+            return VarDictionary::new();
+        };
+        let mut out = entry_to_dict(entry);
+        if let Some(mod_) = self.mods.list().iter().find(|mod_| mod_.name == target) {
+            out.set(
+                &"description".to_variant(),
+                &mod_.meta.description.clone().unwrap_or_default().to_variant(),
+            );
+            out.set(
+                &"subtitle".to_variant(),
+                &mod_.meta.subtitle.clone().unwrap_or_default().to_variant(),
+            );
+            out.set(
+                &"config_folder".to_variant(),
+                &mod_
+                    .config_folder(self.mods.mod_directory())
+                    .display()
+                    .to_string()
+                    .to_variant(),
+            );
+            out.set(
+                &"file".to_variant(),
+                &mod_.file.display().to_string().to_variant(),
+            );
+            out.set(
+                &"repo".to_variant(),
+                &mod_.meta.repo.clone().unwrap_or_default().to_variant(),
+            );
+            out.set(&"failed".to_variant(), &mod_.failed(&self.settings).to_variant());
+            let reason = mod_
+                .unsupported_reason
+                .as_ref()
+                .map(|reason| reason.message().to_owned())
+                .unwrap_or_default();
+            out.set(&"reason".to_variant(), &reason.to_variant());
+            out.set(
+                &"errored_content".to_variant(),
+                &(mod_.errored_content.len() as i64).to_variant(),
+            );
+            out.set(
+                &"soft_dependencies".to_variant(),
+                &string_array(&mod_.soft_dependencies),
+            );
+            out.set(
+                &"missing_soft_dependencies".to_variant(),
+                &string_array(&mod_.missing_soft_dependencies),
+            );
+        }
+        out
+    }
+
+    /// Parses a GitHub mod listing JSON (`ModListing`) into a dictionary.
+    ///
+    /// The browser fetches the JSON with `HTTPRequest`; parsing/version matching
+    /// stay in `mind-core` so the dialog does not re-implement `parseVersion`/
+    /// `matchesGameVersion`.
+    #[func]
+    pub fn parse_listing(&self, json_text: GString) -> VarDictionary {
+        let mut out = VarDictionary::new();
+        match serde_json::from_str::<ModListing>(&json_text.to_string()) {
+            Ok(listing) => {
+                out.set(&"ok".to_variant(), &true.to_variant());
+                let value = serde_json::to_value(&listing).unwrap_or(serde_json::Value::Null);
+                out.set(&"listing".to_variant(), &json_to_dict(&value));
+            }
+            Err(error) => {
+                out.set(&"ok".to_variant(), &false.to_variant());
+                out.set(&"error".to_variant(), &error.to_string().to_variant());
+            }
+        }
+        out
+    }
+
+    /// `ModListing.getMatchingRelease`: the release matching `build`/`revision`.
+    ///
+    /// Returns `{found, id, version}`; `found = false` means "use `/latest`".
+    #[func]
+    pub fn matching_release(
+        &self,
+        listing_json: GString,
+        build: i32,
+        revision: i32,
+    ) -> VarDictionary {
+        let mut out = VarDictionary::new();
+        let Ok(listing) = serde_json::from_str::<ModListing>(&listing_json.to_string()) else {
+            out.set(&"found".to_variant(), &false.to_variant());
+            return out;
+        };
+        match listing.get_matching_release(build, revision) {
+            Some(release) => {
+                out.set(&"found".to_variant(), &true.to_variant());
+                out.set(&"id".to_variant(), &release.id.to_variant());
+                out.set(&"version".to_variant(), &release.version.to_variant());
+            }
+            None => {
+                out.set(&"found".to_variant(), &false.to_variant());
+            }
+        }
+        out
+    }
+
+    /// `Mods.getConfigFolder` path for a mod (`user://mods/<internal-name>`).
+    #[func]
+    pub fn config_folder(&self, name: GString) -> GString {
+        let target = name.to_string();
+        self.mods
+            .list()
+            .iter()
+            .find(|mod_| mod_.name == target)
+            .map(|mod_| {
+                GString::from(
+                    mod_.config_folder(self.mods.mod_directory())
+                        .display()
+                        .to_string()
+                        .as_str(),
+                )
+            })
+            .unwrap_or_default()
+    }
+}
+
+/// Packs a `Vec<String>` into a Godot string array.
+fn string_array(values: &[String]) -> PackedStringArray {
+    let mut out = PackedStringArray::new();
+    for value in values {
+        out.push(&GString::from(value.as_str()));
+    }
+    out
+}
+
+/// Converts a `serde_json::Value` to a Godot `VarDictionary`.
+fn json_to_dict(value: &serde_json::Value) -> VarDictionary {
+    let text = serde_json::to_string(value).unwrap_or_else(|_| String::from("{}"));
+    Json::parse_string(text.as_str())
+        .try_to::<VarDictionary>()
+        .unwrap_or_default()
 }
 
 /// Converts a `ModListEntry` to a Godot dictionary via its serde JSON form.
 fn entry_to_dict(entry: &ModListEntry) -> VarDictionary {
-    let value = serde_json::to_value(entry).unwrap_or(serde_json::Value::Null);
-    let text = serde_json::to_string(&value).unwrap_or_else(|_| String::from("{}"));
-    Json::parse_string(text.as_str())
-        .try_to::<VarDictionary>()
-        .unwrap_or_default()
+    json_to_dict(&serde_json::to_value(entry).unwrap_or(serde_json::Value::Null))
 }
 
 /// Globalizes `user://mods` to a native path.

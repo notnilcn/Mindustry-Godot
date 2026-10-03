@@ -152,6 +152,15 @@ impl ItemModule {
         self.total = 0;
     }
 
+    /// `ItemModule.checkArrayCapacity`: grows/shrinks the dense item array to
+    /// `size` and drops the flow cache (`DataPatcher.fixContentArrays`).
+    pub fn check_array_capacity(&mut self, size: usize) {
+        if self.items.len() != size {
+            self.items.resize(size, 0);
+        }
+        self.flow = None;
+    }
+
     /// All non-zero stacks in item-id order.
     pub fn stacks(&self) -> impl Iterator<Item = (ItemId, i32)> + '_ {
         self.items
@@ -220,6 +229,15 @@ impl LiquidModule {
     /// Whether any liquid is stored.
     pub fn has_any(&self) -> bool {
         self.current_amount > 0.0
+    }
+
+    /// `LiquidModule.checkArrayCapacity`: grows/shrinks the dense liquid array
+    /// to `size` and drops the flow cache (`DataPatcher.fixContentArrays`).
+    pub fn check_array_capacity(&mut self, size: usize) {
+        if self.liquids.len() != size {
+            self.liquids.resize(size, 0.0);
+        }
+        self.flow = None;
     }
 }
 
@@ -294,6 +312,30 @@ mod tests {
         assert_eq!(module.current(), 5.0);
         assert_eq!(module.remove(LiquidId::WATER, 2.0), 2.0);
         assert_eq!(module.current(), 3.0);
+    }
+
+    #[test]
+    fn item_module_check_array_capacity_grows_and_preserves() {
+        let mut module = ItemModule::with_items(2);
+        module.add(ItemId::COPPER, 3, 10);
+        module.flow = Some(FlowWindow::default());
+        module.check_array_capacity(5);
+        assert_eq!(module.items.len(), 5);
+        assert_eq!(module.get(ItemId::COPPER), 3);
+        assert!(module.flow.is_none());
+        module.check_array_capacity(5);
+        assert_eq!(module.items.len(), 5);
+    }
+
+    #[test]
+    fn liquid_module_check_array_capacity_grows_and_preserves() {
+        let mut module = LiquidModule::with_liquids(2);
+        module.add(LiquidId::WATER, 4.0, 10.0);
+        module.flow = Some(FlowWindow::default());
+        module.check_array_capacity(4);
+        assert_eq!(module.liquids.len(), 4);
+        assert_eq!(module.get(LiquidId::WATER), 4.0);
+        assert!(module.flow.is_none());
     }
 
     #[test]
