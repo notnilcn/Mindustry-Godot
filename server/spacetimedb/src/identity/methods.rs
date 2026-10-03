@@ -47,9 +47,7 @@ pub fn validate_profile_name(name: &str) -> Result<(), String> {
 /// Validates a language tag: non-empty ASCII alphanumerics/`-`/`_`.
 pub fn validate_language(language: &str) -> Result<(), String> {
     if language.is_empty() || language.len() > MAX_LANGUAGE_LEN {
-        return Err(format!(
-            "language must be 1-{MAX_LANGUAGE_LEN} characters"
-        ));
+        return Err(format!("language must be 1-{MAX_LANGUAGE_LEN} characters"));
     }
     if !language
         .chars()

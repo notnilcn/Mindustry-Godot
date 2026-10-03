@@ -8,6 +8,7 @@ pub mod methods;
 pub mod plans;
 pub mod player_state;
 pub mod reducers;
+pub mod rules_merge;
 pub mod snapshot;
 pub mod sweep;
 pub mod tables;
