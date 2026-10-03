@@ -5044,6 +5044,7 @@ fn cmd_editor_bench(suite: &str, size: i32, runs: u32, json: bool) -> anyhow::Re
     use mind_core::content::BlockId;
     use mind_core::editor::grid::WorldEditorGrid;
     use mind_core::editor::{EditorGrid, EditorTool, MapEditor};
+    use mind_core::util::alloc::{alloc_bytes, alloc_count, enabled as alloc_enabled};
     use mind_core::world::{NoopRenderHooks, NoopWorldHooks, WorldGrid};
     use std::time::Instant;
 
@@ -5086,7 +5087,7 @@ fn cmd_editor_bench(suite: &str, size: i32, runs: u32, json: bool) -> anyhow::Re
                 );
                 editor.flush_op();
             }
-            "undo" => {
+            "undo" | "mapview" => {
                 let mut world =
                     WorldEditorGrid::new(&mut grid, &content, &mut ecs, &hooks, &render);
                 editor.draw_block = wall;
@@ -5139,6 +5140,52 @@ fn cmd_editor_bench(suite: &str, size: i32, runs: u32, json: bool) -> anyhow::Re
     samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let median = samples[samples.len() / 2];
 
+    // §7d MapView draw + op recording steady-state allocation audit (plan 19):
+    // after warmup, repeated line/flush/undo/redo cycles must not allocate.
+    let mut alloc_delta = 0u64;
+    let mut bytes_delta = 0u64;
+    if suite == "mapview" {
+        let wall = content.block_id("copper-wall").unwrap_or(BlockId::AIR);
+        let hooks = NoopWorldHooks;
+        let render = NoopRenderHooks;
+        let mut editor = MapEditor::new();
+        let mut grid = WorldGrid::new(0, 0);
+        let mut ecs = World::new();
+        {
+            let mut world = WorldEditorGrid::new(&mut grid, &content, &mut ecs, &hooks, &render);
+            editor.begin_edit_size(&mut world, &content, size, size);
+        }
+        let len = (size - 4).max(1);
+        let step = |editor: &mut MapEditor, world: &mut WorldEditorGrid| {
+            editor.draw_block = wall;
+            mind_core::editor::tool::touched_line(
+                editor,
+                EditorTool::Line,
+                world,
+                &content,
+                2,
+                2,
+                2 + len,
+                2,
+            );
+            editor.flush_op();
+            editor.undo(world, &content);
+            editor.redo(world, &content);
+        };
+        let mut world = WorldEditorGrid::new(&mut grid, &content, &mut ecs, &hooks, &render);
+        for _ in 0..20 {
+            step(&mut editor, &mut world);
+        }
+        let before = alloc_count();
+        let bytes_before = alloc_bytes();
+        for _ in 0..runs {
+            step(&mut editor, &mut world);
+        }
+        alloc_delta = alloc_count().saturating_sub(before);
+        bytes_delta = alloc_bytes().saturating_sub(bytes_before);
+    }
+    let alloc_ok = !alloc_enabled() || alloc_delta == 0;
+
     let report = serde_json::json!({
         "format": 1,
         "generator": "editor_bench",
@@ -5147,7 +5194,12 @@ fn cmd_editor_bench(suite: &str, size: i32, runs: u32, json: bool) -> anyhow::Re
         "runs": runs,
         "p50_us": median,
         "p99_us": samples[samples.len() - 1],
-        "ok": true,
+        "alloc_audit_enabled": alloc_enabled(),
+        "alloc_count": alloc_delta,
+        "alloc_bytes": bytes_delta,
+        "alloc_limit": 0,
+        "alloc_ok": alloc_ok,
+        "ok": alloc_ok,
     });
     let text = serde_json::to_string_pretty(&report)?;
     if json {

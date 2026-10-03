@@ -1190,6 +1190,21 @@ pub enum FxCommand {
         #[arg(long)]
         json: bool,
     },
+
+    /// Effects-excluded proof (plan 17 §7b #3): run the same combat scenario
+    /// with a no-op sink and with a recording `FxBus`, asserting identical sim
+    /// checksums while effects were emitted.
+    NoopHeadless {
+        /// Deterministic sim seed.
+        #[arg(long, default_value_t = 7)]
+        seed: u64,
+        /// Ticks to run.
+        #[arg(long, default_value_t = 120)]
+        ticks: u32,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// `world` subcommands (plan 06 §7b).

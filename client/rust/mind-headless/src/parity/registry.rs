@@ -50,6 +50,10 @@ pub struct ChecksumRegistry {
     pub owner: String,
     /// Active/planned/header contributors.
     pub contributors: Vec<Contributor>,
+    /// Reviewed order in which the **active** contributors fold into the
+    /// canonical stream. Must be a permutation of the active contributor ids.
+    #[serde(default)]
+    pub fold_order: Vec<String>,
     /// View-only exclusions.
     #[serde(default)]
     pub excluded: Vec<Excluded>,
@@ -103,6 +107,31 @@ impl ChecksumRegistry {
                 ));
             }
         }
+        // Reviewed fold order: must be exactly the active contributor set.
+        let active: BTreeSet<&str> = self
+            .contributors
+            .iter()
+            .filter(|c| c.status == "active")
+            .map(|c| c.id.as_str())
+            .collect();
+        let mut ordered = BTreeSet::new();
+        for id in &self.fold_order {
+            if !ordered.insert(id.as_str()) {
+                problems.push(format!("checksum registry: duplicate fold_order id `{id}`"));
+            }
+            if !active.contains(id.as_str()) {
+                problems.push(format!(
+                    "checksum registry: fold_order id `{id}` is not an active contributor"
+                ));
+            }
+        }
+        for id in &active {
+            if !ordered.contains(id) {
+                problems.push(format!(
+                    "checksum registry: active contributor `{id}` is missing from fold_order"
+                ));
+            }
+        }
         problems
     }
 
@@ -148,6 +177,37 @@ mod tests {
                 .check(&repo)
                 .iter()
                 .any(|p| p.contains("checksum_version"))
+        );
+    }
+
+    #[test]
+    fn fold_order_must_match_active_contributors() {
+        let registry = ChecksumRegistry::load(&registry_path()).expect("registry");
+        let repo = crate::paths::find_repo_root(None).expect("repo root");
+        assert!(
+            registry.check(&repo).is_empty(),
+            "committed fold_order: {:?}",
+            registry.check(&repo)
+        );
+
+        let mut missing = registry.clone();
+        missing.fold_order.retain(|id| id != "groups");
+        assert!(
+            missing
+                .check(&repo)
+                .iter()
+                .any(|p| p.contains("missing from fold_order")),
+            "a dropped active contributor must be flagged"
+        );
+
+        let mut unknown = registry;
+        unknown.fold_order.push("rules".to_owned());
+        assert!(
+            unknown
+                .check(&repo)
+                .iter()
+                .any(|p| p.contains("not an active contributor")),
+            "a non-active fold_order id must be flagged"
         );
     }
 }

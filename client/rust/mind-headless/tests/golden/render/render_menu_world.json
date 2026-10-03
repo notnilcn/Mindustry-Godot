@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "scenario": "render_menu_world",
+  "seed": 1234,
+  "width": 100,
+  "height": 50,
+  "flyers": 5,
+  "tile_hash": "b7104680ca852118",
+  "floors": [{"name":"darkPanel3","count":992},{"name":"darkPanel4","count":160},{"name":"sand","count":1875},{"name":"stone","count":1973}],
+  "walls": [{"name":"darkMetal","count":613},{"name":"sandWall","count":1027},{"name":"stoneWall","count":904}],
+  "overlays": [{"name":"oreLead","count":1214},{"name":"oreScrap","count":1079}]
+}

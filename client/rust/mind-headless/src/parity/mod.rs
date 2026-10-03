@@ -248,6 +248,7 @@ fn cmd_registry(json: bool, repo: Option<&Path>) -> Result<i32> {
             "contributors": registry.contributors.iter().map(|c| serde_json::json!({
                 "id": c.id, "owner": c.owner, "status": c.status, "note": c.note
             })).collect::<Vec<_>>(),
+            "fold_order": registry.fold_order,
             "problems": problems,
         });
         print_json(&value)?;

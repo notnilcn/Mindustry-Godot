@@ -7,14 +7,16 @@
 //! `mind-headless/tests/golden/fx/`.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
+use mind_core::combat::harness::CombatHarness;
 use mind_core::content::EffectId;
 use mind_core::content::effect_by_name;
 use mind_core::fx::{
-    BatchBackend, EffectData, EffectKind, EffectState, EmptySnapshot, FxPool, batching_runs,
+    BatchBackend, EffectData, EffectKind, EffectState, EmptySnapshot, FxBus, FxPool, batching_runs,
     build_program, build_program_into, build_program_into_lod, catalog_counts, draw_call_count,
     order_hash, registry,
 };
@@ -57,6 +59,7 @@ pub fn run(command: &FxCommand) -> Result<i32> {
             json,
         } => bench(*states, *frames, *json),
         FxCommand::Smoke { json } => smoke(*json),
+        FxCommand::NoopHeadless { seed, ticks, json } => noop_headless(*seed, *ticks, *json),
     }
 }
 
@@ -97,7 +100,11 @@ fn audit(wave: Option<&str>, strict: bool, json: bool) -> Result<i32> {
     } else {
         counts.unported
     };
-    let pass = !strict || unported == 0;
+    // The committed declaration-order oracle (`parity/fx_order.txt`, plan 17
+    // §6.3). Verified against `Fx.java` order when the file is present.
+    let order_problems = order_oracle_check(reg);
+    let order_oracle_ok = order_problems.is_empty();
+    let pass = (!strict || unported == 0) && order_oracle_ok;
     let value = json!({
         "format": 1,
         "effect_count": reg.len(),
@@ -109,10 +116,51 @@ fn audit(wave: Option<&str>, strict: bool, json: bool) -> Result<i32> {
         "unported": counts.unported,
         "wave": wave.unwrap_or("all"),
         "wave_unported": wave_unported,
+        "order_oracle_ok": order_oracle_ok,
+        "order_oracle_problems": order_problems,
         "pass": pass,
     });
     emit(&value, json)?;
     Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+}
+
+/// Verifies the registry's name order against `parity/fx_order.txt`.
+///
+/// A missing file or unresolvable repo root skips the check (returns empty) so
+/// the oracle is additive; when present, a single drift line fails `fx audit`.
+fn order_oracle_check(reg: &mind_core::fx::EffectRegistry) -> Vec<String> {
+    let Ok(repo) = crate::paths::find_repo_root(None) else {
+        return Vec::new();
+    };
+    let path = repo.join("parity/fx_order.txt");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    let names: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect();
+    if names.len() != reg.len() {
+        return vec![format!(
+            "fx_order.txt has {} entries, registry has {}",
+            names.len(),
+            reg.len()
+        )];
+    }
+    let mut problems = Vec::new();
+    for (index, def) in reg.iter().enumerate() {
+        if names[index] != def.name {
+            problems.push(format!(
+                "fx_order.txt[{}] = `{}` != registry `{}`",
+                index, names[index], def.name
+            ));
+            if problems.len() >= 8 {
+                break;
+            }
+        }
+    }
+    problems
 }
 
 fn wave_range(wave: Option<&str>) -> Result<Option<(usize, usize)>> {
@@ -501,6 +549,60 @@ fn smoke(json: bool) -> Result<i32> {
     let value = json!({"format": 1, "effect": "smoke", "prims": program.len(), "pass": ok});
     emit(&value, json)?;
     Ok(if ok { EXIT_PASS } else { EXIT_FAIL })
+}
+
+/// `fx noop-headless` (plan 17 §7b #3): prove effects never enter the sim
+/// checksum. A `duo` turret fires at a wall for `ticks`; the run is repeated
+/// with a recording [`FxBus`]. The canonical checksums must be identical while
+/// the recording run captured live effect events.
+fn noop_headless(seed: u64, ticks: u32, json: bool) -> Result<i32> {
+    use mind_core::world::blocks::defense::turrets;
+
+    let run = |bus: Option<Arc<FxBus>>| -> Result<(String, usize)> {
+        let mut harness = CombatHarness::new(48, 16, seed);
+        let wall = harness
+            .content()
+            .block_id("copper-wall")
+            .ok_or_else(|| anyhow::anyhow!("copper-wall missing"))?;
+        let _ = harness.place(12, 8, wall, 0, true);
+        let (tx, ty) = CombatHarness::tile_center(4, 8);
+        let turret = harness
+            .spawn_test_turret("duo", tx, ty, 1)
+            .ok_or_else(|| anyhow::anyhow!("duo turret config missing"))?;
+        let copper = harness
+            .content()
+            .item_id("copper")
+            .ok_or_else(|| anyhow::anyhow!("copper missing"))?;
+        for _ in 0..10 {
+            turrets::handle_item(&mut harness.build.world, turret, copper);
+        }
+        if let Some(bus) = bus.clone() {
+            harness.set_fx(bus);
+        }
+        for _ in 0..ticks {
+            harness.tick();
+        }
+        let recorded = bus.as_ref().map(|bus| bus.len()).unwrap_or(0);
+        Ok((harness.checksum_hex(), recorded))
+    };
+
+    let (baseline, _) = run(None)?;
+    let bus = Arc::new(FxBus::new());
+    let (recorded, events) = run(Some(bus))?;
+    let checksum_ok = baseline == recorded;
+    let pass = checksum_ok && events > 0;
+    let value = json!({
+        "format": 1,
+        "seed": seed,
+        "ticks": ticks,
+        "baseline_checksum": baseline,
+        "recording_checksum": recorded,
+        "effects_excluded": checksum_ok,
+        "effects_emitted": events,
+        "pass": pass,
+    });
+    emit(&value, json)?;
+    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
 }
 
 fn write_or_check(

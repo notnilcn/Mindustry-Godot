@@ -48,6 +48,12 @@
       "path": "client/rust/mind-core/bench/baselines.json",
       "present": true,
       "note": "audio section"
+    },
+    {
+      "plan": "19",
+      "path": "bench/editor_baseline.json",
+      "present": true,
+      "note": "editor §7d budgets + MapView steady-state alloc-audit record"
     }
   ],
   "entries": [

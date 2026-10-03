@@ -241,6 +241,20 @@
       "sha256": "c86d3661671f5da1c0744329f9788604d1169c18be359303dd14c97c97815880"
     },
     {
+      "id": "harness_render_render_layer_order_nosort",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/render/render_layer_order_nosort.json",
+      "owner_plan": "16",
+      "sha256": "a9ec2e9f180add20d95f973d94c03dd86cdd23760dd14e0cb92a78bac8391870"
+    },
+    {
+      "id": "harness_render_render_menu_world",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/render/render_menu_world.json",
+      "owner_plan": "16",
+      "sha256": "d83feddfb8938731729c487b45055a9ab54a2ff947d29b95a79b3d238bab2f1f"
+    },
+    {
       "id": "harness_sim_core_determinism",
       "kind": "harness",
       "path": "client/rust/mind-core/tests/golden/sim_core_determinism.checksums",
@@ -615,6 +629,14 @@
       "owner_plan": "17",
       "sha256": "ca43c32931e493e243ccc1a4271643eaacf40c90d14544f08769539aac560b28",
       "regen": "tools/regen_goldens.sh --only oracle_fx_fx_order"
+    },
+    {
+      "id": "oracle_fx_fx_order_txt",
+      "kind": "oracle",
+      "path": "parity/fx_order.txt",
+      "owner_plan": "17",
+      "sha256": "b7ddaadbbc9938b55358c8bab88727678f0246895b61c98599296825a0104340",
+      "regen": "python3 parity/java/extract_source_goldens.py (fx_order.txt names from parity/golden/fx/fx_order.json)"
     },
     {
       "id": "harness_editor_basic_ops",
