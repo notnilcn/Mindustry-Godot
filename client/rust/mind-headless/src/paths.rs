@@ -96,6 +96,21 @@ pub fn find_repo_root(explicit: Option<&Path>) -> anyhow::Result<PathBuf> {
     }
 }
 
+/// Resolves a plan file referenced by a parity registry entry (`matrix.toml`,
+/// `checksum_registry.json`). Plan files live under `plans/`; the repo root is
+/// still accepted so an owner path stays valid if a plan is not relocated.
+pub fn resolve_plan_file(repo: &Path, owner: &str) -> Option<PathBuf> {
+    let root = repo.join(owner);
+    if root.is_file() {
+        return Some(root);
+    }
+    let under_plans = repo.join("plans").join(owner);
+    if under_plans.is_file() {
+        return Some(under_plans);
+    }
+    None
+}
+
 /// Marker file that identifies the `mind-core` crate directory (plan 04).
 const MIND_CORE_MARKER: &str = "entity_class_ids.toml";
 

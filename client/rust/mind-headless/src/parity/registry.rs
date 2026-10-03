@@ -86,7 +86,7 @@ impl ChecksumRegistry {
                 self.algorithm
             ));
         }
-        if !repo.join(&self.owner).is_file() {
+        if crate::paths::resolve_plan_file(repo, &self.owner).is_none() {
             problems.push(format!(
                 "checksum registry: owner plan `{}` does not exist",
                 self.owner

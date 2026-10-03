@@ -110,7 +110,7 @@ pub fn check(rows: &[Row], repo: &Path, test_names: Option<&BTreeSet<String>>) -
         }
         if row.owner.is_empty() {
             problems.push(format!("{label}: empty `owner`"));
-        } else if !repo.join(&row.owner).is_file() {
+        } else if crate::paths::resolve_plan_file(repo, &row.owner).is_none() {
             problems.push(format!(
                 "{label}: owner plan `{}` does not exist",
                 row.owner
