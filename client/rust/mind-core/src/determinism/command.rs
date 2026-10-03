@@ -106,6 +106,69 @@ pub enum SimCommand {
         /// Extension data.
         data: SmallVec<[u8; 32]>,
     },
+    /// Rotate a placed building (plan 15 §3.3.1).
+    Rotate {
+        /// Tile x.
+        x: i16,
+        /// Tile y.
+        y: i16,
+        /// `false` = clockwise, `true` = counter-clockwise.
+        direction: bool,
+    },
+    /// Remove queued/team plans at packed positions (plan 15 §3.3.1).
+    DeletePlans {
+        /// Arc `Point2.pack`ed positions.
+        positions: SmallVec<[i32; 32]>,
+    },
+    /// Command buildings to move/attack (plan 15 §3.3.1).
+    CommandBuilding {
+        /// Arc `Point2.pack`ed building positions.
+        positions: SmallVec<[i32; 32]>,
+        /// Target x.
+        x: f32,
+        /// Target y.
+        y: f32,
+    },
+    /// Withdraw/deposit/drop an item (plan 15 §3.3.1).
+    Inventory {
+        /// `0` withdraw, `1` deposit, `2` drop.
+        kind: u8,
+        /// Tile x.
+        x: i16,
+        /// Tile y.
+        y: i16,
+        /// Item content id.
+        item: Option<u16>,
+        /// Amount.
+        amount: i32,
+        /// Drop angle.
+        angle: f32,
+    },
+    /// Pick up / drop a payload (plan 15 §3.3.1).
+    Payload {
+        /// `0` pickup unit, `1` pickup build, `2` drop.
+        kind: u8,
+        /// X.
+        x: f32,
+        /// Y.
+        y: f32,
+        /// Target unit/building id.
+        target: Option<i32>,
+    },
+    /// Possess a unit or return to the player (`unitControl`).
+    UnitControl {
+        /// Unit entity id, or `None` to clear.
+        unit: Option<i32>,
+    },
+    /// Clear the controlled unit (`unitClear`).
+    UnitClear,
+    /// Select a controllable building (`buildingControlSelect`).
+    BuildingControlSelect {
+        /// Tile x.
+        x: i16,
+        /// Tile y.
+        y: i16,
+    },
 }
 
 impl SimCommand {
@@ -119,6 +182,14 @@ impl SimCommand {
             SimCommand::SetRules { .. } => "set_rules",
             SimCommand::SpawnUnit { .. } => "spawn_unit",
             SimCommand::Custom { .. } => "custom",
+            SimCommand::Rotate { .. } => "rotate",
+            SimCommand::DeletePlans { .. } => "delete_plans",
+            SimCommand::CommandBuilding { .. } => "command_building",
+            SimCommand::Inventory { .. } => "inventory",
+            SimCommand::Payload { .. } => "payload",
+            SimCommand::UnitControl { .. } => "unit_control",
+            SimCommand::UnitClear => "unit_clear",
+            SimCommand::BuildingControlSelect { .. } => "building_control_select",
         }
     }
 
@@ -440,6 +511,82 @@ fn encode_command(out: &mut Vec<u8>, command: &SimCommand) {
             put_u16(out, *kind);
             put_bytes(out, data);
         }
+        SimCommand::Rotate { x, y, direction } => {
+            put_u8(out, 7);
+            put_i16(out, *x);
+            put_i16(out, *y);
+            put_u8(out, u8::from(*direction));
+        }
+        SimCommand::DeletePlans { positions } => {
+            put_u8(out, 8);
+            encode_positions(out, positions);
+        }
+        SimCommand::CommandBuilding { positions, x, y } => {
+            put_u8(out, 9);
+            encode_positions(out, positions);
+            put_f32(out, *x);
+            put_f32(out, *y);
+        }
+        SimCommand::Inventory {
+            kind,
+            x,
+            y,
+            item,
+            amount,
+            angle,
+        } => {
+            put_u8(out, 10);
+            put_u8(out, *kind);
+            put_i16(out, *x);
+            put_i16(out, *y);
+            match item {
+                Some(item) => {
+                    put_u8(out, 1);
+                    put_u16(out, *item);
+                }
+                None => put_u8(out, 0),
+            }
+            put_i32(out, *amount);
+            put_f32(out, *angle);
+        }
+        SimCommand::Payload { kind, x, y, target } => {
+            put_u8(out, 11);
+            put_u8(out, *kind);
+            put_f32(out, *x);
+            put_f32(out, *y);
+            match target {
+                Some(target) => {
+                    put_u8(out, 1);
+                    put_i32(out, *target);
+                }
+                None => put_u8(out, 0),
+            }
+        }
+        SimCommand::UnitControl { unit } => {
+            put_u8(out, 12);
+            match unit {
+                Some(unit) => {
+                    put_u8(out, 1);
+                    put_i32(out, *unit);
+                }
+                None => put_u8(out, 0),
+            }
+        }
+        SimCommand::UnitClear => {
+            put_u8(out, 13);
+        }
+        SimCommand::BuildingControlSelect { x, y } => {
+            put_u8(out, 14);
+            put_i16(out, *x);
+            put_i16(out, *y);
+        }
+    }
+}
+
+fn encode_positions(out: &mut Vec<u8>, positions: &SmallVec<[i32; 32]>) {
+    put_u32(out, positions.len() as u32);
+    for position in positions {
+        put_i32(out, *position);
     }
 }
 
@@ -548,6 +695,18 @@ impl<'a> Cursor<'a> {
         }
         Ok(units)
     }
+
+    fn positions(&mut self) -> Result<SmallVec<[i32; 32]>, CommandLogError> {
+        let count = self.u32()?;
+        if count > MAX_SIMLOG_UNITS {
+            return Err(CommandLogError::LengthOverflow(count, MAX_SIMLOG_UNITS));
+        }
+        let mut positions = SmallVec::new();
+        for _ in 0..count {
+            positions.push(self.i32()?);
+        }
+        Ok(positions)
+    }
 }
 
 fn decode_command(cur: &mut Cursor<'_>) -> Result<SimCommand, CommandLogError> {
@@ -609,6 +768,63 @@ fn decode_command(cur: &mut Cursor<'_>) -> Result<SimCommand, CommandLogError> {
                 kind,
                 data: SmallVec::from_vec(data),
             })
+        }
+        7 => {
+            let x = cur.i16()?;
+            let y = cur.i16()?;
+            let direction = cur.u8()? != 0;
+            Ok(SimCommand::Rotate { x, y, direction })
+        }
+        8 => Ok(SimCommand::DeletePlans {
+            positions: cur.positions()?,
+        }),
+        9 => {
+            let positions = cur.positions()?;
+            let x = cur.f32()?;
+            let y = cur.f32()?;
+            Ok(SimCommand::CommandBuilding { positions, x, y })
+        }
+        10 => {
+            let kind = cur.u8()?;
+            let x = cur.i16()?;
+            let y = cur.i16()?;
+            let item = match cur.u8()? {
+                0 => None,
+                _ => Some(cur.u16()?),
+            };
+            let amount = cur.i32()?;
+            let angle = cur.f32()?;
+            Ok(SimCommand::Inventory {
+                kind,
+                x,
+                y,
+                item,
+                amount,
+                angle,
+            })
+        }
+        11 => {
+            let kind = cur.u8()?;
+            let x = cur.f32()?;
+            let y = cur.f32()?;
+            let target = match cur.u8()? {
+                0 => None,
+                _ => Some(cur.i32()?),
+            };
+            Ok(SimCommand::Payload { kind, x, y, target })
+        }
+        12 => {
+            let unit = match cur.u8()? {
+                0 => None,
+                _ => Some(cur.i32()?),
+            };
+            Ok(SimCommand::UnitControl { unit })
+        }
+        13 => Ok(SimCommand::UnitClear),
+        14 => {
+            let x = cur.i16()?;
+            let y = cur.i16()?;
+            Ok(SimCommand::BuildingControlSelect { x, y })
         }
         other => Err(CommandLogError::UnknownOp(other)),
     }
@@ -813,7 +1029,136 @@ mod tests {
                 value: ConfigValue::None,
             },
         );
+        log.push(
+            12,
+            SimCommand::Rotate {
+                x: 3,
+                y: -4,
+                direction: true,
+            },
+        );
+        log.push(
+            13,
+            SimCommand::DeletePlans {
+                positions: smallvec::smallvec![1, -2, 3],
+            },
+        );
+        log.push(
+            14,
+            SimCommand::CommandBuilding {
+                positions: smallvec::smallvec![7, 8],
+                x: 2.5,
+                y: -3.5,
+            },
+        );
+        log.push(
+            15,
+            SimCommand::Inventory {
+                kind: 1,
+                x: 4,
+                y: 5,
+                item: Some(9),
+                amount: 25,
+                angle: 1.5,
+            },
+        );
+        log.push(
+            16,
+            SimCommand::Inventory {
+                kind: 2,
+                x: -1,
+                y: -2,
+                item: None,
+                amount: 0,
+                angle: -0.25,
+            },
+        );
+        log.push(
+            17,
+            SimCommand::Payload {
+                kind: 0,
+                x: 1.0,
+                y: 2.0,
+                target: Some(77),
+            },
+        );
+        log.push(
+            18,
+            SimCommand::Payload {
+                kind: 2,
+                x: 3.0,
+                y: 4.0,
+                target: None,
+            },
+        );
+        log.push(19, SimCommand::UnitControl { unit: Some(12) });
+        log.push(20, SimCommand::UnitControl { unit: None });
+        log.push(21, SimCommand::UnitClear);
+        log.push(22, SimCommand::BuildingControlSelect { x: 6, y: 7 });
         log
+    }
+
+    #[test]
+    fn simcommand_extension_variants_roundtrip() {
+        // Plan 15 §3.3.1 additive variants, codec + op names.
+        let cases = vec![
+            (
+                SimCommand::Rotate {
+                    x: 1,
+                    y: 2,
+                    direction: false,
+                },
+                "rotate",
+            ),
+            (
+                SimCommand::DeletePlans {
+                    positions: smallvec::smallvec![9, 8, 7],
+                },
+                "delete_plans",
+            ),
+            (
+                SimCommand::CommandBuilding {
+                    positions: smallvec::smallvec![5],
+                    x: 0.5,
+                    y: 0.75,
+                },
+                "command_building",
+            ),
+            (
+                SimCommand::Inventory {
+                    kind: 0,
+                    x: 3,
+                    y: -3,
+                    item: Some(1),
+                    amount: 3,
+                    angle: 0.0,
+                },
+                "inventory",
+            ),
+            (
+                SimCommand::Payload {
+                    kind: 1,
+                    x: 9.0,
+                    y: 9.0,
+                    target: Some(2),
+                },
+                "payload",
+            ),
+            (SimCommand::UnitControl { unit: Some(4) }, "unit_control"),
+            (SimCommand::UnitControl { unit: None }, "unit_control"),
+            (SimCommand::UnitClear, "unit_clear"),
+            (
+                SimCommand::BuildingControlSelect { x: 0, y: 0 },
+                "building_control_select",
+            ),
+        ];
+        for (command, name) in cases {
+            assert_eq!(command.op_name(), name);
+            let mut log = CommandLog::new(LogHeader::new(1, "flat"));
+            log.push(0, command);
+            let decoded = CommandLog::from_bytes(&log.to_bytes()).expect("decode");
+            assert_eq!(decoded, log);
+        }
     }
 
     #[test]

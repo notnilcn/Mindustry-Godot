@@ -199,6 +199,36 @@ pub fn iterate_line(
     }
 }
 
+/// `Schematics.rotatePlans`: rotate coordinates and rotations around the origin.
+///
+/// `direction` is 1 for clockwise, 3 (`-1`) for counter-clockwise; other values
+/// are taken modulo 4.
+pub fn rotate_plans(plans: &mut [super::plan::ClientPlan], direction: i32) {
+    let steps = direction.rem_euclid(4);
+    for plan in plans.iter_mut() {
+        for _ in 0..steps {
+            let x = plan.x;
+            plan.x = -plan.y;
+            plan.y = x;
+            plan.rotation = ((plan.rotation as i32 + 1).rem_euclid(4)) as u8;
+        }
+    }
+}
+
+/// `Schematics.flipPlans`: mirror coordinates across the origin (`x = -x - 1`).
+pub fn flip_plans(plans: &mut [super::plan::ClientPlan], flip_x: bool, flip_y: bool) {
+    for plan in plans.iter_mut() {
+        if flip_x {
+            plan.x = -plan.x - 1;
+            plan.rotation = ((4 - plan.rotation as i32).rem_euclid(4)) as u8;
+        }
+        if flip_y {
+            plan.y = -plan.y - 1;
+            plan.rotation = ((4 - plan.rotation as i32).rem_euclid(4)) as u8;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -292,5 +322,37 @@ mod tests {
         assert_eq!(out[0].x, 0);
         assert_eq!(out[0].y, 0);
         let _ = HashSet::<i32>::new();
+    }
+
+    #[test]
+    fn rotate_plans_math() {
+        use crate::input::plan::ClientPlan;
+        let mut plans = vec![
+            ClientPlan::place(2, 0, 0, BlockId::STONE_WALL),
+            ClientPlan::place(0, 1, 3, BlockId::STONE_WALL),
+        ];
+        rotate_plans(&mut plans, 1);
+        // (x, y) -> (-y, x): (2,0)->(0,2); (0,1)->(-1,0).
+        assert_eq!((plans[0].x, plans[0].y), (0, 2));
+        assert_eq!((plans[1].x, plans[1].y), (-1, 0));
+        assert_eq!(plans[0].rotation, 1);
+        // Four rotations are the identity.
+        let original = plans.clone();
+        for _ in 0..4 {
+            rotate_plans(&mut plans, 1);
+        }
+        assert_eq!(plans, original);
+    }
+
+    #[test]
+    fn flip_plans_math() {
+        use crate::input::plan::ClientPlan;
+        let mut plans = vec![ClientPlan::place(2, 3, 0, BlockId::STONE_WALL)];
+        flip_plans(&mut plans, true, false);
+        assert_eq!((plans[0].x, plans[0].y), (-3, 3));
+        // Double flip is the identity for coordinates.
+        flip_plans(&mut plans, true, false);
+        assert_eq!((plans[0].x, plans[0].y), (2, 3));
+        assert_eq!(plans[0].rotation, 0);
     }
 }
