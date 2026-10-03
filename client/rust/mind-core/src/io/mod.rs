@@ -21,6 +21,7 @@ pub mod legacy;
 pub mod map;
 pub mod save;
 pub mod settings;
+pub mod sim_io;
 pub mod typeio;
 pub mod wire;
 
@@ -28,6 +29,7 @@ pub use error::IoError;
 pub use fs::{FileSystem, MockFs, NativeFs, Paths};
 pub use save::{SaveIo, SaveMeta, SaveOptions, SaveReadState, WorldContext};
 pub use settings::{SettingValue, SettingsStore};
+pub use sim_io::SimIoHandler;
 pub use wire::{WireReader, WireWriter};
 
 /// Ordered string map — the Arc `StringMap` equivalent used for meta tags and

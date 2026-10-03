@@ -116,6 +116,13 @@ impl INode for MindSimHost {
             mind_core::logic::globals::GlobalVars::install_world(&mut self.sim.ecs.0, registry);
         }
 
+        // Plan 04 §3.10: register the live-sim IO executor so `request_save` /
+        // `request_load` are fulfilled at the `IoSet` boundary. The handler boots
+        // its content lazily on the first IO call, so a session that never saves
+        // pays nothing. The in-engine MCP round-trip stays orchestrator-owned.
+        self.sim
+            .set_io_handler(Box::new(mind_core::io::SimIoHandler::new()));
+
         // Plan-18: install the sim audio sink. Sim systems emit `AudioEvent`s
         // unconditionally; `MindAudio` drains this log once per frame.
         self.sim
@@ -681,28 +688,29 @@ impl MindSimHost {
         false
     }
 
-    // ---- IoSet seam (plan 05 M9 / plan 04 §3.10; MindIo wiring placeholder) ----
+    // ---- IoSet seam (plan 05 M9 / plan 04 §3.10; SimIoHandler wired in ready) ----
     //
-    // The orchestrator wires the plan-04 `MindIo` autoload to these funcs and
-    // satisfies requests at the tick boundary. Copy-pasteable MCP evals (do NOT
-    // launch the editor from this lane; the single-editor mutex is orchestrator-
-    // owned):
+    // `ready()` registers `mind_core::io::SimIoHandler`, so a queued save/load is
+    // fulfilled at the tick boundary against the live grid (Godot `user://` /
+    // `res://` paths are globalized to native paths for plan-04 `NativeFs`). The
+    // plan-04 `MindIo` gdext autoload is a thin client-side wrapper; the in-engine
+    // MCP round-trip itself remains orchestrator-owned (single-editor mutex).
+    // Copy-pasteable MCP evals (do NOT launch the editor from this lane):
     //
     //   godot_exec eval: "var h=Engine.get_main_loop().current_scene.get_node('/root/Spine/SimHost'); print('MCP_TICK=',h.get_tick(),' STATE=',h.get_state(),' UP=',h.get_update_id())"
     //   godot_exec eval: "print('MCP_GROUPS=',Engine.get_main_loop().current_scene.get_node('/root/Spine/SimHost').get_group_counts())"
     //   godot_exec eval: "Engine.get_main_loop().current_scene.get_node('/root/Spine/SimHost').request_save('user://mcp.msav', false); print('MCP_PENDING=',Engine.get_main_loop().current_scene.get_node('/root/Spine/SimHost').io_pending())"
-    //   godot_exec eval: "print('MCP_REQ=',Engine.get_main_loop().current_scene.get_node('/root/Spine/SimHost').take_io_requests_json())"
 
     /// Queues a save at the next `IoSet::Capture` boundary.
     #[func]
     pub fn request_save(&mut self, path: GString, as_map: bool) {
-        self.sim.request_save(path.to_string(), as_map);
+        self.sim.request_save(globalize(&path), as_map);
     }
 
     /// Queues a load at the next `IoSet::Apply` boundary.
     #[func]
     pub fn request_load(&mut self, path: GString) {
-        self.sim.request_load(path.to_string());
+        self.sim.request_load(globalize(&path));
     }
 
     /// Number of queued IO requests.
@@ -1046,6 +1054,17 @@ impl MindSimHost {
             tree.quit_ex().exit_code(i32::from(!ok)).done();
         }
     }
+}
+
+/// Resolves a Godot `user://` / `res://` path to a native path for plan-04
+/// `NativeFs` (the `SimIoHandler` runs in Godot-free `mind-core`).
+fn globalize(path: &GString) -> std::path::PathBuf {
+    let requested = path.to_string();
+    std::path::PathBuf::from(
+        ProjectSettings::singleton()
+            .globalize_path(&requested)
+            .to_string(),
+    )
 }
 
 /// Parses `--capture <path>` / `--capture=<path>` from the user args (after `--`).

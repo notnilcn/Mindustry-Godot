@@ -725,6 +725,22 @@
       "command": "ui menu-tree --json"
     },
     {
+      "name": "ui_prompts",
+      "plan": "14",
+      "phase": "P5",
+      "tier": "T1",
+      "kind": "embedded",
+      "command": "ui prompts --json"
+    },
+    {
+      "name": "ui_relay",
+      "plan": "14",
+      "phase": "P5",
+      "tier": "T1",
+      "kind": "embedded",
+      "command": "ui relay --json"
+    },
+    {
       "name": "ui_text",
       "plan": "14",
       "phase": "P5",
@@ -867,6 +883,14 @@
       "tier": "T1",
       "kind": "embedded",
       "command": "render list render_layer_order_nosort --no-sort --json"
+    },
+    {
+      "name": "render_layers_full",
+      "plan": "16",
+      "phase": "P6",
+      "tier": "T1",
+      "kind": "embedded",
+      "command": "render list render_layers_full --json"
     },
     {
       "name": "render_menu_world",

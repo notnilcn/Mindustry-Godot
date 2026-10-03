@@ -271,7 +271,9 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         update: Some(true),
         consumes: vec![
             consume_items(vec![stack("thorium", 1)]),
-            consume_liquid("cryofluid", 0.02f32),
+            // Upstream `consumeLiquid(cryofluid, …).update(false)`: the reactor
+            // removes coolant in its own `updateTile`, never the generic pass.
+            consume_liquid("cryofluid", 0.02f32).update(false),
         ],
         ..spec("thorium-reactor", BlockKind::NuclearReactor)
     })?;

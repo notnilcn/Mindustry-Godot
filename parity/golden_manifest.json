@@ -364,7 +364,7 @@
       "kind": "harness",
       "path": "client/rust/mind-core/tests/golden/world_gen_erekir.checksum",
       "owner_plan": "06",
-      "sha256": "0e1cb47e30bcc85543c696c1a8312b1fbb4cdf819436fe0ee65334ab432ef74d"
+      "sha256": "4328e9cc685a7f756dbe4299f39466e40115228c3a185f6a270870fff097c432"
     },
     {
       "id": "harness_world_gen_serpulo",
@@ -673,6 +673,27 @@
       "owner_plan": "06/19",
       "sha256": "96f99ff7ff3d722ad7211025e30f5ed3ad77b2ef5d4b9d3af05e8e30e3a82bfa",
       "regen": "cargo run -p mind-headless -- maps roundtrip --json; cargo run -p mind-headless -- editor playtest --json"
+    },
+    {
+      "id": "harness_ui_prompts",
+      "kind": "harness",
+      "path": "client/rust/mind-core/tests/goldens/ui/prompts.json",
+      "owner_plan": "14",
+      "sha256": "1c76c6e0957d508a09d207d3e06e6e4ee14580c9e4c376b8d563c4827082aafe"
+    },
+    {
+      "id": "harness_ui_relay_wire",
+      "kind": "harness",
+      "path": "client/rust/mind-core/tests/goldens/ui/relay_wire.hex",
+      "owner_plan": "14",
+      "sha256": "f8b456bf7ccdd4c287ed783741617fda83b874929360e335d114e536dd04a3bf"
+    },
+    {
+      "id": "harness_render_render_layers_full",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/render/render_layers_full.json",
+      "owner_plan": "16",
+      "sha256": "3ad5d9b8758105abd0b37f67900df32159f12ecae1c368c7c5aef0629c230eb4"
     }
   ]
 }

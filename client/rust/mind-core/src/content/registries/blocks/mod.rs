@@ -989,6 +989,8 @@ pub enum ConsumeDef {
         optional: bool,
         /// `ConsumeItems.ignore`.
         ignore: bool,
+        /// `Consume.update` (`.update(false)` skips the per-tick update pass).
+        update: bool,
     },
     /// `consumeLiquid`.
     Liquid {
@@ -998,6 +1000,8 @@ pub enum ConsumeDef {
         amount: f32,
         /// `ConsumeLiquid.optional`.
         optional: bool,
+        /// `Consume.update` (`.update(false)` skips the per-tick update pass).
+        update: bool,
     },
     /// `consumeLiquids`.
     Liquids {
@@ -1005,6 +1009,8 @@ pub enum ConsumeDef {
         stacks: Vec<LiquidStackSpec>,
         /// `ConsumeLiquids.optional`.
         optional: bool,
+        /// `Consume.update` (`.update(false)` skips the per-tick update pass).
+        update: bool,
     },
     /// `consumePower`.
     Power {
@@ -1012,6 +1018,8 @@ pub enum ConsumeDef {
         usage: f32,
         /// `consumePowerBuffered` capacity (>0 when buffered).
         buffered: f32,
+        /// `Consume.update` (`.update(false)` skips the per-tick update pass).
+        update: bool,
     },
     /// `consumeCoolant`.
     Coolant {
@@ -1023,7 +1031,25 @@ pub enum ConsumeDef {
         allow_gas: bool,
         /// `ConsumeCoolant.optional`.
         optional: bool,
+        /// `Consume.update` (`.update(false)` skips the per-tick update pass).
+        update: bool,
     },
+}
+
+impl ConsumeDef {
+    /// `Consume.update` (Java `.update(false)`): excludes this consumer from the
+    /// per-tick `updateConsumption` pass while keeping it in the efficiency and
+    /// optional partitions (plan 02 §6.1).
+    pub fn update(mut self, on: bool) -> Self {
+        match &mut self {
+            ConsumeDef::Items { update, .. }
+            | ConsumeDef::Liquid { update, .. }
+            | ConsumeDef::Liquids { update, .. }
+            | ConsumeDef::Power { update, .. }
+            | ConsumeDef::Coolant { update, .. } => *update = on,
+        }
+        self
+    }
 }
 
 /// Final consumer record resolved to IDs (plan 02 §6.1 `ConsumeSpec`).
@@ -1801,6 +1827,7 @@ pub fn consume_item(item: &'static str, amount: i32) -> ConsumeDef {
         stacks: vec![StackSpec { item, amount }],
         optional: false,
         ignore: false,
+        update: true,
     }
 }
 
@@ -1810,6 +1837,7 @@ pub fn consume_items(stacks: Vec<StackSpec>) -> ConsumeDef {
         stacks,
         optional: false,
         ignore: false,
+        update: true,
     }
 }
 
@@ -1819,6 +1847,7 @@ pub fn consume_liquid(liquid: &'static str, amount: f32) -> ConsumeDef {
         liquid,
         amount,
         optional: false,
+        update: true,
     }
 }
 
@@ -1827,6 +1856,7 @@ pub fn consume_liquids(stacks: Vec<LiquidStackSpec>) -> ConsumeDef {
     ConsumeDef::Liquids {
         stacks,
         optional: false,
+        update: true,
     }
 }
 
@@ -1835,6 +1865,7 @@ pub fn consume_power(usage: f32) -> ConsumeDef {
     ConsumeDef::Power {
         usage,
         buffered: 0.0,
+        update: true,
     }
 }
 
@@ -1843,6 +1874,7 @@ pub fn consume_power_buffered(capacity: f32) -> ConsumeDef {
     ConsumeDef::Power {
         usage: 0.0,
         buffered: capacity,
+        update: true,
     }
 }
 
@@ -1853,6 +1885,7 @@ pub fn consume_coolant(amount: f32, allow_liquid: bool, allow_gas: bool) -> Cons
         allow_liquid,
         allow_gas,
         optional: false,
+        update: true,
     }
 }
 
@@ -2441,6 +2474,7 @@ fn resolve_consume(
             stacks,
             optional,
             ignore,
+            update,
         } => {
             let mut out = Vec::with_capacity(stacks.len());
             for stack in &stacks {
@@ -2449,7 +2483,7 @@ fn resolve_consume(
             Ok(ConsumeSpec {
                 consume: Consume::Items(out),
                 optional,
-                update: true,
+                update,
                 ignore,
             })
         }
@@ -2457,6 +2491,7 @@ fn resolve_consume(
             liquid,
             amount,
             optional,
+            update,
         } => {
             let liquid = registry
                 .liquid_id(liquid)
@@ -2464,11 +2499,15 @@ fn resolve_consume(
             Ok(ConsumeSpec {
                 consume: Consume::Liquid { liquid, amount },
                 optional,
-                update: true,
+                update,
                 ignore: false,
             })
         }
-        ConsumeDef::Liquids { stacks, optional } => {
+        ConsumeDef::Liquids {
+            stacks,
+            optional,
+            update,
+        } => {
             let mut out = Vec::with_capacity(stacks.len());
             for stack in &stacks {
                 let liquid = registry
@@ -2479,14 +2518,18 @@ fn resolve_consume(
             Ok(ConsumeSpec {
                 consume: Consume::Liquids(out),
                 optional,
-                update: true,
+                update,
                 ignore: false,
             })
         }
-        ConsumeDef::Power { usage, buffered } => Ok(ConsumeSpec {
+        ConsumeDef::Power {
+            usage,
+            buffered,
+            update,
+        } => Ok(ConsumeSpec {
             consume: Consume::Power { usage, buffered },
             optional: false,
-            update: true,
+            update,
             ignore: false,
         }),
         ConsumeDef::Coolant {
@@ -2494,6 +2537,7 @@ fn resolve_consume(
             allow_liquid,
             allow_gas,
             optional,
+            update,
         } => Ok(ConsumeSpec {
             consume: Consume::Coolant {
                 amount,
@@ -2501,7 +2545,7 @@ fn resolve_consume(
                 allow_gas,
             },
             optional,
-            update: true,
+            update,
             ignore: false,
         }),
     }

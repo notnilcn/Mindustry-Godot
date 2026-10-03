@@ -243,6 +243,13 @@ pub static COMMANDS: &[CommandSpec] = &[
     },
 ];
 
+/// The one-line notice printed when `config autoUpdate` is enabled (P22-3).
+///
+/// Mirrors `mind_gdext::platform::update::NOT_AVAILABLE`; the dedicated server
+/// cannot depend on `mind-gdext` (which pulls in Godot), so the string is kept
+/// here as the server-side disposition record.
+pub const UPDATER_NOT_AVAILABLE: &str = "updater not available in this build";
+
 /// Result of a console line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
@@ -752,6 +759,12 @@ fn cmd_config(state: &mut ServerState, args: &[&str]) {
                     if spec.name == "debug" {
                         // Log level changes are handled by the plan-00 logger.
                     }
+                    if spec.name == "autoUpdate" && state.config.get_bool("autoUpdate") {
+                        // P22-3: the bleeding-edge updater is not ported. Retain
+                        // the config key, print the one-line notice, never call
+                        // the network at boot.
+                        state.warn(UPDATER_NOT_AVAILABLE);
+                    }
                 }
                 Err(error) => state.error(&error.to_string()),
             }
@@ -896,6 +909,29 @@ mod tests {
         assert!(dir.join("saves").join("0.msav").exists());
         let rules = std::fs::read_to_string(dir.join("rules.hjson")).expect("rules");
         assert!(rules.contains("reactorExplosions: true"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn js_gc_and_autoupdate_commands_run_without_panicking() {
+        let dir = temp_dir("jsgc");
+        let options = ServerOptions {
+            config_dir: dir.clone(),
+            commands: vec![
+                "js console.log(1)".to_owned(),
+                "gc".to_owned(),
+                "config autoUpdate true".to_owned(),
+                "exit".to_owned(),
+            ],
+            ..ServerOptions::default()
+        };
+        assert_eq!(run(options), 0);
+        let settings = std::fs::read_to_string(dir.join("settings.json")).expect("settings");
+        assert!(
+            settings.contains("\"autoUpdate\": true"),
+            "autoUpdate not persisted: {settings}"
+        );
+        assert_eq!(UPDATER_NOT_AVAILABLE, "updater not available in this build");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
