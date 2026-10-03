@@ -468,6 +468,64 @@ mod tests {
     }
 
     #[test]
+    fn rts_move_replay_checksum() {
+        use crate::determinism::Hasher;
+        use crate::input::action::{CommandTarget, RemoteAction};
+        use crate::input::command_emit::ActionBatcher;
+
+        fn run(match_id: u64) -> u64 {
+            let units = flat_units();
+            let mut controller = DesktopController::new(match_id);
+            controller.select_units(
+                &units,
+                0,
+                SelectRect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 100.0,
+                    h: 100.0,
+                },
+            );
+            let selected: smallvec::SmallVec<[i32; 32]> =
+                controller.state.selected_units.iter().copied().collect();
+            let actions = [
+                RemoteAction::CommandUnits {
+                    units: selected.clone(),
+                    target: CommandTarget::Position { x: 20.0, y: 20.0 },
+                    queue: false,
+                    final_batch: true,
+                },
+                RemoteAction::CommandUnits {
+                    units: selected.clone(),
+                    target: CommandTarget::Unit(99),
+                    queue: true,
+                    final_batch: true,
+                },
+                RemoteAction::SetUnitCommand {
+                    units: selected.clone(),
+                    command: 1,
+                },
+                RemoteAction::SetUnitStance {
+                    units: selected,
+                    stance: 2,
+                    enabled: true,
+                },
+            ];
+            let mut batcher = ActionBatcher::new(match_id);
+            let mut hasher = Hasher::new();
+            for action in actions {
+                for batch in batcher.emit(0, action).expect("emit") {
+                    hasher.write(format!("{batch:?}").as_bytes());
+                }
+            }
+            hasher.finish().value()
+        }
+
+        assert_eq!(run(1), run(1), "same match replays identically");
+        assert_ne!(run(1), run(2), "match id is bound into the batch");
+    }
+
+    #[test]
     fn desktop_replay_harness_runs_log() {
         let mut log = InputLog::new(super::super::input_log::InputHeader::default());
         log.push(0, RawEvent::MouseMove { x: 1.0, y: 2.0 });
