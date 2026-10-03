@@ -132,7 +132,13 @@ impl LogicBlockState {
         let privileged = def.privileged;
         let ipt = self.ipt;
         let code = self.code.clone();
-        let mut asm = match Assembler::assemble(&code, privileged) {
+        // Content/sound constants live in the optional `GlobalVars` resource
+        // (installed at content init); fall back to static globals otherwise.
+        let globals = world
+            .get_resource::<crate::logic::globals::GlobalVars>()
+            .cloned()
+            .unwrap_or_default();
+        let mut asm = match Assembler::assemble_with(&code, privileged, globals) {
             Ok(asm) => asm,
             Err(_) => {
                 self.code = String::new();

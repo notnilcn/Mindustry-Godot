@@ -37,8 +37,14 @@ fn set_from_value(code: &str) -> LogicObject {
 }
 
 fn var(asm: &mut Assembler, symbol: &str) -> crate::logic::value::LVar {
-    let VarRef::Local(id) = asm.var(symbol);
-    asm.arena.get(id).clone()
+    match asm.var(symbol) {
+        VarRef::Local(id) => asm.arena.get(id).clone(),
+        VarRef::Global(id) => asm
+            .globals
+            .global_cell(id)
+            .cloned()
+            .unwrap_or_else(|| crate::logic::value::LVar::new(symbol)),
+    }
 }
 
 #[test]

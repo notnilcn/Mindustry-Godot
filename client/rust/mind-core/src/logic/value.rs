@@ -17,21 +17,31 @@ use crate::content::ContentRef;
 /// (plan 13 §3.2 `VarId`).
 pub type VarId = u32;
 
-/// Local variable reference. Global (mutable `@time`… ) references are resolved
-/// to locals at load time in this milestone; the enum keeps room for the plan
-/// §3.10 global arena.
+/// Variable reference (plan 13 §3.2 deviation 2).
+///
+/// `Local` indexes the owning executor's variable vector; `Global` indexes the
+/// shared [`GlobalVars`](super::globals::GlobalVars) arena so every processor
+/// observes `GlobalVars::update`. `Global` references appear in compiled
+/// instructions and are lowered to executor-local mirror cells at `load` time.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum VarRef {
     /// Index into the executor's local variable vector.
     Local(VarId),
+    /// Index into the shared global variable arena.
+    Global(VarId),
 }
 
 impl VarRef {
     /// The underlying arena id.
     pub const fn id(self) -> VarId {
         match self {
-            VarRef::Local(id) => id,
+            VarRef::Local(id) | VarRef::Global(id) => id,
         }
+    }
+
+    /// Whether this is a global-arena reference.
+    pub const fn is_global(self) -> bool {
+        matches!(self, VarRef::Global(_))
     }
 }
 
