@@ -25,6 +25,8 @@ pub enum HostError {
     UnknownMap(String),
     /// No world is loaded (the command needs `host` first).
     NoWorld,
+    /// The plan-21 host/relay call failed (`serve` online mode).
+    Net(String),
 }
 
 impl std::fmt::Display for HostError {
@@ -32,11 +34,97 @@ impl std::fmt::Display for HostError {
         match self {
             HostError::UnknownMap(map) => write!(f, "unknown map: {map}"),
             HostError::NoWorld => write!(f, "no world loaded; use `host <map> [mode]` first"),
+            HostError::Net(reason) => write!(f, "{reason}"),
         }
     }
 }
 
 impl std::error::Error for HostError {}
+
+/// Admin/moderation failure (plan 21 §3.10 seam).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdminError {
+    /// No live STDB connection: the command needs a database (or offline mode
+    /// falls back to the JSON mirror).
+    Offline,
+    /// Under D2 the action has no representation (IP/subnet bans: no peer IPs).
+    Unsupported(String),
+    /// The player/identity could not be resolved.
+    UnknownTarget(String),
+    /// The reducer send failed.
+    Connector(String),
+    /// No match is currently hosted.
+    NoMatch,
+}
+
+impl std::fmt::Display for AdminError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AdminError::Offline => {
+                write!(
+                    f,
+                    "requires a live STDB connection (plan 21); unavailable offline"
+                )
+            }
+            AdminError::Unsupported(reason) => write!(f, "{reason}"),
+            AdminError::UnknownTarget(target) => write!(f, "no player found matching `{target}`"),
+            AdminError::Connector(reason) => write!(f, "STDB reducer failed: {reason}"),
+            AdminError::NoMatch => write!(f, "no match is hosted"),
+        }
+    }
+}
+
+impl std::error::Error for AdminError {}
+
+/// A live player row for the `players`/`status` view (plan 21 §3.9).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlayerView {
+    /// Identity hex (64 lowercase hex chars).
+    pub identity: String,
+    /// Last-known username (`""` when unresolved).
+    pub name: String,
+    /// Team index, when assigned.
+    pub team: Option<u8>,
+    /// Whether an admin record exists.
+    pub admin: bool,
+    /// Whether the member is currently connected (last `relay_member` row).
+    pub connected: bool,
+    /// Membership role name (`player`/`spectator`).
+    pub role: String,
+    /// Placeholder for the upstream mobile/modded flags (always false here).
+    pub mobile: bool,
+    /// Placeholder for locale (`""` when unknown).
+    pub locale: String,
+}
+
+/// The console-facing admin/moderation seam (plan 21 §3.10 `Admins`).
+///
+/// The dedicated server implements this over the `mind-stdb` reducer set; the
+/// offline mirror is the fallback when no database is reachable (P22-6).
+pub trait Admins {
+    /// Broadcasts a server `System` chat message (`say`).
+    fn say(&mut self, message: &str) -> Result<(), AdminError>;
+    /// Kicks a connected player (`kick`).
+    fn kick(&mut self, target: &str) -> Result<(), AdminError>;
+    /// Bans a player (`ban [kind] <target>`).
+    fn ban(&mut self, kind: crate::server::admin::BanKind, target: &str) -> Result<(), AdminError>;
+    /// Removes every ban for a target (`unban`).
+    fn unban(&mut self, target: &str) -> Result<(), AdminError>;
+    /// Removes an identity ban (`pardon`).
+    fn pardon(&mut self, target: &str) -> Result<(), AdminError>;
+    /// Grants/revokes admin (`admin add|remove`).
+    fn grant(&mut self, target: &str, on: bool) -> Result<(), AdminError>;
+    /// Enables/disables the global whitelist (`config whitelist`).
+    fn set_whitelist_enabled(&mut self, enabled: bool) -> Result<(), AdminError>;
+    /// Adds/removes a whitelist identity (`whitelist add|remove`).
+    fn whitelist(&mut self, target: &str, on: bool) -> Result<(), AdminError>;
+    /// Sets the connection player cap (`playerlimit [off/number]`).
+    fn player_limit(&mut self, limit: Option<u16>) -> Result<(), AdminError>;
+    /// Offline `search`/`info` scan (mirror + live players).
+    fn search(&self, query: &str) -> Vec<PlayerView>;
+    /// Snapshot mirrors for `admins`/`bans` listing.
+    fn mirror(&self) -> &crate::server::admin::AdminMirror;
+}
 
 /// Host state snapshot for `status`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -65,6 +153,10 @@ pub trait HostControl {
     fn status(&self) -> HostStatus;
     /// Forces the next wave.
     fn run_wave(&mut self) -> Result<(), HostError>;
+    /// Live player views (`players`/`status`); empty for a local host.
+    fn players(&self) -> Vec<PlayerView> {
+        Vec::new()
+    }
 }
 
 /// A local, Godot-free host over the plan-04 synthetic world.

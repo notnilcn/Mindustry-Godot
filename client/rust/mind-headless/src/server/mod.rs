@@ -8,6 +8,7 @@
 //! socket). Pure Rust and Godot-free; multiplayer host/admin delegation is
 //! plan 21 and returns "requires plan 21/STDB" until that lands (R2).
 
+pub mod admin;
 pub mod autosave;
 pub mod commands;
 pub mod config;
@@ -15,6 +16,7 @@ pub mod console;
 pub mod dedicated;
 pub mod host;
 pub mod logs;
+pub mod net_host;
 pub mod rules_file;
 pub mod socket;
 
@@ -29,6 +31,7 @@ use config::ServerConfig;
 use console::ConsoleState;
 use host::LocalHost;
 use logs::LogRotator;
+use net_host::NetHost;
 use rules_file::{RulesFile, RulesState};
 use socket::CommandSocket;
 
@@ -72,6 +75,8 @@ pub struct ServerState {
     pub paths: Paths,
     /// Local host (plan-21 host seam).
     pub host: LocalHost,
+    /// Plan-21 networked host/admin seam (`say`/`kick`/`ban`/`players`/…).
+    pub net: NetHost,
     /// Parsed `rules.hjson`.
     pub rules: RulesFile,
     /// Typed default rule state.
@@ -207,11 +212,13 @@ pub fn run(options: ServerOptions) -> i32 {
 
     let paths = Paths::new(&config_dir);
     let maps_dir = paths.maps();
+    let online = !options.offline;
     let mut state = ServerState {
         config,
         config_dir: config_dir.clone(),
         paths,
         host: LocalHost::new(registry, maps_dir),
+        net: NetHost::new(&config_dir, online),
         rules,
         rules_state,
         console: ConsoleState::default(),
@@ -227,6 +234,11 @@ pub fn run(options: ServerOptions) -> i32 {
         "Mindustry-Godot server {} — Server loaded. Type 'help' for help.",
         mind_core::version::BuildInfo::embedded().combined()
     ));
+    if online {
+        state.info("STDB mode: online (connect on first host/admin command)");
+    } else {
+        state.info("STDB mode: offline (admin/ban/whitelist JSON mirror active)");
+    }
 
     // 5. Startup commands: argv, then `config startCommands`.
     let mut startup: Vec<String> = Vec::new();
@@ -242,6 +254,7 @@ pub fn run(options: ServerOptions) -> i32 {
             continue;
         }
         commands::execute(&mut state, &line);
+        state.net.pump();
         if state.exit {
             break;
         }
@@ -259,6 +272,7 @@ pub fn run(options: ServerOptions) -> i32 {
             match line {
                 Ok(line) => {
                     commands::execute(&mut state, line.trim());
+                    state.net.pump();
                     if state.exit {
                         break;
                     }
@@ -309,11 +323,16 @@ fn socket_loop(state: &mut ServerState) {
             Ok(Some(line)) => {
                 if !line.is_empty() {
                     commands::execute(state, &line);
+                    state.net.pump();
                 }
             }
-            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(20)),
+            Ok(None) => {
+                state.net.pump();
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
             Err(error) => {
                 state.warn(&format!("socket read failed: {error}"));
+                state.net.pump();
                 std::thread::sleep(std::time::Duration::from_millis(20));
             }
         }
