@@ -16,6 +16,7 @@ pub mod io_set;
 pub mod logic;
 pub mod reset;
 pub mod schedule;
+pub mod world_apply;
 
 use bevy_ecs::schedule::Schedule;
 use serde_json::Error as JsonError;
@@ -40,6 +41,7 @@ pub use dump::StateDump;
 pub use events::{ALL_TRIGGERS, Trigger, TriggerRegistry};
 pub use fixed::{FixedStepRunner, SIM_STEP};
 pub use io_set::{DeferringIoHandler, IoHandler, IoQueue, IoRequest, IoResponse, IoSet, IoStatus};
+pub use world_apply::WorldApplyRuntime;
 
 /// Errors raised by simulation operations.
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
@@ -161,6 +163,9 @@ pub struct Sim {
     /// Relay-side unit-command apply state (plan 15 M4). Built lazily on the
     /// first unit command so P0 worlds never pay for content boot.
     unit_commands: Option<command::UnitCommandRuntime>,
+    /// Relay-side world-mutation apply state (plan 15 §3.3.1: inventory, build
+    /// plans, building commands). Built lazily on the first such command.
+    world_apply: Option<world_apply::WorldApplyRuntime>,
     /// Currently possessed unit (`unitControl`); `None` means the player unit.
     controlled_unit: Option<i32>,
     /// Currently selected controllable building (`buildingControlSelect`).
@@ -195,6 +200,7 @@ impl Sim {
             platform: Box::new(HeadlessPlatform::with_default_dir()),
             io: IoQueue::new(),
             unit_commands: None,
+            world_apply: None,
             controlled_unit: None,
             control_building: None,
             seed,
@@ -502,23 +508,57 @@ impl Sim {
                 self.commands_applied = self.commands_applied.wrapping_add(1);
                 return Ok(());
             }
-            // Genuinely blocked on other plans' world mutations (no reachable
-            // runtime on this branch); reported explicitly rather than silently.
             SimCommand::Payload { .. } => {
-                // Owner plan 08: `PayloadComp::{pickup,try_drop_payload}` runtime.
+                // Genuinely blocked: `SimCommand::Payload` is the player
+                // `Payloadc` carrier (multiple payloads; pick up a unit or a
+                // whole building). Plan 11's `PayloadComp` carries only
+                // `capacity`, and plan 08's `PayloadHolder`/`handle_payload` are
+                // the *building*-holder path, not the unit carrier; there is no
+                // reachable pickup/drop runtime to apply against. Reported
+                // explicitly (owner plan 08/11) rather than faked.
                 return Err(CommandError::Unsupported("payload"));
             }
-            SimCommand::Inventory { .. } => {
-                // Owner plan 08/07: building item stacks + `ItemsComp` transfer.
-                return Err(CommandError::Unsupported("inventory"));
+            SimCommand::Inventory {
+                kind,
+                x,
+                y,
+                item,
+                amount,
+                angle,
+            } => {
+                // `InputHandler.requestItem`/`transferInventory`/`dropItem`.
+                let _ = angle;
+                let pos = TilePos::new(*x, *y);
+                if self.grid.index(pos).is_err() {
+                    return Err(CommandError::InvalidTarget);
+                }
+                let block = self.grid.block_at(pos).unwrap_or(BlockId::AIR);
+                self.ensure_world_apply()
+                    .apply_inventory(pos, block, *kind, *item, *amount)?;
+                self.commands_applied = self.commands_applied.wrapping_add(1);
+                return Ok(());
             }
-            SimCommand::DeletePlans { .. } => {
-                // Owner plan 07/11: `BuildQueue`/`BuilderComp` plan storage.
-                return Err(CommandError::Unsupported("delete_plans"));
+            SimCommand::DeletePlans { positions } => {
+                // `InputHandler.deletePlans` over the plan-11 `BuildQueue`.
+                self.ensure_world_apply().apply_delete_plans(positions)?;
+                self.commands_applied = self.commands_applied.wrapping_add(1);
+                return Ok(());
             }
-            SimCommand::CommandBuilding { .. } => {
-                // Owner plan 21/11: building-control runtime + commanded registry.
-                return Err(CommandError::Unsupported("command_building"));
+            SimCommand::CommandBuilding { positions, x, y } => {
+                // `InputHandler.commandBuilding`: `Building.onCommand(target)`
+                // for every valid commanded building (`command_pos`). The
+                // upstream `block.commandable` gate is not yet in plan-02
+                // `BlockDef`; tiles without a live building are skipped here.
+                for &packed in positions.iter() {
+                    let pos = TilePos::from_pack(packed);
+                    if self.grid.index(pos).is_err() || self.grid.entity_at(pos).is_none() {
+                        continue;
+                    }
+                    self.ensure_world_apply()
+                        .apply_command_building(pos, *x, *y);
+                }
+                self.commands_applied = self.commands_applied.wrapping_add(1);
+                return Ok(());
             }
             _ => {}
         }
@@ -643,6 +683,73 @@ impl Sim {
     fn ensure_unit_commands(&mut self) -> &mut command::UnitCommandRuntime {
         self.unit_commands
             .get_or_insert_with(command::UnitCommandRuntime::new)
+    }
+
+    /// Lazily builds the relay world-mutation runtime (plan 15 §3.3.1).
+    fn ensure_world_apply(&mut self) -> &mut world_apply::WorldApplyRuntime {
+        self.world_apply
+            .get_or_insert_with(world_apply::WorldApplyRuntime::new)
+    }
+
+    /// Read-only relay world-mutation runtime, if any such command has applied.
+    pub fn world_apply(&self) -> Option<&world_apply::WorldApplyRuntime> {
+        self.world_apply.as_ref()
+    }
+
+    /// Seeds the controlled player's carried stack (`Unit.stack`; host/test).
+    pub fn set_player_item(
+        &mut self,
+        item: Option<(u16, i32)>,
+    ) -> Result<(), crate::determinism::CommandError> {
+        self.ensure_world_apply().set_player_item(item)
+    }
+
+    /// Resolves an item content name to its raw id via the relay world runtime
+    /// (boots it on first use). `None` when the name is unknown.
+    pub fn world_item_id(&mut self, name: &str) -> Option<u16> {
+        self.ensure_world_apply()
+            .content()
+            .item_by_name(name)
+            .map(|item| item.id.raw())
+    }
+
+    /// Resolves a block content name to its raw id via the relay world runtime
+    /// (boots it on first use). `None` when the name is unknown.
+    pub fn world_block_id(&mut self, name: &str) -> Option<u16> {
+        self.ensure_world_apply()
+            .content()
+            .block_by_name(name)
+            .map(|block| block.id.raw())
+    }
+
+    /// The controlled player's carried stack as `(item id, amount)`, if any.
+    pub fn player_item(&self) -> Option<(u16, i32)> {
+        self.world_apply()?
+            .player_item()
+            .map(|(item, amount)| (item.raw(), amount))
+    }
+
+    /// Queues a build plan (host/test seeding of `BuilderComp.plans`).
+    pub fn enqueue_build_plan(&mut self, plan: crate::input::plan::ClientPlan) {
+        self.ensure_world_apply().plans_mut().add_build(plan, false);
+    }
+
+    /// The queued build plan at `(x, y)`, if any.
+    pub fn build_plan_at(&self, x: i32, y: i32) -> Option<&crate::input::plan::ClientPlan> {
+        self.world_apply()?.plans().get(x, y)
+    }
+
+    /// The `command_pos` recorded for a commanded building, if any.
+    pub fn building_command_target(&self, pos: TilePos) -> Option<(f32, f32)> {
+        self.world_apply()?.commanded_target(pos)
+    }
+
+    /// Deterministic digest of the relay world-mutation state (ascending order).
+    pub fn world_apply_checksum(&self) -> Checksum {
+        match &self.world_apply {
+            Some(runtime) => runtime.checksum(),
+            None => Checksummer::new().finish(),
+        }
     }
 
     /// Read-only unit-command runtime, if any unit command has been applied.

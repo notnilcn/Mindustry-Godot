@@ -309,14 +309,14 @@ fn sim_command_rotates_placed_building() {
     .expect("cw wraps");
     assert_eq!(rot(&sim), 3);
 
-    // Blocked variants report an explicit owner-tagged `Unsupported`.
-    assert_eq!(
-        sim.command(SimCommand::DeletePlans {
-            positions: smallvec::smallvec![1],
-        })
-        .unwrap_err(),
-        CommandError::Unsupported("delete_plans")
-    );
+    // `deletePlans` now applies over the relay `BuildQueue` (empty here).
+    sim.command(SimCommand::DeletePlans {
+        positions: smallvec::smallvec![1],
+    })
+    .expect("delete plans");
+
+    // `Payload` stays blocked: the unit payload carrier (`Payloadc`) is not
+    // ported, so there is no runtime to apply against.
     assert_eq!(
         sim.command(SimCommand::Payload {
             kind: 0,
@@ -326,6 +326,200 @@ fn sim_command_rotates_placed_building() {
         })
         .unwrap_err(),
         CommandError::Unsupported("payload")
+    );
+}
+
+#[test]
+fn sim_command_applies_inventory_transfers() {
+    use crate::determinism::{CommandError, SimCommand};
+    use crate::world::TilePos;
+
+    let mut sim = Sim::new(1, 16, 16, BlockId::AIR, BlockId::AIR);
+    // `router` holds items with a small capacity; resolve its real content id.
+    let router = sim.world_block_id("router").expect("router resolves");
+    sim.apply(Command::Place {
+        x: 4,
+        y: 4,
+        block: BlockId::new(router),
+    })
+    .expect("place router");
+    let runtime_item = sim.world_item_id("copper").expect("copper resolves");
+
+    // Deposit from the player into the router; the capacity clamps it to 1.
+    sim.set_player_item(Some((runtime_item, 2))).expect("seed");
+    sim.command(SimCommand::Inventory {
+        kind: 1,
+        x: 4,
+        y: 4,
+        item: Some(runtime_item),
+        amount: 5,
+        angle: 0.0,
+    })
+    .expect("deposit");
+    let pos = TilePos::new(4, 4);
+    assert_eq!(
+        sim.world_apply()
+            .unwrap()
+            .held_at(pos, crate::content::id::ItemId::new(runtime_item)),
+        1,
+        "router capacity clamps the deposit"
+    );
+    assert_eq!(sim.player_item(), Some((runtime_item, 1)));
+
+    // Withdraw it back out.
+    sim.command(SimCommand::Inventory {
+        kind: 0,
+        x: 4,
+        y: 4,
+        item: Some(runtime_item),
+        amount: 1,
+        angle: 0.0,
+    })
+    .expect("withdraw");
+    assert_eq!(sim.player_item(), Some((runtime_item, 2)));
+
+    // Drop clears the carried stack with no building effect.
+    sim.command(SimCommand::Inventory {
+        kind: 2,
+        x: 4,
+        y: 4,
+        item: None,
+        amount: 0,
+        angle: 0.0,
+    })
+    .expect("drop");
+    assert_eq!(sim.player_item(), None);
+
+    // Unknown item ids are structured content errors, not panics.
+    assert_eq!(
+        sim.command(SimCommand::Inventory {
+            kind: 1,
+            x: 4,
+            y: 4,
+            item: Some(u16::MAX),
+            amount: 1,
+            angle: 0.0,
+        })
+        .unwrap_err(),
+        CommandError::UnknownContent(u16::MAX)
+    );
+    // Out-of-bounds target.
+    assert_eq!(
+        sim.command(SimCommand::Inventory {
+            kind: 0,
+            x: 99,
+            y: 0,
+            item: Some(0),
+            amount: 1,
+            angle: 0.0,
+        })
+        .unwrap_err(),
+        CommandError::InvalidTarget
+    );
+}
+
+#[test]
+fn sim_command_deletes_queued_plans() {
+    use crate::content::BlockId;
+    use crate::determinism::SimCommand;
+    use crate::input::plan::ClientPlan;
+    use crate::world::TilePos;
+
+    let mut sim = Sim::new(1, 16, 16, BlockId::AIR, BlockId::AIR);
+    sim.enqueue_build_plan(ClientPlan::place(2, 3, 0, BlockId::STONE_WALL));
+    sim.enqueue_build_plan(ClientPlan::place(5, 6, 0, BlockId::STONE_WALL));
+    assert!(sim.build_plan_at(2, 3).is_some());
+
+    sim.command(SimCommand::DeletePlans {
+        positions: smallvec::smallvec![TilePos::new(2, 3).pack()],
+    })
+    .expect("delete plans");
+    assert!(sim.build_plan_at(2, 3).is_none());
+    assert!(sim.build_plan_at(5, 6).is_some(), "other plan survives");
+}
+
+#[test]
+fn sim_command_commands_valid_buildings_only() {
+    use crate::determinism::SimCommand;
+    use crate::world::TilePos;
+
+    let mut sim = Sim::new(1, 16, 16, BlockId::AIR, BlockId::AIR);
+    sim.apply(Command::Place {
+        x: 3,
+        y: 3,
+        block: BlockId::STONE_WALL,
+    })
+    .expect("place");
+
+    // One live tile, one empty tile: only the live one records a target.
+    sim.command(SimCommand::CommandBuilding {
+        positions: smallvec::smallvec![TilePos::new(3, 3).pack(), TilePos::new(8, 8).pack()],
+        x: 70.0,
+        y: 42.0,
+    })
+    .expect("command buildings");
+    assert_eq!(
+        sim.building_command_target(TilePos::new(3, 3)),
+        Some((70.0, 42.0))
+    );
+    assert_eq!(sim.building_command_target(TilePos::new(8, 8)), None);
+
+    // A later command retargets the same building (append-only no; replaces).
+    sim.command(SimCommand::CommandBuilding {
+        positions: smallvec::smallvec![TilePos::new(3, 3).pack()],
+        x: -1.0,
+        y: 2.5,
+    })
+    .expect("retarget");
+    assert_eq!(
+        sim.building_command_target(TilePos::new(3, 3)),
+        Some((-1.0, 2.5))
+    );
+}
+
+#[test]
+fn sim_command_world_apply_is_deterministic() {
+    use crate::input::plan::ClientPlan;
+    use crate::world::TilePos;
+
+    fn build() -> Sim {
+        let mut sim = Sim::new(7, 16, 16, BlockId::AIR, BlockId::AIR);
+        let router = sim.world_block_id("router").expect("router resolves");
+        sim.apply(Command::Place {
+            x: 2,
+            y: 2,
+            block: BlockId::new(router),
+        })
+        .unwrap();
+        let copper = sim.world_item_id("copper").expect("copper resolves");
+        sim.set_player_item(Some((copper, 3))).unwrap();
+        use crate::determinism::SimCommand;
+        sim.command(SimCommand::Inventory {
+            kind: 1,
+            x: 2,
+            y: 2,
+            item: Some(copper),
+            amount: 3,
+            angle: 0.0,
+        })
+        .unwrap();
+        sim.enqueue_build_plan(ClientPlan::place(4, 4, 0, BlockId::STONE_WALL));
+        sim.command(SimCommand::DeletePlans {
+            positions: smallvec::smallvec![TilePos::new(4, 4).pack()],
+        })
+        .unwrap();
+        sim.command(SimCommand::CommandBuilding {
+            positions: smallvec::smallvec![TilePos::new(2, 2).pack()],
+            x: 9.0,
+            y: 9.0,
+        })
+        .unwrap();
+        sim
+    }
+
+    assert_eq!(
+        build().world_apply_checksum(),
+        build().world_apply_checksum()
     );
 }
 
