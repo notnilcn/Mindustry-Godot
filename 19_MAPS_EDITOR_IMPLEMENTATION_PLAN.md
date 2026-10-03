@@ -854,4 +854,18 @@ Tooling: `/mnt/c/Users/Clinton/g/.opencode/skills/godot-compositor-testing/SKILL
 
 > Append entries here when execution starts. Every "done" claim carries evidence (command, golden path, screenshot path, counter).
 
-- (none yet — M0 not started)
+### M0 — Tile ops + stack + tools (DONE 2026-10-03, `lane/f19-19`)
+
+**Deliverables.** `mind-core/src/editor/{mod,tile_op,draw_op,stack,tool,grid,context,test_grid}.rs` (Godot-free/tokio-free):
+`TileOp`/`TileOpData` bit packing (`x`/`y` 14 bits, `type` 3 bits, `value` 33 bits; 3 signed bytes little-endian), `DrawOperation` undo/redo swap, `OperationStack` (max 30, negative-index redo semantics), `EditorTool` (7 tools, `alt_modes`/`key`/`edit`/`draggable`), `filled` `touched` dispatch + `touched_line` (Bresenham via `world::raycast::raycast_each`), `draw_blocks`/`draw_blocks_replace`/`draw_circle`/`draw_square`/`fill` (all six modes)/`add_cliffs`. `EditorGrid` seam + `WorldEditorGrid` adapter over `WorldGrid`; `TileOpSink` recorder wired into `WorldEditorGrid` (the §3.4 hook adapted to the adapter, no plan-06 file edits). `EditorContext` implements plan-04 `WorldContext`.
+
+**Verify (plan §7 M0).**
+- `cargo test -p mind-core editor::` → **19 passed / 0 failed**. Covers `tile_op_packing_roundtrip` (all 7 kinds + 16383 boundary + negative value), `tile_op_data_packing`, `operation_stack_trace` + 30-cap eviction, `draw_blocks_multiblock_clamp_overlap`, `draw_circle_and_square_footprints`, `data_op_rollback_removes_unchanged_pre_ops`, `fill_flood_tuning_only_reaches_connected_region`, `fill_replace_all_reaches_disconnected_region`, `fill_erase_removes_connected_blocks_only`, `recording_suppressed_while_loading`, `undo_redo_swap_identity`, `touched_line_bresenham_flushes_one_operation`, `add_cliffs_autotiles_isolated_static_block`, `tile_op_sink_records_previous_values`.
+- `cargo run -p mind-headless -- editor ops --json` (cwd `client/rust`, fixture `mind-core/tests/fixtures/editor/basic_ops.json`, 64×64, 3 operations / 20 packed ops) → apply `c7669b5845c31d21`, undo `5c8e5cb798cc412c`, redo `c7669b5845c31d21`; `round_trip_ok=true`, `checksums_ok=true`, exit 0. The three committed goldens are stored as `0xc7669b5845c31d21` / `0x5c8e5cb798cc412c` / `0xc7669b5845c31d21` in the fixture.
+- Full gate on the lane: `cargo test -p mind-core` **1454 passed / 3 ignored**; `cargo fmt --check` clean; workspace `cargo clippy --all-targets -- -D warnings` clean.
+
+**Files.** `mind-core/src/editor/{mod,tile_op,draw_op,stack,tool,grid,context,test_grid}.rs`, `mind-core/src/lib.rs` (`pub mod editor;`), `mind-core/tests/fixtures/editor/basic_ops.json`, `mind-headless/src/{cli,exec}.rs` (`EditorCommand::Ops`).
+
+**Deferred to M1+.** The `WorldGrid` sink is installed by the lifecycle owner (M1) — the draw path records ops explicitly for M0. `EditorBlockInfo::rotate` is `false` until plan-07 `BlockInstance::rotate` is wired; `supports_overlay`/`needs_surface` are approximated. `fillcliffs`/`fillunderliquid`/`fillteams` are ported but only flood/replace/erase have unit coverage. In-engine MCP (M3+) waits on the single-editor mutex.
+
+- (no earlier entries)
