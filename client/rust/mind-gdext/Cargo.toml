@@ -24,3 +24,9 @@ unsafe_code = "allow"
 all = "deny"
 unwrap_used = "deny"
 expect_used = "deny"
+
+[features]
+# Plan 22 M4/OD4: compile the optional Discord RPC seam. Default off; even when
+# enabled no plugin is linked, so the game starts cleanly with a disabled notice.
+default = []
+discord = []

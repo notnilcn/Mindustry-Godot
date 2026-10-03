@@ -1,15 +1,22 @@
 // Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! `MindPlatform` — the Godot-facing platform capability node (plan 22 M0 §3.3).
+//! `MindPlatform` — the Godot-facing platform capability node (plan 22 §3.3).
 //!
-//! M0 lands the class, its capability seam and the `#[func]` MCP probes. Window
-//! control, native dialogs, crash handling, services and URI routing land in M1+
-//! (they need plan 14/15/16 or the export templates). Scene insertion at
-//! `/root/Spine/MindPlatform` is deferred to the orchestrator (shared
-//! `spine.tscn`), per plan 22 §3.3.
+//! Owns the capability snapshot, the `#[func]` MCP probes and the host glue for
+//! window/args, native dialogs, crash handling, URI routing and the service
+//! registry. Scene insertion at `/root/Spine/MindPlatform` is declared in
+//! `client/scenes/spine.tscn` (plan 22 §3.3).
 
 pub mod args;
+pub mod crash;
+pub mod desktop;
+pub mod dialogs;
+pub mod discord;
+pub mod service;
+pub mod update;
+pub mod uri;
+pub mod workshop;
 
 use godot::classes::{DisplayServer, INode, Node as GdNode, Os};
 use godot::obj::{Base, Singleton};
@@ -18,13 +25,16 @@ use godot::prelude::*;
 use mind_core::platform::caps::{PerformanceTier, PlatformCaps, PlatformKind};
 use mind_core::version::BuildInfo;
 
-/// Platform capability node (appended to the spine by the orchestrator).
+use service::ServiceRegistry;
+
+/// Platform capability node (appended to the spine by `spine.tscn`).
 #[derive(GodotClass)]
 #[class(base=Node)]
 pub struct MindPlatform {
     base: Base<GdNode>,
     caps: PlatformCaps,
     test_mobile: bool,
+    services: ServiceRegistry,
 }
 
 #[godot_api]
@@ -34,6 +44,7 @@ impl INode for MindPlatform {
             base,
             caps: PlatformCaps::desktop("en"),
             test_mobile: false,
+            services: ServiceRegistry::default(),
         }
     }
 
@@ -56,12 +67,25 @@ impl INode for MindPlatform {
         if launch.debug {
             log::info!("[platform] launch args: {launch:?}");
         }
+
+        // Window/mode/args plumbing (plan 22 §3.4).
+        desktop::apply_window_args(launch.maximized, launch.width, launch.height);
+        let root = desktop::data_root(launch.data_dir.as_deref());
+        if desktop::check_launch(&root) {
+            log::warn!(
+                "[platform] previous launch may have crashed (leftover {}); check {}/crashes/",
+                desktop::LAUNCH_ID,
+                root.display()
+            );
+        }
+
         log::info!(
-            "[platform] MindPlatform ready: locale={} cores={} tier={:?} testMobile={}",
+            "[platform] MindPlatform ready: locale={} cores={} tier={:?} testMobile={} dataRoot={}",
             self.caps.locale,
             cores,
             self.caps.tier,
-            self.caps.test_mobile
+            self.caps.test_mobile,
+            root.display()
         );
     }
 }
@@ -112,24 +136,57 @@ impl MindPlatform {
         dict
     }
 
-    /// Sets the window fullscreen mode (M1 wires the launch args; M0 logs).
+    /// Sets the window fullscreen/windowed mode (plan 22 §3.4).
     #[func]
     pub fn set_fullscreen(&mut self, enabled: bool) {
-        log::info!("[platform] set_fullscreen({enabled}) — applied at M1");
+        use godot::classes::display_server::WindowMode;
+        let mut display = DisplayServer::singleton();
+        display.window_set_mode(if enabled {
+            WindowMode::FULLSCREEN
+        } else {
+            WindowMode::WINDOWED
+        });
+        log::info!("[platform] set_fullscreen({enabled})");
     }
 
-    /// Debug hook: routes a dropped/passed file (M1 wires the import router).
+    /// Whether the no-op `GameService` is active (always `false` until OD4).
+    #[func]
+    pub fn service_enabled(&self) -> bool {
+        self.services.service().enabled()
+    }
+
+    /// Whether the display server offers native file dialogs (plan 22 §3.5).
+    #[func]
+    pub fn has_native_dialogs(&self) -> bool {
+        dialogs::has_native_dialogs()
+    }
+
+    /// Debug hook: routes a dropped/passed file through the import classifier.
     #[func]
     pub fn dev_file_drop(&mut self, path: GString) -> bool {
-        log::warn!("[platform] dev_file_drop({path}) — not wired until M1");
-        false
+        desktop::handle_file_import(std::path::Path::new(&path.to_string()))
     }
 
-    /// Debug hook: opens a URI (M1 wires `OS.shell_open`).
+    /// Debug hook: marks a launch successful (`Vars.finishLaunch`).
+    #[func]
+    pub fn finish_launch(&mut self) {
+        let root = desktop::data_root(None);
+        desktop::finish_launch(&root);
+    }
+
+    /// Debug hook: opens a URI (`OS.shell_open`).
     #[func]
     pub fn dev_open_uri(&mut self, uri: GString) -> bool {
-        log::warn!("[platform] dev_open_uri({uri}) — not wired until M1");
-        false
+        uri::open_uri(&uri.to_string())
+    }
+
+    /// Debug hook (debug builds only): writes a crash report for the given cause.
+    #[func]
+    pub fn dev_crash(&mut self, reason: GString) -> GString {
+        match crash::write_report(&reason.to_string(), &[]) {
+            Some(path) => GString::from(path.to_string_lossy().as_ref()),
+            None => GString::new(),
+        }
     }
 
     /// Debug hook: toggles the `--mobile-preview` branch (`Vars.testMobile`).

@@ -20,6 +20,7 @@
 ; ├── MindLogic (MindLogic)     NEW (plan 13): mlog facade (plan-14 metadata handoff)
 ; ├── MindNet (MindNet)         NEW (plan 21): relay/session facade + pending-command drain
 ; ├── MindEditor (MindEditor)   NEW (plan 19): maps/editor facade (M3 shell)
+; ├── MindPlatform (MindPlatform) NEW (plan 22): caps/args/window/dialogs/crash/service
 ; ├── Planet (CanvasLayer)      NEW: g3d planet host (plan 16 M7)
 ; └── Ui (CanvasLayer)
 ;     ├── UiRoot (ui_root.tscn instance)   NEW (plan 14): menus/HUD/dialogs
@@ -68,6 +69,8 @@ zoom = Vector2(2, 2)
 [node name="MindNet" type="MindNet" parent="."]
 
 [node name="MindEditor" type="MindEditor" parent="."]
+
+[node name="MindPlatform" type="MindPlatform" parent="."]
 
 [node name="Planet" type="CanvasLayer" parent="."]
 

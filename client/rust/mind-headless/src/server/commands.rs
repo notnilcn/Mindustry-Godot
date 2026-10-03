@@ -9,7 +9,8 @@
 //! to the plan-21 seam and return a clear "requires plan 21/STDB" line until that
 //! plan lands (R2).
 
-use super::host::HostControl;
+use super::admin::BanKind;
+use super::host::{Admins, HostControl};
 use super::{ServerState, console};
 
 /// One entry of the `help` table.
@@ -290,16 +291,25 @@ fn dispatch(state: &mut ServerState, name: &str, args: &[&str]) -> Outcome {
         "status" => cmd_status(state),
         "mods" | "mod" => state.info("0 mods loaded (plan-20 server loaders not built)"),
         "js" => state.error("script mods are not available in this build"),
-        "say" => delegate(state, "say", "plan 21"),
+        "say" => cmd_say(state, args),
         "pause" => cmd_pause(state, args),
         "rules" => cmd_rules(state, args),
         "dumpsettings" => cmd_dumpsettings(state),
         "config" => cmd_config(state, args),
         "fillitems" => delegate(state, "fillitems", "plan 12"),
-        "playerlimit" | "subnet-ban" | "name-ban" | "whitelist" | "kick" | "ban" | "bans"
-        | "unban" | "pardon" | "admin" | "admins" | "players" | "info" | "search" | "dos-ban" => {
-            delegate(state, name, "plan 21 (STDB admin/host)")
-        }
+        "playerlimit" => cmd_playerlimit(state, args),
+        "subnet-ban" | "dos-ban" => cmd_ip_ban(state, name, args),
+        "name-ban" => cmd_name_ban(state, args),
+        "whitelist" => cmd_whitelist(state, args),
+        "kick" => cmd_kick(state, args),
+        "ban" => cmd_ban(state, args),
+        "bans" => cmd_bans(state),
+        "unban" => cmd_unban(state, args, "Unbanned"),
+        "pardon" => cmd_unban(state, args, "Pardoned"),
+        "admin" => cmd_admin(state, args),
+        "admins" => cmd_admins(state),
+        "players" => cmd_players(state),
+        "info" | "search" => cmd_search(state, args),
         "shuffle" | "nextmap" => state.warn(&format!("`{name}` needs the plan-19 map registry")),
         "runwave" => cmd_runwave(state),
         "loadautosave" => cmd_loadautosave(state),
@@ -395,18 +405,266 @@ fn cmd_reloadmaps(state: &mut ServerState) {
 
 fn cmd_status(state: &mut ServerState) {
     let status = state.host.status();
+    let live = state.net.players().len();
     if !status.hosting {
-        state.info("Hosting: no");
+        state.info(&format!("Hosting: no | players={live}"));
         return;
     }
     state.info(&format!(
-        "Hosting: {} | mode={} | wave={} | tick={} | players={}",
+        "Hosting: {} | mode={} | wave={} | tick={} | players={live}",
         status.map.as_deref().unwrap_or("?"),
         status.mode.as_deref().unwrap_or("?"),
         status.wave,
         status.tick,
-        status.players
     ));
+}
+
+fn cmd_say(state: &mut ServerState, args: &[&str]) {
+    let message = args.join(" ");
+    if message.trim().is_empty() {
+        state.warn("Usage: say <message...>");
+        return;
+    }
+    match state.net.say(&message) {
+        Ok(()) => state.info("Server message sent."),
+        Err(error) => state.warn(&error.to_string()),
+    }
+}
+
+fn cmd_players(state: &mut ServerState) {
+    let players = state.net.players();
+    state.info(&format!("Players ({}):", players.len()));
+    for player in players {
+        let name = if player.name.is_empty() {
+            "?"
+        } else {
+            player.name.as_str()
+        };
+        let team = player
+            .team
+            .map(|team| team.to_string())
+            .unwrap_or_else(|| "-".to_owned());
+        state.info(&format!(
+            "  {name} | id={} | team={team} | role={} | admin={} | connected={}",
+            player.identity, player.role, player.admin, player.connected
+        ));
+    }
+}
+
+fn cmd_kick(state: &mut ServerState, args: &[&str]) {
+    let Some(target) = args.first().copied() else {
+        state.warn("Usage: kick <username...>");
+        return;
+    };
+    match state.net.kick(target) {
+        Ok(()) => state.info(&format!("Kicked {target}.")),
+        Err(error) => state.warn(&format!("Could not kick {target}: {error}")),
+    }
+}
+
+fn cmd_ban(state: &mut ServerState, args: &[&str]) {
+    if args.is_empty() {
+        state.warn("Usage: ban [type-id/name/ip] <username/IP/ID...>");
+        return;
+    }
+    let (kind, target) = match BanKind::parse(args[0]) {
+        Some(kind) if args.len() > 1 => (kind, args[1]),
+        _ => (BanKind::Identity, args[0]),
+    };
+    match state.net.ban(kind, target) {
+        Ok(()) => state.info(&format!("Banned {target} ({}).", kind.name())),
+        Err(error) => state.warn(&format!("Could not ban {target}: {error}")),
+    }
+}
+
+fn cmd_bans(state: &mut ServerState) {
+    let bans = state.net.mirror().bans.clone();
+    state.info(&format!("Bans ({}):", bans.len()));
+    for ban in bans {
+        let name = if ban.name.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", ban.name)
+        };
+        state.info(&format!("  {} {}{name}", ban.kind.name(), ban.target));
+    }
+}
+
+fn cmd_unban(state: &mut ServerState, args: &[&str], verb: &str) {
+    let Some(target) = args.first().copied() else {
+        state.warn("Usage: unban <ip/ID>");
+        return;
+    };
+    match state.net.unban(target) {
+        Ok(()) => state.info(&format!("{verb} {target}.")),
+        Err(error) => state.warn(&error.to_string()),
+    }
+}
+
+fn cmd_admin(state: &mut ServerState, args: &[&str]) {
+    match args.first().copied() {
+        None => cmd_admins(state),
+        Some("add") | Some("remove") => {
+            let on = args[0] == "add";
+            let Some(target) = args.get(1).copied() else {
+                state.warn("Usage: admin add|remove <username/ID...>");
+                return;
+            };
+            match state.net.grant(target, on) {
+                Ok(()) => state.info(&format!(
+                    "{} admin {target}.",
+                    if on { "Added" } else { "Removed" }
+                )),
+                Err(error) => state.warn(&error.to_string()),
+            }
+        }
+        Some(other) => state.warn(&format!("Unknown admin subcommand: {other}")),
+    }
+}
+
+fn cmd_admins(state: &mut ServerState) {
+    let admins = state.net.mirror().admins.clone();
+    state.info(&format!("Admins ({}):", admins.len()));
+    for admin in admins {
+        let name = if admin.name.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", admin.name)
+        };
+        state.info(&format!("  {}{name}", admin.identity));
+    }
+}
+
+fn cmd_whitelist(state: &mut ServerState, args: &[&str]) {
+    match args.first().copied() {
+        Some("add") | Some("remove") => {
+            let on = args[0] == "add";
+            let Some(target) = args.get(1).copied() else {
+                state.warn("Usage: whitelist add|remove <ID>");
+                return;
+            };
+            match state.net.whitelist(target, on) {
+                Ok(()) => state.info(&format!(
+                    "{} whitelist for {target}.",
+                    if on { "Added" } else { "Removed" }
+                )),
+                Err(error) => state.warn(&error.to_string()),
+            }
+        }
+        Some("on") | Some("off") => {
+            let on = args[0] == "on";
+            match state.net.set_whitelist_enabled(on) {
+                Ok(()) => state.info(&format!(
+                    "Whitelist {}.",
+                    if on { "enabled" } else { "disabled" }
+                )),
+                Err(error) => state.warn(&error.to_string()),
+            }
+        }
+        _ => state.warn("Usage: whitelist add|remove <ID> | on|off"),
+    }
+}
+
+fn cmd_playerlimit(state: &mut ServerState, args: &[&str]) {
+    match args.first().copied() {
+        None => {
+            let current = match state.net.configured_player_limit() {
+                Some(limit) => limit.to_string(),
+                None => "off".to_owned(),
+            };
+            state.info(&format!("Player limit: {current}"));
+        }
+        Some("off") | Some("0") => match state.net.player_limit(None) {
+            Ok(()) => state.info("Player limit disabled."),
+            Err(error) => state.warn(&error.to_string()),
+        },
+        Some(value) => match value.parse::<u16>() {
+            Ok(limit) if limit > 0 => match state.net.player_limit(Some(limit)) {
+                Ok(()) => state.info(&format!("Player limit set to {limit}.")),
+                Err(error) => state.warn(&error.to_string()),
+            },
+            _ => state.warn("Usage: playerlimit [off/number]"),
+        },
+    }
+}
+
+fn cmd_ip_ban(state: &mut ServerState, name: &str, args: &[&str]) {
+    let kind = if name == "dos-ban" {
+        BanKind::Dos
+    } else {
+        BanKind::Subnet
+    };
+    match args.first().copied() {
+        Some("remove") => {
+            let target = args.get(1).copied().unwrap_or("");
+            match state.net.unban(target) {
+                Ok(()) => state.info(&format!("Removed ban for {target}.")),
+                Err(error) => state.warn(&error.to_string()),
+            }
+        }
+        Some("add") | None => {
+            let target = args.get(1).copied().unwrap_or("");
+            if target.is_empty() {
+                state.warn(&format!("Usage: {name} add|remove <ip>"));
+                return;
+            }
+            match state.net.ban(kind, target) {
+                Ok(()) => state.info(&format!("Banned {target}.")),
+                Err(error) => state.warn(&error.to_string()),
+            }
+        }
+        Some(other) => state.warn(&format!("Unknown {name} subcommand: {other}")),
+    }
+}
+
+fn cmd_name_ban(state: &mut ServerState, args: &[&str]) {
+    match args.first().copied() {
+        Some("add") => {
+            let Some(target) = args.get(1).copied() else {
+                state.warn("Usage: name-ban add <regex>");
+                return;
+            };
+            match state.net.ban(BanKind::Name, target) {
+                Ok(()) => state.info(&format!("Banned name pattern {target}.")),
+                Err(error) => state.warn(&error.to_string()),
+            }
+        }
+        Some("remove") => {
+            let Some(target) = args.get(1).copied() else {
+                state.warn("Usage: name-ban remove <regex>");
+                return;
+            };
+            match state.net.unban(target) {
+                Ok(()) => state.info(&format!("Removed name ban {target}.")),
+                Err(error) => state.warn(&error.to_string()),
+            }
+        }
+        Some("clear") => {
+            state.warn("`name-ban clear` is not supported under D2; remove entries individually")
+        }
+        _ => state.warn("Usage: name-ban add|remove|clear [regex]"),
+    }
+}
+
+fn cmd_search(state: &mut ServerState, args: &[&str]) {
+    let query = args.join(" ");
+    if query.trim().is_empty() {
+        state.warn("Usage: search <name...>");
+        return;
+    }
+    let results = state.net.search(&query);
+    state.info(&format!("Matches ({}):", results.len()));
+    for entry in results {
+        let name = if entry.name.is_empty() {
+            "?"
+        } else {
+            entry.name.as_str()
+        };
+        state.info(&format!(
+            "  {name} | id={} | {}",
+            entry.identity, entry.role
+        ));
+    }
 }
 
 fn cmd_pause(state: &mut ServerState, args: &[&str]) {

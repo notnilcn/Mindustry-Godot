@@ -9,8 +9,11 @@
 //! for logging/data-dir/settings only (plan 05 §3.3 invariant 3).
 
 pub mod args;
+pub mod assoc;
 pub mod caps;
+pub mod file_import;
 pub mod hooks;
+pub mod uri;
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;

@@ -19,7 +19,7 @@ mod log_bridge;
 mod logic;
 mod mods;
 mod net;
-mod platform;
+pub mod platform;
 mod render;
 mod settings;
 mod sim_host;
@@ -58,6 +58,9 @@ unsafe impl ExtensionLibrary for MindExtension {
         // scene is instantiated, so the bridge is live for the first `_ready`.
         if stage == InitStage::Scene {
             log_bridge::install();
+            // Chains the log bridge's hook so a panic flushes `last_log.txt`
+            // before writing its `crashes/` report (plan 22 §3.4).
+            platform::crash::install();
         }
     }
 }
