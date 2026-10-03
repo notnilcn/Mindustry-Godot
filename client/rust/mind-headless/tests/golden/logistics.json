@@ -8,5 +8,6 @@
   "logistics_core_inventory": "b1fcddb3aec86f29",
   "logistics_payload_move": "08a186a649b693e7",
   "logistics_payload_load_unload": "08303498b697ea6e",
+  "logistics_payload_fluids": "387b62c54afe896c",
   "logistics_payload_driver_throw": "a60fa1bc8cd3af62"
 }

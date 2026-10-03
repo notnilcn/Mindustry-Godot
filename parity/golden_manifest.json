@@ -175,7 +175,7 @@
       "kind": "harness",
       "path": "client/rust/mind-headless/tests/golden/logistics.json",
       "owner_plan": "23",
-      "sha256": "8bd682c3a5b5c663226fe99ffe0730f50e910eb592cdd4eaac249a080b535a0b"
+      "sha256": "8b9cea2bbeba4b57335f856d119251f2e739d22a3dc55832363a3745251c14ed"
     },
     {
       "id": "harness_network_heat_network_equilibrium",
