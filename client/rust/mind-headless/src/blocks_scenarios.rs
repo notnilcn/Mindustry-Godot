@@ -9,7 +9,7 @@ use anyhow::{Result, bail};
 use mind_core::content::BlockId;
 use mind_core::world::BuildHarness;
 use mind_core::world::config::ConfigValue;
-use mind_core::world::modules::{ItemModule, PowerModule};
+use mind_core::world::modules::{ItemModule, LiquidModule, PowerModule};
 
 use crate::cli::BlocksCommand;
 
@@ -642,6 +642,155 @@ fn scenario(name: &str, json: bool) -> Result<()> {
                 "loader_total": loader_total,
                 "unloader_total": unloader_total,
                 "payload_after": payload_after,
+                "checksum": mind_core::world::fixtures::logistics::logistics_checksum(&harness.world).to_hex(),
+            });
+            print_json(&report, json, !json);
+            if !pass {
+                bail!("scenario {name} failed");
+            }
+        }
+        "logistics_payload_fluids" => {
+            use mind_core::world::blocks::payloads::payload_unloader::PayloadUnloaderBuild;
+            use mind_core::world::blocks::payloads::{
+                PayloadHolder, create_build_payload, handle_payload,
+            };
+            use mind_core::world::blocks::power::PowerProduction;
+            // Cheat rules give full efficiency without a power graph; the loader
+            // battery-charge path additionally needs an explicit `status` because
+            // the headless harness installs no power graph (plan 09 owns graphs).
+            if let Some(mut rules) = harness
+                .world
+                .get_resource_mut::<mind_core::world::limits::BuildRules>()
+            {
+                rules.cheat = true;
+            }
+            let loader = block(&harness, "payload-loader")?;
+            let unloader = block(&harness, "payload-unloader")?;
+            let liquid_container = block(&harness, "liquid-container")?;
+            let battery = block(&harness, "battery")?;
+            let tank = block(&harness, "liquid-tank")?;
+            let water = harness
+                .content()
+                .liquid_id("water")
+                .ok_or_else(|| anyhow::anyhow!("water liquid missing"))?;
+            let _ = harness.place(6, 6, loader, 0, true);
+            let _ = harness.place(6, 14, unloader, 0, true);
+            // Neighbour for the unloader's `dumpLiquid` (tank 3x3 at its +x edge).
+            let _ = harness.place(9, 14, tank, 0, true);
+            let loader_e = harness.build_at(6, 6);
+            let unloader_e = harness.build_at(6, 14);
+            let neighbour_e = harness.build_at(9, 14);
+
+            // --- Liquid: loader -> payload -> unloader -> neighbour tank. ---
+            let liquid_payload = create_build_payload(&mut harness.world, liquid_container, 0);
+            let mut liquid_loaded = 0.0f32;
+            if let (Some(load_e), Some(entity)) = (loader_e, liquid_payload) {
+                if let Some(mut module) = harness.world.get_mut::<LiquidModule>(load_e) {
+                    module.add(water, 50.0, 100.0);
+                }
+                let payload = mind_core::world::behavior::PayloadRef {
+                    entity: Some(entity),
+                    content: liquid_container.raw(),
+                    is_block: true,
+                };
+                handle_payload(&mut harness.world, load_e, load_e, payload);
+                for _ in 0..60 {
+                    harness.tick();
+                }
+                liquid_loaded = harness
+                    .world
+                    .get::<LiquidModule>(entity)
+                    .map(|m| m.current_amount)
+                    .unwrap_or(0.0);
+                // Hand the loaded payload to the unloader.
+                let held = harness
+                    .world
+                    .get::<PayloadHolder>(load_e)
+                    .and_then(|h| h.payload);
+                if let Some(payload) = held
+                    && let Some(unload_e) = unloader_e
+                {
+                    if let Some(mut holder) = harness.world.get_mut::<PayloadHolder>(load_e) {
+                        holder.payload = None;
+                    }
+                    handle_payload(&mut harness.world, unload_e, unload_e, payload);
+                }
+                for _ in 0..60 {
+                    harness.tick();
+                }
+            }
+            let neighbour_water = neighbour_e
+                .and_then(|e| harness.world.get::<LiquidModule>(e))
+                .map(|m| m.current_amount)
+                .unwrap_or(0.0);
+            let payload_liquid_after = liquid_payload
+                .and_then(|e| harness.world.get::<LiquidModule>(e))
+                .map(|m| m.current_amount)
+                .unwrap_or(0.0);
+
+            // --- Power: loader charges a battery payload; unloader drains it. ---
+            let battery_payload = create_build_payload(&mut harness.world, battery, 0);
+            let mut battery_loaded = 0.0f32;
+            let mut unloader_power = 0.0f32;
+            let mut power_production = 0.0f32;
+            if let (Some(load_e), Some(unload_e), Some(entity)) =
+                (loader_e, unloader_e, battery_payload)
+            {
+                if let Some(mut module) = harness.world.get_mut::<PowerModule>(load_e) {
+                    module.status = 1.0;
+                }
+                let payload = mind_core::world::behavior::PayloadRef {
+                    entity: Some(entity),
+                    content: battery.raw(),
+                    is_block: true,
+                };
+                handle_payload(&mut harness.world, load_e, load_e, payload);
+                for _ in 0..60 {
+                    harness.tick();
+                }
+                battery_loaded = harness
+                    .world
+                    .get::<PowerModule>(entity)
+                    .map(|m| m.status)
+                    .unwrap_or(0.0);
+                let held = harness
+                    .world
+                    .get::<PayloadHolder>(load_e)
+                    .and_then(|h| h.payload);
+                if let Some(payload) = held {
+                    if let Some(mut holder) = harness.world.get_mut::<PayloadHolder>(load_e) {
+                        holder.payload = None;
+                    }
+                    handle_payload(&mut harness.world, unload_e, unload_e, payload);
+                }
+                for _ in 0..2 {
+                    harness.tick();
+                }
+                unloader_power = harness
+                    .world
+                    .get::<PayloadUnloaderBuild>(unload_e)
+                    .map(|s| s.last_output_power)
+                    .unwrap_or(0.0);
+                power_production = harness
+                    .world
+                    .get::<PowerProduction>(unload_e)
+                    .map(|p| p.0)
+                    .unwrap_or(0.0);
+            }
+
+            let liquid_ok =
+                liquid_loaded >= 49.0 && payload_liquid_after <= 0.011 && neighbour_water > 0.0;
+            let power_ok = battery_loaded > 0.3 && unloader_power > 0.0 && power_production > 0.0;
+            let pass = liquid_ok && power_ok;
+            let report = serde_json::json!({
+                "scenario": name,
+                "pass": pass,
+                "liquid_loaded": liquid_loaded,
+                "neighbour_water": neighbour_water,
+                "payload_liquid_after": payload_liquid_after,
+                "battery_loaded": battery_loaded,
+                "unloader_power": unloader_power,
+                "power_production": power_production,
                 "checksum": mind_core::world::fixtures::logistics::logistics_checksum(&harness.world).to_hex(),
             });
             print_json(&report, json, !json);

@@ -12,7 +12,7 @@
 use std::path::Path;
 use std::process::Command;
 
-const SCENARIOS: [&str; 10] = [
+const SCENARIOS: [&str; 11] = [
     "logistics_smoke",
     "logistics_conveyor_lane",
     "logistics_router_fairness",
@@ -22,6 +22,7 @@ const SCENARIOS: [&str; 10] = [
     "logistics_core_inventory",
     "logistics_payload_move",
     "logistics_payload_load_unload",
+    "logistics_payload_fluids",
     "logistics_payload_driver_throw",
 ];
 
