@@ -13,7 +13,11 @@ pub mod binding;
 pub mod caps;
 pub mod focus;
 pub mod input_log;
+pub mod line;
 pub mod place_mode;
+pub mod placement;
+pub mod plan;
+pub mod queue;
 
 pub use binding::{
     BINDS, BindingDefault, BindingState, BindingValue, Category, KeyBind, KeyBindId, KeyBindTable,
@@ -24,4 +28,13 @@ pub use focus::{FocusGuards, FocusState, InputLocks, LockId};
 pub use input_log::{
     INPUT_LOG_FORMAT, InputHeader, InputLog, InputLogError, InputRecord, InputReplay, RawEvent,
 };
+pub use line::{PlaceLine, iterate_line};
 pub use place_mode::{MobileMode, PlaceMode};
+pub use placement::{
+    ASTAR_NODE_LIMIT, BridgePlacer, DirectionBridgePlacer, MAX_LENGTH, NormalizeDrawResult,
+    NormalizeResult, PlacementWorld, RelativeBridgePlacer, astar, calculate_bridges,
+    calculate_nodes, is_side_place, normalize_area, normalize_draw_area, normalize_line,
+    normalize_rectangle, pathfind_line, upgrade_line,
+};
+pub use plan::{ClientPlan, PlanCopy, PlanMirror, PlanTree, PreviewState};
+pub use queue::{AddOutcome, BuildQueue};
