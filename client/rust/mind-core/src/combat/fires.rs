@@ -260,6 +260,35 @@ pub fn update_fires(
     }
 }
 
+/// `Fire` save revision (`plan 10 §6.3`).
+pub const FIRE_REVISION: u8 = 1;
+
+/// Writes the `Fire` save payload (`FireComp.write`; `tile`/`time`/`lifetime`).
+pub fn write_fire(
+    state: &FireState,
+    w: &mut crate::world::BuildingWriter,
+) -> Result<(), crate::io::IoError> {
+    w.s(state.tile.0);
+    w.s(state.tile.1);
+    w.f(state.time);
+    w.f(state.lifetime);
+    Ok(())
+}
+
+/// Reads the `Fire` save payload (revision-tolerant; all fields present since v1).
+pub fn read_fire(
+    state: &mut FireState,
+    r: &mut crate::world::BuildingReader,
+    revision: u8,
+) -> Result<(), crate::io::IoError> {
+    if revision >= 1 {
+        state.tile = (r.s()?, r.s()?);
+        state.time = r.f()?;
+        state.lifetime = r.f()?;
+    }
+    Ok(())
+}
+
 /// Whether `rules.fire` and `Env.oxygen` allow fire (default enabled).
 fn env_allows_fire(world: &World) -> bool {
     world
@@ -355,5 +384,35 @@ mod tests {
             .count();
         assert!(has(&harness.build.world, 8, 8));
         assert!(lit_neighbors >= 1, "spread to a d4 neighbor");
+    }
+
+    #[test]
+    fn fire_save_roundtrip() {
+        use crate::io::wire::{WireReader, WireWriter};
+        let src = FireState {
+            tile: (3, 4),
+            time: 12.5,
+            lifetime: BASE_LIFETIME,
+            puddle_flammability: 2.0,
+            spread_timer: 5.0,
+            fireball_timer: 7.0,
+            damage_timer: 8.0,
+            warmup: 0.0,
+            animation: 0.0,
+        };
+        let mut bytes = Vec::new();
+        {
+            let mut w = WireWriter::new(&mut bytes);
+            write_fire(&src, &mut w).expect("write");
+        }
+        let mut dst = src;
+        dst.tile = (0, 0);
+        dst.time = 0.0;
+        dst.lifetime = 0.0;
+        let mut r = WireReader::new(&bytes);
+        read_fire(&mut dst, &mut r, FIRE_REVISION).expect("read");
+        assert_eq!(dst.tile, (3, 4));
+        assert_eq!(dst.time, 12.5);
+        assert_eq!(dst.lifetime, BASE_LIFETIME);
     }
 }

@@ -47,6 +47,8 @@ pub struct CombatHarness {
     names: BTreeMap<String, BulletId>,
     /// Reusable spawn scratch used by `combat_ctx`/`lightning`.
     scratch_spawned: Vec<Entity>,
+    /// Whether the plan-10 physical mass-driver bolt carrier was installed.
+    mass_driver_ready: bool,
 }
 
 impl CombatHarness {
@@ -116,6 +118,7 @@ impl CombatHarness {
             total_damage: 0.0,
             names,
             scratch_spawned: Vec::new(),
+            mass_driver_ready: false,
         }
     }
 
@@ -162,7 +165,9 @@ impl CombatHarness {
 
     /// Advances one combat tick: buildings, units, bullets, then fires/puddles.
     pub fn tick(&mut self) {
+        self.install_mass_driver_carrier();
         self.build.tick();
+        self.drain_mass_driver_bolts();
         self.update_weapons_only();
         self.update_turrets_only();
         self.update_defense_only();
@@ -231,6 +236,58 @@ impl CombatHarness {
                 }
             }
             self.bullets = alive;
+        }
+        self.bullets_created += spawned.len() as u64;
+        self.bullets.extend(spawned);
+    }
+
+    /// Installs the plan-10 physical mass-driver bolt carrier once, overriding
+    /// plan-08's default in-engine `TestBoltCarrier`.
+    pub fn install_mass_driver_carrier(&mut self) {
+        use crate::combat::bullet::kinds::mass_driver::MassDriverBoltCarrier;
+        if self.mass_driver_ready {
+            return;
+        }
+        if let Some(bolt) = self.bullet_id("mass_driver") {
+            self.build.world.insert_resource(
+                crate::world::blocks::distribution::mass_driver::MassDriverCarrier(
+                    std::sync::Arc::new(MassDriverBoltCarrier { bolt }),
+                ),
+            );
+        }
+        self.mass_driver_ready = true;
+    }
+
+    /// Spawns every bolt queued by plan-08's `MassDriverBuild.fire` into the
+    /// bullet stream. Keeps the physical `MassDriverBolt` in the deterministic
+    /// harness order so it participates in collision/checksum passes.
+    pub fn drain_mass_driver_bolts(&mut self) {
+        use crate::combat::bullet::kinds::mass_driver::{MassDriverBoltQueue, queued_spawn};
+        let queued = self
+            .build
+            .world
+            .remove_resource::<MassDriverBoltQueue>()
+            .unwrap_or_default();
+        if queued.bolts.is_empty() {
+            return;
+        }
+        let mut spawned: Vec<Entity> = Vec::new();
+        {
+            let mut ctx = bullet::CombatCtx {
+                world: &mut self.build.world,
+                content: &self.build.content,
+                grid: &self.build.grid,
+                rng: &mut self.rng,
+                fx: self.fx.as_ref(),
+                audio: &self.build.audio,
+                seq: &mut self.seq,
+                spawned: &mut spawned,
+            };
+            for q in &queued.bolts {
+                if let Some(spawn) = queued_spawn(&self.build.content, q) {
+                    let _ = ctx.spawn(&spawn);
+                }
+            }
         }
         self.bullets_created += spawned.len() as u64;
         self.bullets.extend(spawned);

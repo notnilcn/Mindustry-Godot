@@ -34,15 +34,15 @@
 | `entities/bullet/ExplosionBulletType.java` | `kinds/explosion.rs` | [x] ported | M2 | |
 | `entities/bullet/BombBulletType.java` | `kinds/bomb.rs` | [x] ported | M2 | |
 | `entities/bullet/InterceptorBulletType.java` | `kinds/interceptor.rs` | [x] ported | M2 | |
-| `entities/bullet/MassDriverBolt.java` | `kinds/mass_driver.rs` | [x] ported | M2 | `MassDriverPayload` trait (08 implements). |
+| `entities/bullet/MassDriverBolt.java` | `kinds/mass_driver.rs` | [x] ported | M2/C4 | `MassDriverPayload` trait (08 implements) + upstream `update` from/to intersection, `despawned` item-drop FX and `hit` payload explosion; `MassDriverBoltCarrier`/`MassDriverBoltQueue` spawn the physical bolt (`MassDriverPayloadCarrier` seam). |
 | `entities/bullet/FlakBulletType.java` | `kinds/flak.rs` | [x] ported | M2 | |
 | `entities/bullet/LaserBoltBulletType.java` | `kinds/laser_bolt.rs` | [x] ported | M2 | |
 | `entities/bullet/EmptyBulletType.java` | `kinds/empty.rs` | [x] ported | M2 | |
 | `content/Bullets.java` | plan-02 `registries/bullets.rs` | [x] hand-off | M0–M2 | Metadata half; behavior via kinds. |
 | `entities/Damage.java` | `combat/damage/*.rs` | [x] ported | M0–M2 | `Collided` pool → `SmallVec`. |
 | `entities/Lightning.java` | `combat/lightning.rs` | [x] ported | M2/M3 | Monotonic seed. |
-| `entities/Fires.java` + `comp/FireComp.java` | `combat/fires.rs` | [x] ported | M3 | `willBoil`/heat-env is plan 09. |
-| `entities/Puddles.java` + `comp/PuddleComp.java` | `combat/puddles.rs` | [x] ported | M3 | Liquid reactions are plan 06/09. |
+| `entities/Fires.java` + `comp/FireComp.java` | `combat/fires.rs` | [x] ported | M3 | `willBoil`/heat-env is plan 09. Save codec (`write_fire`/`read_fire`, `FIRE_REVISION=1`) + round-trip test landed; `FireComp` entity-def registration is a plan-04 `registry.rs` append (class id 10 already assigned). |
+| `entities/Puddles.java` + `comp/PuddleComp.java` | `combat/puddles.rs` | [x] ported | M3 | Liquid reactions are plan 06/09. Save codec (`write_puddle`/`read_puddle`, `PUDDLE_REVISION=1`) + round-trip test landed; `PuddleComp` entity-def registration is a plan-04 `registry.rs` append (class id 13 already assigned). |
 
 ## Targeting & weapons
 
@@ -78,10 +78,13 @@
 | `.../turrets/TractorBeamTurret.java` | `turrets/advanced.rs` | [x] ported | M6 | Pull/status/damage. |
 | `.../turrets/BuildTurret.java` | `turrets/mod.rs` | [~] partial | M6 | Plan-following + `ConstructState` progress landed; plan-07 `construct_tick` owns final placement, and proxy-unit mlog sense is plan 13. |
 
-Vanilla ammo coverage (`Blocks.java` `ammo`/`shootType`) — all `ItemTurret`/
-`LiquidTurret`/`PowerTurret`/`LaserTurret`/`PointDefenseTurret`/
-`TractorBeamTurret` tables are ported except the missile-`spawnUnit` turret
-`scathe` (needs plan-11 missile units + `BulletDef.spawn_unit` plumbing) and the
+Vanilla ammo coverage (`Blocks.java` `ammo`/`shootType`) — **all vanilla
+`ItemTurret`/`LiquidTurret`/`PowerTurret`/`LaserTurret`/`PointDefenseTurret`/
+`TractorBeamTurret` ammo entries are registered (29 turrets, item sets audited
+against `Blocks.java`).** The `ripple` plastanium shell (with its 15-way frag)
+and the `scathe` third ammo (`surge-alloy`) gaps are closed. Residuals are
+behavioral, not content: the missile-`spawnUnit` payload of `scathe` (needs
+plan-11 missile units + `BulletDef.spawn_unit` plumbing) and the
 `ContinuousLiquidTurret` `sublimate` activation window (see above).
 
 | Turret | Class | Ammo ported |
