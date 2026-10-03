@@ -83,6 +83,37 @@ pub enum Command {
         profile_json: Option<PathBuf>,
     },
 
+    /// Run the dedicated multiplayer server shape (plan 21 §3.11 / plan 22).
+    Serve {
+        /// Server data root (default `./config`).
+        #[arg(long)]
+        config_dir: Option<PathBuf>,
+        /// SpacetimeDB URI override (`--stdb-host`).
+        #[arg(long)]
+        stdb_host: Option<String>,
+        /// SpacetimeDB database name override (`--db`).
+        #[arg(long)]
+        db: Option<String>,
+        /// Service-token file: the dedicated server's identity (plan §3.11).
+        #[arg(long)]
+        admin_token_file: Option<PathBuf>,
+        /// Match config JSON (`map_id`/`map_seed`/`mode`/`visibility`/...).
+        #[arg(long)]
+        match_config: Option<PathBuf>,
+        /// SpacetimeDB mode (`online` connects; `offline` disables STDB).
+        #[arg(long, default_value = "online")]
+        stdb: String,
+        /// Startup commands; comma-separated and/or repeatable.
+        #[arg(long = "commands", value_delimiter = ',')]
+        commands: Vec<String>,
+        /// Write boot timings JSON here.
+        #[arg(long)]
+        boot_timing_json: Option<PathBuf>,
+        /// Write the tick profile JSON here (accepted; plan 23).
+        #[arg(long)]
+        profile_json: Option<PathBuf>,
+    },
+
     /// Run a registered scenario and verify its golden expectations.
     Run {
         /// Scenario name (see `list`).
@@ -1947,6 +1978,14 @@ pub enum ContentCommand {
         /// Write the deterministic JSON dump here.
         #[arg(long)]
         out: Option<PathBuf>,
+    },
+
+    /// Generate the server module's `content_seed.rs` from the vanilla manifest
+    /// (plan 21 §3.12.4); regenerate via `server/gen_content_seed.sh`.
+    Seed {
+        /// Output path (`server/spacetimedb/src/main/content_seed.rs`).
+        #[arg(long)]
+        out: PathBuf,
     },
 
     /// Benchmark `createBaseContent` + `init` + `postInit`.

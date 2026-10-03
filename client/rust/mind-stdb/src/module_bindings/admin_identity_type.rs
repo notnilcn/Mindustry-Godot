@@ -40,6 +40,7 @@ impl __sdk::__query_builder::HasCols for AdminIdentity {
 ///
 /// Provides typed access to indexed columns for query building.
 pub struct AdminIdentityIxCols {
+    pub granted_at: __sdk::__query_builder::IxCol<AdminIdentity, __sdk::Timestamp>,
     pub identity: __sdk::__query_builder::IxCol<AdminIdentity, __sdk::Identity>,
 }
 
@@ -47,6 +48,7 @@ impl __sdk::__query_builder::HasIxCols for AdminIdentity {
     type IxCols = AdminIdentityIxCols;
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
         AdminIdentityIxCols {
+            granted_at: __sdk::__query_builder::IxCol::new(table_name, "granted_at"),
             identity: __sdk::__query_builder::IxCol::new(table_name, "identity"),
         }
     }

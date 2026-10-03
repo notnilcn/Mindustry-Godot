@@ -172,6 +172,9 @@ fn two_clients_relay_ping_round_trip() {
             "",
             0,
             Vec::new(),
+            None,
+            None,
+            None,
         )
         .is_ok(),
         "create_match failed"
@@ -247,6 +250,9 @@ fn player_state_roundtrip() {
             "",
             0,
             Vec::new(),
+            None,
+            None,
+            None,
         )
         .is_ok()
     );
@@ -345,6 +351,9 @@ fn relay_rejects_non_member_and_rate_limit() {
             "",
             0,
             Vec::new(),
+            None,
+            None,
+            None,
         )
         .is_ok()
     );

@@ -9,7 +9,8 @@ use spacetimedb::{ReducerContext, Table, reducer};
 use super::audit::audit;
 use super::global::PROTOCOL_VERSION;
 use super::seeds::{
-    seed_admin_identities, seed_protocol_info, seed_relay_config, seed_server_config,
+    seed_admin_identities, seed_content_catalog, seed_protocol_info, seed_relay_config,
+    seed_server_config,
 };
 use super::tables::AuditKind;
 use crate::identity::tables::{Player, PlayerSession, player, player_session};
@@ -22,6 +23,7 @@ pub fn init(ctx: &ReducerContext) {
     seed_relay_config(ctx);
     seed_server_config(ctx);
     seed_admin_identities(ctx);
+    seed_content_catalog(ctx);
     crate::relay::sweep::seed_maintenance(ctx);
     audit(
         ctx,

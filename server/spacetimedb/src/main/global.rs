@@ -158,3 +158,38 @@ pub const IDLE_ROW_TTL_SECS: u64 = 30 * 24 * 3600;
 
 /// Player-session rows are pruned after 30 days (plan §6.8).
 pub const PLAYER_SESSION_TTL_SECS: u64 = 30 * 24 * 3600;
+
+// ---- Plan 21 M6 (admin, campaign/schematics, content catalog) ----
+
+/// Admin actions allowed per identity per window (plan §3.10: 5/10 s).
+pub const ADMIN_RATE_MAX: u32 = 5;
+
+/// Admin rate window length in milliseconds (plan §3.10).
+pub const ADMIN_RATE_WINDOW_MS: u32 = 10_000;
+
+/// Hard cap on a ban duration (plan §3.10: 30 days).
+pub const MAX_BAN_SECS: u64 = 30 * 24 * 3600;
+
+/// Chat-filter substring cap.
+pub const MAX_CHAT_FILTER_LEN: usize = 64;
+
+/// Per-player schematic payload cap (plan §3.12.2: base64 ≤ 128 KB).
+pub const MAX_SCHEMATIC_BASE64: usize = 128 * 1024;
+
+/// Schematic name cap.
+pub const MAX_SCHEMATIC_NAME: usize = 100;
+
+/// Schematic tag JSON cap.
+pub const MAX_SCHEMATIC_TAGS_JSON: usize = 8 * 1024;
+
+/// Campaign planet name cap.
+pub const MAX_PLANET_NAME: usize = 100;
+
+/// Sector `info_json` payload cap (plan 12 SectorInfoRow).
+pub const MAX_SECTOR_INFO_JSON: usize = 32 * 1024;
+
+/// Unlock requirement JSON cap.
+pub const MAX_UNLOCK_REQUIREMENTS_JSON: usize = 8 * 1024;
+
+/// Campaign-stat key cap.
+pub const MAX_STAT_KEY: usize = 100;

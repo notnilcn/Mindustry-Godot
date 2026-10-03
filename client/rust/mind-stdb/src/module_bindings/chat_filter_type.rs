@@ -46,6 +46,7 @@ impl __sdk::__query_builder::HasCols for ChatFilter {
 ///
 /// Provides typed access to indexed columns for query building.
 pub struct ChatFilterIxCols {
+    pub added_at: __sdk::__query_builder::IxCol<ChatFilter, __sdk::Timestamp>,
     pub filter_id: __sdk::__query_builder::IxCol<ChatFilter, u64>,
 }
 
@@ -53,6 +54,7 @@ impl __sdk::__query_builder::HasIxCols for ChatFilter {
     type IxCols = ChatFilterIxCols;
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
         ChatFilterIxCols {
+            added_at: __sdk::__query_builder::IxCol::new(table_name, "added_at"),
             filter_id: __sdk::__query_builder::IxCol::new(table_name, "filter_id"),
         }
     }

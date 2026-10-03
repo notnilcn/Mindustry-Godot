@@ -27,8 +27,13 @@ use crate::config::{ConnectionConfig, StdbMode};
 use crate::identity::LocalIdentity;
 use crate::module_bindings::{
     ChatKind, CommandKind, DbConnection, Gamemode, MemberRole, PlayerStateReport, RemoteTables,
-    SnapshotKind, SubscriptionHandle, UiEventKind, Visibility, all_matchesQueryTableAccess,
-    all_playersQueryTableAccess, create_match as _, join_match as _, leave_match as _,
+    SnapshotKind, SubscriptionHandle, UiEventKind, Visibility, add_campaign_stat as _,
+    admin_add_chat_filter as _, admin_ban as _, admin_grant as _, admin_kick as _,
+    admin_remove_chat_filter as _, admin_run_wave as _, admin_set_config as _,
+    admin_set_whitelist as _, admin_skip_wave as _, admin_switch_team as _, admin_tile_op as _,
+    admin_unban as _, admin_whitelist as _, advance_turn as _, all_matchesQueryTableAccess,
+    all_playersQueryTableAccess, create_campaign as _, create_match as _, delete_schematic as _,
+    import_schematic as _, join_match as _, leave_match as _,
     local_client_settingsQueryTableAccess, local_player_profileQueryTableAccess,
     local_playerQueryTableAccess, my_kickQueryTableAccess, my_match_chatQueryTableAccess,
     my_match_checksumsQueryTableAccess, my_match_commandsQueryTableAccess,
@@ -40,8 +45,9 @@ use crate::module_bindings::{
     my_sender_command_stateQueryTableAccess, protocol_infoQueryTableAccess, publish_checksum as _,
     publish_match_state as _, publish_snapshot as _, publish_ui_event as _,
     relay_configQueryTableAccess, report_plan_snapshot as _, report_player_state as _,
-    request_snapshot as _, send_chat as _, send_match_command as _, server_configQueryTableAccess,
-    set_ready as _, set_username as _, start_match as _,
+    request_snapshot as _, save_schematic as _, save_sector_info as _, send_chat as _,
+    send_match_command as _, server_configQueryTableAccess, set_ready as _, set_unlock as _,
+    set_username as _, start_match as _,
 };
 use crate::token::{FileTokenStore, TokenStore};
 use crate::waves::{SubscriptionWaves, WaveName};
@@ -441,6 +447,9 @@ impl Connector {
         build_id: &str,
         content_hash: u64,
         mods: Vec<String>,
+        campaign_id: Option<u64>,
+        sector_planet: Option<String>,
+        sector_id: Option<u32>,
     ) -> Result<(), ConnectorError> {
         self.reducer_conn()?
             .reducers
@@ -456,6 +465,9 @@ impl Connector {
                 build_id.to_string(),
                 content_hash,
                 mods,
+                campaign_id,
+                sector_planet,
+                sector_id,
             )
             .map_err(send_error)
     }
@@ -680,6 +692,265 @@ impl Connector {
                 content_hash,
                 blob,
             )
+            .map_err(send_error)
+    }
+
+    /// Creates an MP campaign owned by the caller (plan 21 §3.12.1).
+    pub fn create_campaign(
+        &mut self,
+        planet: &str,
+        rules_json: &str,
+    ) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .create_campaign(planet.to_string(), rules_json.to_string())
+            .map_err(send_error)
+    }
+
+    /// Upserts one sector's persisted campaign state (campaign host only).
+    #[allow(clippy::too_many_arguments)]
+    pub fn save_sector_info(
+        &mut self,
+        campaign_id: u64,
+        planet: &str,
+        sector_id: u32,
+        info_json: &str,
+        wave: i32,
+        win_wave: i32,
+        waves: bool,
+        attack: bool,
+        minutes_captured: f32,
+        playtime: u64,
+        spawn_position: i32,
+        last_preset_name: &str,
+        was_captured: bool,
+    ) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .save_sector_info(
+                campaign_id,
+                planet.to_string(),
+                sector_id,
+                info_json.to_string(),
+                wave,
+                win_wave,
+                waves,
+                attack,
+                minutes_captured,
+                playtime,
+                spawn_position,
+                last_preset_name.to_string(),
+                was_captured,
+            )
+            .map_err(send_error)
+    }
+
+    /// Upserts one content unlock (campaign host only).
+    pub fn set_unlock(
+        &mut self,
+        campaign_id: u64,
+        content_name: &str,
+        unlocked: bool,
+        requirements_json: &str,
+    ) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .set_unlock(
+                campaign_id,
+                content_name.to_string(),
+                unlocked,
+                requirements_json.to_string(),
+            )
+            .map_err(send_error)
+    }
+
+    /// Adds `delta` to a campaign statistic (campaign host only).
+    pub fn add_campaign_stat(
+        &mut self,
+        campaign_id: u64,
+        kind: u8,
+        key: &str,
+        delta: i64,
+    ) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .add_campaign_stat(campaign_id, kind, key.to_string(), delta)
+            .map_err(send_error)
+    }
+
+    /// Advances a campaign turn (campaign host only).
+    pub fn advance_turn(&mut self, campaign_id: u64) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .advance_turn(campaign_id)
+            .map_err(send_error)
+    }
+
+    /// Saves/replaces a personal schematic.
+    pub fn save_schematic(
+        &mut self,
+        name: &str,
+        base64: &str,
+        tags_json: &str,
+    ) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .save_schematic(name.to_string(), base64.to_string(), tags_json.to_string())
+            .map_err(send_error)
+    }
+
+    /// Imports a personal schematic (same semantics as [`Self::save_schematic`]).
+    pub fn import_schematic(
+        &mut self,
+        name: &str,
+        base64: &str,
+        tags_json: &str,
+    ) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .import_schematic(name.to_string(), base64.to_string(), tags_json.to_string())
+            .map_err(send_error)
+    }
+
+    /// Deletes one of the caller's schematics.
+    pub fn delete_schematic(&mut self, schematic_id: u64) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .delete_schematic(schematic_id)
+            .map_err(send_error)
+    }
+
+    /// Kicks a member (admin or match host; plan §3.10).
+    pub fn admin_kick(
+        &mut self,
+        match_id: u64,
+        target: Identity,
+        reason: &str,
+    ) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .admin_kick(match_id, target, reason.to_string())
+            .map_err(send_error)
+    }
+
+    /// Bans an identity (admin only).
+    pub fn admin_ban(
+        &mut self,
+        target: Identity,
+        reason: &str,
+        duration_secs: Option<u64>,
+    ) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .admin_ban(target, reason.to_string(), duration_secs)
+            .map_err(send_error)
+    }
+
+    /// Removes every ban row for an identity (admin only).
+    pub fn admin_unban(&mut self, target: Identity) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .admin_unban(target)
+            .map_err(send_error)
+    }
+
+    /// Toggles the global whitelist (admin only).
+    pub fn admin_set_whitelist(&mut self, enabled: bool) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .admin_set_whitelist(enabled)
+            .map_err(send_error)
+    }
+
+    /// Adds/removes a whitelist entry (admin only).
+    pub fn admin_whitelist(&mut self, target: Identity, on: bool) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .admin_whitelist(target, on)
+            .map_err(send_error)
+    }
+
+    /// Grants/revokes a global admin (admin only).
+    pub fn admin_grant(&mut self, target: Identity, on: bool) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .admin_grant(target, on)
+            .map_err(send_error)
+    }
+
+    /// Sets a typed `server_config` field (admin only).
+    pub fn admin_set_config(&mut self, field: &str, value: &str) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .admin_set_config(field.to_string(), value.to_string())
+            .map_err(send_error)
+    }
+
+    /// Adds a global chat filter (admin only).
+    pub fn admin_add_chat_filter(
+        &mut self,
+        pattern: &str,
+        mute: bool,
+    ) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .admin_add_chat_filter(pattern.to_string(), mute)
+            .map_err(send_error)
+    }
+
+    /// Removes a chat filter by id (admin only).
+    pub fn admin_remove_chat_filter(&mut self, filter_id: u64) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .admin_remove_chat_filter(filter_id)
+            .map_err(send_error)
+    }
+
+    /// Forces the next wave (admin or host).
+    pub fn admin_skip_wave(&mut self, match_id: u64) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .admin_skip_wave(match_id)
+            .map_err(send_error)
+    }
+
+    /// Runs `count` waves (admin or host).
+    pub fn admin_run_wave(&mut self, match_id: u64, count: u8) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .admin_run_wave(match_id, count)
+            .map_err(send_error)
+    }
+
+    /// Switches a player's team (admin or host).
+    pub fn admin_switch_team(
+        &mut self,
+        match_id: u64,
+        target: Identity,
+        team: u8,
+    ) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .admin_switch_team(match_id, target, team)
+            .map_err(send_error)
+    }
+
+    /// Applies a host/admin remote tile op (admin or host).
+    #[allow(clippy::too_many_arguments)]
+    pub fn admin_tile_op(
+        &mut self,
+        match_id: u64,
+        op: u8,
+        points: Vec<i32>,
+        arg0: i32,
+        arg1: i32,
+        arg2: i32,
+        name0: Option<String>,
+        name1: Option<String>,
+    ) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .admin_tile_op(match_id, op, points, arg0, arg1, arg2, name0, name1)
             .map_err(send_error)
     }
 

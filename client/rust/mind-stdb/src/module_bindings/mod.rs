@@ -6,18 +6,46 @@
 #![allow(unused, clippy::all)]
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
+pub mod add_campaign_stat_reducer;
+pub mod admin_action_kind_type;
+pub mod admin_action_log_table;
+pub mod admin_action_log_type;
+pub mod admin_add_chat_filter_reducer;
+pub mod admin_ban_reducer;
+pub mod admin_grant_reducer;
 pub mod admin_identity_table;
 pub mod admin_identity_type;
+pub mod admin_kick_reducer;
+pub mod admin_rate_type;
+pub mod admin_remove_chat_filter_reducer;
+pub mod admin_run_wave_reducer;
+pub mod admin_set_config_reducer;
+pub mod admin_set_whitelist_reducer;
+pub mod admin_skip_wave_reducer;
+pub mod admin_switch_team_reducer;
 pub mod admin_switch_team_type;
+pub mod admin_tile_op_reducer;
 pub mod admin_tile_op_type;
+pub mod admin_unban_reducer;
+pub mod admin_whitelist_reducer;
+pub mod advance_turn_reducer;
+pub mod all_admins_table;
+pub mod all_bans_table;
+pub mod all_chat_filters_table;
 pub mod all_matches_table;
 pub mod all_players_table;
+pub mod all_whitelist_table;
+pub mod am_i_admin_table;
 pub mod audit_kind_type;
 pub mod audit_log_type;
 pub mod authority_mode_type;
 pub mod break_block_type;
 pub mod building_control_select_type;
 pub mod bullet_type;
+pub mod campaign_stat_type;
+pub mod campaign_stats_table;
+pub mod campaign_table;
+pub mod campaign_type;
 pub mod chat_filter_table;
 pub mod chat_filter_type;
 pub mod chat_kind_type;
@@ -30,11 +58,16 @@ pub mod command_kind_type;
 pub mod command_rate_type;
 pub mod complete_objective_type;
 pub mod config_block_type;
+pub mod content_catalog_table;
+pub mod content_catalog_type;
+pub mod create_campaign_reducer;
 pub mod create_match_reducer;
 pub mod create_profile_reducer;
 pub mod custom_type;
 pub mod delete_plans_type;
+pub mod delete_schematic_reducer;
 pub mod gamemode_type;
+pub mod import_schematic_reducer;
 pub mod inventory_type;
 pub mod join_match_reducer;
 pub mod leave_match_reducer;
@@ -70,6 +103,11 @@ pub mod match_ui_event_type;
 pub mod member_role_type;
 pub mod menu_builder_choose_type;
 pub mod menu_choose_type;
+pub mod my_admin_actions_table;
+pub mod my_campaign_sectors_table;
+pub mod my_campaign_stats_table;
+pub mod my_campaign_unlocks_table;
+pub mod my_campaigns_table;
 pub mod my_kick_table;
 pub mod my_match_chat_table;
 pub mod my_match_checksums_table;
@@ -85,6 +123,7 @@ pub mod my_match_state_table;
 pub mod my_match_table;
 pub mod my_match_ui_events_table;
 pub mod my_matches_table;
+pub mod my_schematics_table;
 pub mod my_sender_command_state_table;
 pub mod payload_type;
 pub mod place_block_type;
@@ -116,6 +155,12 @@ pub mod request_snapshot_reducer;
 pub mod research_unlock_type;
 pub mod rotate_type;
 pub mod run_wave_type;
+pub mod save_schematic_reducer;
+pub mod save_sector_info_reducer;
+pub mod schematic_table;
+pub mod schematic_type;
+pub mod sector_info_table;
+pub mod sector_info_type;
 pub mod send_chat_reducer;
 pub mod send_match_command_reducer;
 pub mod sender_command_state_type;
@@ -124,6 +169,7 @@ pub mod server_config_type;
 pub mod set_ready_reducer;
 pub mod set_rule_type;
 pub mod set_rules_type;
+pub mod set_unlock_reducer;
 pub mod set_username_reducer;
 pub mod snapshot_kind_type;
 pub mod snapshot_rate_type;
@@ -134,23 +180,53 @@ pub mod unit_command_queue_type;
 pub mod unit_command_type;
 pub mod unit_control_type;
 pub mod unit_stance_type;
+pub mod unlock_table;
+pub mod unlock_type;
 pub mod update_client_settings_reducer;
 pub mod visibility_type;
 pub mod whitelist_entry_table;
 pub mod whitelist_entry_type;
 
+pub use add_campaign_stat_reducer::add_campaign_stat;
+pub use admin_action_kind_type::AdminActionKind;
+pub use admin_action_log_table::*;
+pub use admin_action_log_type::AdminActionLog;
+pub use admin_add_chat_filter_reducer::admin_add_chat_filter;
+pub use admin_ban_reducer::admin_ban;
+pub use admin_grant_reducer::admin_grant;
 pub use admin_identity_table::*;
 pub use admin_identity_type::AdminIdentity;
+pub use admin_kick_reducer::admin_kick;
+pub use admin_rate_type::AdminRate;
+pub use admin_remove_chat_filter_reducer::admin_remove_chat_filter;
+pub use admin_run_wave_reducer::admin_run_wave;
+pub use admin_set_config_reducer::admin_set_config;
+pub use admin_set_whitelist_reducer::admin_set_whitelist;
+pub use admin_skip_wave_reducer::admin_skip_wave;
+pub use admin_switch_team_reducer::admin_switch_team;
 pub use admin_switch_team_type::AdminSwitchTeam;
+pub use admin_tile_op_reducer::admin_tile_op;
 pub use admin_tile_op_type::AdminTileOp;
+pub use admin_unban_reducer::admin_unban;
+pub use admin_whitelist_reducer::admin_whitelist;
+pub use advance_turn_reducer::advance_turn;
+pub use all_admins_table::*;
+pub use all_bans_table::*;
+pub use all_chat_filters_table::*;
 pub use all_matches_table::*;
 pub use all_players_table::*;
+pub use all_whitelist_table::*;
+pub use am_i_admin_table::*;
 pub use audit_kind_type::AuditKind;
 pub use audit_log_type::AuditLog;
 pub use authority_mode_type::AuthorityMode;
 pub use break_block_type::BreakBlock;
 pub use building_control_select_type::BuildingControlSelect;
 pub use bullet_type::Bullet;
+pub use campaign_stat_type::CampaignStat;
+pub use campaign_stats_table::*;
+pub use campaign_table::*;
+pub use campaign_type::Campaign;
 pub use chat_filter_table::*;
 pub use chat_filter_type::ChatFilter;
 pub use chat_kind_type::ChatKind;
@@ -163,11 +239,16 @@ pub use command_kind_type::CommandKind;
 pub use command_rate_type::CommandRate;
 pub use complete_objective_type::CompleteObjective;
 pub use config_block_type::ConfigBlock;
+pub use content_catalog_table::*;
+pub use content_catalog_type::ContentCatalog;
+pub use create_campaign_reducer::create_campaign;
 pub use create_match_reducer::create_match;
 pub use create_profile_reducer::create_profile;
 pub use custom_type::Custom;
 pub use delete_plans_type::DeletePlans;
+pub use delete_schematic_reducer::delete_schematic;
 pub use gamemode_type::Gamemode;
+pub use import_schematic_reducer::import_schematic;
 pub use inventory_type::Inventory;
 pub use join_match_reducer::join_match;
 pub use leave_match_reducer::leave_match;
@@ -203,6 +284,11 @@ pub use match_ui_event_type::MatchUiEvent;
 pub use member_role_type::MemberRole;
 pub use menu_builder_choose_type::MenuBuilderChoose;
 pub use menu_choose_type::MenuChoose;
+pub use my_admin_actions_table::*;
+pub use my_campaign_sectors_table::*;
+pub use my_campaign_stats_table::*;
+pub use my_campaign_unlocks_table::*;
+pub use my_campaigns_table::*;
 pub use my_kick_table::*;
 pub use my_match_chat_table::*;
 pub use my_match_checksums_table::*;
@@ -218,6 +304,7 @@ pub use my_match_state_table::*;
 pub use my_match_table::*;
 pub use my_match_ui_events_table::*;
 pub use my_matches_table::*;
+pub use my_schematics_table::*;
 pub use my_sender_command_state_table::*;
 pub use payload_type::Payload;
 pub use place_block_type::PlaceBlock;
@@ -249,6 +336,12 @@ pub use request_snapshot_reducer::request_snapshot;
 pub use research_unlock_type::ResearchUnlock;
 pub use rotate_type::Rotate;
 pub use run_wave_type::RunWave;
+pub use save_schematic_reducer::save_schematic;
+pub use save_sector_info_reducer::save_sector_info;
+pub use schematic_table::*;
+pub use schematic_type::Schematic;
+pub use sector_info_table::*;
+pub use sector_info_type::SectorInfo;
 pub use send_chat_reducer::send_chat;
 pub use send_match_command_reducer::send_match_command;
 pub use sender_command_state_type::SenderCommandState;
@@ -257,6 +350,7 @@ pub use server_config_type::ServerConfig;
 pub use set_ready_reducer::set_ready;
 pub use set_rule_type::SetRule;
 pub use set_rules_type::SetRules;
+pub use set_unlock_reducer::set_unlock;
 pub use set_username_reducer::set_username;
 pub use snapshot_kind_type::SnapshotKind;
 pub use snapshot_rate_type::SnapshotRate;
@@ -267,6 +361,8 @@ pub use unit_command_queue_type::UnitCommandQueue;
 pub use unit_command_type::UnitCommand;
 pub use unit_control_type::UnitControl;
 pub use unit_stance_type::UnitStance;
+pub use unlock_table::*;
+pub use unlock_type::Unlock;
 pub use update_client_settings_reducer::update_client_settings;
 pub use visibility_type::Visibility;
 pub use whitelist_entry_table::*;
@@ -280,6 +376,76 @@ pub use whitelist_entry_type::WhitelistEntry;
 /// to indicate which reducer caused the event.
 
 pub enum Reducer {
+    AddCampaignStat {
+        campaign_id: u64,
+        kind: u8,
+        key: String,
+        delta: i64,
+    },
+    AdminAddChatFilter {
+        pattern: String,
+        mute: bool,
+    },
+    AdminBan {
+        target: __sdk::Identity,
+        reason: String,
+        duration_secs: Option<u64>,
+    },
+    AdminGrant {
+        target: __sdk::Identity,
+        on: bool,
+    },
+    AdminKick {
+        match_id: u64,
+        target: __sdk::Identity,
+        reason: String,
+    },
+    AdminRemoveChatFilter {
+        filter_id: u64,
+    },
+    AdminRunWave {
+        match_id: u64,
+        count: u8,
+    },
+    AdminSetConfig {
+        field: String,
+        value: String,
+    },
+    AdminSetWhitelist {
+        enabled: bool,
+    },
+    AdminSkipWave {
+        match_id: u64,
+    },
+    AdminSwitchTeam {
+        match_id: u64,
+        target: __sdk::Identity,
+        team: u8,
+    },
+    AdminTileOp {
+        match_id: u64,
+        op: u8,
+        points: Vec<i32>,
+        arg_0: i32,
+        arg_1: i32,
+        arg_2: i32,
+        name_0: Option<String>,
+        name_1: Option<String>,
+    },
+    AdminUnban {
+        target: __sdk::Identity,
+    },
+    AdminWhitelist {
+        target: __sdk::Identity,
+        on: bool,
+    },
+    AdvanceTurn {
+        campaign_id: u64,
+    },
+    CreateCampaign {
+        planet: String,
+        rules_json: String,
+    },
     CreateMatch {
         map_id: String,
         map_seed: u64,
@@ -292,9 +458,20 @@ pub enum Reducer {
         build_id: String,
         content_hash: u64,
         mods: Vec<String>,
+        campaign_id: Option<u64>,
+        sector_planet: Option<String>,
+        sector_id: Option<u32>,
     },
     CreateProfile {
         name: String,
+    },
+    DeleteSchematic {
+        schematic_id: u64,
+    },
+    ImportSchematic {
+        name: String,
+        base_64: String,
+        tags_json: String,
     },
     JoinMatch {
         match_id: u64,
@@ -360,6 +537,26 @@ pub enum Reducer {
     RequestSnapshot {
         match_id: u64,
     },
+    SaveSchematic {
+        name: String,
+        base_64: String,
+        tags_json: String,
+    },
+    SaveSectorInfo {
+        campaign_id: u64,
+        planet: String,
+        sector_id: u32,
+        info_json: String,
+        wave: i32,
+        win_wave: i32,
+        waves: bool,
+        attack: bool,
+        minutes_captured: f32,
+        playtime: u64,
+        spawn_position: i32,
+        last_preset_name: String,
+        was_captured: bool,
+    },
     SendChat {
         match_id: u64,
         kind: ChatKind,
@@ -373,6 +570,12 @@ pub enum Reducer {
     SetReady {
         match_id: u64,
         ready: bool,
+    },
+    SetUnlock {
+        campaign_id: u64,
+        content_name: String,
+        unlocked: bool,
+        requirements_json: String,
     },
     SetUsername {
         username: String,
@@ -397,8 +600,26 @@ impl __sdk::InModule for Reducer {
 impl __sdk::Reducer for Reducer {
     fn reducer_name(&self) -> &'static str {
         match self {
+            Reducer::AddCampaignStat { .. } => "add_campaign_stat",
+            Reducer::AdminAddChatFilter { .. } => "admin_add_chat_filter",
+            Reducer::AdminBan { .. } => "admin_ban",
+            Reducer::AdminGrant { .. } => "admin_grant",
+            Reducer::AdminKick { .. } => "admin_kick",
+            Reducer::AdminRemoveChatFilter { .. } => "admin_remove_chat_filter",
+            Reducer::AdminRunWave { .. } => "admin_run_wave",
+            Reducer::AdminSetConfig { .. } => "admin_set_config",
+            Reducer::AdminSetWhitelist { .. } => "admin_set_whitelist",
+            Reducer::AdminSkipWave { .. } => "admin_skip_wave",
+            Reducer::AdminSwitchTeam { .. } => "admin_switch_team",
+            Reducer::AdminTileOp { .. } => "admin_tile_op",
+            Reducer::AdminUnban { .. } => "admin_unban",
+            Reducer::AdminWhitelist { .. } => "admin_whitelist",
+            Reducer::AdvanceTurn { .. } => "advance_turn",
+            Reducer::CreateCampaign { .. } => "create_campaign",
             Reducer::CreateMatch { .. } => "create_match",
             Reducer::CreateProfile { .. } => "create_profile",
+            Reducer::DeleteSchematic { .. } => "delete_schematic",
+            Reducer::ImportSchematic { .. } => "import_schematic",
             Reducer::JoinMatch { .. } => "join_match",
             Reducer::LeaveMatch { .. } => "leave_match",
             Reducer::PublishChecksum { .. } => "publish_checksum",
@@ -408,9 +629,12 @@ impl __sdk::Reducer for Reducer {
             Reducer::ReportPlanSnapshot { .. } => "report_plan_snapshot",
             Reducer::ReportPlayerState { .. } => "report_player_state",
             Reducer::RequestSnapshot { .. } => "request_snapshot",
+            Reducer::SaveSchematic { .. } => "save_schematic",
+            Reducer::SaveSectorInfo { .. } => "save_sector_info",
             Reducer::SendChat { .. } => "send_chat",
             Reducer::SendMatchCommand { .. } => "send_match_command",
             Reducer::SetReady { .. } => "set_ready",
+            Reducer::SetUnlock { .. } => "set_unlock",
             Reducer::SetUsername { .. } => "set_username",
             Reducer::StartMatch { .. } => "start_match",
             Reducer::UpdateClientSettings { .. } => "update_client_settings",
@@ -420,6 +644,124 @@ impl __sdk::Reducer for Reducer {
     #[allow(clippy::clone_on_copy)]
     fn args_bsatn(&self) -> Result<Vec<u8>, __sats::bsatn::EncodeError> {
         match self {
+            Reducer::AddCampaignStat {
+                campaign_id,
+                kind,
+                key,
+                delta,
+            } => __sats::bsatn::to_vec(&add_campaign_stat_reducer::AddCampaignStatArgs {
+                campaign_id: campaign_id.clone(),
+                kind: kind.clone(),
+                key: key.clone(),
+                delta: delta.clone(),
+            }),
+            Reducer::AdminAddChatFilter { pattern, mute } => {
+                __sats::bsatn::to_vec(&admin_add_chat_filter_reducer::AdminAddChatFilterArgs {
+                    pattern: pattern.clone(),
+                    mute: mute.clone(),
+                })
+            }
+            Reducer::AdminBan {
+                target,
+                reason,
+                duration_secs,
+            } => __sats::bsatn::to_vec(&admin_ban_reducer::AdminBanArgs {
+                target: target.clone(),
+                reason: reason.clone(),
+                duration_secs: duration_secs.clone(),
+            }),
+            Reducer::AdminGrant { target, on } => {
+                __sats::bsatn::to_vec(&admin_grant_reducer::AdminGrantArgs {
+                    target: target.clone(),
+                    on: on.clone(),
+                })
+            }
+            Reducer::AdminKick {
+                match_id,
+                target,
+                reason,
+            } => __sats::bsatn::to_vec(&admin_kick_reducer::AdminKickArgs {
+                match_id: match_id.clone(),
+                target: target.clone(),
+                reason: reason.clone(),
+            }),
+            Reducer::AdminRemoveChatFilter { filter_id } => __sats::bsatn::to_vec(
+                &admin_remove_chat_filter_reducer::AdminRemoveChatFilterArgs {
+                    filter_id: filter_id.clone(),
+                },
+            ),
+            Reducer::AdminRunWave { match_id, count } => {
+                __sats::bsatn::to_vec(&admin_run_wave_reducer::AdminRunWaveArgs {
+                    match_id: match_id.clone(),
+                    count: count.clone(),
+                })
+            }
+            Reducer::AdminSetConfig { field, value } => {
+                __sats::bsatn::to_vec(&admin_set_config_reducer::AdminSetConfigArgs {
+                    field: field.clone(),
+                    value: value.clone(),
+                })
+            }
+            Reducer::AdminSetWhitelist { enabled } => {
+                __sats::bsatn::to_vec(&admin_set_whitelist_reducer::AdminSetWhitelistArgs {
+                    enabled: enabled.clone(),
+                })
+            }
+            Reducer::AdminSkipWave { match_id } => {
+                __sats::bsatn::to_vec(&admin_skip_wave_reducer::AdminSkipWaveArgs {
+                    match_id: match_id.clone(),
+                })
+            }
+            Reducer::AdminSwitchTeam {
+                match_id,
+                target,
+                team,
+            } => __sats::bsatn::to_vec(&admin_switch_team_reducer::AdminSwitchTeamArgs {
+                match_id: match_id.clone(),
+                target: target.clone(),
+                team: team.clone(),
+            }),
+            Reducer::AdminTileOp {
+                match_id,
+                op,
+                points,
+                arg_0,
+                arg_1,
+                arg_2,
+                name_0,
+                name_1,
+            } => __sats::bsatn::to_vec(&admin_tile_op_reducer::AdminTileOpArgs {
+                match_id: match_id.clone(),
+                op: op.clone(),
+                points: points.clone(),
+                arg_0: arg_0.clone(),
+                arg_1: arg_1.clone(),
+                arg_2: arg_2.clone(),
+                name_0: name_0.clone(),
+                name_1: name_1.clone(),
+            }),
+            Reducer::AdminUnban { target } => {
+                __sats::bsatn::to_vec(&admin_unban_reducer::AdminUnbanArgs {
+                    target: target.clone(),
+                })
+            }
+            Reducer::AdminWhitelist { target, on } => {
+                __sats::bsatn::to_vec(&admin_whitelist_reducer::AdminWhitelistArgs {
+                    target: target.clone(),
+                    on: on.clone(),
+                })
+            }
+            Reducer::AdvanceTurn { campaign_id } => {
+                __sats::bsatn::to_vec(&advance_turn_reducer::AdvanceTurnArgs {
+                    campaign_id: campaign_id.clone(),
+                })
+            }
+            Reducer::CreateCampaign { planet, rules_json } => {
+                __sats::bsatn::to_vec(&create_campaign_reducer::CreateCampaignArgs {
+                    planet: planet.clone(),
+                    rules_json: rules_json.clone(),
+                })
+            }
             Reducer::CreateMatch {
                 map_id,
                 map_seed,
@@ -432,6 +774,9 @@ impl __sdk::Reducer for Reducer {
                 build_id,
                 content_hash,
                 mods,
+                campaign_id,
+                sector_planet,
+                sector_id,
             } => __sats::bsatn::to_vec(&create_match_reducer::CreateMatchArgs {
                 map_id: map_id.clone(),
                 map_seed: map_seed.clone(),
@@ -444,12 +789,29 @@ impl __sdk::Reducer for Reducer {
                 build_id: build_id.clone(),
                 content_hash: content_hash.clone(),
                 mods: mods.clone(),
+                campaign_id: campaign_id.clone(),
+                sector_planet: sector_planet.clone(),
+                sector_id: sector_id.clone(),
             }),
             Reducer::CreateProfile { name } => {
                 __sats::bsatn::to_vec(&create_profile_reducer::CreateProfileArgs {
                     name: name.clone(),
                 })
             }
+            Reducer::DeleteSchematic { schematic_id } => {
+                __sats::bsatn::to_vec(&delete_schematic_reducer::DeleteSchematicArgs {
+                    schematic_id: schematic_id.clone(),
+                })
+            }
+            Reducer::ImportSchematic {
+                name,
+                base_64,
+                tags_json,
+            } => __sats::bsatn::to_vec(&import_schematic_reducer::ImportSchematicArgs {
+                name: name.clone(),
+                base_64: base_64.clone(),
+                tags_json: tags_json.clone(),
+            }),
             Reducer::JoinMatch {
                 match_id,
                 password,
@@ -568,6 +930,44 @@ impl __sdk::Reducer for Reducer {
                     match_id: match_id.clone(),
                 })
             }
+            Reducer::SaveSchematic {
+                name,
+                base_64,
+                tags_json,
+            } => __sats::bsatn::to_vec(&save_schematic_reducer::SaveSchematicArgs {
+                name: name.clone(),
+                base_64: base_64.clone(),
+                tags_json: tags_json.clone(),
+            }),
+            Reducer::SaveSectorInfo {
+                campaign_id,
+                planet,
+                sector_id,
+                info_json,
+                wave,
+                win_wave,
+                waves,
+                attack,
+                minutes_captured,
+                playtime,
+                spawn_position,
+                last_preset_name,
+                was_captured,
+            } => __sats::bsatn::to_vec(&save_sector_info_reducer::SaveSectorInfoArgs {
+                campaign_id: campaign_id.clone(),
+                planet: planet.clone(),
+                sector_id: sector_id.clone(),
+                info_json: info_json.clone(),
+                wave: wave.clone(),
+                win_wave: win_wave.clone(),
+                waves: waves.clone(),
+                attack: attack.clone(),
+                minutes_captured: minutes_captured.clone(),
+                playtime: playtime.clone(),
+                spawn_position: spawn_position.clone(),
+                last_preset_name: last_preset_name.clone(),
+                was_captured: was_captured.clone(),
+            }),
             Reducer::SendChat {
                 match_id,
                 kind,
@@ -592,6 +992,17 @@ impl __sdk::Reducer for Reducer {
                     ready: ready.clone(),
                 })
             }
+            Reducer::SetUnlock {
+                campaign_id,
+                content_name,
+                unlocked,
+                requirements_json,
+            } => __sats::bsatn::to_vec(&set_unlock_reducer::SetUnlockArgs {
+                campaign_id: campaign_id.clone(),
+                content_name: content_name.clone(),
+                unlocked: unlocked.clone(),
+                requirements_json: requirements_json.clone(),
+            }),
             Reducer::SetUsername { username } => {
                 __sats::bsatn::to_vec(&set_username_reducer::SetUsernameArgs {
                     username: username.clone(),
@@ -625,11 +1036,20 @@ impl __sdk::Reducer for Reducer {
 #[allow(non_snake_case)]
 #[doc(hidden)]
 pub struct DbUpdate {
+    admin_action_log: __sdk::TableUpdate<AdminActionLog>,
     admin_identity: __sdk::TableUpdate<AdminIdentity>,
+    all_admins: __sdk::TableUpdate<AdminIdentity>,
+    all_bans: __sdk::TableUpdate<PlayerBan>,
+    all_chat_filters: __sdk::TableUpdate<ChatFilter>,
     all_matches: __sdk::TableUpdate<RelayMatch>,
     all_players: __sdk::TableUpdate<Player>,
+    all_whitelist: __sdk::TableUpdate<WhitelistEntry>,
+    am_i_admin: __sdk::TableUpdate<AdminIdentity>,
+    campaign: __sdk::TableUpdate<Campaign>,
+    campaign_stats: __sdk::TableUpdate<CampaignStat>,
     chat_filter: __sdk::TableUpdate<ChatFilter>,
     client_settings: __sdk::TableUpdate<ClientSettings>,
+    content_catalog: __sdk::TableUpdate<ContentCatalog>,
     local_client_settings: __sdk::TableUpdate<ClientSettings>,
     local_player: __sdk::TableUpdate<Player>,
     local_player_profile: __sdk::TableUpdate<PlayerProfile>,
@@ -642,6 +1062,11 @@ pub struct DbUpdate {
     match_snapshot: __sdk::TableUpdate<MatchSnapshot>,
     match_state: __sdk::TableUpdate<MatchState>,
     match_ui_event: __sdk::TableUpdate<MatchUiEvent>,
+    my_admin_actions: __sdk::TableUpdate<AdminActionLog>,
+    my_campaign_sectors: __sdk::TableUpdate<SectorInfo>,
+    my_campaign_stats: __sdk::TableUpdate<CampaignStat>,
+    my_campaign_unlocks: __sdk::TableUpdate<Unlock>,
+    my_campaigns: __sdk::TableUpdate<Campaign>,
     my_kick: __sdk::TableUpdate<MatchKick>,
     my_match: __sdk::TableUpdate<RelayMatch>,
     my_match_chat: __sdk::TableUpdate<MatchChat>,
@@ -657,6 +1082,7 @@ pub struct DbUpdate {
     my_match_state: __sdk::TableUpdate<MatchState>,
     my_match_ui_events: __sdk::TableUpdate<MatchUiEvent>,
     my_matches: __sdk::TableUpdate<RelayMatch>,
+    my_schematics: __sdk::TableUpdate<Schematic>,
     my_sender_command_state: __sdk::TableUpdate<SenderCommandState>,
     player: __sdk::TableUpdate<Player>,
     player_ban: __sdk::TableUpdate<PlayerBan>,
@@ -665,7 +1091,10 @@ pub struct DbUpdate {
     protocol_info: __sdk::TableUpdate<ProtocolInfo>,
     relay_config: __sdk::TableUpdate<RelayConfig>,
     relay_match: __sdk::TableUpdate<RelayMatch>,
+    schematic: __sdk::TableUpdate<Schematic>,
+    sector_info: __sdk::TableUpdate<SectorInfo>,
     server_config: __sdk::TableUpdate<ServerConfig>,
+    unlock: __sdk::TableUpdate<Unlock>,
     whitelist_entry: __sdk::TableUpdate<WhitelistEntry>,
 }
 
@@ -675,21 +1104,48 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_update in __sdk::transaction_update_iter_table_updates(raw) {
             match &table_update.table_name[..] {
+                "admin_action_log" => db_update
+                    .admin_action_log
+                    .append(admin_action_log_table::parse_table_update(table_update)?),
                 "admin_identity" => db_update
                     .admin_identity
                     .append(admin_identity_table::parse_table_update(table_update)?),
+                "all_admins" => db_update
+                    .all_admins
+                    .append(all_admins_table::parse_table_update(table_update)?),
+                "all_bans" => db_update
+                    .all_bans
+                    .append(all_bans_table::parse_table_update(table_update)?),
+                "all_chat_filters" => db_update
+                    .all_chat_filters
+                    .append(all_chat_filters_table::parse_table_update(table_update)?),
                 "all_matches" => db_update
                     .all_matches
                     .append(all_matches_table::parse_table_update(table_update)?),
                 "all_players" => db_update
                     .all_players
                     .append(all_players_table::parse_table_update(table_update)?),
+                "all_whitelist" => db_update
+                    .all_whitelist
+                    .append(all_whitelist_table::parse_table_update(table_update)?),
+                "am_i_admin" => db_update
+                    .am_i_admin
+                    .append(am_i_admin_table::parse_table_update(table_update)?),
+                "campaign" => db_update
+                    .campaign
+                    .append(campaign_table::parse_table_update(table_update)?),
+                "campaign_stats" => db_update
+                    .campaign_stats
+                    .append(campaign_stats_table::parse_table_update(table_update)?),
                 "chat_filter" => db_update
                     .chat_filter
                     .append(chat_filter_table::parse_table_update(table_update)?),
                 "client_settings" => db_update
                     .client_settings
                     .append(client_settings_table::parse_table_update(table_update)?),
+                "content_catalog" => db_update
+                    .content_catalog
+                    .append(content_catalog_table::parse_table_update(table_update)?),
                 "local_client_settings" => db_update.local_client_settings.append(
                     local_client_settings_table::parse_table_update(table_update)?,
                 ),
@@ -726,6 +1182,21 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "match_ui_event" => db_update
                     .match_ui_event
                     .append(match_ui_event_table::parse_table_update(table_update)?),
+                "my_admin_actions" => db_update
+                    .my_admin_actions
+                    .append(my_admin_actions_table::parse_table_update(table_update)?),
+                "my_campaign_sectors" => db_update
+                    .my_campaign_sectors
+                    .append(my_campaign_sectors_table::parse_table_update(table_update)?),
+                "my_campaign_stats" => db_update
+                    .my_campaign_stats
+                    .append(my_campaign_stats_table::parse_table_update(table_update)?),
+                "my_campaign_unlocks" => db_update
+                    .my_campaign_unlocks
+                    .append(my_campaign_unlocks_table::parse_table_update(table_update)?),
+                "my_campaigns" => db_update
+                    .my_campaigns
+                    .append(my_campaigns_table::parse_table_update(table_update)?),
                 "my_kick" => db_update
                     .my_kick
                     .append(my_kick_table::parse_table_update(table_update)?),
@@ -771,6 +1242,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "my_matches" => db_update
                     .my_matches
                     .append(my_matches_table::parse_table_update(table_update)?),
+                "my_schematics" => db_update
+                    .my_schematics
+                    .append(my_schematics_table::parse_table_update(table_update)?),
                 "my_sender_command_state" => db_update.my_sender_command_state.append(
                     my_sender_command_state_table::parse_table_update(table_update)?,
                 ),
@@ -795,9 +1269,18 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "relay_match" => db_update
                     .relay_match
                     .append(relay_match_table::parse_table_update(table_update)?),
+                "schematic" => db_update
+                    .schematic
+                    .append(schematic_table::parse_table_update(table_update)?),
+                "sector_info" => db_update
+                    .sector_info
+                    .append(sector_info_table::parse_table_update(table_update)?),
                 "server_config" => db_update
                     .server_config
                     .append(server_config_table::parse_table_update(table_update)?),
+                "unlock" => db_update
+                    .unlock
+                    .append(unlock_table::parse_table_update(table_update)?),
                 "whitelist_entry" => db_update
                     .whitelist_entry
                     .append(whitelist_entry_table::parse_table_update(table_update)?),
@@ -827,15 +1310,27 @@ impl __sdk::DbUpdate for DbUpdate {
     ) -> AppliedDiff<'_> {
         let mut diff = AppliedDiff::default();
 
+        diff.admin_action_log = cache
+            .apply_diff_to_table::<AdminActionLog>("admin_action_log", &self.admin_action_log)
+            .with_updates_by_pk(|row| &row.action_id);
         diff.admin_identity = cache
             .apply_diff_to_table::<AdminIdentity>("admin_identity", &self.admin_identity)
             .with_updates_by_pk(|row| &row.identity);
+        diff.campaign = cache
+            .apply_diff_to_table::<Campaign>("campaign", &self.campaign)
+            .with_updates_by_pk(|row| &row.campaign_id);
+        diff.campaign_stats = cache
+            .apply_diff_to_table::<CampaignStat>("campaign_stats", &self.campaign_stats)
+            .with_updates_by_pk(|row| &row.stat_id);
         diff.chat_filter = cache
             .apply_diff_to_table::<ChatFilter>("chat_filter", &self.chat_filter)
             .with_updates_by_pk(|row| &row.filter_id);
         diff.client_settings = cache
             .apply_diff_to_table::<ClientSettings>("client_settings", &self.client_settings)
             .with_updates_by_pk(|row| &row.identity);
+        diff.content_catalog = cache
+            .apply_diff_to_table::<ContentCatalog>("content_catalog", &self.content_catalog)
+            .with_updates_by_pk(|row| &row.content_id);
         diff.match_chat = cache
             .apply_diff_to_table::<MatchChat>("match_chat", &self.match_chat)
             .with_updates_by_pk(|row| &row.chat_id);
@@ -884,17 +1379,35 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.relay_match = cache
             .apply_diff_to_table::<RelayMatch>("relay_match", &self.relay_match)
             .with_updates_by_pk(|row| &row.match_id);
+        diff.schematic = cache
+            .apply_diff_to_table::<Schematic>("schematic", &self.schematic)
+            .with_updates_by_pk(|row| &row.schematic_id);
+        diff.sector_info = cache
+            .apply_diff_to_table::<SectorInfo>("sector_info", &self.sector_info)
+            .with_updates_by_pk(|row| &row.sector_row_id);
         diff.server_config = cache
             .apply_diff_to_table::<ServerConfig>("server_config", &self.server_config)
             .with_updates_by_pk(|row| &row.id);
+        diff.unlock = cache
+            .apply_diff_to_table::<Unlock>("unlock", &self.unlock)
+            .with_updates_by_pk(|row| &row.unlock_id);
         diff.whitelist_entry = cache
             .apply_diff_to_table::<WhitelistEntry>("whitelist_entry", &self.whitelist_entry)
             .with_updates_by_pk(|row| &row.identity);
+        diff.all_admins =
+            cache.apply_diff_to_table::<AdminIdentity>("all_admins", &self.all_admins);
+        diff.all_bans = cache.apply_diff_to_table::<PlayerBan>("all_bans", &self.all_bans);
+        diff.all_chat_filters =
+            cache.apply_diff_to_table::<ChatFilter>("all_chat_filters", &self.all_chat_filters);
         diff.all_matches =
             cache.apply_diff_to_table::<RelayMatch>("all_matches", &self.all_matches);
         diff.all_players = cache
             .apply_diff_to_table::<Player>("all_players", &self.all_players)
             .with_updates_by_pk(|row| &row.identity);
+        diff.all_whitelist =
+            cache.apply_diff_to_table::<WhitelistEntry>("all_whitelist", &self.all_whitelist);
+        diff.am_i_admin =
+            cache.apply_diff_to_table::<AdminIdentity>("am_i_admin", &self.am_i_admin);
         diff.local_client_settings = cache.apply_diff_to_table::<ClientSettings>(
             "local_client_settings",
             &self.local_client_settings,
@@ -904,6 +1417,16 @@ impl __sdk::DbUpdate for DbUpdate {
             "local_player_profile",
             &self.local_player_profile,
         );
+        diff.my_admin_actions =
+            cache.apply_diff_to_table::<AdminActionLog>("my_admin_actions", &self.my_admin_actions);
+        diff.my_campaign_sectors = cache
+            .apply_diff_to_table::<SectorInfo>("my_campaign_sectors", &self.my_campaign_sectors);
+        diff.my_campaign_stats =
+            cache.apply_diff_to_table::<CampaignStat>("my_campaign_stats", &self.my_campaign_stats);
+        diff.my_campaign_unlocks =
+            cache.apply_diff_to_table::<Unlock>("my_campaign_unlocks", &self.my_campaign_unlocks);
+        diff.my_campaigns =
+            cache.apply_diff_to_table::<Campaign>("my_campaigns", &self.my_campaigns);
         diff.my_kick = cache.apply_diff_to_table::<MatchKick>("my_kick", &self.my_kick);
         diff.my_match = cache.apply_diff_to_table::<RelayMatch>("my_match", &self.my_match);
         diff.my_match_chat =
@@ -939,6 +1462,8 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.my_match_ui_events = cache
             .apply_diff_to_table::<MatchUiEvent>("my_match_ui_events", &self.my_match_ui_events);
         diff.my_matches = cache.apply_diff_to_table::<RelayMatch>("my_matches", &self.my_matches);
+        diff.my_schematics =
+            cache.apply_diff_to_table::<Schematic>("my_schematics", &self.my_schematics);
         diff.my_sender_command_state = cache.apply_diff_to_table::<SenderCommandState>(
             "my_sender_command_state",
             &self.my_sender_command_state,
@@ -950,8 +1475,20 @@ impl __sdk::DbUpdate for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_rows in raw.tables {
             match &table_rows.table[..] {
+                "admin_action_log" => db_update
+                    .admin_action_log
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "admin_identity" => db_update
                     .admin_identity
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "all_admins" => db_update
+                    .all_admins
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "all_bans" => db_update
+                    .all_bans
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "all_chat_filters" => db_update
+                    .all_chat_filters
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "all_matches" => db_update
                     .all_matches
@@ -959,11 +1496,26 @@ impl __sdk::DbUpdate for DbUpdate {
                 "all_players" => db_update
                     .all_players
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "all_whitelist" => db_update
+                    .all_whitelist
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "am_i_admin" => db_update
+                    .am_i_admin
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "campaign" => db_update
+                    .campaign
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "campaign_stats" => db_update
+                    .campaign_stats
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "chat_filter" => db_update
                     .chat_filter
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "client_settings" => db_update
                     .client_settings
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "content_catalog" => db_update
+                    .content_catalog
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "local_client_settings" => db_update
                     .local_client_settings
@@ -1000,6 +1552,21 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "match_ui_event" => db_update
                     .match_ui_event
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "my_admin_actions" => db_update
+                    .my_admin_actions
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "my_campaign_sectors" => db_update
+                    .my_campaign_sectors
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "my_campaign_stats" => db_update
+                    .my_campaign_stats
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "my_campaign_unlocks" => db_update
+                    .my_campaign_unlocks
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "my_campaigns" => db_update
+                    .my_campaigns
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "my_kick" => db_update
                     .my_kick
@@ -1046,6 +1613,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "my_matches" => db_update
                     .my_matches
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "my_schematics" => db_update
+                    .my_schematics
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "my_sender_command_state" => db_update
                     .my_sender_command_state
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
@@ -1070,8 +1640,17 @@ impl __sdk::DbUpdate for DbUpdate {
                 "relay_match" => db_update
                     .relay_match
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "schematic" => db_update
+                    .schematic
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "sector_info" => db_update
+                    .sector_info
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "server_config" => db_update
                     .server_config
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "unlock" => db_update
+                    .unlock
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "whitelist_entry" => db_update
                     .whitelist_entry
@@ -1089,8 +1668,20 @@ impl __sdk::DbUpdate for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_rows in raw.tables {
             match &table_rows.table[..] {
+                "admin_action_log" => db_update
+                    .admin_action_log
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "admin_identity" => db_update
                     .admin_identity
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "all_admins" => db_update
+                    .all_admins
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "all_bans" => db_update
+                    .all_bans
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "all_chat_filters" => db_update
+                    .all_chat_filters
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "all_matches" => db_update
                     .all_matches
@@ -1098,11 +1689,26 @@ impl __sdk::DbUpdate for DbUpdate {
                 "all_players" => db_update
                     .all_players
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "all_whitelist" => db_update
+                    .all_whitelist
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "am_i_admin" => db_update
+                    .am_i_admin
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "campaign" => db_update
+                    .campaign
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "campaign_stats" => db_update
+                    .campaign_stats
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "chat_filter" => db_update
                     .chat_filter
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "client_settings" => db_update
                     .client_settings
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "content_catalog" => db_update
+                    .content_catalog
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "local_client_settings" => db_update
                     .local_client_settings
@@ -1139,6 +1745,21 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "match_ui_event" => db_update
                     .match_ui_event
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "my_admin_actions" => db_update
+                    .my_admin_actions
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "my_campaign_sectors" => db_update
+                    .my_campaign_sectors
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "my_campaign_stats" => db_update
+                    .my_campaign_stats
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "my_campaign_unlocks" => db_update
+                    .my_campaign_unlocks
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "my_campaigns" => db_update
+                    .my_campaigns
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "my_kick" => db_update
                     .my_kick
@@ -1185,6 +1806,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "my_matches" => db_update
                     .my_matches
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "my_schematics" => db_update
+                    .my_schematics
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "my_sender_command_state" => db_update
                     .my_sender_command_state
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -1209,8 +1833,17 @@ impl __sdk::DbUpdate for DbUpdate {
                 "relay_match" => db_update
                     .relay_match
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "schematic" => db_update
+                    .schematic
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "sector_info" => db_update
+                    .sector_info
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "server_config" => db_update
                     .server_config
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "unlock" => db_update
+                    .unlock
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "whitelist_entry" => db_update
                     .whitelist_entry
@@ -1230,11 +1863,20 @@ impl __sdk::DbUpdate for DbUpdate {
 #[allow(non_snake_case)]
 #[doc(hidden)]
 pub struct AppliedDiff<'r> {
+    admin_action_log: __sdk::TableAppliedDiff<'r, AdminActionLog>,
     admin_identity: __sdk::TableAppliedDiff<'r, AdminIdentity>,
+    all_admins: __sdk::TableAppliedDiff<'r, AdminIdentity>,
+    all_bans: __sdk::TableAppliedDiff<'r, PlayerBan>,
+    all_chat_filters: __sdk::TableAppliedDiff<'r, ChatFilter>,
     all_matches: __sdk::TableAppliedDiff<'r, RelayMatch>,
     all_players: __sdk::TableAppliedDiff<'r, Player>,
+    all_whitelist: __sdk::TableAppliedDiff<'r, WhitelistEntry>,
+    am_i_admin: __sdk::TableAppliedDiff<'r, AdminIdentity>,
+    campaign: __sdk::TableAppliedDiff<'r, Campaign>,
+    campaign_stats: __sdk::TableAppliedDiff<'r, CampaignStat>,
     chat_filter: __sdk::TableAppliedDiff<'r, ChatFilter>,
     client_settings: __sdk::TableAppliedDiff<'r, ClientSettings>,
+    content_catalog: __sdk::TableAppliedDiff<'r, ContentCatalog>,
     local_client_settings: __sdk::TableAppliedDiff<'r, ClientSettings>,
     local_player: __sdk::TableAppliedDiff<'r, Player>,
     local_player_profile: __sdk::TableAppliedDiff<'r, PlayerProfile>,
@@ -1247,6 +1889,11 @@ pub struct AppliedDiff<'r> {
     match_snapshot: __sdk::TableAppliedDiff<'r, MatchSnapshot>,
     match_state: __sdk::TableAppliedDiff<'r, MatchState>,
     match_ui_event: __sdk::TableAppliedDiff<'r, MatchUiEvent>,
+    my_admin_actions: __sdk::TableAppliedDiff<'r, AdminActionLog>,
+    my_campaign_sectors: __sdk::TableAppliedDiff<'r, SectorInfo>,
+    my_campaign_stats: __sdk::TableAppliedDiff<'r, CampaignStat>,
+    my_campaign_unlocks: __sdk::TableAppliedDiff<'r, Unlock>,
+    my_campaigns: __sdk::TableAppliedDiff<'r, Campaign>,
     my_kick: __sdk::TableAppliedDiff<'r, MatchKick>,
     my_match: __sdk::TableAppliedDiff<'r, RelayMatch>,
     my_match_chat: __sdk::TableAppliedDiff<'r, MatchChat>,
@@ -1262,6 +1909,7 @@ pub struct AppliedDiff<'r> {
     my_match_state: __sdk::TableAppliedDiff<'r, MatchState>,
     my_match_ui_events: __sdk::TableAppliedDiff<'r, MatchUiEvent>,
     my_matches: __sdk::TableAppliedDiff<'r, RelayMatch>,
+    my_schematics: __sdk::TableAppliedDiff<'r, Schematic>,
     my_sender_command_state: __sdk::TableAppliedDiff<'r, SenderCommandState>,
     player: __sdk::TableAppliedDiff<'r, Player>,
     player_ban: __sdk::TableAppliedDiff<'r, PlayerBan>,
@@ -1270,7 +1918,10 @@ pub struct AppliedDiff<'r> {
     protocol_info: __sdk::TableAppliedDiff<'r, ProtocolInfo>,
     relay_config: __sdk::TableAppliedDiff<'r, RelayConfig>,
     relay_match: __sdk::TableAppliedDiff<'r, RelayMatch>,
+    schematic: __sdk::TableAppliedDiff<'r, Schematic>,
+    sector_info: __sdk::TableAppliedDiff<'r, SectorInfo>,
     server_config: __sdk::TableAppliedDiff<'r, ServerConfig>,
+    unlock: __sdk::TableAppliedDiff<'r, Unlock>,
     whitelist_entry: __sdk::TableAppliedDiff<'r, WhitelistEntry>,
     __unused: std::marker::PhantomData<&'r ()>,
 }
@@ -1285,17 +1936,54 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         event: &EventContext,
         callbacks: &mut __sdk::DbCallbacks<RemoteModule>,
     ) {
+        callbacks.invoke_table_row_callbacks::<AdminActionLog>(
+            "admin_action_log",
+            &self.admin_action_log,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<AdminIdentity>(
             "admin_identity",
             &self.admin_identity,
             event,
         );
+        callbacks.invoke_table_row_callbacks::<AdminIdentity>(
+            "all_admins",
+            &self.all_admins,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<PlayerBan>("all_bans", &self.all_bans, event);
+        callbacks.invoke_table_row_callbacks::<ChatFilter>(
+            "all_chat_filters",
+            &self.all_chat_filters,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<RelayMatch>("all_matches", &self.all_matches, event);
         callbacks.invoke_table_row_callbacks::<Player>("all_players", &self.all_players, event);
+        callbacks.invoke_table_row_callbacks::<WhitelistEntry>(
+            "all_whitelist",
+            &self.all_whitelist,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<AdminIdentity>(
+            "am_i_admin",
+            &self.am_i_admin,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<Campaign>("campaign", &self.campaign, event);
+        callbacks.invoke_table_row_callbacks::<CampaignStat>(
+            "campaign_stats",
+            &self.campaign_stats,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<ChatFilter>("chat_filter", &self.chat_filter, event);
         callbacks.invoke_table_row_callbacks::<ClientSettings>(
             "client_settings",
             &self.client_settings,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<ContentCatalog>(
+            "content_catalog",
+            &self.content_catalog,
             event,
         );
         callbacks.invoke_table_row_callbacks::<ClientSettings>(
@@ -1342,6 +2030,27 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             &self.match_ui_event,
             event,
         );
+        callbacks.invoke_table_row_callbacks::<AdminActionLog>(
+            "my_admin_actions",
+            &self.my_admin_actions,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<SectorInfo>(
+            "my_campaign_sectors",
+            &self.my_campaign_sectors,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<CampaignStat>(
+            "my_campaign_stats",
+            &self.my_campaign_stats,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<Unlock>(
+            "my_campaign_unlocks",
+            &self.my_campaign_unlocks,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<Campaign>("my_campaigns", &self.my_campaigns, event);
         callbacks.invoke_table_row_callbacks::<MatchKick>("my_kick", &self.my_kick, event);
         callbacks.invoke_table_row_callbacks::<RelayMatch>("my_match", &self.my_match, event);
         callbacks.invoke_table_row_callbacks::<MatchChat>(
@@ -1405,6 +2114,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             event,
         );
         callbacks.invoke_table_row_callbacks::<RelayMatch>("my_matches", &self.my_matches, event);
+        callbacks.invoke_table_row_callbacks::<Schematic>(
+            "my_schematics",
+            &self.my_schematics,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<SenderCommandState>(
             "my_sender_command_state",
             &self.my_sender_command_state,
@@ -1433,11 +2147,14 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             event,
         );
         callbacks.invoke_table_row_callbacks::<RelayMatch>("relay_match", &self.relay_match, event);
+        callbacks.invoke_table_row_callbacks::<Schematic>("schematic", &self.schematic, event);
+        callbacks.invoke_table_row_callbacks::<SectorInfo>("sector_info", &self.sector_info, event);
         callbacks.invoke_table_row_callbacks::<ServerConfig>(
             "server_config",
             &self.server_config,
             event,
         );
+        callbacks.invoke_table_row_callbacks::<Unlock>("unlock", &self.unlock, event);
         callbacks.invoke_table_row_callbacks::<WhitelistEntry>(
             "whitelist_entry",
             &self.whitelist_entry,
@@ -2103,11 +2820,20 @@ impl __sdk::SpacetimeModule for RemoteModule {
     type QueryBuilder = __sdk::QueryBuilder;
 
     fn register_tables(client_cache: &mut __sdk::ClientCache<Self>) {
+        admin_action_log_table::register_table(client_cache);
         admin_identity_table::register_table(client_cache);
+        all_admins_table::register_table(client_cache);
+        all_bans_table::register_table(client_cache);
+        all_chat_filters_table::register_table(client_cache);
         all_matches_table::register_table(client_cache);
         all_players_table::register_table(client_cache);
+        all_whitelist_table::register_table(client_cache);
+        am_i_admin_table::register_table(client_cache);
+        campaign_table::register_table(client_cache);
+        campaign_stats_table::register_table(client_cache);
         chat_filter_table::register_table(client_cache);
         client_settings_table::register_table(client_cache);
+        content_catalog_table::register_table(client_cache);
         local_client_settings_table::register_table(client_cache);
         local_player_table::register_table(client_cache);
         local_player_profile_table::register_table(client_cache);
@@ -2120,6 +2846,11 @@ impl __sdk::SpacetimeModule for RemoteModule {
         match_snapshot_table::register_table(client_cache);
         match_state_table::register_table(client_cache);
         match_ui_event_table::register_table(client_cache);
+        my_admin_actions_table::register_table(client_cache);
+        my_campaign_sectors_table::register_table(client_cache);
+        my_campaign_stats_table::register_table(client_cache);
+        my_campaign_unlocks_table::register_table(client_cache);
+        my_campaigns_table::register_table(client_cache);
         my_kick_table::register_table(client_cache);
         my_match_table::register_table(client_cache);
         my_match_chat_table::register_table(client_cache);
@@ -2135,6 +2866,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         my_match_state_table::register_table(client_cache);
         my_match_ui_events_table::register_table(client_cache);
         my_matches_table::register_table(client_cache);
+        my_schematics_table::register_table(client_cache);
         my_sender_command_state_table::register_table(client_cache);
         player_table::register_table(client_cache);
         player_ban_table::register_table(client_cache);
@@ -2143,15 +2875,27 @@ impl __sdk::SpacetimeModule for RemoteModule {
         protocol_info_table::register_table(client_cache);
         relay_config_table::register_table(client_cache);
         relay_match_table::register_table(client_cache);
+        schematic_table::register_table(client_cache);
+        sector_info_table::register_table(client_cache);
         server_config_table::register_table(client_cache);
+        unlock_table::register_table(client_cache);
         whitelist_entry_table::register_table(client_cache);
     }
     const ALL_TABLE_NAMES: &'static [&'static str] = &[
+        "admin_action_log",
         "admin_identity",
+        "all_admins",
+        "all_bans",
+        "all_chat_filters",
         "all_matches",
         "all_players",
+        "all_whitelist",
+        "am_i_admin",
+        "campaign",
+        "campaign_stats",
         "chat_filter",
         "client_settings",
+        "content_catalog",
         "local_client_settings",
         "local_player",
         "local_player_profile",
@@ -2164,6 +2908,11 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "match_snapshot",
         "match_state",
         "match_ui_event",
+        "my_admin_actions",
+        "my_campaign_sectors",
+        "my_campaign_stats",
+        "my_campaign_unlocks",
+        "my_campaigns",
         "my_kick",
         "my_match",
         "my_match_chat",
@@ -2179,6 +2928,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "my_match_state",
         "my_match_ui_events",
         "my_matches",
+        "my_schematics",
         "my_sender_command_state",
         "player",
         "player_ban",
@@ -2187,7 +2937,10 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "protocol_info",
         "relay_config",
         "relay_match",
+        "schematic",
+        "sector_info",
         "server_config",
+        "unlock",
         "whitelist_entry",
     ];
 }

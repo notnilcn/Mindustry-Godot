@@ -5,6 +5,7 @@
 //! reducers and views.
 
 pub mod audit;
+pub mod content_seed;
 pub mod global;
 pub mod lifecycle;
 pub mod seeds;

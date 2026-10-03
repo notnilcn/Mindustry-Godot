@@ -6,12 +6,15 @@
 use spacetimedb::{Identity, ReducerContext, Table};
 
 use super::global::{
-    ADMIN_IDENTITIES, DEFAULT_COMMANDS_PER_SECOND, DEFAULT_COMMAND_RATE_WINDOW_MS,
+    ADMIN_IDENTITIES, DEFAULT_COMMAND_RATE_WINDOW_MS, DEFAULT_COMMANDS_PER_SECOND,
     DEFAULT_MAP_HEIGHT_TILES, DEFAULT_MAP_WIDTH_TILES, DEFAULT_MAX_COMMIT_COMMANDS_PER_TRANSACTION,
     MIN_CLIENT_BUILD, PROTOCOL_VERSION, SAVE_FORMAT_VERSION,
 };
 use super::tables::{ProtocolInfo, RelayConfig, protocol_info, relay_config};
-use crate::admin::{AdminIdentity, ServerConfig, admin_identity, default_server_config, server_config};
+use crate::admin::{
+    AdminIdentity, ServerConfig, admin_identity, default_server_config, server_config,
+};
+use crate::mods::{ContentCatalog, content_catalog};
 
 /// Upsert-style seed: re-seeding a row replaces its contents (publish wipes
 /// anyway; this keeps `init` idempotent for tests that call it directly).
@@ -80,6 +83,37 @@ pub fn seed_relay_config(ctx: &ReducerContext) {
 /// Seeds the singleton [`ServerConfig`] row (`id = 0`, plan §6.8).
 pub fn seed_server_config(ctx: &ReducerContext) {
     ServerConfig::seed(ctx, default_server_config());
+}
+
+/// Seeds the vanilla `content_catalog` from the generated manifest (plan §6.8).
+///
+/// Empty manifest (generation unavailable) leaves the catalog empty and logs
+/// the documented degradation (OD-21-F).
+pub fn seed_content_catalog(ctx: &ReducerContext) {
+    let manifest = super::content_seed::VANILLA_CONTENT;
+    if manifest.is_empty() {
+        log::warn!(
+            "seed_content_catalog: no generated vanilla manifest; content existence \
+             checks degrade to shape-only (OD-21-F)"
+        );
+        return;
+    }
+    for (content_type, name) in manifest {
+        if ctx
+            .db
+            .content_catalog()
+            .name()
+            .find((*name).to_string())
+            .is_none()
+        {
+            ctx.db.content_catalog().insert(ContentCatalog {
+                content_id: 0,
+                name: (*name).to_string(),
+                content_type: *content_type,
+                source_mod: String::new(),
+            });
+        }
+    }
 }
 
 /// Seeds the bootstrap admin identities from [`ADMIN_IDENTITIES`] (OD-21-D).
