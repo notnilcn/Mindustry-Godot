@@ -4,7 +4,7 @@
     "repo": "https://github.com/Anuken/Mindustry",
     "commit": "2cd7aeecf1378b3db456be9bfde8691b3cdc1bcc"
   },
-  "note": "Committed oracle + scenario + harness goldens. Oracle goldens are JVM-derived (parity/java/*): CI never needs a JVM. Scenario goldens back scenarios/*.json. Harness goldens under client/rust/*/tests/golden(s)/** are pinned here for sha256 drift in addition to being verified by their owning scenarios (plan 23 §6.2). A golden edit must update this hash in the same commit.",
+  "note": "Committed oracle + scenario + harness goldens. Oracle goldens are JVM-derived (parity/java/*): CI never needs a JVM. Scenario goldens back scenarios/*.json. Harness goldens under client/rust/*/tests/golden(s)/** are pinned here for sha256 drift in addition to being verified by their owning scenarios (plan 23 \u00a76.2). A golden edit must update this hash in the same commit.",
   "goldens": [
     {
       "id": "asset_manifest",
@@ -583,6 +583,38 @@
       "path": "client/rust/mind-headless/tests/golden/units/units_base_build.json",
       "owner_plan": "11",
       "sha256": "7d9acef2e9cb14f843a525dae69fffb8dfbfa5f33da2beab38f3d75407b6b25f"
+    },
+    {
+      "id": "oracle_logic_field_order",
+      "kind": "oracle",
+      "path": "parity/golden/logic/field_order.json",
+      "owner_plan": "13",
+      "sha256": "40b817fa6275a9f3c2f208ac2124cf8e9f0491cbb68f709af15b79b2349c3f34",
+      "regen": "tools/regen_goldens.sh --only oracle_logic_field_order"
+    },
+    {
+      "id": "oracle_ui_ui_keys",
+      "kind": "oracle",
+      "path": "parity/golden/ui/ui_keys.json",
+      "owner_plan": "14",
+      "sha256": "f7d83129ad28f877d7d4187e1b9459d321d7b1170e8b6c73a880e1b378f8ebe3",
+      "regen": "tools/regen_goldens.sh --only oracle_ui_ui_keys"
+    },
+    {
+      "id": "oracle_io_rules_fields",
+      "kind": "oracle",
+      "path": "parity/golden/io/rules_fields.json",
+      "owner_plan": "04",
+      "sha256": "bea5693bd0ca68613867ed56d268a5f548f86c4b36a5bd04adfc4b72ac4a18ea",
+      "regen": "tools/regen_goldens.sh --only oracle_io_rules_fields"
+    },
+    {
+      "id": "oracle_fx_fx_order",
+      "kind": "oracle",
+      "path": "parity/golden/fx/fx_order.json",
+      "owner_plan": "17",
+      "sha256": "ca43c32931e493e243ccc1a4271643eaacf40c90d14544f08769539aac560b28",
+      "regen": "tools/regen_goldens.sh --only oracle_fx_fx_order"
     }
   ]
 }

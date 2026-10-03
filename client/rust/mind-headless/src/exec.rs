@@ -173,7 +173,15 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             scenario,
             profile,
             assert_alloc,
-        } => cmd_bench(&cli, *ticks, scenario, profile.as_deref(), *assert_alloc),
+            checksum,
+        } => cmd_bench(
+            &cli,
+            *ticks,
+            scenario,
+            profile.as_deref(),
+            *assert_alloc,
+            *checksum,
+        ),
         Command::Dump {
             scenario,
             out,
@@ -2261,7 +2269,7 @@ fn normalized_mod_list(report: &serde_json::Value) -> serde_json::Value {
     serde_json::Value::Array(mods)
 }
 
-fn load_scenario(cli: &Cli, name: &str) -> anyhow::Result<Scenario> {
+pub(crate) fn load_scenario(cli: &Cli, name: &str) -> anyhow::Result<Scenario> {
     let fixture = registry::find(name)
         .ok_or_else(|| anyhow!("unknown scenario `{name}`; run `mind-headless list`"))?;
     let dir = paths::find_scenarios_dir(cli.scenarios_dir.as_deref())?;
@@ -2451,7 +2459,10 @@ pub(crate) fn run_suite(
 }
 
 /// Runs a scenario to completion; optionally collects per-tick checksums.
-fn run_scenario(scenario: &Scenario, collect_ticks: bool) -> anyhow::Result<(Sim, Vec<String>)> {
+pub(crate) fn run_scenario(
+    scenario: &Scenario,
+    collect_ticks: bool,
+) -> anyhow::Result<(Sim, Vec<String>)> {
     let mut sim = Sim::from_scenario(scenario)?;
     let mut player = ScenarioPlayer::new(scenario, sim.content())?;
     let mut per_tick = Vec::new();
@@ -2692,7 +2703,7 @@ fn cmd_run(
 }
 
 /// Every `every`-th per-tick checksum plus the final tick (deterministic).
-fn sample_checksums(per_tick: &[String], every: u64) -> Vec<String> {
+pub(crate) fn sample_checksums(per_tick: &[String], every: u64) -> Vec<String> {
     let every = every.max(1) as usize;
     let mut out = Vec::new();
     for (index, checksum) in per_tick.iter().enumerate() {
@@ -2997,13 +3008,14 @@ fn cmd_bench(
     scenario_name: &str,
     profile: Option<&str>,
     assert_alloc: Option<u64>,
+    checksum: bool,
 ) -> anyhow::Result<i32> {
     if ticks == 0 {
         return Err(anyhow!("--ticks must be greater than zero"));
     }
     // Plan 05 M8 §7.4: `bench sim_core --profile {empty,mid,stress}`.
     if scenario_name == "sim_core" || profile.is_some() {
-        return cmd_bench_sim_core(ticks, profile.unwrap_or("mid"), assert_alloc);
+        return cmd_bench_sim_core(ticks, profile.unwrap_or("mid"), assert_alloc, checksum);
     }
     let ticks_usize = usize::try_from(ticks).context("--ticks does not fit in memory")?;
     // Plan 01 §7.4: STDB pump overhead is not a sim scenario.
@@ -3100,6 +3112,9 @@ fn cmd_bench(
         checksum: sim.checksum_hex(),
         baseline_status,
     };
+    if checksum {
+        println!("bench checksum: {}", report.checksum);
+    }
     println!("{}", serde_json::to_string(&report)?);
     Ok(if failed { EXIT_FAIL } else { EXIT_PASS })
 }
@@ -3111,7 +3126,12 @@ fn cmd_bench(
 /// measures `Sim::tick`. The p99 budget is recording-only (plan 23 owns the hard
 /// gate); `--assert-alloc N` fails when the timed region allocates more than `N`
 /// times (requires `--features alloc-audit`).
-fn cmd_bench_sim_core(ticks: u64, profile: &str, assert_alloc: Option<u64>) -> anyhow::Result<i32> {
+fn cmd_bench_sim_core(
+    ticks: u64,
+    profile: &str,
+    assert_alloc: Option<u64>,
+    checksum: bool,
+) -> anyhow::Result<i32> {
     let (width, height, buildings, budget_us) = match profile {
         "empty" => (128i32, 128i32, 0usize, 500u64),
         "mid" => (256, 256, 600, 4_000),
@@ -3192,6 +3212,9 @@ fn cmd_bench_sim_core(ticks: u64, profile: &str, assert_alloc: Option<u64>) -> a
         assert_alloc,
         pass,
     };
+    if checksum {
+        println!("bench checksum: {}", report.checksum);
+    }
     println!("{}", serde_json::to_string(&report)?);
     Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
 }

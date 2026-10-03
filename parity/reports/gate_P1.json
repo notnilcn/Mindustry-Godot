@@ -64,14 +64,14 @@
       "pass": true,
       "problems": [],
       "note": null,
-      "count": 82
+      "count": 86
     },
     {
       "name": "bench_budgets",
       "pass": true,
       "problems": [],
       "note": null,
-      "count": 40
+      "count": 53
     },
     {
       "name": "mcp_catalog",

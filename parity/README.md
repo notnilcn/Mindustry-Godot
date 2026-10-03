@@ -20,7 +20,10 @@ drift-free?*
 | `bench_budgets.json` | JSON | aggregated performance budgets across plans | `parity budgets` |
 | `mcp_catalog.json` | JSON | in-engine playtest queue (documentation only) | `parity mcp` |
 | `soak.toml` | TOML subset | soak profiles | `parity soak --profile <p>` |
+| `golden/` | JSON | source/JVM-derived oracle goldens (`logic`, `ui`, `io`, `fx`) | `parity goldens` / `tools/regen_goldens.sh --check` |
+| `screenshots/` | JSON + PNG | fixed-pose MCP baseline manifest | `parity screenshots` |
 | `reports/` | JSON (generated) | gate reports (`gate_P*.json` committed) | `parity gate <phase> --out ...` |
+| `../bench/baselines.json` | JSON | recorded baseline + every plan budget row | `parity bench-gate --baseline bench/baselines.json --canonical` |
 
 Run everything at once:
 
@@ -89,6 +92,27 @@ subset mechanically:
 
 Node paths and pid-stamp rules are authoritative in
 `00_FOUNDATION_IMPLEMENTATION_PLAN.md` §3.5 and `.opencode/skills/playtest/SKILL.md`.
+
+## Determinism (M1)
+
+```
+parity checksums --suite smoke            # 2 in-process + 2 replay + 1 cross-process per scenario
+parity checksums --suite gate --workers 1,4 --json
+parity replay-fuzz --seed 7 --mutations reorder,dup,truncate
+```
+
+`checksums` compares the canonical FNV-1a checksum across worker counts and a fresh
+child `mind-headless replay`; `replay-fuzz` mutates a known `CommandLog` to prove the
+plan-05 ordering/dedup/truncation contract (reorder/truncate change the checksum;
+duplicates are applied faithfully). The cross-OS `determinism-compare` job is nightly.
+
+## Oracle goldens (`parity/golden/`)
+
+The `parity/java/Dump*.java` one-off JVM tools are the primary oracle; the committed
+`parity/golden/{logic,ui,io,fx}/` files are pinned in `golden_manifest.json` and verified
+by `parity goldens`. `tools/regen_goldens.sh --check` verifies every hash without a JVM;
+`--only <id>` regenerates one (JVM when `MIND_JAVA_PARITY=1`, else the reproducible
+source-derived `parity/java/extract_source_goldens.py`). See `golden/README.md`.
 
 ## Performance budgets
 

@@ -146,3 +146,56 @@ Current P0 surface (plan 01 grows it): table `player` (`identity` primary key, `
 - `spacetime generate` needs the `wasm32-unknown-unknown` Rust target (`rustup target add wasm32-unknown-unknown`).
 - `spacetime sql` is a small SQL subset: plain `SELECT ... WHERE ... LIMIT`; `BETWEEN`/`ORDER BY` are rejected.
 - The Windows `bash` tool is PowerShell: pipe to `Select-Object -First N` instead of `head`/`tail`, or capture full output and search it.
+
+# Part 3 — Plan-23 MCP parity catalog (machine-readable companion)
+
+The in-engine scenarios are catalogued in `parity/mcp_catalog.json` (plan 23 §6.6) and
+the headless goldens they compare against are in `parity/scenario_catalog.json` +
+`parity/golden_manifest.json`. `parity mcp-parity --suite T0` resolves the headless
+half of every entry against its committed golden; the in-engine capture half is
+deferred until the single-editor mutex is available (NUD-40/A). `tools/parity.sh --mcp`
+runs the headless half locally.
+
+## Catalog by phase
+
+| Phase | Plan | Scenario id | Headless parity anchor | Screenshot name(s) |
+|---|---|---|---|---|
+| P0 | 00 | `mcp_spine` | `spine_place_break` golden `a1a7b96167c9718d` | `00_spine_place_break_01.png` |
+| P1 | 01 | `mcp_stdb_relay_2p` | `stdb_command_order` | `01_stdb_net_page.png` |
+| P1 | 02 | `mcp_content` | `content_audit` (counts golden) | `02_content_inspector.png` |
+| P1 | 03 | `mcp_assets` | `assets_regions` | `03_assets_region.png`, `03_assets_icon.png` |
+| P1 | 04 | `mcp_io_roundtrip` | `io_roundtrip` (`C0 == C1`) | `04_io_wave5.png` |
+| P2 | 05 | `mcp_sim_pause` | `sim_core_boot` golden `eaf9472d8cf4dfd5` | `05_sim_inspector.png` |
+| P3 | 06 | `mcp_world_gen` | `world_gen_serpulo` | `06_world_terrain.png` |
+| P3 | 07 | `mcp_blocks` | `blocks_place_construct_destroy` | `07_blocks_place.png` |
+| P3 | 08 | `mcp_logistics` | `logistics_smoke` | `08_logistics_before.png`, `08_logistics_after.png` |
+| P3 | 09 | `mcp_power_split` | `power_graph_split_merge` | `09_power_before_split.png`, `09_power_after_merge.png` |
+| P4 | 10 | `mcp_combat_duo` | `combat_basic` + `combat/duo_dummy_worksheet.json` | `10_combat_preshot.png`, `10_combat_postshot.png` |
+| P4 | 11 | `mcp_units_move` | `units_spawn_path_arrive` | `11_units_move.png` |
+| P4 | 12 | `mcp_campaign_cycle` | `campaign_sector_cycle` | `12_campaign_sector.png` |
+| P5 | 13 | `mcp_logic_display` | `logic_draw` / `logic_arith` | `13_logic_display.png` |
+| P5 | 14 | `mcp_ui_sweep` | `ui_text` + dialog manifest | per-dialog `14_ui_<name>.png` |
+| P5 | 15 | `mcp_input_place` | `placement_validation_table` | `15_place_line_preview.png`, … |
+| P6 | 16 | `mcp_render_layers` | `render_layer_order` | per-layer `16_layer_<name>.png` |
+| P6 | 17 | `mcp_fx_impact` | `fx_lifecycle` / `fx_program` | `17_fx_pre.png`, `17_fx_shot_t2.png`, `17_fx_hit.png` |
+| P7/P8 | 19–22 | `TBD by 19…22` | `editor_*`, `mods_*`, `mp_*` (landed) | `parity/screenshots/baseline/` |
+
+## Naming, pid and pose rules (plan 23 §3.5)
+
+- **Naming.** Screenshots are saved as `parity/screenshots/<plan>_<scenario>_<step>.png`
+  (or `<plan>_<scenario>.png` for a single capture) and recorded in
+  `parity/screenshots/manifest.json`; the baseline oracle is committed under
+  `parity/screenshots/baseline/`. A capture is only promotable once it is
+  non-blank-checked and (when a baseline exists) diffed at the same pose with the
+  plan-23 tolerance (`parity screenshots --diff-a A --diff-b B`: ≤ 12/255 per
+  channel, ≤ 0.5% changed pixels; NUD-37).
+- **Pid stamping.** Every verification eval must return `OS.get_process_id()` and be
+  compared against `godot_game instances`; on a pid change, re-establish the camera,
+  pause state and loaded scenario before interpreting the next result.
+- **Fixed poses.** Use `MindCamera2D.center_on_tile(tx, ty)` + zoom (or
+  `MindRender.set_camera_pose`) and record the pose in the catalog entry so two
+  captures are only ever compared at the same pose.
+- **Checksums over pixels.** Prefer `SimHost.get_checksum()`/`get_state_json()` equality
+  to the committed golden; screenshots are the fallback for view-only systems (16/17).
+- **Clean teardown.** `godot_log errors` must be empty and every toggled flag
+  (pause, camera) restored before the next catalog entry.

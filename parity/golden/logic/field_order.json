@@ -1,0 +1,887 @@
+{
+  "format": 1,
+  "domain": "logic",
+  "kind": "field_order",
+  "source": "13_LOGIC_MLOG_IMPLEMENTATION_PLAN.md#6.2",
+  "upstream_commit": "2cd7aeecf1378b3db456be9bfde8691b3cdc1bcc",
+  "count": 53,
+  "statements": [
+    {
+      "index": 1,
+      "reg": "noop",
+      "variant": "InvalidStatement",
+      "fields": [],
+      "names": []
+    },
+    {
+      "index": 2,
+      "reg": "read",
+      "variant": "Read",
+      "fields": [
+        "S output",
+        "S target",
+        "S address"
+      ],
+      "names": [
+        "output",
+        "target",
+        "address"
+      ]
+    },
+    {
+      "index": 3,
+      "reg": "write",
+      "variant": "Write",
+      "fields": [
+        "S input",
+        "S target",
+        "S address"
+      ],
+      "names": [
+        "input",
+        "target",
+        "address"
+      ]
+    },
+    {
+      "index": 4,
+      "reg": "draw",
+      "variant": "Draw",
+      "fields": [
+        "E(GraphicsType) type",
+        "S x",
+        "S y",
+        "S p1",
+        "S p2",
+        "S p3",
+        "S p4"
+      ],
+      "names": [
+        "type",
+        "x",
+        "y",
+        "p1",
+        "p2",
+        "p3",
+        "p4"
+      ]
+    },
+    {
+      "index": 5,
+      "reg": "print",
+      "variant": "Print",
+      "fields": [
+        "S value"
+      ],
+      "names": [
+        "value"
+      ]
+    },
+    {
+      "index": 6,
+      "reg": "printchar",
+      "variant": "PrintChar",
+      "fields": [
+        "S value"
+      ],
+      "names": [
+        "value"
+      ]
+    },
+    {
+      "index": 7,
+      "reg": "format",
+      "variant": "Format",
+      "fields": [
+        "S value"
+      ],
+      "names": [
+        "value"
+      ]
+    },
+    {
+      "index": 8,
+      "reg": "drawflush",
+      "variant": "DrawFlush",
+      "fields": [
+        "S target"
+      ],
+      "names": [
+        "target"
+      ]
+    },
+    {
+      "index": 9,
+      "reg": "printflush",
+      "variant": "PrintFlush",
+      "fields": [
+        "S target"
+      ],
+      "names": [
+        "target"
+      ]
+    },
+    {
+      "index": 10,
+      "reg": "getlink",
+      "variant": "GetLink",
+      "fields": [
+        "S output",
+        "S address"
+      ],
+      "names": [
+        "output",
+        "address"
+      ]
+    },
+    {
+      "index": 11,
+      "reg": "control",
+      "variant": "Control",
+      "fields": [
+        "E(LAccess) type",
+        "S target",
+        "S p1",
+        "S p2",
+        "S p3",
+        "S p4"
+      ],
+      "names": [
+        "type",
+        "target",
+        "p1",
+        "p2",
+        "p3",
+        "p4"
+      ]
+    },
+    {
+      "index": 12,
+      "reg": "radar",
+      "variant": "Radar",
+      "fields": [
+        "E(RadarTarget) target1",
+        "target2",
+        "target3",
+        "E(RadarSort) sort",
+        "S radar",
+        "S sortOrder",
+        "S output"
+      ],
+      "names": [
+        "target1",
+        "target2",
+        "target3",
+        "sort",
+        "radar",
+        "sortOrder",
+        "output"
+      ]
+    },
+    {
+      "index": 13,
+      "reg": "sensor",
+      "variant": "Sensor",
+      "fields": [
+        "S to",
+        "S from",
+        "S type"
+      ],
+      "names": [
+        "to",
+        "from",
+        "type"
+      ]
+    },
+    {
+      "index": 14,
+      "reg": "set",
+      "variant": "Set",
+      "fields": [
+        "S to",
+        "S from"
+      ],
+      "names": [
+        "to",
+        "from"
+      ]
+    },
+    {
+      "index": 15,
+      "reg": "op",
+      "variant": "Operation",
+      "fields": [
+        "E(LogicOp) op",
+        "S dest",
+        "S a",
+        "S b"
+      ],
+      "names": [
+        "op",
+        "dest",
+        "a",
+        "b"
+      ]
+    },
+    {
+      "index": 16,
+      "reg": "select",
+      "variant": "Select",
+      "fields": [
+        "S result",
+        "E(ConditionOp) op",
+        "S comp0",
+        "S comp1",
+        "S a",
+        "S b"
+      ],
+      "names": [
+        "result",
+        "op",
+        "comp0",
+        "comp1",
+        "a",
+        "b"
+      ]
+    },
+    {
+      "index": 17,
+      "reg": "wait",
+      "variant": "Wait",
+      "fields": [
+        "S value"
+      ],
+      "names": [
+        "value"
+      ]
+    },
+    {
+      "index": 18,
+      "reg": "stop",
+      "variant": "Stop",
+      "fields": [],
+      "names": []
+    },
+    {
+      "index": 19,
+      "reg": "lookup",
+      "variant": "Lookup",
+      "fields": [
+        "E(ContentType) type",
+        "S result",
+        "S id"
+      ],
+      "names": [
+        "type",
+        "result",
+        "id"
+      ]
+    },
+    {
+      "index": 20,
+      "reg": "packcolor",
+      "variant": "PackColor",
+      "fields": [
+        "S result",
+        "S r",
+        "S g",
+        "S b",
+        "S a"
+      ],
+      "names": [
+        "result",
+        "r",
+        "g",
+        "b",
+        "a"
+      ]
+    },
+    {
+      "index": 21,
+      "reg": "unpackcolor",
+      "variant": "UnpackColor",
+      "fields": [
+        "S r",
+        "S g",
+        "S b",
+        "S a",
+        "S value"
+      ],
+      "names": [
+        "r",
+        "g",
+        "b",
+        "a",
+        "value"
+      ]
+    },
+    {
+      "index": 22,
+      "reg": "end",
+      "variant": "End",
+      "fields": [],
+      "names": []
+    },
+    {
+      "index": 23,
+      "reg": "jump",
+      "variant": "Jump",
+      "fields": [
+        "I destIndex",
+        "E(ConditionOp) op",
+        "S value",
+        "S compare"
+      ],
+      "names": [
+        "destIndex",
+        "op",
+        "value",
+        "compare"
+      ]
+    },
+    {
+      "index": 24,
+      "reg": "ubind",
+      "variant": "UnitBind",
+      "fields": [
+        "S type"
+      ],
+      "names": [
+        "type"
+      ]
+    },
+    {
+      "index": 25,
+      "reg": "ucontrol",
+      "variant": "UnitControl",
+      "fields": [
+        "E(LUnitControl) type",
+        "S p1",
+        "S p2",
+        "S p3",
+        "S p4",
+        "S p5"
+      ],
+      "names": [
+        "type",
+        "p1",
+        "p2",
+        "p3",
+        "p4",
+        "p5"
+      ]
+    },
+    {
+      "index": 26,
+      "reg": "uradar",
+      "variant": "UnitRadar (shared RadarFields)",
+      "fields": [
+        "E target1",
+        "target2",
+        "target3",
+        "E sort",
+        "S radar",
+        "S sortOrder",
+        "S output"
+      ],
+      "names": [
+        "target1",
+        "target2",
+        "target3",
+        "sort",
+        "radar",
+        "sortOrder",
+        "output"
+      ]
+    },
+    {
+      "index": 27,
+      "reg": "ulocate",
+      "variant": "UnitLocate",
+      "fields": [
+        "E(LLocate) locate",
+        "E(BlockFlag) flag",
+        "S enemy",
+        "S ore",
+        "S outX",
+        "S outY",
+        "S outFound",
+        "S outBuild"
+      ],
+      "names": [
+        "locate",
+        "flag",
+        "enemy",
+        "ore",
+        "outX",
+        "outY",
+        "outFound",
+        "outBuild"
+      ]
+    },
+    {
+      "index": 28,
+      "reg": "query",
+      "variant": "Query",
+      "fields": [
+        "E(QueryShape) shape",
+        "E(QueryType) type",
+        "S team",
+        "S x",
+        "S y",
+        "S w",
+        "S h"
+      ],
+      "names": [
+        "shape",
+        "type",
+        "team",
+        "x",
+        "y",
+        "w",
+        "h"
+      ]
+    },
+    {
+      "index": 29,
+      "reg": "getblock",
+      "variant": "GetBlock",
+      "fields": [
+        "E(TileLayer) layer",
+        "S result",
+        "S x",
+        "S y"
+      ],
+      "names": [
+        "layer",
+        "result",
+        "x",
+        "y"
+      ]
+    },
+    {
+      "index": 30,
+      "reg": "setblock",
+      "variant": "SetBlock",
+      "fields": [
+        "E(TileLayer) layer",
+        "S block",
+        "S x",
+        "S y",
+        "S team",
+        "S rotation"
+      ],
+      "names": [
+        "layer",
+        "block",
+        "x",
+        "y",
+        "team",
+        "rotation"
+      ]
+    },
+    {
+      "index": 31,
+      "reg": "spawn",
+      "variant": "SpawnUnit",
+      "fields": [
+        "S type",
+        "S x",
+        "S y",
+        "S rotation",
+        "S team",
+        "S result",
+        "S effect"
+      ],
+      "names": [
+        "type",
+        "x",
+        "y",
+        "rotation",
+        "team",
+        "result",
+        "effect"
+      ]
+    },
+    {
+      "index": 32,
+      "reg": "bullet",
+      "variant": "SpawnBullet",
+      "fields": [
+        "S result",
+        "S from",
+        "S index",
+        "S x",
+        "S y",
+        "S rotation",
+        "S team",
+        "S owner",
+        "S damage",
+        "S velocityScl",
+        "S lifeScl",
+        "S aimX",
+        "S aimY"
+      ],
+      "names": [
+        "result",
+        "from",
+        "index",
+        "x",
+        "y",
+        "rotation",
+        "team",
+        "owner",
+        "damage",
+        "velocityScl",
+        "lifeScl",
+        "aimX",
+        "aimY"
+      ]
+    },
+    {
+      "index": 33,
+      "reg": "status",
+      "variant": "ApplyStatus",
+      "fields": [
+        "B clear",
+        "S effect",
+        "S unit",
+        "S duration"
+      ],
+      "names": [
+        "clear",
+        "effect",
+        "unit",
+        "duration"
+      ]
+    },
+    {
+      "index": 34,
+      "reg": "weathersense",
+      "variant": "WeatherSense",
+      "fields": [
+        "S to",
+        "S weather"
+      ],
+      "names": [
+        "to",
+        "weather"
+      ]
+    },
+    {
+      "index": 35,
+      "reg": "weatherset",
+      "variant": "WeatherSet",
+      "fields": [
+        "S weather",
+        "S state"
+      ],
+      "names": [
+        "weather",
+        "state"
+      ]
+    },
+    {
+      "index": 36,
+      "reg": "spawnwave",
+      "variant": "SpawnWave",
+      "fields": [
+        "S x",
+        "S y",
+        "S natural"
+      ],
+      "names": [
+        "x",
+        "y",
+        "natural"
+      ]
+    },
+    {
+      "index": 37,
+      "reg": "setrule",
+      "variant": "SetRule",
+      "fields": [
+        "E(LogicRule) rule",
+        "S value",
+        "S p1",
+        "S p2",
+        "S p3",
+        "S p4"
+      ],
+      "names": [
+        "rule",
+        "value",
+        "p1",
+        "p2",
+        "p3",
+        "p4"
+      ]
+    },
+    {
+      "index": 38,
+      "reg": "message",
+      "variant": "FlushMessage",
+      "fields": [
+        "E(MessageType) type",
+        "S duration",
+        "S outSuccess"
+      ],
+      "names": [
+        "type",
+        "duration",
+        "outSuccess"
+      ]
+    },
+    {
+      "index": 39,
+      "reg": "cutscene",
+      "variant": "Cutscene",
+      "fields": [
+        "E(CutsceneAction) action",
+        "S p1",
+        "S p2",
+        "S p3",
+        "S p4"
+      ],
+      "names": [
+        "action",
+        "p1",
+        "p2",
+        "p3",
+        "p4"
+      ]
+    },
+    {
+      "index": 40,
+      "reg": "effect",
+      "variant": "Effect",
+      "fields": [
+        "S type",
+        "S x",
+        "S y",
+        "S sizerot",
+        "S color",
+        "S data"
+      ],
+      "names": [
+        "type",
+        "x",
+        "y",
+        "sizerot",
+        "color",
+        "data"
+      ]
+    },
+    {
+      "index": 41,
+      "reg": "explosion",
+      "variant": "Explosion",
+      "fields": [
+        "S team",
+        "S x",
+        "S y",
+        "S radius",
+        "S damage",
+        "S air",
+        "S ground",
+        "S pierce",
+        "S effect"
+      ],
+      "names": [
+        "team",
+        "x",
+        "y",
+        "radius",
+        "damage",
+        "air",
+        "ground",
+        "pierce",
+        "effect"
+      ]
+    },
+    {
+      "index": 42,
+      "reg": "setrate",
+      "variant": "SetRate",
+      "fields": [
+        "S amount"
+      ],
+      "names": [
+        "amount"
+      ]
+    },
+    {
+      "index": 43,
+      "reg": "fetch",
+      "variant": "Fetch",
+      "fields": [
+        "E(FetchType) type",
+        "S result",
+        "S team",
+        "S index",
+        "S extra"
+      ],
+      "names": [
+        "type",
+        "result",
+        "team",
+        "index",
+        "extra"
+      ]
+    },
+    {
+      "index": 44,
+      "reg": "sync",
+      "variant": "Sync",
+      "fields": [
+        "S variable"
+      ],
+      "names": [
+        "variable"
+      ]
+    },
+    {
+      "index": 45,
+      "reg": "clientdata",
+      "variant": "ClientData",
+      "fields": [
+        "S channel",
+        "S value",
+        "S reliable"
+      ],
+      "names": [
+        "channel",
+        "value",
+        "reliable"
+      ]
+    },
+    {
+      "index": 46,
+      "reg": "getflag",
+      "variant": "GetFlag",
+      "fields": [
+        "S result",
+        "S flag"
+      ],
+      "names": [
+        "result",
+        "flag"
+      ]
+    },
+    {
+      "index": 47,
+      "reg": "setflag",
+      "variant": "SetFlag",
+      "fields": [
+        "S flag",
+        "S value"
+      ],
+      "names": [
+        "flag",
+        "value"
+      ]
+    },
+    {
+      "index": 48,
+      "reg": "setprop",
+      "variant": "SetProp",
+      "fields": [
+        "S type",
+        "S of",
+        "S value"
+      ],
+      "names": [
+        "type",
+        "of",
+        "value"
+      ]
+    },
+    {
+      "index": 49,
+      "reg": "playsound",
+      "variant": "PlaySound",
+      "fields": [
+        "B positional",
+        "S id",
+        "S volume",
+        "S pitch",
+        "S pan",
+        "S x",
+        "S y",
+        "S limit"
+      ],
+      "names": [
+        "positional",
+        "id",
+        "volume",
+        "pitch",
+        "pan",
+        "x",
+        "y",
+        "limit"
+      ]
+    },
+    {
+      "index": 50,
+      "reg": "playmusic",
+      "variant": "PlayMusic",
+      "fields": [
+        "S name",
+        "S interrupt"
+      ],
+      "names": [
+        "name",
+        "interrupt"
+      ]
+    },
+    {
+      "index": 51,
+      "reg": "setmarker",
+      "variant": "SetMarker",
+      "fields": [
+        "E(LMarkerControl) type",
+        "S id",
+        "S p1",
+        "S p2",
+        "S p3"
+      ],
+      "names": [
+        "type",
+        "id",
+        "p1",
+        "p2",
+        "p3"
+      ]
+    },
+    {
+      "index": 52,
+      "reg": "makemarker",
+      "variant": "MakeMarker",
+      "fields": [
+        "S type",
+        "S id",
+        "S x",
+        "S y",
+        "S replace"
+      ],
+      "names": [
+        "type",
+        "id",
+        "x",
+        "y",
+        "replace"
+      ]
+    },
+    {
+      "index": 53,
+      "reg": "localeprint",
+      "variant": "LocalePrint",
+      "fields": [
+        "S value"
+      ],
+      "names": [
+        "value"
+      ]
+    }
+  ]
+}

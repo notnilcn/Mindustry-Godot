@@ -9,7 +9,9 @@
 //! validate those files and roll them up; they never mutate the registry.
 
 pub mod budgets;
+pub mod checksum;
 pub mod desync;
+pub mod determinism;
 pub mod golden;
 pub mod matrix;
 pub mod mcp;
@@ -142,14 +144,30 @@ pub fn run(cli: &Cli, command: &ParityCommand) -> Result<i32> {
             diff_a,
             diff_b,
         } => cmd_screenshots(*json, repo.as_deref(), diff_a.as_deref(), diff_b.as_deref()),
-        ParityCommand::Report { json, repo } => cmd_report(*json, repo.as_deref()),
+        ParityCommand::Report { json, all, repo } => cmd_report(*json, *all, repo.as_deref()),
         ParityCommand::Gate {
             phase,
             json,
             repo,
             out,
         } => cmd_gate(phase, *json, repo.as_deref(), out.as_deref()),
-        ParityCommand::BenchGate { json, repo } => cmd_bench_gate(*json, repo.as_deref()),
+        ParityCommand::BenchGate {
+            json,
+            baseline,
+            canonical,
+            repo,
+        } => cmd_bench_gate(*json, baseline.as_deref(), *canonical, repo.as_deref()),
+        ParityCommand::Checksums {
+            suite,
+            workers,
+            no_cross_process,
+            json,
+        } => determinism::run_checksums(cli, suite, workers, *no_cross_process, *json),
+        ParityCommand::ReplayFuzz {
+            seed,
+            mutations,
+            json,
+        } => determinism::replay_fuzz(*seed, mutations, *json),
     }
 }
 
@@ -609,12 +627,22 @@ fn cmd_screenshots(
     })
 }
 
-fn cmd_report(json: bool, repo: Option<&Path>) -> Result<i32> {
+fn cmd_report(json: bool, all: bool, repo: Option<&Path>) -> Result<i32> {
     let repo = find_repo(repo)?;
     let outcome = report::collect(&repo, None)?;
     let summary = report::summary(&repo)?;
+    let systems = if all {
+        Some(report::system_rollup(&repo)?)
+    } else {
+        None
+    };
     if json {
-        print_json(&outcome.to_json(Some(&summary)))?;
+        let mut value = outcome.to_json(Some(&summary));
+        value["all"] = serde_json::Value::Bool(all);
+        if let Some(systems) = &systems {
+            value["systems"] = serde_json::to_value(systems)?;
+        }
+        print_json(&value)?;
     } else {
         print_outcome(&outcome);
         println!("system parity roll-up:");
@@ -629,6 +657,15 @@ fn cmd_report(json: bool, repo: Option<&Path>) -> Result<i32> {
         }
         for (phase, count) in &summary.mcp_phase {
             println!("  mcp {phase}: {count}");
+        }
+        if let Some(systems) = &systems {
+            println!("systems (--all):");
+            for system in systems {
+                println!(
+                    "  plan {}: {} matrix / {} scenario / {} budget",
+                    system.plan, system.matrix_rows, system.scenarios, system.budgets
+                );
+            }
         }
     }
     Ok(if outcome.pass() { EXIT_PASS } else { EXIT_FAIL })
@@ -682,21 +719,67 @@ fn cmd_gate(phase: &str, json: bool, repo: Option<&Path>, out: Option<&Path>) ->
     Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
 }
 
-fn cmd_bench_gate(json: bool, repo: Option<&Path>) -> Result<i32> {
+fn cmd_bench_gate(
+    json: bool,
+    baseline: Option<&Path>,
+    canonical: bool,
+    repo: Option<&Path>,
+) -> Result<i32> {
     let repo = find_repo(repo)?;
     let budgets = Budgets::load(&repo.join("parity/bench_budgets.json"))?;
-    let problems = budgets.check(&repo);
-    // No recorded values in CI: gate reports coverage only.
+    let mut problems = budgets.check(&repo);
+    let baseline_path = baseline
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| budgets::Baselines::default_path(&repo));
+    let baseline = if baseline_path.is_file() {
+        let loaded = budgets::Baselines::load(&baseline_path)?;
+        problems.extend(loaded.check_against(&budgets));
+        Some(loaded)
+    } else {
+        problems.push(format!(
+            "bench baseline `{}` is missing (plan 23 M4)",
+            baseline_path.display()
+        ));
+        None
+    };
+    // The canonical rule: the recorded value must be present on the baseline
+    // machine before a >10% regression can gate. CI runners record only.
+    let canonical_recorded = baseline
+        .as_ref()
+        .and_then(|baseline| {
+            baseline
+                .entries
+                .iter()
+                .find(|entry| entry.id == "canonical")
+                .and_then(|entry| entry.value)
+        })
+        .is_some();
+    if canonical && baseline.is_none() {
+        problems.push(String::from(
+            "bench-gate --canonical requires a committed `bench/baselines.json`",
+        ));
+    }
+    let machine = baseline
+        .as_ref()
+        .map(|baseline| baseline.machine.id.clone())
+        .unwrap_or_default();
+    let entries = baseline
+        .as_ref()
+        .map(|baseline| baseline.entries.len())
+        .unwrap_or(0);
     let value = serde_json::json!({
         "format": 1,
         "pass": problems.is_empty(),
+        "baseline": baseline_path.display().to_string(),
+        "machine": machine,
         "canonical": {
             "scenario": budgets.canonical.scenario,
             "metric": budgets.canonical.metric,
             "budget": budgets.canonical.budget,
-            "fail_pct": budgets.canonical.fail_pct
+            "fail_pct": budgets.canonical.fail_pct,
+            "recorded": canonical_recorded
         },
-        "entries": budgets.entries.len(),
+        "entries": entries,
         "problems": problems,
         "note": "recording requires the baseline machine / self-hosted perf runner (plan 23 §7d)",
     });
@@ -704,11 +787,11 @@ fn cmd_bench_gate(json: bool, repo: Option<&Path>) -> Result<i32> {
         print_json(&value)?;
     } else {
         println!(
-            "parity bench-gate: {} budget row(s), canonical {}.{} (fail >{}%) -> {}",
-            budgets.entries.len(),
+            "parity bench-gate: baseline {entries} row(s), canonical {}.{} (fail >{}%, recorded {}) -> {}",
             budgets.canonical.scenario,
             budgets.canonical.metric,
             budgets.canonical.fail_pct,
+            canonical_recorded,
             if problems.is_empty() { "PASS" } else { "FAIL" }
         );
         for problem in &problems {

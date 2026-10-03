@@ -1,6 +1,5 @@
 {
   "format": 1,
-  "note": "Aggregated performance budget registry (plan 23 \u00a77d). Numbers are copied from each owning plan; `measure` is the producing mind-headless command. Per-plan baseline files remain the recording source of truth (`sources`); this file is the cross-crate coverage/gate registry.",
   "machine": {
     "id": "dev-wsl-amd860m",
     "os": "Ubuntu in WSL2 (Windows 11 host, WSLg)",
@@ -16,137 +15,140 @@
     "fail_pct": 10,
     "regression_rule": ">10% canonical-tick regression blocks a phase gate (NUD-39/A)"
   },
-  "sources": [
-    {
-      "plan": "05",
-      "path": "client/rust/mind-core/bench/baselines.json",
-      "present": false,
-      "note": "plan 05 benches are emitted by `bench sim_core`; baseline rows recorded at plan-23 M4"
-    },
-    {
-      "plan": "07",
-      "path": "client/rust/mind-core/bench/baselines.json",
-      "present": true
-    },
-    {
-      "plan": "09",
-      "path": "client/rust/mind-headless/bench/bench_power.json",
-      "present": true
-    },
-    {
-      "plan": "09",
-      "path": "client/rust/mind-headless/bench/bench_liquid.json",
-      "present": true
-    },
-    {
-      "plan": "09",
-      "path": "client/rust/mind-headless/bench/bench_heat.json",
-      "present": true
-    },
-    {
-      "plan": "18",
-      "path": "client/rust/mind-core/bench/baselines.json",
-      "present": true,
-      "note": "audio section"
-    }
-  ],
+  "canonical_entry_id": "canonical",
   "entries": [
+    {
+      "id": "canonical",
+      "plan": "05",
+      "measure": "mind-headless bench --scenario sim_core --profile mid --ticks 3600 --json",
+      "metric": "tick_p95_ms",
+      "value": null,
+      "budget": 4.0,
+      "comparison": "lte"
+    },
     {
       "id": "spine_tick_p99",
       "plan": "00",
       "measure": "bench --scenario spine --json",
       "metric": "p99_us",
-      "budget": 250
+      "value": null,
+      "budget": 250,
+      "comparison": "lte"
     },
     {
       "id": "spine_checksum_dump",
       "plan": "00",
       "measure": "bench --scenario spine --json",
       "metric": "ms",
-      "budget": 5
+      "value": null,
+      "budget": 5,
+      "comparison": "lte"
     },
     {
       "id": "stdb_pump_idle_p99",
       "plan": "01",
       "measure": "bench --scenario stdb_pump --json",
       "metric": "p99_us",
-      "budget": 200
+      "value": null,
+      "budget": 200,
+      "comparison": "lte"
     },
     {
       "id": "stdb_binder_replay_100k",
       "plan": "01",
       "measure": "stdb binder-replay --json",
       "metric": "ms",
-      "budget": 100
+      "value": null,
+      "budget": 100,
+      "comparison": "lte"
     },
     {
       "id": "assets_pack_full",
       "plan": "03",
       "measure": "mind-tools pack",
       "metric": "s",
-      "budget": 90
+      "value": null,
+      "budget": 90,
+      "comparison": "lte"
     },
     {
       "id": "assets_ready",
       "plan": "03",
       "measure": "assets index --atlas assets/sprites",
       "metric": "ms",
-      "budget": 1500
+      "value": null,
+      "budget": 1500,
+      "comparison": "lte"
     },
     {
       "id": "core_sim_empty_p99",
       "plan": "05",
       "measure": "bench sim_core --profile empty --json",
       "metric": "p99_ms",
-      "budget": 0.5
+      "value": null,
+      "budget": 0.5,
+      "comparison": "lte"
     },
     {
       "id": "core_sim_mid_p99",
       "plan": "05",
       "measure": "bench sim_core --profile mid --json",
       "metric": "p99_ms",
-      "budget": 4.0
+      "value": null,
+      "budget": 4.0,
+      "comparison": "lte"
     },
     {
       "id": "core_sim_stress_p99",
       "plan": "05",
       "measure": "bench sim_core --profile stress --json",
       "metric": "p99_ms",
-      "budget": 10.0
+      "value": null,
+      "budget": 10.0,
+      "comparison": "lte"
     },
     {
       "id": "blocks_buildings_p50",
       "plan": "07",
       "measure": "blocks bench --profile buildings --buildings 2000 --ticks 3600 --json",
       "metric": "p50_us",
-      "budget": 600
+      "value": null,
+      "budget": 600,
+      "comparison": "lte"
     },
     {
       "id": "blocks_buildings_p99",
       "plan": "07",
       "measure": "blocks bench --profile buildings --buildings 2000 --ticks 3600 --json",
       "metric": "p99_us",
-      "budget": 1500
+      "value": null,
+      "budget": 1500,
+      "comparison": "lte"
     },
     {
       "id": "blocks_place_p99",
       "plan": "07",
       "measure": "blocks bench --profile place --buildings 2000 --json",
       "metric": "p99_us",
-      "budget": 250
+      "value": null,
+      "budget": 250,
+      "comparison": "lte"
     },
     {
       "id": "blocks_construct_p99",
       "plan": "07",
       "measure": "blocks bench --profile construct --buildings 1000 --ticks 1 --json",
       "metric": "p99_us",
-      "budget": 300
+      "value": null,
+      "budget": 300,
+      "comparison": "lte"
     },
     {
       "id": "logistics_conveyor_throughput",
       "plan": "08",
       "measure": "blocks bench --profile logistics --json",
       "metric": "updates_per_sec",
+      "value": null,
       "budget": 20000000,
       "comparison": "gte"
     },
@@ -155,188 +157,241 @@
       "plan": "08",
       "measure": "blocks bench --profile logistics --json",
       "metric": "p95_ms",
-      "budget": 0.35
+      "value": null,
+      "budget": 0.35,
+      "comparison": "lte"
     },
     {
       "id": "power_update_p95",
       "plan": "09",
       "measure": "power bench --buildings 2000 --ticks 3600 --json",
       "metric": "p95_ms",
-      "budget": 0.3
+      "value": null,
+      "budget": 0.3,
+      "comparison": "lte"
     },
     {
       "id": "liquid_update_p95",
       "plan": "09",
       "measure": "liquid bench --buildings 2000 --ticks 3600 --json",
       "metric": "p95_ms",
-      "budget": 0.2
+      "value": null,
+      "budget": 0.2,
+      "comparison": "lte"
     },
     {
       "id": "heat_update_p95",
       "plan": "09",
       "measure": "heat bench --buildings 2000 --ticks 3600 --json",
       "metric": "p95_ms",
-      "budget": 0.5
+      "value": null,
+      "budget": 0.5,
+      "comparison": "lte"
     },
     {
       "id": "combat_bullets_p95",
       "plan": "10",
       "measure": "combat bench --bullets 2000 --turrets 400 --ticks 3600 --json",
       "metric": "p95_ms",
-      "budget": 1.2
+      "value": null,
+      "budget": 1.2,
+      "comparison": "lte"
     },
     {
       "id": "units_mid_p95",
       "plan": "11",
       "measure": "units bench --units 300 --ticks 600 --json",
       "metric": "p95_ms",
-      "budget": 1.5
+      "value": null,
+      "budget": 1.5,
+      "comparison": "lte"
     },
     {
       "id": "units_stress_p95",
       "plan": "11",
       "measure": "units bench --units 1000 --ticks 600 --json",
       "metric": "p95_ms",
-      "budget": 5.0
+      "value": null,
+      "budget": 5.0,
+      "comparison": "lte"
     },
     {
       "id": "render_build_p50",
       "plan": "16",
       "measure": "render bench --json",
       "metric": "p50_us",
-      "budget": 2500
+      "value": null,
+      "budget": 2500,
+      "comparison": "lte"
     },
     {
       "id": "render_build_p99",
       "plan": "16",
       "measure": "render bench --json",
       "metric": "p99_us",
-      "budget": 5000
+      "value": null,
+      "budget": 5000,
+      "comparison": "lte"
     },
     {
       "id": "audio_mix_p50",
       "plan": "18",
       "measure": "audio bench --ticks 3600 --loops 256 --voices 32 --json",
       "metric": "p50_us",
-      "budget": 100
+      "value": null,
+      "budget": 100,
+      "comparison": "lte"
     },
     {
       "id": "audio_mix_p99",
       "plan": "18",
       "measure": "audio bench --ticks 3600 --loops 256 --voices 32 --json",
       "metric": "p99_us",
-      "budget": 250
+      "value": null,
+      "budget": 250,
+      "comparison": "lte"
     },
     {
       "id": "mods_parse",
       "plan": "20",
       "measure": "mods bench --scene parse --fixture allkinds --json",
       "metric": "us",
-      "budget": 2000
+      "value": null,
+      "budget": 2000,
+      "comparison": "lte"
     },
     {
       "id": "content_base_load",
       "plan": "02",
       "measure": "content bench --runs 20 --json",
       "metric": "median_ms",
-      "budget": 200
+      "value": null,
+      "budget": 200,
+      "comparison": "lte"
     },
     {
       "id": "io_save_p95",
       "plan": "04",
       "measure": "io bench-save --map synthetic --iters 50 --json",
       "metric": "p95_ms",
-      "budget": 50
+      "value": null,
+      "budget": 50,
+      "comparison": "lte"
     },
     {
       "id": "io_load_p95",
       "plan": "04",
       "measure": "io bench-save --map synthetic --iters 50 --json",
       "metric": "p95_ms",
-      "budget": 100
+      "value": null,
+      "budget": 100,
+      "comparison": "lte"
     },
     {
       "id": "world_gen_256_p95",
       "plan": "06",
       "measure": "world bench-gen --generator simplex --width 256 --height 256 --json",
       "metric": "p95_ms",
-      "budget": 250
+      "value": null,
+      "budget": 250,
+      "comparison": "lte"
     },
     {
       "id": "world_gen_serpulo_p95",
       "plan": "06",
       "measure": "world bench-gen --generator serpulo --width 128 --height 128 --json",
       "metric": "p95_ms",
-      "budget": 250
+      "value": null,
+      "budget": 250,
+      "comparison": "lte"
     },
     {
       "id": "world_gen_erekir_p95",
       "plan": "06",
       "measure": "world bench-gen --generator erekir --width 128 --height 128 --json",
       "metric": "p95_ms",
-      "budget": 250
+      "value": null,
+      "budget": 250,
+      "comparison": "lte"
     },
     {
       "id": "world_gen_asteroid_p95",
       "plan": "06",
       "measure": "world bench-gen --generator asteroid --width 500 --height 500 --json",
       "metric": "p95_ms",
-      "budget": 180
+      "value": null,
+      "budget": 180,
+      "comparison": "lte"
     },
     {
       "id": "campaign_teams_p99",
       "plan": "12",
       "measure": "campaign bench --profile teams --ticks 3600 --json",
       "metric": "p99_ms",
-      "budget": 0.35
+      "value": null,
+      "budget": 0.35,
+      "comparison": "lte"
     },
     {
       "id": "campaign_fog_p99",
       "plan": "12",
       "measure": "campaign bench --profile fog --ticks 3600 --json",
       "metric": "p99_ms",
-      "budget": 0.6
+      "value": null,
+      "budget": 0.6,
+      "comparison": "lte"
     },
     {
       "id": "campaign_turn_p99",
       "plan": "12",
       "measure": "campaign bench --profile turn --ticks 3600 --json",
       "metric": "p99_ms",
-      "budget": 0.5
+      "value": null,
+      "budget": 0.5,
+      "comparison": "lte"
     },
     {
       "id": "campaign_objectives_p99",
       "plan": "12",
       "measure": "campaign bench --profile objectives --ticks 3600 --json",
       "metric": "p99_ms",
-      "budget": 0.1
+      "value": null,
+      "budget": 0.1,
+      "comparison": "lte"
     },
     {
       "id": "campaign_schematic_p99",
       "plan": "12",
       "measure": "campaign bench --profile schematic --ticks 3600 --json",
       "metric": "p99_ms",
-      "budget": 1.0
+      "value": null,
+      "budget": 1.0,
+      "comparison": "lte"
     },
     {
       "id": "fx_program_resolve_p95",
       "plan": "17",
       "measure": "fx bench --states 2000 --frames 360 --json",
       "metric": "p95_ms",
-      "budget": 1.5
+      "value": null,
+      "budget": 1.5,
+      "comparison": "lte"
     },
     {
       "id": "fx_program_light_p95",
       "plan": "17",
       "measure": "fx bench --states 2000 --frames 360 --json",
       "metric": "light_p95_ms",
-      "budget": 0.25
+      "value": null,
+      "budget": 0.25,
+      "comparison": "lte"
     },
     {
       "id": "logic_vm_mixed_ns",
       "plan": "13",
       "measure": "mind-headless logic bench --suite logic_vm_mixed --json",
       "metric": "ns_per_instruction",
+      "value": null,
       "budget": 25.0,
       "comparison": "lte"
     },
@@ -345,6 +400,7 @@
       "plan": "13",
       "measure": "mind-headless logic bench --suite logic_vm_mixed --pure-arith --json",
       "metric": "ns_per_instruction",
+      "value": null,
       "budget": 10.0,
       "comparison": "lte"
     },
@@ -353,6 +409,7 @@
       "plan": "13",
       "measure": "mind-headless logic bench --suite logic_vm_mixed --world --json",
       "metric": "p95_us",
+      "value": null,
       "budget": 30.0,
       "comparison": "lte"
     },
@@ -361,6 +418,7 @@
       "plan": "13",
       "measure": "mind-headless logic bench --suite logic_idle_processors --json",
       "metric": "p95_ms",
+      "value": null,
       "budget": 0.2,
       "comparison": "lte"
     },
@@ -369,6 +427,7 @@
       "plan": "13",
       "measure": "mind-headless logic bench --suite logic_assemble --json",
       "metric": "p50_ms",
+      "value": null,
       "budget": 2.0,
       "comparison": "lte"
     },
@@ -377,6 +436,7 @@
       "plan": "14",
       "measure": "in-engine profiler (HUD visible, 1080p, 60s)",
       "metric": "p95_ms",
+      "value": null,
       "budget": 1.0,
       "comparison": "lte"
     },
@@ -385,6 +445,7 @@
       "plan": "14",
       "measure": "MindUi.open_dialog cached-instance bench (N=200)",
       "metric": "p95_ms",
+      "value": null,
       "budget": 8.0,
       "comparison": "lte"
     },
@@ -393,6 +454,7 @@
       "plan": "14",
       "measure": "MindTable.bench(500)",
       "metric": "p95_ms",
+      "value": null,
       "budget": 4.0,
       "comparison": "lte"
     },
@@ -401,6 +463,7 @@
       "plan": "14",
       "measure": "UiRoot theme build at AssetsReadyEvent",
       "metric": "ms",
+      "value": null,
       "budget": 120.0,
       "comparison": "lte"
     },
@@ -409,6 +472,7 @@
       "plan": "15",
       "measure": "mind-headless input bench --profile input_line --json",
       "metric": "p95_ms",
+      "value": null,
       "budget": 0.5,
       "comparison": "lte"
     },
@@ -417,6 +481,7 @@
       "plan": "15",
       "measure": "mind-headless input bench --profile input_astar --json",
       "metric": "p95_ms",
+      "value": null,
       "budget": 2.0,
       "comparison": "lte"
     },
@@ -425,6 +490,7 @@
       "plan": "15",
       "measure": "mind-headless input bench --profile input_select --json",
       "metric": "p95_ms",
+      "value": null,
       "budget": 1.5,
       "comparison": "lte"
     },
@@ -433,6 +499,7 @@
       "plan": "15",
       "measure": "mind-headless input bench --profile input_command --json",
       "metric": "p95_ms",
+      "value": null,
       "budget": 1.0,
       "comparison": "lte"
     }
@@ -443,15 +510,11 @@
       "blocks",
       "logistics",
       "power",
-      "liquid",
-      "heat",
       "combat",
       "units",
-      "render",
-      "audio",
-      "fx"
-    ],
-    "feature": "alloc-audit"
+      "campaign",
+      "ui"
+    ]
   },
   "soak": {
     "profiles": [

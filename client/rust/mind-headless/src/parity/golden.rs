@@ -138,6 +138,82 @@ fn hex(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
 
+    fn load_json(path: &Path) -> serde_json::Value {
+        let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("read {path:?}: {e}"));
+        serde_json::from_str(&text).unwrap_or_else(|e| panic!("parse {path:?}: {e}"))
+    }
+
+    /// Plan 23 M2 owner handshake: the committed source-derived oracle goldens
+    /// must match the Rust port's registered field order / catalogue order.
+    #[test]
+    fn field_order_matches_golden() {
+        let repo = crate::paths::find_repo_root(None).expect("repo root");
+
+        // logic (plan 13): registered names + serialized field order.
+        let logic = load_json(&repo.join("parity/golden/logic/field_order.json"));
+        let golden = logic["statements"].as_array().expect("statements");
+        let statements = mind_core::logic::textio::statements();
+        assert_eq!(statements.len(), golden.len(), "statement count");
+        assert_eq!(
+            logic["count"].as_u64().unwrap() as usize,
+            statements.len(),
+            "logic golden count"
+        );
+        for (meta, entry) in statements.iter().zip(golden) {
+            assert_eq!(meta.registered_name, entry["reg"].as_str().unwrap());
+            let names = entry["names"].as_array().expect("names");
+            assert_eq!(
+                meta.fields.len(),
+                names.len(),
+                "field count for `{}`",
+                meta.registered_name
+            );
+            for (field, name) in meta.fields.iter().zip(names) {
+                // Rust snake_cases and escapes keywords (`type_`); normalize both.
+                let normalize = |value: &str| {
+                    value
+                        .trim_end_matches('_')
+                        .chars()
+                        .filter(|c| *c != '_')
+                        .flat_map(char::to_lowercase)
+                        .collect::<String>()
+                };
+                assert_eq!(
+                    normalize(field.name),
+                    normalize(name.as_str().unwrap()),
+                    "field order for `{}`",
+                    meta.registered_name
+                );
+            }
+        }
+
+        // fx (plan 17): the 267-effect catalogue order.
+        let fx = load_json(&repo.join("parity/golden/fx/fx_order.json"));
+        let effects = fx["effects"].as_array().expect("effects");
+        let registry = mind_core::fx::build_registry();
+        assert_eq!(registry.len(), effects.len(), "fx catalogue count");
+        for (def, name) in registry.iter().zip(effects) {
+            assert_eq!(def.name, name.as_str().unwrap(), "fx order");
+        }
+
+        // ui (plan 14) + io (plan 04): dense, unique, count-consistent.
+        let ui = load_json(&repo.join("parity/golden/ui/ui_keys.json"));
+        let keys = ui["keys"].as_array().expect("keys");
+        assert_eq!(ui["count"].as_u64().unwrap() as usize, keys.len());
+        assert_eq!(
+            keys.iter()
+                .filter_map(|k| k.as_str())
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            keys.len(),
+            "ui keys unique"
+        );
+        let io = load_json(&repo.join("parity/golden/io/rules_fields.json"));
+        let fields = io["fields"].as_array().expect("fields");
+        assert_eq!(io["count"].as_u64().unwrap() as usize, fields.len());
+        assert!(!fields.is_empty());
+    }
+
     #[test]
     fn committed_manifest_hashes_match() {
         let repo = crate::paths::find_repo_root(None).expect("repo root");

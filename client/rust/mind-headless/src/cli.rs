@@ -187,6 +187,9 @@ pub enum Command {
         /// (requires `--features alloc-audit`).
         #[arg(long)]
         assert_alloc: Option<u64>,
+        /// Record and print the final simulation checksum (plan 23 M4).
+        #[arg(long)]
+        checksum: bool,
     },
 
     /// Run a scenario and write its state dump.
@@ -730,6 +733,10 @@ pub enum ParityCommand {
         /// Emit a machine-readable JSON report on stdout.
         #[arg(long)]
         json: bool,
+        /// Include the whole-program per-system roll-up (`parity report --all`,
+        /// plan 23 M7).
+        #[arg(long)]
+        all: bool,
         /// Repo root override (defaults to discovery from cwd).
         #[arg(long)]
         repo: Option<PathBuf>,
@@ -750,14 +757,53 @@ pub enum ParityCommand {
         out: Option<PathBuf>,
     },
 
-    /// Validate the benchmark-budget registry (recording is nightly-owned).
+    /// Validate the benchmark-budget registry (recording is nightly-owned) and,
+    /// when a committed baseline exists, its coverage + canonical rule.
     BenchGate {
         /// Emit a machine-readable JSON report on stdout.
         #[arg(long)]
         json: bool,
+        /// Baseline file override (defaults to `bench/baselines.json`).
+        #[arg(long)]
+        baseline: Option<PathBuf>,
+        /// Also validate the canonical regime (>10% regression gate, NUD-39/A).
+        #[arg(long)]
+        canonical: bool,
         /// Repo root override (defaults to discovery from cwd).
         #[arg(long)]
         repo: Option<PathBuf>,
+    },
+
+    /// Determinism matrix: run each catalogued scenario twice in-process, twice
+    /// through its replayed `.simlog`, and once cross-process, comparing the
+    /// canonical checksums across worker counts (`plan 23 M1`).
+    Checksums {
+        /// Suite key (`sm`/`smoke` = T0, `gate` = T1, `full` = T2).
+        #[arg(long, default_value = "smoke")]
+        suite: String,
+        /// Worker counts to compare (recorded; plan 05 owns worker parity).
+        #[arg(long, value_delimiter = ',', default_value = "1,4")]
+        workers: Vec<usize>,
+        /// Only run the in-process + replay halves (skip the child process).
+        #[arg(long)]
+        no_cross_process: bool,
+        /// Emit the `format: 1` checksum matrix JSON on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Replay-order fuzz: mutate a known command log and prove the plan-05
+    /// `CommandLog` ordering/dedup/truncation semantics (negative controls).
+    ReplayFuzz {
+        /// Deterministic base-log seed.
+        #[arg(long, default_value_t = 7)]
+        seed: u64,
+        /// Comma-separated mutations (`reorder`, `dup`, `truncate`).
+        #[arg(long, default_value = "reorder,dup,truncate")]
+        mutations: String,
+        /// Emit the `format: 1` fuzz report JSON on stdout.
+        #[arg(long)]
+        json: bool,
     },
 }
 
