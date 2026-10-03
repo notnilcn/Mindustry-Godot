@@ -195,54 +195,84 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
 
     // `liquidDrop` (plan 10 §3.10 append-only addendum; upstream
     // `content/Blocks.java` `liquidDrop = Liquids.<x>`).
+    // Floor movement/liquid/drown metadata (`content/Blocks.java`; plan 11 §3.6).
     sink.push(BlockSpec {
         liquid_drop: Some("water"),
+        speed_multiplier: Some(0.2),
+        is_liquid: Some(true),
+        drown_time: Some(200.0),
+        liquid_multiplier: Some(1.5),
         ..spec("deep-water", BlockKind::Floor)
     })?;
 
     sink.push(BlockSpec {
         liquid_drop: Some("water"),
+        speed_multiplier: Some(0.5),
+        is_liquid: Some(true),
         ..spec("shallow-water", BlockKind::Floor)
     })?;
 
     sink.push(BlockSpec {
         liquid_drop: Some("water"),
+        speed_multiplier: Some(0.5),
+        is_liquid: Some(true),
         ..spec("tainted-water", BlockKind::Floor)
     })?;
 
     sink.push(BlockSpec {
         liquid_drop: Some("water"),
+        speed_multiplier: Some(0.18),
+        is_liquid: Some(true),
+        drown_time: Some(200.0),
+        liquid_multiplier: Some(1.5),
         ..spec("deep-tainted-water", BlockKind::Floor)
     })?;
 
-    // `ShallowLiquid` defaults `liquidDrop = Liquids.water`.
+    // `ShallowLiquid` defaults `liquidDrop = Liquids.water`; `set()` sets
+    // `isLiquid = true`, `shallow = true` and copies the liquid base.
     sink.push(BlockSpec {
         liquid_drop: Some("water"),
+        speed_multiplier: Some(0.75),
+        is_liquid: Some(true),
         ..spec("darksand-tainted-water", BlockKind::ShallowLiquid)
     })?;
 
     sink.push(BlockSpec {
         liquid_drop: Some("water"),
+        speed_multiplier: Some(0.8),
+        is_liquid: Some(true),
         ..spec("sand-water", BlockKind::ShallowLiquid)
     })?;
 
     sink.push(BlockSpec {
         liquid_drop: Some("water"),
+        speed_multiplier: Some(0.8),
+        is_liquid: Some(true),
         ..spec("darksand-water", BlockKind::ShallowLiquid)
     })?;
 
     sink.push(BlockSpec {
         liquid_drop: Some("oil"),
+        speed_multiplier: Some(0.19),
+        is_liquid: Some(true),
+        drown_time: Some(230.0),
         ..spec("tar", BlockKind::Floor)
     })?;
 
     sink.push(BlockSpec {
         liquid_drop: Some("cryofluid"),
+        speed_multiplier: Some(0.5),
+        is_liquid: Some(true),
+        drown_time: Some(150.0),
+        liquid_multiplier: Some(0.5),
         ..spec("pooled-cryofluid", BlockKind::Floor)
     })?;
 
     sink.push(BlockSpec {
         liquid_drop: Some("slag"),
+        speed_multiplier: Some(0.19),
+        is_liquid: Some(true),
+        drown_time: Some(230.0),
         ..spec("molten-slag", BlockKind::Floor)
     })?;
 
@@ -284,7 +314,10 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
 
     sink.push(spec("dirt", BlockKind::Floor))?;
 
-    sink.push(spec("mud", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        speed_multiplier: Some(0.6),
+        ..spec("mud", BlockKind::Floor)
+    })?;
 
     sink.push(spec("dacite", BlockKind::Floor))?;
 
@@ -316,10 +349,16 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
 
     sink.push(spec("dense-red-stone", BlockKind::Floor))?;
 
-    sink.push(spec("red-ice", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        speed_multiplier: Some(0.9),
+        ..spec("red-ice", BlockKind::Floor)
+    })?;
 
     sink.push(BlockSpec {
         liquid_drop: Some("arkycite"),
+        speed_multiplier: Some(0.3),
+        is_liquid: Some(true),
+        drown_time: Some(200.0),
         ..spec("arkycite-floor", BlockKind::Floor)
     })?;
 
@@ -375,7 +414,10 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
 
     sink.push(spec("snow", BlockKind::Floor))?;
 
-    sink.push(spec("ice", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        speed_multiplier: Some(0.9),
+        ..spec("ice", BlockKind::Floor)
+    })?;
 
     sink.push(spec("ice-snow", BlockKind::Floor))?;
 

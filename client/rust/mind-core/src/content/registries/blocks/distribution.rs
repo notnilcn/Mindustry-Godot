@@ -90,6 +90,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         configurable: Some(true),
+        crush_fragile: Some(true),
         ..spec("bridge-conveyor", BlockKind::BufferedItemBridge)
     })?;
 
@@ -307,6 +308,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         ])),
         solid: Some(true),
         update: Some(true),
+        crush_fragile: Some(true),
         ..spec("duct-bridge", BlockKind::DuctBridge)
     })?;
 

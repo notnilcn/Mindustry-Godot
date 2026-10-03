@@ -73,6 +73,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
             consume_items(vec![stack("coal", 1), stack("sand", 2)]),
             consume_power(0.5f32),
         ],
+        craft_time: Some(40.0),
         ..spec("silicon-smelter", BlockKind::GenericCrafter)
     })?;
 
@@ -119,6 +120,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
             consume_items(vec![stack("lead", 1), stack("sand", 1)]),
             consume_power(0.6f32),
         ],
+        craft_time: Some(30.0),
         ..spec("kiln", BlockKind::GenericCrafter)
     })?;
 
@@ -192,6 +194,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
                 stack("silicon", 3),
             ]),
         ],
+        craft_time: Some(75.0),
         ..spec("surge-smelter", BlockKind::GenericCrafter)
     })?;
 
@@ -272,6 +275,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
             consume_power(1.0f32),
             consume_items(vec![stack("scrap", 1)]),
         ],
+        craft_time: Some(10.0),
         ..spec("melter", BlockKind::GenericCrafter)
     })?;
 
@@ -285,6 +289,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         consumes: vec![consume_power(1.1f32), consume_liquid("slag", 0.06666667f32)],
+        craft_time: Some(35.0),
         ..spec("separator", BlockKind::Separator)
     })?;
 
@@ -308,6 +313,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
             consume_items(vec![stack("scrap", 1)]),
             consume_liquid("slag", 0.12f32),
         ],
+        craft_time: Some(15.0),
         ..spec("disassembler", BlockKind::Separator)
     })?;
 
@@ -327,6 +333,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
             consume_items(vec![stack("spore-pod", 1)]),
             consume_power(0.7f32),
         ],
+        craft_time: Some(20.0),
         ..spec("spore-press", BlockKind::GenericCrafter)
     })?;
 
@@ -342,6 +349,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
             consume_items(vec![stack("scrap", 1)]),
             consume_power(0.5f32),
         ],
+        craft_time: Some(40.0),
         ..spec("pulverizer", BlockKind::GenericCrafter)
     })?;
 
@@ -360,6 +368,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         consumes: vec![consume_liquid("oil", 0.1f32), consume_power(0.7f32)],
+        craft_time: Some(30.0),
         ..spec("coal-centrifuge", BlockKind::GenericCrafter)
     })?;
 

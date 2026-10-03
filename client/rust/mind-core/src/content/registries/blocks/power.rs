@@ -33,6 +33,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         destructible: Some(true),
         configurable: Some(true),
+        crush_fragile: Some(true),
         ..spec("power-node", BlockKind::PowerNode)
     })?;
 
@@ -318,6 +319,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         update: Some(true),
         fog_radius: Some(1),
         consumes: vec![consume_power_buffered(1e+03f32)],
+        crush_fragile: Some(true),
         ..spec("beam-node", BlockKind::BeamNode)
     })?;
 

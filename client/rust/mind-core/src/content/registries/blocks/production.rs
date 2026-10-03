@@ -135,6 +135,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         consumes: vec![consume_power(1.3333334f32), consume_liquid("water", 0.3f32)],
+        craft_time: Some(100.0),
         ..spec("cultivator", BlockKind::AttributeCrafter)
     })?;
 
@@ -178,6 +179,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         consumes: vec![consume_power(0.5f32)],
+        craft_time: Some(120.0),
         ..spec("vent-condenser", BlockKind::AttributeCrafter)
     })?;
 

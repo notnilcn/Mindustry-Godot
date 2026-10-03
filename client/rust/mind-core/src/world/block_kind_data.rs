@@ -12,11 +12,13 @@
 //! ## Ownership note (plan 07 §8 R2)
 //!
 //! Plan 07 §6.1 sketches `BlockKindData` as an additive field on
-//! plan-02's `BlockDef`. Plan 02's `BlockSpec`/`BlockDef` does not yet expose the
-//! family knob fields, so this pass derives a `BlockKindData` from the existing
-//! metadata via [`BlockKindData::from_def`]. When plan 02 grows the
-//! registration-wave knob fields the derivation is replaced by a copy and no
-//! behavior code changes. The enum shape itself is the frozen interface.
+//! plan-02's `BlockDef`. Plan 02's `BlockSpec`/`BlockDef` now exposes the
+//! floor/environment and placement/crush knob fields (plan 02 §6.1 addendum,
+//! `lane/f27-floor-meta`), so [`BlockKindData::from_def`] copies those real
+//! fields. Crafting/drill/logic numeric knobs are still supplied by the
+//! 07-owned [`BlockKindData::apply_vanilla_knobs`] overlay until plan-02
+//! registration grows the corresponding fields (plan 07 §8 R2, still open).
+//! The enum shape itself is the frozen interface.
 
 use crate::content::{BlockDef, BlockKind};
 
@@ -221,8 +223,16 @@ pub struct TargetDummyDef {
 pub struct FloorDef {
     /// Blend group index (`Floor.blendGroup`).
     pub blend_group: i32,
-    /// Whether this is a deep liquid (`Floor.isDeep`).
+    /// Whether this is a deep liquid (`Floor.isDeep`, derived from `drownTime`).
     pub is_deep: bool,
+    /// Whether this floor is a liquid (`Floor.isLiquid`).
+    pub is_liquid: bool,
+    /// `ShallowLiquid`/generation shallow flag (`Floor.shallow`).
+    pub shallow: bool,
+    /// Unit velocity multiplier (`Floor.speedMultiplier`).
+    pub speed_multiplier: f32,
+    /// Ticks to drown (`Floor.drownTime`; plan 10/11).
+    pub drown_time: f32,
 }
 
 /// `OverlayFloor` family knobs.
@@ -267,6 +277,12 @@ pub struct CliffDef {
 pub struct ShallowLiquidDef {
     /// Whether the liquid is shallow (always true for this class).
     pub shallow: bool,
+    /// Whether this floor is a liquid (`Floor.isLiquid`; always true here).
+    pub is_liquid: bool,
+    /// `Floor.speedMultiplier`.
+    pub speed_multiplier: f32,
+    /// `Floor.drownTime` (`ShallowLiquid` never sets one).
+    pub drown_time: f32,
 }
 
 /// `SteamVent` family knobs.
@@ -523,7 +539,14 @@ impl BlockKindData {
                 size: def.size.clamp(1, 16) as u8,
             },
             BlockKind::Floor | BlockKind::EmptyFloor | BlockKind::ColoredFloor => {
-                BlockKindData::Floor(FloorDef::default())
+                BlockKindData::Floor(FloorDef {
+                    blend_group: 0,
+                    is_deep: def.is_deep,
+                    is_liquid: def.is_liquid,
+                    shallow: def.shallow,
+                    speed_multiplier: def.speed_multiplier,
+                    drown_time: def.drown_time,
+                })
             }
             BlockKind::OverlayFloor | BlockKind::CharacterOverlay | BlockKind::RuneOverlay => {
                 BlockKindData::OverlayFloor(OverlayDef {
@@ -544,9 +567,12 @@ impl BlockKindData {
             | BlockKind::StaticTree
             | BlockKind::TreeBlock => BlockKindData::Prop(PropDef::default()),
             BlockKind::Cliff | BlockKind::TallBlock => BlockKindData::Cliff(CliffDef::default()),
-            BlockKind::ShallowLiquid => {
-                BlockKindData::ShallowLiquid(ShallowLiquidDef { shallow: true })
-            }
+            BlockKind::ShallowLiquid => BlockKindData::ShallowLiquid(ShallowLiquidDef {
+                shallow: true,
+                is_liquid: def.is_liquid,
+                speed_multiplier: def.speed_multiplier,
+                drown_time: def.drown_time,
+            }),
             BlockKind::SteamVent => BlockKindData::SteamVent(SteamVentDef::default()),
             BlockKind::SpawnBlock => BlockKindData::Spawn(SpawnDef::default()),
             BlockKind::Wall | BlockKind::ShieldWall => BlockKindData::Wall(WallDef::default()),
@@ -555,11 +581,18 @@ impl BlockKindData {
             BlockKind::Thruster => BlockKindData::Thruster(ThrusterDef::default()),
             BlockKind::TargetDummy => BlockKindData::TargetDummy(TargetDummyDef::default()),
             BlockKind::GenericCrafter | BlockKind::HeatCrafter => {
-                BlockKindData::Crafter(CrafterDef::default())
+                BlockKindData::Crafter(CrafterDef {
+                    craft_time: def.craft_time,
+                    ..CrafterDef::default()
+                })
             }
-            BlockKind::AttributeCrafter => {
-                BlockKindData::AttributeCrafter(AttributeCrafterDef::default())
-            }
+            BlockKind::AttributeCrafter => BlockKindData::AttributeCrafter(AttributeCrafterDef {
+                crafter: CrafterDef {
+                    craft_time: def.craft_time,
+                    ..CrafterDef::default()
+                },
+                ..AttributeCrafterDef::default()
+            }),
             BlockKind::Drill => BlockKindData::Drill(DrillDef::default()),
             BlockKind::BurstDrill => BlockKindData::BurstDrill(BurstDrillDef::default()),
             BlockKind::BeamDrill => BlockKindData::BeamDrill(BeamDrillDef::default()),
@@ -607,42 +640,29 @@ impl BlockKindData {
     pub fn apply_vanilla_knobs(&mut self, content: &crate::content::ContentRegistry, name: &str) {
         let item = |n: &str| content.item_id(n).map(|id| id.raw()).unwrap_or(0);
         let liquid = |n: &str| content.liquid_id(n).map(|id| id.raw()).unwrap_or(0);
-        let craft = |craft_time: f32,
-                     items: Vec<(u16, i32)>,
-                     liquids: Vec<(u16, f32)>,
-                     ignore: bool| CrafterDef {
-            craft_time,
+        // `craft_time` is now copied from the real plan-02 `BlockDef.craft_time`
+        // field (`from_def`); this overlay only supplies the output stacks that
+        // plan-02 does not yet carry.
+        let craft = |items: Vec<(u16, i32)>, liquids: Vec<(u16, f32)>, ignore: bool| CrafterDef {
+            craft_time: 0.0,
             output_items: items,
             output_liquids: liquids,
             ignore_liquid_fullness: ignore,
         };
         match name {
-            "silicon-smelter" => {
-                self.set_crafter(craft(40.0, vec![(item("silicon"), 1)], vec![], false))
-            }
+            "silicon-smelter" => self.set_crafter(craft(vec![(item("silicon"), 1)], vec![], false)),
             "surge-smelter" => {
-                self.set_crafter(craft(75.0, vec![(item("surge-alloy"), 1)], vec![], false))
+                self.set_crafter(craft(vec![(item("surge-alloy"), 1)], vec![], false))
             }
-            "spore-press" => self.set_crafter(craft(
-                20.0,
-                vec![],
-                vec![(liquid("oil"), 18.0 / 60.0)],
-                false,
-            )),
-            "coal-centrifuge" => {
-                self.set_crafter(craft(30.0, vec![(item("coal"), 1)], vec![], false))
+            "spore-press" => {
+                self.set_crafter(craft(vec![], vec![(liquid("oil"), 18.0 / 60.0)], false))
             }
-            "kiln" => self.set_crafter(craft(30.0, vec![(item("metaglass"), 1)], vec![], false)),
-            "melter" => self.set_crafter(craft(
-                10.0,
-                vec![],
-                vec![(liquid("slag"), 12.0 / 60.0)],
-                false,
-            )),
-            "pulverizer" => self.set_crafter(craft(40.0, vec![(item("sand"), 1)], vec![], false)),
+            "coal-centrifuge" => self.set_crafter(craft(vec![(item("coal"), 1)], vec![], false)),
+            "kiln" => self.set_crafter(craft(vec![(item("metaglass"), 1)], vec![], false)),
+            "melter" => self.set_crafter(craft(vec![], vec![(liquid("slag"), 12.0 / 60.0)], false)),
+            "pulverizer" => self.set_crafter(craft(vec![(item("sand"), 1)], vec![], false)),
             "separator" => {
                 if let BlockKindData::Separator(def) = self {
-                    def.craft_time = 35.0;
                     def.results = vec![
                         (item("copper"), 5),
                         (item("lead"), 3),
@@ -653,7 +673,6 @@ impl BlockKindData {
             }
             "disassembler" => {
                 if let BlockKindData::Separator(def) = self {
-                    def.craft_time = 15.0;
                     def.results = vec![
                         (item("sand"), 2),
                         (item("graphite"), 1),
@@ -706,7 +725,9 @@ impl BlockKindData {
             }
             "cultivator" => {
                 if let BlockKindData::AttributeCrafter(def) = self {
-                    def.crafter = craft(100.0, vec![(item("spore-pod"), 1)], vec![], false);
+                    let craft_time = def.crafter.craft_time;
+                    def.crafter = craft(vec![(item("spore-pod"), 1)], vec![], false);
+                    def.crafter.craft_time = craft_time;
                     def.attribute = -1;
                     def.base_efficiency = 0.0;
                     def.max_boost = 2.0;
@@ -715,7 +736,9 @@ impl BlockKindData {
             }
             "vent-condenser" => {
                 if let BlockKindData::AttributeCrafter(def) = self {
-                    def.crafter = craft(120.0, vec![], vec![(liquid("water"), 30.0 / 60.0)], false);
+                    let craft_time = def.crafter.craft_time;
+                    def.crafter = craft(vec![], vec![(liquid("water"), 30.0 / 60.0)], false);
+                    def.crafter.craft_time = craft_time;
                     def.attribute = -1;
                     def.base_efficiency = 0.0;
                     def.min_efficiency = 9.0 - 0.0001;
@@ -759,12 +782,18 @@ impl BlockKindData {
         }
     }
 
-    fn set_crafter(&mut self, crafter: CrafterDef) {
-        match self {
-            BlockKindData::Crafter(def) => *def = crafter,
-            BlockKindData::AttributeCrafter(def) => def.crafter = crafter,
-            _ => {}
+    fn set_crafter(&mut self, mut crafter: CrafterDef) {
+        let target = match self {
+            BlockKindData::Crafter(def) => def,
+            BlockKindData::AttributeCrafter(def) => &mut def.crafter,
+            _ => return,
+        };
+        // Preserve the real plan-02 `craft_time`; the overlay only supplies
+        // output stacks.
+        if crafter.craft_time == 0.0 {
+            crafter.craft_time = target.craft_time;
         }
+        *target = crafter;
     }
 
     fn set_drill(&mut self, drill_time: f32, tier: i32, blocked: Option<u16>) {

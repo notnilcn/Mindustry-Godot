@@ -203,6 +203,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         destructible: Some(true),
         configurable: Some(true),
+        crush_fragile: Some(true),
         ..spec("reinforced-message", BlockKind::MessageBlock)
     })?;
 
@@ -214,6 +215,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         configurable: Some(true),
+        privileged: Some(true),
         ..spec("world-processor", BlockKind::LogicBlock)
     })?;
 
@@ -224,6 +226,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         env_enabled: Some(EnvMask::any()),
         solid: Some(true),
         destructible: Some(true),
+        privileged: Some(true),
         ..spec("world-cell", BlockKind::MemoryBlock)
     })?;
 
@@ -235,6 +238,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         destructible: Some(true),
         configurable: Some(true),
+        privileged: Some(true),
         ..spec("world-message", BlockKind::MessageBlock)
     })?;
 
@@ -245,6 +249,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         env_enabled: Some(EnvMask::any()),
         update: Some(true),
         configurable: Some(true),
+        privileged: Some(true),
         ..spec("world-switch", BlockKind::SwitchBlock)
     })?;
     let _ = sink;

@@ -47,18 +47,25 @@ pub fn can_break(_def: &BlockDef) -> bool {
     true
 }
 
-/// `Block.canReplace(other)` approximation over available metadata.
+/// `Block.canReplace(other)` (`Block.java:796`).
 ///
-/// `alwaysReplace`/`privileged`/`replaceable`/`subclass` are not yet exposed by
-/// plan 02's `BlockDef` (plan 07 §8 R2); the group/size/construct predicates are
-/// ported exactly and this is the byte-compatible common case.
+/// `def` is `this` (the block being placed); `other` is the existing block. The
+/// `subclass` equality check uses plan 07's `BlockKind` proxy (equal `BlockKind`
+/// implies the same Java base class for every ported vanilla block).
 pub fn can_replace(def: &BlockDef, other: &BlockDef) -> bool {
-    if other.kind == BlockKind::ConstructBlock {
+    if other.kind == BlockKind::ConstructBlock || other.always_replace {
         return true;
     }
-    let same_group = def.group != crate::content::BlockGroup::None && other.group == def.group;
-    let same_block = def.id == other.id;
-    (same_group || same_block) && (def.size >= other.size)
+    if other.privileged {
+        return false;
+    }
+    let self_replace =
+        other.id != def.id || (super::block::kind_rotates(def.kind) && def.quick_rotate);
+    let grouped = (def.group != crate::content::BlockGroup::None && other.group == def.group)
+        || other.id == def.id;
+    let sized = def.size == other.size
+        || (def.size >= other.size && (def.subclass == other.subclass || def.group.any_replace()));
+    other.replaceable && self_replace && grouped && sized
 }
 
 /// Whether a tile holds a breakable, interactable block for `team`.
@@ -167,7 +174,10 @@ pub fn valid_place_at(
                 return false;
             }
             let tile = grid.tile(tx, ty);
-            if tile.block == BlockId::AIR {
+            // Air and the same block are always placeable (upstream
+            // `Build.validPlace`'s "same block, same rotation" bypass; the port
+            // does not model rotation here yet).
+            if tile.block == BlockId::AIR || tile.block == block {
                 continue;
             }
             let Some(current) = content.block(tile.block) else {
@@ -318,6 +328,20 @@ mod tests {
         assert!(can_replace(wall, wall2));
         let build2 = content.block_by_name("build2").expect("build2");
         assert!(can_replace(wall, build2));
+    }
+
+    #[test]
+    fn can_replace_honors_always_replace_and_privileged() {
+        let content = crate::content::test_support::test_registry();
+        let stone = content.block_by_name("stone").expect("stone");
+        // `Prop` subclasses set `alwaysReplace = true`.
+        let boulder = content.block_by_name("sand-boulder").expect("sand-boulder");
+        assert!(can_replace(stone, boulder));
+        // `privileged` blocks can never be replaced.
+        let processor = content
+            .block_by_name("world-processor")
+            .expect("world-processor");
+        assert!(!can_replace(stone, processor));
     }
 
     #[test]
