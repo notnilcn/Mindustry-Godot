@@ -25,6 +25,10 @@ sha2.workspace = true
 # Plan 05 M8 §7.4: forwards the counting global allocator to `mind-core` for
 # `bench --assert-alloc`. Default-off; CI/bench builds opt in.
 alloc-audit = ["mind-core/alloc-audit"]
+# Plan 23 M4: forwards the per-tick building-update cost attribution to
+# `mind-core`. Default-off; `blocks bench` opt-in (`--features profile-build`)
+# to print the order/consume/dispatch split without instrumenting release.
+profile-build = ["mind-core/profile-build"]
 
 [lints]
 workspace = true

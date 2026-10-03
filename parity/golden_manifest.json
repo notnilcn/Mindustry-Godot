@@ -615,6 +615,34 @@
       "owner_plan": "17",
       "sha256": "ca43c32931e493e243ccc1a4271643eaacf40c90d14544f08769539aac560b28",
       "regen": "tools/regen_goldens.sh --only oracle_fx_fx_order"
+    },
+    {
+      "id": "harness_editor_basic_ops",
+      "kind": "harness",
+      "path": "client/rust/mind-core/tests/fixtures/editor/basic_ops.json",
+      "owner_plan": "19",
+      "sha256": "52e9f7fa858067ead44d50cafda16d44d34d9b13bcadb9570a5f4e4146619e7c"
+    },
+    {
+      "id": "harness_editor_objectives",
+      "kind": "harness",
+      "path": "client/rust/mind-core/tests/fixtures/editor/objectives.json",
+      "owner_plan": "19",
+      "sha256": "088076a1255392175409cc306444cc376b789b2a1577616ee43dce09fb801d5e"
+    },
+    {
+      "id": "harness_editor_wave_graph",
+      "kind": "harness",
+      "path": "client/rust/mind-core/tests/fixtures/editor/wave_graph.json",
+      "owner_plan": "19",
+      "sha256": "a354ec40cc4b755e21f4e2b4139d20975d80c3073f1d0fe3de99e07cee4e4919"
+    },
+    {
+      "id": "harness_relay_validation_matrix",
+      "kind": "harness",
+      "path": "client/rust/mind-core/tests/fixtures/relay/validation_matrix.json",
+      "owner_plan": "21",
+      "sha256": "b60abfb2c7bbad18f50d118a3656af2968ae8cbcf8825cdd8083c3347e8f5b5c"
     }
   ]
 }

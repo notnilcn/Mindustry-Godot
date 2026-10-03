@@ -911,6 +911,22 @@ fn bench(profile: &str, buildings: usize, ticks: u64, json: bool) -> Result<()> 
     }
 
     let (p50_us, p95_us, p99_us) = percentiles(samples);
+    // Plan 23 M4: only present when the bench is built `--features profile-build`.
+    #[cfg(feature = "profile-build")]
+    if mind_core::world::update::profile::enabled() {
+        let (order, consume, dispatch, pticks, entities) =
+            mind_core::world::update::profile::take();
+        if pticks > 0 {
+            eprintln!(
+                "PROFILE order_us/tick={:.1} consume_us/tick={:.1} dispatch_us/tick={:.1} entities={} ticks={}",
+                order as f64 / pticks as f64 / 1000.0,
+                consume as f64 / pticks as f64 / 1000.0,
+                dispatch as f64 / pticks as f64 / 1000.0,
+                entities,
+                pticks
+            );
+        }
+    }
     let report = serde_json::json!({
         "scenario": "blocks_bench",
         "profile": profile,

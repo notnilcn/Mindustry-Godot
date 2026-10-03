@@ -9,11 +9,63 @@
 //! buildings in stable sequence order, decay `timeScale`, run the consumer pass,
 //! then call the registered behavior.
 
+use std::time::Instant;
+
 use bevy_ecs::entity::Entity;
 use bevy_ecs::query::{QueryState, With};
 use bevy_ecs::world::World;
 
 use crate::content::{ItemId, LiquidId};
+
+/// Plan 23 M4 opt-in performance instrumentation for the building-update loop.
+///
+/// Compiled **only** with the `profile-build` feature (off in default/release
+/// builds). `blocks bench` runs with `--features profile-build` to attribute the
+/// per-tick cost across `order` (stable iteration order), `consume`
+/// (`update_consumption`) and `dispatch` (`BuildingBehavior::update_tile`).
+#[cfg(feature = "profile-build")]
+pub mod profile {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    /// Nanoseconds spent filling the building iteration order.
+    pub static ORDER_NS: AtomicU64 = AtomicU64::new(0);
+    /// Nanoseconds spent in `update_consumption`.
+    pub static CONSUME_NS: AtomicU64 = AtomicU64::new(0);
+    /// Nanoseconds spent dispatching `BuildingBehavior::update_tile`.
+    pub static DISPATCH_NS: AtomicU64 = AtomicU64::new(0);
+    /// Building ticks counted.
+    pub static TICKS: AtomicU64 = AtomicU64::new(0);
+    /// Entity-updates counted.
+    pub static ENTITIES: AtomicU64 = AtomicU64::new(0);
+
+    /// Whether profiling is on (compile-time, via the feature).
+    #[inline]
+    pub const fn enabled() -> bool {
+        true
+    }
+
+    /// Reads and resets the counters (order_ns, consume_ns, dispatch_ns, ticks, entities).
+    pub fn take() -> (u64, u64, u64, u64, u64) {
+        (
+            ORDER_NS.swap(0, Ordering::Relaxed),
+            CONSUME_NS.swap(0, Ordering::Relaxed),
+            DISPATCH_NS.swap(0, Ordering::Relaxed),
+            TICKS.swap(0, Ordering::Relaxed),
+            ENTITIES.swap(0, Ordering::Relaxed),
+        )
+    }
+}
+
+/// No-op stand-in so call sites compile unchanged in default builds.
+#[cfg(not(feature = "profile-build"))]
+pub mod profile {
+    /// Profiling is opt-in (`profile-build`); always off otherwise.
+    #[inline]
+    pub const fn enabled() -> bool {
+        false
+    }
+}
+
 use crate::ecs::EntitySeq;
 use crate::entities::comp::{Building, Health, Pos, TeamComp, Timers};
 use crate::world::config::ConfigValue;
@@ -145,13 +197,28 @@ pub fn update_buildings(world: &mut World) {
     if let Some(mut clock) = world.get_resource_mut::<BuildClock>() {
         clock.time += 1.0;
     }
+    let prof = profile::enabled();
     let (mut order, mut query) = match world.get_resource_mut::<BuildScratch>() {
         Some(mut scratch) => (std::mem::take(&mut scratch.order), scratch.query.take()),
         None => (Vec::new(), None),
     };
+    let _t_order = prof.then(Instant::now);
     fill_building_order(world, &mut order, &mut query);
+    #[cfg(feature = "profile-build")]
+    if let Some(t) = _t_order {
+        profile::ORDER_NS.fetch_add(
+            t.elapsed().as_nanos() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
     for (_, entity) in order.iter().copied() {
         building_update(world, entity);
+    }
+    #[cfg(feature = "profile-build")]
+    if prof {
+        use std::sync::atomic::Ordering;
+        profile::TICKS.fetch_add(1, Ordering::Relaxed);
+        profile::ENTITIES.fetch_add(order.len() as u64, Ordering::Relaxed);
     }
     if let Some(mut scratch) = world.get_resource_mut::<BuildScratch>() {
         scratch.order = order;
@@ -181,7 +248,15 @@ pub fn building_update(world: &mut World, entity: Entity) {
         return;
     };
 
+    let _t_consume = profile::enabled().then(Instant::now);
     update_consumption(world, entity, &inst);
+    #[cfg(feature = "profile-build")]
+    if let Some(t) = _t_consume {
+        profile::CONSUME_NS.fetch_add(
+            t.elapsed().as_nanos() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
 
     let enabled = world
         .get::<Building>(entity)
@@ -189,7 +264,15 @@ pub fn building_update(world: &mut World, entity: Entity) {
     if enabled || inst.behavior.always_update_when_disabled() {
         // Clone only the behavior handle (single atomic) instead of cloning the
         // whole `Arc<BlockInstance>` again.
+        let _t_dispatch = profile::enabled().then(Instant::now);
         inst.behavior.clone().update_tile(world, entity);
+        #[cfg(feature = "profile-build")]
+        if let Some(t) = _t_dispatch {
+            profile::DISPATCH_NS.fetch_add(
+                t.elapsed().as_nanos() as u64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+        }
     }
 }
 

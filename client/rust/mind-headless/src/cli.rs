@@ -862,6 +862,21 @@ pub enum ParityCommand {
         #[arg(long)]
         json: bool,
     },
+
+    /// Scenario-mirror check (plan 23 §5 M3/R-21): verify (or with `--write`
+    /// materialize) the gitignored `client/scenarios/` mirror against the
+    /// canonical repo `scenarios/` set.
+    Mirror {
+        /// Materialize the exact mirror instead of only checking it.
+        #[arg(long)]
+        write: bool,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Repo root override (defaults to discovery from cwd).
+        #[arg(long)]
+        repo: Option<PathBuf>,
+    },
 }
 
 /// `power`/`liquid`/`heat` subcommands (plan 09 §7b).
