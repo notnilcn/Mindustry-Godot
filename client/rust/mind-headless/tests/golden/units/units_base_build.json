@@ -1,0 +1,13 @@
+{
+  "scenario": "units_base_build",
+  "pass": true,
+  "seed": 11,
+  "ticks": 3600,
+  "registered_parts": 1,
+  "queued_plans": 28,
+  "invalid_plans": 0,
+  "core_units_spawned": 2,
+  "path_found_at": 2,
+  "total_calcs": 1,
+  "checksum": "1aedac089f2e9e05"
+}

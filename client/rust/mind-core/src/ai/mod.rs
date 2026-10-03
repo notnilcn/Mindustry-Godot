@@ -14,6 +14,8 @@
 
 pub mod ai_controller;
 pub mod astar;
+pub mod base_builder_ai;
+pub mod base_registry;
 pub mod block_indexer;
 pub mod control_pathfinder;
 pub mod control_structs;
@@ -30,6 +32,11 @@ pub mod wave_spawner;
 
 pub use ai_controller::AiCtx;
 pub use astar::{AstarScratch, DistanceHeuristic, TileHeuristic, manhattan};
+pub use base_builder_ai::{
+    AiInterval, BaseBuildActions, BaseBuildInput, BaseBuilderAi, ensure_build_ai,
+    update_team_data as update_base_build,
+};
+pub use base_registry::{BasePart, BaseRegistry, BaseResource};
 pub use block_indexer::{BlockIndexer, BlockPriority};
 pub use control_pathfinder::{ControlPathfinder, PathfindResult};
 pub use control_structs::{FieldIndex, IntraEdge, NodeIndex};
@@ -37,7 +44,10 @@ pub use controller::{AiKind, ControllerSlot, UnitController, select_ai};
 pub use controller_registry::{is_logic_controllable, keep_state, select_controller};
 pub use harness::UnitHarness;
 pub use pathfinder::{Cost, Flowfield, PathTile, Pathfinder};
-pub use rts_ai::{RtsAi, Squad};
+pub use rts_ai::{
+    EnemyStat, RtsAi, RtsBuilding, RtsUnit, Squad, SquadMember, SquadStats, ensure_rts_ai,
+    estimate_stats,
+};
 pub use types::command::{AttackTarget, CommandAiState, CommandQueueEntry};
 pub use unit_command_runtime::{
     allows_command, command_controller, default_command, extra_stances, get_unit_stances,

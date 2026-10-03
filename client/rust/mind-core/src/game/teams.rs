@@ -28,13 +28,9 @@ use super::quad_tree::QuadTree;
 use super::rules::{CLUSTER_CHUNK_SIZE, Rules};
 use super::team::NEOPLASTIC;
 
-/// Placeholder for plan 11's `BaseBuilderAI` (M5, not yet shipped). The field is
-/// the integration seam; replacing this type is a plan-11 change.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct BaseBuilderAi {
-    /// Planner tick accumulator (upstream `BaseBuilderAI.timer`).
-    pub timer: f32,
-}
+/// Plan-11 `BaseBuilderAI` (plan 11 M5). The per-`TeamData` field is the
+/// integration seam owned here (plan 12) but implemented by plan 11.
+pub use crate::ai::base_builder_ai::BaseBuilderAi;
 
 /// One live building, as seen by [`Teams::update_team_stats`].
 #[derive(Debug, Clone, Copy, PartialEq)]

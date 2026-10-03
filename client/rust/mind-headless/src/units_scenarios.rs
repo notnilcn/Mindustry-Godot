@@ -37,6 +37,7 @@ pub fn names() -> &'static [&'static str] {
         "units_weapon_fire",
         "units_waves_difficulty",
         "units_legs_ik",
+        "units_base_build",
     ]
 }
 
@@ -66,7 +67,12 @@ pub fn run(command: &UnitsCommand) -> Result<i32> {
             ticks,
             json,
         } => path_report(unit, *tx, *ty, *ticks, *json),
-        UnitsCommand::Bench { units, ticks, json } => bench(*units, *ticks, *json),
+        UnitsCommand::Bench {
+            units,
+            ticks,
+            assert_alloc,
+            json,
+        } => bench(*units, *ticks, *assert_alloc, *json),
     }
 }
 
@@ -87,6 +93,7 @@ pub fn run_scenario(name: &str) -> Result<ScenarioOutput> {
         "units_weapon_fire" => weapon_fire(),
         "units_waves_difficulty" => waves_difficulty(),
         "units_legs_ik" => legs_ik(),
+        "units_base_build" => base_build(),
         other => bail!("unknown units scenario `{other}`"),
     }
 }
@@ -422,6 +429,148 @@ fn spawn_group() -> Result<ScenarioOutput> {
     Ok(ScenarioOutput { report, dump })
 }
 
+/// `units_base_build`: `BaseBuilderAI` traces an enemy-core path and queues
+/// valid base-part plans on ore (plan 11 §5 M5).
+fn base_build() -> Result<ScenarioOutput> {
+    use std::collections::VecDeque;
+
+    use mind_core::ai::{BaseBuildInput, BaseBuilderAi, BaseRegistry, BaseResource, Cost};
+    use mind_core::game::rules::{Rules, TeamRule};
+    use mind_core::game::schematic::Stile;
+    use mind_core::math::ArcRand;
+    use mind_core::world::TilePos;
+    use mind_core::world::build::valid_place;
+    use mind_core::world::config::ConfigValue;
+
+    let mut harness = UnitHarness::new(64, 64, 11);
+    // Cover the whole map in copper ore so any scattered placement matches.
+    {
+        let ore = harness
+            .build
+            .content
+            .block_id("ore-copper")
+            .ok_or_else(|| anyhow::anyhow!("ore-copper missing"))?;
+        for y in 0..64 {
+            for x in 0..64 {
+                harness.build.grid.tiles.get_mut(x, y).floor = ore;
+            }
+        }
+    }
+
+    let content = &harness.build.content;
+    let wall = content
+        .block_id("copper-wall")
+        .ok_or_else(|| anyhow::anyhow!("copper-wall missing"))?;
+    let source = content
+        .block_id("item-source")
+        .ok_or_else(|| anyhow::anyhow!("item-source missing"))?;
+    let copper = content
+        .item_by_name("copper")
+        .ok_or_else(|| anyhow::anyhow!("copper missing"))?
+        .id;
+
+    // A required-copper part: a wall plus a configured item source.
+    let schem = mind_core::game::schematic::Schematic {
+        tiles: vec![
+            Stile::new(wall, 0, 0, ConfigValue::None, 0),
+            Stile::new(source, 1, 0, ConfigValue::Item(copper), 0),
+        ],
+        labels: Vec::new(),
+        tags: Default::default(),
+        width: 2,
+        height: 1,
+        file: None,
+        mod_name: None,
+    };
+    let mut bases = BaseRegistry::new();
+    bases.load(content, vec![schem]);
+    let registered = bases.for_resource(BaseResource::Item(copper)).len();
+
+    // Enemy-core field for the path trace.
+    harness.pathfinder.rebuild(&harness.build.grid, content, 0);
+    let enemy_core = TilePos::new(50, 50);
+    let field = harness
+        .pathfinder
+        .get_field(Cost::Ground, 0, &[enemy_core])
+        .clone();
+
+    let cores = [TilePos::new(10, 10)];
+    let spawns = [TilePos::new(10, 10)];
+    let mut builder = BaseBuilderAi::new();
+    let mut rng = ArcRand::new(11);
+    let mut plans: VecDeque<mind_core::game::teams::BlockPlan> = VecDeque::new();
+    let team_rule = TeamRule::default();
+    let rules = Rules::default();
+
+    let mut core_units_spawned = 0i32;
+    let mut queued = 0u64;
+    let mut invalid = 0u64;
+    let mut path_found_at = None;
+
+    for tick in 0..3600u64 {
+        let mut input = BaseBuildInput {
+            content,
+            grid: &harness.build.grid,
+            table: harness.build.table(),
+            build_rules: &harness.build.rules,
+            counter: &harness.build.counter,
+            team_rule: &team_rule,
+            rules: &rules,
+            team: 0,
+            cores: &cores,
+            spawns: &spawns,
+            enemy_core_field: Some(&field),
+            enemy_cores: &[enemy_core],
+            core_unit_count: core_units_spawned,
+            bases: &bases,
+            rng: &mut rng,
+        };
+        let actions = builder.update(&mut input, &mut plans);
+        if actions.spawn_core_unit {
+            core_units_spawned += 1;
+        }
+        if builder.found_path && path_found_at.is_none() {
+            path_found_at = Some(tick);
+        }
+        while let Some(plan) = plans.pop_front() {
+            let ok = valid_place(
+                content,
+                harness.build.table(),
+                &harness.build.rules,
+                &harness.build.counter,
+                &harness.build.grid,
+                plan.block,
+                0,
+                plan.rotation as u8,
+                plan.x as i32,
+                plan.y as i32,
+            );
+            if ok {
+                queued += 1;
+            } else {
+                invalid += 1;
+            }
+        }
+    }
+
+    let pass = registered > 0 && queued > 0 && invalid == 0;
+    let report = serde_json::json!({
+        "scenario": "units_base_build",
+        "pass": pass,
+        "seed": 11,
+        "ticks": 3600,
+        "registered_parts": registered,
+        "queued_plans": queued,
+        "invalid_plans": invalid,
+        "core_units_spawned": core_units_spawned,
+        "path_found_at": path_found_at,
+        "total_calcs": builder.total_calcs,
+        "checksum": harness.checksum_hex(),
+    });
+    let dump = canonical(&report)?;
+    Ok(ScenarioOutput { report, dump })
+}
+
 fn spawn_report(unit: &str, team: u8, x: f32, y: f32, ticks: u64, json: bool) -> Result<i32> {
     let mut harness = UnitHarness::new(64, 64, 7);
     let Some(entity) = harness.spawn(unit, team, x, y, 0.0) else {
@@ -494,7 +643,9 @@ fn path_report(unit: &str, tx: i32, ty: i32, ticks: u64, json: bool) -> Result<i
     })
 }
 
-fn bench(units: usize, ticks: u64, json: bool) -> Result<i32> {
+fn bench(units: usize, ticks: u64, assert_alloc: Option<u64>, json: bool) -> Result<i32> {
+    use mind_core::util::alloc::{alloc_bytes, alloc_count, enabled as alloc_enabled};
+
     let mut harness = UnitHarness::new(128, 128, 7);
     let mut entities: Vec<Entity> = Vec::with_capacity(units);
     for i in 0..units {
@@ -505,30 +656,59 @@ fn bench(units: usize, ticks: u64, json: bool) -> Result<i32> {
             entities.push(entity);
         }
     }
+
+    // Warm up so first-tick lazy allocations are excluded from the audit.
+    for _ in 0..120 {
+        harness.tick();
+    }
+
+    let alloc_before = alloc_count();
+    let bytes_before = alloc_bytes();
     let mut samples = Vec::with_capacity(ticks as usize);
     for _ in 0..ticks {
         let start = Instant::now();
         harness.tick();
         samples.push(start.elapsed().as_nanos() as u64 / 1000);
     }
+    let alloc_delta = alloc_count().saturating_sub(alloc_before);
+    let bytes_delta = alloc_bytes().saturating_sub(bytes_before);
+
     samples.sort_unstable();
     let p50 = samples.get(samples.len() * 50 / 100).copied().unwrap_or(0);
     let p99 = samples
         .get((samples.len() * 99 / 100).min(samples.len().saturating_sub(1)))
         .copied()
         .unwrap_or(0);
+
+    // §7d: `units_mid` (≤300 units) unit systems ≤ 1.5 ms; `units_stress`
+    // (≤1000 units) ≤ 5.0 ms. Debug builds are non-representative.
+    let budget_ms = if units <= 300 { 1.5 } else { 5.0 };
+    let p99_ms = p99 as f64 / 1000.0;
+    let within_budget = cfg!(debug_assertions) || p99_ms <= budget_ms;
+    let alloc_ok = assert_alloc.is_none_or(|limit| !alloc_enabled() || alloc_delta <= limit);
+    let pass = within_budget && alloc_ok;
+
     let report = serde_json::json!({
         "scenario": "units_bench",
         "units": entities.len(),
         "ticks": ticks,
+        "warmup": 120,
         "p50_us": p50,
         "p99_us": p99,
+        "budget_ms": budget_ms,
+        "within_budget": within_budget,
+        "alloc_audit_enabled": alloc_enabled(),
+        "alloc_count": alloc_delta,
+        "alloc_bytes": bytes_delta,
+        "alloc_limit": assert_alloc,
+        "alloc_ok": alloc_ok,
+        "pass": pass,
         "checksum": harness.checksum_hex(),
     });
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     }
-    Ok(EXIT_PASS)
+    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
 }
 
 #[cfg(test)]

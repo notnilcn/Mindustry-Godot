@@ -1219,6 +1219,10 @@ pub enum UnitsCommand {
         /// Timed ticks.
         #[arg(long, default_value_t = 600)]
         ticks: u64,
+        /// Fail when steady-state tick allocations exceed this count
+        /// (`alloc-audit` feature builds only).
+        #[arg(long)]
+        assert_alloc: Option<u64>,
         /// Emit a machine-readable JSON report on stdout.
         #[arg(long)]
         json: bool,
