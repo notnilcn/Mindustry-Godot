@@ -15,6 +15,9 @@ use indexmap::IndexMap;
 use crate::content::{BlockId, ContentRegistry};
 use crate::io::StringMap;
 use crate::io::fs::{FileSystem, Paths};
+use crate::io::json::JsonIo;
+use crate::io::json::objectives::MapObjectives;
+use crate::io::json::rules::Rules;
 use crate::io::map::PreviewImage;
 use crate::io::save::state::MapSource;
 use crate::maps::{Map, MapError, Maps};
@@ -97,16 +100,18 @@ impl MapSource for EditorMapSource<'_> {
 /// `Maps.saveMap` (client half, §3.8): write `grid` with `map_tags` merged.
 ///
 /// `embed_assets` embeds plan-20 data assets (export only). End-to-end callers
-/// that also want preview pixels use [`save_map_e2e`].
+/// that also want preview pixels use [`save_map_e2e`]. Dialog-owned
+/// `objectives`/`spawns` tags are folded into `rules` first (§3.11 step 2).
 pub fn save_editor_map(
     fs: &dyn FileSystem,
     file: &Path,
     grid: &WorldGrid,
     content: &ContentRegistry,
     base_tags: StringMap,
-    map_tags: StringMap,
+    mut map_tags: StringMap,
     embed_assets: bool,
 ) -> Result<(), MapError> {
+    fold_dialog_tags(&mut map_tags)?;
     let source = EditorMapSource::new(grid, content);
     crate::maps::write_map_source(
         fs,
@@ -117,6 +122,41 @@ pub fn save_editor_map(
         map_tags,
         embed_assets,
     )
+}
+
+/// Folds the objectives/waves dialog tags into `tags["rules"]` (plan 19 M7
+/// sim-host follow-up; `MapEditor.save` §3.11 step 2).
+///
+/// Upstream's `MapObjectivesDialog`/`WaveInfoDialog` mutate `state.rules`
+/// directly so `JsonIO.write(state.rules)` already carries them. The port keeps
+/// the dialog models in dedicated `objectives`/`spawns` tags, so `save`
+/// re-serializes `rules` (canonical `Rules` JSON ABI) with the current dialog
+/// content. Idempotent and a no-op when neither dialog tag is present, so
+/// existing maps keep byte-identical `rules`.
+pub fn fold_dialog_tags(tags: &mut StringMap) -> Result<(), crate::io::IoError> {
+    let objectives = tags
+        .get("objectives")
+        .filter(|json| !json.trim().is_empty())
+        .cloned();
+    let spawns = tags
+        .get("spawns")
+        .filter(|json| !json.trim().is_empty())
+        .cloned();
+    if objectives.is_none() && spawns.is_none() {
+        return Ok(());
+    }
+    let mut rules: Rules = match tags.get("rules") {
+        Some(json) if !json.trim().is_empty() => JsonIo::read(json)?,
+        _ => Rules::default(),
+    };
+    if let Some(json) = objectives {
+        rules.objectives = MapObjectives::from_json(&json)?;
+    }
+    if let Some(json) = spawns {
+        rules.spawns = serde_json::from_str(&json)?;
+    }
+    tags.insert("rules".to_owned(), JsonIo::write(&rules)?);
+    Ok(())
 }
 
 /// `EditorMapsDialog.tryImportMap`: sniff an import, resolve a free name and add
@@ -149,9 +189,10 @@ pub fn save_map_e2e(
     grid: &WorldGrid,
     registry: &mut ContentRegistry,
     base_tags: StringMap,
-    map_tags: StringMap,
+    mut map_tags: StringMap,
     embed_assets: bool,
 ) -> Result<(Map, PreviewImage), MapError> {
+    fold_dialog_tags(&mut map_tags)?;
     let source = EditorMapSource::new(grid, registry);
     let map = maps.save_map(
         fs,
@@ -300,6 +341,41 @@ mod tests {
         fs.write(&file, &crate::io::map::PNG_SIGNATURE).unwrap();
         let error = try_import_map(&fs, &mut maps, Path::new("/maps"), &file).unwrap_err();
         assert!(error.to_string().contains("image"));
+    }
+
+    #[test]
+    fn fold_dialog_tags_writes_objectives_and_spawns_into_rules() {
+        let mut tags = IndexMap::new();
+        tags.insert(
+            "rules".to_owned(),
+            JsonIo::write(&Rules::default()).expect("write rules"),
+        );
+        tags.insert(
+            "objectives".to_owned(),
+            r#"[{"class":"Item","item":"copper","amount":5}]"#.to_owned(),
+        );
+        tags.insert(
+            "spawns".to_owned(),
+            r#"[{"type":"dagger","amount":2}]"#.to_owned(),
+        );
+        fold_dialog_tags(&mut tags).expect("fold");
+        let rules: Rules = JsonIo::read(tags.get("rules").unwrap()).expect("read rules");
+        assert_eq!(rules.objectives.len(), 1);
+        assert_eq!(rules.spawns.len(), 1);
+        assert_eq!(rules.spawns[0].type_, "dagger");
+        assert_eq!(rules.spawns[0].unit_amount, 2);
+
+        // Idempotent: a second fold produces byte-identical `rules`.
+        let once = tags.get("rules").unwrap().clone();
+        fold_dialog_tags(&mut tags).expect("fold again");
+        assert_eq!(tags.get("rules").unwrap(), &once);
+
+        // No dialog tags -> no-op (byte-identical rules).
+        let mut bare = IndexMap::new();
+        bare.insert("rules".to_owned(), "{}".to_owned());
+        let before = bare.get("rules").unwrap().clone();
+        fold_dialog_tags(&mut bare).expect("no-op fold");
+        assert_eq!(bare.get("rules").unwrap(), &before);
     }
 
     /// End-to-end `save_map`/`import_map` with preview pixels (plan 06 M4 /
