@@ -155,16 +155,92 @@ pub fn best(
     best.map(|(_, entity)| entity)
 }
 
-/// `Units.getCap(team)`: `None` = uncapped.
+/// `Units.getCap(team)`: `None` = uncapped (`Integer.MAX_VALUE` upstream).
 ///
-/// TODO(plan 12): read `Rules.disableUnitCap`, `team.ignoreUnitCap`,
-/// `unitCapVariable`/`TeamData.unitCap` and the campaign/PvP flags. Until plan
-/// 12 owns `Rules`/`Team`, the default is uncapped.
-pub const fn get_cap(_team: u8) -> Option<usize> {
-    None
+/// Wired against plan 12's `Rules`/`Team`/`TeamData` (plan 11 §3.9):
+/// the wave team is uncapped unless PvP, `disableUnitCap`/`ignoreUnitCap` win,
+/// otherwise the cap is `unitCap` (plus `TeamData.unitCap` when variable).
+pub fn get_cap(
+    rules: &crate::game::rules::Rules,
+    team: &crate::game::team::Team,
+    is_campaign: bool,
+    data_unit_cap: i32,
+) -> Option<usize> {
+    if (team.id == rules.wave_team && !rules.pvp)
+        || (is_campaign && team.id == rules.wave_team)
+        || rules.disable_unit_cap
+        || team.ignore_unit_cap
+    {
+        return None;
+    }
+    let cap = if rules.unit_cap_variable {
+        rules.unit_cap + data_unit_cap
+    } else {
+        rules.unit_cap
+    };
+    Some(cap.max(0) as usize)
 }
 
-/// `Units.canCreate(team, type)`: cap check + ban flag (plan 11 §3.4).
-pub fn can_create(world: &mut World, team: u8, cap: Option<usize>, banned: bool) -> bool {
-    !banned && cap.is_none_or(|limit| count(world, Some(team)) < limit)
+/// `Units.canCreate(team, type)`: `!useUnitCap || (count < cap && !banned)`.
+pub fn can_create(use_unit_cap: bool, type_count: i32, cap: Option<usize>, banned: bool) -> bool {
+    !use_unit_cap || (cap.is_none_or(|limit| type_count < limit as i32) && !banned)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::rules::Rules;
+    use crate::game::team::{CRUX, NEOPLASTIC, SHARDED, Team};
+
+    #[test]
+    fn wave_team_is_uncapped_outside_pvp() {
+        let rules = Rules::default();
+        assert!(get_cap(&rules, Team::get(CRUX.0), false, 0).is_none());
+        let mut pvp = rules.clone();
+        pvp.pvp = true;
+        assert!(get_cap(&pvp, Team::get(CRUX.0), false, 0).is_some());
+    }
+
+    #[test]
+    fn disable_and_ignore_flags_uncap() {
+        let rules = Rules {
+            unit_cap: 10,
+            disable_unit_cap: true,
+            ..Rules::default()
+        };
+        assert!(get_cap(&rules, Team::get(SHARDED.0), false, 0).is_none());
+
+        let rules = Rules {
+            unit_cap: 10,
+            ..Rules::default()
+        };
+        // neoplastic ignores the cap.
+        assert!(get_cap(&rules, Team::get(NEOPLASTIC.0), false, 0).is_none());
+    }
+
+    #[test]
+    fn variable_cap_adds_team_data_cap() {
+        let rules = Rules {
+            unit_cap: 10,
+            unit_cap_variable: true,
+            ..Rules::default()
+        };
+        let cap = get_cap(&rules, Team::get(SHARDED.0), false, 5);
+        assert_eq!(cap, Some(15));
+        let fixed = Rules {
+            unit_cap: 10,
+            unit_cap_variable: false,
+            ..Rules::default()
+        };
+        assert_eq!(get_cap(&fixed, Team::get(SHARDED.0), false, 5), Some(10));
+    }
+
+    #[test]
+    fn can_create_honours_cap_and_ban() {
+        assert!(can_create(false, 999, Some(1), true), "no cap -> allowed");
+        assert!(can_create(true, 0, Some(10), false));
+        assert!(!can_create(true, 10, Some(10), false), "at cap");
+        assert!(!can_create(true, 0, Some(10), true), "banned");
+        assert!(can_create(true, 5000, None, false), "uncapped");
+    }
 }
