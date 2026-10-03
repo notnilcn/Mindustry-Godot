@@ -302,7 +302,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             crate::network_scenarios::run(crate::network_scenarios::NetworkKind::Heat, command)
         }
         Command::Ui { command } => crate::ui_scenarios::run(command).map(|()| EXIT_PASS),
-        Command::Input { command } => crate::input_scenarios::run(command).map(|()| EXIT_PASS),
+        Command::Input { command } => crate::input_scenarios::run(command),
         Command::Parity { command } => crate::parity::run(&cli, command),
         Command::Audio { command } => crate::audio_scenarios::run(command),
         Command::Mods { command } => match command {

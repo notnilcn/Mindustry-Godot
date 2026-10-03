@@ -1,0 +1,41 @@
+{
+  "scenario": "input_camera_clamp",
+  "steps": [
+    {
+      "step": "zoom_in_clamp",
+      "target_scale": 6.0,
+      "max_scale": 6.0
+    },
+    {
+      "step": "zoom_out_clamp",
+      "target_scale": 0.5,
+      "min_scale": 0.5
+    },
+    {
+      "step": "mobile_pan_clamp",
+      "position": [
+        376.0,
+        323.5
+      ],
+      "max": [
+        376.0,
+        323.5
+      ]
+    },
+    {
+      "step": "minimap_target",
+      "target": [
+        64.0,
+        192.0
+      ]
+    },
+    {
+      "step": "minimap_pan",
+      "position": [
+        128.0,
+        128.0
+      ]
+    }
+  ],
+  "checksum": "ab7b4f1f0a87feb1"
+}

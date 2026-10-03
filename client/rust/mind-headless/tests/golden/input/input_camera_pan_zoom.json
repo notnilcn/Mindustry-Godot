@@ -1,0 +1,105 @@
+{
+  "scenario": "input_camera_pan_zoom",
+  "steps": [
+    {
+      "step": "initial",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "target_scale": 4.0,
+      "camerascale": 4.0,
+      "width": 480.0,
+      "height": 270.0
+    },
+    {
+      "step": "pan_axis_right",
+      "position": [
+        4.5,
+        0.0
+      ],
+      "target_scale": 4.0,
+      "camerascale": 4.0,
+      "width": 480.0,
+      "height": 270.0
+    },
+    {
+      "step": "pan_axis_up_boost",
+      "position": [
+        4.5,
+        -15.0
+      ],
+      "target_scale": 4.0,
+      "camerascale": 4.0,
+      "width": 480.0,
+      "height": 270.0
+    },
+    {
+      "step": "pan_mouse_right_edge",
+      "position": [
+        9.0,
+        -15.0
+      ],
+      "target_scale": 4.0,
+      "camerascale": 4.0,
+      "width": 480.0,
+      "height": 270.0
+    },
+    {
+      "step": "scale_camera_in",
+      "position": [
+        9.0,
+        -15.0
+      ],
+      "target_scale": 5.0,
+      "camerascale": 4.0,
+      "width": 480.0,
+      "height": 270.0
+    },
+    {
+      "step": "update_lerp",
+      "position": [
+        9.0,
+        -15.0
+      ],
+      "target_scale": 5.0,
+      "camerascale": 4.099999904632568,
+      "width": 468.2929992675781,
+      "height": 263.4150085449219
+    },
+    {
+      "step": "update_snap",
+      "position": [
+        9.0,
+        -15.0
+      ],
+      "target_scale": 5.0,
+      "camerascale": 5.0,
+      "width": 384.0,
+      "height": 216.0
+    },
+    {
+      "step": "follow_smooth",
+      "position": [
+        16.280000686645508,
+        -5.800000190734863
+      ],
+      "target_scale": 5.0,
+      "camerascale": 5.0,
+      "width": 384.0,
+      "height": 216.0
+    },
+    {
+      "step": "follow_snap",
+      "position": [
+        100.0,
+        100.0
+      ],
+      "target_scale": 5.0,
+      "camerascale": 5.0,
+      "width": 384.0,
+      "height": 216.0
+    }
+  ],
+  "checksum": "4e9ebda2aa080fbf"
+}

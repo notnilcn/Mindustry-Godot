@@ -1,0 +1,142 @@
+{
+  "scenario": "input_preview_handoff",
+  "preview": {
+    "block": 80,
+    "rotation": 1,
+    "mode": "placing",
+    "cursor": {
+      "tile": [
+        0,
+        0
+      ],
+      "raw": [
+        0.0,
+        0.0
+      ],
+      "kind": "hand"
+    },
+    "line_plans": [
+      {
+        "x": 2,
+        "y": 2,
+        "rot": 0,
+        "block": 80,
+        "breaking": false,
+        "anim_scale": 1.0
+      },
+      {
+        "x": 3,
+        "y": 2,
+        "rot": 0,
+        "block": 80,
+        "breaking": false,
+        "anim_scale": 1.0
+      },
+      {
+        "x": 4,
+        "y": 2,
+        "rot": 0,
+        "block": 80,
+        "breaking": false,
+        "anim_scale": 1.0
+      },
+      {
+        "x": 5,
+        "y": 2,
+        "rot": 0,
+        "block": 80,
+        "breaking": false,
+        "anim_scale": 1.0
+      },
+      {
+        "x": 6,
+        "y": 2,
+        "rot": 0,
+        "block": 80,
+        "breaking": false,
+        "anim_scale": 1.0
+      }
+    ],
+    "select_plans": [],
+    "valid": true,
+    "splan": false,
+    "command_rect": {
+      "x": 0.0,
+      "y": 0.0,
+      "w": 16.0,
+      "h": 16.0
+    },
+    "selected_units": [
+      11,
+      12
+    ],
+    "command_buildings": [],
+    "target": null,
+    "cached_valid": [
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "cursor_kind": "hand",
+  "cursor_resolved": "hand",
+  "player_sync": {
+    "snapshot_id": 1,
+    "unit": null,
+    "dead": false,
+    "x": 0.0,
+    "y": 0.0,
+    "aim_x": 0.0,
+    "aim_y": 0.0,
+    "rotation": 0.0,
+    "base_rotation": 0.0,
+    "vel_x": 0.0,
+    "vel_y": 0.0,
+    "mine_tile": null,
+    "boosting": false,
+    "shooting": true,
+    "chatting": false,
+    "is_building": true,
+    "selected_block": 80,
+    "selected_rotation": 1,
+    "plans": [
+      {
+        "x": 2,
+        "y": 2,
+        "rotation": 1,
+        "block": 80,
+        "config": {
+          "type": "none"
+        },
+        "breaking": false
+      },
+      {
+        "x": 3,
+        "y": 2,
+        "rotation": 1,
+        "block": 80,
+        "config": {
+          "type": "none"
+        },
+        "breaking": false
+      }
+    ],
+    "camera_x": 20.0,
+    "camera_y": 20.0,
+    "camera_w": 480.0,
+    "camera_h": 270.0
+  },
+  "plan_wire": {
+    "x": 2,
+    "y": 2,
+    "rotation": 1,
+    "block": 80,
+    "config": {
+      "type": "none"
+    },
+    "breaking": false
+  },
+  "checksum": "b69b2fed5a88260a"
+}

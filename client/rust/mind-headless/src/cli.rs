@@ -527,6 +527,30 @@ pub enum InputCommand {
         #[arg(long)]
         golden: Option<PathBuf>,
     },
+
+    /// Benchmark an input/placement path against the §7d budget.
+    Bench {
+        /// Profile: `input_line`, `input_astar`, `input_bridges`,
+        /// `input_select`, `input_command`, `input_idle`.
+        #[arg(long, default_value = "input_line")]
+        profile: String,
+        /// Line length in tiles (`input_line`).
+        #[arg(long, default_value_t = 100)]
+        len: i32,
+        /// Unit count (`input_select`/`input_command`).
+        #[arg(long, default_value_t = 200)]
+        units: usize,
+        /// Timed iterations.
+        #[arg(long, default_value_t = 2000)]
+        iters: u64,
+        /// Fail when steady-state allocations exceed this count
+        /// (`alloc-audit` feature builds only).
+        #[arg(long)]
+        assert_alloc: Option<u64>,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// `parity` subcommands (plan 23 §3.7/§7).
