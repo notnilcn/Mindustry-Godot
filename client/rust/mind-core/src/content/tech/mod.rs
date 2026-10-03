@@ -16,7 +16,7 @@ pub mod ekir;
 pub mod serpulo;
 
 use super::ctype::UnlockFields;
-use super::id::{ItemId, PlanetId, SectorId};
+use super::id::{BlockId, ItemId, PlanetId, SectorId, UnitTypeId};
 use super::load::ContentRegistry;
 use super::settings_store::UnlockStore;
 use super::stacks::ItemStack;
@@ -550,6 +550,32 @@ pub fn round_to_10(value: f32) -> i32 {
     ((value / 10.0).round() as i32) * 10
 }
 
+/// `UnlockableContent.researchRequirements()` dispatch.
+///
+/// Blocks use the `Block.researchRequirements()` cost formula ([`BlockDef`]);
+/// units derive theirs from the block that produces them; every other content
+/// type inherits `UnlockableContent`'s empty default. Plan 12's runtime
+/// (`game::tech_tree`) consumes this to gate research with real costs where the
+/// generated tree data did not materialize `TechNode.requirements`.
+///
+/// [`BlockDef`]: super::registries::blocks::BlockDef
+pub fn content_research_requirements(
+    registry: &ContentRegistry,
+    content: ContentRef,
+) -> Vec<ItemStack> {
+    match content.type_ {
+        ContentType::Block => registry
+            .block(BlockId::new(content.id))
+            .map(|block| block.research_requirements())
+            .unwrap_or_default(),
+        ContentType::Unit => registry
+            .unit(UnitTypeId::new(content.id))
+            .map(|unit| unit.research_requirements(registry))
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
 /// Applies `f` to the unlock fields of a mappable, unlockable content record.
 pub(crate) fn with_unlock_fields(
     registry: &mut ContentRegistry,
@@ -715,6 +741,24 @@ mod tests {
         assert_eq!(round_to_10(4.9), 0);
         assert_eq!(round_to_10(5.0), 10);
         assert_eq!(round_to_10(1234.5), 1230);
+    }
+
+    /// `content_research_requirements` dispatches to the block formula and the
+    /// unit derivation, and inherits the empty default for other content types.
+    #[test]
+    fn content_research_requirements_dispatch() {
+        let registry = test_support::test_registry();
+        let press = registry.block_id("graphite-press").unwrap();
+        assert_eq!(
+            content_research_requirements(&registry, ContentRef::of(ContentType::Block, press)),
+            registry.block(press).unwrap().research_requirements()
+        );
+        let copper = registry.item_id("copper").unwrap();
+        assert!(
+            content_research_requirements(&registry, ContentRef::of(ContentType::Item, copper))
+                .is_empty(),
+            "items have no research cost"
+        );
     }
 
     /// Vanilla trees are ported verbatim; unresolved names are blocks/units that

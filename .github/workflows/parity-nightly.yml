@@ -1,0 +1,169 @@
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# Plan 23 nightly / phase-gate CI (23_PARITY_VERIFICATION_IMPLEMENTATION_PLAN.md
+# §3.5/§7f, NUD-40/A). Scheduled + manual dispatch; never required for PR merge.
+#
+#   checksums            per-OS `parity checksums --suite gate` artifacts
+#   determinism-compare  diffs the per-OS artifacts (in-process/replay/process)
+#   golden-drift         `parity goldens` sha256 drift (no JVM required)
+#   bench                `parity bench-gate` structural coverage; the baseline
+#                        machine recording stays deferred (NUD-40/A)
+#   soak                 `parity soak --profile mid` (full duration)
+#   t2-catalog           `parity run --suite full` over the T2 file catalog
+#   mcp                  in-engine MCP smoke on a self-hosted windows-gpu runner
+#
+# Shared GitHub runners have no GPU/editor; the MCP job is gated behind the
+# `run_mcp` dispatch input and self-hosted labels per NUD-40/A.
+
+name: parity-nightly
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      run_mcp:
+        description: "Run the in-engine MCP smoke on the self-hosted windows-gpu runner"
+        type: boolean
+        default: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  checksums:
+    name: checksums (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.1
+
+      - name: parity checksums --suite gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo run -q --manifest-path client/rust/Cargo.toml -p mind-headless -- parity checksums --suite gate --json > parity-checksums-${{ matrix.os }}.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: parity-checksums-${{ matrix.os }}
+          path: parity-checksums-${{ matrix.os }}.json
+          if-no-files-found: error
+
+  determinism-compare:
+    name: determinism-compare
+    needs: checksums
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: parity-checksums-*
+          merge-multiple: true
+          path: checksums
+
+      - name: Compare per-OS checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import glob, json, sys
+
+          files = sorted(glob.glob("checksums/parity-checksums-*.json"))
+          if len(files) < 2:
+              print(f"FAIL: expected >= 2 OS checksum artifacts, found {files}", file=sys.stderr)
+              sys.exit(1)
+
+          def signature(path):
+              data = json.load(open(path))
+              return {
+                  row["scenario"]: row["checksum"]
+                  for row in data["scenarios"]
+                  if row.get("status") == "pass"
+              }
+
+          first = files[0]
+          reference = signature(first)
+          for path in files[1:]:
+              other = signature(path)
+              if other != reference:
+                  print(f"FAIL: {first} vs {path} checksum mismatch", file=sys.stderr)
+                  print(f"  {first}: {[k for k in reference if other.get(k) != reference[k]]}", file=sys.stderr)
+                  print(f"  {path}: {[k for k in other if reference.get(k) != other[k]]}", file=sys.stderr)
+                  sys.exit(1)
+          print(f"determinism-compare: PASS ({len(reference)} scenarios across {len(files)} OSes)")
+          PY
+
+  golden-drift:
+    name: golden-drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.1
+
+      - name: golden sha256 drift
+        shell: bash
+        run: bash tools/regen_goldens.sh --check
+
+  bench:
+    name: bench
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.1
+
+      - name: bench-gate (structural coverage; shared runners record only)
+        shell: bash
+        run: cargo run -q --manifest-path client/rust/Cargo.toml -p mind-headless -- parity bench-gate --json
+
+  soak:
+    name: soak (mid)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.1
+
+      - name: parity soak --profile mid
+        shell: bash
+        run: cargo run -q --manifest-path client/rust/Cargo.toml -p mind-headless -- parity soak --profile mid --minutes 60 --json
+
+  t2-catalog:
+    name: t2-catalog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.1
+
+      - name: parity run --suite full
+        shell: bash
+        run: cargo run -q --manifest-path client/rust/Cargo.toml -p mind-headless -- parity run --suite full --json
+
+  mcp:
+    name: mcp (windows-gpu)
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_mcp }}
+    runs-on: [self-hosted, windows-gpu]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: In-engine MCP smoke (editor must be running)
+        shell: pwsh
+        run: ./tools/mcp-smoke.ps1

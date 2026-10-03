@@ -191,9 +191,13 @@ fn tech_unlock_gating() -> Result<(Value, Value)> {
         locked_before = !tech_tree::can_spend(&registry, node_ref, &items, &ctx);
         gated_node = tech_tree::content_name(&registry, content).unwrap_or_default();
         let _ = tech_tree::unlock(&mut registry, parent_ref, &mut store);
+        // Grant the node's real `UnlockableContent.researchRequirements()` so the
+        // spend path is exercised with actual item costs (plan-02 gap reconciled;
+        // `effective_requirements` derives them for the generated trees).
+        for stack in tech_tree::effective_requirements(&registry, node_ref) {
+            items.add(stack.item, stack.amount, 1_000_000);
+        }
         can_after = tech_tree::can_spend(&registry, node_ref, &items, &ctx);
-        // Spending required zero items for this node (plan-02 requirements gap),
-        // but completes and unlocks.
         let _ = tech_tree::spend(&mut registry, node_ref, &mut items, &mut store, &ctx, false)?;
     }
 

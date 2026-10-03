@@ -14,6 +14,8 @@
 use std::io::{Read, Write};
 use std::path::Path;
 
+use bevy_ecs::entity::Entity;
+use bevy_ecs::world::World;
 use flate2::Compression;
 use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
@@ -21,15 +23,20 @@ use indexmap::{IndexMap, IndexSet};
 
 use super::rules::MAX_LOADOUT_SCHEMATIC_PAD;
 use super::schematic::{Schematic, Stile};
-use crate::content::registries::blocks::{BuildVisibility, TILE_SIZE};
+use crate::content::registries::blocks::{BlockKind, BuildVisibility, TILE_SIZE};
 use crate::content::{BlockId, ContentRegistry};
+use crate::entities::comp::{Building, TeamComp};
 use crate::io::IoError;
 use crate::io::fs::FileSystem;
 use crate::io::save::chunk::map_fallback;
 use crate::io::typeio::{pack_point2, read_object, unpack_point2_x, unpack_point2_y, write_object};
 use crate::io::{WireReader, WireWriter};
-use crate::world::config::{ConfigValue, config_to_type_value, type_value_to_config};
+use crate::world::block::BlockTable;
+use crate::world::config::{ConfigValue, config_to_type_value, read_config, type_value_to_config};
+use crate::world::construct::ConstructState;
+use crate::world::limits::{BlockCounter, BuildRules};
 use crate::world::plan::BuildPlan;
+use crate::world::{WorldCtx, WorldGrid};
 
 /// `.msch` header (`{'m','s','c','h'}`).
 pub const HEADER: [u8; 4] = *b"msch";
@@ -96,6 +103,208 @@ pub struct WorldBuilding {
     pub visible: bool,
     /// Discovered by the selecting team.
     pub discovered: bool,
+}
+
+/// Concrete [`SchematicWorld`] over plan-06's [`WorldGrid`] and the plan-07 ECS
+/// building runtime.
+///
+/// `team = None` is the headless selection contract (all buildings count as
+/// visible + discovered, exactly like upstream `headless`; §R14). With a team,
+/// the entity's `TeamComp` plus the plan-07 `Building.was_visible` flag decide
+/// visibility until plan 12's fog query is wired for the in-engine path.
+pub struct EcsSchematicWorld<'a> {
+    /// Tile grid (plan 06).
+    pub grid: &'a WorldGrid,
+    /// ECS world owning the building entities (plan 07).
+    pub world: &'a World,
+    /// Content registry (sizes + visibility metadata).
+    pub content: &'a ContentRegistry,
+    /// Selecting team (`None` = headless/all-visible).
+    pub team: Option<u8>,
+}
+
+impl SchematicWorld for EcsSchematicWorld<'_> {
+    fn building_at(&self, x: i32, y: i32) -> Option<WorldBuilding> {
+        if !self.grid.tiles.in_bounds(x, y) {
+            return None;
+        }
+        let entity = self.grid.tile(x, y).build?;
+        let building = self.world.get::<Building>(entity)?;
+        // A `ConstructBuild` resolves to its `current` block + `lastConfig`
+        // (upstream `Schematics.create`).
+        let (block, config) = match self.world.get::<ConstructState>(entity) {
+            Some(state) => (state.current, state.last_config.clone()),
+            None => (building.block, read_config(self.world, entity)),
+        };
+        let size = self
+            .content
+            .block(block)
+            .map(|record| record.size)
+            .unwrap_or(1);
+        let (visible, discovered) = match self.team {
+            None => (true, true),
+            Some(team) => {
+                let on_team = self
+                    .world
+                    .get::<TeamComp>(entity)
+                    .map(|comp| comp.team == team)
+                    .unwrap_or(false);
+                (on_team || building.was_visible, true)
+            }
+        };
+        Some(WorldBuilding {
+            block,
+            size,
+            x: building.tile.x() as i32,
+            y: building.tile.y() as i32,
+            rotation: building.rotation as i8,
+            config,
+            visible,
+            discovered,
+        })
+    }
+}
+
+/// Whether a block is a core (`CoreBlock`), the one kind kept regardless of
+/// `isVisible()` in `Schematics.create`.
+fn is_core(content: &ContentRegistry, block: BlockId) -> bool {
+    content
+        .block(block)
+        .is_some_and(|record| record.kind == BlockKind::CoreBlock)
+}
+
+/// `Schematics.place`: places `schem` centered at `(x, y)` through the plan-06
+/// tile ops and applies each tile's config through plan-07's runtime.
+///
+/// Returns the number of tiles actually placed. With `overwrite = false`, tiles
+/// that fail `Build.validPlace` are skipped (plan-06 [`valid_place`]).
+///
+/// [`valid_place`]: crate::world::build::valid_place
+pub fn place(
+    ctx: &mut WorldCtx<'_>,
+    schem: &Schematic,
+    x: i32,
+    y: i32,
+    team: u8,
+    overwrite: bool,
+) -> usize {
+    let ox = x - schem.width / 2;
+    let oy = y - schem.height / 2;
+    let mut placed = 0;
+    for tile in &schem.tiles {
+        let tx = tile.x as i32 + ox;
+        let ty = tile.y as i32 + oy;
+        if !ctx.grid.tiles.in_bounds(tx, ty) {
+            continue;
+        }
+        if !overwrite && !valid_place_ctx(ctx, tile.block, team, tile.rotation as u8, tx, ty) {
+            continue;
+        }
+        place_tile(ctx, tile, tx, ty, team);
+        placed += 1;
+    }
+    placed
+}
+
+/// `Schematics.placeLoadout`: places a loadout centered on its core tile.
+///
+/// With `check`, blocking tiles in each non-core footprint are removed first.
+/// Returns the placed core entities so the caller can register them with the
+/// campaign `Teams` registry (`CoreBuild` registration is plan-11/12-owned).
+pub fn place_loadout(
+    ctx: &mut WorldCtx<'_>,
+    schem: &Schematic,
+    x: i32,
+    y: i32,
+    team: u8,
+    check: bool,
+) -> Vec<Entity> {
+    let Some(core_tile) = schem
+        .tiles
+        .iter()
+        .find(|tile| is_core(ctx.content, tile.block))
+    else {
+        return Vec::new();
+    };
+    let ox = x - core_tile.x as i32;
+    let oy = y - core_tile.y as i32;
+    // Upstream sorts by descending `schematicPriority` (not yet ported); cores
+    // go first, then blocks by id, so structural blocks exist before contents.
+    let mut ordered: Vec<&Stile> = schem.tiles.iter().collect();
+    ordered.sort_by_key(|tile| (!is_core(ctx.content, tile.block), tile.block.raw()));
+    let mut cores = Vec::new();
+    for tile in ordered {
+        let tx = tile.x as i32 + ox;
+        let ty = tile.y as i32 + oy;
+        if !ctx.grid.tiles.in_bounds(tx, ty) {
+            continue;
+        }
+        if check && !is_core(ctx.content, tile.block) {
+            clear_footprint(ctx, tile.block, tx, ty);
+        }
+        place_tile(ctx, tile, tx, ty, team);
+        if let Some(entity) = ctx.grid.tile(tx, ty).build
+            && is_core(ctx.content, tile.block)
+        {
+            cores.push(entity);
+        }
+    }
+    cores
+}
+
+/// Sets one tile through [`WorldCtx`] and applies its config.
+fn place_tile(ctx: &mut WorldCtx<'_>, tile: &Stile, x: i32, y: i32, team: u8) {
+    ctx.set_block(x as i16, y as i16, tile.block, team, tile.rotation as u8);
+    if let Some(entity) = ctx.grid.tile(x, y).build {
+        crate::world::config::configure(ctx.ecs, entity, None, tile.config.clone());
+    }
+}
+
+/// Removes non-air tiles a non-core block would occupy (`placeLoadout` check).
+fn clear_footprint(ctx: &mut WorldCtx<'_>, block: BlockId, x: i32, y: i32) {
+    let size = ctx
+        .content
+        .block(block)
+        .map(|record| record.size)
+        .unwrap_or(1)
+        .max(1);
+    let offset = -(size - 1) / 2;
+    for dx in 0..size {
+        for dy in 0..size {
+            let tx = x + offset + dx;
+            let ty = y + offset + dy;
+            if (tx, ty) == (x, y) || !ctx.grid.tiles.in_bounds(tx, ty) {
+                continue;
+            }
+            if ctx.grid.tile(tx, ty).block != BlockId::AIR {
+                ctx.remove_block(tx as i16, ty as i16);
+            }
+        }
+    }
+}
+
+/// `Build.validPlace` using the plan-07 rule resources when they are installed.
+fn valid_place_ctx(ctx: &WorldCtx<'_>, block: BlockId, team: u8, rot: u8, x: i32, y: i32) -> bool {
+    let (Some(table), Some(rules), Some(counter)) = (
+        ctx.ecs.get_resource::<BlockTable>(),
+        ctx.ecs.get_resource::<BuildRules>(),
+        ctx.ecs.get_resource::<BlockCounter>(),
+    ) else {
+        return true;
+    };
+    crate::world::build::valid_place_at(
+        ctx.content,
+        table,
+        rules,
+        counter,
+        ctx.grid,
+        block,
+        team,
+        rot,
+        x,
+        y,
+        true,
+    )
 }
 
 /// Writes a schematic to bytes (`Schematics.write`).
@@ -821,6 +1030,71 @@ mod tests {
             .unwrap();
         // Selection top-left is tile 4, so the core origin (5,5) maps to (1,1).
         assert_eq!((core_tile.x, core_tile.y), (1, 1));
+    }
+
+    #[test]
+    fn create_from_ecs_world_grid() {
+        let mut harness = crate::world::harness::BuildHarness::new(16, 16, 7);
+        let core = harness.content.block_id("core-shard").unwrap();
+        // Cores are the one kind never filtered as hidden; two separate cores
+        // exercise the multi-building selection scan.
+        assert!(harness.place(4, 4, core, 0, true));
+        assert!(harness.place(10, 4, core, 0, true));
+
+        let schematics = Schematics::new();
+        let world = EcsSchematicWorld {
+            grid: &harness.grid,
+            world: &harness.world,
+            content: &harness.content,
+            team: None,
+        };
+        let schem = schematics.create(&world, &harness.content, 2, 2, 13, 6, 64);
+        assert!(schem.has_core(&harness.content));
+        assert_eq!(schem.tiles.len(), 2, "one tile per building origin");
+        let core_tile = schem.tiles.iter().find(|tile| tile.block == core).unwrap();
+        // Bounds span both cores (3..5 and 9..11); offset is the selection min
+        // (3, 3), so the first core origin (4, 4) maps to (1, 1).
+        assert_eq!((core_tile.x, core_tile.y), (1, 1));
+    }
+
+    #[test]
+    fn place_schematic_through_world_ctx() {
+        let mut harness = crate::world::harness::BuildHarness::new(16, 16, 7);
+        let core = harness.content.block_id("core-shard").unwrap();
+        let wall = harness.content.block_id("copper-wall").unwrap();
+        let schem = Schematic::from_tiles(
+            vec![
+                Stile::new(core, 2, 2, ConfigValue::None, 0),
+                Stile::new(wall, 0, 0, ConfigValue::None, 0),
+            ],
+            IndexMap::new(),
+            6,
+            6,
+        );
+        let placed = harness.with_ctx(|ctx| place(ctx, &schem, 8, 8, 0, true));
+        assert_eq!(placed, 2);
+        // Centered at (8, 8): origin is (5, 5); the core (2, 2) lands at (7, 7).
+        assert_eq!(harness.block_at(7, 7), core);
+        assert_eq!(harness.block_at(5, 5), wall);
+        assert!(harness.build_at(7, 7).is_some());
+    }
+
+    #[test]
+    fn place_loadout_returns_core_entities() {
+        let mut harness = crate::world::harness::BuildHarness::new(32, 32, 7);
+        let core = harness.content.block_id("core-shard").unwrap();
+        let mut schematics = Schematics::new();
+        schematics.load_loadouts(&harness.content);
+        let index = schematics
+            .get_default_loadout(core)
+            .expect("core-shard loadout");
+        let schem = schematics.all[index].clone();
+
+        let cores = harness.with_ctx(|ctx| place_loadout(ctx, &schem, 8, 8, 0, true));
+        assert_eq!(cores.len(), 1, "one core entity placed");
+        assert_eq!(harness.block_at(8, 8), core);
+        let building = harness.world.get::<Building>(cores[0]).unwrap();
+        assert_eq!(building.block, core);
     }
 
     #[test]
