@@ -110,15 +110,17 @@ impl MindMods {
     #[func]
     pub fn import_mod(&mut self, path: GString) -> VarDictionary {
         let source = PathBuf::from(path.to_string());
-        let _ = self
-            .base_mut()
-            .emit_signal("mod_import_progress", &[path.to_variant(), 0.0f32.to_variant()]);
+        let _ = self.base_mut().emit_signal(
+            "mod_import_progress",
+            &[path.to_variant(), 0.0f32.to_variant()],
+        );
         let result = self
             .mods
             .import_mod(&NativeFs, &source, false, &mut self.settings);
-        let _ = self
-            .base_mut()
-            .emit_signal("mod_import_progress", &[path.to_variant(), 1.0f32.to_variant()]);
+        let _ = self.base_mut().emit_signal(
+            "mod_import_progress",
+            &[path.to_variant(), 1.0f32.to_variant()],
+        );
         let mut out = VarDictionary::new();
         match result {
             Ok(_name) => {
@@ -234,7 +236,12 @@ impl MindMods {
         if let Some(mod_) = self.mods.list().iter().find(|mod_| mod_.name == target) {
             out.set(
                 &"description".to_variant(),
-                &mod_.meta.description.clone().unwrap_or_default().to_variant(),
+                &mod_
+                    .meta
+                    .description
+                    .clone()
+                    .unwrap_or_default()
+                    .to_variant(),
             );
             out.set(
                 &"subtitle".to_variant(),
@@ -256,7 +263,10 @@ impl MindMods {
                 &"repo".to_variant(),
                 &mod_.meta.repo.clone().unwrap_or_default().to_variant(),
             );
-            out.set(&"failed".to_variant(), &mod_.failed(&self.settings).to_variant());
+            out.set(
+                &"failed".to_variant(),
+                &mod_.failed(&self.settings).to_variant(),
+            );
             let reason = mod_
                 .unsupported_reason
                 .as_ref()
