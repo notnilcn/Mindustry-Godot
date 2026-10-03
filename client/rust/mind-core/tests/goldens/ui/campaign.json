@@ -1,0 +1,263 @@
+{
+  "format": 1,
+  "planet": "serpulo",
+  "counts": {
+    "planets": 7,
+    "sectors": 272,
+    "research": 223,
+    "schematics": 4,
+    "loadouts": 1,
+    "maps": 0
+  },
+  "planets": [
+    "sun",
+    "erekir",
+    "gier",
+    "notva",
+    "tantros",
+    "serpulo",
+    "verilus"
+  ],
+  "rules": {
+    "planet": "serpulo",
+    "difficulty": "normal",
+    "difficulties": [
+      {
+        "name": "casual",
+        "selected": false,
+        "localized": "casual",
+        "info": "difficulty.enemyHealthMultiplier\ndifficulty.enemySpawnMultiplier\ndifficulty.waveTimeMultiplier\n",
+        "enemy_health": 0.5,
+        "enemy_spawn": 0.5,
+        "wave_time": 2.0
+      },
+      {
+        "name": "easy",
+        "selected": false,
+        "localized": "easy",
+        "info": "difficulty.enemySpawnMultiplier\ndifficulty.waveTimeMultiplier\n",
+        "enemy_health": 1.0,
+        "enemy_spawn": 0.75,
+        "wave_time": 1.5
+      },
+      {
+        "name": "normal",
+        "selected": true,
+        "localized": "normal",
+        "info": "difficulty.nomodifiers",
+        "enemy_health": 1.0,
+        "enemy_spawn": 1.0,
+        "wave_time": 1.0
+      },
+      {
+        "name": "hard",
+        "selected": false,
+        "localized": "hard",
+        "info": "difficulty.enemyHealthMultiplier\ndifficulty.enemySpawnMultiplier\ndifficulty.waveTimeMultiplier\n",
+        "enemy_health": 1.25,
+        "enemy_spawn": 1.5,
+        "wave_time": 0.800000011920929
+      },
+      {
+        "name": "eradication",
+        "selected": false,
+        "localized": "eradication",
+        "info": "difficulty.enemyHealthMultiplier\ndifficulty.enemySpawnMultiplier\ndifficulty.waveTimeMultiplier\n",
+        "enemy_health": 1.5,
+        "enemy_spawn": 2.0,
+        "wave_time": 0.6000000238418579
+      }
+    ],
+    "toggles": [
+      {
+        "key": "fog",
+        "value": false
+      },
+      {
+        "key": "hide_spawns",
+        "value": false
+      },
+      {
+        "key": "sector_invasion",
+        "value": true
+      },
+      {
+        "key": "random_wave_ai",
+        "value": false
+      },
+      {
+        "key": "rts_ai",
+        "value": false
+      }
+    ]
+  },
+  "schematics": [
+    {
+      "index": 0,
+      "name": "basicShard",
+      "description": "",
+      "width": 3,
+      "height": 3,
+      "tiles": 1,
+      "has_core": true,
+      "labels": [],
+      "file": null,
+      "mod_name": null,
+      "requirements": [
+        [
+          "copper",
+          1000
+        ],
+        [
+          "lead",
+          800
+        ]
+      ]
+    },
+    {
+      "index": 1,
+      "name": "basicFoundation",
+      "description": "",
+      "width": 4,
+      "height": 4,
+      "tiles": 1,
+      "has_core": true,
+      "labels": [],
+      "file": null,
+      "mod_name": null,
+      "requirements": [
+        [
+          "copper",
+          3000
+        ],
+        [
+          "lead",
+          3000
+        ],
+        [
+          "silicon",
+          2000
+        ]
+      ]
+    },
+    {
+      "index": 2,
+      "name": "basicNucleus",
+      "description": "m",
+      "width": 5,
+      "height": 5,
+      "tiles": 1,
+      "has_core": true,
+      "labels": [],
+      "file": null,
+      "mod_name": null,
+      "requirements": [
+        [
+          "copper",
+          8000
+        ],
+        [
+          "lead",
+          8000
+        ],
+        [
+          "thorium",
+          4000
+        ],
+        [
+          "silicon",
+          5000
+        ]
+      ]
+    },
+    {
+      "index": 3,
+      "name": "basicBastion",
+      "description": "you do not exist\n",
+      "width": 4,
+      "height": 4,
+      "tiles": 1,
+      "has_core": true,
+      "labels": [],
+      "file": null,
+      "mod_name": null,
+      "requirements": [
+        [
+          "graphite",
+          1000
+        ],
+        [
+          "silicon",
+          1000
+        ],
+        [
+          "beryllium",
+          800
+        ]
+      ]
+    }
+  ],
+  "sample_sector": {
+    "id": 15,
+    "planet": "serpulo",
+    "preset": "groundZero",
+    "name": "groundZero",
+    "difficulty": 1.0,
+    "threat": 0.0,
+    "threat_band": "low",
+    "unlocked": true,
+    "locked": false,
+    "has_base": true,
+    "has_save": true,
+    "captured": true,
+    "attacked": false,
+    "frozen": false,
+    "shielded": false,
+    "has_enemy_base": false,
+    "is_last": false,
+    "capture_wave": 10
+  },
+  "sample_research": {
+    "index": 143,
+    "content": "crawler",
+    "depth": 3,
+    "root": null,
+    "tree": 0,
+    "planet": "serpulo",
+    "unlocked": false,
+    "dependencies_met": false,
+    "requirements_met": false,
+    "requirements": [
+      [
+        "silicon",
+        400
+      ],
+      [
+        "graphite",
+        400
+      ]
+    ],
+    "finished": [
+      [
+        "silicon",
+        0
+      ],
+      [
+        "graphite",
+        0
+      ]
+    ],
+    "objectives": [],
+    "children": 1
+  },
+  "complete": {
+    "planet": "serpulo",
+    "localized": "serpulo",
+    "color": "7d4dff",
+    "playtime_ms": 3600000,
+    "sectors_captured": 2,
+    "waves_lasted": 12,
+    "next_planet": "erekir"
+  },
+  "checksum": "8ea00cf6a79f8612"
+}

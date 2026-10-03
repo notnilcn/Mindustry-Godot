@@ -103,6 +103,22 @@ func set_title_key(key: String) -> void:
 	_apply_title()
 
 
+## M5 campaign read models from `MindUi.campaign_views()` (plan 14 §3.11 12
+## seam). Returns an empty dictionary when the bridge is absent.
+func campaign_views() -> Dictionary:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("campaign_views"):
+		var parsed: Variant = JSON.parse_string(str(ui.call("campaign_views")))
+		if parsed is Dictionary:
+			return parsed
+	return {}
+
+
+## A named section of the campaign read models (`planets`/`sectors`/…).
+func campaign_section(name: String) -> Array:
+	return campaign_views().get(name, []) as Array
+
+
 ## The dialog's content column as a fresh `MindTable` (clears prior content).
 ## code-instantiated: dialog bodies are data-driven and rebuilt on `shown()`.
 func content_table() -> MindTable:

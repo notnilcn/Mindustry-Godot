@@ -25,6 +25,16 @@
     {"name": "admins", "scene": "res://scenes/ui/dialogs/admins_dialog.tscn", "pause": false, "menu_openable": false, "args": []},
     {"name": "bans", "scene": "res://scenes/ui/dialogs/bans_dialog.tscn", "pause": false, "menu_openable": false, "args": []},
     {"name": "traces", "scene": "res://scenes/ui/dialogs/trace_dialog.tscn", "pause": false, "menu_openable": false, "args": ["player:Str"]},
+    {"name": "planet", "scene": "res://scenes/ui/dialogs/planet_dialog.tscn", "pause": true, "menu_openable": false, "args": []},
+    {"name": "research", "scene": "res://scenes/ui/dialogs/research_dialog.tscn", "pause": true, "menu_openable": false, "args": []},
+    {"name": "schematics", "scene": "res://scenes/ui/dialogs/schematics_dialog.tscn", "pause": true, "menu_openable": false, "args": []},
+    {"name": "sector_select", "scene": "res://scenes/ui/dialogs/sector_select_dialog.tscn", "pause": false, "menu_openable": false, "args": []},
+    {"name": "launch_loadout", "scene": "res://scenes/ui/dialogs/launch_loadout_dialog.tscn", "pause": false, "menu_openable": false, "args": []},
+    {"name": "loadout", "scene": "res://scenes/ui/dialogs/loadout_dialog.tscn", "pause": false, "menu_openable": false, "args": []},
+    {"name": "custom", "scene": "res://scenes/ui/dialogs/custom_game_dialog.tscn", "pause": false, "menu_openable": true, "args": []},
+    {"name": "map_play", "scene": "res://scenes/ui/dialogs/map_play_dialog.tscn", "pause": false, "menu_openable": false, "args": ["map:Str"]},
+    {"name": "editor_maps", "scene": "res://scenes/ui/dialogs/editor_maps_dialog.tscn", "pause": false, "menu_openable": true, "args": []},
+    {"name": "file_chooser", "scene": "res://scenes/ui/dialogs/file_chooser_dialog.tscn", "pause": false, "menu_openable": false, "args": ["open:Bool"]},
     {"name": "widget_gallery", "scene": "res://scenes/ui/dialogs/widget_gallery.tscn", "pause": false, "menu_openable": false, "args": []}
   ],
   "fragments": [
@@ -38,7 +48,10 @@
     {"name": "minimap", "scene": "res://scenes/ui/fragments/minimap_fragment.tscn", "group": "hud", "hidden": true},
     {"name": "block_config", "scene": "res://scenes/ui/fragments/block_config_fragment.tscn", "group": "overlay", "hidden": true},
     {"name": "block_inventory", "scene": "res://scenes/ui/fragments/block_inventory_fragment.tscn", "group": "overlay", "hidden": true},
-    {"name": "plan_config", "scene": "res://scenes/ui/fragments/plan_config_fragment.tscn", "group": "overlay", "hidden": true}
+    {"name": "plan_config", "scene": "res://scenes/ui/fragments/plan_config_fragment.tscn", "group": "overlay", "hidden": true},
+    {"name": "chat", "scene": "res://scenes/ui/fragments/chat_fragment.tscn", "group": "hud", "hidden": true},
+    {"name": "console", "scene": "res://scenes/ui/fragments/console_fragment.tscn", "group": "hud", "hidden": true},
+    {"name": "player_list", "scene": "res://scenes/ui/fragments/player_list_fragment.tscn", "group": "hud", "hidden": true}
   ],
   "prompts": ["show_info", "show_text", "show_confirm", "show_text_input", "show_info_toast", "announce", "toast"]
 }

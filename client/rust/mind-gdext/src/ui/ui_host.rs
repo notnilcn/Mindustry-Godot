@@ -36,6 +36,12 @@ pub struct MindUi {
     margin_bottom: i32,
     hud_visible: bool,
     mobile: bool,
+    /// `--mobile-preview` override flag (plan 14 §2.4 item 10 / plan 22).
+    mobile_preview: bool,
+    /// Lazily built M5 campaign read-model JSON (plan 14 §3.11 12 seam).
+    campaign_cache: Option<String>,
+    /// Rust console command registry (plan 14 M7, deviation OD1).
+    console: mind_core::ui::console::ConsoleRegistry,
     /// Manifest `pause` flags keyed by dialog name (plan 14 §3.4).
     pause_flags: HashMap<String, bool>,
     /// Reference count of currently-open pause dialogs.
@@ -47,6 +53,11 @@ pub struct MindUi {
 #[godot_api]
 impl INode for MindUi {
     fn init(base: Base<GdNode>) -> Self {
+        let mobile_preview = Os::singleton()
+            .get_cmdline_args()
+            .as_slice()
+            .iter()
+            .any(|arg| *arg == "--mobile-preview");
         Self {
             base,
             dialogs: HashMap::new(),
@@ -56,7 +67,10 @@ impl INode for MindUi {
             margin_top: 0,
             margin_bottom: 0,
             hud_visible: true,
-            mobile: Os::singleton().has_feature("mobile"),
+            mobile: Os::singleton().has_feature("mobile") || mobile_preview,
+            mobile_preview,
+            campaign_cache: None,
+            console: mind_core::ui::console::ConsoleRegistry::with_defaults(),
             pause_flags: HashMap::new(),
             pause_depth: 0,
             was_paused: false,
@@ -64,7 +78,11 @@ impl INode for MindUi {
     }
 
     fn ready(&mut self) {
-        log::info!("MindUi ready (mobile={})", self.mobile);
+        log::info!(
+            "MindUi ready (mobile={}, mobile_preview={})",
+            self.mobile,
+            self.mobile_preview
+        );
     }
 }
 
@@ -120,6 +138,15 @@ impl MindUi {
     /// Emitted with the text-input result (empty string = cancelled).
     #[signal]
     fn text_input_result(text: GString);
+
+    /// Emitted when the chat fragment wants to send a validated message
+    /// (transport is plan 21's relay; `mode` is `normal`/`team`/`admin`).
+    #[signal]
+    fn chat_message(text: GString, mode: GString);
+
+    /// Emitted when a player-list row requests a relay action (plan 21).
+    #[signal]
+    fn player_action(player: GString, action: GString);
 
     /// Registers a dialog node under a manifest name (`UiRoot` boot) and records
     /// its manifest `pause` flag for the governor.
@@ -383,6 +410,84 @@ impl MindUi {
     #[func]
     pub fn is_mobile(&self) -> bool {
         self.mobile
+    }
+
+    /// Whether the `--mobile-preview` override is active (MCP/tests).
+    #[func]
+    pub fn is_mobile_preview(&self) -> bool {
+        self.mobile_preview
+    }
+
+    /// Overrides the mobile flag at runtime (MCP mobile-preview step, plan 22).
+    #[func]
+    pub fn set_mobile_preview(&mut self, enabled: bool) {
+        self.mobile_preview = enabled;
+        self.mobile = enabled || Os::singleton().has_feature("mobile");
+    }
+
+    /// M5 campaign dialog read models as JSON (`CampaignViews`).
+    ///
+    /// Reads the deterministic plan-12 fixture snapshot; the live campaign
+    /// binding is the documented plan-21/world seam (plan 14 §3.11). Cached
+    /// after the first call.
+    #[func]
+    pub fn campaign_views(&mut self) -> GString {
+        if self.campaign_cache.is_none() {
+            let views = mind_core::ui::campaign::CampaignViews::vanilla_fixture();
+            let json = serde_json::to_string(&views).unwrap_or_else(|_| String::from("{}"));
+            self.campaign_cache = Some(json);
+        }
+        GString::from(self.campaign_cache.as_deref().unwrap_or("{}"))
+    }
+
+    /// Validates and forwards a chat message; returns false when the fragment's
+    /// guard rejected it. Transport is plan 21 (no server behaviour here).
+    #[func]
+    pub fn chat_send(&mut self, text: GString, mode: GString) -> bool {
+        let message = text.to_string();
+        if message.trim().is_empty() {
+            return false;
+        }
+        let _ = self
+            .base_mut()
+            .emit_signal("chat_message", &[message.to_variant(), mode.to_variant()]);
+        true
+    }
+
+    /// Documents the player-list relay seam; always false until plan 21 lands
+    /// (the shell never fakes a server action).
+    #[func]
+    pub fn player_action(&mut self, player: GString, action: GString) -> bool {
+        log::info!(
+            "[ui] player_action {} on {} gated on plan 21 relay",
+            action,
+            player
+        );
+        false
+    }
+
+    /// Player-list rows JSON. The shell reads rows from this endpoint; until
+    /// plan 21 supplies live views it returns an empty list (never faked).
+    #[func]
+    pub fn player_list_json(&self) -> GString {
+        GString::from("[]")
+    }
+
+    /// Executes a console line through the Rust command registry (OD1).
+    #[func]
+    pub fn console_execute(&self, line: GString) -> GString {
+        let output = self.console.execute(&line.to_string()).output;
+        GString::from(output.as_str())
+    }
+
+    /// Registered console command names (parity/test surface).
+    #[func]
+    pub fn console_commands(&self) -> PackedStringArray {
+        let mut out = PackedStringArray::new();
+        for name in self.console.names() {
+            out.push(&GString::from(name));
+        }
+        out
     }
 }
 

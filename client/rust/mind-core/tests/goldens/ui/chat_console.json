@@ -1,0 +1,24 @@
+{
+  "format": 1,
+  "chat": {
+    "prefix_only_rejected": true,
+    "sent_message": "5,6 [help]",
+    "ping": {
+      "x": 5,
+      "y": 6,
+      "text": "[help]"
+    },
+    "mode_cycle": [
+      "/t",
+      "",
+      "/t"
+    ],
+    "out_of_bounds_ping_rejected": true
+  },
+  "console": {
+    "commands": 2,
+    "sum": "7",
+    "unknown": "Unknown command: nope. Type 'help' for a list.",
+    "help_nonempty": true
+  }
+}

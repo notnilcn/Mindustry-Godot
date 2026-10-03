@@ -1,0 +1,18 @@
+{
+  "format": 1,
+  "open": {
+    "title": "Open File",
+    "file_name": "my_base_1",
+    "accepts_msch": true,
+    "accepts_png": false,
+    "allow_multiple": false
+  },
+  "save": {
+    "title": "Save File",
+    "file_name": "file.png",
+    "target": "shot.png"
+  },
+  "sanitized": "a_b_c_d",
+  "ext_equals": true,
+  "missing_extensions_rejected": true
+}

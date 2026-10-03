@@ -434,6 +434,45 @@ pub enum UiCommand {
         #[arg(long)]
         golden: Option<PathBuf>,
     },
+
+    /// Project the plan-12 campaign state into the M5 dialog read models.
+    Campaign {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Write the campaign-views JSON here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+        /// Compare the campaign views against this golden.
+        #[arg(long)]
+        golden: Option<PathBuf>,
+    },
+
+    /// Validate a `FileChooserParams` request set (plan 14 M7).
+    FileChooser {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Write the file-chooser JSON here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+        /// Compare the file-chooser output against this golden.
+        #[arg(long)]
+        golden: Option<PathBuf>,
+    },
+
+    /// Exercise the Rust console command registry + chat validation (plan 14 M7).
+    ChatConsole {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Write the chat/console JSON here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+        /// Compare the chat/console output against this golden.
+        #[arg(long)]
+        golden: Option<PathBuf>,
+    },
 }
 
 /// `input` subcommands (plan 15 §7b).
