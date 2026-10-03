@@ -59,7 +59,8 @@ impl Flowfield {
     }
 
     /// Sets the targets and recomputes the field (`Flowfield.updateTargetPositions`
-    /// + full frontier solve).
+    /// and full frontier solve). Equivalent to [`begin_update`](Self::begin_update)
+    /// followed by an unbounded [`advance`](Self::advance).
     pub fn update(
         &mut self,
         tiles: &[PathTile],
@@ -68,6 +69,14 @@ impl Flowfield {
         cost: Cost,
         diagonals: bool,
     ) {
+        self.begin_update(width, height);
+        let _ = self.advance(tiles, width, height, cost, diagonals, u32::MAX);
+    }
+
+    /// Restarts the incremental solve: resets the working weights, clears the
+    /// frontier and seeds the targets (`Pathfinder.registerPath`). The field is
+    /// then advanced by [`advance`](Self::advance).
+    pub fn begin_update(&mut self, width: i32, height: i32) {
         let len = self.complete_weights.len();
         self.complete_weights.fill(UNREACHABLE);
         self.came_from.fill(usize::MAX);
@@ -83,44 +92,68 @@ impl Flowfield {
                 self.frontier.add(target, 0.0);
             }
         }
+    }
+
+    /// Advances the frontier by at most `budget` pops (`Pathfinder.updateFrontier`)
+    /// and returns whether the field is complete. The persisted frontier and
+    /// working weights make repeated budgeted calls converge on exactly the same
+    /// weights as a single unbounded solve.
+    pub fn advance(
+        &mut self,
+        tiles: &[PathTile],
+        width: i32,
+        height: i32,
+        cost: Cost,
+        diagonals: bool,
+        budget: u32,
+    ) -> bool {
+        if self.done {
+            return true;
+        }
+        let mut processed: u32 = 0;
         while let Some((node, weight)) = self.frontier.poll() {
-            if weight > self.complete_weights[node] {
-                continue;
-            }
-            let x = (node as i32) % width;
-            let y = (node as i32) / width;
-            for (dx, dy) in DIRS {
-                let diagonal = dx != 0 && dy != 0;
-                if diagonal && !diagonals {
-                    continue;
-                }
-                let nx = x + dx;
-                let ny = y + dy;
-                if nx < 0 || ny < 0 || nx >= width || ny >= height {
-                    continue;
-                }
-                let next = (nx + ny * width) as usize;
-                if !cost.passable(tiles[next]) {
-                    continue;
-                }
-                // No corner cutting: both orthogonal neighbors must be passable.
-                if diagonal {
-                    let side_a = ((x + dx) + y * width) as usize;
-                    let side_b = (x + (y + dy) * width) as usize;
-                    if !cost.passable(tiles[side_a]) || !cost.passable(tiles[side_b]) {
+            if weight <= self.complete_weights[node] {
+                let x = (node as i32) % width;
+                let y = (node as i32) / width;
+                for (dx, dy) in DIRS {
+                    let diagonal = dx != 0 && dy != 0;
+                    if diagonal && !diagonals {
                         continue;
                     }
+                    let nx = x + dx;
+                    let ny = y + dy;
+                    if nx < 0 || ny < 0 || nx >= width || ny >= height {
+                        continue;
+                    }
+                    let next = (nx + ny * width) as usize;
+                    if !cost.passable(tiles[next]) {
+                        continue;
+                    }
+                    // No corner cutting: both orthogonal neighbors must be passable.
+                    if diagonal {
+                        let side_a = ((x + dx) + y * width) as usize;
+                        let side_b = (x + (y + dy) * width) as usize;
+                        if !cost.passable(tiles[side_a]) || !cost.passable(tiles[side_b]) {
+                            continue;
+                        }
+                    }
+                    let step = if diagonal { SQRT2 } else { 1.0 };
+                    let next_weight = self.complete_weights[node] + step;
+                    if next_weight < self.complete_weights[next] {
+                        self.complete_weights[next] = next_weight;
+                        self.came_from[next] = node;
+                        self.frontier.add(next, next_weight);
+                    }
                 }
-                let step = if diagonal { SQRT2 } else { 1.0 };
-                let next_weight = self.complete_weights[node] + step;
-                if next_weight < self.complete_weights[next] {
-                    self.complete_weights[next] = next_weight;
-                    self.came_from[next] = node;
-                    self.frontier.add(next, next_weight);
-                }
+            }
+            processed = processed.saturating_add(1);
+            if processed >= budget {
+                // Budget exhausted; `done` stays false until the frontier drains.
+                return self.frontier.is_empty();
             }
         }
         self.done = true;
+        true
     }
 
     /// Whether a target is reachable.

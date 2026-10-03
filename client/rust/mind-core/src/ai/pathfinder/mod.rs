@@ -44,6 +44,9 @@ pub struct Pathfinder {
     pub tiles: Vec<PathTile>,
     /// Cached fields keyed by `(team, cost)`.
     fields: BTreeMap<FieldKey, Flowfield>,
+    /// Fields with an in-progress incremental solve, in deterministic enqueue
+    /// order (`Pathfinder.queue` + `threadList`).
+    pending: Vec<FieldKey>,
     /// Monotonic field-recompute counter (determinism/debug).
     pub updates: u64,
 }
@@ -56,6 +59,7 @@ impl Pathfinder {
             height,
             tiles: Vec::new(),
             fields: BTreeMap::new(),
+            pending: Vec::new(),
             updates: 0,
         }
     }
@@ -66,6 +70,7 @@ impl Pathfinder {
         self.height = grid.height();
         self.tiles = path_tile::build_tiles(grid, content, team);
         self.fields.clear();
+        self.pending.clear();
     }
 
     /// Updates one tile's packed data (`TileChangeEvent` main-thread path).
@@ -90,6 +95,7 @@ impl Pathfinder {
         self.tiles[index] = PathTile::from_parts(health, team, solid, false, false);
         // Invalidate every cached field; it is rebuilt lazily on next access.
         self.fields.clear();
+        self.pending.clear();
     }
 
     /// Returns (building if needed) the flowfield for `(team, cost)` targeting
@@ -100,20 +106,7 @@ impl Pathfinder {
             team,
             cost: cost.id(),
         };
-        let mut target_indices: Vec<usize> = targets
-            .iter()
-            .filter(|pos| {
-                self.width > 0
-                    && self.height > 0
-                    && pos.x() >= 0
-                    && pos.y() >= 0
-                    && (pos.x() as i32) < self.width
-                    && (pos.y() as i32) < self.height
-            })
-            .map(|pos| pos.x() as usize + pos.y() as usize * self.width as usize)
-            .collect();
-        target_indices.sort_unstable();
-        target_indices.dedup();
+        let target_indices = self.normalize_targets(targets);
 
         match self.fields.entry(key) {
             Entry::Occupied(mut entry) => {
@@ -138,9 +131,85 @@ impl Pathfinder {
         self.fields.len()
     }
 
-    /// Advances the deterministic worker budget. M0 fields are computed lazily
-    /// and synchronously, so this is a no-op until M3.
-    pub fn step(&mut self, _budget: u32) {}
+    /// Filters and packs valid target tiles (`Flowfield.getPositions` output).
+    fn normalize_targets(&self, targets: &[TilePos]) -> Vec<usize> {
+        let mut indices: Vec<usize> = targets
+            .iter()
+            .filter(|pos| {
+                self.width > 0
+                    && self.height > 0
+                    && pos.x() >= 0
+                    && pos.y() >= 0
+                    && (pos.x() as i32) < self.width
+                    && (pos.y() as i32) < self.height
+            })
+            .map(|pos| pos.x() as usize + pos.y() as usize * self.width as usize)
+            .collect();
+        indices.sort_unstable();
+        indices.dedup();
+        indices
+    }
+
+    /// Registers (or re-targets) a field for incremental building; returns
+    /// whether a solve was started. [`step`](Self::step) advances it. This is
+    /// the deterministic replacement for the upstream background
+    /// `Pathfinder.registerPath`/`updateFrontier` pair; [`get_field`](Self::get_field)
+    /// remains the eager single-call path.
+    pub fn request_field(&mut self, cost: Cost, team: u8, targets: &[TilePos]) -> bool {
+        let key = FieldKey {
+            team,
+            cost: cost.id(),
+        };
+        let target_indices = self.normalize_targets(targets);
+        let needs_start = match self.fields.get(&key) {
+            Some(field) => field.targets != target_indices,
+            None => true,
+        };
+        if !needs_start {
+            return false;
+        }
+        let width = self.width;
+        let height = self.height;
+        let field = self
+            .fields
+            .entry(key)
+            .or_insert_with(|| Flowfield::new(width, height));
+        let expected = (width.max(0) as usize) * (height.max(0) as usize);
+        if field.complete_weights.len() != expected {
+            *field = Flowfield::new(width, height);
+        }
+        field.targets = target_indices;
+        field.begin_update(width, height);
+        self.updates = self.updates.wrapping_add(1);
+        if !self.pending.contains(&key) {
+            self.pending.push(key);
+        }
+        true
+    }
+
+    /// Advances the deterministic incremental frontier by `budget` node pops,
+    /// split evenly across in-progress fields (`FLOWFIELD_NODES_PER_TICK`).
+    pub fn step(&mut self, budget: u32) {
+        if self.pending.is_empty() || self.tiles.is_empty() || budget == 0 {
+            return;
+        }
+        let share = (budget / self.pending.len() as u32).max(1);
+        let pending = std::mem::take(&mut self.pending);
+        let mut still = Vec::with_capacity(pending.len());
+        for key in pending {
+            let Some(cost) = Cost::from_id(key.cost) else {
+                continue;
+            };
+            let Some(field) = self.fields.get_mut(&key) else {
+                continue;
+            };
+            let done = field.advance(&self.tiles, self.width, self.height, cost, true, share);
+            if !done {
+                still.push(key);
+            }
+        }
+        self.pending = still;
+    }
 }
 
 /// Builds and solves a flowfield for `targets`.
@@ -187,5 +256,50 @@ mod tests {
         let count = path.field_count();
         let _ = path.get_field(Cost::Ground, 0, &[TilePos::new(30, 4)]);
         assert_eq!(path.field_count(), count);
+    }
+
+    #[test]
+    fn incremental_step_matches_eager_solve() {
+        let content = content();
+        let mut grid = WorldGrid::new(24, 16);
+        grid.fill(crate::content::BlockId::AIR, crate::content::BlockId::AIR);
+        // A partial wall so the field has interesting structure.
+        for y in 4..12i16 {
+            grid.set_block(
+                TilePos::new(9, y),
+                crate::content::BlockId::STONE_WALL,
+                0,
+                0,
+            )
+            .expect("wall");
+        }
+        let targets = [TilePos::new(20, 8)];
+
+        let mut eager = Pathfinder::new(grid.width(), grid.height());
+        eager.rebuild(&grid, &content, 0);
+        let expected = eager
+            .get_field(Cost::Ground, 0, &targets)
+            .complete_weights
+            .clone();
+
+        let mut inc = Pathfinder::new(grid.width(), grid.height());
+        inc.rebuild(&grid, &content, 0);
+        assert!(inc.request_field(Cost::Ground, 0, &targets));
+        // A small per-tick budget must converge over several calls.
+        let mut calls = 0;
+        while inc
+            .fields
+            .get(&FieldKey { team: 0, cost: 0 })
+            .is_some_and(|f| !f.done)
+        {
+            inc.step(4);
+            calls += 1;
+            assert!(calls < 1_000, "incremental field never completed");
+        }
+        let got = inc
+            .get_field(Cost::Ground, 0, &targets)
+            .complete_weights
+            .clone();
+        assert_eq!(got, expected, "incremental == eager solve");
     }
 }
