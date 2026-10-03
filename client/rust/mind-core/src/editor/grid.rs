@@ -12,7 +12,7 @@ use bevy_ecs::world::World;
 use crate::content::{BlockId, ContentRegistry};
 use crate::ecs::{BuildingComp, TeamId};
 use crate::world::ops::{WorldCtx, WorldEventLog};
-use crate::world::{RenderHooks, WorldGrid, WorldHooks};
+use crate::world::{RenderHooks, TilePos, Tiles, WorldGrid, WorldHooks};
 
 use super::EditorGrid;
 use super::context::TileOpSink;
@@ -294,6 +294,101 @@ impl EditorGrid for WorldEditorGrid<'_> {
     fn update_block(&mut self, x: i32, y: i32) {
         self.render.recache_tile(x as i16, y as i16);
         self.render.invalidate_tile(x as i16, y as i16);
+    }
+
+    fn clear_editor_darkness(&mut self) {
+        for index in 0..self.grid.tiles.len() {
+            let block = self.grid.tiles.geti(index).block;
+            let static_block = self
+                .content
+                .block(block)
+                .is_some_and(|def| crate::world::tile::is_static_kind(def.kind));
+            if static_block {
+                // `tile.data` is overloaded as edge darkness for static walls
+                // (`EditorRenderer.resize` clears it for the editor view).
+                self.grid.tiles.geti_mut(index).data = 0;
+            }
+        }
+    }
+
+    fn recache_all(&mut self) {
+        let width = self.grid.tiles.width;
+        let height = self.grid.tiles.height;
+        for y in 0..height {
+            for x in 0..width {
+                self.render.recache_tile(x as i16, y as i16);
+            }
+        }
+    }
+
+    fn resize_shift(
+        &mut self,
+        content: &ContentRegistry,
+        width: i32,
+        height: i32,
+        shift_x: i32,
+        shift_y: i32,
+    ) {
+        // Capture every multiblock center build *before* remapping `x/y`
+        // (`MapEditor.resize` captures configs first; plan 07 owns live config,
+        // so this preserves the block/team/rotation placement).
+        let mut builds: Vec<(TilePos, BlockId, u8, u8)> = Vec::new();
+        for index in 0..self.grid.tiles.len() {
+            let tile = self.grid.tiles.geti(index);
+            if let Some(entity) = tile.build
+                && let Some(comp) = self.ecs.get::<BuildingComp>(entity)
+                && comp.pos == TilePos::new(tile.x, tile.y)
+            {
+                builds.push((comp.pos, comp.block, comp.team.0, comp.rot));
+            }
+        }
+
+        let old = self.grid.tiles.clone();
+        let (old_w, old_h) = (old.width, old.height);
+        let stone = content.block_id("stone").map(|b| b.raw()).unwrap_or(0);
+        let mut new_tiles = Tiles::new(width, height);
+        for tile in new_tiles.array_mut() {
+            tile.floor = BlockId::new(stone);
+        }
+        for y in 0..old_h {
+            for x in 0..old_w {
+                let nx = x + shift_x;
+                let ny = y + shift_y;
+                if !new_tiles.in_bounds(nx, ny) {
+                    continue;
+                }
+                let src = old.get(x, y).clone();
+                let dst = new_tiles.get_mut(nx, ny);
+                dst.floor = src.floor;
+                dst.overlay = src.overlay;
+                dst.block = src.block;
+                dst.data = src.data;
+                dst.floor_data = src.floor_data;
+                dst.overlay_data = src.overlay_data;
+                dst.extra_data = src.extra_data;
+            }
+        }
+        self.grid.tiles = new_tiles;
+        self.grid.clear_buildings();
+
+        // Reattach the shifted center builds; the ECS host spawns the entities.
+        for (pos, block, team, rot) in builds {
+            let nx = pos.x() as i32 + shift_x;
+            let ny = pos.y() as i32 + shift_y;
+            if !self.grid.tiles.in_bounds(nx, ny) {
+                continue;
+            }
+            let mut log = WorldEventLog::default();
+            let mut ctx = WorldCtx {
+                grid: self.grid,
+                content: self.content,
+                ecs: self.ecs,
+                hooks: self.hooks,
+                render: self.render,
+                log: &mut log,
+            };
+            ctx.set_block(nx as i16, ny as i16, block, team, rot);
+        }
     }
 }
 

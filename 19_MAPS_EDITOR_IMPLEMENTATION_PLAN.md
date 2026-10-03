@@ -868,4 +868,33 @@ Tooling: `/mnt/c/Users/Clinton/g/.opencode/skills/godot-compositor-testing/SKILL
 
 **Deferred to M1+.** The `WorldGrid` sink is installed by the lifecycle owner (M1) — the draw path records ops explicitly for M0. `EditorBlockInfo::rotate` is `false` until plan-07 `BlockInstance::rotate` is wired; `supports_overlay`/`needs_surface` are approximated. `fillcliffs`/`fillunderliquid`/`fillteams` are ported but only flood/replace/erase have unit coverage. In-engine MCP (M3+) waits on the single-editor mutex.
 
+### M1 — Editor lifecycle (DONE 2026-10-03, `lane/f20-19`, base `43d2c31`)
+
+**Deliverables.** `mind-core/src/editor/lifecycle.rs` (`MapEditor::begin_edit_map`/`begin_edit_image`/`adopt_world`/`resize`/`create_map`/`runtime_load`/`export_image`; `try_catch_map_error`), `editor/context.rs` (`EditorContext` rewritten to own the grid + a precomputed `Block.hasBuilding` table so `SaveReadState.content` can borrow `&mut ContentRegistry`; concrete `EditorRecorder` = `TileOpSink`), `editor/grid.rs` + `editor/test_grid.rs` (`EditorGrid::{clear_editor_darkness, recache_all, resize_shift}`), `editor/mod.rs` (`MapEditor` `Resource` derive, `install_recorder`/`remove_recorder`/`drain_recorded_ops`/`should_record_ops`). Darkness clear + recache go through plan-06 `RenderHooks` no-ops; `resize_shift` captures center builds first and reattaches them (live configs are plan 07's `BuildPlan::point_config`, deferred).
+
+**Verify (plan §7 M1).**
+- `cargo run -p mind-headless -- editor roundtrip --json` (synthetic 32×32: `begin_edit_size` → `adopt_world` → 3 line ops → fill/flush → undo-all → redo-all → `save_editor_map` → `begin_edit_map`): normalized world checksums draw/redo/loaded all `cf47382195a5b7bc`; `round_trip_ok=true`, exit 0.
+- `cargo run -p mind-headless -- editor resize-shift --json`: 100×100 → 80×80 shift `(-10,-10)`; tile `(10,10)` = `copper-wall`, extra data `(20,20)` = `0x4321`, border `(0,0)` floor `stone`; `ok=true`, exit 0.
+- `cargo test -p mind-core editor::` → **30 passed** incl. `skip_gate_suppresses_recording` (`is_game`/loading/generating), `runtime_load_suppresses_then_restores`, `resize_shift_preserves_tiles_and_data`, `adopt_world_clears_darkness`, `recorder_shared_buffer_receives_ops`.
+- Lane gate: `cargo test -p mind-core` **1497 passed / 3 ignored**; `cargo fmt --all -- --check` clean; workspace `cargo clippy --all-targets -- -D warnings` clean.
+
+**Files.** `mind-core/src/editor/{mod,context,grid,test_grid,lifecycle}.rs`; `mind-headless/src/{cli,exec}.rs` (`EditorCommand::{Roundtrip,ResizeShift}`).
+
+**Deferred to M3+.** `begin_edit_image`'s tile import writes floors/overlays only (plan-04 `ImageTileSink` has no `set_block`); live building-config shift; `EditorRenderer`; Godot lifecycle. MCP §7c waits on the single-editor mutex.
+
+### M2 — Map lifecycle client + PNG (DONE 2026-10-03, `lane/f20-19`)
+
+**Deliverables.** Plan-04 `mind-core/src/io/map/preview.rs` + `mod.rs`: **PNG codec addition** `encode_png`/`decode_png` (RGB/RGBA 8-bit) behind `PreviewImage` (OD19-D; `png = 0.17.16` workspace pin; the only plan-04 `io` change, reported). `mind-core/src/editor/preview.rs`: `PreviewPipeline` (`load_previews`/`queue_new_preview`/`create_all_previews`/`create_new_preview`/`texture_for`/`cache_for`/`check_previews`) — Godot-free core half; the `Gd<ImageTexture>` binding is M3. `mind-core/src/editor/maps_glue.rs`: `EditorMapSource` (writes the `map` region from a live `WorldGrid`), `GridImageSink`/`import_image_into_grid`, `save_editor_map` (map tags win over the standard base tag set), `try_import_map` (image reject + free-name copy), `canonicalize_tags`. `MapEditor::export_image`/`begin_edit_image` wire image export/import; `try_catch_map_error` maps `MapError` → `@editor.errornot`/`@editor.errorheader`/`@editor.errorload`.
+
+**Verify (plan §7 M2).**
+- `cargo run -p mind-headless -- maps save-load-save --json`: 32×32 editor fixture with `rules`/`genfilters`/`locales`; save A (4607 B) → load → save B; **byte-equal**; reloaded `rules` = `{"editor":false}`; `ok=true`.
+- `cargo run -p mind-headless -- maps preview-tiles --json`: 8×8 hand tiles + ores; pixel checksum `1a0374ab5994da45`, PNG 177 B, `png_round_trip_ok=true`.
+- `cargo run -p mind-headless -- maps image-roundtrip --json`: `write_image` → PNG → `read_image` → `write_image`; checksum `4d1d3a32c6b05ea5` both sides.
+- `cargo run -p mind-headless -- maps registry-shuffle --json`: registry order custom→builtin, 16 selections, `repeats=0`.
+- `cargo test -p mind-core io::map editor::preview editor::maps_glue` green; lane fmt + workspace clippy clean.
+
+**Files.** `mind-core/src/io/map/{preview,mod}.rs`, `mind-core/Cargo.toml` (+`png`), `mind-core/src/editor/{preview,maps_glue}.rs`; `mind-headless/src/{cli,exec}.rs` (`MapsCommand::{SaveLoadSave,PreviewTiles,ImageRoundtrip,RegistryShuffle}`).
+
+**Deferred to M3+.** `EditorMapsDialog` (14's `MapListDialog` subclass) and `MindPreview` `Texture2D` binding; preview PNG + cache writes are synchronous (std thread deferred with the Godot shell); plan-04 `FogControl`-retained previews (06 reflection hack intentionally not ported).
+
 - (no earlier entries)

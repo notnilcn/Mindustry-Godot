@@ -281,9 +281,19 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
         },
         Command::Maps { command } => match command {
             MapsCommand::List { dir, json } => cmd_maps_list(dir, *json),
+            MapsCommand::SaveLoadSave { map, json } => cmd_maps_save_load_save(map, *json),
+            MapsCommand::PreviewTiles { json } => cmd_maps_preview_tiles(*json),
+            MapsCommand::ImageRoundtrip { json } => cmd_maps_image_roundtrip(*json),
+            MapsCommand::RegistryShuffle { seeds, json } => {
+                cmd_maps_registry_shuffle(*seeds, *json)
+            }
         },
         Command::Editor { command } => match command {
             EditorCommand::Ops { fixture, json } => cmd_editor_ops(fixture, *json),
+            EditorCommand::Roundtrip { map, seed, json } => {
+                cmd_editor_roundtrip(map.as_deref(), *seed, *json)
+            }
+            EditorCommand::ResizeShift { json } => cmd_editor_resize_shift(*json),
         },
         Command::Blocks { command } => crate::blocks_scenarios::run(command).map(|()| EXIT_PASS),
         Command::Combat { command } => crate::combat_scenarios::run(command),
@@ -4167,6 +4177,514 @@ fn cmd_editor_ops(fixture: &Path, json: bool) -> anyhow::Result<i32> {
     } else {
         Ok(EXIT_FAIL)
     }
+}
+
+/// Normalized world checksum (counters zeroed) so a save/load round-trip is
+/// comparable across the load epilogue's counter reset.
+fn editor_world_checksum_normalized(grid: &mut mind_core::world::WorldGrid) -> String {
+    grid.tile_changes = 0;
+    grid.floor_changes = 0;
+    editor_world_checksum(grid)
+}
+
+/// FNV-1a checksum of a preview image's pixels (plan 19 §7b).
+fn preview_image_checksum(image: &mind_core::io::map::PreviewImage) -> String {
+    let mut hasher = mind_core::determinism::Hasher::new();
+    hasher.write_u32(image.width);
+    hasher.write_u32(image.height);
+    hasher.write(&image.rgba);
+    hasher.finish().to_hex()
+}
+
+/// `editor roundtrip` (plan 19 M1 §5/§7b): adopt → draw → undo → save → reload.
+fn cmd_editor_roundtrip(map: Option<&Path>, _seed: u64, json: bool) -> anyhow::Result<i32> {
+    use bevy_ecs::world::World;
+    use mind_core::content::BlockId;
+    use mind_core::editor::grid::WorldEditorGrid;
+    use mind_core::editor::maps_glue::{editor_base_tags, save_editor_map};
+    use mind_core::editor::{EditorTool, MapEditor};
+    use mind_core::io::fs::NativeFs;
+    use mind_core::io::map::MapIo;
+    use mind_core::maps::Map;
+    use mind_core::world::{NoopRenderHooks, NoopWorldHooks, WorldGrid};
+
+    let mut content = boot_content()?;
+    let fs = NativeFs;
+    let mut editor = MapEditor::new();
+    let mut grid = WorldGrid::new(0, 0);
+    let mut ecs = World::new();
+    let hooks = NoopWorldHooks;
+    let render = NoopRenderHooks;
+
+    if let Some(file) = map {
+        let header = MapIo::create_map(&fs, file, true)?;
+        let loaded = Map::from_header(&header, true);
+        editor.begin_edit_map(&mut grid, &mut content, &fs, &loaded)?;
+    } else {
+        let mut world = WorldEditorGrid::new(&mut grid, &content, &mut ecs, &hooks, &render);
+        editor.begin_edit_size(&mut world, &content, 32, 32);
+        editor.adopt_world(&mut world);
+    }
+
+    // adopt → draw 3 lines + 1 fill.
+    let wall = content.block_id("copper-wall").unwrap_or(BlockId::AIR);
+    {
+        let mut world = WorldEditorGrid::new(&mut grid, &content, &mut ecs, &hooks, &render);
+        editor.draw_block = wall;
+        editor.tool = EditorTool::Line;
+        mind_core::editor::tool::touched_line(
+            &mut editor,
+            EditorTool::Line,
+            &mut world,
+            &content,
+            4,
+            4,
+            20,
+            4,
+        );
+        mind_core::editor::tool::touched_line(
+            &mut editor,
+            EditorTool::Line,
+            &mut world,
+            &content,
+            4,
+            6,
+            4,
+            18,
+        );
+        mind_core::editor::tool::touched_line(
+            &mut editor,
+            EditorTool::Line,
+            &mut world,
+            &content,
+            8,
+            8,
+            16,
+            16,
+        );
+        editor.flush_op();
+    }
+    let checksum_after_draw = editor_world_checksum_normalized(&mut grid);
+    while editor.can_undo() {
+        let mut world = WorldEditorGrid::new(&mut grid, &content, &mut ecs, &hooks, &render);
+        editor.undo(&mut world, &content);
+    }
+    let checksum_after_undo = editor_world_checksum_normalized(&mut grid);
+    while editor.can_redo() {
+        let mut world = WorldEditorGrid::new(&mut grid, &content, &mut ecs, &hooks, &render);
+        editor.redo(&mut world, &content);
+    }
+    let checksum_after_redo = editor_world_checksum_normalized(&mut grid);
+
+    // save → reload.
+    let dir = std::env::temp_dir().join("mgorch-editor");
+    std::fs::create_dir_all(&dir)?;
+    let save_file = dir.join("editor_roundtrip.msav");
+    editor
+        .tags
+        .insert("name".to_owned(), "Editor Roundtrip".to_owned());
+    editor.tags.insert("rules".to_owned(), "{}".to_owned());
+    editor.tags.insert("genfilters".to_owned(), "{}".to_owned());
+    editor.tags.insert("locales".to_owned(), "{}".to_owned());
+    let base = editor_base_tags(
+        grid.tiles.width as u16,
+        grid.tiles.height as u16,
+        "Editor Roundtrip",
+    );
+    save_editor_map(
+        &fs,
+        &save_file,
+        &grid,
+        &content,
+        base,
+        editor.tags.clone(),
+        false,
+    )?;
+    let header = MapIo::create_map(&fs, &save_file, true)?;
+    let reloaded = Map::from_header(&header, true);
+    let mut grid2 = WorldGrid::new(0, 0);
+    editor.begin_edit_map(&mut grid2, &mut content, &fs, &reloaded)?;
+    let checksum_loaded = editor_world_checksum_normalized(&mut grid2);
+
+    let round_trip_ok =
+        checksum_after_draw == checksum_after_redo && checksum_after_draw == checksum_loaded;
+    let report = serde_json::json!({
+        "format": 1,
+        "generator": "editor_roundtrip",
+        "source": map.map(|p| p.display().to_string()),
+        "save": save_file.display().to_string(),
+        "checksum_after_draw": checksum_after_draw,
+        "checksum_after_undo": checksum_after_undo,
+        "checksum_after_redo": checksum_after_redo,
+        "checksum_loaded": checksum_loaded,
+        "round_trip_ok": round_trip_ok,
+        "ok": round_trip_ok,
+    });
+    let text = serde_json::to_string_pretty(&report)?;
+    if json {
+        println!("{text}");
+    } else {
+        println!("draw:   {checksum_after_draw}");
+        println!("undo:   {checksum_after_undo}");
+        println!("redo:   {checksum_after_redo}");
+        println!("loaded: {checksum_loaded}");
+        println!("round trip: {}", if round_trip_ok { "ok" } else { "FAIL" });
+    }
+    Ok(if round_trip_ok { EXIT_PASS } else { EXIT_FAIL })
+}
+
+/// `editor resize-shift` (plan 19 M1 §5/§7b): in-bounds tiles/data survive a
+/// resize with a ±10 shift; out-of-bounds tiles become the default stone floor.
+fn cmd_editor_resize_shift(json: bool) -> anyhow::Result<i32> {
+    use bevy_ecs::world::World;
+    use mind_core::editor::grid::WorldEditorGrid;
+    use mind_core::editor::{EditorGrid, MapEditor};
+    use mind_core::world::{NoopRenderHooks, NoopWorldHooks, WorldGrid};
+
+    let content = boot_content()?;
+    let mut editor = MapEditor::new();
+    let mut grid = WorldGrid::new(0, 0);
+    let mut ecs = World::new();
+    let hooks = NoopWorldHooks;
+    let render = NoopRenderHooks;
+    let wall = content
+        .block_id("copper-wall")
+        .ok_or_else(|| anyhow!("content is missing `copper-wall`"))?;
+    let stone = content
+        .block_id("stone")
+        .ok_or_else(|| anyhow!("content is missing `stone`"))?;
+
+    {
+        let mut world = WorldEditorGrid::new(&mut grid, &content, &mut ecs, &hooks, &render);
+        editor.begin_edit_size(&mut world, &content, 100, 100);
+    }
+    {
+        let mut world = WorldEditorGrid::new(&mut grid, &content, &mut ecs, &hooks, &render);
+        for x in 20..60 {
+            for y in 20..60 {
+                world.set_block(x, y, wall, 0, 0);
+            }
+        }
+        world.set_extra_data(30, 30, 0x4321);
+    }
+    {
+        let mut world = WorldEditorGrid::new(&mut grid, &content, &mut ecs, &hooks, &render);
+        editor.resize(&mut world, &content, 80, 80, -10, -10);
+    }
+
+    let ok = grid.tiles.width == 80
+        && grid.tiles.height == 80
+        && grid.tiles.get(10, 10).block == wall
+        && grid.tiles.get(20, 20).extra_data == 0x4321
+        && grid.tiles.get(0, 0).floor == stone;
+
+    let report = serde_json::json!({
+        "format": 1,
+        "generator": "editor_resize_shift",
+        "width": grid.tiles.width,
+        "height": grid.tiles.height,
+        "preserved_tile": grid.tiles.get(10, 10).block.raw(),
+        "preserved_extra": grid.tiles.get(20, 20).extra_data,
+        "border_floor": grid.tiles.get(0, 0).floor.raw(),
+        "ok": ok,
+    });
+    let text = serde_json::to_string_pretty(&report)?;
+    if json {
+        println!("{text}");
+    } else {
+        println!("editor resize-shift: {}", if ok { "ok" } else { "FAIL" });
+    }
+    Ok(if ok { EXIT_PASS } else { EXIT_FAIL })
+}
+
+/// `maps save-load-save` (plan 19 M2 §5/§7b): save → load → save byte-stable.
+fn cmd_maps_save_load_save(map_name: &str, json: bool) -> anyhow::Result<i32> {
+    use mind_core::content::BlockId;
+    use mind_core::editor::MapEditor;
+    use mind_core::editor::maps_glue::{editor_base_tags, save_editor_map};
+    use mind_core::io::FileSystem;
+    use mind_core::io::StringMap as IndexMap;
+    use mind_core::io::fs::NativeFs;
+    use mind_core::io::map::MapIo;
+    use mind_core::maps::Map;
+    use mind_core::world::WorldGrid;
+
+    let mut content = boot_content()?;
+    let fs = NativeFs;
+    let dir = std::env::temp_dir().join("mgorch-maps");
+    std::fs::create_dir_all(&dir)?;
+    let file_a = dir.join(format!("{map_name}_a.msav"));
+    let file_b = dir.join(format!("{map_name}_b.msav"));
+
+    let mut grid = WorldGrid::new(32, 32);
+    let stone = content.block_id("stone").unwrap_or(BlockId::AIR);
+    let copper = content.block_id("copper-wall").unwrap_or(BlockId::AIR);
+    let ice = content.block_id("ice").unwrap_or(stone);
+    for tile in grid.tiles.array_mut() {
+        tile.floor = stone;
+    }
+    grid.tiles.get_mut(5, 5).block = copper;
+    grid.tiles.get_mut(7, 7).floor = ice;
+
+    let mut tags = IndexMap::new();
+    tags.insert("name".to_owned(), map_name.to_owned());
+    tags.insert("description".to_owned(), "editor fixture".to_owned());
+    tags.insert("author".to_owned(), "lane/f20-19".to_owned());
+    tags.insert("rules".to_owned(), r#"{"editor":false}"#.to_owned());
+    tags.insert("genfilters".to_owned(), "{}".to_owned());
+    tags.insert("locales".to_owned(), r#"{"en":{"a":"A"}}"#.to_owned());
+    let base = editor_base_tags(32, 32, map_name);
+    save_editor_map(&fs, &file_a, &grid, &content, base, tags, false)?;
+    let bytes_a = fs.read(&file_a)?;
+
+    let header = MapIo::create_map(&fs, &file_a, true)?;
+    let map_a = Map::from_header(&header, true);
+    let mut grid2 = WorldGrid::new(0, 0);
+    let mut editor = MapEditor::new();
+    editor.begin_edit_map(&mut grid2, &mut content, &fs, &map_a)?;
+
+    let base2 = editor_base_tags(
+        grid2.tiles.width as u16,
+        grid2.tiles.height as u16,
+        map_name,
+    );
+    save_editor_map(
+        &fs,
+        &file_b,
+        &grid2,
+        &content,
+        base2,
+        editor.tags.clone(),
+        false,
+    )?;
+    let bytes_b = fs.read(&file_b)?;
+
+    let idempotent = bytes_a == bytes_b;
+    let rules_a = map_a.tags.get("rules").cloned().unwrap_or_default();
+    let header_b = MapIo::create_map(&fs, &file_b, true)?;
+    let rules_b = header_b.tags.get("rules").cloned().unwrap_or_default();
+    let rules_equal = rules_a == rules_b;
+
+    let report = serde_json::json!({
+        "format": 1,
+        "generator": "maps_save_load_save",
+        "map": map_name,
+        "bytes_a": bytes_a.len(),
+        "bytes_b": bytes_b.len(),
+        "idempotent": idempotent,
+        "rules_equal": rules_equal,
+        "rules": rules_a,
+        "ok": idempotent && rules_equal,
+    });
+    let text = serde_json::to_string_pretty(&report)?;
+    if json {
+        println!("{text}");
+    } else {
+        println!(
+            "save-load-save: {} ({} B)",
+            if idempotent && rules_equal {
+                "ok"
+            } else {
+                "FAIL"
+            },
+            bytes_a.len()
+        );
+    }
+    Ok(if idempotent && rules_equal {
+        EXIT_PASS
+    } else {
+        EXIT_FAIL
+    })
+}
+
+/// `maps preview-tiles` (plan 19 M2 §5/§7b): deterministic preview pixels +
+/// PNG round-trip.
+fn cmd_maps_preview_tiles(json: bool) -> anyhow::Result<i32> {
+    use mind_core::content::BlockId;
+    use mind_core::editor::maps_glue::EditorMapSource;
+    use mind_core::io::map::{MapIo, decode_png, encode_png};
+    use mind_core::world::WorldGrid;
+
+    let content = boot_content()?;
+    let mut grid = WorldGrid::new(8, 8);
+    let stone = content.block_id("stone").unwrap_or(BlockId::AIR);
+    let ore = content.block_id("ore-copper");
+    for tile in grid.tiles.array_mut() {
+        tile.floor = stone;
+    }
+    let mut ore_count = 0usize;
+    if let Some(ore) = ore {
+        grid.tiles.get_mut(2, 2).overlay = ore;
+        grid.tiles.get_mut(5, 3).overlay = ore;
+        ore_count = 2;
+    }
+
+    let source = EditorMapSource::new(&grid, &content);
+    let image = MapIo::preview_from_tiles(&content, &source);
+    let pixel_checksum = preview_image_checksum(&image);
+    let png = encode_png(&image)?;
+    let decoded = decode_png(&png)?;
+    let png_ok = decoded == image;
+
+    let report = serde_json::json!({
+        "format": 1,
+        "generator": "maps_preview_tiles",
+        "width": image.width,
+        "height": image.height,
+        "pixel_checksum": pixel_checksum,
+        "png_bytes": png.len(),
+        "png_round_trip_ok": png_ok,
+        "ore_count": ore_count,
+        "ok": png_ok,
+    });
+    let text = serde_json::to_string_pretty(&report)?;
+    if json {
+        println!("{text}");
+    } else {
+        println!("preview {pixel_checksum} png_round_trip={png_ok}");
+    }
+    Ok(if png_ok { EXIT_PASS } else { EXIT_FAIL })
+}
+
+/// `maps image-roundtrip` (plan 19 M2 §5/§7b): PNG → `read_image` → `write_image`
+/// preserves the pixel checksum.
+fn cmd_maps_image_roundtrip(json: bool) -> anyhow::Result<i32> {
+    use mind_core::content::BlockId;
+    use mind_core::editor::maps_glue::{EditorMapSource, GridImageSink};
+    use mind_core::io::map::{
+        BlockPalette, FnColorMapper, decode_png, encode_png, read_image, write_image,
+    };
+    use mind_core::world::WorldGrid;
+
+    let content = boot_content()?;
+    let stone = content.block_id("stone").unwrap_or(BlockId::AIR);
+    let ice = content.block_id("ice").unwrap_or(stone);
+
+    let mut grid = WorldGrid::new(8, 8);
+    for tile in grid.tiles.array_mut() {
+        tile.floor = stone;
+    }
+    for x in 0..8 {
+        grid.tiles.get_mut(x, 4).floor = ice;
+    }
+
+    let palette = BlockPalette::of(&content);
+    // The headless fixture builder does not run plan 03's region-derived
+    // `map_color` pass, so invert the deterministic palette colors the writer
+    // uses instead of plan-06's `ColorMapper` (which only sees explicit colors).
+    let pairs: Vec<(u32, BlockId)> = content
+        .blocks()
+        .iter()
+        .map(|def| (palette.map_color(def.id.raw()), def.id))
+        .collect();
+    let image_in = write_image(&palette, &EditorMapSource::new(&grid, &content));
+    let checksum_in = preview_image_checksum(&image_in);
+    let png = encode_png(&image_in)?;
+    let decoded = decode_png(&png)?;
+
+    let mut grid2 = WorldGrid::new(8, 8);
+    for tile in grid2.tiles.array_mut() {
+        tile.floor = stone;
+    }
+    let mapper = FnColorMapper(move |rgba: u32| {
+        pairs
+            .iter()
+            .find(|(color, _)| *color == rgba)
+            .map(|(_, block)| *block)
+    });
+    let mut sink = GridImageSink { grid: &mut grid2 };
+    read_image(&palette, &decoded, &mut sink, &mapper)?;
+    let image_out = write_image(&palette, &EditorMapSource::new(&grid2, &content));
+    let checksum_out = preview_image_checksum(&image_out);
+    let ok = checksum_in == checksum_out;
+
+    let report = serde_json::json!({
+        "format": 1,
+        "generator": "maps_image_roundtrip",
+        "checksum_in": checksum_in,
+        "checksum_out": checksum_out,
+        "png_bytes": png.len(),
+        "ok": ok,
+    });
+    let text = serde_json::to_string_pretty(&report)?;
+    if json {
+        println!("{text}");
+    } else {
+        println!("image round-trip: {}", if ok { "ok" } else { "FAIL" });
+    }
+    Ok(if ok { EXIT_PASS } else { EXIT_FAIL })
+}
+
+/// `maps registry-shuffle` (plan 06 §7b, verified by 19 M2): registry ordering
+/// and `ShuffleMode` selection across seeds never repeats `previous` when more
+/// than one candidate exists.
+fn cmd_maps_registry_shuffle(seeds: u32, json: bool) -> anyhow::Result<i32> {
+    use mind_core::io::StringMap as IndexMap;
+    use mind_core::maps::{GameMode, Map, Maps, ShuffleMode};
+    use mind_core::random::JavaRandom;
+
+    fn named(name: &str, custom: bool, dir: &str) -> Map {
+        let mut tags = IndexMap::new();
+        tags.insert("name".to_owned(), name.to_owned());
+        Map::new(
+            std::path::PathBuf::from(format!("{dir}/{name}.msav")),
+            16,
+            16,
+            tags,
+            custom,
+            1,
+            -1,
+        )
+    }
+
+    let mut maps = Maps::new();
+    maps.add(named("alpha", false, "/maps/default"));
+    maps.add(named("beta", false, "/maps/default"));
+    maps.add(named("custom-one", true, "/maps"));
+    maps.add(named("custom-two", true, "/maps"));
+    let mut modded = named("mod-map", false, "/mods/x/maps");
+    modded.mod_id = Some("x".to_owned());
+    maps.add(modded);
+
+    let order: Vec<&str> = maps.all().iter().map(Map::name).collect();
+    let custom_before_builtin = order
+        .iter()
+        .position(|name| *name == "custom-one")
+        .zip(order.iter().position(|name| *name == "alpha"))
+        .is_some_and(|(custom, builtin)| custom < builtin);
+
+    let mut rng = JavaRandom::new(1);
+    let mut previous: Option<usize> = None;
+    let mut repeats = 0usize;
+    let mut selections = Vec::new();
+    for _ in 0..seeds.max(1) {
+        let next = ShuffleMode::All.next(GameMode::Survival, previous, maps.all(), &mut rng);
+        if let Some(index) = next {
+            if Some(index) == previous {
+                repeats += 1;
+            }
+            selections.push(maps.all()[index].name().to_owned());
+            previous = Some(index);
+        }
+    }
+    let ok = custom_before_builtin && repeats == 0 && !selections.is_empty();
+
+    let report = serde_json::json!({
+        "format": 1,
+        "generator": "maps_registry_shuffle",
+        "order": order,
+        "custom_before_builtin": custom_before_builtin,
+        "selections": selections,
+        "repeats": repeats,
+        "ok": ok,
+    });
+    let text = serde_json::to_string_pretty(&report)?;
+    if json {
+        println!("{text}");
+    } else {
+        println!("registry-shuffle: {}", if ok { "ok" } else { "FAIL" });
+    }
+    Ok(if ok { EXIT_PASS } else { EXIT_FAIL })
 }
 
 fn cmd_world_multiblock(
