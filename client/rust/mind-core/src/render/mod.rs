@@ -16,6 +16,7 @@ pub mod bloom;
 pub mod commands;
 pub mod cutscene;
 pub mod draw;
+pub mod draw_desc;
 pub mod draw_meta;
 pub mod drawf;
 pub mod env;
@@ -25,6 +26,7 @@ pub mod g3d;
 pub mod hooks;
 pub mod ids;
 pub mod layer;
+pub mod layers;
 pub mod light;
 pub mod list;
 pub mod lod;
@@ -50,6 +52,7 @@ pub use draw::{
     Blending, DrawPrim, DrawProgram, GPUPARTICLES_THRESHOLD, MAX_DRAW_CALLS_TARGET,
     MULTIMESH_THRESHOLD, PrimKind, RegionKey, ShaderKey, TextureKey,
 };
+pub use draw_desc::{DescDraw, DrawDesc, DrawState, execute as execute_draw_desc, vanilla_chain};
 pub use draw_meta::BlockDrawMeta;
 pub use drawf::{lerp as lerp_color, pal, to_bits, with_alpha};
 pub use env::{
@@ -60,6 +63,7 @@ pub use g3d::{MeshData, PlanetGrid, PlanetParams, build_planet_grid, hex_is_inde
 pub use hooks::RenderInvalidation;
 pub use ids::{RegionId, RegionIdTable};
 pub use layer::{BuildingCacheLayer, CacheLayerId, Layer};
+pub use layers::{DrawCounters, LayerRenderList, build_layers, count_entries};
 pub use list::{
     FORMAT, RenderEntry, RenderList, block_cache_layer, build_entries, floor_cache_layer,
     is_accessible, sort_entries,

@@ -9,7 +9,7 @@ use mind_core::content::{
     BlockId, ContentRegistry, MemoryBundle, MemoryUnlockStore, create_base_content,
 };
 use mind_core::render::list::{FORMAT, RenderList, build_entries, sort_entries};
-use mind_core::render::{BandPlan, BuildingCacheGrid, FloorChunkGrid, RegionIdTable};
+use mind_core::render::{BandPlan, BuildingCacheGrid, FloorChunkGrid, RegionIdTable, build_layers};
 use mind_core::world::{TilePos, WorldGrid};
 
 use crate::cli::RenderCommand;
@@ -170,6 +170,72 @@ fn list(
         }
         return Ok(EXIT_PASS);
     }
+    if name == "render_layers_full" {
+        let stone = content
+            .block_id("stone")
+            .ok_or_else(|| anyhow::anyhow!("missing `stone` floor"))?;
+        let mut world = WorldGrid::new(32, 32);
+        world.fill(stone, BlockId::AIR);
+        for (bx, by, block) in [
+            (4, 4, "copper-wall"),
+            (8, 8, "phase-weaver"),
+            (12, 8, "cryofluid-mixer"),
+            (16, 8, "cultivator"),
+            (20, 8, "silicon-smelter"),
+            (8, 13, "steam-generator"),
+            (12, 13, "pulverizer"),
+            (16, 13, "melter"),
+            (20, 13, "plastanium-compressor"),
+            (24, 13, "router"),
+            (26, 13, "duct"),
+        ] {
+            let id = content
+                .block_id(block)
+                .ok_or_else(|| anyhow::anyhow!("missing `{block}`"))?;
+            world.set_block(TilePos::new(bx, by), id, 0, 0)?;
+        }
+        world.tile_changes = -1;
+        world.floor_changes = -1;
+        let camera = mind_core::render::CameraView {
+            x: 128.0,
+            y: 128.0,
+            w: 320.0,
+            h: 180.0,
+            zoom: 4.0,
+            team: 1,
+        };
+        let mut ids = RegionIdTable::new();
+        let mut full = build_layers(&world, &content, &mut ids, &camera, 1, 2);
+        full.scenario = name.to_owned();
+        let text = full.to_json(&ids);
+        if let Some(path) = check {
+            let golden = std::fs::read_to_string(path)
+                .with_context(|| format!("reading golden `{}`", path.display()))?;
+            if golden != text {
+                eprintln!("render-list: mismatch against `{}`", path.display());
+                return Ok(EXIT_FAIL);
+            }
+            if json {
+                println!(
+                    "{{\"scenario\":\"{name}\",\"pass\":true,\"entries\":{},\"layers\":{},\"draw_calls\":{}}}",
+                    full.entries.len(),
+                    full.layers.len(),
+                    full.counters.draw_calls
+                );
+            }
+            return Ok(EXIT_PASS);
+        }
+        if let Some(path) = out {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).ok();
+            }
+            std::fs::write(path, &text).with_context(|| format!("writing `{}`", path.display()))?;
+        } else {
+            print!("{text}");
+        }
+        return Ok(EXIT_PASS);
+    }
+
     let scenario = scenario_world(name, &content)?;
     let mut ids = RegionIdTable::new();
     let mut entries = build_entries(&scenario.world, &content, &mut ids, &scenario.camera);
@@ -307,11 +373,13 @@ fn bench(
 
     let mut samples = Vec::with_capacity(iters);
     let mut entries = 0usize;
+    let mut counters = mind_core::render::DrawCounters::default();
     for _ in 0..iters {
         let start = std::time::Instant::now();
         let built = build_entries(&world, &content, &mut ids, &camera);
         samples.push(start.elapsed().as_micros() as u64);
         entries = built.len();
+        counters = mind_core::render::count_entries(&built, 0);
         std::hint::black_box(&built);
     }
     samples.sort_unstable();
@@ -322,8 +390,10 @@ fn bench(
         .unwrap_or(0);
 
     let report = format!(
-        "{{\"scenario\":\"render_bench\",\"width\":{width},\"height\":{height},\"buildings\":{placed},\"iters\":{iters},\"entries\":{entries},\"regions\":{},\"p50_us\":{p50},\"p99_us\":{p99},\"budget_us\":{{\"p50\":2500,\"p99\":5000}},\"pass\":{}}}",
+        "{{\"scenario\":\"render_bench\",\"width\":{width},\"height\":{height},\"buildings\":{placed},\"iters\":{iters},\"entries\":{entries},\"regions\":{},\"draw_calls\":{},\"triangles\":{},\"p50_us\":{p50},\"p99_us\":{p99},\"budget_us\":{{\"p50\":2500,\"p99\":5000}},\"pass\":{}}}",
         ids.len(),
+        counters.draw_calls,
+        counters.triangles,
         p99 <= 5000,
     );
     let _ = json;
