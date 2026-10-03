@@ -39,6 +39,10 @@ harness = false
 name = "world"
 harness = false
 
+[[bench]]
+name = "combat"
+harness = false
+
 [build-dependencies]
 serde_json.workspace = true
 

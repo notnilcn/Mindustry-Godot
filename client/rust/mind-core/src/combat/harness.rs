@@ -87,6 +87,13 @@ impl CombatHarness {
                 "meltdown",
                 "parallax",
                 "segment",
+                "titan",
+                "disperse",
+                "afflict",
+                "lustre",
+                "smite",
+                "malign",
+                "build-tower",
             ] {
                 if let Some(config) = config_for(&build.content, name, &names) {
                     registry.register_named(name, Arc::new(TurretBehavior::new(config)));

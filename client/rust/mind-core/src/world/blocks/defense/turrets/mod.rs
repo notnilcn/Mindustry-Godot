@@ -32,12 +32,17 @@ use bevy_ecs::world::World;
 use smallvec::SmallVec;
 
 use crate::combat::bullet::{BulletSpawn, CombatCtx};
+use crate::combat::targeting::TargetQueries;
 use crate::content::registries::bullets::BulletDef;
 use crate::content::registries::units::weapon::ShootPatternSpec;
 use crate::content::{BulletId, BulletKind, ContentRegistry, ItemId, LiquidId};
-use crate::entities::comp::{Health, Pos, TeamComp};
+use crate::entities::comp::{Health, Pos};
 use crate::weapons::pattern::{self, ShotBuffer};
+use crate::world::PayloadRef;
+use crate::world::blocks::payloads::PayloadKind;
+use crate::world::construct::ConstructState;
 use crate::world::modules::{LiquidModule, PowerModule};
+use crate::world::plan::BuildPlan;
 
 pub mod advanced;
 pub mod behavior;
@@ -65,7 +70,48 @@ pub struct LiquidAmmo {
     pub ammo_multiplier: f32,
 }
 
-/// Ammo family (`ItemTurret`/`LiquidTurret`/`PowerTurret`).
+/// One payload-ammo entry (`PayloadAmmoTurret.ammoTypes`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PayloadAmmo {
+    /// Accepted payload content (block or unit).
+    pub content: PayloadContent,
+    /// Bullet fired when this payload is consumed.
+    pub bullet: BulletId,
+}
+
+/// Payload content key (block or unit) for `PayloadAmmoTurret`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PayloadContent {
+    /// Whether the content is a building or a unit (`Payload` type tag).
+    pub kind: PayloadKind,
+    /// Raw block/unit content id.
+    pub id: u16,
+}
+
+impl PayloadContent {
+    /// Extracts the content key from an incoming payload handle.
+    pub fn from_payload(payload: PayloadRef) -> Self {
+        Self {
+            kind: if payload.is_block {
+                PayloadKind::Build
+            } else {
+                PayloadKind::Unit
+            },
+            id: payload.content,
+        }
+    }
+}
+
+/// One per-instance payload-ammo stack (`PayloadSeq` entry).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PayloadStack {
+    /// Stored content.
+    pub content: PayloadContent,
+    /// Number of stored payloads of this content.
+    pub count: i32,
+}
+
+/// Ammo family (`ItemTurret`/`LiquidTurret`/`PowerTurret`/`PayloadAmmoTurret`).
 #[derive(Debug, Clone, PartialEq)]
 pub enum TurretAmmo {
     /// `ItemTurret.ammoTypes`.
@@ -74,6 +120,8 @@ pub enum TurretAmmo {
     Liquid(Vec<LiquidAmmo>),
     /// `PowerTurret.shootType`.
     Power(BulletId),
+    /// `PayloadAmmoTurret.ammoTypes` (content → bullet).
+    Payload(Vec<PayloadAmmo>),
 }
 
 /// Turret behavior class (`BaseTurret` subclass dispatch, M5/M6).
@@ -205,6 +253,8 @@ pub struct TurretConfig {
     pub shoot_duration: f32,
     /// `LaserTurret.firingMoveFract` (rotation speed scale while firing).
     pub firing_move_fract: f32,
+    /// `BuildTurret.buildSpeed` (construction units per tick).
+    pub build_speed: f32,
 }
 
 impl TurretConfig {
@@ -283,6 +333,14 @@ pub struct TurretState {
     pub bullet_target: Option<Entity>,
     /// `TractorBeamBuild.any` (beam is active this tick).
     pub any: bool,
+    /// `PayloadTurretBuild.payloads` (payload-ammo stacks by content).
+    pub payloads: SmallVec<[PayloadStack; 4]>,
+    /// `BuildTurretBuild.warmup`.
+    pub build_warmup: f32,
+    /// `BuildTurretBuild` proxy build-plan queue.
+    pub build_plans: SmallVec<[BuildPlan; 4]>,
+    /// `BuildTurretBuild.following`-equivalent: the plan currently being built.
+    pub build_target: Option<(i32, i32)>,
 }
 
 /// One continuous/laser beam bullet entry (`Turret.BulletEntry`).
@@ -366,6 +424,10 @@ impl TurretState {
             unit_target: None,
             bullet_target: None,
             any: false,
+            payloads: SmallVec::new(),
+            build_warmup: 0.0,
+            build_plans: SmallVec::new(),
+            build_target: None,
         }
     }
 }
@@ -512,6 +574,7 @@ pub fn config_for(
                 status_chance: 0.0,
                 shoot_duration: 0.0,
                 firing_move_fract: 1.0,
+                build_speed: 1.0,
             })
         }
         "test-item" => {
@@ -568,6 +631,7 @@ pub fn config_for(
                 status_chance: 0.0,
                 shoot_duration: 0.0,
                 firing_move_fract: 1.0,
+                build_speed: 1.0,
             })
         }
         "test-liquid" => {
@@ -624,6 +688,7 @@ pub fn config_for(
                 status_chance: 0.0,
                 shoot_duration: 0.0,
                 firing_move_fract: 1.0,
+                build_speed: 1.0,
             })
         }
         "test-power" => {
@@ -680,6 +745,7 @@ pub fn config_for(
                 status_chance: 0.0,
                 shoot_duration: 0.0,
                 firing_move_fract: 1.0,
+                build_speed: 1.0,
             })
         }
         _ => advanced::config_for(content, name, names),
@@ -757,6 +823,15 @@ fn peek_ammo_state(state: &TurretState, world: &World, e: Entity) -> Option<Bull
             best.map(|(_, bullet)| bullet)
         }
         TurretAmmo::Power(bullet) => Some(*bullet),
+        TurretAmmo::Payload(ammo) => ammo
+            .iter()
+            .find(|entry| {
+                state
+                    .payloads
+                    .iter()
+                    .any(|stack| stack.content == entry.content && stack.count > 0)
+            })
+            .map(|entry| entry.bullet),
     }
 }
 
@@ -782,6 +857,12 @@ fn has_ammo_state(state: &TurretState, world: &World, e: Entity) -> bool {
                 .any(|entry| liquids.get(entry.liquid) >= 1.0 / entry.ammo_multiplier)
         }
         TurretAmmo::Power(_) => true,
+        TurretAmmo::Payload(ammo) => ammo.iter().any(|entry| {
+            state
+                .payloads
+                .iter()
+                .any(|stack| stack.content == entry.content && stack.count > 0)
+        }),
     }
 }
 
@@ -887,6 +968,55 @@ pub fn handle_liquid(world: &mut World, e: Entity, liquid: LiquidId, amount: f32
     }
 }
 
+/// `PayloadTurretBuild.acceptPayload`.
+pub fn accept_payload(world: &World, e: Entity, payload: PayloadRef) -> bool {
+    let Some(state) = world.get::<TurretState>(e) else {
+        return false;
+    };
+    let TurretAmmo::Payload(ammo) = &state.config.ammo else {
+        return false;
+    };
+    let content = PayloadContent::from_payload(payload);
+    let total: i32 = state.payloads.iter().map(|stack| stack.count).sum();
+    total < state.config.max_ammo && ammo.iter().any(|entry| entry.content == content)
+}
+
+/// `PayloadTurretBuild.handlePayload`.
+pub fn handle_payload(world: &mut World, e: Entity, payload: PayloadRef) {
+    let Some(mut state) = world.entity_mut(e).take::<TurretState>() else {
+        return;
+    };
+    let content = PayloadContent::from_payload(payload);
+    if let TurretAmmo::Payload(ammo) = &state.config.ammo
+        && ammo.iter().any(|entry| entry.content == content)
+    {
+        if let Some(stack) = state
+            .payloads
+            .iter_mut()
+            .find(|stack| stack.content == content)
+        {
+            stack.count += 1;
+        } else {
+            state.payloads.push(PayloadStack { content, count: 1 });
+        }
+    }
+    world.entity_mut(e).insert(state);
+}
+
+/// Queues a build plan on a `BuildTurret` (`unit.addBuild`; plan 11/15 seam).
+pub fn add_build_plan(world: &mut World, e: Entity, plan: BuildPlan) -> bool {
+    let Some(mut state) = world.entity_mut(e).take::<TurretState>() else {
+        return false;
+    };
+    if state.config.kind != TurretKind::Build {
+        world.entity_mut(e).insert(state);
+        return false;
+    }
+    state.build_plans.push(plan);
+    world.entity_mut(e).insert(state);
+    true
+}
+
 /// Removes one shot's worth of ammo and returns the fired bullet
 /// (`TurretBuild.useAmmo`).
 fn use_ammo(state: &mut TurretState, world: &mut World, e: Entity) -> Option<BulletId> {
@@ -909,6 +1039,27 @@ fn use_ammo(state: &mut TurretState, world: &mut World, e: Entity) -> Option<Bul
             }
         }
         TurretAmmo::Power(_) => {}
+        TurretAmmo::Payload(ammo) => {
+            let content = ammo
+                .iter()
+                .find(|entry| {
+                    state
+                        .payloads
+                        .iter()
+                        .any(|stack| stack.content == entry.content && stack.count > 0)
+                })
+                .map(|entry| entry.content);
+            if let Some(content) = content {
+                if let Some(stack) = state
+                    .payloads
+                    .iter_mut()
+                    .find(|stack| stack.content == content)
+                {
+                    stack.count -= 1;
+                }
+                state.payloads.retain(|stack| stack.count > 0);
+            }
+        }
     }
     if let Some((liquid, amount)) = liquid_remove
         && let Some(mut liquids) = world.get_mut::<LiquidModule>(e)
@@ -922,6 +1073,9 @@ fn use_ammo(state: &mut TurretState, world: &mut World, e: Entity) -> Option<Bul
 
 /// Updates every turret entity one tick (`Groups.build` turret half).
 pub fn update_turrets(ctx: &mut CombatCtx<'_>) {
+    // Plan-10 §3.2/§3.7: build the plan-11 `BlockIndexer` + unit snapshot once
+    // per pass and query it deterministically instead of scanning all entities.
+    let targets = TargetQueries::build(ctx.world, ctx.content);
     let turrets: Vec<Entity> = ctx
         .world
         .iter_entities()
@@ -935,16 +1089,26 @@ pub fn update_turrets(ctx: &mut CombatCtx<'_>) {
         let Some(mut state) = ctx.world.entity_mut(turret).take::<TurretState>() else {
             continue;
         };
-        update_turret(ctx, turret, &mut state);
+        update_turret(ctx, turret, &mut state, &targets);
         ctx.world.entity_mut(turret).insert(state);
     }
 }
 
-fn update_turret(ctx: &mut CombatCtx<'_>, e: Entity, state: &mut TurretState) {
+fn update_turret(
+    ctx: &mut CombatCtx<'_>,
+    e: Entity,
+    state: &mut TurretState,
+    targets: &TargetQueries,
+) {
     let config = state.config.clone();
     let (x, y) = position(ctx.world, e).unwrap_or((0.0, 0.0));
     let team = ctx.team(e);
     let eff = efficiency(ctx.world, e);
+
+    // `PayloadTurretBuild.updateTile`: `totalAmmo = payloads.total()`.
+    if let TurretAmmo::Payload(_) = &config.ammo {
+        state.total_ammo = state.payloads.iter().map(|stack| stack.count).sum();
+    }
 
     // Target validation + shooting intent.
     if state.target.is_some() && !validate_target(ctx, e, state) {
@@ -1025,15 +1189,19 @@ fn update_turret(ctx: &mut CombatCtx<'_>, e: Entity, state: &mut TurretState) {
             return;
         }
         TurretKind::TractorBeam => {
-            advanced::update_tractor(ctx, e, state, &config, x, y, team, eff);
+            advanced::update_tractor(ctx, e, state, &config, x, y, team, eff, targets);
             return;
         }
         TurretKind::Continuous => {
-            advanced::update_continuous(ctx, e, state, &config, x, y, team, eff);
+            advanced::update_continuous(ctx, e, state, &config, x, y, team, eff, targets);
             return;
         }
         TurretKind::Laser => {
-            advanced::update_laser(ctx, e, state, &config, x, y, team, eff);
+            advanced::update_laser(ctx, e, state, &config, x, y, team, eff, targets);
+            return;
+        }
+        TurretKind::Build => {
+            update_build(ctx, e, state, &config, x, y, eff);
             return;
         }
         _ => {}
@@ -1046,7 +1214,7 @@ fn update_turret(ctx: &mut CombatCtx<'_>, e: Entity, state: &mut TurretState) {
     // Target acquisition on the interval timer.
     state.target_timer -= 1.0;
     if state.target_timer <= 0.0 {
-        find_target(ctx, e, state, team, x, y);
+        find_target(ctx, e, state, team, x, y, targets);
         state.target_timer = config.target_interval;
     }
     if state.target.is_none() {
@@ -1120,6 +1288,76 @@ fn update_shooting(ctx: &mut CombatCtx<'_>, e: Entity, state: &mut TurretState) 
         let reload = state.config.reload.max(0.0001);
         state.reload_counter %= reload;
     }
+}
+
+/// `BuildTurretBuild.updateTile` (plan 10 §3.8): follow queued build plans and
+/// drive the target `ConstructBuild`'s progress through plan 07's
+/// [`ConstructState`]. Placement finalisation stays with plan 07
+/// (`BuildHarness::construct_tick`); this is the proxy-unit `updateBuildLogic`
+/// half.
+fn update_build(
+    ctx: &mut CombatCtx<'_>,
+    e: Entity,
+    state: &mut TurretState,
+    config: &TurretConfig,
+    x: f32,
+    y: f32,
+    eff: f32,
+) {
+    // Drop plans outside the grid (`Build.validPlace` is plan 07's).
+    state
+        .build_plans
+        .retain(|plan| ctx.grid.tiles.in_bounds(plan.x, plan.y));
+
+    // `unit.buildPlan() == null`: search the queue for the first plan in range.
+    if state.build_target.is_none() {
+        let range2 = config.range * config.range;
+        state.build_target = state
+            .build_plans
+            .iter()
+            .find(|plan| {
+                let px = plan.x as f32 * crate::world::block::TILE_SIZE;
+                let py = plan.y as f32 * crate::world::block::TILE_SIZE;
+                let dx = px - x;
+                let dy = py - y;
+                dx * dx + dy * dy <= range2
+            })
+            .map(|plan| (plan.x, plan.y));
+    }
+
+    let mut actively_building = false;
+    if let Some((tx, ty)) = state.build_target {
+        let build = ctx.grid.tiles.get(tx, ty).build;
+        if let Some(entity) = build
+            && let Some(mut construct) = ctx.world.get_mut::<ConstructState>(entity)
+        {
+            construct.last_builder = Some(e);
+            let done = construct.advance_construct(config.build_speed * eff);
+            actively_building = true;
+            if done {
+                state
+                    .build_plans
+                    .retain(|plan| !(plan.x == tx && plan.y == ty));
+                state.build_target = None;
+            }
+        } else {
+            // Target gone/invalid: discard the plan and retry next tick.
+            state
+                .build_plans
+                .retain(|plan| !(plan.x == tx && plan.y == ty));
+            state.build_target = None;
+        }
+    }
+
+    // `warmup = Mathf.lerpDelta(warmup, unit.activelyBuilding() ? efficiency : 0, 0.1)`.
+    state.build_warmup = lerp_delta(
+        state.build_warmup,
+        if actively_building { eff } else { 0.0 },
+        0.1,
+    );
+    state.is_shooting = actively_building;
+    state.was_shooting = actively_building;
+    state.any = actively_building;
 }
 
 /// `TurretBuild.shoot`.
@@ -1242,45 +1480,29 @@ fn shoot(ctx: &mut CombatCtx<'_>, e: Entity, state: &mut TurretState, bullet: Bu
     state.heat = 1.0;
 }
 
-/// `TurretBuild.findTarget` (closest enemy building/unit; plan 11 replaces the
-/// scan with `TargetQueries`).
-fn find_target(ctx: &CombatCtx<'_>, e: Entity, state: &mut TurretState, team: u8, x: f32, y: f32) {
-    let range = state.config.range;
-    let mut best: Option<(f32, Entity)> = None;
-    for entity_ref in ctx.world.iter_entities() {
-        let other = entity_ref.id();
-        if other == e {
-            continue;
-        }
-        let is_unit = entity_ref.contains::<crate::entities::comp::Unit>();
-        let is_building = entity_ref.contains::<crate::entities::comp::Building>();
-        if !is_unit && !is_building {
-            continue;
-        }
-        if (is_unit && !state.config.target_air) || (is_building && !state.config.target_ground) {
-            continue;
-        }
-        if !entity_ref.contains::<Health>() {
-            continue;
-        }
-        if entity_ref.get::<TeamComp>().map(|t| t.team) == Some(team) {
-            continue;
-        }
-        let Some(pos) = entity_ref.get::<Pos>() else {
-            continue;
-        };
-        let dst2 = (pos.x - x).powi(2) + (pos.y - y).powi(2);
-        if dst2 > range * range {
-            continue;
-        }
-        let better = best.is_none_or(|(current, current_entity)| {
-            dst2 < current || (dst2 == current && other.index() < current_entity.index())
-        });
-        if better {
-            best = Some((dst2, other));
-        }
-    }
-    state.target = best.map(|(_, entity)| entity);
+/// `TurretBuild.findTarget` via plan 11's [`TargetQueries`] (plan 10 §3.8).
+#[allow(clippy::too_many_arguments)]
+fn find_target(
+    ctx: &CombatCtx<'_>,
+    e: Entity,
+    state: &mut TurretState,
+    team: u8,
+    x: f32,
+    y: f32,
+    targets: &TargetQueries,
+) {
+    let config = &state.config;
+    state.target = targets.closest_target(
+        ctx.world,
+        team,
+        x,
+        y,
+        config.range,
+        config.target_air,
+        config.target_ground,
+        config.target_blocks,
+    );
+    let _ = e;
     if let Some(target) = state.target {
         state.target_pos = position(ctx.world, target).unwrap_or((x, y));
     }
@@ -1514,5 +1736,69 @@ mod tests {
             0,
             "activation timer blocks fire"
         );
+    }
+
+    #[test]
+    fn payload_ammo_accept_and_consume() {
+        let mut harness = CombatHarness::new(48, 16, 7);
+        let wall = harness.content().block_id("copper-wall").expect("wall");
+        // Target at tile 10,8; turret at tile 4,8.
+        assert!(harness.place(10, 8, wall, 0, true));
+        let (tx, ty) = CombatHarness::tile_center(4, 8);
+        let turret = harness
+            .spawn_test_turret("test-payload", tx, ty, 1)
+            .expect("payload turret");
+        let payload = crate::world::PayloadRef {
+            entity: None,
+            content: wall.raw(),
+            is_block: true,
+        };
+        assert!(accept_payload(&harness.build.world, turret, payload));
+        for _ in 0..3 {
+            handle_payload(&mut harness.build.world, turret, payload);
+        }
+        // A fourth payload is rejected at the capacity of 3.
+        assert!(!accept_payload(&harness.build.world, turret, payload));
+        let hp_before = harness.building_health_at(10, 8);
+        for _ in 0..80 {
+            harness.tick();
+        }
+        let state = harness.build.world.get::<TurretState>(turret).unwrap();
+        assert!(state.total_shots > 0, "payload turret fired");
+        assert!(state.total_ammo < 3, "payload ammo consumed");
+        assert!(
+            harness.building_health_at(10, 8) < hp_before,
+            "payload bullet damaged target"
+        );
+    }
+
+    #[test]
+    fn build_turret_advances_construction() {
+        let mut harness = CombatHarness::new(48, 16, 7);
+        let wall = harness.content().block_id("copper-wall").expect("wall");
+        // Non-instant placement creates a plan-07 construction at the tile.
+        assert!(harness.place(10, 8, wall, 0, false));
+        let construct = harness.build_at(10, 8).expect("construct entity");
+        let (tx, ty) = CombatHarness::tile_center(4, 8);
+        let turret = harness
+            .spawn_test_turret("build-tower", tx, ty, 1)
+            .expect("build tower");
+        assert!(add_build_plan(
+            &mut harness.build.world,
+            turret,
+            BuildPlan::place(10, 8, 0, wall)
+        ));
+        for _ in 0..20 {
+            harness.tick();
+        }
+        let progress = harness
+            .build
+            .world
+            .get::<ConstructState>(construct)
+            .expect("construct state")
+            .progress;
+        assert!(progress > 0.0, "build turret advanced the construct");
+        let state = harness.build.world.get::<TurretState>(turret).unwrap();
+        assert!(state.build_warmup > 0.0, "build warmup ramped");
     }
 }

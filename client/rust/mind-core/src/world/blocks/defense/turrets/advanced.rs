@@ -23,12 +23,17 @@ use std::collections::BTreeMap;
 use bevy_ecs::entity::Entity;
 
 use crate::combat::bullet::{Bullet, BulletSpawn, CombatCtx};
+use crate::combat::targeting::TargetQueries;
 use crate::content::registries::bullets::BulletDef;
 use crate::content::registries::units::weapon::ShootPatternSpec;
 use crate::content::{BulletId, BulletKind, ContentRegistry, LiquidId, StatusId};
-use crate::entities::comp::{Health, Pos, TeamComp, Unit, Vel};
+use crate::entities::comp::{Health, Pos, TeamComp, Vel};
+use crate::world::blocks::payloads::PayloadKind;
 
-use super::{BeamEntry, ItemAmmo, LiquidAmmo, TurretAmmo, TurretConfig, TurretKind, TurretState};
+use super::{
+    BeamEntry, ItemAmmo, LiquidAmmo, PayloadAmmo, PayloadContent, TurretAmmo, TurretConfig,
+    TurretKind, TurretState,
+};
 
 // ---------------------------------------------------------------------------
 // Content: remaining vanilla turret ammo (`Blocks.java`)
@@ -591,23 +596,292 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
         def.building_damage_multiplier = 0.2;
     });
 
+    // `titan` (`ArtilleryBulletType`, Erekir shell turret).
+    add("titan_thorium", BulletKind::Artillery, &|def| {
+        def.speed = 2.5;
+        def.lifetime = 140.0;
+        def.damage = 350.0;
+        def.splash_damage = 350.0;
+        def.splash_damage_radius = 65.0;
+        def.scaled_splash_damage = true;
+        def.knockback = 2.0;
+        def.ammo_multiplier = 1.0;
+        def.building_damage_multiplier = 0.3;
+        def.width = 17.0;
+        def.height = 19.0;
+    });
+    add("titan_carbide", BulletKind::Artillery, &|def| {
+        def.speed = 3.25;
+        def.lifetime = 140.0;
+        def.damage = 700.0;
+        def.splash_damage = 750.0;
+        def.splash_damage_radius = 36.0;
+        def.scaled_splash_damage = true;
+        def.knockback = 3.0;
+        def.ammo_multiplier = 1.0;
+        def.reload_multiplier = 0.8;
+        def.building_damage_multiplier = 0.2;
+        def.width = 15.0;
+        def.height = 28.0;
+        def.frag_bullets = 12;
+        def.frag_life_min = 1.5;
+    });
+    add("titan_carbide_frag", BulletKind::Artillery, &|def| {
+        def.speed = 0.5;
+        def.lifetime = 50.0;
+        def.damage = 50.0;
+        def.splash_damage = 50.0;
+        def.splash_damage_radius = 22.0;
+        def.scaled_splash_damage = true;
+        def.pierce_armor = true;
+        def.building_damage_multiplier = 0.25;
+        def.width = 8.0;
+        def.height = 12.0;
+    });
+    add("titan_oxide", BulletKind::Artillery, &|def| {
+        def.speed = 2.5;
+        def.lifetime = 190.0;
+        def.damage = 300.0;
+        def.splash_damage = 180.0;
+        def.splash_damage_radius = 110.0;
+        def.scaled_splash_damage = true;
+        def.reload_multiplier = 0.7;
+        def.knockback = 2.0;
+        def.ammo_multiplier = 1.0;
+        def.building_damage_multiplier = 0.25;
+        def.width = 17.0;
+        def.height = 19.0;
+    });
+    add("titan_oxide_frag", BulletKind::Empty, &|def| {
+        def.lifetime = 150.0;
+        def.bullet_interval = 20.0;
+        def.interval_bullets = 1;
+    });
+    add("titan_oxide_interval", BulletKind::Empty, &|def| {
+        def.splash_damage = 15.0;
+        def.splash_damage_radius = 90.0;
+        def.collides = false;
+        def.collides_air = false;
+        def.instant_disappear = true;
+    });
+
+    // `disperse` (`BasicBulletType`, anti-air flak).
+    add("disperse_tungsten", BulletKind::Basic, &|def| {
+        def.speed = 8.5;
+        def.lifetime = 34.0;
+        def.damage = 65.0;
+        def.ammo_multiplier = 3.0;
+        def.width = 16.0;
+        def.height = 16.0;
+        def.collides_ground = false;
+        def.collides_tiles = false;
+        def.shrink_y = 0.3;
+    });
+    add("disperse_thorium", BulletKind::Basic, &|def| {
+        def.speed = 9.5;
+        def.lifetime = 34.0;
+        def.damage = 90.0;
+        def.ammo_multiplier = 1.0;
+        def.reload_multiplier = 0.85;
+        def.pierce_cap = 2;
+        def.width = 16.0;
+        def.height = 16.0;
+        def.collides_ground = false;
+        def.collides_tiles = false;
+        def.shrink_y = 0.3;
+    });
+    add("disperse_silicon", BulletKind::Basic, &|def| {
+        def.speed = 9.0;
+        def.lifetime = 34.0;
+        def.damage = 37.0;
+        def.ammo_multiplier = 4.0;
+        def.homing_power = 0.045;
+        def.width = 16.0;
+        def.height = 16.0;
+        def.collides_ground = false;
+        def.collides_tiles = false;
+        def.shrink_y = 0.3;
+    });
+    add("disperse_surge", BulletKind::Basic, &|def| {
+        def.speed = 6.0;
+        def.lifetime = 34.0;
+        def.damage = 65.0;
+        def.ammo_multiplier = 3.0;
+        def.reload_multiplier = 0.75;
+        def.lightning = 3;
+        def.lightning_length = 4;
+        def.lightning_length_rand = 3;
+        def.lightning_damage = 18.0;
+        def.width = 16.0;
+        def.height = 16.0;
+        def.collides_ground = false;
+        def.collides_tiles = false;
+        def.shrink_y = 0.3;
+        def.bullet_interval = 4.0;
+        def.interval_bullets = 1;
+    });
+    add("disperse_surge_interval", BulletKind::Lightning, &|def| {
+        def.lightning_length = 2;
+        def.lightning_length_rand = 4;
+        def.lightning_cone = 30.0;
+        def.lightning_damage = 20.0;
+        def.collides = false;
+        def.collides_air = false;
+        def.collides_ground = false;
+        def.hittable = false;
+        def.instant_disappear = true;
+        def.lifetime = 1.0;
+    });
+
+    // `afflict` (`BasicBulletType`, Erekir surge orb).
+    add("afflict_orb", BulletKind::Basic, &|def| {
+        def.speed = 5.0;
+        def.lifetime = 80.0;
+        def.damage = 180.0;
+        def.pierce_cap = 2;
+        def.building_damage_multiplier = 0.5;
+        def.width = 16.0;
+        def.height = 16.0;
+        def.shrink_x = 0.0;
+        def.shrink_y = 0.0;
+        def.bullet_interval = 3.0;
+        def.interval_bullets = 2;
+        def.interval_angle = 180.0;
+        def.interval_spread = 300.0;
+        def.interval_random_spread = 20.0;
+        def.frag_bullets = 20;
+        def.frag_velocity_min = 0.5;
+        def.frag_velocity_max = 1.2;
+        def.frag_life_min = 0.5;
+    });
+    add("afflict_frag", BulletKind::Basic, &|def| {
+        def.speed = 3.0;
+        def.lifetime = 28.0;
+        def.damage = 35.0;
+        def.width = 9.0;
+        def.height = 15.0;
+        def.hit_size = 5.0;
+        def.pierce_cap = 3;
+        def.pierce_building = true;
+        def.building_damage_multiplier = 0.3;
+        def.homing_power = 0.1;
+    });
+
+    // `lustre` (`PointLaserBulletType`, Erekir continuous beam).
+    add("lustre_laser", BulletKind::ContinuousLaser, &|def| {
+        def.speed = 0.0;
+        def.lifetime = 1.0;
+        def.damage = 210.0;
+        def.length = 250.0;
+        def.building_damage_multiplier = 0.3;
+        def.hit_size = 4.0;
+    });
+
+    // `smite` (`BasicBulletType`, piercing surge orb + lightning).
+    add("smite_orb", BulletKind::Basic, &|def| {
+        def.speed = 7.0;
+        def.damage = 250.0;
+        def.width = 17.0;
+        def.height = 21.0;
+        def.hit_size = 8.0;
+        def.ammo_multiplier = 1.0;
+        def.pierce_cap = 4;
+        def.pierce = true;
+        def.pierce_building = true;
+        def.building_damage_multiplier = 0.3;
+        def.bullet_interval = 3.0;
+        def.interval_bullets = 1;
+    });
+    add("smite_lightning", BulletKind::Lightning, &|def| {
+        def.speed = 0.0001;
+        def.lifetime = 10.0;
+        def.damage = 30.0;
+        def.lightning_length = 5;
+        def.lightning_length_rand = 10;
+        def.collides_air = false;
+        def.building_damage_multiplier = 0.25;
+    });
+
+    // `malign` (`FlakBulletType`, homing flak + laser frag).
+    add("malign_flak", BulletKind::Flak, &|def| {
+        def.speed = 8.0;
+        def.damage = 70.0;
+        def.lifetime = 40.0;
+        def.width = 12.0;
+        def.height = 22.0;
+        def.hit_size = 7.0;
+        def.ammo_multiplier = 1.0;
+        def.building_damage_multiplier = 0.3;
+        def.homing_power = 0.17;
+        def.homing_delay = 19.0;
+        def.homing_range = 160.0;
+        def.explode_range = 100.0;
+        def.explode_delay = 0.0;
+        def.flak_interval = 20.0;
+        def.bullet_interval = 20.0;
+        def.interval_bullets = 1;
+        def.frag_bullets = 1;
+        def.frag_spread = 0.0;
+        def.frag_random_spread = 0.0;
+        def.collides_ground = true;
+    });
+    add("malign_lightning", BulletKind::Lightning, &|def| {
+        def.speed = 0.0001;
+        def.lifetime = 10.0;
+        def.damage = 18.0;
+        def.lightning_length = 35;
+        def.lightning_length_rand = 5;
+        def.lightning_cone = 15.0;
+    });
+    add("malign_frag", BulletKind::Laser, &|def| {
+        def.speed = 0.0;
+        def.lifetime = 22.0;
+        def.damage = 65.0;
+        def.length = 120.0;
+        def.pierce_cap = 2;
+        def.building_damage_multiplier = 0.25;
+        def.hit_size = 4.0;
+    });
+
     // Cross-references (child defs must exist first).
-    for (parent, child) in [
+    for (parent_name, child_name) in [
         ("scatter_glass", "scatter_frag"),
         ("cyclone_metaglass", "cyclone_frag"),
         ("cyclone_plastanium", "cyclone_plast_frag"),
         ("breach_carbide", "breach_carbide_frag"),
+        ("titan_carbide", "titan_carbide_frag"),
+        ("titan_oxide", "titan_oxide_frag"),
+        ("titan_oxide_frag", "titan_oxide_interval"),
+        ("disperse_surge", "disperse_surge_interval"),
+        ("afflict_orb", "afflict_frag"),
+        ("smite_orb", "smite_lightning"),
+        ("malign_flak", "malign_frag"),
+        ("malign_flak", "malign_lightning"),
     ] {
-        if let (Some(parent), Some(child)) = (names.get(parent), names.get(child))
+        if let (Some(parent), Some(child)) = (names.get(parent_name), names.get(child_name))
             && let Some(def) = content.bullet_mut(*parent)
         {
-            def.frag_bullet = Some(*child);
+            if parent_name == "afflict_orb" {
+                def.frag_bullet = Some(*child);
+                def.interval_bullet = Some(*child);
+            } else if parent_name == "titan_oxide" {
+                def.frag_bullet = Some(*child);
+            } else if parent_name == "malign_flak" {
+                // First pass sets `frag_bullet`, second sets `interval_bullet`.
+                if def.frag_bullet.is_none() {
+                    def.frag_bullet = Some(*child);
+                } else {
+                    def.interval_bullet = Some(*child);
+                }
+            } else {
+                def.interval_bullet = Some(*child);
+            }
         }
     }
 
     // Status/liquid references resolve against the plan-02 registries (the
     // closure above cannot borrow `content` immutably).
-    let status_refs: [(&str, &str); 9] = [
+    let status_refs: [(&str, &str); 11] = [
         ("salvo_pyratite", "burning"),
         ("swarmer_blast", "blasted"),
         ("swarmer_pyratite", "burning"),
@@ -617,6 +891,8 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
         ("cyclone_blast", "blasted"),
         ("spectre_pyratite", "burning"),
         ("meltdown_laser", "melting"),
+        ("titan_thorium", "blasted"),
+        ("titan_oxide", "corroded"),
     ];
     for (bullet_name, status_name) in status_refs {
         if let (Some(id), Some(status)) = (
@@ -626,6 +902,11 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
         {
             def.status = status;
         }
+    }
+    if let Some(id) = names.get("titan_oxide").copied()
+        && let Some(def) = content.bullet_mut(id)
+    {
+        def.status_duration = 60.0 * 8.0;
     }
     let liquid_refs: [(&str, &str); 8] = [
         ("wave_water", "water"),
@@ -707,6 +988,7 @@ pub fn base_config(kind: TurretKind, ammo: TurretAmmo) -> TurretConfig {
         status_chance: 0.0,
         shoot_duration: 0.0,
         firing_move_fract: 1.0,
+        build_speed: 1.0,
     }
 }
 
@@ -1086,6 +1368,162 @@ pub fn config_for(
             c.coolant_multiplier = 2.0;
             Some(c)
         }
+        // `titan` (`ItemTurret`, Erekir artillery).
+        "titan" => {
+            let mut c = base_config(
+                TurretKind::Item,
+                TurretAmmo::Item(vec![
+                    item_ammo("thorium", "titan_thorium")?,
+                    item_ammo("carbide", "titan_carbide")?,
+                    item_ammo("oxide", "titan_oxide")?,
+                ]),
+            );
+            c.range = 390.0;
+            c.reload = 60.0 * 2.3;
+            c.max_ammo = 12;
+            c.ammo_per_shot = 4;
+            c.consume_ammo_once = true;
+            c.target_air = false;
+            c.recoil = 1.0;
+            c.recoil_time = 0.0;
+            c.rotate_speed = 1.4;
+            c.min_warmup = 0.85;
+            c.warmup_maintain_time = 120.0;
+            c.shoot_warmup_speed = 0.08;
+            c.shoot_y = 7.0;
+            c.coolant_amount = 30.0 / 60.0;
+            c.coolant_multiplier = 3.75;
+            c.target_interval = 40.0;
+            Some(c)
+        }
+        // `disperse` (`ItemTurret`, anti-air flak).
+        "disperse" => {
+            let mut c = base_config(
+                TurretKind::Item,
+                TurretAmmo::Item(vec![
+                    item_ammo("tungsten", "disperse_tungsten")?,
+                    item_ammo("thorium", "disperse_thorium")?,
+                    item_ammo("silicon", "disperse_silicon")?,
+                    item_ammo("surge-alloy", "disperse_surge")?,
+                ]),
+            );
+            c.range = 310.0;
+            c.reload = 9.0;
+            c.consume_ammo_once = true;
+            c.shoot_y = 15.0;
+            c.rotate_speed = 5.0;
+            c.shoot_cone = 30.0;
+            c.target_ground = false;
+            c.inaccuracy = 8.0;
+            c.shoot_warmup_speed = 0.08;
+            c.coolant_amount = 20.0 / 60.0;
+            c.coolant_multiplier = 6.25;
+            c.shoot = ShootPatternSpec::alternate(4, 0.0, 4.7, 4);
+            Some(c)
+        }
+        // `afflict` (`PowerTurret`, Erekir heat-gated surge orb).
+        "afflict" => {
+            let mut c = base_config(TurretKind::Power, power("afflict_orb")?);
+            c.range = 368.0;
+            c.reload = 50.0;
+            c.cooldown_time = 100.0;
+            c.heat_requirement = 20.0;
+            c.max_heat_efficiency = 1.0;
+            c.recoil = 3.0;
+            c.rotate_speed = 1.5;
+            c.shoot_cone = 20.0;
+            c.inaccuracy = 1.0;
+            c.shoot_y = 4.0;
+            c.target_interval = 40.0;
+            Some(c)
+        }
+        // `lustre` (`ContinuousTurret`, Erekir beam).
+        "lustre" => {
+            let mut c = base_config(TurretKind::Continuous, power("lustre_laser")?);
+            c.range = 250.0;
+            c.rotate_speed = 0.9;
+            c.aim_change_speed = 0.9;
+            c.shoot_cone = 360.0;
+            c.shoot_warmup_speed = 0.08;
+            c.shoot_y = 0.5;
+            c.scale_damage_efficiency = true;
+            Some(c)
+        }
+        // `smite` (`ItemTurret`, piercing surge orb + helix).
+        "smite" => {
+            let mut c = base_config(
+                TurretKind::Item,
+                TurretAmmo::Item(vec![item_ammo("surge-alloy", "smite_orb")?]),
+            );
+            c.range = 300.0;
+            c.reload = 100.0;
+            c.ammo_per_shot = 2;
+            c.consume_ammo_once = true;
+            c.min_warmup = 0.99;
+            c.warmup_maintain_time = 120.0;
+            c.shoot_warmup_speed = 0.04;
+            c.coolant_amount = 15.0 / 60.0;
+            c.coolant_multiplier = 15.0;
+            c.recoil = 2.0;
+            c.shoot_y = 15.0;
+            c.rotate_speed = 1.5;
+            c.shoot_cone = 30.0;
+            c.shoot = ShootPatternSpec::multi(
+                ShootPatternSpec::alternate(5, 0.0, 6.27, 5),
+                vec![ShootPatternSpec::helix(4.0, 3.0)],
+            );
+            Some(c)
+        }
+        // `malign` (`PowerTurret`, Erekir homing flak).
+        "malign" => {
+            let mut c = base_config(TurretKind::Power, power("malign_flak")?);
+            c.range = 410.0;
+            c.reload = 3.5;
+            c.heat_requirement = 144.0;
+            c.max_heat_efficiency = 1.0;
+            c.warmup_maintain_time = 120.0;
+            c.min_warmup = 0.96;
+            c.shoot_warmup_speed = 0.08;
+            c.velocity_rnd = 0.15;
+            c.recoil = 0.5;
+            c.recoil_time = 30.0;
+            c.rotate_speed = 2.6;
+            c.shoot_cone = 100.0;
+            c.shoot_y = 20.0;
+            c.shoot = ShootPatternSpec::summon(0.0, 0.0, 11.0, 20.0);
+            Some(c)
+        }
+        // `build-tower` (`BuildTurret`): proxy build-plan follower (plan 10 M6).
+        "build-tower" => {
+            let mut c = base_config(TurretKind::Build, TurretAmmo::Item(Vec::new()));
+            c.range = 200.0;
+            c.rotate_speed = 10.0;
+            c.build_speed = 1.5;
+            c.target_interval = 15.0;
+            Some(c)
+        }
+        // Harness fixture: `PayloadAmmoTurret` fed a build payload fires `fuse`.
+        "test-payload" => {
+            let block = content.block_id("copper-wall")?;
+            let ammo = vec![PayloadAmmo {
+                content: PayloadContent {
+                    kind: PayloadKind::Build,
+                    id: block.raw(),
+                },
+                bullet: bullet("fuse")?,
+            }];
+            let mut c = base_config(TurretKind::PayloadAmmo, TurretAmmo::Payload(ammo));
+            c.range = 160.0;
+            c.reload = 20.0;
+            c.max_ammo = 3;
+            c.ammo_per_shot = 1;
+            c.consume_ammo_once = true;
+            c.rotate_speed = 10.0;
+            c.shoot_cone = 15.0;
+            c.target_interval = 20.0;
+            c.shoot_warmup_speed = 0.1;
+            Some(c)
+        }
         // Harness fixture: a continuous beam using the `continuous` fixture
         // bullet (mirrors `meltdown`'s class, no vanilla ammo port yet).
         "test-continuous" => {
@@ -1243,10 +1681,11 @@ pub fn update_tractor(
     y: f32,
     team: u8,
     eff: f32,
+    targets: &TargetQueries,
 ) {
     state.retarget_timer -= 1.0;
     if state.retarget_timer <= 0.0 {
-        state.unit_target = find_enemy_unit(ctx, x, y, config.range, team, config);
+        state.unit_target = find_enemy_unit(ctx, targets, x, y, config.range, team, config);
         state.retarget_timer = config.retarget_time;
     }
     let Some(target) = state.unit_target else {
@@ -1312,8 +1751,13 @@ pub fn update_tractor(
 }
 
 /// Closest enemy unit matching the target flags (stable tie-break).
+///
+/// Plan 10 §3.7: unit search goes through plan 11's [`TargetQueries`] device
+/// snapshot (air/ground cannot be distinguished until unit type flags land, so
+/// a unit is targeted when either flag is enabled).
 fn find_enemy_unit(
     ctx: &CombatCtx<'_>,
+    targets: &TargetQueries,
     x: f32,
     y: f32,
     range: f32,
@@ -1323,31 +1767,7 @@ fn find_enemy_unit(
     if !config.target_air && !config.target_ground {
         return None;
     }
-    let range2 = range * range;
-    let mut best: Option<(f32, Entity)> = None;
-    for entity_ref in ctx.world.iter_entities() {
-        let other = entity_ref.id();
-        if entity_ref.get::<Unit>().is_none() {
-            continue;
-        }
-        if entity_ref.get::<TeamComp>().map(|t| t.team) == Some(team) {
-            continue;
-        }
-        let Some(pos) = entity_ref.get::<Pos>() else {
-            continue;
-        };
-        let dst2 = (pos.x - x).powi(2) + (pos.y - y).powi(2);
-        if dst2 > range2 {
-            continue;
-        }
-        let better = best.is_none_or(|(current, current_entity)| {
-            dst2 < current || (dst2 == current && other.index() < current_entity.index())
-        });
-        if better {
-            best = Some((dst2, other));
-        }
-    }
-    best.map(|(_, entity)| entity)
+    targets.closest_unit(ctx.world, team, x, y, range)
 }
 
 /// `ContinuousTurretBuild.updateTile` (M6): keep-alive beam that follows the aim.
@@ -1361,6 +1781,7 @@ pub fn update_continuous(
     y: f32,
     team: u8,
     eff: f32,
+    targets: &TargetQueries,
 ) {
     // Drop dead/foreign beams (`bullets.removeAll(...)`).
     state
@@ -1429,7 +1850,7 @@ pub fn update_continuous(
     // Target acquisition (`TurretBuild` interval timer).
     state.target_timer -= 1.0;
     if state.target_timer <= 0.0 {
-        super::find_target(ctx, e, state, team, x, y);
+        super::find_target(ctx, e, state, team, x, y, targets);
         state.target_timer = config.target_interval;
     }
     if state.target.is_none() {
@@ -1457,6 +1878,7 @@ pub fn update_laser(
     y: f32,
     team: u8,
     eff: f32,
+    targets: &TargetQueries,
 ) {
     state
         .bullets
@@ -1535,7 +1957,7 @@ pub fn update_laser(
 
     state.target_timer -= 1.0;
     if state.target_timer <= 0.0 {
-        super::find_target(ctx, e, state, team, x, y);
+        super::find_target(ctx, e, state, team, x, y, targets);
         state.target_timer = config.target_interval;
     }
     if state.target.is_none() {
@@ -1639,6 +2061,14 @@ mod tests {
             "meltdown_laser",
             "breach_carbide",
             "diffuse_oxide",
+            "titan_thorium",
+            "titan_carbide",
+            "titan_oxide",
+            "disperse_surge",
+            "afflict_orb",
+            "lustre_laser",
+            "smite_orb",
+            "malign_flak",
         ] {
             assert!(harness.bullet_id(name).is_some(), "missing {name}");
         }
@@ -1668,6 +2098,14 @@ mod tests {
             "meltdown",
             "parallax",
             "segment",
+            "titan",
+            "disperse",
+            "afflict",
+            "lustre",
+            "smite",
+            "malign",
+            "build-tower",
+            "test-payload",
         ] {
             assert!(
                 super::super::config_for(harness.content(), name, harness.names_map()).is_some(),
