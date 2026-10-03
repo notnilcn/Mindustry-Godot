@@ -84,3 +84,13 @@ offset_right = 310.0
 offset_bottom = 660.0
 mouse_filter = 2
 text = "audio: -"
+
+; Plan-19 M3 inspector `Editor` tab: tool/brush/selection/op stack.
+[node name="Editor" type="Label" parent="."]
+layout_mode = 1
+offset_left = 10.0
+offset_top = 668.0
+offset_right = 310.0
+offset_bottom = 760.0
+mouse_filter = 2
+text = "editor: -"

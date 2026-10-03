@@ -48,6 +48,11 @@ impl OperationStack {
         self.stack.is_empty()
     }
 
+    /// Retained operations in insertion order (plan 19 M3 dev/MCP op log).
+    pub fn ops(&self) -> &[DrawOperation] {
+        &self.stack
+    }
+
     /// Pushes an operation, dropping any redo tail (`OperationStack.add`).
     pub fn add(&mut self, action: DrawOperation) {
         let len = self.stack.len() as i32;

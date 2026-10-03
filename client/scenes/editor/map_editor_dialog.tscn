@@ -1,0 +1,185 @@
+; SPDX-License-Identifier: GPL-3.0-only
+;
+; MapEditorDialog (plan 19 §3.10): the editor shell. Static toolbar/team/brush/
+; show-toggle/palette structure is declared here (tscn-first, editor-navigable);
+; map_editor_dialog.gd wires it to /root/Spine/MindEditor. Block rows and team
+; buttons are data-driven and built in code.
+;
+; Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
+; Source: core/src/mindustry/editor/MapEditorDialog.java
+
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/editor/map_view.tscn" id="1_view"]
+[ext_resource type="Script" path="res://scenes/editor/map_editor_dialog.gd" id="2_script"]
+
+[node name="MapEditorDialog" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1
+visible = false
+script = ExtResource("2_script")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.03, 0.04, 0.06, 0.94)
+
+[node name="MapView" parent="." instance=ExtResource("1_view")]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 176.0
+offset_right = -288.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="LeftTools" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 9
+anchor_bottom = 1.0
+offset_left = 8.0
+offset_top = 8.0
+offset_right = 168.0
+offset_bottom = -8.0
+grow_vertical = 2
+theme_override_constants/separation = 6
+
+[node name="Title" type="Label" parent="LeftTools"]
+layout_mode = 2
+text = "Editor"
+
+[node name="ToolGrid" type="GridContainer" parent="LeftTools"]
+layout_mode = 2
+columns = 3
+
+[node name="GridButton" type="Button" parent="LeftTools/ToolGrid"]
+layout_mode = 2
+text = "grid"
+
+[node name="ZoomButton" type="Button" parent="LeftTools/ToolGrid"]
+layout_mode = 2
+text = "zoom"
+
+[node name="UndoButton" type="Button" parent="LeftTools/ToolGrid"]
+layout_mode = 2
+text = "undo"
+
+[node name="RedoButton" type="Button" parent="LeftTools/ToolGrid"]
+layout_mode = 2
+text = "redo"
+
+[node name="PickButton" type="Button" parent="LeftTools/ToolGrid"]
+layout_mode = 2
+text = "pick"
+
+[node name="LineButton" type="Button" parent="LeftTools/ToolGrid"]
+layout_mode = 2
+text = "line"
+
+[node name="PencilButton" type="Button" parent="LeftTools/ToolGrid"]
+layout_mode = 2
+text = "pencil"
+
+[node name="EraserButton" type="Button" parent="LeftTools/ToolGrid"]
+layout_mode = 2
+text = "eraser"
+
+[node name="FillButton" type="Button" parent="LeftTools/ToolGrid"]
+layout_mode = 2
+text = "fill"
+
+[node name="SprayButton" type="Button" parent="LeftTools/ToolGrid"]
+layout_mode = 2
+text = "spray"
+
+[node name="RotateButton" type="Button" parent="LeftTools/ToolGrid"]
+layout_mode = 2
+text = "rotate"
+
+[node name="TeamLabel" type="Label" parent="LeftTools"]
+layout_mode = 2
+text = "Team"
+
+[node name="TeamRow" type="HBoxContainer" parent="LeftTools"]
+layout_mode = 2
+
+[node name="BrushLabel" type="Label" parent="LeftTools"]
+layout_mode = 2
+text = "Brush"
+
+[node name="BrushSlider" type="HSlider" parent="LeftTools"]
+layout_mode = 2
+min_value = 0.0
+max_value = 8.0
+step = 1.0
+value = 0.0
+
+[node name="ShowChecks" type="VBoxContainer" parent="LeftTools"]
+layout_mode = 2
+
+[node name="ShowBlocks" type="CheckBox" parent="LeftTools/ShowChecks"]
+layout_mode = 2
+button_pressed = true
+text = "blocks"
+
+[node name="ShowTerrain" type="CheckBox" parent="LeftTools/ShowChecks"]
+layout_mode = 2
+button_pressed = true
+text = "terrain"
+
+[node name="ShowFloor" type="CheckBox" parent="LeftTools/ShowChecks"]
+layout_mode = 2
+button_pressed = true
+text = "floor"
+
+[node name="RightPalette" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 11
+anchor_left = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -280.0
+offset_top = 8.0
+offset_right = -8.0
+offset_bottom = -8.0
+grow_horizontal = 0
+grow_vertical = 2
+theme_override_constants/separation = 6
+
+[node name="PaletteTitle" type="Label" parent="RightPalette"]
+layout_mode = 2
+text = "Blocks"
+
+[node name="SearchField" type="LineEdit" parent="RightPalette"]
+layout_mode = 2
+placeholder_text = "search"
+
+[node name="SelectedLabel" type="Label" parent="RightPalette"]
+layout_mode = 2
+autowrap_mode = 2
+text = "selected: -"
+
+[node name="ConfigPanel" type="VBoxContainer" parent="RightPalette"]
+visible = false
+layout_mode = 2
+
+[node name="ConfigLabel" type="Label" parent="RightPalette/ConfigPanel"]
+layout_mode = 2
+text = "config"
+
+[node name="BlockList" type="ItemList" parent="RightPalette"]
+layout_mode = 2
+size_flags_vertical = 3
+same_column_width = true
+fixed_column_width = 260
