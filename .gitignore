@@ -28,6 +28,7 @@ client/android/
 # Logs and local state
 *.log
 last_log.txt
+out/
 
 # Editor workspace state
 .obsidian/

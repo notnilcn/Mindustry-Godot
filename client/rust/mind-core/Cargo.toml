@@ -53,3 +53,7 @@ msav-import = []
 # Plan 05 M8 §7.4: installs a counting global allocator so the harness can
 # prove steady-state ticks are allocation-free. Default-off (test/bench only).
 alloc-audit = []
+# Plan 23 M4: per-tick building-update cost attribution (`world::update::profile`).
+# Default-off; the `mind-headless` bench harness opts in with `--features
+# profile-build` so no instrumentation is compiled into normal/release builds.
+profile-build = []

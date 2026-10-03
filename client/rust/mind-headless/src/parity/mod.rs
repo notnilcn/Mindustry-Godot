@@ -168,6 +168,7 @@ pub fn run(cli: &Cli, command: &ParityCommand) -> Result<i32> {
             mutations,
             json,
         } => determinism::replay_fuzz(*seed, mutations, *json),
+        ParityCommand::Mirror { write, json, repo } => cmd_mirror(*write, *json, repo.as_deref()),
     }
 }
 
@@ -450,6 +451,34 @@ fn cmd_scenarios(json: bool, repo: Option<&Path>) -> Result<i32> {
     } else {
         EXIT_FAIL
     })
+}
+
+fn cmd_mirror(write: bool, json: bool, repo: Option<&Path>) -> Result<i32> {
+    let repo = find_repo(repo)?;
+    let problems = scenario::mirror(&repo, write)?;
+    let pass = problems.is_empty();
+    if json {
+        print_json(&serde_json::json!({
+            "format": 1,
+            "write": write,
+            "pass": pass,
+            "problems": problems,
+        }))?;
+    } else if write {
+        println!(
+            "parity mirror: materialized client/scenarios/ from scenarios/ -> {}",
+            if pass { "PASS" } else { "FAIL" }
+        );
+    } else {
+        println!(
+            "parity mirror: client/scenarios/ vs scenarios/ -> {}",
+            if pass { "PASS" } else { "FAIL" }
+        );
+        for problem in &problems {
+            println!("  - {problem}");
+        }
+    }
+    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
 }
 
 fn cmd_soak(

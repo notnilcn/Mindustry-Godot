@@ -57,21 +57,21 @@
       "pass": true,
       "problems": [],
       "note": null,
-      "count": 133
+      "count": 148
     },
     {
       "name": "golden_manifest",
       "pass": true,
       "problems": [],
       "note": null,
-      "count": 86
+      "count": 90
     },
     {
       "name": "bench_budgets",
       "pass": true,
       "problems": [],
       "note": null,
-      "count": 53
+      "count": 59
     },
     {
       "name": "mcp_catalog",

@@ -112,7 +112,7 @@
       "plan": "07",
       "measure": "blocks bench --profile buildings --buildings 2000 --ticks 3600 --json",
       "metric": "p50_us",
-      "value": null,
+      "value": 87.0,
       "budget": 600,
       "comparison": "lte"
     },
@@ -121,7 +121,7 @@
       "plan": "07",
       "measure": "blocks bench --profile buildings --buildings 2000 --ticks 3600 --json",
       "metric": "p99_us",
-      "value": null,
+      "value": 149.0,
       "budget": 1500,
       "comparison": "lte"
     },
@@ -157,7 +157,7 @@
       "plan": "08",
       "measure": "blocks bench --profile logistics --json",
       "metric": "p95_ms",
-      "value": null,
+      "value": 0.265,
       "budget": 0.35,
       "comparison": "lte"
     },
@@ -501,6 +501,60 @@
       "metric": "p95_ms",
       "value": null,
       "budget": 1.0,
+      "comparison": "lte"
+    },
+    {
+      "id": "editor_bench_p99",
+      "plan": "19",
+      "measure": "editor bench --json",
+      "metric": "p99_us",
+      "value": 29.076,
+      "budget": 250,
+      "comparison": "lte"
+    },
+    {
+      "id": "mp_checksum_p50",
+      "plan": "21",
+      "measure": "bench --scenario mp_checksum --ticks 2000",
+      "metric": "p50_us",
+      "value": 7.0,
+      "budget": 50,
+      "comparison": "lte"
+    },
+    {
+      "id": "mp_apply_p99",
+      "plan": "21",
+      "measure": "bench --scenario mp_apply --ticks 2000",
+      "metric": "p99_us",
+      "value": 1.0,
+      "budget": 25,
+      "comparison": "lte"
+    },
+    {
+      "id": "mp_relay_roundtrip_p99",
+      "plan": "21",
+      "measure": "bench --scenario mp_relay_roundtrip --ticks 2000",
+      "metric": "p99_us",
+      "value": 1.0,
+      "budget": 25,
+      "comparison": "lte"
+    },
+    {
+      "id": "mp_snapshot_bytes_p99",
+      "plan": "21",
+      "measure": "bench --scenario mp_snapshot_bytes --ticks 2000",
+      "metric": "p99_us",
+      "value": 2.0,
+      "budget": 100,
+      "comparison": "lte"
+    },
+    {
+      "id": "mp_plan_p99",
+      "plan": "21",
+      "measure": "bench --scenario mp_plan --ticks 2000",
+      "metric": "p99_us",
+      "value": 2.0,
+      "budget": 100,
       "comparison": "lte"
     }
   ],

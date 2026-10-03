@@ -435,6 +435,48 @@
       "metric": "p95_ms",
       "budget": 1.0,
       "comparison": "lte"
+    },
+    {
+      "id": "editor_bench_p99",
+      "plan": "19",
+      "measure": "editor bench --json",
+      "metric": "p99_us",
+      "budget": 250
+    },
+    {
+      "id": "mp_checksum_p50",
+      "plan": "21",
+      "measure": "bench --scenario mp_checksum --ticks 2000",
+      "metric": "p50_us",
+      "budget": 50
+    },
+    {
+      "id": "mp_apply_p99",
+      "plan": "21",
+      "measure": "bench --scenario mp_apply --ticks 2000",
+      "metric": "p99_us",
+      "budget": 25
+    },
+    {
+      "id": "mp_relay_roundtrip_p99",
+      "plan": "21",
+      "measure": "bench --scenario mp_relay_roundtrip --ticks 2000",
+      "metric": "p99_us",
+      "budget": 25
+    },
+    {
+      "id": "mp_snapshot_bytes_p99",
+      "plan": "21",
+      "measure": "bench --scenario mp_snapshot_bytes --ticks 2000",
+      "metric": "p99_us",
+      "budget": 100
+    },
+    {
+      "id": "mp_plan_p99",
+      "plan": "21",
+      "measure": "bench --scenario mp_plan --ticks 2000",
+      "metric": "p99_us",
+      "budget": 100
     }
   ],
   "alloc": {

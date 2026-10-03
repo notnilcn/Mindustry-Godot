@@ -911,6 +911,8 @@ fn bench(profile: &str, buildings: usize, ticks: u64, json: bool) -> Result<()> 
     }
 
     let (p50_us, p95_us, p99_us) = percentiles(samples);
+    // Plan 23 M4: only present when the bench is built `--features profile-build`.
+    #[cfg(feature = "profile-build")]
     if mind_core::world::update::profile::enabled() {
         let (order, consume, dispatch, pticks, entities) =
             mind_core::world::update::profile::take();

@@ -5,8 +5,8 @@
 //! committed scenario file must be catalogued, and the catalog's recorded
 //! `expect_checksum` must match the scenario file.
 
-use std::collections::BTreeSet;
-use std::path::Path;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -178,6 +178,92 @@ impl ScenarioCatalog {
     }
 }
 
+/// Lists the `*.json` files directly under `dir` as `name -> path` (sorted).
+fn json_files(dir: &Path) -> BTreeMap<String, PathBuf> {
+    let mut files = BTreeMap::new();
+    if let Ok(read_dir) = std::fs::read_dir(dir) {
+        for path in read_dir.flatten().map(|entry| entry.path()) {
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                files.insert(stem.to_owned(), path);
+            }
+        }
+    }
+    files
+}
+
+/// Scenario-mirror check (plan 23 §5 M3, R-21).
+///
+/// `tools/sync_scenarios` copies the canonical repo `scenarios/*.json` into the
+/// gitignored engine mirror `client/scenarios/` (loaded at
+/// `res://scenarios/<name>.json`). With `write = true` this materializes the
+/// exact mirror (removes stale JSON, copies the canonical set); otherwise it
+/// verifies the mirror is byte-identical and reports drift/missing/extra files.
+/// An absent mirror is reported once (not a per-file flood) so a clean checkout
+/// fails loud rather than silently passing.
+pub fn mirror(repo: &Path, write: bool) -> Result<Vec<String>> {
+    let src = repo.join("scenarios");
+    let dst = repo.join("client/scenarios");
+    let canonical = json_files(&src);
+
+    if write {
+        std::fs::create_dir_all(&dst).with_context(|| format!("creating `{}`", dst.display()))?;
+        for path in json_files(&dst).values() {
+            std::fs::remove_file(path)
+                .with_context(|| format!("removing stale `{}`", path.display()))?;
+        }
+        for path in canonical.values() {
+            let file = path
+                .file_name()
+                .ok_or_else(|| anyhow::anyhow!("bad scenario path `{}`", path.display()))?;
+            std::fs::copy(path, dst.join(file))
+                .with_context(|| format!("copying `{}`", path.display()))?;
+        }
+        return Ok(Vec::new());
+    }
+
+    let mut problems = Vec::new();
+    if !dst.is_dir() {
+        problems.push(format!(
+            "scenario mirror `{}` is not materialized (run `tools/sync_scenarios.sh` or `parity mirror --write`)",
+            dst.display()
+        ));
+        return Ok(problems);
+    }
+    let mirrored = json_files(&dst);
+    for name in canonical.keys() {
+        if !mirrored.contains_key(name) {
+            problems.push(format!("scenario mirror is missing `{name}.json`"));
+        }
+    }
+    for name in mirrored.keys() {
+        if !canonical.contains_key(name) {
+            problems.push(format!(
+                "scenario mirror has stale `{name}.json` (absent from `scenarios/`)"
+            ));
+        }
+    }
+    for (name, source) in &canonical {
+        let Some(target) = mirrored.get(name) else {
+            continue;
+        };
+        let source_bytes =
+            std::fs::read(source).with_context(|| format!("reading `{}`", source.display()))?;
+        let target_bytes =
+            std::fs::read(target).with_context(|| format!("reading `{}`", target.display()))?;
+        if source_bytes != target_bytes {
+            problems.push(format!(
+                "scenario mirror `{name}.json` differs from `scenarios/{name}.json`"
+            ));
+        }
+    }
+    problems.sort();
+    problems.dedup();
+    Ok(problems)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -230,5 +316,25 @@ mod tests {
                 .iter()
                 .any(|p| p.contains("stdb_offline_boot"))
         );
+    }
+
+    #[test]
+    fn scenario_mirror_matches_canonical() {
+        let repo = crate::paths::find_repo_root(None).expect("repo root");
+        mirror(&repo, true).expect("materializing the scenario mirror");
+
+        let clean = mirror(&repo, false).expect("verifying the scenario mirror");
+        assert!(clean.is_empty(), "mirror problems: {clean:?}");
+
+        // A stale extra file must be flagged (and then re-materialized away).
+        let stale = repo.join("client/scenarios/__stale__.json");
+        std::fs::write(&stale, b"{}").expect("writing stale file");
+        let problems = mirror(&repo, false).expect("verifying with a stale file");
+        assert!(
+            problems.iter().any(|p| p.contains("__stale__")),
+            "stale file not flagged: {problems:?}"
+        );
+        mirror(&repo, true).expect("re-materializing the scenario mirror");
+        assert!(!stale.exists(), "stale file survived re-materialization");
     }
 }
