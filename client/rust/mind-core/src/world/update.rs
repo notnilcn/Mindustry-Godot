@@ -9,11 +9,42 @@
 //! buildings in stable sequence order, decay `timeScale`, run the consumer pass,
 //! then call the registered behavior.
 
+use std::time::Instant;
+
 use bevy_ecs::entity::Entity;
 use bevy_ecs::query::{QueryState, With};
 use bevy_ecs::world::World;
 
 use crate::content::{ItemId, LiquidId};
+
+/// TEMPORARY performance instrumentation (enabled by `MIND_PROFILE_BUILD`).
+pub mod profile {
+    use std::sync::OnceLock;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    pub static ORDER_NS: AtomicU64 = AtomicU64::new(0);
+    pub static CONSUME_NS: AtomicU64 = AtomicU64::new(0);
+    pub static DISPATCH_NS: AtomicU64 = AtomicU64::new(0);
+    pub static TICKS: AtomicU64 = AtomicU64::new(0);
+    pub static ENTITIES: AtomicU64 = AtomicU64::new(0);
+
+    /// Whether profiling is on.
+    pub fn enabled() -> bool {
+        *ENABLED.get_or_init(|| std::env::var_os("MIND_PROFILE_BUILD").is_some())
+    }
+
+    /// Reads and resets the counters (order_ns, consume_ns, dispatch_ns, ticks, entities).
+    pub fn take() -> (u64, u64, u64, u64, u64) {
+        (
+            ORDER_NS.swap(0, Ordering::Relaxed),
+            CONSUME_NS.swap(0, Ordering::Relaxed),
+            DISPATCH_NS.swap(0, Ordering::Relaxed),
+            TICKS.swap(0, Ordering::Relaxed),
+            ENTITIES.swap(0, Ordering::Relaxed),
+        )
+    }
+}
 use crate::ecs::EntitySeq;
 use crate::entities::comp::{Building, Health, Pos, TeamComp, Timers};
 use crate::world::config::ConfigValue;
@@ -145,13 +176,23 @@ pub fn update_buildings(world: &mut World) {
     if let Some(mut clock) = world.get_resource_mut::<BuildClock>() {
         clock.time += 1.0;
     }
+    let prof = profile::enabled();
     let (mut order, mut query) = match world.get_resource_mut::<BuildScratch>() {
         Some(mut scratch) => (std::mem::take(&mut scratch.order), scratch.query.take()),
         None => (Vec::new(), None),
     };
+    let t_order = prof.then(Instant::now);
     fill_building_order(world, &mut order, &mut query);
+    if let Some(t) = t_order {
+        profile::ORDER_NS.fetch_add(t.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+    }
     for (_, entity) in order.iter().copied() {
         building_update(world, entity);
+    }
+    if prof {
+        use std::sync::atomic::Ordering;
+        profile::TICKS.fetch_add(1, Ordering::Relaxed);
+        profile::ENTITIES.fetch_add(order.len() as u64, Ordering::Relaxed);
     }
     if let Some(mut scratch) = world.get_resource_mut::<BuildScratch>() {
         scratch.order = order;
@@ -181,7 +222,12 @@ pub fn building_update(world: &mut World, entity: Entity) {
         return;
     };
 
+    let t_consume = profile::enabled().then(Instant::now);
     update_consumption(world, entity, &inst);
+    if let Some(t) = t_consume {
+        profile::CONSUME_NS
+            .fetch_add(t.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+    }
 
     let enabled = world
         .get::<Building>(entity)
@@ -189,7 +235,12 @@ pub fn building_update(world: &mut World, entity: Entity) {
     if enabled || inst.behavior.always_update_when_disabled() {
         // Clone only the behavior handle (single atomic) instead of cloning the
         // whole `Arc<BlockInstance>` again.
+        let t_dispatch = profile::enabled().then(Instant::now);
         inst.behavior.clone().update_tile(world, entity);
+        if let Some(t) = t_dispatch {
+            profile::DISPATCH_NS
+                .fetch_add(t.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 }
 
