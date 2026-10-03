@@ -14,12 +14,13 @@ use indexmap::IndexMap;
 
 use crate::content::{BlockId, ContentRegistry};
 use crate::io::StringMap;
-use crate::io::fs::FileSystem;
-use crate::io::map::MapIo;
-use crate::io::save::WriteContext;
+use crate::io::fs::{FileSystem, Paths};
+use crate::io::map::PreviewImage;
 use crate::io::save::state::MapSource;
 use crate::maps::{Map, MapError, Maps};
 use crate::world::WorldGrid;
+
+use super::preview::PreviewPipeline;
 
 /// [`MapSource`] view of the live editor grid (writes the `map` region).
 ///
@@ -95,7 +96,8 @@ impl MapSource for EditorMapSource<'_> {
 
 /// `Maps.saveMap` (client half, §3.8): write `grid` with `map_tags` merged.
 ///
-/// `embed_assets` embeds plan-20 data assets (export only).
+/// `embed_assets` embeds plan-20 data assets (export only). End-to-end callers
+/// that also want preview pixels use [`save_map_e2e`].
 pub fn save_editor_map(
     fs: &dyn FileSystem,
     file: &Path,
@@ -106,23 +108,15 @@ pub fn save_editor_map(
     embed_assets: bool,
 ) -> Result<(), MapError> {
     let source = EditorMapSource::new(grid, content);
-    // Map tags (rules/genfilters/locales/name/...) win over the standard base
-    // tag set (`SaveVersion.write` lets `ctx.tags` override `extra_tags`, so the
-    // merged map tags must enter `ctx.tags`).
-    let mut tags = base_tags;
-    for (key, value) in &map_tags {
-        tags.insert(key.clone(), value.clone());
-    }
-    let ctx = WriteContext {
-        tags,
-        content: Some(content),
-        map: Some(&source),
-        entities: None,
-        markers: None,
-        patches: None,
-        custom_chunks: None,
-    };
-    MapIo::write_map(fs, file, &ctx, map_tags, embed_assets).map_err(MapError::from)
+    crate::maps::write_map_source(
+        fs,
+        file,
+        &source,
+        content,
+        base_tags,
+        map_tags,
+        embed_assets,
+    )
 }
 
 /// `EditorMapsDialog.tryImportMap`: sniff an import, resolve a free name and add
@@ -136,27 +130,67 @@ pub fn try_import_map(
     dir: &Path,
     source: &Path,
 ) -> Result<Map, MapError> {
-    if MapIo::is_image(fs, source) {
-        return Err(MapError::exception(
-            source.to_path_buf(),
-            "image files cannot be imported as maps",
-        ));
-    }
-    let header = MapIo::create_map(fs, source, true)?;
-    let name = if header.name.trim().is_empty() {
-        "unknown".to_owned()
-    } else {
-        header.name.clone()
-    };
-    let file = maps.find_file(fs, dir, &name);
-    let bytes = fs.read(source)?;
-    fs.write(&file, &bytes)?;
-    maps.load_map_file(fs, &file, true)?;
-    let index = maps.index_of_file(&file).ok_or(MapError::NotFound(name))?;
-    maps.all()
-        .get(index)
+    maps.import_map(fs, dir, source)
+}
+
+/// End-to-end `Maps.saveMap` for the editor (plan 06 M4 / plan 19 M7): write the
+/// native `MGRS` map, fill the preview spawn/team cache and generate the preview
+/// pixels (PNG + cache) through the [`PreviewPipeline`].
+///
+/// Returns the registered map and its deterministic preview pixels so a headless
+/// caller can assert the checksum.
+#[allow(clippy::too_many_arguments)]
+pub fn save_map_e2e(
+    fs: &dyn FileSystem,
+    paths: &Paths,
+    pipeline: &mut PreviewPipeline,
+    maps: &mut Maps,
+    file: &Path,
+    grid: &WorldGrid,
+    registry: &mut ContentRegistry,
+    base_tags: StringMap,
+    map_tags: StringMap,
+    embed_assets: bool,
+) -> Result<(Map, PreviewImage), MapError> {
+    let source = EditorMapSource::new(grid, registry);
+    let map = maps.save_map(
+        fs,
+        paths,
+        file,
+        &source,
+        registry,
+        base_tags,
+        map_tags,
+        embed_assets,
+    )?;
+    pipeline.queue_new_preview(&map);
+    pipeline.create_new_preview(fs, paths, registry, &map)?;
+    let image = pipeline
+        .texture_for(&map)
         .cloned()
-        .ok_or_else(|| MapError::NotFound(file.display().to_string()))
+        .ok_or_else(|| MapError::NotFound(file.display().to_string()))?;
+    Ok((map, image))
+}
+
+/// End-to-end `Maps.importMap` (plan 06 §3.9 / plan 19 §3.8): copy + register an
+/// imported map, then regenerate its preview pixels (PNG + cache).
+pub fn import_map_e2e(
+    fs: &dyn FileSystem,
+    paths: &Paths,
+    pipeline: &mut PreviewPipeline,
+    maps: &mut Maps,
+    dir: &Path,
+    source: &Path,
+    registry: &mut ContentRegistry,
+) -> Result<(Map, PreviewImage), MapError> {
+    let map = maps.import_map(fs, dir, source)?;
+    pipeline.queue_new_preview(&map);
+    pipeline.create_new_preview(fs, paths, registry, &map)?;
+    let image = pipeline
+        .texture_for(&map)
+        .cloned()
+        .ok_or_else(|| MapError::NotFound(map.file.display().to_string()))?;
+    Ok((map, image))
 }
 
 /// Builds the standard base meta tags for an editor map export (`plan 04 §6.2`).
@@ -266,5 +300,73 @@ mod tests {
         fs.write(&file, &crate::io::map::PNG_SIGNATURE).unwrap();
         let error = try_import_map(&fs, &mut maps, Path::new("/maps"), &file).unwrap_err();
         assert!(error.to_string().contains("image"));
+    }
+
+    /// End-to-end `save_map`/`import_map` with preview pixels (plan 06 M4 /
+    /// plan 19 M7): the native map round-trips through an import copy and both
+    /// preview generations are byte-identical.
+    #[test]
+    fn save_and_import_map_e2e_preview_pixels() {
+        use crate::content::BlockId;
+        use crate::io::fs::Paths;
+
+        let fs = MockFs::new();
+        let paths = Paths::new("/data");
+        let mut content = crate::content::test_support::test_registry();
+        let stone = content.block_id("stone").unwrap_or(BlockId::AIR);
+
+        let mut grid = WorldGrid::new(8, 8);
+        for tile in grid.tiles.array_mut() {
+            tile.floor = stone;
+        }
+        let mut spawns = 0u32;
+        if let Some(spawn) = content.block_id("spawn") {
+            grid.tiles.get_mut(1, 1).overlay = spawn;
+            grid.tiles.get_mut(4, 4).overlay = spawn;
+            spawns = 2;
+        }
+
+        let mut maps = Maps::new();
+        let mut pipeline = PreviewPipeline::new();
+        let file = std::path::PathBuf::from("/data/maps/e2e.msav");
+        let mut tags = IndexMap::new();
+        tags.insert("name".to_owned(), "E2E".to_owned());
+        let base = editor_base_tags(8, 8, "E2E");
+        let (map, image) = save_map_e2e(
+            &fs,
+            &paths,
+            &mut pipeline,
+            &mut maps,
+            &file,
+            &grid,
+            &mut content,
+            base,
+            tags,
+            false,
+        )
+        .unwrap();
+        assert_eq!(maps.len(), 1);
+        assert_eq!(map.name(), "E2E");
+        assert_eq!(map.spawns, spawns);
+        assert!(fs.exists(&crate::maps::preview_file(&paths, &map)));
+        assert_eq!(image.rgba.len(), 8 * 8 * 4);
+
+        // Import into a second registry/dir; the preview pixels must match.
+        let dir = std::path::PathBuf::from("/data/imports");
+        let mut imported_maps = Maps::new();
+        let mut imported_pipeline = PreviewPipeline::new();
+        let (imported, image2) = import_map_e2e(
+            &fs,
+            &paths,
+            &mut imported_pipeline,
+            &mut imported_maps,
+            &dir,
+            &file,
+            &mut content,
+        )
+        .unwrap();
+        assert_eq!(imported.name(), "E2E");
+        assert_eq!(imported_maps.len(), 1);
+        assert_eq!(image.rgba, image2.rgba, "preview pixels are deterministic");
     }
 }

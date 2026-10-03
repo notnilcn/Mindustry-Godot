@@ -25,13 +25,18 @@ pub use preview::{PreviewCache, PreviewQueue, cache_file, preview_file};
 pub use sector_damage::{DamageBuilding, DamageFx, NoopDamageFx, SectorDamageState};
 pub use shuffle::{GameMode, MapProvider, ShuffleMode};
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use bevy_ecs::prelude::Resource;
 use indexmap::IndexMap;
 
+use crate::content::ContentRegistry;
+use crate::io::StringMap;
 use crate::io::fs::{FileSystem, Paths, SAVE_EXTENSION};
-use crate::io::map::MapIo;
+use crate::io::map::{BlockPalette, MapIo};
+use crate::io::save::WriteContext;
+use crate::io::save::state::MapSource;
 use crate::random::JavaRandom;
 use crate::util::strings::sanitize_filename;
 
@@ -297,6 +302,77 @@ impl Maps {
         }
     }
 
+    /// `Maps.saveMap` registry half (plan 06 §3.9 / plan 19 M7): write a live
+    /// tile source as a native `MGRS` map, fill the spawn/team preview metadata,
+    /// write the cache file and re-sort.
+    ///
+    /// Pixel/PNG generation stays in plan 19 (`PreviewPipeline`); this method
+    /// only owns the file, the registry entry and the cache file. `map_tags`
+    /// win over `base_tags` (`SaveVersion.write` lets `ctx.tags` override).
+    #[allow(clippy::too_many_arguments)]
+    pub fn save_map(
+        &mut self,
+        fs: &dyn FileSystem,
+        paths: &Paths,
+        file: &Path,
+        source: &dyn MapSource,
+        content: &ContentRegistry,
+        base_tags: StringMap,
+        map_tags: StringMap,
+        embed_assets: bool,
+    ) -> Result<Map, MapError> {
+        write_map_source(fs, file, source, content, base_tags, map_tags, embed_assets)?;
+        let header = MapIo::create_map(fs, file, true)?;
+        let mut map = Map::from_header(&header, true);
+        let scan = scan_map_source(source, content);
+        map.spawns = scan.spawns;
+        map.teams = scan.teams;
+        map.validate_name()?;
+        // Cache write failures are non-fatal upstream (the preview still loads).
+        if let Err(error) = preview::write_cache(fs, paths, &map) {
+            log::warn!(
+                "failed to write preview cache for `{}`: {error}",
+                map.name()
+            );
+        }
+        self.add(map.clone());
+        Ok(map)
+    }
+
+    /// `Maps.importMap` (plan 06 §3.9 / plan 19 §3.8): reject images, sniff a
+    /// free name, copy the file into `dir` and register it.
+    ///
+    /// Preview regeneration (pixels/PNG) is the plan-19 client half
+    /// (`editor::maps_glue::import_map_e2e`).
+    pub fn import_map(
+        &mut self,
+        fs: &dyn FileSystem,
+        dir: &Path,
+        source: &Path,
+    ) -> Result<Map, MapError> {
+        if MapIo::is_image(fs, source) {
+            return Err(MapError::exception(
+                source.to_path_buf(),
+                "image files cannot be imported as maps",
+            ));
+        }
+        let header = MapIo::create_map(fs, source, true)?;
+        let name = if header.name.trim().is_empty() {
+            "unknown".to_owned()
+        } else {
+            header.name.clone()
+        };
+        let file = self.find_file(fs, dir, &name);
+        let bytes = fs.read(source)?;
+        fs.write(&file, &bytes)?;
+        self.load_map_file(fs, &file, true)?;
+        let index = self.index_of_file(&file).ok_or(MapError::NotFound(name))?;
+        self.all()
+            .get(index)
+            .cloned()
+            .ok_or_else(|| MapError::NotFound(file.display().to_string()))
+    }
+
     /// Selects the next map (`Maps.getNextMap`).
     ///
     /// Honours `next_override` first, then a custom provider, then the shuffle
@@ -327,6 +403,64 @@ impl Maps {
         tags.insert("name".to_owned(), name.to_owned());
         Map::new(file, width, height, tags, custom, 1, -1)
     }
+}
+
+/// Preview metadata scanned from a live tile source (`Maps.saveMap` client half).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MapScan {
+    /// Enemy spawn-overlay count.
+    pub spawns: u32,
+    /// Teams with core buildings; empty for tile-only sources (teams live on
+    /// plan-07 building entities, not on [`crate::world::Tile`]).
+    pub teams: BTreeSet<u8>,
+}
+
+/// Scans core teams and spawn overlays from a live source (`Maps.saveMap`).
+///
+/// The tile-source shape carries no building team, so `teams` is populated only
+/// when a caller supplies it; the spawn count is exact (`BlockPalette::is_spawn`).
+pub fn scan_map_source(source: &dyn MapSource, content: &ContentRegistry) -> MapScan {
+    let palette = BlockPalette::of(content);
+    let len = source.width() as usize * source.height() as usize;
+    let mut spawns = 0u32;
+    for index in 0..len {
+        if palette.is_spawn(source.overlay_id(index)) {
+            spawns = spawns.saturating_add(1);
+        }
+    }
+    MapScan {
+        spawns,
+        teams: BTreeSet::new(),
+    }
+}
+
+/// Shared native-map writer: merges `map_tags` over `base_tags` and writes the
+/// `map` region (plan 04 `MapIo::write_map`). Used by `Maps::save_map` and the
+/// editor glue (`map_tags` win because they enter `ctx.tags`).
+#[allow(clippy::too_many_arguments)]
+pub fn write_map_source(
+    fs: &dyn FileSystem,
+    file: &Path,
+    source: &dyn MapSource,
+    content: &ContentRegistry,
+    base_tags: StringMap,
+    map_tags: StringMap,
+    embed_assets: bool,
+) -> Result<(), MapError> {
+    let mut tags = base_tags;
+    for (key, value) in &map_tags {
+        tags.insert(key.clone(), value.clone());
+    }
+    let ctx = WriteContext {
+        tags,
+        content: Some(content),
+        map: Some(source),
+        entities: None,
+        markers: None,
+        patches: None,
+        custom_chunks: None,
+    };
+    MapIo::write_map(fs, file, &ctx, map_tags, embed_assets).map_err(MapError::from)
 }
 
 #[cfg(test)]

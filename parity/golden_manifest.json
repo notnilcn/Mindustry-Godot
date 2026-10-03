@@ -643,6 +643,14 @@
       "path": "client/rust/mind-core/tests/fixtures/relay/validation_matrix.json",
       "owner_plan": "21",
       "sha256": "b60abfb2c7bbad18f50d118a3656af2968ae8cbcf8825cdd8083c3347e8f5b5c"
+    },
+    {
+      "id": "harness_maps_editor_roundtrip",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/maps_editor.json",
+      "owner_plan": "06/19",
+      "sha256": "96f99ff7ff3d722ad7211025e30f5ed3ad77b2ef5d4b9d3af05e8e30e3a82bfa",
+      "regen": "cargo run -p mind-headless -- maps roundtrip --json; cargo run -p mind-headless -- editor playtest --json"
     }
   ]
 }

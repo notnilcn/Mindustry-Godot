@@ -1342,6 +1342,15 @@ pub enum MapsCommand {
         json: bool,
     },
 
+    /// `save_map`/`import_map` end-to-end with preview pixels (plan 06 M4 /
+    /// plan 19 M7 §3.8): save a live grid, generate the preview PNG/cache,
+    /// import it into a second registry and assert the preview checksums match.
+    Roundtrip {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Deterministic hand-built tile-set preview pixels + PNG round-trip
     /// (plan 19 M2 §5/§7b).
     PreviewTiles {
@@ -1424,6 +1433,15 @@ pub enum EditorCommand {
     /// filter stack over a 64×64 snapshot produces the same preview pixels on
     /// every run, and a mid-generation re-run coalesces to one result.
     GenPreview {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Editor playtest state-machine transitions (plan 19 M7 §3.11):
+    /// `edit_in_game` → `resume_editing` → Shift `playtest` → `try_exit`, with
+    /// the plan-12 `PlaySession` phase/rules asserted at each step.
+    Playtest {
         /// Emit a machine-readable JSON report on stdout.
         #[arg(long)]
         json: bool,
