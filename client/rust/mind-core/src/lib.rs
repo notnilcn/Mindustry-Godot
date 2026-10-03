@@ -29,6 +29,7 @@ pub mod event;
 pub mod fixtures;
 pub mod fx;
 pub mod game;
+pub mod input;
 pub mod io;
 pub mod log;
 pub mod logic;

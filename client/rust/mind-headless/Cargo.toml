@@ -17,6 +17,7 @@ anyhow.workspace = true
 log.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+smallvec.workspace = true
 # plan 23: sha256 golden drift verification (already a workspace dep via plan 03)
 sha2.workspace = true
 

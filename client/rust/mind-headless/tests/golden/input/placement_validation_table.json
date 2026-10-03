@@ -1,0 +1,518 @@
+{
+  "scenario": "placement_validation_table",
+  "rows": [
+    {
+      "block": "conveyor",
+      "x": 0,
+      "y": 0,
+      "rot": 0,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "conveyor",
+      "x": 10,
+      "y": 10,
+      "rot": 0,
+      "valid_place": false,
+      "valid_break": true
+    },
+    {
+      "block": "conveyor",
+      "x": 10,
+      "y": 11,
+      "rot": 0,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "conveyor",
+      "x": 16,
+      "y": 16,
+      "rot": 1,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "conveyor",
+      "x": 20,
+      "y": 20,
+      "rot": 0,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "conveyor",
+      "x": 20,
+      "y": 21,
+      "rot": 2,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "conveyor",
+      "x": 32,
+      "y": 32,
+      "rot": 0,
+      "valid_place": false,
+      "valid_break": true
+    },
+    {
+      "block": "conveyor",
+      "x": 33,
+      "y": 33,
+      "rot": 0,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "router",
+      "x": 0,
+      "y": 0,
+      "rot": 0,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "router",
+      "x": 10,
+      "y": 10,
+      "rot": 0,
+      "valid_place": false,
+      "valid_break": true
+    },
+    {
+      "block": "router",
+      "x": 10,
+      "y": 11,
+      "rot": 0,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "router",
+      "x": 16,
+      "y": 16,
+      "rot": 1,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "router",
+      "x": 20,
+      "y": 20,
+      "rot": 0,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "router",
+      "x": 20,
+      "y": 21,
+      "rot": 2,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "router",
+      "x": 32,
+      "y": 32,
+      "rot": 0,
+      "valid_place": false,
+      "valid_break": true
+    },
+    {
+      "block": "router",
+      "x": 33,
+      "y": 33,
+      "rot": 0,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "copper-wall",
+      "x": 0,
+      "y": 0,
+      "rot": 0,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "copper-wall",
+      "x": 10,
+      "y": 10,
+      "rot": 0,
+      "valid_place": true,
+      "valid_break": true
+    },
+    {
+      "block": "copper-wall",
+      "x": 10,
+      "y": 11,
+      "rot": 0,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "copper-wall",
+      "x": 16,
+      "y": 16,
+      "rot": 1,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "copper-wall",
+      "x": 20,
+      "y": 20,
+      "rot": 0,
+      "valid_place": false,
+      "valid_break": false
+    },
+    {
+      "block": "copper-wall",
+      "x": 20,
+      "y": 21,
+      "rot": 2,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "copper-wall",
+      "x": 32,
+      "y": 32,
+      "rot": 0,
+      "valid_place": false,
+      "valid_break": true
+    },
+    {
+      "block": "copper-wall",
+      "x": 33,
+      "y": 33,
+      "rot": 0,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "core-shard",
+      "x": 0,
+      "y": 0,
+      "rot": 0,
+      "valid_place": false,
+      "valid_break": false
+    },
+    {
+      "block": "core-shard",
+      "x": 10,
+      "y": 10,
+      "rot": 0,
+      "valid_place": false,
+      "valid_break": true
+    },
+    {
+      "block": "core-shard",
+      "x": 10,
+      "y": 11,
+      "rot": 0,
+      "valid_place": false,
+      "valid_break": false
+    },
+    {
+      "block": "core-shard",
+      "x": 16,
+      "y": 16,
+      "rot": 1,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "core-shard",
+      "x": 20,
+      "y": 20,
+      "rot": 0,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "core-shard",
+      "x": 20,
+      "y": 21,
+      "rot": 2,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "core-shard",
+      "x": 32,
+      "y": 32,
+      "rot": 0,
+      "valid_place": true,
+      "valid_break": true
+    },
+    {
+      "block": "core-shard",
+      "x": 33,
+      "y": 33,
+      "rot": 0,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "mechanical-drill",
+      "x": 0,
+      "y": 0,
+      "rot": 0,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "mechanical-drill",
+      "x": 10,
+      "y": 10,
+      "rot": 0,
+      "valid_place": false,
+      "valid_break": true
+    },
+    {
+      "block": "mechanical-drill",
+      "x": 10,
+      "y": 11,
+      "rot": 0,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "mechanical-drill",
+      "x": 16,
+      "y": 16,
+      "rot": 1,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "mechanical-drill",
+      "x": 20,
+      "y": 20,
+      "rot": 0,
+      "valid_place": false,
+      "valid_break": false
+    },
+    {
+      "block": "mechanical-drill",
+      "x": 20,
+      "y": 21,
+      "rot": 2,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "mechanical-drill",
+      "x": 32,
+      "y": 32,
+      "rot": 0,
+      "valid_place": false,
+      "valid_break": true
+    },
+    {
+      "block": "mechanical-drill",
+      "x": 33,
+      "y": 33,
+      "rot": 0,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "combustion-generator",
+      "x": 0,
+      "y": 0,
+      "rot": 0,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "combustion-generator",
+      "x": 10,
+      "y": 10,
+      "rot": 0,
+      "valid_place": false,
+      "valid_break": true
+    },
+    {
+      "block": "combustion-generator",
+      "x": 10,
+      "y": 11,
+      "rot": 0,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "combustion-generator",
+      "x": 16,
+      "y": 16,
+      "rot": 1,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "combustion-generator",
+      "x": 20,
+      "y": 20,
+      "rot": 0,
+      "valid_place": false,
+      "valid_break": false
+    },
+    {
+      "block": "combustion-generator",
+      "x": 20,
+      "y": 21,
+      "rot": 2,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "combustion-generator",
+      "x": 32,
+      "y": 32,
+      "rot": 0,
+      "valid_place": false,
+      "valid_break": true
+    },
+    {
+      "block": "combustion-generator",
+      "x": 33,
+      "y": 33,
+      "rot": 0,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "solar-panel",
+      "x": 0,
+      "y": 0,
+      "rot": 0,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "solar-panel",
+      "x": 10,
+      "y": 10,
+      "rot": 0,
+      "valid_place": false,
+      "valid_break": true
+    },
+    {
+      "block": "solar-panel",
+      "x": 10,
+      "y": 11,
+      "rot": 0,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "solar-panel",
+      "x": 16,
+      "y": 16,
+      "rot": 1,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "solar-panel",
+      "x": 20,
+      "y": 20,
+      "rot": 0,
+      "valid_place": false,
+      "valid_break": false
+    },
+    {
+      "block": "solar-panel",
+      "x": 20,
+      "y": 21,
+      "rot": 2,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "solar-panel",
+      "x": 32,
+      "y": 32,
+      "rot": 0,
+      "valid_place": false,
+      "valid_break": true
+    },
+    {
+      "block": "solar-panel",
+      "x": 33,
+      "y": 33,
+      "rot": 0,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "battery",
+      "x": 0,
+      "y": 0,
+      "rot": 0,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "battery",
+      "x": 10,
+      "y": 10,
+      "rot": 0,
+      "valid_place": false,
+      "valid_break": true
+    },
+    {
+      "block": "battery",
+      "x": 10,
+      "y": 11,
+      "rot": 0,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "battery",
+      "x": 16,
+      "y": 16,
+      "rot": 1,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "battery",
+      "x": 20,
+      "y": 20,
+      "rot": 0,
+      "valid_place": false,
+      "valid_break": false
+    },
+    {
+      "block": "battery",
+      "x": 20,
+      "y": 21,
+      "rot": 2,
+      "valid_place": true,
+      "valid_break": false
+    },
+    {
+      "block": "battery",
+      "x": 32,
+      "y": 32,
+      "rot": 0,
+      "valid_place": false,
+      "valid_break": true
+    },
+    {
+      "block": "battery",
+      "x": 33,
+      "y": 33,
+      "rot": 0,
+      "valid_place": true,
+      "valid_break": false
+    }
+  ],
+  "checksum": "3467dd3d398a625a"
+}

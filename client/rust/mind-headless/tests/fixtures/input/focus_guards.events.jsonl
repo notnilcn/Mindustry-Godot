@@ -1,0 +1,9 @@
+{"format":1,"header":{"build":"0.1.0","map":"flat-64","seed":123,"mobile":false,"width":1920,"height":1080}}
+{"tick":0,"ev":{"t":"KeyDown","code":"a"}}
+{"tick":0,"ev":{"t":"MouseMove","x":640.0,"y":360.0}}
+{"tick":3,"ev":{"t":"MouseButton","button":"left","down":true,"x":640.0,"y":360.0}}
+{"tick":7,"ev":{"t":"UiFocus","has_keyboard":false,"has_mouse":false,"has_dialog":true,"has_field":false,"has_scroll":false,"chat_shown":false,"console_shown":false,"hud_shown":true,"is_menu":false,"is_editor":false,"editor_blocks_shown":false}}
+{"tick":12,"ev":{"t":"Scroll","x":0.0,"y":1.0}}
+{"tick":20,"ev":{"t":"MouseButton","button":"left","down":false,"x":700.0,"y":400.0}}
+{"tick":30,"ev":{"t":"Magnify","factor":1.1}}
+{"tick":40,"ev":{"t":"TouchDown","pointer":0,"x":100.0,"y":200.0}}
