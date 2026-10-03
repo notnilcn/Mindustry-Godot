@@ -44,6 +44,11 @@ fn input_scenarios_match_committed_goldens() {
         ("input_replay_mobile", "input_replay_mobile.json"),
         ("input_mobile_parity", "input_mobile_parity.json"),
         ("input_rts_move", "input_rts_move.json"),
+        ("input_camera_pan_zoom", "input_camera_pan_zoom.json"),
+        ("input_camera_clamp", "input_camera_clamp.json"),
+        ("input_camera_shake", "input_camera_shake.json"),
+        ("input_plan_snapshot", "input_plan_snapshot.json"),
+        ("input_preview_handoff", "input_preview_handoff.json"),
     ] {
         check(scenario, file);
     }

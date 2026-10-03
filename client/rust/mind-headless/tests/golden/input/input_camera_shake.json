@@ -1,0 +1,72 @@
+{
+  "scenario": "input_camera_shake",
+  "consumed": true,
+  "frames": [
+    {
+      "tick": 0,
+      "offset": [
+        12.432000160217285,
+        -6.859000205993652
+      ],
+      "intensity": 16.0
+    },
+    {
+      "tick": 1,
+      "offset": [
+        0.023000000044703484,
+        0.019999999552965164
+      ],
+      "intensity": 12.0
+    },
+    {
+      "tick": 2,
+      "offset": [
+        -4.081999778747559,
+        -3.555999994277954
+      ],
+      "intensity": 8.0
+    },
+    {
+      "tick": 3,
+      "offset": [
+        1.0720000267028809,
+        -0.18700000643730164
+      ],
+      "intensity": 4.0
+    },
+    {
+      "tick": 4,
+      "offset": [
+        -0.6320000290870667,
+        0.9760000109672546
+      ],
+      "intensity": 0.0
+    },
+    {
+      "tick": 5,
+      "offset": [
+        0.0,
+        0.0
+      ],
+      "intensity": 0.0
+    },
+    {
+      "tick": 6,
+      "offset": [
+        0.0,
+        0.0
+      ],
+      "intensity": 0.0
+    },
+    {
+      "tick": 7,
+      "offset": [
+        0.0,
+        0.0
+      ],
+      "intensity": 0.0
+    }
+  ],
+  "back_to_baseline": true,
+  "checksum": "2ff759f092e45bd9"
+}

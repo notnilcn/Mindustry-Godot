@@ -1,0 +1,60 @@
+{
+  "scenario": "input_plan_snapshot",
+  "interval_ticks": 30,
+  "chunk": 75,
+  "cap": 1000,
+  "empty": {
+    "count": 1,
+    "plans": true
+  },
+  "desktop": {
+    "count": 14,
+    "chunks": [
+      75,
+      75,
+      75,
+      75,
+      75,
+      75,
+      75,
+      75,
+      75,
+      75,
+      75,
+      75,
+      75,
+      25
+    ]
+  },
+  "mobile": {
+    "count": 14,
+    "chunks": [
+      75,
+      75,
+      75,
+      75,
+      75,
+      75,
+      75,
+      75,
+      75,
+      75,
+      75,
+      75,
+      75,
+      25
+    ]
+  },
+  "cadence": [
+    {
+      "tick": 29,
+      "ready": false
+    },
+    {
+      "tick": 30,
+      "ready": true
+    }
+  ],
+  "group_id_after_advance": 1,
+  "checksum": "a2e764e0c2eb5295"
+}

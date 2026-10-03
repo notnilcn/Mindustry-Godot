@@ -18,22 +18,44 @@ use smallvec::SmallVec;
 
 use crate::cli::InputCommand;
 
+/// Exit code: pass.
+const EXIT_PASS: i32 = 0;
+/// Exit code: assertion/golden/budget mismatch.
+const EXIT_FAIL: i32 = 1;
+
 /// Runs an `input` subcommand.
-pub fn run(command: &InputCommand) -> Result<()> {
+pub fn run(command: &InputCommand) -> Result<i32> {
     match command {
-        InputCommand::Dump { json, out, golden } => dump(*json, out.as_deref(), golden.as_deref()),
+        InputCommand::Dump { json, out, golden } => {
+            dump(*json, out.as_deref(), golden.as_deref())?;
+            Ok(EXIT_PASS)
+        }
         InputCommand::Replay {
             events,
             out,
             json,
             mobile,
-        } => replay(events, out.as_deref(), *json, *mobile),
+        } => {
+            replay(events, out.as_deref(), *json, *mobile)?;
+            Ok(EXIT_PASS)
+        }
         InputCommand::Scenario {
             name,
             json,
             dump: out,
             golden,
-        } => scenario(name, *json, out.as_deref(), golden.as_deref()),
+        } => {
+            scenario(name, *json, out.as_deref(), golden.as_deref())?;
+            Ok(EXIT_PASS)
+        }
+        InputCommand::Bench {
+            profile,
+            len,
+            units,
+            iters,
+            assert_alloc,
+            json,
+        } => bench(profile, *len, *units, *iters, *assert_alloc, *json),
     }
 }
 
@@ -154,6 +176,11 @@ fn scenario(name: &str, json: bool, out: Option<&Path>, golden: Option<&Path>) -
         "input_replay_mobile" => input_replay_mobile(json, out, golden),
         "input_mobile_parity" => input_mobile_parity(json, out, golden),
         "input_rts_move" => input_rts_move(json, out, golden),
+        "input_camera_pan_zoom" => input_camera_pan_zoom(json, out, golden),
+        "input_camera_clamp" => input_camera_clamp(json, out, golden),
+        "input_camera_shake" => input_camera_shake(json, out, golden),
+        "input_plan_snapshot" => input_plan_snapshot(json, out, golden),
+        "input_preview_handoff" => input_preview_handoff(json, out, golden),
         other => bail!("unknown input scenario `{other}`"),
     }
 }
@@ -789,6 +816,268 @@ fn input_rts_move(json: bool, out: Option<&Path>, golden: Option<&Path>) -> Resu
     Ok(())
 }
 
+/// Rounds a float to 3 decimals so scenario goldens are byte-stable.
+fn round3(value: f32) -> f32 {
+    (value * 1000.0).round() / 1000.0
+}
+
+/// `input_camera_pan_zoom`: the M5 camera pan/zoom/follow rig math.
+fn input_camera_pan_zoom(json: bool, out: Option<&Path>, golden: Option<&Path>) -> Result<()> {
+    use mind_core::input::CameraState;
+
+    let mut camera = CameraState::new((1920.0, 1080.0));
+    camera.world_size = Some((256.0, 256.0));
+    let mut steps = Vec::new();
+    let snap = |name: &str, camera: &CameraState, steps: &mut Vec<serde_json::Value>| {
+        steps.push(serde_json::json!({
+            "step": name,
+            "position": [round3(camera.position.0), round3(camera.position.1)],
+            "target_scale": round3(camera.target_scale),
+            "camerascale": round3(camera.camerascale),
+            "width": round3(camera.camera_width()),
+            "height": round3(camera.camera_height()),
+        }));
+    };
+    snap("initial", &camera, &mut steps);
+
+    camera.pan_axis(1.0, 0.0, 1.0, false);
+    snap("pan_axis_right", &camera, &mut steps);
+    camera.pan_axis(0.0, -1.0, 1.0, true);
+    snap("pan_axis_up_boost", &camera, &mut steps);
+    camera.pan_mouse(1920.0, 540.0, 1.0, false);
+    snap("pan_mouse_right_edge", &camera, &mut steps);
+
+    camera.scale_camera(1.0);
+    snap("scale_camera_in", &camera, &mut steps);
+    camera.update(1.0, 4, 1);
+    snap("update_lerp", &camera, &mut steps);
+    camera.update(1000.0, 4, 1);
+    snap("update_snap", &camera, &mut steps);
+
+    camera.follow(100.0, 100.0, true, 1.0);
+    snap("follow_smooth", &camera, &mut steps);
+    camera.follow(100.0, 100.0, false, 1.0);
+    snap("follow_snap", &camera, &mut steps);
+
+    let report = serde_json::json!({
+        "scenario": "input_camera_pan_zoom",
+        "steps": steps,
+        "checksum": fnv1a(serde_json::to_string(&steps)?.as_bytes()),
+    });
+    emit(&report, out, golden)?;
+    print_json(&report, json);
+    Ok(())
+}
+
+/// `input_camera_clamp`: zoom clamps, world position clamp and minimap mapping.
+fn input_camera_clamp(json: bool, out: Option<&Path>, golden: Option<&Path>) -> Result<()> {
+    use mind_core::input::{CameraState, MinimapRegion};
+
+    let mut camera = CameraState::new((1920.0, 1080.0));
+    camera.world_size = Some((256.0, 256.0));
+    camera.set_scale_immediate(4.0);
+
+    let mut steps = Vec::new();
+    camera.set_scale(1000.0);
+    steps.push(serde_json::json!({
+        "step": "zoom_in_clamp",
+        "target_scale": round3(camera.target_scale),
+        "max_scale": round3(camera.max_scale()),
+    }));
+    camera.set_scale(0.0);
+    steps.push(serde_json::json!({
+        "step": "zoom_out_clamp",
+        "target_scale": round3(camera.target_scale),
+        "min_scale": round3(camera.min_scale()),
+    }));
+
+    // Drag far past the world edge; the mobile pan clamp holds.
+    camera.set_scale_immediate(4.0);
+    for _ in 0..50 {
+        camera.mobile_pan(-10_000.0, -10_000.0);
+    }
+    steps.push(serde_json::json!({
+        "step": "mobile_pan_clamp",
+        "position": [round3(camera.position.0), round3(camera.position.1)],
+        "max": [
+            round3(256.0 + camera.camera_width() / 4.0),
+            round3(256.0 + camera.camera_height() / 4.0),
+        ],
+    }));
+
+    // Minimap pointer mapping (full map region).
+    let (x, y) = camera.minimap_target(0.25, 0.75, MinimapRegion::FULL);
+    steps.push(serde_json::json!({
+        "step": "minimap_target",
+        "target": [round3(x), round3(y)],
+    }));
+    camera.minimap_pan(0.5, 0.5, MinimapRegion::FULL);
+    steps.push(serde_json::json!({
+        "step": "minimap_pan",
+        "position": [round3(camera.position.0), round3(camera.position.1)],
+    }));
+
+    let report = serde_json::json!({
+        "scenario": "input_camera_clamp",
+        "steps": steps,
+        "checksum": fnv1a(serde_json::to_string(&steps)?.as_bytes()),
+    });
+    emit(&report, out, golden)?;
+    print_json(&report, json);
+    Ok(())
+}
+
+/// `input_camera_shake`: the plan-17 `ShakeEvent` consumer and decay to baseline.
+fn input_camera_shake(json: bool, out: Option<&Path>, golden: Option<&Path>) -> Result<()> {
+    use mind_core::fx::FxEvent;
+    use mind_core::input::CameraState;
+
+    let mut camera = CameraState::new((1920.0, 1080.0));
+    let consumed = camera.on_fx_event(&FxEvent::Shake {
+        intensity: 20.0,
+        duration: 5.0,
+    });
+    let mut frames = Vec::new();
+    for tick in 0..8u64 {
+        let (ox, oy) = camera.shake_offset(4, tick);
+        frames.push(serde_json::json!({
+            "tick": tick,
+            "offset": [round3(ox), round3(oy)],
+            "intensity": round3(camera.shake.intensity),
+        }));
+    }
+    let back_to_baseline = camera.shake.offset == (0.0, 0.0);
+    let report = serde_json::json!({
+        "scenario": "input_camera_shake",
+        "consumed": consumed,
+        "frames": frames,
+        "back_to_baseline": back_to_baseline,
+        "checksum": fnv1a(serde_json::to_string(&frames)?.as_bytes()),
+    });
+    emit(&report, out, golden)?;
+    print_json(&report, json);
+    Ok(())
+}
+
+/// `input_plan_snapshot`: 0.5 s cadence, 75-plan chunks, 1000 cap, mobile selects.
+fn input_plan_snapshot(json: bool, out: Option<&Path>, golden: Option<&Path>) -> Result<()> {
+    use mind_core::content::BlockId;
+    use mind_core::input::{
+        ClientPlan, MAX_PLAYER_PREVIEW_PLANS, PLAN_SNAPSHOT_CHUNK, PLAN_SNAPSHOT_INTERVAL_TICKS,
+        PlanSnapshotTimer, build_plan_snapshots,
+    };
+
+    let plans: Vec<ClientPlan> = (0..1200)
+        .map(|i| ClientPlan::place(i % 100, i / 100, 0, BlockId::STONE_WALL))
+        .collect();
+    let select_plans = vec![ClientPlan::place(5, 5, 0, BlockId::STONE_WALL)];
+
+    let empty = build_plan_snapshots(&[], &[], false, 7, 1);
+    let desktop = build_plan_snapshots(&plans, &select_plans, false, 7, 2);
+    let mobile = build_plan_snapshots(&plans, &select_plans, true, 7, 3);
+    let mut timer = PlanSnapshotTimer::new(0, PLAN_SNAPSHOT_INTERVAL_TICKS);
+    let due = [
+        serde_json::json!({"tick": 29, "ready": timer.ready(29)}),
+        serde_json::json!({"tick": 30, "ready": timer.ready(30)}),
+    ];
+    let group_id = timer.advance(30);
+
+    let chunk_sizes = |snapshots: &[mind_core::input::PlanSnapshot]| -> Vec<usize> {
+        snapshots
+            .iter()
+            .map(|snapshot| snapshot.plans.as_ref().map(Vec::len).unwrap_or(0))
+            .collect()
+    };
+    let report = serde_json::json!({
+        "scenario": "input_plan_snapshot",
+        "interval_ticks": PLAN_SNAPSHOT_INTERVAL_TICKS,
+        "chunk": PLAN_SNAPSHOT_CHUNK,
+        "cap": MAX_PLAYER_PREVIEW_PLANS,
+        "empty": {"count": empty.len(), "plans": empty[0].plans.is_none()},
+        "desktop": {"count": desktop.len(), "chunks": chunk_sizes(&desktop)},
+        "mobile": {"count": mobile.len(), "chunks": chunk_sizes(&mobile)},
+        "cadence": due,
+        "group_id_after_advance": group_id,
+        "checksum": fnv1a(
+            serde_json::to_string(&(
+                chunk_sizes(&desktop),
+                chunk_sizes(&mobile),
+                empty[0].plans.is_none(),
+            ))?
+            .as_bytes(),
+        ),
+    });
+    emit(&report, out, golden)?;
+    print_json(&report, json);
+    Ok(())
+}
+
+/// `input_preview_handoff`: `PreviewState` + cursor + player-sync payload for 16/21.
+fn input_preview_handoff(json: bool, out: Option<&Path>, golden: Option<&Path>) -> Result<()> {
+    use mind_core::content::BlockId;
+    use mind_core::input::line::LineParams;
+    use mind_core::input::replay::ReplayWorld;
+    use mind_core::input::{
+        ClientPlan, CursorContext, CursorKind, InputState, PlanWire, PlayerInputSync,
+        resolve_cursor,
+    };
+
+    let world = ReplayWorld::new();
+    let mut state = InputState::new();
+    state.select_block(Some(BlockId::STONE_WALL));
+    state.update_line(
+        &world,
+        None,
+        mind_core::world::TilePos::new(2, 2),
+        mind_core::world::TilePos::new(6, 2),
+        &LineParams {
+            rotation: 1,
+            ..LineParams::default()
+        },
+    );
+    state.selected_units = smallvec::smallvec![11, 12];
+    state.command_rect = Some((0.0, 0.0, 16.0, 16.0));
+    state.refresh_preview();
+
+    let cursor = resolve_cursor(&CursorContext {
+        placing_or_select: true,
+        ..CursorContext::default()
+    });
+    state.preview.cursor = cursor;
+    let preview = state.preview.handoff_json();
+
+    let sync = PlayerInputSync {
+        snapshot_id: 1,
+        shooting: true,
+        boosting: false,
+        selected_block: Some(BlockId::STONE_WALL.raw()),
+        selected_rotation: state.rotation,
+        camera_x: 20.0,
+        camera_y: 20.0,
+        camera_w: 480.0,
+        camera_h: 270.0,
+        ..PlayerInputSync::default()
+    }
+    .with_plans(Some(&[
+        ClientPlan::place(2, 2, 1, BlockId::STONE_WALL),
+        ClientPlan::place(3, 2, 1, BlockId::STONE_WALL),
+    ]));
+
+    let wire = PlanWire::from_client(&ClientPlan::place(2, 2, 1, BlockId::STONE_WALL));
+    let report = serde_json::json!({
+        "scenario": "input_preview_handoff",
+        "preview": preview,
+        "cursor_kind": CursorKind::Hand.name(),
+        "cursor_resolved": cursor.name(),
+        "player_sync": serde_json::to_value(&sync)?,
+        "plan_wire": serde_json::to_value(&wire)?,
+        "checksum": fnv1a(serde_json::to_string(&preview)?.as_bytes()),
+    });
+    emit(&report, out, golden)?;
+    print_json(&report, json);
+    Ok(())
+}
+
 /// Serializes a [`mind_core::input::RemoteAction`] to JSON.
 fn remote_action_json(action: &mind_core::input::RemoteAction) -> serde_json::Value {
     match action {
@@ -841,6 +1130,280 @@ fn sim_command_json(command: &mind_core::determinism::SimCommand) -> serde_json:
         }),
         other => serde_json::json!({"op": other.op_name()}),
     }
+}
+
+/// A flat [`PlacementWorld`] for the input benches (no content, no sim).
+struct BenchWorld {
+    width: i32,
+    height: i32,
+    deep: bool,
+}
+
+impl BenchWorld {
+    fn new(width: i32, height: i32, deep: bool) -> Self {
+        Self {
+            width,
+            height,
+            deep,
+        }
+    }
+}
+
+impl PlacementWorld for BenchWorld {
+    fn in_bounds(&self, x: i32, y: i32) -> bool {
+        x >= 0 && y >= 0 && x < self.width && y < self.height
+    }
+
+    fn block_at(&self, _x: i32, _y: i32) -> BlockId {
+        BlockId::AIR
+    }
+
+    fn floor_deep(&self, _x: i32, _y: i32) -> bool {
+        self.deep
+    }
+
+    fn always_replace(&self, _x: i32, _y: i32) -> bool {
+        true
+    }
+
+    fn can_replace(&self, _target: BlockId, _other: BlockId) -> bool {
+        true
+    }
+
+    fn valid_place(&self, _block: BlockId, _x: i32, _y: i32, _rotation: u8) -> bool {
+        true
+    }
+}
+
+/// Times `body` for `iters` iterations after `warmup` and returns
+/// `(sorted samples in us, alloc count delta, alloc bytes delta)`.
+fn time_it<B: FnMut()>(iters: u64, warmup: u64, mut body: B) -> (Vec<u64>, u64, u64) {
+    use std::time::Instant;
+
+    for _ in 0..warmup {
+        body();
+    }
+    let mut samples = Vec::with_capacity(iters as usize);
+    let alloc_before = mind_core::util::alloc::alloc_count();
+    let bytes_before = mind_core::util::alloc::alloc_bytes();
+    for _ in 0..iters {
+        let start = Instant::now();
+        body();
+        samples.push(start.elapsed().as_nanos() as u64 / 1000);
+    }
+    let alloc = mind_core::util::alloc::alloc_count().saturating_sub(alloc_before);
+    let bytes = mind_core::util::alloc::alloc_bytes().saturating_sub(bytes_before);
+    samples.sort_unstable();
+    (samples, alloc, bytes)
+}
+
+/// Percentile helper (`p` in `0..=100`).
+fn percentile(samples: &[u64], p: usize) -> u64 {
+    if samples.is_empty() {
+        return 0;
+    }
+    samples[(samples.len() * p / 100).min(samples.len() - 1)]
+}
+
+/// `input bench`: the §7d input budgets. `input_idle` additionally asserts zero
+/// steady-state allocations under `--features alloc-audit`.
+fn bench(
+    profile: &str,
+    len: i32,
+    units: usize,
+    iters: u64,
+    assert_alloc: Option<u64>,
+    json: bool,
+) -> Result<i32> {
+    use mind_core::input::action::{CommandTarget, RemoteAction};
+    use mind_core::input::command_emit::ActionBatcher;
+    use mind_core::input::line::LineParams;
+    use mind_core::input::rts::{SelectRect, SelectableUnit};
+    use mind_core::util::alloc::enabled as alloc_enabled;
+
+    let iters = iters.max(1);
+    let (samples, alloc_delta, bytes_delta, detail) = match profile {
+        "input_line" => {
+            let world = BenchWorld::new(256, 256, false);
+            let mut state = mind_core::input::InputState::new();
+            state.select_block(Some(BlockId::STONE_WALL));
+            state.begin_place();
+            let end = len.max(1);
+            let (samples, alloc, bytes) = time_it(iters, 20, || {
+                state.update_line(
+                    &world,
+                    None,
+                    TilePos::new(0, 0),
+                    TilePos::new(end as i16, 0),
+                    &LineParams {
+                        rotation: 1,
+                        ..LineParams::default()
+                    },
+                );
+                state.refresh_preview();
+            });
+            (
+                samples,
+                alloc,
+                bytes,
+                serde_json::json!({"len": end, "segment": "updateLine+refreshPreview"}),
+            )
+        }
+        "input_astar" => {
+            let world = BenchWorld::new(64, 64, false);
+            let mut out: SmallVec<[TilePos; 128]> = SmallVec::new();
+            let (samples, alloc, bytes) = time_it(iters, 10, || {
+                out.clear();
+                mind_core::input::astar(
+                    &world,
+                    None,
+                    TilePos::new(1, 1),
+                    TilePos::new(60, 60),
+                    &mut out,
+                );
+            });
+            (
+                samples,
+                alloc,
+                bytes,
+                serde_json::json!({"segment": "astar(64x64)", "nodes": out.len()}),
+            )
+        }
+        "input_bridges" => {
+            let world = BenchWorld::new(256, 256, false);
+            let plans: SmallVec<[mind_core::input::PlanCopy; 128]> = (0..len.max(1))
+                .map(|i| mind_core::input::ClientPlan::place(i, 0, 0, BlockId::STONE_WALL))
+                .collect();
+            let placer = mind_core::input::RelativeBridgePlacer {
+                block: BlockId::STONE_WALL,
+                unlocked: true,
+                range: 12,
+                use_extra: false,
+            };
+            let (samples, alloc, bytes) = time_it(iters, 10, || {
+                let mut working = plans.clone();
+                mind_core::input::calculate_bridges(&world, &mut working, &placer, false, |_| {
+                    false
+                });
+            });
+            (
+                samples,
+                alloc,
+                bytes,
+                serde_json::json!({"plans": plans.len(), "segment": "calculateBridges"}),
+            )
+        }
+        "input_select" => {
+            let list: Vec<SelectableUnit> = (0..units)
+                .map(|i| SelectableUnit {
+                    id: i as i32,
+                    type_id: 0,
+                    x: (i % 40) as f32 * 16.0,
+                    y: (i / 40) as f32 * 16.0,
+                    team: 0,
+                    commandable: true,
+                })
+                .collect();
+            let rect = SelectRect {
+                x: -10.0,
+                y: -10.0,
+                w: 1_000_000.0,
+                h: 1_000_000.0,
+            };
+            let mut out: SmallVec<[i32; 128]> = SmallVec::new();
+            let (samples, alloc, bytes) = time_it(iters, 10, || {
+                mind_core::input::select_units_rect(&list, 0, rect, &mut out);
+            });
+            (
+                samples,
+                alloc,
+                bytes,
+                serde_json::json!({"units": list.len(), "selected": out.len()}),
+            )
+        }
+        "input_command" => {
+            let group: SmallVec<[i32; 32]> = (0..units as i32).collect();
+            let mut batcher = ActionBatcher::new(1);
+            let (samples, alloc, bytes) = time_it(iters, 10, || {
+                let _ = batcher.emit(
+                    0,
+                    RemoteAction::CommandUnits {
+                        units: group.clone(),
+                        target: CommandTarget::Position { x: 1.0, y: 2.0 },
+                        queue: false,
+                        final_batch: true,
+                    },
+                );
+            });
+            (
+                samples,
+                alloc,
+                bytes,
+                serde_json::json!({"units": group.len(), "segment": "ActionBatcher::emit"}),
+            )
+        }
+        "input_idle" => {
+            let mut state = mind_core::input::InputState::new();
+            let (samples, alloc, bytes) = time_it(iters, 20, || {
+                state.refresh_preview();
+            });
+            (
+                samples,
+                alloc,
+                bytes,
+                serde_json::json!({"segment": "refreshPreview(idle)"}),
+            )
+        }
+        other => bail!("unknown input bench profile `{other}`"),
+    };
+
+    let budget_us = match profile {
+        "input_line" => 500,
+        "input_astar" => 2_000,
+        "input_bridges" => 500,
+        "input_select" => 1_500,
+        "input_command" => 1_000,
+        "input_idle" => 200,
+        _ => unreachable!("profile validated above"),
+    };
+    let p50 = percentile(&samples, 50);
+    let p95 = percentile(&samples, 95);
+    let p99 = percentile(&samples, 99);
+    // Debug builds are not representative (matching the other §7d benches).
+    let within_budget = p95 <= budget_us;
+    let budget_ok = cfg!(debug_assertions) || within_budget;
+    let alloc_limit_ok = assert_alloc.is_none_or(|limit| !alloc_enabled() || alloc_delta <= limit);
+    let idle_zero_alloc = profile != "input_idle" || !alloc_enabled() || alloc_delta == 0;
+    let pass = budget_ok && alloc_limit_ok && idle_zero_alloc;
+
+    let report = serde_json::json!({
+        "scenario": "input_bench",
+        "profile": profile,
+        "iters": iters,
+        "p50_us": p50,
+        "p95_us": p95,
+        "p99_us": p99,
+        "budget_us": budget_us,
+        "within_budget": within_budget,
+        "budget_ok": budget_ok,
+        "alloc_audit_enabled": alloc_enabled(),
+        "alloc_count": alloc_delta,
+        "alloc_bytes": bytes_delta,
+        "alloc_limit": assert_alloc,
+        "alloc_limit_ok": alloc_limit_ok,
+        "idle_zero_alloc": idle_zero_alloc,
+        "detail": detail,
+        "pass": pass,
+    });
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "input bench {profile}: p50={p50}us p95={p95}us p99={p99}us (budget {budget_us}us) alloc={alloc_delta} {}",
+            if pass { "OK" } else { "OVER" }
+        );
+    }
+    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
 }
 
 fn points_case(name: &str, points: &SmallVec<[TilePos; 128]>) -> serde_json::Value {
