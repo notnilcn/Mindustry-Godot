@@ -1683,6 +1683,10 @@ pub enum UnitsCommand {
         /// (`alloc-audit` feature builds only).
         #[arg(long)]
         assert_alloc: Option<u64>,
+        /// Benchmark profile: `ai` (unit AI+movement tick, default) or `path`
+        /// (`ControlPathfinder` field build + request, §7d `pathfinder_flat256`).
+        #[arg(long)]
+        profile: Option<String>,
         /// Emit a machine-readable JSON report on stdout.
         #[arg(long)]
         json: bool,

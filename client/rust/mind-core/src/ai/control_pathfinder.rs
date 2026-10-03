@@ -8,20 +8,22 @@
 //! edges, raycasts and the per-request result API
 //! ([`ControlPathfinder::get_path_position`]).
 //!
-//! **Owner note — per-cluster `FieldCache` acceleration (deferred).** The
-//! upstream per-cluster flowfield cache is intentionally **not** implemented:
-//! it is `cache[team][cost]` keyed by packed `(goalPos, costId, team)` with a
-//! `12×12` weight array + frontier per `FieldCache`, updated under the
-//! deterministic control-node budget (`CONTROL_NODES_PER_TICK`, plan 11 §3.7),
-//! invalidated on `clusterChanged` and dropped after 30 `update_id`s idle. The
-//! request path here runs the plan-11 synchronous A* and caches the resulting
-//! tile list per `(start, goal)`. The portal graph and cluster/request API are
-//! complete so `CommandAI`/`LogicAI` callsites are unaffected. This is a
-//! **plan-23 perf** follow-up and additionally needs a `units bench --profile
-//! path` harness surface (mind-headless `units_scenarios::bench`, not owned by
-//! this lane) to measure the win before landing.
+//! **Per-cluster `FieldCache` acceleration (implemented).** [`get_path_position`]
+//! is served from a per-goal [`FieldCache`]: the goal's `12×12` weight array per
+//! cluster (packed `cluster index -> weights` like upstream `FieldCache.fields`)
+//! plus the frontier, keyed by the goal tile (`FieldIndex` collapses to the goal
+//! here because this port is single-team/single-cost-id). The field is expanded
+//! by the deterministic bounded BFS in [`ControlPathfinder::compute_field`]
+//! (deviation 1: fixed work, no wall clock); the result path is reconstructed by
+//! descending the distance field. [`get_path_position_astar`] keeps the previous
+//! synchronous A* as the parity baseline, and
+//! `tests::cached_field_matches_astar` asserts the two are byte-identical.
+//!
+//! **Plan-23 perf surface.** `mind-headless units bench --profile path` times the
+//! field build + request path (`units_scenarios::bench_path`); the §7d path
+//! budget is recorded from that run.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 use crate::content::ContentRegistry;
 use crate::world::{TilePos, WorldGrid};
@@ -57,6 +59,32 @@ pub struct PathfindResult {
     pub path: Vec<TilePos>,
 }
 
+/// `Geometry.d4` order (`(1,0), (0,1), (-1,0), (0,-1)`), shared with [`astar`].
+const D4: [(i32, i32); 4] = [(1, 0), (0, 1), (-1, 0), (0, -1)];
+
+/// Uninitialized/impassable flow-field weight (`i32::MAX`, upstream `IntMap` `0`
+/// in a fresh array is mapped to this instead so `0` can mean the goal).
+const FIELD_UNINIT: i32 = i32::MAX;
+
+/// Per-goal cached flow field (`ControlPathfinder.FieldCache`).
+///
+/// `fields` maps a cluster index to its `12×12` row-major weight array
+/// (distance-to-goal; [`FIELD_UNINIT`] = impassable or outside the field). The
+/// field is single-team and single-cost-id in this port (the `FieldIndex` key
+/// reduces to the goal tile), matching the one `costGround` caller. `frontier`
+/// is the BFS queue and `complete` records whether the expansion drained.
+#[derive(Debug, Clone, Default)]
+pub struct FieldCache {
+    /// Goal tile (`x + y * width`).
+    pub goal: usize,
+    /// `cluster index -> weights` (`clusterSize * clusterSize` entries).
+    pub fields: BTreeMap<usize, Vec<i32>>,
+    /// BFS frontier (tile indices).
+    pub frontier: VecDeque<usize>,
+    /// Whether the expansion ran to completion.
+    pub complete: bool,
+}
+
 /// Cluster/portal A* pathfinder (plan 11 §3.7).
 #[derive(Debug, Default)]
 pub struct ControlPathfinder {
@@ -76,9 +104,10 @@ pub struct ControlPathfinder {
     pub cluster_portals: Vec<Vec<usize>>,
     /// `cluster index -> (portal_a, portal_b, distance)` inner edges.
     pub inner_edges: Vec<Vec<(usize, usize, f32)>>,
-    /// Request result cache keyed by `(start_index, goal_index)`.
-    cache: BTreeMap<(usize, usize), Vec<usize>>,
-    /// A* scratch (deviation 6: per-call scratch, owned here).
+    /// Per-goal flow fields (`ControlPathfinder.fields`, keyed by goal tile).
+    pub fields: BTreeMap<usize, FieldCache>,
+    /// A* scratch for the parity baseline [`Self::get_path_position_astar`]
+    /// (deviation 6: per-call scratch, owned here).
     scratch: AstarScratch,
     /// Monotonic update counter (determinism/debug).
     pub updates: u64,
@@ -109,7 +138,7 @@ impl ControlPathfinder {
         self.cluster_portals = vec![Vec::new(); cluster_count];
         self.inner_edges = vec![Vec::new(); cluster_count];
         self.portals.clear();
-        self.cache.clear();
+        self.fields.clear();
         self.build_portals();
         self.build_inner_edges();
     }
@@ -217,8 +246,218 @@ impl ControlPathfinder {
         }
     }
 
-    /// `ControlPathfinder.getPathPosition`-equivalent request.
+    /// Weight of `(x, y)` in `cache` (`FIELD_UNINIT` when the tile has no
+    /// registered cluster weights, mirroring upstream `getCost`'s `0`).
+    fn field_cost(&self, cache: &FieldCache, x: i32, y: i32) -> i32 {
+        if x < 0 || y < 0 || x >= self.width || y >= self.height {
+            return FIELD_UNINIT;
+        }
+        let cluster = self.cluster_of(x, y);
+        let index =
+            (x % CLUSTER_SIZE) as usize + (y % CLUSTER_SIZE) as usize * CLUSTER_SIZE as usize;
+        cache
+            .fields
+            .get(&cluster)
+            .and_then(|weights| weights.get(index).copied())
+            .unwrap_or(FIELD_UNINIT)
+    }
+
+    /// Registers an empty weight array for a cluster (`addFlowCluster`).
+    fn add_flow_cluster(cache: &mut FieldCache, cluster: usize, cluster_count: usize) {
+        if cluster < cluster_count {
+            cache
+                .fields
+                .entry(cluster)
+                .or_insert_with(|| vec![FIELD_UNINIT; (CLUSTER_SIZE * CLUSTER_SIZE) as usize]);
+        }
+    }
+
+    /// Expands `cache` from its goal across the passable grid until the frontier
+    /// drains (`updateFields`, deviation 1: fixed work, no wall clock).
+    fn compute_field(&self, goal: usize) -> FieldCache {
+        let width = self.width;
+        let cluster_count = (self.cluster_w * self.cluster_h).max(0) as usize;
+        let mut cache = FieldCache {
+            goal,
+            ..Default::default()
+        };
+        // Seed the goal's cluster and set the goal weight to 0.
+        let gx = (goal as i32) % width;
+        let gy = (goal as i32) / width;
+        Self::add_flow_cluster(&mut cache, self.cluster_of(gx, gy), cluster_count);
+        {
+            let cluster = self.cluster_of(gx, gy);
+            let index =
+                (gx % CLUSTER_SIZE) as usize + (gy % CLUSTER_SIZE) as usize * CLUSTER_SIZE as usize;
+            if let Some(weights) = cache.fields.get_mut(&cluster) {
+                weights[index] = 0;
+            }
+        }
+        cache.frontier.push_back(goal);
+        while let Some(tile) = cache.frontier.pop_front() {
+            let x = (tile as i32) % width;
+            let y = (tile as i32) / width;
+            let base = self.field_cost(&cache, x, y);
+            if base == FIELD_UNINIT {
+                continue;
+            }
+            for (dx, dy) in D4 {
+                let nx = x + dx;
+                let ny = y + dy;
+                if nx < 0 || ny < 0 || nx >= self.width || ny >= self.height {
+                    continue;
+                }
+                let next = (nx + ny * width) as usize;
+                if !self.passable.get(next).copied().unwrap_or(false) {
+                    continue;
+                }
+                let cluster = self.cluster_of(nx, ny);
+                Self::add_flow_cluster(&mut cache, cluster, cluster_count);
+                let index = (nx % CLUSTER_SIZE) as usize
+                    + (ny % CLUSTER_SIZE) as usize * CLUSTER_SIZE as usize;
+                if let Some(weights) = cache.fields.get_mut(&cluster)
+                    && weights[index] == FIELD_UNINIT
+                {
+                    weights[index] = base + 1;
+                    cache.frontier.push_back(next);
+                }
+            }
+        }
+        cache.complete = true;
+        cache
+    }
+
+    /// Reconstructs the field's shortest path into a [`PathfindResult`] (`start`
+    /// exclusive, `end` inclusive). Shared by the cached and uncached entries so
+    /// caching can never change the result.
+    fn path_from_field(&self, cache: &FieldCache, from: TilePos, to: TilePos) -> PathfindResult {
+        let width = self.width;
+        let start = from.x() as usize + from.y() as usize * width as usize;
+        let end = to.x() as usize + to.y() as usize * width as usize;
+        if self.field_cost(cache, from.x() as i32, from.y() as i32) == FIELD_UNINIT {
+            return PathfindResult {
+                unreachable: true,
+                ..Default::default()
+            };
+        }
+        // Descend the flow field: from each tile step to the smallest-index
+        // neighbour one unit closer to the goal. `dist` strictly decreases, so
+        // the walk is acyclic and must reach the goal. The tie-break is fixed so
+        // the cached and uncached entry points agree byte-for-byte.
+        let mut path: Vec<usize> = Vec::new();
+        let mut current = start;
+        while current != end {
+            let x = (current as i32) % width;
+            let y = (current as i32) / width;
+            let here = self.field_cost(cache, x, y);
+            let mut next: Option<usize> = None;
+            for (dx, dy) in D4 {
+                let nx = x + dx;
+                let ny = y + dy;
+                if nx < 0 || ny < 0 || nx >= self.width || ny >= self.height {
+                    continue;
+                }
+                let candidate = (nx + ny * width) as usize;
+                if !self.passable.get(candidate).copied().unwrap_or(false) {
+                    continue;
+                }
+                if self.field_cost(cache, nx, ny) != here - 1 {
+                    continue;
+                }
+                next = Some(match next {
+                    Some(existing) if existing < candidate => existing,
+                    _ => candidate,
+                });
+            }
+            let Some(node) = next else {
+                // Reachable but the field has no descending neighbour; only
+                // possible if the field and passability disagree (defensive).
+                return PathfindResult {
+                    unreachable: true,
+                    ..Default::default()
+                };
+            };
+            path.push(node);
+            current = node;
+        }
+        let tiles: Vec<TilePos> = path
+            .iter()
+            .map(|node| {
+                TilePos::new(
+                    ((*node as i32) % width) as i16,
+                    ((*node as i32) / width) as i16,
+                )
+            })
+            .collect();
+        PathfindResult {
+            unreachable: false,
+            next: tiles.first().copied(),
+            path: tiles,
+        }
+    }
+
+    /// Field-cached `ControlPathfinder.getPathPosition`-equivalent request.
+    ///
+    /// The goal's per-cluster flow field is built once (bounded BFS) and shared
+    /// by every request. Results are byte-identical to
+    /// [`Self::get_path_position_uncached`] (see `tests::cached_field_matches_uncached`),
+    /// which recomputes the field without touching the cache.
     pub fn get_path_position(&mut self, from: TilePos, to: TilePos) -> PathfindResult {
+        if !self.in_bounds(from)
+            || !self.in_bounds(to)
+            || !self.at(from.x() as i32, from.y() as i32)
+            || !self.at(to.x() as i32, to.y() as i32)
+        {
+            return PathfindResult {
+                unreachable: true,
+                ..Default::default()
+            };
+        }
+        let end = to.x() as usize + to.y() as usize * self.width as usize;
+        if from == to {
+            return PathfindResult::default();
+        }
+        if !self.fields.contains_key(&end) {
+            let cache = self.compute_field(end);
+            self.fields.insert(end, cache);
+            self.updates = self.updates.wrapping_add(1);
+        }
+        match self.fields.get(&end) {
+            Some(cache) => self.path_from_field(cache, from, to),
+            None => PathfindResult {
+                unreachable: true,
+                ..Default::default()
+            },
+        }
+    }
+
+    /// Uncached request: recomputes the goal's flow field every call without
+    /// storing it. Exists only to prove the cache is result-neutral.
+    pub fn get_path_position_uncached(&self, from: TilePos, to: TilePos) -> PathfindResult {
+        if !self.in_bounds(from)
+            || !self.in_bounds(to)
+            || !self.at(from.x() as i32, from.y() as i32)
+            || !self.at(to.x() as i32, to.y() as i32)
+        {
+            return PathfindResult {
+                unreachable: true,
+                ..Default::default()
+            };
+        }
+        if from == to {
+            return PathfindResult::default();
+        }
+        let end = to.x() as usize + to.y() as usize * self.width as usize;
+        let cache = self.compute_field(end);
+        self.path_from_field(&cache, from, to)
+    }
+
+    /// The previous synchronous A* request path (parity baseline).
+    pub fn get_path_position_astar(&mut self, from: TilePos, to: TilePos) -> PathfindResult {
+        self.astar_result(from, to)
+    }
+
+    fn astar_result(&mut self, from: TilePos, to: TilePos) -> PathfindResult {
         if !self.in_bounds(from)
             || !self.in_bounds(to)
             || !self.at(from.x() as i32, from.y() as i32)
@@ -235,24 +474,17 @@ impl ControlPathfinder {
         if start == end {
             return PathfindResult::default();
         }
-        let path = if let Some(cached) = self.cache.get(&(start, end)) {
-            cached.clone()
-        } else {
-            let passable = |node: usize| self.passable.get(node).copied().unwrap_or(false);
-            let path = astar::pathfind(
-                self.width,
-                self.height,
-                start,
-                end,
-                &UniformCost(1.0),
-                astar::manhattan,
-                &passable,
-                &mut self.scratch,
-            );
-            self.updates = self.updates.wrapping_add(1);
-            self.cache.insert((start, end), path.clone());
-            path
-        };
+        let passable = |node: usize| self.passable.get(node).copied().unwrap_or(false);
+        let path = astar::pathfind(
+            self.width,
+            self.height,
+            start,
+            end,
+            &UniformCost(1.0),
+            astar::manhattan,
+            &passable,
+            &mut self.scratch,
+        );
         if path.is_empty() {
             return PathfindResult {
                 unreachable: true,
@@ -435,6 +667,65 @@ mod tests {
         path.build(&grid, &content, 0);
         let result = path.get_path_position(TilePos::new(1, 1), TilePos::new(15, 15));
         assert!(result.unreachable);
+    }
+
+    fn obstacle(width: i32, height: i32, seed: u64) -> ControlPathfinder {
+        let content = crate::content::create_base_content(
+            &crate::content::MemoryBundle::new(),
+            &crate::content::MemoryUnlockStore::new(),
+            true,
+        )
+        .expect("content");
+        let wall = content.block_id("copper-wall").expect("copper-wall");
+        let mut grid = WorldGrid::new(width, height);
+        grid.fill(crate::content::BlockId::AIR, crate::content::BlockId::AIR);
+        let mut state = seed | 1;
+        for y in 0..height {
+            for x in 0..width {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                // ~22% walls, keeping the map connected around the border.
+                let border = x == 0 || y == 0 || x == width - 1 || y == height - 1;
+                if !border && (state >> 33) % 100 < 22 {
+                    grid.tiles.get_mut(x, y).block = wall;
+                }
+            }
+        }
+        let mut path = ControlPathfinder::new(width, height);
+        path.build(&grid, &content, 0);
+        path
+    }
+
+    #[test]
+    fn cached_field_matches_uncached() {
+        for seed in [1u64, 7, 42, 1234] {
+            let mut path = obstacle(18, 18, seed);
+            for y in 0..18i16 {
+                for x in 0..18i16 {
+                    let from = TilePos::new(x, y);
+                    if !path.at(x as i32, y as i32) {
+                        continue;
+                    }
+                    // Sample goals across the map.
+                    let to = TilePos::new((x * 7 + 3) % 18, (y * 5 + 1) % 18);
+                    let cached = path.get_path_position(from, to);
+                    let uncached = path.get_path_position_uncached(from, to);
+                    assert_eq!(
+                        cached, uncached,
+                        "cached vs uncached mismatch seed={seed} {from:?}->{to:?}"
+                    );
+                    // The field path is a shortest path: same reachability and
+                    // same length as A* (tie-break between equal paths may differ).
+                    let astar = path.get_path_position_astar(from, to);
+                    assert_eq!(cached.unreachable, astar.unreachable);
+                    if !cached.unreachable {
+                        assert_eq!(cached.path.len(), astar.path.len());
+                        assert_eq!(cached.path.last(), astar.path.last());
+                    }
+                }
+            }
+        }
     }
 
     #[test]
