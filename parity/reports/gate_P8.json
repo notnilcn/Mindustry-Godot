@@ -1,0 +1,84 @@
+{
+  "format": 1,
+  "phase": "P8",
+  "pass": true,
+  "steps": [
+    {
+      "name": "matrix_check",
+      "status": "pass"
+    },
+    {
+      "name": "t1_scenario_suite",
+      "status": "deferred",
+      "owner": "tools/ci.sh"
+    },
+    {
+      "name": "checksum_matrix",
+      "status": "deferred",
+      "owner": "nightly"
+    },
+    {
+      "name": "mcp_parity",
+      "status": "deferred",
+      "owner": "nightly windows-gpu"
+    },
+    {
+      "name": "bench_gate",
+      "status": "deferred",
+      "owner": "nightly perf"
+    },
+    {
+      "name": "goldens_verify",
+      "status": "pass"
+    },
+    {
+      "name": "ledger_check",
+      "status": "deferred",
+      "owner": "parity report"
+    }
+  ],
+  "checks": [
+    {
+      "name": "matrix",
+      "pass": true,
+      "problems": [],
+      "note": "91 landed rows; no --tests list supplied (not resolved)",
+      "count": 100
+    },
+    {
+      "name": "checksum_registry",
+      "pass": true,
+      "problems": [],
+      "note": null,
+      "count": 7
+    },
+    {
+      "name": "scenario_catalog",
+      "pass": true,
+      "problems": [],
+      "note": null,
+      "count": 133
+    },
+    {
+      "name": "golden_manifest",
+      "pass": true,
+      "problems": [],
+      "note": null,
+      "count": 82
+    },
+    {
+      "name": "bench_budgets",
+      "pass": true,
+      "problems": [],
+      "note": null,
+      "count": 40
+    },
+    {
+      "name": "mcp_catalog",
+      "pass": true,
+      "problems": [],
+      "note": null,
+      "count": 26
+    }
+  ]
+}
