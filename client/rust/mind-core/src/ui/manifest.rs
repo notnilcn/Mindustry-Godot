@@ -343,6 +343,22 @@ pub const EXPECTED_M3_DIALOGS: &[&str] = &[
     "traces",
 ];
 
+/// Dialog names required by plan 14 M5 (campaign dialogs; plan 12 landed).
+pub const EXPECTED_M5_DIALOGS: &[&str] = &[
+    "planet",
+    "research",
+    "schematics",
+    "sector_select",
+    "launch_loadout",
+    "loadout",
+    "custom",
+    "map_play",
+    "editor_maps",
+];
+
+/// Dialog names required by plan 14 M7 (file chooser; chat/console are fragments).
+pub const EXPECTED_M7_DIALOGS: &[&str] = &["file_chooser"];
+
 /// Pause flag for a dialog from `UI.init()` (§3.4).
 pub fn expected_pause(name: &str) -> Option<bool> {
     Some(match name {
@@ -425,7 +441,28 @@ mod tests {
                 "M3 dialog '{name}' missing from dialogs_manifest.json"
             );
         }
-        for name in ["menu", "hud", "placement", "minimap", "block_config"] {
+        for name in EXPECTED_M5_DIALOGS {
+            assert!(
+                manifest.dialog(name).is_some(),
+                "M5 dialog '{name}' missing from dialogs_manifest.json"
+            );
+        }
+        for name in EXPECTED_M7_DIALOGS {
+            assert!(
+                manifest.dialog(name).is_some(),
+                "M7 dialog '{name}' missing from dialogs_manifest.json"
+            );
+        }
+        for name in [
+            "menu",
+            "hud",
+            "placement",
+            "minimap",
+            "block_config",
+            "chat",
+            "console",
+            "player_list",
+        ] {
             assert!(
                 manifest.fragments.iter().any(|entry| entry.name == name),
                 "fragment '{name}' missing from dialogs_manifest.json"

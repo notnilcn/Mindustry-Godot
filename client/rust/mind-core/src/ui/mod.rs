@@ -9,8 +9,13 @@
 //! `client/scenes/ui`.
 
 pub mod builder;
+pub mod campaign;
+pub mod chat;
+pub mod console;
 pub mod display;
+pub mod file_chooser;
 pub mod hud_text;
 pub mod manifest;
+pub mod player_list;
 pub mod stat_display;
 pub mod text;

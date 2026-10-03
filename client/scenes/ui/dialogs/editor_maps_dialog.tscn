@@ -1,0 +1,14 @@
+; SPDX-License-Identifier: GPL-3.0-only
+;
+; EditorMapsDialog (plan 14 M5 shell). Inherits the shared dialog frame; the map
+; list/import/export actions are built by editor_maps_dialog.gd (editor model 19).
+;
+; Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
+
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/ui/dialogs/mind_dialog_base.tscn" id="1_base"]
+[ext_resource type="Script" path="res://ui/dialogs/editor_maps_dialog.gd" id="2_script"]
+
+[node name="EditorMapsDialog" instance=ExtResource("1_base")]
+script = ExtResource("2_script")

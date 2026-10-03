@@ -1,0 +1,21 @@
+; SPDX-License-Identifier: GPL-3.0-only
+;
+; ConsoleFragment (plan 14 M7). Persistent HUD overlay; the line editor, history
+; and scroll buttons are built by console_fragment.gd (runtime data, §3.10).
+;
+; Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
+; Source: core/src/mindustry/ui/fragments/ConsoleFragment.java
+
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://ui/fragments/console_fragment.gd" id="1_script"]
+
+[node name="ConsoleFragment" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("1_script")

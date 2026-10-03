@@ -44,6 +44,15 @@ pub fn run(command: &UiCommand) -> Result<()> {
         UiCommand::Display { json, dump, golden } => {
             display(*json, dump.as_deref(), golden.as_deref())
         }
+        UiCommand::Campaign { json, dump, golden } => {
+            campaign(*json, dump.as_deref(), golden.as_deref())
+        }
+        UiCommand::FileChooser { json, dump, golden } => {
+            file_chooser(*json, dump.as_deref(), golden.as_deref())
+        }
+        UiCommand::ChatConsole { json, dump, golden } => {
+            chat_console(*json, dump.as_deref(), golden.as_deref())
+        }
     }
 }
 
@@ -351,6 +360,136 @@ fn manifest(json_out: bool, repo: Option<&Path>) -> Result<()> {
     finish(value, json_out, None, None)
 }
 
+/// `ui campaign`: projects the plan-12 campaign fixture into the M5 dialog read
+/// models and locks counts + a content checksum against the committed golden.
+fn campaign(json_out: bool, dump: Option<&Path>, golden: Option<&Path>) -> Result<()> {
+    use mind_core::ui::campaign::CampaignViews;
+
+    let views = CampaignViews::vanilla_fixture();
+    let full = serde_json::to_value(&views)?;
+    let checksum = fnv_hex(&serde_json::to_vec(&full)?);
+    let sample_sector = views
+        .sectors
+        .iter()
+        .find(|sector| sector.preset.as_deref() == Some("groundZero"))
+        .or_else(|| views.sectors.first());
+    let sample_research = views
+        .research
+        .iter()
+        .find(|node| !node.requirements.is_empty())
+        .or_else(|| views.research.first());
+    let value = json!({
+        "format": 1,
+        "planet": views.planet,
+        "counts": {
+            "planets": views.planets.len(),
+            "sectors": views.sectors.len(),
+            "research": views.research.len(),
+            "schematics": views.schematics.len(),
+            "loadouts": views.loadouts.len(),
+            "maps": views.maps.len(),
+        },
+        "planets": views.planets.iter().map(|planet| planet.name.clone()).collect::<Vec<_>>(),
+        "rules": views.rules,
+        "schematics": views.schematics,
+        "sample_sector": sample_sector,
+        "sample_research": sample_research,
+        "complete": views.complete,
+        "checksum": checksum,
+    });
+    finish(value, json_out, dump, golden)
+}
+
+/// `ui file-chooser`: validates `FileChooserParams` request resolution.
+fn file_chooser(json_out: bool, dump: Option<&Path>, golden: Option<&Path>) -> Result<()> {
+    use mind_core::content::MemoryBundle;
+    use mind_core::ui::file_chooser::{FileChooserParams, ext_equals, sanitize_filename};
+
+    let bundle = MemoryBundle::with_pairs([("open", "Open File"), ("save", "Save File")]);
+    let mut open = FileChooserParams::open(&["msch"]).with_name("my base:1");
+    open.submit(&bundle, "import_schematic").ok();
+    let mut save = FileChooserParams::save(&["png", "jpg"]);
+    save.check_params(&bundle).ok();
+    let missing = FileChooserParams::new().check_params(&bundle).is_err();
+    let value = json!({
+        "format": 1,
+        "open": {
+            "title": open.title,
+            "file_name": open.file_name,
+            "accepts_msch": open.accepts("x.msch"),
+            "accepts_png": open.accepts("x.png"),
+            "allow_multiple": open.allow_multiple,
+        },
+        "save": {
+            "title": save.title,
+            "file_name": save.file_name,
+            "target": save.save_target_name("shot.jpeg"),
+        },
+        "sanitized": sanitize_filename("a b/c:d"),
+        "ext_equals": ext_equals("MAP.msav", "msav"),
+        "missing_extensions_rejected": missing,
+    });
+    finish(value, json_out, dump, golden)
+}
+
+/// `ui chat-console`: exercises the chat state machine and console registry.
+fn chat_console(json_out: bool, dump: Option<&Path>, golden: Option<&Path>) -> Result<()> {
+    use mind_core::ui::chat::{ChatMode, ChatState, check_ping};
+    use mind_core::ui::console::ConsoleRegistry;
+
+    let mut chat = ChatState::new();
+    chat.mode = ChatMode::Team;
+    let prefix_only = chat.send("/t", false, (100, 100)).is_none();
+    let sent = chat.send("5,6 [help]", false, (100, 100));
+    let ping = sent.as_ref().and_then(|send| send.ping.clone());
+    let mode_cycle: Vec<&'static str> = {
+        let mut state = ChatState::new();
+        let mut input = String::new();
+        let mut modes = Vec::new();
+        for _ in 0..3 {
+            input = state.next_mode(false, &input);
+            modes.push(state.mode.prefix());
+        }
+        modes
+    };
+    let out_of_bounds = check_ping("200,2 [x]", 100, 100).is_none();
+
+    let mut registry = ConsoleRegistry::with_defaults();
+    registry.register("sum", "sum <a> <b>", "add two integers", |args| {
+        let a: i32 = args.first().and_then(|s| s.parse().ok()).unwrap_or(0);
+        let b: i32 = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+        format!("{}", a + b)
+    });
+    let sum = registry.execute("sum 3 4").output;
+    let unknown = registry.execute("nope").output;
+    let help_nonempty = !registry.help_text().is_empty();
+
+    let value = json!({
+        "format": 1,
+        "chat": {
+            "prefix_only_rejected": prefix_only,
+            "sent_message": sent.map(|send| send.message),
+            "ping": ping,
+            "mode_cycle": mode_cycle,
+            "out_of_bounds_ping_rejected": out_of_bounds,
+        },
+        "console": {
+            "commands": registry.len(),
+            "sum": sum,
+            "unknown": unknown,
+            "help_nonempty": help_nonempty,
+        },
+    });
+    finish(value, json_out, dump, golden)
+}
+
+/// FNV-1a hex over bytes (canonical checksum helper).
+fn fnv_hex(bytes: &[u8]) -> String {
+    let mut hasher = mind_core::determinism::Hasher::new();
+    hasher.write(bytes);
+    hasher.finish().to_hex()
+}
+
 /// Emits `value`, optionally dumping and/or comparing against a golden.
 fn finish(value: Value, json_out: bool, dump: Option<&Path>, golden: Option<&Path>) -> Result<()> {
     let rendered = serde_json::to_string_pretty(&value)?;
@@ -382,4 +521,30 @@ fn hex(bytes: &[u8]) -> String {
         out.push_str(&format!("{byte:02x}"));
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Committed UI golden path (`mind-core/tests/goldens/ui`).
+    fn golden(name: &str) -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../mind-core/tests/goldens/ui")
+            .join(name)
+    }
+
+    /// Runs a golden-bearing scenario against its committed golden; the helper
+    /// bails with `golden mismatch` when the output drifts.
+    #[test]
+    fn ui_goldens_match() {
+        text(false, None, Some(&golden("text.json"))).unwrap();
+        dsl_scenario(false, None, Some(&golden("dsl.json"))).unwrap();
+        menu_tree(false, None, Some(&golden("menu_tree.json"))).unwrap();
+        hud_text(false, None, Some(&golden("hud_text.json"))).unwrap();
+        display(false, None, Some(&golden("display.json"))).unwrap();
+        campaign(false, None, Some(&golden("campaign.json"))).unwrap();
+        file_chooser(false, None, Some(&golden("file_chooser.json"))).unwrap();
+        chat_console(false, None, Some(&golden("chat_console.json"))).unwrap();
+    }
 }
