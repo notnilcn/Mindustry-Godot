@@ -11,6 +11,7 @@
 //! plan 04's [`FileSystem`](crate::io::FileSystem).
 
 pub mod assets;
+pub mod catalog;
 pub mod deps;
 pub mod discovery;
 pub mod json;
@@ -30,6 +31,10 @@ use serde::Serialize;
 
 use crate::io::{FileSystem, SettingsStore};
 
+pub use catalog::{
+    CATALOG_CONTENT_TYPES, ContentCatalogEntry, catalog_type_index, catalogs_by_mod,
+    content_catalog, content_catalog_for_mod, vanilla_content_catalog,
+};
 pub use deps::{ModDependency, resolve_dependencies};
 pub use discovery::{
     ModCandidate, ModEntry, ModRoot, ModSource, config_file, config_folder, find_meta, read_zip,
