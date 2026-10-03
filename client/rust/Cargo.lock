@@ -1746,6 +1746,7 @@ dependencies = [
  "log",
  "mind-derive",
  "mind-macros",
+ "png",
  "serde",
  "serde_json",
  "sha2",

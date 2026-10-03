@@ -1188,6 +1188,43 @@ pub enum MapsCommand {
         #[arg(long)]
         json: bool,
     },
+
+    /// Editor-map save → load → save idempotence with rules/genfilters/locales
+    /// tags (plan 19 M2 §5/§7b).
+    SaveLoadSave {
+        /// Fixture map name (only used for the temp file stems).
+        #[arg(long, default_value = "editor_fixture")]
+        map: String,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Deterministic hand-built tile-set preview pixels + PNG round-trip
+    /// (plan 19 M2 §5/§7b).
+    PreviewTiles {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// PNG image-map import/export round-trip (plan 19 M2 §5/§7b).
+    ImageRoundtrip {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Registry ordering + `ShuffleMode` selection across seeds (plan 06 §7b,
+    /// consumed/verified by plan 19 M2).
+    RegistryShuffle {
+        /// Number of selection iterations per mode.
+        #[arg(long, default_value_t = 16)]
+        seeds: u32,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// `editor` subcommands (plan 19 §7b).
@@ -1199,6 +1236,29 @@ pub enum EditorCommand {
         /// Fixture JSON path (relative to the current directory unless absolute).
         #[arg(long, default_value = "mind-core/tests/fixtures/editor/basic_ops.json")]
         fixture: PathBuf,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Editor lifecycle round-trip (plan 19 M1 §5/§7b): begin_edit/adopt → draw
+    /// → undo-all → redo-all → save → reload, comparing normalized world
+    /// checksums at each checkpoint.
+    Roundtrip {
+        /// Optional source map file; omitted builds a synthetic 32×32 editor map.
+        #[arg(long)]
+        map: Option<PathBuf>,
+        /// Deterministic seed (reserved for generation filters).
+        #[arg(long, default_value_t = 1)]
+        seed: u64,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Resize-with-shift scenario (plan 19 M1 §5/§7b): a 100×100 painted map
+    /// resized to 80×80 with a ±10 shift preserves in-bounds tiles/config data.
+    ResizeShift {
         /// Emit a machine-readable JSON report on stdout.
         #[arg(long)]
         json: bool,

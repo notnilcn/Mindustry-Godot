@@ -7,11 +7,16 @@
 //! `mind-core` only computes the raw pixels (`PreviewImage`); Godot textures
 //! and the on-disk cache are plan 19. Block minimap colors come from plan
 //! 02's `BlockDef.map_color`; missing colors default deterministically (R9).
+//!
+//! **Plan-19 addition (OD19-D).** [`encode_png`]/[`decode_png`] are a minimal
+//! RGBA8 PNG codec behind [`PreviewImage`], requested by plan 19 (map image
+//! import/export + preview files). This is the only plan-04 `io` surface 19
+//! adds; it uses the workspace-pinned `png` crate already used by plan 03.
 
-use super::super::IoResult;
 use super::super::save::fixture::creates_building_kind;
 use super::super::save::state::{MapSource, WorldContext};
 use super::super::wire::WireReader;
+use super::super::{IoError, IoResult};
 use crate::content::{BlockId, BlockKind, ContentRegistry};
 
 /// Black (`Color.rgba8888(0,0,0,1)`-ish sentinel used by the preview blend).
@@ -493,10 +498,94 @@ pub fn read_image(
     Ok(())
 }
 
+/// Encodes a [`PreviewImage`] as an RGBA8 PNG (`MapIO` image export, plan 19).
+///
+/// The `png` crate is a plan-04 addition requested by 19 (OD19-D); it is the
+/// workspace-pinned `=0.17.16` already used by plan 03.
+pub fn encode_png(image: &PreviewImage) -> IoResult<Vec<u8>> {
+    let mut out: Vec<u8> = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut out, image.width, image.height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder
+            .write_header()
+            .map_err(|error| IoError::corrupt(format!("PNG encode header: {error}")))?;
+        writer
+            .write_image_data(&image.rgba)
+            .map_err(|error| IoError::corrupt(format!("PNG encode data: {error}")))?;
+    }
+    Ok(out)
+}
+
+/// Decodes an 8-bit PNG into a [`PreviewImage`] (`MapIO` image import, plan 19).
+///
+/// RGB and RGBA inputs are accepted; an alpha-less image becomes fully opaque.
+/// Indexed/16-bit/grayscale inputs are rejected as unsupported rather than
+/// guessed at (the editor only imports colored PNG maps).
+pub fn decode_png(bytes: &[u8]) -> IoResult<PreviewImage> {
+    let decoder = png::Decoder::new(bytes);
+    let mut reader = decoder
+        .read_info()
+        .map_err(|error| IoError::corrupt(format!("PNG decode info: {error}")))?;
+    let mut buffer = vec![0u8; reader.output_buffer_size()];
+    let info = reader
+        .next_frame(&mut buffer)
+        .map_err(|error| IoError::corrupt(format!("PNG decode frame: {error}")))?;
+    if info.bit_depth != png::BitDepth::Eight {
+        return Err(IoError::corrupt(format!(
+            "unsupported PNG bit depth {:?} (expected 8-bit)",
+            info.bit_depth
+        )));
+    }
+    let data = &buffer[..info.buffer_size()];
+    let (width, height) = (info.width, info.height);
+    let pixel_count = width as usize * height as usize;
+    let mut rgba = Vec::with_capacity(pixel_count * 4);
+    match info.color_type {
+        png::ColorType::Rgba => rgba.extend_from_slice(data),
+        png::ColorType::Rgb => {
+            for pixel in data.as_chunks::<3>().0 {
+                rgba.extend_from_slice(&[pixel[0], pixel[1], pixel[2], 0xff]);
+            }
+        }
+        other => {
+            return Err(IoError::corrupt(format!(
+                "unsupported PNG color type {other:?} (expected RGB/RGBA)"
+            )));
+        }
+    }
+    if rgba.len() != pixel_count * 4 {
+        return Err(IoError::corrupt("PNG payload length mismatch"));
+    }
+    Ok(PreviewImage {
+        width,
+        height,
+        rgba,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::content::test_support::test_registry;
+
+    #[test]
+    fn png_roundtrip_preserves_pixels() {
+        let mut image = PreviewImage::new(3, 2);
+        image.set(0, 0, 0xff0000ff);
+        image.set(1, 1, 0x00ff00ff);
+        image.set(2, 1, 0x0000ffff);
+        let bytes = encode_png(&image).unwrap();
+        assert!(bytes.starts_with(&super::super::PNG_SIGNATURE));
+        let decoded = decode_png(&bytes).unwrap();
+        assert_eq!(decoded, image);
+    }
+
+    #[test]
+    fn decode_rejects_garbage() {
+        assert!(decode_png(b"not a png").is_err());
+    }
 
     #[test]
     fn preview_image_pixels() {

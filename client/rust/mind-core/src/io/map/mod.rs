@@ -14,7 +14,8 @@ use std::path::Path;
 pub use header::MapHeader;
 pub use preview::{
     BlockPalette, ColorMapper, FnColorMapper, ImageTileSink, PreviewContext, PreviewImage,
-    color_for, generate_preview_from_tiles, read_image, team_color, write_image,
+    color_for, decode_png, encode_png, generate_preview_from_tiles, read_image, team_color,
+    write_image,
 };
 
 use super::fs::{FileSystem, SAVE_EXTENSION};

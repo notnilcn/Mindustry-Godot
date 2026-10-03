@@ -21,6 +21,8 @@ flate2.workspace = true
 sha2.workspace = true
 zip.workspace = true
 data-encoding.workspace = true
+# Plan 19 / OD19-D: PNG image-map + preview codec (`io::map::encode_png`/`decode_png`).
+png.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true

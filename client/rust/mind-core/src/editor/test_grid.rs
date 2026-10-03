@@ -171,4 +171,44 @@ impl EditorGrid for TestGrid {
     fn update_static(&mut self, _x: i32, _y: i32) {}
 
     fn update_block(&mut self, _x: i32, _y: i32) {}
+
+    fn clear_editor_darkness(&mut self) {
+        self.data.iter_mut().for_each(|data| *data = 0);
+    }
+
+    fn recache_all(&mut self) {}
+
+    fn resize_shift(
+        &mut self,
+        _content: &crate::content::ContentRegistry,
+        width: i32,
+        height: i32,
+        shift_x: i32,
+        shift_y: i32,
+    ) {
+        let old = self.clone();
+        let (old_w, old_h) = (old.width, old.height);
+        *self = TestGrid::new(width, height);
+        for y in 0..old_h {
+            for x in 0..old_w {
+                let nx = x + shift_x;
+                let ny = y + shift_y;
+                if !self.in_bounds(nx, ny) {
+                    continue;
+                }
+                let src = old.index(x, y);
+                let dst = self.index(nx, ny);
+                self.floor[dst] = old.floor[src];
+                self.overlay[dst] = old.overlay[src];
+                self.block[dst] = old.block[src];
+                self.data[dst] = old.data[src];
+                self.floor_data[dst] = old.floor_data[src];
+                self.overlay_data[dst] = old.overlay_data[src];
+                self.extra[dst] = old.extra[src];
+                self.team[dst] = old.team[src];
+                self.rotation[dst] = old.rotation[src];
+                self.build[dst] = old.build[src];
+            }
+        }
+    }
 }

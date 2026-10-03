@@ -13,6 +13,9 @@
 pub mod context;
 pub mod draw_op;
 pub mod grid;
+pub mod lifecycle;
+pub mod maps_glue;
+pub mod preview;
 pub mod stack;
 pub mod tile_op;
 pub mod tool;
@@ -24,6 +27,8 @@ pub use draw_op::DrawOperation;
 pub use stack::OperationStack;
 pub use tile_op::{TileOp, TileOpData};
 pub use tool::EditorTool;
+
+use std::sync::{Arc, Mutex};
 
 use indexmap::IndexMap;
 
@@ -176,9 +181,28 @@ pub trait EditorGrid {
     fn update_static(&mut self, x: i32, y: i32);
     /// Marks one tile's chunk dirty (`renderer.updateBlock`).
     fn update_block(&mut self, x: i32, y: i32);
+
+    /// Clears static-wall edge darkness (`EditorRenderer.resize` `StaticWall.data = 0`).
+    ///
+    /// Plan 19 M1; the render side is a `RenderHooks` no-op in headless.
+    fn clear_editor_darkness(&mut self);
+    /// Recaches every tile after a load/resize (`EditorRenderer.resize`).
+    fn recache_all(&mut self);
+    /// Rebuilds the grid resized by `(width, height)` with every in-bounds tile
+    /// shifted by `(shift_x, shift_y)` and shifted building centers reattached
+    /// (`MapEditor.resize`). Out-of-bounds tiles become the default stone floor.
+    fn resize_shift(
+        &mut self,
+        content: &ContentRegistry,
+        width: i32,
+        height: i32,
+        shift_x: i32,
+        shift_y: i32,
+    );
 }
 
 /// The editor singleton (`MapEditor`).
+#[derive(bevy_ecs::prelude::Resource)]
 pub struct MapEditor {
     /// `name`/`description`/`author`/`rules`/`genfilters`/`locales`/`steamid`.
     pub tags: IndexMap<String, String>,
@@ -210,6 +234,8 @@ pub struct MapEditor {
     pub shown_with_map: bool,
     stack: OperationStack,
     current_op: Option<DrawOperation>,
+    /// Shared buffer of the installed [`context::TileOpSink`] (`EditorTile.op`).
+    recorder: Option<Arc<Mutex<Vec<u64>>>>,
 }
 
 impl Default for MapEditor {
@@ -239,6 +265,7 @@ impl MapEditor {
             shown_with_map: false,
             stack: OperationStack::new(),
             current_op: None,
+            recorder: None,
         }
     }
 
@@ -337,6 +364,43 @@ impl MapEditor {
         if let Some(op) = self.current_op.as_mut() {
             op.remove(amount);
         }
+    }
+
+    /// Installs this editor's [`context::TileOpSink`] on a live world
+    /// (`EditorTile` replacement; plan 19 §2.3.1/§3.4).
+    pub fn install_recorder(&mut self, world: &mut grid::WorldEditorGrid<'_>) {
+        let ops: Arc<Mutex<Vec<u64>>> = Arc::new(Mutex::new(Vec::new()));
+        world.install_sink(Box::new(context::EditorRecorder::new(ops.clone())));
+        self.recorder = Some(ops);
+    }
+
+    /// Removes the recorder from the live world (`hide`/`reset`).
+    pub fn remove_recorder(&mut self, world: &mut grid::WorldEditorGrid<'_>) {
+        world.take_sink();
+        self.recorder = None;
+    }
+
+    /// Drains the installed recorder's buffer into the current operation
+    /// (`EditorTile.op`); returns the number of packed ops moved.
+    pub fn drain_recorded_ops(&mut self) -> usize {
+        let Some(buffer) = &self.recorder else {
+            return 0;
+        };
+        let drained: Vec<u64> = match buffer.lock() {
+            Ok(mut ops) => std::mem::take(&mut *ops),
+            Err(_) => return 0,
+        };
+        let count = drained.len();
+        for op in drained {
+            self.add_tile_op(op);
+        }
+        count
+    }
+
+    /// Rust form of `EditorTile.skip()`: recording is suppressed while loading,
+    /// while the world generates, and during normal play (`!editor`).
+    pub fn should_record_ops(&self, state_is_game: bool, world_generating: bool) -> bool {
+        !self.loading && !world_generating && !state_is_game
     }
 
     /// Whether an undo is available.
