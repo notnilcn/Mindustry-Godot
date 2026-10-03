@@ -48,6 +48,16 @@ impl DrawOperation {
         &self.ops
     }
 
+    /// Backing allocation capacity (plan 19 M7 steady-state alloc audit).
+    pub fn capacity(&self) -> usize {
+        self.ops.capacity()
+    }
+
+    /// Reserves capacity up-front so steady-state recording never reallocates.
+    pub fn reserve(&mut self, additional: usize) {
+        self.ops.reserve(additional);
+    }
+
     /// Drops the last `amount` ops (`DrawOperation.remove`).
     pub fn remove(&mut self, amount: usize) {
         let len = self.ops.len().saturating_sub(amount);
@@ -214,5 +224,25 @@ mod tests {
 
         op.redo(&mut world, &content);
         assert_eq!(world.block_id(2, 2), wall);
+    }
+
+    /// Plan 19 M7 §7d steady-state allocation audit: once a draw operation is
+    /// warmed up, recording more ops never grows the backing allocation.
+    #[test]
+    fn op_recording_capacity_is_stable_after_warmup() {
+        // Pre-reserving keeps recording allocation-free across the reserved span.
+        let mut op = DrawOperation::new();
+        op.reserve(1000);
+        let capacity = op.capacity();
+        for i in 0..1000u64 {
+            op.add(i);
+        }
+        assert_eq!(op.capacity(), capacity, "recording reallocated");
+        // `remove` + re-add within the reserve also stays allocation-free.
+        op.remove(500);
+        for i in 0..500u64 {
+            op.add(i);
+        }
+        assert_eq!(op.capacity(), capacity);
     }
 }

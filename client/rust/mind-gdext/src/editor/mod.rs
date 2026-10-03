@@ -59,6 +59,25 @@ fn dict(pairs: Vec<(&str, Variant)>) -> VarDictionary {
     out
 }
 
+/// Parses a `spawns` JSON tag into spawn groups (invalid entries skipped).
+fn parse_spawn_groups(json: Option<&str>) -> Vec<mind_core::game::spawn_group::SpawnGroup> {
+    let Some(json) = json else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
+        return Vec::new();
+    };
+    value
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| mind_core::game::spawn_group::SpawnGroup::from_json(item).ok())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// `MindEditor` — editor state/command facade for GDScript + MCP.
 #[derive(GodotClass)]
 #[class(base=Node)]
@@ -622,6 +641,341 @@ impl MindEditor {
         self.editor
             .resize(&mut world, content, width, height, shift_x, shift_y);
         true
+    }
+
+    // --- M4/M5/M6 dialog data (plan 19 M4-M6) ---
+
+    /// `MapGenerateDialog.filters`: the `genfilters` tag JSON, or the default
+    /// stack when unset.
+    #[func]
+    pub fn filters_json(&self) -> GString {
+        if let Some(tag) = self.editor.tags.get("genfilters")
+            && !tag.trim().is_empty()
+        {
+            return GString::from(tag.as_str());
+        }
+        match self.content.as_ref() {
+            Some(content) => GString::from(
+                mind_core::maps::filters::write_filters(
+                    content,
+                    &mind_core::maps::filters::default_filter_stack(content),
+                )
+                .as_str(),
+            ),
+            None => GString::from("[]"),
+        }
+    }
+
+    /// Stores the `genfilters` tag from the generate dialog.
+    #[func]
+    pub fn set_filters_json(&mut self, json: GString) -> bool {
+        self.editor
+            .tags
+            .insert("genfilters".to_owned(), json.to_string());
+        self.clear_error();
+        true
+    }
+
+    /// `MapGenerateDialog.applyToEditor`: run the tag filters over the world and
+    /// clear the op stack.
+    #[func]
+    pub fn apply_filters(&mut self) -> bool {
+        let Some(content) = self.content.as_ref() else {
+            return false;
+        };
+        let tag = self.editor.tags.get("genfilters").cloned();
+        let mut filters = mind_core::editor::generate::filters_from_tag(content, tag.as_deref());
+        mind_core::editor::generate::apply_filters_to_editor(
+            &mut self.editor,
+            &mut self.grid,
+            content,
+            &mut filters,
+            0,
+        );
+        self.clear_error();
+        true
+    }
+
+    /// `SectorGenerateDialog.apply`: generation is owned by the planet/sector
+    /// host (plan 06 `WorldGrid::load_sector`); the dialogue records the request
+    /// and reports deferred until that host is wired in-engine.
+    #[func]
+    pub fn sector_generate(&mut self, planet: GString, sector: i64, seed: i64) -> bool {
+        self.editor.tags.insert(
+            "sector".to_owned(),
+            format!("{}:{}:{}", planet, sector, seed),
+        );
+        self.last_error_key = Some("@editor.sectorgenerate".to_owned());
+        self.last_error_message =
+            Some("sector generation awaits the plan-06 load_sector host".to_owned());
+        false
+    }
+
+    /// `MapObjectivesDialog`: the objectives JSON (`MapInfoDialog` route).
+    #[func]
+    pub fn objectives_json(&self) -> GString {
+        match self.editor.tags.get("objectives") {
+            Some(json) if !json.trim().is_empty() => GString::from(json.as_str()),
+            _ => GString::from("[]"),
+        }
+    }
+
+    /// Stores the objectives JSON.
+    #[func]
+    pub fn set_objectives_json(&mut self, json: GString) -> bool {
+        let parsed = mind_core::editor::objectives::parse_objectives(&json.to_string());
+        match parsed {
+            Ok(objectives) => match mind_core::editor::objectives::write_objectives(&objectives) {
+                Ok(canonical) => {
+                    self.editor.tags.insert("objectives".to_owned(), canonical);
+                    self.clear_error();
+                    true
+                }
+                Err(error) => {
+                    self.last_error_key = Some("@editor.errorload".to_owned());
+                    self.last_error_message = Some(error.to_string());
+                    false
+                }
+            },
+            Err(error) => {
+                self.last_error_key = Some("@editor.errorload".to_owned());
+                self.last_error_message = Some(error.to_string());
+                false
+            }
+        }
+    }
+
+    /// `WaveInfoDialog`: the `spawns` JSON.
+    #[func]
+    pub fn waves_json(&self) -> GString {
+        match self.editor.tags.get("spawns") {
+            Some(json) if !json.trim().is_empty() => GString::from(json.as_str()),
+            _ => GString::from("[]"),
+        }
+    }
+
+    /// Stores the `spawns` JSON after validating each group.
+    #[func]
+    pub fn set_waves_json(&mut self, json: GString) -> bool {
+        let value: serde_json::Value = match serde_json::from_str(&json.to_string()) {
+            Ok(value) => value,
+            Err(error) => {
+                self.last_error_key = Some("@editor.errorload".to_owned());
+                self.last_error_message = Some(error.to_string());
+                return false;
+            }
+        };
+        let Some(items) = value.as_array() else {
+            self.last_error_key = Some("@editor.errorload".to_owned());
+            self.last_error_message = Some("spawns must be an array".to_owned());
+            return false;
+        };
+        for item in items {
+            if let Err(error) = mind_core::game::spawn_group::SpawnGroup::from_json(item) {
+                self.last_error_key = Some("@editor.errorload".to_owned());
+                self.last_error_message = Some(error);
+                return false;
+            }
+        }
+        self.editor
+            .tags
+            .insert("spawns".to_owned(), json.to_string());
+        self.clear_error();
+        true
+    }
+
+    /// `MapLocalesDialog`: the `locales` JSON.
+    #[func]
+    pub fn locales_json(&self) -> GString {
+        match self.editor.tags.get("locales") {
+            Some(json) if !json.trim().is_empty() => GString::from(json.as_str()),
+            _ => GString::from("{}"),
+        }
+    }
+
+    /// Stores the `locales` JSON after validating it parses.
+    #[func]
+    pub fn set_locales_json(&mut self, json: GString) -> bool {
+        match mind_core::maps::locales::parse_json(&json.to_string()) {
+            Ok(locales) => match mind_core::maps::locales::write_json(&locales) {
+                Ok(canonical) => {
+                    self.editor.tags.insert("locales".to_owned(), canonical);
+                    self.clear_error();
+                    true
+                }
+                Err(error) => {
+                    self.last_error_key = Some("@editor.errorload".to_owned());
+                    self.last_error_message = Some(error.to_string());
+                    false
+                }
+            },
+            Err(error) => {
+                self.last_error_key = Some("@editor.errorload".to_owned());
+                self.last_error_message = Some(error.to_string());
+                false
+            }
+        }
+    }
+
+    /// `WaveGraph.rebuild`: the counts/health series for the `spawns` tag.
+    #[func]
+    pub fn wave_graph(&self, from: i64, to: i64) -> VarDictionary {
+        use mind_core::editor::wave_graph::WaveGraphData;
+        let Some(content) = self.content.as_ref() else {
+            return dict(vec![("from", from.to_variant()), ("to", to.to_variant())]);
+        };
+        let groups = parse_spawn_groups(self.editor.tags.get("spawns").map(String::as_str));
+        let resolve = |name: &str| {
+            content
+                .unit_by_name(name)
+                .map(|def| (def.id.raw(), def.health))
+        };
+        let data = WaveGraphData::compute(&groups, from as i32, to as i32, resolve);
+
+        let mut units: Array<VarDictionary> = Array::new();
+        for unit in &data.units {
+            units.push(&dict(vec![
+                ("id", (unit.id as i64).to_variant()),
+                ("name", GString::from(unit.name.as_str()).to_variant()),
+                ("health", (unit.health as f64).to_variant()),
+            ]));
+        }
+        let mut series: Array<Variant> = Array::new();
+        for row in &data.series {
+            let mut values = PackedInt64Array::new();
+            for value in row {
+                values.push(*value as i64);
+            }
+            series.push(&values.to_variant());
+        }
+        let mut totals = PackedInt64Array::new();
+        for value in &data.totals {
+            totals.push(*value as i64);
+        }
+        let mut health: Array<Variant> = Array::new();
+        for value in &data.health {
+            health.push(&(*value as f64).to_variant());
+        }
+
+        dict(vec![
+            ("from", (data.from as i64).to_variant()),
+            ("to", (data.to as i64).to_variant()),
+            ("units", units.to_variant()),
+            ("series", series.to_variant()),
+            ("totals", totals.to_variant()),
+            ("health", health.to_variant()),
+            ("max", (data.max as i64).to_variant()),
+            ("max_total", (data.max_total as i64).to_variant()),
+            ("max_health", (data.max_health as f64).to_variant()),
+        ])
+    }
+
+    /// `MapProcessorsDialog`: `world-processor` centers with tag/icon.
+    #[func]
+    pub fn processors(&self) -> Array<VarDictionary> {
+        let mut out = Array::new();
+        let Some(content) = self.content.as_ref() else {
+            return out;
+        };
+        let Some(processor) = content.block_id("world-processor") else {
+            return out;
+        };
+        for index in 0..self.grid.tiles.len() {
+            let tile = self.grid.tiles.geti(index);
+            if tile.block != processor {
+                continue;
+            }
+            let Some(entity) = tile.build else {
+                continue;
+            };
+            let (tag, icon_tag) = self
+                .ecs
+                .0
+                .get::<mind_core::logic::blocks::logic_block::LogicBlockState>(entity)
+                .map(|state| (state.tag.clone(), state.icon_tag))
+                .unwrap_or((None, '\0'));
+            out.push(&dict(vec![
+                ("x", (tile.x as i32).to_variant()),
+                ("y", (tile.y as i32).to_variant()),
+                (
+                    "tag",
+                    GString::from(tag.unwrap_or_default().as_str()).to_variant(),
+                ),
+                ("icon_tag", (icon_tag as i64).to_variant()),
+            ]));
+        }
+        out
+    }
+
+    /// `MapAssetsDialog.assets()`: the loaded data-asset records.
+    ///
+    /// The plan-20 `ModDataManager` is not yet mounted on this node, so the list
+    /// is empty until the asset host is wired (documented in the plan changelog).
+    #[func]
+    pub fn assets(&self) -> Array<VarDictionary> {
+        Array::new()
+    }
+
+    /// `MapEditorDialog.export`: write the map with embedded data assets.
+    #[func]
+    pub fn export_map(&mut self, path: GString) -> bool {
+        let Some(content) = self.content.as_ref() else {
+            return false;
+        };
+        let name = self.editor.tags.get("name").cloned().unwrap_or_default();
+        let file = Self::native_path(&path.to_string());
+        let base = editor_base_tags(
+            self.grid.tiles.width as u16,
+            self.grid.tiles.height as u16,
+            &name,
+        );
+        match save_editor_map(
+            &NativeFs,
+            &file,
+            &self.grid,
+            content,
+            base,
+            self.editor.tags.clone(),
+            true,
+        ) {
+            Ok(()) => {
+                self.clear_error();
+                true
+            }
+            Err(error) => {
+                self.set_map_error(&error);
+                false
+            }
+        }
+    }
+
+    /// `MapEditorDialog.exportImage`: write the color-mapped PNG.
+    #[func]
+    pub fn export_image(&mut self, path: GString) -> bool {
+        let Some(content) = self.content.as_ref() else {
+            return false;
+        };
+        let file = Self::native_path(&path.to_string());
+        let source = mind_core::editor::maps_glue::EditorMapSource::new(&self.grid, content);
+        let image = self.editor.export_image(content, &source);
+        match mind_core::io::map::encode_png(&image) {
+            Ok(bytes) => match NativeFs.write(&file, &bytes) {
+                Ok(()) => {
+                    self.clear_error();
+                    true
+                }
+                Err(error) => {
+                    self.last_error_key = Some("@editor.errorload".to_owned());
+                    self.last_error_message = Some(error.to_string());
+                    false
+                }
+            },
+            Err(error) => {
+                self.last_error_key = Some("@editor.errorload".to_owned());
+                self.last_error_message = Some(error.to_string());
+                false
+            }
+        }
     }
 
     /// `Maps.saveMap` shell: writes `user://maps/<name>.msav`.
