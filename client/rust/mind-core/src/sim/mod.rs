@@ -7,6 +7,7 @@
 
 pub mod boot;
 pub mod clock;
+pub mod command;
 pub mod config;
 pub mod dump;
 pub mod events;
@@ -33,6 +34,7 @@ use crate::world::{TilePos, WorldError, WorldGrid};
 
 pub use boot::{BootError, SimBuilder, TickReport};
 pub use clock::SimClock;
+pub use command::{MOVE_COMMAND, UnitCommandRuntime, resolve_wire_target};
 pub use config::SimConfig;
 pub use dump::StateDump;
 pub use events::{ALL_TRIGGERS, Trigger, TriggerRegistry};
@@ -156,6 +158,14 @@ pub struct Sim {
     /// Save/load boundary queue (plan 05 M9; plan 04 §3.10).
     pub io: IoQueue,
 
+    /// Relay-side unit-command apply state (plan 15 M4). Built lazily on the
+    /// first unit command so P0 worlds never pay for content boot.
+    unit_commands: Option<command::UnitCommandRuntime>,
+    /// Currently possessed unit (`unitControl`); `None` means the player unit.
+    controlled_unit: Option<i32>,
+    /// Currently selected controllable building (`buildingControlSelect`).
+    control_building: Option<TilePos>,
+
     seed: u64,
     selected_block: BlockId,
     entity_seq: EntitySequencer,
@@ -184,6 +194,9 @@ impl Sim {
             config: SimConfig::new().with_seed(seed),
             platform: Box::new(HeadlessPlatform::with_default_dir()),
             io: IoQueue::new(),
+            unit_commands: None,
+            controlled_unit: None,
+            control_building: None,
             seed,
             selected_block: BlockId::STONE_WALL,
             entity_seq: EntitySequencer::default(),
@@ -433,7 +446,36 @@ impl Sim {
         &mut self,
         command: crate::determinism::SimCommand,
     ) -> Result<(), crate::determinism::CommandError> {
-        use crate::determinism::CommandError;
+        use crate::determinism::{CommandError, SimCommand};
+        match &command {
+            SimCommand::UnitCommand {
+                units,
+                command: unit_command,
+                x,
+                y,
+            } => {
+                self.ensure_unit_commands()
+                    .apply_unit_command(units, *unit_command, *x, *y);
+                self.commands_applied = self.commands_applied.wrapping_add(1);
+                return Ok(());
+            }
+            SimCommand::UnitControl { unit } => {
+                self.controlled_unit = *unit;
+                self.commands_applied = self.commands_applied.wrapping_add(1);
+                return Ok(());
+            }
+            SimCommand::UnitClear => {
+                self.controlled_unit = None;
+                self.commands_applied = self.commands_applied.wrapping_add(1);
+                return Ok(());
+            }
+            SimCommand::BuildingControlSelect { x, y } => {
+                self.control_building = Some(TilePos::new(*x, *y));
+                self.commands_applied = self.commands_applied.wrapping_add(1);
+                return Ok(());
+            }
+            _ => {}
+        }
         let op = command.op_name();
         match command.to_p0() {
             Some(p0) => self.apply(p0).map_err(|error| match error {
@@ -549,6 +591,46 @@ impl Sim {
     /// Number of commands applied so far (valid or rejected no-ops).
     pub fn commands_applied(&self) -> u64 {
         self.commands_applied
+    }
+
+    /// Lazily builds the unit-command runtime (plan 15 M4).
+    fn ensure_unit_commands(&mut self) -> &mut command::UnitCommandRuntime {
+        self.unit_commands
+            .get_or_insert_with(command::UnitCommandRuntime::new)
+    }
+
+    /// Read-only unit-command runtime, if any unit command has been applied.
+    pub fn unit_commands(&self) -> Option<&command::UnitCommandRuntime> {
+        self.unit_commands.as_ref()
+    }
+
+    /// Registers a commandable unit for the relay-side apply path, returning its
+    /// relay id.
+    pub fn spawn_command_unit(&mut self, name: &str, team: u8) -> Option<i32> {
+        self.ensure_unit_commands().spawn(name, team)
+    }
+
+    /// The `CommandAI` state of a relay unit id, if tracked.
+    pub fn unit_command_state(&self, id: i32) -> Option<&crate::ai::CommandAiState> {
+        self.unit_commands.as_ref()?.state(id)
+    }
+
+    /// Deterministic digest of the relay unit-command state (ascending id order).
+    pub fn unit_command_checksum(&self) -> Checksum {
+        match &self.unit_commands {
+            Some(runtime) => runtime.checksum(),
+            None => Checksummer::new().finish(),
+        }
+    }
+
+    /// Currently possessed unit id (`unitControl`), if any.
+    pub fn controlled_unit(&self) -> Option<i32> {
+        self.controlled_unit
+    }
+
+    /// Currently selected controllable building (`buildingControlSelect`).
+    pub fn control_building(&self) -> Option<TilePos> {
+        self.control_building
     }
 
     /// Recorded block events, oldest first.

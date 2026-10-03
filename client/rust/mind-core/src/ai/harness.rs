@@ -16,7 +16,9 @@ use crate::content::ContentRegistry;
 use crate::determinism::{Checksum, Checksummer, SimRng};
 use crate::ecs::EntitySeq;
 use crate::entities::comp::unit::comp::{PhysicsComp, UnitCore};
-use crate::entities::comp::unit::lifecycle::{set_move_target, spawn_unit, sync_weapon_state};
+use crate::entities::comp::unit::lifecycle::{
+    kill_unit, remove_unit, set_move_target, spawn_unit, sync_weapon_state,
+};
 use crate::entities::comp::unit::movement;
 use crate::entities::comp::unit::queries::{UnitSnapshot, snapshot};
 use crate::entities::comp::{Health, Pos, TeamComp};
@@ -113,6 +115,26 @@ impl UnitHarness {
             entity,
             TilePos::new(tx as i16, ty as i16),
         )
+    }
+
+    /// Despawns a unit without the death path (`UnitComp.remove`).
+    pub fn remove(&mut self, entity: Entity) -> bool {
+        if remove_unit(&mut self.build.world, entity) {
+            self.units_removed += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Kills a unit through the death path (`UnitComp.kill`/`destroy`).
+    pub fn kill(&mut self, entity: Entity) -> bool {
+        if kill_unit(&mut self.build.world, entity) {
+            self.units_removed += 1;
+            true
+        } else {
+            false
+        }
     }
 
     /// Whether `entity` is still alive in the world.
@@ -447,5 +469,170 @@ mod tests {
             after < before,
             "unit weapon fired and damaged the target (before={before} after={after})"
         );
+    }
+
+    /// Plan 11 M8 lifecycle hardening (`cargo test units::fuzz_*`).
+    mod units {
+        use super::*;
+
+        /// Deterministic add/remove fuzz: repeated spawn/despawn must stay
+        /// consistent and reproducible.
+        fn fuzz_add_remove_run(seed: u64) -> (usize, String) {
+            let mut harness = UnitHarness::new(64, 64, seed);
+            let mut live: Vec<Entity> = Vec::new();
+            for step in 0..400u64 {
+                let roll = (step.wrapping_mul(2_654_435_761)) % 100;
+                if roll < 55 || live.is_empty() {
+                    let x = 8.0 + ((step * 7) % 48) as f32;
+                    let y = 8.0 + ((step * 13) % 48) as f32;
+                    if let Some(entity) = harness.spawn("dagger", 0, x, y, 0.0) {
+                        live.push(entity);
+                    }
+                } else {
+                    let index = (step as usize * 31) % live.len();
+                    let entity = live.swap_remove(index);
+                    assert!(harness.remove(entity), "tracked unit must exist");
+                }
+                harness.tick();
+                assert_eq!(
+                    harness.unit_count(),
+                    live.len(),
+                    "live count tracks removal"
+                );
+            }
+            (harness.unit_count(), harness.checksum_hex())
+        }
+
+        #[test]
+        fn fuzz_add_remove() {
+            let first = fuzz_add_remove_run(11);
+            let second = fuzz_add_remove_run(11);
+            assert_eq!(first, second, "add/remove fuzz is deterministic");
+            assert!(first.0 <= 400);
+        }
+
+        fn fuzz_kill_during_update_run(seed: u64) -> (usize, String) {
+            let mut harness = UnitHarness::new(64, 64, seed);
+            let mut live: Vec<Entity> = Vec::new();
+            for i in 0..80i32 {
+                if let Some(entity) = harness.spawn(
+                    "dagger",
+                    0,
+                    10.0 + (i % 20) as f32 * 2.0,
+                    10.0 + (i / 20) as f32 * 2.0,
+                    0.0,
+                ) {
+                    harness.command_move(entity, 60, 60);
+                    live.push(entity);
+                }
+            }
+            for tick in 0..300u64 {
+                if tick % 5 == 0 {
+                    let snapshot = live.clone();
+                    for (index, entity) in snapshot.iter().enumerate() {
+                        if index % 7 == tick as usize % 7 && harness.kill(*entity) {
+                            live.retain(|candidate| candidate != entity);
+                        }
+                    }
+                }
+                // `tick` iterates a clone that still contains just-killed
+                // entities; it must skip them without panicking.
+                harness.tick();
+                assert_eq!(harness.unit_count(), live.len());
+            }
+            (harness.unit_count(), harness.checksum_hex())
+        }
+
+        #[test]
+        fn fuzz_kill_during_update() {
+            let first = fuzz_kill_during_update_run(5);
+            let second = fuzz_kill_during_update_run(5);
+            assert_eq!(first, second, "kill-during-update is deterministic");
+        }
+
+        #[test]
+        fn determinism_workers_1_vs_4() {
+            use crate::async_work::{AsyncCore, PhysicsProcess, PhysicsSnapshot};
+
+            let mut harness = UnitHarness::new(64, 64, 7);
+            let mut slots: Vec<u32> = Vec::new();
+            for i in 0..120i32 {
+                if let Some(entity) = harness.spawn(
+                    "dagger",
+                    0,
+                    12.0 + (i % 24) as f32 * 2.0,
+                    12.0 + (i / 24) as f32 * 2.0,
+                    0.0,
+                ) {
+                    let seq = harness
+                        .build
+                        .world
+                        .get::<EntitySeq>(entity)
+                        .map(|seq| seq.0)
+                        .unwrap_or(u64::MAX);
+                    slots.push(seq as u32);
+                }
+            }
+            let snapshot = PhysicsSnapshot::new(slots);
+
+            let mut world_one = bevy_ecs::world::World::new();
+            let mut one = AsyncCore::new(4);
+            one.add(Box::new(PhysicsProcess::new(4)));
+            one.step(&mut world_one, &snapshot, 1);
+
+            let mut world_four = bevy_ecs::world::World::new();
+            let mut four = AsyncCore::new(4);
+            four.add(Box::new(PhysicsProcess::new(4)));
+            four.step(&mut world_four, &snapshot, 4);
+
+            assert_eq!(one.last_workers(), 1);
+            assert_eq!(four.last_workers(), 4);
+            assert_eq!(
+                one.state_sum(),
+                four.state_sum(),
+                "unit physics join is worker-count independent"
+            );
+        }
+
+        /// Steady-state alloc audit (plan 11 §7d): after warmup, equal tick
+        /// windows must allocate identically (no per-tick growth).
+        #[cfg(feature = "alloc-audit")]
+        #[test]
+        fn steady_state_alloc_audit() {
+            use crate::util::alloc::{alloc_count, enabled};
+
+            if !enabled() {
+                return;
+            }
+            let mut harness = UnitHarness::new(128, 128, 7);
+            for i in 0..200i32 {
+                if let Some(entity) = harness.spawn(
+                    "dagger",
+                    0,
+                    20.0 + (i % 40) as f32 * 2.0,
+                    20.0 + (i / 40) as f32 * 2.0,
+                    0.0,
+                ) {
+                    harness.command_move(entity, 100, 100);
+                }
+            }
+            for _ in 0..120 {
+                harness.tick();
+            }
+            let before_first = alloc_count();
+            for _ in 0..60 {
+                harness.tick();
+            }
+            let first_window = alloc_count().saturating_sub(before_first);
+            let before_second = alloc_count();
+            for _ in 0..60 {
+                harness.tick();
+            }
+            let second_window = alloc_count().saturating_sub(before_second);
+            assert!(
+                first_window.abs_diff(second_window) <= 8,
+                "unit-heavy steady state must not grow allocations (windows {first_window} vs {second_window})"
+            );
+        }
     }
 }

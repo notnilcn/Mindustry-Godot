@@ -193,3 +193,79 @@ fn scenario_player_matches_stamped_ticks() {
     assert_eq!(player.applied(), 4);
     assert_eq!(sim.commands_applied(), 4);
 }
+
+#[test]
+fn sim_command_applies_unit_command_and_control() {
+    use crate::determinism::SimCommand;
+
+    let mut sim = Sim::new(1, 16, 16, BlockId::AIR, BlockId::AIR);
+    let id = sim.spawn_command_unit("dagger", 0).expect("dagger");
+    assert!(sim.unit_commands().is_some());
+
+    // Move order (emitter marker `command = 0`).
+    sim.command(SimCommand::UnitCommand {
+        units: smallvec::smallvec![id],
+        command: 0,
+        x: 50.0,
+        y: 60.0,
+    })
+    .expect("unit command applies");
+    assert_eq!(
+        sim.unit_command_state(id).unwrap().target_pos,
+        Some((50.0, 60.0))
+    );
+
+    // setUnitCommand (`repair` id 1 is rejected on a dagger; state unchanged).
+    let before = sim.unit_command_state(id).unwrap().command;
+    sim.command(SimCommand::UnitCommand {
+        units: smallvec::smallvec![id],
+        command: 1,
+        x: 0.0,
+        y: 0.0,
+    })
+    .expect("command switch applies as a no-op when disallowed");
+    assert_eq!(sim.unit_command_state(id).unwrap().command, before);
+
+    // Player-control variants.
+    sim.command(SimCommand::UnitControl { unit: Some(id) })
+        .expect("unit control");
+    assert_eq!(sim.controlled_unit(), Some(id));
+    sim.command(SimCommand::BuildingControlSelect { x: 3, y: 4 })
+        .expect("building control select");
+    assert_eq!(sim.control_building(), Some(TilePos::new(3, 4)));
+    sim.command(SimCommand::UnitClear).expect("unit clear");
+    assert_eq!(sim.controlled_unit(), None);
+
+    // move + command-switch + unitControl + buildingControlSelect + unitClear.
+    assert_eq!(sim.commands_applied(), 5);
+}
+
+#[test]
+fn sim_command_unit_state_is_deterministic() {
+    use crate::determinism::SimCommand;
+
+    let mut first = Sim::new(7, 16, 16, BlockId::AIR, BlockId::AIR);
+    let mut second = Sim::new(7, 16, 16, BlockId::AIR, BlockId::AIR);
+    for sim in [&mut first, &mut second] {
+        let a = sim.spawn_command_unit("dagger", 0).expect("dagger");
+        let b = sim.spawn_command_unit("dagger", 1).expect("dagger");
+        sim.command(SimCommand::UnitCommand {
+            units: smallvec::smallvec![a],
+            command: 0,
+            x: 12.0,
+            y: 34.0,
+        })
+        .unwrap();
+        sim.command(SimCommand::UnitCommand {
+            units: smallvec::smallvec![b],
+            command: 0,
+            x: 9.0,
+            y: 0.0,
+        })
+        .unwrap();
+    }
+    assert_eq!(
+        first.unit_command_checksum(),
+        second.unit_command_checksum()
+    );
+}
