@@ -251,6 +251,13 @@ pub enum Command {
         command: MapsCommand,
     },
 
+    /// Map editor op-log oracle (plan 19 §7b).
+    Editor {
+        /// Editor subcommand.
+        #[command(subcommand)]
+        command: EditorCommand,
+    },
+
     /// Block/building runtime scenarios (plan 07 §7b).
     Blocks {
         /// Blocks subcommand.
@@ -1101,6 +1108,21 @@ pub enum MapsCommand {
         /// Directory to list.
         #[arg(long, default_value = "tests/fixtures/maps")]
         dir: PathBuf,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+/// `editor` subcommands (plan 19 §7b).
+#[derive(Debug, Subcommand)]
+pub enum EditorCommand {
+    /// Replay a packed op-log fixture: apply → undo-all → redo-all, matching the
+    /// three committed world checksums (plan 19 M0 §5/§7b).
+    Ops {
+        /// Fixture JSON path (relative to the current directory unless absolute).
+        #[arg(long, default_value = "mind-core/tests/fixtures/editor/basic_ops.json")]
+        fixture: PathBuf,
         /// Emit a machine-readable JSON report on stdout.
         #[arg(long)]
         json: bool,
