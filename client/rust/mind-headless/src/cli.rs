@@ -1510,6 +1510,21 @@ pub enum ModsCommand {
         #[arg(long)]
         json: bool,
     },
+
+    /// Load a fixture with one bad content file among good ones and verify the
+    /// bad record is isolated while the good records still register (plan 20
+    /// M1/M3 §7b).
+    ErrorIsolation {
+        /// Fixture name under `parity/mod_fixtures/`.
+        #[arg(long)]
+        fixture: String,
+        /// Repo root override (defaults to discovery from cwd).
+        #[arg(long)]
+        repo: Option<PathBuf>,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// `trace` subcommands (plan 05 M6).
