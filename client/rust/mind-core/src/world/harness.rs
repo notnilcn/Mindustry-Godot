@@ -211,7 +211,10 @@ impl BuildHarness {
 
     /// Runs `f` with a [`WorldCtx`] over the harness grid/ECS (disjoint field
     /// borrows keep the hooks/content available).
-    fn with_ctx<R>(&mut self, f: impl FnOnce(&mut WorldCtx<'_>) -> R) -> R {
+    ///
+    /// Public so plan-12/15/19 callers can drive tile ops (e.g. schematic
+    /// placement) against the same world without duplicating the hook bundle.
+    pub fn with_ctx<R>(&mut self, f: impl FnOnce(&mut WorldCtx<'_>) -> R) -> R {
         let render = NoopRenderHooks;
         let mut ctx = WorldCtx {
             grid: &mut self.grid,

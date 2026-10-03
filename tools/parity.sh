@@ -12,6 +12,7 @@
 #   --mcp                headless half of `parity mcp-parity` (in-engine half is editor-gated)
 #   --bench              validate the performance-budget coverage (`parity bench-gate`)
 #   --soak <profile>     bounded soak run (`mid`/`stress`; full duration is nightly-owned)
+#   --checksums          `parity checksums --suite gate` (in-process/replay/cross-process)
 #   --json               pass `--json` through to the harness
 #
 # The T1/T2 suites, checksum matrix, in-engine MCP capture and full soak durations
@@ -45,6 +46,7 @@ DO_CHECK=0
 DO_MIRROR=0
 DO_MCP=0
 DO_BENCH=0
+DO_CHECKSUMS=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -56,16 +58,17 @@ while [[ $# -gt 0 ]]; do
     --soak) SOAK="${2:?--soak needs mid|stress}"; shift 2 ;;
     --mcp) DO_MCP=1; shift ;;
     --bench) DO_BENCH=1; shift ;;
+    --checksums) DO_CHECKSUMS=1; shift ;;
     --json) JSON=1; shift ;;
     -h|--help)
-      sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      sed -n '2,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
       exit 0 ;;
     *) echo "parity.sh: unknown argument '$1'" >&2; exit 2 ;;
   esac
 done
 
 # No selector: default to the CI subset (structural check + smoke suite).
-if [[ -z "$SUITE$GATE$SOAK" && $DO_CHECK -eq 0 && $DO_MIRROR -eq 0 && $DO_MCP -eq 0 && $DO_BENCH -eq 0 ]]; then
+if [[ -z "$SUITE$GATE$SOAK" && $DO_CHECK -eq 0 && $DO_MIRROR -eq 0 && $DO_MCP -eq 0 && $DO_BENCH -eq 0 && $DO_CHECKSUMS -eq 0 ]]; then
   DO_CHECK=1
   SUITE="smoke"
 fi
@@ -111,6 +114,12 @@ fi
 
 if [[ -n "$SOAK" ]]; then
   args=(parity soak --profile "$SOAK")
+  ((JSON)) && args+=(--json)
+  run_headless "${args[@]}" || rc=$?
+fi
+
+if ((DO_CHECKSUMS)); then
+  args=(parity checksums --suite gate)
   ((JSON)) && args+=(--json)
   run_headless "${args[@]}" || rc=$?
 fi

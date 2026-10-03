@@ -15,7 +15,7 @@ use crate::content::ctype::UnlockFields;
 use crate::content::load::ContentRegistry;
 use crate::content::settings_store::UnlockStore;
 use crate::content::stacks::ItemStack;
-use crate::content::tech::{ObjectiveSpec, TechNode, TechNodeRef};
+use crate::content::tech::{ObjectiveSpec, TechNode, TechNodeRef, content_research_requirements};
 use crate::content::{
     BlockId, ContentRef, ContentType, ItemId, LiquidId, PlanetId, SectorId, StatusId, TeamEntryId,
     UnitTypeId, WeatherId,
@@ -44,6 +44,38 @@ pub fn requirements_complete(node: &TechNode) -> bool {
         .all(|(requirement, finished)| finished.amount >= requirement.amount)
 }
 
+/// Effective research requirements of a node.
+///
+/// Returns the materialized `TechNode.requirements` when present. The generated
+/// vanilla trees left the list empty (plan-02 `TechNode.requirements` gap), so
+/// the content's `UnlockableContent.researchRequirements()` is derived on demand
+/// and scaled by the node's inherited `research_cost_multipliers` exactly like
+/// the builder scales explicit lists.
+pub fn effective_requirements(registry: &ContentRegistry, node_ref: TechNodeRef) -> Vec<ItemStack> {
+    let Some(node) = registry.tech().node(node_ref) else {
+        return Vec::new();
+    };
+    if !node.requirements.is_empty() {
+        return node.requirements.clone();
+    }
+    let Some(content) = node.content else {
+        return Vec::new();
+    };
+    let mut out = content_research_requirements(registry, content);
+    if !node.research_cost_multipliers.is_empty() {
+        for stack in &mut out {
+            let scale = node
+                .research_cost_multipliers
+                .iter()
+                .find(|(item, _)| *item == stack.item)
+                .map(|(_, value)| *value)
+                .unwrap_or(1.0);
+            stack.amount = (stack.amount as f32 * scale) as i32;
+        }
+    }
+    out
+}
+
 /// `ResearchDialog.canSpend`: dependencies and objectives satisfied and not
 /// already unlocked.
 pub fn can_spend(
@@ -67,12 +99,17 @@ pub fn can_spend(
     if !objectives_complete(registry, &node.objectives, ctx) {
         return false;
     }
-    node.requirements
-        .iter()
-        .zip(&node.finished_requirements)
-        .all(|(requirement, finished)| {
-            finished.amount >= requirement.amount || items.get(requirement.item) > 0
-        })
+    // Requirements come from the node's materialized list, or the content's
+    // `researchRequirements()` when the generated tree left it empty.
+    let requirements = effective_requirements(registry, node_ref);
+    requirements.iter().enumerate().all(|(index, requirement)| {
+        let finished = node
+            .finished_requirements
+            .get(index)
+            .map(|stack| stack.amount)
+            .unwrap_or(0);
+        finished >= requirement.amount || items.get(requirement.item) > 0
+    })
 }
 
 /// `ResearchDialog.selectable`: all parents unlocked.
@@ -130,7 +167,46 @@ pub fn spend(
     if !objectives_complete(registry, &node.objectives, ctx) {
         return Err(SpendError::IncompleteObjectives);
     }
-    let requirement_count = node.requirements.len();
+
+    // Materialize the content-derived requirements when the generated tree left
+    // the node's list empty (plan-02 `TechNode.requirements` gap). Persisted
+    // `req-` progress is loaded the same way `TechNode.setupRequirements` does
+    // at build time. Nodes with an explicit list are untouched.
+    if registry
+        .tech()
+        .node(node_ref)
+        .is_some_and(|node| node.requirements.is_empty())
+    {
+        let effective = effective_requirements(registry, node_ref);
+        if !effective.is_empty() {
+            let content_name = registry
+                .tech()
+                .node(node_ref)
+                .map(|node| node.content_name.clone())
+                .unwrap_or_default();
+            let finished: Vec<ItemStack> = effective
+                .iter()
+                .map(|stack| {
+                    let item_name = registry
+                        .item(stack.item)
+                        .map(|item| item.name.as_str())
+                        .unwrap_or("<unknown>");
+                    let key = TechNode::requirement_key(&content_name, item_name);
+                    ItemStack::new(stack.item, store.get_i32(&key))
+                })
+                .collect();
+            if let Some(record) = registry.tech.node_mut(node_ref) {
+                record.requirements = effective;
+                record.finished_requirements = finished;
+            }
+        }
+    }
+
+    let requirement_count = registry
+        .tech()
+        .node(node_ref)
+        .map(|node| node.requirements.len())
+        .unwrap_or(0);
     let mut spent = Vec::new();
     let mut complete = true;
 
@@ -249,11 +325,11 @@ pub fn reset_all(registry: &mut ContentRegistry) {
     }
 }
 
-/// Harness/test helper: appends a tech node with explicit requirements.
+/// Harness/test helper: appends a tech node with an explicit requirement list.
 ///
-/// Used by `mind-headless campaign tech` and the unit tests while plan 02 does
-/// not yet materialize `UnlockableContent.researchRequirements()` into node
-/// `requirements` (all vanilla nodes currently have empty requirement lists).
+/// Used by `mind-headless campaign tech` and the unit tests to build synthetic
+/// nodes that are independent of the content registry. Vanilla nodes derive
+/// their costs through [`effective_requirements`].
 pub fn push_node(
     registry: &mut ContentRegistry,
     depth: u32,
@@ -472,6 +548,69 @@ mod tests {
         let name = content_name(&registry, content).unwrap();
         let expected = format!("req-{name}-{}", item_name(&registry, item));
         assert_eq!(store.get_i32(&expected), need);
+    }
+
+    /// Vanilla nodes carry no materialized `requirements`; spend/gating derive
+    /// the real `UnlockableContent.researchRequirements()` on demand and consume
+    /// exactly those items (plan-02 gap reconciliation).
+    #[test]
+    fn vanilla_research_uses_content_requirements() {
+        let (mut registry, mut store) = registry();
+        let (node_ref, parent_ref, effective) = (0..registry.tech().nodes.len())
+            .find_map(|index| {
+                let node_ref = TechNodeRef(index as u32);
+                let node = registry.tech().node(node_ref)?;
+                if node.content.is_none() || !node.requirements.is_empty() {
+                    return None;
+                }
+                let effective = effective_requirements(&registry, node_ref);
+                if effective.is_empty() {
+                    return None;
+                }
+                Some((node_ref, node.parent?, effective))
+            })
+            .expect("a vanilla node with derived research requirements");
+        assert!(
+            registry
+                .tech()
+                .node(node_ref)
+                .unwrap()
+                .requirements
+                .is_empty(),
+            "generated tree did not materialize the list"
+        );
+
+        let _ = unlock(&mut registry, parent_ref, &mut store);
+        let mut items = ItemModule::with_items(registry.items().len());
+        assert!(
+            !can_spend(&registry, node_ref, &items, &AllowAll),
+            "an empty inventory cannot research a costed node"
+        );
+
+        for stack in &effective {
+            items.add(stack.item, stack.amount + 5, 1_000_000);
+        }
+        assert!(can_spend(&registry, node_ref, &items, &AllowAll));
+        let result = spend(
+            &mut registry,
+            node_ref,
+            &mut items,
+            &mut store,
+            &AllowAll,
+            false,
+        )
+        .unwrap();
+        assert!(result.complete);
+        for stack in &effective {
+            assert_eq!(items.get(stack.item), 5, "only the requirement was spent");
+        }
+        assert_eq!(
+            registry.tech().node(node_ref).unwrap().requirements,
+            effective,
+            "the runtime materialized the derived list"
+        );
+        let content = registry.tech().node(node_ref).unwrap().content.unwrap();
+        assert!(content_unlocked(&registry, content));
     }
 
     #[test]

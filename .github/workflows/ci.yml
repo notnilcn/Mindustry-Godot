@@ -3,6 +3,7 @@
 # P0 CI (`00_FOUNDATION_IMPLEMENTATION_PLAN.md` §3.8):
 #   rust       fmt / clippy / check / mind-core tests / headless goldens /
 #              bench budget / boundary greps (ubuntu + windows)
+#   matrix-check plan-23 parity registries + harness goldens + T0 smoke (23 §7f)
 #   spacetimedb STDB module typecheck + generated-bindings drift gate
 #   godot-import build the GDExtension, download pinned Godot 4.7.2, run the
 #              headless editor import/parse check
@@ -111,6 +112,32 @@ jobs:
           set -euo pipefail
           bash tools/sync_scenarios.sh
           diff -r scenarios client/scenarios
+
+  # Plan 23 §7f: matrix + registry drift + harness-golden sha256 + T0 catalog
+  # smoke. Read-only; needs no Godot/GPU/JVM, so it is safe on shared runners.
+  # `--tests` turns on the "every landed matrix row resolves" gate; `parity
+  # goldens` re-checked on every push/PR so a re-recorded harness golden must
+  # update parity/golden_manifest.json in the same commit.
+  matrix-check:
+    name: matrix-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.1
+
+      - name: parity check + goldens + T0 smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path client/rust/Cargo.toml -p mind-core     -- --list > tests-core.txt
+          cargo test --manifest-path client/rust/Cargo.toml -p mind-headless -- --list > tests-headless.txt
+          cat tests-core.txt tests-headless.txt > tests.txt
+          cargo run -q --manifest-path client/rust/Cargo.toml -p mind-headless -- parity check --tests tests.txt
+          cargo run -q --manifest-path client/rust/Cargo.toml -p mind-headless -- parity goldens
+          cargo run -q --manifest-path client/rust/Cargo.toml -p mind-headless -- run-all --tier T0
 
   spacetimedb:
     name: spacetimedb
