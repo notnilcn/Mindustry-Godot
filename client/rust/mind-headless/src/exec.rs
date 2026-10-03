@@ -317,6 +317,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
         Command::Maps { command } => match command {
             MapsCommand::List { dir, json } => cmd_maps_list(dir, *json),
             MapsCommand::SaveLoadSave { map, json } => cmd_maps_save_load_save(map, *json),
+            MapsCommand::Roundtrip { json } => cmd_maps_roundtrip(*json),
             MapsCommand::PreviewTiles { json } => cmd_maps_preview_tiles(*json),
             MapsCommand::ImageRoundtrip { json } => cmd_maps_image_roundtrip(*json),
             MapsCommand::RegistryShuffle { seeds, json } => {
@@ -333,6 +334,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             }
             EditorCommand::ResizeShift { json } => cmd_editor_resize_shift(*json),
             EditorCommand::GenPreview { json } => cmd_editor_gen_preview(*json),
+            EditorCommand::Playtest { json } => cmd_editor_playtest(*json),
             EditorCommand::Objectives { fixture, json } => cmd_editor_objectives(fixture, *json),
             EditorCommand::WaveGraph { fixture, json } => cmd_editor_wave_graph(fixture, *json),
             EditorCommand::Locales { json } => cmd_editor_locales(*json),
@@ -4598,6 +4600,111 @@ fn cmd_editor_gen_preview(json: bool) -> anyhow::Result<i32> {
     })
 }
 
+/// `editor playtest` (plan 19 M7 §3.11): `edit_in_game` → `resume_editing` →
+/// Shift `playtest` → `try_exit` over the plan-12 `PlaySession`.
+fn cmd_editor_playtest(json: bool) -> anyhow::Result<i32> {
+    use mind_core::editor::MapEditor;
+    use mind_core::editor::playtest::{EditorPlayState, PlaytestOutcome};
+    use mind_core::game::State;
+    use mind_core::game::play::PlaySession;
+    use mind_core::game::rules::Rules;
+    use mind_core::game::rules_event::RulesEpoch;
+    use mind_core::maps::Maps;
+    use mind_core::world::NoopMapGenHooks;
+
+    let _ = boot_content()?;
+
+    let mut editor = MapEditor::new();
+    let mut session = PlaySession::new(Rules::default());
+    let mut play = EditorPlayState::new();
+    play.rules.waves = true;
+    let mut epoch = RulesEpoch::new();
+
+    // 1. `editInGame`: snapshot + hidden editor gamemode + playing phase.
+    let events_edit = play.edit_in_game(&mut editor, &mut session);
+    let after_edit = session.phase;
+    let editor_rules = session.rules.editor;
+    let has_snapshot = play.last_saved_rules.is_some();
+
+    // 2. `resumeEditing`: menu phase with the snapshot restored.
+    play.resume_editing(&mut editor, &mut session);
+    let after_resume = session.phase;
+    let restored_waves = play.rules.waves;
+
+    // 3. Shift `playtest`: save() is the gdext facade's job; the core state
+    // machine auto-picks `sandbox` for a spawnless map and enters `Playing`.
+    let map = Maps::map_for_file(
+        std::path::PathBuf::from("/maps/playtest.msav"),
+        16,
+        16,
+        "Playtest",
+        true,
+    );
+    let outcome = play.playtest(
+        &mut editor,
+        &mut session,
+        &map,
+        &NoopMapGenHooks,
+        &mut epoch,
+        true,
+    );
+    let (mode, events_play) = match outcome {
+        PlaytestOutcome::Playing { mode, events } => (mode.name().to_owned(), events),
+        PlaytestOutcome::Dialog => ("dialog".to_owned(), Vec::new()),
+    };
+    let after_playtest = session.phase;
+
+    // 4. `tryExit` always requires the unsaved-changes confirm.
+    let exit_confirm = play.try_exit();
+
+    // Deterministic digest of the transition sequence (no wall-clock/ids).
+    let mut hasher = mind_core::determinism::Hasher::new();
+    hasher.write_u8(after_edit.as_u8());
+    hasher.write_bool(editor_rules);
+    hasher.write_bool(has_snapshot);
+    hasher.write_u8(after_resume.as_u8());
+    hasher.write_bool(restored_waves);
+    hasher.write(mode.as_bytes());
+    hasher.write_u32(events_edit.len() as u32);
+    hasher.write_u32(events_play.len() as u32);
+    hasher.write_bool(exit_confirm);
+    hasher.write_u8(after_playtest.as_u8());
+    let checksum = hasher.finish().to_hex();
+
+    let ok = after_edit == State::Playing
+        && editor_rules
+        && has_snapshot
+        && after_resume == State::Menu
+        && restored_waves
+        && mode == "sandbox"
+        && after_playtest == State::Playing
+        && exit_confirm;
+
+    let report = serde_json::json!({
+        "format": 1,
+        "generator": "editor_playtest",
+        "phase_after_edit_in_game": after_edit.name(),
+        "rules_editor": editor_rules,
+        "has_snapshot": has_snapshot,
+        "phase_after_resume_editing": after_resume.name(),
+        "restored_waves": restored_waves,
+        "auto_mode": mode,
+        "phase_after_playtest": after_playtest.name(),
+        "edit_events": events_edit.len(),
+        "play_events": events_play.len(),
+        "exit_confirm": exit_confirm,
+        "checksum": checksum,
+        "ok": ok,
+    });
+    let text = serde_json::to_string_pretty(&report)?;
+    if json {
+        println!("{text}");
+    } else {
+        println!("editor playtest: {checksum} mode={mode} ok={ok}");
+    }
+    Ok(if ok { EXIT_PASS } else { EXIT_FAIL })
+}
+
 /// `editor objectives` (plan 19 M5 §5/§7b): parse → serialize → parse the golden
 /// objective fixture, preserving `editorPos`/`parents`, and verify every
 /// descriptor name appears in the serialized JSON.
@@ -5258,6 +5365,109 @@ fn cmd_maps_save_load_save(map_name: &str, json: bool) -> anyhow::Result<i32> {
     } else {
         EXIT_FAIL
     })
+}
+
+/// `maps roundtrip` (plan 06 M4 / plan 19 M7 §3.8): save a live grid through
+/// `save_map`, generate its preview PNG/cache, import the copy through
+/// `import_map` and assert both preview pixel checksums match.
+fn cmd_maps_roundtrip(json: bool) -> anyhow::Result<i32> {
+    use mind_core::content::BlockId;
+    use mind_core::editor::maps_glue::{editor_base_tags, import_map_e2e, save_map_e2e};
+    use mind_core::editor::preview::PreviewPipeline;
+    use mind_core::io::FileSystem;
+    use mind_core::io::StringMap as IndexMap;
+    use mind_core::io::fs::{NativeFs, Paths};
+    use mind_core::maps::Maps;
+    use mind_core::world::WorldGrid;
+
+    let fs = NativeFs;
+    let root = std::env::temp_dir().join("mgorch-maps-roundtrip");
+    let _ = std::fs::remove_dir_all(&root);
+    let paths = Paths::new(&root);
+    std::fs::create_dir_all(paths.maps())?;
+    std::fs::create_dir_all(root.join("imported"))?;
+
+    let mut content = boot_content()?;
+    let stone = content.block_id("stone").unwrap_or(BlockId::AIR);
+    let core = content.block_id("core-shard");
+    let spawn = content.block_id("spawn");
+
+    let mut grid = WorldGrid::new(16, 16);
+    for tile in grid.tiles.array_mut() {
+        tile.floor = stone;
+    }
+    if let Some(core) = core {
+        grid.tiles.get_mut(4, 4).block = core;
+    }
+    let mut spawn_count = 0u32;
+    if let Some(spawn) = spawn {
+        grid.tiles.get_mut(8, 8).overlay = spawn;
+        grid.tiles.get_mut(9, 8).overlay = spawn;
+        spawn_count = 2;
+    }
+
+    let mut tags = IndexMap::new();
+    tags.insert("name".to_owned(), "Roundtrip".to_owned());
+    tags.insert("author".to_owned(), "lane/f25-maps".to_owned());
+    let base = editor_base_tags(16, 16, "Roundtrip");
+    let file = paths.maps().join("roundtrip.msav");
+
+    let mut maps = Maps::new();
+    let mut pipeline = PreviewPipeline::new();
+    let (map, image) = save_map_e2e(
+        &fs,
+        &paths,
+        &mut pipeline,
+        &mut maps,
+        &file,
+        &grid,
+        &mut content,
+        base,
+        tags,
+        false,
+    )?;
+    let checksum_save = preview_image_checksum(&image);
+    let preview_written = fs.exists(&mind_core::maps::preview_file(&paths, &map));
+    let cache_written = fs.exists(&mind_core::maps::cache_file(&paths, &map));
+
+    let import_dir = root.join("imported");
+    let mut imported_maps = Maps::new();
+    let mut imported_pipeline = PreviewPipeline::new();
+    let (imported, image2) = import_map_e2e(
+        &fs,
+        &paths,
+        &mut imported_pipeline,
+        &mut imported_maps,
+        &import_dir,
+        &file,
+        &mut content,
+    )?;
+    let checksum_import = preview_image_checksum(&image2);
+
+    let map_ok = maps.len() == 1 && imported_maps.len() == 1 && imported.name() == map.name();
+    let preview_ok = preview_written && cache_written && checksum_save == checksum_import;
+    let ok = map_ok && preview_ok && map.spawns == spawn_count;
+
+    let report = serde_json::json!({
+        "format": 1,
+        "generator": "maps_roundtrip",
+        "map": map.name(),
+        "spawns": map.spawns,
+        "preview_checksum_save": checksum_save,
+        "preview_checksum_import": checksum_import,
+        "preview_written": preview_written,
+        "cache_written": cache_written,
+        "registry_save": maps.len(),
+        "registry_import": imported_maps.len(),
+        "ok": ok,
+    });
+    let text = serde_json::to_string_pretty(&report)?;
+    if json {
+        println!("{text}");
+    } else {
+        println!("maps roundtrip: {checksum_save} -> {checksum_import} ok={ok}");
+    }
+    Ok(if ok { EXIT_PASS } else { EXIT_FAIL })
 }
 
 /// `maps preview-tiles` (plan 19 M2 §5/§7b): deterministic preview pixels +

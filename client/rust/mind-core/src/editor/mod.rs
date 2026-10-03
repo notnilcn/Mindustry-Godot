@@ -22,6 +22,7 @@ pub mod grid;
 pub mod lifecycle;
 pub mod maps_glue;
 pub mod objectives;
+pub mod playtest;
 pub mod preview;
 pub mod processors;
 pub mod stack;

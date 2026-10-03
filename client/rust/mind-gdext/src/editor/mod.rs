@@ -38,13 +38,16 @@ use mind_core::editor::draw_op::DrawOperation;
 use mind_core::editor::grid::WorldEditorGrid;
 use mind_core::editor::lifecycle::try_catch_map_error;
 use mind_core::editor::maps_glue::{editor_base_tags, save_editor_map};
+use mind_core::editor::playtest::{EditorPlayState, PlaytestOutcome};
 use mind_core::editor::{BRUSH_SIZES, EditorTool, MapEditor};
+use mind_core::game::play::PlaySession;
+use mind_core::game::rules_event::RulesEpoch;
 use mind_core::game::team::Team;
 use mind_core::io::fs::{FileSystem, NativeFs};
 use mind_core::io::map::MapIo;
 use mind_core::maps::Map;
 use mind_core::maps::filters::block_info;
-use mind_core::world::{NoopRenderHooks, NoopWorldHooks, WorldGrid};
+use mind_core::world::{NoopMapGenHooks, NoopRenderHooks, NoopWorldHooks, WorldGrid};
 
 mod map_view;
 
@@ -93,6 +96,9 @@ pub struct MindEditor {
     last_error_key: Option<String>,
     last_error_message: Option<String>,
     view: MapViewDriver,
+    play: EditorPlayState,
+    play_session: PlaySession,
+    rules_epoch: RulesEpoch,
 }
 
 #[godot_api]
@@ -132,6 +138,9 @@ impl INode for MindEditor {
             last_error_key: None,
             last_error_message: None,
             view: MapViewDriver::new(),
+            play: EditorPlayState::new(),
+            play_session: PlaySession::default(),
+            rules_epoch: RulesEpoch::default(),
         }
     }
 
@@ -1050,6 +1059,126 @@ impl MindEditor {
                 ])
             }
         }
+    }
+
+    // --- playtest lifecycle (plan 19 M7 §3.11) ---
+
+    /// `MapEditorDialog.editInGame()`: snapshot rules, apply the hidden `editor`
+    /// gamemode and enter a synthetic play session.
+    #[func]
+    pub fn edit_in_game(&mut self) -> VarDictionary {
+        let events = self
+            .play
+            .edit_in_game(&mut self.editor, &mut self.play_session);
+        self.clear_error();
+        dict(vec![
+            ("ok", true.to_variant()),
+            ("playing", true.to_variant()),
+            (
+                "phase",
+                GString::from(self.play_session.phase.name()).to_variant(),
+            ),
+            ("rules_editor", self.play_session.rules.editor.to_variant()),
+            ("events", (events.len() as i64).to_variant()),
+        ])
+    }
+
+    /// `MapEditorDialog.playtest()`: save first, then (Shift) auto-pick a valid
+    /// gamemode and replay the map. Without Shift the caller opens
+    /// `MapPlayDialog` (returns `dialog: true`).
+    #[func]
+    pub fn playtest(&mut self) -> VarDictionary {
+        let name = self.editor.tags.get("name").cloned().unwrap_or_default();
+        if name.trim().is_empty() {
+            self.last_error_key = Some("@editor.save.noname".to_owned());
+            self.last_error_message = Some("playtest requires a map name".to_owned());
+            return dict(vec![
+                ("ok", false.to_variant()),
+                ("error", GString::from("noname").to_variant()),
+            ]);
+        }
+        let _ = self.save();
+        let Some(path) = self.file.clone() else {
+            self.last_error_key = Some("@editor.errorsave".to_owned());
+            self.last_error_message = Some("playtest could not save the map".to_owned());
+            return dict(vec![
+                ("ok", false.to_variant()),
+                ("error", GString::from("@editor.errorsave").to_variant()),
+            ]);
+        };
+        let fs = NativeFs;
+        let header = match MapIo::create_map(&fs, &path, true) {
+            Ok(header) => header,
+            Err(error) => {
+                self.last_error_key = Some("@editor.errorload".to_owned());
+                self.last_error_message = Some(error.to_string());
+                return dict(vec![("ok", false.to_variant())]);
+            }
+        };
+        let map = Map::from_header(&header, true);
+        let outcome = self.play.playtest(
+            &mut self.editor,
+            &mut self.play_session,
+            &map,
+            &NoopMapGenHooks,
+            &mut self.rules_epoch,
+            true,
+        );
+        match outcome {
+            PlaytestOutcome::Dialog => dict(vec![
+                ("ok", true.to_variant()),
+                ("dialog", true.to_variant()),
+            ]),
+            PlaytestOutcome::Playing { mode, events } => dict(vec![
+                ("ok", true.to_variant()),
+                ("dialog", false.to_variant()),
+                ("mode", GString::from(mode.name()).to_variant()),
+                (
+                    "phase",
+                    GString::from(self.play_session.phase.name()).to_variant(),
+                ),
+                ("events", (events.len() as i64).to_variant()),
+            ]),
+        }
+    }
+
+    /// `MapEditorDialog.resumeEditing()`: return to the menu with the pre-playtest
+    /// rules restored.
+    #[func]
+    pub fn resume_editing(&mut self) -> bool {
+        self.play
+            .resume_editing(&mut self.editor, &mut self.play_session);
+        true
+    }
+
+    /// `MapEditorDialog.resumeAfterPlaytest(map)`: reopen the map file.
+    #[func]
+    pub fn resume_after_playtest(&mut self, path: GString) -> bool {
+        self.begin_edit_map(path)
+    }
+
+    /// `MapEditorDialog.tryExit()`: always requires the unsaved-changes confirm.
+    #[func]
+    pub fn try_exit(&mut self) -> bool {
+        self.play.try_exit()
+    }
+
+    /// Playtest lifecycle state for the inspector / MCP oracle.
+    #[func]
+    pub fn playtest_status(&self) -> VarDictionary {
+        dict(vec![
+            (
+                "phase",
+                GString::from(self.play_session.phase.name()).to_variant(),
+            ),
+            ("editor", self.play_session.rules.editor.to_variant()),
+            ("playtesting", self.play.playtesting.to_variant()),
+            (
+                "has_snapshot",
+                self.play.last_saved_rules.is_some().to_variant(),
+            ),
+            ("saved", self.editor.saved.to_variant()),
+        ])
     }
 
     // --- map view (view-only, plan 19 §3.5) ---

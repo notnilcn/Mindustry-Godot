@@ -996,6 +996,14 @@
       "command": "editor ops --fixture client/rust/mind-core/tests/fixtures/editor/basic_ops.json --json"
     },
     {
+      "name": "editor_playtest",
+      "plan": "19",
+      "phase": "P7",
+      "tier": "T1",
+      "kind": "embedded",
+      "command": "editor playtest --json"
+    },
+    {
       "name": "editor_resize_shift",
       "plan": "19",
       "phase": "P7",
@@ -1050,6 +1058,14 @@
       "tier": "T1",
       "kind": "embedded",
       "command": "maps registry-shuffle --json"
+    },
+    {
+      "name": "maps_roundtrip",
+      "plan": "19",
+      "phase": "P7",
+      "tier": "T1",
+      "kind": "embedded",
+      "command": "maps roundtrip --json"
     },
     {
       "name": "maps_save_load_save",
