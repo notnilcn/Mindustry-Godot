@@ -79,7 +79,7 @@ func _request_send() -> void:
 
 
 func _next_mode() -> void:
-	var previous := PREFIXES[_mode]
+	var previous: String = PREFIXES[_mode]
 	var admin := false
 	_mode = (_mode + 1) % MODES.size()
 	while MODES[_mode] == "admin" and not admin:

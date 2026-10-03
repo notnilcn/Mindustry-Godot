@@ -40,7 +40,7 @@ static func verify(theme: Theme, manifest: Dictionary) -> bool:
 	var ok := true
 	for group in MindStyles.GROUP_BASE_TYPES.keys():
 		for name in manifest.get(group, []):
-			if not theme.has_type(name):
+			if not theme.get_type_list().has(str(name)):
 				push_warning("[ui] style not registered: %s" % str(name))
 				ok = false
 	return ok

@@ -6,6 +6,8 @@
 ## `NetClient`/`mind-stdb` connect flow are plans 01/21/22; the M3 shell provides
 ## the address field, connect button, server list host and version-mismatch hook.
 
+extends MindDialog
+
 signal connect_requested(address: String)
 
 var _table: MindTable = null
