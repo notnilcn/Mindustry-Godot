@@ -10,8 +10,9 @@ use std::time::Instant;
 
 use anyhow::{Result, bail};
 use bevy_ecs::entity::Entity;
-use mind_core::ai::UnitHarness;
+use mind_core::ai::{ControlPathfinder, UnitHarness};
 use mind_core::determinism::Checksummer;
+use mind_core::world::TilePos;
 
 use crate::cli::UnitsCommand;
 
@@ -76,8 +77,13 @@ pub fn run(command: &UnitsCommand) -> Result<i32> {
             units,
             ticks,
             assert_alloc,
+            profile,
             json,
-        } => bench(*units, *ticks, *assert_alloc, *json),
+        } => match profile.as_deref() {
+            Some("path") => bench_path(*ticks, *json),
+            Some("ai") | None => bench(*units, *ticks, *assert_alloc, *json),
+            Some(other) => bail!("unknown units bench profile `{other}` (expected `ai` or `path`)"),
+        },
     }
 }
 
@@ -1154,6 +1160,87 @@ fn bench(units: usize, ticks: u64, assert_alloc: Option<u64>, json: bool) -> Res
         println!("{}", serde_json::to_string_pretty(&report)?);
     }
     Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+}
+
+/// §7d `pathfinder_flat256`: field build + cached request cost on a 256² flat
+/// grid.
+///
+/// Phase 1 builds one per-goal flow field per distinct goal (`build_*`); phase 2
+/// re-requests the same goals so every call is a cache hit (`request_*`). The
+/// asserted budget is the cache-hit request (`≤ 100 µs`); the synchronous full
+/// field build is reported but not budgeted here (plan 23 measures the real
+/// incremental `CONTROL_NODES_PER_TICK` engine). Debug builds are exempt.
+fn bench_path(ticks: u64, json: bool) -> Result<i32> {
+    let size: i32 = 256;
+    let harness = UnitHarness::new(size, size, 7);
+    let content = harness.content();
+    let mut pathfinder = ControlPathfinder::new(size, size);
+    pathfinder.build(&harness.build.grid, content, 0);
+
+    let goals: Vec<TilePos> = (0..32u64)
+        .map(|i| {
+            let gx = ((i * 37 + 11) % (size as u64 - 2)) as i16 + 1;
+            let gy = ((i * 53 + 7) % (size as u64 - 2)) as i16 + 1;
+            TilePos::new(gx, gy)
+        })
+        .collect();
+
+    // Phase 1: build each distinct goal's field.
+    let mut build_samples = Vec::with_capacity(goals.len());
+    for &to in &goals {
+        let start = Instant::now();
+        let result = pathfinder.get_path_position(TilePos::new(1, 1), to);
+        build_samples.push(start.elapsed().as_nanos() as u64 / 1000);
+        if result.unreachable {
+            bail!("path field build to {to:?} unexpectedly unreachable");
+        }
+    }
+
+    // Phase 2: cached requests (fields already present).
+    let requests = ticks.max(1);
+    let mut samples = Vec::with_capacity(requests as usize);
+    for i in 0..requests {
+        let to = goals[(i as usize) % goals.len()];
+        let start = Instant::now();
+        let result = pathfinder.get_path_position(TilePos::new(1, 1), to);
+        samples.push(start.elapsed().as_nanos() as u64 / 1000);
+        if result.unreachable {
+            bail!("cached path request to {to:?} unexpectedly unreachable");
+        }
+    }
+
+    let percentile = |samples: &mut Vec<u64>, pct: usize| -> u64 {
+        samples.sort_unstable();
+        samples
+            .get((samples.len() * pct / 100).min(samples.len().saturating_sub(1)))
+            .copied()
+            .unwrap_or(0)
+    };
+    let build_p50 = percentile(&mut build_samples, 50);
+    let build_p99 = percentile(&mut build_samples, 99);
+    let p50 = percentile(&mut samples, 50);
+    let p99 = percentile(&mut samples, 99);
+
+    let budget_ms = 0.6;
+    let p99_ms = p99 as f64 / 1000.0;
+    let within_budget = cfg!(debug_assertions) || p99_ms <= budget_ms;
+    let report = serde_json::json!({
+        "scenario": "units_bench_path",
+        "map": format!("flat_{size}"),
+        "fields_built": pathfinder.fields.len(),
+        "requests": requests,
+        "build_p50_us": build_p50,
+        "build_p99_us": build_p99,
+        "request_p50_us": p50,
+        "request_p99_us": p99,
+        "budget_ms": budget_ms,
+        "within_budget": within_budget,
+        "pass": within_budget,
+    });
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    }
+    Ok(if within_budget { EXIT_PASS } else { EXIT_FAIL })
 }
 
 #[cfg(test)]
