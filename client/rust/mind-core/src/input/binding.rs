@@ -863,6 +863,17 @@ impl KeyBindTable {
             .iter()
             .filter(move |bind| bind.category == Some(category))
     }
+
+    /// Every bundle key the input system owns, in parity order (plan 15 §6.1):
+    /// `keybind.<name>.name` for each binding, then `category.<category>.name`
+    /// for each non-debug category. Localization (plan 03) consumes this list.
+    pub fn bundle_keys() -> Vec<String> {
+        let mut keys: Vec<String> = BINDS.iter().map(KeyBind::bundle_key).collect();
+        for category in Category::ALL {
+            keys.push(format!("category.{}.name", category.name()));
+        }
+        keys
+    }
 }
 
 /// A bind's current value.
@@ -1145,6 +1156,25 @@ mod tests {
                 + 2,
             88
         );
+    }
+
+    #[test]
+    fn bundle_keys_cover_every_bind_and_category() {
+        let keys = KeyBindTable::bundle_keys();
+        // One `keybind.<name>.name` per bind + one `category.<name>.name` per
+        // non-debug category (plan 15 §6.1).
+        assert_eq!(keys.len(), KeyBindTable::len() + Category::ALL.len());
+        assert!(keys.contains(&"keybind.move_x.name".to_owned()));
+        assert!(keys.contains(&"keybind.unit_command_move.name".to_owned()));
+        assert!(keys.contains(&"category.general.name".to_owned()));
+        assert!(keys.contains(&"category.multiplayer.name".to_owned()));
+        // No debug-only bind leaks a category key.
+        assert!(!keys.contains(&"category.debug.name".to_owned()));
+        // Keys are unique.
+        let mut sorted = keys.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), keys.len());
     }
 
     #[test]
