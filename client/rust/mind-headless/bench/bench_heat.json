@@ -4,13 +4,22 @@
   "buildings": 2000,
   "ticks": 3600,
   "warmup": 600,
-  "p50_us": 602,
-  "p99_us": 1071,
-  "p99_ms": 1.071,
+  "p50_us": 366,
+  "p99_us": 546,
+  "p99_ms": 0.546,
   "budget_ms": 0.5,
   "within_budget": false,
   "detail": {
     "placed": 4000,
     "method": "calculate_heat (producer -> conductor, reused scratch)"
-  }
+  },
+  "machine": {
+    "id": "dev-win-amd860m",
+    "os": "Windows 11 Pro 10.0.26200",
+    "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+    "rust": "1.98.1",
+    "profile": "release"
+  },
+  "recorded_at": "2026-10-04",
+  "note": "Release build on dev-win-amd860m. The budget registry states this row as a p95_ms budget, but the producer emits p50/p99 only; the recorded p99_ms exceeds the 0.5 ms tool budget (within_budget:false). Do not loosen the budget; see plan 23 changelog."
 }

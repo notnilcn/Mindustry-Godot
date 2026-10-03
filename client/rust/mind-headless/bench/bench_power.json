@@ -4,14 +4,23 @@
   "buildings": 2000,
   "ticks": 3600,
   "warmup": 600,
-  "p50_us": 242,
-  "p99_us": 616,
-  "p99_ms": 0.616,
+  "p50_us": 161,
+  "p99_us": 436,
+  "p99_ms": 0.436,
   "budget_ms": 0.3,
   "within_budget": false,
   "detail": {
     "placed": 2000,
     "graphs": 200,
     "method": "PowerGrids::update_all"
-  }
+  },
+  "machine": {
+    "id": "dev-win-amd860m",
+    "os": "Windows 11 Pro 10.0.26200",
+    "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+    "rust": "1.98.1",
+    "profile": "release"
+  },
+  "recorded_at": "2026-10-04",
+  "note": "Release build on dev-win-amd860m. The budget registry (`parity/bench_budgets.json`) states this row as a p95_ms budget, but the producer emits p50/p99 only; the recorded p99_ms exceeds the 0.3 ms tool budget (within_budget:false). Do not loosen the budget; see plan 23 changelog."
 }

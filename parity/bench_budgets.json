@@ -2,11 +2,14 @@
   "format": 1,
   "note": "Aggregated performance budget registry (plan 23 \u00a77d). Numbers are copied from each owning plan; `measure` is the producing mind-headless command. Per-plan baseline files remain the recording source of truth (`sources`); this file is the cross-crate coverage/gate registry.",
   "machine": {
-    "id": "dev-wsl-amd860m",
-    "os": "Ubuntu in WSL2 (Windows 11 host, WSLg)",
-    "gpu": "llvmpipe (software Vulkan; GPU budgets use dev-win-amd860m on Windows)",
+    "id": "dev-win-amd860m",
+    "os": "Windows 11 Pro 10.0.26200",
+    "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+    "gpu": "AMD Radeon(TM) 860M Graphics",
     "godot": "4.7.2.stable",
-    "profile": "release"
+    "profile": "release",
+    "rust": "1.98.1",
+    "recorded_at": "2026-10-04"
   },
   "canonical": {
     "scenario": "sim_core_mid",

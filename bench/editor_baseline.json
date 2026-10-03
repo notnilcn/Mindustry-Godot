@@ -1,5 +1,5 @@
 {
-  "note": "Plan 19 §7d editor performance budgets (dev host, Ubuntu WSL2, debug build). Budgets are copied from 19_MAPS_EDITOR_IMPLEMENTATION_PLAN.md §7d; `measured` records the current MapView draw + op-recording suite. A release re-record is owned by the perf runner (plan 23). The steady-state allocation audit is now zero (F30: pre-reserved line/brush scratch + pooled DrawOperations + per-frame event-log drain).",
+  "note": "Plan 19 §7d editor performance budgets. Budgets are copied from 19_MAPS_EDITOR_IMPLEMENTATION_PLAN.md §7d; `measured` records the MapView draw + op-recording suite. `measured.debug` is the earlier Ubuntu WSL2 debug record; `measured.release` is the release re-record on dev-win-amd860m (plan 23 baseline pass). The steady-state allocation audit is zero (pre-reserved line/brush scratch + pooled DrawOperations + per-frame event-log drain).",
   "format": 1,
   "scenario": "editor_bench",
   "fixture": "200x200 editor map, copper-wall lines",
@@ -21,6 +21,24 @@
         "p99_us": 749.036,
         "within_budget": true,
         "command": "cargo run -p mind-headless -- editor bench --suite mapview --size 200 --runs 40 --json"
+      }
+    },
+    "release": {
+      "mapview": {
+        "size": 200,
+        "runs": 40,
+        "p50_us": 60.0,
+        "p99_us": 94.7,
+        "within_budget": true,
+        "command": "mind-headless editor bench --suite mapview --size 200 --runs 40 --json"
+      },
+      "line": {
+        "size": 200,
+        "runs": 20,
+        "p50_us": 13.1,
+        "p99_us": 28.8,
+        "within_budget": true,
+        "command": "mind-headless editor bench --json"
       }
     }
   },

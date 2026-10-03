@@ -1,11 +1,14 @@
 {
   "format": 1,
   "machine": {
-    "id": "dev-wsl-amd860m",
-    "os": "Ubuntu in WSL2 (Windows 11 host, WSLg)",
-    "gpu": "llvmpipe (software Vulkan; GPU budgets use dev-win-amd860m on Windows)",
+    "id": "dev-win-amd860m",
+    "os": "Windows 11 Pro 10.0.26200",
+    "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+    "gpu": "AMD Radeon(TM) 860M Graphics",
+    "rust": "1.98.1",
     "godot": "4.7.2.stable",
-    "profile": "release"
+    "profile": "release",
+    "recorded_at": "2026-10-04"
   },
   "canonical": {
     "scenario": "sim_core_mid",
@@ -22,18 +25,20 @@
       "plan": "05",
       "measure": "mind-headless bench --scenario sim_core --profile mid --ticks 3600 --json",
       "metric": "tick_p95_ms",
-      "value": null,
+      "value": 0.0001,
       "budget": 4.0,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release, dev-win-amd860m; p95_ns 100 -> 0.0001 ms (flat 256x256 + 600 stone walls, no active blocks). Command rejects --json; bench always emits JSON."
     },
     {
       "id": "spine_tick_p99",
       "plan": "00",
       "measure": "bench --scenario spine --json",
       "metric": "p99_us",
-      "value": null,
+      "value": 1.0,
       "budget": 250,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release; p99_ns 100 (100000 ticks)"
     },
     {
       "id": "spine_checksum_dump",
@@ -42,16 +47,18 @@
       "metric": "ms",
       "value": null,
       "budget": 5,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "deferred: `bench` emits `{p50_us,p99_us,checksum}`, not a checksum-dump millisecond metric; no producing command in this build"
     },
     {
       "id": "stdb_pump_idle_p99",
       "plan": "01",
       "measure": "bench --scenario stdb_pump --json",
       "metric": "p99_us",
-      "value": null,
+      "value": 1.0,
       "budget": 200,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release; p99_ns 100 (100000 ticks)"
     },
     {
       "id": "stdb_binder_replay_100k",
@@ -60,7 +67,8 @@
       "metric": "ms",
       "value": null,
       "budget": 100,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "deferred: no `stdb` subcommand family ships in this build; the binder replay is exercised as the `stdb_binder_replay` scenario"
     },
     {
       "id": "assets_pack_full",
@@ -69,7 +77,8 @@
       "metric": "s",
       "value": null,
       "budget": 90,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "deferred: `mind-tools pack` is a separate crate/binary, out of this recording pass"
     },
     {
       "id": "assets_ready",
@@ -78,70 +87,78 @@
       "metric": "ms",
       "value": null,
       "budget": 1500,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "deferred: `assets index` reports region counts only, no timing"
     },
     {
       "id": "core_sim_empty_p99",
       "plan": "05",
       "measure": "bench sim_core --profile empty --json",
       "metric": "p99_ms",
-      "value": null,
+      "value": 0.0001,
       "budget": 0.5,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release; p99_ns 100 on 128x128, 0 buildings"
     },
     {
       "id": "core_sim_mid_p99",
       "plan": "05",
       "measure": "bench sim_core --profile mid --json",
       "metric": "p99_ms",
-      "value": null,
+      "value": 0.0001,
       "budget": 4.0,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release; p99_ns 100 on 256x256, 600 buildings"
     },
     {
       "id": "core_sim_stress_p99",
       "plan": "05",
       "measure": "bench sim_core --profile stress --json",
       "metric": "p99_ms",
-      "value": null,
+      "value": 0.0001,
       "budget": 10.0,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release; p99_ns 100 on 512x512, 2000 buildings"
     },
     {
       "id": "blocks_buildings_p50",
       "plan": "07",
       "measure": "blocks bench --profile buildings --buildings 2000 --ticks 3600 --json",
       "metric": "p50_us",
-      "value": 87.0,
+      "value": 109.0,
       "budget": 600,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release, dev-win-amd860m"
     },
     {
       "id": "blocks_buildings_p99",
       "plan": "07",
       "measure": "blocks bench --profile buildings --buildings 2000 --ticks 3600 --json",
       "metric": "p99_us",
-      "value": 149.0,
+      "value": 144.0,
       "budget": 1500,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release, dev-win-amd860m"
     },
     {
       "id": "blocks_place_p99",
       "plan": "07",
       "measure": "blocks bench --profile place --buildings 2000 --json",
       "metric": "p99_us",
-      "value": null,
+      "value": 24.0,
       "budget": 250,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release, dev-win-amd860m"
     },
     {
       "id": "blocks_construct_p99",
       "plan": "07",
       "measure": "blocks bench --profile construct --buildings 1000 --ticks 1 --json",
       "metric": "p99_us",
-      "value": null,
+      "value": 84.0,
       "budget": 300,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release, dev-win-amd860m"
     },
     {
       "id": "logistics_conveyor_throughput",
@@ -150,16 +167,18 @@
       "metric": "updates_per_sec",
       "value": null,
       "budget": 20000000,
-      "comparison": "gte"
+      "comparison": "gte",
+      "note": "deferred: the logistics bench emits p50/p95/p99 us only, no updates_per_sec field"
     },
     {
       "id": "logistics_slice_p95",
       "plan": "08",
       "measure": "blocks bench --profile logistics --json",
       "metric": "p95_ms",
-      "value": 0.265,
+      "value": 0.316,
       "budget": 0.35,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release; p95_us 316"
     },
     {
       "id": "power_update_p95",
@@ -168,7 +187,8 @@
       "metric": "p95_ms",
       "value": null,
       "budget": 0.3,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "deferred: the power bench emits p50_us/p99_us only (no p95). Measured p99_ms 0.436 exceeds the 0.3 ms tool budget (`within_budget:false`); see plan 23 changelog"
     },
     {
       "id": "liquid_update_p95",
@@ -177,7 +197,8 @@
       "metric": "p95_ms",
       "value": null,
       "budget": 0.2,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "deferred: emits p50_us/p99_us only (no p95). Measured p99_ms 0.566 exceeds the 0.2 ms tool budget (`within_budget:false`)"
     },
     {
       "id": "heat_update_p95",
@@ -186,16 +207,18 @@
       "metric": "p95_ms",
       "value": null,
       "budget": 0.5,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "deferred: emits p50_us/p99_us only (no p95). Measured p99_ms 0.546 exceeds the 0.5 ms tool budget (`within_budget:false`)"
     },
     {
       "id": "combat_bullets_p95",
       "plan": "10",
       "measure": "combat bench --bullets 2000 --turrets 400 --ticks 3600 --json",
       "metric": "p95_ms",
-      "value": null,
+      "value": 0.639,
       "budget": 1.2,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release; p95_us 639"
     },
     {
       "id": "units_mid_p95",
@@ -204,7 +227,8 @@
       "metric": "p95_ms",
       "value": null,
       "budget": 1.5,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "deferred (probable regression): measured p50 363678 us / p99 513922 us (242x/342x over budget) on a working tree carrying concurrent uncommitted AI/pathfinder edits (`ai/pathfinder/*`, `entities/comp/unit/*`); needs a clean-tree re-record"
     },
     {
       "id": "units_stress_p95",
@@ -213,169 +237,188 @@
       "metric": "p95_ms",
       "value": null,
       "budget": 5.0,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "deferred: not run (the 300-unit pass took ~4.5 min; 1000 units would exceed the recording timebox). See units_mid_p95"
     },
     {
       "id": "render_build_p50",
       "plan": "16",
       "measure": "render bench --json",
       "metric": "p50_us",
-      "value": null,
+      "value": 1787.0,
       "budget": 2500,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release, 250x250 + 5000 buildings, 200 iters"
     },
     {
       "id": "render_build_p99",
       "plan": "16",
       "measure": "render bench --json",
       "metric": "p99_us",
-      "value": null,
+      "value": 2397.0,
       "budget": 5000,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release, 250x250 + 5000 buildings, 200 iters"
     },
     {
       "id": "audio_mix_p50",
       "plan": "18",
       "measure": "audio bench --ticks 3600 --loops 256 --voices 32 --json",
       "metric": "p50_us",
-      "value": null,
+      "value": 3.0,
       "budget": 100,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release; p50_ns 3000"
     },
     {
       "id": "audio_mix_p99",
       "plan": "18",
       "measure": "audio bench --ticks 3600 --loops 256 --voices 32 --json",
       "metric": "p99_us",
-      "value": null,
+      "value": 6.6,
       "budget": 250,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release; p99_ns 6600"
     },
     {
       "id": "mods_parse",
       "plan": "20",
       "measure": "mods bench --scene parse --fixture allkinds --json",
       "metric": "us",
-      "value": null,
+      "value": 147.0,
       "budget": 2000,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release; p99_us 147 (20 runs, 9 files) recorded against the `us` budget"
     },
     {
       "id": "content_base_load",
       "plan": "02",
       "measure": "content bench --runs 20 --json",
       "metric": "median_ms",
-      "value": null,
+      "value": 1.4844,
       "budget": 200,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release; median of 20 create+init+postInit+load runs"
     },
     {
       "id": "io_save_p95",
       "plan": "04",
       "measure": "io bench-save --map synthetic --iters 50 --json",
       "metric": "p95_ms",
-      "value": null,
+      "value": 3.942,
       "budget": 50,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release; synthetic 64x64, 600 ticks, 50 iters"
     },
     {
       "id": "io_load_p95",
       "plan": "04",
       "measure": "io bench-save --map synthetic --iters 50 --json",
       "metric": "p95_ms",
-      "value": null,
+      "value": 0.1774,
       "budget": 100,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release; synthetic 64x64, 600 ticks, 50 iters"
     },
     {
       "id": "world_gen_256_p95",
       "plan": "06",
       "measure": "world bench-gen --generator simplex --width 256 --height 256 --json",
       "metric": "p95_ms",
-      "value": null,
+      "value": 14.0559,
       "budget": 250,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release, seed 42, 20 iters"
     },
     {
       "id": "world_gen_serpulo_p95",
       "plan": "06",
       "measure": "world bench-gen --generator serpulo --width 128 --height 128 --json",
       "metric": "p95_ms",
-      "value": null,
+      "value": 45.8408,
       "budget": 250,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release, seed 42, 20 iters"
     },
     {
       "id": "world_gen_erekir_p95",
       "plan": "06",
       "measure": "world bench-gen --generator erekir --width 128 --height 128 --json",
       "metric": "p95_ms",
-      "value": null,
+      "value": 32.9065,
       "budget": 250,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release, seed 42, 20 iters"
     },
     {
       "id": "world_gen_asteroid_p95",
       "plan": "06",
       "measure": "world bench-gen --generator asteroid --width 500 --height 500 --json",
       "metric": "p95_ms",
-      "value": null,
+      "value": 37.957,
       "budget": 180,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release, seed 42, 20 iters"
     },
     {
       "id": "campaign_teams_p99",
       "plan": "12",
       "measure": "campaign bench --profile teams --ticks 3600 --json",
       "metric": "p99_ms",
-      "value": null,
+      "value": 0.02864725,
       "budget": 0.35,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release; `campaign bench` reports `timing_ms` as a per-op mean, not a p99 (recorded mean here); `budget_ok:true`"
     },
     {
       "id": "campaign_fog_p99",
       "plan": "12",
       "measure": "campaign bench --profile fog --ticks 3600 --json",
       "metric": "p99_ms",
-      "value": null,
+      "value": 0.033177333333333336,
       "budget": 0.6,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release; per-op mean, not p99 (recorded mean); `budget_ok:true`"
     },
     {
       "id": "campaign_turn_p99",
       "plan": "12",
       "measure": "campaign bench --profile turn --ticks 3600 --json",
       "metric": "p99_ms",
-      "value": null,
+      "value": 0.0075204,
       "budget": 0.5,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release; per-op mean, not p99 (recorded mean); `budget_ok:true`"
     },
     {
       "id": "campaign_objectives_p99",
       "plan": "12",
       "measure": "campaign bench --profile objectives --ticks 3600 --json",
       "metric": "p99_ms",
-      "value": null,
+      "value": 0.00007438888888888888,
       "budget": 0.1,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release; per-op mean, not p99 (recorded mean); `budget_ok:true`"
     },
     {
       "id": "campaign_schematic_p99",
       "plan": "12",
       "measure": "campaign bench --profile schematic --ticks 3600 --json",
       "metric": "p99_ms",
-      "value": null,
+      "value": 0.04666605555555556,
       "budget": 1.0,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release; per-op mean, not p99 (recorded mean); `budget_ok:true`"
     },
     {
       "id": "fx_program_resolve_p95",
       "plan": "17",
       "measure": "fx bench --states 2000 --frames 360 --json",
       "metric": "p95_ms",
-      "value": null,
+      "value": 1.3151269444444447,
       "budget": 1.5,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release; the fx bench emits `ms_per_frame` (a per-frame mean), not a p95; recorded that value against the budget"
     },
     {
       "id": "fx_program_light_p95",
@@ -384,7 +427,8 @@
       "metric": "light_p95_ms",
       "value": null,
       "budget": 0.25,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "deferred: the fx bench emits no `light_p95_ms` field"
     },
     {
       "id": "logic_vm_mixed_ns",
@@ -393,7 +437,8 @@
       "metric": "ns_per_instruction",
       "value": null,
       "budget": 25.0,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "deferred: no `logic bench` subcommand ships in this build (`logic` has assemble/run/dump only)"
     },
     {
       "id": "logic_vm_arith_ns",
@@ -402,7 +447,8 @@
       "metric": "ns_per_instruction",
       "value": null,
       "budget": 10.0,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "deferred: no `logic bench` subcommand"
     },
     {
       "id": "logic_world_ms",
@@ -411,7 +457,8 @@
       "metric": "p95_us",
       "value": null,
       "budget": 30.0,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "deferred: no `logic bench` subcommand"
     },
     {
       "id": "logic_idle_processors_ms",
@@ -420,7 +467,8 @@
       "metric": "p95_ms",
       "value": null,
       "budget": 0.2,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "deferred: no `logic bench` subcommand"
     },
     {
       "id": "logic_assemble_ms",
@@ -429,7 +477,8 @@
       "metric": "p50_ms",
       "value": null,
       "budget": 2.0,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "deferred: no `logic bench` subcommand"
     },
     {
       "id": "ui_frame_p95_ms",
@@ -438,7 +487,8 @@
       "metric": "p95_ms",
       "value": null,
       "budget": 1.0,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "deferred: requires the Godot editor / in-engine profiler (NUD-40/A)"
     },
     {
       "id": "ui_dialog_open_p95_ms",
@@ -447,7 +497,8 @@
       "metric": "p95_ms",
       "value": null,
       "budget": 8.0,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "deferred: in-engine (MindUi open_dialog), no headless producer"
     },
     {
       "id": "ui_table_500_ms",
@@ -456,7 +507,8 @@
       "metric": "p95_ms",
       "value": null,
       "budget": 4.0,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "deferred: in-engine (MindTable.bench), no headless producer"
     },
     {
       "id": "ui_theme_build_ms",
@@ -465,52 +517,58 @@
       "metric": "ms",
       "value": null,
       "budget": 120.0,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "deferred: in-engine (UiRoot theme build), no headless producer"
     },
     {
       "id": "input_preview_p95_ms",
       "plan": "15",
       "measure": "mind-headless input bench --profile input_line --json",
       "metric": "p95_ms",
-      "value": null,
+      "value": 0.001,
       "budget": 0.5,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release; p95_us 1 -> 0.001 ms"
     },
     {
       "id": "input_astar_p95_ms",
       "plan": "15",
       "measure": "mind-headless input bench --profile input_astar --json",
       "metric": "p95_ms",
-      "value": null,
+      "value": 0.162,
       "budget": 2.0,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release; p95_us 162 on a 64x64 map"
     },
     {
       "id": "input_select_p95_ms",
       "plan": "15",
       "measure": "mind-headless input bench --profile input_select --json",
       "metric": "p95_ms",
-      "value": null,
+      "value": 0.0,
       "budget": 1.5,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release; p95_us 0 (sub-microsecond samples, 200 groups selected)"
     },
     {
       "id": "input_command_p95_ms",
       "plan": "15",
       "measure": "mind-headless input bench --profile input_command --json",
       "metric": "p95_ms",
-      "value": null,
+      "value": 0.0,
       "budget": 1.0,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release; p95_us 0 (ActionBatcher::emit, 200 units)"
     },
     {
       "id": "editor_bench_p99",
       "plan": "19",
       "measure": "editor bench --json",
       "metric": "p99_us",
-      "value": 29.076,
+      "value": 28.8,
       "budget": 250,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release, suite line, 200x200, 20 runs; suite mapview p50/p99 = 60.0/94.7 us"
     },
     {
       "id": "mp_checksum_p50",
@@ -519,7 +577,8 @@
       "metric": "p50_us",
       "value": 7.0,
       "budget": 50,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release; p50_ns 7000"
     },
     {
       "id": "mp_apply_p99",
@@ -528,7 +587,8 @@
       "metric": "p99_us",
       "value": 1.0,
       "budget": 25,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release; p99_ns 200"
     },
     {
       "id": "mp_relay_roundtrip_p99",
@@ -537,25 +597,28 @@
       "metric": "p99_us",
       "value": 1.0,
       "budget": 25,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release; p99_ns 200"
     },
     {
       "id": "mp_snapshot_bytes_p99",
       "plan": "21",
       "measure": "bench --scenario mp_snapshot_bytes --ticks 2000",
       "metric": "p99_us",
-      "value": 2.0,
+      "value": 28.0,
       "budget": 100,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release; p99_ns 27200"
     },
     {
       "id": "mp_plan_p99",
       "plan": "21",
       "measure": "bench --scenario mp_plan --ticks 2000",
       "metric": "p99_us",
-      "value": 2.0,
+      "value": 1.0,
       "budget": 100,
-      "comparison": "lte"
+      "comparison": "lte",
+      "note": "release; p99_ns 900"
     }
   ],
   "alloc": {
