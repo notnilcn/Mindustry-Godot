@@ -9,7 +9,8 @@
 //! `KeyCode`. `touched`/`touched_line` dispatch lives on [`MapEditor`].
 
 use super::EditorGrid;
-use super::{EditorBlockInfo, MapEditor};
+use super::tile_op::{OP_DATA, OP_DATA_EXTRA, TileOp, TileOpData};
+use super::{D8, EditorBlockInfo, MapEditor};
 use crate::content::{BlockDef, BlockId, ContentRegistry};
 
 /// The editor tool enum (`EditorTool`), declaration order.
@@ -199,7 +200,7 @@ pub fn touched(
                 }
             });
         }
-        EditorTool::Fill => { /* plan 19 M0: flood fill wired in `MapEditor::fill` */ }
+        EditorTool::Fill => fill_touched(editor, mode, world, content, x, y),
         EditorTool::Spray => {
             let info = editor.draw_info(content);
             let block = editor.draw_block;
@@ -220,6 +221,242 @@ pub fn touched(
         }
         EditorTool::Zoom => {}
     }
+}
+
+/// Records the two data pre-ops (`EditorTool.fill` `saveData` wrapper).
+fn record_data_pre_ops(editor: &mut MapEditor, world: &dyn EditorGrid, x: i32, y: i32) {
+    let (data, floor_data, overlay_data, extra) = world.tile_data(x, y);
+    editor.add_tile_op(TileOp::get(
+        x,
+        y,
+        OP_DATA,
+        TileOpData::get(data, floor_data, overlay_data),
+    ));
+    editor.add_tile_op(TileOp::get(x, y, OP_DATA_EXTRA, extra));
+}
+
+/// `EditorTool.fill.touched` (upstream `EditorTool.java:104-234`): six modes with
+/// the multiblock guard, team fill, erase, cliff fill and under-liquid fill.
+fn fill_touched(
+    editor: &mut MapEditor,
+    mode: i32,
+    world: &mut dyn EditorGrid,
+    content: &ContentRegistry,
+    x: i32,
+    y: i32,
+) {
+    if !world.in_bounds(x, y) {
+        return;
+    }
+    let draw_block = editor.draw_block;
+    let draw_team = editor.draw_team;
+    let rotation = editor.rotation;
+    let draw_info = editor.draw_info(content);
+    let tile_block = world.block_id(x, y);
+    let tile_info = EditorBlockInfo::from_def(content.block(tile_block));
+
+    // Don't fill multiblocks with a multiblock draw block; behave like the pencil.
+    if draw_info.is_multiblock && (mode == 0 || mode == -1) {
+        editor.draw_blocks(world, content, x, y);
+        return;
+    }
+
+    if mode == 0 || mode == -1 {
+        // Can't fill parts of multiblocks.
+        if tile_info.is_multiblock {
+            return;
+        }
+        let replace = mode == 0;
+        let save_data = draw_info.save_data;
+        let supports_overlay = draw_info.supports_overlay;
+        if draw_info.is_overlay {
+            let dest = world.overlay_id(x, y);
+            if dest == draw_block {
+                return;
+            }
+            let tester = move |w: &dyn EditorGrid, c: &ContentRegistry, tx: i32, ty: i32| {
+                w.overlay_id(tx, ty) == dest
+                    && EditorBlockInfo::from_def(c.block(w.floor_id(tx, ty))).supports_overlay
+            };
+            let mut setter = move |ed: &mut MapEditor, w: &mut dyn EditorGrid, tx: i32, ty: i32| {
+                if save_data {
+                    record_data_pre_ops(ed, &*w, tx, ty);
+                }
+                w.set_overlay(tx, ty, draw_block);
+            };
+            editor.fill(world, content, x, y, replace, &tester, &mut setter);
+        } else if draw_info.is_floor {
+            let dest = world.floor_id(x, y);
+            if dest == draw_block {
+                return;
+            }
+            let content_ref = content;
+            let tester = move |w: &dyn EditorGrid, _c: &ContentRegistry, tx: i32, ty: i32| {
+                w.floor_id(tx, ty) == dest
+            };
+            let mut setter = move |ed: &mut MapEditor, w: &mut dyn EditorGrid, tx: i32, ty: i32| {
+                if save_data {
+                    record_data_pre_ops(ed, &*w, tx, ty);
+                }
+                w.set_floor(tx, ty, draw_block);
+                let overlay = w.overlay_id(tx, ty);
+                if !is_overlay(content_ref.block(overlay)) && !supports_overlay {
+                    w.set_overlay(tx, ty, BlockId::AIR);
+                }
+            };
+            editor.fill(world, content, x, y, replace, &tester, &mut setter);
+        } else {
+            let dest = world.block_id(x, y);
+            if dest == draw_block {
+                return;
+            }
+            let tester = move |w: &dyn EditorGrid, _c: &ContentRegistry, tx: i32, ty: i32| {
+                w.block_id(tx, ty) == dest
+            };
+            let mut setter = move |ed: &mut MapEditor, w: &mut dyn EditorGrid, tx: i32, ty: i32| {
+                if save_data {
+                    record_data_pre_ops(ed, &*w, tx, ty);
+                }
+                w.set_block(tx, ty, draw_block, draw_team, rotation);
+            };
+            editor.fill(world, content, x, y, replace, &tester, &mut setter);
+        }
+    } else if mode == 1 {
+        // Team fill: only synthetic tiles are meaningful.
+        if tile_info.synthetic {
+            let dest = world.team_id(x, y);
+            if dest == draw_team {
+                return;
+            }
+            let tester = move |w: &dyn EditorGrid, c: &ContentRegistry, tx: i32, ty: i32| {
+                w.team_id(tx, ty) == dest
+                    && EditorBlockInfo::from_def(c.block(w.block_id(tx, ty))).synthetic
+            };
+            let mut setter =
+                move |_ed: &mut MapEditor, w: &mut dyn EditorGrid, tx: i32, ty: i32| {
+                    w.set_team(tx, ty, draw_team);
+                };
+            editor.fill(world, content, x, y, true, &tester, &mut setter);
+        }
+    } else if mode == 2 {
+        // Erase: blocks first, then overlays; floors are not erased.
+        let overlay = world.overlay_id(x, y);
+        if tile_block != BlockId::AIR {
+            let tester = move |w: &dyn EditorGrid, _c: &ContentRegistry, tx: i32, ty: i32| {
+                w.block_id(tx, ty) == tile_block
+            };
+            let mut setter =
+                move |_ed: &mut MapEditor, w: &mut dyn EditorGrid, tx: i32, ty: i32| {
+                    w.set_block(tx, ty, BlockId::AIR, 0, 0);
+                };
+            editor.fill(world, content, x, y, false, &tester, &mut setter);
+        } else if overlay != BlockId::AIR {
+            let tester = move |w: &dyn EditorGrid, _c: &ContentRegistry, tx: i32, ty: i32| {
+                w.overlay_id(tx, ty) == overlay
+            };
+            let mut setter =
+                move |_ed: &mut MapEditor, w: &mut dyn EditorGrid, tx: i32, ty: i32| {
+                    w.set_overlay(tx, ty, BlockId::AIR);
+                };
+            editor.fill(world, content, x, y, false, &tester, &mut setter);
+        }
+    } else if mode == 3 {
+        // Cliff fill: static blocks become autotiled cliffs.
+        let cliff = content.block_id("cliff").unwrap_or(BlockId::AIR);
+        if !tile_info.is_static || tile_block == cliff {
+            return;
+        }
+        let air = BlockId::AIR;
+        let content_ref = content;
+        let mut was_static = vec![false; (world.width() * world.height()).max(0) as usize];
+        let tester = move |w: &dyn EditorGrid, c: &ContentRegistry, tx: i32, ty: i32| {
+            let block = w.block_id(tx, ty);
+            EditorBlockInfo::from_def(c.block(block)).is_static && block != cliff
+        };
+        let mut setter = move |_ed: &mut MapEditor, w: &mut dyn EditorGrid, tx: i32, ty: i32| {
+            let width = w.width();
+            let mut rotation = 0i32;
+            for (i, (dx, dy)) in D8.iter().enumerate() {
+                let (ox, oy) = (tx + dx, ty + dy);
+                if w.in_bounds(ox, oy) {
+                    let other = w.block_id(ox, oy);
+                    let index = (ox + oy * width).max(0) as usize;
+                    if !EditorBlockInfo::from_def(content_ref.block(other)).is_static
+                        && !was_static.get(index).copied().unwrap_or(false)
+                    {
+                        rotation |= 1 << i;
+                    }
+                }
+            }
+            let index = (tx + ty * width).max(0) as usize;
+            if rotation != 0 {
+                w.set_block(tx, ty, cliff, w.team_id(tx, ty), w.rotation(tx, ty));
+            } else {
+                w.set_block(tx, ty, air, 0, 0);
+                if let Some(slot) = was_static.get_mut(index) {
+                    *slot = true;
+                }
+            }
+            let (_, floor_data, overlay_data, _) = w.tile_data(tx, ty);
+            w.set_data(tx, ty, rotation as i8, floor_data, overlay_data);
+        };
+        editor.fill(world, content, x, y, false, &tester, &mut setter);
+    } else if mode == 4 && draw_info.is_floor && !draw_info.is_liquid {
+        // Fill under liquid: overlay liquid tiles, matching floor + overlay.
+        if !EditorBlockInfo::from_def(content.block(world.floor_id(x, y))).is_liquid {
+            return;
+        }
+        let dest = world.floor_id(x, y);
+        let dest_overlay = world.overlay_id(x, y);
+        let tester = move |w: &dyn EditorGrid, _c: &ContentRegistry, tx: i32, ty: i32| {
+            w.floor_id(tx, ty) == dest && w.overlay_id(tx, ty) == dest_overlay
+        };
+        let mut setter = move |_ed: &mut MapEditor, w: &mut dyn EditorGrid, tx: i32, ty: i32| {
+            if w.overlay_id(tx, ty) != draw_block {
+                w.set_overlay(tx, ty, draw_block);
+            }
+        };
+        editor.fill(world, content, x, y, false, &tester, &mut setter);
+    }
+}
+
+/// `EditorTool.line.touchedLine`: Bresenham line with an optional dominant-axis
+/// snap (`mode == 1`), then flush (`MapView` release).
+#[allow(clippy::too_many_arguments)]
+pub fn touched_line(
+    editor: &mut MapEditor,
+    tool: EditorTool,
+    world: &mut dyn EditorGrid,
+    content: &ContentRegistry,
+    x1: i32,
+    y1: i32,
+    mut x2: i32,
+    mut y2: i32,
+) {
+    if tool != EditorTool::Line {
+        return;
+    }
+    let mode = editor.tool_modes[tool.index()];
+    if mode == 1 {
+        if (x2 - x1).abs() > (y2 - y1).abs() {
+            y2 = y1;
+        } else {
+            x2 = x1;
+        }
+    }
+    let mut points: Vec<(i32, i32)> = Vec::new();
+    crate::world::raycast::raycast_each(x1, y1, x2, y2, |x, y| {
+        points.push((x, y));
+        false
+    });
+    for (x, y) in points {
+        if mode == 0 {
+            editor.draw_blocks_replace(world, content, x, y);
+        } else {
+            editor.draw_blocks(world, content, x, y);
+        }
+    }
+    editor.flush_op();
 }
 
 /// Deterministic spray gate (`Mathf.chance(0.012)` in `EditorTool.spray`).

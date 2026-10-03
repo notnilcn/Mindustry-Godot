@@ -898,4 +898,154 @@ mod tests {
         assert_eq!(editor.draw_block, stone(&content));
         assert!(!editor.can_undo());
     }
+
+    /// `editor::tests::recording_suppressed` (plan 19 §7a): the `loading` gate
+    /// suppresses op recording while still mutating, and `set_tile` restores it.
+    #[test]
+    fn recording_suppressed_while_loading() {
+        let content = crate::content::test_support::test_registry();
+        let mut editor = MapEditor::new();
+        let mut world = TestGrid::new(8, 8);
+        let wall = content.block_id("stone-wall").unwrap();
+        editor.draw_block = wall;
+
+        editor.loading = true;
+        editor.draw_blocks(&mut world, &content, 2, 2);
+        assert_eq!(editor.ops(), 0, "recording suppressed while loading");
+        assert_eq!(world.block_id(2, 2), wall, "mutation still happens");
+
+        editor.loading = false;
+        editor.draw_blocks(&mut world, &content, 3, 3);
+        assert!(editor.ops() > 0, "recording resumes after loading");
+
+        let mut op = DrawOperation::from_ops(vec![crate::editor::tile_op::TileOp::get(
+            4,
+            4,
+            crate::editor::tile_op::OP_BLOCK,
+            wall.raw() as i32,
+        )]);
+        op.redo(&mut world, &content);
+        assert!(!world.is_loading(), "set_tile restores the loading flag");
+        assert_eq!(world.block_id(4, 4), wall);
+    }
+
+    /// `editor::tests::fill_flood_tuning` (plan 19 §7a): scanline flood fill only
+    /// reaches the connected region.
+    #[test]
+    fn fill_flood_tuning_only_reaches_connected_region() {
+        let content = crate::content::test_support::test_registry();
+        let mut editor = MapEditor::new();
+        let mut world = TestGrid::new(8, 8);
+        let wall = content.block_id("stone-wall").unwrap();
+        let copper = content.block_id("copper-wall").unwrap();
+        for (x, y) in [(0, 0), (1, 0), (2, 0), (0, 1), (0, 2)] {
+            world.set_block(x, y, wall, 0, 0);
+        }
+        world.set_block(6, 6, wall, 0, 0);
+
+        editor.draw_block = copper;
+        editor.tool = EditorTool::Fill;
+        editor.tool_modes[EditorTool::Fill.index()] = -1;
+        crate::editor::tool::touched(&mut editor, EditorTool::Fill, &mut world, &content, 0, 0);
+
+        assert_eq!(world.block_id(0, 0), copper);
+        assert_eq!(world.block_id(2, 0), copper);
+        assert_eq!(world.block_id(0, 2), copper);
+        assert_eq!(world.block_id(6, 6), wall, "disconnected region untouched");
+        assert_eq!(world.block_id(3, 0), BlockId::AIR);
+    }
+
+    /// `editor::tests::fill_replace` (plan 19 §7a): replace-all fills the whole
+    /// grid, connected or not.
+    #[test]
+    fn fill_replace_all_reaches_disconnected_region() {
+        let content = crate::content::test_support::test_registry();
+        let mut editor = MapEditor::new();
+        let mut world = TestGrid::new(8, 8);
+        let wall = content.block_id("stone-wall").unwrap();
+        let copper = content.block_id("copper-wall").unwrap();
+        world.set_block(0, 0, wall, 0, 0);
+        world.set_block(6, 6, wall, 0, 0);
+
+        editor.draw_block = copper;
+        editor.tool = EditorTool::Fill;
+        editor.tool_modes[EditorTool::Fill.index()] = 0;
+        crate::editor::tool::touched(&mut editor, EditorTool::Fill, &mut world, &content, 0, 0);
+
+        assert_eq!(world.block_id(0, 0), copper);
+        assert_eq!(
+            world.block_id(6, 6),
+            copper,
+            "replace-all reaches all tiles"
+        );
+    }
+
+    /// `editor::tests::fill_erase` (plan 19 §7a): `fillerase` removes the
+    /// connected block region only.
+    #[test]
+    fn fill_erase_removes_connected_blocks_only() {
+        let content = crate::content::test_support::test_registry();
+        let mut editor = MapEditor::new();
+        let mut world = TestGrid::new(8, 8);
+        let wall = content.block_id("stone-wall").unwrap();
+        for (x, y) in [(0, 0), (1, 0), (2, 0), (0, 1)] {
+            world.set_block(x, y, wall, 0, 0);
+        }
+        world.set_block(6, 6, wall, 0, 0);
+
+        editor.tool = EditorTool::Fill;
+        editor.tool_modes[EditorTool::Fill.index()] = 2;
+        crate::editor::tool::touched(&mut editor, EditorTool::Fill, &mut world, &content, 0, 0);
+
+        assert_eq!(world.block_id(0, 0), BlockId::AIR);
+        assert_eq!(world.block_id(2, 0), BlockId::AIR);
+        assert_eq!(world.block_id(6, 6), wall, "disconnected block kept");
+    }
+
+    /// `editor::tests::touched_line_bresenham` (plan 19 §3.5): the line tool
+    /// paints every Bresenham point and flushes one undoable operation.
+    #[test]
+    fn touched_line_bresenham_flushes_one_operation() {
+        let content = crate::content::test_support::test_registry();
+        let mut editor = MapEditor::new();
+        let mut world = TestGrid::new(8, 8);
+        let copper = content.block_id("copper-wall").unwrap();
+        editor.draw_block = copper;
+        editor.tool = EditorTool::Line;
+        editor.tool_modes[EditorTool::Line.index()] = -1;
+
+        crate::editor::tool::touched_line(
+            &mut editor,
+            EditorTool::Line,
+            &mut world,
+            &content,
+            0,
+            0,
+            3,
+            0,
+        );
+
+        for x in 0..=3 {
+            assert_eq!(world.block_id(x, 0), copper, "tile ({x},0) drawn");
+        }
+        assert!(editor.can_undo(), "line flushed one operation");
+        assert_eq!(editor.ops(), 0, "current op cleared by flush");
+    }
+
+    /// `editor::tests::add_cliffs` (plan 19 §5): an isolated static block becomes
+    /// a cliff whose data byte is the 8-neighbour non-static bitmask.
+    #[test]
+    fn add_cliffs_autotiles_isolated_static_block() {
+        let content = crate::content::test_support::test_registry();
+        let mut editor = MapEditor::new();
+        let mut world = TestGrid::new(5, 5);
+        let wall = content.block_id("stone-wall").unwrap();
+        let cliff = content.block_id("cliff").unwrap();
+        world.set_block(1, 1, wall, 0, 0);
+
+        editor.add_cliffs(&mut world, &content);
+
+        assert_eq!(world.block_id(1, 1), cliff);
+        assert_eq!(world.tile_data(1, 1).0, 0xFFu8 as i8);
+    }
 }
