@@ -67,7 +67,12 @@ pub fn run(command: &UnitsCommand) -> Result<i32> {
             ticks,
             json,
         } => path_report(unit, *tx, *ty, *ticks, *json),
-        UnitsCommand::Bench { units, ticks, json } => bench(*units, *ticks, *json),
+        UnitsCommand::Bench {
+            units,
+            ticks,
+            assert_alloc,
+            json,
+        } => bench(*units, *ticks, *assert_alloc, *json),
     }
 }
 
@@ -638,7 +643,9 @@ fn path_report(unit: &str, tx: i32, ty: i32, ticks: u64, json: bool) -> Result<i
     })
 }
 
-fn bench(units: usize, ticks: u64, json: bool) -> Result<i32> {
+fn bench(units: usize, ticks: u64, assert_alloc: Option<u64>, json: bool) -> Result<i32> {
+    use mind_core::util::alloc::{alloc_bytes, alloc_count, enabled as alloc_enabled};
+
     let mut harness = UnitHarness::new(128, 128, 7);
     let mut entities: Vec<Entity> = Vec::with_capacity(units);
     for i in 0..units {
@@ -649,30 +656,59 @@ fn bench(units: usize, ticks: u64, json: bool) -> Result<i32> {
             entities.push(entity);
         }
     }
+
+    // Warm up so first-tick lazy allocations are excluded from the audit.
+    for _ in 0..120 {
+        harness.tick();
+    }
+
+    let alloc_before = alloc_count();
+    let bytes_before = alloc_bytes();
     let mut samples = Vec::with_capacity(ticks as usize);
     for _ in 0..ticks {
         let start = Instant::now();
         harness.tick();
         samples.push(start.elapsed().as_nanos() as u64 / 1000);
     }
+    let alloc_delta = alloc_count().saturating_sub(alloc_before);
+    let bytes_delta = alloc_bytes().saturating_sub(bytes_before);
+
     samples.sort_unstable();
     let p50 = samples.get(samples.len() * 50 / 100).copied().unwrap_or(0);
     let p99 = samples
         .get((samples.len() * 99 / 100).min(samples.len().saturating_sub(1)))
         .copied()
         .unwrap_or(0);
+
+    // §7d: `units_mid` (≤300 units) unit systems ≤ 1.5 ms; `units_stress`
+    // (≤1000 units) ≤ 5.0 ms. Debug builds are non-representative.
+    let budget_ms = if units <= 300 { 1.5 } else { 5.0 };
+    let p99_ms = p99 as f64 / 1000.0;
+    let within_budget = cfg!(debug_assertions) || p99_ms <= budget_ms;
+    let alloc_ok = assert_alloc.is_none_or(|limit| !alloc_enabled() || alloc_delta <= limit);
+    let pass = within_budget && alloc_ok;
+
     let report = serde_json::json!({
         "scenario": "units_bench",
         "units": entities.len(),
         "ticks": ticks,
+        "warmup": 120,
         "p50_us": p50,
         "p99_us": p99,
+        "budget_ms": budget_ms,
+        "within_budget": within_budget,
+        "alloc_audit_enabled": alloc_enabled(),
+        "alloc_count": alloc_delta,
+        "alloc_bytes": bytes_delta,
+        "alloc_limit": assert_alloc,
+        "alloc_ok": alloc_ok,
+        "pass": pass,
         "checksum": harness.checksum_hex(),
     });
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     }
-    Ok(EXIT_PASS)
+    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
 }
 
 #[cfg(test)]
