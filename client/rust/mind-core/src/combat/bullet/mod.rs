@@ -24,6 +24,7 @@ use crate::audio::{AudioSinkRes, sim as audio_sim};
 use crate::content::{BulletId, ContentRegistry};
 use crate::determinism::{RngStream, SimRng};
 use crate::entities::comp::{Health, Pos, TeamComp, Vel};
+use crate::fx::TrailChannelId;
 use crate::world::WorldGrid;
 
 pub use behavior::{BulletBehavior, behavior_for};
@@ -39,6 +40,11 @@ pub const ABSORBED: u16 = 1 << 2;
 pub const HIT: u16 = 1 << 3;
 /// Bullet flag: locally owned (`owner` present; view/interp skip).
 pub const OWNER_LOCAL: u16 = 1 << 4;
+/// Bullet flag: lifetime expiry requested removal without a hit
+/// (`TimedComp.update` → `remove()`; upstream `hit == false`). Kept distinct
+/// from [`HIT`] so `BulletType.despawned` (and its `despawnSound`) runs for
+/// lifetime removals, matching `BulletComp.remove`.
+pub const EXPIRED: u16 = 1 << 5;
 
 /// Transient typed payload (`BulletComp.data`; plan 10 §2.4.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -154,10 +160,10 @@ impl Bullet {
         self.flags &= !flag;
     }
 
-    /// Whether the bullet should be removed (`hit` or absorbed).
+    /// Whether the bullet should be removed (`hit`, absorbed or expired).
     #[inline]
     pub fn finished(&self) -> bool {
-        self.has(HIT) || self.has(ABSORBED)
+        self.has(HIT) || self.has(ABSORBED) || self.has(EXPIRED)
     }
 }
 
@@ -438,7 +444,15 @@ pub fn update_bullet(ctx: &mut CombatCtx<'_>, entity: Entity) -> bool {
 
     if trail {
         let (x, y) = ctx.pos(entity).unwrap_or((px, py));
-        ctx.fx.trail(
+        // Plan 17 §3.9: key the trail by the bullet's stable entity sequence so
+        // `FxEvent::Trail` can resolve the per-channel `TrailRegistry` tint.
+        let channel = ctx
+            .world
+            .get::<crate::ecs::EntitySeq>(entity)
+            .map(|seq| TrailChannelId(seq.0 as u32))
+            .unwrap_or(TrailChannelId(0));
+        ctx.fx.trail_channel(
+            channel,
             x,
             y,
             rotation,
@@ -463,14 +477,15 @@ pub fn update_bullet(ctx: &mut CombatCtx<'_>, entity: Entity) -> bool {
         return false;
     }
 
-    // Lifetime.
+    // Lifetime (`TimedComp.update`): expiry is a despawn, never a hit, so
+    // `despawned`/`despawnSound` still runs in `finish_bullet`.
     let (time, lifetime) = ctx
         .bullet(entity)
         .map(|b| (b.time, b.lifetime))
         .unwrap_or((0.0, 0.0));
     if time >= lifetime {
         if let Some(mut bullet) = ctx.world.get_mut::<Bullet>(entity) {
-            bullet.set(HIT);
+            bullet.set(EXPIRED);
         }
         return false;
     }
@@ -962,6 +977,65 @@ mod tests {
             harness.step_bullets_only();
         }
         assert!(harness.build.world.get_entity(e).is_err());
+    }
+
+    /// Plan 18 §7e: a lifetime removal (`TimedComp.update` → `remove()` with
+    /// `!hit`) runs `BulletType.despawned` (emitting `despawnSound`) before
+    /// `removed`, matching `BulletComp.remove`; a collision runs `hit` instead.
+    #[test]
+    fn despawn_sound_fires_on_lifetime_not_hit() {
+        use crate::audio::SharedAudioLog;
+        use crate::content::registries::sound_meta::SoundId;
+
+        // Lifetime expiry with no target: despawnSound, never hitSound.
+        let log = SharedAudioLog::new();
+        let mut harness = CombatHarness::new(16, 16, 1);
+        harness.build.set_audio_sink(log.clone());
+        let (x, y) = CombatHarness::tile_center(4, 4);
+        let e = harness.spawn_bullet("fuse", x, y, 0.0, 0).expect("spawn");
+        for _ in 0..200 {
+            harness.step_bullets_only();
+        }
+        assert!(harness.build.world.get_entity(e).is_err(), "removed");
+        let events = log.events();
+        let despawn = events
+            .iter()
+            .filter(|event| event.event.sound() == Some(SoundId::EXPLOSION))
+            .count();
+        let hit = events
+            .iter()
+            .filter(|event| event.event.sound() == Some(SoundId::EXPLOSION_ARTILLERY))
+            .count();
+        assert_eq!(
+            despawn, 1,
+            "lifetime despawnSound emitted once, before removed"
+        );
+        assert_eq!(hit, 0, "lifetime removal is not a hit");
+
+        // Collision: hitSound, never despawnSound.
+        let log = SharedAudioLog::new();
+        let mut harness = CombatHarness::new(32, 32, 2);
+        harness.build.set_audio_sink(log.clone());
+        let wall = harness.content().block_id("copper-wall").expect("wall");
+        assert!(harness.build.place(10, 8, wall, 0, true));
+        let (x, y) = CombatHarness::tile_center(4, 8);
+        let _ = harness.spawn_bullet("fuse", x, y, 0.0, 1).expect("spawn");
+        for _ in 0..40 {
+            harness.step_bullets_only();
+        }
+        let events = log.events();
+        assert!(
+            events
+                .iter()
+                .any(|event| event.event.sound() == Some(SoundId::EXPLOSION_ARTILLERY)),
+            "collision emits hitSound"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| event.event.sound() == Some(SoundId::EXPLOSION)),
+            "collision must not emit despawnSound"
+        );
     }
 
     #[test]

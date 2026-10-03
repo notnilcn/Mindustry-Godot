@@ -16,6 +16,8 @@ use crate::content::registries::sound_meta::SoundId;
 use crate::content::{EffectId, Rgba};
 use crate::render::RegionKey;
 
+use super::data::TrailChannelId;
+
 pub use crate::combat::view::FxSink;
 
 /// Settings mirrored from `Renderer.enableEffects` + weather/screenshake
@@ -87,6 +89,8 @@ pub enum FxEvent {
     },
     /// A trail update.
     Trail {
+        /// Registry channel (`Some` for `FxSink::trail_channel`, plan 17 §3.9).
+        channel: Option<TrailChannelId>,
         /// World x.
         x: f32,
         /// World y.
@@ -259,6 +263,29 @@ impl FxSink for FxBus {
 
     fn trail(&self, x: f32, y: f32, rotation: f32, color: Rgba, width: f32, length: f32) {
         self.push(FxEvent::Trail {
+            channel: None,
+            x,
+            y,
+            rotation,
+            color,
+            width,
+            length,
+        });
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn trail_channel(
+        &self,
+        channel: TrailChannelId,
+        x: f32,
+        y: f32,
+        rotation: f32,
+        color: Rgba,
+        width: f32,
+        length: f32,
+    ) {
+        self.push(FxEvent::Trail {
+            channel: Some(channel),
             x,
             y,
             rotation,
@@ -317,5 +344,22 @@ mod tests {
         let sink = NoopFxSink;
         emit_named(&sink, EffectId::SMOKE, 0.0, 0.0, 0.0, Rgba::WHITE);
         sink.shake(1.0);
+    }
+
+    #[test]
+    fn trail_channel_is_carried() {
+        let bus = FxBus::new();
+        bus.trail_channel(TrailChannelId(7), 1.0, 2.0, 0.0, Rgba::WHITE, 3.0, 4.0);
+        // The legacy entry point still records an unkeyed trail.
+        bus.trail(5.0, 6.0, 0.0, Rgba::WHITE, 1.0, 2.0);
+        let events = bus.drain();
+        assert!(matches!(
+            events[0],
+            FxEvent::Trail {
+                channel: Some(TrailChannelId(7)),
+                ..
+            }
+        ));
+        assert!(matches!(events[1], FxEvent::Trail { channel: None, .. }));
     }
 }
