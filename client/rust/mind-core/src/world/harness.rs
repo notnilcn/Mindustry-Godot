@@ -184,6 +184,24 @@ impl BuildHarness {
         &self.content
     }
 
+    /// Plan-13 M7 content-init install: registers the content-initialized
+    /// [`GlobalVars`](crate::logic::globals::GlobalVars) and the
+    /// [`LogicContentIndex`](crate::logic::world::LogicContentIndex) the logic
+    /// VM reads (`@<name>`/`@sfx-*`, live time/client cells, `ulocate` lookups).
+    ///
+    /// Kept out of [`new`](Self::new) on purpose: bevy stores each resource on a
+    /// hidden entity, so inserting them shifts the ECS entity indices that a few
+    /// non-logic harness goldens hash. Logic callers install them explicitly at
+    /// their world boot (the `mind-headless logic` scenarios; the plan-06
+    /// generation filter builds an equivalent world).
+    pub fn install_logic_globals(&mut self) {
+        crate::logic::globals::GlobalVars::install_world(&mut self.world, &self.content);
+        self.world
+            .insert_resource(crate::logic::world::LogicContentIndex::from_content(
+                &self.content,
+            ));
+    }
+
     /// Resolved block table (from the ECS resource).
     pub fn table(&self) -> &BlockTable {
         self.world

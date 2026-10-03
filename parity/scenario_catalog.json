@@ -621,6 +621,14 @@
       "command": "logic run logic_save_load --json"
     },
     {
+      "name": "logic_script_filter",
+      "plan": "13",
+      "phase": "P5",
+      "tier": "T1",
+      "kind": "embedded",
+      "command": "logic run logic_script_filter --json"
+    },
+    {
       "name": "logic_sensor_access",
       "plan": "13",
       "phase": "P5",

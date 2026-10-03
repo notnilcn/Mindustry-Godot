@@ -24,6 +24,7 @@ use bevy_ecs::prelude::Resource;
 use bevy_ecs::query::With;
 use bevy_ecs::world::World;
 
+use crate::content::ItemId;
 use crate::content::{BlockId, UnitTypeId};
 use crate::content::{ContentRef, ContentType};
 use crate::entities::comp::unit::{HitboxComp, UnitTypeComp};
@@ -426,6 +427,65 @@ pub fn message_ref(world: &World) -> Option<&MessageState> {
     world.get_resource::<MessageState>()
 }
 
+/// Content lookups the privileged `ulocate` scans need (`Tile.drop`,
+/// `BlockDef.flags`, spawn overlays). Plan 11's `BlockIndexer`/plan 06's
+/// `WorldGrid` are not reachable from the VM, so the harness installs this
+/// lightweight projection of the content registry at world boot.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct LogicContentIndex {
+    /// `(ore floor/overlay BlockId, dropped ItemId)` (`Tile.drop`).
+    pub ore_drops: Vec<(BlockId, ItemId)>,
+    /// `(building BlockId, BlockDef.flags)` for `ulocate building`.
+    pub block_flags: Vec<(BlockId, Vec<crate::content::registries::blocks::BlockFlag>)>,
+    /// Spawn overlay ids (`ulocate spawn`; `BlockKind::SpawnBlock`).
+    pub spawn_overlays: Vec<BlockId>,
+}
+
+impl LogicContentIndex {
+    /// Projects the content registry into the ulocate lookup tables.
+    pub fn from_content(content: &crate::content::ContentRegistry) -> Self {
+        use crate::content::registries::blocks::BlockKind;
+        let mut index = Self::default();
+        for def in content.blocks() {
+            if let Some(item) = def.item_drop {
+                index.ore_drops.push((def.id, item));
+            }
+            index.block_flags.push((def.id, def.flags.clone()));
+            if def.kind == BlockKind::SpawnBlock {
+                index.spawn_overlays.push(def.id);
+            }
+        }
+        index
+    }
+
+    /// `Tile.drop` for a floor/overlay block, if it is an ore.
+    pub fn ore_drop_for(&self, block: BlockId) -> Option<ItemId> {
+        self.ore_drops
+            .iter()
+            .find(|(id, _)| *id == block)
+            .map(|(_, item)| *item)
+    }
+
+    /// `BlockDef.flags` for a building block.
+    pub fn flags_of(&self, block: BlockId) -> &[crate::content::registries::blocks::BlockFlag] {
+        self.block_flags
+            .iter()
+            .find(|(id, _)| *id == block)
+            .map(|(_, flags)| flags.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// Whether `block` is a spawn overlay (`BlockKind::SpawnBlock`).
+    pub fn is_spawn_overlay(&self, block: BlockId) -> bool {
+        self.spawn_overlays.contains(&block)
+    }
+}
+
+/// Borrows the installed content index, if any.
+pub fn content_index_ref(world: &World) -> Option<&LogicContentIndex> {
+    world.get_resource::<LogicContentIndex>()
+}
+
 /// Builds a default objective marker for a `MapObjectives.markerNameToType` name.
 pub fn new_marker(type_name: &str) -> Option<ObjectiveMarker> {
     let canonical = marker_name_to_type(type_name)?;
@@ -748,6 +808,24 @@ pub fn run_get_block(
 ) {
     let tx = exec.arena.get(x.id()).numi();
     let ty = exec.arena.get(y.id()).numi();
+    // The generation/editor world carries the live `WorldGrid`; read floor/ore
+    // and block straight from it (plan 06 filter hook).
+    if let Some(grid) = world.get_resource::<crate::world::WorldGrid>() {
+        let in_bounds = tx >= 0 && ty >= 0 && tx < grid.width() && ty < grid.height();
+        let value = if in_bounds {
+            let tile = grid.tile(tx, ty);
+            match layer {
+                TileLayer::Building => tile.build.map(LogicObject::Building),
+                TileLayer::Block => Some(LogicObject::Content(ContentRef::block(tile.block))),
+                TileLayer::Floor => Some(LogicObject::Content(ContentRef::block(tile.floor))),
+                TileLayer::Ore => Some(LogicObject::Content(ContentRef::block(tile.overlay))),
+            }
+        } else {
+            None
+        };
+        out_obj(exec, result, value);
+        return;
+    }
     let builds = world.get_resource::<crate::world::TileBuilds>();
     let in_bounds = builds.is_some_and(|b| tx >= 0 && ty >= 0 && tx < b.width && ty < b.height);
     let entity = builds.and_then(|b| b.get(tx, ty));
@@ -777,24 +855,55 @@ pub fn run_set_block(
     team: VarRef,
     rotation: VarRef,
 ) {
-    let Some(mut state) = world.get_resource_mut::<LogicWorldState>() else {
-        return;
-    };
-    if !state.is_host {
-        return;
-    }
     let tx = numi(exec, x);
     let ty = numi(exec, y);
     if tx < 0 || ty < 0 {
         return;
     }
     let block_obj = obj_of(exec, block);
-    let team_id = exec
-        .arena
-        .get(team.id())
-        .team()
-        .unwrap_or(state.rules.default_team);
+    let team_id = exec.arena.get(team.id()).team().unwrap_or_else(|| {
+        world
+            .get_resource::<LogicWorldState>()
+            .map(|s| s.rules.default_team)
+            .unwrap_or(0)
+    });
     let rot = numi(exec, rotation).clamp(0, 3);
+
+    // Map-generation/editor worlds carry the live `WorldGrid`; apply the
+    // mutation in place there (`LogicFilter` setting tiles, plan 06 §3.8).
+    if let Some(mut grid) = world.get_resource_mut::<crate::world::WorldGrid>() {
+        let width = grid.width();
+        let height = grid.height();
+        if tx < width && ty < height {
+            let block_id = match &block_obj {
+                Some(LogicObject::Content(c)) if c.type_ == ContentType::Block => {
+                    Some(BlockId::new(c.id))
+                }
+                _ => None,
+            };
+            if let Some(block_id) = block_id {
+                let index = (tx + ty * width) as usize;
+                let tile = grid.tiles.geti_mut(index);
+                match layer {
+                    TileLayer::Ore => tile.overlay = block_id,
+                    TileLayer::Floor => tile.floor = block_id,
+                    TileLayer::Block => {
+                        tile.block = block_id;
+                        tile.build = None;
+                    }
+                    TileLayer::Building => {}
+                }
+            }
+        }
+    }
+
+    // Host-gated event log (the normal processor path).
+    let Some(mut state) = world.get_resource_mut::<LogicWorldState>() else {
+        return;
+    };
+    if !state.is_host {
+        return;
+    }
     state.emit(LogicWorldEvent::SetBlock {
         layer,
         block: block_obj,

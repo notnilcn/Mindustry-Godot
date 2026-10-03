@@ -255,6 +255,7 @@ pub struct LinkSensorReport {
 /// Runs the link/sensor scenario.
 pub fn link_sensor(ticks: u64) -> Result<LinkSensorReport> {
     let mut harness = BuildHarness::new(16, 16, 1);
+    harness.install_logic_globals();
     let processor = harness
         .content()
         .block_id("micro-processor")
@@ -333,6 +334,88 @@ fn run_link_sensor(ticks: u64, json: bool) -> Result<i32> {
     Ok(0)
 }
 
+/// `logic_script_filter` report (plan 13 §7b; plan-06 `LogicFilter` hook).
+pub struct ScriptFilterReport {
+    /// Deterministic checksum over the resulting tiles.
+    pub checksum: String,
+    /// Number of tiles the script changed to a non-air block.
+    pub blocks: usize,
+    /// Number of tiles whose floor changed.
+    pub floors: usize,
+}
+
+/// Runs a `LogicFilter`-style privileged script over a generated grid.
+#[allow(clippy::expect_used)]
+pub fn script_filter() -> Result<ScriptFilterReport> {
+    use mind_core::determinism::Hasher;
+    use mind_core::maps::filters::GenerateFilter;
+    use mind_core::maps::filters::apply_stack;
+    use mind_core::maps::filters::builtin::LogicFilter;
+    use mind_core::world::tiles::Tiles;
+
+    let content = BuildHarness::load_content();
+    let stone = content.block_id("stone").context("stone floor")?;
+    let sand = content.block_id("sand-floor").context("sand-floor")?;
+    let mut tiles = Tiles::new(4, 4);
+    for index in 0..16 {
+        tiles.geti_mut(index).floor = stone;
+    }
+    let code = "setblock block @copper-wall 1 1 0 0\n\
+        setblock block @copper-wall 2 2 0 0\n\
+        setblock floor @sand-floor 0 0 0 0\n\
+        end\n"
+        .to_owned();
+    let mut stack: Vec<Box<dyn GenerateFilter>> = vec![Box::new(LogicFilter {
+        seed: 7,
+        code: Some(code),
+        loop_enabled: false,
+    })];
+    let mut rng = mind_core::determinism::SimRng::new(7);
+    apply_stack(&mut tiles, &mut stack, &content, &mut rng);
+
+    let mut hasher = Hasher::new();
+    let mut blocks = 0usize;
+    let mut floors = 0usize;
+    for index in 0..16 {
+        let tile = tiles.geti(index);
+        hasher.write_u16(tile.block.raw());
+        hasher.write_u16(tile.floor.raw());
+        if tile.block != mind_core::content::BlockId::AIR {
+            blocks += 1;
+        }
+        if tile.floor == sand {
+            floors += 1;
+        }
+    }
+    Ok(ScriptFilterReport {
+        checksum: hasher.finish().to_hex(),
+        blocks,
+        floors,
+    })
+}
+
+/// Prints the logic-script-filter scenario.
+fn run_script_filter(json: bool) -> Result<i32> {
+    let report = script_filter()?;
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "scenario": "logic_script_filter",
+                "checksum": report.checksum,
+                "blocks": report.blocks,
+                "floors": report.floors,
+            })
+        );
+    } else {
+        println!(
+            "logic_script_filter: checksum={} blocks={} floors={}",
+            report.checksum, report.blocks, report.floors
+        );
+    }
+    Ok(0)
+}
+
 /// `logic_save_load` report.
 pub struct SaveLoadReport {
     /// Deterministic checksum.
@@ -348,6 +431,7 @@ pub struct SaveLoadReport {
 /// Runs the save/load scenario.
 pub fn save_load(ticks: u64) -> Result<SaveLoadReport> {
     let mut harness = BuildHarness::new(16, 16, 1);
+    harness.install_logic_globals();
     let processor = harness
         .content()
         .block_id("micro-processor")
@@ -440,6 +524,7 @@ pub struct DrawReport {
 /// Runs the draw scenario (`capture` disables the headless skip flag).
 pub fn draw_report(capture: bool, ticks: u64) -> Result<DrawReport> {
     let mut harness = BuildHarness::new(16, 16, 1);
+    harness.install_logic_globals();
     let processor = harness
         .content()
         .block_id("micro-processor")
@@ -506,6 +591,7 @@ pub struct SensorAccessReport {
 /// Runs the sensor/control scenario against a linked processor + switch.
 pub fn sensor_access(ticks: u64) -> Result<SensorAccessReport> {
     let mut harness = BuildHarness::new(16, 16, 1);
+    harness.install_logic_globals();
     let processor = harness
         .content()
         .block_id("micro-processor")
@@ -887,6 +973,7 @@ fn assemble(file: &Path, out: Option<&Path>, privileged: bool, json: bool) -> Re
 fn run_named(name: &str, ticks: Option<u64>, json: bool) -> Result<i32> {
     match name {
         "logic_link_sensor" => return run_link_sensor(ticks.unwrap_or(10), json),
+        "logic_script_filter" => return run_script_filter(json),
         "logic_save_load" => return run_save_load(ticks.unwrap_or(20), json),
         "logic_draw" => return run_draw(true, ticks.unwrap_or(3), json),
         "logic_draw_headless" => return run_draw(false, ticks.unwrap_or(3), json),
@@ -972,6 +1059,7 @@ fn world_processor_rig(
     height: i32,
 ) -> Result<(BuildHarness, bevy_ecs::entity::Entity)> {
     let mut harness = BuildHarness::new(width, height, 1);
+    harness.install_logic_globals();
     harness
         .world
         .insert_resource(LogicRulesRes(Box::new(PermissiveRules)));
@@ -1344,6 +1432,11 @@ mod tests {
         assert_eq!(headless.checksum, "89cd31291d2aefa4");
         assert_eq!(headless.commands, 0);
         assert_eq!(headless.operations, 1);
+
+        let script = script_filter().expect("logic_script_filter");
+        assert_eq!(script.checksum, "88e1ecca86f43323");
+        assert_eq!(script.blocks, 2);
+        assert_eq!(script.floors, 1);
     }
 
     #[test]

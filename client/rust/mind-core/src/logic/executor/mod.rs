@@ -1288,18 +1288,19 @@ impl Instruction {
                 unit_control::apply_control(world, unit, *type_, &params);
             }
             Instruction::UnitLocate {
+                locate,
+                flag,
+                enemy,
+                ore,
                 out_x,
                 out_y,
                 out_found,
                 out_build,
-                ..
             } => {
-                // Ore/building/spawn/damaged scans need plan 06/11 world queries
-                // (quadtree/ore index); report "not found" until those land.
-                set_output_num(exec, *out_x, 0.0);
-                set_output_num(exec, *out_y, 0.0);
-                set_output_num(exec, *out_found, 0.0);
-                set_output_obj(exec, *out_build, None);
+                unit_control::run_ulocate(
+                    exec, world, *locate, *flag, *enemy, *ore, *out_x, *out_y, *out_found,
+                    *out_build,
+                );
             }
             Instruction::Query {
                 shape,
