@@ -3,14 +3,18 @@
 //! `parity desync-inject` (plan 23 §3.3/M5): feed deliberately corrupted
 //! checksum/command streams to the plan-21 desync detector.
 //!
-//! Plan 21 owns the production detector. Until it lands this module carries a
-//! deterministic **reference detector double** behind a trait so the injected
-//! cases and their expected outcomes are already pinned. Swapping in plan 21's
-//! detector is a trait-impl change here, not a case change.
+//! Plan 21 owns the production detector. The checksum half routes through
+//! [`mind_stdb::checksum::ChecksumMonitor`] (plan 21 M4): the host's checkpoint
+//! stream seeds the monitor and every peer checkpoint is compared at its
+//! `command_id` watermark. The command-stream anomalies (reorder / duplicate /
+//! gap / skipped / late / tick-stamp) remain harness-side observations of the
+//! same stream, expressed behind the [`DesyncDetector`] trait.
 
 use std::collections::BTreeMap;
 
 use anyhow::{Result, anyhow};
+use mind_stdb::checksum::{ChecksumMonitor, ChecksumReport, scope_bits};
+use spacetimedb_sdk::Identity;
 
 /// The reserved injection cases (plan 23 §3.3).
 pub const CASES: &[&str] = &[
@@ -97,35 +101,81 @@ pub trait DesyncDetector {
     fn observe(&mut self, frame: &Frame) -> Verdict;
 }
 
-/// The reference detector double (placeholder for plan 21).
+/// The production detector: plan 21's [`ChecksumMonitor`] for checkpoint
+/// comparisons plus the command-stream anomaly checks.
 ///
-/// It tracks the last observed command sequence and tick and flags the injected
-/// anomalies with their documented outcomes.
-#[derive(Debug, Default)]
-pub struct ReferenceDetector {
+/// The host's identity/checksum frames seed the monitor (call [`Self::seed`]);
+/// command baselines come from the peer stream itself (reorder/dup/gap need the
+/// run of contiguous sequences to be visible in the corrupted stream).
+#[derive(Debug)]
+pub struct Plan21Detector {
+    monitor: ChecksumMonitor,
+    host: Identity,
+    local: Identity,
+    content_hash: Option<String>,
     last_seq: Option<u64>,
     last_tick: u64,
     /// Tick-stamp jump that counts as an anomaly (plan 21 §3.9 threshold).
     max_tick_jump: u64,
     /// Applied-before-stamp tolerance.
     late_tolerance: u64,
-    content_hash: Option<String>,
-    /// Host baseline checkpoints keyed by tick (seeded before peer frames).
-    expected_checksums: BTreeMap<u64, String>,
 }
 
-impl ReferenceDetector {
+impl Default for Plan21Detector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Plan21Detector {
     /// Creates a detector with the documented thresholds.
     pub fn new() -> Self {
+        let host = Identity::from_byte_array([0u8; 32]);
+        let local = Identity::from_byte_array([1u8; 32]);
+        let mut monitor = ChecksumMonitor::new();
+        monitor.set_host(host);
+        monitor.set_local(local);
         Self {
+            monitor,
+            host,
+            local,
+            content_hash: None,
+            last_seq: None,
+            last_tick: 0,
             max_tick_jump: 6_000,
             late_tolerance: 0,
-            ..Self::default()
+        }
+    }
+
+    /// Feeds a host-baseline frame (content hash or a canonical checkpoint).
+    pub fn seed(&mut self, frame: &Frame) {
+        match frame {
+            Frame::Checksum { tick, value } => {
+                self.monitor.record(self.report(self.host, *tick, value));
+            }
+            Frame::ContentHash(hash) => {
+                if self.content_hash.is_none() {
+                    self.content_hash = Some(hash.clone());
+                }
+            }
+            Frame::Command { .. } => {}
+        }
+    }
+
+    /// Builds one plan-21 checkpoint report for `sender`.
+    fn report(&self, sender: Identity, tick: u64, value: &str) -> ChecksumReport {
+        ChecksumReport {
+            sender,
+            command_id: tick,
+            sim_tick: tick,
+            checksum: parse_checksum(value),
+            checksum_version: mind_core::constants::CHECKSUM_VERSION,
+            scope: scope_bits(true, false, false),
         }
     }
 }
 
-impl DesyncDetector for ReferenceDetector {
+impl DesyncDetector for Plan21Detector {
     fn observe(&mut self, frame: &Frame) -> Verdict {
         match frame {
             Frame::ContentHash(hash) => match &self.content_hash {
@@ -135,14 +185,15 @@ impl DesyncDetector for ReferenceDetector {
                     Verdict::Ok
                 }
             },
-            Frame::Checksum { tick, value } => match self.expected_checksums.get(tick) {
-                Some(expected) if expected != value => Verdict::ChecksumMismatch { tick: *tick },
-                Some(_) => Verdict::Ok,
-                None => {
-                    self.expected_checksums.insert(*tick, value.clone());
-                    Verdict::Ok
+            Frame::Checksum { tick, value } => {
+                self.monitor.record(self.report(self.local, *tick, value));
+                match self.monitor.detect() {
+                    Some(desync) => Verdict::ChecksumMismatch {
+                        tick: desync.command_id,
+                    },
+                    None => Verdict::Ok,
                 }
-            },
+            }
             Frame::Command {
                 seq,
                 tick,
@@ -173,6 +224,19 @@ impl DesyncDetector for ReferenceDetector {
             }
         }
     }
+}
+
+/// Parses an FNV-1a hex checkpoint (falling back to a positional hash so a
+/// malformed peer value still yields a stable, comparable number).
+fn parse_checksum(value: &str) -> u64 {
+    u64::from_str_radix(value.trim(), 16).unwrap_or_else(|_| {
+        let mut hash = 0xcbf2_9ce4_8422_2325u64;
+        for byte in value.as_bytes() {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        hash
+    })
 }
 
 /// A host/peer stream pair plus the expected verdict and a description.
@@ -296,17 +360,12 @@ fn scenario(case: &str) -> Result<Scenario> {
 /// Runs one injected case and returns its `format: 1` report.
 pub fn run(case: &str, _seed: u64) -> Result<serde_json::Value> {
     let scenario = scenario(case)?;
-    let mut detector = ReferenceDetector::new();
-    // The host's identity/checksum frames are the detector's baseline; command
+    let mut detector = Plan21Detector::new();
+    // The host's identity/checksum frames seed the plan-21 monitor; command
     // baselines come from the peer stream itself (reorder/dup/gap need the run
     // of contiguous sequences to be visible in the corrupted stream).
     for frame in &scenario.host {
-        match frame {
-            Frame::ContentHash(_) | Frame::Checksum { .. } => {
-                let _ = detector.observe(frame);
-            }
-            Frame::Command { .. } => {}
-        }
+        detector.seed(frame);
     }
     let mut verdicts = Vec::new();
     for frame in &scenario.peer {
@@ -317,7 +376,7 @@ pub fn run(case: &str, _seed: u64) -> Result<serde_json::Value> {
     // host's, which the harness does explicitly.
     let observed = if case == "skipped_command" {
         let mut observed = Verdict::Ok;
-        let mut detector = ReferenceDetector::new();
+        let mut detector = Plan21Detector::new();
         for frame in &scenario.peer {
             observed = detector.observe(frame);
         }
@@ -356,7 +415,7 @@ pub fn run(case: &str, _seed: u64) -> Result<serde_json::Value> {
         "format": 1,
         "pass": pass,
         "case": case,
-        "detector": "reference-double (plan 21 owns the production detector)",
+        "detector": "plan-21 ChecksumMonitor",
         "expected": verdict_name(&scenario.expected),
         "observed": verdict_name(&observed),
         "frames": scenario.peer.len(),
@@ -431,10 +490,14 @@ mod tests {
     }
 
     #[test]
-    fn reference_detector_compares_checksums_against_a_baseline() {
-        let mut detector = ReferenceDetector::new();
+    fn plan21_detector_compares_checksums_against_a_baseline() {
+        let mut detector = Plan21Detector::new();
         // Seeding the host checkpoint at tick 600 makes the equal peer frame
         // pass and a differing one fail (the baseline the case harness relies on).
+        detector.seed(&Frame::Checksum {
+            tick: 600,
+            value: String::from("aaaa"),
+        });
         assert_eq!(
             detector.observe(&Frame::Checksum {
                 tick: 600,
@@ -459,8 +522,26 @@ mod tests {
     }
 
     #[test]
+    fn plan21_detector_ignores_a_version_divergent_peer() {
+        // Sanity: distinct values always differ at the same watermark, so the
+        // monitor reports the mismatch (the plan-21 detector owns versioning).
+        let mut detector = Plan21Detector::new();
+        detector.seed(&Frame::Checksum {
+            tick: 10,
+            value: String::from("1"),
+        });
+        assert_eq!(
+            detector.observe(&Frame::Checksum {
+                tick: 10,
+                value: String::from("2"),
+            }),
+            Verdict::ChecksumMismatch { tick: 10 }
+        );
+    }
+
+    #[test]
     fn content_hash_mismatch_detects_a_different_build() {
-        let mut detector = ReferenceDetector::new();
+        let mut detector = Plan21Detector::new();
         assert_eq!(
             detector.observe(&Frame::ContentHash(String::from("c0ffee"))),
             Verdict::Ok

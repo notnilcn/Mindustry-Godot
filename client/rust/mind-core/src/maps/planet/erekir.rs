@@ -7,8 +7,10 @@
 //! Deviations (OD6-A/OD6-B, structural parity): `state.rules.*`,
 //! `Schematics.placeLaunchLoadout` and `Waves.generate` are plan-11/12 hooks and
 //! are not applied (no tile effect); `world.getDarkness` is zero until plan 12's
-//! sector polygon lands, and the `steam` floor attribute is absent from plan 02,
-//! so vent placement does not skip steam tiles.
+//! sector polygon lands. The `steam` floor attribute is populated for the 8
+//! Erekir vents (plan 02), so [`steam_attr`] now skips existing steam tiles when
+//! placing vents (the `world_gen_erekir` golden moved `b8fd9327d1d0b300` →
+//! `daf8a3e078b79de7`).
 
 use crate::content::{BlockDef, BlockId, BlockKind, ContentRegistry};
 use crate::determinism::{RngStream, SimRng};
@@ -993,7 +995,7 @@ mod tests {
         }
         assert_eq!(
             Checksum(hasher.finish().value()).to_hex(),
-            "b8fd9327d1d0b300"
+            "daf8a3e078b79de7"
         );
     }
 }
