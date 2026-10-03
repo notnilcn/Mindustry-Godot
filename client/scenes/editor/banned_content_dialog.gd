@@ -41,7 +41,7 @@ func _build() -> void:
 
 
 func _on_search(text: String) -> void:
-	_search = text.to_lowercase()
+	_search = text.to_lower()
 	shown()
 
 

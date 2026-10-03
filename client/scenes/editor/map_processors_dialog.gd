@@ -40,7 +40,7 @@ func _build() -> void:
 
 
 func _on_search(text: String) -> void:
-	_search = text.to_lowercase()
+	_search = text.to_lower()
 	_rebuild()
 
 
@@ -53,7 +53,7 @@ func _rebuild() -> void:
 	var shown := 0
 	for entry: Variant in entries:
 		var value: Dictionary = entry if entry is Dictionary else {}
-		var tag := str(value.get("tag", "")).to_lowercase()
+		var tag := str(value.get("tag", "")).to_lower()
 		if not _search.is_empty() and not tag.contains(_search):
 			continue
 		shown += 1
