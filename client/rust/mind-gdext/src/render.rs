@@ -222,6 +222,8 @@ pub struct MindWorldRenderer {
     draw_light: bool,
     draw_hitboxes: bool,
     shaders: ShaderRegistry,
+    /// Whether the plan-19 editor view is mounted (suspends the main bands).
+    editor_view_active: bool,
 }
 
 #[godot_api]
@@ -255,6 +257,7 @@ impl INode2D for MindWorldRenderer {
             draw_light: true,
             draw_hitboxes: false,
             shaders: ShaderRegistry::new(),
+            editor_view_active: false,
         }
     }
 
@@ -748,6 +751,19 @@ impl MindWorldRenderer {
         self.stats.mesh_rebuilds += 1;
         0
     }
+
+    /// Suspends/restores the main-world band bracket for the plan-19 editor
+    /// `SubViewport` (plan 19 §3.7). The editor reuses the same baked meshes;
+    /// this only detaches the main-world bands while the editor view is mounted.
+    #[func]
+    pub fn set_editor_view_active(&mut self, active: bool) {
+        self.editor_view_active = active;
+        self.base_mut().set_visible(!active);
+        log::info!(
+            "MindWorldRenderer editor view {}",
+            if active { "mounted" } else { "unmounted" }
+        );
+    }
 }
 
 fn band_name(entry: &BandEntry) -> String {
@@ -761,6 +777,8 @@ pub struct MindRender {
     base: Base<Node>,
     renderer: Option<Gd<MindWorldRenderer>>,
     menu_seed: i64,
+    /// Mounted editor view spec (plan 19 §3.7); `None` when unmounted.
+    editor_view: Option<VarDictionary>,
 }
 
 #[godot_api]
@@ -770,6 +788,7 @@ impl INode for MindRender {
             base,
             renderer: None,
             menu_seed: 0,
+            editor_view: None,
         }
     }
 
@@ -967,6 +986,42 @@ impl MindRender {
         self.renderer()
             .map(|mut renderer| renderer.bind_mut().rebuild_chunks())
             .unwrap_or(0)
+    }
+
+    /// Mounts the plan-19 editor view (plan 19 §3.7): stores the
+    /// `EditorRenderSpec` dictionary and suspends the main world bands so the
+    /// editor `SubViewport` can draw the shared chunk meshes. Returns `true`.
+    #[func]
+    pub fn mount_editor_view(&mut self, spec: VarDictionary) -> bool {
+        self.editor_view = Some(spec);
+        if let Some(mut renderer) = self.renderer() {
+            renderer.bind_mut().set_editor_view_active(true);
+        } else {
+            log::warn!("MindRender.mount_editor_view: no MindWorldRenderer");
+        }
+        true
+    }
+
+    /// Unmounts the editor view and restores the main world bands.
+    #[func]
+    pub fn unmount_editor_view(&mut self) -> bool {
+        self.editor_view = None;
+        if let Some(mut renderer) = self.renderer() {
+            renderer.bind_mut().set_editor_view_active(false);
+        }
+        true
+    }
+
+    /// Whether an editor view is currently mounted.
+    #[func]
+    pub fn editor_view_mounted(&self) -> bool {
+        self.editor_view.is_some()
+    }
+
+    /// The mounted editor view spec (`{}` when unmounted).
+    #[func]
+    pub fn editor_view_spec(&self) -> VarDictionary {
+        self.editor_view.clone().unwrap_or_default()
     }
 
     fn capture_to(&mut self, path: &str) -> bool {

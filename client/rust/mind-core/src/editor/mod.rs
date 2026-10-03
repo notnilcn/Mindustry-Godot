@@ -356,6 +356,21 @@ impl MapEditor {
         self.current_op.as_ref().map_or(0, DrawOperation::size)
     }
 
+    /// Number of retained undo operations (`OperationStack.len`).
+    pub fn retained_ops(&self) -> usize {
+        self.stack.len()
+    }
+
+    /// The retained undo operations as packed op lists, oldest first
+    /// (plan 19 M3 `dev_op_log`).
+    pub fn op_log(&self) -> Vec<Vec<u64>> {
+        self.stack
+            .ops()
+            .iter()
+            .map(|operation| operation.ops().to_vec())
+            .collect()
+    }
+
     /// Removes the last `amount` ops from the current operation.
     pub fn remove_last_ops(&mut self, amount: usize) {
         if self.loading {

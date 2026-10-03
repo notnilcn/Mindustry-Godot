@@ -31,9 +31,12 @@ var _elapsed := 0.0
 @onready var _content_list: ItemList = $ContentList
 @onready var _region_preview: TextureRect = $RegionPreview
 @onready var _audio_label: Label = $Audio
+@onready var _editor_label: Label = $Editor
 
 ## Path to the plan-18 audio driver (`/root/Spine/MindAudio`).
 @export var audio_path: NodePath = ^"/root/Spine/MindAudio"
+## Path to the plan-19 editor facade (`/root/Spine/MindEditor`).
+@export var editor_path: NodePath = ^"/root/Spine/MindEditor"
 
 
 func _ready() -> void:
@@ -83,6 +86,7 @@ func _refresh() -> void:
 	_label.text = "\n".join(lines)
 	_refresh_audio()
 	_refresh_net()
+	_refresh_editor()
 
 
 ## Plan-18 §3.10 `Audio` row: bus/music/lowpass/voice state from `MindAudio.stats()`.
@@ -99,6 +103,26 @@ func _refresh_audio() -> void:
 		float(stats.get("lowpass_wet", 0.0)),
 		int(stats.get("voices", 0)),
 		int(stats.get("loop_sounds", 0)),
+	]
+
+
+## Plan-19 M3 inspector `Editor` tab: tool/brush/selection/op stack. Read-only;
+## sourced from the `/root/Spine/MindEditor` facade status dictionary.
+func _refresh_editor() -> void:
+	var editor := get_node_or_null(editor_path)
+	if editor == null or not is_instance_valid(editor):
+		_editor_label.text = "editor: -"
+		return
+	var status: Dictionary = editor.call("status")
+	_editor_label.text = "editor: %s  brush=%.1f  block=%s\nops=%d undo=%s redo=%s  %dx%d" % [
+		str(status.get("tool", "-")),
+		float(status.get("brush_size", 1.0)),
+		str(status.get("draw_block", "-")),
+		int(status.get("retained_ops", 0)),
+		"y" if bool(status.get("can_undo", false)) else "n",
+		"y" if bool(status.get("can_redo", false)) else "n",
+		int(status.get("width", 0)),
+		int(status.get("height", 0)),
 	]
 
 
