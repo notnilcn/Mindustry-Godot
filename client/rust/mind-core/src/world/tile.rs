@@ -89,7 +89,22 @@ impl Tile {
     }
 
     /// Flammability of the floor/block (`Tile.getFlammability`).
-    pub fn get_flammability(&self) -> f32 {
+    ///
+    /// Plan 10 §3.10: for an empty tile this is the floor's `liquidDrop`
+    /// flammability (`tar` → oil `1.2`); a tile with a building contributes its
+    /// item/liquid flammability upstream, which requires plan-07/08 module
+    /// inventories not reachable from a bare `Tile` — the fire system adds the
+    /// puddle contribution separately, and the build half stays `0` until the
+    /// inventories are threaded through.
+    pub fn get_flammability(&self, content: &ContentRegistry) -> f32 {
+        if self.block == BlockId::AIR {
+            return content
+                .block(self.floor)
+                .and_then(|def| def.liquid_drop)
+                .and_then(|liquid| content.liquid(liquid))
+                .map(|def| def.flammability)
+                .unwrap_or(0.0);
+        }
         0.0
     }
 

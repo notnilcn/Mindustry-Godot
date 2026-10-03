@@ -190,7 +190,7 @@ pub fn update_fires(
         let in_bounds = tiles.in_bounds(tx as i32, ty as i32);
         let flammability = if in_bounds {
             let tile = tiles.get(tx as i32, ty as i32);
-            let base = tile.get_flammability();
+            let base = tile.get_flammability(content);
             let puddle = super::puddles::find_at(world, tx, ty)
                 .and_then(|p| world.get::<super::puddles::PuddleState>(p).copied())
                 .map(|p| {
@@ -275,6 +275,8 @@ pub struct CombatEnv {
     pub fire: bool,
     /// `Rules.hasEnv(Env.oxygen)`.
     pub oxygen: bool,
+    /// `state.envAttrs.get(Attribute.heat)` (`Liquid.willBoil`).
+    pub heat: f32,
 }
 
 impl Default for CombatEnv {
@@ -282,6 +284,7 @@ impl Default for CombatEnv {
         Self {
             fire: true,
             oxygen: true,
+            heat: 0.0,
         }
     }
 }
@@ -336,6 +339,7 @@ mod tests {
         for _ in 0..400 {
             let _ = super::super::puddles::deposit(
                 &mut harness.build.world,
+                &harness.build.grid.tiles,
                 &harness.build.content,
                 8,
                 8,

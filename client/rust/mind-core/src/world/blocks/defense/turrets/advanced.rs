@@ -843,6 +843,45 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
         def.hit_size = 4.0;
     });
 
+    // `sublimate` (`ContinuousLiquidTurret`; `ContinuousFlameBulletType` ammo).
+    // Deviation: `rangeChange` (cyanogen) folds into the resolved beam `length`.
+    add("sublimate_ozone", BulletKind::ContinuousFlame, &|def| {
+        def.damage = 60.0;
+        def.length = 130.0;
+        def.ammo_multiplier = 1.2;
+        def.knockback = 1.0;
+        def.pierce_cap = 2;
+        def.building_damage_multiplier = 0.3;
+        def.hit_size = 4.0;
+    });
+    add("sublimate_cyanogen", BulletKind::ContinuousFlame, &|def| {
+        def.damage = 130.0;
+        def.length = 200.0;
+        def.knockback = 2.0;
+        def.pierce_cap = 3;
+        def.building_damage_multiplier = 0.3;
+        def.hit_size = 4.0;
+    });
+
+    // `scathe` (`ItemTurret`; `BulletType(0,0)` carriers whose payload is a
+    // spawned `scathe-missile` `MissileUnitType`). The missile unit defs and the
+    // `BulletType.spawnUnit` init path are plan 11 (`units/**`); until they land
+    // these are registered as `Empty` carriers so the turret + ammo resolve and
+    // fire. The missile flight/death explosion is recorded as a plan-10 blocker.
+    add("scathe_carbide", BulletKind::Empty, &|def| {
+        def.speed = 0.0;
+        def.lifetime = 1.0;
+        def.ammo_multiplier = 1.0;
+        def.building_damage_multiplier = 0.1;
+    });
+    add("scathe_phase", BulletKind::Empty, &|def| {
+        def.speed = 0.0;
+        def.lifetime = 1.0;
+        def.ammo_multiplier = 5.0;
+        def.reload_multiplier = 0.8;
+        def.building_damage_multiplier = 0.1;
+    });
+
     // Cross-references (child defs must exist first).
     for (parent_name, child_name) in [
         ("scatter_glass", "scatter_frag"),
@@ -1493,6 +1532,43 @@ pub fn config_for(
             c.shoot = ShootPatternSpec::summon(0.0, 0.0, 11.0, 20.0);
             Some(c)
         }
+        // `sublimate` (`ContinuousLiquidTurret`, Erekir flame beam). The engine
+        // dispatches `TurretKind::Continuous` with `TurretAmmo::Liquid`; liquid
+        // consumption stays with the plan-07/08 `ConsumeLiquidFilter` consumer
+        // (`liquidConsumed = 18/60`), not the turret tick.
+        "sublimate" => {
+            let mut c = base_config(
+                TurretKind::Continuous,
+                TurretAmmo::Liquid(vec![
+                    liquid_ammo("ozone", "sublimate_ozone")?,
+                    liquid_ammo("cyanogen", "sublimate_cyanogen")?,
+                ]),
+            );
+            c.range = 130.0;
+            c.target_interval = 5.0;
+            c.shoot_y = 8.0;
+            c.shoot_cone = 15.0;
+            c.scale_damage_efficiency = true;
+            Some(c)
+        }
+        // `scathe` (`ItemTurret`, Erekir missile launcher). `predictTarget=false`
+        // and the per-ammo `reloadMultiplier` are carried by the ammo entry; the
+        // missile `spawnUnit` payload is plan 11 (see `scathe_carbide` comment).
+        "scathe" => {
+            let mut c = base_config(
+                TurretKind::Item,
+                TurretAmmo::Item(vec![
+                    item_ammo("carbide", "scathe_carbide")?,
+                    item_ammo("phase-fabric", "scathe_phase")?,
+                ]),
+            );
+            // `range = max(spawnUnit.lifetime * spawnUnit.speed)` over the ammo
+            // (carbide missile: 4.6 * 330 = 1518).
+            c.range = 1518.0;
+            c.reload = 10.0;
+            c.target_interval = 20.0;
+            Some(c)
+        }
         // `build-tower` (`BuildTurret`): proxy build-plan follower (plan 10 M6).
         "build-tower" => {
             let mut c = base_config(TurretKind::Build, TurretAmmo::Item(Vec::new()));
@@ -1861,7 +1937,10 @@ pub fn update_continuous(
     if angle_dist(state.rotation, dest) >= config.shoot_cone && !config.always_shooting {
         return;
     }
-    if !super::can_consume(state, ctx.world, e, config) || state.shoot_warmup < config.min_warmup {
+    if !super::can_consume(state, ctx.world, e, config)
+        || !super::has_ammo_state(state, ctx.world, e)
+        || state.shoot_warmup < config.min_warmup
+    {
         return;
     }
     spawn_beam(ctx, e, state, config, x, y, team, 0.0);
@@ -2069,6 +2148,10 @@ mod tests {
             "lustre_laser",
             "smite_orb",
             "malign_flak",
+            "sublimate_ozone",
+            "sublimate_cyanogen",
+            "scathe_carbide",
+            "scathe_phase",
         ] {
             assert!(harness.bullet_id(name).is_some(), "missing {name}");
         }
@@ -2104,6 +2187,8 @@ mod tests {
             "lustre",
             "smite",
             "malign",
+            "sublimate",
+            "scathe",
             "build-tower",
             "test-payload",
         ] {
@@ -2172,5 +2257,41 @@ mod tests {
         }
         let state = harness.build.world.get::<TurretState>(turret).unwrap();
         assert!(!state.bullets.is_empty(), "continuous beam is alive");
+    }
+
+    #[test]
+    fn sublimate_liquid_beam_spawns_with_ozone() {
+        let mut harness = CombatHarness::new(48, 16, 7);
+        let (turret, _) = turret_at(&mut harness, "sublimate");
+        let ozone = harness.content().liquid_id("ozone").expect("ozone");
+        super::super::handle_liquid(&mut harness.build.world, turret, ozone, 50.0);
+        for _ in 0..120 {
+            harness.tick();
+        }
+        let state = harness.build.world.get::<TurretState>(turret).unwrap();
+        assert!(
+            !state.bullets.is_empty(),
+            "sublimate beam is alive with ozone"
+        );
+    }
+
+    #[test]
+    fn scathe_item_missile_carrier_fires() {
+        let mut harness = CombatHarness::new(48, 16, 7);
+        let (turret, _) = turret_at(&mut harness, "scathe");
+        let carbide = harness.content().item_id("carbide").expect("carbide");
+        for _ in 0..12 {
+            super::super::handle_item(&mut harness.build.world, turret, carbide);
+        }
+        for _ in 0..200 {
+            harness.tick();
+        }
+        let shots = harness
+            .build
+            .world
+            .get::<TurretState>(turret)
+            .unwrap()
+            .total_shots;
+        assert!(shots > 0, "scathe fired its ammo carrier");
     }
 }

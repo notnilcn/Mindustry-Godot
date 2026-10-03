@@ -181,6 +181,7 @@ fn scenario(name: &str, json: bool) -> Result<i32> {
             let mut rng = SimRng::new(23);
             let _ = puddles::deposit(
                 &mut harness.build.world,
+                &harness.build.grid.tiles,
                 &harness.build.content,
                 10,
                 10,
@@ -192,6 +193,7 @@ fn scenario(name: &str, json: bool) -> Result<i32> {
             for _ in 0..200 {
                 let _ = puddles::deposit(
                     &mut harness.build.world,
+                    &harness.build.grid.tiles,
                     &harness.build.content,
                     10,
                     10,
@@ -215,6 +217,118 @@ fn scenario(name: &str, json: bool) -> Result<i32> {
                 "fire": fire,
                 "puddle": puddle,
                 "spread_neighbors": spread,
+                "checksum": bullet_checksum(&harness),
+            });
+            print_json(&report, json);
+            Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+        }
+        "combat_liquid_floor_react" => {
+            use mind_core::combat::{fires, puddles};
+            use mind_core::determinism::SimRng;
+            let mut harness = CombatHarness::new(32, 32, 41);
+            // Global heat env (`state.envAttrs.get(Attribute.heat)`).
+            harness
+                .build
+                .world
+                .insert_resource(mind_core::combat::fires::CombatEnv {
+                    heat: 0.6,
+                    ..Default::default()
+                });
+            let tar = harness
+                .content()
+                .block_id("tar")
+                .ok_or_else(|| anyhow::anyhow!("tar missing"))?;
+            let slag = harness
+                .content()
+                .liquid_id("slag")
+                .ok_or_else(|| anyhow::anyhow!("slag missing"))?;
+            let water = harness
+                .content()
+                .liquid_id("water")
+                .ok_or_else(|| anyhow::anyhow!("water missing"))?;
+            let neph = harness
+                .content()
+                .liquid_id("neoplasm")
+                .ok_or_else(|| anyhow::anyhow!("neoplasm missing"))?;
+            let mut rng = SimRng::new(41);
+            // (a) Floor-drop reaction: hot slag on flammable tar → fire, no puddle.
+            harness.build.grid.tiles.get_mut(6, 6).floor = tar;
+            let _ = puddles::deposit(
+                &mut harness.build.world,
+                &harness.build.grid.tiles,
+                &harness.build.content,
+                6,
+                6,
+                slag,
+                10.0,
+                &mut rng,
+            );
+            let floor_fire = fires::has(&harness.build.world, 6, 6);
+            let floor_puddle = puddles::find_at(&harness.build.world, 6, 6).is_some();
+            // (b) `willBoil`: heat 0.6 ≥ water boilPoint 0.5 → vaporizes.
+            let boiled = puddles::deposit(
+                &mut harness.build.world,
+                &harness.build.grid.tiles,
+                &harness.build.content,
+                8,
+                8,
+                water,
+                10.0,
+                &mut rng,
+            )
+            .is_none();
+            // (c) `CellLiquid.react`: neoplasm + water adds the spread amount.
+            // Reset heat so the water spread-target does not vaporize.
+            if let Some(mut env) = harness
+                .build
+                .world
+                .get_resource_mut::<mind_core::combat::fires::CombatEnv>()
+            {
+                env.heat = 0.0;
+            }
+            let e = puddles::deposit(
+                &mut harness.build.world,
+                &harness.build.grid.tiles,
+                &harness.build.content,
+                10,
+                10,
+                neph,
+                10.0,
+                &mut rng,
+            )
+            .ok_or_else(|| anyhow::anyhow!("neoplasm puddle"))?;
+            let before = harness
+                .build
+                .world
+                .get::<puddles::PuddleState>(e)
+                .map(|p| p.amount)
+                .unwrap_or(0.0);
+            let _ = puddles::deposit(
+                &mut harness.build.world,
+                &harness.build.grid.tiles,
+                &harness.build.content,
+                10,
+                10,
+                water,
+                5.0,
+                &mut rng,
+            );
+            let after = harness
+                .build
+                .world
+                .get::<puddles::PuddleState>(e)
+                .map(|p| p.amount)
+                .unwrap_or(0.0);
+            let reacted = (after - (before + 5.0)).abs() < 1e-5;
+            let pass = floor_fire && !floor_puddle && boiled && reacted;
+            let report = serde_json::json!({
+                "scenario": name,
+                "seed": 41,
+                "pass": pass,
+                "floor_fire": floor_fire,
+                "floor_puddle": floor_puddle,
+                "boiled": boiled,
+                "reacted": reacted,
                 "checksum": bullet_checksum(&harness),
             });
             print_json(&report, json);

@@ -128,6 +128,90 @@ fn weapon_volley_matches_golden() {
 }
 
 #[test]
+fn liquid_floor_react_matches_golden() {
+    use mind_core::combat::{fires, puddles};
+    use mind_core::determinism::SimRng;
+
+    let mut harness = CombatHarness::new(32, 32, 41);
+    harness.build.world.insert_resource(fires::CombatEnv {
+        heat: 0.6,
+        ..Default::default()
+    });
+    let tar = harness.content().block_id("tar").expect("tar");
+    let slag = harness.content().liquid_id("slag").expect("slag");
+    let water = harness.content().liquid_id("water").expect("water");
+    let neph = harness.content().liquid_id("neoplasm").expect("neoplasm");
+    let mut rng = SimRng::new(41);
+    harness.build.grid.tiles.get_mut(6, 6).floor = tar;
+    let _ = puddles::deposit(
+        &mut harness.build.world,
+        &harness.build.grid.tiles,
+        &harness.build.content,
+        6,
+        6,
+        slag,
+        10.0,
+        &mut rng,
+    );
+    assert!(fires::has(&harness.build.world, 6, 6));
+    assert!(puddles::find_at(&harness.build.world, 6, 6).is_none());
+    assert!(
+        puddles::deposit(
+            &mut harness.build.world,
+            &harness.build.grid.tiles,
+            &harness.build.content,
+            8,
+            8,
+            water,
+            10.0,
+            &mut rng,
+        )
+        .is_none()
+    );
+    if let Some(mut env) = harness.build.world.get_resource_mut::<fires::CombatEnv>() {
+        env.heat = 0.0;
+    }
+    let e = puddles::deposit(
+        &mut harness.build.world,
+        &harness.build.grid.tiles,
+        &harness.build.content,
+        10,
+        10,
+        neph,
+        10.0,
+        &mut rng,
+    )
+    .expect("neoplasm");
+    let before = harness
+        .build
+        .world
+        .get::<puddles::PuddleState>(e)
+        .map(|p| p.amount)
+        .unwrap_or(0.0);
+    let _ = puddles::deposit(
+        &mut harness.build.world,
+        &harness.build.grid.tiles,
+        &harness.build.content,
+        10,
+        10,
+        water,
+        5.0,
+        &mut rng,
+    );
+    let after = harness
+        .build
+        .world
+        .get::<puddles::PuddleState>(e)
+        .map(|p| p.amount)
+        .unwrap_or(0.0);
+    assert!((after - (before + 5.0)).abs() < 1e-5);
+    assert_eq!(
+        harness.checksum_hex(),
+        scenario("combat_liquid_floor_react")
+    );
+}
+
+#[test]
 fn turret_ammo_fire_matches_golden() {
     let mut harness = CombatHarness::new(48, 16, 37);
     let wall = harness.content().block_id("copper-wall").expect("wall");

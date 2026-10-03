@@ -133,7 +133,7 @@
       "kind": "harness",
       "path": "client/rust/mind-core/tests/golden/combat.json",
       "owner_plan": "10",
-      "sha256": "2ebdf8ac48fe290f72d4140b7d7759ac72af32cee08733dc6c7d2c045f48924e"
+      "sha256": "c276e7c5209711103c592c7bef649da5c43e2d43b7994d06644a53c9fbecb70b"
     },
     {
       "id": "harness_entitymeta",
