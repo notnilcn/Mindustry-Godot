@@ -92,14 +92,23 @@ remain TODO.
 objects (append/replace/index), `abilities`, reconstructor `upgrades`
 (`Seq<UnitType[]>`: replace/append/index + nested `upgrades.0.1` forms),
 `targetFlags`, `unit.type`, `plans`, `requiredPlanets` gating, `afterPatch`,
-`unapply` resets and `fix_content_arrays` growth. Nested scalar sugar
-(`{"block":{"router.health":9}}`) is handled. `isPatched` reflects the
+`unapply` resets and `fix_content_arrays` growth (registry dense item tables +
+live `ItemModule`/`LiquidModule`). Created-object `init`/`postInit`/`load` run
+on patch-created content and embedded `ContentAsset` records. Nested scalar
+sugar (`{"block":{"router.health":9}}`) is handled. `isPatched` reflects the
 patcher's touched content for plan 19.
 
 Blocked (other plans): block `drawer` draw parts (plan 17) and `craftTime`
-(plan 07 behavior field) block the `bigPatch`/`singleValue` cases; created-object
-`postInit/load` (client) and `fix_content_arrays` runtime `ItemSeq`/`ItemModule`
-tables remain. 10 of the 30 upstream `PatcherTests` cases beyond the earlier
-slice are ported here (`reconstructorPlans{,EditSpecific,Add}`,
+(plan 07 behavior field) block the `bigPatch`/`singleValue` cases; `ammoReassign`
+needs plan-10 typed `ammoTypes`. 10 of the 30 upstream `PatcherTests` cases
+beyond the earlier slice are ported here (`reconstructorPlans{,EditSpecific,Add}`,
 `nestedArrays{,2}`, `unitFlags`, `assignStringToObject`, `noIdAssign`,
 `noResolution`, `singleValue` form (via `health`), `addWeapon`).
+
+## Per-mod content catalog (C10)
+
+`mind-core::mods::catalog` emits the plan-21 `content_catalog` pair list
+(`ContentCatalogEntry { content_type, name, source_mod }`, compact live-type
+index) deduped/sorted by name; the vanilla subset is **667 pairs**, byte-equal
+to `server/spacetimedb/src/main/content_seed.rs` (`source_mod == ""`), and
+`catalogs_by_mod` groups the modded rows.

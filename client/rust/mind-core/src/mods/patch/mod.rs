@@ -8,9 +8,10 @@
 //! `ObjectSet` (`immunities.+`), `consumes` power merge, `@NoPatch` refusal,
 //! `requiredPlanets` gating, created-`afterPatch` on touched content, and
 //! `unapply` restoring via recorded `ResetAction`s + the registry index
-//! snapshot. `ObjectMap`/`ObjectFloatMap`/`Attributes`, created-object
-//! `init/postInit/load`, `fix_content_arrays` growth and per-mod
-//! `load_mod_patches` file wiring are tracked in the plan Changelog (M3b).
+//! snapshot, created-object `init/postInit/load` on patch-created content, and
+//! `fix_content_arrays` dense-table growth (registry + world halves). `ObjectMap`
+//! /`ObjectFloatMap`/`Attributes` and per-mod `load_mod_patches` file wiring
+//! landed in M3b (see the plan Changelog).
 
 use indexmap::IndexSet;
 use serde_json::{Map, Value};
@@ -158,11 +159,6 @@ impl DataPatcher {
                 self.apply_key(registry, key, value);
             }
         }
-        // Created content runs `afterPatch()` once after the traversal.
-        registry
-            .after_patch()
-            .map_err(|error| ContentError::Parse(error.to_string()))?;
-        self.after_patch_calls += 1;
         // `DataPatcher.created`: init then postInit on each new record, and the
         // client `loadIcon`/`load` half (headless no-op).
         let created = std::mem::take(&mut self.created);
@@ -181,7 +177,16 @@ impl DataPatcher {
                 .load_created(*reference)
                 .map_err(|error| ContentError::Parse(error.to_string()))?;
         }
+        // `DataPatcher.fixContentArrays` runs before the `afterPatch` sweep so
+        // the derived `build_time`/`health` re-derivation sees the grown item
+        // tables (upstream order: content apply + `fixContentArrays`, then
+        // `afterCallbacks`).
         fix_content_arrays(registry);
+        // Created content runs `afterPatch()` once after the traversal.
+        registry
+            .after_patch()
+            .map_err(|error| ContentError::Parse(error.to_string()))?;
+        self.after_patch_calls += 1;
         self.applied = true;
         Ok(())
     }
@@ -2232,15 +2237,22 @@ impl DataPatcher {
     }
 }
 
-/// `DataPatcher.fixContentArrays`: grows item/liquid/block-backed arrays and
-/// editor tile references after patch content added new content (plan 09/19).
+/// `DataPatcher.fixContentArrays`: grows/shrinks the registry-backed dense
+/// item tables after patch/embedded content added or removed items
+/// (`Block.checkContentArrayCapacity` parity).
 ///
-/// The registry rebuilds its arrays from `arr_epoch` consumers in plans 07/09;
-/// this hook grows the per-item `BlockDef` arrays (`item_costs`/
-/// `item_health_scaling`) so newly added items have dense entries. Growth of
-/// runtime `ItemSeq`/`ItemModule` tables lands with plans 07/09 when those
-/// arrays exist in the port.
+/// The port stores the block-level item tables as the per-item `BlockDef`
+/// arrays `item_costs`/`item_health_scaling` (used by `Block.init_self` for
+/// `build_time`/`health`). This hook resizes them to the live item count,
+/// matching upstream's `Arrays.copyOf(filter, items)`. The world half — live
+/// building `ItemModule`/`LiquidModule` tables and the editor tile remap — is
+/// [`fix_world_content_arrays`] (plan 09/19). Upstream's `ItemSeq` usage is
+/// campaign-local and sized at construction; the port's transient `ItemSeq`s
+/// (`UnitType.getRequirements`) are already built with `registry.items().len()`.
 pub fn fix_content_arrays(registry: &mut ContentRegistry) {
+    // Upstream guards this with `DataPatcher.needsArrayFix` (set when content is
+    // created); the port runs it unconditionally, which is idempotent because
+    // the resize is a no-op unless the item count changed.
     let item_count = registry.items().len();
     if item_count == 0 {
         return;
@@ -2252,10 +2264,12 @@ pub fn fix_content_arrays(registry: &mut ContentRegistry) {
         .map(|item| item.health_scaling)
         .collect();
     for block in registry.blocks_mut() {
-        if block.item_costs.len() < item_count {
+        // `!Vars.content.blocks().synthetic()` blocks are still resized upstream;
+        // the port has no `synthetic()` flag, so every block is handled.
+        if block.item_costs.len() != item_count {
             block.item_costs = costs.clone();
         }
-        if block.item_health_scaling.len() < item_count {
+        if block.item_health_scaling.len() != item_count {
             block.item_health_scaling = scaling.clone();
         }
     }
@@ -2676,6 +2690,33 @@ mod tests {
         assert_eq!(registry.bullets().len(), bullets_before);
     }
 
+    /// Plan 20 C10: a bullet created by a patch runs the created-object `init()`
+    /// lifecycle (`DataPatcher.created`); `BulletType.init` sets `pierce` when
+    /// `pierceCap >= 1`, observable proof the callback ran.
+    #[test]
+    fn created_bullet_runs_init_lifecycle() {
+        let mut registry = test_registry();
+        let bullets_before = registry.bullets().len();
+        let mut patcher = DataPatcher::new();
+        patcher
+            .apply(
+                &mut registry,
+                &[patch(
+                    r#"{"unit.dagger.weapons.+": {"name":"lifecycle-weapon","bullet":{"type":"LaserBulletType","pierceCap":2,"damage":5}}}"#,
+                )],
+            )
+            .expect("append weapon");
+        let created = &registry.bullets()[bullets_before..];
+        assert_eq!(created.len(), 1, "one inline bullet registered");
+        assert_eq!(created[0].pierce_cap, 2);
+        assert!(
+            created[0].pierce,
+            "created bullet init() lifecycle did not run"
+        );
+        patcher.unapply(&mut registry);
+        assert_eq!(registry.bullets().len(), bullets_before);
+    }
+
     /// PatcherTests.uUnitWeaponReassign: whole-array replace, reset restores.
     #[test]
     fn unit_weapons_reassign() {
@@ -2757,6 +2798,41 @@ mod tests {
                 .liquids
                 .len(),
             liquid_count
+        );
+    }
+
+    /// Plan 20 C10: `fix_content_arrays` resizes a block's dense item tables to
+    /// the live item count (`Block.checkContentArrayCapacity` grow/shrink).
+    #[test]
+    fn fix_content_arrays_resizes_block_item_tables() {
+        let mut registry = test_registry();
+        let item_count = registry.items().len();
+        let id = registry.block_id("router").expect("router");
+        {
+            let block = registry.block_mut(id).expect("block");
+            block.item_costs.truncate(1);
+            block.item_health_scaling.truncate(1);
+        }
+        fix_content_arrays(&mut registry);
+        {
+            let block = registry.block(id).expect("block");
+            assert_eq!(block.item_costs.len(), item_count);
+            assert_eq!(block.item_health_scaling.len(), item_count);
+            assert_eq!(
+                block.item_costs[0],
+                registry.item(ItemId::new(0)).expect("item").cost
+            );
+        }
+        // Growing past the live count shrinks back (`Arrays.copyOf` parity).
+        registry
+            .block_mut(id)
+            .expect("block")
+            .item_costs
+            .push(999.0);
+        fix_content_arrays(&mut registry);
+        assert_eq!(
+            registry.block(id).expect("block").item_costs.len(),
+            item_count
         );
     }
 
