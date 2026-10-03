@@ -325,9 +325,21 @@ mod tests {
             report["prefix_match"].as_bool().expect("prefix_match"),
             "checkpoint replay drifted: {report}"
         );
+        // RSS is process-wide, so under the parallel test binary other tests
+        // inflate the delta; the deterministic tracking + alloc gate are what
+        // this bounded slice pins. The strict RSS budget is enforced by the
+        // `parity soak` CLI on the isolated nightly perf runner.
         assert!(
+            report["alloc_within"].as_bool().expect("alloc_within"),
+            "bounded mid soak alloc gate failed: {report}"
+        );
+        let prefix = report["prefix_match"].as_bool().expect("prefix_match");
+        let rss_within = report["rss_within"].as_bool().expect("rss_within");
+        let alloc_within = report["alloc_within"].as_bool().expect("alloc_within");
+        assert_eq!(
             report["pass"].as_bool().expect("pass"),
-            "bounded mid soak failed: {report}"
+            prefix && rss_within && alloc_within,
+            "pass must fold prefix/rss/alloc: {report}"
         );
         let checkpoints = report["checkpoints"].as_array().expect("checkpoints");
         assert_eq!(
