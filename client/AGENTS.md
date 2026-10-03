@@ -1,36 +1,72 @@
-# AGENTS.md — `client/` (Godot 4.7 project)
+# AGENTS.md — client/ (Godot 4.7 project)
 
-The Godot side of Mindustry-Godot. **Behavior lives in Rust** (`client/rust/`, GDExtension via `mind-gdext`); this tree owns scenes, GDScript UI, the project file and third-party addons. Read the root [`AGENTS.md`](../AGENTS.md) first; this file is the client-specific map.
+The Godot project for Mindustry-Godot. Gameplay behavior lives in Rust (`client/rust/`, exported as the `mind-gdext` GDExtension); this tree owns the `.tscn` scene graph, the GDScript UI layer, shaders, `project.godot`, third-party addons and the generated scenario mirror. Read the root [`AGENTS.md`](../AGENTS.md) first.
 
 ## Layout
 
-| Path | Contents |
+| Path | Responsibility |
 |---|---|
-| `project.godot` | Main scene `res://scenes/spine.tscn`; renderer `mobile` (locked OD-R2); MCP autoload + editor plugin. |
-| `mind.gdextension` | Maps `res://bin/rust/{debug,release}/libmind_gdext.{so,dll,dylib}` to the Rust cdylib. Build via `tools/build.sh`. |
-| `scenes/spine.tscn` | P0 spine rig: `/root/Spine/{SimHost, World/TileGrid, World/Camera2D, Ui/StateInspector}`. |
-| `scenes/ui/state_inspector.tscn`, `ui/state_inspector.gd` | Read-only overlay; polls `SimHost.get_state_json()` every 250 ms and on `state_changed`. |
-| `rust/` | Cargo workspace: `mind-core` (Godot-free sim), `mind-headless`, `mind-gdext`, `mind-stdb`. Never build it from inside the editor. |
-| `bin/`, `.godot/`, `scenarios/` | Build output / editor cache / generated scenario mirror — all gitignored. |
-| `addons/open_godot_mcp/` | Editor bridge + runtime autoload for MCP verification; don't edit unless working on the addon. |
-| `addons/blastbullets2d/`, `addons/phantom_camera/` | Retained but unused at P0 (OD-R12); plans 10/15 evaluate them. |
+| `project.godot` | Project file: main scene `res://scenes/spine.tscn`, `mobile` rendering method, Jolt 3D physics, the `McpRuntimeAutoload`/`MindAssets`/`MindMods`/`StdbConnector`/`MindUi`/`MindHud` autoloads, and the `open_godot_mcp` editor plugin. |
+| `mind.gdextension` | Maps `gdext_rust_init` (minimum compatibility 4.7) to `res://bin/rust/{debug,release}/…mind_gdext…`; `tools/build.sh` produces that library. |
+| `scenes/spine.tscn` | Main scene rig: `SimHost`, `Input`, `MindAudio`, `World/{TileGrid,Camera2D,Renderer,Bloom,LowRes,MinimapProvider}`, the `MindRender`/`MindFx`/`MindCampaign`/`MindLogic`/`MindNet`/`MindEditor`/`MindPlatform` facades, `Planet`, and `Ui/{UiRoot,EditorDialog,StateInspector}`. |
+| `scenes/autoloads/` | One `.tscn` per autoload; each root node is the native `mind-gdext` class (`MindAssets`, `MindMods`, `StdbConnector`, `MindUi`, `MindHud`). |
+| `scenes/editor/` | Map-editor shell and tools: `map_editor_dialog`, `map_view`, `wave_graph`, `map_objectives_canvas`, `wave_info_dialog`, `banned_content_dialog`, `sector_generate_dialog`, plus the map info/load/save/resize/locales/processors/generate/data dialogs. |
+| `scenes/ui/dialogs/`, `scenes/ui/fragments/`, `scenes/ui/widgets/` | `.tscn` files mirroring `ui/`; `mind_dialog_base.tscn` is the shared dialog shell and `mind_minimap.tscn` hosts the minimap widget. |
+| `scenes/ui/state_inspector.tscn` | Read-only spine overlay reading sim/net/audio/editor JSON. |
+| `ui/` | GDScript UI layer: `ui_root.gd`, the dialog base, table/widget factories, theme/text/layout helpers, dialogs, fragments and the two manifests. |
+| `ui/dialogs_manifest.json`, `ui/styles_manifest.json` | The UI ABI: dialog/fragment inventory and the themed style names. |
+| `shaders/` | Ported Godot shaders (`default`, `water`, `fog`, `planet`, `shield`, `buildbeam`, …) plus `tools/shaders_check.gd`. |
+| `addons/open_godot_mcp/` | Editor plugin and runtime autoload that back MCP inspection and in-engine playtesting. |
+| `addons/blastbullets2d/`, `addons/phantom_camera/` | Vendored third-party addons (bullet engine; camera tweening), loaded as plugins. |
+| `audio/bus_layout.json` | Declarative bus table (`Master`, `Music`, `Sound`, `UI`) matching the `MindAudio` buses. |
+| `tools/shaders_check.gd` | `SceneTree` script that force-compiles every `res://shaders/*.gdshader`. |
+| `scenarios/` | Generated mirror of the repo-root `scenarios/`; synced by `tools/sync_scenarios.sh`, never hand-edited. |
+| `bin/`, `.godot/` | Build output and editor import cache; gitignored. |
+| `rust/` | Cargo workspace (`mind-core`, `mind-gdext`, `mind-headless`, `mind-stdb`, `mind-atlas`, `mind-derive`, `mind-macros`, `mind-tools`); build it with `tools/build.sh`, not from inside the editor. |
+
+## Responsibilities
+
+- `ui_root.gd` (`MindUiRoot`) owns the layer groups (`MenuGroup`, `HudGroup`, `DialogLayer`, `OverlayLayer`, `LoadingLayer`), eagerly instantiates every manifest dialog and fragment, builds the theme via `MindThemeBuilder`, and connects the `MindUi` prompt/toast signals.
+- `mind_dialog.gd` (`MindDialog`) is the base for all dialogs; `MindUi` (Rust) owns visibility and the active-dialog stack, while the node renders and calls `show_dialog`/`hide_dialog`.
+- Fragments bind to the read-only `MindHud` properties and signals or to `MindUi` JSON endpoints; they never touch sim state.
+- Editor dialogs read and write `/root/Spine/MindEditor` (tool dispatch, rotation, undo/redo and palette order are resolved in Rust).
+- The native nodes (`MindSimHost`, `MindWorldRenderer`, `MindFx`, `MindCampaign`, `MindLogic`, `MindNet`, `MindEditor`, `MindPlatform`, `MindAudio`, `MindAssets`, `MindMods`, `StdbConnector`) are the interface to the Rust behavior; GDScript only calls them.
+
+## Key types
+
+- Dialogs: `MindDialog` over the shell scene `scenes/ui/dialogs/mind_dialog_base.tscn`.
+- Layout/widgets: `MindTable`, `MindCell`, `MindStack`, `MindScroll`, `MindWidgets`, `MindUiMargins`.
+- Theme/text: `MindStyles`, `MindThemeBuilder`, `MindStyleLookup`, `MindIconEffect`, `MindLabel`, `MindRichLabel`.
+- Interactive widgets: `MindMinimapWidget`, `MindBar`, `MindCollapser`, `MindCheck`, `MindTooltip`, `MindGridImage`, `MindBorderImage`, `ItemsDisplay`, `CoreItemsDisplay`.
+- Layout algorithms: `MindTreeLayout`, `MindRowTreeLayout`, `MindBranchTreeLayout`, `MindRadialTreeLayout`.
+
+## Invariants
+
+- **`.tscn`-first.** Static UI, world scaffolding, autoloads and debug views live in scenes so the project is navigable in the editor. Rust owns behavior, not static scene construction.
+- Any node built in code needs a `# code-instantiated: <specific reason>` comment at the site (`spawned at runtime`, `pooled/high-churn`, `count driven by server rows`).
+- **GDScript is UI-only.** It reads sim JSON and signals (`get_state_json`, `state_changed`) and never mutates sim state.
+- **Manifest ABI.** A new dialog or fragment must be added to `ui/dialogs_manifest.json` and to the `EXPECTED_*_DIALOGS`/fragment lists in `mind-core::ui::manifest`. `MindUiRoot._ready()` and `MindThemeBuilder.verify()` check the manifests at boot.
+- **Bundle keys.** User-visible strings go through `_t("@key")`; debug-only strings are the exception.
+- `scenarios/` is an exact, generated mirror of the repo-root `scenarios/`; edit the canonical files and run `tools/sync_scenarios.sh`.
+- Generated STDB bindings under `rust/mind-stdb/src/module_bindings/` are never hand-edited; regenerate with `server/build.sh` (drift gate `--check`).
+- Source files are UTF-8/LF with `SPDX-License-Identifier: GPL-3.0-only` headers citing the ported Mindustry source.
 
 ## Conventions
 
-- **`.tscn`-first** (`HIGH_LEVEL_PLAN.md` §6.6): static UI, world scaffolding, autoloads and debug views belong in scenes so a human can open and navigate the project in the editor. Rust owns behavior, not static scene construction.
-- Any node created in code needs a `# code-instantiated: <specific reason>` comment at the site ("spawned at runtime", "pooled/high-churn", "count driven by server rows" — not "easier in code").
-- GDScript is UI-only: it reads `MindSimHost` (JSON/signals), never mutates sim state.
-- Generated STDB bindings (`rust/mind-stdb/src/module_bindings/`) are **never hand-edited**; regenerate with `server/build.sh` (drift gate `--check`).
-- New files LF/UTF-8; cite ported Mindustry sources in headers.
+- `MindWidgets` factories are the way dialogs build themed widgets; text/icon lookup routes through `MindAssets`.
+- Style names in `styles_manifest.json` are the parity ABI; only presentation values in `MindStyles`/`MindThemeBuilder` are local.
+- `MindTable`'s fluent `add(child).grow_x_axis().pad(4)` API mirrors `Table.add(...)`; call `row()` to start a new row.
+- Addon trees under `addons/` are vendored; change them only when working on the addon itself.
 
-## Build, run, verify (WSL2 Ubuntu)
+## Verification
 
 ```bash
-tools/build.sh                                  # mind-gdext + mind-headless -> client/bin/rust, syncs scenarios
-godot4 --path client                            # opens res://scenes/spine.tscn
-bash tools/godot.sh --headless --editor --quit --path client   # import/parse check
-tools/ci.sh                                     # full gate (audits Rust + this tree)
-tools/mcp-smoke.sh                              # in-engine spine smoke (needs the editor running)
+tools/build.sh                                                  # mind-gdext + mind-headless -> client/bin/rust, then sync scenarios
+godot4 --path client                                            # open res://scenes/spine.tscn
+bash tools/godot.sh --headless --editor --quit --path client    # import/parse gate
+godot4 --headless --path client --script res://tools/shaders_check.gd   # shader compile gate
+tools/ci.sh                                                     # full local gate (Rust, goldens, mirror, Godot import, STDB)
+tools/mcp-smoke.sh                                              # in-engine spine smoke (needs the editor running)
 ```
 
-In-engine verification goes through open-godot-mcp with **pid-stamped** evals; the repo skill [`.opencode/skills/playtest/SKILL.md`](../.opencode/skills/playtest/SKILL.md) has the launch flow, node map and recipes. Full plan: [`00_FOUNDATION_IMPLEMENTATION_PLAN.md`](../00_FOUNDATION_IMPLEMENTATION_PLAN.md) §3.4–§3.5, §7c.
+In-engine checks run through the `open_godot_mcp` addon; the repo skill [`.opencode/skills/playtest/SKILL.md`](../.opencode/skills/playtest/SKILL.md) holds the launch flow, node map and pid-stamped recipes.
