@@ -9,6 +9,7 @@
 use smallvec::SmallVec;
 
 use crate::ai::{AttackTarget, CommandAiState, CommandQueueEntry};
+use crate::content::id::UnitCommandId;
 use crate::world::TilePos;
 
 use super::action::CommandTarget;
@@ -174,8 +175,34 @@ pub fn select_buildings_rect(
 /// ([`CommandTarget::Unit`]/[`CommandTarget::Building`]) to each selected unit,
 /// queueing the waypoint when `queue` is set. Returns the number of units
 /// updated. Formation/`UnitGroup` grouping stays with the caller (plan 11).
+///
+/// This convenience form omits the implicit move command; use
+/// [`command_units_apply_with_move`] when the content-resolved `move` id is
+/// available (the relay/`Sim::command` path always has it).
 pub fn command_units_apply(
     states: &mut [&mut CommandAiState],
+    target: CommandTarget,
+    queue: bool,
+) -> usize {
+    command_units_apply_with_move(states, None, target, queue)
+}
+
+/// Full upstream `commandUnits` per-unit loop (`InputHandler.java:310-408`).
+///
+/// For every selected unit:
+/// 1. **implicit move** — when `move_command` is `Some` and the unit has no
+///    active command, install it (`if(ai.command == null || ai.command.switchToMove)
+///    ai.command(UnitCommand.moveCommand)`). The port tests `command.is_none()`;
+///    `switchToMove` bookkeeping is the caller's `UnitCommandDef` concern.
+/// 2. **target** — a queued order appends a [`CommandQueueEntry`]; a direct
+///    order clears the queue first (`ai.commandQueue.clear()`) then sets the
+///    position/attack target, matching upstream.
+///
+/// Returns the number of units updated. Formation grouping (`finalBatch`,
+/// `UnitGroup`) stays with plan 11's caller.
+pub fn command_units_apply_with_move(
+    states: &mut [&mut CommandAiState],
+    move_command: Option<UnitCommandId>,
     target: CommandTarget,
     queue: bool,
 ) -> usize {
@@ -186,11 +213,19 @@ pub fn command_units_apply(
     };
     let mut applied = 0usize;
     for state in states.iter_mut() {
+        if let Some(move_command) = move_command
+            && state.command.is_none()
+        {
+            state.last_command = state.command;
+            state.command = Some(move_command);
+            state.stop_at_target = false;
+        }
         if queue {
             if state.command_queue(entry) {
                 applied += 1;
             }
         } else {
+            state.command_queue.clear();
             match target {
                 CommandTarget::Position { x, y } => state.command_position(x, y),
                 CommandTarget::Unit(id) => state.command_target(AttackTarget::Unit(id)),
@@ -322,5 +357,37 @@ mod tests {
             second.attack_target,
             Some(AttackTarget::Building(TilePos::new(3, 4).pack()))
         );
+    }
+
+    #[test]
+    fn command_units_apply_implicit_move_and_clear_queue() {
+        use crate::ai::CommandQueueEntry;
+        use crate::content::id::UnitCommandId;
+
+        let move_command = UnitCommandId::new(0);
+        let mut first = CommandAiState::default();
+        // A queued order appends and does not clear.
+        let queued = command_units_apply_with_move(
+            &mut [&mut first],
+            Some(move_command),
+            CommandTarget::Position { x: 1.0, y: 2.0 },
+            true,
+        );
+        assert_eq!(queued, 1);
+        assert_eq!(first.command, Some(move_command), "implicit move installed");
+        assert_eq!(first.command_queue.len(), 1);
+        // A direct order clears the queue and sets position.
+        let direct = command_units_apply_with_move(
+            &mut [&mut first],
+            Some(move_command),
+            CommandTarget::Position { x: 5.0, y: 6.0 },
+            false,
+        );
+        assert_eq!(direct, 1);
+        assert!(first.command_queue.is_empty(), "direct order clears queue");
+        assert_eq!(first.target_pos, Some((5.0, 6.0)));
+        assert_eq!(first.attack_target, None);
+        // Queue-level entry encoding is preserved.
+        let _ = CommandQueueEntry::Position(0.0, 0.0);
     }
 }
