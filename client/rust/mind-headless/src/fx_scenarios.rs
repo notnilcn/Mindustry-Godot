@@ -16,9 +16,9 @@ use mind_core::combat::harness::CombatHarness;
 use mind_core::content::EffectId;
 use mind_core::content::effect_by_name;
 use mind_core::fx::{
-    BatchBackend, EffectData, EffectKind, EffectState, EmptySnapshot, FxBus, FxPool, batching_runs,
-    build_program, build_program_into, build_program_into_lod, catalog_counts, draw_call_count,
-    order_hash, registry,
+    BatchBackend, EffectData, EffectKind, EffectState, EmptySnapshot, FxBus, FxPool,
+    batched_draw_call_count, batching_runs, build_program, build_program_into,
+    build_program_into_lod, catalog_counts, order_hash, registry,
 };
 use mind_core::render::draw::{Blending, DrawPrim, DrawProgram, MAX_DRAW_CALLS_TARGET, PrimKind};
 
@@ -475,7 +475,9 @@ fn bench(states: usize, frames: u32, json: bool) -> Result<i32> {
         }
         program.sort();
         total_prims += program.len() as u64;
-        max_draw_calls = max_draw_calls.max(draw_call_count(&program.prims));
+        // The batched executor count (plan 16 §7.4): material/MultiMesh
+        // collapse of every `(z, blend, region)` bank, not just adjacent runs.
+        max_draw_calls = max_draw_calls.max(batched_draw_call_count(&program.prims));
         let runs = batching_runs(&program.prims);
         let mut region_prims = 0u64;
         for run in &runs {

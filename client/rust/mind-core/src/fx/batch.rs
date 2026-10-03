@@ -109,6 +109,67 @@ pub fn draw_call_count(prims: &[DrawPrim]) -> usize {
     calls
 }
 
+/// Stable rank for a [`Blending`] key.
+fn blend_rank(blend: Blending) -> u8 {
+    match blend {
+        Blending::Normal => 0,
+        Blending::Additive => 1,
+        Blending::Multiply => 2,
+    }
+}
+
+/// Discriminant tag for a batched shape prim (per-instance geometry varies but
+/// the mesh/shader is shared). `None` for prims that are inherently one draw
+/// each (`NoiseLayer`/`ShaderBlit`).
+fn shape_tag(kind: &PrimKind) -> Option<u32> {
+    Some(match kind {
+        PrimKind::Rect { .. } => 0,
+        PrimKind::Circle { fill, .. } => 1 + u32::from(*fill),
+        PrimKind::Poly { sides, fill, .. } => 3 + u32::from(*fill) + (*sides as u32) * 2,
+        PrimKind::Polygon { fill, .. } => 1000 + u32::from(*fill),
+        PrimKind::Tri { .. } => 1002,
+        PrimKind::Line { cap, .. } => 1003 + u32::from(*cap),
+        PrimKind::Polyline { .. } => 1005,
+        PrimKind::Arc { .. } => 1006,
+        // `Drawf.light` accumulates into plan 16's single `LightRenderer` pass.
+        PrimKind::Light { .. } => 2000,
+        PrimKind::Region { .. } | PrimKind::NoiseLayer { .. } | PrimKind::ShaderBlit { .. } => {
+            return None;
+        }
+    })
+}
+
+/// Draw calls a fully-batched executor submits for `prims` (plan 16 §7.4 /
+/// plan 17 §7d): every `(z, blend, region)` group is **one** vertex/MultiMesh
+/// bank regardless of adjacency, every shape kind at a `(z, blend)` is one
+/// instanced draw, and `NoiseLayer`/`ShaderBlit` stay one draw each. Unlike
+/// [`draw_call_count`] (adjacent runs), this models the material/MultiMesh
+/// collapse that makes the `mid` FX profile fit the ≤200 target.
+pub fn batched_draw_call_count(prims: &[DrawPrim]) -> usize {
+    use std::collections::BTreeMap;
+    let mut region_groups: BTreeMap<(u32, u8, &'static str), u32> = BTreeMap::new();
+    let mut shape_groups: BTreeMap<(u32, u8, u32), u32> = BTreeMap::new();
+    let mut uniques = 0usize;
+    for prim in prims {
+        match &prim.kind {
+            PrimKind::Region { region, .. } => {
+                *region_groups
+                    .entry((prim.z.to_bits(), blend_rank(prim.blend), region.0))
+                    .or_insert(0) += 1;
+            }
+            kind => match shape_tag(kind) {
+                Some(tag) => {
+                    *shape_groups
+                        .entry((prim.z.to_bits(), blend_rank(prim.blend), tag))
+                        .or_insert(0) += 1;
+                }
+                None => uniques += 1,
+            },
+        }
+    }
+    region_groups.len() + shape_groups.len() + uniques
+}
+
 /// LOD particle-count policy (plan 17 §3.14): at `Lod::l2`, halve (floor 1).
 pub fn lod_particle_count(base: i32, l2: bool) -> i32 {
     if l2 { (base / 2).max(1) } else { base }
@@ -175,6 +236,39 @@ mod tests {
             choose_backend(GPUPARTICLES_THRESHOLD as usize),
             BatchBackend::GpuParticles
         );
+    }
+
+    #[test]
+    fn batched_executor_collapses_non_adjacent_keys() {
+        // a, b, a at the same z/blend: the adjacent-run count is 3, but the
+        // batched executor groups the two `a` regions into one bank -> 2.
+        let prims = vec![
+            region(0.0, 10.0, Blending::Normal, "a"),
+            region(1.0, 10.0, Blending::Normal, "b"),
+            region(2.0, 10.0, Blending::Normal, "a"),
+        ];
+        assert_eq!(draw_call_count(&prims), 3);
+        assert_eq!(batched_draw_call_count(&prims), 2);
+        // Different z stays a distinct bank.
+        let split = vec![
+            region(0.0, 10.0, Blending::Normal, "a"),
+            region(1.0, 11.0, Blending::Normal, "a"),
+        ];
+        assert_eq!(batched_draw_call_count(&split), 2);
+        // Same-kind shapes at one `(z, blend)` collapse into one instanced draw.
+        let shape = |x: f32| DrawPrim {
+            z: 10.0,
+            blend: Blending::Normal,
+            kind: PrimKind::Circle {
+                x,
+                y: 0.0,
+                r: 1.0,
+                fill: true,
+                stroke: 0.0,
+                color: Rgba::WHITE,
+            },
+        };
+        assert_eq!(batched_draw_call_count(&[shape(0.0), shape(1.0)]), 1);
     }
 
     #[test]

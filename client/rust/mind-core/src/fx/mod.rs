@@ -31,7 +31,8 @@ pub mod weather_fx;
 
 pub use crate::render::draw::DrawProgram;
 pub use batch::{
-    BatchBackend, RegionBatch, batching_runs, choose_backend, draw_call_count, lod_particle_count,
+    BatchBackend, RegionBatch, batched_draw_call_count, batching_runs, choose_backend,
+    draw_call_count, lod_particle_count,
 };
 pub use catalog::{CatalogCounts, build_registry, counts as catalog_counts, order_hash};
 pub use container::EffectContainer;
