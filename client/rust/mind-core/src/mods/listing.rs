@@ -176,6 +176,12 @@ mod tests {
         assert_eq!(super::parse_version("146."), None);
         assert_eq!(super::parse_version(".1"), None);
         assert_eq!(super::parse_version("146.1.2"), None);
+        // Signed forms parse like Java `Strings.parseInt` (sign is preserved).
+        assert_eq!(super::parse_version("+146"), Some((146, 0)));
+        assert_eq!(super::parse_version("-1"), Some((-1, 0)));
+        // Non-numeric tails are refused.
+        assert_eq!(super::parse_version("146a"), None);
+        assert_eq!(super::parse_version("146.1a"), None);
     }
 
     /// Plan 20 M6: `listing::matches_game_version`.
@@ -189,6 +195,23 @@ mod tests {
         // Specified revision must match exactly.
         assert!(matches_game_version(Some((146, 2)), 146, 2));
         assert!(!matches_game_version(Some((146, 2)), 146, 3));
+        // Custom builds (`-1`) never match a specified tag.
+        assert!(!matches_game_version(Some((146, 0)), -1, 0));
+        assert!(matches_game_version(None, -1, 0));
+    }
+
+    /// Plan 20 M6: `matchesGameVersion(releaseTitle)` (title -> tag -> match).
+    #[test]
+    fn matches_game_version_title() {
+        assert!(matches_game_version(parse_version_tag("[v146]"), 146, 0));
+        assert!(matches_game_version(
+            parse_version_tag("Mod [b146.2]"),
+            146,
+            2
+        ));
+        assert!(!matches_game_version(parse_version_tag("[v146]"), 145, 0));
+        // Untagged (or unanchored) titles match every build.
+        assert!(matches_game_version(parse_version_tag("Nightly"), 999, 9));
     }
 
     /// Plan 20 M6: version tags in release titles.
@@ -227,6 +250,11 @@ mod tests {
         let release = listing.get_matching_release(146, 0).expect("match 146");
         assert_eq!(release.id, "1");
         assert!(listing.get_matching_release(140, 0).is_none());
+        // `release_matches` shares the tag parser (anchored `[vN]`/`[bN.M]`).
+        assert!(listing.release_matches("Something [v146]", 146, 0));
+        assert!(!listing.release_matches("Something [v146]", 147, 0));
+        // An unanchored tag parses to `None`, which matches every build.
+        assert!(listing.release_matches("inline [v146] tag", 146, 0));
     }
 
     /// GitHub listing JSON deserializes with camelCase keys and defaults.
