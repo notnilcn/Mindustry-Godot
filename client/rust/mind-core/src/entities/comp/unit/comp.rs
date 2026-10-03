@@ -12,7 +12,7 @@
 use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
 
-use crate::content::{ItemId, StatusId, UnitTypeId};
+use crate::content::{BlockId, ItemId, StatusId, UnitTypeId};
 use crate::world::TilePos;
 
 /// Core unit state (`UnitComp` fields not owned by a base component).
@@ -195,6 +195,22 @@ pub struct ElevationMoveComp {
 pub struct TankComp {
     /// Tread dust timer.
     pub tread_time: f32,
+    /// Solid-tile slowdown (`lastSlowdown`), lerped toward
+    /// `UnitType.crawlSlowdown`.
+    pub last_slowdown: f32,
+    /// Deep floor under the treads when every scanned tile is deep
+    /// (`lastDeepFloor`; `drownFloor` replacement input).
+    pub last_deep_floor: Option<BlockId>,
+}
+
+impl Default for TankComp {
+    fn default() -> Self {
+        Self {
+            tread_time: 0.0,
+            last_slowdown: 1.0,
+            last_deep_floor: None,
+        }
+    }
 }
 
 /// Naval water movement (`WaterMoveComp`).
@@ -209,6 +225,25 @@ pub struct WaterMoveComp {
 pub struct CrawlComp {
     /// Segment rotation in degrees (`segmentRot`).
     pub segment_rot: f32,
+    /// Deep floor under the unit when ≥75% of scanned tiles are deep
+    /// (`lastDeepFloor`; `drownFloor` replacement input).
+    pub last_deep_floor: Option<BlockId>,
+    /// Solid-tile slowdown multiplier (`lastCrawlSlowdown`), lerped toward
+    /// `UnitType.crawlSlowdown`.
+    pub last_crawl_slowdown: f32,
+    /// Movement animation timer (`crawlTime`).
+    pub crawl_time: f32,
+}
+
+impl Default for CrawlComp {
+    fn default() -> Self {
+        Self {
+            segment_rot: 0.0,
+            last_deep_floor: None,
+            last_crawl_slowdown: 1.0,
+            crawl_time: 0.0,
+        }
+    }
 }
 
 /// Payload carrier state (`PayloadComp`); payload entities are plan 08's.

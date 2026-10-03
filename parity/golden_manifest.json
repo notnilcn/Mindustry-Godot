@@ -575,7 +575,7 @@
       "kind": "harness",
       "path": "client/rust/mind-headless/tests/golden/input/input_rts_move.json",
       "owner_plan": "15",
-      "sha256": "49b4b79105043d1bd857815239204e43f8723bddbe7c56867d85415b63cea6d3"
+      "sha256": "c576d142e4dabfe2572029283977353e948e5319a5b30805e8477d3403daa2a9"
     },
     {
       "id": "harness_units_base_build",

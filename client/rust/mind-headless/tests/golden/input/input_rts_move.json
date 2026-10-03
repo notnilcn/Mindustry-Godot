@@ -99,7 +99,7 @@
       "enabled": true
     },
     {
-      "op": "custom"
+      "op": "unit_stance"
     }
   ],
   "control_group": {
@@ -115,5 +115,5 @@
     ],
     "second_queue": 1
   },
-  "checksum": "c04e75fe90e02c08"
+  "checksum": "dd0a4f68081b2e36"
 }

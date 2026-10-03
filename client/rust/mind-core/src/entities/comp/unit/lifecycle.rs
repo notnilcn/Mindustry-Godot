@@ -192,9 +192,7 @@ pub fn insert_kind_components(
             ));
     }
     if has(UnitComponent::Tank) {
-        world
-            .entity_mut(entity)
-            .insert(TankComp { tread_time: 0.0 });
+        world.entity_mut(entity).insert(TankComp::default());
     }
     if has(UnitComponent::WaterMove) {
         world
@@ -202,8 +200,10 @@ pub fn insert_kind_components(
             .insert(WaterMoveComp { trail_time: 0.0 });
     }
     if has(UnitComponent::Crawl) {
+        // `CrawlComp.add`: `segmentRot = rotation`.
         world.entity_mut(entity).insert(CrawlComp {
             segment_rot: rotation,
+            ..CrawlComp::default()
         });
     }
     if has(UnitComponent::ElevationMove) {

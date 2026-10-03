@@ -169,6 +169,18 @@ pub enum SimCommand {
         /// Tile y.
         y: i16,
     },
+    /// Set a unit stance (`setUnitStance`; plan 11 §6.5 / plan 15 §3.3.1).
+    ///
+    /// Replaces the earlier `Custom { kind: 102 }` fallback (plan 15 §3.3.1
+    /// resolution, 2026-10-03); variant id 15 is append-only.
+    UnitStance {
+        /// Unit entity ids.
+        units: SmallVec<[i32; 32]>,
+        /// Stance content id.
+        stance: u16,
+        /// Whether the stance is enabled (`false` = clear).
+        enabled: bool,
+    },
 }
 
 impl SimCommand {
@@ -190,6 +202,7 @@ impl SimCommand {
             SimCommand::UnitControl { .. } => "unit_control",
             SimCommand::UnitClear => "unit_clear",
             SimCommand::BuildingControlSelect { .. } => "building_control_select",
+            SimCommand::UnitStance { .. } => "unit_stance",
         }
     }
 
@@ -580,6 +593,19 @@ fn encode_command(out: &mut Vec<u8>, command: &SimCommand) {
             put_i16(out, *x);
             put_i16(out, *y);
         }
+        SimCommand::UnitStance {
+            units,
+            stance,
+            enabled,
+        } => {
+            put_u8(out, 15);
+            put_u32(out, units.len() as u32);
+            for id in units {
+                put_i32(out, *id);
+            }
+            put_u16(out, *stance);
+            put_u8(out, u8::from(*enabled));
+        }
     }
 }
 
@@ -825,6 +851,16 @@ fn decode_command(cur: &mut Cursor<'_>) -> Result<SimCommand, CommandLogError> {
             let x = cur.i16()?;
             let y = cur.i16()?;
             Ok(SimCommand::BuildingControlSelect { x, y })
+        }
+        15 => {
+            let units = cur.unit_list()?;
+            let stance = cur.u16()?;
+            let enabled = cur.u8()? != 0;
+            Ok(SimCommand::UnitStance {
+                units,
+                stance,
+                enabled,
+            })
         }
         other => Err(CommandLogError::UnknownOp(other)),
     }
@@ -1095,6 +1131,22 @@ mod tests {
         log.push(20, SimCommand::UnitControl { unit: None });
         log.push(21, SimCommand::UnitClear);
         log.push(22, SimCommand::BuildingControlSelect { x: 6, y: 7 });
+        log.push(
+            23,
+            SimCommand::UnitStance {
+                units: smallvec::smallvec![1, 2, 3],
+                stance: 2,
+                enabled: true,
+            },
+        );
+        log.push(
+            24,
+            SimCommand::UnitStance {
+                units: smallvec::smallvec![],
+                stance: 7,
+                enabled: false,
+            },
+        );
         log
     }
 
@@ -1150,6 +1202,22 @@ mod tests {
             (
                 SimCommand::BuildingControlSelect { x: 0, y: 0 },
                 "building_control_select",
+            ),
+            (
+                SimCommand::UnitStance {
+                    units: smallvec::smallvec![4, 5],
+                    stance: 2,
+                    enabled: true,
+                },
+                "unit_stance",
+            ),
+            (
+                SimCommand::UnitStance {
+                    units: smallvec::smallvec![6],
+                    stance: 3,
+                    enabled: false,
+                },
+                "unit_stance",
             ),
         ];
         for (command, name) in cases {

@@ -15,6 +15,7 @@ use crate::content::ContentRegistry;
 use crate::entities::comp::unit::comp::{
     CrawlComp, LegsComp, MechComp, TankComp, UnitTypeComp, WaterMoveComp,
 };
+use crate::world::WorldGrid;
 
 use super::crawl::update_crawl;
 use super::legs::update_legs;
@@ -26,6 +27,7 @@ use super::water_move::update_water_move;
 /// Advances every kind-specific movement state for `entity`.
 pub fn update_kinematics(
     world: &mut World,
+    grid: &WorldGrid,
     content: &ContentRegistry,
     entity: Entity,
     delta: (f32, f32),
@@ -43,10 +45,10 @@ pub fn update_kinematics(
         update_mech(world, entity, delta);
     }
     if world.get::<TankComp>(entity).is_some() {
-        update_tank(world, entity, delta);
+        update_tank(world, grid, content, entity, delta, unit_def);
     }
     if world.get::<CrawlComp>(entity).is_some() {
-        update_crawl(world, entity, delta, unit_def.segment_max_rot);
+        update_crawl(world, grid, content, entity, delta, unit_def);
     }
     if world.get::<WaterMoveComp>(entity).is_some() {
         update_water_move(world, entity, delta);

@@ -8,13 +8,18 @@
 //! edges, raycasts and the per-request result API
 //! ([`ControlPathfinder::get_path_position`]).
 //!
-//! **Deviation note:** the upstream per-cluster flowfield `FieldCache`
-//! acceleration (12×12 weight arrays + frontier pushed with the control node
-//! budget) is intentionally **not** implemented here; the request path runs the
-//! plan-11 synchronous A* and caches the resulting tile list per request. The
-//! portal graph and cluster API are complete, so `CommandAI`/`LogicAI` callsites
-//! are unaffected. Field-cache optimization is deferred with owner plan 23
-//! (perf) once `bench-path` numbers justify it.
+//! **Owner note — per-cluster `FieldCache` acceleration (deferred).** The
+//! upstream per-cluster flowfield cache is intentionally **not** implemented:
+//! it is `cache[team][cost]` keyed by packed `(goalPos, costId, team)` with a
+//! `12×12` weight array + frontier per `FieldCache`, updated under the
+//! deterministic control-node budget (`CONTROL_NODES_PER_TICK`, plan 11 §3.7),
+//! invalidated on `clusterChanged` and dropped after 30 `update_id`s idle. The
+//! request path here runs the plan-11 synchronous A* and caches the resulting
+//! tile list per `(start, goal)`. The portal graph and cluster/request API are
+//! complete so `CommandAI`/`LogicAI` callsites are unaffected. This is a
+//! **plan-23 perf** follow-up and additionally needs a `units bench --profile
+//! path` harness surface (mind-headless `units_scenarios::bench`, not owned by
+//! this lane) to measure the win before landing.
 
 use std::collections::BTreeMap;
 

@@ -186,6 +186,7 @@ impl UnitHarness {
                 };
                 movement::update_kinematics(
                     &mut self.build.world,
+                    &self.build.grid,
                     &self.build.content,
                     entity,
                     delta,

@@ -87,8 +87,10 @@ pub fn update_repair(ctx: &mut AiCtx, unit: Entity, state: &mut RepairAi) -> boo
     } else {
         ctx.pathfind(unit, tile, build_range);
     }
-    // TODO(plan 10/12): retreat when under fire (`RepairAI` reads
-    // `wasDamaged`/`lastDamageTime` and flees; needs the damage event feed).
+    // Owner note (plan 10/11): `RepairAI.updateMovement`'s idle retreat reads
+    // `wasDamaged`/`lastDamageTime` (a plan-10 damage-event feed) and flees to
+    // `unit.closestCore()` after `retreatDelay = 3 s`. The heal/target half is
+    // live; the retreat half is deferred until the unit damage-timer feed lands.
     true
 }
 
