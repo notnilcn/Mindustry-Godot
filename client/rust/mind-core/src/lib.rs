@@ -24,6 +24,7 @@ pub mod constants;
 pub mod content;
 pub mod determinism;
 pub mod ecs;
+pub mod editor;
 pub mod entities;
 pub mod event;
 pub mod fixtures;
