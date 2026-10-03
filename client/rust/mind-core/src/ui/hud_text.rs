@@ -163,6 +163,37 @@ pub fn waiting_time(ticks: f32) -> String {
     }
 }
 
+/// `state.serverTps` reduced to the displayed value (`-1` → local `60`).
+pub fn tps_value(server_tps: i32) -> i32 {
+    if server_tps == -1 { 60 } else { server_tps }
+}
+
+/// `fps` label (`HudFragment` fps/ping block).
+pub fn fps_text(fps: i32, bundle: &Bundle) -> String {
+    bundle.format("fps", &[&fps.to_string()])
+}
+
+/// `ping` label (client only upstream; 0 offline).
+pub fn ping_text(ping: i32, bundle: &Bundle) -> String {
+    bundle.format("ping", &[&ping.to_string()])
+}
+
+/// `tps` label (client only upstream).
+pub fn tps_text(server_tps: i32, bundle: &Bundle) -> String {
+    let tps = tps_value(server_tps);
+    bundle.format("tps", &[&tps.to_string()])
+}
+
+/// `memory` label (Java heap MiB on desktop; static memory MiB in Godot).
+pub fn memory_text(memory_mb: i32, bundle: &Bundle) -> String {
+    bundle.format("memory", &[&memory_mb.to_string()])
+}
+
+/// `memory2` label (Java + native heap MiB).
+pub fn memory2_text(java_mb: i32, native_mb: i32, bundle: &Bundle) -> String {
+    bundle.format("memory2", &[&java_mb.to_string(), &native_mb.to_string()])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -309,5 +340,20 @@ mod tests {
         let text = status_text(&status, &bundle(), &iconc());
         assert!(text.starts_with("[lightgray]"));
         assert!(text.contains("[accent]1:00"));
+    }
+
+    #[test]
+    fn fps_ping_tps_memory_format() {
+        let bundle = Bundle::from_layers(vec![parse_properties(
+            "fps=FPS: {0}\nping=Ping: {0}ms\ntps=TPS: {0}\nmemory=Mem: {0}mb\nmemory2=Mem:\\n {0}mb +\\n {1}mb\n",
+        )]);
+        assert_eq!(fps_text(60, &bundle), "FPS: 60");
+        assert_eq!(ping_text(42, &bundle), "Ping: 42ms");
+        assert_eq!(tps_text(-1, &bundle), "TPS: 60");
+        assert_eq!(tps_text(58, &bundle), "TPS: 58");
+        assert_eq!(tps_value(-1), 60);
+        assert_eq!(tps_value(59), 59);
+        assert_eq!(memory_text(128, &bundle), "Mem: 128mb");
+        assert_eq!(memory2_text(64, 32, &bundle), "Mem:\n 64mb +\n 32mb");
     }
 }

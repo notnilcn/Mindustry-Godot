@@ -1,0 +1,159 @@
+{
+  "format": 1,
+  "catalogue": [
+    {
+      "name": "show_info",
+      "modal": true,
+      "pause": false,
+      "id_addressable": false
+    },
+    {
+      "name": "show_info_fade",
+      "modal": false,
+      "pause": false,
+      "id_addressable": false
+    },
+    {
+      "name": "show_info_toast",
+      "modal": false,
+      "pause": false,
+      "id_addressable": false
+    },
+    {
+      "name": "show_info_popup",
+      "modal": false,
+      "pause": false,
+      "id_addressable": true
+    },
+    {
+      "name": "show_info_on_hidden",
+      "modal": true,
+      "pause": false,
+      "id_addressable": false
+    },
+    {
+      "name": "show_startup_info",
+      "modal": true,
+      "pause": false,
+      "id_addressable": false
+    },
+    {
+      "name": "show_error",
+      "modal": true,
+      "pause": false,
+      "id_addressable": false
+    },
+    {
+      "name": "show_exception",
+      "modal": true,
+      "pause": false,
+      "id_addressable": false
+    },
+    {
+      "name": "show_text",
+      "modal": true,
+      "pause": false,
+      "id_addressable": false
+    },
+    {
+      "name": "show_info_text",
+      "modal": true,
+      "pause": false,
+      "id_addressable": false
+    },
+    {
+      "name": "show_small",
+      "modal": true,
+      "pause": false,
+      "id_addressable": false
+    },
+    {
+      "name": "show_confirm",
+      "modal": true,
+      "pause": false,
+      "id_addressable": false
+    },
+    {
+      "name": "show_custom_confirm",
+      "modal": true,
+      "pause": false,
+      "id_addressable": false
+    },
+    {
+      "name": "show_ok_text",
+      "modal": true,
+      "pause": false,
+      "id_addressable": false
+    },
+    {
+      "name": "show_text_input",
+      "modal": true,
+      "pause": false,
+      "id_addressable": false
+    },
+    {
+      "name": "show_label",
+      "modal": false,
+      "pause": false,
+      "id_addressable": true
+    },
+    {
+      "name": "announce",
+      "modal": false,
+      "pause": false,
+      "id_addressable": false
+    },
+    {
+      "name": "toast",
+      "modal": false,
+      "pause": false,
+      "id_addressable": false
+    },
+    {
+      "name": "unlock_toast",
+      "modal": false,
+      "pause": false,
+      "id_addressable": false
+    }
+  ],
+  "text_input": [
+    {
+      "name": "numeric_strict",
+      "filtered": "12345",
+      "allows_char": true,
+      "cancel": "cancelled",
+      "empty": "rejected",
+      "submitted": "submitted",
+      "relay_cancel": null,
+      "relay_ok": "12"
+    },
+    {
+      "name": "text_allow_empty",
+      "filtered": "abcd",
+      "cancel": "cancelled",
+      "empty": "submitted",
+      "relay_empty": ""
+    }
+  ],
+  "confirm": {
+    "yes": "@ok",
+    "no": "@cancel",
+    "confirmed": "confirmed",
+    "cancelled": "cancelled",
+    "custom_yes": "Yes!",
+    "custom_no": "Nope",
+    "ok_no": null
+  },
+  "popup": {
+    "first_is_none": true,
+    "replaced": "first",
+    "transient_ignored": true,
+    "removed": "second",
+    "len_after_remove": 0
+  },
+  "announcement": {
+    "initial": false,
+    "after_announce": true,
+    "after_clear": false
+  }
+}

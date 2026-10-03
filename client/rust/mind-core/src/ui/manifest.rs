@@ -34,6 +34,8 @@ pub enum ManifestError {
     PauseMismatch(String),
     /// A `Styles.*` field is missing from the manifest.
     MissingStyle(String),
+    /// A `UI.java` prompt helper is missing from the manifest.
+    MissingPrompt(String),
 }
 
 impl std::fmt::Display for ManifestError {
@@ -47,6 +49,7 @@ impl std::fmt::Display for ManifestError {
                 write!(f, "pause flag mismatch for dialog '{name}'")
             }
             ManifestError::MissingStyle(name) => write!(f, "missing style '{name}'"),
+            ManifestError::MissingPrompt(name) => write!(f, "missing prompt helper '{name}'"),
         }
     }
 }
@@ -137,6 +140,17 @@ impl DialogsManifest {
             }
             if let Some(root) = root {
                 check_scene(root, &entry.scene)?;
+            }
+        }
+        let mut prompts = HashSet::new();
+        for name in &self.prompts {
+            if !prompts.insert(name.as_str()) {
+                return Err(ManifestError::Duplicate(name.clone()));
+            }
+        }
+        for required in EXPECTED_PROMPTS {
+            if !prompts.contains(required) {
+                return Err(ManifestError::MissingPrompt((*required).to_owned()));
             }
         }
         Ok(())
@@ -313,6 +327,30 @@ pub const EXPECTED_STYLES: &[&str] = &[
     "defaultTree",
 ];
 
+/// The complete `UI.java` prompt-helper list implemented by this plan
+/// (plan §2.1 item 4 / §6.4). Must equal [`crate::ui::prompts::PROMPT_HELPERS`].
+pub const EXPECTED_PROMPTS: &[&str] = &[
+    "show_info",
+    "show_info_fade",
+    "show_info_toast",
+    "show_info_popup",
+    "show_info_on_hidden",
+    "show_startup_info",
+    "show_error",
+    "show_exception",
+    "show_text",
+    "show_info_text",
+    "show_small",
+    "show_confirm",
+    "show_custom_confirm",
+    "show_ok_text",
+    "show_text_input",
+    "show_label",
+    "announce",
+    "toast",
+    "unlock_toast",
+];
+
 /// Dialog names required by plan 14 M3 (menus + standalone dialogs). Later
 /// milestones append to this list; a name missing from
 /// `client/ui/dialogs_manifest.json` fails [`tests::repo_dialogs_manifest_complete`].
@@ -395,7 +433,7 @@ mod tests {
       "fragments": [
         {"name":"menu","scene":"res://scenes/ui/fragments/menu_fragment.tscn","group":"menu"}
       ],
-      "prompts": ["show_info"]
+      "prompts": ["show_info","show_info_fade","show_info_toast","show_info_popup","show_info_on_hidden","show_startup_info","show_error","show_exception","show_text","show_info_text","show_small","show_confirm","show_custom_confirm","show_ok_text","show_text_input","show_label","announce","toast","unlock_toast"]
     }"#;
 
     #[test]
@@ -475,6 +513,41 @@ mod tests {
                 .any(|entry| entry.name == "menu" && entry.group == "menu"),
             "menu fragment group wrong"
         );
+        for name in EXPECTED_PROMPTS {
+            assert!(
+                manifest.prompts.iter().any(|prompt| prompt == name),
+                "prompt helper '{name}' missing from dialogs_manifest.json"
+            );
+        }
+        assert_eq!(
+            manifest.prompts.len(),
+            EXPECTED_PROMPTS.len(),
+            "dialogs_manifest.json prompts[] drifted from EXPECTED_PROMPTS"
+        );
+    }
+
+    #[test]
+    fn every_prompt_helper_declared() {
+        // The prompt catalogue has one entry per manifest `prompts[]` key.
+        assert_eq!(EXPECTED_PROMPTS, crate::ui::prompts::PROMPT_HELPERS);
+        let manifest = DialogsManifest::from_json(DIALOGS).unwrap();
+        assert!(manifest.validate(None).is_ok());
+
+        // A missing prompt helper fails validation.
+        let missing =
+            DialogsManifest::from_json(r#"{"format":1,"prompts":["show_info"]}"#).unwrap();
+        assert_eq!(
+            missing.validate(None),
+            Err(ManifestError::MissingPrompt("show_info_fade".into()))
+        );
+
+        // A duplicate prompt helper fails validation.
+        let mut duplicated = DialogsManifest::from_json(DIALOGS).unwrap();
+        duplicated.prompts.push("show_info".to_owned());
+        assert_eq!(
+            duplicated.validate(None),
+            Err(ManifestError::Duplicate("show_info".into()))
+        );
     }
 
     #[test]
@@ -491,5 +564,33 @@ mod tests {
         // Duplicate names across groups fail.
         manifest.drawables.push("black".to_owned());
         assert!(manifest.validate().is_err());
+    }
+
+    /// Validates the committed `client/ui/styles_manifest.json` against
+    /// `Styles.java` (plan §7e: "`styles_manifest.json` complete").
+    #[test]
+    fn repo_styles_manifest_complete() {
+        let client = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let styles_path = client.join("ui/styles_manifest.json");
+        let text = std::fs::read_to_string(&styles_path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", styles_path.display()));
+        let manifest = StylesManifest::from_json(&text).expect("parse styles_manifest.json");
+        manifest
+            .validate()
+            .expect("validate styles_manifest.json (uniqueness + completeness)");
+
+        // The committed file must carry exactly the `Styles.java` field set:
+        // no missing names and no extras that would silently become theme
+        // defaults.
+        let expected: HashSet<&str> = EXPECTED_STYLES.iter().copied().collect();
+        let actual: HashSet<&str> = manifest
+            .groups()
+            .into_iter()
+            .flat_map(|group| group.iter().map(String::as_str))
+            .collect();
+        assert_eq!(
+            actual, expected,
+            "styles_manifest.json does not exactly match Styles.java"
+        );
     }
 }

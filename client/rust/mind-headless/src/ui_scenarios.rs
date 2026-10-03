@@ -59,7 +59,161 @@ pub fn run(command: &UiCommand) -> Result<()> {
         UiCommand::MenuHost { json, dump, golden } => {
             menu_host(*json, dump.as_deref(), golden.as_deref())
         }
+        UiCommand::Relay { json, dump, golden } => relay(*json, dump.as_deref(), golden.as_deref()),
+        UiCommand::Prompts { json, dump, golden } => {
+            prompts(*json, dump.as_deref(), golden.as_deref())
+        }
     }
+}
+
+/// `ui relay`: every M6 relay payload encoded from the fixed fixture tree must
+/// match the committed `relay_wire.hex` bytes (plan 14 §6.6 byte stability).
+fn relay(json_out: bool, dump: Option<&Path>, golden: Option<&Path>) -> Result<()> {
+    use mind_core::ui::builder::ui_relay::{parse_wire_golden, to_hex, wire_fixtures};
+
+    let fixtures = wire_fixtures();
+    if let Some(path) = golden {
+        let text = std::fs::read_to_string(path)
+            .with_context(|| format!("read relay golden {}", path.display()))?;
+        let expected = parse_wire_golden(&text);
+        if expected.len() != fixtures.len() {
+            bail!(
+                "relay golden {} has {} fixtures, expected {}",
+                path.display(),
+                expected.len(),
+                fixtures.len()
+            );
+        }
+        for (actual, (expected_name, expected_bytes)) in fixtures.iter().zip(expected.iter()) {
+            if actual.0 != expected_name {
+                bail!(
+                    "relay golden order mismatch: expected '{expected_name}', got '{}'",
+                    actual.0
+                );
+            }
+            if actual.1 != *expected_bytes {
+                bail!("relay byte mismatch for '{}'", actual.0);
+            }
+        }
+    }
+    let value = json!({
+        "format": 1,
+        "fixtures": fixtures
+            .iter()
+            .map(|(name, bytes)| json!({"name": name, "len": bytes.len(), "hex": to_hex(bytes)}))
+            .collect::<Vec<_>>(),
+    });
+    finish(value, json_out, dump, None)
+}
+
+/// `ui prompts`: the Godot-free prompt-helper model (catalogue, text-input
+/// gating/filtering, confirm specs, popup id replacement, announcement
+/// tracking). Plan 14 §2.1 item 4.
+fn prompts(json_out: bool, dump: Option<&Path>, golden: Option<&Path>) -> Result<()> {
+    use mind_core::ui::prompts::{
+        AnnouncementTracker, ConfirmOutcome, ConfirmSpec, PROMPT_HELPERS, PopupEntry,
+        PopupRegistry, TextInputOutcome, TextInputSpec,
+    };
+
+    let catalogue: Vec<Value> = PROMPT_HELPERS
+        .iter()
+        .filter_map(|name| {
+            let kind = mind_core::ui::prompts::PromptKind::from_name(name)?;
+            Some(json!({
+                "name": name,
+                "modal": kind.is_modal(),
+                "pause": kind.should_pause(),
+                "id_addressable": kind.is_id_addressable(),
+            }))
+        })
+        .collect();
+
+    let numeric = TextInputSpec::new("@name", "Enter a number", 5, "", true, false);
+    let lenient = TextInputSpec::new("@name", "Enter text", 4, "abcd", false, true);
+    let outcome_name = |outcome: TextInputOutcome| match outcome {
+        TextInputOutcome::Cancelled => "cancelled",
+        TextInputOutcome::Submitted(_) => "submitted",
+        TextInputOutcome::Rejected => "rejected",
+    };
+    let text_input = json!([
+        {
+            "name": "numeric_strict",
+            "filtered": numeric.filter("a1b2c3d4e5f6"),
+            "allows_char": numeric.permits('7') && !numeric.permits('x'),
+            "cancel": outcome_name(numeric.outcome(None)),
+            "empty": outcome_name(numeric.outcome(Some(""))),
+            "submitted": outcome_name(numeric.outcome(Some("12"))),
+            "relay_cancel": numeric.relay_result(None),
+            "relay_ok": numeric.relay_result(Some("12")),
+        },
+        {
+            "name": "text_allow_empty",
+            "filtered": lenient.filter("abcdef"),
+            "cancel": outcome_name(lenient.outcome(None)),
+            "empty": outcome_name(lenient.outcome(Some(""))),
+            "relay_empty": lenient.relay_result(Some("")),
+        },
+    ]);
+
+    let confirm = ConfirmSpec::confirm("@confirm", "sure?");
+    let custom = ConfirmSpec::custom("@t", "body", "Yes!", "Nope");
+    let confirm_json = json!({
+        "yes": confirm.yes,
+        "no": confirm.no,
+        "confirmed": match ConfirmSpec::outcome(true) { ConfirmOutcome::Confirmed => "confirmed", ConfirmOutcome::Cancelled => "cancelled" },
+        "cancelled": match ConfirmSpec::outcome(false) { ConfirmOutcome::Confirmed => "confirmed", ConfirmOutcome::Cancelled => "cancelled" },
+        "custom_yes": custom.yes,
+        "custom_no": custom.no,
+        "ok_no": ConfirmSpec::ok("@t", "body").no,
+    });
+
+    let entry = PopupEntry {
+        message: String::new(),
+        duration: 2.0,
+        align: 1,
+        top: 0,
+        left: 0,
+        bottom: 0,
+        right: 0,
+    };
+    let mut popups = PopupRegistry::new();
+    let first = popups.show("first", Some("p"), entry.clone()).is_none();
+    let replaced = popups
+        .show("second", Some("p"), entry.clone())
+        .map(|old| old.message);
+    let transient_ignored = popups
+        .show("transient", Option::<String>::None, entry)
+        .is_none();
+    let removed = popups.remove("p").map(|old| old.message);
+    let popup_json = json!({
+        "first_is_none": first,
+        "replaced": replaced,
+        "transient_ignored": transient_ignored,
+        "removed": removed,
+        "len_after_remove": popups.len(),
+    });
+
+    let mut announcements = AnnouncementTracker::new();
+    let initial = announcements.has_announcement();
+    announcements.announce();
+    let after = announcements.has_announcement();
+    announcements.clear();
+    let cleared = announcements.has_announcement();
+    let announce_json = json!({
+        "initial": initial,
+        "after_announce": after,
+        "after_clear": cleared,
+    });
+
+    let value = json!({
+        "format": 1,
+        "catalogue": catalogue,
+        "text_input": text_input,
+        "confirm": confirm_json,
+        "popup": popup_json,
+        "announcement": announce_json,
+    });
+    finish(value, json_out, dump, golden)
 }
 
 /// `ui display`: renders the `StatValues`/`Displayable` display kinds to
@@ -753,5 +907,7 @@ mod tests {
         chat_console(false, None, Some(&golden("chat_console.json"))).unwrap();
         builder(false, None, Some(&golden("builder.json"))).unwrap();
         menu_host(false, None, Some(&golden("menu_host.json"))).unwrap();
+        prompts(false, None, Some(&golden("prompts.json"))).unwrap();
+        relay(false, None, Some(&golden("relay_wire.hex"))).unwrap();
     }
 }
