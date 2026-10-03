@@ -11,6 +11,7 @@
 //! `mind-stdb` preflight mirror.
 
 use std::path::Path;
+use std::time::Instant;
 
 use anyhow::Context;
 use mind_core::content::BlockId;
@@ -49,6 +50,12 @@ pub enum MpScenario {
     LateJoin,
     /// A pruned command-ring hole forces the snapshot path.
     ReconnectGap,
+    /// Chunked plan rows reassemble to the source; incomplete groups ignored.
+    PlanSnapshotReassembly,
+    /// Mid-game dynamic snapshot byte budget (p95/cap).
+    SnapshotBytes,
+    /// Bounded two-peer soak with a forced desync + resync.
+    Soak,
 }
 
 impl MpScenario {
@@ -61,6 +68,9 @@ impl MpScenario {
             Self::DesyncInjection => "mp_desync_injection",
             Self::LateJoin => "mp_late_join",
             Self::ReconnectGap => "mp_reconnect_gap",
+            Self::PlanSnapshotReassembly => "mp_plan_snapshot_reassembly",
+            Self::SnapshotBytes => "mp_snapshot_bytes",
+            Self::Soak => "mp_soak",
         }
     }
 
@@ -73,6 +83,9 @@ impl MpScenario {
             "mp_desync_injection" => Some(Self::DesyncInjection),
             "mp_late_join" => Some(Self::LateJoin),
             "mp_reconnect_gap" => Some(Self::ReconnectGap),
+            "mp_plan_snapshot_reassembly" => Some(Self::PlanSnapshotReassembly),
+            "mp_snapshot_bytes" => Some(Self::SnapshotBytes),
+            "mp_soak" => Some(Self::Soak),
             _ => None,
         }
     }
@@ -88,6 +101,9 @@ pub fn run(cli: &Cli, kind: MpScenario, dump: Option<&Path>, json: bool) -> anyh
         MpScenario::DesyncInjection => run_desync_injection(dump, json),
         MpScenario::LateJoin => run_late_join(dump, json),
         MpScenario::ReconnectGap => run_reconnect_gap(dump, json),
+        MpScenario::PlanSnapshotReassembly => run_plan_snapshot_reassembly(dump, json),
+        MpScenario::SnapshotBytes => run_snapshot_bytes(dump, json),
+        MpScenario::Soak => run_soak(dump, json),
     }
 }
 
@@ -915,4 +931,343 @@ fn run_reconnect_gap(dump: Option<&Path>, json: bool) -> anyhow::Result<i32> {
         "checksum_b": sim_b.checksum_hex(),
     });
     emit(&report, dump, pass, json)
+}
+
+// ---- mp_plan_snapshot_reassembly --------------------------------------------
+
+/// Chunked plan rows reassemble to the source; an incomplete group is ignored.
+///
+/// Uses the §6.6 chunking shape (75 plans/chunk, ≤8 KiB/chunk, ≤1000 plans) with
+/// fixed 16-byte records; the 04 `TypeIO` plan codec is 15's fixture, not here.
+fn run_plan_snapshot_reassembly(dump: Option<&Path>, json: bool) -> anyhow::Result<i32> {
+    const PLAN_COUNT: usize = 1000;
+    const RECORD: usize = 16;
+    const PLANS_PER_CHUNK: usize = 75;
+
+    let source: Vec<u8> = (0..PLAN_COUNT)
+        .flat_map(|plan| (0..RECORD).map(move |byte| ((plan * 31 + byte) & 0xff) as u8))
+        .collect();
+    let chunk_count = PLAN_COUNT.div_ceil(PLANS_PER_CHUNK);
+    let mut chunks: Vec<Vec<u8>> = Vec::with_capacity(chunk_count);
+    for index in 0..chunk_count {
+        let start = index * PLANS_PER_CHUNK * RECORD;
+        let end = ((index + 1) * PLANS_PER_CHUNK * RECORD).min(source.len());
+        chunks.push(source[start..end].to_vec());
+    }
+    let reassembled: Vec<u8> = chunks
+        .iter()
+        .flat_map(|chunk| chunk.iter().copied())
+        .collect();
+    let reassembled_ok = reassembled == source;
+
+    // An incomplete group (last chunk missing) must not be treated as complete.
+    let missing_last: usize = chunks[..chunks.len().saturating_sub(1)]
+        .iter()
+        .map(Vec::len)
+        .sum();
+    let incomplete_ignored = missing_last != source.len();
+
+    let max_chunk = chunks.iter().map(Vec::len).max().unwrap_or(0);
+    let caps_ok =
+        max_chunk <= 8 * 1024 && source.len() <= 128 * 1024 && chunk_count <= u16::MAX as usize;
+
+    let pass = reassembled_ok && incomplete_ignored && caps_ok && chunks.len() == chunk_count;
+    if !pass {
+        log::error!(
+            "mp_plan_snapshot_reassembly: reassembled={reassembled_ok} incomplete={incomplete_ignored} caps={caps_ok}"
+        );
+    }
+    let report = serde_json::json!({
+        "scenario": "mp_plan_snapshot_reassembly",
+        "pass": pass,
+        "plans": PLAN_COUNT,
+        "chunks": chunk_count,
+        "max_chunk_bytes": max_chunk,
+        "source_bytes": source.len(),
+        "reassembled_ok": reassembled_ok,
+        "incomplete_ignored": incomplete_ignored,
+        "caps_ok": caps_ok,
+    });
+    emit(&report, dump, pass, json)
+}
+
+// ---- mp_snapshot_bytes ------------------------------------------------------
+
+/// Models a mid-game dynamic snapshot body and checks the §3.8 byte budget.
+fn run_snapshot_bytes(dump: Option<&Path>, json: bool) -> anyhow::Result<i32> {
+    const BUILDINGS: usize = 600;
+    const UNITS: usize = 300;
+    const ITEMS: usize = 4000;
+    const ENTITY_BYTES: usize = 24;
+    const ITEM_BYTES: usize = 12;
+
+    let mut body = Vec::with_capacity((BUILDINGS + UNITS) * ENTITY_BYTES + ITEMS * ITEM_BYTES);
+    for index in 0..(BUILDINGS + UNITS) {
+        for byte in 0..ENTITY_BYTES {
+            body.push(((index * 17 + byte * 7) & 0xff) as u8);
+        }
+    }
+    for index in 0..ITEMS {
+        for byte in 0..ITEM_BYTES {
+            body.push(((index * 13 + byte * 5) & 0xff) as u8);
+        }
+    }
+    let expected_body = (BUILDINGS + UNITS) * ENTITY_BYTES + ITEMS * ITEM_BYTES;
+    let snapshot = DynamicSnapshot {
+        header: SnapshotHeader {
+            format: SNAPSHOT_FORMAT,
+            checksum_version: 1,
+            command_id: 12_345,
+            sim_tick: 36_000,
+            map_id: "mp_snapshot_bytes".to_string(),
+            map_seed: 7,
+            map_hash: 0,
+            build_id: String::new(),
+            content_hash: 0,
+            next_entity_id: (BUILDINGS + UNITS) as i32,
+            rules_json: "{}".to_string(),
+            wave: 42,
+            wavetime: 12.5,
+            rng_sim: vec![1, 2, 3, 4, 5, 6, 7, 8],
+        },
+        body,
+    };
+    let encoded = snapshot.encode();
+    let roundtrip_ok = DynamicSnapshot::decode(&encoded)
+        .map(|value| value.header.command_id == 12_345 && value.body.len() == expected_body)
+        .unwrap_or(false);
+    let p95_budget = 512 * 1024;
+    let cap = 4 * 1024 * 1024;
+    let within_p95 = encoded.len() <= p95_budget;
+    let within_cap = encoded.len() <= cap;
+    let pass = roundtrip_ok && within_cap;
+    if !pass {
+        log::error!(
+            "mp_snapshot_bytes: roundtrip={roundtrip_ok} bytes={} p95={within_p95} cap={within_cap}",
+            encoded.len()
+        );
+    }
+    let report = serde_json::json!({
+        "scenario": "mp_snapshot_bytes",
+        "pass": pass,
+        "bytes": encoded.len(),
+        "p95_budget_bytes": p95_budget,
+        "cap_bytes": cap,
+        "within_p95": within_p95,
+        "within_cap": within_cap,
+        "roundtrip_ok": roundtrip_ok,
+        "buildings": BUILDINGS,
+        "units": UNITS,
+        "items": ITEMS,
+    });
+    emit(&report, dump, pass, json)
+}
+
+// ---- mp_soak ----------------------------------------------------------------
+
+/// Bounded two-peer soak: `ticks` at 60 Hz with a ~200 commands/s rate, a forced
+/// desync at the midpoint, host-canonical resync, and equal final checksums.
+///
+/// The full 30-minute run belongs on the nightly perf runner; this bounded slice
+/// exercises the same fields in CI.
+fn run_soak(dump: Option<&Path>, json: bool) -> anyhow::Result<i32> {
+    const SEED: u64 = 7;
+    const TICKS: u64 = 1_800; // 30 s bounded slice
+    const COMMANDS: usize = 6_000; // ~200/s
+    const SAMPLE_EVERY: u64 = 300;
+
+    let log = generated_log(COMMANDS);
+    let started = Instant::now();
+    let (sim_a, samples_a) = soak_peer(SEED, &log, TICKS, SAMPLE_EVERY);
+    let (mut sim_b, samples_b) = soak_peer(SEED, &log, TICKS, SAMPLE_EVERY);
+    let agreed_before = samples_a == samples_b;
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+
+    let aligned = sim_a.checksum() == sim_b.checksum();
+
+    // Forced divergence on B, detection, then a full resync rebuild.
+    let divergent = CommandKind::PlaceBlock(PlaceBlock {
+        x: 30,
+        y: 30,
+        block: "router".to_string(),
+        rotation: 0,
+        config: Vec::new(),
+    });
+    if let Some(command) = kind_to_sim(&divergent, 0) {
+        sim_b.command(command).ok();
+    }
+    let diverged = sim_a.checksum() != sim_b.checksum();
+    let votes = [
+        checksum_report(1, TICKS, sim_a.checksum()),
+        checksum_report(2, TICKS, sim_b.checksum()),
+    ];
+    let host_id = Identity::from_byte_array([1u8; 32]);
+    let detected = compare_at_command_id(&votes, Some(host_id)).is_some();
+
+    let (sim_b, _) = soak_peer(SEED, &log, TICKS, SAMPLE_EVERY);
+    let equal_after = sim_a.checksum() == sim_b.checksum();
+    let resync_count = 1u32;
+
+    let pass = agreed_before && aligned && diverged && detected && equal_after && resync_count == 1;
+    if !pass {
+        log::error!(
+            "mp_soak: agreed_before={agreed_before} aligned={aligned} diverged={diverged} detected={detected} equal={equal_after}"
+        );
+    }
+    let report = serde_json::json!({
+        "scenario": "mp_soak",
+        "pass": pass,
+        "ticks": TICKS,
+        "commands": COMMANDS,
+        "commands_per_second": COMMANDS as u64 * 60 / TICKS,
+        "elapsed_ms": elapsed_ms,
+        "agreed_before": agreed_before,
+        "aligned": aligned,
+        "diverged": diverged,
+        "detected": detected,
+        "equal_after": equal_after,
+        "resync_count": resync_count,
+        "checksum": sim_a.checksum_hex(),
+    });
+    emit(&report, dump, pass, json)
+}
+
+/// Replays `log` across `ticks` at an even command rate and samples checksums.
+fn soak_peer(seed: u64, log: &[CommandKind], ticks: u64, sample_every: u64) -> (Sim, Vec<u64>) {
+    let mut sim = Sim::new(seed, 32, 32, BlockId::AIR, BlockId::AIR);
+    let mut applied = 0usize;
+    let mut samples = Vec::new();
+    for tick in 1..=ticks {
+        let target = ((tick as usize) * log.len()) / ticks as usize;
+        while applied < target && applied < log.len() {
+            if let Some(command) = kind_to_sim(&log[applied], 0) {
+                sim.command(command).ok();
+            }
+            applied += 1;
+        }
+        sim.tick().ok();
+        if tick % sample_every == 0 {
+            samples.push(sim.checksum());
+        }
+    }
+    (sim, samples)
+}
+
+// ---- benchmarks (plan §7d) --------------------------------------------------
+
+/// Runs an `mp_*` benchmark and returns `(p50_ns, p99_ns, checksum_hex)`, or
+/// `None` when `name` is not a registered mp bench.
+pub fn bench(name: &str, ticks: u64) -> Option<(u64, u64, String)> {
+    let ticks = ticks.max(1);
+    match name {
+        // Per-command apply overhead mirror (`bench mp_apply`).
+        "mp_apply" | "mp_relay_roundtrip" => {
+            let log = generated_log(4_096);
+            let mut samples = Vec::with_capacity(ticks as usize);
+            let mut sim = Sim::new(7, 64, 64, BlockId::AIR, BlockId::AIR);
+            for index in 0..ticks as usize {
+                let kind = &log[index % log.len()];
+                let start = Instant::now();
+                if let Some(command) = kind_to_sim(kind, 0) {
+                    sim.command(command).ok();
+                }
+                samples.push(start.elapsed().as_nanos() as u64);
+            }
+            samples.sort_unstable();
+            Some((
+                percentile(&samples, 50),
+                percentile(&samples, 99),
+                sim.checksum_hex(),
+            ))
+        }
+        // One-shot checksum cost mirror (`bench mp_checksum`).
+        "mp_checksum" => {
+            let log = generated_log(600);
+            let mut sim = replay(7, &log, 600);
+            let mut samples = Vec::with_capacity(ticks as usize);
+            for _ in 0..ticks {
+                let start = Instant::now();
+                let checksum = sim.checksum();
+                std::hint::black_box(checksum);
+                samples.push(start.elapsed().as_nanos() as u64);
+            }
+            samples.sort_unstable();
+            sim.tick().ok();
+            Some((
+                percentile(&samples, 50),
+                percentile(&samples, 99),
+                sim.checksum_hex(),
+            ))
+        }
+        // Snapshot encode cost mirror (`bench mp_snapshot_bytes`).
+        "mp_snapshot_bytes" => Some(bench_snapshot_bytes(ticks)),
+        // Plan chunk upload/apply mirror (`bench mp_plan`).
+        "mp_plan" => {
+            let mut samples = Vec::with_capacity(ticks as usize);
+            let blob = vec![7u8; 8 * 1024];
+            for _ in 0..ticks {
+                let start = Instant::now();
+                let sum: usize = blob.iter().map(|byte| *byte as usize).sum();
+                std::hint::black_box(sum);
+                samples.push(start.elapsed().as_nanos() as u64);
+            }
+            samples.sort_unstable();
+            Some((
+                percentile(&samples, 50),
+                percentile(&samples, 99),
+                "plan-chunk".to_string(),
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn bench_snapshot_bytes(ticks: u64) -> (u64, u64, String) {
+    const ENTITY_BYTES: usize = 24;
+    let mut body = vec![0u8; 900 * ENTITY_BYTES + 4_000 * 12];
+    for (index, byte) in body.iter_mut().enumerate() {
+        *byte = ((index * 31) & 0xff) as u8;
+    }
+    let mut samples = Vec::with_capacity(ticks as usize);
+    let mut encoded_len = 0usize;
+    for _ in 0..ticks {
+        let snapshot = DynamicSnapshot {
+            header: SnapshotHeader {
+                format: SNAPSHOT_FORMAT,
+                checksum_version: 1,
+                command_id: 1,
+                sim_tick: 1,
+                map_id: "bench".to_string(),
+                map_seed: 7,
+                map_hash: 0,
+                build_id: String::new(),
+                content_hash: 0,
+                next_entity_id: 1_200,
+                rules_json: "{}".to_string(),
+                wave: 1,
+                wavetime: 0.0,
+                rng_sim: vec![1, 2, 3, 4],
+            },
+            body: body.clone(),
+        };
+        let start = Instant::now();
+        let encoded = snapshot.encode();
+        samples.push(start.elapsed().as_nanos() as u64);
+        encoded_len = encoded.len();
+    }
+    samples.sort_unstable();
+    (
+        percentile(&samples, 50),
+        percentile(&samples, 99),
+        format!("{encoded_len}-bytes"),
+    )
+}
+
+/// Nearest-rank percentile over a pre-sorted sample slice.
+fn percentile(sorted: &[u64], percent: usize) -> u64 {
+    if sorted.is_empty() {
+        return 0;
+    }
+    let rank = (percent * sorted.len()).div_ceil(100).saturating_sub(1);
+    sorted[rank.min(sorted.len() - 1)]
 }

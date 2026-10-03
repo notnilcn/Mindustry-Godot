@@ -40,6 +40,7 @@ impl __sdk::__query_builder::HasCols for WhitelistEntry {
 ///
 /// Provides typed access to indexed columns for query building.
 pub struct WhitelistEntryIxCols {
+    pub added_at: __sdk::__query_builder::IxCol<WhitelistEntry, __sdk::Timestamp>,
     pub identity: __sdk::__query_builder::IxCol<WhitelistEntry, __sdk::Identity>,
 }
 
@@ -47,6 +48,7 @@ impl __sdk::__query_builder::HasIxCols for WhitelistEntry {
     type IxCols = WhitelistEntryIxCols;
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
         WhitelistEntryIxCols {
+            added_at: __sdk::__query_builder::IxCol::new(table_name, "added_at"),
             identity: __sdk::__query_builder::IxCol::new(table_name, "identity"),
         }
     }

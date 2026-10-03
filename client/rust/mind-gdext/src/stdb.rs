@@ -438,6 +438,9 @@ impl StdbConnector {
             "",
             0,
             Vec::new(),
+            None,
+            None,
+            None,
         ) {
             Ok(()) => true,
             Err(error) => {

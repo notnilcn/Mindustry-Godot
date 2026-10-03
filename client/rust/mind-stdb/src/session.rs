@@ -72,6 +72,12 @@ pub struct HostParams {
     pub content_hash: u64,
     /// Required mod names.
     pub mods: Vec<String>,
+    /// MP campaign to link the match to (plan §3.3/§3.12.1).
+    pub campaign_id: Option<u64>,
+    /// Campaign planet name (when `campaign_id` is set).
+    pub sector_planet: Option<String>,
+    /// Campaign sector id (when `campaign_id` is set).
+    pub sector_id: Option<u32>,
 }
 
 impl Default for HostParams {
@@ -88,6 +94,9 @@ impl Default for HostParams {
             build_id: String::new(),
             content_hash: 0,
             mods: Vec::new(),
+            campaign_id: None,
+            sector_planet: None,
+            sector_id: None,
         }
     }
 }
@@ -210,6 +219,9 @@ impl MatchSession {
             &params.build_id,
             params.content_hash,
             params.mods.clone(),
+            params.campaign_id,
+            params.sector_planet.clone(),
+            params.sector_id,
         )?;
         self.is_host = true;
         self.ready = true;

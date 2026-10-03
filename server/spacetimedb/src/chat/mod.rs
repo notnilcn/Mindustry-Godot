@@ -64,7 +64,7 @@ pub struct ChatRate {
 }
 
 /// Global lowercase-substring chat filter (plan §6.1; admin-managed in M6).
-#[table(accessor = chat_filter, public)]
+#[table(accessor = chat_filter, public, index(accessor = by_chat_filter_added, btree(columns = [added_at])))]
 pub struct ChatFilter {
     /// Auto-inc filter id.
     #[primary_key]

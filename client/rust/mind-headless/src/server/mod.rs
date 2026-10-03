@@ -12,6 +12,7 @@ pub mod autosave;
 pub mod commands;
 pub mod config;
 pub mod console;
+pub mod dedicated;
 pub mod host;
 pub mod logs;
 pub mod rules_file;

@@ -87,6 +87,15 @@ fi
 echo "== generate rust bindings =="
 spacetime generate --lang rust --out-dir "$BINDINGS_DIR" --module-path "$MODULE_PATH" -y
 
+# Plan 21 §3.12.4: opt-in vanilla content manifest generation. Off by default so
+# the normal publish stays fast; `GEN_CONTENT_SEED=1 server/build.sh` regenerates
+# `main/content_seed.rs` before publishing (empty stays a valid shape-only seed).
+if [[ "${GEN_CONTENT_SEED:-0}" == "1" ]]; then
+  echo "== generate content seed =="
+  bash "$SCRIPT_DIR/gen_content_seed.sh" \
+    || echo "warning: content seed generation failed; keeping the existing manifest"
+fi
+
 echo "== publish $DB to $SERVER (wipes dev data) =="
 spacetime publish "$DB" --server "$SERVER" --module-path "$MODULE_PATH" --delete-data=always -y
 

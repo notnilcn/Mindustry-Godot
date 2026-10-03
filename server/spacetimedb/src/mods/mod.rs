@@ -6,7 +6,7 @@
 //! this module freezes the STDB shape and the set-comparison semantics derived
 //! from upstream `NetServer` (`Missing mods:` / `Unnecessary mods:`).
 
-use spacetimedb::{table};
+use spacetimedb::table;
 
 /// One mod the host requires for a match (plan §6.1); vanilla is implicit.
 #[table(accessor = match_mod, public, index(accessor = by_match_mod, btree(columns = [match_id, name])))]
@@ -19,6 +19,21 @@ pub struct MatchMod {
     pub name: String,
     pub version: String,
     pub content_hash: u64,
+}
+
+/// Vanilla content manifest row (plan §3.12.4/§6.1), seeded from the build.
+///
+/// `content_type` mirrors plan 02's content kind discriminator; `source_mod`
+/// is `""` for vanilla (mods do not replicate per-mod catalogs under D2).
+#[table(accessor = content_catalog, public)]
+pub struct ContentCatalog {
+    #[primary_key]
+    #[auto_inc]
+    pub content_id: u64,
+    #[unique]
+    pub name: String,
+    pub content_type: u8,
+    pub source_mod: String,
 }
 
 /// Compares the host's required mod set against a joiner's loaded set.
@@ -46,9 +61,18 @@ pub fn check_mods(host_mods: &[String], client_mods: &[String]) -> Result<(), St
     Ok(())
 }
 
+/// Whether a content name may be referenced by a command (plan §3.12.4).
+///
+/// Vanilla matches use the seeded `content_catalog`; modded matches skip the
+/// existence check because per-mod catalogs are not replicated under D2 (the
+/// name still passes charset/length validation).
+pub fn content_name_allowed(catalog: &[String], has_mods: bool, name: &str) -> bool {
+    has_mods || catalog.iter().any(|entry| entry == name)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::check_mods;
+    use super::{check_mods, content_name_allowed};
 
     fn names(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| value.to_string()).collect()
@@ -66,5 +90,14 @@ mod tests {
         assert_eq!(error, "Missing mods: b");
         let error = check_mods(&names(&["a"]), &names(&["a", "c"])).unwrap_err();
         assert_eq!(error, "Unnecessary mods: c");
+    }
+
+    #[test]
+    fn content_catalog_gates_vanilla_only() {
+        let catalog = names(&["router", "stone-wall"]);
+        assert!(content_name_allowed(&catalog, false, "router"));
+        assert!(!content_name_allowed(&catalog, false, "modded-block"));
+        // Modded matches skip existence checks (names still shape-validated).
+        assert!(content_name_allowed(&catalog, true, "modded-block"));
     }
 }

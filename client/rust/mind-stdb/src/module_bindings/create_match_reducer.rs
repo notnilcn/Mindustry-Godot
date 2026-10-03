@@ -21,6 +21,9 @@ pub(super) struct CreateMatchArgs {
     pub build_id: String,
     pub content_hash: u64,
     pub mods: Vec<String>,
+    pub campaign_id: Option<u64>,
+    pub sector_planet: Option<String>,
+    pub sector_id: Option<u32>,
 }
 
 impl From<CreateMatchArgs> for super::Reducer {
@@ -37,6 +40,9 @@ impl From<CreateMatchArgs> for super::Reducer {
             build_id: args.build_id,
             content_hash: args.content_hash,
             mods: args.mods,
+            campaign_id: args.campaign_id,
+            sector_planet: args.sector_planet,
+            sector_id: args.sector_id,
         }
     }
 }
@@ -69,6 +75,9 @@ pub trait create_match {
         build_id: String,
         content_hash: u64,
         mods: Vec<String>,
+        campaign_id: Option<u64>,
+        sector_planet: Option<String>,
+        sector_id: Option<u32>,
     ) -> __sdk::Result<()> {
         self.create_match_then(
             map_id,
@@ -82,6 +91,9 @@ pub trait create_match {
             build_id,
             content_hash,
             mods,
+            campaign_id,
+            sector_planet,
+            sector_id,
             |_, _| {},
         )
     }
@@ -105,6 +117,9 @@ pub trait create_match {
         build_id: String,
         content_hash: u64,
         mods: Vec<String>,
+        campaign_id: Option<u64>,
+        sector_planet: Option<String>,
+        sector_id: Option<u32>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -126,6 +141,9 @@ impl create_match for super::RemoteReducers {
         build_id: String,
         content_hash: u64,
         mods: Vec<String>,
+        campaign_id: Option<u64>,
+        sector_planet: Option<String>,
+        sector_id: Option<u32>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -144,6 +162,9 @@ impl create_match for super::RemoteReducers {
                 build_id,
                 content_hash,
                 mods,
+                campaign_id,
+                sector_planet,
+                sector_id,
             },
             callback,
         )

@@ -38,6 +38,9 @@ pub fn create_match(
     build_id: String,
     content_hash: u64,
     mods: Vec<String>,
+    campaign_id: Option<u64>,
+    sector_planet: Option<String>,
+    sector_id: Option<u32>,
 ) -> Result<(), String> {
     let map_id = map_id.trim().to_string();
     if map_id.is_empty() || map_id.chars().count() > MAX_MAP_ID_LEN {
@@ -89,9 +92,9 @@ pub fn create_match(
         is_dedicated: false,
         player_count: 1,
         max_players,
-        campaign_id: None,
-        sector_planet: None,
-        sector_id: None,
+        campaign_id,
+        sector_planet,
+        sector_id,
         last_command_id: 0,
         last_snapshot_id: None,
         closed_at: None,
@@ -403,7 +406,7 @@ pub fn send_match_command(
     result
 }
 
-fn send_match_command_impl(
+pub(crate) fn send_match_command_impl(
     ctx: &ReducerContext,
     match_id: u64,
     client_tick: u64,
@@ -438,6 +441,8 @@ fn send_match_command_impl(
         }
     }
     validate_kind(&kind, row.map_width_tiles, row.map_height_tiles)?;
+    // Plan §3.12.1: campaign rows are written on the same ordered command.
+    crate::campaign::persist_from_command(ctx, &row, &kind)?;
     let rules_update = rules_after_command(&kind, &row)?;
     let config = relay_config_or_default(ctx);
     let sender_seq = rate_allow(ctx, &config)?;

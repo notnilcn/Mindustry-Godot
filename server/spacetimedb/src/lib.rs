@@ -12,6 +12,7 @@
 #![allow(non_snake_case)]
 
 mod admin;
+mod campaign;
 mod chat;
 mod identity;
 mod main;
