@@ -179,10 +179,13 @@ pub fn build_entries(
             if tile.block != BlockId::AIR
                 && let Some(def) = content.block(tile.block)
             {
-                // Walls (non-`normal` cache layer) bake into the floor pass;
-                // every other block draws at `Layer.block` (dynamic or cached).
+                // Walls (non-`normal` cache layer) bake into the floor pass; a
+                // cached block on the `under` building-cache band (`duct`) draws
+                // at `Layer.blockUnder`; everything else draws at `Layer.block`.
                 let (layer, z) = if def.cache_layer != CacheLayerId::Normal {
                     (Layer::Floor, Layer::Floor.z())
+                } else if def.draw_cached && def.building_cache_layer < Layer::Block.z() {
+                    (Layer::BlockUnder, Layer::BlockUnder.z())
                 } else {
                     (Layer::Block, Layer::Block.z())
                 };

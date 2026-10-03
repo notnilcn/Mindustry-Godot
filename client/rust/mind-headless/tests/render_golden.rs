@@ -36,6 +36,7 @@ fn render_scenarios_match_committed_goldens() {
         "render_layer_order",
         "render_darkness_radius",
         "render_menu_world",
+        "render_layers_full",
     ] {
         run(&[
             "render",

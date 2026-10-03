@@ -210,6 +210,21 @@ impl Layer {
     pub fn from_name(name: &str) -> Option<Layer> {
         Layer::ALL.iter().copied().find(|l| l.name() == name)
     }
+
+    /// Resolves the nearest named [`Layer`] for an arbitrary `z` (descriptor
+    /// overrides such as `block + 0.01` fold onto their base layer).
+    pub fn from_z(z: f32) -> Layer {
+        let mut best = Layer::Block;
+        let mut best_delta = f32::MAX;
+        for layer in Layer::ALL {
+            let delta = (layer.z() - z).abs();
+            if delta < best_delta {
+                best_delta = delta;
+                best = layer;
+            }
+        }
+        best
+    }
 }
 
 /// A `CacheLayer` id. The numeric value is the frozen ABI order
