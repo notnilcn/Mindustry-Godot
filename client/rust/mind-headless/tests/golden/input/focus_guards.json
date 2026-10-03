@@ -1,0 +1,39 @@
+{
+  "scenario": "input_focus_guards",
+  "cases": [
+    {
+      "name": "locked_gates_camera_only",
+      "locked": true,
+      "blocks_camera": true,
+      "typing": false
+    },
+    {
+      "name": "dialog_blocks_placement",
+      "can_place": false,
+      "can_shoot": false,
+      "can_mine": false
+    },
+    {
+      "name": "chat_blocks_zoom",
+      "blocks_zoom": true
+    },
+    {
+      "name": "scroll_blocks_zoom",
+      "blocks_zoom": true
+    },
+    {
+      "name": "menu_clears_state",
+      "can_place": false,
+      "clears_placement": true
+    }
+  ],
+  "modes": [
+    "none",
+    "breaking",
+    "placing",
+    "schematic_select",
+    "rebuild_select"
+  ],
+  "keybinds": 88,
+  "checksum": "0fc90429922fffd4"
+}

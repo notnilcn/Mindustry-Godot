@@ -342,6 +342,13 @@ pub enum Command {
         command: UiCommand,
     },
 
+    /// Input/binding/placement scenarios and replay (plan 15 §7b).
+    Input {
+        /// Input subcommand.
+        #[command(subcommand)]
+        command: InputCommand,
+    },
+
     /// Parity/verification registries, catalogs and gate reports (plan 23).
     Parity {
         /// Parity subcommand.
@@ -424,6 +431,53 @@ pub enum UiCommand {
         #[arg(long)]
         dump: Option<PathBuf>,
         /// Compare the rendered rows against this golden.
+        #[arg(long)]
+        golden: Option<PathBuf>,
+    },
+}
+
+/// `input` subcommands (plan 15 §7b).
+#[derive(Debug, Subcommand)]
+pub enum InputCommand {
+    /// Dump the full binding registry parity table (`Binding.java`).
+    Dump {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Write the registry JSON here.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Compare the registry JSON against this golden.
+        #[arg(long)]
+        golden: Option<PathBuf>,
+    },
+
+    /// Replay a `format:1` input-event log (`.events.jsonl`).
+    Replay {
+        /// Input-event log path.
+        events: PathBuf,
+        /// Write the replay summary JSON here.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Force the mobile handler (overrides the header flag).
+        #[arg(long)]
+        mobile: bool,
+    },
+
+    /// Run a named input scenario.
+    Scenario {
+        /// Scenario name (`input_focus_guards`, ...).
+        name: String,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Write the scenario report JSON here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+        /// Compare the scenario report against this golden.
         #[arg(long)]
         golden: Option<PathBuf>,
     },

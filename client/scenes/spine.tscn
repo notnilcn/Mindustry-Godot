@@ -31,6 +31,8 @@
 
 [node name="SimHost" type="MindSimHost" parent="."]
 
+[node name="Input" type="MindInput" parent="."]
+
 [node name="MindAudio" type="MindAudio" parent="."]
 
 [node name="World" type="Node2D" parent="."]

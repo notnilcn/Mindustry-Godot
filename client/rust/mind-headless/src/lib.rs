@@ -18,6 +18,7 @@ pub mod cli;
 pub mod combat_scenarios;
 pub mod exec;
 pub mod fx_scenarios;
+pub mod input_scenarios;
 pub mod logic_scenarios;
 pub mod network_scenarios;
 pub mod parity;

@@ -1,0 +1,629 @@
+{
+  "format": 1,
+  "count": 88,
+  "categories": {
+    "general": 24,
+    "command": 24,
+    "blocks": 16,
+    "view": 15,
+    "multiplayer": 7
+  },
+  "binds": [
+    {
+      "name": "move_x",
+      "category": "general",
+      "axis": true,
+      "bundle": "keybind.move_x.name",
+      "default": "a/d"
+    },
+    {
+      "name": "move_y",
+      "category": "general",
+      "axis": true,
+      "bundle": "keybind.move_y.name",
+      "default": "s/w"
+    },
+    {
+      "name": "mouse_move",
+      "category": "general",
+      "axis": false,
+      "bundle": "keybind.mouse_move.name",
+      "default": "mouseBack"
+    },
+    {
+      "name": "pan",
+      "category": "general",
+      "axis": false,
+      "bundle": "keybind.pan.name",
+      "default": "mouseForward"
+    },
+    {
+      "name": "boost",
+      "category": "general",
+      "axis": false,
+      "bundle": "keybind.boost.name",
+      "default": "shiftLeft"
+    },
+    {
+      "name": "respawn",
+      "category": "general",
+      "axis": false,
+      "bundle": "keybind.respawn.name",
+      "default": "v"
+    },
+    {
+      "name": "control",
+      "category": "general",
+      "axis": false,
+      "bundle": "keybind.control.name",
+      "default": "controlLeft"
+    },
+    {
+      "name": "select",
+      "category": "general",
+      "axis": false,
+      "bundle": "keybind.select.name",
+      "default": "mouseLeft"
+    },
+    {
+      "name": "deselect",
+      "category": "general",
+      "axis": false,
+      "bundle": "keybind.deselect.name",
+      "default": "mouseRight"
+    },
+    {
+      "name": "break_block",
+      "category": "general",
+      "axis": false,
+      "bundle": "keybind.break_block.name",
+      "default": "mouseRight"
+    },
+    {
+      "name": "pickupCargo",
+      "category": "general",
+      "axis": false,
+      "bundle": "keybind.pickupCargo.name",
+      "default": "leftBracket"
+    },
+    {
+      "name": "dropCargo",
+      "category": "general",
+      "axis": false,
+      "bundle": "keybind.dropCargo.name",
+      "default": "rightBracket"
+    },
+    {
+      "name": "clear_building",
+      "category": "general",
+      "axis": false,
+      "bundle": "keybind.clear_building.name",
+      "default": "q"
+    },
+    {
+      "name": "pause_building",
+      "category": "general",
+      "axis": false,
+      "bundle": "keybind.pause_building.name",
+      "default": "e"
+    },
+    {
+      "name": "rotate",
+      "category": "general",
+      "axis": true,
+      "bundle": "keybind.rotate.name",
+      "default": "/scroll"
+    },
+    {
+      "name": "rotateplaced",
+      "category": "general",
+      "axis": false,
+      "bundle": "keybind.rotateplaced.name",
+      "default": "r"
+    },
+    {
+      "name": "diagonal_placement",
+      "category": "general",
+      "axis": false,
+      "bundle": "keybind.diagonal_placement.name",
+      "default": "controlLeft"
+    },
+    {
+      "name": "pick",
+      "category": "general",
+      "axis": false,
+      "bundle": "keybind.pick.name",
+      "default": "mouseMiddle"
+    },
+    {
+      "name": "ping",
+      "category": "general",
+      "axis": false,
+      "bundle": "keybind.ping.name",
+      "default": "p"
+    },
+    {
+      "name": "rebuild_select",
+      "category": "general",
+      "axis": false,
+      "bundle": "keybind.rebuild_select.name",
+      "default": "b"
+    },
+    {
+      "name": "schematic_select",
+      "category": "general",
+      "axis": false,
+      "bundle": "keybind.schematic_select.name",
+      "default": "f"
+    },
+    {
+      "name": "schematic_flip_x",
+      "category": "general",
+      "axis": false,
+      "bundle": "keybind.schematic_flip_x.name",
+      "default": "z"
+    },
+    {
+      "name": "schematic_flip_y",
+      "category": "general",
+      "axis": false,
+      "bundle": "keybind.schematic_flip_y.name",
+      "default": "x"
+    },
+    {
+      "name": "schematic_menu",
+      "category": "general",
+      "axis": false,
+      "bundle": "keybind.schematic_menu.name",
+      "default": "t"
+    },
+    {
+      "name": "command_mode",
+      "category": "command",
+      "axis": false,
+      "bundle": "keybind.command_mode.name",
+      "default": "shiftLeft"
+    },
+    {
+      "name": "command_queue",
+      "category": "command",
+      "axis": false,
+      "bundle": "keybind.command_queue.name",
+      "default": "mouseMiddle"
+    },
+    {
+      "name": "create_control_group",
+      "category": "command",
+      "axis": false,
+      "bundle": "keybind.create_control_group.name",
+      "default": "controlLeft"
+    },
+    {
+      "name": "select_all_units",
+      "category": "command",
+      "axis": false,
+      "bundle": "keybind.select_all_units.name",
+      "default": "g"
+    },
+    {
+      "name": "select_all_unit_factories",
+      "category": "command",
+      "axis": false,
+      "bundle": "keybind.select_all_unit_factories.name",
+      "default": "h"
+    },
+    {
+      "name": "select_all_unit_transport",
+      "category": "command",
+      "axis": false,
+      "bundle": "keybind.select_all_unit_transport.name",
+      "default": null
+    },
+    {
+      "name": "select_across_screen",
+      "category": "command",
+      "axis": false,
+      "bundle": "keybind.select_across_screen.name",
+      "default": "altLeft"
+    },
+    {
+      "name": "cancel_orders",
+      "category": "command",
+      "axis": false,
+      "bundle": "keybind.cancel_orders.name",
+      "default": null
+    },
+    {
+      "name": "unit_stance_hold_fire",
+      "category": "command",
+      "axis": false,
+      "bundle": "keybind.unit_stance_hold_fire.name",
+      "default": null
+    },
+    {
+      "name": "unit_stance_pursue_target",
+      "category": "command",
+      "axis": false,
+      "bundle": "keybind.unit_stance_pursue_target.name",
+      "default": null
+    },
+    {
+      "name": "unit_stance_patrol",
+      "category": "command",
+      "axis": false,
+      "bundle": "keybind.unit_stance_patrol.name",
+      "default": null
+    },
+    {
+      "name": "unit_stance_ram",
+      "category": "command",
+      "axis": false,
+      "bundle": "keybind.unit_stance_ram.name",
+      "default": null
+    },
+    {
+      "name": "unit_stance_boost",
+      "category": "command",
+      "axis": false,
+      "bundle": "keybind.unit_stance_boost.name",
+      "default": null
+    },
+    {
+      "name": "unit_stance_hold_position",
+      "category": "command",
+      "axis": false,
+      "bundle": "keybind.unit_stance_hold_position.name",
+      "default": null
+    },
+    {
+      "name": "unit_command_move",
+      "category": "command",
+      "axis": false,
+      "bundle": "keybind.unit_command_move.name",
+      "default": null
+    },
+    {
+      "name": "unit_command_repair",
+      "category": "command",
+      "axis": false,
+      "bundle": "keybind.unit_command_repair.name",
+      "default": null
+    },
+    {
+      "name": "unit_command_rebuild",
+      "category": "command",
+      "axis": false,
+      "bundle": "keybind.unit_command_rebuild.name",
+      "default": null
+    },
+    {
+      "name": "unit_command_assist",
+      "category": "command",
+      "axis": false,
+      "bundle": "keybind.unit_command_assist.name",
+      "default": null
+    },
+    {
+      "name": "unit_command_mine",
+      "category": "command",
+      "axis": false,
+      "bundle": "keybind.unit_command_mine.name",
+      "default": null
+    },
+    {
+      "name": "unit_command_enter_payload",
+      "category": "command",
+      "axis": false,
+      "bundle": "keybind.unit_command_enter_payload.name",
+      "default": null
+    },
+    {
+      "name": "unit_command_load_units",
+      "category": "command",
+      "axis": false,
+      "bundle": "keybind.unit_command_load_units.name",
+      "default": null
+    },
+    {
+      "name": "unit_command_load_blocks",
+      "category": "command",
+      "axis": false,
+      "bundle": "keybind.unit_command_load_blocks.name",
+      "default": null
+    },
+    {
+      "name": "unit_command_unload_payload",
+      "category": "command",
+      "axis": false,
+      "bundle": "keybind.unit_command_unload_payload.name",
+      "default": null
+    },
+    {
+      "name": "unit_command_loop_payload",
+      "category": "command",
+      "axis": false,
+      "bundle": "keybind.unit_command_loop_payload.name",
+      "default": null
+    },
+    {
+      "name": "category_prev",
+      "category": "blocks",
+      "axis": false,
+      "bundle": "keybind.category_prev.name",
+      "default": "comma"
+    },
+    {
+      "name": "category_next",
+      "category": "blocks",
+      "axis": false,
+      "bundle": "keybind.category_next.name",
+      "default": "period"
+    },
+    {
+      "name": "block_select_left",
+      "category": "blocks",
+      "axis": false,
+      "bundle": "keybind.block_select_left.name",
+      "default": "left"
+    },
+    {
+      "name": "block_select_right",
+      "category": "blocks",
+      "axis": false,
+      "bundle": "keybind.block_select_right.name",
+      "default": "right"
+    },
+    {
+      "name": "block_select_up",
+      "category": "blocks",
+      "axis": false,
+      "bundle": "keybind.block_select_up.name",
+      "default": "up"
+    },
+    {
+      "name": "block_select_down",
+      "category": "blocks",
+      "axis": false,
+      "bundle": "keybind.block_select_down.name",
+      "default": "down"
+    },
+    {
+      "name": "block_select_01",
+      "category": "blocks",
+      "axis": false,
+      "bundle": "keybind.block_select_01.name",
+      "default": "num1"
+    },
+    {
+      "name": "block_select_02",
+      "category": "blocks",
+      "axis": false,
+      "bundle": "keybind.block_select_02.name",
+      "default": "num2"
+    },
+    {
+      "name": "block_select_03",
+      "category": "blocks",
+      "axis": false,
+      "bundle": "keybind.block_select_03.name",
+      "default": "num3"
+    },
+    {
+      "name": "block_select_04",
+      "category": "blocks",
+      "axis": false,
+      "bundle": "keybind.block_select_04.name",
+      "default": "num4"
+    },
+    {
+      "name": "block_select_05",
+      "category": "blocks",
+      "axis": false,
+      "bundle": "keybind.block_select_05.name",
+      "default": "num5"
+    },
+    {
+      "name": "block_select_06",
+      "category": "blocks",
+      "axis": false,
+      "bundle": "keybind.block_select_06.name",
+      "default": "num6"
+    },
+    {
+      "name": "block_select_07",
+      "category": "blocks",
+      "axis": false,
+      "bundle": "keybind.block_select_07.name",
+      "default": "num7"
+    },
+    {
+      "name": "block_select_08",
+      "category": "blocks",
+      "axis": false,
+      "bundle": "keybind.block_select_08.name",
+      "default": "num8"
+    },
+    {
+      "name": "block_select_09",
+      "category": "blocks",
+      "axis": false,
+      "bundle": "keybind.block_select_09.name",
+      "default": "num9"
+    },
+    {
+      "name": "block_select_10",
+      "category": "blocks",
+      "axis": false,
+      "bundle": "keybind.block_select_10.name",
+      "default": "num0"
+    },
+    {
+      "name": "zoom",
+      "category": "view",
+      "axis": true,
+      "bundle": "keybind.zoom.name",
+      "default": "/scroll"
+    },
+    {
+      "name": "detach_camera",
+      "category": "view",
+      "axis": false,
+      "bundle": "keybind.detach_camera.name",
+      "default": null
+    },
+    {
+      "name": "teleport_cursor",
+      "category": "view",
+      "axis": false,
+      "bundle": "keybind.teleport_cursor.name",
+      "default": null
+    },
+    {
+      "name": "menu",
+      "category": "view",
+      "axis": false,
+      "bundle": "keybind.menu.name",
+      "default": "escape"
+    },
+    {
+      "name": "fullscreen",
+      "category": "view",
+      "axis": false,
+      "bundle": "keybind.fullscreen.name",
+      "default": "f11"
+    },
+    {
+      "name": "pause",
+      "category": "view",
+      "axis": false,
+      "bundle": "keybind.pause.name",
+      "default": "space"
+    },
+    {
+      "name": "skip_wave",
+      "category": "view",
+      "axis": false,
+      "bundle": "keybind.skip_wave.name",
+      "default": null
+    },
+    {
+      "name": "minimap",
+      "category": "view",
+      "axis": false,
+      "bundle": "keybind.minimap.name",
+      "default": "m"
+    },
+    {
+      "name": "research",
+      "category": "view",
+      "axis": false,
+      "bundle": "keybind.research.name",
+      "default": "j"
+    },
+    {
+      "name": "planet_map",
+      "category": "view",
+      "axis": false,
+      "bundle": "keybind.planet_map.name",
+      "default": "n"
+    },
+    {
+      "name": "block_info",
+      "category": "view",
+      "axis": false,
+      "bundle": "keybind.block_info.name",
+      "default": "f1"
+    },
+    {
+      "name": "toggle_menus",
+      "category": "view",
+      "axis": false,
+      "bundle": "keybind.toggle_menus.name",
+      "default": "c"
+    },
+    {
+      "name": "screenshot",
+      "category": "view",
+      "axis": false,
+      "bundle": "keybind.screenshot.name",
+      "default": "f12"
+    },
+    {
+      "name": "toggle_power_lines",
+      "category": "view",
+      "axis": false,
+      "bundle": "keybind.toggle_power_lines.name",
+      "default": "f5"
+    },
+    {
+      "name": "toggle_block_status",
+      "category": "view",
+      "axis": false,
+      "bundle": "keybind.toggle_block_status.name",
+      "default": "f6"
+    },
+    {
+      "name": "player_list",
+      "category": "multiplayer",
+      "axis": false,
+      "bundle": "keybind.player_list.name",
+      "default": "tab"
+    },
+    {
+      "name": "chat",
+      "category": "multiplayer",
+      "axis": false,
+      "bundle": "keybind.chat.name",
+      "default": "enter"
+    },
+    {
+      "name": "chat_history_prev",
+      "category": "multiplayer",
+      "axis": false,
+      "bundle": "keybind.chat_history_prev.name",
+      "default": "up"
+    },
+    {
+      "name": "chat_history_next",
+      "category": "multiplayer",
+      "axis": false,
+      "bundle": "keybind.chat_history_next.name",
+      "default": "down"
+    },
+    {
+      "name": "chat_scroll",
+      "category": "multiplayer",
+      "axis": true,
+      "bundle": "keybind.chat_scroll.name",
+      "default": "/scroll"
+    },
+    {
+      "name": "chat_mode",
+      "category": "multiplayer",
+      "axis": false,
+      "bundle": "keybind.chat_mode.name",
+      "default": "tab"
+    },
+    {
+      "name": "console",
+      "category": "multiplayer",
+      "axis": false,
+      "bundle": "keybind.console.name",
+      "default": "f8"
+    },
+    {
+      "name": "debug_hitboxes",
+      "category": null,
+      "axis": false,
+      "bundle": "keybind.debug_hitboxes.name",
+      "default": null
+    },
+    {
+      "name": "performance_metrics",
+      "category": null,
+      "axis": false,
+      "bundle": "keybind.performance_metrics.name",
+      "default": null
+    }
+  ]
+}
