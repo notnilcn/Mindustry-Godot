@@ -1290,6 +1290,10 @@ pub struct BlockSpec {
     pub emit_light: Option<bool>,
     /// `Block.drawTeamOverlay` (team corner is drawn).
     pub draw_team_overlay: Option<bool>,
+    /// `Floor.liquidDrop` (the liquid this floor yields / reacts with; plan 10
+    /// §3.10 needs it for `Tile.getFlammability` and floor-drop reactions).
+    /// Append-only addendum: plan 02 originally omitted the field.
+    pub liquid_drop: Option<&'static str>,
 }
 
 impl Default for BlockSpec {
@@ -1365,6 +1369,7 @@ impl Default for BlockSpec {
             obstructs_light: None,
             emit_light: None,
             draw_team_overlay: None,
+            liquid_drop: None,
         }
     }
 }
@@ -1983,6 +1988,8 @@ pub struct BlockDef {
     /// `Drill.drillMultipliers` (`ObjectFloatMap<Item>`); plan 20 M3b patches this
     /// via `block.<name>.drillMultipliers`.
     pub drill_multipliers: Vec<(ItemId, f32)>,
+    /// `Floor.liquidDrop` (`Option<Liquid>`; plan 10 §3.10 append-only addendum).
+    pub liquid_drop: Option<LiquidId>,
 }
 
 impl BlockDef {
@@ -2032,6 +2039,14 @@ impl BlockDef {
             Some(name) => Some(
                 registry
                     .item_id(name)
+                    .ok_or_else(|| ContentError::UnknownName(name.to_owned()))?,
+            ),
+            None => None,
+        };
+        let liquid_drop = match spec.liquid_drop {
+            Some(name) => Some(
+                registry
+                    .liquid_id(name)
                     .ok_or_else(|| ContentError::UnknownName(name.to_owned()))?,
             ),
             None => None,
@@ -2192,6 +2207,7 @@ impl BlockDef {
             item_health_scaling,
             attributes: Vec::new(),
             drill_multipliers: Vec::new(),
+            liquid_drop,
         };
         if let Some(generate) = generate_icons {
             def.unlock.generate_icons = generate;

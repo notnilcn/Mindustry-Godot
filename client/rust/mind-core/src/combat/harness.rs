@@ -93,6 +93,8 @@ impl CombatHarness {
                 "lustre",
                 "smite",
                 "malign",
+                "sublimate",
+                "scathe",
                 "build-tower",
             ] {
                 if let Some(config) = config_for(&build.content, name, &names) {

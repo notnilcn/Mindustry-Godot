@@ -42,7 +42,16 @@ impl BulletBehavior for LiquidBehavior {
         }
         let ts = crate::config::TILESIZE as f32;
         let (tx, ty) = ((x / ts).floor() as i16, (y / ts).floor() as i16);
-        let _ = puddles::deposit(ctx.world, ctx.content, tx, ty, liquid, puddle_size, ctx.rng);
+        let _ = puddles::deposit(
+            ctx.world,
+            &ctx.grid.tiles,
+            ctx.content,
+            tx,
+            ty,
+            liquid,
+            puddle_size,
+            ctx.rng,
+        );
         // `LiquidBulletType.hit` also extinguishes fires for non-flammable cold
         // liquids (`liquid.temperature <= 0.5 && flammability < 0.3`).
         let cold = ctx

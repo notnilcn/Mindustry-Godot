@@ -61,10 +61,14 @@ pub fn has_liquid(world: &World, tx: i16, ty: i16, liquid: LiquidId) -> bool {
 
 /// Deposits `amount` of `liquid` at `(tx, ty)` (`Puddles.deposit`).
 ///
-/// Gaseous liquids vaporize immediately (no puddle); a different existing liquid
-/// is replaced.
+/// Vaporizes when the liquid boils (`Liquid.willBoil`: global heat ≥
+/// `boilPoint`; gases always boil), reacts with a liquid-drop floor it cannot
+/// stay on (`tar`/`pooled-cryofluid`/`molten-slag`/…), and reacts with a
+/// different existing puddle. A solid floor rejects the puddle.
+#[allow(clippy::too_many_arguments)]
 pub fn deposit(
     world: &mut World,
+    tiles: &crate::world::tiles::Tiles,
     content: &ContentRegistry,
     tx: i16,
     ty: i16,
@@ -73,32 +77,60 @@ pub fn deposit(
     rng: &mut SimRng,
 ) -> Option<Entity> {
     let def = content.liquid(liquid)?;
-    // Gaseous liquids vaporize instead of pooling (`Liquid.willBoil` needs the
-    // global heat attribute owned by plan 12; gases are always treated as boiling).
-    if def.gas {
+    // `Liquid.willBoil()` (`Attribute.heat.env() >= boilPoint`); gases set
+    // `boilPoint = -1`, so they always boil. The heat value is the global
+    // `state.envAttrs` (plan 06/12), surfaced through [`super::fires::CombatEnv`].
+    let heat = world
+        .get_resource::<super::fires::CombatEnv>()
+        .map(|env| env.heat)
+        .unwrap_or(0.0);
+    if def.gas || heat >= def.boil_point {
         return None;
     }
+
     let ts = crate::config::TILESIZE as f32;
+    let ax = (tx as f32 + 0.5) * ts;
+    let ay = (ty as f32 + 0.5) * ts;
+
+    // Floor liquid-drop reaction (`Puddles.deposit` step 4): an `isLiquid` floor
+    // carries a `liquidDrop`; if the incoming liquid cannot stay on it, react
+    // (fire/steam/`Liquid.react`) and do not pool.
+    let floor_def = tiles
+        .in_bounds(tx as i32, ty as i32)
+        .then(|| content.block(tiles.get(tx as i32, ty as i32).floor))
+        .flatten();
+    if let Some(drop) = floor_def.and_then(|floor| floor.liquid_drop)
+        && !def.can_stay_on.contains(&drop)
+    {
+        let _ = react_puddle(world, content, drop, liquid, amount, tx, ty, rng);
+        return None;
+    }
+    // `if(tile.floor().solid) return;`
+    if floor_def.is_some_and(|floor| floor.solid) {
+        return None;
+    }
+
     if let Some(entity) = find_at(world, tx, ty)
-        && let Some(mut puddle) = world.get_mut::<PuddleState>(entity)
+        && let Some(puddle) = world.get::<PuddleState>(entity).copied()
     {
         if puddle.liquid == liquid {
-            puddle.accepting += amount;
-            puddle.amount = (puddle.amount + puddle.accepting).min(MAX_LIQUID);
-            puddle.accepting = 0.0;
+            if let Some(mut puddle) = world.get_mut::<PuddleState>(entity) {
+                puddle.accepting += amount;
+                puddle.amount = (puddle.amount + puddle.accepting).min(MAX_LIQUID);
+                puddle.accepting = 0.0;
+            }
             return Some(entity);
         }
-        // Different liquid: reset to the new one.
-        puddle.liquid = liquid;
-        puddle.amount = amount.min(MAX_LIQUID);
+        // Different existing liquid: `reactPuddle(p.liquid, liquid, ...)`.
+        let added = react_puddle(world, content, puddle.liquid, liquid, amount, tx, ty, rng);
+        if let Some(mut puddle) = world.get_mut::<PuddleState>(entity) {
+            puddle.amount = (puddle.amount + added).clamp(0.0, MAX_LIQUID);
+        }
         return Some(entity);
     }
     let entity = world
         .spawn((
-            Pos {
-                x: (tx as f32 + 0.5) * ts,
-                y: (ty as f32 + 0.5) * ts,
-            },
+            Pos { x: ax, y: ay },
             PuddleState {
                 tile: (tx, ty),
                 liquid,
@@ -110,6 +142,57 @@ pub fn deposit(
         ))
         .id();
     Some(entity)
+}
+
+/// `Puddles.reactPuddle`: reacts two liquids at a tile, returning the amount of
+/// `liquid` that should be added to the destination puddle.
+///
+/// Flammable + hot ignites a fire; a cold/hot mismatch removes liquid (steam);
+/// otherwise defers to [`liquid_react`]. The `Bullets.fireball.createNet`
+/// chance and `Fx.steam` are view/net seams (plan 17/21).
+#[allow(clippy::too_many_arguments)]
+fn react_puddle(
+    world: &mut World,
+    content: &ContentRegistry,
+    dest: LiquidId,
+    liquid: LiquidId,
+    amount: f32,
+    tx: i16,
+    ty: i16,
+    rng: &mut SimRng,
+) -> f32 {
+    let Some(dest_def) = content.liquid(dest) else {
+        return 0.0;
+    };
+    let Some(other) = content.liquid(liquid) else {
+        return 0.0;
+    };
+    let flammable_hot = (dest_def.flammability > 0.3 && other.temperature > 0.7)
+        || (other.flammability > 0.3 && dest_def.temperature > 0.7);
+    if flammable_hot {
+        let _ = super::fires::create(world, tx, ty, rng);
+    } else if dest_def.temperature > 0.7 && other.temperature < 0.55 {
+        // Cold liquid poured onto a hot puddle.
+        return -0.1 * amount;
+    } else if other.temperature > 0.7 && dest_def.temperature < 0.55 {
+        // Hot liquid poured onto a cold puddle.
+        return -0.7 * amount;
+    }
+    // `Liquid.react` (base `0`; `CellLiquid` returns `amount` for `spreadTarget`).
+    liquid_react(dest_def, liquid, amount)
+}
+
+/// `Liquid.react` behavior half (`Liquid.java`; `CellLiquid.java` override).
+fn liquid_react(
+    dest: &crate::content::registries::liquids::Liquid,
+    other: LiquidId,
+    amount: f32,
+) -> f32 {
+    if dest.cell.as_ref().and_then(|cell| cell.spread_target) == Some(other) {
+        amount
+    } else {
+        0.0
+    }
 }
 
 /// Removes a puddle (`PuddleComp.remove`/`Puddles.remove`).
@@ -175,8 +258,9 @@ pub fn update_puddles(
                 if tiles.in_bounds(nx, ny) {
                     let empty = tiles.get(nx, ny).build.is_none() || def.move_through_blocks;
                     if empty {
-                        let _ =
-                            deposit(world, content, nx as i16, ny as i16, liquid, deposited, rng);
+                        let _ = deposit(
+                            world, tiles, content, nx as i16, ny as i16, liquid, deposited, rng,
+                        );
                     }
                 }
             }
@@ -224,6 +308,7 @@ mod tests {
         let mut rng = SimRng::new(3);
         let e = deposit(
             &mut harness.build.world,
+            &harness.build.grid.tiles,
             &harness.build.content,
             4,
             4,
@@ -249,6 +334,7 @@ mod tests {
         assert!(
             deposit(
                 &mut harness.build.world,
+                &harness.build.grid.tiles,
                 &harness.build.content,
                 4,
                 4,
@@ -267,6 +353,7 @@ mod tests {
         let mut rng = SimRng::new(3);
         let e = deposit(
             &mut harness.build.world,
+            &harness.build.grid.tiles,
             &harness.build.content,
             8,
             8,
@@ -293,6 +380,7 @@ mod tests {
         let mut rng = SimRng::new(3);
         let e = deposit(
             &mut harness.build.world,
+            &harness.build.grid.tiles,
             &harness.build.content,
             4,
             4,
@@ -305,5 +393,146 @@ mod tests {
             harness.puddle_tick();
         }
         assert!(harness.build.world.get_entity(e).is_err());
+    }
+
+    #[test]
+    fn will_boil_heat_attribute_vaporizes_fitting_liquid() {
+        let mut harness = CombatHarness::new(16, 16, 3);
+        // `Attribute.heat.env() >= boilPoint` (water 0.5, oil 0.65).
+        harness
+            .build
+            .world
+            .insert_resource(crate::combat::fires::CombatEnv {
+                heat: 0.6,
+                ..Default::default()
+            });
+        let water = harness.content().liquid_id("water").expect("water");
+        let oil = harness.content().liquid_id("oil").expect("oil");
+        let mut rng = SimRng::new(3);
+        // water boils (0.6 >= 0.5); oil does not (0.6 < 0.65).
+        assert!(
+            deposit(
+                &mut harness.build.world,
+                &harness.build.grid.tiles,
+                &harness.build.content,
+                4,
+                4,
+                water,
+                10.0,
+                &mut rng
+            )
+            .is_none()
+        );
+        assert!(
+            deposit(
+                &mut harness.build.world,
+                &harness.build.grid.tiles,
+                &harness.build.content,
+                5,
+                5,
+                oil,
+                10.0,
+                &mut rng
+            )
+            .is_some()
+        );
+    }
+
+    #[test]
+    fn tar_floor_flammability_and_floor_drop_reaction() {
+        let mut harness = CombatHarness::new(16, 16, 3);
+        let tar = harness.content().block_id("tar").expect("tar");
+        let slag = harness.content().liquid_id("slag").expect("slag");
+        harness.build.grid.tiles.get_mut(4, 4).floor = tar;
+        // `Tile.getFlammability` reads the floor's `liquidDrop` (tar → oil 1.2).
+        let flammability = harness
+            .build
+            .grid
+            .tiles
+            .get(4, 4)
+            .get_flammability(&harness.build.content);
+        assert!(
+            (flammability - 1.2).abs() < 1e-5,
+            "flammability={flammability}"
+        );
+        // Hot slag + flammable oil floor → fire, and no puddle is created.
+        let mut rng = SimRng::new(3);
+        let result = deposit(
+            &mut harness.build.world,
+            &harness.build.grid.tiles,
+            &harness.build.content,
+            4,
+            4,
+            slag,
+            10.0,
+            &mut rng,
+        );
+        assert!(result.is_none(), "floor drop consumes the deposit");
+        assert!(crate::combat::fires::has(&harness.build.world, 4, 4));
+    }
+
+    #[test]
+    fn solid_floor_rejects_puddle() {
+        let mut harness = CombatHarness::new(16, 16, 3);
+        let space = harness.content().block_id("space").expect("space");
+        harness.build.grid.tiles.get_mut(6, 6).floor = space;
+        let water = harness.content().liquid_id("water").expect("water");
+        let mut rng = SimRng::new(3);
+        assert!(
+            deposit(
+                &mut harness.build.world,
+                &harness.build.grid.tiles,
+                &harness.build.content,
+                6,
+                6,
+                water,
+                10.0,
+                &mut rng
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn cell_liquid_reacts_with_spread_target() {
+        let mut harness = CombatHarness::new(16, 16, 3);
+        let neph = harness.content().liquid_id("neoplasm").expect("neoplasm");
+        let water = harness.content().liquid_id("water").expect("water");
+        let mut rng = SimRng::new(3);
+        let e = deposit(
+            &mut harness.build.world,
+            &harness.build.grid.tiles,
+            &harness.build.content,
+            8,
+            8,
+            neph,
+            10.0,
+            &mut rng,
+        )
+        .expect("neoplasm puddle");
+        let before = harness
+            .build
+            .world
+            .get::<PuddleState>(e)
+            .map(|p| p.amount)
+            .unwrap_or(0.0);
+        // `CellLiquid.react(water)` returns the full amount for its spread target.
+        let _ = deposit(
+            &mut harness.build.world,
+            &harness.build.grid.tiles,
+            &harness.build.content,
+            8,
+            8,
+            water,
+            5.0,
+            &mut rng,
+        );
+        let after = harness
+            .build
+            .world
+            .get::<PuddleState>(e)
+            .map(|p| p.amount)
+            .unwrap_or(0.0);
+        assert!((after - (before + 5.0)).abs() < 1e-5, "{before} -> {after}");
     }
 }

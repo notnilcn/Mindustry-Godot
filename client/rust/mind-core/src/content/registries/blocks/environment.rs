@@ -193,25 +193,58 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         ..spec("build16", BlockKind::ConstructBlock)
     })?;
 
-    sink.push(spec("deep-water", BlockKind::Floor))?;
+    // `liquidDrop` (plan 10 §3.10 append-only addendum; upstream
+    // `content/Blocks.java` `liquidDrop = Liquids.<x>`).
+    sink.push(BlockSpec {
+        liquid_drop: Some("water"),
+        ..spec("deep-water", BlockKind::Floor)
+    })?;
 
-    sink.push(spec("shallow-water", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        liquid_drop: Some("water"),
+        ..spec("shallow-water", BlockKind::Floor)
+    })?;
 
-    sink.push(spec("tainted-water", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        liquid_drop: Some("water"),
+        ..spec("tainted-water", BlockKind::Floor)
+    })?;
 
-    sink.push(spec("deep-tainted-water", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        liquid_drop: Some("water"),
+        ..spec("deep-tainted-water", BlockKind::Floor)
+    })?;
 
-    sink.push(spec("darksand-tainted-water", BlockKind::ShallowLiquid))?;
+    // `ShallowLiquid` defaults `liquidDrop = Liquids.water`.
+    sink.push(BlockSpec {
+        liquid_drop: Some("water"),
+        ..spec("darksand-tainted-water", BlockKind::ShallowLiquid)
+    })?;
 
-    sink.push(spec("sand-water", BlockKind::ShallowLiquid))?;
+    sink.push(BlockSpec {
+        liquid_drop: Some("water"),
+        ..spec("sand-water", BlockKind::ShallowLiquid)
+    })?;
 
-    sink.push(spec("darksand-water", BlockKind::ShallowLiquid))?;
+    sink.push(BlockSpec {
+        liquid_drop: Some("water"),
+        ..spec("darksand-water", BlockKind::ShallowLiquid)
+    })?;
 
-    sink.push(spec("tar", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        liquid_drop: Some("oil"),
+        ..spec("tar", BlockKind::Floor)
+    })?;
 
-    sink.push(spec("pooled-cryofluid", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        liquid_drop: Some("cryofluid"),
+        ..spec("pooled-cryofluid", BlockKind::Floor)
+    })?;
 
-    sink.push(spec("molten-slag", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        liquid_drop: Some("slag"),
+        ..spec("molten-slag", BlockKind::Floor)
+    })?;
 
     sink.push(BlockSpec {
         solid: Some(true),
@@ -285,7 +318,10 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
 
     sink.push(spec("red-ice", BlockKind::Floor))?;
 
-    sink.push(spec("arkycite-floor", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        liquid_drop: Some("arkycite"),
+        ..spec("arkycite-floor", BlockKind::Floor)
+    })?;
 
     sink.push(spec("arkyic-stone", BlockKind::Floor))?;
 
