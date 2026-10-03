@@ -9,7 +9,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Draft v1 — 2026-10-01, not started. 2 items flagged `NEEDS USER DECISION` in §8 (OD19-A, OD19-B); neither blocks M0–M2. |
+| **Status** | **M0–M8 landed 2026-10-03** (`lane/f19-19` M0, `lane/f20-19` M1–M2, `lane/f21-19` M3, `lane/f22-19` M4–M8); in-engine MCP §7c + plan-16 chunk-mesh draw in the editor SubViewport deferred to the single-editor mutex. OD19-A/OD19-B locked 2026-10-01. |
 | **Phase** | P7 — Editor, mods, export |
 | **Depends on** | `04_IO_SERIALIZATION_IMPLEMENTATION_PLAN.md` (`SaveIo`/`MapIo`, `WorldContext` trait, `JsonIo`, `FileSystem`/`Paths`, `PreviewImage`, `MapHeader`, slot/preview paths), `06_WORLD_TERRAIN_IMPLEMENTATION_PLAN.md` (`WorldGrid`/`Tiles`/`Tile`, `CachedTile`/`TileGen`, `Maps` registry + `Map` + `MapException` + preview queue/cache + `ShuffleMode`, `FilterRegistry`/`GenerateFilter`/`FilterOption`, `ColorMapper`, `WorldGrid::load_sector`), `14_UI_IMPLEMENTATION_PLAN.md` (`MindDialog`/`MindTable`/`FileChooser`/`ColorPicker`/`PaletteDialog`/`MapListDialog`/`NodeName`/`spawner` widgets, `MapPlayDialog` shell, `CustomRulesDialog`, `IconSelectDialog`), `15_INPUT_RTS_IMPLEMENTATION_PLAN.md` (`FocusState`/`InputLocks`, gesture plumbing, camera rig, keybinds, `Placement` helpers), `16_RENDER_WORLD_IMPLEMENTATION_PLAN.md` (`floor_cache`/`block_cache` epochs, `scan` visible sets, band renderer, `checkPreviews` call site, `MindRender` facade). |
 | **Blocks** | `22_PLATFORM_EXPORT_IMPLEMENTATION_PLAN.md` (export includes maps + file associations), `23_PARITY_VERIFICATION_IMPLEMENTATION_PLAN.md` (editor scenarios, map-lifecycle goldens, MCP catalog). Consumed (not blocked) by `12_CAMPAIGN_IMPLEMENTATION_PLAN.md` (map metadata/rules tags, `MapObjectives`/`MapMarkers` mutation via editor, `MapLocales`). |
@@ -802,16 +802,16 @@ Method: `mind-headless editor bench --suite <name> --json` (release, median of 2
 
 ### 7e. Exit criteria checklist
 
-- [ ] `cargo test -p mind-core editor::` and `maps::` green; op-pack/undo/fill/resize/fixer/objective-field tests pass.
-- [ ] `mind-headless editor ops` matches apply/undo/redo goldens; `editor roundtrip`, `editor resize-shift`, `editor image-roundtrip` pass.
-- [ ] `mind-headless maps save-load-save` idempotent; `maps preview-tiles` golden; `maps registry-shuffle`; `maps fix --dry-run` fixture.
-- [ ] MCP C1/C2/C3 pass with screenshots (`editor_line.png`, `editor_undo.png`, `editor_reload.png`, `editor_gen_preview.png`) and clean logs.
-- [ ] All editor dialogs open/close without errors; palette/team/brush/tool state mirrored in the inspector Editor tab.
-- [ ] `editor.tags` round-trip (`name/rules/genfilters/locales`) through save/load/export; export embeds data assets; built-in overwrite refused.
-- [ ] Playtest round-trip preserves the editor world; `tryExit` always confirms and `logic.reset()` runs on confirm.
-- [ ] §7d budgets recorded in `bench/editor_baseline.json`; alloc audit zero.
-- [ ] `mind-core` Godot-free/tokio-free greps green; no `HashMap` iteration in editor/save paths; GPL headers on all files.
-- [ ] Plan-20/23 reconciliation notes resolved or re-assigned; changelog evidence entries completed.
+- [x] `cargo test -p mind-core editor::` and `maps::` green; op-pack/undo/fill/resize/fixer/objective-field tests pass. (1542 lib passed.)
+- [x] `mind-headless editor ops` matches apply/undo/redo goldens; `editor roundtrip`, `editor resize-shift`, `editor image-roundtrip` pass.
+- [x] `mind-headless maps save-load-save` idempotent; `maps preview-tiles` golden; `maps registry-shuffle`; `maps fix --dry-run` fixture.
+- [ ] MCP C1/C2/C3 pass with screenshots (`editor_line.png`, `editor_undo.png`, `editor_reload.png`, `editor_gen_preview.png`) and clean logs. — **deferred (single-editor mutex)**
+- [ ] All editor dialogs open/close without errors; palette/team/brush/tool state mirrored in the inspector Editor tab. — **scene parse-check only; in-engine open deferred**
+- [~] `editor.tags` round-trip (`name/rules/genfilters/locales`) through save/load/export; export embeds data assets; built-in overwrite refused. — **tags/genfilters/locales + embedded export landed; objectives/waves dialog tags not yet folded into `rules` (M7 sim-host follow-up)**
+- [ ] Playtest round-trip preserves the editor world; `tryExit` always confirms and `logic.reset()` runs on confirm. — **deferred (plan 07/12 sim host)**
+- [~] §7d budgets recorded in `bench/editor_baseline.json`; alloc audit zero. — **`editor bench` + DrawOperation alloc test landed; baseline file/MapView alloc audit deferred**
+- [x] `mind-core` Godot-free/tokio-free greps green; no `HashMap` iteration in editor/save paths; GPL headers on all files.
+- [x] Plan-20/23 reconciliation notes resolved or re-assigned; changelog evidence entries completed. (`editor::assets::DataManagerApi`; plan-23 catalogue registration left to its owner.)
 
 ---
 
@@ -912,4 +912,32 @@ Tooling: `/mnt/c/Users/Clinton/g/.opencode/skills/godot-compositor-testing/SKILL
 
 **Deferred (named).** `EditorPlugin`/autoload not needed (MindEditor is a spine node, HLP §6.6). `MindPreview` `Texture2D` provider (maps-list/dialog data, M4/M6). In-engine MCP §7c-1 (palette/brush screenshot) waits on the single-editor mutex; the mount handoff suspends the main bands but does not yet draw the shared chunk meshes inside the editor `SubViewport` (plan-16 draw integration). Dialog-data APIs (`filters_json`/`objectives_json`/`waves_json`/`locales_json`/`processors`/`assets`) and `playtest`/`edit_in_game`/`resume_editing`/`try_exit` belong to M4–M7.
 
-- (no earlier entries)
+### M4 — Meta dialogs (DONE 2026-10-03, `lane/f22-19`, base `main` @ `0e3d368`)
+
+**Deliverables.** `mind-core/src/editor/gen.rs` (exported as `editor::generate`): `EditorSnapshot` packed-tile capture, `TilesMapSource`, deterministic `generate_preview(snapshot, filters, content, seed)` and write-through `apply_filters_to_editor(editor, grid, content, filters, seed)` (clears the op stack), `filters_from_tag`. `mind-gdext::MindEditor` gains `filters_json`/`set_filters_json`/`apply_filters`/`sector_generate`. Scenes `client/scenes/editor/{map_info_dialog,map_resize_dialog,map_load_dialog,map_generate_dialog,sector_generate_dialog}.{tscn,gd}`.
+
+**Verify.** `mind-headless editor gen-preview --json` → pixel checksum `21a5176d736430f2`, second run identical, PNG round-trip true, exit 0. MCP §7c-2 deferred (single-editor mutex).
+
+### M5 — Objectives + waves (DONE 2026-10-03, `lane/f22-19`)
+
+**Deliverables.** `mind-derive::ObjectiveFields` proc macro (`#[objective(name,kind,flags)]`); `editor/objectives.rs` (13-class declarative descriptors, `FieldFlags`, `FieldFilter`, `provider_default`, `interpret_number`, `ObjectiveNode`/`edges`/`fixup_parents`, `parse_objectives`/`write_objectives`); `editor/wave_graph.rs` (`WaveGraphMode`, `WaveGraphUnit`, `WaveGraphData::compute`, `next_step`). `MindEditor.objectives_json`/`set_objectives_json`/`waves_json`/`set_waves_json`/`wave_graph`. Scenes `map_objectives_dialog`/`map_objectives_canvas`/`wave_info_dialog`/`wave_graph`. Fixtures `tests/fixtures/editor/{objectives,wave_graph}.json`.
+
+**Verify.** `mind-headless editor objectives --json` → `round_trip_ok`/`editor_pos_ok`/`parents_ok`/`descriptor_ok`/`all_classes_covered` all true; `mind-headless editor wave-graph --json` → checksum `a81e6c788a043d02` (`expected_checksum` equal). MCP canvas/graph screenshots deferred.
+
+### M6 — Processors, locales, banned, assets (DONE 2026-10-03, `lane/f22-19`)
+
+**Deliverables.** `maps/locales.rs` (`MapLocales` helpers, `PropertyStatus`, `read_locale`/`write_locale`, `MapLocaleView: ObjectiveLocale`, `apply_to_all`); `editor/processors.rs` (`ProcessorEntry`, `processor_entries`, `add_processor`, `remove_processor`); `editor/banned.rs` (`BanKind`, set edit ops, `filter_pane`, `rules_json`); `editor/assets.rs` (`DataManagerApi`, `export_zip`/`import_zip`, `AssetRecord`). `MindEditor.locales_json`/`set_locales_json`/`processors`/`assets`. Scenes `map_processors_dialog`/`map_locales_dialog`/`banned_content_dialog`/`data/map_assets_dialog`.
+
+**Verify.** `mind-headless editor locales --json` (apply/rollback + view all true); `editor banned --json` (`Rules` JSON round-trip true); `editor assets --json` (zip round-trip true, `PK`). `data/{patches,content,bundles,images,audio}_view.gd` body views + `assets()` plan-20 mount deferred.
+
+### M7 — Save/playtest/export/exit + budgets (PARTIAL 2026-10-03, `lane/f22-19`)
+
+**Deliverables.** `MindEditor.export_map` (embedded assets) / `export_image` (color-mapped PNG); `editor bench --suite {recache,line,undo,fill,replay} [--size] [--runs]`; `DrawOperation::{capacity,reserve}` + `op_recording_capacity_is_stable_after_warmup`.
+
+**Verify.** `editor bench` exits 0 with `p50_us`/`p99_us` (64×64 dev host: line ~0.1 ms, fill ~0.02 ms, undo ~0.43 ms); `cargo test -p mind-core editor::draw_op` green. **Deferred (plan 07/12 sim host):** `edit_in_game`/`playtest`/`resume_editing`/`resume_after_playtest`/`try_exit`; release `bench/editor_baseline.json`; in-engine MapView alloc audit.
+
+### M8 — Verification sweep, `maps fix`, docs (DONE 2026-10-03, `lane/f22-19`)
+
+**Deliverables.** `maps/fix.rs` MapFixer port (hidden banned blocks/units, infinite resources/instant build, unlocalized/typo TimerObjectives, `wave > 1`, revealed blocks, hidden attack-mode) + `mind-headless maps fix [--dir] [--dry-run]`; this changelog + HLP §3 row/§13 entry.
+
+**Verify.** `mind-headless maps fix --json` → `dry_changes 6`, `first_changed 1`, `second_changed 0`, exit 0. Plan-23 scenario registration of `editor gen-preview`/`objectives`/`wave-graph`/`locales`/`banned`/`assets`/`bench`/`maps fix` is left to plan 23's catalogue owner.
