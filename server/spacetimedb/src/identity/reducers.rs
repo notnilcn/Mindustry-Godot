@@ -10,7 +10,9 @@ use super::methods::{
     validate_keybinds_json, validate_language, validate_profile_name, validate_ui_scale,
     validate_username, validate_volume,
 };
-use super::tables::{ClientSettings, Player, PlayerProfile, client_settings, player, player_profile};
+use super::tables::{
+    ClientSettings, Player, PlayerProfile, client_settings, player, player_profile,
+};
 use crate::main::audit::audit;
 use crate::main::tables::AuditKind;
 

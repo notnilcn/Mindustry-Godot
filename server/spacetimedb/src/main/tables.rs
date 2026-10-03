@@ -3,7 +3,7 @@
 //! Module-wide singleton tables: protocol handshake and relay configuration
 //! (plan 01 §6.1). Both are seeded in [`super::seeds`] on `init`.
 
-use spacetimedb::{table, SpacetimeType};
+use spacetimedb::{SpacetimeType, table};
 
 /// Protocol handshake row, singleton `id = 0` (client view `protocol_info`).
 #[table(accessor = protocol_info, public)]

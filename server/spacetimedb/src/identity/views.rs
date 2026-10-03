@@ -21,7 +21,11 @@ fn local_player(ctx: &ViewContext) -> Option<Player> {
 /// The caller's most recently created profile (highest auto-inc `profile_id`).
 #[view(accessor = local_player_profile, public)]
 fn local_player_profile(ctx: &ViewContext) -> Option<PlayerProfile> {
-    ctx.db.player_profile().by_owner().filter(ctx.sender()).last()
+    ctx.db
+        .player_profile()
+        .by_owner()
+        .filter(ctx.sender())
+        .last()
 }
 
 /// Every player row; plan 21 adds AOI-scoped projections when the roster grows.

@@ -11,6 +11,7 @@ use super::methods::{
     rate_allow, relay_config_or_default, require_match, require_member, require_status,
     spectator_forbidden, validate_join, validate_kind,
 };
+use super::rules_merge::{merge_rule, validate_rules_blob};
 use super::tables::{
     AuthorityMode, CommandKind, Gamemode, MatchCommand, MatchState, MatchStatus, MemberRole,
     RelayMatch, RelayMember, SenderCommandState, SetRule, SetRules, Visibility, match_command,
@@ -492,14 +493,15 @@ pub(crate) fn send_match_command_impl(
 
 /// Rules changes a command carries, validated against the current epoch.
 ///
-/// `SetRules` replaces the whole blob (host edit); `SetRule` is a single-field
-/// edit whose merge is plan 12/13's job — until that lands the stub only
-/// materializes the first field when `rules_json` is empty, otherwise it keeps
-/// the blob and just advances the epoch (documented M3 stub).
+/// `SetRules` replaces the whole blob (host edit); its JSON must parse as an
+/// object. `SetRule` merges one field *into* the blob along a nested path
+/// (plan 12/13 `Rules` shape; [`super::rules_merge::merge_rule`]). Both bump
+/// `rules_epoch`.
 pub fn rules_after_command(
     kind: &CommandKind,
     row: &RelayMatch,
 ) -> Result<Option<(String, u32)>, String> {
+    let next_epoch = row.rules_epoch.saturating_add(1);
     match kind {
         CommandKind::SetRules(SetRules {
             rules_json,
@@ -511,27 +513,25 @@ pub fn rules_after_command(
                     row.rules_epoch
                 ));
             }
-            Ok(Some((
-                rules_json.clone(),
-                row.rules_epoch.saturating_add(1),
-            )))
+            validate_rules_blob(rules_json)?;
+            cap_rules_json(rules_json)?;
+            Ok(Some((rules_json.clone(), next_epoch)))
         }
-        CommandKind::SetRule(SetRule { rule, json }) => Ok(Some((
-            merge_rule_stub(&row.rules_json, rule, json),
-            row.rules_epoch.saturating_add(1),
-        ))),
+        CommandKind::SetRule(SetRule { rule, json }) => {
+            let merged = merge_rule(&row.rules_json, rule, json)?;
+            cap_rules_json(&merged)?;
+            Ok(Some((merged, next_epoch)))
+        }
         _ => Ok(None),
     }
 }
 
-/// Stubbed top-level rule merge (see [`rules_after_command`]).
-pub fn merge_rule_stub(rules_json: &str, rule: &str, json: &str) -> String {
-    let trimmed = rules_json.trim();
-    if trimmed.is_empty() || trimmed == "{}" {
-        format!("{{\"{rule}\":{json}}}")
-    } else {
-        rules_json.to_string()
+/// Enforces the `MAX_RULES_JSON` cap on a rules blob (plan §6.3).
+fn cap_rules_json(rules_json: &str) -> Result<(), String> {
+    if rules_json.chars().count() > MAX_RULES_JSON {
+        return Err(format!("rules_json exceeds {MAX_RULES_JSON} characters"));
     }
+    Ok(())
 }
 
 /// Mirrors a rules change into `match_state` so late joiners read the latest
@@ -652,14 +652,103 @@ mod tests {
     }
 
     #[test]
-    fn set_rule_stub_materializes_first_field() {
-        assert_eq!(merge_rule_stub("{}", "waves", "true"), "{\"waves\":true}");
-        assert_eq!(merge_rule_stub("", "pvp", "false"), "{\"pvp\":false}");
-        // Non-empty blobs are left untouched until plan 12/13's merge lands.
-        assert_eq!(
-            merge_rule_stub("{\"waves\":true}", "pvp", "false"),
-            "{\"waves\":true}"
+    fn set_rule_merges_top_level_field_and_keeps_the_rest() {
+        let row = relay_row("{\"waves\":true,\"pvp\":false}", 3);
+        let update = rules_after_command(
+            &CommandKind::SetRule(SetRule {
+                rule: "pvp".to_string(),
+                json: "true".to_string(),
+            }),
+            &row,
+        )
+        .unwrap()
+        .expect("rules update");
+        assert_eq!(update, ("{\"waves\":true,\"pvp\":true}".to_string(), 4));
+    }
+
+    #[test]
+    fn set_rule_merges_nested_object_and_array_paths() {
+        let row = relay_row(
+            "{\"teams\":{\"1\":{\"unitDamageMultiplier\":1.0}},\"spawns\":[{\"type\":\"dagger\"}]}",
+            1,
         );
+        let nested = rules_after_command(
+            &CommandKind::SetRule(SetRule {
+                rule: "teams.1.unitDamageMultiplier".to_string(),
+                json: "2.5".to_string(),
+            }),
+            &row,
+        )
+        .unwrap()
+        .expect("nested update");
+        assert_eq!(
+            nested.0,
+            "{\"teams\":{\"1\":{\"unitDamageMultiplier\":2.5}},\"spawns\":[{\"type\":\"dagger\"}]}"
+        );
+        assert_eq!(nested.1, 2);
+
+        let appended = rules_after_command(
+            &CommandKind::SetRule(SetRule {
+                rule: "spawns[]".to_string(),
+                json: "{\"type\":\"crawler\"}".to_string(),
+            }),
+            &row,
+        )
+        .unwrap()
+        .expect("append update");
+        assert_eq!(
+            appended.0,
+            "{\"teams\":{\"1\":{\"unitDamageMultiplier\":1.0}},\"spawns\":[{\"type\":\"dagger\"},{\"type\":\"crawler\"}]}"
+        );
+    }
+
+    #[test]
+    fn set_rule_rejects_bad_path_or_json() {
+        let row = relay_row("{}", 1);
+        assert!(
+            rules_after_command(
+                &CommandKind::SetRule(SetRule {
+                    rule: "a..b".to_string(),
+                    json: "true".to_string(),
+                }),
+                &row,
+            )
+            .is_err()
+        );
+        assert!(
+            rules_after_command(
+                &CommandKind::SetRule(SetRule {
+                    rule: "waves".to_string(),
+                    json: "not json".to_string(),
+                }),
+                &row,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn set_rules_whole_blob_replaces_and_validates() {
+        let row = relay_row("{\"waves\":true}", 2);
+        let replaced = rules_after_command(
+            &CommandKind::SetRules(SetRules {
+                rules_json: "{\"pvp\":true}".to_string(),
+                rules_epoch: 2,
+            }),
+            &row,
+        )
+        .unwrap()
+        .expect("whole-blob update");
+        assert_eq!(replaced, ("{\"pvp\":true}".to_string(), 3));
+
+        let invalid = rules_after_command(
+            &CommandKind::SetRules(SetRules {
+                rules_json: "not json".to_string(),
+                rules_epoch: 2,
+            }),
+            &row,
+        );
+        assert!(invalid.is_err());
     }
 
     #[test]
