@@ -15,6 +15,7 @@
 | `pack.sh` / `pack.ps1` | Forward arguments to the offline asset pipeline `mind-tools` (release). |
 | `regen_goldens.sh` / `regen_goldens.ps1` | Verify or regenerate oracle goldens and update `parity/golden_manifest.json` sha256 hashes. |
 | `associate.sh` / `associate.ps1` | Opt-in installer for `.msav`/`.msch` file associations and the `mindustry://` / `mindustry-godot://` schemes. |
+| `export.sh` / `export.ps1` | Plan-22 export wrapper: checks the matching Godot 4.7.2 export templates, runs a headless export for a platform preset, and optionally verifies the artifact. Outputs default under the gitignored `client/bin/export/`. |
 | `version.sh` / `version.ps1` | Write `client/assets/version.properties` (upstream key set) from flags and git state. |
 | `mcp-smoke.sh` / `mcp-smoke.ps1` + `mcp_smoke.py` | In-engine MCP spine smoke over a stdio `open-godot-mcp` server; needs the editor already running. |
 
@@ -28,12 +29,13 @@
 - `regen_goldens.sh` defaults to `--check` (reads committed files, no JVM); `--only <id>` / `--all` regenerate via `parity/java/extract_source_goldens.py` and rewrite hashes. `MIND_JAVA_PARITY=1` uses the JVM dumpers in `parity/java/` when present; `MINDY_SRC` overrides the upstream source path.
 - `version.sh` writes LF-only keys `type`, `number`, `modifier`, `commitHash`, `buildDate`, `build`; commit hash and date default to the current git state. The output is gitignored.
 - `associate.sh` mirrors `mind_core::platform::assoc`: a Linux `.desktop` under `$XDG_DATA_HOME` (plus `update-desktop-database` / `xdg-mime` when available), or a Windows `.reg` imported through `reg.exe` from WSL. `MIND_EXE` overrides the exported binary path.
+`export.sh`/`export.ps1` resolve the Godot binary (`$GODOT_BIN` → `godot4`), derive the `<ver>.stable` templates directory (`~/.local/share/godot/export_templates/` on Linux, `%APPDATA%\Godot\export_templates\` on Windows; `GODOT_TEMPLATES_DIR` overrides), and fail with an install hint when it is absent. `--platform`/`-Platform` selects the preset (`windows`→`Windows Desktop`), `--preset`/`-Preset` overrides it, and `--out`/`-Out` selects the artifact path.
 - `mcp-smoke.sh` execs `python3 tools/mcp_smoke.py`, which spawns its own stdio `open-godot-mcp` server (bridge `ws://127.0.0.1:6970`) and drives `res://scenes/spine.tscn` end-to-end. Flags: `--mcp-bin`, `--repo-root`, `--server-arg`, `--keep-running`, `--verbose`; `OPEN_GODOT_MCP_BIN` overrides binary discovery. Exits `0` pass, `1` assertion/tool failure, `2` bridge not connected.
 
 ## Conventions
 
 - The Bash `.sh` scripts are canonical and run on the WSL2 Ubuntu dev host. Each derives `REPO_ROOT` from `${BASH_SOURCE[0]}`, uses `set -euo pipefail`, and exports `$HOME/.cargo/bin:$HOME/.local/bin` (see `ci.sh`).
-- `.ps1` twins are the Windows entrypoints. `ci.ps1`, `parity.ps1`, and `regen_goldens.ps1` locate the repo inside WSL (`wsl -d Ubuntu -e wslpath -u`) and invoke the matching `.sh`, keeping one implementation. `build.ps1`, `godot.ps1`, `server.ps1`, `sync_scenarios.ps1`, `pack.ps1`, `associate.ps1`, `version.ps1`, and `mcp-smoke.ps1` are native PowerShell mirrors that expose the same arguments and outputs for host-only steps.
+- `.ps1` twins are the Windows entrypoints. `ci.ps1`, `parity.ps1`, and `regen_goldens.ps1` locate the repo inside WSL (`wsl -d Ubuntu -e wslpath -u`) and invoke the matching `.sh`, keeping one implementation. `build.ps1`, `godot.ps1`, `server.ps1`, `sync_scenarios.ps1`, `pack.ps1`, `associate.ps1`, `export.ps1`, `version.ps1`, and `mcp-smoke.ps1` are native PowerShell mirrors that expose the same arguments and outputs for host-only steps.
 - Scripts and their README mentions stay in sync; adding a gate means editing `ci.sh` and, when the argument surface changes, the matching `.ps1`.
 - Generated outputs are gitignored: `client/bin/rust/`, `client/rust/target/parity/`, `client/scenarios/`, and `client/assets/version.properties`.
 - Environment overrides: `GODOT_BIN`, `GODOT_VERBOSE`, `MIND_HEADLESS_BIN`, `MIND_SERVER_HOST`, `MIND_SERVER_PORT`, `MIND_EXE`, `MINDY_SRC`, `MIND_JAVA_PARITY`, `PARITY_OUT_DIR`, `OPEN_GODOT_MCP_BIN`.
@@ -57,6 +59,9 @@ tools/regen_goldens.sh --check
 
 # Server wrapper
 tools/server.sh --socket "status,exit"
+
+# Headless desktop export (templates must be installed)
+tools/export.sh --platform windows --target release --verify
 
 # In-engine MCP smoke (editor already running; never run in CI)
 tools/mcp-smoke.sh
