@@ -23,6 +23,9 @@ use mind_core::io::save::{SaveIo, SaveOptions, SaveReadState, WriteContext};
 pub enum HostError {
     /// The requested map is not `synthetic` and no map file matched.
     UnknownMap(String),
+    /// A known built-in/sector-preset map was requested, but the real-world
+    /// loader (plan 06/12/19) is not wired into the headless host yet.
+    NeedsWorldLoader(String),
     /// No world is loaded (the command needs `host` first).
     NoWorld,
     /// The plan-21 host/relay call failed (`serve` online mode).
@@ -33,6 +36,12 @@ impl std::fmt::Display for HostError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             HostError::UnknownMap(map) => write!(f, "unknown map: {map}"),
+            HostError::NeedsWorldLoader(map) => write!(
+                f,
+                "`{map}` is a known map/sector preset, but the real-world loader \
+                 (plan 06/12/19) is not wired into the headless host yet; use \
+                 `host synthetic` or place a `{map}.msav` under config/maps/"
+            ),
             HostError::NoWorld => write!(f, "no world loaded; use `host <map> [mode]` first"),
             HostError::Net(reason) => write!(f, "{reason}"),
         }
@@ -273,6 +282,18 @@ impl LocalHost {
         self.mode.get_or_insert_with(|| "survival".to_owned());
         Ok(())
     }
+
+    /// Distinguishes an unknown name from a known built-in/sector preset the
+    /// headless host cannot yet build (plan 06/12/19 loader not wired).
+    fn missing_map_error(&self, name: &str) -> HostError {
+        let known_builtin = mind_core::maps::DEFAULT_MAP_NAMES.contains(&name);
+        let known_sector = self.registry.sector_by_name(name).is_some();
+        if known_builtin || known_sector {
+            HostError::NeedsWorldLoader(name.to_owned())
+        } else {
+            HostError::UnknownMap(name.to_owned())
+        }
+    }
 }
 
 impl HostControl for LocalHost {
@@ -289,7 +310,7 @@ impl HostControl for LocalHost {
                 candidate.with_extension("msav")
             };
             if !candidate.exists() {
-                return Err(HostError::UnknownMap(name.to_owned()));
+                return Err(self.missing_map_error(name));
             }
             let mut loader = LocalHost {
                 registry: self.registry,
@@ -331,5 +352,56 @@ impl HostControl for LocalHost {
         let world = self.world.as_mut().ok_or(HostError::NoWorld)?;
         world.wave = world.wave.saturating_add(1);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn registry() -> &'static ContentRegistry {
+        Box::leak(Box::new(
+            crate::server::boot_content().expect("content boot"),
+        ))
+    }
+
+    /// `host groundZero` / `host maze`: plan 06/19 names are recognised and
+    /// delegated to the (unwired) real-world loader rather than reported unknown.
+    #[test]
+    fn known_map_names_delegate_to_world_loader() {
+        let dir = std::env::temp_dir().join(format!("mind-host-map-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut host = LocalHost::new(registry(), dir.clone());
+        assert!(matches!(
+            host.host("groundZero", "survival"),
+            Err(HostError::NeedsWorldLoader(_))
+        ));
+        assert!(matches!(
+            host.host("maze", "survival"),
+            Err(HostError::NeedsWorldLoader(_))
+        ));
+        assert!(matches!(
+            host.host("no-such-map-xyz", "survival"),
+            Err(HostError::UnknownMap(_))
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn synthetic_host_roundtrips_status() {
+        let dir = std::env::temp_dir().join(format!("mind-host-syn-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut host = LocalHost::new(registry(), dir.clone());
+        host.host("synthetic", "survival").expect("host");
+        assert!(host.status().hosting);
+        assert_eq!(host.status().map.as_deref(), Some("synthetic"));
+        // `FixtureWorld::synthetic` starts at wave 3 (save-roundtrip fixture), so
+        // assert the increment rather than an absolute value.
+        let before = host.status().wave;
+        host.run_wave().expect("wave");
+        assert_eq!(host.status().wave, before + 1);
+        host.stop();
+        assert!(!host.status().hosting);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
