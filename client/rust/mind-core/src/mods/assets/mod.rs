@@ -122,8 +122,16 @@ impl DataAssetType {
 pub struct ContentRecord {
     /// Declared content type.
     pub type_: ContentType,
+    /// Content name (file stem, no extension) — the parser's `stem`
+    /// (`DataAsset.name` via `getFileNameWithoutExtension`).
+    pub name: String,
     /// Raw JSON payload.
     pub json: String,
+}
+
+/// `DataAsset.name`: last path component without its extension.
+pub fn data_asset_name(path: &str) -> String {
+    image::image_stem(path)
 }
 
 /// `DataAsset.data`.
@@ -164,10 +172,12 @@ impl DataAsset {
     /// Patch asset from raw JSON (`PatchAsset`).
     pub fn patch(name: impl Into<String>, json: impl Into<String>) -> Self {
         let json = json.into();
+        let path = name.into();
+        let stem = data_asset_name(&path);
         let string_hash = Some(hex32(&sha256(json.as_bytes())));
         Self {
-            path: name.into(),
-            name: String::new(),
+            path,
+            name: stem,
             type_: DataAssetType::Patch,
             embedded: true,
             data: DataAssetData::Patch(json),
@@ -180,13 +190,19 @@ impl DataAsset {
     /// Content asset (`ContentAsset`), always embedded.
     pub fn content(name: impl Into<String>, type_: ContentType, json: impl Into<String>) -> Self {
         let json = json.into();
+        let path = name.into();
+        let stem = data_asset_name(&path);
         let string_hash = Some(hex32(&sha256(json.as_bytes())));
         Self {
-            path: name.into(),
-            name: String::new(),
+            path,
+            name: stem.clone(),
             type_: DataAssetType::Content,
             embedded: true,
-            data: DataAssetData::Content(ContentRecord { type_, json }),
+            data: DataAssetData::Content(ContentRecord {
+                type_,
+                name: stem,
+                json,
+            }),
             byte_hash: None,
             string_hash,
             override_cache_file: None,
@@ -201,9 +217,11 @@ impl DataAsset {
         embedded: bool,
     ) -> Self {
         let hash = sha256(&bytes);
+        let path = path.into();
+        let stem = data_asset_name(&path);
         Self {
-            path: path.into(),
-            name: String::new(),
+            path,
+            name: stem,
             type_,
             embedded,
             data: DataAssetData::Blob(bytes),
@@ -216,9 +234,11 @@ impl DataAsset {
     /// Bundle asset from properties text.
     pub fn bundle(name: impl Into<String>, text: &str) -> Self {
         let string_hash = Some(hex32(&sha256(text.as_bytes())));
+        let path = name.into();
+        let stem = data_asset_name(&path);
         Self {
-            path: name.into(),
-            name: String::new(),
+            path,
+            name: stem,
             type_: DataAssetType::Bundle,
             embedded: false,
             data: DataAssetData::Bundle(parse_properties(text)),
@@ -273,6 +293,7 @@ impl DataAsset {
         let type_ = DataAssetType::from_ordinal(type_code)
             .ok_or_else(|| IoError::corrupt(format!("unknown data asset type {type_code}")))?;
         let path = reader.str()?;
+        let stem = data_asset_name(&path);
         let embedded = reader.bool()?;
         let (data, byte_hash) = if embedded {
             let len = reader.u()? as usize;
@@ -290,6 +311,7 @@ impl DataAsset {
                         .map_err(|_| IoError::corrupt("content asset is not UTF-8"))?;
                     DataAssetData::Content(ContentRecord {
                         type_: content_type,
+                        name: stem.clone(),
                         json,
                     })
                 }
@@ -312,7 +334,7 @@ impl DataAsset {
         };
         Ok(Self {
             path,
-            name: String::new(),
+            name: stem,
             type_,
             embedded,
             data,
@@ -604,6 +626,9 @@ pub struct ModDataManager {
     patcher: crate::mods::patch::DataPatcher,
     content_errors: Vec<String>,
     patched_content: Vec<ContentRef>,
+    /// Registry index baseline before the last `reload_content`, restored on
+    /// unload/replace so runtime content assets never stack (`DataManager` copy).
+    content_snapshot: Option<crate::content::snapshot::RegistryIndexSnapshot>,
 }
 
 impl std::fmt::Debug for ModDataManager {
@@ -659,6 +684,7 @@ impl ModDataManager {
         self.assets.clear();
         self.patched.clear();
         self.patched_content.clear();
+        self.content_snapshot = None;
         self.runtime_textures.clear();
         self.bundle_originals.clear();
         self.merged_bundles.clear();
@@ -799,6 +825,12 @@ impl ModDataManager {
 
     /// `DataManager.unload`: unapply patches and drop every record.
     pub fn unload_assets(&mut self, registry: &mut ContentRegistry) {
+        // Content assets are restored to their pre-load index first (they were
+        // loaded after patches); `patcher.unapply` then rolls patches back to
+        // the true baseline.
+        if let Some(snapshot) = self.content_snapshot.take() {
+            registry.restore_index(snapshot);
+        }
         self.patcher.unapply(registry);
         self.audio_applier.unload();
         self.image_applier.unload();
@@ -834,21 +866,47 @@ impl ModDataManager {
         reload_arrays: bool,
     ) -> Result<(), ModError> {
         self.content_errors.clear();
+        // Replace-only: roll back any previously loaded content set so records
+        // never stack (`DataManager.load` unloads first).
+        if let Some(snapshot) = self.content_snapshot.take() {
+            registry.restore_index(snapshot);
+        }
+        self.content_snapshot = Some(registry.snapshot_index());
         let previous = registry.current_mod().cloned();
         registry.set_current_mod(Some(ModId(String::from("dp"))));
         let mut parser = crate::mods::json::ContentJsonParser::restricted();
+        let mut created: Vec<ContentRef> = Vec::new();
         for record in content {
-            let stem = content_stem(&record.json);
+            let stem = record.name.clone();
             match parser.parse(registry, &stem, &stem, &record.json, record.type_) {
                 Ok(reference) => {
                     if !self.patched_content.contains(&reference) {
                         self.patched_content.push(reference);
                     }
+                    created.push(reference);
                 }
                 Err(error) => self.content_errors.push(error.message),
             }
         }
         registry.set_current_mod(previous);
+        // `DataPatcher.created`: init then postInit on each new record, then the
+        // client `loadIcon`/`load` half (headless no-op). Per-content failures
+        // are isolated into `content_errors` exactly like parse errors.
+        for reference in &created {
+            if let Err(error) = registry.init_created(*reference) {
+                self.content_errors.push(error.to_string());
+            }
+        }
+        for reference in &created {
+            if let Err(error) = registry.post_init_created(*reference) {
+                self.content_errors.push(error.to_string());
+            }
+        }
+        for reference in &created {
+            if let Err(error) = registry.load_created(*reference) {
+                self.content_errors.push(error.to_string());
+            }
+        }
         if reload_arrays {
             crate::mods::patch::fix_content_arrays(registry);
         }
@@ -923,19 +981,6 @@ fn blob_is_empty(asset: &DataAsset) -> bool {
         DataAssetData::Blob(bytes) => bytes.is_empty(),
         _ => false,
     }
-}
-
-/// Content name stem: the JSON `name` field when present, else `content`.
-fn content_stem(json: &str) -> String {
-    serde_json::from_str::<serde_json::Value>(json)
-        .ok()
-        .and_then(|value| {
-            value
-                .get("name")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_owned)
-        })
-        .unwrap_or_else(|| String::from("content"))
 }
 
 /// Plan 20 §6.8 / plan 04 `PatchSetIo`: writes the manager's asset records into
@@ -1182,10 +1227,12 @@ mod tests {
         let records = vec![
             ContentRecord {
                 type_: ContentType::Item,
+                name: "a".to_owned(),
                 json: "{}".to_owned(),
             },
             ContentRecord {
                 type_: ContentType::Block,
+                name: "b".to_owned(),
                 json: "{}".to_owned(),
             },
         ];
@@ -1301,6 +1348,170 @@ mod tests {
         assert!(manager.image_applier().is_empty());
         assert!(manager.bundle_applier().files().next().is_none());
         assert!(manager.content_errors().is_empty());
+    }
+
+    fn content_registry() -> crate::content::ContentRegistry {
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+        let bundle = MemoryBundle::new();
+        let store = MemoryUnlockStore::new();
+        let mut registry = create_base_content(&bundle, &store, true).expect("base content");
+        registry.init().expect("init");
+        registry
+    }
+
+    fn content_record(type_: ContentType, name: &str, json: &str) -> ContentRecord {
+        ContentRecord {
+            type_,
+            name: name.to_owned(),
+            json: json.to_owned(),
+        }
+    }
+
+    /// DataAssetTests.basicItem (§7a): the `dp-` item takes its name from the
+    /// asset file stem, its display name from the JSON bundle, runs the created
+    /// lifecycle and is fully removed when the asset set is unloaded.
+    #[test]
+    fn data_asset_basic_item() {
+        let mut registry = content_registry();
+        let total_items = registry.items().len();
+
+        let mut manager = ModDataManager::new();
+        manager
+            .reload_content(
+                &[content_record(
+                    ContentType::Item,
+                    "testitem",
+                    r#"{"name":"Test Item","hardness":10}"#,
+                )],
+                &mut registry,
+                true,
+            )
+            .expect("reload content");
+
+        let id = registry.item_id("dp-testitem").expect("dp-testitem");
+        let item = registry.item(id).expect("item");
+        assert_eq!(item.hardness, 10);
+        assert_eq!(item.unlock.localized_name, "Test Item");
+        assert!(
+            manager.content_errors().is_empty(),
+            "{:?}",
+            manager.content_errors()
+        );
+
+        manager.unload_assets(&mut registry);
+        assert_eq!(registry.items().len(), total_items);
+        assert!(registry.item_id("dp-testitem").is_none());
+    }
+
+    /// DataAssetTests.basicUnit (§7a): `type: tank` resolves, the created
+    /// lifecycle mirror-expands the weapon to two, and unload removes the unit.
+    #[test]
+    fn data_asset_basic_unit() {
+        use crate::content::registries::bullets::BulletKind;
+
+        let mut registry = content_registry();
+        let total_units = registry.units().len();
+
+        let mut manager = ModDataManager::new();
+        manager
+            .reload_content(
+                &[content_record(
+                    ContentType::Unit,
+                    "testunit",
+                    r#"{"name":"Test Unit","type":"tank","weapons":[
+                        {"mirror":true,"bullet":{"damage":10,"type":"LaserBulletType","length":1000}}]}"#,
+                )],
+                &mut registry,
+                true,
+            )
+            .expect("reload content");
+
+        let id = registry.unit_id("dp-testunit").expect("dp-testunit");
+        let unit = registry.unit(id).expect("unit");
+        assert_eq!(unit.unlock.localized_name, "Test Unit");
+        assert_eq!(unit.weapons.len(), 2, "mirror expands at init");
+        let bullet = registry.bullet(unit.weapons[0].bullet.id).expect("bullet");
+        assert_eq!(bullet.kind, BulletKind::Laser);
+        assert_eq!(bullet.damage, 10.0);
+        assert_eq!(bullet.length, 1000.0);
+        assert!(
+            manager.content_errors().is_empty(),
+            "{:?}",
+            manager.content_errors()
+        );
+
+        manager.unload_assets(&mut registry);
+        assert_eq!(registry.units().len(), total_units);
+        assert!(registry.unit_id("dp-testunit").is_none());
+    }
+
+    /// DataAssetTests.noContentAddedWithError (§7a): an unknown `type` isolates
+    /// the bad asset; the good asset still registers and one warning is kept.
+    #[test]
+    fn data_asset_bad_type_isolated() {
+        let mut registry = content_registry();
+
+        let mut manager = ModDataManager::new();
+        manager
+            .reload_content(
+                &[
+                    content_record(
+                        ContentType::Block,
+                        "goodblock",
+                        r#"{"name":"Good","health":50}"#,
+                    ),
+                    content_record(
+                        ContentType::Block,
+                        "badblock",
+                        r#"{"name":"Bad","type":"TotallyNotABlock"}"#,
+                    ),
+                ],
+                &mut registry,
+                true,
+            )
+            .expect("reload content");
+
+        assert!(registry.block_id("dp-goodblock").is_some());
+        assert!(registry.block_id("dp-badblock").is_none());
+        assert_eq!(
+            manager.content_errors().len(),
+            1,
+            "{:?}",
+            manager.content_errors()
+        );
+    }
+
+    /// DataAssetTests.noNullFieldsAllowed (§7a): an explicit null field is
+    /// refused for that asset only; the warning mentions `null`.
+    #[test]
+    fn data_asset_null_field_isolated() {
+        let mut registry = content_registry();
+
+        let mut manager = ModDataManager::new();
+        manager
+            .reload_content(
+                &[
+                    content_record(
+                        ContentType::Block,
+                        "goodblock",
+                        r#"{"name":"Good","health":50}"#,
+                    ),
+                    content_record(ContentType::Block, "badblock", r#"{"name":null}"#),
+                ],
+                &mut registry,
+                true,
+            )
+            .expect("reload content");
+
+        assert!(registry.block_id("dp-goodblock").is_some());
+        assert!(registry.block_id("dp-badblock").is_none());
+        assert_eq!(
+            manager.content_errors().len(),
+            1,
+            "{:?}",
+            manager.content_errors()
+        );
+        assert!(manager.content_errors()[0].contains("null"));
     }
 
     /// Plan 20 M4: external assets with no resolved payload are `missing`.

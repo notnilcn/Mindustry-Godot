@@ -51,6 +51,9 @@ pub struct DataPatcher {
     used: IndexSet<(ContentRef, String)>,
     warnings: Vec<String>,
     after_patch_calls: usize,
+    /// Content records created during this apply (`DataPatcher.created`); their
+    /// `init`/`postInit`/client `load` run once after traversal.
+    created: Vec<ContentRef>,
 }
 
 impl Default for DataPatcher {
@@ -69,6 +72,14 @@ impl DataPatcher {
             used: IndexSet::new(),
             warnings: Vec::new(),
             after_patch_calls: 0,
+            created: Vec::new(),
+        }
+    }
+
+    /// Records a content reference constructed by this apply (`created`).
+    pub(crate) fn mark_created(&mut self, reference: ContentRef) {
+        if !self.created.contains(&reference) {
+            self.created.push(reference);
         }
     }
 
@@ -120,6 +131,7 @@ impl DataPatcher {
         self.warnings.clear();
         self.used.clear();
         self.resetters.clear();
+        self.created.clear();
         self.after_patch_calls = 0;
 
         for patch in patches {
@@ -151,6 +163,24 @@ impl DataPatcher {
             .after_patch()
             .map_err(|error| ContentError::Parse(error.to_string()))?;
         self.after_patch_calls += 1;
+        // `DataPatcher.created`: init then postInit on each new record, and the
+        // client `loadIcon`/`load` half (headless no-op).
+        let created = std::mem::take(&mut self.created);
+        for reference in &created {
+            registry
+                .init_created(*reference)
+                .map_err(|error| ContentError::Parse(error.to_string()))?;
+        }
+        for reference in &created {
+            registry
+                .post_init_created(*reference)
+                .map_err(|error| ContentError::Parse(error.to_string()))?;
+        }
+        for reference in &created {
+            registry
+                .load_created(*reference)
+                .map_err(|error| ContentError::Parse(error.to_string()))?;
+        }
         fix_content_arrays(registry);
         self.applied = true;
         Ok(())
@@ -184,6 +214,7 @@ impl DataPatcher {
         for resetter in self.resetters.drain(..).rev() {
             resetter(registry);
         }
+        self.created.clear();
         self.used.clear();
         self.applied = false;
     }
@@ -1524,26 +1555,36 @@ impl DataPatcher {
         mode: FieldMode,
         value: &Value,
     ) {
-        let entries: Vec<&Map<String, Value>> = match value {
-            Value::Object(map) => vec![map],
+        // `Seq<Weapon>` accepts a whole array, a single object, or an
+        // index-keyed object (`{"0": {...}}`; `PatcherTests.arrayMulti`).
+        let mut entries: Vec<(Option<usize>, &Map<String, Value>)> = Vec::new();
+        match value {
+            Value::Object(map) if is_index_map(map) => {
+                for (key, val) in map {
+                    let Some(weapon) = val.as_object() else {
+                        self.warn("weapon entries must be objects");
+                        return;
+                    };
+                    entries.push((key.parse().ok(), weapon));
+                }
+            }
+            Value::Object(map) => entries.push((None, map)),
             Value::Array(items) => {
-                let mut out = Vec::with_capacity(items.len());
                 for item in items {
                     match item.as_object() {
-                        Some(map) => out.push(map),
+                        Some(map) => entries.push((None, map)),
                         None => {
                             self.warn("weapon entries must be objects");
                             return;
                         }
                     }
                 }
-                out
             }
             _ => {
                 self.warn("`weapons` must be an object or array");
                 return;
             }
-        };
+        }
         let Some(original) = registry
             .unit(UnitTypeId::new(raw))
             .map(|unit| unit.weapons.clone())
@@ -1558,25 +1599,53 @@ impl DataPatcher {
                     }
                 }));
         }
+        let bullets_before = registry.bullets().len();
         let mut parser = crate::mods::json::ContentJsonParser::new();
-        let mut created = Vec::with_capacity(entries.len());
-        for (index, object) in entries.iter().enumerate() {
-            match parser.parse_weapon_object(registry, "patch", object, index) {
-                Ok(weapon) => created.push(weapon),
+        let mut created: Vec<(
+            Option<usize>,
+            crate::content::registries::units::weapon::WeaponDef,
+        )> = Vec::with_capacity(entries.len());
+        for (index, object) in &entries {
+            match parser.parse_weapon_object(registry, "patch", object, index.unwrap_or(0)) {
+                Ok(weapon) => created.push((*index, weapon)),
                 Err(error) => {
                     self.warn(error.message);
                     return;
                 }
             }
         }
-        if let Some(unit) = registry.unit_mut(UnitTypeId::new(raw)) {
-            match mode {
-                FieldMode::Set => unit.weapons = created,
-                FieldMode::Append => unit.weapons.extend(created),
-                FieldMode::Index(index) => {
-                    if index < unit.weapons.len() && !created.is_empty() {
-                        unit.weapons[index] = created.swap_remove(0);
+        // `DataPatcher.created`: inline bullets registered by these weapons are
+        // freshly constructed non-mappable content that must run its lifecycle.
+        for (_, weapon) in &created {
+            if weapon.bullet.id.raw() as usize >= bullets_before {
+                self.mark_created(ContentRef::new(ContentType::Bullet, weapon.bullet.id.raw()));
+            }
+        }
+        let Some(unit) = registry.unit_mut(UnitTypeId::new(raw)) else {
+            return;
+        };
+        match mode {
+            FieldMode::Set if created.iter().any(|(index, _)| index.is_some()) => {
+                for (index, weapon) in created {
+                    if let Some(index) = index
+                        && index < unit.weapons.len()
+                    {
+                        unit.weapons[index] = weapon;
                     }
+                }
+            }
+            FieldMode::Set => {
+                unit.weapons = created.into_iter().map(|(_, weapon)| weapon).collect();
+            }
+            FieldMode::Append => {
+                unit.weapons
+                    .extend(created.into_iter().map(|(_, weapon)| weapon));
+            }
+            FieldMode::Index(index) => {
+                if index < unit.weapons.len()
+                    && let Some((_, weapon)) = created.into_iter().next()
+                {
+                    unit.weapons[index] = weapon;
                 }
             }
         }
@@ -2192,6 +2261,24 @@ pub fn fix_content_arrays(registry: &mut ContentRegistry) {
     }
 }
 
+/// `DataPatcher.fixContentArrays` world half: grows every live building's
+/// [`ItemModule`](crate::world::ItemModule)/[`LiquidModule`](crate::world::LiquidModule)
+/// to the dense content counts. Upstream only does this for the editor world
+/// (`!Vars.headless && ui.editor.isShown()`); the port exposes it as a hook for
+/// plan 09/19 instead of reaching into `Vars.world`.
+pub fn fix_world_content_arrays(world: &mut bevy_ecs::world::World, registry: &ContentRegistry) {
+    let items = registry.items().len();
+    let liquids = registry.liquids().len();
+    let mut item_query = world.query::<&mut crate::world::ItemModule>();
+    for mut module in item_query.iter_mut(world) {
+        module.check_array_capacity(items);
+    }
+    let mut liquid_query = world.query::<&mut crate::world::LiquidModule>();
+    for mut module in liquid_query.iter_mut(world) {
+        module.check_array_capacity(liquids);
+    }
+}
+
 /// `Mods.loadModPatches`: applies each enabled mod's `patches/**.json` with a
 /// fresh [`DataPatcher`] (so mods never reset each other), files sorted.
 ///
@@ -2309,6 +2396,12 @@ fn parse_liquid_stacks(
         }
     }
     Ok(out)
+}
+
+/// Whether a JSON object is an index-keyed container (`{"0": …}`), used to
+/// address `Seq` elements in the object form (`PatcherTests.arrayMulti`).
+fn is_index_map(map: &Map<String, Value>) -> bool {
+    !map.is_empty() && map.keys().all(|key| key.parse::<usize>().is_ok())
 }
 
 /// Resolves a `unit.targetFlags` name to a [`BlockFlag`] keyword.
@@ -2603,6 +2696,68 @@ mod tests {
         assert_eq!(weapons[0].name, "megapoop");
         patcher.unapply(&mut registry);
         assert_eq!(registry.unit(id).expect("unit").weapons, original);
+    }
+
+    /// PatcherTests.arrayMulti: index-keyed object replacement + `weapons.+`
+    /// append in one patch; unapply restores the authored list.
+    #[test]
+    fn array_multi_edit() {
+        let mut registry = test_registry();
+        let id = registry.unit_id("dagger").expect("dagger");
+        let original = registry.unit(id).expect("unit").weapons.clone();
+        let mut patcher = DataPatcher::new();
+        patcher
+            .apply(
+                &mut registry,
+                &[patch(
+                    r#"{"name":"Patch0","unit":{"dagger":{
+                        "weapons":{"0":{"type":"Weapon","name":"toxopid-cannon"}},
+                        "weapons.+":[{"name":"sei-launcher"}]}}}"#,
+                )],
+            )
+            .expect("array multi");
+        let weapons = registry.unit(id).expect("unit").weapons.clone();
+        assert_eq!(weapons.len(), original.len() + 1);
+        assert_eq!(weapons[0].name, "toxopid-cannon");
+        assert_eq!(weapons.last().expect("appended").name, "sei-launcher");
+        assert!(patcher.warnings().is_empty(), "{:?}", patcher.warnings());
+        patcher.unapply(&mut registry);
+        assert_eq!(registry.unit(id).expect("unit").weapons, original);
+    }
+
+    /// Plan 20 M3b: `fix_content_arrays` world half grows live building
+    /// `ItemModule`/`LiquidModule` arrays to the dense content counts.
+    #[test]
+    fn fix_world_content_arrays_grows_live_modules() {
+        let registry = test_registry();
+        let item_count = registry.items().len();
+        let liquid_count = registry.liquids().len();
+
+        let mut world = bevy_ecs::world::World::new();
+        let items = world.spawn(crate::world::ItemModule::with_items(1)).id();
+        let liquids = world
+            .spawn(crate::world::LiquidModule::with_liquids(1))
+            .id();
+        world
+            .get_mut::<crate::world::ItemModule>(items)
+            .expect("item module")
+            .add(ItemId::COPPER, 3, 10);
+
+        fix_world_content_arrays(&mut world, &registry);
+
+        let module = world
+            .get::<crate::world::ItemModule>(items)
+            .expect("module");
+        assert_eq!(module.items.len(), item_count);
+        assert_eq!(module.get(ItemId::COPPER), 3, "growth preserves counts");
+        assert_eq!(
+            world
+                .get::<crate::world::LiquidModule>(liquids)
+                .expect("liquid module")
+                .liquids
+                .len(),
+            liquid_count
+        );
     }
 
     /// PatcherTests.unitFlagsArray: `targetFlags.+` array append + reset.

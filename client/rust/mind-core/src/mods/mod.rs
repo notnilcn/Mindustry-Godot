@@ -867,4 +867,46 @@ mod tests {
             Some(UnsupportedReason::ScriptsUnsupported)
         );
     }
+
+    /// GenericModTest/ModTestAllure offline port (§7a): the committed
+    /// `parity/mod_fixtures/zip/testmod.zip` package discovers, resolves and
+    /// parses its JSON content into the registry.
+    #[test]
+    fn fixture_zip_mod_loads() {
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+        use crate::io::fs::NativeFs;
+        use crate::mods::provider::ModsContentProvider;
+
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../parity/mod_fixtures/zip");
+        let fs = NativeFs;
+        let settings = SettingsStore::new();
+        let mut mods = Mods::new(true, &dir);
+        let report = mods.load(&fs, &dir, &settings).expect("load zip mod");
+        assert!(
+            report
+                .mods
+                .iter()
+                .any(|m| m.name == "test-mod" && m.state == ModState::Enabled),
+            "testmod.zip discovers as test-mod: {:?}",
+            report.mods
+        );
+
+        let files = mods.collect_content_files(&fs);
+        assert!(
+            files
+                .iter()
+                .any(|file| file.mod_name == "test-mod" && file.stem == "test-ingot"),
+            "zip content file collected: {files:?}"
+        );
+
+        let bundle = MemoryBundle::new();
+        let store = MemoryUnlockStore::new();
+        let mut registry = create_base_content(&bundle, &store, true).expect("base content");
+        registry.init().expect("init");
+        let mut provider = ModsContentProvider::new(files);
+        registry
+            .create_mod_content(&mut provider)
+            .expect("zip content parses");
+        assert!(registry.item_id("test-mod-test-ingot").is_some());
+    }
 }

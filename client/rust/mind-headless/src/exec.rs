@@ -330,6 +330,11 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
                 repo,
                 json,
             } => cmd_mods_assets(fixture, repo.as_deref(), *json),
+            ModsCommand::ErrorIsolation {
+                fixture,
+                repo,
+                json,
+            } => cmd_mods_error_isolation(fixture, repo.as_deref(), *json),
         },
         Command::Io { command } => match command {
             IoCommand::DumpMeta { file, json } => cmd_io_dump_meta(file, *json),
@@ -1808,6 +1813,100 @@ fn cmd_mods_assets(fixture: &str, repo: Option<&Path>, json: bool) -> anyhow::Re
         );
     }
     Ok(EXIT_PASS)
+}
+
+/// Total content records across every mappable kind (registry size).
+fn script_content_count(registry: &mind_core::content::ContentRegistry) -> usize {
+    registry.items().len()
+        + registry.blocks().len()
+        + registry.liquids().len()
+        + registry.statuses().len()
+        + registry.units().len()
+        + registry.weathers().len()
+        + registry.planets().len()
+        + registry.sectors().len()
+        + registry.teams().len()
+}
+
+/// Plan 20 M1/M3 §7b (`mods error-isolation`): one bad content file among good
+/// ones must not remove the good records; the failure is reported instead.
+fn cmd_mods_error_isolation(fixture: &str, repo: Option<&Path>, json: bool) -> anyhow::Result<i32> {
+    use mind_core::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+    use mind_core::io::SettingsStore;
+    use mind_core::io::fs::NativeFs;
+    use mind_core::mods::{Mods, provider::ModsContentProvider};
+
+    let root = paths::find_repo_root(repo)?;
+    let dir = root.join("parity/mod_fixtures").join(fixture);
+    let fs = NativeFs;
+    let mut mods = Mods::new(true, &dir);
+    mods.load_single(&fs, &dir, &SettingsStore::new())
+        .with_context(|| format!("loading fixture `{fixture}`"))?;
+    let files = mods.collect_content_files(&fs);
+    let mut provider = ModsContentProvider::new(files);
+
+    let bundle = MemoryBundle::new();
+    let store = MemoryUnlockStore::new();
+    let mut registry = create_base_content(&bundle, &store, true)
+        .map_err(|error| anyhow!("base content: {error}"))?;
+    registry
+        .init()
+        .map_err(|error| anyhow!("content init: {error}"))?;
+    registry
+        .post_init()
+        .map_err(|error| anyhow!("content post-init: {error}"))?;
+
+    let baseline = script_content_count(&registry);
+    let result = registry.create_mod_content(&mut provider);
+    let errors: Vec<String> = match &result {
+        Ok(()) => Vec::new(),
+        Err(errors) => errors.iter().map(|error| error.to_string()).collect(),
+    };
+    let delta = script_content_count(&registry) - baseline;
+
+    let modded_items: Vec<&str> = registry
+        .items()
+        .iter()
+        .filter(|item| item.minfo.is_modded())
+        .map(|item| item.name.as_str())
+        .collect();
+    let modded_blocks: Vec<&str> = registry
+        .blocks()
+        .iter()
+        .filter(|block| block.minfo.is_modded())
+        .map(|block| block.name.as_str())
+        .collect();
+    let good_item = registry.item_id("error-mod-good-item").is_some();
+    let bad_block_present = registry.block_id("error-mod-bad-block").is_some();
+    // The `error` fixture has two good item files (one with an unknown field
+    // that only warns) and one block with an unknown `type` (rejected).
+    let pass = good_item && !bad_block_present && !errors.is_empty() && delta == 2;
+    if !pass {
+        log::error!(
+            "mods error-isolation failed: good_item={good_item} bad_block={bad_block_present} delta={delta} errors={errors:?}"
+        );
+    }
+    let report = serde_json::json!({
+        "fixture": fixture,
+        "goodItem": good_item,
+        "badBlockPresent": bad_block_present,
+        "errors": errors,
+        "moddedItems": modded_items,
+        "moddedBlocks": modded_blocks,
+        "registryDelta": delta,
+        "modHasContentErrors": mods.has_content_errors(),
+        "pass": pass,
+    });
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "mods error-isolation: {} error(s), registry delta {delta}, goodItem={good_item}, badBlock={bad_block_present}: {}",
+            report["errors"].as_array().map_or(0, Vec::len),
+            if pass { "PASS" } else { "FAIL" }
+        );
+    }
+    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
 }
 
 /// Plan 20 M9 (`mods bench`): times one pipeline scene (§7d).
