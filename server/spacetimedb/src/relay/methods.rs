@@ -12,13 +12,13 @@ use crate::admin::admin_identity as _;
 
 use super::tables::{
     AdminSwitchTeam, AdminTileOp, BreakBlock, Bullet, CommandBuilding, CommandKind, CommandRate,
-    CompleteObjective, ConfigBlock, DeletePlans, Inventory, LogicClientData, LogicSync, MatchStatus,
-    MenuBuilderChoose, MenuChoose, Payload, PlaceBlock, PlayerSpawn, RelayMatch, RelayMember,
-    ResearchUnlock, Rotate, RunWave, SetRule, SetRules, TextInputResult, UnitCommand,
+    CompleteObjective, ConfigBlock, DeletePlans, Inventory, LogicClientData, LogicSync,
+    MatchStatus, MenuBuilderChoose, MenuChoose, Payload, PlaceBlock, PlayerSpawn, RelayMatch,
+    RelayMember, ResearchUnlock, Rotate, RunWave, SetRule, SetRules, TextInputResult, UnitCommand,
     UnitCommandQueue, UnitControl, UnitStance, command_rate, relay_match, relay_member,
 };
 use crate::main::global::{
-    DEFAULT_COMMANDS_PER_SECOND, DEFAULT_COMMAND_RATE_WINDOW_MS, DEFAULT_MAP_HEIGHT_TILES,
+    DEFAULT_COMMAND_RATE_WINDOW_MS, DEFAULT_COMMANDS_PER_SECOND, DEFAULT_MAP_HEIGHT_TILES,
     DEFAULT_MAP_WIDTH_TILES, MAX_CONFIG_BYTES, MAX_PLACE_CONFIG_BYTES, MAX_POSITIONS,
     MAX_RULES_JSON, MAX_UNITS,
 };
@@ -35,6 +35,11 @@ pub const MAX_CONTENT_NAME_LEN: usize = 100;
 
 /// Salt mixed into the password hash so equal passwords differ from bare FNV.
 const PASSWORD_SALT: &[u8] = b"mindustry-godot/password/v1";
+
+/// Whether an `f32` is finite (client-state float guard, plan §6.3).
+pub fn is_finite(value: f32) -> bool {
+    value.is_finite()
+}
 
 /// Whether a rate window starting at `window_start_micros` has expired.
 pub fn window_expired(now_micros: i64, window_start_micros: i64, window_ms: u32) -> bool {
@@ -271,7 +276,10 @@ pub fn validate_kind(
         }
         CommandKind::AdminSwitchTeam(AdminSwitchTeam { .. }) => Ok(()),
         CommandKind::AdminTileOp(AdminTileOp {
-            points, name0, name1, ..
+            points,
+            name0,
+            name1,
+            ..
         }) => {
             cap_list(points.len(), 1024, "points")?;
             if let Some(name) = name0 {
@@ -282,13 +290,13 @@ pub fn validate_kind(
             }
             Ok(())
         }
-        CommandKind::LogicSync(LogicSync { var_name, value, .. }) => {
+        CommandKind::LogicSync(LogicSync {
+            var_name, value, ..
+        }) => {
             cap_str(var_name, 64, "var_name")?;
             cap_bytes(value, 1024, "logic value")
         }
-        CommandKind::LogicClientData(LogicClientData {
-            channel, value, ..
-        }) => {
+        CommandKind::LogicClientData(LogicClientData { channel, value, .. }) => {
             cap_str(channel, 64, "channel")?;
             cap_bytes(value, 8 * 1024, "logic client value")
         }
@@ -494,7 +502,12 @@ mod tests {
         assert!(validate_kind(&place(1, 1, "bad name", 0), 100, 100).is_err());
         assert!(validate_kind(&place(1, 1, "stone-wall", 4), 100, 100).is_err());
         assert!(
-            validate_kind(&CommandKind::BreakBlock(BreakBlock { x: -1, y: 0 }), 100, 100).is_err()
+            validate_kind(
+                &CommandKind::BreakBlock(BreakBlock { x: -1, y: 0 }),
+                100,
+                100
+            )
+            .is_err()
         );
         assert!(
             validate_kind(
@@ -549,13 +562,16 @@ mod tests {
 
     #[test]
     fn role_and_spectator_classification() {
-        assert_eq!(command_role(&CommandKind::PlaceBlock(PlaceBlock {
-            x: 0,
-            y: 0,
-            block: "router".to_string(),
-            rotation: 0,
-            config: Vec::new(),
-        })), CommandRole::Member);
+        assert_eq!(
+            command_role(&CommandKind::PlaceBlock(PlaceBlock {
+                x: 0,
+                y: 0,
+                block: "router".to_string(),
+                rotation: 0,
+                config: Vec::new(),
+            })),
+            CommandRole::Member
+        );
         assert!(!spectator_forbidden(&CommandKind::MenuChoose(MenuChoose {
             menu_id: 1,
             option: 0
@@ -592,7 +608,6 @@ mod tests {
 
     #[test]
     fn rate_window_rolls_after_window() {
-        assert!(!window_expired(1_000_000, 0, 1_000));
         assert!(!window_expired(999_999, 0, 1_000));
         assert!(window_expired(1_000_000, 0, 1_000));
         assert!(window_expired(2_000_000, 1_000_000, 1_000));
@@ -625,6 +640,7 @@ mod tests {
         assert_eq!(validate_join(&full).unwrap_err(), "This server is full.");
         let banned = JoinGate {
             banned: true,
+            max_players: 8,
             ..JoinGate::default()
         };
         assert_eq!(
@@ -633,6 +649,7 @@ mod tests {
         );
         let whitelisted = JoinGate {
             whitelist_enabled: true,
+            max_players: 8,
             ..JoinGate::default()
         };
         assert_eq!(
@@ -642,15 +659,14 @@ mod tests {
         let password = JoinGate {
             stored_password_hash: Some(hash_password("pw")),
             supplied_password: Some("nope".to_string()),
+            max_players: 8,
             ..JoinGate::default()
         };
-        assert_eq!(
-            validate_join(&password).unwrap_err(),
-            "Incorrect password."
-        );
+        assert_eq!(validate_join(&password).unwrap_err(), "Incorrect password.");
         let ok = JoinGate {
             stored_password_hash: Some(hash_password("pw")),
             supplied_password: Some("pw".to_string()),
+            max_players: 8,
             ..JoinGate::default()
         };
         assert!(validate_join(&ok).is_ok());

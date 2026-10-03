@@ -96,3 +96,65 @@ pub const MAX_UNITS: usize = 200;
 /// empty; `server/build.sh --admin <hex>` would inject one). Never a
 /// self-claim reducer.
 pub const ADMIN_IDENTITIES: &[&str] = &[];
+
+// ---- Plan 21 M3–M5 (player state, chat, checksums, snapshots, sweeps) ----
+
+/// Plan 05 canonical checksum version, mirrored for server-side validation.
+pub const CHECKSUM_VERSION: u32 = 1;
+
+/// `ChecksumScope` bit 0: the world cohort is always compared under D2.
+pub const CHECKSUM_SCOPE_WORLD_COHORT: u8 = 0b001;
+
+/// `ChecksumScope` bit 1: include possessed-unit kinematics (off under Relay).
+pub const CHECKSUM_SCOPE_POSSESSED: u8 = 0b010;
+
+/// `ChecksumScope` bit 2: reserved view/FX state (always 0).
+pub const CHECKSUM_SCOPE_VIEW: u8 = 0b100;
+
+/// Default player-state report rate (plan §3.6; upstream 66 ms sync).
+pub const DEFAULT_PLAYER_STATE_PER_SECOND: u32 = 25;
+
+/// Generic rate window for the M3–M5 per-identity gates.
+pub const DEFAULT_RATE_WINDOW_MS: u32 = 1_000;
+
+/// Chat/player-state input-report window.
+pub const CHECKSUM_RATE_WINDOW_MS: u32 = 2_000;
+
+/// Checksum publishes allowed per window (1/2 s floor, small burst headroom).
+pub const CHECKSUM_RATE_MAX: u32 = 4;
+
+/// Snapshot requests allowed per window (plan §3.7: 1/10 s).
+pub const SNAPSHOT_RATE_WINDOW_MS: u32 = 10_000;
+
+/// Snapshot requests allowed per window.
+pub const SNAPSHOT_RATE_MAX: u32 = 2;
+
+/// Dynamic snapshot byte cap (plan §3.8).
+pub const MAX_SNAPSHOT_BYTES: usize = 4 * 1024 * 1024;
+
+/// Dynamic snapshot chunk cap (plan §3.8).
+pub const MAX_SNAPSHOT_CHUNKS: usize = 256;
+
+/// Retained snapshot rows per kind (plan §6.8 keep-3).
+pub const SNAPSHOT_KEEP: usize = 1;
+
+/// UI-event payload cap (plan §6.1).
+pub const MAX_UI_PAYLOAD_BYTES: usize = 64 * 1024;
+
+/// Selected-block content-name cap in player state.
+pub const MAX_SELECTED_BLOCK_LEN: usize = 100;
+
+/// Checksum row retention (plan §6.8: 24 h).
+pub const CHECKSUM_RETENTION_SECS: u64 = 24 * 3600;
+
+/// UI-event retention (plan §6.8: 5 min).
+pub const UI_EVENT_RETENTION_SECS: u64 = 5 * 60;
+
+/// Maintenance sweep interval (plan §6.8: 60 s).
+pub const SWEEP_INTERVAL_SECS: u64 = 60;
+
+/// Idle rate/sender rows are pruned after 30 days (plan §6.8).
+pub const IDLE_ROW_TTL_SECS: u64 = 30 * 24 * 3600;
+
+/// Player-session rows are pruned after 30 days (plan §6.8).
+pub const PLAYER_SESSION_TTL_SECS: u64 = 30 * 24 * 3600;

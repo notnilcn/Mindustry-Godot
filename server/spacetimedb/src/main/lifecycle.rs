@@ -12,9 +12,7 @@ use super::seeds::{
     seed_admin_identities, seed_protocol_info, seed_relay_config, seed_server_config,
 };
 use super::tables::AuditKind;
-use crate::identity::tables::{
-    Player, PlayerSession, player, player_session,
-};
+use crate::identity::tables::{Player, PlayerSession, player, player_session};
 
 /// Seeds protocol/config singletons on publish. Publishing wipes dev data, so
 /// seeds must be self-contained (main/server rule).
@@ -24,6 +22,7 @@ pub fn init(ctx: &ReducerContext) {
     seed_relay_config(ctx);
     seed_server_config(ctx);
     seed_admin_identities(ctx);
+    crate::relay::sweep::seed_maintenance(ctx);
     audit(
         ctx,
         None,

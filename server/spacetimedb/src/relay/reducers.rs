@@ -7,20 +7,18 @@
 use spacetimedb::{ReducerContext, Table, reducer};
 
 use super::methods::{
-    CommandRole, JoinGate, MAX_BLOCK_NAME_LEN, MAX_MAP_ID_LEN, command_role, hash_password,
-    is_host_or_admin, rate_allow, relay_config_or_default, require_match, require_member,
-    require_status, spectator_forbidden, validate_join, validate_kind,
+    CommandRole, JoinGate, MAX_MAP_ID_LEN, command_role, hash_password, is_host_or_admin,
+    rate_allow, relay_config_or_default, require_match, require_member, require_status,
+    spectator_forbidden, validate_join, validate_kind,
 };
 use super::tables::{
     AuthorityMode, CommandKind, Gamemode, MatchCommand, MatchState, MatchStatus, MemberRole,
-    RelayMatch, RelayMember, SenderCommandState, Visibility, match_command, match_state,
-    relay_match, relay_member, sender_command_state,
+    RelayMatch, RelayMember, SenderCommandState, SetRule, SetRules, Visibility, match_command,
+    match_state, relay_match, relay_member, sender_command_state,
 };
 use crate::admin::{player_ban, server_config_or_default, whitelist_entry};
 use crate::main::audit::audit;
-use crate::main::global::{
-    DEFAULT_MAX_PLAYERS, MAX_RULES_JSON, PROTOCOL_VERSION, REPLAY_TAIL,
-};
+use crate::main::global::{DEFAULT_MAX_PLAYERS, MAX_RULES_JSON, PROTOCOL_VERSION};
 use crate::main::tables::AuditKind;
 use crate::mods::{MatchMod, check_mods, match_mod};
 
@@ -61,7 +59,10 @@ pub fn create_match(
     }
     let config = relay_config_or_default(ctx);
     let now = ctx.timestamp;
-    let password_hash = password.as_deref().filter(|pw| !pw.is_empty()).map(hash_password);
+    let password_hash = password
+        .as_deref()
+        .filter(|pw| !pw.is_empty())
+        .map(hash_password);
     let row = ctx.db.relay_match().insert(RelayMatch {
         match_id: 0,
         map_id,
@@ -182,7 +183,12 @@ pub fn join_match(
                 .unwrap_or(true)
         });
     let config = server_config_or_default(ctx);
-    let whitelisted = ctx.db.whitelist_entry().identity().find(ctx.sender()).is_some();
+    let whitelisted = ctx
+        .db
+        .whitelist_entry()
+        .identity()
+        .find(ctx.sender())
+        .is_some();
     let gate = JoinGate {
         banned,
         whitelist_enabled: config.whitelist_enabled,
@@ -432,6 +438,7 @@ fn send_match_command_impl(
         }
     }
     validate_kind(&kind, row.map_width_tiles, row.map_height_tiles)?;
+    let rules_update = rules_after_command(&kind, &row)?;
     let config = relay_config_or_default(ctx);
     let sender_seq = rate_allow(ctx, &config)?;
     let command = ctx.db.match_command().insert(MatchCommand {
@@ -443,10 +450,19 @@ fn send_match_command_impl(
         kind,
         sent_at: ctx.timestamp,
     });
+    let (rules_json, rules_epoch) = match &rules_update {
+        Some((json, epoch)) => (json.clone(), *epoch),
+        None => (row.rules_json.clone(), row.rules_epoch),
+    };
     ctx.db.relay_match().match_id().update(RelayMatch {
         last_command_id: command.command_id,
+        rules_json,
+        rules_epoch,
         ..row
     });
+    if let Some((rules_json, rules_epoch)) = rules_update {
+        upsert_match_state_rules(ctx, match_id, &rules_json, rules_epoch);
+    }
     // Per-sender acceptance bookkeeping (plan §3.5).
     let identity = ctx.sender();
     let existing = ctx.db.sender_command_state().identity().find(identity);
@@ -469,8 +485,196 @@ fn send_match_command_impl(
     Ok(())
 }
 
-/// Keeps the compiler honest about the block-name cap constant in this module.
-const _: usize = MAX_BLOCK_NAME_LEN;
+/// Rules changes a command carries, validated against the current epoch.
+///
+/// `SetRules` replaces the whole blob (host edit); `SetRule` is a single-field
+/// edit whose merge is plan 12/13's job — until that lands the stub only
+/// materializes the first field when `rules_json` is empty, otherwise it keeps
+/// the blob and just advances the epoch (documented M3 stub).
+pub fn rules_after_command(
+    kind: &CommandKind,
+    row: &RelayMatch,
+) -> Result<Option<(String, u32)>, String> {
+    match kind {
+        CommandKind::SetRules(SetRules {
+            rules_json,
+            rules_epoch,
+        }) => {
+            if *rules_epoch != row.rules_epoch {
+                return Err(format!(
+                    "rules epoch {rules_epoch} != current {}",
+                    row.rules_epoch
+                ));
+            }
+            Ok(Some((
+                rules_json.clone(),
+                row.rules_epoch.saturating_add(1),
+            )))
+        }
+        CommandKind::SetRule(SetRule { rule, json }) => Ok(Some((
+            merge_rule_stub(&row.rules_json, rule, json),
+            row.rules_epoch.saturating_add(1),
+        ))),
+        _ => Ok(None),
+    }
+}
 
-/// Keeps the replay-tail constant referenced (plan M5 pruning will consume it).
-const _: u64 = REPLAY_TAIL;
+/// Stubbed top-level rule merge (see [`rules_after_command`]).
+pub fn merge_rule_stub(rules_json: &str, rule: &str, json: &str) -> String {
+    let trimmed = rules_json.trim();
+    if trimmed.is_empty() || trimmed == "{}" {
+        format!("{{\"{rule}\":{json}}}")
+    } else {
+        rules_json.to_string()
+    }
+}
+
+/// Mirrors a rules change into `match_state` so late joiners read the latest
+/// (plan §3.6); inserts a zeroed state row when the host has not published yet.
+fn upsert_match_state_rules(
+    ctx: &ReducerContext,
+    match_id: u64,
+    rules_json: &str,
+    rules_epoch: u32,
+) {
+    let existing = ctx
+        .db
+        .match_state()
+        .by_match_state()
+        .filter(match_id)
+        .next();
+    match existing {
+        Some(state) => {
+            ctx.db.match_state().state_id().update(MatchState {
+                rules_json: rules_json.to_string(),
+                rules_epoch,
+                updated_by: ctx.sender(),
+                updated_at: ctx.timestamp,
+                ..state
+            });
+        }
+        None => {
+            ctx.db.match_state().insert(MatchState {
+                state_id: 0,
+                match_id,
+                rules_json: rules_json.to_string(),
+                rules_epoch,
+                wave: 0,
+                wavetime: 0.0,
+                enemies: 0,
+                paused: false,
+                game_over: false,
+                sim_tick: 0,
+                last_command_id: 0,
+                rng_sim: Vec::new(),
+                next_entity_id: 0,
+                snapshot_id: None,
+                updated_by: ctx.sender(),
+                updated_at: ctx.timestamp,
+            });
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    fn relay_row(rules_json: &str, rules_epoch: u32) -> RelayMatch {
+        RelayMatch {
+            match_id: 1,
+            map_id: "demo".to_string(),
+            map_seed: 1,
+            map_hash: 0,
+            map_width_tiles: 100,
+            map_height_tiles: 100,
+            status: MatchStatus::Running,
+            authority: AuthorityMode::Relay,
+            protocol_version: PROTOCOL_VERSION,
+            created_by: spacetimedb::Identity::from_byte_array([1u8; 32]),
+            created_at: spacetimedb::Timestamp::UNIX_EPOCH,
+            started_at: None,
+            ended_at: None,
+            host: spacetimedb::Identity::from_byte_array([1u8; 32]),
+            mode: Gamemode::Survival,
+            mode_name: "survival".to_string(),
+            visibility: Visibility::Public,
+            password_hash: None,
+            rules_json: rules_json.to_string(),
+            rules_epoch,
+            build_id: String::new(),
+            content_hash: 0,
+            is_dedicated: false,
+            player_count: 1,
+            max_players: 8,
+            campaign_id: None,
+            sector_planet: None,
+            sector_id: None,
+            last_command_id: 0,
+            last_snapshot_id: None,
+            closed_at: None,
+        }
+    }
+
+    #[test]
+    fn set_rules_updates_match_state() {
+        let row = relay_row("{}", 1);
+        let update = rules_after_command(
+            &CommandKind::SetRules(SetRules {
+                rules_json: "{\"waves\":true}".to_string(),
+                rules_epoch: 1,
+            }),
+            &row,
+        )
+        .unwrap()
+        .expect("rules update");
+        assert_eq!(update, ("{\"waves\":true}".to_string(), 2));
+    }
+
+    #[test]
+    fn set_rules_epoch_mismatch() {
+        let row = relay_row("{}", 5);
+        let error = rules_after_command(
+            &CommandKind::SetRules(SetRules {
+                rules_json: "{}".to_string(),
+                rules_epoch: 1,
+            }),
+            &row,
+        )
+        .unwrap_err();
+        assert!(error.contains("rules epoch 1 != current 5"));
+    }
+
+    #[test]
+    fn set_rule_stub_materializes_first_field() {
+        assert_eq!(merge_rule_stub("{}", "waves", "true"), "{\"waves\":true}");
+        assert_eq!(merge_rule_stub("", "pvp", "false"), "{\"pvp\":false}");
+        // Non-empty blobs are left untouched until plan 12/13's merge lands.
+        assert_eq!(
+            merge_rule_stub("{\"waves\":true}", "pvp", "false"),
+            "{\"waves\":true}"
+        );
+    }
+
+    #[test]
+    fn non_rules_commands_do_not_change_rules() {
+        let row = relay_row("{}", 1);
+        assert!(
+            rules_after_command(&CommandKind::Noop, &row)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn set_rules_host_only_is_enforced_by_role() {
+        assert_eq!(
+            command_role(&CommandKind::SetRules(SetRules {
+                rules_json: "{}".to_string(),
+                rules_epoch: 1,
+            })),
+            CommandRole::HostOrAdmin
+        );
+    }
+}

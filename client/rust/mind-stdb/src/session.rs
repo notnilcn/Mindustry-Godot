@@ -160,6 +160,11 @@ impl MatchSession {
         self.is_host
     }
 
+    /// Host identity once observed from `my_match`.
+    pub fn host_identity(&self) -> Option<Identity> {
+        self.host_identity
+    }
+
     /// Whether this client marked itself ready.
     pub fn is_ready(&self) -> bool {
         self.ready

@@ -7,7 +7,8 @@
 //! projection here (generated code is never edited).
 
 use crate::module_bindings::{
-    MatchState, Player, ProtocolInfo, RelayConfig, RelayMatch, RelayMember,
+    MatchChat, MatchChecksum, MatchPlanState, MatchPlayerState, MatchSnapshot, MatchState,
+    MatchUiEvent, Player, ProtocolInfo, RelayConfig, RelayMatch, RelayMember,
 };
 
 /// Debug JSON for one row type.
@@ -109,6 +110,98 @@ impl RowView for MatchState {
             "sim_tick": self.sim_tick,
             "last_command_id": self.last_command_id,
             "rules_epoch": self.rules_epoch,
+        })
+        .to_string()
+    }
+}
+
+impl RowView for MatchPlayerState {
+    fn debug_json(&self) -> String {
+        serde_json::json!({
+            "match_id": self.match_id,
+            "identity": self.identity.to_hex().to_string(),
+            "seq": self.seq,
+            "unit_id": self.unit_id,
+            "dead": self.dead,
+            "x": self.x,
+            "y": self.y,
+            "vx": self.vx,
+            "vy": self.vy,
+            "rotation": self.rotation,
+            "health": self.health,
+            "shield": self.shield,
+            "team": self.team,
+        })
+        .to_string()
+    }
+}
+
+impl RowView for MatchChecksum {
+    fn debug_json(&self) -> String {
+        serde_json::json!({
+            "match_id": self.match_id,
+            "sender": self.sender.to_hex().to_string(),
+            "command_id": self.command_id,
+            "sim_tick": self.sim_tick,
+            "checksum": self.checksum,
+            "checksum_version": self.checksum_version,
+            "scope": self.scope,
+        })
+        .to_string()
+    }
+}
+
+impl RowView for MatchSnapshot {
+    fn debug_json(&self) -> String {
+        serde_json::json!({
+            "snapshot_id": self.snapshot_id,
+            "match_id": self.match_id,
+            "kind": format!("{:?}", self.kind),
+            "command_id": self.command_id,
+            "sim_tick": self.sim_tick,
+            "checksum": self.checksum,
+            "bytes_len": self.bytes_len,
+            "chunk_count": self.chunk_count,
+        })
+        .to_string()
+    }
+}
+
+impl RowView for MatchChat {
+    fn debug_json(&self) -> String {
+        serde_json::json!({
+            "chat_id": self.chat_id,
+            "match_id": self.match_id,
+            "sender": self.sender.to_hex().to_string(),
+            "kind": format!("{:?}", self.kind),
+            "team": self.team,
+            "text": self.text,
+        })
+        .to_string()
+    }
+}
+
+impl RowView for MatchPlanState {
+    fn debug_json(&self) -> String {
+        serde_json::json!({
+            "match_id": self.match_id,
+            "identity": self.identity.to_hex().to_string(),
+            "active_group_id": self.active_group_id,
+            "plan_count": self.plan_count,
+        })
+        .to_string()
+    }
+}
+
+impl RowView for MatchUiEvent {
+    fn debug_json(&self) -> String {
+        serde_json::json!({
+            "event_id": self.event_id,
+            "match_id": self.match_id,
+            "sender": self.sender.to_hex().to_string(),
+            "kind": format!("{:?}", self.kind),
+            "target": self.target.map(|identity| identity.to_hex().to_string()),
+            "payload_len": self.payload.len(),
         })
         .to_string()
     }

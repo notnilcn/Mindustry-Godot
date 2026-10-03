@@ -17,8 +17,8 @@
 use std::time::{Duration, Instant};
 
 use mind_stdb::module_bindings::{
-    CommandKind, Gamemode, LocalPlayerTableAccessor, MemberRole, MyMatchesTableAccessor,
-    RelayConfigTableAccessor, Visibility,
+    CommandKind, Gamemode, LocalPlayerTableAccessor, MemberRole, MyMatchPlayerStatesTableAccessor,
+    MyMatchesTableAccessor, PlayerStateReport, RelayConfigTableAccessor, Visibility,
 };
 use mind_stdb::{
     BinderOptions, CommandStream, ConnectionConfig, Connector, ConnectorEvent, RowChange, StdbMode,
@@ -214,6 +214,104 @@ fn two_clients_relay_ping_round_trip() {
     assert_eq!(stream_guest.applied_count(), 1);
     assert_eq!(stream_host.drain().len(), 1);
     assert_eq!(stream_host.order_error(), None);
+
+    host.disconnect();
+    guest.disconnect();
+}
+
+#[test]
+#[ignore = "requires a local SpacetimeDB with the mindustry-it db published (MIND_STDB_IT=1)"]
+fn player_state_roundtrip() {
+    if !it_enabled() {
+        return;
+    }
+    let mut host = Connector::new(it_config("pshost"));
+    let mut guest = Connector::new(it_config("psguest"));
+    assert!(host.connect().is_ok());
+    assert!(guest.connect().is_ok());
+
+    let matches_host = host.bind::<MyMatchesTableAccessor>("my_matches");
+    let timeout = deadline(20);
+    assert!(pump_until(&mut host, timeout, |conn| conn.is_applied(WaveName::Lobby)));
+    assert!(pump_until(&mut guest, timeout, |conn| conn.is_applied(WaveName::Lobby)));
+    assert!(
+        host.create_match(
+            "it-playerstate-map",
+            3,
+            Gamemode::Survival,
+            "survival",
+            Visibility::Public,
+            None,
+            8,
+            "{}",
+            "",
+            0,
+            Vec::new(),
+        )
+        .is_ok()
+    );
+    assert!(pump_until(&mut host, timeout, |_| matches_host.pending() > 0));
+    let match_id = first_match_id(&matches_host.drain()).expect("match row");
+    assert!(
+        guest
+            .join_match(match_id, None, "", 0, MemberRole::Player, Vec::new())
+            .is_ok()
+    );
+
+    // Bind the player-state view before the Game wave applies (view is live).
+    let states_host = host.bind::<MyMatchPlayerStatesTableAccessor>("my_match_player_states");
+    let mut stream_guest = CommandStream::subscribe(&mut guest, match_id);
+    assert!(host.start_match(match_id, true).is_ok());
+    assert!(pump_until(&mut host, timeout, |conn| conn.is_applied(WaveName::Game)));
+    assert!(pump_until(&mut guest, timeout, |conn| conn.is_applied(WaveName::Game)));
+
+    let report = PlayerStateReport {
+        seq: 1,
+        unit_id: 42,
+        dead: false,
+        x: 12.5,
+        y: 7.25,
+        vx: 0.5,
+        vy: -0.25,
+        pointer_x: 1.0,
+        pointer_y: 2.0,
+        rotation: 90.0,
+        base_rotation: 0.0,
+        mining_x: -1,
+        mining_y: -1,
+        boosting: false,
+        shooting: true,
+        chatting: false,
+        building: false,
+        selected_block: Some("router".to_string()),
+        selected_rotation: 1,
+        view_x: 0.0,
+        view_y: 0.0,
+        view_width: 1920.0,
+        view_height: 1080.0,
+        health: 100.0,
+        shield: 0.0,
+        team: 0,
+    };
+    assert!(guest.report_player_state(match_id, report).is_ok());
+
+    assert!(
+        pump_pair_until(&mut host, &mut guest, timeout, || states_host.pending() > 0),
+        "host never observed the player state row"
+    );
+    let rows = states_host.drain();
+    let row = rows
+        .iter()
+        .find_map(|change| match change {
+            RowChange::Insert(row) | RowChange::Update { new: row, .. } => Some(row),
+            RowChange::Delete(_) => None,
+        })
+        .expect("player state row");
+    assert_eq!(row.match_id, match_id);
+    assert_eq!(row.seq, 1);
+    assert_eq!(row.unit_id, 42);
+    assert!((row.x - 12.5).abs() < f32::EPSILON);
+    let _ = stream_guest.drain();
 
     host.disconnect();
     guest.disconnect();

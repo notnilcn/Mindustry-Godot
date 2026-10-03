@@ -277,11 +277,17 @@ impl MindSimHost {
         GString::from(self.sim.checksum_hex().as_str())
     }
 
-    /// Plan-21 checksum-scope hook. Until plan 05 lands `checksum_scoped` this
-    /// returns the full-context checksum (the authority mask is a no-op here).
+    /// Plan-21 checksum-scope hook (relay scope; the mask is a no-op until plan
+    /// 05 adds possessed-unit fields).
     #[func]
     pub fn get_checksum_scoped(&self) -> GString {
-        GString::from(self.sim.checksum_hex().as_str())
+        GString::from(format!("{:016x}", self.checksum_scoped_value()).as_str())
+    }
+
+    /// Plan-21 scoped checksum value (Rust-only seam for relay publication).
+    pub fn checksum_scoped_value(&self) -> u64 {
+        self.sim
+            .checksum_scoped(&mind_core::sim::ChecksumScope::relay())
     }
 
     /// Number of relay commands queued for the next tick boundary.

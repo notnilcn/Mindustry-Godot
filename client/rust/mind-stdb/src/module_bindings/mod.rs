@@ -18,6 +18,11 @@ pub mod authority_mode_type;
 pub mod break_block_type;
 pub mod building_control_select_type;
 pub mod bullet_type;
+pub mod chat_filter_table;
+pub mod chat_filter_type;
+pub mod chat_kind_type;
+pub mod chat_rate_type;
+pub mod checksum_rate_type;
 pub mod client_settings_table;
 pub mod client_settings_type;
 pub mod command_building_type;
@@ -38,21 +43,47 @@ pub mod local_player_profile_table;
 pub mod local_player_table;
 pub mod logic_client_data_type;
 pub mod logic_sync_type;
+pub mod maintenance_schedule_type;
+pub mod match_chat_table;
+pub mod match_chat_type;
+pub mod match_checksum_table;
+pub mod match_checksum_type;
 pub mod match_command_type;
 pub mod match_kick_type;
 pub mod match_mod_table;
 pub mod match_mod_type;
+pub mod match_plan_chunk_table;
+pub mod match_plan_chunk_type;
+pub mod match_plan_state_table;
+pub mod match_plan_state_type;
+pub mod match_player_state_table;
+pub mod match_player_state_type;
+pub mod match_snapshot_chunk_type;
+pub mod match_snapshot_request_type;
+pub mod match_snapshot_table;
+pub mod match_snapshot_type;
 pub mod match_state_table;
 pub mod match_state_type;
 pub mod match_status_type;
+pub mod match_ui_event_table;
+pub mod match_ui_event_type;
 pub mod member_role_type;
 pub mod menu_builder_choose_type;
 pub mod menu_choose_type;
 pub mod my_kick_table;
+pub mod my_match_chat_table;
+pub mod my_match_checksums_table;
 pub mod my_match_commands_table;
 pub mod my_match_members_table;
+pub mod my_match_plan_chunks_table;
+pub mod my_match_plans_table;
+pub mod my_match_player_states_table;
+pub mod my_match_snapshot_chunks_table;
+pub mod my_match_snapshot_requests_table;
+pub mod my_match_snapshots_table;
 pub mod my_match_state_table;
 pub mod my_match_table;
+pub mod my_match_ui_events_table;
 pub mod my_matches_table;
 pub mod my_sender_command_state_table;
 pub mod payload_type;
@@ -64,19 +95,28 @@ pub mod player_profile_type;
 pub mod player_session_table;
 pub mod player_session_type;
 pub mod player_spawn_type;
+pub mod player_state_rate_type;
+pub mod player_state_report_type;
 pub mod player_table;
 pub mod player_type;
 pub mod protocol_info_table;
 pub mod protocol_info_type;
+pub mod publish_checksum_reducer;
 pub mod publish_match_state_reducer;
+pub mod publish_snapshot_reducer;
+pub mod publish_ui_event_reducer;
 pub mod relay_config_table;
 pub mod relay_config_type;
 pub mod relay_match_table;
 pub mod relay_match_type;
 pub mod relay_member_type;
+pub mod report_plan_snapshot_reducer;
+pub mod report_player_state_reducer;
+pub mod request_snapshot_reducer;
 pub mod research_unlock_type;
 pub mod rotate_type;
 pub mod run_wave_type;
+pub mod send_chat_reducer;
 pub mod send_match_command_reducer;
 pub mod sender_command_state_type;
 pub mod server_config_table;
@@ -85,8 +125,11 @@ pub mod set_ready_reducer;
 pub mod set_rule_type;
 pub mod set_rules_type;
 pub mod set_username_reducer;
+pub mod snapshot_kind_type;
+pub mod snapshot_rate_type;
 pub mod start_match_reducer;
 pub mod text_input_result_type;
+pub mod ui_event_kind_type;
 pub mod unit_command_queue_type;
 pub mod unit_command_type;
 pub mod unit_control_type;
@@ -108,6 +151,11 @@ pub use authority_mode_type::AuthorityMode;
 pub use break_block_type::BreakBlock;
 pub use building_control_select_type::BuildingControlSelect;
 pub use bullet_type::Bullet;
+pub use chat_filter_table::*;
+pub use chat_filter_type::ChatFilter;
+pub use chat_kind_type::ChatKind;
+pub use chat_rate_type::ChatRate;
+pub use checksum_rate_type::ChecksumRate;
 pub use client_settings_table::*;
 pub use client_settings_type::ClientSettings;
 pub use command_building_type::CommandBuilding;
@@ -128,21 +176,47 @@ pub use local_player_profile_table::*;
 pub use local_player_table::*;
 pub use logic_client_data_type::LogicClientData;
 pub use logic_sync_type::LogicSync;
+pub use maintenance_schedule_type::MaintenanceSchedule;
+pub use match_chat_table::*;
+pub use match_chat_type::MatchChat;
+pub use match_checksum_table::*;
+pub use match_checksum_type::MatchChecksum;
 pub use match_command_type::MatchCommand;
 pub use match_kick_type::MatchKick;
 pub use match_mod_table::*;
 pub use match_mod_type::MatchMod;
+pub use match_plan_chunk_table::*;
+pub use match_plan_chunk_type::MatchPlanChunk;
+pub use match_plan_state_table::*;
+pub use match_plan_state_type::MatchPlanState;
+pub use match_player_state_table::*;
+pub use match_player_state_type::MatchPlayerState;
+pub use match_snapshot_chunk_type::MatchSnapshotChunk;
+pub use match_snapshot_request_type::MatchSnapshotRequest;
+pub use match_snapshot_table::*;
+pub use match_snapshot_type::MatchSnapshot;
 pub use match_state_table::*;
 pub use match_state_type::MatchState;
 pub use match_status_type::MatchStatus;
+pub use match_ui_event_table::*;
+pub use match_ui_event_type::MatchUiEvent;
 pub use member_role_type::MemberRole;
 pub use menu_builder_choose_type::MenuBuilderChoose;
 pub use menu_choose_type::MenuChoose;
 pub use my_kick_table::*;
+pub use my_match_chat_table::*;
+pub use my_match_checksums_table::*;
 pub use my_match_commands_table::*;
 pub use my_match_members_table::*;
+pub use my_match_plan_chunks_table::*;
+pub use my_match_plans_table::*;
+pub use my_match_player_states_table::*;
+pub use my_match_snapshot_chunks_table::*;
+pub use my_match_snapshot_requests_table::*;
+pub use my_match_snapshots_table::*;
 pub use my_match_state_table::*;
 pub use my_match_table::*;
+pub use my_match_ui_events_table::*;
 pub use my_matches_table::*;
 pub use my_sender_command_state_table::*;
 pub use payload_type::Payload;
@@ -154,19 +228,28 @@ pub use player_profile_type::PlayerProfile;
 pub use player_session_table::*;
 pub use player_session_type::PlayerSession;
 pub use player_spawn_type::PlayerSpawn;
+pub use player_state_rate_type::PlayerStateRate;
+pub use player_state_report_type::PlayerStateReport;
 pub use player_table::*;
 pub use player_type::Player;
 pub use protocol_info_table::*;
 pub use protocol_info_type::ProtocolInfo;
+pub use publish_checksum_reducer::publish_checksum;
 pub use publish_match_state_reducer::publish_match_state;
+pub use publish_snapshot_reducer::publish_snapshot;
+pub use publish_ui_event_reducer::publish_ui_event;
 pub use relay_config_table::*;
 pub use relay_config_type::RelayConfig;
 pub use relay_match_table::*;
 pub use relay_match_type::RelayMatch;
 pub use relay_member_type::RelayMember;
+pub use report_plan_snapshot_reducer::report_plan_snapshot;
+pub use report_player_state_reducer::report_player_state;
+pub use request_snapshot_reducer::request_snapshot;
 pub use research_unlock_type::ResearchUnlock;
 pub use rotate_type::Rotate;
 pub use run_wave_type::RunWave;
+pub use send_chat_reducer::send_chat;
 pub use send_match_command_reducer::send_match_command;
 pub use sender_command_state_type::SenderCommandState;
 pub use server_config_table::*;
@@ -175,8 +258,11 @@ pub use set_ready_reducer::set_ready;
 pub use set_rule_type::SetRule;
 pub use set_rules_type::SetRules;
 pub use set_username_reducer::set_username;
+pub use snapshot_kind_type::SnapshotKind;
+pub use snapshot_rate_type::SnapshotRate;
 pub use start_match_reducer::start_match;
 pub use text_input_result_type::TextInputResult;
+pub use ui_event_kind_type::UiEventKind;
 pub use unit_command_queue_type::UnitCommandQueue;
 pub use unit_command_type::UnitCommand;
 pub use unit_control_type::UnitControl;
@@ -221,6 +307,14 @@ pub enum Reducer {
     LeaveMatch {
         match_id: u64,
     },
+    PublishChecksum {
+        match_id: u64,
+        command_id: u64,
+        sim_tick: u64,
+        checksum: u64,
+        checksum_version: u32,
+        scope: u8,
+    },
     PublishMatchState {
         match_id: u64,
         wave: i32,
@@ -230,6 +324,46 @@ pub enum Reducer {
         game_over: bool,
         sim_tick: u64,
         last_command_id: u64,
+    },
+    PublishSnapshot {
+        match_id: u64,
+        kind: SnapshotKind,
+        format: u32,
+        checksum_version: u32,
+        command_id: u64,
+        sim_tick: u64,
+        checksum: u64,
+        map_id: String,
+        map_seed: u64,
+        map_hash: u64,
+        build_id: String,
+        content_hash: u64,
+        blob: Vec<u8>,
+    },
+    PublishUiEvent {
+        match_id: u64,
+        kind: UiEventKind,
+        target: Option<__sdk::Identity>,
+        payload: Vec<u8>,
+    },
+    ReportPlanSnapshot {
+        match_id: u64,
+        group_id: u32,
+        chunk_index: u16,
+        chunk_count: u16,
+        plans_blob: Vec<u8>,
+    },
+    ReportPlayerState {
+        match_id: u64,
+        report: PlayerStateReport,
+    },
+    RequestSnapshot {
+        match_id: u64,
+    },
+    SendChat {
+        match_id: u64,
+        kind: ChatKind,
+        text: String,
     },
     SendMatchCommand {
         match_id: u64,
@@ -267,7 +401,14 @@ impl __sdk::Reducer for Reducer {
             Reducer::CreateProfile { .. } => "create_profile",
             Reducer::JoinMatch { .. } => "join_match",
             Reducer::LeaveMatch { .. } => "leave_match",
+            Reducer::PublishChecksum { .. } => "publish_checksum",
             Reducer::PublishMatchState { .. } => "publish_match_state",
+            Reducer::PublishSnapshot { .. } => "publish_snapshot",
+            Reducer::PublishUiEvent { .. } => "publish_ui_event",
+            Reducer::ReportPlanSnapshot { .. } => "report_plan_snapshot",
+            Reducer::ReportPlayerState { .. } => "report_player_state",
+            Reducer::RequestSnapshot { .. } => "request_snapshot",
+            Reducer::SendChat { .. } => "send_chat",
             Reducer::SendMatchCommand { .. } => "send_match_command",
             Reducer::SetReady { .. } => "set_ready",
             Reducer::SetUsername { .. } => "set_username",
@@ -329,6 +470,21 @@ impl __sdk::Reducer for Reducer {
                     match_id: match_id.clone(),
                 })
             }
+            Reducer::PublishChecksum {
+                match_id,
+                command_id,
+                sim_tick,
+                checksum,
+                checksum_version,
+                scope,
+            } => __sats::bsatn::to_vec(&publish_checksum_reducer::PublishChecksumArgs {
+                match_id: match_id.clone(),
+                command_id: command_id.clone(),
+                sim_tick: sim_tick.clone(),
+                checksum: checksum.clone(),
+                checksum_version: checksum_version.clone(),
+                scope: scope.clone(),
+            }),
             Reducer::PublishMatchState {
                 match_id,
                 wave,
@@ -347,6 +503,79 @@ impl __sdk::Reducer for Reducer {
                 game_over: game_over.clone(),
                 sim_tick: sim_tick.clone(),
                 last_command_id: last_command_id.clone(),
+            }),
+            Reducer::PublishSnapshot {
+                match_id,
+                kind,
+                format,
+                checksum_version,
+                command_id,
+                sim_tick,
+                checksum,
+                map_id,
+                map_seed,
+                map_hash,
+                build_id,
+                content_hash,
+                blob,
+            } => __sats::bsatn::to_vec(&publish_snapshot_reducer::PublishSnapshotArgs {
+                match_id: match_id.clone(),
+                kind: kind.clone(),
+                format: format.clone(),
+                checksum_version: checksum_version.clone(),
+                command_id: command_id.clone(),
+                sim_tick: sim_tick.clone(),
+                checksum: checksum.clone(),
+                map_id: map_id.clone(),
+                map_seed: map_seed.clone(),
+                map_hash: map_hash.clone(),
+                build_id: build_id.clone(),
+                content_hash: content_hash.clone(),
+                blob: blob.clone(),
+            }),
+            Reducer::PublishUiEvent {
+                match_id,
+                kind,
+                target,
+                payload,
+            } => __sats::bsatn::to_vec(&publish_ui_event_reducer::PublishUiEventArgs {
+                match_id: match_id.clone(),
+                kind: kind.clone(),
+                target: target.clone(),
+                payload: payload.clone(),
+            }),
+            Reducer::ReportPlanSnapshot {
+                match_id,
+                group_id,
+                chunk_index,
+                chunk_count,
+                plans_blob,
+            } => __sats::bsatn::to_vec(&report_plan_snapshot_reducer::ReportPlanSnapshotArgs {
+                match_id: match_id.clone(),
+                group_id: group_id.clone(),
+                chunk_index: chunk_index.clone(),
+                chunk_count: chunk_count.clone(),
+                plans_blob: plans_blob.clone(),
+            }),
+            Reducer::ReportPlayerState { match_id, report } => {
+                __sats::bsatn::to_vec(&report_player_state_reducer::ReportPlayerStateArgs {
+                    match_id: match_id.clone(),
+                    report: report.clone(),
+                })
+            }
+            Reducer::RequestSnapshot { match_id } => {
+                __sats::bsatn::to_vec(&request_snapshot_reducer::RequestSnapshotArgs {
+                    match_id: match_id.clone(),
+                })
+            }
+            Reducer::SendChat {
+                match_id,
+                kind,
+                text,
+            } => __sats::bsatn::to_vec(&send_chat_reducer::SendChatArgs {
+                match_id: match_id.clone(),
+                kind: kind.clone(),
+                text: text.clone(),
             }),
             Reducer::SendMatchCommand {
                 match_id,
@@ -399,17 +628,34 @@ pub struct DbUpdate {
     admin_identity: __sdk::TableUpdate<AdminIdentity>,
     all_matches: __sdk::TableUpdate<RelayMatch>,
     all_players: __sdk::TableUpdate<Player>,
+    chat_filter: __sdk::TableUpdate<ChatFilter>,
     client_settings: __sdk::TableUpdate<ClientSettings>,
     local_client_settings: __sdk::TableUpdate<ClientSettings>,
     local_player: __sdk::TableUpdate<Player>,
     local_player_profile: __sdk::TableUpdate<PlayerProfile>,
+    match_chat: __sdk::TableUpdate<MatchChat>,
+    match_checksum: __sdk::TableUpdate<MatchChecksum>,
     match_mod: __sdk::TableUpdate<MatchMod>,
+    match_plan_chunk: __sdk::TableUpdate<MatchPlanChunk>,
+    match_plan_state: __sdk::TableUpdate<MatchPlanState>,
+    match_player_state: __sdk::TableUpdate<MatchPlayerState>,
+    match_snapshot: __sdk::TableUpdate<MatchSnapshot>,
     match_state: __sdk::TableUpdate<MatchState>,
+    match_ui_event: __sdk::TableUpdate<MatchUiEvent>,
     my_kick: __sdk::TableUpdate<MatchKick>,
     my_match: __sdk::TableUpdate<RelayMatch>,
+    my_match_chat: __sdk::TableUpdate<MatchChat>,
+    my_match_checksums: __sdk::TableUpdate<MatchChecksum>,
     my_match_commands: __sdk::TableUpdate<MatchCommand>,
     my_match_members: __sdk::TableUpdate<RelayMember>,
+    my_match_plan_chunks: __sdk::TableUpdate<MatchPlanChunk>,
+    my_match_plans: __sdk::TableUpdate<MatchPlanState>,
+    my_match_player_states: __sdk::TableUpdate<MatchPlayerState>,
+    my_match_snapshot_chunks: __sdk::TableUpdate<MatchSnapshotChunk>,
+    my_match_snapshot_requests: __sdk::TableUpdate<MatchSnapshotRequest>,
+    my_match_snapshots: __sdk::TableUpdate<MatchSnapshot>,
     my_match_state: __sdk::TableUpdate<MatchState>,
+    my_match_ui_events: __sdk::TableUpdate<MatchUiEvent>,
     my_matches: __sdk::TableUpdate<RelayMatch>,
     my_sender_command_state: __sdk::TableUpdate<SenderCommandState>,
     player: __sdk::TableUpdate<Player>,
@@ -438,6 +684,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "all_players" => db_update
                     .all_players
                     .append(all_players_table::parse_table_update(table_update)?),
+                "chat_filter" => db_update
+                    .chat_filter
+                    .append(chat_filter_table::parse_table_update(table_update)?),
                 "client_settings" => db_update
                     .client_settings
                     .append(client_settings_table::parse_table_update(table_update)?),
@@ -450,27 +699,75 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "local_player_profile" => db_update.local_player_profile.append(
                     local_player_profile_table::parse_table_update(table_update)?,
                 ),
+                "match_chat" => db_update
+                    .match_chat
+                    .append(match_chat_table::parse_table_update(table_update)?),
+                "match_checksum" => db_update
+                    .match_checksum
+                    .append(match_checksum_table::parse_table_update(table_update)?),
                 "match_mod" => db_update
                     .match_mod
                     .append(match_mod_table::parse_table_update(table_update)?),
+                "match_plan_chunk" => db_update
+                    .match_plan_chunk
+                    .append(match_plan_chunk_table::parse_table_update(table_update)?),
+                "match_plan_state" => db_update
+                    .match_plan_state
+                    .append(match_plan_state_table::parse_table_update(table_update)?),
+                "match_player_state" => db_update
+                    .match_player_state
+                    .append(match_player_state_table::parse_table_update(table_update)?),
+                "match_snapshot" => db_update
+                    .match_snapshot
+                    .append(match_snapshot_table::parse_table_update(table_update)?),
                 "match_state" => db_update
                     .match_state
                     .append(match_state_table::parse_table_update(table_update)?),
+                "match_ui_event" => db_update
+                    .match_ui_event
+                    .append(match_ui_event_table::parse_table_update(table_update)?),
                 "my_kick" => db_update
                     .my_kick
                     .append(my_kick_table::parse_table_update(table_update)?),
                 "my_match" => db_update
                     .my_match
                     .append(my_match_table::parse_table_update(table_update)?),
+                "my_match_chat" => db_update
+                    .my_match_chat
+                    .append(my_match_chat_table::parse_table_update(table_update)?),
+                "my_match_checksums" => db_update
+                    .my_match_checksums
+                    .append(my_match_checksums_table::parse_table_update(table_update)?),
                 "my_match_commands" => db_update
                     .my_match_commands
                     .append(my_match_commands_table::parse_table_update(table_update)?),
                 "my_match_members" => db_update
                     .my_match_members
                     .append(my_match_members_table::parse_table_update(table_update)?),
+                "my_match_plan_chunks" => db_update.my_match_plan_chunks.append(
+                    my_match_plan_chunks_table::parse_table_update(table_update)?,
+                ),
+                "my_match_plans" => db_update
+                    .my_match_plans
+                    .append(my_match_plans_table::parse_table_update(table_update)?),
+                "my_match_player_states" => db_update.my_match_player_states.append(
+                    my_match_player_states_table::parse_table_update(table_update)?,
+                ),
+                "my_match_snapshot_chunks" => db_update.my_match_snapshot_chunks.append(
+                    my_match_snapshot_chunks_table::parse_table_update(table_update)?,
+                ),
+                "my_match_snapshot_requests" => db_update.my_match_snapshot_requests.append(
+                    my_match_snapshot_requests_table::parse_table_update(table_update)?,
+                ),
+                "my_match_snapshots" => db_update
+                    .my_match_snapshots
+                    .append(my_match_snapshots_table::parse_table_update(table_update)?),
                 "my_match_state" => db_update
                     .my_match_state
                     .append(my_match_state_table::parse_table_update(table_update)?),
+                "my_match_ui_events" => db_update
+                    .my_match_ui_events
+                    .append(my_match_ui_events_table::parse_table_update(table_update)?),
                 "my_matches" => db_update
                     .my_matches
                     .append(my_matches_table::parse_table_update(table_update)?),
@@ -533,15 +830,39 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.admin_identity = cache
             .apply_diff_to_table::<AdminIdentity>("admin_identity", &self.admin_identity)
             .with_updates_by_pk(|row| &row.identity);
+        diff.chat_filter = cache
+            .apply_diff_to_table::<ChatFilter>("chat_filter", &self.chat_filter)
+            .with_updates_by_pk(|row| &row.filter_id);
         diff.client_settings = cache
             .apply_diff_to_table::<ClientSettings>("client_settings", &self.client_settings)
             .with_updates_by_pk(|row| &row.identity);
+        diff.match_chat = cache
+            .apply_diff_to_table::<MatchChat>("match_chat", &self.match_chat)
+            .with_updates_by_pk(|row| &row.chat_id);
+        diff.match_checksum = cache
+            .apply_diff_to_table::<MatchChecksum>("match_checksum", &self.match_checksum)
+            .with_updates_by_pk(|row| &row.checksum_id);
         diff.match_mod = cache
             .apply_diff_to_table::<MatchMod>("match_mod", &self.match_mod)
             .with_updates_by_pk(|row| &row.match_mod_id);
+        diff.match_plan_chunk = cache
+            .apply_diff_to_table::<MatchPlanChunk>("match_plan_chunk", &self.match_plan_chunk)
+            .with_updates_by_pk(|row| &row.chunk_id);
+        diff.match_plan_state = cache
+            .apply_diff_to_table::<MatchPlanState>("match_plan_state", &self.match_plan_state)
+            .with_updates_by_pk(|row| &row.plan_state_id);
+        diff.match_player_state = cache
+            .apply_diff_to_table::<MatchPlayerState>("match_player_state", &self.match_player_state)
+            .with_updates_by_pk(|row| &row.state_id);
+        diff.match_snapshot = cache
+            .apply_diff_to_table::<MatchSnapshot>("match_snapshot", &self.match_snapshot)
+            .with_updates_by_pk(|row| &row.snapshot_id);
         diff.match_state = cache
             .apply_diff_to_table::<MatchState>("match_state", &self.match_state)
             .with_updates_by_pk(|row| &row.state_id);
+        diff.match_ui_event = cache
+            .apply_diff_to_table::<MatchUiEvent>("match_ui_event", &self.match_ui_event)
+            .with_updates_by_pk(|row| &row.event_id);
         diff.player = cache
             .apply_diff_to_table::<Player>("player", &self.player)
             .with_updates_by_pk(|row| &row.identity);
@@ -585,12 +906,38 @@ impl __sdk::DbUpdate for DbUpdate {
         );
         diff.my_kick = cache.apply_diff_to_table::<MatchKick>("my_kick", &self.my_kick);
         diff.my_match = cache.apply_diff_to_table::<RelayMatch>("my_match", &self.my_match);
+        diff.my_match_chat =
+            cache.apply_diff_to_table::<MatchChat>("my_match_chat", &self.my_match_chat);
+        diff.my_match_checksums = cache
+            .apply_diff_to_table::<MatchChecksum>("my_match_checksums", &self.my_match_checksums);
         diff.my_match_commands =
             cache.apply_diff_to_table::<MatchCommand>("my_match_commands", &self.my_match_commands);
         diff.my_match_members =
             cache.apply_diff_to_table::<RelayMember>("my_match_members", &self.my_match_members);
+        diff.my_match_plan_chunks = cache.apply_diff_to_table::<MatchPlanChunk>(
+            "my_match_plan_chunks",
+            &self.my_match_plan_chunks,
+        );
+        diff.my_match_plans =
+            cache.apply_diff_to_table::<MatchPlanState>("my_match_plans", &self.my_match_plans);
+        diff.my_match_player_states = cache.apply_diff_to_table::<MatchPlayerState>(
+            "my_match_player_states",
+            &self.my_match_player_states,
+        );
+        diff.my_match_snapshot_chunks = cache.apply_diff_to_table::<MatchSnapshotChunk>(
+            "my_match_snapshot_chunks",
+            &self.my_match_snapshot_chunks,
+        );
+        diff.my_match_snapshot_requests = cache.apply_diff_to_table::<MatchSnapshotRequest>(
+            "my_match_snapshot_requests",
+            &self.my_match_snapshot_requests,
+        );
+        diff.my_match_snapshots = cache
+            .apply_diff_to_table::<MatchSnapshot>("my_match_snapshots", &self.my_match_snapshots);
         diff.my_match_state =
             cache.apply_diff_to_table::<MatchState>("my_match_state", &self.my_match_state);
+        diff.my_match_ui_events = cache
+            .apply_diff_to_table::<MatchUiEvent>("my_match_ui_events", &self.my_match_ui_events);
         diff.my_matches = cache.apply_diff_to_table::<RelayMatch>("my_matches", &self.my_matches);
         diff.my_sender_command_state = cache.apply_diff_to_table::<SenderCommandState>(
             "my_sender_command_state",
@@ -612,6 +959,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "all_players" => db_update
                     .all_players
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "chat_filter" => db_update
+                    .chat_filter
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "client_settings" => db_update
                     .client_settings
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
@@ -624,11 +974,32 @@ impl __sdk::DbUpdate for DbUpdate {
                 "local_player_profile" => db_update
                     .local_player_profile
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "match_chat" => db_update
+                    .match_chat
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "match_checksum" => db_update
+                    .match_checksum
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "match_mod" => db_update
                     .match_mod
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "match_plan_chunk" => db_update
+                    .match_plan_chunk
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "match_plan_state" => db_update
+                    .match_plan_state
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "match_player_state" => db_update
+                    .match_player_state
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "match_snapshot" => db_update
+                    .match_snapshot
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "match_state" => db_update
                     .match_state
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "match_ui_event" => db_update
+                    .match_ui_event
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "my_kick" => db_update
                     .my_kick
@@ -636,14 +1007,41 @@ impl __sdk::DbUpdate for DbUpdate {
                 "my_match" => db_update
                     .my_match
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "my_match_chat" => db_update
+                    .my_match_chat
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "my_match_checksums" => db_update
+                    .my_match_checksums
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "my_match_commands" => db_update
                     .my_match_commands
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "my_match_members" => db_update
                     .my_match_members
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "my_match_plan_chunks" => db_update
+                    .my_match_plan_chunks
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "my_match_plans" => db_update
+                    .my_match_plans
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "my_match_player_states" => db_update
+                    .my_match_player_states
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "my_match_snapshot_chunks" => db_update
+                    .my_match_snapshot_chunks
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "my_match_snapshot_requests" => db_update
+                    .my_match_snapshot_requests
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "my_match_snapshots" => db_update
+                    .my_match_snapshots
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "my_match_state" => db_update
                     .my_match_state
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "my_match_ui_events" => db_update
+                    .my_match_ui_events
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "my_matches" => db_update
                     .my_matches
@@ -700,6 +1098,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "all_players" => db_update
                     .all_players
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "chat_filter" => db_update
+                    .chat_filter
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "client_settings" => db_update
                     .client_settings
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -712,11 +1113,32 @@ impl __sdk::DbUpdate for DbUpdate {
                 "local_player_profile" => db_update
                     .local_player_profile
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "match_chat" => db_update
+                    .match_chat
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "match_checksum" => db_update
+                    .match_checksum
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "match_mod" => db_update
                     .match_mod
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "match_plan_chunk" => db_update
+                    .match_plan_chunk
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "match_plan_state" => db_update
+                    .match_plan_state
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "match_player_state" => db_update
+                    .match_player_state
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "match_snapshot" => db_update
+                    .match_snapshot
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "match_state" => db_update
                     .match_state
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "match_ui_event" => db_update
+                    .match_ui_event
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "my_kick" => db_update
                     .my_kick
@@ -724,14 +1146,41 @@ impl __sdk::DbUpdate for DbUpdate {
                 "my_match" => db_update
                     .my_match
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "my_match_chat" => db_update
+                    .my_match_chat
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "my_match_checksums" => db_update
+                    .my_match_checksums
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "my_match_commands" => db_update
                     .my_match_commands
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "my_match_members" => db_update
                     .my_match_members
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "my_match_plan_chunks" => db_update
+                    .my_match_plan_chunks
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "my_match_plans" => db_update
+                    .my_match_plans
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "my_match_player_states" => db_update
+                    .my_match_player_states
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "my_match_snapshot_chunks" => db_update
+                    .my_match_snapshot_chunks
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "my_match_snapshot_requests" => db_update
+                    .my_match_snapshot_requests
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "my_match_snapshots" => db_update
+                    .my_match_snapshots
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "my_match_state" => db_update
                     .my_match_state
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "my_match_ui_events" => db_update
+                    .my_match_ui_events
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "my_matches" => db_update
                     .my_matches
@@ -784,17 +1233,34 @@ pub struct AppliedDiff<'r> {
     admin_identity: __sdk::TableAppliedDiff<'r, AdminIdentity>,
     all_matches: __sdk::TableAppliedDiff<'r, RelayMatch>,
     all_players: __sdk::TableAppliedDiff<'r, Player>,
+    chat_filter: __sdk::TableAppliedDiff<'r, ChatFilter>,
     client_settings: __sdk::TableAppliedDiff<'r, ClientSettings>,
     local_client_settings: __sdk::TableAppliedDiff<'r, ClientSettings>,
     local_player: __sdk::TableAppliedDiff<'r, Player>,
     local_player_profile: __sdk::TableAppliedDiff<'r, PlayerProfile>,
+    match_chat: __sdk::TableAppliedDiff<'r, MatchChat>,
+    match_checksum: __sdk::TableAppliedDiff<'r, MatchChecksum>,
     match_mod: __sdk::TableAppliedDiff<'r, MatchMod>,
+    match_plan_chunk: __sdk::TableAppliedDiff<'r, MatchPlanChunk>,
+    match_plan_state: __sdk::TableAppliedDiff<'r, MatchPlanState>,
+    match_player_state: __sdk::TableAppliedDiff<'r, MatchPlayerState>,
+    match_snapshot: __sdk::TableAppliedDiff<'r, MatchSnapshot>,
     match_state: __sdk::TableAppliedDiff<'r, MatchState>,
+    match_ui_event: __sdk::TableAppliedDiff<'r, MatchUiEvent>,
     my_kick: __sdk::TableAppliedDiff<'r, MatchKick>,
     my_match: __sdk::TableAppliedDiff<'r, RelayMatch>,
+    my_match_chat: __sdk::TableAppliedDiff<'r, MatchChat>,
+    my_match_checksums: __sdk::TableAppliedDiff<'r, MatchChecksum>,
     my_match_commands: __sdk::TableAppliedDiff<'r, MatchCommand>,
     my_match_members: __sdk::TableAppliedDiff<'r, RelayMember>,
+    my_match_plan_chunks: __sdk::TableAppliedDiff<'r, MatchPlanChunk>,
+    my_match_plans: __sdk::TableAppliedDiff<'r, MatchPlanState>,
+    my_match_player_states: __sdk::TableAppliedDiff<'r, MatchPlayerState>,
+    my_match_snapshot_chunks: __sdk::TableAppliedDiff<'r, MatchSnapshotChunk>,
+    my_match_snapshot_requests: __sdk::TableAppliedDiff<'r, MatchSnapshotRequest>,
+    my_match_snapshots: __sdk::TableAppliedDiff<'r, MatchSnapshot>,
     my_match_state: __sdk::TableAppliedDiff<'r, MatchState>,
+    my_match_ui_events: __sdk::TableAppliedDiff<'r, MatchUiEvent>,
     my_matches: __sdk::TableAppliedDiff<'r, RelayMatch>,
     my_sender_command_state: __sdk::TableAppliedDiff<'r, SenderCommandState>,
     player: __sdk::TableAppliedDiff<'r, Player>,
@@ -826,6 +1292,7 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         );
         callbacks.invoke_table_row_callbacks::<RelayMatch>("all_matches", &self.all_matches, event);
         callbacks.invoke_table_row_callbacks::<Player>("all_players", &self.all_players, event);
+        callbacks.invoke_table_row_callbacks::<ChatFilter>("chat_filter", &self.chat_filter, event);
         callbacks.invoke_table_row_callbacks::<ClientSettings>(
             "client_settings",
             &self.client_settings,
@@ -842,10 +1309,51 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             &self.local_player_profile,
             event,
         );
+        callbacks.invoke_table_row_callbacks::<MatchChat>("match_chat", &self.match_chat, event);
+        callbacks.invoke_table_row_callbacks::<MatchChecksum>(
+            "match_checksum",
+            &self.match_checksum,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<MatchMod>("match_mod", &self.match_mod, event);
+        callbacks.invoke_table_row_callbacks::<MatchPlanChunk>(
+            "match_plan_chunk",
+            &self.match_plan_chunk,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<MatchPlanState>(
+            "match_plan_state",
+            &self.match_plan_state,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<MatchPlayerState>(
+            "match_player_state",
+            &self.match_player_state,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<MatchSnapshot>(
+            "match_snapshot",
+            &self.match_snapshot,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<MatchState>("match_state", &self.match_state, event);
+        callbacks.invoke_table_row_callbacks::<MatchUiEvent>(
+            "match_ui_event",
+            &self.match_ui_event,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<MatchKick>("my_kick", &self.my_kick, event);
         callbacks.invoke_table_row_callbacks::<RelayMatch>("my_match", &self.my_match, event);
+        callbacks.invoke_table_row_callbacks::<MatchChat>(
+            "my_match_chat",
+            &self.my_match_chat,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<MatchChecksum>(
+            "my_match_checksums",
+            &self.my_match_checksums,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<MatchCommand>(
             "my_match_commands",
             &self.my_match_commands,
@@ -856,9 +1364,44 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             &self.my_match_members,
             event,
         );
+        callbacks.invoke_table_row_callbacks::<MatchPlanChunk>(
+            "my_match_plan_chunks",
+            &self.my_match_plan_chunks,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<MatchPlanState>(
+            "my_match_plans",
+            &self.my_match_plans,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<MatchPlayerState>(
+            "my_match_player_states",
+            &self.my_match_player_states,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<MatchSnapshotChunk>(
+            "my_match_snapshot_chunks",
+            &self.my_match_snapshot_chunks,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<MatchSnapshotRequest>(
+            "my_match_snapshot_requests",
+            &self.my_match_snapshot_requests,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<MatchSnapshot>(
+            "my_match_snapshots",
+            &self.my_match_snapshots,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<MatchState>(
             "my_match_state",
             &self.my_match_state,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<MatchUiEvent>(
+            "my_match_ui_events",
+            &self.my_match_ui_events,
             event,
         );
         callbacks.invoke_table_row_callbacks::<RelayMatch>("my_matches", &self.my_matches, event);
@@ -1563,17 +2106,34 @@ impl __sdk::SpacetimeModule for RemoteModule {
         admin_identity_table::register_table(client_cache);
         all_matches_table::register_table(client_cache);
         all_players_table::register_table(client_cache);
+        chat_filter_table::register_table(client_cache);
         client_settings_table::register_table(client_cache);
         local_client_settings_table::register_table(client_cache);
         local_player_table::register_table(client_cache);
         local_player_profile_table::register_table(client_cache);
+        match_chat_table::register_table(client_cache);
+        match_checksum_table::register_table(client_cache);
         match_mod_table::register_table(client_cache);
+        match_plan_chunk_table::register_table(client_cache);
+        match_plan_state_table::register_table(client_cache);
+        match_player_state_table::register_table(client_cache);
+        match_snapshot_table::register_table(client_cache);
         match_state_table::register_table(client_cache);
+        match_ui_event_table::register_table(client_cache);
         my_kick_table::register_table(client_cache);
         my_match_table::register_table(client_cache);
+        my_match_chat_table::register_table(client_cache);
+        my_match_checksums_table::register_table(client_cache);
         my_match_commands_table::register_table(client_cache);
         my_match_members_table::register_table(client_cache);
+        my_match_plan_chunks_table::register_table(client_cache);
+        my_match_plans_table::register_table(client_cache);
+        my_match_player_states_table::register_table(client_cache);
+        my_match_snapshot_chunks_table::register_table(client_cache);
+        my_match_snapshot_requests_table::register_table(client_cache);
+        my_match_snapshots_table::register_table(client_cache);
         my_match_state_table::register_table(client_cache);
+        my_match_ui_events_table::register_table(client_cache);
         my_matches_table::register_table(client_cache);
         my_sender_command_state_table::register_table(client_cache);
         player_table::register_table(client_cache);
@@ -1590,17 +2150,34 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "admin_identity",
         "all_matches",
         "all_players",
+        "chat_filter",
         "client_settings",
         "local_client_settings",
         "local_player",
         "local_player_profile",
+        "match_chat",
+        "match_checksum",
         "match_mod",
+        "match_plan_chunk",
+        "match_plan_state",
+        "match_player_state",
+        "match_snapshot",
         "match_state",
+        "match_ui_event",
         "my_kick",
         "my_match",
+        "my_match_chat",
+        "my_match_checksums",
         "my_match_commands",
         "my_match_members",
+        "my_match_plan_chunks",
+        "my_match_plans",
+        "my_match_player_states",
+        "my_match_snapshot_chunks",
+        "my_match_snapshot_requests",
+        "my_match_snapshots",
         "my_match_state",
+        "my_match_ui_events",
         "my_matches",
         "my_sender_command_state",
         "player",
