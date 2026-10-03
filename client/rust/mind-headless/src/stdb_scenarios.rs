@@ -231,10 +231,12 @@ fn run_command_order(cli: &Cli, dump: Option<&Path>, json: bool) -> anyhow::Resu
         duplicate_ignored,
         order_error,
     };
-    if json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
-    } else {
-        println!("{}", serde_json::to_string(&report)?);
+    if !crate::exec::is_quiet() {
+        if json {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        } else {
+            println!("{}", serde_json::to_string(&report)?);
+        }
     }
     Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
 }
@@ -358,10 +360,12 @@ fn run_binder_replay(cli: &Cli, dump: Option<&Path>, json: bool) -> anyhow::Resu
         expect_replay,
         expect_live,
     };
-    if json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
-    } else {
-        println!("{}", serde_json::to_string(&report)?);
+    if !crate::exec::is_quiet() {
+        if json {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        } else {
+            println!("{}", serde_json::to_string(&report)?);
+        }
     }
     Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
 }
@@ -451,10 +455,12 @@ fn run_offline_boot(cli: &Cli, dump: Option<&Path>, json: bool) -> anyhow::Resul
         expect_state,
         expect_frames,
     };
-    if json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
-    } else {
-        println!("{}", serde_json::to_string(&report)?);
+    if !crate::exec::is_quiet() {
+        if json {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        } else {
+            println!("{}", serde_json::to_string(&report)?);
+        }
     }
     Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
 }

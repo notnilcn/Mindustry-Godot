@@ -457,6 +457,69 @@
       "path": "scenarios/stdb_offline_boot.json",
       "owner_plan": "01",
       "sha256": "f0e31a7dc0f545b3b566fdb2fb85ba8e3544e522228390be8d203384df0be186"
+    },
+    {
+      "id": "harness_ui_campaign",
+      "kind": "harness",
+      "path": "client/rust/mind-core/tests/goldens/ui/campaign.json",
+      "owner_plan": "14",
+      "sha256": "12ea80e3e35d420745e27a75b78c431de1770ceb651a554c610809d385adc72c"
+    },
+    {
+      "id": "harness_ui_chat_console",
+      "kind": "harness",
+      "path": "client/rust/mind-core/tests/goldens/ui/chat_console.json",
+      "owner_plan": "14",
+      "sha256": "9a11e8133de68446e8bbdbb0b4f4e31d9fc4f4293db3da69463b042a5e3d6dfc"
+    },
+    {
+      "id": "harness_ui_display",
+      "kind": "harness",
+      "path": "client/rust/mind-core/tests/goldens/ui/display.json",
+      "owner_plan": "14",
+      "sha256": "ec24db5c0e5c1c77a1c981df6ee16e1d9b9451daa5f29bb3de6eea3378b51eb7"
+    },
+    {
+      "id": "harness_ui_file_chooser",
+      "kind": "harness",
+      "path": "client/rust/mind-core/tests/goldens/ui/file_chooser.json",
+      "owner_plan": "14",
+      "sha256": "e917eb9067d97bad72562373b31fc92f418c4d21bbb251352c29665d47bccb0b"
+    },
+    {
+      "id": "harness_input_focus_guards",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/input/focus_guards.json",
+      "owner_plan": "15",
+      "sha256": "f2bad9e0f903b434eabadc5f233ce5ba0d5a72d08ecdd606ab71ff693f046913"
+    },
+    {
+      "id": "harness_input_focus_guards_replay",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/input/focus_guards_replay.json",
+      "owner_plan": "15",
+      "sha256": "e2e63fba26e832075211905c5e3de5d16f75572714e76325d360c0033db1d50c"
+    },
+    {
+      "id": "harness_input_place_line_headless",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/input/input_place_line_headless.json",
+      "owner_plan": "15",
+      "sha256": "0e6b3264b8d7a468681edea5cec9d2d0a8c468cf3f334d60717aa54ed8f7e780"
+    },
+    {
+      "id": "harness_input_keybinds",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/input/keybinds.json",
+      "owner_plan": "15",
+      "sha256": "b392be92e64b25dc542e3618248cef3850e74e9ac7d4f2a352e99c754377a4aa"
+    },
+    {
+      "id": "harness_input_placement_validation_table",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/input/placement_validation_table.json",
+      "owner_plan": "15",
+      "sha256": "0e018fd12d267b20274aa5d45cb98c4913c35e005ef256f73d5706c2b068067c"
     }
   ]
 }

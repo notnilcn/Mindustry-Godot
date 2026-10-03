@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use anyhow::{Context, anyhow};
@@ -24,7 +25,7 @@ use crate::cli::{
     AssetsCommand, Cli, Command, ContentCommand, EditorCommand, IoCommand, MapsCommand,
     MetaCommand, ModsCommand, TraceCommand, WorldCommand,
 };
-use crate::parity::scenario::ScenarioCatalog;
+use crate::parity::scenario::{ScenarioCatalog, ScenarioEntry};
 use crate::paths;
 use crate::registry;
 use crate::report::{
@@ -42,6 +43,19 @@ const EXIT_PASS: i32 = 0;
 const EXIT_FAIL: i32 = 1;
 /// Exit code: usage/IO error.
 const EXIT_USAGE: i32 = 2;
+
+/// When set, scenario runners in `run_suite` suppress their per-scenario
+/// reports so the suite can emit one clean `format: 1` JSON document.
+static QUIET: AtomicBool = AtomicBool::new(false);
+
+/// Whether per-scenario output is currently suppressed (suite runs only).
+pub(crate) fn is_quiet() -> bool {
+    QUIET.load(Ordering::Relaxed)
+}
+
+fn set_quiet(value: bool) {
+    QUIET.store(value, Ordering::Relaxed);
+}
 
 /// Initializes logging and dispatches the parsed command.
 pub fn run(cli: Cli) -> i32 {
@@ -289,7 +303,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
         }
         Command::Ui { command } => crate::ui_scenarios::run(command).map(|()| EXIT_PASS),
         Command::Input { command } => crate::input_scenarios::run(command).map(|()| EXIT_PASS),
-        Command::Parity { command } => crate::parity::run(command),
+        Command::Parity { command } => crate::parity::run(&cli, command),
         Command::Audio { command } => crate::audio_scenarios::run(command),
         Command::Mods { command } => match command {
             ModsCommand::List { dir, json, check } => cmd_mods_list(dir, *json, *check),
@@ -2292,15 +2306,41 @@ fn cmd_list(json: bool, tier: Option<&str>) -> anyhow::Result<i32> {
     Ok(EXIT_PASS)
 }
 
-/// `run-all [--tier <T>]`: run every file-backed scenario in the tier
-/// (plan 23 §3.2). Embedded/planned entries are catalogued but not run.
-fn cmd_run_all(cli: &Cli, tier: Option<&str>) -> anyhow::Result<i32> {
+/// One executed suite case.
+pub(crate) struct SuiteCase {
+    pub name: String,
+    pub pass: bool,
+    pub duration_ms: u128,
+}
+
+/// The executed cases of a filtered catalog run.
+pub(crate) struct SuiteReport {
+    pub cases: Vec<SuiteCase>,
+}
+
+impl SuiteReport {
+    pub fn passed(&self) -> usize {
+        self.cases.iter().filter(|case| case.pass).count()
+    }
+
+    pub fn pass(&self) -> bool {
+        self.cases.iter().all(|case| case.pass)
+    }
+}
+
+/// Runs the file-backed scenarios matching an optional tier/phase filter.
+pub(crate) fn run_catalog_entries(
+    cli: &Cli,
+    tier: Option<&str>,
+    phase: Option<&str>,
+) -> anyhow::Result<SuiteReport> {
     let catalog = load_scenario_catalog()?;
-    let entries: Vec<&crate::parity::scenario::ScenarioEntry> = catalog
+    let entries: Vec<&ScenarioEntry> = catalog
         .entries
         .iter()
         .filter(|entry| entry.kind == "file")
         .filter(|entry| tier.is_none_or(|tier| entry.tier == tier))
+        .filter(|entry| phase.is_none_or(|phase| entry.phase.as_str() <= phase))
         .collect();
     if entries.is_empty() {
         return Err(anyhow!(
@@ -2308,9 +2348,10 @@ fn cmd_run_all(cli: &Cli, tier: Option<&str>) -> anyhow::Result<i32> {
             tier.unwrap_or("all")
         ));
     }
-    let mut failed = 0;
+    let mut cases = Vec::new();
     for entry in &entries {
         let name = entry.name.as_str();
+        let started = Instant::now();
         let code = if let Some(kind) = StdbScenario::from_name(name) {
             crate::stdb_scenarios::run(cli, kind, None, false)?
         } else if name == "sim_core_reset_play_cycle" {
@@ -2318,17 +2359,84 @@ fn cmd_run_all(cli: &Cli, tier: Option<&str>) -> anyhow::Result<i32> {
         } else {
             cmd_run(cli, name, None, false, None, None, 20, 0, None, None)?
         };
-        if code != EXIT_PASS {
-            failed += 1;
-        }
+        cases.push(SuiteCase {
+            name: name.to_owned(),
+            pass: code == EXIT_PASS,
+            duration_ms: started.elapsed().as_millis(),
+        });
     }
+    Ok(SuiteReport { cases })
+}
+
+/// `run-all [--tier <T>]`: run every file-backed scenario in the tier
+/// (plan 23 §3.2). Embedded/planned entries are catalogued but not run.
+fn cmd_run_all(cli: &Cli, tier: Option<&str>) -> anyhow::Result<i32> {
+    let report = run_catalog_entries(cli, tier, None)?;
     println!(
         "run-all ({}): {}/{} passed",
         tier.unwrap_or("all tiers"),
-        entries.len() - failed,
-        entries.len()
+        report.passed(),
+        report.cases.len()
     );
-    Ok(if failed == 0 { EXIT_PASS } else { EXIT_FAIL })
+    Ok(if report.pass() { EXIT_PASS } else { EXIT_FAIL })
+}
+
+/// `parity run --suite <smoke|gate|full> [--phase Pn]`: the in-process suite
+/// runner (plan 23 §3.2). Emits a `format: 1` report whose `results` match §3.2.
+pub(crate) fn run_suite(
+    cli: &Cli,
+    suite: &str,
+    phase: Option<&str>,
+    json: bool,
+) -> anyhow::Result<i32> {
+    let tier = match suite {
+        "smoke" => "T0",
+        "gate" => "T1",
+        "full" => "T2",
+        other => {
+            return Err(anyhow!("unknown suite `{other}`; expected smoke|gate|full"));
+        }
+    };
+    set_quiet(true);
+    let result = run_catalog_entries(cli, Some(tier), phase);
+    set_quiet(false);
+    let report = result?;
+    let pass = report.pass();
+    let passed = report.passed();
+    let total = report.cases.len();
+    if json {
+        let results: Vec<serde_json::Value> = report
+            .cases
+            .iter()
+            .map(|case| {
+                serde_json::json!({
+                    "scenario": case.name,
+                    "status": if case.pass { "pass" } else { "fail" },
+                    "duration_ms": case.duration_ms,
+                    "error": if case.pass { serde_json::Value::Null } else { serde_json::Value::from("non-zero exit") },
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "format": 1,
+                "suite": suite,
+                "tier": tier,
+                "phase": phase,
+                "results": results,
+                "counts": { "pass": passed, "fail": total - passed, "total": total },
+                "pass": pass,
+            }))?
+        );
+    } else {
+        println!(
+            "parity run --suite {suite} ({tier}{}): {passed}/{total} passed -> {}",
+            phase.map(|p| format!(" <= {p}")).unwrap_or_default(),
+            if pass { "PASS" } else { "FAIL" }
+        );
+    }
+    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
 }
 
 /// Runs a scenario to completion; optionally collects per-tick checksums.
@@ -2357,6 +2465,9 @@ fn write_dump(sim: &Sim, path: &Path, all_tiles: bool) -> anyhow::Result<()> {
 }
 
 fn print_report<T: serde::Serialize>(report: &T, json: bool) -> anyhow::Result<()> {
+    if is_quiet() {
+        return Ok(());
+    }
     if json {
         println!("{}", serde_json::to_string_pretty(report)?);
     } else {

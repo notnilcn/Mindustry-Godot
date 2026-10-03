@@ -1,0 +1,32 @@
+{
+  "format": 1,
+  "note": "Fixed-pose screenshot baselines (plan 23 §3.5/§6.6, M6). Entries are `deferred` until an in-engine capture is committed under parity/screenshots/baseline/; promoting an entry sets status=`captured` and records sha256. Capture is gated on the single-editor MCP mutex (NUD-40/A). `parity screenshots` validates this file and diffs any committed PNGs.",
+  "baselines": [
+    { "id": "spine_place_break", "plan": "00", "scenario": "spine_place_break", "pose": "camera 0,0,1", "path": "parity/screenshots/baseline/00_spine_place_break_01.png", "status": "deferred" },
+    { "id": "content_inspector", "plan": "02", "scenario": null, "pose": "camera 0,0,1", "path": "parity/screenshots/baseline/02_content_inspector.png", "status": "deferred" },
+    { "id": "io_wave5", "plan": "04", "scenario": "io_roundtrip", "pose": "camera 0,0,1", "path": "parity/screenshots/baseline/04_io_wave5.png", "status": "deferred" },
+    { "id": "sim_inspector", "plan": "05", "scenario": "sim_core_boot", "pose": "camera 0,0,1", "path": "parity/screenshots/baseline/05_sim_inspector.png", "status": "deferred" },
+    { "id": "world_terrain", "plan": "06", "scenario": "world_gen", "pose": "camera 0,0,1", "path": "parity/screenshots/baseline/06_world_terrain.png", "status": "deferred" },
+    { "id": "blocks_place", "plan": "07", "scenario": "blocks_place_construct_destroy", "pose": "camera 0,0,1", "path": "parity/screenshots/baseline/07_blocks_place.png", "status": "deferred" },
+    { "id": "logistics_before", "plan": "08", "scenario": "logistics_smoke", "pose": "camera 0,0,1", "path": "parity/screenshots/baseline/08_logistics_before.png", "status": "deferred" },
+    { "id": "logistics_after", "plan": "08", "scenario": "logistics_smoke", "pose": "camera 0,0,1", "path": "parity/screenshots/baseline/08_logistics_after.png", "status": "deferred" },
+    { "id": "power_before_split", "plan": "09", "scenario": "power_graph_split_merge", "pose": "camera 0,0,1", "path": "parity/screenshots/baseline/09_power_before_split.png", "status": "deferred" },
+    { "id": "power_after_merge", "plan": "09", "scenario": "power_graph_split_merge", "pose": "camera 0,0,1", "path": "parity/screenshots/baseline/09_power_after_merge.png", "status": "deferred" },
+    { "id": "combat_preshot", "plan": "10", "scenario": "combat_basic", "pose": "camera 0,0,1", "path": "parity/screenshots/baseline/10_combat_preshot.png", "status": "deferred" },
+    { "id": "combat_postshot", "plan": "10", "scenario": "combat_basic", "pose": "camera 0,0,1", "path": "parity/screenshots/baseline/10_combat_postshot.png", "status": "deferred" },
+    { "id": "units_move", "plan": "11", "scenario": "units_spawn_path_arrive", "pose": "camera 800,800,1", "path": "parity/screenshots/baseline/11_units_move.png", "status": "deferred" },
+    { "id": "campaign_sector", "plan": "12", "scenario": "campaign_sector_cycle", "pose": "camera 0,0,1", "path": "parity/screenshots/baseline/12_campaign_sector.png", "status": "deferred" },
+    { "id": "logic_display", "plan": "13", "scenario": "logic_draw", "pose": "camera 0,0,1", "path": "parity/screenshots/baseline/13_logic_display.png", "status": "deferred" },
+    { "id": "ui_mobile", "plan": "14", "scenario": null, "pose": "fixed-hud", "path": "parity/screenshots/baseline/14_ui_mobile.png", "status": "deferred" },
+    { "id": "place_line_preview", "plan": "15", "scenario": "input_place_line_headless", "pose": "camera 0,0,1", "path": "parity/screenshots/baseline/15_place_line_preview.png", "status": "deferred" },
+    { "id": "place_line_done", "plan": "15", "scenario": "input_place_line_headless", "pose": "camera 0,0,1", "path": "parity/screenshots/baseline/15_place_line_done.png", "status": "deferred" },
+    { "id": "rts_select", "plan": "15", "scenario": null, "pose": "camera 0,0,1", "path": "parity/screenshots/baseline/15_rts_select.png", "status": "deferred" },
+    { "id": "rts_move", "plan": "15", "scenario": null, "pose": "camera 0,0,1", "path": "parity/screenshots/baseline/15_rts_move.png", "status": "deferred" },
+    { "id": "break_rect", "plan": "15", "scenario": null, "pose": "camera 0,0,1", "path": "parity/screenshots/baseline/15_break_rect.png", "status": "deferred" },
+    { "id": "layer_floor", "plan": "16", "scenario": "render_layer_order", "pose": "camera 0,0,1", "path": "parity/screenshots/baseline/16_layer_floor.png", "status": "deferred" },
+    { "id": "fx_pre", "plan": "17", "scenario": "fx_lifecycle", "pose": "camera 0,0,1", "path": "parity/screenshots/baseline/17_fx_pre.png", "status": "deferred" },
+    { "id": "fx_shot_t2", "plan": "17", "scenario": "fx_lifecycle", "pose": "camera 0,0,1", "path": "parity/screenshots/baseline/17_fx_shot_t2.png", "status": "deferred" },
+    { "id": "fx_hit", "plan": "17", "scenario": "fx_lifecycle", "pose": "camera 0,0,1", "path": "parity/screenshots/baseline/17_fx_hit.png", "status": "deferred" },
+    { "id": "audio_mixer", "plan": "18", "scenario": null, "pose": "fixed-hud", "path": "parity/screenshots/baseline/18_audio_mixer.png", "status": "deferred" }
+  ]
+}
