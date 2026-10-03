@@ -444,18 +444,20 @@ pub fn touched_line(
             x2 = x1;
         }
     }
-    let mut points: Vec<(i32, i32)> = Vec::new();
+    let mut points = std::mem::take(&mut editor.line_scratch);
+    points.clear();
     crate::world::raycast::raycast_each(x1, y1, x2, y2, |x, y| {
         points.push((x, y));
         false
     });
-    for (x, y) in points {
+    for &(x, y) in &points {
         if mode == 0 {
             editor.draw_blocks_replace(world, content, x, y);
         } else {
             editor.draw_blocks(world, content, x, y);
         }
     }
+    editor.line_scratch = points;
     editor.flush_op();
 }
 

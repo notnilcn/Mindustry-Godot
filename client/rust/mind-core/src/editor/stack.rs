@@ -64,6 +64,25 @@ impl OperationStack {
         }
     }
 
+    /// Pushes an operation while recycling every dropped operation (redo tail +
+    /// evicted oldest) into `pool`, so steady-state editing reuses allocations
+    /// (plan 19 §7d). Observable stack semantics are identical to [`Self::add`].
+    pub fn add_recycling(&mut self, action: DrawOperation, pool: &mut Vec<DrawOperation>) {
+        let len = self.stack.len() as i32;
+        let keep = (len + self.index).max(0) as usize;
+        while self.stack.len() > keep {
+            if let Some(dropped) = self.stack.pop() {
+                pool.push(dropped);
+            }
+        }
+        self.index = 0;
+        self.stack.push(action);
+        if self.stack.len() > MAX_SIZE {
+            let evicted = self.stack.remove(0);
+            pool.push(evicted);
+        }
+    }
+
     /// Whether an undo is available (`OperationStack.canUndo`).
     pub fn can_undo(&self) -> bool {
         !(self.stack.len() as i32 - 1 + self.index < 0)

@@ -122,8 +122,8 @@ impl EditorGrid for TestGrid {
         true
     }
 
-    fn linked_tiles(&self, x: i32, y: i32) -> Vec<(i32, i32)> {
-        vec![(x, y)]
+    fn linked_tiles(&self, x: i32, y: i32) -> smallvec::SmallVec<[(i32, i32); 9]> {
+        smallvec::smallvec![(x, y)]
     }
 
     fn set_floor(&mut self, x: i32, y: i32, floor: BlockId) {

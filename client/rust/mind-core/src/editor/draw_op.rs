@@ -48,6 +48,12 @@ impl DrawOperation {
         &self.ops
     }
 
+    /// Clears the operation while keeping its backing allocation
+    /// (plan 19 §7d op-pool reuse).
+    pub fn clear(&mut self) {
+        self.ops.clear();
+    }
+
     /// Backing allocation capacity (plan 19 M7 steady-state alloc audit).
     pub fn capacity(&self) -> usize {
         self.ops.capacity()
@@ -244,5 +250,68 @@ mod tests {
             op.add(i);
         }
         assert_eq!(op.capacity(), capacity);
+    }
+
+    /// Plan 19 §7d MapView steady-state audit: after warming past the undo-stack
+    /// cap, a repeated line → flush → undo → redo cycle must not allocate
+    /// (scratch buffers + pooled `DrawOperation`s). Requires `--features
+    /// alloc-audit`; the assertion mirrors the `editor bench --suite mapview`
+    /// counters.
+    #[cfg(feature = "alloc-audit")]
+    #[test]
+    fn steady_state_recording_is_allocation_free() {
+        use bevy_ecs::world::World;
+
+        use crate::content::test_support::test_registry;
+        use crate::editor::grid::WorldEditorGrid;
+        use crate::editor::stack::MAX_SIZE;
+        use crate::editor::tool::touched_line;
+        use crate::editor::{EditorTool, MapEditor};
+        use crate::util::alloc::{alloc_count, enabled};
+        use crate::world::{NoopRenderHooks, NoopWorldHooks, WorldGrid};
+
+        assert!(
+            enabled(),
+            "alloc-audit feature must be enabled for this test"
+        );
+        let content = test_registry();
+        let wall = content.block_id("copper-wall").expect("copper-wall");
+        let mut editor = MapEditor::new();
+        let mut grid = WorldGrid::new(0, 0);
+        let mut ecs = World::new();
+        let hooks = NoopWorldHooks;
+        let render = NoopRenderHooks;
+        {
+            let mut world = WorldEditorGrid::new(&mut grid, &content, &mut ecs, &hooks, &render);
+            editor.begin_edit_size(&mut world, &content, 64, 64);
+        }
+        let mut world = WorldEditorGrid::new(&mut grid, &content, &mut ecs, &hooks, &render);
+        let content_ref = &content;
+        fn run_step(
+            editor: &mut MapEditor,
+            world: &mut WorldEditorGrid<'_>,
+            content: &crate::content::ContentRegistry,
+            wall: crate::content::BlockId,
+        ) {
+            editor.draw_block = wall;
+            touched_line(editor, EditorTool::Line, world, content, 2, 2, 60, 2);
+            editor.flush_op();
+            editor.undo(world, content);
+            editor.redo(world, content);
+            // Frame boundary: drain the world-event log (retaining capacity).
+            world.clear_events();
+        }
+        for _ in 0..(MAX_SIZE + 1) {
+            run_step(&mut editor, &mut world, content_ref, wall);
+        }
+        let before = alloc_count();
+        for _ in 0..40 {
+            run_step(&mut editor, &mut world, content_ref, wall);
+        }
+        assert_eq!(
+            alloc_count(),
+            before,
+            "steady-state editor recording/flush/undo/redo allocated"
+        );
     }
 }
