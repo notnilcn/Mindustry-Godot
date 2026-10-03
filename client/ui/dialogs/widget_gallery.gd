@@ -23,11 +23,11 @@ func _build() -> void:
 	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	cont.add_child(grid)
 
-	grid.add(MindWidgets.bar("Bar", MindStyles.ACCENT, 0.5)).size(200, 24).pad(2)
-	grid.add(MindWidgets.warning_bar()).size(200, 24).pad(2)
+	grid.add(MindWidgets.bar("Bar", MindStyles.ACCENT, 0.5)).width(200).height(24).pad(2)
+	grid.add(MindWidgets.warning_bar()).width(200).height(24).pad(2)
 	grid.row()
 
-	grid.add(MindWidgets.grid_image(8, 4)).size(200, 64).pad(2)
+	grid.add(MindWidgets.grid_image(8, 4)).width(200).height(64).pad(2)
 	grid.add(MindWidgets.check("Check", true)).pad(2)
 	grid.row()
 

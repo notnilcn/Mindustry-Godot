@@ -6,6 +6,8 @@
 ## plans 12/21; the M3 shell provides the name field, mode buttons and the
 ## `host_requested` signal.
 
+extends MindDialog
+
 signal host_requested(host_name: String, mode: String)
 
 ## Gamemode keys (`@mode.*`) offered by the host dialog.
