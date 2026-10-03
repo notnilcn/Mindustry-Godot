@@ -417,21 +417,24 @@ pub struct MapScan {
 
 /// Scans core teams and spawn overlays from a live source (`Maps.saveMap`).
 ///
-/// The tile-source shape carries no building team, so `teams` is populated only
-/// when a caller supplies it; the spawn count is exact (`BlockPalette::is_spawn`).
+/// The spawn count is exact (`BlockPalette::is_spawn`). Teams come from
+/// [`MapSource::core_team`], which a plan-07 ECS-aware source
+/// ([`crate::world::EcsMapSource`]) overrides; tile-only sources leave `teams`
+/// empty (documented fallback).
 pub fn scan_map_source(source: &dyn MapSource, content: &ContentRegistry) -> MapScan {
     let palette = BlockPalette::of(content);
     let len = source.width() as usize * source.height() as usize;
     let mut spawns = 0u32;
+    let mut teams: BTreeSet<u8> = BTreeSet::new();
     for index in 0..len {
         if palette.is_spawn(source.overlay_id(index)) {
             spawns = spawns.saturating_add(1);
         }
+        if let Some(team) = source.core_team(index) {
+            teams.insert(team);
+        }
     }
-    MapScan {
-        spawns,
-        teams: BTreeSet::new(),
-    }
+    MapScan { spawns, teams }
 }
 
 /// Shared native-map writer: merges `map_tags` over `base_tags` and writes the

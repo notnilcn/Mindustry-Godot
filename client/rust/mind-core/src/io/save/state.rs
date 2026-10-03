@@ -206,6 +206,14 @@ pub trait MapSource {
     /// `version` byte (`entity.version()`) then the entity codec body
     /// (`tile.build.writeAll`).
     fn write_building(&self, index: usize, chunk: &mut WireWriter) -> IoResult<()>;
+    /// The team id of a building on a tile, if the source can see plan-07's
+    /// ECS entities. Upstream `Maps.saveMap` scans `tile.getTeamID()` for
+    /// `CoreBlock`s; the Rust tile model carries no team, so a source with ECS
+    /// access (plan 06 M4) overrides this. Tile-only sources return `None` and
+    /// leave [`crate::maps::MapScan::teams`] empty (documented fallback).
+    fn core_team(&self, _index: usize) -> Option<u8> {
+        None
+    }
 }
 
 /// One AI-team build plan (`mindustry.game.Teams.BlockPlan` wire shape).

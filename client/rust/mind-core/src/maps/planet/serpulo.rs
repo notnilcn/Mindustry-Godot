@@ -394,6 +394,9 @@ pub struct SerpuloPlanetGenerator {
     pub water_offset: f32,
     /// Height scale (`heightScl`).
     pub height_scl: f32,
+    /// Whether the generated sector is predominantly water (`naval`; feeds
+    /// `Waves.generate`'s naval flag in [`Self::generate_rules`]).
+    pub naval: bool,
     ids: Ids,
 }
 
@@ -418,6 +421,7 @@ impl SerpuloPlanetGenerator {
             scl: 5.0,
             water_offset: 0.04,
             height_scl: 1.01,
+            naval: false,
             ids: Ids::load_empty(),
         }
     }
@@ -927,6 +931,7 @@ impl WorldGenerator for SerpuloPlanetGenerator {
             }
         }
         let naval = total > 0 && (waters as f32 / total as f32) >= 0.19;
+        self.naval = naval;
 
         if naval {
             for &enemy in &enemy_indices {
@@ -1332,8 +1337,78 @@ impl WorldGenerator for SerpuloPlanetGenerator {
             }
         }
 
-        // `basegen.generate`, `state.rules.*`, `Waves.generate` and
-        // `postGenerate` are plan-11/12 hooks (no tile effect).
+        // `basegen.generate` (ruins) stays a named residual: placing schematics
+        // needs the plan-07 `WorldCtx`/ECS, which `WorldGenerator::generate`
+        // (tiles only) cannot carry; `postGenerate`'s wall fixes land with it.
+    }
+
+    /// `state.rules.*` + `Waves.generate` half of `SerpuloPlanetGenerator.generate`
+    /// (plan 06 §3.10 R3). Ported from the tail of
+    /// `SerpuloPlanetGenerator.java`: the caller owns the runtime `Rules`, so the
+    /// generator writes it explicitly instead of mutating `state.rules`.
+    fn generate_rules(
+        &mut self,
+        rules: &mut crate::game::rules::Rules,
+        _params: &WorldParams,
+        _content: &ContentRegistry,
+    ) {
+        use crate::game::waves::Waves;
+        use crate::math::rand_arc::ArcRand;
+
+        let difficulty = self.sector.threat;
+        let attack = self.sector.has_enemy_base();
+
+        rules.waves = true;
+        // `Mathf.lerp(60*65*2, 60*60, max(difficulty - 0.4, 0))`.
+        let dec = (difficulty - 0.4).max(0.0);
+        rules.wave_spacing = 60.0 * 65.0 * 2.0 + (60.0 * 60.0 - 60.0 * 65.0 * 2.0) * dec;
+        rules.enemy_core_build_radius = 600.0;
+
+        if attack {
+            rules.attack_mode = true;
+        } else {
+            rules.win_wave = 10 + 5 * ((difficulty * 10.0) as i32).max(1);
+        }
+
+        // Upstream `spawner.countGroundSpawns() == 0` on a fresh generation, so
+        // `airOnly == attack`.
+        let runtime = Waves::generate_with(
+            difficulty,
+            &mut ArcRand::new(self.sector.id as u64),
+            attack,
+            attack,
+            self.naval,
+        );
+        rules.spawns = runtime.iter().map(spawn_group_to_json).collect();
+    }
+}
+
+/// Projects the runtime wave [`crate::game::spawn_group::SpawnGroup`] onto the
+/// persisted `Rules.spawns` shape (plan 04 §6.7 upstream camelCase ABI).
+fn spawn_group_to_json(
+    group: &crate::game::spawn_group::SpawnGroup,
+) -> crate::io::json::rules::SpawnGroup {
+    crate::io::json::rules::SpawnGroup {
+        type_: group.unit.clone(),
+        begin: group.begin,
+        end: group.end,
+        spacing: group.spacing,
+        max: group.max,
+        unit_scaling: group.unit_scaling,
+        shields: group.shields,
+        shield_scaling: group.shield_scaling,
+        unit_amount: group.unit_amount,
+        effect: group.effect.clone(),
+        spawn: group.spawn,
+        payloads: group.payloads.clone(),
+        items: group
+            .items
+            .as_ref()
+            .map(|stack| crate::io::json::JsonItemStack {
+                item: Some(stack.item.clone()),
+                amount: stack.amount,
+            }),
+        team: group.team,
     }
 }
 
@@ -1492,5 +1567,39 @@ mod tests {
             Checksum(hasher.finish().value()).to_hex(),
             "55fcac31fc269e11"
         );
+    }
+
+    /// Plan 06 §3.10 R3: `generate_rules` writes the serpulo survival/attack
+    /// rules and the seeded wave table.
+    #[test]
+    fn serpulo_generate_rules_writes_waves_and_spawns() {
+        let content = registry();
+        let mut tiles = Tiles::new(128, 128);
+        let mut generator = SerpuloPlanetGenerator::new();
+        let params = WorldParams {
+            seed_offset: 42,
+            ..WorldParams::default()
+        };
+        generator.generate(&mut tiles, &params, &content);
+
+        let mut rules = crate::game::rules::Rules::default();
+        generator.generate_rules(&mut rules, &params, &content);
+        assert!(rules.waves, "waves enabled");
+        assert_eq!(rules.enemy_core_build_radius, 600.0);
+        // Non-attack sector: win wave formula; waveSpacing lerped from threat 0.
+        assert!(!rules.attack_mode);
+        assert_eq!(rules.win_wave, 10 + 5);
+        assert_eq!(rules.wave_spacing, 60.0 * 65.0 * 2.0);
+        assert!(!rules.spawns.is_empty(), "wave table generated");
+        // Deterministic across two runs at the same seed.
+        let mut again = crate::game::rules::Rules::default();
+        let mut generator2 = SerpuloPlanetGenerator::new();
+        generator2.generate(&mut tiles, &params, &content);
+        generator2.generate_rules(&mut again, &params, &content);
+        assert_eq!(rules.spawns.len(), again.spawns.len());
+        for (a, b) in rules.spawns.iter().zip(&again.spawns) {
+            assert_eq!(a.type_, b.type_);
+            assert_eq!(a.unit_amount, b.unit_amount);
+        }
     }
 }
