@@ -25,6 +25,7 @@ use crate::cli::{
     AssetsCommand, Cli, Command, ContentCommand, EditorCommand, IoCommand, MapsCommand,
     MetaCommand, ModsCommand, TraceCommand, WorldCommand,
 };
+use crate::mp_scenarios::MpScenario;
 use crate::parity::scenario::{ScenarioCatalog, ScenarioEntry};
 use crate::paths;
 use crate::registry;
@@ -2533,6 +2534,13 @@ fn cmd_run(
             log::warn!("--emit-commands/--emit-simlog are ignored for `{name}` (no sim commands)");
         }
         return crate::stdb_scenarios::run(cli, kind, dump, json);
+    }
+    // Plan 21 §7b: `mp_*` scenarios are network-free relay/lifecycle proofs.
+    if let Some(kind) = MpScenario::from_name(name) {
+        if emit_commands.is_some() || emit_simlog.is_some() {
+            log::warn!("--emit-commands/--emit-simlog are ignored for `{name}` (mp scenario)");
+        }
+        return crate::mp_scenarios::run(cli, kind, dump, json);
     }
     // Plan 05 M8 §7.2: the reset/play cycle needs the `reset()`/`play()` flows.
     if name == "sim_core_reset_play_cycle" {

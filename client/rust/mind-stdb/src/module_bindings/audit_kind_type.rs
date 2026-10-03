@@ -20,6 +20,12 @@ pub enum AuditKind {
 
     MatchStart,
 
+    MatchLeave,
+
+    MatchReady,
+
+    MatchEnd,
+
     ConfigChange,
 }
 

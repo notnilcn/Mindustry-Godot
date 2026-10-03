@@ -1,0 +1,91 @@
+{
+  "format": 1,
+  "map_width": 100,
+  "map_height": 100,
+  "cases": [
+    { "name": "noop_ok", "kind": "noop", "expect": "accept" },
+    { "name": "ping_ok", "kind": "ping", "nonce": 42, "expect": "accept" },
+
+    { "name": "place_ok", "kind": "place_block", "x": 5, "y": 6, "block": "stone-wall", "rotation": 1, "expect": "accept" },
+    { "name": "place_min_ok", "kind": "place_block", "x": 0, "y": 0, "block": "router", "rotation": 0, "expect": "accept" },
+    { "name": "place_oob_x_high", "kind": "place_block", "x": 100, "y": 6, "block": "stone-wall", "rotation": 0, "expect": "reject", "reason": "(100, 6) is outside the match bounds" },
+    { "name": "place_oob_y_high", "kind": "place_block", "x": 5, "y": 100, "block": "stone-wall", "rotation": 0, "expect": "reject", "reason": "(5, 100) is outside the match bounds" },
+    { "name": "place_oob_negative", "kind": "place_block", "x": -1, "y": 6, "block": "stone-wall", "rotation": 0, "expect": "reject", "reason": "(-1, 6) is outside the match bounds" },
+    { "name": "place_empty_block", "kind": "place_block", "x": 5, "y": 6, "block": "", "rotation": 0, "expect": "reject", "reason": "content name must be 1-100 characters" },
+    { "name": "place_bad_charset", "kind": "place_block", "x": 5, "y": 6, "block": "bad name", "rotation": 0, "expect": "reject", "reason": "content name has invalid characters" },
+    { "name": "place_rotation_high", "kind": "place_block", "x": 5, "y": 6, "block": "stone-wall", "rotation": 4, "expect": "reject", "reason": "rotation 4 must be 0..=3" },
+    { "name": "place_config_cap", "kind": "place_block", "x": 5, "y": 6, "block": "stone-wall", "rotation": 0, "config_len": 4097, "expect": "reject", "reason": "place config exceeds 4096 bytes" },
+
+    { "name": "break_ok", "kind": "break_block", "x": 99, "y": 99, "expect": "accept" },
+    { "name": "break_oob", "kind": "break_block", "x": 100, "y": 0, "expect": "reject", "reason": "(100, 0) is outside the match bounds" },
+
+    { "name": "config_ok", "kind": "config_block", "x": 0, "y": 0, "value_len": 4, "expect": "accept" },
+    { "name": "config_cap", "kind": "config_block", "x": 0, "y": 0, "value_len": 16385, "expect": "reject", "reason": "config value exceeds 16384 bytes" },
+    { "name": "config_oob", "kind": "config_block", "x": 0, "y": -1, "value_len": 1, "expect": "reject", "reason": "(0, -1) is outside the match bounds" },
+
+    { "name": "rotate_ok", "kind": "rotate", "x": 1, "y": 1, "direction": true, "expect": "accept" },
+    { "name": "rotate_oob", "kind": "rotate", "x": 1, "y": 100, "direction": false, "expect": "reject", "reason": "(1, 100) is outside the match bounds" },
+
+    { "name": "delete_plans_ok", "kind": "delete_plans", "positions": [1, 2, 3], "expect": "accept" },
+    { "name": "delete_plans_cap", "kind": "delete_plans", "list_len": 257, "expect": "reject", "reason": "positions exceeds 256 entries" },
+
+    { "name": "command_building_ok", "kind": "command_building", "positions": [1], "expect": "accept" },
+    { "name": "command_building_cap", "kind": "command_building", "list_len": 257, "expect": "reject", "reason": "positions exceeds 256 entries" },
+
+    { "name": "inventory_ok", "kind": "inventory", "inv_kind": 0, "x": 1, "y": 1, "item": "copper", "amount": 10, "angle": 0.0, "expect": "accept" },
+    { "name": "inventory_no_item_ok", "kind": "inventory", "inv_kind": 2, "x": 1, "y": 1, "amount": 0, "angle": 0.5, "expect": "accept" },
+    { "name": "inventory_oob", "kind": "inventory", "inv_kind": 0, "x": 1, "y": 100, "amount": 1, "angle": 0.0, "expect": "reject", "reason": "(1, 100) is outside the match bounds" },
+    { "name": "inventory_amount_cap", "kind": "inventory", "inv_kind": 0, "x": 1, "y": 1, "amount": 10001, "angle": 0.0, "expect": "reject", "reason": "inventory amount 10001 exceeds 10000" },
+
+    { "name": "payload_ok", "kind": "payload", "payload_kind": 0, "expect": "accept" },
+    { "name": "unit_control_ok", "kind": "unit_control", "expect": "accept" },
+    { "name": "unit_clear_ok", "kind": "unit_clear", "expect": "accept" },
+    { "name": "building_control_select_ok", "kind": "building_control_select", "x": 3, "y": 3, "expect": "accept" },
+    { "name": "building_control_select_oob", "kind": "building_control_select", "x": 3, "y": 100, "expect": "reject", "reason": "(3, 100) is outside the match bounds" },
+
+    { "name": "unit_command_ok", "kind": "unit_command", "list_len": 10, "command": 5, "expect": "accept" },
+    { "name": "unit_command_units_cap", "kind": "unit_command", "list_len": 201, "command": 5, "expect": "reject", "reason": "units exceeds 200 entries" },
+    { "name": "unit_command_command_cap", "kind": "unit_command", "list_len": 1, "command": 256, "expect": "reject", "reason": "unit command 256 must be < 256" },
+    { "name": "unit_command_queue_ok", "kind": "unit_command_queue", "list_len": 1, "command": 1, "expect": "accept" },
+    { "name": "unit_stance_ok", "kind": "unit_stance", "list_len": 1, "stance": 1, "enabled": true, "expect": "accept" },
+    { "name": "unit_stance_cap", "kind": "unit_stance", "list_len": 201, "stance": 1, "enabled": false, "expect": "reject", "reason": "units exceeds 200 entries" },
+
+    { "name": "player_spawn_ok", "kind": "player_spawn", "team": 0, "expect": "accept" },
+    { "name": "player_spawn_bad_unit", "kind": "player_spawn", "unit": "bad unit", "team": 0, "expect": "reject", "reason": "content name has invalid characters" },
+
+    { "name": "bullet_ok", "kind": "bullet", "data_len": 8, "expect": "accept" },
+    { "name": "bullet_cap", "kind": "bullet", "data_len": 4097, "expect": "reject", "reason": "bullet data exceeds 4096 bytes" },
+
+    { "name": "set_rules_ok", "kind": "set_rules", "rules_epoch": 1, "expect": "accept" },
+    { "name": "set_rules_cap", "kind": "set_rules", "rules_epoch": 1, "rules_len": 100001, "expect": "reject", "reason": "rules_json exceeds 100000 characters" },
+    { "name": "set_rule_ok", "kind": "set_rule", "rule": "waves", "json": "true", "expect": "accept" },
+    { "name": "set_rule_cap", "kind": "set_rule", "rule": "waves", "json_len": 16385, "expect": "reject", "reason": "rule json exceeds 16384 characters" },
+
+    { "name": "research_unlock_ok", "kind": "research_unlock", "content": "router", "expect": "accept" },
+    { "name": "research_unlock_bad", "kind": "research_unlock", "content": "", "expect": "reject", "reason": "content name must be 1-100 characters" },
+    { "name": "complete_objective_ok", "kind": "complete_objective", "index": 1, "rules_epoch": 1, "expect": "accept" },
+    { "name": "clear_objectives_ok", "kind": "clear_objectives", "expect": "accept" },
+    { "name": "sector_capture_ok", "kind": "sector_capture", "expect": "accept" },
+    { "name": "save_sector_ok", "kind": "save_sector", "expect": "accept" },
+    { "name": "skip_wave_ok", "kind": "skip_wave", "expect": "accept" },
+    { "name": "run_wave_ok", "kind": "run_wave", "count": 3, "expect": "accept" },
+    { "name": "run_wave_cap", "kind": "run_wave", "count": 11, "expect": "reject", "reason": "wave count 11 exceeds 10" },
+
+    { "name": "admin_switch_team_ok", "kind": "admin_switch_team", "team": 1, "expect": "accept" },
+    { "name": "admin_tile_op_ok", "kind": "admin_tile_op", "points": [1, 2], "name_0": "stone-wall", "expect": "accept" },
+    { "name": "admin_tile_op_cap", "kind": "admin_tile_op", "list_len": 1025, "expect": "reject", "reason": "points exceeds 1024 entries" },
+
+    { "name": "logic_sync_ok", "kind": "logic_sync", "x": 0, "y": 0, "var_name": "v", "value_len": 4, "expect": "accept" },
+    { "name": "logic_sync_cap", "kind": "logic_sync", "x": 0, "y": 0, "var_name": "v", "value_len": 1025, "expect": "reject", "reason": "logic value exceeds 1024 bytes" },
+    { "name": "logic_client_data_ok", "kind": "logic_client_data", "channel": "c", "value_len": 4, "reliable": true, "expect": "accept" },
+    { "name": "logic_client_data_cap", "kind": "logic_client_data", "channel": "c", "value_len": 8193, "reliable": true, "expect": "reject", "reason": "logic client value exceeds 8192 bytes" },
+
+    { "name": "menu_choose_ok", "kind": "menu_choose", "expect": "accept" },
+    { "name": "menu_builder_choose_ok", "kind": "menu_builder_choose", "result_len": 4, "expect": "accept" },
+    { "name": "menu_builder_choose_cap", "kind": "menu_builder_choose", "result_len": 8193, "expect": "reject", "reason": "menu result exceeds 8192 bytes" },
+    { "name": "text_input_result_ok", "kind": "text_input_result", "text": "hello", "expect": "accept" },
+    { "name": "text_input_result_cap", "kind": "text_input_result", "text_len": 257, "expect": "reject", "reason": "text input exceeds 256 characters" },
+    { "name": "custom_ok", "kind": "custom", "custom_kind": 7, "data_len": 4, "expect": "accept" },
+    { "name": "custom_cap", "kind": "custom", "custom_kind": 7, "data_len": 1025, "expect": "reject", "reason": "custom data exceeds 1024 bytes" }
+  ]
+}

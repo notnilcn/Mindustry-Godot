@@ -9,7 +9,12 @@
 
 /// Base wave: subscribed automatically on connect; every screen needs these.
 /// No applied callback by design — late binders replay the cache.
-pub const BASE_TABLES: &[&str] = &["protocol_info", "relay_config", "local_client_settings"];
+pub const BASE_TABLES: &[&str] = &[
+    "protocol_info",
+    "relay_config",
+    "local_client_settings",
+    "server_config",
+];
 
 /// Lobby wave: player roster/profile selection before joining a match.
 pub const LOBBY_TABLES: &[&str] = &[
@@ -17,10 +22,18 @@ pub const LOBBY_TABLES: &[&str] = &[
     "local_player_profile",
     "all_players",
     "my_matches",
+    "all_matches",
 ];
 
 /// Game wave: the live match; raised explicitly on join and dropped on leave.
-pub const GAME_TABLES: &[&str] = &["my_match", "my_match_commands"];
+pub const GAME_TABLES: &[&str] = &[
+    "my_match",
+    "my_match_commands",
+    "my_match_members",
+    "my_match_state",
+    "my_kick",
+    "my_sender_command_state",
+];
 
 /// One of the three subscription waves (plan 01 §3.6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

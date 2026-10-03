@@ -9,9 +9,9 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 pub struct PlaceBlock {
     pub x: i32,
     pub y: i32,
-    pub block_id: u16,
+    pub block: String,
     pub rotation: u8,
-    pub config: u32,
+    pub config: Vec<u8>,
 }
 
 impl __sdk::InModule for PlaceBlock {
