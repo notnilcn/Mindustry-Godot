@@ -1,0 +1,50 @@
+{
+  "scenario": "units_flowfield_costs",
+  "pass": true,
+  "map": "cost_lab_64",
+  "costs": [
+    {
+      "cost": "ground",
+      "id": 0,
+      "reachable": 4033,
+      "far_weight": 87.43900299072266,
+      "barrier_reachable": false
+    },
+    {
+      "cost": "legs",
+      "id": 1,
+      "reachable": 4033,
+      "far_weight": 87.43900299072266,
+      "barrier_reachable": false
+    },
+    {
+      "cost": "naval",
+      "id": 2,
+      "reachable": 1,
+      "far_weight": -1.0,
+      "barrier_reachable": false
+    },
+    {
+      "cost": "neoplasm",
+      "id": 3,
+      "reachable": 4033,
+      "far_weight": 87.43900299072266,
+      "barrier_reachable": false
+    },
+    {
+      "cost": "none",
+      "id": 4,
+      "reachable": 4096,
+      "far_weight": 86.26699829101562,
+      "barrier_reachable": true
+    },
+    {
+      "cost": "hover",
+      "id": 5,
+      "reachable": 4033,
+      "far_weight": 87.43900299072266,
+      "barrier_reachable": false
+    }
+  ],
+  "checksum": "932a35656d421741"
+}

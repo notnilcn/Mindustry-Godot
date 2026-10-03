@@ -1,0 +1,9 @@
+{
+  "scenario": "units_factory_output",
+  "pass": true,
+  "block": "ground-factory",
+  "units_before": 0,
+  "units_after": 1,
+  "state_present": true,
+  "checksum": "fbf2e4ff943f53e4"
+}

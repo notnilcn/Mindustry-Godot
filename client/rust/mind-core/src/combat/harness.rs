@@ -67,8 +67,26 @@ impl CombatHarness {
             use crate::world::blocks::defense::turrets::{behavior::TurretBehavior, config_for};
             let mut registry = default_registry(&build.content);
             for name in [
-                "duo", "scatter", "scorch", "hail", "salvo", "swarmer", "fuse", "ripple", "wave",
-                "tsunami", "lancer", "arc", "parallax", "segment",
+                "duo",
+                "scatter",
+                "scorch",
+                "hail",
+                "salvo",
+                "swarmer",
+                "fuse",
+                "ripple",
+                "cyclone",
+                "foreshadow",
+                "spectre",
+                "breach",
+                "diffuse",
+                "wave",
+                "tsunami",
+                "lancer",
+                "arc",
+                "meltdown",
+                "parallax",
+                "segment",
             ] {
                 if let Some(config) = config_for(&build.content, name, &names) {
                     registry.register_named(name, Arc::new(TurretBehavior::new(config)));

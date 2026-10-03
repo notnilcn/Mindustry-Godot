@@ -1,0 +1,26 @@
+{
+  "scenario": "units_segment_chain",
+  "pass": true,
+  "unit": "renale",
+  "segment_units": 3,
+  "segment_spacing": 9.0,
+  "children": 3,
+  "segments": [
+    {
+      "index": 1,
+      "has_parent": true,
+      "has_child": true
+    },
+    {
+      "index": 2,
+      "has_parent": true,
+      "has_child": true
+    },
+    {
+      "index": 3,
+      "has_parent": true,
+      "has_child": true
+    }
+  ],
+  "checksum": "5c84ecd7400d015b"
+}

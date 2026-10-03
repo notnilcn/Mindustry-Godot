@@ -1,0 +1,10 @@
+{
+  "scenario": "units_cargo_pickup_deliver",
+  "pass": true,
+  "produced": 60,
+  "delivered": 60,
+  "trips": 6,
+  "first_delivery_tick": 539,
+  "stale_flip_tick": 359,
+  "checksum": "6f28f29cf3f22c24"
+}
