@@ -406,6 +406,173 @@ mod tests {
     use crate::module_bindings::{PlaceBlock, SetRules};
 
     #[test]
+    fn command_kind_matrix() {
+        // Invariant §3.17-6: every variant has a caps row and a predict policy;
+        // a valid instance passes preflight.
+        use crate::module_bindings::*;
+        let ctx = PreflightContext::default();
+        let valid: Vec<CommandKind> = vec![
+            CommandKind::Noop,
+            CommandKind::Ping(1),
+            CommandKind::PlaceBlock(PlaceBlock {
+                x: 1,
+                y: 1,
+                block: "stone-wall".to_string(),
+                rotation: 0,
+                config: Vec::new(),
+            }),
+            CommandKind::BreakBlock(BreakBlock { x: 1, y: 1 }),
+            CommandKind::ConfigBlock(ConfigBlock {
+                x: 1,
+                y: 1,
+                value: vec![1],
+            }),
+            CommandKind::Rotate(Rotate {
+                x: 1,
+                y: 1,
+                direction: true,
+            }),
+            CommandKind::DeletePlans(DeletePlans {
+                positions: vec![1],
+            }),
+            CommandKind::CommandBuilding(CommandBuilding {
+                positions: vec![1],
+                x: 1.0,
+                y: 1.0,
+            }),
+            CommandKind::Inventory(Inventory {
+                kind: 0,
+                x: 1,
+                y: 1,
+                item: Some("copper".to_string()),
+                amount: 1,
+                angle: 0.0,
+            }),
+            CommandKind::Payload(Payload {
+                kind: 0,
+                x: 1.0,
+                y: 1.0,
+                target: None,
+            }),
+            CommandKind::UnitControl(UnitControl { unit: None }),
+            CommandKind::UnitClear,
+            CommandKind::BuildingControlSelect(BuildingControlSelect { x: 1, y: 1 }),
+            CommandKind::UnitCommand(UnitCommand {
+                units: vec![1],
+                command: 1,
+                x: 1.0,
+                y: 1.0,
+            }),
+            CommandKind::UnitCommandQueue(UnitCommandQueue {
+                units: vec![1],
+                command: 1,
+                x: 1.0,
+                y: 1.0,
+            }),
+            CommandKind::UnitStance(UnitStance {
+                units: vec![1],
+                stance: 1,
+                enabled: true,
+            }),
+            CommandKind::PlayerSpawn(PlayerSpawn {
+                unit: None,
+                team: 0,
+            }),
+            CommandKind::Bullet(Bullet {
+                def: 1,
+                team: 0,
+                x: 0.0,
+                y: 0.0,
+                angle: 0.0,
+                damage: 0.0,
+                velocity_scl: 1.0,
+                lifetime_scl: 1.0,
+                aim_x: f32::NAN,
+                aim_y: f32::NAN,
+                data: Vec::new(),
+            }),
+            CommandKind::SetRules(SetRules {
+                rules_json: "{}".to_string(),
+                rules_epoch: 1,
+            }),
+            CommandKind::SetRule(SetRule {
+                rule: "waves".to_string(),
+                json: "true".to_string(),
+            }),
+            CommandKind::ResearchUnlock(ResearchUnlock {
+                content: "router".to_string(),
+            }),
+            CommandKind::CompleteObjective(CompleteObjective {
+                index: 0,
+                rules_epoch: 1,
+            }),
+            CommandKind::ClearObjectives,
+            CommandKind::SectorCapture,
+            CommandKind::SaveSector,
+            CommandKind::SkipWave,
+            CommandKind::RunWave(RunWave { count: 1 }),
+            CommandKind::AdminSwitchTeam(AdminSwitchTeam {
+                target: spacetimedb_sdk::Identity::from_byte_array([1u8; 32]),
+                team: 0,
+            }),
+            CommandKind::AdminTileOp(AdminTileOp {
+                op: 0,
+                points: vec![1],
+                arg_0: 0,
+                arg_1: 0,
+                arg_2: 0,
+                name_0: Some("stone-wall".to_string()),
+                name_1: None,
+            }),
+            CommandKind::LogicSync(LogicSync {
+                x: 0,
+                y: 0,
+                var_name: "v".to_string(),
+                var_id: 0,
+                value: vec![1],
+            }),
+            CommandKind::LogicClientData(LogicClientData {
+                channel: "c".to_string(),
+                value: vec![1],
+                reliable: true,
+            }),
+            CommandKind::MenuChoose(MenuChoose {
+                menu_id: 0,
+                option: 0,
+            }),
+            CommandKind::MenuBuilderChoose(MenuBuilderChoose {
+                menu_id: 0,
+                result: vec![1],
+            }),
+            CommandKind::TextInputResult(TextInputResult {
+                id: 0,
+                text: Some("hi".to_string()),
+            }),
+            CommandKind::Custom(Custom {
+                kind: 1,
+                data: vec![1],
+            }),
+        ];
+        assert_eq!(valid.len(), 35);
+        for kind in &valid {
+            preflight_validate(kind, &ctx).unwrap_or_else(|error| {
+                panic!("valid `{}` rejected: {error}", kind_predict_name(kind))
+            });
+            // Every variant maps to a policy (compile-checked match).
+            let _ = predict_policy(kind);
+        }
+    }
+
+    fn kind_predict_name(kind: &CommandKind) -> &'static str {
+        match kind {
+            CommandKind::Noop => "noop",
+            CommandKind::Ping(_) => "ping",
+            CommandKind::PlaceBlock(_) => "place_block",
+            _ => "other",
+        }
+    }
+
+    #[test]
     fn predict_policies_are_classified() {
         assert_eq!(predict_policy(&CommandKind::Noop), PredictPolicy::Immediate);
         assert_eq!(

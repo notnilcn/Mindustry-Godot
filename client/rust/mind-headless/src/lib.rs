@@ -20,6 +20,7 @@ pub mod exec;
 pub mod fx_scenarios;
 pub mod input_scenarios;
 pub mod logic_scenarios;
+pub mod mp_scenarios;
 pub mod network_scenarios;
 pub mod parity;
 pub mod paths;
