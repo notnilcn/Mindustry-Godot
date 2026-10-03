@@ -355,20 +355,268 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
         def.lifetime = 1.0;
     });
 
+    // `scorch` (base `BulletType`, burning pierce flames).
+    add("scorch_coal", BulletKind::Plain, &|def| {
+        def.speed = 3.35;
+        def.lifetime = 18.0;
+        def.damage = 17.0;
+        def.ammo_multiplier = 3.0;
+        def.hit_size = 7.0;
+        def.pierce = true;
+        def.collides_air = false;
+        def.status_duration = 60.0 * 4.0;
+        def.hittable = false;
+    });
+    add("scorch_pyratite", BulletKind::Plain, &|def| {
+        def.speed = 4.0;
+        def.lifetime = 18.0;
+        def.damage = 30.0;
+        def.ammo_multiplier = 10.0;
+        def.hit_size = 7.0;
+        def.pierce = true;
+        def.collides_air = false;
+        def.status_duration = 60.0 * 10.0;
+        def.hittable = false;
+    });
+
+    // `cyclone` (`FlakBulletType`).
+    add("cyclone_metaglass", BulletKind::Flak, &|def| {
+        def.speed = 4.0;
+        def.damage = 6.0;
+        def.ammo_multiplier = 2.0;
+        def.reload_multiplier = 0.8;
+        def.width = 6.0;
+        def.height = 11.0;
+        def.splash_damage = 45.0;
+        def.splash_damage_radius = 25.0;
+        def.explode_range = 20.0;
+        def.collides_ground = true;
+        def.frag_bullets = 4;
+    });
+    add("cyclone_frag", BulletKind::Basic, &|def| {
+        def.speed = 3.0;
+        def.damage = 12.0;
+        def.lifetime = 20.0;
+        def.width = 5.0;
+        def.height = 12.0;
+        def.shrink_y = 1.0;
+        def.collides_ground = true;
+    });
+    add("cyclone_blast", BulletKind::Flak, &|def| {
+        def.speed = 4.0;
+        def.damage = 8.0;
+        def.ammo_multiplier = 5.0;
+        def.splash_damage = 45.0;
+        def.splash_damage_radius = 60.0;
+        def.collides_ground = true;
+    });
+    add("cyclone_plastanium", BulletKind::Flak, &|def| {
+        def.speed = 4.0;
+        def.damage = 8.0;
+        def.ammo_multiplier = 4.0;
+        def.splash_damage = 37.5;
+        def.splash_damage_radius = 40.0;
+        def.explode_range = 20.0;
+        def.collides_ground = true;
+        def.frag_bullets = 6;
+    });
+    add("cyclone_plast_frag", BulletKind::Basic, &|def| {
+        def.speed = 2.5;
+        def.damage = 12.0;
+        def.lifetime = 15.0;
+        def.width = 10.0;
+        def.height = 12.0;
+        def.shrink_y = 1.0;
+        def.collides_ground = true;
+    });
+    add("cyclone_surge", BulletKind::Flak, &|def| {
+        def.speed = 4.5;
+        def.damage = 13.0;
+        def.ammo_multiplier = 5.0;
+        def.splash_damage = 75.0;
+        def.splash_damage_radius = 38.0;
+        def.lightning = 2;
+        def.lightning_length = 7;
+        def.explode_range = 20.0;
+        def.collides_ground = true;
+    });
+
+    // `foreshadow` (`RailBulletType`).
+    add("foreshadow_rail", BulletKind::Rail, &|def| {
+        def.speed = 0.0;
+        def.lifetime = 1.0;
+        def.damage = 1350.0;
+        def.building_damage_multiplier = 0.2;
+        def.pierce_damage_factor = 1.0;
+        def.length = 500.0;
+        def.pierce = true;
+        def.pierce_building = true;
+        def.collides = false;
+        def.ammo_multiplier = 1.0;
+        def.hit_size = 4.0;
+    });
+
+    // `spectre` (`BasicBulletType`).
+    add("spectre_graphite", BulletKind::Basic, &|def| {
+        def.speed = 7.5;
+        def.damage = 50.0;
+        def.hit_size = 4.8;
+        def.width = 15.0;
+        def.height = 21.0;
+        def.ammo_multiplier = 4.0;
+        def.reload_multiplier = 1.7;
+        def.knockback = 0.3;
+    });
+    add("spectre_thorium", BulletKind::Basic, &|def| {
+        def.speed = 8.0;
+        def.damage = 80.0;
+        def.hit_size = 5.0;
+        def.width = 16.0;
+        def.height = 23.0;
+        def.pierce_cap = 2;
+        def.pierce_building = true;
+        def.knockback = 0.7;
+    });
+    add("spectre_pyratite", BulletKind::Basic, &|def| {
+        def.speed = 7.0;
+        def.damage = 70.0;
+        def.hit_size = 5.0;
+        def.width = 16.0;
+        def.height = 21.0;
+        def.make_fire = true;
+        def.pierce_cap = 2;
+        def.pierce_building = true;
+        def.knockback = 0.6;
+        def.ammo_multiplier = 3.0;
+        def.splash_damage = 20.0;
+        def.splash_damage_radius = 25.0;
+    });
+
+    // `meltdown` (`ContinuousLaserBulletType`).
+    add("meltdown_laser", BulletKind::ContinuousLaser, &|def| {
+        def.damage = 78.0;
+        def.length = 200.0;
+        def.lifetime = 16.0;
+        def.hit_size = 4.0;
+        def.large_hit = true;
+        def.incend_amount = 1;
+        def.incend_spread = 5.0;
+        def.incend_chance = 0.4;
+        def.ammo_multiplier = 1.0;
+    });
+
+    // `breach` (`BasicBulletType`, piercing).
+    add("breach_beryllium", BulletKind::Basic, &|def| {
+        def.speed = 7.5;
+        def.damage = 85.0;
+        def.width = 12.0;
+        def.height = 20.0;
+        def.hit_size = 7.0;
+        def.ammo_multiplier = 1.0;
+        def.pierce_cap = 2;
+        def.pierce = true;
+        def.pierce_building = true;
+        def.building_damage_multiplier = 0.3;
+    });
+    add("breach_tungsten", BulletKind::Basic, &|def| {
+        def.speed = 8.0;
+        def.damage = 95.0;
+        def.width = 13.0;
+        def.height = 19.0;
+        def.hit_size = 7.0;
+        def.ammo_multiplier = 2.0;
+        def.pierce_cap = 4;
+        def.pierce = true;
+        def.pierce_building = true;
+        def.building_damage_multiplier = 0.3;
+    });
+    add("breach_carbide", BulletKind::Basic, &|def| {
+        def.speed = 12.0;
+        def.damage = 325.0 / 0.75;
+        def.width = 15.0;
+        def.height = 21.0;
+        def.hit_size = 7.0;
+        def.ammo_multiplier = 2.0;
+        def.reload_multiplier = 0.2;
+        def.building_damage_multiplier = 0.3;
+        def.frag_bullets = 3;
+        def.frag_random_spread = 0.0;
+        def.frag_spread = 25.0;
+        def.frag_velocity_min = 1.0;
+    });
+    add("breach_carbide_frag", BulletKind::Basic, &|def| {
+        def.speed = 8.1;
+        def.damage = 227.0;
+        def.lifetime = 8.0;
+        def.width = 11.0;
+        def.height = 14.0;
+        def.hit_size = 7.0;
+        def.ammo_multiplier = 1.0;
+        def.pierce_cap = 2;
+        def.pierce = true;
+        def.pierce_building = true;
+        def.building_damage_multiplier = 0.2;
+    });
+
+    // `diffuse` (`BasicBulletType`).
+    add("diffuse_graphite", BulletKind::Basic, &|def| {
+        def.speed = 8.0;
+        def.damage = 41.0;
+        def.knockback = 4.0;
+        def.width = 25.0;
+        def.height = 20.0;
+        def.hit_size = 7.0;
+        def.ammo_multiplier = 1.0;
+        def.building_damage_multiplier = 0.2;
+    });
+    add("diffuse_oxide", BulletKind::Basic, &|def| {
+        def.speed = 8.0;
+        def.damage = 90.0;
+        def.knockback = 3.0;
+        def.width = 25.0;
+        def.height = 20.0;
+        def.hit_size = 7.0;
+        def.ammo_multiplier = 2.0;
+        def.building_damage_multiplier = 0.2;
+    });
+    add("diffuse_silicon", BulletKind::Basic, &|def| {
+        def.speed = 8.0;
+        def.damage = 35.0;
+        def.knockback = 3.0;
+        def.width = 25.0;
+        def.height = 20.0;
+        def.hit_size = 7.0;
+        def.homing_power = 0.045;
+        def.ammo_multiplier = 1.0;
+        def.building_damage_multiplier = 0.2;
+    });
+
     // Cross-references (child defs must exist first).
-    if let (Some(parent), Some(child)) = (names.get("scatter_glass"), names.get("scatter_frag"))
-        && let Some(def) = content.bullet_mut(*parent)
-    {
-        def.frag_bullet = Some(*child);
+    for (parent, child) in [
+        ("scatter_glass", "scatter_frag"),
+        ("cyclone_metaglass", "cyclone_frag"),
+        ("cyclone_plastanium", "cyclone_plast_frag"),
+        ("breach_carbide", "breach_carbide_frag"),
+    ] {
+        if let (Some(parent), Some(child)) = (names.get(parent), names.get(child))
+            && let Some(def) = content.bullet_mut(*parent)
+        {
+            def.frag_bullet = Some(*child);
+        }
     }
 
     // Status/liquid references resolve against the plan-02 registries (the
     // closure above cannot borrow `content` immutably).
-    let status_refs: [(&str, &str); 4] = [
+    let status_refs: [(&str, &str); 9] = [
         ("salvo_pyratite", "burning"),
         ("swarmer_blast", "blasted"),
         ("swarmer_pyratite", "burning"),
         ("ripple_blast", "blasted"),
+        ("scorch_coal", "burning"),
+        ("scorch_pyratite", "burning"),
+        ("cyclone_blast", "blasted"),
+        ("spectre_pyratite", "burning"),
+        ("meltdown_laser", "melting"),
     ];
     for (bullet_name, status_name) in status_refs {
         if let (Some(id), Some(status)) = (
@@ -608,6 +856,146 @@ pub fn config_for(
             c.target_air = false;
             c.scale_lifetime_offset = 0.1;
             c.shoot = ShootPatternSpec::plain(4, 0.0, 0.0);
+            Some(c)
+        }
+        "scorch" => {
+            let mut c = base_config(
+                TurretKind::Item,
+                TurretAmmo::Item(vec![
+                    item_ammo("coal", "scorch_coal")?,
+                    item_ammo("pyratite", "scorch_pyratite")?,
+                ]),
+            );
+            c.range = 60.0;
+            c.reload = 6.0;
+            c.shoot_cone = 50.0;
+            c.shoot_y = 3.0;
+            c.target_air = false;
+            c.coolant_amount = 0.1;
+            c.coolant_multiplier = 1.5;
+            c.recoil = 0.0;
+            c.rotate_speed = 10.0;
+            Some(c)
+        }
+        "cyclone" => {
+            let mut c = base_config(
+                TurretKind::Item,
+                TurretAmmo::Item(vec![
+                    item_ammo("metaglass", "cyclone_metaglass")?,
+                    item_ammo("blast-compound", "cyclone_blast")?,
+                    item_ammo("plastanium", "cyclone_plastanium")?,
+                    item_ammo("surge-alloy", "cyclone_surge")?,
+                ]),
+            );
+            c.range = 200.0;
+            c.reload = 10.0;
+            c.recoil = 1.5;
+            c.recoil_time = 10.0;
+            c.rotate_speed = 7.0;
+            c.inaccuracy = 10.0;
+            c.shoot_cone = 30.0;
+            c.shoot_y = 10.0;
+            c.coolant_amount = 0.3;
+            c.coolant_multiplier = 10.0;
+            c.shoot = ShootPatternSpec::barrel(
+                vec![[0.0, 1.0, 0.0], [3.0, 0.0, 0.0], [-3.0, 0.0, 0.0]],
+                0,
+            );
+            Some(c)
+        }
+        "foreshadow" => {
+            let mut c = base_config(
+                TurretKind::Item,
+                TurretAmmo::Item(vec![item_ammo("surge-alloy", "foreshadow_rail")?]),
+            );
+            c.range = 500.0;
+            c.reload = 200.0;
+            c.max_ammo = 40;
+            c.ammo_per_shot = 5;
+            c.rotate_speed = 1.5;
+            c.shoot_cone = 2.0;
+            c.recoil = 5.0;
+            c.cooldown_time = 200.0;
+            c.coolant_amount = 1.0;
+            c.coolant_multiplier = 0.4;
+            Some(c)
+        }
+        "spectre" => {
+            let mut c = base_config(
+                TurretKind::Item,
+                TurretAmmo::Item(vec![
+                    item_ammo("graphite", "spectre_graphite")?,
+                    item_ammo("thorium", "spectre_thorium")?,
+                    item_ammo("pyratite", "spectre_pyratite")?,
+                ]),
+            );
+            c.range = 260.0;
+            c.reload = 7.0;
+            c.recoil_time = 14.0;
+            c.recoil = 3.0;
+            c.rotate_speed = 4.0;
+            c.inaccuracy = 3.0;
+            c.shoot_cone = 24.0;
+            c.coolant_amount = 1.0;
+            c.coolant_multiplier = 0.5;
+            c.shoot = ShootPatternSpec::alternate(1, 0.0, 8.0, 2);
+            Some(c)
+        }
+        "meltdown" => {
+            let mut c = base_config(TurretKind::Laser, power("meltdown_laser")?);
+            c.range = 195.0;
+            c.reload = 90.0;
+            c.shoot_cone = 40.0;
+            c.recoil = 4.0;
+            c.rotate_speed = 1.5;
+            c.shoot_duration = 230.0;
+            c.firing_move_fract = 0.5;
+            c.coolant_amount = 0.5;
+            c.coolant_multiplier = 1.0;
+            Some(c)
+        }
+        "breach" => {
+            let mut c = base_config(
+                TurretKind::Item,
+                TurretAmmo::Item(vec![
+                    item_ammo("beryllium", "breach_beryllium")?,
+                    item_ammo("tungsten", "breach_tungsten")?,
+                    item_ammo("carbide", "breach_carbide")?,
+                ]),
+            );
+            c.range = 190.0;
+            c.reload = 40.0;
+            c.ammo_per_shot = 2;
+            c.recoil = 2.0;
+            c.rotate_speed = 1.5;
+            c.shoot_cone = 3.0;
+            c.shoot_y = -2.0;
+            c.coolant_amount = 0.25;
+            c.coolant_multiplier = 15.0;
+            Some(c)
+        }
+        "diffuse" => {
+            let mut c = base_config(
+                TurretKind::Item,
+                TurretAmmo::Item(vec![
+                    item_ammo("graphite", "diffuse_graphite")?,
+                    item_ammo("oxide", "diffuse_oxide")?,
+                    item_ammo("silicon", "diffuse_silicon")?,
+                ]),
+            );
+            c.range = 125.0;
+            c.reload = 30.0;
+            c.max_ammo = 30;
+            c.ammo_per_shot = 3;
+            c.consume_ammo_once = true;
+            c.recoil = 2.0;
+            c.inaccuracy = 0.2;
+            c.velocity_rnd = 0.17;
+            c.rotate_speed = 3.0;
+            c.shoot_cone = 40.0;
+            c.coolant_amount = 0.25;
+            c.coolant_multiplier = 15.0;
+            c.shoot = ShootPatternSpec::spread(15, 4.0);
             Some(c)
         }
         "wave" => {
@@ -1244,6 +1632,13 @@ mod tests {
             "tsunami_water",
             "lancer_laser",
             "arc_lightning",
+            "scorch_coal",
+            "cyclone_surge",
+            "foreshadow_rail",
+            "spectre_thorium",
+            "meltdown_laser",
+            "breach_carbide",
+            "diffuse_oxide",
         ] {
             assert!(harness.bullet_id(name).is_some(), "missing {name}");
         }
@@ -1253,8 +1648,26 @@ mod tests {
     fn all_supported_turret_configs_resolve() {
         let harness = CombatHarness::new(8, 8, 1);
         for name in [
-            "duo", "scatter", "hail", "salvo", "swarmer", "fuse", "ripple", "wave", "tsunami",
-            "lancer", "arc", "parallax", "segment",
+            "duo",
+            "scatter",
+            "scorch",
+            "hail",
+            "salvo",
+            "swarmer",
+            "fuse",
+            "ripple",
+            "cyclone",
+            "foreshadow",
+            "spectre",
+            "breach",
+            "diffuse",
+            "wave",
+            "tsunami",
+            "lancer",
+            "arc",
+            "meltdown",
+            "parallax",
+            "segment",
         ] {
             assert!(
                 super::super::config_for(harness.content(), name, harness.names_map()).is_some(),

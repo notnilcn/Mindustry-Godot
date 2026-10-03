@@ -18,6 +18,8 @@
 
 use crate::content::{ItemId, UnitTypeId};
 
+pub mod behavior;
+
 /// `UnitBlock` spawn handshake (subset; plan-08 payload wiring is the rest).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum UnitBlockKind {
@@ -135,7 +137,7 @@ impl UnitFactory {
 }
 
 /// `UnitFactoryBuild` progress state (the mutable half).
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, bevy_ecs::component::Component)]
 pub struct UnitFactoryBuild {
     /// Selected plan index.
     pub current_plan: usize,
@@ -207,7 +209,7 @@ impl Reconstructor {
 }
 
 /// `ReconstructorBuild` progress state.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, bevy_ecs::component::Component)]
 pub struct ReconstructorBuild {
     /// Payload unit currently held (`None` = empty).
     pub payload: Option<UnitTypeId>,
@@ -258,7 +260,7 @@ pub struct AssemblerUnitPlan {
 }
 
 /// `UnitAssembler` configuration/state.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, bevy_ecs::component::Component)]
 pub struct UnitAssembler {
     /// Assembler square side (`areaSize`).
     pub area_size: i32,
@@ -318,7 +320,7 @@ pub struct UnitAssemblerModule {
 }
 
 /// `RepairTower` configuration/state.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, bevy_ecs::component::Component)]
 pub struct RepairTower {
     /// Heal range in world units.
     pub range: f32,
@@ -357,7 +359,7 @@ impl RepairTower {
 }
 
 /// `RepairTurret` configuration/state.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, bevy_ecs::component::Component)]
 pub struct RepairTurret {
     /// Repair radius in world units (`repairRadius`).
     pub repair_radius: f32,
@@ -391,7 +393,7 @@ impl RepairTurret {
 }
 
 /// `UnitCargoLoader` configuration.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, bevy_ecs::component::Component)]
 pub struct UnitCargoLoader {
     /// Spawned unit type (`manifold`).
     pub unit_type: UnitTypeId,
@@ -400,7 +402,7 @@ pub struct UnitCargoLoader {
 }
 
 /// `UnitCargoUnloadPoint` configuration/state.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, bevy_ecs::component::Component)]
 pub struct UnitCargoUnloadPoint {
     /// Item configured for unloading.
     pub item: Option<ItemId>,
