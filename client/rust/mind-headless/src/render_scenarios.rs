@@ -90,7 +90,7 @@ fn scenario_world(name: &str, content: &ContentRegistry) -> Result<ScenarioWorld
             world = WorldGrid::new(64, 64);
             world.fill(stone, BlockId::AIR);
         }
-        "render_block_change" | "render_layer_order" => {
+        "render_block_change" | "render_layer_order" | "render_layer_order_nosort" => {
             world = WorldGrid::new(32, 32);
             world.fill(stone, BlockId::AIR);
             let wall = content
@@ -134,6 +134,42 @@ fn list(
     json: bool,
 ) -> Result<i32> {
     let content = boot_content()?;
+    if name == "render_menu_world" {
+        // Plan 16 §7.2: deterministic menu block/floor counts + tile hash. The
+        // full region render-list awaits plan-03 menu region-name resolution.
+        let world = mind_core::render::menu::generate(1234, false);
+        let text = world.summary().to_json();
+        if let Some(path) = check {
+            let golden = std::fs::read_to_string(path)
+                .with_context(|| format!("reading golden `{}`", path.display()))?;
+            if golden != text {
+                eprintln!("render-list: mismatch against `{}`", path.display());
+                return Ok(EXIT_FAIL);
+            }
+            if json {
+                println!(
+                    "{{\"scenario\":\"{name}\",\"pass\":true,\"entries\":{}}}",
+                    world.tiles.len()
+                );
+            }
+            return Ok(EXIT_PASS);
+        }
+        if let Some(path) = out {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).ok();
+            }
+            std::fs::write(path, &text).with_context(|| format!("writing `{}`", path.display()))?;
+        } else {
+            print!("{text}");
+        }
+        if json && out.is_some() {
+            println!(
+                "{{\"scenario\":\"{name}\",\"entries\":{},\"regions\":0}}",
+                world.tiles.len()
+            );
+        }
+        return Ok(EXIT_PASS);
+    }
     let scenario = scenario_world(name, &content)?;
     let mut ids = RegionIdTable::new();
     let mut entries = build_entries(&scenario.world, &content, &mut ids, &scenario.camera);

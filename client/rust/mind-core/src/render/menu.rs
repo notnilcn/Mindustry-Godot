@@ -84,6 +84,92 @@ impl MenuWorld {
     pub fn flyer_position(&self, i: usize, time: f32, flyer_rot: f32, speed: f32) -> [f32; 2] {
         crate::render::menu::flyer_position(self, i, time, flyer_rot, speed)
     }
+
+    /// Deterministic summary used by the `render_menu_world` golden (plan 16
+    /// §7.2): per-name floor/wall/overlay histograms, flyer count and a stable
+    /// tile hash. The full menu render-list awaits plan-03 region-name
+    /// resolution for the camelCase menu block names (plan 16 in-engine host).
+    pub fn summary(&self) -> MenuSummary {
+        let mut floors: std::collections::BTreeMap<&'static str, usize> =
+            std::collections::BTreeMap::new();
+        let mut walls: std::collections::BTreeMap<&'static str, usize> =
+            std::collections::BTreeMap::new();
+        let mut overlays: std::collections::BTreeMap<&'static str, usize> =
+            std::collections::BTreeMap::new();
+        let mut hash = 0xcbf2_9ce4_8422_2325u64;
+        for tile in &self.tiles {
+            *floors.entry(tile.floor).or_default() += 1;
+            if tile.wall != AIR {
+                *walls.entry(tile.wall).or_default() += 1;
+            }
+            if tile.overlay != AIR {
+                *overlays.entry(tile.overlay).or_default() += 1;
+            }
+            for name in [tile.floor, tile.wall, tile.overlay] {
+                for byte in name.as_bytes() {
+                    hash ^= u64::from(*byte);
+                    hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+                }
+                hash ^= u64::from(b'|');
+                hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        }
+        MenuSummary {
+            seed: self.seed,
+            width: self.width,
+            height: self.height,
+            flyers: self.flyers,
+            floors: floors.into_iter().collect(),
+            walls: walls.into_iter().collect(),
+            overlays: overlays.into_iter().collect(),
+            tile_hash: hash,
+        }
+    }
+}
+
+/// A deterministic `MenuWorld` summary (plan 16 §7.2 `render_menu_world`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MenuSummary {
+    /// Pinned generation seed.
+    pub seed: i32,
+    /// Width in tiles.
+    pub width: usize,
+    /// Height in tiles.
+    pub height: usize,
+    /// Flyer count.
+    pub flyers: usize,
+    /// Floor-name histogram (sorted).
+    pub floors: Vec<(&'static str, usize)>,
+    /// Wall-name histogram (sorted, `air` excluded).
+    pub walls: Vec<(&'static str, usize)>,
+    /// Ore-overlay histogram (sorted, `air` excluded).
+    pub overlays: Vec<(&'static str, usize)>,
+    /// Stable FNV-1a hash over the tile name grid.
+    pub tile_hash: u64,
+}
+
+impl MenuSummary {
+    /// Serializes as the `format: 1` `render_menu_world` golden JSON.
+    pub fn to_json(&self) -> String {
+        let pairs = |items: &[(&'static str, usize)]| {
+            items
+                .iter()
+                .map(|(name, count)| format!("{{\"name\":\"{name}\",\"count\":{count}}}"))
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+        format!(
+            "{{\n  \"format\": 1,\n  \"scenario\": \"render_menu_world\",\n  \"seed\": {},\n  \"width\": {},\n  \"height\": {},\n  \"flyers\": {},\n  \"tile_hash\": \"{:016x}\",\n  \"floors\": [{}],\n  \"walls\": [{}],\n  \"overlays\": [{}]\n}}\n",
+            self.seed,
+            self.width,
+            self.height,
+            self.flyers,
+            self.tile_hash,
+            pairs(&self.floors),
+            pairs(&self.walls),
+            pairs(&self.overlays)
+        )
+    }
 }
 
 /// `MenuRenderer` RNG (a small deterministic LCG for the view-only menu).
@@ -333,5 +419,19 @@ mod tests {
             let p = world.flyer_position(i, 1.5, 45.0, 1.0);
             assert!(p[0].is_finite() && p[1].is_finite());
         }
+    }
+
+    #[test]
+    fn summary_is_deterministic_and_counts_all_tiles() {
+        let a = generate(1234, false);
+        let b = generate(1234, false);
+        let sa = a.summary();
+        assert_eq!(sa, b.summary());
+        let total_floors: usize = sa.floors.iter().map(|(_, count)| *count).sum();
+        assert_eq!(total_floors, a.width * a.height);
+        let total_walls: usize = sa.walls.iter().map(|(_, count)| *count).sum();
+        assert!(total_walls > 0, "seed 1234 must generate some walls");
+        // Different seeds produce different summaries.
+        assert_ne!(sa, generate(4321, false).summary());
     }
 }

@@ -861,6 +861,22 @@
       "command": "render list render_layer_order --json"
     },
     {
+      "name": "render_layer_order_nosort",
+      "plan": "16",
+      "phase": "P6",
+      "tier": "T1",
+      "kind": "embedded",
+      "command": "render list render_layer_order_nosort --no-sort --json"
+    },
+    {
+      "name": "render_menu_world",
+      "plan": "16",
+      "phase": "P6",
+      "tier": "T1",
+      "kind": "embedded",
+      "command": "render list render_menu_world --json"
+    },
+    {
       "name": "fx_audit",
       "plan": "17",
       "phase": "P6",
@@ -881,7 +897,8 @@
       "plan": "17",
       "phase": "P6",
       "tier": "T1",
-      "kind": "planned"
+      "kind": "embedded",
+      "command": "fx noop-headless --json"
     },
     {
       "name": "fx_program",
