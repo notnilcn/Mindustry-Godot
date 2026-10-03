@@ -18,6 +18,7 @@ use mind_core::logic::blocks::{
     LogicBlockState, LogicDisplayState, LogicRulesApi, LogicRulesRes, MemoryBlockState,
 };
 use mind_core::logic::executor::Executor;
+use mind_core::logic::globals::{GlobalUpdate, GlobalVars};
 use mind_core::logic::statement::Statement;
 use mind_core::logic::world::{LogicWorldEvent, LogicWorldState};
 use mind_core::world::ConfigValue;
@@ -97,6 +98,118 @@ pub fn run_scenario(scenario: &Scenario, ticks: u64) -> Executor {
         exec.run_budget(&mut world, &mut accumulator, edelta, ipt);
     }
     exec
+}
+
+/// `logic_globals_live`: a processor observing `GlobalVars::update` each tick.
+///
+/// Exercises the `VarRef::Global` lowering (plan 13 §3.2 deviation 2): the
+/// executor's mirror cells refresh from the world's `GlobalVars` resource, so
+/// `@tick`/`@time`/client/content constants stay live.
+pub struct GlobalsLiveReport {
+    /// Deterministic checksum.
+    pub checksum: String,
+    /// `@tick` observed at the final instruction.
+    pub tick: f64,
+    /// `@time` (ms).
+    pub time: f64,
+    /// `@second`.
+    pub second: f64,
+    /// `@minute`.
+    pub minute: f64,
+    /// `@sfx-shoot` sound id.
+    pub sfx: f64,
+    /// `item` object display (`@copper`).
+    pub item: String,
+}
+
+/// Runs the live-globals scenario.
+#[allow(clippy::expect_used)]
+pub fn globals_live(ticks: u64) -> GlobalsLiveReport {
+    let content = BuildHarness::load_content();
+    let globals = GlobalVars::with_content(&content);
+    let code = "set t @tick\nset time @time\nset sec @second\nset min @minute\n\
+        set w @waveNumber\nset wt @waveTime\nset mw @mapw\nset mh @maph\n\
+        set sfx @sfx-shoot\nset item @copper\nend\n";
+    let asm = Assembler::assemble_with(code, true, globals.clone()).expect("assemble");
+    let mut exec = Executor::new();
+    exec.load(asm);
+
+    let mut world = bevy_ecs::world::World::new();
+    world.insert_resource(globals.clone());
+    let mut accumulator = 0.0f32;
+    for tick in 0..ticks {
+        {
+            let mut g = world
+                .get_resource_mut::<GlobalVars>()
+                .expect("globals resource");
+            g.update(&GlobalUpdate {
+                tick,
+                wave: 4,
+                wavetime: 300.0,
+                map_width: 16,
+                map_height: 24,
+                server: true,
+                ..GlobalUpdate::default()
+            });
+        }
+        exec.run_budget(&mut world, &mut accumulator, 1.0, 8.0);
+    }
+
+    let value = |name: &str| {
+        exec.optional_var(name)
+            .map(|id| exec.arena.get(id).num())
+            .unwrap_or(f64::NAN)
+    };
+    let item = exec
+        .optional_var("item")
+        .and_then(|id| exec.arena.get(id).obj.clone())
+        .map(|obj| obj.display())
+        .unwrap_or_default();
+    let tick = value("t");
+    let time = value("time");
+    let second = value("sec");
+    let minute = value("min");
+    let sfx = value("sfx");
+
+    let mut hasher = mind_core::determinism::Hasher::new();
+    hasher.write_f64(tick);
+    hasher.write_f64(time);
+    hasher.write_f64(second);
+    hasher.write_f64(minute);
+    hasher.write_f64(sfx);
+    hasher.write(item.as_bytes());
+    GlobalsLiveReport {
+        checksum: hasher.finish().to_hex(),
+        tick,
+        time,
+        second,
+        minute,
+        sfx,
+        item,
+    }
+}
+
+fn run_globals_live(ticks: u64, json: bool) -> Result<i32> {
+    let report = globals_live(ticks);
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "scenario": "logic_globals_live",
+                "ticks": ticks,
+                "checksum": report.checksum,
+                "tick": report.tick,
+                "time": report.time,
+                "second": report.second,
+                "minute": report.minute,
+                "sfxShoot": report.sfx,
+                "item": report.item,
+            })
+        );
+    } else {
+        println!("logic_globals_live: checksum={}", report.checksum);
+    }
+    Ok(0)
 }
 
 /// Deterministic checksum over non-constant variables and buffers (FNV-1a).
@@ -783,6 +896,7 @@ fn run_named(name: &str, ticks: Option<u64>, json: bool) -> Result<i32> {
         "logic_privileged_world" => return run_privileged_world(ticks.unwrap_or(10), json),
         "logic_markers_smoke" => return run_markers_smoke(json),
         "logic_sync_event" => return run_sync_event(ticks.unwrap_or(13), json),
+        "logic_globals_live" => return run_globals_live(ticks.unwrap_or(120), json),
         _ => {}
     }
     let scenario = scenario(name).with_context(|| format!("unknown logic scenario: {name}"))?;
@@ -1284,6 +1398,18 @@ mod tests {
         assert_eq!(sync.events, 4);
         assert_eq!(sync.var_name, "x");
         assert!(!sync.is_obj);
+    }
+
+    #[test]
+    fn globals_live_observes_tick_updates() {
+        let report = globals_live(120);
+        assert!((report.tick - 119.0).abs() < 1e-9, "tick {}", report.tick);
+        assert!((report.time - 119.0 / 60.0 * 1000.0).abs() < 1e-6);
+        assert!((report.second - 119.0 / 60.0).abs() < 1e-9);
+        assert!((report.minute - 119.0 / 3600.0).abs() < 1e-9);
+        assert_eq!(report.sfx, 117.0, "@sfx-shoot id");
+        assert_eq!(report.item, "[content]");
+        assert_eq!(report.checksum, "b66392fcb6a21d22");
     }
 
     #[test]

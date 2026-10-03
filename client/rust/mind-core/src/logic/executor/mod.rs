@@ -581,6 +581,388 @@ pub enum Instruction {
 }
 
 impl Instruction {
+    /// Visits every [`VarRef`] field (used to lower `Global` refs at load).
+    pub(crate) fn for_each_var_ref_mut(&mut self, f: &mut dyn FnMut(&mut VarRef)) {
+        match self {
+            Instruction::Noop | Instruction::End | Instruction::Stop => {}
+            Instruction::Set { to, from } => {
+                f(to);
+                f(from);
+            }
+            Instruction::Op { dest, a, b, .. } => {
+                f(dest);
+                f(a);
+                f(b);
+            }
+            Instruction::Select {
+                result,
+                c0,
+                c1,
+                a,
+                b,
+                ..
+            } => {
+                f(result);
+                f(c0);
+                f(c1);
+                f(a);
+                f(b);
+            }
+            Instruction::Jump { value, compare, .. } => {
+                f(value);
+                f(compare);
+            }
+            Instruction::Wait { value, .. }
+            | Instruction::Print { value }
+            | Instruction::PrintChar { value }
+            | Instruction::Format { value } => f(value),
+            Instruction::Lookup { result, id } => {
+                f(result);
+                f(id);
+            }
+            Instruction::PackColor { result, r, g, b, a } => {
+                f(result);
+                f(r);
+                f(g);
+                f(b);
+                f(a);
+            }
+            Instruction::UnpackColor { r, g, b, a, value } => {
+                f(r);
+                f(g);
+                f(b);
+                f(a);
+                f(value);
+            }
+            Instruction::Read {
+                output,
+                target,
+                address,
+            } => {
+                f(output);
+                f(target);
+                f(address);
+            }
+            Instruction::Write {
+                input,
+                target,
+                address,
+            } => {
+                f(input);
+                f(target);
+                f(address);
+            }
+            Instruction::GetLink { output, index } => {
+                f(output);
+                f(index);
+            }
+            Instruction::Draw {
+                x,
+                y,
+                p1,
+                p2,
+                p3,
+                p4,
+                ..
+            } => {
+                f(x);
+                f(y);
+                f(p1);
+                f(p2);
+                f(p3);
+                f(p4);
+            }
+            Instruction::DrawFlush { target } | Instruction::PrintFlush { target } => f(target),
+            Instruction::Sensor { to, from, type_ } => {
+                f(to);
+                f(from);
+                f(type_);
+            }
+            Instruction::Control {
+                target,
+                p1,
+                p2,
+                p3,
+                p4,
+                ..
+            } => {
+                f(target);
+                f(p1);
+                f(p2);
+                f(p3);
+                f(p4);
+            }
+            Instruction::SetProp { type_, of, value } => {
+                f(type_);
+                f(of);
+                f(value);
+            }
+            Instruction::Radar {
+                radar,
+                sort_order,
+                output,
+                ..
+            } => {
+                f(radar);
+                f(sort_order);
+                f(output);
+            }
+            Instruction::UnitBind { type_ } => f(type_),
+            Instruction::UnitControl {
+                p1, p2, p3, p4, p5, ..
+            } => {
+                f(p1);
+                f(p2);
+                f(p3);
+                f(p4);
+                f(p5);
+            }
+            Instruction::UnitLocate {
+                enemy,
+                ore,
+                out_x,
+                out_y,
+                out_found,
+                out_build,
+                ..
+            } => {
+                f(enemy);
+                f(ore);
+                f(out_x);
+                f(out_y);
+                f(out_found);
+                f(out_build);
+            }
+            Instruction::Query {
+                team, x, y, w, h, ..
+            } => {
+                f(team);
+                f(x);
+                f(y);
+                f(w);
+                f(h);
+            }
+            Instruction::Fetch {
+                result,
+                team,
+                index,
+                extra,
+                ..
+            } => {
+                f(result);
+                f(team);
+                f(index);
+                f(extra);
+            }
+            Instruction::GetBlock { result, x, y, .. } => {
+                f(result);
+                f(x);
+                f(y);
+            }
+            Instruction::SetBlock {
+                block,
+                x,
+                y,
+                team,
+                rotation,
+                ..
+            } => {
+                f(block);
+                f(x);
+                f(y);
+                f(team);
+                f(rotation);
+            }
+            Instruction::SpawnUnit {
+                type_,
+                x,
+                y,
+                rotation,
+                team,
+                result,
+                effect,
+            } => {
+                f(type_);
+                f(x);
+                f(y);
+                f(rotation);
+                f(team);
+                f(result);
+                f(effect);
+            }
+            Instruction::SpawnBullet {
+                result,
+                from,
+                index,
+                x,
+                y,
+                rotation,
+                team,
+                owner,
+                damage,
+                velocity_scl,
+                life_scl,
+                aim_x,
+                aim_y,
+            } => {
+                f(result);
+                f(from);
+                f(index);
+                f(x);
+                f(y);
+                f(rotation);
+                f(team);
+                f(owner);
+                f(damage);
+                f(velocity_scl);
+                f(life_scl);
+                f(aim_x);
+                f(aim_y);
+            }
+            Instruction::ApplyStatus {
+                effect,
+                unit,
+                duration,
+                ..
+            } => {
+                f(effect);
+                f(unit);
+                f(duration);
+            }
+            Instruction::WeatherSense { to, weather } => {
+                f(to);
+                f(weather);
+            }
+            Instruction::WeatherSet { weather, state } => {
+                f(weather);
+                f(state);
+            }
+            Instruction::SpawnWave { x, y, natural } => {
+                f(x);
+                f(y);
+                f(natural);
+            }
+            Instruction::SetRule {
+                value,
+                p1,
+                p2,
+                p3,
+                p4,
+                ..
+            } => {
+                f(value);
+                f(p1);
+                f(p2);
+                f(p3);
+                f(p4);
+            }
+            Instruction::FlushMessage {
+                duration,
+                out_success,
+                ..
+            } => {
+                f(duration);
+                f(out_success);
+            }
+            Instruction::Cutscene { p1, p2, p3, p4, .. } => {
+                f(p1);
+                f(p2);
+                f(p3);
+                f(p4);
+            }
+            Instruction::Effect {
+                x,
+                y,
+                rotation,
+                color,
+                data,
+                ..
+            } => {
+                f(x);
+                f(y);
+                f(rotation);
+                f(color);
+                f(data);
+            }
+            Instruction::Explosion {
+                team,
+                x,
+                y,
+                radius,
+                damage,
+                air,
+                ground,
+                pierce,
+                effect,
+            } => {
+                f(team);
+                f(x);
+                f(y);
+                f(radius);
+                f(damage);
+                f(air);
+                f(ground);
+                f(pierce);
+                f(effect);
+            }
+            Instruction::GetFlag { result, flag } => {
+                f(result);
+                f(flag);
+            }
+            Instruction::SetFlag { flag, value } => {
+                f(flag);
+                f(value);
+            }
+            Instruction::SetMarker { id, p1, p2, p3, .. } => {
+                f(id);
+                f(p1);
+                f(p2);
+                f(p3);
+            }
+            Instruction::MakeMarker {
+                id, x, y, replace, ..
+            } => {
+                f(id);
+                f(x);
+                f(y);
+                f(replace);
+            }
+            Instruction::PlaySound {
+                id,
+                volume,
+                pitch,
+                pan,
+                x,
+                y,
+                limit,
+                ..
+            } => {
+                f(id);
+                f(volume);
+                f(pitch);
+                f(pan);
+                f(x);
+                f(y);
+                f(limit);
+            }
+            Instruction::PlayMusic { name, interrupt } => {
+                f(name);
+                f(interrupt);
+            }
+            Instruction::LocalePrint { name } => f(name),
+            Instruction::Sync { variable } => f(variable),
+            Instruction::ClientData {
+                channel,
+                value,
+                reliable,
+            } => {
+                f(channel);
+                f(value);
+                f(reliable);
+            }
+        }
+    }
+
     /// Executes one instruction against `exec`.
     ///
     /// Takes `&mut self` because `WaitI.cur_time` is per-instruction mutable
@@ -1262,6 +1644,10 @@ pub struct Executor {
     pub binds: Vec<u32>,
     /// `@queries` result arenas (deviation 3); index 0 is the privileged arena.
     pub queries: Vec<Vec<LogicObject>>,
+    /// Global arena snapshot from the assembler (deviation 2).
+    pub globals: crate::logic::globals::GlobalVars,
+    /// `(local mirror id, global arena id)` for live `@time`-style reads.
+    pub global_mirrors: Vec<(VarId, VarId)>,
 }
 
 impl Default for Executor {
@@ -1296,6 +1682,8 @@ impl Executor {
             link_ids: IndexSet::new(),
             binds: Vec::new(),
             queries: Vec::new(),
+            globals: crate::logic::globals::GlobalVars::new(),
+            global_mirrors: Vec::new(),
         }
     }
 
@@ -1305,7 +1693,8 @@ impl Executor {
     }
 
     /// `LExecutor.load`.
-    pub fn load(&mut self, asm: Assembler) {
+    pub fn load(&mut self, mut asm: Assembler) {
+        self.globals = std::mem::take(&mut asm.globals);
         self.arena = asm.arena;
         self.instructions = asm.instructions;
         self.privileged = asm.privileged;
@@ -1316,6 +1705,10 @@ impl Executor {
         self.binds.clear();
         self.queries.clear();
         self.queries.push(Vec::new());
+
+        // Lower `@time`-style global refs into local mirror cells so the hot VM
+        // path stays index-based while reads observe `GlobalVars::update`.
+        self.lower_globals();
 
         // Keep non-constant vars plus link constants (names not starting with `_`/`@`).
         self.var_ids = self
@@ -1367,8 +1760,85 @@ impl Executor {
         self.arena.get(self.counter).num
     }
 
+    /// Lowers [`VarRef::Global`] instruction fields to local mirror cells.
+    ///
+    /// Mirrors are marked constant so they never leak into variable dumps or
+    /// checksums (upstream filters `@`-constants out of `executor.vars`).
+    fn lower_globals(&mut self) {
+        self.global_mirrors.clear();
+        if self.globals.cells.is_empty() {
+            return;
+        }
+        for index in 0..self.instructions.len() {
+            let mut instr = std::mem::replace(&mut self.instructions[index], Instruction::Noop);
+            {
+                let arena = &mut self.arena;
+                let globals = &self.globals;
+                let mirrors = &mut self.global_mirrors;
+                let mut resolve = |r: &mut VarRef| {
+                    if let VarRef::Global(gid) = *r {
+                        let local = match mirrors.iter().find(|(_, g)| *g == gid) {
+                            Some((local, _)) => *local,
+                            None => {
+                                let (is_obj, obj, num) = globals
+                                    .global_cell(gid)
+                                    .map(|c| (c.is_obj, c.obj.clone(), c.num))
+                                    .unwrap_or((true, None, 0.0));
+                                let name = globals
+                                    .global_cell(gid)
+                                    .map(|c| c.name.clone())
+                                    .unwrap_or_default();
+                                let id = arena.put_var(&name);
+                                let cell = arena.get_mut(id);
+                                cell.is_obj = is_obj;
+                                cell.obj = obj;
+                                cell.num = num;
+                                cell.constant = true;
+                                mirrors.push((id, gid));
+                                id
+                            }
+                        };
+                        *r = VarRef::Local(local);
+                    }
+                };
+                instr.for_each_var_ref_mut(&mut resolve);
+            }
+            self.instructions[index] = instr;
+        }
+    }
+
+    /// Copies live global values into the local mirror cells for this tick.
+    ///
+    /// Reads the [`GlobalVars`](crate::logic::globals::GlobalVars) resource when
+    /// installed (the harness/host path) and falls back to the load-time
+    /// snapshot otherwise (plain unit-test worlds).
+    fn refresh_globals(&mut self, world: &World) {
+        if self.global_mirrors.is_empty() {
+            return;
+        }
+        let resource = world.get_resource::<crate::logic::globals::GlobalVars>();
+        for i in 0..self.global_mirrors.len() {
+            let (local, gid) = self.global_mirrors[i];
+            let value = resource
+                .and_then(|g| g.global_cell(gid))
+                .or_else(|| self.globals.global_cell(gid))
+                .map(|c| (c.is_obj, c.obj.clone(), c.num));
+            if let Some((is_obj, obj, num)) = value {
+                let cell = self.arena.get_mut(local);
+                cell.is_obj = is_obj;
+                cell.obj = obj;
+                cell.num = num;
+            }
+        }
+    }
+
     /// `LExecutor.runOnce`.
     pub fn run_once(&mut self, world: &mut World) {
+        self.refresh_globals(world);
+        self.run_once_inner(world);
+    }
+
+    fn run_once_inner(&mut self, world: &mut World) {
         let len = self.instructions.len() as f64;
         let mut counter = self.arena.get(self.counter).num;
         if counter >= len || counter < 0.0 {
@@ -1389,6 +1859,7 @@ impl Executor {
 
     /// Runs up to `max` instructions (bounded).
     pub fn run(&mut self, world: &mut World, max: usize) {
+        self.refresh_globals(world);
         for _ in 0..max {
             let counter = self.arena.get(self.counter).num;
             if self.stopped
@@ -1398,7 +1869,7 @@ impl Executor {
             {
                 break;
             }
-            self.run_once(world);
+            self.run_once_inner(world);
         }
     }
 
@@ -1408,8 +1879,9 @@ impl Executor {
         if *accumulator > max_scale * ipt {
             *accumulator = max_scale * ipt;
         }
+        self.refresh_globals(world);
         while *accumulator >= 1.0 {
-            self.run_once(world);
+            self.run_once_inner(world);
             if self.yielded {
                 self.yielded = false;
                 break;

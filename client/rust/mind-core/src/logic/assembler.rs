@@ -56,9 +56,23 @@ impl Assembler {
 
     /// `LAssembler.assemble`.
     pub fn assemble(text: &str, privileged: bool) -> Result<Assembler, ParseError> {
+        Self::assemble_with(text, privileged, GlobalVars::new())
+    }
+
+    /// `LAssembler.assemble` against a caller-supplied global arena.
+    ///
+    /// The globals carry content/sound constants; executors receive a clone of
+    /// this arena at `load` and observe live values through
+    /// [`GlobalVars::update`](crate::logic::globals::GlobalVars::update).
+    pub fn assemble_with(
+        text: &str,
+        privileged: bool,
+        globals: GlobalVars,
+    ) -> Result<Assembler, ParseError> {
         let statements = Self::read(text, privileged)?;
         let mut asm = Assembler::new();
         asm.privileged = privileged;
+        asm.globals = globals;
         asm.instructions = statements
             .iter()
             .filter_map(|statement| build_statement(statement, &mut asm))
@@ -85,10 +99,12 @@ impl Assembler {
     }
 
     /// `LAssembler.var`.
+    ///
+    /// Global constants resolve to [`VarRef::Global`] and stay live (deviation
+    /// 2); string/number constants and free variables stay executor-local.
     pub fn var(&mut self, symbol: &str) -> VarRef {
-        if let Some(global) = self.globals.get(symbol, self.privileged) {
-            let id = insert_into(&mut self.arena, &global);
-            return VarRef::Local(id);
+        if let Some(global) = self.globals.get_ref(symbol, self.privileged) {
+            return global;
         }
 
         // string literal
@@ -277,9 +293,13 @@ mod tests {
     use crate::logic::globals::NAMED_COLORS;
 
     fn arena_var(asm: &mut Assembler, symbol: &str) -> LVar {
-        let r = asm.var(symbol);
-        match r {
+        match asm.var(symbol) {
             VarRef::Local(id) => asm.arena.get(id).clone(),
+            VarRef::Global(id) => asm
+                .globals
+                .global_cell(id)
+                .cloned()
+                .unwrap_or_else(|| LVar::new(symbol)),
         }
     }
 

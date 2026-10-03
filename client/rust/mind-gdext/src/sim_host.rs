@@ -97,6 +97,12 @@ impl INode for MindSimHost {
                 }
             };
 
+        // Plan-13 M7: install the content-initialized global logic arena so
+        // executors observe live `@time`/content/`@sfx-*` constants.
+        if let Some(registry) = self.content_snapshot.as_ref() {
+            mind_core::logic::globals::GlobalVars::install_world(&mut self.sim.ecs.0, registry);
+        }
+
         if let Some(saved) = settings::read()
             && let Some(name) = saved.selected_block
             && let Ok(id) = self.sim.content().id(&name)
@@ -467,6 +473,123 @@ impl MindSimHost {
             );
         }
         out
+    }
+
+    // ---- Plan 13 M8 logic host surface (§3.12) ----
+    //
+    // The pure probes (`logic_run`, `logic_statement_names`, `logic_compile`)
+    // work everywhere. The sim-integrated probes (`logic_place`,
+    // `logic_set_code`, `logic_get_state`, `logic_display_commands`) return
+    // their empty/false form until plan 05/07 expose live logic-building state
+    // in `Sim` (the P0 `Sim` uses `BuildingComp`, not plan-07 behaviors).
+    // MCP recipes (plan 13 §7c; editor run is orchestrator-owned via the
+    // single-editor mutex):
+    //
+    //   godot_exec call: $"/root/Spine/MindLogic" statement_names()   # (after adding MindLogic to spine.tscn)
+    //   godot_exec call: $"/root/Spine/SimHost" logic_run("op add a a 1\njump 0 always", 10, 2, true)
+    //   godot_exec call: $"/root/Spine/SimHost" logic_place("logic-processor", 40, 40)  # false until 05/07
+    //   godot_exec call: $"/root/Spine/SimHost" logic_get_state(40, 40)
+
+    /// Whether the sim-integrated logic probes can mutate a live processor.
+    #[func]
+    pub fn logic_available(&self) -> bool {
+        false
+    }
+
+    /// Registered statement names (plan-14 editor handoff).
+    #[func]
+    pub fn logic_statement_names(&self) -> PackedStringArray {
+        let mut out = PackedStringArray::new();
+        for meta in mind_core::logic::statement::all_statements() {
+            out.push(&GString::from(meta.registered_name));
+        }
+        out
+    }
+
+    /// Runs `code` on a temporary executor for `ticks` at `ipt`; dumps vars.
+    #[func]
+    pub fn logic_run(
+        &self,
+        code: GString,
+        ticks: i64,
+        ipt: i64,
+        privileged: bool,
+    ) -> Dictionary<GString, Variant> {
+        let ticks = ticks.clamp(0, 1_000_000) as u64;
+        let ipt = ipt.clamp(1, 1000) as i32;
+        let mut out = Dictionary::<GString, Variant>::new();
+        let Some(exec) =
+            mind_core::logic::script::run_standalone(&code.to_string(), privileged, ticks, ipt)
+        else {
+            out.set(&GString::from("ok"), &false.to_variant());
+            out.set(
+                &GString::from("error"),
+                &GString::from("assemble failed").to_variant(),
+            );
+            return out;
+        };
+        let mut vars = Dictionary::<GString, Variant>::new();
+        for cell in &exec.arena.cells {
+            if cell.constant || cell.name.starts_with('@') {
+                continue;
+            }
+            let value: Variant = if cell.is_obj {
+                match &cell.obj {
+                    None => Variant::nil(),
+                    Some(value) => GString::from(value.display().as_str()).to_variant(),
+                }
+            } else {
+                cell.num.to_variant()
+            };
+            vars.set(&GString::from(cell.name.as_str()), &value);
+        }
+        out.set(&GString::from("ok"), &true.to_variant());
+        out.set(
+            &GString::from("text"),
+            &GString::from(exec.text_buffer.as_str()).to_variant(),
+        );
+        out.set(&GString::from("vars"), &vars.to_variant());
+        out
+    }
+
+    /// Placeholder for placing a logic block (awaits plan 05/07 integration).
+    #[func]
+    pub fn logic_place(&self, kind: GString, _x: i64, _y: i64) -> bool {
+        log::warn!("logic_place(`{kind}`): sim-side logic building state is a plan-05/07 hook");
+        false
+    }
+
+    /// Placeholder for applying compressed logic code (awaits plan 05/07).
+    #[func]
+    pub fn logic_set_code(&self, _x: i64, _y: i64, _code: GString) -> bool {
+        log::warn!("logic_set_code: sim-side logic building state is a plan-05/07 hook");
+        false
+    }
+
+    /// Placeholder for reading a processor state (awaits plan 05/07).
+    #[func]
+    pub fn logic_get_state(&self, _x: i64, _y: i64) -> Dictionary<GString, Variant> {
+        Dictionary::new()
+    }
+
+    /// Placeholder for a display command queue (awaits plan 16 rendering/05).
+    #[func]
+    pub fn logic_display_commands(&self, _x: i64, _y: i64) -> PackedInt64Array {
+        PackedInt64Array::new()
+    }
+
+    /// Runs a registered logic bench case (plan 13 §7d; not yet registered).
+    #[func]
+    pub fn logic_bench(&self, name: GString) -> Dictionary<GString, Variant> {
+        log::warn!("logic_bench(`{name}`): no bench registered yet");
+        Dictionary::new()
+    }
+
+    /// Dev `setrule` probe (awaits the plan-12 `LogicWorldState` resource).
+    #[func]
+    pub fn logic_set_rule(&self, name: GString, _value: Variant) -> bool {
+        log::warn!("logic_set_rule(`{name}`): timeline/sim rule state is a plan-12 hook");
+        false
     }
 
     // ---- IoSet seam (plan 05 M9 / plan 04 §3.10; MindIo wiring placeholder) ----

@@ -17,6 +17,20 @@ pub const LOGIC_FILTER_MAX_INSTRUCTIONS: u32 = 500 * 500 * 25;
 /// `LExecutor.runLogicScript(code)` default cap.
 pub const SCRIPT_DEFAULT_MAX_INSTRUCTIONS: u32 = 100_000;
 
+/// `LogicFilter.apply` seam: runs a map-generation script with the
+/// `maxInstructionsExecution = 6_250_000` budget against `world`.
+///
+/// Plan 06's `maps::filters::LogicFilter::apply_tiles` calls this with a
+/// `World` holding the in-progress `WorldGrid` (+ `ContentRegistry`); until the
+/// generation world exposes those resources, the hook is a documented no-op.
+pub fn run_logic_filter(
+    code: &str,
+    loop_: bool,
+    world: &mut bevy_ecs::world::World,
+) -> Option<Executor> {
+    run_logic_script_in(code, LOGIC_FILTER_MAX_INSTRUCTIONS, loop_, world)
+}
+
 /// Runs a privileged logic script, capped by instruction count.
 ///
 /// Returns the executor (for inspection) or `None` when the code fails to
@@ -60,6 +74,23 @@ pub fn run_logic_script_in(
         }
         executor.run_once(world);
         executed += 1;
+    }
+    Some(executor)
+}
+
+/// Runs `code` on a temporary executor for `ticks` fixed steps at `ipt`
+/// instructions/tick (headless/MCP `logic_run`; no sim world required).
+///
+/// Returns `None` when the code fails to assemble.
+pub fn run_standalone(code: &str, privileged: bool, ticks: u64, ipt: i32) -> Option<Executor> {
+    let asm = Assembler::assemble(code, privileged).ok()?;
+    let mut executor = Executor::new();
+    executor.privileged = privileged;
+    executor.load(asm);
+    let mut world = bevy_ecs::world::World::new();
+    let mut accumulator = 0.0f32;
+    for _ in 0..ticks {
+        executor.run_budget(&mut world, &mut accumulator, 1.0, ipt as f32);
     }
     Some(executor)
 }

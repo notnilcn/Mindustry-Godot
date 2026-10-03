@@ -13,9 +13,10 @@
 
 use indexmap::{IndexMap, IndexSet};
 
+use crate::content::registries::sound_meta::SOUNDS;
 use crate::content::{ContentRef, ContentRegistry, ContentType};
 use crate::logic::access::LAccess;
-use crate::logic::value::{LVar, LogicObject, VarArena};
+use crate::logic::value::{LVar, LogicObject, VarArena, VarId, VarRef};
 use crate::math::ArcRand;
 
 /// `GlobalVars.ctrlProcessor`.
@@ -85,7 +86,7 @@ pub struct GlobalUpdate {
 }
 
 /// `GlobalVars` — logic constant/variable table.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, bevy_ecs::prelude::Resource)]
 pub struct GlobalVars {
     /// Constant cells by name (lookup only).
     pub cells: IndexMap<String, LVar>,
@@ -113,7 +114,18 @@ impl GlobalVars {
             rand: ArcRand::new(0),
         };
         globals.init_static();
+        // Plan 18 seeds the full `Sounds` table unconditionally, so `@sfx-*`
+        // constants are always available (upstream guards on loaded assets).
+        globals.init_sfx();
+        globals.reindex();
         globals
+    }
+
+    /// Assigns every cell its stable global-arena id (insertion index).
+    fn reindex(&mut self) {
+        for (i, var) in self.cells.values_mut().enumerate() {
+            var.id = i as i32;
+        }
     }
 
     fn put_entry(&mut self, name: &str, value: Option<LogicObject>, privileged: bool) {
@@ -275,9 +287,30 @@ impl GlobalVars {
             let key = format!("@status-{name}");
             self.put_content(&key, ContentType::Status, entry.id, false);
         }
+        self.init_sfx();
+        self.reindex();
     }
 
-    /// Convenience: static constants plus content constants.
+    /// Registers `@sfx-<file>` sound-id constants (`GlobalVars.init` audio block).
+    ///
+    /// Upstream iterates the loaded `Sound` assets, skips `Sounds.none`/`unset`
+    /// and uses `sound.file.nameWithoutExtension()` as the key with
+    /// `Sounds.getSoundId(sound)` as the value. Plan 18's seeded `SOUNDS` table
+    /// mirrors the generated `Sounds` order, so the raw index is that id.
+    pub fn init_sfx(&mut self) {
+        for (i, meta) in SOUNDS.iter().enumerate().skip(2) {
+            let file = meta.asset.rsplit('/').next().unwrap_or(meta.name);
+            let key = format!("@sfx-{file}");
+            if self.cells.contains_key(&key) {
+                continue;
+            }
+            let mut var = LVar::num_const(key.clone(), i as f64);
+            var.id = i as i32;
+            self.cells.insert(key, var);
+        }
+    }
+
+    /// Convenience: static constants plus content + sound constants.
     pub fn with_content(content: &ContentRegistry) -> Self {
         let mut globals = Self::new();
         globals.init_content(content);
@@ -296,11 +329,29 @@ impl GlobalVars {
         }
     }
 
+    /// Installs the content-initialized arena as the world's logic-globals
+    /// resource (`GlobalVars.init` at content-init time).
+    ///
+    /// Plan 02/content-init calls this once per content load. Executors then
+    /// observe live updates through [`update_world`](Self::update_world).
+    pub fn install_world(world: &mut bevy_ecs::world::World, content: &ContentRegistry) -> Self {
+        let globals = Self::with_content(content);
+        world.insert_resource(globals.clone());
+        globals
+    }
+
+    /// Applies a [`GlobalUpdate`] to the installed resource, if present.
+    pub fn update_world(world: &mut bevy_ecs::world::World, update: &GlobalUpdate) {
+        if let Some(mut globals) = world.get_resource_mut::<Self>() {
+            globals.update(update);
+        }
+    }
+
     /// `GlobalVars.update` — refreshes the tick/map/network/client variables.
     ///
-    /// Purely a table update: executors copy constants at `load` time, so a
-    /// running VM does **not** observe this until the global-arena (`VarRef::
-    /// Global`) refactor lands (plan 13 §3.2 deviation 2, M7 follow-up).
+    /// Running executors observe these values through their lowered
+    /// [`VarRef::Global`](crate::logic::value::VarRef::Global) mirror cells each
+    /// tick (plan 13 §3.2 deviation 2).
     pub fn update(&mut self, update: &GlobalUpdate) {
         self.set_num_raw("@time", update.tick as f64 / 60.0 * 1000.0);
         self.set_num_raw("@tick", update.tick as f64);
@@ -359,6 +410,32 @@ impl GlobalVars {
             return self.cells.get("null").cloned();
         }
         self.cells.get(name).cloned()
+    }
+
+    /// Returns the global-arena reference for `name` (`GlobalVars.get`).
+    ///
+    /// Mirrors [`get`](Self::get): privileged names resolve to the `null` cell
+    /// for non-privileged callers.
+    pub fn get_ref(&self, name: &str, privileged: bool) -> Option<VarRef> {
+        if !privileged && self.privileged_names.contains(name) {
+            return self
+                .cells
+                .get("null")
+                .map(|v| VarRef::Global(v.id.max(0) as VarId));
+        }
+        self.cells
+            .get(name)
+            .map(|v| VarRef::Global(v.id.max(0) as VarId))
+    }
+
+    /// Global cell by arena id.
+    pub fn global_cell(&self, id: VarId) -> Option<&LVar> {
+        self.cells.get_index(id as usize).map(|(_, v)| v)
+    }
+
+    /// Mutable global cell by arena id.
+    pub fn global_cell_mut(&mut self, id: VarId) -> Option<&mut LVar> {
+        self.cells.get_index_mut(id as usize).map(|(_, v)| v)
     }
 
     /// `GlobalVars.waitVar` (`@wait`).
@@ -537,6 +614,57 @@ mod tests {
         // Privileged fallback: non-privileged `@server` resolves to null.
         assert_eq!(g.get("@server", true).unwrap().num, 1.0);
         assert_eq!(g.get("@server", false).unwrap().obj, None);
+    }
+
+    #[test]
+    fn executor_observes_live_global_update() {
+        use crate::logic::assembler::Assembler;
+        use crate::logic::executor::Executor;
+
+        let mut globals = GlobalVars::new();
+        let asm = Assembler::assemble_with("set t @tick\nend\n", true, globals.clone())
+            .expect("assemble");
+        let mut exec = Executor::new();
+        exec.load(asm);
+
+        // Insert the live arena resource and advance @tick between runs.
+        let mut world = bevy_ecs::world::World::new();
+        globals.update(&GlobalUpdate {
+            tick: 42,
+            ..GlobalUpdate::default()
+        });
+        world.insert_resource(globals.clone());
+        exec.run_once(&mut world);
+        let t = exec.optional_var("t").expect("t");
+        assert_eq!(exec.arena.get(t).num(), 42.0);
+
+        globals.update(&GlobalUpdate {
+            tick: 99,
+            ..GlobalUpdate::default()
+        });
+        world.insert_resource(globals);
+        exec.run_once(&mut world);
+        assert_eq!(
+            exec.arena.get(t).num(),
+            42.0,
+            "counter past end resets to 0"
+        );
+    }
+
+    #[test]
+    fn sfx_constants_register_from_sound_table() {
+        let content = crate::world::harness::BuildHarness::load_content();
+        let g = GlobalVars::with_content(&content);
+        // `Sounds.none`/`unset` are skipped; the first real sound is index 2.
+        assert!(g.get("@sfx-acceleratorCharge", false).is_some());
+        assert_eq!(g.get("@sfx-acceleratorCharge", false).unwrap().num, 2.0);
+        assert!(g.get("@sfx-none", false).is_none());
+        assert_eq!(g.get("@sfx-shoot", false).unwrap().num, {
+            let idx = SOUNDS
+                .iter()
+                .position(|m| m.asset.ends_with("shoot") || m.name == "shoot");
+            idx.unwrap_or(0) as f64
+        });
     }
 
     #[test]
