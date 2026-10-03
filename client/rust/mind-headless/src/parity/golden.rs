@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! `parity/golden_manifest.json` (format 1): committed oracle + scenario goldens
-//! with sha256 drift detection. Harness goldens under `client/rust/*/tests/golden/**`
-//! are verified by the scenarios themselves and are not listed here.
+//! `parity/golden_manifest.json` (format 1): committed oracle + scenario + harness
+//! goldens with sha256 drift detection. Oracle goldens live under `parity/golden/**`
+//! (JVM/source-derived); harness goldens under `client/rust/*/tests/golden(s)/**` are
+//! pinned here in addition to being verified by their owning scenario. M2.
 
 use std::path::Path;
 
