@@ -184,13 +184,18 @@ impl UnitHarness {
                     (Some(before), Some(after)) => (after.0 - before.0, after.1 - before.1),
                     _ => (0.0, 0.0),
                 };
-                movement::update_kinematics(
+                let breaks = movement::update_kinematics(
                     &mut self.build.world,
                     &self.build.grid,
                     &self.build.content,
                     entity,
                     delta,
                 );
+                // `ConstructBlock.deconstructFinish`: tanks/legs overrun props
+                // (`unitMoveBreakable`); the grid is mutated through plan-06 ops.
+                for (tx, ty) in breaks {
+                    self.build.with_ctx(|ctx| ctx.remove_block(tx, ty));
+                }
             }
         }
         self.sync_weapon_states();

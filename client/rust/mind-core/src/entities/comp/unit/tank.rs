@@ -33,6 +33,11 @@ use crate::world::{BlockTable, WorldGrid};
 
 /// `TankComp.update`: advance the tread animation and recompute the overlap
 /// slowdown/deep-floor state.
+///
+/// Returns the tiles overrun with a `unitMoveBreakable` block
+/// (`ConstructBlock.deconstructFinish(t, t.block(), self())`). The caller owns
+/// tile mutation through plan-06 `WorldCtx`, so the requests are collected here
+/// rather than mutating the grid from this read-only movement pass.
 pub fn update_tank(
     world: &mut World,
     grid: &WorldGrid,
@@ -40,11 +45,11 @@ pub fn update_tank(
     entity: Entity,
     delta: (f32, f32),
     unit_def: &UnitTypeDef,
-) {
+) -> Vec<(i16, i16)> {
     let speed = (delta.0 * delta.0 + delta.1 * delta.1).sqrt();
     let (position, hit_size) = {
         let Some(position) = world.get::<Pos>(entity).copied() else {
-            return;
+            return Vec::new();
         };
         let hit_size = world
             .get::<HitboxComp>(entity)
@@ -54,8 +59,17 @@ pub fn update_tank(
     };
 
     // `TankComp.update` crush pass runs before the overlap scan.
+    let mut breaks = Vec::new();
     apply_crush(
-        world, grid, content, entity, position.x, position.y, hit_size, unit_def,
+        world,
+        grid,
+        content,
+        entity,
+        position.x,
+        position.y,
+        hit_size,
+        unit_def,
+        &mut breaks,
     );
 
     let (slowdown, deep_floor) = scan_tiles(
@@ -70,6 +84,8 @@ pub fn update_tank(
             tank.tread_time += speed;
         }
     }
+
+    breaks
 }
 
 /// `TankComp.floorSpeedMultiplier` (`TankComp.java`):
@@ -96,6 +112,7 @@ fn apply_crush(
     y: f32,
     hit_size: f32,
     unit_def: &UnitTypeDef,
+    breaks: &mut Vec<(i16, i16)>,
 ) {
     let Some(team) = world.get::<TeamComp>(entity).map(|comp| comp.team) else {
         return;
@@ -164,8 +181,9 @@ fn apply_crush(
                     .block(tile.block)
                     .is_some_and(|def| def.unit_move_breakable)
             {
-                // `ConstructBlock.deconstructFinish(t, t.block(), self())` needs
-                // a mutable grid; deferred to plan 07's tile-removal API.
+                // `ConstructBlock.deconstructFinish(t, t.block(), self())`: the
+                // caller removes the tile (plan-06 `WorldCtx`), so queue it.
+                breaks.push((tx as i16, ty as i16));
             }
         }
     }
@@ -324,6 +342,33 @@ mod tests {
         );
         let health = harness.build.world.get::<Health>(build).expect("health");
         assert!(health.health <= 0.0, "crush-fragile building is destroyed");
+    }
+
+    #[test]
+    fn tank_breaks_unit_move_breakable_prop() {
+        let mut harness = UnitHarness::new(16, 16, 1);
+        let boulder = harness.content().block_id("boulder").expect("boulder");
+        assert!(
+            harness
+                .content()
+                .block(boulder)
+                .is_some_and(|def| def.unit_move_breakable),
+            "boulder is unitMoveBreakable via the `Prop` constructor"
+        );
+        harness
+            .build
+            .with_ctx(|ctx| ctx.set_block(9, 8, boulder, 0, 0));
+        assert_eq!(harness.build.grid.tile(9, 8).block, boulder);
+        // `conquer` has `crushDamage = 5`; its tread radius covers the neighbor.
+        let _unit = harness
+            .spawn("conquer", 0, 8.5 * 8.0, 8.5 * 8.0, 0.0)
+            .expect("conquer");
+        harness.tick();
+        assert_eq!(
+            harness.build.grid.tile(9, 8).block,
+            crate::content::BlockId::AIR,
+            "the overrun prop is deconstructed through `WorldCtx`"
+        );
     }
 
     #[test]

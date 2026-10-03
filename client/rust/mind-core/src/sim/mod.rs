@@ -546,12 +546,23 @@ impl Sim {
             }
             SimCommand::CommandBuilding { positions, x, y } => {
                 // `InputHandler.commandBuilding`: `Building.onCommand(target)`
-                // for every valid commanded building (`command_pos`). The
-                // upstream `block.commandable` gate is not yet in plan-02
-                // `BlockDef`; tiles without a live building are skipped here.
+                // for every live, `Block.commandable` building (upstream also
+                // checks the player team; the client selection filters team and
+                // `Sim` has no relay-side team).
                 for &packed in positions.iter() {
                     let pos = TilePos::from_pack(packed);
                     if self.grid.index(pos).is_err() || self.grid.entity_at(pos).is_none() {
+                        continue;
+                    }
+                    let Some(block) = self.grid.block_at(pos) else {
+                        continue;
+                    };
+                    let commandable = self
+                        .ensure_world_apply()
+                        .content()
+                        .block(block)
+                        .is_some_and(|def| def.commandable);
+                    if !commandable {
                         continue;
                     }
                     self.ensure_world_apply()

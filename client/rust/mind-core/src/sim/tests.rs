@@ -444,16 +444,30 @@ fn sim_command_commands_valid_buildings_only() {
     use crate::world::TilePos;
 
     let mut sim = Sim::new(1, 16, 16, BlockId::AIR, BlockId::AIR);
+    let factory = sim
+        .world_block_id("ground-factory")
+        .expect("commandable block");
     sim.apply(Command::Place {
         x: 3,
         y: 3,
+        block: BlockId::new(factory),
+    })
+    .expect("place factory");
+    sim.apply(Command::Place {
+        x: 6,
+        y: 3,
         block: BlockId::STONE_WALL,
     })
-    .expect("place");
+    .expect("place wall");
 
-    // One live tile, one empty tile: only the live one records a target.
+    // Only the live, `Block.commandable` tile records a target: a wall and an
+    // empty tile are both ignored (upstream `build.isCommandable()` gate).
     sim.command(SimCommand::CommandBuilding {
-        positions: smallvec::smallvec![TilePos::new(3, 3).pack(), TilePos::new(8, 8).pack()],
+        positions: smallvec::smallvec![
+            TilePos::new(3, 3).pack(),
+            TilePos::new(6, 3).pack(),
+            TilePos::new(8, 8).pack()
+        ],
         x: 70.0,
         y: 42.0,
     })
@@ -461,6 +475,11 @@ fn sim_command_commands_valid_buildings_only() {
     assert_eq!(
         sim.building_command_target(TilePos::new(3, 3)),
         Some((70.0, 42.0))
+    );
+    assert_eq!(
+        sim.building_command_target(TilePos::new(6, 3)),
+        None,
+        "a wall is not commandable"
     );
     assert_eq!(sim.building_command_target(TilePos::new(8, 8)), None);
 

@@ -1348,6 +1348,8 @@ pub struct BlockSpec {
     pub subclass: Option<BlockKind>,
     /// `GenericCrafter.craftTime` (ticks); plan 07 R2 reconciliation.
     pub craft_time: Option<f32>,
+    /// `Block.commandable` (unit command center; plan 11/15 `commandBuilding`).
+    pub commandable: Option<bool>,
     /// Floor/environment attributes (`Floor.attributes`; plan 09 R3 steam vents).
     pub attributes: Vec<(&'static str, f32)>,
 }
@@ -1440,6 +1442,7 @@ impl Default for BlockSpec {
             quick_rotate: None,
             subclass: None,
             craft_time: None,
+            commandable: None,
             attributes: Vec::new(),
         }
     }
@@ -1514,6 +1517,15 @@ impl BlockSpec {
         }
         match kind {
             BlockKind::Block => {}
+            BlockKind::UnitFactory
+            | BlockKind::Reconstructor
+            | BlockKind::UnitAssembler
+            | BlockKind::CoreBlock
+            | BlockKind::PayloadSource => {
+                // Those constructors set `commandable = true` (unit command
+                // centers; plan 11/15 `InputHandler.commandBuilding` gate).
+                spec.commandable = Some(true);
+            }
             BlockKind::AirBlock => {
                 // extends Floor
                 spec.placeable_liquid = Some(true);
@@ -1575,8 +1587,10 @@ impl BlockSpec {
             BlockKind::StaticProp => {
                 spec.draw_cached = Some(true);
                 spec.draw_dynamic = Some(false);
-                // `Prop` constructor: `alwaysReplace = true` (inherited).
+                // `Prop` constructor: `alwaysReplace = true`, `unitMoveBreakable = true`
+                // (inherited); `StaticProp` only overrides the draw flags.
                 spec.always_replace = Some(true);
+                spec.unit_move_breakable = Some(true);
             }
             BlockKind::StaticTree => {
                 spec.solid = Some(true);
@@ -1585,8 +1599,9 @@ impl BlockSpec {
                 spec.always_replace = Some(true);
             }
             BlockKind::Prop => {
-                // `Prop` constructor: `alwaysReplace = true`.
+                // `Prop` constructor: `alwaysReplace = true`, `unitMoveBreakable = true`.
                 spec.always_replace = Some(true);
+                spec.unit_move_breakable = Some(true);
             }
             BlockKind::TreeBlock => {
                 spec.solid = Some(true);
@@ -2118,6 +2133,8 @@ pub struct BlockDef {
     pub subclass: BlockKind,
     /// `GenericCrafter.craftTime` (ticks); plan 07 R2 reconciliation.
     pub craft_time: f32,
+    /// `Block.commandable` (unit command center; plan 11/15 `commandBuilding`).
+    pub commandable: bool,
 }
 
 impl BlockDef {
@@ -2359,6 +2376,7 @@ impl BlockDef {
             quick_rotate: spec.quick_rotate.unwrap_or(true),
             subclass,
             craft_time: spec.craft_time.unwrap_or(0.0),
+            commandable: spec.commandable.unwrap_or(false),
         };
         if let Some(generate) = generate_icons {
             def.unlock.generate_icons = generate;

@@ -25,19 +25,23 @@ use super::tether::check_tether;
 use super::water_move::update_water_move;
 
 /// Advances every kind-specific movement state for `entity`.
+///
+/// Returns the tiles a tank overran with `unitMoveBreakable` blocks; the caller
+/// removes them through plan-06 `WorldCtx` (this pass only borrows the grid).
 pub fn update_kinematics(
     world: &mut World,
     grid: &WorldGrid,
     content: &ContentRegistry,
     entity: Entity,
     delta: (f32, f32),
-) {
+) -> Vec<(i16, i16)> {
     let Some(unit_def) = world
         .get::<UnitTypeComp>(entity)
         .and_then(|comp| content.unit(comp.type_id))
     else {
-        return;
+        return Vec::new();
     };
+    let mut breaks = Vec::new();
     if world.get::<LegsComp>(entity).is_some() {
         update_legs(world, unit_def, entity, delta);
     }
@@ -45,7 +49,7 @@ pub fn update_kinematics(
         update_mech(world, entity, delta);
     }
     if world.get::<TankComp>(entity).is_some() {
-        update_tank(world, grid, content, entity, delta, unit_def);
+        breaks = update_tank(world, grid, content, entity, delta, unit_def);
     }
     if world.get::<CrawlComp>(entity).is_some() {
         update_crawl(world, grid, content, entity, delta, unit_def);
@@ -54,4 +58,5 @@ pub fn update_kinematics(
         update_water_move(world, entity, delta);
     }
     check_tether(world, entity);
+    breaks
 }
