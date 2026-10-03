@@ -1,0 +1,17 @@
+{
+  "scenario": "input_replay_mobile",
+  "mobile": true,
+  "events": 5,
+  "mode": "none",
+  "block": 257,
+  "rotation": 1,
+  "line_plans": 0,
+  "queue_plans": 9,
+  "zoom": 4.400000095367432,
+  "cursor": [
+    96.0,
+    32.0
+  ],
+  "actions": [],
+  "checksum": "09612b07b5ecb5a5"
+}

@@ -1,0 +1,57 @@
+{
+  "scenario": "input_mobile_parity",
+  "steps": [
+    {
+      "step": "use_schematic",
+      "count": 2,
+      "origin": [
+        4,
+        5
+      ],
+      "mode": "schematic_select"
+    },
+    {
+      "step": "transform_schematic",
+      "plans": [
+        [
+          -2,
+          -3,
+          1
+        ],
+        [
+          -8,
+          -7,
+          1
+        ]
+      ]
+    },
+    {
+      "step": "confirm_schematic",
+      "count": 0,
+      "mode": "none"
+    },
+    {
+      "step": "rebuild_area",
+      "count": 2
+    },
+    {
+      "step": "autotarget",
+      "target": 11
+    },
+    {
+      "step": "confirm_plans",
+      "committed": 1,
+      "queue": 1
+    },
+    {
+      "step": "keyboard_gating",
+      "pan": [
+        0.0,
+        0.0
+      ],
+      "zoom": 4.0,
+      "manual_shooting": true
+    }
+  ],
+  "checksum": "5be03d592a93bd84"
+}

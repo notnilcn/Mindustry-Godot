@@ -18,6 +18,7 @@ pub mod desktop;
 pub mod focus;
 pub mod input_log;
 pub mod line;
+pub mod mobile;
 pub mod place_mode;
 pub mod placement;
 pub mod plan;
@@ -41,6 +42,12 @@ pub use input_log::{
     INPUT_LOG_FORMAT, InputHeader, InputLog, InputLogError, InputRecord, InputReplay, RawEvent,
 };
 pub use line::{PlaceLine, flip_plans, iterate_line, rotate_plans};
+pub use mobile::{
+    AREA_BREAK_START_TILES, EDGE_PAN, GestureDetector, GestureEvent, LINE_MODE_START_TILES,
+    LONG_PRESS_SECONDS, MAX_FLING_DELAY_SECONDS, MAX_PAN_SPEED, MINE_DOUBLE_TAP_MS,
+    MobileController, PayloadTarget, TAP_COUNT_INTERVAL_SECONDS, TAP_SQUARE_HALF,
+    should_begin_mine,
+};
 pub use place_mode::{MobileMode, PlaceMode};
 pub use placement::{
     ASTAR_NODE_LIMIT, BridgePlacer, DirectionBridgePlacer, MAX_LENGTH, NormalizeDrawResult,
@@ -50,8 +57,8 @@ pub use placement::{
 };
 pub use plan::{ClientPlan, PlanCopy, PlanMirror, PlanTree, PreviewState};
 pub use queue::{AddOutcome, BuildQueue};
-pub use replay::ReplayHarness;
+pub use replay::{MobileReplayHarness, ReplayHarness};
 pub use rts::{
-    SelectRect, SelectableUnit, enemy_unit_at, select_buildings_rect, select_typed_units,
-    select_unit_tap, select_units_rect,
+    SelectRect, SelectableBuilding, SelectableUnit, command_units_apply, enemy_unit_at,
+    select_buildings_rect, select_typed_units, select_unit_tap, select_units_rect,
 };

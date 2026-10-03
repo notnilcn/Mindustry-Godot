@@ -1,0 +1,119 @@
+{
+  "scenario": "input_rts_move",
+  "selected": 3,
+  "commands": [
+    {
+      "action": "command_units",
+      "units": [
+        1,
+        2,
+        3
+      ],
+      "target": "Position { x: 50.0, y: 50.0 }",
+      "queue": false,
+      "final_batch": true
+    },
+    {
+      "op": "unit_command",
+      "units": [
+        1,
+        2,
+        3
+      ],
+      "command": 0,
+      "x": 50.0,
+      "y": 50.0
+    },
+    {
+      "action": "command_units",
+      "units": [
+        1,
+        2,
+        3
+      ],
+      "target": "Unit(9)",
+      "queue": false,
+      "final_batch": true
+    },
+    {
+      "op": "unit_command",
+      "units": [
+        1,
+        2,
+        3
+      ],
+      "command": 0,
+      "x": 9.0,
+      "y": 0.0
+    },
+    {
+      "action": "command_units",
+      "units": [
+        1,
+        2,
+        3
+      ],
+      "target": "Position { x: 60.0, y: 10.0 }",
+      "queue": true,
+      "final_batch": true
+    },
+    {
+      "op": "unit_command",
+      "units": [
+        1,
+        2,
+        3
+      ],
+      "command": 0,
+      "x": 60.0,
+      "y": 10.0
+    },
+    {
+      "action": "set_unit_command",
+      "units": [
+        1,
+        2,
+        3
+      ],
+      "command": 1
+    },
+    {
+      "op": "unit_command",
+      "units": [
+        1,
+        2,
+        3
+      ],
+      "command": 1,
+      "x": 0.0,
+      "y": 0.0
+    },
+    {
+      "action": "set_unit_stance",
+      "units": [
+        1,
+        2,
+        3
+      ],
+      "stance": 2,
+      "enabled": true
+    },
+    {
+      "op": "custom"
+    }
+  ],
+  "control_group": {
+    "created": true,
+    "double_tap": false
+  },
+  "command_ai": {
+    "applied": 2,
+    "queued": 1,
+    "first_target": [
+      50.0,
+      50.0
+    ],
+    "second_queue": 1
+  },
+  "checksum": "c04e75fe90e02c08"
+}

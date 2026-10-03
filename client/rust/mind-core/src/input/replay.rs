@@ -75,6 +75,151 @@ impl PlacementWorld for ReplayWorld {
     }
 }
 
+/// Deterministic replay driver over the mobile controller (plan 15 §7a).
+#[derive(Debug, Clone)]
+pub struct MobileReplayHarness {
+    /// Mobile controller under test.
+    pub controller: super::mobile::MobileController,
+    /// Cursor in world pixels (from the last touch).
+    pub cursor: (f32, f32),
+    /// Monotonic replay clock in seconds (tick / 60).
+    pub time: f64,
+    /// Actions emitted by the run.
+    pub actions: SmallVec<[super::action::RemoteAction; 16]>,
+}
+
+impl Default for MobileReplayHarness {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl MobileReplayHarness {
+    /// Creates a harness.
+    pub fn new() -> Self {
+        Self {
+            controller: super::mobile::MobileController::new(),
+            cursor: (0.0, 0.0),
+            time: 0.0,
+            actions: SmallVec::new(),
+        }
+    }
+
+    /// Applies one raw event at `tick`, returning the emitted actions.
+    pub fn step(
+        &mut self,
+        tick: u64,
+        event: &RawEvent,
+        world: &dyn PlacementWorld,
+        block: Option<&super::line::LineBlock>,
+        caps: &super::caps::TestCaps,
+    ) -> SmallVec<[super::action::RemoteAction; 4]> {
+        self.time = tick as f64 / 60.0;
+        let mut emitted = SmallVec::new();
+        match event {
+            RawEvent::TouchDown { pointer, x, y } => {
+                self.cursor = (*x, *y);
+                let gestures = self
+                    .controller
+                    .detector
+                    .touch_down(self.time, *x, *y, *pointer);
+                for gesture in gestures {
+                    emitted.extend(self.controller.handle_gesture(gesture, world, block, caps));
+                }
+            }
+            RawEvent::TouchMove { pointer, x, y } => {
+                self.cursor = (*x, *y);
+                let gestures = self
+                    .controller
+                    .detector
+                    .touch_dragged(self.time, *x, *y, *pointer);
+                for gesture in gestures {
+                    emitted.extend(self.controller.handle_gesture(gesture, world, block, caps));
+                }
+                // While in line mode the mobile update loop re-derives the drag
+                // every frame (`MobileInput.update` lineMode branch).
+                if self.controller.mode.line_mode {
+                    let tile = crate::world::TilePos::new(
+                        (*x / crate::config::TILESIZE as f32).floor() as i16,
+                        (*y / crate::config::TILESIZE as f32).floor() as i16,
+                    );
+                    self.controller.drag_to(world, block, tile);
+                }
+            }
+            RawEvent::TouchUp { pointer, x, y } => {
+                self.cursor = (*x, *y);
+                let gestures = self
+                    .controller
+                    .detector
+                    .touch_up(self.time, *x, *y, *pointer);
+                for gesture in gestures {
+                    emitted.extend(self.controller.handle_gesture(gesture, world, block, caps));
+                }
+                if self.controller.mode.line_mode {
+                    if self.controller.state.place_mode.is_placing() {
+                        self.controller.confirm_line(world);
+                    } else if self.controller.state.place_mode.is_breaking()
+                        && let Some(start) = self.controller.line_start
+                    {
+                        let (tx, ty) = (
+                            (*x / crate::config::TILESIZE as f32).floor() as i32,
+                            (*y / crate::config::TILESIZE as f32).floor() as i32,
+                        );
+                        self.controller.state.break_rect(
+                            world,
+                            start.x() as i32,
+                            start.y() as i32,
+                            tx,
+                            ty,
+                        );
+                    }
+                    self.controller.mode.line_mode = false;
+                }
+            }
+            RawEvent::Magnify { factor } => {
+                let base = if self.controller.last_zoom < 0.0 {
+                    4.0
+                } else {
+                    self.controller.last_zoom
+                };
+                self.controller.zoom(1.0, *factor, base);
+            }
+            RawEvent::Action { action, value } => match action.as_str() {
+                "tick" => {
+                    if let Some(long) = self.controller.detector.update(self.time) {
+                        emitted.extend(self.controller.handle_gesture(long, world, block, caps));
+                    }
+                }
+                "confirm" => {
+                    self.controller.confirm_plans(world);
+                }
+                "rotate" => {
+                    self.controller.state.rotation =
+                        (self.controller.state.rotation as i32 + *value as i32).rem_euclid(4) as u8;
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+        self.actions.extend(emitted.iter().cloned());
+        emitted
+    }
+
+    /// Runs a whole log and returns the number of interpreted events.
+    pub fn run(
+        &mut self,
+        log: &InputLog,
+        world: &dyn PlacementWorld,
+        block: Option<&super::line::LineBlock>,
+        caps: &super::caps::TestCaps,
+    ) -> usize {
+        for InputRecord { tick, ev } in &log.records {
+            self.step(*tick, ev, world, block, caps);
+        }
+        log.records.len()
+    }
+}
+
 /// Deterministic replay driver over a controller.
 #[derive(Debug, Clone)]
 pub struct ReplayHarness {
@@ -122,6 +267,7 @@ impl ReplayHarness {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::input::mobile::{GestureDetector, GestureEvent, MobileController, PayloadTarget};
 
     fn flat_units() -> Vec<SelectableUnit> {
         (0..6)
@@ -228,6 +374,155 @@ mod tests {
             }
             other => panic!("expected CommandUnits, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn mobile_longpress_line() {
+        let mut detector = GestureDetector::new();
+        detector.touch_down(0.0, 24.0, 24.0, 0);
+        let event = detector.update(0.31).expect("long press");
+        let world = ReplayWorld::new();
+        let mut controller = MobileController::new();
+        controller.state.select_block(Some(BlockId::STONE_WALL));
+        controller.state.begin_place();
+        controller.handle_gesture(event, &world, None, &caps());
+        assert!(controller.mode.line_mode);
+        assert_eq!(controller.line_start, Some(TilePos::new(3, 3)));
+    }
+
+    #[test]
+    fn mobile_confirm_commit() {
+        let world = ReplayWorld::new();
+        let mut controller = MobileController::new();
+        controller.add_select_plan(super::super::plan::ClientPlan::place(
+            1,
+            1,
+            0,
+            BlockId::STONE_WALL,
+        ));
+        controller.add_select_plan(super::super::plan::ClientPlan::place(
+            2,
+            1,
+            0,
+            BlockId::STONE_WALL,
+        ));
+        assert_eq!(controller.confirm_plans(&world), 2);
+        assert_eq!(controller.queue.len(), 2);
+    }
+
+    #[test]
+    fn mobile_pan_shift_plans() {
+        let mut controller = MobileController::new();
+        controller.down = true;
+        controller.selecting = true;
+        controller.add_select_plan(super::super::plan::ClientPlan::place(
+            5,
+            5,
+            0,
+            BlockId::STONE_WALL,
+        ));
+        controller.pan(crate::config::TILESIZE as f32, 0.0, 800.0, 800.0);
+        assert_eq!(controller.state.select_plans[0].x, 6);
+    }
+
+    #[test]
+    fn mobile_zoom() {
+        let mut detector = GestureDetector::new();
+        detector.touch_down(0.0, 100.0, 100.0, 0);
+        detector.touch_down(0.0, 200.0, 100.0, 1);
+        let events = detector.touch_dragged(0.1, 300.0, 100.0, 1);
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, GestureEvent::Zoom { .. }))
+        );
+        let mut controller = MobileController::new();
+        assert!((controller.zoom(100.0, 200.0, 4.0) - 8.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn mobile_edge_pan() {
+        let mut controller = MobileController::new();
+        let (vx, _vy) = controller.auto_pan(-1000.0, 540.0, 1920.0, 1080.0, 1920.0);
+        assert!(vx < 0.0);
+    }
+
+    #[test]
+    fn mobile_payload_target() {
+        let mut controller = MobileController::new();
+        // A friendly unit within 8 px wins over a building.
+        let target = controller.resolve_payload_target(
+            (10.0, 10.0),
+            &[(7, 12.0, 10.0)],
+            &[TilePos::new(1, 1)],
+            false,
+        );
+        assert_eq!(target, PayloadTarget::Unit(7));
+        // Otherwise a friendly building is selected.
+        let target =
+            controller.resolve_payload_target((10.0, 10.0), &[], &[TilePos::new(1, 1)], false);
+        assert_eq!(target, PayloadTarget::Building(TilePos::new(1, 1)));
+        // With a carried payload and no structure, drop at the position.
+        let target = controller.resolve_payload_target((30.0, 40.0), &[], &[], true);
+        assert_eq!(target, PayloadTarget::Position(30.0, 40.0));
+    }
+
+    #[test]
+    fn rts_move_replay_checksum() {
+        use crate::determinism::Hasher;
+        use crate::input::action::{CommandTarget, RemoteAction};
+        use crate::input::command_emit::ActionBatcher;
+
+        fn run(match_id: u64) -> u64 {
+            let units = flat_units();
+            let mut controller = DesktopController::new(match_id);
+            controller.select_units(
+                &units,
+                0,
+                SelectRect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 100.0,
+                    h: 100.0,
+                },
+            );
+            let selected: smallvec::SmallVec<[i32; 32]> =
+                controller.state.selected_units.iter().copied().collect();
+            let actions = [
+                RemoteAction::CommandUnits {
+                    units: selected.clone(),
+                    target: CommandTarget::Position { x: 20.0, y: 20.0 },
+                    queue: false,
+                    final_batch: true,
+                },
+                RemoteAction::CommandUnits {
+                    units: selected.clone(),
+                    target: CommandTarget::Unit(99),
+                    queue: true,
+                    final_batch: true,
+                },
+                RemoteAction::SetUnitCommand {
+                    units: selected.clone(),
+                    command: 1,
+                },
+                RemoteAction::SetUnitStance {
+                    units: selected,
+                    stance: 2,
+                    enabled: true,
+                },
+            ];
+            let mut batcher = ActionBatcher::new(match_id);
+            let mut hasher = Hasher::new();
+            for action in actions {
+                for batch in batcher.emit(0, action).expect("emit") {
+                    hasher.write(format!("{batch:?}").as_bytes());
+                }
+            }
+            hasher.finish().value()
+        }
+
+        assert_eq!(run(1), run(1), "same match replays identically");
+        assert_ne!(run(1), run(2), "match id is bound into the batch");
     }
 
     #[test]
