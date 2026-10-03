@@ -53,6 +53,23 @@ impl StyleKind {
         StyleKind::Tree,
     ];
 
+    /// Stable lowercase kind name (goldens/logs), distinct from the manifest key.
+    pub fn name(self) -> &'static str {
+        match self {
+            StyleKind::Drawable => "drawable",
+            StyleKind::TextButton => "text_button",
+            StyleKind::Button => "button",
+            StyleKind::ImageButton => "image_button",
+            StyleKind::Pane => "pane",
+            StyleKind::Slider => "slider",
+            StyleKind::Label => "label",
+            StyleKind::Field => "field",
+            StyleKind::Check => "check",
+            StyleKind::Dialog => "dialog",
+            StyleKind::Tree => "tree",
+        }
+    }
+
     /// Manifest group key (`drawables`, `text_buttons`, …).
     pub fn key(self) -> &'static str {
         match self {
@@ -100,6 +117,38 @@ pub fn lookup(manifest: &StylesManifest, kind: StyleKind, name: &str) -> bool {
     kind.names(manifest).iter().any(|n| n == name)
 }
 
+/// Manifest-backed style resolver (`UiStyleLookup.get` equivalent).
+///
+/// The DSL's `style: "grayt"` and `background: "grayPanel"` are resolved
+/// through this, so the Godot theme builder and the headless factory agree on
+/// exactly which names exist and what kind each belongs to.
+#[derive(Debug, Clone, Copy)]
+pub struct StyleLookup<'a> {
+    manifest: &'a StylesManifest,
+}
+
+impl<'a> StyleLookup<'a> {
+    /// Wraps a styles manifest.
+    pub fn new(manifest: &'a StylesManifest) -> Self {
+        Self { manifest }
+    }
+
+    /// Resolves `name` to its owning kind, if any.
+    pub fn resolve(&self, name: &str) -> Option<StyleKind> {
+        StyleKind::of(self.manifest, name)
+    }
+
+    /// Whether `name` resolves to `kind`.
+    pub fn matches(&self, kind: StyleKind, name: &str) -> bool {
+        lookup(self.manifest, kind, name)
+    }
+
+    /// All names registered for `kind`.
+    pub fn names(&self, kind: StyleKind) -> &[String] {
+        kind.names(self.manifest)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -124,5 +173,17 @@ mod tests {
         );
         assert_eq!(StyleKind::of(&manifest, "missing"), None);
         assert_eq!(StyleKind::TextButton.key(), "text_buttons");
+    }
+
+    #[test]
+    fn style_lookup_wrapper_resolves_and_matches() {
+        let manifest = manifest();
+        let lookup = StyleLookup::new(&manifest);
+        assert_eq!(lookup.resolve("grayt"), Some(StyleKind::TextButton));
+        assert!(lookup.matches(StyleKind::TextButton, "grayt"));
+        assert!(!lookup.matches(StyleKind::Drawable, "grayt"));
+        assert!(lookup.matches(StyleKind::Drawable, "grayPanel"));
+        assert_eq!(lookup.resolve("missing"), None);
+        assert_eq!(lookup.names(StyleKind::TextButton), &["defaultt", "grayt"]);
     }
 }

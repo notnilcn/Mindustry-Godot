@@ -1,0 +1,201 @@
+{
+  "format": 1,
+  "factory": {
+    "format": 1,
+    "root": {
+      "type": "table",
+      "style": null,
+      "id": null,
+      "condition": null,
+      "props": [
+        {
+          "key": "background",
+          "value": "grayPanel"
+        },
+        {
+          "key": "row",
+          "value": true
+        }
+      ],
+      "children": [
+        {
+          "type": "label",
+          "style": {
+            "name": "defaultLabel",
+            "kind": "label"
+          },
+          "id": "title",
+          "condition": null,
+          "props": [
+            {
+              "key": "text",
+              "value": "Title"
+            },
+            {
+              "key": "id",
+              "value": "title"
+            },
+            {
+              "key": "style",
+              "value": "defaultLabel"
+            }
+          ],
+          "children": []
+        },
+        {
+          "type": "slider",
+          "style": {
+            "name": "defaultSlider",
+            "kind": "slider"
+          },
+          "id": "vol",
+          "condition": null,
+          "props": [
+            {
+              "key": "text",
+              "value": "vol"
+            },
+            {
+              "key": "id",
+              "value": "vol"
+            },
+            {
+              "key": "min",
+              "value": 0.0
+            },
+            {
+              "key": "max",
+              "value": 1.0
+            },
+            {
+              "key": "defaultValue",
+              "value": 0.5
+            },
+            {
+              "key": "style",
+              "value": "defaultSlider"
+            }
+          ],
+          "children": []
+        },
+        {
+          "type": "button",
+          "style": {
+            "name": "grayt",
+            "kind": "text_button"
+          },
+          "id": null,
+          "condition": null,
+          "props": [
+            {
+              "key": "text",
+              "value": "Buy"
+            },
+            {
+              "key": "style",
+              "value": "grayt"
+            },
+            {
+              "key": "clicked",
+              "value": "buy"
+            },
+            {
+              "key": "icon",
+              "value": "net-badge"
+            }
+          ],
+          "children": []
+        },
+        {
+          "type": "image",
+          "style": null,
+          "id": null,
+          "condition": null,
+          "props": [
+            {
+              "key": "region",
+              "value": "net-icon"
+            }
+          ],
+          "children": []
+        },
+        {
+          "type": "check",
+          "style": null,
+          "id": "enabled",
+          "condition": null,
+          "props": [
+            {
+              "key": "text",
+              "value": "enabled"
+            },
+            {
+              "key": "id",
+              "value": "enabled"
+            },
+            {
+              "key": "checked",
+              "value": true
+            }
+          ],
+          "children": []
+        },
+        {
+          "type": "button",
+          "style": null,
+          "id": null,
+          "condition": null,
+          "props": [
+            {
+              "key": "text",
+              "value": "bad"
+            },
+            {
+              "key": "style",
+              "value": "missingStyle"
+            }
+          ],
+          "children": []
+        }
+      ]
+    },
+    "ids": [
+      "title",
+      "vol",
+      "enabled"
+    ],
+    "images": [
+      "net-badge",
+      "net-icon"
+    ],
+    "styles": [
+      {
+        "name": "defaultLabel",
+        "kind": "label"
+      },
+      {
+        "name": "defaultSlider",
+        "kind": "slider"
+      },
+      {
+        "name": "grayt",
+        "kind": "text_button"
+      }
+    ],
+    "unresolved_styles": [
+      "missingStyle"
+    ]
+  },
+  "style_lookup": {
+    "grayt": "text_button",
+    "defaultLabel": "label",
+    "missingStyle": null
+  },
+  "hot_reload": {
+    "valid": true,
+    "error_line": 2,
+    "error_source": "bogus: 2",
+    "extracted_line": 2,
+    "extracted_source": "bogus: 2"
+  }
+}
