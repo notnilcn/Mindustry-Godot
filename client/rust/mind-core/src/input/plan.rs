@@ -257,6 +257,12 @@ pub struct PreviewState {
     pub selected_units: Vec<i32>,
     /// Commanded building positions.
     pub command_buildings: Vec<(i16, i16)>,
+    /// Resolved system cursor (plan 15 §3.8).
+    pub cursor: crate::input::CursorKind,
+    /// RTS command target marker in world pixels.
+    pub target: Option<(f32, f32)>,
+    /// Per-plan `valid_place` cache (reused across frames).
+    pub cached_valid: Vec<bool>,
 }
 
 impl Default for PreviewState {
@@ -274,6 +280,9 @@ impl Default for PreviewState {
             command_rect: None,
             selected_units: Vec::new(),
             command_buildings: Vec::new(),
+            cursor: crate::input::CursorKind::Arrow,
+            target: None,
+            cached_valid: Vec::new(),
         }
     }
 }
@@ -288,6 +297,9 @@ impl PreviewState {
         self.command_rect = None;
         self.selected_units.clear();
         self.command_buildings.clear();
+        self.cursor = crate::input::CursorKind::Arrow;
+        self.target = None;
+        self.cached_valid.clear();
     }
 
     /// The §6.3 `line_plans` JSON shape (consumed by 16/14).
@@ -306,6 +318,52 @@ impl PreviewState {
                 })
                 .collect(),
         )
+    }
+
+    /// Full handoff JSON for plan 16 (rendering input only; no drawing here).
+    pub fn handoff_json(&self) -> serde_json::Value {
+        let plans_json = |plans: &[ClientPlan]| {
+            serde_json::Value::Array(
+                plans
+                    .iter()
+                    .map(|plan| {
+                        serde_json::json!({
+                            "x": plan.x,
+                            "y": plan.y,
+                            "rot": plan.rotation,
+                            "block": plan.block.raw(),
+                            "breaking": plan.breaking,
+                            "anim_scale": plan.anim_scale,
+                        })
+                    })
+                    .collect(),
+            )
+        };
+        serde_json::json!({
+            "block": self.block.map(|block| block.raw()),
+            "rotation": self.rotation,
+            "mode": self.place_mode.name(),
+            "cursor": {
+                "tile": [self.cursor_tile.0, self.cursor_tile.1],
+                "raw": [self.cursor_raw.0, self.cursor_raw.1],
+                "kind": self.cursor.name(),
+            },
+            "line_plans": plans_json(&self.line_plans),
+            "select_plans": plans_json(&self.select_plans),
+            "valid": self.valid,
+            "splan": self.splan,
+            "command_rect": self.command_rect.map(|(x, y, w, h)| {
+                serde_json::json!({"x": x, "y": y, "w": w, "h": h})
+            }),
+            "selected_units": self.selected_units,
+            "command_buildings": self
+                .command_buildings
+                .iter()
+                .map(|(x, y)| serde_json::json!([x, y]))
+                .collect::<Vec<_>>(),
+            "target": self.target.map(|(x, y)| serde_json::json!([x, y])),
+            "cached_valid": self.cached_valid,
+        })
     }
 }
 

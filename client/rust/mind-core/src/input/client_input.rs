@@ -197,17 +197,48 @@ impl InputState {
             &mut self.line,
         );
         let block = self.block.unwrap_or(BlockId::AIR);
-        self.line_plans = self
-            .line
-            .iter()
-            .map(|step| ClientPlan::place(step.x, step.y, step.rotation, block))
-            .collect();
+        self.line_plans.clear();
+        self.line_plans.extend(
+            self.line
+                .iter()
+                .map(|step| ClientPlan::place(step.x, step.y, step.rotation, block)),
+        );
         self.place_mode = PlaceMode::Placing;
         self.preview.block = self.block;
         self.preview.rotation = params.rotation;
         self.preview.place_mode = self.place_mode;
-        self.preview.line_plans = self.line_plans.clone();
+        self.preview.line_plans.clear();
+        self.preview.line_plans.extend_from_slice(&self.line_plans);
         self.preview.valid = !self.line_plans.is_empty();
+    }
+
+    /// Rebuilds [`Self::preview`] in place from the current state, reusing the
+    /// existing allocations (plan 15 M6: zero steady-state preview allocations).
+    pub fn refresh_preview(&mut self) {
+        self.preview.block = self.block;
+        self.preview.rotation = self.rotation;
+        self.preview.place_mode = self.place_mode;
+        self.preview.valid = !self.line_plans.is_empty();
+        self.preview.splan = self.splan;
+        self.preview.command_rect = self.command_rect;
+        self.preview.line_plans.clear();
+        self.preview.line_plans.extend_from_slice(&self.line_plans);
+        self.preview.select_plans.clear();
+        self.preview
+            .select_plans
+            .extend_from_slice(&self.select_plans);
+        self.preview.selected_units.clear();
+        self.preview
+            .selected_units
+            .extend_from_slice(self.selected_units.as_slice());
+        self.preview.command_buildings.clear();
+        self.preview
+            .command_buildings
+            .extend(self.command_buildings.iter().map(|pos| (pos.x(), pos.y())));
+        self.preview.cached_valid.clear();
+        self.preview
+            .cached_valid
+            .extend(self.line_plans.iter().map(|plan| !plan.breaking));
     }
 
     /// `flushPlans`: valid line plans are copied into the build queue.
@@ -320,5 +351,40 @@ mod tests {
         assert_eq!(committed, 5);
         assert_eq!(queue.len(), 5);
         assert!(state.line_plans.is_empty());
+    }
+
+    #[test]
+    fn refresh_preview_reuses_capacity() {
+        let world = FlatWorld;
+        let mut state = InputState::new();
+        state.select_block(Some(BlockId::STONE_WALL));
+        state.update_line(
+            &world,
+            None,
+            TilePos::new(0, 0),
+            TilePos::new(4, 0),
+            &LineParams {
+                rotation: 1,
+                ..LineParams::default()
+            },
+        );
+        state.refresh_preview();
+        let capacity = state.preview.line_plans.capacity();
+        assert!(capacity >= 5);
+        // A shorter line must not shrink (and therefore not reallocate) the vec.
+        state.update_line(
+            &world,
+            None,
+            TilePos::new(0, 0),
+            TilePos::new(1, 0),
+            &LineParams {
+                rotation: 1,
+                ..LineParams::default()
+            },
+        );
+        state.refresh_preview();
+        assert_eq!(state.preview.line_plans.capacity(), capacity);
+        assert_eq!(state.preview.line_plans.len(), 2);
+        assert_eq!(state.preview.cached_valid, vec![true, true]);
     }
 }
