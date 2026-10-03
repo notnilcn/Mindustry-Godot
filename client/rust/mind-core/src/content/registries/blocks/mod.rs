@@ -1294,6 +1294,8 @@ pub struct BlockSpec {
     /// §3.10 needs it for `Tile.getFlammability` and floor-drop reactions).
     /// Append-only addendum: plan 02 originally omitted the field.
     pub liquid_drop: Option<&'static str>,
+    /// Floor/environment attributes (`Floor.attributes`; plan 09 R3 steam vents).
+    pub attributes: Vec<(&'static str, f32)>,
 }
 
 impl Default for BlockSpec {
@@ -1370,6 +1372,7 @@ impl Default for BlockSpec {
             emit_light: None,
             draw_team_overlay: None,
             liquid_drop: None,
+            attributes: Vec::new(),
         }
     }
 }
@@ -2205,7 +2208,11 @@ impl BlockDef {
             draw_team_overlay: spec.draw_team_overlay.unwrap_or(true),
             item_costs,
             item_health_scaling,
-            attributes: Vec::new(),
+            attributes: spec
+                .attributes
+                .iter()
+                .map(|(name, value)| ((*name).to_string(), *value))
+                .collect(),
             drill_multipliers: Vec::new(),
             liquid_drop,
         };

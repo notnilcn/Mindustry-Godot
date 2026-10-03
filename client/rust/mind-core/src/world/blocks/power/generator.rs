@@ -31,6 +31,14 @@ use crate::world::block::BlockTable;
 use crate::world::modules::{ItemModule, LiquidModule};
 
 use super::PowerProduction;
+use super::explosion::{ReactorExplosion, fire_explosion};
+
+/// `Rules.reactorExplosions` (plan-12 seam; default on).
+pub fn reactor_explosions_enabled(world: &World) -> bool {
+    world
+        .get_resource::<super::behavior::GeneratorEnv>()
+        .is_none_or(|env| env.reactor_explosions)
+}
 
 /// A generator's item/liquid filter (`ConsumeItemFlammable`/
 /// `ConsumeItemRadioactive`/`ConsumeLiquidFlammable`) or specific consumer
@@ -98,6 +106,10 @@ pub struct GeneratorConfig {
     pub liquid_capacity: f32,
     /// `PowerGenerator.explosionMinWarmup`.
     pub explosion_min_warmup: f32,
+    /// `PowerGenerator.explosionRadius` (tiles).
+    pub explosion_radius: f32,
+    /// `PowerGenerator.explosionDamage`.
+    pub explosion_damage: f32,
 }
 
 impl Default for GeneratorConfig {
@@ -113,6 +125,9 @@ impl Default for GeneratorConfig {
             trigger_items: Vec::new(),
             liquid_capacity: 0.0,
             explosion_min_warmup: 0.0,
+            // `PowerGenerator` defaults.
+            explosion_radius: 12.0,
+            explosion_damage: 0.0,
         }
     }
 }
@@ -555,6 +570,20 @@ pub fn update_generator_with(
                 .map(|module| module.get(liquid) >= capacity - 0.01)
                 .unwrap_or(false);
             if full {
+                // `ConsumeGeneratorBuild.updateTile`: `kill()` fires `onDestroyed`
+                // (`createExplosion`), so the trigger fires before the despawn.
+                if reactor_explosions_enabled(world)
+                    && let Some(explosion) = ReactorExplosion::for_building(
+                        world,
+                        entity,
+                        config.explosion_radius,
+                        config.explosion_damage,
+                        true,
+                    )
+                {
+                    let should = state.warmup >= config.explosion_min_warmup;
+                    fire_explosion(world, entity, explosion, should);
+                }
                 crate::world::blocks::power::sandbox::kill_building(world, entity);
             }
         }

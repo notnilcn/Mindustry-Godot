@@ -30,14 +30,16 @@ use bevy_ecs::entity::Entity;
 use bevy_ecs::prelude::Resource;
 use bevy_ecs::world::World;
 
-use crate::content::{ContentRegistry, LiquidId};
+use crate::content::{Attribute, ContentRegistry, LiquidId};
 use crate::entities::comp::Building;
 use crate::world::behavior::{BehaviorRegistry, BuildingBehavior};
 use crate::world::blocks::heat::HeatState;
 use crate::world::blocks::power::PowerProduction;
+use crate::world::blocks::power::explosion::{ReactorExplosion, fire_explosion};
 use crate::world::blocks::power::generator::{
     GeneratorConfig, GeneratorFilter, GeneratorState, item_flammabilities, item_radioactivities,
-    liquid_flammabilities, set_direct_production, update_generator_with,
+    liquid_flammabilities, reactor_explosions_enabled, set_direct_production,
+    update_generator_with,
 };
 use crate::world::blocks::power::reactors::{
     approach_delta, impact_production_efficiency, impact_warmup_step, solar_production_efficiency,
@@ -60,6 +62,8 @@ pub struct GeneratorEnv {
     pub light_env: f32,
     /// `Attribute.heat.env()`.
     pub heat_env: f32,
+    /// `Attribute.steam.env()` (Erekir vents; `turbine-condenser`).
+    pub steam_env: f32,
     /// `Rules.reactorExplosions`.
     pub reactor_explosions: bool,
 }
@@ -72,8 +76,17 @@ impl Default for GeneratorEnv {
             ambient_light_alpha: 0.0,
             light_env: 0.0,
             heat_env: 0.0,
+            steam_env: 0.0,
             reactor_explosions: true,
         }
+    }
+}
+
+/// `Attribute.env()` for the two thermal-generator attributes this port models.
+fn attribute_env(env: &GeneratorEnv, attribute: Attribute) -> f32 {
+    match attribute {
+        Attribute::Steam => env.steam_env,
+        _ => env.heat_env,
     }
 }
 
@@ -82,6 +95,48 @@ fn generator_env(world: &World) -> GeneratorEnv {
         .get_resource::<GeneratorEnv>()
         .copied()
         .unwrap_or_default()
+}
+
+/// `PowerGenerator.onDestroyed` body: apply the `Rules.reactorExplosions` gate,
+/// then `shouldExplode()` (`warmup >= explosionMinWarmup`), then the seam.
+fn fire_generator_explosion(
+    world: &mut World,
+    e: Entity,
+    config: &GeneratorConfig,
+    warmup: f32,
+    fire: bool,
+) -> bool {
+    fire_generator_explosion_cond(
+        world,
+        e,
+        config,
+        warmup >= config.explosion_min_warmup,
+        fire,
+    )
+}
+
+/// [`fire_generator_explosion`] with an explicit `shouldExplode()` result, for
+/// reactors that override it (`NuclearReactor`/`VariableReactor`).
+fn fire_generator_explosion_cond(
+    world: &mut World,
+    e: Entity,
+    config: &GeneratorConfig,
+    should_explode: bool,
+    fire: bool,
+) -> bool {
+    if !reactor_explosions_enabled(world) {
+        return false;
+    }
+    let Some(explosion) = ReactorExplosion::for_building(
+        world,
+        e,
+        config.explosion_radius,
+        config.explosion_damage,
+        fire,
+    ) else {
+        return false;
+    };
+    fire_explosion(world, e, explosion, should_explode)
 }
 
 fn ensure_modules(world: &mut World, e: Entity, items: usize, liquids: usize) {
@@ -149,6 +204,16 @@ impl BuildingBehavior for ConsumeGeneratorBehavior {
             &self.liquid_flammability,
         );
     }
+
+    /// `ConsumeGeneratorBuild.warmup()` (the lerped field, not
+    /// `productionEfficiency`) gates `shouldExplode`.
+    fn on_destroyed(&self, world: &mut World, e: Entity) {
+        let warmup = world
+            .get::<GeneratorState>(e)
+            .map(|state| state.warmup)
+            .unwrap_or(0.0);
+        fire_generator_explosion(world, e, &self.config, warmup, true);
+    }
 }
 
 /// `HeaterGenerator` behavior: `ConsumeGenerator` plus the heat ramp
@@ -191,6 +256,14 @@ impl BuildingBehavior for HeaterGeneratorBehavior {
             );
         }
     }
+
+    fn on_destroyed(&self, world: &mut World, e: Entity) {
+        let warmup = world
+            .get::<GeneratorState>(e)
+            .map(|state| state.warmup)
+            .unwrap_or(0.0);
+        fire_generator_explosion(world, e, &self.generator.config, warmup, true);
+    }
 }
 
 /// `ThermalGenerator` behavior (`ThermalGeneratorBuild.updateTile`).
@@ -205,6 +278,9 @@ pub struct ThermalGeneratorBehavior {
     pub output_liquid: Option<(LiquidId, f32)>,
     /// Number of liquid slots for the module.
     pub liquid_count: usize,
+    /// `ThermalGenerator.attribute` (`heat` for `thermal-generator`, `steam`
+    /// for `turbine-condenser`).
+    pub attribute: Attribute,
 }
 
 /// `ThermalGeneratorBuild.sum` (floor heat attribute sum).
@@ -228,13 +304,26 @@ impl BuildingBehavior for ThermalGeneratorBehavior {
         }
     }
 
+    /// `ThermalGeneratorBuild.onProximityAdded`: `sum = sumAttribute(attribute)`.
+    fn on_proximity_added(&self, world: &mut World, e: Entity) {
+        refresh_thermal_sum(world, e, self.attribute);
+    }
+
+    fn on_destroyed(&self, world: &mut World, e: Entity) {
+        let warmup = world
+            .get::<GeneratorState>(e)
+            .map(|state| state.production_efficiency)
+            .unwrap_or(0.0);
+        fire_generator_explosion(world, e, &self.config, warmup, false);
+    }
+
     fn update_tile(&self, world: &mut World, e: Entity) {
         let env = generator_env(world);
         let sum = world
             .get::<ThermalState>(e)
             .map(|state| state.sum)
             .unwrap_or(0.0);
-        let production_efficiency = sum + env.heat_env;
+        let production_efficiency = sum + attribute_env(&env, self.attribute);
         set_direct_production(world, e, production_efficiency, production_efficiency);
         if let Some((liquid, amount)) = self.output_liquid {
             let delta = delta(world, e);
@@ -362,15 +451,13 @@ impl BuildingBehavior for ImpactReactorBehavior {
         set_direct_production(world, e, production_efficiency, warmup);
     }
 
+    /// `ImpactReactorBuild.warmup()` gates `shouldExplode` (`warmup` field).
     fn on_destroyed(&self, world: &mut World, e: Entity) {
-        let env = generator_env(world);
-        if env.reactor_explosions {
-            let warmup = world
-                .get::<ImpactReactorState>(e)
-                .map(|state| state.warmup)
-                .unwrap_or(0.0);
-            let _ = warmup >= self.config.explosion_min_warmup;
-        }
+        let warmup = world
+            .get::<ImpactReactorState>(e)
+            .map(|state| state.warmup)
+            .unwrap_or(0.0);
+        fire_generator_explosion(world, e, &self.config, warmup, true);
     }
 }
 
@@ -527,9 +614,40 @@ impl BuildingBehavior for NuclearReactorBehavior {
         world.entity_mut(e).insert(state);
         set_direct_production(world, e, fullness, fullness);
         if explode {
+            // `kill()` fires `onDestroyed`; the override gates on fuel/heat.
+            let should = nuclear_should_explode(world, e, self.config.trigger_items.first());
+            fire_generator_explosion_cond(world, e, &self.config, should, true);
             crate::world::blocks::power::sandbox::kill_building(world, e);
         }
     }
+
+    /// `NuclearReactorBuild.shouldExplode` override:
+    /// `super && (fuel >= 5 || heat >= 0.5)` (`super` is `minWarmup == 0`).
+    fn on_destroyed(&self, world: &mut World, e: Entity) {
+        let should = nuclear_should_explode(world, e, self.config.trigger_items.first());
+        fire_generator_explosion_cond(world, e, &self.config, should, true);
+    }
+}
+
+/// `NuclearReactorBuild.shouldExplode`'s extra gate (`fuel >= 5 || heat >= 0.5`).
+fn nuclear_should_explode(
+    world: &World,
+    e: Entity,
+    fuel: Option<&(crate::content::ItemId, i32)>,
+) -> bool {
+    let heat = world
+        .get::<NuclearReactorState>(e)
+        .map(|state| state.heat)
+        .unwrap_or(0.0);
+    let count = fuel
+        .map(|(item, _)| {
+            world
+                .get::<ItemModule>(e)
+                .map(|module| module.get(*item))
+                .unwrap_or(0)
+        })
+        .unwrap_or(0);
+    count >= 5 || heat >= 0.5
 }
 
 /// `VariableReactorBuild` state (`flux-reactor`).
@@ -620,40 +738,45 @@ impl BuildingBehavior for VariableReactorBehavior {
         world.entity_mut(e).insert(state);
         set_direct_production(world, e, scaled, state.warmup);
         if kill {
+            // `kill()` fires `onDestroyed`; `shouldExplode = heat > 0`.
+            fire_generator_explosion_cond(world, e, &self.config, state.heat > 0.0, true);
             crate::world::blocks::power::sandbox::kill_building(world, e);
         }
     }
 
+    /// `VariableReactorBuild.shouldExplode` override: `heat > 0`.
     fn on_destroyed(&self, world: &mut World, e: Entity) {
-        let env = generator_env(world);
         let heat = world
             .get::<VariableReactorState>(e)
             .map(|state| state.heat)
             .unwrap_or(0.0);
-        let _ = env.reactor_explosions && heat > 0.0;
+        fire_generator_explosion_cond(world, e, &self.config, heat > 0.0, true);
     }
 }
 
-/// Grid-taking `sumAttribute(Attribute.heat, x, y)`: sums the heat attribute of
-/// all tiles in the block footprint (plan 06 `WorldGrid`).
-pub fn refresh_thermal_sum(
-    world: &mut World,
-    grid: &crate::world::WorldGrid,
-    content: &ContentRegistry,
-    e: Entity,
-) {
+/// `sumAttribute(attribute, x, y)`: sums an environment attribute over every tile
+/// in the block footprint (`ThermalGeneratorBuild.onProximityAdded`).
+///
+/// Reads `WorldGrid`/`BlockTable` from resources; the plan-07 harness keeps the
+/// grid in its own field, so hosts that drive this hook must install the grid as
+/// a resource (the P0 `Sim` does; `BuildHarness` documents this seam).
+pub fn refresh_thermal_sum(world: &mut World, e: Entity, attribute: Attribute) {
     let Some(block) = world.get::<Building>(e).map(|building| building.block) else {
         return;
     };
-    let Some(instance) = world
-        .get_resource::<crate::world::block::BlockTable>()
-        .and_then(|table| table.instance(block))
-    else {
+    let Some(tile) = world.get::<Building>(e).map(|building| building.tile) else {
         return;
     };
-    let tile = world.get::<Building>(e).map(|building| building.tile);
-    let Some(tile) = tile else { return };
-    let size = instance.def.size.max(1);
+    let Some(grid) = world.get_resource::<crate::world::WorldGrid>() else {
+        return;
+    };
+    let Some(table) = world.get_resource::<crate::world::block::BlockTable>() else {
+        return;
+    };
+    let size = table
+        .instance(block)
+        .map(|instance| instance.def.size.max(1))
+        .unwrap_or(1);
     let mut sum = 0.0f32;
     for dx in 0..size {
         for dy in 0..size {
@@ -662,9 +785,9 @@ pub fn refresh_thermal_sum(
                 continue;
             }
             let floor = grid.tile(tx, ty).floor;
-            if let Some(def) = content.block(floor) {
-                for (name, value) in &def.attributes {
-                    if name == "heat" {
+            if let Some(instance) = table.instance(floor) {
+                for (name, value) in &instance.def.attributes {
+                    if name == attribute.name() {
                         sum += value;
                     }
                 }
@@ -793,7 +916,7 @@ pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
     };
     registry.register_named("neoplasia-reactor", Arc::new(neoplasia));
 
-    // `thermal-generator`.
+    // `thermal-generator` (`attribute = Attribute.heat`).
     let thermal = ThermalGeneratorBehavior {
         config: GeneratorConfig {
             power_production: 1.8,
@@ -801,11 +924,11 @@ pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
         },
         output_liquid: None,
         liquid_count,
+        attribute: Attribute::Heat,
     };
     registry.register_named("thermal-generator", Arc::new(thermal));
 
-    // `turbine-condenser` (`ThermalGenerator`, steam attribute; plan-02 has no
-    // steam attribute, so this uses `heat` — recorded seam).
+    // `turbine-condenser` (`attribute = Attribute.steam`).
     let turbine = ThermalGeneratorBehavior {
         config: GeneratorConfig {
             power_production: 3.0 / 9.0,
@@ -814,6 +937,7 @@ pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
         },
         output_liquid: Some((LiquidId::WATER, 5.0 / 60.0 / 9.0)),
         liquid_count,
+        attribute: Attribute::Steam,
     };
     registry.register_named("turbine-condenser", Arc::new(turbine));
 
@@ -839,6 +963,8 @@ pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
                 trigger_items: vec![(content.item_id("thorium").unwrap_or_default(), 1)],
                 liquid_capacity: 30.0,
                 explosion_min_warmup: 0.0,
+                explosion_radius: 19.0,
+                explosion_damage: 1250.0 * 4.0,
                 ..GeneratorConfig::default()
             },
             heating: 0.005,
@@ -864,6 +990,7 @@ pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
                 trigger_items: vec![(content.item_id("blast-compound").unwrap_or_default(), 1)],
                 liquid_capacity: 80.0,
                 explosion_min_warmup: 0.3,
+                explosion_damage: 1900.0 * 4.0,
                 ..GeneratorConfig::default()
             },
             item_count,
@@ -879,6 +1006,8 @@ pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
                 power_production: 18000.0 / 60.0,
                 liquid_capacity: 30.0,
                 explosion_min_warmup: 0.5,
+                explosion_radius: 16.0,
+                explosion_damage: 1500.0,
                 ..GeneratorConfig::default()
             },
             max_heat: 150.0,
@@ -893,6 +1022,194 @@ pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
 mod tests {
     use super::*;
     use crate::world::BuildHarness;
+    use std::sync::Arc as StdArc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CountingSink {
+        calls: StdArc<AtomicUsize>,
+    }
+
+    impl crate::world::blocks::power::explosion::ExplosionSink for CountingSink {
+        fn explode(
+            &self,
+            _world: &mut World,
+            _explosion: crate::world::blocks::power::explosion::ReactorExplosion,
+        ) {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    fn install_sink(harness: &mut BuildHarness) -> StdArc<AtomicUsize> {
+        let calls = StdArc::new(AtomicUsize::new(0));
+        harness
+            .world
+            .insert_resource(crate::world::blocks::power::explosion::ExplosionSinkRes(
+                Some(Box::new(CountingSink {
+                    calls: calls.clone(),
+                })),
+            ));
+        calls
+    }
+
+    fn behavior_of(
+        harness: &BuildHarness,
+        name: &str,
+    ) -> StdArc<dyn crate::world::behavior::BuildingBehavior> {
+        let block = harness.content().block_id(name).expect(name);
+        harness
+            .table()
+            .instance(block)
+            .expect("instance")
+            .behavior
+            .clone()
+    }
+
+    #[test]
+    fn impact_reactor_explosion_gates_on_min_warmup_and_fires_once() {
+        let mut harness = BuildHarness::new(8, 8, 7);
+        let block = harness.content().block_id("impact-reactor").expect("block");
+        assert!(harness.place(2, 2, block, 0, true));
+        let entity = harness.build_at(2, 2).expect("reactor");
+        let calls = install_sink(&mut harness);
+        let behavior = behavior_of(&harness, "impact-reactor");
+
+        // Below `explosionMinWarmup = 0.3`: no fire.
+        behavior.on_destroyed(&mut harness.world, entity);
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        // Above: fires once, the second call is guarded.
+        harness
+            .world
+            .get_mut::<ImpactReactorState>(entity)
+            .expect("state")
+            .warmup = 0.5;
+        behavior.on_destroyed(&mut harness.world, entity);
+        behavior.on_destroyed(&mut harness.world, entity);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn nuclear_reactor_explosion_gates_on_fuel_or_heat() {
+        let mut harness = BuildHarness::new(8, 8, 7);
+        let block = harness
+            .content()
+            .block_id("thorium-reactor")
+            .expect("block");
+        assert!(harness.place(2, 2, block, 0, true));
+        let entity = harness.build_at(2, 2).expect("reactor");
+        let calls = install_sink(&mut harness);
+        let behavior = behavior_of(&harness, "thorium-reactor");
+
+        // fuel < 5 and heat < 0.5: inert.
+        behavior.on_destroyed(&mut harness.world, entity);
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        harness
+            .world
+            .get_mut::<NuclearReactorState>(entity)
+            .expect("state")
+            .heat = 0.6;
+        behavior.on_destroyed(&mut harness.world, entity);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn variable_reactor_explosion_gates_on_heat() {
+        let mut harness = BuildHarness::new(8, 8, 7);
+        let block = harness.content().block_id("flux-reactor").expect("block");
+        assert!(harness.place(2, 2, block, 0, true));
+        let entity = harness.build_at(2, 2).expect("reactor");
+        let calls = install_sink(&mut harness);
+        let behavior = behavior_of(&harness, "flux-reactor");
+
+        behavior.on_destroyed(&mut harness.world, entity);
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        harness
+            .world
+            .get_mut::<VariableReactorState>(entity)
+            .expect("state")
+            .heat = 20.0;
+        behavior.on_destroyed(&mut harness.world, entity);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn reactor_explosions_rule_disables_trigger() {
+        let mut harness = BuildHarness::new(8, 8, 7);
+        harness.world.insert_resource(GeneratorEnv {
+            reactor_explosions: false,
+            ..GeneratorEnv::default()
+        });
+        let block = harness.content().block_id("flux-reactor").expect("block");
+        assert!(harness.place(2, 2, block, 0, true));
+        let entity = harness.build_at(2, 2).expect("reactor");
+        let calls = install_sink(&mut harness);
+        harness
+            .world
+            .get_mut::<VariableReactorState>(entity)
+            .expect("state")
+            .heat = 20.0;
+        let behavior = behavior_of(&harness, "flux-reactor");
+        behavior.on_destroyed(&mut harness.world, entity);
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn block_spec_attributes_lower_for_steam() {
+        use crate::content::registries::blocks::{BlockKind, BlockSpec, spec};
+        use crate::content::{BlockDef, MemoryBundle, MemoryUnlockStore};
+
+        let registry = crate::content::test_support::test_registry();
+        let bundle = MemoryBundle::new();
+        let store = MemoryUnlockStore::new();
+        let def = BlockDef::from_spec(
+            BlockSpec {
+                attributes: vec![("steam", 1.0)],
+                ..spec("test-floor", BlockKind::Floor)
+            },
+            &registry,
+            &bundle,
+            &store,
+        )
+        .expect("def");
+        assert_eq!(def.attributes, vec![("steam".to_string(), 1.0)]);
+        assert_eq!(Attribute::Steam.name(), "steam");
+    }
+
+    #[test]
+    fn thermal_generator_sums_attribute_over_footprint() {
+        use crate::world::TilePos;
+        use crate::world::WorldGrid;
+        use crate::world::block::BlockTable;
+        use crate::world::limits::BuildRules;
+        use crate::world::proximity;
+        use bevy_ecs::world::World as EcsWorld;
+
+        let content = crate::content::test_support::test_registry();
+        let table = BlockTable::build_default(&content).expect("table");
+        let turbine = table.get_named("turbine-condenser").expect("turbine");
+        // `turbine-condenser` is a `ThermalGenerator` with `attribute = steam`;
+        // `refresh_thermal_sum` reads `Floor.attributes` for that attribute (plan
+        // 02/06 populate the Erekir vents; when absent the sum is zero).
+        let grid = WorldGrid::new(8, 8);
+        let mut world = EcsWorld::new();
+        world.insert_resource(BuildRules::default());
+        // `refresh_thermal_sum` reads the grid as a resource (the P0 `Sim` does;
+        // `BuildHarness` keeps it in a field).
+        world.insert_resource(grid.clone());
+        let entity = turbine.spawn(
+            &mut world,
+            0,
+            TilePos::new(2, 2),
+            0,
+            0,
+            content.items().len(),
+            content.liquids().len(),
+        );
+        world.insert_resource(table);
+        // `onProximityAdded` runs `sumAttribute(Attribute.steam)` without panic.
+        proximity::update_proximity(&mut world, &grid, &content, entity).expect("proximity update");
+        let state = world.get::<ThermalState>(entity).expect("thermal state");
+        assert_eq!(state.sum, 0.0);
+    }
 
     #[test]
     fn combustion_generator_runs_on_coal() {
