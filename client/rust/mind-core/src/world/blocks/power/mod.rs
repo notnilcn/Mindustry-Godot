@@ -13,6 +13,7 @@
 //! [`graph::PowerScratch`]; `update` takes an explicit `delta` (D8).
 
 pub mod behavior;
+pub mod explosion;
 pub mod generator;
 pub mod graph;
 pub mod module;
@@ -21,6 +22,9 @@ pub mod reactors;
 pub mod sandbox;
 
 pub use behavior::register;
+pub use explosion::{
+    ExplosionFired, ExplosionSink, ExplosionSinkRes, ReactorExplosion, fire_explosion,
+};
 
 use bevy_ecs::component::Component;
 

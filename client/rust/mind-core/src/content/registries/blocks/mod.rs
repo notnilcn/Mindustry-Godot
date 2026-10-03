@@ -1322,6 +1322,8 @@ pub struct BlockSpec {
     pub subclass: Option<BlockKind>,
     /// `GenericCrafter.craftTime` (ticks); plan 07 R2 reconciliation.
     pub craft_time: Option<f32>,
+    /// Floor/environment attributes (`Floor.attributes`; plan 09 R3 steam vents).
+    pub attributes: Vec<(&'static str, f32)>,
 }
 
 impl Default for BlockSpec {
@@ -1412,6 +1414,7 @@ impl Default for BlockSpec {
             quick_rotate: None,
             subclass: None,
             craft_time: None,
+            attributes: Vec::new(),
         }
     }
 }
@@ -2301,7 +2304,11 @@ impl BlockDef {
             draw_team_overlay: spec.draw_team_overlay.unwrap_or(true),
             item_costs,
             item_health_scaling,
-            attributes: Vec::new(),
+            attributes: spec
+                .attributes
+                .iter()
+                .map(|(name, value)| ((*name).to_string(), *value))
+                .collect(),
             drill_multipliers: Vec::new(),
             liquid_drop,
             speed_multiplier: spec.speed_multiplier.unwrap_or(1.0),

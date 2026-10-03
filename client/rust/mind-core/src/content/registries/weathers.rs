@@ -18,7 +18,11 @@ use super::super::{ContentError, ContentType};
 /// `Time.toMinutes` (arc): one minute in ticks.
 pub const TIME_TO_MINUTES: f32 = 60.0 * 60.0;
 
-/// Environment attribute tag (`Attribute.light`/`water`/`spores`/`heat`).
+/// Environment attribute tag (`Attribute.light`/`water`/`spores`/`heat`/`steam`).
+///
+/// Append-only: `Heat..Light` keep the indices this port shipped with; `Steam`
+/// is appended (plan 09 R3 / plan 02) so existing attribute arrays and checksums
+/// are unchanged. Upstream's `oil`/`sand` are still unmodelled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Attribute {
     /// `Attribute.heat`.
@@ -29,6 +33,8 @@ pub enum Attribute {
     Water,
     /// `Attribute.light`.
     Light,
+    /// `Attribute.steam` (Erekir vents; `turbine-condenser`).
+    Steam,
 }
 
 impl Attribute {
@@ -39,6 +45,7 @@ impl Attribute {
             Attribute::Spores => "spores",
             Attribute::Water => "water",
             Attribute::Light => "light",
+            Attribute::Steam => "steam",
         }
     }
 }

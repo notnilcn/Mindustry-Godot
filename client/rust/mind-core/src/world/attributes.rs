@@ -13,10 +13,10 @@ use serde::{Deserialize, Serialize};
 use crate::content::Attribute;
 
 /// Number of attribute slots (plan 02 `Attribute` variants).
-pub const ATTRIBUTE_COUNT: usize = 4;
+pub const ATTRIBUTE_COUNT: usize = 5;
 
 /// Attribute-name order used for JSON serialization (plan 06 §3.7).
-pub const ATTRIBUTE_NAMES: [&str; ATTRIBUTE_COUNT] = ["heat", "spores", "water", "light"];
+pub const ATTRIBUTE_NAMES: [&str; ATTRIBUTE_COUNT] = ["heat", "spores", "water", "light", "steam"];
 
 /// Index of an [`Attribute`] in the value array.
 pub const fn attribute_index(attribute: Attribute) -> usize {
@@ -25,6 +25,7 @@ pub const fn attribute_index(attribute: Attribute) -> usize {
         Attribute::Spores => 1,
         Attribute::Water => 2,
         Attribute::Light => 3,
+        Attribute::Steam => 4,
     }
 }
 
@@ -35,6 +36,7 @@ pub fn attribute_from_name(name: &str) -> Option<Attribute> {
         "spores" => Some(Attribute::Spores),
         "water" => Some(Attribute::Water),
         "light" => Some(Attribute::Light),
+        "steam" => Some(Attribute::Steam),
         _ => None,
     }
 }
@@ -137,6 +139,21 @@ mod tests {
         a.add_scaled(&b, 0.5);
         assert_eq!(a.get(Attribute::Water), 4.0);
         assert_eq!(a.get(Attribute::Heat), 6.0);
+    }
+
+    #[test]
+    fn steam_roundtrips_and_keeps_legacy_indices() {
+        // Append-only: `Heat..Light` keep their original indices.
+        assert_eq!(attribute_index(Attribute::Heat), 0);
+        assert_eq!(attribute_index(Attribute::Light), 3);
+        assert_eq!(attribute_index(Attribute::Steam), 4);
+        assert_eq!(Attribute::Steam.name(), "steam");
+        let mut a = Attributes::new();
+        a.set(Attribute::Steam, 1.0);
+        let json = serde_json::to_string(&a).unwrap();
+        assert!(json.contains("\"steam\":1.0"));
+        let decoded: Attributes = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.get(Attribute::Steam), 1.0);
     }
 
     #[test]
