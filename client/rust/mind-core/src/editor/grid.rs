@@ -10,11 +10,12 @@
 use bevy_ecs::world::World;
 
 use crate::content::{BlockId, ContentRegistry};
-use crate::ecs::BuildingComp;
+use crate::ecs::{BuildingComp, TeamId};
 use crate::world::ops::{WorldCtx, WorldEventLog};
 use crate::world::{RenderHooks, WorldGrid, WorldHooks};
 
 use super::EditorGrid;
+use super::context::TileOpSink;
 
 /// An [`EditorGrid`] over the live [`WorldGrid`].
 pub struct WorldEditorGrid<'a> {
@@ -29,6 +30,7 @@ pub struct WorldEditorGrid<'a> {
     /// Render invalidation hooks.
     pub render: &'a dyn RenderHooks,
     log: WorldEventLog,
+    sink: Option<Box<dyn TileOpSink>>,
 }
 
 impl<'a> WorldEditorGrid<'a> {
@@ -47,7 +49,22 @@ impl<'a> WorldEditorGrid<'a> {
             hooks,
             render,
             log: WorldEventLog::default(),
+            sink: None,
         }
+    }
+
+    /// Installs the tile-op recorder (`EditorTile` replacement, plan 19 §2.3.1).
+    ///
+    /// The sink observes the *previous* value around each mutation; the editor
+    /// installs it while editing and drops it on hide/reset. Gating on
+    /// `is_loading`/`is_generating`/playing is the caller's responsibility.
+    pub fn install_sink(&mut self, sink: Box<dyn TileOpSink>) {
+        self.sink = Some(sink);
+    }
+
+    /// Removes and returns the installed recorder, if any.
+    pub fn take_sink(&mut self) -> Option<Box<dyn TileOpSink>> {
+        self.sink.take()
     }
 
     fn tile_build(&self, x: i32, y: i32) -> Option<bevy_ecs::entity::Entity> {
@@ -185,6 +202,7 @@ impl EditorGrid for WorldEditorGrid<'_> {
     }
 
     fn set_floor(&mut self, x: i32, y: i32, floor: BlockId) {
+        let prev = self.floor_id(x, y);
         let mut ctx = WorldCtx {
             grid: self.grid,
             content: self.content,
@@ -194,9 +212,13 @@ impl EditorGrid for WorldEditorGrid<'_> {
             log: &mut self.log,
         };
         ctx.set_floor(x as i16, y as i16, floor);
+        if let Some(sink) = self.sink.as_mut() {
+            sink.floor_changed(x, y, prev);
+        }
     }
 
     fn set_overlay(&mut self, x: i32, y: i32, overlay: BlockId) {
+        let prev = self.overlay_id(x, y);
         let mut ctx = WorldCtx {
             grid: self.grid,
             content: self.content,
@@ -206,9 +228,16 @@ impl EditorGrid for WorldEditorGrid<'_> {
             log: &mut self.log,
         };
         ctx.set_overlay(x as i16, y as i16, overlay);
+        if let Some(sink) = self.sink.as_mut() {
+            sink.overlay_changed(x, y, prev);
+        }
     }
 
     fn set_block(&mut self, x: i32, y: i32, block: BlockId, team: u8, rot: i32) {
+        let prev_block = self.block_id(x, y);
+        let prev_rot = self.rotation(x, y);
+        let prev_team = TeamId(self.team_id(x, y));
+        let was_center = self.is_center(x, y);
         let mut ctx = WorldCtx {
             grid: self.grid,
             content: self.content,
@@ -218,13 +247,20 @@ impl EditorGrid for WorldEditorGrid<'_> {
             log: &mut self.log,
         };
         ctx.set_block(x as i16, y as i16, block, team, rot as u8);
+        if let Some(sink) = self.sink.as_mut() {
+            sink.block_changed(x, y, prev_block, prev_rot, prev_team, was_center);
+        }
     }
 
     fn set_team(&mut self, x: i32, y: i32, team: u8) {
+        let prev = TeamId(self.team_id(x, y));
         if let Some(entity) = self.tile_build(x, y)
             && let Some(mut comp) = self.ecs.get_mut::<BuildingComp>(entity)
         {
-            comp.team = crate::ecs::TeamId(team);
+            comp.team = TeamId(team);
+            if let Some(sink) = self.sink.as_mut() {
+                sink.team_changed(x, y, prev);
+            }
         }
     }
 
@@ -258,5 +294,86 @@ impl EditorGrid for WorldEditorGrid<'_> {
     fn update_block(&mut self, x: i32, y: i32) {
         self.render.recache_tile(x as i16, y as i16);
         self.render.invalidate_tile(x as i16, y as i16);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use super::*;
+    use crate::world::{NoopRenderHooks, NoopWorldHooks};
+
+    #[derive(Default)]
+    struct SinkLog {
+        floors: Vec<(i32, i32, BlockId)>,
+        overlays: Vec<(i32, i32, BlockId)>,
+        blocks: Vec<(i32, i32, BlockId, i32, TeamId, bool)>,
+        teams: Vec<(i32, i32, TeamId)>,
+    }
+
+    struct Recorder(Rc<RefCell<SinkLog>>);
+
+    impl TileOpSink for Recorder {
+        fn floor_changed(&mut self, x: i32, y: i32, prev: BlockId) {
+            self.0.borrow_mut().floors.push((x, y, prev));
+        }
+        fn overlay_changed(&mut self, x: i32, y: i32, prev: BlockId) {
+            self.0.borrow_mut().overlays.push((x, y, prev));
+        }
+        fn block_changed(
+            &mut self,
+            x: i32,
+            y: i32,
+            prev_block: BlockId,
+            prev_rot: i32,
+            prev_team: TeamId,
+            was_center: bool,
+        ) {
+            self.0
+                .borrow_mut()
+                .blocks
+                .push((x, y, prev_block, prev_rot, prev_team, was_center));
+        }
+        fn team_changed(&mut self, x: i32, y: i32, prev_team: TeamId) {
+            self.0.borrow_mut().teams.push((x, y, prev_team));
+        }
+    }
+
+    /// `editor::tests::tile_op_sink_records_previous_values`: the recorder seam
+    /// observes the value replaced by each mutation (plan 19 §3.4).
+    #[test]
+    fn tile_op_sink_records_previous_values() {
+        let content = crate::content::test_support::test_registry();
+        let mut grid = WorldGrid::new(4, 4);
+        let mut ecs = World::new();
+        let hooks = NoopWorldHooks;
+        let render = NoopRenderHooks;
+        let log = Rc::new(RefCell::new(SinkLog::default()));
+
+        let mut editor_grid = WorldEditorGrid::new(&mut grid, &content, &mut ecs, &hooks, &render);
+        editor_grid.install_sink(Box::new(Recorder(log.clone())));
+
+        let stone = content.block_id("stone").unwrap();
+        let ore = content.block_id("ore-copper").unwrap();
+        let wall = content.block_id("stone-wall").unwrap();
+        editor_grid.set_floor(1, 1, stone);
+        editor_grid.set_overlay(2, 2, ore);
+        editor_grid.set_block(1, 1, wall, 3, 1);
+
+        let log = log.borrow();
+        assert_eq!(log.floors, vec![(1, 1, BlockId::AIR)]);
+        assert_eq!(log.overlays, vec![(2, 2, BlockId::AIR)]);
+        assert_eq!(log.blocks.len(), 1);
+        let (x, y, prev_block, prev_rot, prev_team, was_center) = log.blocks[0];
+        assert_eq!((x, y), (1, 1));
+        assert_eq!(prev_block, BlockId::AIR);
+        assert_eq!(prev_rot, 0);
+        assert_eq!(prev_team, TeamId(0));
+        assert!(was_center);
+
+        drop(log);
+        assert!(editor_grid.take_sink().is_some());
     }
 }
