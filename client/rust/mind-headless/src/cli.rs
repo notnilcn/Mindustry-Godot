@@ -540,6 +540,32 @@ pub enum UiCommand {
         #[arg(long)]
         golden: Option<PathBuf>,
     },
+
+    /// Check the M6 relay codec bytes against the committed `relay_wire.hex`.
+    Relay {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Write the decoded-fixture JSON here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+        /// `relay_wire.hex` to compare against.
+        #[arg(long)]
+        golden: Option<PathBuf>,
+    },
+
+    /// Exercise the Godot-free prompt-helper model (plan 14 §2.1 item 4).
+    Prompts {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Write the prompt-model JSON here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+        /// Compare the prompt model against this golden.
+        #[arg(long)]
+        golden: Option<PathBuf>,
+    },
 }
 
 /// `input` subcommands (plan 15 §7b).

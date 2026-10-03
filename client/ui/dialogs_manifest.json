@@ -53,5 +53,5 @@
     {"name": "console", "scene": "res://scenes/ui/fragments/console_fragment.tscn", "group": "hud", "hidden": true},
     {"name": "player_list", "scene": "res://scenes/ui/fragments/player_list_fragment.tscn", "group": "hud", "hidden": true}
   ],
-  "prompts": ["show_info", "show_text", "show_confirm", "show_text_input", "show_info_toast", "announce", "toast"]
+  "prompts": ["show_info", "show_info_fade", "show_info_toast", "show_info_popup", "show_info_on_hidden", "show_startup_info", "show_error", "show_exception", "show_text", "show_info_text", "show_small", "show_confirm", "show_custom_confirm", "show_ok_text", "show_text_input", "show_label", "announce", "toast", "unlock_toast"]
 }

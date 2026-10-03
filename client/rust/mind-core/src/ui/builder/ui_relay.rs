@@ -672,6 +672,159 @@ pub fn fixture_tree() -> UiNode {
         )
 }
 
+/// Every M6 relay payload encoded from a fixed fixture tree, in `ui relay`
+/// order. The committed `ui/relay_wire.hex` golden freezes the exact bytes
+/// (plan 14 §6.6): any codec change moves the golden and must be documented.
+pub fn wire_fixtures() -> Vec<(&'static str, Vec<u8>)> {
+    use crate::ui::builder::menu_result::{MenuResult, MenuValue};
+
+    let mut choose_result = MenuResult::from_result("buy");
+    choose_result.token = 42;
+    choose_result.insert("amount", MenuValue::F32(2.5));
+    choose_result.insert("name", MenuValue::Str("copper".to_owned()));
+    choose_result.insert("enabled", MenuValue::Bool(true));
+
+    vec![
+        ("ui_node", fixture_tree().encode_message()),
+        ("menu_result", choose_result.encode()),
+        (
+            "menu_builder_show",
+            encode_menu_builder_show(&MenuBuilderShow {
+                id: 1,
+                token: 42,
+                title: Some("Shop".to_owned()),
+                hide_on_click: false,
+                hide_existing: true,
+                fill_screen: false,
+                ui: fixture_tree(),
+            }),
+        ),
+        (
+            "menu_builder_update",
+            encode_menu_builder_update(&MenuBuilderUpdate {
+                id: 1,
+                table_id: "body".to_owned(),
+                ui: fixture_tree(),
+            }),
+        ),
+        ("menu_builder_hide", encode_menu_builder_hide(1)),
+        (
+            "menu_choose",
+            encode_menu_choose(MenuChoose {
+                menu_id: 3,
+                option: -1,
+            }),
+        ),
+        (
+            "menu_builder_choose",
+            encode_menu_builder_choose(&MenuBuilderChoose {
+                menu_id: 3,
+                result: choose_result,
+            }),
+        ),
+        (
+            "text_input",
+            encode_text_input(&TextInput {
+                id: 1,
+                title: "Name".to_owned(),
+                message: "Enter".to_owned(),
+                len: 32,
+                def: "abc".to_owned(),
+                numeric: true,
+                allow_empty: false,
+            }),
+        ),
+        (
+            "text_input_result",
+            encode_text_input_result(&TextInputResult {
+                id: 1,
+                text: Some("hello".to_owned()),
+            }),
+        ),
+        (
+            "info_popup",
+            encode_info_popup(&InfoPopup {
+                message: Some("hi".to_owned()),
+                id: Some("p1".to_owned()),
+                duration: 2.5,
+                align: 1,
+                top: 4,
+                left: 5,
+                bottom: 6,
+                right: 7,
+            }),
+        ),
+        (
+            "label",
+            encode_label(&WorldLabel {
+                message: Some("marker".to_owned()),
+                id: 9,
+                duration: 3.0,
+                world_x: 12.0,
+                world_y: -4.5,
+                flags: 7,
+            }),
+        ),
+        (
+            "warning_toast",
+            encode_warning_toast(&WarningToast {
+                icon: 63743,
+                text: "careful".to_owned(),
+            }),
+        ),
+        (
+            "ping_marker",
+            encode_ping_marker(PingMarker { x: 1.0, y: 2.0 }),
+        ),
+        ("hud_text", encode_message("wave 3")),
+        ("hide_hud_text", encode_empty()),
+    ]
+}
+
+/// Parses a committed `relay_wire.hex` file (`name hex` lines, `#` comments).
+pub fn parse_wire_golden(text: &str) -> Vec<(String, Vec<u8>)> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((name, hex)) = line.split_once(char::is_whitespace) else {
+            continue;
+        };
+        let Some(bytes) = decode_hex(hex.trim()) else {
+            continue;
+        };
+        out.push((name.to_owned(), bytes));
+    }
+    out
+}
+
+fn decode_hex(hex: &str) -> Option<Vec<u8>> {
+    if !hex.len().is_multiple_of(2) {
+        return None;
+    }
+    let mut out = Vec::with_capacity(hex.len() / 2);
+    let bytes = hex.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        let hi = (bytes[index] as char).to_digit(16)?;
+        let lo = (bytes[index + 1] as char).to_digit(16)?;
+        out.push((hi * 16 + lo) as u8);
+        index += 2;
+    }
+    Some(out)
+}
+
+/// Lowercase hex for a byte slice (`ui relay` / golden tooling).
+pub fn to_hex(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push_str(&format!("{byte:02x}"));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -858,5 +1011,39 @@ mod tests {
             decode_menu_builder_hide(&padded),
             Err(RelayError::TrailingBytes(1))
         ));
+    }
+
+    #[test]
+    fn relay_wire_bytes_match_golden() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/goldens/ui/relay_wire.hex");
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        let expected = parse_wire_golden(&text);
+        let actual = wire_fixtures();
+        assert_eq!(
+            actual.len(),
+            expected.len(),
+            "relay_wire.hex fixture count drifted"
+        );
+        for ((name, bytes), (expected_name, expected_bytes)) in actual.iter().zip(expected.iter()) {
+            assert_eq!(name, expected_name, "relay_wire.hex order drifted");
+            assert_eq!(
+                to_hex(bytes),
+                to_hex(expected_bytes),
+                "wire bytes drifted for '{name}'"
+            );
+        }
+    }
+
+    /// Maintainer helper: regenerate the committed `relay_wire.hex` golden on an
+    /// intentional codec/format change (`cargo test -p mind-core
+    /// ui::builder::ui_relay::tests::print_relay_wire -- --ignored --nocapture`).
+    #[test]
+    #[ignore = "regenerates relay_wire.hex; run intentionally"]
+    fn print_relay_wire() {
+        for (name, bytes) in wire_fixtures() {
+            println!("{name} {}", to_hex(&bytes));
+        }
     }
 }
