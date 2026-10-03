@@ -9,6 +9,7 @@
 //! validate those files and roll them up; they never mutate the registry.
 
 pub mod budgets;
+pub mod desync;
 pub mod golden;
 pub mod matrix;
 pub mod mcp;
@@ -16,6 +17,7 @@ pub mod minitoml;
 pub mod registry;
 pub mod report;
 pub mod scenario;
+pub mod screenshot;
 pub mod soak;
 
 use std::collections::BTreeSet;
@@ -30,6 +32,7 @@ use self::golden::GoldenManifest;
 use self::mcp::McpCatalog;
 use self::registry::ChecksumRegistry;
 use self::scenario::ScenarioCatalog;
+use self::screenshot::ScreenshotManifest;
 use self::soak::Soak;
 
 /// Exit code: all checks passed.
@@ -122,8 +125,15 @@ pub fn run(command: &ParityCommand) -> Result<i32> {
         ParityCommand::Soak {
             profile,
             minutes,
+            ticks,
+            seed,
             json,
-        } => cmd_soak(profile, *minutes, *json, None),
+        } => cmd_soak(profile, *minutes, *ticks, *seed, *json, None),
+        ParityCommand::DesyncInject { case, seed, json } => cmd_desync(case, *seed, *json),
+        ParityCommand::McpParity { suite, json, repo } => {
+            cmd_mcp_parity(suite, *json, repo.as_deref())
+        }
+        ParityCommand::Screenshots { json, repo } => cmd_screenshots(*json, repo.as_deref()),
         ParityCommand::Report { json, repo } => cmd_report(*json, repo.as_deref()),
         ParityCommand::Gate {
             phase,
@@ -416,7 +426,14 @@ fn cmd_scenarios(json: bool, repo: Option<&Path>) -> Result<i32> {
     })
 }
 
-fn cmd_soak(profile: &str, minutes: Option<u64>, json: bool, repo: Option<&Path>) -> Result<i32> {
+fn cmd_soak(
+    profile: &str,
+    minutes: Option<u64>,
+    ticks: Option<u64>,
+    seed: u64,
+    json: bool,
+    repo: Option<&Path>,
+) -> Result<i32> {
     let repo = find_repo(repo)?;
     let soak = Soak::load(&repo.join("parity/soak.toml"))?;
     let problems = soak.check();
@@ -430,29 +447,125 @@ fn cmd_soak(profile: &str, minutes: Option<u64>, json: bool, repo: Option<&Path>
         }
         return Ok(EXIT_FAIL);
     }
-    let selected = soak.profile(profile)?;
-    let effective_minutes = minutes.unwrap_or(selected.minutes);
+    let value = soak.run(profile, minutes, ticks, seed)?;
+    let pass = value["pass"].as_bool().unwrap_or(false);
     if json {
-        let value = serde_json::json!({
-            "format": 1,
-            "pass": true,
-            "executed": false,
-            "profile": selected.name,
-            "minutes": effective_minutes,
-            "fields": selected.fields,
-            "note": "soak execution is minutes-scale and belongs on the nightly perf runner; this is the validated plan",
-        });
+        print_json(&value)?;
+    } else if value["executed"].as_bool().unwrap_or(false) {
+        println!(
+            "parity soak: profile `{}` ran {} tick(s) in {} ms -> {}",
+            value["profile"].as_str().unwrap_or(profile),
+            value["ticks"].as_u64().unwrap_or(0),
+            value["elapsed_ms"].as_u64().unwrap_or(0),
+            if pass { "PASS" } else { "FAIL" },
+        );
+        println!(
+            "  checksum {}; prefix_match {}; rss growth {:.2}% (max {}%); alloc delta {:?} (audit {})",
+            value["final_checksum"].as_str().unwrap_or("-"),
+            value["prefix_match"].as_bool().unwrap_or(false),
+            value["rss_growth_pct"].as_f64().unwrap_or(0.0),
+            value["max_rss_growth_pct"].as_f64().unwrap_or(0.0),
+            value["alloc_delta"],
+            value["alloc_audit"].as_bool().unwrap_or(false),
+        );
+    } else {
+        println!(
+            "parity soak: profile `{}` deferred ({})",
+            value["profile"].as_str().unwrap_or(profile),
+            value["deferred"].as_str().unwrap_or("editor/plan 21"),
+        );
+    }
+    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+}
+
+fn cmd_desync(case: &str, seed: u64, json: bool) -> Result<i32> {
+    let value = if case == "all" {
+        desync::run_all(seed)?
+    } else {
+        desync::run(case, seed)?
+    };
+    let pass = value["pass"].as_bool().unwrap_or(false);
+    if json {
+        print_json(&value)?;
+    } else if case == "all" {
+        println!(
+            "parity desync-inject: {} case(s) -> {}",
+            value["cases"].as_object().map(|c| c.len()).unwrap_or(0),
+            if pass { "PASS" } else { "FAIL" },
+        );
+    } else {
+        println!(
+            "parity desync-inject: case `{case}` expected {} got {} -> {}",
+            value["expected"].as_str().unwrap_or("-"),
+            value["observed"].as_str().unwrap_or("-"),
+            if pass { "PASS" } else { "FAIL" },
+        );
+    }
+    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+}
+
+fn cmd_mcp_parity(suite: &str, json: bool, repo: Option<&Path>) -> Result<i32> {
+    let repo = find_repo(repo)?;
+    let mcp = McpCatalog::load(&repo.join("parity/mcp_catalog.json"))?;
+    let scenarios = ScenarioCatalog::load(&repo.join("parity/scenario_catalog.json"))?;
+    let value = mcp::parity_report(&mcp, &scenarios, suite);
+    let pass = value["pass"].as_bool().unwrap_or(false);
+    if json {
         print_json(&value)?;
     } else {
         println!(
-            "parity soak: profile `{}` for {} minute(s) (skeleton; nightly perf runner executes)",
-            selected.name, effective_minutes
+            "parity mcp-parity: suite {suite}, {} headless-checksum check(s) -> {} (in-engine deferred)",
+            value["entries"].as_u64().unwrap_or(0),
+            if pass { "PASS" } else { "FAIL" },
         );
-        for (key, value) in &selected.fields {
-            println!("  {key} = {value}");
+    }
+    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+}
+
+fn cmd_screenshots(json: bool, repo: Option<&Path>) -> Result<i32> {
+    let repo = find_repo(repo)?;
+    let manifest = ScreenshotManifest::load(&repo.join("parity/screenshots/manifest.json"))?;
+    let results = manifest.verify(&repo);
+    let problems = manifest.check(&repo);
+    let captured = results.iter().filter(|r| r.pass).count();
+    let deferred = results.iter().filter(|r| !r.pass).count();
+    if json {
+        let entries: Vec<serde_json::Value> = results
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "id": r.id, "exists": r.exists,
+                    "sha256_match": r.sha256_match, "pass": r.pass,
+                    "status": "deferred",
+                })
+            })
+            .collect();
+        print_json(&serde_json::json!({
+            "format": 1,
+            "pass": problems.is_empty(),
+            "captured": captured,
+            "deferred": deferred,
+            "capture_deferred": "in-engine screenshot capture needs the Godot editor (single-editor MCP mutex)",
+            "baselines": entries,
+            "problems": problems,
+        }))?;
+    } else {
+        println!(
+            "parity screenshots: {} baseline(s), {} satisfied, {} deferred -> {}",
+            results.len(),
+            captured,
+            deferred,
+            if problems.is_empty() { "PASS" } else { "FAIL" },
+        );
+        for problem in &problems {
+            println!("  - {problem}");
         }
     }
-    Ok(EXIT_PASS)
+    Ok(if problems.is_empty() {
+        EXIT_PASS
+    } else {
+        EXIT_FAIL
+    })
 }
 
 fn cmd_report(json: bool, repo: Option<&Path>) -> Result<i32> {

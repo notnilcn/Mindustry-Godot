@@ -9,6 +9,8 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
+use super::scenario::ScenarioCatalog;
+
 /// One MCP catalog entry.
 #[derive(Debug, Clone, Deserialize)]
 pub struct McpEntry {
@@ -93,10 +95,69 @@ impl McpCatalog {
     }
 }
 
+/// The headless half of `parity mcp-parity`.
+///
+/// For the requested suite (`T0`/`T1`/`T2` by scenario tier, `P0`..`P8` by
+/// catalog phase, or `all`) it resolves every catalogued MCP scenario against
+/// its committed golden. The in-engine capture comparison is reported
+/// `deferred` (editor-gated); `pass` reflects the headless half.
+pub fn parity_report(
+    mcp: &McpCatalog,
+    scenarios: &ScenarioCatalog,
+    suite: &str,
+) -> serde_json::Value {
+    let mut entries = Vec::new();
+    let mut pass = true;
+    for entry in &mcp.entries {
+        let scenario = entry
+            .scenario
+            .as_deref()
+            .and_then(|name| scenarios.entries.iter().find(|s| s.name == name));
+        let matches = if suite == "all" {
+            true
+        } else if suite.starts_with('T') {
+            scenario.is_some_and(|s| s.tier == suite)
+        } else {
+            entry.phase == suite
+        };
+        if !matches {
+            continue;
+        }
+        let known = entry.scenario.as_deref().is_none() || scenario.is_some();
+        let golden = scenario.and_then(|s| {
+            if s.kind == "file" {
+                s.expect_checksum.clone()
+            } else {
+                s.command.clone()
+            }
+        });
+        let headless_ok = known && (scenario.is_none() || golden.is_some());
+        if !headless_ok {
+            pass = false;
+        }
+        entries.push(serde_json::json!({
+            "id": entry.id,
+            "plan": entry.plan,
+            "phase": entry.phase,
+            "scenario": entry.scenario,
+            "golden": golden,
+            "headless_pass": headless_ok,
+            "in_engine": "deferred",
+            "in_engine_owner": "single-editor MCP mutex (NUD-40/A)",
+        }));
+    }
+    serde_json::json!({
+        "format": 1,
+        "pass": pass,
+        "suite": suite,
+        "entries": entries.len(),
+        "checks": entries,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parity::scenario::ScenarioCatalog;
 
     #[test]
     fn committed_mcp_catalog_is_consistent() {
