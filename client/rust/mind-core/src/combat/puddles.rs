@@ -59,6 +59,35 @@ pub fn has_liquid(world: &World, tx: i16, ty: i16, liquid: LiquidId) -> bool {
         .is_some_and(|puddle| puddle.liquid == liquid && puddle.amount > 0.0)
 }
 
+/// `Puddle` save revision (`plan 10 §6.3`).
+pub const PUDDLE_REVISION: u8 = 1;
+
+/// Writes the `Puddle` save payload (`amount`/`tile`/`liquid`; `PuddleComp.write`).
+pub fn write_puddle(
+    state: &PuddleState,
+    w: &mut crate::world::BuildingWriter,
+) -> Result<(), crate::io::IoError> {
+    w.f(state.amount);
+    w.s(state.tile.0);
+    w.s(state.tile.1);
+    w.us(state.liquid.raw());
+    Ok(())
+}
+
+/// Reads the `Puddle` save payload (revision-tolerant; all fields present since v1).
+pub fn read_puddle(
+    state: &mut PuddleState,
+    r: &mut crate::world::BuildingReader,
+    revision: u8,
+) -> Result<(), crate::io::IoError> {
+    if revision >= 1 {
+        state.amount = r.f()?;
+        state.tile = (r.s()?, r.s()?);
+        state.liquid = LiquidId::new(r.us()?);
+    }
+    Ok(())
+}
+
 /// Deposits `amount` of `liquid` at `(tx, ty)` (`Puddles.deposit`).
 ///
 /// Vaporizes when the liquid boils (`Liquid.willBoil`: global heat ≥
@@ -534,5 +563,32 @@ mod tests {
             .map(|p| p.amount)
             .unwrap_or(0.0);
         assert!((after - (before + 5.0)).abs() < 1e-5, "{before} -> {after}");
+    }
+
+    #[test]
+    fn puddle_save_roundtrip() {
+        use crate::io::wire::{WireReader, WireWriter};
+        let src = PuddleState {
+            tile: (7, 9),
+            liquid: LiquidId::new(2),
+            amount: 42.5,
+            accepting: 1.0,
+            update_time: 0.0,
+            last_ripple: 0.0,
+        };
+        let mut bytes = Vec::new();
+        {
+            let mut w = WireWriter::new(&mut bytes);
+            write_puddle(&src, &mut w).expect("write");
+        }
+        let mut dst = src;
+        dst.tile = (0, 0);
+        dst.liquid = LiquidId::WATER;
+        dst.amount = 0.0;
+        let mut r = WireReader::new(&bytes);
+        read_puddle(&mut dst, &mut r, PUDDLE_REVISION).expect("read");
+        assert_eq!(dst.tile, (7, 9));
+        assert_eq!(dst.liquid, LiquidId::new(2));
+        assert_eq!(dst.amount, 42.5);
     }
 }

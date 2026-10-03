@@ -288,6 +288,26 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
         def.status = StatusId::NONE;
         def.hit_size = 7.0;
     });
+    add("ripple_plastanium", BulletKind::Artillery, &|def| {
+        def.speed = 3.4;
+        def.lifetime = 80.0;
+        def.damage = 40.0;
+        def.knockback = 1.0;
+        def.collides_tiles = false;
+        def.splash_damage_radius = 30.0;
+        def.splash_damage = 90.0;
+        def.frag_bullets = 15;
+        def.hit_size = 7.0;
+    });
+    add("ripple_plast_frag", BulletKind::Basic, &|def| {
+        def.speed = 2.5;
+        def.lifetime = 15.0;
+        def.damage = 14.0;
+        def.width = 10.0;
+        def.height = 12.0;
+        def.shrink_y = 1.0;
+        def.collides_air = false;
+    });
 
     // `wave` (LiquidBulletType). The liquid is patched by name below.
     for (name, damage) in [
@@ -881,6 +901,13 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
         def.reload_multiplier = 0.8;
         def.building_damage_multiplier = 0.1;
     });
+    add("scathe_surge", BulletKind::Empty, &|def| {
+        def.speed = 0.0;
+        def.lifetime = 1.0;
+        def.ammo_multiplier = 1.0;
+        def.reload_multiplier = 0.9;
+        def.building_damage_multiplier = 0.1;
+    });
 
     // Cross-references (child defs must exist first).
     for (parent_name, child_name) in [
@@ -915,6 +942,19 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
             } else {
                 def.interval_bullet = Some(*child);
             }
+        }
+    }
+
+    // `ripple`'s plastanium shell uses `fragBullet` (not `intervalBullet`);
+    // assigned explicitly because the shared cross-reference loop above maps
+    // plain entries to `interval_bullet`.
+    if let (Some(parent), Some(child)) = (
+        names.get("ripple_plastanium"),
+        names.get("ripple_plast_frag"),
+    ) {
+        let (parent, child) = (*parent, *child);
+        if let Some(def) = content.bullet_mut(parent) {
+            def.frag_bullet = Some(child);
         }
     }
 
@@ -1166,6 +1206,7 @@ pub fn config_for(
                     item_ammo("silicon", "ripple_silicon")?,
                     item_ammo("pyratite", "ripple_pyratite")?,
                     item_ammo("blast-compound", "ripple_blast")?,
+                    item_ammo("plastanium", "ripple_plastanium")?,
                 ]),
             );
             c.range = 290.0;
@@ -1560,6 +1601,7 @@ pub fn config_for(
                 TurretAmmo::Item(vec![
                     item_ammo("carbide", "scathe_carbide")?,
                     item_ammo("phase-fabric", "scathe_phase")?,
+                    item_ammo("surge-alloy", "scathe_surge")?,
                 ]),
             );
             // `range = max(spawnUnit.lifetime * spawnUnit.speed)` over the ammo
@@ -2129,6 +2171,8 @@ mod tests {
             "swarmer_surge",
             "fuse_thorium",
             "ripple_blast",
+            "ripple_plastanium",
+            "ripple_plast_frag",
             "wave_slag",
             "tsunami_water",
             "lancer_laser",
@@ -2152,6 +2196,7 @@ mod tests {
             "sublimate_cyanogen",
             "scathe_carbide",
             "scathe_phase",
+            "scathe_surge",
         ] {
             assert!(harness.bullet_id(name).is_some(), "missing {name}");
         }
@@ -2197,6 +2242,51 @@ mod tests {
                 "config missing for {name}"
             );
         }
+    }
+
+    /// Vanilla ammo tables with the largest item sets: `ripple` has 5
+    /// (`Blocks.java:3977`) and `scathe` has 3 (`Blocks.java:5245`). Both were
+    /// previously short by one entry; this locks the append-only content in.
+    #[test]
+    fn ripple_and_scathe_ammo_item_sets_complete() {
+        use crate::content::ItemId;
+        let harness = CombatHarness::new(8, 8, 1);
+        let cfg =
+            |name: &str| config_for(harness.content(), name, harness.names_map()).expect("config");
+        let items = |name: &str| -> Vec<ItemId> {
+            match cfg(name).ammo {
+                TurretAmmo::Item(entries) => entries.iter().map(|e| e.item).collect(),
+                _ => panic!("{name} is not an item turret"),
+            }
+        };
+        let content = harness.content();
+        let resolve = |names: &[&str]| -> Vec<ItemId> {
+            names
+                .iter()
+                .map(|n| content.item_id(n).unwrap_or_else(|| panic!("item {n}")))
+                .collect()
+        };
+        assert_eq!(
+            items("ripple"),
+            resolve(&[
+                "graphite",
+                "silicon",
+                "pyratite",
+                "blast-compound",
+                "plastanium"
+            ])
+        );
+        assert_eq!(
+            items("scathe"),
+            resolve(&["carbide", "phase-fabric", "surge-alloy"])
+        );
+        // The plastanium shell carries the 15-way frag child (`Blocks.java`
+        // `ripple`): verify the cross-reference resolved.
+        let parent = harness.bullet_id("ripple_plastanium").expect("parent");
+        let child = harness.bullet_id("ripple_plast_frag").expect("child");
+        let def = content.bullet(parent).expect("def");
+        assert_eq!(def.frag_bullets, 15);
+        assert_eq!(def.frag_bullet, Some(child));
     }
 
     #[test]

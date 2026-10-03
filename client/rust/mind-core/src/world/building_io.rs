@@ -366,7 +366,12 @@ impl BuildingCodec {
             .unwrap_or(f32::MAX);
         apply_base(world, entity, &decoded, max_health);
         if let Some(inst) = behavior_instance(world, entity) {
-            let revision = inst.building.revision();
+            // The per-kind body uses the behavior's own IO version
+            // (`Building.version()`), not the base layout revision: turrets
+            // report 1/2/3 (`plan 10 §6.3`) while the base stays at
+            // `REVISION`. `BuildingKind::revision()` is the logistics-family
+            // fallback only.
+            let revision = inst.behavior.version(world, entity);
             inst.behavior.read(world, entity, r, revision);
         }
         Ok(())

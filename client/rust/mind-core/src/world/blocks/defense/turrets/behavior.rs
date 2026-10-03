@@ -130,6 +130,66 @@ mod tests {
         assert_eq!(state.ammo[0].amount, 6);
     }
 
+    /// Full save/load round-trip through plan-07's `BuildingCodec` (plan 10
+    /// §6.3/§7e): a placed `duo` with copper ammo, reload and rotation survives
+    /// `write` -> `read` on a fresh entity.
+    #[test]
+    fn placed_turret_ammo_and_reload_roundtrip() {
+        use crate::io::wire::{WireReader, WireWriter};
+        use crate::world::TilePos;
+        use crate::world::building_io::BuildingCodec;
+
+        let mut harness = CombatHarness::new(32, 32, 7);
+        let duo = harness.content().block_id("duo").expect("duo");
+        assert!(harness.place(10, 10, duo, 0, true));
+        let src = harness.build_at(10, 10).expect("placed duo");
+        let copper = harness.content().item_id("copper").expect("copper");
+        for _ in 0..3 {
+            handle_item(&mut harness.build.world, src, copper);
+        }
+        {
+            let mut state = harness.build.world.get_mut::<TurretState>(src).unwrap();
+            state.reload_counter = 0.5;
+            state.rotation = 42.0;
+        }
+
+        let mut bytes = Vec::new();
+        {
+            let mut w = WireWriter::new(&mut bytes);
+            BuildingCodec::write(&harness.build.world, src, &mut w, false).expect("write");
+        }
+
+        let inst = harness
+            .build
+            .table()
+            .instance(duo)
+            .expect("duo instance")
+            .clone();
+        let (items, liquids) = harness.build.module_slot_counts();
+        let dst = inst.spawn(
+            &mut harness.build.world,
+            99,
+            TilePos::new(12, 10),
+            0,
+            0,
+            items,
+            liquids,
+        );
+        inst.behavior.create_state(&mut harness.build.world, dst);
+        let mut r = WireReader::new(&bytes);
+        BuildingCodec::read(&mut harness.build.world, dst, &mut r, 3).expect("read");
+
+        let state = harness
+            .build
+            .world
+            .get::<TurretState>(dst)
+            .expect("dst state");
+        assert_eq!(state.reload_counter, 0.5);
+        assert_eq!(state.rotation, 42.0);
+        assert_eq!(state.total_ammo, 6, "3 copper x duo ammoMultiplier 2");
+        assert_eq!(state.ammo.first().map(|entry| entry.amount), Some(6));
+    }
+
     /// `LiquidTurretBuild.acceptLiquid` through the behavior seam.
     #[test]
     fn placed_liquid_turret_accepts_matching_liquid() {
