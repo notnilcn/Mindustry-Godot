@@ -520,6 +520,69 @@
       "path": "client/rust/mind-headless/tests/golden/input/placement_validation_table.json",
       "owner_plan": "15",
       "sha256": "0e018fd12d267b20274aa5d45cb98c4913c35e005ef256f73d5706c2b068067c"
+    },
+    {
+      "id": "harness_input_camera_pan_zoom",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/input/input_camera_pan_zoom.json",
+      "owner_plan": "15",
+      "sha256": "8ada64314f87138f69735988cf500c70c2862b35ad975a3ffd976d2c7a62a155"
+    },
+    {
+      "id": "harness_input_camera_clamp",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/input/input_camera_clamp.json",
+      "owner_plan": "15",
+      "sha256": "667af5a37512e3dfd1e1ec823335ef8b327831b9d00d2e831ff869dc0e144449"
+    },
+    {
+      "id": "harness_input_camera_shake",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/input/input_camera_shake.json",
+      "owner_plan": "15",
+      "sha256": "2d02124d216a98f967707ddc20e1cc48154688e2b052f3190359e37dd4c90dc3"
+    },
+    {
+      "id": "harness_input_plan_snapshot",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/input/input_plan_snapshot.json",
+      "owner_plan": "15",
+      "sha256": "60121c2c69c4795779112c97ad160e95e2ceb758bc02b91d9815bdc6522cf468"
+    },
+    {
+      "id": "harness_input_preview_handoff",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/input/input_preview_handoff.json",
+      "owner_plan": "15",
+      "sha256": "978172734e1e0a20c4f040f98d801028be6da00fa1752f512439d9ea50640b33"
+    },
+    {
+      "id": "harness_input_replay_mobile",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/input/input_replay_mobile.json",
+      "owner_plan": "15",
+      "sha256": "773243b0087c7cc74811170509d7cc85b3b8cf845b42d2951dbf368cc61fee4b"
+    },
+    {
+      "id": "harness_input_mobile_parity",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/input/input_mobile_parity.json",
+      "owner_plan": "15",
+      "sha256": "d0ebc15efa181cb035ab345067215600b5c5003238a8ed8d08b25249d3275a9e"
+    },
+    {
+      "id": "harness_input_rts_move",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/input/input_rts_move.json",
+      "owner_plan": "15",
+      "sha256": "49b4b79105043d1bd857815239204e43f8723bddbe7c56867d85415b63cea6d3"
+    },
+    {
+      "id": "harness_units_base_build",
+      "kind": "harness",
+      "path": "client/rust/mind-headless/tests/golden/units/units_base_build.json",
+      "owner_plan": "11",
+      "sha256": "7d9acef2e9cb14f843a525dae69fffb8dfbfa5f33da2beab38f3d75407b6b25f"
     }
   ]
 }

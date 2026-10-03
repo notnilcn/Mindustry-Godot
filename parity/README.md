@@ -58,6 +58,10 @@ mind-headless parity matrix check --tests out/tests.txt
   update `golden_manifest.json` (`sha256`) in the *same commit*. CI never needs a JVM.
 - **Scenario golden**: commit `scenarios/<name>.json`, add a `kind = "file"` entry to
   `scenario_catalog.json`, and record `expect_checksum` from the file.
+- **Harness golden** (Rust self-recorded): every file under
+  `client/rust/*/tests/golden(s)/**` is pinned in `golden_manifest.json` with
+  `kind = "harness"` and the owning plan. `parity goldens` sha256-checks it in
+  addition to the owning scenario's byte comparison.
 - Any checksum change that touches a `checksum_registry.json` contributor must bump
   `CHECKSUM_VERSION` and re-record every golden in the same commit (R-02).
 
@@ -101,5 +105,23 @@ values are recorded on the baseline machine / self-hosted `perf` runner only.
 (matrix, checksum registry, scenario/golden/budget/MCP catalogs) and marks the
 nightly-owned steps (`T1` suite, checksum matrix, MCP parity, bench-gate) as
 `deferred`. Commit `gate_P*.json` as the phase evidence of record.
+
+## Local suite driver
+
+`tools/parity.sh` (`.ps1` twin) mirrors the runnable subset of the nightly runner on
+the dev host without faking the deferred steps:
+
+```
+tools/parity.sh                      # default: structural check --tests + smoke suite
+tools/parity.sh --suite gate --phase P5
+tools/parity.sh --gate P8            # writes parity/reports/gate_P8.json
+tools/parity.sh --check              # registries + landed-row resolution + golden sha256
+tools/parity.sh --mcp                # headless half of mcp-parity (in-engine is editor-gated)
+tools/parity.sh --bench              # bench-budget coverage
+tools/parity.sh --soak mid           # bounded soak slice (full duration nightly-owned)
+```
+
+The T1/T2 suites, checksum matrix, in-engine MCP capture and full soak durations stay
+on the self-hosted nightly runners (NUD-40/A).
 
 See [`system_checklist.md`](system_checklist.md) for the per-system status roll-up.
