@@ -286,6 +286,16 @@ impl crate::io::map::ImageTileSink for GridImageSink<'_> {
             self.grid.tiles.get_mut(x as i32, y as i32).overlay = overlay;
         }
     }
+
+    fn set_block(&mut self, x: u16, y: u16, block: BlockId, _team: u8, _rot: u8) {
+        if self.grid.tiles.in_bounds(x as i32, y as i32) {
+            let tile = self.grid.tiles.get_mut(x as i32, y as i32);
+            tile.block = block;
+            // Image import only targets environment tiles; no building entity is
+            // spawned (upstream `Tile.setBlock` with `Team.derelict`).
+            tile.build = None;
+        }
+    }
 }
 
 /// `MapIO.readImage(img, tiles, colorMapper)`: import an image onto a grid.

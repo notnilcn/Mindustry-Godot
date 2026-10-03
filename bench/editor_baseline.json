@@ -1,5 +1,5 @@
 {
-  "note": "Plan 19 §7d editor performance budgets (dev host, Ubuntu WSL2, debug build). Budgets are copied from 19_MAPS_EDITOR_IMPLEMENTATION_PLAN.md §7d; `measured` records the current MapView draw + op-recording suite. A release re-record is owned by the perf runner (plan 23). The steady-state allocation audit is recorded but NOT yet zero — see `alloc_audit.gap`.",
+  "note": "Plan 19 §7d editor performance budgets (dev host, Ubuntu WSL2, debug build). Budgets are copied from 19_MAPS_EDITOR_IMPLEMENTATION_PLAN.md §7d; `measured` records the current MapView draw + op-recording suite. A release re-record is owned by the perf runner (plan 23). The steady-state allocation audit is now zero (F30: pre-reserved line/brush scratch + pooled DrawOperations + per-frame event-log drain).",
   "format": 1,
   "scenario": "editor_bench",
   "fixture": "200x200 editor map, copper-wall lines",
@@ -17,8 +17,8 @@
       "mapview": {
         "size": 200,
         "runs": 40,
-        "p50_us": 611.674,
-        "p99_us": 1133.277,
+        "p50_us": 608.057,
+        "p99_us": 749.036,
         "within_budget": true,
         "command": "cargo run -p mind-headless -- editor bench --suite mapview --size 200 --runs 40 --json"
       }
@@ -29,13 +29,13 @@
     "mapview_steady_state": {
       "size": 200,
       "runs": 40,
-      "alloc_count": 71520,
-      "alloc_bytes": 1245440,
+      "alloc_count": 0,
+      "alloc_bytes": 0,
       "alloc_limit": 0,
-      "alloc_ok": false,
+      "alloc_ok": true,
       "command": "cargo run -p mind-headless --features alloc-audit -- editor bench --suite mapview --size 200 --runs 40 --json"
     },
     "tests": ["editor::draw_op::tests::steady_state_recording_is_allocation_free"],
-    "gap": "MapView draw + op recording is not yet zero-alloc: editor::tool::touched_line builds a fresh Vec<(i32,i32)> per call and the DrawOperation tile vector grows as tiles are recorded. Pre-reserved scratch buffers are a plan-19 follow-up; the per-frame MapView draw call site is plan-15 input."
+    "note": "Reaching zero required pre-reserved line/brush scratch buffers, an op pool that recycles DrawOperation allocations across the 30-op undo cap, SmallVec linked-tile footprints, and draining the world-event log at the frame boundary (`WorldEditorGrid::clear_events`). The op pool correctness fix (clear the reused op) is asserted by the editor unit/oracle tests."
   }
 }

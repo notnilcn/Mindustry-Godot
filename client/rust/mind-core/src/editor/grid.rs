@@ -67,6 +67,14 @@ impl<'a> WorldEditorGrid<'a> {
         self.sink.take()
     }
 
+    /// Drains the accumulated world-event log while retaining its capacity
+    /// (`WorldEventLog::clear`). The sim drains world events every frame; the
+    /// editor's `editor bench --suite mapview` audit calls this at the frame
+    /// boundary so repeated draws do not grow the log (plan 19 §7d).
+    pub fn clear_events(&mut self) {
+        self.log.clear();
+    }
+
     fn tile_build(&self, x: i32, y: i32) -> Option<bevy_ecs::entity::Entity> {
         if !self.grid.tiles.in_bounds(x, y) {
             return None;
@@ -178,7 +186,7 @@ impl EditorGrid for WorldEditorGrid<'_> {
         }
     }
 
-    fn linked_tiles(&self, x: i32, y: i32) -> Vec<(i32, i32)> {
+    fn linked_tiles(&self, x: i32, y: i32) -> smallvec::SmallVec<[(i32, i32); 9]> {
         // Resolve the center (multiblock proxies link to the center entity).
         let center = self
             .tile_build(x, y)
@@ -192,7 +200,7 @@ impl EditorGrid for WorldEditorGrid<'_> {
             .map(|def| def.size.max(1))
             .unwrap_or(1);
         let offset = -(size - 1) / 2;
-        let mut out = Vec::with_capacity((size * size) as usize);
+        let mut out: smallvec::SmallVec<[(i32, i32); 9]> = smallvec::SmallVec::new();
         for dx in 0..size {
             for dy in 0..size {
                 out.push((cx + offset + dx, cy + offset + dy));

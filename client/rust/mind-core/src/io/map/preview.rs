@@ -89,6 +89,7 @@ pub struct BlockPalette {
     solid: Vec<bool>,
     wall_ore: Vec<bool>,
     has_color: Vec<bool>,
+    sizes: Vec<i32>,
     /// `stone` floor id (0 when absent).
     pub stone: u16,
 }
@@ -106,8 +107,19 @@ impl BlockPalette {
             solid: blocks.iter().map(|def| def.solid).collect(),
             wall_ore: blocks.iter().map(|def| def.wall_ore).collect(),
             has_color: blocks.iter().map(|def| def.has_color).collect(),
+            sizes: blocks.iter().map(|def| def.size.max(1)).collect(),
             stone: registry.block_id("stone").map(|id| id.raw()).unwrap_or(0),
         }
+    }
+
+    /// `Block.size` (1 for unknown/air ids).
+    pub fn block_size(&self, id: u16) -> i32 {
+        self.get(&self.sizes, id).unwrap_or(1).max(1)
+    }
+
+    /// `Block.isMultiblock()`.
+    pub fn is_multiblock(&self, id: u16) -> bool {
+        self.block_size(id) > 1
     }
 
     fn get<T: Copy>(&self, table: &[T], id: u16) -> Option<T> {
@@ -464,12 +476,18 @@ pub trait ImageTileSink {
     fn set_floor(&mut self, x: u16, y: u16, floor: BlockId);
     /// Sets the overlay of one tile.
     fn set_overlay(&mut self, x: u16, y: u16, overlay: BlockId);
+    /// Sets a wall/block (and its multiblock footprint) with a team + rotation
+    /// (`Tile.setBlock`; plan 19 image-import block path).
+    fn set_block(&mut self, x: u16, y: u16, block: BlockId, team: u8, rot: u8);
 }
 
-/// `MapIO.readImage`: assigns floors/overlays from color-mapped pixels.
+/// `MapIO.readImage`: assigns floors/overlays/blocks from color-mapped pixels.
 ///
 /// Buildings are ignored (image maps are environment-only); unmapped pixels
-/// default the floor to `stone` (upstream behavior).
+/// default the floor to `stone` (upstream behavior). The block/wall path is
+/// ported from `MapIO.readImage` (`tile.setBlock(block)` /
+/// `setBlock(block, Team.derelict, 0)` for multiblocks); the editor invokes it
+/// through `MapEditor.beginEdit(Pixmap)`.
 pub fn read_image(
     palette: &BlockPalette,
     image: &PreviewImage,
@@ -477,9 +495,11 @@ pub fn read_image(
     mapper: &dyn ColorMapper,
 ) -> IoResult<()> {
     let stone = palette.stone;
-    for y in 0..tiles.height() {
-        for x in 0..tiles.width() {
-            let pixel = image.get(u32::from(x), u32::from(tiles.height()) - 1 - u32::from(y));
+    let width = tiles.width();
+    let height = tiles.height();
+    for y in 0..height {
+        for x in 0..width {
+            let pixel = image.get(u32::from(x), u32::from(height) - 1 - u32::from(y));
             let Some(block) = mapper.block_for_color(pixel) else {
                 tiles.set_floor(x, y, BlockId::new(stone));
                 continue;
@@ -492,9 +512,28 @@ pub fn read_image(
                 tiles.set_overlay(x, y, block);
             } else if palette.is_floor_like(block.raw()) {
                 tiles.set_floor(x, y, block);
+            } else {
+                // `tile.setBlock(block, Team.derelict, 0)`: expand the footprint
+                // for multiblocks, otherwise a single wall tile.
+                let size = palette.block_size(block.raw());
+                let offset = -(size - 1) / 2;
+                for dx in 0..size {
+                    for dy in 0..size {
+                        let tx = x as i32 + offset + dx;
+                        let ty = y as i32 + offset + dy;
+                        if tx < 0 || ty < 0 || tx >= width as i32 || ty >= height as i32 {
+                            continue;
+                        }
+                        tiles.set_block(tx as u16, ty as u16, block, 0, 0);
+                    }
+                }
             }
         }
     }
+    // Default air floors to stone (upstream final pass). The editor pre-fills
+    // the grid with `stone` and the unmapped-pixel branch above writes `stone`,
+    // so this pass only affects a caller that supplied air floors; callers
+    // without a floor reader are covered by `beginEdit(Pixmap)`'s pre-fill.
     Ok(())
 }
 
@@ -615,5 +654,70 @@ mod tests {
         let conveyor = registry.block_id("conveyor").unwrap().raw();
         assert!(palette.synthetic(conveyor));
         assert_eq!(color_for(&palette, conveyor, 0, 0, 1), team_color(1));
+    }
+
+    /// Minimal in-memory sink capturing the image-import writes.
+    #[derive(Default)]
+    struct RecordingSink {
+        width: u16,
+        height: u16,
+        floors: std::collections::BTreeMap<(u16, u16), BlockId>,
+        overlays: std::collections::BTreeMap<(u16, u16), BlockId>,
+        blocks: std::collections::BTreeMap<(u16, u16), (BlockId, u8, u8)>,
+    }
+
+    impl ImageTileSink for RecordingSink {
+        fn width(&self) -> u16 {
+            self.width
+        }
+        fn height(&self) -> u16 {
+            self.height
+        }
+        fn set_floor(&mut self, x: u16, y: u16, floor: BlockId) {
+            self.floors.insert((x, y), floor);
+        }
+        fn set_overlay(&mut self, x: u16, y: u16, overlay: BlockId) {
+            self.overlays.insert((x, y), overlay);
+        }
+        fn set_block(&mut self, x: u16, y: u16, block: BlockId, team: u8, rot: u8) {
+            self.blocks.insert((x, y), (block, team, rot));
+        }
+    }
+
+    /// Plan 19 image import block path: a wall-colored pixel writes a block with
+    /// `Team.derelict`/rotation 0 (`MapIO.readImage`), not silently dropped.
+    #[test]
+    fn read_image_places_blocks() {
+        let registry = test_registry();
+        let palette = BlockPalette::of(&registry);
+        // `copper-wall` has a building and is skipped (upstream `hasBuilding`);
+        // `cliff` is an environment block and exercises the block path.
+        let wall = registry.block_id("cliff").unwrap();
+        let stone = registry.block_id("stone").unwrap();
+        let wall_color = palette.map_color(wall.raw());
+        let stone_color = palette.map_color(stone.raw());
+
+        let mut image = PreviewImage::new(2, 1);
+        image.set(0, 0, wall_color);
+        image.set(1, 0, stone_color);
+
+        let mapper = FnColorMapper(move |rgba: u32| {
+            if rgba == wall_color {
+                Some(wall)
+            } else if rgba == stone_color {
+                Some(stone)
+            } else {
+                None
+            }
+        });
+        let mut sink = RecordingSink {
+            width: 2,
+            height: 1,
+            ..RecordingSink::default()
+        };
+        read_image(&palette, &image, &mut sink, &mapper).unwrap();
+
+        assert_eq!(sink.blocks.get(&(0, 0)), Some(&(wall, 0, 0)));
+        assert_eq!(sink.floors.get(&(1, 0)), Some(&stone));
     }
 }

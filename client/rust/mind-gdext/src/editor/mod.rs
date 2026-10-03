@@ -50,8 +50,10 @@ use mind_core::maps::filters::block_info;
 use mind_core::world::{NoopMapGenHooks, NoopRenderHooks, NoopWorldHooks, WorldGrid};
 
 mod map_view;
+pub mod preview;
 
 use map_view::{MapViewDriver, brush_polygon};
+pub use preview::MindPreview;
 
 /// Builds a `{GString: Variant}` dictionary (mirrors the other facades).
 fn dict(pairs: Vec<(&str, Variant)>) -> VarDictionary {

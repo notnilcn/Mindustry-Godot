@@ -5271,9 +5271,14 @@ fn cmd_editor_bench(suite: &str, size: i32, runs: u32, json: bool) -> anyhow::Re
             editor.flush_op();
             editor.undo(world, &content);
             editor.redo(world, &content);
+            // Frame boundary: the sim drains world events each frame; clear the
+            // log (retaining capacity) so repeated draws do not reallocate.
+            world.clear_events();
         };
         let mut world = WorldEditorGrid::new(&mut grid, &content, &mut ecs, &hooks, &render);
-        for _ in 0..20 {
+        // Warm up past the undo-stack cap so the op pool is fully seeded with
+        // capacity-bearing recycled operations before the measured region.
+        for _ in 0..(mind_core::editor::stack::MAX_SIZE + 1) {
             step(&mut editor, &mut world);
         }
         let before = alloc_count();
@@ -5307,7 +5312,7 @@ fn cmd_editor_bench(suite: &str, size: i32, runs: u32, json: bool) -> anyhow::Re
     } else {
         println!("editor bench {suite}: p50 {median:.1} us");
     }
-    Ok(EXIT_PASS)
+    Ok(if alloc_ok { EXIT_PASS } else { EXIT_FAIL })
 }
 
 /// `maps fix` (plan 19 M8 §3.13/§7b): build a deterministic fixture dir, run the

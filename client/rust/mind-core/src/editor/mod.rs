@@ -67,7 +67,7 @@ pub struct EditorBlockInfo {
     pub is_multiblock: bool,
     /// `Block.synthetic()` (`update || destructible`).
     pub synthetic: bool,
-    /// `Block.rotate` (plan-07 `BlockInstance`; `false` at M0).
+    /// `Block.rotate` (plan-07 `BlockInstance::rotate` derived from the kind).
     pub rotate: bool,
     /// `Block.saveData`.
     pub save_data: bool,
@@ -118,7 +118,7 @@ impl EditorBlockInfo {
             is_overlay: block_info::is_overlay(def),
             is_multiblock: def.size > 1,
             synthetic: block_info::synthetic(def),
-            rotate: false,
+            rotate: crate::world::block::kind_rotates(def.kind),
             save_data: def.save_data,
             save_config: def.save_config,
             wall_ore: def.wall_ore,
@@ -170,8 +170,9 @@ pub trait EditorGrid {
     /// Whether the tile is the center of its building (`Tile.isCenter`).
     fn is_center(&self, x: i32, y: i32) -> bool;
     /// Every tile belonging to the building at `(x, y)` (footprint; includes
-    /// `(x, y)` when standalone).
-    fn linked_tiles(&self, x: i32, y: i32) -> Vec<(i32, i32)>;
+    /// `(x, y)` when standalone). `SmallVec` keeps the common 1..9-tile cases
+    /// (single blocks through 3×3 multiblocks) heap-free on the op hot path.
+    fn linked_tiles(&self, x: i32, y: i32) -> smallvec::SmallVec<[(i32, i32); 9]>;
 
     /// Sets the floor (`Tile.setFloor`).
     fn set_floor(&mut self, x: i32, y: i32, floor: BlockId);
@@ -243,7 +244,13 @@ pub struct MapEditor {
     /// Whether `show()` should not reset the world.
     pub shown_with_map: bool,
     stack: OperationStack,
-    current_op: Option<DrawOperation>,
+    current_op: DrawOperation,
+    /// Recycled [`DrawOperation`] allocations (plan 19 §7d zero-alloc audit).
+    op_pool: Vec<DrawOperation>,
+    /// Reused Bresenham point scratch (`tool::touched_line`).
+    line_scratch: Vec<(i32, i32)>,
+    /// Reused brush footprint scratch (`MapEditor.draw_blocks*`).
+    draw_scratch: Vec<(i32, i32)>,
     /// Shared buffer of the installed [`context::TileOpSink`] (`EditorTile.op`).
     recorder: Option<Arc<Mutex<Vec<u64>>>>,
 }
@@ -274,7 +281,10 @@ impl MapEditor {
             saved: false,
             shown_with_map: false,
             stack: OperationStack::new(),
-            current_op: None,
+            current_op: DrawOperation::new(),
+            op_pool: Vec::new(),
+            line_scratch: Vec::new(),
+            draw_scratch: Vec::new(),
             recorder: None,
         }
     }
@@ -327,9 +337,7 @@ impl MapEditor {
         if self.loading {
             return;
         }
-        self.current_op
-            .get_or_insert_with(DrawOperation::new)
-            .add(data);
+        self.current_op.add(data);
     }
 
     /// Records the current value of op type `ty` on `(x, y)`.
@@ -340,12 +348,22 @@ impl MapEditor {
 
     /// Flushes the accumulated operation to the undo stack
     /// (`MapEditor.flushOp`).
+    ///
+    /// The finished [`DrawOperation`] moves into the stack while a recycled
+    /// spare (from the op pool / stack eviction) becomes the next current op, so
+    /// steady-state recording never allocates a fresh tile vector (plan 19 §7d).
     pub fn flush_op(&mut self) {
-        if let Some(op) = self.current_op.take()
-            && !op.is_empty()
-        {
-            self.stack.add(op);
+        if self.current_op.is_empty() {
+            return;
         }
+        // Move the finished op into the stack first so any stack eviction lands
+        // in the pool before we pick the next current op; once the stack is at
+        // its cap this always reuses a capacity-bearing op (cleared in place).
+        let done = std::mem::take(&mut self.current_op);
+        self.stack.add_recycling(done, &mut self.op_pool);
+        let mut next = self.op_pool.pop().unwrap_or_default();
+        next.clear();
+        self.current_op = next;
     }
 
     /// Pushes a complete operation onto the undo stack (dev/oracle path).
@@ -358,12 +376,12 @@ impl MapEditor {
     /// Clears the undo stack (`MapEditor.clearOp`).
     pub fn clear_op(&mut self) {
         self.stack.clear();
-        self.current_op = None;
+        self.current_op.clear();
     }
 
     /// Number of ops in the current operation (`MapEditor.ops`).
     pub fn ops(&self) -> usize {
-        self.current_op.as_ref().map_or(0, DrawOperation::size)
+        self.current_op.size()
     }
 
     /// Number of retained undo operations (`OperationStack.len`).
@@ -386,9 +404,7 @@ impl MapEditor {
         if self.loading {
             return;
         }
-        if let Some(op) = self.current_op.as_mut() {
-            op.remove(amount);
-        }
+        self.current_op.remove(amount);
     }
 
     /// Installs this editor's [`context::TileOpSink`] on a live world
@@ -508,19 +524,21 @@ impl MapEditor {
         }
 
         let is_floor = info.is_floor && self.draw_block != BlockId::AIR;
-        let mut targets: Vec<(i32, i32)> = Vec::new();
+        let mut targets = std::mem::take(&mut self.draw_scratch);
+        targets.clear();
         if square {
             self.for_each_square(world, x, y, &mut |tx, ty| targets.push((tx, ty)));
         } else {
             self.for_each_circle(world, x, y, &mut |tx, ty| targets.push((tx, ty)));
         }
 
-        for (tx, ty) in targets {
+        for &(tx, ty) in &targets {
             if !tester(world, content, tx, ty) {
                 continue;
             }
             self.draw_one(world, content, tx, ty, force_overlay, is_floor, &info);
         }
+        self.draw_scratch = targets;
     }
 
     /// `drawBlocks(x, y, square=true, ...)` with an always-true tester.
@@ -838,11 +856,13 @@ impl MapEditor {
         y: i32,
         f: &mut dyn FnMut(&mut dyn EditorGrid, i32, i32),
     ) {
-        let mut targets: Vec<(i32, i32)> = Vec::new();
+        let mut targets = std::mem::take(&mut self.draw_scratch);
+        targets.clear();
         self.for_each_circle(world, x, y, &mut |tx, ty| targets.push((tx, ty)));
-        for (tx, ty) in targets {
+        for &(tx, ty) in &targets {
             f(world, tx, ty);
         }
+        self.draw_scratch = targets;
     }
 
     /// Applies `f` to every tile in the square brush.
@@ -853,11 +873,13 @@ impl MapEditor {
         y: i32,
         f: &mut dyn FnMut(&mut dyn EditorGrid, i32, i32),
     ) {
-        let mut targets: Vec<(i32, i32)> = Vec::new();
+        let mut targets = std::mem::take(&mut self.draw_scratch);
+        targets.clear();
         self.for_each_square(world, x, y, &mut |tx, ty| targets.push((tx, ty)));
-        for (tx, ty) in targets {
+        for &(tx, ty) in &targets {
             f(world, tx, ty);
         }
+        self.draw_scratch = targets;
     }
 }
 
