@@ -17,6 +17,8 @@
 ; ├── MindRender (MindRender)   NEW (plan 16): stable MCP/debug facade
 ; ├── MindFx (MindFx)           NEW (plan 17): effect/decal/trail pool + FX draw
 ; ├── MindCampaign (MindCampaign) NEW (plan 12): campaign/sector/rules/objectives facade
+; ├── MindLogic (MindLogic)     NEW (plan 13): mlog facade (plan-14 metadata handoff)
+; ├── MindNet (MindNet)         NEW (plan 21): relay/session facade + pending-command drain
 ; ├── Planet (CanvasLayer)      NEW: g3d planet host (plan 16 M7)
 ; └── Ui (CanvasLayer)
 ;     ├── UiRoot (ui_root.tscn instance)   NEW (plan 14): menus/HUD/dialogs
@@ -57,6 +59,10 @@ zoom = Vector2(2, 2)
 [node name="MindFx" type="MindFx" parent="."]
 
 [node name="MindCampaign" type="MindCampaign" parent="."]
+
+[node name="MindLogic" type="MindLogic" parent="."]
+
+[node name="MindNet" type="MindNet" parent="."]
 
 [node name="Planet" type="CanvasLayer" parent="."]
 

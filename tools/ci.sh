@@ -51,6 +51,18 @@ cargo check --manifest-path "$MANIFEST" --workspace
 say "cargo test -p mind-core"
 cargo test --manifest-path "$MANIFEST" -p mind-core
 
+# Plan 23 §7f: matrix + registry drift + T0 catalog smoke. Read-only, no
+# Godot/GPU. `--tests` turns on the "every landed matrix row resolves" gate.
+say "parity check (matrix + registries) + T0 smoke"
+PARITY_DIR="$(mktemp -d)"
+cargo test --manifest-path "$MANIFEST" -p mind-core     -- --list > "$PARITY_DIR/tests-core.txt"
+cargo test --manifest-path "$MANIFEST" -p mind-headless -- --list > "$PARITY_DIR/tests-headless.txt"
+cat "$PARITY_DIR/tests-core.txt" "$PARITY_DIR/tests-headless.txt" > "$PARITY_DIR/tests.txt"
+cargo run -q --manifest-path "$MANIFEST" -p mind-headless -- parity check --tests "$PARITY_DIR/tests.txt"
+cargo run -q --manifest-path "$MANIFEST" -p mind-headless -- parity goldens
+cargo run -q --manifest-path "$MANIFEST" -p mind-headless -- run-all --tier T0
+rm -rf "$PARITY_DIR"
+
 say "golden: run spine_place_break"
 cargo run -q --manifest-path "$MANIFEST" -p mind-headless -- run spine_place_break --json > /dev/null
 

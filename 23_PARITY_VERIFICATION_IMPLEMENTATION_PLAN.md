@@ -207,7 +207,7 @@ Continuous plan: milestones overlap sibling execution; M0 may start once plan 00
 - [x] Ingest `parity/mcp_catalog.json` from plans 00–22 §7c (this file's §7c is the rendered view).
 - [x] Add `parity check`, `parity matrix`, `parity registry`, `parity goldens`, `parity budgets`, `parity scenarios`, `parity mcp`, `parity soak`, `parity report`, `parity gate`, `parity bench-gate` (`mind-headless parity …`, plan §3.7). `list --json` / `run-all` / catalog `tier`+`plan` fields landed at the F17 lane (below); `parity run --suite` remains.
 - [x] Scenario registry (`parity/scenario_catalog.json`) carries `tier` + `plan` for every entry; `mind-headless list [--json] [--tier T0|T1|T2]` and `run-all [--tier T]` landed (`list --json` is the tier source of truth; `run-all` runs the file-backed tier). `parity run --suite smoke|gate|full` remains outstanding (embedded reporters print; a clean suite JSON needs the nightly runner / child-process capture).
-- [ ] `tools/ci.sh` gains `parity matrix check`; `ci.yml` gains `matrix-check` (orchestrator-owned — proposed patch in §7f).
+- [x] `tools/ci.sh` gains the parity block (`parity check --tests`, `parity goldens`, `run-all --tier T0`) — **applied by the orchestrator 2026-10-03 (F20 post-join)**; `ci.yml` `matrix-check` job remains orchestrator-owned/proposed in §7f (not applied; `.github` unverifiable locally).
 - **Verify:** `cargo run -p mind-headless -- parity check --tests out/tests.txt` exit 0 (matrix **100 rows, 91 landed resolved / 9 no-equivalent**); `parity report` roll-up green; `list --tier T0 --json` (18) and `run-all --tier T0` (4/4) green.
 
 ### M1 — Determinism harness
@@ -952,6 +952,12 @@ Plan 00 also ships `tools/mcp-smoke.sh` automating steps 1–6 + log check.
 - [ ] `parity report --all --json` green at the final ledger review.
 
 ### 7f. Proposed CI patch (orchestrator-owned; NOT applied by lane 23)
+
+> **Update 2026-10-03 (F20 post-join, orchestrator):** the `tools/ci.sh` half of
+> this patch is now **APPLIED** (the `parity check --tests` / `parity goldens` /
+> `run-all --tier T0` block after `cargo test -p mind-core`; `.ps1` is a thin WSL
+> wrapper so it needs no change). The `.github/workflows/ci.yml` `matrix-check`
+> job below is still proposed/not applied (no local CI runner).
 
 The plan-23 harness is already runnable; wiring it into the shared CI is
 orchestrator-owned per the lane brief, so the patch is recorded here rather than
