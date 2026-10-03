@@ -4,18 +4,24 @@
   "algorithm": "fnv1a64",
   "owner": "05_SIM_CORE_IMPLEMENTATION_PLAN.md",
   "contributors": [
-    { "id": "game_state", "owner": "05", "status": "active" },
-    { "id": "clock_rng", "owner": "05", "status": "active" },
-    { "id": "groups", "owner": "05", "status": "active" },
-    { "id": "world_grid", "owner": "06", "status": "active", "note": "world::checksum; active since plan 06 landed" },
-    { "id": "rules", "owner": "12", "status": "planned", "note": "Rules::checksum_part exists (plan 12 game::rules::tests::checksum_part_is_stable_and_sensitive); Sim::checksum fold still pending the 05/23 reconcile (plan 12 open item)" },
-    { "id": "logic_rng", "owner": "13", "status": "planned", "note": "logic landed (13); the reserved RNG stream is not folded into Sim::checksum yet" },
+    { "id": "game_state", "owner": "05", "status": "active", "note": "phase, tick, update_id" },
+    { "id": "clock_rng", "owner": "05", "status": "active", "note": "clock time/runs + Sim RNG stream state + seed" },
+    { "id": "groups", "owner": "05", "status": "active", "note": "entities in stable seq order (block/team/rot/pos)" },
+    { "id": "world_grid", "owner": "06", "status": "active", "note": "world::checksum; row-major tile block/build stream; active since plan 06 landed" },
+    { "id": "rules", "owner": "12", "status": "planned", "note": "Reviewed fold position: after `world_grid`, before `groups`. `Rules::checksum_part` is stable and sensitive (`game::rules::tests::checksum_part_is_stable_and_sensitive`) but folding it changes every golden, so it is held pending the joint CHECKSUM_VERSION bump + golden re-record (plan 12 R5 / plan 00 §6.4 / plan 23 R-02)." },
+    { "id": "logic_rng", "owner": "13", "status": "planned", "note": "Reviewed fold position: after `clock_rng` (a dedicated `RngStream::Logic` would be part of the RNG contributor). Logic execution landed (13) but does not yet mutate a checksummed dedicated stream; folding it changes every golden, so it is held pending the joint CHECKSUM_VERSION bump + golden re-record." },
     { "id": "content_hash", "owner": "02", "status": "header" }
+  ],
+  "fold_order": [
+    "game_state",
+    "clock_rng",
+    "world_grid",
+    "groups"
   ],
   "excluded": [
     { "id": "render", "owner": "16", "reason": "view-only (HLP §2.4)" },
     { "id": "fx", "owner": "17", "reason": "view-only (HLP §2.4)" }
   ],
-  "note": "Reviewed at the F15/F16 golden expansion: the campaign/logic/world-harness goldens are all recorded at CHECKSUM_VERSION 1; no contributor composition changed, so no version bump. `world_grid` is active; `rules`/`logic_rng` remain unfolded.",
+  "note": "Reviewed at the F26 oracle-completeness pass. `fold_order` documents the exact `Sim::checksum_value` fold order (state -> clock/rng/seed -> grid row-major -> entities by seq); it is validated as a permutation of the active contributors. `rules`/`logic_rng` now carry a reviewed insertion position and are otherwise unchanged (not folded), so CHECKSUM_VERSION stays 1 and all goldens are byte-identical.",
   "bump_rule": "Any contributor change bumps CHECKSUM_VERSION and re-records every golden in the same commit (plan 00 §6.4, plan 23 R-02)."
 }
