@@ -22,6 +22,7 @@ use super::place_mode::{MobileMode, PlaceMode};
 use super::placement::PlacementWorld;
 use super::plan::ClientPlan;
 use super::queue::BuildQueue;
+use super::rts::SelectableUnit;
 
 // Arc `GestureDetector` thresholds. Mindustry constructs the detector at
 // `InputHandler.add()` with `new GestureDetector(20, 0.5f, 0.3f, 0.15f, this)`;
@@ -110,6 +111,22 @@ pub enum GestureEvent {
     },
     /// Pinching ended.
     PinchStop,
+}
+
+impl GestureEvent {
+    /// Stable parity name (gesture JSON / replay logs).
+    pub const fn name(&self) -> &'static str {
+        match self {
+            GestureEvent::TouchDown { .. } => "touch_down",
+            GestureEvent::Tap { .. } => "tap",
+            GestureEvent::LongPress { .. } => "long_press",
+            GestureEvent::Pan { .. } => "pan",
+            GestureEvent::PanStop => "pan_stop",
+            GestureEvent::Fling { .. } => "fling",
+            GestureEvent::Zoom { .. } => "zoom",
+            GestureEvent::PinchStop => "pinch_stop",
+        }
+    }
 }
 
 /// Arc `GestureDetector.VelocityTracker` (10-sample mean velocity).
@@ -292,7 +309,13 @@ impl GestureDetector {
     }
 
     /// `touchDown`.
-    pub fn touch_down(&mut self, time: f64, x: f32, y: f32, pointer: i32) -> SmallVec<[GestureEvent; 2]> {
+    pub fn touch_down(
+        &mut self,
+        time: f64,
+        x: f32,
+        y: f32,
+        pointer: i32,
+    ) -> SmallVec<[GestureEvent; 2]> {
         let mut out = SmallVec::new();
         if pointer > 1 {
             return out;
@@ -325,7 +348,13 @@ impl GestureDetector {
     }
 
     /// `touchDragged`.
-    pub fn touch_dragged(&mut self, time: f64, x: f32, y: f32, pointer: i32) -> SmallVec<[GestureEvent; 2]> {
+    pub fn touch_dragged(
+        &mut self,
+        time: f64,
+        x: f32,
+        y: f32,
+        pointer: i32,
+    ) -> SmallVec<[GestureEvent; 2]> {
         let mut out = SmallVec::new();
         if pointer > 1 || self.long_press_fired {
             return out;
@@ -363,7 +392,13 @@ impl GestureDetector {
     }
 
     /// `touchUp`.
-    pub fn touch_up(&mut self, time: f64, x: f32, y: f32, pointer: i32) -> SmallVec<[GestureEvent; 2]> {
+    pub fn touch_up(
+        &mut self,
+        time: f64,
+        x: f32,
+        y: f32,
+        pointer: i32,
+    ) -> SmallVec<[GestureEvent; 2]> {
         let mut out = SmallVec::new();
         if pointer > 1 {
             return out;
@@ -404,7 +439,11 @@ impl GestureDetector {
             self.pinching = false;
             out.push(GestureEvent::PinchStop);
             self.panning = true;
-            let start = if pointer == 0 { self.pointer2 } else { self.pointer1 };
+            let start = if pointer == 0 {
+                self.pointer2
+            } else {
+                self.pointer1
+            };
             self.tracker.start(start.0, start.1, time);
             return out;
         }
@@ -514,6 +553,16 @@ pub struct MobileController {
     pub emitted: SmallVec<[RemoteAction; 4]>,
     /// Monotonic render clock (ms).
     pub clock_ms: u64,
+    /// `settings.getBool("keyboard")`: mobile keyboard mode.
+    pub keyboard: bool,
+    /// `lastBlock` (mode-transition tracking, `MobileInput.update`).
+    pub last_block: Option<BlockId>,
+    /// `lastPlaced` (last selection plan added).
+    pub last_placed: Option<ClientPlan>,
+    /// Deconstruction plans fading out (`MobileInput.removals`).
+    pub removals: Vec<ClientPlan>,
+    /// Last building resolved by autotarget (`MobileInput.target`).
+    pub target_building: Option<TilePos>,
 }
 
 impl Default for MobileController {
@@ -545,6 +594,11 @@ impl MobileController {
             last_zoom: -1.0,
             emitted: SmallVec::new(),
             clock_ms: 0,
+            keyboard: false,
+            last_block: None,
+            last_placed: None,
+            removals: Vec::new(),
+            target_building: None,
         }
     }
 
@@ -562,7 +616,10 @@ impl MobileController {
             return false;
         };
         let d = distance(
-            (start.x() as f32 * TILESIZE as f32, start.y() as f32 * TILESIZE as f32),
+            (
+                start.x() as f32 * TILESIZE as f32,
+                start.y() as f32 * TILESIZE as f32,
+            ),
             (world_x, world_y),
         );
         self.mode.line_mode
@@ -576,7 +633,10 @@ impl MobileController {
             return false;
         };
         let d = distance(
-            (start.x() as f32 * TILESIZE as f32, start.y() as f32 * TILESIZE as f32),
+            (
+                start.x() as f32 * TILESIZE as f32,
+                start.y() as f32 * TILESIZE as f32,
+            ),
             (world_x, world_y),
         );
         self.mode.line_mode
@@ -585,12 +645,7 @@ impl MobileController {
     }
 
     /// `updateLine` for the active drag.
-    pub fn drag_to(
-        &mut self,
-        world: &dyn PlacementWorld,
-        block: Option<&LineBlock>,
-        end: TilePos,
-    ) {
+    pub fn drag_to(&mut self, world: &dyn PlacementWorld, block: Option<&LineBlock>, end: TilePos) {
         let Some(start) = self.line_start else {
             return;
         };
@@ -607,7 +662,8 @@ impl MobileController {
     }
 
     fn update_mode_from_place_mode(&mut self) {
-        self.mode.line_mode = self.state.place_mode.is_placing() || self.state.place_mode.is_breaking();
+        self.mode.line_mode =
+            self.state.place_mode.is_placing() || self.state.place_mode.is_breaking();
         self.mode.schematic_mode = self.state.place_mode.is_schematic_selecting();
         self.mode.rebuild_mode = self.state.place_mode.is_rebuild_selecting();
     }
@@ -654,8 +710,241 @@ impl MobileController {
 
     /// Queues a placement plan on a tap (`selectPlans.add`).
     pub fn add_select_plan(&mut self, plan: ClientPlan) {
+        self.last_placed = Some(plan.clone());
         self.state.select_plans.push(plan);
         self.mode.confirm_pending = true;
+    }
+
+    /// `isRebuildSelecting`.
+    pub fn is_rebuild_selecting(&self) -> bool {
+        self.mode.rebuild_mode
+    }
+
+    /// `hasSchematic` (a schematic is loaded for placement).
+    pub fn has_schematic(&self) -> bool {
+        self.state.has_schematic
+    }
+
+    /// `MobileInput.schemOriginX/Y`: the centroid of `selectPlans` in tiles.
+    ///
+    /// Deviation: uses plan centers (no `drawx`/`drawy` block offset), which is
+    /// exact for the 1x1 fixture set and within a tile otherwise.
+    pub fn schem_origin(&self) -> (i32, i32) {
+        if self.state.select_plans.is_empty() {
+            return (0, 0);
+        }
+        let sum_x: i64 = self.state.select_plans.iter().map(|p| p.x as i64).sum();
+        let sum_y: i64 = self.state.select_plans.iter().map(|p| p.y as i64).sum();
+        let count = self.state.select_plans.len() as i64;
+        ((sum_x / count) as i32, (sum_y / count) as i32)
+    }
+
+    /// `useSchematic`: replace `selectPlans` with a schematic's plans.
+    pub fn use_schematic(&mut self, plans: Vec<ClientPlan>) {
+        self.state.select_plans = plans;
+        self.state.has_schematic = true;
+        self.mode.schematic_mode = true;
+        self.mode.confirm_pending = !self.state.select_plans.is_empty();
+        self.state.place_mode = PlaceMode::SchematicSelect;
+    }
+
+    /// `MobileInput.touchUp` schematic branch: place the created schematic and
+    /// leave select mode (plans stay queued for the confirm button).
+    pub fn confirm_schematic(&mut self, plans: Vec<ClientPlan>) -> usize {
+        self.use_schematic(plans);
+        self.mode.schematic_mode = false;
+        self.state.place_mode = PlaceMode::None;
+        self.state.select_plans.len()
+    }
+
+    /// `getPlan`: the selection plan at `tile`.
+    ///
+    /// Deviation: exact-tile match; upstream compares block footprints, which
+    /// needs plan 07's `BlockView.size` (not yet threaded into `ClientPlan`).
+    pub fn get_plan(&self, tile: TilePos) -> Option<&ClientPlan> {
+        self.state
+            .select_plans
+            .iter()
+            .find(|plan| plan.x == tile.x() as i32 && plan.y == tile.y() as i32)
+    }
+
+    /// `hasPlan`.
+    pub fn has_plan(&self, tile: TilePos) -> bool {
+        self.get_plan(tile).is_some()
+    }
+
+    /// `removePlan`: drop the plan and queue a deconstruction fade.
+    pub fn remove_plan(&mut self, plan: &ClientPlan) -> bool {
+        let before = self.state.select_plans.len();
+        self.state
+            .select_plans
+            .retain(|p| p.x != plan.x || p.y != plan.y);
+        if self.state.select_plans.len() == before {
+            return false;
+        }
+        if !plan.breaking {
+            self.removals.push(plan.clone());
+        }
+        true
+    }
+
+    /// `checkOverlapPlacement`: would a `block_size` footprint at `(x, y)`
+    /// overlap an existing selection plan? Breaking plans block their own tile.
+    pub fn check_overlap_placement(&self, x: i32, y: i32, block_size: i32) -> bool {
+        let half = (block_size - 1) / 2;
+        for plan in &self.state.select_plans {
+            let dx = (plan.x - x).abs();
+            let dy = (plan.y - y).abs();
+            if dx <= half && dy <= half {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// `checkTargets`: acquire the closest enemy within [`TARGET_RANGE`], else a
+    /// world building. Sets [`Self::target`]/[`Self::target_building`].
+    pub fn check_targets(
+        &mut self,
+        world: &dyn PlacementWorld,
+        units: &[SelectableUnit],
+        player_team: u8,
+        x: f32,
+        y: f32,
+    ) -> Option<i32> {
+        let mut best: Option<(f32, i32)> = None;
+        for unit in units {
+            if unit.team == player_team {
+                continue;
+            }
+            let dist = (unit.x - x).hypot(unit.y - y);
+            if dist <= TARGET_RANGE && best.is_none_or(|(best_dist, _)| dist < best_dist) {
+                best = Some((dist, unit.id));
+            }
+        }
+        if let Some((_, id)) = best {
+            self.target = Some(id);
+            self.target_building = None;
+            return Some(id);
+        }
+        let tile = TilePos::new(
+            (x / TILESIZE as f32).floor() as i16,
+            (y / TILESIZE as f32).floor() as i16,
+        );
+        if world.block_at(tile.x() as i32, tile.y() as i32) != BlockId::AIR {
+            self.target_building = Some(tile);
+        }
+        None
+    }
+
+    /// `rebuildArea`: queue replacement plans for derelicts in the rect. The
+    /// caller supplies the plan-07 `getReplacement` result per tile.
+    pub fn rebuild_area(
+        &mut self,
+        world: &dyn PlacementWorld,
+        x1: i32,
+        y1: i32,
+        x2: i32,
+        y2: i32,
+        replacement: impl Fn(TilePos, BlockId) -> Option<ClientPlan>,
+    ) -> usize {
+        let (min_x, max_x) = (x1.min(x2), x1.max(x2));
+        let (min_y, max_y) = (y1.min(y2), y1.max(y2));
+        let mut queued = 0usize;
+        for y in min_y..=max_y {
+            for x in min_x..=max_x {
+                let block = world.block_at(x, y);
+                if block == BlockId::AIR {
+                    continue;
+                }
+                if let Some(plan) = replacement(TilePos::new(x as i16, y as i16), block) {
+                    self.add_select_plan(plan);
+                    queued += 1;
+                }
+            }
+        }
+        self.mode.rebuild_mode = false;
+        self.state.place_mode = PlaceMode::None;
+        queued
+    }
+
+    /// `update()` state transitions (command/placing/line/schematic/rebuild).
+    pub fn update_transitions(&mut self) {
+        if !self.state.command_mode {
+            self.mode.queue_command_mode = false;
+        } else {
+            self.state.place_mode = PlaceMode::None;
+            self.mode.schematic_mode = false;
+        }
+
+        if self.state.block.is_some() {
+            self.mode.rebuild_mode = false;
+            self.mode.schematic_mode = false;
+            self.state.command_mode = false;
+        }
+
+        if !self.state.command_mode {
+            self.state.command_buildings.clear();
+            self.state.selected_units.clear();
+        }
+
+        if self.state.place_mode == PlaceMode::None {
+            self.mode.line_mode = false;
+        }
+        if self.mode.line_mode && self.state.place_mode.is_placing() && self.state.block.is_none() {
+            self.mode.line_mode = false;
+        }
+
+        if self.state.block.is_some() && self.state.place_mode == PlaceMode::None {
+            self.state.place_mode = PlaceMode::Placing;
+        }
+        if self.state.block.is_none() && self.state.place_mode.is_placing() {
+            self.state.place_mode = PlaceMode::None;
+        }
+
+        if !self.mode.schematic_mode
+            && (self.state.place_mode.is_schematic_selecting()
+                || self.state.place_mode.is_rebuild_selecting())
+        {
+            self.state.place_mode = PlaceMode::None;
+        }
+        if !self.mode.rebuild_mode && self.state.place_mode.is_rebuild_selecting() {
+            self.state.place_mode = PlaceMode::None;
+        }
+
+        if self.state.block != self.last_block
+            && self.state.place_mode.is_breaking()
+            && self.state.block.is_some()
+        {
+            self.state.place_mode = PlaceMode::Placing;
+            self.last_block = self.state.block;
+        }
+        if self.state.block.is_none() {
+            self.last_block = None;
+        }
+    }
+
+    /// `MobileInput.update` keyboard-less camera move (returns the world delta).
+    pub fn camera_move(&mut self, axis_x: f32, axis_y: f32, delta: f32) -> (f32, f32) {
+        if self.keyboard {
+            return (0.0, 0.0);
+        }
+        let length = (axis_x * axis_x + axis_y * axis_y).sqrt();
+        if length <= 0.0 {
+            return (0.0, 0.0);
+        }
+        let speed = delta * CAM_SPEED / length;
+        (axis_x * speed, axis_y * speed)
+    }
+
+    /// `settings.getBool("keyboard")` branch.
+    pub fn keyboard(&self) -> bool {
+        self.keyboard
+    }
+
+    /// Sets the mobile keyboard mode (`settings` push).
+    pub fn set_keyboard(&mut self, value: bool) {
+        self.keyboard = value;
     }
 
     /// Pan handling (upstream `MobileInput.pan`). Shifts `select_plans` while a
@@ -667,6 +956,11 @@ impl MobileController {
         camera_width: f32,
         viewport_width: f32,
     ) -> (f32, f32) {
+        // `MobileInput.pan` guards: keyboard mode, dialog, manual shooting and
+        // schematic placement block touch panning.
+        if self.keyboard || self.manual_shooting || !self.down || self.mode.schematic_mode {
+            return (0.0, 0.0);
+        }
         let scale = if viewport_width > 0.0 {
             camera_width / viewport_width
         } else {
@@ -702,7 +996,12 @@ impl MobileController {
     }
 
     /// Pinch zoom (`MobileInput.zoom`): returns the new target scale.
+    ///
+    /// Keyboard mode disables touch zoom (`MobileInput.zoom` early return).
     pub fn zoom(&mut self, initial_distance: f32, distance: f32, base_scale: f32) -> f32 {
+        if self.keyboard {
+            return base_scale;
+        }
         if self.last_zoom < 0.0 {
             self.last_zoom = base_scale;
         }
@@ -801,18 +1100,29 @@ impl MobileController {
         self.emitted.clear();
         match event {
             GestureEvent::TouchDown { x, y, pointer } => {
-                if caps.is_menu() || caps.focus().is_menu {
+                if caps.is_menu() || caps.focus().is_menu || caps.is_cutscene() {
                     return SmallVec::new();
                 }
+                self.keyboard = caps.mobile_keyboard();
                 self.down = true;
                 if pointer == 0 {
                     let tile = TilePos::new(
                         (x / TILESIZE as f32).floor() as i16,
                         (y / TILESIZE as f32).floor() as i16,
                     );
-                    self.selecting = self.state.select_plans.iter().any(|plan| {
-                        TilePos::new(plan.x as i16, plan.y as i16) == tile
-                    });
+                    // Selecting begins only on an existing plan (`hasPlan`).
+                    self.selecting = self.has_plan(tile) && !self.command_mode_enabled();
+                    if self.mode.schematic_mode && self.state.block.is_none() {
+                        self.state.place_mode = if self.mode.rebuild_mode {
+                            PlaceMode::RebuildSelect
+                        } else {
+                            PlaceMode::SchematicSelect
+                        };
+                        self.begin_line(tile);
+                    } else if !self.selecting && self.keyboard {
+                        // Keyboard mode shoots on touch down (`MobileInput.touchDown`).
+                        self.manual_shooting = true;
+                    }
                 }
             }
             GestureEvent::LongPress { x, y } => {
@@ -845,11 +1155,28 @@ impl MobileController {
                     (x / TILESIZE as f32).floor() as i16,
                     (y / TILESIZE as f32).floor() as i16,
                 );
-                if let Some(block_id) = self.state.block
+                let block_size = block.map(|b| b.size).unwrap_or(1);
+                // Remove an existing plan on tap before queueing a new one.
+                let existing = if !self.command_mode_enabled() {
+                    self.get_plan(tile).cloned()
+                } else {
+                    None
+                };
+                if let Some(plan) = existing {
+                    self.remove_plan(&plan);
+                } else if let Some(block_id) = self.state.block
                     && self.state.place_mode.is_placing()
                 {
-                    if world.valid_place(block_id, tile.x() as i32, tile.y() as i32, self.state.rotation)
-                    {
+                    if world.valid_place(
+                        block_id,
+                        tile.x() as i32,
+                        tile.y() as i32,
+                        self.state.rotation,
+                    ) && !self.check_overlap_placement(
+                        tile.x() as i32,
+                        tile.y() as i32,
+                        block_size,
+                    ) {
                         self.add_select_plan(ClientPlan::place(
                             tile.x() as i32,
                             tile.y() as i32,
@@ -857,12 +1184,13 @@ impl MobileController {
                             block_id,
                         ));
                     }
-                } else if self.state.place_mode.is_breaking() {
-                    self.add_select_plan(ClientPlan::break_plan(
-                        tile.x() as i32,
-                        tile.y() as i32,
-                    ));
+                } else if self.state.place_mode.is_breaking()
+                    && world.block_at(tile.x() as i32, tile.y() as i32) != BlockId::AIR
+                    && !self.has_plan(tile)
+                {
+                    self.add_select_plan(ClientPlan::break_plan(tile.x() as i32, tile.y() as i32));
                 } else if count == 2 {
+                    self.payload_target = PayloadTarget::None;
                     self.manual_shooting = false;
                 }
             }
@@ -872,9 +1200,7 @@ impl MobileController {
                 let _ = self.pan(delta_x, delta_y, 1.0, 1.0);
             }
             GestureEvent::PanStop => self.pan_stop(),
-            GestureEvent::Fling { .. }
-            | GestureEvent::Zoom { .. }
-            | GestureEvent::PinchStop => {}
+            GestureEvent::Fling { .. } | GestureEvent::Zoom { .. } | GestureEvent::PinchStop => {}
         }
         self.emitted.clone()
     }
@@ -892,6 +1218,11 @@ impl MobileController {
         self.mode = MobileMode::default();
         self.line_start = None;
         self.selecting = false;
+        self.removals.clear();
+        self.target = None;
+        self.target_building = None;
+        self.last_placed = None;
+        self.last_block = None;
     }
 }
 
@@ -939,6 +1270,7 @@ mod tests {
     #[test]
     fn pan_shifts_plans() {
         let mut controller = MobileController::new();
+        controller.down = true;
         controller.selecting = true;
         controller.add_select_plan(ClientPlan::place(5, 5, 0, BlockId::STONE_WALL));
         // One tile of drag pans the selected plans by exactly one tile.
@@ -995,5 +1327,170 @@ mod tests {
         // ...but a same-tile second tap within 500 ms does.
         assert!(should_begin_mine(tile, Some(tile), 200, true));
         assert!(!should_begin_mine(tile, Some(tile), 600, true));
+    }
+
+    #[test]
+    fn autotarget() {
+        let world = ReplayWorld::new();
+        let mut controller = MobileController::new();
+        let units = [
+            SelectableUnit {
+                id: 5,
+                type_id: 0,
+                x: 30.0,
+                y: 30.0,
+                team: 1,
+                commandable: true,
+            },
+            SelectableUnit {
+                id: 6,
+                type_id: 0,
+                x: 32.0,
+                y: 30.0,
+                team: 0,
+                commandable: true,
+            },
+        ];
+        // Closest enemy within 20 px is targeted; own units are ignored.
+        assert_eq!(
+            controller.check_targets(&world, &units, 0, 31.0, 30.0),
+            Some(5)
+        );
+        assert_eq!(controller.target, Some(5));
+        // No enemy in range: fall through to building/position resolution.
+        assert_eq!(
+            controller.check_targets(&world, &units, 0, 400.0, 400.0),
+            None
+        );
+    }
+
+    #[test]
+    fn schematic_use_and_origin() {
+        let mut controller = MobileController::new();
+        let plans = vec![
+            ClientPlan::place(4, 4, 0, BlockId::STONE_WALL),
+            ClientPlan::place(6, 8, 0, BlockId::STONE_WALL),
+        ];
+        assert_eq!(controller.schem_origin(), (0, 0));
+        controller.use_schematic(plans);
+        assert!(controller.has_schematic());
+        assert!(controller.mode.schematic_mode);
+        assert_eq!(controller.state.place_mode, PlaceMode::SchematicSelect);
+        assert_eq!(controller.schem_origin(), (5, 6));
+        assert_eq!(controller.confirm_schematic(Vec::new()), 0);
+        assert!(!controller.mode.schematic_mode);
+        assert_eq!(controller.state.place_mode, PlaceMode::None);
+    }
+
+    #[test]
+    fn plan_remove_and_overlap() {
+        let mut controller = MobileController::new();
+        controller.add_select_plan(ClientPlan::place(2, 2, 0, BlockId::STONE_WALL));
+        assert!(controller.has_plan(TilePos::new(2, 2)));
+        assert_eq!(
+            controller.get_plan(TilePos::new(2, 2)).map(|p| p.x),
+            Some(2)
+        );
+        // A 1x1 footprint at the same tile overlaps.
+        assert!(controller.check_overlap_placement(2, 2, 1));
+        assert!(!controller.check_overlap_placement(9, 9, 1));
+        let plan = controller
+            .get_plan(TilePos::new(2, 2))
+            .cloned()
+            .expect("plan");
+        assert!(controller.remove_plan(&plan));
+        assert!(!controller.remove_plan(&plan));
+        assert_eq!(controller.removals.len(), 1);
+        assert!(!controller.has_plan(TilePos::new(2, 2)));
+    }
+
+    #[test]
+    fn rebuild_area_queues_replacements() {
+        let mut world = ReplayWorld::new();
+        world.place(3, 3, BlockId::STONE_WALL);
+        world.place(4, 3, BlockId::STONE_WALL);
+        let mut controller = MobileController::new();
+        controller.mode.rebuild_mode = true;
+        controller.state.place_mode = PlaceMode::RebuildSelect;
+        let queued = controller.rebuild_area(&world, 3, 3, 4, 3, |pos, _block| {
+            Some(ClientPlan::place(
+                pos.x() as i32,
+                pos.y() as i32,
+                0,
+                BlockId::STONE_WALL,
+            ))
+        });
+        assert_eq!(queued, 2);
+        assert_eq!(controller.state.select_plans.len(), 2);
+        assert_eq!(controller.state.place_mode, PlaceMode::None);
+        assert!(!controller.mode.rebuild_mode);
+    }
+
+    #[test]
+    fn keyboard_gates_pan_zoom() {
+        let mut controller = MobileController::new();
+        controller.set_keyboard(true);
+        assert!(controller.keyboard());
+        controller.down = true;
+        controller.selecting = true;
+        controller.add_select_plan(ClientPlan::place(5, 5, 0, BlockId::STONE_WALL));
+        // Pan is disabled in keyboard mode: plans do not shift.
+        assert_eq!(
+            controller.pan(TILESIZE as f32, 0.0, 800.0, 800.0),
+            (0.0, 0.0)
+        );
+        assert_eq!(controller.state.select_plans[0].x, 5);
+        // Zoom is disabled in keyboard mode: the base scale is returned.
+        assert_eq!(controller.zoom(100.0, 200.0, 4.0), 4.0);
+        // Keyboard camera move is disabled too.
+        assert_eq!(controller.camera_move(1.0, 0.0, 0.1), (0.0, 0.0));
+
+        controller.set_keyboard(false);
+        let (dx, _dy) = controller.camera_move(1.0, 0.0, 1.0);
+        assert!((dx - CAM_SPEED).abs() < 0.001);
+        assert!((controller.zoom(100.0, 200.0, 4.0) - 8.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn touch_down_selects_existing_plan() {
+        let world = ReplayWorld::new();
+        let mut controller = MobileController::new();
+        controller.add_select_plan(ClientPlan::place(4, 4, 0, BlockId::STONE_WALL));
+        let caps = TestCaps {
+            mobile: true,
+            ..TestCaps::default()
+        };
+        controller.handle_gesture(
+            GestureEvent::TouchDown {
+                x: 4.0 * TILESIZE as f32,
+                y: 4.0 * TILESIZE as f32,
+                pointer: 0,
+            },
+            &world,
+            None,
+            &caps,
+        );
+        assert!(controller.selecting);
+        assert!(controller.down);
+    }
+
+    #[test]
+    fn tap_removes_existing_plan() {
+        let world = ReplayWorld::new();
+        let mut controller = MobileController::new();
+        controller.add_select_plan(ClientPlan::place(4, 4, 0, BlockId::STONE_WALL));
+        let caps = TestCaps::default();
+        controller.handle_gesture(
+            GestureEvent::Tap {
+                x: 4.0 * TILESIZE as f32,
+                y: 4.0 * TILESIZE as f32,
+                count: 1,
+            },
+            &world,
+            None,
+            &caps,
+        );
+        assert!(controller.state.select_plans.is_empty());
+        assert_eq!(controller.removals.len(), 1);
     }
 }

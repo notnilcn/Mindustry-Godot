@@ -82,6 +82,12 @@ pub trait InputCaps {
         false
     }
 
+    /// `settings.getBool("keyboard")`: mobile keyboard mode disables touch
+    /// pan/zoom and enables shoot-on-touch (`MobileInput`).
+    fn mobile_keyboard(&self) -> bool {
+        false
+    }
+
     /// Player select radius (`11` desktop / `17` mobile).
     fn player_select_range(&self) -> f32 {
         if self.mobile() { 17.0 } else { 11.0 }
@@ -111,6 +117,8 @@ pub struct TestCaps {
     pub swap_diagonal: Option<bool>,
     /// Mobile handler flag.
     pub mobile: bool,
+    /// `keyboard` mobile setting.
+    pub mobile_keyboard: Option<bool>,
 }
 
 impl InputCaps for TestCaps {
@@ -152,6 +160,10 @@ impl InputCaps for TestCaps {
 
     fn mobile(&self) -> bool {
         self.mobile
+    }
+
+    fn mobile_keyboard(&self) -> bool {
+        self.mobile_keyboard.unwrap_or(false)
     }
 }
 

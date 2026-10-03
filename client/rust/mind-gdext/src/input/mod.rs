@@ -37,6 +37,10 @@ pub struct MindInput {
     last_event_count: usize,
     /// Whether the malformed-event warning has been logged once.
     warned: bool,
+    /// Mobile touch session (constructed when the handler is mobile).
+    mobile: mobile::MobileInputBridge,
+    /// Client monotonic clock in seconds for the gesture detector.
+    mobile_time: f64,
 }
 
 #[godot_api]
@@ -52,6 +56,8 @@ impl INode for MindInput {
             frame: 0,
             last_event_count: 0,
             warned: false,
+            mobile: mobile::MobileInputBridge::new(),
+            mobile_time: 0.0,
         }
     }
 
@@ -70,11 +76,16 @@ impl INode for MindInput {
         self.pending.extend(translated);
     }
 
-    fn process(&mut self, _delta: f64) {
+    fn process(&mut self, delta: f64) {
         self.frame += 1;
-        // M0: events are logged/counted; M2 feeds the desktop/mobile controllers.
+        // M0: events are logged/counted; the desktop controller is M2.
         self.last_event_count = self.pending.len();
         self.pending.clear();
+        // M3: drive the mobile gesture detector's long-press timer. The touch
+        // stream itself is folded in by the `mobile_*` callbacks (plan 14).
+        self.mobile_time += delta;
+        let _ = self.mobile.tick(self.mobile_time);
+        self.mobile.update_transitions();
     }
 }
 
@@ -223,4 +234,130 @@ impl MindInput {
         });
         GString::from(&value.to_string())
     }
+
+    /// `/root/Spine/Input` mobile state JSON (plan-14 mobile HUD).
+    #[func]
+    pub fn mobile_state_json(&self) -> GString {
+        GString::from(&self.mobile.state_json().to_string())
+    }
+
+    /// Mobile interaction mode flags JSON (plan-14 mobile HUD).
+    #[func]
+    pub fn mobile_mode_json(&self) -> GString {
+        GString::from(&self.mobile.mode_json().to_string())
+    }
+
+    /// Pushes the `keyboard` mobile setting (plan 22 owns native input).
+    #[func]
+    pub fn set_mobile_keyboard(&mut self, keyboard: bool) {
+        self.mobile.set_keyboard(keyboard);
+    }
+
+    /// Selects the mobile placement block by raw content id (`-1` clears).
+    #[func]
+    pub fn set_mobile_block(&mut self, raw: i64) {
+        let block = if raw < 0 {
+            None
+        } else {
+            Some(mind_core::content::BlockId::new(raw as u16))
+        };
+        self.mobile.set_block(block);
+    }
+
+    /// `rotate` mobile button.
+    #[func]
+    pub fn mobile_rotate(&mut self, delta: i64) {
+        self.mobile.rotate(delta as i32);
+    }
+
+    /// `flip` mobile button.
+    #[func]
+    pub fn mobile_flip(&mut self, flip_x: bool, flip_y: bool) {
+        self.mobile.flip(flip_x, flip_y);
+    }
+
+    /// `rotate plans` mobile button.
+    #[func]
+    pub fn mobile_rotate_plans(&mut self, direction: i64) {
+        self.mobile.rotate_plans(direction as i32);
+    }
+
+    /// `toggle command mode` mobile button.
+    #[func]
+    pub fn mobile_toggle_command_mode(&mut self) -> bool {
+        self.mobile.toggle_command_mode()
+    }
+
+    /// `toggle queue mode` mobile button.
+    #[func]
+    pub fn mobile_toggle_queue_mode(&mut self) -> bool {
+        self.mobile.toggle_queue_mode()
+    }
+
+    /// `toggle schematic` mobile button.
+    #[func]
+    pub fn mobile_toggle_schematic(&mut self) -> bool {
+        self.mobile.toggle_schematic()
+    }
+
+    /// `clear building` mobile button.
+    #[func]
+    pub fn mobile_clear_select_plans(&mut self) {
+        self.mobile.clear_select_plans();
+    }
+
+    /// Queued selection-plan count (confirm button badge).
+    #[func]
+    pub fn mobile_select_plan_count(&self) -> i64 {
+        self.mobile.select_plan_count() as i64
+    }
+
+    /// Folds a Godot `InputEventScreenTouch` into the gesture detector.
+    #[func]
+    pub fn mobile_touch_down(&mut self, time: f64, x: f32, y: f32, pointer: i64) -> GString {
+        let events = self.mobile.touch_down(time, x, y, pointer as i32);
+        gestures_json(&events)
+    }
+
+    /// Folds a Godot `InputEventScreenDrag` into the gesture detector.
+    #[func]
+    pub fn mobile_touch_drag(&mut self, time: f64, x: f32, y: f32, pointer: i64) -> GString {
+        let events = self.mobile.touch_drag(time, x, y, pointer as i32);
+        gestures_json(&events)
+    }
+
+    /// Folds a Godot `InputEventScreenTouch` release into the gesture detector.
+    #[func]
+    pub fn mobile_touch_up(&mut self, time: f64, x: f32, y: f32, pointer: i64) -> GString {
+        let events = self.mobile.touch_up(time, x, y, pointer as i32);
+        gestures_json(&events)
+    }
+
+    /// Fires a pending long press at `time` and returns it as JSON.
+    #[func]
+    pub fn mobile_tick(&mut self, time: f64) -> GString {
+        match self.mobile.tick(time) {
+            Some(event) => GString::from(&mobile::gesture_json(&event).to_string()),
+            None => GString::from("null"),
+        }
+    }
+
+    /// Keyboard-less mobile camera move for the autoload's `_process`.
+    #[func]
+    pub fn mobile_camera_move(&mut self, axis_x: f32, axis_y: f32, delta: f64) -> Vector2 {
+        let (x, y) = self.mobile.camera_move(axis_x, axis_y, delta as f32);
+        Vector2::new(x, y)
+    }
+
+    /// Clears the mobile session (`updateState` menu branch).
+    #[func]
+    pub fn mobile_reset(&mut self) {
+        self.mobile.reset();
+    }
+}
+
+/// Serializes gesture events to a JSON array (GDScript/MCP consumers).
+fn gestures_json(events: &[mind_core::input::GestureEvent]) -> GString {
+    let array: Vec<serde_json::Value> = events.iter().map(mobile::gesture_json).collect();
+    GString::from(&serde_json::Value::Array(array).to_string())
 }

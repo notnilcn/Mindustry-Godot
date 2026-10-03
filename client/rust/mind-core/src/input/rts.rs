@@ -8,7 +8,10 @@
 
 use smallvec::SmallVec;
 
+use crate::ai::{AttackTarget, CommandAiState, CommandQueueEntry};
 use crate::world::TilePos;
+
+use super::action::CommandTarget;
 
 /// A unit candidate for selection.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -162,6 +165,45 @@ pub fn select_buildings_rect(
     }
 }
 
+/// `InputHandler.commandUnits` apply side (plan 15 §3.9, plan 11 §3.8).
+///
+/// Plan 11 ships the per-unit [`CommandAiState`] transitions but not the
+/// `InputHandler.java:310-408` selection loop it was assigned; this adapter is
+/// the documented 15→11 seam. It applies an implicit move
+/// ([`CommandTarget::Position`]) or an explicit attack target
+/// ([`CommandTarget::Unit`]/[`CommandTarget::Building`]) to each selected unit,
+/// queueing the waypoint when `queue` is set. Returns the number of units
+/// updated. Formation/`UnitGroup` grouping stays with the caller (plan 11).
+pub fn command_units_apply(
+    states: &mut [&mut CommandAiState],
+    target: CommandTarget,
+    queue: bool,
+) -> usize {
+    let entry = match target {
+        CommandTarget::Position { x, y } => CommandQueueEntry::Position(x, y),
+        CommandTarget::Unit(id) => CommandQueueEntry::Unit(id),
+        CommandTarget::Building(pos) => CommandQueueEntry::Building(pos.pack()),
+    };
+    let mut applied = 0usize;
+    for state in states.iter_mut() {
+        if queue {
+            if state.command_queue(entry) {
+                applied += 1;
+            }
+        } else {
+            match target {
+                CommandTarget::Position { x, y } => state.command_position(x, y),
+                CommandTarget::Unit(id) => state.command_target(AttackTarget::Unit(id)),
+                CommandTarget::Building(pos) => {
+                    state.command_target(AttackTarget::Building(pos.pack()));
+                }
+            }
+            applied += 1;
+        }
+    }
+    applied
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,5 +292,35 @@ mod tests {
             &mut selected,
         );
         assert_eq!(selected.as_slice(), &[TilePos::new(3, 3)]);
+    }
+
+    #[test]
+    fn command_units_apply_move_and_target() {
+        let mut first = CommandAiState::default();
+        let mut second = CommandAiState::default();
+        let applied = command_units_apply(
+            &mut [&mut first, &mut second],
+            CommandTarget::Position { x: 12.0, y: 34.0 },
+            false,
+        );
+        assert_eq!(applied, 2);
+        assert_eq!(first.target_pos, Some((12.0, 34.0)));
+        assert_eq!(second.target_pos, Some((12.0, 34.0)));
+        // Queue mode appends rather than replacing.
+        let applied = command_units_apply(&mut [&mut first], CommandTarget::Unit(7), true);
+        assert_eq!(applied, 1);
+        assert_eq!(first.command_queue.len(), 1);
+        assert_eq!(first.command_queue[0], CommandQueueEntry::Unit(7));
+        // Explicit attack target (non-queue).
+        let applied = command_units_apply(
+            &mut [&mut second],
+            CommandTarget::Building(TilePos::new(3, 4)),
+            false,
+        );
+        assert_eq!(applied, 1);
+        assert_eq!(
+            second.attack_target,
+            Some(AttackTarget::Building(TilePos::new(3, 4).pack()))
+        );
     }
 }

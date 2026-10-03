@@ -158,16 +158,20 @@ impl MobileReplayHarness {
                 if self.controller.mode.line_mode {
                     if self.controller.state.place_mode.is_placing() {
                         self.controller.confirm_line(world);
-                    } else if self.controller.state.place_mode.is_breaking() {
-                        if let Some(start) = self.controller.line_start {
-                            let (tx, ty) = (
-                                (*x / crate::config::TILESIZE as f32).floor() as i32,
-                                (*y / crate::config::TILESIZE as f32).floor() as i32,
-                            );
-                            self.controller
-                                .state
-                                .break_rect(world, start.x() as i32, start.y() as i32, tx, ty);
-                        }
+                    } else if self.controller.state.place_mode.is_breaking()
+                        && let Some(start) = self.controller.line_start
+                    {
+                        let (tx, ty) = (
+                            (*x / crate::config::TILESIZE as f32).floor() as i32,
+                            (*y / crate::config::TILESIZE as f32).floor() as i32,
+                        );
+                        self.controller.state.break_rect(
+                            world,
+                            start.x() as i32,
+                            start.y() as i32,
+                            tx,
+                            ty,
+                        );
                     }
                     self.controller.mode.line_mode = false;
                 }
@@ -409,6 +413,7 @@ mod tests {
     #[test]
     fn mobile_pan_shift_plans() {
         let mut controller = MobileController::new();
+        controller.down = true;
         controller.selecting = true;
         controller.add_select_plan(super::super::plan::ClientPlan::place(
             5,
@@ -426,7 +431,11 @@ mod tests {
         detector.touch_down(0.0, 100.0, 100.0, 0);
         detector.touch_down(0.0, 200.0, 100.0, 1);
         let events = detector.touch_dragged(0.1, 300.0, 100.0, 1);
-        assert!(events.iter().any(|e| matches!(e, GestureEvent::Zoom { .. })));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, GestureEvent::Zoom { .. }))
+        );
         let mut controller = MobileController::new();
         assert!((controller.zoom(100.0, 200.0, 4.0) - 8.0).abs() < 0.001);
     }
@@ -450,12 +459,8 @@ mod tests {
         );
         assert_eq!(target, PayloadTarget::Unit(7));
         // Otherwise a friendly building is selected.
-        let target = controller.resolve_payload_target(
-            (10.0, 10.0),
-            &[],
-            &[TilePos::new(1, 1)],
-            false,
-        );
+        let target =
+            controller.resolve_payload_target((10.0, 10.0), &[], &[TilePos::new(1, 1)], false);
         assert_eq!(target, PayloadTarget::Building(TilePos::new(1, 1)));
         // With a carried payload and no structure, drop at the position.
         let target = controller.resolve_payload_target((30.0, 40.0), &[], &[], true);
