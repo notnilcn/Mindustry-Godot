@@ -146,12 +146,7 @@ impl Soak {
             .copied()
             .unwrap_or(128)
             .clamp(16, 1024) as i32;
-        let buildings = profile
-            .fields
-            .get("buildings")
-            .copied()
-            .unwrap_or(0)
-            .max(0) as usize;
+        let buildings = profile.fields.get("buildings").copied().unwrap_or(0).max(0) as usize;
         let checksum_every = profile
             .fields
             .get("checksum_every_ticks")
@@ -193,10 +188,10 @@ impl Soak {
                     "checksum": sim.checksum_hex(),
                 }));
             }
-            if tick % (checksum_every.max(60)) == 0 {
-                if let Some(rss) = resident_bytes() {
-                    peak_rss = Some(peak_rss.map_or(rss, |p| p.max(rss)));
-                }
+            if tick % checksum_every.max(60) == 0
+                && let Some(rss) = resident_bytes()
+            {
+                peak_rss = Some(peak_rss.map_or(rss, |p| p.max(rss)));
             }
         }
         let elapsed_ms = started.elapsed().as_millis() as u64;
@@ -253,6 +248,8 @@ impl Soak {
             "max_alloc_delta": max_alloc_delta,
             "alloc_within": alloc_within,
             "elapsed_ms": elapsed_ms,
+            "declared_fields": &profile.fields,
+            "load_model": "bounded walls-only slice; units/bullets/belt load belongs to the owning systems on the nightly perf runner",
         }))
     }
 }
@@ -313,5 +310,63 @@ mod tests {
     fn unknown_profile_is_an_error() {
         let soak = Soak::load(&soak_path()).expect("soak");
         assert!(soak.profile("nope").is_err());
+    }
+
+    /// Bounded slice of the `mid` profile: 600 ticks (10 s of sim at 60 Hz)
+    /// after the 600-tick warmup. The full 60-minute run belongs on the nightly
+    /// perf runner; this pins the runner's tracking fields on every CI run.
+    #[test]
+    fn bounded_mid_soak_executes_and_tracks() {
+        let soak = Soak::load(&soak_path()).expect("soak");
+        let report = soak.run("mid", None, Some(600), 7).expect("soak run");
+        assert_eq!(report["executed"], serde_json::json!(true));
+        assert_eq!(report["ticks"], serde_json::json!(600));
+        assert!(
+            report["prefix_match"].as_bool().expect("prefix_match"),
+            "checkpoint replay drifted: {report}"
+        );
+        assert!(
+            report["pass"].as_bool().expect("pass"),
+            "bounded mid soak failed: {report}"
+        );
+        let checkpoints = report["checkpoints"].as_array().expect("checkpoints");
+        assert_eq!(
+            checkpoints.len(),
+            1,
+            "600 ticks has one 600-tick checkpoint"
+        );
+        assert!(
+            report["final_checksum"]
+                .as_str()
+                .is_some_and(|c| !c.is_empty())
+        );
+        assert!(report["elapsed_ms"].as_u64().is_some());
+    }
+
+    #[test]
+    fn soak_checksum_is_seed_deterministic() {
+        let soak = Soak::load(&soak_path()).expect("soak");
+        let first = soak.run("mid", None, Some(120), 7).expect("first");
+        let second = soak.run("mid", None, Some(120), 7).expect("second");
+        let other = soak.run("mid", None, Some(120), 8).expect("other");
+        assert_eq!(first["final_checksum"], second["final_checksum"]);
+        assert_ne!(first["final_checksum"], other["final_checksum"]);
+    }
+
+    #[test]
+    fn windowed_and_multiplayer_are_deferred() {
+        let soak = Soak::load(&soak_path()).expect("soak");
+        for profile in ["windowed", "multiplayer"] {
+            let report = soak.run(profile, Some(1), None, 7).expect("deferred");
+            assert_eq!(report["executed"], serde_json::json!(false), "{profile}");
+            assert_eq!(report["pass"], serde_json::json!(true), "{profile}");
+            assert!(report["deferred"].as_str().is_some(), "{profile}");
+        }
+    }
+
+    #[test]
+    fn zero_tick_budget_is_an_error() {
+        let soak = Soak::load(&soak_path()).expect("soak");
+        assert!(soak.run("mid", Some(0), None, 7).is_err());
     }
 }

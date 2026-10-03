@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 
-use crate::cli::ParityCommand;
+use crate::cli::{Cli, ParityCommand};
 
 use self::budgets::Budgets;
 use self::golden::GoldenManifest;
@@ -97,7 +97,7 @@ fn print_json(value: &serde_json::Value) -> Result<()> {
 }
 
 /// Dispatches a `parity` subcommand.
-pub fn run(command: &ParityCommand) -> Result<i32> {
+pub fn run(cli: &Cli, command: &ParityCommand) -> Result<i32> {
     match command {
         ParityCommand::Check { json, repo, tests } => {
             let repo = find_repo(repo.as_deref())?;
@@ -110,6 +110,9 @@ pub fn run(command: &ParityCommand) -> Result<i32> {
                 print_outcome(&outcome);
             }
             Ok(if outcome.pass() { EXIT_PASS } else { EXIT_FAIL })
+        }
+        ParityCommand::Run { suite, phase, json } => {
+            crate::exec::run_suite(cli, suite, phase.as_deref(), *json)
         }
         ParityCommand::Matrix {
             json,
@@ -133,7 +136,12 @@ pub fn run(command: &ParityCommand) -> Result<i32> {
         ParityCommand::McpParity { suite, json, repo } => {
             cmd_mcp_parity(suite, *json, repo.as_deref())
         }
-        ParityCommand::Screenshots { json, repo } => cmd_screenshots(*json, repo.as_deref()),
+        ParityCommand::Screenshots {
+            json,
+            repo,
+            diff_a,
+            diff_b,
+        } => cmd_screenshots(*json, repo.as_deref(), diff_a.as_deref(), diff_b.as_deref()),
         ParityCommand::Report { json, repo } => cmd_report(*json, repo.as_deref()),
         ParityCommand::Gate {
             phase,
@@ -522,7 +530,40 @@ fn cmd_mcp_parity(suite: &str, json: bool, repo: Option<&Path>) -> Result<i32> {
     Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
 }
 
-fn cmd_screenshots(json: bool, repo: Option<&Path>) -> Result<i32> {
+fn cmd_screenshots(
+    json: bool,
+    repo: Option<&Path>,
+    diff_a: Option<&Path>,
+    diff_b: Option<&Path>,
+) -> Result<i32> {
+    match (diff_a, diff_b) {
+        (Some(left), Some(right)) => {
+            let diff =
+                screenshot::diff_png_files(left, right, screenshot::DiffTolerance::default())?;
+            let pass = diff.pass;
+            if json {
+                print_json(&diff.to_json())?;
+            } else {
+                println!(
+                    "parity screenshots diff: {}x{}, {} changed ({:.4}%), max delta {}, mean {:.3} -> {}",
+                    diff.width,
+                    diff.height,
+                    diff.changed_pixels,
+                    diff.changed_fraction * 100.0,
+                    diff.max_channel_delta,
+                    diff.mean_channel_delta,
+                    if pass { "PASS" } else { "FAIL" },
+                );
+            }
+            return Ok(if pass { EXIT_PASS } else { EXIT_FAIL });
+        }
+        (Some(_), None) | (None, Some(_)) => {
+            return Err(anyhow!(
+                "screenshot diff needs both `--diff-a` and `--diff-b`"
+            ));
+        }
+        (None, None) => {}
+    }
     let repo = find_repo(repo)?;
     let manifest = ScreenshotManifest::load(&repo.join("parity/screenshots/manifest.json"))?;
     let results = manifest.verify(&repo);

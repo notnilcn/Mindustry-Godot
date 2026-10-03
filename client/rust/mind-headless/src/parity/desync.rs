@@ -110,6 +110,8 @@ pub struct ReferenceDetector {
     /// Applied-before-stamp tolerance.
     late_tolerance: u64,
     content_hash: Option<String>,
+    /// Host baseline checkpoints keyed by tick (seeded before peer frames).
+    expected_checksums: BTreeMap<u64, String>,
 }
 
 impl ReferenceDetector {
@@ -133,7 +135,14 @@ impl DesyncDetector for ReferenceDetector {
                     Verdict::Ok
                 }
             },
-            Frame::Checksum { tick, .. } => Verdict::ChecksumMismatch { tick: *tick },
+            Frame::Checksum { tick, value } => match self.expected_checksums.get(tick) {
+                Some(expected) if expected != value => Verdict::ChecksumMismatch { tick: *tick },
+                Some(_) => Verdict::Ok,
+                None => {
+                    self.expected_checksums.insert(*tick, value.clone());
+                    Verdict::Ok
+                }
+            },
             Frame::Command {
                 seq,
                 tick,
@@ -275,7 +284,9 @@ fn scenario(case: &str) -> Result<Scenario> {
             Ok(Scenario {
                 host: ok_commands,
                 peer,
-                expected: Verdict::TickStampAnomaly { delta: 100_000 - 120 },
+                expected: Verdict::TickStampAnomaly {
+                    delta: 100_000 - 120,
+                },
             })
         }
         other => Err(anyhow!("unknown desync case `{other}`")),
@@ -286,6 +297,17 @@ fn scenario(case: &str) -> Result<Scenario> {
 pub fn run(case: &str, _seed: u64) -> Result<serde_json::Value> {
     let scenario = scenario(case)?;
     let mut detector = ReferenceDetector::new();
+    // The host's identity/checksum frames are the detector's baseline; command
+    // baselines come from the peer stream itself (reorder/dup/gap need the run
+    // of contiguous sequences to be visible in the corrupted stream).
+    for frame in &scenario.host {
+        match frame {
+            Frame::ContentHash(_) | Frame::Checksum { .. } => {
+                let _ = detector.observe(frame);
+            }
+            Frame::Command { .. } => {}
+        }
+    }
     let mut verdicts = Vec::new();
     for frame in &scenario.peer {
         verdicts.push(detector.observe(frame));
@@ -395,5 +417,71 @@ mod tests {
     #[test]
     fn run_all_is_green() {
         assert!(run_all(7).expect("all")["pass"].as_bool().unwrap_or(false));
+    }
+
+    #[test]
+    fn every_case_reports_its_expected_verdict_name() {
+        for case in CASES {
+            let report = run(case, 7).expect("case");
+            assert_eq!(
+                report["observed"], report["expected"],
+                "case `{case}` reported the wrong verdict: {report}"
+            );
+        }
+    }
+
+    #[test]
+    fn reference_detector_compares_checksums_against_a_baseline() {
+        let mut detector = ReferenceDetector::new();
+        // Seeding the host checkpoint at tick 600 makes the equal peer frame
+        // pass and a differing one fail (the baseline the case harness relies on).
+        assert_eq!(
+            detector.observe(&Frame::Checksum {
+                tick: 600,
+                value: String::from("aaaa"),
+            }),
+            Verdict::Ok
+        );
+        assert_eq!(
+            detector.observe(&Frame::Checksum {
+                tick: 600,
+                value: String::from("aaaa"),
+            }),
+            Verdict::Ok
+        );
+        assert_eq!(
+            detector.observe(&Frame::Checksum {
+                tick: 600,
+                value: String::from("bbbb"),
+            }),
+            Verdict::ChecksumMismatch { tick: 600 }
+        );
+    }
+
+    #[test]
+    fn content_hash_mismatch_detects_a_different_build() {
+        let mut detector = ReferenceDetector::new();
+        assert_eq!(
+            detector.observe(&Frame::ContentHash(String::from("c0ffee"))),
+            Verdict::Ok
+        );
+        assert_eq!(
+            detector.observe(&Frame::ContentHash(String::from("deadbe"))),
+            Verdict::IncompatibleBuild
+        );
+    }
+
+    #[test]
+    fn verdict_names_are_stable_and_unique() {
+        let mut names = std::collections::BTreeSet::new();
+        for case in CASES {
+            let report = run(case, 7).expect("case");
+            let observed = report["observed"].as_str().expect("observed");
+            // A few cases share detector verdicts; the case name itself stays unique.
+            assert!(report["case"].as_str().is_some());
+            names.insert(observed.to_owned());
+        }
+        assert!(names.contains("incompatible_build"));
+        assert!(names.contains("checksum_mismatch"));
     }
 }

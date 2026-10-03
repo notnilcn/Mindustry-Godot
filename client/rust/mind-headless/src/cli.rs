@@ -539,6 +539,23 @@ pub enum ParityCommand {
         tests: Option<PathBuf>,
     },
 
+    /// Run a headless suite across the catalog (`smoke` = T0, `gate` = T1,
+    /// `full` = T2) in-process and emit its `format: 1` report (§3.2).
+    ///
+    /// Only file-backed scenarios run here; embedded subsystem scenarios are
+    /// exercised by their own subcommands/nightly runner.
+    Run {
+        /// Suite key (`smoke`, `gate`, `full`).
+        #[arg(long, default_value = "smoke")]
+        suite: String,
+        /// Restrict to scenarios whose phase is at or before this phase (`P0`..`P8`).
+        #[arg(long)]
+        phase: Option<String>,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Validate `parity/matrix.toml` (the upstream-test mapping registry).
     Matrix {
         /// Emit a machine-readable JSON report on stdout.
@@ -669,6 +686,12 @@ pub enum ParityCommand {
         /// Repo root override (defaults to discovery from cwd).
         #[arg(long)]
         repo: Option<PathBuf>,
+        /// Left PNG for a headless tolerance diff (`--diff-b` required).
+        #[arg(long)]
+        diff_a: Option<PathBuf>,
+        /// Right PNG for a headless tolerance diff (`--diff-a` required).
+        #[arg(long)]
+        diff_b: Option<PathBuf>,
     },
 
     /// Roll up the parity registries into a program status report.
