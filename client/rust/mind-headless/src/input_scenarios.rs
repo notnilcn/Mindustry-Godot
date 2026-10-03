@@ -10,7 +10,7 @@ use mind_core::content::{
 };
 use mind_core::input::{
     BindingDefault, BindingState, FocusGuards, FocusState, InputLog, InputReplay, KeyBindTable,
-    LockId, PlaceMode, PlacementWorld, RawEvent,
+    LockId, PlaceMode, PlacementWorld, RawEvent, RemoteAction,
 };
 use mind_core::world::build::{can_replace, valid_break, valid_place_at};
 use mind_core::world::{BlockCounter, BlockTable, BuildRules, TilePos, WorldGrid};
@@ -151,6 +151,7 @@ fn scenario(name: &str, json: bool, out: Option<&Path>, golden: Option<&Path>) -
         "input_focus_guards" => focus_guards(json, out, golden),
         "placement_validation_table" => placement_validation_table(json, out, golden),
         "input_place_line_headless" => input_place_line_headless(json, out, golden),
+        "input_replay_mobile" => input_replay_mobile(json, out, golden),
         other => bail!("unknown input scenario `{other}`"),
     }
 }
@@ -429,6 +430,58 @@ fn input_place_line_headless(json: bool, out: Option<&Path>, golden: Option<&Pat
         "scenario": "input_place_line_headless",
         "cases": cases,
         "checksum": fnv1a(serde_json::to_string(&cases)?.as_bytes()),
+    });
+    emit(&report, out, golden)?;
+    print_json(&report, json);
+    Ok(())
+}
+
+/// `input_replay_mobile`: scripted touch replay (long-press line + confirm +
+/// magnify) through the mobile controller, dumped as a state report.
+fn input_replay_mobile(json: bool, out: Option<&Path>, golden: Option<&Path>) -> Result<()> {
+    let world = mind_core::input::replay::ReplayWorld::new();
+    let conveyor = boot_content()?
+        .block_id("conveyor")
+        .unwrap_or(BlockId::AIR);
+
+    let header = mind_core::input::InputHeader {
+        mobile: true,
+        ..mind_core::input::InputHeader::default()
+    };
+    let mut log = InputLog::new(header);
+    log.push(0, RawEvent::TouchDown { pointer: 0, x: 32.0, y: 32.0 });
+    log.push(20, RawEvent::Action { action: "tick".to_owned(), value: 0.0 });
+    log.push(21, RawEvent::TouchMove { pointer: 0, x: 96.0, y: 32.0 });
+    log.push(22, RawEvent::TouchUp { pointer: 0, x: 96.0, y: 32.0 });
+    log.push(40, RawEvent::Magnify { factor: 1.1 });
+
+    let caps = mind_core::input::TestCaps {
+        mobile: true,
+        ..mind_core::input::TestCaps::default()
+    };
+    let mut harness = mind_core::input::MobileReplayHarness::new();
+    harness.controller.state.select_block(Some(conveyor));
+    harness.controller.state.begin_place();
+    let events = harness.run(&log, &world, None, &caps);
+
+    let actions: Vec<&str> = harness
+        .actions
+        .iter()
+        .map(mind_core::input::RemoteAction::name)
+        .collect();
+    let report = serde_json::json!({
+        "scenario": "input_replay_mobile",
+        "mobile": log.header.mobile,
+        "events": events,
+        "mode": harness.controller.state.place_mode.name(),
+        "block": conveyor.raw(),
+        "rotation": harness.controller.state.rotation,
+        "line_plans": harness.controller.state.line_plans.len(),
+        "queue_plans": harness.controller.queue.len(),
+        "zoom": harness.controller.last_zoom,
+        "cursor": [harness.cursor.0, harness.cursor.1],
+        "actions": actions,
+        "checksum": fnv1a(serde_json::to_string(&actions)?.as_bytes()),
     });
     emit(&report, out, golden)?;
     print_json(&report, json);

@@ -9,6 +9,8 @@
 
 pub mod bindings;
 pub mod events;
+pub mod gesture;
+pub mod mobile;
 
 use godot::classes::{INode, Node};
 use godot::obj::Base;
