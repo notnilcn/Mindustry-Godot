@@ -377,10 +377,7 @@ mod tests {
         assert!(decoded.was_cancelled());
         assert_eq!(decoded.token, 9);
 
-        assert_eq!(
-            MenuResult::decode(&[2]),
-            Err(MenuResultError::BadFormat(2))
-        );
+        assert_eq!(MenuResult::decode(&[2]), Err(MenuResultError::BadFormat(2)));
         assert_eq!(MenuResult::decode(&[]), Err(MenuResultError::Eof));
     }
 }

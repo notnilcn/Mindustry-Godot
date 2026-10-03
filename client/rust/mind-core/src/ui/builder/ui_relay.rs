@@ -14,8 +14,8 @@
 //! typed records. Nothing here touches Godot or the network.
 
 use crate::ui::builder::menu_result::{MenuResult, MenuResultError};
-use crate::ui::builder::ui_node::{Cursor, UiNode};
 use crate::ui::builder::ui_key::UiKey;
+use crate::ui::builder::ui_node::{Cursor, UiNode};
 
 /// Header byte for every plan-14 relay payload.
 pub const UI_RELAY_FORMAT: u8 = 1;
@@ -113,6 +113,39 @@ pub struct MenuBuilderChoose {
     pub menu_id: i32,
     /// Captured result.
     pub result: MenuResult,
+}
+
+/// A client → host result command, matching plan-21 `CommandKind` variants
+/// (`MenuChoose`/`MenuBuilderChoose`/`TextInputResult`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum RelayCommand {
+    /// Legacy option menu pick.
+    MenuChoose(MenuChoose),
+    /// Menu-builder result (token + id values).
+    MenuBuilderChoose(MenuBuilderChoose),
+    /// Text-input result.
+    TextInputResult(TextInputResult),
+}
+
+impl RelayCommand {
+    /// Stable kind name (matches the plan-21 `CommandKind` variant, snake_case).
+    pub fn kind_name(&self) -> &'static str {
+        match self {
+            RelayCommand::MenuChoose(_) => "menu_choose",
+            RelayCommand::MenuBuilderChoose(_) => "menu_builder_choose",
+            RelayCommand::TextInputResult(_) => "text_input_result",
+        }
+    }
+
+    /// Encodes the command payload (plan 14 §6.3), without the `CommandKind`
+    /// envelope owned by plan 21.
+    pub fn encode(&self) -> Vec<u8> {
+        match self {
+            RelayCommand::MenuChoose(value) => encode_menu_choose(*value),
+            RelayCommand::MenuBuilderChoose(value) => encode_menu_builder_choose(value),
+            RelayCommand::TextInputResult(value) => encode_text_input_result(value),
+        }
+    }
 }
 
 /// `text_input` payload (server → client).
@@ -228,9 +261,9 @@ pub fn encode_menu_builder_show(value: &MenuBuilderShow) -> Vec<u8> {
 /// Decodes `menu_builder_show`.
 pub fn decode_menu_builder_show(data: &[u8]) -> Result<MenuBuilderShow, RelayError> {
     let mut reader = Reader::new(data)?;
-    let flags = reader.u8()?;
     let id = reader.i32()?;
     let token = reader.i64()?;
+    let flags = reader.u8()?;
     let title = if flags & (1 << 3) != 0 {
         Some(reader.str()?)
     } else {
@@ -680,7 +713,10 @@ mod tests {
             decode_menu_builder_update(&encode_menu_builder_update(&update)).unwrap(),
             update
         );
-        assert_eq!(decode_menu_builder_hide(&encode_menu_builder_hide(5)).unwrap(), 5);
+        assert_eq!(
+            decode_menu_builder_hide(&encode_menu_builder_hide(5)).unwrap(),
+            5
+        );
     }
 
     #[test]
@@ -688,10 +724,7 @@ mod tests {
         let mut result = MenuResult::from_result("buy");
         result.token = 12;
         result.insert("volume", MenuValue::F32(0.25));
-        let choose = MenuBuilderChoose {
-            menu_id: 4,
-            result,
-        };
+        let choose = MenuBuilderChoose { menu_id: 4, result };
         let bytes = encode_menu_builder_choose(&choose);
         assert_eq!(decode_menu_builder_choose(&bytes).unwrap(), choose);
 
@@ -727,7 +760,10 @@ mod tests {
             numeric: true,
             allow_empty: false,
         };
-        assert_eq!(decode_text_input(&encode_text_input(&input)).unwrap(), input);
+        assert_eq!(
+            decode_text_input(&encode_text_input(&input)).unwrap(),
+            input
+        );
 
         let popup = InfoPopup {
             message: Some("hi".to_owned()),
@@ -739,7 +775,10 @@ mod tests {
             bottom: 6,
             right: 7,
         };
-        assert_eq!(decode_info_popup(&encode_info_popup(&popup)).unwrap(), popup);
+        assert_eq!(
+            decode_info_popup(&encode_info_popup(&popup)).unwrap(),
+            popup
+        );
 
         let label = WorldLabel {
             message: Some("marker".to_owned()),
@@ -765,6 +804,42 @@ mod tests {
 
         assert_eq!(decode_message(&encode_message("hud")).unwrap(), "hud");
         assert_eq!(decode_empty(&encode_empty()).unwrap(), ());
+    }
+
+    #[test]
+    fn relay_command_kind_names_and_encoding() {
+        let result = MenuResult::from_result("buy");
+        let choose = RelayCommand::MenuBuilderChoose(MenuBuilderChoose {
+            menu_id: 3,
+            result: result.clone(),
+        });
+        assert_eq!(choose.kind_name(), "menu_builder_choose");
+        let bytes = choose.encode();
+        assert_eq!(bytes[0], UI_RELAY_FORMAT);
+        assert_eq!(
+            decode_menu_builder_choose(&bytes).unwrap(),
+            MenuBuilderChoose { menu_id: 3, result }
+        );
+
+        let option = RelayCommand::MenuChoose(MenuChoose {
+            menu_id: 3,
+            option: 1,
+        });
+        assert_eq!(option.kind_name(), "menu_choose");
+        assert_eq!(decode_menu_choose(&option.encode()).unwrap().option, 1);
+
+        let text = RelayCommand::TextInputResult(TextInputResult {
+            id: 4,
+            text: Some("hi".to_owned()),
+        });
+        assert_eq!(text.kind_name(), "text_input_result");
+        assert_eq!(
+            decode_text_input_result(&text.encode())
+                .unwrap()
+                .text
+                .as_deref(),
+            Some("hi")
+        );
     }
 
     #[test]

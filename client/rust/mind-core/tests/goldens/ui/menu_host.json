@@ -1,0 +1,28 @@
+{
+  "format": 1,
+  "show": [
+    "show:1:false"
+  ],
+  "ids": [
+    "title",
+    "amount",
+    "name"
+  ],
+  "choose": {
+    "kind": "menu_builder_choose",
+    "bytes": 48,
+    "roundtrip": true
+  },
+  "update": [
+    "update:1:body"
+  ],
+  "hide": [
+    "hide:1"
+  ],
+  "cancelled": [
+    "choose:2:<cancelled>",
+    "hide:2"
+  ],
+  "cancelled_token": 9,
+  "unknown_event_error": true
+}

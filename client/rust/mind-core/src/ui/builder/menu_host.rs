@@ -15,9 +15,13 @@ use indexmap::IndexMap;
 
 use crate::ui::builder::menu_builder::MenuBuilder;
 use crate::ui::builder::menu_result::{MenuResult, MenuValue};
-use crate::ui::builder::tree_builder::{BuildContext, build, validate_caps};
 use crate::ui::builder::tree_builder::TreeCapsError;
+use crate::ui::builder::tree_builder::{BuildContext, build, validate_caps};
 use crate::ui::builder::ui_node::UiNode;
+use crate::ui::builder::ui_relay::{
+    MenuBuilderChoose, RelayCommand, RelayError, decode_menu_builder_hide,
+    decode_menu_builder_show, decode_menu_builder_update,
+};
 
 /// A captured click: the result id plus the values of every id-bearing element.
 #[derive(Debug, Clone, PartialEq)]
@@ -92,7 +96,31 @@ pub enum MenuHostEvent {
         id: i32,
     },
     /// Send this result to the host via the relay.
-    Choose(MenuResult),
+    Choose {
+        /// Menu id the result belongs to.
+        menu_id: i32,
+        /// Captured result.
+        result: MenuResult,
+    },
+}
+
+impl MenuHostEvent {
+    /// The plan-21 `CommandKind` relay command this event produces, if any.
+    ///
+    /// Only [`MenuHostEvent::Choose`] yields a client → host result; `Show`/
+    /// `Update`/`Hide` are local render directives. The encoded bytes are the
+    /// documented `MenuBuilderChoose` payload (`menu_id` + `MenuResult` bytes).
+    pub fn relay_command(&self) -> Option<RelayCommand> {
+        match self {
+            MenuHostEvent::Choose { menu_id, result } => {
+                Some(RelayCommand::MenuBuilderChoose(MenuBuilderChoose {
+                    menu_id: *menu_id,
+                    result: result.clone(),
+                }))
+            }
+            _ => None,
+        }
+    }
 }
 
 /// Menu-host validation failure (R9 server-menu spam caps).
@@ -172,8 +200,9 @@ impl MenuHost {
             // Upstream `menuDialogs.remove(id)` then hides only when
             // `hideExisting`; a replaced dialog still fires its `hidden`
             // listener (cancelled result) before the new one is kept.
-            let old = self.menus.shift_remove(&id).expect("checked");
-            if builder.hide_existing {
+            if let Some(old) = self.menus.shift_remove(&id)
+                && builder.hide_existing
+            {
                 events.extend(cancelled_events(&old));
                 events.push(MenuHostEvent::Hide { id });
             }
@@ -243,12 +272,95 @@ impl MenuHost {
             result.insert(key, value);
         }
         let hide_on_click = entry.hide_on_click;
-        let mut events = vec![MenuHostEvent::Choose(result)];
+        let mut events = vec![MenuHostEvent::Choose {
+            menu_id: id,
+            result,
+        }];
         if hide_on_click {
             self.menus.shift_remove(&id);
             events.push(MenuHostEvent::Hide { id });
         }
         events
+    }
+
+    /// Applies a decoded plan-21 `match_ui_event` row (host → client seam).
+    ///
+    /// `kind` is the lowercase relay event name
+    /// (`menu_builder_show`/`menu_builder_update`/`menu_builder_hide`) and
+    /// `payload` is the matching plan-14 encoding. The returned events are
+    /// render directives; any [`MenuHostEvent::Choose`] carries the bytes to
+    /// send back through plan 21's `CommandKind::MenuBuilderChoose` — this
+    /// layer never invents transport.
+    pub fn apply_event(
+        &mut self,
+        kind: &str,
+        payload: &[u8],
+        ctx: &BuildContext,
+    ) -> Result<Vec<MenuHostEvent>, MenuRelayError> {
+        match kind {
+            "menu_builder_show" => {
+                let event = decode_menu_builder_show(payload)?;
+                let mut builder = MenuBuilder::of(event.ui)
+                    .id(event.id)
+                    .token(event.token)
+                    .hide_on_click(event.hide_on_click)
+                    .hide_existing(event.hide_existing)
+                    .fill_screen(event.fill_screen);
+                if let Some(title) = event.title {
+                    builder = builder.title(title);
+                }
+                Ok(self.show(builder, ctx)?)
+            }
+            "menu_builder_update" => {
+                let event = decode_menu_builder_update(payload)?;
+                Ok(self.update(event.id, &event.table_id, event.ui, ctx)?)
+            }
+            "menu_builder_hide" => Ok(self.hide(decode_menu_builder_hide(payload)?)),
+            other => Err(MenuRelayError::UnknownEvent(other.to_owned())),
+        }
+    }
+}
+
+/// Error applying a plan-21 UI event to a [`MenuHost`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum MenuRelayError {
+    /// The event kind is not a menu-builder event.
+    UnknownEvent(String),
+    /// The payload failed to decode.
+    Relay(RelayError),
+    /// The decoded tree exceeded the R9 caps.
+    Caps(TreeCapsError),
+}
+
+impl std::fmt::Display for MenuRelayError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MenuRelayError::UnknownEvent(kind) => write!(f, "unknown ui event kind `{kind}`"),
+            MenuRelayError::Relay(error) => write!(f, "{error}"),
+            MenuRelayError::Caps(error) => write!(f, "{error}"),
+        }
+    }
+}
+
+impl std::error::Error for MenuRelayError {}
+
+impl From<RelayError> for MenuRelayError {
+    fn from(error: RelayError) -> Self {
+        MenuRelayError::Relay(error)
+    }
+}
+
+impl From<TreeCapsError> for MenuRelayError {
+    fn from(error: TreeCapsError) -> Self {
+        MenuRelayError::Caps(error)
+    }
+}
+
+impl From<MenuHostError> for MenuRelayError {
+    fn from(error: MenuHostError) -> Self {
+        match error {
+            MenuHostError::Caps(error) => MenuRelayError::Caps(error),
+        }
     }
 }
 
@@ -259,7 +371,10 @@ fn cancelled_events(entry: &MenuEntry) -> Vec<MenuHostEvent> {
     }
     let mut result = MenuResult::new();
     result.token = entry.token;
-    vec![MenuHostEvent::Choose(result)]
+    vec![MenuHostEvent::Choose {
+        menu_id: entry.id,
+        result,
+    }]
 }
 
 #[cfg(test)]
@@ -301,7 +416,8 @@ mod tests {
         let events = host.choose(1, MenuSelection::new("buy"));
         assert_eq!(events.len(), 2);
         match &events[0] {
-            MenuHostEvent::Choose(result) => {
+            MenuHostEvent::Choose { menu_id, result } => {
+                assert_eq!(*menu_id, 1);
                 assert!(result.is("buy"));
                 assert_eq!(result.token, 9);
             }
@@ -319,7 +435,8 @@ mod tests {
         let events = host.hide(2);
         assert_eq!(events.len(), 2);
         match &events[0] {
-            MenuHostEvent::Choose(result) => {
+            MenuHostEvent::Choose { menu_id, result } => {
+                assert_eq!(*menu_id, 2);
                 assert!(result.was_cancelled());
                 assert_eq!(result.token, 44);
             }
@@ -328,7 +445,8 @@ mod tests {
         assert_eq!(events[1], MenuHostEvent::Hide { id: 2 });
 
         // Hiding a live menu after a choice produces no extra cancelled result.
-        host.show(builder(3, 1), &ctx).unwrap();
+        // Use a non-hide-on-click menu so the dialog survives the choice.
+        host.show(builder(3, 1).hide_on_click(false), &ctx).unwrap();
         host.choose(3, MenuSelection::new("buy"));
         assert_eq!(host.hide(3), vec![MenuHostEvent::Hide { id: 3 }]);
     }
@@ -349,7 +467,7 @@ mod tests {
         );
         assert!(events.iter().any(|event| matches!(
             event,
-            MenuHostEvent::Choose(result) if result.was_cancelled() && result.token == 100
+            MenuHostEvent::Choose { result, .. } if result.was_cancelled() && result.token == 100
         )));
         assert_eq!(host.len(), 1);
         assert_eq!(host.get(4).unwrap().token, 200);
@@ -377,7 +495,9 @@ mod tests {
         assert_eq!(host.get(5).unwrap().ids, vec!["live".to_owned()]);
         // Unknown id is a no-op.
         assert!(
-            host.update(99, "body", replacement, &ctx).unwrap().is_empty()
+            host.update(99, "body", replacement, &ctx)
+                .unwrap()
+                .is_empty()
         );
     }
 
@@ -399,7 +519,7 @@ mod tests {
                 .with("name", MenuValue::Str("base".to_owned())),
         );
         match &events[0] {
-            MenuHostEvent::Choose(result) => {
+            MenuHostEvent::Choose { result, .. } => {
                 assert_eq!(result.get_f32("volume"), 0.25);
                 assert_eq!(result.get_str("name"), Some("base"));
             }
@@ -415,5 +535,82 @@ mod tests {
         let ui = UiNode::new(UiKey::Label).str(UiKey::Text, "x".repeat(70_000));
         let error = host.show(MenuBuilder::of(ui).id(7), &ctx).unwrap_err();
         assert!(matches!(error, MenuHostError::Caps(_)));
+    }
+
+    #[test]
+    fn apply_event_drives_lifecycle_and_result() {
+        use crate::ui::builder::ui_relay::{
+            MenuBuilderShow, MenuBuilderUpdate, encode_menu_builder_hide, encode_menu_builder_show,
+            encode_menu_builder_update,
+        };
+
+        let ctx = BuildContext::default();
+        let show = MenuBuilderShow {
+            id: 11,
+            token: 77,
+            title: Some("Shop".to_owned()),
+            hide_on_click: false,
+            hide_existing: true,
+            fill_screen: false,
+            ui: UiNode::new(UiKey::Table).child(
+                UiNode::new(UiKey::Button)
+                    .str(UiKey::Text, "Buy")
+                    .str(UiKey::Clicked, "buy"),
+            ),
+        };
+        let mut host = MenuHost::new();
+        let events = host
+            .apply_event("menu_builder_show", &encode_menu_builder_show(&show), &ctx)
+            .unwrap();
+        assert_eq!(
+            events,
+            vec![MenuHostEvent::Show {
+                id: 11,
+                had_previous: false
+            }]
+        );
+        assert!(host.contains(11));
+
+        // A click yields the documented plan-21 `MenuBuilderChoose` command.
+        let events = host.choose(11, MenuSelection::new("buy"));
+        let command = events[0].relay_command().expect("choose yields a command");
+        assert_eq!(command.kind_name(), "menu_builder_choose");
+        match command {
+            RelayCommand::MenuBuilderChoose(value) => {
+                assert_eq!(value.menu_id, 11);
+                assert_eq!(value.result.token, 77);
+                assert!(value.result.is("buy"));
+            }
+            other => panic!("expected builder choose, got {other:?}"),
+        }
+
+        let update = MenuBuilderUpdate {
+            id: 11,
+            table_id: "body".to_owned(),
+            ui: UiNode::new(UiKey::Table),
+        };
+        let events = host
+            .apply_event(
+                "menu_builder_update",
+                &encode_menu_builder_update(&update),
+                &ctx,
+            )
+            .unwrap();
+        assert!(matches!(events.as_slice(), [MenuHostEvent::Update { .. }]));
+
+        let events = host
+            .apply_event("menu_builder_hide", &encode_menu_builder_hide(11), &ctx)
+            .unwrap();
+        assert_eq!(events, vec![MenuHostEvent::Hide { id: 11 }]);
+
+        // Unknown kinds and malformed payloads are typed errors, never faked.
+        assert_eq!(
+            host.apply_event("hud_text", &[], &ctx),
+            Err(MenuRelayError::UnknownEvent("hud_text".to_owned()))
+        );
+        assert!(matches!(
+            host.apply_event("menu_builder_hide", &[9], &ctx),
+            Err(MenuRelayError::Relay(_))
+        ));
     }
 }

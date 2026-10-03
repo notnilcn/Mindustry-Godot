@@ -202,7 +202,9 @@ fn collect_region(child: &UiNode) -> Option<String> {
                 .str_value(UiKey::Region)
                 .or_else(|| child.str_value(UiKey::Icon))
                 .unwrap_or("error");
-            region.starts_with(SERVER_REGION_PREFIX).then(|| region.to_owned())
+            region
+                .starts_with(SERVER_REGION_PREFIX)
+                .then(|| region.to_owned())
         }
         UiKey::Button | UiKey::ImageButton => child
             .str_value(UiKey::Icon)
@@ -247,7 +249,6 @@ fn element_for(child: &UiNode) -> Option<Element> {
     };
     Some(element)
 }
-
 
 /// Viewport context used by [`eval_condition`].
 #[derive(Debug, Clone, Copy)]
@@ -517,7 +518,7 @@ mod tests {
     fn materialize_collects_element_values_and_fires_result() {
         let ctx = BuildContext::default();
         let root = crate::ui::builder::dsl::parse(
-            "table {\n  row\n  slider: \"vol\" { id: \"volume\" min: 0 max: 1 defaultValue: 0.25 }\n  field: \"\" { id: \"name\" text: \"base\" }\n  check: \"on\" { id: \"enabled\" checked: true }\n  button: \"Buy\" { id: \"buy\" clicked: \"buy\" }\n}\n",
+            "table {\n  row\n  slider: \"vol\" { id: \"volume\" min: 0 max: 1 defaultValue: 0.25 }\n  field: \"base\" { id: \"name\" }\n  check: \"on\" { id: \"enabled\" checked: true }\n  button: \"Buy\" { id: \"buy\" clicked: \"buy\" }\n}\n",
         )
         .unwrap();
         let materialized = materialize(&root, &ctx);
@@ -552,7 +553,10 @@ mod tests {
             current = next.child(current);
         }
         let root = UiNode::new(UiKey::Table).child(current);
-        assert!(matches!(validate_caps(&root), Err(TreeCapsError::TooDeep(_))));
+        assert!(matches!(
+            validate_caps(&root),
+            Err(TreeCapsError::TooDeep(_))
+        ));
     }
 
     #[test]

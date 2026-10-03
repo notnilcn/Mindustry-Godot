@@ -514,6 +514,32 @@ pub enum UiCommand {
         #[arg(long)]
         golden: Option<PathBuf>,
     },
+
+    /// Materialize an MSUI tree through the Godot-free `dsl_factory` (plan 14 M6).
+    Builder {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Write the materialized-tree JSON here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+        /// Compare the materialized tree against this golden.
+        #[arg(long)]
+        golden: Option<PathBuf>,
+    },
+
+    /// Drive the server-menu host lifecycle + plan-21 relay handshake (plan 14 M6).
+    MenuHost {
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Write the menu-host JSON here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+        /// Compare the menu-host output against this golden.
+        #[arg(long)]
+        golden: Option<PathBuf>,
+    },
 }
 
 /// `input` subcommands (plan 15 §7b).

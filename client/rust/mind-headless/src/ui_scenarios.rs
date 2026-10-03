@@ -53,6 +53,12 @@ pub fn run(command: &UiCommand) -> Result<()> {
         UiCommand::ChatConsole { json, dump, golden } => {
             chat_console(*json, dump.as_deref(), golden.as_deref())
         }
+        UiCommand::Builder { json, dump, golden } => {
+            builder(*json, dump.as_deref(), golden.as_deref())
+        }
+        UiCommand::MenuHost { json, dump, golden } => {
+            menu_host(*json, dump.as_deref(), golden.as_deref())
+        }
     }
 }
 
@@ -483,6 +489,205 @@ fn chat_console(json_out: bool, dump: Option<&Path>, golden: Option<&Path>) -> R
     finish(value, json_out, dump, golden)
 }
 
+/// Inline styles fixture for `ui builder` (hermetic: the committed
+/// `styles_manifest.json` is validated separately by `ui manifest`).
+const BUILDER_STYLES: &str = r#"{"format":1,"drawables":["black","grayPanel","none"],"text_buttons":["defaultt","grayt"],"labels":["defaultLabel","outlineLabel"],"sliders":["defaultSlider"],"panes":["defaultPane"],"checks":["defaultCheck"]}"#;
+
+/// `ui builder`: materialize an MSUI tree through the Godot-free `dsl_factory`
+/// (style resolution, conditions, id/image collection) and report style lookup
+/// plus hot-reload parse diagnostics (plan 14 M6).
+fn builder(json_out: bool, dump: Option<&Path>, golden: Option<&Path>) -> Result<()> {
+    use mind_core::ui::builder::dsl_factory::dump_json as factory_json;
+    use mind_core::ui::builder::hot_reload::{error_line, error_source_line, parse_source};
+    use mind_core::ui::builder::style_lookup::{StyleKind, StyleLookup};
+    use mind_core::ui::manifest::StylesManifest;
+
+    let manifest = StylesManifest::from_json(BUILDER_STYLES).context("parse builder styles")?;
+    let lookup = StyleLookup::new(&manifest);
+    let source = "background: grayPanel\nrow\nlabel: \"Title\" { id: \"title\" style: \"defaultLabel\" }\nslider: \"vol\" { id: \"vol\" min: 0 max: 1 defaultValue: 0.5 style: \"defaultSlider\" }\nbutton: \"Buy\" { style: \"grayt\" clicked: \"buy\" icon: net-badge }\nimage: net-icon\ncheck: \"enabled\" { id: \"enabled\" checked: true }\nbutton: \"hidden\" { condition: \"landscape\" }\nbutton: \"bad\" { style: \"missingStyle\" }\n";
+    let tree = dsl::parse(source).context("parse builder fixture")?;
+    let ctx = BuildContext {
+        portrait: true,
+        width: 720.0,
+        height: 1280.0,
+    };
+    let parsed = match parse_source("label: \"a\"\nbogus: 2\n") {
+        Ok(_) => bail!("expected the bogus fixture to fail parsing"),
+        Err(error) => error,
+    };
+    let value = json!({
+        "format": 1,
+        "factory": factory_json(&tree, &manifest, &ctx),
+        "style_lookup": {
+            "grayt": lookup.resolve("grayt").map(StyleKind::name),
+            "defaultLabel": lookup.resolve("defaultLabel").map(StyleKind::name),
+            "missingStyle": lookup.resolve("missingStyle").map(StyleKind::name),
+        },
+        "hot_reload": {
+            "valid": parse_source(source).is_ok(),
+            "error_line": parsed.line,
+            "error_source": parsed.source_line,
+            "extracted_line": error_line("Unknown property at line 2"),
+            "extracted_source": error_source_line("label: \"a\"\nbogus: 2\n", "Unknown property at line 2"),
+        },
+    });
+    finish(value, json_out, dump, golden)
+}
+
+/// `ui menu-host`: drive the server-menu lifecycle and the plan-21 relay
+/// handshake — `match_ui_event` (`show`/`update`/`hide`) in, `MenuBuilderChoose`
+/// bytes out (plan 14 M6, never faked transport).
+fn menu_host(json_out: bool, dump: Option<&Path>, golden: Option<&Path>) -> Result<()> {
+    use mind_core::ui::builder::menu_host::{MenuHost, MenuHostEvent, MenuSelection};
+    use mind_core::ui::builder::menu_result::MenuValue;
+    use mind_core::ui::builder::ui_key::UiKey;
+    use mind_core::ui::builder::ui_relay::{
+        MenuBuilderShow, MenuBuilderUpdate, decode_menu_builder_choose, encode_menu_builder_hide,
+        encode_menu_builder_show, encode_menu_builder_update,
+    };
+
+    let ctx = BuildContext::default();
+    let show = MenuBuilderShow {
+        id: 1,
+        token: 42,
+        title: Some("Shop".to_owned()),
+        hide_on_click: false,
+        hide_existing: true,
+        fill_screen: false,
+        ui: UiNode::new(UiKey::Table)
+            .child(
+                UiNode::new(UiKey::Label)
+                    .str(UiKey::Text, "Shop")
+                    .str(UiKey::Id, "title"),
+            )
+            .child(
+                UiNode::new(UiKey::Slider)
+                    .str(UiKey::Id, "amount")
+                    .f32(UiKey::Min, 0.0)
+                    .f32(UiKey::Max, 5.0)
+                    .f32(UiKey::DefaultValue, 2.5),
+            )
+            .child(
+                UiNode::new(UiKey::Field)
+                    .str(UiKey::Id, "name")
+                    .str(UiKey::Text, "base"),
+            )
+            .child(
+                UiNode::new(UiKey::Button)
+                    .str(UiKey::Text, "Buy")
+                    .str(UiKey::Clicked, "buy"),
+            ),
+    };
+
+    let mut host = MenuHost::new();
+    let show_events = host
+        .apply_event("menu_builder_show", &encode_menu_builder_show(&show), &ctx)
+        .context("apply show")?;
+    let ids = host
+        .get(1)
+        .map(|entry| entry.ids.clone())
+        .unwrap_or_default();
+
+    let choose_events = host.choose(
+        1,
+        MenuSelection::new("buy")
+            .with("amount", MenuValue::F32(2.5))
+            .with("name", MenuValue::Str("base".to_owned())),
+    );
+    let command = choose_events.iter().find_map(MenuHostEvent::relay_command);
+    let choose = match &command {
+        Some(command) => {
+            let bytes = command.encode();
+            let decoded =
+                decode_menu_builder_choose(&bytes).context("decode menu_builder_choose")?;
+            json!({
+                "kind": command.kind_name(),
+                "bytes": bytes.len(),
+                "roundtrip": decoded.result.token == 42
+                    && decoded.result.is("buy")
+                    && decoded.result.get_f32("amount") == 2.5
+                    && decoded.result.get_str("name") == Some("base"),
+            })
+        }
+        None => Value::Null,
+    };
+
+    let update = MenuBuilderUpdate {
+        id: 1,
+        table_id: "body".to_owned(),
+        ui: UiNode::new(UiKey::Table),
+    };
+    let update_events = host
+        .apply_event(
+            "menu_builder_update",
+            &encode_menu_builder_update(&update),
+            &ctx,
+        )
+        .context("apply update")?;
+    let hide_events = host
+        .apply_event("menu_builder_hide", &encode_menu_builder_hide(1), &ctx)
+        .context("apply hide")?;
+
+    // A menu closed with no choice produces a cancelled result (token only).
+    let mut cancelled_host = MenuHost::new();
+    cancelled_host
+        .apply_event(
+            "menu_builder_show",
+            &encode_menu_builder_show(&MenuBuilderShow {
+                id: 2,
+                token: 9,
+                title: None,
+                hide_on_click: true,
+                hide_existing: true,
+                fill_screen: false,
+                ui: UiNode::new(UiKey::Table),
+            }),
+            &ctx,
+        )
+        .context("apply cancelled show")?;
+    let cancelled_events = cancelled_host
+        .apply_event("menu_builder_hide", &encode_menu_builder_hide(2), &ctx)
+        .context("apply cancelled hide")?;
+    let cancelled_token = cancelled_events
+        .iter()
+        .find_map(MenuHostEvent::relay_command)
+        .map(|command| match command {
+            mind_core::ui::builder::ui_relay::RelayCommand::MenuBuilderChoose(value) => {
+                value.result.token
+            }
+            _ => 0,
+        })
+        .unwrap_or(0);
+    let unknown_event_error = host.apply_event("hud_text", &[], &ctx).is_err();
+
+    let value = json!({
+        "format": 1,
+        "show": show_events.iter().map(event_name).collect::<Vec<_>>(),
+        "ids": ids,
+        "choose": choose,
+        "update": update_events.iter().map(event_name).collect::<Vec<_>>(),
+        "hide": hide_events.iter().map(event_name).collect::<Vec<_>>(),
+        "cancelled": cancelled_events.iter().map(event_name).collect::<Vec<_>>(),
+        "cancelled_token": cancelled_token,
+        "unknown_event_error": unknown_event_error,
+    });
+    finish(value, json_out, dump, golden)
+}
+
+/// Compact event description for the `ui menu-host` golden.
+fn event_name(event: &mind_core::ui::builder::menu_host::MenuHostEvent) -> String {
+    use mind_core::ui::builder::menu_host::MenuHostEvent;
+    match event {
+        MenuHostEvent::Show { id, had_previous } => format!("show:{id}:{had_previous}"),
+        MenuHostEvent::Update { id, table_id } => format!("update:{id}:{table_id}"),
+        MenuHostEvent::Hide { id } => format!("hide:{id}"),
+        MenuHostEvent::Choose { menu_id, result } => format!(
+            "choose:{menu_id}:{}",
+            result.result.as_deref().unwrap_or("<cancelled>")
+        ),
+    }
+}
+
 /// FNV-1a hex over bytes (canonical checksum helper).
 fn fnv_hex(bytes: &[u8]) -> String {
     let mut hasher = mind_core::determinism::Hasher::new();
@@ -546,5 +751,7 @@ mod tests {
         campaign(false, None, Some(&golden("campaign.json"))).unwrap();
         file_chooser(false, None, Some(&golden("file_chooser.json"))).unwrap();
         chat_console(false, None, Some(&golden("chat_console.json"))).unwrap();
+        builder(false, None, Some(&golden("builder.json"))).unwrap();
+        menu_host(false, None, Some(&golden("menu_host.json"))).unwrap();
     }
 }

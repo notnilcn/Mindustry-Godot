@@ -8,6 +8,7 @@
 //! network, no filesystem — the Godot sink lives in `mind-gdext`.
 
 pub mod dsl;
+pub mod dsl_factory;
 pub mod dsl_writer;
 pub mod hot_reload;
 pub mod menu_builder;

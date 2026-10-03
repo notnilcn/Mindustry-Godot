@@ -9,8 +9,35 @@
 //! `client/ui/dialogs/ui_hot_reload.gd`; this module owns the Godot-free timing
 //! and error-line extraction so it is testable headless.
 
+use crate::ui::builder::dsl;
+use crate::ui::builder::ui_node::UiNode;
+
 /// Debounce window (`UiHotReload` uses `> 100` ms).
 pub const DEBOUNCE_MS: i64 = 100;
+
+/// A parse error annotated with the offending source line (upstream renders
+/// `Line: [red]<text>` under the editor).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HotReloadError {
+    /// 1-based line number from the parser.
+    pub line: usize,
+    /// Parser message (without the line suffix).
+    pub message: String,
+    /// The source line text, when in range.
+    pub source_line: Option<String>,
+}
+
+/// Parses hot-reload source, tagging failures with their source line.
+pub fn parse_source(source: &str) -> Result<UiNode, HotReloadError> {
+    dsl::parse(source).map_err(|error| {
+        let message = error.to_string();
+        HotReloadError {
+            line: error.line,
+            message: error.message,
+            source_line: error_source_line(source, &message),
+        }
+    })
+}
 
 /// Mtime/debounce tracker for one file.
 #[derive(Debug, Clone)]
@@ -110,5 +137,16 @@ mod tests {
         );
         // Out-of-range line returns `None`.
         assert_eq!(error_source_line(source, "line 5"), None);
+    }
+
+    #[test]
+    fn parse_source_reports_line_and_source_text() {
+        let tree = parse_source("label: \"ok\"\n").unwrap();
+        assert_eq!(tree.entries.len(), 1);
+
+        let error = parse_source("label: \"a\"\nbogus: 1\n").unwrap_err();
+        assert_eq!(error.line, 2);
+        assert_eq!(error.source_line.as_deref(), Some("bogus: 1"));
+        assert!(error.message.contains("Unknown property"));
     }
 }
