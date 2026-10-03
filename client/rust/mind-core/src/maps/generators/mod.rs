@@ -16,6 +16,7 @@ pub mod planet;
 pub mod simplex;
 
 use crate::content::ContentRegistry;
+use crate::game::rules::Rules;
 use crate::world::WorldParams;
 use crate::world::tiles::Tiles;
 
@@ -38,4 +39,18 @@ pub trait WorldGenerator {
 
     /// Specialized post-pass; must not modify tiles (`WorldGenerator.postGenerate`).
     fn post_generate(&mut self, _tiles: &mut Tiles, _content: &ContentRegistry) {}
+
+    /// Writes generated rules (`state.rules`) the generator mutates.
+    ///
+    /// Upstream planet generators assign `state.rules.*` at the end of
+    /// `generate` (`waves`, `waveSpacing`, `attackMode`, `enemyCoreBuildRadius`,
+    /// `winWave`, `spawns`). The Rust port threads an explicit [`Rules`] so the
+    /// caller (sector load / `world gen`) owns the runtime state. Default: no-op.
+    fn generate_rules(
+        &mut self,
+        _rules: &mut Rules,
+        _params: &WorldParams,
+        _content: &ContentRegistry,
+    ) {
+    }
 }

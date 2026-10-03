@@ -948,9 +948,12 @@ fn cmd_io_roundtrip(
     use mind_core::io::save::versions::v1::base_meta_tags;
     use mind_core::io::save::{SaveIo, SaveOptions, SaveReadState, WriteContext};
 
+    if map == "serpulo" || map == "generated" {
+        return cmd_io_roundtrip_real(map, width, height, out, json);
+    }
     if map != "synthetic" {
         return Err(anyhow!(
-            "io roundtrip --map {map}: real maps need plan 06 (world/generators); use `--map synthetic`"
+            "io roundtrip --map {map}: unknown map; use `synthetic` or `serpulo`"
         ));
     }
     let out = out
@@ -1006,6 +1009,103 @@ fn cmd_io_roundtrip(
         width,
         height,
         ticks,
+        out: out.display().to_string(),
+        bytes,
+        buildings: all_buildings,
+        checksum_before,
+        checksum_after,
+        pass,
+    };
+    print_report(&report, json)?;
+    Ok(if pass { EXIT_PASS } else { EXIT_FAIL })
+}
+
+/// FNV-1a checksum over a grid's floor/overlay/block layers (row-major).
+fn grid_tile_checksum(grid: &mind_core::world::WorldGrid) -> String {
+    use mind_core::determinism::Hasher;
+    let mut hasher = Hasher::new();
+    hasher.write_u32(grid.tiles.width as u32);
+    hasher.write_u32(grid.tiles.height as u32);
+    for index in 0..grid.tiles.len() {
+        let tile = grid.tiles.geti(index);
+        hasher.write_u16(tile.block.raw());
+        hasher.write_u16(tile.floor.raw());
+        hasher.write_u16(tile.overlay.raw());
+    }
+    hasher.finish().to_hex()
+}
+
+/// Plan 06 M2 real-context round-trip (04 §5 M4 swap): generate a real planet
+/// map, write it through [`mind_core::world::EcsMapSource`] and read it back
+/// through the plan-06 [`mind_core::world::Context`] (no synthetic fixture).
+/// Asserts the tile checksum survives save → reset → load.
+fn cmd_io_roundtrip_real(
+    map: &str,
+    width: u16,
+    height: u16,
+    out: Option<&Path>,
+    json: bool,
+) -> anyhow::Result<i32> {
+    use mind_core::io::fs::{FileSystem, NativeFs};
+    use mind_core::io::save::versions::v1::base_meta_tags;
+    use mind_core::io::save::{SaveIo, SaveOptions, SaveReadState, WriteContext};
+    use mind_core::maps::generators::WorldGenerator;
+    use mind_core::world::{Context, EcsMapSource, WorldGrid, WorldParams};
+
+    let out = out
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::env::temp_dir().join("mind-io-roundtrip-real.msav"));
+    let fs = NativeFs;
+    let content = boot_content()?;
+    let params = WorldParams {
+        seed_offset: 42,
+        width: width as i32,
+        height: height as i32,
+        ..WorldParams::default()
+    };
+    let mut grid = WorldGrid::new(width as i32, height as i32);
+    let mut generator = mind_core::maps::planet::SerpuloPlanetGenerator::new();
+    generator.generate(&mut grid.tiles, &params, &content);
+    let checksum_before = grid_tile_checksum(&grid);
+
+    // Write through the plan-06 ECS-aware map source (no buildings: the serpulo
+    // generator's launch loadout/ruins remain plan-12 seams).
+    let ecs = bevy_ecs::world::World::new();
+    let source = EcsMapSource::new(&grid, &content, &ecs);
+    let mut tags = base_meta_tags(width, height, 0, map);
+    tags.insert("name".to_owned(), map.to_owned());
+    let mut ctx = WriteContext::meta_only(tags);
+    ctx.content = Some(&content);
+    ctx.map = Some(&source);
+    SaveIo::save(&fs, &out, &ctx, &SaveOptions::new())?;
+    let bytes = fs.len(&out).unwrap_or(0);
+
+    // Read into a fresh grid through the real `Context` (04's WorldContext).
+    let read_content = boot_content()?;
+    let mut load_registry = boot_content()?;
+    let mut loaded_grid = WorldGrid::new(0, 0);
+    let all_buildings;
+    {
+        let mut context = Context::new(&mut loaded_grid, &read_content);
+        let mut state = SaveReadState {
+            context: Some(&mut context),
+            content: Some(&mut load_registry),
+            ..SaveReadState::default()
+        };
+        SaveIo::load(&fs, &out, &mut state)?;
+        all_buildings = state.all_buildings.len();
+    }
+    let checksum_after = grid_tile_checksum(&loaded_grid);
+
+    let pass = checksum_before == checksum_after;
+    if !pass {
+        log::error!("io roundtrip (real) checksum mismatch: {checksum_before} != {checksum_after}");
+    }
+    let report = IoRoundtripReport {
+        map: map.to_owned(),
+        width,
+        height,
+        ticks: 0,
         out: out.display().to_string(),
         bytes,
         buildings: all_buildings,

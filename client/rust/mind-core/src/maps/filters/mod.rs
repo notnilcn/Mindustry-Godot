@@ -194,8 +194,11 @@ impl Default for PackedState {
 /// The generation read/write input (`GenerateInput`).
 ///
 /// `states` is the local packed buffer `tile()` reads; the engine keeps it in
-/// sync per the buffered/unbuffered rule (§2.3.4).
-#[derive(Clone, Default)]
+/// sync per the buffered/unbuffered rule (§2.3.4). `world` carries the
+/// persistent generation ECS resources (`WorldGrid`/`GlobalVars`/
+/// `LogicContentIndex`/`LogicWorldState`) for post filters that run privileged
+/// logic scripts; `None` means the stack was applied without a booted world.
+#[derive(Default)]
 pub struct GenerateInput<'a> {
     /// Current tile x.
     pub x: i32,
@@ -219,6 +222,8 @@ pub struct GenerateInput<'a> {
     pub states: Vec<PackedState>,
     /// Buffered output slot.
     pub output: Vec<PackedState>,
+    /// Persistent generation ECS world (see the type-level doc).
+    pub world: Option<&'a mut bevy_ecs::world::World>,
 }
 
 impl<'a> GenerateInput<'a> {
@@ -554,15 +559,47 @@ fn apply_result(
 
 /// Applies a filter stack (`World.FilterContext.applyFilters`).
 ///
-/// Filters are randomized from the caller's `MapGen` stream (OD6-A).
+/// Filters are randomized from the caller's `MapGen` stream (OD6-A). Logic
+/// filters need the privileged VM's persistent resources, so when the stack
+/// contains one this boots a scratch generation world
+/// ([`crate::world::generation`]); callers that already own a live generation
+/// world should use [`apply_stack_in`] instead.
 pub fn apply_stack(
     tiles: &mut Tiles,
     stack: &mut [Box<dyn GenerateFilter>],
     content: &ContentRegistry,
     rng: &mut SimRng,
 ) {
+    if stack.iter().any(|filter| filter.class_tag() == "logic") {
+        let mut ecs = bevy_ecs::world::World::new();
+        crate::world::generation::ensure_generation_resources(
+            &mut ecs,
+            content,
+            tiles.width,
+            tiles.height,
+        );
+        apply_stack_in(tiles, stack, content, rng, Some(&mut ecs));
+    } else {
+        apply_stack_in(tiles, stack, content, rng, None);
+    }
+}
+
+/// Applies a filter stack against an optional persistent generation ECS world.
+///
+/// `ecs` must be the world booted by
+/// [`crate::world::generation::install_generation_resources`] (or one for which
+/// [`crate::world::generation::ensure_generation_resources`] has run), so
+/// `LogicFilter` reads/mutates the live resources rather than building new ones.
+pub fn apply_stack_in(
+    tiles: &mut Tiles,
+    stack: &mut [Box<dyn GenerateFilter>],
+    content: &ContentRegistry,
+    rng: &mut SimRng,
+    ecs: Option<&mut bevy_ecs::world::World>,
+) {
     let mut input: GenerateInput<'_> = GenerateInput {
         content: Some(content),
+        world: ecs,
         ..GenerateInput::default()
     };
     for filter in stack.iter_mut() {

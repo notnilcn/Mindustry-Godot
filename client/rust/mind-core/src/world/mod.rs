@@ -33,6 +33,7 @@ pub mod draw;
 pub mod edges;
 pub mod events;
 pub mod fixtures;
+pub mod generation;
 // The harness is deterministic test/scenario infrastructure; panicking on a
 // broken content bootstrap is intentional (plan 07 §7b).
 #[allow(clippy::expect_used)]
@@ -40,6 +41,7 @@ pub mod harness;
 pub mod hooks;
 pub mod item_buffer;
 pub mod limits;
+pub mod map_source;
 pub mod modules;
 pub mod network_state;
 pub mod ops;
@@ -86,6 +88,7 @@ pub use hooks::{
 };
 pub use item_buffer::{DirectionalItemBuffer, ItemBuffer, packed};
 pub use limits::{BlockCounter, BuildRules};
+pub use map_source::EcsMapSource;
 pub use modules::{FlowWindow, ItemModule, LiquidModule, PowerGraphId, PowerModule};
 pub use network_state::{BuildingState, GraphState, NetworkState};
 pub use ops::{WorldCtx, WorldEventLog};

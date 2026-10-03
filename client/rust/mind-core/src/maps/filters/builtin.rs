@@ -1526,7 +1526,7 @@ impl GenerateFilter for LogicFilter {
     fn apply_tiles(
         &mut self,
         tiles: &mut Tiles,
-        _input: &mut GenerateInput<'_>,
+        input: &mut GenerateInput<'_>,
         content: &ContentRegistry,
         _rng: &mut SimRng,
     ) {
@@ -1539,28 +1539,23 @@ impl GenerateFilter for LogicFilter {
 
         // Upstream `LogicFilter.apply` ignores the filter's local `Tiles` and
         // runs a privileged script against the live generation `World`
-        // (`LExecutor.runLogicScript`). Mirror that: move the in-progress grid
-        // into a temporary `WorldGrid` resource so `getblock`/`setblock` read
-        // and mutate the same tiles, then copy the result back.
+        // (`LExecutor.runLogicScript`). The world boot installs the persistent
+        // resources (`GlobalVars`/`LogicContentIndex`/`LogicWorldState`), so we
+        // reuse them; the in-progress grid is moved into a `WorldGrid` resource
+        // for the duration of the script (the engine borrows `&mut Tiles`).
+        let Some(world) = input.world.as_deref_mut() else {
+            log::debug!("LogicFilter skipped: no generation world installed");
+            return;
+        };
         let owned = std::mem::take(tiles);
         let width = owned.width;
         let height = owned.height;
+        crate::world::generation::ensure_generation_resources(world, content, width, height);
         let mut grid = crate::world::WorldGrid::new(width, height);
         grid.tiles = owned;
-
-        let mut world = bevy_ecs::world::World::new();
         world.insert_resource(grid);
-        world.insert_resource(crate::logic::globals::GlobalVars::with_content(content));
-        world.insert_resource(crate::logic::world::LogicContentIndex::from_content(
-            content,
-        ));
-        let mut state = crate::logic::world::LogicWorldState::new();
-        state.is_host = true;
-        state.map_width = width;
-        state.map_height = height;
-        world.insert_resource(state);
 
-        let _ = crate::logic::script::run_logic_filter(&code, self.loop_enabled, &mut world);
+        let _ = crate::logic::script::run_logic_filter(&code, self.loop_enabled, world);
 
         if let Some(grid) = world.remove_resource::<crate::world::WorldGrid>() {
             *tiles = grid.tiles;

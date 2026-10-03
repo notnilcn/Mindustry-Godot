@@ -349,7 +349,7 @@ pub struct ScriptFilterReport {
 pub fn script_filter() -> Result<ScriptFilterReport> {
     use mind_core::determinism::Hasher;
     use mind_core::maps::filters::GenerateFilter;
-    use mind_core::maps::filters::apply_stack;
+    use mind_core::maps::filters::apply_stack_in;
     use mind_core::maps::filters::builtin::LogicFilter;
     use mind_core::world::tiles::Tiles;
 
@@ -370,8 +370,23 @@ pub fn script_filter() -> Result<ScriptFilterReport> {
         code: Some(code),
         loop_enabled: false,
     })];
+    // Boot the persistent generation resources once (plan 06 M9): the logic
+    // script runs `getblock`/`setblock` against the live `WorldGrid` resource.
+    let mut generation_world = bevy_ecs::world::World::new();
+    mind_core::world::generation::ensure_generation_resources(
+        &mut generation_world,
+        &content,
+        4,
+        4,
+    );
     let mut rng = mind_core::determinism::SimRng::new(7);
-    apply_stack(&mut tiles, &mut stack, &content, &mut rng);
+    apply_stack_in(
+        &mut tiles,
+        &mut stack,
+        &content,
+        &mut rng,
+        Some(&mut generation_world),
+    );
 
     let mut hasher = Hasher::new();
     let mut blocks = 0usize;
