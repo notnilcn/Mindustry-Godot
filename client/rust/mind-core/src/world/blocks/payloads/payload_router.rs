@@ -186,6 +186,18 @@ fn force_update_next(world: &mut World, next: Entity) {
 }
 
 impl BuildingBehavior for PayloadRouterBehavior {
+    fn update_batch(
+        &self,
+        world: &mut bevy_ecs::world::World,
+        inst: &crate::world::block::BlockInstance,
+        entities: &[bevy_ecs::entity::Entity],
+    ) {
+        // Plan 08 §7.4: allocate-free batched dispatch (empty-consumer fast path).
+        for &e in entities {
+            crate::world::update::building_update_no_consumers(world, e, inst);
+        }
+    }
+
     fn create_state(&self, world: &mut World, e: Entity) {
         self.conveyor.create_state(world, e);
         if world.get::<PayloadRouterBuild>(e).is_none() {

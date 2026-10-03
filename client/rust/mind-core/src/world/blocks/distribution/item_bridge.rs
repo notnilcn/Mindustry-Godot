@@ -297,6 +297,18 @@ fn relative_to(origin: TilePos, other: TilePos) -> i8 {
 }
 
 impl BuildingBehavior for ItemBridgeBehavior {
+    fn update_batch(
+        &self,
+        world: &mut bevy_ecs::world::World,
+        inst: &crate::world::block::BlockInstance,
+        entities: &[bevy_ecs::entity::Entity],
+    ) {
+        // Plan 08 §7.4: allocate-free batched dispatch (empty-consumer fast path).
+        for &e in entities {
+            crate::world::update::building_update_no_consumers(world, e, inst);
+        }
+    }
+
     fn create_state(&self, world: &mut World, e: Entity) {
         if world.get::<ItemBridgeBuild>(e).is_none() {
             let buffer = self.buffered.then(|| ItemBuffer::new(self.buffer_capacity));

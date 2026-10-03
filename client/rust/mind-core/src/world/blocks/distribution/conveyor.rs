@@ -381,6 +381,18 @@ impl BuildingBehavior for ConveyorBehavior {
         no_sleep(world, e);
     }
 
+    fn update_batch(
+        &self,
+        world: &mut World,
+        inst: &crate::world::block::BlockInstance,
+        entities: &[Entity],
+    ) {
+        // Plan 08 §7.4: allocate-free batched dispatch (empty-consumer fast path).
+        for &e in entities {
+            crate::world::update::building_update_no_consumers(world, e, inst);
+        }
+    }
+
     fn accept_item(&self, world: &World, e: Entity, source: Entity, _item: ItemId) -> bool {
         let (len, minitem, rotation, next) = {
             let Some(belt) = world.get::<ConveyorBuild>(e) else {

@@ -81,6 +81,18 @@ pub fn unloader_should_export(world: &World, e: Entity) -> bool {
 }
 
 impl BuildingBehavior for PayloadUnloaderBehavior {
+    fn update_batch(
+        &self,
+        world: &mut bevy_ecs::world::World,
+        inst: &crate::world::block::BlockInstance,
+        entities: &[bevy_ecs::entity::Entity],
+    ) {
+        // Plan 08 §7.4: allocate-free batched dispatch (empty-consumer fast path).
+        for &e in entities {
+            crate::world::update::building_update_no_consumers(world, e, inst);
+        }
+    }
+
     fn create_state(&self, world: &mut World, e: Entity) {
         self.base.create_state(world, e);
         if world.get::<PayloadUnloaderBuild>(e).is_none() {

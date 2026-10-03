@@ -12,10 +12,10 @@
 use std::time::Instant;
 
 use bevy_ecs::entity::Entity;
-use bevy_ecs::query::{QueryState, With};
+use bevy_ecs::query::QueryState;
 use bevy_ecs::world::World;
 
-use crate::content::{ItemId, LiquidId};
+use crate::content::{BlockId, ItemId, LiquidId};
 
 /// Plan 23 M4 opt-in performance instrumentation for the building-update loop.
 ///
@@ -124,8 +124,10 @@ impl BlockInstance {
 }
 
 /// Cached query over `Building` entities (plan 08 §7.4: avoid the per-tick
-/// `iter_entities` + doubled component probe).
-pub type BuildingOrderQuery = QueryState<(Entity, &'static EntitySeq), With<Building>>;
+/// `iter_entities` + doubled component probe). Fetches `&Building` too so the
+/// batch dispatcher can group a contiguous run by block id without a second
+/// per-entity component access.
+pub type BuildingOrderQuery = QueryState<(Entity, &'static EntitySeq, &'static Building)>;
 
 /// Iterator order key: sequence then entity index (stable, deterministic).
 ///
@@ -137,20 +139,20 @@ pub type BuildingOrderQuery = QueryState<(Entity, &'static EntitySeq), With<Buil
 /// ordered (the common steady-state case).
 fn fill_building_order(
     world: &mut World,
-    order: &mut Vec<(u64, Entity)>,
+    order: &mut Vec<(u64, Entity, BlockId)>,
     query: &mut Option<BuildingOrderQuery>,
 ) {
     order.clear();
     let mut state = query.take().unwrap_or_else(|| QueryState::new(world));
-    for (entity, seq) in state.iter(&*world) {
-        order.push((seq.0, entity));
+    for (entity, seq, building) in state.iter(&*world) {
+        order.push((seq.0, entity, building.block));
     }
     *query = Some(state);
     if !order
         .windows(2)
         .all(|w| (w[0].0, w[0].1.index()) <= (w[1].0, w[1].1.index()))
     {
-        order.sort_unstable_by_key(|(seq, entity)| (*seq, entity.index()));
+        order.sort_unstable_by_key(|(seq, entity, _)| (*seq, entity.index()));
     }
 }
 
@@ -158,8 +160,10 @@ fn fill_building_order(
 /// (plan 07 §7d alloc-audit).
 #[derive(Default, bevy_ecs::prelude::Resource)]
 pub struct BuildScratch {
-    /// Building iteration order.
-    pub order: Vec<(u64, Entity)>,
+    /// Building iteration order: sequence, entity, block id.
+    pub order: Vec<(u64, Entity, BlockId)>,
+    /// Reused contiguous-run buffer for the batch hook (never per-tick fresh).
+    pub run: Vec<Entity>,
     /// Cached building query (see [`fill_building_order`]).
     pub query: Option<BuildingOrderQuery>,
 }
@@ -198,9 +202,13 @@ pub fn update_buildings(world: &mut World) {
         clock.time += 1.0;
     }
     let prof = profile::enabled();
-    let (mut order, mut query) = match world.get_resource_mut::<BuildScratch>() {
-        Some(mut scratch) => (std::mem::take(&mut scratch.order), scratch.query.take()),
-        None => (Vec::new(), None),
+    let (mut order, mut run, mut query) = match world.get_resource_mut::<BuildScratch>() {
+        Some(mut scratch) => (
+            std::mem::take(&mut scratch.order),
+            std::mem::take(&mut scratch.run),
+            scratch.query.take(),
+        ),
+        None => (Vec::new(), Vec::new(), None),
     };
     let _t_order = prof.then(Instant::now);
     fill_building_order(world, &mut order, &mut query);
@@ -211,9 +219,36 @@ pub fn update_buildings(world: &mut World) {
             std::sync::atomic::Ordering::Relaxed,
         );
     }
-    for (_, entity) in order.iter().copied() {
-        building_update(world, entity);
+
+    // Dispatch in the exact building order, but as maximal contiguous runs that
+    // share a block id: the run's `Arc<BlockInstance>`/behavior is resolved once
+    // instead of once per entity (plan 07 §3.4 batch hook). The per-entity
+    // sequence inside `update_batch` is unchanged, so the update order and
+    // semantics are byte-identical to the per-entity loop.
+    let mut index = 0usize;
+    while index < order.len() {
+        let block = order[index].2;
+        run.clear();
+        let mut end = index;
+        while end < order.len() && order[end].2 == block {
+            run.push(order[end].1);
+            end += 1;
+        }
+        match world
+            .get_resource::<BlockTable>()
+            .and_then(|table| table.instance(block))
+        {
+            Some(inst) => inst.behavior.update_batch(world, &inst, &run),
+            // Unknown block: keep the original per-entity decay/no-op behavior.
+            None => {
+                for &entity in &run {
+                    building_update(world, entity);
+                }
+            }
+        }
+        index = end;
     }
+
     #[cfg(feature = "profile-build")]
     if prof {
         use std::sync::atomic::Ordering;
@@ -222,24 +257,29 @@ pub fn update_buildings(world: &mut World) {
     }
     if let Some(mut scratch) = world.get_resource_mut::<BuildScratch>() {
         scratch.order = order;
+        scratch.run = run;
         scratch.query = query;
     }
 }
 
+/// Applies the `timeScaleDuration` decay and returns the block id.
+///
+/// `(timeScaleDuration -= Time.delta) <= 0 -> timeScale = 1`. `None` when the
+/// entity has no `Building` (the loop skips it exactly as before).
+#[inline]
+fn decay_time_scale(world: &mut World, entity: Entity) -> Option<BlockId> {
+    let mut building = world.get_mut::<Building>(entity)?;
+    building.time_scale_duration -= 1.0;
+    if building.time_scale_duration <= 0.0 {
+        building.time_scale = 1.0;
+    }
+    Some(building.block)
+}
+
 /// One building's `update()` (`BuildingComp.update`).
 pub fn building_update(world: &mut World, entity: Entity) {
-    // `(timeScaleDuration -= Time.delta) <= 0 -> timeScale = 1`.
-    // The block id is read in the same borrow so the common path needs one
-    // `Building` access instead of two (plan 08 §7.4 hot path).
-    let block_id = {
-        let Some(mut building) = world.get_mut::<Building>(entity) else {
-            return;
-        };
-        building.time_scale_duration -= 1.0;
-        if building.time_scale_duration <= 0.0 {
-            building.time_scale = 1.0;
-        }
-        building.block
+    let Some(block_id) = decay_time_scale(world, entity) else {
+        return;
     };
     let Some(inst) = world
         .get_resource::<BlockTable>()
@@ -247,9 +287,25 @@ pub fn building_update(world: &mut World, entity: Entity) {
     else {
         return;
     };
+    update_consumption_and_dispatch(world, entity, &inst);
+}
 
+/// Same as [`building_update`] but with the block instance already resolved.
+///
+/// The batch dispatcher (plan 07 §3.4) resolves the instance once per contiguous
+/// run; the default [`BuildingBehavior::update_batch`] delegates here so the
+/// per-entity sequence is identical to the unbatched loop.
+pub fn building_update_with(world: &mut World, entity: Entity, inst: &BlockInstance) {
+    if decay_time_scale(world, entity).is_none() {
+        return;
+    }
+    update_consumption_and_dispatch(world, entity, inst);
+}
+
+/// Consumption pass + behavior dispatch for an already-decayed building.
+fn update_consumption_and_dispatch(world: &mut World, entity: Entity, inst: &BlockInstance) {
     let _t_consume = profile::enabled().then(Instant::now);
-    update_consumption(world, entity, &inst);
+    update_consumption(world, entity, inst);
     #[cfg(feature = "profile-build")]
     if let Some(t) = _t_consume {
         profile::CONSUME_NS.fetch_add(
@@ -262,10 +318,8 @@ pub fn building_update(world: &mut World, entity: Entity) {
         .get::<Building>(entity)
         .is_some_and(|building| building.enabled);
     if enabled || inst.behavior.always_update_when_disabled() {
-        // Clone only the behavior handle (single atomic) instead of cloning the
-        // whole `Arc<BlockInstance>` again.
         let _t_dispatch = profile::enabled().then(Instant::now);
-        inst.behavior.clone().update_tile(world, entity);
+        inst.behavior.update_tile(world, entity);
         #[cfg(feature = "profile-build")]
         if let Some(t) = _t_dispatch {
             profile::DISPATCH_NS.fetch_add(
@@ -274,6 +328,65 @@ pub fn building_update(world: &mut World, entity: Entity) {
             );
         }
     }
+}
+
+/// Batched fast path for behavior families whose blocks have no consumers
+/// (conveyors/ducts/routers/junctions/bridges/payload; plan 07/08 §7.4).
+///
+/// Semantically identical to [`building_update_with`] while `inst.consumers` is
+/// empty: `update_consumption`'s empty-consumer branch computes
+/// `potential = enabled ? 1 : 0`, `eff = potential * efficiencyScale` and writes
+/// those four fields with `should_consume_power = true`. Fusing the decay read
+/// and the consumption read into one `Building` access removes per-entity column
+/// lookups. Blocks that do consume fall back to the exact path.
+pub fn building_update_no_consumers(world: &mut World, entity: Entity, inst: &BlockInstance) {
+    if !inst.consumers.is_empty() {
+        building_update_with(world, entity, inst);
+        return;
+    }
+    let Some(enabled) = decay_time_scale_read_enabled(world, entity) else {
+        return;
+    };
+    let _t_consume = profile::enabled().then(Instant::now);
+    let scale = inst.behavior.efficiency_scale(world, entity);
+    let potential = if enabled { 1.0 } else { 0.0 };
+    let efficiency = potential * scale;
+    if let Some(mut building) = world.get_mut::<Building>(entity) {
+        building.potential_efficiency = potential;
+        building.efficiency = efficiency;
+        building.optional_efficiency = efficiency;
+        building.should_consume_power = true;
+    }
+    #[cfg(feature = "profile-build")]
+    if let Some(t) = _t_consume {
+        profile::CONSUME_NS.fetch_add(
+            t.elapsed().as_nanos() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
+    if enabled || inst.behavior.always_update_when_disabled() {
+        let _t_dispatch = profile::enabled().then(Instant::now);
+        inst.behavior.update_tile(world, entity);
+        #[cfg(feature = "profile-build")]
+        if let Some(t) = _t_dispatch {
+            profile::DISPATCH_NS.fetch_add(
+                t.elapsed().as_nanos() as u64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+        }
+    }
+}
+
+/// Decay `timeScaleDuration` and read `enabled` in a single `Building` borrow
+/// (`None` when the entity has no `Building`).
+#[inline]
+fn decay_time_scale_read_enabled(world: &mut World, entity: Entity) -> Option<bool> {
+    let mut building = world.get_mut::<Building>(entity)?;
+    building.time_scale_duration -= 1.0;
+    if building.time_scale_duration <= 0.0 {
+        building.time_scale = 1.0;
+    }
+    Some(building.enabled)
 }
 
 /// `BuildingComp.updateConsumption` (verbatim pass structure).
