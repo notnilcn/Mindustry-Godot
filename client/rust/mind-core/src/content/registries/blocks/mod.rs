@@ -1294,6 +1294,34 @@ pub struct BlockSpec {
     /// §3.10 needs it for `Tile.getFlammability` and floor-drop reactions).
     /// Append-only addendum: plan 02 originally omitted the field.
     pub liquid_drop: Option<&'static str>,
+    /// `Floor.speedMultiplier` (unit velocity multiplier; plan 11 §3.6).
+    pub speed_multiplier: Option<f32>,
+    /// `Floor.isLiquid` (naval solidity/`onLiquid`; plan 11 §3.6).
+    pub is_liquid: Option<bool>,
+    /// `Floor.shallow` (`ShallowLiquid.set` sets true; plan 11 §3.6).
+    pub shallow: Option<bool>,
+    /// `Floor.drownTime` (ticks to drown; plan 11 `isDeep`/drown; plan 10).
+    pub drown_time: Option<f32>,
+    /// `Floor.liquidMultiplier` (deep-water pump yield; plan 10/11).
+    pub liquid_multiplier: Option<f32>,
+    /// `Block.crushFragile` (instantly destroyed by crushing tanks; plan 11).
+    pub crush_fragile: Option<bool>,
+    /// `Block.crushDamageMultiplier` (tank-crush damage scaling; plan 11).
+    pub crush_damage_multiplier: Option<f32>,
+    /// `Block.unitMoveBreakable` (deconstructed by moving units; plan 11).
+    pub unit_move_breakable: Option<bool>,
+    /// `Block.alwaysReplace` (plan 07 `Block.canReplace`).
+    pub always_replace: Option<bool>,
+    /// `Block.privileged` (world processors/cells; plan 07/13).
+    pub privileged: Option<bool>,
+    /// `Block.replaceable` (`canReplace`; plan 07).
+    pub replaceable: Option<bool>,
+    /// `Block.quickRotate` (`canReplace` self-replacement; plan 07).
+    pub quick_rotate: Option<bool>,
+    /// Java `Block.subclass` proxy; plan 07 uses `kind` equality when unset.
+    pub subclass: Option<BlockKind>,
+    /// `GenericCrafter.craftTime` (ticks); plan 07 R2 reconciliation.
+    pub craft_time: Option<f32>,
 }
 
 impl Default for BlockSpec {
@@ -1370,6 +1398,20 @@ impl Default for BlockSpec {
             emit_light: None,
             draw_team_overlay: None,
             liquid_drop: None,
+            speed_multiplier: None,
+            is_liquid: None,
+            shallow: None,
+            drown_time: None,
+            liquid_multiplier: None,
+            crush_fragile: None,
+            crush_damage_multiplier: None,
+            unit_move_breakable: None,
+            always_replace: None,
+            privileged: None,
+            replaceable: None,
+            quick_rotate: None,
+            subclass: None,
+            craft_time: None,
         }
     }
 }
@@ -1450,6 +1492,8 @@ impl BlockSpec {
                 spec.has_shadow = Some(false);
                 spec.draw_cached = Some(false);
                 spec.draw_dynamic = Some(false);
+                // `AirBlock` constructor: `alwaysReplace = true`.
+                spec.always_replace = Some(true);
             }
             BlockKind::SpawnBlock => spec.placeable_liquid = Some(true),
             BlockKind::RemoveWall => {
@@ -1502,24 +1546,38 @@ impl BlockSpec {
             BlockKind::StaticProp => {
                 spec.draw_cached = Some(true);
                 spec.draw_dynamic = Some(false);
+                // `Prop` constructor: `alwaysReplace = true` (inherited).
+                spec.always_replace = Some(true);
             }
             BlockKind::StaticTree => {
                 spec.solid = Some(true);
                 spec.placeable_liquid = Some(true);
                 spec.cache_layer = Some(CacheLayerId::Walls);
+                spec.always_replace = Some(true);
             }
-            BlockKind::Prop => {}
+            BlockKind::Prop => {
+                // `Prop` constructor: `alwaysReplace = true`.
+                spec.always_replace = Some(true);
+            }
             BlockKind::TreeBlock => {
                 spec.solid = Some(true);
                 spec.custom_shadow = Some(true);
+                spec.always_replace = Some(true);
             }
             BlockKind::TallBlock => {
                 spec.solid = Some(true);
                 spec.custom_shadow = Some(true);
                 spec.has_shadow = Some(true);
+                spec.always_replace = Some(true);
             }
-            BlockKind::SeaBush => spec.obstructs_light = Some(false),
-            BlockKind::Seaweed => spec.obstructs_light = Some(false),
+            BlockKind::SeaBush => {
+                spec.obstructs_light = Some(false);
+                spec.always_replace = Some(true);
+            }
+            BlockKind::Seaweed => {
+                spec.obstructs_light = Some(false);
+                spec.always_replace = Some(true);
+            }
             BlockKind::SteamVent => {
                 spec.placeable_liquid = Some(true);
                 spec.ore_threshold = Some(0.828);
@@ -1601,6 +1659,8 @@ impl BlockSpec {
                 spec.build_cost_multiplier = Some(6.0);
                 spec.priority = Some(TARGET_PRIORITY_WALL);
                 spec.env_enabled = Some(EnvMask::any());
+                // `Wall.java:45`: `crushDamageMultiplier = 5f`.
+                spec.crush_damage_multiplier = Some(5.0);
                 // `Wall.init()`: drawCached = true; drawDynamic = false unless flashHit.
                 spec.draw_cached = Some(true);
                 spec.draw_dynamic = Some(false);
@@ -1613,6 +1673,8 @@ impl BlockSpec {
                 spec.build_cost_multiplier = Some(6.0);
                 spec.priority = Some(TARGET_PRIORITY_WALL);
                 spec.env_enabled = Some(EnvMask::any());
+                // `ShieldWall extends Wall`: inherits `crushDamageMultiplier = 5`.
+                spec.crush_damage_multiplier = Some(5.0);
                 // `ShieldWall.init()` re-enables dynamic drawing for the shield glow.
                 spec.draw_cached = Some(true);
                 spec.draw_dynamic = Some(true);
@@ -1990,6 +2052,36 @@ pub struct BlockDef {
     pub drill_multipliers: Vec<(ItemId, f32)>,
     /// `Floor.liquidDrop` (`Option<Liquid>`; plan 10 §3.10 append-only addendum).
     pub liquid_drop: Option<LiquidId>,
+    /// `Floor.speedMultiplier` (plan 11 §3.6 unit velocity multiplier).
+    pub speed_multiplier: f32,
+    /// `Floor.isLiquid` (plan 11 §3.6 naval predicate).
+    pub is_liquid: bool,
+    /// `Floor.shallow` (plan 11 §3.6 shallow-speed rule).
+    pub shallow: bool,
+    /// `Floor.isDeep()` (`drownTime > 0`; plan 11 §3.6 deep-floor dispatch).
+    pub is_deep: bool,
+    /// `Floor.drownTime` (plan 10/11 drowning).
+    pub drown_time: f32,
+    /// `Floor.liquidMultiplier` (plan 10 pump yield).
+    pub liquid_multiplier: f32,
+    /// `Block.crushFragile` (plan 11 tank crush).
+    pub crush_fragile: bool,
+    /// `Block.crushDamageMultiplier` (plan 11 tank crush damage; `Wall` = 5).
+    pub crush_damage_multiplier: f32,
+    /// `Block.unitMoveBreakable` (plan 11 unit deconstruct).
+    pub unit_move_breakable: bool,
+    /// `Block.alwaysReplace` (plan 07 `can_replace`).
+    pub always_replace: bool,
+    /// `Block.privileged` (plan 07/13 world processors).
+    pub privileged: bool,
+    /// `Block.replaceable` (plan 07 `can_replace`).
+    pub replaceable: bool,
+    /// `Block.quickRotate` (plan 07 `can_replace` self-replacement).
+    pub quick_rotate: bool,
+    /// Java `Block.subclass` proxy (plan 07 uses `kind` equality when `kind`).
+    pub subclass: BlockKind,
+    /// `GenericCrafter.craftTime` (ticks); plan 07 R2 reconciliation.
+    pub craft_time: f32,
 }
 
 impl BlockDef {
@@ -2051,6 +2143,10 @@ impl BlockDef {
             ),
             None => None,
         };
+        // `Floor.isDeep()` = `drownTime > 0` (`Floor.java:339`).
+        let drown_time = spec.drown_time.unwrap_or(0.0);
+        let is_deep = drown_time > 0.0;
+        let subclass = spec.subclass.unwrap_or(spec.kind);
         let mut unit_plans = Vec::with_capacity(spec.unit_plans.len());
         for plan in &spec.unit_plans {
             let unit = registry
@@ -2208,6 +2304,21 @@ impl BlockDef {
             attributes: Vec::new(),
             drill_multipliers: Vec::new(),
             liquid_drop,
+            speed_multiplier: spec.speed_multiplier.unwrap_or(1.0),
+            is_liquid: spec.is_liquid.unwrap_or(false),
+            shallow: spec.shallow.unwrap_or(false),
+            is_deep,
+            drown_time,
+            liquid_multiplier: spec.liquid_multiplier.unwrap_or(1.0),
+            crush_fragile: spec.crush_fragile.unwrap_or(false),
+            crush_damage_multiplier: spec.crush_damage_multiplier.unwrap_or(1.0),
+            unit_move_breakable: spec.unit_move_breakable.unwrap_or(false),
+            always_replace: spec.always_replace.unwrap_or(false),
+            privileged: spec.privileged.unwrap_or(false),
+            replaceable: spec.replaceable.unwrap_or(true),
+            quick_rotate: spec.quick_rotate.unwrap_or(true),
+            subclass,
+            craft_time: spec.craft_time.unwrap_or(0.0),
         };
         if let Some(generate) = generate_icons {
             def.unlock.generate_icons = generate;

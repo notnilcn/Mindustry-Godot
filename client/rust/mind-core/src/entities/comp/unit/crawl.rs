@@ -10,11 +10,12 @@
 //! (the plan-11 status lists melee/crush as plan-10); `floorSpeedMultiplier`
 //! additionally needs the plan-02/06 floor speed metadata.
 //!
-//! **Owner note (plan 02/06):** the scan's deep branch reads
-//! [`crate::world::behavior::environment::floor_is_deep`], which is `false` for
-//! every block until plan 02 populates `FloorDef.is_deep` (registered
-//! `deep-water` is currently a plain `Floor` with `is_deep == false`); the
-//! slowdown branch is fully live.
+//! **Plan-02/06 status (`lane/f27-floor-meta`):** `FloorDef.is_deep` is now
+//! populated from the vanilla `drownTime > 0` derivation, so the scan's deep
+//! branch ([`floor_is_deep`]) is live for `deep-water`, `deep-tainted-water`,
+//! `tar`, `molten-slag`, `pooled-cryofluid` and `arkycite-floor`. The
+//! `floorSpeedMultiplier` replacement ([`floor_speed_multiplier`]) reads the
+//! copied `Floor.speedMultiplier`/`isDeep` fields.
 
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
@@ -75,6 +76,26 @@ pub fn update_crawl(
         crawl.segment_rot = clamp_range(crawl.segment_rot, rotation, unit_def.segment_max_rot);
         crawl.crawl_time += speed;
     }
+}
+
+/// `CrawlComp.floorSpeedMultiplier` (`CrawlComp.java`):
+/// `pow(isDeep ? 0.45 : speedMultiplier, floorMultiplier) * speedMultiplier *
+/// lastCrawlSlowdown`.
+///
+/// `unit_speed_multiplier` is the unit's `speedMultiplier` import; `meta` is the
+/// walked floor (`None`/air is dry with `speedMultiplier = 1`).
+pub fn floor_speed_multiplier(
+    meta: Option<crate::world::behavior::environment::FloorMeta>,
+    floor_multiplier: f32,
+    unit_speed_multiplier: f32,
+    last_crawl_slowdown: f32,
+) -> f32 {
+    let base = match meta {
+        Some(meta) if meta.is_deep => 0.45,
+        Some(meta) => meta.speed_multiplier,
+        None => 1.0,
+    };
+    base.powf(floor_multiplier) * unit_speed_multiplier * last_crawl_slowdown
 }
 
 /// Tile scan: `(0.75-deep lastDeepFloor, lastCrawlSlowdown)`.
@@ -160,6 +181,7 @@ fn clamp_range(angle: f32, target: f32, range: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::ai::UnitHarness;
     use crate::entities::comp::unit::CrawlComp;
     use crate::entities::comp::unit::movement::update_kinematics;
@@ -218,5 +240,27 @@ mod tests {
         );
         // Deep metadata is plan-02/06 (see module note): inert until populated.
         assert_eq!(crawl.last_deep_floor, None);
+    }
+
+    #[test]
+    fn crawl_floor_speed_multiplier_uses_deep_and_speed() {
+        use crate::world::behavior::environment::FloorMeta;
+        let deep = FloorMeta {
+            is_deep: true,
+            is_liquid: true,
+            shallow: false,
+            speed_multiplier: 0.2,
+            drown_time: 200.0,
+        };
+        assert!((floor_speed_multiplier(Some(deep), 1.0, 1.0, 1.0) - 0.45).abs() < 1e-6);
+        let shallow = FloorMeta {
+            is_deep: false,
+            is_liquid: true,
+            shallow: true,
+            speed_multiplier: 0.75,
+            drown_time: 0.0,
+        };
+        assert!((floor_speed_multiplier(Some(shallow), 1.0, 1.0, 0.5) - 0.375).abs() < 1e-6);
+        assert_eq!(floor_speed_multiplier(None, 1.0, 1.0, 1.0), 1.0);
     }
 }
