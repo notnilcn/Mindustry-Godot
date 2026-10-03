@@ -7,7 +7,7 @@
 use crate::module_bindings::ProtocolInfo;
 
 /// Client-side protocol version; must equal the server's `PROTOCOL_VERSION`.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Client build number compared against `ProtocolInfo::min_client_build`.
 pub const CLIENT_BUILD: u32 = 1;

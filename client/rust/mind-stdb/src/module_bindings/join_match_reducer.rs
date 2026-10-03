@@ -4,16 +4,28 @@
 #![allow(unused, clippy::all)]
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
+use super::member_role_type::MemberRole;
+
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
 pub(super) struct JoinMatchArgs {
     pub match_id: u64,
+    pub password: Option<String>,
+    pub build_id: String,
+    pub content_hash: u64,
+    pub role: MemberRole,
+    pub mods: Vec<String>,
 }
 
 impl From<JoinMatchArgs> for super::Reducer {
     fn from(args: JoinMatchArgs) -> Self {
         Self::JoinMatch {
             match_id: args.match_id,
+            password: args.password,
+            build_id: args.build_id,
+            content_hash: args.content_hash,
+            role: args.role,
+            mods: args.mods,
         }
     }
 }
@@ -33,8 +45,24 @@ pub trait join_match {
     /// The reducer will run asynchronously in the future,
     ///  and this method provides no way to listen for its completion status.
     /// /// Use [`join_match:join_match_then`] to run a callback after the reducer completes.
-    fn join_match(&self, match_id: u64) -> __sdk::Result<()> {
-        self.join_match_then(match_id, |_, _| {})
+    fn join_match(
+        &self,
+        match_id: u64,
+        password: Option<String>,
+        build_id: String,
+        content_hash: u64,
+        role: MemberRole,
+        mods: Vec<String>,
+    ) -> __sdk::Result<()> {
+        self.join_match_then(
+            match_id,
+            password,
+            build_id,
+            content_hash,
+            role,
+            mods,
+            |_, _| {},
+        )
     }
 
     /// Request that the remote module invoke the reducer `join_match` to run as soon as possible,
@@ -46,6 +74,11 @@ pub trait join_match {
     fn join_match_then(
         &self,
         match_id: u64,
+        password: Option<String>,
+        build_id: String,
+        content_hash: u64,
+        role: MemberRole,
+        mods: Vec<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -57,12 +90,26 @@ impl join_match for super::RemoteReducers {
     fn join_match_then(
         &self,
         match_id: u64,
+        password: Option<String>,
+        build_id: String,
+        content_hash: u64,
+        role: MemberRole,
+        mods: Vec<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
             + 'static,
     ) -> __sdk::Result<()> {
-        self.imp
-            .invoke_reducer_with_callback(JoinMatchArgs { match_id }, callback)
+        self.imp.invoke_reducer_with_callback(
+            JoinMatchArgs {
+                match_id,
+                password,
+                build_id,
+                content_hash,
+                role,
+                mods,
+            },
+            callback,
+        )
     }
 }

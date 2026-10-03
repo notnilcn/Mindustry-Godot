@@ -4,9 +4,34 @@
 #![allow(unused, clippy::all)]
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
+use super::admin_switch_team_type::AdminSwitchTeam;
+use super::admin_tile_op_type::AdminTileOp;
 use super::break_block_type::BreakBlock;
+use super::building_control_select_type::BuildingControlSelect;
+use super::bullet_type::Bullet;
+use super::command_building_type::CommandBuilding;
+use super::complete_objective_type::CompleteObjective;
 use super::config_block_type::ConfigBlock;
+use super::custom_type::Custom;
+use super::delete_plans_type::DeletePlans;
+use super::inventory_type::Inventory;
+use super::logic_client_data_type::LogicClientData;
+use super::logic_sync_type::LogicSync;
+use super::menu_builder_choose_type::MenuBuilderChoose;
+use super::menu_choose_type::MenuChoose;
+use super::payload_type::Payload;
 use super::place_block_type::PlaceBlock;
+use super::player_spawn_type::PlayerSpawn;
+use super::research_unlock_type::ResearchUnlock;
+use super::rotate_type::Rotate;
+use super::run_wave_type::RunWave;
+use super::set_rule_type::SetRule;
+use super::set_rules_type::SetRules;
+use super::text_input_result_type::TextInputResult;
+use super::unit_command_queue_type::UnitCommandQueue;
+use super::unit_command_type::UnitCommand;
+use super::unit_control_type::UnitControl;
+use super::unit_stance_type::UnitStance;
 
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
@@ -20,6 +45,66 @@ pub enum CommandKind {
     BreakBlock(BreakBlock),
 
     ConfigBlock(ConfigBlock),
+
+    Rotate(Rotate),
+
+    DeletePlans(DeletePlans),
+
+    CommandBuilding(CommandBuilding),
+
+    Inventory(Inventory),
+
+    Payload(Payload),
+
+    UnitControl(UnitControl),
+
+    UnitClear,
+
+    BuildingControlSelect(BuildingControlSelect),
+
+    UnitCommand(UnitCommand),
+
+    UnitCommandQueue(UnitCommandQueue),
+
+    UnitStance(UnitStance),
+
+    PlayerSpawn(PlayerSpawn),
+
+    Bullet(Bullet),
+
+    SetRules(SetRules),
+
+    SetRule(SetRule),
+
+    ResearchUnlock(ResearchUnlock),
+
+    CompleteObjective(CompleteObjective),
+
+    ClearObjectives,
+
+    SectorCapture,
+
+    SaveSector,
+
+    SkipWave,
+
+    RunWave(RunWave),
+
+    AdminSwitchTeam(AdminSwitchTeam),
+
+    AdminTileOp(AdminTileOp),
+
+    LogicSync(LogicSync),
+
+    LogicClientData(LogicClientData),
+
+    MenuChoose(MenuChoose),
+
+    MenuBuilderChoose(MenuBuilderChoose),
+
+    TextInputResult(TextInputResult),
+
+    Custom(Custom),
 }
 
 impl __sdk::InModule for CommandKind {

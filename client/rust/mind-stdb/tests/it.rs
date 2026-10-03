@@ -17,7 +17,8 @@
 use std::time::{Duration, Instant};
 
 use mind_stdb::module_bindings::{
-    CommandKind, LocalPlayerTableAccessor, MyMatchesTableAccessor, RelayConfigTableAccessor,
+    CommandKind, Gamemode, LocalPlayerTableAccessor, MemberRole, MyMatchesTableAccessor,
+    RelayConfigTableAccessor, Visibility,
 };
 use mind_stdb::{
     BinderOptions, CommandStream, ConnectionConfig, Connector, ConnectorEvent, RowChange, StdbMode,
@@ -159,7 +160,20 @@ fn two_clients_relay_ping_round_trip() {
     assert!(pump_until(&mut guest, timeout, |conn| conn.is_applied(WaveName::Lobby)));
 
     assert!(
-        host.create_match("it-ping-map", 42).is_ok(),
+        host.create_match(
+            "it-ping-map",
+            42,
+            Gamemode::Survival,
+            "survival",
+            Visibility::Public,
+            None,
+            8,
+            "{}",
+            "",
+            0,
+            Vec::new(),
+        )
+        .is_ok(),
         "create_match failed"
     );
     assert!(
@@ -168,11 +182,16 @@ fn two_clients_relay_ping_round_trip() {
     );
     let match_id = first_match_id(&matches_host.drain()).expect("match row");
 
-    assert!(guest.join_match(match_id).is_ok(), "join_match failed");
+    assert!(
+        guest
+            .join_match(match_id, None, "", 0, MemberRole::Player, Vec::new())
+            .is_ok(),
+        "join_match failed"
+    );
     let mut stream_host = CommandStream::subscribe(&mut host, match_id);
     let mut stream_guest = CommandStream::subscribe(&mut guest, match_id);
 
-    assert!(host.start_match(match_id).is_ok(), "start_match failed");
+    assert!(host.start_match(match_id, true).is_ok(), "start_match failed");
     assert!(pump_until(&mut host, timeout, |conn| conn.is_applied(WaveName::Game)));
     assert!(pump_until(&mut guest, timeout, |conn| conn.is_applied(WaveName::Game)));
 
@@ -212,7 +231,22 @@ fn relay_rejects_non_member_and_rate_limit() {
     let timeout = deadline(20);
     assert!(pump_until(&mut host, timeout, |conn| conn.is_applied(WaveName::Lobby)));
     assert!(pump_until(&mut guest, timeout, |conn| conn.is_applied(WaveName::Lobby)));
-    assert!(host.create_match("it-rate-map", 7).is_ok());
+    assert!(
+        host.create_match(
+            "it-rate-map",
+            7,
+            Gamemode::Survival,
+            "survival",
+            Visibility::Public,
+            None,
+            8,
+            "{}",
+            "",
+            0,
+            Vec::new(),
+        )
+        .is_ok()
+    );
     assert!(pump_until(&mut host, timeout, |_| matches_host.pending() > 0));
     let match_id = first_match_id(&matches_host.drain()).expect("match row");
 
@@ -222,7 +256,7 @@ fn relay_rejects_non_member_and_rate_limit() {
         "send itself should not fail"
     );
     let mut stream_host = CommandStream::subscribe(&mut host, match_id);
-    assert!(host.start_match(match_id).is_ok());
+    assert!(host.start_match(match_id, true).is_ok());
     assert!(pump_until(&mut host, timeout, |conn| conn.is_applied(WaveName::Game)));
     // Give the rejected probe time to (not) show up.
     let probe_window = deadline(2);
@@ -244,7 +278,11 @@ fn relay_rejects_non_member_and_rate_limit() {
     // Member rate limit: send beyond the default cap in one burst; some must be
     // rejected. `commands_per_second` is seeded to 600 by `init`.
     const SENT: u64 = 700;
-    assert!(guest.join_match(match_id).is_ok());
+    assert!(
+        guest
+            .join_match(match_id, None, "", 0, MemberRole::Player, Vec::new())
+            .is_ok()
+    );
     let mut stream_guest = CommandStream::subscribe(&mut guest, match_id);
     assert!(pump_until(&mut guest, timeout, |conn| conn.is_applied(WaveName::Game)));
     for nonce in 0..SENT {

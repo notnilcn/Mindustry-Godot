@@ -26,12 +26,15 @@ use crate::binder::{self, BinderCore, BinderOptions, TableBinder};
 use crate::config::{ConnectionConfig, StdbMode};
 use crate::identity::LocalIdentity;
 use crate::module_bindings::{
-    CommandKind, DbConnection, RemoteTables, SubscriptionHandle, all_playersQueryTableAccess,
-    create_match as _, join_match as _, leave_match as _, local_client_settingsQueryTableAccess,
+    CommandKind, DbConnection, Gamemode, MemberRole, RemoteTables, SubscriptionHandle, Visibility,
+    all_matchesQueryTableAccess, all_playersQueryTableAccess, create_match as _,
+    join_match as _, leave_match as _, local_client_settingsQueryTableAccess,
     local_player_profileQueryTableAccess, local_playerQueryTableAccess,
-    my_match_commandsQueryTableAccess, my_matchQueryTableAccess, my_matchesQueryTableAccess,
-    protocol_infoQueryTableAccess, relay_configQueryTableAccess, send_match_command as _,
-    set_username as _, start_match as _,
+    my_kickQueryTableAccess, my_match_commandsQueryTableAccess, my_match_membersQueryTableAccess,
+    my_match_stateQueryTableAccess, my_matchQueryTableAccess, my_matchesQueryTableAccess,
+    my_sender_command_stateQueryTableAccess, protocol_infoQueryTableAccess,
+    publish_match_state as _, relay_configQueryTableAccess, send_match_command as _,
+    server_configQueryTableAccess, set_ready as _, set_username as _, start_match as _,
 };
 use crate::token::{FileTokenStore, TokenStore};
 use crate::waves::{SubscriptionWaves, WaveName};
@@ -406,19 +409,60 @@ impl Connector {
             .map_err(send_error)
     }
 
-    /// Calls the `create_match` reducer (creator auto-joins server-side).
-    pub fn create_match(&mut self, map_id: &str, map_seed: u64) -> Result<(), ConnectorError> {
+    /// Calls the `create_match` reducer (creator auto-joins as host/player).
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_match(
+        &mut self,
+        map_id: &str,
+        map_seed: u64,
+        mode: Gamemode,
+        mode_name: &str,
+        visibility: Visibility,
+        password: Option<String>,
+        max_players: u16,
+        rules_json: &str,
+        build_id: &str,
+        content_hash: u64,
+        mods: Vec<String>,
+    ) -> Result<(), ConnectorError> {
         self.reducer_conn()?
             .reducers
-            .create_match(map_id.to_string(), map_seed)
+            .create_match(
+                map_id.to_string(),
+                map_seed,
+                mode,
+                mode_name.to_string(),
+                visibility,
+                password,
+                max_players,
+                rules_json.to_string(),
+                build_id.to_string(),
+                content_hash,
+                mods,
+            )
             .map_err(send_error)
     }
 
     /// Calls the `join_match` reducer.
-    pub fn join_match(&mut self, match_id: u64) -> Result<(), ConnectorError> {
+    pub fn join_match(
+        &mut self,
+        match_id: u64,
+        password: Option<String>,
+        build_id: &str,
+        content_hash: u64,
+        role: MemberRole,
+        mods: Vec<String>,
+    ) -> Result<(), ConnectorError> {
         self.reducer_conn()?
             .reducers
-            .join_match(match_id)
+            .join_match(
+                match_id,
+                password,
+                build_id.to_string(),
+                content_hash,
+                role,
+                mods,
+            )
             .map_err(send_error)
     }
 
@@ -430,11 +474,48 @@ impl Connector {
             .map_err(send_error)
     }
 
-    /// Calls the `start_match` reducer (lobby → running).
-    pub fn start_match(&mut self, match_id: u64) -> Result<(), ConnectorError> {
+    /// Calls the `set_ready` reducer (lobby readiness gate).
+    pub fn set_ready(&mut self, match_id: u64, ready: bool) -> Result<(), ConnectorError> {
         self.reducer_conn()?
             .reducers
-            .start_match(match_id)
+            .set_ready(match_id, ready)
+            .map_err(send_error)
+    }
+
+    /// Calls the `start_match` reducer (lobby → running). `force` skips the
+    /// all-ready gate (host only).
+    pub fn start_match(&mut self, match_id: u64, force: bool) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .start_match(match_id, force)
+            .map_err(send_error)
+    }
+
+    /// Calls the `publish_match_state` reducer (host only).
+    #[allow(clippy::too_many_arguments)]
+    pub fn publish_match_state(
+        &mut self,
+        match_id: u64,
+        wave: i32,
+        wavetime: f32,
+        enemies: i32,
+        paused: bool,
+        game_over: bool,
+        sim_tick: u64,
+        last_command_id: u64,
+    ) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .publish_match_state(
+                match_id,
+                wave,
+                wavetime,
+                enemies,
+                paused,
+                game_over,
+                sim_tick,
+                last_command_id,
+            )
             .map_err(send_error)
     }
 
@@ -701,6 +782,7 @@ impl Connector {
                 .add_query(|q| q.from.protocol_info())
                 .add_query(|q| q.from.relay_config())
                 .add_query(|q| q.from.local_client_settings())
+                .add_query(|q| q.from.server_config())
                 .subscribe(),
             WaveName::Lobby => {
                 let applied_queue = queue.clone();
@@ -719,6 +801,7 @@ impl Connector {
                     .add_query(|q| q.from.local_player_profile())
                     .add_query(|q| q.from.all_players())
                     .add_query(|q| q.from.my_matches())
+                    .add_query(|q| q.from.all_matches())
                     .subscribe()
             }
             WaveName::Game => {
@@ -736,6 +819,10 @@ impl Connector {
                     })
                     .add_query(|q| q.from.my_match())
                     .add_query(|q| q.from.my_match_commands())
+                    .add_query(|q| q.from.my_match_members())
+                    .add_query(|q| q.from.my_match_state())
+                    .add_query(|q| q.from.my_kick())
+                    .add_query(|q| q.from.my_sender_command_state())
                     .subscribe()
             }
         };

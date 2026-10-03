@@ -8,12 +8,14 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 #[sats(crate = __lib)]
 pub(super) struct StartMatchArgs {
     pub match_id: u64,
+    pub force: bool,
 }
 
 impl From<StartMatchArgs> for super::Reducer {
     fn from(args: StartMatchArgs) -> Self {
         Self::StartMatch {
             match_id: args.match_id,
+            force: args.force,
         }
     }
 }
@@ -33,8 +35,8 @@ pub trait start_match {
     /// The reducer will run asynchronously in the future,
     ///  and this method provides no way to listen for its completion status.
     /// /// Use [`start_match:start_match_then`] to run a callback after the reducer completes.
-    fn start_match(&self, match_id: u64) -> __sdk::Result<()> {
-        self.start_match_then(match_id, |_, _| {})
+    fn start_match(&self, match_id: u64, force: bool) -> __sdk::Result<()> {
+        self.start_match_then(match_id, force, |_, _| {})
     }
 
     /// Request that the remote module invoke the reducer `start_match` to run as soon as possible,
@@ -46,6 +48,7 @@ pub trait start_match {
     fn start_match_then(
         &self,
         match_id: u64,
+        force: bool,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -57,12 +60,13 @@ impl start_match for super::RemoteReducers {
     fn start_match_then(
         &self,
         match_id: u64,
+        force: bool,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
             + 'static,
     ) -> __sdk::Result<()> {
         self.imp
-            .invoke_reducer_with_callback(StartMatchArgs { match_id }, callback)
+            .invoke_reducer_with_callback(StartMatchArgs { match_id, force }, callback)
     }
 }

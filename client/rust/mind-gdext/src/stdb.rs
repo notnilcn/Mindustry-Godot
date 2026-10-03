@@ -16,8 +16,8 @@ use godot::prelude::*;
 
 use mind_stdb::binder::{BinderOptions, TableBinder};
 use mind_stdb::module_bindings::{
-    CommandKind, MyMatchesTableAccessor, PlayerTableAccessor, ProtocolInfoTableAccessor,
-    RelayConfigTableAccessor,
+    CommandKind, Gamemode, MemberRole, MyMatchesTableAccessor, PlayerTableAccessor,
+    ProtocolInfoTableAccessor, RelayConfigTableAccessor, Visibility,
 };
 use mind_stdb::rows::RowView;
 use mind_stdb::{
@@ -426,7 +426,19 @@ impl StdbConnector {
         let Some(connector) = self.connector.as_mut() else {
             return false;
         };
-        match connector.create_match(&map_id.to_string(), map_seed.max(0) as u64) {
+        match connector.create_match(
+            &map_id.to_string(),
+            map_seed.max(0) as u64,
+            Gamemode::Survival,
+            "survival",
+            Visibility::Public,
+            None,
+            8,
+            "{}",
+            "",
+            0,
+            Vec::new(),
+        ) {
             Ok(()) => true,
             Err(error) => {
                 log::warn!("dev_create_match failed: {error}");
@@ -451,7 +463,9 @@ impl StdbConnector {
         let Some(connector) = self.connector.as_mut() else {
             return false;
         };
-        if let Err(error) = connector.join_match(match_id) {
+        if let Err(error) =
+            connector.join_match(match_id, None, "", 0, MemberRole::Player, Vec::new())
+        {
             log::warn!("dev_join_match failed: {error}");
             return false;
         }
@@ -469,7 +483,7 @@ impl StdbConnector {
         let Some(connector) = self.connector.as_mut() else {
             return false;
         };
-        match connector.start_match(match_id as u64) {
+        match connector.start_match(match_id as u64, true) {
             Ok(()) => true,
             Err(error) => {
                 log::warn!("dev_start_match failed: {error}");

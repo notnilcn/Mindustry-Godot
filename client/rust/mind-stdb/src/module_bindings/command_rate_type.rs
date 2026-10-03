@@ -11,6 +11,11 @@ pub struct CommandRate {
     pub window_start: __sdk::Timestamp,
     pub count: u32,
     pub last_sender_seq: u64,
+    pub count_input: u32,
+    pub count_plan: u32,
+    pub count_ui: u32,
+    pub count_logic: u32,
+    pub count_admin: u32,
 }
 
 impl __sdk::InModule for CommandRate {
@@ -25,6 +30,11 @@ pub struct CommandRateCols {
     pub window_start: __sdk::__query_builder::Col<CommandRate, __sdk::Timestamp>,
     pub count: __sdk::__query_builder::Col<CommandRate, u32>,
     pub last_sender_seq: __sdk::__query_builder::Col<CommandRate, u64>,
+    pub count_input: __sdk::__query_builder::Col<CommandRate, u32>,
+    pub count_plan: __sdk::__query_builder::Col<CommandRate, u32>,
+    pub count_ui: __sdk::__query_builder::Col<CommandRate, u32>,
+    pub count_logic: __sdk::__query_builder::Col<CommandRate, u32>,
+    pub count_admin: __sdk::__query_builder::Col<CommandRate, u32>,
 }
 
 impl __sdk::__query_builder::HasCols for CommandRate {
@@ -35,6 +45,11 @@ impl __sdk::__query_builder::HasCols for CommandRate {
             window_start: __sdk::__query_builder::Col::new(table_name, "window_start"),
             count: __sdk::__query_builder::Col::new(table_name, "count"),
             last_sender_seq: __sdk::__query_builder::Col::new(table_name, "last_sender_seq"),
+            count_input: __sdk::__query_builder::Col::new(table_name, "count_input"),
+            count_plan: __sdk::__query_builder::Col::new(table_name, "count_plan"),
+            count_ui: __sdk::__query_builder::Col::new(table_name, "count_ui"),
+            count_logic: __sdk::__query_builder::Col::new(table_name, "count_logic"),
+            count_admin: __sdk::__query_builder::Col::new(table_name, "count_admin"),
         }
     }
 }

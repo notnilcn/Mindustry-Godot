@@ -11,6 +11,8 @@
 #![allow(special_module_name)]
 #![allow(non_snake_case)]
 
+mod admin;
 mod identity;
 mod main;
+mod mods;
 mod relay;

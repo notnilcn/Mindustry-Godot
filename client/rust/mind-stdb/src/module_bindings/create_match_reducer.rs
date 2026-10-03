@@ -4,11 +4,23 @@
 #![allow(unused, clippy::all)]
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
+use super::gamemode_type::Gamemode;
+use super::visibility_type::Visibility;
+
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
 pub(super) struct CreateMatchArgs {
     pub map_id: String,
     pub map_seed: u64,
+    pub mode: Gamemode,
+    pub mode_name: String,
+    pub visibility: Visibility,
+    pub password: Option<String>,
+    pub max_players: u16,
+    pub rules_json: String,
+    pub build_id: String,
+    pub content_hash: u64,
+    pub mods: Vec<String>,
 }
 
 impl From<CreateMatchArgs> for super::Reducer {
@@ -16,6 +28,15 @@ impl From<CreateMatchArgs> for super::Reducer {
         Self::CreateMatch {
             map_id: args.map_id,
             map_seed: args.map_seed,
+            mode: args.mode,
+            mode_name: args.mode_name,
+            visibility: args.visibility,
+            password: args.password,
+            max_players: args.max_players,
+            rules_json: args.rules_json,
+            build_id: args.build_id,
+            content_hash: args.content_hash,
+            mods: args.mods,
         }
     }
 }
@@ -35,8 +56,34 @@ pub trait create_match {
     /// The reducer will run asynchronously in the future,
     ///  and this method provides no way to listen for its completion status.
     /// /// Use [`create_match:create_match_then`] to run a callback after the reducer completes.
-    fn create_match(&self, map_id: String, map_seed: u64) -> __sdk::Result<()> {
-        self.create_match_then(map_id, map_seed, |_, _| {})
+    fn create_match(
+        &self,
+        map_id: String,
+        map_seed: u64,
+        mode: Gamemode,
+        mode_name: String,
+        visibility: Visibility,
+        password: Option<String>,
+        max_players: u16,
+        rules_json: String,
+        build_id: String,
+        content_hash: u64,
+        mods: Vec<String>,
+    ) -> __sdk::Result<()> {
+        self.create_match_then(
+            map_id,
+            map_seed,
+            mode,
+            mode_name,
+            visibility,
+            password,
+            max_players,
+            rules_json,
+            build_id,
+            content_hash,
+            mods,
+            |_, _| {},
+        )
     }
 
     /// Request that the remote module invoke the reducer `create_match` to run as soon as possible,
@@ -49,6 +96,15 @@ pub trait create_match {
         &self,
         map_id: String,
         map_seed: u64,
+        mode: Gamemode,
+        mode_name: String,
+        visibility: Visibility,
+        password: Option<String>,
+        max_players: u16,
+        rules_json: String,
+        build_id: String,
+        content_hash: u64,
+        mods: Vec<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -61,12 +117,35 @@ impl create_match for super::RemoteReducers {
         &self,
         map_id: String,
         map_seed: u64,
+        mode: Gamemode,
+        mode_name: String,
+        visibility: Visibility,
+        password: Option<String>,
+        max_players: u16,
+        rules_json: String,
+        build_id: String,
+        content_hash: u64,
+        mods: Vec<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
             + 'static,
     ) -> __sdk::Result<()> {
-        self.imp
-            .invoke_reducer_with_callback(CreateMatchArgs { map_id, map_seed }, callback)
+        self.imp.invoke_reducer_with_callback(
+            CreateMatchArgs {
+                map_id,
+                map_seed,
+                mode,
+                mode_name,
+                visibility,
+                password,
+                max_players,
+                rules_json,
+                build_id,
+                content_hash,
+                mods,
+            },
+            callback,
+        )
     }
 }

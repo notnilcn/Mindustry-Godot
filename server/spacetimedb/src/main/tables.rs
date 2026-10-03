@@ -29,6 +29,8 @@ pub struct RelayConfig {
 }
 
 /// Audit record kind (plan 01 §6.1); append-only, server-only table.
+///
+/// Variant names are ABI: append-only, never rename.
 #[derive(SpacetimeType, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AuditKind {
     Connect,
@@ -37,5 +39,8 @@ pub enum AuditKind {
     MatchCreate,
     MatchJoin,
     MatchStart,
+    MatchLeave,
+    MatchReady,
+    MatchEnd,
     ConfigChange,
 }

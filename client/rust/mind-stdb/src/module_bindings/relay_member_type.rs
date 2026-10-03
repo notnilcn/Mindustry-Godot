@@ -4,6 +4,8 @@
 #![allow(unused, clippy::all)]
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
+use super::member_role_type::MemberRole;
+
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
 pub struct RelayMember {
@@ -11,6 +13,12 @@ pub struct RelayMember {
     pub match_id: u64,
     pub identity: __sdk::Identity,
     pub joined_at: __sdk::Timestamp,
+    pub role: MemberRole,
+    pub team: Option<u8>,
+    pub connected: bool,
+    pub ready: bool,
+    pub last_seen_at: __sdk::Timestamp,
+    pub kicked_reason: Option<String>,
 }
 
 impl __sdk::InModule for RelayMember {
@@ -25,6 +33,12 @@ pub struct RelayMemberCols {
     pub match_id: __sdk::__query_builder::Col<RelayMember, u64>,
     pub identity: __sdk::__query_builder::Col<RelayMember, __sdk::Identity>,
     pub joined_at: __sdk::__query_builder::Col<RelayMember, __sdk::Timestamp>,
+    pub role: __sdk::__query_builder::Col<RelayMember, MemberRole>,
+    pub team: __sdk::__query_builder::Col<RelayMember, Option<u8>>,
+    pub connected: __sdk::__query_builder::Col<RelayMember, bool>,
+    pub ready: __sdk::__query_builder::Col<RelayMember, bool>,
+    pub last_seen_at: __sdk::__query_builder::Col<RelayMember, __sdk::Timestamp>,
+    pub kicked_reason: __sdk::__query_builder::Col<RelayMember, Option<String>>,
 }
 
 impl __sdk::__query_builder::HasCols for RelayMember {
@@ -35,6 +49,12 @@ impl __sdk::__query_builder::HasCols for RelayMember {
             match_id: __sdk::__query_builder::Col::new(table_name, "match_id"),
             identity: __sdk::__query_builder::Col::new(table_name, "identity"),
             joined_at: __sdk::__query_builder::Col::new(table_name, "joined_at"),
+            role: __sdk::__query_builder::Col::new(table_name, "role"),
+            team: __sdk::__query_builder::Col::new(table_name, "team"),
+            connected: __sdk::__query_builder::Col::new(table_name, "connected"),
+            ready: __sdk::__query_builder::Col::new(table_name, "ready"),
+            last_seen_at: __sdk::__query_builder::Col::new(table_name, "last_seen_at"),
+            kicked_reason: __sdk::__query_builder::Col::new(table_name, "kicked_reason"),
         }
     }
 }

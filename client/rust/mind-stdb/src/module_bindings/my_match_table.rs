@@ -3,8 +3,10 @@
 
 #![allow(unused, clippy::all)]
 use super::authority_mode_type::AuthorityMode;
+use super::gamemode_type::Gamemode;
 use super::match_status_type::MatchStatus;
 use super::relay_match_type::RelayMatch;
+use super::visibility_type::Visibility;
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
 /// Table handle for the table `my_match`.

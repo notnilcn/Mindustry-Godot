@@ -9,7 +9,7 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 pub struct ConfigBlock {
     pub x: i32,
     pub y: i32,
-    pub config: u32,
+    pub value: Vec<u8>,
 }
 
 impl __sdk::InModule for ConfigBlock {

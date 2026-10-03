@@ -5,7 +5,9 @@
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
 use super::authority_mode_type::AuthorityMode;
+use super::gamemode_type::Gamemode;
 use super::match_status_type::MatchStatus;
+use super::visibility_type::Visibility;
 
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
@@ -13,6 +15,7 @@ pub struct RelayMatch {
     pub match_id: u64,
     pub map_id: String,
     pub map_seed: u64,
+    pub map_hash: u64,
     pub map_width_tiles: i32,
     pub map_height_tiles: i32,
     pub status: MatchStatus,
@@ -22,6 +25,24 @@ pub struct RelayMatch {
     pub created_at: __sdk::Timestamp,
     pub started_at: Option<__sdk::Timestamp>,
     pub ended_at: Option<__sdk::Timestamp>,
+    pub host: __sdk::Identity,
+    pub mode: Gamemode,
+    pub mode_name: String,
+    pub visibility: Visibility,
+    pub password_hash: Option<u64>,
+    pub rules_json: String,
+    pub rules_epoch: u32,
+    pub build_id: String,
+    pub content_hash: u64,
+    pub is_dedicated: bool,
+    pub player_count: u16,
+    pub max_players: u16,
+    pub campaign_id: Option<u64>,
+    pub sector_planet: Option<String>,
+    pub sector_id: Option<u32>,
+    pub last_command_id: u64,
+    pub last_snapshot_id: Option<u64>,
+    pub closed_at: Option<__sdk::Timestamp>,
 }
 
 impl __sdk::InModule for RelayMatch {
@@ -35,6 +56,7 @@ pub struct RelayMatchCols {
     pub match_id: __sdk::__query_builder::Col<RelayMatch, u64>,
     pub map_id: __sdk::__query_builder::Col<RelayMatch, String>,
     pub map_seed: __sdk::__query_builder::Col<RelayMatch, u64>,
+    pub map_hash: __sdk::__query_builder::Col<RelayMatch, u64>,
     pub map_width_tiles: __sdk::__query_builder::Col<RelayMatch, i32>,
     pub map_height_tiles: __sdk::__query_builder::Col<RelayMatch, i32>,
     pub status: __sdk::__query_builder::Col<RelayMatch, MatchStatus>,
@@ -44,6 +66,24 @@ pub struct RelayMatchCols {
     pub created_at: __sdk::__query_builder::Col<RelayMatch, __sdk::Timestamp>,
     pub started_at: __sdk::__query_builder::Col<RelayMatch, Option<__sdk::Timestamp>>,
     pub ended_at: __sdk::__query_builder::Col<RelayMatch, Option<__sdk::Timestamp>>,
+    pub host: __sdk::__query_builder::Col<RelayMatch, __sdk::Identity>,
+    pub mode: __sdk::__query_builder::Col<RelayMatch, Gamemode>,
+    pub mode_name: __sdk::__query_builder::Col<RelayMatch, String>,
+    pub visibility: __sdk::__query_builder::Col<RelayMatch, Visibility>,
+    pub password_hash: __sdk::__query_builder::Col<RelayMatch, Option<u64>>,
+    pub rules_json: __sdk::__query_builder::Col<RelayMatch, String>,
+    pub rules_epoch: __sdk::__query_builder::Col<RelayMatch, u32>,
+    pub build_id: __sdk::__query_builder::Col<RelayMatch, String>,
+    pub content_hash: __sdk::__query_builder::Col<RelayMatch, u64>,
+    pub is_dedicated: __sdk::__query_builder::Col<RelayMatch, bool>,
+    pub player_count: __sdk::__query_builder::Col<RelayMatch, u16>,
+    pub max_players: __sdk::__query_builder::Col<RelayMatch, u16>,
+    pub campaign_id: __sdk::__query_builder::Col<RelayMatch, Option<u64>>,
+    pub sector_planet: __sdk::__query_builder::Col<RelayMatch, Option<String>>,
+    pub sector_id: __sdk::__query_builder::Col<RelayMatch, Option<u32>>,
+    pub last_command_id: __sdk::__query_builder::Col<RelayMatch, u64>,
+    pub last_snapshot_id: __sdk::__query_builder::Col<RelayMatch, Option<u64>>,
+    pub closed_at: __sdk::__query_builder::Col<RelayMatch, Option<__sdk::Timestamp>>,
 }
 
 impl __sdk::__query_builder::HasCols for RelayMatch {
@@ -53,6 +93,7 @@ impl __sdk::__query_builder::HasCols for RelayMatch {
             match_id: __sdk::__query_builder::Col::new(table_name, "match_id"),
             map_id: __sdk::__query_builder::Col::new(table_name, "map_id"),
             map_seed: __sdk::__query_builder::Col::new(table_name, "map_seed"),
+            map_hash: __sdk::__query_builder::Col::new(table_name, "map_hash"),
             map_width_tiles: __sdk::__query_builder::Col::new(table_name, "map_width_tiles"),
             map_height_tiles: __sdk::__query_builder::Col::new(table_name, "map_height_tiles"),
             status: __sdk::__query_builder::Col::new(table_name, "status"),
@@ -62,6 +103,24 @@ impl __sdk::__query_builder::HasCols for RelayMatch {
             created_at: __sdk::__query_builder::Col::new(table_name, "created_at"),
             started_at: __sdk::__query_builder::Col::new(table_name, "started_at"),
             ended_at: __sdk::__query_builder::Col::new(table_name, "ended_at"),
+            host: __sdk::__query_builder::Col::new(table_name, "host"),
+            mode: __sdk::__query_builder::Col::new(table_name, "mode"),
+            mode_name: __sdk::__query_builder::Col::new(table_name, "mode_name"),
+            visibility: __sdk::__query_builder::Col::new(table_name, "visibility"),
+            password_hash: __sdk::__query_builder::Col::new(table_name, "password_hash"),
+            rules_json: __sdk::__query_builder::Col::new(table_name, "rules_json"),
+            rules_epoch: __sdk::__query_builder::Col::new(table_name, "rules_epoch"),
+            build_id: __sdk::__query_builder::Col::new(table_name, "build_id"),
+            content_hash: __sdk::__query_builder::Col::new(table_name, "content_hash"),
+            is_dedicated: __sdk::__query_builder::Col::new(table_name, "is_dedicated"),
+            player_count: __sdk::__query_builder::Col::new(table_name, "player_count"),
+            max_players: __sdk::__query_builder::Col::new(table_name, "max_players"),
+            campaign_id: __sdk::__query_builder::Col::new(table_name, "campaign_id"),
+            sector_planet: __sdk::__query_builder::Col::new(table_name, "sector_planet"),
+            sector_id: __sdk::__query_builder::Col::new(table_name, "sector_id"),
+            last_command_id: __sdk::__query_builder::Col::new(table_name, "last_command_id"),
+            last_snapshot_id: __sdk::__query_builder::Col::new(table_name, "last_snapshot_id"),
+            closed_at: __sdk::__query_builder::Col::new(table_name, "closed_at"),
         }
     }
 }
@@ -71,6 +130,7 @@ impl __sdk::__query_builder::HasCols for RelayMatch {
 /// Provides typed access to indexed columns for query building.
 pub struct RelayMatchIxCols {
     pub match_id: __sdk::__query_builder::IxCol<RelayMatch, u64>,
+    pub visibility: __sdk::__query_builder::IxCol<RelayMatch, Visibility>,
 }
 
 impl __sdk::__query_builder::HasIxCols for RelayMatch {
@@ -78,6 +138,7 @@ impl __sdk::__query_builder::HasIxCols for RelayMatch {
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
         RelayMatchIxCols {
             match_id: __sdk::__query_builder::IxCol::new(table_name, "match_id"),
+            visibility: __sdk::__query_builder::IxCol::new(table_name, "visibility"),
         }
     }
 }
