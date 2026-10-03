@@ -20,10 +20,13 @@ use godot::obj::{Base, Singleton};
 use godot::prelude::*;
 
 use mind_stdb::binder::TableBinder;
+use mind_stdb::checksum::{ChecksumMonitor, ChecksumReport};
 use mind_stdb::commands::CommandSender;
 use mind_stdb::module_bindings::{
-    BreakBlock, CommandKind, Gamemode, MemberRole, MyMatchMembersTableAccessor,
-    MyMatchStateTableAccessor, MyMatchTableAccessor, PlaceBlock, Visibility,
+    BreakBlock, ChatKind, CommandKind, Custom, Gamemode, MatchPlayerState, MemberRole,
+    MyMatchChecksumsTableAccessor, MyMatchMembersTableAccessor, MyMatchPlayerStatesTableAccessor,
+    MyMatchSnapshotsTableAccessor, MyMatchStateTableAccessor, MyMatchTableAccessor, PlaceBlock,
+    Visibility,
 };
 use mind_stdb::rows::RowView;
 use mind_stdb::transport::StdbTransport;
@@ -58,12 +61,19 @@ pub struct MindNet {
     match_binder: Option<TableBinder<MyMatchTableAccessor>>,
     members_binder: Option<TableBinder<MyMatchMembersTableAccessor>>,
     state_binder: Option<TableBinder<MyMatchStateTableAccessor>>,
+    players_binder: Option<TableBinder<MyMatchPlayerStatesTableAccessor>>,
+    checksums_binder: Option<TableBinder<MyMatchChecksumsTableAccessor>>,
+    snapshots_binder: Option<TableBinder<MyMatchSnapshotsTableAccessor>>,
     last_match_json: String,
     last_members_json: String,
     last_state_json: String,
     last_checksum: String,
     authority: String,
     queue_depth: i64,
+    remote_players: std::collections::BTreeMap<String, MatchPlayerState>,
+    checksum_monitor: ChecksumMonitor,
+    snapshot_progress: f32,
+    last_checksum_tick: u64,
 }
 
 #[godot_api]
@@ -82,12 +92,19 @@ impl INode for MindNet {
             match_binder: None,
             members_binder: None,
             state_binder: None,
+            players_binder: None,
+            checksums_binder: None,
+            snapshots_binder: None,
             last_match_json: String::new(),
             last_members_json: String::new(),
             last_state_json: String::new(),
             last_checksum: String::new(),
             authority: "relay".to_string(),
             queue_depth: 0,
+            remote_players: std::collections::BTreeMap::new(),
+            checksum_monitor: ChecksumMonitor::new(),
+            snapshot_progress: 0.0,
+            last_checksum_tick: 0,
         }
     }
 
@@ -116,6 +133,12 @@ impl INode for MindNet {
         self.members_binder =
             Some(connector.bind::<MyMatchMembersTableAccessor>("my_match_members"));
         self.state_binder = Some(connector.bind::<MyMatchStateTableAccessor>("my_match_state"));
+        self.players_binder =
+            Some(connector.bind::<MyMatchPlayerStatesTableAccessor>("my_match_player_states"));
+        self.checksums_binder =
+            Some(connector.bind::<MyMatchChecksumsTableAccessor>("my_match_checksums"));
+        self.snapshots_binder =
+            Some(connector.bind::<MyMatchSnapshotsTableAccessor>("my_match_snapshots"));
         if online {
             if let Err(error) = connector.connect() {
                 log::warn!("MindNet connect failed: {error}");
@@ -142,6 +165,7 @@ impl INode for MindNet {
             match event {
                 ConnectorEvent::Connected { identity } => {
                     self.session.set_local_identity(identity.identity);
+                    self.checksum_monitor.set_local(identity.identity);
                     if let Some(runtime) = self.runtime.as_mut() {
                         runtime.set_local_identity(identity.identity);
                     }
@@ -154,7 +178,11 @@ impl INode for MindNet {
         self.drain_match_rows();
         self.drain_members_rows();
         self.drain_state_rows();
+        self.drain_player_states();
+        self.drain_checksums();
+        self.drain_snapshots();
         self.drain_relay();
+        self.maybe_publish_checksum();
     }
 
     fn exit_tree(&mut self) {
@@ -345,26 +373,7 @@ impl MindNet {
                 return false;
             }
         };
-        let tick = self.sim_tick();
-        let Some(connector) = self.connector.as_mut() else {
-            return false;
-        };
-        let Some(sender) = self.sender.as_mut() else {
-            return false;
-        };
-        let mut transport = StdbTransport::new(connector);
-        match sender.send(&mut transport, tick, kind) {
-            Ok(seq) => {
-                if let Some(runtime) = self.runtime.as_mut() {
-                    runtime.on_prediction(seq);
-                }
-                true
-            }
-            Err(error) => {
-                log::warn!("MindNet.send_command_json failed: {error}");
-                false
-            }
-        }
+        self.emit_command(kind)
     }
 
     /// Last checksum reported by the local sim / relay.
@@ -388,6 +397,23 @@ impl MindNet {
                 .unwrap_or(0)
                 .to_variant(),
         );
+        out.set(
+            &GString::from("checksum_reports"),
+            &(self.checksum_monitor.len() as i64).to_variant(),
+        );
+        out.set(
+            &GString::from("desync"),
+            &self
+                .checksum_monitor
+                .detect()
+                .map(|detected| detected.command_id as i64)
+                .unwrap_or(-1)
+                .to_variant(),
+        );
+        out.set(
+            &GString::from("resync_count"),
+            &(self.session.resync_count() as i64).to_variant(),
+        );
         out
     }
 
@@ -397,37 +423,101 @@ impl MindNet {
         GString::from(self.authority.as_str())
     }
 
-    /// Remote player state mirror (plan M3; empty until then).
+    /// Remote player state mirror (plan M3): the last LWW row for `identity`.
     #[func]
-    pub fn get_remote_player_state(&self, _identity_hex: GString) -> Dictionary<GString, Variant> {
-        Dictionary::new()
+    pub fn get_remote_player_state(&self, identity_hex: GString) -> Dictionary<GString, Variant> {
+        let key = identity_hex.to_string();
+        let Some(state) = self.remote_players.get(&key) else {
+            return Dictionary::new();
+        };
+        let mut out = Dictionary::<GString, Variant>::new();
+        out.set(&GString::from("identity"), &key.to_variant());
+        out.set(&GString::from("seq"), &(state.seq as i64).to_variant());
+        out.set(
+            &GString::from("unit_id"),
+            &(state.unit_id as i64).to_variant(),
+        );
+        out.set(&GString::from("dead"), &state.dead.to_variant());
+        out.set(&GString::from("x"), &state.x.to_variant());
+        out.set(&GString::from("y"), &state.y.to_variant());
+        out.set(&GString::from("vx"), &state.vx.to_variant());
+        out.set(&GString::from("vy"), &state.vy.to_variant());
+        out.set(&GString::from("rotation"), &state.rotation.to_variant());
+        out.set(&GString::from("health"), &state.health.to_variant());
+        out.set(&GString::from("shield"), &state.shield.to_variant());
+        out.set(&GString::from("team"), &(state.team as i64).to_variant());
+        out
     }
 
-    /// Requests a fresh host snapshot (plan M4/M5; not yet implemented).
+    /// Remote player states as a JSON array (renderer/debug; plan §3.15).
     #[func]
-    pub fn request_snapshot(&self) -> bool {
-        log::warn!("MindNet.request_snapshot: snapshot path lands in plan 21 M4/M5");
-        false
+    pub fn get_remote_players_json(&self) -> GString {
+        let entries: Vec<String> = self
+            .remote_players
+            .values()
+            .map(|state| state.debug_json())
+            .collect();
+        let json = format!("[{}]", entries.join(","));
+        GString::from(json.as_str())
     }
 
-    /// Snapshot download progress (plan M4/M5; always 0.0 until then).
+    /// Requests a fresh host snapshot and enters snapshot sync (plan §3.7).
+    #[func]
+    pub fn request_snapshot(&mut self) -> bool {
+        let Some(match_id) = self.session.match_id() else {
+            return false;
+        };
+        let Some(connector) = self.connector.as_mut() else {
+            return false;
+        };
+        connector.subscribe_snapshot();
+        match connector.request_snapshot(match_id) {
+            Ok(()) => {
+                self.session.enter_snapshot_sync();
+                self.snapshot_progress = 0.0;
+                true
+            }
+            Err(error) => {
+                log::warn!("MindNet.request_snapshot failed: {error}");
+                false
+            }
+        }
+    }
+
+    /// Snapshot download progress in `0.0..=1.0` (plan M4/M5).
     #[func]
     pub fn snapshot_progress(&self) -> f32 {
-        0.0
+        self.snapshot_progress
     }
 
-    /// Sends a chat message (plan M3; not yet implemented).
+    /// Sends a chat message on the `All` channel (plan M3).
     #[func]
-    pub fn send_chat(&self, _text: GString) -> bool {
-        log::warn!("MindNet.send_chat: chat transport lands in plan 21 M3");
-        false
+    pub fn send_chat(&mut self, text: GString) -> bool {
+        let Some(match_id) = self.session.match_id() else {
+            return false;
+        };
+        let Some(connector) = self.connector.as_mut() else {
+            return false;
+        };
+        match connector.send_chat(match_id, ChatKind::All, &text.to_string()) {
+            Ok(()) => true,
+            Err(error) => {
+                log::warn!("MindNet.send_chat failed: {error}");
+                false
+            }
+        }
     }
 
-    /// Sends a UI result command (plan M3; not yet implemented).
+    /// Sends a UI result as an opaque `Custom` relay command (plan M3/14).
     #[func]
-    pub fn send_ui_result(&self, _kind: GString, _payload: GString) -> bool {
-        log::warn!("MindNet.send_ui_result: plan 14/21 M3");
-        false
+    pub fn send_ui_result(&mut self, _kind: GString, payload: GString) -> bool {
+        let data = payload.to_string().into_bytes();
+        if data.len() > 1024 {
+            log::warn!("MindNet.send_ui_result: payload exceeds 1 KiB");
+            return false;
+        }
+        let kind = CommandKind::Custom(Custom { kind: 1, data });
+        self.emit_command(kind)
     }
 
     /// Dev: request an authority mode change (authoritative is not implemented).
@@ -545,6 +635,129 @@ impl MindNet {
             let mut host = host.bind_mut();
             for command in commands {
                 host.enqueue_sim_command(command);
+            }
+        }
+    }
+
+    /// Emits one relay command with prediction bookkeeping (plan §3.5).
+    fn emit_command(&mut self, kind: CommandKind) -> bool {
+        let tick = self.sim_tick();
+        let Some(connector) = self.connector.as_mut() else {
+            return false;
+        };
+        let Some(sender) = self.sender.as_mut() else {
+            return false;
+        };
+        let mut transport = StdbTransport::new(connector);
+        match sender.send(&mut transport, tick, kind) {
+            Ok(seq) => {
+                if let Some(runtime) = self.runtime.as_mut() {
+                    runtime.on_prediction(seq);
+                }
+                true
+            }
+            Err(error) => {
+                log::warn!("MindNet.emit_command failed: {error}");
+                false
+            }
+        }
+    }
+
+    /// Mirrors `my_match_player_states` rows for the renderer/tests (plan M3).
+    fn drain_player_states(&mut self) {
+        let Some(binder) = self.players_binder.as_ref() else {
+            return;
+        };
+        for change in binder.drain() {
+            if let RowChange::Insert(row) | RowChange::Update { new: row, .. } = change {
+                self.remote_players
+                    .insert(row.identity.to_hex().to_string(), row);
+            }
+        }
+    }
+
+    /// Feeds `my_match_checksums` rows into the desync monitor (plan M4).
+    fn drain_checksums(&mut self) {
+        let Some(binder) = self.checksums_binder.as_ref() else {
+            return;
+        };
+        let host = self.session.host_identity();
+        if let Some(host) = host {
+            self.checksum_monitor.set_host(host);
+        }
+        for change in binder.drain() {
+            if let RowChange::Insert(row) | RowChange::Update { new: row, .. } = change {
+                self.checksum_monitor.record(ChecksumReport {
+                    sender: row.sender,
+                    command_id: row.command_id,
+                    sim_tick: row.sim_tick,
+                    checksum: row.checksum,
+                    checksum_version: row.checksum_version,
+                    scope: row.scope,
+                });
+                self.last_checksum = format!("{:016x}", row.checksum);
+            }
+        }
+        if self.checksum_monitor.detect().is_some() && self.session.resync_count() == 0 {
+            log::warn!("MindNet: desync detected; requesting a host snapshot");
+            let _ = self.request_snapshot();
+        }
+    }
+
+    /// Tracks the newest snapshot metadata and progress (plan M4/M5).
+    fn drain_snapshots(&mut self) {
+        let Some(binder) = self.snapshots_binder.as_ref() else {
+            return;
+        };
+        let mut newest: Option<(u64, u16)> = None;
+        for change in binder.drain() {
+            if let RowChange::Insert(row) | RowChange::Update { new: row, .. } = change
+                && newest.map(|(id, _)| row.snapshot_id > id).unwrap_or(true)
+            {
+                newest = Some((row.snapshot_id, row.chunk_count));
+            }
+        }
+        if let Some((id, chunks)) = newest {
+            log::debug!("MindNet: snapshot {id} available ({chunks} chunks)");
+        }
+    }
+
+    /// Publishes a scoped checksum every `CHECKSUM_INTERVAL_TICKS` while running.
+    fn maybe_publish_checksum(&mut self) {
+        if self.session.state() != mind_stdb::session::SessionState::InGame {
+            return;
+        }
+        let tick = self.sim_tick();
+        const CHECKSUM_INTERVAL_TICKS: u64 = 120;
+        if tick
+            < self
+                .last_checksum_tick
+                .saturating_add(CHECKSUM_INTERVAL_TICKS)
+        {
+            return;
+        }
+        self.last_checksum_tick = tick;
+        let Some(match_id) = self.session.match_id() else {
+            return;
+        };
+        let checksum = self
+            .sim_host
+            .as_ref()
+            .map(|host| host.bind().checksum_scoped_value())
+            .unwrap_or(0);
+        let command_id = self
+            .runtime
+            .as_ref()
+            .map(|runtime| runtime.last_applied_command_id())
+            .unwrap_or(0);
+        if let Some(connector) = self.connector.as_mut()
+            && connector.is_connected()
+        {
+            let scope = mind_stdb::scope_bits(true, false, false);
+            if let Err(error) =
+                connector.publish_checksum(match_id, command_id, tick, checksum, 1, scope)
+            {
+                log::warn!("MindNet: publish_checksum failed: {error}");
             }
         }
     }

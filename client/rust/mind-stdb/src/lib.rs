@@ -17,6 +17,8 @@
 //! regenerate with `server/build.sh`, drift gate `server/build.sh --check`).
 
 pub mod binder;
+pub mod checksum;
+pub mod command_ring;
 pub mod config;
 pub mod connector;
 pub mod identity;
@@ -34,6 +36,11 @@ pub mod transport;
 pub mod waves;
 
 pub use binder::{BinderOptions, RowChange, TableBinder};
+pub use checksum::{
+    ChecksumMonitor, ChecksumReport, Correction, DesyncDetected, compare_at_command_id,
+    host_canonical_correction, scope_bits, version_mismatch_ignored,
+};
+pub use command_ring::{CommandRing, RingEntry};
 pub use commands::{CommandSender, PredictPolicy, PredictionQueue};
 pub use config::{Backoff, ConnectPolicy, ConnectionConfig, StdbMode};
 pub use connector::{Connector, ConnectorError, ConnectorEvent, ConnectorState};

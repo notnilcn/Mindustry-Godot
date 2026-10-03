@@ -75,6 +75,56 @@ pub struct SimSnapshot {
     pub checksum: u64,
 }
 
+/// Comparison-time checksum projection (plan 21 §3.2/§6.5).
+///
+/// The authority mask is a *projection*, never a change to plan 05's hasher;
+/// masked fields are replaced by their declared defaults while the field walk
+/// order is unchanged. Bits map directly to `match_checksum.scope`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChecksumScope {
+    /// Include the shared world cohort (always true under D2).
+    pub world_cohort: bool,
+    /// Include possessed-unit kinematics/health/input (false under
+    /// `AuthorityMode::Relay`; true under the authoritative sim and headless
+    /// replay).
+    pub include_possessed: bool,
+    /// Include view-only/FX state (always false).
+    pub include_view: bool,
+}
+
+impl Default for ChecksumScope {
+    fn default() -> Self {
+        Self::relay()
+    }
+}
+
+impl ChecksumScope {
+    /// Masked scope used while clients own possessed units (D2 relay).
+    pub const fn relay() -> Self {
+        Self {
+            world_cohort: true,
+            include_possessed: false,
+            include_view: false,
+        }
+    }
+
+    /// Unmasked scope for the deferred authoritative sim / exact replay.
+    pub const fn authoritative() -> Self {
+        Self {
+            world_cohort: true,
+            include_possessed: true,
+            include_view: false,
+        }
+    }
+
+    /// `ChecksumScope` bitset sent in `match_checksum.scope`.
+    pub const fn bits(&self) -> u8 {
+        (self.world_cohort as u8)
+            | ((self.include_possessed as u8) << 1)
+            | ((self.include_view as u8) << 2)
+    }
+}
+
 /// The P0 simulation container.
 pub struct Sim {
     /// ECS world (placed blocks at P0).
@@ -362,6 +412,19 @@ impl Sim {
     /// Checksum as 16 lowercase hex digits (golden format).
     pub fn checksum_hex(&self) -> String {
         self.checksum_value().to_hex()
+    }
+
+    /// Scoped checksum (plan 21 §6.5): walks the identical plan-05 hasher order
+    /// but replaces fields excluded by `scope` with their declared defaults.
+    ///
+    /// At the P0/M9 stage there are no `SyncLocal`/player-possessed components,
+    /// so no field is masked and the value equals [`Sim::checksum`]. The seam is
+    /// additive: plans 05/11/16 hook masked fields here without changing the
+    /// relay API. `scope.bits()` is the value peers publish in
+    /// `match_checksum.scope`.
+    pub fn checksum_scoped(&self, scope: &ChecksumScope) -> u64 {
+        let _ = scope;
+        self.checksum()
     }
 
     /// Applies a canonical [`SimCommand`] through the same path the relay uses

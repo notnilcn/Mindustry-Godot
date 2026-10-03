@@ -134,6 +134,7 @@ mod tests {
         let gate = JoinGate {
             stored_password_hash: Some(hash_password("secret")),
             supplied_password: Some("wrong".to_string()),
+            max_players: 8,
             ..JoinGate::default()
         };
         assert_eq!(validate_join(&gate).unwrap_err(), "Incorrect password.");

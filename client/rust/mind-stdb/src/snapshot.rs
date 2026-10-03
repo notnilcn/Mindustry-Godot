@@ -56,6 +56,8 @@ pub struct SnapshotHeader {
     pub wave: i32,
     /// Seconds until the next wave.
     pub wavetime: f32,
+    /// `RngStream::Sim` state (plan 05).
+    pub rng_sim: Vec<u8>,
 }
 
 /// Snapshot header decode error.
@@ -122,9 +124,14 @@ fn read_string(bytes: &[u8], pos: &mut usize) -> Result<String, SnapshotError> {
     String::from_utf8(raw.to_vec()).map_err(|_| SnapshotError::InvalidString)
 }
 
+fn read_bytes(bytes: &[u8], pos: &mut usize) -> Result<Vec<u8>, SnapshotError> {
+    let len = read_u32(bytes, pos)? as usize;
+    Ok(take(bytes, pos, len)?.to_vec())
+}
+
 impl SnapshotHeader {
-    /// Decodes the fixed header from the start of a dynamic blob.
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, SnapshotError> {
+    /// Decodes the fixed header and returns it with the consumed byte length.
+    pub fn from_bytes_with_len(bytes: &[u8]) -> Result<(Self, usize), SnapshotError> {
         if bytes.len() < 4 || bytes[..4] != SNAPSHOT_MAGIC {
             return Err(SnapshotError::BadMagic);
         }
@@ -133,7 +140,7 @@ impl SnapshotHeader {
         if format != SNAPSHOT_FORMAT {
             return Err(SnapshotError::UnsupportedFormat { found: format });
         }
-        Ok(Self {
+        let header = Self {
             format,
             checksum_version: read_u32(bytes, &mut pos)?,
             command_id: read_u64(bytes, &mut pos)?,
@@ -147,7 +154,14 @@ impl SnapshotHeader {
             rules_json: read_string(bytes, &mut pos)?,
             wave: read_i32(bytes, &mut pos)?,
             wavetime: read_f32(bytes, &mut pos)?,
-        })
+            rng_sim: read_bytes(bytes, &mut pos)?,
+        };
+        Ok((header, pos))
+    }
+
+    /// Decodes the fixed header from the start of a dynamic blob.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, SnapshotError> {
+        Self::from_bytes_with_len(bytes).map(|(header, _)| header)
     }
 
     /// Encodes the header (symmetrical with [`SnapshotHeader::from_bytes`]).
@@ -167,6 +181,7 @@ impl SnapshotHeader {
         put_string(&mut out, &self.rules_json);
         out.extend_from_slice(&self.wave.to_le_bytes());
         out.extend_from_slice(&self.wavetime.to_bits().to_le_bytes());
+        put_bytes(&mut out, &self.rng_sim);
         out
     }
 
@@ -199,6 +214,65 @@ impl SnapshotHeader {
 fn put_string(out: &mut Vec<u8>, value: &str) {
     out.extend_from_slice(&(value.len() as u32).to_le_bytes());
     out.extend_from_slice(value.as_bytes());
+}
+
+fn put_bytes(out: &mut Vec<u8>, value: &[u8]) {
+    out.extend_from_slice(&(value.len() as u32).to_le_bytes());
+    out.extend_from_slice(value);
+}
+
+/// A dynamic snapshot: the fixed [`SnapshotHeader`] plus an opaque
+/// plan-04 entity/team payload (`teams` + `entities` per plan §6.4).
+#[derive(Debug, Clone, PartialEq)]
+pub struct DynamicSnapshot {
+    /// Decoded header.
+    pub header: SnapshotHeader,
+    /// Opaque body following the header (04 codec output).
+    pub body: Vec<u8>,
+}
+
+impl DynamicSnapshot {
+    /// Encodes header + body into one blob (chunk-split by the caller).
+    pub fn encode(&self) -> Vec<u8> {
+        let mut out = self.header.to_bytes();
+        out.extend_from_slice(&self.body);
+        out
+    }
+
+    /// Decodes a blob, splitting the header from the body.
+    pub fn decode(bytes: &[u8]) -> Result<Self, SnapshotError> {
+        let (header, pos) = SnapshotHeader::from_bytes_with_len(bytes)?;
+        Ok(Self {
+            header,
+            body: bytes[pos..].to_vec(),
+        })
+    }
+
+    /// Total encoded length.
+    pub fn encoded_len(&self) -> usize {
+        self.header.to_bytes().len() + self.body.len()
+    }
+}
+
+/// Snapshot ids to delete keeping the newest of each [`SnapshotKind`]
+/// (plan §6.8 "keep-3").
+pub fn snapshot_keep_ids(rows: &[(u64, SnapshotKind)]) -> Vec<u64> {
+    let mut newest: [Option<u64>; 3] = [None, None, None];
+    let slot = |kind: SnapshotKind| match kind {
+        SnapshotKind::WorldReset => 0,
+        SnapshotKind::Dynamic => 1,
+        SnapshotKind::Digest => 2,
+    };
+    for (id, kind) in rows {
+        let index = slot(*kind);
+        if newest[index].map(|current| *id > current).unwrap_or(true) {
+            newest[index] = Some(*id);
+        }
+    }
+    rows.iter()
+        .filter(|(id, kind)| newest[slot(*kind)] != Some(*id))
+        .map(|(id, _)| *id)
+        .collect()
 }
 
 /// Number of chunks for a blob of `len` bytes.
@@ -283,6 +357,7 @@ mod tests {
             rules_json: "{\"waves\":true}".to_string(),
             wave: 3,
             wavetime: 12.5,
+            rng_sim: vec![0xaa, 0xbb, 0xcc, 0xdd],
         }
     }
 
@@ -341,6 +416,36 @@ mod tests {
         // Missing chunk -> None.
         let missing: Vec<(u16, Vec<u8>)> = indexed.iter().take(2).cloned().collect();
         assert_eq!(reassemble(&missing, chunks.len()), None);
+    }
+
+    #[test]
+    fn dynamic_snapshot_roundtrip() {
+        let snapshot = DynamicSnapshot {
+            header: header(),
+            body: vec![1, 2, 3, 4, 5, 6, 7],
+        };
+        let encoded = snapshot.encode();
+        let decoded = DynamicSnapshot::decode(&encoded).expect("decode");
+        assert_eq!(decoded, snapshot);
+        assert_eq!(decoded.encoded_len(), encoded.len());
+        // The header decoder also tolerates the trailing body.
+        assert_eq!(
+            SnapshotHeader::from_bytes(&encoded).expect("header"),
+            header()
+        );
+    }
+
+    #[test]
+    fn snapshot_keep_three() {
+        let rows = vec![
+            (1u64, SnapshotKind::WorldReset),
+            (2, SnapshotKind::Dynamic),
+            (3, SnapshotKind::Dynamic),
+            (4, SnapshotKind::Digest),
+        ];
+        let mut deleted = snapshot_keep_ids(&rows);
+        deleted.sort_unstable();
+        assert_eq!(deleted, vec![2]);
     }
 
     #[test]

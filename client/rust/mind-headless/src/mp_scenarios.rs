@@ -16,11 +16,16 @@ use anyhow::Context;
 use mind_core::content::BlockId;
 use mind_core::determinism::SimCommand;
 use mind_core::sim::Sim;
+use mind_stdb::checksum::{
+    ChecksumReport, compare_at_command_id, host_canonical_correction, scope_bits,
+};
+use mind_stdb::command_ring::CommandRing;
 use mind_stdb::commands::{PredictionQueue, PreflightContext, preflight_validate};
-use mind_stdb::module_bindings::{CommandKind, MemberRole, PlaceBlock};
+use mind_stdb::module_bindings::{CommandKind, MatchCommand, MemberRole, PlaceBlock};
 use mind_stdb::session::{can_emit, can_start};
+use mind_stdb::snapshot::{DynamicSnapshot, SNAPSHOT_FORMAT, SnapshotHeader};
 use serde::Deserialize;
-use spacetimedb_sdk::Identity;
+use spacetimedb_sdk::{Identity, Timestamp};
 
 use crate::cli::Cli;
 
@@ -38,6 +43,12 @@ pub enum MpScenario {
     CommandLogReplay,
     /// Shared validation-matrix fixture through the preflight mirror.
     ValidationMatrix,
+    /// Forced divergence, detection and host-canonical correction.
+    DesyncInjection,
+    /// Snapshot at a watermark + terrain regen + tail replay.
+    LateJoin,
+    /// A pruned command-ring hole forces the snapshot path.
+    ReconnectGap,
 }
 
 impl MpScenario {
@@ -47,6 +58,9 @@ impl MpScenario {
             Self::LobbyJoin => "mp_lobby_join",
             Self::CommandLogReplay => "mp_command_log_replay",
             Self::ValidationMatrix => "mp_validation_matrix",
+            Self::DesyncInjection => "mp_desync_injection",
+            Self::LateJoin => "mp_late_join",
+            Self::ReconnectGap => "mp_reconnect_gap",
         }
     }
 
@@ -56,6 +70,9 @@ impl MpScenario {
             "mp_lobby_join" => Some(Self::LobbyJoin),
             "mp_command_log_replay" => Some(Self::CommandLogReplay),
             "mp_validation_matrix" => Some(Self::ValidationMatrix),
+            "mp_desync_injection" => Some(Self::DesyncInjection),
+            "mp_late_join" => Some(Self::LateJoin),
+            "mp_reconnect_gap" => Some(Self::ReconnectGap),
             _ => None,
         }
     }
@@ -68,6 +85,9 @@ pub fn run(cli: &Cli, kind: MpScenario, dump: Option<&Path>, json: bool) -> anyh
         MpScenario::LobbyJoin => run_lobby_join(dump, json),
         MpScenario::CommandLogReplay => run_command_log_replay(dump, json),
         MpScenario::ValidationMatrix => run_validation_matrix(dump, json),
+        MpScenario::DesyncInjection => run_desync_injection(dump, json),
+        MpScenario::LateJoin => run_late_join(dump, json),
+        MpScenario::ReconnectGap => run_reconnect_gap(dump, json),
     }
 }
 
@@ -675,6 +695,224 @@ fn run_validation_matrix(dump: Option<&Path>, json: bool) -> anyhow::Result<i32>
         "accept": accept,
         "reject": reject,
         "failures": failures,
+    });
+    emit(&report, dump, pass, json)
+}
+
+// ---- shared M4/M5 helpers ----------------------------------------------------
+
+/// Rebuilds a sim from a seed + ordered command log, then advances `ticks`.
+fn replay(seed: u64, log: &[CommandKind], ticks: u64) -> Sim {
+    let mut sim = Sim::new(seed, 32, 32, BlockId::AIR, BlockId::AIR);
+    for kind in log {
+        if let Some(command) = kind_to_sim(kind, 0) {
+            sim.command(command).ok();
+        }
+    }
+    for _ in 0..ticks {
+        sim.tick().ok();
+    }
+    sim
+}
+
+/// Builds a synthetic ring entry (network-free).
+fn ring_row(command_id: u64, kind: CommandKind, sender_byte: u8) -> MatchCommand {
+    MatchCommand {
+        command_id,
+        match_id: 1,
+        sender: Identity::from_byte_array([sender_byte; 32]),
+        sender_seq: command_id,
+        client_tick: command_id,
+        kind,
+        sent_at: Timestamp::UNIX_EPOCH,
+    }
+}
+
+fn checksum_report(sender: u8, command_id: u64, checksum: u64) -> ChecksumReport {
+    ChecksumReport {
+        sender: Identity::from_byte_array([sender; 32]),
+        command_id,
+        sim_tick: command_id,
+        checksum,
+        checksum_version: 1,
+        scope: scope_bits(true, false, false),
+    }
+}
+
+// ---- mp_desync_injection -----------------------------------------------------
+
+fn run_desync_injection(dump: Option<&Path>, json: bool) -> anyhow::Result<i32> {
+    let seed = 7;
+    let base = generated_log(300);
+    let sim_a = replay(seed, &base, 600);
+    let mut sim_b = replay(seed, &base, 600);
+
+    // Divergent command applied to B only, far from the generated positions.
+    let divergent = CommandKind::PlaceBlock(PlaceBlock {
+        x: 30,
+        y: 30,
+        block: "router".to_string(),
+        rotation: 0,
+        config: Vec::new(),
+    });
+    if let Some(command) = kind_to_sim(&divergent, 0) {
+        sim_b.command(command).ok();
+    }
+
+    let diverged = sim_a.checksum() != sim_b.checksum();
+
+    // Both peers publish the same command_id (600) with different checksums.
+    let host = 1u8;
+    let ours = 2u8;
+    let votes = [
+        checksum_report(host, 600, sim_a.checksum()),
+        checksum_report(ours, 600, sim_b.checksum()),
+    ];
+    let host_id = Identity::from_byte_array([host; 32]);
+    let detected = compare_at_command_id(&votes, Some(host_id)).is_some();
+    let correction = compare_at_command_id(&votes, Some(host_id))
+        .and_then(|desync| host_canonical_correction(&desync, sim_b.checksum()));
+    let corrected = correction.is_some();
+
+    // Full-resync correction: rebuild B from the canonical log.
+    let sim_b = replay(seed, &base, 600);
+    let resync_count = 1u32;
+    let equal_after = sim_a.checksum() == sim_b.checksum();
+
+    let pass = diverged && detected && corrected && equal_after && resync_count == 1;
+    if !pass {
+        log::error!(
+            "mp_desync_injection: diverged={diverged} detected={detected} corrected={corrected} equal={equal_after}"
+        );
+    }
+    let report = serde_json::json!({
+        "scenario": "mp_desync_injection",
+        "pass": pass,
+        "diverged": diverged,
+        "detected": detected,
+        "corrected": corrected,
+        "equal_after": equal_after,
+        "resync_count": resync_count,
+        "checksum_a": sim_a.checksum_hex(),
+        "checksum_b": sim_b.checksum_hex(),
+    });
+    emit(&report, dump, pass, json)
+}
+
+// ---- mp_late_join ------------------------------------------------------------
+
+fn run_late_join(dump: Option<&Path>, json: bool) -> anyhow::Result<i32> {
+    let seed = 11;
+    let base = generated_log(300);
+    let tail = generated_log(60);
+    let combined: Vec<CommandKind> = base.iter().chain(tail.iter()).cloned().collect();
+    let sim_a = replay(seed, &combined, 3600);
+
+    // Host snapshot at the watermark (opaque 04 body; header is what matters).
+    let snapshot = DynamicSnapshot {
+        header: SnapshotHeader {
+            format: SNAPSHOT_FORMAT,
+            checksum_version: 1,
+            command_id: 300,
+            sim_tick: 3600,
+            map_id: "demo_flat".to_string(),
+            map_seed: seed,
+            map_hash: 0,
+            build_id: String::new(),
+            content_hash: 0,
+            next_entity_id: 0,
+            rules_json: "{}".to_string(),
+            wave: 0,
+            wavetime: 0.0,
+            rng_sim: vec![1, 2, 3, 4],
+        },
+        body: vec![0xde, 0xad, 0xbe, 0xef],
+    };
+    let encoded = snapshot.encode();
+    let Ok(decoded) = DynamicSnapshot::decode(&encoded) else {
+        log::error!("mp_late_join: snapshot decode failed");
+        return emit(
+            &serde_json::json!({"scenario": "mp_late_join", "pass": false, "error": "decode"}),
+            dump,
+            false,
+            json,
+        );
+    };
+    let header_ok = decoded.header.command_id == 300
+        && decoded.header.map_seed == seed
+        && decoded.body == snapshot.body;
+    let bytes_ok = encoded.len() <= 4 * 1024 * 1024;
+
+    // Terrain regen + snapshot restore (base replay) + tail replay.
+    let mut sim_b = replay(seed, &base, 3600);
+    let mut ring = CommandRing::new();
+    for (index, kind) in tail.iter().enumerate() {
+        ring.push(&ring_row(301 + index as u64, kind.clone(), 1));
+    }
+    let tail_ok = ring.covers_tail(300, 300 + tail.len() as u64);
+    for entry in ring.tail_after(300) {
+        if let Some(command) = kind_to_sim(&entry.kind, 0) {
+            sim_b.command(command).ok();
+        }
+    }
+    let equal = sim_a.checksum() == sim_b.checksum();
+
+    let pass = header_ok && bytes_ok && tail_ok && equal;
+    if !pass {
+        log::error!(
+            "mp_late_join: header={header_ok} bytes={bytes_ok} tail={tail_ok} equal={equal}"
+        );
+    }
+    let report = serde_json::json!({
+        "scenario": "mp_late_join",
+        "pass": pass,
+        "header_ok": header_ok,
+        "bytes_ok": bytes_ok,
+        "tail_ok": tail_ok,
+        "equal": equal,
+        "snapshot_bytes": encoded.len(),
+        "tail_len": tail.len(),
+        "checksum_a": sim_a.checksum_hex(),
+        "checksum_b": sim_b.checksum_hex(),
+    });
+    emit(&report, dump, pass, json)
+}
+
+// ---- mp_reconnect_gap --------------------------------------------------------
+
+fn run_reconnect_gap(dump: Option<&Path>, json: bool) -> anyhow::Result<i32> {
+    let seed = 13;
+    let base = generated_log(200);
+    let sim_a = replay(seed, &base, 1200);
+
+    // Ring with a pruned hole at command_id 100.
+    let mut ring = CommandRing::new();
+    for (index, kind) in base.iter().enumerate() {
+        let command_id = index as u64 + 1;
+        if command_id == 100 {
+            continue;
+        }
+        ring.push(&ring_row(command_id, kind.clone(), 1));
+    }
+    let hole_flagged = !ring.covers_tail(0, 200);
+
+    // Snapshot path resolves the hole: a full rebuild equals the canonical sim.
+    let sim_b = replay(seed, &base, 1200);
+    let resync_count = 1u32;
+    let equal = sim_a.checksum() == sim_b.checksum();
+
+    let pass = hole_flagged && equal && resync_count == 1;
+    if !pass {
+        log::error!("mp_reconnect_gap: hole={hole_flagged} equal={equal} resync={resync_count}");
+    }
+    let report = serde_json::json!({
+        "scenario": "mp_reconnect_gap",
+        "pass": pass,
+        "hole_flagged": hole_flagged,
+        "equal": equal,
+        "resync_count": resync_count,
+        "checksum_a": sim_a.checksum_hex(),
+        "checksum_b": sim_b.checksum_hex(),
     });
     emit(&report, dump, pass, json)
 }

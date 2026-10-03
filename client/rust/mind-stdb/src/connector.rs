@@ -26,15 +26,22 @@ use crate::binder::{self, BinderCore, BinderOptions, TableBinder};
 use crate::config::{ConnectionConfig, StdbMode};
 use crate::identity::LocalIdentity;
 use crate::module_bindings::{
-    CommandKind, DbConnection, Gamemode, MemberRole, RemoteTables, SubscriptionHandle, Visibility,
-    all_matchesQueryTableAccess, all_playersQueryTableAccess, create_match as _, join_match as _,
-    leave_match as _, local_client_settingsQueryTableAccess, local_player_profileQueryTableAccess,
-    local_playerQueryTableAccess, my_kickQueryTableAccess, my_match_commandsQueryTableAccess,
-    my_match_membersQueryTableAccess, my_match_stateQueryTableAccess, my_matchQueryTableAccess,
-    my_matchesQueryTableAccess, my_sender_command_stateQueryTableAccess,
-    protocol_infoQueryTableAccess, publish_match_state as _, relay_configQueryTableAccess,
-    send_match_command as _, server_configQueryTableAccess, set_ready as _, set_username as _,
-    start_match as _,
+    ChatKind, CommandKind, DbConnection, Gamemode, MemberRole, PlayerStateReport, RemoteTables,
+    SnapshotKind, SubscriptionHandle, UiEventKind, Visibility, all_matchesQueryTableAccess,
+    all_playersQueryTableAccess, create_match as _, join_match as _, leave_match as _,
+    local_client_settingsQueryTableAccess, local_player_profileQueryTableAccess,
+    local_playerQueryTableAccess, my_kickQueryTableAccess, my_match_chatQueryTableAccess,
+    my_match_checksumsQueryTableAccess, my_match_commandsQueryTableAccess,
+    my_match_membersQueryTableAccess, my_match_plan_chunksQueryTableAccess,
+    my_match_plansQueryTableAccess, my_match_player_statesQueryTableAccess,
+    my_match_snapshot_chunksQueryTableAccess, my_match_snapshot_requestsQueryTableAccess,
+    my_match_snapshotsQueryTableAccess, my_match_stateQueryTableAccess,
+    my_match_ui_eventsQueryTableAccess, my_matchQueryTableAccess, my_matchesQueryTableAccess,
+    my_sender_command_stateQueryTableAccess, protocol_infoQueryTableAccess, publish_checksum as _,
+    publish_match_state as _, publish_snapshot as _, publish_ui_event as _,
+    relay_configQueryTableAccess, report_plan_snapshot as _, report_player_state as _,
+    request_snapshot as _, send_chat as _, send_match_command as _, server_configQueryTableAccess,
+    set_ready as _, set_username as _, start_match as _,
 };
 use crate::token::{FileTokenStore, TokenStore};
 use crate::waves::{SubscriptionWaves, WaveName};
@@ -178,7 +185,7 @@ pub struct Connector {
     events: Vec<ConnectorEvent>,
     frames: u64,
     waves: SubscriptionWaves,
-    wave_handles: [Option<SubscriptionHandle>; 3],
+    wave_handles: [Option<SubscriptionHandle>; 4],
     binders: Vec<ErasedBinder>,
 }
 
@@ -208,7 +215,7 @@ impl Connector {
             events: Vec::new(),
             frames: 0,
             waves: SubscriptionWaves::new(),
-            wave_handles: [None, None, None],
+            wave_handles: [None, None, None, None],
             binders: Vec::new(),
         }
     }
@@ -364,6 +371,16 @@ impl Connector {
     /// Drops the Game wave subscription.
     pub fn unsubscribe_game(&mut self) {
         self.unsubscribe_wave(WaveName::Game);
+    }
+
+    /// Desires and issues the on-demand Snapshot wave (plan §6.2).
+    pub fn subscribe_snapshot(&mut self) {
+        self.subscribe_wave(WaveName::Snapshot);
+    }
+
+    /// Drops the Snapshot wave subscription after a download completes.
+    pub fn unsubscribe_snapshot(&mut self) {
+        self.unsubscribe_wave(WaveName::Snapshot);
     }
 
     /// Binds a consumer to one table (insert/delete changes only).
@@ -540,6 +557,130 @@ impl Connector {
         nonce: u64,
     ) -> Result<(), ConnectorError> {
         self.send_match_command(match_id, client_tick, CommandKind::Ping(nonce))
+    }
+
+    /// Reports the caller's LWW player state (plan §3.6, 15–25 Hz).
+    pub fn report_player_state(
+        &mut self,
+        match_id: u64,
+        report: PlayerStateReport,
+    ) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .report_player_state(match_id, report)
+            .map_err(send_error)
+    }
+
+    /// Sends one chat message (plan §3.6).
+    pub fn send_chat(
+        &mut self,
+        match_id: u64,
+        kind: ChatKind,
+        text: &str,
+    ) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .send_chat(match_id, kind, text.to_string())
+            .map_err(send_error)
+    }
+
+    /// Publishes a host UI event (plan §3.6; host/admin only server-side).
+    pub fn publish_ui_event(
+        &mut self,
+        match_id: u64,
+        kind: UiEventKind,
+        target: Option<Identity>,
+        payload: Vec<u8>,
+    ) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .publish_ui_event(match_id, kind, target, payload)
+            .map_err(send_error)
+    }
+
+    /// Uploads one chunk of a plan-snapshot group (plan §3.6/§6.6).
+    pub fn report_plan_snapshot(
+        &mut self,
+        match_id: u64,
+        group_id: u32,
+        chunk_index: u16,
+        chunk_count: u16,
+        plans_blob: Vec<u8>,
+    ) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .report_plan_snapshot(match_id, group_id, chunk_index, chunk_count, plans_blob)
+            .map_err(send_error)
+    }
+
+    /// Publishes a scoped checksum (plan §3.7).
+    #[allow(clippy::too_many_arguments)]
+    pub fn publish_checksum(
+        &mut self,
+        match_id: u64,
+        command_id: u64,
+        sim_tick: u64,
+        checksum: u64,
+        checksum_version: u32,
+        scope: u8,
+    ) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .publish_checksum(
+                match_id,
+                command_id,
+                sim_tick,
+                checksum,
+                checksum_version,
+                scope,
+            )
+            .map_err(send_error)
+    }
+
+    /// Requests a fresh host snapshot (plan §3.7).
+    pub fn request_snapshot(&mut self, match_id: u64) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .request_snapshot(match_id)
+            .map_err(send_error)
+    }
+
+    /// Publishes a host snapshot (plan §3.8; host/admin only server-side).
+    #[allow(clippy::too_many_arguments)]
+    pub fn publish_snapshot(
+        &mut self,
+        match_id: u64,
+        kind: SnapshotKind,
+        format: u32,
+        checksum_version: u32,
+        command_id: u64,
+        sim_tick: u64,
+        checksum: u64,
+        map_id: &str,
+        map_seed: u64,
+        map_hash: u64,
+        build_id: &str,
+        content_hash: u64,
+        blob: Vec<u8>,
+    ) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .publish_snapshot(
+                match_id,
+                kind,
+                format,
+                checksum_version,
+                command_id,
+                sim_tick,
+                checksum,
+                map_id.to_string(),
+                map_seed,
+                map_hash,
+                build_id.to_string(),
+                content_hash,
+                blob,
+            )
+            .map_err(send_error)
     }
 
     fn reducer_conn(&self) -> Result<&DbConnection, ConnectorError> {
@@ -756,7 +897,7 @@ impl Connector {
 
     /// Issues every desired, non-empty wave after a connect.
     fn reissue_waves(&mut self) {
-        self.wave_handles = [None, None, None];
+        self.wave_handles = [None, None, None, None];
         for wave in WaveName::ALL {
             if !self.waves.is_desired(wave) || wave.tables().is_empty() {
                 continue;
@@ -823,6 +964,30 @@ impl Connector {
                     .add_query(|q| q.from.my_match_state())
                     .add_query(|q| q.from.my_kick())
                     .add_query(|q| q.from.my_sender_command_state())
+                    .add_query(|q| q.from.my_match_player_states())
+                    .add_query(|q| q.from.my_match_plans())
+                    .add_query(|q| q.from.my_match_plan_chunks())
+                    .add_query(|q| q.from.my_match_ui_events())
+                    .add_query(|q| q.from.my_match_chat())
+                    .add_query(|q| q.from.my_match_checksums())
+                    .add_query(|q| q.from.my_match_snapshots())
+                    .add_query(|q| q.from.my_match_snapshot_requests())
+                    .subscribe()
+            }
+            WaveName::Snapshot => {
+                let applied_queue = queue.clone();
+                let error_queue = queue.clone();
+                builder
+                    .on_applied(move |_ctx| {
+                        applied_queue.push(InternalEvent::WaveApplied(WaveName::Snapshot));
+                    })
+                    .on_error(move |_ctx, error| {
+                        error_queue.push(InternalEvent::WaveError {
+                            wave: WaveName::Snapshot,
+                            message: error.to_string(),
+                        });
+                    })
+                    .add_query(|q| q.from.my_match_snapshot_chunks())
                     .subscribe()
             }
         };
@@ -841,7 +1006,7 @@ impl Connector {
 
     /// Drops wave handles and applied flags (connection gone).
     fn clear_waves(&mut self) {
-        self.wave_handles = [None, None, None];
+        self.wave_handles = [None, None, None, None];
         self.waves.clear();
     }
 
@@ -889,6 +1054,7 @@ fn wave_index(wave: WaveName) -> usize {
         WaveName::Base => 0,
         WaveName::Lobby => 1,
         WaveName::Game => 2,
+        WaveName::Snapshot => 3,
     }
 }
 
