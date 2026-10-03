@@ -1525,12 +1525,46 @@ impl GenerateFilter for LogicFilter {
     }
     fn apply_tiles(
         &mut self,
-        _tiles: &mut Tiles,
+        tiles: &mut Tiles,
         _input: &mut GenerateInput<'_>,
-        _content: &ContentRegistry,
+        content: &ContentRegistry,
         _rng: &mut SimRng,
     ) {
-        log::debug!("LogicFilter is a plan-13 hook; no-op in mind-core M5");
+        let Some(code) = self.code.clone() else {
+            return;
+        };
+        if code.is_empty() {
+            return;
+        }
+
+        // Upstream `LogicFilter.apply` ignores the filter's local `Tiles` and
+        // runs a privileged script against the live generation `World`
+        // (`LExecutor.runLogicScript`). Mirror that: move the in-progress grid
+        // into a temporary `WorldGrid` resource so `getblock`/`setblock` read
+        // and mutate the same tiles, then copy the result back.
+        let owned = std::mem::take(tiles);
+        let width = owned.width;
+        let height = owned.height;
+        let mut grid = crate::world::WorldGrid::new(width, height);
+        grid.tiles = owned;
+
+        let mut world = bevy_ecs::world::World::new();
+        world.insert_resource(grid);
+        world.insert_resource(crate::logic::globals::GlobalVars::with_content(content));
+        world.insert_resource(crate::logic::world::LogicContentIndex::from_content(
+            content,
+        ));
+        let mut state = crate::logic::world::LogicWorldState::new();
+        state.is_host = true;
+        state.map_width = width;
+        state.map_height = height;
+        world.insert_resource(state);
+
+        let _ = crate::logic::script::run_logic_filter(&code, self.loop_enabled, &mut world);
+
+        if let Some(grid) = world.remove_resource::<crate::world::WorldGrid>() {
+            *tiles = grid.tiles;
+        }
     }
 }
 

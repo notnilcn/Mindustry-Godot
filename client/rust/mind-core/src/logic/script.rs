@@ -56,7 +56,14 @@ pub fn run_logic_script_in(
     if code.is_empty() {
         return None;
     }
-    let asm = Assembler::assemble(code, true).ok()?;
+    // Content/`@sfx-*` constants resolve through the installed `GlobalVars`
+    // resource when present (plan-13 M7 content-init install); fall back to the
+    // static-only arena otherwise.
+    let globals = world
+        .get_resource::<crate::logic::globals::GlobalVars>()
+        .cloned()
+        .unwrap_or_default();
+    let asm = Assembler::assemble_with(code, true, globals).ok()?;
     let mut executor = Executor::new();
     executor.privileged = true;
     executor.load(asm);

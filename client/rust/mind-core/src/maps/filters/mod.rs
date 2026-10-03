@@ -946,4 +946,30 @@ mod tests {
         assert_eq!(filters.len(), 1);
         assert_eq!(filters[0].seed(), 5);
     }
+
+    /// Plan-13 M7/plan-06 hook: a `LogicFilter` script mutates the generation
+    /// tiles through `getblock`/`setblock` on the temporary `WorldGrid`.
+    #[test]
+    fn logic_filter_applies_generated_script() {
+        let content = test_registry();
+        let wall = content.block_id("copper-wall").expect("copper-wall");
+        let sand = content.block_id("sand-floor").expect("sand-floor");
+        let mut tiles = crate::world::tiles::Tiles::new(3, 3);
+        for index in 0..9 {
+            tiles.geti_mut(index).floor = BlockId::AIR;
+        }
+        let code = "setblock block @copper-wall 1 1 0 0\n\
+            setblock floor @sand-floor 0 0 0 0\n\
+            end\n"
+            .to_owned();
+        let mut stack: Vec<Box<dyn GenerateFilter>> = vec![Box::new(builtin::LogicFilter {
+            seed: 0,
+            code: Some(code),
+            loop_enabled: false,
+        })];
+        let mut rng = SimRng::new(1);
+        apply_stack(&mut tiles, &mut stack, &content, &mut rng);
+        assert_eq!(tiles.geti(4).block, wall, "setblock block applied");
+        assert_eq!(tiles.geti(0).floor, sand, "setblock floor applied");
+    }
 }

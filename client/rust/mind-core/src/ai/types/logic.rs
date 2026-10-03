@@ -9,7 +9,9 @@
 //! `LUnitControl` setter bridge; this module owns the timer/reset behavior and
 //! exposes the public state plan 13 writes.
 
+use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
+use indexmap::IndexSet;
 
 use super::super::ai_controller::AiCtx;
 use crate::logic::enums::LUnitControl;
@@ -18,6 +20,8 @@ use crate::world::plan::BuildPlan;
 
 /// `LogicAI.timeout` at 60 Hz: 10 seconds (`Time.toSeconds(10)`).
 pub const LOGIC_TIMEOUT_TICKS: f32 = 600.0;
+/// `LogicAI.updateMovement` radar-cache refresh period (40 ticks).
+pub const LOGIC_TARGET_TIMER: f32 = 40.0;
 
 /// `LogicAI` controller state.
 ///
@@ -25,7 +29,7 @@ pub const LOGIC_TIMEOUT_TICKS: f32 = 600.0;
 /// fields; the movement/behaviour body reads them. `target_id` holds the
 /// upstream `Teamc` object id (unit or building) because the bridge passes a
 /// numeric id, not an ECS handle.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Component)]
 pub struct LogicAi {
     /// Bound unit.
     pub unit: Option<Entity>,
@@ -36,6 +40,8 @@ pub struct LogicAi {
     pub timeout: f32,
     /// Whether a processor is currently driving it.
     pub controlled: bool,
+    /// Active `LUnitControl` mode (`LogicAI.control`).
+    pub control: LUnitControl,
     /// `targetPos` (world pixels).
     pub target_pos: (f32, f32),
     /// `target` object id (`-1` = none).
@@ -56,6 +62,16 @@ pub struct LogicAi {
     pub mine_tile: i32,
     /// `buildPlan` (place or deconstruct).
     pub build_plan: Option<BuildPlan>,
+    /// `targetTimer`: ticks until the per-instruction radar cache resets.
+    pub target_timer: f32,
+    /// `radars`: instruction keys refreshed this period (`checkTargetTimer`).
+    pub radars: IndexSet<i32>,
+    /// `aimControl`.
+    pub aim_control: LUnitControl,
+    /// `shoot`.
+    pub shoot: bool,
+    /// `mainTarget`.
+    pub main_target: Option<Entity>,
 }
 
 impl Default for LogicAi {
@@ -65,6 +81,7 @@ impl Default for LogicAi {
             building: i32::MIN,
             timeout: LOGIC_TIMEOUT_TICKS,
             controlled: false,
+            control: LUnitControl::Idle,
             target_pos: (0.0, 0.0),
             target_id: -1,
             item_target: (0.0, 0.0),
@@ -75,6 +92,11 @@ impl Default for LogicAi {
             moving: false,
             mine_tile: i32::MIN,
             build_plan: None,
+            target_timer: 0.0,
+            radars: IndexSet::new(),
+            aim_control: LUnitControl::Stop,
+            shoot: false,
+            main_target: None,
         }
     }
 }
@@ -108,12 +130,31 @@ impl LogicAi {
         self.moving = true;
     }
 
+    /// `LogicAI.checkTargetTimer`: `true` the first time `key` is seen in the
+    /// current 40-tick period (per-instruction result cache gate).
+    pub fn check_target_timer(&mut self, key: i32) -> bool {
+        self.radars.insert(key)
+    }
+
+    /// Current move destination as a tile (`move`/`pathfind` families).
+    pub fn target_tile(&self) -> Option<TilePos> {
+        if self.moving {
+            Some(TilePos::new(
+                crate::world::WorldGrid::to_tile(self.target_pos.0) as i16,
+                crate::world::WorldGrid::to_tile(self.target_pos.1) as i16,
+            ))
+        } else {
+            None
+        }
+    }
+
     /// Applies one `LUnitControl` setter (plan 13's `UnitControlI` bridge).
     ///
     /// `params` are the instruction operands in upstream order. Returns `false`
     /// only for `unbind` (the controller should be released); the caller owns
     /// the `Rules.logicUnitControl`/`logicUnitBuild` gating.
     pub fn apply_control(&mut self, control: LUnitControl, params: &[f64]) -> bool {
+        self.control = control;
         let f = |i: usize| params.get(i).copied().unwrap_or(0.0) as f32;
         let id = |i: usize| params.get(i).copied().unwrap_or(-1.0) as i32;
         match control {
@@ -164,15 +205,47 @@ impl LogicAi {
     }
 }
 
-/// `LogicAI.updateUnit`: count the timeout down; the unit idles while driven.
+/// `LogicAI.updateMovement`: refresh the radar cache, count the control timeout
+/// down, and steer the unit for the active `LUnitControl` mode.
 ///
 /// Returns `false` once the controller should be reset (caller re-evaluates
-/// selection), matching upstream's `invalid` controller path.
+/// selection), matching upstream's `unit.resetController()` path.
 pub fn update_logic(ctx: &mut AiCtx, unit: Entity, state: &mut LogicAi) -> bool {
+    // `updateMovement` head: `targetTimer` / radar set.
+    if state.target_timer > 0.0 {
+        state.target_timer -= 1.0;
+    } else {
+        state.radars.clear();
+        state.target_timer = LOGIC_TARGET_TIMER;
+    }
+
     state.timeout -= 1.0;
     if state.expired() {
         ctx.stop_shooting(unit);
         return false;
+    }
+
+    match state.control {
+        LUnitControl::Move => {
+            let (x, y) = state.target_pos;
+            ctx.move_direct(unit, x, y, 1.0);
+        }
+        LUnitControl::Approach => {
+            let (x, y) = state.target_pos;
+            ctx.move_direct(unit, x, y, 7.0);
+        }
+        LUnitControl::Pathfind => {
+            if ctx.is_flying(unit) {
+                let (x, y) = state.target_pos;
+                ctx.move_direct(unit, x, y, 1.0);
+            } else if let Some(tile) = state.target_tile() {
+                ctx.pathfind(unit, tile, 4.0);
+            }
+        }
+        // `autoPathfind` resolves the nearest enemy core through plan-12
+        // `TeamData`/the spawner; that host query is owned by plan 11/12.
+        LUnitControl::AutoPathfind | LUnitControl::Stop => {}
+        _ => {}
     }
     true
 }
@@ -230,5 +303,52 @@ mod tests {
         assert!(state.build_plan.as_ref().expect("break plan").breaking);
         assert!(!state.apply_control(LUnitControl::Unbind, &[]));
         assert!(!state.controlled);
+    }
+
+    #[test]
+    fn check_target_timer_dedupes_within_period() {
+        let mut state = LogicAi::default();
+        assert!(state.check_target_timer(7));
+        assert!(!state.check_target_timer(7), "same instruction is cached");
+        assert!(state.check_target_timer(8));
+        // The set clears once the 40-tick period elapses.
+        state.target_timer = 0.0;
+        state.radars.clear();
+        assert!(state.check_target_timer(7));
+    }
+
+    #[test]
+    fn update_logic_moves_unit_toward_target() {
+        let mut harness = UnitHarness::new(64, 64, 1);
+        let unit = harness.spawn("dagger", 0, 64.0, 64.0, 0.0).expect("dagger");
+        let mut state = LogicAi::new(unit, i32::MIN);
+        state.control();
+        assert!(state.apply_control(LUnitControl::Move, &[160.0, 160.0]));
+        let before = harness
+            .build
+            .world
+            .get::<crate::entities::comp::Pos>(unit)
+            .unwrap()
+            .x;
+        for _ in 0..10 {
+            let mut ctx = AiCtx {
+                world: &mut harness.build.world,
+                grid: &harness.build.grid,
+                content: &harness.build.content,
+                pathfinder: &mut harness.pathfinder,
+                team: 0,
+            };
+            assert!(update_logic(&mut ctx, unit, &mut state));
+        }
+        let after = harness
+            .build
+            .world
+            .get::<crate::entities::comp::Pos>(unit)
+            .unwrap()
+            .x;
+        assert!(
+            after > before,
+            "unit moved toward the target ({before} -> {after})"
+        );
     }
 }
