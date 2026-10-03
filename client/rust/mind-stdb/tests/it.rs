@@ -266,6 +266,9 @@ fn player_state_roundtrip() {
 
     // Bind the player-state view before the Game wave applies (view is live).
     let states_host = host.bind::<MyMatchPlayerStatesTableAccessor>("my_match_player_states");
+    // The host also needs the Game wave issued; `CommandStream::subscribe` is the
+    // production path that raises it (the host observes the guest's report here).
+    let mut stream_host = CommandStream::subscribe(&mut host, match_id);
     let mut stream_guest = CommandStream::subscribe(&mut guest, match_id);
     assert!(host.start_match(match_id, true).is_ok());
     assert!(pump_until(&mut host, timeout, |conn| conn.is_applied(WaveName::Game)));
@@ -317,6 +320,7 @@ fn player_state_roundtrip() {
     assert_eq!(row.seq, 1);
     assert_eq!(row.unit_id, 42);
     assert!((row.x - 12.5).abs() < f32::EPSILON);
+    let _ = stream_host.drain();
     let _ = stream_guest.drain();
 
     host.disconnect();
