@@ -11,6 +11,9 @@
 
 use indexmap::IndexMap;
 
+/// Header byte for the [`MenuResult`] wire encoding (plan 14 §6.3).
+pub const MENU_RESULT_FORMAT: u8 = 1;
+
 /// Maximum length of the result string.
 pub const MAX_RESULT_LEN: usize = 500;
 /// Maximum length of a single value in chars.
@@ -32,7 +35,7 @@ pub enum MenuValue {
 }
 
 /// Captured menu result (`MenuResult`).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct MenuResult {
     /// Token passed to `MenuBuilder`.
     pub token: i64,
@@ -140,6 +143,163 @@ impl MenuResult {
     pub fn get_bool(&self, id: &str) -> bool {
         self.get_bool_or(id, false)
     }
+
+    /// Encodes the result for the plan-21 `MenuBuilderChoose.result` bytes
+    /// (`format: 1` + token + optional result id + capped value map).
+    pub fn encode(&self) -> Vec<u8> {
+        let mut out = vec![MENU_RESULT_FORMAT];
+        out.extend_from_slice(&self.token.to_le_bytes());
+        match &self.result {
+            Some(result) => {
+                out.push(1);
+                write_str(&mut out, result);
+            }
+            None => out.push(0),
+        }
+        out.extend_from_slice(&(self.values.len() as u16).to_le_bytes());
+        for (id, value) in &self.values {
+            write_str(&mut out, id);
+            match value {
+                MenuValue::Str(text) => {
+                    out.push(0);
+                    write_str(&mut out, text);
+                }
+                MenuValue::F32(value) => {
+                    out.push(1);
+                    out.extend_from_slice(&value.to_le_bytes());
+                }
+                MenuValue::Bool(value) => {
+                    out.push(2);
+                    out.push(u8::from(*value));
+                }
+            }
+        }
+        out
+    }
+
+    /// Decodes a [`Self::encode`] payload, re-applying the upstream caps.
+    pub fn decode(data: &[u8]) -> Result<MenuResult, MenuResultError> {
+        let mut reader = Reader { data, pos: 0 };
+        let format = reader.u8()?;
+        if format != MENU_RESULT_FORMAT {
+            return Err(MenuResultError::BadFormat(format));
+        }
+        let token = reader.i64()?;
+        let result = if reader.u8()? != 0 {
+            Some(reader.str()?)
+        } else {
+            None
+        };
+        let count = reader.u16()?;
+        let mut decoded = MenuResult {
+            token,
+            result: match result {
+                Some(result) => {
+                    let mut clipped = result;
+                    if clipped.chars().count() > MAX_RESULT_LEN {
+                        clipped = clipped.chars().take(MAX_RESULT_LEN).collect();
+                    }
+                    Some(clipped)
+                }
+                None => None,
+            },
+            values: IndexMap::new(),
+        };
+        for _ in 0..count {
+            let id = reader.str()?;
+            let value = match reader.u8()? {
+                0 => MenuValue::Str(reader.str()?),
+                1 => MenuValue::F32(reader.f32()?),
+                2 => MenuValue::Bool(reader.u8()? != 0),
+                other => return Err(MenuResultError::BadTag(other)),
+            };
+            decoded.insert(id, value);
+        }
+        if reader.pos != data.len() {
+            return Err(MenuResultError::TrailingBytes(data.len() - reader.pos));
+        }
+        Ok(decoded)
+    }
+}
+
+/// [`MenuResult`] wire decode errors.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MenuResultError {
+    /// Unknown format header byte.
+    BadFormat(u8),
+    /// Unknown value tag byte.
+    BadTag(u8),
+    /// Unexpected end of input.
+    Eof,
+    /// Invalid UTF-8 in a string payload.
+    Utf8,
+    /// Bytes left after decoding.
+    TrailingBytes(usize),
+}
+
+impl std::fmt::Display for MenuResultError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MenuResultError::BadFormat(value) => write!(f, "unknown menu result format {value}"),
+            MenuResultError::BadTag(value) => write!(f, "unknown menu value tag {value}"),
+            MenuResultError::Eof => write!(f, "unexpected end of menu result input"),
+            MenuResultError::Utf8 => write!(f, "invalid utf-8 in menu result string"),
+            MenuResultError::TrailingBytes(count) => write!(f, "{count} trailing bytes"),
+        }
+    }
+}
+
+impl std::error::Error for MenuResultError {}
+
+fn write_str(out: &mut Vec<u8>, value: &str) {
+    let bytes = value.as_bytes();
+    out.extend_from_slice(&(bytes.len() as u16).to_le_bytes());
+    out.extend_from_slice(bytes);
+}
+
+struct Reader<'a> {
+    data: &'a [u8],
+    pos: usize,
+}
+
+impl Reader<'_> {
+    fn take(&mut self, len: usize) -> Result<&[u8], MenuResultError> {
+        if self.pos + len > self.data.len() {
+            return Err(MenuResultError::Eof);
+        }
+        let slice = &self.data[self.pos..self.pos + len];
+        self.pos += len;
+        Ok(slice)
+    }
+
+    fn u8(&mut self) -> Result<u8, MenuResultError> {
+        Ok(self.take(1)?[0])
+    }
+
+    fn u16(&mut self) -> Result<u16, MenuResultError> {
+        let bytes = self.take(2)?;
+        Ok(u16::from_le_bytes([bytes[0], bytes[1]]))
+    }
+
+    fn i64(&mut self) -> Result<i64, MenuResultError> {
+        let bytes = self.take(8)?;
+        Ok(i64::from_le_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ]))
+    }
+
+    fn f32(&mut self) -> Result<f32, MenuResultError> {
+        let bytes = self.take(4)?;
+        Ok(f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+    }
+
+    fn str(&mut self) -> Result<String, MenuResultError> {
+        let len = self.u16()? as usize;
+        let bytes = self.take(len)?;
+        std::str::from_utf8(bytes)
+            .map(str::to_owned)
+            .map_err(|_| MenuResultError::Utf8)
+    }
 }
 
 /// Truncates a string to `max` chars.
@@ -193,5 +353,34 @@ mod tests {
         assert!(result.was_cancelled());
         result.token = 7;
         assert_eq!(result.token, 7);
+    }
+
+    #[test]
+    fn menu_result_wire_roundtrip() {
+        let mut result = MenuResult::from_result("buy");
+        result.token = 42;
+        result.insert("amount", MenuValue::F32(3.5));
+        result.insert("name", MenuValue::Str("copper".to_owned()));
+        result.insert("enabled", MenuValue::Bool(true));
+        let bytes = result.encode();
+        let decoded = MenuResult::decode(&bytes).unwrap();
+        assert_eq!(decoded.token, 42);
+        assert!(decoded.is("buy"));
+        assert_eq!(decoded.get_f32("amount"), 3.5);
+        assert_eq!(decoded.get_str("name"), Some("copper"));
+        assert!(decoded.get_bool("enabled"));
+
+        // Cancelled result round-trips with `result == None`.
+        let mut cancelled = MenuResult::new();
+        cancelled.token = 9;
+        let decoded = MenuResult::decode(&cancelled.encode()).unwrap();
+        assert!(decoded.was_cancelled());
+        assert_eq!(decoded.token, 9);
+
+        assert_eq!(
+            MenuResult::decode(&[2]),
+            Err(MenuResultError::BadFormat(2))
+        );
+        assert_eq!(MenuResult::decode(&[]), Err(MenuResultError::Eof));
     }
 }

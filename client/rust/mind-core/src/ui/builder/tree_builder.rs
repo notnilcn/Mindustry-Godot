@@ -11,11 +11,243 @@
 
 use serde_json::{Value, json};
 
+use crate::ui::builder::menu_result::{MenuResult, MenuValue};
 use crate::ui::builder::ui_key::UiKey;
 use crate::ui::builder::ui_node::{UiNode, UiValue};
 
 /// Prefix for server-streamed image regions (`DataImagePacker.serverRegionPrefix`).
 pub const SERVER_REGION_PREFIX: &str = "net-";
+
+/// Maximum nodes in one server menu tree (R9 cap).
+pub const MAX_NODES: usize = 4096;
+/// Maximum nesting depth of a server menu tree (R9 cap).
+pub const MAX_DEPTH: usize = 48;
+/// Maximum length of a single string value in a server menu tree (R9 cap).
+pub const MAX_STRING_LEN: usize = 4096;
+
+/// Server-menu tree cap violation (R9).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TreeCapsError {
+    /// More than [`MAX_NODES`] nodes.
+    TooManyNodes(usize),
+    /// Deeper than [`MAX_DEPTH`].
+    TooDeep(usize),
+    /// A string value exceeds [`MAX_STRING_LEN`].
+    StringTooLong(usize),
+}
+
+impl std::fmt::Display for TreeCapsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TreeCapsError::TooManyNodes(count) => {
+                write!(f, "menu tree has {count} nodes (max {MAX_NODES})")
+            }
+            TreeCapsError::TooDeep(depth) => {
+                write!(f, "menu tree depth {depth} exceeds {MAX_DEPTH}")
+            }
+            TreeCapsError::StringTooLong(len) => {
+                write!(f, "menu string {len} chars exceeds {MAX_STRING_LEN}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for TreeCapsError {}
+
+/// Validates the R9 node/depth/string caps on a server-supplied tree.
+pub fn validate_caps(root: &UiNode) -> Result<(), TreeCapsError> {
+    let mut state = CapState {
+        nodes: 0,
+        max_depth: 0,
+    };
+    check_node(root, 1, &mut state)
+}
+
+struct CapState {
+    nodes: usize,
+    max_depth: usize,
+}
+
+fn check_node(node: &UiNode, depth: usize, state: &mut CapState) -> Result<(), TreeCapsError> {
+    state.nodes += 1;
+    state.max_depth = state.max_depth.max(depth);
+    if state.nodes > MAX_NODES {
+        return Err(TreeCapsError::TooManyNodes(state.nodes));
+    }
+    if depth > MAX_DEPTH {
+        return Err(TreeCapsError::TooDeep(depth));
+    }
+    for entry in &node.entries {
+        match &entry.value {
+            UiValue::Str(value) => {
+                if value.chars().count() > MAX_STRING_LEN {
+                    return Err(TreeCapsError::StringTooLong(value.chars().count()));
+                }
+            }
+            UiValue::Node(child) => check_node(child, depth + 1, state)?,
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// A value captured from an id-bearing element (`UiTreeBuilder.fireResult`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ElementValue {
+    /// Slider value.
+    F32(f32),
+    /// Text-field text.
+    Str(String),
+    /// Check box / toggle button state.
+    Bool(bool),
+}
+
+/// One materialized id-bearing element.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Element {
+    /// Node type.
+    pub kind: UiKey,
+    /// Click/enter result id, if wired.
+    pub result: Option<String>,
+    /// Captured value at click time.
+    pub value: ElementValue,
+    /// Whether a button has a toggle style (participates in results).
+    pub checkable: bool,
+}
+
+/// Result of the Godot-free materialization walk.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Materialized {
+    /// Ids of elements that declare one, in tree order.
+    pub ids: Vec<String>,
+    /// Server-streamed image regions, in tree order.
+    pub images: Vec<String>,
+    /// Id → captured element, insertion order.
+    pub elements: indexmap::IndexMap<String, Element>,
+}
+
+impl Materialized {
+    /// `UiTreeBuilder.fireResult`: builds a `MenuResult` from the clicked id and
+    /// the current values of every id-bearing element.
+    pub fn fire_result(&self, result_id: &str, token: i64) -> MenuResult {
+        let mut result = MenuResult::from_result(result_id);
+        result.token = token;
+        for (id, element) in &self.elements {
+            match element.value {
+                ElementValue::F32(value) => result.insert(id.clone(), MenuValue::F32(value)),
+                ElementValue::Str(ref value) => {
+                    result.insert(id.clone(), MenuValue::Str(value.clone()));
+                }
+                ElementValue::Bool(value) => result.insert(id.clone(), MenuValue::Bool(value)),
+            }
+        }
+        result
+    }
+}
+
+/// Style names whose button style exposes a `checked` drawable (`UiTreeBuilder`
+/// distinguishes toggle buttons solely by their style).
+pub fn is_checkable_style(name: &str) -> bool {
+    matches!(
+        name,
+        "flatTogglet"
+            | "logicTogglet"
+            | "flatToggleMenut"
+            | "togglet"
+            | "clearTogglet"
+            | "fullTogglet"
+            | "squareTogglet"
+            | "emptyTogglei"
+            | "squareTogglei"
+            | "grayTogglei"
+            | "clearTogglei"
+            | "clearNoneTogglei"
+    )
+}
+
+/// Godot-free materialization: ids, streamed images and element values.
+pub fn materialize(root: &UiNode, ctx: &BuildContext) -> Materialized {
+    let mut out = Materialized::default();
+    walk_materialized(root, ctx, &mut out);
+    out
+}
+
+fn walk_materialized(node: &UiNode, ctx: &BuildContext, out: &mut Materialized) {
+    for entry in &node.entries {
+        let UiValue::Node(child) = &entry.value else {
+            continue;
+        };
+        if let Some(cond) = child.str_value(UiKey::Condition)
+            && !eval_condition(cond, ctx)
+        {
+            continue;
+        }
+        if let Some(region) = collect_region(child) {
+            out.images.push(region);
+        }
+        if let Some(id) = child.str_value(UiKey::Id) {
+            out.ids.push(id.to_owned());
+            if let Some(element) = element_for(child) {
+                out.elements.insert(id.to_owned(), element);
+            }
+        }
+        walk_materialized(child, ctx, out);
+    }
+}
+
+fn collect_region(child: &UiNode) -> Option<String> {
+    match child.node_type {
+        UiKey::Image => {
+            let region = child
+                .str_value(UiKey::Region)
+                .or_else(|| child.str_value(UiKey::Icon))
+                .unwrap_or("error");
+            region.starts_with(SERVER_REGION_PREFIX).then(|| region.to_owned())
+        }
+        UiKey::Button | UiKey::ImageButton => child
+            .str_value(UiKey::Icon)
+            .filter(|icon| icon.starts_with(SERVER_REGION_PREFIX))
+            .map(str::to_owned),
+        _ => None,
+    }
+}
+
+fn element_for(child: &UiNode) -> Option<Element> {
+    let style = child.str_value(UiKey::Style).unwrap_or("");
+    let element = match child.node_type {
+        UiKey::Slider => Element {
+            kind: UiKey::Slider,
+            result: None,
+            value: ElementValue::F32(
+                child
+                    .num(UiKey::DefaultValue)
+                    .unwrap_or_else(|| child.num_or(UiKey::Min, 0.0)),
+            ),
+            checkable: false,
+        },
+        UiKey::Field => Element {
+            kind: UiKey::Field,
+            result: child.str_value(UiKey::Enter).map(str::to_owned),
+            value: ElementValue::Str(child.str_or(UiKey::Text, "").to_owned()),
+            checkable: false,
+        },
+        UiKey::Check => Element {
+            kind: UiKey::Check,
+            result: None,
+            value: ElementValue::Bool(child.bool_or(UiKey::Checked, false)),
+            checkable: false,
+        },
+        UiKey::Button | UiKey::ButtonTable | UiKey::ImageButton => Element {
+            kind: child.node_type,
+            result: child.str_value(UiKey::Clicked).map(str::to_owned),
+            value: ElementValue::Bool(child.bool_or(UiKey::Checked, false)),
+            checkable: is_checkable_style(style),
+        },
+        _ => return None,
+    };
+    Some(element)
+}
+
 
 /// Viewport context used by [`eval_condition`].
 #[derive(Debug, Clone, Copy)]
@@ -279,5 +511,55 @@ mod tests {
         let result = build(&root, &ctx);
         assert_eq!(result.ids, vec!["volume".to_owned()]);
         assert_eq!(result.images, vec!["net-icon".to_owned()]);
+    }
+
+    #[test]
+    fn materialize_collects_element_values_and_fires_result() {
+        let ctx = BuildContext::default();
+        let root = crate::ui::builder::dsl::parse(
+            "table {\n  row\n  slider: \"vol\" { id: \"volume\" min: 0 max: 1 defaultValue: 0.25 }\n  field: \"\" { id: \"name\" text: \"base\" }\n  check: \"on\" { id: \"enabled\" checked: true }\n  button: \"Buy\" { id: \"buy\" clicked: \"buy\" }\n}\n",
+        )
+        .unwrap();
+        let materialized = materialize(&root, &ctx);
+        assert_eq!(materialized.ids, vec!["volume", "name", "enabled", "buy"]);
+        // A plain `defaultt` button is not checkable and contributes no value.
+        assert!(!materialized.elements["buy"].checkable);
+
+        let result = materialized.fire_result("buy", 7);
+        assert_eq!(result.token, 7);
+        assert!(result.is("buy"));
+        assert_eq!(result.get_f32("volume"), 0.25);
+        assert_eq!(result.get_str("name"), Some("base"));
+        assert!(result.get_bool("enabled"));
+    }
+
+    #[test]
+    fn caps_reject_oversized_trees() {
+        let ok = UiNode::new(UiKey::Table).child(UiNode::new(UiKey::Space));
+        assert!(validate_caps(&ok).is_ok());
+
+        // Oversized string.
+        let long = UiNode::new(UiKey::Label).str(UiKey::Text, "x".repeat(MAX_STRING_LEN + 1));
+        assert_eq!(
+            validate_caps(&long),
+            Err(TreeCapsError::StringTooLong(MAX_STRING_LEN + 1))
+        );
+
+        // Too deep.
+        let mut current = UiNode::new(UiKey::Table);
+        for _ in 0..MAX_DEPTH {
+            let next = UiNode::new(UiKey::Table);
+            current = next.child(current);
+        }
+        let root = UiNode::new(UiKey::Table).child(current);
+        assert!(matches!(validate_caps(&root), Err(TreeCapsError::TooDeep(_))));
+    }
+
+    #[test]
+    fn checkable_style_detection() {
+        assert!(is_checkable_style("togglet"));
+        assert!(is_checkable_style("flatTogglet"));
+        assert!(!is_checkable_style("defaultt"));
+        assert!(!is_checkable_style("grayt"));
     }
 }
