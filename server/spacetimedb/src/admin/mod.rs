@@ -93,3 +93,49 @@ pub fn server_config_or_default(ctx: &ReducerContext) -> ServerConfig {
         .find(0u8)
         .unwrap_or_else(default_server_config)
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::relay::methods::{JoinGate, hash_password, validate_join};
+
+    #[test]
+    fn ban_blocks_join() {
+        let gate = JoinGate {
+            banned: true,
+            ..JoinGate::default()
+        };
+        assert_eq!(
+            validate_join(&gate).unwrap_err(),
+            "You are banned from this server."
+        );
+    }
+
+    #[test]
+    fn whitelist_blocks_join() {
+        let gate = JoinGate {
+            whitelist_enabled: true,
+            whitelisted: false,
+            ..JoinGate::default()
+        };
+        assert_eq!(
+            validate_join(&gate).unwrap_err(),
+            "This server is whitelisted."
+        );
+        let allowed = JoinGate {
+            whitelist_enabled: true,
+            whitelisted: true,
+            ..JoinGate::default()
+        };
+        assert!(validate_join(&allowed).is_ok());
+    }
+
+    #[test]
+    fn password_gate_uses_salted_hash() {
+        let gate = JoinGate {
+            stored_password_hash: Some(hash_password("secret")),
+            supplied_password: Some("wrong".to_string()),
+            ..JoinGate::default()
+        };
+        assert_eq!(validate_join(&gate).unwrap_err(), "Incorrect password.");
+    }
+}
