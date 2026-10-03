@@ -14,8 +14,9 @@ use super::action::{CommandTarget, RemoteAction};
 pub const COMMAND_CHUNK: usize = 200;
 /// Delete-plan positions per command (cap; larger lists emit consecutively).
 pub const DELETE_POSITION_CAP: usize = 256;
-/// `Custom` kind used for a unit stance until plan 05 adds a typed variant
-/// (documented fallback; 11 §6.5).
+/// Former `Custom` kind for a unit stance. Retained as a **reserved** constant
+/// so the old wire value is never reused; `SetUnitStance` now emits the typed
+/// [`crate::determinism::SimCommand::UnitStance`] variant (plan 15 §3.3.1).
 pub const CUSTOM_UNIT_STANCE: u16 = 102;
 
 /// One ordered relay batch (`ActionBatch`, §6.4).
@@ -161,14 +162,12 @@ impl ActionBatcher {
                 if units.is_empty() {
                     return Err(ActionError::NoUnits);
                 }
-                let mut data: SmallVec<[u8; 32]> = SmallVec::new();
-                data.extend_from_slice(&stance.to_le_bytes());
-                data.push(u8::from(enabled));
                 batches.push(self.batch(
                     tick,
-                    smallvec::smallvec![SimCommand::Custom {
-                        kind: CUSTOM_UNIT_STANCE,
-                        data,
+                    smallvec::smallvec![SimCommand::UnitStance {
+                        units,
+                        stance,
+                        enabled,
                     }],
                 ));
             }

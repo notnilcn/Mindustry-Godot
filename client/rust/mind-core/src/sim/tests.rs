@@ -226,6 +226,29 @@ fn sim_command_applies_unit_command_and_control() {
     .expect("command switch applies as a no-op when disallowed");
     assert_eq!(sim.unit_command_state(id).unwrap().command, before);
 
+    // setUnitStance carries unit ids on the wire and applies to each unit.
+    let patrol = sim
+        .unit_commands()
+        .unwrap()
+        .content()
+        .unit_stance_by_name("patrol")
+        .expect("patrol stance")
+        .id;
+    sim.command(SimCommand::UnitStance {
+        units: smallvec::smallvec![id],
+        stance: patrol.raw(),
+        enabled: true,
+    })
+    .expect("unit stance applies");
+    assert!(sim.unit_command_state(id).unwrap().stances.get(patrol));
+    sim.command(SimCommand::UnitStance {
+        units: smallvec::smallvec![id],
+        stance: patrol.raw(),
+        enabled: false,
+    })
+    .expect("unit stance clears");
+    assert!(!sim.unit_command_state(id).unwrap().stances.get(patrol));
+
     // Player-control variants.
     sim.command(SimCommand::UnitControl { unit: Some(id) })
         .expect("unit control");
@@ -236,8 +259,74 @@ fn sim_command_applies_unit_command_and_control() {
     sim.command(SimCommand::UnitClear).expect("unit clear");
     assert_eq!(sim.controlled_unit(), None);
 
-    // move + command-switch + unitControl + buildingControlSelect + unitClear.
-    assert_eq!(sim.commands_applied(), 5);
+    // move + command-switch + stance set + stance clear + unitControl +
+    // buildingControlSelect + unitClear.
+    assert_eq!(sim.commands_applied(), 7);
+}
+
+#[test]
+fn sim_command_rotates_placed_building() {
+    use crate::command::Command;
+    use crate::determinism::{CommandError, SimCommand};
+
+    let mut sim = Sim::new(1, 16, 16, BlockId::AIR, BlockId::AIR);
+    sim.apply(Command::Place {
+        x: 3,
+        y: 3,
+        block: BlockId::STONE_WALL,
+    })
+    .expect("place");
+    let entity = sim.grid.entity_at(TilePos::new(3, 3)).expect("building");
+    let rot = |sim: &Sim| {
+        sim.ecs
+            .0
+            .get::<crate::ecs::BuildingComp>(entity)
+            .unwrap()
+            .rot
+    };
+    assert_eq!(rot(&sim), 0);
+
+    // `true` = counter-clockwise (+1), `false` = clockwise (-1), mod 4.
+    sim.command(SimCommand::Rotate {
+        x: 3,
+        y: 3,
+        direction: true,
+    })
+    .expect("ccw");
+    assert_eq!(rot(&sim), 1);
+    sim.command(SimCommand::Rotate {
+        x: 3,
+        y: 3,
+        direction: false,
+    })
+    .expect("cw");
+    assert_eq!(rot(&sim), 0);
+    sim.command(SimCommand::Rotate {
+        x: 3,
+        y: 3,
+        direction: false,
+    })
+    .expect("cw wraps");
+    assert_eq!(rot(&sim), 3);
+
+    // Blocked variants report an explicit owner-tagged `Unsupported`.
+    assert_eq!(
+        sim.command(SimCommand::DeletePlans {
+            positions: smallvec::smallvec![1],
+        })
+        .unwrap_err(),
+        CommandError::Unsupported("delete_plans")
+    );
+    assert_eq!(
+        sim.command(SimCommand::Payload {
+            kind: 0,
+            x: 0.0,
+            y: 0.0,
+            target: None,
+        })
+        .unwrap_err(),
+        CommandError::Unsupported("payload")
+    );
 }
 
 #[test]

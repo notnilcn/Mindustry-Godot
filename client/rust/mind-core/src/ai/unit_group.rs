@@ -9,12 +9,23 @@
 //! are ≤ 50 units and the whole computation runs inside the tick that triggers
 //! it, so there is no `mainExecutor` submission or `volatile` state. The
 //! quadtree broad-phase becomes an `O(n²)` pair scan (still ≤ 50 units); the
-//! per-unit `raycastFastAvoid` clamp is a plan-11 M3 seam and is marked below.
+//! per-unit `raycastFastAvoid` clamp is [`UnitGroup::clamp_offsets_to_pathfinder`].
 
 use std::f32::consts::PI;
 
+use crate::world::WorldGrid;
+
+use super::control_pathfinder::ControlPathfinder;
+
 /// `Vars.unitCollisionRadiusScale`.
 pub const UNIT_COLLISION_RADIUS_SCALE: f32 = 0.6;
+
+/// `mindustry.async.PhysicsProcess.layerGround`.
+pub const LAYER_GROUND: i32 = 0;
+/// `mindustry.async.PhysicsProcess.layerLegs`.
+pub const LAYER_LEGS: i32 = 1;
+/// `mindustry.async.PhysicsProcess.layerFlying`.
+pub const LAYER_FLYING: i32 = 2;
 
 /// One unit's contribution to a formation (`x`, `y`, `hitSize`).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -65,11 +76,10 @@ impl UnitGroup {
 
     /// Whether `collision_layer` is the flying layer (`PhysicsProcess.layerFlying`).
     ///
-    /// TODO(plan 05): read the real `PhysicsProcess.layerFlying` constant once
-    /// plan 05's physics process lands; it is not on this branch.
+    /// Matches plan 05's deterministic `PhysicsProcess` ordinal (`layerFlying = 2`);
+    /// the earlier local `1` was `layerLegs` and skipped the raycast for legs.
     pub fn is_flying_layer(&self) -> bool {
-        // Upstream `layerFlying = 1`; keep as a local constant until plan 05 owns it.
-        self.collision_layer == 1
+        self.collision_layer == LAYER_FLYING
     }
 
     /// Computes the formation offsets for the current members.
@@ -177,10 +187,56 @@ impl UnitGroup {
         }
 
         self.original_positions = self.positions.clone();
-        // TODO(plan 11 M3): per-unit `ControlPathfinder::raycast_fast_avoid`
-        // clamp from each offset toward `dest`. No `ControlPathfinder` on this
-        // branch yet; offsets are used unclamped, matching a corridor-free map.
+        // The per-unit `raycastFastAvoid` clamp runs in
+        // [`Self::clamp_offsets_to_pathfinder`] once the caller supplies a
+        // `ControlPathfinder` (upstream does it inside `calculateFormation` on a
+        // worker thread; the port keeps it explicit and join-free).
         self.valid = true;
+    }
+
+    /// Clamps each formation offset against the first solid tile on the segment
+    /// from `dest` to the offset, mirroring `UnitGroup.updateRaycast`.
+    ///
+    /// Skipped on the flying layer. Must be called after
+    /// [`Self::calculate_formation`]; it rewrites [`Self::positions`] in place
+    /// while leaving [`Self::original_positions`] intact, exactly like upstream.
+    pub fn clamp_offsets_to_pathfinder(&mut self, dest: (f32, f32), path: &ControlPathfinder) {
+        if self.is_flying_layer() || self.original_positions.is_empty() {
+            return;
+        }
+        let tile_size = crate::config::TILESIZE as f32;
+        let dest_x = WorldGrid::to_tile(dest.0);
+        let dest_y = WorldGrid::to_tile(dest.1);
+        for index in 0..self.original_positions.len() {
+            let (offset_x, offset_y) = self.original_positions[index];
+            let world_x = offset_x + dest.0;
+            let world_y = offset_y + dest.1;
+            let tiles = path.raycast_fast_avoid(
+                dest_x,
+                dest_y,
+                WorldGrid::to_tile(world_x),
+                WorldGrid::to_tile(world_y),
+            );
+            // A collision is the last raycast tile when it is solid (tile `0,0`
+            // is skipped, preserving upstream's `res != 0` quirk).
+            let Some(&collision) = tiles.last() else {
+                continue;
+            };
+            if !path.solid(collision.x() as i32, collision.y() as i32)
+                || (collision.x() == 0 && collision.y() == 0)
+            {
+                continue;
+            }
+            let vx = collision.x() as f32 * tile_size - dest.0;
+            let vy = collision.y() as f32 * tile_size - dest.1;
+            let len = (vx * vx + vy * vy).sqrt();
+            if len <= 0.0 {
+                continue;
+            }
+            // `v1.setLength(max(len - tilesize - 4, 0))`.
+            let scale = (len - tile_size - 4.0).max(0.0) / len;
+            self.positions[index] = (vx * scale, vy * scale);
+        }
     }
 
     /// World-space position of member `index` for a destination `(x, y)`.
@@ -241,5 +297,73 @@ mod tests {
         group.calculate_formation(0);
         assert!(group.valid);
         assert!(group.positions.is_empty());
+    }
+
+    fn flat_path(width: i32, height: i32, wall_x: Option<i32>) -> ControlPathfinder {
+        let content = crate::content::create_base_content(
+            &crate::content::MemoryBundle::new(),
+            &crate::content::MemoryUnlockStore::new(),
+            true,
+        )
+        .expect("content");
+        let mut grid = WorldGrid::new(width, height);
+        grid.fill(crate::content::BlockId::AIR, crate::content::BlockId::AIR);
+        if let Some(x) = wall_x {
+            let wall = content.block_id("copper-wall").expect("copper-wall");
+            for y in 0..height {
+                grid.tiles.get_mut(x, y).block = wall;
+            }
+        }
+        let mut path = ControlPathfinder::new(width, height);
+        path.build(&grid, &content, 0);
+        path
+    }
+
+    #[test]
+    fn physics_layer_constants_match_upstream() {
+        assert_eq!(LAYER_GROUND, 0);
+        assert_eq!(LAYER_LEGS, 1);
+        assert_eq!(LAYER_FLYING, 2);
+        let mut group = squad(2, 8.0);
+        group.calculate_formation(LAYER_LEGS);
+        assert!(!group.is_flying_layer(), "legs is not the flying layer");
+        group.calculate_formation(LAYER_FLYING);
+        assert!(group.is_flying_layer());
+    }
+
+    #[test]
+    fn flying_layer_skips_raycast_clamp() {
+        let path = flat_path(32, 32, Some(16));
+        let mut group = UnitGroup::new();
+        group.set_units(vec![FormationUnit::new(20.0 * 8.0, 16.0 * 8.0, 8.0)]);
+        let dest = (16.0 * 8.0, 16.0 * 8.0);
+        group.calculate_formation(LAYER_FLYING);
+        let before = group.positions.clone();
+        group.clamp_offsets_to_pathfinder(dest, &path);
+        assert_eq!(group.positions, before, "flying offsets are unclamped");
+    }
+
+    #[test]
+    fn clamp_pulls_offset_before_a_solid() {
+        // Wall column at tile x=18, between the dest (tile 16) and the offset
+        // world point (tile 20).
+        let path = flat_path(32, 32, Some(18));
+        let dest = (16.0 * 8.0, 16.0 * 8.0);
+        let mut group = UnitGroup::new();
+        group.set_units(vec![FormationUnit::new(20.0 * 8.0, 16.0 * 8.0, 8.0)]);
+        group.calculate_formation(LAYER_GROUND);
+        // Single-unit formations have a zero offset; seed a known one directly
+        // (upstream stores `positions`/`originalPositions` as public arrays).
+        group.original_positions = vec![(4.0 * 8.0, 0.0)];
+        group.positions = group.original_positions.clone();
+        let unclamped = group.positions[0];
+        group.clamp_offsets_to_pathfinder(dest, &path);
+        let clamped = group.positions[0];
+        assert_ne!(clamped, unclamped, "offset was clamped");
+        // The clamped world point stays on the destination side of the wall.
+        let world_x = clamped.0 + dest.0;
+        assert!(world_x < 18.0 * 8.0, "world_x {world_x} is before the wall");
+        // `original_positions` is preserved for the next recompute.
+        assert_eq!(group.original_positions[0], unclamped);
     }
 }

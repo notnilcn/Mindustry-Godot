@@ -474,6 +474,52 @@ impl Sim {
                 self.commands_applied = self.commands_applied.wrapping_add(1);
                 return Ok(());
             }
+            SimCommand::UnitStance {
+                units,
+                stance,
+                enabled,
+            } => {
+                self.ensure_unit_commands()
+                    .set_unit_stance(units, *stance, *enabled);
+                self.commands_applied = self.commands_applied.wrapping_add(1);
+                return Ok(());
+            }
+            SimCommand::Rotate { x, y, direction } => {
+                let pos = TilePos::new(*x, *y);
+                if self.grid.index(pos).is_err() {
+                    return Err(CommandError::InvalidTarget);
+                }
+                let Some(entity) = self.grid.entity_at(pos) else {
+                    return Err(CommandError::InvalidTarget);
+                };
+                let Some(mut building) = self.ecs.0.get_mut::<BuildingComp>(entity) else {
+                    return Err(CommandError::InvalidTarget);
+                };
+                // Upstream `InputHandler.rotateBlock`: `rotation = mod(rotation +
+                // sign(direction), 4)`; `direction == true` is counter-clockwise.
+                let step = if *direction { 1 } else { -1 };
+                building.rot = (building.rot as i32 + step).rem_euclid(4) as u8;
+                self.commands_applied = self.commands_applied.wrapping_add(1);
+                return Ok(());
+            }
+            // Genuinely blocked on other plans' world mutations (no reachable
+            // runtime on this branch); reported explicitly rather than silently.
+            SimCommand::Payload { .. } => {
+                // Owner plan 08: `PayloadComp::{pickup,try_drop_payload}` runtime.
+                return Err(CommandError::Unsupported("payload"));
+            }
+            SimCommand::Inventory { .. } => {
+                // Owner plan 08/07: building item stacks + `ItemsComp` transfer.
+                return Err(CommandError::Unsupported("inventory"));
+            }
+            SimCommand::DeletePlans { .. } => {
+                // Owner plan 07/11: `BuildQueue`/`BuilderComp` plan storage.
+                return Err(CommandError::Unsupported("delete_plans"));
+            }
+            SimCommand::CommandBuilding { .. } => {
+                // Owner plan 21/11: building-control runtime + commanded registry.
+                return Err(CommandError::Unsupported("command_building"));
+            }
             _ => {}
         }
         let op = command.op_name();

@@ -56,6 +56,7 @@ mod tests {
         for _ in 0..10 {
             update_kinematics(
                 &mut harness.build.world,
+                &harness.build.grid,
                 &harness.build.content,
                 unit,
                 (2.0, 0.0),

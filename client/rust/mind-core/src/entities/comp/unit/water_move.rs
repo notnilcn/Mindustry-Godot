@@ -4,8 +4,15 @@
 //! `WaterMoveComp` naval movement state (plan 11 §3.6).
 //!
 //! Ported from `core/src/mindustry/entities/comp/WaterMoveComp.java`. The port
-//! keeps the two wave-trail timers; the water-solid predicate and shallow-floor
-//! speed rules read plan-06 floor data (marked).
+//! keeps the wave-trail timer and advances it with movement.
+//!
+//! **Owner note (plan 02/06):** `WaterMoveComp::{solidity,onSolid,onLiquid}`
+//! (`EntityCollisions.waterSolid`) and `floorSpeedMultiplier` (`(shallow ? 1 :
+//! 1.3) * speedMultiplier`) need the floor metadata `Floor.isLiquid`/`shallow`/
+//! `speedMultiplier`, which is not on [`crate::content::BlockDef`] or
+//! `FloorDef` today. `ShallowLiquidDef.shallow` exists but is not reachable from
+//! a tile's floor id without the plan-02/06 floor table; deferred until then
+//! (the two wave-trail `Trail` objects are also view data, plan 17).
 
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
@@ -18,7 +25,6 @@ pub fn update_water_move(world: &mut World, entity: Entity, delta: (f32, f32)) {
     if let Some(mut water) = world.get_mut::<WaterMoveComp>(entity) {
         water.trail_time += speed;
     }
-    // TODO(plan 06): water-solid predicate + `floorSpeedMultiplier` shallow rules.
 }
 
 #[cfg(test)]
@@ -33,6 +39,7 @@ mod tests {
         let unit = harness.spawn("risso", 0, 64.0, 64.0, 0.0).expect("risso");
         update_kinematics(
             &mut harness.build.world,
+            &harness.build.grid,
             &harness.build.content,
             unit,
             (3.0, 0.0),

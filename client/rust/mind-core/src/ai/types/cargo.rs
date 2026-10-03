@@ -59,9 +59,12 @@ pub fn update_cargo(ctx: &mut AiCtx, unit: Entity, _state: &mut CargoAi) -> bool
         .map(|hitbox| hitbox.hit_size.max(4.0))
         .unwrap_or(4.0);
     let arrived = ctx.move_direct(unit, cx, cy, arrive);
-    // Drop the payload into the building when docked (plan-08 hand-off).
+    // Drop the payload into the building when docked.
     if arrived && carrying {
-        // TODO(plan 08): `PayloadComp.tryDropPayload` into the docked building.
+        // Owner note (plan 08): `CargoAI`'s drop half is `Call.transferItemTo` /
+        // `PayloadComp.tryDropPayload` into the docked `UnitCargoUnloadPointBuild`.
+        // Plan 08 exposes the payload/cargo transfer API; this callsite is wired
+        // to it once the unload-point building runtime lands (plan 11 §2.3).
     }
     arrived
 }
