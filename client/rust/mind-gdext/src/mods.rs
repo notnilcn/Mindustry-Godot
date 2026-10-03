@@ -20,6 +20,7 @@ use godot::prelude::*;
 
 use mind_core::io::{NativeFs, SettingsStore};
 use mind_core::mods::{ModListEntry, ModListing, Mods};
+use mind_core::version::BuildInfo;
 
 /// Mods directory in Godot user space (`<data>/mods/`).
 const MODS_PATH: &str = "user://mods";
@@ -107,9 +108,14 @@ impl MindMods {
     }
 
     /// Imports a `.zip`/`.jar`/folder into the mods directory.
+    ///
+    /// The browser hands in a `user://modcache/...` path; `NativeFs` only speaks
+    /// native paths, so localized Godot paths are globalized first (a native
+    /// path from the file chooser passes through unchanged).
     #[func]
     pub fn import_mod(&mut self, path: GString) -> VarDictionary {
-        let source = PathBuf::from(path.to_string());
+        let global = ProjectSettings::singleton().globalize_path(path.to_string().as_str());
+        let source = PathBuf::from(global.to_string());
         let _ = self.base_mut().emit_signal(
             "mod_import_progress",
             &[path.to_variant(), 0.0f32.to_variant()],
@@ -336,6 +342,38 @@ impl MindMods {
                 out.set(&"found".to_variant(), &false.to_variant());
             }
         }
+        out
+    }
+
+    /// The embedded game build (`Version.build`; `-1` for a custom build).
+    ///
+    /// The browser passes this to `matching_release` instead of guessing.
+    #[func]
+    pub fn game_build(&self) -> i32 {
+        BuildInfo::embedded().build
+    }
+
+    /// The embedded game revision (`Version.revision`).
+    #[func]
+    pub fn game_revision(&self) -> i32 {
+        BuildInfo::embedded().revision as i32
+    }
+
+    /// `BuildInfo` fields for the dialog footer / version-mismatch checks.
+    #[func]
+    pub fn version_info(&self) -> VarDictionary {
+        let info = BuildInfo::embedded();
+        let mut out = VarDictionary::new();
+        out.set(&"build".to_variant(), &info.build.to_variant());
+        out.set(
+            &"revision".to_variant(),
+            &(info.revision as i64).to_variant(),
+        );
+        out.set(
+            &"buildString".to_variant(),
+            &info.build_string().to_variant(),
+        );
+        out.set(&"combined".to_variant(), &info.combined().to_variant());
         out
     }
 

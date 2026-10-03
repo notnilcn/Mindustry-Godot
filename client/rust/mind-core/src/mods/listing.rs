@@ -15,11 +15,43 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModRelease {
     /// GitHub release id (`$API/releases/$id`).
-    #[serde(default)]
+    ///
+    /// `mods.json` writes this as a JSON number; `arc`'s `Jval` coerces it to
+    /// the upstream `String` field, so deserialize accepts either form.
+    #[serde(default, deserialize_with = "deserialize_id")]
     pub id: String,
     /// Mod version string in the release's `mod.json`.
     #[serde(default)]
     pub version: String,
+}
+
+/// Accepts a release id written as a string or a number (upstream `Jval.asString`).
+fn deserialize_id<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum IdValue {
+        Str(String),
+        Int(i64),
+        Uint(u64),
+        Float(f64),
+    }
+
+    Ok(match Option::<IdValue>::deserialize(deserializer)? {
+        None => String::new(),
+        Some(IdValue::Str(value)) => value,
+        Some(IdValue::Int(value)) => value.to_string(),
+        Some(IdValue::Uint(value)) => value.to_string(),
+        Some(IdValue::Float(value)) => {
+            if value.fract() == 0.0 {
+                format!("{}", value as i64)
+            } else {
+                value.to_string()
+            }
+        }
+    })
 }
 
 /// A parsed mod listing (`ModListing`).
@@ -63,11 +95,14 @@ pub struct ModListing {
 }
 
 impl ModListing {
-    /// `getMatchingRelease`: the release whose tag matches `build`/`revision`,
+    /// `getMatchingRelease`: the release whose key matches `build`/`revision`,
     /// or `None` (use `/latest`).
+    ///
+    /// `releases` is keyed by the game build string (`"146"` / `"146.1"`) and
+    /// upstream parses each key with `parseVersion` (not `parseVersionTag`).
     pub fn get_matching_release(&self, build: i32, revision: i32) -> Option<&ModRelease> {
         for (tag, release) in &self.releases {
-            if matches_game_version(parse_version_tag(tag), build, revision) {
+            if matches_game_version(parse_version(tag), build, revision) {
                 return Some(release);
             }
         }
@@ -143,8 +178,14 @@ pub fn parse_version_tag(text: &str) -> Option<(i32, i32)> {
             index += 1;
             continue;
         }
-        // Anchored at start or end, and major >= 15.
-        if (start == 0 || cursor + 1 == bytes.len()) && major >= 15 {
+        // Only a tag anchored at the start or end counts; the first one found
+        // decides (upstream returns null for an anchored major below 15 rather
+        // than scanning on).
+        if start == 0 || cursor + 1 == bytes.len() {
+            // Below 15 is likely a major-version tag like `[v7]`.
+            if major < 15 {
+                return None;
+            }
             return Some((major, minor));
         }
         index = cursor + 1;
@@ -226,18 +267,28 @@ mod tests {
     }
 
     /// Plan 20 M6: `getMatchingRelease` picks the version-matching entry.
+    ///
+    /// `releases` is keyed by the game build string and parsed with
+    /// `parseVersion` (upstream), so `"[v146]"` keys would never match.
     #[test]
     fn matching_release() {
         let mut releases = IndexMap::new();
         releases.insert(
-            String::from("[v147]"),
+            String::from("147"),
             ModRelease {
                 id: String::from("2"),
                 version: String::from("2.0"),
             },
         );
         releases.insert(
-            String::from("[v146]"),
+            String::from("146.1"),
+            ModRelease {
+                id: String::from("11"),
+                version: String::from("1.1"),
+            },
+        );
+        releases.insert(
+            String::from("146"),
             ModRelease {
                 id: String::from("1"),
                 version: String::from("1.0"),
@@ -247,14 +298,29 @@ mod tests {
             releases,
             ..ModListing::default()
         };
-        let release = listing.get_matching_release(146, 0).expect("match 146");
-        assert_eq!(release.id, "1");
+        // Insertion order decides: `146.1` precedes `146`, so an exact revision
+        // match returns it, while a non-matching revision falls through to the
+        // unspecified-minor entry.
+        let release = listing.get_matching_release(146, 1).expect("match 146.1");
+        assert_eq!(release.id, "11");
+        let release = listing.get_matching_release(146, 3).expect("match 146");
+        assert_eq!(release.id, "1", "first matching entry wins, like ArrayMap");
         assert!(listing.get_matching_release(140, 0).is_none());
-        // `release_matches` shares the tag parser (anchored `[vN]`/`[bN.M]`).
+        // A tag-form key is not a version string and must not match.
+        assert!(listing.get_matching_release(999, 0).is_none());
+        // `release_matches` uses the anchored tag parser (`[vN]`/`[bN.M]`).
         assert!(listing.release_matches("Something [v146]", 146, 0));
         assert!(!listing.release_matches("Something [v146]", 147, 0));
         // An unanchored tag parses to `None`, which matches every build.
         assert!(listing.release_matches("inline [v146] tag", 146, 0));
+    }
+
+    /// An anchored major below 15 stops the tag scan (upstream returns null).
+    #[test]
+    fn anchored_low_major_stops_scan() {
+        assert_eq!(parse_version_tag("[v7]"), None);
+        assert_eq!(parse_version_tag("[v7] then [v160] at end"), None);
+        assert_eq!(parse_version_tag("start [v7]"), None);
     }
 
     /// GitHub listing JSON deserializes with camelCase keys and defaults.
@@ -267,7 +333,7 @@ mod tests {
             "author": "tester",
             "stars": 12,
             "tags": ["utility"],
-            "releases": {"[v146]": {"id": "1", "version": "1.0"}}
+            "releases": {"146": {"id": 1, "version": "1.0"}}
         }"#;
         let listing: ModListing = serde_json::from_str(json).expect("parse listing");
         assert_eq!(listing.repo, "owner/repo");
@@ -275,5 +341,43 @@ mod tests {
         assert_eq!(listing.stars, 12);
         assert_eq!(listing.tags, vec!["utility"]);
         assert_eq!(listing.releases.len(), 1);
+        // Numeric `id` from `mods.json` becomes the upstream string field.
+        assert_eq!(listing.releases["146"].id, "1");
+    }
+
+    /// The real `mods.json` shape: numeric release ids, absent optional keys,
+    /// plain-version release keys. `getMatchingRelease` must pick a release.
+    #[test]
+    fn real_mods_json_shape_matches_release() {
+        let json = r#"{
+            "repo": "cardillan/mlogassertions",
+            "internalName": "mlog-assertions-8",
+            "name": "Mlog Dev Tools",
+            "author": "cardillan",
+            "lastUpdated": "2026-10-03T18:50:14Z",
+            "stars": 4,
+            "version": "0.11.2",
+            "minGameVersion": "154.2",
+            "hasIcon": true,
+            "hasScripts": false,
+            "hasJava": true,
+            "description": "tools",
+            "releases": {
+                "154.2": {"id": 389859853, "version": "0.9.0"},
+                "155": {"id": 396067194, "version": "0.10.21"},
+                "160": {"id": 402587569, "version": "0.11.2"}
+            }
+        }"#;
+        let listing: ModListing = serde_json::from_str(json).expect("parse listing");
+        assert_eq!(listing.icon_hash, "");
+        assert!(listing.tags.is_empty());
+        assert!(!listing.legacy_compatible);
+        assert_eq!(listing.releases["160"].id, "402587569");
+        let release = listing.get_matching_release(160, 0).expect("match 160");
+        assert_eq!(release.version, "0.11.2");
+        let release = listing.get_matching_release(155, 0).expect("match 155");
+        assert_eq!(release.version, "0.10.21");
+        // A build with no version-specific release falls back to `/latest`.
+        assert!(listing.get_matching_release(146, 0).is_none());
     }
 }

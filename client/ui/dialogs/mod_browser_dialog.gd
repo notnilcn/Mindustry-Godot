@@ -20,11 +20,12 @@ const MOD_JSON_URLS := [
 const GH_API := "https://api.github.com"
 ## TEMP download directory for zipballs (deleted after import).
 const CACHE_PATH := "user://modcache"
-## `Version.build` is surfaced by plan 22/23; until then version-specific release
-## selection degrades to the untagged release (documented M6 seam).
-const GAME_BUILD := 0
-## `Version.revision` (see `GAME_BUILD`).
-const GAME_REVISION := 0
+## GitHub rejects API/raw requests without a `User-Agent` (HTTP 403); send the
+## project agent and the JSON accept header on every request.
+var _http_headers := PackedStringArray([
+	"User-Agent: Mindustry-Godot",
+	"Accept: application/vnd.github+json",
+])
 
 var _search: LineEdit = null
 var _repo_field: LineEdit = null
@@ -37,11 +38,20 @@ var _installed_repos: Dictionary = {}
 var _order_date := true
 var _open_repo := ""
 var _queue: Array = []
+var _pending_install: Array = []
 var _pending_repo := ""
+var _pending_release := ""
 var _pending_url_index := 0
+var _downloading := false
+var _fetching := false
+## `Version.build`/`Version.revision` from the embedded `BuildInfo` (plan 22);
+## release matching must not guess these.
+var _game_build := 0
+var _game_revision := 0
 
 var _list_http: HTTPRequest = null
 var _api_http: HTTPRequest = null
+var _release_http: HTTPRequest = null
 var _zip_http: HTTPRequest = null
 
 
@@ -53,6 +63,10 @@ func _ready() -> void:
 	_build()
 	add_close_button()
 	_connect_mods()
+	var mods := _mods()
+	if mods != null:
+		_game_build = int(mods.call("game_build"))
+		_game_revision = int(mods.call("game_revision"))
 
 
 func shown() -> void:
@@ -69,10 +83,44 @@ func set_context_json(json_text: String) -> void:
 		_install_repo(repo)
 
 
-## Batch reinstall queue (upstream's `@mods.update.all` sequential import).
-func install_repos(repos: Array) -> void:
-	_queue = repos.duplicate()
-	_order_next()
+## Batch reinstall queue (upstream's `@mods.update.all` / dependency import).
+## Entries are `owner/repo` or a mod internal name; internal names resolve
+## against the fetched listings, so a name-only batch is deferred until loaded.
+func install_repos(items: Array) -> void:
+	var deferred: Array = []
+	for item in items:
+		var repo := _repo_for(str(item))
+		if repo.is_empty():
+			deferred.append(item)
+		else:
+			_queue.append(repo)
+	if not deferred.is_empty():
+		_pending_install = deferred
+		_fetch_listings()
+	if not _queue.is_empty():
+		_order_next()
+
+
+## Resolves an `owner/repo` string or an internal mod name via the listings.
+func _repo_for(item: String) -> String:
+	var cleaned := item.strip_edges()
+	if cleaned.contains("/"):
+		return cleaned
+	for listing in _listings:
+		if not (listing is Dictionary):
+			continue
+		var internal := str(listing.get("internal_name", listing.get("internalName", "")))
+		if internal == cleaned:
+			return str(listing.get("repo", ""))
+	return ""
+
+
+## Listing for `repo` (case-insensitive), or `{}` when absent.
+func _find_listing(repo: String) -> Dictionary:
+	for listing in _listings:
+		if listing is Dictionary and str(listing.get("repo", "")).nocasecmp_to(repo) == 0:
+			return listing
+	return {}
 
 
 func _build() -> void:
@@ -119,6 +167,9 @@ func _fetch_listings() -> void:
 	if not _listings.is_empty():
 		_rebuild()
 		return
+	if _fetching:
+		return
+	_fetching = true
 	_status.text = _t("@loading")
 	_status.visible = true
 	_fetch_url_index(0)
@@ -126,11 +177,12 @@ func _fetch_listings() -> void:
 
 func _fetch_url_index(index: int) -> void:
 	if index >= MOD_JSON_URLS.size():
+		_fetching = false
 		_status.text = _fmt("@connectfail", ["mods.json"])
 		_rebuild()
 		return
 	_pending_url_index = index
-	if _list_http.request(MOD_JSON_URLS[index]) != OK:
+	if _list_http.request(MOD_JSON_URLS[index], _http_headers) != OK:
 		_fetch_url_index(index + 1)
 
 
@@ -146,6 +198,7 @@ func _on_list_completed(result: int, code: int, _headers: PackedStringArray, bod
 ## Normalizes each raw listing through `mind-core`'s `ModListing` (camelCase +
 ## defaults) so the dialog never re-implements the listing model.
 func _parse_listings(raw: Array) -> void:
+	_fetching = false
 	_listings.clear()
 	var mods := _mods()
 	for entry in raw:
@@ -160,6 +213,11 @@ func _parse_listings(raw: Array) -> void:
 	_status.visible = false
 	_refresh_installed()
 	_rebuild()
+	# A queued dependency install waits for the listings to resolve names.
+	if not _pending_install.is_empty():
+		var pending := _pending_install.duplicate()
+		_pending_install.clear()
+		install_repos(pending)
 
 
 func _refresh_installed() -> void:
@@ -185,15 +243,58 @@ func _publish_updates() -> void:
 	var mods := _mods()
 	var updates := {}
 	for listing in _listings:
-		var repo := str(listing.get("repo", ""))
+		if not (listing is Dictionary):
+			continue
+		var entry: Dictionary = listing
+		var repo := str(entry.get("repo", ""))
 		if not _installed_repos.has(repo):
 			continue
 		var name := str(_installed_repos[repo])
 		var details: Dictionary = mods.call("details", name) if mods != null else {}
-		var latest := str(listing.get("version", ""))
-		if not latest.is_empty() and latest != str(details.get("version", "")):
+		var latest := _latest_version(entry)
+		if not latest.is_empty() and _version_newer(latest, str(details.get("version", ""))):
 			updates[name] = latest
 	mods_dialog.call("set_updates", updates)
+
+
+## Version that would be installed: the release matching this build, else the
+## listing's latest (`refreshModUpdates` uses the matching release's version).
+func _latest_version(listing: Dictionary) -> String:
+	var release := _matching_release(listing)
+	if not release.is_empty():
+		var version := str(release.get("version", ""))
+		if not version.is_empty():
+			return version
+	return str(listing.get("version", ""))
+
+
+## Numeric comparison of the dot-separated version prefix (`checkNewerSemver`
+## intent); `"1.2.1"` is newer than `"1.2"`, an equal prefix is not newer.
+func _version_newer(newer: String, older: String) -> bool:
+	if newer == older:
+		return false
+	var left := _version_parts(newer)
+	var right := _version_parts(older)
+	for index in maxi(left.size(), right.size()):
+		var a: int = left[index] if index < left.size() else 0
+		var b: int = right[index] if index < right.size() else 0
+		if a != b:
+			return a > b
+	return false
+
+
+func _version_parts(version: String) -> Array:
+	var parts: Array = []
+	for chunk in version.strip_edges().split(".", false):
+		var digits := ""
+		for i in chunk.length():
+			var ch := chunk[i]
+			if ch >= "0" and ch <= "9":
+				digits += ch
+			else:
+				break
+		parts.append(int(digits) if not digits.is_empty() else 0)
+	return parts
 
 
 func _rebuild() -> void:
@@ -296,7 +397,7 @@ func _matching_release(listing: Dictionary) -> Dictionary:
 	if mods == null:
 		return {}
 	var result: Dictionary = mods.call(
-		"matching_release", JSON.stringify(listing), GAME_BUILD, GAME_REVISION
+		"matching_release", JSON.stringify(listing), _game_build, _game_revision
 	)
 	return result if bool(result.get("found", false)) else {}
 
@@ -321,7 +422,8 @@ func _toggle_repo(repo: String) -> void:
 	_rebuild()
 
 
-## Downloads `<repo>`'s default-branch zipball, then imports it via `MindMods`.
+## Downloads `<repo>`'s zipball for the release matching this build (else the
+## default branch), then imports it via `MindMods`.
 func _install_repo(repo: String) -> void:
 	var cleaned := repo.strip_edges().replace(" ", "")
 	if cleaned.begins_with("https://github.com/"):
@@ -330,11 +432,28 @@ func _install_repo(repo: String) -> void:
 	if cleaned.is_empty() or cleaned.find("/") == -1:
 		return
 	_pending_repo = cleaned
+	_pending_release = ""
+	var listing := _find_listing(cleaned)
+	if not listing.is_empty():
+		var release := _matching_release(listing)
+		if not release.is_empty():
+			_pending_release = str(release.get("id", ""))
 	_status.text = _fmt("@mods.downloading", [cleaned])
 	_status.visible = true
-	var error := _api_http.request("%s/repos/%s" % [GH_API, cleaned])
-	if error != OK:
-		_install_failed(str(error))
+	if _pending_release.is_empty():
+		# No version-specific release: resolve the default branch from the repo.
+		var error := _api_http.request("%s/repos/%s" % [GH_API, cleaned], _http_headers)
+		if error != OK:
+			_install_failed(str(error))
+		return
+	_request_release_zipball(cleaned)
+
+
+## Fetches the release object (`githubImportBranch` release path) for its zipball.
+func _request_release_zipball(repo: String) -> void:
+	var url := "%s/repos/%s/releases/%s" % [GH_API, repo, _pending_release]
+	if _release_http.request(url, _http_headers) != OK:
+		_install_failed(_fmt("@connectfail", ["release"]))
 
 
 func _on_api_completed(result: int, code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
@@ -345,11 +464,38 @@ func _on_api_completed(result: int, code: int, _headers: PackedStringArray, body
 	var branch := "master"
 	if parsed is Dictionary:
 		branch = str(parsed.get("default_branch", "master"))
-	if _zip_http.request("%s/repos/%s/zipball/%s" % [GH_API, _pending_repo, branch]) != OK:
+	_request_zipball("%s/repos/%s/zipball/%s" % [GH_API, _pending_repo, branch])
+
+
+func _on_release_completed(result: int, code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+	if result != HTTPRequest.RESULT_SUCCESS or code != 200:
+		# Release lookup failed; fall back to the default-branch zipball.
+		_pending_release = ""
+		var error := _api_http.request("%s/repos/%s" % [GH_API, _pending_repo], _http_headers)
+		if error != OK:
+			_install_failed(str(error))
+		return
+	var parsed: Variant = JSON.parse_string(body.get_string_from_utf8())
+	var zipball := ""
+	if parsed is Dictionary:
+		zipball = str(parsed.get("zipball_url", ""))
+	if zipball.is_empty():
 		_install_failed(_fmt("@connectfail", ["zipball"]))
+		return
+	_request_zipball(zipball)
+
+
+func _request_zipball(url: String) -> void:
+	if _zip_http.request(url, _http_headers) != OK:
+		_install_failed(_fmt("@connectfail", ["zipball"]))
+		return
+	_downloading = true
+	_status.text = "%s 0%%" % _fmt("@mods.downloading", [_pending_repo])
+	_status.visible = true
 
 
 func _on_zip_completed(result: int, code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+	_downloading = false
 	if result != HTTPRequest.RESULT_SUCCESS or code != 200:
 		_install_failed(_fmt("@connectfail", [str(code)]))
 		return
@@ -363,6 +509,14 @@ func _on_zip_completed(result: int, code: int, _headers: PackedStringArray, body
 	file.close()
 	var mods := _mods()
 	var imported: Dictionary = mods.call("import_mod", path) if mods != null else {}
+	if mods != null and not bool(imported.get("ok", false)):
+		# Duplicate install (reinstall): drop the existing copy and retry once.
+		if not _installed_repos.has(_pending_repo):
+			_refresh_installed()
+		var existing := str(_installed_repos.get(_pending_repo, ""))
+		if not existing.is_empty():
+			mods.call("remove_mod", existing)
+			imported = mods.call("import_mod", path)
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 	if mods != null and not bool(imported.get("ok", false)):
 		_install_failed(str(imported.get("error", _t("@mod.delete.error"))))
@@ -374,6 +528,7 @@ func _on_zip_completed(result: int, code: int, _headers: PackedStringArray, body
 
 
 func _install_failed(message: String) -> void:
+	_downloading = false
 	_status.text = message
 	_status.visible = true
 	var ui := _ui()
@@ -394,15 +549,33 @@ func _on_import_progress(_path: String, ratio: float) -> void:
 	_status.text = "%s %d%%" % [_fmt("@mods.downloading", [_pending_repo]), int(ratio * 100.0)]
 
 
+## Streams the real `HTTPRequest` byte counters while the zipball downloads.
+func _process(_delta: float) -> void:
+	if not _downloading:
+		return
+	var total := _zip_http.get_body_size()
+	if total <= 0:
+		return
+	var downloaded := _zip_http.get_downloaded_bytes()
+	_status.text = "%s %d%%" % [
+		_fmt("@mods.downloading", [_pending_repo]),
+		int(float(downloaded) / float(total) * 100.0),
+	]
+	_status.visible = true
+
+
 func _add_http() -> void:
-	# code-instantiated: one HTTPRequest per concurrent step (list/api/zip) since a
-	# single request node cannot multiplex the sequential GitHub download flow.
+	# code-instantiated: one HTTPRequest per concurrent step (list/api/release/zip)
+	# since a single request node cannot multiplex the sequential GitHub flow.
 	_list_http = HTTPRequest.new()
 	_list_http.request_completed.connect(_on_list_completed)
 	add_child(_list_http)
 	_api_http = HTTPRequest.new()
 	_api_http.request_completed.connect(_on_api_completed)
 	add_child(_api_http)
+	_release_http = HTTPRequest.new()
+	_release_http.request_completed.connect(_on_release_completed)
+	add_child(_release_http)
 	_zip_http = HTTPRequest.new()
 	_zip_http.request_completed.connect(_on_zip_completed)
 	add_child(_zip_http)
