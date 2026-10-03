@@ -18,6 +18,7 @@ use indexmap::IndexMap;
 use crate::content::{BlockDef, BlockId, ItemId, LiquidId};
 use crate::io::entity::{EntityReader, EntityWriter};
 
+use super::block::BlockInstance;
 use super::config::ConfigValue;
 use super::modules::PowerGraphId;
 use super::stats::Stats;
@@ -131,6 +132,20 @@ pub trait BuildingBehavior: Send + Sync {
     /// Per-tick update (`Building.updateTile`).
     fn update_tile(&self, world: &mut World, e: Entity) {
         let _ = (world, e);
+    }
+
+    /// Batched per-tick update over a contiguous run of entities that share this
+    /// behavior/block (plan 07 §3.4 batch dispatch; additive hook).
+    ///
+    /// `inst` is this behavior's resolved [`BlockInstance`]. The default
+    /// delegates to the per-entity [`Self::update_tile`] via
+    /// [`crate::world::update::building_update_with`] so every existing behavior
+    /// keeps its exact update sequence; hot logistics families override this
+    /// with [`crate::world::update::building_update_no_consumers`].
+    fn update_batch(&self, world: &mut World, inst: &BlockInstance, entities: &[Entity]) {
+        for &e in entities {
+            crate::world::update::building_update_with(world, e, inst);
+        }
     }
 
     /// `noUpdateDisabled` inverse (`Block.noUpdateDisabled`).

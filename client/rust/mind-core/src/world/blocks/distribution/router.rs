@@ -123,6 +123,18 @@ impl BuildingBehavior for RouterBehavior {
         }
     }
 
+    fn update_batch(
+        &self,
+        world: &mut World,
+        inst: &crate::world::block::BlockInstance,
+        entities: &[Entity],
+    ) {
+        // Plan 08 §7.4: allocate-free batched dispatch (empty-consumer fast path).
+        for &e in entities {
+            crate::world::update::building_update_no_consumers(world, e, inst);
+        }
+    }
+
     fn accept_stack(
         &self,
         _world: &World,

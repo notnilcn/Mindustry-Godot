@@ -201,6 +201,18 @@ impl PayloadMassDriverBehavior {
 }
 
 impl BuildingBehavior for PayloadMassDriverBehavior {
+    fn update_batch(
+        &self,
+        world: &mut bevy_ecs::world::World,
+        inst: &crate::world::block::BlockInstance,
+        entities: &[bevy_ecs::entity::Entity],
+    ) {
+        // Plan 08 §7.4: allocate-free batched dispatch (empty-consumer fast path).
+        for &e in entities {
+            crate::world::update::building_update_no_consumers(world, e, inst);
+        }
+    }
+
     fn create_state(&self, world: &mut World, e: Entity) {
         if world.get::<PayloadDriverBuild>(e).is_none() {
             let rotation = rot_deg(world, e);
