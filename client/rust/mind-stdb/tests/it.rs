@@ -191,7 +191,10 @@ fn two_clients_relay_ping_round_trip() {
     let mut stream_host = CommandStream::subscribe(&mut host, match_id);
     let mut stream_guest = CommandStream::subscribe(&mut guest, match_id);
 
-    assert!(host.start_match(match_id, true).is_ok(), "start_match failed");
+    assert!(
+        host.start_match(match_id, true).is_ok(),
+        "start_match failed"
+    );
     assert!(pump_until(&mut host, timeout, |conn| conn.is_applied(WaveName::Game)));
     assert!(pump_until(&mut guest, timeout, |conn| conn.is_applied(WaveName::Game)));
 

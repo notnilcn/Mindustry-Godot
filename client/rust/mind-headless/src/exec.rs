@@ -25,6 +25,7 @@ use crate::cli::{
     AssetsCommand, Cli, Command, ContentCommand, EditorCommand, IoCommand, MapsCommand,
     MetaCommand, ModsCommand, TraceCommand, WorldCommand,
 };
+use crate::mp_scenarios::MpScenario;
 use crate::parity::scenario::{ScenarioCatalog, ScenarioEntry};
 use crate::paths;
 use crate::registry;
@@ -35,7 +36,6 @@ use crate::report::{
     IoMapListEntry, IoMapListReport, IoRoundtripReport, IoSettingsReport, RunReport,
     SimCoreCycleReport, SimCoreProfileReport, SimCoreReplayReport, SimReport, TileCheck,
 };
-use crate::mp_scenarios::MpScenario;
 use crate::stdb_scenarios::StdbScenario;
 
 /// Exit code: success.

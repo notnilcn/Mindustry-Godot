@@ -265,6 +265,7 @@ impl SnapshotProgress {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
 
     fn header() -> SnapshotHeader {
@@ -290,9 +291,15 @@ mod tests {
         let header = header();
         let decoded = SnapshotHeader::from_bytes(&header.to_bytes()).expect("decode");
         assert_eq!(decoded, header);
-        assert!(decoded.validate_identity("demo_flat", 42, "build-1", 9).is_ok());
+        assert!(
+            decoded
+                .validate_identity("demo_flat", 42, "build-1", 9)
+                .is_ok()
+        );
         assert_eq!(
-            decoded.validate_identity("other", 42, "build-1", 9).unwrap_err(),
+            decoded
+                .validate_identity("other", 42, "build-1", 9)
+                .unwrap_err(),
             SnapshotError::IdentityMismatch { field: "map_id" }
         );
     }
@@ -319,7 +326,9 @@ mod tests {
 
     #[test]
     fn chunk_reassembly() {
-        let blob: Vec<u8> = (0..(SNAPSHOT_CHUNK_BYTES * 2 + 7)).map(|i| i as u8).collect();
+        let blob: Vec<u8> = (0..(SNAPSHOT_CHUNK_BYTES * 2 + 7))
+            .map(|i| i as u8)
+            .collect();
         let chunks = split_chunks(&blob);
         assert_eq!(chunks.len(), 3);
         assert_eq!(chunk_count(blob.len()), 3);
@@ -336,8 +345,28 @@ mod tests {
 
     #[test]
     fn progress_fraction() {
-        assert_eq!(SnapshotProgress { received: 0, total: 0 }.fraction(), 1.0);
-        assert_eq!(SnapshotProgress { received: 1, total: 4 }.fraction(), 0.25);
-        assert!(SnapshotProgress { received: 4, total: 4 }.is_complete());
+        assert_eq!(
+            SnapshotProgress {
+                received: 0,
+                total: 0
+            }
+            .fraction(),
+            1.0
+        );
+        assert_eq!(
+            SnapshotProgress {
+                received: 1,
+                total: 4
+            }
+            .fraction(),
+            0.25
+        );
+        assert!(
+            SnapshotProgress {
+                received: 4,
+                total: 4
+            }
+            .is_complete()
+        );
     }
 }

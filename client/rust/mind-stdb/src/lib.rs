@@ -34,13 +34,14 @@ pub mod transport;
 pub mod waves;
 
 pub use binder::{BinderOptions, RowChange, TableBinder};
+pub use commands::{CommandSender, PredictPolicy, PredictionQueue};
 pub use config::{Backoff, ConnectPolicy, ConnectionConfig, StdbMode};
 pub use connector::{Connector, ConnectorError, ConnectorEvent, ConnectorState};
 pub use identity::{LocalIdentity, is_player_arg, parse_player_suffix, parse_player_suffix_from};
 pub use protocol::{CLIENT_BUILD, PROTOCOL_VERSION, ProtocolError, check_protocol};
-pub use commands::{CommandSender, PredictPolicy, PredictionQueue};
 pub use relay::{CommandStream, OrderError};
 pub use session::{HostParams, MatchSession, SessionError, SessionState};
+pub use spacetimedb_sdk::Identity;
 pub use token::{FileTokenStore, TokenStore, token_key};
 pub use transport::{RelayTransport, StdbTransport};
 pub use waves::{SubscriptionWaves, WaveEvent, WaveName};

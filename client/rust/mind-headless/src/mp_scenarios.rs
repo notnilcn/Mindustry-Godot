@@ -16,10 +16,8 @@ use anyhow::Context;
 use mind_core::content::BlockId;
 use mind_core::determinism::SimCommand;
 use mind_core::sim::Sim;
-use mind_stdb::commands::{PreflightContext, PredictionQueue, preflight_validate};
-use mind_stdb::module_bindings::{
-    CommandKind, MemberRole, PlaceBlock,
-};
+use mind_stdb::commands::{PredictionQueue, PreflightContext, preflight_validate};
+use mind_stdb::module_bindings::{CommandKind, MemberRole, PlaceBlock};
 use mind_stdb::session::{can_emit, can_start};
 use serde::Deserialize;
 use spacetimedb_sdk::Identity;
@@ -73,7 +71,12 @@ pub fn run(cli: &Cli, kind: MpScenario, dump: Option<&Path>, json: bool) -> anyh
     }
 }
 
-fn emit(report: &serde_json::Value, dump: Option<&Path>, pass: bool, json: bool) -> anyhow::Result<i32> {
+fn emit(
+    report: &serde_json::Value,
+    dump: Option<&Path>,
+    pass: bool,
+    json: bool,
+) -> anyhow::Result<i32> {
     if let Some(path) = dump {
         std::fs::write(path, serde_json::to_string_pretty(report)?)
             .with_context(|| format!("writing dump `{}`", path.display()))?;
@@ -265,15 +268,19 @@ fn generated_log(len: usize) -> Vec<CommandKind> {
         let x = (index % 20) as i32 + 1;
         let y = (index / 20) as i32 + 1;
         if index % 4 == 3 {
-            log.push(CommandKind::BreakBlock(mind_stdb::module_bindings::BreakBlock {
-                x,
-                y,
-            }));
+            log.push(CommandKind::BreakBlock(
+                mind_stdb::module_bindings::BreakBlock { x, y },
+            ));
         } else {
             log.push(CommandKind::PlaceBlock(PlaceBlock {
                 x,
                 y,
-                block: if index % 2 == 0 { "stone-wall" } else { "router" }.to_string(),
+                block: if index % 2 == 0 {
+                    "stone-wall"
+                } else {
+                    "router"
+                }
+                .to_string(),
                 rotation: (index % 4) as u8,
                 config: Vec::new(),
             }));
@@ -530,7 +537,10 @@ fn build_kind(case: &MatrixCase) -> Result<CommandKind, String> {
         }),
         "set_rule" => CommandKind::SetRule(SetRule {
             rule: case.rule.clone().unwrap_or_default(),
-            json: "x".repeat(case.json_len.unwrap_or(case.json.as_deref().map(str::len).unwrap_or(0))),
+            json: "x".repeat(
+                case.json_len
+                    .unwrap_or(case.json.as_deref().map(str::len).unwrap_or(0)),
+            ),
         }),
         "research_unlock" => CommandKind::ResearchUnlock(ResearchUnlock {
             content: case.content.clone().unwrap_or_default(),
@@ -631,14 +641,14 @@ fn run_validation_matrix(dump: Option<&Path>, json: bool) -> anyhow::Result<i32>
                 case.name, case.expect, result
             ));
             pass = false;
-        } else if let (Some(reason), Err(actual)) = (&case.reason, &result) {
-            if actual != reason {
-                failures.push(format!(
-                    "{}: reason `{actual}` != expected `{reason}`",
-                    case.name
-                ));
-                pass = false;
-            }
+        } else if let (Some(reason), Err(actual)) = (&case.reason, &result)
+            && actual != reason
+        {
+            failures.push(format!(
+                "{}: reason `{actual}` != expected `{reason}`",
+                case.name
+            ));
+            pass = false;
         }
         if actual_accept {
             accept += 1;

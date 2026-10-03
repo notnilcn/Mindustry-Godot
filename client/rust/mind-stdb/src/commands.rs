@@ -124,10 +124,7 @@ fn valid_content_name(name: &str, max_len: usize) -> Result<(), String> {
 
 /// Client mirror of the server's cheap validator (plan §6.3). Reason strings
 /// match the server for the shared validation-matrix cases.
-pub fn preflight_validate(
-    kind: &CommandKind,
-    ctx: &PreflightContext,
-) -> Result<(), String> {
+pub fn preflight_validate(kind: &CommandKind, ctx: &PreflightContext) -> Result<(), String> {
     let bounds = |x: i32, y: i32| -> Result<(), String> {
         if x >= 0 && y >= 0 && x < ctx.map_width && y < ctx.map_height {
             Ok(())
@@ -141,10 +138,7 @@ pub fn preflight_validate(
             bounds(payload.x, payload.y)?;
             valid_content_name(&payload.block, MAX_BLOCK_NAME_LEN)?;
             if payload.rotation > 3 {
-                return Err(format!(
-                    "rotation {} must be 0..=3",
-                    payload.rotation
-                ));
+                return Err(format!("rotation {} must be 0..=3", payload.rotation));
             }
             cap_bytes(&payload.config, MAX_PLACE_CONFIG_BYTES, "place config")
         }
@@ -166,10 +160,7 @@ pub fn preflight_validate(
                 valid_content_name(item, MAX_CONTENT_NAME_LEN)?;
             }
             if payload.amount.abs() > 10_000 {
-                return Err(format!(
-                    "inventory amount {} exceeds 10000",
-                    payload.amount
-                ));
+                return Err(format!("inventory amount {} exceeds 10000", payload.amount));
             }
             Ok(())
         }
@@ -187,9 +178,7 @@ pub fn preflight_validate(
             }
             Ok(())
         }
-        CommandKind::UnitStance(payload) => {
-            cap_list(payload.units.len(), MAX_UNITS, "units")
-        }
+        CommandKind::UnitStance(payload) => cap_list(payload.units.len(), MAX_UNITS, "units"),
         CommandKind::PlayerSpawn(payload) => {
             if let Some(unit) = &payload.unit {
                 valid_content_name(unit, MAX_CONTENT_NAME_LEN)?;
@@ -402,6 +391,7 @@ impl CommandSender {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
     use crate::module_bindings::{PlaceBlock, SetRules};
 
@@ -432,9 +422,7 @@ mod tests {
                 y: 1,
                 direction: true,
             }),
-            CommandKind::DeletePlans(DeletePlans {
-                positions: vec![1],
-            }),
+            CommandKind::DeletePlans(DeletePlans { positions: vec![1] }),
             CommandKind::CommandBuilding(CommandBuilding {
                 positions: vec![1],
                 x: 1.0,
@@ -576,10 +564,12 @@ mod tests {
     fn predict_policies_are_classified() {
         assert_eq!(predict_policy(&CommandKind::Noop), PredictPolicy::Immediate);
         assert_eq!(
-            predict_policy(&CommandKind::PlayerSpawn(crate::module_bindings::PlayerSpawn {
-                unit: None,
-                team: 0
-            })),
+            predict_policy(&CommandKind::PlayerSpawn(
+                crate::module_bindings::PlayerSpawn {
+                    unit: None,
+                    team: 0
+                }
+            )),
             PredictPolicy::LocalOnly
         );
         assert_eq!(

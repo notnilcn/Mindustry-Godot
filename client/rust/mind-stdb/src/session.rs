@@ -11,9 +11,7 @@
 use spacetimedb_sdk::Identity;
 
 use crate::connector::{Connector, ConnectorError};
-use crate::module_bindings::{
-    Gamemode, MatchStatus, MemberRole, RelayMatch, Visibility,
-};
+use crate::module_bindings::{Gamemode, MatchStatus, MemberRole, RelayMatch, Visibility};
 
 /// High-level lifecycle state (plan §3.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -190,7 +188,11 @@ impl MatchSession {
     }
 
     /// Creates a match and enters [`SessionState::InLobby`] as host.
-    pub fn host(&mut self, connector: &mut Connector, params: &HostParams) -> Result<(), SessionError> {
+    pub fn host(
+        &mut self,
+        connector: &mut Connector,
+        params: &HostParams,
+    ) -> Result<(), SessionError> {
         connector.create_match(
             &params.map_id,
             params.map_seed,
@@ -212,6 +214,7 @@ impl MatchSession {
     }
 
     /// Joins `match_id`; enters [`SessionState::Loading`] then lobby/game.
+    #[allow(clippy::too_many_arguments)]
     pub fn join(
         &mut self,
         connector: &mut Connector,
@@ -232,7 +235,11 @@ impl MatchSession {
     }
 
     /// Marks readiness and enters the lobby.
-    pub fn set_ready(&mut self, connector: &mut Connector, ready: bool) -> Result<(), SessionError> {
+    pub fn set_ready(
+        &mut self,
+        connector: &mut Connector,
+        ready: bool,
+    ) -> Result<(), SessionError> {
         let match_id = self.match_id.ok_or(SessionError::NoMatch)?;
         connector.set_ready(match_id, ready)?;
         self.ready = ready;

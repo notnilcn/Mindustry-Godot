@@ -8,6 +8,8 @@
 //! `core/src/mindustry/core/Logic.java` (fixed step pump); the fixed-step
 //! accumulator itself lives in `mind_core::sim::FixedStepRunner` (D8).
 
+use std::collections::VecDeque;
+
 use godot::classes::{INode, InputEvent, InputEventMouseButton, Os, ProjectSettings};
 use godot::global::MouseButton;
 use godot::obj::{Base, Singleton};
@@ -20,6 +22,7 @@ use mind_core::content::{
     BlockId, ContentRegistry, ContentType, MemoryBundle, MemoryUnlockStore, content_counts,
     create_base_content,
 };
+use mind_core::determinism::SimCommand;
 use mind_core::scenario::{Scenario, ScenarioPlayer};
 use mind_core::sim::{FixedStepRunner, Sim};
 use mind_core::world::blocks::heat::HeatState;
@@ -59,6 +62,10 @@ pub struct MindSimHost {
     revision: u64,
     /// Plan-17 `MindFx` sibling (`../MindFx`); the one-way sim→view tick hook.
     fx_host: Option<Gd<Node>>,
+    /// Plan-21 relay queue: commands drained and applied at the next tick
+    /// start (never mid-frame). Populated by `MindNet`/MCP via
+    /// `enqueue_sim_command`/`apply_sim_command_json`.
+    pending_commands: VecDeque<SimCommand>,
 }
 
 #[godot_api]
@@ -79,6 +86,7 @@ impl INode for MindSimHost {
             content_snapshot: None,
             revision: 0,
             fx_host: None,
+            pending_commands: VecDeque::new(),
         }
     }
 
@@ -267,6 +275,69 @@ impl MindSimHost {
     #[func]
     pub fn get_checksum(&self) -> GString {
         GString::from(self.sim.checksum_hex().as_str())
+    }
+
+    /// Plan-21 checksum-scope hook. Until plan 05 lands `checksum_scoped` this
+    /// returns the full-context checksum (the authority mask is a no-op here).
+    #[func]
+    pub fn get_checksum_scoped(&self) -> GString {
+        GString::from(self.sim.checksum_hex().as_str())
+    }
+
+    /// Number of relay commands queued for the next tick boundary.
+    #[func]
+    pub fn pending_command_count(&self) -> i64 {
+        self.pending_commands.len() as i64
+    }
+
+    /// Enqueues a canonical [`SimCommand`] to apply at the next tick start
+    /// (plan 21 §3.5). Rust-only seam used by the `MindNet` relay runtime.
+    pub fn enqueue_sim_command(&mut self, command: SimCommand) {
+        self.pending_commands.push_back(command);
+    }
+
+    /// MCP/dev helper: parse a small JSON command and enqueue it.
+    ///
+    /// Shape: `{"op":"place","x":1,"y":2,"block":<u16>,"rotation":0}` or
+    /// `{"op":"break","x":1,"y":2}`.
+    #[func]
+    pub fn apply_sim_command_json(&mut self, cmd_json: GString) -> bool {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&cmd_json.to_string()) else {
+            log::warn!("apply_sim_command_json: invalid JSON");
+            return false;
+        };
+        let op = value.get("op").and_then(|v| v.as_str()).unwrap_or("");
+        let x = value.get("x").and_then(|v| v.as_i64()).unwrap_or(i64::MIN);
+        let y = value.get("y").and_then(|v| v.as_i64()).unwrap_or(i64::MIN);
+        let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
+            log::warn!("apply_sim_command_json: missing/oversized x,y");
+            return false;
+        };
+        let command = match op {
+            "place" => {
+                let block = value.get("block").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
+                let rotation = value
+                    .get("rotation")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0)
+                    .clamp(0, 3) as i8;
+                SimCommand::Place {
+                    x,
+                    y,
+                    block,
+                    rotation,
+                    team: 0,
+                    player: None,
+                }
+            }
+            "break" => SimCommand::Break { x, y, player: None },
+            other => {
+                log::warn!("apply_sim_command_json: unsupported op `{other}`");
+                return false;
+            }
+        };
+        self.pending_commands.push_back(command);
+        true
     }
 
     /// Per-type content counts for the inspector `Content` tab (plan 02 §3.7).
@@ -839,9 +910,21 @@ impl MindSimHost {
         }
     }
 
+    /// Drains queued relay commands and applies them at a tick boundary
+    /// (plan 21 §3.5: apply only at fixed-tick starts, never mid-frame).
+    fn drain_pending_commands(&mut self) {
+        while let Some(command) = self.pending_commands.pop_front() {
+            match self.sim.command(command) {
+                Ok(()) => self.world_dirty = true,
+                Err(error) => log::warn!("relay command rejected by sim: {error}"),
+            }
+        }
+    }
+
     /// Runs `steps` fixed steps, applying scenario commands before each tick.
     fn advance_steps(&mut self, steps: u32) {
         for _ in 0..steps {
+            self.drain_pending_commands();
             let applied_before = self.sim.commands_applied();
             let result = if let Some(player) = self.player.as_mut() {
                 player.step(&mut self.sim)

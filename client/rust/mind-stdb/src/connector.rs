@@ -27,14 +27,14 @@ use crate::config::{ConnectionConfig, StdbMode};
 use crate::identity::LocalIdentity;
 use crate::module_bindings::{
     CommandKind, DbConnection, Gamemode, MemberRole, RemoteTables, SubscriptionHandle, Visibility,
-    all_matchesQueryTableAccess, all_playersQueryTableAccess, create_match as _,
-    join_match as _, leave_match as _, local_client_settingsQueryTableAccess,
-    local_player_profileQueryTableAccess, local_playerQueryTableAccess,
-    my_kickQueryTableAccess, my_match_commandsQueryTableAccess, my_match_membersQueryTableAccess,
-    my_match_stateQueryTableAccess, my_matchQueryTableAccess, my_matchesQueryTableAccess,
-    my_sender_command_stateQueryTableAccess, protocol_infoQueryTableAccess,
-    publish_match_state as _, relay_configQueryTableAccess, send_match_command as _,
-    server_configQueryTableAccess, set_ready as _, set_username as _, start_match as _,
+    all_matchesQueryTableAccess, all_playersQueryTableAccess, create_match as _, join_match as _,
+    leave_match as _, local_client_settingsQueryTableAccess, local_player_profileQueryTableAccess,
+    local_playerQueryTableAccess, my_kickQueryTableAccess, my_match_commandsQueryTableAccess,
+    my_match_membersQueryTableAccess, my_match_stateQueryTableAccess, my_matchQueryTableAccess,
+    my_matchesQueryTableAccess, my_sender_command_stateQueryTableAccess,
+    protocol_infoQueryTableAccess, publish_match_state as _, relay_configQueryTableAccess,
+    send_match_command as _, server_configQueryTableAccess, set_ready as _, set_username as _,
+    start_match as _,
 };
 use crate::token::{FileTokenStore, TokenStore};
 use crate::waves::{SubscriptionWaves, WaveName};

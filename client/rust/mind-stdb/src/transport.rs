@@ -76,6 +76,7 @@ impl RelayTransport for StdbTransport<'_> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
     use crate::config::{ConnectionConfig, StdbMode};
 
@@ -91,9 +92,7 @@ mod tests {
         let mut transport = StdbTransport::new(&mut connector);
         assert_eq!(transport.transport_name(), "stdb");
         // Offline: the send fails with a connector error, never panics.
-        let error = transport
-            .send_command(1, 0, CommandKind::Noop)
-            .unwrap_err();
+        let error = transport.send_command(1, 0, CommandKind::Noop).unwrap_err();
         assert!(matches!(error, TransportError::Connector(_)));
         // request_snapshot is a no-op on the STDB seam (rows carry it).
         assert!(transport.request_snapshot(1).is_ok());

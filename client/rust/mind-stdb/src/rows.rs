@@ -6,7 +6,9 @@
 //! needs a human/debug JSON string, so each supported row gets a small manual
 //! projection here (generated code is never edited).
 
-use crate::module_bindings::{Player, ProtocolInfo, RelayConfig, RelayMatch};
+use crate::module_bindings::{
+    MatchState, Player, ProtocolInfo, RelayConfig, RelayMatch, RelayMember,
+};
 
 /// Debug JSON for one row type.
 pub trait RowView {
@@ -64,6 +66,49 @@ impl RowView for RelayMatch {
             "authority": format!("{:?}", self.authority),
             "protocol_version": self.protocol_version,
             "created_by": self.created_by.to_hex().to_string(),
+            "host": self.host.to_hex().to_string(),
+            "mode": format!("{:?}", self.mode),
+            "mode_name": self.mode_name,
+            "visibility": format!("{:?}", self.visibility),
+            "rules_epoch": self.rules_epoch,
+            "is_dedicated": self.is_dedicated,
+            "player_count": self.player_count,
+            "max_players": self.max_players,
+            "last_command_id": self.last_command_id,
+        })
+        .to_string()
+    }
+}
+
+impl RowView for RelayMember {
+    fn debug_json(&self) -> String {
+        serde_json::json!({
+            "member_id": self.member_id,
+            "match_id": self.match_id,
+            "identity": self.identity.to_hex().to_string(),
+            "role": format!("{:?}", self.role),
+            "team": self.team,
+            "connected": self.connected,
+            "ready": self.ready,
+            "kicked_reason": self.kicked_reason,
+        })
+        .to_string()
+    }
+}
+
+impl RowView for MatchState {
+    fn debug_json(&self) -> String {
+        serde_json::json!({
+            "state_id": self.state_id,
+            "match_id": self.match_id,
+            "wave": self.wave,
+            "wavetime": self.wavetime,
+            "enemies": self.enemies,
+            "paused": self.paused,
+            "game_over": self.game_over,
+            "sim_tick": self.sim_tick,
+            "last_command_id": self.last_command_id,
+            "rules_epoch": self.rules_epoch,
         })
         .to_string()
     }
