@@ -126,6 +126,73 @@ impl Summary {
     }
 }
 
+/// One per-system roll-up row (plan 23 M7 `parity report --all`).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SystemRollup {
+    /// Owning plan short number.
+    pub plan: String,
+    /// Matrix rows owned by the plan.
+    pub matrix_rows: usize,
+    /// Catalogued scenarios owned by the plan.
+    pub scenarios: usize,
+    /// Budget rows owned by the plan.
+    pub budgets: usize,
+}
+
+/// Derives the whole-program per-system roll-up from the committed registries.
+pub fn system_rollup(repo: &Path) -> Result<Vec<SystemRollup>> {
+    let rows = matrix_mod::load(&repo.join("parity/matrix.toml"))?;
+    let scenarios = ScenarioCatalog::load(&repo.join("parity/scenario_catalog.json"))?;
+    let budgets = budgets::Budgets::load(&repo.join("parity/bench_budgets.json"))?;
+
+    let mut by_plan: BTreeMap<String, SystemRollup> = BTreeMap::new();
+    for row in &rows {
+        let plan = owner_plan_number(&row.owner);
+        let entry = by_plan.entry(plan.clone()).or_insert_with(|| SystemRollup {
+            plan,
+            matrix_rows: 0,
+            scenarios: 0,
+            budgets: 0,
+        });
+        entry.matrix_rows += 1;
+    }
+    for scenario in &scenarios.entries {
+        let entry = by_plan
+            .entry(scenario.plan.clone())
+            .or_insert_with(|| SystemRollup {
+                plan: scenario.plan.clone(),
+                matrix_rows: 0,
+                scenarios: 0,
+                budgets: 0,
+            });
+        entry.scenarios += 1;
+    }
+    for budget in &budgets.entries {
+        let entry = by_plan
+            .entry(budget.plan.clone())
+            .or_insert_with(|| SystemRollup {
+                plan: budget.plan.clone(),
+                matrix_rows: 0,
+                scenarios: 0,
+                budgets: 0,
+            });
+        entry.budgets += 1;
+    }
+    Ok(by_plan.into_values().collect())
+}
+
+/// Extracts the `{nn}` plan number from an owner filename like
+/// `05_SIM_CORE_IMPLEMENTATION_PLAN.md` (or returns the input unchanged when it
+/// is already a short number).
+fn owner_plan_number(owner: &str) -> String {
+    let digits: String = owner.chars().take_while(char::is_ascii_digit).collect();
+    if digits.is_empty() {
+        owner.to_owned()
+    } else {
+        digits
+    }
+}
+
 /// Collects every structural check against the repo.
 pub fn collect(repo: &Path, tests: Option<&BTreeSet<String>>) -> Result<CheckOutcome> {
     let mut checks = Vec::new();

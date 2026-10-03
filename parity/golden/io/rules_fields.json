@@ -1,0 +1,435 @@
+{
+  "format": 1,
+  "domain": "io",
+  "kind": "rules_field_order",
+  "source": "core/src/mindustry/game/Rules.java",
+  "source_sha256": "d4512d36606bcc86a88c04695f48cc6dea2aa365cdf3f310a4062a462a3b264b",
+  "upstream_commit": "2cd7aeecf1378b3db456be9bfde8691b3cdc1bcc",
+  "count": 106,
+  "fields": [
+    {
+      "type": "boolean",
+      "name": "allowEditRules"
+    },
+    {
+      "type": "boolean",
+      "name": "infiniteResources"
+    },
+    {
+      "type": "boolean",
+      "name": "coreBuildAndConfig"
+    },
+    {
+      "type": "TeamRules",
+      "name": "teams"
+    },
+    {
+      "type": "boolean",
+      "name": "waveTimer"
+    },
+    {
+      "type": "boolean",
+      "name": "waveSending"
+    },
+    {
+      "type": "boolean",
+      "name": "waves"
+    },
+    {
+      "type": "boolean",
+      "name": "airUseSpawns"
+    },
+    {
+      "type": "boolean",
+      "name": "wavesSpawnAtCores"
+    },
+    {
+      "type": "boolean",
+      "name": "pvp"
+    },
+    {
+      "type": "boolean",
+      "name": "pvpAutoPause"
+    },
+    {
+      "type": "boolean",
+      "name": "pauseDisabled"
+    },
+    {
+      "type": "boolean",
+      "name": "waitEnemies"
+    },
+    {
+      "type": "boolean",
+      "name": "attackMode"
+    },
+    {
+      "type": "boolean",
+      "name": "editor"
+    },
+    {
+      "type": "boolean",
+      "name": "derelictRepair"
+    },
+    {
+      "type": "boolean",
+      "name": "canGameOver"
+    },
+    {
+      "type": "boolean",
+      "name": "coreCapture"
+    },
+    {
+      "type": "boolean",
+      "name": "reactorExplosions"
+    },
+    {
+      "type": "boolean",
+      "name": "possessionAllowed"
+    },
+    {
+      "type": "boolean",
+      "name": "schematicsAllowed"
+    },
+    {
+      "type": "boolean",
+      "name": "damageExplosions"
+    },
+    {
+      "type": "boolean",
+      "name": "fire"
+    },
+    {
+      "type": "boolean",
+      "name": "randomWaveAI"
+    },
+    {
+      "type": "boolean",
+      "name": "unitPayloadUpdate"
+    },
+    {
+      "type": "boolean",
+      "name": "unitPayloadsExplode"
+    },
+    {
+      "type": "boolean",
+      "name": "unitCapVariable"
+    },
+    {
+      "type": "boolean",
+      "name": "hideSpawns"
+    },
+    {
+      "type": "float",
+      "name": "solarMultiplier"
+    },
+    {
+      "type": "float",
+      "name": "unitBuildSpeedMultiplier"
+    },
+    {
+      "type": "float",
+      "name": "unitCostMultiplier"
+    },
+    {
+      "type": "float",
+      "name": "unitDamageMultiplier"
+    },
+    {
+      "type": "float",
+      "name": "unitHealthMultiplier"
+    },
+    {
+      "type": "float",
+      "name": "unitCrashDamageMultiplier"
+    },
+    {
+      "type": "float",
+      "name": "unitMineSpeedMultiplier"
+    },
+    {
+      "type": "float",
+      "name": "unitFactoryActivationDelay"
+    },
+    {
+      "type": "boolean",
+      "name": "ghostBlocks"
+    },
+    {
+      "type": "boolean",
+      "name": "showOtherTeamPings"
+    },
+    {
+      "type": "boolean",
+      "name": "logicUnitControl"
+    },
+    {
+      "type": "boolean",
+      "name": "logicUnitBuild"
+    },
+    {
+      "type": "boolean",
+      "name": "logicUnitDeconstruct"
+    },
+    {
+      "type": "boolean",
+      "name": "worldProcessorPlayerLink"
+    },
+    {
+      "type": "boolean",
+      "name": "allowEditWorldProcessors"
+    },
+    {
+      "type": "boolean",
+      "name": "disableWorldProcessors"
+    },
+    {
+      "type": "float",
+      "name": "blockHealthMultiplier"
+    },
+    {
+      "type": "float",
+      "name": "blockDamageMultiplier"
+    },
+    {
+      "type": "float",
+      "name": "buildCostMultiplier"
+    },
+    {
+      "type": "float",
+      "name": "buildSpeedMultiplier"
+    },
+    {
+      "type": "float",
+      "name": "deconstructRefundMultiplier"
+    },
+    {
+      "type": "float",
+      "name": "objectiveTimerMultiplier"
+    },
+    {
+      "type": "float",
+      "name": "enemyCoreBuildRadius"
+    },
+    {
+      "type": "boolean",
+      "name": "polygonCoreProtection"
+    },
+    {
+      "type": "boolean",
+      "name": "placeRangeCheck"
+    },
+    {
+      "type": "boolean",
+      "name": "cleanupDeadTeams"
+    },
+    {
+      "type": "boolean",
+      "name": "onlyDepositCore"
+    },
+    {
+      "type": "boolean",
+      "name": "allowCoreUnloaders"
+    },
+    {
+      "type": "float",
+      "name": "itemDepositCooldown"
+    },
+    {
+      "type": "boolean",
+      "name": "coreDestroyClear"
+    },
+    {
+      "type": "boolean",
+      "name": "hideBannedBlocks"
+    },
+    {
+      "type": "boolean",
+      "name": "allowEnvironmentDeconstruct"
+    },
+    {
+      "type": "boolean",
+      "name": "instantBuild"
+    },
+    {
+      "type": "boolean",
+      "name": "blockWhitelist"
+    },
+    {
+      "type": "boolean",
+      "name": "unitWhitelist"
+    },
+    {
+      "type": "float",
+      "name": "dropZoneRadius"
+    },
+    {
+      "type": "float",
+      "name": "waveSpacing"
+    },
+    {
+      "type": "float",
+      "name": "initialWaveSpacing"
+    },
+    {
+      "type": "int",
+      "name": "winWave"
+    },
+    {
+      "type": "int",
+      "name": "unitCap"
+    },
+    {
+      "type": "boolean",
+      "name": "disableUnitCap"
+    },
+    {
+      "type": "float",
+      "name": "dragMultiplier"
+    },
+    {
+      "type": "int",
+      "name": "env"
+    },
+    {
+      "type": "Attributes",
+      "name": "attributes"
+    },
+    {
+      "type": "boolean",
+      "name": "alwaysPlayMusic"
+    },
+    {
+      "type": "boolean",
+      "name": "disableMusic"
+    },
+    {
+      "type": "float",
+      "name": "musicVolume"
+    },
+    {
+      "type": "Seq<SpawnGroup>",
+      "name": "spawns"
+    },
+    {
+      "type": "Seq<ItemStack>",
+      "name": "loadout"
+    },
+    {
+      "type": "Seq<WeatherEntry>",
+      "name": "weather"
+    },
+    {
+      "type": "ObjectIntMap<Block>",
+      "name": "blockLimits"
+    },
+    {
+      "type": "ObjectSet<Block>",
+      "name": "bannedBlocks"
+    },
+    {
+      "type": "ObjectSet<UnitType>",
+      "name": "bannedUnits"
+    },
+    {
+      "type": "ObjectSet<Block>",
+      "name": "revealedBlocks"
+    },
+    {
+      "type": "ObjectSet<UnlockableContent>",
+      "name": "researched"
+    },
+    {
+      "type": "MapObjectives",
+      "name": "objectives"
+    },
+    {
+      "type": "ObjectSet<String>",
+      "name": "objectiveFlags"
+    },
+    {
+      "type": "boolean",
+      "name": "fog"
+    },
+    {
+      "type": "boolean",
+      "name": "staticFog"
+    },
+    {
+      "type": "Color",
+      "name": "staticColor"
+    },
+    {
+      "type": "Color",
+      "name": "dynamicColor"
+    },
+    {
+      "type": "boolean",
+      "name": "lighting"
+    },
+    {
+      "type": "Color",
+      "name": "ambientLight"
+    },
+    {
+      "type": "boolean",
+      "name": "unitLight"
+    },
+    {
+      "type": "Team",
+      "name": "defaultTeam"
+    },
+    {
+      "type": "Team",
+      "name": "waveTeam"
+    },
+    {
+      "type": "Color",
+      "name": "cloudColor"
+    },
+    {
+      "type": "boolean",
+      "name": "coreIncinerates"
+    },
+    {
+      "type": "boolean",
+      "name": "borderDarkness"
+    },
+    {
+      "type": "boolean",
+      "name": "limitMapArea"
+    },
+    {
+      "type": "int limitX, limitY,",
+      "name": "limitWidth"
+    },
+    {
+      "type": "boolean",
+      "name": "disableOutsideArea"
+    },
+    {
+      "type": "StringMap",
+      "name": "tags"
+    },
+    {
+      "type": "float",
+      "name": "backgroundSpeed"
+    },
+    {
+      "type": "float",
+      "name": "backgroundScl"
+    },
+    {
+      "type": "float",
+      "name": "backgroundOffsetX"
+    },
+    {
+      "type": "Planet",
+      "name": "planet"
+    },
+    {
+      "type": "boolean",
+      "name": "allowLogicData"
+    }
+  ]
+}
