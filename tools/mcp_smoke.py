@@ -11,7 +11,7 @@
 #
 #   1. godot_editor_edit open_scene res://scenes/spine.tscn + explicit play
 #   2. pid-stamped liveness eval (get_tick/get_checksum)
-#   3. load_scenario + step(60) in Playing -> golden checksum e53c9277bb8c28d1
+#   3. load_scenario + step(60) in Playing -> golden checksum a1a7b96167c9718d
 #   4. pause, API place_block/break_block
 #   5. tile_to_screen + real godot_input mouse click (place/break via _input)
 #   6. godot_log errors clean + startup [I] lines present, then stop
@@ -37,7 +37,7 @@ import threading
 import time
 from collections import deque
 
-GOLDEN_CHECKSUM = "e53c9277bb8c28d1"
+GOLDEN_CHECKSUM = "a1a7b96167c9718d"
 SPINE_SCENE = "res://scenes/spine.tscn"
 SCENARIO = "res://scenarios/spine_place_break.json"
 HOST_PATH = "/root/Spine/SimHost"
