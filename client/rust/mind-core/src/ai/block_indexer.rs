@@ -223,6 +223,45 @@ impl BlockIndexer {
         best.and_then(|(_, entity)| world.get::<Building>(entity).map(|building| building.tile))
     }
 
+    /// Nearest hostile building within `range` (no flag requirement).
+    ///
+    /// Unlike [`Self::find_enemy_tile`] (which restricts to priority flags),
+    /// this considers every indexed building, matching `Units.bestTarget`'s
+    /// building half for turret targeting (plan 10 §3.7). Ties break by entity
+    /// index for determinism.
+    pub fn find_enemy_building(
+        &self,
+        world: &World,
+        team: u8,
+        x: f32,
+        y: f32,
+        range: f32,
+    ) -> Option<Entity> {
+        let range2 = range * range;
+        let mut best: Option<(f32, Entity)> = None;
+        for &entity in &self.all {
+            if world.get::<TeamComp>(entity).map(|t| t.team) == Some(team) {
+                continue;
+            }
+            let Some(pos) = world.get::<Pos>(entity) else {
+                continue;
+            };
+            let dx = pos.x - x;
+            let dy = pos.y - y;
+            let dist2 = dx * dx + dy * dy;
+            if dist2 > range2 {
+                continue;
+            }
+            match best {
+                Some((best_dist, best_entity))
+                    if best_dist < dist2
+                        || (best_dist == dist2 && best_entity.index() <= entity.index()) => {}
+                _ => best = Some((dist2, entity)),
+            }
+        }
+        best.map(|(_, entity)| entity)
+    }
+
     /// Closest ore tile to `(x, y)` (delegates to the miner scan).
     pub fn find_closest_ore(
         &self,

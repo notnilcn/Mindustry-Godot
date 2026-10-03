@@ -19,11 +19,12 @@ use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
 use crate::content::{ItemId, LiquidId};
-use crate::world::behavior::BuildingBehavior;
+use crate::world::behavior::{BuildingBehavior, PayloadRef};
 use crate::world::{BuildingReader, BuildingWriter};
 
 use super::{
-    TurretConfig, TurretState, accept_item, accept_liquid, handle_item, handle_liquid, save,
+    TurretConfig, TurretState, accept_item, accept_liquid, accept_payload, handle_item,
+    handle_liquid, handle_payload, save,
 };
 
 /// `ItemTurretBuild`/`LiquidTurretBuild`/`PowerTurretBuild` behavior.
@@ -69,6 +70,20 @@ impl BuildingBehavior for TurretBehavior {
         amount: f32,
     ) {
         handle_liquid(world, e, liquid, amount);
+    }
+
+    fn accept_payload(
+        &self,
+        world: &World,
+        e: Entity,
+        _source: Entity,
+        payload: PayloadRef,
+    ) -> bool {
+        accept_payload(world, e, payload)
+    }
+
+    fn handle_payload(&self, world: &mut World, e: Entity, _source: Entity, payload: PayloadRef) {
+        handle_payload(world, e, payload);
     }
 
     fn version(&self, _world: &World, _e: Entity) -> u8 {

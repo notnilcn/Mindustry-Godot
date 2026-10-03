@@ -15,10 +15,12 @@ pub mod fires;
 pub mod harness;
 pub mod lightning;
 pub mod puddles;
+pub mod targeting;
 pub mod view;
 
 pub use bullet::{Bullet, BulletData, BulletSpawn, create};
 pub use harness::CombatHarness;
+pub use targeting::TargetQueries;
 pub use view::{
     BulletDrawState, CombatFx, FxHandle, FxSink, LaserDrawState, NoopFx, ShieldDrawState,
     TurretDrawState, noop_fx,
