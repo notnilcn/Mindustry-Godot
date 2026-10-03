@@ -21,8 +21,8 @@ use mind_core::util::alloc::{alloc_count, enabled as alloc_audit_enabled};
 use mind_core::world::TilePos;
 
 use crate::cli::{
-    AssetsCommand, Cli, Command, ContentCommand, IoCommand, MapsCommand, MetaCommand, ModsCommand,
-    TraceCommand, WorldCommand,
+    AssetsCommand, Cli, Command, ContentCommand, EditorCommand, IoCommand, MapsCommand,
+    MetaCommand, ModsCommand, TraceCommand, WorldCommand,
 };
 use crate::parity::scenario::ScenarioCatalog;
 use crate::paths;
@@ -267,6 +267,9 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
         },
         Command::Maps { command } => match command {
             MapsCommand::List { dir, json } => cmd_maps_list(dir, *json),
+        },
+        Command::Editor { command } => match command {
+            EditorCommand::Ops { fixture, json } => cmd_editor_ops(fixture, *json),
         },
         Command::Blocks { command } => crate::blocks_scenarios::run(command).map(|()| EXIT_PASS),
         Command::Combat { command } => crate::combat_scenarios::run(command),
@@ -3770,6 +3773,190 @@ fn cmd_maps_list(dir: &Path, json: bool) -> anyhow::Result<i32> {
         println!("{} maps", maps.len());
     }
     Ok(EXIT_PASS)
+}
+
+/// JSON op-log fixture (plan 19 §6.1): `ops` is a list of `DrawOperation`s, each
+/// a list of packed `u64` values (decimal numbers or decimal/hex strings).
+#[derive(Debug, serde::Deserialize)]
+struct EditorOpsFixture {
+    #[serde(default = "default_editor_fixture_format")]
+    format: u32,
+    width: i32,
+    height: i32,
+    ops: Vec<Vec<serde_json::Value>>,
+    #[serde(default)]
+    checksum_after_apply: String,
+    #[serde(default)]
+    checksum_after_undo: String,
+    #[serde(default)]
+    checksum_after_redo: String,
+}
+
+fn default_editor_fixture_format() -> u32 {
+    1
+}
+
+/// Parses one packed-op value (number, decimal string or `0x` hex string).
+fn editor_op_value(value: &serde_json::Value) -> anyhow::Result<u64> {
+    match value {
+        serde_json::Value::Number(number) => number
+            .as_u64()
+            .ok_or_else(|| anyhow!("op value `{number}` is not an unsigned integer")),
+        serde_json::Value::String(text) => {
+            let text = text.trim();
+            if let Some(hex) = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
+                u64::from_str_radix(hex, 16)
+                    .map_err(|error| anyhow!("invalid hex op value `{text}`: {error}"))
+            } else {
+                text.parse::<u64>()
+                    .map_err(|error| anyhow!("invalid op value `{text}`: {error}"))
+            }
+        }
+        other => Err(anyhow!("unsupported op value `{other}`")),
+    }
+}
+
+/// Canonical world checksum (`ChecksumPart for WorldGrid`, plan 06 §3.2).
+fn editor_world_checksum(grid: &mind_core::world::WorldGrid) -> String {
+    use mind_core::determinism::Checksummer;
+    let mut checksummer = Checksummer::new();
+    checksummer.part(grid);
+    checksummer.finish().to_hex()
+}
+
+/// Compares two checksum strings ignoring an optional `0x` prefix and case.
+fn editor_checksum_matches(actual: &str, expected: &str) -> bool {
+    fn normalize(value: &str) -> String {
+        value
+            .trim()
+            .trim_start_matches("0x")
+            .trim_start_matches("0X")
+            .to_ascii_lowercase()
+    }
+    normalize(actual) == normalize(expected)
+}
+
+/// `editor ops` (plan 19 M0 §5/§7b): replay a packed op-log fixture through the
+/// real `WorldGrid` seam — apply → undo-all → redo-all — and assert the three
+/// committed world checksums.
+fn cmd_editor_ops(fixture: &Path, json: bool) -> anyhow::Result<i32> {
+    use mind_core::content::BlockId;
+    use mind_core::editor::draw_op::DrawOperation;
+    use mind_core::editor::grid::WorldEditorGrid;
+    use mind_core::editor::stack::OperationStack;
+    use mind_core::world::{NoopRenderHooks, NoopWorldHooks, WorldGrid};
+
+    let text = std::fs::read_to_string(fixture)
+        .with_context(|| format!("reading editor fixture `{}`", fixture.display()))?;
+    let data: EditorOpsFixture = serde_json::from_str(&text)
+        .with_context(|| format!("parsing editor fixture `{}`", fixture.display()))?;
+    if data.format != 1 {
+        return Err(anyhow!(
+            "unsupported editor fixture format {} (expected 1)",
+            data.format
+        ));
+    }
+    if data.width <= 0 || data.height <= 0 {
+        return Err(anyhow!(
+            "fixture dimensions must be positive (got {}x{})",
+            data.width,
+            data.height
+        ));
+    }
+
+    let content = boot_content()?;
+    let stone = content.block_id("stone").unwrap_or(BlockId::AIR);
+
+    let mut grid = WorldGrid::new(data.width, data.height);
+    // `begin_edit_size` base: every tile is stone-floored air.
+    for index in 0..grid.tiles.len() {
+        grid.tiles.geti_mut(index).floor = stone;
+    }
+    let mut ecs = bevy_ecs::world::World::new();
+    let hooks = NoopWorldHooks;
+    let render = NoopRenderHooks;
+
+    let mut stack = OperationStack::new();
+    let mut op_count = 0usize;
+    for packed in &data.ops {
+        let mut ops = Vec::with_capacity(packed.len());
+        for value in packed {
+            ops.push(editor_op_value(value)?);
+        }
+        op_count += ops.len();
+        let mut operation = DrawOperation::from_ops(ops);
+        {
+            let mut world = WorldEditorGrid::new(&mut grid, &content, &mut ecs, &hooks, &render);
+            operation.redo(&mut world, &content);
+        }
+        stack.add(operation);
+    }
+
+    let checksum_after_apply = editor_world_checksum(&grid);
+    while stack.can_undo() {
+        let mut world = WorldEditorGrid::new(&mut grid, &content, &mut ecs, &hooks, &render);
+        stack.undo(&mut world, &content);
+    }
+    let checksum_after_undo = editor_world_checksum(&grid);
+    while stack.can_redo() {
+        let mut world = WorldEditorGrid::new(&mut grid, &content, &mut ecs, &hooks, &render);
+        stack.redo(&mut world, &content);
+    }
+    let checksum_after_redo = editor_world_checksum(&grid);
+
+    // An apply → undo-all → redo-all cycle must land on the applied state.
+    let round_trip_ok = checksum_after_apply == checksum_after_redo;
+    let goldens_present = !data.checksum_after_apply.is_empty()
+        && !data.checksum_after_undo.is_empty()
+        && !data.checksum_after_redo.is_empty();
+    let checksums_ok = !goldens_present
+        || (editor_checksum_matches(&checksum_after_apply, &data.checksum_after_apply)
+            && editor_checksum_matches(&checksum_after_undo, &data.checksum_after_undo)
+            && editor_checksum_matches(&checksum_after_redo, &data.checksum_after_redo));
+
+    let report = serde_json::json!({
+        "format": 1,
+        "generator": "editor_ops",
+        "fixture": fixture.display().to_string(),
+        "width": data.width,
+        "height": data.height,
+        "operations": data.ops.len(),
+        "ops": op_count,
+        "checksum_after_apply": checksum_after_apply,
+        "checksum_after_undo": checksum_after_undo,
+        "checksum_after_redo": checksum_after_redo,
+        "expected": {
+            "checksum_after_apply": data.checksum_after_apply,
+            "checksum_after_undo": data.checksum_after_undo,
+            "checksum_after_redo": data.checksum_after_redo,
+        },
+        "goldens_present": goldens_present,
+        "round_trip_ok": round_trip_ok,
+        "checksums_ok": checksums_ok,
+        "ok": round_trip_ok && checksums_ok,
+    });
+    let text = serde_json::to_string_pretty(&report)?;
+    if json {
+        println!("{text}");
+    } else {
+        println!("apply: {checksum_after_apply}");
+        println!("undo:  {checksum_after_undo}");
+        println!("redo:  {checksum_after_redo}");
+        if !round_trip_ok {
+            log::error!("editor ops round-trip mismatch: redo checksum != apply checksum");
+        }
+        if goldens_present && !checksums_ok {
+            log::error!(
+                "editor ops checksum mismatch against `{}`",
+                fixture.display()
+            );
+        }
+    }
+    if round_trip_ok && checksums_ok {
+        Ok(EXIT_PASS)
+    } else {
+        Ok(EXIT_FAIL)
+    }
 }
 
 fn cmd_world_multiblock(
