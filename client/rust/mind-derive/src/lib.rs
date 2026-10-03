@@ -432,6 +432,148 @@ fn parse_field_attrs(field: &syn::Field) -> syn::Result<FieldAttrs> {
     Ok(out)
 }
 
+/// Derives `mind_core::editor::objectives::ObjectiveFields` from
+/// `#[objective(name = "...", kind = "...", flags = "...")]` field attributes
+/// (plan 19 §2.3.2/§3.9, OD19-F: no Java reflection, descriptors are data).
+///
+/// Supported `kind` values: `string`, `bool`, `byte`, `int`, `float`, `team`,
+/// `color`, `vec2f`, `vec2i`, `content:<item|block|unit>`, `seq:<kind>`,
+/// `map:<kind>`. `flags` is a `|`/`,`-separated list of `second`, `tilepos`,
+/// `multiline`, `logiccode`, `researchable`, `synthetic`, `hidden`.
+#[proc_macro_derive(ObjectiveFields, attributes(objective))]
+pub fn derive_objective_fields(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match expand_objective_fields(&input) {
+        Ok(tokens) => tokens.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
+fn expand_objective_fields(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
+    let ident = &input.ident;
+    let fields = match &input.data {
+        Data::Struct(data) => match &data.fields {
+            Fields::Named(named) => named.named.iter().collect::<Vec<_>>(),
+            _ => {
+                return Err(syn::Error::new_spanned(
+                    input,
+                    "ObjectiveFields requires named fields",
+                ));
+            }
+        },
+        _ => {
+            return Err(syn::Error::new_spanned(
+                input,
+                "ObjectiveFields can only be derived for structs",
+            ));
+        }
+    };
+
+    let mut descriptors = Vec::new();
+    for field in fields {
+        let mut name: Option<String> = None;
+        let mut kind: Option<proc_macro2::TokenStream> = None;
+        let mut flags: Option<proc_macro2::TokenStream> = None;
+        for attr in &field.attrs {
+            if !attr.path().is_ident("objective") {
+                continue;
+            }
+            attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("name") {
+                    let value: syn::LitStr = meta.value()?.parse()?;
+                    name = Some(value.value());
+                    return Ok(());
+                }
+                if meta.path.is_ident("kind") {
+                    let value: syn::LitStr = meta.value()?.parse()?;
+                    kind = Some(
+                        parse_field_kind(&value.value())
+                            .map_err(|error| syn::Error::new(value.span(), error))?,
+                    );
+                    return Ok(());
+                }
+                if meta.path.is_ident("flags") {
+                    let value: syn::LitStr = meta.value()?.parse()?;
+                    flags = Some(parse_field_flags(&value.value()));
+                    return Ok(());
+                }
+                Err(meta.error("unsupported objective attribute"))
+            })?;
+        }
+        let Some(name) = name else { continue };
+        let kind = kind.ok_or_else(|| syn::Error::new_spanned(field, "missing kind"))?;
+        let flags =
+            flags.unwrap_or_else(|| quote!(::mind_core::editor::objectives::FieldFlags::empty()));
+        descriptors.push(quote! {
+            ::mind_core::editor::objectives::ObjectiveField::new(#name, #kind, #flags)
+        });
+    }
+
+    Ok(quote! {
+        impl ::mind_core::editor::objectives::ObjectiveFields for #ident {
+            fn fields(&self) -> Vec<::mind_core::editor::objectives::ObjectiveField> {
+                vec![#(#descriptors),*]
+            }
+        }
+    })
+}
+
+fn parse_field_kind(kind: &str) -> Result<proc_macro2::TokenStream, String> {
+    let path = quote!(::mind_core::editor::objectives::FieldKind);
+    let simple = match kind {
+        "string" => quote!(#path::String),
+        "bool" => quote!(#path::Bool),
+        "byte" => quote!(#path::Byte),
+        "int" => quote!(#path::Int),
+        "float" => quote!(#path::Float),
+        "team" => quote!(#path::Team),
+        "color" => quote!(#path::Color),
+        "vec2f" => quote!(#path::Vec2F),
+        "vec2i" => quote!(#path::Vec2I),
+        "content:item" => quote!(#path::Content(::mind_core::content::ContentType::Item)),
+        "content:block" => quote!(#path::Content(::mind_core::content::ContentType::Block)),
+        "content:unit" => quote!(#path::Content(::mind_core::content::ContentType::Unit)),
+        other => {
+            if let Some(inner) = other.strip_prefix("seq:") {
+                let inner = parse_field_kind(inner)?;
+                quote!(#path::Seq(::std::boxed::Box::new(#inner)))
+            } else if let Some(inner) = other.strip_prefix("map:") {
+                let inner = parse_field_kind(inner)?;
+                quote!(#path::Map(::std::boxed::Box::new(#inner)))
+            } else {
+                return Err(format!("unknown objective field kind `{other}`"));
+            }
+        }
+    };
+    Ok(simple)
+}
+
+fn parse_field_flags(flags: &str) -> proc_macro2::TokenStream {
+    let path = quote!(::mind_core::editor::objectives::FieldFlags);
+    let mut out = quote!(#path::empty());
+    for flag in flags
+        .split(['|', ','])
+        .map(str::trim)
+        .filter(|f| !f.is_empty())
+    {
+        let constant = match flag {
+            "second" => quote!(#path::SECOND),
+            "tilepos" => quote!(#path::TILE_POS),
+            "multiline" => quote!(#path::MULTILINE),
+            "logiccode" => quote!(#path::LOGIC_CODE),
+            "researchable" => quote!(#path::RESEARCHABLE),
+            "synthetic" => quote!(#path::SYNTHETIC),
+            "hidden" => quote!(#path::HIDDEN),
+            other => {
+                let message = format!("unknown objective flag `{other}`");
+                quote!(compile_error!(#message))
+            }
+        };
+        out = quote!(#out.union(#constant));
+    }
+    out
+}
+
 /// `BuildingComp` → `BUILDING_COMP`, `alpha` → `ALPHA` (class-const names,
 /// must match `mind_core::io::entity::class_ids` and the check-class-ids tool).
 fn screaming_snake(name: &str) -> String {

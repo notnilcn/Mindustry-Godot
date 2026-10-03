@@ -10,15 +10,24 @@
 //! [`test_grid::TestGrid`]. Tile op recording is explicit here (the upstream
 //! `EditorTile` subclass is replaced by the M1 `TileOpSink`; plan 19 §2.3.1).
 
+pub mod assets;
+pub mod banned;
 pub mod context;
 pub mod draw_op;
+// Plan 19 §3.1 names this file `gen.rs`; `gen` is a Rust 2024 reserved keyword,
+// so the module is exported as `generate` via an explicit path.
+#[path = "gen.rs"]
+pub mod generate;
 pub mod grid;
 pub mod lifecycle;
 pub mod maps_glue;
+pub mod objectives;
 pub mod preview;
+pub mod processors;
 pub mod stack;
 pub mod tile_op;
 pub mod tool;
+pub mod wave_graph;
 
 #[cfg(test)]
 pub mod test_grid;

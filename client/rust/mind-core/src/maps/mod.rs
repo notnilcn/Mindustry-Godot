@@ -10,7 +10,9 @@
 
 pub mod error;
 pub mod filters;
+pub mod fix;
 pub mod generators;
+pub mod locales;
 pub mod map;
 pub mod planet;
 pub mod preview;

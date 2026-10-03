@@ -1,0 +1,7 @@
+[
+  {"class":"Research","content":"alpha","parents":[],"editorPos":196612},
+  {"class":"Item","item":"copper","amount":5,"parents":[0],"editorPos":-131066},
+  {"class":"Timer","text":"@objective.hold","duration":30.0,"countup":0.0,"parents":[1],"editorPos":524287},
+  {"class":"DestroyBlock","pos":{"x":1,"y":2},"team":2,"block":"router","parents":[],"editorPos":-197607},
+  {"class":"Flag","flag":"f","text":null,"parents":[],"editorPos":0}
+]
