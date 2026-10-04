@@ -11,8 +11,7 @@ The real `asset_manifest.json` is plan 03's artifact; this source-derived
 fallback drives the M7 region audit until plan 03 replaces it.
 
 Usage: gen_audit_inputs.py [upstream_core_dir]
-  upstream_core_dir defaults to
-  /home/c/g/code_examples/Mindustry/core
+  upstream_core_dir defaults to ../Mindustry/core
 """
 import json
 import re
@@ -20,7 +19,7 @@ import sys
 from pathlib import Path
 
 CORE = Path(sys.argv[1] if len(sys.argv) > 1
-            else "/home/c/g/code_examples/Mindustry/core")
+            else "../Mindustry/core")
 BUNDLE = CORE / "assets/bundles/bundle.properties"
 SPRITES = CORE / "assets-raw/sprites"
 OUT_DIR = Path("parity")

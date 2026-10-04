@@ -29,7 +29,7 @@ The MCP server is a stdio process (`open-godot-mcp`, Windows binary `~/.local/bi
 1. **`godot_health check` first.** If it reports `BRIDGE_NOT_CONNECTED` (or errors with "No Godot instance connected"), launch the editor yourself from WSL2 Ubuntu; the MCP bridge auto-loads with the editor and WSLg hosts the window:
 
    ```bash
-   nohup godot4 --editor --path /mnt/c/Users/Clinton/g/code_examples/mindustry-godot/client \
+   nohup godot4 --editor --path client \
      >/tmp/mind-editor.log 2>&1 &
    ```
 

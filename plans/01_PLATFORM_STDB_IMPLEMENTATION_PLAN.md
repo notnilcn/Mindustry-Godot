@@ -8,7 +8,7 @@
 | **Phase** | P1 — Platform & content. |
 | **Depends on** | `00_FOUNDATION_IMPLEMENTATION_PLAN.md` (workspace, gdext bring-up, `mind-headless` harness, build scripts, MCP bridge). This plan must not start before plan 00's workspace + headless + MCP gates are green. |
 | **Blocks** | `21_MULTIPLAYER_IMPLEMENTATION_PLAN.md` (full schema, relay authority, snapshots); the lobby/identity parts of `12_CAMPAIGN_IMPLEMENTATION_PLAN.md` (profiles, campaign identity) and `14_UI_IMPLEMENTATION_PLAN.md` (settings dialog, join/lobby UI, connection-lost UI). |
-| **Sources** | C# being replaced: `client/sstdbsdk/AGENTS.md`, `DatabaseConnector.cs`, `TableSubscriber.cs`, `TableBinderComponent.cs`, `DatabaseConnector.tscn` (584 LOC total). Conventions: `/mnt/c/Users/Clinton/g/main/AGENTS.md`, `/mnt/c/Users/Clinton/g/main/server/AGENTS.md`, and a real 2.x module read for shape: `/mnt/c/Users/Clinton/g/main/server/spacetimedb/{Cargo.toml,src/lib.rs,src/main/{mod,lifecycle,seeds,global}.rs,src/item/{reducers,views}.rs,src/chat/mod.rs}`. Tooling: local `spacetime` CLI 2.10.1 (WSL; 2.10.2 upgrade available), `spacetimedb-sdk` 2.10.1 (docs.rs), `spacetimedb` server crate 2.10.1 (crates.io). Test rig: `/mnt/c/Users/Clinton/g/.opencode/skills/playtest/SKILL.md` (main-project recipes; the mindustry-godot analog is created by plan 00). |
+| **Sources** | C# being replaced: `client/sstdbsdk/AGENTS.md`, `DatabaseConnector.cs`, `TableSubscriber.cs`, `TableBinderComponent.cs`, `DatabaseConnector.tscn` (584 LOC total). Conventions: `../../main/AGENTS.md`, `../../main/server/AGENTS.md`, and a real 2.x module read for shape: `../../main/server/spacetimedb/{Cargo.toml,src/lib.rs,src/main/{mod,lifecycle,seeds,global}.rs,src/item/{reducers,views}.rs,src/chat/mod.rs}`. Tooling: local `spacetime` CLI 2.10.1 (WSL; 2.10.2 upgrade available), `spacetimedb-sdk` 2.10.1 (docs.rs), `spacetimedb` server crate 2.10.1 (crates.io). Test rig: `../../.opencode/skills/playtest/SKILL.md` (main-project recipes; the mindustry-godot analog is created by plan 00). |
 | **Extends spine** | Plan 00's rig is untouched. Adds: `StdbConnector` (gdext autoload, one `Node`) + optional `StdbBinder` (gdext `Node`) to the project; a `mind-headless` scenario family (`stdb_*`); a `net` page on the plan-00 state inspector (connector state, wave status, relay counters); `server/spacetime.json` + `build.sh`/`build.ps1` publish rig; generated Rust bindings. The plan-00 in-engine spine must keep working **offline** with the STDB layer absent. |
 
 This plan replaces the C# `sstdbsdk` semantics 1:1 (D1) and lays the STDB foundation: identity/session/profile/settings/audit skeleton, subscription waves, typed binders, and an ordered per-match command relay with cheap server-side validation (D2). Catalog/save/campaign tables are explicitly **not** here — plan 21 owns the full schema.
@@ -516,13 +516,13 @@ Regressions block the P1 gate (HIGH_LEVEL_PLAN §7.4/§5).
 
 Exact files/dirs read for this plan (2026-10-01):
 
-- `C:\Users\Clinton\g\code_examples\mindustry-godot\HIGH_LEVEL_PLAN.md` (§0 locked decisions, §2 architecture, §3 plan set, §4 template, §6–§9 conventions/verification/parity ledger).
-- `C:\Users\Clinton\g\code_examples\mindustry-godot\PRELIMINARY_PLAN.md` (historical intent).
-- `C:\Users\Clinton\g\code_examples\mindustry-godot\client\sstdbsdk\AGENTS.md`, `DatabaseConnector.cs`, `TableSubscriber.cs`, `TableBinderComponent.cs`, `DatabaseConnector.tscn`, `README.md`, `pointers.md`.
-- `C:\Users\Clinton\g\main\AGENTS.md` (project-wide client/server map, publish workflow) and `C:\Users\Clinton\g\main\server\AGENTS.md` (SpacetimeDB Rust rules, canonical shapes, views, indexes, commands).
-- `C:\Users\Clinton\g\main\server\spacetimedb\Cargo.toml`, `src\lib.rs`, `src\main\{mod,lifecycle,seeds,global}.rs`, `src\item\{reducers,views}.rs`, `src\chat\mod.rs` (2.x layout, seed trait, rate window, view/semijoin idioms).
-- `/mnt/c/Users/Clinton/g/main/server/{build.sh,spacetime.json}` (publish/generate pattern being adapted to Rust).
-- `/mnt/c/Users/Clinton/g/.opencode/skills/playtest/SKILL.md` (MCP + `spacetime` CLI verification rules).
+- `./HIGH_LEVEL_PLAN.md` (§0 locked decisions, §2 architecture, §3 plan set, §4 template, §6–§9 conventions/verification/parity ledger).
+- `./PRELIMINARY_PLAN.md` (historical intent).
+- `./client/sstdbsdk/AGENTS.md`, `DatabaseConnector.cs`, `TableSubscriber.cs`, `TableBinderComponent.cs`, `DatabaseConnector.tscn`, `README.md`, `pointers.md`.
+- `../../main/AGENTS.md` (project-wide client/server map, publish workflow) and `../../main/server/AGENTS.md` (SpacetimeDB Rust rules, canonical shapes, views, indexes, commands).
+- `../../main/server/spacetimedb/Cargo.toml`, `src\lib.rs`, `src\main\{mod,lifecycle,seeds,global}.rs`, `src\item\{reducers,views}.rs`, `src\chat\mod.rs` (2.x layout, seed trait, rate window, view/semijoin idioms).
+- `../../main/server/{build.sh,spacetime.json}` (publish/generate pattern being adapted to Rust).
+- `../../.opencode/skills/playtest/SKILL.md` (MCP + `spacetime` CLI verification rules).
 - `spacetime generate --help` / `spacetime --help` (CLI 2.10.1 confirms `--lang rust`).
 - crates.io API: `spacetimedb-sdk` 2.10.1 and `spacetimedb` 2.10.1 version/pin data; docs.rs `spacetimedb_sdk` 2.10.1 crate page and the SpacetimeDB Rust client reference (`DbConnection`, `DbContext`, `frame_tick`/`run_threaded`/`run_async`, `SubscriptionHandle`, `Table`/`TableWithPrimaryKey` callbacks, query builder).
 

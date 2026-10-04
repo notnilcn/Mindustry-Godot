@@ -585,7 +585,7 @@ Read in full or targeted for this plan:
 - Mindustry sources: `audio/{SoundControl,SoundPriority,AmbientSource,SoundLoop,MusicContainer}.java`; `core/Control.java`; `core/GameState.java`; `core/Logic.java`; `game/{Rules,EventType}.java`; `type/{Planet,Weather}.java`; `world/Block.java`; `world/blocks/defense/turrets/Turret.java`; `entities/comp/{BuildingComp,UnitComp,FireComp,MinerComp,TankComp,BuilderComp,WeatherStateComp,PowerGenerator,ImpactReactor,Drill,BurstDrill}.java`; `entities/effect/SoundEffect.java`; `logic/LExecutor.java`; `editor/data/MapAudioView.java`; `ui/dialogs/SettingsMenuDialog.java`; `ClientLauncher.java`; `annotations/.../impl/AssetsProcess.java`; `tests/src/test/java/**` (inventory: no audio tests).
 - Arc oracle sources (fetched from `https://github.com/Anuken/Arc` `master`, not present on disk): `arc-core/src/arc/audio/{Sound,Music,Audio,AudioSource,AudioBus,Filters}.java`.
 - Godot 4.7 docs: `AudioStreamPlayer`, `AudioStreamPlayer2D`, `AudioEffectLowPassFilter`/`AudioEffectFilter`, `AudioServer`, `AudioListener2D`, `AudioStreamOggVorbis`/`AudioStreamMP3`.
-- Skills: `C:\Users\Clinton\g\.opencode\skills\playtest\SKILL.md`, `C:\Users\Clinton\g\.opencode\skills\godot-compositor-testing\SKILL.md`.
+- Skills: `../../.opencode/skills/playtest/SKILL.md`, `../../.opencode/skills/godot-compositor-testing/SKILL.md`.
 
 ## Changelog
 

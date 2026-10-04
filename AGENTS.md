@@ -64,8 +64,10 @@ the addon itself.
 
 ## Build, run, verify
 
-Run from the repo root on WSL2 Ubuntu. From a Windows terminal, prefix with
-`wsl -d Ubuntu -e bash -lc '<command>'`; the `.ps1` twins are Windows entrypoints.
+Run from the repo root. The `.sh` scripts are canonical on the WSL2 Ubuntu dev host and the
+`.ps1` twins are the Windows entrypoints; either host can run the relative `cargo` commands
+below. From a Windows terminal, a `.sh` can also be invoked with
+`wsl -d Ubuntu -e bash -lc '<command>'`.
 
 ```bash
 # Rust checks (mind-core must stay Godot-free / tokio-free)
@@ -107,13 +109,19 @@ tools/mcp-smoke.sh             # in-engine MCP smoke; needs a live editor, not r
   (`client/rust/mind-stdb/src/module_bindings/`), packed assets under `assets/`, the
   `client/scenarios/` mirror and generated manifests are produced by tooling and overwritten.
   Regenerate with the owning script (`server/build.sh`, `tools/pack.sh`, `tools/sync_scenarios.sh`).
+- **Keep paths relative and host-neutral.** Scripts, docs and commands reference files
+  relative to the repo root or to the file that owns them — never a `C:\…`, `/home/…`,
+  `/mnt/c/…` or `~/.local/…` location. The WSL2 Ubuntu host and native Windows both run the
+  toolchain, so absolute machine paths break as soon as you switch. Host installs are resolved
+  through environment overrides (`GODOT_BIN`, `MINDY_SRC`, `OPEN_GODOT_MCP_BIN`, …), and
+  sibling checkouts (upstream `Mindustry`, `Arc`, `main`) sit alongside the repo and are
+  referenced relatively (`../Mindustry`, `../Arc`, `../../main`).
 - **Keep parity pinned.** Content IDs, `ContentType` ordinals, entity field order, bundle keys
   and sprite region names are append-only ABI. A change touching a `parity/checksum_registry.json`
   contributor bumps `CHECKSUM_VERSION` and re-records every golden in the same change.
 - **Verify before finishing.** Run the applicable checks above; use `tools/ci.sh` for a
   full gate. New files are UTF-8, LF line endings, no BOM, GPL-3.0-only, and cite the ported
   Mindustry source in the header when they mirror upstream.
-
 - Godot-first and editor-navigable. Prefer **nodes and scenes declared in `.tscn` files** over trees
   built in code; a human should be able to open the project in the Godot editor and navigate/inspect
   the game. Static UI, world scaffolding, autoloads and debug views belong in scenes. When code must

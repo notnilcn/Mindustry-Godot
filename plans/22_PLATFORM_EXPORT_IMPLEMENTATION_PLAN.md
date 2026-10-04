@@ -662,7 +662,7 @@ Repo-local: `mindustry-godot/HIGH_LEVEL_PLAN.md` (§0 D1–D9, §2.1/§2.2/§2.4
 
 Mindustry: `AGENTS.md`; `core/AGENTS.md`; `core/src/mindustry/AGENTS.md`; `core/src/mindustry/core/AGENTS.md`; `desktop/AGENTS.md` + `desktop/src/mindustry/desktop/DesktopLauncher.java` + `desktop/src/mindustry/desktop/steam/*` (paths only); `server/AGENTS.md` + `server/src/mindustry/server/{ServerLauncher,ServerControl}.java`; `android/AGENTS.md` + `android/src/mindustry/android/{AndroidLauncher,AndroidRhinoContext}.java`; `ios/AGENTS.md` + `ios/src/mindustry/ios/IOSLauncher.java`; `core/src/mindustry/core/{Platform,Version}.java`; `core/src/mindustry/net/{CrashHandler,BeControl,Administration}.java`; `core/src/mindustry/Vars.java`; `core/src/mindustry/ClientLauncher.java`; `core/src/mindustry/ui/FileChooser.java`; `core/src/mindustry/ui/Menus.java`; `tests/AGENTS.md`; `tests/src/test/java/**` (inventory); `fastlane/` (metadata only); `LICENSE` (GPL-3.0).
 
-Tooling/reference: `/mnt/c/Users/Clinton/g/.opencode/skills/{godot-compositor-testing,playtest}/SKILL.md`; `godot4`/`godot4-mono` on PATH in WSL Ubuntu (standard `godot4` is the dev host per OD7); Godot 4.7.2 export-template docs; Godot `DisplayServer.file_dialog_show`/`OS.get_cmdline_args` API docs; `open-godot-mcp` `godot_export` tool docs.
+Tooling/reference: `../../.opencode/skills/{godot-compositor-testing,playtest}/SKILL.md`; `godot4`/`godot4-mono` on PATH in WSL Ubuntu (standard `godot4` is the dev host per OD7); Godot 4.7.2 export-template docs; Godot `DisplayServer.file_dialog_show`/`OS.get_cmdline_args` API docs; `open-godot-mcp` `godot_export` tool docs.
 
 ## Changelog
 

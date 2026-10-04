@@ -652,7 +652,7 @@ The exact eval strings are recorded in `assets/parity/mcp_assets_scenario.md` wh
 
 ## 9. References
 
-Read in full for this plan (paths relative to `C:\Users\Clinton\g\code_examples\`):
+Read in full for this plan (paths relative to `../`):
 
 - `mindustry-godot/HIGH_LEVEL_PLAN.md` (§0 locked decisions, §2 architecture, §4 template, §6–§9 conventions)
 - `mindustry-godot/PRELIMINARY_PLAN.md`

@@ -16,7 +16,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MANIFEST="$REPO_ROOT/client/rust/Cargo.toml"
 MANIFEST_JSON="$REPO_ROOT/parity/golden_manifest.json"
-MINDY_SRC="${MINDY_SRC:-/home/c/g/code_examples/Mindustry}"
+MINDY_SRC="${MINDY_SRC:-$REPO_ROOT/../Mindustry}"
 
 run_harness() {
   cargo run -q --manifest-path "$MANIFEST" -p mind-headless -- "$@"

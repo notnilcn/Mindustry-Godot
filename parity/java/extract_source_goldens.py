@@ -11,7 +11,7 @@
 # golden is pinned to the exact upstream commit.
 #
 # Usage: extract_source_goldens.py [mindustry_src] [out_root]
-#   mindustry_src  defaults to /home/c/g/code_examples/Mindustry
+#   mindustry_src  defaults to ../Mindustry
 #   out_root       defaults to the repo's parity/golden directory
 
 import hashlib
@@ -20,7 +20,7 @@ import os
 import re
 import sys
 
-MD = sys.argv[1] if len(sys.argv) > 1 else "/home/c/g/code_examples/Mindustry"
+MD = sys.argv[1] if len(sys.argv) > 1 else "../Mindustry"
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 OUT = sys.argv[2] if len(sys.argv) > 2 else os.path.join(REPO, "parity", "golden")
 LOCK = os.path.join(REPO, "parity", "upstream.lock")

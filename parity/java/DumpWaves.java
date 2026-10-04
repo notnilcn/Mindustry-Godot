@@ -4,7 +4,7 @@
 // dumps the generated groups so the Rust port can be byte-compared.
 //
 // Build:
-//   javac -d /tmp/mgwaves DumpWaves.java /home/c/g/code_examples/Arc/arc-core/src/arc/math/Rand.java
+//   javac -d /tmp/mgwaves parity/java/DumpWaves.java ../Arc/arc-core/src/arc/math/Rand.java
 // Run:
 //   java -cp /tmp/mgwaves DumpWaves > parity/java/jvm_wave_generate.json
 

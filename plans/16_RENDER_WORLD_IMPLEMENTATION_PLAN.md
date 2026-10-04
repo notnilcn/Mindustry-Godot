@@ -574,7 +574,7 @@ New command `mind-headless render-list <scenario> [--out <path>] [--no-sort] [--
 
 ### 7.3 MCP playtest scenarios (concrete, pid-stamped)
 
-Preconditions follow plan 00 §7c / the repo playtest skill: `godot_health check`; if `BRIDGE_NOT_CONNECTED`, launch the editor (`nohup godot4 --editor --path /home/c/g/code_examples/mindustry-godot/client >/tmp/mind-editor.log 2>&1 &`), wait ~20 s, `godot_instance list`. Every eval returns `{"pid": OS.get_process_id(), …}` and is compared with `godot_game instances`.
+Preconditions follow plan 00 §7c / the repo playtest skill: `godot_health check`; if `BRIDGE_NOT_CONNECTED`, launch the editor (`nohup godot4 --editor --path ./client >/tmp/mind-editor.log 2>&1 &`), wait ~20 s, `godot_instance list`. Every eval returns `{"pid": OS.get_process_id(), …}` and is compared with `godot_game instances`.
 
 **7c-1 — Fixed-pose layer screenshot sweep (per-layer oracle).**
 1. `godot_editor_edit open_scene res://scenes/spine.tscn`; `godot_game play` with the scene passed explicitly.
@@ -655,7 +655,7 @@ Repo-local: `mindustry-godot/HIGH_LEVEL_PLAN.md` (§0 D1–D9, §2.1–2.4 crate
 
 Mindustry sources read in full or key parts: `core/src/mindustry/core/Renderer.java`; `graphics/AGENTS.md`; `core/src/mindustry/core/AGENTS.md`; `world/AGENTS.md`; `core/assets/AGENTS.md`; `ui/AGENTS.md`; `graphics/Layer.java`, `CacheLayer.java`, `BuildingCacheLayer.java`, `FloorRenderer.java`, `BlockRenderer.java`, `OverlayRenderer.java`, `LightRenderer.java`, `FogRenderer.java`, `MinimapRenderer.java`, `Pixelator.java`, `Shaders.java`, `Pal.java`, `Trail.java`, `EnvRenderers.java`, `Lod.java`, `MenuRenderer.java`, `LoadRenderer.java` (structure), `MultiPacker.java` (signatures), `DebugCollisionRenderer.java`, `Drawf.java` (signatures), `InverseKinematics.java`, `Voronoi.java`, `CubemapMesh.java`; `graphics/g3d/PlanetRenderer.java`, `PlanetMesh.java`, `PlanetGrid.java`, `PlanetParams.java`, `MeshBuilder.java`, `HexMesh.java`, `NoiseMesh.java`, `HexSkyMesh.java`, `SunMesh.java`, `MatMesh.java`, `MultiMesh.java`, `HexMesher.java`, `GenericMesh.java`, `ShaderSphereMesh.java`; `world/draw/DrawBlock.java`, `DrawBlockParts.java`, `DrawMulti.java`; `world/blocks/environment/Floor.java` (draw fields via AGENTS); `core/assets/shaders/*` (names via `Shaders.java`).
 
-Tooling: `/mnt/c/Users/Clinton/g/.opencode/skills/godot-compositor-testing/SKILL.md` (headless import/parse checks, windowed `--capture`, RenderingDevice gotchas); `/mnt/c/Users/Clinton/g/.opencode/skills/playtest/SKILL.md` (pid-stamped recipes, screenshot attribution); open-godot-mcp tool docs (`godot_health`, `godot_game`, `godot_exec`, `godot_input`, `godot_screenshot`, `godot_profiler`, `godot_runtime_state`, `godot_log`); Godot 4.7 docs (`SubViewport`/`ViewportTexture`, `CanvasItem.z_index`, `CanvasItemMaterial`, `WorldEnvironment`/glow, `use_hdr_2d`, `RenderingServer.canvas_item_*`, `ArrayMesh`/`ImmediateMesh`, `Cubemap`).
+Tooling: `../../.opencode/skills/godot-compositor-testing/SKILL.md` (headless import/parse checks, windowed `--capture`, RenderingDevice gotchas); `../../.opencode/skills/playtest/SKILL.md` (pid-stamped recipes, screenshot attribution); open-godot-mcp tool docs (`godot_health`, `godot_game`, `godot_exec`, `godot_input`, `godot_screenshot`, `godot_profiler`, `godot_runtime_state`, `godot_log`); Godot 4.7 docs (`SubViewport`/`ViewportTexture`, `CanvasItem.z_index`, `CanvasItemMaterial`, `WorldEnvironment`/glow, `use_hdr_2d`, `RenderingServer.canvas_item_*`, `ArrayMesh`/`ImmediateMesh`, `Cubemap`).
 
 ## Changelog
 

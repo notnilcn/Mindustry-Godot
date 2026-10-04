@@ -11,8 +11,8 @@
 
 - `cargo run -q --release -p mind-tools -- pack --root .` has produced
   `assets/sprites/sprites.atlas.json` + pages (fallback optional).
-- The editor is running the project at `client/` (repo path
-  `/home/c/g/code_examples/mg-lanes/03-assets`); the `MindAssets` autoload
+- The editor is running the project at `client/` (a lane worktree such as
+  `../mg-lanes/03-assets` works too); the `MindAssets` autoload
   resolves `<project>/../assets`. Override with the project setting
   `mindustry/assets_dir` if the tree is elsewhere.
 - `godot_health check` → `ok: true`; open + play `res://scenes/game.tscn`.

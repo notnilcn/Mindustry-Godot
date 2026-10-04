@@ -415,7 +415,7 @@ Exact ordered steps:
 
 - `tools/ci.sh`/`.ps1`, `tools/mcp-smoke.sh`, `.github/workflows/ci.yml`; `client/AGENTS.md` and `server/AGENTS.md` stubs pointing at the conventions.
 - Create the repo skill `mindustry-godot/.opencode/skills/playtest/SKILL.md`, mirroring the existing skill’s structure (frontmatter `name`/`description`/`whenToUse`; “which tool for what”; Part 1 Godot MCP recipes; Part 2 `spacetime` CLI), with these mindustry-godot specifics:
-  - launch (when `godot_health check` reports BRIDGE_NOT_CONNECTED): from WSL, `nohup godot4 --editor --path /home/c/g/code_examples/mindustry-godot/client >/tmp/mind-editor.log 2>&1 &`; wait ~20 s; `godot_instance list`; bridge port 6970. WSLg hosts the window; if driving from a Windows terminal, prefix `wsl -d Ubuntu -e bash -lc '...'`.
+  - launch (when `godot_health check` reports BRIDGE_NOT_CONNECTED): from WSL, `nohup godot4 --editor --path ./client >/tmp/mind-editor.log 2>&1 &`; wait ~20 s; `godot_instance list`; bridge port 6970. WSLg hosts the window; if driving from a Windows terminal, prefix `wsl -d Ubuntu -e bash -lc '...'`.
   - preflight identity: the bridge is 127.0.0.1:6970 — close any other editor holding that port (the sibling `main/` project is Windows-side), then verify `godot_exec eval {"code":"return ProjectSettings.globalize_path(\"res://\")"}` contains `mindustry-godot` before any `godot_game` call.
   - always run `res://scenes/spine.tscn`; node map: `/root/Spine/SimHost`, `/root/Spine/World/TileGrid`, `/root/Spine/World/Camera2D`, `/root/Spine/Ui/StateInspector/Label`.
   - pid-stamp rule: every eval returns `"pid": OS.get_process_id()`, compared against `godot_game instances`; re-establish assumed state if the pid changes.
@@ -550,7 +550,7 @@ Ad-hoc runs: `mind-headless sim 600 --seed 1 --dump out.json` (schema smoke) and
 
 ### 7c. MCP playtest scenario (concrete)
 
-Preconditions: build via `tools/build.sh`; `godot_health check`; if BRIDGE_NOT_CONNECTED, launch the editor per the repo skill (background: `nohup godot4 --editor --path /home/c/g/code_examples/mindustry-godot/client >/tmp/mind-editor.log 2>&1 &`), wait ~20 s, `godot_instance list`. The bridge binds **127.0.0.1:6970**: if another Godot editor (e.g. the sibling `main/` project, Windows-side) already holds 6970, the MCP server will keep talking to *that* editor. Close the other editor before launching, then verify identity in step 0 — `godot_exec eval {"code":"return ProjectSettings.globalize_path(\"res://\")"}` must contain `mindustry-godot` — before any `godot_game` call.
+Preconditions: build via `tools/build.sh`; `godot_health check`; if BRIDGE_NOT_CONNECTED, launch the editor per the repo skill (background: `nohup godot4 --editor --path ./client >/tmp/mind-editor.log 2>&1 &`), wait ~20 s, `godot_instance list`. The bridge binds **127.0.0.1:6970**: if another Godot editor (e.g. the sibling `main/` project, Windows-side) already holds 6970, the MCP server will keep talking to *that* editor. Close the other editor before launching, then verify identity in step 0 — `godot_exec eval {"code":"return ProjectSettings.globalize_path(\"res://\")"}` must contain `mindustry-godot` — before any `godot_game` call.
 
 1. `godot_editor_edit open_scene res://scenes/spine.tscn`; `godot_game play` with `scene: "res://scenes/spine.tscn"` passed explicitly.
 2. Pid-stamp + liveness: `godot_exec eval {"code": "return {\"pid\": OS.get_process_id(), \"tick\": get_node(\"/root/Spine/SimHost\").get_tick(), \"checksum\": str(get_node(\"/root/Spine/SimHost\").get_checksum())}"}` — record pid; compare with `godot_game instances`.
@@ -623,7 +623,7 @@ Repo-local: `mindustry-godot/HIGH_LEVEL_PLAN.md` (§0 D1–D9, §1 port table, �
 
 Mindustry: `AGENTS.md`; `core/AGENTS.md`; `core/src/mindustry/AGENTS.md`; `core/src/mindustry/core/AGENTS.md`; `desktop/AGENTS.md`; `tests/AGENTS.md`; `tests/src/test/java/**`; `core/src/mindustry/Vars.java`; `core/src/mindustry/ClientLauncher.java`; `core/src/mindustry/core/Logic.java`; `core/src/mindustry/core/GameState.java`; `core/src/mindustry/core/World.java`; `core/src/mindustry/wiki`-adjacent paths cited in §4 (via the AGENTS indexes); `LICENSE`.
 
-Tooling/reference projects: `/mnt/c/Users/Clinton/g/main/AGENTS.md`; `main/server/AGENTS.md`; `main/server/build.sh`; `main/server/spacetime.json`; `main/server/spacetimedb/Cargo.toml`; `/mnt/c/Users/Clinton/g/.opencode/skills/godot-compositor-testing/SKILL.md`; `/mnt/c/Users/Clinton/g/.opencode/skills/playtest/SKILL.md`; `godot4`/`godot4-mono` on PATH in WSL Ubuntu; `/mnt/c/Users/Clinton/g/code_examples/spacetimedb/licenses/` (license inventory); godot-rust releases (`godot 0.5.5`, `api-4-7`); crates.io pins (`bevy_ecs 0.19.1`, `spacetimedb 2.10.1`, `spacetimedb-sdk 2.10.1`).
+Tooling/reference projects: `../../main/AGENTS.md`; `main/server/AGENTS.md`; `main/server/build.sh`; `main/server/spacetime.json`; `main/server/spacetimedb/Cargo.toml`; `../../.opencode/skills/godot-compositor-testing/SKILL.md`; `../../.opencode/skills/playtest/SKILL.md`; `godot4`/`godot4-mono` on PATH in WSL Ubuntu; `../spacetimedb/licenses/` (license inventory); godot-rust releases (`godot 0.5.5`, `api-4-7`); crates.io pins (`bevy_ecs 0.19.1`, `spacetimedb 2.10.1`, `spacetimedb-sdk 2.10.1`).
 
 ## Changelog
 

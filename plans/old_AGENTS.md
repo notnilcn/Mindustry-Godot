@@ -45,7 +45,7 @@ tools/                   # build/godot/ci/sync_scenarios + mcp-smoke (sh + ps1 t
 
 ## Build & run (WSL2 Ubuntu-first)
 
-All commands run in **WSL2 Ubuntu** (login shell — `godot4`, `cargo`, `spacetime` on PATH). From a Windows terminal, prefix `wsl -d Ubuntu -e bash -lc '<cmd>'`. Repo path in WSL: `/home/c/g/code_examples/mindustry-godot` (Windows UNC `\\wsl.localhost\Ubuntu\home\c\g\code_examples\mindustry-godot`; the old `/mnt/c/...` tree is a frozen duplicate — do not edit it).
+All commands run in **WSL2 Ubuntu** (login shell — `godot4`, `cargo`, `spacetime` on PATH). From a Windows terminal, prefix `wsl -d Ubuntu -e bash -lc '<cmd>'`. Repo path in WSL: `.` (Windows UNC `\\wsl.localhost\Ubuntu\home\c\g\code_examples\mindustry-godot`; the old `/mnt/c/...` tree is a frozen duplicate — do not edit it).
 
 - Rust checks: `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test -p mind-core` (all with `--manifest-path client/rust/Cargo.toml`).
 - Headless oracle: `cargo run -p mind-headless -- run <scenario> --json` / `sim` / `replay` / `dump` / `bench` (goldens: `spine_place_break` → `a1a7b96167c9718d`; canonical FNV-1a `Checksum` per plan 05 M8 / HLP §12 C2).

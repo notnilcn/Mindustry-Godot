@@ -609,7 +609,7 @@ These are Godot-free (the plans' `mind-core::ui` module), so they run in CI with
 
 ### 7c. MCP playtest scenario — `ui_sweep` (concrete)
 
-Preconditions: `tools/build.sh`; `godot_health check`; if `BRIDGE_NOT_CONNECTED`, launch the editor per the repo skill (`nohup godot4 --editor --path /home/c/g/code_examples/mindustry-godot/client >/tmp/mind-editor.log 2>&1 &`), wait ~20 s, `godot_instance list`.
+Preconditions: `tools/build.sh`; `godot_health check`; if `BRIDGE_NOT_CONNECTED`, launch the editor per the repo skill (`nohup godot4 --editor --path ./client >/tmp/mind-editor.log 2>&1 &`), wait ~20 s, `godot_instance list`.
 
 1. `godot_editor_edit open_scene res://scenes/spine.tscn`; `godot_game play` with `scene: "res://scenes/spine.tscn"`.
 2. Pid-stamp: `godot_exec eval {"code": "return {\"pid\": OS.get_process_id(), \"dialog\": str(MindUi.dialog_stack())}"}` — record pid; compare with `godot_game instances`.

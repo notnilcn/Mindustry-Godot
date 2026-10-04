@@ -6,8 +6,8 @@
 # repos; the classpath is read from build outputs and the Gradle cache.
 #
 # Usage: run.sh [mindustry_src] [arc_src] [out_json]
-#   mindustry_src      defaults to /home/c/g/code_examples/Mindustry
-#   arc_src            defaults to /home/c/g/code_examples/Arc
+#   mindustry_src      defaults to the sibling checkout ../Mindustry
+#   arc_src            defaults to the sibling checkout ../Arc
 #   out_json           defaults to parity/java/jvm_golden_content.json
 #   MINDY_JVM_CP       overrides the discovered classpath
 #   MINDY_VERSION      label emitted in the golden (default v146)
@@ -22,9 +22,10 @@
 #   cd Mindustry/core/assets && bash <this script> <Mindustry> <Arc> <out>
 set -euo pipefail
 
-MINDY_SRC=${1:-/home/c/g/code_examples/Mindustry}
-ARC_SRC=${2:-/home/c/g/code_examples/Arc}
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
+MINDY_SRC=${1:-"$REPO_ROOT/../Mindustry"}
+ARC_SRC=${2:-"$REPO_ROOT/../Arc"}
 OUT=${3:-"$SCRIPT_DIR/jvm_golden_content.json"}
 
 if [[ -n "${MINDY_JVM_CP:-}" ]]; then

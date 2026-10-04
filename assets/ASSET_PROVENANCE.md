@@ -5,7 +5,7 @@ This tree is vendored from the upstream Mindustry checkout by
 Mindustry is GPL-3.0 (<https://github.com/Anuken/Mindustry>); the port
 keeps region names, bundle keys and file paths byte-identical.
 
-- Source: `/home/c/g/code_examples/Mindustry` (`core/assets` -> `assets/`, `core/assets-raw` -> `assets-raw/`)
+- Source: `../Mindustry` (`core/assets` -> `assets/`, `core/assets-raw` -> `assets-raw/`)
 - Upstream commit: `2cd7aeecf1378b3db456be9bfde8691b3cdc1bcc` (2026-10-01)
 - Migrated file count: 2977
 - Input tree sha256: `cc949a8cae58eac80aa2f9b611c00cbb0fd825f329fd21a403c6154d9648c265`

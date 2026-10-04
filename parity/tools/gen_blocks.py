@@ -5,7 +5,7 @@ One-off conversion used for plan 02 M3/M4; the data is committed and this
 script is re-run only when upstream content changes.
 
 Usage: gen_blocks.py [upstream_mindustry_src] [--out-dir DIR] [--ledger PATH]
-  upstream_mindustry_src defaults to /home/c/g/code_examples/Mindustry/core/src/mindustry
+  upstream_mindustry_src defaults to ../Mindustry/core/src/mindustry
   --out-dir defaults to client/rust/mind-core/src/content/registries/blocks
   --ledger defaults to parity/ledgers/blocks.md
 """
@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("--")
-            else "/home/c/g/code_examples/Mindustry/core/src/mindustry")
+            else "../Mindustry/core/src/mindustry")
 OUT = Path("client/rust/mind-core/src/content/registries/blocks")
 LEDGER = Path("parity/ledgers/blocks.md")
 args = sys.argv[2:] if len(sys.argv) > 1 and not sys.argv[1].startswith("--") else sys.argv[1:]

@@ -7,7 +7,7 @@
 #
 # Requirements:
 #   * WSL2 Ubuntu dev host, editor already running per the repo playtest skill:
-#       nohup godot4 --editor --path /home/c/.../mindustry-godot/client \
+#       nohup godot4 --editor --path client \
 #         >/tmp/mind-editor.log 2>&1 &
 #   * `python3` on PATH (stdlib only).
 #   * The MCP bridge (ws://127.0.0.1:6970) accepts multiple clients, so this can

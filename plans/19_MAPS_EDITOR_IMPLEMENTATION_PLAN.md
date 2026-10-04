@@ -848,7 +848,7 @@ Repo-local: `mindustry-godot/HIGH_LEVEL_PLAN.md` (§0 D1–D9, §2 architecture,
 
 Mindustry sources read: all files in the §1 Sources row (editor package in full, `MapIO.java`, `Maps.java`, `Map.java`, `MapException.java`, `MapPreviewLoader.java`, `tools/MapFixer.java`, `ui/dialogs/{MapListDialog,EditorMapsDialog,MapPlayDialog}.java`, `game/MapObjectives.java` data half, `mod/data/DataAssetType.java`, `tests/src/test/java/{ApplicationTests,DataAssetTests}.java`).
 
-Tooling: `/mnt/c/Users/Clinton/g/.opencode/skills/godot-compositor-testing/SKILL.md` (headless import/parse checks, windowed capture, process hygiene); `/mnt/c/Users/Clinton/g/.opencode/skills/playtest/SKILL.md` (pid-stamped recipes, screenshot attribution); open-godot-mcp tool docs (`godot_health`, `godot_game`, `godot_exec`, `godot_input`, `godot_screenshot`, `godot_runtime_state`, `godot_log`, `godot_editor_*`); Godot 4.7 docs (`SubViewportContainer`/`SubViewport`, `Control._gui_input`/`_draw`, `Image.load_png_from_buffer`/`save_png`, `FileAccess`/`DirAccess`, `RenderingServer.canvas_item_*`).
+Tooling: `../../.opencode/skills/godot-compositor-testing/SKILL.md` (headless import/parse checks, windowed capture, process hygiene); `../../.opencode/skills/playtest/SKILL.md` (pid-stamped recipes, screenshot attribution); open-godot-mcp tool docs (`godot_health`, `godot_game`, `godot_exec`, `godot_input`, `godot_screenshot`, `godot_runtime_state`, `godot_log`, `godot_editor_*`); Godot 4.7 docs (`SubViewportContainer`/`SubViewport`, `Control._gui_input`/`_draw`, `Image.load_png_from_buffer`/`save_png`, `FileAccess`/`DirAccess`, `RenderingServer.canvas_item_*`).
 
 ## Changelog
 
