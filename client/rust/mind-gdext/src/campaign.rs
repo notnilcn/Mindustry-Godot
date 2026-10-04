@@ -12,6 +12,7 @@
 //! In-engine MCP verification (plan 12 §7c) is deferred to the orchestrator's
 //! single-editor mutex; this class compiles and exposes the API surface today.
 
+use godot::classes::notify::NodeNotification;
 use godot::classes::{INode, Node};
 use godot::obj::Base;
 use godot::prelude::*;
@@ -80,6 +81,23 @@ impl INode for MindCampaign {
     }
 
     fn ready(&mut self) {
+        self.bootstrap();
+    }
+
+    fn on_notification(&mut self, what: NodeNotification) {
+        // `ready()` is not re-run on hot reload; rebuild Godot-derived state.
+        if what == NodeNotification::EXTENSION_RELOADED {
+            self.bootstrap();
+        }
+    }
+}
+
+#[godot_api]
+impl MindCampaign {
+    /// Rebuilds the campaign content (runs from `ready()` and on
+    /// `EXTENSION_RELOADED`, which does not re-run `ready()`). The registry and
+    /// campaign are overwritten, so a re-run never duplicates them.
+    fn bootstrap(&mut self) {
         let bundle = MemoryBundle::new();
         match create_base_content(&bundle, &self.store, true) {
             Ok(registry) => {
@@ -94,10 +112,7 @@ impl INode for MindCampaign {
             }
         }
     }
-}
 
-#[godot_api]
-impl MindCampaign {
     /// Starts a campaign sector (host-side launch), returning success.
     #[func]
     pub fn start_sector(&mut self, planet: GString, sector: i32) -> bool {

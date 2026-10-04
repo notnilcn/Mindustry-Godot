@@ -13,6 +13,7 @@ pub mod buses;
 pub mod streams;
 pub mod voices;
 
+use godot::classes::notify::NodeNotification;
 use godot::classes::{
     AudioListener2D, AudioServer, AudioStreamPlayer, Camera2D, INode, Node as GdNode,
 };
@@ -106,46 +107,14 @@ impl INode for MindAudio {
     }
 
     fn ready(&mut self) {
-        let seed = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_nanos() as u64)
-            .unwrap_or(1);
-        self.rng = SeededAudioRng::new(seed);
+        self.bootstrap();
+    }
 
-        self.bus = buses::ensure_buses();
-
-        let assets_dir = resolve_assets_dir();
-        self.streams = StreamCache::load(&assets_dir);
-
-        // code-instantiated: the pool is a fixed, preallocated set of pooled
-        // high-churn players (plan 18 §3.6); not expressible as static nodes.
-        let mut self_node: Gd<GdNode> = self.base_mut().clone().upcast::<GdNode>();
-        let pool = VoicePool::new(&mut self_node, "Sound", "UI");
-        if !self.bus.is_ready() {
-            log::warn!("[audio] bus layout incomplete: {:?}", self.bus);
+    fn on_notification(&mut self, what: NodeNotification) {
+        // `ready()` is not re-run on hot reload; rebuild Godot-derived state.
+        if what == NodeNotification::EXTENSION_RELOADED {
+            self.bootstrap();
         }
-        // The music player is a single pooled voice on the Music bus.
-        let mut music_player = AudioStreamPlayer::new_alloc();
-        music_player.set_bus(&StringName::from("Music"));
-        self.base_mut().add_child(&music_player);
-        pool.stop_all();
-        self.pool = Some(pool);
-        self.music_player = Some(music_player);
-
-        // Audio listener on the spine camera (plan 18 §3.10).
-        if let Some(camera) = self.find_camera() {
-            let mut listener = AudioListener2D::new_alloc();
-            listener.make_current();
-            let mut camera = camera;
-            camera.add_child(&listener);
-        }
-
-        self.ready = true;
-        log::info!(
-            "[audio] ready (buses {:?}, {} sounds)",
-            self.bus,
-            self.streams.sound_count()
-        );
     }
 
     fn process(&mut self, delta: f64) {
@@ -206,6 +175,85 @@ impl INode for MindAudio {
 }
 
 impl MindAudio {
+    /// Rebuilds the audio driver (runs from `ready()` and on
+    /// `EXTENSION_RELOADED`, which does not re-run `ready()`).
+    ///
+    /// Hot reload persists the pool/music/listener nodes a previous instance
+    /// added, so those generated children are cleared first; the buses, stream
+    /// cache and pool are then rebuilt in place.
+    fn bootstrap(&mut self) {
+        self.clear_generated_children();
+
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos() as u64)
+            .unwrap_or(1);
+        self.rng = SeededAudioRng::new(seed);
+
+        self.bus = buses::ensure_buses();
+
+        let assets_dir = resolve_assets_dir();
+        self.streams = StreamCache::load(&assets_dir);
+
+        // code-instantiated: the pool is a fixed, preallocated set of pooled
+        // high-churn players (plan 18 §3.6); not expressible as static nodes.
+        let mut self_node: Gd<GdNode> = self.base_mut().clone().upcast::<GdNode>();
+        let pool = VoicePool::new(&mut self_node, "Sound", "UI");
+        if !self.bus.is_ready() {
+            log::warn!("[audio] bus layout incomplete: {:?}", self.bus);
+        }
+        // The music player is a single pooled voice on the Music bus.
+        let mut music_player = AudioStreamPlayer::new_alloc();
+        music_player.set_bus(&StringName::from("Music"));
+        self.base_mut().add_child(&music_player);
+        pool.stop_all();
+        self.pool = Some(pool);
+        self.music_player = Some(music_player);
+
+        // Audio listener on the spine camera (plan 18 §3.10). Adopt the listener
+        // a previous instance left on the camera instead of stacking a second.
+        if let Some(camera) = self.find_camera() {
+            let mut camera = camera;
+            let existing = camera
+                .get_children()
+                .iter_shared()
+                .find_map(|child| child.try_cast::<AudioListener2D>().ok());
+            let mut listener = match existing {
+                Some(listener) => listener,
+                None => {
+                    let created = AudioListener2D::new_alloc();
+                    camera.add_child(&created);
+                    created
+                }
+            };
+            listener.make_current();
+        }
+
+        self.ready = true;
+        log::info!(
+            "[audio] ready (buses {:?}, {} sounds)",
+            self.bus,
+            self.streams.sound_count()
+        );
+    }
+
+    /// Frees the `WorldVoices` container and direct `AudioStreamPlayer`
+    /// children a previous instance added, so a reload does not duplicate the
+    /// voice pool or the music player.
+    fn clear_generated_children(&mut self) {
+        let mut base: Gd<GdNode> = self.base_mut().clone().upcast::<GdNode>();
+        if let Some(mut container) = base.get_node_or_null("WorldVoices") {
+            base.remove_child(&container);
+            container.queue_free();
+        }
+        for mut child in base.get_children().iter_shared() {
+            if child.clone().try_cast::<AudioStreamPlayer>().is_ok() {
+                base.remove_child(&child);
+                child.queue_free();
+            }
+        }
+    }
+
     fn sim_host(&self) -> Option<Gd<crate::sim_host::MindSimHost>> {
         let base = self.base();
         let node = base.get_node_or_null("../SimHost")?;

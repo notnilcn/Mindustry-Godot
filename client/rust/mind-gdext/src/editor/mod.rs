@@ -24,6 +24,7 @@ use std::path::PathBuf;
 use godot::builtin::{
     Array, GString, PackedInt64Array, PackedVector2Array, VarDictionary, Variant, Vector2,
 };
+use godot::classes::notify::NodeNotification;
 use godot::classes::{INode, Node, ProjectSettings};
 use godot::obj::{Base, Singleton};
 use godot::prelude::*;
@@ -147,12 +148,25 @@ impl INode for MindEditor {
     }
 
     fn ready(&mut self) {
-        let blocks = self.palette_blocks(GString::new()).len();
-        log::info!("MindEditor ready ({blocks} editor blocks)");
+        self.bootstrap();
+    }
+
+    fn on_notification(&mut self, what: NodeNotification) {
+        // `ready()` is not re-run on hot reload; rebuild Godot-derived state.
+        if what == NodeNotification::EXTENSION_RELOADED {
+            self.bootstrap();
+        }
     }
 }
 
 impl MindEditor {
+    /// Rebuilds the node's Godot-derived state (runs from `ready()` and on
+    /// `EXTENSION_RELOADED`, which does not re-run `ready()`).
+    fn bootstrap(&mut self) {
+        let blocks = self.palette_blocks(GString::new()).len();
+        log::info!("MindEditor ready ({blocks} editor blocks)");
+    }
+
     /// Resolves a Godot `res://`/`user://` path to a native path.
     fn native_path(raw: &str) -> PathBuf {
         if raw.starts_with("res://") || raw.starts_with("user://") {

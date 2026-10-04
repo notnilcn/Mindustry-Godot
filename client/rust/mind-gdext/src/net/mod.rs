@@ -15,6 +15,7 @@
 
 pub mod relay;
 
+use godot::classes::notify::NodeNotification;
 use godot::classes::{INode, Node, Os, ProjectSettings};
 use godot::obj::{Base, Singleton};
 use godot::prelude::*;
@@ -109,6 +110,63 @@ impl INode for MindNet {
     }
 
     fn ready(&mut self) {
+        self.bootstrap();
+    }
+
+    fn on_notification(&mut self, what: NodeNotification) {
+        // `ready()` is not re-run on hot reload; rebuild Godot-derived state.
+        if what == NodeNotification::EXTENSION_RELOADED {
+            self.bootstrap();
+        }
+    }
+
+    fn process(&mut self, _delta: f64) {
+        let Some(connector) = self.connector.as_mut() else {
+            return;
+        };
+        connector.pump();
+        for event in connector.drain_events() {
+            match event {
+                ConnectorEvent::Connected { identity } => {
+                    self.session.set_local_identity(identity.identity);
+                    self.checksum_monitor.set_local(identity.identity);
+                    if let Some(runtime) = self.runtime.as_mut() {
+                        runtime.set_local_identity(identity.identity);
+                    }
+                }
+                ConnectorEvent::Disconnected { .. } => self.session.on_disconnected(),
+                ConnectorEvent::Resync => self.session.on_resync(),
+                _ => {}
+            }
+        }
+        self.drain_match_rows();
+        self.drain_members_rows();
+        self.drain_state_rows();
+        self.drain_player_states();
+        self.drain_checksums();
+        self.drain_snapshots();
+        self.drain_relay();
+        self.maybe_publish_checksum();
+    }
+
+    fn exit_tree(&mut self) {
+        if let Some(connector) = self.connector.as_mut() {
+            connector.disconnect();
+        }
+    }
+}
+
+#[godot_api]
+impl MindNet {
+    /// Rebuilds the session/connector (runs from `ready()` and on
+    /// `EXTENSION_RELOADED`, which does not re-run `ready()`). Any previous
+    /// connector is dropped and the binder handles are overwritten, so a re-run
+    /// never leaks a link.
+    fn bootstrap(&mut self) {
+        if let Some(connector) = self.connector.as_mut() {
+            connector.disconnect();
+        }
+
         let engine = collect_args(Os::singleton().get_cmdline_args().as_slice());
         let user = collect_args(Os::singleton().get_cmdline_user_args().as_slice());
         let suffix = parse_player_suffix_from(&engine, &user);
@@ -156,44 +214,6 @@ impl INode for MindNet {
             });
     }
 
-    fn process(&mut self, _delta: f64) {
-        let Some(connector) = self.connector.as_mut() else {
-            return;
-        };
-        connector.pump();
-        for event in connector.drain_events() {
-            match event {
-                ConnectorEvent::Connected { identity } => {
-                    self.session.set_local_identity(identity.identity);
-                    self.checksum_monitor.set_local(identity.identity);
-                    if let Some(runtime) = self.runtime.as_mut() {
-                        runtime.set_local_identity(identity.identity);
-                    }
-                }
-                ConnectorEvent::Disconnected { .. } => self.session.on_disconnected(),
-                ConnectorEvent::Resync => self.session.on_resync(),
-                _ => {}
-            }
-        }
-        self.drain_match_rows();
-        self.drain_members_rows();
-        self.drain_state_rows();
-        self.drain_player_states();
-        self.drain_checksums();
-        self.drain_snapshots();
-        self.drain_relay();
-        self.maybe_publish_checksum();
-    }
-
-    fn exit_tree(&mut self) {
-        if let Some(connector) = self.connector.as_mut() {
-            connector.disconnect();
-        }
-    }
-}
-
-#[godot_api]
-impl MindNet {
     /// Session state changed (`offline`/`in_lobby`/`in_game`/...).
     #[signal]
     fn session_changed(state: GString);

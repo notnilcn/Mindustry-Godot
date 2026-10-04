@@ -7,6 +7,7 @@
 //! Placeholder for the plan-16 `FloorRenderer`/`BlockRenderer`; at P0 every
 //! block is a flat quad (`Vars.tilesize = 8` from `mind_core::config`).
 
+use godot::classes::notify::CanvasItemNotification;
 use godot::classes::{INode2D, Node2D};
 use godot::obj::Base;
 use godot::prelude::*;
@@ -38,13 +39,14 @@ impl INode2D for MindTileGrid {
     }
 
     fn ready(&mut self) {
-        // Scene-wired host (tscn-first): the spine declares SimHost as a sibling.
-        if let Some(host) = self.base().try_get_node_as::<MindSimHost>("../../SimHost") {
-            self.host = Some(host);
-        } else {
-            log::warn!("MindTileGrid: no MindSimHost at ../../SimHost (call set_host)");
+        self.bootstrap();
+    }
+
+    fn on_notification(&mut self, what: CanvasItemNotification) {
+        // `ready()` is not re-run on hot reload; rebuild Godot-derived state.
+        if what == CanvasItemNotification::EXTENSION_RELOADED {
+            self.bootstrap();
         }
-        self.base_mut().queue_redraw();
     }
 
     fn draw(&mut self) {
@@ -97,6 +99,19 @@ impl INode2D for MindTileGrid {
 
 #[godot_api]
 impl MindTileGrid {
+    /// Rebuilds the node's Godot-derived state (runs from `ready()` and on
+    /// `EXTENSION_RELOADED`, which does not re-run `ready()`). The host lookup
+    /// overwrites, so a re-run never duplicates.
+    fn bootstrap(&mut self) {
+        // Scene-wired host (tscn-first): the spine declares SimHost as a sibling.
+        if let Some(host) = self.base().try_get_node_as::<MindSimHost>("../../SimHost") {
+            self.host = Some(host);
+        } else {
+            log::warn!("MindTileGrid: no MindSimHost at ../../SimHost (call set_host)");
+        }
+        self.base_mut().queue_redraw();
+    }
+
     /// Binds the sim host the grid pulls `tile_blocks()` from.
     #[func]
     pub fn set_host(&mut self, host: Gd<MindSimHost>) {
