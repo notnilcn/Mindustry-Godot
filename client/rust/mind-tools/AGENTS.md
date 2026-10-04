@@ -28,7 +28,7 @@ first; the Cargo-workspace map is `client/rust/AGENTS.md` ([`../AGENTS.md`](../A
 | `assets-raw/` | Vendored source: `sprites/` (authored PNGs + `pack.json`), `fontgen/config.json`, `icons/`. |
 | `assets/` | Vendored runtime assets plus generated outputs (`sprites/`, `icons/`, `shaders/`, `sounds.index.json`, `locales`). |
 | `build/assets/` | Gitignored work/output dir (`staging/`, `last_pack_version`, `region_inventory.json`, timings, manifests). |
-| `tools/pack.sh` / `pack.ps1` | Repo entry point; forwards all arguments to the release `mind-tools` binary. |
+| `tools/pack.sh` | Repo entry point; forwards all arguments to the release `mind-tools` binary. |
 
 ## Generator passes
 
@@ -98,7 +98,7 @@ skips the 2048-capped fallback atlas and `--timings` writes `build/assets/pack_t
 
 ## Verification
 
-Run from the repo root (WSL2 Ubuntu); `tools/pack.sh` is the canonical wrapper.
+Run from the repo root (Linux); `tools/pack.sh` is the canonical wrapper.
 
 ```bash
 # Library/CLI tests

@@ -3,7 +3,7 @@
 
 //! Save/schematic/URI association file generation (plan 22 §6.7, P22-9).
 //!
-//! The game never writes these itself; `tools/associate.sh`/`.ps1` run the
+//! The game never writes these itself; `tools/associate.sh` runs the
 //! opt-in installer. This module owns the exact file bodies (a Linux `.desktop`
 //! with MimeType handlers and a Windows `.reg` script registering `.msav`,
 //! `.msch` and the dual `mindustry://`/`mindustry-godot://` protocol).

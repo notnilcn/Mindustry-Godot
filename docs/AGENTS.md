@@ -23,8 +23,8 @@ platform work, not API docs. Read the root [`AGENTS.md`](../AGENTS.md) first.
   (`client/rust/mind-gdext/src/platform/`), which hosts the `MindPlatform` node and the `args`,
   `crash`, `desktop`, `dialogs`, `discord`, `service`, `update`, `uri` and `workshop` glue;
   `discord.md` and `steam-parity.md` document its Discord and Steam branches.
-- Packaging notes reference the release tooling: `tools/pack.sh` (`tools/pack.ps1`) drives the
-  offline `mind-tools` pipeline, and `tools/version.sh` writes the version metadata the export
+- Packaging notes reference the release tooling: `tools/pack.sh` drives the offline
+  `mind-tools` pipeline, and `tools/version.sh` writes the version metadata the export
   presets consume.
 - Godot-free platform policy lives in `mind_core::platform::caps` and `mind_core::service`; the docs
   describe the contract, the Rust code owns it.

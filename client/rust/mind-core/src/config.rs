@@ -57,7 +57,7 @@ impl MindConfig {
 /// Resolves the default data directory.
 ///
 /// Order: `MINDUSTRY_GODOT_DATA_DIR`, then `$XDG_DATA_HOME/Mindustry-Godot`,
-/// then `$HOME/.local/share/Mindustry-Godot` (Linux/WSL), then the current
+/// then `$HOME/.local/share/Mindustry-Godot` (Linux), then the current
 /// directory as a last resort.
 pub fn default_data_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os(DATA_DIR_ENV) {

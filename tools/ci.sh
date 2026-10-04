@@ -9,9 +9,8 @@
 #   Godot build + headless editor import/parse check
 #   crate boundary greps, mind-stdb check, STDB module typecheck, bindings drift
 #
-# Bash is primary (WSL2 Ubuntu). tools/ci.ps1 is the Windows wrapper and simply
-# executes this file inside WSL. The MCP smoke is intentionally NOT here: it
-# needs the interactive editor and is local-only (`tools/mcp-smoke.sh`).
+# The MCP smoke is intentionally NOT here: it needs the interactive editor and
+# is local-only (`tools/mcp-smoke.sh`).
 
 set -euo pipefail
 

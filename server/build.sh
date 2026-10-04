@@ -2,8 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 #
 # Publishes the mindustry_godot SpacetimeDB module and regenerates the checked-in
-# Rust client bindings. Bash is primary (WSL2 Ubuntu); build.ps1 is the Windows
-# parity wrapper.
+# Rust client bindings.
 #
 # Usage:
 #   server/build.sh [--db NAME] [--server HOST] [--check]
@@ -57,7 +56,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 command -v spacetime >/dev/null 2>&1 || {
-  echo "build.sh: spacetime CLI not found on PATH (install 2.10.1 in WSL2 Ubuntu)" >&2
+  echo "build.sh: spacetime CLI not found on PATH (install 2.10.1)" >&2
   exit 1
 }
 

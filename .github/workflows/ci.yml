@@ -9,7 +9,7 @@
 #              headless editor import/parse check
 #
 # The interactive MCP smoke (`tools/mcp-smoke.sh`) is local-only: it needs a
-# running editor + WSLg window and is never run here. No secrets are used.
+# running editor + display and is never run here. No secrets are used.
 
 name: CI
 

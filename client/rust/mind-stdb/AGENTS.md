@@ -39,7 +39,7 @@ Read the root [`AGENTS.md`](../../../AGENTS.md) first. See also
    internally; `pump()` calls `DbConnection::frame_tick()` from the main thread.
 2. **`module_bindings/` is GENERATED.** Never read it as documentation and never
    hand-edit it. Regenerate with `server/build.sh`; the drift gate is
-   `server/build.sh --check` (`server/build.ps1 -Check` on Windows).
+   `server/build.sh --check`.
 3. **`cargo test -p mind-stdb` is network-free.** Live tests are `#[ignore]`d and
    env-gated by `MIND_STDB_IT=1`; they use database `mindustry-it`, never
    `mindustry`.

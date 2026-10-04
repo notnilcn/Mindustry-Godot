@@ -8,6 +8,10 @@
 
 config_version=5
 
+[animation]
+
+compatibility/default_parent_skeleton_in_mesh_instance_3d=true
+
 [application]
 
 config/name="Mindustry-Godot"
@@ -28,10 +32,6 @@ MindHud="*res://scenes/autoloads/mind_hud.tscn"
 
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
-
-[dotnet]
-
-project/assembly_name="Mindustry-Godot"
 
 [editor_plugins]
 

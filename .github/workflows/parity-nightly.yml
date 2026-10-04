@@ -10,7 +10,7 @@
 #                        machine recording stays deferred (NUD-40/A)
 #   soak                 `parity soak --profile mid` (full duration)
 #   t2-catalog           `parity run --suite full` over the T2 file catalog
-#   mcp                  in-engine MCP smoke on a self-hosted windows-gpu runner
+#   mcp                  in-engine MCP smoke on a self-hosted linux-gpu runner
 #
 # Shared GitHub runners have no GPU/editor; the MCP job is gated behind the
 # `run_mcp` dispatch input and self-hosted labels per NUD-40/A.
@@ -23,7 +23,7 @@ on:
   workflow_dispatch:
     inputs:
       run_mcp:
-        description: "Run the in-engine MCP smoke on the self-hosted windows-gpu runner"
+        description: "Run the in-engine MCP smoke on the self-hosted linux-gpu runner"
         type: boolean
         default: false
 
@@ -158,12 +158,12 @@ jobs:
         run: cargo run -q --manifest-path client/rust/Cargo.toml -p mind-headless -- parity run --suite full --json
 
   mcp:
-    name: mcp (windows-gpu)
+    name: mcp (linux-gpu)
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_mcp }}
-    runs-on: [self-hosted, windows-gpu]
+    runs-on: [self-hosted, linux-gpu]
     steps:
       - uses: actions/checkout@v4
 
       - name: In-engine MCP smoke (editor must be running)
-        shell: pwsh
-        run: ./tools/mcp-smoke.ps1
+        shell: bash
+        run: ./tools/mcp-smoke.sh

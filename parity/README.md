@@ -132,7 +132,7 @@ nightly-owned steps (`T1` suite, checksum matrix, MCP parity, bench-gate) as
 
 ## Local suite driver
 
-`tools/parity.sh` (`.ps1` twin) mirrors the runnable subset of the nightly runner on
+`tools/parity.sh` mirrors the runnable subset of the nightly runner on
 the dev host without faking the deferred steps:
 
 ```

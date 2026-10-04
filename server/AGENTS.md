@@ -16,7 +16,6 @@ The SpacetimeDB side of Mindustry-Godot: the persistent-state module plus the to
 | `spacetimedb/src/mods/` | `match_mod` + `content_catalog`, mod-set comparison and `content_name_allowed`. |
 | `spacetime.json` | Local defaults (`server: local`, `module-path: ./spacetimedb`) and the generate target `../client/rust/mind-stdb/src/module_bindings`. |
 | `build.sh` | Canonical script: `spacetime generate` into the bindings dir, then `spacetime publish --delete-data=always`. |
-| `build.ps1` | Windows parity wrapper that invokes `build.sh` inside WSL2 Ubuntu. |
 | `gen_content_seed.sh` | Opt-in regeneration of `spacetimedb/src/main/content_seed.rs`. |
 
 ## Responsibilities
@@ -48,7 +47,6 @@ The SpacetimeDB side of Mindustry-Godot: the persistent-state module plus the to
 ```bash
 server/build.sh                              # publish mindustry + regenerate bindings
 server/build.sh --check                      # bindings drift gate (no publish)
-server/build.ps1 -Check                      # the same gate on Windows
 cargo check --manifest-path server/spacetimedb/Cargo.toml --tests
 GEN_CONTENT_SEED=1 server/build.sh           # also regenerate content_seed.rs
 spacetime describe mindustry --server local  # tables/reducers
@@ -56,4 +54,4 @@ spacetime logs mindustry --server local      # module logs
 spacetime sql mindustry --server local "SELECT * FROM player LIMIT 10"
 ```
 
-`--check` / `-Check` regenerates the bindings into a temp directory and diffs them against the checked-in copy without publishing, exiting non-zero on drift. Runtime client/server verification runs through the Godot MCP tools rather than CLI reducer calls; see [`.opencode/skills/playtest/SKILL.md`](../.opencode/skills/playtest/SKILL.md).
+`--check` regenerates the bindings into a temp directory and diffs them against the checked-in copy without publishing, exiting non-zero on drift. Runtime client/server verification runs through the Godot MCP tools rather than CLI reducer calls; see [`.opencode/skills/playtest/SKILL.md`](../.opencode/skills/playtest/SKILL.md).

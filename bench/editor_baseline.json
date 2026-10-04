@@ -1,5 +1,5 @@
 {
-  "note": "Plan 19 §7d editor performance budgets. Budgets are copied from 19_MAPS_EDITOR_IMPLEMENTATION_PLAN.md §7d; `measured` records the MapView draw + op-recording suite. `measured.debug` is the earlier Ubuntu WSL2 debug record; `measured.release` is the release re-record on dev-win-amd860m (plan 23 baseline pass). The steady-state allocation audit is zero (pre-reserved line/brush scratch + pooled DrawOperations + per-frame event-log drain).",
+  "note": "Plan 19 §7d editor performance budgets. Budgets are copied from 19_MAPS_EDITOR_IMPLEMENTATION_PLAN.md §7d; `measured` records the MapView draw + op-recording suite. `measured.debug` is the earlier Ubuntu debug record; `measured.release` is the release re-record on dev-win-amd860m (plan 23 baseline pass). The steady-state allocation audit is zero (pre-reserved line/brush scratch + pooled DrawOperations + per-frame event-log drain).",
   "format": 1,
   "scenario": "editor_bench",
   "fixture": "200x200 editor map, copper-wall lines",

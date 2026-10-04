@@ -220,7 +220,7 @@ mod tests {
         vec![
             Row {
                 upstream: "A.test".into(),
-                owner: "00_FOUNDATION_IMPLEMENTATION_PLAN.md".into(),
+                owner: "05_SIM_CORE_IMPLEMENTATION_PLAN.md".into(),
                 phase: "P0".into(),
                 rust: "foo::tests::bar".into(),
                 primary: true,

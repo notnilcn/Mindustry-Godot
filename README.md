@@ -17,9 +17,9 @@ the agent guide.
 | `client/rust/` | Cargo workspace: `mind-core` (Godot-free sim), `mind-headless` (oracle), `mind-gdext` (GDExtension), `mind-stdb` (STDB client). |
 | `server/` | SpacetimeDB module crate + publish scripts (see `server/AGENTS.md`). |
 | `scenarios/` | Canonical headless scenarios; goldens live here. |
-| `tools/` | `build`, `godot`, `ci`, `sync_scenarios`, `mcp-smoke` (bash + PowerShell twins). |
+| `tools/` | `build`, `godot`, `ci`, `sync_scenarios`, `mcp-smoke` bash scripts. |
 
-## Build, run, verify (WSL2 Ubuntu, from the repo root)
+## Build, run, verify (Linux, from the repo root)
 
 ```bash
 # Rust checks (mind-core must stay Godot-free/tokio-free)
@@ -45,8 +45,7 @@ tools/ci.sh                    # full local gate (fmt/clippy/tests/goldens/bench
 tools/mcp-smoke.sh             # in-engine MCP smoke (needs the editor running)
 ```
 
-From a Windows terminal prefix WSL commands with `wsl -d Ubuntu -e bash -lc '<command>'`;
-the `.ps1` twins are Windows parity. In-engine workflows (launch, node map, pid-stamped
+In-engine workflows (launch, node map, pid-stamped
 evals) are in [`.opencode/skills/playtest/SKILL.md`](.opencode/skills/playtest/SKILL.md);
 `.github/workflows/ci.yml` runs the Rust/STDB/Godot-import jobs on push/PR to `main`.
 

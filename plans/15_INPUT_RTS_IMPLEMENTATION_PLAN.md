@@ -527,7 +527,7 @@ Budgets recorded in `bench/baselines.json`; plan 23 owns the CI gate. Regression
 | R4 | D2 has no authoritative sim: locally applied commands that 21's cheap validation drops cause divergence. | Clients apply immediately (upstream parity); 21 owns rejection events + desync correction; 15 surfaces rejection toasts and never retries silently. | Reconcile with 21 at execution |
 | R5 | `UiFocus` delivery (GDScript push vs Rust probe). | 14's UI autoload calls `MindInput.set_ui_focus(...)`; Rust probe used only as fallback for editor/standalone. | **U1** (default stated; 14 must agree) |
 | R6 | `Arc QuadTree` port fidelity (iteration order feeds `find`). | Port exact Arc semantics with insertion-order iteration; reuse 11's spatial port if it exports a generic variant; golden test. | no |
-| R7 | Mobile gesture parity cannot be fully validated on the Windows/WSL dev host (no touch device). | Exact constants ported + synthetic touch replay; real-device check deferred to 22 (OD5). | no |
+| R7 | Mobile gesture parity cannot be fully validated on the Linux dev host (no touch device). | Exact constants ported + synthetic touch replay; real-device check deferred to 22 (OD5). | no |
 | R8 | Input timing windows use client monotonic clock (I3). | Accepted: input is local-only; replay uses logged ticks; sim never reads it. | no |
 | R9 | `Menu` key/back handling on Android vs desktop, fullscreen/screenshot/pause bindings split between `Control` and input. | `MindInput` owns them, calling 14/22 APIs; parity table in §4. | no |
 | R10 | Screen shake source. | 17 fires `ShakeEvent`; camera consumes; no shake math in 15 beyond the `Renderer` port. | no |

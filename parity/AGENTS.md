@@ -103,5 +103,4 @@ tools/parity.sh --gate P8
 tools/regen_goldens.sh --check
 ```
 
-Run from the repo root (WSL2 Ubuntu); `tools/parity.ps1` forwards the same arguments from a
-Windows shell into WSL.
+Run from the repo root (Linux).

@@ -30,7 +30,7 @@ client/                  # Godot 4.7 project (scenes/GDScript UI only) — see c
   bin/ .godot/ scenarios/  # gitignored build output, editor cache, scenario mirror
 server/                  # STDB module crate + publish scripts — see server/AGENTS.md
 scenarios/               # canonical headless scenarios (goldens live here)
-tools/                   # build/godot/ci/sync_scenarios + mcp-smoke (sh + ps1 twins)
+tools/                   # build/godot/ci/sync_scenarios + mcp-smoke
 .github/workflows/ci.yml # rust (ubuntu+windows), spacetimedb, godot-import
 {nn}_{SYSTEM}_IMPLEMENTATION_PLAN.md   # 00..23, root level
 ```
@@ -39,19 +39,19 @@ tools/                   # build/godot/ci/sync_scenarios + mcp-smoke (sh + ps1 t
 
 ## Folders to treat carefully
 
-- `client/rust/mind-stdb/src/module_bindings/` — generated STDB client bindings. **Never read or hand-edit**; regenerate with `server/build.sh`; CI drift gate is `server/build.sh --check` (`.ps1` twin uses `-Check`).
+- `client/rust/mind-stdb/src/module_bindings/` — generated STDB client bindings. **Never read or hand-edit**; regenerate with `server/build.sh`; CI drift gate is `server/build.sh --check`.
 - `client/.godot/`, `client/bin/`, `client/rust/target/`, `server/spacetimedb/target/`, `client/scenarios/` — caches / build output / generated mirror.
 - `Mindustry/**/gen/**` in the source repo does not exist (generated); never look for it.
 
-## Build & run (WSL2 Ubuntu-first)
+## Build & run (Linux-first)
 
-All commands run in **WSL2 Ubuntu** (login shell — `godot4`, `cargo`, `spacetime` on PATH). From a Windows terminal, prefix `wsl -d Ubuntu -e bash -lc '<cmd>'`. Repo path in WSL: `.` (Windows UNC `\\wsl.localhost\Ubuntu\home\c\g\code_examples\mindustry-godot`; the old `/mnt/c/...` tree is a frozen duplicate — do not edit it).
+All commands run on **Linux** (login shell — `godot4`, `cargo`, `spacetime` on PATH). Repo path: `.`.
 
 - Rust checks: `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test -p mind-core` (all with `--manifest-path client/rust/Cargo.toml`).
 - Headless oracle: `cargo run -p mind-headless -- run <scenario> --json` / `sim` / `replay` / `dump` / `bench` (goldens: `spine_place_break` → `a1a7b96167c9718d`; canonical FNV-1a `Checksum` per plan 05 M8 / HLP §12 C2).
 - Build + engine: `tools/build.sh`; `godot4 --path client` runs `res://scenes/spine.tscn`.
 - Server: `server/build.sh` (publish + generate; `--check` drift mode); local DB is `mindustry`, module `mindustry_godot`.
-- Full local gate: **`tools/ci.sh`** (`.ps1` twin); in-engine smoke: **`tools/mcp-smoke.sh`** (`.ps1` twin, needs the editor running).
+- Full local gate: **`tools/ci.sh`**; in-engine smoke: **`tools/mcp-smoke.sh`** (needs the editor running).
 
 ## Verification
 

@@ -88,7 +88,7 @@ in `../` owns scenes and GDScript UI; behavior lives here. Read the root
 
 ## Verification
 
-Run from the repo root (WSL2 Ubuntu); prefix with `wsl -d Ubuntu -e bash -lc '<cmd>'` from Windows.
+Run from the repo root (Linux).
 
 ```bash
 cargo fmt --manifest-path client/rust/Cargo.toml --all -- --check

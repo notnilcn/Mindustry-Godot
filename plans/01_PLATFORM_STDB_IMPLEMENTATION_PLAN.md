@@ -8,8 +8,8 @@
 | **Phase** | P1 — Platform & content. |
 | **Depends on** | `00_FOUNDATION_IMPLEMENTATION_PLAN.md` (workspace, gdext bring-up, `mind-headless` harness, build scripts, MCP bridge). This plan must not start before plan 00's workspace + headless + MCP gates are green. |
 | **Blocks** | `21_MULTIPLAYER_IMPLEMENTATION_PLAN.md` (full schema, relay authority, snapshots); the lobby/identity parts of `12_CAMPAIGN_IMPLEMENTATION_PLAN.md` (profiles, campaign identity) and `14_UI_IMPLEMENTATION_PLAN.md` (settings dialog, join/lobby UI, connection-lost UI). |
-| **Sources** | C# being replaced: `client/sstdbsdk/AGENTS.md`, `DatabaseConnector.cs`, `TableSubscriber.cs`, `TableBinderComponent.cs`, `DatabaseConnector.tscn` (584 LOC total). Conventions: `../../main/AGENTS.md`, `../../main/server/AGENTS.md`, and a real 2.x module read for shape: `../../main/server/spacetimedb/{Cargo.toml,src/lib.rs,src/main/{mod,lifecycle,seeds,global}.rs,src/item/{reducers,views}.rs,src/chat/mod.rs}`. Tooling: local `spacetime` CLI 2.10.1 (WSL; 2.10.2 upgrade available), `spacetimedb-sdk` 2.10.1 (docs.rs), `spacetimedb` server crate 2.10.1 (crates.io). Test rig: `../../.opencode/skills/playtest/SKILL.md` (main-project recipes; the mindustry-godot analog is created by plan 00). |
-| **Extends spine** | Plan 00's rig is untouched. Adds: `StdbConnector` (gdext autoload, one `Node`) + optional `StdbBinder` (gdext `Node`) to the project; a `mind-headless` scenario family (`stdb_*`); a `net` page on the plan-00 state inspector (connector state, wave status, relay counters); `server/spacetime.json` + `build.sh`/`build.ps1` publish rig; generated Rust bindings. The plan-00 in-engine spine must keep working **offline** with the STDB layer absent. |
+| **Sources** | C# being replaced: `client/sstdbsdk/AGENTS.md`, `DatabaseConnector.cs`, `TableSubscriber.cs`, `TableBinderComponent.cs`, `DatabaseConnector.tscn` (584 LOC total). Conventions: `../../main/AGENTS.md`, `../../main/server/AGENTS.md`, and a real 2.x module read for shape: `../../main/server/spacetimedb/{Cargo.toml,src/lib.rs,src/main/{mod,lifecycle,seeds,global}.rs,src/item/{reducers,views}.rs,src/chat/mod.rs}`. Tooling: local `spacetime` CLI 2.10.1 (on the Linux dev host; 2.10.2 upgrade available), `spacetimedb-sdk` 2.10.1 (docs.rs), `spacetimedb` server crate 2.10.1 (crates.io). Test rig: `../../.opencode/skills/playtest/SKILL.md` (main-project recipes; the mindustry-godot analog is created by plan 00). |
+| **Extends spine** | Plan 00's rig is untouched. Adds: `StdbConnector` (gdext autoload, one `Node`) + optional `StdbBinder` (gdext `Node`) to the project; a `mind-headless` scenario family (`stdb_*`); a `net` page on the plan-00 state inspector (connector state, wave status, relay counters); `server/spacetime.json` + `build.sh` publish rig; generated Rust bindings. The plan-00 in-engine spine must keep working **offline** with the STDB layer absent. |
 
 This plan replaces the C# `sstdbsdk` semantics 1:1 (D1) and lays the STDB foundation: identity/session/profile/settings/audit skeleton, subscription waves, typed binders, and an ordered per-match command relay with cheap server-side validation (D2). Catalog/save/campaign tables are explicitly **not** here — plan 21 owns the full schema.
 
@@ -18,7 +18,7 @@ This plan replaces the C# `sstdbsdk` semantics 1:1 (D1) and lays the STDB founda
 ### 2.1 In scope
 
 1. **`mind-stdb` crate** (pure Rust, Godot-free, tokio-free in its public API): connection lifecycle equivalent to `DatabaseConnector.cs`; token persistence per host + `--pN` suffix; subscription waves equivalent to `TableSubscriber.cs` base/lobby/game; typed per-table binder equivalent to `TableBinderComponent.cs`; frame pump bridge.
-2. **Generated Rust bindings workflow**: `spacetime generate --lang rust` into `client/rust/mind-stdb/src/module_bindings/`; never hand-edited; `server/build.sh` (WSL/Linux primary) + `build.ps1` (Windows parity) regenerate + publish locally.
+2. **Generated Rust bindings workflow**: `spacetime generate --lang rust` into `client/rust/mind-stdb/src/module_bindings/`; never hand-edited; `server/build.sh` regenerates + publishes locally.
 3. **`server/spacetimedb/` skeleton** (2.x conventions, `#[table(accessor, public)]`, views, indexes, `ctx.sender()`, spread updates): `player`/`player_session`/`player_profile`, `client_settings`, `protocol_info`, `audit_log`, `relay_config`, lifecycle reducers (`init`/`client_connected`/`client_disconnected`), seeds in code.
 4. **Command-relay foundation**: `relay_match`/`relay_member` + append-only ordered `match_command` (private table exposed through a per-caller view), client reducers with cheap validation only (identity/ownership/membership, rate limit, enum, coarse range/existence/payload caps), and a client `CommandStream` that delivers every command to every peer in transaction order with per-sender sequence checks.
 5. **gdext layer**: `StdbConnector` autoload (`_process` pump, Godot signals) and `StdbBinder` node (no-arg signals + debug JSON row) so GDScript UI layout can consume rows without C#. Typed Rust consumers use `mind-stdb` directly.
@@ -79,7 +79,7 @@ client/scenes/autoloads/
   stdb_connector.tscn                 # root node is the gdext StdbConnector class
 server/
   spacetime.json                      # rust generate entry
-  build.sh  build.ps1                 # generate + publish (bash primary; .ps1 Windows parity)
+  build.sh                            # generate + publish
   spacetimedb/                        # module skeleton crate
 ```
 
@@ -307,7 +307,7 @@ Ordered; each milestone ends with its verification commands. **Smallest vertical
 ### M0 — Workspace, crate skeletons, bindings pipeline
 - [x] Add `client/rust/mind-stdb` to the plan-00 workspace; `Cargo.toml` with pins (`spacetimedb-sdk = "=2.10.1"`, `serde`, `serde_json`, `log`).
 - [x] Create `server/spacetimedb/` crate (`mindustry_godot`, edition 2024, cdylib, `spacetimedb = "=2.10.1"`), `src/lib.rs` module skeleton (§3.7).
-- [x] `server/spacetime.json` with a `rust` generate entry into `../client/rust/mind-stdb/src/module_bindings`; `server/build.sh` + `build.ps1` (`spacetime generate --lang rust ...`; `spacetime publish mindustry -y --delete-data` with `--server`/`--db` overrides; `--check` drift mode).
+- [x] `server/spacetime.json` with a `rust` generate entry into `../client/rust/mind-stdb/src/module_bindings`; `server/build.sh` (`spacetime generate --lang rust ...`; `spacetime publish mindustry -y --delete-data` with `--server`/`--db` overrides; `--check` drift mode).
 - [x] Commit generated bindings; add the never-hand-edit header note to `mind-stdb/AGENTS.md`.
 - [x] `client/scenes/autoloads/stdb_connector.tscn` committed (native `StdbConnector` root; `.tscn`-first).
 - [ ] `project.godot`: autoload `StdbConnector="*res://scenes/autoloads/stdb_connector.tscn"` — **deferred to M5** so the project never boots with a missing native class (the scene alone is inert).
@@ -385,12 +385,12 @@ Defined in §3.8. Views: `my_matches` (member semijoin), `my_match` (single acti
 - Server crate: `spacetimedb = "=2.10.1"`; client SDK: `spacetimedb-sdk = "=2.10.1"`. Exact pins, lockstep. Generated bindings bring their own exact pins; do not override them.
 - `PROTOCOL_VERSION` (ours) is separate from the crate version: module `main/global.rs` and `mind-stdb/src/protocol.rs` both define it; plan 23 checks the live row against the client constant. Bump both together when the envelope changes.
 - `main/` pairs server crate 2.2.0 with C# 2.7.1 and CLI 2.10.1, proving cross-minor tolerance, but Rust generated bindings are pinned to the generating CLI's SDK line, so this plan pins everything to one line to remove skew.
-- CI gates: `spacetime --version` == 2.10.1 (WSL dev + CI); `server/build.sh --check` (regenerate to temp dir, `git diff --exit-code module_bindings`); `cargo tree -p mind-stdb` shows a single `spacetimedb-sdk` version.
+- CI gates: `spacetime --version` == 2.10.1 (Linux dev + CI); `server/build.sh --check` (regenerate to temp dir, `git diff --exit-code module_bindings`); `cargo tree -p mind-stdb` shows a single `spacetimedb-sdk` version.
 
 ### 6.5 Generated bindings workflow
 
 - Output path: `client/rust/mind-stdb/src/module_bindings/` (checked in, never hand-edited). Header comment generated by the CLI is authoritative; add a repo-level note in `mind-stdb/AGENTS.md`, not in the files.
-- `server/build.sh` (primary, WSL/Linux): `spacetime generate --lang rust --out-dir ../client/rust/mind-stdb/src/module_bindings --module-path ./spacetimedb -y`; then `spacetime publish mindustry --delete-data -y` (default local; `--server <url>` sets project server). `build.ps1` mirrors for Windows.
+- `server/build.sh` (primary, Linux): `spacetime generate --lang rust --out-dir ../client/rust/mind-stdb/src/module_bindings --module-path ./spacetimedb -y`; then `spacetime publish mindustry --delete-data -y` (default local; `--server <url>` sets project server).
 - `server/spacetime.json` holds the same generate entry so `spacetime generate` from `server/` matches the script.
 
 ### 6.6 Token file format
@@ -499,9 +499,9 @@ Regressions block the P1 gate (HIGH_LEVEL_PLAN §7.4/§5).
 |---|---|---|---|
 | R1 | **Rust SDK API uncertainty.** Exact generated names (`DbConnection::frame_tick`, typed `add_query` on view accessors, table accessor marker types, `credentials` module) verified only against 2.10.1 docs, not compiled yet. | Use the documented 2.10.1 API; isolate every SDK touch point in `connector.rs`/`waves.rs`/`binder.rs`; keep a raw-SQL `subscribe(&[...])` fallback inside `waves.rs`. First M2 task is a spike compiling `frame_tick` + one table subscription. | Monitor; fix per 2.10.1 release notes |
 | R2 | **Pump mode** (main-thread `frame_tick` vs `run_threaded` + channel). | Main-thread `frame_tick` (C# parity), queue-based binders make the swap a feature flag if budget fails. | Default; fallback pre-designed |
-| R3 | **Server module name / db name.** Not covered by HIGH_LEVEL_PLAN. | **Locked 2026-10-01 (NUD-08; final user decision): crate `mindustry_godot`, local db `mindustry`, integration db `mindustry-it`.** Scripts take `--db`/`--server` overrides (`.ps1`: `-Db`/`-Server`). | locked |
+| R3 | **Server module name / db name.** Not covered by HIGH_LEVEL_PLAN. | **Locked 2026-10-01 (NUD-08; final user decision): crate `mindustry_godot`, local db `mindustry`, integration db `mindustry-it`.** Scripts take `--db`/`--server` overrides. | locked |
 | R4 | **Command envelope representation** (typed `CommandKind` enum vs generic `type:u16 + bytes`). | Typed enum with a small fixed envelope; plan 21 owns the full variant set and the schema hard-cut. | **NEEDS USER DECISION** (affects 21's schema-freeze point) |
-| R5 | **Generated bindings are checked in.** | Yes, with a `--check` drift gate (`.ps1` twin: `-Check`); plan 00's CI applies it. | Reconcile with `00_FOUNDATION_IMPLEMENTATION_PLAN.md` CI design |
+| R5 | **Generated bindings are checked in.** | Yes, with a `--check` drift gate; plan 00's CI applies it. | Reconcile with `00_FOUNDATION_IMPLEMENTATION_PLAN.md` CI design |
 | R6 | **Version pin =2.10.1 vs main's server 2.2.0/C# 2.7.1.** | Lockstep 2.10.1 for Rust (generated bindings pin it). | Reconcile with plan 21; flag if it prefers tracking main |
 | R7 | **Rejection auditing.** A reducer returning `Err` rolls back its writes, so failures cannot write `AuditLog`. | Failures go to `log::warn!`; only committed actions audit. Plan 21 may add a staged rejection path (needs a second transaction trigger). | Documented limitation |
 | R8 | **Command-log retention.** No pruning in plan 01; 200 cmd/s ≈ 17 MB/day worst case (2 KB/row). | Plan 21 adds snapshot + prune; queue cap 20k rows protects clients. | Deferred to 21 |
@@ -544,7 +544,7 @@ Deleted at M6 (NUD-05=C, no archive): `client/Scripts/Components/` (`IComponent.
 
 #### M0 — Workspace, crate skeletons, bindings pipeline (commit `01-M0`)
 
-- Verified the plan-00 skeleton against §3.1/§3.2: workspace member `mind-stdb` with `spacetimedb-sdk = "=2.10.1"` pin, separate `server/spacetimedb` crate (`mindustry_godot`, cdylib, `spacetimedb = "=2.10.1"`), `server/spacetime.json` generate entry, `build.sh`/`build.ps1` (`--check`/`-Check` drift mode), checked-in `module_bindings/`.
+- Verified the plan-00 skeleton against §3.1/§3.2: workspace member `mind-stdb` with `spacetimedb-sdk = "=2.10.1"` pin, separate `server/spacetimedb` crate (`mindustry_godot`, cdylib, `spacetimedb = "=2.10.1"`), `server/spacetime.json` generate entry, `build.sh` (`--check` drift mode), checked-in `module_bindings/`.
 - Added `client/rust/mind-stdb/AGENTS.md`: generated-bindings never-hand-edit rule + drift gate, the five-step recipe (table → reducer → wave entry → binder + handler → reducer call), the ported C# rules and `stdb_*` verify commands.
 - Added `client/scenes/autoloads/stdb_connector.tscn` (native `StdbConnector` root node; scene is inert until the class lands in M5). The `project.godot` autoload registration deliberately moves to M5: registering a scene whose native class does not exist yet would break boot before mind-gdext M5 lands.
 - Removed the unused direct `tokio` dependency from `mind-stdb` (§3.2: no tokio in the public API; the SDK owns its runtime).
@@ -581,7 +581,7 @@ Deleted at M6 (NUD-05=C, no archive): `client/Scripts/Components/` (`IComponent.
   - `cargo test --manifest-path client/rust/Cargo.toml -p mind-stdb` → `13 passed; 0 failed` (identity/token/offline/pump state tests listed in §7.1 minus the M3+ ones).
   - `cargo run -p mind-headless -- run stdb_offline_boot --json` → `{"state":"offline","frames":64,"pumps":64,"pump_p50_ns":50,"pump_p99_ns":1784,"pass":true,...}` (p99 budget 200 µs met).
   - `cargo fmt -p mind-stdb -p mind-headless -- --check` clean; `cargo clippy -p mind-stdb -p mind-headless --all-targets -- -D warnings` clean; `cargo check -p mind-gdext` green.
-  - Environment note (machine-local, not committed): WSL's `~/.cargo/config.toml` OpenSSL workaround had broken `libcrypto.so.3`/`libssl.so.3` symlinks, so rust-lld fell back to static `libcrypto.a` and failed on zstd symbols. Repaired the two symlinks to the system `libcrypto.so.3`/`libssl.so.3`; `cargo test` (which links the SDK's native-tls) now works. CI runners with `libssl-dev` are unaffected.
+  - Environment note (machine-local, not committed): the Linux dev host's `~/.cargo/config.toml` OpenSSL workaround had broken `libcrypto.so.3`/`libssl.so.3` symlinks, so rust-lld fell back to static `libcrypto.a` and failed on zstd symbols. Repaired the two symlinks to the system `libcrypto.so.3`/`libssl.so.3`; `cargo test` (which links the SDK's native-tls) now works. CI runners with `libssl-dev` are unaffected.
 
 #### M3 — Waves + typed binders (commit `01-M3`)
 

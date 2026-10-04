@@ -130,24 +130,22 @@ if [[ "$PLATFORM" == "linux" ]]; then
       ;;
   esac
 else
-  # Windows: run the .reg through reg.exe via interop from WSL.
+  # Windows target: the dev host is Linux, so emit a .reg script for the
+  # Windows host instead of importing it on this machine.
+  REG_OUT_DIR="$REPO_ROOT/build/export"
   case "$ACTION" in
     print) windows_reg_body ;;
     install)
-      tmp="$(mktemp --suffix=.reg)"
-      windows_reg_body > "$tmp"
-      winpath="$(wslpath -w "$tmp")"
-      reg.exe import "$winpath"
-      rm -f "$tmp"
-      echo "associate.sh: registered HKCU .msav/.msch + mindustry(-godot)://"
+      mkdir -p "$REG_OUT_DIR"
+      out="${MIND_REG_OUT:-$REG_OUT_DIR/mindustry-godot-associate.reg}"
+      windows_reg_body > "$out"
+      echo "associate.sh: wrote $out (import it on the Windows host)"
       ;;
     uninstall)
-      tmp="$(mktemp --suffix=.reg)"
-      windows_unreg_body > "$tmp"
-      winpath="$(wslpath -w "$tmp")"
-      reg.exe import "$winpath"
-      rm -f "$tmp"
-      echo "associate.sh: removed HKCU associations"
+      mkdir -p "$REG_OUT_DIR"
+      out="${MIND_REG_OUT:-$REG_OUT_DIR/mindustry-godot-unassociate.reg}"
+      windows_unreg_body > "$out"
+      echo "associate.sh: wrote $out (import it on the Windows host)"
       ;;
   esac
 fi

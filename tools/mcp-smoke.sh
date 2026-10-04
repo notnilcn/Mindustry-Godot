@@ -6,7 +6,7 @@
 # (`00_FOUNDATION_IMPLEMENTATION_PLAN.md` §7c steps 1-6 and 9).
 #
 # Requirements:
-#   * WSL2 Ubuntu dev host, editor already running per the repo playtest skill:
+#   * Linux dev host, editor already running per the repo playtest skill:
 #       nohup godot4 --editor --path client \
 #         >/tmp/mind-editor.log 2>&1 &
 #   * `python3` on PATH (stdlib only).

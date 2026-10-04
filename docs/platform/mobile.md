@@ -42,6 +42,6 @@ smaller FX/preview caps (plans 12/19), low-quality audio defaults (plan 18).
 | Item | Status | Reason |
 |---|---|---|
 | Android preset | deferred | export templates absent (R10) |
-| Android touch smoke | NOT-RUN | no `adb`/device in WSL; optional |
+| Android touch smoke | NOT-RUN | no `adb`/device on the Linux host; optional |
 | iOS preset | **cut** | NUD-52=B |
 | Caps/tier headless tests | ✅ | `mind_core::platform::caps::tests` |

@@ -19,8 +19,8 @@
 # Constraints (documented in the repo playtest skill):
 #   * The editor must already be running (this script does not launch it).
 #   * Bridge default port 6970; the headless import check may briefly hold 6971.
-#   * Spawning the Windows .exe from WSL python3 via interop was tested on this
-#     host and works; `--mcp-bin` / OPEN_GODOT_MCP_BIN override the lookup.
+#   * `--mcp-bin` / OPEN_GODOT_MCP_BIN override the lookup (PATH, then
+#     `~/.local/bin/open-godot-mcp`).
 #
 # Exit codes: 0 pass, 1 assertion/tool failure, 2 bridge not connected / setup.
 
@@ -44,10 +44,7 @@ HOST_PATH = "/root/Spine/SimHost"
 CAMERA_PATH = "/root/Spine/World/Camera2D"
 
 DEFAULT_MCP_CANDIDATES = (
-    "~/.local/bin/open-godot-mcp.exe",
     "~/.local/bin/open-godot-mcp",
-    r"C:\Users\Clinton\.local\bin\open-godot-mcp.exe",
-    "/mnt/c/Users/Clinton/.local/bin/open-godot-mcp.exe",
 )
 
 
@@ -91,21 +88,6 @@ def find_mcp_bin(explicit: str | None) -> str:
     found = shutil.which("open-godot-mcp")
     if found:
         return found
-    # WSL: ask the Windows interop resolver before falling back to fixed paths.
-    cmd = shutil.which("cmd.exe")
-    if cmd:
-        try:
-            out = subprocess.run(
-                [cmd, "/c", "where", "open-godot-mcp.exe"],
-                capture_output=True, text=True, timeout=20,
-            )
-            first = out.stdout.strip().splitlines()
-            if out.returncode == 0 and first:
-                drive = first[0].strip()
-                wsl = "/mnt/" + drive[0].lower() + drive[2:].replace("\\", "/")
-                return wsl
-        except (OSError, subprocess.SubprocessError):
-            pass
     for cand in DEFAULT_MCP_CANDIDATES:
         path = os.path.expanduser(cand)
         if os.path.exists(path):
@@ -293,17 +275,10 @@ def wait_until(description: str, predicate, timeout: float = 5.0,
 
 
 def launch_hint(repo_root: str) -> str:
-    native = repo_root.replace("\\", "/")
-    if len(native) >= 2 and native[1] == ":":
-        wsl_client = f"/mnt/{native[0].lower()}{native[2:]}/client"
-    else:
-        wsl_client = f"{native}/client"
+    client = repo_root.replace("\\", "/") + "/client"
     return (
-        "Launch the editor first (WSL2 Ubuntu, WSLg window):\n"
-        f"  nohup godot4 --editor --path {wsl_client} >/tmp/mind-editor.log 2>&1 &\n"
-        "  # from a Windows terminal:\n"
-        "  wsl -d Ubuntu -e bash -lc "
-        f"\"nohup godot4 --editor --path {wsl_client} >/tmp/mind-editor.log 2>&1 &\"\n"
+        "Launch the editor first (Linux dev host):\n"
+        f"  nohup godot4 --editor --path {client} >/tmp/mind-editor.log 2>&1 &\n"
         "Wait ~20 s, then re-run this smoke."
     )
 

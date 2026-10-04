@@ -20,22 +20,22 @@ Generic UI-driving mechanics (CLICK/DRAG coordinates, eval pitfalls, stall diagn
 - `playtest` MCP prompt — the interactive + deterministic workflow with exact tool JSON.
 - The `open_godot_mcp` addon docs under `client/addons/open_godot_mcp/` (`docs/`, handler headers) — short reminders at the call site.
 
-The MCP server is a stdio process (`open-godot-mcp`, Windows binary `~/.local/bin/open-godot-mcp.exe`, bridge default **ws://127.0.0.1:6970**). Every tool takes `action` plus an optional `params` object; action-specific arguments go inside `params` (e.g. `godot_editor_edit {"action":"open_scene","params":{"path":"res://..."}}`).
+The MCP server is a stdio process (`open-godot-mcp`, binary `~/.local/bin/open-godot-mcp`, bridge default **ws://127.0.0.1:6970**). Every tool takes `action` plus an optional `params` object; action-specific arguments go inside `params` (e.g. `godot_editor_edit {"action":"open_scene","params":{"path":"res://..."}}`).
 
 # Part 1 — Godot MCP recipes (project-specific)
 
 ## Session start
 
-1. **`godot_health check` first.** If it reports `BRIDGE_NOT_CONNECTED` (or errors with "No Godot instance connected"), launch the editor yourself from WSL2 Ubuntu; the MCP bridge auto-loads with the editor and WSLg hosts the window:
+1. **`godot_health check` first.** If it reports `BRIDGE_NOT_CONNECTED` (or errors with "No Godot instance connected"), launch the editor yourself on the Linux host; the MCP bridge auto-loads with the editor and the native display hosts the window:
 
    ```bash
    nohup godot4 --editor --path client \
      >/tmp/mind-editor.log 2>&1 &
    ```
 
-   From a Windows terminal prefix that with `wsl -d Ubuntu -e bash -lc "..."`. Wait ~20 s, then `godot_instance list` (the instance appears adopted) and `godot_health check` (port 6970). The editor never exits; a second, headless editor run during CI may briefly bind 6971 — ignore it.
+   Wait ~20 s, then `godot_instance list` (the instance appears adopted) and `godot_health check` (port 6970). The editor never exits; a second, headless editor run during CI may briefly bind 6971 — ignore it.
 
-2. **Identity preflight before any `godot_game` call.** The bridge is `127.0.0.1:6970`; if another Godot editor (the sibling `main/` project is Windows-side) already holds it, the MCP server talks to *that* project. Close the other editor, then verify: `godot_editor_read state` → `project_path` must contain `mindustry-godot`. (The `godot_exec` runtime identity check only works once a game is running; the smoke asserts it after play via `ProjectSettings.globalize_path("res://")`.)
+2. **Identity preflight before any `godot_game` call.** The bridge is `127.0.0.1:6970`; if another Godot editor (the sibling `main/` project) already holds it, the MCP server talks to *that* project. Close the other editor, then verify: `godot_editor_read state` → `project_path` must contain `mindustry-godot`. (The `godot_exec` runtime identity check only works once a game is running; the smoke asserts it after play via `ProjectSettings.globalize_path("res://")`.)
 
 3. **Always run `res://scenes/game.tscn`** — the only P0 entry point. `godot_editor_edit {"action":"open_scene","params":{"path":"res://scenes/game.tscn"}}`, then `godot_game {"action":"play","params":{"scene":"res://scenes/game.tscn"}}` with the scene passed explicitly. Never play whatever scene happens to be open. Wait for `godot_game {"action":"status"}` → `runtime_connected: true`. Omitting `params.scene` (bare `godot_game {"action":"play"}`) **appears to succeed** — it returns `runtime_ready: true` — but no game process attaches the bridge: `godot_game status` reports `runtime_connected: false` / `instance_count: 0`, and every `godot_exec` then fails with `RUNTIME_NOT_CONNECTED`. Passing the scene is the fix; if the runtime never connects, confirm the `scene` param was sent before anything else.
 
@@ -108,7 +108,7 @@ godot_exec {"action":"call","params":{"node_path":"/root/Spine/SimHost","method"
 
 ### 9. Automated smoke (do this first when in doubt)
 
-`tools/mcp-smoke.sh` (WSL) / `tools/mcp-smoke.ps1` (Windows) spawn a fresh stdio MCP server, verify identity, then automate §7c steps 1–6 and 9: open + play spine, pid stamp, `load_scenario` + `step(60)` golden checksum, pause, API place/break, camera-resolved mouse place/break, log checks, teardown. It exits non-zero on any mismatch and prints the exact editor launch command when the bridge is down. The bridge accepts multiple MCP clients, so it can run while opencode's own MCP connection is attached — no need to close anything.
+`tools/mcp-smoke.sh` spawns a fresh stdio MCP server, verifies identity, then automates §7c steps 1–6 and 9: open + play spine, pid stamp, `load_scenario` + `step(60)` golden checksum, pause, API place/break, camera-resolved mouse place/break, log checks, teardown. It exits non-zero on any mismatch and prints the exact editor launch command when the bridge is down. The bridge accepts multiple MCP clients, so it can run while opencode's own MCP connection is attached — no need to close anything.
 
 ## When a recipe fails
 
@@ -125,7 +125,7 @@ Server-side setup and inspection only. Module/crate name: **`mindustry_godot`**;
 
 ## Core commands
 
-All commands run from the repo root in WSL2 Ubuntu (`spacetime` is on PATH in login shells):
+All commands run from the repo root (`spacetime` is on PATH in login shells):
 
 ```bash
 server/build.sh              # publish mindustry + regenerate Rust bindings (wipes dev data)
@@ -146,7 +146,6 @@ Current P0 surface (plan 01 grows it): table `player` (`identity` primary key, `
 - The CLI is pinned to 2.10.1 (crates/bindings match). `spacetime version install 2.10.1 --use` if the host has another default.
 - `spacetime generate` needs the `wasm32-unknown-unknown` Rust target (`rustup target add wasm32-unknown-unknown`).
 - `spacetime sql` is a small SQL subset: plain `SELECT ... WHERE ... LIMIT`; `BETWEEN`/`ORDER BY` are rejected.
-- The Windows `bash` tool is PowerShell: pipe to `Select-Object -First N` instead of `head`/`tail`, or capture full output and search it.
 
 # Part 3 — Plan-23 MCP parity catalog (machine-readable companion)
 

@@ -78,7 +78,7 @@ first; the workspace map is [`client/rust/AGENTS.md`](../AGENTS.md).
 
 ## Verification
 
-From the repo root (WSL2 Ubuntu):
+From the repo root (Linux):
 
 ```bash
 cargo run -p mind-headless -- run spine_place_break --json

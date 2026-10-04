@@ -2,7 +2,7 @@
 
 > Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
 
-**Status: preset-only this phase.** Export templates are absent on the WSL host
+**Status: preset-only this phase.** Export templates are absent on the Linux dev host
 (R10), so no signed or unsigned store artifact is produced here. This document is
 the runbook for when templates are installed.
 
@@ -30,7 +30,7 @@ Fields captured per preset: `name`, `platform`, `export_path`,
 - Data root is Godot `user://` (Android internal app files) with SAF import/export
   (P22-7). No `files_moved` migration.
 - `tools/adb-smoke.sh` installs/launches/taps/screenshots when `adb` and a device
-  are available (currently neither in WSL → documented NOT-RUN).
+  are available (currently neither on the Linux host → documented NOT-RUN).
 
 ## iOS (cut — NUD-52=B)
 
