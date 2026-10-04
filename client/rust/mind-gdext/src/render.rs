@@ -320,8 +320,9 @@ impl MindWorldRenderer {
                 .get_node_or_null(name.as_str())
                 .and_then(|node| node.try_cast::<Node2D>().ok());
             let mut node = if let Some(mut node) = adopted {
-                while let Some(child) = node.get_child(0) {
+                while let Some(mut child) = node.get_child(0) {
                     node.remove_child(&child);
+                    child.queue_free();
                 }
                 node
             } else {
