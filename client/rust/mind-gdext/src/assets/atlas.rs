@@ -409,6 +409,13 @@ impl MindAssets {
         self.fonts.default_font()
     }
 
+    /// Icon `FontFile` (`icon.ttf`), when loaded. UI glyphs render through the
+    /// code points in `assets/icons/icon_codes.json`.
+    #[func]
+    pub fn icon_font(&self) -> Option<Gd<godot::classes::FontFile>> {
+        self.fonts.icon.clone()
+    }
+
     /// Mods-first virtual FS (plan 20 hook); vanilla reads stay on disk.
     #[func]
     pub fn file_tree(&self) -> VarDictionary {

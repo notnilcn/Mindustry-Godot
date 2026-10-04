@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="Mindustry-Godot"
-run/main_scene="res://scenes/spine.tscn"
+run/main_scene="res://scenes/game.tscn"
 config/features=PackedStringArray("4.7")
 config/icon="res://icon.svg"
 
@@ -28,6 +28,10 @@ MindHud="*res://scenes/autoloads/mind_hud.tscn"
 
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
+
+[dotnet]
+
+project/assembly_name="Mindustry-Godot"
 
 [editor_plugins]
 

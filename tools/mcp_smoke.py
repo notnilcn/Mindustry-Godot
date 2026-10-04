@@ -9,7 +9,7 @@
 # e.g. opencode's own MCP connection -- is attached), performs the MCP
 # handshake, then drives the running Godot editor + game:
 #
-#   1. godot_editor_edit open_scene res://scenes/spine.tscn + explicit play
+#   1. godot_editor_edit open_scene res://scenes/game.tscn + explicit play
 #   2. pid-stamped liveness eval (get_tick/get_checksum)
 #   3. load_scenario + step(60) in Playing -> golden checksum a1a7b96167c9718d
 #   4. pause, API place_block/break_block
@@ -38,7 +38,7 @@ import time
 from collections import deque
 
 GOLDEN_CHECKSUM = "a1a7b96167c9718d"
-SPINE_SCENE = "res://scenes/spine.tscn"
+SPINE_SCENE = "res://scenes/game.tscn"
 SCENARIO = "res://scenarios/spine_place_break.json"
 HOST_PATH = "/root/Spine/SimHost"
 CAMERA_PATH = "/root/Spine/World/Camera2D"

@@ -1,7 +1,5 @@
-; SPDX-License-Identifier: GPL-3.0-only
+[gd_scene format=3 uid="uid://dymcah6fo0uhd"]
 
-[gd_scene format=3]
+[node name="Hello" type="Node" unique_id=651742738]
 
-[node name="Hello" type="Node"]
-
-[node name="MindHello" type="MindHello" parent="."]
+[node name="MindHello" type="MindHello" parent="." unique_id=155683001]

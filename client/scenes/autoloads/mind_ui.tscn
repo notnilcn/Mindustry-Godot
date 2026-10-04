@@ -1,9 +1,3 @@
-; SPDX-License-Identifier: GPL-3.0-only
-;
-; MindUi autoload (plan 14 §3.2). `MindUi` (Rust, mind-gdext) owns the dialog
-; registry, pause governor, margins and prompt/toast signals. Declared as a
-; scene so the singleton is editor-navigable and matches the autoload name.
+[gd_scene format=3 uid="uid://dbct71maoec8a"]
 
-[gd_scene format=3]
-
-[node name="MindUi" type="MindUi"]
+[node name="MindUi" type="MindUi" unique_id=862216262]

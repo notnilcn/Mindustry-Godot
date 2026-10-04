@@ -1,15 +1,7 @@
-; SPDX-License-Identifier: GPL-3.0-only
-;
-; Save dialog (plan 14 §3.4, M3). Inherits the shared frame; slot/new-save rows
-; are built by save_dialog.gd.
-;
-; Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
-; Source: core/src/mindustry/ui/dialogs/SaveDialog.java
+[gd_scene format=3 uid="uid://bdtsu0sueak5g"]
 
-[gd_scene load_steps=3 format=3]
+[ext_resource type="PackedScene" uid="uid://bl7rulbb5cu37" path="res://scenes/ui/dialogs/mind_dialog_base.tscn" id="1_base"]
+[ext_resource type="Script" uid="uid://tse4sn6emlw2" path="res://ui/dialogs/save_dialog.gd" id="2_save"]
 
-[ext_resource type="PackedScene" path="res://scenes/ui/dialogs/mind_dialog_base.tscn" id="1_base"]
-[ext_resource type="Script" path="res://ui/dialogs/save_dialog.gd" id="2_save"]
-
-[node name="SaveDialog" instance=ExtResource("1_base")]
+[node name="SaveDialog" unique_id=1898079632 instance=ExtResource("1_base")]
 script = ExtResource("2_save")

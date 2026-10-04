@@ -15,7 +15,7 @@
   `/home/c/g/code_examples/mg-lanes/03-assets`); the `MindAssets` autoload
   resolves `<project>/../assets`. Override with the project setting
   `mindustry/assets_dir` if the tree is elsewhere.
-- `godot_health check` → `ok: true`; open + play `res://scenes/spine.tscn`.
+- `godot_health check` → `ok: true`; open + play `res://scenes/game.tscn`.
 
 ## Steps
 
@@ -27,7 +27,7 @@
    stay constant across the run.
 
 2. **Load spine + wait for assets.**
-   `godot_game {"action":"play","params":{"scene":"res://scenes/spine.tscn"}}`
+   `godot_game {"action":"play","params":{"scene":"res://scenes/game.tscn"}}`
    then poll:
    `godot_log {"action":"get","params":{"source":"game","count":50}}`
    for `[assets] ready ok=true …`.

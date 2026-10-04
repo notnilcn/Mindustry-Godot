@@ -1,17 +1,11 @@
-; SPDX-License-Identifier: GPL-3.0-only
-;
-; Menu fragment (plan 14 §3.5, M3): static desktop button set. Button text is
-; replaced with bundle strings by menu_fragment.gd; mobile rebuilds the set as a
-; `MindMobileButton` grid (code-instantiated).
-;
-; Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
-; Source: core/src/mindustry/ui/fragments/MenuFragment.java
+[gd_scene format=3 uid="uid://dmnumw6ho3ep1"]
 
-[gd_scene load_steps=2 format=3]
+[ext_resource type="Script" uid="uid://bg7ssx5fi8stv" path="res://ui/fragments/menu_fragment.gd" id="1_menu"]
 
-[ext_resource type="Script" path="res://ui/fragments/menu_fragment.gd" id="1_menu"]
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_sidebar"]
+bg_color = Color(0, 0, 0, 0.6)
 
-[node name="MenuFragment" type="Control"]
+[node name="MenuFragment" type="Control" unique_id=1836291772]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -21,84 +15,60 @@ grow_vertical = 2
 mouse_filter = 1
 script = ExtResource("1_menu")
 
-[node name="Center" type="CenterContainer" parent="."]
+[node name="Sidebar" type="PanelContainer" parent="." unique_id=1200000003]
 layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
+anchors_preset = 0
 anchor_bottom = 1.0
-grow_horizontal = 2
+offset_right = 230.0
 grow_vertical = 2
 mouse_filter = 1
+theme_override_styles/panel = SubResource("StyleBoxFlat_sidebar")
 
-[node name="Panel" type="PanelContainer" parent="Center"]
+[node name="Buttons" type="VBoxContainer" parent="Sidebar" unique_id=1200000004]
 layout_mode = 2
-theme_type_variation = &"defaultDialog"
 
-[node name="Layout" type="VBoxContainer" parent="Center/Panel"]
-layout_mode = 2
-theme_override_constants/separation = 8
+[node name="Submenu" type="PanelContainer" parent="." unique_id=1200000005]
+visible = false
+layout_mode = 1
+anchors_preset = 0
+anchor_bottom = 1.0
+offset_right = 460.0
+grow_vertical = 2
+mouse_filter = 1
+theme_override_styles/panel = SubResource("StyleBoxFlat_sidebar")
 
-[node name="Title" type="Label" parent="Center/Panel/Layout"]
+[node name="Buttons" type="VBoxContainer" parent="Submenu" unique_id=1200000006]
 layout_mode = 2
-text = "Mindustry-Godot"
+
+[node name="Discord" type="Button" parent="." unique_id=1200000007]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -94.0
+offset_top = -54.0
+offset_right = -10.0
+offset_bottom = -9.0
+grow_horizontal = 0
+grow_vertical = 0
+
+[node name="Logo" type="TextureRect" parent="." unique_id=1200000001]
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+grow_horizontal = 2
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Version" type="Label" parent="." unique_id=1200000002]
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+grow_horizontal = 2
 horizontal_alignment = 1
-
-[node name="Version" type="Label" parent="Center/Panel/Layout"]
-layout_mode = 2
-text = "dev"
-horizontal_alignment = 1
-theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
-
-[node name="Buttons" type="VBoxContainer" parent="Center/Panel/Layout"]
-layout_mode = 2
-theme_override_constants/separation = 4
-
-[node name="PlayButton" type="Button" parent="Center/Panel/Layout/Buttons"]
-layout_mode = 2
-theme_type_variation = &"defaultt"
-text = "Play"
-
-[node name="CampaignButton" type="Button" parent="Center/Panel/Layout/Buttons"]
-layout_mode = 2
-theme_type_variation = &"defaultt"
-text = "Campaign"
-
-[node name="DatabaseButton" type="Button" parent="Center/Panel/Layout/Buttons"]
-layout_mode = 2
-theme_type_variation = &"defaultt"
-text = "Database"
-
-[node name="EditorButton" type="Button" parent="Center/Panel/Layout/Buttons"]
-layout_mode = 2
-theme_type_variation = &"defaultt"
-text = "Editor"
-
-[node name="ModsButton" type="Button" parent="Center/Panel/Layout/Buttons"]
-layout_mode = 2
-theme_type_variation = &"defaultt"
-text = "Mods"
-
-[node name="SettingsButton" type="Button" parent="Center/Panel/Layout/Buttons"]
-layout_mode = 2
-theme_type_variation = &"defaultt"
-text = "Settings"
-
-[node name="LanguageButton" type="Button" parent="Center/Panel/Layout/Buttons"]
-layout_mode = 2
-theme_type_variation = &"defaultt"
-text = "Language"
-
-[node name="DiscordButton" type="Button" parent="Center/Panel/Layout/Buttons"]
-layout_mode = 2
-theme_type_variation = &"defaultt"
-text = "Discord"
-
-[node name="AboutButton" type="Button" parent="Center/Panel/Layout/Buttons"]
-layout_mode = 2
-theme_type_variation = &"defaultt"
-text = "About"
-
-[node name="QuitButton" type="Button" parent="Center/Panel/Layout/Buttons"]
-layout_mode = 2
-theme_type_variation = &"defaultt"
-text = "Quit"
+mouse_filter = 2

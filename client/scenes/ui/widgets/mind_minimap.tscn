@@ -1,16 +1,8 @@
-; SPDX-License-Identifier: GPL-3.0-only
-;
-; Minimap widget (plan 14 §3.3, M4). Static 140 px Control; the world texture is
-; painted by plan 16 and the placeholder grid by mind_minimap.gd.
-;
-; Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
-; Source: core/src/mindustry/ui/Minimap.java
+[gd_scene format=3 uid="uid://0achppyekdyt"]
 
-[gd_scene load_steps=2 format=3]
+[ext_resource type="Script" uid="uid://bc1tps3nygudw" path="res://ui/widgets/mind_minimap.gd" id="1_minimap"]
 
-[ext_resource type="Script" path="res://ui/widgets/mind_minimap.gd" id="1_minimap"]
-
-[node name="MindMinimap" type="Control"]
+[node name="MindMinimap" type="Control" unique_id=160101713]
 custom_minimum_size = Vector2(140, 140)
 layout_mode = 3
 anchors_preset = 0

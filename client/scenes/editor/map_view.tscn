@@ -1,30 +1,17 @@
-; SPDX-License-Identifier: GPL-3.0-only
-;
-; MapView (plan 19 §3.10): the editor world viewport host. Static layout only;
-; map_view.gd forwards pointer input to /root/Spine/MindEditor and draws the
-; border/grid/brush outline from Rust-supplied projection data.
-;
-; The SubViewport/EditorWorldView node is the plan-16 editor mount point
-; (MindRender.mount_editor_view); mesh drawing is owned by plan 16.
-;
-; Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
-; Source: core/src/mindustry/editor/MapView.java
+[gd_scene format=3 uid="uid://dvw7wmrt7t0sy"]
 
-[gd_scene load_steps=2 format=3]
+[ext_resource type="Script" uid="uid://c7we0ccj4ygle" path="res://scenes/editor/map_view.gd" id="1_view"]
 
-[ext_resource type="Script" path="res://scenes/editor/map_view.gd" id="1_view"]
-
-[node name="MapView" type="Control"]
+[node name="MapView" type="Control" unique_id=1521711370]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-mouse_filter = 0
 script = ExtResource("1_view")
 
-[node name="ViewportContainer" type="SubViewportContainer" parent="."]
+[node name="ViewportContainer" type="SubViewportContainer" parent="." unique_id=219924903]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -34,9 +21,9 @@ grow_vertical = 2
 mouse_filter = 2
 stretch = true
 
-[node name="SubViewport" type="SubViewport" parent="ViewportContainer"]
+[node name="SubViewport" type="SubViewport" parent="ViewportContainer" unique_id=1638892624]
 handle_input_locally = false
-size = Vector2i(640, 360)
-render_target_update_mode = 3
+size = Vector2i(1152, 648)
+render_target_update_mode = 4
 
-[node name="EditorWorldView" type="Node2D" parent="ViewportContainer/SubViewport"]
+[node name="EditorWorldView" type="Node2D" parent="ViewportContainer/SubViewport" unique_id=1855288005]

@@ -30,7 +30,7 @@
 - `version.sh` writes LF-only keys `type`, `number`, `modifier`, `commitHash`, `buildDate`, `build`; commit hash and date default to the current git state. The output is gitignored.
 - `associate.sh` mirrors `mind_core::platform::assoc`: a Linux `.desktop` under `$XDG_DATA_HOME` (plus `update-desktop-database` / `xdg-mime` when available), or a Windows `.reg` imported through `reg.exe` from WSL. `MIND_EXE` overrides the exported binary path.
 `export.sh`/`export.ps1` resolve the Godot binary (`$GODOT_BIN` → `godot4`), derive the `<ver>.stable` templates directory (`~/.local/share/godot/export_templates/` on Linux, `%APPDATA%\Godot\export_templates\` on Windows; `GODOT_TEMPLATES_DIR` overrides), and fail with an install hint when it is absent. `--platform`/`-Platform` selects the preset (`windows`→`Windows Desktop`), `--preset`/`-Preset` overrides it, and `--out`/`-Out` selects the artifact path.
-- `mcp-smoke.sh` execs `python3 tools/mcp_smoke.py`, which spawns its own stdio `open-godot-mcp` server (bridge `ws://127.0.0.1:6970`) and drives `res://scenes/spine.tscn` end-to-end. Flags: `--mcp-bin`, `--repo-root`, `--server-arg`, `--keep-running`, `--verbose`; `OPEN_GODOT_MCP_BIN` overrides binary discovery. Exits `0` pass, `1` assertion/tool failure, `2` bridge not connected.
+- `mcp-smoke.sh` execs `python3 tools/mcp_smoke.py`, which spawns its own stdio `open-godot-mcp` server (bridge `ws://127.0.0.1:6970`) and drives `res://scenes/game.tscn` end-to-end. Flags: `--mcp-bin`, `--repo-root`, `--server-arg`, `--keep-running`, `--verbose`; `OPEN_GODOT_MCP_BIN` overrides binary discovery. Exits `0` pass, `1` assertion/tool failure, `2` bridge not connected.
 
 ## Conventions
 

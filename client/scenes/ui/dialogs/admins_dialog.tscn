@@ -1,15 +1,7 @@
-; SPDX-License-Identifier: GPL-3.0-only
-;
-; Admins dialog (plan 14 §3.4, M3). Inherits the shared frame; roster rows are
-; built by admins_dialog.gd.
-;
-; Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
-; Source: core/src/mindustry/ui/dialogs/AdminsDialog.java
-
-[gd_scene load_steps=3 format=3]
+[gd_scene format=3 uid="uid://b6yvvd7po85b1"]
 
 [ext_resource type="PackedScene" path="res://scenes/ui/dialogs/mind_dialog_base.tscn" id="1_base"]
-[ext_resource type="Script" path="res://ui/dialogs/admins_dialog.gd" id="2_admins"]
+[ext_resource type="Script" uid="uid://bpgvn7en0v4y0" path="res://ui/dialogs/admins_dialog.gd" id="2_admins"]
 
-[node name="AdminsDialog" instance=ExtResource("1_base")]
+[node name="AdminsDialog" unique_id=1795297856 instance=ExtResource("1_base")]
 script = ExtResource("2_admins")

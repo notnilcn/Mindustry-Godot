@@ -1,18 +1,9 @@
-; SPDX-License-Identifier: GPL-3.0-only
-;
-; HUD fragment (plan 14 §3.5, M4): the named regions from the plan table are
-; declared here (tscn-first) so the layout is editor-navigable. Labels bind to
-; the read-only `MindHud` surface in hud_fragment.gd; no sim reads in GDScript.
-;
-; Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
-; Source: core/src/mindustry/ui/fragments/HudFragment.java
+[gd_scene format=3 uid="uid://b8751xbl1aaxo"]
 
-[gd_scene load_steps=3 format=3]
-
-[ext_resource type="Script" path="res://ui/fragments/hud_fragment.gd" id="1_hud"]
+[ext_resource type="Script" uid="uid://dmrw1f17j7lal" path="res://ui/fragments/hud_fragment.gd" id="1_hud"]
 [ext_resource type="PackedScene" path="res://scenes/ui/widgets/mind_minimap.tscn" id="2_minimap"]
 
-[node name="HudFragment" type="Control"]
+[node name="HudFragment" type="Control" unique_id=1693915975]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -22,7 +13,7 @@ grow_vertical = 2
 mouse_filter = 1
 script = ExtResource("1_hud")
 
-[node name="WavesStack" type="VBoxContainer" parent="."]
+[node name="WavesStack" type="VBoxContainer" parent="." unique_id=859926016]
 layout_mode = 1
 anchors_preset = 5
 anchor_left = 0.5
@@ -30,21 +21,19 @@ anchor_right = 0.5
 grow_horizontal = 2
 theme_override_constants/separation = 4
 
-[node name="WavesMain" type="VBoxContainer" parent="WavesStack"]
+[node name="WavesMain" type="VBoxContainer" parent="WavesStack" unique_id=739026049]
 layout_mode = 2
 theme_override_constants/separation = 2
 
-[node name="Status" type="Label" parent="WavesStack/WavesMain"]
+[node name="Status" type="Label" parent="WavesStack/WavesMain" unique_id=399553049]
 layout_mode = 2
-text = ""
 horizontal_alignment = 1
 
-[node name="Info" type="Label" parent="WavesStack/WavesMain"]
+[node name="Info" type="Label" parent="WavesStack/WavesMain" unique_id=1511531312]
 layout_mode = 2
-text = ""
 horizontal_alignment = 1
 
-[node name="FpsBox" type="VBoxContainer" parent="."]
+[node name="FpsBox" type="VBoxContainer" parent="." unique_id=3948997]
 layout_mode = 1
 anchors_preset = 1
 anchor_left = 1.0
@@ -53,42 +42,41 @@ offset_left = -120.0
 grow_horizontal = 0
 theme_override_constants/separation = 0
 
-[node name="Fps" type="Label" parent="FpsBox"]
+[node name="Fps" type="Label" parent="FpsBox" unique_id=2000358608]
 layout_mode = 2
 text = "FPS: 0"
 horizontal_alignment = 2
 
-[node name="Memory" type="Label" parent="FpsBox"]
+[node name="Memory" type="Label" parent="FpsBox" unique_id=1062426290]
 layout_mode = 2
 text = "0 MB"
 horizontal_alignment = 2
 
-[node name="Ping" type="Label" parent="FpsBox"]
+[node name="Ping" type="Label" parent="FpsBox" unique_id=403221149]
 layout_mode = 2
 text = "0 ms"
 horizontal_alignment = 2
 
-[node name="CoreInfo" type="VBoxContainer" parent="."]
+[node name="CoreInfo" type="VBoxContainer" parent="." unique_id=640893471]
 layout_mode = 1
 anchors_preset = 7
 anchor_left = 0.5
-anchor_right = 0.5
 anchor_top = 1.0
+anchor_right = 0.5
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 0
 theme_override_constants/separation = 2
 
-[node name="CoreItems" type="Control" parent="CoreInfo"]
-layout_mode = 2
+[node name="CoreItems" type="Control" parent="CoreInfo" unique_id=1080290227]
 custom_minimum_size = Vector2(0, 32)
-
-[node name="HudText" type="Label" parent="CoreInfo"]
 layout_mode = 2
-text = ""
+
+[node name="HudText" type="Label" parent="CoreInfo" unique_id=1872703018]
+layout_mode = 2
 horizontal_alignment = 1
 
-[node name="MinimapBox" type="Control" parent="."]
+[node name="MinimapBox" type="Control" parent="." unique_id=110911400]
 layout_mode = 1
 anchors_preset = 3
 anchor_left = 1.0
@@ -100,12 +88,12 @@ offset_top = -186.0
 grow_horizontal = 0
 grow_vertical = 0
 
-[node name="Minimap" parent="MinimapBox" instance=ExtResource("2_minimap")]
+[node name="Minimap" parent="MinimapBox" unique_id=253910749 instance=ExtResource("2_minimap")]
 layout_mode = 0
 offset_right = 140.0
 offset_bottom = 140.0
 
-[node name="Position" type="Label" parent="MinimapBox"]
+[node name="Position" type="Label" parent="MinimapBox" unique_id=336799321]
 layout_mode = 1
 anchors_preset = 3
 anchor_left = 1.0
@@ -114,9 +102,8 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 0
 grow_vertical = 0
-text = ""
 
-[node name="PausedBanner" type="Label" parent="."]
+[node name="PausedBanner" type="Label" parent="." unique_id=1173120531]
 layout_mode = 1
 anchors_preset = 8
 anchor_left = 0.5
@@ -128,7 +115,7 @@ grow_vertical = 2
 text = "Paused"
 horizontal_alignment = 1
 
-[node name="WaitingBanner" type="Label" parent="."]
+[node name="WaitingBanner" type="Label" parent="." unique_id=1997578906]
 layout_mode = 1
 anchors_preset = 8
 anchor_left = 0.5

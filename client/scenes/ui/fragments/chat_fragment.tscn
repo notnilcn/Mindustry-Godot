@@ -1,16 +1,8 @@
-; SPDX-License-Identifier: GPL-3.0-only
-;
-; ChatFragment (plan 14 M7). Persistent HUD overlay; the message buffer and
-; input row are built by chat_fragment.gd (runtime data, §3.10).
-;
-; Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
-; Source: core/src/mindustry/ui/fragments/ChatFragment.java
+[gd_scene format=3 uid="uid://dst7fhmryiaal"]
 
-[gd_scene load_steps=2 format=3]
+[ext_resource type="Script" uid="uid://bint83ykr2u11" path="res://ui/fragments/chat_fragment.gd" id="1_script"]
 
-[ext_resource type="Script" path="res://ui/fragments/chat_fragment.gd" id="1_script"]
-
-[node name="ChatFragment" type="Control"]
+[node name="ChatFragment" type="Control" unique_id=1563347039]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0

@@ -203,7 +203,7 @@ mod tests {
                 id: String::from("mcp_test"),
                 phase: String::from("P0"),
                 plan: String::from("00"),
-                scene: String::from("res://scenes/spine.tscn"),
+                scene: String::from("res://scenes/game.tscn"),
                 scenario: Some(String::from("test_scenario")),
                 steps: vec![String::from("load_scenario")],
                 asserts: Vec::new(),

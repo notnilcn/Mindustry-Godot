@@ -41,6 +41,11 @@ impl MenuRenderer {
         self.world.is_some()
     }
 
+    /// The generated menu world (`None` before `generate`).
+    pub fn world(&self) -> Option<&MenuWorld> {
+        self.world.as_ref()
+    }
+
     /// Tile count.
     pub fn tile_count(&self) -> usize {
         self.world.as_ref().map(|w| w.tiles.len()).unwrap_or(0)

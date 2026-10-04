@@ -1,14 +1,8 @@
-; SPDX-License-Identifier: GPL-3.0-only
-;
-; plan 19 editor drawing control.
-;
-; Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
+[gd_scene format=3 uid="uid://8co71e3flfak"]
 
-[gd_scene load_steps=2 format=3]
+[ext_resource type="Script" uid="uid://b7nim3875pled" path="res://scenes/editor/map_objectives_canvas.gd" id="1_script"]
 
-[ext_resource type="Script" path="res://scenes/editor/map_objectives_canvas.gd" id="1_script"]
-
-[node name="MapObjectivesCanvas" type="Control"]
+[node name="MapObjectivesCanvas" type="Control" unique_id=1546882207]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0

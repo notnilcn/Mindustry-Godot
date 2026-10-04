@@ -53,3 +53,5 @@ __pycache__/
 # Local agent/orchestrator session state (not part of the project)
 session.json
 .kimi-code/
+
+screenshots_for_ai/

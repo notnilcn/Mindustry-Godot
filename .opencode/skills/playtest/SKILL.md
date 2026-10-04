@@ -13,7 +13,7 @@ whenToUse: When playtesting, verifying, or driving the Mindustry-Godot client �
 
 **The `spacetime` CLI is for server-side setup and inspection around that playtest**: publishing the local module, checking module logs, reading rows with SQL, and confirming what the module exposes with `describe`. The P0 module is a skeleton (one `player` table + `set_username`), so in practice the CLI is mostly a publish/log/describe tool until plan 01 grows the schema. Use it to arrange the scenario, then verify the result through the running client.
 
-Typical flow: `server/build.sh` (local publish + bindings) → `godot_game play` on `res://scenes/spine.tscn` → verify via pid-stamped `godot_exec` evals and/or `spacetime sql` when the check is purely server-side.
+Typical flow: `server/build.sh` (local publish + bindings) → `godot_game play` on `res://scenes/game.tscn` → verify via pid-stamped `godot_exec` evals and/or `spacetime sql` when the check is purely server-side.
 
 Generic UI-driving mechanics (CLICK/DRAG coordinates, eval pitfalls, stall diagnosis) live in the MCP itself — **follow them, don't re-derive here**:
 
@@ -37,7 +37,7 @@ The MCP server is a stdio process (`open-godot-mcp`, Windows binary `~/.local/bi
 
 2. **Identity preflight before any `godot_game` call.** The bridge is `127.0.0.1:6970`; if another Godot editor (the sibling `main/` project is Windows-side) already holds it, the MCP server talks to *that* project. Close the other editor, then verify: `godot_editor_read state` → `project_path` must contain `mindustry-godot`. (The `godot_exec` runtime identity check only works once a game is running; the smoke asserts it after play via `ProjectSettings.globalize_path("res://")`.)
 
-3. **Always run `res://scenes/spine.tscn`** — the only P0 entry point. `godot_editor_edit {"action":"open_scene","params":{"path":"res://scenes/spine.tscn"}}`, then `godot_game {"action":"play","params":{"scene":"res://scenes/spine.tscn"}}` with the scene passed explicitly. Never play whatever scene happens to be open. Wait for `godot_game {"action":"status"}` → `runtime_connected: true`.
+3. **Always run `res://scenes/game.tscn`** — the only P0 entry point. `godot_editor_edit {"action":"open_scene","params":{"path":"res://scenes/game.tscn"}}`, then `godot_game {"action":"play","params":{"scene":"res://scenes/game.tscn"}}` with the scene passed explicitly. Never play whatever scene happens to be open. Wait for `godot_game {"action":"status"}` → `runtime_connected: true`. Omitting `params.scene` (bare `godot_game {"action":"play"}`) **appears to succeed** — it returns `runtime_ready: true` — but no game process attaches the bridge: `godot_game status` reports `runtime_connected: false` / `instance_count: 0`, and every `godot_exec` then fails with `RUNTIME_NOT_CONNECTED`. Passing the scene is the fix; if the runtime never connects, confirm the `scene` param was sent before anything else.
 
 4. **Node map** (all static nodes declared in the `.tscn`):
 
@@ -117,6 +117,7 @@ godot_exec {"action":"call","params":{"node_path":"/root/Spine/SimHost","method"
 3. The headless oracle is the cheaper ground truth: `cargo run -p mind-headless -- run spine_place_break --json` and `... run spine_determinism --json` from the repo root.
 4. A wedged game: `godot_game {"action":"stop"}` then play again. Do not kill the editor unless the bridge itself is unresponsive; relaunch it with the command from Session start.
 5. `godot_exec` failing with `RUNTIME_NOT_CONNECTED` means no game process is connected — play first (recipes 1–2 need the game, editor-only tools do not).
+6. **`godot_game play` with no `scene` param looks successful but does not attach the runtime** (`status` → `runtime_connected: false`, `instance_count: 0`). Always play `res://scenes/game.tscn` explicitly (§Session start 3); this is the usual cause of a "broken" MCP session.
 
 # Part 2 — SpacetimeDB CLI (`mindustry_godot`)
 

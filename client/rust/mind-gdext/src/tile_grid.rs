@@ -104,7 +104,7 @@ impl MindTileGrid {
         self.base_mut().queue_redraw();
     }
 
-    /// `world_changed` receiver (wired in `spine.tscn`): schedules a `_draw`.
+    /// `world_changed` receiver (wired in `game.tscn`): schedules a `_draw`.
     #[func]
     pub fn redraw_requested(&mut self) {
         self.base_mut().queue_redraw();

@@ -581,7 +581,7 @@ impl MindSimHost {
     // MCP recipes (plan 13 §7c; editor run is orchestrator-owned via the
     // single-editor mutex):
     //
-    //   godot_exec call: $"/root/Spine/MindLogic" statement_names()   # (after adding MindLogic to spine.tscn)
+    //   godot_exec call: $"/root/Spine/MindLogic" statement_names()   # (after adding MindLogic to game.tscn)
     //   godot_exec call: $"/root/Spine/SimHost" logic_run("op add a a 1\njump 0 always", 10, 2, true)
     //   godot_exec call: $"/root/Spine/SimHost" logic_place("logic-processor", 40, 40)  # false until 05/07
     //   godot_exec call: $"/root/Spine/SimHost" logic_get_state(40, 40)

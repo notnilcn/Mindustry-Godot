@@ -1,14 +1,9 @@
-; SPDX-License-Identifier: GPL-3.0-only
-;
-; State inspector overlay of the M4 spine (plan 00 §3.5). UI layout only:
-; state_inspector.gd reads MindSimHost and never writes sim state.
-; Node path /root/Spine/Ui/StateInspector/Label is part of the MCP test API.
-
-[gd_scene load_steps=2 format=3]
+[gd_scene format=3 uid="uid://cofwy4j2648mg"]
 
 [ext_resource type="Script" uid="uid://xroj1litmuf5" path="res://ui/state_inspector.gd" id="1_inspector"]
 
-[node name="StateInspector" type="Control"]
+[node name="StateInspector" type="Control" unique_id=379553688]
+visible = false
 layout_mode = 3
 anchors_preset = 0
 offset_right = 320.0
@@ -16,44 +11,41 @@ offset_bottom = 200.0
 mouse_filter = 2
 script = ExtResource("1_inspector")
 
-[node name="Background" type="ColorRect" parent="."]
+[node name="Background" type="ColorRect" parent="." unique_id=141378442]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-color = Color(0.04, 0.05, 0.08, 0.72)
 mouse_filter = 2
+color = Color(0.04, 0.05, 0.08, 0.72)
 
-[node name="Label" type="Label" parent="."]
+[node name="Label" type="Label" parent="." unique_id=2000879862]
 layout_mode = 1
 offset_left = 10.0
 offset_top = 8.0
 offset_right = 310.0
 offset_bottom = 124.0
-mouse_filter = 2
 text = "tick: 0"
 
-[node name="NetLabel" type="Label" parent="."]
+[node name="NetLabel" type="Label" parent="." unique_id=1111929321]
 layout_mode = 1
 offset_left = 10.0
 offset_top = 132.0
 offset_right = 310.0
 offset_bottom = 192.0
-mouse_filter = 2
 text = "net: -"
 
-[node name="ContentCounts" type="Label" parent="."]
+[node name="ContentCounts" type="Label" parent="." unique_id=538431092]
 layout_mode = 1
 offset_left = 10.0
 offset_top = 200.0
 offset_right = 310.0
 offset_bottom = 320.0
-mouse_filter = 2
 text = "content: -"
 
-[node name="ContentList" type="ItemList" parent="."]
+[node name="ContentList" type="ItemList" parent="." unique_id=1149820174]
 layout_mode = 1
 offset_left = 10.0
 offset_top = 328.0
@@ -61,11 +53,10 @@ offset_right = 310.0
 offset_bottom = 468.0
 mouse_filter = 2
 auto_height = true
-max_text_lines = 1
 same_column_width = true
 fixed_column_width = 280
 
-[node name="RegionPreview" type="TextureRect" parent="."]
+[node name="RegionPreview" type="TextureRect" parent="." unique_id=115056837]
 layout_mode = 1
 offset_left = 10.0
 offset_top = 476.0
@@ -75,22 +66,18 @@ mouse_filter = 2
 expand_mode = 1
 stretch_mode = 5
 
-; Plan-18 §3.10 inspector `Audio` row (bus/music/lowpass/voice state).
-[node name="Audio" type="Label" parent="."]
+[node name="Audio" type="Label" parent="." unique_id=1290801398]
 layout_mode = 1
 offset_left = 10.0
 offset_top = 612.0
 offset_right = 310.0
 offset_bottom = 660.0
-mouse_filter = 2
 text = "audio: -"
 
-; Plan-19 M3 inspector `Editor` tab: tool/brush/selection/op stack.
-[node name="Editor" type="Label" parent="."]
+[node name="Editor" type="Label" parent="." unique_id=95882919]
 layout_mode = 1
 offset_left = 10.0
 offset_top = 668.0
 offset_right = 310.0
 offset_bottom = 760.0
-mouse_filter = 2
 text = "editor: -"

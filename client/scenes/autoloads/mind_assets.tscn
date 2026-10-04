@@ -1,10 +1,3 @@
-; SPDX-License-Identifier: GPL-3.0-only
-;
-; MindAssets autoload (plan 03 M5). `MindAssets` (Rust, mind-gdext) loads the
-; packed atlas + loose textures and exposes the MCP `probe(name)` API plus the
-; state-inspector fixture helpers. Declared as a scene so it is editor-navigable
-; and matches the autoload singleton name `MindAssets`.
+[gd_scene format=3 uid="uid://blejsujeg4ctt"]
 
-[gd_scene format=3]
-
-[node name="MindAssets" type="MindAssets"]
+[node name="MindAssets" type="MindAssets" unique_id=1728784661]

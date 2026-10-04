@@ -6,7 +6,7 @@
 //!
 //! Campaign state, play flows, objectives, tech and schematics all live in
 //! `mind_core::game`; this node is the thin Godot shell the MCP oracle and the
-//! plan-14 dialogs drive. It is declared in `res://scenes/spine.tscn` (HLP §6.6,
+//! plan-14 dialogs drive. It is declared in `res://scenes/game.tscn` (HLP §6.6,
 //! tscn-first) rather than registered as a project autoload singleton.
 //!
 //! In-engine MCP verification (plan 12 §7c) is deferred to the orchestrator's

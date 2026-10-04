@@ -1,0 +1,67 @@
+[gd_scene format=3 uid="uid://c71o7eu2mstmd"]
+
+[ext_resource type="PackedScene" path="res://scenes/ui/state_inspector.tscn" id="1_inspector"]
+[ext_resource type="PackedScene" path="res://scenes/ui/ui_root.tscn" id="2_uiroot"]
+[ext_resource type="PackedScene" path="res://scenes/editor/map_editor_dialog.tscn" id="3_editor"]
+[ext_resource type="Script" path="res://ui/menu_background.gd" id="4_menubg"]
+
+[node name="Spine" type="Node" unique_id=1959762537]
+
+[node name="SimHost" type="MindSimHost" parent="." unique_id=842240592]
+
+[node name="Input" type="MindInput" parent="." unique_id=293949483]
+
+[node name="MindAudio" type="MindAudio" parent="." unique_id=889813358]
+
+[node name="World" type="Node2D" parent="." unique_id=1855719485]
+
+[node name="TileGrid" type="MindTileGrid" parent="World" unique_id=582739400]
+visible = false
+
+[node name="Camera2D" type="MindCamera2D" parent="World" unique_id=85325158]
+position = Vector2(128, 128)
+zoom = Vector2(2, 2)
+
+[node name="Renderer" type="MindWorldRenderer" parent="World" unique_id=1055646708]
+
+[node name="Bloom" type="Node2D" parent="World" unique_id=1685205082]
+
+[node name="LowRes" type="Node2D" parent="World" unique_id=1530245159]
+
+[node name="MinimapProvider" type="MindMinimap" parent="World" unique_id=758620958]
+
+[node name="MindRender" type="MindRender" parent="." unique_id=1844555076]
+
+[node name="MindFx" type="MindFx" parent="." unique_id=102409333]
+
+[node name="MindCampaign" type="MindCampaign" parent="." unique_id=2074069977]
+
+[node name="MindLogic" type="MindLogic" parent="." unique_id=1522895067]
+
+[node name="MindNet" type="MindNet" parent="." unique_id=709721595]
+
+[node name="MindEditor" type="MindEditor" parent="." unique_id=1226968200]
+
+[node name="MindPlatform" type="MindPlatform" parent="." unique_id=1187341600]
+
+[node name="Planet" type="CanvasLayer" parent="." unique_id=328291941]
+
+[node name="Ui" type="CanvasLayer" parent="." unique_id=541018541]
+
+[node name="MenuBackground" type="TextureRect" parent="Ui" unique_id=1600000001]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("4_menubg")
+
+[node name="UiRoot" parent="Ui" unique_id=1318437125 instance=ExtResource("2_uiroot")]
+
+[node name="EditorDialog" parent="Ui" unique_id=1972126241 instance=ExtResource("3_editor")]
+
+[node name="StateInspector" parent="Ui" unique_id=1200639430 instance=ExtResource("1_inspector")]
+
+[connection signal="state_changed" from="SimHost" to="Ui/StateInspector" method="_on_state_changed"]
+[connection signal="world_changed" from="SimHost" to="World/TileGrid" method="redraw_requested"]

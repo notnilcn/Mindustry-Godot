@@ -1,15 +1,8 @@
-; SPDX-License-Identifier: GPL-3.0-only
-;
-; Fade-in overlay (plan 14 §3.5/M2). Root is a full-screen ColorRect.
-;
-; Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
+[gd_scene format=3 uid="uid://bopvf6uifjyr7"]
 
-[gd_scene load_steps=2 format=3]
+[ext_resource type="Script" uid="uid://bhdrxysvd00kl" path="res://ui/fragments/fade_in_fragment.gd" id="1_fade"]
 
-[ext_resource type="Script" path="res://ui/fragments/fade_in_fragment.gd" id="1_fade"]
-
-[node name="FadeInFragment" type="ColorRect"]
-layout_mode = 3
+[node name="FadeInFragment" type="ColorRect" unique_id=1181448012]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0

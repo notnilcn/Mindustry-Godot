@@ -1,13 +1,3 @@
-; SPDX-License-Identifier: GPL-3.0-only
-;
-; StdbConnector autoload (plan 01 §3.11). The root node is the native
-; `StdbConnector` GDExtension class (mind-gdext), not a script: default
-; host/db/mode live on the class exports so the editor can inspect them.
-; Registered in project.godot as `StdbConnector` when mind-gdext lands (M5).
+[gd_scene format=3 uid="uid://bvr030p62nier"]
 
-[gd_scene format=3]
-
-[node name="StdbConnector" type="StdbConnector"]
-host = "http://127.0.0.1:3000"
-db_name = "mindustry"
-offline = true
+[node name="StdbConnector" type="StdbConnector" unique_id=1432755747]

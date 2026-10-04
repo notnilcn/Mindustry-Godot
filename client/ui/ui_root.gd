@@ -28,6 +28,31 @@ func _ready() -> void:
 	_apply_theme()
 	_load_manifest()
 	_connect_prompts()
+	_boot()
+
+
+## Boot presentation (`MenuFragment`/`LoadingFragment`/`FadeInFragment` order):
+## the standalone menu is shown, the in-game HUD group is hidden, the loading
+## overlay is cleared and the black boot cover fades out.
+func _boot() -> void:
+	set_menu_visible(true)
+	var fade := overlay_layer.get_node_or_null("fade_in")
+	if fade != null and fade.has_method("start"):
+		fade.call("start")
+
+
+## Shows the standalone menu (`MenuGroup`/`MenuBackground`) and hides the
+## in-game HUD group (parity: `state.isMenu()` gates both), clearing the loading
+## overlay too.
+func set_menu_visible(menu_visible: bool) -> void:
+	menu_group.visible = menu_visible
+	hud_group.visible = not menu_visible
+	var background := get_node_or_null("../MenuBackground")
+	if background != null:
+		background.visible = menu_visible
+	var loading := loading_layer.get_node_or_null("loading")
+	if loading != null and loading.has_method("hide_loading"):
+		loading.call("hide_loading")
 
 
 func _ui() -> Node:

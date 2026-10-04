@@ -6,9 +6,9 @@ The Godot project for Mindustry-Godot. Gameplay behavior lives in Rust (`client/
 
 | Path | Responsibility |
 |---|---|
-| `project.godot` | Project file: main scene `res://scenes/spine.tscn`, `mobile` rendering method, Jolt 3D physics, the `McpRuntimeAutoload`/`MindAssets`/`MindMods`/`StdbConnector`/`MindUi`/`MindHud` autoloads, and the `open_godot_mcp` editor plugin. |
+| `project.godot` | Project file: main scene `res://scenes/game.tscn`, `mobile` rendering method, Jolt 3D physics, the `McpRuntimeAutoload`/`MindAssets`/`MindMods`/`StdbConnector`/`MindUi`/`MindHud` autoloads, and the `open_godot_mcp` editor plugin. |
 | `mind.gdextension` | Maps `gdext_rust_init` (minimum compatibility 4.7) to `res://bin/rust/{debug,release}/…mind_gdext…`; `tools/build.sh` produces that library. |
-| `scenes/spine.tscn` | Main scene rig: `SimHost`, `Input`, `MindAudio`, `World/{TileGrid,Camera2D,Renderer,Bloom,LowRes,MinimapProvider}`, the `MindRender`/`MindFx`/`MindCampaign`/`MindLogic`/`MindNet`/`MindEditor`/`MindPlatform` facades, `Planet`, and `Ui/{UiRoot,EditorDialog,StateInspector}`. |
+| `scenes/game.tscn` | Main scene rig: `SimHost`, `Input`, `MindAudio`, `World/{TileGrid,Camera2D,Renderer,Bloom,LowRes,MinimapProvider}`, the `MindRender`/`MindFx`/`MindCampaign`/`MindLogic`/`MindNet`/`MindEditor`/`MindPlatform` facades, `Planet`, and `Ui/{MenuBackground,UiRoot,EditorDialog,StateInspector}`. |
 | `scenes/autoloads/` | One `.tscn` per autoload; each root node is the native `mind-gdext` class (`MindAssets`, `MindMods`, `StdbConnector`, `MindUi`, `MindHud`). |
 | `scenes/editor/` | Map-editor shell and tools: `map_editor_dialog`, `map_view`, `wave_graph`, `map_objectives_canvas`, `wave_info_dialog`, `banned_content_dialog`, `sector_generate_dialog`, plus the map info/load/save/resize/locales/processors/generate/data dialogs. |
 | `scenes/ui/dialogs/`, `scenes/ui/fragments/`, `scenes/ui/widgets/` | `.tscn` files mirroring `ui/`; `mind_dialog_base.tscn` is the shared dialog shell and `mind_minimap.tscn` hosts the minimap widget. |
@@ -26,7 +26,8 @@ The Godot project for Mindustry-Godot. Gameplay behavior lives in Rust (`client/
 
 ## Responsibilities
 
-- `ui_root.gd` (`MindUiRoot`) owns the layer groups (`MenuGroup`, `HudGroup`, `DialogLayer`, `OverlayLayer`, `LoadingLayer`), eagerly instantiates every manifest dialog and fragment, builds the theme via `MindThemeBuilder`, and connects the `MindUi` prompt/toast signals.
+- `ui_root.gd` (`MindUiRoot`) owns the layer groups (`MenuGroup`, `HudGroup`, `DialogLayer`, `OverlayLayer`, `LoadingLayer`), eagerly instantiates every manifest dialog and fragment, builds the theme via `MindThemeBuilder`, connects the `MindUi` prompt/toast signals, and runs the boot presentation (`set_menu_visible(true)`: show the menu, hide the HUD group, clear the loading overlay, fade the boot cover).
+- `menu_fragment.gd` renders the standalone menu in `MenuGroup`: the `MINDISTRY` logo, the left sidebar button tree (icons are Mindustry icon-font glyphs via `MindAssets.icon_font`) with fade-in submenus, the Discord banner and quit. `menu_background.gd` under `Ui/MenuBackground` asks the Rust `MindRender.build_menu_texture` for the procedural `MenuRenderer` world baked to a texture and darkens it behind the menu.
 - `mind_dialog.gd` (`MindDialog`) is the base for all dialogs; `MindUi` (Rust) owns visibility and the active-dialog stack, while the node renders and calls `show_dialog`/`hide_dialog`.
 - Fragments bind to the read-only `MindHud` properties and signals or to `MindUi` JSON endpoints; they never touch sim state.
 - Editor dialogs read and write `/root/Spine/MindEditor` (tool dispatch, rotation, undo/redo and palette order are resolved in Rust).
@@ -62,7 +63,7 @@ The Godot project for Mindustry-Godot. Gameplay behavior lives in Rust (`client/
 
 ```bash
 tools/build.sh                                                  # mind-gdext + mind-headless -> client/bin/rust, then sync scenarios
-godot4 --path client                                            # open res://scenes/spine.tscn
+godot4 --path client                                            # open res://scenes/game.tscn
 bash tools/godot.sh --headless --editor --quit --path client    # import/parse gate
 godot4 --headless --path client --script res://tools/shaders_check.gd   # shader compile gate
 tools/ci.sh                                                     # full local gate (Rust, goldens, mirror, Godot import, STDB)

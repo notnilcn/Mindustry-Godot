@@ -1,56 +1,88 @@
 ## SPDX-License-Identifier: GPL-3.0-only
 ## Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
-## Source: core/src/mindustry/ui/fragments/MenuFragment.java (plan 14 §3.5, M3).
+## Source: core/src/mindustry/ui/fragments/MenuFragment.java.
 ##
-## Standalone menu. The button set is declared in `menu_fragment.tscn`
-## (tscn-first); this script only routes each button to `MindUi.open_dialog` and
-## builds the mobile variant (`buildMobile`) when `MindUi.is_mobile()`. Alpha/
-## mod/editor gated buttons are hidden when their owner is unavailable.
+## Standalone menu. `Logo`/`Version`/`Sidebar`/`Submenu`/`Discord` are declared in
+## `menu_fragment.tscn`; this script lays out the logo, builds the desktop button
+## tree (upstream `buildDesktop`), fades submenus in/out and routes each button to
+## `MindUi.open_dialog`, an info prompt, or quit. Icons are the Mindustry icon-font
+## glyphs (`icon_codes.json`) rendered through the `MindAssets` icon font.
 
 extends Control
 
-## Button node name -> dialog manifest key.
-const BUTTON_DIALOGS := {
-	"PlayButton": "join",
-	"DatabaseButton": "database",
-	"ModsButton": "mods",
-	"SettingsButton": "settings",
-	"LanguageButton": "language",
-	"DiscordButton": "discord",
-	"AboutButton": "about",
+## UI icon name -> `icon.ttf` code point (`assets/icons/icon_codes.json`).
+const ICON_CODES := {
+	"play": 59433,
+	"menu": 59532,
+	"terrain": 59492,
+	"steam": 59426,
+	"book": 59483,
+	"settings": 59516,
+	"exit": 59487,
+	"add": 59411,
+	"download": 59513,
+	"info": 61737,
+	"paste": 59474,
 }
 
-## Buttons owned by plans not yet wired in this client (rendered as info stubs).
-const BUTTON_INFO := {
-	"CampaignButton": "@campaign",
-	"EditorButton": "@editor",
-}
+const BUTTON_W := 230.0
+const BUTTON_H := 70.0
 
-## Button node name -> bundle text key.
-const BUTTON_TEXT := {
-	"PlayButton": "@play",
-	"CampaignButton": "@campaign",
-	"DatabaseButton": "@database",
-	"EditorButton": "@editor",
-	"ModsButton": "@mods",
-	"SettingsButton": "@settings",
-	"LanguageButton": "@settings.language",
-	"DiscordButton": "@discord",
-	"AboutButton": "@about.button",
-	"QuitButton": "@quit",
-}
+## Upstream `MenuFragment.desktopButtons` (top-level). `submenu` opens the second
+## column, `dialog` opens a manifest dialog, `info` shows a bundle prompt.
+const DESKTOP_BUTTONS := [
+	{"text": "@play", "icon": "play", "submenu": [
+		{"text": "@campaign", "icon": "play", "dialog": "planet"},
+		{"text": "@joingame", "icon": "add", "dialog": "join"},
+		{"text": "@customgame", "icon": "terrain", "dialog": "custom"},
+		{"text": "@loadgame", "icon": "download", "dialog": "load"},
+	]},
+	{"text": "@database.button", "icon": "menu", "submenu": [
+		{"text": "@schematics", "icon": "paste", "dialog": "schematics"},
+		{"text": "@database", "icon": "book", "dialog": "database"},
+		{"text": "@about.button", "icon": "info", "dialog": "about"},
+	]},
+	{"text": "@editor", "icon": "terrain", "dialog": "editor_maps"},
+	{"text": "@workshop", "icon": "steam", "info": "@workshop"},
+	{"text": "@mods", "icon": "book", "dialog": "mods"},
+	{"text": "@settings", "icon": "settings", "dialog": "settings"},
+	{"text": "@quit", "icon": "exit", "action": "quit"},
+]
+
+## Mobile grid (`MenuFragment.buildMobile`): a flat 3-column set.
+const MOBILE_BUTTONS := [
+	{"text": "@campaign", "icon": "play", "dialog": "planet"},
+	{"text": "@joingame", "icon": "add", "dialog": "join"},
+	{"text": "@customgame", "icon": "terrain", "dialog": "custom"},
+	{"text": "@loadgame", "icon": "download", "dialog": "load"},
+	{"text": "@editor", "icon": "terrain", "dialog": "editor_maps"},
+	{"text": "@settings", "icon": "settings", "dialog": "settings"},
+	{"text": "@mods", "icon": "book", "dialog": "mods"},
+	{"text": "@quit", "icon": "exit", "action": "quit"},
+]
 
 var _buttons: VBoxContainer = null
-var _mobile_grid: GridContainer = null
+var _submenu: PanelContainer = null
+var _submenu_buttons: VBoxContainer = null
+var _icon_font: FontFile = null
+var _active_button: Button = null
 
 
 func _ready() -> void:
-	_buttons = get_node_or_null("Center/Panel/Layout/Buttons")
-	_version_label()
-	_localize_buttons()
+	_buttons = get_node_or_null("Sidebar/Buttons") as VBoxContainer
+	_submenu = get_node_or_null("Submenu") as PanelContainer
+	_submenu_buttons = get_node_or_null("Submenu/Buttons") as VBoxContainer
+	_icon_font = _load_icon_font()
+	_apply_version()
+	_setup_discord()
 	if _is_mobile():
 		_build_mobile()
-	_connect_buttons()
+	else:
+		_build_desktop()
+	_apply_layout()
+	get_viewport().size_changed.connect(_apply_layout)
+	if _submenu != null:
+		_submenu.visible = false
 
 
 func _is_mobile() -> bool:
@@ -58,22 +90,12 @@ func _is_mobile() -> bool:
 	return ui != null and bool(ui.call("is_mobile"))
 
 
-func _version_label() -> void:
-	var label := get_node_or_null("Center/Panel/Layout/Version")
-	if label == null:
-		return
-	label.text = "v%s" % str(ProjectSettings.get_setting("application/config/version", "dev"))
-
-
-## Applies bundle text to every declared menu button (parity: no hardcoded UI
-## strings; the keys are `@play`/`@database`/…).
-func _localize_buttons() -> void:
-	if _buttons == null:
-		return
-	for button_name in BUTTON_TEXT:
-		var button := _buttons.get_node_or_null(NodePath(button_name))
-		if button != null:
-			button.text = _t(str(BUTTON_TEXT[button_name]))
+func _load_icon_font() -> FontFile:
+	var assets := MindWidgets.assets()
+	if assets == null:
+		return null
+	var font: Variant = assets.call("icon_font")
+	return font if font is FontFile else null
 
 
 func _t(key: String) -> String:
@@ -84,20 +106,182 @@ func _t(key: String) -> String:
 	return str(assets.call("bundle_get", resolved))
 
 
-func _connect_buttons() -> void:
+## Positions the logo (top-center), version label, sidebar/submenu columns and
+## the button-size defaults, re-run on viewport resize (`ResizeEvent`).
+func _apply_layout() -> void:
+	var viewport_w := get_viewport_rect().size.x
+	var logo := get_node_or_null("Logo") as TextureRect
+	if logo != null:
+		logo.texture = MindWidgets.icon_texture("logo")
+		var w := clampf(viewport_w * 0.42, 160.0, maxf(160.0, viewport_w - 20.0))
+		var h := w * (107.0 / 768.0)
+		logo.offset_left = -w * 0.5
+		logo.offset_right = w * 0.5
+		logo.offset_top = 8.0
+		logo.offset_bottom = 8.0 + h
+	var version := get_node_or_null("Version") as Label
+	if version != null:
+		var top := (logo.offset_bottom if logo != null else 0.0) + 2.0
+		version.offset_left = -160.0
+		version.offset_right = 160.0
+		version.offset_top = top
+		version.offset_bottom = top + 24.0
+	var x := viewport_w / 10.0
+	var sidebar := get_node_or_null("Sidebar") as PanelContainer
+	if sidebar != null:
+		sidebar.offset_left = x
+		sidebar.offset_right = x + BUTTON_W
+	if _submenu != null:
+		_submenu.offset_left = x + BUTTON_W
+		_submenu.offset_right = x + BUTTON_W * 2.0
+
+
+func _apply_version() -> void:
+	var label := get_node_or_null("Version") as Label
+	if label == null:
+		return
+	var version := str(ProjectSettings.get_setting("application/config/version", ""))
+	label.text = "Mindustry-Godot" if version.is_empty() else "v%s" % version
+
+
+func _setup_discord() -> void:
+	var discord := get_node_or_null("Discord") as Button
+	if discord == null:
+		return
+	var texture := MindWidgets.icon_texture("discord-banner")
+	if texture == null:
+		discord.visible = false
+		return
+	var box := StyleBoxTexture.new()
+	box.texture = texture
+	discord.add_theme_stylebox_override("normal", box)
+	discord.add_theme_stylebox_override("hover", box)
+	discord.add_theme_stylebox_override("pressed", box)
+	discord.tooltip_text = _t("@discord")
+	discord.pressed.connect(_open.bind("discord"))
+
+
+func _build_desktop() -> void:
 	if _buttons == null:
 		return
-	for button_name in BUTTON_DIALOGS:
-		var button := _buttons.get_node_or_null(NodePath(button_name))
-		if button != null:
-			button.pressed.connect(_open.bind(str(BUTTON_DIALOGS[button_name])))
-	for button_name in BUTTON_INFO:
-		var button := _buttons.get_node_or_null(NodePath(button_name))
-		if button != null:
-			button.pressed.connect(_info.bind(str(BUTTON_INFO[button_name])))
-	var quit := _buttons.get_node_or_null("QuitButton")
-	if quit != null:
-		quit.pressed.connect(_quit)
+	for entry in DESKTOP_BUTTONS:
+		var button := _make_button(entry, Vector2(BUTTON_W, BUTTON_H))
+		button.pressed.connect(_on_menu_button.bind(entry, button))
+		_buttons.add_child(button)
+
+
+## Mobile variant (`MenuFragment.buildMobile`): the top-level set in a centered
+## 3-column grid instead of the left sidebar.
+func _build_mobile() -> void:
+	var sidebar := get_node_or_null("Sidebar") as PanelContainer
+	if sidebar != null:
+		sidebar.visible = false
+	# code-instantiated: mobile grid is a runtime layout variant chosen from
+	# `Vars.mobile`; the entries reuse the shared desktop set.
+	var grid := GridContainer.new()
+	grid.columns = 3
+	grid.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(grid)
+	for entry in MOBILE_BUTTONS:
+		var button := _make_button(entry, Vector2(150.0, 150.0))
+		button.pressed.connect(_on_menu_button.bind(entry, button))
+		grid.add_child(button)
+
+
+## Builds one icon+label menu button. code-instantiated: the icon glyph + label
+## row is data-driven from the button table and has no static scene (the desktop
+## set is `width`/`height` uniform, upstream `buttons(Table, MenuButton...)`).
+func _make_button(entry: Dictionary, size: Vector2) -> Button:
+	var button := Button.new()
+	button.custom_minimum_size = size
+	button.focus_mode = Control.FOCUS_NONE
+	button.toggle_mode = entry.has("submenu")
+	button.add_theme_stylebox_override("normal", _menu_style(Color(0.0, 0.0, 0.0, 0.0)))
+	button.add_theme_stylebox_override("hover", _menu_style(Color(1.0, 1.0, 1.0, 0.08)))
+	button.add_theme_stylebox_override("pressed", _menu_style(Color(1.0, 1.0, 1.0, 0.14)))
+	var row := HBoxContainer.new()
+	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	row.offset_left = 11.0
+	row.add_theme_constant_override("separation", 8)
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	button.add_child(row)
+	var icon := Label.new()
+	icon.text = _glyph(str(entry.get("icon", "")))
+	if _icon_font != null:
+		icon.add_theme_font_override("font", _icon_font)
+	icon.add_theme_font_size_override("font_size", 26)
+	icon.custom_minimum_size = Vector2(30.0, 0.0)
+	icon.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	icon.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(icon)
+	var label := Label.new()
+	label.text = _t(str(entry.get("text", "")))
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(label)
+	return button
+
+
+func _menu_style(color: Color) -> StyleBoxFlat:
+	var box := StyleBoxFlat.new()
+	box.bg_color = color
+	box.content_margin_left = 11.0
+	return box
+
+
+func _glyph(icon_name: String) -> String:
+	if not ICON_CODES.has(icon_name):
+		return ""
+	return char(int(ICON_CODES[icon_name]))
+
+
+func _on_menu_button(entry: Dictionary, button: Button) -> void:
+	if entry.has("submenu"):
+		if _active_button == button:
+			_hide_submenu()
+		else:
+			_show_submenu(entry["submenu"], button)
+		return
+	if entry.has("dialog"):
+		_open(str(entry["dialog"]))
+	elif entry.has("info"):
+		_info(str(entry["info"]))
+	elif entry.has("action") and str(entry["action"]) == "quit":
+		_quit()
+
+
+func _show_submenu(entries: Array, source: Button) -> void:
+	if _submenu == null or _submenu_buttons == null:
+		return
+	for child in _submenu_buttons.get_children():
+		child.queue_free()
+	# code-instantiated: the submenu top spacer aligns its first row with the
+	# clicked top-level button (upstream `submenu.add().height(...)`).
+	var spacer := Control.new()
+	spacer.custom_minimum_size = Vector2(0.0, source.position.y)
+	_submenu_buttons.add_child(spacer)
+	for entry in entries:
+		var button := _make_button(entry, Vector2(BUTTON_W, BUTTON_H))
+		button.pressed.connect(_on_menu_button.bind(entry, button))
+		_submenu_buttons.add_child(button)
+	_submenu.visible = true
+	if _active_button != null and _active_button != source:
+		_active_button.button_pressed = false
+	_active_button = source
+	source.button_pressed = true
+
+
+func _hide_submenu() -> void:
+	if _submenu != null:
+		_submenu.visible = false
+	if _submenu_buttons != null:
+		for child in _submenu_buttons.get_children():
+			child.queue_free()
+	if _active_button != null:
+		_active_button.button_pressed = false
+		_active_button = null
 
 
 func _open(dialog_name: String) -> void:
@@ -114,29 +298,3 @@ func _info(key: String) -> void:
 
 func _quit() -> void:
 	get_tree().quit()
-
-
-## Mobile layout (`MenuFragment.buildMobile`): a 2-column grid of
-## `MindMobileButton`s. code-instantiated: the mobile grid is a layout variant
-## chosen at runtime from `Vars.mobile`, and each entry reuses the desktop set.
-func _build_mobile() -> void:
-	if _buttons == null:
-		return
-	for child in _buttons.get_children():
-		child.queue_free()
-	_mobile_grid = GridContainer.new()
-	_mobile_grid.columns = 2
-	_buttons.add_child(_mobile_grid)
-	var entries := [
-		{"icon": "units", "key": "@play", "dialog": "join"},
-		{"icon": "map", "key": "@database", "dialog": "database"},
-		{"icon": "settings", "key": "@settings", "dialog": "settings"},
-		{"icon": "effect", "key": "@mods", "dialog": "mods"},
-		{"icon": "home", "key": "@about.button", "dialog": "about"},
-		{"icon": "cancel", "key": "@quit", "dialog": ""},
-	]
-	for entry in entries:
-		var dialog_name := str(entry.dialog)
-		var callback := Callable(self, "_quit") if dialog_name.is_empty() else _open.bind(dialog_name)
-		var button := MindWidgets.mobile_button(str(entry.icon), str(entry.key), callback)
-		_mobile_grid.add_child(button)

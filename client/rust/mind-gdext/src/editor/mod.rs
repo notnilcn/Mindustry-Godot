@@ -9,7 +9,7 @@
 //! `mind-core` (OD19-B); this node owns only view handling (pan/zoom/projection)
 //! and the type conversions across the Godot boundary.
 //!
-//! Declared in `res://scenes/spine.tscn` at `/root/Spine/MindEditor` (HLP §6.6)
+//! Declared in `res://scenes/game.tscn` at `/root/Spine/MindEditor` (HLP §6.6)
 //! rather than as a project autoload singleton. In-engine MCP §7c-1 verification
 //! is deferred to the orchestrator's single-editor mutex; this class compiles
 //! and exposes the API surface today.

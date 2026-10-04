@@ -1,7 +1,7 @@
 # Plan 18 §7c — in-engine audio MCP scenario (DEFERRED to the single-editor mutex)
 
 > Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
-> Status 2026-10-02: the code + `res://scenes/spine.tscn` node (`/root/Spine/MindAudio`)
+> Status 2026-10-02: the code + `res://scenes/game.tscn` node (`/root/Spine/MindAudio`)
 > are landed; **none of these evals have been executed yet**. Run them from the
 > orchestrator's single-editor lane and paste the outputs into
 > `18_AUDIO_IMPLEMENTATION_PLAN.md` §7c/Changelog. Screenshots are not meaningful
@@ -15,8 +15,8 @@ Every eval must return `{"pid": OS.get_process_id(), ...}` compared with
 1. Open + run the spine and wait for `[audio] ready`:
 
    ```text
-   godot_editor_edit open_scene res://scenes/spine.tscn
-   godot_game play scene=res://scenes/spine.tscn
+   godot_editor_edit open_scene res://scenes/game.tscn
+   godot_game play scene=res://scenes/game.tscn
    godot_log get
    ```
 

@@ -1,16 +1,8 @@
-; SPDX-License-Identifier: GPL-3.0-only
-;
-; PlayerListFragment (plan 14 M7 shell). Persistent overlay; rows come from the
-; plan-21 relay view and are built by player_list_fragment.gd (§3.10).
-;
-; Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
-; Source: core/src/mindustry/ui/fragments/PlayerListFragment.java
+[gd_scene format=3 uid="uid://bqinoo73njfmb"]
 
-[gd_scene load_steps=2 format=3]
+[ext_resource type="Script" uid="uid://bd6dl3rfc63mo" path="res://ui/fragments/player_list_fragment.gd" id="1_script"]
 
-[ext_resource type="Script" path="res://ui/fragments/player_list_fragment.gd" id="1_script"]
-
-[node name="PlayerListFragment" type="Control"]
+[node name="PlayerListFragment" type="Control" unique_id=2040351985]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0

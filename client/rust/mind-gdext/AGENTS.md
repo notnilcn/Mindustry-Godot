@@ -16,7 +16,7 @@ surface is documented in [`NET_API.md`](NET_API.md).
 | `src/sim_host.rs` | `MindSimHost` — owns `mind_core::Sim`, the fixed 60 Hz pump and the MCP/test API. |
 | `src/camera.rs` | `MindCamera2D` — pan/zoom/edge-pan/shake; screen↔tile transforms over `mind_core::input::CameraState`. |
 | `src/tile_grid.rs` | `MindTileGrid` — debug grid lines plus one quad per non-air block. |
-| `src/render.rs` | `MindWorldRenderer` (frame pipeline, band children, `RenderStats`) and `MindRender` facade. |
+| `src/render.rs` | `MindWorldRenderer` (frame pipeline, band children, `RenderStats`, `build_menu_texture` menu-world bake) and `MindRender` facade. |
 | `src/fx.rs` | `MindFx` — effect/decal/trail/shake pools and the `FxBus` drain; geometry helpers in `fx/`. |
 | `src/logic.rs` | `MindLogic` — mlog statement metadata plus parse/compile/run probes over `mind_core::logic`. |
 | `src/campaign.rs` | `MindCampaign` — sector/play/rules/tech/schematic facade over `mind_core::game`. |

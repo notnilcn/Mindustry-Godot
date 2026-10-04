@@ -8,10 +8,10 @@
 //!
 //! Orchestration note: plan 00's `StdbConnector` already owns a connector for
 //! the MCP/dev path. To avoid double-pumping, **either** add `MindNet` to
-//! `client/scenes/spine.tscn`/`project.godot` and drop `StdbConnector`, **or**
+//! `client/scenes/game.tscn`/`project.godot` and drop `StdbConnector`, **or**
 //! keep `StdbConnector` for dev and instantiate `MindNet` lazily from the UI
 //! (plan 14). This lane implements the Rust node; the scene wiring is left to
-//! the orchestrator because `spine.tscn` is shared.
+//! the orchestrator because `game.tscn` is shared.
 
 pub mod relay;
 

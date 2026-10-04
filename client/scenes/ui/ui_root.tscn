@@ -1,17 +1,8 @@
-; SPDX-License-Identifier: GPL-3.0-only
-;
-; UI root of the plan-14 client UI (plan 14 §3.2). Inserted under
-; `Spine/Ui/UiRoot`; groups map to Mindustry's `UI.menuGroup`/`hudGroup` plus
-; the dialog/overlay/loading layers. Static layer scaffolds only; dialogs and
-; fragments are manifest-instantiated by ui_root.gd (code-instantiated).
-;
-; Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
+[gd_scene format=3 uid="uid://cv6as2w3aemqj"]
 
-[gd_scene load_steps=2 format=3]
+[ext_resource type="Script" uid="uid://cn1cjsecxfvae" path="res://ui/ui_root.gd" id="1_root"]
 
-[ext_resource type="Script" path="res://ui/ui_root.gd" id="1_root"]
-
-[node name="UiRoot" type="Control"]
+[node name="UiRoot" type="Control" unique_id=1850708239]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -21,7 +12,7 @@ grow_vertical = 2
 mouse_filter = 1
 script = ExtResource("1_root")
 
-[node name="MenuGroup" type="Control" parent="."]
+[node name="MenuGroup" type="Control" parent="." unique_id=919372948]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -30,7 +21,7 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 1
 
-[node name="HudGroup" type="Control" parent="."]
+[node name="HudGroup" type="Control" parent="." unique_id=391159085]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -39,7 +30,7 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 1
 
-[node name="DialogLayer" type="Control" parent="."]
+[node name="DialogLayer" type="Control" parent="." unique_id=77974028]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -48,7 +39,7 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 1
 
-[node name="OverlayLayer" type="Control" parent="."]
+[node name="OverlayLayer" type="Control" parent="." unique_id=1940911922]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -57,7 +48,7 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 1
 
-[node name="LoadingLayer" type="Control" parent="."]
+[node name="LoadingLayer" type="Control" parent="." unique_id=1901464120]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0

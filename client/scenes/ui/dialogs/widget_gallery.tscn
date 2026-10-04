@@ -1,15 +1,8 @@
-; SPDX-License-Identifier: GPL-3.0-only
-;
-; Dev-only widget gallery (plan 14 §5 M1 verification). Static frame mirrors
-; about_dialog.tscn; the widget row content is code-built (data-driven gallery).
-;
-; Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
+[gd_scene format=3 uid="uid://y7l1b6hjvmin"]
 
-[gd_scene load_steps=2 format=3]
+[ext_resource type="Script" uid="uid://b1muws6dpb1l5" path="res://ui/dialogs/widget_gallery.gd" id="1_gallery"]
 
-[ext_resource type="Script" path="res://ui/dialogs/widget_gallery.gd" id="1_gallery"]
-
-[node name="WidgetGallery" type="Control"]
+[node name="WidgetGallery" type="Control" unique_id=838145590]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -18,7 +11,7 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_gallery")
 
-[node name="Dim" type="ColorRect" parent="."]
+[node name="Dim" type="ColorRect" parent="." unique_id=962738629]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -27,38 +20,37 @@ grow_horizontal = 2
 grow_vertical = 2
 color = Color(0, 0, 0, 0.55)
 
-[node name="Center" type="CenterContainer" parent="."]
+[node name="Center" type="CenterContainer" parent="." unique_id=310732327]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-mouse_filter = 1
 
-[node name="Panel" type="PanelContainer" parent="Center"]
-layout_mode = 2
+[node name="Panel" type="PanelContainer" parent="Center" unique_id=1281741256]
 custom_minimum_size = Vector2(560, 400)
+layout_mode = 2
 theme_type_variation = &"defaultDialog"
 
-[node name="Layout" type="VBoxContainer" parent="Center/Panel"]
+[node name="Layout" type="VBoxContainer" parent="Center/Panel" unique_id=376766451]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Title" type="Label" parent="Center/Panel/Layout"]
+[node name="Title" type="Label" parent="Center/Panel/Layout" unique_id=421732666]
 layout_mode = 2
 text = "Widget Gallery"
 horizontal_alignment = 1
 
-[node name="Body" type="ScrollContainer" parent="Center/Panel/Layout"]
+[node name="Body" type="ScrollContainer" parent="Center/Panel/Layout" unique_id=467325180]
 layout_mode = 2
 size_flags_vertical = 3
 horizontal_scroll_mode = 0
 
-[node name="Content" type="VBoxContainer" parent="Center/Panel/Layout/Body"]
+[node name="Content" type="VBoxContainer" parent="Center/Panel/Layout/Body" unique_id=908780600]
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="Buttons" type="HBoxContainer" parent="Center/Panel/Layout"]
+[node name="Buttons" type="HBoxContainer" parent="Center/Panel/Layout" unique_id=2119147073]
 layout_mode = 2
 alignment = 1

@@ -6,7 +6,7 @@
 //! Owns the capability snapshot, the `#[func]` MCP probes and the host glue for
 //! window/args, native dialogs, crash handling, URI routing and the service
 //! registry. Scene insertion at `/root/Spine/MindPlatform` is declared in
-//! `client/scenes/spine.tscn` (plan 22 §3.3).
+//! `client/scenes/game.tscn` (plan 22 §3.3).
 
 pub mod args;
 pub mod crash;
@@ -27,7 +27,7 @@ use mind_core::version::BuildInfo;
 
 use service::ServiceRegistry;
 
-/// Platform capability node (appended to the spine by `spine.tscn`).
+/// Platform capability node (appended to the spine by `game.tscn`).
 #[derive(GodotClass)]
 #[class(base=Node)]
 pub struct MindPlatform {

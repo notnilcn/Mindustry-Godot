@@ -11,7 +11,7 @@
 //! The simulator-integrated `logic_place`/`logic_set_code`/`logic_get_state`
 //! probes live on `MindSimHost`; they await the plan-05/07 live logic-building
 //! integration (the P0 `Sim` uses `BuildingComp`, not plan-07's logic
-//! behaviors). This node is declared in `res://scenes/spine.tscn` by the
+//! behaviors). This node is declared in `res://scenes/game.tscn` by the
 //! orchestrator (HLP §6.6); it is not a project autoload.
 
 use godot::classes::{INode, Node};

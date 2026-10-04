@@ -1,14 +1,8 @@
-; SPDX-License-Identifier: GPL-3.0-only
-;
-; Performance overlay (plan 14 §3.5/M2). Read-only Godot `Performance` monitors.
-;
-; Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
+[gd_scene format=3 uid="uid://b62opqjov10ca"]
 
-[gd_scene load_steps=2 format=3]
+[ext_resource type="Script" uid="uid://cf3bsc7mp73aa" path="res://ui/fragments/performance_fragment.gd" id="1_perf"]
 
-[ext_resource type="Script" path="res://ui/fragments/performance_fragment.gd" id="1_perf"]
-
-[node name="PerformanceFragment" type="Control"]
+[node name="PerformanceFragment" type="Control" unique_id=1010017539]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -18,7 +12,7 @@ grow_vertical = 2
 mouse_filter = 2
 script = ExtResource("1_perf")
 
-[node name="Panel" type="PanelContainer" parent="."]
+[node name="Panel" type="PanelContainer" parent="." unique_id=248597420]
 layout_mode = 1
 anchors_preset = 1
 anchor_left = 1.0
@@ -30,7 +24,7 @@ offset_bottom = 40.0
 grow_horizontal = 0
 theme_type_variation = &"defaultDialog"
 
-[node name="Label" type="Label" parent="Panel"]
+[node name="Label" type="Label" parent="Panel" unique_id=1677671630]
 layout_mode = 2
 text = "fps -"
 horizontal_alignment = 2

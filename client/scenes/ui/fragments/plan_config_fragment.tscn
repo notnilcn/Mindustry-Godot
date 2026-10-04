@@ -1,25 +1,17 @@
-; SPDX-License-Identifier: GPL-3.0-only
-;
-; PlanConfig fragment (plan 14 §3.5, M4): static popup frame; controls are built
-; by plan_config_fragment.gd from the plan-07 point config.
-;
-; Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
-; Source: core/src/mindustry/ui/fragments/PlanConfigFragment.java
+[gd_scene format=3 uid="uid://dliybhvclsxdn"]
 
-[gd_scene load_steps=2 format=3]
+[ext_resource type="Script" uid="uid://nfv2g7mm8url" path="res://ui/fragments/plan_config_fragment.gd" id="1_plan"]
 
-[ext_resource type="Script" path="res://ui/fragments/plan_config_fragment.gd" id="1_plan"]
-
-[node name="PlanConfigFragment" type="Control"]
-layout_mode = 1
+[node name="PlanConfigFragment" type="Control" unique_id=1521121174]
+visible = false
+layout_mode = 3
 anchors_preset = 0
 offset_right = 260.0
 offset_bottom = 160.0
 mouse_filter = 1
-visible = false
 script = ExtResource("1_plan")
 
-[node name="Panel" type="PanelContainer" parent="."]
+[node name="Panel" type="PanelContainer" parent="." unique_id=2032585553]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -28,5 +20,5 @@ grow_horizontal = 2
 grow_vertical = 2
 theme_type_variation = &"defaultPane"
 
-[node name="Body" type="VBoxContainer" parent="Panel"]
+[node name="Body" type="VBoxContainer" parent="Panel" unique_id=1621529391]
 layout_mode = 2

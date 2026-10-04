@@ -1,25 +1,17 @@
-; SPDX-License-Identifier: GPL-3.0-only
-;
-; BlockInventory fragment (plan 14 §3.5, M4): static item-grid frame; entries are
-; built by block_inventory_fragment.gd from the item read model.
-;
-; Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
-; Source: core/src/mindustry/ui/fragments/BlockInventoryFragment.java
+[gd_scene format=3 uid="uid://bcjfgdp5ye1my"]
 
-[gd_scene load_steps=2 format=3]
+[ext_resource type="Script" uid="uid://b5edro0rnewta" path="res://ui/fragments/block_inventory_fragment.gd" id="1_inv"]
 
-[ext_resource type="Script" path="res://ui/fragments/block_inventory_fragment.gd" id="1_inv"]
-
-[node name="BlockInventoryFragment" type="Control"]
-layout_mode = 1
+[node name="BlockInventoryFragment" type="Control" unique_id=1330912829]
+visible = false
+layout_mode = 3
 anchors_preset = 0
 offset_right = 260.0
 offset_bottom = 200.0
 mouse_filter = 1
-visible = false
 script = ExtResource("1_inv")
 
-[node name="Panel" type="PanelContainer" parent="."]
+[node name="Panel" type="PanelContainer" parent="." unique_id=624287084]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -28,6 +20,6 @@ grow_horizontal = 2
 grow_vertical = 2
 theme_type_variation = &"defaultPane"
 
-[node name="Grid" type="GridContainer" parent="Panel"]
+[node name="Grid" type="GridContainer" parent="Panel" unique_id=2084915454]
 layout_mode = 2
 columns = 4

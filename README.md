@@ -33,7 +33,7 @@ cargo run --manifest-path client/rust/Cargo.toml -p mind-headless -- bench --tic
 
 # Engine
 tools/build.sh                 # mind-gdext + mind-headless -> client/bin/rust, syncs scenarios
-godot4 --path client           # opens res://scenes/spine.tscn
+godot4 --path client           # opens res://scenes/game.tscn
 
 # Server (local publish wipes dev data; --check is the bindings drift gate)
 server/build.sh

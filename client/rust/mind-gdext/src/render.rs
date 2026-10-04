@@ -10,15 +10,20 @@
 
 use std::collections::HashMap;
 
-use godot::builtin::{GString, PackedFloat32Array, PackedStringArray, VarDictionary};
-use godot::classes::{Camera2D, INode, INode2D, Image, Node, Node2D, Viewport};
+use godot::builtin::{
+    Color, GString, PackedByteArray, PackedFloat32Array, PackedStringArray, Rect2i, VarDictionary,
+    Vector2i,
+};
+use godot::classes::{Camera2D, INode, INode2D, Image, ImageTexture, Node, Node2D, Viewport};
 use godot::obj::{Base, WithBaseField};
 use godot::prelude::*;
 
 use mind_core::config::TILESIZE;
+use mind_core::content::ContentRegistry;
 use mind_core::render::Layer;
 use mind_core::render::bands::{BandEntry, BandKey, BandPlan};
 use mind_core::render::lod::Lod;
+use mind_core::render::menu::MenuWorld;
 use mind_core::render::queue::RenderQueue;
 use mind_core::render::rules::RulesRenderView;
 use mind_core::render::scan::CameraView;
@@ -197,6 +202,8 @@ impl RenderStats {
 pub struct MindWorldRenderer {
     base: Base<Node2D>,
     host: Option<Gd<MindSimHost>>,
+    /// Atlas autoload captured at boot for the menu-background bake.
+    assets: Option<Gd<MindAssets>>,
     band_plan: BandPlan,
     band_nodes: Vec<Gd<Node2D>>,
     band_index: HashMap<BandKey, usize>,
@@ -232,6 +239,7 @@ impl INode2D for MindWorldRenderer {
         Self {
             base,
             host: None,
+            assets: None,
             band_plan: BandPlan::new(),
             band_nodes: Vec::new(),
             band_index: HashMap::new(),
@@ -329,6 +337,7 @@ impl MindWorldRenderer {
         if assets.is_none() {
             log::warn!("MindWorldRenderer: no MindAssets autoload; atlas disabled");
         }
+        self.assets = assets.clone();
         let assets_dir = assets
             .as_ref()
             .map(|assets| assets.bind().assets_dir().to_string());
@@ -707,6 +716,26 @@ impl MindWorldRenderer {
         self.menu.generate(seed as i32, mobile);
     }
 
+    /// Bakes the procedural menu world (`MenuRenderer`) into a single
+    /// atlas-blitted `ImageTexture` for the menu background. Floors, walls and
+    /// ore overlays are composited per tile; `None` when assets or the content
+    /// registry are unavailable.
+    #[func]
+    pub fn build_menu_texture(&mut self, seed: i64, mobile: bool) -> Option<Gd<ImageTexture>> {
+        self.menu.generate(seed as i32, mobile);
+        let world = self.menu.world()?.clone();
+        let assets = self.assets.clone()?;
+        let host = self.host.clone()?;
+        let assets = assets.bind();
+        let host = host.bind();
+        let registry = host.content_registry()?;
+        let texture = build_menu_image(&assets, registry, &world);
+        if texture.is_none() {
+            log::warn!("MindWorldRenderer: menu background bake failed");
+        }
+        texture
+    }
+
     /// Planet/g3d sector + mesh info (plan 16 M7).
     #[func]
     pub fn planet_info(&mut self) -> VarDictionary {
@@ -768,6 +797,112 @@ impl MindWorldRenderer {
 
 fn band_name(entry: &BandEntry) -> String {
     format!("Band_{}_{}", entry.layer.name(), entry.sub)
+}
+
+/// Menu tile sprite size in pixels (the packed floor/wall/ore regions are 32px;
+/// `TILESIZE` is the sim world unit, 4× smaller).
+const MENU_TILE_PX: i32 = 32;
+
+/// camelCase Java block field (`sandWall`, `oreCopper`) → port content name
+/// (`sand-wall`, `ore-copper`).
+fn kebab_name(name: &str) -> String {
+    let mut out = String::with_capacity(name.len() + 4);
+    for (index, ch) in name.chars().enumerate() {
+        if ch.is_ascii_uppercase() {
+            if index != 0 {
+                out.push('-');
+            }
+            out.push(ch.to_ascii_lowercase());
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+/// Resolves the atlas geometry `[x, y, w, h, page]` for a menu block name,
+/// trying the content block's region plus its numbered sprite variants
+/// (environment floors/walls ship `name1..N` and the port stores the bare name).
+fn resolve_menu_geometry(
+    assets: &MindAssets,
+    registry: &ContentRegistry,
+    name: &str,
+) -> Option<PackedInt32Array> {
+    let kebab = kebab_name(name);
+    let base = registry
+        .block_by_name(&kebab)
+        .or_else(|| registry.block_by_name(&format!("{kebab}-floor")))
+        .map(|block| block.region.clone())
+        .unwrap_or(kebab);
+    for suffix in ["", "1", "2", "3"] {
+        let geometry = assets.region_geometry(GString::from(format!("{base}{suffix}").as_str()));
+        if geometry.len() >= 5 {
+            return Some(geometry);
+        }
+    }
+    None
+}
+
+/// Composites a [`MenuWorld`]'s floor/wall/overlay tiles into an RGBA8 texture.
+fn build_menu_image(
+    assets: &MindAssets,
+    registry: &ContentRegistry,
+    world: &MenuWorld,
+) -> Option<Gd<ImageTexture>> {
+    let width = world.width as i32;
+    let height = world.height as i32;
+    let mut data = PackedByteArray::new();
+    data.resize((width * MENU_TILE_PX * height * MENU_TILE_PX * 4) as usize);
+    let mut target = Image::create_from_data(
+        width * MENU_TILE_PX,
+        height * MENU_TILE_PX,
+        false,
+        godot::classes::image::Format::RGBA8,
+        &data,
+    )?;
+    // Opaque base so any unresolved tile (or sprite alpha) never reveals the
+    // world behind the menu backdrop.
+    target.fill(Color::from_rgba8(18, 20, 24, 255));
+
+    let mut pages: HashMap<i32, Gd<Image>> = HashMap::new();
+    let mut missing: u64 = 0;
+    for y in 0..world.height {
+        for x in 0..world.width {
+            let Some(tile) = world.tile(x, y) else {
+                continue;
+            };
+            for name in [tile.floor, tile.wall, tile.overlay] {
+                if name == "air" {
+                    continue;
+                }
+                let Some(geometry) = resolve_menu_geometry(assets, registry, name) else {
+                    missing += 1;
+                    continue;
+                };
+                let slice = geometry.as_slice();
+                let page = slice[4];
+                if let std::collections::hash_map::Entry::Vacant(entry) = pages.entry(page) {
+                    let image = assets.page_texture(page as i64)?.get_image()?;
+                    entry.insert(image);
+                }
+                let Some(source) = pages.get(&page) else {
+                    continue;
+                };
+                target.blend_rect(
+                    source,
+                    Rect2i::new(
+                        Vector2i::new(slice[0], slice[1]),
+                        Vector2i::new(slice[2], slice[3]),
+                    ),
+                    Vector2i::new(x as i32 * MENU_TILE_PX, y as i32 * MENU_TILE_PX),
+                );
+            }
+        }
+    }
+    if missing > 0 {
+        log::warn!("MindWorldRenderer: menu background {missing} tiles missing regions");
+    }
+    ImageTexture::create_from_image(&target)
 }
 
 /// `MindRender` — the stable MCP/debug facade (plan 16 §3.2).
@@ -899,6 +1034,13 @@ impl MindRender {
         if let Some(mut renderer) = self.renderer() {
             renderer.bind_mut().generate_menu(seed, mobile);
         }
+    }
+
+    /// Bakes the menu background texture (`MindWorldRenderer::build_menu_texture`).
+    #[func]
+    pub fn build_menu_texture(&mut self, seed: i64, mobile: bool) -> Option<Gd<ImageTexture>> {
+        self.renderer()
+            .and_then(|mut renderer| renderer.bind_mut().build_menu_texture(seed, mobile))
     }
 
     /// Planet/g3d sector + mesh info (plan 16 M7).
