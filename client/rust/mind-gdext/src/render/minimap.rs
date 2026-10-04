@@ -13,6 +13,7 @@
 
 use std::collections::HashSet;
 
+use godot::classes::notify::CanvasItemNotification;
 use godot::classes::{Image, ImageTexture, Node2D, Texture2D};
 use godot::obj::{Base, WithBaseField};
 use godot::prelude::*;
@@ -65,11 +66,14 @@ impl INode2D for MindMinimap {
     }
 
     fn ready(&mut self) {
-        self.host = self.base().try_get_node_as::<MindSimHost>("../../SimHost");
-        if self.host.is_none() {
-            log::warn!("MindMinimap: no MindSimHost at ../../SimHost");
+        self.bootstrap();
+    }
+
+    fn on_notification(&mut self, what: CanvasItemNotification) {
+        // `ready()` is one-shot; rebuild (idempotently) after a hot reload.
+        if what == CanvasItemNotification::EXTENSION_RELOADED {
+            self.bootstrap();
         }
-        self.rebuild_all();
     }
 
     fn process(&mut self, delta: f64) {
@@ -93,6 +97,15 @@ impl INode2D for MindMinimap {
 }
 
 impl MindMinimap {
+    /// Re-resolves the sim host and rebuilds the texture (idempotent).
+    fn bootstrap(&mut self) {
+        self.host = self.base().try_get_node_as::<MindSimHost>("../../SimHost");
+        if self.host.is_none() {
+            log::warn!("MindMinimap: no MindSimHost at ../../SimHost");
+        }
+        self.rebuild_all();
+    }
+
     /// Whether the provider has a texture (plan 14 gate).
     pub fn has_texture(&self) -> bool {
         self.texture.is_some()

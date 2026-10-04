@@ -14,6 +14,7 @@ use godot::builtin::{
     Color, GString, PackedByteArray, PackedFloat32Array, PackedStringArray, Rect2i, VarDictionary,
     Vector2i,
 };
+use godot::classes::notify::{CanvasItemNotification, NodeNotification};
 use godot::classes::{Camera2D, INode, INode2D, Image, ImageTexture, Node, Node2D, Viewport};
 use godot::obj::{Base, WithBaseField};
 use godot::prelude::*;
@@ -270,6 +271,25 @@ impl INode2D for MindWorldRenderer {
     }
 
     fn ready(&mut self) {
+        self.bootstrap();
+    }
+
+    fn on_notification(&mut self, what: CanvasItemNotification) {
+        // `ready()` is one-shot; rebuild the Godot-derived children on reload.
+        if what == CanvasItemNotification::EXTENSION_RELOADED {
+            self.bootstrap();
+        }
+    }
+
+    fn process(&mut self, _delta: f64) {
+        self.frame();
+    }
+}
+
+impl MindWorldRenderer {
+    /// Rebuilds the Godot-derived pipeline state (adopts persisted band
+    /// children) after `ready()` or a hot reload.
+    fn bootstrap(&mut self) {
         if let Some(host) = self.base().try_get_node_as::<MindSimHost>("../../SimHost") {
             self.host = Some(host);
         } else {
@@ -280,12 +300,6 @@ impl INode2D for MindWorldRenderer {
         log::info!("MindWorldRenderer ready ({} bands)", self.band_nodes.len());
     }
 
-    fn process(&mut self, _delta: f64) {
-        self.frame();
-    }
-}
-
-impl MindWorldRenderer {
     /// Creates one `Node2D` per band with `z_as_relative = false`.
     ///
     /// The band table is generated from the append-only `BandPlan`; the band
@@ -293,13 +307,32 @@ impl MindWorldRenderer {
     fn build_bands(&mut self) {
         // code-instantiated: one band node per append-only BandPlan entry;
         // count and z order are data-driven from the Layer/CacheLayer tables.
+        //
+        // Hot reload persists the previous instance's band nodes as plain
+        // engine children while `band_nodes`/`band_index` reset, so adopt a
+        // child with the same name instead of duplicating it, and drop the
+        // stale render-bank children it still carries (the rebuilt passes
+        // re-attach fresh ones).
         for entry in self.band_plan.entries().to_vec() {
-            let mut node = Node2D::new_alloc();
-            node.set_name(band_name(&entry).as_str());
+            let name = band_name(&entry);
+            let adopted = self
+                .base()
+                .get_node_or_null(name.as_str())
+                .and_then(|node| node.try_cast::<Node2D>().ok());
+            let mut node = if let Some(mut node) = adopted {
+                while let Some(mut child) = node.get_child(0) {
+                    node.remove_child(&child);
+                    child.queue_free();
+                }
+                node
+            } else {
+                let mut node = Node2D::new_alloc();
+                node.set_name(name.as_str());
+                self.base_mut().add_child(&node);
+                node
+            };
             node.set_z_index(entry.band);
             node.set_z_as_relative(false);
-            let node = node;
-            self.base_mut().add_child(&node);
             let index = self.band_nodes.len();
             self.band_index.insert(
                 BandKey {
@@ -928,6 +961,21 @@ impl INode for MindRender {
     }
 
     fn ready(&mut self) {
+        self.bootstrap();
+    }
+
+    fn on_notification(&mut self, what: NodeNotification) {
+        // `ready()` is one-shot; re-resolve the renderer after a hot reload.
+        if what == NodeNotification::EXTENSION_RELOADED {
+            self.bootstrap();
+        }
+    }
+}
+
+impl MindRender {
+    /// Re-resolves the world renderer (runs from `ready()` and on
+    /// `EXTENSION_RELOADED`, which does not re-run `ready()`).
+    fn bootstrap(&mut self) {
         self.renderer = self
             .base()
             .try_get_node_as::<MindWorldRenderer>("../World/Renderer");
@@ -935,9 +983,7 @@ impl INode for MindRender {
             log::warn!("MindRender: no MindWorldRenderer at ../World/Renderer");
         }
     }
-}
 
-impl MindRender {
     fn renderer(&self) -> Option<Gd<MindWorldRenderer>> {
         self.renderer.clone()
     }

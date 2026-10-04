@@ -81,6 +81,10 @@ surface is documented in [`NET_API.md`](NET_API.md).
   `MindCamera2D::screen_to_tile`; scene lookups are by node path and warn when missing.
 - Render layers are append-only `BandPlan` entries; the minimap batches tile updates and rebuilds from
   the `world_revision` counter.
+- Scene `Mind*` nodes rebuild Godot-derived state in `bootstrap()` in response to the
+  `EXTENSION_RELOADED` notification, because `ready()` runs only once per engine load. Every
+  `bootstrap()` is idempotent: resource inserts overwrite, connectors/binders are dropped and
+  reopened, and persisted band children are adopted rather than duplicated.
 - `mind-core` stays Godot-free and tokio-free; all Godot types stay in this crate.
 
 ## Rules

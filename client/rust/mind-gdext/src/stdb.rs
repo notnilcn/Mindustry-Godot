@@ -10,6 +10,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use godot::classes::notify::NodeNotification;
 use godot::classes::{INode, Node, Os, ProjectSettings};
 use godot::obj::Singleton;
 use godot::prelude::*;
@@ -147,41 +148,14 @@ impl INode for StdbConnector {
     }
 
     fn ready(&mut self) {
-        let engine_args = Os::singleton().get_cmdline_args();
-        let user_args = Os::singleton().get_cmdline_user_args();
-        let engine = collect_args(engine_args.as_slice());
-        let user = collect_args(user_args.as_slice());
-        let suffix = parse_player_suffix_from(&engine, &user);
-        let db_arg = user.iter().any(|arg| arg == "--db") || engine.iter().any(|arg| arg == "--db");
-        if let Some(parsed) = &suffix {
-            self.token_suffix = GString::from(parsed.as_str());
-        }
-        // `--pN`/`--db` opt into online; the scene default is offline.
-        let online = !self.offline || db_arg || suffix.is_some();
+        self.bootstrap();
+    }
 
-        let token_dir = ProjectSettings::singleton().globalize_path("user://");
-        let config = ConnectionConfig {
-            host: self.host.to_string(),
-            db_name: self.db_name.to_string(),
-            token_append: suffix,
-            token_store_path: Some(PathBuf::from(token_dir.to_string())),
-            mode: if online {
-                StdbMode::Online
-            } else {
-                StdbMode::Offline
-            },
-            ..ConnectionConfig::default()
-        };
-        let mut connector = Connector::new(config);
-        // Bound before connect so the Lobby wave's snapshot reaches it.
-        let matches = connector.bind::<MyMatchesTableAccessor>("my_matches");
-        if !online {
-            log::info!("StdbConnector offline (single-player default)");
-        } else if let Err(error) = connector.connect() {
-            log::warn!("StdbConnector connect failed: {error}");
+    fn on_notification(&mut self, what: NodeNotification) {
+        // `ready()` is not re-run on hot reload; reopen the connector.
+        if what == NodeNotification::EXTENSION_RELOADED {
+            self.bootstrap();
         }
-        self.connector = Some(connector);
-        self.matches = Some(matches);
     }
 
     fn process(&mut self, _delta: f64) {
@@ -538,6 +512,52 @@ impl StdbConnector {
 }
 
 impl StdbConnector {
+    /// Reopens the process-wide connector (runs from `ready()` and on
+    /// `EXTENSION_RELOADED`). Drops any previous connector and binder cache so
+    /// re-running never leaks a link or double-binds a table.
+    fn bootstrap(&mut self) {
+        if let Some(connector) = self.connector.as_mut() {
+            connector.disconnect();
+        }
+        self.binder_nodes.clear();
+
+        let engine_args = Os::singleton().get_cmdline_args();
+        let user_args = Os::singleton().get_cmdline_user_args();
+        let engine = collect_args(engine_args.as_slice());
+        let user = collect_args(user_args.as_slice());
+        let suffix = parse_player_suffix_from(&engine, &user);
+        let db_arg = user.iter().any(|arg| arg == "--db") || engine.iter().any(|arg| arg == "--db");
+        if let Some(parsed) = &suffix {
+            self.token_suffix = GString::from(parsed.as_str());
+        }
+        // `--pN`/`--db` opt into online; the scene default is offline.
+        let online = !self.offline || db_arg || suffix.is_some();
+
+        let token_dir = ProjectSettings::singleton().globalize_path("user://");
+        let config = ConnectionConfig {
+            host: self.host.to_string(),
+            db_name: self.db_name.to_string(),
+            token_append: suffix,
+            token_store_path: Some(PathBuf::from(token_dir.to_string())),
+            mode: if online {
+                StdbMode::Online
+            } else {
+                StdbMode::Offline
+            },
+            ..ConnectionConfig::default()
+        };
+        let mut connector = Connector::new(config);
+        // Bound before connect so the Lobby wave's snapshot reaches it.
+        let matches = connector.bind::<MyMatchesTableAccessor>("my_matches");
+        if !online {
+            log::info!("StdbConnector offline (single-player default)");
+        } else if let Err(error) = connector.connect() {
+            log::warn!("StdbConnector connect failed: {error}");
+        }
+        self.connector = Some(connector);
+        self.matches = Some(matches);
+    }
+
     fn emit_connected(&mut self, identity: &LocalIdentity) {
         let hex = GString::from(identity.hex().as_str());
         log::info!("StdbConnector connected as {hex}");
@@ -588,32 +608,14 @@ impl INode for StdbBinder {
     }
 
     fn ready(&mut self) {
-        self.node_key = self.base().get_path().to_string();
-        let Some(mut connector) = self
-            .base()
-            .try_get_node_as::<StdbConnector>("/root/StdbConnector")
-        else {
-            log::warn!(
-                "StdbBinder `{}`: no /root/StdbConnector autoload",
-                self.node_key
-            );
-            return;
-        };
-        let table = self.table_name.clone();
-        let key = GString::from(self.node_key.as_str());
-        let replay = self.replay_existing;
-        let verbose = self.verbose;
-        if !connector
-            .bind_mut()
-            .attach_binder(key, table, replay, verbose)
-        {
-            return;
+        self.bootstrap();
+    }
+
+    fn on_notification(&mut self, what: NodeNotification) {
+        // `ready()` is not re-run on hot reload; re-attach the binder once.
+        if what == NodeNotification::EXTENSION_RELOADED {
+            self.bootstrap();
         }
-        log::info!(
-            "StdbBinder `{}` attached to `{}` (replay {replay})",
-            self.node_key,
-            self.table_name
-        );
     }
 
     fn process(&mut self, _delta: f64) {
@@ -661,6 +663,41 @@ impl INode for StdbBinder {
 
 #[godot_api]
 impl StdbBinder {
+    /// Re-attaches this node's table to the connector (runs from `ready()` and
+    /// on `EXTENSION_RELOADED`). A fresh reload instance has an empty
+    /// `node_key`, so it attaches once; a second call is skipped.
+    fn bootstrap(&mut self) {
+        if !self.node_key.is_empty() {
+            return;
+        }
+        self.node_key = self.base().get_path().to_string();
+        let Some(mut connector) = self
+            .base()
+            .try_get_node_as::<StdbConnector>("/root/StdbConnector")
+        else {
+            log::warn!(
+                "StdbBinder `{}`: no /root/StdbConnector autoload",
+                self.node_key
+            );
+            return;
+        };
+        let table = self.table_name.clone();
+        let key = GString::from(self.node_key.as_str());
+        let replay = self.replay_existing;
+        let verbose = self.verbose;
+        if !connector
+            .bind_mut()
+            .attach_binder(key, table, replay, verbose)
+        {
+            return;
+        }
+        log::info!(
+            "StdbBinder `{}` attached to `{}` (replay {replay})",
+            self.node_key,
+            self.table_name
+        );
+    }
+
     /// A row entered the bound set (inspect `last_row_json`).
     #[signal]
     fn row_inserted();

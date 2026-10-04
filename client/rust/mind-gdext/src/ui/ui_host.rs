@@ -16,6 +16,7 @@
 
 use std::collections::HashMap;
 
+use godot::classes::notify::NodeNotification;
 use godot::classes::{INode, Node as GdNode, Os};
 use godot::obj::{Base, Singleton};
 use godot::prelude::*;
@@ -78,11 +79,14 @@ impl INode for MindUi {
     }
 
     fn ready(&mut self) {
-        log::info!(
-            "MindUi ready (mobile={}, mobile_preview={})",
-            self.mobile,
-            self.mobile_preview
-        );
+        self.bootstrap();
+    }
+
+    fn on_notification(&mut self, what: NodeNotification) {
+        // `ready()` is not re-run on hot reload; re-run the boot logging.
+        if what == NodeNotification::EXTENSION_RELOADED {
+            self.bootstrap();
+        }
     }
 }
 
@@ -495,6 +499,16 @@ impl MindUi {
 }
 
 impl MindUi {
+    /// Re-runs boot logging (runs from `ready()` and on
+    /// `EXTENSION_RELOADED`, which does not re-run `ready()`).
+    fn bootstrap(&mut self) {
+        log::info!(
+            "MindUi ready (mobile={}, mobile_preview={})",
+            self.mobile,
+            self.mobile_preview
+        );
+    }
+
     /// Resolves the sim owner the governor drives, if present.
     fn sim_host(&self) -> Option<Gd<GdNode>> {
         self.base().get_node_or_null(SIM_HOST_PATH)

@@ -10,6 +10,7 @@
 
 use std::collections::VecDeque;
 
+use godot::classes::notify::NodeNotification;
 use godot::classes::{INode, InputEvent, InputEventMouseButton, Os, ProjectSettings};
 use godot::global::MouseButton;
 use godot::obj::{Base, Singleton};
@@ -96,67 +97,14 @@ impl INode for MindSimHost {
     }
 
     fn ready(&mut self) {
-        self.content_snapshot =
-            match create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
-                .and_then(|mut registry| {
-                    registry.init()?;
-                    registry.post_init()?;
-                    Ok(registry)
-                }) {
-                Ok(registry) => Some(registry),
-                Err(error) => {
-                    log::warn!("content snapshot unavailable: {error}");
-                    None
-                }
-            };
+        self.bootstrap();
+    }
 
-        // Plan-13 M7: install the content-initialized global logic arena so
-        // executors observe live `@time`/content/`@sfx-*` constants.
-        if let Some(registry) = self.content_snapshot.as_ref() {
-            mind_core::logic::globals::GlobalVars::install_world(&mut self.sim.ecs.0, registry);
+    fn on_notification(&mut self, what: NodeNotification) {
+        // `ready()` is not re-run on hot reload; rebuild Godot-derived state.
+        if what == NodeNotification::EXTENSION_RELOADED {
+            self.bootstrap();
         }
-
-        // Plan 04 §3.10: register the live-sim IO executor so `request_save` /
-        // `request_load` are fulfilled at the `IoSet` boundary. The handler boots
-        // its content lazily on the first IO call, so a session that never saves
-        // pays nothing. The in-engine MCP round-trip stays orchestrator-owned.
-        self.sim
-            .set_io_handler(Box::new(mind_core::io::SimIoHandler::new()));
-
-        // Plan-18: install the sim audio sink. Sim systems emit `AudioEvent`s
-        // unconditionally; `MindAudio` drains this log once per frame.
-        self.sim
-            .ecs
-            .0
-            .insert_resource(AudioSinkRes::new(self.audio_log.clone()));
-
-        if let Some(saved) = settings::read()
-            && let Some(name) = saved.selected_block
-            && let Ok(id) = self.sim.content().id(&name)
-        {
-            let _ = self.sim.set_selected_block(id);
-        }
-
-        self.capture = parse_capture_args();
-        // The STDB connection is owned by the `StdbConnector` autoload (plan 01
-        // M5, exactly one pump per process); the sim host no longer connects.
-        self.world_dirty = true;
-        self.emit_state();
-        self.emit_world_changed();
-
-        // Plan-17 sim→view hook: the FX host advances one fixed view tick per
-        // sim tick (one-way; the sim never reads the view). Optional: absent in
-        // headless/no-FX scenes.
-        self.fx_host = self.base().try_get_node_as::<Node>("../MindFx");
-
-        log::info!(
-            "MindSimHost ready ({}x{} seed {} selected `{}`, mind-core {})",
-            self.sim.grid.width(),
-            self.sim.grid.height(),
-            self.sim.seed(),
-            self.sim.block_name_of(self.sim.selected_block()),
-            mind_core::MIND_VERSION
-        );
     }
 
     fn process(&mut self, delta: f64) {
@@ -232,6 +180,75 @@ impl INode for MindSimHost {
 
 #[godot_api]
 impl MindSimHost {
+    /// Rebuilds Godot-derived boot state from the (possibly reloaded) node.
+    ///
+    /// Runs from `ready()` and again on `EXTENSION_RELOADED`; every step is
+    /// idempotent (resource inserts overwrite, `set_io_handler` replaces) and
+    /// the sim `init` already provided a fresh world.
+    fn bootstrap(&mut self) {
+        self.content_snapshot =
+            match create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+                .and_then(|mut registry| {
+                    registry.init()?;
+                    registry.post_init()?;
+                    Ok(registry)
+                }) {
+                Ok(registry) => Some(registry),
+                Err(error) => {
+                    log::warn!("content snapshot unavailable: {error}");
+                    None
+                }
+            };
+
+        // Plan-13 M7: install the content-initialized global logic arena so
+        // executors observe live `@time`/content/`@sfx-*` constants.
+        if let Some(registry) = self.content_snapshot.as_ref() {
+            mind_core::logic::globals::GlobalVars::install_world(&mut self.sim.ecs.0, registry);
+        }
+
+        // Plan 04 §3.10: register the live-sim IO executor so `request_save` /
+        // `request_load` are fulfilled at the `IoSet` boundary. The handler boots
+        // its content lazily on the first IO call, so a session that never saves
+        // pays nothing. The in-engine MCP round-trip stays orchestrator-owned.
+        self.sim
+            .set_io_handler(Box::new(mind_core::io::SimIoHandler::new()));
+
+        // Plan-18: install the sim audio sink. Sim systems emit `AudioEvent`s
+        // unconditionally; `MindAudio` drains this log once per frame.
+        self.sim
+            .ecs
+            .0
+            .insert_resource(AudioSinkRes::new(self.audio_log.clone()));
+
+        if let Some(saved) = settings::read()
+            && let Some(name) = saved.selected_block
+            && let Ok(id) = self.sim.content().id(&name)
+        {
+            let _ = self.sim.set_selected_block(id);
+        }
+
+        self.capture = parse_capture_args();
+        // The STDB connection is owned by the `StdbConnector` autoload (plan 01
+        // M5, exactly one pump per process); the sim host no longer connects.
+        self.world_dirty = true;
+        self.emit_state();
+        self.emit_world_changed();
+
+        // Plan-17 sim→view hook: the FX host advances one fixed view tick per
+        // sim tick (one-way; the sim never reads the view). Optional: absent in
+        // headless/no-FX scenes.
+        self.fx_host = self.base().try_get_node_as::<Node>("../MindFx");
+
+        log::info!(
+            "MindSimHost ready ({}x{} seed {} selected `{}`, mind-core {})",
+            self.sim.grid.width(),
+            self.sim.grid.height(),
+            self.sim.seed(),
+            self.sim.block_name_of(self.sim.selected_block()),
+            mind_core::MIND_VERSION
+        );
+    }
+
     /// Emitted after every tick/API mutation: `(tick, checksum)`.
     #[signal]
     fn state_changed(tick: i64, checksum: GString);
