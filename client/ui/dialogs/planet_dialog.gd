@@ -118,7 +118,7 @@ func _make_planet_card(planet: Dictionary) -> Button:
 	column.alignment = BoxContainer.ALIGNMENT_CENTER
 	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	card.add_child(column)
-	var name_label := MindWidgets.label(str(planet.get("localized", planet.get("name", ""))))
+	var name_label := MindWidgets.label(_localized_planet(planet))
 	name_label.add_theme_color_override("default_color", MindStyles.ACCENT)
 	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -204,7 +204,7 @@ func _build_rail(rail: MindTable, planet_name: String) -> void:
 		if not bool(planet.get("visible", true)):
 			continue
 		# code-instantiated: planet rail entries come from the Planets runtime.
-		var button := MindWidgets.button(str(planet.get("localized", name)))
+		var button := MindWidgets.button(_localized_planet(planet))
 		button.toggle_mode = true
 		button.button_pressed = name == planet_name
 		button.pressed.connect(func() -> void: _show_planet(name))
@@ -246,11 +246,33 @@ func _build_sector_panel(sector: Dictionary, _planet_name: String) -> void:
 		_root.add(MindWidgets.label("@none")).grow_x_axis().pad(8)
 		_root.row()
 		return
-	_root.add(MindWidgets.label(str(sector.get("name", "")))).grow_x_axis().pad(4)
+	_root.add(MindWidgets.label(_localized_sector(sector))).grow_x_axis().pad(4)
 	_root.row()
 	var threat := str(sector.get("threat_band", "low"))
 	_root.add(MindWidgets.label("%s%s" % [_t("@sectors.threat"), _t("@threat.%s" % threat)])).grow_x_axis().pad(2)
 	_root.row()
+
+
+## Localized planet label (`planet.<name>.name`), falling back to the read model
+## (which carries the lowercase content name until the bundle is bound).
+func _localized_planet(planet: Dictionary) -> String:
+	var name := str(planet.get("name", ""))
+	var key := "planet.%s.name" % name
+	var localized := _t("@%s" % key)
+	if localized.is_empty() or localized == key:
+		return str(planet.get("localized", name))
+	return localized
+
+
+## Localized sector label (`sector.<preset>.name`).
+func _localized_sector(sector: Dictionary) -> String:
+	var preset := str(sector.get("preset", ""))
+	if not preset.is_empty():
+		var key := "sector.%s.name" % preset
+		var localized := _t("@%s" % key)
+		if not localized.is_empty() and localized != key:
+			return localized
+	return str(sector.get("name", ""))
 
 
 func _wrap_label(markup_text: String) -> Control:
@@ -302,6 +324,11 @@ func _launch(planet_name: String, sector_id: int) -> void:
 	if sector_id < 0:
 		return
 	sector_activated.emit(planet_name, sector_id)
+	# Generate and install the sector's world into the sim host first so the
+	# renderer draws terrain (`Control.playNewSector` world half).
+	var sim_host := get_node_or_null("/root/Spine/SimHost")
+	if sim_host != null and sim_host.has_method("load_sector"):
+		sim_host.call("load_sector", planet_name, sector_id)
 	var started := false
 	var campaign := get_node_or_null("/root/Spine/MindCampaign")
 	if campaign != null and campaign.has_method("start_sector"):

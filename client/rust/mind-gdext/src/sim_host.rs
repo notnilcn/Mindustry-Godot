@@ -866,6 +866,53 @@ impl MindSimHost {
         true
     }
 
+    /// Generates and installs a campaign sector's world into the sim
+    /// (`Control.playNewSector` world half). The campaign play-flow state itself
+    /// lives in `MindCampaign`; this only owns the tile grid the renderer draws.
+    /// Returns `false` when the planet generator or content registry is missing.
+    #[func]
+    pub fn load_sector(&mut self, planet: GString, sector: i32) -> bool {
+        if sector < 0 {
+            return false;
+        }
+        let planet_name = planet.to_string();
+        // Take the registry out so the generator can borrow it while the sim is
+        // rebuilt, then hand it back (content boot is expensive; never drop it).
+        let Some(registry) = self.content_snapshot.take() else {
+            log::warn!("load_sector: content registry unavailable");
+            return false;
+        };
+        const SECTOR_SIZE: i32 = 128;
+        let generated = mind_core::maps::planet::generate_sector(
+            &planet_name,
+            sector as u16,
+            1,
+            SECTOR_SIZE,
+            SECTOR_SIZE,
+            &registry,
+        );
+        self.content_snapshot = Some(registry);
+        let Some(generated) = generated else {
+            log::warn!("load_sector: no generator for planet `{planet_name}`");
+            return false;
+        };
+
+        // Reuse a fresh sim and swap in the generated grid; a new iteration keeps
+        // no ECS entities from the previous world.
+        let mut sim = Sim::new(1, SECTOR_SIZE, SECTOR_SIZE, BlockId::AIR, BlockId::AIR);
+        sim.grid = generated.grid;
+        let _ = sim.set_phase(mind_core::game::State::Playing);
+        self.runner =
+            FixedStepRunner::for_rate(sim.config().fixed_hz, sim.config().max_ticks_per_frame);
+        self.sim = sim;
+        self.player = None;
+        self.world_dirty = true;
+        self.emit_state();
+        self.emit_world_changed();
+        log::info!("loaded campaign sector `{planet_name}:{sector}`");
+        true
+    }
+
     /// Name of the currently selected block.
     #[func]
     pub fn selected_block(&self) -> GString {

@@ -239,6 +239,103 @@ pub struct CampaignCompleteView {
     pub next_planet: Option<String>,
 }
 
+/// One block entry in the placement palette (`PlacementFragment`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct BlockEntryView {
+    /// Content name.
+    pub name: String,
+    /// Bundle key for the display label (`block.<name>.name`) or the localized
+    /// name when base content carries one.
+    pub localized: String,
+    /// Multiblock size in tiles.
+    pub size: i32,
+}
+
+/// One placement-palette category (`PlacementFragment` category rail).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct BlockCategoryView {
+    /// `Category.name()`.
+    pub name: &'static str,
+    /// Localized label bundle key (`database-tag.<name>`).
+    pub label: String,
+    /// Buildable blocks in content order.
+    pub blocks: Vec<BlockEntryView>,
+}
+
+/// The placement-palette catalog consumed by `placement_fragment.gd`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct BlockCatalogView {
+    /// Initially selected block name.
+    pub selected: String,
+    /// Non-empty categories in `Category.all` order.
+    pub categories: Vec<BlockCategoryView>,
+}
+
+impl BlockCatalogView {
+    /// Empty catalog (content boot failure; never panics in a `#[func]`).
+    pub fn empty() -> Self {
+        Self {
+            selected: String::new(),
+            categories: Vec::new(),
+        }
+    }
+}
+
+/// Builds the placement-palette catalog from base content.
+///
+/// Groups the shown build-menu blocks by `Category` (`Block.visible()` +
+/// `BuildVisibility.shown`). Unlock filtering is the HUD's job once research
+/// state is bound; the catalog is the full build-menu inventory.
+pub fn block_catalog() -> BlockCatalogView {
+    use crate::content::{Category, MemoryBundle, MemoryUnlockStore, create_base_content};
+
+    let Ok(mut registry) =
+        create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+    else {
+        return BlockCatalogView::empty();
+    };
+    // `init`/`post_init` derive per-block fields (`build_time`) the build-menu
+    // filter reads; `create_base_content` alone leaves them at defaults.
+    if registry.init().is_err() || registry.post_init().is_err() {
+        return BlockCatalogView::empty();
+    }
+    let mut categories: Vec<BlockCategoryView> = Category::ALL
+        .iter()
+        .map(|category| BlockCategoryView {
+            name: category.name(),
+            label: format!("database-tag.{}", category.name()),
+            blocks: Vec::new(),
+        })
+        .collect();
+    for block in registry.blocks() {
+        // Buildable buildings carry a derived build time; floors/walls/props do
+        // not, so this is the build-menu filter while `build_visibility` stays
+        // unpopulated in the port's generated specs.
+        if block.removed || block.build_time <= 0.0 {
+            continue;
+        }
+        let localized = if block.unlock.localized_name.is_empty()
+            || block.unlock.localized_name == block.name
+        {
+            format!("block.{}.name", block.name)
+        } else {
+            block.unlock.localized_name.clone()
+        };
+        categories[block.category.ordinal()]
+            .blocks
+            .push(BlockEntryView {
+                name: block.name.clone(),
+                localized,
+                size: block.size,
+            });
+    }
+    categories.retain(|category| !category.blocks.is_empty());
+    BlockCatalogView {
+        selected: String::from("conveyor"),
+        categories,
+    }
+}
+
 /// A `MapPlayDialog`/`CustomGameDialog`/`EditorMapsDialog` map row.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MapEntryView {
@@ -870,6 +967,37 @@ mod tests {
         ]);
         assert_eq!(rows[0].name, "alpha");
         assert_eq!(rows[1].name, "zeta");
+    }
+
+    #[test]
+    fn block_catalog_covers_build_menu() {
+        let catalog = block_catalog();
+        assert!(
+            catalog.categories.len() >= 4,
+            "several non-empty categories: {}",
+            catalog.categories.len()
+        );
+        assert!(
+            catalog
+                .categories
+                .iter()
+                .all(|category| !category.blocks.is_empty()),
+            "no empty category survives the filter"
+        );
+        assert!(
+            catalog
+                .categories
+                .iter()
+                .any(|category| category.blocks.iter().any(|block| block.name == "conveyor")),
+            "conveyor is in the distribution category"
+        );
+        assert!(
+            catalog
+                .categories
+                .iter()
+                .all(|category| { category.label == format!("database-tag.{}", category.name) }),
+            "category labels are database-tag bundle keys"
+        );
     }
 
     #[test]

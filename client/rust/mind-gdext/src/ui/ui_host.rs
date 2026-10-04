@@ -41,6 +41,8 @@ pub struct MindUi {
     mobile_preview: bool,
     /// Lazily built M5 campaign read-model JSON (plan 14 §3.11 12 seam).
     campaign_cache: Option<String>,
+    /// Lazily built placement-palette catalog JSON (`PlacementFragment`).
+    block_catalog_cache: Option<String>,
     /// Rust console command registry (plan 14 M7, deviation OD1).
     console: mind_core::ui::console::ConsoleRegistry,
     /// Manifest `pause` flags keyed by dialog name (plan 14 §3.4).
@@ -71,6 +73,7 @@ impl INode for MindUi {
             mobile: Os::singleton().has_feature("mobile") || mobile_preview,
             mobile_preview,
             campaign_cache: None,
+            block_catalog_cache: None,
             console: mind_core::ui::console::ConsoleRegistry::with_defaults(),
             pause_flags: HashMap::new(),
             pause_depth: 0,
@@ -181,9 +184,11 @@ impl MindUi {
         }
         let _ = node.call("show_dialog", &[]);
         let should_pause = self.pause_flags.get(&key).copied().unwrap_or(false);
+        // Re-opening an already-stacked dialog must not double-count its pause.
+        let was_open = self.stack.iter().any(|entry| entry == &key);
         self.stack.retain(|entry| entry != &key);
         self.stack.push(key);
-        if should_pause {
+        if should_pause && !was_open {
             self.push_pause();
         }
         let _ = self.base_mut().emit_signal("dialog_stack_changed", &[]);
@@ -199,16 +204,33 @@ impl MindUi {
         {
             let _ = node.call("hide_dialog", &[]);
         }
+        let was_top = self.stack.last().is_some_and(|entry| entry == &key);
         let before = self.stack.len();
         self.stack.retain(|entry| entry != &key);
         if self.stack.len() != before {
             if self.pause_flags.get(&key).copied().unwrap_or(false) {
                 self.pop_pause();
             }
+            if was_top {
+                self.reveal_top();
+            }
             let _ = self.base_mut().emit_signal("dialog_stack_changed", &[]);
             return true;
         }
         false
+    }
+
+    /// Re-shows the current top of the stack after a close (`BaseDialog`
+    /// restoration; the parent was hidden when the child opened).
+    fn reveal_top(&mut self) {
+        let Some(top) = self.stack.last().cloned() else {
+            return;
+        };
+        if let Some(mut node) = self.dialogs.get(&top).cloned()
+            && node.has_method("show_dialog")
+        {
+            let _ = node.call("show_dialog", &[]);
+        }
     }
 
     /// Closes the active (top) dialog — the Android back-button path.
@@ -225,6 +247,7 @@ impl MindUi {
         if self.pause_flags.get(&key).copied().unwrap_or(false) {
             self.pop_pause();
         }
+        self.reveal_top();
         let _ = self.base_mut().emit_signal("dialog_stack_changed", &[]);
         true
     }
@@ -445,6 +468,19 @@ impl MindUi {
             self.campaign_cache = Some(json);
         }
         GString::from(self.campaign_cache.as_deref().unwrap_or("{}"))
+    }
+
+    /// Placement-palette catalog JSON (`PlacementFragment` block list): the
+    /// non-empty `Category` groups with their buildable blocks and
+    /// `database-tag.*` label keys. Cached after the first build.
+    #[func]
+    pub fn block_catalog_json(&mut self) -> GString {
+        if self.block_catalog_cache.is_none() {
+            let catalog = mind_core::ui::campaign::block_catalog();
+            let json = serde_json::to_string(&catalog).unwrap_or_else(|_| String::from("{}"));
+            self.block_catalog_cache = Some(json);
+        }
+        GString::from(self.block_catalog_cache.as_deref().unwrap_or("{}"))
     }
 
     /// Validates and forwards a chat message; returns false when the fragment's
