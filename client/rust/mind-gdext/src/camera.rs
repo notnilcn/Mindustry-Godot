@@ -38,6 +38,10 @@ pub struct MindCamera2D {
     view_tick: u64,
     /// `screenshake` setting `0..=4`.
     screenshake: i32,
+    /// Last `(x, y)` position exchanged with the Godot node (echo guard).
+    shadow_position: (f32, f32),
+    /// Last zoom exchanged with the Godot node (echo guard).
+    shadow_scale: f32,
 }
 
 #[godot_api]
@@ -49,26 +53,25 @@ impl ICamera2D for MindCamera2D {
             mouse_inside: false,
             view_tick: 0,
             screenshake: DEFAULT_SCREENSHAKE,
+            shadow_position: (0.0, 0.0),
+            shadow_scale: 1.0,
         }
     }
 
     fn ready(&mut self) {
-        self.base_mut().make_current();
-        if let Some(saved) = settings::read()
-            && let Some(zoom) = saved.zoom
-        {
-            self.camera.set_scale_immediate(zoom as f32);
-        }
-        let position = self.base().get_position();
-        self.camera.position = (position.x, position.y);
-        log::debug!(
-            "MindCamera2D ready at {:?} zoom {:?}",
-            self.base().get_position(),
-            self.base().get_zoom()
-        );
+        self.bootstrap();
     }
 
     fn process(&mut self, delta: f64) {
+        // Shadow guard (godot-bevy `TransformSyncMetadata::shadow` pattern):
+        // adopt any position Godot authored since our last write before stepping
+        // the rig, so editor/direct-node moves are not immediately clobbered.
+        let node_position = self.base().get_position();
+        if node_position.x != self.shadow_position.0 || node_position.y != self.shadow_position.1 {
+            self.camera.position = (node_position.x, node_position.y);
+            self.shadow_position = (node_position.x, node_position.y);
+        }
+
         self.view_tick = self.view_tick.wrapping_add(1);
         if let Some(viewport) = self.base().get_viewport() {
             let size = viewport.get_visible_rect().size;
@@ -114,9 +117,15 @@ impl ICamera2D for MindCamera2D {
             .update(delta_frames, self.screenshake, self.view_tick);
 
         let zoom = self.camera.camerascale.max(0.01);
-        self.base_mut().set_zoom(Vector2::new(zoom, zoom));
+        if zoom != self.shadow_scale {
+            self.base_mut().set_zoom(Vector2::new(zoom, zoom));
+            self.shadow_scale = zoom;
+        }
         let (x, y) = self.camera.render_position();
-        self.base_mut().set_position(Vector2::new(x, y));
+        if x != self.shadow_position.0 || y != self.shadow_position.1 {
+            self.base_mut().set_position(Vector2::new(x, y));
+            self.shadow_position = (x, y);
+        }
     }
 
     fn input(&mut self, event: Gd<InputEvent>) {
@@ -139,6 +148,7 @@ impl ICamera2D for MindCamera2D {
         match what {
             CanvasItemNotification::WM_MOUSE_ENTER => self.mouse_inside = true,
             CanvasItemNotification::WM_MOUSE_EXIT => self.mouse_inside = false,
+            CanvasItemNotification::EXTENSION_RELOADED => self.bootstrap(),
             _ => {}
         }
     }
@@ -146,6 +156,28 @@ impl ICamera2D for MindCamera2D {
 
 #[godot_api]
 impl MindCamera2D {
+    /// Rebuilds the rig's Godot-derived state (runs from `ready()` and on
+    /// `EXTENSION_RELOADED`, which does not re-run `ready()`).
+    fn bootstrap(&mut self) {
+        self.base_mut().make_current();
+        if let Some(saved) = settings::read()
+            && let Some(zoom) = saved.zoom
+        {
+            self.camera.set_scale_immediate(zoom as f32);
+        }
+        let position = self.base().get_position();
+        self.camera.position = (position.x, position.y);
+        // Seed the echo-guard shadows from the node so no write is issued for
+        // state Godot already owns.
+        self.shadow_position = (position.x, position.y);
+        self.shadow_scale = self.base().get_zoom().x;
+        log::debug!(
+            "MindCamera2D ready at {:?} zoom {:?}",
+            self.base().get_position(),
+            self.base().get_zoom()
+        );
+    }
+
     /// Viewport position → tile `(x, y)`.
     ///
     /// `(x, y)` is a viewport-space point (e.g. `InputEventMouse.position`);
@@ -181,6 +213,7 @@ impl MindCamera2D {
         self.camera.center_on_tile(x, y);
         let (px, py) = self.camera.position;
         self.base_mut().set_position(Vector2::new(px, py));
+        self.shadow_position = (px, py);
     }
 
     /// `InputHandler.panCamera`: force the camera center (world pixels).
@@ -189,6 +222,7 @@ impl MindCamera2D {
         self.camera.pan_camera(x as f32, y as f32);
         self.base_mut()
             .set_position(Vector2::new(x as f32, y as f32));
+        self.shadow_position = (x as f32, y as f32);
     }
 
     /// `Renderer.scaleCamera(amount)` (relative zoom-by).
@@ -245,6 +279,7 @@ impl MindCamera2D {
         self.camera.spectate(x as f32, y as f32);
         self.base_mut()
             .set_position(Vector2::new(x as f32, y as f32));
+        self.shadow_position = (x as f32, y as f32);
     }
 
     /// `logicCutscene` pan+zoom (`zoom` `0..=1`, `-1` keeps the gameplay target).
