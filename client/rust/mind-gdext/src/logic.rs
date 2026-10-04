@@ -14,6 +14,7 @@
 //! behaviors). This node is declared in `res://scenes/game.tscn` by the
 //! orchestrator (HLP §6.6); it is not a project autoload.
 
+use godot::classes::notify::NodeNotification;
 use godot::classes::{INode, Node};
 use godot::obj::Base;
 use godot::prelude::*;
@@ -38,10 +39,14 @@ impl INode for MindLogic {
     }
 
     fn ready(&mut self) {
-        log::info!(
-            "MindLogic ready ({} registered statements)",
-            all_statements().len()
-        );
+        self.bootstrap();
+    }
+
+    fn on_notification(&mut self, what: NodeNotification) {
+        // `ready()` is not re-run on hot reload; rebuild Godot-derived state.
+        if what == NodeNotification::EXTENSION_RELOADED {
+            self.bootstrap();
+        }
     }
 }
 
@@ -72,6 +77,15 @@ fn field_dict(name: &str, kind: FieldKind) -> Dictionary<GString, Variant> {
 
 #[godot_api]
 impl MindLogic {
+    /// Rebuilds the node's Godot-derived state (runs from `ready()` and on
+    /// `EXTENSION_RELOADED`, which does not re-run `ready()`).
+    fn bootstrap(&mut self) {
+        log::info!(
+            "MindLogic ready ({} registered statements)",
+            all_statements().len()
+        );
+    }
+
     /// Number of registered statements (53 in vanilla).
     #[func]
     pub fn statement_count(&self) -> i64 {

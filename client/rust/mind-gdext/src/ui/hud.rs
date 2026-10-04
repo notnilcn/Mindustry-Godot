@@ -10,6 +10,7 @@
 //! (`wave`/`enemies`/`ping`/`tps`) carry upstream defaults until those seams
 //! land and are flagged in the plan changelog.
 
+use godot::classes::notify::NodeNotification;
 use godot::classes::{Engine, INode, Node as GdNode, Os};
 use godot::obj::{Base, WithBaseField};
 use godot::prelude::*;
@@ -83,11 +84,14 @@ impl INode for MindHud {
     }
 
     fn ready(&mut self) {
-        self.host = self.base().get_node_or_null(SIM_HOST_PATH);
-        if self.host.is_none() {
-            log::warn!("MindHud: no MindSimHost at {SIM_HOST_PATH}");
+        self.bootstrap();
+    }
+
+    fn on_notification(&mut self, what: NodeNotification) {
+        // `ready()` is not re-run on hot reload; rebuild Godot-derived state.
+        if what == NodeNotification::EXTENSION_RELOADED {
+            self.bootstrap();
         }
-        self.refresh();
     }
 
     fn process(&mut self, _delta: f64) {
@@ -157,6 +161,16 @@ impl MindHud {
 }
 
 impl MindHud {
+    /// Rebuilds the read-only surface from the (possibly reloaded) node; the
+    /// host lookup and `refresh()` overwrite, so a re-run never duplicates.
+    fn bootstrap(&mut self) {
+        self.host = self.base().get_node_or_null(SIM_HOST_PATH);
+        if self.host.is_none() {
+            log::warn!("MindHud: no MindSimHost at {SIM_HOST_PATH}");
+        }
+        self.refresh();
+    }
+
     /// Recomputes the read-only surface from the sim host + engine monitors.
     fn refresh(&mut self) {
         self.fps = Engine::singleton().get_frames_per_second() as i32;

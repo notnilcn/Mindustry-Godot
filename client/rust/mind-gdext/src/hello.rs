@@ -6,6 +6,7 @@
 //! (plan `00_FOUNDATION_IMPLEMENTATION_PLAN.md` §3.5); it stays registered until
 //! then so `scenes/hello.tscn` remains a valid GDExtension round-trip check.
 
+use godot::classes::notify::NodeNotification;
 use godot::prelude::*;
 
 /// Trivial node that logs on `_ready`; its `crate_version` `#[func]` establishes
@@ -19,12 +20,25 @@ pub struct MindHello {
 #[godot_api]
 impl INode for MindHello {
     fn ready(&mut self) {
-        log::info!("mind-gdext loaded (mind-gdext {})", crate::MIND_VERSION);
+        self.bootstrap();
+    }
+
+    fn on_notification(&mut self, what: NodeNotification) {
+        // `ready()` is not re-run on hot reload; rebuild Godot-derived state.
+        if what == NodeNotification::EXTENSION_RELOADED {
+            self.bootstrap();
+        }
     }
 }
 
 #[godot_api]
 impl MindHello {
+    /// Rebuilds the node's Godot-derived state (runs from `ready()` and on
+    /// `EXTENSION_RELOADED`, which does not re-run `ready()`).
+    fn bootstrap(&mut self) {
+        log::info!("mind-gdext loaded (mind-gdext {})", crate::MIND_VERSION);
+    }
+
     /// Returns the `mind-gdext` crate version as a Godot string.
     #[func]
     pub fn crate_version(&self) -> GString {

@@ -18,6 +18,7 @@ pub mod update;
 pub mod uri;
 pub mod workshop;
 
+use godot::classes::notify::NodeNotification;
 use godot::classes::{DisplayServer, INode, Node as GdNode, Os};
 use godot::obj::{Base, Singleton};
 use godot::prelude::*;
@@ -49,6 +50,23 @@ impl INode for MindPlatform {
     }
 
     fn ready(&mut self) {
+        self.bootstrap();
+    }
+
+    fn on_notification(&mut self, what: NodeNotification) {
+        // `ready()` is not re-run on hot reload; rebuild Godot-derived state.
+        if what == NodeNotification::EXTENSION_RELOADED {
+            self.bootstrap();
+        }
+    }
+}
+
+#[godot_api]
+impl MindPlatform {
+    /// Rebuilds the platform capability snapshot (runs from `ready()` and on
+    /// `EXTENSION_RELOADED`, which does not re-run `ready()`). Every field write
+    /// overwrites and the window args are idempotent.
+    fn bootstrap(&mut self) {
         let os = Os::singleton();
         let locale = os.get_locale().to_string();
         let cores = os.get_processor_count().max(1) as u32;
@@ -88,10 +106,7 @@ impl INode for MindPlatform {
             root.display()
         );
     }
-}
 
-#[godot_api]
-impl MindPlatform {
     /// The embedded `Version.java` build report (plan 22 §3.2).
     #[func]
     pub fn get_build_info(&self) -> VarDictionary {

@@ -17,6 +17,7 @@
 use std::collections::HashMap;
 
 use godot::builtin::{Array, GString, PackedInt32Array, Rect2, VarDictionary, Vector2};
+use godot::classes::notify::NodeNotification;
 use godot::classes::{AtlasTexture, AudioStream, FileAccess, INode, Image, ImageTexture, Node};
 use godot::global::Error;
 use godot::obj::{Base, NewGd};
@@ -87,6 +88,23 @@ impl INode for MindAssets {
     }
 
     fn ready(&mut self) {
+        self.bootstrap();
+    }
+
+    fn on_notification(&mut self, what: NodeNotification) {
+        // `ready()` is not re-run on hot reload; rebuild Godot-derived state.
+        if what == NodeNotification::EXTENSION_RELOADED {
+            self.bootstrap();
+        }
+    }
+}
+
+#[godot_api]
+impl MindAssets {
+    /// Rebuilds the atlas binding (runs from `ready()` and on
+    /// `EXTENSION_RELOADED`, which does not re-run `ready()`). `load_assets` is
+    /// a re-entrant no-op after success, so a re-run never reloads.
+    fn bootstrap(&mut self) {
         let ok = self.load_assets();
         log::info!(
             "[assets] ready ok={ok} dir={} pages={} regions={} icons={} fonts={} sounds={}",
@@ -98,10 +116,7 @@ impl INode for MindAssets {
             self.audio.sound_count()
         );
     }
-}
 
-#[godot_api]
-impl MindAssets {
     /// Loads the manifest + pages once (re-entrant no-op after success).
     #[func]
     pub fn load_assets(&mut self) -> bool {

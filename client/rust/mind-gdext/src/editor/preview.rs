@@ -16,6 +16,7 @@
 use std::path::PathBuf;
 
 use godot::builtin::{Array, GString, PackedByteArray, VarDictionary};
+use godot::classes::notify::NodeNotification;
 use godot::classes::{INode, Image, ImageTexture, Node, ProjectSettings, Texture2D};
 use godot::obj::{Base, Singleton};
 use godot::prelude::*;
@@ -48,11 +49,24 @@ impl INode for MindPreview {
     }
 
     fn ready(&mut self) {
-        log::info!("MindPreview ready ({} maps)", self.maps.len());
+        self.bootstrap();
+    }
+
+    fn on_notification(&mut self, what: NodeNotification) {
+        // `ready()` is not re-run on hot reload; rebuild Godot-derived state.
+        if what == NodeNotification::EXTENSION_RELOADED {
+            self.bootstrap();
+        }
     }
 }
 
 impl MindPreview {
+    /// Rebuilds the node's Godot-derived state (runs from `ready()` and on
+    /// `EXTENSION_RELOADED`, which does not re-run `ready()`).
+    fn bootstrap(&mut self) {
+        log::info!("MindPreview ready ({} maps)", self.maps.len());
+    }
+
     fn paths(&self) -> Paths {
         Paths::new(&self.root)
     }

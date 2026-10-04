@@ -14,6 +14,7 @@
 
 use std::path::PathBuf;
 
+use godot::classes::notify::NodeNotification;
 use godot::classes::{INode, Json, Node as GdNode, ProjectSettings};
 use godot::obj::{Base, Singleton};
 use godot::prelude::*;
@@ -45,6 +46,23 @@ impl INode for MindMods {
     }
 
     fn ready(&mut self) {
+        self.bootstrap();
+    }
+
+    fn on_notification(&mut self, what: NodeNotification) {
+        // `ready()` is not re-run on hot reload; rebuild Godot-derived state.
+        if what == NodeNotification::EXTENSION_RELOADED {
+            self.bootstrap();
+        }
+    }
+}
+
+#[godot_api]
+impl MindMods {
+    /// Rebuilds the mod registry (runs from `ready()` and on
+    /// `EXTENSION_RELOADED`, which does not re-run `ready()`). The `Mods`
+    /// instance is replaced before loading, so a re-run never duplicates.
+    fn bootstrap(&mut self) {
         let dir = mods_dir();
         if let Err(error) = std::fs::create_dir_all(&dir) {
             log::warn!("[mods] could not create `{}`: {error}", dir.display());
@@ -57,10 +75,7 @@ impl INode for MindMods {
             Err(error) => log::warn!("[mods] load failed: {error}"),
         }
     }
-}
 
-#[godot_api]
-impl MindMods {
     /// Emitted whenever the mod set or its enable flags change.
     #[signal]
     fn mods_changed();

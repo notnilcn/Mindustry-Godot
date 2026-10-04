@@ -11,6 +11,7 @@
 //! is the thin execution + probe facade the MCP oracle drives.
 
 use godot::builtin::{Color, GString, PackedVector2Array, Rect2, VarDictionary, Vector2};
+use godot::classes::notify::CanvasItemNotification;
 use godot::classes::{INode2D, Node2D};
 use godot::obj::{Base, WithBaseField};
 use godot::prelude::*;
@@ -86,7 +87,14 @@ impl INode2D for MindFx {
     }
 
     fn ready(&mut self) {
-        self.base_mut().queue_redraw();
+        self.bootstrap();
+    }
+
+    fn on_notification(&mut self, what: CanvasItemNotification) {
+        // `ready()` is not re-run on hot reload; rebuild Godot-derived state.
+        if what == CanvasItemNotification::EXTENSION_RELOADED {
+            self.bootstrap();
+        }
     }
 
     fn draw(&mut self) {
@@ -118,6 +126,12 @@ impl INode2D for MindFx {
 }
 
 impl MindFx {
+    /// Rebuilds the node's Godot-derived state (runs from `ready()` and on
+    /// `EXTENSION_RELOADED`, which does not re-run `ready()`).
+    fn bootstrap(&mut self) {
+        self.base_mut().queue_redraw();
+    }
+
     /// Executes one primitive; returns whether it was drawn.
     fn draw_prim(&mut self, prim: &mind_core::render::draw::DrawPrim) -> bool {
         let mut base = self.base_mut();

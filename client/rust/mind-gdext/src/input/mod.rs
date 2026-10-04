@@ -12,6 +12,7 @@ pub mod events;
 pub mod gesture;
 pub mod mobile;
 
+use godot::classes::notify::NodeNotification;
 use godot::classes::{INode, Node};
 use godot::obj::Base;
 use godot::prelude::*;
@@ -62,12 +63,14 @@ impl INode for MindInput {
     }
 
     fn ready(&mut self) {
-        self.bindings = bindings::load();
-        log::info!(
-            "MindInput ready ({} keybinds, {} rebinds)",
-            KeyBindTable::len(),
-            self.rebind_count()
-        );
+        self.bootstrap();
+    }
+
+    fn on_notification(&mut self, what: NodeNotification) {
+        // `ready()` is not re-run on hot reload; rebuild Godot-derived state.
+        if what == NodeNotification::EXTENSION_RELOADED {
+            self.bootstrap();
+        }
     }
 
     fn input(&mut self, event: Gd<godot::classes::InputEvent>) {
@@ -91,6 +94,18 @@ impl INode for MindInput {
 
 #[godot_api]
 impl MindInput {
+    /// Rebuilds the client-local binding state (runs from `ready()` and on
+    /// `EXTENSION_RELOADED`, which does not re-run `ready()`). The binding state
+    /// is overwritten, so a re-run never duplicates.
+    fn bootstrap(&mut self) {
+        self.bindings = bindings::load();
+        log::info!(
+            "MindInput ready ({} keybinds, {} rebinds)",
+            KeyBindTable::len(),
+            self.rebind_count()
+        );
+    }
+
     /// Frames pumped.
     #[func]
     pub fn frame(&self) -> i64 {
