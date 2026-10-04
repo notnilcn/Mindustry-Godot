@@ -26,6 +26,8 @@ theme_override_styles/panel = SubResource("StyleBoxFlat_sidebar")
 
 [node name="Buttons" type="VBoxContainer" parent="Sidebar" unique_id=1200000004]
 layout_mode = 2
+alignment = 1
+theme_override_constants/separation = 0
 
 [node name="Submenu" type="PanelContainer" parent="." unique_id=1200000005]
 visible = false
@@ -39,6 +41,7 @@ theme_override_styles/panel = SubResource("StyleBoxFlat_sidebar")
 
 [node name="Buttons" type="VBoxContainer" parent="Submenu" unique_id=1200000006]
 layout_mode = 2
+theme_override_constants/separation = 0
 
 [node name="Discord" type="Button" parent="." unique_id=1200000007]
 layout_mode = 1
