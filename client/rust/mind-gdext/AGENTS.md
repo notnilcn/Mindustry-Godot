@@ -84,7 +84,11 @@ surface is documented in [`NET_API.md`](NET_API.md).
 - Scene `Mind*` nodes rebuild Godot-derived state in `bootstrap()` in response to the
   `EXTENSION_RELOADED` notification, because `ready()` runs only once per engine load. Every
   `bootstrap()` is idempotent: resource inserts overwrite, connectors/binders are dropped and
-  reopened, and persisted band children are adopted rather than duplicated.
+  reopened, and persisted band children are adopted rather than duplicated. `MindAudio` is the
+  exception: its `ready()` creates the voice pool, music player and camera listener, and those
+  node-tree mutations re-enter the notification callback while the node is already mutably
+  borrowed (a gdext `bind_mut` re-entrancy panic), so it keeps `ready()`-only initialization with
+  no `on_notification` arm.
 - `mind-core` stays Godot-free and tokio-free; all Godot types stay in this crate.
 
 ## Rules
