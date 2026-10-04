@@ -66,31 +66,7 @@ the addon itself.
 
 Run from the repo root. The `.sh` scripts are canonical on the WSL2 Ubuntu dev host and the
 `.ps1` twins are the Windows entrypoints; either host can run the relative `cargo` commands
-below. From a Windows terminal, a `.sh` can also be invoked with
-`wsl -d Ubuntu -e bash -lc '<command>'`.
-
-```bash
-# Rust checks (mind-core must stay Godot-free / tokio-free)
-cargo fmt --manifest-path client/rust/Cargo.toml --all -- --check
-cargo clippy --manifest-path client/rust/Cargo.toml --workspace --all-targets -- -D warnings
-cargo test --manifest-path client/rust/Cargo.toml -p mind-core
-
-# Headless oracle: run a golden and the bench
-cargo run --manifest-path client/rust/Cargo.toml -p mind-headless -- run spine_place_break --json
-cargo run --manifest-path client/rust/Cargo.toml -p mind-headless -- bench --ticks 100000
-
-# Engine: build the GDExtension into client/bin/rust, then open the project
-tools/build.sh
-godot4 --path client
-
-# Server: publish local module and regenerate client bindings (wipes local dev data)
-server/build.sh
-server/build.sh --check        # bindings drift gate; never publishes
-
-# Gates
-tools/ci.sh                    # full local gate (fmt/clippy/tests/parity/goldens/bench/godot/STDB)
-tools/mcp-smoke.sh             # in-engine MCP smoke; needs a live editor, not run in CI
-```
+below.
 
 ## Workflow rules
 
