@@ -2,10 +2,11 @@
 ## Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
 ## Source: core/src/mindustry/core/UI.java (`init`, `updateMargins`, groups).
 ##
-## The Godot-side UI root under `Spine/Ui`. It owns the layer groups, eagerly
-## instantiates every manifest dialog/fragment (parity with `UI.init()`), builds
-## the theme, and registers dialogs with the Rust `MindUi` singleton. Layout and
-## lifecycle only — no game rules or sim reads (plan 14 §3.2/§3.10).
+## The Godot-side UI root under `Spine/Ui`. It owns the layer groups and binds
+## every manifest dialog/fragment to the node statically declared by name in
+## `scenes/ui/ui_root.tscn`, builds the theme, and registers dialogs with the
+## Rust `MindUi` singleton. Layout and lifecycle only — no game rules or sim
+## reads (plan 14 §3.2/§3.10).
 
 class_name MindUiRoot
 extends Control
@@ -22,11 +23,19 @@ const DIALOGS_MANIFEST := "res://ui/dialogs_manifest.json"
 var theme_build_ms := 0
 
 var _dialogs: Dictionary = {}
+var _theme_applied := false
+
+
+func _enter_tree() -> void:
+	# Static children `_ready` before the parent, so the theme is applied here to
+	# be in place before the instanced dialogs/fragments `_ready` runs.
+	if not _theme_applied:
+		_theme_applied = true
+		_apply_theme()
 
 
 func _ready() -> void:
-	_apply_theme()
-	_load_manifest()
+	_bind_manifest()
 	_connect_prompts()
 	_boot()
 
@@ -70,7 +79,7 @@ func _apply_theme() -> void:
 	self.theme = theme
 
 
-func _load_manifest() -> void:
+func _bind_manifest() -> void:
 	if not FileAccess.file_exists(DIALOGS_MANIFEST):
 		push_warning("[ui] missing %s" % DIALOGS_MANIFEST)
 		return
@@ -79,37 +88,43 @@ func _load_manifest() -> void:
 		push_warning("[ui] dialogs_manifest is not an object")
 		return
 	var manifest: Dictionary = parsed
+	var expected := {}
 	for entry in manifest.get("dialogs", []):
-		_instantiate(entry, dialog_layer, false)
+		if _bind(entry, dialog_layer, false):
+			expected[str(entry.get("name", ""))] = true
 	for entry in manifest.get("fragments", []):
-		_instantiate(entry, _group_for(str(entry.get("group", ""))), true)
+		if _bind(entry, _group_for(str(entry.get("group", ""))), true):
+			expected[str(entry.get("name", ""))] = true
+	_verify_manifest(expected)
 
 
-func _instantiate(entry: Dictionary, parent: Control, is_fragment: bool) -> void:
-	var dialog_name := str(entry.get("name", ""))
-	var scene_path := str(entry.get("scene", ""))
-	if dialog_name.is_empty() or scene_path.is_empty():
-		return
-	# code-instantiated: dialogs/fragments are manifest-driven (name -> scene
-	# path is data), so the scene tree cannot declare them statically.
-	var packed: PackedScene = load(scene_path)
-	if packed == null:
-		push_warning("[ui] could not load %s" % scene_path)
-		return
-	var instance: Node = packed.instantiate()
-	instance.name = dialog_name
-	parent.add_child(instance)
+func _bind(entry: Dictionary, parent: Control, is_fragment: bool) -> bool:
+	var node_name := str(entry.get("name", ""))
+	if node_name.is_empty():
+		return false
+	var instance := parent.get_node_or_null(NodePath(node_name))
+	if instance == null:
+		push_error("[ui] manifest entry `%s` has no scene node under %s" % [node_name, parent.name])
+		return false
 	if is_fragment:
-		# Manifest `hidden: true` marks fragments that are shown on demand
-		# (fullscreen minimap, config/inventory popups); everything else is a
-		# persistent HUD/menu element.
 		instance.visible = not bool(entry.get("hidden", false))
-		return
-	_dialogs[dialog_name] = instance
+		return true
+	_dialogs[node_name] = instance
 	var ui := _ui()
 	if ui != null:
 		var should_pause := bool(entry.get("pause", false))
-		ui.call("register_dialog", dialog_name, instance, should_pause)
+		ui.call("register_dialog", node_name, instance, should_pause)
+	return true
+
+
+## Cross-check the manifest against the statically-instanced scene children
+## (mirrors `MindThemeBuilder.verify`): every manifest name resolves, and every
+## static child under a layer group is a manifest entry.
+func _verify_manifest(expected: Dictionary) -> void:
+	for parent in [dialog_layer, menu_group, hud_group, overlay_layer, loading_layer]:
+		for child in parent.get_children():
+			if not expected.has(str(child.name)):
+				push_error("[ui] scene node `%s` under %s is missing from dialogs_manifest" % [child.name, parent.name])
 
 
 func _group_for(group_name: String) -> Control:

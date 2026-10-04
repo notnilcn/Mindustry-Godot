@@ -70,7 +70,8 @@ GDScript under `client/ui` and `client/scenes/ui`; the Rust↔GDScript contract 
   crate exposes read-model JSON that GDScript consumes through `MindUi` endpoints such as
   `campaign_views()`, `chat_send(text, mode)`, `console_execute(line)`, `player_list_json()` and
   `player_action(...)`; `DisplayServer.file_dialog_show` is handled natively by `mind-gdext`.
-- A new dialog or fragment must be added to both `ui/dialogs_manifest.json` and the matching
+- A new dialog or fragment must be added to the static instance under its layer group in
+  `client/scenes/ui/ui_root.tscn`, `ui/dialogs_manifest.json`, and the matching
   `EXPECTED_*_DIALOGS`/fragment list; a new style to `styles_manifest.json` and `EXPECTED_STYLES`; a
   new prompt to `prompts::PROMPT_HELPERS`, `EXPECTED_PROMPTS` and the manifest `prompts[]`.
 - Dialogs and `.tscn` files may reference only styles that `StyleLookup` resolves against the manifest.
