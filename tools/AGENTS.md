@@ -18,10 +18,12 @@
 | `export.sh` / `export.ps1` | Plan-22 export wrapper: checks the matching Godot 4.7.2 export templates, runs a headless export for a platform preset, and optionally verifies the artifact. Outputs default under the gitignored `client/bin/export/`. |
 | `version.sh` / `version.ps1` | Write `client/assets/version.properties` (upstream key set) from flags and git state. |
 | `mcp-smoke.sh` / `mcp-smoke.ps1` + `mcp_smoke.py` | In-engine MCP spine smoke over a stdio `open-godot-mcp` server; needs the editor already running. |
+| `watch.sh` / `watch.ps1` | Watch `client/rust/**` for `.rs`/`Cargo.toml` edits and re-run `build.sh`; ignores `client/rust/target/` and `client/bin/`. |
 
 ## Responsibilities
 
 - `build.sh` compiles `-p mind-gdext -p mind-headless` with `--target-dir client/bin/rust` so `mind.gdextension` finds the shared library, then delegates scenario mirroring to `tools/sync_scenarios.sh`.
+- `watch.sh` is a developer loop: it watches `client/rust/**` and re-runs `build.sh` on `.rs`/`Cargo.toml` edits, ignoring `client/rust/target/` and `client/bin/` so its own build output never retriggers a rebuild. It prefers `inotifywait` and falls back to a 2s polling loop when unavailable; `watch.ps1` mirrors it with `System.IO.FileSystemWatcher`. It is not part of `ci.sh`.
 - `ci.sh` is the single local gate. It runs `cargo fmt --check`, `clippy -D warnings`, `cargo check`, `cargo test -p mind-core`, `parity check --tests`, `parity goldens`, `run-all --tier T0`, the three spine goldens, a scenario-mirror `diff -r`, a release `bench --ticks 100000 --scenario bench_baseline` budget (warn +20% / fail +50% over `BASE_P50_NS=130` / `BASE_P99_NS=301` ns), `build.sh`, a `godot.sh --headless --editor --quit` import/parse check, `mind-core` godot/tokio boundary greps, `cargo check -p mind-stdb`, STDB module typecheck, and `server/build.sh --check`. It does **not** include the MCP smoke.
 - `parity.sh` forwards to `mind-headless parity …`: `--check`, `--mirror`, `--suite smoke|gate|full`, `--gate Pn` → `parity/reports/gate_Pn.json`, `--mcp`, `--bench`, `--soak mid|stress`, `--checksums`, `--json`. With no selector it runs `--check` plus the `smoke` suite. Output goes to `PARITY_OUT_DIR` (`client/rust/target/parity` by default).
 - `server.sh` uses `MIND_HEADLESS_BIN` (`client/rust/target/debug/mind-headless`), `MIND_SERVER_HOST` (`127.0.0.1`), and `MIND_SERVER_PORT` (`6859`); `--socket "cmd,…"` writes newline commands and prints the reply, and `--serve` starts then tears down the server.
