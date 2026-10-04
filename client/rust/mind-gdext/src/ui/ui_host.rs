@@ -433,7 +433,10 @@ impl MindUi {
     #[func]
     pub fn campaign_views(&mut self) -> GString {
         if self.campaign_cache.is_none() {
-            let views = mind_core::ui::campaign::CampaignViews::vanilla_fixture();
+            let mut views = mind_core::ui::campaign::CampaignViews::vanilla_fixture();
+            // The fixture carries no map registry; feed the built-in map rows so
+            // `CustomGameDialog`/`EditorMapsDialog` render the default map grid.
+            views.maps = mind_core::ui::campaign::default_map_entries();
             let json = serde_json::to_string(&views).unwrap_or_else(|_| String::from("{}"));
             self.campaign_cache = Some(json);
         }

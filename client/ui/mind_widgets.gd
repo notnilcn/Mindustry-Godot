@@ -49,6 +49,80 @@ static func image_button(region_name: String, style: String = "defaulti") -> But
 	return result
 
 
+## An action button with an icon-font glyph followed by a label, mirroring
+## upstream `TextButton` + `Icon.*` drawables. Falls back to plain text when the
+## glyph is unknown or assets are absent.
+static func icon_button(icon_name: String, text_value: String, style: String = "defaultt") -> Button:
+	var result := Button.new()
+	result.theme_type_variation = style
+	var glyph_text := MindIcons.glyph(icon_name)
+	if glyph_text.is_empty():
+		result.text = text_value
+		return result
+	# code-instantiated: data-driven icon+label row inside the themed button.
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	row.add_theme_constant_override("separation", 6)
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	result.add_child(row)
+	var icon := Label.new()
+	icon.text = glyph_text
+	MindIcons.apply_icon_font(icon)
+	icon.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(icon)
+	var label := Label.new()
+	label.text = text_value
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# Apply the default font up front so the row reports a real minimum width
+	# (the theme font is not available before the node enters the tree).
+	var assets := assets()
+	if assets != null:
+		var default_font: Variant = assets.call("default_font")
+		if default_font is FontFile and default_font != null:
+			label.add_theme_font_override("font", default_font)
+	label.add_theme_font_size_override("font_size", 18)
+	row.add_child(label)
+	# A `Button` is not a container, so children do not contribute to its minimum
+	# size; size it from the icon+label row so labels are not clipped.
+	var row_min := row.get_combined_minimum_size()
+	result.custom_minimum_size.x = maxf(result.custom_minimum_size.x, row_min.x + 20.0)
+	result.custom_minimum_size.y = maxf(result.custom_minimum_size.y, row_min.y)
+	return result
+
+
+## A standalone icon-glyph label (section headers, rail entries).
+static func glyph(icon_name: String, font_size: int = 22, color: Color = Color.WHITE) -> Label:
+	# code-instantiated: icon runs use the icon font, which no themed label carries.
+	var result := Label.new()
+	result.text = MindIcons.glyph(icon_name)
+	MindIcons.apply_icon_font(result)
+	result.add_theme_font_size_override("font_size", font_size)
+	result.add_theme_color_override("font_color", color)
+	result.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	result.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	return result
+
+
+## A bundle string translated to Godot BBCode via `MindAssets.bundle_markup`
+## (`[accent]` colors, `:icon:` tokens, `\n`). Falls back to the bare key.
+static func markup(key: String) -> String:
+	var assets := assets()
+	if assets == null:
+		return key.trim_prefix("@")
+	return str(assets.call("bundle_markup", key.trim_prefix("@")))
+
+
+## `Core.bundle.format` + markup translation (see [method markup]).
+static func markup_format(key: String, args: Array) -> String:
+	var assets := assets()
+	if assets == null:
+		return key.trim_prefix("@")
+	return str(assets.call("bundle_markup_format", key.trim_prefix("@"), args))
+
+
 static func image(region_name: String) -> TextureRect:
 	var result := TextureRect.new()
 	result.texture = icon_texture(region_name)

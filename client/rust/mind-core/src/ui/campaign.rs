@@ -606,6 +606,26 @@ pub fn map_views(entries: &[MapEntryView]) -> Vec<MapEntryView> {
     rows
 }
 
+/// Built-in map rows from `Maps.defaultMapNames` (`MapListDialog` built-in set).
+///
+/// Sizes are unknown here because loading the `MSAV` headers needs the IO layer;
+/// the map grid renders the name and a placeholder preview until plan 19 supplies
+/// the metadata and generated previews. Rows are sorted by name via [`map_views`].
+pub fn default_map_entries() -> Vec<MapEntryView> {
+    map_views(
+        &crate::maps::DEFAULT_MAP_NAMES
+            .iter()
+            .map(|name| MapEntryView {
+                name: (*name).to_owned(),
+                author: None,
+                width: 0,
+                height: 0,
+                custom: false,
+            })
+            .collect::<Vec<_>>(),
+    )
+}
+
 impl CampaignViews {
     /// Projects the complete campaign state into the M5 dialog read models.
     pub fn from_campaign(

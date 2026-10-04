@@ -372,6 +372,31 @@ impl MindAssets {
         GString::from(self.bundle.format(&key, &refs).as_str())
     }
 
+    /// `Core.bundle.get(key)` translated to Godot BBCode via
+    /// `mind_core::ui::text::render_markup` (`[accent]`/`[]` colors, `:icon:`
+    /// tokens and `\n` escapes). The key is echoed (and markup-normalized) when
+    /// missing, matching [`MindAssets::bundle_get`].
+    #[func]
+    pub fn bundle_markup(&self, key: GString) -> GString {
+        let key = key.to_string();
+        let raw = self.bundle.get(&key);
+        GString::from(mind_core::ui::text::render_markup(raw, &self.iconc).as_str())
+    }
+
+    /// [`MindAssets::bundle_markup`] for a `Core.bundle.format` string.
+    #[func]
+    pub fn bundle_markup_format(&self, key: GString, args: PackedStringArray) -> GString {
+        let key = key.to_string();
+        let owned: Vec<String> = args
+            .as_slice()
+            .iter()
+            .map(|value| value.to_string())
+            .collect();
+        let refs: Vec<&str> = owned.iter().map(String::as_str).collect();
+        let raw = self.bundle.format(&key, &refs);
+        GString::from(mind_core::ui::text::render_markup(&raw, &self.iconc).as_str())
+    }
+
     /// Selectable locales (`assets/locales`).
     #[func]
     pub fn locales(&self) -> PackedStringArray {

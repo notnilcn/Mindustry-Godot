@@ -16,6 +16,16 @@ var _current_row := 0
 var _defaults: MindCell = null
 var _background_name := ""
 var _margin_value := 0.0
+var _sorting := false
+
+
+func _notification(what: int) -> void:
+	# Re-run layout when the container is resized. A deferred `queue_sort()` can
+	# fire before the parent assigns the final size, leaving grow cells at their
+	# minimum; re-sorting here lets them fill once the size is known. The guard
+	# stops a child min-size change from recursing mid-sort.
+	if what == NOTIFICATION_RESIZED and not _sorting:
+		queue_sort()
 
 
 ## Appends `child` to the current row and returns its [MindCell].
@@ -54,6 +64,13 @@ func margin(value: float) -> void:
 	queue_redraw()
 
 
+## Forces an immediate layout pass. Grids nested inside another container do not
+## always receive the deferred `NOTIFICATION_SORT_CHILDREN` after a runtime
+## rebuild, so dialogs call this (and a deferred repeat) once the cells are added.
+func sort_now() -> void:
+	_sort_children()
+
+
 ## Removes every child and cell.
 func clear_children() -> void:
 	for entry in _cells:
@@ -86,6 +103,12 @@ func _get_minimum_size() -> Vector2:
 
 
 func _sort_children() -> void:
+	_sorting = true
+	_sort_children_inner()
+	_sorting = false
+
+
+func _sort_children_inner() -> void:
 	var grid := _grid()
 	var min_size := _get_minimum_size()
 	var extra := size - min_size

@@ -26,10 +26,39 @@ extends Control
 
 var _context: Dictionary = {}
 
+## Cached `MindUi.campaign_views()` snapshot. `MindUi` binds `&mut self` for the
+## duration of `open_dialog`, so re-entering `campaign_views()` from a dialog's
+## `shown()` panics ("already bound"); dialogs read this once and reuse it.
+var _campaign_views_cache: Dictionary = {}
+var _campaign_views_loaded := false
+
 
 func _ready() -> void:
 	visible = false
 	_apply_title()
+	_apply_full_dialog()
+
+
+## Stretches the centered panel to the whole viewport for `full_dialog` dialogs
+## (`Styles.fullDialog`, upstream `PlanetDialog`/`CustomGameDialog`/`LoadDialog`).
+func _apply_full_dialog() -> void:
+	if not full_dialog:
+		return
+	var panel := get_node_or_null("Center/Panel") as Control
+	if panel != null:
+		panel.theme_type_variation = "fullDialog"
+		panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		_resize_full_panel()
+	var viewport := get_viewport()
+	if viewport != null and not viewport.size_changed.is_connected(_resize_full_panel):
+		viewport.size_changed.connect(_resize_full_panel)
+
+
+func _resize_full_panel() -> void:
+	var panel := get_node_or_null("Center/Panel") as Control
+	if panel != null and full_dialog:
+		panel.custom_minimum_size = get_viewport_rect().size
 
 
 ## Receives the JSON context passed to `MindUi.open_dialog` (used by the MCP
@@ -57,6 +86,18 @@ func show_dialog() -> void:
 	visible = true
 	move_to_front()
 	shown()
+	# `MindTable` layout is manual: place now (min sizes) and again next frame
+	# once the containers have assigned their final size, so grow cells fill.
+	_resort_tables()
+	call_deferred("_resort_tables")
+
+
+## Re-runs layout on every nested `MindTable` (grow cells otherwise stay at their
+## minimum size when a grid is built while the dialog is hidden).
+func _resort_tables() -> void:
+	for node in find_children("*", "", true, false):
+		if node is MindTable:
+			node.sort_now()
 
 
 ## Hides the dialog.
@@ -86,6 +127,35 @@ func add_close_button(width: float = 210.0) -> Button:
 	return button
 
 
+## Appends a themed action button to the button row (`buttons.button(...)`).
+## `icon_name` adds an icon-font glyph; `width > 0` sets a minimum width.
+func add_button(text_value: String, listener: Callable, icon_name: String = "", width: float = 0.0) -> Button:
+	# code-instantiated: action buttons are data-driven per dialog and have no
+	# static scene (the button row is shared across every dialog).
+	var button: Button
+	if icon_name.is_empty():
+		button = MindWidgets.button(text_value)
+	else:
+		button = MindWidgets.icon_button(icon_name, text_value)
+	if width <= 0.0 and not icon_name.is_empty():
+		# A `Button` does not size to its child row; estimate a width from the
+		# label so icon+text action buttons do not clip (e.g. "Add Server").
+		width = maxf(150.0, float(text_value.length()) * 12.0 + 60.0)
+	if width > 0.0:
+		button.custom_minimum_size.x = width
+	if listener.is_valid():
+		button.pressed.connect(listener)
+	if buttons != null:
+		buttons.add_child(button)
+	return button
+
+
+## Bundle string translated to BBCode (`MindAssets.bundle_markup`): `[accent]`
+## colors, `:icon:` tokens and `\n` escapes. Mirrors upstream `Core.bundle.get`.
+func _tm(key: String) -> String:
+	return MindWidgets.markup(key)
+
+
 ## Bundle lookup with the key echoed back when assets are absent (plan 03
 ## `Bundle.get` semantics; all user-visible strings must go through a key).
 func _t(key: String) -> String:
@@ -103,15 +173,35 @@ func set_title_key(key: String) -> void:
 	_apply_title()
 
 
+## Sets literal title text (empty hides the row) and re-applies.
+func set_title_text(value: String) -> void:
+	title_text = value
+	_apply_title()
+
+
+## Removes every button from the shared button row (used when a dialog swaps
+## between modes, e.g. campaign select vs. the planet view).
+func clear_buttons() -> void:
+	if buttons == null:
+		return
+	for child in buttons.get_children():
+		child.queue_free()
+
+
 ## M5 campaign read models from `MindUi.campaign_views()` (plan 14 §3.11 12
-## seam). Returns an empty dictionary when the bridge is absent.
+## seam), cached for the dialog's lifetime. Returns an empty dictionary when the
+## bridge is absent. The cache is loaded during `_ready` (before `MindUi` binds
+## itself), so `shown()` never re-enters the `&mut` Rust endpoint.
 func campaign_views() -> Dictionary:
+	if _campaign_views_loaded:
+		return _campaign_views_cache
+	_campaign_views_loaded = true
 	var ui := get_node_or_null("/root/MindUi")
 	if ui != null and ui.has_method("campaign_views"):
 		var parsed: Variant = JSON.parse_string(str(ui.call("campaign_views")))
 		if parsed is Dictionary:
-			return parsed
-	return {}
+			_campaign_views_cache = parsed
+	return _campaign_views_cache
 
 
 ## A named section of the campaign read models (`planets`/`sectors`/…).
