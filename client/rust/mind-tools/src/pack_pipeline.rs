@@ -55,7 +55,7 @@ pub fn pack(
     let inputs_hash = staged_inputs_hash(staging)?;
 
     if out_dir.exists() {
-        fs::remove_dir_all(out_dir).with_context(|| format!("wiping {}", out_dir.display()))?;
+        clean_generated(out_dir, extras)?;
     }
     fs::create_dir_all(out_dir).with_context(|| format!("creating {}", out_dir.display()))?;
 
@@ -124,6 +124,55 @@ pub fn pack(
         inputs_hash,
         files,
     })
+}
+
+/// Removes a previous run's generated outputs (atlas pages, manifest, extras
+/// and the fallback atlas) while preserving the loose vendored art that lives
+/// beside them (`sprites/space.png`, `sprites/planets/`, `sprites/effects/`
+/// error/logo art). `mind-tools migrate` vendors those files; a pack wipe that
+/// used to take the whole directory made `migrate` + `pack` unable to produce a
+/// working tree (EV-0015).
+fn clean_generated(
+    out_dir: &Path,
+    extras: &BTreeMap<String, mind_atlas::pixmaps::Pixmap>,
+) -> Result<()> {
+    let mut entries: Vec<PathBuf> = fs::read_dir(out_dir)?
+        .map(|entry| entry.map(|e| e.path()))
+        .collect::<std::io::Result<_>>()?;
+    entries.sort();
+    for path in entries {
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if path.is_dir() {
+            if name == "fallback" {
+                fs::remove_dir_all(&path)
+                    .with_context(|| format!("deleting {}", path.display()))?;
+            }
+            continue;
+        }
+        let generated = name == "sprites.atlas.json"
+            || is_page_file(&name)
+            || extras.contains_key(name.trim_end_matches(".png"));
+        if generated {
+            fs::remove_file(&path).with_context(|| format!("deleting {}", path.display()))?;
+        }
+    }
+    Ok(())
+}
+
+/// Whether `name` is a generated atlas page (`page_file_name`):
+/// `sprites.png`, `sprites2.png`, `sprites3.png`, …
+fn is_page_file(name: &str) -> bool {
+    let Some(stem) = name.strip_suffix(".png") else {
+        return false;
+    };
+    if stem == "sprites" {
+        return true;
+    }
+    stem.strip_prefix("sprites")
+        .is_some_and(|rest| !rest.is_empty() && rest.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
 /// Decodes a pass's images in index order, fanning reads out across threads

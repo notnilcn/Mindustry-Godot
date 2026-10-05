@@ -67,6 +67,10 @@ skips the 2048-capped fallback atlas and `--timings` writes `build/assets/pack_t
   `assets/sprites/fallback/`, `assets/icons/icon_codes.json`, `assets/sounds.index.json`,
   `assets/locales`, `assets/shaders/godot/`, `assets/shaders/shader.index.json`) are **never
   hand-edited** — rerun the pipeline.
+- **`pack` cleans only generated outputs.** The loose vendored art under `assets/sprites/`
+  (`space.png`, `planets/`, `clouds.png`, `noise.png`, `error.png`, `logo.png`, …) migrates with
+  `assets/` and must survive every pack (`clean_generated`), so `migrate` + `pack` reproduces a
+  working tree.
 - Region names are **flattened base names**; duplicate stems under `assets-raw/sprites/**` are a
   hard pack error (`assert_no_duplicate_region_names`, `PackAtlas::enumerate`).
 - Every directory walk sorts before iterating, parallel decode/AA/regeneration collects results

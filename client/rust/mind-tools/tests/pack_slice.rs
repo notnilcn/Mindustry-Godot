@@ -151,3 +151,39 @@ fn pack_is_byte_deterministic() {
     fs::remove_dir_all(&root_a).unwrap();
     fs::remove_dir_all(&root_b).unwrap();
 }
+
+/// A re-pack into a tree that already has the vendored loose art must keep it
+/// (`sprites/space.png`, `sprites/planets/*`) while replacing the generated
+/// atlas outputs (EV-0015).
+#[test]
+fn pack_preserves_loose_sprites() {
+    let (root, out) = pack_fixture("loose");
+    let staging = root.join("staging");
+    let loose = [
+        ("space.png", b"space".as_slice()),
+        ("planets/serpulo.png", b"serpulo".as_slice()),
+        ("error.png", b"error".as_slice()),
+    ];
+    for (name, bytes) in &loose {
+        let path = out.join(name);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, bytes).unwrap();
+    }
+
+    let output =
+        mind_tools::pack_pipeline::pack(&staging, &out, false, &std::collections::BTreeMap::new())
+            .unwrap();
+
+    for (name, bytes) in &loose {
+        let path = out.join(name);
+        assert!(path.is_file(), "{name} was deleted by pack");
+        assert_eq!(fs::read(&path).unwrap(), *bytes, "{name} content changed");
+    }
+    // The regenerated manifest is still valid and complete.
+    let manifest_text = fs::read_to_string(out.join("sprites.atlas.json")).unwrap();
+    let index = AtlasIndex::from_manifest_json(&manifest_text).unwrap();
+    assert!(index.find("copper-wall").is_some());
+    assert!(index.find("error").is_some());
+    assert!(output.regions >= 3);
+    fs::remove_dir_all(&root).unwrap();
+}
