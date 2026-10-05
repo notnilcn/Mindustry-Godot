@@ -50,8 +50,9 @@ surface is documented in [`NET_API.md`](NET_API.md).
   `Node2D` per band entry plus the listed passes. The renderer reads the sim; it never feeds it.
 - **Input translation.** `MindInput` captures `InputEvent`s into `mind_core::input::RawEvent`s and
   owns `BindingState`, `InputLocks` and `FocusState`; `MindCamera2D` polls key state for pan/zoom and
-  exposes `screen_to_tile`/`tile_to_screen`; `MindSimHost::input` turns left/right mouse into
-  `Command::Place`/`Command::Break`.
+  exposes `screen_to_tile`/`tile_to_screen`; `MindSimHost::unhandled_input` turns left/right mouse
+  into `Command::Place`/`Command::Break` after the GUI has had the event (UI-consumed clicks never
+  reach the world).
 - **Net and STDB wiring.** `MindNet` owns the `MatchSession`, `Connector`, `RelayRuntime` and
   `CommandSender`; foreign `SimCommand`s are queued into `MindSimHost.pending_commands` so they apply
   only at tick boundaries, and scoped checksums are published while in game. `StdbConnector` owns the

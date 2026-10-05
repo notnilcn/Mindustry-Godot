@@ -131,7 +131,14 @@ impl INode for MindSimHost {
         self.emit_world_changed();
     }
 
-    fn input(&mut self, event: Gd<InputEvent>) {
+    /// Applies world place/break only for clicks the GUI did not consume.
+    ///
+    /// Godot dispatches `Control` input (`_gui_input`/`accept_event`, and every
+    /// `mouse_filter` STOP hit) before `_unhandled_input`, so a click on a
+    /// placement tab, block button, HUD or dialog can never reach the world.
+    /// Upstream parity: `DesktopInput.update` gates world clicks on
+    /// `!Core.scene.hasMouse()` (`core/src/mindustry/input/DesktopInput.java`).
+    fn unhandled_input(&mut self, event: Gd<InputEvent>) {
         let Ok(mouse) = event.try_cast::<InputEventMouseButton>() else {
             return;
         };

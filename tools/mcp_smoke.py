@@ -13,7 +13,7 @@
 #   2. pid-stamped liveness eval (get_tick/get_checksum)
 #   3. load_scenario + step(60) in Playing -> golden checksum a1a7b96167c9718d
 #   4. pause, API place_block/break_block
-#   5. tile_to_screen + real godot_input mouse click (place/break via _input)
+#   5. tile_to_screen + real godot_input mouse click (place/break via _unhandled_input)
 #   6. godot_log errors clean + startup [I] lines present, then stop
 #
 # Constraints (documented in the repo playtest skill):
@@ -414,7 +414,7 @@ def run(repo_root: str, mcp_bin: str, server_args: list[str], verbose: bool,
 
         # Step 6: real input path. Resolve the tile center in viewport space,
         # click it, then step(1) so the paused pump advances (the click itself
-        # applies through MindSimHost::_input immediately).
+        # applies through MindSimHost::_unhandled_input immediately).
         screen = eval_code(
             mcp, f"return get_node(\"{CAMERA_PATH}\").tile_to_screen(7, 7)"
         )
