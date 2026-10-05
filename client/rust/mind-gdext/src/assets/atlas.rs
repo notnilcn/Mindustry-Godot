@@ -50,6 +50,9 @@ pub struct MindAssets {
     region_textures: HashMap<String, Gd<AtlasTexture>>,
     /// Loose textures (`sprites/<name>.png` not in the atlas).
     loose_textures: HashMap<String, Gd<ImageTexture>>,
+    /// Loose textures with alpha derived from luminance (planet renders whose
+    /// opaque black background must cut out over the starfield).
+    cutout_textures: HashMap<String, Gd<ImageTexture>>,
     /// Locale bundle (`Core.bundle`).
     bundle: Bundle,
     /// Content icon code table (`Iconc`).
@@ -77,6 +80,7 @@ impl INode for MindAssets {
             pages: Vec::new(),
             region_textures: HashMap::new(),
             loose_textures: HashMap::new(),
+            cutout_textures: HashMap::new(),
             bundle: Bundle::new(),
             iconc: Iconc::default(),
             locales: Vec::new(),
@@ -244,6 +248,40 @@ impl MindAssets {
         }
         let texture = ImageTexture::create_from_image(&image)?;
         self.loose_textures.insert(key, texture.clone());
+        Some(texture)
+    }
+
+    /// Loads and caches a loose `sprites/<name>.png` with alpha derived from
+    /// luminance (`PlanetDialog` planet art carries an opaque black
+    /// background). The ramp keeps the atmosphere glow semi-transparent and
+    /// makes the empty space between stars fully transparent.
+    #[func]
+    pub fn find_loose_cutout(&mut self, name: GString) -> Option<Gd<ImageTexture>> {
+        let key = name.to_string();
+        if let Some(texture) = self.cutout_textures.get(&key) {
+            return Some(texture.clone());
+        }
+        let path = format!("{}/sprites/{key}.png", self.assets_dir);
+        if !FileAccess::file_exists(&path) {
+            return None;
+        }
+        let bytes = FileAccess::get_file_as_bytes(&path);
+        let mut image = Image::new_gd();
+        if image.load_png_from_buffer(&bytes) != Error::OK {
+            return None;
+        }
+        let width = image.get_width();
+        let height = image.get_height();
+        for y in 0..height {
+            for x in 0..width {
+                let color = image.get_pixel(x, y);
+                let luma = 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b;
+                let alpha = ((luma - 0.02) * 4.0).clamp(0.0, 1.0);
+                image.set_pixel(x, y, Color::from_rgba(color.r, color.g, color.b, alpha));
+            }
+        }
+        let texture = ImageTexture::create_from_image(&image)?;
+        self.cutout_textures.insert(key, texture.clone());
         Some(texture)
     }
 

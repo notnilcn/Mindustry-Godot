@@ -12,8 +12,9 @@
 //! In-engine MCP verification (plan 12 §7c) is deferred to the orchestrator's
 //! single-editor mutex; this class compiles and exposes the API surface today.
 
+use godot::builtin::{PackedInt32Array, PackedVector3Array, VarDictionary, Vector3};
 use godot::classes::notify::NodeNotification;
-use godot::classes::{INode, Node};
+use godot::classes::{FileAccess, INode, Node};
 use godot::obj::Base;
 use godot::prelude::*;
 
@@ -32,7 +33,12 @@ use mind_core::game::universe::{Campaign, TurnContext};
 use mind_core::game::world_reloader::HostReloader;
 use mind_core::io::settings::SettingsStore;
 use mind_core::random::JavaRandom;
+use mind_core::render::g3d::grid::PlanetGrid;
+use mind_core::render::g3d::mesh_data::build_planet_grid;
 use mind_core::world::modules::ItemModule;
+
+/// `PlanetRenderer.outlineRad`: the sector-grid shell scale over `radius`.
+const OUTLINE_RAD: f32 = 1.17;
 
 /// Objective context with every tech objective met (single-player research path).
 struct AllObjectivesMet;
@@ -443,6 +449,92 @@ impl MindCampaign {
     #[func]
     pub fn load_slot(&mut self, name: GString) -> bool {
         self.settings.has(&format!("mcp-save-{name}"))
+    }
+
+    /// Planet globe data for the sector view (plan 16 g3d seam): the
+    /// `PlanetGrid` sector topology, the render-plane grid-line mesh
+    /// (`MeshBuilder.buildPlanetGrid` at `outlineRad * radius`) and the
+    /// `assets/planets/<name>.json` preset → sector-index remap.
+    ///
+    /// Returns an empty dictionary for an unknown planet or before content
+    /// boot.
+    #[func]
+    pub fn planet_view(&mut self, planet: GString) -> VarDictionary {
+        let mut out = VarDictionary::new();
+        let name = planet.to_string();
+        let Some(registry) = self.registry.as_ref() else {
+            return out;
+        };
+        let Some(def) = registry.planet_by_name(&name) else {
+            return out;
+        };
+
+        let grid = PlanetGrid::create(def.sector_tiles as usize);
+        let outline = OUTLINE_RAD * def.radius;
+
+        let mut tiles = PackedVector3Array::new();
+        for tile in &grid.tiles {
+            tiles.push(Vector3::new(tile.v[0], tile.v[1], tile.v[2]));
+        }
+        let mut corners = PackedVector3Array::new();
+        for corner in &grid.corners {
+            corners.push(Vector3::new(corner.v[0], corner.v[1], corner.v[2]));
+        }
+        let mut tile_corners = Array::<PackedInt32Array>::new();
+        for tile in &grid.tiles {
+            let mut ids = PackedInt32Array::new();
+            for corner in &tile.corners {
+                ids.push(*corner as i32);
+            }
+            tile_corners.push(&ids);
+        }
+
+        let line_mesh = build_planet_grid(&grid, u32::MAX, outline);
+        let mut lines = PackedVector3Array::new();
+        for vertex in &line_mesh.vertices {
+            lines.push(Vector3::new(vertex[0], vertex[1], vertex[2]));
+        }
+
+        let mut presets = VarDictionary::new();
+        let path = format!(
+            "{}/planets/{name}.json",
+            crate::assets::loader::resolve_assets_dir()
+        );
+        if FileAccess::file_exists(&path) {
+            let text = FileAccess::get_file_as_string(&path).to_string();
+            match serde_json::from_str::<serde_json::Value>(&mind_core::io::json::quote_bare_keys(
+                &text,
+            )) {
+                Ok(value) => {
+                    if let Some(entries) = value.get("presets").and_then(|v| v.as_object()) {
+                        for (preset, index) in entries {
+                            if let Some(index) = index.as_u64() {
+                                presets.set(preset.as_str(), index as i64);
+                            }
+                        }
+                    }
+                }
+                Err(error) => log::warn!("[campaign] planet data {path}: {error}"),
+            }
+        }
+
+        let icon = def.icon_color;
+        out.set("name", name);
+        out.set("grid_size", def.sector_tiles as i64);
+        out.set("radius", def.radius);
+        out.set("outline", outline);
+        out.set("cam_radius", def.cam_radius);
+        out.set("start_sector", def.start_sector as i64);
+        out.set(
+            "icon_color",
+            Color::from_rgba(icon.r, icon.g, icon.b, icon.a),
+        );
+        out.set("tiles", &tiles);
+        out.set("corners", &corners);
+        out.set("tile_corners", &tile_corners);
+        out.set("lines", &lines);
+        out.set("presets", &presets);
+        out
     }
 
     /// Content boot error, if any (diagnostics).

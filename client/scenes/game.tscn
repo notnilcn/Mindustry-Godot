@@ -4,6 +4,7 @@
 [ext_resource type="PackedScene" path="res://scenes/ui/ui_root.tscn" id="2_uiroot"]
 [ext_resource type="PackedScene" path="res://scenes/editor/map_editor_dialog.tscn" id="3_editor"]
 [ext_resource type="Script" path="res://ui/menu_background.gd" id="4_menubg"]
+[ext_resource type="PackedScene" path="res://scenes/ui/planet_view.tscn" id="5_planetview"]
 
 [node name="Spine" type="Node" unique_id=1959762537]
 
@@ -45,6 +46,8 @@ zoom = Vector2(2, 2)
 [node name="MindPlatform" type="MindPlatform" parent="." unique_id=1187341600]
 
 [node name="Planet" type="CanvasLayer" parent="." unique_id=328291941]
+
+[node name="PlanetView" parent="Planet" instance=ExtResource("5_planetview")]
 
 [node name="Ui" type="CanvasLayer" parent="." unique_id=541018541]
 
