@@ -80,7 +80,18 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 			theme.set_stylebox("pressed", name, flat(Color(0.13, 0.15, 0.18, 1.0)))
 			theme.set_color("font_color", name, Color(0.92, 0.92, 0.92))
 		"PanelContainer":
-			theme.set_stylebox("panel", name, flat(MindStyles.GRAY_PANEL))
+			if name == "fullDialog":
+				# `Styles.fullDialog` uses `windowEmpty`: a full-viewport frame
+				# over the stage background (the `Dim` overlay + backdrop), not an
+				# opaque sheet. Content floats over the space backdrop.
+				var empty := StyleBoxEmpty.new()
+				empty.content_margin_left = 8.0
+				empty.content_margin_right = 8.0
+				empty.content_margin_top = 4.0
+				empty.content_margin_bottom = 4.0
+				theme.set_stylebox("panel", name, empty)
+			else:
+				theme.set_stylebox("panel", name, flat(MindStyles.GRAY_PANEL))
 		"RichTextLabel":
 			theme.set_color("default_color", name, Color(0.92, 0.92, 0.92))
 		"HSlider":

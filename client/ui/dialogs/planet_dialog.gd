@@ -7,8 +7,9 @@
 ## the planet view — a planet rail, the active planet's sector grid, the selected
 ## sector's threat readout and a Launch button (`@sectors.launch`). Data comes
 ## from the `MindUi.campaign_views()` read models; launching calls the
-## `MindCampaign.start_sector` facade. The g3d planet renderer is plan 16, so the
-## planet is drawn as a tinted disc placeholder.
+## `MindCampaign.start_sector` facade. The chooser cards draw the vendored
+## `sprites/planets/<name>.png` textures (`PlanetDialog.planetTextures`); the
+## interactive g3d globe is plan 16's `Planet` layer.
 
 extends MindDialog
 
@@ -29,6 +30,7 @@ func _ready() -> void:
 	should_pause = true
 	full_dialog = true
 	super._ready()
+	_add_space_backdrop()
 	_build()
 	_show_select()
 
@@ -44,6 +46,30 @@ func shown() -> void:
 
 func _build() -> void:
 	_root = content_table()
+
+
+## Full-screen starfield behind the chooser (`sprites/space.png`; the live g3d
+## backdrop is plan 16's `Planet` layer). Adds behind the base `Dim` overlay so
+## the dialog dim still applies.
+func _add_space_backdrop() -> void:
+	if get_node_or_null("SpaceBackdrop") != null:
+		return
+	var assets := MindWidgets.assets()
+	if assets == null:
+		return
+	var texture: Variant = assets.call("find_loose", "space")
+	if not (texture is Texture2D):
+		return
+	# code-instantiated: single backdrop image; no static scene owns it yet.
+	var backdrop := TextureRect.new()
+	backdrop.name = "SpaceBackdrop"
+	backdrop.texture = texture
+	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	backdrop.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	backdrop.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(backdrop)
+	move_child(backdrop, 0)
 
 
 func _clear_root() -> void:
@@ -97,14 +123,17 @@ func _show_select() -> void:
 	add_button(_t("@back"), _close, "left")
 
 
-## The two campaign starting choices (`PlanetDialog` uses Serpulo/Erekir).
+## The two campaign starting choices in reference order (`PlanetDialog` lists
+## Serpulo before Erekir; the read model's planet order is not guaranteed).
 func _campaign_planets() -> Array:
-	var out: Array = []
+	var by_name := {}
 	for planet_variant in campaign_section("planets"):
 		var planet: Dictionary = planet_variant
-		var name := str(planet.get("name", ""))
-		if name == "serpulo" or name == "erekir":
-			out.append(planet)
+		by_name[str(planet.get("name", ""))] = planet
+	var out: Array = []
+	for name in ["serpulo", "erekir"]:
+		if by_name.has(name):
+			out.append(by_name[name])
 	return out
 
 
@@ -123,13 +152,37 @@ func _make_planet_card(planet: Dictionary) -> Button:
 	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	column.add_child(name_label)
-	var disc := Panel.new()
-	disc.custom_minimum_size = Vector2(DISC_SIZE, DISC_SIZE)
-	disc.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	disc.add_theme_stylebox_override("panel", _disc_style(planet))
-	disc.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	column.add_child(disc)
+	var texture := _planet_texture(planet)
+	if texture != null:
+		var image := TextureRect.new()
+		image.texture = texture
+		image.custom_minimum_size = Vector2(DISC_SIZE, DISC_SIZE)
+		image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		image.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+		image.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		column.add_child(image)
+	else:
+		var disc := Panel.new()
+		disc.custom_minimum_size = Vector2(DISC_SIZE, DISC_SIZE)
+		disc.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		disc.add_theme_stylebox_override("panel", _disc_style(planet))
+		disc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		column.add_child(disc)
 	return card
+
+
+## Vendored `sprites/planets/<name>.png` (`PlanetDialog.planetTextures`), or
+## `null` so the card falls back to the tinted disc.
+func _planet_texture(planet: Dictionary) -> Texture2D:
+	var assets := MindWidgets.assets()
+	if assets == null:
+		return null
+	var name := str(planet.get("name", ""))
+	var texture: Variant = assets.call("find_loose", "planets/%s" % name)
+	if texture is Texture2D:
+		return texture
+	return null
 
 
 func _disc_style(planet: Dictionary) -> StyleBoxFlat:
