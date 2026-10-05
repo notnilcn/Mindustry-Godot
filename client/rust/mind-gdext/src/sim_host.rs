@@ -21,8 +21,8 @@ use crate::settings;
 use mind_core::audio::{AudioSinkRes, SharedAudioLog};
 use mind_core::command::Command;
 use mind_core::content::{
-    BlockId, ContentRegistry, ContentType, MemoryBundle, MemoryUnlockStore, content_counts,
-    create_base_content,
+    BlockId, BlockKind, ContentRegistry, ContentType, MemoryBundle, MemoryUnlockStore,
+    content_counts, create_base_content,
 };
 use mind_core::determinism::SimCommand;
 use mind_core::editor::context::EditorContext;
@@ -65,6 +65,9 @@ pub struct MindSimHost {
     /// The plan-16 renderer uses it to invalidate chunk meshes without wiring
     /// raw tile coords across the view boundary (plan 16 §3.5).
     revision: u64,
+    /// Monotonic world-load counter (`load_scenario`/`load_sector`), used by the
+    /// camera rig to snap on every world load, including same-size reloads.
+    world_loads: u64,
     /// Plan-17 `MindFx` sibling (`../MindFx`); the one-way sim→view tick hook.
     fx_host: Option<Gd<Node>>,
     /// Plan-21 relay queue: commands drained and applied at the next tick
@@ -93,6 +96,7 @@ impl INode for MindSimHost {
             world_dirty: false,
             content_snapshot: None,
             revision: 0,
+            world_loads: 0,
             fx_host: None,
             pending_commands: VecDeque::new(),
             audio_log: SharedAudioLog::new(),
@@ -169,13 +173,8 @@ impl INode for MindSimHost {
 
     fn exit_tree(&mut self) {
         // Minimal P0 client settings (§6.5); plan 04 replaces this with Settings.
-        let zoom = self
-            .base()
-            .try_get_node_as::<MindCamera2D>("../World/Camera2D")
-            .map(|camera| camera.bind().zoom_value())
-            .unwrap_or(1.0);
         let selected = self.sim.block_name_of(self.sim.selected_block());
-        if !settings::write(&selected, zoom) {
+        if !settings::write(&selected) {
             log::warn!("failed to write user://settings.json");
         }
     }
@@ -864,6 +863,7 @@ impl MindSimHost {
         self.sim = sim;
         self.player = Some(player);
         self.world_dirty = true;
+        self.world_loads += 1;
         self.emit_state();
         self.emit_world_changed();
         true
@@ -918,6 +918,7 @@ impl MindSimHost {
         self.sim = sim;
         self.player = None;
         self.world_dirty = true;
+        self.world_loads += 1;
         self.emit_state();
         self.emit_world_changed();
         log::info!("loaded campaign sector `{planet_name}:{sector}`");
@@ -985,6 +986,18 @@ impl MindSimHost {
     /// World size in tiles `(width, height)`; used to draw the grid border.
     pub fn world_size(&self) -> (i32, i32) {
         (self.sim.grid.width(), self.sim.grid.height())
+    }
+
+    /// Number of completed world loads; the camera rig snaps on a change.
+    pub fn world_loads(&self) -> u64 {
+        self.world_loads
+    }
+
+    /// Player best-core camera target for a world load (`Control.WorldLoadEvent`
+    /// → `camera.position.set(player.bestCore())`), in world pixels. `None`
+    /// before content boot or on a core-less map.
+    pub fn best_core_position(&self) -> Option<(f32, f32)> {
+        first_core_position(&self.sim.grid, self.content_snapshot.as_ref()?)
     }
 
     /// Read-only world grid for the plan-16 floor/block bakers.
@@ -1222,4 +1235,75 @@ fn parse_capture_args() -> Option<CaptureRequest> {
         index += 1;
     }
     None
+}
+
+/// Rendered center of the first core in row-major order, matching the block
+/// renderer's `(tile + 0.5) * TILESIZE + Block.offset` quad center.
+///
+/// Upstream `Player.bestCore()` picks the player team's core; the port's tile
+/// model carries no team, so this returns the first core tile scanned.
+fn first_core_position(grid: &WorldGrid, content: &ContentRegistry) -> Option<(f32, f32)> {
+    let unit = mind_core::config::TILESIZE as f32;
+    grid.iter_row_major().find_map(|(pos, index)| {
+        let def = content.block(grid.block_id_at(index))?;
+        (def.kind == BlockKind::CoreBlock).then(|| {
+            (
+                (pos.x() as f32 + 0.5) * unit + def.offset,
+                (pos.y() as f32 + 0.5) * unit + def.offset,
+            )
+        })
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mind_core::world::TilePos;
+
+    fn base_registry() -> ContentRegistry {
+        let bundle = MemoryBundle::new();
+        let store = MemoryUnlockStore::new();
+        match create_base_content(&bundle, &store, true) {
+            Ok(mut registry) => {
+                if let Err(error) = registry.init() {
+                    panic!("registry init failed: {error}");
+                }
+                if let Err(error) = registry.post_init() {
+                    panic!("registry post_init failed: {error}");
+                }
+                registry
+            }
+            Err(error) => panic!("content boot failed: {error}"),
+        }
+    }
+
+    #[test]
+    fn best_core_position_uses_the_core_tile_center() {
+        let registry = base_registry();
+        let Some(core) = registry.block_id("core-shard") else {
+            panic!("core-shard missing");
+        };
+        let Some(def) = registry.block(core) else {
+            panic!("core-shard def missing");
+        };
+        let offset = def.offset;
+        let mut grid = WorldGrid::new(8, 8);
+        grid.fill(BlockId::AIR, BlockId::AIR);
+        if grid.set_block(TilePos::new(3, 5), core, 0, 0).is_err() {
+            panic!("set_block failed");
+        }
+        let unit = mind_core::config::TILESIZE as f32;
+        assert_eq!(
+            first_core_position(&grid, &registry),
+            Some(((3.0 + 0.5) * unit + offset, (5.0 + 0.5) * unit + offset))
+        );
+    }
+
+    #[test]
+    fn best_core_position_is_none_without_cores() {
+        let registry = base_registry();
+        let mut grid = WorldGrid::new(4, 4);
+        grid.fill(BlockId::AIR, BlockId::AIR);
+        assert_eq!(first_core_position(&grid, &registry), None);
+    }
 }

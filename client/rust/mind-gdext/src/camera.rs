@@ -18,7 +18,6 @@ use mind_core::config::TILESIZE;
 use mind_core::fx::FxEvent;
 use mind_core::input::{CameraState, MinimapRegion};
 
-use crate::settings;
 use crate::sim_host::MindSimHost;
 
 /// Default `screenshake` setting (`Renderer` reads it each frame).
@@ -47,6 +46,8 @@ pub struct MindCamera2D {
     host: Option<Gd<MindSimHost>>,
     /// World size the rig last adopted (`Control` world-load camera snap).
     world_dims: (i32, i32),
+    /// World-load counter the rig last adopted (recenters on a same-size load).
+    world_loads: u64,
 }
 
 #[godot_api]
@@ -62,6 +63,7 @@ impl ICamera2D for MindCamera2D {
             shadow_scale: 1.0,
             host: None,
             world_dims: (0, 0),
+            world_loads: 0,
         }
     }
 
@@ -171,11 +173,6 @@ impl MindCamera2D {
         // Scene-wired sim host (tscn-first): the spine declares SimHost as a
         // sibling of World, so the camera follows world loads.
         self.host = self.base().try_get_node_as::<MindSimHost>("../../SimHost");
-        if let Some(saved) = settings::read()
-            && let Some(zoom) = saved.zoom
-        {
-            self.camera.set_scale_immediate(zoom as f32);
-        }
         let position = self.base().get_position();
         self.camera.position = (position.x, position.y);
         // Seed the echo-guard shadows from the node so no write is issued for
@@ -189,21 +186,29 @@ impl MindCamera2D {
         );
     }
 
-    /// `Control` `WorldLoadEvent`/`Trigger.newGame`: on a world-size change set
-    /// the pan bounds and center the camera. Upstream centers on the player's
-    /// best core; the port centers the world until the core query lands.
+    /// `Control` `WorldLoadEvent`: on a world load, set the pan bounds and snap
+    /// the camera to the player's best core (`camera.position.set(player.bestCore())`),
+    /// falling back to the world middle when the map has no core.
     fn follow_world(&mut self) {
         let Some(host) = self.host.clone() else {
             return;
         };
         let (width, height) = host.bind().world_size();
-        if width <= 0 || height <= 0 || (width, height) == self.world_dims {
+        let loads = host.bind().world_loads();
+        if width <= 0
+            || height <= 0
+            || ((width, height) == self.world_dims && loads == self.world_loads)
+        {
             return;
         }
         self.world_dims = (width, height);
+        self.world_loads = loads;
         let unit = TILESIZE as f32;
         self.camera.world_size = Some((width as f32 * unit, height as f32 * unit));
-        self.camera.center_on_tile(width / 2, height / 2);
+        match host.bind().best_core_position() {
+            Some((x, y)) => self.camera.pan_camera(x, y),
+            None => self.camera.center_on_tile(width / 2, height / 2),
+        }
         let (x, y) = self.camera.render_position();
         self.base_mut().set_position(Vector2::new(x, y));
         self.shadow_position = (x, y);
@@ -324,11 +329,6 @@ impl MindCamera2D {
     #[func]
     pub fn clear_logic_cutscene(&mut self) {
         self.camera.clear_logic_cutscene();
-    }
-
-    /// Current zoom factor (settings persistence helper; not part of the MCP API).
-    pub fn zoom_value(&self) -> f64 {
-        self.camera.camerascale as f64
     }
 
     /// The camera rig state as JSON (MCP `§7c` camera probes).

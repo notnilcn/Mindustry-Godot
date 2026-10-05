@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 //! Minimal P0 client settings (`user://settings.json`, plan §6.5): selected
-//! block + camera zoom only. Plan 04 replaces this with the full `Settings`
-//! port; the file shape is `{ "format": 1, "selected_block": "...", "zoom": 1.0 }`.
+//! block only. Plan 04 replaces this with the full `Settings` port; the file
+//! shape is `{ "format": 1, "selected_block": "..." }`. Camera zoom is not
+//! persisted: upstream `Renderer.targetscale` resets to `Scl.scl(4)` every boot.
 
 use std::path::PathBuf;
 
@@ -21,8 +22,6 @@ const SETTINGS_FORMAT: i64 = 1;
 pub struct ClientSettings {
     /// Last selected block name.
     pub selected_block: Option<String>,
-    /// Last camera zoom.
-    pub zoom: Option<f64>,
 }
 
 /// Reads `user://settings.json`; `None` when absent or unreadable.
@@ -37,25 +36,16 @@ pub fn read() -> Option<ClientSettings> {
         .get(&block_key)
         .and_then(|value| value.try_to::<GString>().ok())
         .map(|name| name.to_string());
-    let zoom_key = "zoom".to_variant();
-    let zoom = dict
-        .get(&zoom_key)
-        .and_then(|value| value.try_to::<f64>().ok());
-    Some(ClientSettings {
-        selected_block,
-        zoom,
-    })
+    Some(ClientSettings { selected_block })
 }
 
 /// Writes `user://settings.json`; `false` when the file cannot be written.
-pub fn write(selected_block: &str, zoom: f64) -> bool {
+pub fn write(selected_block: &str) -> bool {
     let mut dict = VarDictionary::new();
     let format_key = "format".to_variant();
     let block_key = "selected_block".to_variant();
-    let zoom_key = "zoom".to_variant();
     dict.set(&format_key, &SETTINGS_FORMAT.to_variant());
     dict.set(&block_key, &selected_block.to_variant());
-    dict.set(&zoom_key, &zoom.to_variant());
     let text = Json::stringify(&dict.to_variant());
 
     let native = native_path();
