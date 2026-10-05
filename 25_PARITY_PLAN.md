@@ -124,7 +124,7 @@ saying why (upstream deviation accepted, platform limitation, duplicate).
 |---|---|---|---|---|
 | M0 bring-up | done | 20261005-150056-boot_menu | — | First twin-run complete; 8 findings filed. |
 | M1 menu & settings | in-progress | 20261005-161109-ev0002-verify | none | `boot_menu` evaluated; EV-0001/0002/0005/0009 verified-fixed; EV-0003/0004/0006/0007/0008 open (S3/S4). `settings_ui`, `ui_dialogs` not yet run. |
-| M2 campaign & HUD | not-started | — | — | |
+| M2 campaign & HUD | in-progress | 20261005-184929-ev0011-verify2 | EV-0015 (S2, assets) | `campaign_launch` twin-run: EV-0011 (chooser planets/order/backdrop) and EV-0012 (sector terrain) verified-fixed; EV-0010 (3D globe + hex sector view), EV-0013 (block-picker icons), EV-0014 (wall-dominated generated sector) open. |
 | M3 building & economy | not-started | — | — | |
 | M4 combat, units, logic | not-started | — | — | |
 | M5 breadth & platform | not-started | — | — | |

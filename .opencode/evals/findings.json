@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "updated": "2026-10-05T06:15:24+00:00",
+  "updated": "2026-10-05T08:58:37+00:00",
   "findings": [
     {
       "id": "EV-0001",
@@ -197,6 +197,184 @@
       "plan": "14",
       "first_seen": "2026-10-05T05:59:18+00:00",
       "last_verified": "2026-10-05T06:09:49+00:00"
+    },
+    {
+      "id": "EV-0010",
+      "area": "ui/campaign",
+      "severity": "S3",
+      "status": "open",
+      "title": "Campaign sector view is a flat raw-id text grid instead of the 3D planet with hex sectors",
+      "expected": "Java: sector view renders the 3D Serpulo globe with a hex sector grid, left planet sidebar (Erekir/Serpulo/Difficulty), and a selected-sector panel with Threat and Launch; Back/ Tech Tree at bottom",
+      "actual": "Godot: flat 3-column list of raw internal ids (sunkenPier, serpulo-sector-2, groundZero); left sidebar shows 'verilus'; bottom row Resume/Back/Tech Tree; clicking groundZero only fills detail labels name+Threat; no globe, hex grid, starfield or in-panel Launch",
+      "repro": "scenario campaign_launch step 2 (Play > Campaign > Serpulo > OK)",
+      "evidence": [
+        "runs/20261005-163933-campaign_launch/godot/step-02-sector-view.png",
+        "runs/20261005-163933-campaign_launch/java/step-02b-sector-view-leg2.png",
+        "runs/20261005-163933-campaign_launch/java/step-03a-groundzero-selected.png",
+        "runs/20261005-163933-campaign_launch/godot/state-observations.json",
+        "runs/20261005-175054-ev0012-verify/godot/step-02-sector-view.png",
+        "runs/20261005-175054-ev0012-verify/godot/step-03a-groundzero-selected.png"
+      ],
+      "notes": [
+        "Sector action is labeled Resume although the starting sector has no save (Java would show Launch)",
+        "2026-10-05T08:01:12+00:00: Triage 20261005-175054: still reproduces. Sector dialog has 0 Node3D / 0 SubViewport, 281 raw-id text buttons (sunkenPier, serpulo-sector-2, ...), Resume/Back/Tech Tree bottom bar; flat grid."
+      ],
+      "plan": "12",
+      "first_seen": "2026-10-05T07:18:31+00:00",
+      "last_verified": "2026-10-05T08:01:12+00:00"
+    },
+    {
+      "id": "EV-0011",
+      "area": "ui/campaign",
+      "severity": "S3",
+      "status": "verified-fixed",
+      "title": "Select Starting Campaign dialog shows flat 2D circles and swaps planet order",
+      "expected": "Java: starfield backdrop, 3D-shaded planets with Serpulo on the left (accent selection border) and Erekir on the right; dynamic description; Back bottom-left / OK center / Tech Tree right",
+      "actual": "Godot: flat filled circles, Erekir left / Serpulo right, no starfield or 3D shading; title, dynamic description switch and OK-disabled-until-selected behavior match",
+      "repro": "scenario campaign_launch step 1 (Play > Campaign)",
+      "evidence": [
+        "runs/20261005-163933-campaign_launch/godot/step-01-planet-dialog.png",
+        "runs/20261005-163933-campaign_launch/godot/step-01b-serpulo-selected.png",
+        "runs/20261005-163933-campaign_launch/java/step-01-select-starting-campaign.png",
+        "runs/20261005-163933-campaign_launch/godot/state-observations.json",
+        "runs/20261005-175054-ev0012-verify/godot/step-01-erekir-left-serpulo-right.png",
+        "runs/20261005-182803-ev0011-verify/godot/step-01-planet-dialog.png",
+        "runs/20261005-182803-ev0011-verify/godot/planet-pixels.json",
+        "runs/20261005-182803-ev0011-verify/godot/state-01-planet-dialog.json",
+        "runs/20261005-182803-ev0011-verify/diff/backdrop-occlusion.json",
+        "runs/20261005-182803-ev0011-verify/godot/xscreen-nopanel-crop.png",
+        "runs/20261005-182803-ev0011-verify/godot/step-01b-serpulo-selected.png",
+        "runs/20261005-182803-ev0011-verify/godot/step-02b-ingame-after-launch.png",
+        "runs/20261005-184929-ev0011-verify2/godot/step-01-planet-dialog.png",
+        "runs/20261005-184929-ev0011-verify2/godot/backdrop-pixels.json",
+        "runs/20261005-184929-ev0011-verify2/godot/planet-pixels-new.json",
+        "runs/20261005-184929-ev0011-verify2/godot/state-01-planet-dialog-pid371512.json",
+        "runs/20261005-184929-ev0011-verify2/diff/step-01-old-vs-new.json",
+        "runs/20261005-184929-ev0011-verify2/diff/step-01-java-godot.json",
+        "runs/20261005-184929-ev0011-verify2/godot/step-01b-serpulo-selected.png",
+        "runs/20261005-184929-ev0011-verify2/godot/state-flow-pid372884.json",
+        "runs/20261005-184929-ev0011-verify2/godot/step-02b-ingame-after-launch.png",
+        "runs/20261005-184929-ev0011-verify2/godot/post-run-log-errors.json"
+      ],
+      "notes": [
+        "2026-10-05T08:01:12+00:00: Triage 20261005-175054: still reproduces. Planet chooser is two flat Buttons (Erekir left c=(412,194), Serpulo right c=(740,194)), no Node3D/SubViewport or starfield; dynamic description and OK-disabled-until-selected match.",
+        "2026-10-05T08:47:04+00:00: 2026-10-05 re-ran campaign_launch step 1 (menu > Play > Campaign) on pid 366431 at 1152x648: Serpulo LEFT card center x=412 and Erekir RIGHT center x=740, each card a TextureRect 512x512 identity-equal to find_loose('planets/serpulo')/find_loose('planets/erekir'); assets_dir=client/../assets; serpulo sha256 d39a0ba2..., erekir 951dfbdf..., space 90b6ef70... all match build/assets/migration_manifest.json; screenshot crops show 3D-shaded purple/orange planets (godot/planet-pixels.json), no flat discs. Regression checks pass: Serpulo click enables OK + description switches, OK opens the sector view, groundZero+Resume enters the game (hud visible, tick 196). NOT fully fixed: the starfield backdrop exists (SpaceBackdrop index 0, space.png 2048x2048, behind Dim index 1) but is occluded by the full-screen fullDialog Center/Panel (StyleBoxFlat bg (0.16,0.18,0.21,0.95), rect 0,0 1152x648), so the capture background is a flat slate fill (std 0.2) and the starfield is not player-visible; with the panel hidden the backdrop shows as near-black (0,0,1). See diff/backdrop-occlusion.json.",
+        "2026-10-05T08:58:37+00:00: 2026-10-05 verify2 (menu > Play > Campaign at 1152x648, pid 371512): fullDialog PanelContainer stylebox is now StyleBoxEmpty (theme_builder.gd sha256 c4fde002...), starfield is player-visible: left/right/corner bands are near-black space (mean ~(0,0,2), max luma 95-113) with 88/47 star-peak pixels vs the prior run's flat (39,44,51) sheet with 0 star peaks; old->new frame diff changed 72.8 pct; Java-vs-Godot step-01 changed_fraction 0.974 -> 0.407, palette 0.904 -> 0.201. Planets/order unchanged: Serpulo LEFT x=412 / Erekir RIGHT x=740, each 512x512 TextureRect identity-equal to find_loose('planets/serpulo'/'planets/erekir'), sha256 matching migration_manifest.json; card crops byte-identical to the prior run. Launch regression PASS (pid 372884): Serpulo click enables OK + switches description, OK -> sector view, groundZero -> Resume -> in-game (menu hidden, HUD visible, phase playing, 128x128/13406 tiles); step-02b capture identical to the previous verify. Logs clean apart from the pre-existing [W] 'tile outside a 32x32 world' warnings. Residual not-regressed style gaps: no accent border on selected card, select-screen action row not Java's Back-left/OK-center/Tech-Tree-right (both pre-date this fix; overlaps EV-0010 scope)."
+      ],
+      "plan": "12",
+      "first_seen": "2026-10-05T07:18:31+00:00",
+      "last_verified": "2026-10-05T08:58:37+00:00"
+    },
+    {
+      "id": "EV-0012",
+      "area": "render/campaign",
+      "severity": "S2",
+      "status": "verified-fixed",
+      "title": "Launched Ground Zero sector renders no terrain (uniform gray viewport)",
+      "expected": "Java: Ground Zero launches into snowy terrain with copper ore, core and objectives/copper HUD",
+      "actual": "Godot: uniform gray viewport; core is an untextured dark rounded rect; sim world loads Ground Zero data (128x128, 13406 non-air tiles incl. ice-wall/dune-wall, tick advancing) but World/TileGrid.visible=false and no floor/ore sprites are drawn; HUD shows only debug FPS labels",
+      "repro": "scenario campaign_launch step 4 (sector view > Ground Zero > Resume)",
+      "evidence": [
+        "runs/20261005-163933-campaign_launch/godot/step-04-ingame-hud.png",
+        "runs/20261005-163933-campaign_launch/java/step-04b-after-skip.png",
+        "runs/20261005-163933-campaign_launch/godot/state-observations.json",
+        "runs/20261005-175054-ev0012-verify/godot/step-04-ingame-hud.png",
+        "runs/20261005-175054-ev0012-verify/godot/layer-toggle-covers-off.png",
+        "runs/20261005-175054-ev0012-verify/godot/state-ingame.json",
+        "runs/20261005-175054-ev0012-verify/diff/step-04-java-vs-godot.json",
+        "runs/20261005-180701-ev0012-verify2/godot/step-04-ingame-hud.png",
+        "runs/20261005-180701-ev0012-verify2/godot/toggle-darkness-off.png",
+        "runs/20261005-180701-ev0012-verify2/godot/toggle-blockUnder-off.png",
+        "runs/20261005-180701-ev0012-verify2/godot/toggle-walls-off.png",
+        "runs/20261005-180701-ev0012-verify2/godot/toggle-light-off.png",
+        "runs/20261005-180701-ev0012-verify2/godot/bands.json",
+        "runs/20261005-180701-ev0012-verify2/godot/camera-ingame.json",
+        "runs/20261005-180701-ev0012-verify2/godot/render-stats.json",
+        "runs/20261005-180701-ev0012-verify2/godot/color-analysis.json",
+        "runs/20261005-180701-ev0012-verify2/diff/step-04-default-vs-darkness-off.json",
+        "runs/20261005-180701-ev0012-verify2/godot/step-04-ingame-hud.png",
+        "runs/20261005-180701-ev0012-verify2/godot/toggle-darkness-off.png",
+        "runs/20261005-180701-ev0012-verify2/godot/color-analysis.json"
+      ],
+      "notes": [
+        "Objectives/copper counter and core item HUD also absent in the same frame",
+        "2026-10-05T08:01:12+00:00: Re-ran exact repro against the uncommitted render fixes (editor restarted, .so md5 a44f7f9c/17:50; pid 334762). Terrain fixes are active underneath (atlas variants resolve: floor UVs sample ore-copper1/shale-wall1, no env-error; missing_regions 12->1; floor_8 spans 6 chunks x0..720/y0..480; hints hidden) BUT the exact frame is still a full-world black cover: Band_blockUnder_0 (z=13) + Band_darkness_0 (z=26) 1024x1024 composite quads render near-opaque black, and the light pass that would lift them (Band_light_0, z=36) is inactive (0 visible meshes, light_rebuilds=0) because RulesRenderView.lighting=false and set_rules_lighting has no caller; light.rs u_ambient still hardcoded. With both covers hidden the correct snow/ice/ore palette appears (world-canvas mean [103.5,104.2,123.8]). Remaining blocker = light/darkness composite wiring, not the floor atlas or chunk grid.",
+        "2026-10-05T08:16:07+00:00: verify2 (editor restarted 18:07, .so d2c33ed3f84c0efb10ea8c9c145bd33c/18:06, pid 347966; exact repro re-driven). Progress: camera now recenters on world change ((132,132)->(516,516) world px, 32x32->128x128, expected ~512); Band_blockUnder_0 no longer covers (individual toggle 1.4% pixels, mean 0.5, probes unchanged); walls band Band_floor_8 (CacheLayerId::Walls id 8) draws at block z=14 (== Band_block_0 z=14, above blockUnder z=13, below building sprites; hiding it changes 8.5%); terrain renders multi-colour (default mean [76.4,70,69.5] with shadow+darkness; with darkness off mean [158.7,144.3,137.6], dominant sand (208,160,128)/tainted-water (32,48,48)/snow (240,224,192)); hints stays hidden. REMAINING BLOCKER (single band): Band_darkness_0 (z=26) composites opaque black over 47.4% of the frame in the default state - hiding it alone turns probes (400,200)/(900,300)/(300,150) from (0,0,0) to (255,228,201)/(210,174,141)/(247,204,166); MindCampaign.get_rules_json() lighting=false and upstream Renderer.java:383-388 only draws Layer.darkness when lighting is on; the light pass is still inert (hiding Band_light_0 changes 0.0%, light_rebuilds=0/light_circles=0). Landmark: camera center tile (64,64) air/open floor, rendered center px (253,254,254); view x16..112/y37..91 has 3085 wall tiles (sand-wall 1609/dune-wall 805/snow-wall 216/...); no ore tiles in get_state_json (floor overlays absent; missing_regions=1). No error-log entries after in-game step.",
+        "2026-10-05T08:19:11+00:00: 2026-10-05 verify2 re-judge (no new in-engine run): the filed symptom no longer reproduces in the exact campaign_launch step-4 repro. Fresh verify2 run (run.json: game pid 347966; editor restarted 18:07:07 so .so client/bin/rust/debug/libmind_gdext.so md5 d2c33ed3f84c0efb10ea8c9c145bd33c mtime 18:06:38 loaded) shows textured multi-colour terrain instead of the uniform gray viewport: with the darkness band hidden the canvas mean is [158.7,144.3,137.6] with dominant sand (208,160,128), tainted water (32,48,48), snow (240,224,192); walls band draws at block z; camera recentered to (516,516) world px on the 128x128 map (expected ~512); hints hidden; missing_regions=1; error log empty. Upstream source facts checked for this re-judge: (1) Vars.java:218 'public static boolean enableDarkness = true;' - darkness is on by default; (2) Renderer.java:383-385 gates only the light composite on 'state.rules.lighting && drawLight', while Renderer.java:387-389 draws Layer.darkness via blocks::drawDarkness whenever enableDarkness, independent of lighting - the earlier 08:16 note that upstream draws darkness only when lighting is on was a misread of the adjacent blocks; additionally Ground Zero's preset sets noLighting=true (SectorPresets.java:28; Universe.java:87 skips the sector light update; Rules.lighting default false at Rules.java:209), so lighting=false and an inert light band are expected for this sector, not a blocker; (3) BlockRenderer.java:425-452 draws the wall-darkness FBO over the world, and World.getWallDarkness (World.java:453-467; darkRadius=4 at Vars.java:67) makes darkness Manhattan-distance-to-open-floor minus 1, so thin/edge walls stay lit and only enclosed massifs go black - consistent with toggle-darkness-off.png. The residual blackout is therefore not 'no terrain'; it is tracked separately as EV-0014 (wall-dominated launched Ground Zero composition, S3)."
+      ],
+      "plan": "12",
+      "first_seen": "2026-10-05T07:18:31+00:00",
+      "last_verified": "2026-10-05T08:19:11+00:00"
+    },
+    {
+      "id": "EV-0013",
+      "area": "ui/hud",
+      "severity": "S3",
+      "status": "open",
+      "title": "In-game block picker is a text list without block or category icons",
+      "expected": "Java: in-game block picker at bottom-right shows unlocked blocks as 46px icon buttons and categories as 50px icon buttons (ui.getIcon(cat.name())); locked/empty categories hidden",
+      "actual": "Godot: placement panel is a 976px-wide text UI at x=354 (clipped past the 1152px viewport) with Search + category text row (Turret..Logic) + 28 icon-less text block Buttons (Duo, Scatter, ...); all category names shown",
+      "repro": "scenario campaign_launch step 4 (in-game placement panel)",
+      "evidence": [
+        "runs/20261005-163933-campaign_launch/godot/step-04-ingame-hud.png",
+        "runs/20261005-163933-campaign_launch/java/step-04b-after-skip.png",
+        "runs/20261005-163933-campaign_launch/godot/state-observations.json",
+        "runs/20261005-175054-ev0012-verify/godot/step-04-ingame-hud.png",
+        "runs/20261005-175054-ev0012-verify/godot/state-ingame.json"
+      ],
+      "notes": [
+        "User symptom a4 raw @category.* keys did not reproduce at 8ee2758 - names are localized now; text-vs-icons mismatch remains",
+        "2026-10-05T08:01:12+00:00: Triage 20261005-175054: text-only picker still reproduces (38 Buttons, 0 TextureRects; first rows Turret/Production/...); panel rect now fits the viewport (532,528,620x120) so the earlier 976px clipping was not observed this run."
+      ],
+      "plan": "14",
+      "first_seen": "2026-10-05T07:18:31+00:00",
+      "last_verified": "2026-10-05T08:01:12+00:00"
+    },
+    {
+      "id": "EV-0014",
+      "area": "render/campaign",
+      "severity": "S3",
+      "status": "open",
+      "title": "Launched Ground Zero terrain is wall-dominated; enclosed-wall darkness blacks out ~47% of the centered view",
+      "expected": "Java: Ground Zero launches the stored designed map via the preset's FileMapGenerator (SectorPresets.java:22 groundZero; SectorPreset.java:83-85; World.java:269-272), i.e. mostly open snowy terrain with the core and copper ore; darkness (enableDarkness, Vars.java:218) only blackens enclosed static-wall interiors",
+      "actual": "Godot: launched sector sim state is 81.8% non-air (13406/16384 tiles; wall types sand/dune/snow/salt/shale in view) and the default frame is ~47% opaque black: mean [76.4,70.0,69.5]; hiding Band_darkness_0 alone changes 47.4% of pixels and restores mean [158.7,144.3,137.6] with sand/tainted-water/snow palette; darkness_rebuilds=4, missing_regions=1, error log empty",
+      "repro": "scenario campaign_launch step 4 (Play > Campaign > Serpulo > OK > Ground Zero > Resume; exact EV-0012 repro)",
+      "evidence": [
+        "runs/20261005-180701-ev0012-verify2/godot/step-04-ingame-hud.png",
+        "runs/20261005-180701-ev0012-verify2/godot/toggle-darkness-off.png",
+        "runs/20261005-180701-ev0012-verify2/godot/color-analysis.json",
+        "runs/20261005-180701-ev0012-verify2/godot/render-stats.json",
+        "runs/20261005-180701-ev0012-verify2/diff/step-04-default-vs-darkness-off.json",
+        "runs/20261005-180701-ev0012-verify2/run.json"
+      ],
+      "notes": [
+        "Upstream Ground Zero is a stored designed map (core/assets/maps/serpulo/groundZero.msav) loaded by the preset FileMapGenerator (SectorPreset.java:83-85), not a SerpuloPlanetGenerator output (World.java:269-272 picks preset.generator when sector.preset != null); the port ships the same assets/maps/serpulo/groundZero.msav, so the 82%-wall launched composition may be generator/map-load coverage rather than a darkness-render regression. The darkness pass itself matches upstream: Renderer.java:387-389 draws Layer.darkness unconditionally when enableDarkness (Vars.java:218), and World.getWallDarkness (World.java:453-467, darkRadius=4 Vars.java:67) falls off with distance to open floor, so only enclosed massifs go black (BlockRenderer.java:425-452; luminance 1-min((darkness+0.5)/4,1) at line 437). Implementer should confirm which loader produced the launched tiles and compare composition against the stored map. Camera center (64,64) is open floor and lit; 3085 wall tiles sit in the x16..112/y37..91 view (run.json landmark)."
+      ],
+      "plan": "12",
+      "first_seen": "2026-10-05T08:19:08+00:00",
+      "last_verified": "2026-10-05T08:19:08+00:00"
+    },
+    {
+      "id": "EV-0015",
+      "area": "assets/pipeline",
+      "severity": "S2",
+      "status": "open",
+      "title": "As-delivered tree has no bundle/atlas outputs: menus and dialogs show raw bundle keys (campaign.select, campaign.none) and renderer uses placeholder quads",
+      "expected": "Java: localized menu/dialog text ('Select Starting Campaign', 'Database') and textured menu background / world rendering",
+      "actual": "Godot after the 18:22 mind-tools migrate: assets/locales and assets/sprites/sprites.atlas.json absent; log '[assets] ready ok=false pages=0 regions=0'; dialog title/description show campaign.select/campaign.none; '[W] MindWorldRenderer: atlas manifest unavailable; using placeholder quads' and 'menu background 8211 tiles missing regions'. Running the canonical `mind-tools pack` regenerates the outputs but its pack_pipeline wipes assets/sprites first (fs::remove_dir_all(out_dir)), deleting the vendored loose sprites (planets/, space.png, error.png, logo.png, ...), so migrate+pack cannot currently leave both the generated outputs and the vendored loose art in the tree.",
+      "repro": "launch res://scenes/game.tscn from the as-delivered working tree (no assets/locales + no assets/sprites/sprites.atlas.json) > Play > Campaign",
+      "evidence": [
+        "runs/20261005-182803-ev0011-verify/godot/step-01-pre-pack-planet-dialog.png",
+        "runs/20261005-182803-ev0011-verify/godot/pre-pack-missing-assets.txt",
+        "runs/20261005-182803-ev0011-verify/notes-assets.json",
+        "runs/20261005-182803-ev0011-verify/pack.log"
+      ],
+      "notes": [
+        "Evaluator restored a workable tree to verify EV-0011: ran `cargo run -p mind-tools -- pack` (log pack.log) then re-copied the 13 vendored loose sprites from ../Mindustry and sha256-verified them against build/assets/migration_manifest.json; no game code/scene/config touched. migrate.rs does a clean-mirror wipe; pack_pipeline.rs::pack wipes assets/sprites before writing pages. A robust fix must make the migrate->pack flow preserve the loose sprites (or load them from a non-generated location)."
+      ],
+      "plan": "03",
+      "first_seen": "2026-10-05T08:47:08+00:00",
+      "last_verified": "2026-10-05T08:47:08+00:00"
     }
   ]
 }
