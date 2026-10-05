@@ -39,6 +39,42 @@ skill:
 Host installs are resolved through environment overrides (`GODOT_BIN`,
 `MINDY_SRC`, `JAVA17_HOME`, `MCP_VENV`); never hardcode absolute paths.
 
+## 0. Parallel loops — resource isolation
+
+Sessions started with `.opencode/loops/bin/start-loop.sh <N> --run` export the
+loop manifest and prepend `.opencode/loops/mcp-bin` to `PATH`, so bare
+`computer-mcp` / `open-godot-mcp` (and the opencode MCP servers) are pinned to
+this loop's display and editor bridge port. Loop 1 is the main checkout on the
+current display; loops >= 2 run on Xvfb `:11+` in `../Mindustry-Godot-loopN`
+worktrees on branch `parity/loop-N`. Read `.opencode/loops/README.md` before
+starting or stopping a loop.
+
+| Variable | Meaning |
+|---|---|
+| `PARITY_LOOP`, `PARITY_DISPLAY` | loop id and its X display (`:10`, `:11`, …) |
+| `PARITY_BRIDGE_PORT` | editor addon listen port / MCP adopt port (6970, 6980, …) |
+| `PARITY_WORKTREE` | checkout this loop runs in |
+| `PARITY_EVALS_DIR`, `PARITY_LEDGER` | shared evals dir and flock-protected ledger |
+| `PARITY_RUN_PREFIX` | prefix run dirs with this (`l2-…` for loop 2) |
+| `PARITY_LOOP_DIR` | per-loop runtime dir (xvfb pid/log, client user data) |
+
+Rules:
+
+- Loops are isolated; within one loop, drive one client at a time (Java then
+  Godot). Different loops may run concurrently — never share a display.
+- Launch clients only through `.opencode/loops/bin/run-godot-editor.sh` and
+  `.opencode/loops/bin/run-java.sh`; they set display, bridge port, and
+  per-loop user-data dirs. Never use `godot_instance launch_editor` (it
+  allocates ports from its own local index, ignoring the loop map) and never
+  run `open-godot-mcp --shutdown-all` (it kills sibling loops' servers).
+- Ledger writes go to `$PARITY_LEDGER` (the scripts' default via env), which is
+  shared by all loops and serialized by a file lock. Run dirs live under
+  `$PARITY_EVALS_DIR/runs/${PARITY_RUN_PREFIX}<stamp>-<scenario>/`.
+- On an Xvfb display a one-shot `computer-mcp mouse move` does not persist: the
+  pointer snaps back to screen center when the XTEST client disconnects. Drive
+  the Java leg with the persistent computer-mcp MCP tools, or click with
+  `.opencode/loops/bin/parity-click.sh <x> <y> [button]` (single process).
+
 ## 1. Preconditions
 
 Run the bootstrap check before any scenario. If anything fails, stop and report
@@ -84,10 +120,12 @@ JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 bash ../Mindustry/gradlew \
   -p ../Mindustry tools:pack desktop:dist
 ```
 
-**Display.** The host runs X on `DISPLAY=:10.0` with Mesa `llvmpipe` (software
-GL): expect ~5–15 FPS. `godot_screenshot game` needs a windowed game, not
-`--headless`. Always check a capture is non-blank (`capture_screen.py` and
-`frame_diff.py` report mean/stddev) before treating a black frame as a finding.
+**Display.** Render with Mesa `llvmpipe` (software GL): expect ~5–15 FPS, and
+budget CPU when running several loops. Each loop has its own display
+(`$PARITY_DISPLAY`: loop 1 is the live `:10`, loops >= 2 are Xvfb at
+1280x720x24). `godot_screenshot game` needs a windowed game, not `--headless`.
+Always check a capture is non-blank (`capture_screen.py` and `frame_diff.py`
+report mean/stddev) before treating a black frame as a finding.
 
 **Vision.** If the session model cannot accept images, never write "the button
 is missing" from an unseen PNG: run `frame_diff.py` for metrics and
@@ -95,18 +133,20 @@ is missing" from an unseen PNG: run `frame_diff.py` for metrics and
 
 ## 2. Twin-run protocol
 
-One scenario at a time, Java first, Godot second.
+Within this loop, one scenario at a time, Java first, Godot second. Parallel
+loops run the same protocol simultaneously on their own displays.
 
 ```
 pick scope → create run dir → JAVA leg (capture) → quit Java
            → GODOT leg (capture) → quit Godot → compare → ledger + report
 ```
 
-Run directory and naming:
+Run directory and naming (`$PARITY_EVALS_DIR` is shared, so keep the loop
+prefix; `$PARITY_RUN_PREFIX` is empty for loop 1 and `l<N>-` otherwise):
 
 ```
-.opencode/evals/runs/<YYYYMMDD-HHMMSS>-<scenario>/
-  run.json          # scenario id, versions/commits, window size, host, outcome
+$PARITY_EVALS_DIR/runs/${PARITY_RUN_PREFIX}<YYYYMMDD-HHMMSS>-<scenario>/
+  run.json          # scenario id, loop id, versions/commits, window size, host, outcome
   java/  step-<nn>-<name>.png | game.log | notes.md
   godot/ step-<nn>-<name>.png | game.log | state-<nn>.json
   diff/  step-<nn>.json | step-<nn>-heatmap.png
@@ -121,13 +161,16 @@ and the same camera pose per capture step.
 ## 3. Godot leg
 
 Follow the playtest skill exactly: `godot_health check` → editor identity
-(`godot_editor_read state` → `project_path` contains `mindustry-godot`) →
-`godot_editor_edit open_scene` → `godot_game play` **with**
+(`godot_editor_read state` → `project_path` contains the loop worktree, not a
+sibling checkout) → `godot_editor_edit open_scene` → `godot_game play` **with**
 `{"scene":"res://scenes/game.tscn"}` → `godot_game status` with
-`runtime_connected: true`. Launch the editor if the bridge is down:
+`runtime_connected: true`. Launch the editor if the bridge is down, through the
+loop wrapper (it pins `$PARITY_DISPLAY` and `$PARITY_BRIDGE_PORT`; the MCP shim
+adopts the same port):
 
 ```bash
-nohup "${GODOT_BIN:-godot4}" --editor --path client >>"$RUN/godot/editor.log" 2>&1 &
+nohup .opencode/loops/bin/run-godot-editor.sh \
+  >"$PARITY_LOOP_DIR/logs/editor.log" 2>&1 &
 ```
 
 Useful evaluator moves, all pid-stamped:
@@ -179,18 +222,22 @@ The reference is driven at the OS level with computer-mcp (mouse, keyboard,
 screenshot, window state). There is no semantic API.
 
 ```bash
-RUN=.opencode/evals/runs/<stamp>-<scenario>
-JAVA17="${JAVA17_HOME:-$(dirname "$(dirname "$(readlink -f "$(command -v java)")")")}"  # printed by bootstrap.sh
-JAVA_HOME="$JAVA17" "$JAVA17/bin/java" -jar \
-  ../Mindustry/desktop/build/libs/Mindustry.jar >"$RUN/java/game.log" 2>&1 &
+RUN="$PARITY_EVALS_DIR/runs/${PARITY_RUN_PREFIX}<stamp>-<scenario>"
+# launch through the loop wrapper: it sets DISPLAY, a seeded per-loop HOME,
+# and per-loop XDG dirs so settings/saves never race another loop
+.opencode/loops/bin/run-java.sh >"$RUN/java/game.log" 2>&1 &
 # readiness signal in the log, not a fixed sleep:
 until grep -q "Total time to load" "$RUN/java/game.log"; do sleep 2; done
 ```
 
-Drive with the computer-mcp tools (`click`, `double_click`, `drag`,
+Drive with the computer-mcp MCP tools (`click`, `double_click`, `drag`,
 `mouse_move`, `type`, `key_press`, `key_down`, `key_up`, `screenshot`,
-`list_windows`, `get_window_info`), or the CLI directly (`computer-mcp mouse
-click --x 640 --y 360`; run `--help` for exact flags). Capture to disk with:
+`list_windows`, `get_window_info`). Those tools go to the loop's persistent
+computer-mcp server, so pointer state survives between calls. For scripted CLI
+clicks use `.opencode/loops/bin/parity-click.sh <x> <y> [button]`; a bare
+`computer-mcp mouse move` followed by a separate `computer-mcp mouse click`
+does **not** work on an Xvfb display (the pointer resets to center when the
+one-shot XTEST client exits). Capture to disk with:
 
 ```bash
 "$MCP_VENV/bin/python" .opencode/skills/parity-eval/scripts/capture_screen.py \
@@ -202,11 +249,13 @@ pid recorded at launch, and note it in `run.json`.
 
 Java gotchas:
 
-- Settings persist in `~/.local/share/Mindustry`; normalize them once
-  (window size, UI scale, language, music/SFX volume) and record the values in
+- Settings live in the loop's seeded HOME (`$PARITY_LOOP_DIR/home`), copied
+  once from `~/.local/share/Mindustry`; normalize them inside the loop (window
+  size, UI scale, language, music/SFX volume) and record the values in
   `run.json`. `settings_backups/` keeps prior snapshots.
-- There is a single X display and usually no WM tooling: run one client at a
-  time so it owns focus.
+- Each loop owns its display, and Xvfb has no WM: run one client at a time in
+  this loop so it owns focus, and never start a Java client on another loop's
+  display.
 - Prefer keyboard shortcuts and menu paths that exist in both clients; when a
   click coordinate is needed, derive it from the current Java screenshot at the
   recorded window size and store the coordinate in the run notes.
@@ -243,21 +292,27 @@ repro. "Looks different" is not a finding.
 
 ## 6. Ledger and reports
 
-`.opencode/evals/findings.json` is machine-readable and single-writer. Use the
-script; never hand-edit:
+`$PARITY_LEDGER` (default `.opencode/evals/findings.json`) is machine-readable,
+shared by all parallel loops, and protected by a file lock: `record_finding.py`
+takes the lock around every read-modify-write, so `add`/`claim` from concurrent
+loops can never duplicate ids or lose entries. Use the script; never hand-edit.
+Implementers may run `claim`/`release`; `add`/`verify` are evaluator-only.
 
 ```bash
 python3 .opencode/skills/parity-eval/scripts/record_finding.py list --status open
+python3 .opencode/skills/parity-eval/scripts/record_finding.py claim \
+  --area ui --owner "loop-${PARITY_LOOP:-1}"      # atomic; exits 3 when none
+python3 .opencode/skills/parity-eval/scripts/record_finding.py release \
+  --id EV-0001 --note "fix abandoned"
 python3 .opencode/skills/parity-eval/scripts/record_finding.py add \
   --area ui/menu --severity S2 --title "Campaign button does not open the planet view" \
   --expected "Java: Play > Campaign opens Serpulo planet view" \
   --actual "Godot: click leaves the menu unchanged; no dialog bound" \
   --repro "scenario boot_menu step 4" \
-  --evidence runs/<stamp>-boot_menu/godot/step-04.png \
-  --plan 14
+  --evidence "runs/${PARITY_RUN_PREFIX}<stamp>-boot_menu/godot/step-04.png" --plan 14
 python3 .opencode/skills/parity-eval/scripts/record_finding.py verify \
   --id EV-0001 --status verified-fixed --note "re-ran boot_menu at <commit>" \
-  --evidence runs/<stamp2>-boot_menu/godot/step-04.png
+  --evidence "runs/${PARITY_RUN_PREFIX}<stamp2>-boot_menu/godot/step-04.png"
 ```
 
 Titles name the player-visible symptom, not the presumed code cause. One
@@ -319,10 +374,18 @@ Before scripting a new scenario, check whether an entry already exists in
 
 - `godot_game play` without the explicit `params.scene` looks successful but
   attaches nothing; every later `godot_exec` fails with `RUNTIME_NOT_CONNECTED`.
-- The MCP bridge binds one editor at `127.0.0.1:6970`; a sibling Godot project
-  can steal it. Identity-check `project_path` every session.
+- Each loop's editor addon listens on `$PARITY_BRIDGE_PORT` (6970, 6980, …) and
+  the MCP shim adopts exactly that port. Identity-check `project_path` every
+  session: with several loops running, a wrong-port editor is easy to adopt.
 - Two runtimes (editor game + stale instance) make a misrouted eval look
   successful; pid-stamp everything.
+- `godot_instance launch_editor` allocates ports from its own local index and
+  ignores the loop map; launch editors only through `run-godot-editor.sh`.
+  Never run `open-godot-mcp --shutdown-all` — it kills sibling loops' servers.
+- On Xvfb, a one-shot `computer-mcp mouse move` snaps back to screen center
+  when the process exits. Use the persistent computer-mcp MCP tools or
+  `parity-click.sh`; the same applies to any helper that moves and clicks in
+  separate processes.
 - Eval bodies with `for`/`while` time out; split heavy expressions. A `null`
   result with `ok: true` usually means the body errored.
 - `godot_screenshot burst` blocks the round-trip; keep bursts tiny or take

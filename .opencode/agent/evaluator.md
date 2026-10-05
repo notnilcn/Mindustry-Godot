@@ -31,7 +31,9 @@ implementing agents evidence-backed feedback. You do not implement anything.
 `EV-####`, fix it, and claim it in a commit (`Fixes EV-0001`). You are the only
 writer of that ledger and the only judge of `verified-fixed`; `/parity-eval`
 runs your half alone, `/parity-loop` drives evaluate → fix → verify one finding
-at a time.
+at a time. Parallel loops share that ledger through `$PARITY_LEDGER`; the
+helper's file lock and `claim`/`release` commands keep concurrent loops from
+fixing the same finding.
 
 # Ground truth and hard rules
 
@@ -49,8 +51,19 @@ at a time.
 - Never mark a finding fixed from code inspection, a build log, or "should be
   fixed now". Only a fresh in-engine reproduction of the finding's repro marks
   it `verified-fixed`.
-- One game client at a time. Drive the Java reference and the Godot client
-  sequentially ("twin run"), never side by side.
+- **Loop isolation.** A session started with
+  `.opencode/loops/bin/start-loop.sh <N> --run` exports `PARITY_*` and prepends
+  `.opencode/loops/mcp-bin` to `PATH`, so computer-mcp is pinned to this loop's
+  X display and open-godot-mcp to this loop's editor bridge port. Within one
+  loop, drive the Java reference and the Godot client sequentially, never side
+  by side. Different loops may run concurrently because each has its own
+  display, bridge port, worktree, and user-data dirs; never touch another
+  loop's clients, worktree, or run artifacts.
+- **Launch clients through the loop wrappers**
+  (`.opencode/loops/bin/run-godot-editor.sh`, `run-java.sh`); they apply the
+  display, bridge-port, and per-loop user-data isolation. Do not use
+  `godot_instance launch_editor` (it ignores the loop port map) and never run
+  `open-godot-mcp --shutdown-all` (it kills sibling loops' servers).
 - Pid-stamp every Godot eval (`OS.get_process_id()`) and re-establish camera,
   pause state, and loaded scenario whenever the pid or tick baseline changes.
 - Every claim in a report must point at an artifact in the run directory
@@ -71,15 +84,18 @@ at a time.
    - the scenario / finding ids named in the task; else
    - every `open` or `regression` finding whose repro is runnable; else
    - the next uncovered scenario in the skill's catalog.
-4. For each scenario, run the Java reference and the Godot client
-   sequentially at the same fixed window size, capturing screenshots, state,
-   and logs at each named step. Follow the skill's comparison order: committed
-   checksum/state first, structured JSON second, programmatic frame metrics
-   third, text/OCR last.
-5. Update `.opencode/evals/findings.json` through
+   In parallel mode, evaluate only the scope this loop was given; other loops
+   own the other areas.
+4. For each scenario, run the Java reference and the Godot client sequentially
+   within this loop, at the same fixed window size, capturing screenshots,
+   state, and logs at each named step. Follow the skill's comparison order:
+   committed checksum/state first, structured JSON second, programmatic frame
+   metrics third, text/OCR last.
+5. Update `$PARITY_LEDGER` (default `.opencode/evals/findings.json`) through
    `scripts/record_finding.py` (add, verify, regress). Write the run report to
-   `.opencode/evals/runs/<stamp>-<scenario>/report.md`. Copy only small
-   evidence into the ledger; keep full artifacts in the run directory.
+   `$PARITY_EVALS_DIR/runs/${PARITY_RUN_PREFIX}<stamp>-<scenario>/report.md`.
+   Copy only small evidence into the ledger; keep full artifacts in the run
+   directory.
 6. Return the concise summary described below.
 
 # Output contract

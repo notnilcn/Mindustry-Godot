@@ -2,8 +2,11 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Single-writer helper for the parity-eval findings ledger.
 
-The evaluator is the only writer. Implementers claim fixes in commit messages
-("Fixes EV-0001"); the evaluator re-runs the repro and calls `verify`.
+The evaluator is the only writer of findings content (`add`/`verify`).
+Implementers may run `claim`/`release`, which are coordination writes guarded
+by the same exclusive file lock. Parallel loops share one ledger:
+`PARITY_LEDGER` overrides the default path, and every mutating command holds
+`<ledger>.lock` for the whole read-modify-write.
 
 Examples:
     record_finding.py add --area ui/menu --severity S2 \
@@ -14,6 +17,8 @@ Examples:
         --evidence runs/20261005-120000-boot_menu/godot/step-04.png --plan 14
     record_finding.py verify --id EV-0001 --status verified-fixed \
         --note "re-ran boot_menu at 0706963" --evidence runs/.../step-04.png
+    record_finding.py claim --area ui --owner loop-2
+    record_finding.py release --id EV-0001 --note "fix abandoned"
     record_finding.py list --status open
     record_finding.py summary
 """
@@ -22,9 +27,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - non-POSIX fallback
+    fcntl = None
 
 DEFAULT_LEDGER = Path(".opencode/evals/findings.json")
 STATUSES = ("open", "in-progress", "verified-fixed", "regression", "wontfix")
@@ -33,6 +45,30 @@ SEVERITIES = ("S1", "S2", "S3", "S4")
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def resolve_ledger(path: Path | None) -> Path:
+    """CLI --ledger wins, then PARITY_LEDGER, then the repo default."""
+    if path is not None:
+        return path
+    env = os.environ.get("PARITY_LEDGER")
+    return Path(env) if env else DEFAULT_LEDGER
+
+
+@contextmanager
+def ledger_lock(path: Path):
+    """Exclusive cross-process lock for the whole read-modify-write."""
+    if fcntl is None:
+        yield
+        return
+    lock_path = path.with_name(path.name + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "w", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def load(path: Path) -> dict:
@@ -68,40 +104,105 @@ def find(data: dict, finding_id: str) -> dict:
 
 
 def cmd_add(args: argparse.Namespace) -> int:
-    data = load(args.ledger)
-    finding = {
-        "id": next_id(data),
-        "area": args.area,
-        "severity": args.severity,
-        "status": "open",
-        "title": args.title,
-        "expected": args.expected,
-        "actual": args.actual,
-        "repro": args.repro,
-        "evidence": list(args.evidence or []),
-        "notes": list(args.notes or []),
-        "plan": args.plan,
-        "first_seen": now(),
-        "last_verified": now(),
-    }
-    data["findings"].append(finding)
-    save(args.ledger, data)
+    with ledger_lock(args.ledger):
+        data = load(args.ledger)
+        finding = {
+            "id": next_id(data),
+            "area": args.area,
+            "severity": args.severity,
+            "status": "open",
+            "title": args.title,
+            "expected": args.expected,
+            "actual": args.actual,
+            "repro": args.repro,
+            "evidence": list(args.evidence or []),
+            "notes": list(args.notes or []),
+            "plan": args.plan,
+            "first_seen": now(),
+            "last_verified": now(),
+        }
+        if os.environ.get("PARITY_LOOP"):
+            finding["found_by_loop"] = os.environ["PARITY_LOOP"]
+        data["findings"].append(finding)
+        save(args.ledger, data)
     print(finding["id"])
     return 0
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
-    data = load(args.ledger)
-    finding = find(data, args.id)
-    previous = finding["status"]
-    finding["status"] = args.status
-    finding["last_verified"] = now()
-    if args.note:
-        finding["notes"].append(f"{now()}: {args.note}")
-    if args.evidence:
-        finding.setdefault("evidence", []).extend(args.evidence)
-    save(args.ledger, data)
+    with ledger_lock(args.ledger):
+        data = load(args.ledger)
+        finding = find(data, args.id)
+        previous = finding["status"]
+        finding["status"] = args.status
+        finding["last_verified"] = now()
+        finding.pop("owner", None)
+        if args.note:
+            finding.setdefault("notes", []).append(
+                f"{now()}: [loop {os.environ.get('PARITY_LOOP', '?')}] {args.note}"
+            )
+        if args.evidence:
+            finding.setdefault("evidence", []).extend(args.evidence)
+        save(args.ledger, data)
     print(f"{finding['id']}: {previous} -> {args.status}")
+    return 0
+
+
+def cmd_claim(args: argparse.Namespace) -> int:
+    """Atomically pick and mark the highest-priority open finding."""
+    with ledger_lock(args.ledger):
+        data = load(args.ledger)
+        rows = [
+            f
+            for f in data["findings"]
+            if f.get("status") == "open"
+            and (not args.severity or f.get("severity") == args.severity)
+            and (not args.area or str(f.get("area", "")).startswith(args.area))
+        ]
+        if not rows:
+            print("null")
+            return 3
+        rows.sort(key=lambda f: (SEVERITIES.index(f["severity"]), f.get("first_seen", "")))
+        finding = rows[0]
+        owner = args.owner or f"loop-{os.environ.get('PARITY_LOOP', '?')}"
+        finding["status"] = "in-progress"
+        finding["owner"] = owner
+        finding["last_verified"] = now()
+        finding.setdefault("notes", []).append(f"{now()}: claimed by {owner}")
+        save(args.ledger, data)
+    print(
+        json.dumps(
+            {
+                "id": finding["id"],
+                "severity": finding["severity"],
+                "area": finding["area"],
+                "title": finding["title"],
+                "repro": finding.get("repro"),
+                "evidence": finding.get("evidence", []),
+                "owner": owner,
+            },
+            indent=2,
+        )
+    )
+    return 0
+
+
+def cmd_release(args: argparse.Namespace) -> int:
+    """Return a claimed finding to the open pool."""
+    with ledger_lock(args.ledger):
+        data = load(args.ledger)
+        finding = find(data, args.id)
+        previous = finding["status"]
+        if previous != "in-progress":
+            print(f"{finding['id']}: status is {previous}; nothing to release")
+            return 0
+        finding["status"] = "open"
+        finding.pop("owner", None)
+        finding["last_verified"] = now()
+        if args.note:
+            finding.setdefault("notes", []).append(f"{now()}: released: {args.note}")
+        save(args.ledger, data)
+    print(f"{finding['id']}: in-progress -> open")
     return 0
 
 
@@ -114,6 +215,8 @@ def cmd_list(args: argparse.Namespace) -> int:
         rows = [f for f in rows if f["severity"] == args.severity]
     if args.area:
         rows = [f for f in rows if f["area"].startswith(args.area)]
+    if args.owner:
+        rows = [f for f in rows if f.get("owner") == args.owner]
     print(json.dumps(rows, indent=2))
     return 0
 
@@ -125,18 +228,28 @@ def cmd_summary(args: argparse.Namespace) -> int:
     for f in data["findings"]:
         by_status[f["status"]] = by_status.get(f["status"], 0) + 1
         by_severity[f["severity"]] = by_severity.get(f["severity"], 0) + 1
-    print(json.dumps({
-        "total": len(data["findings"]),
-        "by_status": by_status,
-        "by_severity": by_severity,
-        "updated": data.get("updated"),
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "total": len(data["findings"]),
+                "by_status": by_status,
+                "by_severity": by_severity,
+                "updated": data.get("updated"),
+            },
+            indent=2,
+        )
+    )
     return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
+    parser.add_argument(
+        "--ledger",
+        type=Path,
+        default=None,
+        help="ledger path (default: $PARITY_LEDGER or .opencode/evals/findings.json)",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_add = sub.add_parser("add", help="record a new finding")
@@ -158,16 +271,31 @@ def main() -> int:
     p_verify.add_argument("--evidence", action="append", default=[])
     p_verify.set_defaults(func=cmd_verify)
 
+    p_claim = sub.add_parser(
+        "claim", help="atomically claim the highest-priority open finding"
+    )
+    p_claim.add_argument("--area", help="only findings whose area starts with this")
+    p_claim.add_argument("--severity", choices=SEVERITIES)
+    p_claim.add_argument("--owner", help="owner label (default: loop-$PARITY_LOOP)")
+    p_claim.set_defaults(func=cmd_claim)
+
+    p_release = sub.add_parser("release", help="return a claimed finding to the open pool")
+    p_release.add_argument("--id", required=True)
+    p_release.add_argument("--note")
+    p_release.set_defaults(func=cmd_release)
+
     p_list = sub.add_parser("list", help="list findings as JSON")
     p_list.add_argument("--status", choices=STATUSES)
     p_list.add_argument("--severity", choices=SEVERITIES)
     p_list.add_argument("--area")
+    p_list.add_argument("--owner")
     p_list.set_defaults(func=cmd_list)
 
     p_summary = sub.add_parser("summary", help="counts by status/severity")
     p_summary.set_defaults(func=cmd_summary)
 
     args = parser.parse_args()
+    args.ledger = resolve_ledger(args.ledger)
     return args.func(args)
 
 

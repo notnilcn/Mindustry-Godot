@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# PATH shim: pin open-godot-mcp to this parity loop's editor bridge port and
+# X display, and give the server (and any standalone game it spawns) the
+# loop's isolated Godot user-data dirs.
+set -euo pipefail
+
+self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+clean_path="$(printf '%s' "$PATH" | tr ':' '\n' | grep -vFx "$self_dir" | paste -sd: -)"
+real="${OPEN_GODOT_MCP_REAL:-$(PATH="$clean_path" command -v open-godot-mcp || true)}"
+if [ -z "$real" ]; then
+  echo "parity-loop shim: open-godot-mcp not found on PATH" >&2
+  exit 127
+fi
+
+env_args=()
+[ -n "${PARITY_DISPLAY:-}" ] && env_args+=("DISPLAY=$PARITY_DISPLAY")
+[ -n "${PARITY_BRIDGE_PORT:-}" ] && env_args+=("OPEN_GODOT_MCP_PORT=$PARITY_BRIDGE_PORT")
+if [ -n "${PARITY_LOOP_DIR:-}" ]; then
+  mkdir -p "$PARITY_LOOP_DIR/xdg-data" "$PARITY_LOOP_DIR/xdg-config" "$PARITY_LOOP_DIR/xdg-cache"
+  env_args+=(
+    "XDG_DATA_HOME=$PARITY_LOOP_DIR/xdg-data"
+    "XDG_CONFIG_HOME=$PARITY_LOOP_DIR/xdg-config"
+    "XDG_CACHE_HOME=$PARITY_LOOP_DIR/xdg-cache"
+  )
+fi
+exec env "${env_args[@]}" "$real" "$@"

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# PATH shim: pin computer-mcp to this parity loop's X display.
+# Loop sessions prepend .opencode/loops/mcp-bin to PATH, so bare
+# `computer-mcp` / the opencode MCP entry resolve here. Outside a loop
+# session nothing is exported and this degrades to the plain binary.
+set -euo pipefail
+
+self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+clean_path="$(printf '%s' "$PATH" | tr ':' '\n' | grep -vFx "$self_dir" | paste -sd: -)"
+real="${COMPUTER_MCP_REAL:-$(PATH="$clean_path" command -v computer-mcp || true)}"
+if [ -z "$real" ]; then
+  echo "parity-loop shim: computer-mcp not found on PATH" >&2
+  exit 127
+fi
+
+display="${PARITY_DISPLAY:-${DISPLAY:-}}"
+if [ -n "$display" ]; then
+  exec env DISPLAY="$display" "$real" "$@"
+fi
+exec "$real" "$@"

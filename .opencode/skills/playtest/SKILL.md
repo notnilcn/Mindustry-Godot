@@ -20,22 +20,22 @@ Generic UI-driving mechanics (CLICK/DRAG coordinates, eval pitfalls, stall diagn
 - `playtest` MCP prompt — the interactive + deterministic workflow with exact tool JSON.
 - The `open_godot_mcp` addon docs under `client/addons/open_godot_mcp/` (`docs/`, handler headers) — short reminders at the call site.
 
-The MCP server is a stdio process (`open-godot-mcp`, binary `~/.local/bin/open-godot-mcp`, bridge default **ws://127.0.0.1:6970**). Every tool takes `action` plus an optional `params` object; action-specific arguments go inside `params` (e.g. `godot_editor_edit {"action":"open_scene","params":{"path":"res://..."}}`).
+The MCP server is a stdio process (`open-godot-mcp`, binary `~/.local/bin/open-godot-mcp`, bridge default **ws://127.0.0.1:6970**, overridden per parity loop by `$PARITY_BRIDGE_PORT` through the `.opencode/loops/mcp-bin` PATH shim). Every tool takes `action` plus an optional `params` object; action-specific arguments go inside `params` (e.g. `godot_editor_edit {"action":"open_scene","params":{"path":"res://..."}}`).
 
 # Part 1 — Godot MCP recipes (project-specific)
 
 ## Session start
 
-1. **`godot_health check` first.** If it reports `BRIDGE_NOT_CONNECTED` (or errors with "No Godot instance connected"), launch the editor yourself on the Linux host; the MCP bridge auto-loads with the editor and the native display hosts the window:
+1. **`godot_health check` first.** If it reports `BRIDGE_NOT_CONNECTED` (or errors with "No Godot instance connected"), launch the editor yourself on the Linux host; the MCP bridge auto-loads with the editor and the native display hosts the window. Inside a parity loop (`PARITY_LOOP` set), use the loop wrapper so display, bridge port, and user-data dirs stay isolated:
 
    ```bash
-   nohup godot4 --editor --path client \
-     >/tmp/mind-editor.log 2>&1 &
+   nohup .opencode/loops/bin/run-godot-editor.sh \
+     >"${PARITY_LOOP_DIR:-/tmp}/logs/editor.log" 2>&1 &
    ```
 
-   Wait ~20 s, then `godot_instance list` (the instance appears adopted) and `godot_health check` (port 6970). The editor never exits; a second, headless editor run during CI may briefly bind 6971 — ignore it.
+   For a plain single-loop session the equivalent is `nohup godot4 --editor --path client >/tmp/mind-editor.log 2>&1 &`. Wait ~20 s, then `godot_instance list` (the instance appears adopted) and `godot_health check` (port `$PARITY_BRIDGE_PORT`, default 6970). The editor never exits; a second, headless editor run during CI may briefly bind 6971 — ignore it. Never run `open-godot-mcp --shutdown-all` while other loops are up.
 
-2. **Identity preflight before any `godot_game` call.** The bridge is `127.0.0.1:6970`; if another Godot editor (the sibling `main/` project) already holds it, the MCP server talks to *that* project. Close the other editor, then verify: `godot_editor_read state` → `project_path` must contain `mindustry-godot`. (The `godot_exec` runtime identity check only works once a game is running; the smoke asserts it after play via `ProjectSettings.globalize_path("res://")`.)
+2. **Identity preflight before any `godot_game` call.** The bridge is `127.0.0.1:${PARITY_BRIDGE_PORT:-6970}`; if another Godot editor (a sibling parity loop, or the `main/` project) already holds the port the shim adopts, the MCP server talks to *that* project. Stop the other editor or fix the loop mapping, then verify: `godot_editor_read state` → `project_path` must contain `mindustry-godot` (and the loop's worktree path when `PARITY_LOOP` is set). (The `godot_exec` runtime identity check only works once a game is running; the smoke asserts it after play via `ProjectSettings.globalize_path("res://")`.)
 
 3. **Always run `res://scenes/game.tscn`** — the only P0 entry point. `godot_editor_edit {"action":"open_scene","params":{"path":"res://scenes/game.tscn"}}`, then `godot_game {"action":"play","params":{"scene":"res://scenes/game.tscn"}}` with the scene passed explicitly. Never play whatever scene happens to be open. Wait for `godot_game {"action":"status"}` → `runtime_connected: true`. Omitting `params.scene` (bare `godot_game {"action":"play"}`) **appears to succeed** — it returns `runtime_ready: true` — but no game process attaches the bridge: `godot_game status` reports `runtime_connected: false` / `instance_count: 0`, and every `godot_exec` then fails with `RUNTIME_NOT_CONNECTED`. Passing the scene is the fix; if the runtime never connects, confirm the `scene` param was sent before anything else.
 
@@ -152,8 +152,9 @@ Current P0 surface (plan 01 grows it): table `player` (`identity` primary key, `
 The in-engine scenarios are catalogued in `parity/mcp_catalog.json` (plan 23 §6.6) and
 the headless goldens they compare against are in `parity/scenario_catalog.json` +
 `parity/golden_manifest.json`. `parity mcp-parity --suite T0` resolves the headless
-half of every entry against its committed golden; the in-engine capture half is
-deferred until the single-editor mutex is available (NUD-40/A). `tools/parity.sh --mcp`
+half of every entry against its committed golden; the in-engine capture half runs
+inside a parity loop, whose own worktree + editor + bridge port keep it isolated from
+sibling loops (`.opencode/loops/README.md`). `tools/parity.sh --mcp`
 runs the headless half locally.
 
 ## Catalog by phase

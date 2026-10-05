@@ -51,4 +51,7 @@ __pycache__/
 session.json
 .kimi-code/
 
+# Parity loop ledger lock (record_finding.py)
+.opencode/evals/findings.json.lock
+
 screenshots_for_ai/

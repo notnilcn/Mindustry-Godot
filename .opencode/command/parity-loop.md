@@ -4,12 +4,16 @@ description: Run one bounded parity iteration — evaluate if needed, fix one le
 
 Run one iteration of the Mindustry-Godot parity feedback loop. Scope: $ARGUMENTS
 
-Default scope: the highest-severity `open`/`regression` finding in
-`.opencode/evals/findings.json`; if the ledger has no runnable open finding,
-evaluate the next uncovered scenario from the `parity-eval` skill catalog.
+Default scope: the highest-severity `open` finding in `$PARITY_LEDGER`
+(default `.opencode/evals/findings.json`) matching `$ARGUMENTS`; if the ledger
+has no runnable open finding, evaluate the next uncovered scenario from the
+`parity-eval` skill catalog. Parallel loops are expected: each loop runs in its
+own worktree/display/bridge port and must take a disjoint scope.
 
 The evaluator is a subagent; you (the primary agent) do the fixing. Never write
-to `.opencode/evals/` yourself — the evaluator is the only writer. Never let the
+findings content (`add`/`verify`/`regress`) yourself — the evaluator is the only
+writer. The `claim`/`release` coordination commands are the exception: run them
+through `record_finding.py`, which holds the ledger's file lock. Never let the
 evaluator edit game code.
 
 ## Iteration
@@ -21,15 +25,20 @@ evaluator edit game code.
    ids, coverage delta, blockers). Do not summarize the skill to it — it loads
    the `parity-eval` skill itself.
 
-2. **Pick exactly one finding.** Read the ledger:
+2. **Claim exactly one finding atomically.** The shared ledger is written by
+   several loops, so never "read and pick" by hand:
 
    ```bash
-   python3 .opencode/skills/parity-eval/scripts/record_finding.py list --status open
-   python3 .opencode/skills/parity-eval/scripts/record_finding.py list --status regression
+   python3 .opencode/skills/parity-eval/scripts/record_finding.py claim \
+     --owner "loop-${PARITY_LOOP:-1}" ${SCOPE_AREA:+--area "$SCOPE_AREA"}
    ```
 
-   Order S1 > S2 > S3 > S4, oldest first within a severity, scoped to
-   `$ARGUMENTS` when given. Quote the finding id in every update.
+   The command locks the ledger, picks the highest severity (S1 > S2 > S3 > S4)
+   then oldest open finding matching the scope, marks it `in-progress`, prints
+   the finding JSON, and exits 3 when nothing matches. If it exits 3, evaluate
+   the next uncovered scenario instead. If a claim fails hard mid-iteration
+   (fix abandoned, blocker, evaluation says it is not real), return it with
+   `record_finding.py release --id EV-XXXX --note "<why>"`.
 
 3. **Fix that finding only.** Read the nearest `AGENTS.md` to the code you
    touch and follow it. Keep the change minimal and parity-pinned (content IDs,
