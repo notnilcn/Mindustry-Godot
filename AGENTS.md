@@ -28,7 +28,7 @@ you are about to touch.
 | `bench/` | Recorded performance baselines (`baselines.json`, `editor_baseline.json`). |
 | `docs/` | Operator-facing platform and packaging notes. |
 | `.github/workflows/` | `ci.yml` (push/PR gate) and `parity-nightly.yml`. |
-| `.opencode/skills/playtest/` | In-engine playtest skill: launch flow, node map, MCP recipes. |
+| `.opencode/` | Agent workflow: `agent/evaluator.md`, `command/parity-eval.md`, `command/parity-loop.md`, `evals/` (gap ledger + run artifacts), and the `skills/playtest` + `skills/parity-eval` skills. |
 
 ## Documentation map
 
@@ -66,6 +66,26 @@ the addon itself.
 
 Run from the repo root. The `.sh` scripts are canonical on the Linux dev host and run the
 relative `cargo` commands below.
+
+## Parity feedback loop
+
+Player-visible parity is evaluated in-engine, not asserted from docs. The loop:
+
+1. The `evaluator` subagent (`.opencode/agent/evaluator.md`) drives the Java
+   reference with computer-mcp and the Godot client with open-godot-mcp,
+   compares against the committed goldens and each other, and records one
+   player-visible gap per finding in `.opencode/evals/findings.json` with
+   screenshot/state/log evidence.
+2. Implementers read the ledger, fix one `EV-####` at a time in game code, and
+   claim it in the commit message (`Fixes EV-0001`). Only the evaluator writes
+   the ledger and only the evaluator marks a finding `verified-fixed`, after
+   re-running the exact repro.
+3. `/parity-eval` runs the evaluation half; `/parity-loop` drives one
+   evaluate → fix → verify iteration. Run reports live under
+   `.opencode/evals/runs/` (local evidence, not committed).
+
+Docs, plans and gate reports are claims until a running client reproduces them;
+a finding without an artifact is not a finding.
 
 ## Workflow rules
 
