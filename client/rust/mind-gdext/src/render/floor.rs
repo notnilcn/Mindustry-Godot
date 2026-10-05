@@ -498,7 +498,7 @@ mod tests {
 
     #[test]
     fn color_from_rgba() {
-        let color = color_from(0xff80_4020);
+        let color = color_from(0x8040_20ff);
         assert!((color.r - 0.5).abs() < 0.01);
         assert!((color.g - 0.25).abs() < 0.01);
         assert!((color.b - 0.125).abs() < 0.01);
