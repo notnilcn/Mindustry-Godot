@@ -13,8 +13,14 @@
 #
 # Options:
 #   --run             exec opencode in the loop worktree when setup succeeds
+#   --no-auto         launch opencode without --auto (approval prompts enabled)
 #   --no-seed-builds  do not copy client/bin/rust and client/.godot into a new
 #                     worktree (a from-scratch Rust/Godot build is expensive)
+#
+# Loop sessions launch with `opencode --auto` by default: permission asks are
+# auto-approved inside the loop, while explicit deny rules (the evaluator's
+# game-code/commit/push blocks) still hold. Set PARITY_OPENCODE_AUTO=0 or pass
+# --no-auto to keep prompting.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,10 +33,13 @@ usage() {
 
 run_opencode=0
 seed_builds=1
+auto_approve="${PARITY_OPENCODE_AUTO:-1}"
 id=""
 for arg in "$@"; do
   case "$arg" in
     --run) run_opencode=1 ;;
+    --auto) auto_approve=1 ;;
+    --no-auto) auto_approve=0 ;;
     --no-seed-builds) seed_builds=0 ;;
     -h | --help)
       usage
@@ -121,12 +130,18 @@ cat <<EOF
   run prefix:   '${PARITY_RUN_PREFIX}'  (prefix run dirs with this)
   runtime dir:  $PARITY_LOOP_DIR
   MCP shims:    $PARITY_MCP_BIN  (prepended to PATH)
+  auto-approve: $([ "$auto_approve" -eq 1 ] && echo "--auto (asks approved; explicit denies stay)" || echo "off (permission prompts enabled)")
 
   editor:  $script_dir/run-godot-editor.sh &
   java:    $script_dir/run-java.sh
 EOF
 
 if [ "$run_opencode" -eq 1 ]; then
+  if [ "$auto_approve" -eq 1 ]; then
+    echo "[parity-loop $PARITY_LOOP] starting opencode --auto in $PARITY_WORKTREE"
+    cd "$PARITY_WORKTREE"
+    exec opencode --auto
+  fi
   echo "[parity-loop $PARITY_LOOP] starting opencode in $PARITY_WORKTREE"
   cd "$PARITY_WORKTREE"
   exec opencode

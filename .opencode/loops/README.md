@@ -40,6 +40,12 @@ config keep their plain names (`computer-mcp`, `open-godot-mcp`); the shims
 translate `PARITY_DISPLAY`/`PARITY_BRIDGE_PORT` per session. Restarting
 opencode is not needed.
 
+Loop sessions launch with `opencode --auto` (auto-approve permission asks;
+explicit deny rules still hold, e.g. the evaluator cannot edit game code or
+commit). Pass `--no-auto` or set `PARITY_OPENCODE_AUTO=0` to keep approval
+prompts. If you start opencode yourself instead of using `--run`, add `--auto`
+the same way.
+
 Inside the loop session, launch the clients per loop:
 
 ```bash
