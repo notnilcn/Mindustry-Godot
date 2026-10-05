@@ -55,11 +55,11 @@ Do not duplicate those recipes in this plan.
 
 | Step | Command / check | State |
 |---|---|---|
-| MCP preconditions | `MCP_VENV=... .opencode/skills/parity-eval/scripts/bootstrap.sh --check` | [ ] |
+| MCP preconditions | `MCP_VENV=... .opencode/skills/parity-eval/scripts/bootstrap.sh --check` | [x] |
 | Rust client built | `tools/build.sh` produces `client/bin/rust/debug/libmind_gdext.so` | [x] |
 | Java reference built | `../Mindustry/desktop/build/libs/Mindustry.jar` exists | [x] |
 | Editor + bridge | launch editor, `godot_health check` → `bridge_connected: true`; `godot_editor_read state` → project is Mindustry-Godot | [x] |
-| First twin-run | `/parity-eval boot_menu` writes a report and the ledger's first records | [ ] |
+| First twin-run | `/parity-eval boot_menu` writes a report and the ledger's first records | [x] |
 
 M0 exit: the `boot_menu` report exists with non-blank captures from both legs,
 and `findings.json` is no longer empty.
@@ -122,8 +122,8 @@ saying why (upstream deviation accepted, platform limitation, duplicate).
 
 | Milestone | Status | Last run | Open S1/S2 | Notes |
 |---|---|---|---|---|
-| M0 bring-up | in-progress | — | — | Rust + Java builds done; first twin-run pending |
-| M1 menu & settings | not-started | — | — | |
+| M0 bring-up | done | 20261005-150056-boot_menu | — | First twin-run complete; 8 findings filed. |
+| M1 menu & settings | in-progress | 20261005-161109-ev0002-verify | none | `boot_menu` evaluated; EV-0001/0002/0005/0009 verified-fixed; EV-0003/0004/0006/0007/0008 open (S3/S4). `settings_ui`, `ui_dialogs` not yet run. |
 | M2 campaign & HUD | not-started | — | — | |
 | M3 building & economy | not-started | — | — | |
 | M4 combat, units, logic | not-started | — | — | |

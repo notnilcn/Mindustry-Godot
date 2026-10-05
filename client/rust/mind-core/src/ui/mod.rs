@@ -19,5 +19,6 @@ pub mod manifest;
 pub mod pause;
 pub mod player_list;
 pub mod prompts;
+pub mod settings;
 pub mod stat_display;
 pub mod text;

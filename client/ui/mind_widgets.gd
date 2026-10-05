@@ -86,10 +86,16 @@ static func icon_button(icon_name: String, text_value: String, style: String = "
 	label.add_theme_font_size_override("font_size", 18)
 	row.add_child(label)
 	# A `Button` is not a container, so children do not contribute to its minimum
-	# size; size it from the icon+label row so labels are not clipped.
-	var row_min := row.get_combined_minimum_size()
-	result.custom_minimum_size.x = maxf(result.custom_minimum_size.x, row_min.x + 20.0)
-	result.custom_minimum_size.y = maxf(result.custom_minimum_size.y, row_min.y)
+	# size. Theme metrics only resolve once the button is inside the tree, so
+	# measure the row and apply its minimum on `ready` (measuring at construction
+	# returns a zero-height label); size it from the icon+label row so labels are
+	# not clipped.
+	result.ready.connect(
+		func():
+			var row_min := row.get_combined_minimum_size()
+			result.custom_minimum_size.x = maxf(result.custom_minimum_size.x, row_min.x + 20.0)
+			result.custom_minimum_size.y = maxf(result.custom_minimum_size.y, row_min.y)
+	)
 	return result
 
 

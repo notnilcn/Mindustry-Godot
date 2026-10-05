@@ -43,7 +43,6 @@ const DESKTOP_BUTTONS := [
 		{"text": "@about.button", "icon": "info", "dialog": "about"},
 	]},
 	{"text": "@editor", "icon": "terrain", "dialog": "editor_maps"},
-	{"text": "@workshop", "icon": "steam", "info": "@workshop"},
 	{"text": "@mods", "icon": "book", "dialog": "mods"},
 	{"text": "@settings", "icon": "settings", "dialog": "settings"},
 	{"text": "@quit", "icon": "exit", "action": "quit"},

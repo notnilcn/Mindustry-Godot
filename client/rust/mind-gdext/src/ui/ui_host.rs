@@ -20,6 +20,8 @@ use godot::classes::notify::NodeNotification;
 use godot::classes::{INode, Node as GdNode, Os};
 use godot::obj::{Base, Singleton};
 use godot::prelude::*;
+use mind_core::io::{FileSystem, NativeFs, Paths, SettingsStore};
+use mind_core::ui::settings::{self, SettingKind};
 
 /// Path to the sim owner that the pause governor drives.
 const SIM_HOST_PATH: &str = "/root/Spine/SimHost";
@@ -45,6 +47,8 @@ pub struct MindUi {
     block_catalog_cache: Option<String>,
     /// Rust console command registry (plan 14 M7, deviation OD1).
     console: mind_core::ui::console::ConsoleRegistry,
+    /// Plan-04 settings KV store behind the settings dialog.
+    settings: SettingsStore,
     /// Manifest `pause` flags keyed by dialog name (plan 14 §3.4).
     pause_flags: HashMap<String, bool>,
     /// Reference count of currently-open pause dialogs.
@@ -75,6 +79,7 @@ impl INode for MindUi {
             campaign_cache: None,
             block_catalog_cache: None,
             console: mind_core::ui::console::ConsoleRegistry::with_defaults(),
+            settings: SettingsStore::new(),
             pause_flags: HashMap::new(),
             pause_depth: 0,
             was_paused: false,
@@ -532,6 +537,113 @@ impl MindUi {
         }
         out
     }
+
+    /// Settings category rail JSON (`SettingsMenuDialog.rebuildMenu` order).
+    #[func]
+    pub fn settings_categories_json(&self) -> GString {
+        let categories: Vec<serde_json::Value> = settings::CATEGORIES
+            .iter()
+            .map(|category| {
+                serde_json::json!({
+                    "id": category.id,
+                    "key": category.key,
+                    "icon": category.icon,
+                    "action": match category.action {
+                        settings::SettingsAction::Table => "table",
+                        settings::SettingsAction::Language => "language",
+                        settings::SettingsAction::Controls => "controls",
+                        settings::SettingsAction::Data => "data",
+                    },
+                })
+            })
+            .collect();
+        json_string(&serde_json::Value::Array(categories))
+    }
+
+    /// Settings table rows JSON with current store values (`None` table is `[]`).
+    #[func]
+    pub fn settings_rows_json(&self, category: GString) -> GString {
+        let Some(rows) = settings::table_rows(&category.to_string()) else {
+            return GString::from("[]");
+        };
+        let values: Vec<serde_json::Value> = rows.iter().map(|row| self.row_json(row)).collect();
+        json_string(&serde_json::Value::Array(values))
+    }
+
+    /// Writes one known setting key through the plan-04 store and persists it.
+    #[func]
+    pub fn settings_set(&mut self, key: GString, value: Variant) -> bool {
+        let key = key.to_string();
+        let Some(row) = settings::all_rows().find(|row| row.key == key) else {
+            log::warn!("[ui] settings_set: unknown key '{key}'");
+            return false;
+        };
+        match row.kind {
+            SettingKind::Check => {
+                let Ok(enabled) = value.try_to::<bool>() else {
+                    return false;
+                };
+                self.settings.put_bool(&key, enabled);
+            }
+            SettingKind::Slider { min, max, .. } => {
+                let Ok(number) = value.try_to::<i32>() else {
+                    return false;
+                };
+                self.settings.put_i32(&key, number.clamp(min, max));
+            }
+        }
+        self.persist_settings();
+        true
+    }
+
+    /// Removes every key of one table, restoring the model defaults.
+    #[func]
+    pub fn settings_reset(&mut self, category: GString) -> bool {
+        let Some(rows) = settings::table_rows(&category.to_string()) else {
+            return false;
+        };
+        for row in rows {
+            self.settings.remove(row.key);
+        }
+        self.persist_settings();
+        true
+    }
+
+    /// Runs a data-category action (`clear-saves`, `open-folder`).
+    ///
+    /// Actions whose backing subsystem is not ported are not exposed by the
+    /// model and return false here rather than faking success.
+    #[func]
+    pub fn settings_action(&mut self, action: GString) -> bool {
+        match action.to_string().as_str() {
+            "clear-saves" => {
+                let paths = Paths::resolve(None);
+                let fs = NativeFs;
+                let mut removed = 0usize;
+                for dir in [paths.saves(), paths.previews()] {
+                    let Ok(files) = fs.walk(&dir) else {
+                        continue;
+                    };
+                    for file in files {
+                        if fs.delete(&file).is_ok() {
+                            removed += 1;
+                        }
+                    }
+                }
+                log::info!("[ui] settings_action clear-saves removed {removed} file(s)");
+                true
+            }
+            "open-folder" => {
+                let root = Paths::resolve(None).root().display().to_string();
+                let error = Os::singleton().shell_open(&GString::from(root.as_str()));
+                error == godot::global::Error::OK
+            }
+            other => {
+                log::info!("[ui] settings_action '{other}' is not ported");
+                false
+            }
+        }
+    }
 }
 
 impl MindUi {
@@ -543,6 +655,37 @@ impl MindUi {
             self.mobile,
             self.mobile_preview
         );
+        self.settings = SettingsStore::load(&NativeFs, &Paths::resolve(None));
+    }
+
+    /// One settings row as JSON (current store value + model default/bounds).
+    fn row_json(&self, row: &settings::SettingRow) -> serde_json::Value {
+        match row.kind {
+            SettingKind::Check => serde_json::json!({
+                "key": row.key,
+                "kind": "check",
+                "value": self.settings.get_bool(row.key, row.default_bool()),
+                "default": row.default_bool(),
+            }),
+            SettingKind::Slider { min, max, step } => serde_json::json!({
+                "key": row.key,
+                "kind": "slider",
+                "value": self.settings.get_i32(row.key, row.default_i32()),
+                "default": row.default_i32(),
+                "min": min,
+                "max": max,
+                "step": step,
+                "format": format_tag(row.format),
+            }),
+        }
+    }
+
+    /// Atomically writes the settings store (writes are small; no debounce pump
+    /// exists in this node).
+    fn persist_settings(&mut self) {
+        if let Err(error) = self.settings.force_save(&NativeFs, &Paths::resolve(None)) {
+            log::warn!("[ui] settings save failed: {error}");
+        }
     }
 
     /// Resolves the sim owner the governor drives, if present.
@@ -585,5 +728,30 @@ impl MindUi {
         if self.pause_depth == 0 && !self.was_paused {
             self.set_sim_paused(false);
         }
+    }
+}
+
+/// Serializes a JSON value, falling back to an empty container on failure.
+fn json_string(value: &serde_json::Value) -> GString {
+    match serde_json::to_string(value) {
+        Ok(json) => GString::from(json.as_str()),
+        Err(error) => {
+            log::warn!("[ui] settings JSON encode failed: {error}");
+            GString::from("[]")
+        }
+    }
+}
+
+/// The widget-layer format tag for a slider row.
+fn format_tag(format: settings::SettingFormat) -> &'static str {
+    match format {
+        settings::SettingFormat::Plain => "plain",
+        settings::SettingFormat::Percent => "percent",
+        settings::SettingFormat::Seconds => "seconds",
+        settings::SettingFormat::Multiplier => "multiplier",
+        settings::SettingFormat::X => "x",
+        settings::SettingFormat::BloomPercent => "bloomPercent",
+        settings::SettingFormat::Pixels => "pixels",
+        settings::SettingFormat::FpsCap => "fpsCap",
     }
 }

@@ -1,5 +1,202 @@
 {
   "format": 1,
-  "updated": null,
-  "findings": []
+  "updated": "2026-10-05T06:15:24+00:00",
+  "findings": [
+    {
+      "id": "EV-0001",
+      "area": "ui/menu",
+      "severity": "S2",
+      "status": "verified-fixed",
+      "title": "Settings dialog renders no setting controls (empty content pane)",
+      "expected": "Java: each Settings category shows its controls (checkboxes, sliders, keybinds, data actions)",
+      "actual": "Godot: Settings opens a centered panel whose right pane is an empty scroll area; only the selected category header renders",
+      "repro": "scenario boot_menu step 2",
+      "evidence": [
+        "runs/20261005-150056-boot_menu/godot/step-02-settings.png",
+        "runs/20261005-150056-boot_menu/godot/state-02-settings.json",
+        "runs/20261005-154654-boot_menu-verify/godot/step-02-settings.png",
+        "runs/20261005-154654-boot_menu-verify/godot/state-02-settings.json",
+        "runs/20261005-154654-boot_menu-verify/godot/state-model-settings.json",
+        "runs/20261005-154654-boot_menu-verify/godot/state-persistence.json"
+      ],
+      "notes": [
+        "2026-10-05T05:59:11+00:00: re-ran boot_menu step 2 in a fresh editor with the rebuilt GDExtension at 7ed0263 (2026-10-05). Settings content pane now renders real controls: Game 11 model rows (1 slider: Save Interval; 10 checks), rendered 10 MindCheck + 1 HSlider; Graphics 39 rows (27 checks + 12 sliders), Sound 4, Dev 4; Language and Controls open their dialogs; Game Data renders Clear Saves and Open Data Folder. fps check toggled through the UI and uiscale slider changed to 200, both read back via MindUi.settings_rows_json and persisted across stop/play (settings.bin)."
+      ],
+      "plan": "14",
+      "first_seen": "2026-10-05T05:35:07+00:00",
+      "last_verified": "2026-10-05T05:59:11+00:00"
+    },
+    {
+      "id": "EV-0002",
+      "area": "ui/menu",
+      "severity": "S3",
+      "status": "verified-fixed",
+      "title": "Main menu shows a Workshop button the reference build does not",
+      "expected": "Java (non-Steam): sidebar is Play, Database, Editor, Mods, Settings, Quit; Workshop is Steam-only (MenuFragment.java:222)",
+      "actual": "Godot: 7 visible top-level buttons, Workshop between Editor and Mods",
+      "repro": "scenario boot_menu step 1",
+      "evidence": [
+        "runs/20261005-150056-boot_menu/godot/step-01-main-menu.png",
+        "runs/20261005-150056-boot_menu/godot/state-01-menu.json",
+        "runs/20261005-150056-boot_menu/java/step-01-main-menu.png",
+        "runs/20261005-161109-ev0002-verify/godot/step-01-main-menu.png",
+        "runs/20261005-161109-ev0002-verify/godot/state-01-menu.json",
+        "runs/20261005-161109-ev0002-verify/godot/errors.json",
+        "runs/20261005-161109-ev0002-verify/diff/engine-vs-xscreen.json"
+      ],
+      "notes": [
+        "2026-10-05T06:15:24+00:00: re-ran boot_menu step 1 at 2026-10-05 (fresh editor, game pid 277068): top-level sidebar is exactly Play, Database, Editor, Mods, Settings, Quit - Workshop absent; Play submenu = Campaign/Join Game/Custom Game/Load Game, Database submenu = Schematics/Core Database/About"
+      ],
+      "plan": "14",
+      "first_seen": "2026-10-05T05:35:07+00:00",
+      "last_verified": "2026-10-05T06:15:24+00:00"
+    },
+    {
+      "id": "EV-0003",
+      "area": "ui/menu",
+      "severity": "S3",
+      "status": "open",
+      "title": "Menu logo is 37 percent narrower than the reference at the same window size",
+      "expected": "Java at 1152x648: logo pixel bbox 754 px wide (198..951)",
+      "actual": "Godot at 1152x648: logo global width 483.84 px, pixel bbox 475 px (338..812)",
+      "repro": "scenario boot_menu step 1",
+      "evidence": [
+        "runs/20261005-150056-boot_menu/godot/step-01-main-menu.png",
+        "runs/20261005-150056-boot_menu/java/step-01-main-menu.png",
+        "runs/20261005-150056-boot_menu/godot/state-01-menu.json"
+      ],
+      "notes": [],
+      "plan": "14",
+      "first_seen": "2026-10-05T05:35:07+00:00",
+      "last_verified": "2026-10-05T05:35:07+00:00"
+    },
+    {
+      "id": "EV-0004",
+      "area": "ui/menu",
+      "severity": "S4",
+      "status": "open",
+      "title": "Version label text and color differ from the reference",
+      "expected": "Java: custom build (accent orange) below the logo",
+      "actual": "Godot: Mindustry-Godot in white directly under the logo",
+      "repro": "scenario boot_menu step 1",
+      "evidence": [
+        "runs/20261005-150056-boot_menu/godot/step-01-main-menu.png",
+        "runs/20261005-150056-boot_menu/java/step-01-main-menu.png",
+        "runs/20261005-150056-boot_menu/godot/state-01-menu.json"
+      ],
+      "notes": [],
+      "plan": "14",
+      "first_seen": "2026-10-05T05:35:07+00:00",
+      "last_verified": "2026-10-05T05:35:07+00:00"
+    },
+    {
+      "id": "EV-0005",
+      "area": "ui/menu",
+      "severity": "S3",
+      "status": "verified-fixed",
+      "title": "Settings category rail shows raw settings.main and omits Language and Controls",
+      "expected": "Java categories in order: Game, Graphics, Sound, Language, Controls, Game Data, Developer Options",
+      "actual": "Godot: Game, Graphics, Sound, Developer Options, settings.main (raw bundle key echoed by _t), Game Data",
+      "repro": "scenario boot_menu step 2",
+      "evidence": [
+        "runs/20261005-150056-boot_menu/godot/step-02-settings.png",
+        "runs/20261005-150056-boot_menu/godot/state-02-settings.json",
+        "runs/20261005-150056-boot_menu/java/step-02-settings.png",
+        "runs/20261005-154654-boot_menu-verify/godot/step-02-settings.png",
+        "runs/20261005-154654-boot_menu-verify/godot/state-02-settings.json",
+        "runs/20261005-154654-boot_menu-verify/godot/state-11-language.json",
+        "runs/20261005-154654-boot_menu-verify/godot/state-12-controls.json"
+      ],
+      "notes": [
+        "2026-10-05T05:59:14+00:00: same fresh run (pid 262990/266549). Rail renders exactly Game, Graphics, Sound, Language, Controls, Game Data, Developer Options in that order (label dump from the live tree and settings_categories_json); no raw settings.main label exists anywhere in the dialog. Language and Controls both open their mapped dialogs."
+      ],
+      "plan": "14",
+      "first_seen": "2026-10-05T05:35:17+00:00",
+      "last_verified": "2026-10-05T05:59:14+00:00"
+    },
+    {
+      "id": "EV-0006",
+      "area": "ui/menu",
+      "severity": "S3",
+      "status": "open",
+      "title": "About link titles render raw bundle keys",
+      "expected": "Java: Discord, Changelog, Trello, Wiki, Suggestions, Reddit, Itch.io, Google play, F-Droid, Github, Dev builds, Bug",
+      "actual": "Godot: link.discord.title, link.changelog.title, link.trello.title, link.wiki.title, link.suggestions.title, link.reddit.title, link.github.title, link.bug.title; descriptions resolve and no link icons render",
+      "repro": "scenario boot_menu step 4",
+      "evidence": [
+        "runs/20261005-150056-boot_menu/godot/step-04-about.png",
+        "runs/20261005-150056-boot_menu/godot/state-04-about.json",
+        "runs/20261005-150056-boot_menu/java/step-04-about.png"
+      ],
+      "notes": [],
+      "plan": "14",
+      "first_seen": "2026-10-05T05:35:17+00:00",
+      "last_verified": "2026-10-05T05:35:17+00:00"
+    },
+    {
+      "id": "EV-0007",
+      "area": "ui/menu",
+      "severity": "S3",
+      "status": "open",
+      "title": "About dialog is missing four reference links and the Credits button",
+      "expected": "Java: 12 links including Itch.io, Google play, F-Droid, Dev builds, plus Back and Credits buttons",
+      "actual": "Godot: 8 links only; single Back button, no Credits",
+      "repro": "scenario boot_menu step 4",
+      "evidence": [
+        "runs/20261005-150056-boot_menu/godot/step-04-about.png",
+        "runs/20261005-150056-boot_menu/godot/state-04-about.json",
+        "runs/20261005-150056-boot_menu/java/step-04-about.png"
+      ],
+      "notes": [],
+      "plan": "14",
+      "first_seen": "2026-10-05T05:35:17+00:00",
+      "last_verified": "2026-10-05T05:35:17+00:00"
+    },
+    {
+      "id": "EV-0008",
+      "area": "ui/menu",
+      "severity": "S3",
+      "status": "open",
+      "title": "Database submenu stays expanded after the About dialog closes",
+      "expected": "Java: after closing About the main menu is back to base state with no submenu",
+      "actual": "Godot: submenu_visible remains true; step-05 capture is byte-identical to step-03 (Database submenu open)",
+      "repro": "scenario boot_menu step 5",
+      "evidence": [
+        "runs/20261005-150056-boot_menu/godot/step-05-back-to-menu.png",
+        "runs/20261005-150056-boot_menu/godot/step-03-database-submenu.png",
+        "runs/20261005-150056-boot_menu/java/step-05-back-to-menu.png",
+        "runs/20261005-150056-boot_menu/godot/state-05-back-to-menu.json"
+      ],
+      "notes": [],
+      "plan": "14",
+      "first_seen": "2026-10-05T05:35:17+00:00",
+      "last_verified": "2026-10-05T05:35:17+00:00"
+    },
+    {
+      "id": "EV-0009",
+      "area": "ui/menu",
+      "severity": "S3",
+      "status": "verified-fixed",
+      "title": "Settings category rail rows overlap, making the category list visually garbled",
+      "expected": "Java: each category is a full-height (~50 px) row with icon and label legible; adjacent labels do not overlap (runs/20261005-150056-boot_menu/java/step-02-settings.png)",
+      "actual": "Godot: the 7 rail buttons lay out 8 px tall at 12 px spacing (global centers y=166..238); the 18 px icon+label rows overflow their buttons and overlap the next category, so the rail reads as a stack of colliding text",
+      "repro": "scenario boot_menu step 2 (Settings dialog open, category rail)",
+      "evidence": [
+        "runs/20261005-154654-boot_menu-verify/godot/step-05-settings-reopened.png",
+        "runs/20261005-154654-boot_menu-verify/godot/step-07-graphics-fps-row.png",
+        "runs/20261005-154654-boot_menu-verify/godot/state-02-settings.json",
+        "runs/20261005-160059-ev0009-verify/godot/step-02-settings.png",
+        "runs/20261005-160059-ev0009-verify/godot/state-02-settings.json",
+        "runs/20261005-160059-ev0009-verify/diff/rail-analysis.json",
+        "runs/20261005-160059-ev0009-verify/java/java-step-02-settings-reused.png"
+      ],
+      "notes": [
+        "Reproduced on live-frame captures after a clean stop/play (pids 265519 and 266549); rail button rect measured via godot_exec (h=8, 12 px stride). Rail content itself is correct: see EV-0005 (verified-fixed).",
+        "2026-10-05T06:09:49+00:00: re-ran boot_menu step 2 at 2026-10-05 (client 7ed0263 + uncommitted GDScript: icon_button ready-time min-size + rail 300x50); rail buttons all h=50.0 at 54 px stride, min gap 4.0 px, zero label-rect overlaps, order Game/Graphics/Sound/Language/Controls/Game Data/Developer Options; Game pane renders 11 rows (10 checks + 1 slider) on pids 271667 and 273669"
+      ],
+      "plan": "14",
+      "first_seen": "2026-10-05T05:59:18+00:00",
+      "last_verified": "2026-10-05T06:09:49+00:00"
+    }
+  ]
 }
