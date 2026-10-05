@@ -14,6 +14,8 @@
 # Options:
 #   --run             exec opencode in the loop worktree when setup succeeds
 #   --no-auto         launch opencode without --auto (approval prompts enabled)
+#   --reuse-bridge    do not fail when the loop's bridge port is already in
+#                     use (launch-parallel.sh reuses a running editor)
 #   --no-seed-builds  do not copy client/bin/rust and client/.godot into a new
 #                     worktree (a from-scratch Rust/Godot build is expensive)
 #
@@ -34,12 +36,14 @@ usage() {
 run_opencode=0
 seed_builds=1
 auto_approve="${PARITY_OPENCODE_AUTO:-1}"
+reuse_bridge=0
 id=""
 for arg in "$@"; do
   case "$arg" in
     --run) run_opencode=1 ;;
     --auto) auto_approve=1 ;;
     --no-auto) auto_approve=0 ;;
+    --reuse-bridge) reuse_bridge=1 ;;
     --no-seed-builds) seed_builds=0 ;;
     -h | --help)
       usage
@@ -111,14 +115,20 @@ fi
 # 3) bridge-port ownership for loops >= 2 (loop 1 may already hold 6970)
 if [ "$PARITY_LOOP" -ge 2 ] && command -v ss >/dev/null 2>&1; then
   if ss -ltn 2>/dev/null | grep -qE ":${PARITY_BRIDGE_PORT}[[:space:]]"; then
-    echo "[loop $PARITY_LOOP] ERROR: bridge port $PARITY_BRIDGE_PORT is already in use." >&2
-    echo "  A stale editor may be holding it; stop it or choose another loop id." >&2
-    exit 1
+    if [ "$reuse_bridge" -eq 1 ]; then
+      echo "[loop $PARITY_LOOP] bridge port $PARITY_BRIDGE_PORT already in use; reusing the running editor"
+    else
+      echo "[loop $PARITY_LOOP] ERROR: bridge port $PARITY_BRIDGE_PORT is already in use." >&2
+      echo "  A stale editor may be holding it; stop it or choose another loop id" >&2
+      echo "  (or pass --reuse-bridge to use the editor that is already listening)." >&2
+      exit 1
+    fi
   fi
 fi
 
 # 4) session environment
 export PATH="$PARITY_MCP_BIN:$PATH"
+export DISPLAY="$PARITY_DISPLAY"
 
 cat <<EOF
 [parity-loop $PARITY_LOOP] ready

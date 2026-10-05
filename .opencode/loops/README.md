@@ -7,6 +7,38 @@ X display: XTEST input, focus, and full-screen capture are global per display,
 and on Linux the MCP's window-targeting tools are not implemented. Distinct
 displays are what makes the Java legs truly parallel.
 
+## One-session orchestration (recommended)
+
+Start a single `opencode --auto` in the main checkout and paste:
+
+```
+/parity-parallel 1=ui/menu 2=input --iterations 2
+```
+
+The primary agent is only an orchestrator: it calls
+`.opencode/loops/bin/launch-parallel.sh`, which prepares each loop (Xvfb,
+worktree, editor, MCP shims) and spawns one headless child process per loop:
+
+```
+opencode run --auto --agent loop-runner --dir <worktree> "<loop task>"
+```
+
+Each child is one opencode process with its own MCP servers (hence its own
+display and bridge port), runs up to `--iterations K` iterations of the
+parity loop (default 2), spawns its own `evaluator` subagents, and commits on
+its own `parity/loop-N` branch. Nothing is merged or pushed. A plan can also
+live in a file: `launch-parallel.sh --plan plans/current.plan`.
+
+Monitor and stop:
+
+```bash
+.opencode/loops/bin/parallel-status.sh
+.opencode/loops/bin/parallel-stop.sh 2        # or --all
+```
+
+The `loop-runner` agent is installed to `~/.config/opencode/agents/` by the
+launcher so it is available in every worktree regardless of branch.
+
 ## Resource map
 
 Loop ids are 1-based and encoded in environment variables (`lib/loop-vars.sh`):
