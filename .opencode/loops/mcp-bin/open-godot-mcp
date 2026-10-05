@@ -14,6 +14,13 @@ if [ -z "$real" ]; then
   exit 127
 fi
 
+# If only the loop id was inherited (manual launch), derive the full manifest.
+if [ -n "${PARITY_LOOP:-}" ]; then
+  # shellcheck source=../lib/loop-vars.sh
+  . "$self_dir/../lib/loop-vars.sh"
+  parity_loop_vars "$PARITY_LOOP"
+fi
+
 env_args=()
 [ -n "${PARITY_DISPLAY:-}" ] && env_args+=("DISPLAY=$PARITY_DISPLAY")
 [ -n "${PARITY_BRIDGE_PORT:-}" ] && env_args+=("OPEN_GODOT_MCP_PORT=$PARITY_BRIDGE_PORT")

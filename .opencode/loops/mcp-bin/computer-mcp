@@ -15,6 +15,13 @@ if [ -z "$real" ]; then
   exit 127
 fi
 
+# If only the loop id was inherited (manual launch), derive the full manifest.
+if [ -n "${PARITY_LOOP:-}" ]; then
+  # shellcheck source=../lib/loop-vars.sh
+  . "$self_dir/../lib/loop-vars.sh"
+  parity_loop_vars "$PARITY_LOOP"
+fi
+
 display="${PARITY_DISPLAY:-${DISPLAY:-}}"
 if [ -n "$display" ]; then
   exec env DISPLAY="$display" "$real" "$@"
