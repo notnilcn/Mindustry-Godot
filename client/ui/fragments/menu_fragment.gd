@@ -111,13 +111,22 @@ func _apply_layout() -> void:
 	var viewport_w := get_viewport_rect().size.x
 	var logo := get_node_or_null("Logo") as TextureRect
 	if logo != null:
-		logo.texture = MindWidgets.icon_texture("logo")
-		var w := clampf(viewport_w * 0.42, 160.0, maxf(160.0, viewport_w - 20.0))
-		var h := w * (107.0 / 768.0)
+		# Upstream draws the logo at `min(logo.width * Scl.scl(1), width - Scl.scl(20))`,
+		# 6px below the top edge (MenuFragment.java:114-121). The port has no separate
+		# UI scale; the native atlas region is the 768x107 `logo` sprite.
+		var texture := MindWidgets.icon_texture("logo")
+		logo.texture = texture
+		var native_w := 768.0
+		var native_h := 107.0
+		if texture != null and texture.get_width() > 0:
+			native_w = float(texture.get_width())
+			native_h = float(texture.get_height())
+		var w := minf(native_w, viewport_w - 20.0)
+		var h := w * native_h / native_w
 		logo.offset_left = -w * 0.5
 		logo.offset_right = w * 0.5
-		logo.offset_top = 8.0
-		logo.offset_bottom = 8.0 + h
+		logo.offset_top = 6.0
+		logo.offset_bottom = 6.0 + h
 	var version := get_node_or_null("Version") as Label
 	if version != null:
 		var top := (logo.offset_bottom if logo != null else 0.0) + 2.0
