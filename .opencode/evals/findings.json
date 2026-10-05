@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "updated": "2026-10-05T08:58:37+00:00",
+  "updated": "2026-10-05T10:55:55+00:00",
   "findings": [
     {
       "id": "EV-0001",
@@ -202,7 +202,7 @@
       "id": "EV-0010",
       "area": "ui/campaign",
       "severity": "S3",
-      "status": "open",
+      "status": "verified-fixed",
       "title": "Campaign sector view is a flat raw-id text grid instead of the 3D planet with hex sectors",
       "expected": "Java: sector view renders the 3D Serpulo globe with a hex sector grid, left planet sidebar (Erekir/Serpulo/Difficulty), and a selected-sector panel with Threat and Launch; Back/ Tech Tree at bottom",
       "actual": "Godot: flat 3-column list of raw internal ids (sunkenPier, serpulo-sector-2, groundZero); left sidebar shows 'verilus'; bottom row Resume/Back/Tech Tree; clicking groundZero only fills detail labels name+Threat; no globe, hex grid, starfield or in-panel Launch",
@@ -213,15 +213,22 @@
         "runs/20261005-163933-campaign_launch/java/step-03a-groundzero-selected.png",
         "runs/20261005-163933-campaign_launch/godot/state-observations.json",
         "runs/20261005-175054-ev0012-verify/godot/step-02-sector-view.png",
-        "runs/20261005-175054-ev0012-verify/godot/step-03a-groundzero-selected.png"
+        "runs/20261005-175054-ev0012-verify/godot/step-03a-groundzero-selected.png",
+        "runs/20261005-194944-ev0010-verify/godot/step-02-sector-view.png",
+        "runs/20261005-194944-ev0010-verify/godot/state-02-sector-view.json",
+        "runs/20261005-194944-ev0010-verify/godot/step-03-ingame.png",
+        "runs/20261005-194944-ev0010-verify/godot/state-03-ingame.json",
+        "runs/20261005-194944-ev0010-verify/diff/step-02-java-vs-godot.json",
+        "runs/20261005-194944-ev0010-verify/godot/step-01-planet-dialog.png"
       ],
       "notes": [
         "Sector action is labeled Resume although the starting sector has no save (Java would show Launch)",
-        "2026-10-05T08:01:12+00:00: Triage 20261005-175054: still reproduces. Sector dialog has 0 Node3D / 0 SubViewport, 281 raw-id text buttons (sunkenPier, serpulo-sector-2, ...), Resume/Back/Tech Tree bottom bar; flat grid."
+        "2026-10-05T08:01:12+00:00: Triage 20261005-175054: still reproduces. Sector dialog has 0 Node3D / 0 SubViewport, 281 raw-id text buttons (sunkenPier, serpulo-sector-2, ...), Resume/Back/Tech Tree bottom bar; flat grid.",
+        "2026-10-05T09:58:17+00:00: Re-ran the exact campaign_launch repro on clean pid 409777 at HEAD f04ece8 + dirty tree (new client/ui/planet_view.gd + scenes/ui/planet_view.tscn, planet_dialog.gd; .so md5 c6d5867a92c21bc6ba1f475f2d251b32, mtime 19:33:45), 1152x648. Chooser frame byte-identical to verified EV-0011 (frame_diff 0.0). Play > Campaign > Serpulo > OK now opens the 3D globe /root/Spine/Planet/PlanetView: Node3D 5 / SubViewport 1 / Camera3D 1 / MeshInstance3D 4, grid line mesh 3240 verts, selection+outline+body meshes non-null; data serpulo 272 tiles, start_sector 170, 30 presets, groundZero=170; in-world label [ Ground Zero ] centered at (576,324); pick(576,324)=170. Left rail Erekir/Serpulo(pressed)/Difficulty; bottom panel Ground Zero + Threat: Low + in-panel Launch (576,613); Back (108,578) / Tech Tree (1044,578); 6 dialog buttons total, zero raw-id buttons (flat grid had 280). Launch enters the game: phase playing, tick 52->528, menu hidden, HUD visible, log 'loaded campaign sector serpulo:15'. Only known warnings, no new game-code errors. Residual vs Java a3: changed_fraction 0.511, palette distance 0.252 (old flat grid vs Java was 0.570/0.372) and no per-sector icon/lock pass (only Body/Grid/Selection/Outline meshes)."
       ],
       "plan": "12",
       "first_seen": "2026-10-05T07:18:31+00:00",
-      "last_verified": "2026-10-05T08:01:12+00:00"
+      "last_verified": "2026-10-05T09:58:17+00:00"
     },
     {
       "id": "EV-0011",
@@ -334,7 +341,7 @@
       "id": "EV-0014",
       "area": "render/campaign",
       "severity": "S3",
-      "status": "open",
+      "status": "verified-fixed",
       "title": "Launched Ground Zero terrain is wall-dominated; enclosed-wall darkness blacks out ~47% of the centered view",
       "expected": "Java: Ground Zero launches the stored designed map via the preset's FileMapGenerator (SectorPresets.java:22 groundZero; SectorPreset.java:83-85; World.java:269-272), i.e. mostly open snowy terrain with the core and copper ore; darkness (enableDarkness, Vars.java:218) only blackens enclosed static-wall interiors",
       "actual": "Godot: launched sector sim state is 81.8% non-air (13406/16384 tiles; wall types sand/dune/snow/salt/shale in view) and the default frame is ~47% opaque black: mean [76.4,70.0,69.5]; hiding Band_darkness_0 alone changes 47.4% of pixels and restores mean [158.7,144.3,137.6] with sand/tainted-water/snow palette; darkness_rebuilds=4, missing_regions=1, error log empty",
@@ -345,20 +352,30 @@
         "runs/20261005-180701-ev0012-verify2/godot/color-analysis.json",
         "runs/20261005-180701-ev0012-verify2/godot/render-stats.json",
         "runs/20261005-180701-ev0012-verify2/diff/step-04-default-vs-darkness-off.json",
-        "runs/20261005-180701-ev0012-verify2/run.json"
+        "runs/20261005-180701-ev0012-verify2/run.json",
+        "runs/20261005-203520-ev0014-verify/godot/step-04-launch.png",
+        "runs/20261005-203520-ev0014-verify/godot/state-04-ingame.json",
+        "runs/20261005-203520-ev0014-verify/godot/frame-analysis.json",
+        "runs/20261005-203520-ev0014-verify/godot/post-launch-log-fresh.json",
+        "runs/20261005-203520-ev0014-verify/godot/step-05-core-view.png",
+        "runs/20261005-203520-ev0014-verify/godot/core-scale-measurement.json",
+        "runs/20261005-203520-ev0014-verify/diff/godot-vs-java-step-04b-after-skip.json",
+        "runs/20261005-203520-ev0014-verify/run.json"
       ],
       "notes": [
-        "Upstream Ground Zero is a stored designed map (core/assets/maps/serpulo/groundZero.msav) loaded by the preset FileMapGenerator (SectorPreset.java:83-85), not a SerpuloPlanetGenerator output (World.java:269-272 picks preset.generator when sector.preset != null); the port ships the same assets/maps/serpulo/groundZero.msav, so the 82%-wall launched composition may be generator/map-load coverage rather than a darkness-render regression. The darkness pass itself matches upstream: Renderer.java:387-389 draws Layer.darkness unconditionally when enableDarkness (Vars.java:218), and World.getWallDarkness (World.java:453-467, darkRadius=4 Vars.java:67) falls off with distance to open floor, so only enclosed massifs go black (BlockRenderer.java:425-452; luminance 1-min((darkness+0.5)/4,1) at line 437). Implementer should confirm which loader produced the launched tiles and compare composition against the stored map. Camera center (64,64) is open floor and lit; 3085 wall tiles sit in the x16..112/y37..91 view (run.json landmark)."
+        "Upstream Ground Zero is a stored designed map (core/assets/maps/serpulo/groundZero.msav) loaded by the preset FileMapGenerator (SectorPreset.java:83-85), not a SerpuloPlanetGenerator output (World.java:269-272 picks preset.generator when sector.preset != null); the port ships the same assets/maps/serpulo/groundZero.msav, so the 82%-wall launched composition may be generator/map-load coverage rather than a darkness-render regression. The darkness pass itself matches upstream: Renderer.java:387-389 draws Layer.darkness unconditionally when enableDarkness (Vars.java:218), and World.getWallDarkness (World.java:453-467, darkRadius=4 Vars.java:67) falls off with distance to open floor, so only enclosed massifs go black (BlockRenderer.java:425-452; luminance 1-min((darkness+0.5)/4,1) at line 437). Implementer should confirm which loader produced the launched tiles and compare composition against the stored map. Camera center (64,64) is open floor and lit; 3085 wall tiles sit in the x16..112/y37..91 view (run.json landmark).",
+        "2026-10-05T10:44:39+00:00: 2026-10-05 10:35-10:45Z re-ran the exact campaign_launch repro on a fresh editor (pid 464179, started 20:33:25 after the .so rebuild 20:29:28; .so md5 f9d69c67c5fd442bc7940945984c5852): menu > Play > Campaign > Serpulo card > OK > in-panel Launch, pid-stamped game pid 467431 (a first pid 465481 run gave identical numbers but was stopped after an evaluator await-eval wedged the frame loop; kept as step-04-launch-pid465481.png / state-04-ingame-pid465481.json). get_state_json: world 256x256, sparse true, 56078 non-air tiles exactly (snow-wall 29963, dune-wall 14849, ice-wall 9010, snow-pine 2195, scrap-wall 32, conveyor 20, world-processor 5, router 2, mechanical-drill 2, core-shard 1, scrap-wall-large 1), phase playing, tick advancing (8->48->112->156->204; first pid reached 148). Log line present: '[I] load_sector: loaded preset map  (256x256)' (+ '[I] loaded campaign sector '); no new game errors (only the pre-existing '[W] command rejected: tile (16, 40) is outside a 32x32 world' backdrop warning). Visuals: the exact step-4 frame is not uniform gray (std luma 90.4); palette is snow/ice (232,238,244/233,238,244) plus a copper ore cluster near the core (bbox 501,186-687,303), no sand/tainted-water; with an evaluator camera probe centered on the core (129,55) the open core pocket renders bright (center grid luma 230-255 within +/-120px). Upstream darkness recomputed from the loaded map (darkRadius 4) predicts 67% pure black in the default wide view vs 40% rendered and 0 black in the 21x21 around the core, so darkness is not over-blackening the open core area. Residual NOT part of this loader defect: the default launch camera stays on the map middle (128,128) with the core off-screen and 2.67x more zoomed out than Java camerascale 4 - filed as EV-0016; hence frame_diff vs committed Java step-04b is pose-dominated (changed_fraction 0.921, palette_distance 0.658). Core/HUD: core-shard exists in the sim and renders, but wave/status and CoreInfo labels are empty, objectives list empty and MindCampaign.get_sector_state hasCore=false - noted under the existing HUD gap (EV-0013/EV-0012 notes), no duplicate filed.",
+        "2026-10-05T10:44:51+00:00: CORRECTION of the preceding note (backticks in the log strings were shell-expanded there, truncating them): the two launch log lines from post-launch-log-fresh.json are exactly: [I] load_sector: loaded preset map `serpulo/groundZero` (256x256) and [I] loaded campaign sector `serpulo:15`. All other content of the preceding note stands: world 256x256, 56078 non-air tiles, phase playing, tick advancing, snow/ice + copper palette, open core pocket lit, residual camera pose filed as EV-0016, no new game errors."
       ],
       "plan": "12",
       "first_seen": "2026-10-05T08:19:08+00:00",
-      "last_verified": "2026-10-05T08:19:08+00:00"
+      "last_verified": "2026-10-05T10:44:51+00:00"
     },
     {
       "id": "EV-0015",
       "area": "assets/pipeline",
       "severity": "S2",
-      "status": "open",
+      "status": "verified-fixed",
       "title": "As-delivered tree has no bundle/atlas outputs: menus and dialogs show raw bundle keys (campaign.select, campaign.none) and renderer uses placeholder quads",
       "expected": "Java: localized menu/dialog text ('Select Starting Campaign', 'Database') and textured menu background / world rendering",
       "actual": "Godot after the 18:22 mind-tools migrate: assets/locales and assets/sprites/sprites.atlas.json absent; log '[assets] ready ok=false pages=0 regions=0'; dialog title/description show campaign.select/campaign.none; '[W] MindWorldRenderer: atlas manifest unavailable; using placeholder quads' and 'menu background 8211 tiles missing regions'. Running the canonical `mind-tools pack` regenerates the outputs but its pack_pipeline wipes assets/sprites first (fs::remove_dir_all(out_dir)), deleting the vendored loose sprites (planets/, space.png, error.png, logo.png, ...), so migrate+pack cannot currently leave both the generated outputs and the vendored loose art in the tree.",
@@ -367,14 +384,47 @@
         "runs/20261005-182803-ev0011-verify/godot/step-01-pre-pack-planet-dialog.png",
         "runs/20261005-182803-ev0011-verify/godot/pre-pack-missing-assets.txt",
         "runs/20261005-182803-ev0011-verify/notes-assets.json",
-        "runs/20261005-182803-ev0011-verify/pack.log"
+        "runs/20261005-182803-ev0011-verify/pack.log",
+        "runs/20261005-104805-ev0015-verify/report.md",
+        "runs/20261005-104805-ev0015-verify/post-pack-state.json",
+        "runs/20261005-104805-ev0015-verify/pack.log",
+        "runs/20261005-104805-ev0015-verify/migrate.log",
+        "runs/20261005-104805-ev0015-verify/godot/boot-log-pid476469.json",
+        "runs/20261005-104805-ev0015-verify/godot/state-assets.json",
+        "runs/20261005-104805-ev0015-verify/godot/step-assets.png",
+        "runs/20261005-104805-ev0015-verify/godot/step-assets-sector.png"
       ],
       "notes": [
-        "Evaluator restored a workable tree to verify EV-0011: ran `cargo run -p mind-tools -- pack` (log pack.log) then re-copied the 13 vendored loose sprites from ../Mindustry and sha256-verified them against build/assets/migration_manifest.json; no game code/scene/config touched. migrate.rs does a clean-mirror wipe; pack_pipeline.rs::pack wipes assets/sprites before writing pages. A robust fix must make the migrate->pack flow preserve the loose sprites (or load them from a non-generated location)."
+        "Evaluator restored a workable tree to verify EV-0011: ran `cargo run -p mind-tools -- pack` (log pack.log) then re-copied the 13 vendored loose sprites from ../Mindustry and sha256-verified them against build/assets/migration_manifest.json; no game code/scene/config touched. migrate.rs does a clean-mirror wipe; pack_pipeline.rs::pack wipes assets/sprites before writing pages. A robust fix must make the migrate->pack flow preserve the loose sprites (or load them from a non-generated location).",
+        "2026-10-05T10:55:55+00:00: 2026-10-05 10:48-10:55Z fresh EV-0015 repro at HEAD f04ece8 + dirty tree (gdext md5 f9d69c67c5fd442bc7940945984c5852): 'bash tools/pack.sh migrate --from ../Mindustry --to .' exit 0 (2977 files; generated outputs absent, loose art present) then 'bash tools/pack.sh pack' exit 0 (5135 regions/4 pages, fallback 8 pages, locales 35, 0 error lines). Loose serpulo/erekir/space/error/logo sha256 all survive pack and equal the fresh migration_manifest; sprites.atlas.json parses (5135 regions); sprites.png+2..4, fallback/sprites.atlas.json, block_colors.png, assets/locales present. Engine pid 476469: '[assets] ready ok=true pages=4 regions=5135', no placeholder-quads warning; find_loose(planets/serpulo|space) -> ImageTexture 512x512/2048x2048, find_region(sector-groundZero) -> AtlasTexture; chooser title label = 'Select Starting Campaign' (bundle_get campaign.select/none resolve real text); Play>Campaign shows space backdrop + Serpulo-left/Erekir-right cards, sector view loads serpulo (272 tiles, body/grid/selection meshes, label [ Ground Zero ], Launch). Pre-existing only: menu-background missing-regions warning (1260/1368/1000 in earlier healthy runs) and menu-click world fall-through warnings. Note: migrate clean-mirror deleted tracked assets/parity/mcp_assets_scenario.md + mcp_audio_scenario.md and restored 13 assets/icons|scripts|shaders files at upstream 100755 mode (content identical)."
       ],
       "plan": "03",
       "first_seen": "2026-10-05T08:47:08+00:00",
-      "last_verified": "2026-10-05T08:47:08+00:00"
+      "last_verified": "2026-10-05T10:55:55+00:00"
+    },
+    {
+      "id": "EV-0016",
+      "area": "render/campaign",
+      "severity": "S3",
+      "status": "open",
+      "title": "Launched sector camera opens on the map middle (core off-screen) at ~2.7x the reference zoom",
+      "expected": "Java: Control.WorldLoadEvent sets camera.position to player.bestCore() (Control.java:92-107), and Renderer camerascale = Scl.scl(4) => 32 px/tile at tilesize 8 (36x20 tiles visible at 1152x648), so a Ground Zero launch opens on the core",
+      "actual": "Godot: after Launch the camera centers the world middle (screen_to_tile(576,324) = (128,128)); the core-shard at (129,55) is off-screen above (tile_to_screen y = -552); camera zoom 1.5 * tilesize 8 = 12 px/tile (96x54 tiles visible, 2.67x wider than Java); the exact-repro frame is mean luma 90.8 with 26.4% pure-black and 58.3% dark pixels, core not visible",
+      "repro": "scenario campaign_launch step 4 (Play > Campaign > Serpulo > OK > in-panel Launch) - initial camera pose after the sector loads; camera.rs:203-206 centers width/2,height/2",
+      "evidence": [
+        "runs/20261005-203520-ev0014-verify/godot/step-04-launch.png",
+        "runs/20261005-203520-ev0014-verify/godot/state-04-ingame.json",
+        "runs/20261005-203520-ev0014-verify/godot/frame-analysis.json",
+        "runs/20261005-203520-ev0014-verify/godot/core-scale-measurement.json",
+        "runs/20261005-203520-ev0014-verify/godot/step-05-core-view.png",
+        "runs/20261005-203520-ev0014-verify/diff/godot-vs-java-step-04b-after-skip.json"
+      ],
+      "notes": [
+        "Evaluator probe: center_on_tile(129,55) then capture step-05-core-view.png shows the core pocket renders bright (center grid luma 230-255 within +/-120 px) with copper ore cluster bbox (501,186)-(687,303); the wide dark frame is the designed map's enclosed wall massifs plus the 2.67x zoom-out. Upstream darkness recomputed from the loaded map predicts 67% black in the default 192x108-tile view (Godot renders 40%) and 0 black in the 21x21 core pocket, so the darkness pass itself is not over-blackening."
+      ],
+      "plan": "12",
+      "first_seen": "2026-10-05T10:44:31+00:00",
+      "last_verified": "2026-10-05T10:44:31+00:00"
     }
   ]
 }
