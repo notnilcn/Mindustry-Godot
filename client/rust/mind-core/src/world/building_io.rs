@@ -205,6 +205,44 @@ pub fn read_base(
     decoded.module_bits = module_bits;
     decoded.version = version;
 
+    read_modules(decoded, r, module_bits, legacy, version)
+}
+
+/// Pinned upstream `BuildingComp.readBase` layout (legacy `MSAV` maps): the
+/// per-building save version byte is embedded after the rotation byte.
+pub fn read_base_legacy(decoded: &mut DecodedBase, r: &mut EntityReader) -> Result<(), IoError> {
+    decoded.health = r.f()?;
+    let rot = r.b()?;
+    decoded.team = r.b()? as u8;
+    decoded.rotation = (rot & 0x7f) as u8;
+
+    let mut module_bits = 0u8;
+    let mut legacy = true;
+    let mut version = 0u8;
+    if (rot & 0x80u8 as i8) != 0 {
+        version = r.b()? as u8;
+        if version >= 1 {
+            decoded.enabled = r.b()? == 1;
+        }
+        if version >= 2 {
+            module_bits = r.ub()?;
+        }
+        legacy = false;
+    }
+    decoded.module_bits = module_bits;
+    decoded.version = version;
+
+    read_modules(decoded, r, module_bits, legacy, version)
+}
+
+/// Module stacks and trailing version-gated fields shared by both base layouts.
+fn read_modules(
+    decoded: &mut DecodedBase,
+    r: &mut EntityReader,
+    module_bits: u8,
+    legacy: bool,
+    version: u8,
+) -> Result<(), IoError> {
     if module_bits & MODULE_ITEM != 0 {
         let count = if legacy {
             r.ub()? as i32

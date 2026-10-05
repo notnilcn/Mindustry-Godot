@@ -4,8 +4,9 @@
 container, the big-endian wire and `TypeIO` codecs, entity revision IO, `JsonIO`, settings
 persistence, save slots, and map headers/previews. It ports upstream `mindustry.io` (`SaveIO`,
 `SaveVersion`, `SaveFileReader`, `TypeIO`, `JsonIO`, `MapIO`), `game/Saves.java` and Arc
-`Settings`/`Fi`; the upstream `MSAV` container enters only through the default-off `msav-import`
-feature. Every untrusted-input path returns [`IoError`]; nothing here links Godot or tokio.
+`Settings`/`Fi`; the upstream `MSAV` container is imported through the default-off `msav-import`
+feature (enabled by `mind-gdext` for campaign preset maps). Every untrusted-input path returns
+[`IoError`]; nothing here links Godot or tokio.
 Read the root [`AGENTS.md`](../../../../../AGENTS.md) first; the crate-level map is
 `mind-core/AGENTS.md` (`../../AGENTS.md`).
 
@@ -80,9 +81,11 @@ file to `<stem>-backup.msav` first and restoring it if the write fails. `SaveIo:
   `version_array()`, overriding only the changed region hooks.
 - Settings keys follow the upstream names (`save-<n>-name`, `save-<n>-autosave`, `saveinterval`,
   `last-sector-save`); a corrupt `settings.bin` falls back to defaults with a warning.
-- `MSAV` is gated by the default-off `msav-import` feature in `Cargo.toml`; `SaveIo::open_native`
-  sniffs it via `sniffs_as_legacy` and delegates to `legacy::open_legacy`. With the feature off,
-  `MSAV` input fails with the standard unknown-version message.
+- `MSAV` is gated by the default-off `msav-import` feature in `Cargo.toml`. With the feature on,
+  `SaveIo::load_bytes` sniffs it via `legacy::sniffs_as_legacy`, inflates the whole stream, parses
+  the 8-byte header and walks the version-gated regions with `v1::read_legacy_regions`. With the
+  feature off, `MSAV` input fails with the standard unknown-version message via
+  `legacy::open_legacy`.
 - Port upstream sources and cite them in file headers; new files are UTF-8/LF and GPL-3.0-only.
   Do not relax the boundary rules to land a feature.
 

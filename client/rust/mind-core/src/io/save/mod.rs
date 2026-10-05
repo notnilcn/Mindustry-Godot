@@ -11,8 +11,9 @@
 //! Native framing (plan 04 §6.1, deviations 1–2): the 4-byte magic `MGRS` is
 //! raw; everything after it (`u32` format version + regions) is zlib-deflated.
 //! The legacy upstream magic `MSAV` is import-only behind the default-off
-//! `msav-import` feature (OD2/NUD-02); without it, legacy files fail with the
-//! standard unknown-version message.
+//! `msav-import` feature (OD2/NUD-02); the Godot client opts in so campaign
+//! preset maps load. Without the feature, legacy files fail with the standard
+//! unknown-version message.
 
 pub mod chunk;
 pub mod fixture;
@@ -142,6 +143,13 @@ impl SaveIo {
 
     /// Loads from an in-memory (deflated, magic-prefixed) save.
     pub fn load_bytes(bytes: &[u8], state: &mut SaveReadState) -> Result<(), IoError> {
+        // Legacy upstream `MSAV` import (opt-in `msav-import`): the whole
+        // stream is deflated and the header is raw, so it is handled before
+        // the native `MGRS` path.
+        #[cfg(feature = "msav-import")]
+        if super::legacy::sniffs_as_legacy(bytes) {
+            return super::legacy::load_legacy(bytes, state);
+        }
         let (format, mut reader) = Self::open_native(bytes)?;
         let writer = version::get_writer(format).ok_or(IoError::UnknownVersion(format))?;
         let result = writer.read(&mut reader, state);
@@ -241,9 +249,7 @@ impl SaveIo {
 
 /// Whether the stream inflates to the legacy upstream `MSAV` header.
 fn sniffs_as_legacy(bytes: &[u8]) -> bool {
-    let mut decoder = ZlibDecoder::new(Cursor::new(bytes));
-    let mut header = [0u8; 4];
-    matches!(decoder.read_exact(&mut header), Ok(())) && header == LEGACY_MAGIC
+    super::legacy::sniffs_as_legacy(bytes)
 }
 
 #[cfg(test)]
@@ -349,6 +355,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(feature = "msav-import"))]
     #[test]
     fn legacy_msav_fails_with_unknown_version_message() {
         // Hand-build a legacy stream: fully deflated `MSAV` + u32 version 13.
@@ -363,6 +370,24 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "Unknown save version: 13. Are you trying to load a save from a newer version?"
+        );
+    }
+
+    #[cfg(feature = "msav-import")]
+    #[test]
+    fn legacy_msav_header_is_accepted_then_truncation_errors() {
+        // Hand-build a legacy stream: fully deflated `MSAV` + u32 version 13.
+        let mut bytes = Vec::new();
+        let mut encoder = ZlibEncoder::new(&mut bytes, Compression::fast());
+        encoder.write_all(b"MSAV").unwrap();
+        encoder.write_all(&13u32.to_be_bytes()).unwrap();
+        encoder.finish().unwrap();
+
+        let mut state = SaveReadState::default();
+        let error = SaveIo::load_bytes(&bytes, &mut state).unwrap_err();
+        assert!(
+            !error.to_string().contains("Unknown save version"),
+            "MSAV header is imported, not rejected: {error}"
         );
     }
 
@@ -431,5 +456,46 @@ mod tests {
         bad[at] ^= 0xFF;
         let mut state = SaveReadState::default();
         assert!(SaveIo::load_bytes(&bad, &mut state).is_err());
+    }
+
+    /// Imports the vendored designed Ground Zero map (`assets/maps/serpulo/`)
+    /// through the MSAV reader: 128x128 and mostly open terrain, unlike the
+    /// planet-generator fallback (EV-0014). Skips when the asset is absent.
+    #[cfg(feature = "msav-import")]
+    #[test]
+    fn legacy_ground_zero_map_imports_designed_terrain() {
+        use crate::content::{BlockId, MemoryBundle, MemoryUnlockStore, create_base_content};
+        use crate::editor::context::EditorContext;
+        use crate::world::WorldGrid;
+
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../assets/maps/serpulo/groundZero.msav");
+        let Ok(bytes) = std::fs::read(&path) else {
+            return;
+        };
+        let mut registry =
+            create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true).unwrap();
+        let mut grid = WorldGrid::new(0, 0);
+        grid.begin_map_load();
+        let result = {
+            let mut context = EditorContext::new(&mut grid, &registry);
+            let mut state = SaveReadState {
+                context: Some(&mut context),
+                content: Some(&mut registry),
+                ..SaveReadState::default()
+            };
+            SaveIo::load_bytes(&bytes, &mut state)
+        };
+        result.expect("ground zero map imports");
+        grid.end_map_load(&registry);
+        // The committed 256x256 designed map: 56095 non-air block tiles (the
+        // Java-launched save of the same map parses to 56218 after play).
+        assert_eq!((grid.tiles.width, grid.tiles.height), (256, 256));
+        let walls = grid
+            .tiles
+            .iter()
+            .filter(|tile| tile.block != BlockId::AIR)
+            .count();
+        assert_eq!(walls, 56078, "designed Ground Zero composition");
     }
 }

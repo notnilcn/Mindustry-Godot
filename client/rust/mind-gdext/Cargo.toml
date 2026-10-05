@@ -11,7 +11,9 @@ crate-type = ["cdylib"]
 
 [dependencies]
 godot.workspace = true
-mind-core = { path = "../mind-core" }
+# `msav-import`: campaign preset sectors load their upstream `assets/maps/**.msav`
+# designed maps (EV-0014) instead of the planet generator fallback.
+mind-core = { path = "../mind-core", features = ["msav-import"] }
 mind-stdb = { path = "../mind-stdb" }
 serde_json.workspace = true
 smallvec.workspace = true

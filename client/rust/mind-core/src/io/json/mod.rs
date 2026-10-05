@@ -53,6 +53,66 @@ pub fn strip_legacy_prefix(input: &str) -> Cow<'_, str> {
     }
 }
 
+/// Rewrites Arc's lenient `Json` text into strict JSON: bare object keys
+/// (`{teams:{0:{}}}`) and bare string values (`type:dagger`, `text:@gz.conveyors`)
+/// are quoted, while literals (`true`/`false`/`null`) and numbers are left
+/// alone. String literals are copied verbatim. Used by the legacy `MSAV`
+/// import for `Rules`/game data; strict JSON is unchanged.
+pub fn quote_bare_keys(text: &str) -> String {
+    fn is_bare(ch: char) -> bool {
+        ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '@' | '#')
+    }
+    fn is_literal(token: &str) -> bool {
+        matches!(token, "true" | "false" | "null") || token.parse::<f64>().is_ok()
+    }
+
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len() + 64);
+    let mut index = 0;
+    while index < chars.len() {
+        let current = chars[index];
+        if current == '"' {
+            out.push(current);
+            index += 1;
+            while index < chars.len() {
+                out.push(chars[index]);
+                if chars[index] == '\\' && index + 1 < chars.len() {
+                    index += 1;
+                    out.push(chars[index]);
+                } else if chars[index] == '"' {
+                    index += 1;
+                    break;
+                }
+                index += 1;
+            }
+            continue;
+        }
+        if is_bare(current) {
+            let start = index;
+            while index < chars.len() && is_bare(chars[index]) {
+                index += 1;
+            }
+            let token: String = chars[start..index].iter().collect();
+            let mut next = index;
+            while next < chars.len() && chars[next].is_whitespace() {
+                next += 1;
+            }
+            let key = next < chars.len() && chars[next] == ':';
+            if key || !is_literal(&token) {
+                out.push('"');
+                out.push_str(&token);
+                out.push('"');
+            } else {
+                out.push_str(&token);
+            }
+            continue;
+        }
+        out.push(current);
+        index += 1;
+    }
+    out
+}
+
 /// `JsonIO` static API (`write`, `read`, `read_into`, `copy`, `print`).
 pub struct JsonIo;
 
@@ -165,5 +225,19 @@ mod tests {
         assert_eq!(json, r#"{"a":"b"}"#);
         assert!(JsonIo::pretty(&json).unwrap().contains('\n'));
         assert_eq!(JsonIo::copy(&map).unwrap(), map);
+    }
+
+    #[test]
+    fn arc_json_quoting_produces_strict_json() {
+        let arc = r#"{teams:{0:{},1:{}},type:dagger,text:@gz.conveyors,class:CoreItem,
+            x:10.24,neg:-2,arr:[1,true,false,null,{a:b}],quoted:"a:b"}"#;
+        let strict = super::quote_bare_keys(arc);
+        let parsed: Value = serde_json::from_str(&strict).expect("strict json");
+        assert_eq!(parsed["teams"]["0"], Value::Object(Default::default()));
+        assert_eq!(parsed["type"], Value::String("dagger".to_owned()));
+        assert_eq!(parsed["text"], Value::String("@gz.conveyors".to_owned()));
+        assert_eq!(parsed["neg"], serde_json::json!(-2));
+        assert_eq!(parsed["arr"][4]["a"], Value::String("b".to_owned()));
+        assert_eq!(parsed["quoted"], Value::String("a:b".to_owned()));
     }
 }

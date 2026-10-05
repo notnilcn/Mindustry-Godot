@@ -177,6 +177,12 @@ pub trait WorldContext {
     fn is_map(&self) -> bool {
         false
     }
+
+    /// Selects the pinned upstream tile-entity base layout for the following
+    /// reads: legacy `MSAV` chunks embed the per-building version byte inside
+    /// the payload, while native v1 stores it in the chunk header. Implemented
+    /// by contexts that load legacy maps; the default keeps the native layout.
+    fn set_legacy_entities(&mut self, _legacy: bool) {}
 }
 
 /// Write-side tile data source for the `map` region (the read-side is

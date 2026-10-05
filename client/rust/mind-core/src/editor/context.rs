@@ -132,6 +132,8 @@ pub struct EditorContext<'a> {
     has_building: Vec<bool>,
     /// Decoded tile-entity payloads awaiting spawn by the ECS-owning host.
     pub pending_buildings: Vec<(usize, crate::world::building_io::DecodedBase)>,
+    /// Legacy `MSAV` tile-entity layout (version byte inside the payload).
+    legacy_entities: bool,
     /// The installed recorder (M1; dropped during a load).
     pub sink: Option<Box<dyn TileOpSink>>,
 }
@@ -148,6 +150,7 @@ impl<'a> EditorContext<'a> {
             grid,
             has_building,
             pending_buildings: Vec::new(),
+            legacy_entities: false,
             sink: None,
         }
     }
@@ -241,13 +244,21 @@ impl WorldContext for EditorContext<'_> {
         version: u8,
     ) -> Result<(), IoError> {
         let mut decoded = crate::world::building_io::DecodedBase::default();
-        crate::world::building_io::read_base(&mut decoded, reader, version)?;
+        if self.legacy_entities {
+            crate::world::building_io::read_base_legacy(&mut decoded, reader)?;
+        } else {
+            crate::world::building_io::read_base(&mut decoded, reader, version)?;
+        }
         self.pending_buildings.push((index, decoded));
         Ok(())
     }
 
     fn is_map(&self) -> bool {
         true
+    }
+
+    fn set_legacy_entities(&mut self, legacy: bool) {
+        self.legacy_entities = legacy;
     }
 }
 

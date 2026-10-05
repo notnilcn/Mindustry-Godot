@@ -232,6 +232,107 @@ impl SaveVersion for SaveV1 {
     }
 }
 
+/// Reads the upstream `MSAV` region walk (`SaveVersion.read`) from an inflated
+/// body whose 8-byte header was already consumed. Region bodies are identical
+/// to native v1's; only the framing differs (raw `i32` length chunks, version
+/// gated `patches`/`markers`).
+#[cfg(feature = "msav-import")]
+pub(crate) fn read_legacy_regions(
+    body: &[u8],
+    version: u32,
+    state: &mut SaveReadState,
+) -> Result<(), IoError> {
+    state.reset();
+    // Legacy MSAV tile entities carry the building version byte in the chunk.
+    if let Some(context) = state.context.as_deref_mut() {
+        context.set_legacy_entities(true);
+    }
+    let mut wire = WireReader::new(body);
+    let mut saw_meta = false;
+    read_legacy_region(&mut wire, REGION_META, |wire| {
+        saw_meta = true;
+        read_meta(wire, state)
+    })?;
+    if version >= 12 {
+        read_legacy_region(&mut wire, REGION_PATCHES, |wire| {
+            read_data_patches(wire, state)
+        })?;
+    }
+    read_legacy_region(&mut wire, REGION_CONTENT, |wire| {
+        read_content_header(wire, state.content.as_deref()).map(|mapper| {
+            if let (Some(mapper), Some(content)) = (mapper, state.content.as_deref_mut()) {
+                content.set_temporary_mapper(Some(mapper));
+            }
+        })
+    })?;
+    read_legacy_region(&mut wire, REGION_MAP, |wire| read_map(wire, state))?;
+    read_legacy_region(&mut wire, REGION_ENTITIES, |wire| {
+        read_entities(wire, state)
+    })?;
+    if version >= 8 {
+        // Upstream markers are a JSON document filling the region; without a
+        // sink the payload is skipped by length (the native stub's count
+        // prefix is native-only framing).
+        if state.markers.is_some() {
+            read_legacy_region(&mut wire, REGION_MARKERS, |wire| match &mut state.markers {
+                Some(sink) => sink.read_markers(wire),
+                None => Ok(()),
+            })?;
+        } else {
+            skip_legacy_region(&mut wire, REGION_MARKERS)?;
+        }
+    }
+    read_legacy_region(&mut wire, REGION_CUSTOM, |wire| {
+        read_custom_chunks(wire, state)
+    })?;
+    if !saw_meta {
+        return Err(IoError::corrupt("save is missing the \"meta\" region"));
+    }
+    // Upstream `JsonIO` writes Arc-style JSON with bare object keys; quote them
+    // before the strict parse.
+    if let Some(text) = state.rule_string.take() {
+        state.rule_string = Some(crate::io::json::quote_bare_keys(&text));
+    }
+    read_rules(state)?;
+    Ok(())
+}
+
+/// Skips one legacy region (`i32` length + payload) without parsing it.
+#[cfg(feature = "msav-import")]
+fn skip_legacy_region(wire: &mut WireReader, name: &str) -> Result<(), IoError> {
+    let length = wire.i()?;
+    if length < 0 {
+        return Err(IoError::corrupt(format!(
+            "region \"{name}\" has a negative length"
+        )));
+    }
+    wire.skip(length as usize)
+}
+
+/// One legacy region: `i32` length + body, with the payload fully consumed.
+#[cfg(feature = "msav-import")]
+fn read_legacy_region(
+    wire: &mut WireReader,
+    name: &str,
+    body: impl FnOnce(&mut WireReader) -> Result<(), IoError>,
+) -> Result<(), IoError> {
+    let length = wire.i()?;
+    if length < 0 {
+        return Err(IoError::corrupt(format!(
+            "region \"{name}\" has a negative length"
+        )));
+    }
+    let start = wire.pos();
+    body(wire).map_err(|error| IoError::region_read(name, error))?;
+    let consumed = wire.pos() - start;
+    if consumed != length as usize {
+        return Err(IoError::corrupt(format!(
+            "Error reading region \"{name}\": read length mismatch. Expected: {length}; Actual: {consumed}"
+        )));
+    }
+    Ok(())
+}
+
 /// `SaveVersion.readMeta`: parses stats/locales eagerly and stashes the rules
 /// JSON (parsed by [`read_rules`] after the other regions).
 fn read_meta(wire: &mut WireReader, state: &mut SaveReadState) -> Result<(), IoError> {

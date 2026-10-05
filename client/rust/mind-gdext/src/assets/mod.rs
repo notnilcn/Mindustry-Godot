@@ -12,6 +12,6 @@ mod atlas;
 mod audio;
 mod bundle;
 mod fonts;
-mod loader;
+pub(crate) mod loader;
 
 pub use atlas::MindAssets;

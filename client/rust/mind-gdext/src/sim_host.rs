@@ -11,7 +11,7 @@
 use std::collections::VecDeque;
 
 use godot::classes::notify::NodeNotification;
-use godot::classes::{INode, InputEvent, InputEventMouseButton, Os, ProjectSettings};
+use godot::classes::{FileAccess, INode, InputEvent, InputEventMouseButton, Os, ProjectSettings};
 use godot::global::MouseButton;
 use godot::obj::{Base, Singleton};
 use godot::prelude::*;
@@ -25,8 +25,11 @@ use mind_core::content::{
     create_base_content,
 };
 use mind_core::determinism::SimCommand;
+use mind_core::editor::context::EditorContext;
+use mind_core::io::save::{SaveIo, SaveReadState};
 use mind_core::scenario::{Scenario, ScenarioPlayer};
 use mind_core::sim::{FixedStepRunner, Sim};
+use mind_core::world::WorldGrid;
 use mind_core::world::blocks::heat::HeatState;
 use mind_core::world::blocks::power::PowerGrids;
 use mind_core::world::modules::{LiquidModule, PowerModule};
@@ -878,29 +881,37 @@ impl MindSimHost {
         let planet_name = planet.to_string();
         // Take the registry out so the generator can borrow it while the sim is
         // rebuilt, then hand it back (content boot is expensive; never drop it).
-        let Some(registry) = self.content_snapshot.take() else {
+        let Some(mut registry) = self.content_snapshot.take() else {
             log::warn!("load_sector: content registry unavailable");
             return false;
         };
         const SECTOR_SIZE: i32 = 128;
-        let generated = mind_core::maps::planet::generate_sector(
-            &planet_name,
-            sector as u16,
-            1,
-            SECTOR_SIZE,
-            SECTOR_SIZE,
-            &registry,
-        );
+        // `World.loadSector`: a preset sector uses its stored designed map
+        // (`SectorPreset.generator` / `FileMapGenerator`); planet sectors fall
+        // back to the planet generator.
+        let loaded = load_preset_map_grid(&planet_name, sector as u16, &mut registry);
+        let generated = if loaded.is_none() {
+            mind_core::maps::planet::generate_sector(
+                &planet_name,
+                sector as u16,
+                1,
+                SECTOR_SIZE,
+                SECTOR_SIZE,
+                &registry,
+            )
+        } else {
+            None
+        };
         self.content_snapshot = Some(registry);
-        let Some(generated) = generated else {
-            log::warn!("load_sector: no generator for planet `{planet_name}`");
+        let Some(grid) = loaded.or_else(|| generated.map(|generated| generated.grid)) else {
+            log::warn!("load_sector: no map or generator for planet `{planet_name}`");
             return false;
         };
 
-        // Reuse a fresh sim and swap in the generated grid; a new iteration keeps
-        // no ECS entities from the previous world.
+        // Reuse a fresh sim and swap in the loaded/generated grid; a new
+        // iteration keeps no ECS entities from the previous world.
         let mut sim = Sim::new(1, SECTOR_SIZE, SECTOR_SIZE, BlockId::AIR, BlockId::AIR);
-        sim.grid = generated.grid;
+        sim.grid = grid;
         let _ = sim.set_phase(mind_core::game::State::Playing);
         self.runner =
             FixedStepRunner::for_rate(sim.config().fixed_hz, sim.config().max_ticks_per_frame);
@@ -1129,6 +1140,63 @@ fn globalize(path: &GString) -> std::path::PathBuf {
             .globalize_path(&requested)
             .to_string(),
     )
+}
+
+/// `World.loadSector` preset branch: loads the preset's `maps/<planet>/<map>.msav`
+/// through the save reader into a fresh [`WorldGrid`]. Returns `None` when the
+/// sector cell has no preset, the file is absent, or the load fails (the caller
+/// then uses the planet generator).
+fn load_preset_map_grid(
+    planet_name: &str,
+    sector: u16,
+    registry: &mut ContentRegistry,
+) -> Option<WorldGrid> {
+    // Resolve `sector.preset` and its map name (`SectorPreset.initialize`).
+    let (owner_name, map_name) = {
+        let planet = registry.planet_by_name(planet_name)?;
+        let cell = planet.sectors.get(sector as usize)?;
+        let preset = registry.sector(cell.preset?)?;
+        let owner = registry
+            .planet(preset.planet)
+            .map(|planet| planet.name.clone())
+            .unwrap_or_else(|| planet_name.to_owned());
+        let map = preset
+            .file_name
+            .clone()
+            .unwrap_or_else(|| preset.name.clone());
+        (owner, map)
+    };
+    let path = format!(
+        "{}/maps/{owner_name}/{map_name}.msav",
+        crate::assets::loader::resolve_assets_dir()
+    );
+    if !FileAccess::file_exists(&path) {
+        log::warn!("load_sector: preset map missing `{path}`");
+        return None;
+    }
+    let bytes = FileAccess::get_file_as_bytes(&path);
+    let mut grid = WorldGrid::new(0, 0);
+    grid.begin_map_load();
+    let result = {
+        let mut context = EditorContext::new(&mut grid, registry);
+        let mut state = SaveReadState {
+            context: Some(&mut context),
+            content: Some(registry),
+            ..SaveReadState::default()
+        };
+        SaveIo::load_bytes(bytes.as_slice(), &mut state)
+    };
+    if let Err(error) = result {
+        log::warn!("load_sector: preset map `{owner_name}/{map_name}` failed: {error}");
+        return None;
+    }
+    grid.end_map_load(registry);
+    log::info!(
+        "load_sector: loaded preset map `{owner_name}/{map_name}` ({}x{})",
+        grid.tiles.width,
+        grid.tiles.height
+    );
+    Some(grid)
 }
 
 /// Parses `--capture <path>` / `--capture=<path>` from the user args (after `--`).
