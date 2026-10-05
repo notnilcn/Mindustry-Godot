@@ -17,7 +17,7 @@ var _loaded := false
 
 @onready var search: LineEdit = get_node_or_null("Panel/Layout/Search")
 @onready var categories: HBoxContainer = get_node_or_null("Panel/Layout/Categories")
-@onready var blocks: GridContainer = get_node_or_null("Panel/Layout/Blocks")
+@onready var blocks: GridContainer = get_node_or_null("Panel/Layout/Scroll/Blocks")
 
 
 func _ready() -> void:
@@ -73,13 +73,19 @@ func _build_categories() -> void:
 		return
 	if _selected_category >= list.size():
 		_selected_category = 0
+	# `ButtonGroup`: exactly the active category is checked (`rebuildCategory`).
+	var group := ButtonGroup.new()
 	for index in list.size():
 		var entry: Dictionary = list[index]
-		var button := Button.new()
-		button.text = _bundle(str(entry.get("label", "")), str(entry.get("name", "")))
-		button.theme_type_variation = "flatTogglet"
+		var cat_name := str(entry.get("name", ""))
+		var label := _bundle(str(entry.get("label", "")), cat_name)
+		var button := MindWidgets.glyph_button(cat_name, label, "clearTogglei")
+		button.name = "category-%s" % cat_name
+		button.tooltip_text = label
 		button.toggle_mode = true
+		button.button_group = group
 		button.button_pressed = index == _selected_category
+		button.custom_minimum_size = Vector2(50, 50)
 		button.pressed.connect(_select.bind(index))
 		categories.add_child(button)
 
@@ -105,6 +111,11 @@ func _rebuild() -> void:
 	if search != null:
 		query = search.text.to_lower()
 	var host := get_node_or_null("/root/Spine/SimHost")
+	var selected := ""
+	if host != null and host.has_method("selected_block"):
+		selected = str(host.call("selected_block"))
+	# `ButtonGroup`: the active block is the checked button (`button.group(group)`).
+	var group := ButtonGroup.new()
 	for block_variant in category.get("blocks", []):
 		var block: Dictionary = block_variant
 		var name := str(block.get("name", ""))
@@ -112,10 +123,20 @@ func _rebuild() -> void:
 		if not query.is_empty():
 			if not name.to_lower().contains(query) and not label.to_lower().contains(query):
 				continue
-		var button := Button.new()
-		button.text = label
-		button.tooltip_text = name
-		button.theme_type_variation = "flatBordert"
+		var button := MindWidgets.image_button_first(
+			PackedStringArray(["block-%s-ui" % name, "block-%s-full" % name, name]), "selecti"
+		)
+		button.name = "block-%s" % name
+		button.tooltip_text = label
+		button.toggle_mode = true
+		button.button_group = group
+		button.button_pressed = name == selected
+		button.custom_minimum_size = Vector2(46, 46)
+		# `Button.resizeImage(iconMed)`: 46px cell, 32px centred icon.
+		button.expand_icon = true
+		button.add_theme_constant_override("icon_max_width", 32)
+		if button.icon == null:
+			button.text = label
 		button.pressed.connect(func() -> void:
 			if host != null:
 				host.call("select_block", name))

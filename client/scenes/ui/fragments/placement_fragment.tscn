@@ -9,8 +9,8 @@ anchor_left = 1.0
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -620.0
-offset_top = -120.0
+offset_left = -640.0
+offset_top = -260.0
 grow_horizontal = 0
 grow_vertical = 0
 mouse_filter = 1
@@ -35,7 +35,11 @@ layout_mode = 2
 [node name="Categories" type="HBoxContainer" parent="Panel/Layout" unique_id=110755601]
 layout_mode = 2
 
-[node name="Blocks" type="GridContainer" parent="Panel/Layout" unique_id=1692868212]
+[node name="Scroll" type="ScrollContainer" parent="Panel/Layout"]
 layout_mode = 2
 size_flags_vertical = 3
+
+[node name="Blocks" type="GridContainer" parent="Panel/Layout/Scroll" unique_id=1692868212]
+layout_mode = 2
+size_flags_horizontal = 3
 columns = 10

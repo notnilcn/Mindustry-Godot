@@ -49,6 +49,38 @@ static func image_button(region_name: String, style: String = "defaulti") -> But
 	return result
 
 
+## Image button resolved from the first available region in `region_names`
+## (`core.atlas.find` fallback chain; e.g. `block-x-ui` then `block-x-full`).
+static func image_button_first(region_names: PackedStringArray, style: String = "defaulti") -> Button:
+	var result := Button.new()
+	result.theme_type_variation = style
+	for region_name in region_names:
+		var texture := icon_texture(region_name)
+		if texture != null:
+			result.icon = texture
+			break
+	return result
+
+
+## An icon-font-glyph toggle button (`PlacementFragment` category rail); falls
+## back to `fallback_text` when the glyph is unknown.
+static func glyph_button(
+	icon_name: String, fallback_text: String, style: String = "clearTogglei"
+) -> Button:
+	var result := Button.new()
+	result.theme_type_variation = style
+	var glyph_text := MindIcons.glyph(icon_name)
+	if glyph_text.is_empty():
+		result.text = fallback_text
+		return result
+	# code-instantiated: centered glyph label inside the themed toggle button.
+	var icon := glyph(icon_name, 28)
+	icon.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	result.add_child(icon)
+	return result
+
+
 ## An action button with an icon-font glyph followed by a label, mirroring
 ## upstream `TextButton` + `Icon.*` drawables. Falls back to plain text when the
 ## glyph is unknown or assets are absent.
