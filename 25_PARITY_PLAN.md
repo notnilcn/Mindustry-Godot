@@ -100,8 +100,8 @@ saying why (upstream deviation accepted, platform limitation, duplicate).
 
 ## 6. Session budget and stop conditions
 
-- Evaluate at most **2 scenarios** and complete at most **3 fix/verify
-  iterations** per session; then summarize and stop. Quality over throughput;
+- Evaluate at most **2 scenarios** and complete at most **5 fix/verify
+  iterations** per session; then provide a continuation prompt so the task can be handed off in a new session and stop. Quality over throughput;
   every claim must survive re-verification.
 - Stop immediately on: MCP bridge down, missing display/Java, a corrupted
   ledger, or an evaluator/fixer deadlock (two rounds without new evidence).
@@ -124,7 +124,7 @@ saying why (upstream deviation accepted, platform limitation, duplicate).
 |---|---|---|---|---|
 | M0 bring-up | done | 20261005-150056-boot_menu | — | First twin-run complete; 8 findings filed. |
 | M1 menu & settings | in-progress | 20261005-161109-ev0002-verify | none | `boot_menu` evaluated; EV-0001/0002/0005/0009 verified-fixed; EV-0003/0004/0006/0007/0008 open (S3/S4). `settings_ui`, `ui_dialogs` not yet run. |
-| M2 campaign & HUD | in-progress | 20261005-104805-ev0015-verify | none | EV-0010 (3D globe + hex sector view), EV-0014 (preset-map launch via new `msav-import`) and EV-0015 (pack preserves loose art) verified-fixed; EV-0011/0012 stay verified. Open: EV-0013 (block-picker icons, S3), EV-0016 (launch camera pose/zoom, S3). |
+| M2 campaign & HUD | in-progress | 20261005-215133-ev0017-verify | EV-0018 | EV-0016 (launch camera snaps to core at default zoom 4) and EV-0017 (block picker renders 46px block / 50px category icon buttons) verified-fixed; EV-0010/0011/0012/0014/0015 stay verified. Open: EV-0013 (icons render; catalog still lacks unlock/empty-category filtering, S3), EV-0018 (UI clicks leak into world place/break, S2). |
 | M3 building & economy | not-started | — | — | |
 | M4 combat, units, logic | not-started | — | — | |
 | M5 breadth & platform | not-started | — | — | |

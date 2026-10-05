@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "updated": "2026-10-05T10:55:55+00:00",
+  "updated": "2026-10-05T12:01:17+00:00",
   "findings": [
     {
       "id": "EV-0001",
@@ -327,15 +327,24 @@
         "runs/20261005-163933-campaign_launch/java/step-04b-after-skip.png",
         "runs/20261005-163933-campaign_launch/godot/state-observations.json",
         "runs/20261005-175054-ev0012-verify/godot/step-04-ingame-hud.png",
-        "runs/20261005-175054-ev0012-verify/godot/state-ingame.json"
+        "runs/20261005-175054-ev0012-verify/godot/state-ingame.json",
+        "runs/20261005-213346-ev0013-verify/godot/step-04-ingame-hud.png",
+        "runs/20261005-213346-ev0013-verify/godot/state-04-ingame.json",
+        "runs/20261005-213346-ev0013-verify/godot/log-launch-errors.json",
+        "runs/20261005-215133-ev0017-verify/godot/state-04-ingame.json",
+        "runs/20261005-215133-ev0017-verify/godot/state-04b-distribution.json",
+        "runs/20261005-215133-ev0017-verify/godot/state-04c-defense.json",
+        "runs/20261005-215133-ev0017-verify/godot/step-04-ingame-hud.png"
       ],
       "notes": [
         "User symptom a4 raw @category.* keys did not reproduce at 8ee2758 - names are localized now; text-vs-icons mismatch remains",
-        "2026-10-05T08:01:12+00:00: Triage 20261005-175054: text-only picker still reproduces (38 Buttons, 0 TextureRects; first rows Turret/Production/...); panel rect now fits the viewport (532,528,620x120) so the earlier 976px clipping was not observed this run."
+        "2026-10-05T08:01:12+00:00: Triage 20261005-175054: text-only picker still reproduces (38 Buttons, 0 TextureRects; first rows Turret/Production/...); panel rect now fits the viewport (532,528,620x120) so the earlier 976px clipping was not observed this run.",
+        "2026-10-05T11:50:16+00:00: Re-ran the exact campaign_launch step-4 repro (pid 512564, 1152x648, HEAD 4df82bb + uncommitted placement-fragment icon fix). Category half of the fix works: 10/10 category-<name> Buttons are 50x50 toggles in a ButtonGroup with non-empty MindIcons glyphs (turret/liquid/units/logic added); panel is now bottom-right 640x260 with a ScrollContainer, no clipping. Block half cannot be verified fixed: Panel/Layout/Scroll/Blocks has 0 block buttons (0 with icon, 0 with text) because _rebuild() aborts at the first block on Invalid assignment of property or key 'icon_max_width' on a base object of type Button (placement_fragment.gd:135; Godot 4.7.2 has it only as theme_override_constants/icon_max_width). Filed as EV-0017. Unlock filtering residual still player-visible and part of this finding's expected text: block_catalog_json returns all 447 blocks in 10 categories (incl. editor-only rows in distribution); Java getUnlockedByCategory shows only visible+unlocked+placeable+environmentBuildable blocks and hides categories with none (PlacementFragment.java:213,771), so at Ground Zero the Java reference shows no picker at all (bottom-right is terrain, mean RGB ~157) while Godot shows the category rail + empty panel.",
+        "2026-10-05T12:01:13+00:00: 2026-10-05T22:0x: Re-ran campaign_launch step 4 with EV-0017 fix in place (pid 517487, 1152x648). Icon symptom now VERIFIED in-engine: Panel/Layout/Scroll/Blocks renders 28/28 turret block Buttons, all 46x46 with non-null icons (duo 32x32, scatter 64x64); defense category 30/30 icon buttons; category rail 10/10 are 50x50 glyph toggles (non-empty MindIcons codepoints); panel 640x260 bottom-right with ScrollContainer, no clipping; distribution category 191/214 have icons. REMAINING mismatch (why this stays open): catalog is still unfiltered - MindUi.block_catalog_json returns 10 categories / 447 blocks with only {name, localized, size} per entry, no unlock/visible/placeable fields; all 10 categories render at Ground Zero where the Java reference shows no picker (PlacementFragment.getUnlockedByCategory filters visible+unlocked+placeable+environmentBuildable and hides empty categories). distribution is a 214-block catch-all of terrain/editor-only rows; its 23 text-fallback blocks (air, build1..16, armored-conveyor, legacy factories, command-center) stretch GridContainer columns so real blocks render far wider than 46px (e.g. block-conveyor actual width 208 while custom_minimum_size is 46x46). Expected text includes 'locked/empty categories hidden', which is not met; cannot mark verified-fixed."
       ],
       "plan": "14",
       "first_seen": "2026-10-05T07:18:31+00:00",
-      "last_verified": "2026-10-05T08:01:12+00:00"
+      "last_verified": "2026-10-05T12:01:13+00:00"
     },
     {
       "id": "EV-0014",
@@ -406,7 +415,7 @@
       "id": "EV-0016",
       "area": "render/campaign",
       "severity": "S3",
-      "status": "open",
+      "status": "verified-fixed",
       "title": "Launched sector camera opens on the map middle (core off-screen) at ~2.7x the reference zoom",
       "expected": "Java: Control.WorldLoadEvent sets camera.position to player.bestCore() (Control.java:92-107), and Renderer camerascale = Scl.scl(4) => 32 px/tile at tilesize 8 (36x20 tiles visible at 1152x648), so a Ground Zero launch opens on the core",
       "actual": "Godot: after Launch the camera centers the world middle (screen_to_tile(576,324) = (128,128)); the core-shard at (129,55) is off-screen above (tile_to_screen y = -552); camera zoom 1.5 * tilesize 8 = 12 px/tile (96x54 tiles visible, 2.67x wider than Java); the exact-repro frame is mean luma 90.8 with 26.4% pure-black and 58.3% dark pixels, core not visible",
@@ -417,14 +426,73 @@
         "runs/20261005-203520-ev0014-verify/godot/frame-analysis.json",
         "runs/20261005-203520-ev0014-verify/godot/core-scale-measurement.json",
         "runs/20261005-203520-ev0014-verify/godot/step-05-core-view.png",
-        "runs/20261005-203520-ev0014-verify/diff/godot-vs-java-step-04b-after-skip.json"
+        "runs/20261005-203520-ev0014-verify/diff/godot-vs-java-step-04b-after-skip.json",
+        "runs/20261005-212026-ev0016-verify/godot/step-04-launch.png",
+        "runs/20261005-212026-ev0016-verify/godot/step-04b-launch-later.png",
+        "runs/20261005-212026-ev0016-verify/godot/camera-state.json",
+        "runs/20261005-212026-ev0016-verify/godot/state-04-ingame.json",
+        "runs/20261005-212026-ev0016-verify/godot/frame-analysis.json",
+        "runs/20261005-212026-ev0016-verify/godot/log-excerpt.txt",
+        "runs/20261005-212026-ev0016-verify/godot/settings-before.json",
+        "runs/20261005-212026-ev0016-verify/godot/settings-after-stop.json",
+        "runs/20261005-212026-ev0016-verify/diff/godot-vs-java-step-04b-after-skip.json"
       ],
       "notes": [
-        "Evaluator probe: center_on_tile(129,55) then capture step-05-core-view.png shows the core pocket renders bright (center grid luma 230-255 within +/-120 px) with copper ore cluster bbox (501,186)-(687,303); the wide dark frame is the designed map's enclosed wall massifs plus the 2.67x zoom-out. Upstream darkness recomputed from the loaded map predicts 67% black in the default 192x108-tile view (Godot renders 40%) and 0 black in the 21x21 core pocket, so the darkness pass itself is not over-blackening."
+        "Evaluator probe: center_on_tile(129,55) then capture step-05-core-view.png shows the core pocket renders bright (center grid luma 230-255 within +/-120 px) with copper ore cluster bbox (501,186)-(687,303); the wide dark frame is the designed map's enclosed wall massifs plus the 2.67x zoom-out. Upstream darkness recomputed from the loaded map predicts 67% black in the default 192x108-tile view (Godot renders 40%) and 0 black in the 21x21 core pocket, so the darkness pass itself is not over-blackening.",
+        "2026-10-05T11:29:41+00:00: Re-ran exact campaign_launch repro on a fresh boot (pid 501352) with the new GDExtension (.so md5 6951de57f19202c2f59bc680c1d13e81) while stale settings.json still held zoom:1.5 (md5 bb3e94d5..., byte-identical before/during/after; key ignored, not rewritten). Load log: serpulo/groundZero 256x256, 56078 non-air, 1 core-shard at (129,55). camera_state_json: position (1036,444) == core tile centre, camerascale 4.0, target_scale 4.0, view 288x162 world units = 32 px/tile, 36x20.25 tiles; screen_to_tile(576,324)=(129,55); stable at tick 736. Rendered core sprite 96x96 px centred at (575.5,323.5) offset (-0.5,-0.5); two live captures 10s apart differ while core stays centred. Frame vs stored Java after-skip: changed_fraction 0.639, palette_distance 0.298 (pre-fix 0.921/0.665); luma mean 185.8 vs Java 199.8, black 0.0% vs 2.2%, bright>200 65.3% vs 69.1%. No game-side errors. Two aborted evaluator pids from break-on-error pauses, recovered with stop/play; no product impact."
       ],
       "plan": "12",
       "first_seen": "2026-10-05T10:44:31+00:00",
-      "last_verified": "2026-10-05T10:44:31+00:00"
+      "last_verified": "2026-10-05T11:29:41+00:00"
+    },
+    {
+      "id": "EV-0017",
+      "area": "ui/hud",
+      "severity": "S2",
+      "status": "verified-fixed",
+      "title": "In-game block picker renders no block buttons (rebuild aborts on a runtime error)",
+      "expected": "Godot (post-fix intent): each category lists its blocks as 46px icon buttons (block-<name>-ui -> block-<name>-full -> <name> chain), so the picker is usable; Java: PlacementFragment.getUnlockedByCategory lists unlocked blocks as icon buttons and shows nothing when none are unlocked",
+      "actual": "Categories render (10 glyph buttons 50x50) but Panel/Layout/Scroll/Blocks has 0 block buttons: placement_fragment._rebuild() aborts at the first block on \"Invalid assignment of property or key 'icon_max_width' with value of type 'int' on a base object of type 'Button'\" (placement_fragment.gd:135). No block is ever added (0 with icon, 0 with text); the 447-block catalog is never displayed. With the editor debugger attached the same error also halts the game at boot (break-on-error) until Continue.",
+      "repro": "scenario campaign_launch step 4 (in-game placement panel), pid 512564, 1152x648",
+      "evidence": [
+        "runs/20261005-213346-ev0013-verify/godot/step-04-ingame-hud.png",
+        "runs/20261005-213346-ev0013-verify/godot/state-04-ingame.json",
+        "runs/20261005-213346-ev0013-verify/godot/log-launch-errors.json",
+        "runs/20261005-213346-ev0013-verify/godot/log-broken-boot.json",
+        "runs/20261005-213346-ev0013-verify/godot/state-broken-boot-panel.json",
+        "runs/20261005-215133-ev0017-verify/godot/state-04-ingame.json",
+        "runs/20261005-215133-ev0017-verify/godot/state-04b-distribution.json",
+        "runs/20261005-215133-ev0017-verify/godot/state-04c-defense.json",
+        "runs/20261005-215133-ev0017-verify/godot/step-04-ingame-hud.png",
+        "runs/20261005-215133-ev0017-verify/godot/log-excerpt.txt"
+      ],
+      "notes": [
+        "Godot 4.7.2 Button exposes icon_max_width only as the theme constant theme_override_constants/icon_max_width; probed in-engine: b.get_property_list() has no direct icon_max_width and assigning it raises. Atlas regions for standard blocks all resolve (block-duo-ui/-full, duo, block-conveyor-ui/-full, block-scatter-ui, block-stone-wall-ui), so assets are not the blocker. Unlock-state filtering remains tracked under EV-0013. Severity S2 because this leaves the campaign build picker with no selectable blocks (and freezes editor-debug runs at boot).",
+        "2026-10-05T12:01:05+00:00: Re-ran campaign_launch step 4 (pid 517487, 1152x648, HEAD 4df82bb + placement_fragment.gd working-tree fix). Panel/Layout/Scroll/Blocks now has 28/28 turret block Buttons, every one with custom_minimum_size 46x46 AND actual size 46x46, non-null icon (icon chain block-<name>-ui -> block-<name>-full -> <name>), no text fallbacks; icon_max_width theme constant override = 32 on all 28. Standard blocks: duo (32x32 icon), scatter (64x64 icon) in turret; conveyor (32x32) and stone-wall (32x32) in distribution, both 46x46 min. Category rail 10/10 50x50 glyph toggles in a ButtonGroup. No 'Invalid assignment' or GDScript runtime error in the launch log; game did not break-on-error at boot. Only log error is the host crash-recovery warning left by the evaluator-wedged earlier session (log-harness-artifacts.json). EV-0013's unlock-filtering residual remains and is tracked there."
+      ],
+      "plan": "14",
+      "first_seen": "2026-10-05T11:50:21+00:00",
+      "last_verified": "2026-10-05T12:01:05+00:00"
+    },
+    {
+      "id": "EV-0018",
+      "area": "input/placement",
+      "severity": "S2",
+      "status": "open",
+      "title": "UI clicks also place/break world blocks (input leak)",
+      "expected": "Java: clicking a UI control (placement category tab, block button, toolbar or menu button) is consumed by the UI and never issues a world place/break command",
+      "actual": "Godot: every left/right press is applied by MindSimHost 'input' (the _input virtual -> sim_host.rs input()) before the GUI consumes it, with no UI-hover/consumed guard. Three category-tab clicks in the placement panel issued place commands for the selected block at the tile under each tab: block_placed stone-wall at (131,59)/(136,59)/(128,59), build_id 0/1/2. A real OS-level click on the Production tab (computer-mcp, not the MCP injector) switched the category AND placed stone-wall at (130,59) build_id 3 (commands_applied 4->5). Main-menu clicks also log 'mouse tile (..) applied (LEFT)' before the sector loads",
+      "repro": "campaign_launch step 4 (in-game placement panel), pid 517487, 1152x648: click any category tab; assert get_state_json events/world tiles. Menu-phase clicks reproduce in the boot log too",
+      "evidence": [
+        "runs/20261005-215133-ev0017-verify/godot/state-input-leak.json",
+        "runs/20261005-215133-ev0017-verify/godot/step-04-leak-editor-output.png"
+      ],
+      "notes": [
+        "Root-cause pointer only (not proof): client/rust/mind-gdext/src/sim_host.rs:134 overrides the _input virtual and calls apply_command(Place/Break) for every mouse press; upstream InputHandler suppresses world input while UI has mouse. Also note EV-0013/EV-0017 category-tab evidence was captured with the same clicks, which is why each tab click left a player-built wall in Ground Zero."
+      ],
+      "plan": "15",
+      "first_seen": "2026-10-05T12:01:17+00:00",
+      "last_verified": "2026-10-05T12:01:17+00:00"
     }
   ]
 }
