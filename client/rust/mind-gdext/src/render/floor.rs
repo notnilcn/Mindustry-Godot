@@ -36,6 +36,8 @@ use mind_core::world::{Tile, WorldGrid};
 use crate::assets::MindAssets;
 use crate::sim_host::MindSimHost;
 
+use super::atlas_bind::region_geometry_with_variants;
+
 /// `FloorRenderer.growSprites` padding (0.04 world px).
 const GROW: f32 = 0.04;
 const _: () = assert!(GROW > 0.0);
@@ -116,6 +118,9 @@ pub struct FloorRenderer {
     /// Floor band `Node2D` per `CacheLayerId.id()`.
     band_nodes: Vec<Gd<Node2D>>,
     grid: FloorChunkGrid,
+    /// World dimensions the chunk grid was built for; a change (menu world →
+    /// loaded sector/map) rebuilds the grid and drops stale chunk meshes.
+    dims: (i32, i32),
     /// Last `MindSimHost::world_revision` seen.
     revision: i64,
     /// Region-name → resolved geometry (never strings per frame).
@@ -139,6 +144,7 @@ impl FloorRenderer {
             assets,
             band_nodes,
             grid: FloorChunkGrid::new(width, height),
+            dims: (width, height),
             regions: HashMap::new(),
             chunks: BTreeMap::new(),
             stats: FloorStats::default(),
@@ -153,6 +159,10 @@ impl FloorRenderer {
     /// Rebuilds the chunks that are dirty and in view (plan 16 §3.5
     /// `drawFloor` preliminary pass). Called once per frame after view sync.
     pub fn update(&mut self, view: &CameraView) {
+        let (width, height) = self.host.clone().bind().world_size();
+        if (width, height) != self.dims {
+            self.resize(width, height);
+        }
         let revision = self.host.clone().bind().world_revision();
         if revision != self.revision {
             self.revision = revision;
@@ -171,6 +181,23 @@ impl FloorRenderer {
             }
         }
         self.stats.dirty = self.grid.dirty_count() as i64;
+    }
+
+    /// Rebuilds the chunk bookkeeping for a new world size and frees every
+    /// baked mesh of the previous world (`FloorRenderer` is constructed per
+    /// world upstream; the port keeps one instance and resizes it).
+    fn resize(&mut self, width: i32, height: i32) {
+        for mut old in std::mem::take(&mut self.chunks).into_values() {
+            for nodes in &mut old.layers {
+                for node in nodes.iter_mut() {
+                    node.queue_free();
+                }
+            }
+        }
+        self.dims = (width, height);
+        self.grid = FloorChunkGrid::new(width, height);
+        // Force the revision branch to dirty every new chunk on the next frame.
+        self.revision = i64::MIN;
     }
 
     /// Frees the current nodes for a chunk and re-bakes every used cache layer.
@@ -311,7 +338,7 @@ impl FloorRenderer {
     fn lookup(&mut self, name: &str) -> Option<ResolvedRegion> {
         let assets = self.assets.clone()?;
         let assets = assets.bind();
-        let mut geometry = assets.region_geometry(GString::from(name));
+        let mut geometry = region_geometry_with_variants(&assets, name);
         if geometry.is_empty() && name != ERROR_REGION {
             self.stats.missing_regions += 1;
             geometry = assets.region_geometry(GString::from(ERROR_REGION));

@@ -23,6 +23,7 @@ use mind_core::config::TILESIZE;
 use mind_core::content::ContentRegistry;
 use mind_core::render::Layer;
 use mind_core::render::bands::{BandEntry, BandKey, BandPlan};
+use mind_core::render::layer::CacheLayerId;
 use mind_core::render::lod::Lod;
 use mind_core::render::menu::MenuWorld;
 use mind_core::render::queue::RenderQueue;
@@ -308,6 +309,14 @@ impl MindWorldRenderer {
         // code-instantiated: one band node per append-only BandPlan entry;
         // count and z order are data-driven from the Layer/CacheLayer tables.
         //
+        // Upstream draws `CacheLayer.walls` at `Layer.block - 0.09` (after the
+        // shadow composite at `Layer.block - 1`), not with the floor bands; the
+        // integer band table has no slot between `blockUnder` and `block`, so
+        // the walls node shares the block band's z and is created before it
+        // (tree order draws it under building sprites, over shadows). The band
+        // number in the plan is unchanged (append-only ABI).
+        let walls_z = self.band_plan.band(BandKey::base(Layer::Block));
+        //
         // Hot reload persists the previous instance's band nodes as plain
         // engine children while `band_nodes`/`band_index` reset, so adopt a
         // child with the same name instead of duplicating it, and drop the
@@ -331,7 +340,8 @@ impl MindWorldRenderer {
                 self.base_mut().add_child(&node);
                 node
             };
-            node.set_z_index(entry.band);
+            let walls = entry.layer == Layer::Floor && entry.sub == CacheLayerId::Walls.id();
+            node.set_z_index(if walls { walls_z } else { entry.band });
             node.set_z_as_relative(false);
             let index = self.band_nodes.len();
             self.band_index.insert(
@@ -539,7 +549,15 @@ impl MindWorldRenderer {
         self.stats.stage_trace.push(String::from("markers"));
         let draw_light = self.draw_light;
         if let Some(light) = self.light.as_mut() {
-            light.update(&view, draw_light, 0.01, true);
+            // `Renderer.draw`: the light composite only runs when
+            // `Rules.lighting` is set; the ambient alpha comes from the
+            // `Rules` `ambientLight` alpha (never a hardcoded near-black).
+            light.update(
+                &view,
+                self.rules.lighting,
+                self.rules.ambient_light[3],
+                draw_light,
+            );
             let light_stats = light.stats();
             self.stats.light_rebuilds = light_stats.rebuilds;
             self.stats.light_circles = light_stats.lights;
@@ -719,6 +737,26 @@ impl MindWorldRenderer {
     #[func]
     pub fn set_rules_env(&mut self, mask: i64) {
         self.rules.env = mask as u32;
+    }
+
+    /// Sets `Rules.lighting` and `Rules.ambientLight` for the light composite
+    /// (plan 16 M5). The light pass stays hidden while `lighting` is `false`.
+    #[func]
+    pub fn set_rules_lighting(
+        &mut self,
+        lighting: bool,
+        ambient_r: f64,
+        ambient_g: f64,
+        ambient_b: f64,
+        ambient_a: f64,
+    ) {
+        self.rules.lighting = lighting;
+        self.rules.ambient_light = [
+            ambient_r as f32,
+            ambient_g as f32,
+            ambient_b as f32,
+            ambient_a as f32,
+        ];
     }
 
     /// Queues a packed fog event (plan 12 `ClientHooks::fog_handle_event`).
@@ -1071,6 +1109,23 @@ impl MindRender {
     pub fn set_rules_env(&mut self, mask: i64) {
         if let Some(mut renderer) = self.renderer() {
             renderer.bind_mut().set_rules_env(mask);
+        }
+    }
+
+    /// Sets `Rules.lighting`/`ambientLight` for the light composite.
+    #[func]
+    pub fn set_rules_lighting(
+        &mut self,
+        lighting: bool,
+        ambient_r: f64,
+        ambient_g: f64,
+        ambient_b: f64,
+        ambient_a: f64,
+    ) {
+        if let Some(mut renderer) = self.renderer() {
+            renderer
+                .bind_mut()
+                .set_rules_lighting(lighting, ambient_r, ambient_g, ambient_b, ambient_a);
         }
     }
 

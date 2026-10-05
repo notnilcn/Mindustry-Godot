@@ -19,6 +19,7 @@ use mind_core::fx::FxEvent;
 use mind_core::input::{CameraState, MinimapRegion};
 
 use crate::settings;
+use crate::sim_host::MindSimHost;
 
 /// Default `screenshake` setting (`Renderer` reads it each frame).
 const DEFAULT_SCREENSHAKE: i32 = 4;
@@ -42,6 +43,10 @@ pub struct MindCamera2D {
     shadow_position: (f32, f32),
     /// Last zoom exchanged with the Godot node (echo guard).
     shadow_scale: f32,
+    /// Scene sim host; a world-size change recenters the camera on it.
+    host: Option<Gd<MindSimHost>>,
+    /// World size the rig last adopted (`Control` world-load camera snap).
+    world_dims: (i32, i32),
 }
 
 #[godot_api]
@@ -55,6 +60,8 @@ impl ICamera2D for MindCamera2D {
             screenshake: DEFAULT_SCREENSHAKE,
             shadow_position: (0.0, 0.0),
             shadow_scale: 1.0,
+            host: None,
+            world_dims: (0, 0),
         }
     }
 
@@ -77,6 +84,7 @@ impl ICamera2D for MindCamera2D {
             let size = viewport.get_visible_rect().size;
             self.camera.viewport = (size.x, size.y);
         }
+        self.follow_world();
 
         let input = Input::singleton();
         let mut axis = Vector2::ZERO;
@@ -160,6 +168,9 @@ impl MindCamera2D {
     /// `EXTENSION_RELOADED`, which does not re-run `ready()`).
     fn bootstrap(&mut self) {
         self.base_mut().make_current();
+        // Scene-wired sim host (tscn-first): the spine declares SimHost as a
+        // sibling of World, so the camera follows world loads.
+        self.host = self.base().try_get_node_as::<MindSimHost>("../../SimHost");
         if let Some(saved) = settings::read()
             && let Some(zoom) = saved.zoom
         {
@@ -176,6 +187,26 @@ impl MindCamera2D {
             self.base().get_position(),
             self.base().get_zoom()
         );
+    }
+
+    /// `Control` `WorldLoadEvent`/`Trigger.newGame`: on a world-size change set
+    /// the pan bounds and center the camera. Upstream centers on the player's
+    /// best core; the port centers the world until the core query lands.
+    fn follow_world(&mut self) {
+        let Some(host) = self.host.clone() else {
+            return;
+        };
+        let (width, height) = host.bind().world_size();
+        if width <= 0 || height <= 0 || (width, height) == self.world_dims {
+            return;
+        }
+        self.world_dims = (width, height);
+        let unit = TILESIZE as f32;
+        self.camera.world_size = Some((width as f32 * unit, height as f32 * unit));
+        self.camera.center_on_tile(width / 2, height / 2);
+        let (x, y) = self.camera.render_position();
+        self.base_mut().set_position(Vector2::new(x, y));
+        self.shadow_position = (x, y);
     }
 
     /// Viewport position → tile `(x, y)`.

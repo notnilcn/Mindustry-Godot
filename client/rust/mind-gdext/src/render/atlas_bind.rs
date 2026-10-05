@@ -18,6 +18,34 @@ use crate::assets::MindAssets;
 
 /// `FloorRenderer` error fallback region.
 pub const ERROR_REGION: &str = "env-error";
+/// Resolves a region's atlas geometry, falling back to the numbered sprite
+/// variants (`name1..name3`) that upstream `Floor.variantRegions` /
+/// `StaticWall.variantRegions` load (`Floor.load`: `atlas.find(name + (i + 1))`).
+/// The bare region wins when the atlas ships one (buildings, effects).
+pub fn region_geometry_with_variants(
+    assets: &MindAssets,
+    name: &str,
+) -> godot::builtin::PackedInt32Array {
+    for candidate in variant_region_candidates(name) {
+        let geometry = assets.region_geometry(GString::from(candidate.as_str()));
+        if !geometry.is_empty() {
+            return geometry;
+        }
+    }
+    godot::builtin::PackedInt32Array::new()
+}
+
+/// Candidate atlas region names for a content region: the bare name first, then
+/// the upstream numbered variants (`Floor.variantRegions`/`StaticWall` ship
+/// `name1..name3`; the content registry stores only the bare name).
+pub fn variant_region_candidates(name: &str) -> [String; 4] {
+    [
+        name.to_owned(),
+        format!("{name}1"),
+        format!("{name}2"),
+        format!("{name}3"),
+    ]
+}
 
 /// A resolved atlas region.
 #[derive(Clone)]
@@ -82,7 +110,7 @@ impl RegionResolver {
     fn lookup(&mut self, name: &str) -> Option<ResolvedRegion> {
         let assets = self.assets.clone()?;
         let assets = assets.bind();
-        let mut geometry = assets.region_geometry(GString::from(name));
+        let mut geometry = region_geometry_with_variants(&assets, name);
         if geometry.is_empty() && name != ERROR_REGION {
             self.missing += 1;
             geometry = assets.region_geometry(GString::from(ERROR_REGION));
@@ -155,4 +183,21 @@ pub fn color_from(rgba: u32) -> Color {
         ((rgba >> 8) & 0xff) as u8,
         (rgba & 0xff) as u8,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn variant_candidates_prefer_bare_then_numbered() {
+        assert_eq!(
+            variant_region_candidates("snow"),
+            ["snow", "snow1", "snow2", "snow3"]
+        );
+        assert_eq!(
+            variant_region_candidates("ice-wall"),
+            ["ice-wall", "ice-wall1", "ice-wall2", "ice-wall3"]
+        );
+    }
 }

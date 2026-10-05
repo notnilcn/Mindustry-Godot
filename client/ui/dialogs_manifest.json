@@ -43,7 +43,7 @@
     {"name": "fade_in", "scene": "res://scenes/ui/fragments/fade_in_fragment.tscn", "group": "overlay"},
     {"name": "hud", "scene": "res://scenes/ui/fragments/hud_fragment.tscn", "group": "hud"},
     {"name": "performance", "scene": "res://scenes/ui/fragments/performance_fragment.tscn", "group": "hud"},
-    {"name": "hints", "scene": "res://scenes/ui/fragments/hints_fragment.tscn", "group": "hud"},
+    {"name": "hints", "scene": "res://scenes/ui/fragments/hints_fragment.tscn", "group": "hud", "hidden": true},
     {"name": "placement", "scene": "res://scenes/ui/fragments/placement_fragment.tscn", "group": "hud"},
     {"name": "minimap", "scene": "res://scenes/ui/fragments/minimap_fragment.tscn", "group": "hud", "hidden": true},
     {"name": "block_config", "scene": "res://scenes/ui/fragments/block_config_fragment.tscn", "group": "overlay", "hidden": true},

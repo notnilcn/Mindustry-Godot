@@ -49,6 +49,9 @@ pub struct BuildingCacheRenderer {
     normal_holder: Gd<Node2D>,
     resolver: RegionResolver,
     grid: BuildingCacheGrid,
+    /// World dimensions the cache grid was built for; a change (menu world →
+    /// loaded sector/map) rebuilds the grid and drops stale cached meshes.
+    dims: (i32, i32),
     revision: i64,
     /// Chunk linear index → `[under, normal]` pooled nodes.
     chunks: BTreeMap<usize, [Vec<Gd<MeshInstance2D>>; BUILDING_CACHE_LAYERS]>,
@@ -80,6 +83,7 @@ impl BuildingCacheRenderer {
             normal_holder,
             resolver: RegionResolver::new(assets),
             grid: BuildingCacheGrid::new(width, height),
+            dims: (width, height),
             revision: i64::MIN,
             chunks: BTreeMap::new(),
             stats: BuildingCacheStats::default(),
@@ -93,6 +97,10 @@ impl BuildingCacheRenderer {
 
     /// Rebuilds dirty cached chunks overlapping `view`.
     pub fn update(&mut self, view: &CameraView) {
+        let (width, height) = self.host.clone().bind().world_size();
+        if (width, height) != self.dims {
+            self.resize(width, height);
+        }
         let revision = self.host.clone().bind().world_revision();
         if revision != self.revision {
             self.revision = revision;
@@ -123,6 +131,23 @@ impl BuildingCacheRenderer {
         self.stats.sprites = sprites;
         self.stats.dirty = self.grid.dirty_count() as i64;
         self.stats.missing_regions = self.resolver.missing();
+    }
+
+    /// Rebuilds the cache bookkeeping for a new world size and frees every
+    /// cached mesh of the previous world (`BuildingCacheRenderer` is
+    /// constructed per world upstream; the port keeps one instance).
+    fn resize(&mut self, width: i32, height: i32) {
+        for mut layers in std::mem::take(&mut self.chunks).into_values() {
+            for nodes in &mut layers {
+                for node in nodes.iter_mut() {
+                    node.queue_free();
+                }
+            }
+        }
+        self.dims = (width, height);
+        self.grid = BuildingCacheGrid::new(width, height);
+        // Force the revision branch to recache every new chunk next frame.
+        self.revision = i64::MIN;
     }
 
     /// Bakes one `(chunk, layer)` and returns the cached sprite count.
