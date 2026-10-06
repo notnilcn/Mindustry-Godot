@@ -148,8 +148,24 @@ func _apply_version() -> void:
 	var label := get_node_or_null("Version") as Label
 	if label == null:
 		return
-	var version := str(ProjectSettings.get_setting("application/config/version", ""))
-	label.text = "Mindustry-Godot" if version.is_empty() else "v%s" % version
+	var info := _build_info()
+	var build := int(info.get("build", -1))
+	# `MenuFragment.java:112`: custom builds (build == -1) draw the combined
+	# version string in `#fc8140aa`, stamped builds in `#ffffffba`.
+	label.add_theme_color_override(
+		"font_color", Color("fc8140aa") if build == -1 else Color("ffffffba")
+	)
+	label.text = str(info.get("combined", "custom build"))
+
+
+## The embedded `Version.java` build report (`MindPlatform.get_build_info`).
+func _build_info() -> Dictionary:
+	var platform := get_node_or_null("/root/Spine/MindPlatform")
+	if platform != null and platform.has_method("get_build_info"):
+		var info: Variant = platform.call("get_build_info")
+		if info is Dictionary:
+			return info
+	return {"build": -1, "combined": "custom build"}
 
 
 func _setup_discord() -> void:

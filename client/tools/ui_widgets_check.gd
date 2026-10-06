@@ -290,5 +290,21 @@ func _init() -> void:
 	)
 	_check(menu.get("_active_button") == null, "dismissed submenu clears the active button")
 
+	# EV-0004: the version label mirrors `Version.combined()`, drawn in the
+	# custom-build color `#fc8140aa` (`MenuFragment.java:112`); the bare host has
+	# no MindPlatform, so the BuildInfo default ("custom build", build -1) is used.
+	var version_label := menu.get_node_or_null("Version") as Label
+	_check(
+		version_label != null and version_label.text == "custom build",
+		"menu version label renders the combined version (got %s)"
+			% (version_label.text if version_label != null else "null")
+	)
+	if version_label != null:
+		_check(
+			version_label.get_theme_color("font_color") == Color("fc8140aa"),
+			"menu version label uses the custom-build color (got %s)"
+				% version_label.get_theme_color("font_color")
+		)
+
 	print("UICHECK: failed=", _failures)
 	quit(1 if _failures > 0 else 0)
