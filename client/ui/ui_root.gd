@@ -331,9 +331,9 @@ func _build_prompt(title_text: String, message: String, with_field: bool) -> Dic
 		title.text = title_text
 		title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		layout.add_child(title)
-	var body := Label.new()
-	body.text = message
+	var body := MindWidgets.label(message)
 	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	layout.add_child(body)
 	var field := LineEdit.new()
 	if with_field:
