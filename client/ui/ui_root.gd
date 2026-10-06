@@ -68,6 +68,39 @@ func _check_uiscale_changed() -> void:
 	set_process(true)
 
 
+## `Control.java:746-750` (`Binding.menu`, ESC): close the top dialog, hide the
+## fullscreen minimap, or open the in-game pause menu. Game-over and
+## campaign-complete stay modal (no ESC close), matching upstream.
+func _unhandled_key_input(event: InputEvent) -> void:
+	var key := event as InputEventKey
+	if key == null or not key.pressed or key.echo:
+		return
+	if key.keycode == KEY_ESCAPE and _on_escape():
+		get_viewport().set_input_as_handled()
+
+
+func _on_escape() -> bool:
+	var ui := _ui()
+	if ui == null:
+		return false
+	var minimap := get_node_or_null("HudGroup/minimap") as Control
+	if minimap != null and minimap.visible:
+		minimap.visible = false
+		return true
+	if bool(ui.call("has_dialog")):
+		var stack: PackedStringArray = ui.call("dialog_stack")
+		var top := ""
+		if not stack.is_empty():
+			top = str(stack[stack.size() - 1])
+		if top == "restart" or top == "campaign_complete":
+			return false
+		ui.call("close_top_dialog")
+		return true
+	if menu_group.visible:
+		return false
+	return bool(ui.call("open_dialog", "paused", ""))
+
+
 func _process(delta: float) -> void:
 	if _uiscale_prompt.is_empty():
 		return

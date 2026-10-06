@@ -4,6 +4,7 @@
     {"name": "about", "scene": "res://scenes/ui/dialogs/about_dialog.tscn", "pause": false, "menu_openable": true, "args": []},
     {"name": "credits", "scene": "res://scenes/ui/dialogs/credits_dialog.tscn", "pause": false, "menu_openable": false, "args": []},
     {"name": "settings", "scene": "res://scenes/ui/dialogs/settings_menu_dialog.tscn", "pause": true, "menu_openable": true, "args": []},
+    {"name": "paused", "scene": "res://scenes/ui/dialogs/paused_dialog.tscn", "pause": true, "menu_openable": false, "args": []},
     {"name": "language", "scene": "res://scenes/ui/dialogs/language_dialog.tscn", "pause": false, "menu_openable": true, "args": []},
     {"name": "controls", "scene": "res://scenes/ui/dialogs/keybind_dialog.tscn", "pause": false, "menu_openable": true, "args": []},
     {"name": "database", "scene": "res://scenes/ui/dialogs/database_dialog.tscn", "pause": true, "menu_openable": true, "args": []},

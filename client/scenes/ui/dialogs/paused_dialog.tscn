@@ -1,0 +1,7 @@
+[gd_scene format=3 uid="uid://b4nq8pausedws"]
+
+[ext_resource type="PackedScene" path="res://scenes/ui/dialogs/mind_dialog_base.tscn" id="1_base"]
+[ext_resource type="Script" uid="uid://r5x7iv6jmpgin" path="res://ui/dialogs/paused_dialog.gd" id="2_paused"]
+
+[node name="PausedDialog" unique_id=1893204527 instance=ExtResource("1_base")]
+script = ExtResource("2_paused")
