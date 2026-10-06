@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "updated": "2026-10-06T09:10:21+00:00",
+  "updated": "2026-10-06T09:15:23+00:00",
   "findings": [
     {
       "id": "EV-0001",
@@ -196,7 +196,7 @@
       "id": "EV-0008",
       "area": "ui/menu",
       "severity": "S3",
-      "status": "open",
+      "status": "verified-fixed",
       "title": "Database submenu stays expanded after the About dialog closes",
       "expected": "Java: after closing About the main menu is back to base state with no submenu",
       "actual": "Godot: submenu_visible remains true; step-05 capture is byte-identical to step-03 (Database submenu open)",
@@ -209,14 +209,25 @@
         "runs/20261006-172828-ui_dialogs/godot/step-04-after-about.png",
         "runs/20261006-172828-ui_dialogs/godot/step-02-database-submenu.png",
         "runs/20261006-172828-ui_dialogs/godot/state-dialog-close-stuck.json",
-        "runs/20261006-172828-ui_dialogs/java/step-06-after-about.png"
+        "runs/20261006-172828-ui_dialogs/java/step-06-after-about.png",
+        "runs/20261006-091133-ev0008-verify/godot/state-ev0008-verify.json",
+        "runs/20261006-091133-ev0008-verify/godot/step-01-submenu-open.png",
+        "runs/20261006-091133-ev0008-verify/godot/step-02-about-open.png",
+        "runs/20261006-091133-ev0008-verify/godot/step-03-after-about.png",
+        "runs/20261006-091133-ev0008-verify/godot/step-04-base-state.png",
+        "runs/20261006-091133-ev0008-verify/diff/new-after-about-vs-new-submenu.json",
+        "runs/20261006-091133-ev0008-verify/godot/ui_widgets_check.log",
+        "runs/20261006-091133-ev0008-verify/godot/log-errors-final.json",
+        "runs/20261006-091133-ev0008-verify/report.md"
       ],
       "notes": [
-        "2026-10-06T07:58:30+00:00: [loop ?] Fresh ui_dialogs run 20261006-172828 (pid 1098928): About > Back leaves submenu_visible=true and the post-close frame is byte-identical to the pre-open submenu frame (md5 1d7b965410088b8c2c1722e7ebcc725d both). Java post-About frame 20261006-172828-ui_dialogs/java/step-06-after-about.png shows the base menu with no submenu."
+        "2026-10-06T07:58:30+00:00: [loop ?] Fresh ui_dialogs run 20261006-172828 (pid 1098928): About > Back leaves submenu_visible=true and the post-close frame is byte-identical to the pre-open submenu frame (md5 1d7b965410088b8c2c1722e7ebcc725d both). Java post-About frame 20261006-172828-ui_dialogs/java/step-06-after-about.png shows the base menu with no submenu.",
+        "2026-10-06T09:10:45+00:00: claimed by loop-1",
+        "2026-10-06T09:15:23+00:00: [loop ?] Fresh in-engine repro at HEAD 7bbc680 (fix 7bbc680), pid 1147148, 1152x648, log cleared first. Readings: baseline submenu_visible=false/stack=[]; click Database (230,219) -> submenu_visible=true (3 items); click About (460,359) -> submenu_visible=false, active_button cleared, stack=[about] (the fix dismisses the submenu before running the leaf); About Back (474,503) -> stack=[], has_dialog=false, submenu_visible=false - base menu state. Pre-fix the after-About frame was byte-identical to the submenu-open frame (both md5 1d7b9654...); now after-About md5 350a5056... differs from the submenu-open md5 c6f77792... (frame diff changed 0.191, palette 0.164). Sanity: Database toggles on/off (active cleared), and Database then Editor (top-level leaf) opens editor_maps with submenu_visible=false and returns to base after Back. No info/CurseForge leaf exists in this HEAD's desktop table; Quit was not clicked, its branch is the same _hide_submenu path the gate asserts. Headless gate exit 0: 'menu submenu opens', 'opening a submenu dialog dismisses the submenu', 'dismissed submenu clears the active button'. Log errors only the pre-existing launchid.dat boot warning."
       ],
       "plan": "14",
       "first_seen": "2026-10-05T05:35:17+00:00",
-      "last_verified": "2026-10-06T07:58:30+00:00"
+      "last_verified": "2026-10-06T09:15:23+00:00"
     },
     {
       "id": "EV-0009",
