@@ -21,6 +21,7 @@ The Godot project for Mindustry-Godot. Gameplay behavior lives in Rust (`client/
 | `addons/blastbullets2d/`, `addons/phantom_camera/` | Vendored third-party addons (bullet engine; camera tweening), loaded as plugins. |
 | `audio/bus_layout.json` | Declarative bus table (`Master`, `Music`, `Sound`, `UI`) matching the `MindAudio` buses. |
 | `tools/shaders_check.gd` | `SceneTree` script that force-compiles every `res://shaders/*.gdshader`. |
+| `tools/ui_widgets_check.gd` | `SceneTree` script that boots `MindAssets` headlessly and asserts the check widget's atlas regions and minimum row size (GDScript-only widget oracle). |
 | `scenarios/` | Generated mirror of the repo-root `scenarios/`; synced by `tools/sync_scenarios.sh`, never hand-edited. |
 | `bin/`, `.godot/` | Build output and editor import cache; gitignored. |
 | `rust/` | Cargo workspace (`mind-core`, `mind-gdext`, `mind-headless`, `mind-stdb`, `mind-atlas`, `mind-derive`, `mind-macros`, `mind-tools`); build it with `tools/build.sh`, not from inside the editor. |
@@ -67,6 +68,7 @@ tools/build.sh                                                  # mind-gdext + m
 godot4 --path client                                            # open res://scenes/game.tscn
 bash tools/godot.sh --headless --editor --quit --path client    # import/parse gate
 godot4 --headless --path client --script res://tools/shaders_check.gd   # shader compile gate
+godot4 --headless --path client --script res://tools/ui_widgets_check.gd  # widget region/size gate
 tools/ci.sh                                                     # full local gate (Rust, goldens, mirror, Godot import, STDB)
 tools/mcp-smoke.sh                                              # in-engine spine smoke (needs the editor running)
 ```
