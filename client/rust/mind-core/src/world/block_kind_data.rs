@@ -649,8 +649,129 @@ impl BlockKindData {
             output_liquids: liquids,
             ignore_liquid_fullness: ignore,
         };
+        // `Blocks.java` factories whose `craftTime` is set explicitly upstream
+        // (`GenericCrafter.craftTime` defaults to 80).
+        let craft_t = |items: Vec<(u16, i32)>,
+                       liquids: Vec<(u16, f32)>,
+                       craft_time: f32,
+                       ignore: bool| CrafterDef {
+            craft_time,
+            output_items: items,
+            output_liquids: liquids,
+            ignore_liquid_fullness: ignore,
+        };
         match name {
             "silicon-smelter" => self.set_crafter(craft(vec![(item("silicon"), 1)], vec![], false)),
+            // `Blocks.java:1041 graphite-press` — graphite x1, craftTime 90.
+            "graphite-press" => {
+                self.set_crafter(craft_t(vec![(item("graphite"), 1)], vec![], 90.0, false))
+            }
+            // `Blocks.java:1053 multi-press` — graphite x2, craftTime 30.
+            "multi-press" => {
+                self.set_crafter(craft_t(vec![(item("graphite"), 2)], vec![], 30.0, false))
+            }
+            // `Blocks.java:1086 silicon-crucible` — silicon x8, craftTime 90,
+            // `boostScale`/`outputScale` 0.15, `baseEfficiency` 1.
+            "silicon-crucible" => {
+                self.set_crafter(craft_t(vec![(item("silicon"), 8)], vec![], 90.0, false));
+                if let BlockKindData::AttributeCrafter(def) = self {
+                    def.attribute = 0;
+                    def.base_efficiency = 1.0;
+                    def.boost_scale = 0.15;
+                    def.max_boost = 1.0;
+                    def.min_efficiency = -1.0;
+                }
+            }
+            // `Blocks.java:1120 plastanium-compressor` — plastanium x1, craftTime 60.
+            "plastanium-compressor" => {
+                self.set_crafter(craft_t(vec![(item("plastanium"), 1)], vec![], 60.0, false))
+            }
+            // `Blocks.java:1138 phase-weaver` — phase-fabric x1, craftTime 120.
+            "phase-weaver" => self.set_crafter(craft_t(
+                vec![(item("phase-fabric"), 1)],
+                vec![],
+                120.0,
+                false,
+            )),
+            // `Blocks.java:1170 cryofluid-mixer` — cryofluid 12/60, craftTime 120.
+            "cryofluid-mixer" => self.set_crafter(craft_t(
+                vec![],
+                vec![(liquid("cryofluid"), 12.0 / 60.0)],
+                120.0,
+                false,
+            )),
+            // `Blocks.java:1191 pyratite-mixer` — pyratite x1, default craftTime 80.
+            "pyratite-mixer" => {
+                self.set_crafter(craft_t(vec![(item("pyratite"), 1)], vec![], 80.0, false))
+            }
+            // `Blocks.java:1206 blast-mixer` — blast-compound x1, default craftTime 80.
+            "blast-mixer" => self.set_crafter(craft_t(
+                vec![(item("blast-compound"), 1)],
+                vec![],
+                80.0,
+                false,
+            )),
+            // `Blocks.java:1335 silicon-arc-furnace` — silicon x4, craftTime 50.
+            "silicon-arc-furnace" => {
+                self.set_crafter(craft_t(vec![(item("silicon"), 4)], vec![], 50.0, false))
+            }
+            // `Blocks.java:1356 electrolyzer` — ozone 4/60 + hydrogen 6/60, craftTime 10.
+            "electrolyzer" => self.set_crafter(craft_t(
+                vec![],
+                vec![
+                    (liquid("ozone"), 4.0 / 60.0),
+                    (liquid("hydrogen"), 6.0 / 60.0),
+                ],
+                10.0,
+                false,
+            )),
+            // `Blocks.java:1400 atmospheric-concentrator` (HeatCrafter) —
+            // nitrogen 16/60, default craftTime 80.
+            "atmospheric-concentrator" => self.set_crafter(craft_t(
+                vec![],
+                vec![(liquid("nitrogen"), 16.0 / 60.0)],
+                80.0,
+                false,
+            )),
+            // `Blocks.java:1537 carbide-crucible` (HeatCrafter) — carbide x1,
+            // craftTime 60 * 2.25/4 = 33.75.
+            "carbide-crucible" => self.set_crafter(craft_t(
+                vec![(item("carbide"), 1)],
+                vec![],
+                60.0 * 2.25 / 4.0,
+                false,
+            )),
+            // `Blocks.java:1556 slag-centrifuge` — gallium 1/60, craftTime 120.
+            "slag-centrifuge" => self.set_crafter(craft_t(
+                vec![],
+                vec![(liquid("gallium"), 1.0 / 60.0)],
+                120.0,
+                false,
+            )),
+            // `Blocks.java:1587 surge-crucible` (HeatCrafter) — surge-alloy x1,
+            // craftTime 60 * 3/4 = 45.
+            "surge-crucible" => self.set_crafter(craft_t(
+                vec![(item("surge-alloy"), 1)],
+                vec![],
+                60.0 * 3.0 / 4.0,
+                false,
+            )),
+            // `Blocks.java:1623 cyanogen-synthesizer` (HeatCrafter) — cyanogen
+            // 12/60, craftTime 80/4 = 20.
+            "cyanogen-synthesizer" => self.set_crafter(craft_t(
+                vec![],
+                vec![(liquid("cyanogen"), 12.0 / 60.0)],
+                80.0 / 4.0,
+                false,
+            )),
+            // `Blocks.java:1655 phase-synthesizer` (HeatCrafter) — phase-fabric
+            // x1, craftTime 60 * 2/4 = 30.
+            "phase-synthesizer" => self.set_crafter(craft_t(
+                vec![(item("phase-fabric"), 1)],
+                vec![],
+                60.0 * 2.0 / 4.0,
+                false,
+            )),
             "surge-smelter" => {
                 self.set_crafter(craft(vec![(item("surge-alloy"), 1)], vec![], false))
             }
@@ -685,6 +806,14 @@ impl BlockKindData {
             "pneumatic-drill" => self.set_drill(400.0, 3, None),
             "laser-drill" => self.set_drill(280.0, 4, None),
             "blast-drill" => self.set_drill(280.0, 5, None),
+            // `Blocks.java:2299 mechanical-pump` — `pumpAmount = 7/60`.
+            "mechanical-pump" => self.set_pump_amount(7.0 / 60.0),
+            // `Blocks.java:2305 rotary-pump` — `pumpAmount = 0.2`.
+            "rotary-pump" => self.set_pump_amount(0.2),
+            // `Blocks.java:2314 impulse-pump` — `pumpAmount = 0.22`.
+            "impulse-pump" => self.set_pump_amount(0.22),
+            // `Blocks.java:2404 reinforced-pump` — `pumpAmount = 80/60/4`.
+            "reinforced-pump" => self.set_pump_amount(80.0 / 60.0 / 4.0),
             "impact-drill" => {
                 if let BlockKindData::BurstDrill(def) = self {
                     def.drill.drill_time = 720.0;
@@ -692,6 +821,16 @@ impl BlockKindData {
                     def.drill.blocked_items = vec![item("thorium")];
                     def.drill_multiplier = 1.0;
                     def.burst_time = 60.0 * 5.0;
+                }
+            }
+            // `Blocks.java:3112 eruption-drill` — `drillTime = 281.25`, tier 7,
+            // `BurstDrill.invertedTime` default 200.
+            "eruption-drill" => {
+                if let BlockKindData::BurstDrill(def) = self {
+                    def.drill.drill_time = 281.25;
+                    def.drill.tier = 7;
+                    def.drill_multiplier = 1.0;
+                    def.inverted_time = 200.0;
                 }
             }
             "plasma-bore" => {
@@ -788,9 +927,9 @@ impl BlockKindData {
             BlockKindData::AttributeCrafter(def) => &mut def.crafter,
             _ => return,
         };
-        // Preserve the real plan-02 `craft_time`; the overlay only supplies
-        // output stacks.
-        if crafter.craft_time == 0.0 {
+        // The real plan-02 `craft_time` wins when present; the overlay supplies
+        // the upstream value for the factories whose generated data omits it.
+        if target.craft_time != 0.0 {
             crafter.craft_time = target.craft_time;
         }
         *target = crafter;
@@ -808,6 +947,13 @@ impl BlockKindData {
             BlockKindData::Drill(def) => apply(def),
             BlockKindData::BurstDrill(def) => apply(&mut def.drill),
             _ => {}
+        }
+    }
+
+    /// Sets `Pump.pumpAmount` for a plain (`Pump`) family block.
+    fn set_pump_amount(&mut self, amount: f32) {
+        if let BlockKindData::Pump(def) = self {
+            def.pump_amount = amount;
         }
     }
 
@@ -928,6 +1074,164 @@ impl BlockKindData {
 mod tests {
     use super::*;
     use crate::content::test_support::test_registry;
+    use crate::world::block::BlockTable;
+
+    fn crafter_of(inst: &crate::world::block::BlockInstance) -> &CrafterDef {
+        match &inst.kind_data {
+            BlockKindData::Crafter(def) => def,
+            BlockKindData::AttributeCrafter(def) => &def.crafter,
+            other => panic!("not a crafter: {other:?}"),
+        }
+    }
+
+    /// gap5 GAP-3 / K-1: every vanilla factory carries its upstream output
+    /// stacks and craft time (`Blocks.java` crafting regions).
+    #[test]
+    fn factory_recipes_match_upstream() {
+        let content = test_registry();
+        let table = BlockTable::build_default(&content).expect("table");
+        let item = |name: &str| content.item_id(name).map(|id| id.raw()).unwrap_or(u16::MAX);
+        let liquid = |name: &str| {
+            content
+                .liquid_id(name)
+                .map(|id| id.raw())
+                .unwrap_or(u16::MAX)
+        };
+
+        type RecipeCase = (&'static str, Vec<(u16, i32)>, Vec<(u16, f32)>, f32);
+        let cases: Vec<RecipeCase> = vec![
+            ("graphite-press", vec![(item("graphite"), 1)], vec![], 90.0),
+            ("multi-press", vec![(item("graphite"), 2)], vec![], 30.0),
+            ("silicon-crucible", vec![(item("silicon"), 8)], vec![], 90.0),
+            (
+                "plastanium-compressor",
+                vec![(item("plastanium"), 1)],
+                vec![],
+                60.0,
+            ),
+            (
+                "phase-weaver",
+                vec![(item("phase-fabric"), 1)],
+                vec![],
+                120.0,
+            ),
+            (
+                "cryofluid-mixer",
+                vec![],
+                vec![(liquid("cryofluid"), 12.0 / 60.0)],
+                120.0,
+            ),
+            ("pyratite-mixer", vec![(item("pyratite"), 1)], vec![], 80.0),
+            (
+                "blast-mixer",
+                vec![(item("blast-compound"), 1)],
+                vec![],
+                80.0,
+            ),
+            (
+                "silicon-arc-furnace",
+                vec![(item("silicon"), 4)],
+                vec![],
+                50.0,
+            ),
+            (
+                "electrolyzer",
+                vec![],
+                vec![
+                    (liquid("ozone"), 4.0 / 60.0),
+                    (liquid("hydrogen"), 6.0 / 60.0),
+                ],
+                10.0,
+            ),
+            (
+                "atmospheric-concentrator",
+                vec![],
+                vec![(liquid("nitrogen"), 16.0 / 60.0)],
+                80.0,
+            ),
+            (
+                "carbide-crucible",
+                vec![(item("carbide"), 1)],
+                vec![],
+                60.0 * 2.25 / 4.0,
+            ),
+            (
+                "slag-centrifuge",
+                vec![],
+                vec![(liquid("gallium"), 1.0 / 60.0)],
+                120.0,
+            ),
+            (
+                "surge-crucible",
+                vec![(item("surge-alloy"), 1)],
+                vec![],
+                45.0,
+            ),
+            (
+                "cyanogen-synthesizer",
+                vec![],
+                vec![(liquid("cyanogen"), 12.0 / 60.0)],
+                20.0,
+            ),
+            (
+                "phase-synthesizer",
+                vec![(item("phase-fabric"), 1)],
+                vec![],
+                30.0,
+            ),
+        ];
+
+        for (name, items, liquids, craft_time) in cases {
+            let inst = table.get_named(name).unwrap_or_else(|| panic!("{name}"));
+            let crafter = crafter_of(inst);
+            assert_eq!(crafter.output_items, items, "outputs for {name}");
+            assert_eq!(crafter.output_liquids, liquids, "liquid outputs for {name}");
+            assert_eq!(crafter.craft_time, craft_time, "craft time for {name}");
+        }
+
+        // `silicon-crucible` is an `AttributeCrafter` with `baseEfficiency` 1,
+        // `boostScale`/`outputScale` 0.15 (`Blocks.java:1086`).
+        let crucible = table.get_named("silicon-crucible").expect("crucible");
+        match &crucible.kind_data {
+            BlockKindData::AttributeCrafter(def) => {
+                assert_eq!(def.base_efficiency, 1.0);
+                assert_eq!(def.boost_scale, 0.15);
+                assert_eq!(def.attribute, 0);
+            }
+            other => panic!("expected AttributeCrafter, got {other:?}"),
+        }
+    }
+
+    /// gap5 GAP-9 / K-5: pump amounts and the eruption-drill time are the
+    /// upstream `Blocks.java` values (not zero).
+    #[test]
+    fn pumps_and_eruption_drill_match_upstream() {
+        let content = test_registry();
+        let table = BlockTable::build_default(&content).expect("table");
+        for (name, amount) in [
+            ("mechanical-pump", 7.0f32 / 60.0),
+            ("rotary-pump", 0.2),
+            ("impulse-pump", 0.22),
+            ("reinforced-pump", 80.0 / 60.0 / 4.0),
+        ] {
+            let inst = table.get_named(name).unwrap_or_else(|| panic!("{name}"));
+            match &inst.kind_data {
+                BlockKindData::Pump(def) => {
+                    assert_eq!(def.pump_amount, amount, "pump amount for {name}")
+                }
+                other => panic!("expected Pump for {name}, got {other:?}"),
+            }
+        }
+        let drill = table.get_named("eruption-drill").expect("eruption-drill");
+        match &drill.kind_data {
+            BlockKindData::BurstDrill(def) => {
+                assert_eq!(def.drill.drill_time, 281.25);
+                assert_eq!(def.drill.tier, 7);
+                assert_eq!(def.inverted_time, 200.0);
+            }
+            other => panic!("expected BurstDrill, got {other:?}"),
+        }
+    }
 
     #[test]
     fn family_mapping_matches_owned_kinds() {
