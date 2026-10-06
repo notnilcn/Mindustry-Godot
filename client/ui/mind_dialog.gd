@@ -120,11 +120,22 @@ func add_close_button(width: float = 210.0) -> Button:
 	var button := Button.new()
 	button.text = _t("@back")
 	button.theme_type_variation = "defaultt"
-	button.pressed.connect(hide_dialog)
+	button.pressed.connect(_close_pressed)
 	button.custom_minimum_size.x = width
 	if buttons != null:
 		buttons.add_child(button)
 	return button
+
+
+## Closes through `MindUi` so the dialog stack and the pause governor stay in
+## sync (upstream `BaseDialog.hide` pops the dialog); a dialog that was never
+## registered still hides locally.
+func _close_pressed() -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("close_dialog"):
+		if bool(ui.call("close_dialog", String(name))):
+			return
+	hide_dialog()
 
 
 ## Appends a themed action button to the button row (`buttons.button(...)`).

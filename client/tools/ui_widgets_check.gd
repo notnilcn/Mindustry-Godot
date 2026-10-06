@@ -86,5 +86,24 @@ func _init() -> void:
 	)
 	table.free()
 
+	# A dialog's Back button must close through `MindUi`, not just hide the node:
+	# the stack entry keeps the pause governor and the menu modal guard latched
+	# (upstream `BaseDialog.hide` leaves the UI interactive).
+	var ui: Node = root.get_node_or_null("MindUi")
+	_check(ui != null, "MindUi autoload is present")
+	if ui != null:
+		var dialog: Control = load("res://ui/mind_dialog.gd").new()
+		dialog.name = "ui_widgets_check_dialog"
+		root.add_child(dialog)
+		var buttons := VBoxContainer.new()
+		dialog.add_child(buttons)
+		dialog.buttons = buttons
+		ui.call("register_dialog", String(dialog.name), dialog, false)
+		ui.call("open_dialog", String(dialog.name), "")
+		_check(bool(ui.call("has_dialog")), "open_dialog pushes the dialog onto the MindUi stack")
+		dialog.add_close_button().pressed.emit()
+		_check(not bool(ui.call("has_dialog")), "Back button pops the dialog off the MindUi stack")
+		_check(not dialog.visible, "Back button hides the dialog node")
+
 	print("UICHECK: failed=", _failures)
 	quit(1 if _failures > 0 else 0)
