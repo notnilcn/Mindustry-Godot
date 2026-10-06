@@ -26,7 +26,7 @@ use crate::world::blocks::distribution::item_bridge::ItemBridgeBuild;
 use crate::world::modules::LiquidModule;
 
 use super::current_liquid;
-use super::movement::{dump_liquid, move_liquid};
+use super::movement::{dump_liquid, dump_liquid_proximity, move_liquid, move_liquid_proximity};
 
 /// `ItemBridge.positionsValid` / `DirectionBridge.positionsValid` (plan 08).
 pub use crate::world::blocks::distribution::item_bridge::positions_valid;
@@ -79,6 +79,137 @@ pub fn update_liquid_bridge_tile(world: &mut World, grid: &WorldGrid, entity: En
         dump_liquid_bridge(world, grid, entity, liquid);
     }
     moved
+}
+
+/// [`resolve_link`] over the [`crate::world::TileBuilds`] mirror, so a
+/// `BuildingBehavior::update_tile` (no grid borrow) can resolve a bridge link.
+pub fn resolve_link_world(world: &World, link: i32) -> Option<Entity> {
+    if link < 0 {
+        return None;
+    }
+    let (x, y) = crate::world::pos::unpack(link);
+    world
+        .get_resource::<crate::world::TileBuilds>()?
+        .get(x as i32, y as i32)
+}
+
+/// `ItemBridge.linkValid` for same-type liquid bridges (grid-free).
+pub fn link_valid_world(world: &World, entity: Entity, other: Entity, range: i32) -> bool {
+    if entity == other {
+        return false;
+    }
+    let (Some(a), Some(b)) = (
+        world.get::<crate::entities::comp::Building>(entity),
+        world.get::<crate::entities::comp::Building>(other),
+    ) else {
+        return false;
+    };
+    if !positions_valid(
+        a.tile.x() as i32,
+        a.tile.y() as i32,
+        b.tile.x() as i32,
+        b.tile.y() as i32,
+        range,
+    ) {
+        return false;
+    }
+    if a.block != b.block {
+        return false;
+    }
+    world
+        .get::<crate::entities::comp::TeamComp>(entity)
+        .zip(world.get::<crate::entities::comp::TeamComp>(other))
+        .is_some_and(|(x, y)| x.team == y.team)
+}
+
+/// `LiquidBridgeBuild.updateTile` without a grid borrow
+/// (`LiquidBridge.java`): warm up toward efficiency while the link is valid,
+/// then `moveLiquid`; dump in the fallback direction when unlinked.
+pub fn update_liquid_bridge_world(world: &mut World, entity: Entity, range: i32) -> f32 {
+    let Some(link) = world
+        .get::<ItemBridgeBuild>(entity)
+        .map(|bridge| bridge.link)
+    else {
+        return 0.0;
+    };
+    let other = resolve_link_world(world, link);
+    let valid = other.is_some_and(|other| link_valid_world(world, entity, other, range));
+    let efficiency = world
+        .get::<crate::entities::comp::Building>(entity)
+        .map(|building| building.efficiency)
+        .unwrap_or(0.0);
+    if let Some(mut bridge) = world.get_mut::<ItemBridgeBuild>(entity) {
+        bridge.warmup = if bridge.warmup < efficiency {
+            (bridge.warmup + efficiency / 30.0).min(efficiency)
+        } else {
+            (bridge.warmup - efficiency / 30.0).max(efficiency)
+        };
+    }
+    let Some(liquid) = world.get::<LiquidModule>(entity).and_then(current_liquid) else {
+        return 0.0;
+    };
+    if !valid {
+        dump_liquid_proximity(world, entity, liquid, 1.0, -1);
+        return 0.0;
+    }
+    let Some(other) = other else {
+        return 0.0;
+    };
+    let warmup = world
+        .get::<ItemBridgeBuild>(entity)
+        .map(|bridge| bridge.warmup)
+        .unwrap_or(0.0);
+    if warmup < 0.25 {
+        return 0.0;
+    }
+    let moved = move_liquid_proximity(world, entity, other, liquid);
+    if moved > 0.0
+        && let Some(mut bridge) = world.get_mut::<ItemBridgeBuild>(entity)
+    {
+        bridge.moved = true;
+    }
+    moved
+}
+
+/// `DirectionLiquidBridgeBuild.updateTile` without a grid borrow: link + move,
+/// or `moveLiquidForward(false, current)` when unlinked.
+pub fn update_direction_liquid_bridge_world(
+    world: &mut World,
+    entity: Entity,
+    range: i32,
+) -> Option<Entity> {
+    let liquid = world.get::<LiquidModule>(entity).and_then(current_liquid);
+    let link = find_link(world, entity, range);
+    if let Some(mut bridge) = world.get_mut::<DirectionBridgeBuild>(entity) {
+        bridge.last_link = link;
+    }
+
+    if let Some(link) = link {
+        if let Some(liquid) = liquid {
+            move_liquid_proximity(world, entity, link, liquid);
+            let rotation = world
+                .get::<crate::entities::comp::Building>(entity)
+                .map(|building| building.rotation)
+                .unwrap_or(0);
+            if let Some(mut target) = world.get_mut::<DirectionBridgeBuild>(link) {
+                target.occupied[(rotation % 4) as usize] = Some(entity);
+            }
+        }
+    } else if let Some(liquid) = liquid {
+        let next = forward_neighbor_world(world, entity);
+        super::movement::move_liquid_forward_proximity(world, entity, next, false, liquid);
+    }
+
+    clear_stale_occupancy(world, entity);
+    link
+}
+
+fn forward_neighbor_world(world: &World, entity: Entity) -> Option<Entity> {
+    let building = world.get::<crate::entities::comp::Building>(entity)?;
+    let (dx, dy) = crate::world::blocks::autotiler::d4(building.rotation);
+    let x = building.tile.x() as i32 + dx;
+    let y = building.tile.y() as i32 + dy;
+    world.get_resource::<crate::world::TileBuilds>()?.get(x, y)
 }
 
 /// `DirectionLiquidBridgeBuild.updateTile`: move to the linked output, or dump
