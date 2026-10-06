@@ -3,21 +3,23 @@
 //! `MindCamera2D` — the RTS camera rig node (plan 15 §3.11).
 //!
 //! All camera math lives in the Godot-free [`mind_core::input::CameraState`];
-//! this node only polls Godot input, applies the transform and exposes the MCP
-//! probe API. Ported from `core/src/mindustry/core/Renderer.java` (scale/shake),
-//! `input/DesktopInput.java` (pan/zoom) and `input/MobileInput.java` (edge pan).
-//! `Vars.tilesize = 8` comes from `mind_core::config`.
+//! this node only polls the sibling `MindInput` bindings, applies the transform
+//! and exposes the MCP probe API. Ported from
+//! `core/src/mindustry/core/Renderer.java` (scale/shake),
+//! `input/DesktopInput.java` (pan/zoom/follow/detach) and
+//! `input/MobileInput.java` (edge pan). `Vars.tilesize = 8` comes from
+//! `mind_core::config`.
 
 use godot::classes::notify::CanvasItemNotification;
-use godot::classes::{Camera2D, ICamera2D, Input, InputEvent, InputEventMouseButton};
-use godot::global::{Key, MouseButton};
-use godot::obj::{Base, Singleton};
+use godot::classes::{Camera2D, ICamera2D};
+use godot::obj::Base;
 use godot::prelude::*;
 
 use mind_core::config::TILESIZE;
 use mind_core::fx::FxEvent;
 use mind_core::input::{CameraState, MinimapRegion};
 
+use crate::input::MindInput;
 use crate::sim_host::MindSimHost;
 
 /// Default `screenshake` setting (`Renderer` reads it each frame).
@@ -44,10 +46,14 @@ pub struct MindCamera2D {
     shadow_scale: f32,
     /// Scene sim host; a world-size change recenters the camera on it.
     host: Option<Gd<MindSimHost>>,
+    /// Sibling `MindInput`; pan/boost come from the binding state.
+    input: Option<Gd<MindInput>>,
     /// World size the rig last adopted (`Control` world-load camera snap).
     world_dims: (i32, i32),
     /// World-load counter the rig last adopted (recenters on a same-size load).
     world_loads: u64,
+    /// Smooth-follow target (`None` = detached; manual pan clears it).
+    follow_target: Option<(f32, f32)>,
 }
 
 #[godot_api]
@@ -62,8 +68,10 @@ impl ICamera2D for MindCamera2D {
             shadow_position: (0.0, 0.0),
             shadow_scale: 1.0,
             host: None,
+            input: None,
             world_dims: (0, 0),
             world_loads: 0,
+            follow_target: None,
         }
     }
 
@@ -79,6 +87,7 @@ impl ICamera2D for MindCamera2D {
         if node_position.x != self.shadow_position.0 || node_position.y != self.shadow_position.1 {
             self.camera.position = (node_position.x, node_position.y);
             self.shadow_position = (node_position.x, node_position.y);
+            self.follow_target = None;
         }
 
         self.view_tick = self.view_tick.wrapping_add(1);
@@ -88,24 +97,17 @@ impl ICamera2D for MindCamera2D {
         }
         self.follow_world();
 
-        let input = Input::singleton();
-        let mut axis = Vector2::ZERO;
-        if input.is_key_pressed(Key::A) || input.is_key_pressed(Key::LEFT) {
-            axis.x -= 1.0;
-        }
-        if input.is_key_pressed(Key::D) || input.is_key_pressed(Key::RIGHT) {
-            axis.x += 1.0;
-        }
-        if input.is_key_pressed(Key::W) || input.is_key_pressed(Key::UP) {
-            axis.y -= 1.0;
-        }
-        if input.is_key_pressed(Key::S) || input.is_key_pressed(Key::DOWN) {
-            axis.y += 1.0;
-        }
-
         let delta_frames = (delta * 60.0) as f32;
-        let boost = input.is_key_pressed(Key::SHIFT);
-        self.camera.pan_axis(axis.x, axis.y, delta_frames, boost);
+        let (axis_x, axis_y) = self.pan_axis();
+        let boost = self.boost_pressed();
+        if axis_x != 0.0 || axis_y != 0.0 || self.pan_pressed() {
+            // Manual pan detaches the follow lock (`DesktopInput.panning`).
+            self.follow_target = None;
+        }
+        if let Some((target_x, target_y)) = self.follow_target {
+            self.camera.follow(target_x, target_y, true, delta_frames);
+        }
+        self.camera.pan_axis(axis_x, axis_y, delta_frames, boost);
 
         if self.mouse_inside
             && let Some(viewport) = self.base().get_viewport()
@@ -119,6 +121,7 @@ impl ICamera2D for MindCamera2D {
                 || mouse.y > rect.position.y + rect.size.y - margin
             {
                 self.camera.auto_pan(mouse.x, mouse.y);
+                self.follow_target = None;
             }
         }
 
@@ -136,22 +139,6 @@ impl ICamera2D for MindCamera2D {
             self.base_mut().set_position(Vector2::new(x, y));
             self.shadow_position = (x, y);
         }
-    }
-
-    fn input(&mut self, event: Gd<InputEvent>) {
-        let Ok(mouse) = event.try_cast::<InputEventMouseButton>() else {
-            return;
-        };
-        if !mouse.is_pressed() {
-            return;
-        }
-        let amount = match mouse.get_button_index() {
-            MouseButton::WHEEL_UP => 1.0,
-            MouseButton::WHEEL_DOWN => -1.0,
-            _ => return,
-        };
-        // `Renderer.scaleCamera(Core.input.axisTap(Binding.zoom))`.
-        self.camera.scale_camera(amount);
     }
 
     fn on_notification(&mut self, what: CanvasItemNotification) {
@@ -173,6 +160,8 @@ impl MindCamera2D {
         // Scene-wired sim host (tscn-first): the spine declares SimHost as a
         // sibling of World, so the camera follows world loads.
         self.host = self.base().try_get_node_as::<MindSimHost>("../../SimHost");
+        // Sibling `Input` owns the binding state (`BindingState`).
+        self.input = self.base().try_get_node_as::<MindInput>("../../Input");
         let position = self.base().get_position();
         self.camera.position = (position.x, position.y);
         // Seed the echo-guard shadows from the node so no write is issued for
@@ -206,12 +195,44 @@ impl MindCamera2D {
         let unit = TILESIZE as f32;
         self.camera.world_size = Some((width as f32 * unit, height as f32 * unit));
         match host.bind().best_core_position() {
-            Some((x, y)) => self.camera.pan_camera(x, y),
-            None => self.camera.center_on_tile(width / 2, height / 2),
+            Some((x, y)) => {
+                self.camera.pan_camera(x, y);
+                self.follow_target = Some((x, y));
+            }
+            None => {
+                self.camera.center_on_tile(width / 2, height / 2);
+                self.follow_target = None;
+            }
         }
         let (x, y) = self.camera.render_position();
         self.base_mut().set_position(Vector2::new(x, y));
         self.shadow_position = (x, y);
+    }
+
+    /// Binding-driven pan axis from the sibling `MindInput`.
+    fn pan_axis(&self) -> (f32, f32) {
+        let Some(input) = self.input.clone() else {
+            return (0.0, 0.0);
+        };
+        let guard = input.bind();
+        let axis = guard.pan_axis();
+        (axis.x, axis.y)
+    }
+
+    /// Binding-driven `boost` hold.
+    fn boost_pressed(&self) -> bool {
+        let Some(input) = self.input.clone() else {
+            return false;
+        };
+        input.bind().boost_pressed()
+    }
+
+    /// Binding-driven `pan` hold (middle mouse by default).
+    fn pan_pressed(&self) -> bool {
+        let Some(input) = self.input.clone() else {
+            return false;
+        };
+        input.bind().pan_pressed()
     }
 
     /// Viewport position → tile `(x, y)`.
@@ -247,6 +268,7 @@ impl MindCamera2D {
     #[func]
     pub fn center_on_tile(&mut self, x: i32, y: i32) {
         self.camera.center_on_tile(x, y);
+        self.follow_target = None;
         let (px, py) = self.camera.position;
         self.base_mut().set_position(Vector2::new(px, py));
         self.shadow_position = (px, py);
@@ -256,9 +278,49 @@ impl MindCamera2D {
     #[func]
     pub fn pan_to(&mut self, x: f64, y: f64) {
         self.camera.pan_camera(x as f32, y as f32);
+        self.follow_target = None;
         self.base_mut()
             .set_position(Vector2::new(x as f32, y as f32));
         self.shadow_position = (x as f32, y as f32);
+    }
+
+    /// `Binding.respawn`/detach toggle: snap back to and follow the best core
+    /// (`DesktopInput.update` player/core follow).
+    #[func]
+    pub fn recenter_player(&mut self) {
+        let Some(host) = self.host.clone() else {
+            return;
+        };
+        let Some((x, y)) = host.bind().best_core_position() else {
+            return;
+        };
+        self.camera.pan_camera(x, y);
+        self.follow_target = Some((x, y));
+        let (px, py) = self.camera.render_position();
+        self.base_mut().set_position(Vector2::new(px, py));
+        self.shadow_position = (px, py);
+    }
+
+    /// Enables/disables the smooth-follow lock (`settings` `detach-camera`).
+    #[func]
+    pub fn set_follow(&mut self, follow: bool) {
+        if follow {
+            self.recenter_player();
+        } else {
+            self.follow_target = None;
+        }
+    }
+
+    /// Whether the camera is currently locked to a follow target.
+    #[func]
+    pub fn is_following(&self) -> bool {
+        self.follow_target.is_some()
+    }
+
+    /// Viewport size in pixels (selection-rect math / probes).
+    #[func]
+    pub fn viewport_size(&self) -> Vector2 {
+        Vector2::new(self.camera.viewport.0, self.camera.viewport.1)
     }
 
     /// `Renderer.scaleCamera(amount)` (relative zoom-by).
@@ -278,6 +340,7 @@ impl MindCamera2D {
     pub fn minimap_pan(&mut self, fraction_x: f64, fraction_y: f64) {
         self.camera
             .minimap_pan(fraction_x as f32, fraction_y as f32, MinimapRegion::FULL);
+        self.follow_target = None;
         let (px, py) = self.camera.position;
         self.base_mut().set_position(Vector2::new(px, py));
     }
@@ -313,6 +376,7 @@ impl MindCamera2D {
     #[func]
     pub fn spectate(&mut self, x: f64, y: f64) {
         self.camera.spectate(x as f32, y as f32);
+        self.follow_target = None;
         self.base_mut()
             .set_position(Vector2::new(x as f32, y as f32));
         self.shadow_position = (x as f32, y as f32);

@@ -17,17 +17,17 @@ use mind_core::input::RawEvent;
 /// Translates one event into zero or more [`RawEvent`]s.
 pub fn translate(event: &Gd<InputEvent>, out: &mut Vec<RawEvent>) {
     if let Ok(key) = event.clone().try_cast::<InputEventKey>() {
-        out.push(RawEvent::KeyDown {
-            code: godot_key_name(key.get_keycode()),
-        });
-        if !key.is_pressed() {
-            // Reclassify the just-pushed event as an up edge.
-            if let Some(last) = out.last_mut() {
-                *last = RawEvent::KeyUp {
-                    code: godot_key_name(key.get_keycode()),
-                };
-            }
+        // Arc key events do not auto-repeat; OS echo events must not reach the
+        // binding tap path (`Binding`/`InputHandler` taps fire once per press).
+        if key.is_echo() {
+            return;
         }
+        let code = godot_key_name(key.get_keycode());
+        out.push(if key.is_pressed() {
+            RawEvent::KeyDown { code }
+        } else {
+            RawEvent::KeyUp { code }
+        });
         return;
     }
     if let Ok(mouse) = event.clone().try_cast::<InputEventMouseButton>() {

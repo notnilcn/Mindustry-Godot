@@ -3,23 +3,41 @@
 
 //! `MindInput` — the `Spine/Input` node (plan 15 §3.1).
 //!
-//! Captures raw Godot `InputEvent`s into [`RawEvent`]s and owns client-local
-//! input state (bindings, locks, focus). No game rules and no sim reads/writes
-//! (I1/I2); the placement controllers live in `mind-core`.
+//! Captures raw Godot `InputEvent`s into [`RawEvent`]s, owns client-local input
+//! state (bindings, locks, focus) and drives the live desktop controller
+//! ([`desktop::DesktopBridge`]): mouse/key actions become `SimCommand`s on
+//! `MindSimHost` (applied at tick boundaries) and view effects on the camera/HUD.
+//! No game rules and no sim reads/writes (I1/I2); the placement controllers live
+//! in `mind-core`.
 
 pub mod bindings;
+pub mod desktop;
 pub mod events;
 pub mod gesture;
 pub mod mobile;
 
 use godot::classes::notify::NodeNotification;
-use godot::classes::{INode, Node};
+use godot::classes::{Control, INode, Node};
 use godot::obj::Base;
 use godot::prelude::*;
 
 use mind_core::input::{
-    BindingState, BindingValue, FocusState, InputLocks, KeyBindTable, RawEvent, key_display_name,
+    BindingState, BindingValue, FocusState, InputLocks, KeyBindTable, RawEvent, ids,
+    key_display_name,
 };
+use mind_core::world::config::ConfigValue;
+
+use crate::camera::MindCamera2D;
+use crate::sim_host::MindSimHost;
+
+use desktop::{DesktopBridge, Effect};
+
+/// Path of the block-config overlay in the UI root.
+const BLOCK_CONFIG_PATH: &str = "../Ui/UiRoot/OverlayLayer/block_config";
+/// Path of the block-inventory overlay in the UI root.
+const BLOCK_INVENTORY_PATH: &str = "../Ui/UiRoot/OverlayLayer/block_inventory";
+/// Path of a HUD fragment under the UI root (`minimap`, `console`, ...).
+const HUD_FRAGMENT_DIR: &str = "../Ui/UiRoot/HudGroup";
 
 /// The `/root/Spine/Input` input node.
 #[derive(GodotClass)]
@@ -44,6 +62,8 @@ pub struct MindInput {
     mobile: mobile::MobileInputBridge,
     /// Client monotonic clock in seconds for the gesture detector.
     mobile_time: f64,
+    /// Live desktop controller bridge (placement, hotkeys, RTS).
+    bridge: DesktopBridge,
 }
 
 #[godot_api]
@@ -61,6 +81,7 @@ impl INode for MindInput {
             warned: false,
             mobile: mobile::MobileInputBridge::new(),
             mobile_time: 0.0,
+            bridge: DesktopBridge::new(),
         }
     }
 
@@ -73,19 +94,45 @@ impl INode for MindInput {
         if what == NodeNotification::EXTENSION_RELOADED {
             self.bootstrap();
         }
+        // A focus loss drops key releases; clear held state so the camera does
+        // not keep panning until the key is pressed again.
+        if what == NodeNotification::APPLICATION_FOCUS_OUT {
+            self.bridge.clear_keys();
+        }
     }
 
     fn input(&mut self, event: Gd<godot::classes::InputEvent>) {
         let mut translated = Vec::new();
         events::translate(&event, &mut translated);
-        self.pending.extend(translated);
+        for raw in translated {
+            // World mouse presses: skip when a STOP-filter `Control` is under
+            // the cursor (upstream `!Core.scene.hasMouse()`); otherwise consume
+            // the event so `MindSimHost::unhandled_input` cannot double-place.
+            let is_press = matches!(
+                &raw,
+                RawEvent::MouseButton { button, down: true, .. }
+                    if button == "left" || button == "right" || button == "middle"
+            );
+            if is_press && self.ui_captures() {
+                continue;
+            }
+            self.bridge.handle(&self.bindings, raw);
+            if is_press {
+                self.mark_input_handled();
+            }
+        }
     }
 
     fn process(&mut self, delta: f64) {
         self.frame += 1;
-        // M0: events are logged/counted; the desktop controller is M2.
-        self.last_event_count = self.pending.len();
-        self.pending.clear();
+        // Test/MCP-injected events (`inject_key`/`push_event`) are dispatched
+        // here; real events are dispatched immediately in `input`.
+        let pending = std::mem::take(&mut self.pending);
+        self.last_event_count = pending.len();
+        for event in pending {
+            self.bridge.handle(&self.bindings, event);
+        }
+        self.drain_effects();
         // M3: drive the mobile gesture detector's long-press timer. The touch
         // stream itself is folded in by the `mobile_*` callbacks (plan 14).
         self.mobile_time += delta;
@@ -96,16 +143,162 @@ impl INode for MindInput {
 
 #[godot_api]
 impl MindInput {
+    /// Emitted when a registered binding fires (`action` is the binding name).
+    #[signal]
+    fn hotkey(action: GString);
+
+    /// Emitted when the RTS selection changes (JSON array of unit ids).
+    #[signal]
+    fn selection_changed(units_json: GString);
+
     /// Rebuilds the client-local binding state (runs from `ready()` and on
     /// `EXTENSION_RELOADED`, which does not re-run `ready()`). The binding state
     /// is overwritten, so a re-run never duplicates.
     fn bootstrap(&mut self) {
         self.bindings = bindings::load();
+        // Scene wiring (tscn-first): the spine declares SimHost as a sibling of
+        // Input and Camera2D under World.
+        self.bridge.host = self.base().try_get_node_as::<MindSimHost>("../SimHost");
+        self.bridge.camera = self
+            .base()
+            .try_get_node_as::<MindCamera2D>("../World/Camera2D");
+        self.bridge.refresh_items();
+        self.sync_selected_block();
+        self.load_catalog();
         log::info!(
             "MindInput ready ({} keybinds, {} rebinds)",
             KeyBindTable::len(),
             self.rebind_count()
         );
+    }
+
+    /// Adopts `MindSimHost.selected_block()` as the live placement block.
+    fn sync_selected_block(&mut self) {
+        let Some(host) = self.bridge.host.clone() else {
+            return;
+        };
+        let name = host.bind().selected_block().to_string();
+        let guard = host.bind();
+        if let Some(content) = guard.content_registry()
+            && let Some(id) = content.block_id(&name)
+        {
+            self.bridge.controller.state.select_block(Some(id));
+        }
+    }
+
+    /// Loads the buildable-block catalogue for the `1`..`0` block-select binds.
+    fn load_catalog(&mut self) {
+        let catalog = mind_core::ui::campaign::block_catalog();
+        let categories: Vec<Vec<String>> = catalog
+            .categories
+            .iter()
+            .map(|category| {
+                category
+                    .blocks
+                    .iter()
+                    .map(|block| block.name.clone())
+                    .collect()
+            })
+            .collect();
+        self.bridge.set_catalog(categories);
+    }
+
+    /// Whether a STOP-filter `Control` owns the mouse (upstream `hasMouse`).
+    fn ui_captures(&self) -> bool {
+        let Some(mut viewport) = self.base().get_viewport() else {
+            return false;
+        };
+        let hovered = viewport.call("gui_get_hovered_control", &[]);
+        let Ok(control) = hovered.try_to::<Gd<Control>>() else {
+            return false;
+        };
+        // `mouse_filter`: 0 = STOP, 1 = PASS, 2 = IGNORE. PASS controls fall
+        // through to `_unhandled_input`, so only STOP blocks the world.
+        matches!(control.get("mouse_filter").try_to::<i64>(), Ok(0))
+    }
+
+    /// Consumes the current input dispatch (prevents `unhandled_input`).
+    fn mark_input_handled(&self) {
+        if let Some(mut viewport) = self.base().get_viewport() {
+            viewport.call("set_input_as_handled", &[]);
+        }
+    }
+
+    /// Resolves UI effects produced by the desktop bridge.
+    fn drain_effects(&mut self) {
+        let effects = self.bridge.take_effects();
+        for effect in effects {
+            match effect {
+                Effect::OpenDialog { name, ctx } => {
+                    if let Some(mut ui) = self.base().try_get_node_as::<Node>("/root/MindUi") {
+                        let _ = ui.call(
+                            "open_dialog",
+                            &[
+                                GString::from(name.as_str()).to_variant(),
+                                GString::from(ctx.as_str()).to_variant(),
+                            ],
+                        );
+                    }
+                }
+                Effect::ToggleFragment(name) => {
+                    let path = format!("{HUD_FRAGMENT_DIR}/{name}");
+                    let Some(mut node) = self.base().try_get_node_as::<Node>(&path) else {
+                        continue;
+                    };
+                    if node.has_method("toggle") {
+                        let _ = node.call("toggle", &[]);
+                    } else {
+                        let visible = node.get("visible").try_to::<bool>().unwrap_or(false);
+                        node.set("visible", &(!visible).to_variant());
+                    }
+                }
+                Effect::OpenBlockConfig { x, y, spec } => {
+                    let Some(mut node) = self.base().try_get_node_as::<Node>(BLOCK_CONFIG_PATH)
+                    else {
+                        continue;
+                    };
+                    let _ = node.call(
+                        "configure",
+                        &[
+                            Vector2::new(x as f32, y as f32).to_variant(),
+                            GString::from(spec.as_str()).to_variant(),
+                        ],
+                    );
+                }
+                Effect::OpenBlockInventory { x, y, items } => {
+                    let Some(mut node) = self.base().try_get_node_as::<Node>(BLOCK_INVENTORY_PATH)
+                    else {
+                        continue;
+                    };
+                    let _ = node.call(
+                        "open_at",
+                        &[
+                            Vector2i::new(x, y).to_variant(),
+                            GString::from(items.as_str()).to_variant(),
+                        ],
+                    );
+                }
+                Effect::Screenshot => {
+                    if let Some(mut host) = self.bridge.host.clone() {
+                        let _ = host.call(
+                            "capture",
+                            &[GString::from("user://screenshot.png").to_variant()],
+                        );
+                    }
+                }
+                Effect::Hotkey(action) => {
+                    let _ = self
+                        .base_mut()
+                        .emit_signal("hotkey", &[GString::from(action.as_str()).to_variant()]);
+                }
+                Effect::SelectionChanged(json) => {
+                    let _ = self.base_mut().emit_signal(
+                        "selection_changed",
+                        &[GString::from(json.as_str()).to_variant()],
+                    );
+                }
+            }
+        }
     }
 
     /// Frames pumped.
@@ -284,33 +477,239 @@ impl MindInput {
         GString::from(&serde_json::Value::Array(list).to_string())
     }
 
-    /// The state dump (§6.3 shape; fields owned by later milestones are stubs).
+    /// The state dump (§6.3 shape; playback fields come from the live bridge).
     #[func]
     pub fn get_input_state_json(&self) -> GString {
         let focus = serde_json::to_value(&self.focus).unwrap_or(serde_json::Value::Null);
+        let state = &self.bridge.controller.state;
+        let block = state.block.and_then(|id| {
+            let host = self.bridge.host.clone()?;
+            let guard = host.bind();
+            guard
+                .content_registry()?
+                .block(id)
+                .map(|def| def.name.clone())
+        });
+        let line_plans: Vec<serde_json::Value> = state
+            .line_plans
+            .iter()
+            .map(|plan| {
+                serde_json::json!({
+                    "x": plan.x,
+                    "y": plan.y,
+                    "rotation": plan.rotation,
+                    "block": plan.block.raw(),
+                })
+            })
+            .collect();
+        let selected: Vec<i32> = state.selected_units.iter().copied().collect();
+        let buildings: Vec<[i32; 2]> = state
+            .command_buildings
+            .iter()
+            .map(|pos| [pos.x() as i32, pos.y() as i32])
+            .collect();
+        let groups: Vec<Vec<i32>> = state
+            .control_groups
+            .iter()
+            .map(|group| group.iter().copied().collect())
+            .collect();
         let value = serde_json::json!({
             "format": 1,
             "tick": self.frame,
             "mobile": false,
-            "mode": "none",
-            "block": serde_json::Value::Null,
-            "rotation": 0,
-            "is_building": true,
-            "command_mode": false,
-            "queue_mode": false,
+            "mode": state.place_mode.name(),
+            "block": block,
+            "rotation": state.rotation,
+            "is_building": state.is_building,
+            "command_mode": state.command_mode,
+            "queue_mode": state.queue_mode,
             "cursor": serde_json::Value::Null,
-            "line_plans": [],
-            "select_plans": [],
-            "player_plans_mirror": 0,
-            "selected_units": [],
-            "command_buildings": [],
-            "command_rect": serde_json::Value::Null,
-            "control_groups": [],
+            "line_plans": line_plans,
+            "select_plans": state.select_plans.len(),
+            "player_plans_mirror": state.last_plans.len(),
+            "selected_units": selected,
+            "command_buildings": buildings,
+            "command_rect": state.command_rect,
+            "control_groups": groups,
+            "last_action": self.bridge.last_action,
+            "action_count": self.bridge.action_count,
             "locks": self.locks.names(),
             "focus": focus,
             "emitted_commands": [],
         });
         GString::from(&value.to_string())
+    }
+
+    /// Last placement-line preview (`[{x,y,rotation,block}]`).
+    #[func]
+    pub fn placement_preview_json(&self) -> GString {
+        GString::from(self.bridge.preview_json.as_str())
+    }
+
+    /// `move_x`/`move_y` binding axis (`MindCamera2D` poll).
+    #[func]
+    pub fn pan_axis(&self) -> Vector2 {
+        let (x, y) = self.bridge.pan_axis(&self.bindings);
+        Vector2::new(x, y)
+    }
+
+    /// `boost` binding held (`MindCamera2D` poll).
+    #[func]
+    pub fn boost_pressed(&self) -> bool {
+        self.bridge.key_down(&self.bindings, ids::BOOST)
+    }
+
+    /// `pan` binding held (mouse-forward/middle pan).
+    #[func]
+    pub fn pan_pressed(&self) -> bool {
+        self.bridge.key_down(&self.bindings, ids::PAN)
+    }
+
+    /// Toggles RTS command mode (`Binding.command_mode`).
+    #[func]
+    pub fn toggle_command_mode(&mut self) -> bool {
+        self.bridge.toggle_command_mode();
+        self.bridge.controller.state.command_mode
+    }
+
+    /// Whether command mode is active.
+    #[func]
+    pub fn command_mode(&self) -> bool {
+        self.bridge.controller.state.command_mode
+    }
+
+    /// Feeds the selectable-unit list (`[{id,type,x,y,team,commandable}]`).
+    #[func]
+    pub fn set_selectable_units_json(&mut self, json: GString) -> i64 {
+        self.bridge.set_selectable_units_json(&json.to_string()) as i64
+    }
+
+    /// Current RTS selection as a JSON id array.
+    #[func]
+    pub fn selection_json(&self) -> GString {
+        let ids: Vec<i32> = self
+            .bridge
+            .controller
+            .state
+            .selected_units
+            .iter()
+            .copied()
+            .collect();
+        GString::from(
+            serde_json::Value::Array(ids.into_iter().map(serde_json::Value::from).collect())
+                .to_string()
+                .as_str(),
+        )
+    }
+
+    /// Sets a unit stance on the current selection (`setUnitStance`).
+    #[func]
+    pub fn set_unit_stance(&mut self, stance: i64, enabled: bool) {
+        self.bridge.set_stance(stance.max(0) as u16, enabled);
+    }
+
+    /// Selects a buildable block by name and syncs the placement state.
+    #[func]
+    pub fn select_block_by_name(&mut self, name: GString) -> bool {
+        let Some(mut host) = self.bridge.host.clone() else {
+            return false;
+        };
+        let name_text = name.to_string();
+        if !host.bind_mut().select_block(name) {
+            return false;
+        }
+        let guard = host.bind();
+        if let Some(content) = guard.content_registry()
+            && let Some(id) = content.block_id(&name_text)
+        {
+            self.bridge.controller.state.select_block(Some(id));
+        }
+        true
+    }
+
+    /// Rotates the pending placement 90° (`Binding.rotate`).
+    #[func]
+    pub fn rotate_placement(&mut self) {
+        self.bridge.rotate_placement(&self.bindings);
+    }
+
+    /// Rotates the placed building under the cursor or the pending placement.
+    #[func]
+    pub fn rotate_placed(&mut self) {
+        self.bridge.rotate_under_cursor(&self.bindings);
+    }
+
+    /// Clears the selected block (`Binding.clear_building`).
+    #[func]
+    pub fn clear_building(&mut self) {
+        self.bridge.controller.state.select_block(None);
+    }
+
+    /// Toggles placement building pause (`Binding.pause_building`).
+    #[func]
+    pub fn set_building_paused(&mut self, paused: bool) {
+        self.bridge.controller.state.is_building = !paused;
+    }
+
+    /// Sets the active catalogue category for the `1`..`0` binds.
+    #[func]
+    pub fn set_catalog_category(&mut self, index: i64) {
+        self.bridge.catalog_category = index.max(0) as usize;
+        let _ = self.bridge.select_catalog_block(0);
+    }
+
+    /// Submits a building config (`tileConfig`) through the sim command queue.
+    ///
+    /// `kind` is `none`/`string`/`content`/`item`/`number`/`bool`; content-ish
+    /// kinds carry the content name in `value`.
+    #[func]
+    pub fn configure_building(&mut self, x: i32, y: i32, kind: GString, value: GString) -> bool {
+        let kind = kind.to_string();
+        let value = value.to_string();
+        let config = match kind.as_str() {
+            "none" => ConfigValue::None,
+            "number" => match value.parse::<f64>() {
+                Ok(number) => ConfigValue::Number(number),
+                Err(_) => return false,
+            },
+            "bool" => ConfigValue::Bool(value == "true" || value == "1"),
+            _ => ConfigValue::String(value),
+        };
+        let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
+            return false;
+        };
+        self.bridge
+            .emit_action(mind_core::input::RemoteAction::Configure {
+                x,
+                y,
+                value: config,
+            });
+        true
+    }
+
+    /// Withdraws/deposits an item at a block (`tryDropItems`/`requestItem`).
+    #[func]
+    pub fn transfer_item(&mut self, x: i32, y: i32, item: GString, amount: i64, deposit: bool) {
+        self.bridge
+            .transfer_item(x, y, &item.to_string(), amount as i32, deposit);
+    }
+
+    /// Payload pickup (`[`): `requestUnitPayload` at the cursor.
+    #[func]
+    pub fn pickup_payload(&mut self) {
+        self.bridge.pickup_payload();
+    }
+
+    /// Payload drop (`]`): `requestDropPayload` at the cursor.
+    #[func]
+    pub fn drop_payload(&mut self) {
+        self.bridge.drop_payload();
+    }
+
+    /// Latches `keybinds.json` into `BindingState` (rebind dialogs call this).
+    #[func]
+    pub fn reload_bindings(&mut self) {
+        self.bindings = bindings::load();
     }
 
     /// `/root/Spine/Input` mobile state JSON (plan-14 mobile HUD).
