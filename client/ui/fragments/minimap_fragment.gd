@@ -2,11 +2,16 @@
 ## Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
 ## Source: core/src/mindustry/ui/fragments/MinimapFragment.java (plan 14 §3.5, M4).
 ##
-## Fullscreen minimap: hosts the `MindMinimap` widget, captures scroll/keys and
+## Fullscreen minimap: hosts the `MindMinimapWidget`, captures scroll/keys and
 ## pans/zooms the camera (plan 15). The widget's pan/zoom signals are forwarded
-## to `MindUi`/the camera host; draw content is plan 16's.
+## to the `MindCamera2D` host; terrain/entity pixels come from the native
+## `MindMinimap` provider the widget consumes. Left-tap or ESC (via `UiRoot`)
+## hides the overlay.
 
 extends Control
+
+## Last absolute widget zoom, converted into a `Renderer.scaleCamera` step.
+var _last_zoom := 1.0
 
 @onready var minimap: MindMinimapWidget = get_node_or_null("Center/Minimap")
 
@@ -22,17 +27,31 @@ func _ready() -> void:
 
 
 func _on_pan(world_delta: Vector2) -> void:
-	# Forwarded to the plan-15 camera host; the name is frozen by §3.11.
 	var camera := get_node_or_null("/root/Spine/World/Camera2D")
-	if camera != null and camera.has_method("pan_by"):
-		camera.call("pan_by", world_delta)
+	if camera == null or not camera.has_method("pan_to"):
+		return
+	var position: Vector2 = camera.get("position")
+	camera.call("pan_to", position.x + world_delta.x, position.y + world_delta.y)
 
 
+## `Renderer.scaleCamera`: 4.0 is `ZOOM_STEP_DIVISOR`, so a factor ratio `r`
+## becomes the step `(r - 1) * 4`.
 func _on_zoom(factor: float) -> void:
 	var camera := get_node_or_null("/root/Spine/World/Camera2D")
-	if camera != null and camera.has_method("zoom_by"):
-		camera.call("zoom_by", factor)
+	if camera == null or not camera.has_method("zoom_by"):
+		return
+	var step := (factor / maxf(_last_zoom, 0.0001) - 1.0) * 4.0
+	_last_zoom = factor
+	if absf(step) > 0.0001:
+		camera.call("zoom_by", step)
 
 
+## `MinimapFragment.toggle`: left-tap on the map (or a second key press) closes.
 func _on_tapped() -> void:
+	toggle()
+
+
+func toggle() -> void:
 	visible = not visible
+	if visible:
+		move_to_front()

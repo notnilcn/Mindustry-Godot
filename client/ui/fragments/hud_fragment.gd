@@ -30,8 +30,10 @@ var _game_over_shown := false
 @onready var waiting_banner: RichTextLabel = get_node_or_null("WaitingBanner")
 @onready var hud_text: RichTextLabel = get_node_or_null("CoreInfo/HudText")
 @onready var position_label: RichTextLabel = get_node_or_null("MinimapBox/Position")
+@onready var minimap_widget: MindMinimapWidget = get_node_or_null("MinimapBox/Minimap")
 
 var _skip_button: Button = null
+var _minimap_last_zoom := 1.0
 
 
 func _ready() -> void:
@@ -51,7 +53,21 @@ func _ready() -> void:
 			_hud.connect("wave_event", _on_wave_event)
 		if _hud.has_signal("sector_event"):
 			_hud.connect("sector_event", _on_sector_event)
+	_connect_minimap()
 	refresh()
+
+
+## `HudFragment.java:336-351`: the embedded minimap pans/zooms the camera and
+## left-tap opens the fullscreen fragment.
+func _connect_minimap() -> void:
+	if minimap_widget == null:
+		return
+	if not minimap_widget.pan_requested.is_connected(_on_minimap_pan):
+		minimap_widget.pan_requested.connect(_on_minimap_pan)
+	if not minimap_widget.zoom_changed.is_connected(_on_minimap_zoom):
+		minimap_widget.zoom_changed.connect(_on_minimap_zoom)
+	if not minimap_widget.tapped.is_connected(_on_minimap_tapped):
+		minimap_widget.tapped.connect(_on_minimap_tapped)
 
 
 func _process(delta: float) -> void:
@@ -111,6 +127,7 @@ func refresh() -> void:
 		position_label.visible = not position.is_empty()
 	_refresh_core_items()
 	_refresh_skip_button()
+	_refresh_loading()
 	_check_game_over()
 
 
@@ -149,13 +166,30 @@ func _refresh_core_items() -> void:
 		core_items.update_items(parsed)
 
 
+## `LoadingFragment` driver: shows the overlay while the Rust IO queue has
+## pending save/load work (`MindSimHost.io_pending`) and hides it after.
+func _refresh_loading() -> void:
+	var host := get_node_or_null("/root/Spine/SimHost")
+	if host == null or not host.has_method("io_pending"):
+		return
+	var pending := int(host.call("io_pending"))
+	var loading := get_node_or_null("/root/Spine/Ui/UiRoot/LoadingLayer/loading")
+	if loading == null:
+		return
+	var shown := bool(loading.call("is_shown")) if loading.has_method("is_shown") else false
+	if pending > 0 and not shown:
+		loading.call("set_progress", 0.0, "")
+	elif pending == 0 and shown:
+		loading.call("hide_loading")
+
+
 ## Opens the game-over dialog on the campaign loss (`gameOver`) or sector
 ## capture edge; the dialog owns the continue/menu routing.
 func _check_game_over() -> void:
 	if _hud == null:
 		return
 	var campaign := bool(_hud.get("campaign"))
-	var captured := campaign and bool(_hud.get("was_captured"))
+	var captured := campaign and bool(_hud.get("has_core")) and bool(_hud.get("was_captured"))
 	var over := bool(_hud.get("game_over"))
 	if over or captured:
 		if not _game_over_shown:
@@ -209,3 +243,29 @@ func _on_wave_event() -> void:
 
 func _on_sector_event(_kind: String, _name: String) -> void:
 	refresh()
+
+
+func _on_minimap_pan(world_delta: Vector2) -> void:
+	var camera := get_node_or_null("/root/Spine/World/Camera2D")
+	if camera == null or not camera.has_method("pan_to"):
+		return
+	var position: Vector2 = camera.get("position")
+	camera.call("pan_to", position.x + world_delta.x, position.y + world_delta.y)
+
+
+## `Renderer.scaleCamera` step from the widget's absolute zoom ratio.
+func _on_minimap_zoom(factor: float) -> void:
+	var camera := get_node_or_null("/root/Spine/World/Camera2D")
+	if camera == null or not camera.has_method("zoom_by"):
+		return
+	var step := (factor / maxf(_minimap_last_zoom, 0.0001) - 1.0) * 4.0
+	_minimap_last_zoom = factor
+	if absf(step) > 0.0001:
+		camera.call("zoom_by", step)
+
+
+## `Minimap.clicked` -> `ui.minimapfrag.toggle()`.
+func _on_minimap_tapped() -> void:
+	var fragment := get_node_or_null("/root/Spine/Ui/UiRoot/HudGroup/minimap")
+	if fragment != null and fragment.has_method("toggle"):
+		fragment.call("toggle")
