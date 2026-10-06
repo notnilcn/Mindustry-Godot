@@ -25,7 +25,8 @@ use mind_core::game::campaign_rules::CampaignRules;
 use mind_core::game::objectives::CampaignObjectiveContext;
 use mind_core::game::planet::EmptyNeighborhood;
 use mind_core::game::play::{
-    PlaySession, play_map, play_new_sector, play_sector, run_wave_campaign, sector_capture,
+    PlaySession, SectorRef, play_map, play_new_sector, play_sector, run_wave_campaign,
+    sector_capture,
 };
 use mind_core::game::rules::Rules;
 use mind_core::game::rules_event::{RulesEpoch, apply_set_rules};
@@ -402,7 +403,7 @@ impl MindCampaign {
         if let Some(host) = self.host()
             && let Some(map_rules) = host.bind().last_sector_rules().cloned()
         {
-            merge_map_rules(&mut self.session.rules, &map_rules);
+            merge_map_rules(&mut self.session.rules, &map_rules, preset_id.is_some());
         }
 
         // Install the runtime and register the live cores/spawns (GAP-9).
@@ -620,29 +621,30 @@ impl MindCampaign {
             return false;
         };
 
-        // Real inventory: the active sector's stored items (`Sector.items`).
+        // Real inventory: the stored items of every owned, non-frozen sector
+        // (`ResearchDialog.rebuildItems` aggregates `sector.items()`).
         let mut items = ItemModule::with_items(registry.items().len());
-        let sector_items: Vec<(String, i32)> = self
-            .session
-            .sector
-            .and_then(|(planet, sector)| {
-                self.campaign
-                    .as_ref()
-                    .and_then(|campaign| campaign.sector(planet, sector))
-            })
-            .map(|sector| {
-                sector
-                    .info
-                    .info
-                    .items
-                    .iter()
-                    .map(|(name, amount)| (name.clone(), *amount))
-                    .collect()
-            })
-            .unwrap_or_default();
-        for (name, amount) in &sector_items {
-            if let Some(id) = registry.item_id(name) {
-                items.add(id, *amount, i32::MAX);
+        let mut sector_entries: Vec<(SectorRef, Vec<(String, i32)>)> = Vec::new();
+        if let Some(campaign) = self.campaign.as_ref() {
+            for planet in campaign.planets.values() {
+                for sector in &planet.sectors {
+                    if !sector.has_base() || sector.is_frozen(None) {
+                        continue;
+                    }
+                    let entry: Vec<(String, i32)> = sector
+                        .info
+                        .info
+                        .items
+                        .iter()
+                        .map(|(name, amount)| (name.clone(), *amount))
+                        .collect();
+                    for (name, amount) in &entry {
+                        if let Some(id) = registry.item_id(name) {
+                            items.add(id, (*amount).max(0), i32::MAX);
+                        }
+                    }
+                    sector_entries.push(((planet.id, sector.id), entry));
+                }
             }
         }
 
@@ -665,16 +667,31 @@ impl MindCampaign {
         };
         let changed = result.complete || !result.spent.is_empty();
 
-        // Write the remaining inventory back into the sector.
-        if let Some((planet, sector)) = self.session.sector
-            && let Some(record) = self
-                .campaign
-                .as_mut()
-                .and_then(|campaign| campaign.sector_mut(planet, sector))
-        {
-            for (name, _) in &sector_items {
-                let left = registry.item_id(name).map(|id| items.get(id)).unwrap_or(0);
-                record.info.info.items.insert(name.clone(), left);
+        // Deduct the spent stacks from the aggregated sectors in order.
+        for spent in &result.spent {
+            let Some(name) = registry.item(spent.item).map(|item| item.name.clone()) else {
+                continue;
+            };
+            let mut remaining = spent.amount;
+            for ((planet, sector), entry) in &mut sector_entries {
+                if remaining <= 0 {
+                    break;
+                }
+                let Some((_, amount)) =
+                    entry.iter_mut().find(|(entry_name, _)| entry_name == &name)
+                else {
+                    continue;
+                };
+                let used = remaining.min((*amount).max(0));
+                *amount -= used;
+                remaining -= used;
+                if let Some(record) = self
+                    .campaign
+                    .as_mut()
+                    .and_then(|campaign| campaign.sector_mut(*planet, *sector))
+                {
+                    record.info.info.items.insert(name.clone(), *amount);
+                }
             }
         }
         // Newly unlocked content may auto-unlock dependent zero-cost nodes.
@@ -1259,14 +1276,20 @@ impl MindCampaign {
 }
 
 /// Merges the loaded map/generator's wave rules into the session rules without
-/// clobbering the preset/campaign fold (`World.loadSector` ordering).
-fn merge_map_rules(session: &mut Rules, map: &Rules) {
-    if map.win_wave > 0 && session.win_wave == 0 {
-        session.win_wave = map.win_wave;
-    }
+/// clobbering the preset/campaign fold (`World.loadSector` ordering). For a
+/// preset-launched sector the preset wins; a planet-generated sector adopts the
+/// generator's `generate_rules` wave/win settings.
+fn merge_map_rules(session: &mut Rules, map: &Rules, has_preset: bool) {
     if !map.spawns.is_empty() {
         session.spawns = map.spawns.clone();
     }
+    if has_preset {
+        return;
+    }
+    session.waves = map.waves;
+    session.win_wave = map.win_wave;
+    session.attack_mode = map.attack_mode;
+    session.wave_spacing = map.wave_spacing;
 }
 
 /// Sanitizes a save-slot name into a file stem (alphanumerics, `-`, `_`).
