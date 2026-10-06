@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "updated": "2026-10-06T10:03:46+00:00",
+  "updated": "2026-10-06T10:12:31+00:00",
   "findings": [
     {
       "id": "EV-0001",
@@ -761,12 +761,17 @@
       "repro": "scenario settings_ui (Godot leg): menu > Settings > Graphics; read settings_rows_json('graphics') uiscale and DisplayServer window content_scale_factor",
       "evidence": [
         "runs/20261006-172828-settings_ui/godot/state-settings-layout.json",
-        "runs/20261006-172828-settings_ui/godot/step-03-settings-graphics.png"
+        "runs/20261006-172828-settings_ui/godot/step-03-settings-graphics.png",
+        "runs/20261006-100520-ev0025-0032-verify/godot/state-ev0025-0032-verify.json",
+        "runs/20261006-100520-ev0025-0032-verify/godot/step-02-uiscale-150.png",
+        "runs/20261006-100520-ev0025-0032-verify/report.md"
       ],
-      "notes": [],
+      "notes": [
+        "2026-10-06T10:11:31+00:00: [loop ?] Partial at HEAD 60398e4 (fix 48298b6), window 1152x648, log cleared. APPLY HALF FIXED: content_scale_factor now equals max(uiscale,25)/100 at boot, pid-stamped for uiscale 100->1.0 (pid 1185310), 150->1.5 (pids 1185937/1188374, viewport 768x432), 25 (store clamps <25)->0.25 (pid 1186254), 200 (set by a concurrent session)->2.0 (pid 1187755, viewport 576x324). Visual step-02-uiscale-150.png shows the whole window scaled 1.5x. REMAINING: the reference also prompts a restart when the value changes (Control.java uiscale.reset countdown), and the port shows no notice - settings_menu_dialog._set_value only calls MindUi.settings_set, and settings_set('uiscale',120) left dialog_stack/has_dialog/has_field unchanged; grep finds no uiscale notice in client/ui (only language_dialog emits @language.restart). Keep open for the missing restart prompt."
+      ],
       "plan": "14",
       "first_seen": "2026-10-06T07:58:09+00:00",
-      "last_verified": "2026-10-06T07:58:09+00:00"
+      "last_verified": "2026-10-06T10:11:31+00:00"
     },
     {
       "id": "EV-0026",
@@ -928,7 +933,7 @@
       "id": "EV-0032",
       "area": "ui/settings",
       "severity": "S3",
-      "status": "open",
+      "status": "verified-fixed",
       "title": "Settings dialog body is shorter than the reference: half the Game rows and the Developer Options rail entry need scrolling",
       "expected": "Java at 1152x648: Settings Game pane shows Save Interval plus 9 check rows and the full 7-entry category rail without scrolling (java/step-java-settings-game.png)",
       "actual": "Godot: Body scroll viewport is only 316px tall (y 162..478); only 5 of 10 check rows (y 229..437) are visible and the 7th rail entry Developer Options (y 486..536) is below the viewport at scroll 0; the pane still scrolls (max 642) after the label-wrapping fix shortened the slider header from 130px to 26px",
@@ -936,14 +941,24 @@
       "evidence": [
         "runs/20261006-192439-ev0020-0030-verify/godot/state-01-settings-game.json",
         "runs/20261006-192439-ev0020-0030-verify/godot/step-01-settings-game-mshot.png",
-        "runs/20261006-192439-ev0020-0030-verify/java/step-java-settings-game.png"
+        "runs/20261006-192439-ev0020-0030-verify/java/step-java-settings-game.png",
+        "runs/20261006-100520-ev0025-0032-verify/godot/state-ev0025-0032-verify.json",
+        "runs/20261006-100520-ev0025-0032-verify/godot/step-01-settings-game.png",
+        "runs/20261006-100520-ev0025-0032-verify/diff/settings-game-java-vs-godot.json",
+        "runs/20261006-100520-ev0025-0032-verify/report.md",
+        "runs/20261006-195955-ev0025-0032-verify/godot/state-01-settings-game-fixed.json",
+        "runs/20261006-195955-ev0025-0032-verify/godot/state-02-settings-game-pid1185310.json",
+        "runs/20261006-195955-ev0025-0032-verify/godot/step-01-settings-game-fixed-mshot.png",
+        "runs/20261006-195955-ev0025-0032-verify/java/step-java-settings-game.png"
       ],
       "notes": [
-        "Filed from the EV-0021 re-check: EV-0021's filed symptom (all checks below the pane, 130px slider header) is fixed, but the pane height difference remains. Java visibly fits 9 checks plus the rail; Godot fits 5 checks and clips the rail."
+        "Filed from the EV-0021 re-check: EV-0021's filed symptom (all checks below the pane, 130px slider header) is fixed, but the pane height difference remains. Java visibly fits 9 checks plus the rail; Godot fits 5 checks and clips the rail.",
+        "2026-10-06T10:11:31+00:00: [loop ?] Fresh in-engine repro at HEAD 60398e4 (fix ba8203c), pid 1185310, window 1152x648, uiscale 1.0, log cleared first; menu > Settings. Settings panel is now 758x608 at (197,20) (was 758x400 at (197,124)); body scroll viewport y=58 h=524 (was y=162 h=316); all 7 category rail entries visible at y=58..382 including Developer Options (was clipped); 8 Game check rows fully inside the viewport (10 rows at y=125..593, h=45; was 4). Java reference at 1152x648 shows the full rail and ~9 rows; the port now matches structurally. Visual: step-01-settings-game.png.",
+        "2026-10-06T10:12:31+00:00: [loop ?] Fresh in-engine repro at HEAD ba8203c (live-loop dumps pids 1187991/1188913/1185310, 1152x648, uiscale 100/factor 1.0): panel 758x608 (y=20; viewport-40), Body 742x524 (y 58..582; was 316 y162..478); 10 Game checks y=125..593 stride 52 -> 8 fully inside + 9th starts inside with its label y=550 h=26 fully inside (4px row padding clipped), 10th (commandmodehold, y=593) below; all 7 rail entries fully inside incl. Developer Options y=382..432. Java Game table is likewise saveinterval + 10 checks (SettingsMenuDialog.java:373-416). Filed symptom (half the rows + Dev Options needing scrolling) no longer reproduces. Residual: 10th check still needs scrolling; live body 524 vs 538 headless-probe figure."
       ],
       "plan": "14",
       "first_seen": "2026-10-06T09:39:52+00:00",
-      "last_verified": "2026-10-06T09:39:52+00:00"
+      "last_verified": "2026-10-06T10:12:31+00:00"
     },
     {
       "id": "EV-0033",
