@@ -725,6 +725,32 @@ mod tests {
         assert!(spawned, "tank-assembler produced vanquish");
     }
 
+    /// gap5 GAP-4 / K-4: `basic-assembler-module` registers its tier with the
+    /// adjacent assembler (`UnitAssemblerModuleBuild.findLink`/`checkTier`).
+    #[test]
+    fn assembler_module_registers_tier() {
+        use crate::world::BuildHarness;
+
+        let mut harness = BuildHarness::new(20, 20, 7);
+        let assembler = harness
+            .content()
+            .block_id("tank-assembler")
+            .expect("tank-assembler");
+        let module = harness
+            .content()
+            .block_id("basic-assembler-module")
+            .expect("basic-assembler-module");
+        assert!(harness.place(7, 7, assembler, 0, true));
+        assert!(harness.place(12, 7, module, 0, true));
+        let entity = harness.build_at(7, 7).expect("assembler");
+        let tier = harness
+            .world
+            .get::<UnitAssembler>(entity)
+            .map(|assembler| assembler.module_tier)
+            .unwrap_or(0);
+        assert_eq!(tier, 1, "module raised the assembler tier");
+    }
+
     /// gap5 GAP-12 / K-8: `unit-cargo-loader` is configured with `manifold` and
     /// spawns it through the normal behavior tick.
     #[test]
