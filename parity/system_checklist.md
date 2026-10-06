@@ -45,3 +45,4 @@ backing scenario check pending the windowed runner); budget rows **30** across 1
 - Visual/terrain parity is structural + Rust-recorded goldens (HLP §9).
 - MCP runs are local/self-hosted only; never required on shared CI (NUD-40/A).
 - In-engine MCP evaluation runs locally via `.opencode/evals/` (one client per display); the UI/Input rows above are set from those `runs/` artifacts and `findings.json`, not code inspection.
+- `tools/ci.sh`'s bench step enforces the baseline-machine `bench/baselines.json` values (`bench_baseline` p99 1 µs, +50%); on the current loaded Linux host the release bench measures ~9× that (p50 1188 ns / p99 2375 ns, `baseline_status: fail`), so the bench gate is red for environment reasons, not a sim regression. Every other `tools/ci.sh` step (fmt/clippy/tests, parity/goldens/T0, mirror, Godot import, boundary, mind-stdb/spacetimedb, STDB drift) passes at this tip.
