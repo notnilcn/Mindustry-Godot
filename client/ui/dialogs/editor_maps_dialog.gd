@@ -132,14 +132,14 @@ func _open_export() -> void:
 	_open_chooser(false)
 
 
-func _open_chooser(open: bool) -> void:
+func _open_chooser(is_open: bool) -> void:
 	var ui := get_node_or_null("/root/MindUi")
 	if ui == null or not ui.has_method("open_dialog"):
 		return
 	ui.call(
 		"open_dialog",
 		"file_chooser",
-		JSON.stringify({"open": open, "extensions": ["msav"]})
+		JSON.stringify({"open": is_open, "extensions": ["msav"]})
 	)
 
 
