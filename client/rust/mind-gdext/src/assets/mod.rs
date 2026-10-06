@@ -10,7 +10,7 @@
 
 mod atlas;
 mod audio;
-mod bundle;
+pub(crate) mod bundle;
 mod fonts;
 pub(crate) mod loader;
 

@@ -21,7 +21,7 @@ use crate::settings;
 use mind_core::audio::{AudioSinkRes, SharedAudioLog};
 use mind_core::command::Command;
 use mind_core::content::{
-    BlockId, BlockKind, ContentRegistry, ContentType, MemoryBundle, MemoryUnlockStore,
+    BlockId, BlockKind, ContentRegistry, ContentType, ItemId, MemoryBundle, MemoryUnlockStore,
     content_counts, create_base_content,
 };
 use mind_core::determinism::SimCommand;
@@ -32,7 +32,7 @@ use mind_core::sim::{FixedStepRunner, Sim};
 use mind_core::world::WorldGrid;
 use mind_core::world::blocks::heat::HeatState;
 use mind_core::world::blocks::power::PowerGrids;
-use mind_core::world::modules::{LiquidModule, PowerModule};
+use mind_core::world::modules::{ItemModule, LiquidModule, PowerModule};
 
 /// Maximum ticks accepted by one `step()` call (defensive; UI/MCP only).
 const MAX_STEP_TICKS: i64 = 1_000_000;
@@ -1148,6 +1148,42 @@ impl MindSimHost {
         if let Some(mut tree) = self.base().get_tree_or_null() {
             tree.quit_ex().exit_code(i32::from(!ok)).done();
         }
+    }
+
+    /// Player-core item counts as JSON (`{item-name: amount}`) for the HUD core
+    /// display (`CoreItemsDisplay`). Appended for `MindHud`; read-only. Mirrors
+    /// `player.team().core()`: the first core block in entity order.
+    #[func]
+    pub fn core_items_json(&self) -> GString {
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return GString::from("{}");
+        };
+        let world = &self.sim.ecs.0;
+        for (_id, entity, comp) in self.sim.ecs.entities_by_seq() {
+            let Some(def) = content.block(comp.block) else {
+                continue;
+            };
+            if def.kind != BlockKind::CoreBlock {
+                continue;
+            }
+            let Some(module) = world.get::<ItemModule>(entity) else {
+                continue;
+            };
+            let mut items = serde_json::Map::new();
+            for (index, amount) in module.items.iter().enumerate() {
+                if *amount <= 0 {
+                    continue;
+                }
+                let Some(item) = content.item(ItemId::new(index as u16)) else {
+                    continue;
+                };
+                items.insert(item.name.clone(), serde_json::Value::from(*amount));
+            }
+            let json = serde_json::to_string(&serde_json::Value::Object(items))
+                .unwrap_or_else(|_| String::from("{}"));
+            return GString::from(json.as_str());
+        }
+        GString::from("{}")
     }
 }
 
