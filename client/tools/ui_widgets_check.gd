@@ -184,5 +184,18 @@ func _init() -> void:
 			key_width = (node as Control).size.x
 	_check(key_width > 1.0, "key label renders with a real width (got %s)" % key_width)
 
+	# The About dialog titles must resolve through the Links fallback, not render
+	# the raw `link.*.title` keys (EV-0006).
+	var about: Control = load("res://scenes/ui/dialogs/about_dialog.tscn").instantiate()
+	root.add_child(about)
+	var about_texts: Array = []
+	for node in about.find_children("*", "", true, false):
+		var text: Variant = node.get("text")
+		if text is String:
+			about_texts.append(text)
+	_check(about_texts.has("Discord"), "About renders the Discord title")
+	_check(about_texts.has("Trello"), "About renders the Trello title")
+	_check(not about_texts.has("link.trello.title"), "About does not render raw title keys")
+
 	print("UICHECK: failed=", _failures)
 	quit(1 if _failures > 0 else 0)

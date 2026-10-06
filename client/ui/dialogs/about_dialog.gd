@@ -51,7 +51,7 @@ func _build() -> void:
 
 func _add_link(link: Dictionary) -> void:
 	var button := Button.new()
-	button.text = _t("@link.%s.title" % str(link.name))
+	button.text = _link_title(str(link.name))
 	button.icon = MindWidgets.icon_texture(str(link.icon))
 	button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	button.theme_type_variation = "flatBordert"
@@ -62,6 +62,33 @@ func _add_link(link: Dictionary) -> void:
 	description.add_theme_color_override("default_color", Color(0.8, 0.8, 0.8))
 	_grid.add(description).grow_x_axis().pad(1)
 	_grid.row()
+
+
+## `Links.LinkEntry.title`: bundle override, else the `Strings.capitalize`
+## fallback over the hyphen-replaced name (`Links.java`). The bundle has no
+## `link.*.title` keys, so the fallback is what the Java reference renders
+## ("Google play", "F droid", "Dev builds").
+func _link_title(name: String) -> String:
+	var key := "link.%s.title" % name
+	var value := _t("@" + key)
+	if value != key:
+		return value
+	return _capitalize(name.replace("-", " "))
+
+
+## Arc `Strings.capitalize`: upper-cases the first character and any character
+## following `_`/`-` (which themselves become spaces).
+static func _capitalize(text: String) -> String:
+	var out := ""
+	var upper_next := true
+	for character in text:
+		if character == "_" or character == "-":
+			out += " "
+			upper_next = true
+			continue
+		out += character.to_upper() if upper_next else character
+		upper_next = false
+	return out
 
 
 func _open_link(url: String) -> void:
