@@ -51,9 +51,10 @@ evaluator edit game code.
    possible, the finding's headless repro. A red check means fix the fix, not
    claim the finding.
 
-5. **Claim the fix.** Ask the user before committing (normal commit rules).
-   Once approved, commit with a message that ends in `Fixes EV-XXXX` — that is
-   the repo's fix-claim convention. Never edit the ledger to mark it fixed.
+5. **Claim the fix.** Parity fix commits are pre-authorized: commit directly
+   without asking, with a message that ends in `Fixes EV-XXXX` — that is the
+   repo's fix-claim convention. Never push, and never edit the ledger to mark it
+   fixed.
 
 6. **Re-verify in-engine.** Launch the `evaluator` subagent again with the
    task: verify finding `EV-XXXX` by re-running its exact repro, update the

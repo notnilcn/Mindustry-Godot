@@ -12,7 +12,7 @@ displays are what makes the Java legs truly parallel.
 Start a single `opencode --auto` in the main checkout and paste:
 
 ```
-/parity-parallel 1=ui/menu 2=input --iterations 2
+/parity-parallel 1=ui/menu 2=input 3=campaign --iterations 3
 ```
 
 The primary agent is only an orchestrator: it calls
@@ -52,7 +52,7 @@ Loop ids are 1-based and encoded in environment variables (`lib/loop-vars.sh`):
 
 All loops share the **main checkout's ledger** (`PARITY_LEDGER`). `record_finding.py`
 flock-serializes writes, and `claim`/`release` make picking a finding atomic, so
-two loops never fix the same `EV-####`.
+concurrent loops never fix the same `EV-####`.
 
 ## Start a loop
 
@@ -145,5 +145,7 @@ every sibling loop's server on the host.
 
 ## Budget
 
-The host renders with Mesa llvmpipe (CPU). Start with two loops and watch CPU
-and FPS (16 cores / 14 GiB here); a third loop is likely to contend.
+The launcher supports any number of loop ids. The host renders with Mesa
+llvmpipe (CPU); run up to three loops and watch CPU, RAM and FPS (16 cores /
+14 GiB here). Drop back a loop if an editor or game stops responding, if FPS
+collapses, or if the host starts swapping.

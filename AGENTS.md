@@ -112,6 +112,8 @@ a finding without an artifact is not a finding.
 - **Keep parity pinned.** Content IDs, `ContentType` ordinals, entity field order, bundle keys
   and sprite region names are append-only ABI. A change touching a `parity/checksum_registry.json`
   contributor bumps `CHECKSUM_VERSION` and re-records every golden in the same change.
+- **Parity fix commits are pre-authorized.** Commit each verified fix directly without asking,
+  with `Fixes EV-####` in the message; never push.
 - **Verify before finishing.** Run the applicable checks above; use `tools/ci.sh` for a
   full gate. New files are UTF-8, LF line endings, no BOM, GPL-3.0-only, and cite the ported
   Mindustry source in the header when they mirror upstream.
