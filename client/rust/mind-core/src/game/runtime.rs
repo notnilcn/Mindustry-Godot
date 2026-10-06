@@ -127,6 +127,9 @@ pub fn sync_session_with_sim(
     sync.spawn_count = map_spawns.max(sync.wave_cores as i32);
     session.spawn_count = sync.spawn_count;
     session.enemies = 0;
+    // `Logic.play` starting-items half: with the cores registered, clear the
+    // default team's inventory and add the launch loadout (GAP-10).
+    super::play::apply_launch_loadout(session, content);
     sync
 }
 
@@ -466,5 +469,39 @@ mod tests {
         assert_eq!(sync.spawn_count, 1);
         assert_eq!(session.player_core_count(), 1);
         assert_eq!(session.wave_core_count(), 1);
+    }
+
+    #[test]
+    fn sync_applies_the_launch_loadout() {
+        use crate::ecs::BuildingComp as Comp;
+        use crate::io::json::content_serde::JsonItemStack;
+        use crate::world::TilePos;
+
+        let registry = content();
+        let mut session = PlaySession::new(Rules {
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        session.add_starting_items = true;
+        session.rules.loadout = vec![JsonItemStack {
+            item: Some("copper".to_owned()),
+            amount: 500,
+        }];
+        let mut world = World::new();
+        let core = registry.block_id("core-shard").expect("core");
+        world.spawn(Comp {
+            pos: TilePos::new(8, 8),
+            block: core,
+            team: TeamId(1),
+            rot: 0,
+        });
+        let _ = sync_session_with_sim(&mut session, &mut world, &registry, 0);
+        let copper = registry.item_id("copper").expect("copper");
+        let inventory = session
+            .teams
+            .inventory_ref(TeamId(1))
+            .expect("team inventory");
+        assert_eq!(inventory.get(copper), 500);
     }
 }

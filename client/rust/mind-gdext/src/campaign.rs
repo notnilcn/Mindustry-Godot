@@ -35,6 +35,7 @@ use mind_core::game::schematics::Schematics;
 use mind_core::game::tech_tree::{self, SettingsUnlockStore};
 use mind_core::game::universe::{Campaign, TurnContext};
 use mind_core::game::world_reloader::HostReloader;
+use mind_core::io::FileSystem;
 use mind_core::io::fs::{NativeFs, Paths};
 use mind_core::io::settings::SettingsStore;
 use mind_core::random::JavaRandom;
@@ -130,6 +131,16 @@ impl MindCampaign {
                 self.saves = Saves::new();
                 self.saves
                     .load(&NativeFs, &self.paths, &registry, &mut self.settings);
+                // `Saves.load` assigns sector save files; reflect them on the
+                // runtime sectors so launches take the resume branch (C-3).
+                for planet in campaign.planets.values_mut() {
+                    for sector in &mut planet.sectors {
+                        let file = self.paths.sector_save(&planet.name, sector.id as u32);
+                        if NativeFs.exists(&file) {
+                            sector.save = Some(format!("sector-{}-{}", planet.name, sector.id));
+                        }
+                    }
+                }
                 self.registry = Some(registry);
                 self.campaign = Some(campaign);
                 self.runtime_installed = false;

@@ -1318,7 +1318,11 @@ fn sector_save_path(planet_name: &str, sector: u16) -> String {
     let root = ProjectSettings::singleton()
         .globalize_path("user://")
         .to_string();
-    format!("{root}saves/sector-{planet_name}-{sector}.msav")
+    std::path::Path::new(&root)
+        .join("saves")
+        .join(format!("sector-{planet_name}-{sector}.msav"))
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// `World.loadSector` preset branch: loads the preset's `maps/<planet>/<map>.msav`
