@@ -15,6 +15,7 @@ use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
 use crate::entities::comp::Building;
+use crate::world::behavior::BuildingBehavior;
 use crate::world::block::TILE_SIZE;
 use crate::world::modules::{PowerGraphId, PowerModule};
 use crate::world::{TilePos, WorldGrid};
@@ -22,6 +23,35 @@ use crate::world::{TilePos, WorldGrid};
 use super::graph::{PowerGrids, set_status};
 use super::module::read_power_info;
 use super::{PowerNodeConfig, PowerProduction};
+
+/// `PowerNode`/`LongPowerNode` construction behavior: inserts the
+/// [`PowerNodeConfig`] the graph linker (`get_potential_links`/`link_valid`)
+/// reads. The `UpdatePowerGraph` schedule slot then merges graphs
+/// (`Logic.updateEntities`); this behavior owns only the construction half.
+#[derive(Debug, Clone, Copy)]
+pub struct PowerNodeBehavior {
+    /// `PowerNode.maxNodes`.
+    pub max_nodes: u8,
+    /// `PowerNode.laserRange` (tiles).
+    pub laser_range: f32,
+    /// `PowerNode.autolink`.
+    pub autolink: bool,
+    /// `PowerNode.sameBlockConnection`.
+    pub same_block_connection: bool,
+}
+
+impl BuildingBehavior for PowerNodeBehavior {
+    fn create_state(&self, world: &mut World, e: Entity) {
+        if world.get::<PowerNodeConfig>(e).is_none() {
+            world.entity_mut(e).insert(PowerNodeConfig {
+                max_nodes: self.max_nodes,
+                laser_range: self.laser_range,
+                autolink: self.autolink,
+                same_block_connection: self.same_block_connection,
+            });
+        }
+    }
+}
 
 /// Circle/axis-aligned-rect overlap (Arc `Intersector.overlaps(Circle, Rect)`).
 pub fn circle_rect_overlap(cx: f32, cy: f32, radius: f32, rect: [f32; 4]) -> bool {
