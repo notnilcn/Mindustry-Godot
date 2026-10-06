@@ -91,7 +91,7 @@
       "kind": "harness",
       "path": "client/rust/mind-headless/tests/golden/campaign/play.json",
       "owner_plan": "12",
-      "sha256": "c1f7291517e70ba3826fb6bcb1db416be38dc835be17a8532e88f504f0df336f"
+      "sha256": "a564cd5e44c8e1822e2da964c05fb1af6551ccd22060149fe57324f68a70c1a5"
     },
     {
       "id": "harness_campaign_rules_roundtrip",

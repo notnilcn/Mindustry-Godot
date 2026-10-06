@@ -9,7 +9,10 @@
 //! auto-insertion is performed by plan 02's `TechNode` builder.
 
 use crate::content::tech::ObjectiveSpec;
-use crate::content::{ContentRef, PlanetId, SectorId};
+use crate::content::{ContentRef, ContentRegistry, PlanetId, SectorId};
+
+use super::tech_tree;
+use super::universe::Campaign;
 
 /// Sector runtime facts the objectives read (`Sector.save`/`isCaptured`/`hasBase`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -99,6 +102,76 @@ impl Objective {
 /// Whether all `objectives` are met.
 pub fn all_complete(objectives: &[Objective], ctx: &dyn ObjectiveContext) -> bool {
     objectives.iter().all(|objective| objective.complete(ctx))
+}
+
+/// Live campaign [`ObjectiveContext`]: unlock state and sector/planet status
+/// snapshotted from the registry + runtime campaign.
+///
+/// The context owns its data so callers can hold it while mutating the registry
+/// (`tech_tree::spend`).
+pub struct CampaignObjectiveContext {
+    unlocked: std::collections::HashSet<u32>,
+    sectors: std::collections::HashMap<u16, SectorStatus>,
+    planets_with_base: std::collections::HashSet<u16>,
+}
+
+impl CampaignObjectiveContext {
+    /// Snapshots the context from a registry + runtime campaign.
+    pub fn new(registry: &ContentRegistry, campaign: &Campaign) -> Self {
+        let unlocked = registry
+            .tech()
+            .nodes
+            .iter()
+            .filter_map(|node| node.content)
+            .filter(|content| tech_tree::content_unlocked(registry, *content))
+            .map(pack_content)
+            .collect();
+        let sectors = registry
+            .sectors()
+            .iter()
+            .filter_map(|preset| {
+                let record = campaign.sector(preset.planet, preset.sector)?;
+                Some((
+                    preset.id.raw(),
+                    SectorStatus {
+                        has_save: record.has_save(),
+                        captured: record.is_captured(None),
+                        has_base: record.has_base(),
+                    },
+                ))
+            })
+            .collect();
+        let planets_with_base = campaign
+            .planets
+            .values()
+            .filter(|planet| planet.sectors.iter().any(|sector| sector.has_base()))
+            .map(|planet| planet.id.raw())
+            .collect();
+        Self {
+            unlocked,
+            sectors,
+            planets_with_base,
+        }
+    }
+}
+
+/// Packs a content reference into a `u32` key (`type ordinal << 16 | id`).
+fn pack_content(content: ContentRef) -> u32 {
+    ((content.type_.ordinal() as u32) << 16) | content.id as u32
+}
+
+impl ObjectiveContext for CampaignObjectiveContext {
+    fn is_unlocked(&self, content: ContentRef) -> bool {
+        self.unlocked.contains(&pack_content(content))
+    }
+
+    fn sector_status(&self, sector: SectorId) -> SectorStatus {
+        self.sectors.get(&sector.raw()).copied().unwrap_or_default()
+    }
+
+    fn planet_has_base(&self, planet: PlanetId) -> bool {
+        self.planets_with_base.contains(&planet.raw())
+    }
 }
 
 #[cfg(test)]

@@ -24,6 +24,41 @@ use crate::world::modules::ItemModule;
 
 use super::objectives::ObjectiveContext;
 use super::rules::Rules;
+use crate::io::settings::SettingsStore;
+
+/// [`UnlockStore`] over the persistent [`SettingsStore`] (`Core.settings`).
+///
+/// The unlock keys (`<name>-unlocked`, `req-<content>-<item>`) live in the
+/// settings store exactly like upstream; the wrapper lets the tech-tree runtime
+/// read/write them without the caller handling every key.
+pub struct SettingsUnlockStore<'a> {
+    settings: &'a mut SettingsStore,
+}
+
+impl<'a> SettingsUnlockStore<'a> {
+    /// Wraps a settings store.
+    pub fn new(settings: &'a mut SettingsStore) -> Self {
+        Self { settings }
+    }
+}
+
+impl UnlockStore for SettingsUnlockStore<'_> {
+    fn get_bool(&self, key: &str) -> bool {
+        self.settings.get_bool(key, false)
+    }
+
+    fn set_bool(&mut self, key: &str, value: bool) {
+        self.settings.put_bool(key, value);
+    }
+
+    fn get_i32(&self, key: &str) -> i32 {
+        self.settings.get_i32(key, 0)
+    }
+
+    fn set_i32(&mut self, key: &str, value: i32) {
+        self.settings.put_i32(key, value);
+    }
+}
 
 /// Result of a research spend attempt.
 #[derive(Debug, Clone, PartialEq)]
