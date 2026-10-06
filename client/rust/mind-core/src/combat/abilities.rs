@@ -540,7 +540,11 @@ fn energy_field_tick(
 ) {
     let (rx, ry) = rotate_offset(x, y, spec.x, spec.y, unit_rotation(world, entity));
     let unit_type = world.get::<UnitTypeComp>(entity).map(|comp| comp.type_id);
-    let damage_multiplier = 1.0;
+    // `EnergyFieldAbility.update`: `damage * unit.damageMultiplier`.
+    let damage_multiplier = world
+        .get::<crate::entities::comp::unit::comp::StatusComp>(entity)
+        .map(|status| status.damage_multiplier)
+        .unwrap_or(1.0);
 
     let mut candidates: Vec<(f32, Entity)> = Vec::new();
     for target in queries::in_radius(world, rx, ry, spec.range, None) {
