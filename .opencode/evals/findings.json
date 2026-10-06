@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "updated": "2026-10-06T10:33:29+00:00",
+  "updated": "2026-10-06T10:34:10+00:00",
   "findings": [
     {
       "id": "EV-0001",
@@ -378,7 +378,7 @@
       "id": "EV-0013",
       "area": "ui/hud",
       "severity": "S3",
-      "status": "open",
+      "status": "in-progress",
       "title": "In-game block picker is a text list without block or category icons",
       "expected": "Java: in-game block picker at bottom-right shows unlocked blocks as 46px icon buttons and categories as 50px icon buttons (ui.getIcon(cat.name())); locked/empty categories hidden",
       "actual": "Godot: placement panel is a 976px-wide text UI at x=354 (clipped past the 1152px viewport) with Search + category text row (Turret..Logic) + 28 icon-less text block Buttons (Duo, Scatter, ...); all category names shown",
@@ -403,11 +403,13 @@
         "2026-10-05T11:50:16+00:00: Re-ran the exact campaign_launch step-4 repro (pid 512564, 1152x648, HEAD 4df82bb + uncommitted placement-fragment icon fix). Category half of the fix works: 10/10 category-<name> Buttons are 50x50 toggles in a ButtonGroup with non-empty MindIcons glyphs (turret/liquid/units/logic added); panel is now bottom-right 640x260 with a ScrollContainer, no clipping. Block half cannot be verified fixed: Panel/Layout/Scroll/Blocks has 0 block buttons (0 with icon, 0 with text) because _rebuild() aborts at the first block on Invalid assignment of property or key 'icon_max_width' on a base object of type Button (placement_fragment.gd:135; Godot 4.7.2 has it only as theme_override_constants/icon_max_width). Filed as EV-0017. Unlock filtering residual still player-visible and part of this finding's expected text: block_catalog_json returns all 447 blocks in 10 categories (incl. editor-only rows in distribution); Java getUnlockedByCategory shows only visible+unlocked+placeable+environmentBuildable blocks and hides categories with none (PlacementFragment.java:213,771), so at Ground Zero the Java reference shows no picker at all (bottom-right is terrain, mean RGB ~157) while Godot shows the category rail + empty panel.",
         "2026-10-05T12:01:13+00:00: 2026-10-05T22:0x: Re-ran campaign_launch step 4 with EV-0017 fix in place (pid 517487, 1152x648). Icon symptom now VERIFIED in-engine: Panel/Layout/Scroll/Blocks renders 28/28 turret block Buttons, all 46x46 with non-null icons (duo 32x32, scatter 64x64); defense category 30/30 icon buttons; category rail 10/10 are 50x50 glyph toggles (non-empty MindIcons codepoints); panel 640x260 bottom-right with ScrollContainer, no clipping; distribution category 191/214 have icons. REMAINING mismatch (why this stays open): catalog is still unfiltered - MindUi.block_catalog_json returns 10 categories / 447 blocks with only {name, localized, size} per entry, no unlock/visible/placeable fields; all 10 categories render at Ground Zero where the Java reference shows no picker (PlacementFragment.getUnlockedByCategory filters visible+unlocked+placeable+environmentBuildable and hides empty categories). distribution is a 214-block catch-all of terrain/editor-only rows; its 23 text-fallback blocks (air, build1..16, armored-conveyor, legacy factories, command-center) stretch GridContainer columns so real blocks render far wider than 46px (e.g. block-conveyor actual width 208 while custom_minimum_size is 46x46). Expected text includes 'locked/empty categories hidden', which is not met; cannot mark verified-fixed.",
         "2026-10-06T10:02:58+00:00: claimed by loop-1",
-        "2026-10-06T10:03:46+00:00: released: Claim released without a fix: the shared display/bridge was continuously occupied by another session's live game client (pid 1183572, and earlier 1182113), so the evaluator could not run the required fresh twin-run for the picker at Ground Zero. No code changed. Re-claim when the display is exclusive."
+        "2026-10-06T10:03:46+00:00: released: Claim released without a fix: the shared display/bridge was continuously occupied by another session's live game client (pid 1183572, and earlier 1182113), so the evaluator could not run the required fresh twin-run for the picker at Ground Zero. No code changed. Re-claim when the display is exclusive.",
+        "2026-10-06T10:34:10+00:00: claimed by loop-1"
       ],
       "plan": "14",
       "first_seen": "2026-10-05T07:18:31+00:00",
-      "last_verified": "2026-10-06T10:03:46+00:00"
+      "last_verified": "2026-10-06T10:34:10+00:00",
+      "owner": "loop-1"
     },
     {
       "id": "EV-0014",
