@@ -43,6 +43,8 @@ zoom = Vector2(2, 2)
 
 [node name="MindEditor" type="MindEditor" parent="." unique_id=1226968200]
 
+[node name="MindPreview" type="MindPreview" parent="." unique_id=1600000011]
+
 [node name="MindPlatform" type="MindPlatform" parent="." unique_id=1187341600]
 
 [node name="Planet" type="CanvasLayer" parent="." unique_id=328291941]

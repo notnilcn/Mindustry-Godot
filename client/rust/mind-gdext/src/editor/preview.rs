@@ -132,28 +132,34 @@ impl MindPreview {
         count
     }
 
-    /// `EditorMapsDialog` provider rows: `{name, path, custom, preview}`.
+    /// `CustomGameDialog`/`EditorMapsDialog` provider rows:
+    /// `{name, path, custom, author, description, width, height, preview}`.
     #[func]
     pub fn maps_list(&self) -> Array<VarDictionary> {
         let paths = self.paths();
         let mut out = Array::<VarDictionary>::new();
         for map in self.maps.all() {
+            let (name, path, custom, author, description, width, height) = map_row_fields(map);
             let mut row = VarDictionary::new();
             row.set(
                 &GString::from("name"),
-                &GString::from(map.name()).to_variant(),
+                &GString::from(name.as_str()).to_variant(),
             );
             row.set(
                 &GString::from("path"),
-                &GString::from(
-                    std::path::Path::new(&map.file)
-                        .display()
-                        .to_string()
-                        .as_str(),
-                )
-                .to_variant(),
+                &GString::from(path.as_str()).to_variant(),
             );
-            row.set(&GString::from("custom"), &map.custom.to_variant());
+            row.set(&GString::from("custom"), &custom.to_variant());
+            row.set(
+                &GString::from("author"),
+                &GString::from(author.as_str()).to_variant(),
+            );
+            row.set(
+                &GString::from("description"),
+                &GString::from(description.as_str()).to_variant(),
+            );
+            row.set(&GString::from("width"), &width.to_variant());
+            row.set(&GString::from("height"), &height.to_variant());
             row.set(
                 &GString::from("preview"),
                 &NativeFs.exists(&preview_file(&paths, map)).to_variant(),
@@ -202,6 +208,19 @@ impl MindPreview {
     }
 }
 
+/// Plain metadata of one registered map (`maps_list` row fields).
+fn map_row_fields(map: &Map) -> (String, String, bool, String, String, i32, i32) {
+    (
+        map.name().to_owned(),
+        map.file.display().to_string(),
+        map.custom,
+        map.author().to_owned(),
+        map.description().to_owned(),
+        map.width,
+        map.height,
+    )
+}
+
 /// Binds a [`PreviewImage`] to a Godot `Texture2D` (RGBA8).
 fn bind_texture(image: &PreviewImage) -> Option<Gd<Texture2D>> {
     let data = PackedByteArray::from(image.rgba.as_slice());
@@ -222,4 +241,38 @@ fn default_root() -> PathBuf {
             .globalize_path("user://")
             .to_string(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mind_core::io::StringMap;
+
+    fn fixture_map() -> Map {
+        let mut tags = StringMap::new();
+        tags.insert("name".to_owned(), "alpha".to_owned());
+        tags.insert("author".to_owned(), "tester".to_owned());
+        tags.insert("description".to_owned(), "a test map".to_owned());
+        Map::new(
+            PathBuf::from("/tmp/maps/alpha.msav"),
+            64,
+            32,
+            tags,
+            true,
+            1,
+            -1,
+        )
+    }
+
+    #[test]
+    fn map_row_fields_carry_registry_metadata() {
+        let (name, path, custom, author, description, width, height) =
+            map_row_fields(&fixture_map());
+        assert_eq!(name, "alpha");
+        assert_eq!(path, "/tmp/maps/alpha.msav");
+        assert!(custom);
+        assert_eq!(author, "tester");
+        assert_eq!(description, "a test map");
+        assert_eq!((width, height), (64, 32));
+    }
 }

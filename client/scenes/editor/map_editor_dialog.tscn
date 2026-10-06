@@ -44,6 +44,10 @@ theme_override_constants/separation = 6
 layout_mode = 2
 text = "Editor"
 
+[node name="BackButton" type="Button" parent="LeftTools" unique_id=1600000012]
+layout_mode = 2
+text = "back"
+
 [node name="ToolGrid" type="GridContainer" parent="LeftTools" unique_id=1806637987]
 layout_mode = 2
 columns = 3
