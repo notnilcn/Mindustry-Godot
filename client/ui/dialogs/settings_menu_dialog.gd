@@ -30,10 +30,31 @@ func _ready() -> void:
 	set_title_key("@settings")
 	should_pause = true
 	super._ready()
+	_apply_dialog_size()
 	_connect_confirm()
 	_categories = _load_categories()
 	_build()
 	add_close_button()
+
+
+## Upstream `BaseDialog.setFillParent(true)` fills the parent. At 1152x648 the
+## Java reference shows the whole Game list and the full category rail; the
+## shared shell only enforces its 560x400 minimum, so grow the panel with the
+## viewport (the body's ScrollContainer still handles shorter windows).
+func _apply_dialog_size() -> void:
+	var panel := get_node_or_null("Center/Panel") as Control
+	if panel == null:
+		return
+	panel.custom_minimum_size.y = _panel_height()
+	var viewport := get_viewport()
+	if viewport != null and not viewport.size_changed.is_connected(_apply_dialog_size):
+		viewport.size_changed.connect(_apply_dialog_size)
+
+
+func _panel_height() -> float:
+	# Upstream dialog margins leave roughly this much of the viewport for the
+	# panel; the Game list needs ~9 rows plus the header to match Java.
+	return maxf(400.0, get_viewport_rect().size.y - 40.0)
 
 
 func _build() -> void:
