@@ -149,13 +149,12 @@ impl StatusApply for UnitStatusApply {
                 }
                 if let Some(mut comp) = world.get_mut::<StatusComp>(entity)
                     && let Some(entry) = comp.statuses.get_mut(index)
+                    && let Some((result, cap)) = handler.extend
                 {
-                    if let Some((result, cap)) = handler.extend {
-                        entry.effect = result;
-                        entry.duration += duration;
-                        if let Some(cap) = cap {
-                            entry.duration = entry.duration.min(cap);
-                        }
+                    entry.effect = result;
+                    entry.duration += duration;
+                    if let Some(cap) = cap {
+                        entry.duration = entry.duration.min(cap);
                     }
                 }
             }

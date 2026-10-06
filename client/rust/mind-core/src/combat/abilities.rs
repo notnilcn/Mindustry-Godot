@@ -655,9 +655,7 @@ fn buildings_in_radius(world: &World, x: f32, y: f32, radius: f32) -> Vec<(f32, 
         .iter_entities()
         .filter_map(|entity_ref| {
             let building = entity_ref.get::<Building>()?;
-            if entity_ref.get::<Health>().is_none() {
-                return None;
-            }
+            entity_ref.get::<Health>()?;
             let (bx, by) = crate::world::BuildHarness::tile_center(
                 building.tile.x() as i32,
                 building.tile.y() as i32,
@@ -746,6 +744,7 @@ fn absorb_bullets_force_field(
 
 /// `ShieldArcAbility.update` bullet shield: absorb or deflect bullets in the
 /// arc, draining `data` by the def's shield damage.
+#[allow(clippy::too_many_arguments)]
 fn shield_arc_absorb(
     world: &mut World,
     content: &ContentRegistry,
@@ -903,6 +902,7 @@ pub fn run_death_abilities(
 }
 
 /// `SpawnDeathAbility.death`.
+#[allow(clippy::too_many_arguments)]
 fn spawn_death(
     world: &mut World,
     content: &ContentRegistry,
@@ -951,8 +951,8 @@ fn liquid_explode(
         return;
     };
     let ts = crate::config::TILESIZE as f32;
-    let tx = crate::world::WorldGrid::to_tile(x) as i32;
-    let ty = crate::world::WorldGrid::to_tile(y) as i32;
+    let tx = crate::world::WorldGrid::to_tile(x);
+    let ty = crate::world::WorldGrid::to_tile(y);
     let rad = ((hit_size / ts * LIQUID_EXPLODE_RAD_SCALE) as i32).max(1);
     let real_noise = hit_size / LIQUID_EXPLODE_NOISE_MAG;
     for dx in -rad..=rad {

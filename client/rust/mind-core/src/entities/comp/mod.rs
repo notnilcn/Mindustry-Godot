@@ -9,6 +9,7 @@ pub mod building;
 pub mod health;
 pub mod markers;
 pub mod unit;
+pub mod weather;
 
 pub use base::{BaseEntity, DefId, Local, Pos, Remote, SimId, TeamComp, Vel};
 pub use building::{
@@ -17,3 +18,4 @@ pub use building::{
 };
 pub use health::{Health, hp};
 pub use markers::{Bullet, Draw, EffectState, Player, PowerGraphUpdater, Unit, WeatherState};
+pub use weather::{WeatherRuntime, apply_weather_status, update_weather_state};
