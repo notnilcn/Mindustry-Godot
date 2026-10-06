@@ -31,7 +31,7 @@ const PROVIDER_PATH := "/root/Spine/World/MinimapProvider"
 var zoom := 1.0
 var _dragging := false
 var _drag_last := Vector2.ZERO
-## Half-extent of the map in world pixels (updated from the provider texture).
+## Full map extent in world pixels (updated from the provider texture size).
 var map_extent := Vector2(200.0, 200.0)
 var _provider: Node = null
 
