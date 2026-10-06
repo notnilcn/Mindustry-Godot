@@ -3,8 +3,10 @@
 ## Source: core/src/mindustry/ui/fragments/PlanConfigFragment.java
 ##         (plan 14 §3.5, M4).
 ##
-## Build-plan configuration popup (`BuildPlan.point_config`). The plan data model
-## is plan 07/15; the M4 shell renders the frame and the apply signal.
+## Build-plan configuration popup (`BuildPlan.point_config`). The config dict is
+## `{title, options: [{name, label}], value}`; choosing an option emits
+## `plan_config_applied` with the selection. The plan-model caller (queued-plan
+## point config) is the remaining plan 07/15 seam.
 
 extends Control
 
@@ -32,4 +34,30 @@ func _rebuild() -> void:
 	for child in body.get_children():
 		child.queue_free()
 	# code-instantiated: plan-config controls come from the plan-07 point config
-	# (data-driven; placeholder until the plan model bridge lands).
+	# options (data-driven; count is runtime content).
+	var title := Label.new()
+	title.text = str(_config.get("title", ""))
+	body.add_child(title)
+	var options: Array = _config.get("options", [])
+	if options.is_empty():
+		var apply := Button.new()
+		apply.text = "OK"
+		apply.pressed.connect(func() -> void: _choose(str(_config.get("value", ""))))
+		body.add_child(apply)
+		return
+	for option in options:
+		if not (option is Dictionary):
+			continue
+		var name := str(option.get("name", ""))
+		var label := str(option.get("label", name))
+		var button := Button.new()
+		button.text = label
+		button.tooltip_text = label
+		button.pressed.connect(func() -> void: _choose(name))
+		body.add_child(button)
+
+
+func _choose(value: String) -> void:
+	_config["value"] = value
+	plan_config_applied.emit(_config.duplicate())
+	visible = false

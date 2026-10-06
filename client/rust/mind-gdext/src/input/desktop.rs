@@ -21,7 +21,7 @@ use mind_core::determinism::SimCommand;
 use mind_core::input::{
     BindingState, BindingValue, ClientPlan, DesktopController, InventoryKind, KeyBindTable,
     PayloadAction, PlaceMode, PlacementWorld, RawEvent, RemoteAction, SelectRect, SelectableUnit,
-    ids, line::LineBlock, line::LineParams, select_unit_tap, select_units_rect,
+    ids, line::LineBlock, line::LineParams, select_typed_units, select_unit_tap, select_units_rect,
 };
 use mind_core::world::TilePos;
 use mind_core::world::build::can_replace;
@@ -33,6 +33,8 @@ use crate::sim_host::MindSimHost;
 const DRAG_TILE_CAP: usize = 256;
 /// `Build.validPlace` hit radius for tap selection (world pixels).
 const UNIT_TAP_RADIUS: f32 = 11.0;
+/// Double-tap window for `selectTypedUnits` (`Time.timeSinceMillis < 300`).
+const UNIT_TAP_INTERVAL_MS: u64 = 300;
 
 /// One world interaction in flight.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -197,6 +199,13 @@ pub struct DesktopBridge {
     pub preview_json: String,
     /// Item name→dense id cache for configure/inventory commands.
     item_ids: HashMap<String, u16>,
+    /// Last unit-tap timestamp (`Time.millis`, double-tap typed select).
+    last_tap_ms: u64,
+    /// Last tapped unit type (double-tap typed select).
+    last_tap_type: Option<i32>,
+    /// A LineEdit/TextEdit owns keyboard focus (`scene.hasField()`): key edges
+    /// update held state but fire no bindings and the camera does not pan.
+    pub text_focus: bool,
 }
 
 impl Default for DesktopBridge {
@@ -223,6 +232,9 @@ impl DesktopBridge {
             effects: Vec::new(),
             preview_json: String::from("[]"),
             item_ids: HashMap::new(),
+            last_tap_ms: 0,
+            last_tap_type: None,
+            text_focus: false,
         }
     }
 
@@ -306,8 +318,33 @@ impl DesktopBridge {
         }
     }
 
+    /// Whether an axis/key binding drives the wheel (`scroll`).
+    fn axis_is_scroll(bindings: &BindingState, id: u16) -> bool {
+        match bindings.value(id) {
+            BindingValue::Axis { negative, positive } => {
+                negative.as_deref() == Some("scroll") || positive.as_deref() == Some("scroll")
+            }
+            BindingValue::Key(name) => name == "scroll",
+            BindingValue::Unset => false,
+        }
+    }
+
+    /// Whether the negative direction of an axis binding is currently held.
+    fn axis_negative(&self, bindings: &BindingState, id: u16) -> bool {
+        match bindings.value(id) {
+            BindingValue::Axis {
+                negative: Some(name),
+                ..
+            } => self.pressed.contains(name),
+            _ => false,
+        }
+    }
+
     /// X/Y pan axis from the `move_x`/`move_y` bindings.
     pub fn pan_axis(&self, bindings: &BindingState) -> (f32, f32) {
+        if self.text_focus {
+            return (0.0, 0.0);
+        }
         (
             self.key_axis(bindings, ids::MOVE_X),
             self.key_axis(bindings, ids::MOVE_Y),
@@ -319,13 +356,15 @@ impl DesktopBridge {
         match event {
             RawEvent::KeyDown { code } => {
                 let fresh = self.pressed.insert(code.clone());
-                if fresh {
+                if fresh && !self.text_focus {
                     self.key_down_event(bindings, &code);
                 }
             }
             RawEvent::KeyUp { code } => {
                 self.pressed.remove(&code);
-                self.key_up_event(bindings, &code);
+                if !self.text_focus {
+                    self.key_up_event(bindings, &code);
+                }
             }
             RawEvent::MouseMove { x, y } => {
                 self.mouse = (x, y);
@@ -381,6 +420,24 @@ impl DesktopBridge {
         match name {
             "respawn" => self.recenter_camera(),
             "rotateplaced" => self.rotate_under_cursor(bindings),
+            "rotate" => {
+                // Axis edges (`rotate` defaults to the wheel).
+                let step = if self.axis_negative(bindings, ids::ROTATE) {
+                    -1
+                } else {
+                    1
+                };
+                self.rotate_placement_step(bindings, step);
+            }
+            "zoom" => {
+                let amount = if self.axis_negative(bindings, ids::ZOOM) {
+                    -1.0
+                } else {
+                    1.0
+                };
+                self.zoom(amount);
+                self.fire_hotkey("zoom");
+            }
             "clear_building" => {
                 self.controller.state.select_block(None);
                 self.fire_hotkey(name);
@@ -460,6 +517,13 @@ impl DesktopBridge {
                 self.fire_hotkey(name);
             }
             "screenshot" => self.effects.push(Effect::Screenshot),
+            "detach_camera" => {
+                if let Some(mut camera) = self.camera.clone() {
+                    let following = camera.bind().is_following();
+                    camera.bind_mut().set_follow(!following);
+                }
+                self.fire_hotkey(name);
+            }
             _ => {}
         }
     }
@@ -534,6 +598,12 @@ impl DesktopBridge {
     }
 
     fn select_all_units(&mut self, bindings: &BindingState, factories: bool) {
+        // `selectAllUnits` only runs in command mode upstream; enabling it here
+        // gives the player a direct entry point (`command_mode` shares the
+        // `boost` key by default and is otherwise only rebind/reachable).
+        if !self.controller.state.command_mode {
+            self.toggle_command_mode();
+        }
         let screens = self.key_down(bindings, ids::SELECT_ACROSS_SCREEN);
         if factories {
             // Command buildings come from the sim selection feed.
@@ -669,7 +739,13 @@ impl DesktopBridge {
 
     /// Rotates the pending placement by +1 (`input.rotation`).
     pub fn rotate_placement(&mut self, bindings: &BindingState) {
-        self.controller.state.rotation = (self.controller.state.rotation + 1) % 4;
+        self.rotate_placement_step(bindings, 1);
+    }
+
+    /// Rotates the pending placement by `step` (`input.rotation`).
+    fn rotate_placement_step(&mut self, bindings: &BindingState, step: i32) {
+        self.controller.state.rotation =
+            (self.controller.state.rotation as i32 + step).rem_euclid(4) as u8;
         self.controller.state.override_line_rotation = true;
         if let Some(drag) = self.drag
             && drag.kind == DragKind::Place
@@ -677,6 +753,13 @@ impl DesktopBridge {
             self.update_place_line(bindings, drag.start, drag.last);
         }
         self.fire_hotkey("rotate");
+    }
+
+    /// `Renderer.scaleCamera(amount)` from the `zoom` binding.
+    fn zoom(&mut self, amount: f32) {
+        if let Some(mut camera) = self.camera.clone() {
+            camera.bind_mut().zoom_by(amount as f64);
+        }
     }
 
     /// Opens the config UI or content info for the block under the cursor.
@@ -801,6 +884,12 @@ impl DesktopBridge {
         Some(((x as f32 + 0.5) * unit, (y as f32 + 0.5) * unit))
     }
 
+    /// Closest commandable unit under the cursor (`tapCommandUnit`).
+    fn tap_unit_at_cursor(&self) -> Option<i32> {
+        let (x, y) = self.cursor_world()?;
+        select_unit_tap(&self.selectable, 0, x, y, UNIT_TAP_RADIUS)
+    }
+
     fn mouse_button(&mut self, bindings: &BindingState, button: &str, down: bool) {
         match (button, down) {
             ("left", true) => self.left_press(bindings),
@@ -817,6 +906,13 @@ impl DesktopBridge {
             return;
         };
         if self.controller.state.command_mode {
+            // `Binding.control` + `Binding.select`: possess the unit under the
+            // cursor (`Call.unitControl`).
+            if self.key_down(bindings, ids::CONTROL)
+                && let Some(id) = self.tap_unit_at_cursor()
+            {
+                self.emit_action(RemoteAction::UnitControl { unit: Some(id) });
+            }
             self.drag = Some(Drag {
                 kind: DragKind::SelectRect,
                 start: (x, y),
@@ -1040,9 +1136,27 @@ impl DesktopBridge {
             if let Some((x, y)) = self.cursor_world() {
                 match select_unit_tap(&self.selectable, 0, x, y, UNIT_TAP_RADIUS) {
                     Some(id) => {
+                        let now_ms = Time::singleton().get_ticks_msec().max(0) as u64;
+                        let type_id = self
+                            .selectable
+                            .iter()
+                            .find(|unit| unit.id == id)
+                            .map(|unit| unit.type_id);
+                        let double_tap = type_id.is_some()
+                            && type_id == self.last_tap_type
+                            && now_ms.saturating_sub(self.last_tap_ms) < UNIT_TAP_INTERVAL_MS;
                         self.controller.state.selected_units.clear();
-                        self.controller.state.selected_units.push(id);
+                        if double_tap {
+                            // Double tap selects every unit of the tapped type.
+                            let mut out = SmallVec::new();
+                            select_typed_units(&self.selectable, 0, type_id.unwrap_or(0), &mut out);
+                            self.controller.state.selected_units = out;
+                        } else {
+                            self.controller.state.selected_units.push(id);
+                        }
                         self.controller.state.tapped_one = true;
+                        self.last_tap_ms = now_ms;
+                        self.last_tap_type = type_id;
                     }
                     None => {
                         self.controller.state.selected_units.clear();
@@ -1067,11 +1181,17 @@ impl DesktopBridge {
     }
 
     /// `update()` scroll gating: rotate the placement, else zoom the camera.
+    /// Honours the `rotate`/`zoom` bindings (both default to `scroll`).
     fn scroll(&mut self, bindings: &BindingState, delta: f32) {
         if delta == 0.0 {
             return;
         }
-        if self.controller.state.is_building && self.controller.state.block.is_some() {
+        let rotate_on_scroll = Self::axis_is_scroll(bindings, ids::ROTATE);
+        let zoom_on_scroll = Self::axis_is_scroll(bindings, ids::ZOOM);
+        if rotate_on_scroll
+            && self.controller.state.is_building
+            && self.controller.state.block.is_some()
+        {
             let step = if delta > 0.0 { 1 } else { -1 };
             self.controller.state.rotation =
                 (self.controller.state.rotation as i32 + step).rem_euclid(4) as u8;
@@ -1083,7 +1203,7 @@ impl DesktopBridge {
             }
             return;
         }
-        if let Some(mut camera) = self.camera.clone() {
+        if zoom_on_scroll && let Some(mut camera) = self.camera.clone() {
             camera.bind_mut().zoom_by(delta as f64);
         }
     }
@@ -1186,8 +1306,10 @@ impl DesktopBridge {
         }
     }
 
-    /// Camera recenter on the player core (`Binding.respawn`).
+    /// Camera recenter on the player core (`Binding.respawn`); also clears any
+    /// possessed unit (`Call.unitClear`).
     pub fn recenter_camera(&mut self) {
+        self.emit_action(RemoteAction::UnitClear);
         if let Some(mut camera) = self.camera.clone() {
             camera.bind_mut().recenter_player();
         }

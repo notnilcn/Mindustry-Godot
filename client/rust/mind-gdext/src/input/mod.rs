@@ -104,16 +104,20 @@ impl INode for MindInput {
     fn input(&mut self, event: Gd<godot::classes::InputEvent>) {
         let mut translated = Vec::new();
         events::translate(&event, &mut translated);
+        self.bridge.text_focus = self.text_field_focused();
         for raw in translated {
-            // World mouse presses: skip when a STOP-filter `Control` is under
-            // the cursor (upstream `!Core.scene.hasMouse()`); otherwise consume
-            // the event so `MindSimHost::unhandled_input` cannot double-place.
+            // World mouse presses: skip when a STOP-filter `Control` owns the
+            // event position (upstream `!Core.scene.hasMouse()`); otherwise
+            // consume the event so `MindSimHost::unhandled_input` cannot
+            // double-place. The positional walk is used (not
+            // `gui_get_hovered_control`) so synthetic/MCP clicks at viewport
+            // coordinates test the same point.
             let is_press = matches!(
                 &raw,
                 RawEvent::MouseButton { button, down: true, .. }
                     if button == "left" || button == "right" || button == "middle"
             );
-            if is_press && self.ui_captures() {
+            if is_press && self.ui_captures(&raw) {
                 continue;
             }
             self.bridge.handle(&self.bindings, raw);
@@ -129,6 +133,7 @@ impl INode for MindInput {
         // here; real events are dispatched immediately in `input`.
         let pending = std::mem::take(&mut self.pending);
         self.last_event_count = pending.len();
+        self.bridge.text_focus = self.text_field_focused();
         for event in pending {
             self.bridge.handle(&self.bindings, event);
         }
@@ -203,18 +208,55 @@ impl MindInput {
         self.bridge.set_catalog(categories);
     }
 
-    /// Whether a STOP-filter `Control` owns the mouse (upstream `hasMouse`).
-    fn ui_captures(&self) -> bool {
-        let Some(mut viewport) = self.base().get_viewport() else {
+    /// Whether a STOP-filter `Control` owns the given event position
+    /// (upstream `Core.scene.hasMouse()`). PASS controls fall through to
+    /// `_unhandled_input`, so only STOP controls (or a STOP ancestor) block the
+    /// world.
+    fn ui_captures(&self, event: &RawEvent) -> bool {
+        let RawEvent::MouseButton { x, y, .. } = event else {
             return false;
         };
-        let hovered = viewport.call("gui_get_hovered_control", &[]);
-        let Ok(control) = hovered.try_to::<Gd<Control>>() else {
-            return false;
-        };
-        // `mouse_filter`: 0 = STOP, 1 = PASS, 2 = IGNORE. PASS controls fall
-        // through to `_unhandled_input`, so only STOP blocks the world.
-        matches!(control.get("mouse_filter").try_to::<i64>(), Ok(0))
+        let tree = self.base().get_tree();
+        let root = tree.get_root();
+        let controls = root.find_children("*");
+        let point = Vector2::new(*x, *y);
+        // Later siblings are drawn on top: walk in reverse tree order.
+        for index in (0..controls.len()).rev() {
+            let Some(node) = controls.get(index) else {
+                continue;
+            };
+            let Ok(control) = node.clone().try_cast::<Control>() else {
+                continue;
+            };
+            if !control.is_visible_in_tree() {
+                continue;
+            }
+            if matches!(control.get("mouse_filter").try_to::<i64>(), Ok(2)) {
+                continue;
+            }
+            if !control.get_global_rect().contains_point(point) {
+                continue;
+            }
+            // `mouse_filter`: 0 = STOP, 1 = PASS, 2 = IGNORE.
+            if matches!(control.get("mouse_filter").try_to::<i64>(), Ok(0)) {
+                return true;
+            }
+            let mut parent = control.get_parent();
+            while let Some(current) = parent {
+                if let Ok(parent_control) = current.clone().try_cast::<Control>() {
+                    if !parent_control.is_visible_in_tree() {
+                        break;
+                    }
+                    match parent_control.get("mouse_filter").try_to::<i64>() {
+                        Ok(0) => return true,
+                        Ok(2) => break,
+                        _ => {}
+                    }
+                }
+                parent = current.get_parent();
+            }
+        }
+        false
     }
 
     /// Consumes the current input dispatch (prevents `unhandled_input`).
@@ -222,6 +264,19 @@ impl MindInput {
         if let Some(mut viewport) = self.base().get_viewport() {
             viewport.call("set_input_as_handled", &[]);
         }
+    }
+
+    /// Whether a `LineEdit`/`TextEdit` owns keyboard focus
+    /// (`Core.scene.hasField()`): field typing must not fire gameplay binds.
+    fn text_field_focused(&self) -> bool {
+        let Some(mut viewport) = self.base().get_viewport() else {
+            return false;
+        };
+        let owner = viewport.call("gui_get_focus_owner", &[]);
+        let Ok(control) = owner.try_to::<Gd<Control>>() else {
+            return false;
+        };
+        control.is_class("LineEdit") || control.is_class("TextEdit")
     }
 
     /// Resolves UI effects produced by the desktop bridge.
