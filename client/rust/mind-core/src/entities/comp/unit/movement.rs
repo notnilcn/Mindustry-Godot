@@ -39,6 +39,8 @@ pub fn update_kinematics(
     // kind-specific movement bodies; the live unit loop may instead call
     // [`crate::combat::damage::status::update_unit_status`] directly.
     crate::combat::damage::status::update_unit_status(world, content, entity);
+    // `for(Ability a : abilities) a.update(self())` at the end of `Unit.update`.
+    crate::combat::abilities::update_unit_abilities(world, content, entity);
 
     let Some(unit_def) = world
         .get::<UnitTypeComp>(entity)

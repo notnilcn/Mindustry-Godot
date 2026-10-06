@@ -9,6 +9,7 @@
 //! goes through [`crate::determinism`] and all view/FX output through the
 //! [`view::FxSink`] seam (plan 17).
 
+pub mod abilities;
 pub mod bullet;
 pub mod damage;
 pub mod fires;
@@ -18,6 +19,10 @@ pub mod puddles;
 pub mod targeting;
 pub mod view;
 
+pub use abilities::{
+    AbilityComp, AbilityState, init_unit_abilities, run_death_abilities, update_abilities,
+    update_unit_abilities,
+};
 pub use bullet::{Bullet, BulletData, BulletSpawn, create};
 pub use harness::CombatHarness;
 pub use targeting::TargetQueries;

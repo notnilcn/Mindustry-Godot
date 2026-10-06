@@ -167,6 +167,9 @@ fn spawn_single(
     ));
 
     insert_kind_components(world, entity, unit, x, y, rotation);
+    // `UnitType.setType`: copy the type's abilities (`Ability.created` runs
+    // `ForceField`/`ShieldArc` max-shield initialization).
+    crate::combat::abilities::init_unit_abilities(world, entity, unit);
     entity
 }
 
@@ -286,6 +289,28 @@ pub fn kill_unit(world: &mut World, entity: Entity) -> bool {
         );
     }
     remove_unit(world, entity)
+}
+
+/// Kills a unit and runs its death abilities first (`UnitComp.killed` →
+/// `Ability.death` for `SpawnDeathAbility`/`LiquidExplodeAbility`).
+///
+/// `seq` is the caller's deterministic entity-sequence allocator. The live unit
+/// loop should use this entry point instead of [`kill_unit`] so death spawns and
+/// liquid explosions run.
+#[allow(clippy::too_many_arguments)]
+pub fn kill_unit_with_abilities(
+    world: &mut World,
+    content: &ContentRegistry,
+    tiles: &crate::world::tiles::Tiles,
+    rng: &mut crate::determinism::SimRng,
+    seq: &mut u64,
+    entity: Entity,
+) -> bool {
+    if world.get_entity(entity).is_err() {
+        return false;
+    }
+    crate::combat::abilities::run_death_abilities(world, content, tiles, rng, seq, entity);
+    kill_unit(world, entity)
 }
 
 /// Reads a unit's content type id.
