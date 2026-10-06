@@ -84,11 +84,11 @@ func _rebuild() -> void:
 		_list.row()
 	# Live launch resources (`universe.getLaunchResources`): already-selected
 	# item totals shown alongside the schematic requirement totals above.
-	var resources := campaign_json("get_launch_resources")
-	if not resources.is_empty():
+	var resource_totals := campaign_json("get_launch_resources")
+	if not resource_totals.is_empty():
 		var parts := PackedStringArray()
-		for item in resources:
-			parts.append("%s x%d" % [str(item), int(resources[item])])
+		for item in resource_totals:
+			parts.append("%s x%d" % [str(item), int(resource_totals[item])])
 		if not parts.is_empty():
 			_list.add(MindWidgets.label("%s %s" % [_t("@resources"), ", ".join(parts)])).grow_x_axis().pad(2)
 			_list.row()
