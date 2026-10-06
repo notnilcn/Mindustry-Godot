@@ -276,10 +276,23 @@ impl Campaign {
                 .and_then(|id| total_radii.get(&id.raw()).copied())
                 .unwrap_or(0.0);
             let mut planet = Planet::from_def(registry, def, parent_total);
-            // Build adjacency from the plan-06 seam.
-            planet.neighbors = (0..planet.sector_count())
-                .map(|id| neighborhood.near(def.id, id as u16))
-                .collect();
+            // Build adjacency from the icosphere grid when the planet has one;
+            // fall back to the plan-06 `SectorNeighborhood` seam otherwise.
+            planet.neighbors = if def.sector_tiles > 0 {
+                let grid = crate::render::g3d::grid::PlanetGrid::create(def.sector_tiles as usize);
+                (0..planet.sector_count())
+                    .map(|id| {
+                        grid.tiles
+                            .get(id as usize)
+                            .map(|tile| tile.tiles.iter().map(|n| *n as u16).collect())
+                            .unwrap_or_default()
+                    })
+                    .collect()
+            } else {
+                (0..planet.sector_count())
+                    .map(|id| neighborhood.near(def.id, id as u16))
+                    .collect()
+            };
             total_radii.insert(def.id.raw(), planet.total_radius);
             order.push(def.id.raw());
             if let Some(parent) = def.parent

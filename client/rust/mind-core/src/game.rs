@@ -16,6 +16,7 @@ pub mod play;
 pub mod quad_tree;
 pub mod rules;
 pub mod rules_event;
+pub mod runtime;
 pub mod saves;
 pub mod schematic;
 pub mod schematics;

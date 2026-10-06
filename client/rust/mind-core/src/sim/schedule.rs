@@ -406,6 +406,14 @@ pub fn build_sim_schedule() -> Schedule {
     // Plan 07: building runtime. No-op unless a `world::block::BlockTable`
     // resource is present, so the P0 `Sim` checksum/golden is unchanged.
     schedule.add_systems(crate::world::update::update_buildings.in_set(EntitySet::UpdateBuildings));
+    // ---- campaign wiring (WS2): no-op unless `game::runtime::CampaignRuntime`
+    // is installed in the ECS world. Owns only the Campaign / Objectives /
+    // GameStateCheck blocks; never reorders the sets above.
+    schedule.add_systems(crate::game::runtime::campaign_tick_system.in_set(TickSet::Campaign));
+    schedule.add_systems(crate::game::runtime::objectives_tick_system.in_set(TickSet::Objectives));
+    schedule
+        .add_systems(crate::game::runtime::game_state_tick_system.in_set(TickSet::GameStateCheck));
+    // ---- end campaign wiring ----
     schedule
 }
 

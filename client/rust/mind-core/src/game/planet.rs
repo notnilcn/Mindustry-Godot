@@ -55,6 +55,8 @@ pub struct Planet {
     pub children: Vec<PlanetId>,
     /// Sphere radius.
     pub radius: f32,
+    /// Sector-grid subdivision (`0` = no landable grid).
+    pub sector_tiles: u8,
     /// Orbit spacing defined by the parent.
     pub orbit_spacing: f32,
     /// Random orbit-angle offset.
@@ -95,6 +97,10 @@ pub struct Planet {
     pub show_rts_ai_rule: bool,
     /// Waves on sector loss.
     pub allow_waves: bool,
+    /// Launch-loadout picker allowed on this planet.
+    pub allow_launch_loadout: bool,
+    /// Launch-schematic picker allowed on this planet.
+    pub allow_launch_schematics: bool,
     /// Default start sector.
     pub start_sector: u16,
     /// Simulate sector invasions.
@@ -156,6 +162,14 @@ impl Planet {
                 sector.preset_capture_wave = preset.capture_wave;
                 sector.preset_always_unlocked = preset.unlock.always_unlocked;
                 sector.preset_name = Some(preset.name.clone());
+                sector.preset_start_wave_time_multiplier = preset.start_wave_time_multiplier;
+                sector.preset_add_starting_items = preset.add_starting_items;
+                sector.preset_no_lighting = preset.no_lighting;
+                sector.preset_is_last_sector = preset.is_last_sector;
+                sector.preset_attack_after_waves = preset.attack_after_waves;
+                sector.preset_override_launch_defaults = preset.override_launch_defaults;
+                sector.preset_allow_launch_loadout = preset.allow_launch_loadout;
+                sector.preset_allow_launch_schematics = preset.allow_launch_schematics;
             }
             sectors.push(sector);
             neighbors.push(Vec::new());
@@ -180,6 +194,7 @@ impl Planet {
             parent: def.parent,
             children: Vec::new(),
             radius: def.radius,
+            sector_tiles: def.sector_tiles,
             orbit_spacing: def.orbit_spacing,
             orbit_offset,
             orbit_radius,
@@ -200,6 +215,8 @@ impl Planet {
             light_dst_to: 1.0,
             show_rts_ai_rule: def.show_rts_ai_rule,
             allow_waves: def.allow_waves,
+            allow_launch_loadout: def.allow_launch_loadout,
+            allow_launch_schematics: def.allow_launch_schematics,
             start_sector: def.start_sector as u16,
             allow_sector_invasion: def.allow_sector_invasion,
             default_env: env_mask(&def.default_env),
@@ -379,6 +396,36 @@ impl Planet {
                 if self
                     .sectors
                     .get(neighbor as usize)
+                    .is_some_and(|s| s.generate_enemy_base)
+                {
+                    sum += 0.9;
+                }
+            }
+            if self.sectors[index].has_enemy_base() {
+                sum += 0.88;
+            }
+            let threat = if self.sectors[index].preset.is_none()
+                || (!self.sectors[index].preset_require_unlock
+                    && self.sectors[index].preset_difficulty == 0.0)
+            {
+                (sum / 5.0).clamp(0.3, 1.2)
+            } else {
+                (self.sectors[index].preset_difficulty / 10.0).clamp(0.0, 1.0)
+            };
+            self.sectors[index].threat = threat;
+        }
+    }
+
+    /// `Planet.updateBaseCoverage` over the runtime `neighbors` built by
+    /// [`super::universe::Campaign::from_registry`].
+    pub fn update_base_coverage_from_neighbors(&mut self) {
+        for index in 0..self.sectors.len() {
+            let id = self.sectors[index].id;
+            let mut sum = 1.0f32;
+            for neighbor in self.neighbors.get(id as usize).into_iter().flatten() {
+                if self
+                    .sectors
+                    .get(*neighbor as usize)
                     .is_some_and(|s| s.generate_enemy_base)
                 {
                     sum += 0.9;
