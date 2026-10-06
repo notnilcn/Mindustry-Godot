@@ -12,6 +12,12 @@ extends RichTextLabel
 
 func _init() -> void:
 	bbcode_enabled = true
+	# Arc `Label` does not wrap unless `setWrap(true)` (plan 14 §3.7). Godot's
+	# `RichTextLabel` defaults to word-smart wrapping, whose minimum width is
+	# hard-coded to 1px and whose minimum height is the content height at that
+	# width, so every label inside a row/table cell collapses. Callers opt into
+	# wrapping explicitly by assigning `autowrap_mode`.
+	autowrap_mode = TextServer.AUTOWRAP_OFF
 	fit_content = true
 	scroll_active = false
 

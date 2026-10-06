@@ -139,6 +139,8 @@ func _add_slider_row(row: Dictionary, key: String, title: String) -> void:
 	var header := HBoxContainer.new()
 	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var title_label := MindWidgets.label(title)
+	# Upstream `content.add(title, Styles.outlineLabel).left().growX().wrap()`.
+	title_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(title_label)
 	header.add_child(value_label)

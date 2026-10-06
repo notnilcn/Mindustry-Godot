@@ -214,6 +214,32 @@ func _init() -> void:
 			credits_texts.append(text)
 	_check(credits_texts.has("redloong9527"), "credits dialog lists contributors")
 	_check(not credits_texts.has("credits.text"), "credits dialog translates credits.text")
+	# Contributor rows must render at their text width, not the 1px minimum a
+	# word-wrapped `RichTextLabel` reports (EV-0030).
+	await process_frame
+	var contributor_width := -1.0
+	for node in credits.find_children("*", "RichTextLabel", true, false):
+		if str(node.get("text")) == "redloong9527":
+			contributor_width = (node as Control).size.x
+	_check(
+		contributor_width > 1.0,
+		"credits contributor label renders its text width (got %s)" % contributor_width
+	)
+
+	# Slider value labels sit in a settings row HBox after the expanding title;
+	# they must keep their text width instead of collapsing to 1px (EV-0020).
+	var value_header := HBoxContainer.new()
+	value_header.size = Vector2(420, 40)
+	root.add_child(value_header)
+	var value_label: Control = load("res://ui/text/mind_rich_label.gd").new()
+	value_label.text = "100%"
+	value_header.add_child(value_label)
+	await process_frame
+	_check(
+		value_label.size.x > 1.0,
+		"slider value label renders its text width (got %s)" % value_label.size.x
+	)
+	value_header.free()
 
 	# A menu leaf button must dismiss the open submenu before running its action
 	# (upstream MenuFragment.buttons). (EV-0008)

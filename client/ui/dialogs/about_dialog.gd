@@ -71,6 +71,9 @@ func _add_link(link: Dictionary) -> void:
 	_grid.add(button).grow_x_axis().pad(2)
 	_grid.row()
 	var description := MindWidgets.label(_t("@link.%s.description" % str(link.name)))
+	# Upstream `labelWrap(link.description).width(w - 100f - h)` wraps; labels
+	# are single-line unless they opt in.
+	description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	description.add_theme_color_override("default_color", Color(0.8, 0.8, 0.8))
 	_grid.add(description).grow_x_axis().pad(1)
 	_grid.row()
