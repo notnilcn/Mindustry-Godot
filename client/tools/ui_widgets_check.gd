@@ -203,6 +203,24 @@ func _init() -> void:
 		_check(about_texts.has(title), "About renders the %s link" % title)
 	_check(about_texts.has("Credits"), "About renders the Credits button")
 
+	# EV-0029: every link row draws its `Icon` glyph through the icon font (an
+	# atlas-region lookup returns null for these names).
+	var link_glyphs: Array = []
+	for glyph_name in [
+		"discord", "list", "trello", "book", "add", "reddit-alien",
+		"itchio", "googleplay", "android", "github", "github-square", "wrench",
+	]:
+		link_glyphs.append(MindIcons.glyph(glyph_name))
+	var icon_font: Variant = assets.call("icon_font")
+	var glyphs_with_icon_font := 0
+	for node in about.find_children("*", "Label", true, false):
+		if link_glyphs.has(str(node.get("text"))) and node.get_theme_font("font") == icon_font:
+			glyphs_with_icon_font += 1
+	_check(
+		glyphs_with_icon_font == 12,
+		"About renders all 12 link icon glyphs in the icon font (got %s)" % glyphs_with_icon_font
+	)
+
 	# EV-0007: the Credits dialog lists the packed contributors and translates
 	# the `credits.text` blurb.
 	var credits: Control = load("res://scenes/ui/dialogs/credits_dialog.tscn").instantiate()

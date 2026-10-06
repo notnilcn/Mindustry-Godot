@@ -84,7 +84,12 @@ static func glyph_button(
 ## An action button with an icon-font glyph followed by a label, mirroring
 ## upstream `TextButton` + `Icon.*` drawables. Falls back to plain text when the
 ## glyph is unknown or assets are absent.
-static func icon_button(icon_name: String, text_value: String, style: String = "defaultt") -> Button:
+static func icon_button(
+	icon_name: String,
+	text_value: String,
+	style: String = "defaultt",
+	row_alignment: int = BoxContainer.ALIGNMENT_CENTER
+) -> Button:
 	var result := Button.new()
 	result.theme_type_variation = style
 	var glyph_text := MindIcons.glyph(icon_name)
@@ -93,7 +98,7 @@ static func icon_button(icon_name: String, text_value: String, style: String = "
 		return result
 	# code-instantiated: data-driven icon+label row inside the themed button.
 	var row := HBoxContainer.new()
-	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.alignment = row_alignment
 	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	row.add_theme_constant_override("separation", 6)
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE

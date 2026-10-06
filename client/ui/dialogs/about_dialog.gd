@@ -9,21 +9,22 @@
 
 extends MindDialog
 
-## `Links.getLinks()` entries (name, link, icon region, color hex). Order and
+## `Links.getLinks()` entries (name, link, icon-font glyph, color hex). Order and
 ## names are the upstream ABI; bannedItems (google-play/itch.io/dev-builds/
-## f-droid) render only when the platform is not iOS/Steam (M3).
+## f-droid) render only when the platform is not iOS/Steam (M3). `icon` is the
+## `Icon` glyph alias resolved through [MindIcons], not an atlas region.
 const LINKS := [
 	{"name": "discord", "link": "https://discord.gg/mindustry", "icon": "discord", "color": "7289da"},
 	{"name": "changelog", "link": "https://github.com/Anuken/Mindustry/releases", "icon": "list", "color": "ffd37f"},
 	{"name": "trello", "link": "https://trello.com/b/aE2tcUwF", "icon": "trello", "color": "026aa7"},
 	{"name": "wiki", "link": "https://mindustrygame.github.io/wiki/", "icon": "book", "color": "0f142f"},
 	{"name": "suggestions", "link": "https://github.com/Anuken/Mindustry-Suggestions/issues/new/choose/", "icon": "add", "color": "ebebeb"},
-	{"name": "reddit", "link": "https://www.reddit.com/r/Mindustry/", "icon": "redditAlien", "color": "ee593b"},
+	{"name": "reddit", "link": "https://www.reddit.com/r/Mindustry/", "icon": "reddit-alien", "color": "ee593b"},
 	{"name": "itch.io", "link": "https://anuke.itch.io/mindustry", "icon": "itchio", "color": "fa5c5c"},
 	{"name": "google-play", "link": "https://play.google.com/store/apps/details?id=io.anuke.mindustry", "icon": "googleplay", "color": "689f38"},
 	{"name": "f-droid", "link": "https://f-droid.org/packages/io.anuke.mindustry/", "icon": "android", "color": "026aa7"},
 	{"name": "github", "link": "https://github.com/Anuken/Mindustry/", "icon": "github", "color": "24292e"},
-	{"name": "dev-builds", "link": "https://github.com/Anuken/MindustryBuilds", "icon": "githubSquare", "color": "fafbfc"},
+	{"name": "dev-builds", "link": "https://github.com/Anuken/MindustryBuilds", "icon": "github-square", "color": "fafbfc"},
 	{"name": "bug", "link": "https://github.com/Anuken/Mindustry/issues/new", "icon": "wrench", "color": "cbd97f"},
 ]
 
@@ -62,11 +63,11 @@ func _show_credits() -> void:
 
 
 func _add_link(link: Dictionary) -> void:
-	var button := Button.new()
-	button.text = _link_title(str(link.name))
-	button.icon = MindWidgets.icon_texture(str(link.icon))
+	# Upstream draws `link.icon` (an `Icon` glyph drawable) beside the title.
+	var button := MindWidgets.icon_button(
+		str(link.icon), _link_title(str(link.name)), "flatBordert", BoxContainer.ALIGNMENT_BEGIN
+	)
 	button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	button.theme_type_variation = "flatBordert"
 	button.pressed.connect(_open_link.bind(str(link.link)))
 	_grid.add(button).grow_x_axis().pad(2)
 	_grid.row()
