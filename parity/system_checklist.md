@@ -24,8 +24,8 @@ single-editor mutex until the nightly `windows-gpu` runner is wired (NUD-40/A).
 | Units/AI/waves | 11 | P4 | 4 | 2 embedded | 2 | in-progress | controllers/pathfinder/waves; plan-12 seams open |
 | Campaign | 12 | P4 | 6 planned | 2 planned | 0 | not-started | `campaign::tests` names reserved in matrix |
 | Logic/mlog | 13 | P5 | 15 planned | 2 planned | 0 | not-started | `logic::*` names reserved; 0 rows landed |
-| UI | 14 | P5 | 0 upstream | 1 planned | 0 | not-started | `ui_text` promised |
-| Input/RTS | 15 | P5 | 3 placement-adjacent | 2 planned | 0 | not-started | `input_place_line_headless` promised |
+| UI | 14 | P5 | 0 upstream | 1 planned | 0 | in-progress | in-engine MCP eval at 1152x648: `boot_menu`/`settings_ui`/`ui_dialogs` (`.opencode/evals/runs/20261006-*`); 28 findings verified-fixed via `.opencode/evals/findings.json`; `ui_text` scenario pending |
+| Input/RTS | 15 | P5 | 3 placement-adjacent | 2 planned | 0 | in-progress | in-engine MCP: GUI-consumed input (EV-0018) and the Rebind Keys dialog (EV-0023) verified; `input_place_line_headless` pending |
 | Render/world | 16 | P6 | 0 upstream | 4 embedded | 2 | in-progress | render-list goldens; MCP per-layer deferred |
 | FX/parts | 17 | P6 | 0 upstream | 1 planned | 0 | not-started | `fx_lifecycle` promised |
 | Audio | 18 | P6 | 0 upstream | 3 embedded | 2 | parity-complete | `audio_golden.rs`; `bench/baselines.json` audio rows |
@@ -44,3 +44,4 @@ backing scenario check pending the windowed runner); budget rows **30** across 1
 - Java power tests used `delta = 0.5`; Rust goldens use `delta = 1.0` (09 R6).
 - Visual/terrain parity is structural + Rust-recorded goldens (HLP §9).
 - MCP runs are local/self-hosted only; never required on shared CI (NUD-40/A).
+- In-engine MCP evaluation runs locally via `.opencode/evals/` (one client per display); the UI/Input rows above are set from those `runs/` artifacts and `findings.json`, not code inspection.
