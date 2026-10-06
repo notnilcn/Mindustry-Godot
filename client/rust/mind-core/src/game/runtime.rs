@@ -103,6 +103,7 @@ pub fn sync_session_with_sim(
     world: &mut World,
     content: &ContentRegistry,
     map_spawns: i32,
+    apply_loadout: bool,
 ) -> SessionSync {
     let mut cores: Vec<(Entity, u8)> = Vec::new();
     for entity in world.iter_entities() {
@@ -136,8 +137,11 @@ pub fn sync_session_with_sim(
     session.spawn_count = sync.spawn_count;
     session.enemies = 0;
     // `Logic.play` starting-items half: with the cores registered, clear the
-    // default team's inventory and add the launch loadout (GAP-10).
-    super::play::apply_launch_loadout(session, content);
+    // default team's inventory and add the launch loadout (GAP-10) on a fresh
+    // launch; a resumed save keeps its own core inventory.
+    if apply_loadout {
+        super::play::apply_launch_loadout(session, content);
+    }
     sync
 }
 
@@ -469,7 +473,7 @@ mod tests {
             team: TeamId(2),
             rot: 0,
         });
-        let sync = sync_session_with_sim(&mut session, &mut world, &registry, 1);
+        let sync = sync_session_with_sim(&mut session, &mut world, &registry, 1, true);
         assert_eq!(sync.player_cores, 1);
         assert_eq!(sync.wave_cores, 1);
         assert_eq!(sync.spawn_count, 1);
@@ -502,7 +506,7 @@ mod tests {
             team: TeamId(1),
             rot: 0,
         });
-        let _ = sync_session_with_sim(&mut session, &mut world, &registry, 0);
+        let _ = sync_session_with_sim(&mut session, &mut world, &registry, 0, true);
         let copper = registry.item_id("copper").expect("copper");
         let inventory = session
             .teams

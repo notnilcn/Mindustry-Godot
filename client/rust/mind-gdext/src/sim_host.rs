@@ -993,14 +993,20 @@ impl MindSimHost {
     }
 
     /// Registers the live world's cores into the installed session and reports
-    /// the spawn accounting (GAP-9).
-    pub fn sync_campaign_session(&mut self, content: &ContentRegistry) -> Option<SessionSync> {
+    /// the spawn accounting (GAP-9). `apply_loadout` adds the launch loadout to
+    /// the default team's core inventory (fresh launches only).
+    pub fn sync_campaign_session(
+        &mut self,
+        content: &ContentRegistry,
+        apply_loadout: bool,
+    ) -> Option<SessionSync> {
         let mut runtime = self.take_campaign_runtime()?;
         let sync = sync_session_with_sim(
             &mut runtime.session,
             &mut self.sim.ecs.0,
             content,
             self.sector_spawns,
+            apply_loadout,
         );
         self.put_campaign_runtime(runtime);
         Some(sync)

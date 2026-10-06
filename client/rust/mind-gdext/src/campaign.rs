@@ -412,7 +412,7 @@ impl MindCampaign {
             let mut runtime = CampaignRuntime::new(self.session.clone(), campaign.clone());
             runtime.set_unlocked_content(collect_unlocked(&registry));
             host.bind_mut().install_campaign_runtime(runtime);
-            let sync = host.bind_mut().sync_campaign_session(&registry);
+            let sync = host.bind_mut().sync_campaign_session(&registry, !has_save);
             if let Some(sync) = sync {
                 if sync.player_cores > 0 {
                     let save_name = format!("sector-{planet_name}-{sector_id}");
