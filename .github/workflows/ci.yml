@@ -202,7 +202,10 @@ jobs:
           LOG="$(mktemp)"
           "$GODOT_BIN" --headless --editor --quit --path client >"$LOG" 2>&1
           cat "$LOG"
-          if grep -nE 'SCRIPT ERROR|SHADER ERROR|Parse Error|Failed to load|Cannot open|Can.t open|ERROR:' "$LOG"; then
+          # Godot prints a benign `ERROR: <n> resources still in use at exit`
+          # cleanup line on every headless editor quit; drop it first.
+          if grep -nE 'SCRIPT ERROR|SHADER ERROR|Parse Error|Failed to load|Cannot open|Can.t open|ERROR:' "$LOG" \
+              | grep -vE 'resources still in use at exit'; then
             echo "FAIL: Godot headless import logged parse/load errors" >&2
             exit 1
           fi

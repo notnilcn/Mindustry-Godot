@@ -119,7 +119,10 @@ if ! bash tools/godot.sh --headless --editor --quit --path client >"$GODOT_LOG" 
   tail -n 40 "$GODOT_LOG" >&2
   exit 1
 fi
-if grep -nE 'SCRIPT ERROR|SHADER ERROR|Parse Error|Failed to load|Cannot open|Can.t open|ERROR:' "$GODOT_LOG" >&2; then
+# Godot prints a benign `ERROR: <n> resources still in use at exit` cleanup line
+# on every headless editor quit; drop it before the parse/load error scan.
+if grep -nE 'SCRIPT ERROR|SHADER ERROR|Parse Error|Failed to load|Cannot open|Can.t open|ERROR:' "$GODOT_LOG" |
+    grep -vE 'resources still in use at exit' >&2; then
   echo "FAIL: godot headless import logged parse/load errors (above)" >&2
   exit 1
 fi
