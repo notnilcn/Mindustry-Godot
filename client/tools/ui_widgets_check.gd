@@ -306,5 +306,21 @@ func _init() -> void:
 				% version_label.get_theme_color("font_color")
 		)
 
+	# Prompt bodies must render BBCode: the uiscale reset prompt's translated
+	# `[color=...]` markup used to render literally because the body was a plain
+	# Label (EV-0034).
+	var ui_root: Control = load("res://scenes/ui/ui_root.tscn").instantiate()
+	root.add_child(ui_root)
+	var prompt: Dictionary = ui_root.call(
+		"_build_prompt", "", "[color=#ff0000ff]Red[/color] plain", false
+	)
+	var prompt_body: Variant = prompt.get("body")
+	_check(prompt_body is RichTextLabel, "prompt body is a BBCode label")
+	var parsed := ""
+	if prompt_body is RichTextLabel:
+		parsed = (prompt_body as RichTextLabel).get_parsed_text()
+	_check(parsed == "Red plain", "prompt body parses BBCode markup (got '%s')" % parsed)
+	ui_root.free()
+
 	print("UICHECK: failed=", _failures)
 	quit(1 if _failures > 0 else 0)
