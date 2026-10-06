@@ -69,5 +69,22 @@ func _init() -> void:
 	_check(indicator != null and indicator.texture == off_texture, "unchecked indicator uses check-off")
 	check.free()
 
+	# `SettingsMenuDialog` places each check in a 45px cell with 7px top pad
+	# (upstream `.height(45f).padTop(7f)`, 52px pitch). Fill the cell instead of
+	# growing it so extra table height is not absorbed into the rows.
+	var table := MindTable.new()
+	table.size = Vector2(500, 100)
+	root.add_child(table)
+	var cell_check: Control = load("res://ui/widgets/mind_check.gd").new()
+	cell_check.setup("Conveyor Placement Pathfinding", true, Callable())
+	table.add(cell_check).grow_x_axis().fill_y_axis().set_min_height(45.0).set_pad_top(7.0)
+	table.row()
+	table.sort_now()
+	_check(
+		is_equal_approx(cell_check.size.y, 45.0),
+		"settings check cell keeps the 45px row (got %s)" % cell_check.size.y
+	)
+	table.free()
+
 	print("UICHECK: failed=", _failures)
 	quit(1 if _failures > 0 else 0)

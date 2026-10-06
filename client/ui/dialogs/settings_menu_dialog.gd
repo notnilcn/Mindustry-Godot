@@ -119,7 +119,7 @@ func _add_row(row: Dictionary) -> void:
 			var check := MindWidgets.check(
 				title, bool(row.get("value", false)), func(value): _set_value(key, value)
 			)
-			_table_host.add(check).grow().set_min_height(45.0).set_pad_top(7.0)
+			_table_host.add(check).grow_x_axis().fill_y_axis().set_min_height(45.0).set_pad_top(7.0)
 			_table_host.row()
 		"slider":
 			_add_slider_row(row, key, title)
