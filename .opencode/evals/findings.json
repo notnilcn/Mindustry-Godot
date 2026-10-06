@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "updated": "2026-10-06T10:12:31+00:00",
+  "updated": "2026-10-06T10:24:27+00:00",
   "findings": [
     {
       "id": "EV-0001",
@@ -659,15 +659,18 @@
         "runs/20261006-192439-ev0020-0030-verify/java/step-java-settings-game.png",
         "runs/20261006-093202-ev0020-0030-verify/godot/state-ev0020-0030-verify.json",
         "runs/20261006-093202-ev0020-0030-verify/godot/step-01-settings-game.png",
-        "runs/20261006-093202-ev0020-0030-verify/report.md"
+        "runs/20261006-093202-ev0020-0030-verify/report.md",
+        "runs/20261006-195955-ev0025-0032-verify/godot/state-05-ev0021-recheck.json",
+        "runs/20261006-195955-ev0025-0032-verify/godot/state-01-settings-game-fixed.json"
       ],
       "notes": [
         "2026-10-06T09:39:47+00:00: [loop ?] Fresh 63e1e0a re-run (pid 1154515, menu > Settings, Game pane before scrolling, 1152x648): first check is fully inside the Body viewport - y=229 h=45 with viewport bottom 478 (was y=481); the slider header/title row is h=26 (was 130); 10 checks at stride 52 (229..697), scroll max 642 (was 876); the empty Game pane of the filed repro no longer reproduces. Residual tracked as EV-0032: the 316px-tall pane still shows only 5 of 10 checks and the Developer Options rail entry (y=486) below the viewport, vs Java showing 9 checks and the full rail.",
-        "2026-10-06T09:42:18+00:00: [loop ?] Bonus re-run of the exact repro at HEAD 63e1e0a, pid 1159283, 1152x648. The Game table no longer opens with every check row below the pane: first check is at y=229 (was y=481 vs the 478 viewport bottom) with h=45, and 4 check rows are fully inside the scroll viewport at scroll 0 (5th partially; step-01-settings-game.png shows Fetch/Auto-Create/Automatic/Conveyor/Hints). RESIDUAL, stated explicitly: only 4 rows fully visible vs Java's 8+ because the port's settings panel is shorter; verifying for the titled symptom only."
+        "2026-10-06T09:42:18+00:00: [loop ?] Bonus re-run of the exact repro at HEAD 63e1e0a, pid 1159283, 1152x648. The Game table no longer opens with every check row below the pane: first check is at y=229 (was y=481 vs the 478 viewport bottom) with h=45, and 4 check rows are fully inside the scroll viewport at scroll 0 (5th partially; step-01-settings-game.png shows Fetch/Auto-Create/Automatic/Conveyor/Hints). RESIDUAL, stated explicitly: only 4 rows fully visible vs Java's 8+ because the port's settings panel is shorter; verifying for the titled symptom only.",
+        "2026-10-06T10:12:56+00:00: [loop ?] Re-check at uiscale 100 / content_scale_factor 1.0 after ba8203c (pid 1188913, frames 2841, 1152x648): first Game check y=125 h=45 fully inside the grown Body viewport (top 58, bottom 582; was y=481 vs bottom 478), slider header h=26. The titled symptom (every check row below the visible pane) does not reproduce. Status unchanged."
       ],
       "plan": "14",
       "first_seen": "2026-10-06T07:58:08+00:00",
-      "last_verified": "2026-10-06T09:42:18+00:00"
+      "last_verified": "2026-10-06T10:12:56+00:00"
     },
     {
       "id": "EV-0022",
@@ -754,7 +757,7 @@
       "id": "EV-0025",
       "area": "ui/settings",
       "severity": "S3",
-      "status": "open",
+      "status": "verified-fixed",
       "title": "UI Scaling setting is stored but never applied",
       "expected": "Java: uiscale is applied at startup (Vars.java:517 Scl.setProduct) and Control.java prompts a restart when it changes",
       "actual": "Godot: settings store reports uiscale=200 (persisted across stop/play), content_scale_factor stays 1.0 and every control keeps its 1.0 layout; no uiscale consumer exists in client/ui or mind-gdext",
@@ -764,14 +767,24 @@
         "runs/20261006-172828-settings_ui/godot/step-03-settings-graphics.png",
         "runs/20261006-100520-ev0025-0032-verify/godot/state-ev0025-0032-verify.json",
         "runs/20261006-100520-ev0025-0032-verify/godot/step-02-uiscale-150.png",
-        "runs/20261006-100520-ev0025-0032-verify/report.md"
+        "runs/20261006-100520-ev0025-0032-verify/report.md",
+        "runs/20261006-195955-ev0025-0032-verify/godot/state-03-ev0025-uiscale200.json",
+        "runs/20261006-195955-ev0025-0032-verify/godot/step-ev0025-uiscale200-menu-mshot.png",
+        "runs/20261006-195955-ev0025-0032-verify/godot/state-04-ev0025-restored.json",
+        "runs/20261006-101800-ev0025-verify/godot/state-ev0025-verify.json",
+        "runs/20261006-101800-ev0025-verify/godot/step-01-graphics-uiscale150-flagged.png",
+        "runs/20261006-101800-ev0025-verify/godot/step-02-uiscale-reset-prompt.png",
+        "runs/20261006-101800-ev0025-verify/run.json",
+        "runs/20261006-101800-ev0025-verify/report.md"
       ],
       "notes": [
-        "2026-10-06T10:11:31+00:00: [loop ?] Partial at HEAD 60398e4 (fix 48298b6), window 1152x648, log cleared. APPLY HALF FIXED: content_scale_factor now equals max(uiscale,25)/100 at boot, pid-stamped for uiscale 100->1.0 (pid 1185310), 150->1.5 (pids 1185937/1188374, viewport 768x432), 25 (store clamps <25)->0.25 (pid 1186254), 200 (set by a concurrent session)->2.0 (pid 1187755, viewport 576x324). Visual step-02-uiscale-150.png shows the whole window scaled 1.5x. REMAINING: the reference also prompts a restart when the value changes (Control.java uiscale.reset countdown), and the port shows no notice - settings_menu_dialog._set_value only calls MindUi.settings_set, and settings_set('uiscale',120) left dialog_stack/has_dialog/has_field unchanged; grep finds no uiscale notice in client/ui (only language_dialog emits @language.restart). Keep open for the missing restart prompt."
+        "2026-10-06T10:11:31+00:00: [loop ?] Partial at HEAD 60398e4 (fix 48298b6), window 1152x648, log cleared. APPLY HALF FIXED: content_scale_factor now equals max(uiscale,25)/100 at boot, pid-stamped for uiscale 100->1.0 (pid 1185310), 150->1.5 (pids 1185937/1188374, viewport 768x432), 25 (store clamps <25)->0.25 (pid 1186254), 200 (set by a concurrent session)->2.0 (pid 1187755, viewport 576x324). Visual step-02-uiscale-150.png shows the whole window scaled 1.5x. REMAINING: the reference also prompts a restart when the value changes (Control.java uiscale.reset countdown), and the port shows no notice - settings_menu_dialog._set_value only calls MindUi.settings_set, and settings_set('uiscale',120) left dialog_stack/has_dialog/has_field unchanged; grep finds no uiscale notice in client/ui (only language_dialog emits @language.restart). Keep open for the missing restart prompt.",
+        "2026-10-06T10:12:53+00:00: [loop ?] Boot-apply half re-verified at HEAD 60398e4 (fix 48298b6): settings_set('uiscale',200) -> stop/play -> fresh pid 1187755 reads stored=200, content_scale_factor=2.0 (was 1.0), window 1152x648 / logical visible rect 576x324, get_final_transform scale 2.0 -> UI renders 2x physical (godot/step-ev0025-uiscale200-menu-mshot.png). Restored: set 100 -> stop/play -> pids 1187991/1188673/1188913 read stored=100, factor 1.0, final scale 1.0. STATUS KEPT OPEN: the expected restart prompt (Control.java:640-664, @uiscale.reset countdown) is still absent per the 10:11:31Z note; settings_menu_dialog._set_value only calls settings_set. Concurrent session set uiscale=150 mid-run (pid 1188374 factor 1.5); 100 re-asserted.",
+        "2026-10-06T10:24:27+00:00: [loop ?] Fresh in-engine repro at HEAD bc8d111 (fix f43f45a), window 1152x648, log cleared. Real Graphics slider click (710,163) set uiscale=150 and uiscale_changed=true (pid 1199186, factor still 1.0); next boot (pid 1200025) applied content_scale_factor=1.5 and showed the @uiscale.reset prompt with countdown (body 'UI scale has been changed. / Press \"OK\" to confirm this scale. / Reverting and exiting in {n} seconds...') and buttons OK (317,289) / Cancel & Exit (406,289) at scale 1.5. OK (pid 1201262) kept uiscale=150, cleared uiscale_changed, factor 1.5, prompt gone. Cancel & Exit (406,289) reverted uiscale to 100 and exited; next boot (pid 1201934) read 100/false/factor 1.0. The 11s timeout ran the same revert+exit path twice (pid 1200407 read 100/false/1.0). Final state uiscale=100, flag false (pid 1202818). The prompt body's raw markup is filed separately as a new S4 finding (not folded into EV-0025)."
       ],
       "plan": "14",
       "first_seen": "2026-10-06T07:58:09+00:00",
-      "last_verified": "2026-10-06T10:11:31+00:00"
+      "last_verified": "2026-10-06T10:24:27+00:00"
     },
     {
       "id": "EV-0026",
@@ -982,6 +995,26 @@
       "plan": "20",
       "first_seen": "2026-10-06T09:39:52+00:00",
       "last_verified": "2026-10-06T09:56:20+00:00"
+    },
+    {
+      "id": "EV-0034",
+      "area": "ui/settings",
+      "severity": "S4",
+      "status": "open",
+      "title": "UI-scale reset prompt shows raw [color=#...] markup instead of styled text",
+      "expected": "Java: the @uiscale.reset countdown renders as colored text (scarlet 'Reverting and exiting in', accent seconds) inside the '@confirm' dialog",
+      "actual": "Godot: the prompt body is a plain Label, so the Godot BBCode produced by MindWidgets.markup_format shows literally: 'UI scale has been changed.\\nPress \"OK\" to confirm this scale.\\n[color=#ff3100ff]Reverting and exiting in[/color][color=#ffd37fff] 8[/color][color=#ff3100ff] seconds...[/color]'. Also noted: the dialog has no '@confirm' title (title passed as '') and the buttons are ordered OK / Cancel & Exit vs upstream Cancel & Exit / OK.",
+      "repro": "scenario settings_ui: set uiscale to 150 via the Graphics slider, restart; observe the @uiscale.reset prompt during its 11s countdown",
+      "evidence": [
+        "runs/20261006-101800-ev0025-verify/godot/step-02-uiscale-reset-prompt.png",
+        "runs/20261006-101800-ev0025-verify/godot/state-ev0025-verify.json"
+      ],
+      "notes": [
+        "Split out of EV-0025 during its bc8d111 verification: the apply/prompt/OK/Cancel behaviors verify fixed, but the prompt body renders machine markup to the player."
+      ],
+      "plan": "14",
+      "first_seen": "2026-10-06T10:24:27+00:00",
+      "last_verified": "2026-10-06T10:24:27+00:00"
     }
   ]
 }
