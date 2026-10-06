@@ -79,6 +79,7 @@ pub fn color_tag(name: &str) -> Option<u32> {
         ("blue", 0x5267ffff),
         ("navy", 0x001080ff),
         ("royal", 0x4040ffff),
+        ("sky", 0x87ceebff),
         ("cyan", 0x00ffffff),
         ("teal", 0x0088a0ff),
         ("green", 0x00ff00ff),
@@ -359,6 +360,16 @@ mod tests {
             "[color=#ff0000ff]a[/color][color=#7f7f7fff]b[/color][color=#ff0000ff]c[/color]"
         );
         assert_eq!(render_markup("#ff0000aa", &iconc()), "#ff0000aa");
+    }
+
+    #[test]
+    fn markup_sky_tag_renders_credits_blurb() {
+        // `credits.text` uses `[royal]` and `[sky]`; arc registers `SKY` from
+        // `Color.sky` (0x87ceebff) (`arc.graphics.Colors.reset`).
+        assert_eq!(
+            render_markup("[royal]Anuken[] - [sky]anukendev@gmail.com[]", &iconc()),
+            "[color=#4040ffff]Anuken[/color] - [color=#87ceebff]anukendev@gmail.com[/color]"
+        );
     }
 
     #[test]
