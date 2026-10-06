@@ -339,11 +339,61 @@ pub struct StatusEntry {
     pub duration: f32,
 }
 
-/// Status effect list (`StatusComp`); application/extend/cancel from plan 10.
-#[derive(Debug, Clone, PartialEq, Component, Default)]
+impl StatusEntry {
+    /// `StatusEntry.set(effect, time)`.
+    pub const fn new(effect: StatusId, duration: f32) -> Self {
+        Self { effect, duration }
+    }
+}
+
+/// Status effect list (`StatusComp`), including the transient per-tick
+/// multipliers (`StatusComp.update`).
+///
+/// `statuses` and `damage_times` are index-aligned: `damage_times[i]` is the
+/// `StatusEntry.damageTime` accumulator for `statuses[i]`. Every mutation goes
+/// through the methods here so the invariant holds; `statuses` is public for
+/// read access only. Transient fields are recomputed each tick by
+/// [`crate::combat::damage::status::update_unit_status`] and never serialized
+/// (upstream marks them `transient`).
+#[derive(Debug, Clone, PartialEq, Component)]
 pub struct StatusComp {
     /// Active entries, in application order.
     pub statuses: Vec<StatusEntry>,
+    /// Interval-damage accumulators, aligned with `statuses` (`StatusEntry.damageTime`).
+    pub damage_times: Vec<f32>,
+    /// Speed multiplier (`StatusComp.speedMultiplier`).
+    pub speed_multiplier: f32,
+    /// Outgoing damage multiplier (`StatusComp.damageMultiplier`).
+    pub damage_multiplier: f32,
+    /// Incoming damage divisor (`StatusComp.healthMultiplier`).
+    pub health_multiplier: f32,
+    /// Weapon reload multiplier (`StatusComp.reloadMultiplier`).
+    pub reload_multiplier: f32,
+    /// Build speed multiplier (`StatusComp.buildSpeedMultiplier`).
+    pub build_speed_multiplier: f32,
+    /// Drag multiplier (`StatusComp.dragMultiplier`).
+    pub drag_multiplier: f32,
+    /// Armor override (`StatusComp.armorOverride`; `< 0` = none).
+    pub armor_override: f32,
+    /// Whether weapons are disabled (`StatusComp.disarmed`).
+    pub disarmed: bool,
+}
+
+impl Default for StatusComp {
+    fn default() -> Self {
+        Self {
+            statuses: Vec::new(),
+            damage_times: Vec::new(),
+            speed_multiplier: 1.0,
+            damage_multiplier: 1.0,
+            health_multiplier: 1.0,
+            reload_multiplier: 1.0,
+            build_speed_multiplier: 1.0,
+            drag_multiplier: 1.0,
+            armor_override: -1.0,
+            disarmed: false,
+        }
+    }
 }
 
 impl StatusComp {
@@ -357,6 +407,7 @@ impl StatusComp {
             existing.duration = existing.duration.max(entry.duration);
         } else {
             self.statuses.push(entry);
+            self.damage_times.push(0.0);
         }
     }
 
@@ -365,9 +416,64 @@ impl StatusComp {
         !self.statuses.is_empty()
     }
 
-    /// Cancels every entry for `effect`.
+    /// Whether `effect` is currently applied (`StatusComp.hasEffect`).
+    pub fn has_effect_of(&self, effect: StatusId) -> bool {
+        self.statuses.iter().any(|status| status.effect == effect)
+    }
+
+    /// Remaining duration for `effect`, `0` when absent (`StatusComp.getDuration`).
+    pub fn get_duration(&self, effect: StatusId) -> f32 {
+        self.statuses
+            .iter()
+            .find(|status| status.effect == effect)
+            .map(|status| status.duration)
+            .unwrap_or(0.0)
+    }
+
+    /// Replaces the duration for `effect`; `duration == 0` removes it
+    /// (`StatusComp.setDuration` → `applyStatus(..., shorten = true)`).
+    pub fn set_duration(&mut self, effect: StatusId, duration: f32) {
+        if duration == 0.0 {
+            self.remove(effect);
+            return;
+        }
+        if let Some(existing) = self
+            .statuses
+            .iter_mut()
+            .find(|status| status.effect == effect)
+        {
+            existing.duration = duration;
+        }
+    }
+
+    /// Cancels every entry for `effect` (`StatusComp.unapply`).
     pub fn remove(&mut self, effect: StatusId) {
-        self.statuses.retain(|status| status.effect != effect);
+        if let Some(index) = self
+            .statuses
+            .iter()
+            .position(|status| status.effect == effect)
+        {
+            self.statuses.remove(index);
+            self.damage_times.remove(index);
+        }
+    }
+
+    /// Cancels every status (`StatusComp.clearStatuses`).
+    pub fn clear(&mut self) {
+        self.statuses.clear();
+        self.damage_times.clear();
+    }
+
+    /// Resets the transient multipliers to the upstream `StatusComp.update` start values.
+    pub fn reset_modifiers(&mut self) {
+        self.speed_multiplier = 1.0;
+        self.damage_multiplier = 1.0;
+        self.health_multiplier = 1.0;
+        self.reload_multiplier = 1.0;
+        self.build_speed_multiplier = 1.0;
+        self.drag_multiplier = 1.0;
+        self.armor_override = -1.0;
+        self.disarmed = false;
     }
 }
 

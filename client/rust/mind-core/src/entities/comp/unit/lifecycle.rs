@@ -317,6 +317,9 @@ pub fn ai_kind_of(world: &World, entity: Entity) -> Option<AiKind> {
 /// Re-syncs the plan-10 [`crate::weapons::UnitState`] from the unit core and
 /// velocity (`Unit.rotation` -> `UnitState.rotation`, `deltaLen` -> speed).
 ///
+/// Also carries the status-driven weapon fields: `reloadMultiplier` and
+/// `canShoot()` (`!disarmed && !(type.canBoost && isFlying())`).
+///
 /// Called once per tick before the weapon update pass so the plan-10 engine sees
 /// the same values upstream's `Unit.update`/`WeaponsComp.update` would.
 pub fn sync_weapon_state(world: &mut World, entity: Entity) {
@@ -328,8 +331,20 @@ pub fn sync_weapon_state(world: &mut World, entity: Entity) {
         .get::<Vel>(entity)
         .map(|vel| (vel.x * vel.x + vel.y * vel.y).sqrt())
         .unwrap_or(0.0);
+    let (reload_multiplier, disarmed) = world
+        .get::<StatusComp>(entity)
+        .map(|status| (status.reload_multiplier, status.disarmed))
+        .unwrap_or((1.0, false));
+    let boosting = world
+        .get::<PhysicsComp>(entity)
+        .is_some_and(|physics| physics.can_boost)
+        && world
+            .get::<UnitCore>(entity)
+            .is_some_and(|core| core.elevation > 0.0);
     if let Some(mut state) = world.get_mut::<crate::weapons::UnitState>(entity) {
         state.rotation = rotation;
         state.delta_len = delta_len;
+        state.reload_multiplier = reload_multiplier;
+        state.can_shoot = !disarmed && !boosting;
     }
 }
