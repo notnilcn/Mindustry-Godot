@@ -109,11 +109,11 @@ func _refresh() -> void:
 	_list.clear_children()
 
 	if mods == null:
-		_list.add(MindWidgets.label(_t("@mods.none"))).pad(8)
+		_list.add(MindWidgets.label(MindWidgets.markup("@mods.none"))).pad(8)
 		return
 	var entries: Array = mods.call("list")
 	if entries.is_empty():
-		_list.add(MindWidgets.label(_t("@mods.none"))).pad(8)
+		_list.add(MindWidgets.label(MindWidgets.markup("@mods.none"))).pad(8)
 		return
 
 	var query := _search.text.to_lower() if _search != null else ""
@@ -129,7 +129,7 @@ func _refresh() -> void:
 		shown += 1
 
 	if shown == 0:
-		_list.add(MindWidgets.label(_t("@none.found"))).pad(8)
+		_list.add(MindWidgets.label(MindWidgets.markup("@none.found"))).pad(8)
 	if not _updates.is_empty():
 		_list.row()
 		# code-instantiated: batch action only when the browser reported updates.
