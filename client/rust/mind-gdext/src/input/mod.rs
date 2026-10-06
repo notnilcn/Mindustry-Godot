@@ -729,6 +729,12 @@ impl MindInput {
         self.bridge.key_down(&self.bindings, ids::PAN)
     }
 
+    /// Whether the world accepts gameplay input (no open dialog/text field).
+    #[func]
+    pub fn gameplay_input_active(&self) -> bool {
+        !self.bridge.text_focus && !self.bridge.ui_dialog
+    }
+
     /// Toggles RTS command mode (`Binding.command_mode`).
     #[func]
     pub fn toggle_command_mode(&mut self) -> bool {

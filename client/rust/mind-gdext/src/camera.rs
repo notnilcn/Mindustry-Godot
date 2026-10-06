@@ -110,6 +110,7 @@ impl ICamera2D for MindCamera2D {
         self.camera.pan_axis(axis_x, axis_y, delta_frames, boost);
 
         if self.mouse_inside
+            && self.gameplay_active()
             && let Some(viewport) = self.base().get_viewport()
         {
             let rect = viewport.get_visible_rect();
@@ -233,6 +234,14 @@ impl MindCamera2D {
             return false;
         };
         input.bind().pan_pressed()
+    }
+
+    /// Whether the world accepts gameplay input (no dialog/text field open).
+    fn gameplay_active(&self) -> bool {
+        let Some(input) = self.input.clone() else {
+            return true;
+        };
+        input.bind().gameplay_input_active()
     }
 
     /// Viewport position → tile `(x, y)`.
