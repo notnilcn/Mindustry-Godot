@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "updated": "2026-10-06T09:15:23+00:00",
+  "updated": "2026-10-06T09:42:18+00:00",
   "findings": [
     {
       "id": "EV-0001",
@@ -603,7 +603,7 @@
       "id": "EV-0020",
       "area": "ui/settings",
       "severity": "S3",
-      "status": "open",
+      "status": "verified-fixed",
       "title": "Settings slider value labels are 1px wide and invisible",
       "expected": "Java: slider rows show the current value right-aligned (Save Interval 60 seconds, UI Scaling 100%, Music Volume 100%)",
       "actual": "Godot: the slider value RichTextLabel has width 1.0 at x=938, so no value text is visible; only 'Save Interval' / 'Music Volume' titles render",
@@ -612,18 +612,34 @@
         "runs/20261006-172828-settings_ui/godot/state-settings-layout.json",
         "runs/20261006-172828-settings_ui/godot/step-03-settings-graphics.png",
         "runs/20261006-172828-settings_ui/godot/step-04-settings-sound.png",
-        "runs/20261006-172828-settings_ui/java/step-05-settings-sound.png"
+        "runs/20261006-172828-settings_ui/java/step-05-settings-sound.png",
+        "runs/20261006-192439-ev0020-0030-verify/godot/state-01-settings-game.json",
+        "runs/20261006-192439-ev0020-0030-verify/godot/state-03-settings-sound.json",
+        "runs/20261006-192439-ev0020-0030-verify/godot/state-02-settings-graphics.json",
+        "runs/20261006-192439-ev0020-0030-verify/godot/step-01-settings-game-mshot.png",
+        "runs/20261006-192439-ev0020-0030-verify/godot/step-03-settings-sound-mshot.png",
+        "runs/20261006-192439-ev0020-0030-verify/godot/step-02-settings-graphics-mshot.png",
+        "runs/20261006-192439-ev0020-0030-verify/java/step-java-settings-sound.png",
+        "runs/20261006-192439-ev0020-0030-verify/java/step-java-settings-graphics.png",
+        "runs/20261006-093202-ev0020-0030-verify/godot/state-ev0020-0030-verify.json",
+        "runs/20261006-093202-ev0020-0030-verify/godot/step-01-settings-game.png",
+        "runs/20261006-093202-ev0020-0030-verify/godot/step-02-settings-graphics.png",
+        "runs/20261006-093202-ev0020-0030-verify/godot/step-06-settings-sound.png",
+        "runs/20261006-093202-ev0020-0030-verify/report.md"
       ],
-      "notes": [],
+      "notes": [
+        "2026-10-06T09:39:37+00:00: [loop ?] Fresh 63e1e0a re-run at 1152x648 (pids 1154515/1156625): Game row '60 seconds' now x=843 w=96 h=26 (was x=938 w=1 h=130); Sound '100%' x=892 w=47 h=26; Graphics values 0px/200%/1.0x/150%/2x/240 FPS all render with real widths. Value labels autowrap=0 (OFF). Screenshots show values right-aligned; no clipped or 1px labels.",
+        "2026-10-06T09:42:18+00:00: [loop ?] Fresh in-engine repro at HEAD 63e1e0a (fix 63e1e0a: MindRichLabel defaults AUTOWRAP_OFF; callers opt in), pid 1158546/1159283/1160906, window 1152x648, log cleared. Value labels now render with real widths and h=26 (were w=1 h=130): Game '60 seconds' x=843 w=96; Graphics '0px' 32, '200%' 47, '1.0x' 36, '150%' 47, '2x' 21, '240 FPS' 67, '100%' 47; Sound three '100%' at w=47. Titles still wrap (Save Interval/Music Volume/UI Edge Padding aw=3). Matches the Java notes/screenshots (java/step-java-settings-*.png). Visual: step-01-settings-game.png, step-02-settings-graphics.png, step-06-settings-sound.png. Regression sweep found no clipping/overflow in About descriptions, Credits contributors, or Controls key labels."
+      ],
       "plan": "14",
       "first_seen": "2026-10-06T07:58:08+00:00",
-      "last_verified": "2026-10-06T07:58:08+00:00"
+      "last_verified": "2026-10-06T09:42:18+00:00"
     },
     {
       "id": "EV-0021",
       "area": "ui/settings",
       "severity": "S3",
-      "status": "open",
+      "status": "verified-fixed",
       "title": "Settings Game table opens with every check row below the visible pane",
       "expected": "Java at 1152x648: Game table shows Save Interval plus 8+ check rows immediately",
       "actual": "Godot: on open only 'Save Interval' and its slider are visible; the first check sits at y=481 vs the scroll viewport bottom 478, stride 52px down to y=949; the slider header RichTextLabel is 130px tall and the Developer Options rail entry is clipped below the viewport",
@@ -631,12 +647,21 @@
       "evidence": [
         "runs/20261006-172828-settings_ui/godot/step-02-settings-game-live.png",
         "runs/20261006-172828-settings_ui/godot/state-settings-layout.json",
-        "runs/20261006-172828-settings_ui/java/step-03-settings-game.png"
+        "runs/20261006-172828-settings_ui/java/step-03-settings-game.png",
+        "runs/20261006-192439-ev0020-0030-verify/godot/state-01-settings-game.json",
+        "runs/20261006-192439-ev0020-0030-verify/godot/step-01-settings-game-mshot.png",
+        "runs/20261006-192439-ev0020-0030-verify/java/step-java-settings-game.png",
+        "runs/20261006-093202-ev0020-0030-verify/godot/state-ev0020-0030-verify.json",
+        "runs/20261006-093202-ev0020-0030-verify/godot/step-01-settings-game.png",
+        "runs/20261006-093202-ev0020-0030-verify/report.md"
       ],
-      "notes": [],
+      "notes": [
+        "2026-10-06T09:39:47+00:00: [loop ?] Fresh 63e1e0a re-run (pid 1154515, menu > Settings, Game pane before scrolling, 1152x648): first check is fully inside the Body viewport - y=229 h=45 with viewport bottom 478 (was y=481); the slider header/title row is h=26 (was 130); 10 checks at stride 52 (229..697), scroll max 642 (was 876); the empty Game pane of the filed repro no longer reproduces. Residual tracked as EV-0032: the 316px-tall pane still shows only 5 of 10 checks and the Developer Options rail entry (y=486) below the viewport, vs Java showing 9 checks and the full rail.",
+        "2026-10-06T09:42:18+00:00: [loop ?] Bonus re-run of the exact repro at HEAD 63e1e0a, pid 1159283, 1152x648. The Game table no longer opens with every check row below the pane: first check is at y=229 (was y=481 vs the 478 viewport bottom) with h=45, and 4 check rows are fully inside the scroll viewport at scroll 0 (5th partially; step-01-settings-game.png shows Fetch/Auto-Create/Automatic/Conveyor/Hints). RESIDUAL, stated explicitly: only 4 rows fully visible vs Java's 8+ because the port's settings panel is shorter; verifying for the titled symptom only."
+      ],
       "plan": "14",
       "first_seen": "2026-10-06T07:58:08+00:00",
-      "last_verified": "2026-10-06T07:58:08+00:00"
+      "last_verified": "2026-10-06T09:42:18+00:00"
     },
     {
       "id": "EV-0022",
@@ -762,7 +787,7 @@
       "id": "EV-0027",
       "area": "ui/dialogs",
       "severity": "S3",
-      "status": "open",
+      "status": "verified-fixed",
       "title": "Mods dialog opens with no visible controls",
       "expected": "Java: Mods dialog shows Import Mod / Mod Browser buttons and 'No mods found!' in the window",
       "actual": "Godot: only the title 'Mods' and Back are visible; all action buttons are laid out at y=720-760, below the 648px window (Import File, Import From GitHub, Mod Browser, Open Folder, Modding Guide, 'Errors have occurred loading mods')",
@@ -770,12 +795,17 @@
       "evidence": [
         "runs/20261006-172828-ui_dialogs/godot/step-06-mods.png",
         "runs/20261006-172828-ui_dialogs/godot/state-mods-offscreen.json",
-        "runs/20261006-172828-ui_dialogs/java/step-10-mods.png"
+        "runs/20261006-172828-ui_dialogs/java/step-10-mods.png",
+        "runs/20261006-192439-ev0020-0030-verify/godot/state-05-mods.json",
+        "runs/20261006-192439-ev0020-0030-verify/godot/step-05-mods-mshot.png",
+        "runs/20261006-192439-ev0020-0030-verify/java/step-java-mods.png"
       ],
-      "notes": [],
+      "notes": [
+        "2026-10-06T09:39:47+00:00: [loop ?] Fresh 63e1e0a re-run (pid 1161539, menu > Mods, 1152x648): Import File (218,200,111x34), Import From GitHub (333,200,192x34), Mod Browser (529,200,132x34), Open Folder (665,200,123x34), Modding Guide (792,200,149x34) all inside the 648px window with bottom=234 (was y=720-760, offscreen); Back at y=486. Screenshot shows the full action row. The empty-list label renders literal '[lightgray]' markup - filed separately as EV-0033."
+      ],
       "plan": "14",
       "first_seen": "2026-10-06T07:58:16+00:00",
-      "last_verified": "2026-10-06T07:58:16+00:00"
+      "last_verified": "2026-10-06T09:39:47+00:00"
     },
     {
       "id": "EV-0028",
@@ -821,7 +851,7 @@
       "id": "EV-0030",
       "area": "ui/menu",
       "severity": "S3",
-      "status": "open",
+      "status": "verified-fixed",
       "title": "Credits dialog contributor list is not visible (1px-wide labels)",
       "expected": "Java: the Credits dialog shows the 'Translators and Contributors' 3-column list with names (redloong9527, Prosta4okua, Felix Corvus, Vanguard, Timmeey86, Epowerj, ...)",
       "actual": "Godot: 202 labels exist in the tree, but every contributor label renders 1px wide (redloong9527 x=310 y=1480 w=1 h=338; first row x=310/488/667 w=1), so no name is visible at any scroll position; the heading 'Translators and Contributors' renders (528 px) and the blurb label is 988 px tall with scroll max 24917 (inflated-label layout family of EV-0020/EV-0023)",
@@ -830,14 +860,23 @@
         "runs/20261006-090405-ev0007-verify/godot/step-05-credits-contributors-live.png",
         "runs/20261006-090405-ev0007-verify/godot/step-03-credits.png",
         "runs/20261006-090405-ev0007-verify/godot/state-ev0007-verify.json",
-        "runs/20261006-172828-ui_dialogs/java/step-05-credits.png"
+        "runs/20261006-172828-ui_dialogs/java/step-05-credits.png",
+        "runs/20261006-192439-ev0020-0030-verify/godot/state-04-credits.json",
+        "runs/20261006-192439-ev0020-0030-verify/godot/step-04-credits-top-mshot.png",
+        "runs/20261006-192439-ev0020-0030-verify/java/step-java-credits.png",
+        "runs/20261006-093202-ev0020-0030-verify/godot/state-ev0020-0030-verify.json",
+        "runs/20261006-093202-ev0020-0030-verify/godot/step-03-credits.png",
+        "runs/20261006-093202-ev0020-0030-verify/report.md"
       ],
       "notes": [
-        "Split out of EV-0007 during its 9ecc2de re-verification: the About links + Credits button are fixed, but the Credits body's contributor list is not player-visible. Do not re-open EV-0007 for this."
+        "Split out of EV-0007 during its 9ecc2de re-verification: the About links + Credits button are fixed, but the Credits body's contributor list is not player-visible. Do not re-open EV-0007 for this.",
+        "2026-10-06T09:39:40+00:00: [loop ?] Fresh 63e1a re-run (pid 1157350, menu > Database > About > Credits, 1152x648): blurb is one line h=26 at y=174 (was x=316 y=174 w=512 h=988, scroll max 24917); 202/202 rich labels now wider than 1px. First contributor redloong9527 x=121 y=258 w=119 (was x=310 y=1480 w=1 h=338), Prosta4okua w=110, Felix Corvus w=105; heading y=225 and 7 contributor rows visible at scroll 0. Literal [sky] blurb markup still present (EV-0031, unchanged).",
+        "2026-10-06T09:39:57+00:00: [loop ?] Note correction: the re-run commit in the previous EV-0030 verification note is 63e1e0a6c9040d880ccf68428a78f03ea6597f91 (typo '63e1a').",
+        "2026-10-06T09:42:18+00:00: [loop ?] Fresh in-engine repro at HEAD 63e1e0a, pid 1162051, 1152x648. Credits contributor labels now render with real widths (were w=1 h=208..338): heading 'Translators and Contributors' y=225 w=906 h=26; first packed contributor redloong9527 x=121 y=258 w=119 h=26; Prosta4okua 110, Felix Corvus 105, Vanguard 84, Timmeey86 101, Epowerj 71 in 3 columns at y=258/290, all inside the viewport. The list is player-visible; step-03-credits.png shows the full 3-column list matching java/step-java-credits.png. (The blurb still shows a literal [sky] - tracked as EV-0031, left open.)"
       ],
       "plan": "14",
       "first_seen": "2026-10-06T09:10:21+00:00",
-      "last_verified": "2026-10-06T09:10:21+00:00"
+      "last_verified": "2026-10-06T09:42:18+00:00"
     },
     {
       "id": "EV-0031",
@@ -851,14 +890,60 @@
       "evidence": [
         "runs/20261006-090405-ev0007-verify/godot/step-03-credits.png",
         "runs/20261006-090405-ev0007-verify/godot/state-ev0007-verify.json",
-        "runs/20261006-172828-ui_dialogs/java/step-05-credits.png"
+        "runs/20261006-172828-ui_dialogs/java/step-05-credits.png",
+        "runs/20261006-192439-ev0020-0030-verify/godot/step-04-credits-top-mshot.png",
+        "runs/20261006-093202-ev0020-0030-verify/godot/state-ev0020-0030-verify.json",
+        "runs/20261006-093202-ev0020-0030-verify/godot/step-03-credits.png",
+        "runs/20261006-093202-ev0020-0030-verify/report.md"
       ],
       "notes": [
-        "Split out of EV-0007 during its 9ecc2de re-verification."
+        "Split out of EV-0007 during its 9ecc2de re-verification.",
+        "2026-10-06T09:39:52+00:00: [loop ?] Fresh 63e1e0a re-run (pid 1157350): credits blurb still renders the literal '[sky]' tag before the email - 'Created by Anuken - [sky]anukendev@gmail.com' - in step-04-credits-top-mshot.png; status unchanged.",
+        "2026-10-06T09:42:18+00:00: [loop ?] Fresh repro at HEAD 63e1e0a, pid 1162051: the Credits blurb still renders a literal [sky] - parsed text 'Created by Anuken - [sky]anukendev@gmail.com' (raw 'Created by [color=#4040ffff]Anuken[/color] - [lb]sky]anukendev@gmail.com'; bundle is 'Created by [royal]Anuken[] - [sky]anukendev@gmail.com[]'). The wrap fix compacted the blurb to h=26 w=890 but did not convert the [sky] color tag. Still open."
       ],
       "plan": "14",
       "first_seen": "2026-10-06T09:10:21+00:00",
-      "last_verified": "2026-10-06T09:10:21+00:00"
+      "last_verified": "2026-10-06T09:42:18+00:00"
+    },
+    {
+      "id": "EV-0032",
+      "area": "ui/settings",
+      "severity": "S3",
+      "status": "open",
+      "title": "Settings dialog body is shorter than the reference: half the Game rows and the Developer Options rail entry need scrolling",
+      "expected": "Java at 1152x648: Settings Game pane shows Save Interval plus 9 check rows and the full 7-entry category rail without scrolling (java/step-java-settings-game.png)",
+      "actual": "Godot: Body scroll viewport is only 316px tall (y 162..478); only 5 of 10 check rows (y 229..437) are visible and the 7th rail entry Developer Options (y 486..536) is below the viewport at scroll 0; the pane still scrolls (max 642) after the label-wrapping fix shortened the slider header from 130px to 26px",
+      "repro": "scenario settings_ui (Godot leg): menu > Settings (230,429); count visible check rows and rail entries before scrolling",
+      "evidence": [
+        "runs/20261006-192439-ev0020-0030-verify/godot/state-01-settings-game.json",
+        "runs/20261006-192439-ev0020-0030-verify/godot/step-01-settings-game-mshot.png",
+        "runs/20261006-192439-ev0020-0030-verify/java/step-java-settings-game.png"
+      ],
+      "notes": [
+        "Filed from the EV-0021 re-check: EV-0021's filed symptom (all checks below the pane, 130px slider header) is fixed, but the pane height difference remains. Java visibly fits 9 checks plus the rail; Godot fits 5 checks and clips the rail."
+      ],
+      "plan": "14",
+      "first_seen": "2026-10-06T09:39:52+00:00",
+      "last_verified": "2026-10-06T09:39:52+00:00"
+    },
+    {
+      "id": "EV-0033",
+      "area": "ui/dialogs",
+      "severity": "S4",
+      "status": "open",
+      "title": "Mods dialog renders a literal [lightgray] tag in the empty-list message",
+      "expected": "Java: the empty mod list shows 'No mods found!' (java/step-java-mods.png)",
+      "actual": "Godot: the body label renders '[lightgray]No mods found!' with the BBCode tag visible; same markup-leak family as EV-0031",
+      "repro": "scenario ui_dialogs (Godot leg): menu > Mods (230,359); read the empty-list label",
+      "evidence": [
+        "runs/20261006-192439-ev0020-0030-verify/godot/step-05-mods-mshot.png",
+        "runs/20261006-192439-ev0020-0030-verify/godot/state-05-mods.json",
+        "runs/20261006-192439-ev0020-0030-verify/java/step-java-mods.png"
+      ],
+      "notes": [],
+      "plan": "20",
+      "first_seen": "2026-10-06T09:39:52+00:00",
+      "last_verified": "2026-10-06T09:39:52+00:00"
     }
   ]
 }
