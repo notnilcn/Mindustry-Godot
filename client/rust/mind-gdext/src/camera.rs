@@ -329,6 +329,13 @@ impl MindCamera2D {
         self.camera.scale_camera(amount as f32);
     }
 
+    /// `MobileInput.pan`: viewport-pixel drag delta (touch gesture).
+    #[func]
+    pub fn mobile_pan(&mut self, delta_x: f64, delta_y: f64) {
+        self.camera.mobile_pan(delta_x as f32, delta_y as f32);
+        self.follow_target = None;
+    }
+
     /// `Renderer.setScale` (absolute target scale).
     #[func]
     pub fn set_camera_scale(&mut self, scale: f64) {

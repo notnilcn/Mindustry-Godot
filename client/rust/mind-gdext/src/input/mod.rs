@@ -16,6 +16,8 @@ pub mod events;
 pub mod gesture;
 pub mod mobile;
 
+use std::collections::HashSet;
+
 use godot::classes::notify::NodeNotification;
 use godot::classes::{Control, INode, Node};
 use godot::obj::Base;
@@ -64,6 +66,8 @@ pub struct MindInput {
     mobile_time: f64,
     /// Live desktop controller bridge (placement, hotkeys, RTS).
     bridge: DesktopBridge,
+    /// Touch pointers owned by a STOP-filter control (no world gestures).
+    ui_pointers: HashSet<i32>,
 }
 
 #[godot_api]
@@ -82,6 +86,7 @@ impl INode for MindInput {
             mobile: mobile::MobileInputBridge::new(),
             mobile_time: 0.0,
             bridge: DesktopBridge::new(),
+            ui_pointers: HashSet::new(),
         }
     }
 
@@ -106,6 +111,11 @@ impl INode for MindInput {
         events::translate(&event, &mut translated);
         self.bridge.text_focus = self.text_field_focused();
         for raw in translated {
+            // Touch gestures drive the mobile bridge directly (plan-14 mobile
+            // HUD is out of scope; pan/zoom already work without it).
+            if self.route_touch(&raw) {
+                continue;
+            }
             // World mouse presses: skip when a STOP-filter `Control` owns the
             // event position (upstream `!Core.scene.hasMouse()`); otherwise
             // consume the event so `MindSimHost::unhandled_input` cannot
@@ -117,8 +127,13 @@ impl INode for MindInput {
                 RawEvent::MouseButton { button, down: true, .. }
                     if button == "left" || button == "right" || button == "middle"
             );
-            if is_press && self.ui_captures(&raw) {
-                continue;
+            if is_press {
+                let RawEvent::MouseButton { x, y, .. } = &raw else {
+                    continue;
+                };
+                if self.ui_captures_at(*x, *y) {
+                    continue;
+                }
             }
             self.bridge.handle(&self.bindings, raw);
             if is_press {
@@ -212,14 +227,11 @@ impl MindInput {
     /// (upstream `Core.scene.hasMouse()`). PASS controls fall through to
     /// `_unhandled_input`, so only STOP controls (or a STOP ancestor) block the
     /// world.
-    fn ui_captures(&self, event: &RawEvent) -> bool {
-        let RawEvent::MouseButton { x, y, .. } = event else {
-            return false;
-        };
+    fn ui_captures_at(&self, x: f32, y: f32) -> bool {
         let tree = self.base().get_tree();
         let root = tree.get_root();
         let controls = root.find_children("*");
-        let point = Vector2::new(*x, *y);
+        let point = Vector2::new(x, y);
         // Later siblings are drawn on top: walk in reverse tree order.
         for index in (0..controls.len()).rev() {
             let Some(node) = controls.get(index) else {
@@ -277,6 +289,66 @@ impl MindInput {
             return false;
         };
         control.is_class("LineEdit") || control.is_class("TextEdit")
+    }
+
+    /// Folds a Godot touch event into the mobile gesture bridge and applies the
+    /// resulting camera pan/zoom. Returns whether the event was a touch event.
+    fn route_touch(&mut self, raw: &RawEvent) -> bool {
+        let time = self.mobile_time;
+        let events = match raw {
+            RawEvent::TouchDown { pointer, x, y } => {
+                if self.ui_captures_at(*x, *y) {
+                    self.ui_pointers.insert(*pointer);
+                    return true;
+                }
+                self.mobile.touch_down(time, *x, *y, *pointer)
+            }
+            RawEvent::TouchMove { pointer, x, y } => {
+                if self.ui_pointers.contains(pointer) {
+                    return true;
+                }
+                self.mobile.touch_drag(time, *x, *y, *pointer)
+            }
+            RawEvent::TouchUp { pointer, x, y } => {
+                if self.ui_pointers.remove(pointer) {
+                    return true;
+                }
+                self.mobile.touch_up(time, *x, *y, *pointer)
+            }
+            _ => return false,
+        };
+        self.apply_gestures(&events);
+        true
+    }
+
+    /// Applies gesture events that map directly to the camera rig (mobile pan
+    /// and pinch zoom); taps/long-presses stay with the plan-14 mobile HUD.
+    fn apply_gestures(&mut self, events: &[gesture::GestureEvent]) {
+        let Some(camera) = self.bridge.camera.clone() else {
+            return;
+        };
+        for event in events {
+            match event {
+                gesture::GestureEvent::Pan {
+                    delta_x, delta_y, ..
+                } => {
+                    camera
+                        .clone()
+                        .bind_mut()
+                        .mobile_pan(*delta_x as f64, *delta_y as f64);
+                }
+                gesture::GestureEvent::Zoom {
+                    initial_distance,
+                    distance,
+                } => {
+                    if *initial_distance > 0.0 {
+                        let amount = (*distance / *initial_distance - 1.0) * 4.0;
+                        camera.clone().bind_mut().zoom_by(amount as f64);
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     /// Resolves UI effects produced by the desktop bridge.
