@@ -178,6 +178,11 @@ func _init() -> void:
 			label_texts.append(text)
 	_check(label_texts.has("A / D"), "axis binding renders min / max (A / D)")
 	_check(label_texts.has("Move X"), "binding name resolves from the bundle")
+	var key_width := -1.0
+	for node in keybind.find_children("*", "", true, false):
+		if node.get("text") == "A / D" and node is Control:
+			key_width = (node as Control).size.x
+	_check(key_width > 1.0, "key label renders with a real width (got %s)" % key_width)
 
 	print("UICHECK: failed=", _failures)
 	quit(1 if _failures > 0 else 0)

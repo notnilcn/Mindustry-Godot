@@ -120,7 +120,7 @@ func _add_binding_row(entry: Dictionary, localized: String) -> void:
 
 	var key := MindWidgets.label(_key_text(entry))
 	key.add_theme_color_override("font_color", UNSET_COLOR if _is_unset(entry) else MindStyles.ACCENT)
-	_list.add(key).set_min_width(90.0).set_align(3).set_pad_right(20.0)
+	_list.add(key).fill_x_axis().set_min_width(90.0).set_align(3).set_pad_right(20.0)
 
 	var rebind := MindWidgets.button(_t("@settings.rebind"))
 	rebind.theme_type_variation = "grayt"
