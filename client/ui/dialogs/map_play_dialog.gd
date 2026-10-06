@@ -35,7 +35,7 @@ func set_context_json(json_text: String) -> void:
 	_rules_json = str(context().get("rules", ""))
 	var requested := str(context().get("mode", ""))
 	if MODES.has(requested):
-		_mode = requested
+		_select_mode(requested)
 
 
 func _build() -> void:
