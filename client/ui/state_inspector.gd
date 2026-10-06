@@ -2,9 +2,13 @@
 ##
 ## State inspector overlay for the M4 spine (plan 00 §3.5/§3.10).
 ##
-## Reads `MindSimHost.get_state_json()` (the same schema as the headless dump)
-## every 250 ms and on the `state_changed(tick, checksum)` signal. This script
-## never writes sim state; it is UI layout + read-only formatting only.
+## Reads the cheap `MindSimHost` accessors (tick, checksum, update id, phase,
+## selected block, group counts) every 250 ms and on the
+## `state_changed(tick, checksum)` signal while visible. The full
+## `get_state_json()` dump is deliberately not used: it serializes the whole
+## grid and entity list (megabytes per call) and would stall the frame loop.
+## This script never writes sim state; it is UI layout + read-only formatting
+## only.
 
 extends Control
 
@@ -49,11 +53,17 @@ func _ready() -> void:
 	_camera = get_node_or_null(camera_path)
 	if _camera == null:
 		_camera = get_node_or_null("/root/Spine/World/Camera2D")
-	_refresh()
-	_refresh_content()
+	visibility_changed.connect(_on_visibility_changed)
+	if visible:
+		_refresh()
+		_refresh_content()
 
 
 func _process(delta: float) -> void:
+	# Hidden overlay must not poll: the refresh is debug-only and every frame of
+	# polling costs main-thread time in normal play.
+	if not visible:
+		return
 	_elapsed += delta
 	if _elapsed >= POLL_INTERVAL:
 		_elapsed = 0.0
@@ -61,19 +71,24 @@ func _process(delta: float) -> void:
 
 
 func _on_state_changed(_tick: int, _checksum: String) -> void:
+	if not visible:
+		return
 	_refresh()
+
+
+func _on_visibility_changed() -> void:
+	if not visible:
+		return
+	_elapsed = 0.0
+	_refresh()
+	_refresh_content()
 
 
 func _refresh() -> void:
 	if _host == null or not is_instance_valid(_host):
 		return
-	var parsed: Variant = JSON.parse_string(_host.call("get_state_json"))
-	if not (parsed is Dictionary):
-		return
-	var state: Dictionary = parsed
-
 	var lines := PackedStringArray()
-	lines.append("tick: %d" % int(state.get("tick", 0)))
+	lines.append("tick: %d" % int(_host.call("get_tick")))
 	lines.append("update: %d  state: %s" % [
 		int(_host.call("get_update_id")),
 		str(_host.call("get_state")),
@@ -81,7 +96,7 @@ func _refresh() -> void:
 	lines.append("paused: %s" % ("true" if bool(_host.call("is_paused")) else "false"))
 	lines.append("selected: %s" % str(_host.call("selected_block")))
 	lines.append("cursor: %s" % _cursor_tile_text())
-	lines.append("checksum: %s" % str(state.get("checksum", "")))
+	lines.append("checksum: %s" % str(_host.call("get_checksum")))
 	lines.append("groups: %s" % _group_counts_text())
 	_label.text = "\n".join(lines)
 	_refresh_audio()

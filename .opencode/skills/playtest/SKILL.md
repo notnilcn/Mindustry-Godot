@@ -95,7 +95,7 @@ godot_exec {"action":"call","params":{"node_path":"/root/Spine/SimHost","method"
 
 ### 6. `get_state_json` assertions
 
-`godot_exec {"action":"eval","params":{"code":"return get_node(\"/root/Spine/SimHost\").get_state_json()"}}` returns the canonical dump (same schema as `mind-headless --dump`): `{format, tick, phase, checksum, world:{width,height,sparse,tiles:[{x,y,block,team,rot,build_id}]}, entities, events, commands_applied}`. `world.tiles` is sparse (non-air only) and sorted by `(y, x)` — assert on parsed JSON, not substring hunts. The inspector label (`/root/Spine/Ui/StateInspector/Label`) polls this every 250 ms and on `state_changed(tick, checksum)`; its text contains `tick`, `checksum` and the selected block.
+`godot_exec {"action":"eval","params":{"code":"return get_node(\"/root/Spine/SimHost\").get_state_json()"}}` returns the canonical dump (same schema as `mind-headless --dump`): `{format, tick, phase, checksum, world:{width,height,sparse,tiles:[{x,y,block,team,rot,build_id}]}, entities, events, commands_applied}`. `world.tiles` is sparse (non-air only) and sorted by `(y, x)` — assert on parsed JSON, not substring hunts. The full dump is heavy (megabytes on a loaded sector), so treat it as an MCP/assertion endpoint only; the inspector label (`/root/Spine/Ui/StateInspector/Label`) refreshes from the cheap `get_tick`/`get_checksum`/`get_group_counts` accessors every 250 ms and on `state_changed(tick, checksum)` while visible, and its text contains `tick`, `checksum` and the selected block.
 
 ### 7. Camera
 
