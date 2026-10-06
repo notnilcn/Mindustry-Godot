@@ -36,12 +36,19 @@ const CAMPAIGN_PATH := "/root/Spine/MindCampaign"
 ## and reuse this cache elsewhere.
 var _campaign_views_cache: Dictionary = {}
 var _campaign_views_loaded := false
+## Shared boot snapshot so every dialog does not re-project the live campaign
+## on its own `_ready`; per-open refreshes always re-fetch.
+static var _shared_views: Dictionary = {}
 
 
 func _ready() -> void:
 	visible = false
 	_apply_title()
 	_apply_full_dialog()
+	# Preload the read-model cache while `MindUi` cannot be bound yet (dialogs are
+	# constructed before any `open_dialog` call), so `shown()` never re-enters the
+	# `&mut` Rust endpoint through the lazy fallback.
+	_ensure_campaign_views_loaded()
 
 
 ## Stretches the centered panel to the whole viewport for `full_dialog` dialogs
@@ -206,23 +213,35 @@ func clear_buttons() -> void:
 
 ## M5 campaign read models (plan 14 §3.11 12 seam). Reads the live
 ## `MindCampaign` projection when available and otherwise the `MindUi` fixture;
-## cached for the dialog's lifetime. The cache is first loaded during `_ready`
-## (before `MindUi` binds itself), and `refresh_campaign_views()` rebuilds it on
-## open so a running dialog reflects live campaign state.
+## cached for the dialog's lifetime. The cache is preloaded by `_ready` (before
+## `MindUi` binds itself) and `refresh_campaign_views()` rebuilds it on open so a
+## running dialog reflects live campaign state.
 func campaign_views() -> Dictionary:
+	_ensure_campaign_views_loaded()
+	return _campaign_views_cache
+
+
+## First-load path: live `MindCampaign` when it exposes the read model, else the
+## `MindUi` fixture. Only called from `_ready` (never from `shown()`, where
+## `MindUi` is mutably bound by `open_dialog`).
+func _ensure_campaign_views_loaded() -> void:
 	if _campaign_views_loaded:
-		return _campaign_views_cache
+		return
 	_campaign_views_loaded = true
+	if not _shared_views.is_empty():
+		_campaign_views_cache = _shared_views
+		return
 	var live := _live_campaign_views("")
 	if not live.is_empty():
 		_campaign_views_cache = live
-		return _campaign_views_cache
+		_shared_views = live
+		return
 	var ui := get_node_or_null("/root/MindUi")
 	if ui != null and ui.has_method("campaign_views"):
 		var parsed: Variant = JSON.parse_string(str(ui.call("campaign_views")))
 		if parsed is Dictionary:
 			_campaign_views_cache = parsed
-	return _campaign_views_cache
+			_shared_views = parsed
 
 
 ## Rebuilds the cached campaign read models from the live `MindCampaign` node
@@ -233,6 +252,7 @@ func refresh_campaign_views(planet: String = "") -> Dictionary:
 	if not live.is_empty():
 		_campaign_views_cache = live
 		_campaign_views_loaded = true
+		_shared_views = live
 	return _campaign_views_cache
 
 
