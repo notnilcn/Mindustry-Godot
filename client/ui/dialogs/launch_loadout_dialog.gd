@@ -82,6 +82,16 @@ func _rebuild() -> void:
 	if _capacity > 0:
 		_list.add(MindWidgets.label(MindWidgets.markup_format("@launch.capacity", [_capacity]))).pad(4)
 		_list.row()
+	# Live launch resources (`universe.getLaunchResources`): already-selected
+	# item totals shown alongside the schematic requirement totals above.
+	var resources := campaign_json("get_launch_resources")
+	if not resources.is_empty():
+		var parts := PackedStringArray()
+		for item in resources:
+			parts.append("%s x%d" % [str(item), int(resources[item])])
+		if not parts.is_empty():
+			_list.add(MindWidgets.label("%s %s" % [_t("@resources"), ", ".join(parts)])).grow_x_axis().pad(2)
+			_list.row()
 	clear_buttons()
 	add_button(_t("@launch.text"), _confirm, "ok", 200.0)
 	var resources := add_button(_t("@resources"), _open_loadout, "edit", 200.0)
