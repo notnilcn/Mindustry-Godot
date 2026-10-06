@@ -58,6 +58,8 @@ pub struct CampaignRuntime {
     pub turn_due: bool,
     /// Running as a network client (`net.client()`): server-only systems skip.
     pub is_client: bool,
+    /// Unlocked content names (map objective `Research`/`Produce` predicates).
+    pub unlocked_content: std::collections::HashSet<String>,
 }
 
 impl CampaignRuntime {
@@ -70,7 +72,13 @@ impl CampaignRuntime {
             ticks: 0,
             turn_due: false,
             is_client: false,
+            unlocked_content: std::collections::HashSet::new(),
         }
+    }
+
+    /// Replaces the unlocked-content cache (host-side registry projection).
+    pub fn set_unlocked_content(&mut self, names: impl IntoIterator<Item = String>) {
+        self.unlocked_content = names.into_iter().collect();
     }
 
     /// Current match rules.
@@ -261,6 +269,7 @@ pub fn objectives_tick_system(world: &mut World) {
         let env = RuntimeObjectiveEnv {
             rules: &rules_snapshot,
             teams: &runtime.session.teams,
+            unlocked: &runtime.unlocked_content,
         };
         runtime
             .session
@@ -282,19 +291,16 @@ pub fn objectives_tick_system(world: &mut World) {
 struct RuntimeObjectiveEnv<'a> {
     rules: &'a Rules,
     teams: &'a Teams,
+    unlocked: &'a std::collections::HashSet<String>,
 }
 
 impl ObjectiveEnv for RuntimeObjectiveEnv<'_> {
     fn is_content_unlocked(&self, content: &str) -> bool {
-        self.rules.researched.iter().any(|name| name == content)
+        self.rules.researched.iter().any(|name| name == content) || self.unlocked.contains(content)
     }
 
-    fn team_has_item(&self, team: u8, _item: &str, amount: i32) -> bool {
+    fn team_has_item(&self, _team: u8, _item: &str, amount: i32) -> bool {
         amount <= 0
-            || self
-                .teams
-                .get_or_null(TeamId(team))
-                .is_some_and(|data| data.core().is_some())
     }
 
     fn core_item_count(&self, _item: &str) -> i32 {

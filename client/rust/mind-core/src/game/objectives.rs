@@ -275,4 +275,33 @@ mod tests {
         ctx.unlocked.push(content);
         assert!(all_complete(&objectives, &ctx));
     }
+
+    #[test]
+    fn campaign_context_snapshots_unlocks_and_sectors() {
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+        use crate::game::planet::EmptyNeighborhood;
+        use crate::game::universe::Campaign;
+
+        let registry =
+            create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true).unwrap();
+        let mut campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
+        let planet = campaign.planet_id_by_name("serpulo").unwrap();
+        let ground_zero = registry.sector_by_name("groundZero").unwrap();
+
+        let ctx = CampaignObjectiveContext::new(&registry, &campaign);
+        // Ground Zero starts unbased: SectorComplete not met.
+        let status = ctx.sector_status(ground_zero.id);
+        assert!(!status.has_base && !status.captured);
+        assert!(!Objective::SectorComplete(ground_zero.id).complete(&ctx));
+
+        let sector = campaign.sector_mut(planet, ground_zero.sector).unwrap();
+        sector.save = Some("save".to_owned());
+        sector.info.info.has_core = true;
+        sector.info.info.was_captured = true;
+        sector.info.info.waves = false;
+        sector.info.info.attack = false;
+        let ctx = CampaignObjectiveContext::new(&registry, &campaign);
+        assert!(Objective::SectorComplete(ground_zero.id).complete(&ctx));
+        assert!(Objective::OnPlanet(planet).complete(&ctx));
+    }
 }

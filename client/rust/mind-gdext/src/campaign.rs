@@ -409,7 +409,8 @@ impl MindCampaign {
         // Install the runtime and register the live cores/spawns (GAP-9).
         let mut installed = false;
         if let Some(mut host) = self.host() {
-            let runtime = CampaignRuntime::new(self.session.clone(), campaign.clone());
+            let mut runtime = CampaignRuntime::new(self.session.clone(), campaign.clone());
+            runtime.set_unlocked_content(collect_unlocked(&registry));
             host.bind_mut().install_campaign_runtime(runtime);
             let sync = host.bind_mut().sync_campaign_session(&registry);
             if let Some(sync) = sync {
@@ -718,10 +719,16 @@ impl MindCampaign {
         let Some(campaign) = self.campaign.clone() else {
             return;
         };
+        let unlocked = self
+            .registry
+            .as_ref()
+            .map(collect_unlocked)
+            .unwrap_or_default();
         if let Some(mut host) = self.host() {
             let taken = host.bind_mut().take_campaign_runtime();
             if let Some(mut runtime) = taken {
                 runtime.campaign = campaign;
+                runtime.set_unlocked_content(unlocked);
                 host.bind_mut().put_campaign_runtime(runtime);
             }
         }
@@ -1275,8 +1282,7 @@ impl MindCampaign {
     }
 }
 
-/// Merges the loaded map/generator's wave rules into the session rules without
-/// clobbering the preset/campaign fold (`World.loadSector` ordering). For a
+/// Merges the loaded map/generator's wave rules into the session rules without/// clobbering the preset/campaign fold (`World.loadSector` ordering). For a
 /// preset-launched sector the preset wins; a planet-generated sector adopts the
 /// generator's `generate_rules` wave/win settings.
 fn merge_map_rules(session: &mut Rules, map: &Rules, has_preset: bool) {
@@ -1290,6 +1296,18 @@ fn merge_map_rules(session: &mut Rules, map: &Rules, has_preset: bool) {
     session.win_wave = map.win_wave;
     session.attack_mode = map.attack_mode;
     session.wave_spacing = map.wave_spacing;
+}
+
+/// Unlocked content names of the registry (map objective `Research`/`Produce`).
+fn collect_unlocked(registry: &ContentRegistry) -> Vec<String> {
+    registry
+        .tech()
+        .nodes
+        .iter()
+        .filter_map(|node| node.content)
+        .filter(|content| tech_tree::content_unlocked(registry, *content))
+        .filter_map(|content| tech_tree::content_name(registry, content))
+        .collect()
 }
 
 /// Sanitizes a save-slot name into a file stem (alphanumerics, `-`, `_`).
