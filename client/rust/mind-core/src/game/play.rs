@@ -278,27 +278,26 @@ pub fn apply_sector_preset_rules(
         return false;
     };
     let mut applied = false;
-    if let Some(sector) = planet_record.sector(sector_id) {
-        if let Some(preset_id) = sector.preset
-            && let Some(preset) = registry.sector(preset_id)
-        {
-            session.rules.win_wave = preset.capture_wave;
-            let attack = preset.capture_wave <= 0 && sector.has_enemy_base();
-            session.rules.attack_mode = attack;
-            session.rules.waves = !attack;
-            if session.rules.win_wave <= 0 && !attack && planet_record.allow_waves {
-                // `SectorInfo.write`: infinite waves get a default win wave.
-                session.rules.win_wave = 30;
-            }
-            session.attack_after_waves = preset.attack_after_waves;
-            session.add_starting_items = preset.add_starting_items;
-            session.allow_launch_loadout =
-                sector.allow_launch_loadout(planet_record.allow_launch_loadout);
-            if preset.no_lighting {
-                session.rules.lighting = false;
-            }
-            applied = true;
+    if let Some(sector) = planet_record.sector(sector_id)
+        && let Some(preset_id) = sector.preset
+        && let Some(preset) = registry.sector(preset_id)
+    {
+        session.rules.win_wave = preset.capture_wave;
+        let attack = preset.capture_wave <= 0 && sector.has_enemy_base();
+        session.rules.attack_mode = attack;
+        session.rules.waves = !attack;
+        if session.rules.win_wave <= 0 && !attack && planet_record.allow_waves {
+            // `SectorInfo.write`: infinite waves get a default win wave.
+            session.rules.win_wave = 30;
         }
+        session.attack_after_waves = preset.attack_after_waves;
+        session.add_starting_items = preset.add_starting_items;
+        session.allow_launch_loadout =
+            sector.allow_launch_loadout(planet_record.allow_launch_loadout);
+        if preset.no_lighting {
+            session.rules.lighting = false;
+        }
+        applied = true;
     }
 
     // `Planet.applyRules(rules, customGame=false)`: env/attributes + campaign
@@ -735,7 +734,7 @@ mod tests {
     #[test]
     fn sector_preset_rules_apply() {
         let registry = content();
-        let mut campaign = campaign(&registry);
+        let campaign = campaign(&registry);
         let planet = campaign.planet_id_by_name("serpulo").unwrap();
         let sector_id = registry.sector_by_name("groundZero").unwrap().sector;
         let mut session = PlaySession::new(Rules::default());

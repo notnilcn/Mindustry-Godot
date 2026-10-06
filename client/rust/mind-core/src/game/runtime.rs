@@ -390,7 +390,7 @@ mod tests {
     #[test]
     fn wave_timer_reaches_win_wave_and_captures() {
         let registry = content();
-        let mut campaign = campaign(&registry);
+        let campaign = campaign(&registry);
         let planet = campaign.planet_id_by_name("serpulo").unwrap();
         let sector_id = registry.sector_by_name("groundZero").unwrap().sector;
         let mut session = PlaySession::new(Rules {
@@ -415,7 +415,7 @@ mod tests {
         // One tick fires the due wave; the next game-state pass captures.
         campaign_tick_system(&mut world);
         game_state_tick_system(&mut world);
-        let mut runtime = world
+        let runtime = world
             .remove_resource::<CampaignRuntime>()
             .expect("runtime installed");
         assert!(runtime.session.wave >= 1);

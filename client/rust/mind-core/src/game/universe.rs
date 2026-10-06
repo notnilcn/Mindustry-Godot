@@ -283,7 +283,7 @@ impl Campaign {
                 (0..planet.sector_count())
                     .map(|id| {
                         grid.tiles
-                            .get(id as usize)
+                            .get(id)
                             .map(|tile| tile.tiles.iter().map(|n| *n as u16).collect())
                             .unwrap_or_default()
                     })
