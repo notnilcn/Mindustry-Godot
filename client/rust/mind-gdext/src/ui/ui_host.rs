@@ -26,6 +26,9 @@ use mind_core::ui::settings::{self, SettingKind};
 /// Path to the sim owner that the pause governor drives.
 const SIM_HOST_PATH: &str = "/root/Spine/SimHost";
 
+/// Path to the campaign facade that owns the live sector/tech/rules state.
+const CAMPAIGN_PATH: &str = "/root/Spine/MindCampaign";
+
 /// `MindUi` — the UI registry/prompt singleton (`/root/MindUi`).
 #[derive(GodotClass)]
 #[class(base=Node)]
@@ -41,8 +44,10 @@ pub struct MindUi {
     mobile: bool,
     /// `--mobile-preview` override flag (plan 14 §2.4 item 10 / plan 22).
     mobile_preview: bool,
-    /// Lazily built M5 campaign read-model JSON (plan 14 §3.11 12 seam).
-    campaign_cache: Option<String>,
+    /// Lazily built fallback campaign fixture (`MindCampaign` absent or not
+    /// exposing live read models); invalidated through
+    /// [`Self::invalidate_campaign_views`].
+    campaign_fixture: Option<String>,
     /// Lazily built placement-palette catalog JSON (`PlacementFragment`).
     block_catalog_cache: Option<String>,
     /// Rust console command registry (plan 14 M7, deviation OD1).
@@ -76,7 +81,7 @@ impl INode for MindUi {
             hud_visible: true,
             mobile: Os::singleton().has_feature("mobile") || mobile_preview,
             mobile_preview,
-            campaign_cache: None,
+            campaign_fixture: None,
             block_catalog_cache: None,
             console: mind_core::ui::console::ConsoleRegistry::with_defaults(),
             settings: SettingsStore::new(),
@@ -459,33 +464,61 @@ impl MindUi {
 
     /// M5 campaign dialog read models as JSON (`CampaignViews`).
     ///
-    /// Reads the deterministic plan-12 fixture snapshot; the live campaign
-    /// binding is the documented plan-21/world seam (plan 14 §3.11). Cached
-    /// after the first call.
+    /// Prefers the live projection when `MindCampaign` exposes
+    /// `campaign_views_json(planet)` (`""` = active planet); otherwise builds and
+    /// caches the deterministic vanilla fixture. The fixture cache is dropped by
+    /// [`Self::invalidate_campaign_views`], and the GDScript dialogs refresh
+    /// through `MindCampaign` directly so a rebuild can be forced per open.
     #[func]
     pub fn campaign_views(&mut self) -> GString {
-        if self.campaign_cache.is_none() {
+        self.campaign_views_json(GString::new())
+    }
+
+    /// M5 campaign read models for `planet` (`""` = active planet).
+    #[func]
+    pub fn campaign_views_json(&mut self, planet: GString) -> GString {
+        if let Some(json) = self.live_campaign_call("campaign_views_json", &[planet.to_variant()]) {
+            return json;
+        }
+        if self.campaign_fixture.is_none() {
             let mut views = mind_core::ui::campaign::CampaignViews::vanilla_fixture();
             // The fixture carries no map registry; feed the built-in map rows so
             // `CustomGameDialog`/`EditorMapsDialog` render the default map grid.
             views.maps = mind_core::ui::campaign::default_map_entries();
             let json = serde_json::to_string(&views).unwrap_or_else(|_| String::from("{}"));
-            self.campaign_cache = Some(json);
+            self.campaign_fixture = Some(json);
         }
-        GString::from(self.campaign_cache.as_deref().unwrap_or("{}"))
+        GString::from(self.campaign_fixture.as_deref().unwrap_or("{}"))
+    }
+
+    /// Drops the cached campaign fixture so the next read rebuilds it.
+    #[func]
+    pub fn invalidate_campaign_views(&mut self) {
+        self.campaign_fixture = None;
     }
 
     /// Placement-palette catalog JSON (`PlacementFragment` block list): the
     /// non-empty `Category` groups with their buildable blocks and
-    /// `database-tag.*` label keys. Cached after the first build.
+    /// `database-tag.*` label keys. Prefers the live campaign catalog when
+    /// `MindCampaign` exposes `block_catalog_json`; otherwise builds and caches
+    /// the unfiltered build-menu inventory.
     #[func]
     pub fn block_catalog_json(&mut self) -> GString {
+        if let Some(json) = self.live_campaign_call("block_catalog_json", &[]) {
+            return json;
+        }
         if self.block_catalog_cache.is_none() {
             let catalog = mind_core::ui::campaign::block_catalog();
             let json = serde_json::to_string(&catalog).unwrap_or_else(|_| String::from("{}"));
             self.block_catalog_cache = Some(json);
         }
         GString::from(self.block_catalog_cache.as_deref().unwrap_or("{}"))
+    }
+
+    /// Drops the cached block-catalog fixture so the next read rebuilds it.
+    #[func]
+    pub fn invalidate_block_catalog(&mut self) {
+        self.block_catalog_cache = None;
     }
 
     /// Validates and forwards a chat message; returns false when the fragment's
@@ -671,6 +704,23 @@ impl MindUi {
             self.mobile_preview
         );
         self.settings = SettingsStore::load(&NativeFs, &Paths::resolve(None));
+    }
+
+    /// Calls a JSON read-model method on the live campaign facade, if present.
+    ///
+    /// Returns `None` when the node is absent, does not expose `name`, or
+    /// answers with an empty payload, so callers fall back to their
+    /// deterministic fixture.
+    fn live_campaign_call(&self, name: &str, args: &[Variant]) -> Option<GString> {
+        let mut campaign = self.base().get_node_or_null(CAMPAIGN_PATH)?;
+        if !campaign.has_method(name) {
+            return None;
+        }
+        let text = campaign.call(name, args).try_to::<GString>().ok()?;
+        if text.is_empty() || text == "{}" || text == "[]" || text == "null" {
+            return None;
+        }
+        Some(text)
     }
 
     /// One settings row as JSON (current store value + model default/bounds).

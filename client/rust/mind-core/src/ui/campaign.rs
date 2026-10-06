@@ -20,7 +20,7 @@
 use serde::Serialize;
 
 use crate::content::registries::sectors::SectorPresetDef;
-use crate::content::{ContentRegistry, PlanetId};
+use crate::content::{ContentRegistry, PlanetId, UnlockStore};
 use crate::game::campaign_rules::{ALL_DIFFICULTIES, CampaignRules, Difficulty};
 use crate::game::planet::Planet;
 use crate::game::schematics::Schematics;
@@ -287,11 +287,46 @@ impl BlockCatalogView {
 /// `BuildVisibility.shown`). Unlock filtering is the HUD's job once research
 /// state is bound; the catalog is the full build-menu inventory.
 pub fn block_catalog() -> BlockCatalogView {
-    use crate::content::{Category, MemoryBundle, MemoryUnlockStore, create_base_content};
+    block_catalog_with(None)
+}
 
-    let Ok(mut registry) =
-        create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
-    else {
+/// Builds the placement-palette catalog filtered by live unlock state.
+///
+/// `store` is the campaign unlock store: tech-gated blocks are dropped until
+/// their `<name>-unlocked` bit is set (`Block.unlockedNowHost`) and explicitly
+/// non-build `BuildVisibility` values (`debugOnly`/`editorOnly`/`sandboxOnly`/
+/// `coreZoneOnly`/`worldProcessorOnly`/launch-pad/lighting/fog) are removed.
+/// The generated block specs leave `build_visibility` unpopulated (`Hidden`) for
+/// ordinary build-menu blocks, so only the explicit variants are filtered.
+/// [`block_catalog`] keeps the unfiltered inventory when no store is bound.
+pub fn block_catalog_unlocked(store: &dyn UnlockStore) -> BlockCatalogView {
+    block_catalog_with(Some(store))
+}
+
+/// Whether a tech node is granted at boot: no item requirements and no
+/// objectives (`Control.checkAutoUnlocks` roots).
+fn tech_node_auto_unlocks(
+    registry: &ContentRegistry,
+    node_ref: crate::content::tech::TechNodeRef,
+) -> bool {
+    registry
+        .tech()
+        .node(node_ref)
+        .is_some_and(|node| node.requirements.is_empty() && node.objectives.is_empty())
+}
+
+/// Shared catalog builder; `store` enables the unlock/visibility filter.
+fn block_catalog_with(store: Option<&dyn UnlockStore>) -> BlockCatalogView {
+    use crate::content::{
+        BuildVisibility, Category, MemoryBundle, MemoryUnlockStore, create_base_content,
+    };
+
+    let empty = MemoryUnlockStore::new();
+    let store_ref: &dyn UnlockStore = match store {
+        Some(store) => store,
+        None => &empty,
+    };
+    let Ok(mut registry) = create_base_content(&MemoryBundle::new(), store_ref, true) else {
         return BlockCatalogView::empty();
     };
     // `init`/`post_init` derive per-block fields (`build_time`) the build-menu
@@ -313,6 +348,31 @@ pub fn block_catalog() -> BlockCatalogView {
         // unpopulated in the port's generated specs.
         if block.removed || block.build_time <= 0.0 {
             continue;
+        }
+        if store.is_some() {
+            if matches!(
+                block.build_visibility,
+                BuildVisibility::DebugOnly
+                    | BuildVisibility::EditorOnly
+                    | BuildVisibility::SandboxOnly
+                    | BuildVisibility::CoreZoneOnly
+                    | BuildVisibility::WorldProcessorOnly
+                    | BuildVisibility::LegacyLaunchPadOnly
+                    | BuildVisibility::LightingOnly
+                    | BuildVisibility::FogOnly
+            ) {
+                continue;
+            }
+            // Tech-gated blocks need their unlock bit (or be a zero-requirement,
+            // objective-free root that `check_auto_unlocks` grants at boot);
+            // blocks outside the tech tree stay available (the port's specs do
+            // not model `alwaysUnlocked` for them).
+            if let Some(node_ref) = block.unlock.tech_node
+                && !block.unlock.unlocked()
+                && !tech_node_auto_unlocks(&registry, node_ref)
+            {
+                continue;
+            }
         }
         let localized = if block.unlock.localized_name.is_empty()
             || block.unlock.localized_name == block.name
@@ -997,6 +1057,33 @@ mod tests {
                 .iter()
                 .all(|category| { category.label == format!("database-tag.{}", category.name) }),
             "category labels are database-tag bundle keys"
+        );
+    }
+
+    #[test]
+    fn unlocked_catalog_filters_visibility_and_tech_gates() {
+        use crate::content::MemoryUnlockStore;
+
+        let full = block_catalog();
+        let has = |catalog: &BlockCatalogView, name: &str| {
+            catalog
+                .categories
+                .iter()
+                .any(|category| category.blocks.iter().any(|block| block.name == name))
+        };
+        assert!(
+            has(&full, "power-source"),
+            "sandbox block in the raw inventory"
+        );
+        let filtered = block_catalog_unlocked(&MemoryUnlockStore::new());
+        assert!(
+            !has(&filtered, "power-source"),
+            "sandbox-only block is not buildable in campaign"
+        );
+        assert!(has(&filtered, "conveyor"), "ungated block stays available");
+        assert!(
+            !filtered.categories.is_empty(),
+            "unlock-filtered catalog keeps the build menu"
         );
     }
 
