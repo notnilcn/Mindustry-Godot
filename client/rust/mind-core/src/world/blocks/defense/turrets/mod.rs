@@ -481,6 +481,23 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
 
     // M5/M6 remainder: the rest of the vanilla turret ammo tables (`Blocks.java`).
     advanced::register_bullets(content, names);
+
+    // Bridge for the plan-07 default registry: the fixture ammo bullets are not
+    // part of the base content registry yet, so the name map is cached here and
+    // read by `defense::register`.
+    let _ = FIXTURE_NAMES.set(names.clone());
+}
+
+/// Fixture bullet-name map installed by [`register_bullets`].
+///
+/// `None` until a content registry has been extended with the plan-10 fixtures;
+/// the ids are guarded against the caller's `ContentRegistry` bullet count by
+/// `defense::register`.
+static FIXTURE_NAMES: std::sync::OnceLock<BTreeMap<String, BulletId>> = std::sync::OnceLock::new();
+
+/// The named fixture bullet map ([`register_bullets`]) when installed.
+pub fn fixture_names() -> Option<&'static BTreeMap<String, BulletId>> {
+    FIXTURE_NAMES.get()
 }
 
 /// Builds the resolved [`TurretConfig`] for a supported block name.

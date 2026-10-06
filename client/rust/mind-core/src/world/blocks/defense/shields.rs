@@ -15,6 +15,7 @@ use std::f32::consts::PI;
 
 use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
+use bevy_ecs::world::World;
 
 use crate::combat::bullet::CombatCtx;
 use crate::entities::comp::{Health, Pos, TeamComp};
@@ -168,22 +169,21 @@ impl ForceProjectorState {
     }
 }
 
-/// `ForceBuild.updateTile` + `deflectBullets` (`delta == 1`).
+/// `ForceBuild.updateTile` state half (`delta == 1`), without the bullet pass.
 ///
 /// `coolant_heat_capacity` is the active coolant's `heatCapacity` (`0` = none),
 /// supplied by plan 09 through the consumer pass.
-pub fn update_force_projector(
-    ctx: &mut CombatCtx<'_>,
+pub fn update_force_projector_state(
+    world: &World,
     e: Entity,
     state: &mut ForceProjectorState,
-    team: u8,
     eff: f32,
     phase_valid: bool,
     coolant_heat_capacity: f32,
 ) {
-    let Some((x, y)) = position(ctx.world, e) else {
+    if position(world, e).is_none() {
         return;
-    };
+    }
     state.phase_heat = lerp_delta(state.phase_heat, if phase_valid { 1.0 } else { 0.0 }, 0.1);
     state.warmup = lerp_delta(state.warmup, eff, 0.1);
     state.radscl = lerp_delta(
@@ -218,6 +218,28 @@ pub fn update_force_projector(
     if state.hit > 0.0 {
         state.hit -= 1.0 / 5.0;
     }
+}
+
+/// `ForceBuild.updateTile` + `deflectBullets` (`delta == 1`).
+///
+/// `coolant_heat_capacity` is the active coolant's `heatCapacity` (`0` = none),
+/// supplied by plan 09 through the consumer pass.
+pub fn update_force_projector(
+    ctx: &mut CombatCtx<'_>,
+    e: Entity,
+    state: &mut ForceProjectorState,
+    team: u8,
+    eff: f32,
+    phase_valid: bool,
+    coolant_heat_capacity: f32,
+) {
+    if position(ctx.world, e).is_none() {
+        return;
+    }
+    update_force_projector_state(ctx.world, e, state, eff, phase_valid, coolant_heat_capacity);
+    let Some((x, y)) = position(ctx.world, e) else {
+        return;
+    };
     deflect_bullets(ctx, state, team, x, y);
 }
 
@@ -399,7 +421,19 @@ pub fn update_mend_projector(
     can_heal: bool,
     phase_valid: bool,
 ) {
-    let Some((x, y)) = position(ctx.world, e) else {
+    update_mend_projector_world(ctx.world, e, state, eff, can_heal, phase_valid);
+}
+
+/// [`update_mend_projector`] over a plain `&mut World` (normal behavior tick).
+pub fn update_mend_projector_world(
+    world: &mut World,
+    e: Entity,
+    state: &mut MendProjectorState,
+    eff: f32,
+    can_heal: bool,
+    phase_valid: bool,
+) {
+    let Some((x, y)) = position(world, e) else {
         return;
     };
     state.smooth_efficiency = lerp_delta(state.smooth_efficiency, eff, 0.08);
@@ -418,8 +452,7 @@ pub fn update_mend_projector(
     let real_range = state.range + state.phase_heat * state.phase_range_boost;
     let range2 = real_range * real_range;
     let amount_percent = (state.heal_percent + state.phase_heat * state.phase_boost) / 100.0;
-    let targets: Vec<Entity> = ctx
-        .world
+    let targets: Vec<Entity> = world
         .iter_entities()
         .filter_map(|entity_ref| {
             let health = entity_ref.get::<Health>()?;
@@ -436,12 +469,11 @@ pub fn update_mend_projector(
         })
         .collect();
     for target in targets {
-        if let Some(mut health) = ctx.world.get_mut::<Health>(target) {
+        if let Some(mut health) = world.get_mut::<Health>(target) {
             let heal = health.max_health * amount_percent * eff;
             health.health = (health.health + heal).min(health.max_health);
         }
     }
-    let _ = (x, y, real_range);
 }
 
 // ---------------------------------------------------------------------------

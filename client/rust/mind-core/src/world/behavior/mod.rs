@@ -494,7 +494,76 @@ pub fn default_behavior(def: &BlockDef) -> Arc<dyn BuildingBehavior> {
         K::Wall | K::ShieldWall => Arc::new(defense::WallBehavior),
         K::Radar => Arc::new(defense::RadarBehavior),
         K::Thruster => Arc::new(defense::ThrusterBehavior),
-        K::TargetDummy => Arc::new(defense::TargetDummyBehavior),
+        K::TargetDummy => {
+            Arc::new(crate::world::blocks::defense::behaviors::TargetDummyDefenseBehavior)
+        }
+        // Projector/mine/shield state machines (`world/blocks/defense`); the
+        // exact per-block knobs are installed by `defense::register`.
+        K::MendProjector => Arc::new(
+            crate::world::blocks::defense::behaviors::MendProjectorBehavior {
+                state: crate::world::blocks::defense::shields::MendProjectorState::default(),
+            },
+        ),
+        K::OverdriveProjector => Arc::new(
+            crate::world::blocks::defense::behaviors::OverdriveProjectorBehavior {
+                state: crate::world::blocks::defense::projectors::OverdriveProjectorState::default(
+                ),
+            },
+        ),
+        K::ForceProjector => Arc::new(
+            crate::world::blocks::defense::behaviors::ForceProjectorBehavior {
+                state: crate::world::blocks::defense::shields::ForceProjectorState::default(),
+            },
+        ),
+        K::ShockMine => Arc::new(
+            crate::world::blocks::defense::behaviors::ShockMineBehavior {
+                state: crate::world::blocks::defense::shields::ShockMineState::default(),
+            },
+        ),
+        K::RegenProjector => Arc::new(
+            crate::world::blocks::defense::behaviors::RegenProjectorBehavior {
+                state: crate::world::blocks::defense::projectors::RegenProjectorState::default(),
+            },
+        ),
+        K::ShockwaveTower => Arc::new(
+            crate::world::blocks::defense::behaviors::ShockwaveTowerBehavior {
+                state: crate::world::blocks::defense::projectors::ShockwaveTowerState::default(),
+            },
+        ),
+        K::BaseShield => Arc::new(
+            crate::world::blocks::defense::behaviors::BaseShieldBehavior {
+                state: crate::world::blocks::defense::projectors::BaseShieldState::default(),
+            },
+        ),
+        // Liquid bridges (`world/blocks/liquid/bridge.rs`); the phase-conduit
+        // range (12) is installed by `liquid::register`.
+        K::LiquidBridge => {
+            Arc::new(crate::world::blocks::liquid::behavior::LiquidBridgeBehavior { range: 4 })
+        }
+        K::DirectionLiquidBridge => Arc::new(
+            crate::world::blocks::liquid::behavior::DirectionLiquidBridgeBehavior { range: 4 },
+        ),
+        // Power nodes: construction inserts the `PowerNodeConfig` the graph
+        // linker reads; exact knobs are installed by `power::register`.
+        K::PowerNode | K::LongPowerNode => {
+            Arc::new(crate::world::blocks::power::nodes::PowerNodeBehavior {
+                max_nodes: 3,
+                laser_range: 6.0,
+                autolink: true,
+                same_block_connection: false,
+            })
+        }
+        // Turret ammo configs need the content bullet fixtures; they are
+        // installed by `defense::register` when the fixture map is present.
+        K::ItemTurret
+        | K::LiquidTurret
+        | K::PowerTurret
+        | K::ContinuousTurret
+        | K::ContinuousLiquidTurret
+        | K::LaserTurret
+        | K::PointDefenseTurret
+        | K::TractorBeamTurret
+        | K::BuildTurret => Arc::new(NoopBehavior),
         K::GenericCrafter
         | K::HeatCrafter
         | K::AttributeCrafter
