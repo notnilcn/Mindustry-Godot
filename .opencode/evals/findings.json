@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "updated": "2026-10-06T10:34:10+00:00",
+  "updated": "2026-10-06T21:50:19+00:00",
   "findings": [
     {
       "id": "EV-0001",
@@ -1038,6 +1038,227 @@
       "plan": "14",
       "first_seen": "2026-10-06T10:24:27+00:00",
       "last_verified": "2026-10-06T10:31:29+00:00"
+    },
+    {
+      "id": "EV-0035",
+      "area": "game/campaign",
+      "severity": "S1",
+      "status": "open",
+      "title": "First boot panics in MindCampaign bootstrap; campaign launch and tech tree are dead",
+      "expected": "Java: a fresh install boots; Play > Campaign > Serpulo > Ground Zero launches the sector (session sector set, waves on, core registered)",
+      "actual": "Godot: MindCampaign.ready() panics at mind-core/src/io/save/slot.rs:249 'chunk size must be non-zero' on a user:// dir with no saves/; registry+campaign stay None, so get_tech_state nodes=0, list_save_slots=[], start_sector('serpulo',170)=false and get_sector_state campaign=false",
+      "repro": "godot_game play res://scenes/game.tscn on a fresh user:// dir, then eval /root/Spine/MindCampaign.start_sector('serpulo',170); log shows panic in MindCampaign::ready()",
+      "evidence": [
+        "runs/l2-20261007-064916-campaign_spine/godot/crash-report-mindcampaign-ready.txt",
+        "runs/l2-20261007-064916-campaign_spine/godot/state-01-boot-failed-launch.json",
+        "runs/l2-20261007-064916-campaign_spine/godot/step-01-boot-after-launch-panic.png"
+      ],
+      "notes": [],
+      "plan": "12",
+      "first_seen": "2026-10-06T20:50:55+00:00",
+      "last_verified": "2026-10-06T20:50:55+00:00",
+      "found_by_loop": "2"
+    },
+    {
+      "id": "EV-0036",
+      "area": "game/campaign",
+      "severity": "S2",
+      "status": "open",
+      "title": "Campaign save_slot/load_slot never write or read a file after a sector launch (IO queue never drains)",
+      "expected": "Java: launching a sector and saving writes user://saves/<name>.msav; the slot lists and can be resumed",
+      "actual": "Godot: MindCampaign.save_slot('evalws2') returns true but host.io_pending() stays 1 and user://saves/evalws2.msav never appears after 130 ticks; list_save_slots() stays []",
+      "repro": "launch serpulo:170, call MindCampaign.save_slot('evalws2'), SimHost.step(120), then FileAccess.file_exists('user://saves/evalws2.msav')==false and io_pending()==1",
+      "evidence": [
+        "runs/l2-20261007-064916-campaign_spine/godot/state-03-save-never-drains.json"
+      ],
+      "notes": [],
+      "plan": "12",
+      "first_seen": "2026-10-06T20:54:35+00:00",
+      "last_verified": "2026-10-06T20:54:35+00:00",
+      "found_by_loop": "2"
+    },
+    {
+      "id": "EV-0037",
+      "area": "game/campaign",
+      "severity": "S1",
+      "status": "open",
+      "title": "A fresh Ground Zero launch registers no player core: hasCore=false and zero building entities",
+      "expected": "Java: SectorInfo.hasCore defaults true; World.loadSector loads the preset map's core, so a fresh launch has a default-team core and does not instantly lose",
+      "actual": "Godot: after load_sector('serpulo',170)+start_sector, get_sector_state().hasCore=false and SimHost.get_group_counts().build=0; sync_session_with_sim scans ECS BuildingComp which load_sector never populates, so player_core_count()==0 and check_game_state_campaign sets game_over on the first GameStateCheck tick",
+      "repro": "launch serpulo:170 via the UI sequence (load_sector then start_sector), then eval MindCampaign.get_sector_state() and SimHost.get_group_counts()",
+      "evidence": [
+        "runs/l2-20261007-064916-campaign_spine/godot/state-02-launch-rules.json"
+      ],
+      "notes": [],
+      "plan": "12",
+      "first_seen": "2026-10-06T20:56:18+00:00",
+      "last_verified": "2026-10-06T20:56:18+00:00",
+      "found_by_loop": "2"
+    },
+    {
+      "id": "EV-0038",
+      "area": "ui/editor",
+      "severity": "S2",
+      "status": "open",
+      "title": "Editor > Maps: clicking a map row does nothing; the map editor never opens",
+      "expected": "Java: Editor > Maps lists the map registry; clicking a row opens MapEditor (ui.editor.show())",
+      "actual": "Godot: clicking 'archipelago' leaves editor_maps open; MindEditor.begin_edit_map returns false with @editor.errorload (the ENOENT is the get_meta backup fallback masking the real parse error); EditorDialog.visible stays false. Built-in assets/maps/default/*.msav are legacy MSAV v4/v5 and MapIo::create_map/get_meta_bytes does not route the legacy container.",
+      "repro": "godot_game play res://scenes/game.tscn; menu > Editor; click the first row (archipelago) at its resolved center; EditorDialog.visible==false and MindEditor.last_error.key==@editor.errorload",
+      "evidence": [
+        "runs/l4-20261007-064905-editor_flow/godot/state-01-editor-maps.json"
+      ],
+      "notes": [
+        "Same root cause empties MindPreview (EV added for the registry); Import opens file_chooser and Back closes the browser, so only the row->editor step fails."
+      ],
+      "plan": "19",
+      "first_seen": "2026-10-06T21:01:00+00:00",
+      "last_verified": "2026-10-06T21:01:00+00:00",
+      "found_by_loop": "4"
+    },
+    {
+      "id": "EV-0039",
+      "area": "ui/custom_game",
+      "severity": "S2",
+      "status": "open",
+      "title": "Map registry is always empty: Custom Game and Editor list 0x0 name-only fixtures, not live maps",
+      "expected": "Java: Custom Game / Editor map lists come from the live Maps registry with real map metadata and previews",
+      "actual": "Godot: MindPreview.map_count()==0 and maps_list()==[] after refresh (it scans only user://maps, which is empty on a fresh dir); MapIo::create_map cannot read the built-in legacy MSAV files, so the live registry never populates. Dialogs fall back to MindUi.campaign_views()['maps'] = default_map_entries(): 18 rows with width=0,height=0, no author and no path.",
+      "repro": "godot_game play res://scenes/game.tscn; Play > Custom Game; eval /root/Spine/MindPreview.map_count()==0 and JSON.parse_string(MindUi.campaign_views())['maps'][0] == {name:'archipelago',author:null,width:0,height:0,custom:false} (no path)",
+      "evidence": [
+        "runs/l4-20261007-064905-custom_game/godot/state-01-custom-game.json"
+      ],
+      "notes": [
+        "Blocks EV-0038 too: the same create_map/MSAV gap leaves the editor list on fixtures. Mode/rules application is separately BLOCKED-BY-INTEGRATION (MindCampaign.start_map_mode absent)."
+      ],
+      "plan": "19",
+      "first_seen": "2026-10-06T21:01:03+00:00",
+      "last_verified": "2026-10-06T21:01:03+00:00",
+      "found_by_loop": "4"
+    },
+    {
+      "id": "EV-0040",
+      "area": "ui/dialogs",
+      "severity": "S1",
+      "status": "verified-fixed",
+      "title": "Game runtime never connects: launch_loadout_dialog.gd parse error blocks the client at boot",
+      "expected": "Java: the client boots to the main menu and the campaign UI is reachable (Play > Campaign > Serpulo, planet dialog, research, launch loadout)",
+      "actual": "Godot: godot_game play res://scenes/game.tscn reports runtime_ready but status stays runtime_connected=false (pid 0, ready false) and every godot_exec fails RUNTIME_NOT_CONNECTED / no ogm:hello beacon. Log: 'Parse Error: There is already a variable named \"resources\" declared in this scope.' at res://ui/dialogs/launch_loadout_dialog.gd:97; the script is statically instanced by res://scenes/ui/ui_root.tscn. No game process survives. Reproduced twice (second after godot_game stop).",
+      "repro": "godot_game play {\"scene\":\"res://scenes/game.tscn\"} then godot_game status -> runtime_connected:false, pid 0; godot_exec eval -> RUNTIME_NOT_CONNECTED",
+      "evidence": [
+        "runs/l6-20261007-070739-campaign_ui_boot/godot/editor-log-boot-excerpt.txt",
+        "runs/l6-20261007-070739-campaign_ui_boot/godot/eval-runtime-not-connected.json",
+        "runs/l6-20261007-070739-campaign_ui_boot/godot/status-after-play.json",
+        "runs/l6-20261007-071337-launch_loadout/godot/state-00-boot.json",
+        "runs/l6-20261007-071337-launch_loadout/godot/state-03-launch-loadout.json"
+      ],
+      "notes": [
+        "2026-10-06T21:37:04+00:00: [loop 6] Re-ran the boot repro on this branch at a1227b4 (loop 6, pid 1895407, 1152x648): godot_game play res://scenes/game.tscn returns runtime_ready+runtime_connected with one instance; launch_loadout_dialog.gd parses and force-opens (basicShard row, total 1800). The duplicate 'var resources' parse error does not recur after clearing the editor log buffer."
+      ],
+      "plan": "14",
+      "first_seen": "2026-10-06T21:08:00+00:00",
+      "last_verified": "2026-10-06T21:37:04+00:00",
+      "found_by_loop": "6"
+    },
+    {
+      "id": "EV-0041",
+      "area": "ui/campaign",
+      "severity": "S1",
+      "status": "open",
+      "title": "Campaign Difficulty dialog errors on a missing MindCell.left() and freezes the client",
+      "expected": "Java: Play > Campaign > Serpulo > OK, then the Difficulty rail button opens the CampaignRules dialog with 5 difficulty buttons (casual/easy/normal/hard/eradication) and the 5 rule toggles; the client keeps running",
+      "actual": "Godot: opening campaign_rules logs 'Invalid call. Nonexistent function \"left\" in base \"RefCounted (MindCell)\"' from campaign_rules_dialog.gd:82 (_rebuild, the first rule toggle); the full-screen dialog opens with no body and Engine.get_process_frames() freezes (2371 before and after a 2s wait); any later MindUi method call panics 'Gd<T>::bind() failed, already bound; T = mind_gdext::ui::ui_host::MindUi'",
+      "repro": "fresh boot res://scenes/game.tscn; godot_exec eval: get_node('/root/MindUi').call('open_dialog','campaign_rules', JSON.stringify({'planet':'serpulo'})) (also reproducible by Play>Campaign>Serpulo>OK then clicking the campaign.difficulty rail button); the eval times out, log shows the MindCell.left error, and Engine.get_process_frames() does not advance",
+      "evidence": [
+        "runs/l6-20261007-071337-campaign_planet/godot/state-04-campaign-rules.json",
+        "runs/l6-20261007-071337-campaign_planet/godot/step-04-campaign-rules-wedged.png",
+        "runs/l6-20261007-071337-campaign_planet/godot/crash-report-mindui-borrow.txt",
+        "runs/l6-20261007-071337-campaign_planet/godot/state-03-sector-panel.json"
+      ],
+      "notes": [],
+      "plan": "14",
+      "first_seen": "2026-10-06T21:36:58+00:00",
+      "last_verified": "2026-10-06T21:36:58+00:00",
+      "found_by_loop": "6"
+    },
+    {
+      "id": "EV-0042",
+      "area": "ui/campaign",
+      "severity": "S3",
+      "status": "open",
+      "title": "Research root rail rows overlap after switching roots (MindTable not re-sorted)",
+      "expected": "Java: clicking a tech-tree root in the left rail keeps the roots as a vertical list; the active root stays clickable and the node table shows that root's nodes",
+      "actual": "Godot: ResearchDialog._select_root/_rebuild_roots clears and re-adds the root MindTable but never re-sorts it, so after clicking the second root both root buttons stack at (8,38) (techtree.serpulo 160x34 and techtree.<null> 148x34) and the first root can no longer be clicked; the initial build is fine because show_dialog's _resort_tables sorts it",
+      "repro": "fresh boot; godot_exec eval: open_dialog('research', {'planet':'serpulo'}); read root button rects (10,40) and (10,78); emit pressed on the techtree.<null> button; re-read rects -> both at (8,38)",
+      "evidence": [
+        "runs/l6-20261007-071337-research/godot/state-01-research.json",
+        "runs/l6-20261007-071337-research/godot/step-02-research-rail-overlap.png",
+        "runs/l6-20261007-071337-research/godot/step-01-research-dialog.png"
+      ],
+      "notes": [],
+      "plan": "14",
+      "first_seen": "2026-10-06T21:36:58+00:00",
+      "last_verified": "2026-10-06T21:36:58+00:00",
+      "found_by_loop": "6"
+    },
+    {
+      "id": "EV-0043",
+      "area": "input/blocks",
+      "severity": "S2",
+      "status": "open",
+      "title": "Right-drag cannot break item-capacity blocks (conveyor/turret); an empty inventory panel opens instead",
+      "expected": "Java: the right-button binding (breakBlock) enters breaking mode and a right-drag breaks every non-air tile in the rect (DesktopInput.java:743). Config/inventory open on the LEFT tap, and the inventory only when build.block.hasItems && items.total() > 0 (InputHandler.java:2017).",
+      "actual": "Godot: right-press on a placed conveyor (or a duo turret) opens OverlayLayer/block_inventory at the tile (empty grid: only the close X, items JSON hardcoded \"{}\") instead of starting a break; a 6-tile right-drag over conveyors x=10..15,y=16 leaves all 6 placed. A copper-wall control line right-drags/breaks normally (6 -> 0), so the break path itself works only for has_items==false blocks.",
+      "repro": "scenario input_controls (Godot leg): select conveyor, left-drag tiles x=10..15 y=16, then right-drag the same line; get_state_json() still lists all 6 conveyor tiles and OverlayLayer/block_inventory.visible==true",
+      "evidence": [
+        "runs/l7-20261007-074043-input_controls/godot/break-evidence.json"
+      ],
+      "notes": [
+        "screenshots: runs/l7-20261007-074043-input_controls/godot/step-01-rightclick-empty-inventory.png, runs/l7-20261007-074043-input_controls/godot/step-03-placed-blocks-after-failed-right-drag.png. Cause seam: desktop.rs right_press() consults config_spec/has_items_at before begin_break; has_items_at = def.has_items && def.item_capacity>0 with no items.total()>0 guard, so any item-capacity block diverts to inventory. Distinct from the known missing item_stacks_json feed."
+      ],
+      "plan": "15",
+      "first_seen": "2026-10-06T21:50:14+00:00",
+      "last_verified": "2026-10-06T21:50:14+00:00",
+      "found_by_loop": "7"
+    },
+    {
+      "id": "EV-0044",
+      "area": "input/command",
+      "severity": "S2",
+      "status": "open",
+      "title": "Default RTS command-mode toggle (Shift) is inert; command mode is unreachable from the keyboard with default binds",
+      "expected": "Java: with no placement block selected and no live boosting player unit, tapping the command-mode key toggles command mode (DesktopInput.java:302-307); command_mode and boost share shiftLeft by default and the tap path is used.",
+      "actual": "Godot: with block==null, pressing/releasing Shift leaves command_mode false and fires no action (last_action stays clear_building, action_count unchanged). MindInput.toggle_command_mode() sets it true, and dragging then produces command_rect [80,80,40,24], so only the key path is dead.",
+      "repro": "scenario input_controls (Godot leg): Q to clear the placement block, then godot_input key Shift down+up; get_input_state_json().command_mode stays false (compare MindInput.toggle_command_mode() -> true)",
+      "evidence": [
+        "runs/l7-20261007-074043-input_controls/godot/rts-evidence.json"
+      ],
+      "notes": [
+        "key_up_event guards the toggle with ; both binding names resolve to \"shiftLeft\" for the default binds, so the condition is always false. The RTS selection rect itself works once command mode is set via the API."
+      ],
+      "plan": "15",
+      "first_seen": "2026-10-06T21:50:19+00:00",
+      "last_verified": "2026-10-06T21:50:19+00:00",
+      "found_by_loop": "7"
+    },
+    {
+      "id": "EV-0045",
+      "area": "ui/config",
+      "severity": "S3",
+      "status": "open",
+      "title": "Sorter config panel opens with no item options",
+      "expected": "Java: Sorter is configurable with an Item config (Sorter.java:37 config(Item.class, ...)), so its config fragment shows the item filter list.",
+      "actual": "Godot: right-clicking a placed sorter opens OverlayLayer/block_config with the correct block/x/y but _config.options == [] (empty grid; only clear + close), so no filter can be picked.",
+      "repro": "scenario input_controls (Godot leg): select sorter, place at tile 18,16, right-click it; block_config.visible==true and block_config._config.options.size()==0",
+      "evidence": [
+        "runs/l7-20261007-074043-input_controls/godot/config-evidence.json"
+      ],
+      "notes": [
+        "screenshot: runs/l7-20261007-074043-input_controls/godot/step-02-sorter-config-empty-options.png. config_spec builds options only from def.has_items (all items) or def.has_liquids (all liquids); the Sorter def sets neither. Submitting is separately blocked (Configure arm), this is the read-model gap."
+      ],
+      "plan": "15",
+      "first_seen": "2026-10-06T21:50:19+00:00",
+      "last_verified": "2026-10-06T21:50:19+00:00",
+      "found_by_loop": "7"
     }
   ]
 }
