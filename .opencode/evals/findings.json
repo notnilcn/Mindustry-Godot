@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "updated": "2026-10-06T08:13:04+00:00",
+  "updated": "2026-10-06T08:18:41+00:00",
   "findings": [
     {
       "id": "EV-0001",
@@ -690,7 +690,7 @@
       "id": "EV-0026",
       "area": "ui/dialogs",
       "severity": "S2",
-      "status": "open",
+      "status": "verified-fixed",
       "title": "Closing a dialog leaves it on the MindUi stack, keeps the sim paused and its hidden controls swallow menu clicks",
       "expected": "Java: Back closes the dialog, releases pause and the menu is immediately interactive",
       "actual": "Godot: after Settings > Back (576,503) the menu is visible but dialog_stack=['settings'], has_dialog=true and is_paused=true; the hidden settings rail button (205,216 300x50) still has mouse capture at (230,219), so the Database menu button does nothing; likewise About > Back leaves stack=['about'] with has_dialog=true",
@@ -698,12 +698,21 @@
       "evidence": [
         "runs/20261006-172828-settings_ui/godot/step-08-settings-back-stuck.png",
         "runs/20261006-172828-settings_ui/godot/state-dialog-close-stuck.json",
-        "runs/20261006-172828-ui_dialogs/godot/step-04-after-about.png"
+        "runs/20261006-172828-ui_dialogs/godot/step-04-after-about.png",
+        "runs/20261006-081514-ev0026-verify/godot/state-ev0026-verify.json",
+        "runs/20261006-081514-ev0026-verify/godot/step-01-settings-open.png",
+        "runs/20261006-081514-ev0026-verify/godot/step-02-after-close.png",
+        "runs/20261006-081514-ev0026-verify/godot/ui_widgets_check.log",
+        "runs/20261006-081514-ev0026-verify/godot/log-errors-final.json",
+        "runs/20261006-081514-ev0026-verify/report.md"
       ],
-      "notes": [],
+      "notes": [
+        "2026-10-06T08:14:39+00:00: claimed by loop-1",
+        "2026-10-06T08:18:41+00:00: [loop ?] Fresh in-engine repro at HEAD 8c16919 (fix 8c16919), game pid 1111444, 1152x648, log cleared first. Settings open: dialog_stack()=['settings'], has_dialog=true, is_paused()=true, node visible; dialog Back at resolved (576,503): stack=[], has_dialog=false, is_paused()=false, node hidden. Second round-trip Core Database: open stack=['database']/paused true -> Back stack=[]/paused false/node hidden. About (non-pause): open stack=['about']/paused false -> Back stack=[]/has_dialog false/node hidden. Input capture gone: immediately after the Settings close the Database button (230,219) opened its 3-item submenu (pre-fix the hidden settings rail swallowed it), and after the About close the Database click toggled the submenu visible->hidden with stack staying empty. tools/ui_widgets_check.gd exit 0 including 'open_dialog pushes the dialog onto the MindUi stack', 'Back button pops the dialog off the MindUi stack', 'Back button hides the dialog node'. Log errors only pre-existing boot warnings."
+      ],
       "plan": "14",
       "first_seen": "2026-10-06T07:58:16+00:00",
-      "last_verified": "2026-10-06T07:58:16+00:00"
+      "last_verified": "2026-10-06T08:18:41+00:00"
     },
     {
       "id": "EV-0027",
