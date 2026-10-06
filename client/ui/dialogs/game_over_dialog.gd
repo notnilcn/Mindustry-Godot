@@ -73,7 +73,7 @@ func _build_buttons() -> void:
 
 
 func _continue_pressed() -> void:
-	hide_dialog()
+	_close_pressed()
 	var ui := _ui()
 	if ui != null:
 		ui.call("open_dialog", "planet", "")
@@ -81,7 +81,7 @@ func _continue_pressed() -> void:
 
 ## Non-campaign `@menu`: park the sim paused behind the standalone menu.
 func _menu_pressed() -> void:
-	hide_dialog()
+	_close_pressed()
 	var host := get_node_or_null("/root/Spine/SimHost")
 	if host != null and host.has_method("set_paused"):
 		host.call("set_paused", true)

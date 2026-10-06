@@ -1158,33 +1158,38 @@ impl MindSimHost {
         let Some(content) = self.content_snapshot.as_ref() else {
             return GString::from("{}");
         };
-        let world = &self.sim.ecs.0;
-        for (_id, entity, comp) in self.sim.ecs.entities_by_seq() {
-            let Some(def) = content.block(comp.block) else {
-                continue;
-            };
-            if def.kind != BlockKind::CoreBlock {
-                continue;
-            }
-            let Some(module) = world.get::<ItemModule>(entity) else {
-                continue;
-            };
-            let mut items = serde_json::Map::new();
-            for (index, amount) in module.items.iter().enumerate() {
-                if *amount <= 0 {
-                    continue;
-                }
-                let Some(item) = content.item(ItemId::new(index as u16)) else {
-                    continue;
-                };
-                items.insert(item.name.clone(), serde_json::Value::from(*amount));
-            }
-            let json = serde_json::to_string(&serde_json::Value::Object(items))
-                .unwrap_or_else(|_| String::from("{}"));
-            return GString::from(json.as_str());
-        }
-        GString::from("{}")
+        GString::from(core_items_json(&self.sim, content).as_str())
     }
+}
+
+/// First core block's item counts as a JSON object (empty when there is no core
+/// or content boot failed). See [`MindSimHost::core_items_json`].
+fn core_items_json(sim: &Sim, content: &ContentRegistry) -> String {
+    let world = &sim.ecs.0;
+    for (_id, entity, comp) in sim.ecs.entities_by_seq() {
+        let Some(def) = content.block(comp.block) else {
+            continue;
+        };
+        if def.kind != BlockKind::CoreBlock {
+            continue;
+        }
+        let Some(module) = world.get::<ItemModule>(entity) else {
+            continue;
+        };
+        let mut items = serde_json::Map::new();
+        for (index, amount) in module.items.iter().enumerate() {
+            if *amount <= 0 {
+                continue;
+            }
+            let Some(item) = content.item(ItemId::new(index as u16)) else {
+                continue;
+            };
+            items.insert(item.name.clone(), serde_json::Value::from(*amount));
+        }
+        return serde_json::to_string(&serde_json::Value::Object(items))
+            .unwrap_or_else(|_| String::from("{}"));
+    }
+    String::from("{}")
 }
 
 /// Resolves a Godot `user://` / `res://` path to a native path for plan-04
@@ -1348,5 +1353,34 @@ mod tests {
         let mut grid = WorldGrid::new(4, 4);
         grid.fill(BlockId::AIR, BlockId::AIR);
         assert_eq!(first_core_position(&grid, &registry), None);
+    }
+
+    #[test]
+    fn core_items_json_reports_the_core_inventory() {
+        let registry = base_registry();
+        let Some(core) = registry.block_id("core-shard") else {
+            panic!("core-shard missing");
+        };
+        let Some(copper) = registry.item_id("copper") else {
+            panic!("copper missing");
+        };
+        let mut sim = Sim::new(1, 16, 16, BlockId::AIR, BlockId::AIR);
+        if let Err(error) = sim.apply(Command::Place {
+            x: 4,
+            y: 4,
+            block: core,
+        }) {
+            panic!("place core failed: {error}");
+        }
+        let entity = sim.grid.tile(4, 4).build.expect("core building entity");
+        {
+            // `Sim::apply` spawns the base building only; the plan-08 building
+            // path attaches the item module, so attach the fixture module here.
+            let mut module = ItemModule::with_items(registry.items().len());
+            module.add(copper, 25, 1000);
+            sim.ecs.0.entity_mut(entity).insert(module);
+        }
+        let json = core_items_json(&sim, &registry);
+        assert!(json.contains("\"copper\":25"), "unexpected JSON: {json}");
     }
 }
