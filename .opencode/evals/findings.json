@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "updated": "2026-10-06T10:24:27+00:00",
+  "updated": "2026-10-06T10:31:29+00:00",
   "findings": [
     {
       "id": "EV-0001",
@@ -775,16 +775,29 @@
         "runs/20261006-101800-ev0025-verify/godot/step-01-graphics-uiscale150-flagged.png",
         "runs/20261006-101800-ev0025-verify/godot/step-02-uiscale-reset-prompt.png",
         "runs/20261006-101800-ev0025-verify/run.json",
-        "runs/20261006-101800-ev0025-verify/report.md"
+        "runs/20261006-101800-ev0025-verify/report.md",
+        "runs/20261006-101820-ev0025-final-verify/godot/state-00-setup-settings-hexdump.txt",
+        "runs/20261006-101820-ev0025-final-verify/godot/state-01-boot1-prompt-pre-ok.json",
+        "runs/20261006-101820-ev0025-final-verify/godot/step-01-boot1-uiscale200-prompt.png",
+        "runs/20261006-101820-ev0025-final-verify/godot/state-02-post-ok.json",
+        "runs/20261006-101820-ev0025-final-verify/godot/state-02-post-ok-settings-hexdump.txt",
+        "runs/20261006-101820-ev0025-final-verify/godot/step-02-post-ok-menu.png",
+        "runs/20261006-101820-ev0025-final-verify/godot/state-03-boot2-post-ok-persist.json",
+        "runs/20261006-101820-ev0025-final-verify/godot/state-04-boot3-cancel.json",
+        "runs/20261006-101820-ev0025-final-verify/godot/state-04-post-cancel-settings-hexdump.txt",
+        "runs/20261006-101820-ev0025-final-verify/godot/step-03-boot4-restored-menu-scale100.png",
+        "runs/20261006-101820-ev0025-final-verify/diff/scale200-vs-scale100-menu.json",
+        "runs/20261006-101820-ev0025-final-verify/report.md"
       ],
       "notes": [
         "2026-10-06T10:11:31+00:00: [loop ?] Partial at HEAD 60398e4 (fix 48298b6), window 1152x648, log cleared. APPLY HALF FIXED: content_scale_factor now equals max(uiscale,25)/100 at boot, pid-stamped for uiscale 100->1.0 (pid 1185310), 150->1.5 (pids 1185937/1188374, viewport 768x432), 25 (store clamps <25)->0.25 (pid 1186254), 200 (set by a concurrent session)->2.0 (pid 1187755, viewport 576x324). Visual step-02-uiscale-150.png shows the whole window scaled 1.5x. REMAINING: the reference also prompts a restart when the value changes (Control.java uiscale.reset countdown), and the port shows no notice - settings_menu_dialog._set_value only calls MindUi.settings_set, and settings_set('uiscale',120) left dialog_stack/has_dialog/has_field unchanged; grep finds no uiscale notice in client/ui (only language_dialog emits @language.restart). Keep open for the missing restart prompt.",
         "2026-10-06T10:12:53+00:00: [loop ?] Boot-apply half re-verified at HEAD 60398e4 (fix 48298b6): settings_set('uiscale',200) -> stop/play -> fresh pid 1187755 reads stored=200, content_scale_factor=2.0 (was 1.0), window 1152x648 / logical visible rect 576x324, get_final_transform scale 2.0 -> UI renders 2x physical (godot/step-ev0025-uiscale200-menu-mshot.png). Restored: set 100 -> stop/play -> pids 1187991/1188673/1188913 read stored=100, factor 1.0, final scale 1.0. STATUS KEPT OPEN: the expected restart prompt (Control.java:640-664, @uiscale.reset countdown) is still absent per the 10:11:31Z note; settings_menu_dialog._set_value only calls settings_set. Concurrent session set uiscale=150 mid-run (pid 1188374 factor 1.5); 100 re-asserted.",
-        "2026-10-06T10:24:27+00:00: [loop ?] Fresh in-engine repro at HEAD bc8d111 (fix f43f45a), window 1152x648, log cleared. Real Graphics slider click (710,163) set uiscale=150 and uiscale_changed=true (pid 1199186, factor still 1.0); next boot (pid 1200025) applied content_scale_factor=1.5 and showed the @uiscale.reset prompt with countdown (body 'UI scale has been changed. / Press \"OK\" to confirm this scale. / Reverting and exiting in {n} seconds...') and buttons OK (317,289) / Cancel & Exit (406,289) at scale 1.5. OK (pid 1201262) kept uiscale=150, cleared uiscale_changed, factor 1.5, prompt gone. Cancel & Exit (406,289) reverted uiscale to 100 and exited; next boot (pid 1201934) read 100/false/factor 1.0. The 11s timeout ran the same revert+exit path twice (pid 1200407 read 100/false/1.0). Final state uiscale=100, flag false (pid 1202818). The prompt body's raw markup is filed separately as a new S4 finding (not folded into EV-0025)."
+        "2026-10-06T10:24:27+00:00: [loop ?] Fresh in-engine repro at HEAD bc8d111 (fix f43f45a), window 1152x648, log cleared. Real Graphics slider click (710,163) set uiscale=150 and uiscale_changed=true (pid 1199186, factor still 1.0); next boot (pid 1200025) applied content_scale_factor=1.5 and showed the @uiscale.reset prompt with countdown (body 'UI scale has been changed. / Press \"OK\" to confirm this scale. / Reverting and exiting in {n} seconds...') and buttons OK (317,289) / Cancel & Exit (406,289) at scale 1.5. OK (pid 1201262) kept uiscale=150, cleared uiscale_changed, factor 1.5, prompt gone. Cancel & Exit (406,289) reverted uiscale to 100 and exited; next boot (pid 1201934) read 100/false/factor 1.0. The 11s timeout ran the same revert+exit path twice (pid 1200407 read 100/false/1.0). Final state uiscale=100, flag false (pid 1202818). The prompt body's raw markup is filed separately as a new S4 finding (not folded into EV-0025).",
+        "2026-10-06T10:29:49+00:00: [loop ?] Independent end-to-end verification at HEAD bc8d111 (f43f45a ancestor; no game-code diff f43f45a..bc8d111), window 1152x648. APPLY: boot0 pid 1203568 MindUi.settings_set('uiscale',200)+set_uiscale_changed(true) -> disk settings.bin uiscale=0xc8/flag=0x01; fresh pids 1205188 and 1205556 read content_scale_factor=2.0, logical viewport 576x324, MCP status input_scale [2.0,2.0]. PROMPT: pids 1204350/1205188/1205731 show '@uiscale.reset' body 'UI scale has been changed...' with live countdown (6.098s/56.44s/57.36s remaining), buttons OK / Cancel & Exit. OK (pid 1205188, click viewport 221,203): prompt closed, uiscalechanged=false, uiscale stays 200, factor 2.0, same pid alive (frames 503->1720); fresh pid 1205556 shows no prompt, 200/false, factor 2.0. CANCEL & EXIT (pid 1205731, click viewport 310,203): pid exited (ps gone; status is_playing=false/instance_count=0), disk uiscale=100/flag=false. RESTORED: fresh pid 1206043 reads uiscale=100, uiscalechanged=false, factor=1.0, no prompt; profile left at 100/false. Countdown-bump caveat: after two eval-body errors paused the debugger and consumed the natural 11s window, _uiscale_countdown was set to 60 on pids 1205188/1205731 to finish capture/click; live decrease still observed. Raw [color] markup in the prompt body matches already-filed EV-0034 (not duplicated)."
       ],
       "plan": "14",
       "first_seen": "2026-10-06T07:58:09+00:00",
-      "last_verified": "2026-10-06T10:24:27+00:00"
+      "last_verified": "2026-10-06T10:29:49+00:00"
     },
     {
       "id": "EV-0026",
@@ -1000,21 +1013,26 @@
       "id": "EV-0034",
       "area": "ui/settings",
       "severity": "S4",
-      "status": "open",
+      "status": "verified-fixed",
       "title": "UI-scale reset prompt shows raw [color=#...] markup instead of styled text",
       "expected": "Java: the @uiscale.reset countdown renders as colored text (scarlet 'Reverting and exiting in', accent seconds) inside the '@confirm' dialog",
       "actual": "Godot: the prompt body is a plain Label, so the Godot BBCode produced by MindWidgets.markup_format shows literally: 'UI scale has been changed.\\nPress \"OK\" to confirm this scale.\\n[color=#ff3100ff]Reverting and exiting in[/color][color=#ffd37fff] 8[/color][color=#ff3100ff] seconds...[/color]'. Also noted: the dialog has no '@confirm' title (title passed as '') and the buttons are ordered OK / Cancel & Exit vs upstream Cancel & Exit / OK.",
       "repro": "scenario settings_ui: set uiscale to 150 via the Graphics slider, restart; observe the @uiscale.reset prompt during its 11s countdown",
       "evidence": [
         "runs/20261006-101800-ev0025-verify/godot/step-02-uiscale-reset-prompt.png",
-        "runs/20261006-101800-ev0025-verify/godot/state-ev0025-verify.json"
+        "runs/20261006-101800-ev0025-verify/godot/state-ev0025-verify.json",
+        "runs/20261006-102909-ev0034-verify/godot/state-ev0034-verify.json",
+        "runs/20261006-102909-ev0034-verify/godot/step-01-uiscale-prompt.png",
+        "runs/20261006-102909-ev0034-verify/run.json",
+        "runs/20261006-102909-ev0034-verify/report.md"
       ],
       "notes": [
-        "Split out of EV-0025 during its bc8d111 verification: the apply/prompt/OK/Cancel behaviors verify fixed, but the prompt body renders machine markup to the player."
+        "Split out of EV-0025 during its bc8d111 verification: the apply/prompt/OK/Cancel behaviors verify fixed, but the prompt body renders machine markup to the player.",
+        "2026-10-06T10:31:29+00:00: [loop ?] Fresh in-engine repro at HEAD 3f5a7bb (fix f6dd57c), window 1152x648, log cleared. With uiscale=150 + set_uiscale_changed(true) and a restart, pid 1206691 booted at content_scale_factor 1.5 and showed the @uiscale.reset prompt: the body node is now a RichTextLabel (bbcode_enabled=true) and get_parsed_text() = 'UI scale has been changed.\\nPress \"OK\" to confirm this scale.\\nReverting and exiting in 7 seconds...' with no literal [color=...] tags; the capture shows the countdown line rendered in red with OK / Cancel & Exit buttons at scale 1.5. Previously the plain Label displayed the raw [color=#ff3100ff]...[/color] tags. The 11s countdown expiring auto-reverted uiscale to 100 and exited; a fresh boot (pid 1207837) read uiscale=100, flag false, factor 1.0."
       ],
       "plan": "14",
       "first_seen": "2026-10-06T10:24:27+00:00",
-      "last_verified": "2026-10-06T10:24:27+00:00"
+      "last_verified": "2026-10-06T10:31:29+00:00"
     }
   ]
 }

@@ -127,7 +127,7 @@ saying why (upstream deviation accepted, platform limitation, duplicate).
 | Milestone | Status | Last run | Open S1/S2 | Notes |
 |---|---|---|---|---|
 | M0 bring-up | done | 20261005-150056-boot_menu | — | First twin-run complete; 8 findings filed. |
-| M1 menu & settings | in-progress | 20261006-101800-ev0025-verify | none | `boot_menu`, `settings_ui`, `ui_dialogs` evaluated; verified-fixed through EV-0033 plus EV-0025/EV-0032. Open: EV-0024 (blocked: no ported data-IO/campaign/research/crash-log subsystem for 7 of the 9 Game Data actions), EV-0028 (needs the Core Database UI over the existing unlock model), EV-0034 (S4: the uiscale reset prompt shows raw markup). |
+| M1 menu & settings | in-progress | 20261006-102909-ev0034-verify | none | `boot_menu`, `settings_ui`, `ui_dialogs` evaluated; verified-fixed through EV-0034 (EV-0025 uiscale apply+confirm, EV-0032 settings panel, EV-0034 prompt markup). Open: EV-0024 (blocked: no ported data-IO/campaign/research/crash-log subsystem for 7 of the 9 Game Data actions), EV-0028 (needs the Core Database UI over the existing unlock model). |
 | M2 campaign & HUD | in-progress | 20261006-071416-ev0018-verify | none | EV-0016 (launch camera snaps to core at default zoom 4) and EV-0017 (block picker renders 46px block / 50px category icon buttons) verified-fixed; EV-0018 (UI clicks leak into world place/break, S2) verified-fixed. EV-0010/0011/0012/0014/0015 stay verified. Open: EV-0013 (needs the same unlock/catalog filtering model as EV-0024/0028). |
 | M3 building & economy | not-started | — | — | |
 | M4 combat, units, logic | not-started | — | — | |
