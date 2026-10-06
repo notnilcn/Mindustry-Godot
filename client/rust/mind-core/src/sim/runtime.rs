@@ -154,6 +154,11 @@ impl SimRuntime {
         &self.counter
     }
 
+    /// Clears runtime bookkeeping after [`Sim::reset`] (entities are gone).
+    pub(crate) fn reset(&mut self) {
+        self.counter = BlockCounter::new();
+    }
+
     /// Whether placement is allowed by the `BuildVisibility`/unlock gate.
     ///
     /// `Block.canBeBuilt()` excludes hidden/debug-only; the campaign gate also

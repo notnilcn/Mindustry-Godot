@@ -856,6 +856,85 @@ fn block_runtime_replaces_compatible_occupied_tile() {
 }
 
 #[test]
+fn block_runtime_inventory_targets_live_item_module() {
+    use crate::determinism::SimCommand;
+    use crate::world::modules::ItemModule;
+
+    let mut sim = Sim::new(1, 16, 16, BlockId::AIR, BlockId::AIR);
+    sim.install_block_runtime().expect("install");
+    let container = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .block_id("container")
+        .expect("container");
+    sim.apply(Command::Place {
+        x: 4,
+        y: 4,
+        block: BlockId::new(container.raw()),
+    })
+    .expect("place container");
+    let entity = sim.grid.entity_at(TilePos::new(4, 4)).expect("entity");
+    let copper = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .item_by_name("copper")
+        .expect("copper")
+        .id;
+
+    sim.set_player_item(Some((copper.raw(), 10))).expect("seed");
+    sim.command(SimCommand::Inventory {
+        kind: 1,
+        x: 4,
+        y: 4,
+        item: Some(copper.raw()),
+        amount: 6,
+        angle: 0.0,
+    })
+    .expect("deposit");
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<ItemModule>(entity)
+            .expect("module")
+            .get(copper),
+        6
+    );
+    assert_eq!(sim.player_item(), Some((copper.raw(), 4)));
+
+    sim.command(SimCommand::Inventory {
+        kind: 0,
+        x: 4,
+        y: 4,
+        item: Some(copper.raw()),
+        amount: 2,
+        angle: 0.0,
+    })
+    .expect("withdraw");
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<ItemModule>(entity)
+            .expect("module")
+            .get(copper),
+        4
+    );
+    assert_eq!(sim.player_item(), Some((copper.raw(), 6)));
+
+    sim.command(SimCommand::Inventory {
+        kind: 2,
+        x: 4,
+        y: 4,
+        item: None,
+        amount: 0,
+        angle: 0.0,
+    })
+    .expect("drop");
+    assert_eq!(sim.player_item(), None);
+}
+
+#[test]
 fn block_runtime_placement_gate_rejects_locked_and_special_visibility() {
     let mut sim = Sim::new(1, 16, 16, BlockId::AIR, BlockId::AIR);
     sim.install_block_runtime_with(SimRuntimeConfig {

@@ -603,9 +603,27 @@ impl Sim {
                 if self.grid.index(pos).is_err() {
                     return Err(CommandError::InvalidTarget);
                 }
-                let block = self.grid.block_at(pos).unwrap_or(BlockId::AIR);
-                self.ensure_world_apply()
-                    .apply_inventory(pos, block, *kind, *item, *amount)?;
+                if self.block_runtime.is_some()
+                    && let Some(entity) = self.grid.entity_at(pos)
+                {
+                    // Live runtime: the real `ItemModule` is the storage the
+                    // block behaviors read, so mutate that instead of the relay
+                    // mirror.
+                    let world_apply = self
+                        .world_apply
+                        .get_or_insert_with(world_apply::WorldApplyRuntime::new);
+                    world_apply.apply_inventory_entity(
+                        &mut self.ecs.0,
+                        entity,
+                        *kind,
+                        *item,
+                        *amount,
+                    )?;
+                } else {
+                    let block = self.grid.block_at(pos).unwrap_or(BlockId::AIR);
+                    self.ensure_world_apply()
+                        .apply_inventory(pos, block, *kind, *item, *amount)?;
+                }
                 self.commands_applied = self.commands_applied.wrapping_add(1);
                 return Ok(());
             }
