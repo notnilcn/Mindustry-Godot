@@ -260,8 +260,24 @@ impl MindCampaign {
         }
 
         // Mirror the authoritative runtime state into the facade for getters.
-        self.session = runtime.session.clone();
-        self.campaign = Some(runtime.campaign.clone());
+        // Scalars/objectives stay fresh every pump; the full session (teams)
+        // and campaign clone only when an event actually landed.
+        let mirrored = !events.is_empty();
+        self.session.wave = runtime.session.wave;
+        self.session.wavetime = runtime.session.wavetime;
+        self.session.game_over = runtime.session.game_over;
+        self.session.won = runtime.session.won;
+        self.session.enemies = runtime.session.enemies;
+        self.session.spawn_count = runtime.session.spawn_count;
+        self.session.is_spawning = runtime.session.is_spawning;
+        self.session.sector = runtime.session.sector;
+        self.session.attack_after_waves = runtime.session.attack_after_waves;
+        self.session.rules = runtime.session.rules.clone();
+        self.session.objectives = runtime.session.objectives.clone();
+        if mirrored {
+            self.session = runtime.session.clone();
+            self.campaign = Some(runtime.campaign.clone());
+        }
         host.bind_mut().put_campaign_runtime(runtime);
         if dirty {
             self.persist();
@@ -735,6 +751,18 @@ impl MindCampaign {
     pub fn complete_objective(&mut self, index: i64) -> bool {
         if index < 0 {
             return false;
+        }
+        if let Some(mut host) = self.host() {
+            let taken = host.bind_mut().take_campaign_runtime();
+            if let Some(mut runtime) = taken {
+                let completed = runtime
+                    .session
+                    .objectives
+                    .complete(index as usize, &mut runtime.session.rules);
+                self.session.objectives = runtime.session.objectives.clone();
+                host.bind_mut().put_campaign_runtime(runtime);
+                return completed;
+            }
         }
         self.session
             .objectives
