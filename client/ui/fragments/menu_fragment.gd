@@ -252,6 +252,10 @@ func _on_menu_button(entry: Dictionary, button: Button) -> void:
 		else:
 			_show_submenu(entry["submenu"], button)
 		return
+	# Upstream `MenuFragment.buttons` fades the open submenu out before running a
+	# leaf button's runnable, so the menu is back to its base state behind the
+	# dialog.
+	_hide_submenu()
 	if entry.has("dialog"):
 		_open(str(entry["dialog"]))
 	elif entry.has("info"):

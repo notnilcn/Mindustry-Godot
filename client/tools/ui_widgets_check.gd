@@ -215,5 +215,21 @@ func _init() -> void:
 	_check(credits_texts.has("redloong9527"), "credits dialog lists contributors")
 	_check(not credits_texts.has("credits.text"), "credits dialog translates credits.text")
 
+	# A menu leaf button must dismiss the open submenu before running its action
+	# (upstream MenuFragment.buttons). (EV-0008)
+	var menu: Control = load("res://scenes/ui/fragments/menu_fragment.tscn").instantiate()
+	root.add_child(menu)
+	var source := Button.new()
+	var leaf := Button.new()
+	menu.call("_show_submenu", [{"text": "@about.button", "dialog": "about"}], source)
+	var submenu := menu.get("_submenu") as Control
+	_check(submenu != null and submenu.visible, "menu submenu opens")
+	menu.call("_on_menu_button", {"dialog": "about"}, leaf)
+	_check(
+		submenu != null and not submenu.visible,
+		"opening a submenu dialog dismisses the submenu"
+	)
+	_check(menu.get("_active_button") == null, "dismissed submenu clears the active button")
+
 	print("UICHECK: failed=", _failures)
 	quit(1 if _failures > 0 else 0)
