@@ -356,6 +356,7 @@ pub const EXPECTED_PROMPTS: &[&str] = &[
 /// `client/ui/dialogs_manifest.json` fails [`tests::repo_dialogs_manifest_complete`].
 pub const EXPECTED_M3_DIALOGS: &[&str] = &[
     "about",
+    "credits",
     "settings",
     "language",
     "controls",
@@ -404,7 +405,7 @@ pub fn expected_pause(name: &str) -> Option<bool> {
         | "campaign_complete" | "full_text" => true,
         "about" | "admins" | "bans" | "campaign_rules" | "canvas_edit" | "picker" | "content"
         | "custom" | "custom_rules" | "discord" | "editor_maps" | "effects" | "file_chooser"
-        | "restart" | "host" | "icon_select" | "join" | "controls" | "language"
+        | "restart" | "host" | "icon_select" | "join" | "controls" | "language" | "credits"
         | "launch_loadout" | "load" | "loadout" | "map_play" | "mod_browser" | "mods"
         | "palette" | "save" | "sector_select" | "traces" | "editor" => false,
         _ => return None,

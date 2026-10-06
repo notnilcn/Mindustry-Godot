@@ -19,7 +19,11 @@ const LINKS := [
 	{"name": "wiki", "link": "https://mindustrygame.github.io/wiki/", "icon": "book", "color": "0f142f"},
 	{"name": "suggestions", "link": "https://github.com/Anuken/Mindustry-Suggestions/issues/new/choose/", "icon": "add", "color": "ebebeb"},
 	{"name": "reddit", "link": "https://www.reddit.com/r/Mindustry/", "icon": "redditAlien", "color": "ee593b"},
+	{"name": "itch.io", "link": "https://anuke.itch.io/mindustry", "icon": "itchio", "color": "fa5c5c"},
+	{"name": "google-play", "link": "https://play.google.com/store/apps/details?id=io.anuke.mindustry", "icon": "googleplay", "color": "689f38"},
+	{"name": "f-droid", "link": "https://f-droid.org/packages/io.anuke.mindustry/", "icon": "android", "color": "026aa7"},
 	{"name": "github", "link": "https://github.com/Anuken/Mindustry/", "icon": "github", "color": "24292e"},
+	{"name": "dev-builds", "link": "https://github.com/Anuken/MindustryBuilds", "icon": "githubSquare", "color": "fafbfc"},
 	{"name": "bug", "link": "https://github.com/Anuken/Mindustry/issues/new", "icon": "wrench", "color": "cbd97f"},
 ]
 
@@ -47,6 +51,14 @@ func _build() -> void:
 	for link in LINKS:
 		_add_link(link)
 	add_close_button()
+	add_button(_t("@credits"), _show_credits, "", 200.0)
+
+
+## Upstream `AboutDialog.showCredits` opens the credits dialog.
+func _show_credits() -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null:
+		ui.call("open_dialog", "credits", "{}")
 
 
 func _add_link(link: Dictionary) -> void:

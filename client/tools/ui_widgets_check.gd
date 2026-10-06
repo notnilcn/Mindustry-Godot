@@ -196,6 +196,24 @@ func _init() -> void:
 	_check(about_texts.has("Discord"), "About renders the Discord title")
 	_check(about_texts.has("Trello"), "About renders the Trello title")
 	_check(not about_texts.has("link.trello.title"), "About does not render raw title keys")
+	for title in [
+		"Discord", "Changelog", "Trello", "Wiki", "Suggestions", "Reddit",
+		"Itch.io", "Google play", "F droid", "Github", "Dev builds", "Bug",
+	]:
+		_check(about_texts.has(title), "About renders the %s link" % title)
+	_check(about_texts.has("Credits"), "About renders the Credits button")
+
+	# EV-0007: the Credits dialog lists the packed contributors and translates
+	# the `credits.text` blurb.
+	var credits: Control = load("res://scenes/ui/dialogs/credits_dialog.tscn").instantiate()
+	root.add_child(credits)
+	var credits_texts: Array = []
+	for node in credits.find_children("*", "", true, false):
+		var text: Variant = node.get("text")
+		if text is String:
+			credits_texts.append(text)
+	_check(credits_texts.has("redloong9527"), "credits dialog lists contributors")
+	_check(not credits_texts.has("credits.text"), "credits dialog translates credits.text")
 
 	print("UICHECK: failed=", _failures)
 	quit(1 if _failures > 0 else 0)

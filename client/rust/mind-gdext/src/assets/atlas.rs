@@ -460,6 +460,25 @@ impl MindAssets {
         out
     }
 
+    /// Contributor names (`contributors` file at the asset root; the
+    /// `AboutDialog` credits list).
+    #[func]
+    pub fn contributors(&self) -> PackedStringArray {
+        let path = format!("{}/contributors", self.assets_dir);
+        if !FileAccess::file_exists(&path) {
+            return PackedStringArray::new();
+        }
+        let text = FileAccess::get_file_as_string(&path).to_string();
+        let mut out = PackedStringArray::new();
+        for line in text.lines() {
+            let name = line.trim();
+            if !name.is_empty() {
+                out.push(&GString::from(name));
+            }
+        }
+        out
+    }
+
     /// `Iconc` content name → PUA char string (`Fonts.getUnicodeStr`).
     #[func]
     pub fn unicode_str(&self, name: GString) -> GString {

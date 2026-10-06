@@ -3,6 +3,7 @@
 [ext_resource type="Script" uid="uid://cn1cjsecxfvae" path="res://ui/ui_root.gd" id="1_root"]
 
 [ext_resource type="PackedScene" path="res://scenes/ui/dialogs/about_dialog.tscn" id="dlg_about"]
+[ext_resource type="PackedScene" path="res://scenes/ui/dialogs/credits_dialog.tscn" id="dlg_credits"]
 [ext_resource type="PackedScene" path="res://scenes/ui/dialogs/settings_menu_dialog.tscn" id="dlg_settings"]
 [ext_resource type="PackedScene" path="res://scenes/ui/dialogs/language_dialog.tscn" id="dlg_language"]
 [ext_resource type="PackedScene" path="res://scenes/ui/dialogs/keybind_dialog.tscn" id="dlg_controls"]
@@ -108,6 +109,7 @@ grow_vertical = 2
 mouse_filter = 2
 
 [node name="about" parent="DialogLayer" instance=ExtResource("dlg_about")]
+[node name="credits" parent="DialogLayer" instance=ExtResource("dlg_credits")]
 [node name="settings" parent="DialogLayer" instance=ExtResource("dlg_settings")]
 [node name="language" parent="DialogLayer" instance=ExtResource("dlg_language")]
 [node name="controls" parent="DialogLayer" instance=ExtResource("dlg_controls")]
