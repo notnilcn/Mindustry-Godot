@@ -37,7 +37,25 @@ func _enter_tree() -> void:
 func _ready() -> void:
 	_bind_manifest()
 	_connect_prompts()
+	_apply_ui_scale()
 	_boot()
+
+
+## `Vars.java:517 Scl.setProduct`: the persisted `uiscale` percent scales the
+## whole UI at boot (minimum 25%, matching upstream). The window content scale
+## factor is Godot's equivalent of the Scl product.
+func _apply_ui_scale() -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui == null or not ui.has_method("settings_rows_json"):
+		return
+	var parsed: Variant = JSON.parse_string(str(ui.call("settings_rows_json", "graphics")))
+	if not (parsed is Array):
+		return
+	for row in parsed:
+		if row is Dictionary and str(row.get("key", "")) == "uiscale":
+			var scale := maxf(float(row.get("value", 100)), 25.0) / 100.0
+			get_window().content_scale_factor = scale
+			return
 
 
 ## Boot presentation (`MenuFragment`/`LoadingFragment`/`FadeInFragment` order):
