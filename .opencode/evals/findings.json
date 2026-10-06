@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "updated": "2026-10-06T08:59:49+00:00",
+  "updated": "2026-10-06T09:10:21+00:00",
   "findings": [
     {
       "id": "EV-0001",
@@ -162,7 +162,7 @@
       "id": "EV-0007",
       "area": "ui/menu",
       "severity": "S3",
-      "status": "open",
+      "status": "verified-fixed",
       "title": "About dialog is missing four reference links and the Credits button",
       "expected": "Java: 12 links including Itch.io, Google play, F-Droid, Dev builds, plus Back and Credits buttons",
       "actual": "Godot: 8 links only; single Back button, no Credits",
@@ -174,14 +174,23 @@
         "runs/20261006-172828-ui_dialogs/godot/step-03-about.png",
         "runs/20261006-172828-ui_dialogs/godot/state-about.json",
         "runs/20261006-172828-ui_dialogs/java/step-03-about.png",
-        "runs/20261006-172828-ui_dialogs/java/step-04-about-scrolled.png"
+        "runs/20261006-172828-ui_dialogs/java/step-04-about-scrolled.png",
+        "runs/20261006-090405-ev0007-verify/godot/state-ev0007-verify.json",
+        "runs/20261006-090405-ev0007-verify/godot/step-01-about-top.png",
+        "runs/20261006-090405-ev0007-verify/godot/step-02-about-bottom.png",
+        "runs/20261006-090405-ev0007-verify/godot/step-03-credits.png",
+        "runs/20261006-090405-ev0007-verify/godot/step-05-credits-contributors-live.png",
+        "runs/20261006-090405-ev0007-verify/godot/log-errors-final.json",
+        "runs/20261006-090405-ev0007-verify/report.md"
       ],
       "notes": [
-        "2026-10-06T07:58:30+00:00: [loop ?] Fresh ui_dialogs run 20261006-172828: About still has only 8 link rows (itch.io, google-play, f-droid, dev-builds absent) and a single Back button with no Credits button (state-about.json: credits_button=false). Java capture shows 12 links plus Back+Credits."
+        "2026-10-06T07:58:30+00:00: [loop ?] Fresh ui_dialogs run 20261006-172828: About still has only 8 link rows (itch.io, google-play, f-droid, dev-builds absent) and a single Back button with no Credits button (state-about.json: credits_button=false). Java capture shows 12 links plus Back+Credits.",
+        "2026-10-06T09:00:51+00:00: claimed by loop-1",
+        "2026-10-06T09:10:21+00:00: [loop ?] Fresh in-engine repro at HEAD 9ecc2de (fix 9ecc2de; rebuilt .so 19:03, MindAssets.contributors() present), pid 1143171 then 1145291, 1152x648, log cleared first; menu > Database > About. About now has exactly 12 link rows in upstream order (Discord, Changelog, Trello, Wiki, Suggestions, Reddit, Itch.io, Google play, F droid, Github, Dev builds, Bug) with all 12 descriptions resolved, plus Back and a Credits button (683,503) - matching the Java captures. Credits opens (stack [about,credits]), title 'Credits', credits.text blurb present and translated, 'Translators and Contributors' heading present, 202 labels. Two distinct Credits-body defects persist and are filed separately, not folded into EV-0007: contributor labels render 1px wide so the list is not visible (new finding), and the blurb leaks a literal [sky] (new finding). About row icons remain EV-0029."
       ],
       "plan": "14",
       "first_seen": "2026-10-05T05:35:17+00:00",
-      "last_verified": "2026-10-06T07:58:30+00:00"
+      "last_verified": "2026-10-06T09:10:21+00:00"
     },
     {
       "id": "EV-0008",
@@ -796,6 +805,49 @@
       "plan": "14",
       "first_seen": "2026-10-06T08:59:49+00:00",
       "last_verified": "2026-10-06T08:59:49+00:00"
+    },
+    {
+      "id": "EV-0030",
+      "area": "ui/menu",
+      "severity": "S3",
+      "status": "open",
+      "title": "Credits dialog contributor list is not visible (1px-wide labels)",
+      "expected": "Java: the Credits dialog shows the 'Translators and Contributors' 3-column list with names (redloong9527, Prosta4okua, Felix Corvus, Vanguard, Timmeey86, Epowerj, ...)",
+      "actual": "Godot: 202 labels exist in the tree, but every contributor label renders 1px wide (redloong9527 x=310 y=1480 w=1 h=338; first row x=310/488/667 w=1), so no name is visible at any scroll position; the heading 'Translators and Contributors' renders (528 px) and the blurb label is 988 px tall with scroll max 24917 (inflated-label layout family of EV-0020/EV-0023)",
+      "repro": "scenario ui_dialogs (Godot leg): menu > Database > About > Credits (button 683,503); scroll the credits dialog and read the contributor RichTextLabel widths",
+      "evidence": [
+        "runs/20261006-090405-ev0007-verify/godot/step-05-credits-contributors-live.png",
+        "runs/20261006-090405-ev0007-verify/godot/step-03-credits.png",
+        "runs/20261006-090405-ev0007-verify/godot/state-ev0007-verify.json",
+        "runs/20261006-172828-ui_dialogs/java/step-05-credits.png"
+      ],
+      "notes": [
+        "Split out of EV-0007 during its 9ecc2de re-verification: the About links + Credits button are fixed, but the Credits body's contributor list is not player-visible. Do not re-open EV-0007 for this."
+      ],
+      "plan": "14",
+      "first_seen": "2026-10-06T09:10:21+00:00",
+      "last_verified": "2026-10-06T09:10:21+00:00"
+    },
+    {
+      "id": "EV-0031",
+      "area": "ui/menu",
+      "severity": "S4",
+      "status": "open",
+      "title": "Credits blurb renders a literal [sky] before the email",
+      "expected": "Java: 'Created by Anuken - anukendev@gmail.com' (bundle credits.text = 'Created by [royal]Anuken[] - [sky]anukendev@gmail.com[]', both color tags applied)",
+      "actual": "Godot: the blurb's parsed text is 'Created by Anuken - [sky]anukendev@gmail.com'; the [sky] color tag is not converted by render_markup (the [royal] tag converts fine), so the literal '[sky]' renders before the address",
+      "repro": "scenario ui_dialogs (Godot leg): menu > Database > About > Credits; read the 'Created by' RichTextLabel get_parsed_text()",
+      "evidence": [
+        "runs/20261006-090405-ev0007-verify/godot/step-03-credits.png",
+        "runs/20261006-090405-ev0007-verify/godot/state-ev0007-verify.json",
+        "runs/20261006-172828-ui_dialogs/java/step-05-credits.png"
+      ],
+      "notes": [
+        "Split out of EV-0007 during its 9ecc2de re-verification."
+      ],
+      "plan": "14",
+      "first_seen": "2026-10-06T09:10:21+00:00",
+      "last_verified": "2026-10-06T09:10:21+00:00"
     }
   ]
 }
