@@ -48,7 +48,9 @@ func _build() -> void:
 		button.toggle_mode = true
 		button.button_pressed = locale == _current_locale
 		button.pressed.connect(_select.bind(locale))
-		list.add(button).size(400.0)
+		# Upstream `langs.add(button)...size(400f, 50f)`; `size(s)` would make
+		# the cell square.
+		list.add(button).width(400.0).height(50.0)
 		list.row()
 
 

@@ -221,6 +221,21 @@ func _init() -> void:
 		"About renders all 12 link icon glyphs in the icon font (got %s)" % glyphs_with_icon_font
 	)
 
+	# EV-0022: the locale list stacks 400x50 rows (upstream `.size(400f, 50f)`);
+	# a `size(400)` cell makes every row 400x400.
+	var language: Control = load("res://scenes/ui/dialogs/language_dialog.tscn").instantiate()
+	root.add_child(language)
+	await process_frame
+	var english_size := Vector2.ZERO
+	for node in language.find_children("*", "Button", true, false):
+		if str(node.get("text")) == "English":
+			english_size = (node as Control).size
+	_check(
+		is_equal_approx(english_size.x, 400.0) and english_size.y < 60.0,
+		"language rows are 400x50 (got %s)" % english_size
+	)
+	language.free()
+
 	# EV-0007: the Credits dialog lists the packed contributors and translates
 	# the `credits.text` blurb.
 	var credits: Control = load("res://scenes/ui/dialogs/credits_dialog.tscn").instantiate()
