@@ -26,7 +26,25 @@ func _ready() -> void:
 	# The HUD starts hidden in the menu; build the (content-booting) catalogue on
 	# first reveal instead of during boot.
 	visibility_changed.connect(_ensure_loaded)
+	# Category cycling (`,`/`.`) is dispatched by `MindInput`; the rail owns the
+	# visible index and pushes it back.
+	var input := get_node_or_null("/root/Spine/Input")
+	if input != null and input.has_signal("hotkey") and not input.is_connected("hotkey", Callable(self, "_on_hotkey")):
+		input.connect("hotkey", Callable(self, "_on_hotkey"))
 	_ensure_loaded()
+
+
+func _on_hotkey(action: String) -> void:
+	if action != "category_prev" and action != "category_next":
+		return
+	var count := int(_catalog.get("categories", []).size())
+	if count <= 0:
+		return
+	var delta := -1 if action == "category_prev" else 1
+	_selected_category = wrapi(_selected_category + delta, 0, count)
+	_sync_category()
+	_build_categories()
+	_rebuild()
 
 
 func _ensure_loaded() -> void:

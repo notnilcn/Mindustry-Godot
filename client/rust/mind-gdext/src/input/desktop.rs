@@ -513,6 +513,12 @@ impl DesktopBridge {
                 self.fire_hotkey(name);
             }
             "block_info" => self.block_info_hotkey(),
+            "pick" => self.pick_block(),
+            "category_prev" | "category_next" => {
+                // The placement fragment owns the category rail; it reacts to
+                // the hotkey signal and pushes the new index back.
+                self.fire_hotkey(name);
+            }
             "pause" => {
                 if let Some(mut host) = self.host.clone() {
                     let paused = host.bind().is_paused();
