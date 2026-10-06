@@ -1372,7 +1372,9 @@ mod tests {
         }) {
             panic!("place core failed: {error}");
         }
-        let entity = sim.grid.tile(4, 4).build.expect("core building entity");
+        let Some(entity) = sim.grid.tile(4, 4).build else {
+            panic!("core building entity missing");
+        };
         {
             // `Sim::apply` spawns the base building only; the plan-08 building
             // path attaches the item module, so attach the fixture module here.
