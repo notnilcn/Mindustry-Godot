@@ -21,6 +21,51 @@ const CHECK_REGIONS := ["check-off", "check-on", "check-over", "check-on-over"]
 var _failures := 0
 
 
+## `/root/Spine/Input` double for the keybind-dialog oracle (the real node is a
+## game-scene child that the `--script` main loop does not instantiate).
+class KeybindInputStub:
+	extends Node
+
+	func keybinds_json() -> String:
+		return JSON.stringify([
+			{
+				"name": "move_x",
+				"category": "general",
+				"axis": true,
+				"bundle": "keybind.move_x.name",
+				"value": "d",
+				"display": "D",
+				"negativeDisplay": "A",
+				"default": true,
+			},
+			{
+				"name": "select",
+				"category": "general",
+				"axis": false,
+				"bundle": "keybind.select.name",
+				"value": "q",
+				"display": "Q",
+				"negativeDisplay": null,
+				"default": true,
+			},
+		])
+
+	func rebind(_name: String, _code: String) -> bool:
+		return true
+
+	func rebind_key(_name: String, _text: String) -> bool:
+		return true
+
+	func reset_keybind(_name: String) -> bool:
+		return true
+
+	func reset_keybinds() -> void:
+		pass
+
+	func unbind_keybind(_name: String) -> bool:
+		return true
+
+
 func _check(condition: bool, message: String) -> void:
 	if condition:
 		print("UICHECK: ok ", message)
@@ -104,6 +149,35 @@ func _init() -> void:
 		dialog.add_close_button().pressed.emit()
 		_check(not bool(ui.call("has_dialog")), "Back button pops the dialog off the MindUi stack")
 		_check(not dialog.visible, "Back button hides the dialog node")
+
+	# The Controls dialog must render the binding registry (names, key columns,
+	# Rebind/Reset), not the category-header stub (EV-0023).
+	var spine := Node.new()
+	spine.name = "Spine"
+	root.add_child(spine)
+	var stub := KeybindInputStub.new()
+	stub.name = "Input"
+	spine.add_child(stub)
+	var keybind: Control = load("res://scenes/ui/dialogs/keybind_dialog.tscn").instantiate()
+	root.add_child(keybind)
+	var button_texts: Array = []
+	for button in keybind.find_children("*", "Button", true, false):
+		button_texts.append(button.text)
+	_check(
+		button_texts.count("Rebind") == 2,
+		"keybind dialog renders one Rebind per binding (got %s)" % button_texts.count("Rebind")
+	)
+	_check(
+		button_texts.count("Reset to Defaults") == 1,
+		"keybind dialog renders the reset-all button"
+	)
+	var label_texts: Array = []
+	for node in keybind.find_children("*", "", true, false):
+		var text: Variant = node.get("text")
+		if text is String:
+			label_texts.append(text)
+	_check(label_texts.has("A / D"), "axis binding renders min / max (A / D)")
+	_check(label_texts.has("Move X"), "binding name resolves from the bundle")
 
 	print("UICHECK: failed=", _failures)
 	quit(1 if _failures > 0 else 0)

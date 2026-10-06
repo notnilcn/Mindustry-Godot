@@ -19,6 +19,7 @@ pub mod cursor;
 pub mod desktop;
 pub mod focus;
 pub mod input_log;
+pub mod keycode;
 pub mod line;
 pub mod mobile;
 pub mod place_mode;
@@ -50,6 +51,7 @@ pub use focus::{FocusGuards, FocusState, InputLocks, LockId};
 pub use input_log::{
     INPUT_LOG_FORMAT, InputHeader, InputLog, InputLogError, InputRecord, InputReplay, RawEvent,
 };
+pub use keycode::display_name as key_display_name;
 pub use line::{PlaceLine, flip_plans, iterate_line, rotate_plans};
 pub use mobile::{
     AREA_BREAK_START_TILES, EDGE_PAN, GestureDetector, GestureEvent, LINE_MODE_START_TILES,

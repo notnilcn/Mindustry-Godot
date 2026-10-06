@@ -14,6 +14,7 @@ algorithms only. Read the root [`AGENTS.md`](../../../../../AGENTS.md) first. Th
 | `mod.rs` | Module root; declares every submodule and re-exports the public input surface. |
 | `action.rs` | `RemoteAction` (every client mutation once) with `CommandTarget`, `InventoryKind`, `PayloadAction`, `name()`/`relayed()`. |
 | `binding.rs` | `KeyBindTable`/`BINDS` registry (`KeyKind`, `Category`, `BindingDefault`, `ids`) and the client-local `BindingState` persisted through `SettingsStore`. |
+| `keycode.rs` | Arc `KeyCode` display-name table (`KeyCode.getName` -> `Input.getKeyName`) consumed by the keybind dialog's key column. |
 | `camera_state.rs` | `CameraState` rig: zoom clamps, `scale_camera`, pan/follow/cutscene, minimap mapping, `CameraView` and `ShakeState`. |
 | `caps.rs` | `InputCaps` trait abstracting settings/focus/scene reads, plus the headless `TestCaps` double. |
 | `client_input.rs` | `InputState` (`InputHandler` fields), control groups, `update_line`, `refresh_preview`, `flush_plans`, `break_rect`. |

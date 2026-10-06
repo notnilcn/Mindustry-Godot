@@ -17,7 +17,9 @@ use godot::classes::{INode, Node};
 use godot::obj::Base;
 use godot::prelude::*;
 
-use mind_core::input::{BindingState, FocusState, InputLocks, KeyBindTable, RawEvent};
+use mind_core::input::{
+    BindingState, BindingValue, FocusState, InputLocks, KeyBindTable, RawEvent, key_display_name,
+};
 
 /// The `/root/Spine/Input` input node.
 #[derive(GodotClass)]
@@ -204,18 +206,79 @@ impl MindInput {
         }
     }
 
-    /// The full binding registry + current values as JSON.
+    /// Rebinds `name` from a Godot key display string (`OS.get_keycode_string`),
+    /// normalizing it to the registry name (GDScript capture path).
+    #[func]
+    pub fn rebind_key(&mut self, name: GString, godot_text: GString) -> bool {
+        let code = events::normalize_key_name(&godot_text.to_string());
+        if bindings::rebind(&mut self.bindings, &name.to_string(), &code) {
+            bindings::save(&self.bindings);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Resets one binding to its upstream default and persists it.
+    #[func]
+    pub fn reset_keybind(&mut self, name: GString) -> bool {
+        let Some(id) = self.bind_id(&name.to_string()) else {
+            return false;
+        };
+        *self.bindings.value_mut(id) = mind_core::input::binding::default_value_for(id);
+        bindings::save(&self.bindings);
+        true
+    }
+
+    /// Resets every binding to its upstream default and persists it.
+    #[func]
+    pub fn reset_keybinds(&mut self) {
+        self.bindings.reset();
+        bindings::save(&self.bindings);
+    }
+
+    /// Unbinds one binding and persists it (`Binding.unset`).
+    #[func]
+    pub fn unbind_keybind(&mut self, name: GString) -> bool {
+        let Some(id) = self.bind_id(&name.to_string()) else {
+            return false;
+        };
+        self.bindings.clear(id);
+        bindings::save(&self.bindings);
+        true
+    }
+
+    /// Numeric id for a registry binding name.
+    fn bind_id(&self, name: &str) -> Option<u16> {
+        KeyBindTable::all()
+            .iter()
+            .position(|bind| bind.name == name)
+            .map(|index| index as u16)
+    }
+
+    /// The full binding registry + current values as JSON. `display` and
+    /// `negativeDisplay` are the Arc `KeyCode.getName()` strings the keybind
+    /// dialog renders; `default` drives the per-row Reset disabled state.
     #[func]
     pub fn keybinds_json(&self) -> GString {
         let mut list = Vec::new();
         for (index, bind) in KeyBindTable::all().iter().enumerate() {
             let id = index as u16;
+            let (negative, positive) = match self.bindings.value(id) {
+                BindingValue::Axis { negative, positive } => {
+                    (negative.as_deref(), positive.as_deref())
+                }
+                other => (None, other.display_name()),
+            };
             list.push(serde_json::json!({
                 "name": bind.name,
                 "category": bind.category.map(|c| c.name()),
                 "axis": bind.kind == mind_core::input::KeyKind::Axis,
                 "bundle": bind.bundle_key(),
                 "value": self.bindings.name(id),
+                "display": positive.map(key_display_name),
+                "negativeDisplay": negative.map(key_display_name),
+                "default": self.bindings.is_default(id),
             }));
         }
         GString::from(&serde_json::Value::Array(list).to_string())

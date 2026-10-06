@@ -972,6 +972,11 @@ impl BindingState {
         self.values = BINDS.iter().map(default_value).collect();
     }
 
+    /// Whether `id` still holds its upstream default (`KeyBind.isDefault`).
+    pub fn is_default(&self, id: KeyBindId) -> bool {
+        self.values[id as usize] == default_value(&BINDS[id as usize])
+    }
+
     /// The first axis that a key name participates in (negative matches first).
     pub fn axis_of(&self, id: KeyBindId, name: &str) -> Option<f32> {
         match self.values[id as usize] {
@@ -1058,6 +1063,11 @@ fn default_value(bind: &KeyBind) -> BindingValue {
             positive: positive.map(str::to_owned),
         },
     }
+}
+
+/// The upstream default value for `id` (`KeyBind.defaultValue`).
+pub fn default_value_for(id: KeyBindId) -> BindingValue {
+    default_value(&BINDS[id as usize])
 }
 
 #[cfg(test)]
