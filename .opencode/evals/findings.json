@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "updated": "2026-10-06T10:31:29+00:00",
+  "updated": "2026-10-06T10:33:29+00:00",
   "findings": [
     {
       "id": "EV-0001",
@@ -865,10 +865,13 @@
         "runs/20261006-172828-ui_dialogs/godot/state-database-stub.json",
         "runs/20261006-172828-ui_dialogs/java/step-07-database.png"
       ],
-      "notes": [],
+      "notes": [
+        "2026-10-06T10:32:23+00:00: claimed by loop-1",
+        "2026-10-06T10:33:29+00:00: released: Claim released without a fix (scope confirmed, groundwork mapped). EV-0028 needs a content-database view + dialog rewrite, best done in a focused single-writer session. Scoping: mind-core already has the data - UnlockFields {database_category, database_tag, all_database_tabs, shown_planets, database_tabs, hide_database, unlocked, localized_name, icon_region} on items/blocks/liquids/units/statuses; ContentRegistry accessors items()/blocks()/liquids()/units()/entries(type); bundle keys database-category.<type|cat> and database-tag.<tag> exist. Upstream DatabaseDialog.java: planet tabs = 'all' (Planets.sun) + every content.databaseTabs, rendered as 50px icon toggles; contents grouped by category then tag; each row is a grid of uiIcon (unlocked) or lock (locked), click opens ContentInfoDialog; empty categories hidden. Proposed: a mind_core::ui::campaign::content_database() view + MindUi.content_database_json(), then rewrite client/ui/dialogs/database_dialog.gd. Blocks EV-0013 too (same unlock/catalog filtering)."
+      ],
       "plan": "14",
       "first_seen": "2026-10-06T07:58:16+00:00",
-      "last_verified": "2026-10-06T07:58:16+00:00"
+      "last_verified": "2026-10-06T10:33:29+00:00"
     },
     {
       "id": "EV-0029",
