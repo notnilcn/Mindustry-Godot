@@ -379,7 +379,7 @@ impl MindInput {
                         node.set("visible", &(!visible).to_variant());
                     }
                 }
-                Effect::OpenBlockConfig { x, y, spec } => {
+                Effect::OpenBlockConfig { screen, spec, .. } => {
                     let Some(mut node) = self.base().try_get_node_as::<Node>(BLOCK_CONFIG_PATH)
                     else {
                         continue;
@@ -387,16 +387,22 @@ impl MindInput {
                     let _ = node.call(
                         "configure",
                         &[
-                            Vector2::new(x as f32, y as f32).to_variant(),
+                            Vector2::new(screen.0, screen.1).to_variant(),
                             GString::from(spec.as_str()).to_variant(),
                         ],
                     );
                 }
-                Effect::OpenBlockInventory { x, y, items } => {
+                Effect::OpenBlockInventory {
+                    x,
+                    y,
+                    screen,
+                    items,
+                } => {
                     let Some(mut node) = self.base().try_get_node_as::<Node>(BLOCK_INVENTORY_PATH)
                     else {
                         continue;
                     };
+                    node.set("position", &Vector2::new(screen.0, screen.1).to_variant());
                     let _ = node.call(
                         "open_at",
                         &[

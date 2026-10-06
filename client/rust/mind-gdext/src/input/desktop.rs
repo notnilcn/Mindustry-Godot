@@ -75,6 +75,8 @@ pub enum Effect {
         x: i32,
         /// Tile y.
         y: i32,
+        /// Viewport anchor (click position).
+        screen: (f32, f32),
         /// Config-spec JSON consumed by `block_config_fragment.gd`.
         spec: String,
     },
@@ -84,6 +86,8 @@ pub enum Effect {
         x: i32,
         /// Tile y.
         y: i32,
+        /// Viewport anchor (click position).
+        screen: (f32, f32),
         /// `{item_name: amount}` JSON.
         items: String,
     },
@@ -768,7 +772,12 @@ impl DesktopBridge {
             return;
         };
         if let Some(spec) = self.config_spec(x, y) {
-            self.effects.push(Effect::OpenBlockConfig { x, y, spec });
+            self.effects.push(Effect::OpenBlockConfig {
+                x,
+                y,
+                screen: self.mouse,
+                spec,
+            });
             self.fire_hotkey("block_info");
             return;
         }
@@ -955,13 +964,19 @@ impl DesktopBridge {
             return;
         }
         if let Some(spec) = self.config_spec(x, y) {
-            self.effects.push(Effect::OpenBlockConfig { x, y, spec });
+            self.effects.push(Effect::OpenBlockConfig {
+                x,
+                y,
+                screen: self.mouse,
+                spec,
+            });
             return;
         }
         if self.has_items_at(x, y) {
             self.effects.push(Effect::OpenBlockInventory {
                 x,
                 y,
+                screen: self.mouse,
                 items: String::from("{}"),
             });
             return;
