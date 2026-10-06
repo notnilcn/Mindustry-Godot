@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "updated": "2026-10-05T12:01:17+00:00",
+  "updated": "2026-10-06T07:26:24+00:00",
   "findings": [
     {
       "id": "EV-0001",
@@ -55,7 +55,7 @@
       "id": "EV-0003",
       "area": "ui/menu",
       "severity": "S3",
-      "status": "open",
+      "status": "verified-fixed",
       "title": "Menu logo is 37 percent narrower than the reference at the same window size",
       "expected": "Java at 1152x648: logo pixel bbox 754 px wide (198..951)",
       "actual": "Godot at 1152x648: logo global width 483.84 px, pixel bbox 475 px (338..812)",
@@ -63,12 +63,21 @@
       "evidence": [
         "runs/20261005-150056-boot_menu/godot/step-01-main-menu.png",
         "runs/20261005-150056-boot_menu/java/step-01-main-menu.png",
-        "runs/20261005-150056-boot_menu/godot/state-01-menu.json"
+        "runs/20261005-150056-boot_menu/godot/state-01-menu.json",
+        "runs/20261006-072421-ev0003-verify/godot/step-01-main-menu.png",
+        "runs/20261006-072421-ev0003-verify/godot/step-01-analysis.json",
+        "runs/20261006-072421-ev0003-verify/godot/state-01-menu.json",
+        "runs/20261006-072421-ev0003-verify/godot/step-01-fresh-vs-java-top.png",
+        "runs/20261006-072421-ev0003-verify/godot/log-errors.json",
+        "runs/20261006-072421-ev0003-verify/report.md"
       ],
-      "notes": [],
+      "notes": [
+        "2026-10-05T22:42:57+00:00: claimed by loop-2",
+        "2026-10-06T07:26:24+00:00: [loop ?] Fresh in-engine repro at HEAD bc6d94e (fix commit, cherry-pick of dead-loop-2 4a6f0cb): boot_menu step 1 main menu, pid 1083396, 1152x648, log cleared first. Logo Control global rect x=192.0 y=6.0 w=768.0 h=107.0, drawn 1:1 from the native 768x107 texture - the commit message's headless claim is confirmed in-engine exactly. Pixel bbox measured with the archived method after re-validating it on the old captures (yields Java 754 exact and pre-fix Godot 475 exact): fresh logo-only bbox 198..951 x 12..92, w=754 h=81 - identical to the Java baseline 198..951 x 12..92 w=754 h=81, 0 px delta on width and all four edges. Full-band bbox reaches y=138 only because the white 'Mindustry-Godot' version label (rect 416,115 320x26) crosses the luma threshold; the Java label is orange and excluded. The pre-fix bbox 338..812 w=475 does not reproduce. Visual side-by-side (step-01-fresh-vs-java-top.png) matches in size and horizontal centering. Only log entry is the pre-existing menu-background-missing-regions boot warning; no new errors. Java leg not re-run (committed 1152x648 baseline used). EV-0004 label text/color still open separately."
+      ],
       "plan": "14",
       "first_seen": "2026-10-05T05:35:07+00:00",
-      "last_verified": "2026-10-05T05:35:07+00:00"
+      "last_verified": "2026-10-06T07:26:24+00:00"
     },
     {
       "id": "EV-0004",
@@ -478,21 +487,32 @@
       "id": "EV-0018",
       "area": "input/placement",
       "severity": "S2",
-      "status": "open",
+      "status": "verified-fixed",
       "title": "UI clicks also place/break world blocks (input leak)",
       "expected": "Java: clicking a UI control (placement category tab, block button, toolbar or menu button) is consumed by the UI and never issues a world place/break command",
       "actual": "Godot: every left/right press is applied by MindSimHost 'input' (the _input virtual -> sim_host.rs input()) before the GUI consumes it, with no UI-hover/consumed guard. Three category-tab clicks in the placement panel issued place commands for the selected block at the tile under each tab: block_placed stone-wall at (131,59)/(136,59)/(128,59), build_id 0/1/2. A real OS-level click on the Production tab (computer-mcp, not the MCP injector) switched the category AND placed stone-wall at (130,59) build_id 3 (commands_applied 4->5). Main-menu clicks also log 'mouse tile (..) applied (LEFT)' before the sector loads",
       "repro": "campaign_launch step 4 (in-game placement panel), pid 517487, 1152x648: click any category tab; assert get_state_json events/world tiles. Menu-phase clicks reproduce in the boot log too",
       "evidence": [
         "runs/20261005-215133-ev0017-verify/godot/state-input-leak.json",
-        "runs/20261005-215133-ev0017-verify/godot/step-04-leak-editor-output.png"
+        "runs/20261005-215133-ev0017-verify/godot/step-04-leak-editor-output.png",
+        "runs/20261006-071416-ev0018-verify/godot/state-metrics.json",
+        "runs/20261006-071416-ev0018-verify/godot/state-13-after-os-prod-click.json.gz",
+        "runs/20261006-071416-ev0018-verify/godot/state-12-groundzero-prelaunch.json.gz",
+        "runs/20261006-071416-ev0018-verify/godot/state-15-after-world-place.json.gz",
+        "runs/20261006-071416-ev0018-verify/godot/state-16-after-world-break.json.gz",
+        "runs/20261006-071416-ev0018-verify/godot/step-11-os-click-production.png",
+        "runs/20261006-071416-ev0018-verify/godot/log-excerpt.txt",
+        "runs/20261006-071416-ev0018-verify/godot/log-errors.json",
+        "runs/20261006-071416-ev0018-verify/report.md"
       ],
       "notes": [
-        "Root-cause pointer only (not proof): client/rust/mind-gdext/src/sim_host.rs:134 overrides the _input virtual and calls apply_command(Place/Break) for every mouse press; upstream InputHandler suppresses world input while UI has mouse. Also note EV-0013/EV-0017 category-tab evidence was captured with the same clicks, which is why each tab click left a player-built wall in Ground Zero."
+        "Root-cause pointer only (not proof): client/rust/mind-gdext/src/sim_host.rs:134 overrides the _input virtual and calls apply_command(Place/Break) for every mouse press; upstream InputHandler suppresses world input while UI has mouse. Also note EV-0013/EV-0017 category-tab evidence was captured with the same clicks, which is why each tab click left a player-built wall in Ground Zero.",
+        "2026-10-05T21:21:27+00:00: claimed by loop-1",
+        "2026-10-06T07:23:38+00:00: [loop ?] Fresh in-engine repro at HEAD bc6d94e (client/bin/rust/debug/libmind_gdext.so built 07:27:59, after fix commit 81fc269 07:27:22): campaign_launch step 4 at Ground Zero (preset serpulo/groundZero, 256x256, 56078 non-air tiles), pid 1080554, window 1152x648, camera (1036,444) zoom 4 - the same pose the original repro used (category row maps to tile y=59). 12 UI clicks produced ZERO deltas in commands_applied/events/world tiles: menu/nav Play, Campaign, Serpulo card, OK, Launch; MCP clicks on category production/distribution/defense/turret, block-duo, panel background (518,394), grid gap (568,507); and a REAL OS-level computer-mcp XTEST click at screen (983,744)=viewport (599,455) on the Production tab (category switched to production blocks, no place event). log-excerpt.txt shows the only two '[D] mouse tile (125,55) applied' lines are the negative-control world clicks; no UI click logged an applied line. Negative control: left-click empty world tile (125,55) -> commands_applied 0->1, tiles 56078->56079, block_placed stone-wall build_id 0; right-click -> commands_applied 2, tiles back to 56078, block_broken. Error buffer cleared and empty (log-errors.json). Residual uncertainty: Java leg not re-run (optional for this Godot-side gating regression; same-flow reference captures committed under runs/20261005-163933-campaign_launch/java/); HUD controls other than the placement panel not individually clicked. Session-1 harness wedge (await eval) documented in report.md."
       ],
       "plan": "15",
       "first_seen": "2026-10-05T12:01:17+00:00",
-      "last_verified": "2026-10-05T12:01:17+00:00"
+      "last_verified": "2026-10-06T07:23:38+00:00"
     }
   ]
 }

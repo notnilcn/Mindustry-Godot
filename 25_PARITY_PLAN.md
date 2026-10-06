@@ -90,7 +90,8 @@ queue. Scenario ids come from `.opencode/skills/parity-eval/SKILL.md` §7 and
    Parity-pinned ABI (content ids, checksums, sprite names) is append-only.
 4. **Check it** with the narrowest command (`cargo test -p <crate>`,
    `tools/ci.sh` for cross-cutting).
-5. **Claim it** in the commit message (`Fixes EV-0001`) after user approval.
+5. **Claim it** in the commit message (`Fixes EV-0001`). Parity fix commits are
+   pre-authorized: commit each verified fix directly without asking, and never push.
 6. **Re-verify**: evaluator re-runs the finding's exact repro and updates the
    ledger to `verified-fixed` (or `regression`). No claim without a fresh repro.
 7. Repeat from §5.2 until the milestone exit criteria hold.
@@ -100,9 +101,12 @@ saying why (upstream deviation accepted, platform limitation, duplicate).
 
 ## 6. Session budget and stop conditions
 
-- Evaluate at most **2 scenarios** and complete at most **5 fix/verify
-  iterations** per session; then provide a continuation prompt so the task can be handed off in a new session and stop. Quality over throughput;
-  every claim must survive re-verification.
+- Run up to **three parallel loops** with disjoint scopes
+  (`.opencode/loops/`, `/parity-parallel`). Each loop evaluates at most
+  **3 scenarios** and completes at most **5 fix/verify iterations** per
+  session; then provide a continuation prompt so the task can be handed off in
+  a new session and stop. Quality over throughput; every claim must survive
+  re-verification.
 - Stop immediately on: MCP bridge down, missing display/Java, a corrupted
   ledger, or an evaluator/fixer deadlock (two rounds without new evidence).
 - Never leave a finding half-claimed: if the fix is unverified, say so in the
@@ -123,8 +127,8 @@ saying why (upstream deviation accepted, platform limitation, duplicate).
 | Milestone | Status | Last run | Open S1/S2 | Notes |
 |---|---|---|---|---|
 | M0 bring-up | done | 20261005-150056-boot_menu | — | First twin-run complete; 8 findings filed. |
-| M1 menu & settings | in-progress | 20261005-161109-ev0002-verify | none | `boot_menu` evaluated; EV-0001/0002/0005/0009 verified-fixed; EV-0003/0004/0006/0007/0008 open (S3/S4). `settings_ui`, `ui_dialogs` not yet run. |
-| M2 campaign & HUD | in-progress | 20261005-215133-ev0017-verify | EV-0018 | EV-0016 (launch camera snaps to core at default zoom 4) and EV-0017 (block picker renders 46px block / 50px category icon buttons) verified-fixed; EV-0010/0011/0012/0014/0015 stay verified. Open: EV-0013 (icons render; catalog still lacks unlock/empty-category filtering, S3), EV-0018 (UI clicks leak into world place/break, S2). |
+| M1 menu & settings | in-progress | 20261006-072421-ev0003-verify | none | `boot_menu` evaluated; EV-0001/0002/0003/0005/0009 verified-fixed; EV-0004/0006/0007/0008 open (S3/S4). `settings_ui`, `ui_dialogs` not yet run. |
+| M2 campaign & HUD | in-progress | 20261006-071416-ev0018-verify | none | EV-0016 (launch camera snaps to core at default zoom 4) and EV-0017 (block picker renders 46px block / 50px category icon buttons) verified-fixed; EV-0018 (UI clicks leak into world place/break, S2) verified-fixed. EV-0010/0011/0012/0014/0015 stay verified. Open: EV-0013 (icons render; catalog still lacks unlock/empty-category filtering, S3). |
 | M3 building & economy | not-started | — | — | |
 | M4 combat, units, logic | not-started | — | — | |
 | M5 breadth & platform | not-started | — | — | |
