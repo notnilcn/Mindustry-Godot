@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "updated": "2026-10-06T08:18:41+00:00",
+  "updated": "2026-10-06T08:55:56+00:00",
   "findings": [
     {
       "id": "EV-0001",
@@ -634,7 +634,7 @@
       "id": "EV-0023",
       "area": "ui/settings",
       "severity": "S2",
-      "status": "open",
+      "status": "verified-fixed",
       "title": "Controls dialog has no keybinding rows (only raw @category.* labels)",
       "expected": "Java: Settings > Controls opens the Rebind Keys dialog with per-action rows, key columns and Rebind/Reset buttons",
       "actual": "Godot: the Controls dialog renders only '@category.general' (plus 3 more raw keys off-pane) and a Back button; zero keybind rows, no Rebind/Reset controls",
@@ -642,12 +642,29 @@
       "evidence": [
         "runs/20261006-172828-settings_ui/godot/step-09-settings-controls.png",
         "runs/20261006-172828-settings_ui/godot/state-controls-stub.json",
-        "runs/20261006-172828-settings_ui/java/step-07-settings-controls.png"
+        "runs/20261006-172828-settings_ui/java/step-07-settings-controls.png",
+        "runs/20261006-084316-ev0023-verify/godot/state-ev0023-verify.json",
+        "runs/20261006-084316-ev0023-verify/godot/step-01-controls-full.png",
+        "runs/20261006-084316-ev0023-verify/godot/step-02-search-boost.png",
+        "runs/20261006-084316-ev0023-verify/godot/step-03-after-close.png",
+        "runs/20261006-084316-ev0023-verify/godot/ui_widgets_check.log",
+        "runs/20261006-084316-ev0023-verify/godot/log-errors-final.json",
+        "runs/20261006-084316-ev0023-verify/report.md",
+        "runs/20261006-085223-ev0023-verify2/godot/state-ev0023-verify2.json",
+        "runs/20261006-085223-ev0023-verify2/godot/step-01-controls-full.png",
+        "runs/20261006-085223-ev0023-verify2/godot/step-02-after-close.png",
+        "runs/20261006-085223-ev0023-verify2/godot/ui_widgets_check.log",
+        "runs/20261006-085223-ev0023-verify2/godot/log-errors-final.json",
+        "runs/20261006-085223-ev0023-verify2/report.md"
       ],
-      "notes": [],
+      "notes": [
+        "2026-10-06T08:34:07+00:00: claimed by loop-1",
+        "2026-10-06T08:51:17+00:00: [loop ?] PARTIAL at HEAD 5244904 (fix 5244904), fresh engine repro pid 1130042, 1152x648, log cleared. FIXED: Controls opens Rebind Keys (title), 88 per-registry Rebind rows + 87 per-row Reset (menu excluded) all disabled at default, Reset to Defaults present, localized 'General' category header (no raw @category.*), first-row keys match Java (Move X 'A / D', Move Y 'S / W', Follow Mouse 'Mouse Back', Pan View 'Mouse Forward', Boost 'L-Shift', Respawn 'V', Control Unit 'L-Ctrl', Select/Shoot 'Mouse Left', Deselect 'Mouse Right'); search 'move' filters 88->3 and clears back to 88; Rebind on Boost + press q -> display 'Q'/value 'q'/default false; Reset -> 'L-Shift'/'shiftLeft'/default true; close pops the MindUi stack ([settings,controls]->[settings]->[]) and releases pause. REMAINING (blocks verified-fixed): every key label renders width 1px so the key COLUMN is invisible in the dialog - samples 'A / D' (580,129,w=1,h=104), 'S / W' (580,233,w=1), 'L-Shift' (580,935,w=1,h=208), 'L-Ctrl' (580,1195,w=1), 'Mouse Left' (580,1377,w=1,h=260); step-01-controls-full.png shows names+Rebind/Reset but no key strings vs the Java reference. Same 1px-label defect family as EV-0020, and the fix's headless gate checks the label text not its rendered width. See runs/20261006-084316-ev0023-verify/report.md.",
+        "2026-10-06T08:55:56+00:00: [loop ?] Follow-up in-engine re-verification at HEAD db47ea2 (fix db47ea2, on top of 5244904; GDScript-only). Fresh play, pid 1134679, 1152x648, log cleared first; menu > Settings > Controls. Supersedes the 5244904 partial verify. Key labels now render at width 143px each (were 1px): Move X 'A / D' (580,194,w=143,text 42), Move Y 'S / W' (580,350,143/44), Follow Mouse 'Mouse Back' (580,571,143/105), Pan View 'Mouse Forward' (580,831,143/136 - fits, not clipped), Boost 'L-Shift' (580,1026,143/56), Control Unit 'L-Ctrl' (580,1468,143/47), Select/Shoot 'Mouse Left' (580,1780,143/97); filtered layouts 233-242px. Functional re-confirmed: search 'move' filters 88->3 (Boost absent), Rebind Boost + q -> display 'Q'/value 'q'/default false (rendered 'Q' 242px, Reset enabled), Reset -> 'L-Shift'/'shiftLeft'/default true, close pops [settings,controls]->[settings]->[] with has_dialog false and paused false. Headless gate exit 0 incl. 'key label renders with a real width (got 90.0)', failed=0. Only the pre-existing launchid.dat boot warning."
+      ],
       "plan": "14",
       "first_seen": "2026-10-06T07:58:09+00:00",
-      "last_verified": "2026-10-06T07:58:09+00:00"
+      "last_verified": "2026-10-06T08:55:56+00:00"
     },
     {
       "id": "EV-0024",
