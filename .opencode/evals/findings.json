@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "updated": "2026-10-06T09:42:18+00:00",
+  "updated": "2026-10-06T09:59:48+00:00",
   "findings": [
     {
       "id": "EV-0001",
@@ -83,7 +83,7 @@
       "id": "EV-0004",
       "area": "ui/menu",
       "severity": "S4",
-      "status": "open",
+      "status": "verified-fixed",
       "title": "Version label text and color differ from the reference",
       "expected": "Java: custom build (accent orange) below the logo",
       "actual": "Godot: Mindustry-Godot in white directly under the logo",
@@ -94,14 +94,18 @@
         "runs/20261005-150056-boot_menu/godot/state-01-menu.json",
         "runs/20261006-172828-settings_ui/godot/step-01-main-menu.png",
         "runs/20261006-172828-settings_ui/java/step-01-main-menu.png",
-        "runs/20261006-172828-settings_ui/diff/version-label-analysis.json"
+        "runs/20261006-172828-settings_ui/diff/version-label-analysis.json",
+        "runs/20261006-194540-ev0029-0033-verify/godot/state-ev0004-version.json",
+        "runs/20261006-194540-ev0029-0033-verify/godot/step-03-main-menu.png",
+        "runs/20261006-194540-ev0029-0033-verify/diff/step-menu.json"
       ],
       "notes": [
-        "2026-10-06T07:58:30+00:00: [loop ?] Fresh ui_dialogs/settings_ui twin run 20261006-172828 at HEAD c045080, Godot pid 1091007/1094036, 1152x648. Still reproduces: Godot version label is white 'Mindustry-Godot'; Java shows orange 'custom build'. Same-band pixel count x330-830 y110-150: Godot 531 white / 4 orange vs Java 0 white / 530 orange (diff/version-label-analysis.json)."
+        "2026-10-06T07:58:30+00:00: [loop ?] Fresh ui_dialogs/settings_ui twin run 20261006-172828 at HEAD c045080, Godot pid 1091007/1094036, 1152x648. Still reproduces: Godot version label is white 'Mindustry-Godot'; Java shows orange 'custom build'. Same-band pixel count x330-830 y110-150: Godot 531 white / 4 orange vs Java 0 white / 530 orange (diff/version-label-analysis.json).",
+        "2026-10-06T09:56:20+00:00: [loop ?] Fresh in-engine repro (HEAD b67015f = a8eb18e client tree, tools/build.sh 19:44 .so; Godot pid 1173788, 1152x648): menu Version label text 'custom build' with font_color override (0.9882,0.5059,0.251,0.6667)=#fc8140aa, rect (416,115,320,26). Band x330-830 y110-150: 0 white / 327 orange vs the broken capture's 531 white / 4 orange (Java ref 0 white / 544 orange). Residual not filed: glyph raster 110px wide vs Java 122px, text 7px lower."
       ],
       "plan": "14",
       "first_seen": "2026-10-05T05:35:07+00:00",
-      "last_verified": "2026-10-06T07:58:30+00:00"
+      "last_verified": "2026-10-06T09:56:20+00:00"
     },
     {
       "id": "EV-0005",
@@ -667,7 +671,7 @@
       "id": "EV-0022",
       "area": "ui/settings",
       "severity": "S3",
-      "status": "open",
+      "status": "verified-fixed",
       "title": "Language dialog stacks locales 400px apart, showing one language at a time",
       "expected": "Java: Language dialog shows a scrollable list with several languages visible at once",
       "actual": "Godot: the 35 locale buttons are 400x400 and stacked at 400px stride (scroll max 14000 for a 316px viewport); on open only English is visible",
@@ -675,12 +679,16 @@
       "evidence": [
         "runs/20261006-172828-settings_ui/godot/step-07-settings-language.png",
         "runs/20261006-172828-settings_ui/godot/state-language-rows.json",
-        "runs/20261006-172828-settings_ui/java/step-06-settings-language.png"
+        "runs/20261006-172828-settings_ui/java/step-06-settings-language.png",
+        "runs/20261006-194540-ev0029-0033-verify/godot/state-ev0022-language-rows.json",
+        "runs/20261006-194540-ev0029-0033-verify/godot/step-07-language.png"
       ],
-      "notes": [],
+      "notes": [
+        "2026-10-06T09:56:20+00:00: [loop ?] Fresh in-engine repro (pid 1173788): menu > Settings > Language; 35 locale buttons are all 400x50 at a 50px stride (English y=162, Belarusian 212, ...), scroll_max 1750 = 35*50 for a 316px pane, 6 languages visible at once; pre-fix was 400x400 at 400px stride / scroll_max 14000."
+      ],
       "plan": "14",
       "first_seen": "2026-10-06T07:58:08+00:00",
-      "last_verified": "2026-10-06T07:58:08+00:00"
+      "last_verified": "2026-10-06T09:56:20+00:00"
     },
     {
       "id": "EV-0023",
@@ -732,10 +740,13 @@
         "runs/20261006-172828-settings_ui/godot/state-gamedata-actions.json",
         "runs/20261006-172828-settings_ui/java/step-08-settings-data.png"
       ],
-      "notes": [],
+      "notes": [
+        "2026-10-06T09:58:29+00:00: claimed by loop-1",
+        "2026-10-06T09:59:48+00:00: released: Blocked, not abandoned: the 7 missing data actions (clear planet/campaign data, research, export/import data, crash logs) have no ported backing subsystem (campaign saves are settings markers, crash.rs has no API, data IO/research runtime unported). Exposing them would fake success. Needs the campaign/IO milestones; evaluator should mark blocked/wontfix for M1."
+      ],
       "plan": "14",
       "first_seen": "2026-10-06T07:58:09+00:00",
-      "last_verified": "2026-10-06T07:58:09+00:00"
+      "last_verified": "2026-10-06T09:59:48+00:00"
     },
     {
       "id": "EV-0025",
@@ -830,7 +841,7 @@
       "id": "EV-0029",
       "area": "ui/menu",
       "severity": "S3",
-      "status": "open",
+      "status": "verified-fixed",
       "title": "About link rows render no icon (atlas lookup instead of the icon font)",
       "expected": "Java: every About link row shows its Mindustry icon glyph (Icon.discord, Icon.list, Icon.trello, Icon.book, Icon.add, Icon.redditAlien, Icon.github, Icon.wrench) beside the title, on a colored bar with an external-link button",
       "actual": "Godot: all 8 About link buttons have icon=null (icon_w 0, icon_max_width 0). about_dialog.gd calls MindWidgets.icon_texture(name) (sprite-atlas regions) but the referenced names (discord, list, trello, book, add, redditAlien, github, wrench) are Mindustry icon-font glyph names and are absent from assets/sprites/sprites.atlas.json, so the lookup returns null and no icon renders. The colored bar and external-link button are also absent.",
@@ -838,14 +849,17 @@
       "evidence": [
         "runs/20261006-085749-ev0006-verify/godot/state-about-verify.json",
         "runs/20261006-085749-ev0006-verify/godot/step-01-about.png",
-        "runs/20261006-172828-ui_dialogs/java/step-03-about.png"
+        "runs/20261006-172828-ui_dialogs/java/step-03-about.png",
+        "runs/20261006-194540-ev0029-0033-verify/godot/state-ev0029-about-glyphs.json",
+        "runs/20261006-194540-ev0029-0033-verify/godot/step-04-about.png"
       ],
       "notes": [
-        "Split out of EV-0006 during its 38d8105 re-verification: EV-0006's titled symptom (raw title keys) is fixed, but the 'no link icons render' observation from EV-0006.actual persists and has a distinct cause. Do not re-open EV-0006 for this."
+        "Split out of EV-0006 during its 38d8105 re-verification: EV-0006's titled symptom (raw title keys) is fixed, but the 'no link icons render' observation from EV-0006.actual persists and has a distinct cause. Do not re-open EV-0006 for this.",
+        "2026-10-06T09:56:20+00:00: [loop ?] Fresh in-engine repro (pid 1173788, 1152x648): menu > Database > About with real clicks; 12/12 link rows render an icon-font glyph Label beside the title. Codepoints match MindIcons.glyph 1:1 (discord 59405, list 59409, trello 61825, book 59483, add 59411, reddit-alien 62081, itchio 59434, googleplay 59453, android 59461, github 62216, github-square 62208, wrench 59407), label widths 15-25px, dialog stack ['about']."
       ],
       "plan": "14",
       "first_seen": "2026-10-06T08:59:49+00:00",
-      "last_verified": "2026-10-06T08:59:49+00:00"
+      "last_verified": "2026-10-06T09:56:20+00:00"
     },
     {
       "id": "EV-0030",
@@ -882,7 +896,7 @@
       "id": "EV-0031",
       "area": "ui/menu",
       "severity": "S4",
-      "status": "open",
+      "status": "verified-fixed",
       "title": "Credits blurb renders a literal [sky] before the email",
       "expected": "Java: 'Created by Anuken - anukendev@gmail.com' (bundle credits.text = 'Created by [royal]Anuken[] - [sky]anukendev@gmail.com[]', both color tags applied)",
       "actual": "Godot: the blurb's parsed text is 'Created by Anuken - [sky]anukendev@gmail.com'; the [sky] color tag is not converted by render_markup (the [royal] tag converts fine), so the literal '[sky]' renders before the address",
@@ -894,16 +908,19 @@
         "runs/20261006-192439-ev0020-0030-verify/godot/step-04-credits-top-mshot.png",
         "runs/20261006-093202-ev0020-0030-verify/godot/state-ev0020-0030-verify.json",
         "runs/20261006-093202-ev0020-0030-verify/godot/step-03-credits.png",
-        "runs/20261006-093202-ev0020-0030-verify/report.md"
+        "runs/20261006-093202-ev0020-0030-verify/report.md",
+        "runs/20261006-194540-ev0029-0033-verify/godot/state-ev0031-credits-blurb.json",
+        "runs/20261006-194540-ev0029-0033-verify/godot/step-05-credits.png"
       ],
       "notes": [
         "Split out of EV-0007 during its 9ecc2de re-verification.",
         "2026-10-06T09:39:52+00:00: [loop ?] Fresh 63e1e0a re-run (pid 1157350): credits blurb still renders the literal '[sky]' tag before the email - 'Created by Anuken - [sky]anukendev@gmail.com' - in step-04-credits-top-mshot.png; status unchanged.",
-        "2026-10-06T09:42:18+00:00: [loop ?] Fresh repro at HEAD 63e1e0a, pid 1162051: the Credits blurb still renders a literal [sky] - parsed text 'Created by Anuken - [sky]anukendev@gmail.com' (raw 'Created by [color=#4040ffff]Anuken[/color] - [lb]sky]anukendev@gmail.com'; bundle is 'Created by [royal]Anuken[] - [sky]anukendev@gmail.com[]'). The wrap fix compacted the blurb to h=26 w=890 but did not convert the [sky] color tag. Still open."
+        "2026-10-06T09:42:18+00:00: [loop ?] Fresh repro at HEAD 63e1e0a, pid 1162051: the Credits blurb still renders a literal [sky] - parsed text 'Created by Anuken - [sky]anukendev@gmail.com' (raw 'Created by [color=#4040ffff]Anuken[/color] - [lb]sky]anukendev@gmail.com'; bundle is 'Created by [royal]Anuken[] - [sky]anukendev@gmail.com[]'). The wrap fix compacted the blurb to h=26 w=890 but did not convert the [sky] color tag. Still open.",
+        "2026-10-06T09:56:20+00:00: [loop ?] Fresh in-engine repro (pid 1173788): About > Credits; blurb BBCode 'Created by [color=#4040ffff]Anuken[/color] - [color=#87ceebff]anukendev@gmail.com[/color]', get_parsed_text()='Created by Anuken - anukendev@gmail.com' (no literal [sky]); centered panel (107,124,938x400), blurb 890x26."
       ],
       "plan": "14",
       "first_seen": "2026-10-06T09:10:21+00:00",
-      "last_verified": "2026-10-06T09:42:18+00:00"
+      "last_verified": "2026-10-06T09:56:20+00:00"
     },
     {
       "id": "EV-0032",
@@ -930,7 +947,7 @@
       "id": "EV-0033",
       "area": "ui/dialogs",
       "severity": "S4",
-      "status": "open",
+      "status": "verified-fixed",
       "title": "Mods dialog renders a literal [lightgray] tag in the empty-list message",
       "expected": "Java: the empty mod list shows 'No mods found!' (java/step-java-mods.png)",
       "actual": "Godot: the body label renders '[lightgray]No mods found!' with the BBCode tag visible; same markup-leak family as EV-0031",
@@ -938,12 +955,16 @@
       "evidence": [
         "runs/20261006-192439-ev0020-0030-verify/godot/step-05-mods-mshot.png",
         "runs/20261006-192439-ev0020-0030-verify/godot/state-05-mods.json",
-        "runs/20261006-192439-ev0020-0030-verify/java/step-java-mods.png"
+        "runs/20261006-192439-ev0020-0030-verify/java/step-java-mods.png",
+        "runs/20261006-194540-ev0029-0033-verify/godot/state-ev0033-mods-empty.json",
+        "runs/20261006-194540-ev0029-0033-verify/godot/step-06-mods.png"
       ],
-      "notes": [],
+      "notes": [
+        "2026-10-06T09:56:20+00:00: [loop ?] Fresh in-engine repro (pid 1173788): menu > Mods with 0 mods loaded and empty MindMods.errors(); empty-list label text '[color=#bfbfbfff]No mods found![/color]' -> parsed 'No mods found!' (no literal [lightgray]), visible at (222,364,140x26)."
+      ],
       "plan": "20",
       "first_seen": "2026-10-06T09:39:52+00:00",
-      "last_verified": "2026-10-06T09:39:52+00:00"
+      "last_verified": "2026-10-06T09:56:20+00:00"
     }
   ]
 }

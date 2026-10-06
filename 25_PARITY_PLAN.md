@@ -127,8 +127,8 @@ saying why (upstream deviation accepted, platform limitation, duplicate).
 | Milestone | Status | Last run | Open S1/S2 | Notes |
 |---|---|---|---|---|
 | M0 bring-up | done | 20261005-150056-boot_menu | — | First twin-run complete; 8 findings filed. |
-| M1 menu & settings | in-progress | 20261006-093202-ev0020-0030-verify | none | `boot_menu`, `settings_ui`, `ui_dialogs` evaluated; EV-0001/0002/0003/0005/0006/0007/0008/0009/0019/0020/0021/0023/0026/0030 verified-fixed. Open: EV-0004 (S4), EV-0022/0024/0025/0028/0029/0032 (S3), EV-0031/0033 (S4). |
-| M2 campaign & HUD | in-progress | 20261006-071416-ev0018-verify | none | EV-0016 (launch camera snaps to core at default zoom 4) and EV-0017 (block picker renders 46px block / 50px category icon buttons) verified-fixed; EV-0018 (UI clicks leak into world place/break, S2) verified-fixed. EV-0010/0011/0012/0014/0015 stay verified. Open: EV-0013 (icons render; catalog still lacks unlock/empty-category filtering, S3). |
+| M1 menu & settings | in-progress | 20261006-194540-ev0029-0033-verify | none | `boot_menu`, `settings_ui`, `ui_dialogs` evaluated; verified-fixed: EV-0001/0002/0003/0005/0006/0007/0008/0009/0019/0020/0021/0022/0023/0026/0027/0029/0030/0031/0033 (EV-0025 uiscale-at-boot and EV-0032 settings panel size are committed, verification in flight). Open: EV-0024 (blocked, not abandoned: the other 7 data actions have no ported data-IO/campaign/research/crash-log subsystem), EV-0028 (needs the content-database/unlock model behind it). |
+| M2 campaign & HUD | in-progress | 20261006-071416-ev0018-verify | none | EV-0016 (launch camera snaps to core at default zoom 4) and EV-0017 (block picker renders 46px block / 50px category icon buttons) verified-fixed; EV-0018 (UI clicks leak into world place/break, S2) verified-fixed. EV-0010/0011/0012/0014/0015 stay verified. Open: EV-0013 (needs the same unlock/catalog filtering model as EV-0024/0028). |
 | M3 building & economy | not-started | — | — | |
 | M4 combat, units, logic | not-started | — | — | |
 | M5 breadth & platform | not-started | — | — | |
