@@ -114,6 +114,11 @@ func _rebuild_detail() -> void:
 		var button := MindWidgets.button(_t(_action_label(action)))
 		button.pressed.connect(_on_action.bind(_selected, action))
 		buttons.add_child(button)
+	if bool(schematic.get("has_core", false)):
+		# Core schematics are launch loadouts: open the capacity editor too.
+		var configure := MindWidgets.button(_t("@configure"))
+		configure.pressed.connect(_open_loadout.bind(_selected))
+		buttons.add_child(configure)
 	_detail.add(buttons).pad(4)
 
 
@@ -189,6 +194,14 @@ func _edit(index: int) -> void:
 	var ui := get_node_or_null("/root/MindUi")
 	if ui != null:
 		ui.call("show_text_input", _t("@schematic.edit"), _t("@name"), 64, name, false, false)
+
+
+## Opens the capacity editor for a core schematic (launch/schematics flow).
+func _open_loadout(index: int) -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui == null:
+		return
+	ui.call("open_dialog", "loadout", JSON.stringify({"index": index}))
 
 
 ## `SchematicsDialog` icon tag picker (`IconSelectDialog`).
