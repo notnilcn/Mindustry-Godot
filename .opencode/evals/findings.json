@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "updated": "2026-10-06T07:26:24+00:00",
+  "updated": "2026-10-06T07:59:39+00:00",
   "findings": [
     {
       "id": "EV-0001",
@@ -91,12 +91,17 @@
       "evidence": [
         "runs/20261005-150056-boot_menu/godot/step-01-main-menu.png",
         "runs/20261005-150056-boot_menu/java/step-01-main-menu.png",
-        "runs/20261005-150056-boot_menu/godot/state-01-menu.json"
+        "runs/20261005-150056-boot_menu/godot/state-01-menu.json",
+        "runs/20261006-172828-settings_ui/godot/step-01-main-menu.png",
+        "runs/20261006-172828-settings_ui/java/step-01-main-menu.png",
+        "runs/20261006-172828-settings_ui/diff/version-label-analysis.json"
       ],
-      "notes": [],
+      "notes": [
+        "2026-10-06T07:58:30+00:00: [loop ?] Fresh ui_dialogs/settings_ui twin run 20261006-172828 at HEAD c045080, Godot pid 1091007/1094036, 1152x648. Still reproduces: Godot version label is white 'Mindustry-Godot'; Java shows orange 'custom build'. Same-band pixel count x330-830 y110-150: Godot 531 white / 4 orange vs Java 0 white / 530 orange (diff/version-label-analysis.json)."
+      ],
       "plan": "14",
       "first_seen": "2026-10-05T05:35:07+00:00",
-      "last_verified": "2026-10-05T05:35:07+00:00"
+      "last_verified": "2026-10-06T07:58:30+00:00"
     },
     {
       "id": "EV-0005",
@@ -135,12 +140,16 @@
       "evidence": [
         "runs/20261005-150056-boot_menu/godot/step-04-about.png",
         "runs/20261005-150056-boot_menu/godot/state-04-about.json",
-        "runs/20261005-150056-boot_menu/java/step-04-about.png"
+        "runs/20261005-150056-boot_menu/java/step-04-about.png",
+        "runs/20261006-172828-ui_dialogs/godot/step-03-about.png",
+        "runs/20261006-172828-ui_dialogs/godot/state-about.json"
       ],
-      "notes": [],
+      "notes": [
+        "2026-10-06T07:58:30+00:00: [loop ?] Fresh ui_dialogs run 20261006-172828 (Godot pid 1098928, menu > Database > About): the 8 link buttons still render raw keys link.discord.title, link.changelog.title, link.trello.title, link.wiki.title, link.suggestions.title, link.reddit.title, link.github.title, link.bug.title; descriptions resolve normally."
+      ],
       "plan": "14",
       "first_seen": "2026-10-05T05:35:17+00:00",
-      "last_verified": "2026-10-05T05:35:17+00:00"
+      "last_verified": "2026-10-06T07:58:30+00:00"
     },
     {
       "id": "EV-0007",
@@ -154,12 +163,18 @@
       "evidence": [
         "runs/20261005-150056-boot_menu/godot/step-04-about.png",
         "runs/20261005-150056-boot_menu/godot/state-04-about.json",
-        "runs/20261005-150056-boot_menu/java/step-04-about.png"
+        "runs/20261005-150056-boot_menu/java/step-04-about.png",
+        "runs/20261006-172828-ui_dialogs/godot/step-03-about.png",
+        "runs/20261006-172828-ui_dialogs/godot/state-about.json",
+        "runs/20261006-172828-ui_dialogs/java/step-03-about.png",
+        "runs/20261006-172828-ui_dialogs/java/step-04-about-scrolled.png"
       ],
-      "notes": [],
+      "notes": [
+        "2026-10-06T07:58:30+00:00: [loop ?] Fresh ui_dialogs run 20261006-172828: About still has only 8 link rows (itch.io, google-play, f-droid, dev-builds absent) and a single Back button with no Credits button (state-about.json: credits_button=false). Java capture shows 12 links plus Back+Credits."
+      ],
       "plan": "14",
       "first_seen": "2026-10-05T05:35:17+00:00",
-      "last_verified": "2026-10-05T05:35:17+00:00"
+      "last_verified": "2026-10-06T07:58:30+00:00"
     },
     {
       "id": "EV-0008",
@@ -174,12 +189,18 @@
         "runs/20261005-150056-boot_menu/godot/step-05-back-to-menu.png",
         "runs/20261005-150056-boot_menu/godot/step-03-database-submenu.png",
         "runs/20261005-150056-boot_menu/java/step-05-back-to-menu.png",
-        "runs/20261005-150056-boot_menu/godot/state-05-back-to-menu.json"
+        "runs/20261005-150056-boot_menu/godot/state-05-back-to-menu.json",
+        "runs/20261006-172828-ui_dialogs/godot/step-04-after-about.png",
+        "runs/20261006-172828-ui_dialogs/godot/step-02-database-submenu.png",
+        "runs/20261006-172828-ui_dialogs/godot/state-dialog-close-stuck.json",
+        "runs/20261006-172828-ui_dialogs/java/step-06-after-about.png"
       ],
-      "notes": [],
+      "notes": [
+        "2026-10-06T07:58:30+00:00: [loop ?] Fresh ui_dialogs run 20261006-172828 (pid 1098928): About > Back leaves submenu_visible=true and the post-close frame is byte-identical to the pre-open submenu frame (md5 1d7b965410088b8c2c1722e7ebcc725d both). Java post-About frame 20261006-172828-ui_dialogs/java/step-06-after-about.png shows the base menu with no submenu."
+      ],
       "plan": "14",
       "first_seen": "2026-10-05T05:35:17+00:00",
-      "last_verified": "2026-10-05T05:35:17+00:00"
+      "last_verified": "2026-10-06T07:58:30+00:00"
     },
     {
       "id": "EV-0009",
@@ -513,6 +534,200 @@
       "plan": "15",
       "first_seen": "2026-10-05T12:01:17+00:00",
       "last_verified": "2026-10-06T07:23:38+00:00"
+    },
+    {
+      "id": "EV-0019",
+      "area": "ui/settings",
+      "severity": "S2",
+      "status": "in-progress",
+      "title": "Settings check controls render no check indicator and only an 8px strip responds to clicks",
+      "expected": "Java: each check setting is a 45px-high row with a round check indicator; clicking anywhere on the row label toggles it",
+      "actual": "Godot: check rows render only their label (MindCheck TextureRect texture is null: atlas has check-on/check-off, code asks for checkOn/checkOff); the MindCheck button is 8px tall at 52px stride, so clicking the visible label of 'Conveyor Placement Pathfinding' (700,256) leaves conveyorpathfinding=true while clicking the 8px strip (729,239) toggles it",
+      "repro": "scenario settings_ui (Godot leg): menu > Settings (230,429), scroll the Game pane, click the 'Conveyor Placement Pathfinding' label vs its 8px strip; assert MindUi.settings_rows_json('game')",
+      "evidence": [
+        "runs/20261006-172828-settings_ui/godot/step-02f-settings-scroll400.png",
+        "runs/20261006-172828-settings_ui/godot/row-hints-8x.png",
+        "runs/20261006-172828-settings_ui/godot/state-settings-layout.json",
+        "runs/20261006-172828-settings_ui/java/step-03-settings-game.png"
+      ],
+      "notes": [
+        "2026-10-06T07:59:39+00:00: claimed by loop-1"
+      ],
+      "plan": "14",
+      "first_seen": "2026-10-06T07:58:08+00:00",
+      "last_verified": "2026-10-06T07:59:39+00:00",
+      "owner": "loop-1"
+    },
+    {
+      "id": "EV-0020",
+      "area": "ui/settings",
+      "severity": "S3",
+      "status": "open",
+      "title": "Settings slider value labels are 1px wide and invisible",
+      "expected": "Java: slider rows show the current value right-aligned (Save Interval 60 seconds, UI Scaling 100%, Music Volume 100%)",
+      "actual": "Godot: the slider value RichTextLabel has width 1.0 at x=938, so no value text is visible; only 'Save Interval' / 'Music Volume' titles render",
+      "repro": "scenario settings_ui (Godot leg): menu > Settings; inspect the value labels of the Save Interval / Music Volume rows; compare with java/step-03-settings-game.png and java/step-05-settings-sound.png",
+      "evidence": [
+        "runs/20261006-172828-settings_ui/godot/state-settings-layout.json",
+        "runs/20261006-172828-settings_ui/godot/step-03-settings-graphics.png",
+        "runs/20261006-172828-settings_ui/godot/step-04-settings-sound.png",
+        "runs/20261006-172828-settings_ui/java/step-05-settings-sound.png"
+      ],
+      "notes": [],
+      "plan": "14",
+      "first_seen": "2026-10-06T07:58:08+00:00",
+      "last_verified": "2026-10-06T07:58:08+00:00"
+    },
+    {
+      "id": "EV-0021",
+      "area": "ui/settings",
+      "severity": "S3",
+      "status": "open",
+      "title": "Settings Game table opens with every check row below the visible pane",
+      "expected": "Java at 1152x648: Game table shows Save Interval plus 8+ check rows immediately",
+      "actual": "Godot: on open only 'Save Interval' and its slider are visible; the first check sits at y=481 vs the scroll viewport bottom 478, stride 52px down to y=949; the slider header RichTextLabel is 130px tall and the Developer Options rail entry is clipped below the viewport",
+      "repro": "scenario settings_ui (Godot leg): menu > Settings (230,429); capture the Game pane before scrolling",
+      "evidence": [
+        "runs/20261006-172828-settings_ui/godot/step-02-settings-game-live.png",
+        "runs/20261006-172828-settings_ui/godot/state-settings-layout.json",
+        "runs/20261006-172828-settings_ui/java/step-03-settings-game.png"
+      ],
+      "notes": [],
+      "plan": "14",
+      "first_seen": "2026-10-06T07:58:08+00:00",
+      "last_verified": "2026-10-06T07:58:08+00:00"
+    },
+    {
+      "id": "EV-0022",
+      "area": "ui/settings",
+      "severity": "S3",
+      "status": "open",
+      "title": "Language dialog stacks locales 400px apart, showing one language at a time",
+      "expected": "Java: Language dialog shows a scrollable list with several languages visible at once",
+      "actual": "Godot: the 35 locale buttons are 400x400 and stacked at 400px stride (scroll max 14000 for a 316px viewport); on open only English is visible",
+      "repro": "scenario settings_ui (Godot leg): menu > Settings > Language (rail 431,291 with a scrolled rail); capture the dialog",
+      "evidence": [
+        "runs/20261006-172828-settings_ui/godot/step-07-settings-language.png",
+        "runs/20261006-172828-settings_ui/godot/state-language-rows.json",
+        "runs/20261006-172828-settings_ui/java/step-06-settings-language.png"
+      ],
+      "notes": [],
+      "plan": "14",
+      "first_seen": "2026-10-06T07:58:08+00:00",
+      "last_verified": "2026-10-06T07:58:08+00:00"
+    },
+    {
+      "id": "EV-0023",
+      "area": "ui/settings",
+      "severity": "S2",
+      "status": "open",
+      "title": "Controls dialog has no keybinding rows (only raw @category.* labels)",
+      "expected": "Java: Settings > Controls opens the Rebind Keys dialog with per-action rows, key columns and Rebind/Reset buttons",
+      "actual": "Godot: the Controls dialog renders only '@category.general' (plus 3 more raw keys off-pane) and a Back button; zero keybind rows, no Rebind/Reset controls",
+      "repro": "scenario settings_ui (Godot leg): menu > Settings > Controls (rail button 355,403); inspect dialog content",
+      "evidence": [
+        "runs/20261006-172828-settings_ui/godot/step-09-settings-controls.png",
+        "runs/20261006-172828-settings_ui/godot/state-controls-stub.json",
+        "runs/20261006-172828-settings_ui/java/step-07-settings-controls.png"
+      ],
+      "notes": [],
+      "plan": "14",
+      "first_seen": "2026-10-06T07:58:09+00:00",
+      "last_verified": "2026-10-06T07:58:09+00:00"
+    },
+    {
+      "id": "EV-0024",
+      "area": "ui/settings",
+      "severity": "S3",
+      "status": "open",
+      "title": "Game Data exposes 2 of the reference's 9 data actions",
+      "expected": "Java: Clear Game Data..., Clear Planet Data, Clear Saves, Clear Research, Clear Campaign Saves, Export Data, Import Data, Open Data Folder, Export Crash Logs",
+      "actual": "Godot: only Clear Saves and Open Data Folder are listed (DataActions const); the other seven actions are absent",
+      "repro": "scenario settings_ui (Godot leg): menu > Settings > Game Data; compare with java/step-08-settings-data.png",
+      "evidence": [
+        "runs/20261006-172828-settings_ui/godot/step-06-settings-data.png",
+        "runs/20261006-172828-settings_ui/godot/state-gamedata-actions.json",
+        "runs/20261006-172828-settings_ui/java/step-08-settings-data.png"
+      ],
+      "notes": [],
+      "plan": "14",
+      "first_seen": "2026-10-06T07:58:09+00:00",
+      "last_verified": "2026-10-06T07:58:09+00:00"
+    },
+    {
+      "id": "EV-0025",
+      "area": "ui/settings",
+      "severity": "S3",
+      "status": "open",
+      "title": "UI Scaling setting is stored but never applied",
+      "expected": "Java: uiscale is applied at startup (Vars.java:517 Scl.setProduct) and Control.java prompts a restart when it changes",
+      "actual": "Godot: settings store reports uiscale=200 (persisted across stop/play), content_scale_factor stays 1.0 and every control keeps its 1.0 layout; no uiscale consumer exists in client/ui or mind-gdext",
+      "repro": "scenario settings_ui (Godot leg): menu > Settings > Graphics; read settings_rows_json('graphics') uiscale and DisplayServer window content_scale_factor",
+      "evidence": [
+        "runs/20261006-172828-settings_ui/godot/state-settings-layout.json",
+        "runs/20261006-172828-settings_ui/godot/step-03-settings-graphics.png"
+      ],
+      "notes": [],
+      "plan": "14",
+      "first_seen": "2026-10-06T07:58:09+00:00",
+      "last_verified": "2026-10-06T07:58:09+00:00"
+    },
+    {
+      "id": "EV-0026",
+      "area": "ui/dialogs",
+      "severity": "S2",
+      "status": "open",
+      "title": "Closing a dialog leaves it on the MindUi stack, keeps the sim paused and its hidden controls swallow menu clicks",
+      "expected": "Java: Back closes the dialog, releases pause and the menu is immediately interactive",
+      "actual": "Godot: after Settings > Back (576,503) the menu is visible but dialog_stack=['settings'], has_dialog=true and is_paused=true; the hidden settings rail button (205,216 300x50) still has mouse capture at (230,219), so the Database menu button does nothing; likewise About > Back leaves stack=['about'] with has_dialog=true",
+      "repro": "scenario ui_dialogs (Godot leg): menu > Settings > Back; read MindUi.dialog_stack()/has_dialog() and MindSimHost.is_paused(); then click the Database menu button",
+      "evidence": [
+        "runs/20261006-172828-settings_ui/godot/step-08-settings-back-stuck.png",
+        "runs/20261006-172828-settings_ui/godot/state-dialog-close-stuck.json",
+        "runs/20261006-172828-ui_dialogs/godot/step-04-after-about.png"
+      ],
+      "notes": [],
+      "plan": "14",
+      "first_seen": "2026-10-06T07:58:16+00:00",
+      "last_verified": "2026-10-06T07:58:16+00:00"
+    },
+    {
+      "id": "EV-0027",
+      "area": "ui/dialogs",
+      "severity": "S3",
+      "status": "open",
+      "title": "Mods dialog opens with no visible controls",
+      "expected": "Java: Mods dialog shows Import Mod / Mod Browser buttons and 'No mods found!' in the window",
+      "actual": "Godot: only the title 'Mods' and Back are visible; all action buttons are laid out at y=720-760, below the 648px window (Import File, Import From GitHub, Mod Browser, Open Folder, Modding Guide, 'Errors have occurred loading mods')",
+      "repro": "scenario ui_dialogs (Godot leg): menu > Mods (230,359); capture the dialog",
+      "evidence": [
+        "runs/20261006-172828-ui_dialogs/godot/step-06-mods.png",
+        "runs/20261006-172828-ui_dialogs/godot/state-mods-offscreen.json",
+        "runs/20261006-172828-ui_dialogs/java/step-10-mods.png"
+      ],
+      "notes": [],
+      "plan": "14",
+      "first_seen": "2026-10-06T07:58:16+00:00",
+      "last_verified": "2026-10-06T07:58:16+00:00"
+    },
+    {
+      "id": "EV-0028",
+      "area": "ui/dialogs",
+      "severity": "S3",
+      "status": "open",
+      "title": "Core Database dialog lists no content and uses category tabs instead of the reference's planet tabs",
+      "expected": "Java: Core Database has all/Serpulo/Erekir tabs and an Items/Blocks content grid of locked/unlocked entries",
+      "actual": "Godot: tabs are items/blocks/units/liquids (raw ids), the content area is the placeholder '<none>', and no content entries are rendered",
+      "repro": "scenario ui_dialogs (Godot leg): menu > Database > Core Database (460,289); inspect dialog content",
+      "evidence": [
+        "runs/20261006-172828-ui_dialogs/godot/step-05-database.png",
+        "runs/20261006-172828-ui_dialogs/godot/state-database-stub.json",
+        "runs/20261006-172828-ui_dialogs/java/step-07-database.png"
+      ],
+      "notes": [],
+      "plan": "14",
+      "first_seen": "2026-10-06T07:58:16+00:00",
+      "last_verified": "2026-10-06T07:58:16+00:00"
     }
   ]
 }
