@@ -2,14 +2,16 @@
 ## Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
 ## Source: core/src/mindustry/ui/dialogs/DatabaseDialog.java (plan 14 §3.4, M3).
 ##
-## Content database: search field + content-type tabs. The content catalogue and
-## unlock filters come from plan 02; the M3 shell provides the search/tab frame
-## and opens `ContentInfoDialog` for a selected entry.
+## Content database: search field + content-type tabs. Rows come from the live
+## content snapshot (`MindSimHost.content_list`); selecting one opens
+## `ContentInfoDialog` with the content key. Unlock filtering is plan 02's.
 
 extends MindDialog
 
 ## `ContentType` tab order used by `DatabaseDialog` (`items`, `blocks`, `units`).
 const TABS := ["@items", "@blocks", "@units", "@liquids"]
+## `ContentType.name()` per tab (`ContentRegistry.entries`).
+const CONTENT_TYPES := ["item", "block", "unit", "liquid"]
 
 var _tab_list: MindTable = null
 var _tab_index := 0
@@ -65,10 +67,38 @@ func _rebuild() -> void:
 	var query := ""
 	if _search != null:
 		query = _search.text.to_lower()
-	# code-instantiated: rows come from the plan-02 content registry once exposed;
-	# M3 renders the filtered empty-state.
-	var placeholder := MindWidgets.label(_t("@none"))
-	placeholder.modulate = MindStyles.UNLAUNCHED
-	_tab_list.add(placeholder).pad(8)
-	if not query.is_empty():
-		pass
+	var names := _filtered_names(query)
+	if names.is_empty():
+		var placeholder := MindWidgets.label(_t("@none"))
+		placeholder.modulate = MindStyles.UNLAUNCHED
+		_tab_list.add(placeholder).pad(8)
+		return
+	for content_name in names:
+		# code-instantiated: content rows come from the live content snapshot.
+		var button := MindWidgets.button(content_name)
+		button.pressed.connect(_open_content.bind(content_name))
+		_tab_list.add(button).grow_x_axis().pad(2)
+		_tab_list.row()
+
+
+## Content names of the active tab, filtered by the search query.
+func _filtered_names(query: String) -> Array:
+	var names: Array = []
+	var host := get_node_or_null("/root/Spine/SimHost")
+	if host == null or not host.has_method("content_list"):
+		return names
+	var listed: Variant = host.call("content_list", CONTENT_TYPES[_tab_index])
+	if not (listed is PackedStringArray):
+		return names
+	for value in listed:
+		var name := str(value)
+		if query.is_empty() or name.to_lower().contains(query):
+			names.append(name)
+	return names
+
+
+## `ContentInfoDialog`: `ui.content.show(content)`.
+func _open_content(content_name: String) -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("open_dialog"):
+		ui.call("open_dialog", "content", JSON.stringify({"content": content_name}))
