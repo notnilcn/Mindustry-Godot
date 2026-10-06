@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "updated": "2026-10-06T08:55:56+00:00",
+  "updated": "2026-10-06T08:59:49+00:00",
   "findings": [
     {
       "id": "EV-0001",
@@ -132,7 +132,7 @@
       "id": "EV-0006",
       "area": "ui/menu",
       "severity": "S3",
-      "status": "open",
+      "status": "verified-fixed",
       "title": "About link titles render raw bundle keys",
       "expected": "Java: Discord, Changelog, Trello, Wiki, Suggestions, Reddit, Itch.io, Google play, F-Droid, Github, Dev builds, Bug",
       "actual": "Godot: link.discord.title, link.changelog.title, link.trello.title, link.wiki.title, link.suggestions.title, link.reddit.title, link.github.title, link.bug.title; descriptions resolve and no link icons render",
@@ -142,14 +142,21 @@
         "runs/20261005-150056-boot_menu/godot/state-04-about.json",
         "runs/20261005-150056-boot_menu/java/step-04-about.png",
         "runs/20261006-172828-ui_dialogs/godot/step-03-about.png",
-        "runs/20261006-172828-ui_dialogs/godot/state-about.json"
+        "runs/20261006-172828-ui_dialogs/godot/state-about.json",
+        "runs/20261006-085749-ev0006-verify/godot/state-about-verify.json",
+        "runs/20261006-085749-ev0006-verify/godot/step-01-about.png",
+        "runs/20261006-085749-ev0006-verify/godot/ui_widgets_check.log",
+        "runs/20261006-085749-ev0006-verify/godot/log-errors-final.json",
+        "runs/20261006-085749-ev0006-verify/report.md"
       ],
       "notes": [
-        "2026-10-06T07:58:30+00:00: [loop ?] Fresh ui_dialogs run 20261006-172828 (Godot pid 1098928, menu > Database > About): the 8 link buttons still render raw keys link.discord.title, link.changelog.title, link.trello.title, link.wiki.title, link.suggestions.title, link.reddit.title, link.github.title, link.bug.title; descriptions resolve normally."
+        "2026-10-06T07:58:30+00:00: [loop ?] Fresh ui_dialogs run 20261006-172828 (Godot pid 1098928, menu > Database > About): the 8 link buttons still render raw keys link.discord.title, link.changelog.title, link.trello.title, link.wiki.title, link.suggestions.title, link.reddit.title, link.github.title, link.bug.title; descriptions resolve normally.",
+        "2026-10-06T08:56:19+00:00: claimed by loop-1",
+        "2026-10-06T08:59:49+00:00: [loop ?] Fresh in-engine repro at HEAD 38d8105 (fix 38d8105), pid 1137585, 1152x648, log cleared first; menu > Database > About. All 8 link titles now render the Links.LinkEntry fallback (Strings.capitalize with '-'->' ') and no raw key remains: Discord, Changelog, Trello, Wiki, Suggestions, Reddit, Github, Bug; raw_link_key_count=0; descriptions 8/8 resolve. The Java-overlapping rows match ('Discord','Changelog','Trello','Wiki','Suggestions','Reddit','Github','Bug'); the 4 links Godot lacks (Itch.io/Google play/F droid/Dev builds) remain under EV-0007. Headless gate exit 0: 'About renders the Discord title', 'About renders the Trello title', 'About does not render raw title keys'. The 'no link icons render' observation from the original actual persists (all 8 buttons icon=null; the names are icon-font glyphs absent from the atlas) and is filed separately (not silently widened into EV-0006)."
       ],
       "plan": "14",
       "first_seen": "2026-10-05T05:35:17+00:00",
-      "last_verified": "2026-10-06T07:58:30+00:00"
+      "last_verified": "2026-10-06T08:59:49+00:00"
     },
     {
       "id": "EV-0007",
@@ -768,6 +775,27 @@
       "plan": "14",
       "first_seen": "2026-10-06T07:58:16+00:00",
       "last_verified": "2026-10-06T07:58:16+00:00"
+    },
+    {
+      "id": "EV-0029",
+      "area": "ui/menu",
+      "severity": "S3",
+      "status": "open",
+      "title": "About link rows render no icon (atlas lookup instead of the icon font)",
+      "expected": "Java: every About link row shows its Mindustry icon glyph (Icon.discord, Icon.list, Icon.trello, Icon.book, Icon.add, Icon.redditAlien, Icon.github, Icon.wrench) beside the title, on a colored bar with an external-link button",
+      "actual": "Godot: all 8 About link buttons have icon=null (icon_w 0, icon_max_width 0). about_dialog.gd calls MindWidgets.icon_texture(name) (sprite-atlas regions) but the referenced names (discord, list, trello, book, add, redditAlien, github, wrench) are Mindustry icon-font glyph names and are absent from assets/sprites/sprites.atlas.json, so the lookup returns null and no icon renders. The colored bar and external-link button are also absent.",
+      "repro": "scenario ui_dialogs (Godot leg): menu > Database > About (submenu 460,359); read button.icon / icon_max_width for the 8 link rows",
+      "evidence": [
+        "runs/20261006-085749-ev0006-verify/godot/state-about-verify.json",
+        "runs/20261006-085749-ev0006-verify/godot/step-01-about.png",
+        "runs/20261006-172828-ui_dialogs/java/step-03-about.png"
+      ],
+      "notes": [
+        "Split out of EV-0006 during its 38d8105 re-verification: EV-0006's titled symptom (raw title keys) is fixed, but the 'no link icons render' observation from EV-0006.actual persists and has a distinct cause. Do not re-open EV-0006 for this."
+      ],
+      "plan": "14",
+      "first_seen": "2026-10-06T08:59:49+00:00",
+      "last_verified": "2026-10-06T08:59:49+00:00"
     }
   ]
 }
