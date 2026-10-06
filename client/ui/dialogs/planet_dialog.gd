@@ -90,6 +90,7 @@ func _show_select() -> void:
 	set_title_text(_t("@campaign.select"))
 	_clear_root()
 	_set_planet_view_active(false)
+	refresh_campaign_views()
 
 	var choices := _campaign_planets()
 	var row := HBoxContainer.new()
@@ -222,6 +223,7 @@ func _show_planet(planet_name: String) -> void:
 	set_title_text("")
 	_clear_root()
 	_set_planet_view_active(true)
+	refresh_campaign_views(planet_name)
 
 	var view := _planet_view()
 	if view != null:
@@ -561,13 +563,13 @@ func _enter_game() -> void:
 func _open_tech_tree() -> void:
 	var ui := get_node_or_null("/root/MindUi")
 	if ui != null:
-		ui.call("open_dialog", "research", "{}")
+		ui.call("open_dialog", "research", JSON.stringify({"planet": _selected_planet}))
 
 
 func _open_campaign_rules() -> void:
 	var ui := get_node_or_null("/root/MindUi")
 	if ui != null:
-		ui.call("open_dialog", "campaign_rules", "{}")
+		ui.call("open_dialog", "campaign_rules", JSON.stringify({"planet": _selected_planet}))
 
 
 ## Closes through `MindUi` so the dialog stack and pause governor stay in sync.
