@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "updated": "2026-10-06T07:59:39+00:00",
+  "updated": "2026-10-06T08:13:04+00:00",
   "findings": [
     {
       "id": "EV-0001",
@@ -539,7 +539,7 @@
       "id": "EV-0019",
       "area": "ui/settings",
       "severity": "S2",
-      "status": "in-progress",
+      "status": "verified-fixed",
       "title": "Settings check controls render no check indicator and only an 8px strip responds to clicks",
       "expected": "Java: each check setting is a 45px-high row with a round check indicator; clicking anywhere on the row label toggles it",
       "actual": "Godot: check rows render only their label (MindCheck TextureRect texture is null: atlas has check-on/check-off, code asks for checkOn/checkOff); the MindCheck button is 8px tall at 52px stride, so clicking the visible label of 'Conveyor Placement Pathfinding' (700,256) leaves conveyorpathfinding=true while clicking the 8px strip (729,239) toggles it",
@@ -548,15 +548,29 @@
         "runs/20261006-172828-settings_ui/godot/step-02f-settings-scroll400.png",
         "runs/20261006-172828-settings_ui/godot/row-hints-8x.png",
         "runs/20261006-172828-settings_ui/godot/state-settings-layout.json",
-        "runs/20261006-172828-settings_ui/java/step-03-settings-game.png"
+        "runs/20261006-172828-settings_ui/java/step-03-settings-game.png",
+        "runs/20261006-080407-ev0019-verify/godot/state-ev0019-verify.json",
+        "runs/20261006-080407-ev0019-verify/godot/step-01-settings-game-scrolled.png",
+        "runs/20261006-080407-ev0019-verify/godot/step-02-settings-game-indicators.png",
+        "runs/20261006-080407-ev0019-verify/godot/step-03-indicators-zoom.png",
+        "runs/20261006-080407-ev0019-verify/godot/ui_widgets_check.log",
+        "runs/20261006-080407-ev0019-verify/godot/log-errors-final.json",
+        "runs/20261006-080407-ev0019-verify/report.md",
+        "runs/20261006-080951-ev0019-verify2/godot/state-ev0019-verify2.json",
+        "runs/20261006-080951-ev0019-verify2/godot/step-01-settings-game-45px.png",
+        "runs/20261006-080951-ev0019-verify2/godot/step-02-indicators-zoom.png",
+        "runs/20261006-080951-ev0019-verify2/godot/ui_widgets_check.log",
+        "runs/20261006-080951-ev0019-verify2/godot/log-errors-final.json",
+        "runs/20261006-080951-ev0019-verify2/report.md"
       ],
       "notes": [
-        "2026-10-06T07:59:39+00:00: claimed by loop-1"
+        "2026-10-06T07:59:39+00:00: claimed by loop-1",
+        "2026-10-06T08:08:35+00:00: [loop ?] Fresh in-engine repro at fixed HEAD 06c8f97 (fix 985c88e; clean tree, GDScript-only change), Godot 4.7.2, 1152x648, pid 1105416 plus persistence pass pid 1106763, log cleared first. Game > Settings (230,429), Game pane scrolled to 300. Check button rect is now 420x52 filling the padded 45px cell (was 420x8 at y=481 stride 52); indicator TextureRect is a 32x32 AtlasTexture (was null) and regions map exactly to sprites.atlas.json page 3: check-off (1519,477) unchecked, check-on (1553,477) checked, check-over (1315,445) unchecked+hover, check-on-over (1383,447) checked+hover. Click on the Conveyor Placement Pathfinding label center (701,368) flipped settings_rows_json('game').conveyorpathfinding false->true (button_pressed true, indicator check-on-over while hovered, check-on after pointer-out); a row-internal click at (900,368) flipped it back true->false; the old 8px strip band at (600,345) now toggles like any row click (false->true). Value true persisted across stop/play (new pid 1106763 read true); restored to false with a label click. Fix headless gate tools/ui_widgets_check.gd exit 0 (all regions resolve, min height 32, checked->check-on, unchecked->check-off, failed=0). Log errors only the pre-existing launchid.dat/menu-background boot warnings.",
+        "2026-10-06T08:13:04+00:00: [loop ?] Follow-up in-engine re-verification at HEAD 2547f91 (fix 2547f91 'keep settings check rows at the 45px cell height'; supersedes the 06c8f97 verify that accepted h=52/pitch ~59.7). Fresh play of res://scenes/game.tscn, pid 1108474 + persistence pass pid 1109445, 1152x648, log cleared first; Game > Settings, pane scrolled to 300. Check button is now 420x45 at y=463/515/567/619, pitch exactly 52 (upstream .height(45f).padTop(7f)); was 420x52 at ~59.7 pitch. Indicator stays a 32x32 AtlasTexture with the same region map (check-off 1519,477 / check-on 1553,477 / check-over 1315,445 / check-on-over 1383,447; hover swap re-confirmed). Label-center click (701,341) flipped settings_rows_json('game').conveyorpathfinding false->true; row-interior click (900,341) flipped it true->false; value true persisted across stop/play (pid 1109445 read true) and was restored to false with a label click. tools/ui_widgets_check.gd exit 0 including the new 'settings check cell keeps the 45px row (got 45.0)' assertion. Log errors only pre-existing boot warnings."
       ],
       "plan": "14",
       "first_seen": "2026-10-06T07:58:08+00:00",
-      "last_verified": "2026-10-06T07:59:39+00:00",
-      "owner": "loop-1"
+      "last_verified": "2026-10-06T08:13:04+00:00"
     },
     {
       "id": "EV-0020",

@@ -127,7 +127,7 @@ saying why (upstream deviation accepted, platform limitation, duplicate).
 | Milestone | Status | Last run | Open S1/S2 | Notes |
 |---|---|---|---|---|
 | M0 bring-up | done | 20261005-150056-boot_menu | — | First twin-run complete; 8 findings filed. |
-| M1 menu & settings | in-progress | 20261006-072421-ev0003-verify | none | `boot_menu` evaluated; EV-0001/0002/0003/0005/0009 verified-fixed; EV-0004/0006/0007/0008 open (S3/S4). `settings_ui`, `ui_dialogs` not yet run. |
+| M1 menu & settings | in-progress | 20261006-080951-ev0019-verify2 | EV-0023, EV-0026 | `boot_menu`, `settings_ui`, `ui_dialogs` evaluated; EV-0001/0002/0003/0005/0009/0019 verified-fixed. Open: EV-0004 (S4), EV-0006/0007/0008 (About, S3), EV-0020/0021/0022/0024/0025/0027/0028 (settings/dialog layout, S3), EV-0023 (Controls keybindings, S2), EV-0026 (dialog close keeps stack/pause, S2). |
 | M2 campaign & HUD | in-progress | 20261006-071416-ev0018-verify | none | EV-0016 (launch camera snaps to core at default zoom 4) and EV-0017 (block picker renders 46px block / 50px category icon buttons) verified-fixed; EV-0018 (UI clicks leak into world place/break, S2) verified-fixed. EV-0010/0011/0012/0014/0015 stay verified. Open: EV-0013 (icons render; catalog still lacks unlock/empty-category filtering, S3). |
 | M3 building & economy | not-started | — | — | |
 | M4 combat, units, logic | not-started | — | — | |
