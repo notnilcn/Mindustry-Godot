@@ -58,15 +58,16 @@ func _table_add(node: Control) -> void:
 func _rebuild_roots() -> void:
 	_roots.clear_children()
 	var nodes := campaign_section("research")
-	var seen := {}
+	var roots: Array[String] = []
 	for node_variant in nodes:
-		var node: Dictionary = node_variant
-		var root := str(node.get("root", ""))
-		if root.is_empty() or seen.has(root):
-			continue
-		seen[root] = true
-		if _root_name.is_empty() or not seen.has(_root_name):
-			_root_name = root
+		var root := str((node_variant as Dictionary).get("root", ""))
+		if not root.is_empty() and not roots.has(root):
+			roots.append(root)
+	if roots.is_empty():
+		return
+	if not roots.has(_root_name):
+		_root_name = roots[0]
+	for root in roots:
 		# code-instantiated: root entries are the data-driven TechNode roots.
 		var button := MindWidgets.button(_t("techtree.%s" % root))
 		button.toggle_mode = true

@@ -278,6 +278,18 @@ func show_toast(text: String) -> void:
 		ui.call("show_info", text)
 
 
+## `UI.formatTime`-style playtime (h/m/s) for millisecond values.
+func format_time_ms(milliseconds: int) -> String:
+	var seconds := int(milliseconds / 1000.0)
+	var hours := seconds / 3600
+	var minutes := (seconds % 3600) / 60
+	if hours > 0:
+		return "%dh %dm" % [hours, minutes]
+	if minutes > 0:
+		return "%dm %ds" % [minutes, seconds % 60]
+	return "%ds" % seconds
+
+
 ## Live campaign read models from `MindCampaign.campaign_views_json` (WS2
 ## contract); `{}` when the facade or endpoint is absent.
 func _live_campaign_views(planet: String) -> Dictionary:
