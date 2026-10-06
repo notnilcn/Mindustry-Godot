@@ -406,6 +406,13 @@ pub fn build_sim_schedule() -> Schedule {
     // Plan 07: building runtime. No-op unless a `world::block::BlockTable`
     // resource is present, so the P0 `Sim` checksum/golden is unchanged.
     schedule.add_systems(crate::world::update::update_buildings.in_set(EntitySet::UpdateBuildings));
+    // live runtime wiring (WS1: sim-runtime) — additive only; these systems are
+    // no-ops unless the opt-in `Sim` runtime installed its resources
+    // (`BlockTable`/`PowerGrids`), so P0 scenario sims and goldens stay
+    // byte-identical. Never reorder the sets above.
+    schedule
+        .add_systems(crate::world::update::update_power_graphs.in_set(EntitySet::UpdatePowerGraph));
+    // end live runtime wiring
     schedule
 }
 

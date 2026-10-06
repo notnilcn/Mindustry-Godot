@@ -571,3 +571,343 @@ fn sim_command_unit_state_is_deterministic() {
         second.unit_command_checksum()
     );
 }
+
+#[test]
+fn block_runtime_provisions_and_ticks_placed_buildings() {
+    use crate::ecs::BuildingComp;
+    use crate::entities::comp::{Building, Health};
+    use crate::world::block::BlockTable;
+    use crate::world::update::BuildClock;
+
+    let mut sim = Sim::new(7, 16, 16, BlockId::AIR, BlockId::AIR);
+    assert!(!sim.has_block_runtime());
+    sim.install_block_runtime().expect("runtime installs");
+    assert!(sim.has_block_runtime());
+    assert!(sim.ecs.0.contains_resource::<BlockTable>());
+    assert!(
+        sim.ecs
+            .0
+            .contains_resource::<crate::world::blocks::power::PowerGrids>()
+    );
+
+    let wall = sim.content().id("copper-wall").expect("copper-wall");
+    sim.apply(Command::Place {
+        x: 4,
+        y: 4,
+        block: wall,
+    })
+    .expect("place");
+    let entity = sim
+        .grid
+        .entity_at(TilePos::new(4, 4))
+        .expect("runtime entity");
+    assert!(sim.ecs.0.get::<Building>(entity).is_some());
+    assert!(sim.ecs.0.get::<BuildingComp>(entity).is_some());
+    assert!(sim.ecs.0.get::<Health>(entity).is_some());
+
+    let before = sim.ecs.0.get_resource::<BuildClock>().expect("clock").time;
+    for _ in 0..3 {
+        sim.tick().expect("tick");
+    }
+    let after = sim.ecs.0.get_resource::<BuildClock>().expect("clock").time;
+    assert!(after > before, "UpdateBuildings ran ({before} -> {after})");
+
+    // `Command::Break` goes through the runtime tile ops and clears entity.
+    sim.apply(Command::Break { x: 4, y: 4 }).expect("break");
+    assert_eq!(sim.block_at(TilePos::new(4, 4)), Some(BlockId::AIR));
+    assert!(sim.ecs.0.get_entity(entity).is_err());
+}
+
+#[test]
+fn block_runtime_is_deterministic() {
+    fn run() -> u64 {
+        let mut sim = Sim::new(7, 32, 32, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("install");
+        let wall = sim.content().id("copper-wall").expect("wall");
+        let conveyor = sim
+            .block_runtime()
+            .expect("runtime")
+            .content()
+            .block_id("conveyor")
+            .expect("conveyor");
+        for (x, y) in [(2, 2), (3, 2), (4, 4)] {
+            sim.apply(Command::Place { x, y, block: wall })
+                .expect("place wall");
+        }
+        sim.command(crate::determinism::SimCommand::Place {
+            x: 6,
+            y: 6,
+            block: conveyor.raw(),
+            rotation: 1,
+            team: 0,
+            player: None,
+        })
+        .expect("place conveyor");
+        for _ in 0..10 {
+            sim.tick().expect("tick");
+        }
+        sim.runtime_checksum().value()
+    }
+    assert_eq!(run(), run());
+}
+
+#[test]
+fn block_runtime_honors_place_rotation_end_to_end() {
+    use crate::determinism::SimCommand;
+    use crate::entities::comp::Building;
+
+    let mut sim = Sim::new(1, 16, 16, BlockId::AIR, BlockId::AIR);
+    sim.install_block_runtime().expect("install");
+    let conveyor = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .block_id("conveyor")
+        .expect("conveyor");
+    sim.command(SimCommand::Place {
+        x: 3,
+        y: 3,
+        block: conveyor.raw(),
+        rotation: 1,
+        team: 0,
+        player: None,
+    })
+    .expect("rotated place");
+    let entity = sim.grid.entity_at(TilePos::new(3, 3)).expect("building");
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<Building>(entity)
+            .expect("runtime building")
+            .rotation,
+        1
+    );
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<crate::ecs::BuildingComp>(entity)
+            .expect("p0 comp")
+            .rot,
+        1
+    );
+
+    // A rotated `Place` is not representable as a P0 command: it must not be
+    // silently dropped by `to_p0`.
+    let rotated = SimCommand::Place {
+        x: 3,
+        y: 3,
+        block: conveyor.raw(),
+        rotation: 2,
+        team: 0,
+        player: None,
+    };
+    assert!(rotated.to_p0().is_none());
+    assert!(
+        SimCommand::Place {
+            x: 3,
+            y: 3,
+            block: conveyor.raw(),
+            rotation: 0,
+            team: 0,
+            player: None,
+        }
+        .to_p0()
+        .is_some()
+    );
+}
+
+#[test]
+fn block_runtime_configure_applies_to_building() {
+    use crate::determinism::{ConfigValue as Wire, SimCommand};
+    use crate::world::config::{ConfigValue, read_config};
+
+    let mut sim = Sim::new(1, 16, 16, BlockId::AIR, BlockId::AIR);
+    sim.install_block_runtime().expect("install");
+    let sorter = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .block_id("sorter")
+        .expect("sorter");
+    sim.apply(Command::Place {
+        x: 3,
+        y: 3,
+        block: BlockId::new(sorter.raw()),
+    })
+    .expect("place sorter");
+
+    sim.command(SimCommand::Configure {
+        x: 3,
+        y: 3,
+        value: Wire::Content(String::from("copper")),
+    })
+    .expect("configure sorter");
+    let entity = sim.grid.entity_at(TilePos::new(3, 3)).expect("building");
+    let copper = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .item_by_name("copper")
+        .expect("copper")
+        .id;
+    assert_eq!(read_config(&sim.ecs.0, entity), ConfigValue::Item(copper));
+
+    // Unknown content and empty tiles are structured errors.
+    assert_eq!(
+        sim.command(SimCommand::Configure {
+            x: 3,
+            y: 3,
+            value: Wire::Content(String::from("not-a-content")),
+        })
+        .unwrap_err(),
+        crate::determinism::CommandError::UnknownContent(u16::MAX)
+    );
+    assert_eq!(
+        sim.command(SimCommand::Configure {
+            x: 9,
+            y: 9,
+            value: Wire::Bool(true),
+        })
+        .unwrap_err(),
+        crate::determinism::CommandError::InvalidTarget
+    );
+}
+
+#[test]
+fn block_runtime_power_graph_updates_in_schedule() {
+    use crate::world::blocks::power::{PowerGrids, PowerNodeInfo, PowerProduction};
+    use crate::world::modules::PowerModule;
+
+    let mut sim = Sim::new(3, 16, 16, BlockId::AIR, BlockId::AIR);
+    sim.install_block_runtime().expect("install");
+    let node = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .block_id("power-node")
+        .expect("power-node");
+    sim.apply(Command::Place {
+        x: 4,
+        y: 4,
+        block: BlockId::new(node.raw()),
+    })
+    .expect("place a");
+    sim.apply(Command::Place {
+        x: 5,
+        y: 4,
+        block: BlockId::new(node.raw()),
+    })
+    .expect("place b");
+    let a = sim.grid.entity_at(TilePos::new(4, 4)).expect("a");
+    let b = sim.grid.entity_at(TilePos::new(5, 4)).expect("b");
+    sim.ecs.0.entity_mut(a).insert(PowerNodeInfo::producer());
+    sim.ecs.0.entity_mut(a).insert(PowerProduction(1.0));
+    sim.ecs
+        .0
+        .entity_mut(b)
+        .insert(PowerNodeInfo::consumer(100.0));
+    sim.rebuild_power_graphs();
+    {
+        let graphs = sim.ecs.0.get_resource::<PowerGrids>().expect("power arena");
+        assert_eq!(graphs.graph_count(), 1, "adjacent nodes share one graph");
+    }
+
+    let status = |sim: &Sim| sim.ecs.0.get::<PowerModule>(b).expect("module").status;
+    assert_eq!(status(&sim), 0.0);
+    sim.tick().expect("tick");
+    let after = status(&sim);
+    assert!(
+        after > 0.0 && after < 1.0,
+        "UpdatePowerGraph ran: status={after}"
+    );
+}
+
+#[test]
+fn block_runtime_replaces_compatible_occupied_tile() {
+    let mut sim = Sim::new(1, 16, 16, BlockId::AIR, BlockId::AIR);
+    sim.install_block_runtime().expect("install");
+    let wall = sim.content().id("copper-wall").expect("copper-wall");
+    let upgraded = sim.content().id("titanium-wall").expect("titanium-wall");
+    sim.apply(Command::Place {
+        x: 2,
+        y: 2,
+        block: wall,
+    })
+    .expect("place");
+    sim.apply(Command::Place {
+        x: 2,
+        y: 2,
+        block: upgraded,
+    })
+    .expect("replace");
+    assert_eq!(sim.block_at(TilePos::new(2, 2)), Some(upgraded));
+    let entity = sim.grid.entity_at(TilePos::new(2, 2)).expect("entity");
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<crate::entities::comp::Building>(entity)
+            .expect("runtime building")
+            .block,
+        upgraded
+    );
+    let runtime = sim.block_runtime().expect("runtime");
+    assert_eq!(runtime.counter().count(0, wall), 0);
+    assert_eq!(runtime.counter().count(0, upgraded), 1);
+}
+
+#[test]
+fn block_runtime_placement_gate_rejects_locked_and_special_visibility() {
+    let mut sim = Sim::new(1, 16, 16, BlockId::AIR, BlockId::AIR);
+    sim.install_block_runtime_with(SimRuntimeConfig {
+        placement_gate: true,
+        campaign: true,
+    })
+    .expect("install");
+    let source = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .block_id("power-source")
+        .expect("power-source");
+    let shown = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .block_id("canvas")
+        .expect("shown block");
+
+    // Sandbox-only content is gated even in a campaign.
+    sim.apply(Command::Place {
+        x: 2,
+        y: 2,
+        block: BlockId::new(source.raw()),
+    })
+    .expect("rejected no-op");
+    assert_eq!(sim.block_at(TilePos::new(2, 2)), Some(BlockId::AIR));
+
+    // A shown but locked block is gated until unlocked.
+    sim.apply(Command::Place {
+        x: 3,
+        y: 3,
+        block: BlockId::new(shown.raw()),
+    })
+    .expect("locked no-op");
+    assert_eq!(sim.block_at(TilePos::new(3, 3)), Some(BlockId::AIR));
+    sim.block_runtime_mut()
+        .expect("runtime")
+        .content_mut()
+        .block_mut(shown)
+        .expect("shown def")
+        .unlock
+        .unlocked = true;
+    sim.apply(Command::Place {
+        x: 3,
+        y: 3,
+        block: BlockId::new(shown.raw()),
+    })
+    .expect("unlocked place");
+    assert_eq!(
+        sim.block_at(TilePos::new(3, 3)),
+        Some(BlockId::new(shown.raw()))
+    );
+}

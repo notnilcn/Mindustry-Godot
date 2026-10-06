@@ -227,13 +227,28 @@ impl SimCommand {
     }
 
     /// Converts back to the P0 subset when representable.
+    ///
+    /// `Place.rotation` has no P0 `Command` field: a rotated place is *not*
+    /// representable, so it returns `None` rather than silently dropping the
+    /// rotation (the live block runtime handles it, `Sim::command`).
     pub fn to_p0(&self) -> Option<P0Command> {
         match self {
-            SimCommand::Place { x, y, block, .. } => Some(P0Command::Place {
-                x: *x,
-                y: *y,
-                block: BlockId::new(*block),
-            }),
+            SimCommand::Place {
+                x,
+                y,
+                block,
+                rotation,
+                ..
+            } => {
+                if *rotation != 0 {
+                    return None;
+                }
+                Some(P0Command::Place {
+                    x: *x,
+                    y: *y,
+                    block: BlockId::new(*block),
+                })
+            }
             SimCommand::Break { x, y, .. } => Some(P0Command::Break { x: *x, y: *y }),
             _ => None,
         }
