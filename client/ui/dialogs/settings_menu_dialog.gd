@@ -24,6 +24,8 @@ var _table_host: MindTable = null
 var _categories: Array = []
 var _selected := ""
 var _pending_action := ""
+## Scale the Settings dialog was built with (`SettingsMenuDialog.lastUiScale`).
+var _uiscale_start := -1
 
 
 func _ready() -> void:
@@ -148,6 +150,8 @@ func _add_row(row: Dictionary) -> void:
 
 func _add_slider_row(row: Dictionary, key: String, title: String) -> void:
 	var value := int(row.get("value", 0))
+	if key == "uiscale" and _uiscale_start < 0:
+		_uiscale_start = value
 	var slider := MindWidgets.slider(
 		float(row.get("min", 0)), float(row.get("max", 100)), float(row.get("step", 1))
 	)
@@ -171,6 +175,12 @@ func _add_slider_row(row: Dictionary, key: String, title: String) -> void:
 			var number := int(new_value)
 			value_label.text = _format_value(row, number)
 			_set_value(key, number)
+			# `SettingsMenuDialog.java:432`: flag the change so the next boot
+			# confirms the scale (`Control.java` prompt).
+			if key == "uiscale" and _uiscale_start >= 0:
+				var ui := _ui()
+				if ui != null:
+					ui.call("set_uiscale_changed", number != _uiscale_start)
 	)
 	_table_host.add(header).grow_x_axis().set_pad_top(4.0)
 	_table_host.row()

@@ -22,8 +22,14 @@ const DIALOGS_MANIFEST := "res://ui/dialogs_manifest.json"
 ## Theme build time in milliseconds (plan 14 §7d budget probe).
 var theme_build_ms := 0
 
+## `Control.java:640` UI-scale confirmation countdown (`60 * 11` frames).
+const UISCALE_REVERT_SECONDS := 11
+
 var _dialogs: Dictionary = {}
 var _theme_applied := false
+var _uiscale_prompt: Dictionary = {}
+var _uiscale_countdown := 0.0
+var _uiscale_shown_seconds := -1
 
 
 func _enter_tree() -> void:
@@ -39,6 +45,54 @@ func _ready() -> void:
 	_connect_prompts()
 	_apply_ui_scale()
 	_boot()
+	_check_uiscale_changed()
+
+
+## `Control.java:640` boot confirmation for a changed UI scale: the prompt
+## counts down, `OK` keeps the new scale and `@uiscale.cancel` reverts to 100%
+## and exits.
+func _check_uiscale_changed() -> void:
+	var ui := _ui()
+	if ui == null or not ui.has_method("uiscale_changed"):
+		return
+	if not bool(ui.call("uiscale_changed")):
+		return
+	_uiscale_countdown = UISCALE_REVERT_SECONDS
+	_uiscale_prompt = _build_prompt(
+		"", MindWidgets.markup_format("@uiscale.reset", [UISCALE_REVERT_SECONDS]), false
+	)
+	_add_prompt_button(_uiscale_prompt.buttons, MindWidgets.markup("@ok"), func() -> void:
+		_finish_uiscale(true))
+	_add_prompt_button(_uiscale_prompt.buttons, MindWidgets.markup("@uiscale.cancel"), func() -> void:
+		_finish_uiscale(false))
+	set_process(true)
+
+
+func _process(delta: float) -> void:
+	if _uiscale_prompt.is_empty():
+		return
+	_uiscale_countdown -= delta
+	var seconds := maxi(0, int(ceil(_uiscale_countdown)))
+	if seconds != _uiscale_shown_seconds:
+		_uiscale_shown_seconds = seconds
+		_uiscale_prompt.body.text = MindWidgets.markup_format("@uiscale.reset", [seconds])
+	if _uiscale_countdown <= 0.0:
+		_finish_uiscale(false)
+
+
+func _finish_uiscale(keep: bool) -> void:
+	if _uiscale_prompt.is_empty():
+		return
+	_uiscale_prompt.root.queue_free()
+	_uiscale_prompt = {}
+	set_process(false)
+	var ui := _ui()
+	if ui == null:
+		return
+	ui.call("set_uiscale_changed", false)
+	if not keep:
+		ui.call("settings_set", "uiscale", 100)
+		get_tree().quit()
 
 
 ## `Vars.java:517 Scl.setProduct`: the persisted `uiscale` percent scales the
@@ -287,7 +341,7 @@ func _build_prompt(title_text: String, message: String, with_field: bool) -> Dic
 	var buttons := HBoxContainer.new()
 	buttons.alignment = BoxContainer.ALIGNMENT_CENTER
 	layout.add_child(buttons)
-	return {"root": root, "field": field, "buttons": buttons}
+	return {"root": root, "field": field, "buttons": buttons, "body": body}
 
 
 func _add_prompt_button(container: Container, text: String, callback: Callable) -> Button:

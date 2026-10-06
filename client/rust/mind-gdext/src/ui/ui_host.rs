@@ -609,6 +609,21 @@ impl MindUi {
         true
     }
 
+    /// `Control.java:640` `uiscalechanged`: whether the UI scale was changed
+    /// since the last confirmed boot.
+    #[func]
+    pub fn uiscale_changed(&self) -> bool {
+        self.settings.get_bool("uiscalechanged", false)
+    }
+
+    /// Sets the `uiscalechanged` boot-confirmation flag (`Control.java`).
+    #[func]
+    pub fn set_uiscale_changed(&mut self, changed: bool) -> bool {
+        self.settings.put_bool("uiscalechanged", changed);
+        self.persist_settings();
+        true
+    }
+
     /// Runs a data-category action (`clear-saves`, `open-folder`).
     ///
     /// Actions whose backing subsystem is not ported are not exposed by the
