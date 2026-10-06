@@ -825,7 +825,7 @@ impl MindInput {
     #[func]
     pub fn set_catalog_category(&mut self, index: i64) {
         self.bridge.catalog_category = index.max(0) as usize;
-        let _ = self.bridge.select_catalog_block(0);
+        self.bridge.select_catalog_block(0);
     }
 
     /// Submits a building config (`tileConfig`) through the sim command queue.
