@@ -109,7 +109,16 @@ impl INode for MindInput {
     fn input(&mut self, event: Gd<godot::classes::InputEvent>) {
         let mut translated = Vec::new();
         events::translate(&event, &mut translated);
-        self.bridge.text_focus = self.text_field_focused();
+        // Dialog/field state is only read for key/button/scroll edges (mouse
+        // motion is high-frequency and cannot change it).
+        let needs_state = translated
+            .iter()
+            .any(|raw| !matches!(raw, RawEvent::MouseMove { .. }));
+        let dialog_open = needs_state && self.dialog_open();
+        if needs_state {
+            self.bridge.text_focus = self.text_field_focused();
+            self.bridge.ui_dialog = dialog_open;
+        }
         for raw in translated {
             // Touch gestures drive the mobile bridge directly (plan-14 mobile
             // HUD is out of scope; pan/zoom already work without it).
@@ -134,6 +143,12 @@ impl INode for MindInput {
                 if self.ui_captures_at(*x, *y) {
                     continue;
                 }
+                // Behind an open dialog no world click may land, but the click
+                // must not reach `MindSimHost::unhandled_input` either.
+                if dialog_open {
+                    self.mark_input_handled();
+                    continue;
+                }
             }
             self.bridge.handle(&self.bindings, raw);
             if is_press {
@@ -149,6 +164,7 @@ impl INode for MindInput {
         let pending = std::mem::take(&mut self.pending);
         self.last_event_count = pending.len();
         self.bridge.text_focus = self.text_field_focused();
+        self.bridge.ui_dialog = self.dialog_open();
         for event in pending {
             self.bridge.handle(&self.bindings, event);
         }
@@ -289,6 +305,21 @@ impl MindInput {
             return false;
         };
         control.is_class("LineEdit") || control.is_class("TextEdit")
+    }
+
+    /// Whether any dialog is open (`scene.hasDialog()`): gameplay binds and
+    /// camera pan/zoom are gated off.
+    fn dialog_open(&self) -> bool {
+        let Some(mut ui) = self.base().try_get_node_as::<Node>("/root/MindUi") else {
+            return false;
+        };
+        if !ui.has_method("dialog_stack") {
+            return false;
+        }
+        ui.call("dialog_stack", &[])
+            .try_to::<PackedStringArray>()
+            .map(|stack| !stack.is_empty())
+            .unwrap_or(false)
     }
 
     /// Folds a Godot touch event into the mobile gesture bridge and applies the

@@ -210,6 +210,9 @@ pub struct DesktopBridge {
     /// A LineEdit/TextEdit owns keyboard focus (`scene.hasField()`): key edges
     /// update held state but fire no bindings and the camera does not pan.
     pub text_focus: bool,
+    /// A dialog is open (`scene.hasDialog()`): key edges fire no bindings and
+    /// the camera does not pan/zoom.
+    pub ui_dialog: bool,
 }
 
 impl Default for DesktopBridge {
@@ -239,6 +242,7 @@ impl DesktopBridge {
             last_tap_ms: 0,
             last_tap_type: None,
             text_focus: false,
+            ui_dialog: false,
         }
     }
 
@@ -346,7 +350,7 @@ impl DesktopBridge {
 
     /// X/Y pan axis from the `move_x`/`move_y` bindings.
     pub fn pan_axis(&self, bindings: &BindingState) -> (f32, f32) {
-        if self.text_focus {
+        if self.text_focus || self.ui_dialog {
             return (0.0, 0.0);
         }
         (
@@ -360,13 +364,13 @@ impl DesktopBridge {
         match event {
             RawEvent::KeyDown { code } => {
                 let fresh = self.pressed.insert(code.clone());
-                if fresh && !self.text_focus {
+                if fresh && !self.text_focus && !self.ui_dialog {
                     self.key_down_event(bindings, &code);
                 }
             }
             RawEvent::KeyUp { code } => {
                 self.pressed.remove(&code);
-                if !self.text_focus {
+                if !self.text_focus && !self.ui_dialog {
                     self.key_up_event(bindings, &code);
                 }
             }
@@ -1204,7 +1208,7 @@ impl DesktopBridge {
     /// `update()` scroll gating: rotate the placement, else zoom the camera.
     /// Honours the `rotate`/`zoom` bindings (both default to `scroll`).
     fn scroll(&mut self, bindings: &BindingState, delta: f32) {
-        if delta == 0.0 {
+        if delta == 0.0 || self.ui_dialog {
             return;
         }
         let rotate_on_scroll = Self::axis_is_scroll(bindings, ids::ROTATE);
