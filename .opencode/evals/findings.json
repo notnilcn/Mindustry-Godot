@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "updated": "2026-10-07T02:57:00+00:00",
+  "updated": "2026-10-07T08:18:59+00:00",
   "findings": [
     {
       "id": "EV-0001",
@@ -378,7 +378,7 @@
       "id": "EV-0013",
       "area": "ui/hud",
       "severity": "S3",
-      "status": "in-progress",
+      "status": "needs-evaluation",
       "title": "In-game block picker is a text list without block or category icons",
       "expected": "Java: in-game block picker at bottom-right shows unlocked blocks as 46px icon buttons and categories as 50px icon buttons (ui.getIcon(cat.name())); locked/empty categories hidden",
       "actual": "Godot: placement panel is a 976px-wide text UI at x=354 (clipped past the 1152px viewport) with Search + category text row (Turret..Logic) + 28 icon-less text block Buttons (Duo, Scatter, ...); all category names shown",
@@ -404,12 +404,14 @@
         "2026-10-05T12:01:13+00:00: 2026-10-05T22:0x: Re-ran campaign_launch step 4 with EV-0017 fix in place (pid 517487, 1152x648). Icon symptom now VERIFIED in-engine: Panel/Layout/Scroll/Blocks renders 28/28 turret block Buttons, all 46x46 with non-null icons (duo 32x32, scatter 64x64); defense category 30/30 icon buttons; category rail 10/10 are 50x50 glyph toggles (non-empty MindIcons codepoints); panel 640x260 bottom-right with ScrollContainer, no clipping; distribution category 191/214 have icons. REMAINING mismatch (why this stays open): catalog is still unfiltered - MindUi.block_catalog_json returns 10 categories / 447 blocks with only {name, localized, size} per entry, no unlock/visible/placeable fields; all 10 categories render at Ground Zero where the Java reference shows no picker (PlacementFragment.getUnlockedByCategory filters visible+unlocked+placeable+environmentBuildable and hides empty categories). distribution is a 214-block catch-all of terrain/editor-only rows; its 23 text-fallback blocks (air, build1..16, armored-conveyor, legacy factories, command-center) stretch GridContainer columns so real blocks render far wider than 46px (e.g. block-conveyor actual width 208 while custom_minimum_size is 46x46). Expected text includes 'locked/empty categories hidden', which is not met; cannot mark verified-fixed.",
         "2026-10-06T10:02:58+00:00: claimed by loop-1",
         "2026-10-06T10:03:46+00:00: released: Claim released without a fix: the shared display/bridge was continuously occupied by another session's live game client (pid 1183572, and earlier 1182113), so the evaluator could not run the required fresh twin-run for the picker at Ground Zero. No code changed. Re-claim when the display is exclusive.",
-        "2026-10-06T10:34:10+00:00: claimed by loop-1"
+        "2026-10-06T10:34:10+00:00: claimed by loop-1",
+        "2026-10-07T04:42:54+00:00: migrated status in-progress -> needs-evaluation",
+        "2026-10-07T04:42:54+00:00: reaped stale claim (loop-1, was needs-evaluation); restored needs-evaluation",
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/campaign-ui b390354: unlock-filtered block catalog closes the filtering residual."
       ],
       "plan": "14",
       "first_seen": "2026-10-05T07:18:31+00:00",
-      "last_verified": "2026-10-06T10:34:10+00:00",
-      "owner": "loop-1"
+      "last_verified": "2026-10-06T10:34:10+00:00"
     },
     {
       "id": "EV-0014",
@@ -857,7 +859,7 @@
       "id": "EV-0028",
       "area": "ui/dialogs",
       "severity": "S3",
-      "status": "open",
+      "status": "needs-evaluation",
       "title": "Core Database dialog lists no content and uses category tabs instead of the reference's planet tabs",
       "expected": "Java: Core Database has all/Serpulo/Erekir tabs and an Items/Blocks content grid of locked/unlocked entries",
       "actual": "Godot: tabs are items/blocks/units/liquids (raw ids), the content area is the placeholder '<none>', and no content entries are rendered",
@@ -869,7 +871,8 @@
       ],
       "notes": [
         "2026-10-06T10:32:23+00:00: claimed by loop-1",
-        "2026-10-06T10:33:29+00:00: released: Claim released without a fix (scope confirmed, groundwork mapped). EV-0028 needs a content-database view + dialog rewrite, best done in a focused single-writer session. Scoping: mind-core already has the data - UnlockFields {database_category, database_tag, all_database_tabs, shown_planets, database_tabs, hide_database, unlocked, localized_name, icon_region} on items/blocks/liquids/units/statuses; ContentRegistry accessors items()/blocks()/liquids()/units()/entries(type); bundle keys database-category.<type|cat> and database-tag.<tag> exist. Upstream DatabaseDialog.java: planet tabs = 'all' (Planets.sun) + every content.databaseTabs, rendered as 50px icon toggles; contents grouped by category then tag; each row is a grid of uiIcon (unlocked) or lock (locked), click opens ContentInfoDialog; empty categories hidden. Proposed: a mind_core::ui::campaign::content_database() view + MindUi.content_database_json(), then rewrite client/ui/dialogs/database_dialog.gd. Blocks EV-0013 too (same unlock/catalog filtering)."
+        "2026-10-06T10:33:29+00:00: released: Claim released without a fix (scope confirmed, groundwork mapped). EV-0028 needs a content-database view + dialog rewrite, best done in a focused single-writer session. Scoping: mind-core already has the data - UnlockFields {database_category, database_tag, all_database_tabs, shown_planets, database_tabs, hide_database, unlocked, localized_name, icon_region} on items/blocks/liquids/units/statuses; ContentRegistry accessors items()/blocks()/liquids()/units()/entries(type); bundle keys database-category.<type|cat> and database-tag.<tag> exist. Upstream DatabaseDialog.java: planet tabs = 'all' (Planets.sun) + every content.databaseTabs, rendered as 50px icon toggles; contents grouped by category then tag; each row is a grid of uiIcon (unlocked) or lock (locked), click opens ContentInfoDialog; empty categories hidden. Proposed: a mind_core::ui::campaign::content_database() view + MindUi.content_database_json(), then rewrite client/ui/dialogs/database_dialog.gd. Blocks EV-0013 too (same unlock/catalog filtering).",
+        "2026-10-07T05:15:39+00:00: [needs-evaluation] Landed agent/menu-reachability 28e5403: database rows filter by search and content info opens."
       ],
       "plan": "14",
       "first_seen": "2026-10-06T07:58:16+00:00",
@@ -1043,7 +1046,7 @@
       "id": "EV-0035",
       "area": "game/campaign",
       "severity": "S1",
-      "status": "in-progress",
+      "status": "claimed",
       "title": "First boot panics in MindCampaign bootstrap; campaign launch and tech tree are dead",
       "expected": "Java: a fresh install boots; Play > Campaign > Serpulo > Ground Zero launches the sector (session sector set, waves on, core registered)",
       "actual": "Godot: MindCampaign.ready() panics at mind-core/src/io/save/slot.rs:249 'chunk size must be non-zero' on a user:// dir with no saves/; registry+campaign stay None, so get_tech_state nodes=0, list_save_slots=[], start_sector('serpulo',170)=false and get_sector_state campaign=false",
@@ -1054,13 +1057,20 @@
         "runs/l2-20261007-064916-campaign_spine/godot/step-01-boot-after-launch-panic.png"
       ],
       "notes": [
-        "2026-10-07T02:39:35+00:00: claimed by loop-2"
+        "2026-10-07T02:39:35+00:00: claimed by loop-2",
+        "2026-10-07T04:42:54+00:00: migrated status in-progress -> needs-evaluation",
+        "2026-10-07T04:42:54+00:00: reaped stale claim (loop-2, was needs-evaluation); restored needs-evaluation",
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed parity/loop-3 empty-saves guard + agent/campaign-spine bootstrap persistence.",
+        "2026-10-07T08:18:59+00:00: claimed by eval-oc-12820 for evaluation"
       ],
       "plan": "12",
       "first_seen": "2026-10-06T20:50:55+00:00",
-      "last_verified": "2026-10-07T02:39:35+00:00",
+      "last_verified": "2026-10-07T08:18:59+00:00",
       "found_by_loop": "2",
-      "owner": "loop-2"
+      "prev_status": "needs-evaluation",
+      "owner": "eval-oc-12820",
+      "claimed_at": "2026-10-07T08:18:59+00:00",
+      "claimed_for": "evaluation"
     },
     {
       "id": "EV-0036",
@@ -1121,7 +1131,7 @@
       "id": "EV-0038",
       "area": "ui/editor",
       "severity": "S2",
-      "status": "open",
+      "status": "needs-evaluation",
       "title": "Editor > Maps: clicking a map row does nothing; the map editor never opens",
       "expected": "Java: Editor > Maps lists the map registry; clicking a row opens MapEditor (ui.editor.show())",
       "actual": "Godot: clicking 'archipelago' leaves editor_maps open; MindEditor.begin_edit_map returns false with @editor.errorload (the ENOENT is the get_meta backup fallback masking the real parse error); EditorDialog.visible stays false. Built-in assets/maps/default/*.msav are legacy MSAV v4/v5 and MapIo::create_map/get_meta_bytes does not route the legacy container.",
@@ -1130,7 +1140,8 @@
         "runs/l4-20261007-064905-editor_flow/godot/state-01-editor-maps.json"
       ],
       "notes": [
-        "Same root cause empties MindPreview (EV added for the registry); Import opens file_chooser and Back closes the browser, so only the row->editor step fails."
+        "Same root cause empties MindPreview (EV added for the registry); Import opens file_chooser and Back closes the browser, so only the row->editor step fails.",
+        "2026-10-07T05:15:39+00:00: [needs-evaluation] Landed agent/menu-reachability 448e60e: editor maps open via the live MindPreview registry."
       ],
       "plan": "19",
       "first_seen": "2026-10-06T21:01:00+00:00",
@@ -1141,7 +1152,7 @@
       "id": "EV-0039",
       "area": "ui/custom_game",
       "severity": "S2",
-      "status": "open",
+      "status": "needs-evaluation",
       "title": "Map registry is always empty: Custom Game and Editor list 0x0 name-only fixtures, not live maps",
       "expected": "Java: Custom Game / Editor map lists come from the live Maps registry with real map metadata and previews",
       "actual": "Godot: MindPreview.map_count()==0 and maps_list()==[] after refresh (it scans only user://maps, which is empty on a fresh dir); MapIo::create_map cannot read the built-in legacy MSAV files, so the live registry never populates. Dialogs fall back to MindUi.campaign_views()['maps'] = default_map_entries(): 18 rows with width=0,height=0, no author and no path.",
@@ -1150,7 +1161,8 @@
         "runs/l4-20261007-064905-custom_game/godot/state-01-custom-game.json"
       ],
       "notes": [
-        "Blocks EV-0038 too: the same create_map/MSAV gap leaves the editor list on fixtures. Mode/rules application is separately BLOCKED-BY-INTEGRATION (MindCampaign.start_map_mode absent)."
+        "Blocks EV-0038 too: the same create_map/MSAV gap leaves the editor list on fixtures. Mode/rules application is separately BLOCKED-BY-INTEGRATION (MindCampaign.start_map_mode absent).",
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/menu-reachability f9defd7/544df70: live map registry feeds Custom Game with mode/rules/playtest."
       ],
       "plan": "19",
       "first_seen": "2026-10-06T21:01:03+00:00",
@@ -1185,7 +1197,7 @@
       "id": "EV-0041",
       "area": "ui/campaign",
       "severity": "S1",
-      "status": "open",
+      "status": "needs-evaluation",
       "title": "Campaign Difficulty dialog errors on a missing MindCell.left() and freezes the client",
       "expected": "Java: Play > Campaign > Serpulo > OK, then the Difficulty rail button opens the CampaignRules dialog with 5 difficulty buttons (casual/easy/normal/hard/eradication) and the 5 rule toggles; the client keeps running",
       "actual": "Godot: opening campaign_rules logs 'Invalid call. Nonexistent function \"left\" in base \"RefCounted (MindCell)\"' from campaign_rules_dialog.gd:82 (_rebuild, the first rule toggle); the full-screen dialog opens with no body and Engine.get_process_frames() freezes (2371 before and after a 2s wait); any later MindUi method call panics 'Gd<T>::bind() failed, already bound; T = mind_gdext::ui::ui_host::MindUi'",
@@ -1198,7 +1210,8 @@
       ],
       "notes": [
         "2026-10-07T02:39:41+00:00: claimed by loop-3",
-        "2026-10-07T02:45:26+00:00: released: loop-3 scope rotated to game/campaign; ui/campaign claim stale from the previous loop-3 run (drain-parallel rotated scope)"
+        "2026-10-07T02:45:26+00:00: released: loop-3 scope rotated to game/campaign; ui/campaign claim stale from the previous loop-3 run (drain-parallel rotated scope)",
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/campaign-ui d9a5b14: live campaign rules/difficulty toggles."
       ],
       "plan": "14",
       "first_seen": "2026-10-06T21:36:58+00:00",
@@ -1209,7 +1222,7 @@
       "id": "EV-0042",
       "area": "ui/campaign",
       "severity": "S3",
-      "status": "open",
+      "status": "needs-evaluation",
       "title": "Research root rail rows overlap after switching roots (MindTable not re-sorted)",
       "expected": "Java: clicking a tech-tree root in the left rail keeps the roots as a vertical list; the active root stays clickable and the node table shows that root's nodes",
       "actual": "Godot: ResearchDialog._select_root/_rebuild_roots clears and re-adds the root MindTable but never re-sorts it, so after clicking the second root both root buttons stack at (8,38) (techtree.serpulo 160x34 and techtree.<null> 148x34) and the first root can no longer be clicked; the initial build is fine because show_dialog's _resort_tables sorts it",
@@ -1219,7 +1232,9 @@
         "runs/l6-20261007-071337-research/godot/step-02-research-rail-overlap.png",
         "runs/l6-20261007-071337-research/godot/step-01-research-dialog.png"
       ],
-      "notes": [],
+      "notes": [
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/campaign-ui e30a2e3: research root rail re-sorted on root switch."
+      ],
       "plan": "14",
       "first_seen": "2026-10-06T21:36:58+00:00",
       "last_verified": "2026-10-06T21:36:58+00:00",
@@ -1229,7 +1244,7 @@
       "id": "EV-0043",
       "area": "input/blocks",
       "severity": "S2",
-      "status": "open",
+      "status": "needs-evaluation",
       "title": "Right-drag cannot break item-capacity blocks (conveyor/turret); an empty inventory panel opens instead",
       "expected": "Java: the right-button binding (breakBlock) enters breaking mode and a right-drag breaks every non-air tile in the rect (DesktopInput.java:743). Config/inventory open on the LEFT tap, and the inventory only when build.block.hasItems && items.total() > 0 (InputHandler.java:2017).",
       "actual": "Godot: right-press on a placed conveyor (or a duo turret) opens OverlayLayer/block_inventory at the tile (empty grid: only the close X, items JSON hardcoded \"{}\") instead of starting a break; a 6-tile right-drag over conveyors x=10..15,y=16 leaves all 6 placed. A copper-wall control line right-drags/breaks normally (6 -> 0), so the break path itself works only for has_items==false blocks.",
@@ -1238,7 +1253,8 @@
         "runs/l7-20261007-074043-input_controls/godot/break-evidence.json"
       ],
       "notes": [
-        "screenshots: runs/l7-20261007-074043-input_controls/godot/step-01-rightclick-empty-inventory.png, runs/l7-20261007-074043-input_controls/godot/step-03-placed-blocks-after-failed-right-drag.png. Cause seam: desktop.rs right_press() consults config_spec/has_items_at before begin_break; has_items_at = def.has_items && def.item_capacity>0 with no items.total()>0 guard, so any item-capacity block diverts to inventory. Distinct from the known missing item_stacks_json feed."
+        "screenshots: runs/l7-20261007-074043-input_controls/godot/step-01-rightclick-empty-inventory.png, runs/l7-20261007-074043-input_controls/godot/step-03-placed-blocks-after-failed-right-drag.png. Cause seam: desktop.rs right_press() consults config_spec/has_items_at before begin_break; has_items_at = def.has_items && def.item_capacity>0 with no items.total()>0 guard, so any item-capacity block diverts to inventory. Distinct from the known missing item_stacks_json feed.",
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/input-controls cfe850f/106b4bc: config+inventory fragment routing and click gating."
       ],
       "plan": "15",
       "first_seen": "2026-10-06T21:50:14+00:00",
@@ -1249,7 +1265,7 @@
       "id": "EV-0044",
       "area": "input/command",
       "severity": "S2",
-      "status": "open",
+      "status": "needs-evaluation",
       "title": "Default RTS command-mode toggle (Shift) is inert; command mode is unreachable from the keyboard with default binds",
       "expected": "Java: with no placement block selected and no live boosting player unit, tapping the command-mode key toggles command mode (DesktopInput.java:302-307); command_mode and boost share shiftLeft by default and the tap path is used.",
       "actual": "Godot: with block==null, pressing/releasing Shift leaves command_mode false and fires no action (last_action stays clear_building, action_count unchanged). MindInput.toggle_command_mode() sets it true, and dragging then produces command_rect [80,80,40,24], so only the key path is dead.",
@@ -1258,7 +1274,8 @@
         "runs/l7-20261007-074043-input_controls/godot/rts-evidence.json"
       ],
       "notes": [
-        "key_up_event guards the toggle with ; both binding names resolve to \"shiftLeft\" for the default binds, so the condition is always false. The RTS selection rect itself works once command mode is set via the API."
+        "key_up_event guards the toggle with ; both binding names resolve to \"shiftLeft\" for the default binds, so the condition is always false. The RTS selection rect itself works once command mode is set via the API.",
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/input-controls cfe850f: RTS command mode/selection/orders."
       ],
       "plan": "15",
       "first_seen": "2026-10-06T21:50:19+00:00",
@@ -1269,7 +1286,7 @@
       "id": "EV-0045",
       "area": "ui/config",
       "severity": "S3",
-      "status": "open",
+      "status": "needs-evaluation",
       "title": "Sorter config panel opens with no item options",
       "expected": "Java: Sorter is configurable with an Item config (Sorter.java:37 config(Item.class, ...)), so its config fragment shows the item filter list.",
       "actual": "Godot: right-clicking a placed sorter opens OverlayLayer/block_config with the correct block/x/y but _config.options == [] (empty grid; only clear + close), so no filter can be picked.",
@@ -1278,7 +1295,8 @@
         "runs/l7-20261007-074043-input_controls/godot/config-evidence.json"
       ],
       "notes": [
-        "screenshot: runs/l7-20261007-074043-input_controls/godot/step-02-sorter-config-empty-options.png. config_spec builds options only from def.has_items (all items) or def.has_liquids (all liquids); the Sorter def sets neither. Submitting is separately blocked (Configure arm), this is the read-model gap."
+        "screenshot: runs/l7-20261007-074043-input_controls/godot/step-02-sorter-config-empty-options.png. config_spec builds options only from def.has_items (all items) or def.has_liquids (all liquids); the Sorter def sets neither. Submitting is separately blocked (Configure arm), this is the read-model gap.",
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/input-controls cfe850f/106b4bc: config fragment populated at the click position."
       ],
       "plan": "15",
       "first_seen": "2026-10-06T21:50:19+00:00",
@@ -1289,7 +1307,7 @@
       "id": "EV-0046",
       "area": "game/sim",
       "severity": "S1",
-      "status": "open",
+      "status": "needs-evaluation",
       "title": "No objective/wave-timer/game-state systems run live: a sector can never be won or lost",
       "expected": "Logic.java:608-617 calls updateEntities+checkGameState every tick; checkGameState :327-372 runs capture/lose checks; sectorCapture :394-420 books the win",
       "actual": "schedule.rs:403-409 registers only stub_system+update_buildings; TickSet Campaign/Objectives/WaveTimer/RunWave/GameStateCheck (:77-88) have zero systems; check_game_state is called only by mind-headless (campaign_scenarios.rs:963)",
@@ -1307,7 +1325,8 @@
       "notes": [
         "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
         "2026-10-07T02:45:18+00:00: claimed by loop-2",
-        "2026-10-07T02:45:21+00:00: released: in scope but not independently fixable in one iteration: the live Sim schedule has no campaign-model resource and no building/unit entities, so wiring check_game_state/Objectives/WaveTimer now would only observe an empty world (repro itself says 'needs EV-0035 bootstrap fix first'). Taking the prerequisite live block runtime (EV-0047) this iteration; re-claim EV-0046 after the runtime lands."
+        "2026-10-07T02:45:21+00:00: released: in scope but not independently fixable in one iteration: the live Sim schedule has no campaign-model resource and no building/unit entities, so wiring check_game_state/Objectives/WaveTimer now would only observe an empty world (repro itself says 'needs EV-0035 bootstrap fix first'). Taking the prerequisite live block runtime (EV-0047) this iteration; re-claim EV-0046 after the runtime lands.",
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/campaign-spine: Campaign/Objectives/GameStateCheck systems and the wave timer on the live path."
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
@@ -1317,7 +1336,7 @@
       "id": "EV-0047",
       "area": "game/sim",
       "severity": "S1",
-      "status": "code-verified",
+      "status": "needs-evaluation",
       "title": "Placed buildings are inert: no mining, transport, crafting, power or block updates",
       "expected": "Logic.java:464 updateEntities updates every entity each tick; BuildingComp.update/updateConsumption drive mining, transport, crafting, power",
       "actual": "Sim::apply(Place) spawns only BuildingComp (sim/mod.rs:249-274); load_sector swaps a raw grid with no BlockTable/behavior (sim_host.rs:918-925); a placed drill/conveyor sets a tile and does nothing (production.rs:237-251)",
@@ -1338,7 +1357,9 @@
       "notes": [
         "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
         "2026-10-07T02:45:18+00:00: claimed by loop-2",
-        "2026-10-07T02:55:13+00:00: [loop 2] Commit 5a9e9ee closes the code seam. Sim::apply(Command::Place) routes through SimRuntime::place and Command::Break through runtime_break when installed (client/rust/mind-core/src/sim/mod.rs:262-327), and Sim::command routes the relay SimCommand::Place/Configure through the same runtime (sim/mod.rs:663-725). install_block_runtime_from provisions BlockTable/BuildRules/BuildClock/TileBuilds/ModuleDims/PowerGrids and spawns full plan-07 entities via BlockInstance::spawn + SimHooks::new_building (sim/runtime.rs:488-524, 94-124). sim/schedule.rs:406-414 registers update_buildings (UpdateBuildings) and update_power_graphs (UpdatePowerGraph); both are no-ops without the runtime resources (world/update.rs:194-197, 270-276) and the upstream powerGraph-before-build order is preserved (Logic.java:486-492). MindSimHost installs the runtime in bootstrap() (default spine) and load_sector() (campaign) (mind-gdext/src/sim_host.rs:215, 930); load_scenario deliberately uses Sim::from_scenario without an install (sim_host.rs:846). Residuals for in-engine verification: (1) load_scenario/from_scenario still runs the frozen P0 path, so blocks placed during scenario playback stay inert by design; (2) the default spine world is flat floor=air (sim_host.rs:87), so a drill placed there has no dominant_item regardless of the runtime -- the repro needs an ore floor (e.g. via load_sector); (3) blocks pre-existing in a loaded sector grid have no ECS entity (sim_host.rs:912-920 assigns a raw grid), so only player-placed blocks exercise the runtime. cargo test -p mind-core sim:: = 62 passed / 0 failed; P0 golden spine_place_break still passes (a1a7b96167c9718d)."
+        "2026-10-07T02:55:13+00:00: [loop 2] Commit 5a9e9ee closes the code seam. Sim::apply(Command::Place) routes through SimRuntime::place and Command::Break through runtime_break when installed (client/rust/mind-core/src/sim/mod.rs:262-327), and Sim::command routes the relay SimCommand::Place/Configure through the same runtime (sim/mod.rs:663-725). install_block_runtime_from provisions BlockTable/BuildRules/BuildClock/TileBuilds/ModuleDims/PowerGrids and spawns full plan-07 entities via BlockInstance::spawn + SimHooks::new_building (sim/runtime.rs:488-524, 94-124). sim/schedule.rs:406-414 registers update_buildings (UpdateBuildings) and update_power_graphs (UpdatePowerGraph); both are no-ops without the runtime resources (world/update.rs:194-197, 270-276) and the upstream powerGraph-before-build order is preserved (Logic.java:486-492). MindSimHost installs the runtime in bootstrap() (default spine) and load_sector() (campaign) (mind-gdext/src/sim_host.rs:215, 930); load_scenario deliberately uses Sim::from_scenario without an install (sim_host.rs:846). Residuals for in-engine verification: (1) load_scenario/from_scenario still runs the frozen P0 path, so blocks placed during scenario playback stay inert by design; (2) the default spine world is flat floor=air (sim_host.rs:87), so a drill placed there has no dominant_item regardless of the runtime -- the repro needs an ore floor (e.g. via load_sector); (3) blocks pre-existing in a loaded sector grid have no ECS entity (sim_host.rs:912-920 assigns a raw grid), so only player-placed blocks exercise the runtime. cargo test -p mind-core sim:: = 62 passed / 0 failed; P0 golden spine_place_break still passes (a1a7b96167c9718d).",
+        "2026-10-07T04:42:54+00:00: migrated status code-verified -> needs-evaluation",
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/sim-runtime 262e2b9/f150ca2 + loop-2 host install cherry-pick 5e3b699."
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
@@ -1374,7 +1395,7 @@
       "id": "EV-0049",
       "area": "game/campaign",
       "severity": "S2",
-      "status": "in-progress",
+      "status": "needs-evaluation",
       "title": "Launch ignores the sector preset rules: waves stay off and winWave stays 0",
       "expected": "World.java:266,292,299-330 setSectorRules applies the preset rules and planet.applyRules; Control.java:569-601 playNewSector carries params (captureWave -> winWave)",
       "actual": "campaign.rs:124-155 calls play_new_sector with default Rules; play.rs:269 only sets rules.sector; the preset capture_wave is stored at planet.rs:156 but never applied; defaults are waves=false/win_wave=0 (rules.rs:665,723)",
@@ -1393,18 +1414,20 @@
       ],
       "notes": [
         "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
-        "2026-10-07T02:57:00+00:00: claimed by loop-3"
+        "2026-10-07T02:57:00+00:00: claimed by loop-3",
+        "2026-10-07T04:42:54+00:00: migrated status in-progress -> needs-evaluation",
+        "2026-10-07T04:42:54+00:00: reaped stale claim (loop-3, was needs-evaluation); restored needs-evaluation",
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed parity/loop-3 9f5f90d (3aa171d) superseded by agent/campaign-spine apply_sector_preset_rules."
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
-      "last_verified": "2026-10-07T02:57:00+00:00",
-      "owner": "loop-3"
+      "last_verified": "2026-10-07T02:57:00+00:00"
     },
     {
       "id": "EV-0050",
       "area": "ui/dialogs",
       "severity": "S1",
-      "status": "open",
+      "status": "needs-evaluation",
       "title": "No in-game pause menu: Escape does nothing; save/quit/settings unreachable",
       "expected": "Control.java:746-750 Binding.menu opens ui.paused.show(); PausedDialog.java:14-217 offers Back to menu, Save/Load, Settings, Host, Abandon, Quit",
       "actual": "no paused entry in dialogs_manifest.json:3-40; MindInput::process drains events unused (input/mod.rs:84-96); hud_fragment.gd only shows a Paused banner; open_dialog(planet) is menu-only",
@@ -1419,7 +1442,8 @@
         "../Mindustry/core/src/mindustry/ui/dialogs/PausedDialog.java:14-217"
       ],
       "notes": [
-        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending."
+        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/hud-overlays cb87f65: in-game pause menu and ESC handling."
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
@@ -1429,7 +1453,7 @@
       "id": "EV-0051",
       "area": "game/campaign",
       "severity": "S2",
-      "status": "open",
+      "status": "needs-evaluation",
       "title": "Planet map is a frozen fixture: owned/captured/locked sector state never updates",
       "expected": "PlanetDialog.java:414-462,1304-1328 derives sector color, action label and stats live from Sector.hasBase()/isCaptured()/preset.unlocked()",
       "actual": "ui_host.rs:465-476 caches CampaignViews::vanilla_fixture() forever; the fixture pre-owns Ground Zero/Salt Flats (ui/campaign.rs:792-810); MindCampaign.get_sector_state has no GDScript caller",
@@ -1443,7 +1467,8 @@
         "../Mindustry/core/src/mindustry/ui/dialogs/PlanetDialog.java:1304-1328"
       ],
       "notes": [
-        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending."
+        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/campaign-ui b390354: live campaign read path replaces the frozen fixture."
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
@@ -1453,7 +1478,7 @@
       "id": "EV-0052",
       "area": "game/campaign",
       "severity": "S1",
-      "status": "open",
+      "status": "needs-evaluation",
       "title": "Research purchase is a dead signal: clicking a locked ready node never unlocks it",
       "expected": "ResearchDialog.java:484-486 canSpend/locked -> spend(node), :567-625 removes items, finishes requirements, unlocks + ResearchEvent; Control.java:350-358 checkAutoUnlocks",
       "actual": "research_dialog.gd:13,90,103-104 emits research_requested with no listener; campaign.rs:238-272 spends from a fresh empty inventory; tech_tree.rs:243-248 returns Ok with complete=false, so research() reports success and nothing unlocks",
@@ -1470,7 +1495,8 @@
         "../Mindustry/core/src/mindustry/core/Control.java:350-358"
       ],
       "notes": [
-        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending."
+        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/campaign-ui + agent/campaign-spine: research spends live sector inventories and unlocks."
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
@@ -1480,7 +1506,7 @@
       "id": "EV-0053",
       "area": "ui/hud",
       "severity": "S2",
-      "status": "open",
+      "status": "needs-evaluation",
       "title": "HUD shows no wave, enemies, objectives, or capture/lose toasts",
       "expected": "HudFragment.java:1132-1150 composes wave/enemy/wavetime text, :1088-1107 objectives, :502-510 skip-wave button, :1234-1236 canSkipWave",
       "actual": "hud.rs:39-44 declares wave/enemies but refresh :175-190 never assigns them; hud_text.rs:53-134 composer has no producer; hud_fragment.gd:50-51 reads only status_text",
@@ -1496,7 +1522,8 @@
         "../Mindustry/core/src/mindustry/ui/fragments/HudFragment.java:1088-1107"
       ],
       "notes": [
-        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending."
+        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/hud-overlays e34adb8: wave/enemy/objective/core-item producers."
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
@@ -1533,7 +1560,7 @@
       "id": "EV-0055",
       "area": "input",
       "severity": "S2",
-      "status": "open",
+      "status": "needs-evaluation",
       "title": "RTS selection and orders are absent: units cannot be selected or commanded",
       "expected": "DesktopInput.java:300-321 command mode, :905-935 drag-rect/tap select; InputHandler.java:1091-1200 commandTap/orders; Binding.java:39 commandMode",
       "actual": "input/mod.rs:289-314 get_input_state_json hardcodes command_mode:false and selected_units:[]; rts.rs:68-203/command_emit.rs are headless-only; no client selection/order path (EV-0044 covers only the Shift toggle)",
@@ -1547,7 +1574,8 @@
         "../Mindustry/core/src/mindustry/input/InputHandler.java:1091-1200"
       ],
       "notes": [
-        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending."
+        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/input-controls cfe850f: RTS selection and orders."
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
@@ -1557,7 +1585,7 @@
       "id": "EV-0056",
       "area": "input/placement",
       "severity": "S2",
-      "status": "open",
+      "status": "needs-evaluation",
       "title": "No block rotation: everything places at rotation 0 and cannot be rotated",
       "expected": "DesktopInput.java:834-846 rotate key/rotatePlans; :898-899 Call.rotateBlock on placed buildings (rotation = mod(rot+dir,4))",
       "actual": "sim_host.rs:168-173 place has no rotation; sim/mod.rs:259-264 always rot:0; determinism/command.rs:230-240 drops Place.rotation; project.godot has no [input]; SimCommand::Rotate :493-510 has no UI caller",
@@ -1571,7 +1599,8 @@
         "../Mindustry/core/src/mindustry/input/DesktopInput.java:834-846"
       ],
       "notes": [
-        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending."
+        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/input-controls 652f319: placement rotation."
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
@@ -1581,7 +1610,7 @@
       "id": "EV-0057",
       "area": "input",
       "severity": "S2",
-      "status": "open",
+      "status": "needs-evaluation",
       "title": "Keybinds are cosmetic: rebinding pan/boost keys changes nothing in game",
       "expected": "DesktopInput.java:239-295 reads Binding.boost/moveX/moveY for pan/boost; Binding.java:8-103 defines the binds",
       "actual": "input/mod.rs:102-109,200-212 loads/persists/rebinds BindingState but no gameplay consumer; camera.rs:91-108 hardcodes A/D/W/S+arrows+Shift; project.godot has no [input] section",
@@ -1596,7 +1625,8 @@
         "../Mindustry/core/src/mindustry/input/Binding.java:8-103"
       ],
       "notes": [
-        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending."
+        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/input-controls 652f319: binding state consumed by camera/hotkeys."
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
@@ -1606,7 +1636,7 @@
       "id": "EV-0058",
       "area": "content/blocks",
       "severity": "S2",
-      "status": "open",
+      "status": "needs-evaluation",
       "title": "16 of 27 factory recipes missing: graphite/silicon/plastanium crafters emit nothing",
       "expected": "Blocks.java:1041 graphite-press, :1086 silicon-crucible, :1120 plastanium-compressor, :1138 phase-weaver, :1170 cryofluid-mixer, :1191 pyratite-mixer, :1206 blast-mixer and the Erekir heat crafters define outputs",
       "actual": "block_kind_data.rs:640-782 apply_vanilla_knobs is the only recipe source and covers 11 of 27 crafters; production.rs:237-251 consumes inputs and resets progress with empty output_items",
@@ -1621,7 +1651,8 @@
         "../Mindustry/core/src/mindustry/content/Blocks.java:1655"
       ],
       "notes": [
-        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending."
+        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/content-behaviors 9c51747: 16 missing factory recipes and pump/drill knobs."
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",

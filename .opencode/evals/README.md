@@ -1,8 +1,9 @@
 # `.opencode/evals/` — parity evaluation ledger
 
-Persistent state for the parity loop: the `gap-identifier` writes code-sourced
-candidates, the `evaluator` writes engine-sourced findings and final verdicts,
-and implementers claim/release. Nothing here is game code.
+Persistent state for the parity workflow: the `gap-identifier` writes
+code-sourced candidates, the `evaluator` writes engine-sourced findings and
+engine verdicts, and workers claim/release through `record_finding.py`. Nothing
+here is game code.
 
 ## Layout
 
@@ -16,41 +17,59 @@ and implementers claim/release. Nothing here is game code.
 ## Finding lifecycle
 
 ```
-open ──fixer claims──► in-progress ──gap identifier reads diff──► code-verified
-  ▲                                                                    │
-  │                                          evaluator re-runs repro   │
-  └──────────── release ────────────────┬─────────────────────────────┘
-                                        ▼
-                                 verified-fixed ──► regression (re-repro)
+open ──claim --for fix──► claimed ──fixer commits──► needs-evaluation
+                                                          │
+                                          claim --for evaluation
+                                                          ▼
+                                                       claimed
+                                                          │
+                             evaluator re-runs the exact repro in-engine
+                                                          ▼
+      verified-fixed (expected behavior) ──re-repro──► regression
+      verified-unfixed (gap still present after a fix attempt)
+      needs-evaluation (blocked/deferred; released back to the queue)
+      wontfix (accepted deviation)
 ```
 
 - `open` — a candidate: code-sourced (file:line + repro sketch) or
-  engine-sourced; no fresh evidence of a fix.
-- `in-progress` — claimed by one owner; released if the fix is abandoned.
-- `code-verified` — the gap identifier read the committed diff and it closes
-  the code seam; no in-engine evidence yet.
-- `verified-fixed` — the evaluator re-ran the exact repro in-engine and the
-  expected behavior was observed; evidence path recorded.
-- `regression` — previously verified-fixed, reproduced again.
-- `wontfix` — accepted deviation, platform limitation, duplicate, or the code
-  reading shows the gap is closed; the note says which.
+  engine-sourced; no fresh evidence of a fix. Fixer queue.
+- `needs-evaluation` — queued for the evaluator: seeded for in-engine triage, a
+  fixer just committed, or a loop died before evaluation finished. Evaluator
+  queue.
+- `claimed` — **the cross-session lock.** One owner, a `claimed_at` stamp, and
+  the `prev_status` to restore. A finding with a fresh owner is invisible to
+  every picker; `reap` releases claims older than the TTL (default 90 min).
+  A finding can carry a live owner while its status reads `needs-evaluation`
+  (the crash-safe handoff before an evaluation leg).
+- `verified-fixed` — evaluator re-ran the exact repro and observed the expected
+  behavior; evidence path recorded. Terminal.
+- `verified-unfixed` — evaluator re-ran the repro and confirmed the gap is
+  still present after a fix attempt. Fixer queue.
+- `regression` — a previously verified-fixed finding reproduced again. Fixer
+  queue.
+- `wontfix` — accepted deviation, platform limitation, duplicate, or code
+  evidence shows the gap is closed; the note says which. Terminal.
 - Severities: `S1` crash/hang/data loss; `S2` core flow broken; `S3`
   behavior/visual mismatch; `S4` polish.
+- Legacy `in-progress` and `code-verified` records are normalized to
+  `needs-evaluation` on load; `record_finding.py migrate` persists that mapping.
 
 ## Writers
 
 | Command | Who |
 |---|---|
-| `add --source code`, `code-verify`, `wontfix` | `gap-identifier` |
-| `add --source engine`, `verify` (final verdict) | `evaluator` |
-| `claim`, `release` | implementers / loop runners |
+| `add --source code` (status `open` or `needs-evaluation`), `set-status ... wontfix` | `gap-identifier` |
+| `add --source engine`, `verify` (engine verdicts), `release` on a blocker | `evaluator` |
+| `claim --for fix`, `set-status needs-evaluation`, `release` | `parity-writer` |
+| `claim --for evaluation`, `reap` | `parity-orchestrator` (evaluate loops) |
+| `claim --for loop`, `set-status`, `release` | `parity-orchestrator` + `gap-loop` |
 
 Fixes are claimed in commit messages (`Fixes EV-0001`) and verified by the
-evaluator. Implementers read the ledger with `record_finding.py list` and work
-one finding at a time. `/parity-campaign` runs a whole session (seed → loops →
-sweep), `/parity-gap` fans out discovery, `/parity-loop` drives one
-identify → fix → code-verify → final-verify iteration, `/parity-parallel`
-launches the loop processes, and `/parity-eval` runs the evaluation half alone.
+evaluator in-engine. Commands: `/seed-gaps` fans out code-only discovery,
+`/evaluate-gaps` drains the evaluator queue one finding at a time, `/fix-gaps`
+runs one area-partitioned fixer swarm, and `/loop-gaps` drives
+identify → implement → evaluate per finding (max five cycles per item) until
+the ledger is terminal.
 
 ## Bootstrap
 

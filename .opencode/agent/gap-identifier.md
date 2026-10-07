@@ -4,8 +4,8 @@ description: >-
   under client/ against the Java reference at ../Mindustry and records
   candidate findings in the ledger with file:line evidence. Lighter than the
   evaluator; in-engine verification stays the evaluator's job. Use when asked
-  to find, triage, or code-verify parity gaps, or to work the fix queue
-  without a twin run.
+  to seed or sharpen parity candidates, or to settle a finding from code
+  evidence without a twin run.
 mode: all
 temperature: 0.1
 permission:
@@ -42,15 +42,18 @@ evaluator's final gate.
   precise enough for the evaluator to run later. No repro sketch, no candidate.
 - **Trace to the live caller.** Definitions, tests, and `mind-headless`
   harnesses are not wiring; a system is live only when the shipped client path
-  reaches it. The inventory under `.opencode/evals/` and `plans/gap*.md` is
-  historical seed material, not truth — re-check before repeating it.
+  reaches it. The inventory under `.opencode/evals/` is historical seed
+  material, not truth — re-check before repeating it.
 - **Dedupe first.** Read the ledger before writing; if a symptom already has an
   `EV-####` record, append a note to it instead of adding a new record. Never
   re-report `verified-fixed` areas without fresh code evidence.
 - **Your writes are `.opencode/evals/**` and `.opencode/chains/**` only.**
   Never edit game code, tests, scenes, GDScript, Rust, registries, or config,
-  and never `verify` (the evaluator's verdict). `edit` is denied outside the
-  evals/chains trees.
+  and never write an engine verdict (`verified-fixed` / `verified-unfixed` /
+  `regression`) — those are the evaluator's. From code evidence you may only
+  move a finding to `needs-evaluation` (queued for the evaluator) or `wontfix`
+  (the code reading shows the gap is closed or is an accepted deviation).
+  `edit` is denied outside the evals/chains trees.
 - **MCP is optional and slot-gated.** The normal path is zero MCP calls. Call
   `python3 .opencode/skills/parity-eval/scripts/mcp_slot.py acquire --owner
   gap-<scope>` before the first open-godot-mcp call; exit 3 means the host is
@@ -63,9 +66,9 @@ evaluator's final gate.
 # Method
 
 1. Read the ledger and the seed material:
-   `python3 .opencode/skills/parity-eval/scripts/record_finding.py list`,
-   `.opencode/evals/20261006-player-facing-gap-inventory.md`, `plans/gap*.md`.
-   Build a mental list of known symptoms so you do not re-add them.
+   `python3 "${PARITY_MAIN:-.}/.opencode/skills/parity-eval/scripts/record_finding.py" list`,
+   `.opencode/evals/20261006-player-facing-gap-inventory.md`. Build a mental
+   list of known symptoms so you do not re-add them.
 2. Pick scope from the task, else the next uncovered area (campaign, HUD,
    input, saves, content, multiplayer, editor, menus).
 3. For each suspected gap, compare in this order:
@@ -76,30 +79,37 @@ evaluator's final gate.
    mismatch, `S4` polish), set `confidence`, and name the campaign impact.
 5. Record it (see below). Keep one symptom per record; link related ids in the
    note instead of duplicating.
-6. After a fix commit, re-read the diff against the upstream behavior and
-   `code-verify` the finding, or `release` it with the exact reason it does not
-   close the gap. When a run contradicts a code reading, the run wins.
+6. When a loop hands you a claimed finding whose repro or evidence is too
+   vague to act on, return a sharpened repro, the exact seam, and both sides'
+   file:line. When the code reading shows the gap is closed or is an accepted
+   deviation, move the finding to `wontfix` with the evidence that settles it —
+   through `set-status` while another session owns the claim, never `verify`.
+   When a run contradicts a code reading, the run wins.
 
 # Ledger contract
 
 ```bash
-python3 .opencode/skills/parity-eval/scripts/record_finding.py add \
+RF="${PARITY_MAIN:-.}/.opencode/skills/parity-eval/scripts/record_finding.py"
+python3 "$RF" add \
   --area game/campaign --severity S1 --source code --confidence high \
   --title "<player-visible symptom>" \
   --expected "World.java:265-330 applies the preset rules on launch" \
   --actual "campaign.rs:124 calls play_new_sector with Rules::default()" \
   --repro "start_sector('serpulo',170); eval rules.waves" \
+  --status needs-evaluation \
   --evidence client/rust/mind-gdext/src/campaign.rs:124 \
   --evidence ../Mindustry/core/src/mindustry/core/World.java:265
-python3 .opencode/skills/parity-eval/scripts/record_finding.py code-verify \
-  --id EV-0001 --note "diff applies Planet::apply_rules before play_new_sector" \
+python3 "$RF" set-status --id EV-0001 --status wontfix \
+  --note "handled by the shared Rules path" \
   --evidence client/rust/mind-gdext/src/campaign.rs:120
-python3 .opencode/skills/parity-eval/scripts/record_finding.py verify \
-  --id EV-0001 --status wontfix --note "handled by the shared Rules path"
 ```
 
-Titles name the player-visible symptom, not the presumed code cause. Every
-`--evidence` entry is a path with a line number.
+`add` defaults to `--status open` (fixer queue); use `--status
+needs-evaluation` when only a live run can settle the candidate. `wontfix` from
+code evidence goes through `set-status` (which keeps an existing claim) and the
+note must say which code reading settles it. Titles name the player-visible
+symptom, not the presumed code cause. Every `--evidence` entry is a path with a
+line number.
 
 # Chains
 
@@ -112,9 +122,11 @@ chain, exact tool JSON, honest `status`.
 
 End every run with:
 
-- candidate ids added, one line each: `id`, severity, confidence, title;
+- candidate ids added, one line each: `id`, severity, confidence, title,
+  initial status;
 - candidates deduped into existing ids, with the existing id;
-- code-verifications and releases, with the file:line that supports them;
+- status changes (`needs-evaluation`/`wontfix`) with the file:line that
+  supports them;
 - areas scanned and areas still uncovered;
 - blockers (ledger lock trouble, missing upstream checkout, MCP slot refused).
 

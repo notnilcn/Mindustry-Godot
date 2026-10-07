@@ -11,8 +11,9 @@ description: >-
 # Skill: parity-eval — Java↔Godot twin-run evaluation
 
 Two agents consume this skill: the `gap-identifier` for the code-level half
-(candidate discovery and `code-verify`, no twin run) and the `evaluator` for
-the in-engine half (twin runs and the final `verified-fixed` verdicts). Read
+(candidate seeding and code-evidence triage, no twin run) and the `evaluator`
+for the in-engine half (twin runs and the engine verdicts:
+`verified-fixed` / `verified-unfixed` / `regression` / `wontfix`). Read
 [`../playtest/SKILL.md`](../playtest/SKILL.md) first for the Godot MCP launch
 flow, node map, pid-stamp rules, and eval pitfalls; this skill adds the Java
 reference leg, the comparison protocol, and the evidence/ledger contract. Do
@@ -48,10 +49,11 @@ Host installs are resolved through environment overrides (`GODOT_BIN`,
 Sessions started with `.opencode/loops/bin/start-loop.sh <N> --run` export the
 loop manifest and prepend `.opencode/loops/mcp-bin` to `PATH`, so bare
 `computer-mcp` / `open-godot-mcp` (and the opencode MCP servers) are pinned to
-this loop's display and editor bridge port. Loop 1 is the main checkout on the
-current display; loops >= 2 run on Xvfb `:11+` in `../Mindustry-Godot-loopN`
-worktrees on branch `parity/loop-N`. Read `.opencode/loops/README.md` before
-starting or stopping a loop.
+this loop's display and editor bridge port. Loop 1 is the main checkout on an
+inherited display or `:10`; loops >= 2 run on `:(9+N)` in
+`../Mindustry-Godot-loopN` worktrees on branch `parity/loop-N`. The launch
+helpers (and the MCP shims) start that loop's Xvfb when the display is down.
+Read `.opencode/loops/README.md` before starting or stopping a loop.
 
 | Variable | Meaning |
 |---|---|
@@ -142,8 +144,9 @@ JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 bash ../Mindustry/gradlew \
 
 **Display.** Render with Mesa `llvmpipe` (software GL): expect ~5–15 FPS, and
 budget CPU when running several loops. Each loop has its own display
-(`$PARITY_DISPLAY`: loop 1 is the live `:10`, loops >= 2 are Xvfb at
-1280x720x24). `godot_screenshot game` needs a windowed game, not `--headless`.
+(`$PARITY_DISPLAY`: loop 1 is an inherited display or `:10`, loops >= 2 are
+Xvfb at `:(9+N)`; the loop wrappers start Xvfb when it is down).
+`godot_screenshot game` needs a windowed game, not `--headless`.
 Always check a capture is non-blank (`capture_screen.py` and `frame_diff.py`
 report mean/stddev) before treating a black frame as a finding.
 
@@ -313,53 +316,65 @@ repro. "Looks different" is not a finding.
 ## 6. Ledger and reports
 
 `$PARITY_LEDGER` (default `.opencode/evals/findings.json`) is machine-readable,
-shared by all parallel loops, and protected by a file lock: `record_finding.py`
+shared by all parallel sessions, and protected by a file lock: `record_finding.py`
 takes the lock around every read-modify-write, so `add`/`claim` from concurrent
-loops can never duplicate ids or lose entries. Use the script; never hand-edit.
-Implementers may run `claim`/`release`; the gap identifier owns
-`add --source code` and `code-verify`; the evaluator owns
-`add --source engine` and `verify` — the only `verified-fixed` verdict.
+sessions can never duplicate ids or lose entries. Use the script; never
+hand-edit. In a loop worktree call it through the main checkout:
+`RF="${PARITY_MAIN:-.}/.opencode/skills/parity-eval/scripts/record_finding.py"`.
+Queue statuses: `open`/`regression`/`verified-unfixed` are the fixer queue,
+`needs-evaluation` the evaluator queue, `claimed` the cross-session lock
+(a fresh `owner` hides the item from pickers even while the status reads
+`needs-evaluation`), and `verified-fixed`/`wontfix` are terminal. The gap
+identifier owns `add --source code` and code-evidence `wontfix`; the evaluator
+owns `add --source engine` and `verify`; workers `claim`/`release` and use
+`set-status` to hand items between queues without dropping the claim.
 
 ```bash
-python3 .opencode/skills/parity-eval/scripts/record_finding.py list --status open
-python3 .opencode/skills/parity-eval/scripts/record_finding.py claim \
-  --area ui --owner "loop-${PARITY_LOOP:-1}"      # atomic; exits 3 when none
-python3 .opencode/skills/parity-eval/scripts/record_finding.py release \
-  --id EV-0001 --note "fix abandoned"
-python3 .opencode/skills/parity-eval/scripts/record_finding.py add \
+python3 "$RF" summary
+python3 "$RF" list --status open
+python3 "$RF" claim --for fix --area ui --owner "fix-${PARITY_LOOP:-1}"   # atomic; exits 3 when none
+python3 "$RF" set-status --id EV-0001 --status needs-evaluation \
+  --note "commit abc1234: fix landed"                  # keeps the claim
+python3 "$RF" release --id EV-0001 --note "fix abandoned"
+python3 "$RF" reap --older-than-minutes 90             # recover dead-session claims
+python3 "$RF" add \
   --area ui/menu --severity S2 --title "Campaign button does not open the planet view" \
   --expected "Java: Play > Campaign opens Serpulo planet view" \
   --actual "Godot: click leaves the menu unchanged; no dialog bound" \
   --repro "scenario boot_menu step 4" \
   --evidence "runs/${PARITY_RUN_PREFIX}<stamp>-boot_menu/godot/step-04.png" --plan 14
-python3 .opencode/skills/parity-eval/scripts/record_finding.py verify \
+python3 "$RF" verify \
   --id EV-0001 --status verified-fixed --note "re-ran boot_menu at <commit>" \
   --evidence "runs/${PARITY_RUN_PREFIX}<stamp2>-boot_menu/godot/step-04.png"
+python3 "$RF" verify --id EV-0002 --status verified-unfixed --note "repro still fails"
 ```
 
-### Code-level candidates and `code-verify`
+### Code-level candidates and triage
 
-The gap identifier records candidates without running anything:
+The gap identifier records candidates without running anything; `--status`
+defaults to `open` and becomes `needs-evaluation` when only a live run can
+settle the candidate:
 
 ```bash
-python3 .opencode/skills/parity-eval/scripts/record_finding.py add \
+python3 "$RF" add \
   --area game/campaign --severity S1 --source code --confidence high \
+  --status needs-evaluation \
   --title "Launch never applies the sector rules" \
   --expected "World.java:265-330 applies the preset rules on launch" \
   --actual "campaign.rs:124 calls play_new_sector with Rules::default()" \
   --repro "start_sector('serpulo',170); eval rules.waves" \
   --evidence client/rust/mind-gdext/src/campaign.rs:124 \
   --evidence ../Mindustry/core/src/mindustry/core/World.java:265
-python3 .opencode/skills/parity-eval/scripts/record_finding.py code-verify \
-  --id EV-0001 --note "diff wires Planet::apply_rules into start_sector" \
+python3 "$RF" set-status --id EV-0001 --status wontfix \
+  --note "handled by the shared Rules path" \
   --evidence client/rust/mind-gdext/src/campaign.rs:120
 ```
 
 Rules for code-sourced records: both sides' file:line in `--evidence`, a repro
 sketch the evaluator can execute later, one symptom per record, and dedupe
-notes on existing ids instead of new records. `code-verified` means the
-committed diff closes the code seam; the evaluator's in-engine repro is still
-required before `verified-fixed`.
+notes on existing ids instead of new records. Code evidence never closes a
+finding as fixed; the evaluator's in-engine repro is the only path to
+`verified-fixed`.
 
 Titles name the player-visible symptom, not the presumed code cause. One
 finding per independent symptom; link an existing id in notes instead of
@@ -442,5 +457,6 @@ Before scripting a new scenario, check whether an entry already exists in
   then has no tool to call. Relaunch with `DISPLAY` set (loop shims or the
   global config env) instead of improvising a headless Java leg.
 - Never write a finding without an artifact path. Never mark fixed without a
-  fresh repro. Never edit game code. Never mark `verified-fixed` from a code
-  reading — that is what `code-verified` is for.
+  fresh repro. Never edit game code. Never record an engine verdict from a code
+  reading — code evidence can only seed a candidate, queue it for
+  `needs-evaluation`, or settle it as `wontfix`.

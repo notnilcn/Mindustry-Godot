@@ -6,7 +6,8 @@
  * Every opencode process takes one lease on its first MCP tool call and
  * refreshes it on later calls (`.opencode/skills/parity-eval/scripts/mcp_slot.py`).
  * When the registry is full, workflow agents listed in `MCP_SLOT_GUARD_AGENTS`
- * (default `gap-identifier,loop-runner,evaluator`) get their call denied;
+ * (default `gap-identifier,gap-loop,parity-orchestrator,evaluator`) get their
+ * call denied;
  * everyone else is warned and allowed, because the guard must never deadlock a
  * human's session. The two slots are what the loops and their evaluator legs
  * share.
@@ -30,7 +31,10 @@ const MCP_TOOL = /^(open-godot-mcp|computer-mcp)_/
 const SCRIPT = ".opencode/skills/parity-eval/scripts/mcp_slot.py"
 const OWNER = `oc-${process.pid}`
 const QUIET_MS = 60_000
-const GATED = (process.env.MCP_SLOT_GUARD_AGENTS ?? "gap-identifier,loop-runner,evaluator")
+const GATED = (
+  process.env.MCP_SLOT_GUARD_AGENTS ??
+  "gap-identifier,gap-loop,parity-orchestrator,evaluator"
+)
   .split(",")
   .map((name) => name.trim())
   .filter(Boolean)

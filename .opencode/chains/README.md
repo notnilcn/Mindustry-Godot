@@ -52,5 +52,6 @@ Body sections: `## Steps` (exact tool + action + params, one step per call),
 - **Keep it current.** When a step fails at the same commit, fix the chain in
   the same change that fixes the tooling.
 
-Consumers: the `evaluator` and `gap-identifier` subagents, `loop-runner`, and
-any playtest session. Skills point here; they do not duplicate the sequences.
+Consumers: the `evaluator` and `gap-identifier` subagents, `gap-loop` and
+`parity-writer`, and any playtest session. Skills point here; they do not
+duplicate the sequences.
