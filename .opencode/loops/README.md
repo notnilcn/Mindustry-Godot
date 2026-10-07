@@ -42,6 +42,13 @@ display and open-godot-mcp to the loop bridge port and XDG dirs.
   (`.opencode/evals/twin-evaluator`, one at a time across sessions).
 - A restarted loop recovers its own dead claims with
   `record_finding.py reap --session loop-N --older-than-minutes 0`.
+- `start-loop.sh` refuses to launch when the worktree's workflow files
+  (`.opencode/{agent,command,skills,plugin,loops}` or `AGENTS.md`) differ from
+  the main checkout: the session loads commands and agents from the worktree,
+  while `record_finding.py` and the shared ledger resolve to main, so drift
+  makes a command call a helper with a different CLI. Commit workflow changes
+  on main and merge main into the loop branch before starting; `--allow-drift`
+  overrides the check.
 - Launch clients only through `run-godot-editor.sh` / `run-java.sh`; never use
   `godot_instance launch_editor` (it ignores the loop port map) and never run
   `open-godot-mcp --shutdown-all` (it kills sibling loops).

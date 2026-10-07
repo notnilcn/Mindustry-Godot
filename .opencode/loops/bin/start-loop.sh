@@ -18,6 +18,8 @@
 #                     use (launch-parallel.sh reuses a running editor)
 #   --no-seed-builds  do not copy client/bin/rust and client/.godot into a new
 #                     worktree (a from-scratch Rust/Godot build is expensive)
+#   --allow-drift     start even when the worktree's workflow files
+#                     (.opencode, AGENTS.md) differ from the main checkout
 #
 # Loop sessions launch with `opencode --auto` by default: permission asks are
 # auto-approved inside the loop, while explicit deny rules (the evaluator's
@@ -30,13 +32,14 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$script_dir/../lib/loop-vars.sh"
 
 usage() {
-  sed -n '3,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '3,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 run_opencode=0
 seed_builds=1
 auto_approve="${PARITY_OPENCODE_AUTO:-1}"
 reuse_bridge=0
+allow_drift=0
 id=""
 for arg in "$@"; do
   case "$arg" in
@@ -45,6 +48,7 @@ for arg in "$@"; do
     --no-auto) auto_approve=0 ;;
     --reuse-bridge) reuse_bridge=1 ;;
     --no-seed-builds) seed_builds=0 ;;
+    --allow-drift) allow_drift=1 ;;
     -h | --help)
       usage
       exit 0
@@ -87,10 +91,34 @@ if [ "$PARITY_LOOP" -ge 2 ]; then
     done
   fi
 
-  if [ ! -f "$PARITY_WORKTREE/.opencode/loops/lib/loop-vars.sh" ]; then
-    echo "[loop $PARITY_LOOP] WARNING: worktree .opencode lacks loop tooling." >&2
-    echo "  Commit the loop tooling on main (or rebase parity/loop-$PARITY_LOOP) so the" >&2
-    echo "  session loads the loop-aware skills and commands." >&2
+  # The session loads commands, agents and skills from this worktree, but
+  # record_finding.py and the shared ledger resolve to $PARITY_MAIN. Refuse to
+  # start when the two disagree: a stale loop branch or uncommitted workflow
+  # edits on main would invoke a helper whose CLI no longer matches the
+  # command that called it.
+  workflow_drift=()
+  for rel in .opencode/agent .opencode/command .opencode/skills \
+    .opencode/plugin .opencode/loops AGENTS.md; do
+    if [ ! -e "$PARITY_MAIN/$rel" ] && [ ! -e "$PARITY_WORKTREE/$rel" ]; then
+      continue
+    fi
+    if ! diff -rq -x run -x __pycache__ "$PARITY_MAIN/$rel" "$PARITY_WORKTREE/$rel" \
+      >/dev/null 2>&1; then
+      workflow_drift+=("$rel")
+    fi
+  done
+  if [ "${#workflow_drift[@]}" -gt 0 ]; then
+    echo "[loop $PARITY_LOOP] workflow files differ from the main checkout:" >&2
+    printf '  - %s\n' "${workflow_drift[@]}" >&2
+    echo "  This session loads commands/agents from the worktree, but the ledger helper" >&2
+    echo "  and shared ledger resolve to main; the mismatch can call a helper with a" >&2
+    echo "  different CLI (unknown --for/--status values)." >&2
+    echo "  Refresh the worktree from main (git -C $PARITY_WORKTREE merge main), then" >&2
+    echo "  restart. Pass --allow-drift to start anyway." >&2
+    if [ "$allow_drift" -ne 1 ]; then
+      exit 1
+    fi
+    echo "[loop $PARITY_LOOP] WARNING: continuing despite workflow drift (--allow-drift)" >&2
   fi
 fi
 
