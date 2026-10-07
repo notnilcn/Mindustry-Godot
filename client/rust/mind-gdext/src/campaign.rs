@@ -14,7 +14,7 @@
 
 use godot::builtin::{PackedInt32Array, PackedVector3Array, VarDictionary, Vector3};
 use godot::classes::notify::NodeNotification;
-use godot::classes::{FileAccess, INode, Node};
+use godot::classes::{FileAccess, INode, Node, ProjectSettings};
 use godot::obj::Base;
 use godot::prelude::*;
 
@@ -31,14 +31,21 @@ use mind_core::game::schematics::Schematics;
 use mind_core::game::tech_tree;
 use mind_core::game::universe::{Campaign, TurnContext};
 use mind_core::game::world_reloader::HostReloader;
+use mind_core::io::fs::{NativeFs, Paths};
+use mind_core::io::save::slot::list_save_slots as list_slot_files;
 use mind_core::io::settings::SettingsStore;
 use mind_core::random::JavaRandom;
 use mind_core::render::g3d::grid::PlanetGrid;
 use mind_core::render::g3d::mesh_data::build_planet_grid;
 use mind_core::world::modules::ItemModule;
 
+use crate::sim_host::MindSimHost;
+
 /// `PlanetRenderer.outlineRad`: the sector-grid shell scale over `radius`.
 const OUTLINE_RAD: f32 = 1.17;
+
+/// Scene path of the sim owner (`scenes/game.tscn` under `Spine`).
+const SIM_HOST_PATH: &str = "/root/Spine/SimHost";
 
 /// Objective context with every tech objective met (single-player research path).
 struct AllObjectivesMet;
@@ -437,18 +444,64 @@ impl MindCampaign {
         false
     }
 
-    /// Saves a named slot marker into the settings store.
-    #[func]
-    pub fn save_slot(&mut self, name: GString) -> bool {
-        let key = format!("mcp-save-{name}");
-        self.settings.put_string(&key, "1");
-        self.settings.has(&key)
+    /// The live sim owner this facade drives, if it is in the scene.
+    fn host(&self) -> Option<Gd<MindSimHost>> {
+        self.base().try_get_node_as::<MindSimHost>(SIM_HOST_PATH)
     }
 
-    /// Loads a named slot marker from the settings store.
+    /// Saves the live sim to `user://saves/<name>.msav` (`Saves.saveSector`
+    /// through the plan-04 IO queue). The write drains at the next `IoSet::Capture`
+    /// boundary; the settings marker keeps the slot named for the load listing.
+    #[func]
+    pub fn save_slot(&mut self, name: GString) -> bool {
+        let name = name.to_string();
+        let key = format!("mcp-save-{name}");
+        self.settings.put_string(&key, "1");
+        let Some(mut host) = self.host() else {
+            log::warn!("save_slot `{name}`: no MindSimHost at {SIM_HOST_PATH}");
+            return false;
+        };
+        let path = format!("user://saves/{name}.msav");
+        host.bind_mut()
+            .request_save(GString::from(path.as_str()), false);
+        true
+    }
+
+    /// Loads `user://saves/<name>.msav` into the live sim (`Saves.cautiousLoad`
+    /// through the plan-04 IO queue). The read drains at the next `IoSet::Apply`.
     #[func]
     pub fn load_slot(&mut self, name: GString) -> bool {
-        self.settings.has(&format!("mcp-save-{name}"))
+        let name = name.to_string();
+        if !self.settings.has(&format!("mcp-save-{name}")) {
+            return false;
+        }
+        let Some(mut host) = self.host() else {
+            log::warn!("load_slot `{name}`: no MindSimHost at {SIM_HOST_PATH}");
+            return false;
+        };
+        let path = format!("user://saves/{name}.msav");
+        host.bind_mut().request_load(GString::from(path.as_str()));
+        true
+    }
+
+    /// Metadata for every `.msav` in the saves directory (`Saves.load` listing).
+    /// Returns `[]` on a fresh install (no saves yet).
+    #[func]
+    pub fn list_save_slots(&self) -> Array<VarDictionary> {
+        // `request_save` writes through Godot's `user://`, so list the same dir.
+        let root = ProjectSettings::singleton()
+            .globalize_path("user://")
+            .to_string();
+        let paths = Paths::new(root);
+        let mut out = Array::<VarDictionary>::new();
+        for slot in list_slot_files(&NativeFs, &paths) {
+            let mut row = VarDictionary::new();
+            row.set("path", slot.file.display().to_string());
+            row.set("name", slot.name(&self.settings));
+            row.set("wave", slot.get_wave() as i64);
+            out.push(&row);
+        }
+        out
     }
 
     /// Planet globe data for the sector view (plan 16 g3d seam): the

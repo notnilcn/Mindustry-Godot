@@ -209,25 +209,10 @@ impl MindSimHost {
                 }
             };
 
-        // Plan-13 M7: install the content-initialized global logic arena so
-        // executors observe live `@time`/content/`@sfx-*` constants.
-        if let Some(registry) = self.content_snapshot.as_ref() {
-            mind_core::logic::globals::GlobalVars::install_world(&mut self.sim.ecs.0, registry);
-        }
-
-        // Plan 04 §3.10: register the live-sim IO executor so `request_save` /
-        // `request_load` are fulfilled at the `IoSet` boundary. The handler boots
-        // its content lazily on the first IO call, so a session that never saves
-        // pays nothing. The in-engine MCP round-trip stays orchestrator-owned.
-        self.sim
-            .set_io_handler(Box::new(mind_core::io::SimIoHandler::new()));
-
-        // Plan-18: install the sim audio sink. Sim systems emit `AudioEvent`s
-        // unconditionally; `MindAudio` drains this log once per frame.
-        self.sim
-            .ecs
-            .0
-            .insert_resource(AudioSinkRes::new(self.audio_log.clone()));
+        // Plan-13 M7 + plan 04 §3.10 + plan-18: wire the per-sim host seams
+        // (logic globals, IO executor, audio sink). Must be re-run whenever a
+        // fresh `Sim` replaces `self.sim`, or queued IO never drains.
+        self.install_sim_seams();
 
         if let Some(saved) = settings::read()
             && let Some(name) = saved.selected_block
@@ -265,6 +250,32 @@ impl MindSimHost {
     /// Emitted when place/break/load changed the tile grid (view redraw hint).
     #[signal]
     fn world_changed();
+
+    /// Wires the host seams that live on the `Sim` value: the content-initialized
+    /// logic globals (plan-13 M7), the live-sim IO executor (plan 04 §3.10) and
+    /// the audio sink (plan-18).
+    ///
+    /// `load_scenario`/`load_sector` install a brand-new `Sim`, so this must run
+    /// again after every replacement; otherwise `request_save`/`request_load`
+    /// queue into an `IoQueue` with no handler and never drain.
+    fn install_sim_seams(&mut self) {
+        if let Some(registry) = self.content_snapshot.take() {
+            mind_core::logic::globals::GlobalVars::install_world(&mut self.sim.ecs.0, &registry);
+            self.content_snapshot = Some(registry);
+        }
+
+        // The handler boots its content lazily on the first IO call, so a
+        // session that never saves pays nothing.
+        self.sim
+            .set_io_handler(Box::new(mind_core::io::SimIoHandler::new()));
+
+        // Sim systems emit `AudioEvent`s unconditionally; `MindAudio` drains this
+        // log once per frame.
+        self.sim
+            .ecs
+            .0
+            .insert_resource(AudioSinkRes::new(self.audio_log.clone()));
+    }
 
     /// Places a block at `(x, y)` immediately (API path; MCP §7c step 5).
     #[func]
@@ -869,6 +880,7 @@ impl MindSimHost {
             FixedStepRunner::for_rate(sim.config().fixed_hz, sim.config().max_ticks_per_frame);
         self.sim = sim;
         self.player = Some(player);
+        self.install_sim_seams();
         self.world_dirty = true;
         self.world_loads += 1;
         self.emit_state();
@@ -924,6 +936,9 @@ impl MindSimHost {
             FixedStepRunner::for_rate(sim.config().fixed_hz, sim.config().max_ticks_per_frame);
         self.sim = sim;
         self.player = None;
+        // The fresh `Sim` carries no IO executor; re-wire the seams so a queued
+        // `request_save`/`request_load` drains at the next `IoSet` boundary.
+        self.install_sim_seams();
         self.world_dirty = true;
         self.world_loads += 1;
         self.emit_state();

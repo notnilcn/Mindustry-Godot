@@ -237,6 +237,10 @@ pub fn list_files_meta(fs: &dyn FileSystem, dir: &Path) -> Vec<(PathBuf, SaveMet
         })
         .collect();
     files.sort();
+    if files.is_empty() {
+        // `chunks` panics on a zero chunk size; an empty saves dir has no slots.
+        return Vec::new();
+    }
 
     let threads = std::thread::available_parallelism()
         .map(|n| n.get())
@@ -320,6 +324,18 @@ mod tests {
         let mut sorted = names.clone();
         sorted.sort();
         assert_eq!(names, sorted);
+    }
+
+    /// `io::save::slot::tests::empty_dir_lists_no_slots`: a saves directory with
+    /// no `.msav` files (fresh install) lists zero slots instead of panicking.
+    #[test]
+    fn empty_dir_lists_no_slots() {
+        let fs = MockFs::new();
+        let paths = Paths::new("/data");
+        assert!(list_save_slots(&fs, &paths).is_empty());
+        // A stray non-save file is not a slot either.
+        fs.write(&paths.saves().join("notes.txt"), b"hi").unwrap();
+        assert!(list_save_slots(&fs, &paths).is_empty());
     }
 
     /// `io::save::slot::tests::backup_fallback` (plan 04 §7a): a corrupt
