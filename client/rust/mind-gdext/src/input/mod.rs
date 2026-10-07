@@ -371,11 +371,9 @@ impl MindInput {
                 gesture::GestureEvent::Zoom {
                     initial_distance,
                     distance,
-                } => {
-                    if *initial_distance > 0.0 {
-                        let amount = (*distance / *initial_distance - 1.0) * 4.0;
-                        camera.clone().bind_mut().zoom_by(amount as f64);
-                    }
+                } if *initial_distance > 0.0 => {
+                    let amount = (*distance / *initial_distance - 1.0) * 4.0;
+                    camera.clone().bind_mut().zoom_by(amount as f64);
                 }
                 _ => {}
             }

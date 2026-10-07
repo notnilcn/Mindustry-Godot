@@ -579,7 +579,7 @@ impl DesktopBridge {
     /// `createControlGroup`/`recallControlGroup` for a digit binding.
     fn control_group(&mut self, bindings: &BindingState, index: usize) {
         let creating = self.key_down(bindings, ids::CREATE_CONTROL_GROUP);
-        let now_ms = Time::singleton().get_ticks_msec().max(0) as u64;
+        let now_ms = Time::singleton().get_ticks_msec();
         if creating {
             self.controller.create_control_group(index, true);
         } else if self.controller.recall_control_group(index, now_ms) {
@@ -1161,7 +1161,7 @@ impl DesktopBridge {
             if let Some((x, y)) = self.cursor_world() {
                 match select_unit_tap(&self.selectable, 0, x, y, UNIT_TAP_RADIUS) {
                     Some(id) => {
-                        let now_ms = Time::singleton().get_ticks_msec().max(0) as u64;
+                        let now_ms = Time::singleton().get_ticks_msec();
                         let type_id = self
                             .selectable
                             .iter()
