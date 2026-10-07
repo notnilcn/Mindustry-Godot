@@ -421,6 +421,22 @@ pub struct Sector {
     pub preset_always_unlocked: bool,
     /// Preset name (for `sectorDataMatches`/save info).
     pub preset_name: Option<String>,
+    /// Preset `startWaveTimeMultiplier`.
+    pub preset_start_wave_time_multiplier: f32,
+    /// Preset `addStartingItems`.
+    pub preset_add_starting_items: bool,
+    /// Preset `noLighting`.
+    pub preset_no_lighting: bool,
+    /// Preset `isLastSector`.
+    pub preset_is_last_sector: bool,
+    /// Preset `attackAfterWaves`.
+    pub preset_attack_after_waves: bool,
+    /// Preset `overrideLaunchDefaults`.
+    pub preset_override_launch_defaults: bool,
+    /// Preset `allowLaunchLoadout`.
+    pub preset_allow_launch_loadout: bool,
+    /// Preset `allowLaunchSchematics`.
+    pub preset_allow_launch_schematics: bool,
     /// Visual shield target sector index.
     pub shield_target: Option<u16>,
     /// Difficulty based on nearby bases.
@@ -447,6 +463,14 @@ impl Sector {
             preset_capture_wave: 0,
             preset_always_unlocked: false,
             preset_name: None,
+            preset_start_wave_time_multiplier: 2.0,
+            preset_add_starting_items: false,
+            preset_no_lighting: false,
+            preset_is_last_sector: false,
+            preset_attack_after_waves: false,
+            preset_override_launch_defaults: false,
+            preset_allow_launch_loadout: false,
+            preset_allow_launch_schematics: false,
             shield_target: None,
             threat: 0.0,
             generate_enemy_base: false,
@@ -535,6 +559,29 @@ impl Sector {
         let generated = (self.generate_enemy_base && self.preset.is_none())
             || (self.preset.is_some() && self.preset_capture_wave == 0);
         generated && (self.save.is_none() || self.info.info.attack || !self.has_base())
+    }
+
+    /// `Sector.isLastSector` (`preset.isLastSector`).
+    pub fn is_last_sector(&self) -> bool {
+        self.preset_is_last_sector
+    }
+
+    /// `Sector.allowLaunchLoadout()`.
+    pub fn allow_launch_loadout(&self, planet_allow: bool) -> bool {
+        if self.preset.is_some() && self.preset_override_launch_defaults {
+            self.preset_allow_launch_loadout
+        } else {
+            planet_allow
+        }
+    }
+
+    /// `Sector.allowLaunchSchematics()`.
+    pub fn allow_launch_schematics(&self, planet_allow: bool) -> bool {
+        if self.preset.is_some() && self.preset_override_launch_defaults {
+            self.preset_allow_launch_schematics
+        } else {
+            planet_allow
+        }
     }
 
     /// `Sector.isShielded`.

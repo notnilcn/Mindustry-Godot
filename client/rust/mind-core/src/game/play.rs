@@ -55,6 +55,13 @@ pub enum PlayEvent {
         /// First-ever capture (`!wasCaptured` before).
         initial: bool,
     },
+    /// `Control`'s last-sector victory (`ui.campaignComplete.show`).
+    CampaignComplete {
+        /// Completed planet.
+        planet: PlanetId,
+        /// Final sector.
+        sector: u16,
+    },
     /// `SectorLoseEvent` (campaign loss).
     SectorLose {
         /// Lost planet.
@@ -244,32 +251,37 @@ pub fn play_map(
     events
 }
 
-/// `World.setSectorRules` rules half (`World.java:266,292,299-330`): resolve the
-/// sector preset (`rules.winWave = preset.captureWave`, attack mode when there is
-/// no capture wave and an enemy base) and fold the planet's campaign rules.
+/// `World.setSectorRules` campaign half: folds the sector preset (capture wave,
+/// waves/attack mode) and the planet/campaign rules into the session rules.
 ///
-/// `Control.playNewSector` calls `world.loadSector` before `logic.play`, so a
-/// fresh launch must start from neutral wave/attack state and then re-derive it
-/// from the sector that is being played.
-fn apply_sector_preset_rules(
+/// Returns `true` when the sector has a resolvable preset. Fresh matches start
+/// from neutral wave/attack state because `logic.reset` recreates
+/// `GameState.rules` upstream, while this port keeps the `Rules` value across
+/// launches.
+pub fn apply_sector_preset_rules(
     session: &mut PlaySession,
     campaign: &Campaign,
     registry: &ContentRegistry,
     planet: PlanetId,
     sector_id: u16,
-) {
+) -> bool {
     session.rules.win_wave = 0;
     session.rules.waves = false;
     session.rules.attack_mode = false;
+    session.rules.disable_world_processors = false;
+    session.rules.objective_timer_multiplier = 1.0;
+    session.attack_after_waves = false;
+    session.add_starting_items = false;
+    session.allow_launch_loadout = false;
 
     let Some(planet_record) = campaign.planet(planet) else {
-        return;
+        return false;
     };
+    let mut applied = false;
     if let Some(sector) = planet_record.sector(sector_id)
         && let Some(preset_id) = sector.preset
         && let Some(preset) = registry.sector(preset_id)
     {
-        // `SectorPreset.rules`: the capture wave is the win wave.
         session.rules.win_wave = preset.capture_wave;
         let attack = preset.capture_wave <= 0 && sector.has_enemy_base();
         session.rules.attack_mode = attack;
@@ -278,9 +290,57 @@ fn apply_sector_preset_rules(
             // `SectorInfo.write`: infinite waves get a default win wave.
             session.rules.win_wave = 30;
         }
+        session.attack_after_waves = preset.attack_after_waves;
+        session.add_starting_items = preset.add_starting_items;
+        session.allow_launch_loadout =
+            sector.allow_launch_loadout(planet_record.allow_launch_loadout);
+        if preset.no_lighting {
+            session.rules.lighting = false;
+        }
+        applied = true;
     }
-    // `Planet.applyRules(rules, customGame = false)`.
+
+    // `Planet.applyRules(rules, customGame=false)`: env/attributes + campaign
+    // fold (fog, hideSpawns, difficulty team multipliers).
     planet_record.apply_rules(registry, &mut session.rules, false, false);
+    session.difficulty_wave_time_multiplier = planet_record
+        .campaign_rules
+        .difficulty
+        .wave_time_multiplier();
+    applied
+}
+
+/// `Logic.play` starting-items half: clear the default team's core inventory
+/// and add the launch loadout. Core storage capacity is a plan-08/11 runtime
+/// concern here, so the add is unbounded.
+pub fn apply_launch_loadout(session: &mut PlaySession, registry: &ContentRegistry) {
+    let condition =
+        !session.is_campaign() || !session.allow_launch_loadout || session.add_starting_items;
+    if !condition {
+        return;
+    }
+    let team = TeamId(session.default_team());
+    if session
+        .teams
+        .get_or_null(team)
+        .is_none_or(|data| data.core().is_none())
+    {
+        return;
+    }
+    let stacks: Vec<(String, i32)> = session
+        .rules
+        .loadout
+        .iter()
+        .filter_map(|stack| stack.item.clone().map(|item| (item, stack.amount)))
+        .collect();
+    let item_count = registry.items().len();
+    let inventory = session.teams.inventory(team, item_count);
+    inventory.clear();
+    for (name, amount) in stacks {
+        if let Some(item) = registry.item_id(&name) {
+            inventory.add(item, amount, i32::MAX);
+        }
+    }
 }
 
 /// `Control.playNewSector(origin, sector, reloader, params, beforePlay)`.
@@ -313,6 +373,7 @@ pub fn play_new_sector(
         sector.info.info.origin = origin.map(|(_planet, s)| SectorKey::format(&planet_name, s));
         sector.info.info.destination = origin.map(|(_, s)| SectorKey::format(&planet_name, s));
         sector.info.info.attempts += 1;
+        sector.being_played = true;
     }
 
     let incoming = session.rules.clone();
@@ -322,6 +383,7 @@ pub fn play_new_sector(
         rules_epoch: load.rules_epoch,
     }];
     events.extend(logic_play(session));
+    apply_launch_loadout(session, registry);
     events.push(PlayEvent::SectorLaunch {
         planet,
         sector: sector_id,
@@ -370,11 +432,15 @@ pub fn play_sector(
 
     session.reset_world();
     session.sector = Some((planet, sector_id));
+    apply_sector_preset_rules(session, campaign, registry, planet, sector_id);
     let planet_name = campaign
         .planet(planet)
         .map(|planet| planet.name.clone())
         .unwrap_or_default();
     session.rules.sector = Some(SectorKey::format(&planet_name, sector_id));
+    if let Some(sector) = campaign.sector_mut(planet, sector_id) {
+        sector.being_played = true;
+    }
     let incoming = session.rules.clone();
     let load = apply_rules_load(&mut session.rules, incoming, true, epoch);
     session.phase = State::Playing;
@@ -399,13 +465,8 @@ pub fn logic_play(session: &mut PlaySession) -> Vec<PlayEvent> {
     };
     session.wavetime = base * multiplier;
     session.stats.reset();
-
-    // Starting loadout (`CoreBuild.items.clear` + capped add). Core inventories
-    // are owned by plan 08; the deterministic intent is recorded here for the
-    // ECS adapter to apply.
-    if !session.is_campaign() || !session.allow_launch_loadout || session.add_starting_items {
-        // `session.rules.loadout` is applied by the plan-08 core adapter.
-    }
+    // Map objectives load with the map (`state.rules.objectives`).
+    session.objectives = MapObjectivesRuntime::from_rules(&session.rules);
     vec![PlayEvent::Play]
 }
 
@@ -524,7 +585,9 @@ fn check_game_state_default(session: &mut PlaySession) -> Vec<PlayEvent> {
     events
 }
 
-/// `Logic.sectorCapture()`: disable waves, fire capture, clear markers/objectives.
+/// `Logic.sectorCapture()`: disable waves, fire capture, clear
+/// markers/objectives and record the campaign capture bookkeeping
+/// (`sectorsCaptured`, base coverage, last-sector victory).
 pub fn sector_capture(session: &mut PlaySession, campaign: &mut Campaign) -> Vec<PlayEvent> {
     session.rules.waves = false;
 
@@ -536,20 +599,42 @@ pub fn sector_capture(session: &mut PlaySession, campaign: &mut Campaign) -> Vec
         .sector(planet, sector_id)
         .map(|sector| !sector.info.info.was_captured)
         .unwrap_or(true);
+    let last_sector = campaign
+        .sector(planet, sector_id)
+        .is_some_and(Sector::is_last_sector);
 
     if let Some(sector) = campaign.sector_mut(planet, sector_id) {
         sector.info.info.was_captured = true;
+        sector.info.info.waves = false;
+        sector.info.info.attack = false;
+        sector.being_played = false;
+    }
+    // `Logic`'s `SectorCaptureEvent` listener: `stats.sectorsCaptured++`.
+    if let Some(stats) = campaign.stats_for_mut(planet) {
+        stats.sectors_captured += 1;
+    }
+    // `Planet.updateBaseCoverage`: threat reflects the new frontiers.
+    if let Some(planet_record) = campaign.planet_mut(planet) {
+        planet_record.update_base_coverage_from_neighbors();
     }
     session.rules.attack_mode = false;
     session.rules.disable_world_processors = true;
     session.markers.clear();
     session.objectives.clear();
 
-    vec![PlayEvent::SectorCapture {
+    let mut events = vec![PlayEvent::SectorCapture {
         planet,
         sector: sector_id,
         initial,
-    }]
+    }];
+    // `Control`'s last-sector victory: campaign complete on the first capture.
+    if last_sector && initial {
+        events.push(PlayEvent::CampaignComplete {
+            planet,
+            sector: sector_id,
+        });
+    }
+    events
 }
 
 /// `Logic.updateGameOver(winner)`.
@@ -577,6 +662,33 @@ pub fn sector_lose(session: &mut PlaySession, winner: u8) -> PlayEvent {
     } else {
         PlayEvent::GameOver { winner }
     }
+}
+
+/// Campaign loss bookkeeping around [`sector_lose`] (`GameOverEvent` listener +
+/// `PlanetDialog` loss path): lifetime stats, `being_played` and the
+/// `clearSectorOnLose` save wipe.
+pub fn apply_sector_loss(
+    session: &mut PlaySession,
+    campaign: &mut Campaign,
+    winner: u8,
+) -> Vec<PlayEvent> {
+    if let Some((planet, sector_id)) = session.sector {
+        // `GameOverEvent` listener: `stats.sectorsLost++`.
+        if let Some(stats) = campaign.stats_for_mut(planet) {
+            stats.sectors_lost += 1;
+        }
+        let clear_on_lose = campaign
+            .planet(planet)
+            .is_some_and(|planet| planet.campaign_rules.clear_sector_on_lose);
+        if let Some(sector) = campaign.sector_mut(planet, sector_id) {
+            sector.being_played = false;
+            if clear_on_lose {
+                sector.save = None;
+                sector.info.info.has_core = false;
+            }
+        }
+    }
+    vec![sector_lose(session, winner)]
 }
 
 /// A reloader that does nothing (headless/unit tests).
@@ -617,6 +729,94 @@ mod tests {
 
     fn campaign(registry: &ContentRegistry) -> Campaign {
         Campaign::from_registry(registry, &EmptyNeighborhood)
+    }
+
+    #[test]
+    fn sector_preset_rules_apply() {
+        let registry = content();
+        let campaign = campaign(&registry);
+        let planet = campaign.planet_id_by_name("serpulo").unwrap();
+        let sector_id = registry.sector_by_name("groundZero").unwrap().sector;
+        let mut session = PlaySession::new(Rules::default());
+        let applied =
+            apply_sector_preset_rules(&mut session, &campaign, &registry, planet, sector_id);
+        assert!(applied);
+        assert_eq!(session.rules.win_wave, 10, "captureWave -> winWave");
+        assert!(session.rules.waves, "capture sector runs waves");
+        assert!(!session.rules.attack_mode);
+        assert!(session.add_starting_items, "groundZero adds starting items");
+        // Planet/campaign fold applied.
+        assert_eq!(session.rules.planet, "serpulo");
+        assert_eq!(session.difficulty_wave_time_multiplier, 1.0);
+    }
+
+    #[test]
+    fn sector_capture_stats_and_last_sector() {
+        let registry = content();
+        let mut campaign = campaign(&registry);
+        let planet = campaign.planet_id_by_name("serpulo").unwrap();
+        let sector_id = registry.sector_by_name("groundZero").unwrap().sector;
+        if let Some(sector) = campaign.sector_mut(planet, sector_id) {
+            sector.preset_is_last_sector = true;
+        }
+        let mut session = PlaySession::new(Rules::default());
+        session.sector = Some((planet, sector_id));
+        session.wave = 4;
+        let events = sector_capture(&mut session, &mut campaign);
+        assert_eq!(
+            events,
+            vec![
+                PlayEvent::SectorCapture {
+                    planet,
+                    sector: sector_id,
+                    initial: true
+                },
+                PlayEvent::CampaignComplete {
+                    planet,
+                    sector: sector_id
+                },
+            ]
+        );
+        assert_eq!(
+            campaign
+                .stats_for(planet)
+                .map(|stats| stats.sectors_captured),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn sector_loss_clears_save_when_configured() {
+        let registry = content();
+        let mut campaign = campaign(&registry);
+        let planet = campaign.planet_id_by_name("serpulo").unwrap();
+        let sector_id = registry.sector_by_name("groundZero").unwrap().sector;
+        campaign
+            .planet_mut(planet)
+            .expect("planet")
+            .campaign_rules
+            .clear_sector_on_lose = true;
+        if let Some(sector) = campaign.sector_mut(planet, sector_id) {
+            sector.save = Some("save".to_owned());
+            sector.info.info.has_core = true;
+        }
+        let mut session = PlaySession::new(Rules::default());
+        session.sector = Some((planet, sector_id));
+        let events = apply_sector_loss(&mut session, &mut campaign, 2);
+        assert_eq!(
+            events,
+            vec![PlayEvent::SectorLose {
+                planet,
+                sector: sector_id,
+                winner: 2
+            }]
+        );
+        let sector = campaign.sector(planet, sector_id).expect("sector");
+        assert!(sector.save.is_none());
+        assert_eq!(
+            campaign.stats_for(planet).map(|stats| stats.sectors_lost),
+            Some(1)
+        );
     }
 
     #[test]

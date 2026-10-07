@@ -954,8 +954,8 @@ fn campaign_play(planet_name: &str, sector_name: &str) -> Result<(Value, Value)>
     let markers_before = session.markers.size();
     let objectives_before = session.objectives.len();
 
-    // `World.setSectorRules`: the sector preset's `captureWave` becomes
-    // `rules.winWave`; run that many waves before the capture check.
+    // C-1: the sector preset's `captureWave` becomes `rules.winWave`; run that
+    // many waves before the game-state check can capture (`World.setSectorRules`).
     assert_eq!(session.rules.win_wave, 10, "groundZero capture wave");
     let win_wave = session.rules.win_wave.max(1);
     for _ in 0..win_wave {

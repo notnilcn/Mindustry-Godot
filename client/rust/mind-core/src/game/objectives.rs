@@ -9,7 +9,10 @@
 //! auto-insertion is performed by plan 02's `TechNode` builder.
 
 use crate::content::tech::ObjectiveSpec;
-use crate::content::{ContentRef, PlanetId, SectorId};
+use crate::content::{ContentRef, ContentRegistry, PlanetId, SectorId};
+
+use super::tech_tree;
+use super::universe::Campaign;
 
 /// Sector runtime facts the objectives read (`Sector.save`/`isCaptured`/`hasBase`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -99,6 +102,76 @@ impl Objective {
 /// Whether all `objectives` are met.
 pub fn all_complete(objectives: &[Objective], ctx: &dyn ObjectiveContext) -> bool {
     objectives.iter().all(|objective| objective.complete(ctx))
+}
+
+/// Live campaign [`ObjectiveContext`]: unlock state and sector/planet status
+/// snapshotted from the registry + runtime campaign.
+///
+/// The context owns its data so callers can hold it while mutating the registry
+/// (`tech_tree::spend`).
+pub struct CampaignObjectiveContext {
+    unlocked: std::collections::HashSet<u32>,
+    sectors: std::collections::HashMap<u16, SectorStatus>,
+    planets_with_base: std::collections::HashSet<u16>,
+}
+
+impl CampaignObjectiveContext {
+    /// Snapshots the context from a registry + runtime campaign.
+    pub fn new(registry: &ContentRegistry, campaign: &Campaign) -> Self {
+        let unlocked = registry
+            .tech()
+            .nodes
+            .iter()
+            .filter_map(|node| node.content)
+            .filter(|content| tech_tree::content_unlocked(registry, *content))
+            .map(pack_content)
+            .collect();
+        let sectors = registry
+            .sectors()
+            .iter()
+            .filter_map(|preset| {
+                let record = campaign.sector(preset.planet, preset.sector)?;
+                Some((
+                    preset.id.raw(),
+                    SectorStatus {
+                        has_save: record.has_save(),
+                        captured: record.is_captured(None),
+                        has_base: record.has_base(),
+                    },
+                ))
+            })
+            .collect();
+        let planets_with_base = campaign
+            .planets
+            .values()
+            .filter(|planet| planet.sectors.iter().any(|sector| sector.has_base()))
+            .map(|planet| planet.id.raw())
+            .collect();
+        Self {
+            unlocked,
+            sectors,
+            planets_with_base,
+        }
+    }
+}
+
+/// Packs a content reference into a `u32` key (`type ordinal << 16 | id`).
+fn pack_content(content: ContentRef) -> u32 {
+    ((content.type_.ordinal() as u32) << 16) | content.id as u32
+}
+
+impl ObjectiveContext for CampaignObjectiveContext {
+    fn is_unlocked(&self, content: ContentRef) -> bool {
+        self.unlocked.contains(&pack_content(content))
+    }
+
+    fn sector_status(&self, sector: SectorId) -> SectorStatus {
+        self.sectors.get(&sector.raw()).copied().unwrap_or_default()
+    }
+
+    fn planet_has_base(&self, planet: PlanetId) -> bool {
+        self.planets_with_base.contains(&planet.raw())
+    }
 }
 
 #[cfg(test)]
@@ -201,5 +274,34 @@ mod tests {
         assert!(!all_complete(&objectives, &ctx));
         ctx.unlocked.push(content);
         assert!(all_complete(&objectives, &ctx));
+    }
+
+    #[test]
+    fn campaign_context_snapshots_unlocks_and_sectors() {
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+        use crate::game::planet::EmptyNeighborhood;
+        use crate::game::universe::Campaign;
+
+        let registry =
+            create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true).unwrap();
+        let mut campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
+        let planet = campaign.planet_id_by_name("serpulo").unwrap();
+        let ground_zero = registry.sector_by_name("groundZero").unwrap();
+
+        let ctx = CampaignObjectiveContext::new(&registry, &campaign);
+        // Ground Zero starts unbased: SectorComplete not met.
+        let status = ctx.sector_status(ground_zero.id);
+        assert!(!status.has_base && !status.captured);
+        assert!(!Objective::SectorComplete(ground_zero.id).complete(&ctx));
+
+        let sector = campaign.sector_mut(planet, ground_zero.sector).unwrap();
+        sector.save = Some("save".to_owned());
+        sector.info.info.has_core = true;
+        sector.info.info.was_captured = true;
+        sector.info.info.waves = false;
+        sector.info.info.attack = false;
+        let ctx = CampaignObjectiveContext::new(&registry, &campaign);
+        assert!(Objective::SectorComplete(ground_zero.id).complete(&ctx));
+        assert!(Objective::OnPlanet(planet).complete(&ctx));
     }
 }

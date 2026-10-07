@@ -26,6 +26,8 @@ use mind_core::content::{
 };
 use mind_core::determinism::SimCommand;
 use mind_core::editor::context::EditorContext;
+use mind_core::game::rules::Rules;
+use mind_core::game::runtime::{CampaignRuntime, SessionSync, sync_session_with_sim};
 use mind_core::io::save::{SaveIo, SaveReadState};
 use mind_core::scenario::{Scenario, ScenarioPlayer};
 use mind_core::sim::{FixedStepRunner, Sim};
@@ -77,6 +79,10 @@ pub struct MindSimHost {
     /// Plan-18 sim→client audio log; installed as an `AudioSinkRes` resource
     /// and drained by `/root/Spine/MindAudio` (plan 18 §3.3/§3.10).
     audio_log: SharedAudioLog,
+    /// Rules resolved by the last `load_sector` (preset map/generator/save).
+    sector_rules: Option<Rules>,
+    /// Enemy spawn-overlay count of the last loaded sector grid.
+    sector_spawns: i32,
 }
 
 #[godot_api]
@@ -100,6 +106,8 @@ impl INode for MindSimHost {
             fx_host: None,
             pending_commands: VecDeque::new(),
             audio_log: SharedAudioLog::new(),
+            sector_rules: None,
+            sector_spawns: 0,
         }
     }
 
@@ -895,15 +903,19 @@ impl MindSimHost {
     }
 
     /// Generates and installs a campaign sector's world into the sim
-    /// (`Control.playNewSector` world half). The campaign play-flow state itself
-    /// lives in `MindCampaign`; this only owns the tile grid the renderer draws.
-    /// Returns `false` when the planet generator or content registry is missing.
+    /// (`Control.playNewSector` world half), preferring an existing sector save
+    /// (`user://saves/sector-<planet>-<id>.msav`, resume) over the preset map
+    /// and the planet generator. The campaign play-flow state itself lives in
+    /// `MindCampaign`; this only owns the tile grid the renderer draws.
+    /// Returns `false` when the planet generator, map and save are all missing.
     #[func]
     pub fn load_sector(&mut self, planet: GString, sector: i32) -> bool {
         if sector < 0 {
             return false;
         }
         let planet_name = planet.to_string();
+        // A new world invalidates the previous campaign runtime.
+        self.sim.ecs.0.remove_resource::<CampaignRuntime>();
         // Take the registry out so the generator can borrow it while the sim is
         // rebuilt, then hand it back (content boot is expensive; never drop it).
         let Some(mut registry) = self.content_snapshot.take() else {
@@ -911,10 +923,17 @@ impl MindSimHost {
             return false;
         };
         const SECTOR_SIZE: i32 = 128;
-        // `World.loadSector`: a preset sector uses its stored designed map
-        // (`SectorPreset.generator` / `FileMapGenerator`); planet sectors fall
-        // back to the planet generator.
-        let loaded = load_preset_map_grid(&planet_name, sector as u16, &mut registry);
+        // `Control.playSector`: an existing sector save is the resume source.
+        let save_path = sector_save_path(&planet_name, sector as u16);
+        let loaded = if std::path::Path::new(&save_path).is_file() {
+            log::info!("load_sector: resuming `{planet_name}:{sector}` from `{save_path}`");
+            load_grid_file(&save_path, &mut registry)
+        } else {
+            // `World.loadSector`: a preset sector uses its stored designed map
+            // (`SectorPreset.generator` / `FileMapGenerator`); planet sectors
+            // fall back to the planet generator.
+            load_preset_map_grid(&planet_name, sector as u16, &mut registry)
+        };
         let generated = if loaded.is_none() {
             mind_core::maps::planet::generate_sector(
                 &planet_name,
@@ -927,11 +946,20 @@ impl MindSimHost {
         } else {
             None
         };
-        self.content_snapshot = Some(registry);
-        let Some(grid) = loaded.or_else(|| generated.map(|generated| generated.grid)) else {
-            log::warn!("load_sector: no map or generator for planet `{planet_name}`");
-            return false;
+        let (grid, rules) = match loaded {
+            Some(loaded) => (loaded.grid, loaded.rules),
+            None => match generated {
+                Some(generated) => (generated.grid, Some(generated.rules)),
+                None => {
+                    self.content_snapshot = Some(registry);
+                    log::warn!("load_sector: no map or generator for planet `{planet_name}`");
+                    return false;
+                }
+            },
         };
+        self.sector_spawns = count_spawns(&grid, &registry);
+        self.sector_rules = rules;
+        self.content_snapshot = Some(registry);
 
         // Reuse a fresh sim and swap in the loaded/generated grid; a new
         // iteration keeps no ECS entities from the previous world.
@@ -956,6 +984,128 @@ impl MindSimHost {
         self.emit_world_changed();
         log::info!("loaded campaign sector `{planet_name}:{sector}`");
         true
+    }
+
+    /// Rules resolved by the last `load_sector` (preset map, save or generator).
+    /// Rust-only seam for `MindCampaign.start_sector`.
+    pub fn last_sector_rules(&self) -> Option<&Rules> {
+        self.sector_rules.as_ref()
+    }
+
+    /// Enemy spawn-overlay count of the last loaded sector grid.
+    pub fn sector_spawn_count(&self) -> i32 {
+        self.sector_spawns
+    }
+
+    /// Installs (replacing any previous) the live campaign runtime resource so
+    /// the `TickSet::Campaign`/`Objectives`/`GameStateCheck` systems run.
+    pub fn install_campaign_runtime(&mut self, runtime: CampaignRuntime) {
+        self.sim.ecs.0.insert_resource(runtime);
+    }
+
+    /// Removes the campaign runtime (menu/abort/new world).
+    pub fn clear_campaign_runtime(&mut self) {
+        self.sim.ecs.0.remove_resource::<CampaignRuntime>();
+    }
+
+    /// Takes the runtime out for host-side bookkeeping.
+    pub fn take_campaign_runtime(&mut self) -> Option<CampaignRuntime> {
+        self.sim.ecs.0.remove_resource::<CampaignRuntime>()
+    }
+
+    /// Puts a bookkept runtime back.
+    pub fn put_campaign_runtime(&mut self, runtime: CampaignRuntime) {
+        self.sim.ecs.0.insert_resource(runtime);
+    }
+
+    /// Registers the live world's cores into the installed session and reports
+    /// the spawn accounting (GAP-9). `apply_loadout` adds the launch loadout to
+    /// the default team's core inventory (fresh launches only).
+    pub fn sync_campaign_session(
+        &mut self,
+        content: &ContentRegistry,
+        apply_loadout: bool,
+    ) -> Option<SessionSync> {
+        let mut runtime = self.take_campaign_runtime()?;
+        let sync = sync_session_with_sim(
+            &mut runtime.session,
+            &mut self.sim.ecs.0,
+            content,
+            self.sector_spawns,
+            apply_loadout,
+        );
+        self.put_campaign_runtime(runtime);
+        Some(sync)
+    }
+
+    /// Applies `Planet.sectorCaptureReplacements` to the loaded tile floors
+    /// (`Logic`'s `SectorCaptureEvent` listener). Returns the replaced count.
+    pub fn apply_capture_replacements(&mut self, pairs: &[(String, String)]) -> i64 {
+        let Some(registry) = self.content_snapshot.as_ref() else {
+            return 0;
+        };
+        let map: Vec<(u16, u16)> = pairs
+            .iter()
+            .filter_map(|(from, to)| {
+                Some((registry.block_id(from)?.get(), registry.block_id(to)?.get()))
+            })
+            .collect();
+        if map.is_empty() {
+            return 0;
+        }
+        let mut replaced = 0i64;
+        for tile in self.sim.grid.tiles.array_mut() {
+            for (from, to) in &map {
+                if tile.floor.get() == *from {
+                    tile.floor = BlockId::new(*to);
+                    replaced += 1;
+                }
+            }
+        }
+        if replaced > 0 {
+            self.world_dirty = true;
+            log::info!("capture replacements: {replaced} floor tile(s) rethemed");
+        }
+        replaced
+    }
+
+    /// Linearly searches the grid for `(x, y, block-id)` pairs of a rectangle;
+    /// Rust-only seam for `MindCampaign.write_schematic_selection`.
+    pub fn tile_region(&self, x0: i32, y0: i32, x1: i32, y1: i32) -> Vec<(i16, i16, u16)> {
+        let (min_x, max_x) = (x0.min(x1), x0.max(x1));
+        let (min_y, max_y) = (y0.min(y1), y0.max(y1));
+        let mut out = Vec::new();
+        for y in min_y..=max_y {
+            for x in min_x..=max_x {
+                let Ok(x16) = i16::try_from(x) else { continue };
+                let Ok(y16) = i16::try_from(y) else { continue };
+                if let Some(block) = self
+                    .sim
+                    .grid
+                    .block_at(mind_core::world::TilePos::new(x16, y16))
+                {
+                    out.push((x16, y16, block.raw()));
+                }
+            }
+        }
+        out
+    }
+
+    /// Immediate block placement at a tile (schematic placement seam). The P0
+    /// `Sim::apply` path carries rotation `0` only; rotated schematics degrade
+    /// to unrotated until the rotate relay command lands (I-2).
+    pub fn place_block_at(&mut self, x: i16, y: i16, block: BlockId, rot: i8) -> bool {
+        let _ = rot;
+        match self.sim.apply(Command::Place { x, y, block }) {
+            Ok(()) => {
+                self.world_dirty = true;
+                true
+            }
+            Err(error) => {
+                log::warn!("schematic place at ({x}, {y}) rejected: {error}");
+                false
+            }
+        }
     }
 
     /// Name of the currently selected block.
@@ -1210,6 +1360,25 @@ fn globalize(path: &GString) -> std::path::PathBuf {
     )
 }
 
+/// A grid loaded from a save/preset-map file plus the rules the container
+/// carried (MSAV map rules / MGRS save rules), when any.
+struct LoadedGrid {
+    grid: WorldGrid,
+    rules: Option<Rules>,
+}
+
+/// Native path of a campaign sector save (`user://saves/sector-<planet>-<id>.msav`).
+fn sector_save_path(planet_name: &str, sector: u16) -> String {
+    let root = ProjectSettings::singleton()
+        .globalize_path("user://")
+        .to_string();
+    std::path::Path::new(&root)
+        .join("saves")
+        .join(format!("sector-{planet_name}-{sector}.msav"))
+        .to_string_lossy()
+        .into_owned()
+}
+
 /// `World.loadSector` preset branch: loads the preset's `maps/<planet>/<map>.msav`
 /// through the save reader into a fresh [`WorldGrid`]. Returns `None` when the
 /// sector cell has no preset, the file is absent, or the load fails (the caller
@@ -1218,7 +1387,7 @@ fn load_preset_map_grid(
     planet_name: &str,
     sector: u16,
     registry: &mut ContentRegistry,
-) -> Option<WorldGrid> {
+) -> Option<LoadedGrid> {
     // Resolve `sector.preset` and its map name (`SectorPreset.initialize`).
     let (owner_name, map_name) = {
         let planet = registry.planet_by_name(planet_name)?;
@@ -1242,9 +1411,22 @@ fn load_preset_map_grid(
         log::warn!("load_sector: preset map missing `{path}`");
         return None;
     }
-    let bytes = FileAccess::get_file_as_bytes(&path);
+    let loaded = load_grid_file(&path, registry)?;
+    log::info!(
+        "load_sector: loaded preset map `{owner_name}/{map_name}` ({}x{})",
+        loaded.grid.tiles.width,
+        loaded.grid.tiles.height
+    );
+    Some(loaded)
+}
+
+/// Reads an `.msav`/`MGRS` file into a fresh [`WorldGrid`] through the save
+/// reader, preserving the container's rules.
+fn load_grid_file(path: &str, registry: &mut ContentRegistry) -> Option<LoadedGrid> {
+    let bytes = FileAccess::get_file_as_bytes(path);
     let mut grid = WorldGrid::new(0, 0);
     grid.begin_map_load();
+    let rules;
     let result = {
         let mut context = EditorContext::new(&mut grid, registry);
         let mut state = SaveReadState {
@@ -1252,19 +1434,29 @@ fn load_preset_map_grid(
             content: Some(registry),
             ..SaveReadState::default()
         };
-        SaveIo::load_bytes(bytes.as_slice(), &mut state)
+        let result = SaveIo::load_bytes(bytes.as_slice(), &mut state);
+        rules = state.rules.clone();
+        result
     };
     if let Err(error) = result {
-        log::warn!("load_sector: preset map `{owner_name}/{map_name}` failed: {error}");
+        log::warn!("load_sector: `{path}` failed: {error}");
         return None;
     }
     grid.end_map_load(registry);
-    log::info!(
-        "load_sector: loaded preset map `{owner_name}/{map_name}` ({}x{})",
-        grid.tiles.width,
-        grid.tiles.height
-    );
-    Some(grid)
+    Some(LoadedGrid { grid, rules })
+}
+
+/// Counts enemy spawn overlays (`BlockPalette.is_spawn`) on a loaded grid.
+fn count_spawns(grid: &WorldGrid, content: &ContentRegistry) -> i32 {
+    grid.tiles
+        .array()
+        .iter()
+        .filter(|tile| {
+            content
+                .block(tile.overlay)
+                .is_some_and(|def| def.kind == BlockKind::SpawnBlock)
+        })
+        .count() as i32
 }
 
 /// Parses `--capture <path>` / `--capture=<path>` from the user args (after `--`).
