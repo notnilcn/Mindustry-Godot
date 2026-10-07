@@ -50,28 +50,24 @@ func _refresh_registry() -> void:
 		preview.call("refresh")
 
 
-## Merges the live registry rows (`MindPreview.maps_list`) with the read-model
-## built-ins, keeping the first row per name (custom maps win a name clash).
+## The live registry rows (`MindPreview.maps_list`). The read-model built-ins
+## are a fallback for an empty registry (missing assets/previews).
 func _maps() -> Array:
 	var rows: Array = []
-	var seen := {}
 	var preview := get_node_or_null("/root/Spine/MindPreview")
 	if preview != null and preview.has_method("maps_list"):
 		var maps: Variant = preview.call("maps_list")
 		if maps is Array:
 			for map_variant in maps:
 				var map: Dictionary = map_variant
-				var name := str(map.get("name", ""))
-				if name.is_empty():
-					continue
-				rows.append(map)
-				seen[name.to_lower()] = true
+				if not str(map.get("name", "")).is_empty():
+					rows.append(map)
+	if not rows.is_empty():
+		return rows
 	for row_variant in campaign_section("maps"):
 		var row: Dictionary = row_variant
-		var name := str(row.get("name", ""))
-		if name.is_empty() or seen.has(name.to_lower()):
-			continue
-		rows.append(row)
+		if not str(row.get("name", "")).is_empty():
+			rows.append(row)
 	return rows
 
 
