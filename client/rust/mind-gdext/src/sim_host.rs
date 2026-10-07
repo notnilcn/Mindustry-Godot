@@ -946,10 +946,10 @@ impl MindSimHost {
         } else {
             None
         };
-        let (grid, rules) = match loaded {
-            Some(loaded) => (loaded.grid, loaded.rules),
+        let (grid, rules, pending_buildings) = match loaded {
+            Some(loaded) => (loaded.grid, loaded.rules, loaded.pending_buildings),
             None => match generated {
-                Some(generated) => (generated.grid, Some(generated.rules)),
+                Some(generated) => (generated.grid, Some(generated.rules), Vec::new()),
                 None => {
                     self.content_snapshot = Some(registry);
                     log::warn!("load_sector: no map or generator for planet `{planet_name}`");
@@ -975,6 +975,13 @@ impl MindSimHost {
         // resources are installed before any entity exists so ECS indices stay
         // stable.
         self.install_live_block_runtime();
+        // `World.loadMap`'s building half: the reader decoded the map's tile
+        // entities into the pending queue while the grid was built, so spawn
+        // the ECS buildings (cores included) the campaign runtime/teams read.
+        let materialized = self.sim.materialize_map_buildings(&pending_buildings);
+        if materialized > 0 {
+            log::info!("load_sector: materialized {materialized} map building(s)");
+        }
         // The fresh `Sim` carries no IO executor; re-wire the seams so a queued
         // `request_save`/`request_load` drains at the next `IoSet` boundary.
         self.install_sim_seams();
@@ -1406,6 +1413,8 @@ fn globalize(path: &GString) -> std::path::PathBuf {
 struct LoadedGrid {
     grid: WorldGrid,
     rules: Option<Rules>,
+    /// Decoded building payloads `(tile index, base)` awaiting ECS spawn.
+    pending_buildings: Vec<(usize, mind_core::world::building_io::DecodedBase)>,
 }
 
 /// Native path of a campaign sector save (`user://saves/sector-<planet>-<id>.msav`).
@@ -1467,24 +1476,33 @@ fn load_grid_file(path: &str, registry: &mut ContentRegistry) -> Option<LoadedGr
     let bytes = FileAccess::get_file_as_bytes(path);
     let mut grid = WorldGrid::new(0, 0);
     grid.begin_map_load();
-    let rules;
-    let result = {
+    let (result, rules, pending_buildings) = {
         let mut context = EditorContext::new(&mut grid, registry);
-        let mut state = SaveReadState {
-            context: Some(&mut context),
-            content: Some(registry),
-            ..SaveReadState::default()
+        let (result, rules) = {
+            let mut state = SaveReadState {
+                context: Some(&mut context),
+                content: Some(registry),
+                ..SaveReadState::default()
+            };
+            let result = SaveIo::load_bytes(bytes.as_slice(), &mut state);
+            (result, state.rules.clone())
         };
-        let result = SaveIo::load_bytes(bytes.as_slice(), &mut state);
-        rules = state.rules.clone();
-        result
+        (
+            result,
+            rules,
+            std::mem::take(&mut context.pending_buildings),
+        )
     };
     if let Err(error) = result {
         log::warn!("load_sector: `{path}` failed: {error}");
         return None;
     }
     grid.end_map_load(registry);
-    Some(LoadedGrid { grid, rules })
+    Some(LoadedGrid {
+        grid,
+        rules,
+        pending_buildings,
+    })
 }
 
 /// Counts enemy spawn overlays (`BlockPalette.is_spawn`) on a loaded grid.

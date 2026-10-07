@@ -86,12 +86,27 @@ impl MapSource for EcsMapSource<'_> {
 
     fn write_building(
         &self,
-        _index: usize,
-        _chunk: &mut crate::io::wire::WireWriter,
+        index: usize,
+        chunk: &mut crate::io::wire::WireWriter,
     ) -> crate::io::IoResult<()> {
-        // Building tile-entity chunks are a plan-07/04 seam; the ECS-aware
-        // source currently projects presence/team/center only.
-        Ok(())
+        let Some(entity) = self.grid.tiles.geti(index).build else {
+            return Err(crate::io::IoError::corrupt(
+                "missing building at center tile",
+            ));
+        };
+        // P0 entities carry only `BuildingComp`; the full `writeBase` body needs
+        // the `Building` component the live block runtime attaches (plan 07).
+        if self
+            .ecs
+            .get::<crate::entities::comp::Building>(entity)
+            .is_none()
+        {
+            return Ok(());
+        }
+        // Tile-entity base revision paired with `read_base`: 3 reads enabled,
+        // module bits and the efficiency bytes that `write_base` emits.
+        chunk.b(3);
+        crate::world::building_io::BuildingCodec::write(self.ecs, entity, chunk, false)
     }
 
     fn core_team(&self, index: usize) -> Option<u8> {

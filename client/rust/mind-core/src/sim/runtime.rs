@@ -36,6 +36,7 @@ use crate::world::block::{BlockError, BlockTable};
 use crate::world::blocks::power::{
     PowerGrids, PowerNodeConfig, power_graph_removed, update_power_graph,
 };
+use crate::world::building_io::{self, DecodedBase};
 use crate::world::config::ConfigValue as WorldConfigValue;
 use crate::world::limits::{BlockCounter, BuildRules};
 use crate::world::modules::{ItemModule, LiquidModule, ModuleDims, PowerModule};
@@ -357,6 +358,70 @@ impl SimRuntime {
         Some(block)
     }
 
+    /// `World.loadMap`'s building half: spawns the ECS building entities for a
+    /// grid whose tile blocks were read from a map/save.
+    ///
+    /// `pending` is the reader's decoded payload queue (`(tile index, base)`);
+    /// each entry is a multiblock/single-block center, so the payload drives the
+    /// tile-op spawn (team/rotation/health/modules applied from
+    /// [`DecodedBase`]). Proximity and power links are rebuilt once afterwards,
+    /// mirroring `World.endMapLoad`. Returns the number of entities spawned.
+    pub fn materialize_buildings(
+        &mut self,
+        ecs: &mut World,
+        grid: &mut WorldGrid,
+        pending: &[(usize, DecodedBase)],
+    ) -> usize {
+        // Tile blocks are already assigned; suppress the tile-change counters
+        // while the entity links are attached (`World.generating`).
+        let generating = grid.generating;
+        grid.generating = true;
+        let mut log = WorldEventLog::default();
+        let mut spawned: Vec<Entity> = Vec::new();
+        for (index, decoded) in pending {
+            let Some(tile) = grid.tiles.array().get(*index) else {
+                continue;
+            };
+            if tile.build.is_some() {
+                continue;
+            }
+            let block = tile.block;
+            if block == BlockId::AIR || !crate::world::block_has_building(&self.content, block) {
+                continue;
+            }
+            let (x, y) = (tile.x, tile.y);
+            {
+                let mut ctx = WorldCtx {
+                    grid: &mut *grid,
+                    content: &self.content,
+                    ecs: &mut *ecs,
+                    hooks: &self.hooks,
+                    render: &self.render,
+                    log: &mut log,
+                };
+                ctx.set_block(x, y, block, decoded.team, decoded.rotation);
+            }
+            let Some(entity) = grid.entity_at(TilePos::new(x, y)) else {
+                continue;
+            };
+            let max_health = self
+                .content
+                .block(block)
+                .map(|def| def.health.max(0) as f32)
+                .unwrap_or(f32::MAX);
+            building_io::apply_base(ecs, entity, decoded, max_health);
+            spawned.push(entity);
+        }
+        grid.generating = generating;
+        for entity in &spawned {
+            let _ = update_proximity(ecs, grid, &self.content, *entity);
+        }
+        for entity in &spawned {
+            self.merge_power_graph(ecs, grid, *entity);
+        }
+        spawned.len()
+    }
+
     /// Recomputes proximity for the tile at `(x, y)` and its four neighbors.
     fn refresh_proximity_at(&self, world: &mut World, grid: &WorldGrid, x: i16, y: i16) {
         if let Some(entity) = grid.entity_at(TilePos::new(x, y)) {
@@ -531,6 +596,22 @@ impl Sim {
         }
     }
 
+    /// Materializes the ECS buildings for a loaded grid (map/save reader's
+    /// decoded payload queue). No-op without the live block runtime; returns the
+    /// number of entities spawned.
+    pub fn materialize_map_buildings(&mut self, pending: &[(usize, DecodedBase)]) -> usize {
+        let Sim {
+            grid,
+            ecs,
+            block_runtime,
+            ..
+        } = self;
+        let Some(runtime) = block_runtime.as_mut() else {
+            return 0;
+        };
+        runtime.materialize_buildings(&mut ecs.0, grid, pending)
+    }
+
     /// Rebuilds every power graph from proximity (`World.endMapLoad` path).
     pub fn rebuild_power_graphs(&mut self) {
         let Some(mut graphs) = self.ecs.0.remove_resource::<PowerGrids>() else {
@@ -538,5 +619,72 @@ impl Sim {
         };
         graphs.rebuild_all(&mut self.ecs.0, &self.grid);
         self.ecs.0.insert_resource(graphs);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+    use crate::ecs::BuildingComp;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::sync_session_with_sim;
+
+    fn registry() -> ContentRegistry {
+        create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+            .expect("content boot")
+    }
+
+    /// A loaded map carries tile blocks with no ECS entities; materializing the
+    /// reader's decoded payload queue must link a live building and make the
+    /// session sync see the map's default-team core (EV-0037).
+    #[test]
+    fn materialize_links_loaded_map_buildings() {
+        let content = registry();
+        let core = content.block_id("core-shard").expect("core-shard");
+        let mut sim = Sim::new(1, 16, 16, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("runtime");
+        let pos = TilePos::new(5, 6);
+        // `MapIO`/`Context` writes the block without the entity.
+        sim.grid.set_block(pos, core, 1, 0).expect("tile block");
+        assert_eq!(sim.group_counts().get("build"), Some(&0));
+
+        let pending = [(
+            sim.grid.index(pos).expect("index"),
+            DecodedBase {
+                team: 1,
+                rotation: 0,
+                health: 250.0,
+                ..DecodedBase::default()
+            },
+        )];
+        assert_eq!(sim.materialize_map_buildings(&pending), 1);
+        assert_eq!(sim.group_counts().get("build"), Some(&1));
+        let entity = sim.grid.entity_at(pos).expect("entity linked");
+        let comp = sim.ecs.0.get::<BuildingComp>(entity).expect("BuildingComp");
+        assert_eq!(comp.team.0, 1);
+        assert_eq!(comp.block, core);
+        assert_eq!(comp.pos, pos);
+
+        let mut session = PlaySession::new(Rules {
+            waves: true,
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        let sync = sync_session_with_sim(&mut session, &mut sim.ecs.0, &content, 0, false);
+        assert_eq!(sync.player_cores, 1);
+        assert_eq!(session.player_core_count(), 1);
+    }
+
+    /// Without the live runtime the payload queue is inert (P0 spine unchanged).
+    #[test]
+    fn materialize_is_a_noop_without_the_runtime() {
+        let mut sim = Sim::new(1, 8, 8, BlockId::AIR, BlockId::AIR);
+        assert_eq!(
+            sim.materialize_map_buildings(&[(0, DecodedBase::default())]),
+            0
+        );
     }
 }

@@ -285,6 +285,42 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    /// A live-runtime building (plan 07 `Building` + modules) must write a
+    /// decodable tile-entity chunk, so a materialized map/sector core survives
+    /// the auto-save round trip (EV-0037).
+    #[test]
+    fn live_runtime_core_save_then_load_roundtrips() {
+        let mut sim = Sim::new(1, 16, 16, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("runtime");
+        let core = sim.content().id("core-shard").expect("core-shard");
+        sim.apply(Command::Place {
+            x: 5,
+            y: 5,
+            block: core,
+        })
+        .expect("place core");
+        sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
+
+        let path = temp_path("live-core-roundtrip");
+        let _ = std::fs::remove_file(&path);
+        sim.request_save(&path, false);
+        sim.tick().expect("capture tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses.len(), 1, "one save response: {responses:?}");
+        assert_eq!(responses[0].status, IoStatus::Ok);
+        assert!(path.is_file(), "save file written");
+
+        sim.grid.fill(BlockId::AIR, BlockId::AIR);
+        sim.request_load(&path);
+        sim.tick().expect("apply tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses.len(), 1, "one load response: {responses:?}");
+        assert_eq!(responses[0].status, IoStatus::Ok, "save reloads");
+        assert_eq!(sim.grid.block_at(TilePos::new(5, 5)), Some(core));
+
+        let _ = std::fs::remove_file(&path);
+    }
+
     #[test]
     fn load_of_a_missing_file_is_a_failed_response() {
         let mut sim = Sim::new(1, 4, 4, BlockId::AIR, BlockId::AIR);
