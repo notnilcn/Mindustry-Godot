@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "updated": "2026-10-07T02:39:41+00:00",
+  "updated": "2026-10-07T02:57:00+00:00",
   "findings": [
     {
       "id": "EV-0001",
@@ -1066,18 +1066,37 @@
       "id": "EV-0036",
       "area": "game/campaign",
       "severity": "S2",
-      "status": "open",
+      "status": "verified-fixed",
       "title": "Campaign save_slot/load_slot never write or read a file after a sector launch (IO queue never drains)",
       "expected": "Java: launching a sector and saving writes user://saves/<name>.msav; the slot lists and can be resumed",
       "actual": "Godot: MindCampaign.save_slot('evalws2') returns true but host.io_pending() stays 1 and user://saves/evalws2.msav never appears after 130 ticks; list_save_slots() stays []",
       "repro": "launch serpulo:170, call MindCampaign.save_slot('evalws2'), SimHost.step(120), then FileAccess.file_exists('user://saves/evalws2.msav')==false and io_pending()==1",
       "evidence": [
-        "runs/l2-20261007-064916-campaign_spine/godot/state-03-save-never-drains.json"
+        "runs/l2-20261007-064916-campaign_spine/godot/state-03-save-never-drains.json",
+        "client/rust/mind-gdext/src/sim_host.rs:261",
+        "client/rust/mind-gdext/src/sim_host.rs:883",
+        "client/rust/mind-gdext/src/sim_host.rs:941",
+        "client/rust/mind-gdext/src/campaign.rs:456",
+        "client/rust/mind-gdext/src/campaign.rs:466",
+        "client/rust/mind-gdext/src/campaign.rs:490",
+        "client/rust/mind-core/src/io/sim_io.rs:221",
+        "client/rust/mind-core/src/io/save/slot.rs:240",
+        "runs/l3-20261007-125520-ev0036/godot/state-01-load-sector.json",
+        "runs/l3-20261007-125520-ev0036/godot/state-03-save-pending.json",
+        "runs/l3-20261007-125520-ev0036/godot/state-04-step-drain.json",
+        "runs/l3-20261007-125520-ev0036/godot/state-05-file-slots.json",
+        "runs/l3-20261007-125520-ev0036/godot/state-06-load-drain.json",
+        "runs/l3-20261007-125520-ev0036/godot/step-07-game.png",
+        "runs/l3-20261007-125520-ev0036/godot/game.log"
       ],
-      "notes": [],
+      "notes": [
+        "2026-10-07T02:45:36+00:00: claimed by loop-3",
+        "2026-10-07T02:54:36+00:00: [code] fbc90f7 re-wires the per-sim seams: sim_host.rs:261 install_sim_seams now installs GlobalVars + SimIoHandler + AudioSink, and is called from bootstrap:215, load_scenario:883 and load_sector:941 so a fresh Sim replacement always carries the IO executor; previously only bootstrap had it, so a queued save never drained. campaign.rs:449 host() resolves /root/Spine/SimHost (scene game.tscn:9-11, live path planet_dialog.gd:543-548 load_sector then start_sector). save_slot:466 now queues request_save(user://saves/<name>.msav,false) and load_slot:483 request_load, both globalized by sim_host.rs:1171 and fulfilled by SimIoHandler::capture/apply (mind-core/io/sim_io.rs:199-229) at the IoSet boundary pumped by Sim::tick (io_set.rs:218). list_save_slots:490 lists the same globalized user:// dir; slot.rs:240 empty-dir guard returns [] instead of panicking on chunks(0). Verified: cargo check -p mind-gdext passes; io::save::slot::tests::empty_dir_lists_no_slots passes.",
+        "2026-10-07T02:56:22+00:00: [loop 3] Re-ran the exact 7-step repro at commit fbc90f7 (loop 3, display :12, Godot pid 2112919, worktree Mindustry-Godot-loop3). load_sector/start_sector true; save_slot('evalslot') true with io_pending=1, then step drains to 0; user://saves/evalslot.msav exists (16434 B, sha256 c82299c1...) and list_save_slots()=1; load_slot true with before=1/after=0. No IO/save/campaign errors in the log. Only pre-existing boot-time asset manifest [E] entries, unrelated."
+      ],
       "plan": "12",
       "first_seen": "2026-10-06T20:54:35+00:00",
-      "last_verified": "2026-10-06T20:54:35+00:00",
+      "last_verified": "2026-10-07T02:56:22+00:00",
       "found_by_loop": "2"
     },
     {
@@ -1166,7 +1185,7 @@
       "id": "EV-0041",
       "area": "ui/campaign",
       "severity": "S1",
-      "status": "in-progress",
+      "status": "open",
       "title": "Campaign Difficulty dialog errors on a missing MindCell.left() and freezes the client",
       "expected": "Java: Play > Campaign > Serpulo > OK, then the Difficulty rail button opens the CampaignRules dialog with 5 difficulty buttons (casual/easy/normal/hard/eradication) and the 5 rule toggles; the client keeps running",
       "actual": "Godot: opening campaign_rules logs 'Invalid call. Nonexistent function \"left\" in base \"RefCounted (MindCell)\"' from campaign_rules_dialog.gd:82 (_rebuild, the first rule toggle); the full-screen dialog opens with no body and Engine.get_process_frames() freezes (2371 before and after a 2s wait); any later MindUi method call panics 'Gd<T>::bind() failed, already bound; T = mind_gdext::ui::ui_host::MindUi'",
@@ -1178,13 +1197,13 @@
         "runs/l6-20261007-071337-campaign_planet/godot/state-03-sector-panel.json"
       ],
       "notes": [
-        "2026-10-07T02:39:41+00:00: claimed by loop-3"
+        "2026-10-07T02:39:41+00:00: claimed by loop-3",
+        "2026-10-07T02:45:26+00:00: released: loop-3 scope rotated to game/campaign; ui/campaign claim stale from the previous loop-3 run (drain-parallel rotated scope)"
       ],
       "plan": "14",
       "first_seen": "2026-10-06T21:36:58+00:00",
-      "last_verified": "2026-10-07T02:39:41+00:00",
-      "found_by_loop": "6",
-      "owner": "loop-3"
+      "last_verified": "2026-10-07T02:45:26+00:00",
+      "found_by_loop": "6"
     },
     {
       "id": "EV-0042",
@@ -1286,17 +1305,19 @@
         "../Mindustry/core/src/mindustry/core/Logic.java:608-617"
       ],
       "notes": [
-        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending."
+        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
+        "2026-10-07T02:45:18+00:00: claimed by loop-2",
+        "2026-10-07T02:45:21+00:00: released: in scope but not independently fixable in one iteration: the live Sim schedule has no campaign-model resource and no building/unit entities, so wiring check_game_state/Objectives/WaveTimer now would only observe an empty world (repro itself says 'needs EV-0035 bootstrap fix first'). Taking the prerequisite live block runtime (EV-0047) this iteration; re-claim EV-0046 after the runtime lands."
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
-      "last_verified": "2026-10-06T23:24:28+00:00"
+      "last_verified": "2026-10-07T02:45:21+00:00"
     },
     {
       "id": "EV-0047",
       "area": "game/sim",
       "severity": "S1",
-      "status": "open",
+      "status": "code-verified",
       "title": "Placed buildings are inert: no mining, transport, crafting, power or block updates",
       "expected": "Logic.java:464 updateEntities updates every entity each tick; BuildingComp.update/updateConsumption drive mining, transport, crafting, power",
       "actual": "Sim::apply(Place) spawns only BuildingComp (sim/mod.rs:249-274); load_sector swaps a raw grid with no BlockTable/behavior (sim_host.rs:918-925); a placed drill/conveyor sets a tile and does nothing (production.rs:237-251)",
@@ -1308,14 +1329,20 @@
         "client/rust/mind-gdext/src/sim_host.rs:918-925",
         "client/rust/mind-core/src/world/behavior/production.rs:237-251",
         "../Mindustry/core/src/mindustry/core/Logic.java:464",
-        "../Mindustry/core/src/mindustry/entities/comp/BuildingComp.java"
+        "../Mindustry/core/src/mindustry/entities/comp/BuildingComp.java",
+        "client/rust/mind-core/src/sim/runtime.rs",
+        "client/rust/mind-core/src/sim/schedule.rs",
+        "client/rust/mind-gdext/src/sim_host.rs",
+        "commit 5a9e9ee"
       ],
       "notes": [
-        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending."
+        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
+        "2026-10-07T02:45:18+00:00: claimed by loop-2",
+        "2026-10-07T02:55:13+00:00: [loop 2] Commit 5a9e9ee closes the code seam. Sim::apply(Command::Place) routes through SimRuntime::place and Command::Break through runtime_break when installed (client/rust/mind-core/src/sim/mod.rs:262-327), and Sim::command routes the relay SimCommand::Place/Configure through the same runtime (sim/mod.rs:663-725). install_block_runtime_from provisions BlockTable/BuildRules/BuildClock/TileBuilds/ModuleDims/PowerGrids and spawns full plan-07 entities via BlockInstance::spawn + SimHooks::new_building (sim/runtime.rs:488-524, 94-124). sim/schedule.rs:406-414 registers update_buildings (UpdateBuildings) and update_power_graphs (UpdatePowerGraph); both are no-ops without the runtime resources (world/update.rs:194-197, 270-276) and the upstream powerGraph-before-build order is preserved (Logic.java:486-492). MindSimHost installs the runtime in bootstrap() (default spine) and load_sector() (campaign) (mind-gdext/src/sim_host.rs:215, 930); load_scenario deliberately uses Sim::from_scenario without an install (sim_host.rs:846). Residuals for in-engine verification: (1) load_scenario/from_scenario still runs the frozen P0 path, so blocks placed during scenario playback stay inert by design; (2) the default spine world is flat floor=air (sim_host.rs:87), so a drill placed there has no dominant_item regardless of the runtime -- the repro needs an ore floor (e.g. via load_sector); (3) blocks pre-existing in a loaded sector grid have no ECS entity (sim_host.rs:912-920 assigns a raw grid), so only player-placed blocks exercise the runtime. cargo test -p mind-core sim:: = 62 passed / 0 failed; P0 golden spine_place_break still passes (a1a7b96167c9718d)."
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
-      "last_verified": "2026-10-06T23:24:28+00:00"
+      "last_verified": "2026-10-07T02:55:13+00:00"
     },
     {
       "id": "EV-0048",
@@ -1347,7 +1374,7 @@
       "id": "EV-0049",
       "area": "game/campaign",
       "severity": "S2",
-      "status": "open",
+      "status": "in-progress",
       "title": "Launch ignores the sector preset rules: waves stay off and winWave stays 0",
       "expected": "World.java:266,292,299-330 setSectorRules applies the preset rules and planet.applyRules; Control.java:569-601 playNewSector carries params (captureWave -> winWave)",
       "actual": "campaign.rs:124-155 calls play_new_sector with default Rules; play.rs:269 only sets rules.sector; the preset capture_wave is stored at planet.rs:156 but never applied; defaults are waves=false/win_wave=0 (rules.rs:665,723)",
@@ -1365,11 +1392,13 @@
         "../Mindustry/core/src/mindustry/core/Control.java:569-601"
       ],
       "notes": [
-        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending."
+        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
+        "2026-10-07T02:57:00+00:00: claimed by loop-3"
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
-      "last_verified": "2026-10-06T23:24:28+00:00"
+      "last_verified": "2026-10-07T02:57:00+00:00",
+      "owner": "loop-3"
     },
     {
       "id": "EV-0050",
