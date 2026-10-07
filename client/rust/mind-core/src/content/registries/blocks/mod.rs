@@ -1290,6 +1290,8 @@ pub struct BlockSpec {
     pub region: Option<&'static str>,
     /// Disable icon generation.
     pub generate_icons: Option<bool>,
+    /// `UnlockableContent.alwaysUnlocked` (bypasses the stored unlock flag).
+    pub always_unlocked: Option<bool>,
     /// Map color.
     pub map_color: Option<Rgba>,
     /// Use this block's color in the minimap.
@@ -1414,6 +1416,7 @@ impl Default for BlockSpec {
             fog_radius: None,
             region: None,
             generate_icons: None,
+            always_unlocked: None,
             map_color: None,
             has_color: None,
             square_sprite: None,
@@ -2381,6 +2384,9 @@ impl BlockDef {
         if let Some(generate) = generate_icons {
             def.unlock.generate_icons = generate;
         }
+        if let Some(always_unlocked) = spec.always_unlocked {
+            def.unlock.always_unlocked = always_unlocked;
+        }
         Ok(def)
     }
 
@@ -3005,9 +3011,7 @@ pub(crate) fn post_init_link(registry: &mut ContentRegistry) -> Result<(), Conte
     for (index, shown) in assignments {
         if let Some(block) = registry.blocks_mut().get_mut(index) {
             for planet in shown {
-                if !block.unlock.shown_planets.contains(&planet) {
-                    block.unlock.shown_planets.push(planet);
-                }
+                block.unlock.add_shown_planet(planet);
             }
         }
     }
@@ -3197,6 +3201,8 @@ mod tests {
         assert_eq!(core.priority, TARGET_PRIORITY_CORE);
         assert_eq!(core.unit_cap_modifier, 8);
         assert!(core.solid && core.update && core.has_items);
+        // `coreShard.alwaysUnlocked = true` (Blocks.java:3147).
+        assert!(core.unlock.always_unlocked && core.unlock.unlocked());
 
         let duo = get("duo");
         assert!(duo.flags.contains(&BlockFlag::Turret));
@@ -3219,6 +3225,10 @@ mod tests {
         assert!(power_source.outputs_power && !power_source.consumes_power);
         assert_eq!(power_source.build_visibility, BuildVisibility::SandboxOnly);
         assert!(power_source.destructible && power_source.configurable);
+        // Sandbox/logic blocks are `alwaysUnlocked` upstream (Blocks.java:6750+).
+        assert!(power_source.unlock.always_unlocked);
+        assert!(get("target-dummy").unlock.always_unlocked);
+        assert!(get("heat-source").unlock.always_unlocked);
 
         let processor = get("world-processor");
         assert_eq!(processor.group, BlockGroup::Logic);

@@ -36,6 +36,7 @@ use crate::world::block::{BlockError, BlockTable};
 use crate::world::blocks::power::{
     PowerGrids, PowerNodeConfig, power_graph_removed, update_power_graph,
 };
+use crate::world::building_io::{self, DecodedBase};
 use crate::world::config::ConfigValue as WorldConfigValue;
 use crate::world::limits::{BlockCounter, BuildRules};
 use crate::world::modules::{ItemModule, LiquidModule, ModuleDims, PowerModule};
@@ -357,6 +358,70 @@ impl SimRuntime {
         Some(block)
     }
 
+    /// `World.loadMap`'s building half: spawns the ECS building entities for a
+    /// grid whose tile blocks were read from a map/save.
+    ///
+    /// `pending` is the reader's decoded payload queue (`(tile index, base)`);
+    /// each entry is a multiblock/single-block center, so the payload drives the
+    /// tile-op spawn (team/rotation/health/modules applied from
+    /// [`DecodedBase`]). Proximity and power links are rebuilt once afterwards,
+    /// mirroring `World.endMapLoad`. Returns the number of entities spawned.
+    pub fn materialize_buildings(
+        &mut self,
+        ecs: &mut World,
+        grid: &mut WorldGrid,
+        pending: &[(usize, DecodedBase)],
+    ) -> usize {
+        // Tile blocks are already assigned; suppress the tile-change counters
+        // while the entity links are attached (`World.generating`).
+        let generating = grid.generating;
+        grid.generating = true;
+        let mut log = WorldEventLog::default();
+        let mut spawned: Vec<Entity> = Vec::new();
+        for (index, decoded) in pending {
+            let Some(tile) = grid.tiles.array().get(*index) else {
+                continue;
+            };
+            if tile.build.is_some() {
+                continue;
+            }
+            let block = tile.block;
+            if block == BlockId::AIR || !crate::world::block_has_building(&self.content, block) {
+                continue;
+            }
+            let (x, y) = (tile.x, tile.y);
+            {
+                let mut ctx = WorldCtx {
+                    grid: &mut *grid,
+                    content: &self.content,
+                    ecs: &mut *ecs,
+                    hooks: &self.hooks,
+                    render: &self.render,
+                    log: &mut log,
+                };
+                ctx.set_block(x, y, block, decoded.team, decoded.rotation);
+            }
+            let Some(entity) = grid.entity_at(TilePos::new(x, y)) else {
+                continue;
+            };
+            let max_health = self
+                .content
+                .block(block)
+                .map(|def| def.health.max(0) as f32)
+                .unwrap_or(f32::MAX);
+            building_io::apply_base(ecs, entity, decoded, max_health);
+            spawned.push(entity);
+        }
+        grid.generating = generating;
+        for entity in &spawned {
+            let _ = update_proximity(ecs, grid, &self.content, *entity);
+        }
+        for entity in &spawned {
+            self.merge_power_graph(ecs, grid, *entity);
+        }
+        spawned.len()
+    }
+
     /// Recomputes proximity for the tile at `(x, y)` and its four neighbors.
     fn refresh_proximity_at(&self, world: &mut World, grid: &WorldGrid, x: i16, y: i16) {
         if let Some(entity) = grid.entity_at(TilePos::new(x, y)) {
@@ -531,6 +596,22 @@ impl Sim {
         }
     }
 
+    /// Materializes the ECS buildings for a loaded grid (map/save reader's
+    /// decoded payload queue). No-op without the live block runtime; returns the
+    /// number of entities spawned.
+    pub fn materialize_map_buildings(&mut self, pending: &[(usize, DecodedBase)]) -> usize {
+        let Sim {
+            grid,
+            ecs,
+            block_runtime,
+            ..
+        } = self;
+        let Some(runtime) = block_runtime.as_mut() else {
+            return 0;
+        };
+        runtime.materialize_buildings(&mut ecs.0, grid, pending)
+    }
+
     /// Rebuilds every power graph from proximity (`World.endMapLoad` path).
     pub fn rebuild_power_graphs(&mut self) {
         let Some(mut graphs) = self.ecs.0.remove_resource::<PowerGrids>() else {
@@ -538,5 +619,186 @@ impl Sim {
         };
         graphs.rebuild_all(&mut self.ecs.0, &self.grid);
         self.ecs.0.insert_resource(graphs);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+    use crate::ecs::BuildingComp;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::sync_session_with_sim;
+
+    fn registry() -> ContentRegistry {
+        create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+            .expect("content boot")
+    }
+
+    /// A loaded map carries tile blocks with no ECS entities; materializing the
+    /// reader's decoded payload queue must link a live building and make the
+    /// session sync see the map's default-team core (EV-0037).
+    #[test]
+    fn materialize_links_loaded_map_buildings() {
+        let content = registry();
+        let core = content.block_id("core-shard").expect("core-shard");
+        let mut sim = Sim::new(1, 16, 16, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("runtime");
+        let pos = TilePos::new(5, 6);
+        // `MapIO`/`Context` writes the block without the entity.
+        sim.grid.set_block(pos, core, 1, 0).expect("tile block");
+        assert_eq!(sim.group_counts().get("build"), Some(&0));
+
+        let pending = [(
+            sim.grid.index(pos).expect("index"),
+            DecodedBase {
+                team: 1,
+                rotation: 0,
+                health: 250.0,
+                ..DecodedBase::default()
+            },
+        )];
+        assert_eq!(sim.materialize_map_buildings(&pending), 1);
+        assert_eq!(sim.group_counts().get("build"), Some(&1));
+        let entity = sim.grid.entity_at(pos).expect("entity linked");
+        let comp = sim.ecs.0.get::<BuildingComp>(entity).expect("BuildingComp");
+        assert_eq!(comp.team.0, 1);
+        assert_eq!(comp.block, core);
+        assert_eq!(comp.pos, pos);
+
+        let mut session = PlaySession::new(Rules {
+            waves: true,
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        let sync = sync_session_with_sim(&mut session, &mut sim.ecs.0, &content, 0, false);
+        assert_eq!(sync.player_cores, 1);
+        assert_eq!(session.player_core_count(), 1);
+    }
+
+    /// The evaluator's EV-0047 repro at the core level: load the vendored
+    /// Ground Zero map, materialize its buildings, place a mechanical drill on
+    /// map ore (stored in `tile.overlay`) beside a core and tick. The drill
+    /// must deliver copper into the core's item module. Skips without the
+    /// vendored asset (`msav-import` feature only).
+    #[cfg(feature = "msav-import")]
+    #[test]
+    fn ground_zero_drill_feeds_the_materialized_core() {
+        use crate::command::Command;
+        use crate::editor::context::EditorContext;
+        use crate::io::save::{SaveIo, SaveReadState};
+        use crate::world::modules::ItemModule;
+        use std::path::Path;
+
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../assets/maps/serpulo/groundZero.msav");
+        let Ok(bytes) = std::fs::read(&path) else {
+            return;
+        };
+        let mut content = registry();
+        let mut grid = WorldGrid::new(0, 0);
+        grid.begin_map_load();
+        let (result, pending) = {
+            let mut context = EditorContext::new(&mut grid, &content);
+            let (result, pending) = {
+                let mut state = SaveReadState {
+                    context: Some(&mut context),
+                    content: Some(&mut content),
+                    ..SaveReadState::default()
+                };
+                let result = SaveIo::load_bytes(&bytes, &mut state);
+                (result, std::mem::take(&mut context.pending_buildings))
+            };
+            (result, pending)
+        };
+        result.expect("map imports");
+        grid.end_map_load(&content);
+
+        let ore = content.block_id("ore-copper").expect("ore-copper");
+        let core_block = content.block_id("core-shard").expect("core");
+        let drill = content.block_id("mechanical-drill").expect("drill");
+        let width = grid.tiles.width;
+        let height = grid.tiles.height;
+        let air = BlockId::AIR;
+        // 2x2 ore footprint with a clear 6x4 rectangle around it for the core.
+        let mut spot = None;
+        'outer: for y in 2..(height - 5) {
+            for x in 2..(width - 7) {
+                let mut ok = true;
+                for dx in 0..6 {
+                    for dy in 0..4 {
+                        let in_ore = (0..2).contains(&dx) && (0..2).contains(&dy);
+                        let t = grid.tile(x + dx, y + dy);
+                        if t.block != air {
+                            ok = false;
+                        }
+                        if in_ore && t.overlay != ore {
+                            ok = false;
+                        }
+                        if !in_ore && t.overlay != air && dx > 1 {
+                            ok = false;
+                        }
+                    }
+                }
+                if ok {
+                    spot = Some((x, y + 1));
+                    break 'outer;
+                }
+            }
+        }
+        let Some((x, y)) = spot else {
+            panic!("no ore patch with clear core space");
+        };
+
+        let mut sim = Sim::new(1, width, height, air, air);
+        sim.grid = grid;
+        sim.install_block_runtime().expect("runtime");
+        assert!(sim.materialize_map_buildings(&pending) > 0);
+        sim.apply(Command::Place {
+            x: (x + 3) as i16,
+            y: y as i16,
+            block: core_block,
+        })
+        .expect("core command");
+        sim.apply(Command::Place {
+            x: x as i16,
+            y: y as i16,
+            block: drill,
+        })
+        .expect("drill command");
+        let core_entity = sim
+            .grid
+            .entity_at(TilePos::new((x + 3) as i16, y as i16))
+            .expect("core entity");
+        let drill_entity = sim
+            .grid
+            .entity_at(TilePos::new(x as i16, y as i16))
+            .expect("drill entity");
+        let copper = content.item_id("copper").expect("copper");
+        for _ in 0..300 {
+            sim.tick().expect("tick");
+        }
+        let stored = sim
+            .ecs
+            .0
+            .get::<ItemModule>(core_entity)
+            .map(|m| m.get(copper))
+            .unwrap_or(0);
+        assert!(
+            stored >= 1,
+            "core received no copper from the map-ore drill; drill entity {drill_entity:?}"
+        );
+    }
+
+    /// Without the live runtime the payload queue is inert (P0 spine unchanged).
+    #[test]
+    fn materialize_is_a_noop_without_the_runtime() {
+        let mut sim = Sim::new(1, 8, 8, BlockId::AIR, BlockId::AIR);
+        assert_eq!(
+            sim.materialize_map_buildings(&[(0, DecodedBase::default())]),
+            0
+        );
     }
 }

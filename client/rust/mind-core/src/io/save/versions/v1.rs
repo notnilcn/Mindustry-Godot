@@ -232,10 +232,26 @@ impl SaveVersion for SaveV1 {
     }
 }
 
-/// Reads the upstream `MSAV` region walk (`SaveVersion.read`) from an inflated
-/// body whose 8-byte header was already consumed. Region bodies are identical
-/// to native v1's; only the framing differs (raw `i32` length chunks, version
-/// gated `patches`/`markers`).
+/// Meta-only read of one legacy `MSAV` region stream (`SaveIO.getMeta`): the
+/// `meta` region is the `i32`-length-prefixed string map.
+#[cfg(feature = "msav-import")]
+pub(crate) fn read_legacy_meta(body: &[u8], version: u32) -> Result<SaveMeta, IoError> {
+    let mut wire = WireReader::new(body);
+    let mut tags = StringMap::new();
+    read_legacy_region(&mut wire, REGION_META, |wire| {
+        tags = wire.string_map()?;
+        Ok(())
+    })?;
+    SaveMeta::from_tags(version as i32, tags)
+}
+
+/// Reads the upstream `MSAV` region walk from an inflated body whose 8-byte
+/// header was already consumed. Region bodies are identical to native v1's;
+/// only the framing differs (raw `i32` length chunks) and each version's
+/// `SaveVersion.read` override decides the region set:
+/// v1-6 `LegacyRegionSaveVersion` (no `custom`), v7-9 `SaveVersion`, v10-11
+/// `Save10`/`Save11` (v11 moves `patches` after `content`), v12+ `Save12`/`13`
+/// (`patches` right after `meta`).
 #[cfg(feature = "msav-import")]
 pub(crate) fn read_legacy_regions(
     body: &[u8],
@@ -265,9 +281,17 @@ pub(crate) fn read_legacy_regions(
             }
         })
     })?;
-    read_legacy_region(&mut wire, REGION_MAP, |wire| read_map(wire, state))?;
+    if version == 11 {
+        // `Save11`: old string-only patches, placed after the content header.
+        read_legacy_region(&mut wire, REGION_PATCHES, |wire| {
+            read_legacy_simple_patches(wire, state)
+        })?;
+    }
+    read_legacy_region(&mut wire, REGION_MAP, |wire| {
+        read_legacy_map(wire, state, version)
+    })?;
     read_legacy_region(&mut wire, REGION_ENTITIES, |wire| {
-        read_entities(wire, state)
+        read_legacy_entities(wire, state, version)
     })?;
     if version >= 8 {
         // Upstream markers are a JSON document filling the region; without a
@@ -282,9 +306,12 @@ pub(crate) fn read_legacy_regions(
             skip_legacy_region(&mut wire, REGION_MARKERS)?;
         }
     }
-    read_legacy_region(&mut wire, REGION_CUSTOM, |wire| {
-        read_custom_chunks(wire, state)
-    })?;
+    if version >= 7 {
+        // `LegacyRegionSaveVersion` (<= 6) has no custom-chunk region.
+        read_legacy_region(&mut wire, REGION_CUSTOM, |wire| {
+            read_custom_chunks(wire, state)
+        })?;
+    }
     if !saw_meta {
         return Err(IoError::corrupt("save is missing the \"meta\" region"));
     }
@@ -335,15 +362,18 @@ fn read_legacy_region(
 
 /// `SaveVersion.readMeta`: parses stats/locales eagerly and stashes the rules
 /// JSON (parsed by [`read_rules`] after the other regions).
+///
+/// Legacy `MSAV` files carry Arc-style bare object keys; quote them before the
+/// strict parse (rules are quoted by the caller after all regions land).
 fn read_meta(wire: &mut WireReader, state: &mut SaveReadState) -> Result<(), IoError> {
     let map = wire.string_map()?;
     state.rule_string = Some(map.get("rules").cloned().unwrap_or_else(|| "{}".to_owned()));
-    state.stats = Some(JsonIo::read(
+    state.stats = Some(JsonIo::read(&crate::io::json::quote_bare_keys(
         map.get("stats").map(String::as_str).unwrap_or("{}"),
-    )?);
-    state.locales = Some(JsonIo::read(
+    ))?);
+    state.locales = Some(JsonIo::read(&crate::io::json::quote_bare_keys(
         map.get("locales").map(String::as_str).unwrap_or("{}"),
-    )?);
+    ))?);
     state.tags = map;
     Ok(())
 }
@@ -377,6 +407,94 @@ fn read_data_patches(wire: &mut WireReader, state: &mut SaveReadState) -> Result
     }
     let assets = crate::mods::assets::read_asset_records(wire, total as usize)?;
     state.patches = Some(assets);
+    Ok(())
+}
+
+/// `Save11.readDataPatches`: the old simplified patch region — a `u8` count of
+/// length-prefixed UTF-8 patch documents (no type tags/assets).
+#[cfg(feature = "msav-import")]
+fn read_legacy_simple_patches(
+    wire: &mut WireReader,
+    state: &mut SaveReadState,
+) -> Result<(), IoError> {
+    let amount = wire.ub()?;
+    if amount == 0 {
+        return Ok(());
+    }
+    let mut assets = Vec::with_capacity(amount as usize);
+    for index in 0..amount {
+        let len = wire.i()?;
+        if len < 0 {
+            return Err(IoError::corrupt(format!(
+                "invalid legacy patch length: {len}"
+            )));
+        }
+        let bytes = wire.bytes(len as usize)?;
+        let text = String::from_utf8_lossy(bytes).into_owned();
+        assets.push(crate::mods::assets::DataAsset::patch(
+            format!("patch-{index}.json"),
+            text,
+        ));
+    }
+    state.patches = Some(assets);
+    Ok(())
+}
+
+/// `MapIO.loadMap` map region for a legacy `MSAV` version: v4-9 frames tile
+/// entities as `u16` chunks with the legacy tile-data bit
+/// (`ShortChunkSaveVersion.readMap`); v10+ uses the 4-byte chunk framing
+/// (`SaveVersion.readMap`, shared with native v1). v1-3 use the older
+/// `LegacySaveVersion.readMap` layout, which is not ported.
+#[cfg(feature = "msav-import")]
+fn read_legacy_map(
+    wire: &mut WireReader,
+    state: &mut SaveReadState,
+    version: u32,
+) -> Result<(), IoError> {
+    if version <= 3 {
+        return Err(IoError::corrupt(format!(
+            "legacy MSAV v{version} maps use the pre-short-chunk map format (unsupported)"
+        )));
+    }
+    read_map_with(wire, state, version <= 9)
+}
+
+/// `readEntities` for a legacy `MSAV` version: the entity-mapping region is
+/// absent in v4 (`Save4.readEntities`), and world entities move from the
+/// `LegacySaveVersion2`/`ShortChunkSaveVersion` `u16` chunk framing to the
+/// 4-byte framing in v10 (`Save10`).
+#[cfg(feature = "msav-import")]
+fn read_legacy_entities(
+    wire: &mut WireReader,
+    state: &mut SaveReadState,
+    version: u32,
+) -> Result<(), IoError> {
+    let custom = if version == 4 {
+        EntityIdMap::new()
+    } else {
+        read_entity_mapping(wire)?
+    };
+    read_team_blocks(wire, state)?;
+    if version <= 6 {
+        // `LegacySaveVersion2.readWorldEntities`: IDs are not stored; each
+        // entity is re-added with a fresh ID. Entity sinks are not wired for
+        // this layout, so only the `u16` framing is consumed.
+        let amount = wire.i()?;
+        if amount < 0 {
+            return Err(IoError::corrupt(format!("invalid entity count: {amount}")));
+        }
+        for _ in 0..amount {
+            let len = wire.us()? as usize;
+            wire.skip(len)?;
+        }
+    } else if version <= 9 {
+        read_short_chunk_world_entities(wire, state, &custom)?;
+    } else {
+        read_world_entities(wire, state, &custom)?;
+    }
+    if let Some(sink) = state.entities.as_deref_mut() {
+        sink.after_read_all();
+    }
     Ok(())
 }
 
@@ -547,6 +665,17 @@ fn write_map(
 
 /// `SaveVersion.readMap` (ported against [`super::super::state::WorldContext`]).
 fn read_map(wire: &mut WireReader, state: &mut SaveReadState) -> Result<(), IoError> {
+    read_map_with(wire, state, false)
+}
+
+/// Map-region reader shared by native v1 (4-byte tile-entity chunks) and
+/// legacy MSAV v4-9 (`ShortChunkSaveVersion.readMap`: `u16` chunks plus the
+/// legacy bit-2 tile-data byte).
+fn read_map_with(
+    wire: &mut WireReader,
+    state: &mut SaveReadState,
+    legacy_short: bool,
+) -> Result<(), IoError> {
     let width = wire.us()?;
     let height = wire.us()?;
     if width == 0 && height == 0 {
@@ -577,6 +706,7 @@ fn read_map(wire: &mut WireReader, state: &mut SaveReadState) -> Result<(), IoEr
         width,
         height,
         len,
+        legacy_short,
     );
     if !generating {
         context.end();
@@ -594,6 +724,7 @@ fn read_map_body(
     width: u16,
     height: u16,
     len: usize,
+    legacy_short: bool,
 ) -> Result<(), IoError> {
     let stone = registry
         .block_id("stone")
@@ -636,6 +767,8 @@ fn read_map_body(
         let block = map_block_id(registry, block_raw);
         let packed = wire.ub()?;
         let had_entity = packed & 1 != 0;
+        // Legacy bit 2 (MSAV <= 9): one tile-data byte when no entity is present.
+        let had_data_old = legacy_short && packed & 2 != 0;
         let had_data = packed & 4 != 0;
 
         let mut data = 0u8;
@@ -664,8 +797,12 @@ fn read_map_body(
         }
         if had_entity {
             if is_center {
+                let chunk_len = if legacy_short {
+                    wire.us()? as usize
+                } else {
+                    wire.u()? as usize
+                };
                 if context.block_has_building_io(i) {
-                    let chunk_len = wire.u()? as usize;
                     let payload = wire.bytes(chunk_len)?;
                     let mut chunk = WireReader::new(payload);
                     let version = chunk.ub()?;
@@ -676,10 +813,16 @@ fn read_map_body(
                     })?;
                 } else {
                     // The block lost its building IO (removed/changed): skip.
-                    let chunk_len = wire.u()? as usize;
                     wire.skip(chunk_len)?;
                 }
                 context.on_read_building(i);
+            }
+        } else if legacy_short && (had_data_old || had_data) {
+            if had_data_old {
+                // Old bit-2 format: `Tile.setBlock` then a single data byte.
+                context.set_block(i, block);
+                let old_data = wire.ub()?;
+                context.set_tile_data(i, old_data, 0, 0, 0);
             }
         } else if !had_data {
             let consecutives = wire.ub()? as usize;
@@ -734,7 +877,17 @@ fn write_entities(
 
 /// `SaveVersion.readEntities`.
 fn read_entities(wire: &mut WireReader, state: &mut SaveReadState) -> Result<(), IoError> {
-    // `readEntityMapping`: custom ids override the global mapping by name.
+    let custom = read_entity_mapping(wire)?;
+    read_team_blocks(wire, state)?;
+    read_world_entities(wire, state, &custom)?;
+    if let Some(sink) = state.entities.as_deref_mut() {
+        sink.after_read_all();
+    }
+    Ok(())
+}
+
+/// `readEntityMapping`: custom ids override the global mapping by name.
+fn read_entity_mapping(wire: &mut WireReader) -> Result<EntityIdMap, IoError> {
     let mut custom = EntityIdMap::new();
     let mapped = wire.us()?;
     for _ in 0..mapped {
@@ -742,8 +895,11 @@ fn read_entities(wire: &mut WireReader, state: &mut SaveReadState) -> Result<(),
         let name = wire.str()?;
         custom.insert(id, &name);
     }
+    Ok(custom)
+}
 
-    // `readTeamBlocks`.
+/// `readTeamBlocks`.
+fn read_team_blocks(wire: &mut WireReader, state: &mut SaveReadState) -> Result<(), IoError> {
     let team_count = wire.i()?;
     if team_count < 0 {
         return Err(IoError::corrupt(format!(
@@ -779,9 +935,16 @@ fn read_entities(wire: &mut WireReader, state: &mut SaveReadState) -> Result<(),
         }
         state.team_plans.push((team, plans));
     }
+    Ok(())
+}
 
-    // `readWorldEntities`: unknown class IDs are skipped by length; the
-    // `afterReadAll` pass runs at the end.
+/// `SaveVersion.readWorldEntities` (4-byte chunks): unknown class IDs are
+/// skipped by length.
+fn read_world_entities(
+    wire: &mut WireReader,
+    state: &mut SaveReadState,
+    custom: &EntityIdMap,
+) -> Result<(), IoError> {
     let amount = wire.i()?;
     if amount < 0 {
         return Err(IoError::corrupt(format!("invalid entity count: {amount}")));
@@ -789,24 +952,51 @@ fn read_entities(wire: &mut WireReader, state: &mut SaveReadState) -> Result<(),
     for _ in 0..amount {
         let chunk_len = wire.u()? as usize;
         let payload = wire.bytes(chunk_len)?;
-        let mut chunk = WireReader::new(payload);
-        let class_id = chunk.ub()?;
-        let custom_name = custom.name_of(u16::from(class_id));
-        let supported = state
-            .entities
-            .as_deref()
-            .map(|sink| sink.supports_class(class_id, custom_name))
-            .unwrap_or(false);
-        if supported {
-            let id = chunk.i()?;
-            if let Some(sink) = state.entities.as_deref_mut() {
-                sink.read_entity(class_id, custom_name, id, &mut chunk)?;
-            }
-        }
-        // Unknown/no-sink chunks are discarded (payload already sliced).
+        read_entity_chunk(state, custom, payload)?;
     }
-    if let Some(sink) = state.entities.as_deref_mut() {
-        sink.after_read_all();
+    Ok(())
+}
+
+/// `ShortChunkSaveVersion.readWorldEntities` (MSAV v7-9): `u16` chunk framing,
+/// entity IDs present after the class byte.
+#[cfg(feature = "msav-import")]
+fn read_short_chunk_world_entities(
+    wire: &mut WireReader,
+    state: &mut SaveReadState,
+    custom: &EntityIdMap,
+) -> Result<(), IoError> {
+    let amount = wire.i()?;
+    if amount < 0 {
+        return Err(IoError::corrupt(format!("invalid entity count: {amount}")));
+    }
+    for _ in 0..amount {
+        let chunk_len = wire.us()? as usize;
+        let payload = wire.bytes(chunk_len)?;
+        read_entity_chunk(state, custom, payload)?;
+    }
+    Ok(())
+}
+
+/// One entity chunk: `u8` class id, then the ID and payload when the class is
+/// known to the sink; unknown/no-sink chunks are discarded.
+fn read_entity_chunk(
+    state: &mut SaveReadState,
+    custom: &EntityIdMap,
+    payload: &[u8],
+) -> Result<(), IoError> {
+    let mut chunk = WireReader::new(payload);
+    let class_id = chunk.ub()?;
+    let custom_name = custom.name_of(u16::from(class_id));
+    let supported = state
+        .entities
+        .as_deref()
+        .map(|sink| sink.supports_class(class_id, custom_name))
+        .unwrap_or(false);
+    if supported {
+        let id = chunk.i()?;
+        if let Some(sink) = state.entities.as_deref_mut() {
+            sink.read_entity(class_id, custom_name, id, &mut chunk)?;
+        }
     }
     Ok(())
 }

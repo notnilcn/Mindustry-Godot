@@ -21,12 +21,15 @@ func _ready() -> void:
 
 
 func shown() -> void:
-	_hud_set(false)
+	# Deferred: `shown()` runs inside `MindUi.open_dialog`, which mutably binds
+	# `MindUi`; the HUD toggle must run after that call returns.
+	_hud_set.call_deferred(false)
 	_rebuild()
 
 
 func hidden() -> void:
-	_hud_set(true)
+	# Deferred for the same reason (`MindUi.close_dialog` binds `MindUi`).
+	_hud_set.call_deferred(true)
 
 
 func _rebuild() -> void:

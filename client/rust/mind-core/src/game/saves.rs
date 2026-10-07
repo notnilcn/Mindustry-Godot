@@ -394,6 +394,27 @@ impl Saves {
         Ok(())
     }
 
+    /// `SettingsMenuDialog` clear/clear-planet campaign saves: removes every
+    /// sector slot, or only the slots of `planet`.
+    pub fn delete_sectors(
+        &mut self,
+        fs: &dyn FileSystem,
+        registry: &ContentRegistry,
+        planet: Option<PlanetId>,
+    ) -> Result<(), IoError> {
+        self.slots.retain_mut(|slot| {
+            let Some((slot_planet, _)) = sector_of_slot(registry, slot) else {
+                return true;
+            };
+            if planet.is_some_and(|target| target != slot_planet) {
+                return true;
+            }
+            let _ = slot.delete(fs);
+            false
+        });
+        Ok(())
+    }
+
     /// Mod validation for one slot (`cautious_load` on the slot meta): the
     /// caller passes the currently loaded mod names.
     pub fn cautious_load(slot: &SaveSlot, loaded_mods: &[String]) -> MissingModsReport {
@@ -703,6 +724,61 @@ mod tests {
         saves.delete_all(&fs).unwrap();
         assert_eq!(saves.slots.len(), 1, "sector saves are kept");
         assert!(saves.slots[0].is_sector());
+    }
+
+    #[test]
+    fn delete_sectors_scoped_by_planet() {
+        let fs = MockFs::new();
+        let paths = Paths::new("/data");
+        let registry = registry();
+        let serpulo = registry.planet_id("serpulo").unwrap();
+        let mut settings = SettingsStore::new();
+        let mut saves = Saves::new();
+
+        // One numbered save, one Serpulo sector save, one Erekir sector save.
+        let ctx = WriteContext::meta_only(base_meta_tags(8, 8, 1, "normal"));
+        SaveSlot::new(paths.save_slot(0))
+            .save(&fs, &paths, &ctx, &SaveOptions::new())
+            .unwrap();
+        let serpulo_ctx = meta_ctx(r#"{"sector":"serpulo-15"}"#, &[]);
+        saves
+            .save_sector(
+                &fs,
+                &paths,
+                &mut settings,
+                "serpulo",
+                15,
+                &serpulo_ctx,
+                &SaveOptions::new(),
+            )
+            .unwrap();
+        let erekir_ctx = meta_ctx(r#"{"sector":"erekir-0"}"#, &[]);
+        saves
+            .save_sector(
+                &fs,
+                &paths,
+                &mut settings,
+                "erekir",
+                0,
+                &erekir_ctx,
+                &SaveOptions::new(),
+            )
+            .unwrap();
+        saves.load(&fs, &paths, &registry, &mut settings);
+        assert_eq!(saves.slots.len(), 3);
+
+        saves.delete_sectors(&fs, &registry, Some(serpulo)).unwrap();
+        assert_eq!(
+            saves.slots.len(),
+            2,
+            "only Serpulo's sector save is removed"
+        );
+        assert!(!fs.exists(&paths.sector_save("serpulo", 15)));
+        assert!(fs.exists(&paths.sector_save("erekir", 0)));
+
+        saves.delete_sectors(&fs, &registry, None).unwrap();
+        assert_eq!(saves.slots.len(), 1, "numbered saves are kept");
+        assert!(!fs.exists(&paths.sector_save("erekir", 0)));
     }
 
     #[test]

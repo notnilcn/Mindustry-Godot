@@ -946,10 +946,10 @@ impl MindSimHost {
         } else {
             None
         };
-        let (grid, rules) = match loaded {
-            Some(loaded) => (loaded.grid, loaded.rules),
+        let (grid, rules, pending_buildings) = match loaded {
+            Some(loaded) => (loaded.grid, loaded.rules, loaded.pending_buildings),
             None => match generated {
-                Some(generated) => (generated.grid, Some(generated.rules)),
+                Some(generated) => (generated.grid, Some(generated.rules), Vec::new()),
                 None => {
                     self.content_snapshot = Some(registry);
                     log::warn!("load_sector: no map or generator for planet `{planet_name}`");
@@ -975,6 +975,13 @@ impl MindSimHost {
         // resources are installed before any entity exists so ECS indices stay
         // stable.
         self.install_live_block_runtime();
+        // `World.loadMap`'s building half: the reader decoded the map's tile
+        // entities into the pending queue while the grid was built, so spawn
+        // the ECS buildings (cores included) the campaign runtime/teams read.
+        let materialized = self.sim.materialize_map_buildings(&pending_buildings);
+        if materialized > 0 {
+            log::info!("load_sector: materialized {materialized} map building(s)");
+        }
         // The fresh `Sim` carries no IO executor; re-wire the seams so a queued
         // `request_save`/`request_load` drains at the next `IoSet` boundary.
         self.install_sim_seams();
@@ -1368,6 +1375,76 @@ impl MindSimHost {
         };
         GString::from(core_items_json(&self.sim, content).as_str())
     }
+
+    /// Live core items of `team` as `(content name, amount)` (`Team.items()`:
+    /// the first core in entity order). Rust-only seam for the campaign
+    /// research spend.
+    pub fn player_core_items(&self, team: u8) -> Vec<(String, i32)> {
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return Vec::new();
+        };
+        for (_seq, entity, comp) in self.sim.ecs.entities_by_seq() {
+            if comp.team.0 != team {
+                continue;
+            }
+            if !content
+                .block(comp.block)
+                .is_some_and(|def| def.kind == BlockKind::CoreBlock)
+            {
+                continue;
+            }
+            let Some(module) = self.sim.ecs.0.get::<ItemModule>(entity) else {
+                continue;
+            };
+            let mut out = Vec::new();
+            for (index, amount) in module.items.iter().enumerate() {
+                if *amount <= 0 {
+                    continue;
+                }
+                if let Some(item) = content.item(ItemId::new(index as u16)) {
+                    out.push((item.name.clone(), *amount));
+                }
+            }
+            return out;
+        }
+        Vec::new()
+    }
+
+    /// `Team.items().remove(item, amount)` on the first core of `team`; returns
+    /// the removed amount (`0` without a matching core/item). Rust-only seam for
+    /// the campaign research spend.
+    pub fn remove_player_core_items(&mut self, team: u8, item: &str, amount: i32) -> i32 {
+        if amount <= 0 {
+            return 0;
+        }
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return 0;
+        };
+        let Some(item) = content.item_id(item) else {
+            return 0;
+        };
+        let mut target = None;
+        for (_seq, entity, comp) in self.sim.ecs.entities_by_seq() {
+            if comp.team.0 != team {
+                continue;
+            }
+            let is_core = content
+                .block(comp.block)
+                .is_some_and(|def| def.kind == BlockKind::CoreBlock);
+            if !is_core || self.sim.ecs.0.get::<ItemModule>(entity).is_none() {
+                continue;
+            }
+            target = Some(entity);
+            break;
+        }
+        let Some(entity) = target else {
+            return 0;
+        };
+        match self.sim.ecs.0.get_mut::<ItemModule>(entity) {
+            Some(mut module) => module.remove(item, amount),
+            None => 0,
+        }
+    }
 }
 
 /// First core block's item counts as a JSON object (empty when there is no core
@@ -1446,6 +1523,8 @@ fn globalize(path: &GString) -> std::path::PathBuf {
 struct LoadedGrid {
     grid: WorldGrid,
     rules: Option<Rules>,
+    /// Decoded building payloads `(tile index, base)` awaiting ECS spawn.
+    pending_buildings: Vec<(usize, mind_core::world::building_io::DecodedBase)>,
 }
 
 /// Native path of a campaign sector save (`user://saves/sector-<planet>-<id>.msav`).
@@ -1507,24 +1586,33 @@ fn load_grid_file(path: &str, registry: &mut ContentRegistry) -> Option<LoadedGr
     let bytes = FileAccess::get_file_as_bytes(path);
     let mut grid = WorldGrid::new(0, 0);
     grid.begin_map_load();
-    let rules;
-    let result = {
+    let (result, rules, pending_buildings) = {
         let mut context = EditorContext::new(&mut grid, registry);
-        let mut state = SaveReadState {
-            context: Some(&mut context),
-            content: Some(registry),
-            ..SaveReadState::default()
+        let (result, rules) = {
+            let mut state = SaveReadState {
+                context: Some(&mut context),
+                content: Some(registry),
+                ..SaveReadState::default()
+            };
+            let result = SaveIo::load_bytes(bytes.as_slice(), &mut state);
+            (result, state.rules.clone())
         };
-        let result = SaveIo::load_bytes(bytes.as_slice(), &mut state);
-        rules = state.rules.clone();
-        result
+        (
+            result,
+            rules,
+            std::mem::take(&mut context.pending_buildings),
+        )
     };
     if let Err(error) = result {
         log::warn!("load_sector: `{path}` failed: {error}");
         return None;
     }
     grid.end_map_load(registry);
-    Some(LoadedGrid { grid, rules })
+    Some(LoadedGrid {
+        grid,
+        rules,
+        pending_buildings,
+    })
 }
 
 /// Counts enemy spawn overlays (`BlockPalette.is_spawn`) on a loaded grid.

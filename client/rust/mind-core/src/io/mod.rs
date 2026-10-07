@@ -13,6 +13,7 @@
 //! Boundaries (plan 04 §3.12): no Godot/tokio, no `unwrap`/`expect` on runtime
 //! data, ordered maps only on serialized paths, append-only format versions.
 
+pub mod data_archive;
 pub mod entity;
 pub mod error;
 pub mod fs;

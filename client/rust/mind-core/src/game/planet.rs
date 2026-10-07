@@ -323,6 +323,14 @@ impl Planet {
         settings.put_json(&format!("{}-campaign-stats", self.name), &self.stats)
     }
 
+    /// `Planet.clearStats`: resets this planet's own lifetime stats.
+    ///
+    /// `statParent` sharing is a `Campaign` concern (`Campaign::stats_for_mut`
+    /// resolves the shared record before calling this).
+    pub fn clear_stats(&mut self) {
+        self.stats = CampaignStats::new();
+    }
+
     /// `Planet.getStartSector`.
     pub fn get_start_sector(&self) -> Option<&Sector> {
         if self.sectors.is_empty() {

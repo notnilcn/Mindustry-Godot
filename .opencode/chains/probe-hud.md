@@ -39,12 +39,15 @@ last_verified: not yet (seeded from .opencode/skills/playtest/SKILL.md §Recipes
 4. Screenshot (only when pixels are the evidence):
 
    ```
-   godot_exec {"action":"eval","params":{"code":"get_window().move_to_foreground()"}}
+   godot_exec {"action":"eval","params":{"code":"get_window().grab_focus()"}}
    godot_screenshot {"action":"game"}
    ```
 
-   `move_to_foreground` first avoids a stale presented frame when the editor
-   overlaps the game window.
+   Focus the game window first to avoid a stale presented frame when the editor
+   overlaps it. Use `get_window().grab_focus()`: `move_to_foreground()` is
+   deprecated on Godot 4.7.2 and logs an error-level deprecation entry that
+   pollutes the "no new error-log entries" check (seen in run
+   `l2-20261007-160101-ev0041-campaign-rules-godot`).
 
 5. Logs: clear before the step, then check after:
 

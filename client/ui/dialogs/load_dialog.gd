@@ -3,9 +3,11 @@
 ## Source: core/src/mindustry/ui/dialogs/LoadDialog.java
 ##
 ## "Load Game" dialog: a search row (field + gamemode filter toggles), a grid of
-## save cards, and an "Import Save" button. The save-slot listing is supplied
-## through `_context.slots`; with no slots the grid renders the empty state
-## (`@save.none`). Clicking a card body emits `slot_selected(name)` and closes.
+## save cards, and an "Import Save" button. The listing comes from the live
+## `Saves` store (`MindCampaign.list_save_slots`), with `_context.slots` taking
+## precedence when supplied; with no slots the grid renders the empty state
+## (`@save.none`). Clicking a card body emits `slot_selected(name)`, queues the
+## slot load on the live facade, and closes.
 
 extends MindDialog
 
@@ -24,6 +26,8 @@ var _field: LineEdit = null
 var _grid: MindTable = null
 ## Gamemode names whose saves are hidden from the grid (`hidden` upstream).
 var _hidden: Dictionary = {}
+## Slot rows for the current open (`Saves.getSaveSlots` snapshot).
+var _slots: Array = []
 
 
 func _ready() -> void:
@@ -35,10 +39,25 @@ func _ready() -> void:
 
 
 func shown() -> void:
-	# Upstream `shown` resets the search string and rebuilds the grid.
+	# Upstream `shown` resets the search string and re-reads the live slot list.
 	if _field != null and not _field.text.is_empty():
 		_field.text = ""
+	_refresh_slots()
 	_rebuild_list()
+
+
+## Context slots (MCP/test injection) win; otherwise the live `Saves` listing.
+func _refresh_slots() -> void:
+	var injected: Variant = context().get("slots", null)
+	if injected is Array:
+		_slots = injected
+		return
+	var campaign := campaign_node()
+	if campaign == null or not campaign.has_method("list_save_slots"):
+		_slots = []
+		return
+	var listed: Variant = campaign.call("list_save_slots")
+	_slots = listed if listed is Array else []
 
 
 func _build() -> void:
@@ -94,7 +113,7 @@ func _rebuild_list() -> void:
 	if _grid == null:
 		return
 	_grid.clear_children()
-	var slots: Array = context().get("slots", [])
+	var slots: Array = _slots
 	var needle := _field.text.strip_edges().to_lower() if _field != null else ""
 	var columns := maxi(int(get_viewport_rect().size.x / 470.0), 1)
 	var any := false
@@ -103,6 +122,9 @@ func _rebuild_list() -> void:
 		if not (entry is Dictionary):
 			continue
 		var slot: Dictionary = entry
+		# `SaveSlot.isHidden`: sector saves are hidden from the load list.
+		if bool(slot.get("sector", false)):
+			continue
 		var name := str(slot.get("name", ""))
 		if not needle.is_empty() and not name.to_lower().contains(needle):
 			continue
@@ -130,7 +152,7 @@ func _build_card(slot: Dictionary) -> Button:
 	var card := MindWidgets.button("")
 	card.theme_type_variation = "grayt"
 	card.custom_minimum_size = Vector2(400, 160)
-	card.pressed.connect(_select.bind(name))
+	card.pressed.connect(_select.bind(slot))
 
 	# code-instantiated: card body follows the slot data; ignores clicks so the
 	# card button itself handles selection.
@@ -216,9 +238,22 @@ func _meta_lines(slot: Dictionary) -> Array:
 	return lines
 
 
-func _select(slot: String) -> void:
-	slot_selected.emit(slot)
+func _select(slot: Dictionary) -> void:
+	slot_selected.emit(str(slot.get("name", "")))
+	_load_slot(slot)
 	_close()
+
+
+## `LoadDialog.runLoadSave`: hands the slot to the live facade, which queues the
+## load at the next IO boundary (`MindCampaign.load_slot`).
+func _load_slot(slot: Dictionary) -> void:
+	var file := str(slot.get("file", ""))
+	var stem := file.get_file().get_basename()
+	if stem.is_empty():
+		stem = str(slot.get("name", ""))
+	if stem.is_empty():
+		return
+	campaign_call("load_slot", [stem])
 
 
 func _open_import() -> void:

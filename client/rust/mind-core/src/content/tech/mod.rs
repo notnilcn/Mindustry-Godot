@@ -603,6 +603,11 @@ pub(crate) fn with_unlock_fields(
                 f(&mut record.unlock);
             }
         }
+        ContentType::Unit => {
+            if let Some(record) = registry.unit_mut(UnitTypeId::new(content.id)) {
+                f(&mut record.unlock);
+            }
+        }
         ContentType::Weather => {
             if let Some(record) = registry.weather_mut(super::id::WeatherId::new(content.id)) {
                 f(&mut record.unlock);

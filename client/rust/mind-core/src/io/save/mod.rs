@@ -177,6 +177,13 @@ impl SaveIo {
 
     /// Meta-only read from memory (`SaveIO.getMeta(DataInputStream)`).
     pub fn get_meta_bytes(bytes: &[u8]) -> Result<SaveMeta, IoError> {
+        // Legacy upstream `MSAV` import (opt-in `msav-import`): the whole
+        // stream is deflated and the header is raw, so it is handled before
+        // the native `MGRS` path (mirrors `load_bytes`).
+        #[cfg(feature = "msav-import")]
+        if super::legacy::sniffs_as_legacy(bytes) {
+            return super::legacy::load_legacy_meta(bytes);
+        }
         let (format, mut reader) = Self::open_native(bytes)?;
         let writer = version::get_writer(format).ok_or(IoError::UnknownVersion(format))?;
         writer.get_meta(&mut reader)
@@ -497,5 +504,62 @@ mod tests {
             .filter(|tile| tile.block != BlockId::AIR)
             .count();
         assert_eq!(walls, 56078, "designed Ground Zero composition");
+    }
+
+    /// EV-0038: every built-in default map is a legacy MSAV v4/v5/v7 file.
+    /// `MapIo::create_map` (meta-only list reads) and the full editor load
+    /// (`MapEditor::begin_edit_map`) must route them through the `MSAV`
+    /// importer. Skips when the assets are absent.
+    #[cfg(feature = "msav-import")]
+    #[test]
+    fn legacy_default_maps_read_meta_and_load() {
+        use crate::content::{BlockId, MemoryBundle, MemoryUnlockStore, create_base_content};
+        use crate::editor::context::EditorContext;
+        use crate::io::map::MapIo;
+        use crate::world::WorldGrid;
+
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../assets/maps/default");
+        let mut checked = 0usize;
+        for name in crate::maps::DEFAULT_MAP_NAMES {
+            let path = dir.join(format!("{name}.msav"));
+            let Ok(bytes) = std::fs::read(&path) else {
+                continue;
+            };
+            let header = MapIo::create_map(&crate::io::fs::NativeFs, &path, true)
+                .unwrap_or_else(|e| panic!("create_map {name}: {e}"));
+            assert!(!header.name.trim().is_empty(), "meta name for {name}");
+            assert!(header.width > 0 && header.height > 0, "{name} dimensions");
+
+            let mut registry =
+                create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true).unwrap();
+            let mut grid = WorldGrid::new(0, 0);
+            grid.begin_map_load();
+            let result = {
+                let mut context = EditorContext::new(&mut grid, &registry);
+                let mut state = SaveReadState {
+                    context: Some(&mut context),
+                    content: Some(&mut registry),
+                    ..SaveReadState::default()
+                };
+                SaveIo::load_bytes(&bytes, &mut state)
+            };
+            result.unwrap_or_else(|e| panic!("load {name}: {e}"));
+            grid.end_map_load(&registry);
+            assert_eq!(
+                (grid.tiles.width, grid.tiles.height),
+                (header.width, header.height),
+                "{name} grid size"
+            );
+            assert!(
+                grid.tiles.iter().any(|tile| tile.block != BlockId::AIR),
+                "{name} has terrain"
+            );
+            checked += 1;
+        }
+        // Either the assets are checked out (all 18) or the test is a no-op.
+        assert!(
+            checked == 0 || checked == crate::maps::DEFAULT_MAP_NAMES.len(),
+            "checked {checked} default maps"
+        );
     }
 }

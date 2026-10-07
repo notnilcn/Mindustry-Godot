@@ -18,14 +18,18 @@ use crate::content::{ContentRegistry, ItemId, LiquidId};
 use crate::entities::comp::{Building, CrafterState, DrillState, PumpState};
 use crate::world::block::BlockTable;
 use crate::world::block_kind_data::{CrafterDef, DrillDef};
+use crate::world::blocks::distribution::transfer;
 use crate::world::modules::{ItemModule, LiquidModule};
-use crate::world::update::{delta, edelta, get_progress_increase};
+use crate::world::update::{delta, edelta, get_progress_increase, run_timer};
 use crate::world::{BlockKindData, WorldGrid};
 
 use super::{BuildingBehavior, BuildingReader, BuildingWriter};
 
 /// `GenericCrafter.warmupSpeed`.
 pub const CRAFTER_WARMUP_SPEED: f32 = 0.019;
+/// `Block.dumpTime`: dump attempts are gated every this many ticks (`5` = 12/s
+/// at `timeScale` 1; `timerDump` is building timer index 0).
+pub const DUMP_TIME: f32 = 5.0;
 
 /// `Mathf.approachDelta` (fixed step => `speed` per tick).
 fn approach(current: f32, target: f32, speed: f32) -> f32 {
@@ -56,14 +60,6 @@ fn crafter_knobs(data: &BlockKindData) -> Option<CrafterDef> {
             ignore_liquid_fullness: false,
         }),
         _ => None,
-    }
-}
-
-fn produce_item(world: &mut World, e: Entity, item: ItemId, amount: i32, capacity: i32) {
-    if amount > 0
-        && let Some(mut module) = world.get_mut::<ItemModule>(e)
-    {
-        module.add(item, amount, capacity);
     }
 }
 
@@ -152,6 +148,26 @@ impl BuildingBehavior for CrafterBehavior {
         {
             craft(world, e, &crafter, item_capacity);
         }
+
+        // `dumpOutputs()` item half (`Separator` shares the timer with `dump()`):
+        // `if(outputItems != null && timer(timerDump, dumpTime / timeScale))`.
+        let time_scale = world
+            .get::<Building>(e)
+            .map(|building| building.time_scale)
+            .unwrap_or(1.0);
+        if run_timer(world, e, 0, DUMP_TIME / time_scale) {
+            if matches!(inst.kind_data, BlockKindData::Separator(_)) {
+                let _ = transfer::dump(world, e, None);
+            } else {
+                for (item, amount) in &crafter.output_items {
+                    for _ in 0..(*amount).max(1) {
+                        if !transfer::dump(world, e, Some(ItemId::new(*item))) {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn efficiency_scale(&self, world: &mut World, e: Entity) -> f32 {
@@ -228,7 +244,11 @@ fn craft(world: &mut World, e: Entity, crafter: &CrafterDef, item_capacity: i32)
             let mut acc = 0;
             for (item, amount) in &results {
                 if pick < acc + *amount {
-                    produce_item(world, e, ItemId::new(*item), 1, item_capacity);
+                    let item = ItemId::new(*item);
+                    // `if(item != null && items.get(item) < itemCapacity) offload(item)`.
+                    if transfer::item_count(world, e, item) < item_capacity {
+                        transfer::offload(world, e, item);
+                    }
                     break;
                 }
                 acc += *amount;
@@ -247,7 +267,10 @@ fn craft(world: &mut World, e: Entity, crafter: &CrafterDef, item_capacity: i32)
             accumulator[index] += *amount as f32;
             let floored = accumulator[index].floor();
             accumulator[index] -= floored;
-            produce_item(world, e, ItemId::new(*item), floored as i32, item_capacity);
+            // `for(j < floored) offload(output.item)`.
+            for _ in 0..floored.max(0.0) as i32 {
+                transfer::offload(world, e, ItemId::new(*item));
+            }
         }
         if let Some(mut state) = world.get_mut::<CrafterState>(e) {
             state.output_accumulator = accumulator;
@@ -283,6 +306,20 @@ impl BuildingBehavior for DrillBehavior {
             },
             _ => return,
         };
+        // `if(timer(timerDump, dumpTime / timeScale)) dump(dominantItem != null
+        // && items.has(dominantItem) ? dominantItem : null)`.
+        let time_scale = world
+            .get::<Building>(e)
+            .map(|building| building.time_scale)
+            .unwrap_or(1.0);
+        if run_timer(world, e, 0, DUMP_TIME / time_scale) {
+            let dominant = world
+                .get::<DrillState>(e)
+                .and_then(|state| state.dominant_item);
+            let todump = dominant.filter(|item| transfer::item_count(world, e, *item) > 0);
+            let _ = transfer::dump(world, e, todump);
+        }
+
         let (dominant, count) = world
             .get::<DrillState>(e)
             .map(|state| (state.dominant_item, state.dominant_items))
@@ -325,7 +362,11 @@ impl BuildingBehavior for DrillBehavior {
         };
         if count > 0 && ready && progress >= delay {
             let amount = (progress / delay) as i32;
-            produce_item(world, e, item, amount.max(1), item_capacity);
+            // `for(i < amount) offload(dominantItem)`: push to an accepting
+            // neighbor, falling back to the drill's own module.
+            for _ in 0..amount.max(1) {
+                transfer::offload(world, e, item);
+            }
             if let Some(mut state) = world.get_mut::<DrillState>(e) {
                 state.progress %= delay;
             }
@@ -392,7 +433,7 @@ pub fn refresh_drill_ore(
     }
 }
 
-/// Counts mineable floor drops over a `size x size` footprint.
+/// Counts mineable floor/overlay drops over a `size x size` footprint.
 pub fn count_ore(
     content: &ContentRegistry,
     grid: &WorldGrid,
@@ -410,11 +451,11 @@ pub fn count_ore(
             if !grid.tiles.in_bounds(tx, ty) {
                 continue;
             }
-            let floor = grid.tile(tx, ty).floor;
-            let Some(def) = content.block(floor) else {
-                continue;
-            };
-            let Some(drop) = def.item_drop else {
+            let tile = grid.tile(tx, ty);
+            // `Tile.drop()`: an overlay with a drop (ore) wins over the floor.
+            let overlay_drop = content.block(tile.overlay).and_then(|def| def.item_drop);
+            let floor_drop = content.block(tile.floor).and_then(|def| def.item_drop);
+            let Some(drop) = overlay_drop.or(floor_drop) else {
                 continue;
             };
             let raw = drop.raw();
@@ -699,5 +740,92 @@ mod tests {
         let (item, count) = count_ore(&content, &grid, 0, 0, 3, 5, &[]);
         assert_eq!(item, Some(copper));
         assert_eq!(count, 9);
+    }
+
+    /// `Tile.drop()`: MSAV maps store ore as an overlay, so a drill footprint
+    /// over `ore-copper` overlays must still count copper.
+    #[test]
+    fn ore_counting_reads_overlay_ore() {
+        let content = test_registry();
+        let mut grid = WorldGrid::new(8, 8);
+        let ore = content.block_id("ore-copper").expect("ore-copper");
+        for x in 0..2 {
+            for y in 0..2 {
+                grid.tiles.get_mut(x, y).overlay = ore;
+            }
+        }
+        let copper = content.item_id("copper").expect("copper");
+        let (item, count) = count_ore(&content, &grid, 0, 0, 2, 5, &[]);
+        assert_eq!(item, Some(copper));
+        assert_eq!(count, 4);
+    }
+
+    /// A drill's produced item must offload into an adjacent same-team core
+    /// (`DrillBuild.updateTile` `offload(dominantItem)`).
+    #[test]
+    fn drill_offloads_to_adjacent_core() {
+        let content = test_registry();
+        let table = BlockTable::build_default(&content).expect("table");
+        let mut world = EcsWorld::new();
+        world.insert_resource(BuildRules::default());
+        // The table must exist before spawn: `CoreBehavior.create_state` reads
+        // `BlockDef.item_capacity` for the core storage capacity.
+        world.insert_resource(table);
+        let (core_inst, drill_inst) = {
+            let table = world.get_resource::<BlockTable>().expect("table");
+            (
+                table.get_named("core-shard").expect("core-shard").clone(),
+                table
+                    .get_named("mechanical-drill")
+                    .expect("mechanical-drill")
+                    .clone(),
+            )
+        };
+        let core = core_inst.spawn(
+            &mut world,
+            0,
+            TilePos::new(4, 4),
+            1,
+            0,
+            content.items().len(),
+            content.liquids().len(),
+        );
+        let drill = drill_inst.spawn(
+            &mut world,
+            1,
+            TilePos::new(7, 4),
+            1,
+            0,
+            content.items().len(),
+            content.liquids().len(),
+        );
+        drill_inst.behavior.create_state(&mut world, drill);
+        // Link proximity by hand (grid-free, like the transfer tests).
+        if let Some(mut building) = world.get_mut::<Building>(drill) {
+            building.proximity.push(core);
+        }
+        if let Some(mut building) = world.get_mut::<Building>(core) {
+            building.proximity.push(drill);
+        }
+
+        let copper = content.item_id("copper").expect("copper");
+        if let Some(mut state) = world.get_mut::<DrillState>(drill) {
+            state.dominant_item = Some(copper);
+            state.dominant_items = 1;
+        }
+        for _ in 0..2000 {
+            if let Some(mut building) = world.get_mut::<Building>(drill) {
+                building.efficiency = 1.0;
+            }
+            update_buildings(&mut world);
+        }
+        let stored = world
+            .get::<ItemModule>(core)
+            .map(|items| items.get(copper))
+            .unwrap_or(0);
+        assert!(
+            stored >= 1,
+            "expected copper delivered to the core, got {stored}"
+        );
     }
 }

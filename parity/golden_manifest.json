@@ -119,7 +119,7 @@
       "kind": "harness",
       "path": "client/rust/mind-headless/tests/golden/campaign/tech_unlock_gating.json",
       "owner_plan": "12",
-      "sha256": "e692c1a61e4e23a21afd4b19c81fc64d80d6a7a232cc4c4b1cae7009e975edba"
+      "sha256": "2360d1944339bddb53ab083c9c0b8a553536c7f73a73eb0ed911a74fd756fcc8"
     },
     {
       "id": "harness_campaign_turn",
@@ -477,7 +477,7 @@
       "kind": "harness",
       "path": "client/rust/mind-core/tests/goldens/ui/campaign.json",
       "owner_plan": "14",
-      "sha256": "12ea80e3e35d420745e27a75b78c431de1770ceb651a554c610809d385adc72c"
+      "sha256": "4866ebbc17ea5cdbfb21c22a2453f219795d3c87327f74bad2b3b9052002262b"
     },
     {
       "id": "harness_ui_chat_console",

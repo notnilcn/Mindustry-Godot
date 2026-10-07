@@ -554,6 +554,36 @@ mod tests {
         fs.write(&dir.join("notes.txt"), b"ignored").unwrap();
     }
 
+    /// EV-0039: the live registry (`Maps.load`) populates from the built-in
+    /// legacy MSAV assets with real metadata, not name-only fixtures. Mirrors
+    /// the `MindPreview.reload` call. Skips when the assets are absent.
+    #[cfg(feature = "msav-import")]
+    #[test]
+    fn builtin_registry_loads_legacy_assets() {
+        let fs = crate::io::fs::NativeFs;
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../assets/maps");
+        if !fs.exists(&dir.join("default").join("archipelago.msav")) {
+            return;
+        }
+        let mut maps = Maps::new();
+        let loaded = maps.load(
+            &fs,
+            &MapSources {
+                builtin_dir: Some(dir),
+                custom_dir: None,
+                use_default_folder: true,
+            },
+        );
+        assert_eq!(loaded, DEFAULT_MAP_NAMES.len(), "all built-ins load");
+        let archipelago = maps.by_name("Archipelago").expect("Archipelago registered");
+        assert_eq!((archipelago.width, archipelago.height), (500, 500));
+        assert!(!archipelago.file.as_os_str().is_empty());
+        for map in maps.all() {
+            assert!(map.width > 0 && map.height > 0, "{} dimensions", map.name());
+            assert!(map.file.exists(), "{} file", map.name());
+        }
+    }
+
     #[test]
     fn header_roundtrip_from_registry() {
         let fs = MockFs::new();

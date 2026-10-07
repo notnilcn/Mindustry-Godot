@@ -724,6 +724,26 @@ pub fn load(
     Ok(())
 }
 
+/// `Planet.init` content-tab half (`autoAssignPlanet`): every content in a
+/// planet's tech tree is added to that planet's `shownPlanets`
+/// (`TechTree.addPlanet`) and `databaseTabs` (`TechTree.addDatabaseTab`).
+///
+/// Runs after the `postInit` sweep and the block auto-assignment, when the
+/// planet→tree mapping is complete.
+pub(crate) fn post_init_link(registry: &mut ContentRegistry) -> Result<(), ContentError> {
+    let assignments: Vec<(TreeId, PlanetId)> = registry
+        .planets()
+        .iter()
+        .filter_map(|planet| planet.tech_tree.map(|tree| (tree, planet.id)))
+        .collect();
+    for (tree, planet) in assignments {
+        let tab = super::super::ContentRef::of(ContentType::Planet, planet);
+        registry.add_planet_to_tree(tree, planet);
+        registry.add_database_tab_to_tree(tree, tab);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::super::test_support::test_registry;

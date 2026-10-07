@@ -13,7 +13,7 @@
 
 use std::collections::BTreeMap;
 
-use super::ctype::{Content, ErrorContent, Mappable, ModId};
+use super::ctype::{Content, ErrorContent, Mappable, ModId, Unlockable};
 use super::id::{BlockId, BulletId, ItemId, LiquidId, PlanetId, StatusId, TeamEntryId, UnitTypeId};
 use super::names::{self, NameMaps};
 use super::parser_hooks::{ContentErrors, ModContentProvider, ModErrorSink};
@@ -22,6 +22,7 @@ use super::registries::{
     loadouts::LoadoutDef, planets::PlanetDef, sectors::SectorPresetDef, stances::UnitStanceDef,
     statuses::StatusEffect, teams::TeamEntry, units::UnitTypeDef, weathers::WeatherDef,
 };
+use super::settings_store::UnlockStore;
 use super::snapshot::RegistryIndexSnapshot;
 use super::tech::{TechNodeRef, TechStore, TreeId};
 use super::{ContentError, ContentRef, ContentType};
@@ -347,6 +348,7 @@ impl ContentRegistry {
         }
         self.sweep(LifecyclePhase::PostInit)?;
         super::registries::blocks::post_init_link(self)?;
+        super::registries::planets::post_init_link(self)?;
         self.phases.post_init = true;
         Ok(())
     }
@@ -1095,6 +1097,50 @@ impl ContentRegistry {
     /// Error record by id.
     pub fn error(&self, id: u16) -> Option<&ErrorContent> {
         self.errors.get(id as usize)
+    }
+
+    /// `Content.each` + `UnlockableContent.clearUnlock()`: locks unlockable
+    /// content again.
+    ///
+    /// `planet` restricts to content whose `databaseTabs` contain that planet
+    /// (`SettingsMenuDialog` clear-planet-research); `None` locks every record
+    /// (`clearResearch`). Returns the number of records whose stored unlock flag
+    /// was set before the call.
+    pub fn clear_unlocks(
+        &mut self,
+        store: &mut dyn UnlockStore,
+        planet: Option<PlanetId>,
+    ) -> usize {
+        let planet_ref = planet.map(|id| ContentRef::new(ContentType::Planet, id.raw()));
+        let mut cleared = 0usize;
+        macro_rules! clear_all {
+            ($($field:ident),* $(,)?) => {
+                $(
+                    for record in &mut self.$field {
+                        let allowed = {
+                            let fields = record.unlock();
+                            match planet_ref {
+                                None => true,
+                                Some(tab) => fields.database_tabs.contains(&tab),
+                            }
+                        };
+                        if !allowed {
+                            continue;
+                        }
+                        let was_unlocked = record.unlock().unlocked;
+                        let name = record.name().to_owned();
+                        record.unlock_mut().clear_unlock(&name, store);
+                        if was_unlocked {
+                            cleared += 1;
+                        }
+                    }
+                )*
+            };
+        }
+        clear_all!(
+            items, blocks, liquids, statuses, units, weathers, sectors, planets
+        );
+        cleared
     }
 }
 

@@ -25,6 +25,7 @@ use crate::content::{BlockKind, ContentRegistry};
 use crate::ecs::{BuildingComp, TeamId};
 use crate::game::State;
 use crate::render::g3d::grid::PlanetGrid;
+use crate::world::modules::ItemModule;
 
 /// Sim ticks per second (fixed rate).
 const TICKS_PER_SECOND: f32 = 60.0;
@@ -105,7 +106,7 @@ pub fn sync_session_with_sim(
     map_spawns: i32,
     apply_loadout: bool,
 ) -> SessionSync {
-    let mut cores: Vec<(Entity, u8)> = Vec::new();
+    let mut cores: Vec<(Entity, u8, i32)> = Vec::new();
     for entity in world.iter_entities() {
         let Some(comp) = entity.get::<BuildingComp>() else {
             continue;
@@ -114,7 +115,7 @@ pub fn sync_session_with_sim(
             continue;
         };
         if def.kind == BlockKind::CoreBlock {
-            cores.push((entity.id(), comp.team.0));
+            cores.push((entity.id(), comp.team.0, def.item_capacity));
         }
     }
 
@@ -122,14 +123,14 @@ pub fn sync_session_with_sim(
     let default_team = session.default_team();
     let wave_team = session.wave_team();
     let mut sync = SessionSync::default();
-    for (entity, team) in cores {
+    for (entity, team, _) in &cores {
         session
             .teams
-            .register_core(entity, TeamId(team), &session.rules);
-        if team == default_team {
+            .register_core(*entity, TeamId(*team), &session.rules);
+        if *team == default_team {
             sync.player_cores += 1;
         }
-        if team == wave_team {
+        if *team == wave_team {
             sync.wave_cores += 1;
         }
     }
@@ -141,6 +142,28 @@ pub fn sync_session_with_sim(
     // launch; a resumed save keeps its own core inventory.
     if apply_loadout {
         super::play::apply_launch_loadout(session, content);
+        // Upstream clears each core building's own items and adds the loadout
+        // there (`entity.items.clear()` + `items.add`); the live core module is
+        // the authoritative store (`Team.items()`/`Sector.items()` while
+        // playing), so mirror the loadout into it as well.
+        if !session.is_campaign() || !session.allow_launch_loadout || session.add_starting_items {
+            for (entity, team, capacity) in &cores {
+                if *team != default_team {
+                    continue;
+                }
+                let Some(mut module) = world.get_mut::<ItemModule>(*entity) else {
+                    continue;
+                };
+                module.clear();
+                for stack in &session.rules.loadout {
+                    if let Some(name) = &stack.item
+                        && let Some(item) = content.item_id(name)
+                    {
+                        module.add(item, stack.amount.max(0), *capacity);
+                    }
+                }
+            }
+        }
     }
     sync
 }
@@ -500,12 +523,20 @@ mod tests {
         }];
         let mut world = World::new();
         let core = registry.block_id("core-shard").expect("core");
-        world.spawn(Comp {
-            pos: TilePos::new(8, 8),
-            block: core,
-            team: TeamId(1),
-            rot: 0,
-        });
+        let entity = world
+            .spawn(Comp {
+                pos: TilePos::new(8, 8),
+                block: core,
+                team: TeamId(1),
+                rot: 0,
+            })
+            .id();
+        let lead = registry.item_id("lead").expect("lead");
+        {
+            let mut module = ItemModule::with_items(registry.items().len());
+            module.add(lead, 9, 100);
+            world.entity_mut(entity).insert(module);
+        }
         let _ = sync_session_with_sim(&mut session, &mut world, &registry, 0, true);
         let copper = registry.item_id("copper").expect("copper");
         let inventory = session
@@ -513,5 +544,9 @@ mod tests {
             .inventory_ref(TeamId(1))
             .expect("team inventory");
         assert_eq!(inventory.get(copper), 500);
+        // Upstream also clears/loads the core building's own storage.
+        let module = world.get::<ItemModule>(entity).expect("core module");
+        assert_eq!(module.get(copper), 500);
+        assert_eq!(module.get(lead), 0, "fresh launch clears core storage");
     }
 }

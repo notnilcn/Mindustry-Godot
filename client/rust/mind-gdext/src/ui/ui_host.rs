@@ -15,12 +15,13 @@
 //! to the orchestrator's single-editor mutex.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use godot::classes::notify::NodeNotification;
-use godot::classes::{INode, Node as GdNode, Os};
+use godot::classes::{INode, Node as GdNode, Os, ProjectSettings};
 use godot::obj::{Base, Singleton};
 use godot::prelude::*;
-use mind_core::io::{FileSystem, NativeFs, Paths, SettingsStore};
+use mind_core::io::{FileSystem, NativeFs, Paths, SettingValue, SettingsStore};
 use mind_core::ui::settings::{self, SettingKind};
 
 /// Path to the sim owner that the pause governor drives.
@@ -657,30 +658,20 @@ impl MindUi {
         true
     }
 
-    /// Runs a data-category action (`clear-saves`, `open-folder`).
+    /// Runs a data-category action (`clear-data`, `clear-saves`,
+    /// `clear-research`, `clear-campaign-saves`, `open-folder`).
     ///
-    /// Actions whose backing subsystem is not ported are not exposed by the
-    /// model and return false here rather than faking success.
+    /// Campaign-backed clears route through the `MindCampaign` facade (the node
+    /// that owns the registry, campaign and save-slot policy). Actions whose
+    /// backing subsystem is not ported return false rather than faking success.
     #[func]
     pub fn settings_action(&mut self, action: GString) -> bool {
-        match action.to_string().as_str() {
-            "clear-saves" => {
-                let paths = Paths::resolve(None);
-                let fs = NativeFs;
-                let mut removed = 0usize;
-                for dir in [paths.saves(), paths.previews()] {
-                    let Ok(files) = fs.walk(&dir) else {
-                        continue;
-                    };
-                    for file in files {
-                        if fs.delete(&file).is_ok() {
-                            removed += 1;
-                        }
-                    }
-                }
-                log::info!("[ui] settings_action clear-saves removed {removed} file(s)");
-                true
-            }
+        let id = action.to_string();
+        match id.as_str() {
+            "clear-saves" => self.campaign_call("clear_saves"),
+            "clear-research" => self.campaign_call("clear_research"),
+            "clear-campaign-saves" => self.campaign_call("clear_campaign_saves"),
+            "clear-data" => self.clear_game_data(),
             "open-folder" => {
                 let root = Paths::resolve(None).root().display().to_string();
                 let error = Os::singleton().shell_open(&GString::from(root.as_str()));
@@ -691,6 +682,203 @@ impl MindUi {
                 false
             }
         }
+    }
+
+    /// `@settings.cleardata`: clears the settings store while keeping
+    /// `usid`/`uuid` keys, wipes the game data trees and exits (`Core.app.exit`).
+    fn clear_game_data(&mut self) -> bool {
+        let preserved: Vec<(String, SettingValue)> = self
+            .settings
+            .keys()
+            .filter(|key| key.contains("usid") || key.contains("uuid"))
+            .filter_map(|key| {
+                self.settings
+                    .get(key)
+                    .cloned()
+                    .map(|value| (key.to_owned(), value))
+            })
+            .collect();
+        self.settings.clear();
+        for (key, value) in preserved {
+            self.settings.put(&key, value);
+        }
+
+        // Drop the campaign facade's in-memory state before wiping the files;
+        // its `exit_tree` persist would otherwise rewrite the deleted store.
+        if let Some(mut campaign) = self.base().get_node_or_null(CAMPAIGN_PATH)
+            && campaign.has_method("clear_in_memory")
+        {
+            campaign.call("clear_in_memory", &[]);
+        }
+
+        // Upstream deletes every entry of the data directory; the port's data
+        // is split between the data root (settings, crashes) and Godot's
+        // `user://` (saves, maps, mods, campaign settings), so both are wiped.
+        let root = Paths::resolve(None).root().to_path_buf();
+        let removed = mind_core::io::data_archive::delete_files(&NativeFs, &root).unwrap_or(0);
+        let user = Self::user_root();
+        let mut removed_user = 0usize;
+        for dir in [
+            "config",
+            "saves",
+            "maps",
+            "mods",
+            "schematics",
+            "cache",
+            "tmp",
+        ] {
+            removed_user +=
+                mind_core::io::data_archive::delete_files(&NativeFs, &user.join(dir)).unwrap_or(0);
+        }
+        let _ = NativeFs.delete(&user.join("last_log.txt"));
+        // Keep the `usid`/`uuid` keys on disk like upstream's post-clear
+        // `settings.save()` (the preserved store replaces the wiped file).
+        self.persist_settings();
+        log::info!("[ui] cleared game data ({removed} data-root, {removed_user} user file(s))");
+        self.base().get_tree().quit();
+        true
+    }
+
+    /// `@data.export`: writes one zip archive with `settings.bin` plus the
+    /// saves/maps/mods/schematics/cache trees (native `FileChooser.export`).
+    #[func]
+    pub fn data_export(&mut self, path: GString) -> bool {
+        self.persist_settings();
+        let paths = Paths::resolve(None);
+        let user = Self::user_root();
+        let out = PathBuf::from(path.to_string());
+        match mind_core::io::data_archive::export_data(
+            &NativeFs,
+            &out,
+            &paths.settings_file(),
+            &user,
+        ) {
+            Ok(report) => {
+                log::info!(
+                    "[ui] exported {} data file(s) ({} bytes) to {}",
+                    report.files,
+                    report.bytes,
+                    out.display()
+                );
+                true
+            }
+            Err(error) => {
+                log::warn!("[ui] data export failed: {error}");
+                false
+            }
+        }
+    }
+
+    /// `@data.import`: merges one zip archive over the data roots, deletes the
+    /// map preview cache and exits (`importData` + `Control` exit path).
+    #[func]
+    pub fn data_import(&mut self, path: GString) -> bool {
+        let paths = Paths::resolve(None);
+        let user = Self::user_root();
+        let archive = PathBuf::from(path.to_string());
+        match mind_core::io::data_archive::import_data(
+            &NativeFs,
+            &archive,
+            &paths.settings_file(),
+            &user,
+        ) {
+            Ok(report) => {
+                let _ =
+                    mind_core::io::data_archive::delete_files(&NativeFs, &user.join("previews"));
+                self.settings = SettingsStore::load(&NativeFs, &paths);
+                // Rebuild the campaign facade from the imported settings before
+                // quitting: its `exit_tree` persist would otherwise write the
+                // pre-import store back (`importData` reloads settings).
+                if let Some(mut campaign) = self.base().get_node_or_null(CAMPAIGN_PATH)
+                    && campaign.has_method("reload_from_disk")
+                {
+                    campaign.call("reload_from_disk", &[]);
+                }
+                log::info!("[ui] imported {} data file(s); restarting", report.files);
+                self.base().get_tree().quit();
+                true
+            }
+            Err(error) => {
+                log::warn!("[ui] data import failed: {error}");
+                false
+            }
+        }
+    }
+
+    /// `SettingsMenuDialog` `@crash.none` gate: whether any crash report or
+    /// `last_log.txt` exists.
+    #[func]
+    pub fn crash_logs_available(&self) -> bool {
+        let crashes = Paths::resolve(None).root().join("crashes");
+        NativeFs
+            .ls(&crashes)
+            .map(|files| !files.is_empty())
+            .unwrap_or(false)
+            || NativeFs.exists(&Self::user_root().join("last_log.txt"))
+    }
+
+    /// `@crash.export`: writes `getLogs()` (every `crashes/*` report followed
+    /// by `last_log.txt`) to `path`.
+    #[func]
+    pub fn export_crash_logs(&self, path: GString) -> bool {
+        let crashes = Paths::resolve(None).root().join("crashes");
+        let mut out = String::new();
+        if let Ok(files) = NativeFs.ls(&crashes) {
+            for file in files {
+                if !NativeFs.is_file(&file) {
+                    continue;
+                }
+                let name = file
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                out.push_str(&name);
+                out.push_str("\n\n");
+                if let Ok(text) = NativeFs.read(&file) {
+                    out.push_str(&String::from_utf8_lossy(&text));
+                    out.push('\n');
+                }
+            }
+        }
+        let log = Self::user_root().join("last_log.txt");
+        if NativeFs.exists(&log) {
+            out.push_str("\nlast log:\n");
+            if let Ok(text) = NativeFs.read(&log) {
+                out.push_str(&String::from_utf8_lossy(&text));
+            }
+        }
+        match NativeFs.write(&PathBuf::from(path.to_string()), out.as_bytes()) {
+            Ok(()) => {
+                log::info!("[ui] exported crash logs ({} byte(s))", out.len());
+                true
+            }
+            Err(error) => {
+                log::warn!("[ui] crash log export failed: {error}");
+                false
+            }
+        }
+    }
+
+    /// The Godot `user://` root that holds the campaign saves/maps/mods.
+    fn user_root() -> PathBuf {
+        PathBuf::from(
+            ProjectSettings::singleton()
+                .globalize_path("user://")
+                .to_string(),
+        )
+    }
+
+    /// Calls one bool method on the live campaign facade.
+    fn campaign_call(&self, method: &str) -> bool {
+        let Some(mut campaign) = self.base().get_node_or_null(CAMPAIGN_PATH) else {
+            log::warn!("[ui] settings action: `{CAMPAIGN_PATH}` missing");
+            return false;
+        };
+        if !campaign.has_method(method) {
+            log::warn!("[ui] settings action: campaign has no `{method}`");
+            return false;
+        }
+        campaign.call(method, &[]).try_to::<bool>().unwrap_or(false)
     }
 }
 

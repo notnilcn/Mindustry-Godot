@@ -66,6 +66,42 @@ class KeybindInputStub:
 		return true
 
 
+## `/root/Spine/MindCampaign` double for the load-dialog oracle: serves the live
+## save listing and records the queued load.
+class SaveCampaignStub:
+	extends Node
+
+	var loaded := ""
+
+	func list_save_slots() -> Array:
+		return [{
+			"name": "alpha",
+			"file": "user://saves/7.msav",
+			"sector": false,
+			"autosave": false,
+		}]
+
+	func load_slot(name: String) -> bool:
+		loaded = name
+		return true
+
+
+## `/root/Spine/MindCampaign` double for the pause-dialog oracle: serves the
+## sector summary and records an abandoned sector.
+class PauseCampaignStub:
+	extends Node
+
+	var state: Dictionary = {}
+	var abandoned := false
+
+	func get_sector_state() -> Dictionary:
+		return state
+
+	func abandon_sector() -> bool:
+		abandoned = true
+		return true
+
+
 func _check(condition: bool, message: String) -> void:
 	if condition:
 		print("UICHECK: ok ", message)
@@ -306,6 +342,106 @@ func _init() -> void:
 				% version_label.get_theme_color("font_color")
 		)
 
+	# EV-0054: `Load Game` lists the live saves and queues a load when a card is
+	# clicked; the menu opens the dialog with no slot context.
+	var save_stub := SaveCampaignStub.new()
+	save_stub.name = "MindCampaign"
+	spine.add_child(save_stub)
+	var load_dialog: Control = load("res://scenes/ui/dialogs/load_dialog.tscn").instantiate()
+	root.add_child(load_dialog)
+	load_dialog.call("shown")
+	var load_grid: Variant = load_dialog.get("_grid")
+	var cards := 0
+	if load_grid is MindTable:
+		for child in (load_grid as MindTable).get_children():
+			if child is Button:
+				cards += 1
+	_check(cards == 1, "load dialog lists the live save slot (got %s card(s))" % cards)
+	if cards == 1:
+		(load_grid as MindTable).get_child(0).emit_signal("pressed")
+		_check(
+			save_stub.loaded == "7",
+			"clicking a save card queues a load of its file stem (got '%s')" % save_stub.loaded
+		)
+	load_dialog.free()
+	save_stub.free()
+
+	# EV-0061: opening the game-over dialog must not re-enter `MindUi` while
+	# `open_dialog` mutably binds it (gdext `bind_mut` panic freezes the client).
+	if ui != null:
+		var over_dialog: Control = load("res://scenes/ui/dialogs/game_over_dialog.tscn").instantiate()
+		root.add_child(over_dialog)
+		ui.call("register_dialog", "game_over_check", over_dialog, false)
+		ui.call("open_dialog", "game_over_check", JSON.stringify({"campaign": false}))
+		await process_frame
+		_check(bool(ui.call("has_dialog")), "game-over dialog opens through MindUi")
+		_check(not bool(ui.call("hud_visible")), "game-over dialog hides the HUD flag")
+		ui.call("close_dialog", "game_over_check")
+		await process_frame
+		_check(bool(ui.call("hud_visible")), "closing the game-over dialog restores the HUD flag")
+		over_dialog.free()
+
+	# EV-0063: the desktop pause branch shows the campaign `@objective` /
+	# `@abandon` entries and keeps the mobile `@planetmap` off desktop.
+	var pause_stub := PauseCampaignStub.new()
+	pause_stub.name = "MindCampaign"
+	pause_stub.state = {"campaign": true, "presetDescription": "Defend the sector."}
+	spine.add_child(pause_stub)
+	var paused_dialog: Control = load("res://scenes/ui/dialogs/paused_dialog.tscn").instantiate()
+	root.add_child(paused_dialog)
+	paused_dialog.call("shown")
+	var buttons := paused_dialog.get_node_or_null("Center/Panel/Layout/Buttons")
+	var objective: Button = buttons.get_node_or_null("objective") if buttons != null else null
+	var abandon: Button = buttons.get_node_or_null("abandon") if buttons != null else null
+	var planet: Button = buttons.get_node_or_null("planetmap") if buttons != null else null
+	_check(
+		objective != null and objective.visible,
+		"pause dialog shows @objective for a described campaign sector"
+	)
+	_check(
+		abandon != null and abandon.visible,
+		"pause dialog shows @abandon in a campaign sector"
+	)
+	_check(
+		planet != null and not planet.visible,
+		"pause dialog keeps the mobile @planetmap off desktop"
+	)
+	if abandon != null:
+		abandon.pressed.emit()
+		ui.call("resolve_confirm", true)
+		_check(pause_stub.abandoned, "pause dialog abandon confirms into the live facade")
+	pause_stub.state = {"campaign": false}
+	paused_dialog.call("shown")
+	_check(
+		objective != null and not objective.visible,
+		"pause dialog hides @objective outside a campaign sector"
+	)
+	_check(
+		abandon != null and not abandon.visible,
+		"pause dialog hides @abandon outside a campaign sector"
+	)
+	paused_dialog.free()
+	pause_stub.free()
+
+	# The `@objective` entry opens the full-text dialog with the preset text.
+	var full_text: Control = load("res://scenes/ui/dialogs/full_text_dialog.tscn").instantiate()
+	root.add_child(full_text)
+	full_text.call(
+		"set_context_json",
+		JSON.stringify({"title": "@objective", "text": "Defend the sector."})
+	)
+	full_text.call("show_dialog")
+	var objective_body := ""
+	for node in full_text.find_children("*", "", true, false):
+		if str(node.get("text")) == "Defend the sector.":
+			objective_body = "Defend the sector."
+	_check(
+		objective_body == "Defend the sector.",
+		"full-text dialog renders the objective description from context"
+	)
+	full_text.call("hide_dialog")
+	full_text.free()
+
 	# Prompt bodies must render BBCode: the uiscale reset prompt's translated
 	# `[color=...]` markup used to render literally because the body was a plain
 	# Label (EV-0034).
@@ -321,6 +457,25 @@ func _init() -> void:
 		parsed = (prompt_body as RichTextLabel).get_parsed_text()
 	_check(parsed == "Red plain", "prompt body parses BBCode markup (got '%s')" % parsed)
 	ui_root.free()
+
+	# EV-0041: the campaign difficulty dialog builds each rule toggle through the
+	# fluent cell API (`Cell.left()`); a missing `MindCell.left()` aborts
+	# `_rebuild` before the first toggle and wedges the client under the debugger.
+	var rules_dialog: Control = load("res://ui/dialogs/campaign_rules_dialog.gd").new()
+	root.add_child(rules_dialog)
+	rules_dialog.call("set_context_json", '{"planet":"serpulo"}')
+	rules_dialog.call("shown")
+	var rules_table: Variant = rules_dialog.get("_table")
+	var rule_toggles := 0
+	if rules_table is MindTable:
+		for child in (rules_table as MindTable).get_children():
+			if child is MindCheck:
+				rule_toggles += 1
+	_check(
+		rule_toggles == 7,
+		"campaign rules dialog builds all seven rule toggles (got %s)" % rule_toggles
+	)
+	rules_dialog.free()
 
 	print("UICHECK: failed=", _failures)
 	quit(1 if _failures > 0 else 0)

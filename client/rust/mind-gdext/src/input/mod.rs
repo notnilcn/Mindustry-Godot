@@ -246,7 +246,11 @@ impl MindInput {
     fn ui_captures_at(&self, x: f32, y: f32) -> bool {
         let tree = self.base().get_tree();
         let root = tree.get_root();
-        let controls = root.find_children("*");
+        // `owned = false`: the default `owned = true` finds nothing under the
+        // ownerless root Window, so runtime-created Controls (`Button.new()` in
+        // the UI factories) would be missed and their clicks consumed as world
+        // presses instead of reaching `_gui_input`.
+        let controls = root.find_children_ex("*").owned(false).done();
         let point = Vector2::new(x, y);
         // Later siblings are drawn on top: walk in reverse tree order.
         for index in (0..controls.len()).rev() {

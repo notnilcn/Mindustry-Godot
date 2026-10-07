@@ -18,8 +18,9 @@ use godot::classes::{FileAccess, INode, Node, ProjectSettings};
 use godot::obj::Base;
 use godot::prelude::*;
 
+use mind_core::content::registries::planets::GeneratorKind;
 use mind_core::content::{
-    ContentRef, ContentRegistry, ContentType, MemoryBundle, create_base_content,
+    ContentRef, ContentRegistry, ContentType, MemoryBundle, PlanetId, create_base_content,
 };
 use mind_core::game::campaign_rules::CampaignRules;
 use mind_core::game::objectives::CampaignObjectiveContext;
@@ -127,7 +128,13 @@ impl MindCampaign {
         let bundle = MemoryBundle::new();
         let store = SettingsUnlockStore::new(&mut self.settings);
         match create_base_content(&bundle, &store, true) {
-            Ok(registry) => {
+            Ok(mut registry) => {
+                // The facade reads database tabs and derived block/unit fields
+                // (`ContentLoader.init`/`postInit` sweeps), so run the same
+                // lifecycle the sim host/editor run.
+                if let Err(error) = registry.init().and_then(|()| registry.post_init()) {
+                    log::error!("MindCampaign content lifecycle failed: {error}");
+                }
                 let mut campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
                 campaign.load_all(&self.settings);
                 self.saves = Saves::new();
@@ -624,13 +631,29 @@ impl MindCampaign {
         };
 
         // Real inventory: the stored items of every owned, non-frozen sector
-        // (`ResearchDialog.rebuildItems` aggregates `sector.items()`).
+        // (`ResearchDialog.rebuildItems` aggregates `sector.items()`). The
+        // sector being played reads its live core module instead (`Sector.items`
+        // -> `state.rules.defaultTeam.items()`), so it is not double-counted.
+        let default_team = self.session.default_team();
         let mut items = ItemModule::with_items(registry.items().len());
+        if self.session.is_campaign()
+            && let Some(host) = self.host()
+        {
+            for (name, amount) in host.bind().player_core_items(default_team) {
+                if let Some(id) = registry.item_id(&name) {
+                    items.add(id, amount.max(0), i32::MAX);
+                }
+            }
+        }
+        let played_sector = self.session.sector;
         let mut sector_entries: Vec<(SectorRef, Vec<(String, i32)>)> = Vec::new();
         if let Some(campaign) = self.campaign.as_ref() {
             for planet in campaign.planets.values() {
                 for sector in &planet.sectors {
                     if !sector.has_base() || sector.is_frozen(None) {
+                        continue;
+                    }
+                    if played_sector == Some((planet.id, sector.id)) {
                         continue;
                     }
                     let entry: Vec<(String, i32)> = sector
@@ -669,7 +692,9 @@ impl MindCampaign {
         };
         let changed = result.complete || !result.spent.is_empty();
 
-        // Deduct the spent stacks from the aggregated sectors in order.
+        // Deduct the spent stacks: other sectors in order, then the active
+        // sector last from its live core module (`ResearchDialog` removal
+        // order; `Sector.removeItem` writes the core while playing).
         for spent in &result.spent {
             let Some(name) = registry.item(spent.item).map(|item| item.name.clone()) else {
                 continue;
@@ -695,6 +720,15 @@ impl MindCampaign {
                     record.info.info.items.insert(name.clone(), *amount);
                 }
             }
+            if remaining > 0
+                && self.session.is_campaign()
+                && let Some(mut host) = self.host()
+            {
+                remaining -=
+                    host.bind_mut()
+                        .remove_player_core_items(default_team, &name, remaining);
+            }
+            let _ = remaining;
         }
         // Newly unlocked content may auto-unlock dependent zero-cost nodes.
         if !result.unlocked.is_empty()
@@ -869,6 +903,21 @@ impl MindCampaign {
                     .unwrap_or(false)
                     .to_variant(),
             );
+            // `PausedDialog.rebuild` `showObjective`: the preset description
+            // feeds the `@objective` full-text dialog.
+            let preset_description = record
+                .and_then(|sector| sector.preset)
+                .and_then(|preset| {
+                    self.registry
+                        .as_ref()
+                        .and_then(|registry| registry.sector(preset))
+                })
+                .and_then(|preset| preset.unlock.description.clone())
+                .unwrap_or_default();
+            dict.set(
+                &key("presetDescription"),
+                &preset_description.as_str().to_variant(),
+            );
         }
         dict.set(
             &GString::from("campaignComplete"),
@@ -1042,6 +1091,246 @@ impl MindCampaign {
             return false;
         }
         host.bind_mut().request_load(GString::from(path.as_str()));
+        true
+    }
+
+    /// `PlanetDialog.abandonSectorConfirm` (persisted half): clears the active
+    /// sector's items/base/production, drops its save and removes the file.
+    #[func]
+    pub fn abandon_sector(&mut self) -> bool {
+        let Some((planet, sector_id)) = self.session.sector else {
+            return false;
+        };
+        let Some(planet_name) = self
+            .registry
+            .as_ref()
+            .and_then(|registry| registry.planet(planet))
+            .map(|record| record.name.clone())
+        else {
+            return false;
+        };
+
+        let mut cleared = false;
+        if let Some(mut host) = self.host() {
+            let taken = host.bind_mut().take_campaign_runtime();
+            if let Some(mut runtime) = taken {
+                clear_sector_record(
+                    &mut runtime.campaign,
+                    &mut self.settings,
+                    planet,
+                    sector_id,
+                    &planet_name,
+                );
+                host.bind_mut().put_campaign_runtime(runtime);
+                cleared = true;
+            }
+        }
+        if let Some(campaign) = self.campaign.as_mut() {
+            clear_sector_record(
+                campaign,
+                &mut self.settings,
+                planet,
+                sector_id,
+                &planet_name,
+            );
+            cleared = true;
+        }
+        if !cleared {
+            return false;
+        }
+
+        let file = self.paths.sector_save(&planet_name, sector_id as u32);
+        if let Err(error) = NativeFs.delete(&file) {
+            log::warn!(
+                "abandon_sector: failed to delete `{}`: {error}",
+                file.display()
+            );
+        }
+        let backup = mind_core::io::SaveIo::backup_file_for(&file);
+        let _ = NativeFs.delete(&backup);
+        self.persist();
+        log::info!("abandoned campaign sector `{planet_name}:{sector_id}`");
+        true
+    }
+
+    /// `SettingsMenuDialog.planetDataDialog` selectable planets: a generator,
+    /// at least one sector and accessibility (content order).
+    #[func]
+    pub fn selectable_planets(&self) -> Array<VarDictionary> {
+        let mut out = Array::<VarDictionary>::new();
+        let Some(registry) = self.registry.as_ref() else {
+            return out;
+        };
+        for def in registry.planets() {
+            if def.generator == GeneratorKind::None || def.sectors.is_empty() || !def.accessible {
+                continue;
+            }
+            let mut row = VarDictionary::new();
+            row.set(&GString::from("name"), &def.name.as_str().to_variant());
+            let color = def.icon_color;
+            row.set(
+                &GString::from("iconColor"),
+                Color::from_rgba(color.r, color.g, color.b, color.a),
+            );
+            out.push(&row);
+        }
+        out
+    }
+
+    /// `control.saves.deleteAll()` (`@settings.clearsaves`): removes every
+    /// non-sector save slot.
+    #[func]
+    pub fn clear_saves(&mut self) -> bool {
+        let Some(registry) = self.registry.as_ref() else {
+            return false;
+        };
+        self.saves
+            .load(&NativeFs, &self.paths, registry, &mut self.settings);
+        match self.saves.delete_all(&NativeFs) {
+            Ok(()) => {
+                log::info!(
+                    "cleared non-sector saves ({} slot(s) left)",
+                    self.saves.slots.len()
+                );
+                true
+            }
+            Err(error) => {
+                log::warn!("clear saves failed: {error}");
+                false
+            }
+        }
+    }
+
+    /// `@settings.clearresearch`: `Universe.clearLoadoutInfo`, every tech node
+    /// reset and every content unlock cleared.
+    #[func]
+    pub fn clear_research(&mut self) -> bool {
+        let Some(mut registry) = self.registry.take() else {
+            return false;
+        };
+        if let Some(campaign) = self.campaign.as_mut() {
+            campaign.universe.clear_loadout_info(&mut self.settings);
+        }
+        let cleared = {
+            let mut store = SettingsUnlockStore::new(&mut self.settings);
+            registry.clear_unlocks(&mut store, None)
+        };
+        tech_tree::reset_all(&mut registry);
+        self.settings.remove("unlocks");
+        self.registry = Some(registry);
+        self.push_campaign_to_runtime();
+        self.persist();
+        log::info!("cleared research ({cleared} unlock(s))");
+        true
+    }
+
+    /// `@settings.clearplanetresearch`: the planet's tech tree, its database
+    /// content unlocks and the launch loadout info.
+    #[func]
+    pub fn clear_planet_research(&mut self, planet: GString) -> bool {
+        let name = planet.to_string();
+        let Some(mut registry) = self.registry.take() else {
+            return false;
+        };
+        let Some((planet_id, tree)) = registry
+            .planet_by_name(&name)
+            .map(|def| (def.id, def.tech_tree))
+        else {
+            self.registry = Some(registry);
+            log::warn!("clear_planet_research: unknown planet `{name}`");
+            return false;
+        };
+        if let Some(campaign) = self.campaign.as_mut() {
+            campaign.universe.clear_loadout_info(&mut self.settings);
+        }
+        let cleared = {
+            let mut store = SettingsUnlockStore::new(&mut self.settings);
+            registry.clear_unlocks(&mut store, Some(planet_id))
+        };
+        if let Some(tree) = tree {
+            tech_tree::reset_tree(&mut registry, tree);
+        }
+        self.settings.remove("unlocks");
+        self.registry = Some(registry);
+        self.push_campaign_to_runtime();
+        self.persist();
+        log::info!("cleared `{name}` research ({cleared} unlock(s))");
+        true
+    }
+
+    /// `@settings.clearcampaignsaves`: every planet's stats and sector info are
+    /// cleared and every sector save slot deleted.
+    #[func]
+    pub fn clear_campaign_saves(&mut self) -> bool {
+        self.clear_campaign_saves_for(None)
+    }
+
+    /// `@settings.clearplanetcampaignsaves`: planet-scoped campaign-save clear.
+    #[func]
+    pub fn clear_planet_campaign_saves(&mut self, planet: GString) -> bool {
+        let name = planet.to_string();
+        let Some(id) = self
+            .registry
+            .as_ref()
+            .and_then(|registry| registry.planet_by_name(&name))
+            .map(|def| def.id)
+        else {
+            log::warn!("clear_planet_campaign_saves: unknown planet `{name}`");
+            return false;
+        };
+        self.clear_campaign_saves_for(Some(id))
+    }
+
+    /// Shared `SettingsMenuDialog` clear-campaign-saves body (`only` scopes to
+    /// one planet; `None` covers every planet).
+    fn clear_campaign_saves_for(&mut self, only: Option<PlanetId>) -> bool {
+        let Some(registry) = self.registry.take() else {
+            return false;
+        };
+        let Some(mut campaign) = self.campaign.take() else {
+            self.registry = Some(registry);
+            return false;
+        };
+        let planets: Vec<(PlanetId, String)> = campaign
+            .planets
+            .values()
+            .filter(|planet| only.is_none_or(|target| target == planet.id))
+            .map(|planet| (planet.id, planet.name.clone()))
+            .collect();
+        if planets.is_empty() {
+            self.registry = Some(registry);
+            self.campaign = Some(campaign);
+            return false;
+        }
+
+        for (id, name) in &planets {
+            campaign.clear_stats(*id);
+            let Some(planet) = campaign.planet_mut(*id) else {
+                continue;
+            };
+            for sector in &mut planet.sectors {
+                sector.save = None;
+                sector.being_played = false;
+                sector.clear_info(&mut self.settings, name);
+                let file = self.paths.sector_save(name, sector.id as u32);
+                let backup = mind_core::io::SaveIo::backup_file_for(&file);
+                let _ = NativeFs.delete(&file);
+                let _ = NativeFs.delete(&backup);
+            }
+        }
+        self.campaign = Some(campaign);
+
+        // Re-list saves (a slot may have been written this session) and drop
+        // the matching sector slots.
+        self.saves
+            .load(&NativeFs, &self.paths, &registry, &mut self.settings);
+        if let Err(error) = self.saves.delete_sectors(&NativeFs, &registry, only) {
+            log::warn!("clear campaign saves: {error}");
+        }
+        self.registry = Some(registry);
+        self.push_campaign_to_runtime();
+        self.persist();
+        log::info!("cleared campaign saves for {} planet(s)", planets.len());
         true
     }
 
@@ -1289,6 +1578,28 @@ impl MindCampaign {
         GString::from(self.content_error.as_deref().unwrap_or(""))
     }
 
+    /// Rebuilds settings, content and campaign state from disk
+    /// (`importData`'s `settings.load()` + `state = new GameState()` pair).
+    #[func]
+    pub fn reload_from_disk(&mut self) -> bool {
+        self.bootstrap();
+        self.content_error.is_none()
+    }
+
+    /// `@settings.cleardata` host half: drops the in-memory campaign, registry,
+    /// save and settings state so the exit persist cannot resurrect the data
+    /// the UI is about to delete.
+    #[func]
+    pub fn clear_in_memory(&mut self) {
+        self.settings.clear();
+        self.campaign = None;
+        self.registry = None;
+        self.saves = Saves::new();
+        self.session = PlaySession::default();
+        self.runtime_installed = false;
+        self.content_error = None;
+    }
+
     /// Live HUD/status fields (`HudFragment` read surface, gap3 C-10). Appended
     /// for `MindHud`; additive and read-only. Includes the campaign session's
     /// wave/enemy/timer/goal state the other getters do not expose.
@@ -1393,4 +1704,20 @@ fn sanitize_slot_name(name: &str) -> String {
     name.chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_' || *c == '.')
         .collect()
+}
+
+/// Clears one campaign sector's persisted base/items
+/// (`PlanetDialog.abandonSectorConfirm`, non-playing branch).
+fn clear_sector_record(
+    campaign: &mut Campaign,
+    settings: &mut SettingsStore,
+    planet: mind_core::content::PlanetId,
+    sector_id: u16,
+    planet_name: &str,
+) {
+    if let Some(sector) = campaign.sector_mut(planet, sector_id) {
+        sector.save = None;
+        sector.being_played = false;
+        sector.clear_info(settings, planet_name);
+    }
 }

@@ -1,7 +1,7 @@
 {
   "format": 1,
   "scenario": "campaign_tech_unlock_gating",
-  "gated_node": "conveyor",
+  "gated_node": "junction",
   "locked_before": true,
   "spendable_after_parent_unlock": true,
   "items_spent": 30,
@@ -9,7 +9,6 @@
   "req_key": "req-stone-wall-copper",
   "req_persisted": 30,
   "auto_unlocked": [
-    "core-shard",
     "conveyor",
     "junction",
     "router",
@@ -96,7 +95,6 @@
     "spore-pod",
     "oil",
     "plastanium",
-    "core-bastion",
     "plasma-bore",
     "turbine-condenser",
     "beam-node",

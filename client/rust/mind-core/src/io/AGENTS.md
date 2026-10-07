@@ -25,6 +25,7 @@ Read the root [`AGENTS.md`](../../../../../AGENTS.md) first; the crate-level map
 | `json/` | `JsonIO` (`JsonIo`), `Rules`/`GameStats`/`MapLocales`/`SectorInfo`, content serde, objectives. |
 | `map/` | `MapIo` (create/write/load/is_image/generate_preview), `MapHeader`, preview pixels + `encode_png`/`decode_png`. |
 | `settings.rs` | `SettingsStore` (`MGST` file), typed `SettingValue`, upstream key names, atomic and debounced flush. |
+| `data_archive.rs` | Data export/import zip (`SettingsMenuDialog.exportData`/`importData`): settings + saves/maps/mods/schematics/cache trees, `settings.bin` validation, zip-slip/entry caps. |
 | `sim_io.rs` | `SimIoHandler`, the live-sim `IoHandler` fulfilling `IoSet::Capture`/`Apply` save/load requests. |
 | `legacy.rs` | `open_legacy`: handles the upstream `MSAV` magic and returns the standard unknown-version error. |
 

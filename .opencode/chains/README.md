@@ -21,6 +21,7 @@ touch, which precondition is easy to miss.
 | `sector-preset-rules.md` | campaign launch → `get_rules_json` vs preset captureWave/winWave (EV-0049) |
 | `ground-zero-fresh-launch.md` | clear leftover sector saves → restart → UI launch → core/entity/game-over assertions (EV-0037) |
 | `ground-zero-production-probe.md` | fresh Ground Zero → placed drill on overlay ore + adjacent core → deterministic first-delivery bracket (EV-0047) |
+| `campaign-rules-dialog.md` | menu → campaign planet page → `campaign.difficulty` rail button / MindUi `open_dialog` → body + liveness + close |
 | `campaign-save-load.md` | campaign facade → launch → save / list / load a slot |
 | `load-game-dialog.md` | main menu → Load Game → live slot list → card click queues + applies a load |
 | `research-purchase.md` | campaign launch → research dialog → root rail → purchase a locked node |

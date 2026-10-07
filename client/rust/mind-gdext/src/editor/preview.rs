@@ -23,8 +23,10 @@ use godot::prelude::*;
 
 use mind_core::editor::preview::PreviewPipeline;
 use mind_core::io::fs::{FileSystem, NativeFs, Paths};
-use mind_core::io::map::{MapIo, PreviewImage, decode_png};
-use mind_core::maps::{Map, Maps, preview_file};
+use mind_core::io::map::{PreviewImage, decode_png};
+use mind_core::maps::{Map, MapSources, Maps, preview_file};
+
+use crate::assets::loader::resolve_assets_dir;
 
 /// `MindPreview` — map preview textures + `EditorMapsDialog` provider rows.
 #[derive(GodotClass)]
@@ -64,7 +66,22 @@ impl MindPreview {
     /// Rebuilds the node's Godot-derived state (runs from `ready()` and on
     /// `EXTENSION_RELOADED`, which does not re-run `ready()`).
     fn bootstrap(&mut self) {
-        log::info!("MindPreview ready ({} maps)", self.maps.len());
+        let loaded = self.reload();
+        log::info!("MindPreview ready ({loaded} maps)");
+    }
+
+    /// Reloads the live registry (`Maps.load`): the built-in map set from the
+    /// resolved assets folder (`<assets>/maps/default`) plus custom maps from
+    /// the data root's `maps/`.
+    fn reload(&mut self) -> usize {
+        self.maps = Maps::new();
+        let custom = self.paths().maps();
+        let sources = MapSources {
+            builtin_dir: Some(assets_maps_dir()),
+            custom_dir: NativeFs.exists(&custom).then_some(custom),
+            use_default_folder: true,
+        };
+        self.maps.load(&NativeFs, &sources)
     }
 
     fn paths(&self) -> Paths {
@@ -103,33 +120,11 @@ impl MindPreview {
         };
     }
 
-    /// Scans `<root>/maps` for `.msav` files, registering them by meta only.
-    ///
-    /// Mirrors the registry subset `EditorMapsDialog` needs; the actual
-    /// `Maps.load` orchestration stays plan 06's.
+    /// Reloads the live map registry (`Maps.load`): built-ins from the assets
+    /// folder plus `<root>/maps` custom maps. Returns the map count.
     #[func]
     pub fn refresh(&mut self) -> i64 {
-        self.maps = Maps::new();
-        let dir = self.root.join("maps");
-        let mut count = 0i64;
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            return 0;
-        };
-        let mut paths: Vec<PathBuf> = entries
-            .flatten()
-            .map(|entry| entry.path())
-            .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("msav"))
-            .collect();
-        paths.sort();
-        for path in paths {
-            if let Ok(header) = MapIo::create_map(&NativeFs, &path, true)
-                && !header.name.trim().is_empty()
-            {
-                self.maps.add(Map::from_header(&header, true));
-                count += 1;
-            }
-        }
-        count
+        self.reload() as i64
     }
 
     /// `CustomGameDialog`/`EditorMapsDialog` provider rows:
@@ -232,6 +227,20 @@ fn bind_texture(image: &PreviewImage) -> Option<Gd<Texture2D>> {
         &data,
     )?;
     ImageTexture::create_from_image(&godot_image).map(|texture| texture.upcast::<Texture2D>())
+}
+
+/// The built-in map directory (`<assets>/maps`), resolving Godot virtual
+/// prefixes to an OS path for [`NativeFs`].
+fn assets_maps_dir() -> PathBuf {
+    let raw = resolve_assets_dir();
+    let path = if raw.starts_with("res://") || raw.starts_with("user://") {
+        ProjectSettings::singleton()
+            .globalize_path(&raw)
+            .to_string()
+    } else {
+        raw
+    };
+    PathBuf::from(path).join("maps")
 }
 
 /// Default data root (`user://`).

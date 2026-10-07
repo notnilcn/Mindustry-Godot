@@ -165,11 +165,25 @@ impl UnlockFields {
         if self.database_tag.as_deref().is_none_or(str::is_empty) {
             self.database_tag = Some(String::from("default"));
         }
-        for planet in &self.shown_planets {
-            let reference = super::ContentRef::of(ContentType::Planet, *planet);
-            if !self.database_tabs.contains(&reference) {
-                self.database_tabs.push(reference);
-            }
+        for index in 0..self.shown_planets.len() {
+            let planet = self.shown_planets[index];
+            self.add_shown_planet(planet);
+        }
+    }
+
+    /// Adds `planet` to `shownPlanets` and folds it into `databaseTabs`
+    /// (`Block.postInit` auto-assignment + `UnlockableContent.postInit`).
+    ///
+    /// Callers that assign planets after the `postInit` sweep (the port's
+    /// `blocks::post_init_link`) use this instead of pushing `shown_planets`
+    /// alone.
+    pub fn add_shown_planet(&mut self, planet: PlanetId) {
+        if !self.shown_planets.contains(&planet) {
+            self.shown_planets.push(planet);
+        }
+        let reference = super::ContentRef::of(ContentType::Planet, planet);
+        if !self.database_tabs.contains(&reference) {
+            self.database_tabs.push(reference);
         }
     }
 

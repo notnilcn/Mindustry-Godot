@@ -41,6 +41,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         destructible: Some(true),
+        always_unlocked: Some(true),
         ..spec("core-shard", BlockKind::CoreBlock)
     })?;
 
@@ -113,6 +114,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         destructible: Some(true),
+        always_unlocked: Some(true),
         ..spec("core-bastion", BlockKind::CoreBlock)
     })?;
 
