@@ -63,6 +63,20 @@ func handle(tool: String, action: String, params: Dictionary) -> Dictionary:
 - GDScript side: no local unit runner here — verify live via `godot_health check` then the relevant tool (`godot_game status`, `godot_test` for `res://tests/` suites extending `OgmTestSuite`).
 - After touching the bridge/dispatcher/runtime channel, re-run a play/stop cycle plus one runtime round-trip (`digest` or `eval`) before calling it done.
 
+## Consuming-project call-chain ledger (recommended)
+
+Downstream projects should keep a ledger of proven MCP call sequences — for
+example one markdown file per chain under `.opencode/chains/` — and have their
+agents consult it before composing calls. Each entry records when the chain
+applies, its preconditions (including process-start environment such as
+`DISPLAY` for servers that need one), the exact tool calls, success signals,
+failure modes, and the last run that verified it. Treat seeded entries as
+claims and promote them to verified only with a run artifact.
+
+Keep that ledger in the consuming project. This addon and `Docs/` stay generic:
+they describe the tools, not any one project's flow. `README.md` carries the
+longer rationale.
+
 ## Pitfalls
 
 - `EditorInterface` / `EditorDebuggerPlugin` exist **only in the editor**. `runtime_autoload.gd` must guard with `Engine.is_editor_hint()` and never assume editor APIs.
