@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "updated": "2026-10-06T21:50:19+00:00",
+  "updated": "2026-10-06T23:24:28+00:00",
   "findings": [
     {
       "id": "EV-0001",
@@ -1259,6 +1259,390 @@
       "first_seen": "2026-10-06T21:50:19+00:00",
       "last_verified": "2026-10-06T21:50:19+00:00",
       "found_by_loop": "7"
+    },
+    {
+      "id": "EV-0046",
+      "area": "game/sim",
+      "severity": "S1",
+      "status": "open",
+      "title": "No objective/wave-timer/game-state systems run live: a sector can never be won or lost",
+      "expected": "Logic.java:608-617 calls updateEntities+checkGameState every tick; checkGameState :327-372 runs capture/lose checks; sectorCapture :394-420 books the win",
+      "actual": "schedule.rs:403-409 registers only stub_system+update_buildings; TickSet Campaign/Objectives/WaveTimer/RunWave/GameStateCheck (:77-88) have zero systems; check_game_state is called only by mind-headless (campaign_scenarios.rs:963)",
+      "repro": "launch serpulo:170, SimHost.step(600); no PlayEvents/capture is ever produced and wave/enemies never change (needs EV-0035 bootstrap fix first)",
+      "source": "code",
+      "confidence": "high",
+      "evidence": [
+        "client/rust/mind-core/src/sim/schedule.rs:77-88",
+        "client/rust/mind-core/src/sim/schedule.rs:403-409",
+        "client/rust/mind-core/src/game/play.rs:373-385",
+        "client/rust/mind-headless/src/campaign_scenarios.rs:963",
+        "../Mindustry/core/src/mindustry/core/Logic.java:327-372",
+        "../Mindustry/core/src/mindustry/core/Logic.java:608-617"
+      ],
+      "notes": [
+        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending."
+      ],
+      "plan": null,
+      "first_seen": "2026-10-06T23:24:28+00:00",
+      "last_verified": "2026-10-06T23:24:28+00:00"
+    },
+    {
+      "id": "EV-0047",
+      "area": "game/sim",
+      "severity": "S1",
+      "status": "open",
+      "title": "Placed buildings are inert: no mining, transport, crafting, power or block updates",
+      "expected": "Logic.java:464 updateEntities updates every entity each tick; BuildingComp.update/updateConsumption drive mining, transport, crafting, power",
+      "actual": "Sim::apply(Place) spawns only BuildingComp (sim/mod.rs:249-274); load_sector swaps a raw grid with no BlockTable/behavior (sim_host.rs:918-925); a placed drill/conveyor sets a tile and does nothing (production.rs:237-251)",
+      "repro": "SimHost.place_block a drill on an ore tile, step 120 ticks; no item output and the tile never updates",
+      "source": "code",
+      "confidence": "high",
+      "evidence": [
+        "client/rust/mind-core/src/sim/mod.rs:249-274",
+        "client/rust/mind-gdext/src/sim_host.rs:918-925",
+        "client/rust/mind-core/src/world/behavior/production.rs:237-251",
+        "../Mindustry/core/src/mindustry/core/Logic.java:464",
+        "../Mindustry/core/src/mindustry/entities/comp/BuildingComp.java"
+      ],
+      "notes": [
+        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending."
+      ],
+      "plan": null,
+      "first_seen": "2026-10-06T23:24:28+00:00",
+      "last_verified": "2026-10-06T23:24:28+00:00"
+    },
+    {
+      "id": "EV-0048",
+      "area": "game/sim",
+      "severity": "S1",
+      "status": "open",
+      "title": "No unit/wave/bullet/AI runtime live: no enemies spawn, move, or fight",
+      "expected": "Logic.java:464 updates Groups.unit/Groups.bullet; ai/WaveSpawner.java spawns wave groups on the wave timer",
+      "actual": "schedule.rs:346-409 has no unit/combat/wave systems; WaveSpawner is test/headless-only; combat/ai drivers are reachable only via harnesses (combat/harness.rs, ai/harness.rs)",
+      "repro": "MindCampaign.run_wave then step; SimHost.get_group_counts().unit stays 0 and no bullets advance",
+      "source": "code",
+      "confidence": "high",
+      "evidence": [
+        "client/rust/mind-core/src/sim/schedule.rs:346-409",
+        "client/rust/mind-core/src/game/play.rs:373",
+        "client/rust/mind-core/src/combat/harness.rs",
+        "client/rust/mind-core/src/ai/harness.rs",
+        "../Mindustry/core/src/mindustry/core/Logic.java:464",
+        "../Mindustry/core/src/mindustry/ai/WaveSpawner.java"
+      ],
+      "notes": [
+        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending."
+      ],
+      "plan": null,
+      "first_seen": "2026-10-06T23:24:28+00:00",
+      "last_verified": "2026-10-06T23:24:28+00:00"
+    },
+    {
+      "id": "EV-0049",
+      "area": "game/campaign",
+      "severity": "S2",
+      "status": "open",
+      "title": "Launch ignores the sector preset rules: waves stay off and winWave stays 0",
+      "expected": "World.java:266,292,299-330 setSectorRules applies the preset rules and planet.applyRules; Control.java:569-601 playNewSector carries params (captureWave -> winWave)",
+      "actual": "campaign.rs:124-155 calls play_new_sector with default Rules; play.rs:269 only sets rules.sector; the preset capture_wave is stored at planet.rs:156 but never applied; defaults are waves=false/win_wave=0 (rules.rs:665,723)",
+      "repro": "after start_sector, MindCampaign.get_rules_json() shows waves=false, win_wave=0 despite preset captureWave=10",
+      "source": "code",
+      "confidence": "high",
+      "evidence": [
+        "client/rust/mind-gdext/src/campaign.rs:124-155",
+        "client/rust/mind-core/src/game/play.rs:269",
+        "client/rust/mind-core/src/game/planet.rs:156",
+        "client/rust/mind-core/src/game/planet.rs:339",
+        "client/rust/mind-core/src/io/json/rules.rs:665",
+        "client/rust/mind-core/src/io/json/rules.rs:723",
+        "../Mindustry/core/src/mindustry/core/World.java:266",
+        "../Mindustry/core/src/mindustry/core/Control.java:569-601"
+      ],
+      "notes": [
+        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending."
+      ],
+      "plan": null,
+      "first_seen": "2026-10-06T23:24:28+00:00",
+      "last_verified": "2026-10-06T23:24:28+00:00"
+    },
+    {
+      "id": "EV-0050",
+      "area": "ui/dialogs",
+      "severity": "S1",
+      "status": "open",
+      "title": "No in-game pause menu: Escape does nothing; save/quit/settings unreachable",
+      "expected": "Control.java:746-750 Binding.menu opens ui.paused.show(); PausedDialog.java:14-217 offers Back to menu, Save/Load, Settings, Host, Abandon, Quit",
+      "actual": "no paused entry in dialogs_manifest.json:3-40; MindInput::process drains events unused (input/mod.rs:84-96); hud_fragment.gd only shows a Paused banner; open_dialog(planet) is menu-only",
+      "repro": "launch serpulo:170, press Escape, read the MindUi dialog stack - stays empty, game keeps running",
+      "source": "code",
+      "confidence": "high",
+      "evidence": [
+        "client/ui/dialogs_manifest.json:3-40",
+        "client/rust/mind-gdext/src/input/mod.rs:84-96",
+        "client/ui/fragments/hud_fragment.gd",
+        "../Mindustry/core/src/mindustry/core/Control.java:746-750",
+        "../Mindustry/core/src/mindustry/ui/dialogs/PausedDialog.java:14-217"
+      ],
+      "notes": [
+        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending."
+      ],
+      "plan": null,
+      "first_seen": "2026-10-06T23:24:28+00:00",
+      "last_verified": "2026-10-06T23:24:28+00:00"
+    },
+    {
+      "id": "EV-0051",
+      "area": "game/campaign",
+      "severity": "S2",
+      "status": "open",
+      "title": "Planet map is a frozen fixture: owned/captured/locked sector state never updates",
+      "expected": "PlanetDialog.java:414-462,1304-1328 derives sector color, action label and stats live from Sector.hasBase()/isCaptured()/preset.unlocked()",
+      "actual": "ui_host.rs:465-476 caches CampaignViews::vanilla_fixture() forever; the fixture pre-owns Ground Zero/Salt Flats (ui/campaign.rs:792-810); MindCampaign.get_sector_state has no GDScript caller",
+      "repro": "Play > Campaign > Serpulo; panel always shows Ground Zero owned; after MindCampaign.capture_sector the view JSON is unchanged",
+      "source": "code",
+      "confidence": "high",
+      "evidence": [
+        "client/rust/mind-gdext/src/ui/ui_host.rs:465-476",
+        "client/rust/mind-core/src/ui/campaign.rs:792-810",
+        "../Mindustry/core/src/mindustry/ui/dialogs/PlanetDialog.java:414-462",
+        "../Mindustry/core/src/mindustry/ui/dialogs/PlanetDialog.java:1304-1328"
+      ],
+      "notes": [
+        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending."
+      ],
+      "plan": null,
+      "first_seen": "2026-10-06T23:24:28+00:00",
+      "last_verified": "2026-10-06T23:24:28+00:00"
+    },
+    {
+      "id": "EV-0052",
+      "area": "game/campaign",
+      "severity": "S1",
+      "status": "open",
+      "title": "Research purchase is a dead signal: clicking a locked ready node never unlocks it",
+      "expected": "ResearchDialog.java:484-486 canSpend/locked -> spend(node), :567-625 removes items, finishes requirements, unlocks + ResearchEvent; Control.java:350-358 checkAutoUnlocks",
+      "actual": "research_dialog.gd:13,90,103-104 emits research_requested with no listener; campaign.rs:238-272 spends from a fresh empty inventory; tech_tree.rs:243-248 returns Ok with complete=false, so research() reports success and nothing unlocks",
+      "repro": "open research, press a locked ready node, re-read get_tech_state().unlocked - count unchanged (after EV-0035 bootstrap fix)",
+      "source": "code",
+      "confidence": "high",
+      "evidence": [
+        "client/ui/dialogs/research_dialog.gd:13",
+        "client/ui/dialogs/research_dialog.gd:90",
+        "client/ui/dialogs/research_dialog.gd:103-104",
+        "client/rust/mind-gdext/src/campaign.rs:238-272",
+        "client/rust/mind-core/src/game/tech_tree.rs:243-248",
+        "../Mindustry/core/src/mindustry/ui/dialogs/ResearchDialog.java:484-486",
+        "../Mindustry/core/src/mindustry/core/Control.java:350-358"
+      ],
+      "notes": [
+        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending."
+      ],
+      "plan": null,
+      "first_seen": "2026-10-06T23:24:28+00:00",
+      "last_verified": "2026-10-06T23:24:28+00:00"
+    },
+    {
+      "id": "EV-0053",
+      "area": "ui/hud",
+      "severity": "S2",
+      "status": "open",
+      "title": "HUD shows no wave, enemies, objectives, or capture/lose toasts",
+      "expected": "HudFragment.java:1132-1150 composes wave/enemy/wavetime text, :1088-1107 objectives, :502-510 skip-wave button, :1234-1236 canSkipWave",
+      "actual": "hud.rs:39-44 declares wave/enemies but refresh :175-190 never assigns them; hud_text.rs:53-134 composer has no producer; hud_fragment.gd:50-51 reads only status_text",
+      "repro": "launch serpulo:170 and step; MindHud.wave/enemies/status_text stay 0/0/empty and no skip control or toast appears",
+      "source": "code",
+      "confidence": "high",
+      "evidence": [
+        "client/rust/mind-gdext/src/ui/hud.rs:39-44",
+        "client/rust/mind-gdext/src/ui/hud.rs:175-190",
+        "client/rust/mind-core/src/ui/hud_text.rs:53-134",
+        "client/ui/fragments/hud_fragment.gd:50-51",
+        "../Mindustry/core/src/mindustry/ui/fragments/HudFragment.java:502-510",
+        "../Mindustry/core/src/mindustry/ui/fragments/HudFragment.java:1088-1107"
+      ],
+      "notes": [
+        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending."
+      ],
+      "plan": null,
+      "first_seen": "2026-10-06T23:24:28+00:00",
+      "last_verified": "2026-10-06T23:24:28+00:00"
+    },
+    {
+      "id": "EV-0054",
+      "area": "ui/dialogs",
+      "severity": "S1",
+      "status": "open",
+      "title": "Load Game is permanently empty: no slot list is produced and no card can load",
+      "expected": "LoadDialog.java:92 lists control.saves.getSaveSlots(), :224-268 runLoadSave -> slot.cautiousLoad()/load; Saves.java:314-328 restores",
+      "actual": "menu_fragment.gd:38,318 opens load with an empty context; load_dialog.gd:97 reads a slots context never produced; slot_selected :219-220 is unconnected; saves.rs load/load_slot have no client caller",
+      "repro": "menu > Load Game; grid shows @save.none; click any card -> nothing loads (EV-0036 owns the separate write/read seam)",
+      "source": "code",
+      "confidence": "high",
+      "evidence": [
+        "client/ui/fragments/menu_fragment.gd:38",
+        "client/ui/dialogs/load_dialog.gd:97",
+        "client/ui/dialogs/load_dialog.gd:219-220",
+        "client/rust/mind-core/src/game/saves.rs:104-122",
+        "../Mindustry/core/src/mindustry/ui/dialogs/LoadDialog.java:92",
+        "../Mindustry/core/src/mindustry/ui/dialogs/LoadDialog.java:224-268",
+        "../Mindustry/core/src/mindustry/game/Saves.java:314-328"
+      ],
+      "notes": [
+        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending."
+      ],
+      "plan": null,
+      "first_seen": "2026-10-06T23:24:28+00:00",
+      "last_verified": "2026-10-06T23:24:28+00:00"
+    },
+    {
+      "id": "EV-0055",
+      "area": "input",
+      "severity": "S2",
+      "status": "open",
+      "title": "RTS selection and orders are absent: units cannot be selected or commanded",
+      "expected": "DesktopInput.java:300-321 command mode, :905-935 drag-rect/tap select; InputHandler.java:1091-1200 commandTap/orders; Binding.java:39 commandMode",
+      "actual": "input/mod.rs:289-314 get_input_state_json hardcodes command_mode:false and selected_units:[]; rts.rs:68-203/command_emit.rs are headless-only; no client selection/order path (EV-0044 covers only the Shift toggle)",
+      "repro": "set command mode via MindInput.toggle_command_mode(), drag a selection rect; get_input_state_json().selected_units stays []",
+      "source": "code",
+      "confidence": "high",
+      "evidence": [
+        "client/rust/mind-gdext/src/input/mod.rs:289-314",
+        "client/rust/mind-core/src/input/rts.rs:68-203",
+        "../Mindustry/core/src/mindustry/input/DesktopInput.java:300-321",
+        "../Mindustry/core/src/mindustry/input/InputHandler.java:1091-1200"
+      ],
+      "notes": [
+        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending."
+      ],
+      "plan": null,
+      "first_seen": "2026-10-06T23:24:28+00:00",
+      "last_verified": "2026-10-06T23:24:28+00:00"
+    },
+    {
+      "id": "EV-0056",
+      "area": "input/placement",
+      "severity": "S2",
+      "status": "open",
+      "title": "No block rotation: everything places at rotation 0 and cannot be rotated",
+      "expected": "DesktopInput.java:834-846 rotate key/rotatePlans; :898-899 Call.rotateBlock on placed buildings (rotation = mod(rot+dir,4))",
+      "actual": "sim_host.rs:168-173 place has no rotation; sim/mod.rs:259-264 always rot:0; determinism/command.rs:230-240 drops Place.rotation; project.godot has no [input]; SimCommand::Rotate :493-510 has no UI caller",
+      "repro": "select a conveyor and press R, or send SimCommand::Rotate via MCP; tile rotation stays 0",
+      "source": "code",
+      "confidence": "high",
+      "evidence": [
+        "client/rust/mind-gdext/src/sim_host.rs:168-173",
+        "client/rust/mind-core/src/sim/mod.rs:259-264",
+        "client/rust/mind-core/src/determinism/command.rs:230-240",
+        "../Mindustry/core/src/mindustry/input/DesktopInput.java:834-846"
+      ],
+      "notes": [
+        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending."
+      ],
+      "plan": null,
+      "first_seen": "2026-10-06T23:24:28+00:00",
+      "last_verified": "2026-10-06T23:24:28+00:00"
+    },
+    {
+      "id": "EV-0057",
+      "area": "input",
+      "severity": "S2",
+      "status": "open",
+      "title": "Keybinds are cosmetic: rebinding pan/boost keys changes nothing in game",
+      "expected": "DesktopInput.java:239-295 reads Binding.boost/moveX/moveY for pan/boost; Binding.java:8-103 defines the binds",
+      "actual": "input/mod.rs:102-109,200-212 loads/persists/rebinds BindingState but no gameplay consumer; camera.rs:91-108 hardcodes A/D/W/S+arrows+Shift; project.godot has no [input] section",
+      "repro": "rebind Pan Left in Settings > Controls, then pan in game: old keys still work, new keys do not",
+      "source": "code",
+      "confidence": "high",
+      "evidence": [
+        "client/rust/mind-gdext/src/input/mod.rs:102-109",
+        "client/rust/mind-gdext/src/camera.rs:91-108",
+        "client/project.godot",
+        "../Mindustry/core/src/mindustry/input/DesktopInput.java:239-295",
+        "../Mindustry/core/src/mindustry/input/Binding.java:8-103"
+      ],
+      "notes": [
+        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending."
+      ],
+      "plan": null,
+      "first_seen": "2026-10-06T23:24:28+00:00",
+      "last_verified": "2026-10-06T23:24:28+00:00"
+    },
+    {
+      "id": "EV-0058",
+      "area": "content/blocks",
+      "severity": "S2",
+      "status": "open",
+      "title": "16 of 27 factory recipes missing: graphite/silicon/plastanium crafters emit nothing",
+      "expected": "Blocks.java:1041 graphite-press, :1086 silicon-crucible, :1120 plastanium-compressor, :1138 phase-weaver, :1170 cryofluid-mixer, :1191 pyratite-mixer, :1206 blast-mixer and the Erekir heat crafters define outputs",
+      "actual": "block_kind_data.rs:640-782 apply_vanilla_knobs is the only recipe source and covers 11 of 27 crafters; production.rs:237-251 consumes inputs and resets progress with empty output_items",
+      "repro": "once R0-2 is wired: place a graphite-press, feed coal, step; no graphite appears",
+      "source": "code",
+      "confidence": "high",
+      "evidence": [
+        "client/rust/mind-core/src/world/block_kind_data.rs:640-782",
+        "client/rust/mind-core/src/world/behavior/production.rs:237-251",
+        "../Mindustry/core/src/mindustry/content/Blocks.java:1041",
+        "../Mindustry/core/src/mindustry/content/Blocks.java:1086",
+        "../Mindustry/core/src/mindustry/content/Blocks.java:1655"
+      ],
+      "notes": [
+        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending."
+      ],
+      "plan": null,
+      "first_seen": "2026-10-06T23:24:28+00:00",
+      "last_verified": "2026-10-06T23:24:28+00:00"
+    },
+    {
+      "id": "EV-0059",
+      "area": "net/multiplayer",
+      "severity": "S1",
+      "status": "open",
+      "title": "Hosting is impossible: no Host entry anywhere and host_requested has no listener",
+      "expected": "PausedDialog.java:98-105,152 @hostserver -> ui.host.show(); HostDialog.java:51-73 port field + runHost()",
+      "actual": "host_dialog.gd:11,56-60 emits host_requested with no listener; no Host entry in menu_fragment.gd:33-49 or the HUD; MindNet.create_match :224-243 has no GDScript caller",
+      "repro": "menu and HUD have no Host action; emitting host_requested from the dialog does not start a match (net stays offline)",
+      "source": "code",
+      "confidence": "high",
+      "evidence": [
+        "client/ui/dialogs/host_dialog.gd:11",
+        "client/ui/dialogs/host_dialog.gd:56-60",
+        "client/ui/fragments/menu_fragment.gd:33-49",
+        "client/rust/mind-gdext/src/net/mod.rs:224-243",
+        "../Mindustry/core/src/mindustry/ui/dialogs/PausedDialog.java:98-105",
+        "../Mindustry/core/src/mindustry/ui/dialogs/HostDialog.java:51-73"
+      ],
+      "notes": [
+        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending."
+      ],
+      "plan": null,
+      "first_seen": "2026-10-06T23:24:28+00:00",
+      "last_verified": "2026-10-06T23:24:28+00:00"
+    },
+    {
+      "id": "EV-0060",
+      "area": "net/multiplayer",
+      "severity": "S1",
+      "status": "open",
+      "title": "Join Game never connects: Connect emits a signal nobody listens to",
+      "expected": "JoinDialog.java:403-412 local discovery, :626-645 connect -> net.connect(ip,port), :675-682 safeConnect version gate",
+      "actual": "join_dialog.gd:12,240-245 emits connect_requested with no listener; global/remote sections are static :99-115; MindNet.join_match takes a numeric match id and has no GDScript caller (net/mod.rs:54-56,174,261)",
+      "repro": "Play > Join Game > type an address > OK; no connection attempt appears and net state stays offline",
+      "source": "code",
+      "confidence": "high",
+      "evidence": [
+        "client/ui/dialogs/join_dialog.gd:12",
+        "client/ui/dialogs/join_dialog.gd:99-115",
+        "client/ui/dialogs/join_dialog.gd:240-245",
+        "client/rust/mind-gdext/src/net/mod.rs:54-56",
+        "../Mindustry/core/src/mindustry/ui/dialogs/JoinDialog.java:403-412",
+        "../Mindustry/core/src/mindustry/ui/dialogs/JoinDialog.java:626-651"
+      ],
+      "notes": [
+        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending."
+      ],
+      "plan": null,
+      "first_seen": "2026-10-06T23:24:28+00:00",
+      "last_verified": "2026-10-06T23:24:28+00:00"
     }
   ]
 }

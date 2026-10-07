@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Single-writer helper for the parity-eval findings ledger.
 
-The evaluator is the only writer of findings content (`add`/`verify`).
+The evaluator writes engine-sourced findings (`add --source engine`) and the
+final verdicts (`verify`). The gap identifier writes code-sourced candidates
+(`add --source code`) and code-level confirmations (`code-verify`).
 Implementers may run `claim`/`release`, which are coordination writes guarded
 by the same exclusive file lock. Parallel loops share one ledger:
 `PARITY_LEDGER` overrides the default path, and every mutating command holds
@@ -15,11 +17,19 @@ Examples:
         --actual "Godot: click leaves the menu unchanged" \
         --repro "scenario boot_menu step 4" \
         --evidence runs/20261005-120000-boot_menu/godot/step-04.png --plan 14
+    record_finding.py add --area game/campaign --severity S1 --source code \
+        --confidence high --title "Launch never applies the sector rules" \
+        --expected "World.java:265-330 setSectorRules applies the preset rules" \
+        --actual "campaign.rs:124 calls play_new_sector with Rules::default()" \
+        --repro "start_sector('serpulo',170); eval rules.waves"
     record_finding.py verify --id EV-0001 --status verified-fixed \
         --note "re-ran boot_menu at 0706963" --evidence runs/.../step-04.png
+    record_finding.py code-verify --id EV-0001 \
+        --note "diff wires Planet::apply_rules into start_sector" \
+        --evidence client/rust/mind-gdext/src/campaign.rs:124
     record_finding.py claim --area ui --owner loop-2
     record_finding.py release --id EV-0001 --note "fix abandoned"
-    record_finding.py list --status open
+    record_finding.py list --status code-verified
     record_finding.py summary
 """
 
@@ -39,8 +49,17 @@ except ImportError:  # pragma: no cover - non-POSIX fallback
     fcntl = None
 
 DEFAULT_LEDGER = Path(".opencode/evals/findings.json")
-STATUSES = ("open", "in-progress", "verified-fixed", "regression", "wontfix")
+STATUSES = (
+    "open",
+    "in-progress",
+    "code-verified",
+    "verified-fixed",
+    "regression",
+    "wontfix",
+)
 SEVERITIES = ("S1", "S2", "S3", "S4")
+SOURCES = ("code", "engine")
+CONFIDENCE = ("high", "medium", "low")
 
 
 def now() -> str:
@@ -115,6 +134,8 @@ def cmd_add(args: argparse.Namespace) -> int:
             "expected": args.expected,
             "actual": args.actual,
             "repro": args.repro,
+            "source": args.source,
+            "confidence": args.confidence,
             "evidence": list(args.evidence or []),
             "notes": list(args.notes or []),
             "plan": args.plan,
@@ -148,14 +169,32 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_code_verify(args: argparse.Namespace) -> int:
+    """Record that a fix addresses the gap by code inspection (gap identifier)."""
+    with ledger_lock(args.ledger):
+        data = load(args.ledger)
+        finding = find(data, args.id)
+        previous = finding["status"]
+        finding["status"] = "code-verified"
+        finding["last_verified"] = now()
+        if args.note:
+            finding.setdefault("notes", []).append(f"{now()}: [code] {args.note}")
+        if args.evidence:
+            finding.setdefault("evidence", []).extend(args.evidence)
+        save(args.ledger, data)
+    print(f"{finding['id']}: {previous} -> code-verified")
+    return 0
+
+
 def cmd_claim(args: argparse.Namespace) -> int:
-    """Atomically pick and mark the highest-priority open finding."""
+    """Atomically pick and mark the highest-priority finding in a status pool."""
+    status = getattr(args, "status", None) or "open"
     with ledger_lock(args.ledger):
         data = load(args.ledger)
         rows = [
             f
             for f in data["findings"]
-            if f.get("status") == "open"
+            if f.get("status") == status
             and (not args.severity or f.get("severity") == args.severity)
             and (not args.area or str(f.get("area", "")).startswith(args.area))
         ]
@@ -259,6 +298,13 @@ def main() -> int:
     p_add.add_argument("--expected", required=True)
     p_add.add_argument("--actual", required=True)
     p_add.add_argument("--repro", required=True)
+    p_add.add_argument(
+        "--source",
+        choices=SOURCES,
+        default="engine",
+        help="evidence kind: engine (in-engine run) or code (file:line comparison)",
+    )
+    p_add.add_argument("--confidence", choices=CONFIDENCE, default=None)
     p_add.add_argument("--evidence", action="append", default=[])
     p_add.add_argument("--note", action="append", dest="notes", default=[])
     p_add.add_argument("--plan", default=None, help="owning plan, e.g. 14")
@@ -271,11 +317,25 @@ def main() -> int:
     p_verify.add_argument("--evidence", action="append", default=[])
     p_verify.set_defaults(func=cmd_verify)
 
+    p_code = sub.add_parser(
+        "code-verify", help="code-level confirmation that a fix addresses the gap"
+    )
+    p_code.add_argument("--id", required=True)
+    p_code.add_argument("--note")
+    p_code.add_argument("--evidence", action="append", default=[])
+    p_code.set_defaults(func=cmd_code_verify)
+
     p_claim = sub.add_parser(
-        "claim", help="atomically claim the highest-priority open finding"
+        "claim", help="atomically claim the highest-priority finding in a status pool"
     )
     p_claim.add_argument("--area", help="only findings whose area starts with this")
     p_claim.add_argument("--severity", choices=SEVERITIES)
+    p_claim.add_argument(
+        "--status",
+        choices=STATUSES,
+        default="open",
+        help="pool to claim from (default: open); verify loops claim code-verified",
+    )
     p_claim.add_argument("--owner", help="owner label (default: loop-$PARITY_LOOP)")
     p_claim.set_defaults(func=cmd_claim)
 
