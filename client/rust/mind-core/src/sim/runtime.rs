@@ -678,6 +678,120 @@ mod tests {
         assert_eq!(session.player_core_count(), 1);
     }
 
+    /// The evaluator's EV-0047 repro at the core level: load the vendored
+    /// Ground Zero map, materialize its buildings, place a mechanical drill on
+    /// map ore (stored in `tile.overlay`) beside a core and tick. The drill
+    /// must deliver copper into the core's item module. Skips without the
+    /// vendored asset (`msav-import` feature only).
+    #[cfg(feature = "msav-import")]
+    #[test]
+    fn ground_zero_drill_feeds_the_materialized_core() {
+        use crate::command::Command;
+        use crate::editor::context::EditorContext;
+        use crate::io::save::{SaveIo, SaveReadState};
+        use crate::world::modules::ItemModule;
+        use std::path::Path;
+
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../assets/maps/serpulo/groundZero.msav");
+        let Ok(bytes) = std::fs::read(&path) else {
+            return;
+        };
+        let mut content = registry();
+        let mut grid = WorldGrid::new(0, 0);
+        grid.begin_map_load();
+        let (result, pending) = {
+            let mut context = EditorContext::new(&mut grid, &content);
+            let (result, pending) = {
+                let mut state = SaveReadState {
+                    context: Some(&mut context),
+                    content: Some(&mut content),
+                    ..SaveReadState::default()
+                };
+                let result = SaveIo::load_bytes(&bytes, &mut state);
+                (result, std::mem::take(&mut context.pending_buildings))
+            };
+            (result, pending)
+        };
+        result.expect("map imports");
+        grid.end_map_load(&content);
+
+        let ore = content.block_id("ore-copper").expect("ore-copper");
+        let core_block = content.block_id("core-shard").expect("core");
+        let drill = content.block_id("mechanical-drill").expect("drill");
+        let width = grid.tiles.width;
+        let height = grid.tiles.height;
+        let air = BlockId::AIR;
+        // 2x2 ore footprint with a clear 6x4 rectangle around it for the core.
+        let mut spot = None;
+        'outer: for y in 2..(height - 5) {
+            for x in 2..(width - 7) {
+                let mut ok = true;
+                for dx in 0..6 {
+                    for dy in 0..4 {
+                        let in_ore = (0..2).contains(&dx) && (0..2).contains(&dy);
+                        let t = grid.tile(x + dx, y + dy);
+                        if t.block != air {
+                            ok = false;
+                        }
+                        if in_ore && t.overlay != ore {
+                            ok = false;
+                        }
+                        if !in_ore && t.overlay != air && dx > 1 {
+                            ok = false;
+                        }
+                    }
+                }
+                if ok {
+                    spot = Some((x, y + 1));
+                    break 'outer;
+                }
+            }
+        }
+        let Some((x, y)) = spot else {
+            panic!("no ore patch with clear core space");
+        };
+
+        let mut sim = Sim::new(1, width, height, air, air);
+        sim.grid = grid;
+        sim.install_block_runtime().expect("runtime");
+        assert!(sim.materialize_map_buildings(&pending) > 0);
+        sim.apply(Command::Place {
+            x: (x + 3) as i16,
+            y: y as i16,
+            block: core_block,
+        })
+        .expect("core command");
+        sim.apply(Command::Place {
+            x: x as i16,
+            y: y as i16,
+            block: drill,
+        })
+        .expect("drill command");
+        let core_entity = sim
+            .grid
+            .entity_at(TilePos::new((x + 3) as i16, y as i16))
+            .expect("core entity");
+        let drill_entity = sim
+            .grid
+            .entity_at(TilePos::new(x as i16, y as i16))
+            .expect("drill entity");
+        let copper = content.item_id("copper").expect("copper");
+        for _ in 0..300 {
+            sim.tick().expect("tick");
+        }
+        let stored = sim
+            .ecs
+            .0
+            .get::<ItemModule>(core_entity)
+            .map(|m| m.get(copper))
+            .unwrap_or(0);
+        assert!(
+            stored >= 1,
+            "core received no copper from the map-ore drill; drill entity {drill_entity:?}"
+        );
+    }
+
     /// Without the live runtime the payload queue is inert (P0 spine unchanged).
     #[test]
     fn materialize_is_a_noop_without_the_runtime() {
