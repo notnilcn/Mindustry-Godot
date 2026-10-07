@@ -869,6 +869,21 @@ impl MindCampaign {
                     .unwrap_or(false)
                     .to_variant(),
             );
+            // `PausedDialog.rebuild` `showObjective`: the preset description
+            // feeds the `@objective` full-text dialog.
+            let preset_description = record
+                .and_then(|sector| sector.preset)
+                .and_then(|preset| {
+                    self.registry
+                        .as_ref()
+                        .and_then(|registry| registry.sector(preset))
+                })
+                .and_then(|preset| preset.unlock.description.clone())
+                .unwrap_or_default();
+            dict.set(
+                &key("presetDescription"),
+                &preset_description.as_str().to_variant(),
+            );
         }
         dict.set(
             &GString::from("campaignComplete"),
@@ -1042,6 +1057,65 @@ impl MindCampaign {
             return false;
         }
         host.bind_mut().request_load(GString::from(path.as_str()));
+        true
+    }
+
+    /// `PlanetDialog.abandonSectorConfirm` (persisted half): clears the active
+    /// sector's items/base/production, drops its save and removes the file.
+    #[func]
+    pub fn abandon_sector(&mut self) -> bool {
+        let Some((planet, sector_id)) = self.session.sector else {
+            return false;
+        };
+        let Some(planet_name) = self
+            .registry
+            .as_ref()
+            .and_then(|registry| registry.planet(planet))
+            .map(|record| record.name.clone())
+        else {
+            return false;
+        };
+
+        let mut cleared = false;
+        if let Some(mut host) = self.host() {
+            let taken = host.bind_mut().take_campaign_runtime();
+            if let Some(mut runtime) = taken {
+                clear_sector_record(
+                    &mut runtime.campaign,
+                    &mut self.settings,
+                    planet,
+                    sector_id,
+                    &planet_name,
+                );
+                host.bind_mut().put_campaign_runtime(runtime);
+                cleared = true;
+            }
+        }
+        if let Some(campaign) = self.campaign.as_mut() {
+            clear_sector_record(
+                campaign,
+                &mut self.settings,
+                planet,
+                sector_id,
+                &planet_name,
+            );
+            cleared = true;
+        }
+        if !cleared {
+            return false;
+        }
+
+        let file = self.paths.sector_save(&planet_name, sector_id as u32);
+        if let Err(error) = NativeFs.delete(&file) {
+            log::warn!(
+                "abandon_sector: failed to delete `{}`: {error}",
+                file.display()
+            );
+        }
+        let backup = mind_core::io::SaveIo::backup_file_for(&file);
+        let _ = NativeFs.delete(&backup);
+        self.persist();
+        log::info!("abandoned campaign sector `{planet_name}:{sector_id}`");
         true
     }
 
@@ -1393,4 +1467,20 @@ fn sanitize_slot_name(name: &str) -> String {
     name.chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_' || *c == '.')
         .collect()
+}
+
+/// Clears one campaign sector's persisted base/items
+/// (`PlanetDialog.abandonSectorConfirm`, non-playing branch).
+fn clear_sector_record(
+    campaign: &mut Campaign,
+    settings: &mut SettingsStore,
+    planet: mind_core::content::PlanetId,
+    sector_id: u16,
+    planet_name: &str,
+) {
+    if let Some(sector) = campaign.sector_mut(planet, sector_id) {
+        sector.save = None;
+        sector.being_played = false;
+        sector.clear_info(settings, planet_name);
+    }
 }

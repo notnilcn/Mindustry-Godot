@@ -86,6 +86,22 @@ class SaveCampaignStub:
 		return true
 
 
+## `/root/Spine/MindCampaign` double for the pause-dialog oracle: serves the
+## sector summary and records an abandoned sector.
+class PauseCampaignStub:
+	extends Node
+
+	var state: Dictionary = {}
+	var abandoned := false
+
+	func get_sector_state() -> Dictionary:
+		return state
+
+	func abandon_sector() -> bool:
+		abandoned = true
+		return true
+
+
 func _check(condition: bool, message: String) -> void:
 	if condition:
 		print("UICHECK: ok ", message)
@@ -364,6 +380,67 @@ func _init() -> void:
 		await process_frame
 		_check(bool(ui.call("hud_visible")), "closing the game-over dialog restores the HUD flag")
 		over_dialog.free()
+
+	# EV-0063: the desktop pause branch shows the campaign `@objective` /
+	# `@abandon` entries and keeps the mobile `@planetmap` off desktop.
+	var pause_stub := PauseCampaignStub.new()
+	pause_stub.name = "MindCampaign"
+	pause_stub.state = {"campaign": true, "presetDescription": "Defend the sector."}
+	spine.add_child(pause_stub)
+	var paused_dialog: Control = load("res://scenes/ui/dialogs/paused_dialog.tscn").instantiate()
+	root.add_child(paused_dialog)
+	paused_dialog.call("shown")
+	var buttons := paused_dialog.get_node_or_null("Center/Panel/Layout/Buttons")
+	var objective: Button = buttons.get_node_or_null("objective") if buttons != null else null
+	var abandon: Button = buttons.get_node_or_null("abandon") if buttons != null else null
+	var planet: Button = buttons.get_node_or_null("planetmap") if buttons != null else null
+	_check(
+		objective != null and objective.visible,
+		"pause dialog shows @objective for a described campaign sector"
+	)
+	_check(
+		abandon != null and abandon.visible,
+		"pause dialog shows @abandon in a campaign sector"
+	)
+	_check(
+		planet != null and not planet.visible,
+		"pause dialog keeps the mobile @planetmap off desktop"
+	)
+	if abandon != null:
+		abandon.pressed.emit()
+		ui.call("resolve_confirm", true)
+		_check(pause_stub.abandoned, "pause dialog abandon confirms into the live facade")
+	pause_stub.state = {"campaign": false}
+	paused_dialog.call("shown")
+	_check(
+		objective != null and not objective.visible,
+		"pause dialog hides @objective outside a campaign sector"
+	)
+	_check(
+		abandon != null and not abandon.visible,
+		"pause dialog hides @abandon outside a campaign sector"
+	)
+	paused_dialog.free()
+	pause_stub.free()
+
+	# The `@objective` entry opens the full-text dialog with the preset text.
+	var full_text: Control = load("res://scenes/ui/dialogs/full_text_dialog.tscn").instantiate()
+	root.add_child(full_text)
+	full_text.call(
+		"set_context_json",
+		JSON.stringify({"title": "@objective", "text": "Defend the sector."})
+	)
+	full_text.call("show_dialog")
+	var objective_body := ""
+	for node in full_text.find_children("*", "", true, false):
+		if str(node.get("text")) == "Defend the sector.":
+			objective_body = "Defend the sector."
+	_check(
+		objective_body == "Defend the sector.",
+		"full-text dialog renders the objective description from context"
+	)
+	full_text.call("hide_dialog")
+	full_text.free()
 
 	# Prompt bodies must render BBCode: the uiscale reset prompt's translated
 	# `[color=...]` markup used to render literally because the body was a plain
