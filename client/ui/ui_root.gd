@@ -43,6 +43,7 @@ func _enter_tree() -> void:
 func _ready() -> void:
 	_bind_manifest()
 	_connect_prompts()
+	_connect_net()
 	_apply_ui_scale()
 	_boot()
 	_check_uiscale_changed()
@@ -306,6 +307,53 @@ func _connect_prompts() -> void:
 		ui.connect("show_confirm", Callable(self, "_on_show_confirm"))
 	if ui.has_signal("text_input_request") and not ui.is_connected("text_input_request", Callable(self, "_on_text_input_request")):
 		ui.connect("text_input_request", Callable(self, "_on_text_input_request"))
+
+
+## Wires manifest dialog intents that cross into the Rust facades.
+func _connect_net() -> void:
+	var host_dialog := dialog("host")
+	if host_dialog == null or not host_dialog.has_signal("host_requested"):
+		return
+	if not host_dialog.is_connected("host_requested", Callable(self, "_on_host_requested")):
+		host_dialog.connect("host_requested", Callable(self, "_on_host_requested"))
+
+
+## `HostDialog.runHost`: hosts the currently loaded state; the lobby metadata
+## comes from the live campaign sector or the custom map's `Rules.mode_name`
+## (seed/max-players match `HostParams::default()`).
+func _on_host_requested(_host_name: String, mode: String) -> void:
+	var net := get_node_or_null("/root/Spine/MindNet")
+	if net == null or not net.has_method("create_match"):
+		return
+	var campaign := get_node_or_null("/root/Spine/MindCampaign")
+	var rules := "{}"
+	if campaign != null and campaign.has_method("get_rules_json"):
+		rules = str(campaign.call("get_rules_json"))
+	var gamemode := mode.trim_prefix("@mode.")
+	if gamemode.is_empty():
+		gamemode = "survival"
+	net.call("create_match", _current_map_id(campaign), 1, gamemode, "public", 8, rules)
+
+
+## Hosted-state map id: `planet/sector` for a live campaign sector, the custom
+## map's `Rules.mode_name`, else the default spine world.
+func _current_map_id(campaign: Node) -> String:
+	if campaign != null and campaign.has_method("get_sector_state"):
+		var state: Variant = campaign.call("get_sector_state")
+		if state is Dictionary:
+			var dict: Dictionary = state
+			var planet := str(dict.get("planet", ""))
+			if bool(dict.get("campaign", false)) and not planet.is_empty():
+				return "%s-%d" % [planet, int(dict.get("sector", 0))]
+	if campaign != null and campaign.has_method("get_rules_json"):
+		var parsed: Variant = JSON.parse_string(str(campaign.call("get_rules_json")))
+		if parsed is Dictionary:
+			var mode_name: Variant = (parsed as Dictionary).get("modeName")
+			if mode_name is String:
+				var name_text: String = mode_name
+				if not name_text.is_empty():
+					return name_text
+	return "spine"
 
 
 func _on_show_info(text: String) -> void:

@@ -6,12 +6,14 @@
 ## In-game pause menu. `shouldPause = true` (manifest `pause`) so showing it
 ## through `MindUi` pauses the sim via the reference-counted governor. Every
 ## exit routes back through `MindUi` (settings/planet) or the `UiRoot` menu
-## presentation; this dialog never mutates sim state. Save/Load/Host entries are
-## intentionally absent (save/load plumbing and multiplayer are owned elsewhere).
+## presentation; this dialog never mutates sim state. The `@hostserver` entry
+## opens the host dialog (`PausedDialog.java:98-105`); save/load plumbing is
+## owned elsewhere.
 
 extends MindDialog
 
 var _planet_button: Button = null
+var _host_button: Button = null
 var _quit_button: Button = null
 var _pending_quit := false
 
@@ -25,7 +27,7 @@ func _ready() -> void:
 
 
 ## Upstream desktop layout: `@back` (resume), `@settings`, `@planetmap`
-## (campaign only), `@quit`. The optional objective full-text and
+## (campaign only), `@hostserver`, `@quit`. The optional objective full-text and
 ## abandon-sector entries are not ported yet.
 func _build() -> void:
 	add_close_button(240.0)
@@ -34,12 +36,16 @@ func _build() -> void:
 	_planet_button = add_button(_t("@planetmap"), _open_planet, "map", 240.0)
 	_planet_button.name = "planetmap"
 	_planet_button.visible = false
+	_host_button = add_button(_t("@hostserver"), _open_host, "host", 240.0)
+	_host_button.name = "hostserver"
+	_host_button.disabled = _net_active()
 	_quit_button = add_button(_t("@quit"), _confirm_quit, "exit", 240.0)
 	_quit_button.name = "quit"
 
 
 func shown() -> void:
 	_refresh_campaign_buttons()
+	_refresh_host_button()
 
 
 ## `PausedDialog.rebuild`: `@planetmap` appears only in campaign sectors.
@@ -47,6 +53,20 @@ func _refresh_campaign_buttons() -> void:
 	if _planet_button == null:
 		return
 	_planet_button.visible = _is_campaign()
+
+
+## `PausedDialog.java:98-105`: the host entry is disabled while a match is
+## active (`net.active()`); hosting itself runs in the host dialog.
+func _refresh_host_button() -> void:
+	if _host_button != null:
+		_host_button.disabled = _net_active()
+
+
+func _net_active() -> bool:
+	var net := get_node_or_null("/root/Spine/MindNet")
+	if net == null or not net.has_method("session_state"):
+		return false
+	return str(net.call("session_state")) != "offline"
 
 
 func _is_campaign() -> bool:
@@ -70,6 +90,13 @@ func _open_planet() -> void:
 	var ui := _ui()
 	if ui != null:
 		ui.call("open_dialog", "planet", "")
+
+
+## `PausedDialog.java:98-105`: `ui.host.show()` over the pause menu.
+func _open_host() -> void:
+	var ui := _ui()
+	if ui != null:
+		ui.call("open_dialog", "host", "")
 
 
 ## `PausedDialog.showQuitConfirm` (`@quit.confirm`); quitting returns to the
