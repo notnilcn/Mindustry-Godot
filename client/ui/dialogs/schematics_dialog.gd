@@ -2,9 +2,10 @@
 ## Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
 ## Source: core/src/mindustry/ui/dialogs/SchematicsDialog.java (plan 14 M5).
 ##
-## Schematic library: search + list + detail/preview panel over plan-12's
-## `Schematics` registry. Import/export and `.msch` I/O are plan 04/12; the M5
-## shell renders the loaded library and emits the edit/export intents.
+## Schematic library: search + list + detail/preview panel over the live
+## `MindCampaign` schematic read models. Edit/export/delete are wired to the
+## campaign facade (WS2 contract), Import reads the clipboard through
+## `import_schematic`, and the icon picker reuses `icon_select_dialog`.
 
 extends MindDialog
 
@@ -15,6 +16,9 @@ var _field: LineEdit = null
 var _list: MindTable = null
 var _detail: MindTable = null
 var _selected := 0
+var _pending_delete := -1
+var _pending_rename := -1
+var _pending_icon := -1
 
 
 func _ready() -> void:
@@ -24,13 +28,32 @@ func _ready() -> void:
 	super._ready()
 	_build()
 	add_close_button()
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null:
+		if ui.has_signal("confirm_result") and not ui.is_connected("confirm_result", _on_confirm):
+			ui.connect("confirm_result", _on_confirm)
+		if ui.has_signal("text_input_result") and not ui.is_connected("text_input_result", _on_text_input):
+			ui.connect("text_input_result", _on_text_input)
+
+
+func shown() -> void:
+	refresh_campaign_views()
+	_rebuild_list()
+	_rebuild_detail()
 
 
 func _build() -> void:
 	var root := content_table()
-	_field = MindWidgets.field(_t("@schematics.search"))
+	var search_row := HBoxContainer.new()
+	search_row.add_theme_constant_override("separation", 4)
+	_field = MindWidgets.field(_t("@search"))
 	_field.text_changed.connect(func(_text: String) -> void: _rebuild_list())
-	root.add(_field).grow_x_axis().pad(4)
+	search_row.add_child(_field)
+	# code-instantiated: the import entry button is parameterized by the clipboard.
+	var import := MindWidgets.icon_button("download", _t("@schematic.import"), "defaultt")
+	import.pressed.connect(_import)
+	search_row.add_child(import)
+	root.add(search_row).grow_x_axis().pad(4)
 	root.row()
 	var columns := HBoxContainer.new()
 	columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -87,8 +110,148 @@ func _rebuild_detail() -> void:
 		_detail.row()
 	var buttons := HBoxContainer.new()
 	# code-instantiated: the action row is parameterized by the selected schematic.
-	for action in ["edit", "export", "delete"]:
-		var button := MindWidgets.button(_t("@schematics.%s" % action))
-		button.pressed.connect(func() -> void: schematic_action.emit(_selected, action))
+	for action in ["edit", "export", "icon", "delete"]:
+		var button := MindWidgets.button(_t(_action_label(action)))
+		button.pressed.connect(_on_action.bind(_selected, action))
 		buttons.add_child(button)
+	if bool(schematic.get("has_core", false)):
+		# Core schematics are launch loadouts: open the capacity editor too.
+		var configure := MindWidgets.button(_t("@configure"))
+		configure.pressed.connect(_open_loadout.bind(_selected))
+		buttons.add_child(configure)
 	_detail.add(buttons).pad(4)
+
+
+## Action -> bundle label (`SchematicsDialog` import/export/edit flows).
+func _action_label(action: String) -> String:
+	match action:
+		"edit":
+			return "@edit"
+		"export":
+			return "@editor.export"
+		"icon":
+			return "@schematic.icontag"
+		"delete":
+			return "@save.delete"
+	return action
+
+
+func _on_action(index: int, action: String) -> void:
+	schematic_action.emit(index, action)
+	match action:
+		"edit":
+			_edit(index)
+		"export":
+			_export(index)
+		"icon":
+			_open_icon_select(index)
+		"delete":
+			_delete(index)
+
+
+# --- Facade actions (WS2 contract) -------------------------------------------
+
+## `SchematicsDialog.showExport` -> `@copy.clipboard` half.
+func _export(index: int) -> void:
+	var result: Variant = campaign_call("export_schematic", [index])
+	var text := str(result) if result != null else ""
+	if text.is_empty():
+		show_toast(_t("@none"))
+		return
+	DisplayServer.clipboard_set(text)
+	show_toast(_t("@copied"))
+
+
+## `SchematicsDialog.showImport` clipboard half.
+func _import() -> void:
+	var text := DisplayServer.clipboard_get()
+	if text.is_empty():
+		show_toast(_t("@none"))
+		return
+	var result: Variant = campaign_call("import_schematic", [text])
+	if result == null or int(result) < 0:
+		show_toast(_t("@none"))
+		return
+	refresh_campaign_views()
+	_selected = int(result)
+	_rebuild_list()
+	_rebuild_detail()
+
+
+func _delete(index: int) -> void:
+	_pending_delete = index
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null:
+		ui.call("show_confirm", _t("@schematic.delete.confirm"))
+
+
+func _edit(index: int) -> void:
+	_pending_rename = index
+	var name := ""
+	var schematics := campaign_section("schematics")
+	if index >= 0 and index < schematics.size():
+		name = str((schematics[index] as Dictionary).get("name", ""))
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null:
+		ui.call("show_text_input", _t("@schematic.edit"), _t("@name"), 64, name, false, false)
+
+
+## Opens the capacity editor for a core schematic (launch/schematics flow).
+func _open_loadout(index: int) -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui == null:
+		return
+	ui.call("open_dialog", "loadout", JSON.stringify({"index": index}))
+
+
+## `SchematicsDialog` icon tag picker (`IconSelectDialog`).
+func _open_icon_select(index: int) -> void:
+	_pending_icon = index
+	var ui := get_node_or_null("/root/MindUi")
+	var root := get_node_or_null("/root/Spine/Ui/UiRoot")
+	if ui == null:
+		return
+	if root != null and root.has_method("dialog"):
+		var dialog: Node = root.call("dialog", "icon_select")
+		if dialog != null and dialog.has_signal("icon_selected") and not dialog.icon_selected.is_connected(_on_icon_selected):
+			dialog.icon_selected.connect(_on_icon_selected)
+	ui.call("open_dialog", "icon_select", JSON.stringify({"index": index}))
+
+
+func _on_confirm(confirmed: bool) -> void:
+	if not confirmed or _pending_delete < 0:
+		_pending_delete = -1
+		return
+	var index := _pending_delete
+	_pending_delete = -1
+	if bool(campaign_call("delete_schematic", [index])):
+		refresh_campaign_views()
+		_selected = 0
+		_rebuild_list()
+		_rebuild_detail()
+
+
+func _on_text_input(text: String) -> void:
+	if _pending_rename < 0 or text.is_empty():
+		_pending_rename = -1
+		return
+	var index := _pending_rename
+	_pending_rename = -1
+	if bool(campaign_call("rename_schematic", [index, text])):
+		refresh_campaign_views()
+		_rebuild_list()
+		_rebuild_detail()
+
+
+func _on_icon_selected(region_name: String) -> void:
+	if _pending_icon < 0:
+		return
+	var index := _pending_icon
+	_pending_icon = -1
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null:
+		ui.call("close_dialog", "icon_select")
+	if bool(campaign_call("set_schematic_icon", [index, region_name])):
+		refresh_campaign_views()
+		_rebuild_list()
+		_rebuild_detail()

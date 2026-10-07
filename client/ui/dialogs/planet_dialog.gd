@@ -24,6 +24,8 @@ var _root: MindTable = null
 var _selected_planet: String = ""
 var _selected_sector: int = -1
 var _ok_button: Button = null
+## Planet whose campaign-complete screen was already announced (control flow).
+var _complete_announced := ""
 
 
 func _ready() -> void:
@@ -90,6 +92,7 @@ func _show_select() -> void:
 	set_title_text(_t("@campaign.select"))
 	_clear_root()
 	_set_planet_view_active(false)
+	refresh_campaign_views()
 
 	var choices := _campaign_planets()
 	var row := HBoxContainer.new()
@@ -222,6 +225,7 @@ func _show_planet(planet_name: String) -> void:
 	set_title_text("")
 	_clear_root()
 	_set_planet_view_active(true)
+	refresh_campaign_views(planet_name)
 
 	var view := _planet_view()
 	if view != null:
@@ -253,6 +257,38 @@ func _show_planet(planet_name: String) -> void:
 	# Cells added after `show_dialog` need an explicit re-sort (MinTable is manual).
 	_root.call_deferred("sort_now")
 	rail.call_deferred("sort_now")
+	# Deferred: `shown()` runs inside `MindUi.open_dialog`, which mutably binds
+	# `MindUi`; the completion opener must run after that call returns.
+	call_deferred("_maybe_show_campaign_complete")
+
+
+## `Control.java:177-185`: after the final sector is captured, show the campaign
+## completion screen. WS2 owns capture; this polls the live read models (no new
+## signal) and announces once per planet.
+func _maybe_show_campaign_complete() -> void:
+	var views := campaign_views()
+	var last_captured := false
+	for sector_variant in views.get("sectors", []):
+		var sector: Dictionary = sector_variant
+		if bool(sector.get("is_last", false)) and bool(sector.get("captured", false)):
+			last_captured = true
+			break
+	if not last_captured:
+		return
+	var complete: Dictionary = views.get("complete", {})
+	var planet := str(complete.get("planet", views.get("planet", "")))
+	if planet.is_empty() or planet == _complete_announced:
+		return
+	var root := get_node_or_null("/root/Spine/Ui/UiRoot")
+	if root != null and root.has_method("dialog"):
+		var node: Node = root.call("dialog", "campaign_complete")
+		if node != null and node.has_method("is_shown") and bool(node.call("is_shown")):
+			return
+	var ui := get_node_or_null("/root/MindUi")
+	if ui == null:
+		return
+	_complete_announced = planet
+	ui.call("open_dialog", "campaign_complete", JSON.stringify(complete))
 
 
 ## Expands between the edge buttons and the centered sector panel
@@ -282,6 +318,12 @@ func _build_rail(rail: MindTable, planet_name: String) -> void:
 	difficulty.custom_minimum_size = Vector2(208.0, 40.0)
 	difficulty.pressed.connect(_open_campaign_rules)
 	rail.add(difficulty).grow_x_axis().pad(2).set_pad_top(12)
+	rail.row()
+	# `SectorSelectDialog` destination picker (launch-pad/accelerator flow).
+	var select := MindWidgets.icon_button("map", _t("@sectors.launchselect"), "flatTogglet")
+	select.custom_minimum_size = Vector2(208.0, 40.0)
+	select.pressed.connect(_open_sector_select)
+	rail.add(select).grow_x_axis().pad(2)
 	rail.row()
 
 
@@ -325,8 +367,8 @@ func _make_planet_button(planet: Dictionary, selected: bool) -> Button:
 	return button
 
 
-## The selected-sector readout (`PlanetDialog.updateSelected`): name + sector
-## icon, accent divider, Threat and the in-panel action button.
+## The selected-sector readout (`PlanetDialog.updateSelected`): flags, stats,
+## threat and the state-dependent action button (`resume`/`go`/`launch`/locked).
 func _build_sector_panel(sector: Dictionary) -> Control:
 	# code-instantiated: bottom-center readout rebuilt per selected sector.
 	var panel := PanelContainer.new()
@@ -359,17 +401,119 @@ func _build_sector_panel(sector: Dictionary) -> Control:
 	divider.custom_minimum_size = Vector2(0.0, 3.0)
 	column.add_child(divider)
 
+	for state_key in _sector_state_labels(sector):
+		var label := MindWidgets.label(_t(state_key))
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		column.add_child(label)
+
+	if bool(sector.get("has_base", false)):
+		_build_sector_stats(column, sector)
+	else:
+		var threat := str(sector.get("threat_band", "low"))
+		column.add_child(
+			MindWidgets.label("%s %s" % [_t("@sectors.threat"), _t("@threat.%s" % threat)])
+		)
+
+	var action := _sector_action(sector)
+	var launch := MindWidgets.icon_button(str(action.get("icon", "play")), _t(str(action.get("label", "@sectors.launch"))))
+	launch.custom_minimum_size = Vector2(170.0, 54.0)
+	launch.disabled = bool(action.get("disabled", false))
+	var state_tooltip := PackedStringArray()
+	for state_key in _sector_state_labels(sector):
+		state_tooltip.append(_t(state_key))
+	launch.tooltip_text = " ".join(state_tooltip)
+	launch.pressed.connect(
+		func() -> void: _sector_action_pressed(_selected_planet, _selected_sector, str(action.get("mode", "launch")))
+	)
+	column.add_child(launch)
+	return panel
+
+
+## Visible state lines in `PlanetDialog.updateSelected` order; only states with
+## bundle keys get a label (`shielded` stays a map/action-tooltip marker).
+func _sector_state_labels(sector: Dictionary) -> PackedStringArray:
+	var out := PackedStringArray()
+	if bool(sector.get("attacked", false)):
+		out.append("@sectors.underattack")
+		if bool(sector.get("frozen", false)):
+			out.append("@sector.lockdown")
+	elif bool(sector.get("has_base", false)) and bool(sector.get("has_enemy_base", false)):
+		out.append("@sectors.vulnerable")
+	elif not bool(sector.get("has_base", false)) and bool(sector.get("has_enemy_base", false)):
+		out.append("@sectors.enemybase")
+	return out
+
+
+## `PlanetDialog.showStats` rows, rendered inline when the live view carries a
+## `stats` dictionary: playtime/attempts/wave/threat plus production, export,
+## import and stored items.
+func _build_sector_stats(column: VBoxContainer, sector: Dictionary) -> void:
+	var stats: Dictionary = sector.get("stats", {})
 	var threat := str(sector.get("threat_band", "low"))
 	column.add_child(
 		MindWidgets.label("%s %s" % [_t("@sectors.threat"), _t("@threat.%s" % threat)])
 	)
+	if stats.is_empty():
+		return
+	if int(stats.get("playtime_ms", 0)) > 0:
+		column.add_child(
+			MindWidgets.label("%s %s" % [_t("@sectors.time"), format_time_ms(int(stats.get("playtime_ms", 0)))])
+		)
+	if int(stats.get("attempts", 0)) > 0:
+		column.add_child(MindWidgets.label("%s %d" % [_t("@sectors.attempts"), int(stats.get("attempts", 0))]))
+	if int(stats.get("wave", 0)) > 0:
+		column.add_child(MindWidgets.label("%s %d" % [_t("@sectors.wave"), int(stats.get("wave", 0))]))
+	for key in ["production", "export", "import"]:
+		var line := _stat_line("@sectors.%s" % key, stats.get(key, []))
+		if not line.is_empty():
+			column.add_child(MindWidgets.label(line))
+	var stored := _stat_line("@sectors.stored", stats.get("stored", []))
+	if not stored.is_empty():
+		column.add_child(MindWidgets.label(stored))
 
-	var launch := MindWidgets.icon_button("play", _t("@sectors.launch"))
-	launch.custom_minimum_size = Vector2(170.0, 54.0)
-	launch.disabled = bool(sector.get("locked", false))
-	launch.pressed.connect(func() -> void: _launch(_selected_planet, _selected_sector))
-	column.add_child(launch)
-	return panel
+
+## `label item amount` line for a `[[name, value]]` stats list ("" when empty).
+func _stat_line(label_key: String, values: Array) -> String:
+	var parts := PackedStringArray()
+	for entry in values:
+		if entry is Array and (entry as Array).size() >= 2:
+			parts.append("%s %s" % [str(entry[0]), str(entry[1])])
+	if parts.is_empty():
+		return ""
+	return "%s %s" % [_t(label_key), ", ".join(parts)]
+
+
+## `PlanetDialog` action label/icon/behavior for the selected sector:
+## `@sectors.resume` (being played), `@sectors.go` (has a base), `@locked` or
+## `@sectors.launch`.
+func _sector_action(sector: Dictionary) -> Dictionary:
+	if _is_being_played(sector):
+		return {"label": "@sectors.resume", "icon": "play", "mode": "resume", "disabled": false}
+	if bool(sector.get("has_base", false)) or bool(sector.get("captured", false)):
+		return {"label": "@sectors.go", "icon": "play", "mode": "go", "disabled": false}
+	if bool(sector.get("locked", false)):
+		return {"label": "@locked", "icon": "lock", "mode": "launch", "disabled": true}
+	return {"label": "@sectors.launch", "icon": "play", "mode": "launch", "disabled": false}
+
+
+## Whether the live session is currently playing this sector
+## (`Sector.isBeingPlayed`; `MindCampaign.get_sector_state`).
+func _is_being_played(sector: Dictionary) -> bool:
+	var campaign := campaign_node()
+	if campaign == null or not campaign.has_method("get_sector_state"):
+		return false
+	var state: Dictionary = campaign.call("get_sector_state")
+	if not bool(state.get("campaign", false)):
+		return false
+	return str(state.get("planet", "")) == str(sector.get("planet", "")) \
+		and int(state.get("sector", -1)) == int(sector.get("id", -2))
+
+
+func _sector_action_pressed(planet_name: String, sector_id: int, mode: String) -> void:
+	if mode == "resume" or mode == "go":
+		_launch(planet_name, sector_id, -1, true)
+		return
+	_open_launch_loadout(planet_name, sector_id)
 
 
 # --- Planet view glue ---------------------------------------------------------
@@ -533,7 +677,59 @@ func _find_sector(planet_name: String, sector_id: int) -> Dictionary:
 
 # --- Actions ------------------------------------------------------------------
 
-func _launch(planet_name: String, sector_id: int) -> void:
+## Asks for a launch loadout before entering a fresh sector
+## (`PlanetDialog.playSelected` -> `LaunchLoadoutDialog`). Falls through to a
+## direct launch when the dialog (or its signal) is unavailable.
+func _open_launch_loadout(planet_name: String, sector_id: int) -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	var root := get_node_or_null("/root/Spine/Ui/UiRoot")
+	if ui == null or root == null or not root.has_method("dialog"):
+		_launch(planet_name, sector_id)
+		return
+	var dialog: Node = root.call("dialog", "launch_loadout")
+	if dialog == null or not dialog.has_signal("loadout_chosen"):
+		_launch(planet_name, sector_id)
+		return
+	if not dialog.loadout_chosen.is_connected(_on_loadout_chosen):
+		dialog.loadout_chosen.connect(_on_loadout_chosen)
+	ui.call("open_dialog", "launch_loadout", JSON.stringify({
+		"planet": planet_name,
+		"sector": sector_id,
+	}))
+
+
+func _on_loadout_chosen(index: int) -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null:
+		ui.call("close_dialog", "launch_loadout")
+	_launch(_selected_planet, _selected_sector, index)
+
+
+## Opens the sector-destination picker for the current planet and routes the
+## chosen sector into the launch-loadout flow (`SectorSelectDialog`).
+func _open_sector_select() -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	var root := get_node_or_null("/root/Spine/Ui/UiRoot")
+	if ui == null:
+		return
+	if root != null and root.has_method("dialog"):
+		var dialog: Node = root.call("dialog", "sector_select")
+		if dialog != null and dialog.has_signal("sector_chosen") and not dialog.sector_chosen.is_connected(_on_sector_select_chosen):
+			dialog.sector_chosen.connect(_on_sector_select_chosen)
+	ui.call("open_dialog", "sector_select", JSON.stringify({"planet": _selected_planet}))
+
+
+func _on_sector_select_chosen(sector_id: int) -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null:
+		ui.call("close_dialog", "sector_select")
+	_open_launch_loadout(_selected_planet, sector_id)
+
+
+## Enters the sector. `resume` uses the existing-base path
+## (`Control.playSector`; WS2 contract) and `loadout` selects the launch
+## schematic (`universe.updateLoadout`; WS2 contract).
+func _launch(planet_name: String, sector_id: int, loadout: int = -1, resume: bool = false) -> void:
 	if sector_id < 0:
 		return
 	sector_activated.emit(planet_name, sector_id)
@@ -542,10 +738,21 @@ func _launch(planet_name: String, sector_id: int) -> void:
 	var sim_host := get_node_or_null("/root/Spine/SimHost")
 	if sim_host != null and sim_host.has_method("load_sector"):
 		sim_host.call("load_sector", planet_name, sector_id)
+	var campaign := campaign_node()
 	var started := false
-	var campaign := get_node_or_null("/root/Spine/MindCampaign")
-	if campaign != null and campaign.has_method("start_sector"):
-		started = bool(campaign.call("start_sector", planet_name, sector_id))
+	if campaign != null:
+		if resume and campaign.has_method("play_sector"):
+			started = bool(campaign.call("play_sector", planet_name, sector_id))
+		elif campaign.has_method("start_sector"):
+			if loadout >= 0:
+				var result: Variant = campaign.callv("start_sector", [planet_name, sector_id, loadout])
+				if result == null:
+					# Facade without the optional loadout parameter yet: relaunch
+					# without the selection rather than refusing to enter.
+					result = campaign.call("start_sector", planet_name, sector_id)
+				started = bool(result)
+			else:
+				started = bool(campaign.call("start_sector", planet_name, sector_id))
 	_close()
 	if started:
 		_enter_game()
@@ -561,13 +768,13 @@ func _enter_game() -> void:
 func _open_tech_tree() -> void:
 	var ui := get_node_or_null("/root/MindUi")
 	if ui != null:
-		ui.call("open_dialog", "research", "{}")
+		ui.call("open_dialog", "research", JSON.stringify({"planet": _selected_planet}))
 
 
 func _open_campaign_rules() -> void:
 	var ui := get_node_or_null("/root/MindUi")
 	if ui != null:
-		ui.call("open_dialog", "campaign_rules", "{}")
+		ui.call("open_dialog", "campaign_rules", JSON.stringify({"planet": _selected_planet}))
 
 
 ## Closes through `MindUi` so the dialog stack and pause governor stay in sync.

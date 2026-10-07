@@ -26,17 +26,29 @@ extends Control
 
 var _context: Dictionary = {}
 
-## Cached `MindUi.campaign_views()` snapshot. `MindUi` binds `&mut self` for the
-## duration of `open_dialog`, so re-entering `campaign_views()` from a dialog's
-## `shown()` panics ("already bound"); dialogs read this once and reuse it.
+## Path to the live campaign facade (owns sector/tech/rules/schematic state).
+const CAMPAIGN_PATH := "/root/Spine/MindCampaign"
+
+## Cached campaign read-model snapshot. `MindUi` binds `&mut self` for the
+## duration of `open_dialog`, so re-entering `MindUi.campaign_views()` from a
+## dialog's `shown()` panics ("already bound"); dialogs refresh through
+## `refresh_campaign_views()` (which calls the separate `MindCampaign` node)
+## and reuse this cache elsewhere.
 var _campaign_views_cache: Dictionary = {}
 var _campaign_views_loaded := false
+## Shared boot snapshot so every dialog does not re-project the live campaign
+## on its own `_ready`; per-open refreshes always re-fetch.
+static var _shared_views: Dictionary = {}
 
 
 func _ready() -> void:
 	visible = false
 	_apply_title()
 	_apply_full_dialog()
+	# Preload the read-model cache while `MindUi` cannot be bound yet (dialogs are
+	# constructed before any `open_dialog` call), so `shown()` never re-enters the
+	# `&mut` Rust endpoint through the lazy fallback.
+	_ensure_campaign_views_loaded()
 
 
 ## Stretches the centered panel to the whole viewport for `full_dialog` dialogs
@@ -199,20 +211,113 @@ func clear_buttons() -> void:
 		child.queue_free()
 
 
-## M5 campaign read models from `MindUi.campaign_views()` (plan 14 §3.11 12
-## seam), cached for the dialog's lifetime. Returns an empty dictionary when the
-## bridge is absent. The cache is loaded during `_ready` (before `MindUi` binds
-## itself), so `shown()` never re-enters the `&mut` Rust endpoint.
+## M5 campaign read models (plan 14 §3.11 12 seam). Reads the live
+## `MindCampaign` projection when available and otherwise the `MindUi` fixture;
+## cached for the dialog's lifetime. The cache is preloaded by `_ready` (before
+## `MindUi` binds itself) and `refresh_campaign_views()` rebuilds it on open so a
+## running dialog reflects live campaign state.
 func campaign_views() -> Dictionary:
+	_ensure_campaign_views_loaded()
+	return _campaign_views_cache
+
+
+## First-load path: live `MindCampaign` when it exposes the read model, else the
+## `MindUi` fixture. Only called from `_ready` (never from `shown()`, where
+## `MindUi` is mutably bound by `open_dialog`).
+func _ensure_campaign_views_loaded() -> void:
 	if _campaign_views_loaded:
-		return _campaign_views_cache
+		return
 	_campaign_views_loaded = true
+	if not _shared_views.is_empty():
+		_campaign_views_cache = _shared_views
+		return
+	var live := _live_campaign_views("")
+	if not live.is_empty():
+		_campaign_views_cache = live
+		_shared_views = live
+		return
 	var ui := get_node_or_null("/root/MindUi")
 	if ui != null and ui.has_method("campaign_views"):
 		var parsed: Variant = JSON.parse_string(str(ui.call("campaign_views")))
 		if parsed is Dictionary:
 			_campaign_views_cache = parsed
+			_shared_views = parsed
+
+
+## Rebuilds the cached campaign read models from the live `MindCampaign` node
+## for `planet` (`""` = active) and returns the cache. Safe from `shown()` while
+## `MindUi.open_dialog` holds its mutable borrow because it never calls `MindUi`.
+func refresh_campaign_views(planet: String = "") -> Dictionary:
+	var live := _live_campaign_views(planet)
+	if not live.is_empty():
+		_campaign_views_cache = live
+		_campaign_views_loaded = true
+		_shared_views = live
 	return _campaign_views_cache
+
+
+## The live `MindCampaign` facade node, or null when absent (menu boot).
+func campaign_node() -> Node:
+	return get_node_or_null(CAMPAIGN_PATH)
+
+
+## Fetches a campaign read-model method returning JSON; `{}` when unavailable.
+func campaign_json(method: String, args: Array = []) -> Dictionary:
+	var campaign := campaign_node()
+	if campaign == null or not campaign.has_method(method):
+		return {}
+	var parsed: Variant = JSON.parse_string(str(campaign.callv(method, args)))
+	return parsed if parsed is Dictionary else {}
+
+
+## Calls a campaign facade method, returning `null` when it is absent.
+func campaign_call(method: String, args: Array = []) -> Variant:
+	var campaign := campaign_node()
+	if campaign == null or not campaign.has_method(method):
+		return null
+	return campaign.callv(method, args)
+
+
+## Opens the content-info dialog for a content name (`ResearchDialog` info
+## button; the database passes the same `content` context key).
+func open_content_info(content: String) -> void:
+	if content.is_empty():
+		return
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null:
+		ui.call("open_dialog", "content", JSON.stringify({"content": content}))
+
+
+## Shows a transient info prompt through `MindUi` (only valid outside an
+## `open_dialog` call, which mutably binds `MindUi`).
+func show_toast(text: String) -> void:
+	if text.is_empty():
+		return
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("show_info"):
+		ui.call("show_info", text)
+
+
+## `UI.formatTime`-style playtime (h/m/s) for millisecond values.
+func format_time_ms(milliseconds: int) -> String:
+	var seconds := int(milliseconds / 1000.0)
+	var hours := seconds / 3600
+	var minutes := (seconds % 3600) / 60
+	if hours > 0:
+		return "%dh %dm" % [hours, minutes]
+	if minutes > 0:
+		return "%dm %ds" % [minutes, seconds % 60]
+	return "%ds" % seconds
+
+
+## Live campaign read models from `MindCampaign.campaign_views_json` (WS2
+## contract); `{}` when the facade or endpoint is absent.
+func _live_campaign_views(planet: String) -> Dictionary:
+	var campaign := campaign_node()
+	if campaign == null or not campaign.has_method("campaign_views_json"):
+		return {}
+	var parsed: Variant = JSON.parse_string(str(campaign.call("campaign_views_json", planet)))
+	return parsed if parsed is Dictionary else {}
 
 
 ## A named section of the campaign read models (`planets`/`sectors`/…).
