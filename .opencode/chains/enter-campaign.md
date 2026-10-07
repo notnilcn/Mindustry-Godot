@@ -1,14 +1,14 @@
 ---
 id: enter-campaign
 title: Main menu → Campaign → planet → sector → launch
-status: seeded
+status: verified
 applies_when: Entering or observing the campaign flow, from menu to launched sector HUD.
 preconditions:
   - boot-and-identity completed (game in the main menu, runtime connected).
   - UI clicks resolve control centers via eval; never hardcode coordinates.
   - Java reference leg (optional comparison) needs computer-mcp with DISPLAY set at opencode process start.
 tools: [godot_exec, godot_input, godot_screenshot, godot_log]
-last_verified: not yet (UI variant seeded from .opencode/skills/playtest/SKILL.md + menu findings; facade variant from run l2-20261007-064916-campaign_spine)
+last_verified: 2026-10-08 9efd068 facade launch + loadout (runs/l2-20261008-012103-ev0052-research-purchase-godot); UI Play→Campaign→serpulo→OK→sector-panel action (runs/l2-20261008-014155-ev0037-core-launch-godot)
 ---
 
 # enter-campaign
@@ -43,20 +43,29 @@ last_verified: not yet (UI variant seeded from .opencode/skills/playtest/SKILL.m
 
 ## Steps (campaign facade variant)
 
-Use when the UI flow is blocked but the campaign model is the subject:
+Use when the UI flow is blocked but the campaign model is the subject. Verified
+2026-10-08 at `9efd068`: a fresh launch has a real player core and the loadout
+stocks its live module.
 
-1. Query the facade:
+1. Load the preset map on the sim host. `groundZero` is sector **15**; 170 is a
+   plain generated sector (terrain only, no preset map, no core):
 
    ```
-   godot_exec {"action":"eval","params":{"code":"return get_node(\"/root/Spine/SimHost\").start_sector(\"serpulo\", 170)"}}
+   godot_exec {"action":"eval","params":{"code":"return get_node(\"/root/Spine/SimHost\").load_sector(\"serpulo\", 15)"}}
    ```
 
-   (`start_sector` lives on the `MindCampaign` facade used by
-   `.opencode/evals/runs/l2-20261007-064916-campaign_spine`; confirm the node
-   path/method in the current scene before relying on it.)
+   Expect `true` and log lines `load_sector: loaded preset map `serpulo/groundZero` (256x256)`
+   and `load_sector: materialized 61 map building(s)`.
 
-2. Read back the launch result and HUD values (rules, `hasCore`, group counts)
-   via `get_state_json` / facade getters, then screenshot.
+2. Start the campaign sector on **`MindCampaign`** (not `SimHost`) with an
+   explicit `[{item,amount}]` loadout:
+
+   ```
+   godot_exec {"action":"eval","params":{"code":"var c = get_node(\"/root/Spine/MindCampaign\")\nvar h = get_node(\"/root/Spine/SimHost\")\nvar loadout = JSON.stringify([{\"item\": \"copper\", \"amount\": 500}, {\"item\": \"lead\", \"amount\": 500}])\nvar ok = c.start_sector_with_loadout(\"serpulo\", 15, loadout)\nreturn {\"started\": ok, \"sector_state\": c.get_sector_state(), \"core_items\": str(h.core_items_json())}"}}
+   ```
+
+3. Read back: `started: true`, `sector_state.hasCore: true`, and `core_items`
+   equal to the loadout; then read rules / group counts / screenshot as needed.
 
 ## Success signals
 
@@ -70,8 +79,23 @@ Use when the UI flow is blocked but the campaign model is the subject:
   is mandatory.
 - Hover state is read on the NEXT frame after `godot_input`; use
   `gui_get_hovered_control()` in a follow-up eval, not the same call.
-- The UI variant is seeded, not verified: campaign bootstrap/launch gaps
-  (EV-0035 family) can make step 3 fail before any click is wrong. Record the
-  facade result and stop; do not hunt random coordinates.
+- Verified 2026-10-08 at `9efd068` (EV-0037 run): the UI steps land as written —
+  Play (230,149) → Campaign (460,149) → serpulo card (412,194) → OK (499,631),
+  each as discrete `mouse_button` press/release + `Input.flush_buffered_events()`
+  (a `sequence` call timed out on this host once; discrete calls are the safe form).
+- The sector panel's action is read from `CampaignViews::vanilla_fixture()` in this
+  build: `MindUi.campaign_views()` falls back to the fixture when
+  `MindCampaign.campaign_views_json` is absent, and the dialog caches it at `_ready()`,
+  so groundZero always renders `@sectors.go` (resume) even with no saves. Clearing
+  campaign saves mid-process does not refresh the dialog — restart the game so the
+  cache is rebuilt. The `go` click still launches fresh when the sector has no save
+  (`play_sector` → `play_new_sector`); verify freshness from the
+  `MindCampaign ready (0 save slot(s))` log and `wasCaptured=false`, not the label.
+- Campaign bootstrap/launch gaps (EV-0035 family) can make step 3 fail before any
+  click is wrong. Record the facade result and stop; do not hunt random coordinates.
+- `hasCore: false` after the facade launch means the running binary predates
+  `e85732c` (map-building materialization) or the sector has no preset map; use
+  groundZero (sector 15), not 170. A stocked core also requires the loadout to
+  pass `start_sector_with_loadout`, not the bare `start_sector`.
 - Java comparison: computer-mcp crashes at import without `DISPLAY` (pynput),
   and opencode silently drops its tools; the Godot leg is unaffected.

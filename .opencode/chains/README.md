@@ -15,9 +15,15 @@ touch, which precondition is easy to miss.
 | `boot-and-identity.md` | editor bridge → `game.tscn` → runtime connected → pid stamp |
 | `golden-checksum.md` | `load_scenario` + `step(60)` + checksum vs committed golden |
 | `pause-step-interact.md` | pause, step, API and mouse place/break, input flush |
+| `input-controls.md` | no-scenario world, keyboard input vs `get_input_state_json`, API comparison |
 | `probe-hud.md` | state JSON, inspector, screenshot, logs |
 | `enter-campaign.md` | main menu → planet dialog → sector → launch (UI and facade variants) |
+| `sector-preset-rules.md` | campaign launch → `get_rules_json` vs preset captureWave/winWave (EV-0049) |
+| `ground-zero-fresh-launch.md` | clear leftover sector saves → restart → UI launch → core/entity/game-over assertions (EV-0037) |
+| `ground-zero-production-probe.md` | fresh Ground Zero → placed drill on overlay ore + adjacent core → deterministic first-delivery bracket (EV-0047) |
 | `campaign-save-load.md` | campaign facade → launch → save / list / load a slot |
+| `load-game-dialog.md` | main menu → Load Game → live slot list → card click queues + applies a load |
+| `research-purchase.md` | campaign launch → research dialog → root rail → purchase a locked node |
 | `java-reference-leg.md` | Java reference: launch → drive → capture → quit (computer-mcp) |
 
 ## Entry schema

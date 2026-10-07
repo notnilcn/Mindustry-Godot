@@ -1,6 +1,6 @@
 {
   "format": 2,
-  "updated": "2026-10-07T14:35:15+00:00",
+  "updated": "2026-10-07T17:47:14+00:00",
   "findings": [
     {
       "id": "EV-0001",
@@ -1162,13 +1162,17 @@
       "id": "EV-0037",
       "area": "game/campaign",
       "severity": "S1",
-      "status": "godot-open",
+      "status": "twin-verified",
       "title": "A fresh Ground Zero launch registers no player core: hasCore=false and zero building entities",
       "expected": "Java: SectorInfo.hasCore defaults true; World.loadSector loads the preset map's core, so a fresh launch has a default-team core and does not instantly lose",
       "actual": "Godot: after load_sector('serpulo',170)+start_sector, get_sector_state().hasCore=false and SimHost.get_group_counts().build=0; sync_session_with_sim scans ECS BuildingComp which load_sector never populates, so player_core_count()==0 and check_game_state_campaign sets game_over on the first GameStateCheck tick",
       "repro": "launch serpulo:170 via the UI sequence (load_sector then start_sector), then eval MindCampaign.get_sector_state() and SimHost.get_group_counts()",
       "evidence": [
-        "runs/l2-20261007-064916-campaign_spine/godot/state-02-launch-rules.json"
+        "runs/l2-20261007-064916-campaign_spine/godot/state-02-launch-rules.json",
+        "runs/20261007-150716-ev0037-core-launch-godot/run.json",
+        "runs/20261007-150716-ev0037-core-launch-godot/evidence/blocked-evidence.txt",
+        "runs/l2-20261008-014155-ev0037-core-launch-godot/run.json, runs/l2-20261008-014155-ev0037-core-launch-godot/report.md, runs/l2-20261008-014155-ev0037-core-launch-godot/evidence/state-02-launched.json, runs/l2-20261008-014155-ev0037-core-launch-godot/evidence/launch-log-lines.json, runs/l2-20261008-014155-ev0037-core-launch-godot/evidence/screenshots/05-launched-groundzero.png, runs/l2-20261008-014155-ev0037-core-launch-godot/evidence/screenshots/06-launched-after-60-steps.png",
+        "/home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261007-170406-ev0037-core-launch-twin/godot/state-00-launch.json, /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261007-170406-ev0037-core-launch-twin/godot/step-01-groundzero-launched.png, /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261007-170406-ev0037-core-launch-twin/java/step-07-groundzero-launched.png, /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261007-170406-ev0037-core-launch-twin/java/step-06-groundzero-panel.png, /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261007-170406-ev0037-core-launch-twin/java/java-groundzero-sector-serpulo-170.msav"
       ],
       "notes": [
         "2026-10-07T11:00:45+00:00: claimed by fix-game-oc-4734 for fix",
@@ -1178,13 +1182,25 @@
         "2026-10-07T14:22:07+00:00: claimed by oc-9203 for writer (session loop-1)",
         "2026-10-07T14:22:39+00:00: released: recovery: writer commit e85732c present on main; no re-write needed; handing to godot eval",
         "2026-10-07T14:22:52+00:00: claimed by oc-10437 for godot-eval (session loop-1)",
-        "2026-10-07T14:35:15+00:00: reaped stale claim (oc-10437, was godot-unverified); restored godot-open"
+        "2026-10-07T14:35:15+00:00: reaped stale claim (oc-10437, was godot-unverified); restored godot-open",
+        "2026-10-07T14:56:50+00:00: claimed by oc-11774 for godot-eval (session loop-1)",
+        "2026-10-07T15:02:23+00:00: reaped stale claim (oc-11774, was godot-unverified); restored godot-open",
+        "2026-10-07T15:04:06+00:00: claimed by oc-6897 for godot-eval (session loop-1)",
+        "2026-10-07T15:07:54+00:00: released: BLOCKED: MCP refused with '[mcp-slot-guard] MCP slot limit reached (MCP_SLOT_LIMIT)' (free 0/2: stale dead lease oc-4240 loop-1, pid 11854 dead but inside 900s TTL; live lease oc-3238 loop-2). Separate blocker: claim commit e85732c is not in the loop-1 worktree - not an ancestor of main @5f5719d and absent from loop-1's built libmind_gdext.so (2026-10-07 20:16, 0 hits for materialize_map_buildings); it exists only on parity/loop-2 @9efd068 (binary 2026-10-08 01:04, 3 hits). No in-engine repro was possible in loop-1; merge/cherry-pick + rebuild loop-1, or re-home EV-0037 to loop-2.",
+        "2026-10-07T15:11:10+00:00: released: orchestrator loop-1 re-home: fix commit e85732c (materialize_map_buildings) exists only on parity/loop-2; loop-1/main load_sector still swaps a raw grid with no ECS building entities. Loop-1 cannot verify; released for a session whose worktree contains the fix (loop-2).",
+        "2026-10-07T15:37:55+00:00: claimed by oc-70104 for writer (session loop-2)",
+        "2026-10-07T15:40:53+00:00: [godot-open] commit e85732c: pre-exists on parity/loop-2 (ancestor of HEAD 9efd068); load_sector materializes decoded map buildings (cores included) after installing the live block runtime, so sync_session_with_sim registers the default-team player core. Verified: cargo test -p mind-core (1800 passed) incl. materialize_links_loaded_map_buildings, live_runtime_core_save_then_load_roundtrips, and msav-import ground_zero_drill_feeds_the_materialized_core against the real Ground Zero .msav.",
+        "2026-10-07T15:41:12+00:00: released: writer commit e85732c (pre-existing on parity/loop-2); narrow checks green; handing to godot eval",
+        "2026-10-07T15:41:27+00:00: claimed by oc-84109 for godot-eval (session loop-2)",
+        "2026-10-07T15:53:58+00:00: released: Fresh Ground Zero launch re-run via UI on 9efd068 / lib sha 84069d3451ebeb11: cleared the prior evaluator's leftover serpulo-15 autosave, fresh boot logged MindCampaign ready (0 save slot(s)); UI Play>Campaign>serpulo>OK>sector-panel action then logged load_sector preset serpulo/groundZero (256x256) + materialized 61 map building(s) + loaded campaign sector serpulo:15. pid 114964: get_sector_state().hasCore=true (serpulo/15, wasCaptured=false), SimHost.get_group_counts().build=61, core is a 3x3 core-shard on team 0 (player_core_count counts default_team only), get_hud_state().gameOver=false at launch and after step(60) at tick 1807 checksum 19eaf1fca3ae423f; no error entries after launch (boot-time loop-worktree asset warnings only).",
+        "2026-10-07T17:04:06+00:00: claimed by oc-230926 for twin (session loop-2)",
+        "2026-10-07T17:11:28+00:00: [verify] Twin run: Java fresh Ground Zero launch (Play>Campaign>Serpulo>Ground Zero>Launch) pid 211508 rendered the player core + 'Obtain 0/15 Copper' objective; Godot fresh UI launch pid 231368 on 9efd068/lib 84069d3451ebeb11 logged load_sector preset serpulo/groundZero + materialized 61 map building(s) + loaded sector serpulo:15; sector_state.hasCore=true, group_counts.build=61, core-shard 3x3 team 0 build_id 5, hud.gameOver=false at tick 807 and after step(60) at tick 2838; godot error log empty."
       ],
       "plan": "12",
       "first_seen": "2026-10-06T20:56:18+00:00",
-      "last_verified": "2026-10-07T14:22:52+00:00",
+      "last_verified": "2026-10-07T17:11:28+00:00",
       "found_by_loop": "2",
-      "session": "loop-1"
+      "session": "loop-2"
     },
     {
       "id": "EV-0038",
@@ -1280,7 +1296,7 @@
       "id": "EV-0041",
       "area": "ui/campaign",
       "severity": "S1",
-      "status": "godot-open",
+      "status": "twin-verified",
       "title": "Campaign Difficulty dialog errors on a missing MindCell.left() and freezes the client",
       "expected": "Java: Play > Campaign > Serpulo > OK, then the Difficulty rail button opens the CampaignRules dialog with 5 difficulty buttons (casual/easy/normal/hard/eradication) and the 5 rule toggles; the client keeps running",
       "actual": "Godot: opening campaign_rules logs 'Invalid call. Nonexistent function \"left\" in base \"RefCounted (MindCell)\"' from campaign_rules_dialog.gd:82 (_rebuild, the first rule toggle); the full-screen dialog opens with no body and Engine.get_process_frames() freezes (2371 before and after a 2s wait); any later MindUi method call panics 'Gd<T>::bind() failed, already bound; T = mind_gdext::ui::ui_host::MindUi'",
@@ -1292,7 +1308,9 @@
         "runs/l6-20261007-071337-campaign_planet/godot/state-03-sector-panel.json",
         "runs/20261007-084439-ev0041-campaign-rules/godot/state-04-campaign-rules.json",
         "runs/20261007-084439-ev0041-campaign-rules/godot/step-04-campaign-rules-wedged.png",
-        "runs/20261007-084439-ev0041-campaign-rules/java/step-04-campaign-rules.png"
+        "runs/20261007-084439-ev0041-campaign-rules/java/step-04-campaign-rules.png",
+        "/home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261007-160101-ev0041-campaign-rules-godot/run.json, /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261007-160101-ev0041-campaign-rules-godot/report.md, /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261007-160101-ev0041-campaign-rules-godot/godot/state-04-campaign-rules-ui.json, /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261007-160101-ev0041-campaign-rules-godot/godot/state-05-api-open.json, /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261007-160101-ev0041-campaign-rules-godot/godot/step-04-campaign-rules-ui.png, /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261007-160101-ev0041-campaign-rules-godot/godot/step-05-api-open-campaign-rules.png, /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261007-160101-ev0041-campaign-rules-godot/godot/log-errors-phase-b.json",
+        "/home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261007-172706-ev0041-campaign-rules-twin/godot/state-01-campaign-rules.json, /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261007-172706-ev0041-campaign-rules-twin/godot/step-01-campaign-rules-api.png, /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261007-172706-ev0041-campaign-rules-twin/java/step-05-difficulty.png"
       ],
       "notes": [
         "2026-10-07T02:39:41+00:00: claimed by loop-3",
@@ -1305,13 +1323,21 @@
         "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open",
         "2026-10-07T14:05:56+00:00: migrated: cleared legacy claim (fix-ui-oc-4734)",
         "2026-10-07T14:22:07+00:00: claimed by oc-9203 for writer (session loop-1)",
-        "2026-10-07T14:35:15+00:00: reaped stale claim (oc-9203, was godot-open); restored godot-open"
+        "2026-10-07T14:35:15+00:00: reaped stale claim (oc-9203, was godot-open); restored godot-open",
+        "2026-10-07T15:11:10+00:00: released: orchestrator loop-1 re-home: fix commit 5b5fa95 (Arc Cell align API) exists only on parity/loop-2; main's client/ui/mind_cell.gd still has no left()/right()/top()/bottom(). Loop-1 cannot verify; released for a session whose worktree contains the fix (loop-2).",
+        "2026-10-07T15:37:55+00:00: claimed by oc-70104 for writer (session loop-2)",
+        "2026-10-07T16:00:12+00:00: [godot-open] commit 5b5fa95: pre-exists on parity/loop-2 (ancestor of 9efd068); MindCell.left()/right()/top()/bottom() plus the cell-API dialog rebuild close the seam. Headless ui_widgets_check 60 ok/0 fail; in-engine open_dialog('campaign_rules') builds 5 difficulty + 7 rule toggles, process frames advance, later MindUi has_dialog/close_dialog calls succeed, error log empty.",
+        "2026-10-07T16:00:23+00:00: released: writer commit 5b5fa95 (pre-existing on parity/loop-2); narrow checks green; handing to godot eval",
+        "2026-10-07T16:00:38+00:00: claimed by oc-139286 for godot-eval (session loop-2)",
+        "2026-10-07T16:11:20+00:00: released: Verified at HEAD 9efd068, lib sha256 84069d3451ebeb11. UI path: Play>Campaign>Serpulo>OK>campaign.difficulty opens the dialog with 5 difficulty buttons (Normal selected) + 7 rule toggles matching Java labels + Back; pid 154748, frames 3522->8313 while tick 1177 (menu flow holds SimHost paused); has_dialog/is_dialog_shown/close_dialog all succeed; no MindCell.left log entry. Exact API repro: open_dialog('campaign_rules', {'planet':'serpulo'}) returns true in 4 ms; pid 161392, frames 6451->7429 and tick 3250->3753 over 3 s; close_dialog true; error log has only the boot platform warning. No Gd<T>::bind() panic. Secondary out-of-scope observation: re-clicking a difficulty button rebuilds the table with collapsed layout while the client keeps running (recorded in report, candidate separate finding).",
+        "2026-10-07T17:27:06+00:00: claimed by oc-255491 for twin (session loop-2)",
+        "2026-10-07T17:33:25+00:00: [verify] Twin run: Java Difficulty dialog (pid 211508) rendered 5 difficulty buttons (Casual/Easy/Normal selected/Hard/Eradication) + 7 toggles (Enemy Sector Invasions, Fog of War, Hide Enemy Spawns, Unpredictable Wave AI, Disable Pausing, RTS Attack AI, Clear Sector On Loss); Godot UI path pid 255782 rendered the same 5+7 labels, frames 22808->27244, close_dialog true; API path pid 260714 open_dialog('campaign_rules') returned true in 4 ms (pre-fix: 15 s timeout), 5+7 present, frames 2560->5522, close true; log has no MindCell.left error and no Gd bind panic (only boot env warnings)."
       ],
       "plan": "14",
       "first_seen": "2026-10-06T21:36:58+00:00",
-      "last_verified": "2026-10-07T14:22:07+00:00",
+      "last_verified": "2026-10-07T17:33:25+00:00",
       "found_by_loop": "6",
-      "session": "loop-1"
+      "session": "loop-2"
     },
     {
       "id": "EV-0042",
@@ -1340,44 +1366,73 @@
       "id": "EV-0043",
       "area": "input/blocks",
       "severity": "S2",
-      "status": "godot-open",
+      "status": "twin-verified",
       "title": "Right-drag cannot break item-capacity blocks (conveyor/turret); an empty inventory panel opens instead",
       "expected": "Java: the right-button binding (breakBlock) enters breaking mode and a right-drag breaks every non-air tile in the rect (DesktopInput.java:743). Config/inventory open on the LEFT tap, and the inventory only when build.block.hasItems && items.total() > 0 (InputHandler.java:2017).",
       "actual": "Godot: right-press on a placed conveyor (or a duo turret) opens OverlayLayer/block_inventory at the tile (empty grid: only the close X, items JSON hardcoded \"{}\") instead of starting a break; a 6-tile right-drag over conveyors x=10..15,y=16 leaves all 6 placed. A copper-wall control line right-drags/breaks normally (6 -> 0), so the break path itself works only for has_items==false blocks.",
       "repro": "scenario input_controls (Godot leg): select conveyor, left-drag tiles x=10..15 y=16, then right-drag the same line; get_state_json() still lists all 6 conveyor tiles and OverlayLayer/block_inventory.visible==true",
       "evidence": [
-        "runs/l7-20261007-074043-input_controls/godot/break-evidence.json"
+        "runs/l7-20261007-074043-input_controls/godot/break-evidence.json",
+        "runs/20261008-011233-input_controls-godot/godot/godot-break-evidence.json runs/20261008-011233-input_controls-godot/report.md runs/20261008-011233-input_controls-godot/godot/step-01-right-press-inventory-open.png runs/20261008-011233-input_controls-godot/godot/step-02-after-conveyor-right-drag.png",
+        "runs/20261008-015146-input_controls-godot/godot/godot-break-evidence.json runs/20261008-015146-input_controls-godot/report.md runs/20261008-015146-input_controls-godot/godot/step-01-right-press-conveyor-mode-breaking.png runs/20261008-015146-input_controls-godot/godot/step-02-after-conveyor-right-drag.png runs/20261008-015146-input_controls-godot/godot/step-04-sorter-left-tap-config.png runs/20261008-015146-input_controls-godot/godot/pid-119768-maps.txt",
+        ".opencode/evals/runs/20261008-020931-input_controls-twin/godot/godot-break-evidence.json .opencode/evals/runs/20261008-020931-input_controls-twin/report.md .opencode/evals/runs/20261008-020931-input_controls-twin/run.json .opencode/evals/runs/20261008-020931-twin-java-ref/java/step-42-drill-inventory-open.png .opencode/evals/runs/20261008-020931-twin-java-ref/java/step-43-right-press-drill.png .opencode/evals/runs/20261008-020931-twin-java-ref/java/step-44-after-right-drag-break.png"
       ],
       "notes": [
         "screenshots: runs/l7-20261007-074043-input_controls/godot/step-01-rightclick-empty-inventory.png, runs/l7-20261007-074043-input_controls/godot/step-03-placed-blocks-after-failed-right-drag.png. Cause seam: desktop.rs right_press() consults config_spec/has_items_at before begin_break; has_items_at = def.has_items && def.item_capacity>0 with no items.total()>0 guard, so any item-capacity block diverts to inventory. Distinct from the known missing item_stacks_json feed.",
         "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/input-controls cfe850f/106b4bc: config+inventory fragment routing and click gating.",
-        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open"
+        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open",
+        "2026-10-07T15:10:06+00:00: claimed by oc-15672 for writer (session loop-1)",
+        "2026-10-07T15:11:07+00:00: released: orchestrator loop-1: writer not needed; fix commits cfe850f/106b4bc (config+inventory fragment wiring, click-position overlays) are ancestors of main; handing to godot eval",
+        "2026-10-07T15:11:21+00:00: claimed by oc-18574 for godot-eval (session loop-1)",
+        "2026-10-07T15:19:56+00:00: released: Still fails at main 5f5719d (pid 27548): right-press at conveyor (10,16) opens OverlayLayer/block_inventory at the click position (grid holds only the close X, items JSON {}) and never enters breaking mode; right-drag x=10..15 y=16 leaves 6/6 conveyors with commands_applied unchanged at 6 (tick 3386). Copper-wall control right-drags 6->0 in the same session. Expected: right-button breakBlock enters breaking mode and right-drag breaks every non-air tile; inventory only on left tap when hasItems && items.total()>0. No log errors.",
+        "2026-10-07T15:31:19+00:00: claimed by oc-53990 for writer (session loop-1)",
+        "2026-10-07T15:50:01+00:00: [godot-open] commit eaf7c6a: right button always enters breaking mode, left tap is tileTapped; inventory gated on building items.total()>0 with live ItemModule JSON; valid_break honors Tile.breakable (destructible||update) so conveyors break; placement_validation_table golden re-recorded. In-engine: right-drag x=10..15 y=16 removes 6/6 conveyors, right-press opens no inventory.",
+        "2026-10-07T15:51:09+00:00: released: writer commit eaf7c6a (right-button breaking mode, left-tap config/inventory gating, breakable() parity); handing to godot eval",
+        "2026-10-07T15:51:22+00:00: claimed by oc-119279 for godot-eval (session loop-1)",
+        "2026-10-07T15:58:49+00:00: released: Fresh in-engine run pid 119768 at HEAD eaf7c6a (fresh libmind_gdext.so inode 55209937 mapped): right-press conveyor -> mode=breaking, no inventory; right-drag x=10..15 y=16 breaks 6/6 conveyors (commands_applied 6->12, tick 5340); 2/2 duo turrets broken (28->30); copper-wall control 6->0; left-tap empty conveyor opens no inventory; left-tap sorter opens block_config 'Sorter'; log errors [].",
+        "2026-10-07T16:09:30+00:00: claimed by oc-163062 for twin (session loop-1)",
+        "2026-10-07T17:28:29+00:00: [verify] twin pass: fresh Godot pid 249867 (HEAD 761a483, libmind_gdext.so inode 55209817): right-press conveyor -> mode=breaking, block_inventory/block_config hidden; full right-drag 6 conveyors y18 -> 0 (commands_applied 18->24); 2 duos -> 0 (28->30); zero-item conveyor left-tap opens no inventory; sorter left-tap opens block_config. Java leg matches (drill with 10 copper: left-tap inventory, right-press breaking, right-drag removed it). Positive stocked-inventory case not exercised in the empty Godot world."
       ],
       "plan": "15",
       "first_seen": "2026-10-06T21:50:14+00:00",
-      "last_verified": "2026-10-06T21:50:14+00:00",
-      "found_by_loop": "7"
+      "last_verified": "2026-10-07T17:28:29+00:00",
+      "found_by_loop": "7",
+      "session": "loop-1"
     },
     {
       "id": "EV-0044",
       "area": "input/command",
       "severity": "S2",
-      "status": "godot-open",
+      "status": "open",
       "title": "Default RTS command-mode toggle (Shift) is inert; command mode is unreachable from the keyboard with default binds",
       "expected": "Java: with no placement block selected and no live boosting player unit, tapping the command-mode key toggles command mode (DesktopInput.java:302-307); command_mode and boost share shiftLeft by default and the tap path is used.",
       "actual": "Godot: with block==null, pressing/releasing Shift leaves command_mode false and fires no action (last_action stays clear_building, action_count unchanged). MindInput.toggle_command_mode() sets it true, and dragging then produces command_rect [80,80,40,24], so only the key path is dead.",
       "repro": "scenario input_controls (Godot leg): Q to clear the placement block, then godot_input key Shift down+up; get_input_state_json().command_mode stays false (compare MindInput.toggle_command_mode() -> true)",
       "evidence": [
-        "runs/l7-20261007-074043-input_controls/godot/rts-evidence.json"
+        "runs/l7-20261007-074043-input_controls/godot/rts-evidence.json",
+        ".opencode/evals/runs/20261008-012127-input_controls-godot/godot/rts-evidence.json,.opencode/evals/runs/20261008-012127-input_controls-godot/report.md,.opencode/evals/runs/20261008-012127-input_controls-godot/godot/log-errors.json,.opencode/evals/runs/20261008-012127-input_controls-godot/godot/step-00-inworld-no-player.png,.opencode/evals/runs/20261008-012127-input_controls-godot/run.json",
+        ".opencode/evals/runs/20261008-020513-input_controls-godot/godot/rts-evidence.json,.opencode/evals/runs/20261008-020513-input_controls-godot/report.md,.opencode/evals/runs/20261008-020513-input_controls-godot/run.json,.opencode/evals/runs/20261008-020513-input_controls-godot/godot/log-errors.json,.opencode/evals/runs/20261008-020513-input_controls-godot/godot/command-mode-on-api.png",
+        ".opencode/evals/runs/20261008-020931-input_controls-twin/godot/rts-evidence.json .opencode/evals/runs/20261008-020931-input_controls-twin/report.md .opencode/evals/runs/20261008-020931-input_controls-twin/run.json .opencode/evals/runs/20261008-020931-input_controls-twin/godot/step-02-command-mode-on-api-fresh-pid245330.png .opencode/evals/runs/20261008-020931-twin-java-ref/java/step-15-pre-shift-baseline.png .opencode/evals/runs/20261008-020931-twin-java-ref/java/step-16-shift-on-drag.png .opencode/evals/runs/20261008-020931-twin-java-ref/java/step-17-command-mode-on.png .opencode/evals/runs/20261008-020931-twin-java-ref/java/step-17b-command-mode-after-move.png"
       ],
       "notes": [
         "key_up_event guards the toggle with ; both binding names resolve to \"shiftLeft\" for the default binds, so the condition is always false. The RTS selection rect itself works once command mode is set via the API.",
         "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/input-controls cfe850f: RTS command mode/selection/orders.",
-        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open"
+        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open",
+        "2026-10-07T15:10:06+00:00: claimed by oc-15672 for writer (session loop-1)",
+        "2026-10-07T15:11:07+00:00: released: orchestrator loop-1: writer not needed; fix commit cfe850f (RTS command mode/selection/orders) is an ancestor of main; handing to godot eval",
+        "2026-10-07T15:20:31+00:00: claimed by oc-35151 for godot-eval (session loop-1)",
+        "2026-10-07T15:25:51+00:00: released: EV-0044 still reproduces at 5f5719d (pid 40194, tick 2029): with block==null in the empty no-player world (all group counts 0), godot_input key Shift down+up leaves command_mode=false with action_count 2 and last_action clear_building unchanged, and Shift held also leaves command_mode false; MindInput.toggle_command_mode() returns true and records action_count 3 / last_action command_mode, so the API path works and the default key path is dead. Q in the same session cleared the block (action_count 1->2, last_action clear_building), proving key injection lands.",
+        "2026-10-07T15:59:38+00:00: claimed by oc-137218 for writer (session loop-1)",
+        "2026-10-07T16:04:39+00:00: [godot-open] commit 761a483: command-mode key tap no longer gated on command_mode != boost; with no placement block selected shiftLeft down+up toggles command_mode (action_count/last_action command_mode), verified in-engine pid 150896 (tap on->off, block-selected tap ignored); boost polling untouched",
+        "2026-10-07T16:04:50+00:00: released: writer commit 761a483 (default Shift tap toggles command mode on key-up when no block selected); handing to godot eval",
+        "2026-10-07T16:04:59+00:00: claimed by oc-153912 for godot-eval (session loop-1)",
+        "2026-10-07T16:07:03+00:00: released: Fresh pid 154315 (HEAD 761a483, rebuilt libmind_gdext.so mtime 02:03:24 < game start 02:05:06) in-engine: Q cleared block (block=null), Shift tap toggled command_mode false->true on release (frames 3453, action_count 2->3, last_action=command_mode), second tap toggled true->false (action_count 4), tap with block=conveyor left command_mode false and action_count unchanged, MindInput.toggle_command_mode() API still toggles; frames advanced 1959->6417 monotonically; error log empty",
+        "2026-10-07T16:09:30+00:00: claimed by oc-163062 for twin (session loop-1)",
+        "2026-10-07T17:28:33+00:00: [verify] twin fail: Java default commandmodehold=true sets commandMode=input.keyDown while Shift is held (on during hold, off on release, no latch; SettingsMenuDialog.java:416, DesktopInput.java:302-307). Godot 761a483 latches command_mode=true on Shift release (desktop.rs:416-425; down edge ignored 474-476) and never consults caps command_mode_hold (default true, caps.rs:149-150). Fresh pid 245330: held Shift -> command_mode=false; release -> true (action_count 3, last_action command_mode); second tap -> false; API toggle works. Implement the hold branch (or gate the existing toggle on command_mode_hold==false)."
       ],
       "plan": "15",
       "first_seen": "2026-10-06T21:50:19+00:00",
-      "last_verified": "2026-10-06T21:50:19+00:00",
+      "last_verified": "2026-10-07T17:28:33+00:00",
       "found_by_loop": "7"
     },
     {
@@ -1442,7 +1497,7 @@
       "id": "EV-0047",
       "area": "game/sim",
       "severity": "S1",
-      "status": "godot-open",
+      "status": "twin-verified",
       "title": "Placed buildings are inert: no mining, transport, crafting, power or block updates",
       "expected": "Logic.java:464 updateEntities updates every entity each tick; BuildingComp.update/updateConsumption drive mining, transport, crafting, power",
       "actual": "Sim::apply(Place) spawns only BuildingComp (sim/mod.rs:249-274); load_sector swaps a raw grid with no BlockTable/behavior (sim_host.rs:918-925); a placed drill/conveyor sets a tile and does nothing (production.rs:237-251)",
@@ -1461,7 +1516,9 @@
         "commit 5a9e9ee",
         "runs/20261007-092013-ev0047-verify/godot/evidence.json",
         "runs/20261007-092013-ev0047-verify/report.md",
-        "runs/20261007-092013-ev0047-verify/godot/step-01-drill-core-tick4962.png"
+        "runs/20261007-092013-ev0047-verify/godot/step-01-drill-core-tick4962.png",
+        "runs/l2-20261008-021834-ev0047-production-godot/report.md, runs/l2-20261008-021834-ev0047-production-godot/run.json, runs/l2-20261008-021834-ev0047-production-godot/evidence/evidence.json, runs/l2-20261008-021834-ev0047-production-godot/evidence/screenshots/step-01-setup-drill-core-tick0.png",
+        "/home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-034337-ev0047-production-twin/godot/state-01-setup-tick0.json /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-034337-ev0047-production-twin/godot/state-02-tick120.json /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-034337-ev0047-production-twin/godot/state-03-tick182.json /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-034337-ev0047-production-twin/godot/state-04-tick183.json /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-034337-ev0047-production-twin/godot/state-05-replay-a.json /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-034337-ev0047-production-twin/godot/state-06-replay-b.json /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-034337-ev0047-production-twin/godot/state-07-clean-run.json /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-034337-ev0047-production-twin/godot/map-probe.json /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-034337-ev0047-production-twin/godot/step-01-setup-drill-core-tick0.png /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-034337-ev0047-production-twin/godot/step-02-first-copper-tick183.png /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-034337-ev0047-production-twin/java/reused-reference.md"
       ],
       "notes": [
         "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
@@ -1476,12 +1533,20 @@
         "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open",
         "2026-10-07T14:05:56+00:00: migrated: cleared legacy claim (fix-game-oc-4734)",
         "2026-10-07T14:22:07+00:00: claimed by oc-9203 for writer (session loop-1)",
-        "2026-10-07T14:35:15+00:00: reaped stale claim (oc-9203, was godot-open); restored godot-open"
+        "2026-10-07T14:35:15+00:00: reaped stale claim (oc-9203, was godot-open); restored godot-open",
+        "2026-10-07T15:11:10+00:00: released: orchestrator loop-1 re-home: fix commit 2ff52e5 (overlay ore + transfer::offload) exists only on parity/loop-2; main's production.rs has no offload seam. Loop-1 cannot verify; released for a session whose worktree contains the fix (loop-2).",
+        "2026-10-07T15:37:55+00:00: claimed by oc-70104 for writer (session loop-2)",
+        "2026-10-07T16:14:29+00:00: [godot-open] commit 2ff52e5 (pre-exists on parity/loop-2, ancestor of HEAD 9efd068; not on main): count_ore takes the overlay drop first (Tile.drop) so MSAV Ground Zero ore is mined, and drill/crafter/separator outputs route through transfer::offload plus the timerDump dump (Block.dumpTime). Verified on loop-2: cargo test -p mind-core -> 1800 passed/0 failed; cargo test -p mind-core --features msav-import -> 1804 passed/0 failed, incl. ground_zero_drill_feeds_the_materialized_core (evaluator repro at core level: Ground Zero overlay ore + placed mechanical-drill feeds an adjacent core) and drill_offloads_to_adjacent_core.",
+        "2026-10-07T16:14:39+00:00: released: writer commit 2ff52e5 (pre-existing on parity/loop-2); narrow checks green; handing to godot eval",
+        "2026-10-07T16:14:49+00:00: claimed by oc-175926 for godot-eval (session loop-2)",
+        "2026-10-07T16:25:14+00:00: released: Fresh Ground Zero (serpulo:15, no save) on 9efd068 / lib sha 84069d3451ebeb11, game pid 182200: placed mechanical-drill (id 61) on a 2x2 overlay ore-copper footprint (129-130,48-49) edge-adjacent to a placed core-shard (id 62, 129-131,45-47) mines and delivers copper into the core \u2014 core_items_json {} -> {\"copper\":1} with first delivery at exactly tick 183 (empty at 182), reproduced bit-identically on fresh replays (checksum 058849b733bc6720 at tick 183 twice). step() advances exactly, no [E]/[W] entries after log clear. Timing caveat: the repro's 120-tick sample is still {} because the mechanical drill's upstream rate (Blocks.java:2887 drillTime=600 over 4 ore tiles + warmup) cannot produce before ~tick 150; pre-fix the same probe was {} through tick 4962 (runs/20261007-092013-ev0047-verify), so the fix is confirmed. Power side probe: laser-drill + 2 solar panels form one graph (satisfaction 0 -> 0.218 by tick 120; map-start day ramp).",
+        "2026-10-07T17:42:38+00:00: claimed by oc-270074 for twin (session loop-2)",
+        "2026-10-07T17:47:14+00:00: [verify] twin match (loop-2, 2nd sweep), Godot fresh pid 267163 @ 9efd068/lib 84069d3451ebeb11: fresh Ground Zero (no sector save) tick0 checksum b602699c5275bc47; broke map core, placed mechanical-drill build_id 61 on 4 overlay ore-copper tiles (129-130,48-49) + core-shard build_id 62 (129-131,45-47) edge-adjacent; exact repro step(120) -> {} checksum f30fce5874983643; continuing run {} at tick 182 (7497558d805cde67) and {\"copper\":1} first at tick 183 (058849b733bc6720); two independent fresh replays of load+setup+step(183) -> identical checksum 058849b733bc6720 and inventory; clean sequence after log clear -> [E]/[W] empty. Java reference (reused fresh runs/l2-20261007-163042-twin-java-ref, pid 211508) covers fresh Ground Zero launch + core + tutorial manual mining/research but has NO placed-drill capture (first sweep placement click did not land); this session cannot add one blind (model cannot accept images, tesseract absent -> OS-driven Java client cannot be driven to a blind block placement or read back) \u2014 explicit partial, not a silent claim. Map probe of the same asset at tick 0: Ground Zero's only machinery is the derelict outpost (drill build_id 39 at 172-173,163 + conveyor at 171,163), >100 tiles from the player core (128-130,54-56), nothing feeds it; the placed-drill expected behavior is observed fresh in Godot."
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
-      "last_verified": "2026-10-07T14:22:07+00:00",
-      "session": "loop-1"
+      "last_verified": "2026-10-07T17:47:14+00:00",
+      "session": "loop-2"
     },
     {
       "id": "EV-0048",
@@ -1509,17 +1574,19 @@
         "2026-10-07T11:30:46+00:00: claimed by fix-game-oc-4734 for fix",
         "2026-10-07T11:31:00+00:00: released: Re-released; blocker unchanged (umbrella live-unit runtime needs its own finding split). Excluded from this session's claim loop.",
         "2026-10-07T12:11:15+00:00: claimed by fix-game-sim-oc-4734 for fix",
-        "2026-10-07T12:12:23+00:00: released: Blocked: umbrella feature, not a finding-scoped fix. Verified no live unit runtime exists: sim/schedule.rs registers no system in EntitySet::UpdateUnits/UpdateBullets/CollideBullets/PhysicsUnits or TickSet::WaveTimer/RunWave; Sim::group_counts hardcodes unit/bullet 0 (sim/mod.rs:407-409); ai/harness.rs UnitHarness + combat/harness.rs run on a separate BuildHarness world and are not reachable from Sim; sim/runtime.rs owns only the block runtime. Closing the repro (run_wave -> units spawning/moving/fighting with live bullets) requires new sim integration: UnitRuntime resource (units/pathfinder/rng/bullets/spawner), schedule systems for physics+AI+weapons+collision, wave timer/run-wave driver wired to campaign Session, spawn-overlay extraction at sector launch, team-stats/group_counts/checksum integration, and mind-gdext install on launch. Needs the identifier to split EV-0048 into child findings (e.g. live wave spawn driver, live unit AI/movement, live weapons/bullets/collision, runtime group/checksum surfaces). Excluded from this session's fix claim loop."
+        "2026-10-07T12:12:23+00:00: released: Blocked: umbrella feature, not a finding-scoped fix. Verified no live unit runtime exists: sim/schedule.rs registers no system in EntitySet::UpdateUnits/UpdateBullets/CollideBullets/PhysicsUnits or TickSet::WaveTimer/RunWave; Sim::group_counts hardcodes unit/bullet 0 (sim/mod.rs:407-409); ai/harness.rs UnitHarness + combat/harness.rs run on a separate BuildHarness world and are not reachable from Sim; sim/runtime.rs owns only the block runtime. Closing the repro (run_wave -> units spawning/moving/fighting with live bullets) requires new sim integration: UnitRuntime resource (units/pathfinder/rng/bullets/spawner), schedule systems for physics+AI+weapons+collision, wave timer/run-wave driver wired to campaign Session, spawn-overlay extraction at sector launch, team-stats/group_counts/checksum integration, and mind-gdext install on launch. Needs the identifier to split EV-0048 into child findings (e.g. live wave spawn driver, live unit AI/movement, live weapons/bullets/collision, runtime group/checksum surfaces). Excluded from this session's fix claim loop.",
+        "2026-10-07T14:53:35+00:00: claimed by oc-6651 for writer (session loop-2)",
+        "2026-10-07T14:58:23+00:00: released: writer blocker (no commit): umbrella feature, independently re-verified. sim/schedule.rs:346-425 registers no UpdateUnits/UpdateBullets/CollideBullets/PhysicsUnits/WaveTimer/RunWave system; sim/mod.rs:390-417 group_counts hardcodes unit:0 bullet:0; Sim has no unit/bullet runtime resource; ai/harness.rs:33 + combat/harness.rs:29 run on a private BuildHarness world unreachable from Sim; ai/wave_spawner.rs has no live caller; game/runtime.rs:189-204 wave timer only increments. Needs identifier split into child findings (live wave-spawn driver; live unit physics/AI/movement; live weapons/bullets/collision; runtime group/checksum surfaces). cargo test -p mind-core sim: 74 passed, baseline green."
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
-      "last_verified": "2026-10-07T12:12:23+00:00"
+      "last_verified": "2026-10-07T14:58:23+00:00"
     },
     {
       "id": "EV-0049",
       "area": "game/campaign",
       "severity": "S2",
-      "status": "godot-open",
+      "status": "twin-verified",
       "title": "Launch ignores the sector preset rules: waves stay off and winWave stays 0",
       "expected": "World.java:266,292,299-330 setSectorRules applies the preset rules and planet.applyRules; Control.java:569-601 playNewSector carries params (captureWave -> winWave)",
       "actual": "campaign.rs:124-155 calls play_new_sector with default Rules; play.rs:269 only sets rules.sector; the preset capture_wave is stored at planet.rs:156 but never applied; defaults are waves=false/win_wave=0 (rules.rs:665,723)",
@@ -1534,7 +1601,9 @@
         "client/rust/mind-core/src/io/json/rules.rs:665",
         "client/rust/mind-core/src/io/json/rules.rs:723",
         "../Mindustry/core/src/mindustry/core/World.java:266",
-        "../Mindustry/core/src/mindustry/core/Control.java:569-601"
+        "../Mindustry/core/src/mindustry/core/Control.java:569-601",
+        ".opencode/evals/runs/20261007-152746-ev0049-campaign-preset-rules-godot/run.json .opencode/evals/runs/20261007-152746-ev0049-campaign-preset-rules-godot/report.md .opencode/evals/runs/20261007-152746-ev0049-campaign-preset-rules-godot/rules_after_start_sector.json .opencode/evals/runs/20261007-152746-ev0049-campaign-preset-rules-godot/shot_run2_post_start_sector.png .opencode/evals/runs/20261007-152746-ev0049-campaign-preset-rules-godot/crash-report-run2-01_29_33.txt .opencode/evals/runs/20261007-152746-ev0049-campaign-preset-rules-godot/editor.log",
+        ".opencode/evals/runs/20261008-020931-ev0049-campaign-preset-rules-twin/godot/ev0049-rules-evidence.json .opencode/evals/runs/20261008-020931-ev0049-campaign-preset-rules-twin/report.md .opencode/evals/runs/20261008-020931-ev0049-campaign-preset-rules-twin/run.json .opencode/evals/runs/20261008-020931-ev0049-campaign-preset-rules-twin/java/live-save-sector-serpulo-170.msav .opencode/evals/runs/20261008-020931-ev0049-campaign-preset-rules-twin/java/live-save-rules-extract.json .opencode/evals/runs/20261008-020931-ev0049-campaign-preset-rules-twin/godot/step-01-sector-launched-pid249867.png .opencode/evals/runs/20261008-020931-ev0049-campaign-preset-rules-twin/godot/EV-0061-crash-report.txt"
       ],
       "notes": [
         "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
@@ -1542,11 +1611,18 @@
         "2026-10-07T04:42:54+00:00: migrated status in-progress -> needs-evaluation",
         "2026-10-07T04:42:54+00:00: reaped stale claim (loop-3, was needs-evaluation); restored needs-evaluation",
         "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed parity/loop-3 9f5f90d (3aa171d) superseded by agent/campaign-spine apply_sector_preset_rules.",
-        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open"
+        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open",
+        "2026-10-07T15:10:06+00:00: claimed by oc-15672 for writer (session loop-1)",
+        "2026-10-07T15:11:07+00:00: released: orchestrator loop-1: writer not needed; fix commits 9f5f90d/3aa171d (apply_sector_preset_rules) are ancestors of main; handing to godot eval",
+        "2026-10-07T15:26:31+00:00: claimed by oc-46055 for godot-eval (session loop-1)",
+        "2026-10-07T15:30:41+00:00: released: Fresh in-engine repro at HEAD 5f5719d, pid 50912 (run2; run1 pid 47764 corroborates): load_sector('serpulo',15)+start_sector('serpulo',15) -> true; MindCampaign.get_rules_json() = waves=true, winWave=10 (= groundZero preset captureWave 10), attackMode=false, sector 'serpulo-15', planet 'serpulo', lighting=false, 5 preset spawns; identical on re-read before/after the pre-existing EV-0061 game-over panic and across both fresh instances. The finding's waves=false/win_wave=0 symptom does not reproduce; preset rules are applied (captureWave -> winWave). Run error entries belong to open EV-0037/EV-0061 (main lacks core materialization and the EV-0061 fix), not to the rules path.",
+        "2026-10-07T17:26:39+00:00: claimed by oc-254814 for twin (session loop-1)",
+        "2026-10-07T17:28:37+00:00: [verify] twin pass: fresh pid 249867 (HEAD 761a483): load_sector('serpulo',15) -> true, tick 0; start_sector('serpulo',15) -> true; get_rules_json = waves=true, winWave=10 (= groundZero preset captureWave 10), attackMode=false, sector 'serpulo-15', planet 'serpulo', lighting=false; identical re-read after the EV-0061 panic. Java live Ground Zero save shows waves:true, winWave:10 (sector-serpulo-170). Godot stores the groundZero preset at serpulo 15 (registries/sectors.rs:324-337) while upstream preset id is 170 (presets.groundZero=170) - internal id remap, player-visible rules match. Waves=false/win_wave=0 symptom does not reproduce."
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
-      "last_verified": "2026-10-07T02:57:00+00:00"
+      "last_verified": "2026-10-07T17:28:37+00:00",
+      "session": "loop-1"
     },
     {
       "id": "EV-0050",
@@ -1612,7 +1688,7 @@
       "id": "EV-0052",
       "area": "game/campaign",
       "severity": "S1",
-      "status": "godot-open",
+      "status": "twin-verified",
       "title": "Research purchase is a dead signal: clicking a locked ready node never unlocks it",
       "expected": "ResearchDialog.java:484-486 canSpend/locked -> spend(node), :567-625 removes items, finishes requirements, unlocks + ResearchEvent; Control.java:350-358 checkAutoUnlocks",
       "actual": "research_dialog.gd:13,90,103-104 emits research_requested with no listener; campaign.rs:238-272 spends from a fresh empty inventory; tech_tree.rs:243-248 returns Ok with complete=false, so research() reports success and nothing unlocks",
@@ -1630,7 +1706,9 @@
         "runs/20261007-105510-ev0052-research-purchase/report.md",
         "runs/20261007-105510-ev0052-research-purchase/godot/state-01-before-click.json",
         "runs/20261007-105510-ev0052-research-purchase/godot/state-02-after-click.json",
-        "runs/20261007-105510-ev0052-research-purchase/godot/state-03-launch-probe.json"
+        "runs/20261007-105510-ev0052-research-purchase/godot/state-03-launch-probe.json",
+        "runs/l2-20261008-012103-ev0052-research-purchase-godot/report.md runs/l2-20261008-012103-ev0052-research-purchase-godot/run.json runs/l2-20261008-012103-ev0052-research-purchase-godot/godot/state-01-before-click.json runs/l2-20261008-012103-ev0052-research-purchase-godot/godot/state-02-after-click.json runs/l2-20261008-012103-ev0052-research-purchase-godot/godot/game.log",
+        "/home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261007-171145-ev0052-research-twin/godot/state-01-purchase.json, /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261007-171145-ev0052-research-twin/godot/step-02-research-after-purchase.png, /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261007-171145-ev0052-research-twin/java/step-08-research-before.png, /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261007-171145-ev0052-research-twin/java/step-09-research-after.png, /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261007-171145-ev0052-research-twin/java/step-10-research-unlocked.png"
       ],
       "notes": [
         "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
@@ -1642,11 +1720,18 @@
         "2026-10-07T11:31:00+00:00: claimed by fix-game-oc-4734 for fix",
         "2026-10-07T11:46:02+00:00: [needs-evaluation] commit 9b9f69a: BlockSpec always_unlocked ported for the 12 upstream alwaysUnlocked blocks (core-shard root now unlocked at boot); launch loadout written to the live core module (Logic.play clear+stock); research() aggregates and debits the played sector's core module via MindSimHost player_core_items/remove_player_core_items (Sector.items -> Team.items), keeping sector storage for non-played sectors; tech/UI harness goldens re-recorded",
         "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open",
-        "2026-10-07T14:05:56+00:00: migrated: cleared legacy claim (fix-game-oc-4734)"
+        "2026-10-07T14:05:56+00:00: migrated: cleared legacy claim (fix-game-oc-4734)",
+        "2026-10-07T14:53:35+00:00: claimed by oc-6651 for writer (session loop-2)",
+        "2026-10-07T15:02:45+00:00: reaped stale claim (oc-6651, was godot-open); restored godot-open",
+        "2026-10-07T15:05:12+00:00: claimed by oc-3238 for godot-eval (session loop-2)",
+        "2026-10-07T15:23:47+00:00: released: Ground Zero (preset sector 15) launched with loadout [{copper:500},{lead:500}] -> hasCore=true, live core_items {copper:500,lead:500} (pid 32663). Opened research, selected the locked-root rail entry, pressed locked+ready node 'conveyor' (hover-confirmed button, discrete press/release + flush): get_tech_state().unlocked 9 -> 70 (conveyor + 60 auto-unlocks; log 'research auto-unlocked 60 content'), core copper 500 -> 495 (conveyor research_cost). Row rebuilt (button id changed); no [E] logs. Commit 9efd068, lib sha256 84069d3451ebeb11. Note: dialog rows still show the frozen fixture (EV-0051); sort_now nudge needed after root switch (UI defect, out of scope).",
+        "2026-10-07T17:11:45+00:00: claimed by oc-237339 for twin (session loop-2)",
+        "2026-10-07T17:26:53+00:00: [verify] Twin run: Java (pid 211508) Ground Zero live tree showed Mechanical Drill locked 'Copper 0/10'; after manual mining (core 364 copper) the node click debited exactly 10 (364->354) and re-rendered it as 'Researched' with children revealed. Godot exact repro on fresh profile pid 248258 (9 unlocked baseline): load_sector(serpulo,15)+start_sector_with_loadout -> core {copper:500,lead:500}, hasCore; hover-confirmed click on locked+ready 'Conveyor' (id 329638750636) -> unlocked 9->70, core copper 500->495 (conveyor cost 5), row rebuilt, log '[I] research auto-unlocked 60 content'; no errors."
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
-      "last_verified": "2026-10-07T11:31:00+00:00"
+      "last_verified": "2026-10-07T17:26:53+00:00",
+      "session": "loop-2"
     },
     {
       "id": "EV-0053",
@@ -1680,7 +1765,7 @@
       "id": "EV-0054",
       "area": "ui/dialogs",
       "severity": "S1",
-      "status": "godot-open",
+      "status": "twin-verified",
       "title": "Load Game is permanently empty: no slot list is produced and no card can load",
       "expected": "LoadDialog.java:92 lists control.saves.getSaveSlots(), :224-268 runLoadSave -> slot.cautiousLoad()/load; Saves.java:314-328 restores",
       "actual": "menu_fragment.gd:38,318 opens load with an empty context; load_dialog.gd:97 reads a slots context never produced; slot_selected :219-220 is unconnected; saves.rs load/load_slot have no client caller",
@@ -1694,18 +1779,27 @@
         "client/rust/mind-core/src/game/saves.rs:104-122",
         "../Mindustry/core/src/mindustry/ui/dialogs/LoadDialog.java:92",
         "../Mindustry/core/src/mindustry/ui/dialogs/LoadDialog.java:224-268",
-        "../Mindustry/core/src/mindustry/game/Saves.java:314-328"
+        "../Mindustry/core/src/mindustry/game/Saves.java:314-328",
+        "/home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-012632-ev0054-load-game-godot/report.md /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-012632-ev0054-load-game-godot/run.json /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-012632-ev0054-load-game-godot/godot/state-04-dialog.json /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-012632-ev0054-load-game-godot/godot/state-05-click.json /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-012632-ev0054-load-game-godot/godot/state-06-loaded.json /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-012632-ev0054-load-game-godot/godot/step-02-load-dialog.png",
+        "/home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-034014-ev0054-load-game-twin/godot/state-04-dialog.json /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-034014-ev0054-load-game-twin/godot/state-05-click.json /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-034014-ev0054-load-game-twin/godot/state-06-loaded.json /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-034014-ev0054-load-game-twin/godot/step-02-load-dialog.png /home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-034014-ev0054-load-game-twin/diff/java-step01-vs-step02.json"
       ],
       "notes": [
         "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
         "2026-10-07T11:05:30+00:00: claimed by fix-ui-oc-4734 for fix",
         "2026-10-07T11:08:26+00:00: [needs-evaluation] commit 8a4da53: load_dialog refreshes the live MindCampaign.list_save_slots listing on open (context slots still win), hides sector saves (SaveSlot.isHidden), and a card click queues MindCampaign.load_slot(file stem); ui_widgets_check covers listing + click-to-load",
         "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open",
-        "2026-10-07T14:05:56+00:00: migrated: cleared legacy claim (fix-ui-oc-4734)"
+        "2026-10-07T14:05:56+00:00: migrated: cleared legacy claim (fix-ui-oc-4734)",
+        "2026-10-07T14:53:35+00:00: claimed by oc-6651 for writer (session loop-2)",
+        "2026-10-07T15:02:45+00:00: reaped stale claim (oc-6651, was godot-open); restored godot-open",
+        "2026-10-07T15:24:19+00:00: claimed by oc-42398 for godot-eval (session loop-2)",
+        "2026-10-07T15:36:53+00:00: released: Fresh in-engine repro pid 56232 @ HEAD 9efd068, writer 8a4da53, lib sha 84069d3451ebeb11: menu > Play > Load Game (real rect-resolved clicks) opened DialogLayer/load, whose _slots came from the live MindCampaign.list_save_slots (2 non-sector slots: l2ev54.msav created through MindCampaign.save_slot, plus the existing sector-serpulo-15 fixture) and rendered 2 card Buttons with no @save.none empty label; a real click on card 0 at (294,168) queued MindCampaign.load_slot (io_pending 0->1) and closed the dialog; step(120) drained pending 1->0 and restored the saved world (32x32, single stone-wall at (5,4); the (10,10) mutation tile is gone). No [E] log entries in the clean run.",
+        "2026-10-07T17:40:05+00:00: claimed by oc-266918 for twin (session loop-2)",
+        "2026-10-07T17:42:10+00:00: [verify] twin match (loop-2, 2nd sweep): Godot fresh pid 267163 @ 9efd068/lib 84069d3451ebeb11 \u2014 menu > Play > Load Game listed the live slot list (own slot l2ev54b created via MindCampaign.save_slot + pre-existing sector-serpulo-15 fixture): 2 card Buttons, 0 @save.none labels; rect-resolved click on card 0 (294,168) queued MindCampaign.load_slot (io_pending 0->1) and closed the dialog; step(120) drained 1->0 and restored the saved world (32x32, single stone-wall (5,4); the (10,10) mutation gone). Java reference reused from fresh runs/l2-20261007-163042-twin-java-ref (pid 211508): empty -> live card -> click loads; numeric re-check non-blank + 40.4%/67.2% changed-pixel diffs. No [E]/[W] log entries."
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
-      "last_verified": "2026-10-07T11:05:30+00:00"
+      "last_verified": "2026-10-07T17:42:10+00:00",
+      "session": "loop-2"
     },
     {
       "id": "EV-0055",
