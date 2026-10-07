@@ -13,10 +13,12 @@ Interactive (recommended — you can watch and intervene):
 2. Paste this prompt:
 
    > Read `25_PARITY_PLAN.md`. Run the next unfinished milestone in order.
-   > Use the `evaluator` subagent for all in-engine evaluation, and record
-   > findings in `.opencode/evals/findings.json`. Fix one `EV-####` at a time
-   > and have the evaluator re-verify the exact repro before moving on. Stop
-   > after the session budget in §6 and report where you stopped.
+   > Use the `gap-identifier` subagent for code-level gap discovery and
+   > code-verification, and record findings in
+   > `.opencode/evals/findings.json`. Fix one `EV-####` at a time; once the fix
+   > is committed and code-verified, have the `evaluator` subagent re-verify the
+   > exact repro in-engine. Stop after the session budget in §6 and report
+   > where you stopped.
 
 Non-interactive:
 
@@ -28,28 +30,42 @@ The loop primitives this plan orchestrates:
 
 | Entry point | Half | What it does |
 |---|---|---|
-| `/parity-eval [scope]` | evaluate | Twin-run the Java reference and the Godot client, record evidenced gaps, update the ledger. |
-| `/parity-loop [scope]` | fix + verify | Evaluate if needed, fix the top `EV-####`, then have the evaluator re-verify that exact repro. One finding per run. |
+| `/parity-gap [scope]` | identify | Fan out code-only `gap-identifier` agents over disjoint areas; add code-sourced candidates to the ledger. |
+| `/parity-eval [scope]` | final verify | Twin-run the Java reference and the Godot client; the only path to `verified-fixed`. |
+| `/parity-loop [scope]` | fix + verify | Gap-identify if needed, fix the top `EV-####`, code-verify the diff, then have the evaluator re-verify that exact repro in-engine. One finding per run. |
 
 ## 2. Roles and contracts
 
 | Role | Who | Writes | Never |
 |---|---|---|---|
-| Evaluator | `evaluator` subagent (`.opencode/agent/evaluator.md`) | `.opencode/evals/**` only | game code, tests, scenes, config |
+| Gap identifier | `gap-identifier` subagent (`.opencode/agent/gap-identifier.md`) | `.opencode/evals/**`, `.opencode/chains/**` | game code, tests, scenes, config; `verified-fixed` |
+| Evaluator | `evaluator` subagent (`.opencode/agent/evaluator.md`) | `.opencode/evals/**`, `.opencode/chains/**` | game code, tests, scenes, config |
 | Implementer | the primary session agent | game code + tests | the ledger (claims fixes in commit messages as `Fixes EV-####`) |
 
-- **Evidence or it did not happen.** Every finding points at a screenshot, state
-  JSON, log excerpt or checksum under its run directory.
-- **Only the evaluator marks `verified-fixed`**, and only after re-running the
-  finding's exact repro in a fresh engine run.
+- **Evidence matches the source.** A code-sourced candidate points at
+  `../Mindustry` and `client/` file:line pairs plus a repro sketch; an
+  engine-sourced finding points at a screenshot, state JSON, log excerpt or
+  checksum under its run directory.
+- **Two-stage verdicts.** The gap identifier marks `code-verified` after
+  reading the fix diff; **only the evaluator marks `verified-fixed`**, and only
+  after re-running the finding's exact repro in a fresh engine run.
 - **Docs are claims.** `parity/system_checklist.md`, `parity/reports/gate_*.json`
-  and READMEs are inputs to decide where to look, never proof of parity.
-- One game client at a time: Java leg first, quit it, then the Godot leg.
+  and READMEs are inputs to decide where to look, never proof of parity. The
+  code-audit inventory under `.opencode/evals/` is seed material, not truth.
+- **MCP is a capped, shared resource.** At most `MCP_SLOT_LIMIT` (default 2)
+  agents drive MCP at once through
+  `.opencode/skills/parity-eval/scripts/mcp_slot.py`; a further caller stays
+  code-only. The two slots are what the loops and their evaluator legs share.
+  computer-mcp additionally needs `DISPLAY` at opencode process start. Within
+  one loop, one game client at a time: Java leg first, quit it, then the Godot
+  leg.
 
 Read `.opencode/skills/parity-eval/SKILL.md` for the full protocol and
 `.opencode/skills/playtest/SKILL.md` for the Godot MCP launch flow, node map and
 host gotchas (input flush fallback, screenshot staleness, `godot` binary name).
-Do not duplicate those recipes in this plan.
+Project-specific MCP call sequences live in `.opencode/chains/`; consult the
+matching chain before composing calls. Do not duplicate those recipes in this
+plan.
 
 ## 3. Milestone 0 — bring-up (do this once)
 
@@ -59,6 +75,9 @@ Do not duplicate those recipes in this plan.
 | Rust client built | `tools/build.sh` produces `client/bin/rust/debug/libmind_gdext.so` | [x] |
 | Java reference built | `../Mindustry/desktop/build/libs/Mindustry.jar` exists | [x] |
 | Editor + bridge | launch editor, `godot_health check` → `bridge_connected: true`; `godot_editor_read state` → project is Mindustry-Godot | [x] |
+| computer-mcp registered | opencode has `computer-mcp_*` tools; `DISPLAY` set at process start (session env or global config `environment`) | [x] |
+| MCP slots | `python3 .opencode/skills/parity-eval/scripts/mcp_slot.py status` → `limit: 3`, free slots; leases never stale in the registry | [x] |
+| Chains ledger | `.opencode/chains/` present and reachable from the playtest skill | [x] |
 | First twin-run | `/parity-eval boot_menu` writes a report and the ledger's first records | [x] |
 
 M0 exit: the `boot_menu` report exists with non-blank captures from both legs,
@@ -80,11 +99,13 @@ queue. Scenario ids come from `.opencode/skills/parity-eval/SKILL.md` §7 and
 
 ## 5. Per-finding loop
 
-1. **Evaluate** the milestone scope with the `evaluator` subagent (Java leg
-   first, then Godot). It writes `runs/<stamp>-<scenario>/report.md` and adds
-   `EV-####` records.
-2. **Pick one**: `python3 .opencode/skills/parity-eval/scripts/record_finding.py list --status open`
-   — highest severity, oldest first, scoped to the current milestone.
+1. **Gap-identify** the milestone scope with the `gap-identifier` subagent,
+   code-only: compare `../Mindustry` with `client/`, add `EV-####` candidates
+   (`--source code`) with file:line evidence and a repro sketch, and dedupe
+   against the ledger and the code-audit inventory. No engine run.
+2. **Pick one**: `python3 .opencode/skills/parity-eval/scripts/record_finding.py claim
+   --owner "loop-${PARITY_LOOP:-1}"` — highest severity, oldest first, scoped
+   to the current milestone.
 3. **Fix it** following the nearest `AGENTS.md`; smallest change that restores
    the expected behavior, plus the smallest test that would have caught it.
    Parity-pinned ABI (content ids, checksums, sprite names) is append-only.
@@ -92,33 +113,53 @@ queue. Scenario ids come from `.opencode/skills/parity-eval/SKILL.md` §7 and
    `tools/ci.sh` for cross-cutting).
 5. **Claim it** in the commit message (`Fixes EV-0001`). Parity fix commits are
    pre-authorized: commit each verified fix directly without asking, and never push.
-6. **Re-verify**: evaluator re-runs the finding's exact repro and updates the
-   ledger to `verified-fixed` (or `regression`). No claim without a fresh repro.
-7. Repeat from §5.2 until the milestone exit criteria hold.
+6. **Code-verify**: the gap identifier re-reads the fix diff against upstream
+   behavior and marks `code-verified` — or releases the finding with the exact
+   reason the diff does not close the gap.
+7. **Final verify**: only when the fix is committed and `code-verified`, the
+   evaluator re-runs the finding's exact repro and updates the ledger to
+   `verified-fixed` (or `regression`). No claim without a fresh repro. Batch
+   only findings whose repro shares one scenario/state.
+8. Repeat from §5.2 until the milestone exit criteria hold.
 
-`/parity-loop` automates steps 1–6 for one finding. `wontfix` requires a note
-saying why (upstream deviation accepted, platform limitation, duplicate).
+`/parity-gap` fans step 1 out over areas; `/parity-loop` automates steps 1–7 for
+one finding; `/parity-eval` is the final-verification half alone. `wontfix`
+requires a note saying why (upstream deviation accepted, platform limitation,
+duplicate, or the code reading shows the gap is closed).
 
 ## 6. Session budget and stop conditions
 
-- Run up to **three parallel loops** with disjoint scopes
-  (`.opencode/loops/`, `/parity-parallel`). Each loop evaluates at most
-  **3 scenarios** and completes at most **5 fix/verify iterations** per
-  session; then provide a continuation prompt so the task can be handed off in
-  a new session and stop. Quality over throughput; every claim must survive
-  re-verification.
-- Stop immediately on: MCP bridge down, missing display/Java, a corrupted
-  ledger, or an evaluator/fixer deadlock (two rounds without new evidence).
+- **Wave model.** Gap scans and code-verification are code-only and cheap: run
+  many `gap-identifier` agents in parallel (disjoint areas, shared ledger).
+  Fixing scales per worktree. In-engine verification is display-bound and is
+  the scarce stage — keep it to **three parallel loops**
+  (`.opencode/loops/`, `/parity-parallel`) and batch findings that share one
+  scenario into a single engine run.
+- **MCP cap.** Every agent that uses MCP takes a lease first
+  (`.opencode/skills/parity-eval/scripts/mcp_slot.py`, `MCP_SLOT_LIMIT` default
+  2); the next caller stays code-only. computer-mcp additionally needs
+  `DISPLAY` at opencode process start.
+- Each loop evaluates at most **3 scenarios** and completes at most **5
+  fix/verify iterations** per session; then provide a continuation prompt so
+  the task can be handed off in a new session and stop. Quality over
+  throughput; every claim must survive re-verification.
+- Stop immediately on: MCP bridge down, missing `computer-mcp_*` tools
+  (displayless launch), missing display/Java, a corrupted ledger, a stale or
+  corrupt MCP slot registry, or an evaluator/fixer deadlock (two rounds without
+  new evidence).
 - Never leave a finding half-claimed: if the fix is unverified, say so in the
-  summary; the ledger stays `open`/`in-progress`.
-- Resume by reading `record_finding.py summary`, the open S1/S2 list, and the
-  newest run directory. The first unfinished milestone in §4 is the queue.
+  summary; the ledger stays `open`/`code-verified`/`in-progress`.
+- Resume by reading `record_finding.py summary`, the open S1/S2 list, the
+  `code-verified` final-verify queue, and the newest run directory. The first
+  unfinished milestone in §4 is the queue.
 
 ## 7. Exit criteria (campaign complete)
 
 - Every §4 scenario has a run report (parity, gaps, or explicitly blocked with
   the blocker recorded).
-- No `open` S1/S2 findings; S3/S4 are `verified-fixed` or `wontfix` with notes.
+- No `open`/`code-verified` S1/S2 findings; S3/S4 are `verified-fixed` or
+  `wontfix` with notes. `code-verified` alone does not close a finding — the
+  evaluator's in-engine verdict does.
 - `tools/ci.sh` is green at the tip, and `parity/system_checklist.md` is
   updated from in-engine evidence, not from code inspection.
 
@@ -132,3 +173,8 @@ saying why (upstream deviation accepted, platform limitation, duplicate).
 | M3 building & economy | not-started | — | — | |
 | M4 combat, units, logic | not-started | — | — | |
 | M5 breadth & platform | not-started | — | — | |
+
+Seed queue: `EV-0046`…`EV-0060` are code-sourced candidates from the 2026-10-06
+code-audit inventory (campaign spine, HUD, input, saves, content, multiplayer).
+None are engine-verified yet; the fix queue is `record_finding.py list --status
+open`, severity first.

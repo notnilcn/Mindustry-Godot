@@ -28,7 +28,7 @@ you are about to touch.
 | `bench/` | Recorded performance baselines (`baselines.json`, `editor_baseline.json`). |
 | `docs/` | Operator-facing platform and packaging notes. |
 | `.github/workflows/` | `ci.yml` (push/PR gate) and `parity-nightly.yml`. |
-| `.opencode/` | Agent workflow: `agent/evaluator.md`, `command/parity-eval.md`, `command/parity-loop.md`, `evals/` (gap ledger + run artifacts), and the `skills/playtest` + `skills/parity-eval` skills. |
+| `.opencode/` | Agent workflow: `agent/{gap-identifier,evaluator}.md`, `command/{parity-gap,parity-eval,parity-loop,parity-parallel}.md`, `chains/` (project MCP call sequences), `plugin/` (MCP slot guard), `evals/` (gap ledger + run artifacts), and the `skills/playtest` + `skills/parity-eval` skills. |
 
 ## Documentation map
 
@@ -69,23 +69,31 @@ relative `cargo` commands below.
 
 ## Parity feedback loop
 
-Player-visible parity is evaluated in-engine, not asserted from docs. The loop:
+Player-visible parity is verified in-engine, not asserted from docs. The loop:
 
-1. The `evaluator` subagent (`.opencode/agent/evaluator.md`) drives the Java
-   reference with computer-mcp and the Godot client with open-godot-mcp,
-   compares against the committed goldens and each other, and records one
-   player-visible gap per finding in `.opencode/evals/findings.json` with
-   screenshot/state/log evidence.
+1. The `gap-identifier` subagent (`.opencode/agent/gap-identifier.md`) compares
+   the port under `client/` against `../Mindustry` and records code-sourced
+   candidates in `.opencode/evals/findings.json` (`add --source code`) with
+   file:line evidence on both sides and a repro sketch. This stage is cheap and
+   runs in parallel across areas.
 2. Implementers read the ledger, fix one `EV-####` at a time in game code, and
-   claim it in the commit message (`Fixes EV-0001`). Only the evaluator writes
-   the ledger and only the evaluator marks a finding `verified-fixed`, after
-   re-running the exact repro.
-3. `/parity-eval` runs the evaluation half; `/parity-loop` drives one
-   evaluate → fix → verify iteration. Run reports live under
-   `.opencode/evals/runs/` (local evidence, not committed).
+   claim it in the commit message (`Fixes EV-0001`). The gap identifier then
+   re-reads the diff and marks it `code-verified`.
+3. The `evaluator` subagent (`.opencode/agent/evaluator.md`) is the final gate:
+   it drives the Java reference with computer-mcp and the Godot client with
+   open-godot-mcp, re-runs the finding's exact repro, and is the only judge of
+   `verified-fixed`. Run reports live under `.opencode/evals/runs/` (local
+   evidence, not committed).
+4. `/parity-gap` runs a code-scan wave; `/parity-loop` drives one
+   identify → fix → code-verify → final-verify iteration; `/parity-eval` runs
+   the in-engine half alone. MCP use is slot-gated
+   (`.opencode/skills/parity-eval/scripts/mcp_slot.py`, `MCP_SLOT_LIMIT`
+   default 2), and computer-mcp needs `DISPLAY` at opencode process start.
+   Working MCP sequences live in `.opencode/chains/`.
 
 Docs, plans and gate reports are claims until a running client reproduces them;
-a finding without an artifact is not a finding.
+a code-sourced candidate is a falsifiable claim until the evaluator runs its
+repro in-engine.
 
 ## Workflow rules
 

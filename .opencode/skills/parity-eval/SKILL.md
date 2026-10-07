@@ -10,12 +10,15 @@ description: >-
 
 # Skill: parity-eval — Java↔Godot twin-run evaluation
 
-The evaluator agent is the only consumer. Read
+Two agents consume this skill: the `gap-identifier` for the code-level half
+(candidate discovery and `code-verify`, no twin run) and the `evaluator` for
+the in-engine half (twin runs and the final `verified-fixed` verdicts). Read
 [`../playtest/SKILL.md`](../playtest/SKILL.md) first for the Godot MCP launch
 flow, node map, pid-stamp rules, and eval pitfalls; this skill adds the Java
 reference leg, the comparison protocol, and the evidence/ledger contract. Do
 not duplicate the playtest skill here — where they disagree, the playtest skill
-is authoritative for the Godot side.
+is authoritative for the Godot side. Project call sequences live in
+`.opencode/chains/`; consult the matching chain before composing MCP calls.
 
 **Anything a player does goes through a game client.** `spacetime call` never
 counts as a gameplay check. The `spacetime` CLI is only for arranging and
@@ -33,8 +36,9 @@ skill:
 | `../Mindustry` | Java reference (upstream `2cd7aeec…`, per `parity/upstream.lock`). |
 | `parity/mcp_catalog.json` | Authoritative in-engine scenario queue (ids, scenes, steps, screenshots). |
 | `parity/golden_manifest.json`, `parity/scenario_catalog.json` | Simulation goldens/checksums. |
-| `.opencode/evals/` | Ledger + run artifacts (your only write target). |
-| `.opencode/skills/parity-eval/scripts/` | `bootstrap.sh`, `capture_screen.py`, `frame_diff.py`, `record_finding.py`. |
+| `.opencode/evals/` | Ledger + run artifacts + MCP slot leases. |
+| `.opencode/chains/` | Project MCP call sequences; consult before composing calls, keep updated after a confirmed change. |
+| `.opencode/skills/parity-eval/scripts/` | `bootstrap.sh`, `capture_screen.py`, `frame_diff.py`, `record_finding.py`, `mcp_slot.py`. |
 
 Host installs are resolved through environment overrides (`GODOT_BIN`,
 `MINDY_SRC`, `JAVA17_HOME`, `MCP_VENV`); never hardcode absolute paths.
@@ -62,6 +66,14 @@ Rules:
 
 - Loops are isolated; within one loop, drive one client at a time (Java then
   Godot). Different loops may run concurrently — never share a display.
+- **MCP is slot-gated**: before the first MCP call in a session not covered by
+  a loop process lease, run
+  `.opencode/skills/parity-eval/scripts/mcp_slot.py acquire --owner <label>`.
+  Exit 3 means the host is at its MCP limit (two slots); stay code-only or
+  stop. `refresh` between calls; when an MCP run ends, release the slot with
+  `mcp_slot.py release` (bare form uses `$MCP_SLOT_OWNER_KEY`, `--token`/
+  `--key` also work) so a waiting loop can evaluate (`MCP_SLOT_LIMIT` defaults
+  to 2).
 - Launch clients only through `.opencode/loops/bin/run-godot-editor.sh` and
   `.opencode/loops/bin/run-java.sh`; they set display, bridge port, and
   per-loop user-data dirs. Never use `godot_instance launch_editor` (it
@@ -109,6 +121,14 @@ tools/build.sh                       # mind-gdext + mind-headless; syncs scenari
 java -version                        # must be 17.x; bootstrap.sh prints JAVA_HOME
 tools/mcp-smoke.sh                   # when in doubt: isolates bridge/identity/checksum issues
 ```
+
+**computer-mcp needs `DISPLAY` at opencode process start.** It imports
+`pynput` at module load, so without an X connection the server exits and
+opencode silently drops its tools. Confirm the `computer-mcp_*` tools are
+present before attempting the Java leg; a displayless SSH session must export
+`DISPLAY` before launching opencode (or set it in the global config
+`environment`). The loop shims already supply `$PARITY_DISPLAY`, and
+open-godot-mcp has no such requirement.
 
 The Java reference needs a one-time build (also packs sprites); first run
 downloads Gradle 9.x and Arc from jitpack. Use the `JAVA_HOME` printed by
@@ -296,7 +316,9 @@ repro. "Looks different" is not a finding.
 shared by all parallel loops, and protected by a file lock: `record_finding.py`
 takes the lock around every read-modify-write, so `add`/`claim` from concurrent
 loops can never duplicate ids or lose entries. Use the script; never hand-edit.
-Implementers may run `claim`/`release`; `add`/`verify` are evaluator-only.
+Implementers may run `claim`/`release`; the gap identifier owns
+`add --source code` and `code-verify`; the evaluator owns
+`add --source engine` and `verify` — the only `verified-fixed` verdict.
 
 ```bash
 python3 .opencode/skills/parity-eval/scripts/record_finding.py list --status open
@@ -314,6 +336,30 @@ python3 .opencode/skills/parity-eval/scripts/record_finding.py verify \
   --id EV-0001 --status verified-fixed --note "re-ran boot_menu at <commit>" \
   --evidence "runs/${PARITY_RUN_PREFIX}<stamp2>-boot_menu/godot/step-04.png"
 ```
+
+### Code-level candidates and `code-verify`
+
+The gap identifier records candidates without running anything:
+
+```bash
+python3 .opencode/skills/parity-eval/scripts/record_finding.py add \
+  --area game/campaign --severity S1 --source code --confidence high \
+  --title "Launch never applies the sector rules" \
+  --expected "World.java:265-330 applies the preset rules on launch" \
+  --actual "campaign.rs:124 calls play_new_sector with Rules::default()" \
+  --repro "start_sector('serpulo',170); eval rules.waves" \
+  --evidence client/rust/mind-gdext/src/campaign.rs:124 \
+  --evidence ../Mindustry/core/src/mindustry/core/World.java:265
+python3 .opencode/skills/parity-eval/scripts/record_finding.py code-verify \
+  --id EV-0001 --note "diff wires Planet::apply_rules into start_sector" \
+  --evidence client/rust/mind-gdext/src/campaign.rs:120
+```
+
+Rules for code-sourced records: both sides' file:line in `--evidence`, a repro
+sketch the evaluator can execute later, one symptom per record, and dedupe
+notes on existing ids instead of new records. `code-verified` means the
+committed diff closes the code seam; the evaluator's in-engine repro is still
+required before `verified-fixed`.
 
 Titles name the player-visible symptom, not the presumed code cause. One
 finding per independent symptom; link an existing id in notes instead of
@@ -392,5 +438,9 @@ Before scripting a new scenario, check whether an entry already exists in
   individual captures.
 - Don't re-run the headless goldens as "evaluation"; the harness already owns
   that. In-engine time is for the view/input/flow layers the harness cannot see.
+- A displayless opencode session silently drops `computer-mcp`; the Java leg
+  then has no tool to call. Relaunch with `DISPLAY` set (loop shims or the
+  global config env) instead of improvising a headless Java leg.
 - Never write a finding without an artifact path. Never mark fixed without a
-  fresh repro. Never edit game code.
+  fresh repro. Never edit game code. Never mark `verified-fixed` from a code
+  reading — that is what `code-verified` is for.

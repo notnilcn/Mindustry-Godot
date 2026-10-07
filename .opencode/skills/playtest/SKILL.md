@@ -20,6 +20,11 @@ Generic UI-driving mechanics (CLICK/DRAG coordinates, eval pitfalls, stall diagn
 - `playtest` MCP prompt — the interactive + deterministic workflow with exact tool JSON.
 - The `open_godot_mcp` addon docs under `client/addons/open_godot_mcp/` (`docs/`, handler headers) — short reminders at the call site.
 
+Project-specific sequences of these calls live in `.opencode/chains/` (e.g.
+`boot-and-identity`, `golden-checksum`, `enter-campaign`). Check the matching
+chain before composing calls; after a confirmed change, update its step list —
+the chains README carries the schema. Do not copy sequences into this skill.
+
 The MCP server is a stdio process (`open-godot-mcp`, binary `~/.local/bin/open-godot-mcp`, bridge default **ws://127.0.0.1:6970**, overridden per parity loop by `$PARITY_BRIDGE_PORT` through the `.opencode/loops/mcp-bin` PATH shim). Every tool takes `action` plus an optional `params` object; action-specific arguments go inside `params` (e.g. `godot_editor_edit {"action":"open_scene","params":{"path":"res://..."}}`).
 
 # Part 1 — Godot MCP recipes (project-specific)

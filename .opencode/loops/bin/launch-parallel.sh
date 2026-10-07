@@ -65,17 +65,20 @@ if [ -n "$plan_file" ]; then
 fi
 [ "${#specs[@]}" -gt 0 ] || { echo "launch-parallel: no loop specs given" >&2; usage; exit 2; }
 
-# The loop-runner agent must be available even in older worktrees, so install
-# the repo copy into the global agents dir when it is missing or outdated.
-global_agent="$HOME/.config/opencode/agents/loop-runner.md"
-repo_agent="$PARITY_MAIN/.opencode/agent/loop-runner.md"
-if [ "$dry_run" -eq 0 ] && [ -f "$repo_agent" ]; then
-  mkdir -p "$(dirname "$global_agent")"
-  if ! cmp -s "$repo_agent" "$global_agent"; then
-    cp "$repo_agent" "$global_agent"
-    echo "[parallel] installed loop-runner agent at $global_agent"
+# The loop-runner and gap-identifier agents must be available even in older
+# worktrees, so install the repo copies into the global agents dir when they
+# are missing or outdated.
+for agent_name in loop-runner gap-identifier; do
+  global_agent="$HOME/.config/opencode/agents/$agent_name.md"
+  repo_agent="$PARITY_MAIN/.opencode/agent/$agent_name.md"
+  if [ "$dry_run" -eq 0 ] && [ -f "$repo_agent" ]; then
+    mkdir -p "$(dirname "$global_agent")"
+    if ! cmp -s "$repo_agent" "$global_agent"; then
+      cp "$repo_agent" "$global_agent"
+      echo "[parallel] installed $agent_name agent at $global_agent"
+    fi
   fi
-fi
+done
 
 failures=0
 launched=()
@@ -153,17 +156,25 @@ ${PARITY_RUN_PREFIX:-<none>}, runtime dir $PARITY_LOOP_DIR.
 
 Protocol for each iteration:
 1. Read \`.opencode/command/parity-loop.md\` and follow it.
-2. The evaluator subagent does evaluation and re-verification; spawn it with the
-   Task tool exactly as that command describes. If the ledger has no open finding
-   in scope, have it evaluate the next uncovered scenario in scope.
+2. Use the gap-identifier subagent (Task tool) for code scans and
+   code-verification; use the evaluator subagent only for the final in-engine
+   verification of a committed, code-verified fix. If the ledger has no open
+   finding in scope, have the gap identifier scan the scope first.
 3. You own the fix: claim atomically with
    \`record_finding.py claim --area "$scope" --owner loop-$id\`, fix it, run the
    narrow checks, then commit on this branch with \`Fixes EV-XXXX\` (pre-approved;
    never merge, push, rebase, or switch branches).
-4. Never ask the user questions; on a blocker, stop and report it exactly.
+4. MCP use is slot-gated (\`.opencode/skills/parity-eval/scripts/mcp_slot.py\`,
+   MCP_SLOT_LIMIT default 2); at most two loops hold MCP slots and a third
+   stays code-only until one frees. The loop shims supply DISPLAY for
+   computer-mcp.
+   Commit chain updates (\`.opencode/chains/\`) with the fix when a run confirms
+   a sequence.
+5. Never ask the user questions; on a blocker, stop and report it exactly.
 
-Final report: loop id; iterations run; findings fixed and verified-fixed with
-evidence paths; commit shas and subjects; blockers; uncovered scenarios.
+Final report: loop id; iterations run; findings fixed, code-verified, and
+verified-fixed with evidence paths; commit shas and subjects; blockers;
+uncovered scenarios.
 EOF
 )"
 

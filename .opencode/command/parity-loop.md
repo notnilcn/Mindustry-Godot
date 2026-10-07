@@ -1,29 +1,31 @@
 ---
-description: Run one bounded parity iteration — evaluate if needed, fix one ledger finding, re-verify in-engine.
+description: Run one bounded parity iteration — gap-identify, fix one ledger finding, code-verify, then final in-engine verification.
 ---
 
 Run one iteration of the Mindustry-Godot parity feedback loop. Scope: $ARGUMENTS
 
 Default scope: the highest-severity `open` finding in `$PARITY_LEDGER`
 (default `.opencode/evals/findings.json`) matching `$ARGUMENTS`; if the ledger
-has no runnable open finding, evaluate the next uncovered scenario from the
-`parity-eval` skill catalog. Parallel loops are expected: each loop runs in its
-own worktree/display/bridge port and must take a disjoint scope.
+has no runnable open finding, have the gap identifier scan the scope and add
+code-sourced candidates first. Parallel loops are expected: each loop runs in
+its own worktree/display/bridge port and must take a disjoint scope.
 
-The evaluator is a subagent; you (the primary agent) do the fixing. Never write
-findings content (`add`/`verify`/`regress`) yourself — the evaluator is the only
-writer. The `claim`/`release` coordination commands are the exception: run them
-through `record_finding.py`, which holds the ledger's file lock. Never let the
-evaluator edit game code.
+Roles: the `gap-identifier` subagent finds candidates and code-verifies fixes;
+you (the primary agent) fix; the `evaluator` subagent is the final in-engine
+gate and the only judge of `verified-fixed`. Never write `add`/`code-verify`/
+`verify` content yourself — the subagents own those. The `claim`/`release`
+coordination commands are the exception: run them through `record_finding.py`,
+which holds the ledger's file lock. Never let the gap identifier edit game
+code, and never let the fixer mark its own finding verified.
 
 ## Iteration
 
-1. **Evaluate if needed.** If the scope is a scenario or the ledger has no
-   fresh finding for it, launch the `evaluator` subagent with the Task tool.
-   Give it a self-contained brief: scope, why now, and the required return
-   shape (`run dir`, findings added with ids/severity/titles, verified/regressed
-   ids, coverage delta, blockers). Do not summarize the skill to it — it loads
-   the `parity-eval` skill itself.
+1. **Find work.** If the scope has no fresh open finding, launch the
+   `gap-identifier` subagent with the Task tool. Give it a self-contained
+   brief: scope/area, the dedupe requirement (read the ledger and the code-audit
+   inventory first), and the required return shape (candidate ids, severities,
+   confidences, evidence, blockers). Do not summarize its agent contract to it.
+   Code-sourced candidates are enough to start fixing — no engine run here.
 
 2. **Claim exactly one finding atomically.** The shared ledger is written by
    several loops, so never "read and pick" by hand:
@@ -35,9 +37,9 @@ evaluator edit game code.
 
    The command locks the ledger, picks the highest severity (S1 > S2 > S3 > S4)
    then oldest open finding matching the scope, marks it `in-progress`, prints
-   the finding JSON, and exits 3 when nothing matches. If it exits 3, evaluate
-   the next uncovered scenario instead. If a claim fails hard mid-iteration
-   (fix abandoned, blocker, evaluation says it is not real), return it with
+   the finding JSON, and exits 3 when nothing matches. If it exits 3, run step
+   1 instead. If a claim fails hard mid-iteration (fix abandoned, blocker, the
+   candidate is not real), return it with
    `record_finding.py release --id EV-XXXX --note "<why>"`.
 
 3. **Fix that finding only.** Read the nearest `AGENTS.md` to the code you
@@ -56,15 +58,27 @@ evaluator edit game code.
    repo's fix-claim convention. Never push, and never edit the ledger to mark it
    fixed.
 
-6. **Re-verify in-engine.** Launch the `evaluator` subagent again with the
-   task: verify finding `EV-XXXX` by re-running its exact repro, update the
-   ledger (`verified-fixed` or `regression`) with fresh evidence, and report
-   the artifact path. No other scope.
+6. **Code-verify.** Launch the `gap-identifier` subagent again: re-read the fix
+   diff against the upstream behavior and `code-verify` EV-XXXX, or `release`
+   it with the exact reason the diff does not close the gap. This is code
+   inspection only; it does not replace the in-engine repro.
 
-7. **Report and stop.** One finding per invocation: id, what changed, checks
-   run, verification result from the evaluator, and the next recommended
+7. **Final in-engine verification.** Only now — fix committed and marked
+   `code-verified` — launch the `evaluator` subagent to re-run the finding's
+   exact repro, update the ledger (`verified-fixed` or `regression`) with fresh
+   evidence, and report the artifact path. The evaluator frees its MCP slot at
+   the end of the twin-run (`mcp_slot.py release`), so a waiting loop can take
+   it. No other scope; batch only findings whose repro shares one
+   scenario/state.
+
+8. **Report and stop.** One finding per invocation: id, what changed, checks
+   run, code-verify result, evaluator verdict, and the next recommended
    finding. Re-run this command to continue the loop.
 
-If any step is blocked (MCP down, Java reference not built, display missing),
-stop and report the exact blocker — do not improvise installs or skip the
-in-engine verification.
+MCP use is slot-gated (`gap-identifier`, `loop-runner` and `evaluator` are
+denied at the cap; the interactive session is warn-and-allow) through
+`.opencode/skills/parity-eval/scripts/mcp_slot.py`, `MCP_SLOT_LIMIT` default 2;
+computer-mcp additionally needs `DISPLAY` at opencode process start. If any
+step is blocked (MCP slot refused, MCP bridge down, Java reference not built,
+display missing), stop and report the exact blocker — do not improvise installs
+or skip the final verification.

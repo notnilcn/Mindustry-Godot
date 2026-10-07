@@ -1,6 +1,6 @@
 # Parallel parity loops
 
-Run several evaluator/implementer parity loops at once. Each loop gets its own
+Run several gap-identifier/evaluator/implementer parity loops at once. Each loop gets its own
 X display, its own git worktree/branch, its own Godot editor bridge port, and
 isolated client user-data. `computer-mcp` and `open-godot-mcp` cannot share an
 X display: XTEST input, focus, and full-screen capture are global per display,
@@ -25,9 +25,10 @@ opencode run --auto --agent loop-runner --dir <worktree> "<loop task>"
 
 Each child is one opencode process with its own MCP servers (hence its own
 display and bridge port), runs up to `--iterations K` iterations of the
-parity loop (default 2), spawns its own `evaluator` subagents, and commits on
-its own `parity/loop-N` branch. Nothing is merged or pushed. A plan can also
-live in a file: `launch-parallel.sh --plan plans/current.plan`.
+parity loop (default 2), spawns its own `gap-identifier` and `evaluator`
+subagents, and commits on its own `parity/loop-N` branch. Nothing is merged or
+pushed. A plan can also live in a file:
+`launch-parallel.sh --plan plans/current.plan`.
 
 Monitor and stop:
 
@@ -99,6 +100,15 @@ scenario ids or `--area` prefixes) so the work itself does not overlap.
   passes the same port via exact-port adoption. Do **not** pass `--projects` to
   the server and do **not** use `godot_instance launch_editor`: it allocates
   ports from its own local index (6970 first) and ignores the loop mapping.
+- **MCP slots**: every process that uses MCP takes a lease through
+  `../skills/parity-eval/scripts/mcp_slot.py` (`MCP_SLOT_LIMIT`, default 2,
+  shared across worktrees through the git common dir); the guard denies
+  `gap-identifier`, `loop-runner` and `evaluator` once both slots are held, so
+  a further consumer stays code-only until one frees. `computer-mcp` imports
+  `pynput` at module load, so
+  the loop shims supply `DISPLAY=$PARITY_DISPLAY`; a plain SSH opencode session
+  needs the display in its process env (or the global config `environment`) or
+  the server is dropped silently.
 - **User data**: `run-godot-editor.sh`/`run-java.sh` set per-loop `XDG_*` and a
   per-loop `HOME` for Java, so Godot screenshots (`user://mcp_screenshots`),
   editor settings, Mindustry settings/saves, and gameplay logs cannot collide.
@@ -126,8 +136,9 @@ scenario ids or `--area` prefixes) so the work itself does not overlap.
   `PARITY_RUN_PREFIX` (`l2-…`) on run directories.
 - The implementer claims a finding with
   `record_finding.py claim --area <scope> --owner loop-N` (atomic under lock),
-  and `release`s it if the fix is abandoned. `add`/`verify` stay
-  evaluator-only.
+  and `release`s it if the fix is abandoned. The `gap-identifier` owns
+  `add --source code` and `code-verify`; the `evaluator` owns
+  `add --source engine` and the `verify` verdict.
 - Each loop commits on its own `parity/loop-N` branch. Never rewrite another
   loop's branch. Merge/landing is a human decision.
 
@@ -147,5 +158,16 @@ every sibling loop's server on the host.
 
 The launcher supports any number of loop ids. The host renders with Mesa
 llvmpipe (CPU); run up to three loops and watch CPU, RAM and FPS (16 cores /
-14 GiB here). Drop back a loop if an editor or game stops responding, if FPS
-collapses, or if the host starts swapping.
+15.3 GiB here). Drop back a loop if an editor or game stops responding, if FPS
+collapses, or if the host starts swapping. The MCP slot cap
+(`MCP_SLOT_LIMIT`, default 2) bounds concurrent MCP consumers independently of
+loop count; code-only gap-identifier and fixer agents run outside it.
+
+Measured 2026-10-07 (`.opencode/evals/20261007-mcp-cap-test.md`):
+idle editor ≈ 1.3 GB / 0.25 core, unpaused llvmpipe game ≈ 0.8 GB / ~5.6
+cores, so a full loop ≈ 3.1 GB. Four editors + one game + three agent sessions
+peaked at 11.0 GB used with no swap growth. Two evaluator Java legs plus two
+editors peak at 9.2 GB used and 79% CPU busy, so CPU — not RAM — is what caps
+concurrent twin-runs at two. The guard denies `gap-identifier`, `loop-runner`
+and `evaluator` at the cap by default (`MCP_SLOT_GUARD_AGENTS` overrides); the
+interactive session is warn-and-allow.
