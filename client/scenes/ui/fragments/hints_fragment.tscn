@@ -1,6 +1,7 @@
 [gd_scene format=3 uid="uid://deqapucuj7n0m"]
 
 [ext_resource type="Script" uid="uid://8brrxxpglynq" path="res://ui/fragments/hints_fragment.gd" id="1_hints"]
+[ext_resource type="Script" uid="uid://da6xq1jjp24po" path="res://ui/text/mind_rich_label.gd" id="2_rich"]
 
 [node name="HintsFragment" type="Control" unique_id=1616195657]
 layout_mode = 3
@@ -27,7 +28,16 @@ grow_horizontal = 2
 grow_vertical = 2
 theme_type_variation = &"defaultDialog"
 
-[node name="Label" type="Label" parent="Panel" unique_id=345942507]
+[node name="Layout" type="VBoxContainer" parent="Panel" unique_id=1358841326]
 layout_mode = 2
-horizontal_alignment = 1
-autowrap_mode = 3
+theme_override_constants/separation = 6
+
+[node name="Label" type="RichTextLabel" parent="Panel/Layout" unique_id=345942507]
+layout_mode = 2
+script = ExtResource("2_rich")
+
+[node name="Skip" type="Button" parent="Panel/Layout" unique_id=345942508]
+layout_mode = 2
+size_flags_horizontal = 0
+theme_type_variation = &"nonet"
+text = "Skip"

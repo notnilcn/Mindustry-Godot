@@ -2,6 +2,8 @@
 
 [ext_resource type="Script" uid="uid://dmrw1f17j7lal" path="res://ui/fragments/hud_fragment.gd" id="1_hud"]
 [ext_resource type="PackedScene" path="res://scenes/ui/widgets/mind_minimap.tscn" id="2_minimap"]
+[ext_resource type="Script" uid="uid://da6xq1jjp24po" path="res://ui/text/mind_rich_label.gd" id="3_rich"]
+[ext_resource type="Script" uid="uid://cn6bp6oquv5tf" path="res://ui/widgets/core_items_display.gd" id="4_coreitems"]
 
 [node name="HudFragment" type="Control" unique_id=1693915975]
 layout_mode = 3
@@ -25,13 +27,17 @@ theme_override_constants/separation = 4
 layout_mode = 2
 theme_override_constants/separation = 2
 
-[node name="Status" type="Label" parent="WavesStack/WavesMain" unique_id=399553049]
+[node name="Status" type="RichTextLabel" parent="WavesStack/WavesMain" unique_id=399553049]
 layout_mode = 2
-horizontal_alignment = 1
+script = ExtResource("3_rich")
 
-[node name="Info" type="Label" parent="WavesStack/WavesMain" unique_id=1511531312]
+[node name="Info" type="RichTextLabel" parent="WavesStack/WavesMain" unique_id=1511531312]
 layout_mode = 2
-horizontal_alignment = 1
+script = ExtResource("3_rich")
+
+[node name="WaveButtons" type="HBoxContainer" parent="WavesStack/WavesMain" unique_id=1511531313]
+layout_mode = 2
+alignment = 1
 
 [node name="FpsBox" type="VBoxContainer" parent="." unique_id=3948997]
 layout_mode = 1
@@ -68,13 +74,14 @@ grow_horizontal = 2
 grow_vertical = 0
 theme_override_constants/separation = 2
 
-[node name="CoreItems" type="Control" parent="CoreInfo" unique_id=1080290227]
+[node name="CoreItems" type="GridContainer" parent="CoreInfo" unique_id=1080290227]
 custom_minimum_size = Vector2(0, 32)
 layout_mode = 2
+script = ExtResource("4_coreitems")
 
-[node name="HudText" type="Label" parent="CoreInfo" unique_id=1872703018]
+[node name="HudText" type="RichTextLabel" parent="CoreInfo" unique_id=1872703018]
 layout_mode = 2
-horizontal_alignment = 1
+script = ExtResource("3_rich")
 
 [node name="MinimapBox" type="Control" parent="." unique_id=110911400]
 layout_mode = 1
@@ -93,7 +100,7 @@ layout_mode = 0
 offset_right = 140.0
 offset_bottom = 140.0
 
-[node name="Position" type="Label" parent="MinimapBox" unique_id=336799321]
+[node name="Position" type="RichTextLabel" parent="MinimapBox" unique_id=336799321]
 layout_mode = 1
 anchors_preset = 3
 anchor_left = 1.0
@@ -102,8 +109,9 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 0
 grow_vertical = 0
+script = ExtResource("3_rich")
 
-[node name="PausedBanner" type="Label" parent="." unique_id=1173120531]
+[node name="PausedBanner" type="RichTextLabel" parent="." unique_id=1173120531]
 layout_mode = 1
 anchors_preset = 8
 anchor_left = 0.5
@@ -112,10 +120,10 @@ anchor_right = 0.5
 anchor_bottom = 0.5
 grow_horizontal = 2
 grow_vertical = 2
-text = "Paused"
-horizontal_alignment = 1
+text = "[center]Paused"
+script = ExtResource("3_rich")
 
-[node name="WaitingBanner" type="Label" parent="." unique_id=1997578906]
+[node name="WaitingBanner" type="RichTextLabel" parent="." unique_id=1997578906]
 layout_mode = 1
 anchors_preset = 8
 anchor_left = 0.5
@@ -124,5 +132,5 @@ anchor_right = 0.5
 anchor_bottom = 0.5
 grow_horizontal = 2
 grow_vertical = 2
-text = "Waiting for players"
-horizontal_alignment = 1
+text = "[center]Waiting for players"
+script = ExtResource("3_rich")

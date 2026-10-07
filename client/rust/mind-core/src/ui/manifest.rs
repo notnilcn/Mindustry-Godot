@@ -358,6 +358,7 @@ pub const EXPECTED_M3_DIALOGS: &[&str] = &[
     "about",
     "credits",
     "settings",
+    "paused",
     "language",
     "controls",
     "database",
