@@ -47,9 +47,10 @@ open ──fixer claims──► in-progress ──gap identifier reads diff─�
 
 Fixes are claimed in commit messages (`Fixes EV-0001`) and verified by the
 evaluator. Implementers read the ledger with `record_finding.py list` and work
-one finding at a time. `/parity-gap` fans out discovery, `/parity-loop` drives
-one identify → fix → code-verify → final-verify iteration, and `/parity-eval`
-runs the evaluation half alone.
+one finding at a time. `/parity-campaign` runs a whole session (seed → loops →
+sweep), `/parity-gap` fans out discovery, `/parity-loop` drives one
+identify → fix → code-verify → final-verify iteration, `/parity-parallel`
+launches the loop processes, and `/parity-eval` runs the evaluation half alone.
 
 ## Bootstrap
 

@@ -20,12 +20,15 @@ code, and never let the fixer mark its own finding verified.
 
 ## Iteration
 
-1. **Find work.** If the scope has no fresh open finding, launch the
-   `gap-identifier` subagent with the Task tool. Give it a self-contained
-   brief: scope/area, the dedupe requirement (read the ledger and the code-audit
-   inventory first), and the required return shape (candidate ids, severities,
-   confidences, evidence, blockers). Do not summarize its agent contract to it.
-   Code-sourced candidates are enough to start fixing — no engine run here.
+1. **Find work.** If the scope has no open finding, first verify the
+   `code-verified` queue in scope: launch the `evaluator` subagent to re-run
+   those exact repros (batch by scenario) and update the ledger. Only when no
+   `code-verified` finding remains in scope, launch the `gap-identifier`
+   subagent with the Task tool. Give it a self-contained brief: scope/area, the
+   dedupe requirement (read the ledger and the code-audit inventory first), and
+   the required return shape (candidate ids, severities, confidences, evidence,
+   blockers). Do not summarize its agent contract to it. Code-sourced
+   candidates are enough to start fixing — no engine run here.
 
 2. **Claim exactly one finding atomically.** The shared ledger is written by
    several loops, so never "read and pick" by hand:

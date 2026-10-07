@@ -9,11 +9,18 @@ displays are what makes the Java legs truly parallel.
 
 ## One-session orchestration (recommended)
 
-Start a single `opencode --auto` in the main checkout and paste:
+Start a single `opencode --auto` in the main checkout and paste the full
+campaign, which seeds code-only gap candidates first and runs the verification
+sweep after the loops finish:
 
 ```
-/parity-parallel 1=ui/menu 2=input 3=campaign --iterations 3
+/parity-campaign 1=ui/menu 2=input 3=campaign --iterations 3
 ```
+
+`/parity-parallel 1=ui/menu 2=input --iterations 3` is the launch half alone,
+and `/parity-parallel --every-eval` drains the ledger instead: it starts
+`.opencode/loops/bin/drain-parallel.sh --slots 2`, which keeps two runners
+busy, assigning each freed runner the next pending scope until none remain.
 
 The primary agent is only an orchestrator: it calls
 `.opencode/loops/bin/launch-parallel.sh`, which prepares each loop (Xvfb,

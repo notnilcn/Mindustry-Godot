@@ -260,6 +260,36 @@ def cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_next_scope(args: argparse.Namespace) -> int:
+    """Print the area of the highest-priority pending finding.
+
+    Pending means `open`, `code-verified` or `regression` (`wontfix` and
+    `verified-fixed` are terminal). `--exclude` skips areas already covered by
+    active loops, matching either direction of the `area/` prefix.
+    """
+    data = load(args.ledger)
+    pending = {"open", "code-verified", "regression"}
+    exclude = [a.strip() for a in (args.exclude or "").split(",") if a.strip()]
+
+    def covered(area: str) -> bool:
+        return any(
+            area == e or area.startswith(e + "/") or e.startswith(area + "/")
+            for e in exclude
+        )
+
+    rows = [
+        f
+        for f in data["findings"]
+        if f.get("status") in pending and not covered(str(f.get("area", "")))
+    ]
+    if not rows:
+        print("null")
+        return 3
+    rows.sort(key=lambda f: (SEVERITIES.index(f["severity"]), f.get("first_seen", "")))
+    print(rows[0]["area"])
+    return 0
+
+
 def cmd_summary(args: argparse.Namespace) -> int:
     data = load(args.ledger)
     by_status: dict[str, int] = {}
@@ -353,6 +383,17 @@ def main() -> int:
 
     p_summary = sub.add_parser("summary", help="counts by status/severity")
     p_summary.set_defaults(func=cmd_summary)
+
+    p_next = sub.add_parser(
+        "next-scope",
+        help="print the area of the highest-priority pending finding "
+        "(open/code-verified/regression); exit 3 when none",
+    )
+    p_next.add_argument(
+        "--exclude",
+        help="comma-separated areas already covered by active loops",
+    )
+    p_next.set_defaults(func=cmd_next_scope)
 
     args = parser.parse_args()
     args.ledger = resolve_ledger(args.ledger)

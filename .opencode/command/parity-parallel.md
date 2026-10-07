@@ -1,8 +1,11 @@
 ---
-description: Spawn parallel parity loop agents from a plan and report launch status.
+description: Spawn parallel parity loop agents from a plan, a ledger-derived default, or a drain loop.
 ---
 
 Orchestrate parallel Mindustry-Godot parity loops. Plan: $ARGUMENTS
+
+This is the launch half of a campaign; for the full flow (code gap wave →
+loops → final verification sweep) use `/parity-campaign`.
 
 You are only the orchestrator: never evaluate, fix, or edit game code yourself,
 and never run a loop leg yourself.
@@ -17,21 +20,55 @@ are held, so a third loop stays code-only until one frees. Each runner follows
 and the `evaluator` performs only the final in-engine verification of a
 committed, code-verified fix.
 
-1. If `$ARGUMENTS` is empty, stop and ask me for a plan in the form
-   `<loop-id>=<scope> [<loop-id>=<scope> ...]` (for example
-   `1=ui/menu 2=input`). Otherwise run:
+## 1. Resolve the plan
 
-   ```
-   .opencode/loops/bin/launch-parallel.sh $ARGUMENTS
-   ```
+- **Loop specs** (`1=ui/menu 2=input [--iterations K]`): run
 
-2. Report the launcher output: for each loop the scope, worktree, display and
-   bridge port, child pid, and log path.
+  ```
+  .opencode/loops/bin/launch-parallel.sh $ARGUMENTS
+  ```
 
-3. Tell me:
-   - progress: `.opencode/loops/bin/parallel-status.sh`
-   - stop: `.opencode/loops/bin/parallel-stop.sh [loop ...]`
-   - each runner commits on its own `parity/loop-N` branch; nothing is merged
-     or pushed, and I review branches before landing.
+- **`--every-eval`** (no specs): drain the ledger until no finding is left in
+  `open`/`code-verified`/`regression` (`wontfix` and `verified-fixed` are
+  terminal). Each freed runner gets the next-highest-priority scope from the
+  ledger, skipping areas an active runner covers:
 
-4. If the launcher reports a blocker, stop and report it verbatim.
+  ```
+  nohup .opencode/loops/bin/drain-parallel.sh --slots 2 --iterations K \
+    >.opencode/loops/run/drain.log 2>&1 &
+  ```
+
+  Do not combine it with explicit specs; pass `--slots`, `--ids`,
+  `--iterations`, `--max-rounds` through. A runner that cannot launch (dirty
+  worktree) stops the drain and reports — clean the worktree and re-run.
+
+- **No arguments**: derive one scope from the ledger and launch loop 1:
+
+  ```
+  python3 .opencode/skills/parity-eval/scripts/record_finding.py next-scope
+  ```
+
+  It prints the area of the highest-priority pending finding (severity first,
+  then oldest first). Exit 3 means nothing is pending — report "ledger drained"
+  and stop. Otherwise run:
+
+  ```
+  .opencode/loops/bin/launch-parallel.sh 1=<scope> --iterations 2
+  ```
+
+Scope is a finding `area` prefix (`.opencode/evals/findings.json`), so the
+areas `next-scope` prints map directly onto `claim --area` and loop specs.
+
+## 2. Report the launcher output
+
+For each loop: scope, worktree, display, bridge port, child pid, and log path.
+For `--every-eval`, report the drain pid and log path instead.
+
+## 3. Tell me
+
+- progress: `.opencode/loops/bin/parallel-status.sh` (drain: tail the drain log)
+- stop: `.opencode/loops/bin/parallel-stop.sh [loop ...]`
+- each runner commits on its own `parity/loop-N` branch; nothing is merged or
+  pushed, and I review branches before landing.
+
+## 4. If the launcher reports a blocker, stop and report it verbatim.

@@ -28,7 +28,7 @@ you are about to touch.
 | `bench/` | Recorded performance baselines (`baselines.json`, `editor_baseline.json`). |
 | `docs/` | Operator-facing platform and packaging notes. |
 | `.github/workflows/` | `ci.yml` (push/PR gate) and `parity-nightly.yml`. |
-| `.opencode/` | Agent workflow: `agent/{gap-identifier,evaluator}.md`, `command/{parity-gap,parity-eval,parity-loop,parity-parallel}.md`, `chains/` (project MCP call sequences), `plugin/` (MCP slot guard), `evals/` (gap ledger + run artifacts), and the `skills/playtest` + `skills/parity-eval` skills. |
+| `.opencode/` | Agent workflow: `agent/{gap-identifier,evaluator}.md`, `command/{parity-campaign,parity-gap,parity-eval,parity-loop,parity-parallel}.md`, `chains/` (project MCP call sequences), `plugin/` (MCP slot guard), `evals/` (gap ledger + run artifacts), and the `skills/playtest` + `skills/parity-eval` skills. |
 
 ## Documentation map
 

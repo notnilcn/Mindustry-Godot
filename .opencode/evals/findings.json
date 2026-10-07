@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "updated": "2026-10-06T23:24:28+00:00",
+  "updated": "2026-10-07T02:39:41+00:00",
   "findings": [
     {
       "id": "EV-0001",
@@ -1043,7 +1043,7 @@
       "id": "EV-0035",
       "area": "game/campaign",
       "severity": "S1",
-      "status": "open",
+      "status": "in-progress",
       "title": "First boot panics in MindCampaign bootstrap; campaign launch and tech tree are dead",
       "expected": "Java: a fresh install boots; Play > Campaign > Serpulo > Ground Zero launches the sector (session sector set, waves on, core registered)",
       "actual": "Godot: MindCampaign.ready() panics at mind-core/src/io/save/slot.rs:249 'chunk size must be non-zero' on a user:// dir with no saves/; registry+campaign stay None, so get_tech_state nodes=0, list_save_slots=[], start_sector('serpulo',170)=false and get_sector_state campaign=false",
@@ -1053,11 +1053,14 @@
         "runs/l2-20261007-064916-campaign_spine/godot/state-01-boot-failed-launch.json",
         "runs/l2-20261007-064916-campaign_spine/godot/step-01-boot-after-launch-panic.png"
       ],
-      "notes": [],
+      "notes": [
+        "2026-10-07T02:39:35+00:00: claimed by loop-2"
+      ],
       "plan": "12",
       "first_seen": "2026-10-06T20:50:55+00:00",
-      "last_verified": "2026-10-06T20:50:55+00:00",
-      "found_by_loop": "2"
+      "last_verified": "2026-10-07T02:39:35+00:00",
+      "found_by_loop": "2",
+      "owner": "loop-2"
     },
     {
       "id": "EV-0036",
@@ -1163,7 +1166,7 @@
       "id": "EV-0041",
       "area": "ui/campaign",
       "severity": "S1",
-      "status": "open",
+      "status": "in-progress",
       "title": "Campaign Difficulty dialog errors on a missing MindCell.left() and freezes the client",
       "expected": "Java: Play > Campaign > Serpulo > OK, then the Difficulty rail button opens the CampaignRules dialog with 5 difficulty buttons (casual/easy/normal/hard/eradication) and the 5 rule toggles; the client keeps running",
       "actual": "Godot: opening campaign_rules logs 'Invalid call. Nonexistent function \"left\" in base \"RefCounted (MindCell)\"' from campaign_rules_dialog.gd:82 (_rebuild, the first rule toggle); the full-screen dialog opens with no body and Engine.get_process_frames() freezes (2371 before and after a 2s wait); any later MindUi method call panics 'Gd<T>::bind() failed, already bound; T = mind_gdext::ui::ui_host::MindUi'",
@@ -1174,11 +1177,14 @@
         "runs/l6-20261007-071337-campaign_planet/godot/crash-report-mindui-borrow.txt",
         "runs/l6-20261007-071337-campaign_planet/godot/state-03-sector-panel.json"
       ],
-      "notes": [],
+      "notes": [
+        "2026-10-07T02:39:41+00:00: claimed by loop-3"
+      ],
       "plan": "14",
       "first_seen": "2026-10-06T21:36:58+00:00",
-      "last_verified": "2026-10-06T21:36:58+00:00",
-      "found_by_loop": "6"
+      "last_verified": "2026-10-07T02:39:41+00:00",
+      "found_by_loop": "6",
+      "owner": "loop-3"
     },
     {
       "id": "EV-0042",

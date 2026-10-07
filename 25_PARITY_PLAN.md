@@ -30,9 +30,11 @@ The loop primitives this plan orchestrates:
 
 | Entry point | Half | What it does |
 |---|---|---|
+| `/parity-campaign [plan]` | orchestrate | Seed the queue, launch up to three loop runners, watch them, then run the final verification sweep. One command for a whole session. |
 | `/parity-gap [scope]` | identify | Fan out code-only `gap-identifier` agents over disjoint areas; add code-sourced candidates to the ledger. |
 | `/parity-eval [scope]` | final verify | Twin-run the Java reference and the Godot client; the only path to `verified-fixed`. |
 | `/parity-loop [scope]` | fix + verify | Gap-identify if needed, fix the top `EV-####`, code-verify the diff, then have the evaluator re-verify that exact repro in-engine. One finding per run. |
+| `/parity-parallel [plan]` | launch loops | Spawn the loop-runner processes from a plan (the launch half of `/parity-campaign`). |
 
 ## 2. Roles and contracts
 
