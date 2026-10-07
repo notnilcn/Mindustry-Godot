@@ -24,10 +24,10 @@ use mind_stdb::binder::TableBinder;
 use mind_stdb::checksum::{ChecksumMonitor, ChecksumReport};
 use mind_stdb::commands::CommandSender;
 use mind_stdb::module_bindings::{
-    BreakBlock, ChatKind, CommandKind, Custom, Gamemode, MatchPlayerState, MemberRole,
-    MyMatchChecksumsTableAccessor, MyMatchMembersTableAccessor, MyMatchPlayerStatesTableAccessor,
-    MyMatchSnapshotsTableAccessor, MyMatchStateTableAccessor, MyMatchTableAccessor, PlaceBlock,
-    Visibility,
+    AllMatchesTableAccessor, BreakBlock, ChatKind, CommandKind, Custom, Gamemode, MatchPlayerState,
+    MemberRole, MyMatchChecksumsTableAccessor, MyMatchMembersTableAccessor,
+    MyMatchPlayerStatesTableAccessor, MyMatchSnapshotsTableAccessor, MyMatchStateTableAccessor,
+    MyMatchTableAccessor, PlaceBlock, RelayMatch, Visibility,
 };
 use mind_stdb::rows::RowView;
 use mind_stdb::transport::StdbTransport;
@@ -65,6 +65,10 @@ pub struct MindNet {
     players_binder: Option<TableBinder<MyMatchPlayerStatesTableAccessor>>,
     checksums_binder: Option<TableBinder<MyMatchChecksumsTableAccessor>>,
     snapshots_binder: Option<TableBinder<MyMatchSnapshotsTableAccessor>>,
+    public_matches_binder: Option<TableBinder<AllMatchesTableAccessor>>,
+    public_matches: std::collections::BTreeMap<u64, RelayMatch>,
+    token_append: Option<String>,
+    token_store_path: Option<std::path::PathBuf>,
     last_match_json: String,
     last_members_json: String,
     last_state_json: String,
@@ -96,6 +100,10 @@ impl INode for MindNet {
             players_binder: None,
             checksums_binder: None,
             snapshots_binder: None,
+            public_matches_binder: None,
+            public_matches: std::collections::BTreeMap::new(),
+            token_append: None,
+            token_store_path: None,
             last_match_json: String::new(),
             last_members_json: String::new(),
             last_state_json: String::new(),
@@ -142,6 +150,7 @@ impl INode for MindNet {
         self.drain_match_rows();
         self.drain_members_rows();
         self.drain_state_rows();
+        self.drain_public_matches();
         self.drain_player_states();
         self.drain_checksums();
         self.drain_snapshots();
@@ -174,11 +183,13 @@ impl MindNet {
         let online = !self.offline || db_arg || suffix.is_some();
 
         let token_dir = ProjectSettings::singleton().globalize_path("user://");
+        self.token_append = suffix;
+        self.token_store_path = Some(std::path::PathBuf::from(token_dir.to_string()));
         let config = ConnectionConfig {
             host: self.host.to_string(),
             db_name: self.db_name.to_string(),
-            token_append: suffix,
-            token_store_path: Some(std::path::PathBuf::from(token_dir.to_string())),
+            token_append: self.token_append.clone(),
+            token_store_path: self.token_store_path.clone(),
             mode: if online {
                 StdbMode::Online
             } else {
@@ -187,16 +198,7 @@ impl MindNet {
             ..ConnectionConfig::default()
         };
         let mut connector = Connector::new(config);
-        self.match_binder = Some(connector.bind::<MyMatchTableAccessor>("my_match"));
-        self.members_binder =
-            Some(connector.bind::<MyMatchMembersTableAccessor>("my_match_members"));
-        self.state_binder = Some(connector.bind::<MyMatchStateTableAccessor>("my_match_state"));
-        self.players_binder =
-            Some(connector.bind::<MyMatchPlayerStatesTableAccessor>("my_match_player_states"));
-        self.checksums_binder =
-            Some(connector.bind::<MyMatchChecksumsTableAccessor>("my_match_checksums"));
-        self.snapshots_binder =
-            Some(connector.bind::<MyMatchSnapshotsTableAccessor>("my_match_snapshots"));
+        self.attach_binders(&mut connector);
         if online {
             if let Err(error) = connector.connect() {
                 log::warn!("MindNet connect failed: {error}");
@@ -212,6 +214,23 @@ impl MindNet {
                 self.base()
                     .try_get_node_as::<MindSimHost>("/root/Spine/SimHost")
             });
+    }
+
+    /// Registers the table binders on a freshly built connector. Shared by
+    /// `bootstrap()` and `connect_to()`; every binder is overwritten, so a
+    /// rebuilt connector never leaves a stale link.
+    fn attach_binders(&mut self, connector: &mut Connector) {
+        self.match_binder = Some(connector.bind::<MyMatchTableAccessor>("my_match"));
+        self.members_binder =
+            Some(connector.bind::<MyMatchMembersTableAccessor>("my_match_members"));
+        self.state_binder = Some(connector.bind::<MyMatchStateTableAccessor>("my_match_state"));
+        self.players_binder =
+            Some(connector.bind::<MyMatchPlayerStatesTableAccessor>("my_match_player_states"));
+        self.checksums_binder =
+            Some(connector.bind::<MyMatchChecksumsTableAccessor>("my_match_checksums"));
+        self.snapshots_binder =
+            Some(connector.bind::<MyMatchSnapshotsTableAccessor>("my_match_snapshots"));
+        self.public_matches_binder = Some(connector.bind::<AllMatchesTableAccessor>("all_matches"));
     }
 
     /// Session state changed (`offline`/`in_lobby`/`in_game`/...).
@@ -254,6 +273,64 @@ impl MindNet {
                 0
             }
         }
+    }
+
+    /// Direct-connect (`JoinDialog.connect`): rebuilds the connector against
+    /// `address` (`host[:port][/db]`, scheme optional) and enters the public
+    /// match browser. Returns `false` for an invalid address or an active match.
+    #[func]
+    pub fn connect_to(&mut self, address: GString) -> bool {
+        let requested = address.to_string();
+        let default_db = self.db_name.to_string();
+        let Some((host, db_name)) = parse_server_address(&requested, &default_db) else {
+            log::warn!("MindNet.connect_to: invalid address `{requested}`");
+            return false;
+        };
+        if !matches!(
+            self.session.state(),
+            mind_stdb::session::SessionState::Offline | mind_stdb::session::SessionState::Browsing
+        ) {
+            log::warn!("MindNet.connect_to: a match is already active");
+            return false;
+        }
+        if let Some(connector) = self.connector.as_mut() {
+            connector.disconnect();
+        }
+        self.runtime = None;
+        self.sender = None;
+        self.remote_players.clear();
+        self.public_matches.clear();
+        let config = ConnectionConfig {
+            host: host.clone(),
+            db_name: db_name.clone(),
+            token_append: self.token_append.clone(),
+            token_store_path: self.token_store_path.clone(),
+            mode: StdbMode::Online,
+            ..ConnectionConfig::default()
+        };
+        let mut connector = Connector::new(config);
+        self.attach_binders(&mut connector);
+        if let Err(error) = connector.connect() {
+            log::warn!("MindNet.connect_to failed: {error}");
+            return false;
+        }
+        self.connector = Some(connector);
+        self.host = GString::from(host.as_str());
+        self.db_name = GString::from(db_name.as_str());
+        self.session.open_browser();
+        log::info!("MindNet.connect_to: browsing `{host}/{db_name}`");
+        true
+    }
+
+    /// Public match rows from the `all_matches` view (join-dialog browser).
+    #[func]
+    pub fn get_public_matches_json(&self) -> GString {
+        let entries: Vec<String> = self
+            .public_matches
+            .values()
+            .map(RowView::debug_json)
+            .collect();
+        GString::from(format!("[{}]", entries.join(",")).as_str())
     }
 
     /// Joins `match_id`; readiness/loading follows the view.
@@ -742,6 +819,23 @@ impl MindNet {
         }
     }
 
+    /// Mirrors public `all_matches` rows for the join-dialog browser.
+    fn drain_public_matches(&mut self) {
+        let Some(binder) = self.public_matches_binder.as_ref() else {
+            return;
+        };
+        for change in binder.drain() {
+            match change {
+                RowChange::Insert(row) | RowChange::Update { new: row, .. } => {
+                    self.public_matches.insert(row.match_id, row);
+                }
+                RowChange::Delete(row) => {
+                    self.public_matches.remove(&row.match_id);
+                }
+            }
+        }
+    }
+
     /// Publishes a scoped checksum every `CHECKSUM_INTERVAL_TICKS` while running.
     fn maybe_publish_checksum(&mut self) {
         if self.session.state() != mind_stdb::session::SessionState::InGame {
@@ -802,5 +896,69 @@ fn parse_visibility(name: &str) -> Visibility {
         Visibility::Unlisted
     } else {
         Visibility::Public
+    }
+}
+
+/// Parses a direct-connect address (`host[:port][/db]`, `http://` optional)
+/// into a SpacetimeDB host URL and database name. A missing port defaults to
+/// the local dev port (3000); a missing database keeps `default_db`.
+fn parse_server_address(address: &str, default_db: &str) -> Option<(String, String)> {
+    let address = address.trim();
+    if address.is_empty() {
+        return None;
+    }
+    let (scheme, rest) = match address.split_once("://") {
+        Some((scheme, rest)) if !scheme.is_empty() => (format!("{scheme}://"), rest),
+        _ => ("http://".to_string(), address),
+    };
+    let (authority, db) = match rest.split_once('/') {
+        Some((authority, tail)) => {
+            let db = tail.split('/').next().unwrap_or("").trim();
+            (
+                authority,
+                if db.is_empty() {
+                    default_db.to_string()
+                } else {
+                    db.to_string()
+                },
+            )
+        }
+        None => (rest, default_db.to_string()),
+    };
+    let authority = authority.trim();
+    if authority.is_empty() || authority.contains(char::is_whitespace) {
+        return None;
+    }
+    let host = if authority.contains(':') {
+        format!("{scheme}{authority}")
+    } else {
+        format!("{scheme}{authority}:3000")
+    };
+    Some((host, db))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_server_address;
+
+    #[test]
+    fn server_address_parsing() {
+        assert_eq!(
+            parse_server_address("127.0.0.1", "mindustry"),
+            Some(("http://127.0.0.1:3000".to_string(), "mindustry".to_string()))
+        );
+        assert_eq!(
+            parse_server_address("example.com:4000/other", "mindustry"),
+            Some(("http://example.com:4000".to_string(), "other".to_string()))
+        );
+        assert_eq!(
+            parse_server_address("https://db.example.com/prod", "mindustry"),
+            Some((
+                "https://db.example.com:3000".to_string(),
+                "prod".to_string()
+            ))
+        );
+        assert_eq!(parse_server_address("   ", "mindustry"), None);
+        assert_eq!(parse_server_address("bad host", "mindustry"), None);
     }
 }

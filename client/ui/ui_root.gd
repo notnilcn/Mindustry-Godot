@@ -312,10 +312,33 @@ func _connect_prompts() -> void:
 ## Wires manifest dialog intents that cross into the Rust facades.
 func _connect_net() -> void:
 	var host_dialog := dialog("host")
-	if host_dialog == null or not host_dialog.has_signal("host_requested"):
+	if host_dialog != null and host_dialog.has_signal("host_requested"):
+		if not host_dialog.is_connected("host_requested", Callable(self, "_on_host_requested")):
+			host_dialog.connect("host_requested", Callable(self, "_on_host_requested"))
+	var join_dialog := dialog("join")
+	if join_dialog == null:
 		return
-	if not host_dialog.is_connected("host_requested", Callable(self, "_on_host_requested")):
-		host_dialog.connect("host_requested", Callable(self, "_on_host_requested"))
+	if join_dialog.has_signal("connect_requested") \
+			and not join_dialog.is_connected("connect_requested", Callable(self, "_on_connect_requested")):
+		join_dialog.connect("connect_requested", Callable(self, "_on_connect_requested"))
+	if join_dialog.has_signal("join_requested") \
+			and not join_dialog.is_connected("join_requested", Callable(self, "_on_join_requested")):
+		join_dialog.connect("join_requested", Callable(self, "_on_join_requested"))
+
+
+## `JoinDialog.connect`: direct-connect to the addressed SpacetimeDB server and
+## enter the match browser.
+func _on_connect_requested(address: String) -> void:
+	var net := get_node_or_null("/root/Spine/MindNet")
+	if net != null and net.has_method("connect_to"):
+		net.call("connect_to", address)
+
+
+## `JoinDialog.safeConnect`: join the picked public match.
+func _on_join_requested(match_id: int) -> void:
+	var net := get_node_or_null("/root/Spine/MindNet")
+	if net != null and net.has_method("join_match"):
+		net.call("join_match", match_id, "")
 
 
 ## `HostDialog.runHost`: hosts the currently loaded state; the lobby metadata

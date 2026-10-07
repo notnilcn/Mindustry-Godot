@@ -2,14 +2,14 @@
 ## Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
 ## Source: core/src/mindustry/ui/dialogs/JoinDialog.java (plan 14 §3.4, M3).
 ##
-## Direct-connect + server list. The server-list fetch/parse and the
-## `NetClient`/`mind-stdb` connect flow are plans 01/21/22; the M3 shell provides
-## the name/color header, the three collapsible server sections and the
-## address/connect intents.
+## Direct-connect + server list. Local rows come from the dialog context; the
+## global section lists the public `all_matches` rows through `MindNet`, whose
+## `connect_to`/`join_match` calls `UiRoot` wires from the two intents below.
 
 extends MindDialog
 
 signal connect_requested(address: String)
+signal join_requested(match_id: int)
 
 ## Player color shown in the header swatch (upstream `player.color()`).
 var _color := Color.WHITE
@@ -20,6 +20,7 @@ var _search_field: LineEdit = null
 var _add_panel: Control = null
 var _ip_field: LineEdit = null
 var _local_list: MindTable = null
+var _global_list: MindTable = null
 
 
 func _ready() -> void:
@@ -111,7 +112,12 @@ func _build_sections() -> void:
 	remote.add_child(MindWidgets.space(0, 4))
 
 	var global := _add_section("@servers.global", true)
-	global.add_child(MindWidgets.styled_label(_tm("@hosts.none"), "outlineLabel"))
+	# code-instantiated: public match rows come from the `all_matches` view via
+	# `MindNet.get_public_matches_json`; rebuilt on every `shown()`.
+	_global_list = MindTable.new()
+	_global_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	global.add_child(_global_list)
+	_rebuild_public()
 
 
 ## Builds one section header (accent title + collapse glyph, optional search row)
@@ -166,6 +172,7 @@ func _toggle_section(body: Control, glyph: Label) -> void:
 
 func shown() -> void:
 	_rebuild_local()
+	_rebuild_public()
 
 
 ## Local group body: the discovered hosts, or the `@hosts.none` empty state with
@@ -202,6 +209,65 @@ func _rebuild_local() -> void:
 		_local_list.row()
 	_local_list.sort_now()
 	_local_list.call_deferred("sort_now")
+
+
+## Global group body: the public `all_matches` rows (`MindNet` browser), or the
+## `@hosts.none` empty state with a refresh control (`JoinDialog.finishLocalHosts`).
+func _rebuild_public() -> void:
+	if _global_list == null:
+		return
+	_global_list.clear_children()
+	var matches := _public_matches()
+	if matches.is_empty():
+		# code-instantiated: empty-state row carries the refresh control.
+		var empty := HBoxContainer.new()
+		empty.add_theme_constant_override("separation", 6)
+		var empty_label := MindWidgets.styled_label(_tm("@hosts.none"), "outlineLabel")
+		empty_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+		empty_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		empty.add_child(empty_label)
+		var refresh := MindWidgets.icon_button("refresh", "", "emptyi")
+		refresh.custom_minimum_size = Vector2(70, 70)
+		refresh.pressed.connect(_rebuild_public)
+		empty.add_child(refresh)
+		_global_list.add(empty).grow_x_axis().pad(4)
+		_global_list.row()
+		_global_list.sort_now()
+		_global_list.call_deferred("sort_now")
+		return
+	for row_variant in matches:
+		# code-instantiated: public match rows come from the server view.
+		var row: Dictionary = row_variant
+		var match_id := int(row.get("match_id", 0))
+		if match_id <= 0:
+			continue
+		var label := "%s  %s  %d/%d" % [
+			str(row.get("map_id", "")),
+			str(row.get("mode_name", "")),
+			int(row.get("player_count", 0)),
+			int(row.get("max_players", 0)),
+		]
+		var button := MindWidgets.button(label)
+		button.pressed.connect(_join.bind(match_id))
+		_global_list.add(button).grow_x_axis().pad(3)
+		_global_list.row()
+	_global_list.sort_now()
+	_global_list.call_deferred("sort_now")
+
+
+## Live `all_matches` rows from `MindNet` (empty when absent or offline).
+func _public_matches() -> Array:
+	var net := get_node_or_null("/root/Spine/MindNet")
+	if net == null or not net.has_method("get_public_matches_json"):
+		return []
+	var parsed: Variant = JSON.parse_string(str(net.call("get_public_matches_json")))
+	return parsed if parsed is Array else []
+
+
+## `JoinDialog.safeConnect` intent: join the picked public match.
+func _join(match_id: int) -> void:
+	join_requested.emit(match_id)
+	_close()
 
 
 func _open_picker() -> void:
