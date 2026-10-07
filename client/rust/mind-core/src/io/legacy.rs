@@ -52,6 +52,15 @@ pub(crate) fn load_legacy(
     result
 }
 
+/// Meta-only import of a legacy `MSAV` stream (`SaveIO.getMeta` /
+/// `MapIO.createMap` on `MSAV`): inflate, parse the 8-byte header, then read
+/// the first (`meta`) region.
+#[cfg(feature = "msav-import")]
+pub(crate) fn load_legacy_meta(bytes: &[u8]) -> Result<super::save::SaveMeta, IoError> {
+    let (version, body) = inflate_legacy(bytes)?;
+    super::save::versions::v1::read_legacy_meta(&body, version)
+}
+
 /// Inflates the whole stream and parses the `MSAV` header, returning
 /// `(format_version, region_stream)`.
 #[cfg(feature = "msav-import")]
