@@ -119,11 +119,13 @@ impl Tile {
         !self.solid(content)
     }
 
-    /// Whether the block can be broken (`Block.breakable`-shaped).
+    /// Whether the block can be broken (`Tile.breakable()`:
+    /// `block.destructible || block.breakable || block.update`; the port does
+    /// not model upstream's separate `Block.breakable` flag).
     pub fn breakable(&self, content: &ContentRegistry) -> bool {
         content
             .block(self.block)
-            .is_some_and(|def| def.destructible && def.kind != BlockKind::AirBlock)
+            .is_some_and(|def| (def.destructible || def.update) && def.kind != BlockKind::AirBlock)
     }
 
     /// Whether the tile damages entities (floor hazard; floor data in 02).

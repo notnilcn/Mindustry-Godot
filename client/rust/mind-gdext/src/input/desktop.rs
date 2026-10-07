@@ -941,7 +941,13 @@ impl DesktopBridge {
             self.controller.state.command_rect = None;
             return;
         }
-        if !self.controller.state.is_building || self.controller.state.block.is_none() {
+        if self.controller.state.block.is_none() {
+            // No placement selected: a left tap is `tileTapped`
+            // (`InputHandler.java:1973`), which owns config/inventory.
+            self.tile_tapped(x, y);
+            return;
+        }
+        if !self.controller.state.is_building {
             return;
         }
         self.controller.state.begin_place();
@@ -965,14 +971,9 @@ impl DesktopBridge {
         }
     }
 
-    fn right_press(&mut self, bindings: &BindingState) {
-        let Some((x, y)) = self.cursor_tile() else {
-            return;
-        };
-        if self.controller.state.command_mode {
-            self.command_tap(bindings);
-            return;
-        }
+    /// `tileTapped` (`InputHandler.java:1973`): a left tap on a placed building
+    /// opens its config UI, or its inventory when it stores items.
+    fn tile_tapped(&mut self, x: i32, y: i32) {
         if let Some(spec) = self.config_spec(x, y) {
             self.effects.push(Effect::OpenBlockConfig {
                 x,
@@ -982,15 +983,31 @@ impl DesktopBridge {
             });
             return;
         }
-        if self.has_items_at(x, y) {
+        let Some(host) = self.host.clone() else {
+            return;
+        };
+        let items = host.bind().block_items_json(x, y);
+        if let Some(items) = items {
             self.effects.push(Effect::OpenBlockInventory {
                 x,
                 y,
                 screen: self.mouse,
-                items: String::from("{}"),
+                items,
             });
+        }
+    }
+
+    fn right_press(&mut self, bindings: &BindingState) {
+        let Some((x, y)) = self.cursor_tile() else {
+            return;
+        };
+        if self.controller.state.command_mode {
+            self.command_tap(bindings);
             return;
         }
+        // `Binding.breakBlock` (`DesktopInput.pollInputPlayer`): the right
+        // button always enters breaking mode; config/inventory open on the
+        // left tap.
         self.controller.state.begin_break();
         self.drag = Some(Drag {
             kind: DragKind::Break,
@@ -1245,29 +1262,6 @@ impl DesktopBridge {
         };
         let block = guard.grid().block_at(TilePos::new(tx, ty))?;
         content.block(block).map(|def| def.name.clone())
-    }
-
-    /// Whether the tile holds an item container (`Block.hasItems`).
-    pub fn has_items_at(&self, x: i32, y: i32) -> bool {
-        self.with_block_def(x, y, |def| def.has_items && def.item_capacity > 0)
-            .unwrap_or(false)
-    }
-
-    /// Runs `read` on the block def at `(x, y)` while the host borrow is live.
-    fn with_block_def<T>(
-        &self,
-        x: i32,
-        y: i32,
-        read: impl FnOnce(&mind_core::content::BlockDef) -> T,
-    ) -> Option<T> {
-        let host = self.host.clone()?;
-        let guard = host.bind();
-        let content = guard.content_registry()?;
-        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
-            return None;
-        };
-        let block = guard.grid().block_at(TilePos::new(tx, ty))?;
-        content.block(block).map(read)
     }
 
     /// Builds the config-spec JSON for a configurable block.

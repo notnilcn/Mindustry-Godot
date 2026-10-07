@@ -87,7 +87,7 @@ pub fn valid_break(
     let Some(def) = content.block(tile.block) else {
         return false;
     };
-    let breakable = def.destructible || rules.allow_environment_deconstruct;
+    let breakable = tile.breakable(content) || rules.allow_environment_deconstruct;
     if !breakable || !can_break(def) {
         return false;
     }

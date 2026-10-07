@@ -1198,6 +1198,16 @@ impl MindSimHost {
         self.content_snapshot.as_ref()
     }
 
+    /// Item counts of the building at `(x, y)` as JSON (`{item-name: amount}`).
+    ///
+    /// `None` when the tile holds no item-capable building or its item module
+    /// is empty (`Block.hasItems && items.total() > 0`,
+    /// `InputHandler.tileTapped`). Rust-only input-bridge seam; not MCP API.
+    pub fn block_items_json(&self, x: i32, y: i32) -> Option<String> {
+        let content = self.content_snapshot.as_ref()?;
+        block_items_json(&self.sim, content, x, y)
+    }
+
     /// Installs the opt-in live block runtime (plan-07 `BlockTable` + behaviors)
     /// over the host's content snapshot.
     ///
@@ -1388,6 +1398,36 @@ fn core_items_json(sim: &Sim, content: &ContentRegistry) -> String {
             .unwrap_or_else(|_| String::from("{}"));
     }
     String::from("{}")
+}
+
+/// Item counts for the building at `(x, y)` as JSON; `None` when the tile has
+/// no item-capable building or its items total zero. See
+/// [`MindSimHost::block_items_json`].
+fn block_items_json(sim: &Sim, content: &ContentRegistry, x: i32, y: i32) -> Option<String> {
+    let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+        return None;
+    };
+    let pos = mind_core::world::TilePos::new(tx, ty);
+    let def = content.block(sim.grid.block_at(pos)?)?;
+    if !def.has_items {
+        return None;
+    }
+    let entity = sim.grid.entity_at(pos)?;
+    let module = sim.ecs.0.get::<ItemModule>(entity)?;
+    if module.total() <= 0 {
+        return None;
+    }
+    let mut items = serde_json::Map::new();
+    for (index, amount) in module.items.iter().enumerate() {
+        if *amount <= 0 {
+            continue;
+        }
+        let Some(item) = content.item(ItemId::new(index as u16)) else {
+            continue;
+        };
+        items.insert(item.name.clone(), serde_json::Value::from(*amount));
+    }
+    serde_json::to_string(&serde_json::Value::Object(items)).ok()
 }
 
 /// Resolves a Godot `user://` / `res://` path to a native path for plan-04
@@ -1624,5 +1664,43 @@ mod tests {
         }
         let json = core_items_json(&sim, &registry);
         assert!(json.contains("\"copper\":25"), "unexpected JSON: {json}");
+    }
+
+    #[test]
+    fn block_items_json_gates_on_the_item_total() {
+        let registry = base_registry();
+        let Some(conveyor) = registry.block_id("conveyor") else {
+            panic!("conveyor missing");
+        };
+        let Some(copper) = registry.item_id("copper") else {
+            panic!("copper missing");
+        };
+        let mut sim = Sim::new(1, 8, 8, BlockId::AIR, BlockId::AIR);
+        if let Err(error) = sim.apply(Command::Place {
+            x: 2,
+            y: 2,
+            block: conveyor,
+        }) {
+            panic!("place conveyor failed: {error}");
+        }
+        let Some(entity) = sim.grid.tile(2, 2).build else {
+            panic!("conveyor building entity missing");
+        };
+        // `Sim::apply` spawns the base building only; the plan-08 building path
+        // attaches the item module, so attach the fixture module here.
+        sim.ecs
+            .0
+            .entity_mut(entity)
+            .insert(ItemModule::with_items(registry.items().len()));
+        // Zero stored items opens no inventory (`InputHandler.java:2017`).
+        assert_eq!(block_items_json(&sim, &registry, 2, 2), None);
+        if let Some(mut module) = sim.ecs.0.get_mut::<ItemModule>(entity) {
+            module.add(copper, 3, 1000);
+        }
+        let json = match block_items_json(&sim, &registry, 2, 2) {
+            Some(json) => json,
+            None => panic!("items JSON missing"),
+        };
+        assert!(json.contains("\"copper\":3"), "unexpected JSON: {json}");
     }
 }

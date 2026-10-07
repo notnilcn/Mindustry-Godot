@@ -533,7 +533,7 @@
       "kind": "harness",
       "path": "client/rust/mind-headless/tests/golden/input/placement_validation_table.json",
       "owner_plan": "15",
-      "sha256": "0e018fd12d267b20274aa5d45cb98c4913c35e005ef256f73d5706c2b068067c"
+      "sha256": "dcdeb69947d5df5274a351bacf312d8f137587ea86ca2d4c6853e87e01e45788"
     },
     {
       "id": "harness_input_camera_pan_zoom",
