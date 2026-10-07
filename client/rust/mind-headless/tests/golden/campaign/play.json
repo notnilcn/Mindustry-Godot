@@ -10,6 +10,14 @@
     "NewGame",
     "Wave",
     "Wave",
+    "Wave",
+    "Wave",
+    "Wave",
+    "Wave",
+    "Wave",
+    "Wave",
+    "Wave",
+    "Wave",
     "SectorCapture { planet: ContentId(5), sector: 15, initial: true }"
   ],
   "lose_events": [
@@ -21,6 +29,6 @@
   "captured": true,
   "set_rules_open_ok": true,
   "set_rules_campaign_rejected": true,
-  "checksum": "141964dccb5232e7",
+  "checksum": "24a590f37875b92f",
   "pass": true
 }
