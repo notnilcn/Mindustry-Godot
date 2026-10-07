@@ -49,8 +49,8 @@ impl AiCtx<'_> {
             .unwrap_or(false)
     }
 
-    /// `prefSpeed`: `type.speed * (isBoosting ? boostMultiplier : 1)` cleared of
-    /// statuses (status speed multiplier lands with plan 10's status runtime).
+    /// `prefSpeed`: `type.speed * (isBoosting ? boostMultiplier : 1)` scaled by
+    /// the status speed multiplier (`StatusComp.speedMultiplier`).
     pub fn pref_speed(&self, unit: Entity) -> f32 {
         let Some(physics) = self.world.get::<PhysicsComp>(unit) else {
             return 1.0;
@@ -60,10 +60,15 @@ impl AiCtx<'_> {
             .get::<UnitCore>(unit)
             .map(|core| core.boosting)
             .unwrap_or(false);
+        let status_multiplier = self
+            .world
+            .get::<crate::entities::comp::unit::comp::StatusComp>(unit)
+            .map(|status| status.speed_multiplier)
+            .unwrap_or(1.0);
         if boosting && physics.can_boost {
-            physics.speed * physics.boost_multiplier
+            physics.speed * physics.boost_multiplier * status_multiplier
         } else {
-            physics.speed
+            physics.speed * status_multiplier
         }
     }
 

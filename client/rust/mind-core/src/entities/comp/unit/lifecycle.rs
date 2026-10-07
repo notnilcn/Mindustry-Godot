@@ -167,6 +167,9 @@ fn spawn_single(
     ));
 
     insert_kind_components(world, entity, unit, x, y, rotation);
+    // `UnitType.setType`: copy the type's abilities (`Ability.created` runs
+    // `ForceField`/`ShieldArc` max-shield initialization).
+    crate::combat::abilities::init_unit_abilities(world, entity, unit);
     entity
 }
 
@@ -288,6 +291,28 @@ pub fn kill_unit(world: &mut World, entity: Entity) -> bool {
     remove_unit(world, entity)
 }
 
+/// Kills a unit and runs its death abilities first (`UnitComp.killed` →
+/// `Ability.death` for `SpawnDeathAbility`/`LiquidExplodeAbility`).
+///
+/// `seq` is the caller's deterministic entity-sequence allocator. The live unit
+/// loop should use this entry point instead of [`kill_unit`] so death spawns and
+/// liquid explosions run.
+#[allow(clippy::too_many_arguments)]
+pub fn kill_unit_with_abilities(
+    world: &mut World,
+    content: &ContentRegistry,
+    tiles: &crate::world::tiles::Tiles,
+    rng: &mut crate::determinism::SimRng,
+    seq: &mut u64,
+    entity: Entity,
+) -> bool {
+    if world.get_entity(entity).is_err() {
+        return false;
+    }
+    crate::combat::abilities::run_death_abilities(world, content, tiles, rng, seq, entity);
+    kill_unit(world, entity)
+}
+
 /// Reads a unit's content type id.
 pub fn unit_type_of(world: &World, entity: Entity) -> Option<UnitTypeId> {
     world.get::<UnitTypeComp>(entity).map(|comp| comp.type_id)
@@ -317,6 +342,9 @@ pub fn ai_kind_of(world: &World, entity: Entity) -> Option<AiKind> {
 /// Re-syncs the plan-10 [`crate::weapons::UnitState`] from the unit core and
 /// velocity (`Unit.rotation` -> `UnitState.rotation`, `deltaLen` -> speed).
 ///
+/// Also carries the status-driven weapon fields: `reloadMultiplier` and
+/// `canShoot()` (`!disarmed && !(type.canBoost && isFlying())`).
+///
 /// Called once per tick before the weapon update pass so the plan-10 engine sees
 /// the same values upstream's `Unit.update`/`WeaponsComp.update` would.
 pub fn sync_weapon_state(world: &mut World, entity: Entity) {
@@ -328,8 +356,20 @@ pub fn sync_weapon_state(world: &mut World, entity: Entity) {
         .get::<Vel>(entity)
         .map(|vel| (vel.x * vel.x + vel.y * vel.y).sqrt())
         .unwrap_or(0.0);
+    let (reload_multiplier, disarmed) = world
+        .get::<StatusComp>(entity)
+        .map(|status| (status.reload_multiplier, status.disarmed))
+        .unwrap_or((1.0, false));
+    let boosting = world
+        .get::<PhysicsComp>(entity)
+        .is_some_and(|physics| physics.can_boost)
+        && world
+            .get::<UnitCore>(entity)
+            .is_some_and(|core| core.elevation > 0.0);
     if let Some(mut state) = world.get_mut::<crate::weapons::UnitState>(entity) {
         state.rotation = rotation;
         state.delta_len = delta_len;
+        state.reload_multiplier = reload_multiplier;
+        state.can_shoot = !disarmed && !boosting;
     }
 }

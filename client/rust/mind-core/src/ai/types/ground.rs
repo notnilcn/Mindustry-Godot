@@ -113,7 +113,11 @@ pub fn update_ground(
         let speed = world
             .get::<PhysicsComp>(entity)
             .map(|physics| physics.speed)
-            .unwrap_or(1.0);
+            .unwrap_or(1.0)
+            * world
+                .get::<crate::entities::comp::unit::comp::StatusComp>(entity)
+                .map(|status| status.speed_multiplier)
+                .unwrap_or(1.0);
         let hit_size = world
             .get::<HitboxComp>(entity)
             .map(|hitbox| hitbox.hit_size)

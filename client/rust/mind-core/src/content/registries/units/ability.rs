@@ -226,7 +226,11 @@ impl AbilitySpec {
             }
             AbilityKind::MoveEffect => {}
             AbilityKind::SpawnDeath => {}
-            AbilityKind::Regen => {}
+            AbilityKind::Regen => {
+                // `RegenAbility.amount` defaults to `0` (the union default is
+                // the `ShieldRegenField`/`RepairField` `1`).
+                spec.amount = 0.0;
+            }
             AbilityKind::LiquidExplode => {
                 spec.liquid = Some("water");
             }

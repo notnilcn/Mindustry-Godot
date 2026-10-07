@@ -100,6 +100,18 @@ pub fn create(
     } else {
         spawn.damage
     } * spawn.damage_multiplier;
+    // `BulletType.damageMultiplier(b)`: a unit owner scales the bullet by its
+    // status damage multiplier (`StatusComp.damageMultiplier`).
+    let damage = match spawn.owner {
+        Some(owner) => {
+            damage
+                * world
+                    .get::<crate::entities::comp::unit::comp::StatusComp>(owner)
+                    .map(|status| status.damage_multiplier)
+                    .unwrap_or(1.0)
+        }
+        None => damage,
+    };
 
     // `BulletType.create`: angle offset, random offset, create chance.
     let mut angle = spawn.angle + def.angle_offset;

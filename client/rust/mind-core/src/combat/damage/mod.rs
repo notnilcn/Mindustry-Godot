@@ -13,7 +13,9 @@ pub mod explosion;
 pub mod line;
 pub mod status;
 
-pub use area::{DamageOptions, apply_health, complete_damage, damage_area, damage_entity};
+pub use area::{
+    DamageOptions, apply_health, complete_damage, damage_area, damage_entity, heal_health,
+};
 pub use armor::{MIN_ARMOR_DAMAGE, apply_armor, apply_armor_opt};
 pub use explosion::{dynamic_explosion, tile_damage};
 pub use line::{collide_line, find_length, linecast};

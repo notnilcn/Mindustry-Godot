@@ -13,6 +13,8 @@ use bevy_ecs::world::World;
 
 use crate::content::ContentRegistry;
 use crate::ecs::EntitySeq;
+use crate::entities::comp::unit::comp::StatusComp;
+use crate::entities::comp::unit::{ShieldComp, UnitTypeComp};
 use crate::entities::comp::{Building, Health, Pos, TeamComp};
 
 use super::armor::apply_armor_opt;
@@ -100,12 +102,24 @@ fn targets_in_radius(
     targets
 }
 
+/// Effective armor of an entity: block armor for buildings, unit-type armor
+/// for units (`Unit.armor`), with the status armor override winning when set
+/// (`UnitComp.armor`: `armorOverride >= 0 ? armorOverride : armor`).
 fn armor_of(content: &ContentRegistry, world: &World, entity: Entity) -> f32 {
-    let Some(building) = world.get::<Building>(entity) else {
-        return 0.0;
-    };
-    content
-        .block(building.block)
+    if let Some(status) = world.get::<StatusComp>(entity)
+        && status.armor_override >= 0.0
+    {
+        return status.armor_override;
+    }
+    if let Some(building) = world.get::<Building>(entity) {
+        return content
+            .block(building.block)
+            .map(|def| def.armor)
+            .unwrap_or(0.0);
+    }
+    world
+        .get::<UnitTypeComp>(entity)
+        .and_then(|comp| content.unit(comp.type_id))
         .map(|def| def.armor)
         .unwrap_or(0.0)
 }
@@ -204,8 +218,32 @@ pub fn damage_entity(
     applied
 }
 
-/// Subtracts `amount` from an entity's health, clamping at zero (`damage()` core).
+/// Subtracts `amount` from an entity's health after shields
+/// (`ShieldComp.rawDamage` + `StatusComp.healthMultiplier`).
+///
+/// Status `healthMultiplier` divides incoming damage (so `invincible`'s
+/// infinity negates it), shields absorb first, and the remainder drains
+/// health. Armor must already be applied by the caller.
 pub fn apply_health(world: &mut World, entity: Entity, amount: f32) {
+    if amount <= 0.0 {
+        return;
+    }
+    let divisor = world
+        .get::<StatusComp>(entity)
+        .map(|status| status.health_multiplier)
+        .unwrap_or(1.0);
+    let mut amount = amount / divisor;
+    if !amount.is_finite() || amount <= 0.0 {
+        return;
+    }
+    if let Some(mut shield) = world.get_mut::<ShieldComp>(entity) {
+        let absorbed = shield.shield.max(0.0).min(amount);
+        shield.shield -= absorbed;
+        amount -= absorbed;
+    }
+    if amount <= 0.0 {
+        return;
+    }
     let Some(mut health) = world.get_mut::<Health>(entity) else {
         return;
     };
@@ -213,6 +251,17 @@ pub fn apply_health(world: &mut World, entity: Entity, amount: f32) {
     if health.health <= 0.0 {
         health.dead = true;
     }
+}
+
+/// Adds `amount` to an entity's health, clamped to max (`HealthComp.heal`).
+pub fn heal_health(world: &mut World, entity: Entity, amount: f32) {
+    if amount <= 0.0 {
+        return;
+    }
+    let Some(mut health) = world.get_mut::<Health>(entity) else {
+        return;
+    };
+    health.health = (health.health + amount).min(health.max_health);
 }
 
 #[cfg(test)]
