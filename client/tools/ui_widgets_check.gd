@@ -350,6 +350,21 @@ func _init() -> void:
 	load_dialog.free()
 	save_stub.free()
 
+	# EV-0061: opening the game-over dialog must not re-enter `MindUi` while
+	# `open_dialog` mutably binds it (gdext `bind_mut` panic freezes the client).
+	if ui != null:
+		var over_dialog: Control = load("res://scenes/ui/dialogs/game_over_dialog.tscn").instantiate()
+		root.add_child(over_dialog)
+		ui.call("register_dialog", "game_over_check", over_dialog, false)
+		ui.call("open_dialog", "game_over_check", JSON.stringify({"campaign": false}))
+		await process_frame
+		_check(bool(ui.call("has_dialog")), "game-over dialog opens through MindUi")
+		_check(not bool(ui.call("hud_visible")), "game-over dialog hides the HUD flag")
+		ui.call("close_dialog", "game_over_check")
+		await process_frame
+		_check(bool(ui.call("hud_visible")), "closing the game-over dialog restores the HUD flag")
+		over_dialog.free()
+
 	# Prompt bodies must render BBCode: the uiscale reset prompt's translated
 	# `[color=...]` markup used to render literally because the body was a plain
 	# Label (EV-0034).
