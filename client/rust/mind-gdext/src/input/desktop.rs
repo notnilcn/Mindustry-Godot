@@ -415,10 +415,12 @@ impl DesktopBridge {
 
     /// Tap on release (`keyTap` semantics) for bindings that must not fire while
     /// held (`command_mode` shares `shiftLeft` with `boost`).
+    ///
+    /// `DesktopInput.update` toggles command mode on a command-mode key tap when
+    /// no placement block is selected; the shared default key does not disable
+    /// the tap.
     fn key_up_event(&mut self, bindings: &BindingState, code: &str) {
-        let command_mode = bindings.name(ids::COMMAND_MODE);
-        let boost = bindings.name(ids::BOOST);
-        if command_mode.is_some() && command_mode != boost && command_mode == Some(code) {
+        if bindings.name(ids::COMMAND_MODE) == Some(code) && self.controller.state.block.is_none() {
             self.toggle_command_mode();
         }
     }
@@ -1341,4 +1343,46 @@ fn camera_world_corner(camera: &Gd<MindCamera2D>, x: f32, y: f32) -> (f32, f32) 
     let tile = camera.bind().screen_to_tile(x as f64, y as f64);
     let unit = mind_core::config::TILESIZE as f32;
     ((tile.x as f32 + 0.5) * unit, (tile.y as f32 + 0.5) * unit)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_mode_tap_toggles_with_shared_default_binding() {
+        // `DesktopInput.update`: `command_mode` and `boost` both default to
+        // `shiftLeft`; with no placement block a key tap toggles command mode.
+        let mut bridge = DesktopBridge::new();
+        let bindings = BindingState::new();
+        assert_eq!(bindings.name(ids::COMMAND_MODE), Some("shiftLeft"));
+        assert_eq!(bindings.name(ids::BOOST), Some("shiftLeft"));
+
+        bridge.handle(&bindings, RawEvent::key_down("shiftLeft"));
+        assert!(!bridge.controller.state.command_mode);
+        bridge.handle(&bindings, RawEvent::key_up("shiftLeft"));
+        assert!(bridge.controller.state.command_mode);
+        assert_eq!(bridge.last_action, "command_mode");
+        assert_eq!(bridge.action_count, 1);
+
+        // The next tap toggles back off.
+        bridge.handle(&bindings, RawEvent::key_down("shiftLeft"));
+        bridge.handle(&bindings, RawEvent::key_up("shiftLeft"));
+        assert!(!bridge.controller.state.command_mode);
+    }
+
+    #[test]
+    fn command_mode_tap_ignored_while_placing() {
+        // `DesktopInput.update` requires `block == null`.
+        let mut bridge = DesktopBridge::new();
+        let bindings = BindingState::new();
+        bridge
+            .controller
+            .state
+            .select_block(Some(BlockId::STONE_WALL));
+
+        bridge.handle(&bindings, RawEvent::key_down("shiftLeft"));
+        bridge.handle(&bindings, RawEvent::key_up("shiftLeft"));
+        assert!(!bridge.controller.state.command_mode);
+    }
 }
