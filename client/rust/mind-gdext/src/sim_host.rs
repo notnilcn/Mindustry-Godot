@@ -215,6 +215,12 @@ impl MindSimHost {
             mind_core::logic::globals::GlobalVars::install_world(&mut self.sim.ecs.0, registry);
         }
 
+        // Live gameplay (the default spine world, custom maps and campaign
+        // sectors) runs the plan-07 block stack so placed buildings execute their
+        // behaviors. Scenario loads keep the frozen P0 path on purpose: the
+        // committed checksum goldens are recorded against `Sim::from_scenario`.
+        self.install_live_block_runtime();
+
         // Plan 04 §3.10: register the live-sim IO executor so `request_save` /
         // `request_load` are fulfilled at the `IoSet` boundary. The handler boots
         // its content lazily on the first IO call, so a session that never saves
@@ -924,6 +930,11 @@ impl MindSimHost {
             FixedStepRunner::for_rate(sim.config().fixed_hz, sim.config().max_ticks_per_frame);
         self.sim = sim;
         self.player = None;
+        // A campaign sector is live play: its placed blocks must execute their
+        // plan-07 behaviors (mining, transport, crafting, power). The runtime
+        // resources are installed before any entity exists so ECS indices stay
+        // stable.
+        self.install_live_block_runtime();
         self.world_dirty = true;
         self.world_loads += 1;
         self.emit_state();
@@ -1020,6 +1031,28 @@ impl MindSimHost {
     /// Read-only content registry snapshot for block draw metadata.
     pub fn content_registry(&self) -> Option<&ContentRegistry> {
         self.content_snapshot.as_ref()
+    }
+
+    /// Installs the opt-in live block runtime (plan-07 `BlockTable` + behaviors)
+    /// over the host's content snapshot.
+    ///
+    /// The default `Sim` spine stores a bare `BuildingComp` per placed block, so
+    /// buildings are inert (`update_buildings` is a no-op without the runtime
+    /// resources). Installing the runtime makes every subsequent place/break go
+    /// through the real tile ops and lets the scheduled building/power systems
+    /// run. Idempotent; returns `false` when the content snapshot is unavailable
+    /// or the table fails to build.
+    fn install_live_block_runtime(&mut self) -> bool {
+        if self.sim.has_block_runtime() {
+            return true;
+        }
+        match self.sim.install_block_runtime() {
+            Ok(()) => true,
+            Err(error) => {
+                log::warn!("live block runtime install failed: {error}");
+                false
+            }
+        }
     }
 
     /// Applies one immediate command; `false` when `mind-core` rejects it.
