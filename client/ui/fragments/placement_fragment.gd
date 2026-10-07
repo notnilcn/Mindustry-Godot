@@ -26,7 +26,25 @@ func _ready() -> void:
 	# The HUD starts hidden in the menu; build the (content-booting) catalogue on
 	# first reveal instead of during boot.
 	visibility_changed.connect(_ensure_loaded)
+	# Category cycling (`,`/`.`) is dispatched by `MindInput`; the rail owns the
+	# visible index and pushes it back.
+	var input := get_node_or_null("/root/Spine/Input")
+	if input != null and input.has_signal("hotkey") and not input.is_connected("hotkey", Callable(self, "_on_hotkey")):
+		input.connect("hotkey", Callable(self, "_on_hotkey"))
 	_ensure_loaded()
+
+
+func _on_hotkey(action: String) -> void:
+	if action != "category_prev" and action != "category_next":
+		return
+	var count := int(_catalog.get("categories", []).size())
+	if count <= 0:
+		return
+	var delta := -1 if action == "category_prev" else 1
+	_selected_category = wrapi(_selected_category + delta, 0, count)
+	_sync_category()
+	_build_categories()
+	_rebuild()
 
 
 func _ensure_loaded() -> void:
@@ -44,6 +62,7 @@ func _load_catalog() -> void:
 		if parsed is Dictionary:
 			_catalog = parsed
 	_build_categories()
+	_sync_category()
 	_rebuild()
 
 
@@ -92,8 +111,27 @@ func _build_categories() -> void:
 
 func _select(index: int) -> void:
 	_selected_category = index
+	_sync_category()
 	_build_categories()
 	_rebuild()
+
+
+## Mirrors the visible category into `MindInput` so the `1`..`0` block-select
+## binds pick from the same category the player sees.
+func _sync_category() -> void:
+	var input := get_node_or_null("/root/Spine/Input")
+	if input != null and input.has_method("set_catalog_category"):
+		input.call("set_catalog_category", _selected_category)
+
+
+## Selects a block through `MindInput` so the placement rotation/state stay in
+## sync (falls back to the sim host when the input node is absent).
+func _select_block(host: Node, name: String) -> void:
+	var input := get_node_or_null("/root/Spine/Input")
+	if input != null and input.has_method("select_block_by_name"):
+		input.call("select_block_by_name", name)
+	elif host != null:
+		host.call("select_block", name)
 
 
 func _rebuild() -> void:
@@ -138,6 +176,5 @@ func _rebuild() -> void:
 		if button.icon == null:
 			button.text = label
 		button.pressed.connect(func() -> void:
-			if host != null:
-				host.call("select_block", name))
+			_select_block(host, name))
 		blocks.add_child(button)
