@@ -1,12 +1,12 @@
 {
-  "format": 1,
-  "updated": "2026-10-07T08:18:59+00:00",
+  "format": 2,
+  "updated": "2026-10-07T14:35:15+00:00",
   "findings": [
     {
       "id": "EV-0001",
       "area": "ui/menu",
       "severity": "S2",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "Settings dialog renders no setting controls (empty content pane)",
       "expected": "Java: each Settings category shows its controls (checkboxes, sliders, keybinds, data actions)",
       "actual": "Godot: Settings opens a centered panel whose right pane is an empty scroll area; only the selected category header renders",
@@ -20,17 +20,18 @@
         "runs/20261005-154654-boot_menu-verify/godot/state-persistence.json"
       ],
       "notes": [
-        "2026-10-05T05:59:11+00:00: re-ran boot_menu step 2 in a fresh editor with the rebuilt GDExtension at 7ed0263 (2026-10-05). Settings content pane now renders real controls: Game 11 model rows (1 slider: Save Interval; 10 checks), rendered 10 MindCheck + 1 HSlider; Graphics 39 rows (27 checks + 12 sliders), Sound 4, Dev 4; Language and Controls open their dialogs; Game Data renders Clear Saves and Open Data Folder. fps check toggled through the UI and uiscale slider changed to 200, both read back via MindUi.settings_rows_json and persisted across stop/play (settings.bin)."
+        "2026-10-05T05:59:11+00:00: re-ran boot_menu step 2 in a fresh editor with the rebuilt GDExtension at 7ed0263 (2026-10-05). Settings content pane now renders real controls: Game 11 model rows (1 slider: Save Interval; 10 checks), rendered 10 MindCheck + 1 HSlider; Graphics 39 rows (27 checks + 12 sliders), Sound 4, Dev 4; Language and Controls open their dialogs; Game Data renders Clear Saves and Open Data Folder. fps check toggled through the UI and uiscale slider changed to 200, both read back via MindUi.settings_rows_json and persisted across stop/play (settings.bin).",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "14",
       "first_seen": "2026-10-05T05:35:07+00:00",
-      "last_verified": "2026-10-05T05:59:11+00:00"
+      "last_verified": "2026-10-07T14:08:34+00:00"
     },
     {
       "id": "EV-0002",
       "area": "ui/menu",
       "severity": "S3",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "Main menu shows a Workshop button the reference build does not",
       "expected": "Java (non-Steam): sidebar is Play, Database, Editor, Mods, Settings, Quit; Workshop is Steam-only (MenuFragment.java:222)",
       "actual": "Godot: 7 visible top-level buttons, Workshop between Editor and Mods",
@@ -45,7 +46,8 @@
         "runs/20261005-161109-ev0002-verify/diff/engine-vs-xscreen.json"
       ],
       "notes": [
-        "2026-10-05T06:15:24+00:00: re-ran boot_menu step 1 at 2026-10-05 (fresh editor, game pid 277068): top-level sidebar is exactly Play, Database, Editor, Mods, Settings, Quit - Workshop absent; Play submenu = Campaign/Join Game/Custom Game/Load Game, Database submenu = Schematics/Core Database/About"
+        "2026-10-05T06:15:24+00:00: re-ran boot_menu step 1 at 2026-10-05 (fresh editor, game pid 277068): top-level sidebar is exactly Play, Database, Editor, Mods, Settings, Quit - Workshop absent; Play submenu = Campaign/Join Game/Custom Game/Load Game, Database submenu = Schematics/Core Database/About",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "14",
       "first_seen": "2026-10-05T05:35:07+00:00",
@@ -55,7 +57,7 @@
       "id": "EV-0003",
       "area": "ui/menu",
       "severity": "S3",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "Menu logo is 37 percent narrower than the reference at the same window size",
       "expected": "Java at 1152x648: logo pixel bbox 754 px wide (198..951)",
       "actual": "Godot at 1152x648: logo global width 483.84 px, pixel bbox 475 px (338..812)",
@@ -73,7 +75,8 @@
       ],
       "notes": [
         "2026-10-05T22:42:57+00:00: claimed by loop-2",
-        "2026-10-06T07:26:24+00:00: [loop ?] Fresh in-engine repro at HEAD bc6d94e (fix commit, cherry-pick of dead-loop-2 4a6f0cb): boot_menu step 1 main menu, pid 1083396, 1152x648, log cleared first. Logo Control global rect x=192.0 y=6.0 w=768.0 h=107.0, drawn 1:1 from the native 768x107 texture - the commit message's headless claim is confirmed in-engine exactly. Pixel bbox measured with the archived method after re-validating it on the old captures (yields Java 754 exact and pre-fix Godot 475 exact): fresh logo-only bbox 198..951 x 12..92, w=754 h=81 - identical to the Java baseline 198..951 x 12..92 w=754 h=81, 0 px delta on width and all four edges. Full-band bbox reaches y=138 only because the white 'Mindustry-Godot' version label (rect 416,115 320x26) crosses the luma threshold; the Java label is orange and excluded. The pre-fix bbox 338..812 w=475 does not reproduce. Visual side-by-side (step-01-fresh-vs-java-top.png) matches in size and horizontal centering. Only log entry is the pre-existing menu-background-missing-regions boot warning; no new errors. Java leg not re-run (committed 1152x648 baseline used). EV-0004 label text/color still open separately."
+        "2026-10-06T07:26:24+00:00: [loop ?] Fresh in-engine repro at HEAD bc6d94e (fix commit, cherry-pick of dead-loop-2 4a6f0cb): boot_menu step 1 main menu, pid 1083396, 1152x648, log cleared first. Logo Control global rect x=192.0 y=6.0 w=768.0 h=107.0, drawn 1:1 from the native 768x107 texture - the commit message's headless claim is confirmed in-engine exactly. Pixel bbox measured with the archived method after re-validating it on the old captures (yields Java 754 exact and pre-fix Godot 475 exact): fresh logo-only bbox 198..951 x 12..92, w=754 h=81 - identical to the Java baseline 198..951 x 12..92 w=754 h=81, 0 px delta on width and all four edges. Full-band bbox reaches y=138 only because the white 'Mindustry-Godot' version label (rect 416,115 320x26) crosses the luma threshold; the Java label is orange and excluded. The pre-fix bbox 338..812 w=475 does not reproduce. Visual side-by-side (step-01-fresh-vs-java-top.png) matches in size and horizontal centering. Only log entry is the pre-existing menu-background-missing-regions boot warning; no new errors. Java leg not re-run (committed 1152x648 baseline used). EV-0004 label text/color still open separately.",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "14",
       "first_seen": "2026-10-05T05:35:07+00:00",
@@ -83,7 +86,7 @@
       "id": "EV-0004",
       "area": "ui/menu",
       "severity": "S4",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "Version label text and color differ from the reference",
       "expected": "Java: custom build (accent orange) below the logo",
       "actual": "Godot: Mindustry-Godot in white directly under the logo",
@@ -101,7 +104,8 @@
       ],
       "notes": [
         "2026-10-06T07:58:30+00:00: [loop ?] Fresh ui_dialogs/settings_ui twin run 20261006-172828 at HEAD c045080, Godot pid 1091007/1094036, 1152x648. Still reproduces: Godot version label is white 'Mindustry-Godot'; Java shows orange 'custom build'. Same-band pixel count x330-830 y110-150: Godot 531 white / 4 orange vs Java 0 white / 530 orange (diff/version-label-analysis.json).",
-        "2026-10-06T09:56:20+00:00: [loop ?] Fresh in-engine repro (HEAD b67015f = a8eb18e client tree, tools/build.sh 19:44 .so; Godot pid 1173788, 1152x648): menu Version label text 'custom build' with font_color override (0.9882,0.5059,0.251,0.6667)=#fc8140aa, rect (416,115,320,26). Band x330-830 y110-150: 0 white / 327 orange vs the broken capture's 531 white / 4 orange (Java ref 0 white / 544 orange). Residual not filed: glyph raster 110px wide vs Java 122px, text 7px lower."
+        "2026-10-06T09:56:20+00:00: [loop ?] Fresh in-engine repro (HEAD b67015f = a8eb18e client tree, tools/build.sh 19:44 .so; Godot pid 1173788, 1152x648): menu Version label text 'custom build' with font_color override (0.9882,0.5059,0.251,0.6667)=#fc8140aa, rect (416,115,320,26). Band x330-830 y110-150: 0 white / 327 orange vs the broken capture's 531 white / 4 orange (Java ref 0 white / 544 orange). Residual not filed: glyph raster 110px wide vs Java 122px, text 7px lower.",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "14",
       "first_seen": "2026-10-05T05:35:07+00:00",
@@ -111,7 +115,7 @@
       "id": "EV-0005",
       "area": "ui/menu",
       "severity": "S3",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "Settings category rail shows raw settings.main and omits Language and Controls",
       "expected": "Java categories in order: Game, Graphics, Sound, Language, Controls, Game Data, Developer Options",
       "actual": "Godot: Game, Graphics, Sound, Developer Options, settings.main (raw bundle key echoed by _t), Game Data",
@@ -126,7 +130,8 @@
         "runs/20261005-154654-boot_menu-verify/godot/state-12-controls.json"
       ],
       "notes": [
-        "2026-10-05T05:59:14+00:00: same fresh run (pid 262990/266549). Rail renders exactly Game, Graphics, Sound, Language, Controls, Game Data, Developer Options in that order (label dump from the live tree and settings_categories_json); no raw settings.main label exists anywhere in the dialog. Language and Controls both open their mapped dialogs."
+        "2026-10-05T05:59:14+00:00: same fresh run (pid 262990/266549). Rail renders exactly Game, Graphics, Sound, Language, Controls, Game Data, Developer Options in that order (label dump from the live tree and settings_categories_json); no raw settings.main label exists anywhere in the dialog. Language and Controls both open their mapped dialogs.",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "14",
       "first_seen": "2026-10-05T05:35:17+00:00",
@@ -136,7 +141,7 @@
       "id": "EV-0006",
       "area": "ui/menu",
       "severity": "S3",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "About link titles render raw bundle keys",
       "expected": "Java: Discord, Changelog, Trello, Wiki, Suggestions, Reddit, Itch.io, Google play, F-Droid, Github, Dev builds, Bug",
       "actual": "Godot: link.discord.title, link.changelog.title, link.trello.title, link.wiki.title, link.suggestions.title, link.reddit.title, link.github.title, link.bug.title; descriptions resolve and no link icons render",
@@ -156,7 +161,8 @@
       "notes": [
         "2026-10-06T07:58:30+00:00: [loop ?] Fresh ui_dialogs run 20261006-172828 (Godot pid 1098928, menu > Database > About): the 8 link buttons still render raw keys link.discord.title, link.changelog.title, link.trello.title, link.wiki.title, link.suggestions.title, link.reddit.title, link.github.title, link.bug.title; descriptions resolve normally.",
         "2026-10-06T08:56:19+00:00: claimed by loop-1",
-        "2026-10-06T08:59:49+00:00: [loop ?] Fresh in-engine repro at HEAD 38d8105 (fix 38d8105), pid 1137585, 1152x648, log cleared first; menu > Database > About. All 8 link titles now render the Links.LinkEntry fallback (Strings.capitalize with '-'->' ') and no raw key remains: Discord, Changelog, Trello, Wiki, Suggestions, Reddit, Github, Bug; raw_link_key_count=0; descriptions 8/8 resolve. The Java-overlapping rows match ('Discord','Changelog','Trello','Wiki','Suggestions','Reddit','Github','Bug'); the 4 links Godot lacks (Itch.io/Google play/F droid/Dev builds) remain under EV-0007. Headless gate exit 0: 'About renders the Discord title', 'About renders the Trello title', 'About does not render raw title keys'. The 'no link icons render' observation from the original actual persists (all 8 buttons icon=null; the names are icon-font glyphs absent from the atlas) and is filed separately (not silently widened into EV-0006)."
+        "2026-10-06T08:59:49+00:00: [loop ?] Fresh in-engine repro at HEAD 38d8105 (fix 38d8105), pid 1137585, 1152x648, log cleared first; menu > Database > About. All 8 link titles now render the Links.LinkEntry fallback (Strings.capitalize with '-'->' ') and no raw key remains: Discord, Changelog, Trello, Wiki, Suggestions, Reddit, Github, Bug; raw_link_key_count=0; descriptions 8/8 resolve. The Java-overlapping rows match ('Discord','Changelog','Trello','Wiki','Suggestions','Reddit','Github','Bug'); the 4 links Godot lacks (Itch.io/Google play/F droid/Dev builds) remain under EV-0007. Headless gate exit 0: 'About renders the Discord title', 'About renders the Trello title', 'About does not render raw title keys'. The 'no link icons render' observation from the original actual persists (all 8 buttons icon=null; the names are icon-font glyphs absent from the atlas) and is filed separately (not silently widened into EV-0006).",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "14",
       "first_seen": "2026-10-05T05:35:17+00:00",
@@ -166,7 +172,7 @@
       "id": "EV-0007",
       "area": "ui/menu",
       "severity": "S3",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "About dialog is missing four reference links and the Credits button",
       "expected": "Java: 12 links including Itch.io, Google play, F-Droid, Dev builds, plus Back and Credits buttons",
       "actual": "Godot: 8 links only; single Back button, no Credits",
@@ -190,7 +196,8 @@
       "notes": [
         "2026-10-06T07:58:30+00:00: [loop ?] Fresh ui_dialogs run 20261006-172828: About still has only 8 link rows (itch.io, google-play, f-droid, dev-builds absent) and a single Back button with no Credits button (state-about.json: credits_button=false). Java capture shows 12 links plus Back+Credits.",
         "2026-10-06T09:00:51+00:00: claimed by loop-1",
-        "2026-10-06T09:10:21+00:00: [loop ?] Fresh in-engine repro at HEAD 9ecc2de (fix 9ecc2de; rebuilt .so 19:03, MindAssets.contributors() present), pid 1143171 then 1145291, 1152x648, log cleared first; menu > Database > About. About now has exactly 12 link rows in upstream order (Discord, Changelog, Trello, Wiki, Suggestions, Reddit, Itch.io, Google play, F droid, Github, Dev builds, Bug) with all 12 descriptions resolved, plus Back and a Credits button (683,503) - matching the Java captures. Credits opens (stack [about,credits]), title 'Credits', credits.text blurb present and translated, 'Translators and Contributors' heading present, 202 labels. Two distinct Credits-body defects persist and are filed separately, not folded into EV-0007: contributor labels render 1px wide so the list is not visible (new finding), and the blurb leaks a literal [sky] (new finding). About row icons remain EV-0029."
+        "2026-10-06T09:10:21+00:00: [loop ?] Fresh in-engine repro at HEAD 9ecc2de (fix 9ecc2de; rebuilt .so 19:03, MindAssets.contributors() present), pid 1143171 then 1145291, 1152x648, log cleared first; menu > Database > About. About now has exactly 12 link rows in upstream order (Discord, Changelog, Trello, Wiki, Suggestions, Reddit, Itch.io, Google play, F droid, Github, Dev builds, Bug) with all 12 descriptions resolved, plus Back and a Credits button (683,503) - matching the Java captures. Credits opens (stack [about,credits]), title 'Credits', credits.text blurb present and translated, 'Translators and Contributors' heading present, 202 labels. Two distinct Credits-body defects persist and are filed separately, not folded into EV-0007: contributor labels render 1px wide so the list is not visible (new finding), and the blurb leaks a literal [sky] (new finding). About row icons remain EV-0029.",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "14",
       "first_seen": "2026-10-05T05:35:17+00:00",
@@ -200,7 +207,7 @@
       "id": "EV-0008",
       "area": "ui/menu",
       "severity": "S3",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "Database submenu stays expanded after the About dialog closes",
       "expected": "Java: after closing About the main menu is back to base state with no submenu",
       "actual": "Godot: submenu_visible remains true; step-05 capture is byte-identical to step-03 (Database submenu open)",
@@ -227,7 +234,8 @@
       "notes": [
         "2026-10-06T07:58:30+00:00: [loop ?] Fresh ui_dialogs run 20261006-172828 (pid 1098928): About > Back leaves submenu_visible=true and the post-close frame is byte-identical to the pre-open submenu frame (md5 1d7b965410088b8c2c1722e7ebcc725d both). Java post-About frame 20261006-172828-ui_dialogs/java/step-06-after-about.png shows the base menu with no submenu.",
         "2026-10-06T09:10:45+00:00: claimed by loop-1",
-        "2026-10-06T09:15:23+00:00: [loop ?] Fresh in-engine repro at HEAD 7bbc680 (fix 7bbc680), pid 1147148, 1152x648, log cleared first. Readings: baseline submenu_visible=false/stack=[]; click Database (230,219) -> submenu_visible=true (3 items); click About (460,359) -> submenu_visible=false, active_button cleared, stack=[about] (the fix dismisses the submenu before running the leaf); About Back (474,503) -> stack=[], has_dialog=false, submenu_visible=false - base menu state. Pre-fix the after-About frame was byte-identical to the submenu-open frame (both md5 1d7b9654...); now after-About md5 350a5056... differs from the submenu-open md5 c6f77792... (frame diff changed 0.191, palette 0.164). Sanity: Database toggles on/off (active cleared), and Database then Editor (top-level leaf) opens editor_maps with submenu_visible=false and returns to base after Back. No info/CurseForge leaf exists in this HEAD's desktop table; Quit was not clicked, its branch is the same _hide_submenu path the gate asserts. Headless gate exit 0: 'menu submenu opens', 'opening a submenu dialog dismisses the submenu', 'dismissed submenu clears the active button'. Log errors only the pre-existing launchid.dat boot warning."
+        "2026-10-06T09:15:23+00:00: [loop ?] Fresh in-engine repro at HEAD 7bbc680 (fix 7bbc680), pid 1147148, 1152x648, log cleared first. Readings: baseline submenu_visible=false/stack=[]; click Database (230,219) -> submenu_visible=true (3 items); click About (460,359) -> submenu_visible=false, active_button cleared, stack=[about] (the fix dismisses the submenu before running the leaf); About Back (474,503) -> stack=[], has_dialog=false, submenu_visible=false - base menu state. Pre-fix the after-About frame was byte-identical to the submenu-open frame (both md5 1d7b9654...); now after-About md5 350a5056... differs from the submenu-open md5 c6f77792... (frame diff changed 0.191, palette 0.164). Sanity: Database toggles on/off (active cleared), and Database then Editor (top-level leaf) opens editor_maps with submenu_visible=false and returns to base after Back. No info/CurseForge leaf exists in this HEAD's desktop table; Quit was not clicked, its branch is the same _hide_submenu path the gate asserts. Headless gate exit 0: 'menu submenu opens', 'opening a submenu dialog dismisses the submenu', 'dismissed submenu clears the active button'. Log errors only the pre-existing launchid.dat boot warning.",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "14",
       "first_seen": "2026-10-05T05:35:17+00:00",
@@ -237,7 +245,7 @@
       "id": "EV-0009",
       "area": "ui/menu",
       "severity": "S3",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "Settings category rail rows overlap, making the category list visually garbled",
       "expected": "Java: each category is a full-height (~50 px) row with icon and label legible; adjacent labels do not overlap (runs/20261005-150056-boot_menu/java/step-02-settings.png)",
       "actual": "Godot: the 7 rail buttons lay out 8 px tall at 12 px spacing (global centers y=166..238); the 18 px icon+label rows overflow their buttons and overlap the next category, so the rail reads as a stack of colliding text",
@@ -253,7 +261,8 @@
       ],
       "notes": [
         "Reproduced on live-frame captures after a clean stop/play (pids 265519 and 266549); rail button rect measured via godot_exec (h=8, 12 px stride). Rail content itself is correct: see EV-0005 (verified-fixed).",
-        "2026-10-05T06:09:49+00:00: re-ran boot_menu step 2 at 2026-10-05 (client 7ed0263 + uncommitted GDScript: icon_button ready-time min-size + rail 300x50); rail buttons all h=50.0 at 54 px stride, min gap 4.0 px, zero label-rect overlaps, order Game/Graphics/Sound/Language/Controls/Game Data/Developer Options; Game pane renders 11 rows (10 checks + 1 slider) on pids 271667 and 273669"
+        "2026-10-05T06:09:49+00:00: re-ran boot_menu step 2 at 2026-10-05 (client 7ed0263 + uncommitted GDScript: icon_button ready-time min-size + rail 300x50); rail buttons all h=50.0 at 54 px stride, min gap 4.0 px, zero label-rect overlaps, order Game/Graphics/Sound/Language/Controls/Game Data/Developer Options; Game pane renders 11 rows (10 checks + 1 slider) on pids 271667 and 273669",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "14",
       "first_seen": "2026-10-05T05:59:18+00:00",
@@ -263,7 +272,7 @@
       "id": "EV-0010",
       "area": "ui/campaign",
       "severity": "S3",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "Campaign sector view is a flat raw-id text grid instead of the 3D planet with hex sectors",
       "expected": "Java: sector view renders the 3D Serpulo globe with a hex sector grid, left planet sidebar (Erekir/Serpulo/Difficulty), and a selected-sector panel with Threat and Launch; Back/ Tech Tree at bottom",
       "actual": "Godot: flat 3-column list of raw internal ids (sunkenPier, serpulo-sector-2, groundZero); left sidebar shows 'verilus'; bottom row Resume/Back/Tech Tree; clicking groundZero only fills detail labels name+Threat; no globe, hex grid, starfield or in-panel Launch",
@@ -285,7 +294,8 @@
       "notes": [
         "Sector action is labeled Resume although the starting sector has no save (Java would show Launch)",
         "2026-10-05T08:01:12+00:00: Triage 20261005-175054: still reproduces. Sector dialog has 0 Node3D / 0 SubViewport, 281 raw-id text buttons (sunkenPier, serpulo-sector-2, ...), Resume/Back/Tech Tree bottom bar; flat grid.",
-        "2026-10-05T09:58:17+00:00: Re-ran the exact campaign_launch repro on clean pid 409777 at HEAD f04ece8 + dirty tree (new client/ui/planet_view.gd + scenes/ui/planet_view.tscn, planet_dialog.gd; .so md5 c6d5867a92c21bc6ba1f475f2d251b32, mtime 19:33:45), 1152x648. Chooser frame byte-identical to verified EV-0011 (frame_diff 0.0). Play > Campaign > Serpulo > OK now opens the 3D globe /root/Spine/Planet/PlanetView: Node3D 5 / SubViewport 1 / Camera3D 1 / MeshInstance3D 4, grid line mesh 3240 verts, selection+outline+body meshes non-null; data serpulo 272 tiles, start_sector 170, 30 presets, groundZero=170; in-world label [ Ground Zero ] centered at (576,324); pick(576,324)=170. Left rail Erekir/Serpulo(pressed)/Difficulty; bottom panel Ground Zero + Threat: Low + in-panel Launch (576,613); Back (108,578) / Tech Tree (1044,578); 6 dialog buttons total, zero raw-id buttons (flat grid had 280). Launch enters the game: phase playing, tick 52->528, menu hidden, HUD visible, log 'loaded campaign sector serpulo:15'. Only known warnings, no new game-code errors. Residual vs Java a3: changed_fraction 0.511, palette distance 0.252 (old flat grid vs Java was 0.570/0.372) and no per-sector icon/lock pass (only Body/Grid/Selection/Outline meshes)."
+        "2026-10-05T09:58:17+00:00: Re-ran the exact campaign_launch repro on clean pid 409777 at HEAD f04ece8 + dirty tree (new client/ui/planet_view.gd + scenes/ui/planet_view.tscn, planet_dialog.gd; .so md5 c6d5867a92c21bc6ba1f475f2d251b32, mtime 19:33:45), 1152x648. Chooser frame byte-identical to verified EV-0011 (frame_diff 0.0). Play > Campaign > Serpulo > OK now opens the 3D globe /root/Spine/Planet/PlanetView: Node3D 5 / SubViewport 1 / Camera3D 1 / MeshInstance3D 4, grid line mesh 3240 verts, selection+outline+body meshes non-null; data serpulo 272 tiles, start_sector 170, 30 presets, groundZero=170; in-world label [ Ground Zero ] centered at (576,324); pick(576,324)=170. Left rail Erekir/Serpulo(pressed)/Difficulty; bottom panel Ground Zero + Threat: Low + in-panel Launch (576,613); Back (108,578) / Tech Tree (1044,578); 6 dialog buttons total, zero raw-id buttons (flat grid had 280). Launch enters the game: phase playing, tick 52->528, menu hidden, HUD visible, log 'loaded campaign sector serpulo:15'. Only known warnings, no new game-code errors. Residual vs Java a3: changed_fraction 0.511, palette distance 0.252 (old flat grid vs Java was 0.570/0.372) and no per-sector icon/lock pass (only Body/Grid/Selection/Outline meshes).",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "12",
       "first_seen": "2026-10-05T07:18:31+00:00",
@@ -295,7 +305,7 @@
       "id": "EV-0011",
       "area": "ui/campaign",
       "severity": "S3",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "Select Starting Campaign dialog shows flat 2D circles and swaps planet order",
       "expected": "Java: starfield backdrop, 3D-shaded planets with Serpulo on the left (accent selection border) and Erekir on the right; dynamic description; Back bottom-left / OK center / Tech Tree right",
       "actual": "Godot: flat filled circles, Erekir left / Serpulo right, no starfield or 3D shading; title, dynamic description switch and OK-disabled-until-selected behavior match",
@@ -327,7 +337,8 @@
       "notes": [
         "2026-10-05T08:01:12+00:00: Triage 20261005-175054: still reproduces. Planet chooser is two flat Buttons (Erekir left c=(412,194), Serpulo right c=(740,194)), no Node3D/SubViewport or starfield; dynamic description and OK-disabled-until-selected match.",
         "2026-10-05T08:47:04+00:00: 2026-10-05 re-ran campaign_launch step 1 (menu > Play > Campaign) on pid 366431 at 1152x648: Serpulo LEFT card center x=412 and Erekir RIGHT center x=740, each card a TextureRect 512x512 identity-equal to find_loose('planets/serpulo')/find_loose('planets/erekir'); assets_dir=client/../assets; serpulo sha256 d39a0ba2..., erekir 951dfbdf..., space 90b6ef70... all match build/assets/migration_manifest.json; screenshot crops show 3D-shaded purple/orange planets (godot/planet-pixels.json), no flat discs. Regression checks pass: Serpulo click enables OK + description switches, OK opens the sector view, groundZero+Resume enters the game (hud visible, tick 196). NOT fully fixed: the starfield backdrop exists (SpaceBackdrop index 0, space.png 2048x2048, behind Dim index 1) but is occluded by the full-screen fullDialog Center/Panel (StyleBoxFlat bg (0.16,0.18,0.21,0.95), rect 0,0 1152x648), so the capture background is a flat slate fill (std 0.2) and the starfield is not player-visible; with the panel hidden the backdrop shows as near-black (0,0,1). See diff/backdrop-occlusion.json.",
-        "2026-10-05T08:58:37+00:00: 2026-10-05 verify2 (menu > Play > Campaign at 1152x648, pid 371512): fullDialog PanelContainer stylebox is now StyleBoxEmpty (theme_builder.gd sha256 c4fde002...), starfield is player-visible: left/right/corner bands are near-black space (mean ~(0,0,2), max luma 95-113) with 88/47 star-peak pixels vs the prior run's flat (39,44,51) sheet with 0 star peaks; old->new frame diff changed 72.8 pct; Java-vs-Godot step-01 changed_fraction 0.974 -> 0.407, palette 0.904 -> 0.201. Planets/order unchanged: Serpulo LEFT x=412 / Erekir RIGHT x=740, each 512x512 TextureRect identity-equal to find_loose('planets/serpulo'/'planets/erekir'), sha256 matching migration_manifest.json; card crops byte-identical to the prior run. Launch regression PASS (pid 372884): Serpulo click enables OK + switches description, OK -> sector view, groundZero -> Resume -> in-game (menu hidden, HUD visible, phase playing, 128x128/13406 tiles); step-02b capture identical to the previous verify. Logs clean apart from the pre-existing [W] 'tile outside a 32x32 world' warnings. Residual not-regressed style gaps: no accent border on selected card, select-screen action row not Java's Back-left/OK-center/Tech-Tree-right (both pre-date this fix; overlaps EV-0010 scope)."
+        "2026-10-05T08:58:37+00:00: 2026-10-05 verify2 (menu > Play > Campaign at 1152x648, pid 371512): fullDialog PanelContainer stylebox is now StyleBoxEmpty (theme_builder.gd sha256 c4fde002...), starfield is player-visible: left/right/corner bands are near-black space (mean ~(0,0,2), max luma 95-113) with 88/47 star-peak pixels vs the prior run's flat (39,44,51) sheet with 0 star peaks; old->new frame diff changed 72.8 pct; Java-vs-Godot step-01 changed_fraction 0.974 -> 0.407, palette 0.904 -> 0.201. Planets/order unchanged: Serpulo LEFT x=412 / Erekir RIGHT x=740, each 512x512 TextureRect identity-equal to find_loose('planets/serpulo'/'planets/erekir'), sha256 matching migration_manifest.json; card crops byte-identical to the prior run. Launch regression PASS (pid 372884): Serpulo click enables OK + switches description, OK -> sector view, groundZero -> Resume -> in-game (menu hidden, HUD visible, phase playing, 128x128/13406 tiles); step-02b capture identical to the previous verify. Logs clean apart from the pre-existing [W] 'tile outside a 32x32 world' warnings. Residual not-regressed style gaps: no accent border on selected card, select-screen action row not Java's Back-left/OK-center/Tech-Tree-right (both pre-date this fix; overlaps EV-0010 scope).",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "12",
       "first_seen": "2026-10-05T07:18:31+00:00",
@@ -337,7 +348,7 @@
       "id": "EV-0012",
       "area": "render/campaign",
       "severity": "S2",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "Launched Ground Zero sector renders no terrain (uniform gray viewport)",
       "expected": "Java: Ground Zero launches into snowy terrain with copper ore, core and objectives/copper HUD",
       "actual": "Godot: uniform gray viewport; core is an untextured dark rounded rect; sim world loads Ground Zero data (128x128, 13406 non-air tiles incl. ice-wall/dune-wall, tick advancing) but World/TileGrid.visible=false and no floor/ore sprites are drawn; HUD shows only debug FPS labels",
@@ -368,7 +379,8 @@
         "Objectives/copper counter and core item HUD also absent in the same frame",
         "2026-10-05T08:01:12+00:00: Re-ran exact repro against the uncommitted render fixes (editor restarted, .so md5 a44f7f9c/17:50; pid 334762). Terrain fixes are active underneath (atlas variants resolve: floor UVs sample ore-copper1/shale-wall1, no env-error; missing_regions 12->1; floor_8 spans 6 chunks x0..720/y0..480; hints hidden) BUT the exact frame is still a full-world black cover: Band_blockUnder_0 (z=13) + Band_darkness_0 (z=26) 1024x1024 composite quads render near-opaque black, and the light pass that would lift them (Band_light_0, z=36) is inactive (0 visible meshes, light_rebuilds=0) because RulesRenderView.lighting=false and set_rules_lighting has no caller; light.rs u_ambient still hardcoded. With both covers hidden the correct snow/ice/ore palette appears (world-canvas mean [103.5,104.2,123.8]). Remaining blocker = light/darkness composite wiring, not the floor atlas or chunk grid.",
         "2026-10-05T08:16:07+00:00: verify2 (editor restarted 18:07, .so d2c33ed3f84c0efb10ea8c9c145bd33c/18:06, pid 347966; exact repro re-driven). Progress: camera now recenters on world change ((132,132)->(516,516) world px, 32x32->128x128, expected ~512); Band_blockUnder_0 no longer covers (individual toggle 1.4% pixels, mean 0.5, probes unchanged); walls band Band_floor_8 (CacheLayerId::Walls id 8) draws at block z=14 (== Band_block_0 z=14, above blockUnder z=13, below building sprites; hiding it changes 8.5%); terrain renders multi-colour (default mean [76.4,70,69.5] with shadow+darkness; with darkness off mean [158.7,144.3,137.6], dominant sand (208,160,128)/tainted-water (32,48,48)/snow (240,224,192)); hints stays hidden. REMAINING BLOCKER (single band): Band_darkness_0 (z=26) composites opaque black over 47.4% of the frame in the default state - hiding it alone turns probes (400,200)/(900,300)/(300,150) from (0,0,0) to (255,228,201)/(210,174,141)/(247,204,166); MindCampaign.get_rules_json() lighting=false and upstream Renderer.java:383-388 only draws Layer.darkness when lighting is on; the light pass is still inert (hiding Band_light_0 changes 0.0%, light_rebuilds=0/light_circles=0). Landmark: camera center tile (64,64) air/open floor, rendered center px (253,254,254); view x16..112/y37..91 has 3085 wall tiles (sand-wall 1609/dune-wall 805/snow-wall 216/...); no ore tiles in get_state_json (floor overlays absent; missing_regions=1). No error-log entries after in-game step.",
-        "2026-10-05T08:19:11+00:00: 2026-10-05 verify2 re-judge (no new in-engine run): the filed symptom no longer reproduces in the exact campaign_launch step-4 repro. Fresh verify2 run (run.json: game pid 347966; editor restarted 18:07:07 so .so client/bin/rust/debug/libmind_gdext.so md5 d2c33ed3f84c0efb10ea8c9c145bd33c mtime 18:06:38 loaded) shows textured multi-colour terrain instead of the uniform gray viewport: with the darkness band hidden the canvas mean is [158.7,144.3,137.6] with dominant sand (208,160,128), tainted water (32,48,48), snow (240,224,192); walls band draws at block z; camera recentered to (516,516) world px on the 128x128 map (expected ~512); hints hidden; missing_regions=1; error log empty. Upstream source facts checked for this re-judge: (1) Vars.java:218 'public static boolean enableDarkness = true;' - darkness is on by default; (2) Renderer.java:383-385 gates only the light composite on 'state.rules.lighting && drawLight', while Renderer.java:387-389 draws Layer.darkness via blocks::drawDarkness whenever enableDarkness, independent of lighting - the earlier 08:16 note that upstream draws darkness only when lighting is on was a misread of the adjacent blocks; additionally Ground Zero's preset sets noLighting=true (SectorPresets.java:28; Universe.java:87 skips the sector light update; Rules.lighting default false at Rules.java:209), so lighting=false and an inert light band are expected for this sector, not a blocker; (3) BlockRenderer.java:425-452 draws the wall-darkness FBO over the world, and World.getWallDarkness (World.java:453-467; darkRadius=4 at Vars.java:67) makes darkness Manhattan-distance-to-open-floor minus 1, so thin/edge walls stay lit and only enclosed massifs go black - consistent with toggle-darkness-off.png. The residual blackout is therefore not 'no terrain'; it is tracked separately as EV-0014 (wall-dominated launched Ground Zero composition, S3)."
+        "2026-10-05T08:19:11+00:00: 2026-10-05 verify2 re-judge (no new in-engine run): the filed symptom no longer reproduces in the exact campaign_launch step-4 repro. Fresh verify2 run (run.json: game pid 347966; editor restarted 18:07:07 so .so client/bin/rust/debug/libmind_gdext.so md5 d2c33ed3f84c0efb10ea8c9c145bd33c mtime 18:06:38 loaded) shows textured multi-colour terrain instead of the uniform gray viewport: with the darkness band hidden the canvas mean is [158.7,144.3,137.6] with dominant sand (208,160,128), tainted water (32,48,48), snow (240,224,192); walls band draws at block z; camera recentered to (516,516) world px on the 128x128 map (expected ~512); hints hidden; missing_regions=1; error log empty. Upstream source facts checked for this re-judge: (1) Vars.java:218 'public static boolean enableDarkness = true;' - darkness is on by default; (2) Renderer.java:383-385 gates only the light composite on 'state.rules.lighting && drawLight', while Renderer.java:387-389 draws Layer.darkness via blocks::drawDarkness whenever enableDarkness, independent of lighting - the earlier 08:16 note that upstream draws darkness only when lighting is on was a misread of the adjacent blocks; additionally Ground Zero's preset sets noLighting=true (SectorPresets.java:28; Universe.java:87 skips the sector light update; Rules.lighting default false at Rules.java:209), so lighting=false and an inert light band are expected for this sector, not a blocker; (3) BlockRenderer.java:425-452 draws the wall-darkness FBO over the world, and World.getWallDarkness (World.java:453-467; darkRadius=4 at Vars.java:67) makes darkness Manhattan-distance-to-open-floor minus 1, so thin/edge walls stay lit and only enclosed massifs go black - consistent with toggle-darkness-off.png. The residual blackout is therefore not 'no terrain'; it is tracked separately as EV-0014 (wall-dominated launched Ground Zero composition, S3).",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "12",
       "first_seen": "2026-10-05T07:18:31+00:00",
@@ -378,7 +390,7 @@
       "id": "EV-0013",
       "area": "ui/hud",
       "severity": "S3",
-      "status": "needs-evaluation",
+      "status": "godot-open",
       "title": "In-game block picker is a text list without block or category icons",
       "expected": "Java: in-game block picker at bottom-right shows unlocked blocks as 46px icon buttons and categories as 50px icon buttons (ui.getIcon(cat.name())); locked/empty categories hidden",
       "actual": "Godot: placement panel is a 976px-wide text UI at x=354 (clipped past the 1152px viewport) with Search + category text row (Turret..Logic) + 28 icon-less text block Buttons (Duo, Scatter, ...); all category names shown",
@@ -407,7 +419,8 @@
         "2026-10-06T10:34:10+00:00: claimed by loop-1",
         "2026-10-07T04:42:54+00:00: migrated status in-progress -> needs-evaluation",
         "2026-10-07T04:42:54+00:00: reaped stale claim (loop-1, was needs-evaluation); restored needs-evaluation",
-        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/campaign-ui b390354: unlock-filtered block catalog closes the filtering residual."
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/campaign-ui b390354: unlock-filtered block catalog closes the filtering residual.",
+        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open"
       ],
       "plan": "14",
       "first_seen": "2026-10-05T07:18:31+00:00",
@@ -417,7 +430,7 @@
       "id": "EV-0014",
       "area": "render/campaign",
       "severity": "S3",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "Launched Ground Zero terrain is wall-dominated; enclosed-wall darkness blacks out ~47% of the centered view",
       "expected": "Java: Ground Zero launches the stored designed map via the preset's FileMapGenerator (SectorPresets.java:22 groundZero; SectorPreset.java:83-85; World.java:269-272), i.e. mostly open snowy terrain with the core and copper ore; darkness (enableDarkness, Vars.java:218) only blackens enclosed static-wall interiors",
       "actual": "Godot: launched sector sim state is 81.8% non-air (13406/16384 tiles; wall types sand/dune/snow/salt/shale in view) and the default frame is ~47% opaque black: mean [76.4,70.0,69.5]; hiding Band_darkness_0 alone changes 47.4% of pixels and restores mean [158.7,144.3,137.6] with sand/tainted-water/snow palette; darkness_rebuilds=4, missing_regions=1, error log empty",
@@ -441,7 +454,8 @@
       "notes": [
         "Upstream Ground Zero is a stored designed map (core/assets/maps/serpulo/groundZero.msav) loaded by the preset FileMapGenerator (SectorPreset.java:83-85), not a SerpuloPlanetGenerator output (World.java:269-272 picks preset.generator when sector.preset != null); the port ships the same assets/maps/serpulo/groundZero.msav, so the 82%-wall launched composition may be generator/map-load coverage rather than a darkness-render regression. The darkness pass itself matches upstream: Renderer.java:387-389 draws Layer.darkness unconditionally when enableDarkness (Vars.java:218), and World.getWallDarkness (World.java:453-467, darkRadius=4 Vars.java:67) falls off with distance to open floor, so only enclosed massifs go black (BlockRenderer.java:425-452; luminance 1-min((darkness+0.5)/4,1) at line 437). Implementer should confirm which loader produced the launched tiles and compare composition against the stored map. Camera center (64,64) is open floor and lit; 3085 wall tiles sit in the x16..112/y37..91 view (run.json landmark).",
         "2026-10-05T10:44:39+00:00: 2026-10-05 10:35-10:45Z re-ran the exact campaign_launch repro on a fresh editor (pid 464179, started 20:33:25 after the .so rebuild 20:29:28; .so md5 f9d69c67c5fd442bc7940945984c5852): menu > Play > Campaign > Serpulo card > OK > in-panel Launch, pid-stamped game pid 467431 (a first pid 465481 run gave identical numbers but was stopped after an evaluator await-eval wedged the frame loop; kept as step-04-launch-pid465481.png / state-04-ingame-pid465481.json). get_state_json: world 256x256, sparse true, 56078 non-air tiles exactly (snow-wall 29963, dune-wall 14849, ice-wall 9010, snow-pine 2195, scrap-wall 32, conveyor 20, world-processor 5, router 2, mechanical-drill 2, core-shard 1, scrap-wall-large 1), phase playing, tick advancing (8->48->112->156->204; first pid reached 148). Log line present: '[I] load_sector: loaded preset map  (256x256)' (+ '[I] loaded campaign sector '); no new game errors (only the pre-existing '[W] command rejected: tile (16, 40) is outside a 32x32 world' backdrop warning). Visuals: the exact step-4 frame is not uniform gray (std luma 90.4); palette is snow/ice (232,238,244/233,238,244) plus a copper ore cluster near the core (bbox 501,186-687,303), no sand/tainted-water; with an evaluator camera probe centered on the core (129,55) the open core pocket renders bright (center grid luma 230-255 within +/-120px). Upstream darkness recomputed from the loaded map (darkRadius 4) predicts 67% pure black in the default wide view vs 40% rendered and 0 black in the 21x21 around the core, so darkness is not over-blackening the open core area. Residual NOT part of this loader defect: the default launch camera stays on the map middle (128,128) with the core off-screen and 2.67x more zoomed out than Java camerascale 4 - filed as EV-0016; hence frame_diff vs committed Java step-04b is pose-dominated (changed_fraction 0.921, palette_distance 0.658). Core/HUD: core-shard exists in the sim and renders, but wave/status and CoreInfo labels are empty, objectives list empty and MindCampaign.get_sector_state hasCore=false - noted under the existing HUD gap (EV-0013/EV-0012 notes), no duplicate filed.",
-        "2026-10-05T10:44:51+00:00: CORRECTION of the preceding note (backticks in the log strings were shell-expanded there, truncating them): the two launch log lines from post-launch-log-fresh.json are exactly: [I] load_sector: loaded preset map `serpulo/groundZero` (256x256) and [I] loaded campaign sector `serpulo:15`. All other content of the preceding note stands: world 256x256, 56078 non-air tiles, phase playing, tick advancing, snow/ice + copper palette, open core pocket lit, residual camera pose filed as EV-0016, no new game errors."
+        "2026-10-05T10:44:51+00:00: CORRECTION of the preceding note (backticks in the log strings were shell-expanded there, truncating them): the two launch log lines from post-launch-log-fresh.json are exactly: [I] load_sector: loaded preset map `serpulo/groundZero` (256x256) and [I] loaded campaign sector `serpulo:15`. All other content of the preceding note stands: world 256x256, 56078 non-air tiles, phase playing, tick advancing, snow/ice + copper palette, open core pocket lit, residual camera pose filed as EV-0016, no new game errors.",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "12",
       "first_seen": "2026-10-05T08:19:08+00:00",
@@ -451,7 +465,7 @@
       "id": "EV-0015",
       "area": "assets/pipeline",
       "severity": "S2",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "As-delivered tree has no bundle/atlas outputs: menus and dialogs show raw bundle keys (campaign.select, campaign.none) and renderer uses placeholder quads",
       "expected": "Java: localized menu/dialog text ('Select Starting Campaign', 'Database') and textured menu background / world rendering",
       "actual": "Godot after the 18:22 mind-tools migrate: assets/locales and assets/sprites/sprites.atlas.json absent; log '[assets] ready ok=false pages=0 regions=0'; dialog title/description show campaign.select/campaign.none; '[W] MindWorldRenderer: atlas manifest unavailable; using placeholder quads' and 'menu background 8211 tiles missing regions'. Running the canonical `mind-tools pack` regenerates the outputs but its pack_pipeline wipes assets/sprites first (fs::remove_dir_all(out_dir)), deleting the vendored loose sprites (planets/, space.png, error.png, logo.png, ...), so migrate+pack cannot currently leave both the generated outputs and the vendored loose art in the tree.",
@@ -472,7 +486,8 @@
       ],
       "notes": [
         "Evaluator restored a workable tree to verify EV-0011: ran `cargo run -p mind-tools -- pack` (log pack.log) then re-copied the 13 vendored loose sprites from ../Mindustry and sha256-verified them against build/assets/migration_manifest.json; no game code/scene/config touched. migrate.rs does a clean-mirror wipe; pack_pipeline.rs::pack wipes assets/sprites before writing pages. A robust fix must make the migrate->pack flow preserve the loose sprites (or load them from a non-generated location).",
-        "2026-10-05T10:55:55+00:00: 2026-10-05 10:48-10:55Z fresh EV-0015 repro at HEAD f04ece8 + dirty tree (gdext md5 f9d69c67c5fd442bc7940945984c5852): 'bash tools/pack.sh migrate --from ../Mindustry --to .' exit 0 (2977 files; generated outputs absent, loose art present) then 'bash tools/pack.sh pack' exit 0 (5135 regions/4 pages, fallback 8 pages, locales 35, 0 error lines). Loose serpulo/erekir/space/error/logo sha256 all survive pack and equal the fresh migration_manifest; sprites.atlas.json parses (5135 regions); sprites.png+2..4, fallback/sprites.atlas.json, block_colors.png, assets/locales present. Engine pid 476469: '[assets] ready ok=true pages=4 regions=5135', no placeholder-quads warning; find_loose(planets/serpulo|space) -> ImageTexture 512x512/2048x2048, find_region(sector-groundZero) -> AtlasTexture; chooser title label = 'Select Starting Campaign' (bundle_get campaign.select/none resolve real text); Play>Campaign shows space backdrop + Serpulo-left/Erekir-right cards, sector view loads serpulo (272 tiles, body/grid/selection meshes, label [ Ground Zero ], Launch). Pre-existing only: menu-background missing-regions warning (1260/1368/1000 in earlier healthy runs) and menu-click world fall-through warnings. Note: migrate clean-mirror deleted tracked assets/parity/mcp_assets_scenario.md + mcp_audio_scenario.md and restored 13 assets/icons|scripts|shaders files at upstream 100755 mode (content identical)."
+        "2026-10-05T10:55:55+00:00: 2026-10-05 10:48-10:55Z fresh EV-0015 repro at HEAD f04ece8 + dirty tree (gdext md5 f9d69c67c5fd442bc7940945984c5852): 'bash tools/pack.sh migrate --from ../Mindustry --to .' exit 0 (2977 files; generated outputs absent, loose art present) then 'bash tools/pack.sh pack' exit 0 (5135 regions/4 pages, fallback 8 pages, locales 35, 0 error lines). Loose serpulo/erekir/space/error/logo sha256 all survive pack and equal the fresh migration_manifest; sprites.atlas.json parses (5135 regions); sprites.png+2..4, fallback/sprites.atlas.json, block_colors.png, assets/locales present. Engine pid 476469: '[assets] ready ok=true pages=4 regions=5135', no placeholder-quads warning; find_loose(planets/serpulo|space) -> ImageTexture 512x512/2048x2048, find_region(sector-groundZero) -> AtlasTexture; chooser title label = 'Select Starting Campaign' (bundle_get campaign.select/none resolve real text); Play>Campaign shows space backdrop + Serpulo-left/Erekir-right cards, sector view loads serpulo (272 tiles, body/grid/selection meshes, label [ Ground Zero ], Launch). Pre-existing only: menu-background missing-regions warning (1260/1368/1000 in earlier healthy runs) and menu-click world fall-through warnings. Note: migrate clean-mirror deleted tracked assets/parity/mcp_assets_scenario.md + mcp_audio_scenario.md and restored 13 assets/icons|scripts|shaders files at upstream 100755 mode (content identical).",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "03",
       "first_seen": "2026-10-05T08:47:08+00:00",
@@ -482,7 +497,7 @@
       "id": "EV-0016",
       "area": "render/campaign",
       "severity": "S3",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "Launched sector camera opens on the map middle (core off-screen) at ~2.7x the reference zoom",
       "expected": "Java: Control.WorldLoadEvent sets camera.position to player.bestCore() (Control.java:92-107), and Renderer camerascale = Scl.scl(4) => 32 px/tile at tilesize 8 (36x20 tiles visible at 1152x648), so a Ground Zero launch opens on the core",
       "actual": "Godot: after Launch the camera centers the world middle (screen_to_tile(576,324) = (128,128)); the core-shard at (129,55) is off-screen above (tile_to_screen y = -552); camera zoom 1.5 * tilesize 8 = 12 px/tile (96x54 tiles visible, 2.67x wider than Java); the exact-repro frame is mean luma 90.8 with 26.4% pure-black and 58.3% dark pixels, core not visible",
@@ -506,7 +521,8 @@
       ],
       "notes": [
         "Evaluator probe: center_on_tile(129,55) then capture step-05-core-view.png shows the core pocket renders bright (center grid luma 230-255 within +/-120 px) with copper ore cluster bbox (501,186)-(687,303); the wide dark frame is the designed map's enclosed wall massifs plus the 2.67x zoom-out. Upstream darkness recomputed from the loaded map predicts 67% black in the default 192x108-tile view (Godot renders 40%) and 0 black in the 21x21 core pocket, so the darkness pass itself is not over-blackening.",
-        "2026-10-05T11:29:41+00:00: Re-ran exact campaign_launch repro on a fresh boot (pid 501352) with the new GDExtension (.so md5 6951de57f19202c2f59bc680c1d13e81) while stale settings.json still held zoom:1.5 (md5 bb3e94d5..., byte-identical before/during/after; key ignored, not rewritten). Load log: serpulo/groundZero 256x256, 56078 non-air, 1 core-shard at (129,55). camera_state_json: position (1036,444) == core tile centre, camerascale 4.0, target_scale 4.0, view 288x162 world units = 32 px/tile, 36x20.25 tiles; screen_to_tile(576,324)=(129,55); stable at tick 736. Rendered core sprite 96x96 px centred at (575.5,323.5) offset (-0.5,-0.5); two live captures 10s apart differ while core stays centred. Frame vs stored Java after-skip: changed_fraction 0.639, palette_distance 0.298 (pre-fix 0.921/0.665); luma mean 185.8 vs Java 199.8, black 0.0% vs 2.2%, bright>200 65.3% vs 69.1%. No game-side errors. Two aborted evaluator pids from break-on-error pauses, recovered with stop/play; no product impact."
+        "2026-10-05T11:29:41+00:00: Re-ran exact campaign_launch repro on a fresh boot (pid 501352) with the new GDExtension (.so md5 6951de57f19202c2f59bc680c1d13e81) while stale settings.json still held zoom:1.5 (md5 bb3e94d5..., byte-identical before/during/after; key ignored, not rewritten). Load log: serpulo/groundZero 256x256, 56078 non-air, 1 core-shard at (129,55). camera_state_json: position (1036,444) == core tile centre, camerascale 4.0, target_scale 4.0, view 288x162 world units = 32 px/tile, 36x20.25 tiles; screen_to_tile(576,324)=(129,55); stable at tick 736. Rendered core sprite 96x96 px centred at (575.5,323.5) offset (-0.5,-0.5); two live captures 10s apart differ while core stays centred. Frame vs stored Java after-skip: changed_fraction 0.639, palette_distance 0.298 (pre-fix 0.921/0.665); luma mean 185.8 vs Java 199.8, black 0.0% vs 2.2%, bright>200 65.3% vs 69.1%. No game-side errors. Two aborted evaluator pids from break-on-error pauses, recovered with stop/play; no product impact.",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "12",
       "first_seen": "2026-10-05T10:44:31+00:00",
@@ -516,7 +532,7 @@
       "id": "EV-0017",
       "area": "ui/hud",
       "severity": "S2",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "In-game block picker renders no block buttons (rebuild aborts on a runtime error)",
       "expected": "Godot (post-fix intent): each category lists its blocks as 46px icon buttons (block-<name>-ui -> block-<name>-full -> <name> chain), so the picker is usable; Java: PlacementFragment.getUnlockedByCategory lists unlocked blocks as icon buttons and shows nothing when none are unlocked",
       "actual": "Categories render (10 glyph buttons 50x50) but Panel/Layout/Scroll/Blocks has 0 block buttons: placement_fragment._rebuild() aborts at the first block on \"Invalid assignment of property or key 'icon_max_width' with value of type 'int' on a base object of type 'Button'\" (placement_fragment.gd:135). No block is ever added (0 with icon, 0 with text); the 447-block catalog is never displayed. With the editor debugger attached the same error also halts the game at boot (break-on-error) until Continue.",
@@ -535,7 +551,8 @@
       ],
       "notes": [
         "Godot 4.7.2 Button exposes icon_max_width only as the theme constant theme_override_constants/icon_max_width; probed in-engine: b.get_property_list() has no direct icon_max_width and assigning it raises. Atlas regions for standard blocks all resolve (block-duo-ui/-full, duo, block-conveyor-ui/-full, block-scatter-ui, block-stone-wall-ui), so assets are not the blocker. Unlock-state filtering remains tracked under EV-0013. Severity S2 because this leaves the campaign build picker with no selectable blocks (and freezes editor-debug runs at boot).",
-        "2026-10-05T12:01:05+00:00: Re-ran campaign_launch step 4 (pid 517487, 1152x648, HEAD 4df82bb + placement_fragment.gd working-tree fix). Panel/Layout/Scroll/Blocks now has 28/28 turret block Buttons, every one with custom_minimum_size 46x46 AND actual size 46x46, non-null icon (icon chain block-<name>-ui -> block-<name>-full -> <name>), no text fallbacks; icon_max_width theme constant override = 32 on all 28. Standard blocks: duo (32x32 icon), scatter (64x64 icon) in turret; conveyor (32x32) and stone-wall (32x32) in distribution, both 46x46 min. Category rail 10/10 50x50 glyph toggles in a ButtonGroup. No 'Invalid assignment' or GDScript runtime error in the launch log; game did not break-on-error at boot. Only log error is the host crash-recovery warning left by the evaluator-wedged earlier session (log-harness-artifacts.json). EV-0013's unlock-filtering residual remains and is tracked there."
+        "2026-10-05T12:01:05+00:00: Re-ran campaign_launch step 4 (pid 517487, 1152x648, HEAD 4df82bb + placement_fragment.gd working-tree fix). Panel/Layout/Scroll/Blocks now has 28/28 turret block Buttons, every one with custom_minimum_size 46x46 AND actual size 46x46, non-null icon (icon chain block-<name>-ui -> block-<name>-full -> <name>), no text fallbacks; icon_max_width theme constant override = 32 on all 28. Standard blocks: duo (32x32 icon), scatter (64x64 icon) in turret; conveyor (32x32) and stone-wall (32x32) in distribution, both 46x46 min. Category rail 10/10 50x50 glyph toggles in a ButtonGroup. No 'Invalid assignment' or GDScript runtime error in the launch log; game did not break-on-error at boot. Only log error is the host crash-recovery warning left by the evaluator-wedged earlier session (log-harness-artifacts.json). EV-0013's unlock-filtering residual remains and is tracked there.",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "14",
       "first_seen": "2026-10-05T11:50:21+00:00",
@@ -545,7 +562,7 @@
       "id": "EV-0018",
       "area": "input/placement",
       "severity": "S2",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "UI clicks also place/break world blocks (input leak)",
       "expected": "Java: clicking a UI control (placement category tab, block button, toolbar or menu button) is consumed by the UI and never issues a world place/break command",
       "actual": "Godot: every left/right press is applied by MindSimHost 'input' (the _input virtual -> sim_host.rs input()) before the GUI consumes it, with no UI-hover/consumed guard. Three category-tab clicks in the placement panel issued place commands for the selected block at the tile under each tab: block_placed stone-wall at (131,59)/(136,59)/(128,59), build_id 0/1/2. A real OS-level click on the Production tab (computer-mcp, not the MCP injector) switched the category AND placed stone-wall at (130,59) build_id 3 (commands_applied 4->5). Main-menu clicks also log 'mouse tile (..) applied (LEFT)' before the sector loads",
@@ -566,7 +583,8 @@
       "notes": [
         "Root-cause pointer only (not proof): client/rust/mind-gdext/src/sim_host.rs:134 overrides the _input virtual and calls apply_command(Place/Break) for every mouse press; upstream InputHandler suppresses world input while UI has mouse. Also note EV-0013/EV-0017 category-tab evidence was captured with the same clicks, which is why each tab click left a player-built wall in Ground Zero.",
         "2026-10-05T21:21:27+00:00: claimed by loop-1",
-        "2026-10-06T07:23:38+00:00: [loop ?] Fresh in-engine repro at HEAD bc6d94e (client/bin/rust/debug/libmind_gdext.so built 07:27:59, after fix commit 81fc269 07:27:22): campaign_launch step 4 at Ground Zero (preset serpulo/groundZero, 256x256, 56078 non-air tiles), pid 1080554, window 1152x648, camera (1036,444) zoom 4 - the same pose the original repro used (category row maps to tile y=59). 12 UI clicks produced ZERO deltas in commands_applied/events/world tiles: menu/nav Play, Campaign, Serpulo card, OK, Launch; MCP clicks on category production/distribution/defense/turret, block-duo, panel background (518,394), grid gap (568,507); and a REAL OS-level computer-mcp XTEST click at screen (983,744)=viewport (599,455) on the Production tab (category switched to production blocks, no place event). log-excerpt.txt shows the only two '[D] mouse tile (125,55) applied' lines are the negative-control world clicks; no UI click logged an applied line. Negative control: left-click empty world tile (125,55) -> commands_applied 0->1, tiles 56078->56079, block_placed stone-wall build_id 0; right-click -> commands_applied 2, tiles back to 56078, block_broken. Error buffer cleared and empty (log-errors.json). Residual uncertainty: Java leg not re-run (optional for this Godot-side gating regression; same-flow reference captures committed under runs/20261005-163933-campaign_launch/java/); HUD controls other than the placement panel not individually clicked. Session-1 harness wedge (await eval) documented in report.md."
+        "2026-10-06T07:23:38+00:00: [loop ?] Fresh in-engine repro at HEAD bc6d94e (client/bin/rust/debug/libmind_gdext.so built 07:27:59, after fix commit 81fc269 07:27:22): campaign_launch step 4 at Ground Zero (preset serpulo/groundZero, 256x256, 56078 non-air tiles), pid 1080554, window 1152x648, camera (1036,444) zoom 4 - the same pose the original repro used (category row maps to tile y=59). 12 UI clicks produced ZERO deltas in commands_applied/events/world tiles: menu/nav Play, Campaign, Serpulo card, OK, Launch; MCP clicks on category production/distribution/defense/turret, block-duo, panel background (518,394), grid gap (568,507); and a REAL OS-level computer-mcp XTEST click at screen (983,744)=viewport (599,455) on the Production tab (category switched to production blocks, no place event). log-excerpt.txt shows the only two '[D] mouse tile (125,55) applied' lines are the negative-control world clicks; no UI click logged an applied line. Negative control: left-click empty world tile (125,55) -> commands_applied 0->1, tiles 56078->56079, block_placed stone-wall build_id 0; right-click -> commands_applied 2, tiles back to 56078, block_broken. Error buffer cleared and empty (log-errors.json). Residual uncertainty: Java leg not re-run (optional for this Godot-side gating regression; same-flow reference captures committed under runs/20261005-163933-campaign_launch/java/); HUD controls other than the placement panel not individually clicked. Session-1 harness wedge (await eval) documented in report.md.",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "15",
       "first_seen": "2026-10-05T12:01:17+00:00",
@@ -576,7 +594,7 @@
       "id": "EV-0019",
       "area": "ui/settings",
       "severity": "S2",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "Settings check controls render no check indicator and only an 8px strip responds to clicks",
       "expected": "Java: each check setting is a 45px-high row with a round check indicator; clicking anywhere on the row label toggles it",
       "actual": "Godot: check rows render only their label (MindCheck TextureRect texture is null: atlas has check-on/check-off, code asks for checkOn/checkOff); the MindCheck button is 8px tall at 52px stride, so clicking the visible label of 'Conveyor Placement Pathfinding' (700,256) leaves conveyorpathfinding=true while clicking the 8px strip (729,239) toggles it",
@@ -603,7 +621,8 @@
       "notes": [
         "2026-10-06T07:59:39+00:00: claimed by loop-1",
         "2026-10-06T08:08:35+00:00: [loop ?] Fresh in-engine repro at fixed HEAD 06c8f97 (fix 985c88e; clean tree, GDScript-only change), Godot 4.7.2, 1152x648, pid 1105416 plus persistence pass pid 1106763, log cleared first. Game > Settings (230,429), Game pane scrolled to 300. Check button rect is now 420x52 filling the padded 45px cell (was 420x8 at y=481 stride 52); indicator TextureRect is a 32x32 AtlasTexture (was null) and regions map exactly to sprites.atlas.json page 3: check-off (1519,477) unchecked, check-on (1553,477) checked, check-over (1315,445) unchecked+hover, check-on-over (1383,447) checked+hover. Click on the Conveyor Placement Pathfinding label center (701,368) flipped settings_rows_json('game').conveyorpathfinding false->true (button_pressed true, indicator check-on-over while hovered, check-on after pointer-out); a row-internal click at (900,368) flipped it back true->false; the old 8px strip band at (600,345) now toggles like any row click (false->true). Value true persisted across stop/play (new pid 1106763 read true); restored to false with a label click. Fix headless gate tools/ui_widgets_check.gd exit 0 (all regions resolve, min height 32, checked->check-on, unchecked->check-off, failed=0). Log errors only the pre-existing launchid.dat/menu-background boot warnings.",
-        "2026-10-06T08:13:04+00:00: [loop ?] Follow-up in-engine re-verification at HEAD 2547f91 (fix 2547f91 'keep settings check rows at the 45px cell height'; supersedes the 06c8f97 verify that accepted h=52/pitch ~59.7). Fresh play of res://scenes/game.tscn, pid 1108474 + persistence pass pid 1109445, 1152x648, log cleared first; Game > Settings, pane scrolled to 300. Check button is now 420x45 at y=463/515/567/619, pitch exactly 52 (upstream .height(45f).padTop(7f)); was 420x52 at ~59.7 pitch. Indicator stays a 32x32 AtlasTexture with the same region map (check-off 1519,477 / check-on 1553,477 / check-over 1315,445 / check-on-over 1383,447; hover swap re-confirmed). Label-center click (701,341) flipped settings_rows_json('game').conveyorpathfinding false->true; row-interior click (900,341) flipped it true->false; value true persisted across stop/play (pid 1109445 read true) and was restored to false with a label click. tools/ui_widgets_check.gd exit 0 including the new 'settings check cell keeps the 45px row (got 45.0)' assertion. Log errors only pre-existing boot warnings."
+        "2026-10-06T08:13:04+00:00: [loop ?] Follow-up in-engine re-verification at HEAD 2547f91 (fix 2547f91 'keep settings check rows at the 45px cell height'; supersedes the 06c8f97 verify that accepted h=52/pitch ~59.7). Fresh play of res://scenes/game.tscn, pid 1108474 + persistence pass pid 1109445, 1152x648, log cleared first; Game > Settings, pane scrolled to 300. Check button is now 420x45 at y=463/515/567/619, pitch exactly 52 (upstream .height(45f).padTop(7f)); was 420x52 at ~59.7 pitch. Indicator stays a 32x32 AtlasTexture with the same region map (check-off 1519,477 / check-on 1553,477 / check-over 1315,445 / check-on-over 1383,447; hover swap re-confirmed). Label-center click (701,341) flipped settings_rows_json('game').conveyorpathfinding false->true; row-interior click (900,341) flipped it true->false; value true persisted across stop/play (pid 1109445 read true) and was restored to false with a label click. tools/ui_widgets_check.gd exit 0 including the new 'settings check cell keeps the 45px row (got 45.0)' assertion. Log errors only pre-existing boot warnings.",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "14",
       "first_seen": "2026-10-06T07:58:08+00:00",
@@ -613,7 +632,7 @@
       "id": "EV-0020",
       "area": "ui/settings",
       "severity": "S3",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "Settings slider value labels are 1px wide and invisible",
       "expected": "Java: slider rows show the current value right-aligned (Save Interval 60 seconds, UI Scaling 100%, Music Volume 100%)",
       "actual": "Godot: the slider value RichTextLabel has width 1.0 at x=938, so no value text is visible; only 'Save Interval' / 'Music Volume' titles render",
@@ -639,7 +658,8 @@
       ],
       "notes": [
         "2026-10-06T09:39:37+00:00: [loop ?] Fresh 63e1e0a re-run at 1152x648 (pids 1154515/1156625): Game row '60 seconds' now x=843 w=96 h=26 (was x=938 w=1 h=130); Sound '100%' x=892 w=47 h=26; Graphics values 0px/200%/1.0x/150%/2x/240 FPS all render with real widths. Value labels autowrap=0 (OFF). Screenshots show values right-aligned; no clipped or 1px labels.",
-        "2026-10-06T09:42:18+00:00: [loop ?] Fresh in-engine repro at HEAD 63e1e0a (fix 63e1e0a: MindRichLabel defaults AUTOWRAP_OFF; callers opt in), pid 1158546/1159283/1160906, window 1152x648, log cleared. Value labels now render with real widths and h=26 (were w=1 h=130): Game '60 seconds' x=843 w=96; Graphics '0px' 32, '200%' 47, '1.0x' 36, '150%' 47, '2x' 21, '240 FPS' 67, '100%' 47; Sound three '100%' at w=47. Titles still wrap (Save Interval/Music Volume/UI Edge Padding aw=3). Matches the Java notes/screenshots (java/step-java-settings-*.png). Visual: step-01-settings-game.png, step-02-settings-graphics.png, step-06-settings-sound.png. Regression sweep found no clipping/overflow in About descriptions, Credits contributors, or Controls key labels."
+        "2026-10-06T09:42:18+00:00: [loop ?] Fresh in-engine repro at HEAD 63e1e0a (fix 63e1e0a: MindRichLabel defaults AUTOWRAP_OFF; callers opt in), pid 1158546/1159283/1160906, window 1152x648, log cleared. Value labels now render with real widths and h=26 (were w=1 h=130): Game '60 seconds' x=843 w=96; Graphics '0px' 32, '200%' 47, '1.0x' 36, '150%' 47, '2x' 21, '240 FPS' 67, '100%' 47; Sound three '100%' at w=47. Titles still wrap (Save Interval/Music Volume/UI Edge Padding aw=3). Matches the Java notes/screenshots (java/step-java-settings-*.png). Visual: step-01-settings-game.png, step-02-settings-graphics.png, step-06-settings-sound.png. Regression sweep found no clipping/overflow in About descriptions, Credits contributors, or Controls key labels.",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "14",
       "first_seen": "2026-10-06T07:58:08+00:00",
@@ -649,7 +669,7 @@
       "id": "EV-0021",
       "area": "ui/settings",
       "severity": "S3",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "Settings Game table opens with every check row below the visible pane",
       "expected": "Java at 1152x648: Game table shows Save Interval plus 8+ check rows immediately",
       "actual": "Godot: on open only 'Save Interval' and its slider are visible; the first check sits at y=481 vs the scroll viewport bottom 478, stride 52px down to y=949; the slider header RichTextLabel is 130px tall and the Developer Options rail entry is clipped below the viewport",
@@ -670,7 +690,8 @@
       "notes": [
         "2026-10-06T09:39:47+00:00: [loop ?] Fresh 63e1e0a re-run (pid 1154515, menu > Settings, Game pane before scrolling, 1152x648): first check is fully inside the Body viewport - y=229 h=45 with viewport bottom 478 (was y=481); the slider header/title row is h=26 (was 130); 10 checks at stride 52 (229..697), scroll max 642 (was 876); the empty Game pane of the filed repro no longer reproduces. Residual tracked as EV-0032: the 316px-tall pane still shows only 5 of 10 checks and the Developer Options rail entry (y=486) below the viewport, vs Java showing 9 checks and the full rail.",
         "2026-10-06T09:42:18+00:00: [loop ?] Bonus re-run of the exact repro at HEAD 63e1e0a, pid 1159283, 1152x648. The Game table no longer opens with every check row below the pane: first check is at y=229 (was y=481 vs the 478 viewport bottom) with h=45, and 4 check rows are fully inside the scroll viewport at scroll 0 (5th partially; step-01-settings-game.png shows Fetch/Auto-Create/Automatic/Conveyor/Hints). RESIDUAL, stated explicitly: only 4 rows fully visible vs Java's 8+ because the port's settings panel is shorter; verifying for the titled symptom only.",
-        "2026-10-06T10:12:56+00:00: [loop ?] Re-check at uiscale 100 / content_scale_factor 1.0 after ba8203c (pid 1188913, frames 2841, 1152x648): first Game check y=125 h=45 fully inside the grown Body viewport (top 58, bottom 582; was y=481 vs bottom 478), slider header h=26. The titled symptom (every check row below the visible pane) does not reproduce. Status unchanged."
+        "2026-10-06T10:12:56+00:00: [loop ?] Re-check at uiscale 100 / content_scale_factor 1.0 after ba8203c (pid 1188913, frames 2841, 1152x648): first Game check y=125 h=45 fully inside the grown Body viewport (top 58, bottom 582; was y=481 vs bottom 478), slider header h=26. The titled symptom (every check row below the visible pane) does not reproduce. Status unchanged.",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "14",
       "first_seen": "2026-10-06T07:58:08+00:00",
@@ -680,7 +701,7 @@
       "id": "EV-0022",
       "area": "ui/settings",
       "severity": "S3",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "Language dialog stacks locales 400px apart, showing one language at a time",
       "expected": "Java: Language dialog shows a scrollable list with several languages visible at once",
       "actual": "Godot: the 35 locale buttons are 400x400 and stacked at 400px stride (scroll max 14000 for a 316px viewport); on open only English is visible",
@@ -693,7 +714,8 @@
         "runs/20261006-194540-ev0029-0033-verify/godot/step-07-language.png"
       ],
       "notes": [
-        "2026-10-06T09:56:20+00:00: [loop ?] Fresh in-engine repro (pid 1173788): menu > Settings > Language; 35 locale buttons are all 400x50 at a 50px stride (English y=162, Belarusian 212, ...), scroll_max 1750 = 35*50 for a 316px pane, 6 languages visible at once; pre-fix was 400x400 at 400px stride / scroll_max 14000."
+        "2026-10-06T09:56:20+00:00: [loop ?] Fresh in-engine repro (pid 1173788): menu > Settings > Language; 35 locale buttons are all 400x50 at a 50px stride (English y=162, Belarusian 212, ...), scroll_max 1750 = 35*50 for a 316px pane, 6 languages visible at once; pre-fix was 400x400 at 400px stride / scroll_max 14000.",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "14",
       "first_seen": "2026-10-06T07:58:08+00:00",
@@ -703,7 +725,7 @@
       "id": "EV-0023",
       "area": "ui/settings",
       "severity": "S2",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "Controls dialog has no keybinding rows (only raw @category.* labels)",
       "expected": "Java: Settings > Controls opens the Rebind Keys dialog with per-action rows, key columns and Rebind/Reset buttons",
       "actual": "Godot: the Controls dialog renders only '@category.general' (plus 3 more raw keys off-pane) and a Back button; zero keybind rows, no Rebind/Reset controls",
@@ -729,7 +751,8 @@
       "notes": [
         "2026-10-06T08:34:07+00:00: claimed by loop-1",
         "2026-10-06T08:51:17+00:00: [loop ?] PARTIAL at HEAD 5244904 (fix 5244904), fresh engine repro pid 1130042, 1152x648, log cleared. FIXED: Controls opens Rebind Keys (title), 88 per-registry Rebind rows + 87 per-row Reset (menu excluded) all disabled at default, Reset to Defaults present, localized 'General' category header (no raw @category.*), first-row keys match Java (Move X 'A / D', Move Y 'S / W', Follow Mouse 'Mouse Back', Pan View 'Mouse Forward', Boost 'L-Shift', Respawn 'V', Control Unit 'L-Ctrl', Select/Shoot 'Mouse Left', Deselect 'Mouse Right'); search 'move' filters 88->3 and clears back to 88; Rebind on Boost + press q -> display 'Q'/value 'q'/default false; Reset -> 'L-Shift'/'shiftLeft'/default true; close pops the MindUi stack ([settings,controls]->[settings]->[]) and releases pause. REMAINING (blocks verified-fixed): every key label renders width 1px so the key COLUMN is invisible in the dialog - samples 'A / D' (580,129,w=1,h=104), 'S / W' (580,233,w=1), 'L-Shift' (580,935,w=1,h=208), 'L-Ctrl' (580,1195,w=1), 'Mouse Left' (580,1377,w=1,h=260); step-01-controls-full.png shows names+Rebind/Reset but no key strings vs the Java reference. Same 1px-label defect family as EV-0020, and the fix's headless gate checks the label text not its rendered width. See runs/20261006-084316-ev0023-verify/report.md.",
-        "2026-10-06T08:55:56+00:00: [loop ?] Follow-up in-engine re-verification at HEAD db47ea2 (fix db47ea2, on top of 5244904; GDScript-only). Fresh play, pid 1134679, 1152x648, log cleared first; menu > Settings > Controls. Supersedes the 5244904 partial verify. Key labels now render at width 143px each (were 1px): Move X 'A / D' (580,194,w=143,text 42), Move Y 'S / W' (580,350,143/44), Follow Mouse 'Mouse Back' (580,571,143/105), Pan View 'Mouse Forward' (580,831,143/136 - fits, not clipped), Boost 'L-Shift' (580,1026,143/56), Control Unit 'L-Ctrl' (580,1468,143/47), Select/Shoot 'Mouse Left' (580,1780,143/97); filtered layouts 233-242px. Functional re-confirmed: search 'move' filters 88->3 (Boost absent), Rebind Boost + q -> display 'Q'/value 'q'/default false (rendered 'Q' 242px, Reset enabled), Reset -> 'L-Shift'/'shiftLeft'/default true, close pops [settings,controls]->[settings]->[] with has_dialog false and paused false. Headless gate exit 0 incl. 'key label renders with a real width (got 90.0)', failed=0. Only the pre-existing launchid.dat boot warning."
+        "2026-10-06T08:55:56+00:00: [loop ?] Follow-up in-engine re-verification at HEAD db47ea2 (fix db47ea2, on top of 5244904; GDScript-only). Fresh play, pid 1134679, 1152x648, log cleared first; menu > Settings > Controls. Supersedes the 5244904 partial verify. Key labels now render at width 143px each (were 1px): Move X 'A / D' (580,194,w=143,text 42), Move Y 'S / W' (580,350,143/44), Follow Mouse 'Mouse Back' (580,571,143/105), Pan View 'Mouse Forward' (580,831,143/136 - fits, not clipped), Boost 'L-Shift' (580,1026,143/56), Control Unit 'L-Ctrl' (580,1468,143/47), Select/Shoot 'Mouse Left' (580,1780,143/97); filtered layouts 233-242px. Functional re-confirmed: search 'move' filters 88->3 (Boost absent), Rebind Boost + q -> display 'Q'/value 'q'/default false (rendered 'Q' 242px, Reset enabled), Reset -> 'L-Shift'/'shiftLeft'/default true, close pops [settings,controls]->[settings]->[] with has_dialog false and paused false. Headless gate exit 0 incl. 'key label renders with a real width (got 90.0)', failed=0. Only the pre-existing launchid.dat boot warning.",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "14",
       "first_seen": "2026-10-06T07:58:09+00:00",
@@ -739,7 +762,7 @@
       "id": "EV-0024",
       "area": "ui/settings",
       "severity": "S3",
-      "status": "open",
+      "status": "godot-open",
       "title": "Game Data exposes 2 of the reference's 9 data actions",
       "expected": "Java: Clear Game Data..., Clear Planet Data, Clear Saves, Clear Research, Clear Campaign Saves, Export Data, Import Data, Open Data Folder, Export Crash Logs",
       "actual": "Godot: only Clear Saves and Open Data Folder are listed (DataActions const); the other seven actions are absent",
@@ -751,17 +774,25 @@
       ],
       "notes": [
         "2026-10-06T09:58:29+00:00: claimed by loop-1",
-        "2026-10-06T09:59:48+00:00: released: Blocked, not abandoned: the 7 missing data actions (clear planet/campaign data, research, export/import data, crash logs) have no ported backing subsystem (campaign saves are settings markers, crash.rs has no API, data IO/research runtime unported). Exposing them would fake success. Needs the campaign/IO milestones; evaluator should mark blocked/wontfix for M1."
+        "2026-10-06T09:59:48+00:00: released: Blocked, not abandoned: the 7 missing data actions (clear planet/campaign data, research, export/import data, crash logs) have no ported backing subsystem (campaign saves are settings markers, crash.rs has no API, data IO/research runtime unported). Exposing them would fake success. Needs the campaign/IO milestones; evaluator should mark blocked/wontfix for M1.",
+        "2026-10-07T11:19:55+00:00: claimed by fix-ui-oc-4734 for fix",
+        "2026-10-07T11:21:50+00:00: released: Blocked, not abandoned: clear-saves/open-folder are ported; clear-data, clear-research and clear-campaign-saves are now feasible on landed models (tech_tree::reset_all, Universe::clear_loadout_info, Sector::clear_info, Saves sector slots, MindCampaign.abandon_sector da132f1). Still unported: (1) settings.planetselect planet-data dialog with planet-scoped research reset (content database_tabs<->planet mapping) and planet stats reset, (2) data export/import archive (settings.bin+maps/saves/mods/schematics/asset cache zip) with no IO/platform archive seam, (3) crash-log export (crash reports + last_log.txt exist, no collection/save wiring). Exposing the remaining entries without those backends would fake success; needs the data-IO/planet-data milestone.",
+        "2026-10-07T11:21:54+00:00: claimed by fix-ui-oc-4734 for fix",
+        "2026-10-07T11:22:40+00:00: released: Blocked on missing subsystems (released again; the only open item in ui/settings, re-claiming would loop). Feasible now: clear-data, clear-research, clear-campaign-saves on landed models. Missing: planet-data dialog + planet-scoped unlocks (no public ContentRegistry all-content/unlock-clear API; database_tabs<->planet mapping), data export/import archive (settings.bin+maps/saves/mods/schematics/asset-cache zip; no IO/platform archive seam), crash-log export wiring. Implementing the list without them would expose dead buttons.",
+        "2026-10-07T12:11:25+00:00: claimed by fix-ui-settings-oc-4734 for fix",
+        "2026-10-07T12:36:24+00:00: [needs-evaluation] fix committed b91bfe7; nine data actions rendered with real backends (clear-data, planet data, clear saves/research/campaign saves, zip export/import, open folder, crash-log export); evaluator queue",
+        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open",
+        "2026-10-07T14:05:56+00:00: migrated: cleared legacy claim (fix-ui-settings-oc-4734)"
       ],
       "plan": "14",
       "first_seen": "2026-10-06T07:58:09+00:00",
-      "last_verified": "2026-10-06T09:59:48+00:00"
+      "last_verified": "2026-10-07T12:11:25+00:00"
     },
     {
       "id": "EV-0025",
       "area": "ui/settings",
       "severity": "S3",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "UI Scaling setting is stored but never applied",
       "expected": "Java: uiscale is applied at startup (Vars.java:517 Scl.setProduct) and Control.java prompts a restart when it changes",
       "actual": "Godot: settings store reports uiscale=200 (persisted across stop/play), content_scale_factor stays 1.0 and every control keeps its 1.0 layout; no uiscale consumer exists in client/ui or mind-gdext",
@@ -797,7 +828,8 @@
         "2026-10-06T10:11:31+00:00: [loop ?] Partial at HEAD 60398e4 (fix 48298b6), window 1152x648, log cleared. APPLY HALF FIXED: content_scale_factor now equals max(uiscale,25)/100 at boot, pid-stamped for uiscale 100->1.0 (pid 1185310), 150->1.5 (pids 1185937/1188374, viewport 768x432), 25 (store clamps <25)->0.25 (pid 1186254), 200 (set by a concurrent session)->2.0 (pid 1187755, viewport 576x324). Visual step-02-uiscale-150.png shows the whole window scaled 1.5x. REMAINING: the reference also prompts a restart when the value changes (Control.java uiscale.reset countdown), and the port shows no notice - settings_menu_dialog._set_value only calls MindUi.settings_set, and settings_set('uiscale',120) left dialog_stack/has_dialog/has_field unchanged; grep finds no uiscale notice in client/ui (only language_dialog emits @language.restart). Keep open for the missing restart prompt.",
         "2026-10-06T10:12:53+00:00: [loop ?] Boot-apply half re-verified at HEAD 60398e4 (fix 48298b6): settings_set('uiscale',200) -> stop/play -> fresh pid 1187755 reads stored=200, content_scale_factor=2.0 (was 1.0), window 1152x648 / logical visible rect 576x324, get_final_transform scale 2.0 -> UI renders 2x physical (godot/step-ev0025-uiscale200-menu-mshot.png). Restored: set 100 -> stop/play -> pids 1187991/1188673/1188913 read stored=100, factor 1.0, final scale 1.0. STATUS KEPT OPEN: the expected restart prompt (Control.java:640-664, @uiscale.reset countdown) is still absent per the 10:11:31Z note; settings_menu_dialog._set_value only calls settings_set. Concurrent session set uiscale=150 mid-run (pid 1188374 factor 1.5); 100 re-asserted.",
         "2026-10-06T10:24:27+00:00: [loop ?] Fresh in-engine repro at HEAD bc8d111 (fix f43f45a), window 1152x648, log cleared. Real Graphics slider click (710,163) set uiscale=150 and uiscale_changed=true (pid 1199186, factor still 1.0); next boot (pid 1200025) applied content_scale_factor=1.5 and showed the @uiscale.reset prompt with countdown (body 'UI scale has been changed. / Press \"OK\" to confirm this scale. / Reverting and exiting in {n} seconds...') and buttons OK (317,289) / Cancel & Exit (406,289) at scale 1.5. OK (pid 1201262) kept uiscale=150, cleared uiscale_changed, factor 1.5, prompt gone. Cancel & Exit (406,289) reverted uiscale to 100 and exited; next boot (pid 1201934) read 100/false/factor 1.0. The 11s timeout ran the same revert+exit path twice (pid 1200407 read 100/false/1.0). Final state uiscale=100, flag false (pid 1202818). The prompt body's raw markup is filed separately as a new S4 finding (not folded into EV-0025).",
-        "2026-10-06T10:29:49+00:00: [loop ?] Independent end-to-end verification at HEAD bc8d111 (f43f45a ancestor; no game-code diff f43f45a..bc8d111), window 1152x648. APPLY: boot0 pid 1203568 MindUi.settings_set('uiscale',200)+set_uiscale_changed(true) -> disk settings.bin uiscale=0xc8/flag=0x01; fresh pids 1205188 and 1205556 read content_scale_factor=2.0, logical viewport 576x324, MCP status input_scale [2.0,2.0]. PROMPT: pids 1204350/1205188/1205731 show '@uiscale.reset' body 'UI scale has been changed...' with live countdown (6.098s/56.44s/57.36s remaining), buttons OK / Cancel & Exit. OK (pid 1205188, click viewport 221,203): prompt closed, uiscalechanged=false, uiscale stays 200, factor 2.0, same pid alive (frames 503->1720); fresh pid 1205556 shows no prompt, 200/false, factor 2.0. CANCEL & EXIT (pid 1205731, click viewport 310,203): pid exited (ps gone; status is_playing=false/instance_count=0), disk uiscale=100/flag=false. RESTORED: fresh pid 1206043 reads uiscale=100, uiscalechanged=false, factor=1.0, no prompt; profile left at 100/false. Countdown-bump caveat: after two eval-body errors paused the debugger and consumed the natural 11s window, _uiscale_countdown was set to 60 on pids 1205188/1205731 to finish capture/click; live decrease still observed. Raw [color] markup in the prompt body matches already-filed EV-0034 (not duplicated)."
+        "2026-10-06T10:29:49+00:00: [loop ?] Independent end-to-end verification at HEAD bc8d111 (f43f45a ancestor; no game-code diff f43f45a..bc8d111), window 1152x648. APPLY: boot0 pid 1203568 MindUi.settings_set('uiscale',200)+set_uiscale_changed(true) -> disk settings.bin uiscale=0xc8/flag=0x01; fresh pids 1205188 and 1205556 read content_scale_factor=2.0, logical viewport 576x324, MCP status input_scale [2.0,2.0]. PROMPT: pids 1204350/1205188/1205731 show '@uiscale.reset' body 'UI scale has been changed...' with live countdown (6.098s/56.44s/57.36s remaining), buttons OK / Cancel & Exit. OK (pid 1205188, click viewport 221,203): prompt closed, uiscalechanged=false, uiscale stays 200, factor 2.0, same pid alive (frames 503->1720); fresh pid 1205556 shows no prompt, 200/false, factor 2.0. CANCEL & EXIT (pid 1205731, click viewport 310,203): pid exited (ps gone; status is_playing=false/instance_count=0), disk uiscale=100/flag=false. RESTORED: fresh pid 1206043 reads uiscale=100, uiscalechanged=false, factor=1.0, no prompt; profile left at 100/false. Countdown-bump caveat: after two eval-body errors paused the debugger and consumed the natural 11s window, _uiscale_countdown was set to 60 on pids 1205188/1205731 to finish capture/click; live decrease still observed. Raw [color] markup in the prompt body matches already-filed EV-0034 (not duplicated).",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "14",
       "first_seen": "2026-10-06T07:58:09+00:00",
@@ -807,7 +839,7 @@
       "id": "EV-0026",
       "area": "ui/dialogs",
       "severity": "S2",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "Closing a dialog leaves it on the MindUi stack, keeps the sim paused and its hidden controls swallow menu clicks",
       "expected": "Java: Back closes the dialog, releases pause and the menu is immediately interactive",
       "actual": "Godot: after Settings > Back (576,503) the menu is visible but dialog_stack=['settings'], has_dialog=true and is_paused=true; the hidden settings rail button (205,216 300x50) still has mouse capture at (230,219), so the Database menu button does nothing; likewise About > Back leaves stack=['about'] with has_dialog=true",
@@ -825,7 +857,8 @@
       ],
       "notes": [
         "2026-10-06T08:14:39+00:00: claimed by loop-1",
-        "2026-10-06T08:18:41+00:00: [loop ?] Fresh in-engine repro at HEAD 8c16919 (fix 8c16919), game pid 1111444, 1152x648, log cleared first. Settings open: dialog_stack()=['settings'], has_dialog=true, is_paused()=true, node visible; dialog Back at resolved (576,503): stack=[], has_dialog=false, is_paused()=false, node hidden. Second round-trip Core Database: open stack=['database']/paused true -> Back stack=[]/paused false/node hidden. About (non-pause): open stack=['about']/paused false -> Back stack=[]/has_dialog false/node hidden. Input capture gone: immediately after the Settings close the Database button (230,219) opened its 3-item submenu (pre-fix the hidden settings rail swallowed it), and after the About close the Database click toggled the submenu visible->hidden with stack staying empty. tools/ui_widgets_check.gd exit 0 including 'open_dialog pushes the dialog onto the MindUi stack', 'Back button pops the dialog off the MindUi stack', 'Back button hides the dialog node'. Log errors only pre-existing boot warnings."
+        "2026-10-06T08:18:41+00:00: [loop ?] Fresh in-engine repro at HEAD 8c16919 (fix 8c16919), game pid 1111444, 1152x648, log cleared first. Settings open: dialog_stack()=['settings'], has_dialog=true, is_paused()=true, node visible; dialog Back at resolved (576,503): stack=[], has_dialog=false, is_paused()=false, node hidden. Second round-trip Core Database: open stack=['database']/paused true -> Back stack=[]/paused false/node hidden. About (non-pause): open stack=['about']/paused false -> Back stack=[]/has_dialog false/node hidden. Input capture gone: immediately after the Settings close the Database button (230,219) opened its 3-item submenu (pre-fix the hidden settings rail swallowed it), and after the About close the Database click toggled the submenu visible->hidden with stack staying empty. tools/ui_widgets_check.gd exit 0 including 'open_dialog pushes the dialog onto the MindUi stack', 'Back button pops the dialog off the MindUi stack', 'Back button hides the dialog node'. Log errors only pre-existing boot warnings.",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "14",
       "first_seen": "2026-10-06T07:58:16+00:00",
@@ -835,7 +868,7 @@
       "id": "EV-0027",
       "area": "ui/dialogs",
       "severity": "S3",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "Mods dialog opens with no visible controls",
       "expected": "Java: Mods dialog shows Import Mod / Mod Browser buttons and 'No mods found!' in the window",
       "actual": "Godot: only the title 'Mods' and Back are visible; all action buttons are laid out at y=720-760, below the 648px window (Import File, Import From GitHub, Mod Browser, Open Folder, Modding Guide, 'Errors have occurred loading mods')",
@@ -849,7 +882,8 @@
         "runs/20261006-192439-ev0020-0030-verify/java/step-java-mods.png"
       ],
       "notes": [
-        "2026-10-06T09:39:47+00:00: [loop ?] Fresh 63e1e0a re-run (pid 1161539, menu > Mods, 1152x648): Import File (218,200,111x34), Import From GitHub (333,200,192x34), Mod Browser (529,200,132x34), Open Folder (665,200,123x34), Modding Guide (792,200,149x34) all inside the 648px window with bottom=234 (was y=720-760, offscreen); Back at y=486. Screenshot shows the full action row. The empty-list label renders literal '[lightgray]' markup - filed separately as EV-0033."
+        "2026-10-06T09:39:47+00:00: [loop ?] Fresh 63e1e0a re-run (pid 1161539, menu > Mods, 1152x648): Import File (218,200,111x34), Import From GitHub (333,200,192x34), Mod Browser (529,200,132x34), Open Folder (665,200,123x34), Modding Guide (792,200,149x34) all inside the 648px window with bottom=234 (was y=720-760, offscreen); Back at y=486. Screenshot shows the full action row. The empty-list label renders literal '[lightgray]' markup - filed separately as EV-0033.",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "14",
       "first_seen": "2026-10-06T07:58:16+00:00",
@@ -859,7 +893,7 @@
       "id": "EV-0028",
       "area": "ui/dialogs",
       "severity": "S3",
-      "status": "needs-evaluation",
+      "status": "godot-open",
       "title": "Core Database dialog lists no content and uses category tabs instead of the reference's planet tabs",
       "expected": "Java: Core Database has all/Serpulo/Erekir tabs and an Items/Blocks content grid of locked/unlocked entries",
       "actual": "Godot: tabs are items/blocks/units/liquids (raw ids), the content area is the placeholder '<none>', and no content entries are rendered",
@@ -872,7 +906,8 @@
       "notes": [
         "2026-10-06T10:32:23+00:00: claimed by loop-1",
         "2026-10-06T10:33:29+00:00: released: Claim released without a fix (scope confirmed, groundwork mapped). EV-0028 needs a content-database view + dialog rewrite, best done in a focused single-writer session. Scoping: mind-core already has the data - UnlockFields {database_category, database_tag, all_database_tabs, shown_planets, database_tabs, hide_database, unlocked, localized_name, icon_region} on items/blocks/liquids/units/statuses; ContentRegistry accessors items()/blocks()/liquids()/units()/entries(type); bundle keys database-category.<type|cat> and database-tag.<tag> exist. Upstream DatabaseDialog.java: planet tabs = 'all' (Planets.sun) + every content.databaseTabs, rendered as 50px icon toggles; contents grouped by category then tag; each row is a grid of uiIcon (unlocked) or lock (locked), click opens ContentInfoDialog; empty categories hidden. Proposed: a mind_core::ui::campaign::content_database() view + MindUi.content_database_json(), then rewrite client/ui/dialogs/database_dialog.gd. Blocks EV-0013 too (same unlock/catalog filtering).",
-        "2026-10-07T05:15:39+00:00: [needs-evaluation] Landed agent/menu-reachability 28e5403: database rows filter by search and content info opens."
+        "2026-10-07T05:15:39+00:00: [needs-evaluation] Landed agent/menu-reachability 28e5403: database rows filter by search and content info opens.",
+        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open"
       ],
       "plan": "14",
       "first_seen": "2026-10-06T07:58:16+00:00",
@@ -882,7 +917,7 @@
       "id": "EV-0029",
       "area": "ui/menu",
       "severity": "S3",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "About link rows render no icon (atlas lookup instead of the icon font)",
       "expected": "Java: every About link row shows its Mindustry icon glyph (Icon.discord, Icon.list, Icon.trello, Icon.book, Icon.add, Icon.redditAlien, Icon.github, Icon.wrench) beside the title, on a colored bar with an external-link button",
       "actual": "Godot: all 8 About link buttons have icon=null (icon_w 0, icon_max_width 0). about_dialog.gd calls MindWidgets.icon_texture(name) (sprite-atlas regions) but the referenced names (discord, list, trello, book, add, redditAlien, github, wrench) are Mindustry icon-font glyph names and are absent from assets/sprites/sprites.atlas.json, so the lookup returns null and no icon renders. The colored bar and external-link button are also absent.",
@@ -896,7 +931,8 @@
       ],
       "notes": [
         "Split out of EV-0006 during its 38d8105 re-verification: EV-0006's titled symptom (raw title keys) is fixed, but the 'no link icons render' observation from EV-0006.actual persists and has a distinct cause. Do not re-open EV-0006 for this.",
-        "2026-10-06T09:56:20+00:00: [loop ?] Fresh in-engine repro (pid 1173788, 1152x648): menu > Database > About with real clicks; 12/12 link rows render an icon-font glyph Label beside the title. Codepoints match MindIcons.glyph 1:1 (discord 59405, list 59409, trello 61825, book 59483, add 59411, reddit-alien 62081, itchio 59434, googleplay 59453, android 59461, github 62216, github-square 62208, wrench 59407), label widths 15-25px, dialog stack ['about']."
+        "2026-10-06T09:56:20+00:00: [loop ?] Fresh in-engine repro (pid 1173788, 1152x648): menu > Database > About with real clicks; 12/12 link rows render an icon-font glyph Label beside the title. Codepoints match MindIcons.glyph 1:1 (discord 59405, list 59409, trello 61825, book 59483, add 59411, reddit-alien 62081, itchio 59434, googleplay 59453, android 59461, github 62216, github-square 62208, wrench 59407), label widths 15-25px, dialog stack ['about'].",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "14",
       "first_seen": "2026-10-06T08:59:49+00:00",
@@ -906,7 +942,7 @@
       "id": "EV-0030",
       "area": "ui/menu",
       "severity": "S3",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "Credits dialog contributor list is not visible (1px-wide labels)",
       "expected": "Java: the Credits dialog shows the 'Translators and Contributors' 3-column list with names (redloong9527, Prosta4okua, Felix Corvus, Vanguard, Timmeey86, Epowerj, ...)",
       "actual": "Godot: 202 labels exist in the tree, but every contributor label renders 1px wide (redloong9527 x=310 y=1480 w=1 h=338; first row x=310/488/667 w=1), so no name is visible at any scroll position; the heading 'Translators and Contributors' renders (528 px) and the blurb label is 988 px tall with scroll max 24917 (inflated-label layout family of EV-0020/EV-0023)",
@@ -927,7 +963,8 @@
         "Split out of EV-0007 during its 9ecc2de re-verification: the About links + Credits button are fixed, but the Credits body's contributor list is not player-visible. Do not re-open EV-0007 for this.",
         "2026-10-06T09:39:40+00:00: [loop ?] Fresh 63e1a re-run (pid 1157350, menu > Database > About > Credits, 1152x648): blurb is one line h=26 at y=174 (was x=316 y=174 w=512 h=988, scroll max 24917); 202/202 rich labels now wider than 1px. First contributor redloong9527 x=121 y=258 w=119 (was x=310 y=1480 w=1 h=338), Prosta4okua w=110, Felix Corvus w=105; heading y=225 and 7 contributor rows visible at scroll 0. Literal [sky] blurb markup still present (EV-0031, unchanged).",
         "2026-10-06T09:39:57+00:00: [loop ?] Note correction: the re-run commit in the previous EV-0030 verification note is 63e1e0a6c9040d880ccf68428a78f03ea6597f91 (typo '63e1a').",
-        "2026-10-06T09:42:18+00:00: [loop ?] Fresh in-engine repro at HEAD 63e1e0a, pid 1162051, 1152x648. Credits contributor labels now render with real widths (were w=1 h=208..338): heading 'Translators and Contributors' y=225 w=906 h=26; first packed contributor redloong9527 x=121 y=258 w=119 h=26; Prosta4okua 110, Felix Corvus 105, Vanguard 84, Timmeey86 101, Epowerj 71 in 3 columns at y=258/290, all inside the viewport. The list is player-visible; step-03-credits.png shows the full 3-column list matching java/step-java-credits.png. (The blurb still shows a literal [sky] - tracked as EV-0031, left open.)"
+        "2026-10-06T09:42:18+00:00: [loop ?] Fresh in-engine repro at HEAD 63e1e0a, pid 1162051, 1152x648. Credits contributor labels now render with real widths (were w=1 h=208..338): heading 'Translators and Contributors' y=225 w=906 h=26; first packed contributor redloong9527 x=121 y=258 w=119 h=26; Prosta4okua 110, Felix Corvus 105, Vanguard 84, Timmeey86 101, Epowerj 71 in 3 columns at y=258/290, all inside the viewport. The list is player-visible; step-03-credits.png shows the full 3-column list matching java/step-java-credits.png. (The blurb still shows a literal [sky] - tracked as EV-0031, left open.)",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "14",
       "first_seen": "2026-10-06T09:10:21+00:00",
@@ -937,7 +974,7 @@
       "id": "EV-0031",
       "area": "ui/menu",
       "severity": "S4",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "Credits blurb renders a literal [sky] before the email",
       "expected": "Java: 'Created by Anuken - anukendev@gmail.com' (bundle credits.text = 'Created by [royal]Anuken[] - [sky]anukendev@gmail.com[]', both color tags applied)",
       "actual": "Godot: the blurb's parsed text is 'Created by Anuken - [sky]anukendev@gmail.com'; the [sky] color tag is not converted by render_markup (the [royal] tag converts fine), so the literal '[sky]' renders before the address",
@@ -957,7 +994,8 @@
         "Split out of EV-0007 during its 9ecc2de re-verification.",
         "2026-10-06T09:39:52+00:00: [loop ?] Fresh 63e1e0a re-run (pid 1157350): credits blurb still renders the literal '[sky]' tag before the email - 'Created by Anuken - [sky]anukendev@gmail.com' - in step-04-credits-top-mshot.png; status unchanged.",
         "2026-10-06T09:42:18+00:00: [loop ?] Fresh repro at HEAD 63e1e0a, pid 1162051: the Credits blurb still renders a literal [sky] - parsed text 'Created by Anuken - [sky]anukendev@gmail.com' (raw 'Created by [color=#4040ffff]Anuken[/color] - [lb]sky]anukendev@gmail.com'; bundle is 'Created by [royal]Anuken[] - [sky]anukendev@gmail.com[]'). The wrap fix compacted the blurb to h=26 w=890 but did not convert the [sky] color tag. Still open.",
-        "2026-10-06T09:56:20+00:00: [loop ?] Fresh in-engine repro (pid 1173788): About > Credits; blurb BBCode 'Created by [color=#4040ffff]Anuken[/color] - [color=#87ceebff]anukendev@gmail.com[/color]', get_parsed_text()='Created by Anuken - anukendev@gmail.com' (no literal [sky]); centered panel (107,124,938x400), blurb 890x26."
+        "2026-10-06T09:56:20+00:00: [loop ?] Fresh in-engine repro (pid 1173788): About > Credits; blurb BBCode 'Created by [color=#4040ffff]Anuken[/color] - [color=#87ceebff]anukendev@gmail.com[/color]', get_parsed_text()='Created by Anuken - anukendev@gmail.com' (no literal [sky]); centered panel (107,124,938x400), blurb 890x26.",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "14",
       "first_seen": "2026-10-06T09:10:21+00:00",
@@ -967,7 +1005,7 @@
       "id": "EV-0032",
       "area": "ui/settings",
       "severity": "S3",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "Settings dialog body is shorter than the reference: half the Game rows and the Developer Options rail entry need scrolling",
       "expected": "Java at 1152x648: Settings Game pane shows Save Interval plus 9 check rows and the full 7-entry category rail without scrolling (java/step-java-settings-game.png)",
       "actual": "Godot: Body scroll viewport is only 316px tall (y 162..478); only 5 of 10 check rows (y 229..437) are visible and the 7th rail entry Developer Options (y 486..536) is below the viewport at scroll 0; the pane still scrolls (max 642) after the label-wrapping fix shortened the slider header from 130px to 26px",
@@ -988,7 +1026,8 @@
       "notes": [
         "Filed from the EV-0021 re-check: EV-0021's filed symptom (all checks below the pane, 130px slider header) is fixed, but the pane height difference remains. Java visibly fits 9 checks plus the rail; Godot fits 5 checks and clips the rail.",
         "2026-10-06T10:11:31+00:00: [loop ?] Fresh in-engine repro at HEAD 60398e4 (fix ba8203c), pid 1185310, window 1152x648, uiscale 1.0, log cleared first; menu > Settings. Settings panel is now 758x608 at (197,20) (was 758x400 at (197,124)); body scroll viewport y=58 h=524 (was y=162 h=316); all 7 category rail entries visible at y=58..382 including Developer Options (was clipped); 8 Game check rows fully inside the viewport (10 rows at y=125..593, h=45; was 4). Java reference at 1152x648 shows the full rail and ~9 rows; the port now matches structurally. Visual: step-01-settings-game.png.",
-        "2026-10-06T10:12:31+00:00: [loop ?] Fresh in-engine repro at HEAD ba8203c (live-loop dumps pids 1187991/1188913/1185310, 1152x648, uiscale 100/factor 1.0): panel 758x608 (y=20; viewport-40), Body 742x524 (y 58..582; was 316 y162..478); 10 Game checks y=125..593 stride 52 -> 8 fully inside + 9th starts inside with its label y=550 h=26 fully inside (4px row padding clipped), 10th (commandmodehold, y=593) below; all 7 rail entries fully inside incl. Developer Options y=382..432. Java Game table is likewise saveinterval + 10 checks (SettingsMenuDialog.java:373-416). Filed symptom (half the rows + Dev Options needing scrolling) no longer reproduces. Residual: 10th check still needs scrolling; live body 524 vs 538 headless-probe figure."
+        "2026-10-06T10:12:31+00:00: [loop ?] Fresh in-engine repro at HEAD ba8203c (live-loop dumps pids 1187991/1188913/1185310, 1152x648, uiscale 100/factor 1.0): panel 758x608 (y=20; viewport-40), Body 742x524 (y 58..582; was 316 y162..478); 10 Game checks y=125..593 stride 52 -> 8 fully inside + 9th starts inside with its label y=550 h=26 fully inside (4px row padding clipped), 10th (commandmodehold, y=593) below; all 7 rail entries fully inside incl. Developer Options y=382..432. Java Game table is likewise saveinterval + 10 checks (SettingsMenuDialog.java:373-416). Filed symptom (half the rows + Dev Options needing scrolling) no longer reproduces. Residual: 10th check still needs scrolling; live body 524 vs 538 headless-probe figure.",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "14",
       "first_seen": "2026-10-06T09:39:52+00:00",
@@ -998,7 +1037,7 @@
       "id": "EV-0033",
       "area": "ui/dialogs",
       "severity": "S4",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "Mods dialog renders a literal [lightgray] tag in the empty-list message",
       "expected": "Java: the empty mod list shows 'No mods found!' (java/step-java-mods.png)",
       "actual": "Godot: the body label renders '[lightgray]No mods found!' with the BBCode tag visible; same markup-leak family as EV-0031",
@@ -1011,7 +1050,8 @@
         "runs/20261006-194540-ev0029-0033-verify/godot/step-06-mods.png"
       ],
       "notes": [
-        "2026-10-06T09:56:20+00:00: [loop ?] Fresh in-engine repro (pid 1173788): menu > Mods with 0 mods loaded and empty MindMods.errors(); empty-list label text '[color=#bfbfbfff]No mods found![/color]' -> parsed 'No mods found!' (no literal [lightgray]), visible at (222,364,140x26)."
+        "2026-10-06T09:56:20+00:00: [loop ?] Fresh in-engine repro (pid 1173788): menu > Mods with 0 mods loaded and empty MindMods.errors(); empty-list label text '[color=#bfbfbfff]No mods found![/color]' -> parsed 'No mods found!' (no literal [lightgray]), visible at (222,364,140x26).",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "20",
       "first_seen": "2026-10-06T09:39:52+00:00",
@@ -1021,7 +1061,7 @@
       "id": "EV-0034",
       "area": "ui/settings",
       "severity": "S4",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "UI-scale reset prompt shows raw [color=#...] markup instead of styled text",
       "expected": "Java: the @uiscale.reset countdown renders as colored text (scarlet 'Reverting and exiting in', accent seconds) inside the '@confirm' dialog",
       "actual": "Godot: the prompt body is a plain Label, so the Godot BBCode produced by MindWidgets.markup_format shows literally: 'UI scale has been changed.\\nPress \"OK\" to confirm this scale.\\n[color=#ff3100ff]Reverting and exiting in[/color][color=#ffd37fff] 8[/color][color=#ff3100ff] seconds...[/color]'. Also noted: the dialog has no '@confirm' title (title passed as '') and the buttons are ordered OK / Cancel & Exit vs upstream Cancel & Exit / OK.",
@@ -1036,7 +1076,8 @@
       ],
       "notes": [
         "Split out of EV-0025 during its bc8d111 verification: the apply/prompt/OK/Cancel behaviors verify fixed, but the prompt body renders machine markup to the player.",
-        "2026-10-06T10:31:29+00:00: [loop ?] Fresh in-engine repro at HEAD 3f5a7bb (fix f6dd57c), window 1152x648, log cleared. With uiscale=150 + set_uiscale_changed(true) and a restart, pid 1206691 booted at content_scale_factor 1.5 and showed the @uiscale.reset prompt: the body node is now a RichTextLabel (bbcode_enabled=true) and get_parsed_text() = 'UI scale has been changed.\\nPress \"OK\" to confirm this scale.\\nReverting and exiting in 7 seconds...' with no literal [color=...] tags; the capture shows the countdown line rendered in red with OK / Cancel & Exit buttons at scale 1.5. Previously the plain Label displayed the raw [color=#ff3100ff]...[/color] tags. The 11s countdown expiring auto-reverted uiscale to 100 and exited; a fresh boot (pid 1207837) read uiscale=100, flag false, factor 1.0."
+        "2026-10-06T10:31:29+00:00: [loop ?] Fresh in-engine repro at HEAD 3f5a7bb (fix f6dd57c), window 1152x648, log cleared. With uiscale=150 + set_uiscale_changed(true) and a restart, pid 1206691 booted at content_scale_factor 1.5 and showed the @uiscale.reset prompt: the body node is now a RichTextLabel (bbcode_enabled=true) and get_parsed_text() = 'UI scale has been changed.\\nPress \"OK\" to confirm this scale.\\nReverting and exiting in 7 seconds...' with no literal [color=...] tags; the capture shows the countdown line rendered in red with OK / Cancel & Exit buttons at scale 1.5. Previously the plain Label displayed the raw [color=#ff3100ff]...[/color] tags. The 11s countdown expiring auto-reverted uiscale to 100 and exited; a fresh boot (pid 1207837) read uiscale=100, flag false, factor 1.0.",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "14",
       "first_seen": "2026-10-06T10:24:27+00:00",
@@ -1046,7 +1087,7 @@
       "id": "EV-0035",
       "area": "game/campaign",
       "severity": "S1",
-      "status": "claimed",
+      "status": "twin-verified",
       "title": "First boot panics in MindCampaign bootstrap; campaign launch and tech tree are dead",
       "expected": "Java: a fresh install boots; Play > Campaign > Serpulo > Ground Zero launches the sector (session sector set, waves on, core registered)",
       "actual": "Godot: MindCampaign.ready() panics at mind-core/src/io/save/slot.rs:249 'chunk size must be non-zero' on a user:// dir with no saves/; registry+campaign stay None, so get_tech_state nodes=0, list_save_slots=[], start_sector('serpulo',170)=false and get_sector_state campaign=false",
@@ -1054,29 +1095,36 @@
       "evidence": [
         "runs/l2-20261007-064916-campaign_spine/godot/crash-report-mindcampaign-ready.txt",
         "runs/l2-20261007-064916-campaign_spine/godot/state-01-boot-failed-launch.json",
-        "runs/l2-20261007-064916-campaign_spine/godot/step-01-boot-after-launch-panic.png"
+        "runs/l2-20261007-064916-campaign_spine/godot/step-01-boot-after-launch-panic.png",
+        "runs/20261007-201730-ev0035-fresh-campaign/godot/state-01-fresh-boot.json",
+        "runs/20261007-201730-ev0035-fresh-campaign/godot/state-02-start-sector.json",
+        "runs/20261007-201730-ev0035-fresh-campaign/godot/state-03-post-launch.json",
+        "runs/20261007-201730-ev0035-fresh-campaign/godot/game.log",
+        "runs/20261007-201730-ev0035-fresh-campaign/godot/crash-report-mindui-gameover.txt",
+        "runs/20261007-201730-ev0035-fresh-campaign/java/step-03b-groundzero-hud.png",
+        "runs/20261007-201730-ev0035-fresh-campaign/report.md"
       ],
       "notes": [
         "2026-10-07T02:39:35+00:00: claimed by loop-2",
         "2026-10-07T04:42:54+00:00: migrated status in-progress -> needs-evaluation",
         "2026-10-07T04:42:54+00:00: reaped stale claim (loop-2, was needs-evaluation); restored needs-evaluation",
         "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed parity/loop-3 empty-saves guard + agent/campaign-spine bootstrap persistence.",
-        "2026-10-07T08:18:59+00:00: claimed by eval-oc-12820 for evaluation"
+        "2026-10-07T08:18:59+00:00: claimed by eval-oc-12820 for evaluation",
+        "2026-10-07T10:15:34+00:00: reaped stale claim (eval-oc-12820, was claimed); restored needs-evaluation",
+        "2026-10-07T10:15:36+00:00: claimed by eval-oc-5541 for evaluation",
+        "2026-10-07T10:27:28+00:00: [verify] Exact repro re-run in loop 1 (display :10, bridge 6970) at HEAD 9afc04e with rebuilt libmind_gdext.so (97430598ed104a23, 2026-10-07 20:16 +1000). Godot leg: fresh user:// dir (no saves/, saves_dir_exists=false), godot_game play res://scenes/game.tscn, runtime pid 112025. Boot log shows '[I] MindCampaign ready (0 save slot(s))' with no 'chunk size must be non-zero' and no MindCampaign::ready panic; get_tech_state nodes=375 unlocked=7 (was 0); list_save_slots()=0 rows without panic; start_sector('serpulo',170)=true (was false); post-launch get_sector_state campaign=true planet=serpulo sector=170 (was campaign=false). All five 'actual' symptoms in the finding are gone. Remaining launch symptoms are separately filed: hasCore=false/waves=false -> EV-0037 (open); the subsequent zero-core game-over path panics in MindUi::hud_set_visible (Gd bind_mut already bound), stalls frames at 2661/tick 1309 -> EV-0061 (open), crash report captured. Java reference leg on a fresh data dir (no settings, no saves) launched Play > Campaign > Select Starting Campaign (Serpulo) > Ground Zero: snowy terrain, core, tutorial, 'Obtain: 0/15 Copper' HUD, sector .msav written, 0 errors.",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "12",
       "first_seen": "2026-10-06T20:50:55+00:00",
-      "last_verified": "2026-10-07T08:18:59+00:00",
-      "found_by_loop": "2",
-      "prev_status": "needs-evaluation",
-      "owner": "eval-oc-12820",
-      "claimed_at": "2026-10-07T08:18:59+00:00",
-      "claimed_for": "evaluation"
+      "last_verified": "2026-10-07T10:27:28+00:00",
+      "found_by_loop": "2"
     },
     {
       "id": "EV-0036",
       "area": "game/campaign",
       "severity": "S2",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "Campaign save_slot/load_slot never write or read a file after a sector launch (IO queue never drains)",
       "expected": "Java: launching a sector and saving writes user://saves/<name>.msav; the slot lists and can be resumed",
       "actual": "Godot: MindCampaign.save_slot('evalws2') returns true but host.io_pending() stays 1 and user://saves/evalws2.msav never appears after 130 ticks; list_save_slots() stays []",
@@ -1102,7 +1150,8 @@
       "notes": [
         "2026-10-07T02:45:36+00:00: claimed by loop-3",
         "2026-10-07T02:54:36+00:00: [code] fbc90f7 re-wires the per-sim seams: sim_host.rs:261 install_sim_seams now installs GlobalVars + SimIoHandler + AudioSink, and is called from bootstrap:215, load_scenario:883 and load_sector:941 so a fresh Sim replacement always carries the IO executor; previously only bootstrap had it, so a queued save never drained. campaign.rs:449 host() resolves /root/Spine/SimHost (scene game.tscn:9-11, live path planet_dialog.gd:543-548 load_sector then start_sector). save_slot:466 now queues request_save(user://saves/<name>.msav,false) and load_slot:483 request_load, both globalized by sim_host.rs:1171 and fulfilled by SimIoHandler::capture/apply (mind-core/io/sim_io.rs:199-229) at the IoSet boundary pumped by Sim::tick (io_set.rs:218). list_save_slots:490 lists the same globalized user:// dir; slot.rs:240 empty-dir guard returns [] instead of panicking on chunks(0). Verified: cargo check -p mind-gdext passes; io::save::slot::tests::empty_dir_lists_no_slots passes.",
-        "2026-10-07T02:56:22+00:00: [loop 3] Re-ran the exact 7-step repro at commit fbc90f7 (loop 3, display :12, Godot pid 2112919, worktree Mindustry-Godot-loop3). load_sector/start_sector true; save_slot('evalslot') true with io_pending=1, then step drains to 0; user://saves/evalslot.msav exists (16434 B, sha256 c82299c1...) and list_save_slots()=1; load_slot true with before=1/after=0. No IO/save/campaign errors in the log. Only pre-existing boot-time asset manifest [E] entries, unrelated."
+        "2026-10-07T02:56:22+00:00: [loop 3] Re-ran the exact 7-step repro at commit fbc90f7 (loop 3, display :12, Godot pid 2112919, worktree Mindustry-Godot-loop3). load_sector/start_sector true; save_slot('evalslot') true with io_pending=1, then step drains to 0; user://saves/evalslot.msav exists (16434 B, sha256 c82299c1...) and list_save_slots()=1; load_slot true with before=1/after=0. No IO/save/campaign errors in the log. Only pre-existing boot-time asset manifest [E] entries, unrelated.",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "12",
       "first_seen": "2026-10-06T20:54:35+00:00",
@@ -1113,7 +1162,7 @@
       "id": "EV-0037",
       "area": "game/campaign",
       "severity": "S1",
-      "status": "open",
+      "status": "godot-open",
       "title": "A fresh Ground Zero launch registers no player core: hasCore=false and zero building entities",
       "expected": "Java: SectorInfo.hasCore defaults true; World.loadSector loads the preset map's core, so a fresh launch has a default-team core and does not instantly lose",
       "actual": "Godot: after load_sector('serpulo',170)+start_sector, get_sector_state().hasCore=false and SimHost.get_group_counts().build=0; sync_session_with_sim scans ECS BuildingComp which load_sector never populates, so player_core_count()==0 and check_game_state_campaign sets game_over on the first GameStateCheck tick",
@@ -1121,59 +1170,92 @@
       "evidence": [
         "runs/l2-20261007-064916-campaign_spine/godot/state-02-launch-rules.json"
       ],
-      "notes": [],
+      "notes": [
+        "2026-10-07T11:00:45+00:00: claimed by fix-game-oc-4734 for fix",
+        "2026-10-07T11:20:25+00:00: [needs-evaluation] commit e85732c: load_sector now materializes decoded map building payloads into ECS entities (cores included) after installing the block runtime; EcsMapSource writes tile-entity base bodies so the campaign auto-save reloads",
+        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open",
+        "2026-10-07T14:05:56+00:00: migrated: cleared legacy claim (fix-game-oc-4734)",
+        "2026-10-07T14:22:07+00:00: claimed by oc-9203 for writer (session loop-1)",
+        "2026-10-07T14:22:39+00:00: released: recovery: writer commit e85732c present on main; no re-write needed; handing to godot eval",
+        "2026-10-07T14:22:52+00:00: claimed by oc-10437 for godot-eval (session loop-1)",
+        "2026-10-07T14:35:15+00:00: reaped stale claim (oc-10437, was godot-unverified); restored godot-open"
+      ],
       "plan": "12",
       "first_seen": "2026-10-06T20:56:18+00:00",
-      "last_verified": "2026-10-06T20:56:18+00:00",
-      "found_by_loop": "2"
+      "last_verified": "2026-10-07T14:22:52+00:00",
+      "found_by_loop": "2",
+      "session": "loop-1"
     },
     {
       "id": "EV-0038",
       "area": "ui/editor",
       "severity": "S2",
-      "status": "needs-evaluation",
+      "status": "godot-open",
       "title": "Editor > Maps: clicking a map row does nothing; the map editor never opens",
       "expected": "Java: Editor > Maps lists the map registry; clicking a row opens MapEditor (ui.editor.show())",
       "actual": "Godot: clicking 'archipelago' leaves editor_maps open; MindEditor.begin_edit_map returns false with @editor.errorload (the ENOENT is the get_meta backup fallback masking the real parse error); EditorDialog.visible stays false. Built-in assets/maps/default/*.msav are legacy MSAV v4/v5 and MapIo::create_map/get_meta_bytes does not route the legacy container.",
       "repro": "godot_game play res://scenes/game.tscn; menu > Editor; click the first row (archipelago) at its resolved center; EditorDialog.visible==false and MindEditor.last_error.key==@editor.errorload",
       "evidence": [
-        "runs/l4-20261007-064905-editor_flow/godot/state-01-editor-maps.json"
+        "runs/l4-20261007-064905-editor_flow/godot/state-01-editor-maps.json",
+        "runs/20261007-111053-ev0038-verify/godot/state-02-row-click.json",
+        "runs/20261007-111053-ev0038-verify/godot/state-03-direct-begin-edit-map.json",
+        "runs/20261007-111053-ev0038-verify/godot/log-errors.json",
+        "runs/20261007-111053-ev0038-verify/godot/state-01-player-path.json",
+        "runs/20261007-111053-ev0038-verify/godot/step-02-row-click-failed.png",
+        "runs/20261007-111053-ev0038-verify/java/step-03-map-editor.png",
+        "runs/20261007-111053-ev0038-verify/report.md"
       ],
       "notes": [
         "Same root cause empties MindPreview (EV added for the registry); Import opens file_chooser and Back closes the browser, so only the row->editor step fails.",
-        "2026-10-07T05:15:39+00:00: [needs-evaluation] Landed agent/menu-reachability 448e60e: editor maps open via the live MindPreview registry."
+        "2026-10-07T05:15:39+00:00: [needs-evaluation] Landed agent/menu-reachability 448e60e: editor maps open via the live MindPreview registry.",
+        "2026-10-07T11:10:16+00:00: claimed by eval-oc-4182 for evaluation",
+        "2026-10-07T11:22:46+00:00: [verify] Fresh twin run at 9afc04e (fix attempts 70206cf/448e60e in history), loop1 :10. Java: Editor>Maps>Archipelago>Open In Editor opens MapEditor with the map rendered. Godot: pure player path blocked before the GUI (Editor click swallowed, EV-0062); with the row click isolated (MindInput input processing disabled so the injected click reaches the runtime-created button, row center 572,99) editor_maps stays open, EditorDialog.visible=false, begin_edit_map=false, last_error @editor.errorload. Direct begin_edit_map on the existing assets/maps/default/archipelago.msav (zlib-wrapped MSAV v5, 23878B) returns false; godot_log shows the masked real error 'Unknown save version: 5'. MindPreview.map_count()==0, rows are still fixture-only (EV-0039).",
+        "2026-10-07T11:47:22+00:00: claimed by fix-ui2-oc-4734 for fix",
+        "2026-10-07T12:01:46+00:00: [needs-evaluation] commit a1413e8: MSAV meta reads route through the legacy importer (MapIo.create_map/get_meta_bytes) and the legacy region walk is version-gated (no custom <=6, v11 patches after content, u16 short-chunk map/entity framing for v4-9); all 18 built-in default maps now read meta and load into an editor grid (new mind-core test).",
+        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open",
+        "2026-10-07T14:05:56+00:00: migrated: cleared legacy claim (fix-ui2-oc-4734)"
       ],
       "plan": "19",
       "first_seen": "2026-10-06T21:01:00+00:00",
-      "last_verified": "2026-10-06T21:01:00+00:00",
+      "last_verified": "2026-10-07T11:47:22+00:00",
       "found_by_loop": "4"
     },
     {
       "id": "EV-0039",
       "area": "ui/custom_game",
       "severity": "S2",
-      "status": "needs-evaluation",
+      "status": "godot-open",
       "title": "Map registry is always empty: Custom Game and Editor list 0x0 name-only fixtures, not live maps",
       "expected": "Java: Custom Game / Editor map lists come from the live Maps registry with real map metadata and previews",
       "actual": "Godot: MindPreview.map_count()==0 and maps_list()==[] after refresh (it scans only user://maps, which is empty on a fresh dir); MapIo::create_map cannot read the built-in legacy MSAV files, so the live registry never populates. Dialogs fall back to MindUi.campaign_views()['maps'] = default_map_entries(): 18 rows with width=0,height=0, no author and no path.",
       "repro": "godot_game play res://scenes/game.tscn; Play > Custom Game; eval /root/Spine/MindPreview.map_count()==0 and JSON.parse_string(MindUi.campaign_views())['maps'][0] == {name:'archipelago',author:null,width:0,height:0,custom:false} (no path)",
       "evidence": [
-        "runs/l4-20261007-064905-custom_game/godot/state-01-custom-game.json"
+        "runs/l4-20261007-064905-custom_game/godot/state-01-custom-game.json",
+        "runs/20261007-212335-ev0039-verify/godot/state-01-registry.json",
+        "runs/20261007-212335-ev0039-verify/godot/game.log",
+        "runs/20261007-212335-ev0039-verify/java/step-02-custom-game.png",
+        "runs/20261007-212335-ev0039-verify/report.md"
       ],
       "notes": [
         "Blocks EV-0038 too: the same create_map/MSAV gap leaves the editor list on fixtures. Mode/rules application is separately BLOCKED-BY-INTEGRATION (MindCampaign.start_map_mode absent).",
-        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/menu-reachability f9defd7/544df70: live map registry feeds Custom Game with mode/rules/playtest."
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/menu-reachability f9defd7/544df70: live map registry feeds Custom Game with mode/rules/playtest.",
+        "2026-10-07T11:22:59+00:00: claimed by eval-oc-4182 for evaluation",
+        "2026-10-07T11:41:03+00:00: [verify] Re-ran the exact repro at HEAD 9afc04e (libmind_gdext.so built 2026-10-07 20:16) on loop 1 / display :10: fresh boot pid 141639 logs 'MindPreview ready (0 maps)'; MindPreview.map_count()==0 before and after refresh() (refresh returns 0); maps_list()==[]; data_root()=user://.../Mindustry-Godot/ with no maps/ subdir. The live registry is still empty, so Custom Game/Editor still cannot list live maps; Java reference at 1152x648 lists the live Maps registry (Ancient Caldera, Archipelago, Debris Field, ...) with real previews. Second repro assertion (MindUi.campaign_views fixture rows) is unrunnable this build: the read-model call blocks past the 15 s eval timeout and pauses the debugger, and MindCampaign.campaign_views_json is absent so MindDialog falls back to the fixture read model; the 70206cf fix diff did not change that fixture source. Click-path note: code-created menu Buttons are skipped by MindInput::ui_captures_at (find_children owned=true) so injected/OS clicks are marked handled before the GUI.",
+        "2026-10-07T12:01:49+00:00: claimed by fix-ui2-oc-4734 for fix",
+        "2026-10-07T12:06:39+00:00: [needs-evaluation] commit 846d928: MindPreview.reload uses Maps.load with resolved assets/maps as the built-in source plus user://maps custom; headless boot logs 'MindPreview ready (18 maps)'; Custom Game/Editor prefer live rows with fixtures only as an empty-registry fallback; new mind-core test builtin_registry_loads_legacy_assets.",
+        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open",
+        "2026-10-07T14:05:56+00:00: migrated: cleared legacy claim (fix-ui2-oc-4734)"
       ],
       "plan": "19",
       "first_seen": "2026-10-06T21:01:03+00:00",
-      "last_verified": "2026-10-06T21:01:03+00:00",
+      "last_verified": "2026-10-07T12:01:49+00:00",
       "found_by_loop": "4"
     },
     {
       "id": "EV-0040",
       "area": "ui/dialogs",
       "severity": "S1",
-      "status": "verified-fixed",
+      "status": "twin-verified",
       "title": "Game runtime never connects: launch_loadout_dialog.gd parse error blocks the client at boot",
       "expected": "Java: the client boots to the main menu and the campaign UI is reachable (Play > Campaign > Serpulo, planet dialog, research, launch loadout)",
       "actual": "Godot: godot_game play res://scenes/game.tscn reports runtime_ready but status stays runtime_connected=false (pid 0, ready false) and every godot_exec fails RUNTIME_NOT_CONNECTED / no ogm:hello beacon. Log: 'Parse Error: There is already a variable named \"resources\" declared in this scope.' at res://ui/dialogs/launch_loadout_dialog.gd:97; the script is statically instanced by res://scenes/ui/ui_root.tscn. No game process survives. Reproduced twice (second after godot_game stop).",
@@ -1186,7 +1268,8 @@
         "runs/l6-20261007-071337-launch_loadout/godot/state-03-launch-loadout.json"
       ],
       "notes": [
-        "2026-10-06T21:37:04+00:00: [loop 6] Re-ran the boot repro on this branch at a1227b4 (loop 6, pid 1895407, 1152x648): godot_game play res://scenes/game.tscn returns runtime_ready+runtime_connected with one instance; launch_loadout_dialog.gd parses and force-opens (basicShard row, total 1800). The duplicate 'var resources' parse error does not recur after clearing the editor log buffer."
+        "2026-10-06T21:37:04+00:00: [loop 6] Re-ran the boot repro on this branch at a1227b4 (loop 6, pid 1895407, 1152x648): godot_game play res://scenes/game.tscn returns runtime_ready+runtime_connected with one instance; launch_loadout_dialog.gd parses and force-opens (basicShard row, total 1800). The duplicate 'var resources' parse error does not recur after clearing the editor log buffer.",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": "14",
       "first_seen": "2026-10-06T21:08:00+00:00",
@@ -1197,7 +1280,7 @@
       "id": "EV-0041",
       "area": "ui/campaign",
       "severity": "S1",
-      "status": "needs-evaluation",
+      "status": "godot-open",
       "title": "Campaign Difficulty dialog errors on a missing MindCell.left() and freezes the client",
       "expected": "Java: Play > Campaign > Serpulo > OK, then the Difficulty rail button opens the CampaignRules dialog with 5 difficulty buttons (casual/easy/normal/hard/eradication) and the 5 rule toggles; the client keeps running",
       "actual": "Godot: opening campaign_rules logs 'Invalid call. Nonexistent function \"left\" in base \"RefCounted (MindCell)\"' from campaign_rules_dialog.gd:82 (_rebuild, the first rule toggle); the full-screen dialog opens with no body and Engine.get_process_frames() freezes (2371 before and after a 2s wait); any later MindUi method call panics 'Gd<T>::bind() failed, already bound; T = mind_gdext::ui::ui_host::MindUi'",
@@ -1206,23 +1289,35 @@
         "runs/l6-20261007-071337-campaign_planet/godot/state-04-campaign-rules.json",
         "runs/l6-20261007-071337-campaign_planet/godot/step-04-campaign-rules-wedged.png",
         "runs/l6-20261007-071337-campaign_planet/godot/crash-report-mindui-borrow.txt",
-        "runs/l6-20261007-071337-campaign_planet/godot/state-03-sector-panel.json"
+        "runs/l6-20261007-071337-campaign_planet/godot/state-03-sector-panel.json",
+        "runs/20261007-084439-ev0041-campaign-rules/godot/state-04-campaign-rules.json",
+        "runs/20261007-084439-ev0041-campaign-rules/godot/step-04-campaign-rules-wedged.png",
+        "runs/20261007-084439-ev0041-campaign-rules/java/step-04-campaign-rules.png"
       ],
       "notes": [
         "2026-10-07T02:39:41+00:00: claimed by loop-3",
         "2026-10-07T02:45:26+00:00: released: loop-3 scope rotated to game/campaign; ui/campaign claim stale from the previous loop-3 run (drain-parallel rotated scope)",
-        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/campaign-ui d9a5b14: live campaign rules/difficulty toggles."
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/campaign-ui d9a5b14: live campaign rules/difficulty toggles.",
+        "2026-10-07T08:43:41+00:00: claimed by eval-oc-5541 for evaluation",
+        "2026-10-07T08:51:37+00:00: [verify] Exact repro re-run twice on fresh boots at HEAD 9afc04e (fix d9a5b14 ancestor, libmind_gdext.so rebuilt 2026-10-07 15:13 +1000). Run2 pid 15053: get_node('/root/MindUi').call('open_dialog','campaign_rules',JSON.stringify({'planet':'serpulo'})) -> TIMEOUT after 15s; log 'Invalid call. Nonexistent function left in base RefCounted (MindCell)' at the same moment (campaign_rules_dialog.gd:82); frames 399/tick 230 -> 820/453 then frozen at 820/453 for >70s (msec 29860/40275/100485); later MindUi.call('is_dialog_shown') also TIMEOUT; MindUi has 0 child nodes, last frame is the main menu. Run1 pid 13473 corroborates (1856/998 frozen after MindUi method timeout, plus 'Bug: Invalid call error code 1337'). Java reference (2cd7aeec, Java/step-04) shows the Difficulty dialog with 5 difficulty buttons and 7 rule toggles; Java log error-free and responsive. Fix does not resolve the finding; note for fixer: MindCell has no left() and RULE_KEYS omits pause_disabled/clear_sector_on_lose vs the reference's 7 toggles.",
+        "2026-10-07T11:00:47+00:00: claimed by fix-ui-oc-4734 for fix",
+        "2026-10-07T11:05:27+00:00: [needs-evaluation] commit 5b5fa95: MindCell gained the Arc Cell align API (left/right/top/bottom) so campaign_rules_dialog._rebuild no longer errors, and RULE_KEYS now carries all 7 CampaignRulesDialog toggles in reference order; ui_widgets_check asserts 7 toggles build",
+        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open",
+        "2026-10-07T14:05:56+00:00: migrated: cleared legacy claim (fix-ui-oc-4734)",
+        "2026-10-07T14:22:07+00:00: claimed by oc-9203 for writer (session loop-1)",
+        "2026-10-07T14:35:15+00:00: reaped stale claim (oc-9203, was godot-open); restored godot-open"
       ],
       "plan": "14",
       "first_seen": "2026-10-06T21:36:58+00:00",
-      "last_verified": "2026-10-07T02:45:26+00:00",
-      "found_by_loop": "6"
+      "last_verified": "2026-10-07T14:22:07+00:00",
+      "found_by_loop": "6",
+      "session": "loop-1"
     },
     {
       "id": "EV-0042",
       "area": "ui/campaign",
       "severity": "S3",
-      "status": "needs-evaluation",
+      "status": "godot-open",
       "title": "Research root rail rows overlap after switching roots (MindTable not re-sorted)",
       "expected": "Java: clicking a tech-tree root in the left rail keeps the roots as a vertical list; the active root stays clickable and the node table shows that root's nodes",
       "actual": "Godot: ResearchDialog._select_root/_rebuild_roots clears and re-adds the root MindTable but never re-sorts it, so after clicking the second root both root buttons stack at (8,38) (techtree.serpulo 160x34 and techtree.<null> 148x34) and the first root can no longer be clicked; the initial build is fine because show_dialog's _resort_tables sorts it",
@@ -1233,7 +1328,8 @@
         "runs/l6-20261007-071337-research/godot/step-01-research-dialog.png"
       ],
       "notes": [
-        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/campaign-ui e30a2e3: research root rail re-sorted on root switch."
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/campaign-ui e30a2e3: research root rail re-sorted on root switch.",
+        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open"
       ],
       "plan": "14",
       "first_seen": "2026-10-06T21:36:58+00:00",
@@ -1244,7 +1340,7 @@
       "id": "EV-0043",
       "area": "input/blocks",
       "severity": "S2",
-      "status": "needs-evaluation",
+      "status": "godot-open",
       "title": "Right-drag cannot break item-capacity blocks (conveyor/turret); an empty inventory panel opens instead",
       "expected": "Java: the right-button binding (breakBlock) enters breaking mode and a right-drag breaks every non-air tile in the rect (DesktopInput.java:743). Config/inventory open on the LEFT tap, and the inventory only when build.block.hasItems && items.total() > 0 (InputHandler.java:2017).",
       "actual": "Godot: right-press on a placed conveyor (or a duo turret) opens OverlayLayer/block_inventory at the tile (empty grid: only the close X, items JSON hardcoded \"{}\") instead of starting a break; a 6-tile right-drag over conveyors x=10..15,y=16 leaves all 6 placed. A copper-wall control line right-drags/breaks normally (6 -> 0), so the break path itself works only for has_items==false blocks.",
@@ -1254,7 +1350,8 @@
       ],
       "notes": [
         "screenshots: runs/l7-20261007-074043-input_controls/godot/step-01-rightclick-empty-inventory.png, runs/l7-20261007-074043-input_controls/godot/step-03-placed-blocks-after-failed-right-drag.png. Cause seam: desktop.rs right_press() consults config_spec/has_items_at before begin_break; has_items_at = def.has_items && def.item_capacity>0 with no items.total()>0 guard, so any item-capacity block diverts to inventory. Distinct from the known missing item_stacks_json feed.",
-        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/input-controls cfe850f/106b4bc: config+inventory fragment routing and click gating."
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/input-controls cfe850f/106b4bc: config+inventory fragment routing and click gating.",
+        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open"
       ],
       "plan": "15",
       "first_seen": "2026-10-06T21:50:14+00:00",
@@ -1265,7 +1362,7 @@
       "id": "EV-0044",
       "area": "input/command",
       "severity": "S2",
-      "status": "needs-evaluation",
+      "status": "godot-open",
       "title": "Default RTS command-mode toggle (Shift) is inert; command mode is unreachable from the keyboard with default binds",
       "expected": "Java: with no placement block selected and no live boosting player unit, tapping the command-mode key toggles command mode (DesktopInput.java:302-307); command_mode and boost share shiftLeft by default and the tap path is used.",
       "actual": "Godot: with block==null, pressing/releasing Shift leaves command_mode false and fires no action (last_action stays clear_building, action_count unchanged). MindInput.toggle_command_mode() sets it true, and dragging then produces command_rect [80,80,40,24], so only the key path is dead.",
@@ -1275,7 +1372,8 @@
       ],
       "notes": [
         "key_up_event guards the toggle with ; both binding names resolve to \"shiftLeft\" for the default binds, so the condition is always false. The RTS selection rect itself works once command mode is set via the API.",
-        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/input-controls cfe850f: RTS command mode/selection/orders."
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/input-controls cfe850f: RTS command mode/selection/orders.",
+        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open"
       ],
       "plan": "15",
       "first_seen": "2026-10-06T21:50:19+00:00",
@@ -1286,7 +1384,7 @@
       "id": "EV-0045",
       "area": "ui/config",
       "severity": "S3",
-      "status": "needs-evaluation",
+      "status": "godot-open",
       "title": "Sorter config panel opens with no item options",
       "expected": "Java: Sorter is configurable with an Item config (Sorter.java:37 config(Item.class, ...)), so its config fragment shows the item filter list.",
       "actual": "Godot: right-clicking a placed sorter opens OverlayLayer/block_config with the correct block/x/y but _config.options == [] (empty grid; only clear + close), so no filter can be picked.",
@@ -1296,7 +1394,8 @@
       ],
       "notes": [
         "screenshot: runs/l7-20261007-074043-input_controls/godot/step-02-sorter-config-empty-options.png. config_spec builds options only from def.has_items (all items) or def.has_liquids (all liquids); the Sorter def sets neither. Submitting is separately blocked (Configure arm), this is the read-model gap.",
-        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/input-controls cfe850f/106b4bc: config fragment populated at the click position."
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/input-controls cfe850f/106b4bc: config fragment populated at the click position.",
+        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open"
       ],
       "plan": "15",
       "first_seen": "2026-10-06T21:50:19+00:00",
@@ -1307,7 +1406,7 @@
       "id": "EV-0046",
       "area": "game/sim",
       "severity": "S1",
-      "status": "needs-evaluation",
+      "status": "twin-verified",
       "title": "No objective/wave-timer/game-state systems run live: a sector can never be won or lost",
       "expected": "Logic.java:608-617 calls updateEntities+checkGameState every tick; checkGameState :327-372 runs capture/lose checks; sectorCapture :394-420 books the win",
       "actual": "schedule.rs:403-409 registers only stub_system+update_buildings; TickSet Campaign/Objectives/WaveTimer/RunWave/GameStateCheck (:77-88) have zero systems; check_game_state is called only by mind-headless (campaign_scenarios.rs:963)",
@@ -1320,23 +1419,30 @@
         "client/rust/mind-core/src/game/play.rs:373-385",
         "client/rust/mind-headless/src/campaign_scenarios.rs:963",
         "../Mindustry/core/src/mindustry/core/Logic.java:327-372",
-        "../Mindustry/core/src/mindustry/core/Logic.java:608-617"
+        "../Mindustry/core/src/mindustry/core/Logic.java:608-617",
+        "runs/20261007-185524-ev0046-verify/godot/state-baseline.json",
+        "runs/20261007-185524-ev0046-verify/godot/state-poststep600.json",
+        "runs/20261007-185524-ev0046-verify/java/reference-save-meta.txt",
+        "runs/20261007-185524-ev0046-verify/java/reference-notes.md"
       ],
       "notes": [
         "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
         "2026-10-07T02:45:18+00:00: claimed by loop-2",
         "2026-10-07T02:45:21+00:00: released: in scope but not independently fixable in one iteration: the live Sim schedule has no campaign-model resource and no building/unit entities, so wiring check_game_state/Objectives/WaveTimer now would only observe an empty world (repro itself says 'needs EV-0035 bootstrap fix first'). Taking the prerequisite live block runtime (EV-0047) this iteration; re-claim EV-0046 after the runtime lands.",
-        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/campaign-spine: Campaign/Objectives/GameStateCheck systems and the wave timer on the live path."
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/campaign-spine: Campaign/Objectives/GameStateCheck systems and the wave timer on the live path.",
+        "2026-10-07T08:51:50+00:00: claimed by eval-oc-5541 for evaluation",
+        "2026-10-07T09:14:03+00:00: [verify] Fresh run pid 37523: load_sector(serpulo,170)+start_sector(serpulo,170). Baseline paused at tick 326: gameOver=false, wavetime=14400.0, wave=0, enemies=0, hasCore=false, winWave=15. After SimHost.step(600) (tick 926, checksum d9010755e0db9ae1) read post-pump: gameOver=true and wavetime=14399.9833984375 = f32(14400-1/60), i.e. the TickSet::Campaign wave timer decremented one tick and TickSet::GameStateCheck then ran check_game_state's lose branch (zero player cores -> gameOver + apply_sector_loss bookkeeping). No other live code sets game_over, and the frozen-pump control run (frames stalled at 1516) showed neither value change, so both systems are demonstrably on the live schedule. Caveats: (1) Godot's serpulo:170 is a preset-less generated world because content uses IdentityRemap (Java planet data remaps groundZero to sector 170), so hasCore=false and the sector is lost on tick 1 in a core-less world -- a separate content/worldgen gap, not a systems-wiring gap; (2) the generated sector has no map objectives, so the Objectives tick set was not independently observed; (3) win/capture was not reached in 600 ticks (wave=0 < winWave=15); (4) the same repro then panics in MindUi::hud_set_visible when the game-over dialog opens -- filed separately.",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
-      "last_verified": "2026-10-07T02:45:21+00:00"
+      "last_verified": "2026-10-07T09:14:03+00:00"
     },
     {
       "id": "EV-0047",
       "area": "game/sim",
       "severity": "S1",
-      "status": "needs-evaluation",
+      "status": "godot-open",
       "title": "Placed buildings are inert: no mining, transport, crafting, power or block updates",
       "expected": "Logic.java:464 updateEntities updates every entity each tick; BuildingComp.update/updateConsumption drive mining, transport, crafting, power",
       "actual": "Sim::apply(Place) spawns only BuildingComp (sim/mod.rs:249-274); load_sector swaps a raw grid with no BlockTable/behavior (sim_host.rs:918-925); a placed drill/conveyor sets a tile and does nothing (production.rs:237-251)",
@@ -1352,18 +1458,30 @@
         "client/rust/mind-core/src/sim/runtime.rs",
         "client/rust/mind-core/src/sim/schedule.rs",
         "client/rust/mind-gdext/src/sim_host.rs",
-        "commit 5a9e9ee"
+        "commit 5a9e9ee",
+        "runs/20261007-092013-ev0047-verify/godot/evidence.json",
+        "runs/20261007-092013-ev0047-verify/report.md",
+        "runs/20261007-092013-ev0047-verify/godot/step-01-drill-core-tick4962.png"
       ],
       "notes": [
         "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
         "2026-10-07T02:45:18+00:00: claimed by loop-2",
         "2026-10-07T02:55:13+00:00: [loop 2] Commit 5a9e9ee closes the code seam. Sim::apply(Command::Place) routes through SimRuntime::place and Command::Break through runtime_break when installed (client/rust/mind-core/src/sim/mod.rs:262-327), and Sim::command routes the relay SimCommand::Place/Configure through the same runtime (sim/mod.rs:663-725). install_block_runtime_from provisions BlockTable/BuildRules/BuildClock/TileBuilds/ModuleDims/PowerGrids and spawns full plan-07 entities via BlockInstance::spawn + SimHooks::new_building (sim/runtime.rs:488-524, 94-124). sim/schedule.rs:406-414 registers update_buildings (UpdateBuildings) and update_power_graphs (UpdatePowerGraph); both are no-ops without the runtime resources (world/update.rs:194-197, 270-276) and the upstream powerGraph-before-build order is preserved (Logic.java:486-492). MindSimHost installs the runtime in bootstrap() (default spine) and load_sector() (campaign) (mind-gdext/src/sim_host.rs:215, 930); load_scenario deliberately uses Sim::from_scenario without an install (sim_host.rs:846). Residuals for in-engine verification: (1) load_scenario/from_scenario still runs the frozen P0 path, so blocks placed during scenario playback stay inert by design; (2) the default spine world is flat floor=air (sim_host.rs:87), so a drill placed there has no dominant_item regardless of the runtime -- the repro needs an ore floor (e.g. via load_sector); (3) blocks pre-existing in a loaded sector grid have no ECS entity (sim_host.rs:912-920 assigns a raw grid), so only player-placed blocks exercise the runtime. cargo test -p mind-core sim:: = 62 passed / 0 failed; P0 golden spine_place_break still passes (a1a7b96167c9718d).",
         "2026-10-07T04:42:54+00:00: migrated status code-verified -> needs-evaluation",
-        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/sim-runtime 262e2b9/f150ca2 + loop-2 host install cherry-pick 5e3b699."
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/sim-runtime 262e2b9/f150ca2 + loop-2 host install cherry-pick 5e3b699.",
+        "2026-10-07T09:14:43+00:00: claimed by eval-oc-5541 for evaluation",
+        "2026-10-07T10:14:10+00:00: [verify] Engine re-run of the exact repro (loop 1, display :10, pid 90982, Godot HEAD 9afc04e): load_sector serpulo:15 loaded the Ground Zero preset map 256x256 (assets/maps/serpulo/groundZero.msav sha256 6b9bc502...903f, byte-identical to the Java asset). Placed core-shard (126,47) and mechanical-drill (128,47); drill footprint (128..129,47..48) is 2x2 ore-copper (167) over snow floor per the same map file, and the core entity is adjacent. EXACT REPRO step(120): core_items_json {}. Extended steps: tick 720 {} and tick 4962 (step 4000) still {}. Entities exist (tile probes: core-shard build_id 0, mechanical-drill build_id 1) and the runtime IS installed (placed drill carries a runtime LiquidModule; placed solar-panel+battery form power graph id 1 with init=1, and network_counts().graphs=1), but the repro symptom -- item output -- is still absent: a working drill on 4 ore tiles with an adjacent core should have delivered long before 4962 ticks. Residual seams consistent with the engine observation: count_ore reads tile.floor only while MSAV-loaded ore lives in tile.overlay (world/behavior/production.rs:413 vs io/save/versions/v1.rs:618), and DrillBehavior.update_tile produces into its own ItemModule but never calls dump/offload (production.rs:273-333); no MCP accessor exposes non-core building items. Java reference leg partial: fresh Ground Zero launched and the tutorial mining order exercised, but the Java drill placement reference was not completed within budget; the decisive evidence is the Godot engine run.",
+        "2026-10-07T11:20:28+00:00: claimed by fix-game-oc-4734 for fix",
+        "2026-10-07T11:29:30+00:00: [needs-evaluation] commit 2ff52e5: count_ore reads overlay ore (Tile.drop) and drill/crafter outputs route through transfer::offload plus the timerDump dump (Block.dumpTime); mind-core regression test loads groundZero.msav, materializes it, places a drill on overlay ore beside a core and gets copper into the core",
+        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open",
+        "2026-10-07T14:05:56+00:00: migrated: cleared legacy claim (fix-game-oc-4734)",
+        "2026-10-07T14:22:07+00:00: claimed by oc-9203 for writer (session loop-1)",
+        "2026-10-07T14:35:15+00:00: reaped stale claim (oc-9203, was godot-open); restored godot-open"
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
-      "last_verified": "2026-10-07T02:55:13+00:00"
+      "last_verified": "2026-10-07T14:22:07+00:00",
+      "session": "loop-1"
     },
     {
       "id": "EV-0048",
@@ -1385,17 +1503,23 @@
         "../Mindustry/core/src/mindustry/ai/WaveSpawner.java"
       ],
       "notes": [
-        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending."
+        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
+        "2026-10-07T11:29:33+00:00: claimed by fix-game-oc-4734 for fix",
+        "2026-10-07T11:30:41+00:00: released: Blocked, not abandoned: umbrella for the live unit runtime (wave spawn + unit physics/AI + weapons + bullets). Everything ported lives behind the separate UnitHarness/CombatHarness worlds (ai/harness.rs, combat/harness.rs) and build_sim_schedule registers no unit/bullet/wave system (sim/schedule.rs:346-409). Live wiring needs: (1) a Sim-owned unit/bullet runtime resource + entity stores over Sim.ecs.0, (2) live pathfinder/path-tile resources refreshed on block changes, (3) a wave-spawn system over Rules.spawns/Waves and the spawn overlay list, (4) a scheduled CombatCtx (rng/fx/audio/seq/spawned) for update_weapons + bullet update/collide/finish, (5) checksum/dump/save coverage for unit/bullet entities. A spawn-only slice would make get_group_counts().unit > 0 but still leave enemies inert, which fakes the expected move/fight behavior. Split into per-subsystem findings before fixing.",
+        "2026-10-07T11:30:46+00:00: claimed by fix-game-oc-4734 for fix",
+        "2026-10-07T11:31:00+00:00: released: Re-released; blocker unchanged (umbrella live-unit runtime needs its own finding split). Excluded from this session's claim loop.",
+        "2026-10-07T12:11:15+00:00: claimed by fix-game-sim-oc-4734 for fix",
+        "2026-10-07T12:12:23+00:00: released: Blocked: umbrella feature, not a finding-scoped fix. Verified no live unit runtime exists: sim/schedule.rs registers no system in EntitySet::UpdateUnits/UpdateBullets/CollideBullets/PhysicsUnits or TickSet::WaveTimer/RunWave; Sim::group_counts hardcodes unit/bullet 0 (sim/mod.rs:407-409); ai/harness.rs UnitHarness + combat/harness.rs run on a separate BuildHarness world and are not reachable from Sim; sim/runtime.rs owns only the block runtime. Closing the repro (run_wave -> units spawning/moving/fighting with live bullets) requires new sim integration: UnitRuntime resource (units/pathfinder/rng/bullets/spawner), schedule systems for physics+AI+weapons+collision, wave timer/run-wave driver wired to campaign Session, spawn-overlay extraction at sector launch, team-stats/group_counts/checksum integration, and mind-gdext install on launch. Needs the identifier to split EV-0048 into child findings (e.g. live wave spawn driver, live unit AI/movement, live weapons/bullets/collision, runtime group/checksum surfaces). Excluded from this session's fix claim loop."
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
-      "last_verified": "2026-10-06T23:24:28+00:00"
+      "last_verified": "2026-10-07T12:12:23+00:00"
     },
     {
       "id": "EV-0049",
       "area": "game/campaign",
       "severity": "S2",
-      "status": "needs-evaluation",
+      "status": "godot-open",
       "title": "Launch ignores the sector preset rules: waves stay off and winWave stays 0",
       "expected": "World.java:266,292,299-330 setSectorRules applies the preset rules and planet.applyRules; Control.java:569-601 playNewSector carries params (captureWave -> winWave)",
       "actual": "campaign.rs:124-155 calls play_new_sector with default Rules; play.rs:269 only sets rules.sector; the preset capture_wave is stored at planet.rs:156 but never applied; defaults are waves=false/win_wave=0 (rules.rs:665,723)",
@@ -1417,7 +1541,8 @@
         "2026-10-07T02:57:00+00:00: claimed by loop-3",
         "2026-10-07T04:42:54+00:00: migrated status in-progress -> needs-evaluation",
         "2026-10-07T04:42:54+00:00: reaped stale claim (loop-3, was needs-evaluation); restored needs-evaluation",
-        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed parity/loop-3 9f5f90d (3aa171d) superseded by agent/campaign-spine apply_sector_preset_rules."
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed parity/loop-3 9f5f90d (3aa171d) superseded by agent/campaign-spine apply_sector_preset_rules.",
+        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open"
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
@@ -1427,7 +1552,7 @@
       "id": "EV-0050",
       "area": "ui/dialogs",
       "severity": "S1",
-      "status": "needs-evaluation",
+      "status": "twin-verified",
       "title": "No in-game pause menu: Escape does nothing; save/quit/settings unreachable",
       "expected": "Control.java:746-750 Binding.menu opens ui.paused.show(); PausedDialog.java:14-217 offers Back to menu, Save/Load, Settings, Host, Abandon, Quit",
       "actual": "no paused entry in dialogs_manifest.json:3-40; MindInput::process drains events unused (input/mod.rs:84-96); hud_fragment.gd only shows a Paused banner; open_dialog(planet) is menu-only",
@@ -1439,21 +1564,29 @@
         "client/rust/mind-gdext/src/input/mod.rs:84-96",
         "client/ui/fragments/hud_fragment.gd",
         "../Mindustry/core/src/mindustry/core/Control.java:746-750",
-        "../Mindustry/core/src/mindustry/ui/dialogs/PausedDialog.java:14-217"
+        "../Mindustry/core/src/mindustry/ui/dialogs/PausedDialog.java:14-217",
+        ".opencode/evals/runs/20261007-102842-ev0050-verify/godot/state-post-escape.json",
+        ".opencode/evals/runs/20261007-102842-ev0050-verify/godot/step-09-paused-dialog-live.png",
+        ".opencode/evals/runs/20261007-102842-ev0050-verify/java/step-08-pause-dialog.png"
       ],
       "notes": [
         "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
-        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/hud-overlays cb87f65: in-game pause menu and ESC handling."
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/hud-overlays cb87f65: in-game pause menu and ESC handling.",
+        "2026-10-07T09:18:10+00:00: claimed by eval-oc-44276 for evaluation",
+        "2026-10-07T09:35:11+00:00: released: user interrupted loop-2 evaluator to reduce CPU; no twin run completed, returned to evaluator queue",
+        "2026-10-07T10:27:49+00:00: claimed by eval-oc-5541 for evaluation",
+        "2026-10-07T10:43:58+00:00: [verify] Exact repro re-run in loop 1 (:10/6970) at HEAD 9afc04e with fix cb87f65 (ancestor) and libmind_gdext.so 97430598ed104a23. Fresh Godot runtime pid 129324: pre-launch dialog_stack=[] and is_paused=false; start_sector('serpulo',170)=true (campaign=true planet=serpulo sector=170); menu hidden; Escape -> dialog_stack=['paused'], is_dialog_shown('paused')=true, is_paused=true, tick held at 532 while frames/ms advanced (2834/22279 at 3s); no crash while the menu stays open. ESC round trips on pid 127168: Settings opens the settings dialog (stack ['paused','settings']) and Escape closes the top dialog back to paused then to []/running. Java reference (Play>Campaign>Serpulo>Ground Zero, Escape) shows the desktop campaign pause dialog. Blocker context: without the immediate Escape the zero-core launch panics in MindUi::hud_set_visible within ~1s (EV-0061 open), so launch+Escape ran in one synchronous eval on a fresh process; residual button-set divergence and the MindInput click-swallow defect are filed as EV-0063 and EV-0062.",
+        "2026-10-07T14:05:56+00:00: migrated status verified-fixed -> twin-verified"
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
-      "last_verified": "2026-10-06T23:24:28+00:00"
+      "last_verified": "2026-10-07T10:43:58+00:00"
     },
     {
       "id": "EV-0051",
       "area": "game/campaign",
       "severity": "S2",
-      "status": "needs-evaluation",
+      "status": "godot-open",
       "title": "Planet map is a frozen fixture: owned/captured/locked sector state never updates",
       "expected": "PlanetDialog.java:414-462,1304-1328 derives sector color, action label and stats live from Sector.hasBase()/isCaptured()/preset.unlocked()",
       "actual": "ui_host.rs:465-476 caches CampaignViews::vanilla_fixture() forever; the fixture pre-owns Ground Zero/Salt Flats (ui/campaign.rs:792-810); MindCampaign.get_sector_state has no GDScript caller",
@@ -1468,7 +1601,8 @@
       ],
       "notes": [
         "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
-        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/campaign-ui b390354: live campaign read path replaces the frozen fixture."
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/campaign-ui b390354: live campaign read path replaces the frozen fixture.",
+        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open"
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
@@ -1478,7 +1612,7 @@
       "id": "EV-0052",
       "area": "game/campaign",
       "severity": "S1",
-      "status": "needs-evaluation",
+      "status": "godot-open",
       "title": "Research purchase is a dead signal: clicking a locked ready node never unlocks it",
       "expected": "ResearchDialog.java:484-486 canSpend/locked -> spend(node), :567-625 removes items, finishes requirements, unlocks + ResearchEvent; Control.java:350-358 checkAutoUnlocks",
       "actual": "research_dialog.gd:13,90,103-104 emits research_requested with no listener; campaign.rs:238-272 spends from a fresh empty inventory; tech_tree.rs:243-248 returns Ok with complete=false, so research() reports success and nothing unlocks",
@@ -1492,21 +1626,33 @@
         "client/rust/mind-gdext/src/campaign.rs:238-272",
         "client/rust/mind-core/src/game/tech_tree.rs:243-248",
         "../Mindustry/core/src/mindustry/ui/dialogs/ResearchDialog.java:484-486",
-        "../Mindustry/core/src/mindustry/core/Control.java:350-358"
+        "../Mindustry/core/src/mindustry/core/Control.java:350-358",
+        "runs/20261007-105510-ev0052-research-purchase/report.md",
+        "runs/20261007-105510-ev0052-research-purchase/godot/state-01-before-click.json",
+        "runs/20261007-105510-ev0052-research-purchase/godot/state-02-after-click.json",
+        "runs/20261007-105510-ev0052-research-purchase/godot/state-03-launch-probe.json"
       ],
       "notes": [
         "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
-        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/campaign-ui + agent/campaign-spine: research spends live sector inventories and unlocks."
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/campaign-ui + agent/campaign-spine: research spends live sector inventories and unlocks.",
+        "2026-10-07T10:44:16+00:00: claimed by eval-oc-5541 for evaluation",
+        "2026-10-07T10:45:40+00:00: released: released: user interrupted evaluator for host reboot; no twin run completed, returned to evaluator queue",
+        "2026-10-07T10:49:43+00:00: claimed by eval-oc-4182 for evaluation",
+        "2026-10-07T11:09:49+00:00: [verify] Exact repro re-run fresh in loop 1 (display :10, bridge 6970, Godot 9afc04e, libmind_gdext.so sha256 97430598ed104a23, Java 2cd7aeec). Godot pid 12497 fresh boot: open research -> 223 rows, exactly 1 locked+ready and enabled row (root core-shard; requirements [], objectives []); hover-confirmed the node button, injected press+release + Input.flush_buffered_events(); get_tech_state().unlocked stayed 7 -> 7, no row rebuild, no toast. research('core-shard')=false while research('copper')/('sand')=true (name lookup fine; root locked+unaffordable with empty inventory). Manual dialog._on_research_requested('copper') DOES rebuild rows and toast 'New content unlocked!', so the GDScript listener (old 'dead signal') is fixed, but no locked ready node can be purchased. Intended launch path also probed: SimHost.load_sector('serpulo',170) + start_sector_with_loadout([{copper:500},{lead:500}]) -> true but hasCore=false, all group counts 0, core_items_json()={}, research('conveyor')/('mechanical-drill')=false, tech still 7/375. So the expected canSpend->spend->unlock behavior was NOT observed; the player-visible purchase is still impossible. Blockers are the finding's dependencies: EV-0037 (open, no player core -> no inventory) and EV-0051 (needs-evaluation, dialog rows are the frozen MindUi fixture; MindCampaign has no campaign_views_json). Re-evaluate after those land. Artifacts: runs/20261007-105510-ev0052-research-purchase/.",
+        "2026-10-07T11:31:00+00:00: claimed by fix-game-oc-4734 for fix",
+        "2026-10-07T11:46:02+00:00: [needs-evaluation] commit 9b9f69a: BlockSpec always_unlocked ported for the 12 upstream alwaysUnlocked blocks (core-shard root now unlocked at boot); launch loadout written to the live core module (Logic.play clear+stock); research() aggregates and debits the played sector's core module via MindSimHost player_core_items/remove_player_core_items (Sector.items -> Team.items), keeping sector storage for non-played sectors; tech/UI harness goldens re-recorded",
+        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open",
+        "2026-10-07T14:05:56+00:00: migrated: cleared legacy claim (fix-game-oc-4734)"
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
-      "last_verified": "2026-10-06T23:24:28+00:00"
+      "last_verified": "2026-10-07T11:31:00+00:00"
     },
     {
       "id": "EV-0053",
       "area": "ui/hud",
       "severity": "S2",
-      "status": "needs-evaluation",
+      "status": "godot-open",
       "title": "HUD shows no wave, enemies, objectives, or capture/lose toasts",
       "expected": "HudFragment.java:1132-1150 composes wave/enemy/wavetime text, :1088-1107 objectives, :502-510 skip-wave button, :1234-1236 canSkipWave",
       "actual": "hud.rs:39-44 declares wave/enemies but refresh :175-190 never assigns them; hud_text.rs:53-134 composer has no producer; hud_fragment.gd:50-51 reads only status_text",
@@ -1523,7 +1669,8 @@
       ],
       "notes": [
         "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
-        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/hud-overlays e34adb8: wave/enemy/objective/core-item producers."
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/hud-overlays e34adb8: wave/enemy/objective/core-item producers.",
+        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open"
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
@@ -1533,7 +1680,7 @@
       "id": "EV-0054",
       "area": "ui/dialogs",
       "severity": "S1",
-      "status": "open",
+      "status": "godot-open",
       "title": "Load Game is permanently empty: no slot list is produced and no card can load",
       "expected": "LoadDialog.java:92 lists control.saves.getSaveSlots(), :224-268 runLoadSave -> slot.cautiousLoad()/load; Saves.java:314-328 restores",
       "actual": "menu_fragment.gd:38,318 opens load with an empty context; load_dialog.gd:97 reads a slots context never produced; slot_selected :219-220 is unconnected; saves.rs load/load_slot have no client caller",
@@ -1550,17 +1697,21 @@
         "../Mindustry/core/src/mindustry/game/Saves.java:314-328"
       ],
       "notes": [
-        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending."
+        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
+        "2026-10-07T11:05:30+00:00: claimed by fix-ui-oc-4734 for fix",
+        "2026-10-07T11:08:26+00:00: [needs-evaluation] commit 8a4da53: load_dialog refreshes the live MindCampaign.list_save_slots listing on open (context slots still win), hides sector saves (SaveSlot.isHidden), and a card click queues MindCampaign.load_slot(file stem); ui_widgets_check covers listing + click-to-load",
+        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open",
+        "2026-10-07T14:05:56+00:00: migrated: cleared legacy claim (fix-ui-oc-4734)"
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
-      "last_verified": "2026-10-06T23:24:28+00:00"
+      "last_verified": "2026-10-07T11:05:30+00:00"
     },
     {
       "id": "EV-0055",
       "area": "input",
       "severity": "S2",
-      "status": "needs-evaluation",
+      "status": "godot-open",
       "title": "RTS selection and orders are absent: units cannot be selected or commanded",
       "expected": "DesktopInput.java:300-321 command mode, :905-935 drag-rect/tap select; InputHandler.java:1091-1200 commandTap/orders; Binding.java:39 commandMode",
       "actual": "input/mod.rs:289-314 get_input_state_json hardcodes command_mode:false and selected_units:[]; rts.rs:68-203/command_emit.rs are headless-only; no client selection/order path (EV-0044 covers only the Shift toggle)",
@@ -1575,7 +1726,8 @@
       ],
       "notes": [
         "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
-        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/input-controls cfe850f: RTS selection and orders."
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/input-controls cfe850f: RTS selection and orders.",
+        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open"
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
@@ -1585,7 +1737,7 @@
       "id": "EV-0056",
       "area": "input/placement",
       "severity": "S2",
-      "status": "needs-evaluation",
+      "status": "godot-open",
       "title": "No block rotation: everything places at rotation 0 and cannot be rotated",
       "expected": "DesktopInput.java:834-846 rotate key/rotatePlans; :898-899 Call.rotateBlock on placed buildings (rotation = mod(rot+dir,4))",
       "actual": "sim_host.rs:168-173 place has no rotation; sim/mod.rs:259-264 always rot:0; determinism/command.rs:230-240 drops Place.rotation; project.godot has no [input]; SimCommand::Rotate :493-510 has no UI caller",
@@ -1600,7 +1752,8 @@
       ],
       "notes": [
         "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
-        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/input-controls 652f319: placement rotation."
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/input-controls 652f319: placement rotation.",
+        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open"
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
@@ -1610,7 +1763,7 @@
       "id": "EV-0057",
       "area": "input",
       "severity": "S2",
-      "status": "needs-evaluation",
+      "status": "godot-open",
       "title": "Keybinds are cosmetic: rebinding pan/boost keys changes nothing in game",
       "expected": "DesktopInput.java:239-295 reads Binding.boost/moveX/moveY for pan/boost; Binding.java:8-103 defines the binds",
       "actual": "input/mod.rs:102-109,200-212 loads/persists/rebinds BindingState but no gameplay consumer; camera.rs:91-108 hardcodes A/D/W/S+arrows+Shift; project.godot has no [input] section",
@@ -1626,7 +1779,8 @@
       ],
       "notes": [
         "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
-        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/input-controls 652f319: binding state consumed by camera/hotkeys."
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/input-controls 652f319: binding state consumed by camera/hotkeys.",
+        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open"
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
@@ -1636,7 +1790,7 @@
       "id": "EV-0058",
       "area": "content/blocks",
       "severity": "S2",
-      "status": "needs-evaluation",
+      "status": "godot-open",
       "title": "16 of 27 factory recipes missing: graphite/silicon/plastanium crafters emit nothing",
       "expected": "Blocks.java:1041 graphite-press, :1086 silicon-crucible, :1120 plastanium-compressor, :1138 phase-weaver, :1170 cryofluid-mixer, :1191 pyratite-mixer, :1206 blast-mixer and the Erekir heat crafters define outputs",
       "actual": "block_kind_data.rs:640-782 apply_vanilla_knobs is the only recipe source and covers 11 of 27 crafters; production.rs:237-251 consumes inputs and resets progress with empty output_items",
@@ -1652,7 +1806,8 @@
       ],
       "notes": [
         "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
-        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/content-behaviors 9c51747: 16 missing factory recipes and pump/drill knobs."
+        "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/content-behaviors 9c51747: 16 missing factory recipes and pump/drill knobs.",
+        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open"
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
@@ -1662,7 +1817,7 @@
       "id": "EV-0059",
       "area": "net/multiplayer",
       "severity": "S1",
-      "status": "open",
+      "status": "godot-open",
       "title": "Hosting is impossible: no Host entry anywhere and host_requested has no listener",
       "expected": "PausedDialog.java:98-105,152 @hostserver -> ui.host.show(); HostDialog.java:51-73 port field + runHost()",
       "actual": "host_dialog.gd:11,56-60 emits host_requested with no listener; no Host entry in menu_fragment.gd:33-49 or the HUD; MindNet.create_match :224-243 has no GDScript caller",
@@ -1678,17 +1833,21 @@
         "../Mindustry/core/src/mindustry/ui/dialogs/HostDialog.java:51-73"
       ],
       "notes": [
-        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending."
+        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
+        "2026-10-07T11:00:46+00:00: claimed by fix-net-oc-4734 for fix",
+        "2026-10-07T11:06:41+00:00: [needs-evaluation] commit 8d8dde8: pause-menu @hostserver opens the host dialog, host dialog gains a validated port field, and ui_root connects host_requested to MindNet.create_match with the live sector/map/rules",
+        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open",
+        "2026-10-07T14:05:56+00:00: migrated: cleared legacy claim (fix-net-oc-4734)"
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
-      "last_verified": "2026-10-06T23:24:28+00:00"
+      "last_verified": "2026-10-07T11:00:46+00:00"
     },
     {
       "id": "EV-0060",
       "area": "net/multiplayer",
       "severity": "S1",
-      "status": "open",
+      "status": "godot-open",
       "title": "Join Game never connects: Connect emits a signal nobody listens to",
       "expected": "JoinDialog.java:403-412 local discovery, :626-645 connect -> net.connect(ip,port), :675-682 safeConnect version gate",
       "actual": "join_dialog.gd:12,240-245 emits connect_requested with no listener; global/remote sections are static :99-115; MindNet.join_match takes a numeric match id and has no GDScript caller (net/mod.rs:54-56,174,261)",
@@ -1704,11 +1863,99 @@
         "../Mindustry/core/src/mindustry/ui/dialogs/JoinDialog.java:626-651"
       ],
       "notes": [
-        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending."
+        "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
+        "2026-10-07T11:06:44+00:00: claimed by fix-net-oc-4734 for fix",
+        "2026-10-07T11:16:05+00:00: [needs-evaluation] commit f5ef052: UiRoot wires join connect_requested -> MindNet.connect_to (host[:port][/db] switch + browser) and join_requested -> join_match; JoinDialog lists live all_matches rows",
+        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open",
+        "2026-10-07T14:05:56+00:00: migrated: cleared legacy claim (fix-net-oc-4734)"
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
-      "last_verified": "2026-10-06T23:24:28+00:00"
+      "last_verified": "2026-10-07T11:06:44+00:00"
+    },
+    {
+      "id": "EV-0061",
+      "area": "ui/dialogs",
+      "severity": "S1",
+      "status": "godot-open",
+      "title": "Campaign loss panics the client in the game-over dialog path (MindUi::hud_set_visible Gd bind_mut 'already bound')",
+      "expected": "Java: a sector loss fires GameOverEvent and opens GameOverDialog (ui/dialogs/GameOverDialog.java); the client keeps running",
+      "actual": "Godot: once checkGameState sets gameOver on a campaign sector, hud_fragment._open_game_over opens the dialog; the dialog shown() -> _hud_set(false) -> MindUiRoot 'hud_set_visible' call reaches MindUi::hud_set_visible and panics 'Gd<T>::bind_mut() failed, already bound; T = mind_gdext::ui::ui_host::MindUi' (godot-core storage/mod.rs:38). A crash report is written and the frame loop stalls (Engine.get_process_frames stops advancing).",
+      "repro": "load_sector('serpulo',170); start_sector('serpulo',170); run one sim tick (gameOver=true, hasCore=false); wait one frame -> panic in godot_log, crash-report-*.txt written, frames freeze",
+      "source": "engine",
+      "confidence": "high",
+      "evidence": [
+        "runs/20261007-185524-ev0046-verify/godot/crash-report-hud-set-visible-2.txt",
+        "runs/20261007-185524-ev0046-verify/godot/crash-report-hud-set-visible-1.txt",
+        "runs/20261007-185524-ev0046-verify/godot/state-poststep600.json",
+        "runs/20261007-185524-ev0046-verify/godot/editor.log"
+      ],
+      "notes": [
+        "2026-10-07T11:08:28+00:00: claimed by fix-ui-oc-4734 for fix",
+        "2026-10-07T11:10:01+00:00: [needs-evaluation] commit 4b02254: game_over_dialog defers hud_set_visible out of shown()/hidden() so MindUi.open_dialog/close_dialog no longer re-enter the mutably bound MindUi (gdext bind_mut panic); ui_widgets_check drives open_dialog('restart') and asserts the HUD flag toggles without a panic",
+        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open",
+        "2026-10-07T14:05:56+00:00: migrated: cleared legacy claim (fix-ui-oc-4734)"
+      ],
+      "plan": null,
+      "first_seen": "2026-10-07T09:14:08+00:00",
+      "last_verified": "2026-10-07T11:08:28+00:00",
+      "found_by_loop": "1"
+    },
+    {
+      "id": "EV-0062",
+      "area": "input/ui",
+      "severity": "S1",
+      "status": "godot-open",
+      "title": "Mouse clicks on runtime-created UI Controls are swallowed before the GUI (menu and dialog buttons dead)",
+      "expected": "A mouse press over a visible STOP-filter Button reaches the Control and emits pressed (menu Play opens its submenu; paused-dialog Settings opens settings)",
+      "actual": "MindInput::input consumes the press: ui_captures_at walks root.find_children(\"*\") whose owned=true default skips ownerless runtime-created Controls, so it returns false over the menu/dialog buttons and mark_input_handled() blocks Control._gui_input; the same click lands when Spine/Input process_input is disabled",
+      "repro": "boot game.tscn; push_input motion+press+release at the menu Play center (230,149) or the paused-dialog Settings center (454,503); gui_input receives the motion but no button and pressed never fires; set_process_input(false) on /root/Spine/Input and repeat -> settings dialog opens, stack ['paused','settings']",
+      "source": "engine",
+      "confidence": "high",
+      "evidence": [
+        ".opencode/evals/runs/20261007-102842-ev0050-verify/godot/state-paused-dialog-buttons.json",
+        ".opencode/evals/runs/20261007-102842-ev0050-verify/godot/step-09-paused-dialog-live.png",
+        "client/rust/mind-gdext/src/input/mod.rs:139-156 consume path; client/rust/mind-gdext/src/input/mod.rs:246 ui_captures_at"
+      ],
+      "notes": [
+        "Observed while evaluating EV-0050. The main-menu Play button is equally dead for mouse clicks, so this blocks mouse-only UI navigation globally.",
+        "2026-10-07T11:00:45+00:00: claimed by fix-input-oc-4734 for fix",
+        "2026-10-07T11:08:19+00:00: [needs-evaluation] commit 8d94320: find_children(owned=false) so runtime-created STOP Controls are seen; headless A/B probe: baseline click dropped, fixed Button pressed",
+        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open",
+        "2026-10-07T14:05:56+00:00: migrated: cleared legacy claim (fix-input-oc-4734)"
+      ],
+      "plan": null,
+      "first_seen": "2026-10-07T10:43:49+00:00",
+      "last_verified": "2026-10-07T11:00:45+00:00",
+      "found_by_loop": "1"
+    },
+    {
+      "id": "EV-0063",
+      "area": "ui/dialogs",
+      "severity": "S2",
+      "status": "godot-open",
+      "title": "Paused dialog is missing the desktop campaign buttons (Abandon, Host, Map Objective) and shows the mobile Planet Map",
+      "expected": "PausedDialog.java desktop campaign branch: @objective (when the sector preset has a description), @abandon, @back, @settings, @hostserver, @quit; Planet Map/Research belong to the mobile campaign branch",
+      "actual": "Godot paused dialog in a launched serpulo:170 sector renders Back/Settings/Planet Map/Quit only; no Abandon, no Host, no Map Objective",
+      "repro": "launch serpulo:170, press Escape, dump DialogLayer/paused Labels and Buttons",
+      "source": "engine",
+      "confidence": "high",
+      "evidence": [
+        ".opencode/evals/runs/20261007-102842-ev0050-verify/godot/state-paused-dialog-buttons.json",
+        ".opencode/evals/runs/20261007-102842-ev0050-verify/java/step-08-pause-dialog.png",
+        "../Mindustry/core/src/mindustry/ui/dialogs/PausedDialog.java:73-109 desktop branch"
+      ],
+      "notes": [
+        "Residual divergence found while verifying EV-0050 (verified-fixed for the 'no pause menu at all' symptom). The missing Host entry also relates to EV-0059.",
+        "2026-10-07T11:10:04+00:00: claimed by fix-ui-oc-4734 for fix",
+        "2026-10-07T11:19:52+00:00: [needs-evaluation] commit da132f1: paused dialog desktop branch now shows @objective (presetDescription from MindCampaign.get_sector_state, opens full_text via context) and @abandon (confirm -> MindCampaign.abandon_sector clears sector info/save; desktop no longer shows mobile @planetmap); ui_widgets_check covers the button set, abandon confirm wiring and full_text body",
+        "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open",
+        "2026-10-07T14:05:56+00:00: migrated: cleared legacy claim (fix-ui-oc-4734)"
+      ],
+      "plan": null,
+      "first_seen": "2026-10-07T10:43:53+00:00",
+      "last_verified": "2026-10-07T11:10:04+00:00",
+      "found_by_loop": "1"
     }
   ]
 }

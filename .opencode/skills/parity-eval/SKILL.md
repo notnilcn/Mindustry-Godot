@@ -8,12 +8,13 @@ description: >-
   system against upstream, or verifying a claimed port fix in-engine.
 ---
 
-# Skill: parity-eval — Java↔Godot twin-run evaluation
+# Skill: parity-eval — Godot and Java↔Godot twin-run evaluation
 
-Two agents consume this skill: the `gap-identifier` for the code-level half
-(candidate seeding and code-evidence triage, no twin run) and the `evaluator`
-for the in-engine half (twin runs and the engine verdicts:
-`verified-fixed` / `verified-unfixed` / `regression` / `wontfix`). Read
+Three agents consume this skill: the `gap-identifier` for the code-level half
+(candidate seeding and code-evidence triage, no run), the `parity-evaluator`
+for the Godot-only stage (`godot-pass` / `godot-open` while the writer's fix is
+in flight), and the `twin-evaluator` for the final Java↔Godot twin run
+(`twin-verified` / `open`). Read
 [`../playtest/SKILL.md`](../playtest/SKILL.md) first for the Godot MCP launch
 flow, node map, pid-stamp rules, and eval pitfalls; this skill adds the Java
 reference leg, the comparison protocol, and the evidence/ledger contract. Do
@@ -157,7 +158,10 @@ is missing" from an unseen PNG: run `frame_diff.py` for metrics and
 ## 2. Twin-run protocol
 
 Within this loop, one scenario at a time, Java first, Godot second. Parallel
-loops run the same protocol simultaneously on their own displays.
+loops run the same protocol simultaneously on their own displays. The
+`parity-evaluator` runs only the Godot leg; the `twin-evaluator` runs both legs
+for `godot-pass` items, and only one twin evaluator runs across all sessions at
+a time (global twin lease).
 
 ```
 pick scope → create run dir → JAVA leg (capture) → quit Java
@@ -242,7 +246,10 @@ Clean teardown: restore pause/camera, `godot_game stop`, then record the log.
 ## 4. Java leg
 
 The reference is driven at the OS level with computer-mcp (mouse, keyboard,
-screenshot, window state). There is no semantic API.
+screenshot, window state). There is no semantic API. The working launch →
+drive → capture → quit sequence lives in
+`.opencode/chains/java-reference-leg.md`; friction that is not a reusable
+sequence goes to `computer-mcp-learnings.md` at the repo root.
 
 ```bash
 RUN="$PARITY_EVALS_DIR/runs/${PARITY_RUN_PREFIX}<stamp>-<scenario>"
@@ -321,22 +328,33 @@ takes the lock around every read-modify-write, so `add`/`claim` from concurrent
 sessions can never duplicate ids or lose entries. Use the script; never
 hand-edit. In a loop worktree call it through the main checkout:
 `RF="${PARITY_MAIN:-.}/.opencode/skills/parity-eval/scripts/record_finding.py"`.
-Queue statuses: `open`/`regression`/`verified-unfixed` are the fixer queue,
-`needs-evaluation` the evaluator queue, `claimed` the cross-session lock
-(a fresh `owner` hides the item from pickers even while the status reads
-`needs-evaluation`), and `verified-fixed`/`wontfix` are terminal. The gap
-identifier owns `add --source code` and code-evidence `wontfix`; the evaluator
-owns `add --source engine` and `verify`; workers `claim`/`release` and use
-`set-status` to hand items between queues without dropping the claim.
+Phase statuses: `open` (writer queue) → `godot-open` (writer working, then
+awaiting the Godot leg) → `godot-unverified` (Godot leg in flight) →
+`godot-pass` (Godot leg agreed; waits for this session's twin) →
+`twin-unverified` (twin in flight) → `twin-verified` (terminal), plus `wontfix`
+(accepted deviation). A claim is a cross-session lock: a fresh `owner` hides
+the item from pickers; `release` restores the pre-claim status and `reap`
+collects dead-session claims older than `--older-than-minutes` (default 90).
+Every claim carries a `session` label; `writer` retries, `godot-eval` picks and
+`twin` picks only see the same session's items, so a loop never verifies
+another worktree's code. `godot-pass` items are session-local by design; a
+later run of the same loop picks them up.
+
+The gap identifier owns `add --source code` and code-evidence `wontfix`; the
+parity evaluator owns `godot-pass`/`godot-open`; the twin evaluator owns
+`twin-verified`/`open` verdicts via `verify`; the orchestrator claims writer
+batches and drives the transitions.
 
 ```bash
 python3 "$RF" summary
-python3 "$RF" list --status open
-python3 "$RF" claim --for fix --area ui --owner "fix-${PARITY_LOOP:-1}"   # atomic; exits 3 when none
-python3 "$RF" set-status --id EV-0001 --status needs-evaluation \
-  --note "commit abc1234: fix landed"                  # keeps the claim
-python3 "$RF" release --id EV-0001 --note "fix abandoned"
+python3 "$RF" list --status open --session "loop-${PARITY_LOOP:-1}"
+python3 "$RF" claim --for writer --session "loop-${PARITY_LOOP:-1}" --count 3  # exits 3 when none
+python3 "$RF" claim --for godot-eval --id EV-0001 --session "loop-${PARITY_LOOP:-1}"
+python3 "$RF" release --id EV-0001 --status godot-pass \
+  --note "expected behavior observed at <pid>" --evidence "runs/.../godot/step-04.png"
+python3 "$RF" release --id EV-0001 --note "writer blocked: <reason>"
 python3 "$RF" reap --older-than-minutes 90             # recover dead-session claims
+python3 "$RF" reap --session "loop-2" --older-than-minutes 0  # a restarted loop's dead claims
 python3 "$RF" add \
   --area ui/menu --severity S2 --title "Campaign button does not open the planet view" \
   --expected "Java: Play > Campaign opens Serpulo planet view" \
@@ -344,21 +362,19 @@ python3 "$RF" add \
   --repro "scenario boot_menu step 4" \
   --evidence "runs/${PARITY_RUN_PREFIX}<stamp>-boot_menu/godot/step-04.png" --plan 14
 python3 "$RF" verify \
-  --id EV-0001 --status verified-fixed --note "re-ran boot_menu at <commit>" \
+  --id EV-0001 --status twin-verified --note "twin run at <commit>" \
   --evidence "runs/${PARITY_RUN_PREFIX}<stamp2>-boot_menu/godot/step-04.png"
-python3 "$RF" verify --id EV-0002 --status verified-unfixed --note "repro still fails"
+python3 "$RF" verify --id EV-0002 --status open --note "twin fail: <what differs>"
 ```
 
 ### Code-level candidates and triage
 
-The gap identifier records candidates without running anything; `--status`
-defaults to `open` and becomes `needs-evaluation` when only a live run can
-settle the candidate:
+The gap identifier records candidates without running anything; `add` starts
+them in the writer queue (`open`):
 
 ```bash
 python3 "$RF" add \
   --area game/campaign --severity S1 --source code --confidence high \
-  --status needs-evaluation \
   --title "Launch never applies the sector rules" \
   --expected "World.java:265-330 applies the preset rules on launch" \
   --actual "campaign.rs:124 calls play_new_sector with Rules::default()" \
@@ -373,8 +389,9 @@ python3 "$RF" set-status --id EV-0001 --status wontfix \
 Rules for code-sourced records: both sides' file:line in `--evidence`, a repro
 sketch the evaluator can execute later, one symptom per record, and dedupe
 notes on existing ids instead of new records. Code evidence never closes a
-finding as fixed; the evaluator's in-engine repro is the only path to
-`verified-fixed`.
+finding as fixed; a fresh in-engine reproduction is the only path to
+`godot-pass` and `twin-verified`, and only a reading that settles the gap may
+set `wontfix`.
 
 Titles name the player-visible symptom, not the presumed code cause. One
 finding per independent symptom; link an existing id in notes instead of
@@ -456,7 +473,7 @@ Before scripting a new scenario, check whether an entry already exists in
 - A displayless opencode session silently drops `computer-mcp`; the Java leg
   then has no tool to call. Relaunch with `DISPLAY` set (loop shims or the
   global config env) instead of improvising a headless Java leg.
-- Never write a finding without an artifact path. Never mark fixed without a
-  fresh repro. Never edit game code. Never record an engine verdict from a code
-  reading — code evidence can only seed a candidate, queue it for
-  `needs-evaluation`, or settle it as `wontfix`.
+- Never write a finding without an artifact path. Never mark a phase passed
+  without a fresh repro. Never edit game code. Never record a verdict from a
+  code reading — code evidence can only seed a candidate or settle it as
+  `wontfix`.

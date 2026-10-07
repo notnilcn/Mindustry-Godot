@@ -17,6 +17,8 @@ touch, which precondition is easy to miss.
 | `pause-step-interact.md` | pause, step, API and mouse place/break, input flush |
 | `probe-hud.md` | state JSON, inspector, screenshot, logs |
 | `enter-campaign.md` | main menu → planet dialog → sector → launch (UI and facade variants) |
+| `campaign-save-load.md` | campaign facade → launch → save / list / load a slot |
+| `java-reference-leg.md` | Java reference: launch → drive → capture → quit (computer-mcp) |
 
 ## Entry schema
 
@@ -51,7 +53,14 @@ Body sections: `## Steps` (exact tool + action + params, one step per call),
   (computer-mcp) needs `DISPLAY` at opencode start, the Godot leg does not.
 - **Keep it current.** When a step fails at the same commit, fix the chain in
   the same change that fixes the tooling.
+- **Server-tag each chain.** The Godot leg uses open-godot-mcp (`godot_*`
+  tools); the Java leg uses computer-mcp (`computer-mcp_*` tools, or
+  `parity-click.sh` for scripted clicks). Name the server in the chain's
+  `tools` list so the next agent picks the right protocol.
+- **Friction is not a chain.** One-off tool errors and their workarounds go to
+  the repo-root `open-godot-mcp-learnings.md` / `computer-mcp-learnings.md`,
+  not here.
 
-Consumers: the `evaluator` and `gap-identifier` subagents, `gap-loop` and
-`parity-writer`, and any playtest session. Skills point here; they do not
-duplicate the sequences.
+Consumers: the `twin-evaluator` and `gap-identifier` subagents,
+`parity-orchestrator`, `parity-evaluator`, `parity-writer`, and any playtest
+session. Skills point here; they do not duplicate the sequences.

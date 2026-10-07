@@ -45,8 +45,9 @@ Extrapolated full parity loop (editor + game + opencode + MCP):
   displays rather than stacked.
 - **Cap set to 2 (2026-10-07).** Two slots keep the editor + Java/Godot legs
   of an evaluator twin-run comfortable while still allowing two loops to hold
-  MCP; the guard denies `gap-identifier`, `loop-runner` and `evaluator` beyond
-  that (`MCP_SLOT_GUARD_AGENTS` overrides), and the interactive session stays
+  MCP; the guard denies `gap-identifier`, `parity-orchestrator`,
+  `parity-evaluator` and `twin-evaluator` beyond that
+  (`MCP_SLOT_GUARD_AGENTS` overrides), and the interactive session stays
   warn-and-allow. See the evaluator twin-run measurement below.
 
 ## Evaluator twin-run measurement (2026-10-07, two loops)

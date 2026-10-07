@@ -7,9 +7,9 @@
   no cargo, no screenshots. Every item is a **candidate gap**, not an
   engine-reproduced finding.
 - Status: **not in `findings.json`**. This file is the prioritization queue.
-  Promote an item to `EV-####` only after reproducing it in-engine and
-  recording evidence through
-  `.opencode/skills/parity-eval/scripts/record_finding.py add`.
+  Promote an item to `EV-####` through
+  `.opencode/skills/parity-eval/scripts/record_finding.py add --source code
+  --status open`; the writer/evaluator pipeline reproduces it in-engine later.
 
 ## Why this list exists
 
