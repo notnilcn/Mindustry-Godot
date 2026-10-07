@@ -1016,6 +1016,25 @@ pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
             liquid_count,
         }),
     );
+
+    // Power distribution nodes (`Blocks.java` power region; gap5 K-3): the
+    // behavior inserts the `PowerNodeConfig` the linker reads at construction.
+    for (name, max_nodes, laser_range, autolink, same_block_connection) in [
+        ("power-node", 10u8, 6.0f32, true, false),
+        ("power-node-large", 15, 15.0, true, false),
+        ("surge-tower", 2, 40.0, true, false),
+        ("beam-link", 1, 500.0, false, true),
+    ] {
+        registry.register_named(
+            name,
+            Arc::new(super::nodes::PowerNodeBehavior {
+                max_nodes,
+                laser_range,
+                autolink,
+                same_block_connection,
+            }),
+        );
+    }
 }
 
 #[cfg(test)]
@@ -1062,6 +1081,33 @@ mod tests {
             .expect("instance")
             .behavior
             .clone()
+    }
+
+    /// gap5 GAP-7 construction half / K-3: placing a power node inserts the
+    /// [`PowerNodeConfig`](crate::world::blocks::power::PowerNodeConfig) the
+    /// graph linker reads.
+    #[test]
+    fn power_node_inserts_link_config() {
+        use crate::world::blocks::power::PowerNodeConfig;
+
+        let mut harness = BuildHarness::new(8, 8, 7);
+        for (name, max_nodes, laser_range) in [
+            ("power-node", 10u8, 6.0f32),
+            ("power-node-large", 15, 15.0),
+            ("surge-tower", 2, 40.0),
+            ("beam-link", 1, 500.0),
+        ] {
+            let block = harness.content().block_id(name).expect(name);
+            assert!(harness.place(2, 2, block, 0, true), "place {name}");
+            let entity = harness.build_at(2, 2).expect("node");
+            let config = harness
+                .world
+                .get::<PowerNodeConfig>(entity)
+                .unwrap_or_else(|| panic!("{name} PowerNodeConfig"));
+            assert_eq!(config.max_nodes, max_nodes, "maxNodes for {name}");
+            assert_eq!(config.laser_range, laser_range, "laserRange for {name}");
+            assert!(harness.break_block(2, 2, true));
+        }
     }
 
     #[test]

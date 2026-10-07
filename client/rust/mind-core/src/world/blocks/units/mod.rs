@@ -246,13 +246,25 @@ impl ReconstructorBuild {
     }
 }
 
+/// One assembler plan payload requirement (`AssemblerUnitPlan.requirements`;
+/// upstream a `PayloadStack` of a unit or block).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AssemblerPayload {
+    /// Whether the payload is a building (else a unit).
+    pub is_block: bool,
+    /// Raw block/unit content id.
+    pub content: u16,
+    /// Required count.
+    pub amount: i32,
+}
+
 /// One assembler plan (`UnitAssembler.AssemblerUnitPlan`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct AssemblerUnitPlan {
     /// Unit produced.
     pub unit: UnitTypeId,
-    /// Item requirements.
-    pub requirements: Vec<(ItemId, i32)>,
+    /// Payload requirements (`requirements`).
+    pub payloads: Vec<AssemblerPayload>,
     /// Construct time in ticks.
     pub time: f32,
     /// Drones required.
@@ -260,7 +272,7 @@ pub struct AssemblerUnitPlan {
 }
 
 /// `UnitAssembler` configuration/state.
-#[derive(Debug, Clone, Default, PartialEq, bevy_ecs::component::Component)]
+#[derive(Debug, Clone, PartialEq, bevy_ecs::component::Component)]
 pub struct UnitAssembler {
     /// Assembler square side (`areaSize`).
     pub area_size: i32,
@@ -272,10 +284,20 @@ pub struct UnitAssembler {
     pub drones_created: i32,
     /// Drone construct time.
     pub drone_construct_time: f32,
+    /// Accumulated build progress (`progress`).
+    pub progress: f32,
+    /// Stored payloads (`blocks`/`payloads` sequences), keyed by plan entry.
+    pub stored: Vec<(AssemblerPayload, i32)>,
 }
 
 /// `UnitAssembler.areaSize` default.
 pub const ASSEMBLER_AREA_SIZE: i32 = 11;
+
+/// Whether two plan payload entries denote the same content (the stored
+/// counter keys ignore the requirement amount).
+fn same_payload(a: AssemblerPayload, b: AssemblerPayload) -> bool {
+    a.is_block == b.is_block && a.content == b.content
+}
 
 impl UnitAssembler {
     /// Creates an assembler with the upstream 11×11 area.
@@ -286,6 +308,8 @@ impl UnitAssembler {
             module_tier: 0,
             drones_created: 0,
             drone_construct_time,
+            progress: 0.0,
+            stored: Vec::new(),
         }
     }
 
@@ -308,10 +332,102 @@ impl UnitAssembler {
             false
         }
     }
+
+    /// `UnitAssemblerBuild.moduleTier`-gated active plan (`plan()`): the plan
+    /// index is `min(moduleTier, plans.len - 1)`.
+    pub fn plan(&self) -> Option<&AssemblerUnitPlan> {
+        if self.plans.is_empty() {
+            return None;
+        }
+        let index = (self.module_tier.max(0) as usize).min(self.plans.len() - 1);
+        self.plans.get(index)
+    }
+
+    /// Stored count for `payload`.
+    pub fn stored(&self, payload: AssemblerPayload) -> i32 {
+        self.stored
+            .iter()
+            .find(|(candidate, _)| same_payload(*candidate, payload))
+            .map(|(_, amount)| *amount)
+            .unwrap_or(0)
+    }
+
+    /// Whether the active plan accepts one more `payload`
+    /// (`UnitAssemblerBuild.acceptPayload`; the plan is the module-tier one).
+    pub fn accepts_payload(&self, payload: AssemblerPayload) -> bool {
+        let Some(plan) = self.plan() else {
+            return false;
+        };
+        plan.payloads.iter().any(|requirement| {
+            same_payload(*requirement, payload) && self.stored(*requirement) < requirement.amount
+        })
+    }
+
+    /// Stores one accepted payload (`moveInPayload` into `blocks`/`payloads`).
+    pub fn store_payload(&mut self, payload: AssemblerPayload) -> bool {
+        if !self.accepts_payload(payload) {
+            return false;
+        }
+        match self
+            .stored
+            .iter_mut()
+            .find(|(candidate, _)| same_payload(*candidate, payload))
+        {
+            Some((_, amount)) => *amount += 1,
+            None => self.stored.push((payload, 1)),
+        }
+        true
+    }
+
+    /// Whether every active-plan requirement is satisfied
+    /// (`shouldConsume` payload half).
+    pub fn has_requirements(&self) -> bool {
+        let Some(plan) = self.plan() else {
+            return false;
+        };
+        plan.payloads
+            .iter()
+            .all(|requirement| self.stored(*requirement) >= requirement.amount)
+    }
+
+    /// Consumes the active plan's stored payloads (`consume()`).
+    pub fn consume_requirements(&mut self) {
+        let Some(plan) = self.plan() else {
+            return;
+        };
+        let payloads = plan.payloads.clone();
+        for requirement in &payloads {
+            if let Some((_, amount)) = self
+                .stored
+                .iter_mut()
+                .find(|(candidate, _)| same_payload(*candidate, *requirement))
+            {
+                *amount = (*amount - requirement.amount).max(0);
+            }
+        }
+        self.stored.retain(|(_, amount)| *amount > 0);
+    }
+
+    /// `UnitAssemblerBuild.updateTile` progress half: advance when the plan's
+    /// requirements are met and return the unit on completion.
+    pub fn update(&mut self, time_scale: f32) -> Option<UnitTypeId> {
+        let plan = self.plan()?;
+        let (unit, time) = (plan.unit, plan.time.max(0.0001));
+        if !self.has_requirements() {
+            return None;
+        }
+        self.progress += time_scale / time;
+        if self.progress < 1.0 {
+            return None;
+        }
+        self.consume_requirements();
+        self.progress = 0.0;
+        Some(unit)
+    }
 }
 
 /// `UnitAssemblerModule` configuration.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, bevy_ecs::component::Component)]
 pub struct UnitAssemblerModule {
     /// Module tier (`1..=4`).
     pub tier: i32,
@@ -399,6 +515,41 @@ pub struct UnitCargoLoader {
     pub unit_type: UnitTypeId,
     /// Build time in ticks (`unitBuildTime`).
     pub unit_build_time: f32,
+}
+
+/// `UnitTransportSourceBuild` runtime state (`buildProgress`/`unit`).
+#[derive(Debug, Clone, Default, PartialEq, bevy_ecs::component::Component)]
+pub struct CargoLoaderState {
+    /// Accumulated build progress (`buildProgress`).
+    pub build_progress: f32,
+    /// Currently tethered unit (`unit`; `None` = ready to build).
+    pub unit: Option<bevy_ecs::entity::Entity>,
+}
+
+impl CargoLoaderState {
+    /// `UnitTransportSourceBuild.updateTile` progress half: advance while no
+    /// unit is tethered and return the spawned unit on completion.
+    pub fn update(
+        &mut self,
+        time_scale: f32,
+        unit_build_time: f32,
+        unit_type: UnitTypeId,
+        unit_alive: bool,
+    ) -> Option<UnitTypeId> {
+        if self.unit.is_some() {
+            if !unit_alive {
+                self.unit = None;
+            } else {
+                return None;
+            }
+        }
+        self.build_progress += time_scale / unit_build_time.max(0.0001);
+        if self.build_progress >= 1.0 {
+            self.build_progress = 0.0;
+            return Some(unit_type);
+        }
+        None
+    }
 }
 
 /// `UnitCargoUnloadPoint` configuration/state.
@@ -496,7 +647,7 @@ mod tests {
         let dagger = content.unit_by_name("dagger").expect("dagger").id;
         let plan = AssemblerUnitPlan {
             unit: dagger,
-            requirements: Vec::new(),
+            payloads: Vec::new(),
             time: 60.0,
             drones: 4,
         };

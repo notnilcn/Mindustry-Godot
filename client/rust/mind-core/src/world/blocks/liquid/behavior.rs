@@ -17,7 +17,7 @@ use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
-use crate::content::{BlockId, BlockKind, ContentRegistry};
+use crate::content::{BlockId, BlockKind, ContentRegistry, LiquidId};
 use crate::entities::comp::Building;
 use crate::world::behavior::{BehaviorRegistry, BuildingBehavior};
 use crate::world::block::BlockTable;
@@ -365,6 +365,106 @@ impl BuildingBehavior for LiquidJunctionBehavior {
     }
 }
 
+/// `LiquidBridge` behavior (`bridge-conduit`, `phase-conduit`;
+/// `world/blocks/liquid/LiquidBridge.java`).
+#[derive(Debug, Clone, Copy)]
+pub struct LiquidBridgeBehavior {
+    /// `ItemBridge.range` (`LiquidBridge` inherits it).
+    pub range: i32,
+}
+
+impl BuildingBehavior for LiquidBridgeBehavior {
+    fn create_state(&self, world: &mut World, e: Entity) {
+        ensure_node(
+            world,
+            e,
+            LiquidNode {
+                capacity: capacity_of(world, e),
+                accepts: true,
+                leakable: false,
+                junction: false,
+                router: false,
+                reject_from_output: false,
+                pressure: 1.0,
+                filter: Default::default(),
+            },
+        );
+        if world.get::<LiquidModule>(e).is_none() {
+            let liquids = world
+                .get_resource::<crate::world::modules::ModuleDims>()
+                .map(|dims| dims.liquids)
+                .unwrap_or(0);
+            world
+                .entity_mut(e)
+                .insert(LiquidModule::with_liquids(liquids));
+        }
+        if world
+            .get::<crate::world::blocks::distribution::ItemBridgeBuild>(e)
+            .is_none()
+        {
+            world
+                .entity_mut(e)
+                .insert(crate::world::blocks::distribution::ItemBridgeBuild::default());
+        }
+    }
+
+    fn update_tile(&self, world: &mut World, e: Entity) {
+        super::bridge::update_liquid_bridge_world(world, e, self.range);
+    }
+}
+
+/// `DirectionLiquidBridge` behavior (`reinforced-bridge-conduit`;
+/// `world/blocks/distribution/DirectionLiquidBridge.java`).
+#[derive(Debug, Clone, Copy)]
+pub struct DirectionLiquidBridgeBehavior {
+    /// `DirectionBridge.range`.
+    pub range: i32,
+}
+
+impl BuildingBehavior for DirectionLiquidBridgeBehavior {
+    fn create_state(&self, world: &mut World, e: Entity) {
+        ensure_node(
+            world,
+            e,
+            LiquidNode {
+                capacity: capacity_of(world, e),
+                accepts: true,
+                leakable: false,
+                junction: false,
+                router: false,
+                reject_from_output: false,
+                pressure: 1.0,
+                filter: Default::default(),
+            },
+        );
+        if world.get::<LiquidModule>(e).is_none() {
+            let liquids = world
+                .get_resource::<crate::world::modules::ModuleDims>()
+                .map(|dims| dims.liquids)
+                .unwrap_or(0);
+            world
+                .entity_mut(e)
+                .insert(LiquidModule::with_liquids(liquids));
+        }
+        if world
+            .get::<crate::world::blocks::distribution::DirectionBridgeBuild>(e)
+            .is_none()
+        {
+            world
+                .entity_mut(e)
+                .insert(crate::world::blocks::distribution::DirectionBridgeBuild::default());
+        }
+    }
+
+    fn update_tile(&self, world: &mut World, e: Entity) {
+        super::bridge::update_direction_liquid_bridge_world(world, e, self.range);
+    }
+
+    fn accept_liquid(&self, world: &World, e: Entity, src: Entity, _liquid: LiquidId) -> bool {
+        super::bridge::direction_bridge_accepts(world, e, src, self.range)
+    }
+}
+
 /// Registers the vanilla conduit/router/junction blocks.
 pub fn register(registry: &mut BehaviorRegistry, _content: &ContentRegistry) {
     for name in ["conduit", "pulse-conduit"] {
@@ -397,6 +497,20 @@ pub fn register(registry: &mut BehaviorRegistry, _content: &ContentRegistry) {
     for name in ["liquid-junction", "reinforced-liquid-junction"] {
         registry.register_named(name, Arc::new(LiquidJunctionBehavior));
     }
+    // `Blocks.java:2375 bridge-conduit` (range 4), `:2387 phase-conduit`
+    // (range 12), `:2435 reinforced-bridge-conduit` (range 4).
+    registry.register_named(
+        "bridge-conduit",
+        Arc::new(LiquidBridgeBehavior { range: 4 }),
+    );
+    registry.register_named(
+        "phase-conduit",
+        Arc::new(LiquidBridgeBehavior { range: 12 }),
+    );
+    registry.register_named(
+        "reinforced-bridge-conduit",
+        Arc::new(DirectionLiquidBridgeBehavior { range: 4 }),
+    );
 }
 
 #[cfg(test)]
@@ -462,5 +576,76 @@ mod tests {
             .map(|module| module.get(LiquidId::WATER))
             .unwrap_or(0.0);
         assert!(moved > 0.0, "moved={moved}");
+    }
+
+    /// gap5 GAP-8 / K-6: `bridge-conduit` is registered and moves liquid across
+    /// its configured link through the normal behavior tick.
+    #[test]
+    fn liquid_bridge_moves_when_warm() {
+        use crate::world::TilePos;
+        use crate::world::blocks::distribution::ItemBridgeBuild;
+
+        let mut harness = BuildHarness::new(8, 8, 7);
+        let bridge = harness
+            .content()
+            .block_id("bridge-conduit")
+            .expect("bridge");
+        assert!(harness.place(0, 0, bridge, 0, true));
+        assert!(harness.place(4, 0, bridge, 0, true));
+        let source = harness.build_at(0, 0).expect("source");
+        let dest = harness.build_at(4, 0).expect("dest");
+        harness
+            .world
+            .get_mut::<ItemBridgeBuild>(source)
+            .expect("link state")
+            .link = TilePos::new(4, 0).pack();
+        harness
+            .world
+            .get_mut::<LiquidModule>(source)
+            .expect("liquids")
+            .add(LiquidId::WATER, 50.0, 100.0);
+        for _ in 0..20 {
+            harness.tick();
+        }
+        let moved = harness
+            .world
+            .get::<LiquidModule>(dest)
+            .map(|module| module.get(LiquidId::WATER))
+            .unwrap_or(0.0);
+        assert!(moved > 0.0, "bridge moved={moved}");
+    }
+
+    /// `reinforced-bridge-conduit` sends through its facing link and forwards
+    /// on to the downstream container when its own link is empty.
+    #[test]
+    fn direction_liquid_bridge_moves_to_link() {
+        let mut harness = BuildHarness::new(8, 8, 7);
+        let bridge = harness
+            .content()
+            .block_id("reinforced-bridge-conduit")
+            .expect("bridge");
+        let container = harness
+            .content()
+            .block_id("liquid-container")
+            .expect("container");
+        assert!(harness.place(0, 0, bridge, 0, true));
+        assert!(harness.place(4, 0, bridge, 0, true));
+        assert!(harness.place(5, 0, container, 0, true));
+        let source = harness.build_at(0, 0).expect("source");
+        harness
+            .world
+            .get_mut::<LiquidModule>(source)
+            .expect("liquids")
+            .add(LiquidId::WATER, 50.0, 120.0);
+        let sink = harness.build_at(5, 0).expect("sink");
+        for _ in 0..10 {
+            harness.tick();
+        }
+        let moved = harness
+            .world
+            .get::<LiquidModule>(sink)
+            .map(|module| module.get(LiquidId::WATER))
+            .unwrap_or(0.0);
+        assert!(moved > 0.0, "direction bridge forwarded moved={moved}");
     }
 }
