@@ -132,6 +132,26 @@ func set_uniform_y() -> MindCell:
 	return self
 
 
+func top() -> MindCell:
+	align = 1
+	return self
+
+
+func left() -> MindCell:
+	align = 3
+	return self
+
+
+func bottom() -> MindCell:
+	align = 2
+	return self
+
+
+func right() -> MindCell:
+	align = 4
+	return self
+
+
 func width(w: float) -> MindCell:
 	width_value = w
 	return self

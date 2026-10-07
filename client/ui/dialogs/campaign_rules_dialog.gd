@@ -12,8 +12,16 @@ extends MindDialog
 
 signal rule_changed(key: String, value: Variant)
 
-## Vanilla toggle keys (`CampaignRules` field names) in source order.
-const RULE_KEYS := ["fog", "hide_spawns", "sector_invasion", "random_wave_ai", "rts_ai"]
+## Vanilla toggle keys in `CampaignRulesDialog.check` order.
+const RULE_KEYS := [
+	"sector_invasion",
+	"fog",
+	"hide_spawns",
+	"random_wave_ai",
+	"pause_disabled",
+	"rts_ai",
+	"clear_sector_on_lose",
+]
 ## Rule key -> bundle label; unknown keys fall back to the key itself.
 const RULE_LABELS := {
 	"fog": "@rules.fog",

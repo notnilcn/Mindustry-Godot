@@ -322,5 +322,24 @@ func _init() -> void:
 	_check(parsed == "Red plain", "prompt body parses BBCode markup (got '%s')" % parsed)
 	ui_root.free()
 
+	# EV-0041: the campaign difficulty dialog builds each rule toggle through the
+	# fluent cell API (`Cell.left()`); a missing `MindCell.left()` aborts
+	# `_rebuild` before the first toggle and wedges the client under the debugger.
+	var rules_dialog: Control = load("res://ui/dialogs/campaign_rules_dialog.gd").new()
+	root.add_child(rules_dialog)
+	rules_dialog.call("set_context_json", '{"planet":"serpulo"}')
+	rules_dialog.call("shown")
+	var rules_table: Variant = rules_dialog.get("_table")
+	var rule_toggles := 0
+	if rules_table is MindTable:
+		for child in (rules_table as MindTable).get_children():
+			if child is MindCheck:
+				rule_toggles += 1
+	_check(
+		rule_toggles == 7,
+		"campaign rules dialog builds all seven rule toggles (got %s)" % rule_toggles
+	)
+	rules_dialog.free()
+
 	print("UICHECK: failed=", _failures)
 	quit(1 if _failures > 0 else 0)
