@@ -6,12 +6,13 @@
  * Every opencode process takes one lease on its first MCP tool call and
  * refreshes it on later calls (`.opencode/skills/parity-eval/scripts/mcp_slot.py`).
  * When the registry is full, workflow agents listed in `MCP_SLOT_GUARD_AGENTS`
- * (default `gap-identifier,gap-loop,parity-orchestrator,evaluator`) get their
- * call denied;
+ * (default `gap-identifier,parity-orchestrator,parity-evaluator,twin-evaluator`)
+ * get their call denied;
  * everyone else is warned and allowed, because the guard must never deadlock a
  * human's session. The two slots are what the loops and their evaluator legs
- * share.
- * `MCP_SLOT_GUARD=off` disables the guard entirely.
+ * share. `parity-evaluator` is additionally denied every `computer-mcp_*` tool:
+ * it is the Godot-only stage, and the Java reference belongs to the twin
+ * evaluator. `MCP_SLOT_GUARD=off` disables the guard entirely.
  *
  * Failure policy: acquire errors other than "limit" fail open with a console
  * warning; a failed refresh falls through to acquire, so an agent that
@@ -33,11 +34,16 @@ const OWNER = `oc-${process.pid}`
 const QUIET_MS = 60_000
 const GATED = (
   process.env.MCP_SLOT_GUARD_AGENTS ??
-  "gap-identifier,gap-loop,parity-orchestrator,evaluator"
+  "gap-identifier,parity-orchestrator,parity-evaluator,twin-evaluator"
 )
   .split(",")
   .map((name) => name.trim())
   .filter(Boolean)
+
+// Tools that specific agents may never call, regardless of slot state.
+const DENIED: Record<string, RegExp> = {
+  "parity-evaluator": /^computer-mcp_/,
+}
 
 type AcquireResult = { ok: true; degraded?: boolean } | { ok: false }
 
@@ -122,12 +128,18 @@ export default (async ({ directory }) => {
       output.env.MCP_SLOT_OWNER_KEY = OWNER
     },
     "tool.execute.before": async (input) => {
+      const agent = sessionAgent.get(input.sessionID) ?? ""
+      const denied = DENIED[agent]
+      if (denied?.test(input.tool)) {
+        throw new Error(
+          `[mcp-slot-guard] ${agent} may only use open-godot-mcp; ${input.tool} is denied`,
+        )
+      }
       if (!MCP_TOOL.test(input.tool)) return
       lastUse = Date.now()
       if (token && refresh()) return
       const result = acquire()
       if (result.ok) return
-      const agent = sessionAgent.get(input.sessionID) ?? ""
       const message =
         `[mcp-slot-guard] MCP slot limit reached (MCP_SLOT_LIMIT); ` +
         `${GATED.join(", ")} must stay off MCP until a slot frees or a lease expires`

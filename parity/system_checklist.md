@@ -24,7 +24,7 @@ single-editor mutex until the nightly `windows-gpu` runner is wired (NUD-40/A).
 | Units/AI/waves | 11 | P4 | 4 | 2 embedded | 2 | in-progress | controllers/pathfinder/waves; plan-12 seams open |
 | Campaign | 12 | P4 | 6 planned | 2 planned | 0 | not-started | `campaign::tests` names reserved in matrix |
 | Logic/mlog | 13 | P5 | 15 planned | 2 planned | 0 | not-started | `logic::*` names reserved; 0 rows landed |
-| UI | 14 | P5 | 0 upstream | 1 planned | 0 | in-progress | in-engine MCP eval at 1152x648: `boot_menu`/`settings_ui`/`ui_dialogs` (`.opencode/evals/runs/20261006-*`); 28 findings verified-fixed via `.opencode/evals/findings.json`; `ui_text` scenario pending |
+| UI | 14 | P5 | 0 upstream | 1 planned | 0 | in-progress | in-engine MCP eval at 1152x648: `boot_menu`/`settings_ui`/`ui_dialogs` (`.opencode/evals/runs/20261006-*`); 28 findings twin-verified via `.opencode/evals/findings.json`; `ui_text` scenario pending |
 | Input/RTS | 15 | P5 | 3 placement-adjacent | 2 planned | 0 | in-progress | in-engine MCP: GUI-consumed input (EV-0018) and the Rebind Keys dialog (EV-0023) verified; `input_place_line_headless` pending |
 | Render/world | 16 | P6 | 0 upstream | 4 embedded | 2 | in-progress | render-list goldens; MCP per-layer deferred |
 | FX/parts | 17 | P6 | 0 upstream | 1 planned | 0 | not-started | `fx_lifecycle` promised |

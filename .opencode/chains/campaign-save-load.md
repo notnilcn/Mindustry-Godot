@@ -4,9 +4,9 @@ title: Campaign facade → launch a sector → save / list / load a slot
 status: seeded
 applies_when: Exercising MindCampaign save_slot/load_slot/list_save_slots after a sector launch (EV-0036 family).
 preconditions:
-  - boot-and-identity completed (`res://scenes/game.tscn` playing, runtime connected).
-  - Node paths fixed in the scene: `/root/Spine/SimHost`, `/root/Spine/MindCampaign`.
-  - The GDExtension is rebuilt (`tools/build.sh`) and the editor reloaded it (EXTENSION_RELOADED re-runs bootstrap).
+  - "boot-and-identity completed (`res://scenes/game.tscn` playing, runtime connected)."
+  - "Node paths fixed in the scene: `/root/Spine/SimHost`, `/root/Spine/MindCampaign`."
+  - "The GDExtension is rebuilt (`tools/build.sh`) and the editor reloaded it (EXTENSION_RELOADED re-runs bootstrap)."
 tools: [godot_health, godot_game, godot_exec]
 last_verified: not yet (loop-3 pre-commit smoke on 2026-10-07 confirmed every step; no run dir captured)
 ---

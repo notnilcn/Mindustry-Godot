@@ -28,7 +28,7 @@ you are about to touch.
 | `bench/` | Recorded performance baselines (`baselines.json`, `editor_baseline.json`). |
 | `docs/` | Operator-facing platform and packaging notes. |
 | `.github/workflows/` | `ci.yml` (push/PR gate) and `parity-nightly.yml`. |
-| `.opencode/` | Agent workflow: `agent/{gap-identifier,evaluator,parity-orchestrator,gap-loop,parity-writer}.md`, `command/{seed-gaps,evaluate-gaps,fix-gaps,loop-gaps}.md`, `loops/` (per-session worktree/display/bridge isolation and wrappers), `chains/` (project MCP call sequences), `plugin/` (MCP slot guard), `evals/` (gap ledger + run artifacts), and the `skills/playtest` + `skills/parity-eval` skills. |
+| `.opencode/` | Agent workflow: `agent/{gap-identifier,parity-orchestrator,parity-evaluator,parity-writer,twin-evaluator}.md`, `command/{seed-gaps,fix-gaps}.md`, `loops/` (per-session worktree/display/bridge isolation and wrappers), `chains/` (project MCP call sequences), `plugin/` (MCP slot guard), `evals/` (gap ledger + run artifacts), and the `skills/playtest` + `skills/parity-eval` skills. Cross-session tool friction is logged at the repo root in `open-godot-mcp-learnings.md` and `computer-mcp-learnings.md`. |
 
 ## Documentation map
 
@@ -66,42 +66,6 @@ the addon itself.
 
 Run from the repo root. The `.sh` scripts are canonical on the Linux dev host and run the
 relative `cargo` commands below.
-
-## Parity feedback loop
-
-Player-visible parity is verified in-engine, not asserted from docs. The loop:
-
-1. The `gap-identifier` subagent (`.opencode/agent/gap-identifier.md`) compares
-   the port under `client/` against `../Mindustry` and records code-sourced
-   candidates in `.opencode/evals/findings.json` (`add --source code`) with
-   file:line evidence on both sides and a repro sketch. Candidates seed the
-   fixer queue (`open`) or the evaluator queue (`needs-evaluation`). This stage
-   is cheap and runs in parallel across areas.
-2. `parity-writer` fixes one claimed `EV-####` at a time in game code and claims
-   it in the commit message (`Fixes EV-0001`), then moves the finding to
-   `needs-evaluation`.
-3. The `evaluator` subagent (`.opencode/agent/evaluator.md`) is the engine gate:
-   it drives the Java reference with computer-mcp and the Godot client with
-   open-godot-mcp, re-runs the finding's exact repro, and records
-   `verified-fixed` (expected behavior observed), `verified-unfixed` (gap still
-   present), `regression` (a fixed item reproduced) or `wontfix`. Run reports
-   live under `.opencode/evals/runs/` (local evidence, not committed).
-4. Queue coordination is `record_finding.py`: `claim` is an atomic
-   cross-session lock (a fresh `owner` hides the item from every picker),
-   `set-status` hands an item between queues without dropping the claim, and
-   `reap` recovers claims left by dead sessions. `/seed-gaps` fans out code-only
-   discovery, `/evaluate-gaps` drains the evaluator queue one finding at a time,
-   `/fix-gaps` runs an area-partitioned fixer swarm, and `/loop-gaps` drives
-   identify → implement → evaluate per finding (max five cycles per item) until
-   no unprocessed non-terminal item remains. Parallel sessions run in per-loop
-   worktrees (`.opencode/loops/`), and MCP use is slot-gated
-   (`.opencode/skills/parity-eval/scripts/mcp_slot.py`, `MCP_SLOT_LIMIT`
-   default 2); computer-mcp needs `DISPLAY` at opencode process start. Working
-   MCP sequences live in `.opencode/chains/`.
-
-Docs, plans and gate reports are claims until a running client reproduces them;
-a code-sourced candidate is a falsifiable claim until the evaluator runs its
-repro in-engine.
 
 ## Workflow rules
 
