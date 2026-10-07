@@ -706,11 +706,15 @@ mod tests {
     #[test]
     fn rules_researched_overrides_host_store() {
         let (registry, _store) = registry();
+        // The root content is `alwaysUnlocked`; pick a genuinely locked node.
         let content = registry
             .tech()
             .nodes
             .iter()
-            .find_map(|node| node.content)
+            .find_map(|node| {
+                node.content
+                    .filter(|content| !content_unlocked(&registry, *content))
+            })
             .unwrap();
         let name = content_name(&registry, content).unwrap();
         let mut rules = Rules::default();

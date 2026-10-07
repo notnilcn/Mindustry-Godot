@@ -1365,6 +1365,76 @@ impl MindSimHost {
         };
         GString::from(core_items_json(&self.sim, content).as_str())
     }
+
+    /// Live core items of `team` as `(content name, amount)` (`Team.items()`:
+    /// the first core in entity order). Rust-only seam for the campaign
+    /// research spend.
+    pub fn player_core_items(&self, team: u8) -> Vec<(String, i32)> {
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return Vec::new();
+        };
+        for (_seq, entity, comp) in self.sim.ecs.entities_by_seq() {
+            if comp.team.0 != team {
+                continue;
+            }
+            if !content
+                .block(comp.block)
+                .is_some_and(|def| def.kind == BlockKind::CoreBlock)
+            {
+                continue;
+            }
+            let Some(module) = self.sim.ecs.0.get::<ItemModule>(entity) else {
+                continue;
+            };
+            let mut out = Vec::new();
+            for (index, amount) in module.items.iter().enumerate() {
+                if *amount <= 0 {
+                    continue;
+                }
+                if let Some(item) = content.item(ItemId::new(index as u16)) {
+                    out.push((item.name.clone(), *amount));
+                }
+            }
+            return out;
+        }
+        Vec::new()
+    }
+
+    /// `Team.items().remove(item, amount)` on the first core of `team`; returns
+    /// the removed amount (`0` without a matching core/item). Rust-only seam for
+    /// the campaign research spend.
+    pub fn remove_player_core_items(&mut self, team: u8, item: &str, amount: i32) -> i32 {
+        if amount <= 0 {
+            return 0;
+        }
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return 0;
+        };
+        let Some(item) = content.item_id(item) else {
+            return 0;
+        };
+        let mut target = None;
+        for (_seq, entity, comp) in self.sim.ecs.entities_by_seq() {
+            if comp.team.0 != team {
+                continue;
+            }
+            let is_core = content
+                .block(comp.block)
+                .is_some_and(|def| def.kind == BlockKind::CoreBlock);
+            if !is_core || self.sim.ecs.0.get::<ItemModule>(entity).is_none() {
+                continue;
+            }
+            target = Some(entity);
+            break;
+        }
+        let Some(entity) = target else {
+            return 0;
+        };
+        match self.sim.ecs.0.get_mut::<ItemModule>(entity) {
+            Some(mut module) => module.remove(item, amount),
+            None => 0,
+        }
+    }
 }
 
 /// First core block's item counts as a JSON object (empty when there is no core

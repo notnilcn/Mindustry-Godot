@@ -35,6 +35,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         destructible: Some(true),
         configurable: Some(true),
+        always_unlocked: Some(true),
         ..spec("power-source", BlockKind::PowerSource)
     })?;
 
@@ -46,6 +47,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         env_enabled: Some(EnvMask::any()),
         solid: Some(true),
         update: Some(true),
+        always_unlocked: Some(true),
         ..spec("power-void", BlockKind::PowerVoid)
     })?;
 
@@ -58,6 +60,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         update: Some(true),
         save_config: Some(true),
         configurable: Some(true),
+        always_unlocked: Some(true),
         ..spec("item-source", BlockKind::ItemSource)
     })?;
 
@@ -65,6 +68,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         group: Some(BlockGroup::Transportation),
         build_visibility: Some(BuildVisibility::SandboxOnly),
         env_enabled: Some(EnvMask::any()),
+        always_unlocked: Some(true),
         ..spec("item-void", BlockKind::ItemVoid)
     })?;
 
@@ -81,6 +85,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         update: Some(true),
         save_config: Some(true),
         configurable: Some(true),
+        always_unlocked: Some(true),
         ..spec("liquid-source", BlockKind::LiquidSource)
     })?;
 
@@ -94,6 +99,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         floating: Some(true),
         update: Some(true),
+        always_unlocked: Some(true),
         ..spec("liquid-void", BlockKind::LiquidVoid)
     })?;
 
@@ -104,6 +110,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         build_visibility: Some(BuildVisibility::SandboxOnly),
         update: Some(true),
         configurable: Some(true),
+        always_unlocked: Some(true),
         ..spec("payload-source", BlockKind::PayloadSource)
     })?;
 
@@ -113,6 +120,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         group: Some(BlockGroup::Payloads),
         build_visibility: Some(BuildVisibility::SandboxOnly),
         update: Some(true),
+        always_unlocked: Some(true),
         ..spec("payload-void", BlockKind::PayloadVoid)
     })?;
 
@@ -123,6 +131,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         build_visibility: Some(BuildVisibility::SandboxOnly),
         solid: Some(true),
         update: Some(true),
+        always_unlocked: Some(true),
         ..spec("heat-source", BlockKind::HeatProducer)
     })?;
 
@@ -131,6 +140,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         category: Some(Category::Defense),
         build_visibility: Some(BuildVisibility::SandboxOnly),
         save_config: Some(true),
+        always_unlocked: Some(true),
         ..spec("target-dummy", BlockKind::TargetDummy)
     })?;
 

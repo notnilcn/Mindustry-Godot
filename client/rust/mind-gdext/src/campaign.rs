@@ -624,13 +624,29 @@ impl MindCampaign {
         };
 
         // Real inventory: the stored items of every owned, non-frozen sector
-        // (`ResearchDialog.rebuildItems` aggregates `sector.items()`).
+        // (`ResearchDialog.rebuildItems` aggregates `sector.items()`). The
+        // sector being played reads its live core module instead (`Sector.items`
+        // -> `state.rules.defaultTeam.items()`), so it is not double-counted.
+        let default_team = self.session.default_team();
         let mut items = ItemModule::with_items(registry.items().len());
+        if self.session.is_campaign()
+            && let Some(host) = self.host()
+        {
+            for (name, amount) in host.bind().player_core_items(default_team) {
+                if let Some(id) = registry.item_id(&name) {
+                    items.add(id, amount.max(0), i32::MAX);
+                }
+            }
+        }
+        let played_sector = self.session.sector;
         let mut sector_entries: Vec<(SectorRef, Vec<(String, i32)>)> = Vec::new();
         if let Some(campaign) = self.campaign.as_ref() {
             for planet in campaign.planets.values() {
                 for sector in &planet.sectors {
                     if !sector.has_base() || sector.is_frozen(None) {
+                        continue;
+                    }
+                    if played_sector == Some((planet.id, sector.id)) {
                         continue;
                     }
                     let entry: Vec<(String, i32)> = sector
@@ -669,7 +685,9 @@ impl MindCampaign {
         };
         let changed = result.complete || !result.spent.is_empty();
 
-        // Deduct the spent stacks from the aggregated sectors in order.
+        // Deduct the spent stacks: other sectors in order, then the active
+        // sector last from its live core module (`ResearchDialog` removal
+        // order; `Sector.removeItem` writes the core while playing).
         for spent in &result.spent {
             let Some(name) = registry.item(spent.item).map(|item| item.name.clone()) else {
                 continue;
@@ -695,6 +713,15 @@ impl MindCampaign {
                     record.info.info.items.insert(name.clone(), *amount);
                 }
             }
+            if remaining > 0
+                && self.session.is_campaign()
+                && let Some(mut host) = self.host()
+            {
+                remaining -=
+                    host.bind_mut()
+                        .remove_player_core_items(default_team, &name, remaining);
+            }
+            let _ = remaining;
         }
         // Newly unlocked content may auto-unlock dependent zero-cost nodes.
         if !result.unlocked.is_empty()
