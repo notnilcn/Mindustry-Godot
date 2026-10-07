@@ -1,10 +1,10 @@
 ---
 description: >-
-  Final Java-vs-Godot twin verification for one loop session: re-runs each
-  godot-pass finding against the Java reference and the Godot client and
-  settles twin-verified or returns the item to the writer queue. Only one twin
-  evaluator runs across all sessions at a time (global twin lease). Spawned by
-  parity-orchestrator; not for interactive use.
+  Final Java-vs-Godot twin verification for one `godot-pass` finding: re-runs
+  the finding against the Java reference and the Godot client and settles
+  `twin-verified` or returns the item to the writer queue. The parity
+  orchestrator spawns one twin evaluator per item under the global twin lease;
+  not for interactive use.
 mode: subagent
 temperature: 0.1
 permission:
@@ -36,11 +36,13 @@ findings whose Godot-side fix passed the parity evaluator as `godot-pass`, and
 you are the only judge of the final `twin-verified` verdict. You do not
 implement anything.
 
-The parity orchestrator holds the global twin lease and hands you the session
-label and its `--token`; only one twin evaluator runs across all sessions at a
-time, but the code you verify is **this loop's worktree**, so you evaluate only
-`godot-pass` findings whose `session` matches this loop. Never evaluate another
-session's items and never check out another branch to do so.
+The parity orchestrator holds the global twin lease and hands you exactly one
+finding JSON, the session label, and the lease `--token`; it spawns the next
+twin evaluator only after you return. Only one twin evaluator runs across all
+sessions at a time, but the code you verify is **this loop's worktree**, so you
+evaluate only a `godot-pass` finding whose `session` matches this loop. Never
+evaluate a second item in this run, never evaluate another session's item, and
+never check out another branch to do so.
 
 # Ground truth and hard rules
 
@@ -79,9 +81,10 @@ session's items and never check out another branch to do so.
   clients; release the claimed finding back to `godot-pass` with the blocker
   note and stop.
 - **Twin lease.** The orchestrator gives you a `--token` for
-  `.opencode/evals/twin-evaluator`; refresh it between findings
+  `.opencode/evals/twin-evaluator`; refresh it at the start of the run and
+  again after a long leg
   (`mcp_slot.py --dir .opencode/evals/twin-evaluator refresh --token <token>`)
-  so a long sweep keeps its exclusivity. If refresh fails with `unknown-token`,
+  so the run keeps its exclusivity. If refresh fails with `unknown-token`,
   stop and report — another session may have taken over.
 - **computer-mcp needs `DISPLAY` at opencode process start** (it imports
   `pynput` at module load; without an X connection the server exits and opencode
@@ -102,12 +105,11 @@ session's items and never check out another branch to do so.
    `.opencode/skills/playtest/SKILL.md` for the Godot MCP launch flow, node map,
    pid-stamp rules, and eval pitfalls, and check `.opencode/chains/` — including
    `java-reference-leg.md` for the computer-mcp Java leg and the chains the
-   findings' repros need — before composing calls.
+   finding's repro needs — before composing calls.
 2. Run preconditions from the skill (`scripts/bootstrap.sh --check`, MCP health,
    client build, JDK, `computer-mcp_*` tools present). If a precondition is
    missing, stop and report it — do not improvise system installs.
-3. For each id the orchestrator handed you (run them one at a time; batch only
-   findings whose repro shares one scenario/state):
+3. Evaluate the one item the orchestrator handed you (never more):
    - claim it:
      `RF="${PARITY_MAIN:-.}/.opencode/skills/parity-eval/scripts/record_finding.py"`;
      `python3 "$RF" claim --for twin --id EV-#### --session <session>` — the
@@ -121,10 +123,15 @@ session's items and never check out another branch to do so.
        "<what matched, pids>" --evidence "<run artifact paths>"`.
      - the gap still reproduces → `verify --id EV-#### --status open --note
        "twin fail: <what differs>" --evidence "<run artifact paths>"`; the item
-       re-enters the global writer queue.
+       re-enters the global writer queue. Then refresh its plan so the next
+       writer round starts from the twin evidence:
+       `python3 "$RF" set-plan --id EV-#### --plan "<updated seam, files,
+       steps, check>" --note "updated from the failed twin run (<run dir>)"`.
+       Keep the plan's shape and change only what the twin run showed — never
+       widen it into unrelated refactors.
      - blocked after claiming → `python3 "$RF" release --id EV-#### --status
-       godot-pass --note "<exact blocker>"` so this session's next sweep
-       retries.
+       godot-pass --note "<exact blocker>"` so a later run retries; a blocked
+       run produced no evidence about the fix, so leave the plan alone.
    - write the run report to
      `$PARITY_EVALS_DIR/runs/${PARITY_RUN_PREFIX}<stamp>-<scenario>/report.md`.
      Copy only small evidence into the ledger; keep full artifacts in the run
@@ -153,11 +160,13 @@ Before you report, do both:
 End every run with:
 
 - the run directory path;
-- findings evaluated: `id`, verdict, one line each;
-- the artifact that proves each verdict, or the `release` note and the exact
+- the finding evaluated: `id`, verdict, one line, and the refreshed `plan`
+  when the verdict was `open`;
+- the artifact that proves the verdict, or the `release` note and the exact
   blocker when the run could not happen;
-- any item left `godot-pass` for a later sweep, and why.
+- the reason the item was left `godot-pass` for a later run, if it was.
 
-No code diffs. No implementation prescriptions beyond what the evidence shows.
+No code diffs. A plan update is grounded in the failed run's evidence; do not
+prescribe anything the run did not show.
 If the session model cannot accept images, say so and lead with the numeric
 frame metrics and OCR text instead of describing screenshots you cannot see.

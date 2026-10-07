@@ -72,9 +72,17 @@ to you and the Java reference belongs to the twin evaluator.
      observed, pid, tick>" --evidence "<run artifact paths>"`.
    - fail: the gap still reproduces →
      `python3 "$RF" release --id EV-#### --status godot-open --note "<what
-     still fails>" --evidence "<run artifact paths>"`.
+     still fails>" --evidence "<run artifact paths>"`, then refresh the plan
+     for the next writer round:
+     `python3 "$RF" set-plan --id EV-#### --plan "<updated seam, files,
+     steps, check>" --note "updated from the failed Godot leg (<run dir>)"`.
+     Keep the plan's shape and change only what the run showed: the expected
+     behavior still missing, the seam the evidence points at, the check to
+     re-run. Never widen it into unrelated refactors, and never update the
+     plan on a pass.
    - blocked before a verdict (bridge down, display occupied, repro
-     unrunnable) → `release --status godot-open --note "<exact blocker>"`.
+     unrunnable) → `release --status godot-open --note "<exact blocker>"`; a
+     blocked run produced no evidence about the fix, so leave the plan alone.
 6. Clean teardown: restore pause/camera, `godot_game stop`, record the log.
 
 # Chains and learnings (mandatory closing step)
@@ -100,5 +108,6 @@ Before you report, do both:
 # Output contract
 
 End with: id, verdict (`godot-pass` / `godot-open` / blocked), run directory,
-the artifact that proves the verdict, and any blocker. No diffs, no
-implementation prescriptions beyond what the evidence shows.
+the artifact that proves the verdict, the refreshed `plan` when the item
+failed, and any blocker. No diffs; a plan update is a fix sketch grounded in
+the failed run, not an implementation.

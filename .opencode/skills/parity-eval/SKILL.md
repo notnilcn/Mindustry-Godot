@@ -343,7 +343,11 @@ later run of the same loop picks them up.
 The gap identifier owns `add --source code` and code-evidence `wontfix`; the
 parity evaluator owns `godot-pass`/`godot-open`; the twin evaluator owns
 `twin-verified`/`open` verdicts via `verify`; the orchestrator claims writer
-batches and drives the transitions.
+batches and drives each item through the pipeline one at a time. Every
+candidate carries a fix plan in its `plan` field — inline Markdown (seam,
+files, steps, check), not a plan number — so a claim payload hands the writer
+the sketch without any extra file lookup; an evaluator that fails an item
+refreshes that plan from its run evidence before the next writer round.
 
 ```bash
 python3 "$RF" summary
@@ -360,7 +364,9 @@ python3 "$RF" add \
   --expected "Java: Play > Campaign opens Serpulo planet view" \
   --actual "Godot: click leaves the menu unchanged; no dialog bound" \
   --repro "scenario boot_menu step 4" \
-  --evidence "runs/${PARITY_RUN_PREFIX}<stamp>-boot_menu/godot/step-04.png" --plan 14
+  --plan "Seam: menu button emits no signal. Steps: bind Campaign to the planet dialog; hide the Workshop button. Check: headless boot_menu step 4." \
+  --evidence "runs/${PARITY_RUN_PREFIX}<stamp>-boot_menu/godot/step-04.png"
+python3 "$RF" set-plan --id EV-0001 --plan "<Markdown fix sketch>"
 python3 "$RF" verify \
   --id EV-0001 --status twin-verified --note "twin run at <commit>" \
   --evidence "runs/${PARITY_RUN_PREFIX}<stamp2>-boot_menu/godot/step-04.png"
@@ -370,7 +376,7 @@ python3 "$RF" verify --id EV-0002 --status open --note "twin fail: <what differs
 ### Code-level candidates and triage
 
 The gap identifier records candidates without running anything; `add` starts
-them in the writer queue (`open`):
+them in the writer queue (`open`) with a fix plan in `--plan`:
 
 ```bash
 python3 "$RF" add \
@@ -379,16 +385,20 @@ python3 "$RF" add \
   --expected "World.java:265-330 applies the preset rules on launch" \
   --actual "campaign.rs:124 calls play_new_sector with Rules::default()" \
   --repro "start_sector('serpulo',170); eval rules.waves" \
+  --plan "Seam: campaign.rs:124 skips the preset rules. Steps: resolve the preset, pass its Rules to play_new_sector, add the headless case. Check: cargo test -p mind-core campaign." \
   --evidence client/rust/mind-gdext/src/campaign.rs:124 \
   --evidence ../Mindustry/core/src/mindustry/core/World.java:265
+python3 "$RF" set-plan --id EV-0001 --plan "<Markdown fix sketch>" \
+  --note "plan added while sharpening the repro"
 python3 "$RF" set-status --id EV-0001 --status wontfix \
   --note "handled by the shared Rules path" \
   --evidence client/rust/mind-gdext/src/campaign.rs:120
 ```
 
 Rules for code-sourced records: both sides' file:line in `--evidence`, a repro
-sketch the evaluator can execute later, one symptom per record, and dedupe
-notes on existing ids instead of new records. Code evidence never closes a
+sketch the evaluator can execute later, a `plan` sketch (seam, files, steps,
+check) in inline Markdown, one symptom per record, and dedupe notes on
+existing ids instead of new records. Code evidence never closes a
 finding as fixed; a fresh in-engine reproduction is the only path to
 `godot-pass` and `twin-verified`, and only a reading that settles the gap may
 set `wontfix`.

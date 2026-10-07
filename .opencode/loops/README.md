@@ -34,12 +34,16 @@ display and open-godot-mcp to the loop bridge port and XDG dirs.
 
 ## Workflow integration
 
-- `/seed-gaps` seeds the shared ledger with code-sourced `open` candidates and
-  does not need a loop.
+- `/seed-gaps` seeds the shared ledger with code-sourced `open` candidates,
+  each carrying a fix plan in its `plan` field, and does not need a loop.
 - `/fix-gaps` runs per loop. The ledger `session` label is `$PARITY_SESSION`
-  or `loop-$PARITY_LOOP`; a loop only verifies its own `godot-pass` items, and
-  the twin evaluator runs under a global lease
-  (`.opencode/evals/twin-evaluator`, one at a time across sessions).
+  or `loop-$PARITY_LOOP`; a loop works its claimed batch one item at a time,
+  only verifies its own `godot-pass` items, and the twin evaluator runs under
+  a global lease (`.opencode/evals/twin-evaluator`, one item at a time across
+  sessions).
+- `/merge-loops` runs from the main checkout after a loop's fix cycle returns:
+  it merges the loop branch into `main`, runs `tools/ci.sh`, and syncs the
+  loop worktree back from main.
 - A restarted loop recovers its own dead claims with
   `record_finding.py reap --session loop-N --older-than-minutes 0`.
 - `start-loop.sh` refuses to launch when the worktree's workflow files

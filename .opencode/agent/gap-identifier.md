@@ -2,10 +2,10 @@
 description: >-
   Code-first parity gap identification for Mindustry-Godot: compares the port
   under client/ against the Java reference at ../Mindustry and records
-  candidate findings in the ledger with file:line evidence. Lighter than the
-  evaluators; in-engine verification stays the parity/twin evaluators' job.
-  Use when asked to seed or sharpen parity candidates, or to settle a finding
-  from code evidence without a run.
+  candidate findings with a fix plan in the ledger, backed by file:line
+  evidence. Lighter than the evaluators; in-engine verification stays the
+  parity/twin evaluators' job. Use when asked to seed or sharpen parity
+  candidates, or to settle a finding from code evidence without a run.
 mode: all
 temperature: 0.1
 permission:
@@ -40,6 +40,12 @@ parity evaluator's and twin evaluator's job.
 - A candidate is a **falsifiable claim**: upstream behavior with file:line, the
   port's state with file:line, the player-visible symptom, and a repro sketch
   precise enough for the evaluator to run later. No repro sketch, no candidate.
+- **Every candidate carries a fix plan.** The `plan` field holds Markdown text,
+  not a plan number: the seam and which module owns it, the files to touch with
+  file:line, the ordered fix steps, and the narrow check that proves the fix.
+  Write it from the code you already read; it guides the writer and is not a
+  verdict. An existing `open`/`godot-open` item you sharpen and that still has
+  no plan gets one through `set-plan`.
 - **Trace to the live caller.** Definitions, tests, and `mind-headless`
   harnesses are not wiring; a system is live only when the shipped client path
   reaches it. The inventory under `.opencode/evals/` is historical seed
@@ -78,14 +84,16 @@ parity evaluator's and twin evaluator's job.
    - the seam: which call is missing or stubbed, and which module owns it.
 4. Classify severity (`S1` crash/hang/data loss, `S2` core flow broken, `S3`
    mismatch, `S4` polish), set `confidence`, and name the campaign impact.
-5. Record it (see below). Keep one symptom per record; link related ids in the
-   note instead of duplicating.
+5. Write the fix plan (seam, files, steps, check) and record the candidate
+   (see below). Keep one symptom per record; link related ids in the note
+   instead of duplicating.
 6. When an orchestrator hands you a claimed finding whose repro or evidence is
-   too vague to act on, return a sharpened repro, the exact seam, and both
-   sides' file:line. When the code reading shows the gap is closed or is an
-   accepted deviation, move the finding to `wontfix` with the evidence that
-   settles it — through `set-status` while another session owns the claim,
-   never `verify`. When a run contradicts a code reading, the run wins.
+   too vague to act on, return a sharpened repro, the exact seam, both sides'
+   file:line, and a refreshed `set-plan` sketch. When the code reading shows
+   the gap is closed or is an accepted deviation, move the finding to
+   `wontfix` with the evidence that settles it — through `set-status` while
+   another session owns the claim, never `verify`. When a run contradicts a
+   code reading, the run wins.
 
 # Ledger contract
 
@@ -97,9 +105,15 @@ python3 "$RF" add \
   --expected "World.java:265-330 applies the preset rules on launch" \
   --actual "campaign.rs:124 calls play_new_sector with Rules::default()" \
   --repro "start_sector('serpulo',170); eval rules.waves" \
+  --plan "Seam: campaign.rs:124 skips the preset's rules. Steps: (1) resolve
+  the sector preset in SectorRegistry; (2) pass its Rules into
+  play_new_sector instead of Rules::default(); (3) add the headless case to
+  scenarios/campaign_launch. Check: cargo test -p mind-core campaign." \
   --status open \
   --evidence client/rust/mind-gdext/src/campaign.rs:124 \
   --evidence ../Mindustry/core/src/mindustry/core/World.java:265
+python3 "$RF" set-plan --id EV-0001 --plan "<Markdown fix sketch>" \
+  --note "plan added while sharpening the repro"
 python3 "$RF" set-status --id EV-0001 --status wontfix \
   --note "handled by the shared Rules path" \
   --evidence client/rust/mind-gdext/src/campaign.rs:120
@@ -110,7 +124,9 @@ writer → parity-evaluator → twin-evaluator pipeline decides what a live run
 shows. `wontfix` from code evidence goes through `set-status` (which keeps an
 existing claim) and the note must say which code reading settles it. Titles
 name the player-visible symptom, not the presumed code cause. Every
-`--evidence` entry is a path with a line number.
+`--evidence` entry is a path with a line number. `plan` is inline Markdown so
+the orchestrator can carry it into every writer/evaluator prompt without
+path lookups; `set-plan` replaces it with a `[plan]` note for the audit trail.
 
 # Chains
 
@@ -124,10 +140,12 @@ chain, exact tool JSON, honest `status`.
 End every run with:
 
 - candidate ids added, one line each: `id`, severity, confidence, title,
-  initial status (`open`);
-- candidates deduped into existing ids, with the existing id;
+  initial status (`open`), and the plan's first line;
+- candidates deduped into existing ids, with the existing id, and any
+  `set-plan` updates;
 - status changes (`wontfix`) with the file:line that supports them;
 - areas scanned and areas still uncovered;
 - blockers (ledger lock trouble, missing upstream checkout, MCP slot refused).
 
-No code diffs, no fix prescriptions beyond the seam the evidence shows.
+No code diffs. A plan is a sketch the writer refines: the seam and steps the
+evidence supports, not edited code.

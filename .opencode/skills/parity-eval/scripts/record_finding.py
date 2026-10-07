@@ -9,11 +9,12 @@ Lifecycle:
                      +----------+                            +-> open
 
 The gap identifier seeds code-sourced candidates with `add --source code`
-(status `open`). A loop session claims a batch for its writer with
-`claim --for writer --session loop-N`; the parity evaluator claims one item
-(`claim --for godot-eval --id EV-####`) before running the Godot leg; the
-session's twin evaluator claims `godot-pass` items (`claim --for twin`) for
-the Java-vs-Godot twin run.
+(status `open`), each carrying a Markdown fix sketch in the `plan` field.
+A loop session claims a batch for its writer with
+`claim --for writer --session loop-N` and works the items one at a time; the
+parity evaluator claims one item (`claim --for godot-eval --id EV-####`) before
+running the Godot leg; the session's twin evaluator claims one `godot-pass`
+item (`claim --for twin --id EV-####`) for the Java-vs-Godot twin run.
 
 Every claim is a cross-session lock: a finding with a fresh `owner` is
 invisible to pickers until the owner releases it or the claim goes stale and
@@ -29,7 +30,10 @@ Examples:
         --expected "Java: Play > Campaign opens the Serpulo planet view" \
         --actual "Godot: click leaves the menu unchanged" \
         --repro "scenario boot_menu step 4" \
+        --plan "Seam: menu button emits no signal. Steps: bind the Campaign \
+button to the planet dialog. Check: headless campaign_launch step 1." \
         --evidence runs/20261005-120000-boot_menu/godot/step-04.png
+    record_finding.py set-plan --id EV-0001 --plan "<Markdown fix sketch>"
     record_finding.py claim --for writer --session loop-2 --count 3
     record_finding.py claim --for godot-eval --id EV-0001 --session loop-2
     record_finding.py release --id EV-0001 --status godot-pass --note "repro passes"
@@ -325,6 +329,7 @@ def claim_payload(finding: dict) -> dict:
         "expected": finding.get("expected"),
         "actual": finding.get("actual"),
         "repro": finding.get("repro"),
+        "plan": finding.get("plan"),
         "evidence": finding.get("evidence", []),
         "notes": finding.get("notes", [])[-3:],
         "prev_status": finding.get("prev_status"),
@@ -393,6 +398,19 @@ def cmd_set_status(args: argparse.Namespace) -> int:
             note(finding, f"[{args.status}] {args.note}")
         save(args.ledger, data)
     print(f"{finding['id']}: {previous} -> {args.status}")
+    return 0
+
+
+def cmd_set_plan(args: argparse.Namespace) -> int:
+    """Replace a finding's fix plan (Markdown text)."""
+    with ledger_lock(args.ledger):
+        data = load(args.ledger)
+        finding = find(data, args.id)
+        finding["plan"] = args.plan
+        if args.note:
+            note(finding, f"[plan] {args.note}")
+        save(args.ledger, data)
+    print(f"{finding['id']}: plan updated")
     return 0
 
 
@@ -605,7 +623,11 @@ def main() -> int:
     )
     p_add.add_argument("--evidence", action="append", default=[])
     p_add.add_argument("--note", action="append", dest="notes", default=[])
-    p_add.add_argument("--plan", default=None, help="owning plan, e.g. 14")
+    p_add.add_argument(
+        "--plan",
+        default=None,
+        help="fix plan text (Markdown: seam, files, steps, check)",
+    )
     p_add.set_defaults(func=cmd_add)
 
     p_verify = sub.add_parser(
@@ -624,6 +646,14 @@ def main() -> int:
     p_set.add_argument("--status", required=True, choices=SETTABLE)
     p_set.add_argument("--note")
     p_set.set_defaults(func=cmd_set_status)
+
+    p_plan = sub.add_parser(
+        "set-plan", help="replace a finding's fix plan without touching its claim"
+    )
+    p_plan.add_argument("--id", required=True)
+    p_plan.add_argument("--plan", required=True, help="fix plan text (Markdown)")
+    p_plan.add_argument("--note")
+    p_plan.set_defaults(func=cmd_set_plan)
 
     p_claim = sub.add_parser(
         "claim", help="atomically claim claimable findings for a worker kind"

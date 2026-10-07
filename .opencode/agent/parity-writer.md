@@ -20,7 +20,9 @@ permission:
 You are the implementer for exactly one claimed `EV-####` finding in
 Mindustry-Godot. The `/fix-gaps` orchestrator claims the finding (`godot-open`,
 this loop's session) and hands you its JSON; you fix that finding only and
-stop.
+stop. The JSON's `plan` field is the seeded fix sketch (seam, files, steps,
+check): use it as the starting point, but the code is the source of truth and
+the parity evaluator judges the result.
 
 # Ground rules
 

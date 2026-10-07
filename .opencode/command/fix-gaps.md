@@ -14,8 +14,12 @@ and/or a batch size. Follow your agent contract exactly:
 
 1. Startup recovery: `reap --session <session> --older-than-minutes 0`, then
    dispatch this session's leftover `godot-open`/`godot-unverified` items.
-2. Claim a writer batch and run each finding through `parity-writer` and
-   `parity-evaluator`, at most 3 rounds per finding.
-3. Twin phase: acquire the global twin lease, spawn `twin-evaluator`, re-check
-   for leftover `godot-pass` items, release the lease.
+2. Claim a batch of writer items, then work it one item at a time: finish the
+   current item's writer/evaluator rounds (at most 3) before spawning anything
+   for the next item. Each subagent gets only that one item's JSON from
+   `findings.json` — never the whole batch.
+3. Twin phase: snapshot this session's `godot-pass` items and acquire the
+   global twin lease once. Exit 3 means the slot is held — skip the twin phase
+   and stop. Otherwise spawn one `twin-evaluator` per item, sequentially, then
+   release the lease.
 4. Final reap and summary, then your output contract.
