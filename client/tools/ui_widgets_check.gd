@@ -66,6 +66,26 @@ class KeybindInputStub:
 		return true
 
 
+## `/root/Spine/MindCampaign` double for the load-dialog oracle: serves the live
+## save listing and records the queued load.
+class SaveCampaignStub:
+	extends Node
+
+	var loaded := ""
+
+	func list_save_slots() -> Array:
+		return [{
+			"name": "alpha",
+			"file": "user://saves/7.msav",
+			"sector": false,
+			"autosave": false,
+		}]
+
+	func load_slot(name: String) -> bool:
+		loaded = name
+		return true
+
+
 func _check(condition: bool, message: String) -> void:
 	if condition:
 		print("UICHECK: ok ", message)
@@ -305,6 +325,30 @@ func _init() -> void:
 			"menu version label uses the custom-build color (got %s)"
 				% version_label.get_theme_color("font_color")
 		)
+
+	# EV-0054: `Load Game` lists the live saves and queues a load when a card is
+	# clicked; the menu opens the dialog with no slot context.
+	var save_stub := SaveCampaignStub.new()
+	save_stub.name = "MindCampaign"
+	spine.add_child(save_stub)
+	var load_dialog: Control = load("res://scenes/ui/dialogs/load_dialog.tscn").instantiate()
+	root.add_child(load_dialog)
+	load_dialog.call("shown")
+	var load_grid: Variant = load_dialog.get("_grid")
+	var cards := 0
+	if load_grid is MindTable:
+		for child in (load_grid as MindTable).get_children():
+			if child is Button:
+				cards += 1
+	_check(cards == 1, "load dialog lists the live save slot (got %s card(s))" % cards)
+	if cards == 1:
+		(load_grid as MindTable).get_child(0).emit_signal("pressed")
+		_check(
+			save_stub.loaded == "7",
+			"clicking a save card queues a load of its file stem (got '%s')" % save_stub.loaded
+		)
+	load_dialog.free()
+	save_stub.free()
 
 	# Prompt bodies must render BBCode: the uiscale reset prompt's translated
 	# `[color=...]` markup used to render literally because the body was a plain
