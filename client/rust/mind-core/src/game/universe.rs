@@ -357,6 +357,24 @@ impl Campaign {
         }
     }
 
+    /// `Planet.clearStats` with `statParent` delegation (`SettingsMenuDialog`
+    /// clear/clear-planet campaign saves).
+    pub fn clear_stats(&mut self, planet: PlanetId) {
+        let parent = self.planet(planet).and_then(|record| record.stat_parent);
+        match parent {
+            Some(parent) if parent != planet => {
+                if let Some(parent) = self.planet_mut(parent) {
+                    parent.clear_stats();
+                }
+            }
+            _ => {
+                if let Some(record) = self.planet_mut(planet) {
+                    record.clear_stats();
+                }
+            }
+        }
+    }
+
     /// `Universe.updateGlobal`: positions every parentless planet recursively.
     pub fn update_global(&mut self, seconds: f32) {
         let roots: Vec<u16> = self
@@ -856,5 +874,26 @@ mod tests {
             super::super::campaign_rules::Difficulty::Hard
         );
         assert_eq!(p.stats.sectors_captured, 3);
+    }
+
+    #[test]
+    fn clear_stats_follows_stat_parent() {
+        let (registry, mut campaign, serpulo) = serpulo();
+        let erekir = registry.planet_id("erekir").unwrap();
+        campaign.planet_mut(serpulo).unwrap().stats.sectors_captured = 4;
+        campaign.planet_mut(erekir).unwrap().stats.sectors_captured = 2;
+        // A shared stats record clears the parent's aggregate for both planets.
+        campaign.planet_mut(erekir).unwrap().stat_parent = Some(serpulo);
+
+        campaign.clear_stats(erekir);
+        assert_eq!(campaign.planet(serpulo).unwrap().stats.sectors_captured, 0);
+
+        // A record with no stat parent clears its own stats.
+        campaign.planet_mut(erekir).unwrap().stat_parent = None;
+        campaign.planet_mut(erekir).unwrap().stats.sectors_captured = 2;
+        campaign.planet_mut(serpulo).unwrap().stats.sectors_captured = 7;
+        campaign.clear_stats(erekir);
+        assert_eq!(campaign.planet(erekir).unwrap().stats.sectors_captured, 0);
+        assert_eq!(campaign.planet(serpulo).unwrap().stats.sectors_captured, 7);
     }
 }

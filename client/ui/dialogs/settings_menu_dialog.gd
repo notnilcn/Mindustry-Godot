@@ -12,18 +12,35 @@
 extends MindDialog
 
 ## Data-category actions rendered inline (upstream opens its `dataDialog`).
-## Only actions with a ported backing subsystem are listed; the Rust endpoint
-## rejects unknown ids instead of faking success.
+## The list and order mirror `SettingsMenuDialog.dataDialog`.
 const DATA_ACTIONS := [
+	{"id": "clear-data", "text": "@settings.cleardata", "icon": "trash"},
+	{"id": "clear-planet-data", "text": "@settings.clearplanetdata", "icon": "trash"},
 	{"id": "clear-saves", "text": "@settings.clearsaves", "icon": "trash"},
+	{"id": "clear-research", "text": "@settings.clearresearch", "icon": "trash"},
+	{"id": "clear-campaign-saves", "text": "@settings.clearcampaignsaves", "icon": "trash"},
+	{"id": "export-data", "text": "@data.export", "icon": "export"},
+	{"id": "import-data", "text": "@data.import", "icon": "download"},
 	{"id": "open-folder", "text": "@data.openfolder", "icon": "folder"},
+	{"id": "export-crash-logs", "text": "@crash.export", "icon": "export"},
 ]
+
+## Upstream confirm text for the destructive data actions.
+const DATA_CONFIRMS := {
+	"clear-data": "@settings.clearall.confirm",
+	"clear-saves": "@settings.clearsaves.confirm",
+	"clear-research": "@settings.clearresearch.confirm",
+	"clear-campaign-saves": "@settings.clearcampaignsaves.confirm",
+	"import-data": "@data.import.confirm",
+}
 
 var _rail: VBoxContainer = null
 var _table_host: MindTable = null
 var _categories: Array = []
 var _selected := ""
 var _pending_action := ""
+## Selected planet on the inline planet-data pane (`SettingsMenuDialog.planet`).
+var _planet_name := ""
 ## Scale the Settings dialog was built with (`SettingsMenuDialog.lastUiScale`).
 var _uiscale_start := -1
 
@@ -223,12 +240,103 @@ func _run_data_action(action_id: String) -> void:
 	var ui := _ui()
 	if ui == null:
 		return
-	if action_id == "clear-saves":
-		# Destructive: confirm first, upstream `settings.clearsaves.confirm`.
-		_pending_action = action_id
-		ui.call("show_confirm", _t("@settings.clearsaves.confirm"))
+	match action_id:
+		"clear-planet-data":
+			_show_planet_data()
+		"export-data":
+			_pick_file("@data.export", "mindustry-data-export.zip",
+					false, PackedStringArray(["*.zip"]), _on_export_data)
+		"export-crash-logs":
+			if bool(ui.call("crash_logs_available")):
+				_pick_file("@crash.export", "logs.txt",
+						false, PackedStringArray(["*.txt"]), _on_export_crash_logs)
+			else:
+				ui.call("show_info", _t("@crash.none"))
+		"import-data", "clear-data", "clear-saves", "clear-research", "clear-campaign-saves":
+			# Destructive: confirm first (upstream `ui.showConfirm`).
+			_pending_action = action_id
+			ui.call("show_confirm", _t(str(DATA_CONFIRMS[action_id])))
+		_:
+			ui.call("settings_action", action_id)
+
+
+## The inline planet-data pane (`SettingsMenuDialog.planetDataDialog`).
+func _show_planet_data() -> void:
+	_selected = "planet-data"
+	if _table_host == null:
 		return
-	ui.call("settings_action", action_id)
+	var planets := _selectable_planets()
+	if planets.is_empty():
+		_show_data()
+		return
+	if not planets.any(func(row: Dictionary) -> bool: return str(row.get("name", "")) == _planet_name):
+		_planet_name = str(planets[0].get("name", ""))
+	_table_host.clear_children()
+	# code-instantiated: planet entries are runtime content data, not scene nodes.
+	var select := MindWidgets.icon_button("planet", _planet_select_text(), "flatt")
+	select.custom_minimum_size.x = 280.0
+	select.pressed.connect(_open_planet_menu)
+	_table_host.add(select).set_min_height(60.0).pad(4.0)
+	_table_host.row()
+	var research := MindWidgets.icon_button(
+		"trash", _t("@settings.clearplanetresearch"), "flatt"
+	)
+	research.custom_minimum_size.x = 280.0
+	research.pressed.connect(_confirm_planet_research)
+	_table_host.add(research).set_min_height(60.0).pad(4.0)
+	_table_host.row()
+	var saves := MindWidgets.icon_button(
+		"trash", _t("@settings.clearplanetcampaignsaves"), "flatt"
+	)
+	saves.custom_minimum_size.x = 280.0
+	saves.pressed.connect(_confirm_planet_campaign_saves)
+	_table_host.add(saves).set_min_height(60.0).pad(4.0)
+	_table_host.row()
+	var back := MindWidgets.button(_t("@back"))
+	back.pressed.connect(_show_data)
+	_table_host.add(back).set_min_height(60.0).pad(4.0)
+	_table_host.row()
+	_resort_table()
+
+
+func _open_planet_menu() -> void:
+	var planets := _selectable_planets()
+	var menu := PopupMenu.new()  # code-instantiated: planet entries are runtime data.
+	for index in planets.size():
+		menu.add_item(_t("@planet.%s.name" % str(planets[index].get("name", ""))), index)
+	menu.id_pressed.connect(
+		func(index: int) -> void:
+			if index >= 0 and index < planets.size():
+				_planet_name = str(planets[index].get("name", ""))
+				_show_planet_data()
+	)
+	menu.close_requested.connect(menu.queue_free)
+	add_child(menu)
+	menu.popup_centered()
+
+
+func _confirm_planet_research() -> void:
+	_pending_action = "planet-research"
+	var ui := _ui()
+	if ui != null:
+		ui.call(
+			"show_confirm",
+			MindWidgets.markup_format(
+				"@settings.clearplanetresearch.confirm", [_planet_display()]
+			)
+		)
+
+
+func _confirm_planet_campaign_saves() -> void:
+	_pending_action = "planet-campaign-saves"
+	var ui := _ui()
+	if ui != null:
+		ui.call(
+			"show_confirm",
+			MindWidgets.markup_format(
+				"@settings.clearplanetcampaignsaves.confirm", [_planet_display()]
+			)
+		)
 
 
 func _connect_confirm() -> void:
@@ -246,8 +354,98 @@ func _on_confirm(confirmed: bool) -> void:
 	if not confirmed:
 		return
 	var ui := _ui()
+	if ui == null:
+		return
+	match action_id:
+		"import-data":
+			_pick_file("@data.import", "",
+					true, PackedStringArray(["*.zip"]), _on_import_data)
+		"planet-research":
+			_campaign_action("clear_planet_research")
+		"planet-campaign-saves":
+			_campaign_action("clear_planet_campaign_saves")
+		_:
+			ui.call("settings_action", action_id)
+
+
+## Native file chooser (`FileChooser.export`/`open`, native-first like the
+## mods dialog; the plan-14 `file_chooser` dialog is the fallback path).
+func _pick_file(
+	title_key: String,
+	default_name: String,
+	open: bool,
+	filters: PackedStringArray,
+	callback: Callable
+) -> void:
+	DisplayServer.file_dialog_show(
+		_t(title_key),
+		"",
+		default_name,
+		false,
+		DisplayServer.FILE_DIALOG_MODE_OPEN_FILES if open else DisplayServer.FILE_DIALOG_MODE_SAVE_FILE,
+		filters,
+		callback
+	)
+
+
+func _on_export_data(status: bool, paths: PackedStringArray, _filter: int) -> void:
+	if not status or paths.is_empty():
+		return
+	var ui := _ui()
 	if ui != null:
-		ui.call("settings_action", action_id)
+		ui.call("data_export", paths[0])
+
+
+func _on_import_data(status: bool, paths: PackedStringArray, _filter: int) -> void:
+	if not status or paths.is_empty():
+		return
+	var ui := _ui()
+	if ui == null:
+		return
+	if not bool(ui.call("data_import", paths[0])):
+		ui.call("show_info", _t("@data.invalid"))
+
+
+func _on_export_crash_logs(status: bool, paths: PackedStringArray, _filter: int) -> void:
+	if not status or paths.is_empty():
+		return
+	var ui := _ui()
+	if ui != null:
+		ui.call("export_crash_logs", paths[0])
+
+
+func _campaign_action(method: String) -> void:
+	var campaign := _campaign()
+	if campaign != null:
+		campaign.call(method, _planet_name)
+
+
+func _selectable_planets() -> Array:
+	var campaign := _campaign()
+	if campaign == null or not campaign.has_method("selectable_planets"):
+		return []
+	var result: Variant = campaign.call("selectable_planets")
+	return result if result is Array else []
+
+
+func _planet_display() -> String:
+	return _t("@planet.%s.name" % _planet_name)
+
+
+## `settings.planetselect` with the upstream `[#iconColor]` name color.
+func _planet_select_text() -> String:
+	var label := _planet_display()
+	for row in _selectable_planets():
+		if str(row.get("name", "")) == _planet_name:
+			var color: Variant = row.get("iconColor")
+			if color is Color:
+				label = "[#%s]%s[]" % [color.to_html(false), label]
+			break
+	return MindWidgets.markup_format("@settings.planetselect", [label])
+
+
+func _campaign() -> Node:
+	return get_node_or_null("/root/Spine/MindCampaign")
 
 
 func _set_value(key: String, value: Variant) -> void:

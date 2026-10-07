@@ -3011,9 +3011,7 @@ pub(crate) fn post_init_link(registry: &mut ContentRegistry) -> Result<(), Conte
     for (index, shown) in assignments {
         if let Some(block) = registry.blocks_mut().get_mut(index) {
             for planet in shown {
-                if !block.unlock.shown_planets.contains(&planet) {
-                    block.unlock.shown_planets.push(planet);
-                }
+                block.unlock.add_shown_planet(planet);
             }
         }
     }

@@ -360,6 +360,16 @@ pub fn reset_all(registry: &mut ContentRegistry) {
     }
 }
 
+/// `node.reset()` for every node of one tree
+/// (`SettingsMenuDialog` planet-research clear, `rootNode == planet.techTree`).
+pub fn reset_tree(registry: &mut ContentRegistry, tree: crate::content::tech::TreeId) {
+    for node in &mut registry.tech.nodes {
+        if node.tree == Some(tree) {
+            node.reset();
+        }
+    }
+}
+
 /// Harness/test helper: appends a tech node with an explicit requirement list.
 ///
 /// Used by `mind-headless campaign tech` and the unit tests to build synthetic
@@ -463,8 +473,7 @@ pub fn unlock_fields(registry: &ContentRegistry, content: ContentRef) -> Option<
     }
 }
 
-/// Mutable `UnlockFields` for an unlockable reference, including units (the
-/// plan-02 `with_unlock_fields` helper omits `ContentType::Unit`).
+/// Mutable `UnlockFields` for an unlockable reference.
 pub fn unlock_fields_mut(
     registry: &mut ContentRegistry,
     content: ContentRef,
@@ -721,6 +730,124 @@ mod tests {
         assert!(!content_unlocked_with_rules(&registry, content, &rules));
         rules.researched.insert(name);
         assert!(content_unlocked_with_rules(&registry, content, &rules));
+    }
+
+    #[test]
+    fn clear_unlocks_global_and_planet_scoped() {
+        let (mut registry, mut store) = registry();
+        let serpulo = registry.planet_id("serpulo").unwrap();
+        let tab = ContentRef::of(ContentType::Planet, serpulo);
+        let router = ContentRef::of(ContentType::Block, registry.block_id("router").unwrap());
+        let duo = ContentRef::of(ContentType::Block, registry.block_id("duo").unwrap());
+
+        {
+            let fields = unlock_fields_mut(&mut registry, router).unwrap();
+            fields.quiet_unlock("router", &mut store);
+            fields.database_tabs.push(tab);
+        }
+        {
+            let fields = unlock_fields_mut(&mut registry, duo).unwrap();
+            fields.quiet_unlock("duo", &mut store);
+        }
+        assert!(content_unlocked(&registry, router));
+        assert!(content_unlocked(&registry, duo));
+
+        // Planet-scoped clear only locks content in that planet's database tab.
+        assert!(registry.clear_unlocks(&mut store, Some(serpulo)) >= 1);
+        assert!(!content_unlocked(&registry, router));
+        assert!(content_unlocked(&registry, duo));
+
+        // Global clear locks the remaining records.
+        assert!(registry.clear_unlocks(&mut store, None) >= 1);
+        assert!(!content_unlocked(&registry, duo));
+    }
+
+    #[test]
+    fn reset_tree_resets_only_that_tree() {
+        let (mut registry, _store) = registry();
+        let copper = registry.item_id("copper").unwrap();
+        let a = push_node(
+            &mut registry,
+            0,
+            None,
+            None,
+            "tree-a",
+            vec![ItemStack::new(copper, 10)],
+        );
+        let b = push_node(
+            &mut registry,
+            0,
+            None,
+            None,
+            "tree-b",
+            vec![ItemStack::new(copper, 10)],
+        );
+        {
+            let node = registry.tech.node_mut(a).unwrap();
+            node.tree = Some(crate::content::tech::TreeId(0));
+            node.finished_requirements[0].amount = 10;
+        }
+        {
+            let node = registry.tech.node_mut(b).unwrap();
+            node.tree = Some(crate::content::tech::TreeId(1));
+            node.finished_requirements[0].amount = 10;
+        }
+
+        reset_tree(&mut registry, crate::content::tech::TreeId(0));
+        assert_eq!(
+            registry.tech().node(a).unwrap().finished_requirements[0].amount,
+            0
+        );
+        assert_eq!(
+            registry.tech().node(b).unwrap().finished_requirements[0].amount,
+            10
+        );
+    }
+
+    #[test]
+    fn auto_assigned_block_tabs_are_clearable_per_planet() {
+        let (mut registry, mut store) = registry();
+        registry.init().unwrap();
+        registry.post_init().unwrap();
+        // The tree pass (`Planet.init` `autoAssignPlanet`) covers tech-tree
+        // content beyond the requirement-derived block tabs.
+        let serpulo = registry.planet_id("serpulo").unwrap();
+        let serpulo_tab = ContentRef::of(ContentType::Planet, serpulo);
+        assert!(
+            registry
+                .units()
+                .iter()
+                .any(|unit| unit.unlock.database_tabs.contains(&serpulo_tab)),
+            "Serpulo tree units carry the planet database tab"
+        );
+        // `Block.postInit` auto-assigns `shownPlanets` after the registry
+        // `postInit` sweep; those must also land in `databaseTabs` so a
+        // planet-scoped clear can see them.
+        let (content, planet) = registry
+            .blocks()
+            .iter()
+            .find_map(|block| {
+                block
+                    .unlock
+                    .database_tabs
+                    .iter()
+                    .find(|reference| reference.type_ == ContentType::Planet)
+                    .map(|reference| {
+                        (
+                            ContentRef::of(ContentType::Block, block.id),
+                            PlanetId::new(reference.id),
+                        )
+                    })
+            })
+            .expect("a block with an auto-assigned planet tab");
+        let name = content_name(&registry, content).unwrap();
+        unlock_fields_mut(&mut registry, content)
+            .unwrap()
+            .quiet_unlock(&name, &mut store);
+        assert!(content_unlocked(&registry, content));
+
+        registry.clear_unlocks(&mut store, Some(planet));
+        assert!(!content_unlocked(&registry, content));
     }
 
     // --- helpers ---
