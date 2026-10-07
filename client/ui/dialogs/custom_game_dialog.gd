@@ -5,9 +5,9 @@
 ##
 ## Custom-game map browser (`MapListDialog`, `displayType = true`): a search row
 ## over a grid of map tiles. Each tile shows a mode-icon row, the map name, a
-## divider, a preview placeholder and the map type. The rows come from the
-## `MindUi.campaign_views()` `maps` section; choosing a map opens `map_play` and
-## emits `map_chosen`.
+## divider, a preview placeholder and the map type. The rows come from the live
+## `MindPreview` registry plus the read-model built-ins; choosing a map opens
+## `map_play` and emits `map_chosen`.
 
 extends MindDialog
 
@@ -39,7 +39,40 @@ func _ready() -> void:
 
 ## `MapListDialog.shown` rebuilds the map grid so refreshed maps appear.
 func shown() -> void:
+	_refresh_registry()
 	_rebuild()
+
+
+## Reloads the live `MindPreview` registry (editor-saved custom maps).
+func _refresh_registry() -> void:
+	var preview := get_node_or_null("/root/Spine/MindPreview")
+	if preview != null and preview.has_method("refresh"):
+		preview.call("refresh")
+
+
+## Merges the live registry rows (`MindPreview.maps_list`) with the read-model
+## built-ins, keeping the first row per name (custom maps win a name clash).
+func _maps() -> Array:
+	var rows: Array = []
+	var seen := {}
+	var preview := get_node_or_null("/root/Spine/MindPreview")
+	if preview != null and preview.has_method("maps_list"):
+		var maps: Variant = preview.call("maps_list")
+		if maps is Array:
+			for map_variant in maps:
+				var map: Dictionary = map_variant
+				var name := str(map.get("name", ""))
+				if name.is_empty():
+					continue
+				rows.append(map)
+				seen[name.to_lower()] = true
+	for row_variant in campaign_section("maps"):
+		var row: Dictionary = row_variant
+		var name := str(row.get("name", ""))
+		if name.is_empty() or seen.has(name.to_lower()):
+			continue
+		rows.append(row)
+	return rows
 
 
 func _build() -> void:
@@ -124,7 +157,7 @@ func _rebuild() -> void:
 	var maxwidth := maxi(1, int(get_viewport_rect().size.x / COLUMN_WIDTH))
 	var index := 0
 	var shown_any := false
-	for map_variant in campaign_section("maps"):
+	for map_variant in _maps():
 		var map: Dictionary = map_variant
 		if not _passes_filter(map):
 			continue
@@ -157,7 +190,7 @@ func _passes_filter(map: Dictionary) -> bool:
 
 
 func _build_map_tile(map: Dictionary) -> Button:
-	# code-instantiated: map tiles are data-driven from campaign_section("maps").
+	# code-instantiated: map tiles are data-driven from the Maps registry.
 	var map_name := str(map.get("name", ""))
 	var tile := MindWidgets.button("")
 	tile.theme_type_variation = "grayt"

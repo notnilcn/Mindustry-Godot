@@ -52,7 +52,17 @@ func hide_dialog() -> void:
 	visible = false
 
 
+## Closing the editor returns to the editor map list (`EditorMapsDialog.openin`
+## flow: `ui.maps.show()` on exit). Escape folds into the same exit.
+func _exit_to_maps() -> void:
+	hide_dialog()
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("open_dialog"):
+		ui.call("open_dialog", "editor_maps", "{}")
+
+
 func _bind_toolbar() -> void:
+	$LeftTools/BackButton.pressed.connect(_exit_to_maps)
 	var tools := {
 		"ZoomButton": "zoom",
 		"PickButton": "pick",
@@ -213,7 +223,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	match key:
 		KEY_ESCAPE:
-			pass  # Menu sheet is M4; escape is reserved.
+			_exit_to_maps()
 		KEY_V:
 			_select_tool("zoom")
 		KEY_I:
