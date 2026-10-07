@@ -17,6 +17,7 @@ touch, which precondition is easy to miss.
 | `pause-step-interact.md` | pause, step, API and mouse place/break, input flush |
 | `probe-hud.md` | state JSON, inspector, screenshot, logs |
 | `enter-campaign.md` | main menu → planet dialog → sector → launch (UI and facade variants) |
+| `campaign-rules-dialog.md` | menu → campaign planet page → `campaign.difficulty` rail button / MindUi `open_dialog` → body + liveness + close |
 | `campaign-save-load.md` | campaign facade → launch → save / list / load a slot |
 | `java-reference-leg.md` | Java reference: launch → drive → capture → quit (computer-mcp) |
 
