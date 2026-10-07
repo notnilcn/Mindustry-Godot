@@ -262,6 +262,19 @@ pub fn update_buildings(world: &mut World) {
     }
 }
 
+/// `EntitySet::UpdatePowerGraph` system (`Groups.powerGraph.update()`).
+///
+/// Runs every live [`PowerGrids`](super::blocks::power::PowerGrids) graph with
+/// the fixed-step `delta = 1.0`. No-op unless the opt-in live runtime installed
+/// the arena resource, so the P0 `Sim` schedule/checksum is untouched.
+pub fn update_power_graphs(world: &mut World) {
+    let Some(mut graphs) = world.remove_resource::<super::blocks::power::PowerGrids>() else {
+        return;
+    };
+    graphs.update_all(world, 1.0);
+    world.insert_resource(graphs);
+}
+
 /// Applies the `timeScaleDuration` decay and returns the block id.
 ///
 /// `(timeScaleDuration -= Time.delta) <= 0 -> timeScale = 1`. `None` when the

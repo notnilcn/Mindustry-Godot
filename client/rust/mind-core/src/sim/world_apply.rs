@@ -20,12 +20,16 @@
 
 use std::collections::BTreeMap;
 
+use bevy_ecs::entity::Entity;
+use bevy_ecs::world::World;
+
 use crate::content::BlockId;
 use crate::content::id::ItemId;
 use crate::content::{ContentRegistry, MemoryBundle, MemoryUnlockStore, create_base_content};
 use crate::determinism::{Checksum, Checksummer, CommandError};
 use crate::input::queue::BuildQueue;
 use crate::world::TilePos;
+use crate::world::block::BlockTable;
 use crate::world::modules::ItemModule;
 
 /// Deterministic relay-side world-mutation state owned by [`crate::sim::Sim`].
@@ -209,6 +213,92 @@ impl WorldApplyRuntime {
             2 => {
                 // `dropItem`: clears the unit stack; the drop position is FX-only.
                 let _ = (pos, block, item);
+                self.player_item = None;
+                Ok(())
+            }
+            _ => Err(CommandError::InvalidTarget),
+        }
+    }
+
+    /// Applies one inventory mutation against a live building's `ItemModule`.
+    ///
+    /// The live block runtime owns the real item storage (drills, containers,
+    /// factories share the same `ItemModule` their behaviors read), so the
+    /// relay's `BTreeMap` mirror would silently desync from the simulation.
+    /// The player-carried stack stays relay-owned exactly as in
+    /// [`Self::apply_inventory`]; only the building side moves to ECS.
+    pub fn apply_inventory_entity(
+        &mut self,
+        world: &mut World,
+        entity: Entity,
+        kind: u8,
+        item: Option<u16>,
+        amount: i32,
+    ) -> Result<(), CommandError> {
+        match kind {
+            0 => {
+                // `requestItem`: building -> player unit.
+                let raw = item.ok_or(CommandError::InvalidTarget)?;
+                let item_id = self.resolve_item(raw)?;
+                let take = match world.get_mut::<ItemModule>(entity) {
+                    Some(mut module) => {
+                        let take = amount.clamp(0, module.get(item_id));
+                        if take > 0 {
+                            module.remove(item_id, take);
+                        }
+                        take
+                    }
+                    None => 0,
+                };
+                if take > 0 {
+                    self.add_player_item(item_id, take);
+                }
+                Ok(())
+            }
+            1 => {
+                // `transferInventory`: player unit -> building.
+                let raw = item.ok_or(CommandError::InvalidTarget)?;
+                let item_id = self.resolve_item(raw)?;
+                let held = match self.player_item {
+                    Some((held, current)) if held == item_id => current,
+                    _ => 0,
+                };
+                let requested = amount.clamp(0, held);
+                if requested <= 0 {
+                    return Ok(());
+                }
+                let block = world
+                    .get::<crate::entities::comp::Building>(entity)
+                    .map(|building| building.block);
+                let capacity = block
+                    .and_then(|block| {
+                        world
+                            .get_resource::<BlockTable>()
+                            .and_then(|table| table.get(block))
+                            .filter(|inst| inst.def.has_items)
+                            .map(|inst| inst.def.item_capacity)
+                    })
+                    .unwrap_or(0);
+                if capacity <= 0 {
+                    return Ok(());
+                }
+                let accepted = match world.get_mut::<ItemModule>(entity) {
+                    Some(mut module) => module.add(item_id, requested, capacity),
+                    None => 0,
+                };
+                if accepted > 0 {
+                    let left = held - accepted;
+                    self.player_item = if left > 0 {
+                        Some((item_id, left))
+                    } else {
+                        None
+                    };
+                }
+                Ok(())
+            }
+            2 => {
+                // `dropItem`: clears the unit stack; the drop position is FX-only.
+                let _ = (world, entity, item);
                 self.player_item = None;
                 Ok(())
             }

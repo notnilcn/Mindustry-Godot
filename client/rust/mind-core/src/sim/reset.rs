@@ -7,6 +7,8 @@
 //! `core/GameState.java` transitions. A full world reload is plan 06; here the
 //! flows clear the P0 grid/entities and fire the canonical events.
 
+use bevy_ecs::entity::Entity;
+
 use crate::content::BlockId;
 use crate::event::{PlayEvent, ResetEvent, SimEvent, StateChangeEvent};
 use crate::game::{GameState, State};
@@ -35,7 +37,30 @@ impl super::Sim {
     /// `Logic.reset` (`Groups.clear`, `Time.clear`, reset `GameState`).
     pub fn reset(&mut self) {
         let from = self.state.phase;
-        self.ecs.0.clear_entities();
+        if self.block_runtime.is_some() {
+            // Live runtime: despawn only sim entities. `clear_entities` would
+            // also drop the entity-backed resources (`BlockTable`, `BuildRules`,
+            // `PowerGrids`) the runtime needs; a fresh arena leaves no stale
+            // handles and the counter restarts empty (`Groups.clear`).
+            let entities: Vec<Entity> = self
+                .ecs
+                .0
+                .iter_entities()
+                .filter(|entity| entity.contains::<crate::ecs::EntitySeq>())
+                .map(|entity| entity.id())
+                .collect();
+            for entity in entities {
+                self.ecs.0.despawn(entity);
+            }
+            self.ecs
+                .0
+                .insert_resource(crate::world::blocks::power::PowerGrids::new());
+            if let Some(runtime) = self.block_runtime.as_mut() {
+                runtime.reset();
+            }
+        } else {
+            self.ecs.0.clear_entities();
+        }
         self.grid.fill(BlockId::AIR, BlockId::AIR);
         self.time.clear();
         self.clock.reset();
@@ -97,6 +122,49 @@ mod tests {
             events
                 .iter()
                 .any(|event| matches!(event, SimEvent::StateChangeEvent(_)))
+        );
+    }
+
+    #[test]
+    fn reset_clears_live_runtime_state() {
+        use crate::world::blocks::power::PowerGrids;
+
+        let mut sim = Sim::new(1, 8, 8, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("install");
+        let node = sim
+            .block_runtime()
+            .expect("runtime")
+            .content()
+            .block_id("power-node")
+            .expect("power-node");
+        sim.apply(crate::command::Command::Place {
+            x: 2,
+            y: 2,
+            block: node,
+        })
+        .expect("place");
+        assert_eq!(
+            sim.block_runtime()
+                .expect("runtime")
+                .counter()
+                .count(0, node),
+            1
+        );
+        sim.reset();
+        assert_eq!(
+            sim.block_runtime()
+                .expect("runtime")
+                .counter()
+                .count(0, node),
+            0
+        );
+        assert_eq!(
+            sim.ecs
+                .0
+                .get_resource::<PowerGrids>()
+                .expect("arena")
+                .graph_count(),
+            0
         );
     }
 }

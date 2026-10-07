@@ -15,6 +15,7 @@ pub mod fixed;
 pub mod io_set;
 pub mod logic;
 pub mod reset;
+pub mod runtime;
 pub mod schedule;
 pub mod world_apply;
 
@@ -41,6 +42,7 @@ pub use dump::StateDump;
 pub use events::{ALL_TRIGGERS, Trigger, TriggerRegistry};
 pub use fixed::{FixedStepRunner, SIM_STEP};
 pub use io_set::{DeferringIoHandler, IoHandler, IoQueue, IoRequest, IoResponse, IoSet, IoStatus};
+pub use runtime::{RuntimeError, SimRuntime, SimRuntimeConfig};
 pub use world_apply::WorldApplyRuntime;
 
 /// Errors raised by simulation operations.
@@ -166,6 +168,9 @@ pub struct Sim {
     /// Relay-side world-mutation apply state (plan 15 §3.3.1: inventory, build
     /// plans, building commands). Built lazily on the first such command.
     world_apply: Option<world_apply::WorldApplyRuntime>,
+    /// Opt-in live building runtime (plan-07 `BlockTable` + behaviors). `None`
+    /// keeps the P0 path byte-identical; see [`runtime`].
+    block_runtime: Option<runtime::SimRuntime>,
     /// Currently possessed unit (`unitControl`); `None` means the player unit.
     controlled_unit: Option<i32>,
     /// Currently selected controllable building (`buildingControlSelect`).
@@ -201,6 +206,7 @@ impl Sim {
             io: IoQueue::new(),
             unit_commands: None,
             world_apply: None,
+            block_runtime: None,
             controlled_unit: None,
             control_building: None,
             seed,
@@ -253,31 +259,64 @@ impl Sim {
                 }
                 let pos = TilePos::new(x, y);
                 self.grid.index(pos)?;
-                let current = self.grid.block_at(pos).unwrap_or(BlockId::AIR);
-                if current == BlockId::AIR {
-                    let seq = self.entity_seq.alloc();
-                    let comp = BuildingComp {
-                        pos,
-                        block,
-                        team: TeamId::SHARDED,
-                        rot: 0,
-                    };
-                    let entity = self.ecs.spawn_building(seq, comp);
-                    self.grid.set_block(pos, block, TeamId::SHARDED.0, 0)?;
-                    self.grid.set_entity(pos, Some(entity))?;
-                    self.push_event(SimEvent::BlockPlacedEvent(BlockPlacedEvent { x, y, block }));
+                if self.block_runtime.is_some() {
+                    let team = self
+                        .ecs
+                        .0
+                        .get_resource::<crate::world::limits::BuildRules>()
+                        .map_or(TeamId::SHARDED.0, |rules| rules.default_team);
+                    if self.runtime_place(x, y, block, 0, team) {
+                        self.push_event(SimEvent::BlockPlacedEvent(BlockPlacedEvent {
+                            x,
+                            y,
+                            block,
+                        }));
+                    } else {
+                        log::debug!(
+                            "place command rejected at ({x}, {y}) by the live block runtime"
+                        );
+                    }
                 } else {
-                    log::debug!(
-                        "place command rejected at ({x}, {y}): tile already holds block {}",
-                        current.raw()
-                    );
+                    let current = self.grid.block_at(pos).unwrap_or(BlockId::AIR);
+                    if current == BlockId::AIR {
+                        let seq = self.entity_seq.alloc();
+                        let comp = BuildingComp {
+                            pos,
+                            block,
+                            team: TeamId::SHARDED,
+                            rot: 0,
+                        };
+                        let entity = self.ecs.spawn_building(seq, comp);
+                        self.grid.set_block(pos, block, TeamId::SHARDED.0, 0)?;
+                        self.grid.set_entity(pos, Some(entity))?;
+                        self.push_event(SimEvent::BlockPlacedEvent(BlockPlacedEvent {
+                            x,
+                            y,
+                            block,
+                        }));
+                    } else {
+                        log::debug!(
+                            "place command rejected at ({x}, {y}): tile already holds block {}",
+                            current.raw()
+                        );
+                    }
                 }
             }
             Command::Break { x, y } => {
                 let pos = TilePos::new(x, y);
                 self.grid.index(pos)?;
                 let current = self.grid.block_at(pos).unwrap_or(BlockId::AIR);
-                if current != BlockId::AIR {
+                if current == BlockId::AIR {
+                    log::debug!("break command rejected at ({x}, {y}): tile is empty");
+                } else if self.block_runtime.is_some() {
+                    if self.runtime_break(x, y) {
+                        self.push_event(SimEvent::BlockBrokenEvent(BlockBrokenEvent {
+                            x,
+                            y,
+                            block: current,
+                        }));
+                    }
+                } else {
                     if let Some(entity) = self.grid.entity_at(pos) {
                         self.ecs.despawn(entity);
                     }
@@ -287,13 +326,29 @@ impl Sim {
                         y,
                         block: current,
                     }));
-                } else {
-                    log::debug!("break command rejected at ({x}, {y}): tile is empty");
                 }
             }
         }
         self.commands_applied = self.commands_applied.wrapping_add(1);
         Ok(())
+    }
+
+    /// Places through the opt-in live runtime; `false` when absent or rejected.
+    fn runtime_place(&mut self, x: i16, y: i16, block: BlockId, rot: u8, team: u8) -> bool {
+        let Some(runtime) = self.block_runtime.as_mut() else {
+            return false;
+        };
+        runtime.place(&mut self.ecs.0, &mut self.grid, x, y, block, rot, team)
+    }
+
+    /// Breaks through the opt-in live runtime; `false` when absent or rejected.
+    fn runtime_break(&mut self, x: i16, y: i16) -> bool {
+        let Some(runtime) = self.block_runtime.as_mut() else {
+            return false;
+        };
+        runtime
+            .break_block(&mut self.ecs.0, &mut self.grid, x, y)
+            .is_some()
     }
 
     /// Advances the simulation by one fixed step and flushes queued events.
@@ -498,13 +553,29 @@ impl Sim {
                 let Some(entity) = self.grid.entity_at(pos) else {
                     return Err(CommandError::InvalidTarget);
                 };
-                let Some(mut building) = self.ecs.0.get_mut::<BuildingComp>(entity) else {
-                    return Err(CommandError::InvalidTarget);
-                };
                 // Upstream `InputHandler.rotateBlock`: `rotation = mod(rotation +
                 // sign(direction), 4)`; `direction == true` is counter-clockwise.
                 let step = if *direction { 1 } else { -1 };
-                building.rot = (building.rot as i32 + step).rem_euclid(4) as u8;
+                let Some(new_rot) =
+                    self.ecs
+                        .0
+                        .get_mut::<BuildingComp>(entity)
+                        .map(|mut building| {
+                            building.rot = (building.rot as i32 + step).rem_euclid(4) as u8;
+                            building.rot
+                        })
+                else {
+                    return Err(CommandError::InvalidTarget);
+                };
+                // The live runtime reads `Building.rotation`; keep both in sync.
+                if let Some(mut building) = self
+                    .ecs
+                    .0
+                    .get_mut::<crate::entities::comp::Building>(entity)
+                {
+                    building.rotation = new_rot;
+                }
+                crate::world::update::no_sleep(&mut self.ecs.0, entity);
                 self.commands_applied = self.commands_applied.wrapping_add(1);
                 return Ok(());
             }
@@ -532,9 +603,27 @@ impl Sim {
                 if self.grid.index(pos).is_err() {
                     return Err(CommandError::InvalidTarget);
                 }
-                let block = self.grid.block_at(pos).unwrap_or(BlockId::AIR);
-                self.ensure_world_apply()
-                    .apply_inventory(pos, block, *kind, *item, *amount)?;
+                if self.block_runtime.is_some()
+                    && let Some(entity) = self.grid.entity_at(pos)
+                {
+                    // Live runtime: the real `ItemModule` is the storage the
+                    // block behaviors read, so mutate that instead of the relay
+                    // mirror.
+                    let world_apply = self
+                        .world_apply
+                        .get_or_insert_with(world_apply::WorldApplyRuntime::new);
+                    world_apply.apply_inventory_entity(
+                        &mut self.ecs.0,
+                        entity,
+                        *kind,
+                        *item,
+                        *amount,
+                    )?;
+                } else {
+                    let block = self.grid.block_at(pos).unwrap_or(BlockId::AIR);
+                    self.ensure_world_apply()
+                        .apply_inventory(pos, block, *kind, *item, *amount)?;
+                }
                 self.commands_applied = self.commands_applied.wrapping_add(1);
                 return Ok(());
             }
@@ -567,6 +656,69 @@ impl Sim {
                     }
                     self.ensure_world_apply()
                         .apply_command_building(pos, *x, *y);
+                }
+                self.commands_applied = self.commands_applied.wrapping_add(1);
+                return Ok(());
+            }
+            SimCommand::Place {
+                x,
+                y,
+                block,
+                rotation,
+                team,
+                player,
+            } => {
+                // The live runtime honors rotation/team end-to-end; without it the
+                // P0 path below still drops rotation (no rotation-aware `Command`).
+                if self.block_runtime.is_some() {
+                    let _ = player;
+                    let id = BlockId::new(*block);
+                    if self.content.name(id).is_err() {
+                        return Err(CommandError::UnknownContent(*block));
+                    }
+                    if id == BlockId::AIR {
+                        return Err(CommandError::InvalidTarget);
+                    }
+                    let pos = TilePos::new(*x, *y);
+                    if self.grid.index(pos).is_err() {
+                        return Err(CommandError::InvalidTarget);
+                    }
+                    let rot = u8::try_from((*rotation).rem_euclid(4)).unwrap_or(0);
+                    if self.runtime_place(*x, *y, id, rot, *team) {
+                        self.push_event(SimEvent::BlockPlacedEvent(BlockPlacedEvent {
+                            x: *x,
+                            y: *y,
+                            block: id,
+                        }));
+                    } else {
+                        log::debug!(
+                            "place command rejected at ({x}, {y}) by the live block runtime"
+                        );
+                    }
+                    self.commands_applied = self.commands_applied.wrapping_add(1);
+                    return Ok(());
+                }
+            }
+            SimCommand::Configure { x, y, value } => {
+                // `InputHandler` configure: apply the value to the target
+                // building's behavior. Unsupported until a block runtime exists
+                // (P0 has no behavior table).
+                if self.block_runtime.is_none() {
+                    return Err(CommandError::Unsupported("configure"));
+                }
+                let pos = TilePos::new(*x, *y);
+                if self.grid.index(pos).is_err() {
+                    return Err(CommandError::InvalidTarget);
+                }
+                let Some(entity) = self.grid.entity_at(pos) else {
+                    return Err(CommandError::InvalidTarget);
+                };
+                let world_value = match self.block_runtime.as_ref() {
+                    Some(runtime) => runtime.resolve_config(value)?,
+                    None => return Err(CommandError::Unsupported("configure")),
+                };
+                if !crate::world::config::configure(&mut self.ecs.0, entity, None, world_value) {
+                    return Err(CommandError::InvalidTarget);
                 }
                 self.commands_applied = self.commands_applied.wrapping_add(1);
                 return Ok(());
