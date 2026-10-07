@@ -954,8 +954,13 @@ fn campaign_play(planet_name: &str, sector_name: &str) -> Result<(Value, Value)>
     let markers_before = session.markers.size();
     let objectives_before = session.objectives.len();
 
-    events.push(run_wave_campaign(&mut session));
-    events.push(run_wave_campaign(&mut session));
+    // `World.setSectorRules`: the sector preset's `captureWave` becomes
+    // `rules.winWave`; run that many waves before the capture check.
+    assert_eq!(session.rules.win_wave, 10, "groundZero capture wave");
+    let win_wave = session.rules.win_wave.max(1);
+    for _ in 0..win_wave {
+        events.push(run_wave_campaign(&mut session));
+    }
     // A real sector has enemy spawn points; keep waves enabled so the win-wave
     // capture path (not the no-spawns disable path) is exercised.
     session.spawn_count = 1;

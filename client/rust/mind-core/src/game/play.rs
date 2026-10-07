@@ -244,6 +244,45 @@ pub fn play_map(
     events
 }
 
+/// `World.setSectorRules` rules half (`World.java:266,292,299-330`): resolve the
+/// sector preset (`rules.winWave = preset.captureWave`, attack mode when there is
+/// no capture wave and an enemy base) and fold the planet's campaign rules.
+///
+/// `Control.playNewSector` calls `world.loadSector` before `logic.play`, so a
+/// fresh launch must start from neutral wave/attack state and then re-derive it
+/// from the sector that is being played.
+fn apply_sector_preset_rules(
+    session: &mut PlaySession,
+    campaign: &Campaign,
+    registry: &ContentRegistry,
+    planet: PlanetId,
+    sector_id: u16,
+) {
+    session.rules.win_wave = 0;
+    session.rules.waves = false;
+    session.rules.attack_mode = false;
+
+    let Some(planet_record) = campaign.planet(planet) else {
+        return;
+    };
+    if let Some(sector) = planet_record.sector(sector_id)
+        && let Some(preset_id) = sector.preset
+        && let Some(preset) = registry.sector(preset_id)
+    {
+        // `SectorPreset.rules`: the capture wave is the win wave.
+        session.rules.win_wave = preset.capture_wave;
+        let attack = preset.capture_wave <= 0 && sector.has_enemy_base();
+        session.rules.attack_mode = attack;
+        session.rules.waves = !attack;
+        if session.rules.win_wave <= 0 && !attack && planet_record.allow_waves {
+            // `SectorInfo.write`: infinite waves get a default win wave.
+            session.rules.win_wave = 30;
+        }
+    }
+    // `Planet.applyRules(rules, customGame = false)`.
+    planet_record.apply_rules(registry, &mut session.rules, false, false);
+}
+
 /// `Control.playNewSector(origin, sector, reloader, params, beforePlay)`.
 ///
 /// `reloader` is invoked at begin/end exactly like upstream; pass [`NoReloader`]
@@ -262,6 +301,8 @@ pub fn play_new_sector(
     reloader.begin(session);
 
     session.sector = Some((planet, sector_id));
+    // `World.loadSector` rules half: sector preset + planet campaign rules.
+    apply_sector_preset_rules(session, campaign, registry, planet, sector_id);
     let planet_name = campaign
         .planet(planet)
         .map(|planet| planet.name.clone())
@@ -289,7 +330,6 @@ pub fn play_new_sector(
 
     reloader.end(session);
     session.phase = State::Playing;
-    let _ = registry;
     events
 }
 
