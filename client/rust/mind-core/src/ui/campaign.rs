@@ -1215,6 +1215,63 @@ mod tests {
     }
 
     #[test]
+    fn live_projection_tracks_sector_capture() {
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+        use crate::game::planet::EmptyNeighborhood;
+        use crate::game::play::{PlaySession, sector_capture};
+        use crate::game::rules::Rules;
+
+        let registry = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+            .expect("content boot");
+        let mut campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
+        let active = campaign.planet_id_by_name("serpulo").expect("serpulo");
+        let sector_id = registry
+            .sector_by_name("groundZero")
+            .expect("groundZero preset")
+            .sector;
+        let mut schematics = Schematics::new();
+        schematics.load_loadouts(&registry);
+
+        let ground_zero = |views: &CampaignViews| {
+            views
+                .sectors
+                .iter()
+                .find(|sector| sector.id == sector_id)
+                .cloned()
+                .expect("groundZero row")
+        };
+        let before = ground_zero(&CampaignViews::from_campaign(
+            &campaign,
+            &registry,
+            &schematics,
+            active,
+        ));
+        assert!(
+            !before.has_base && !before.captured,
+            "fresh campaign is unowned"
+        );
+
+        // Launch (host writes the save/core) then capture, as the facade does.
+        if let Some(sector) = campaign.sector_mut(active, sector_id) {
+            sector.save = Some(format!("sector-serpulo-{sector_id}"));
+            sector.info.info.has_core = true;
+        }
+        let mut session = PlaySession::new(Rules::default());
+        session.sector = Some((active, sector_id));
+        let events = sector_capture(&mut session, &mut campaign);
+        assert!(!events.is_empty(), "capture emits an event");
+
+        let after = ground_zero(&CampaignViews::from_campaign(
+            &campaign,
+            &registry,
+            &schematics,
+            active,
+        ));
+        assert!(after.has_base, "the launched base is projected");
+        assert!(after.captured, "the capture is projected");
+    }
+
+    #[test]
     fn hex_formats_colors() {
         let color = crate::content::Rgba {
             r: 1.0,

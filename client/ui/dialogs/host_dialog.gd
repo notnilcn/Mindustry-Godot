@@ -54,7 +54,8 @@ func _build() -> void:
 	var port_row := HBoxContainer.new()
 	port_row.add_theme_constant_override("separation", 6)
 	port_row.add_child(MindWidgets.label(_t("@server.port")))
-	_port_field = MindWidgets.field(str(DEFAULT_PORT))
+	_port_field = MindWidgets.field()
+	_port_field.text = str(DEFAULT_PORT)
 	_port_field.max_length = 5
 	_port_field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_port_field.text_changed.connect(_on_port_changed)
