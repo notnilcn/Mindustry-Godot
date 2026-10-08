@@ -27,6 +27,7 @@ use mind_core::input::{
     BindingState, BindingValue, FocusState, InputLocks, KeyBindTable, RawEvent, ids,
     key_display_name,
 };
+use mind_core::io::{NativeFs, Paths, SettingsStore};
 use mind_core::world::config::ConfigValue;
 
 use crate::camera::MindCamera2D;
@@ -125,6 +126,7 @@ impl INode for MindInput {
             if self.route_touch(&raw) {
                 continue;
             }
+            self.refresh_command_mode_hold(&raw);
             // World mouse presses: skip when a STOP-filter `Control` owns the
             // event position (upstream `!Core.scene.hasMouse()`); otherwise
             // consume the event so `MindSimHost::unhandled_input` cannot
@@ -166,8 +168,13 @@ impl INode for MindInput {
         self.bridge.text_focus = self.text_field_focused();
         self.bridge.ui_dialog = self.dialog_open();
         for event in pending {
+            self.refresh_command_mode_hold(&event);
             self.bridge.handle(&self.bindings, event);
         }
+        // `DesktopInput.update` applies the command-mode branch every frame, so
+        // state changes that arrive without a key edge (block selection from a
+        // fragment, focus changes) still close the gate.
+        self.bridge.update_command_mode(&self.bindings, None);
         self.drain_effects();
         // M3: drive the mobile gesture detector's long-press timer. The touch
         // stream itself is folded in by the `mobile_*` callbacks (plan 14).
@@ -192,6 +199,8 @@ impl MindInput {
     /// is overwritten, so a re-run never duplicates.
     fn bootstrap(&mut self) {
         self.bindings = bindings::load();
+        self.bridge
+            .set_command_mode_hold(Self::read_command_mode_hold());
         // Scene wiring (tscn-first): the spine declares SimHost as a sibling of
         // Input and Camera2D under World.
         self.bridge.host = self.base().try_get_node_as::<MindSimHost>("../SimHost");
@@ -237,6 +246,27 @@ impl MindInput {
             })
             .collect();
         self.bridge.set_catalog(categories);
+    }
+
+    /// `settings.getBool("commandmodehold", true)` from the plan-04 store.
+    fn read_command_mode_hold() -> bool {
+        let store = SettingsStore::load(&NativeFs, &Paths::resolve(None));
+        store.get_bool("commandmodehold", true)
+    }
+
+    /// Re-reads the hold setting when a command-mode key edge arrives so a live
+    /// settings-dialog change applies on the next tap (`MindUi.settings_set`
+    /// persists the store).
+    fn refresh_command_mode_hold(&mut self, raw: &RawEvent) {
+        let code = match raw {
+            RawEvent::KeyDown { code } | RawEvent::KeyUp { code } => code,
+            _ => return,
+        };
+        if self.bindings.name(ids::COMMAND_MODE) != Some(code.as_str()) {
+            return;
+        }
+        self.bridge
+            .set_command_mode_hold(Self::read_command_mode_hold());
     }
 
     /// Whether a STOP-filter `Control` owns the given event position
