@@ -27,6 +27,7 @@ GDScript under `client/ui` and `client/scenes/ui`; the Rust↔GDScript contract 
 | `campaign.rs` | Campaign read models (`CampaignViews` and `PlanetView`/`SectorView`/`ResearchView`/`SchematicView`/`LoadoutView`/`CampaignRulesView`/`CampaignCompleteView`/`MapEntryView`) with `vanilla_fixture`/`empty`. |
 | `chat.rs` | `ChatState`, `ChatMode`, `ChatSend`, `Ping` and `check_ping`. |
 | `console.rs` | `ConsoleRegistry`/`ConsoleCommand`/`ConsoleEntry` line dispatch and `help_text`. |
+| `database.rs` | Core Database view model (`DatabaseView` planet tabs + `databaseCategory`/`databaseTag` grid) with `empty`. |
 | `display.rs` | `DisplayRow`/`HoverInfo` hover rows and the `Displayable` provider trait. |
 | `file_chooser.rs` | `FileChooserParams` title/name/extension validation and `sanitize_filename`. |
 | `hud_text.rs` | `HudStatus` and `status_text` plus the fps/ping/tps/memory label helpers. |

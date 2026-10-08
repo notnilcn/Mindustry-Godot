@@ -885,6 +885,25 @@ impl MindCampaign {
         }
     }
 
+    /// Core Database view JSON (`DatabaseDialog` planet tabs + content grid).
+    ///
+    /// Built from the live campaign registry so the menu and campaign show the
+    /// settings-backed locked/unlocked entries; a custom (non-campaign,
+    /// non-menu) game forces everything unlocked (`DatabaseDialog.unlocked`).
+    #[func]
+    pub fn database_json(&self) -> GString {
+        let Some(registry) = self.registry.as_ref() else {
+            return GString::from("{}");
+        };
+        let unlocked_override = !self.session.is_campaign() && self.session.phase.is_game();
+        let view = mind_core::ui::database::database_view(registry, unlocked_override);
+        GString::from(
+            serde_json::to_string(&view)
+                .unwrap_or_else(|_| String::from("{}"))
+                .as_str(),
+        )
+    }
+
     /// Completes an objective by index (`complete_objective` relay target).
     #[func]
     pub fn complete_objective(&mut self, index: i64) -> bool {
