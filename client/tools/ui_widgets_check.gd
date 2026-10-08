@@ -66,12 +66,13 @@ class KeybindInputStub:
 		return true
 
 
-## `/root/Spine/MindCampaign` double for the load-dialog oracle: serves the live
-## save listing and records the queued load.
+## `/root/Spine/MindCampaign` double for the load/save-dialog oracle: serves the
+## live save listing and records the queued load and save.
 class SaveCampaignStub:
 	extends Node
 
 	var loaded := ""
+	var saved := ""
 
 	func list_save_slots() -> Array:
 		return [{
@@ -83,6 +84,10 @@ class SaveCampaignStub:
 
 	func load_slot(name: String) -> bool:
 		loaded = name
+		return true
+
+	func save_slot(name: String) -> bool:
+		saved = name
 		return true
 
 
@@ -364,6 +369,33 @@ func _init() -> void:
 			"clicking a save card queues a load of its file stem (got '%s')" % save_stub.loaded
 		)
 	load_dialog.free()
+
+	# EV-0066: the Save dialog lists the new-save row plus the live slots, and
+	# the row's prompt hands the name to `MindCampaign.save_slot`.
+	var save_dialog: Control = load("res://scenes/ui/dialogs/save_dialog.tscn").instantiate()
+	root.add_child(save_dialog)
+	save_dialog.call("shown")
+	var save_grid: Variant = save_dialog.get("_grid")
+	var save_rows := 0
+	var new_row: Button = null
+	if save_grid is MindTable:
+		for child in (save_grid as MindTable).get_children():
+			if child is Button:
+				if new_row == null:
+					new_row = child
+				save_rows += 1
+	_check(
+		save_rows == 2,
+		"save dialog lists the new-save row plus the live slot (got %s row(s))" % save_rows
+	)
+	if new_row != null and ui != null:
+		new_row.emit_signal("pressed")
+		ui.call("resolve_text_input", "evalslot")
+		_check(
+			save_stub.saved == "evalslot",
+			"new-save prompt queues a save of the entered name (got '%s')" % save_stub.saved
+		)
+	save_dialog.free()
 	save_stub.free()
 
 	# EV-0061: opening the game-over dialog must not re-enter `MindUi` while
@@ -393,6 +425,8 @@ func _init() -> void:
 	var objective := paused_dialog.find_child("objective", true, false) as Button
 	var abandon := paused_dialog.find_child("abandon", true, false) as Button
 	var planet := paused_dialog.find_child("planetmap", true, false) as Button
+	var savegame := paused_dialog.find_child("savegame", true, false) as Button
+	var loadgame := paused_dialog.find_child("loadgame", true, false) as Button
 	var panel := paused_dialog.get_node_or_null("Center/Panel") as Control
 	_check(
 		panel != null and panel.get_combined_minimum_size().x <= panel.custom_minimum_size.x,
@@ -414,6 +448,14 @@ func _init() -> void:
 		planet != null and not planet.visible,
 		"pause dialog keeps the mobile @planetmap off desktop"
 	)
+	_check(
+		savegame != null and not savegame.visible,
+		"pause dialog hides @savegame in a campaign sector"
+	)
+	_check(
+		loadgame != null and not loadgame.visible,
+		"pause dialog hides @loadgame in a campaign sector"
+	)
 	# EV-0063: `shown()` runs inside `MindUi.open_dialog`, which mutably binds
 	# `MindUi`; a synchronous `is_mobile()` re-entry panics ("bind() failed,
 	# already bound") and wedges the UI, so the mobile gate must resolve after
@@ -433,7 +475,7 @@ func _init() -> void:
 		abandon.pressed.emit()
 		ui.call("resolve_confirm", true)
 		_check(pause_stub.abandoned, "pause dialog abandon confirms into the live facade")
-	pause_stub.state = {"campaign": false}
+	pause_stub.state = {"campaign": false, "editor": false}
 	paused_dialog.call("shown")
 	_check(
 		objective != null and not objective.visible,
@@ -442,6 +484,26 @@ func _init() -> void:
 	_check(
 		abandon != null and not abandon.visible,
 		"pause dialog hides @abandon outside a campaign sector"
+	)
+	# EV-0066: the desktop non-campaign set exposes @savegame / @loadgame
+	# (`PausedDialog.java:89-93`), and the editor branch hides them again.
+	_check(
+		savegame != null and savegame.visible,
+		"pause dialog shows @savegame outside campaign/editor"
+	)
+	_check(
+		loadgame != null and loadgame.visible,
+		"pause dialog shows @loadgame outside campaign/editor"
+	)
+	pause_stub.state = {"campaign": false, "editor": true}
+	paused_dialog.call("shown")
+	_check(
+		savegame != null and not savegame.visible,
+		"pause dialog hides @savegame in the editor"
+	)
+	_check(
+		loadgame != null and not loadgame.visible,
+		"pause dialog hides @loadgame in the editor"
 	)
 	paused_dialog.free()
 	pause_stub.free()

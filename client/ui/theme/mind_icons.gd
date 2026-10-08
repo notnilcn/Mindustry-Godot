@@ -98,6 +98,7 @@ const CODES := {
 	"units": 59501,
 	"up": 59396,
 	"up-open": 59430,
+	"upload": 59515,
 	"warn": 9888,
 	"waves": 59451,
 	"wrench": 59407,
