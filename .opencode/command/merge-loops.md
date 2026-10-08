@@ -21,14 +21,12 @@ when the merge carries no compiled code (workflow or ledger commits only) —
 and state the skip in the report.
 
 Sync the branch back from main with
-`git -C ../Mindustry-Godot-loop<N> merge main` before teardown: a restarted
-loop recreates its worktree from the branch, and `start-loop.sh` refuses to
-start while its `.opencode`/`AGENTS.md` files drift from main. When the
-worktree is already gone and the branch still needs the sync, `git branch -f
-parity/loop-<N> main` updates it in place (only while the branch is not
-checked out).
+`git -C ../Mindustry-Godot-loop<N> merge main`: a restarted loop recreates its
+worktree from the branch, and `start-loop.sh` refuses to start while its
+`.opencode`/`AGENTS.md` files drift from main. When the worktree is already
+gone and the branch still needs the sync, `git branch -f parity/loop-<N> main`
+updates it in place (only while the branch is not checked out).
 
-Then tear the finished loop down with `.opencode/loops/bin/stop-loop.sh <N>
---remove-worktree --purge`, only after the loop session has ended; the branch
-stays for a later restart. Do not push. Report the commit list, conflicts, and
-check result (or the CI skip).
+Do not stop the loop or remove its worktree; that is the loop session's or
+operator's call. Do not push. Report the commit list, conflicts, and check
+result (or the CI skip).
