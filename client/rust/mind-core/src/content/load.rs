@@ -347,8 +347,11 @@ impl ContentRegistry {
             return Ok(());
         }
         self.sweep(LifecyclePhase::PostInit)?;
-        super::registries::blocks::post_init_link(self)?;
+        // `Planet.init`'s `TechTree.addPlanet` runs in the init sweep upstream,
+        // before any `Block.postInit`, so the tree pass must land the planet
+        // assignments before the block auto-assignment reads item planets.
         super::registries::planets::post_init_link(self)?;
+        super::registries::blocks::post_init_link(self)?;
         self.phases.post_init = true;
         Ok(())
     }

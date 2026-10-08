@@ -728,8 +728,8 @@ pub fn load(
 /// planet's tech tree is added to that planet's `shownPlanets`
 /// (`TechTree.addPlanet`) and `databaseTabs` (`TechTree.addDatabaseTab`).
 ///
-/// Runs after the `postInit` sweep and the block auto-assignment, when the
-/// planet→tree mapping is complete.
+/// Runs after the `postInit` sweep and before the block auto-assignment
+/// (`Block.postInit`), mirroring upstream's init-before-postInit ordering.
 pub(crate) fn post_init_link(registry: &mut ContentRegistry) -> Result<(), ContentError> {
     let assignments: Vec<(TreeId, PlanetId)> = registry
         .planets()

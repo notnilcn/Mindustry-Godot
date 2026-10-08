@@ -283,24 +283,38 @@ impl BlockCatalogView {
 
 /// Builds the placement-palette catalog from base content.
 ///
-/// Groups the shown build-menu blocks by `Category` (`Block.visible()` +
-/// `BuildVisibility.shown`). Unlock filtering is the HUD's job once research
-/// state is bound; the catalog is the full build-menu inventory.
+/// The custom/sandbox inventory: `unlockedNowHost` is true outside a campaign,
+/// but `PlacementFragment.getUnlockedByCategory` still hides hidden/debug/
+/// editor content, other-planet content and non-placeable blocks. The default
+/// `State.getPlanet()` (Serpulo) supplies the environment context.
 pub fn block_catalog() -> BlockCatalogView {
-    block_catalog_with(None)
+    block_catalog_with(None, None)
+}
+
+/// Custom/sandbox catalog for one planet (`Block.environmentBuildable`).
+pub fn block_catalog_for(planet: &str) -> BlockCatalogView {
+    block_catalog_with(None, Some(planet))
 }
 
 /// Builds the placement-palette catalog filtered by live unlock state.
 ///
 /// `store` is the campaign unlock store: tech-gated blocks are dropped until
-/// their `<name>-unlocked` bit is set (`Block.unlockedNowHost`) and explicitly
-/// non-build `BuildVisibility` values (`debugOnly`/`editorOnly`/`sandboxOnly`/
-/// `coreZoneOnly`/`worldProcessorOnly`/launch-pad/lighting/fog) are removed.
-/// The generated block specs leave `build_visibility` unpopulated (`Hidden`) for
-/// ordinary build-menu blocks, so only the explicit variants are filtered.
-/// [`block_catalog`] keeps the unfiltered inventory when no store is bound.
+/// their `<name>-unlocked` bit is set (`Block.unlockedNowHost`) and the
+/// campaign's non-build `BuildVisibility` values are removed. The generated
+/// specs leave `build_visibility` to the resolver, which marks
+/// requirement-bearing build-menu blocks `Shown` and requirement-less world
+/// content `Hidden` (`Block.requirements(Category, ItemStack...)` defaults to
+/// `BuildVisibility.shown`), so only real buildables reach this filter.
+/// [`block_catalog`] keeps the no-unlock inventory when no store is bound.
 pub fn block_catalog_unlocked(store: &dyn UnlockStore) -> BlockCatalogView {
-    block_catalog_with(Some(store))
+    block_catalog_with(Some(store), None)
+}
+
+/// Unlock-filtered catalog for one campaign planet
+/// (`PlacementFragment.getUnlockedByCategory` reads `state.getPlanet()` for
+/// `Block.environmentBuildable`).
+pub fn block_catalog_unlocked_for(store: &dyn UnlockStore, planet: &str) -> BlockCatalogView {
+    block_catalog_with(Some(store), Some(planet))
 }
 
 /// Whether a tech node is granted at boot: no effective item requirements and
@@ -320,10 +334,12 @@ fn tech_node_auto_unlocks(
     tech_tree::effective_requirements(registry, node_ref).is_empty() && node.objectives.is_empty()
 }
 
-/// Shared catalog builder; `store` enables the unlock/visibility filter.
-fn block_catalog_with(store: Option<&dyn UnlockStore>) -> BlockCatalogView {
+/// Shared catalog builder; `store` enables the unlock/visibility filter and
+/// `planet` overrides the default Serpulo `environmentBuildable` context.
+fn block_catalog_with(store: Option<&dyn UnlockStore>, planet: Option<&str>) -> BlockCatalogView {
+    use crate::content::registries::blocks::BuildVisibility;
     use crate::content::{
-        BuildVisibility, Category, MemoryBundle, MemoryUnlockStore, create_base_content,
+        Category, MemoryBundle, MemoryUnlockStore, PlanetId, create_base_content,
     };
 
     let empty = MemoryUnlockStore::new();
@@ -334,11 +350,15 @@ fn block_catalog_with(store: Option<&dyn UnlockStore>) -> BlockCatalogView {
     let Ok(mut registry) = create_base_content(&MemoryBundle::new(), store_ref, true) else {
         return BlockCatalogView::empty();
     };
-    // `init`/`post_init` derive per-block fields (`build_time`) the build-menu
-    // filter reads; `create_base_content` alone leaves them at defaults.
+    // `init`/`post_init` derive per-block fields the build-menu filter reads
+    // (`build_visibility`, `build_time`) and auto-assign `shownPlanets`.
     if registry.init().is_err() || registry.post_init().is_err() {
         return BlockCatalogView::empty();
     }
+    // `State.getPlanet()` falls back to the rules planet (`serpulo` by default).
+    let planet: Option<PlanetId> = planet
+        .and_then(|name| registry.planet_id(name))
+        .or_else(|| registry.planet_id("serpulo"));
     let mut categories: Vec<BlockCategoryView> = Category::ALL
         .iter()
         .map(|category| BlockCategoryView {
@@ -348,18 +368,32 @@ fn block_catalog_with(store: Option<&dyn UnlockStore>) -> BlockCatalogView {
         })
         .collect();
     for block in registry.blocks() {
-        // Buildable buildings carry a derived build time; floors/walls/props do
-        // not, so this is the build-menu filter while `build_visibility` stays
-        // unpopulated in the port's generated specs.
-        if block.removed || block.build_time <= 0.0 {
+        // `Block.isVisible()` metadata half: hidden/debug/editor content never
+        // reaches the player's placement palette.
+        if block.removed
+            || matches!(
+                block.build_visibility,
+                BuildVisibility::Hidden | BuildVisibility::DebugOnly | BuildVisibility::EditorOnly
+            )
+        {
+            continue;
+        }
+        // `PlacementFragment.unlocked(block)`: player-placeable content only.
+        if !block.placeable_player {
+            continue;
+        }
+        // `Block.environmentBuildable()` (`isOnPlanet`): the auto-assigned
+        // `shownPlanets` drop other planets' content (e.g. Erekir cores).
+        if let Some(planet) = planet
+            && !block.unlock.shown_planets.is_empty()
+            && !block.unlock.shown_planets.contains(&planet)
+        {
             continue;
         }
         if store.is_some() {
             if matches!(
                 block.build_visibility,
-                BuildVisibility::DebugOnly
-                    | BuildVisibility::EditorOnly
-                    | BuildVisibility::SandboxOnly
+                BuildVisibility::SandboxOnly
                     | BuildVisibility::CoreZoneOnly
                     | BuildVisibility::WorldProcessorOnly
                     | BuildVisibility::LegacyLaunchPadOnly
@@ -1049,13 +1083,32 @@ mod tests {
                 .all(|category| !category.blocks.is_empty()),
             "no empty category survives the filter"
         );
-        assert!(
+        let has = |name: &str| {
             catalog
                 .categories
                 .iter()
-                .any(|category| category.blocks.iter().any(|block| block.name == "conveyor")),
-            "conveyor is in the distribution category"
-        );
+                .any(|category| category.blocks.iter().any(|block| block.name == name))
+        };
+        assert!(has("conveyor"), "conveyor is in the distribution category");
+        // World/editor content carries no build requirements, so the resolver
+        // leaves it `BuildVisibility.hidden` (`PlacementFragment.getByCategory`
+        // only sees visible, placeable, environment-buildable blocks).
+        for world in [
+            "air",
+            "spawn",
+            "remove-wall",
+            "deep-water",
+            "stone-wall",
+            "ore-copper",
+            "build2",
+            "legacy-mech-pad",
+            "command-center",
+        ] {
+            assert!(!has(world), "world content `{world}` is not build-menu");
+        }
+        // `Block.environmentBuildable()`: other planets' content stays out of
+        // the Serpulo palette (the default `State.getPlanet()`).
+        assert!(!has("core-bastion"), "the Erekir core is hidden on Serpulo");
         assert!(
             catalog
                 .categories
@@ -1081,6 +1134,15 @@ mod tests {
             "sandbox block in the raw inventory"
         );
         let filtered = block_catalog_unlocked(&MemoryUnlockStore::new());
+        assert!(
+            filtered.categories.is_empty(),
+            "a fresh campaign with no unlock bits has no build-menu content: {:?}",
+            filtered
+                .categories
+                .iter()
+                .map(|category| category.name)
+                .collect::<Vec<_>>()
+        );
         assert!(
             !has(&filtered, "power-source"),
             "sandbox-only block is not buildable in campaign"
@@ -1108,11 +1170,48 @@ mod tests {
         let mut store = MemoryUnlockStore::new();
         store.set_bool("duo-unlocked", true);
         let unlocked = block_catalog_unlocked(&store);
-        assert!(has(&unlocked, "duo"), "researched turret appears");
+        let turret = unlocked
+            .categories
+            .iter()
+            .find(|category| category.name == "turret")
+            .expect("unlocking a turret yields its category");
+        assert_eq!(
+            turret
+                .blocks
+                .iter()
+                .map(|block| block.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["duo"],
+            "exactly the researched block appears"
+        );
+        assert_eq!(
+            unlocked.categories.len(),
+            1,
+            "other categories stay hidden: {:?}",
+            unlocked
+                .categories
+                .iter()
+                .map(|category| category.name)
+                .collect::<Vec<_>>()
+        );
         assert!(
             !has(&unlocked, "foreshadow"),
             "still-locked turret stays hidden"
         );
+
+        // `Block.environmentBuildable()`: the same unlock state yields another
+        // planet's palette (Erekir exposes its always-unlocked core).
+        let erekir = block_catalog_unlocked_for(&MemoryUnlockStore::new(), "erekir");
+        assert!(
+            has(&erekir, "core-bastion"),
+            "Erekir's always-unlocked core is in the Erekir palette"
+        );
+        assert!(!has(&erekir, "duo"), "Serpulo content stays off Erekir");
+
+        // The custom/sandbox catalog takes the same planet context.
+        let erekir_full = block_catalog_for("erekir");
+        assert!(has(&erekir_full, "core-bastion"));
+        assert!(!has(&erekir_full, "duo"));
     }
 
     #[test]

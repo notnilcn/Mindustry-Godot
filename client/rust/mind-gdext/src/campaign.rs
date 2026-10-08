@@ -814,16 +814,19 @@ impl MindCampaign {
     ///
     /// Campaign games filter through the settings-backed unlock store: only
     /// blocks whose `<name>-unlocked` bit is set (or that `check_auto_unlocks`
-    /// grants at boot) and whose `BuildVisibility` is buildable survive, and
-    /// empty categories are dropped. Custom games expose the full build-menu
-    /// inventory, mirroring `unlockedNowHost`'s `!state.isCampaign()` branch.
+    /// grants at boot) and whose `BuildVisibility` is buildable survive, empty
+    /// categories are dropped, and other-planet content is hidden
+    /// (`Block.environmentBuildable` reads the active planet's `shownPlanets`).
+    /// Custom games expose the full build-menu inventory, mirroring
+    /// `unlockedNowHost`'s `!state.isCampaign()` branch, with the same planet
+    /// filter.
     #[func]
     pub fn block_catalog_json(&mut self) -> GString {
         let catalog = if self.session.is_campaign() {
             let store = SettingsUnlockStore::new(&mut self.settings);
-            mind_core::ui::campaign::block_catalog_unlocked(&store)
+            mind_core::ui::campaign::block_catalog_unlocked_for(&store, &self.session.rules.planet)
         } else {
-            mind_core::ui::campaign::block_catalog()
+            mind_core::ui::campaign::block_catalog_for(&self.session.rules.planet)
         };
         GString::from(
             serde_json::to_string(&catalog)
