@@ -1138,6 +1138,13 @@ impl MindCampaign {
             &GString::from("campaign"),
             &self.session.is_campaign().to_variant(),
         );
+        // `GameState.isEditor` (`rules.editor`): the pause dialog's desktop
+        // `!state.isEditor()` gate for the `@savegame`/`@loadgame` entries
+        // (`PausedDialog.java:89-93`).
+        dict.set(
+            &GString::from("editor"),
+            &self.session.rules.editor.to_variant(),
+        );
         dict.set(&GString::from("wave"), &self.session.wave.to_variant());
         dict.set(
             &GString::from("waves"),

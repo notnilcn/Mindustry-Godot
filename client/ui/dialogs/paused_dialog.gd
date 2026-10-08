@@ -7,14 +7,17 @@
 ## through `MindUi` pauses the sim via the reference-counted governor. Every
 ## exit routes back through `MindUi` (settings/planet) or the `UiRoot` menu
 ## presentation; this dialog never mutates sim state. The `@hostserver` entry
-## opens the host dialog (`PausedDialog.java:98-105`); save/load plumbing is
-## owned elsewhere.
+## opens the host dialog (`PausedDialog.java:98-105`); outside a campaign and
+## outside the editor the desktop set also exposes `@savegame`/`@loadgame`,
+## which open the save/load dialogs (`PausedDialog.java:89-93`).
 
 extends MindDialog
 
 var _planet_button: Button = null
 var _objective_button: Button = null
 var _abandon_button: Button = null
+var _save_button: Button = null
+var _load_button: Button = null
 var _host_button: Button = null
 var _quit_button: Button = null
 var _pending_quit := false
@@ -30,8 +33,9 @@ func _ready() -> void:
 
 
 ## Upstream desktop layout: `@objective` (when the sector preset has a
-## description), `@abandon`, `@back` (resume), `@settings`, `@hostserver`,
-## `@quit`. `@planetmap`/`@research` are the mobile campaign branch.
+## description), `@abandon`, `@back` (resume), `@settings`, `@savegame`/
+## `@loadgame` (non-campaign, non-editor), `@hostserver`, `@quit`.
+## `@planetmap`/`@research` are the mobile campaign branch.
 ##
 ## `PausedDialog.rebuild` stacks the desktop campaign entries in rows
 ## (`PausedDialog.java:69-109`); `MindDialog.buttons` is a single HBox, so the
@@ -59,6 +63,14 @@ func _build() -> void:
 	back.name = "back"
 	var settings_button := _add_to(navigation_row, _t("@settings"), _open_settings, "settings", 240.0)
 	settings_button.name = "settings"
+
+	# Desktop non-campaign, non-editor entry set (`PausedDialog.java:89-93`);
+	# the campaign/mobile branch replaces it with `@research`/`@planetmap`.
+	var save_row := _row(rows)
+	_save_button = _add_to(save_row, _t("@savegame"), _open_save, "save", 240.0)
+	_save_button.name = "savegame"
+	_load_button = _add_to(save_row, _t("@loadgame"), _open_load, "upload", 240.0)
+	_load_button.name = "loadgame"
 
 	# Mobile campaign branch entry (`PausedDialog.java:140-149`); desktop keeps
 	# it hidden and takes no row space.
@@ -108,6 +120,14 @@ func shown() -> void:
 func _refresh_campaign_buttons() -> void:
 	var state := _sector_state()
 	var campaign := bool(state.get("campaign", false))
+	var editor := bool(state.get("editor", false))
+	var can_save := not campaign and not editor
+	if _save_button != null:
+		_save_button.visible = can_save
+	if _load_button != null:
+		_load_button.visible = can_save
+		# `PausedDialog.java:92`: load is disabled while a match is active.
+		_load_button.disabled = _net_active()
 	if _objective_button != null:
 		_objective_button.visible = not str(state.get("presetDescription", "")).is_empty()
 	if _abandon_button != null:
@@ -167,6 +187,21 @@ func _open_settings() -> void:
 	var ui := _ui()
 	if ui != null:
 		ui.call("open_dialog", "settings", "")
+
+
+## `PausedDialog.java:91`: `@savegame` opens the save dialog (desktop,
+## non-campaign, non-editor).
+func _open_save() -> void:
+	var ui := _ui()
+	if ui != null:
+		ui.call("open_dialog", "save", "")
+
+
+## `PausedDialog.java:92`: `@loadgame` opens the load dialog.
+func _open_load() -> void:
+	var ui := _ui()
+	if ui != null:
+		ui.call("open_dialog", "load", "")
 
 
 ## `PausedDialog.java:146-149`: hide and open the planet map (campaign only).

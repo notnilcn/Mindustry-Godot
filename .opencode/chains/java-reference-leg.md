@@ -11,7 +11,7 @@ preconditions:
   - computer-mcp registered and opencode started with DISPLAY set (it imports pynput at module load; without an X connection its tools vanish).
   - One client at a time on the loop display (`$PARITY_DISPLAY`; Xwayland with Weston's WM by default, Xvfb with no WM on the software fallback).
 tools: [computer-mcp_mouse_move, computer-mcp_click, computer-mcp_drag, computer-mcp_type, computer-mcp_key_press, computer-mcp_key_down, computer-mcp_key_up, computer-mcp_screenshot, computer-mcp_list_windows, computer-mcp_get_window_info]
-last_verified: 2026-10-08 9efd068 (runs/l2-20261007-163042-twin-java-ref); 2026-10-08 a1ca816 loop-1 (runs/20261008-143432-ev0062-twin); 2026-10-08 986cda3 loop-2 (runs/l2-20261008-150205-input_controls-twin); 2026-10-08 1d8f75b loop-1 (runs/20261008-105728-ev0059-host-twin); 2026-10-08 1d8f75b loop-1 EV-0038 (runs/20261008-121029-ev0038-editor-row-twin); 2026-10-08 1d8f75b loop-1 EV-0039 (runs/20261008-221916-ev0039-twin)
+last_verified: 2026-10-09 2027fbe loop-2 EV-0056 (runs/l2-20261009-001432-ev0056-rotation-twin, Xwayland :2, world reached; rotation pixel-isolation not covered); 2026-10-08 9efd068 (runs/l2-20261007-163042-twin-java-ref); 2026-10-08 a1ca816 loop-1 (runs/20261008-143432-ev0062-twin); 2026-10-08 986cda3 loop-2 (runs/l2-20261008-150205-input_controls-twin); 2026-10-08 1d8f75b loop-1 (runs/20261008-105728-ev0059-host-twin); 2026-10-08 1d8f75b loop-1 EV-0038 (runs/20261008-121029-ev0038-editor-row-twin); 2026-10-08 1d8f75b loop-1 EV-0039 (runs/20261008-221916-ev0039-twin)
 ---
 
 # java-reference-leg
@@ -225,6 +225,31 @@ window + (70,63):
 Evidence: `java/step-06-sector-click2.png` (not owned), `step-12-after-launch.png`
 (tutorial), `step-17-planet-after.png` (warning marker), `step-19-gz-panel-after.png`
 (`Under attack!`/`Go`), `java/notes.md`.
+
+## Verified run (loop-2 twin, 2026-10-09, EV-0056, Xwayland :2, 1152x648)
+
+The worktree wrapper resolves its own runtime dirs: from this worktree it
+started a second java weston and Xwayland `:3`, while the session's persistent
+computer-mcp server is pinned to `:2`. Pin the client to the MCP display and
+keep GLFW off Wayland:
+
+```bash
+(env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET PARITY_DISPLAY_OVERRIDE=:2 \
+  setsid .opencode/loops/bin/run-java.sh -width 1152 -height 648 \
+  -maximized false >"$RUN/java/game.log" 2>&1 </dev/null &)
+```
+
+Without `-u WAYLAND_DISPLAY` GLFW opens a native Wayland window on the Godot
+compositor: the JVM runs but no X window exists for captures or clicks. The
+window lands at +70+63; capture with `--window-title Mindustry` (DISPLAY=:2).
+Custom-game navigation reused the recorded 1152x648 coordinates (Play
+double-click 315,212; Custom Game double-click 550,354 -> MapPlayDialog; Play
+750,641 -> world; ~30-45 s fade-in to a stable frame). One-shot XTEST friction:
+each pynput process loses the window's keyboard focus, so key events need a
+click first in the same process; without OCR (tesseract absent) and with a
+non-vision model the catalog/selection state cannot be read, so this leg
+reached a playable world but could not pixel-isolate the rotation path
+(`runs/l2-20261009-001432-ev0056-rotation-twin/java/notes.md`).
 
 ## Success signals
 

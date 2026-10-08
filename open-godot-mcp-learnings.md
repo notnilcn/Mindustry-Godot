@@ -1111,3 +1111,27 @@ If nothing new happened, no entry.
   now calls `refresh_drill_ore` for spawned drills, or a loaded save's drill
   keeps `dominantItem = None` and never mines (this was the EV-0065 production
   half; see `chains/campaign-save-restore.md`).
+
+## 2026-10-09 — loop-2 EV-0056 Godot leg: main-wrapper editor launch worked; wheel injection recipe
+
+- An editor from the loop's previous session (pid 65783, started 00:01 with the
+  main wrapper, worktree project `<worktree>/client`, `:2`) was **still alive
+  and still owned** `127.0.0.1:6980`; the orchestrator's "bridge is down" state
+  was a health-check miss, not a dead editor. Launching a second editor with
+  the main wrapper (pid 133811) worked but was redundant and could not bind
+  6980. Check `ss -ltnp | grep $PARITY_BRIDGE_PORT` before launching an editor,
+  and reap only your own redundant process. The whole leg ran in the
+  pre-existing editor: `godot_game play` + explicit `res://scenes/game.tscn`
+  attached at pid 135151, window 1152x648.
+- `godot_input` has no wheel action; the shared rotate axis (default `scroll`)
+  is driven by pushing an `InputEventMouseButton` through the viewport
+  (`button_index = MOUSE_BUTTON_WHEEL_UP/DOWN`, `pressed = true`,
+  `factor = 1.0`, `position` set). WHEEL_UP rotated pending placement +1,
+  WHEEL_DOWN -1 (`get_input_state_json().rotation` 2->3->2, `last_action=rotate`)
+  — sequence recorded in `chains/placement-rotation.md` step 3.
+- Port behavior worth knowing (documented in the chain, not a friction): with
+  the block selection cleared, holding R and scrolling over a placed building
+  enqueues one Rotate via the R press edge **and** zooms the camera
+  (4.0->5.0); upstream suppresses zoom while `rotateplaced` is held.
+- Evidence: `runs/l2-20261009-001432-ev0056-rotation-twin/` (`godot/step-results.json`,
+  pid 135151; `godot/log-errors.json` empty).

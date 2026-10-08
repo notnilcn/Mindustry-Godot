@@ -1,13 +1,13 @@
 ---
 id: placement-rotation
-title: Select a conveyor, press R, place at a rotation, and rotate the placed building via R (state-dump rot oracle)
+title: Select a conveyor, rotate pending via R and the wheel, place at a rotation, and rotate the placed building via R (state-dump rot oracle)
 status: verified
-applies_when: Verifying block rotation (rotate key, rotated placement, `Call.rotateBlock` on placed buildings) in the no-scenario default world.
+applies_when: Verifying block rotation (rotate axis/wheel, rotated placement, `Call.rotateBlock` on placed buildings) in the no-scenario default world.
 preconditions:
   - boot-and-identity completed (editor bridge, res://scenes/game.tscn played with the explicit scene param, runtime_connected true, pid stamped).
   - The editor process must postdate the built libmind_gdext.so (kill/relaunch after tools/build.sh).
 tools: [godot_exec, godot_input, godot_game, godot_log, godot_screenshot]
-last_verified: 2026-10-08 996f288 (runs/l2-20261008-185444-ev0056-rotation-godot)
+last_verified: 2026-10-09 2027fbe (runs/l2-20261009-001432-ev0056-rotation-twin, pid 135151, :2); 2026-10-08 996f288 (runs/l2-20261008-185444-ev0056-rotation-godot)
 ---
 
 # placement-rotation
@@ -46,6 +46,20 @@ last_verified: 2026-10-08 996f288 (runs/l2-20261008-185444-ev0056-rotation-godot
 
    `InputState.rotation` starts at 1 (`InputHandler.rotation = 1`); after one R
    expect 2, `last_action=rotate`, `action_count` +1.
+
+   The same rotation state is driven by the shared rotate axis (default
+   `scroll`); `godot_input` has no wheel action, so push the event through the
+   viewport (one event per notch, `factor = 1.0`; `godot_input`'s key actions
+   are unaffected):
+
+   ```
+   godot_exec {"action":"eval","params":{"code":"var ev = InputEventMouseButton.new()\nev.button_index = MOUSE_BUTTON_WHEEL_UP\nev.pressed = true\nev.factor = 1.0\nev.position = Vector2(576, 324)\nget_viewport().push_input(ev)\nreturn {\"pushed\": true}"}}
+   ```
+
+   Then flush and re-read `get_input_state_json()`: WHEEL_UP expect rotation
+   +1, `last_action=rotate` (action_count does not move for wheel edges);
+   WHEEL_DOWN expect -1. Verified 1→2 (R), 2→3 (wheel up), 3→2 (wheel down) at
+   2027fbe pid 135151.
 
 4. Resolve the target tile from the camera, press-hold to read the pending plan,
    then release (one discrete call per event):
@@ -89,12 +103,20 @@ last_verified: 2026-10-08 996f288 (runs/l2-20261008-185444-ev0056-rotation-godot
 
 ## Success signals
 
-- Pending rotation: `get_input_state_json().rotation` increments per R,
-  `last_action=rotate`.
+- Pending rotation: `get_input_state_json().rotation` increments per R and per
+  wheel notch (+1 up / -1 down), `last_action=rotate`.
 - Placement: `placement_preview_json()` and the dump tile `rot` both carry the
   pending rotation; `commands_applied` grows.
 - Placed building: `last_action=rotateplaced`, one pending command per press,
-  dump `rot = mod(rot+1,4)` (2->3->0->1->2 verified at 996f288).
+  dump `rot = mod(rot+1,4)` (2->3->0->1->2 verified at 996f288 and again at
+  2027fbe).
+- Note (upstream gesture difference, not a gap in this chain): with the block
+  cleared and the cursor over the placed building, R + wheel commits one Rotate
+  (via the R press edge) but the wheel also zooms the camera (4.0->5.0 in the
+  2027fbe run), because the port's `scroll()` falls through to zoom when
+  `state.block` is None; upstream suppresses zoom while `rotatePlaced` is held
+  (`DesktopInput.java:479`) and uses the wheel as the rotate trigger
+  (`:898-899`).
 
 ## Failure modes
 
