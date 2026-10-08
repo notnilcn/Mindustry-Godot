@@ -390,10 +390,18 @@ func _init() -> void:
 	var paused_dialog: Control = load("res://scenes/ui/dialogs/paused_dialog.tscn").instantiate()
 	root.add_child(paused_dialog)
 	paused_dialog.call("shown")
-	var buttons := paused_dialog.get_node_or_null("Center/Panel/Layout/Buttons")
-	var objective: Button = buttons.get_node_or_null("objective") if buttons != null else null
-	var abandon: Button = buttons.get_node_or_null("abandon") if buttons != null else null
-	var planet: Button = buttons.get_node_or_null("planetmap") if buttons != null else null
+	var objective := paused_dialog.find_child("objective", true, false) as Button
+	var abandon := paused_dialog.find_child("abandon", true, false) as Button
+	var planet := paused_dialog.find_child("planetmap", true, false) as Button
+	var panel := paused_dialog.get_node_or_null("Center/Panel") as Control
+	_check(
+		panel != null and panel.get_combined_minimum_size().x <= panel.custom_minimum_size.x,
+		"pause dialog button column does not widen the dialog panel (got %s of %s)"
+				% [
+					panel.get_combined_minimum_size().x if panel != null else -1.0,
+					panel.custom_minimum_size.x if panel != null else -1.0,
+				]
+	)
 	_check(
 		objective != null and objective.visible,
 		"pause dialog shows @objective for a described campaign sector"
