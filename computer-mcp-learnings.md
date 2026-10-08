@@ -347,3 +347,28 @@ happened, no entry.
 - Evidence: `runs/20261008-225009-ev0053-hud-twin/` (`java/step-05-maplist.png`,
   `java/step-07-ingame.png`, `java/notes.md`); flow appended to
   `chains/java-custom-survival-wave.md`.
+
+## 2026-10-09 — loop-2 EV-0056 Java leg: pin the worktree client to the MCP display; XTEST focus/ocr limits
+
+- The worktree `run-java.sh` resolves its own runtime dirs, so it started a
+  second java weston + Xwayland `:3` and the game opened as a native Wayland
+  window on the Godot compositor (GLFW prefers Wayland while
+  `WAYLAND_DISPLAY` is exported by the session), invisible to the `:2`
+  persistent computer-mcp and to `capture_screen.py --window-title`. Fix:
+  `env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET PARITY_DISPLAY_OVERRIDE=:2 <worktree
+  wrapper>`; the window then lands at +70+63 in 1152x648 and all `:2` tools
+  see it. The `-u` matters: the wrapper sets `DISPLAY` but does not unset
+  `WAYLAND_DISPLAY`.
+- Keyboard input with one-shot pynput helpers: each new XTEST client loses the
+  window's focus, so a click must precede key events **in the same process**
+  (observed with Escape and the `3`,`1` block-select combo). Mouse events
+  (move/click/scroll) work one-shot, and the pointer position persists on this
+  Xwayland display after the process exits.
+- Without `tesseract` and with a non-vision model the Java UI cannot be read:
+  selection state (block info panel), dialog contents and the catalog grid are
+  unverifiable from captures. The block rotation path was not pixel-isolated;
+  metric-only pixel analysis (bright-band/row scans, frame diffs) reached a
+  playable world and identified catalog/HUD regions but could not attribute a
+  rotation to the input. Evidence:
+  `runs/l2-20261009-001432-ev0056-rotation-twin/java/notes.md`,
+  `java/step-81.png`, `java/step-82-world.png`.

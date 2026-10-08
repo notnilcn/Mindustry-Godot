@@ -1033,3 +1033,53 @@ If nothing new happened, no entry.
 - Reusable sequence in `chains/block-config-fragment.md`; evidence
   `runs/l2-20261008-203338-input_controls-godot/` (pid 249159; fragment
   `_config.options` 22 after the fix).
+
+## 2026-10-09 — loop-2 worktree-wrapper launch hang repeats; `godot_input action=text` drops keystrokes
+
+- Launching `.opencode/loops/bin/run-godot-editor.sh` from the loop-2 worktree
+  (instead of `$PARITY_MAIN/.opencode/loops/bin/run-godot-editor.sh`) reproduced
+  the 2026-10-08 entry: it started duplicate `wayland-mind2`/`mind2-java`
+  westons under the worktree runtime dir and the editor fell back to X11 on the
+  worktree Xwayland `:3`, which died. Then `godot_game status` timed out and
+  every later MCP call reported `BRIDGE_NOT_CONNECTED` while `ss -ltnp` showed
+  `127.0.0.1:6980` LISTEN with a growing backlog (the editor was hung on the
+  dead embedded game; the game pid stayed a zombie). Recovery: kill the editor
+  and the duplicate westons, `rm` the stale `godot-wayland-0{,.lock}` in
+  `$PARITY_WAYLAND_DIR` (no live listener per `ss -xlp`), relaunch with the main
+  wrapper (`[parity-loop 2] editor: display=:2` and no "starting weston" line is
+  the tell). Evidence: `$PARITY_LOOP_DIR/logs/editor.log` 2026-10-09 00:01;
+  `runs/l2-20261009-000205-ev0066-save-menu-godot/`.
+- `godot_input {"action":"text"}` does not type into a focused `LineEdit` with
+  this addon: `runtime_autoload.gd _input_text` sends one `InputEventKey`
+  object for both the press and the release in the same frame, and the engine
+  discards it ("input event object is being parsed more than once in the same
+  frame", logged as an error). The field stays empty and the prompt's OK stays
+  disabled. Workaround: set `field.text` in an eval and emit the field's own
+  `text_changed` (`f.text_changed.emit(str(f.text))`; assigning `text` alone
+  does not emit it), then click OK with real mouse input — everything after OK
+  is the real UI path. Sequence:
+  `chains/pause-save-dialog.md` step 5.
+
+## 2026-10-09 — loop-2 EV-0056 Godot leg: main-wrapper editor launch worked; wheel injection recipe
+
+- An editor from the loop's previous session (pid 65783, started 00:01 with the
+  main wrapper, worktree project `<worktree>/client`, `:2`) was **still alive
+  and still owned** `127.0.0.1:6980`; the orchestrator's "bridge is down" state
+  was a health-check miss, not a dead editor. Launching a second editor with
+  the main wrapper (pid 133811) worked but was redundant and could not bind
+  6980. Check `ss -ltnp | grep $PARITY_BRIDGE_PORT` before launching an editor,
+  and reap only your own redundant process. The whole leg ran in the
+  pre-existing editor: `godot_game play` + explicit `res://scenes/game.tscn`
+  attached at pid 135151, window 1152x648.
+- `godot_input` has no wheel action; the shared rotate axis (default `scroll`)
+  is driven by pushing an `InputEventMouseButton` through the viewport
+  (`button_index = MOUSE_BUTTON_WHEEL_UP/DOWN`, `pressed = true`,
+  `factor = 1.0`, `position` set). WHEEL_UP rotated pending placement +1,
+  WHEEL_DOWN -1 (`get_input_state_json().rotation` 2->3->2, `last_action=rotate`)
+  — sequence recorded in `chains/placement-rotation.md` step 3.
+- Port behavior worth knowing (documented in the chain, not a friction): with
+  the block selection cleared, holding R and scrolling over a placed building
+  enqueues one Rotate via the R press edge **and** zooms the camera
+  (4.0->5.0); upstream suppresses zoom while `rotateplaced` is held.
+- Evidence: `runs/l2-20261009-001432-ev0056-rotation-twin/` (`godot/step-results.json`,
+  pid 135151; `godot/log-errors.json` empty).

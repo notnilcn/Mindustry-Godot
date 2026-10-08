@@ -41,7 +41,7 @@ touch, which precondition is easy to miss.
 | `units-live-wave-runtime.md` | Godot: fresh groundZero → `run_wave` → live unit/bullet assertions (EV-0048) |
 | `hud-wave-enemies-skip.md` | fresh groundZero → MindHud wave/enemies/status text vs fragment mirror + skip button `canSkipWave` + capture toast (EV-0053) |
 | `command-mode-hold-vs-tap.md` | Twin: Java Shift-hold affordance (Command Mode panel) vs Godot `command_mode` state, hold + `commandmodehold=false` tap branches (EV-0044) |
-| `placement-rotation.md` | select conveyor → R rotates pending (`input_state_json.rotation`) → mouse place → dump tile `rot` → R over placed building cycles `rot` mod 4 (EV-0056) |
+| `placement-rotation.md` | select conveyor → R and wheel rotate pending (`input_state_json.rotation`) → mouse place → dump tile `rot` → R over placed building cycles `rot` mod 4 (EV-0056) |
 | `custom-game-map-list.md` | menu Play → Custom Game → `DialogLayer/custom._maps()` live rows (18, real width/height/author/path) + Editor cross-check (EV-0039) |
 | `campaign-live-views-capture.md` | planet dialog live sector state → `capture_sector` → panel/read-model update (EV-0051) |
 
