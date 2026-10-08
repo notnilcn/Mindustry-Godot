@@ -50,15 +50,18 @@ Host installs are resolved through environment overrides (`GODOT_BIN`,
 Sessions started with `.opencode/loops/bin/start-loop.sh <N> --run` export the
 loop manifest and prepend `.opencode/loops/mcp-bin` to `PATH`, so bare
 `computer-mcp` / `open-godot-mcp` (and the opencode MCP servers) are pinned to
-this loop's display and editor bridge port. Loop 1 is the main checkout on an
-inherited display or `:10`; loops >= 2 run on `:(9+N)` in
+this loop's displays and editor bridge port. Loop 1 is the main checkout on an
+inherited X display or `:10`; loops >= 2 run on `:(9+N)` in
 `../Mindustry-Godot-loopN` worktrees on branch `parity/loop-N`. The launch
-helpers (and the MCP shims) start that loop's Xvfb when the display is down.
-Read `.opencode/loops/README.md` before starting or stopping a loop.
+helpers (and the MCP shims) start that loop's Xvfb (Java/X11) and its headless
+weston compositor (Godot on the GPU) when they are down. Read
+`.opencode/loops/README.md` before starting or stopping a loop.
 
 | Variable | Meaning |
 |---|---|
-| `PARITY_LOOP`, `PARITY_DISPLAY` | loop id and its X display (`:10`, `:11`, …) |
+| `PARITY_LOOP` | loop id |
+| `PARITY_DISPLAY` | the loop's Xvfb display (`:10`, `:11`, …) for Java/X11 |
+| `PARITY_WAYLAND_SOCKET`, `PARITY_WAYLAND_DIR` | Godot's weston/Wayland socket (`wayland-mind1`, …) and its runtime dir |
 | `PARITY_BRIDGE_PORT` | editor addon listen port / MCP adopt port (6970, 6980, …) |
 | `PARITY_WORKTREE` | checkout this loop runs in |
 | `PARITY_EVALS_DIR`, `PARITY_LEDGER` | shared evals dir and flock-protected ledger |
@@ -78,8 +81,9 @@ Rules:
   `--key` also work) so a waiting loop can evaluate (`MCP_SLOT_LIMIT` defaults
   to 2).
 - Launch clients only through `.opencode/loops/bin/run-godot-editor.sh` and
-  `.opencode/loops/bin/run-java.sh`; they set display, bridge port, and
-  per-loop user-data dirs. Never use `godot_instance launch_editor` (it
+  `.opencode/loops/bin/run-java.sh`; they set the Godot Wayland compositor /
+  Java X display, bridge port, and per-loop user-data dirs. Never use
+  `godot_instance launch_editor` (it
   allocates ports from its own local index, ignoring the loop map) and never
   run `open-godot-mcp --shutdown-all` (it kills sibling loops' servers).
 - Ledger writes go to `$PARITY_LEDGER` (the scripts' default via env), which is
@@ -143,11 +147,13 @@ JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 bash ../Mindustry/gradlew \
   -p ../Mindustry tools:pack desktop:dist
 ```
 
-**Display.** Render with Mesa `llvmpipe` (software GL): expect ~5–15 FPS, and
-budget CPU when running several loops. Each loop has its own display
-(`$PARITY_DISPLAY`: loop 1 is an inherited display or `:10`, loops >= 2 are
-Xvfb at `:(9+N)`; the loop wrappers start Xvfb when it is down).
-`godot_screenshot game` needs a windowed game, not `--headless`.
+**Display.** The Godot client renders on the loop's headless weston compositor
+(`$PARITY_WAYLAND_SOCKET`, GL on the GPU), so rasterization no longer burns CPU
+and frame capture stays responsive. The Java reference renders with Mesa
+`llvmpipe` (software GL) on the loop's Xvfb display (`$PARITY_DISPLAY`: loop 1
+is an inherited display or `:10`, loops >= 2 are Xvfb at `:(9+N)`; expect
+~5–15 FPS and budget CPU for it). The loop wrappers start both servers when
+down. `godot_screenshot game` needs a windowed game, not `--headless`.
 Always check a capture is non-blank (`capture_screen.py` and `frame_diff.py`
 report mean/stddev) before treating a black frame as a finding.
 
@@ -192,8 +198,9 @@ Follow the playtest skill exactly: `godot_health check` → editor identity
 sibling checkout) → `godot_editor_edit open_scene` → `godot_game play` **with**
 `{"scene":"res://scenes/game.tscn"}` → `godot_game status` with
 `runtime_connected: true`. Launch the editor if the bridge is down, through the
-loop wrapper (it pins `$PARITY_DISPLAY` and `$PARITY_BRIDGE_PORT`; the MCP shim
-adopts the same port):
+loop wrapper (it starts weston and pins the Godot Wayland socket, also keeping
+`$PARITY_DISPLAY` for Java and `$PARITY_BRIDGE_PORT`; the MCP shim adopts the
+same port):
 
 ```bash
 nohup .opencode/loops/bin/run-godot-editor.sh \
@@ -283,9 +290,9 @@ Java gotchas:
   once from `~/.local/share/Mindustry`; normalize them inside the loop (window
   size, UI scale, language, music/SFX volume) and record the values in
   `run.json`. `settings_backups/` keeps prior snapshots.
-- Each loop owns its display, and Xvfb has no WM: run one client at a time in
-  this loop so it owns focus, and never start a Java client on another loop's
-  display.
+- For the Java leg each loop owns its Xvfb display, and Xvfb has no WM: run
+  one X11 client at a time in this loop so it owns focus, and never start a
+  Java client on another loop's display.
 - Prefer keyboard shortcuts and menu paths that exist in both clients; when a
   click coordinate is needed, derive it from the current Java screenshot at the
   recorded window size and store the coordinate in the run notes.

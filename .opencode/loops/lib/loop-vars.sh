@@ -10,7 +10,12 @@
 # Exported per loop:
 #   PARITY_LOOP        numeric loop id (1-based)
 #   PARITY_DISPLAY     X display for this loop (:10 or an inherited display for
-#                      loop 1, :(9+N) for loop N; started as Xvfb when down)
+#                      loop 1, :(9+N) for loop N; started as Xvfb when down);
+#                      backs the Java reference and X11-only tooling
+#   PARITY_WAYLAND_SOCKET  Wayland socket (wayland-mind<N>) for the loop's
+#                      headless weston compositor; hosts the Godot editor/game
+#                      so rendering runs on the GPU (Xvfb has no DRI3)
+#   PARITY_WAYLAND_DIR runtime dir owning that socket (weston-managed)
 #   PARITY_BRIDGE_PORT open-godot-mcp bridge port (editor addon listens)
 #   PARITY_DAP_PORT    documented DAP port for this loop (inert, Godot-owned)
 #   PARITY_LSP_PORT    documented LSP port for this loop (inert, Godot-owned)
@@ -60,11 +65,14 @@ parity_loop_vars() {
   PARITY_EVALS_DIR="$main/.opencode/evals"
   PARITY_LEDGER="$PARITY_EVALS_DIR/findings.json"
   PARITY_LOOP_DIR="$loops_dir/run/loop-$id"
+  PARITY_WAYLAND_SOCKET="wayland-mind$id"
+  PARITY_WAYLAND_DIR="$PARITY_LOOP_DIR/wayland"
   PARITY_MCP_BIN="$loops_dir/mcp-bin"
 
   export PARITY_LOOP PARITY_LOOPS_DIR PARITY_MAIN PARITY_DISPLAY \
     PARITY_WORKTREE PARITY_RUN_PREFIX PARITY_BRIDGE_PORT PARITY_DAP_PORT \
-    PARITY_LSP_PORT PARITY_EVALS_DIR PARITY_LEDGER PARITY_LOOP_DIR PARITY_MCP_BIN
+    PARITY_LSP_PORT PARITY_EVALS_DIR PARITY_LEDGER PARITY_LOOP_DIR \
+    PARITY_WAYLAND_SOCKET PARITY_WAYLAND_DIR PARITY_MCP_BIN
 }
 
 parity_ensure_display() {
@@ -109,6 +117,59 @@ parity_ensure_display() {
     sleep 0.1
   done
   echo "[parity-loop ${PARITY_LOOP:-?}] ERROR: Xvfb failed on $display; see $PARITY_LOOP_DIR/xvfb.log" >&2
+  return 1
+}
+
+parity_ensure_wayland() {
+  # Ensure this loop's headless weston compositor is up (GL renderer on the
+  # GPU). Godot's editor and games run on this Wayland socket: Xvfb has no
+  # DRI3, so Godot there falls back to llvmpipe software rendering and pins
+  # the CPU. Returns 1 when weston is missing or the caller forces X11 with
+  # PARITY_GODOT_DISPLAY=x11 (Godot then runs on PARITY_DISPLAY as before).
+  if [ "${PARITY_GODOT_DISPLAY:-wayland}" = "x11" ]; then
+    return 1
+  fi
+  local socket="${PARITY_WAYLAND_SOCKET:-}"
+  local dir="${PARITY_WAYLAND_DIR:-}"
+  if [ -z "$socket" ] || [ -z "$dir" ]; then
+    echo "parity_ensure_wayland: PARITY_WAYLAND_SOCKET/DIR not set" >&2
+    return 2
+  fi
+
+  # A live compositor: the pidfile process first, a listening socket as the
+  # fallback for one started outside this function.
+  local pid=""
+  [ -f "$PARITY_LOOP_DIR/weston.pid" ] && pid="$(cat "$PARITY_LOOP_DIR/weston.pid" 2>/dev/null || true)"
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null \
+    && tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | grep -q 'weston'; then
+    [ -S "$dir/$socket" ] && return 0
+  fi
+  if [ -S "$dir/$socket" ] && command -v ss >/dev/null 2>&1 \
+    && ss -xl 2>/dev/null | grep -qF "$dir/$socket"; then
+    return 0
+  fi
+  # A killed compositor can leave a stale socket that blocks weston's bind.
+  rm -f "$dir/$socket" "$dir/$socket.lock"
+
+  if ! command -v weston >/dev/null 2>&1; then
+    echo "[parity-loop ${PARITY_LOOP:-?}] weston is not installed; Godot would software-render on Xvfb" >&2
+    return 1
+  fi
+
+  mkdir -p "$dir"
+  chmod 700 "$dir"
+  echo "[parity-loop ${PARITY_LOOP:-?}] starting weston headless on $socket (GL, 1280x720)" >&2
+  XDG_RUNTIME_DIR="$dir" nohup weston \
+    --backend=headless-backend.so --renderer=gl \
+    --width=1280 --height=720 --socket="$socket" --no-config \
+    >"$PARITY_LOOP_DIR/weston.log" 2>&1 &
+  echo "$!" >"$PARITY_LOOP_DIR/weston.pid"
+  local _
+  for _ in $(seq 1 100); do
+    [ -S "$dir/$socket" ] && return 0
+    sleep 0.1
+  done
+  echo "[parity-loop ${PARITY_LOOP:-?}] ERROR: weston failed on $socket; see $PARITY_LOOP_DIR/weston.log" >&2
   return 1
 }
 

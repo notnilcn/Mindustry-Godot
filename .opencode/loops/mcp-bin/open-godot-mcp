@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-only
 #
-# PATH shim: pin open-godot-mcp to this parity loop's editor bridge port and
-# X display, and give the server (and any standalone game it spawns) the
-# loop's isolated Godot user-data dirs.
+# PATH shim: pin open-godot-mcp to this parity loop's editor bridge port,
+# displays and isolated Godot user-data dirs. The server (and any standalone
+# game it spawns) gets the loop's weston/Wayland socket so rendering stays on
+# the GPU; DISPLAY is kept for X11-only tooling.
 set -euo pipefail
 
 self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,12 +20,16 @@ if [ -n "${PARITY_LOOP:-}" ]; then
   # shellcheck source=../lib/loop-vars.sh
   . "$self_dir/../lib/loop-vars.sh"
   parity_loop_vars "$PARITY_LOOP"
-  # The display must exist before the bridge spawns a standalone game.
+  # The displays must exist before the bridge spawns a standalone game.
   parity_ensure_display
+  parity_ensure_wayland || true
 fi
 
 env_args=()
 [ -n "${PARITY_DISPLAY:-}" ] && env_args+=("DISPLAY=$PARITY_DISPLAY")
+if [ -n "${PARITY_WAYLAND_SOCKET:-}" ] && [ -S "${PARITY_WAYLAND_DIR:-}/$PARITY_WAYLAND_SOCKET" ]; then
+  env_args+=("WAYLAND_DISPLAY=$PARITY_WAYLAND_SOCKET" "XDG_RUNTIME_DIR=$PARITY_WAYLAND_DIR")
+fi
 [ -n "${PARITY_BRIDGE_PORT:-}" ] && env_args+=("OPEN_GODOT_MCP_PORT=$PARITY_BRIDGE_PORT")
 if [ -n "${PARITY_LOOP_DIR:-}" ]; then
   mkdir -p "$PARITY_LOOP_DIR/xdg-data" "$PARITY_LOOP_DIR/xdg-config" "$PARITY_LOOP_DIR/xdg-cache"

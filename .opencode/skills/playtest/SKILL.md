@@ -31,14 +31,14 @@ The MCP server is a stdio process (`open-godot-mcp`, binary `~/.local/bin/open-g
 
 ## Session start
 
-1. **`godot_health check` first.** If it reports `BRIDGE_NOT_CONNECTED` (or errors with "No Godot instance connected"), launch the editor yourself on the Linux host; the MCP bridge auto-loads with the editor and the native display hosts the window. Inside a parity loop (`PARITY_LOOP` set), use the loop wrapper so display, bridge port, and user-data dirs stay isolated:
+1. **`godot_health check` first.** If it reports `BRIDGE_NOT_CONNECTED` (or errors with "No Godot instance connected"), launch the editor yourself on the Linux host; the MCP bridge auto-loads with the editor and the loop's weston/Wayland compositor hosts the window on the GPU. Inside a parity loop (`PARITY_LOOP` set), use the loop wrapper so displays, bridge port, and user-data dirs stay isolated:
 
    ```bash
    nohup .opencode/loops/bin/run-godot-editor.sh \
      >"${PARITY_LOOP_DIR:-/tmp}/logs/editor.log" 2>&1 &
    ```
 
-   For a plain single-loop session the equivalent is `nohup godot4 --editor --path client >/tmp/mind-editor.log 2>&1 &`. Wait ~20 s, then `godot_instance list` (the instance appears adopted) and `godot_health check` (port `$PARITY_BRIDGE_PORT`, default 6970). The editor never exits; a second, headless editor run during CI may briefly bind 6971 — ignore it. Never run `open-godot-mcp --shutdown-all` while other loops are up.
+   For a plain single-loop session use the same wrapper (it starts the loop's weston compositor and points the editor at it via `WAYLAND_DISPLAY`/`XDG_RUNTIME_DIR`); a bare `godot4 --editor` lands on Xvfb and software-renders, pinning the CPU. See `.opencode/loops/README.md`. Wait ~20 s, then `godot_instance list` (the instance appears adopted) and `godot_health check` (port `$PARITY_BRIDGE_PORT`, default 6970). The editor never exits; a second, headless editor run during CI may briefly bind 6971 — ignore it. Never run `open-godot-mcp --shutdown-all` while other loops are up.
 
 2. **Identity preflight before any `godot_game` call.** The bridge is `127.0.0.1:${PARITY_BRIDGE_PORT:-6970}`; if another Godot editor (a sibling parity loop, or the `main/` project) already holds the port the shim adopts, the MCP server talks to *that* project. Stop the other editor or fix the loop mapping, then verify: `godot_editor_read state` → `project_path` must contain `mindustry-godot` (and the loop's worktree path when `PARITY_LOOP` is set). (The `godot_exec` runtime identity check only works once a game is running; the smoke asserts it after play via `ProjectSettings.globalize_path("res://")`.)
 

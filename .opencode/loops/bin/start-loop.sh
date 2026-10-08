@@ -7,9 +7,11 @@
 #   start-loop.sh <loop-id>            # set up display/worktree/dirs, print env
 #   start-loop.sh <loop-id> --run      # set up, then exec opencode in the worktree
 #
-# Every loop runs on its own X display, started as Xvfb when down (loop 1 uses
-# an inherited display or :10; loop N >= 2 uses :(9+N)), with its own git
-# worktree (branch parity/loop-N) and bridge port (6970, 6980, 6990, ...).
+# Every loop runs on its own Xvfb display, started when down (loop 1 uses an
+# inherited display or :10; loop N >= 2 uses :(9+N)), plus its own headless
+# weston compositor that hosts the GPU-rendered Godot editor and games on a
+# Wayland socket. It has its own git worktree (branch parity/loop-N) and bridge
+# port (6970, 6980, 6990, ...).
 #
 # Options:
 #   --run             exec opencode in the loop worktree when setup succeeds
@@ -65,8 +67,10 @@ parity_loop_vars "${id:-${PARITY_LOOP:-1}}"
 
 mkdir -p "$PARITY_LOOP_DIR"/{logs,xdg-data,xdg-config,xdg-cache,home}
 
-# 1) dedicated X display: every loop gets one, started when missing
+# 1) dedicated displays: Xvfb for the Java reference and X11 tooling, weston
+#    (GL) for the Godot editor/game so rendering runs on the GPU
 parity_ensure_display
+parity_ensure_wayland || true
 
 # 2) git worktree for loops >= 2
 if [ "$PARITY_LOOP" -ge 2 ]; then
@@ -139,10 +143,17 @@ fi
 # 4) session environment
 export PATH="$PARITY_MCP_BIN:$PATH"
 export DISPLAY="$PARITY_DISPLAY"
+godot_display="x11 ($PARITY_DISPLAY, software)"
+if [ -S "$PARITY_WAYLAND_DIR/$PARITY_WAYLAND_SOCKET" ]; then
+  export WAYLAND_DISPLAY="$PARITY_WAYLAND_SOCKET"
+  export XDG_RUNTIME_DIR="$PARITY_WAYLAND_DIR"
+  godot_display="wayland ($PARITY_WAYLAND_SOCKET, weston/GL)"
+fi
 
 cat <<EOF
 [parity-loop $PARITY_LOOP] ready
-  display:      $PARITY_DISPLAY
+  display:      $PARITY_DISPLAY  (Java/X11)
+  godot:        $godot_display
   bridge port:  $PARITY_BRIDGE_PORT  (editor addon listens; MCP shim connects)
   worktree:     $PARITY_WORKTREE
   evals dir:    $PARITY_EVALS_DIR

@@ -19,7 +19,7 @@ for dir in "$PARITY_LOOPS_DIR"/run/loop-*; do
   ids+=("$id")
 done
 
-printf '%-4s %-6s %-6s %-10s %-9s %s\n' LOOP DISPLAY BRIDGE XVFB LISTEN WORKTREE
+printf '%-4s %-6s %-6s %-10s %-16s %-9s %s\n' LOOP DISPLAY BRIDGE XVFB WESTON LISTEN WORKTREE
 for id in "${ids[@]}"; do
   parity_loop_vars "$id"
   dir="$PARITY_LOOP_DIR"
@@ -31,10 +31,17 @@ for id in "${ids[@]}"; do
   if [ -f "$dir/xvfb.pid" ] && kill -0 "$(cat "$dir/xvfb.pid")" 2>/dev/null; then
     xvfb="pid $(cat "$dir/xvfb.pid")"
   fi
+  weston="down"
+  if [ -S "$PARITY_WAYLAND_DIR/$PARITY_WAYLAND_SOCKET" ]; then
+    weston="up"
+  fi
+  if [ -f "$dir/weston.pid" ] && kill -0 "$(cat "$dir/weston.pid")" 2>/dev/null; then
+    weston="pid $(cat "$dir/weston.pid")"
+  fi
   listen="-"
   if command -v ss >/dev/null 2>&1 && ss -ltn 2>/dev/null | grep -qE ":${PARITY_BRIDGE_PORT}[[:space:]]"; then
     listen="yes"
   fi
-  printf '%-4s %-6s %-6s %-10s %-9s %s\n' \
-    "$id" "$PARITY_DISPLAY" "$PARITY_BRIDGE_PORT" "$xvfb" "$listen" "$PARITY_WORKTREE"
+  printf '%-4s %-6s %-6s %-10s %-16s %-9s %s\n' \
+    "$id" "$PARITY_DISPLAY" "$PARITY_BRIDGE_PORT" "$xvfb" "$weston" "$listen" "$PARITY_WORKTREE"
 done

@@ -57,7 +57,9 @@ Body sections: `## Steps` (exact tool + action + params, one step per call),
   through `get_global_rect().get_center()`.
 - **Preconditions include the host.** Servers that need a display or another
   process-start environment variable belong in `preconditions`; the Java leg
-  (computer-mcp) needs `DISPLAY` at opencode start, the Godot leg does not.
+  (computer-mcp) needs `DISPLAY` at opencode start, the Godot leg does not (the
+  loop wrapper hands it the weston/Wayland compositor through
+  `WAYLAND_DISPLAY`/`XDG_RUNTIME_DIR`).
 - **Keep it current.** When a step fails at the same commit, fix the chain in
   the same change that fixes the tooling.
 - **Server-tag each chain.** The Godot leg uses open-godot-mcp (`godot_*`
