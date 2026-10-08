@@ -294,9 +294,7 @@ impl Sim {
     }
 
     /// Mutable live unit runtime, if installed.
-    pub fn unit_runtime_mut(
-        &mut self,
-    ) -> Option<bevy_ecs::change_detection::Mut<'_, UnitRuntime>> {
+    pub fn unit_runtime_mut(&mut self) -> Option<bevy_ecs::change_detection::Mut<'_, UnitRuntime>> {
         self.ecs.0.get_non_send_mut::<UnitRuntime>()
     }
 
@@ -430,9 +428,7 @@ pub fn unit_update_system(world: &mut World) {
                 } = &mut runtime;
                 update_ground(world, grid, pathfinder, team, entity, target)
             };
-            if arrived
-                && let Some(mut stored) = world.get_mut::<ControllerSlot>(entity)
-            {
+            if arrived && let Some(mut stored) = world.get_mut::<ControllerSlot>(entity) {
                 stored.target = None;
             }
         }
@@ -444,13 +440,8 @@ pub fn unit_update_system(world: &mut World) {
                 (Some(before), Some(after)) => (after.0 - before.0, after.1 - before.1),
                 _ => (0.0, 0.0),
             };
-            let _ = movement::update_kinematics(
-                world,
-                &runtime.grid,
-                &runtime.content,
-                entity,
-                delta,
-            );
+            let _ =
+                movement::update_kinematics(world, &runtime.grid, &runtime.content, entity, delta);
         }
     }
 
@@ -630,10 +621,7 @@ pub fn run_wave_system(world: &mut World) {
             groups_from_rules(&campaign.session.rules),
             campaign.session.wave_team(),
         ),
-        Some(campaign) => (
-            runtime.waves.get().to_vec(),
-            campaign.session.wave_team(),
-        ),
+        Some(campaign) => (runtime.waves.get().to_vec(), campaign.session.wave_team()),
         None => (runtime.waves.get().to_vec(), runtime.wave_team),
     };
     runtime.wave_team = wave_team;
@@ -655,13 +643,13 @@ pub fn run_wave_system(world: &mut World) {
         .tiles
         .array()
         .iter()
-        .filter_map(|tile| {
+        .filter(|tile| {
             runtime
                 .content
                 .block(tile.overlay)
                 .is_some_and(|def| def.kind == BlockKind::SpawnBlock)
-                .then(|| TilePos::new(tile.x, tile.y))
         })
+        .map(|tile| TilePos::new(tile.x, tile.y))
         .collect();
     runtime.wave_spawner.set_spawns(spawns);
 
@@ -677,7 +665,10 @@ pub fn run_wave_system(world: &mut World) {
     let emitted = wave_spawner.spawn_enemies(&groups, wave, |group, x, y, rotation| {
         let team = group.team.unwrap_or(wave_team);
         let entity = group.create_unit(world, content, *seq, team, x, y, rotation, wave)?;
-        let payloads = group.payloads.as_ref().map_or(0, |payloads| payloads.len() as u64);
+        let payloads = group
+            .payloads
+            .as_ref()
+            .map_or(0, |payloads| payloads.len() as u64);
         *seq = seq.wrapping_add(1 + payloads);
         spawned.push(entity);
         Some(entity)
@@ -788,7 +779,8 @@ fn nearest_enemy_building(world: &World, team: u8, x: f32, y: f32) -> Option<Ent
         let replace = match best {
             None => true,
             Some((best_dist, best_entity)) => {
-                dist2 < best_dist || (dist2 == best_dist && entity.id().index() < best_entity.index())
+                dist2 < best_dist
+                    || (dist2 == best_dist && entity.id().index() < best_entity.index())
             }
         };
         if replace {
@@ -806,7 +798,11 @@ fn building_center(world: &World, entity: Entity) -> Option<(f32, f32)> {
     world
         .get::<BuildingComp>(entity)
         .map(|comp| tile_center(comp.pos))
-        .or_else(|| world.get::<Building>(entity).map(|building| tile_center(building.tile)))
+        .or_else(|| {
+            world
+                .get::<Building>(entity)
+                .map(|building| tile_center(building.tile))
+        })
 }
 
 /// Center tile of a live building.
@@ -920,7 +916,10 @@ mod tests {
         }
         let runtime = sim.unit_runtime().expect("runtime");
         assert!(runtime.bullets_created > 0, "wave unit fired bullets");
-        assert!(runtime.units_removed + runtime.bullets_removed > 0, "combat resolved");
+        assert!(
+            runtime.units_removed + runtime.bullets_removed > 0,
+            "combat resolved"
+        );
         let moved = runtime
             .units
             .iter()
@@ -999,5 +998,131 @@ mod tests {
         );
         assert_eq!(sim.group_counts().get("unit"), Some(&1));
         assert!(sim.unit_runtime().expect("runtime").units_created == 1);
+    }
+
+    /// The live campaign timer (`TickSet::Campaign` -> `runWave`) drives the
+    /// same spawn path and updates `state.enemies`/`spawner.isSpawning`.
+    #[test]
+    fn campaign_wave_timer_spawns_live_units() {
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+        use crate::game::State;
+        use crate::game::planet::EmptyNeighborhood;
+        use crate::game::play::PlaySession;
+        use crate::game::rules::Rules;
+        use crate::game::runtime::CampaignRuntime;
+        use crate::game::universe::Campaign;
+
+        let registry = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+            .expect("content");
+        let campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
+        let mut session = PlaySession::new(Rules {
+            waves: true,
+            wave_timer: true,
+            wave_spacing: 0.05,
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        session.phase = State::Playing;
+        session.spawn_count = 1;
+        session.wavetime = 0.001;
+        // Stable player core so `checkGameState` does not end the match.
+        let core_entity = Entity::from_raw_u32(1).expect("entity");
+        session
+            .teams
+            .register_core(core_entity, crate::ecs::TeamId(1), &session.rules);
+
+        let mut sim = Sim::new(1, 48, 48, BlockId::AIR, BlockId::AIR);
+        install(&mut sim);
+        let spawn = block_id(&sim, "spawn");
+        let index = sim.grid.tiles.index(5, 5);
+        sim.grid.tiles.geti_mut(index).overlay = BlockId::new(spawn);
+        sim.set_unit_wave_team(2);
+        sim.ecs
+            .0
+            .insert_resource(CampaignRuntime::new(session, campaign));
+        sim.refresh_unit_runtime();
+
+        for _ in 0..4 {
+            sim.tick().expect("tick");
+        }
+        let runtime = sim
+            .ecs
+            .0
+            .remove_resource::<CampaignRuntime>()
+            .expect("campaign runtime");
+        assert!(runtime.session.wave >= 1, "wave timer fired");
+        assert!(
+            runtime.session.enemies >= 1,
+            "live enemy count mirrored into the session"
+        );
+        assert!(
+            sim.group_counts().get("unit").copied().unwrap_or(0) >= 1,
+            "campaign timer spawned a live unit"
+        );
+        sim.ecs.0.insert_resource(runtime);
+    }
+}
+
+#[cfg(all(test, feature = "msav-import"))]
+mod msav_tests {
+    use super::*;
+    use crate::content::{BlockId, MemoryBundle, MemoryUnlockStore, create_base_content};
+    use crate::editor::context::EditorContext;
+    use crate::io::save::{SaveIo, SaveReadState};
+    use crate::world::building_io::DecodedBase;
+    use std::path::Path;
+
+    /// Evaluator repro over the vendored Ground Zero preset: a real sector with
+    /// its core materialized spawns wave units at the map's `spawn` overlay.
+    #[test]
+    fn ground_zero_wave_spawns_live_units() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../assets/maps/serpulo/groundZero.msav");
+        let Ok(bytes) = std::fs::read(&path) else {
+            return;
+        };
+        let mut content =
+            create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+                .expect("content");
+        let mut grid = WorldGrid::new(0, 0);
+        grid.begin_map_load();
+        let pending: Vec<(usize, DecodedBase)> = {
+            let mut context = EditorContext::new(&mut grid, &content);
+            let mut state = SaveReadState {
+                context: Some(&mut context),
+                content: Some(&mut content),
+                ..SaveReadState::default()
+            };
+            SaveIo::load_bytes(&bytes, &mut state).expect("map imports");
+            std::mem::take(&mut context.pending_buildings)
+        };
+        grid.end_map_load(&content);
+        let spawn = content.block_id("spawn").expect("spawn");
+        let spawns = grid
+            .tiles
+            .array()
+            .iter()
+            .filter(|tile| tile.overlay == spawn)
+            .count();
+        assert!(spawns > 0, "groundZero carries spawn overlay tiles");
+
+        let (width, height) = (grid.tiles.width, grid.tiles.height);
+        let air = BlockId::AIR;
+        let mut sim = Sim::new(1, width, height, air, air);
+        sim.grid = grid;
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        assert!(sim.materialize_map_buildings(&pending) > 0, "core linked");
+        sim.set_unit_wave_team(2);
+        sim.request_wave_spawn(0);
+        for _ in 0..120 {
+            sim.tick().expect("tick");
+        }
+        assert!(
+            sim.group_counts().get("unit").copied().unwrap_or(0) >= 1,
+            "groundZero wave spawned a live unit: {:?}",
+            sim.group_counts()
+        );
     }
 }

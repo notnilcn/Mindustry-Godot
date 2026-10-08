@@ -982,9 +982,6 @@ impl MindSimHost {
         if materialized > 0 {
             log::info!("load_sector: materialized {materialized} map building(s)");
         }
-        // The unit runtime snapshotted the grid before materialization; keep its
-        // terrain/path tiles in sync with the live map.
-        self.sim.refresh_unit_runtime();
         // The fresh `Sim` carries no IO executor; re-wire the seams so a queued
         // `request_save`/`request_load` drains at the next `IoSet` boundary.
         self.install_sim_seams();
