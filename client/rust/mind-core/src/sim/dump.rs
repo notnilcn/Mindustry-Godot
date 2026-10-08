@@ -112,12 +112,17 @@ pub(crate) fn build(sim: &Sim, all_tiles: bool) -> StateDump {
         if !all_tiles && block == BlockId::AIR && entity.is_none() {
             continue;
         }
+        // Team/rotation live on the building entity (`Tile.rotation()` delegates
+        // upstream); a tile with no building reports rotation `0`.
+        let rot = entity
+            .and_then(|handle| sim.ecs.0.get::<crate::ecs::BuildingComp>(handle))
+            .map_or(0, |comp| comp.rot);
         tiles.push(DumpTile {
             x: pos.x(),
             y: pos.y(),
             block: sim.block_name_of(block),
             team: 0,
-            rot: 0,
+            rot,
             build_id: entity.and_then(|handle| sim.ecs.seq_of(handle)),
         });
     }

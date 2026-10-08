@@ -20,7 +20,7 @@ use crate::content::{
 
 use super::behavior::{BehaviorRegistry, BuildingBehavior, BuildingKind, resolve_behavior};
 use super::block_kind_data::BlockKindData;
-use super::config::ConfigHandlers;
+use super::config::{ConfigHandlers, ConfigKind};
 use super::consumers::Consumers;
 use super::draw::DrawSpec;
 
@@ -150,6 +150,12 @@ impl BlockInstance {
             self.kind_data.family(),
             super::block_kind_data::BlockFamily::Environment
         )
+    }
+
+    /// Config value kinds the block's behavior accepts
+    /// (`Block.configurations` keys; `Block.config(...)`).
+    pub fn config_kinds(&self) -> &'static [ConfigKind] {
+        self.behavior.config_kinds()
     }
 
     /// Consumer count.

@@ -390,10 +390,18 @@ func _init() -> void:
 	var paused_dialog: Control = load("res://scenes/ui/dialogs/paused_dialog.tscn").instantiate()
 	root.add_child(paused_dialog)
 	paused_dialog.call("shown")
-	var buttons := paused_dialog.get_node_or_null("Center/Panel/Layout/Buttons")
-	var objective: Button = buttons.get_node_or_null("objective") if buttons != null else null
-	var abandon: Button = buttons.get_node_or_null("abandon") if buttons != null else null
-	var planet: Button = buttons.get_node_or_null("planetmap") if buttons != null else null
+	var objective := paused_dialog.find_child("objective", true, false) as Button
+	var abandon := paused_dialog.find_child("abandon", true, false) as Button
+	var planet := paused_dialog.find_child("planetmap", true, false) as Button
+	var panel := paused_dialog.get_node_or_null("Center/Panel") as Control
+	_check(
+		panel != null and panel.get_combined_minimum_size().x <= panel.custom_minimum_size.x,
+		"pause dialog button column does not widen the dialog panel (got %s of %s)"
+				% [
+					panel.get_combined_minimum_size().x if panel != null else -1.0,
+					panel.custom_minimum_size.x if panel != null else -1.0,
+				]
+	)
 	_check(
 		objective != null and objective.visible,
 		"pause dialog shows @objective for a described campaign sector"
@@ -406,6 +414,21 @@ func _init() -> void:
 		planet != null and not planet.visible,
 		"pause dialog keeps the mobile @planetmap off desktop"
 	)
+	# EV-0063: `shown()` runs inside `MindUi.open_dialog`, which mutably binds
+	# `MindUi`; a synchronous `is_mobile()` re-entry panics ("bind() failed,
+	# already bound") and wedges the UI, so the mobile gate must resolve after
+	# that call returns. Flip mobile preview so the branch is observable here.
+	if ui != null:
+		ui.call("set_mobile_preview", true)
+		ui.call("register_dialog", "paused_check", paused_dialog, false)
+		_check(bool(ui.call("open_dialog", "paused_check", "")), "pause dialog opens through MindUi")
+		await process_frame
+		_check(
+			planet != null and planet.visible,
+			"pause dialog resolves the mobile @planetmap after the MindUi bind returns"
+		)
+		ui.call("close_dialog", "paused_check")
+		ui.call("set_mobile_preview", false)
 	if abandon != null:
 		abandon.pressed.emit()
 		ui.call("resolve_confirm", true)

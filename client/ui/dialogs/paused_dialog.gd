@@ -32,25 +32,69 @@ func _ready() -> void:
 ## Upstream desktop layout: `@objective` (when the sector preset has a
 ## description), `@abandon`, `@back` (resume), `@settings`, `@hostserver`,
 ## `@quit`. `@planetmap`/`@research` are the mobile campaign branch.
+##
+## `PausedDialog.rebuild` stacks the desktop campaign entries in rows
+## (`PausedDialog.java:69-109`); `MindDialog.buttons` is a single HBox, so the
+## dialog builds its own row column inside it. One flat row overflows the
+## window once the campaign entries are present.
 func _build() -> void:
-	_objective_button = add_button(_t("@objective"), _open_objective, "info", 240.0)
+	# code-instantiated: the pause dialog's fixed upstream row layout; the
+	# shared `buttons` HBox is a single row for every dialog.
+	var rows := VBoxContainer.new()
+	rows.name = "Rows"
+	rows.add_theme_constant_override("separation", 6)
+	if buttons != null:
+		buttons.add_child(rows)
+
+	var campaign_row := _row(rows)
+	_objective_button = _add_to(campaign_row, _t("@objective"), _open_objective, "info", 240.0)
 	_objective_button.name = "objective"
 	_objective_button.visible = false
-	_abandon_button = add_button(_t("@abandon"), _confirm_abandon, "cancel", 240.0)
+	_abandon_button = _add_to(campaign_row, _t("@abandon"), _confirm_abandon, "cancel", 240.0)
 	_abandon_button.name = "abandon"
 	_abandon_button.visible = false
-	var back := add_close_button(240.0)
+
+	var navigation_row := _row(rows)
+	var back := _add_to(navigation_row, _t("@back"), _close_pressed, "left", 240.0)
 	back.name = "back"
-	var settings_button := add_button(_t("@settings"), _open_settings, "settings", 240.0)
+	var settings_button := _add_to(navigation_row, _t("@settings"), _open_settings, "settings", 240.0)
 	settings_button.name = "settings"
-	_host_button = add_button(_t("@hostserver"), _open_host, "host", 240.0)
-	_host_button.name = "hostserver"
-	_host_button.disabled = _net_active()
-	_planet_button = add_button(_t("@planetmap"), _open_planet, "map", 240.0)
+
+	# Mobile campaign branch entry (`PausedDialog.java:140-149`); desktop keeps
+	# it hidden and takes no row space.
+	_planet_button = _add_to(rows, _t("@planetmap"), _open_planet, "map", 240.0)
 	_planet_button.name = "planetmap"
 	_planet_button.visible = false
-	_quit_button = add_button(_t("@quit"), _confirm_quit, "exit", 240.0)
+
+	_host_button = _add_to(rows, _t("@hostserver"), _open_host, "host", 484.0)
+	_host_button.name = "hostserver"
+	_host_button.disabled = _net_active()
+	_quit_button = _add_to(rows, _t("@quit"), _confirm_quit, "exit", 240.0)
 	_quit_button.name = "quit"
+
+
+## A centered two-entry row of the dialog's own button column.
+func _row(parent: Container) -> HBoxContainer:
+	# code-instantiated: fixed upstream row grouping (campaign entries pair
+	# up); the shared button row is a single HBox.
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 6)
+	parent.add_child(row)
+	return row
+
+
+## `MindDialog.add_button` variant that targets one row of this dialog.
+func _add_to(
+		parent: Container, text_value: String, listener: Callable, icon_name: String, width: float
+) -> Button:
+	# code-instantiated: the entry set is fixed per the upstream rebuild branch.
+	var button := MindWidgets.icon_button(icon_name, text_value)
+	button.custom_minimum_size.x = width
+	if listener.is_valid():
+		button.pressed.connect(listener)
+	parent.add_child(button)
+	return button
 
 
 func shown() -> void:
@@ -69,6 +113,15 @@ func _refresh_campaign_buttons() -> void:
 	if _abandon_button != null:
 		_abandon_button.visible = campaign
 		_abandon_button.disabled = _net_active() or _game_over()
+	if _planet_button != null:
+		# `_is_mobile()` re-enters `MindUi`, which `MindUi.open_dialog` mutably
+		# binds while calling `shown()`; resolve the mobile branch after that
+		# call returns (same deferral as the game-over HUD toggle, EV-0061).
+		_apply_planet_visibility.call_deferred(campaign)
+
+
+## Mobile-branch gate for `@planetmap`, deferred out of the `MindUi` bind.
+func _apply_planet_visibility(campaign: bool) -> void:
 	if _planet_button != null:
 		_planet_button.visible = campaign and _is_mobile()
 

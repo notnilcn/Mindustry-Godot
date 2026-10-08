@@ -75,6 +75,11 @@ func _rebuild_roots() -> void:
 		button.pressed.connect(_select_root.bind(root))
 		_roots.add(button).grow_x_axis().pad(2)
 		_roots.row()
+	# The rail is a nested MindTable whose deferred sort does not run after a
+	# runtime rebuild; place the roots now and again next frame once the rail
+	# has its final size (same nudge as the load/custom-game grids).
+	_roots.sort_now()
+	_roots.call_deferred("sort_now")
 
 
 func _select_root(root: String) -> void:
@@ -114,6 +119,10 @@ func _rebuild_nodes() -> void:
 			row.add_child(MindWidgets.label("ready"))
 		_nodes.add(row).grow_x_axis().pad(2)
 		_nodes.row()
+	# Same nested-table nudge as the root rail; rows otherwise stack after a
+	# root switch or purchase refresh.
+	_nodes.sort_now()
+	_nodes.call_deferred("sort_now")
 
 
 ## Bundle label for a tech node's content (`<type>.<name>.name`); the type is

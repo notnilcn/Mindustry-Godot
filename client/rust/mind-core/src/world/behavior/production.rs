@@ -48,6 +48,20 @@ fn instance(
     world.get_resource::<BlockTable>()?.instance(block)
 }
 
+/// `Block.consumesItem(item)`: the block declares an item consumer for `item`
+/// (the `itemFilter` built in `Block.init()` from every `ConsumeItems`).
+fn consumes_item(world: &World, e: Entity, item: ItemId) -> bool {
+    instance(world, e).is_some_and(|inst| {
+        inst.consumers.all.iter().any(|consumer| {
+            matches!(
+                &consumer.kind,
+                crate::world::consumers::ConsumeInstanceKind::Items(stacks)
+                    if stacks.iter().any(|stack| stack.item == item)
+            )
+        })
+    })
+}
+
 /// Generic-crafter knobs for any crafter-like block.
 fn crafter_knobs(data: &BlockKindData) -> Option<CrafterDef> {
     match data {
@@ -177,6 +191,48 @@ impl BuildingBehavior for CrafterBehavior {
         match &inst.kind_data {
             BlockKindData::AttributeCrafter(def) => def.base_efficiency.max(0.0),
             _ => 1.0,
+        }
+    }
+
+    /// `BuildingComp.acceptItem`: `block.consumesItem(item) && items.get(item) <
+    /// getMaximumAccepted(item)`.
+    fn accept_item(&self, world: &World, e: Entity, _src: Entity, item: ItemId) -> bool {
+        let stored = world.get::<ItemModule>(e).map(|m| m.get(item)).unwrap_or(0);
+        consumes_item(world, e, item) && stored < self.get_maximum_accepted(world, e, item)
+    }
+
+    /// `GenericCrafterBuild.getMaximumAccepted` (`itemCapacity`).
+    fn get_maximum_accepted(&self, world: &World, e: Entity, _item: ItemId) -> i32 {
+        transfer::item_capacity(world, e)
+    }
+
+    /// `BuildingComp.handleItem` default (one item into the module).
+    fn handle_item(&self, world: &mut World, e: Entity, src: Entity, item: ItemId) {
+        transfer::default_handle_item(world, e, src, item);
+    }
+
+    /// `BuildingComp.acceptStack` default (`acceptItem` + capacity headroom).
+    fn accept_stack(
+        &self,
+        world: &World,
+        e: Entity,
+        item: ItemId,
+        amount: i32,
+        source: Option<Entity>,
+    ) -> i32 {
+        let source_ok = match source {
+            Some(src) => world
+                .get::<crate::entities::comp::TeamComp>(src)
+                .zip(world.get::<crate::entities::comp::TeamComp>(e))
+                .is_some_and(|(a, b)| a.team == b.team),
+            None => true,
+        };
+        if source_ok && self.accept_item(world, e, source.unwrap_or(e), item) {
+            (self.get_maximum_accepted(world, e, item) - transfer::item_count(world, e, item))
+                .min(amount)
+                .max(0)
+        } else {
+            0
         }
     }
 
@@ -827,5 +883,96 @@ mod tests {
             stored >= 1,
             "expected copper delivered to the core, got {stored}"
         );
+    }
+
+    /// EV-0058 repro (transfer half): a graphite-press beside a coal drill must
+    /// accept the delivered coal (`GenericCrafterBuild.acceptItem` /
+    /// `getMaximumAccepted`) and craft graphite.
+    #[test]
+    fn graphite_press_accepts_coal_from_a_neighbor_and_crafts() {
+        use crate::world::BuildHarness;
+
+        let mut harness = BuildHarness::new(16, 16, 7);
+        let press = harness
+            .content()
+            .block_id("graphite-press")
+            .expect("graphite-press");
+        let drill = harness
+            .content()
+            .block_id("mechanical-drill")
+            .expect("mechanical-drill");
+        let coal = harness.content().item_id("coal").expect("coal");
+        // Drill 2x2 at (2,4) covers (2-3,4-5); press 2x2 at (4,4) covers
+        // (4-5,4-5) and is edge-adjacent.
+        assert!(harness.place(2, 4, drill, 0, true));
+        assert!(harness.place(4, 4, press, 0, true));
+        let drill_e = harness.build_at(2, 4).expect("drill entity");
+        let press_e = harness.build_at(4, 4).expect("press entity");
+        if let Some(mut state) = harness.world.get_mut::<DrillState>(drill_e) {
+            state.dominant_item = Some(coal);
+            state.dominant_items = 4;
+        }
+        for _ in 0..2000 {
+            harness.tick();
+        }
+        let graphite = harness.content().item_id("graphite").expect("graphite");
+        let produced = harness
+            .world
+            .get::<ItemModule>(press_e)
+            .map(|items| items.get(graphite))
+            .unwrap_or(0);
+        assert!(produced >= 1, "press produced no graphite: {produced}");
+    }
+
+    /// Every vanilla factory named by the EV-0058 audit must carry its upstream
+    /// output stacks (`Blocks.java` crafting region).
+    #[test]
+    fn vanilla_factory_recipes_define_their_outputs() {
+        let content = test_registry();
+        let table = BlockTable::build_default(&content).expect("table");
+        let expected_items: &[(&str, &str, i32)] = &[
+            ("graphite-press", "graphite", 1),
+            ("multi-press", "graphite", 2),
+            ("silicon-crucible", "silicon", 8),
+            ("plastanium-compressor", "plastanium", 1),
+            ("phase-weaver", "phase-fabric", 1),
+            ("pyratite-mixer", "pyratite", 1),
+            ("blast-mixer", "blast-compound", 1),
+            ("silicon-arc-furnace", "silicon", 4),
+            ("carbide-crucible", "carbide", 1),
+            ("surge-crucible", "surge-alloy", 1),
+            ("phase-synthesizer", "phase-fabric", 1),
+        ];
+        for (name, item, amount) in expected_items {
+            let inst = table.get_named(name).expect(name);
+            let knobs = crafter_knobs(&inst.kind_data).expect(name);
+            let id = content.item_id(item).expect(item);
+            assert!(
+                knobs.output_items.contains(&(id.raw(), *amount)),
+                "{name} missing output {item} x{amount}: {:?}",
+                knobs.output_items
+            );
+        }
+        let expected_liquids: &[(&str, &str, f32)] = &[
+            ("cryofluid-mixer", "cryofluid", 12.0 / 60.0),
+            ("electrolyzer", "ozone", 4.0 / 60.0),
+            ("electrolyzer", "hydrogen", 6.0 / 60.0),
+            ("atmospheric-concentrator", "nitrogen", 16.0 / 60.0),
+            ("slag-centrifuge", "gallium", 1.0 / 60.0),
+            ("cyanogen-synthesizer", "cyanogen", 12.0 / 60.0),
+        ];
+        for (name, liquid, amount) in expected_liquids {
+            let inst = table.get_named(name).expect(name);
+            let knobs = crafter_knobs(&inst.kind_data).expect(name);
+            let id = content.liquid_id(liquid).expect(liquid);
+            assert!(
+                knobs
+                    .output_liquids
+                    .iter()
+                    .any(|(l, a)| *l == id.raw() && (a - amount).abs() < 1e-6),
+                "{name} missing output {liquid} {amount}: {:?}",
+                knobs.output_liquids
+            );
+        }
     }
 }

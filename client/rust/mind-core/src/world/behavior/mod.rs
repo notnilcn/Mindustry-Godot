@@ -19,7 +19,7 @@ use crate::content::{BlockDef, BlockId, ItemId, LiquidId};
 use crate::io::entity::{EntityReader, EntityWriter};
 
 use super::block::BlockInstance;
-use super::config::ConfigValue;
+use super::config::{ConfigKind, ConfigValue};
 use super::modules::PowerGraphId;
 use super::stats::Stats;
 
@@ -211,6 +211,13 @@ pub trait BuildingBehavior: Send + Sync {
     /// `Building.onProximityRemoved()`.
     fn on_proximity_removed(&self, world: &mut World, e: Entity) {
         let _ = (world, e);
+    }
+
+    /// Config value kinds this build accepts (`Block.configurations` keys;
+    /// `Block.config(...)`). Drives the config fragment's option list, mirroring
+    /// `Building.buildConfiguration`.
+    fn config_kinds(&self) -> &'static [ConfigKind] {
+        &[]
     }
 
     /// `Building.config()` readback.
