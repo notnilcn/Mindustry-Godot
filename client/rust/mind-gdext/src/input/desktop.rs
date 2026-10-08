@@ -213,6 +213,10 @@ pub struct DesktopBridge {
     /// A dialog is open (`scene.hasDialog()`): key edges fire no bindings and
     /// the camera does not pan/zoom.
     pub ui_dialog: bool,
+    /// `settings.getBool("commandmodehold", true)`: command mode follows the
+    /// held command key when on (upstream default) and toggles on a key press
+    /// when off.
+    command_mode_hold: bool,
 }
 
 impl Default for DesktopBridge {
@@ -243,6 +247,7 @@ impl DesktopBridge {
             last_tap_type: None,
             text_focus: false,
             ui_dialog: false,
+            command_mode_hold: true,
         }
     }
 
@@ -361,17 +366,21 @@ impl DesktopBridge {
 
     /// Consumes one raw event (bindings are only read).
     pub fn handle(&mut self, bindings: &BindingState, event: RawEvent) {
+        let mut command_edge: Option<bool> = None;
         match event {
             RawEvent::KeyDown { code } => {
                 let fresh = self.pressed.insert(code.clone());
+                if bindings.name(ids::COMMAND_MODE) == Some(code.as_str()) {
+                    command_edge = Some(true);
+                }
                 if fresh && !self.text_focus && !self.ui_dialog {
                     self.key_down_event(bindings, &code);
                 }
             }
             RawEvent::KeyUp { code } => {
                 self.pressed.remove(&code);
-                if !self.text_focus && !self.ui_dialog {
-                    self.key_up_event(bindings, &code);
+                if bindings.name(ids::COMMAND_MODE) == Some(code.as_str()) {
+                    command_edge = Some(false);
                 }
             }
             RawEvent::MouseMove { x, y } => {
@@ -390,6 +399,9 @@ impl DesktopBridge {
             }
             _ => {}
         }
+        // `DesktopInput.update` runs once per frame; applying it per edge keeps
+        // hold mode in step with the event stream.
+        self.update_command_mode(bindings, command_edge);
     }
 
     /// Dispatches every binding whose current key matches a down edge.
@@ -413,14 +425,54 @@ impl DesktopBridge {
         }
     }
 
-    /// Tap on release (`keyTap` semantics) for bindings that must not fire while
-    /// held (`command_mode` shares `shiftLeft` with `boost`).
+    /// `DesktopInput.update` command-mode gate: only while no placement block is
+    /// selected and no UI field/dialog owns input. The upstream boost-conflict
+    /// guard (a live player unit that can boost sharing the key) needs the
+    /// possessed-unit feed, which the bridge does not have yet.
+    fn command_mode_allowed(&self) -> bool {
+        self.controller.state.block.is_none() && !self.text_focus && !self.ui_dialog
+    }
+
+    /// Re-applies the `DesktopInput.update` command-mode branch after one event.
     ///
-    /// `DesktopInput.update` toggles command mode on a command-mode key tap when
-    /// no placement block is selected; the shared default key does not disable
-    /// the tap.
-    fn key_up_event(&mut self, bindings: &BindingState, code: &str) {
-        if bindings.name(ids::COMMAND_MODE) == Some(code) && self.controller.state.block.is_none() {
+    /// The gate closing always clears command mode (upstream else-branch).
+    /// While the gate is open and `commandmodehold` is on, command mode follows
+    /// the command key: a command-key edge sets it, and any event while the key
+    /// is held keeps it on. A released key does not clear a mode latched through
+    /// `toggle_command_mode` (the MCP/test entry point), so that probe stays
+    /// usable without holding the key.
+    pub fn update_command_mode(&mut self, bindings: &BindingState, command_edge: Option<bool>) {
+        if !self.command_mode_allowed() {
+            self.set_command_mode(false);
+            return;
+        }
+        if !self.command_mode_hold {
+            // The tap branch toggles on the key press edge (`dispatch_action`);
+            // the latched value persists until the gate closes.
+            return;
+        }
+        match command_edge {
+            Some(down) => self.set_command_mode(down),
+            None if self.key_down(bindings, ids::COMMAND_MODE) => self.set_command_mode(true),
+            None => {}
+        }
+    }
+
+    /// Applies the `commandmodehold` client setting (defaults to upstream true).
+    pub fn set_command_mode_hold(&mut self, hold: bool) {
+        self.command_mode_hold = hold;
+    }
+
+    /// Sets command mode to `enabled` (`DesktopInput.update` assignment).
+    /// Turning it off clears the RTS selection like `toggle_command_mode`.
+    pub fn set_command_mode(&mut self, enabled: bool) {
+        if self.controller.state.command_mode == enabled {
+            return;
+        }
+        if enabled {
+            self.controller.state.command_mode = true;
+            self.fire_hotkey("command_mode");
+        } else {
             self.toggle_command_mode();
         }
     }
@@ -472,7 +524,11 @@ impl DesktopBridge {
                 }
             }
             "command_mode" => {
-                // Toggled on the key-up tap (`key_up_event`); ignore the down edge.
+                // `input.keyTap` is the press edge (`justPressed`); hold mode is
+                // applied per frame by `update_command_mode`.
+                if !self.command_mode_hold && self.command_mode_allowed() {
+                    self.toggle_command_mode();
+                }
             }
             "select_all_units" | "select_all_unit_transport" => {
                 self.select_all_units(bindings, false);
@@ -615,8 +671,8 @@ impl DesktopBridge {
 
     fn select_all_units(&mut self, bindings: &BindingState, factories: bool) {
         // `selectAllUnits` only runs in command mode upstream; enabling it here
-        // gives the player a direct entry point (`command_mode` shares the
-        // `boost` key by default and is otherwise only rebind/reachable).
+        // gives the player a direct entry point without first holding the
+        // command-mode key.
         if !self.controller.state.command_mode {
             self.toggle_command_mode();
         }
@@ -1350,29 +1406,39 @@ mod tests {
     use super::*;
 
     #[test]
-    fn command_mode_tap_toggles_with_shared_default_binding() {
-        // `DesktopInput.update`: `command_mode` and `boost` both default to
-        // `shiftLeft`; with no placement block a key tap toggles command mode.
+    fn command_mode_hold_tracks_the_shared_default_key() {
+        // `DesktopInput.update` + `commandmodehold` default true: command mode
+        // follows the held command key (`boost` shares `shiftLeft`).
         let mut bridge = DesktopBridge::new();
         let bindings = BindingState::new();
         assert_eq!(bindings.name(ids::COMMAND_MODE), Some("shiftLeft"));
         assert_eq!(bindings.name(ids::BOOST), Some("shiftLeft"));
 
         bridge.handle(&bindings, RawEvent::key_down("shiftLeft"));
-        assert!(!bridge.controller.state.command_mode);
-        bridge.handle(&bindings, RawEvent::key_up("shiftLeft"));
         assert!(bridge.controller.state.command_mode);
         assert_eq!(bridge.last_action, "command_mode");
-        assert_eq!(bridge.action_count, 1);
-
-        // The next tap toggles back off.
-        bridge.handle(&bindings, RawEvent::key_down("shiftLeft"));
         bridge.handle(&bindings, RawEvent::key_up("shiftLeft"));
         assert!(!bridge.controller.state.command_mode);
     }
 
     #[test]
-    fn command_mode_tap_ignored_while_placing() {
+    fn command_mode_tap_toggles_when_hold_disabled() {
+        // `commandmodehold=false`: `input.keyTap` toggles on the press edge.
+        let mut bridge = DesktopBridge::new();
+        bridge.set_command_mode_hold(false);
+        let bindings = BindingState::new();
+
+        bridge.handle(&bindings, RawEvent::key_down("shiftLeft"));
+        assert!(bridge.controller.state.command_mode);
+        bridge.handle(&bindings, RawEvent::key_up("shiftLeft"));
+        assert!(bridge.controller.state.command_mode);
+
+        bridge.handle(&bindings, RawEvent::key_down("shiftLeft"));
+        assert!(!bridge.controller.state.command_mode);
+    }
+
+    #[test]
+    fn command_mode_ignored_while_placing() {
         // `DesktopInput.update` requires `block == null`.
         let mut bridge = DesktopBridge::new();
         let bindings = BindingState::new();
@@ -1382,7 +1448,42 @@ mod tests {
             .select_block(Some(BlockId::STONE_WALL));
 
         bridge.handle(&bindings, RawEvent::key_down("shiftLeft"));
+        assert!(!bridge.controller.state.command_mode);
+    }
+
+    #[test]
+    fn command_mode_api_latch_survives_events_without_the_key() {
+        // `MindInput.toggle_command_mode()` (MCP/test) latches command mode;
+        // hold mode must not clear it while the command key is up.
+        let mut bridge = DesktopBridge::new();
+        let bindings = BindingState::new();
+        bridge.toggle_command_mode();
+        assert!(bridge.controller.state.command_mode);
+
+        bridge.handle(&bindings, RawEvent::MouseMove { x: 10.0, y: 10.0 });
+        bridge.update_command_mode(&bindings, None);
+        assert!(bridge.controller.state.command_mode);
+
+        // A command-key edge still takes over.
+        bridge.handle(&bindings, RawEvent::key_down("shiftLeft"));
         bridge.handle(&bindings, RawEvent::key_up("shiftLeft"));
+        assert!(!bridge.controller.state.command_mode);
+    }
+
+    #[test]
+    fn command_mode_released_when_placement_block_selected() {
+        // `DesktopInput.update` assigns `commandMode = false` in the else
+        // branch, so selecting a block while holding the key drops it.
+        let mut bridge = DesktopBridge::new();
+        let bindings = BindingState::new();
+        bridge.handle(&bindings, RawEvent::key_down("shiftLeft"));
+        assert!(bridge.controller.state.command_mode);
+
+        bridge
+            .controller
+            .state
+            .select_block(Some(BlockId::STONE_WALL));
+        bridge.update_command_mode(&bindings, None);
         assert!(!bridge.controller.state.command_mode);
     }
 }

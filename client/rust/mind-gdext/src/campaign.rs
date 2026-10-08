@@ -448,6 +448,7 @@ impl MindCampaign {
         // Persist attempts/rules; the live tile save is queued for the next IO
         // tick (`Control.playNewSector` -> `saves.saveSector`).
         self.persist();
+        self.invalidate_ui_block_catalog();
         if installed
             && let Some(save_name) = self
                 .campaign
@@ -747,6 +748,7 @@ impl MindCampaign {
         self.push_campaign_to_runtime();
         if changed {
             self.persist();
+            self.invalidate_ui_block_catalog();
         }
         changed
     }
@@ -806,6 +808,42 @@ impl MindCampaign {
             dict.set(&key("error"), &error.as_str().to_variant());
         }
         dict
+    }
+
+    /// Placement-palette catalog JSON (`PlacementFragment.getUnlockedByCategory`).
+    ///
+    /// Campaign games filter through the settings-backed unlock store: only
+    /// blocks whose `<name>-unlocked` bit is set (or that `check_auto_unlocks`
+    /// grants at boot) and whose `BuildVisibility` is buildable survive, empty
+    /// categories are dropped, and other-planet content is hidden
+    /// (`Block.environmentBuildable` reads the active planet's `shownPlanets`).
+    /// Custom games expose the full build-menu inventory, mirroring
+    /// `unlockedNowHost`'s `!state.isCampaign()` branch, with the same planet
+    /// filter.
+    #[func]
+    pub fn block_catalog_json(&mut self) -> GString {
+        let catalog = if self.session.is_campaign() {
+            let store = SettingsUnlockStore::new(&mut self.settings);
+            mind_core::ui::campaign::block_catalog_unlocked_for(&store, &self.session.rules.planet)
+        } else {
+            mind_core::ui::campaign::block_catalog_for(&self.session.rules.planet)
+        };
+        GString::from(
+            serde_json::to_string(&catalog)
+                .unwrap_or_else(|_| String::from("{}"))
+                .as_str(),
+        )
+    }
+
+    /// Drops `MindUi`'s cached placement catalog after an unlock change; its
+    /// campaign-less fallback reads the persisted settings file directly.
+    fn invalidate_ui_block_catalog(&self) {
+        let Some(mut ui) = self.base().get_node_or_null("/root/MindUi") else {
+            return;
+        };
+        if ui.has_method("invalidate_block_catalog") {
+            let _ = ui.call("invalidate_block_catalog", &[]);
+        }
     }
 
     /// Completes an objective by index (`complete_objective` relay target).

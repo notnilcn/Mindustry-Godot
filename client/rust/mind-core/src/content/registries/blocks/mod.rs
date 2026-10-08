@@ -2266,6 +2266,18 @@ impl BlockDef {
         } else {
             spec.has_shadow.unwrap_or(true)
         };
+        // `Block.requirements(Category, ItemStack...)` defaults the visibility
+        // to `BuildVisibility.shown` (`Block.java:1231-1233`); the generated
+        // specs omit the field for those calls. Requirement-bearing blocks are
+        // therefore shown build-menu content, while requirement-less world
+        // content (floors/walls/props/ores/editor blocks) stays hidden.
+        let build_visibility = spec.build_visibility.unwrap_or({
+            if requirements.is_empty() {
+                BuildVisibility::Hidden
+            } else {
+                BuildVisibility::Shown
+            }
+        });
         let mut def = Self {
             id: BlockId::new(0),
             name: spec.name.to_owned(),
@@ -2306,7 +2318,7 @@ impl BlockDef {
             conductive_power: spec.conductive_power.unwrap_or(false),
             outputs_liquid: spec.outputs_liquid.unwrap_or(false),
             accepts_items: false,
-            build_visibility: spec.build_visibility.unwrap_or(BuildVisibility::Hidden),
+            build_visibility,
             env_required: spec.env_required.unwrap_or_default(),
             env_enabled: spec
                 .env_enabled
@@ -2974,7 +2986,8 @@ pub(crate) fn load_into(
     load(&mut sink)
 }
 
-/// `Block.postInit` auto `shownPlanets` (requires the planets registry).
+/// `Block.postInit` auto `shownPlanets` (requires the planets registry and the
+/// `planets::post_init_link` tree pass, which lands item planets first).
 pub(crate) fn post_init_link(registry: &mut ContentRegistry) -> Result<(), ContentError> {
     let planets: Vec<PlanetId> = registry
         .planets()

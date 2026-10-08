@@ -8,7 +8,7 @@ preconditions:
   - UI clicks resolve control centers via eval; never hardcode coordinates.
   - Java reference leg (optional comparison) needs computer-mcp with DISPLAY set at opencode process start.
 tools: [godot_exec, godot_input, godot_screenshot, godot_log]
-last_verified: 2026-10-08 9efd068 facade launch + loadout (runs/l2-20261008-012103-ev0052-research-purchase-godot); UI Play→Campaign→serpulo→OK→sector-panel action (runs/l2-20261008-014155-ev0037-core-launch-godot)
+last_verified: 2026-10-08 9efd068 facade launch + loadout (runs/l2-20261008-012103-ev0052-research-purchase-godot); UI Play→Campaign→serpulo→OK→sector-panel action (runs/l2-20261008-014155-ev0037-core-launch-godot, re-verified a1ca816 in runs/l2-20261008-133536-ev0013-block-picker-godot)
 ---
 
 # enter-campaign

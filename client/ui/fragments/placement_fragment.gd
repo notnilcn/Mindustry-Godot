@@ -13,7 +13,6 @@ extends Control
 
 var _selected_category := 0
 var _catalog: Dictionary = {}
-var _loaded := false
 
 @onready var search: LineEdit = get_node_or_null("Panel/Layout/Search")
 @onready var categories: HBoxContainer = get_node_or_null("Panel/Layout/Categories")
@@ -23,8 +22,9 @@ var _loaded := false
 func _ready() -> void:
 	if search != null:
 		search.text_changed.connect(func(_value: String) -> void: _rebuild())
-	# The HUD starts hidden in the menu; build the (content-booting) catalogue on
-	# first reveal instead of during boot.
+	# The HUD starts hidden in the menu; the catalogue is rebuilt on every reveal
+	# so a sector launch or research that happened while it was hidden is
+	# reflected instead of serving a stale category/block list.
 	visibility_changed.connect(_ensure_loaded)
 	# Category cycling (`,`/`.`) is dispatched by `MindInput`; the rail owns the
 	# visible index and pushes it back.
@@ -48,9 +48,8 @@ func _on_hotkey(action: String) -> void:
 
 
 func _ensure_loaded() -> void:
-	if _loaded or not is_visible_in_tree():
+	if not is_visible_in_tree():
 		return
-	_loaded = true
 	_load_catalog()
 
 

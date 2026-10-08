@@ -8,7 +8,7 @@ preconditions:
   - Ground Zero is serpulo sector 15 (170 is a plain generated sector with no preset map).
   - "No sector save may exist for serpulo-15: a leftover autosave forces the resume branch and hides the fresh-launch behavior."
 tools: [godot_health, godot_game, godot_exec, godot_input, godot_screenshot, godot_log]
-last_verified: 2026-10-08 9efd068 (runs/l2-20261008-014155-ev0037-core-launch-godot)
+last_verified: 2026-10-08 986cda3 (re-run in runs/l2-20261008-145144-ev0013-block-picker-godot; originally 9efd068, runs/l2-20261008-014155-ev0037-core-launch-godot)
 ---
 
 # ground-zero-fresh-launch

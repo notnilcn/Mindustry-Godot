@@ -17,6 +17,7 @@ touch, which precondition is easy to miss.
 | `pause-step-interact.md` | pause, step, API and mouse place/break, input flush |
 | `input-controls.md` | no-scenario world, keyboard input vs `get_input_state_json`, API comparison |
 | `ui-control-click.md` | runtime-created Button click (menu Play, paused Settings) → pressed counter + submenu/dialog stack read-back (EV-0062) |
+| `rts-select-orders.md` | command mode → drag/tap/double-tap select → right-click order vs `pending_command_count`/`commands_applied` (EV-0055) |
 | `probe-hud.md` | state JSON, inspector, screenshot, logs |
 | `enter-campaign.md` | main menu → planet dialog → sector → launch (UI and facade variants) |
 | `sector-preset-rules.md` | campaign launch → `get_rules_json` vs preset captureWave/winWave (EV-0049) |
@@ -26,6 +27,7 @@ touch, which precondition is easy to miss.
 | `campaign-save-load.md` | campaign facade → launch → save / list / load a slot |
 | `load-game-dialog.md` | main menu → Load Game → live slot list → card click queues + applies a load |
 | `research-purchase.md` | campaign launch → research dialog → root rail → purchase a locked node |
+| `placement-picker-audit.md` | campaign launch → in-game placement picker → catalog filtering / icon / clipping audit (EV-0013) |
 | `java-reference-leg.md` | Java reference: launch → drive → capture → quit (computer-mcp) |
 | `java-custom-survival-wave.md` | Java reference: custom survival game → skip/timer wave → spawn/move/combat captures |
 | `units-live-wave-runtime.md` | Godot: fresh groundZero → `run_wave` → live unit/bullet assertions (EV-0048) |
