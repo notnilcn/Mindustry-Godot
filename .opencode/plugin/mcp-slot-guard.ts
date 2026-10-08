@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 /**
- * MCP slot guard — enforces `MCP_SLOT_LIMIT` (default 2) concurrent MCP
- * consumers per host, per the parity plan's laptop-safety budget.
+ * MCP slot guard — enforces `MCP_SLOT_LIMIT` concurrent MCP consumers per
+ * host. The default is 0 (uncapped): every caller gets a lease. Set a positive
+ * value for the parity plan's laptop-safety budget (2 was the two slots the
+ * loops and their fix/twin legs shared).
  *
  * Every opencode process takes one lease on its first MCP tool call and
  * refreshes it on later calls (`.opencode/skills/parity-eval/scripts/mcp_slot.py`).
@@ -9,8 +11,8 @@
  * (default `gap-identifier,parity-orchestrator,parity-writer,twin-evaluator`)
  * get their call denied;
  * everyone else is warned and allowed, because the guard must never deadlock a
- * human's session. The two slots are what the loops and their fix/twin legs
- * share. `parity-writer` is additionally denied every `computer-mcp_*` tool:
+ * human's session. `parity-writer` is additionally denied every
+ * `computer-mcp_*` tool:
  * its Godot leg uses open-godot-mcp, and the Java reference belongs to the twin
  * evaluator. `MCP_SLOT_GUARD=off` disables the guard entirely.
  *

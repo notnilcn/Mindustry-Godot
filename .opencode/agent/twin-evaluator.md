@@ -74,12 +74,12 @@ another branch to do so.
   display, bridge-port, and per-loop user-data isolation. Do not use
   `godot_instance launch_editor` (it ignores the loop port map) and never run
   `open-godot-mcp --shutdown-all` (it kills sibling loops' servers).
-- **MCP is slot-gated.** A loop process already holds a lease; outside a loop,
+- **MCP is slot-tracked.** A loop process already holds a lease; outside a loop,
   take one before the first MCP call:
   `python3 .opencode/skills/parity-eval/scripts/mcp_slot.py acquire --owner
-  twin-<loop>`. Exit 3 means the two slots are held elsewhere — do not start
-  clients; release the claimed finding back to `godot-pass` with the blocker
-  note and stop.
+  twin-<loop>`. Exit 3 (only when a positive `MCP_SLOT_LIMIT` is configured)
+  means the slots are held elsewhere — do not start clients; release the
+  claimed finding back to `godot-pass` with the blocker note and stop.
 - **Twin lease.** The orchestrator gives you a `--token` for
   `.opencode/evals/twin-evaluator`; refresh it at the start of the run and
   again after a long leg

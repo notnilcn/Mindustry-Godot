@@ -76,14 +76,13 @@ Rules:
 
 - Loops are isolated; within one loop, drive one client at a time (Java then
   Godot). Different loops may run concurrently — never share a display.
-- **MCP is slot-gated**: before the first MCP call in a session not covered by
-  a loop process lease, run
+- **MCP is slot-tracked**: before the first MCP call in a session not covered
+  by a loop process lease, run
   `.opencode/skills/parity-eval/scripts/mcp_slot.py acquire --owner <label>`.
-  Exit 3 means the host is at its MCP limit (two slots); stay code-only or
-  stop. `refresh` between calls; when an MCP run ends, release the slot with
-  `mcp_slot.py release` (bare form uses `$MCP_SLOT_OWNER_KEY`, `--token`/
-  `--key` also work) so a waiting loop can evaluate (`MCP_SLOT_LIMIT` defaults
-  to 2).
+  The cap is off by default (`MCP_SLOT_LIMIT=0`); with a positive limit, exit 3
+  means the host is at that limit — stay code-only or stop. `refresh` between
+  calls; when an MCP run ends, release the slot with `mcp_slot.py release`
+  (bare form uses `$MCP_SLOT_OWNER_KEY`, `--token`/`--key` also work).
 - Launch clients only through `.opencode/loops/bin/run-godot-editor.sh` and
   `.opencode/loops/bin/run-java.sh`; they set the Godot Wayland compositor /
   Java X display, bridge port, and per-loop user-data dirs. Never use

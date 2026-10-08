@@ -79,5 +79,6 @@ open-godot-mcp to the loop bridge port, Wayland socket and XDG dirs.
 - Launch clients only through `run-godot-editor.sh` / `run-java.sh`; never use
   `godot_instance launch_editor` (it ignores the loop port map) and never run
   `open-godot-mcp --shutdown-all` (it kills sibling loops).
-- MCP is capped at two concurrent consumers (`MCP_SLOT_LIMIT`), so an active
-  twin run plus one loop's Godot evaluation is the intended ceiling.
+- MCP consumer leases are capped only when `MCP_SLOT_LIMIT` is positive; it
+  defaults to 0 (uncapped). The twin evaluator keeps its own global `--limit 1`
+  lease.

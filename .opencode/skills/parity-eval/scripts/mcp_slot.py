@@ -4,10 +4,12 @@
 
 MCP servers that drive a display, an editor, or a game client are expensive.
 An agent that is about to use MCP acquires a lease first; `MCP_SLOT_LIMIT`
-(default 2) is the maximum number of live leases, so a request is refused while
-the limit is reached. Refusal exits 3 and the caller stays off MCP — for
-code-only agents that is the normal, cheaper path, and the two slots leave
-room for an evaluator to run its Java and Godot legs.
+(default 0) is the maximum number of live leases, so a request is refused while
+the limit is reached. `0` (the default) disables the cap entirely and every
+caller is granted a lease; set a positive value to restore the budget. Refusal
+exits 3 and the caller stays off MCP — for code-only agents that is the normal,
+cheaper path. A positive limit of 2 leaves room for an evaluator to run its
+Java and Godot legs.
 
     mcp_slot.py acquire --owner gap-campaign
     mcp_slot.py refresh --token <token>
@@ -44,7 +46,7 @@ try:
 except ImportError:  # pragma: no cover - non-POSIX fallback
     fcntl = None
 
-DEFAULT_LIMIT = 2
+DEFAULT_LIMIT = 0  # 0 disables the cap
 DEFAULT_TTL = 900
 HOST = socket.gethostname()
 EXIT_LIMIT = 3
@@ -196,7 +198,7 @@ def cmd_acquire(args: argparse.Namespace) -> int:
                     json.dumps(lease, indent=2) + "\n", encoding="utf-8"
                 )
                 return emit({"ok": True, "reused": True, **lease})
-        if len(live) >= args.limit:
+        if args.limit > 0 and len(live) >= args.limit:
             return emit(
                 {
                     "ok": False,
@@ -258,13 +260,15 @@ def cmd_status(args: argparse.Namespace) -> int:
     with registry_lock(args.state_dir):
         reap(args.state_dir, args.ttl)
         live = holders(args.state_dir, args.ttl)
+    unlimited = args.limit <= 0
     return emit(
         {
             "ok": True,
             "limit": args.limit,
+            "unlimited": unlimited,
             "ttl": args.ttl,
             "holders": live,
-            "free": max(0, args.limit - len(live)),
+            "free": None if unlimited else max(0, args.limit - len(live)),
         }
     )
 
@@ -288,7 +292,7 @@ def main() -> int:
         "--limit",
         type=int,
         default=int(os.environ.get("MCP_SLOT_LIMIT", DEFAULT_LIMIT)),
-        help="max concurrent leases including the caller (default: 2)",
+        help="max concurrent leases including the caller (default: 0 = uncapped)",
     )
     parser.add_argument(
         "--ttl",
