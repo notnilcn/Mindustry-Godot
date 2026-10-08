@@ -21,6 +21,7 @@ use godot::classes::notify::NodeNotification;
 use godot::classes::{INode, Node as GdNode, Os, ProjectSettings};
 use godot::obj::{Base, Singleton};
 use godot::prelude::*;
+use mind_core::game::tech_tree::SettingsUnlockStore;
 use mind_core::io::{FileSystem, NativeFs, Paths, SettingValue, SettingsStore};
 use mind_core::ui::settings::{self, SettingKind};
 
@@ -501,15 +502,19 @@ impl MindUi {
     /// Placement-palette catalog JSON (`PlacementFragment` block list): the
     /// non-empty `Category` groups with their buildable blocks and
     /// `database-tag.*` label keys. Prefers the live campaign catalog when
-    /// `MindCampaign` exposes `block_catalog_json`; otherwise builds and caches
-    /// the unfiltered build-menu inventory.
+    /// `MindCampaign` exposes `block_catalog_json`; otherwise builds a cached
+    /// catalog filtered through the persisted campaign settings (the same
+    /// `<name>-unlocked` keys the campaign writes), so a campaign-less read
+    /// never serves the unfiltered inventory.
     #[func]
     pub fn block_catalog_json(&mut self) -> GString {
         if let Some(json) = self.live_campaign_call("block_catalog_json", &[]) {
             return json;
         }
         if self.block_catalog_cache.is_none() {
-            let catalog = mind_core::ui::campaign::block_catalog();
+            let mut settings = SettingsStore::load(&NativeFs, &Paths::new(Self::user_root()));
+            let store = SettingsUnlockStore::new(&mut settings);
+            let catalog = mind_core::ui::campaign::block_catalog_unlocked(&store);
             let json = serde_json::to_string(&catalog).unwrap_or_else(|_| String::from("{}"));
             self.block_catalog_cache = Some(json);
         }

@@ -44,6 +44,13 @@ returns one section (`planets`, `sectors`, `research`, `schematics`, `loadouts`,
 `rules`, `complete`, `maps`). A live campaign binding replaces the deterministic
 fixture snapshot without changing the dialog scripts (plan 12/21 seam).
 
+`MindUi.block_catalog_json()` returns the placement-palette projection built by
+`mind-core::ui::campaign::BlockCatalogView`. In a campaign it prefers
+`MindCampaign.block_catalog_json()`, which filters by the settings-backed unlock
+store (`PlacementFragment.getUnlockedByCategory`: locked tech-gated blocks and
+empty categories are hidden); the campaign-less fallback filters through the
+persisted settings file instead of serving the unfiltered inventory.
+
 ## Chat / console / player list / file chooser (M7)
 
 - `MindUi.chat_send(text, mode)` validates and emits `chat_message`; transport

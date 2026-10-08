@@ -303,16 +303,21 @@ pub fn block_catalog_unlocked(store: &dyn UnlockStore) -> BlockCatalogView {
     block_catalog_with(Some(store))
 }
 
-/// Whether a tech node is granted at boot: no item requirements and no
-/// objectives (`Control.checkAutoUnlocks` roots).
+/// Whether a tech node is granted at boot: no effective item requirements and
+/// no objectives (`Control.checkAutoUnlocks` roots).
+///
+/// The generated vanilla trees leave `TechNode.requirements` empty and derive
+/// the research cost from the content
+/// (`UnlockableContent.researchRequirements()`), so the check must go through
+/// [`tech_tree::effective_requirements`] instead of the stored list.
 fn tech_node_auto_unlocks(
     registry: &ContentRegistry,
     node_ref: crate::content::tech::TechNodeRef,
 ) -> bool {
-    registry
-        .tech()
-        .node(node_ref)
-        .is_some_and(|node| node.requirements.is_empty() && node.objectives.is_empty())
+    let Some(node) = registry.tech().node(node_ref) else {
+        return false;
+    };
+    tech_tree::effective_requirements(registry, node_ref).is_empty() && node.objectives.is_empty()
 }
 
 /// Shared catalog builder; `store` enables the unlock/visibility filter.
@@ -1080,10 +1085,33 @@ mod tests {
             !has(&filtered, "power-source"),
             "sandbox-only block is not buildable in campaign"
         );
-        assert!(has(&filtered, "conveyor"), "ungated block stays available");
         assert!(
-            !filtered.categories.is_empty(),
-            "unlock-filtered catalog keeps the build menu"
+            !has(&filtered, "conveyor"),
+            "a research-gated block is hidden with an empty unlock store"
+        );
+        for locked in ["foreshadow", "spectre", "meltdown", "malign"] {
+            assert!(
+                !has(&filtered, locked),
+                "locked turret `{locked}` is not buildable"
+            );
+        }
+        assert!(
+            filtered
+                .categories
+                .iter()
+                .all(|category| !category.blocks.is_empty()),
+            "empty categories are hidden"
+        );
+
+        // The `<name>-unlocked` bit (what research and sector auto-unlocks
+        // write) puts the block back into the palette.
+        let mut store = MemoryUnlockStore::new();
+        store.set_bool("duo-unlocked", true);
+        let unlocked = block_catalog_unlocked(&store);
+        assert!(has(&unlocked, "duo"), "researched turret appears");
+        assert!(
+            !has(&unlocked, "foreshadow"),
+            "still-locked turret stays hidden"
         );
     }
 
