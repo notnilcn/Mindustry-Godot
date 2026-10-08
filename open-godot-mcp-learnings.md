@@ -303,3 +303,98 @@ nothing new happened, no entry.
 - Evidence: `runs/l2-20261008-034337-ev0047-production-twin/` (twin sweep, pid
   267163; `godot/map-probe.json`, `godot/game.log`) and
   `runs/l2-20261008-034014-ev0054-load-game-twin/`.
+
+## 2026-10-08 — a loop worktree without the generated atlas silently text-falls-back every icon check
+
+- The loop-2 worktree (`Mindustry-Godot-loop2`) has no
+  `assets/sprites/sprites.atlas.json`: it is gitignored and produced by
+  `tools/pack.sh`, and the sync/merge does not carry it into a fresh worktree
+  (main checkout has it). `MindAssets` resolves the asset dir by probing
+  `res://assets` then `<project>/../assets` and therefore boots with zero
+  regions; the run log shows `[assets] ready ok=…` before any evaluator
+  `godot_log clear`, so the condition is easy to miss.
+- Symptom: every `MindWidgets.image_button_first` icon resolves `null`, so
+  `PlacementFragment` block buttons keep `has_icon: false` and render their
+  label text at 67–120px instead of 46px icons; category glyphs still render
+  (they are child `Label`s, not `icon`), and the world background can render
+  blank. Distinguish from a code regression by probing the atlas, not the UI:
+  `get_node("/root/MindAssets").call("region_count")` is 0 and
+  `call("has_region", "block-duo-ui")` is false.
+- Workaround for icon-dependent checks in a fresh worktree: run the pack
+  (`tools/pack.sh`) or point `mindustry/assets_dir` at a checkout whose atlas
+  exists before launching the editor; otherwise record the limitation and judge
+  only code-path observables. This run (`EV-0013`) failed on the catalog
+  filtering independently of the atlas and recorded the icon half as
+  environment-limited.
+- Evidence: `runs/l2-20261008-133536-ev0013-block-picker-godot/` (pid 18767;
+  `godot/state-04-ingame.json` assets.region_count = 0,
+  `godot/step-04-ingame-hud.png` text-fallback buttons).
+
+## 2026-10-08 — the paused banner is a STOP Control at viewport center; paused-run world clicks there vanish
+
+- While `SimHost.set_paused(true)`, `/root/Spine/Ui/UiRoot/HudGroup/hud/PausedBanner`
+  is visible with `mouse_filter=0` (STOP) and a ~64x26 `get_global_rect()`
+  centered on the viewport. `MindInput.ui_captures_at` (upstream
+  `Core.scene.hasMouse()`) drops any world press whose point falls inside a STOP
+  control, so a right-click `command_tap` or selection tap aimed at the exact
+  center silently does nothing while paused — `pending_command_count` and
+  `selected_units` stay unchanged with no log entry.
+- Workaround: before injecting a world click, probe the point in one eval —
+  `get_tree().get_root().find_children("*", "", true, false).filter(func(n):
+  n is Control and n.is_visible_in_tree() and int(n.get("mouse_filter")) == 0
+  and n.get_global_rect().has_point(pt))` — or simply click off-center. Do not
+  use viewport center for paused-run probes, and when a click appears to be a
+  no-op, check STOP hits before suspecting the input path.
+- Node-path reminder for the RTS checks: `get_input_state_json` /
+  `toggle_command_mode` / `set_selectable_units_json` / `selection_json` live on
+  `/root/Spine/Input` (`MindInput`), while `set_paused` / `step` /
+  `pending_command_count` / `get_state_json` live on `/root/Spine/SimHost`.
+- Evidence: `runs/l2-20261008-134830-ev0055-rts-select-godot/` (pid 33526; step 5
+  of `godot/rts-selection-evidence.json`, screenshot
+  `godot/step-06-after-live-order.png`).
+
+## 2026-10-08 — loop editor predating a rebuild; `campaign_views_json` needs a planet arg
+
+- Binary freshness for a loop editor is two-tier: the game process loads
+  `libmind_gdext.so` when it starts, but the editor itself was started at 14:03
+  with the pre-7352edb library while the writer's build landed at 14:24. The
+  editor was killed and relaunched with
+  `.opencode/loops/bin/run-godot-editor.sh` (same bridge 6980) before the run; a
+  cheap in-engine probe settles it either way —
+  `MindCampaign.has_method("block_catalog_json")` was `true` at 7352edb and
+  `false` at a1ca816. `strings libmind_gdext.so | grep block_catalog_json` plus
+  `stat` on the `.so` prove the library, not the process that loaded it.
+- `MindUi.campaign_views_json()` takes one parameter (planet GString); calling
+  it with zero arguments logs `godot-rust function call failed:
+  MindUi::campaign_views_json() … function has 1 parameter, but received 0
+  arguments` and burns the full 15 s eval timeout. Unlike the earlier
+  "malformed eval body pauses the debugger" entry, this one did **not** stall
+  the frame loop: `Time.get_ticks_msec()` kept advancing, the pid stayed live
+  and the next eval answered normally — check `godot_log errors` for the
+  godot-rust reason before assuming a frozen loop. It also falls back to
+  `CampaignViews::vanilla_fixture()` (no live `MindCampaign.campaign_views_json`
+  in this build), so it is not a usable way to enumerate live unlock state; that
+  is what `MindCampaign.block_catalog_json()` / `get_tech_state()` are for.
+- Evidence: `runs/l2-20261008-142848-ev0013-block-picker-godot/` (EV-0013
+  godot-open; pid 133157; the fixture fallback and freshness probe in
+  `godot/state-04-ingame.json`, the timeout error in `godot/log-launch-errors.json`).
+
+## 2026-10-08 — data-driven fragment reads are one frame late; `godot_input sequence` wants `steps[]`
+
+- The placement fragment rebuilds its rail/grid with `child.queue_free()` for
+  the old children, and `queue_free` only removes them at the end of the
+  frame. A `godot_exec` that toggles `visible` (or calls the fragment's reload)
+  and reads `get_children()` in the **same eval** still sees the old, queued
+  children — a cleared catalog then looked like "8 categories / 2 blocks"
+  instead of 0/0, and the first `state-04` artifact had to be rewritten from a
+  follow-up eval. Read data-driven Control children in a later eval than the
+  rebuild that queued them (same-frame reads are fine only when the previous
+  list was already empty).
+- `godot_input sequence` takes `{"steps":[{"type":"mouse_button","params":{...}},
+  ...],"frame_delay":1}`. The flat `{"events":[...]}` form fails with
+  `INVALID_ARGUMENT: steps[] required (array of {type, params} dicts)` and
+  injects nothing; the per-click press+release form above landed every UI step
+  of the campaign launch at 986cda3.
+- Evidence: `runs/l2-20261008-145144-ev0013-block-picker-godot/` (EV-0013
+  godot-pass; pid 179192; the rewritten `godot/state-04-fresh-groundzero.json`
+  and the 8-category post-research read in `godot/state-05-after-research.json`).

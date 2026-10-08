@@ -7,7 +7,7 @@ preconditions:
   - boot-and-identity completed (editor bridge, res://scenes/game.tscn played with the explicit scene param, runtime_connected true, pid stamped).
   - res://scenarios/input_controls is absent from client/scenarios; do not block on load_scenario.
 tools: [godot_exec, godot_input, godot_game, godot_log]
-last_verified: 2026-10-08 761a483 (runs/20261008-020931-input_controls-twin, runs/20261008-020513-input_controls-godot)
+last_verified: 2026-10-08 ca81672 (runs/l2-20261008-140421-input_controls-godot)
 ---
 
 # input-controls
@@ -49,9 +49,22 @@ last_verified: 2026-10-08 761a483 (runs/20261008-020931-input_controls-twin, run
 5. Re-read the same fields; assert on the `action_count`/`last_action` delta,
    not just the payload. Q -> `last_action=clear_building`, `block=null`.
 
-6. For command-mode keys, sample while held AND after release (tap and hold
-   paths differ); a dead path leaves `command_mode` false with
-   `action_count`/`last_action` unchanged.
+6. For command-mode keys, sample while held AND after release in separate
+   round-trips (the event dispatches on the next frame). `commandmodehold`
+   defaults true, so with `block=null` a held Shift must read
+   `command_mode=true` (`action_count` +1, `last_action=command_mode`) and a
+   released Shift must read `false`. For the tap branch, turn the setting off,
+   tap, ignore the release edge, then restore it:
+
+   ```
+   godot_exec {"action":"call","params":{"node_path":"/root/MindUi","method":"settings_set","args":["commandmodehold", false]}}
+   godot_input {"action":"key","params":{"key":"Shift","pressed":true}}   # toggles
+   godot_input {"action":"key","params":{"key":"Shift","pressed":false}}  # ignored
+   godot_exec {"action":"call","params":{"node_path":"/root/MindUi","method":"settings_set","args":["commandmodehold", true]}}
+   ```
+
+   A dead path leaves `command_mode` false with `action_count`/`last_action`
+   unchanged.
 
 7. API comparison (proves the state field itself works and localizes a gap to
    the key path):
@@ -66,8 +79,9 @@ last_verified: 2026-10-08 761a483 (runs/20261008-020931-input_controls-twin, run
 ## Success signals
 
 - Q clears the block: `block=null`, `action_count` +1, `last_action=clear_building`.
-- The command-mode key sets `command_mode=true` (tap or hold per binding
-  semantics).
+- The command-mode key sets `command_mode=true` while held by default
+  (`last_action=command_mode`, `action_count` +1), or toggles on the press edge
+  with `commandmodehold=false`; release drops it only in hold mode.
 - `toggle_command_mode()` returns a bool and records `last_action=command_mode`.
 - Tick and frames advance between evals before any key call is trusted.
 
@@ -87,11 +101,13 @@ last_verified: 2026-10-08 761a483 (runs/20261008-020931-input_controls-twin, run
   `Engine.get_process_frames()` twice before trusting the next input call, and
   restart rather than resume (verified 2026-10-08, twin run pids 231551/245330
   discarded for pids 245330/249867).
-- The command-mode key semantics are a twin trap: `command_mode_hold` defaults
-  true, so Java is hold-to-command (`commandMode = input.keyDown`), while the
-  761a483 Godot path latches on the release tap. Assert held and released
-  samples separately, and compare against `DesktopInput.java:303-304`, not the
-  toggle branch at 305-306 (EV-0044 twin fail, 2026-10-08).
+- Command-mode key semantics are hold-to-command by default
+  (`commandmodehold=true`, `commandMode = input.keyDown`, `DesktopInput.java:303-304`);
+  the tap/toggle branch at 305-306 runs only when the setting is false. Assert
+  the held and released samples separately — sampling only after release reads
+  `false` and looks dead. A toggle-on-release observation means a stale
+  extension is loaded: rebuild and restart the editor before re-running
+  (`open-godot-mcp-learnings.md`, 2026-10-08).
 - Key input is gated by dialogs/fields (`focus.has_dialog`/`has_field`); hide
   the menu first.
 - The persisted block is settings-owned; for placement use
