@@ -23,8 +23,8 @@ use mind_core::input::{
     PayloadAction, PlaceMode, PlacementWorld, RawEvent, RemoteAction, SelectRect, SelectableUnit,
     ids, line::LineBlock, line::LineParams, select_typed_units, select_unit_tap, select_units_rect,
 };
-use mind_core::world::TilePos;
 use mind_core::world::build::can_replace;
+use mind_core::world::{ConfigKind, TilePos};
 
 use crate::camera::MindCamera2D;
 use crate::sim_host::MindSimHost;
@@ -1336,7 +1336,12 @@ impl DesktopBridge {
             return None;
         }
         let mut options: Vec<serde_json::Value> = Vec::new();
-        if def.has_items {
+        // A behavior that declares its config kinds (`Block.config(...)`) owns
+        // the picker; undeclared blocks keep the item/liquid-container fallback.
+        let declared = guard.block_config_kinds(block);
+        let item_options =
+            declared.contains(&ConfigKind::Item) || (declared.is_empty() && def.has_items);
+        if item_options {
             for entry in content.entries(ContentType::Item) {
                 if let Some(name) = entry.name {
                     options.push(serde_json::json!({
@@ -1346,7 +1351,9 @@ impl DesktopBridge {
                 }
             }
         }
-        if options.is_empty() && def.has_liquids {
+        let liquid_options =
+            declared.contains(&ConfigKind::Liquid) || (declared.is_empty() && def.has_liquids);
+        if options.is_empty() && liquid_options {
             for entry in content.entries(ContentType::Liquid) {
                 if let Some(name) = entry.name {
                     options.push(serde_json::json!({

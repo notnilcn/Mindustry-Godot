@@ -1215,6 +1215,18 @@ impl MindSimHost {
         self.content_snapshot.as_ref()
     }
 
+    /// Config value kinds the block's behavior accepts (`Block.config(...)`,
+    /// `Block.configurations` keys) from the live block runtime. Empty when the
+    /// runtime is not installed or the behavior declares none.
+    pub fn block_config_kinds(&self, block: BlockId) -> &'static [mind_core::world::ConfigKind] {
+        self.sim
+            .ecs
+            .0
+            .get_resource::<mind_core::world::block::BlockTable>()
+            .and_then(|table| table.get(block).map(|inst| inst.config_kinds()))
+            .unwrap_or(&[])
+    }
+
     /// Item counts of the building at `(x, y)` as JSON (`{item-name: amount}`).
     ///
     /// `None` when the tile holds no item-capable building or its item module

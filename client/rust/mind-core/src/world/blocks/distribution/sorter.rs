@@ -13,7 +13,7 @@ use crate::content::{BlockId, BlockKind, ItemId};
 use crate::entities::comp::Building;
 use crate::world::behavior::BuildingBehavior;
 use crate::world::block::BlockTable;
-use crate::world::config::ConfigValue;
+use crate::world::config::{ConfigKind, ConfigValue};
 use crate::world::item_buffer::DirectionalItemBuffer;
 
 use super::transfer;
@@ -69,6 +69,12 @@ impl BuildingBehavior for SorterBehavior {
             Some(item) => ConfigValue::Item(item),
             None => ConfigValue::None,
         }
+    }
+
+    fn config_kinds(&self) -> &'static [ConfigKind] {
+        // `SorterBuild.buildConfiguration` shows `content.items()`
+        // (`Sorter.java:145-147`).
+        &[ConfigKind::Item]
     }
 
     fn configured(
@@ -272,5 +278,21 @@ mod tests {
             .build_at(5, 4)
             .map(|e| crate::world::config::read_config(&harness.world, e));
         assert_eq!(read, Some(ConfigValue::Item(copper)));
+    }
+
+    #[test]
+    fn sorter_declares_item_config_options() {
+        // `SorterBuild.buildConfiguration` builds the item picker from
+        // `content.items()` (`Sorter.java:145-147`); the config read model needs
+        // the declared kind to populate the fragment's options.
+        let content = BuildHarness::load_content();
+        let table = BlockTable::build_default(&content).expect("table");
+        for name in ["sorter", "inverted-sorter"] {
+            let inst = table.get_named(name).expect(name);
+            assert!(
+                inst.config_kinds().contains(&ConfigKind::Item),
+                "{name} must declare the item config kind"
+            );
+        }
     }
 }
