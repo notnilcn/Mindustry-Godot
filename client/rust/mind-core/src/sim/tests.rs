@@ -691,6 +691,17 @@ fn block_runtime_honors_place_rotation_end_to_end() {
         1
     );
 
+    // The canonical state dump reports the tile rotation (`Tile.rotation()`
+    // delegates to the building entity upstream).
+    let dump = sim.dump();
+    let tile = dump
+        .world
+        .tiles
+        .iter()
+        .find(|tile| tile.x == 3 && tile.y == 3)
+        .expect("rotated tile in the dump");
+    assert_eq!(tile.rot, 1);
+
     // A rotated `Place` is not representable as a P0 command: it must not be
     // silently dropped by `to_p0`.
     let rotated = SimCommand::Place {
