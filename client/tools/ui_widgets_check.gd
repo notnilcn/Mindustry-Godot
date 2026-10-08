@@ -406,6 +406,21 @@ func _init() -> void:
 		planet != null and not planet.visible,
 		"pause dialog keeps the mobile @planetmap off desktop"
 	)
+	# EV-0063: `shown()` runs inside `MindUi.open_dialog`, which mutably binds
+	# `MindUi`; a synchronous `is_mobile()` re-entry panics ("bind() failed,
+	# already bound") and wedges the UI, so the mobile gate must resolve after
+	# that call returns. Flip mobile preview so the branch is observable here.
+	if ui != null:
+		ui.call("set_mobile_preview", true)
+		ui.call("register_dialog", "paused_check", paused_dialog, false)
+		_check(bool(ui.call("open_dialog", "paused_check", "")), "pause dialog opens through MindUi")
+		await process_frame
+		_check(
+			planet != null and planet.visible,
+			"pause dialog resolves the mobile @planetmap after the MindUi bind returns"
+		)
+		ui.call("close_dialog", "paused_check")
+		ui.call("set_mobile_preview", false)
 	if abandon != null:
 		abandon.pressed.emit()
 		ui.call("resolve_confirm", true)

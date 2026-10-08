@@ -70,6 +70,15 @@ func _refresh_campaign_buttons() -> void:
 		_abandon_button.visible = campaign
 		_abandon_button.disabled = _net_active() or _game_over()
 	if _planet_button != null:
+		# `_is_mobile()` re-enters `MindUi`, which `MindUi.open_dialog` mutably
+		# binds while calling `shown()`; resolve the mobile branch after that
+		# call returns (same deferral as the game-over HUD toggle, EV-0061).
+		_apply_planet_visibility.call_deferred(campaign)
+
+
+## Mobile-branch gate for `@planetmap`, deferred out of the `MindUi` bind.
+func _apply_planet_visibility(campaign: bool) -> void:
+	if _planet_button != null:
 		_planet_button.visible = campaign and _is_mobile()
 
 
