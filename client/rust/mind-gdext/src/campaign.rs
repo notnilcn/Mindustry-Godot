@@ -23,6 +23,7 @@ use mind_core::content::registries::planets::GeneratorKind;
 use mind_core::content::{
     ContentRef, ContentRegistry, ContentType, MemoryBundle, PlanetId, SectorId, create_base_content,
 };
+use mind_core::game::State;
 use mind_core::game::campaign_rules::CampaignRules;
 use mind_core::game::objectives::CampaignObjectiveContext;
 use mind_core::game::planet::EmptyNeighborhood;
@@ -33,7 +34,9 @@ use mind_core::game::play::{
 use mind_core::game::rules::Rules;
 use mind_core::game::rules_event::{RulesEpoch, apply_set_rules};
 use mind_core::game::runtime::CampaignRuntime;
-use mind_core::game::saves::Saves;
+use mind_core::game::saves::{
+    DEFAULT_SAVE_INTERVAL_MINUTES, Saves, SavesUpdate, SavesUpdateResult,
+};
 use mind_core::game::schematics::Schematics;
 use mind_core::game::tech_tree::{self, SettingsUnlockStore};
 use mind_core::game::universe::{Campaign, TurnContext};
@@ -41,7 +44,7 @@ use mind_core::game::world_reloader::HostReloader;
 use mind_core::io::FileSystem;
 use mind_core::io::fs::{NativeFs, Paths};
 use mind_core::io::save::slot::list_save_slots as list_slot_files;
-use mind_core::io::settings::SettingsStore;
+use mind_core::io::settings::{KEY_SAVE_INTERVAL, SettingsStore};
 use mind_core::random::JavaRandom;
 use mind_core::render::g3d::grid::PlanetGrid;
 use mind_core::render::g3d::mesh_data::build_planet_grid;
@@ -73,6 +76,10 @@ pub struct MindCampaign {
     runtime_installed: bool,
     /// The last captured sector was the planet's last (campaign victory).
     campaign_complete: bool,
+    /// Last tick seen by the runtime pump (fixed-tick delta for `Saves::update`).
+    last_pump_tick: u64,
+    /// Tick at which an in-flight autosave clears `Saves.saving` (3-tick task).
+    saving_finish_tick: Option<u64>,
 }
 
 #[godot_api]
@@ -92,6 +99,8 @@ impl INode for MindCampaign {
             bundle: Bundle::new(),
             runtime_installed: false,
             campaign_complete: false,
+            last_pump_tick: 0,
+            saving_finish_tick: None,
         }
     }
 
@@ -112,6 +121,8 @@ impl INode for MindCampaign {
     }
 
     fn exit_tree(&mut self) {
+        // `Control.dispose`: save the current autosave on application dispose.
+        self.run_exit_save();
         self.persist();
     }
 }
@@ -209,6 +220,39 @@ impl MindCampaign {
         self.base().try_get_node_as::<MindSimHost>("../SimHost")
     }
 
+    /// `Core.scene.hasDialog()` for the `MindUi` dialog stack.
+    fn ui_has_dialog(&self) -> bool {
+        let Some(mut ui) = self.base().get_node_or_null("/root/MindUi") else {
+            return false;
+        };
+        if !ui.has_method("has_dialog") {
+            return false;
+        }
+        ui.call("has_dialog", &[]).try_to::<bool>().unwrap_or(false)
+    }
+
+    /// Live `saveinterval` (`Core.settings.getInt`): read from the `MindUi`
+    /// settings store so a mid-session slider change takes effect, falling back
+    /// to this facade's boot-time copy.
+    fn live_save_interval_minutes(&self) -> i32 {
+        let fallback = self
+            .settings
+            .get_i32(KEY_SAVE_INTERVAL, DEFAULT_SAVE_INTERVAL_MINUTES);
+        let Some(mut ui) = self.base().get_node_or_null("/root/MindUi") else {
+            return fallback;
+        };
+        if !ui.has_method("settings_get_i32") {
+            return fallback;
+        }
+        ui.call(
+            "settings_get_i32",
+            &[GString::from(KEY_SAVE_INTERVAL).to_variant()],
+        )
+        .try_to::<i64>()
+        .map(|value| value as i32)
+        .unwrap_or(fallback)
+    }
+
     /// Persists campaign/universe/unlock state to `user://config/settings.bin`.
     fn persist(&mut self) {
         if let Some(campaign) = self.campaign.as_ref()
@@ -222,8 +266,9 @@ impl MindCampaign {
     }
 
     /// Pumps the live campaign runtime: drains tick events, applies capture
-    /// bookkeeping (stats, auto-unlocks, capture replacements), runs due
-    /// campaign turns and saves. No-op without a host/runtime.
+    /// bookkeeping (stats, auto-unlocks, capture replacements), advances the
+    /// `Saves` policy (playtime + autosave cadence), runs due campaign turns
+    /// and saves. No-op without a host/runtime.
     fn pump_runtime(&mut self) {
         let Some(mut host) = self.host() else {
             return;
@@ -233,6 +278,50 @@ impl MindCampaign {
         };
         let events = runtime.take_events();
         let mut dirty = false;
+
+        // `Control.update` -> `saves.update()`: playtime accrual and the
+        // autosave cadence on the fixed-tick delta (deviation 11).
+        let tick = host.bind().get_tick().max(0) as u64;
+        let delta_ticks = tick.saturating_sub(self.last_pump_tick);
+        self.last_pump_tick = tick;
+        let saves_update = SavesUpdate {
+            delta_ticks,
+            is_game: runtime.session.phase.is_game(),
+            paused_with_dialog: host.bind().is_paused() && self.ui_has_dialog(),
+            game_over: runtime.session.game_over,
+            is_campaign: runtime.session.is_campaign(),
+        };
+        let saves_result = if delta_ticks > 0 {
+            self.saves.update_policy(
+                saves_update,
+                &self.settings,
+                self.live_save_interval_minutes(),
+            )
+        } else {
+            SavesUpdateResult::default()
+        };
+        // `Saves.java:210-212`: campaign playtime also lands in the planet stats
+        // (the runtime copy is authoritative while the sector is live).
+        if saves_result.playtime_added > 0
+            && saves_update.is_campaign
+            && let Some((planet, _)) = runtime.session.sector
+            && let Some(stats) = runtime.campaign.stats_for_mut(planet)
+        {
+            stats.playtime += saves_result.playtime_added;
+        }
+        if saves_result.autosaved
+            && let Some(file) = self.saves.current_slot().map(|slot| slot.file.clone())
+        {
+            host.bind_mut()
+                .request_save(GString::from(file.to_string_lossy().as_ref()), false);
+            self.saving_finish_tick = Some(tick.saturating_add(3));
+            dirty = true;
+            log::info!("autosave queued (`{}`)", file.display());
+        }
+        if self.saving_finish_tick.is_some_and(|finish| tick >= finish) {
+            self.saves.finish_saving();
+            self.saving_finish_tick = None;
+        }
 
         let mut registry = self.registry.take();
         let replacements: Vec<(String, String)> = if events.iter().any(|event| {
@@ -327,6 +416,19 @@ impl MindCampaign {
             self.campaign = Some(runtime.campaign.clone());
         }
         host.bind_mut().put_campaign_runtime(runtime);
+        // The facade campaign copy feeds the views/persist; keep its playtime in
+        // step with the runtime accrual (a mirrored clone already carries it).
+        if !mirrored
+            && saves_result.playtime_added > 0
+            && saves_update.is_campaign
+            && let Some((planet, _)) = self.session.sector
+            && let Some(stats) = self
+                .campaign
+                .as_mut()
+                .and_then(|campaign| campaign.stats_for_mut(planet))
+        {
+            stats.playtime += saves_result.playtime_added;
+        }
         if dirty {
             self.persist();
         }
@@ -484,6 +586,9 @@ impl MindCampaign {
         self.registry = Some(registry);
         self.campaign = Some(campaign);
         self.runtime_installed = installed;
+        if let Some(host) = self.host() {
+            self.last_pump_tick = host.bind().get_tick().max(0) as u64;
+        }
         // Persist attempts/rules; the live tile save is queued for the next IO
         // tick (`Control.playNewSector` -> `saves.saveSector`).
         self.persist();
@@ -494,11 +599,28 @@ impl MindCampaign {
                 .as_ref()
                 .and_then(|campaign| campaign.sector(planet_id, sector_id))
                 .and_then(|sector| sector.save.clone())
-            && let Some(mut host) = self.host()
         {
-            let path = format!("user://saves/{save_name}.msav");
-            host.bind_mut()
-                .request_save(GString::from(path.as_str()), false);
+            let file = self.paths.sector_save(&planet_name, sector_id as u32);
+            if has_save {
+                // `World.loadSector` -> `SaveSlot.load`: the resumed slot is
+                // current, so the save policy pumps against it.
+                self.saves.set_current_by_file(&mut self.settings, &file);
+            } else {
+                // `Control.playNewSector` -> `Saves.saveSector`: create the
+                // sector's autosave slot and make it current; the world write is
+                // queued at the IO seam.
+                self.saves.prepare_sector_slot(
+                    &mut self.settings,
+                    &self.paths,
+                    &planet_name,
+                    sector_id,
+                );
+                if let Some(mut host) = self.host() {
+                    let path = format!("user://saves/{save_name}.msav");
+                    host.bind_mut()
+                        .request_save(GString::from(path.as_str()), false);
+                }
+            }
         }
         self.runtime_installed && !events.is_empty()
     }
@@ -1241,6 +1363,45 @@ impl MindCampaign {
         }
         host.bind_mut().request_load(GString::from(path.as_str()));
         true
+    }
+
+    /// `Saves.getTotalPlaytime` (session playtime in milliseconds).
+    #[func]
+    pub fn get_total_playtime(&self) -> i64 {
+        self.saves.get_total_playtime()
+    }
+
+    /// `PausedDialog.runExitSave` / `Control.dispose`: writes the current
+    /// autosave slot through the IO seam, then resets the match to the menu
+    /// (`logic.reset`'s saves/session half). Returns whether a write was queued.
+    #[func]
+    pub fn run_exit_save(&mut self) -> bool {
+        let current = self.saves.get_current().cloned();
+        let should_save = current
+            .as_ref()
+            .is_some_and(|slot| slot.is_autosave(&self.settings))
+            && !self.session.game_over
+            && self.session.phase != State::Menu;
+        let mut queued = false;
+        if should_save
+            && let (Some(file), Some(mut host)) = (current.map(|slot| slot.file), self.host())
+        {
+            host.bind_mut()
+                .request_save(GString::from(file.to_string_lossy().as_ref()), false);
+            host.bind_mut().flush_io();
+            queued = true;
+            log::info!("saved on exit (`{}`)", file.display());
+        }
+        // `StateChangeEvent(menu)`: clears current/playtime (`logic.reset`).
+        self.saves.on_state_change(State::Menu);
+        self.saving_finish_tick = None;
+        self.session.reset_world();
+        self.runtime_installed = false;
+        if let Some(mut host) = self.host() {
+            host.bind_mut().clear_campaign_runtime();
+        }
+        self.persist();
+        queued
     }
 
     /// `PlanetDialog.abandonSectorConfirm` (persisted half): clears the active

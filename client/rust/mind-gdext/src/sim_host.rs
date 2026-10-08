@@ -770,6 +770,12 @@ impl MindSimHost {
         self.sim.io_pending() as i64
     }
 
+    /// Runs queued save/load requests at their `IoSet` boundaries without
+    /// advancing the sim (the exit-save flush while the pump is paused).
+    pub fn flush_io(&mut self) {
+        self.sim.flush_io();
+    }
+
     /// Drains queued IO requests as JSON (`[{kind,path,as_map?}]`) for `MindIo`.
     #[func]
     pub fn take_io_requests_json(&mut self) -> GString {

@@ -46,9 +46,12 @@ func shown() -> void:
 		_table.row()
 
 
-## `CampaignCompleteDialog.@menu` exit; the exit-save half is the save/load
-## plumbing (out of scope), so this returns to the standalone menu directly.
+## `CampaignCompleteDialog.@menu`: `ui.paused.runExitSave()` writes the exit save
+## (`logic.reset` included) before returning to the standalone menu.
 func _exit_to_menu() -> void:
+	var campaign := get_node_or_null("/root/Spine/MindCampaign")
+	if campaign != null and campaign.has_method("run_exit_save"):
+		campaign.call("run_exit_save")
 	var ui := get_node_or_null("/root/MindUi")
 	if ui != null:
 		ui.call("close_dialog", "campaign_complete")

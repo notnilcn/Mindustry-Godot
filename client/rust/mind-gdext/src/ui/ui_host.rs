@@ -635,6 +635,19 @@ impl MindUi {
         true
     }
 
+    /// Reads one known setting key as an integer (`setting.defaults` fallback;
+    /// `0` for an unknown row). The campaign save policy reads `saveinterval`
+    /// through this so a mid-session slider change is live (`Core.settings` is
+    /// one global store upstream).
+    #[func]
+    pub fn settings_get_i32(&self, key: GString) -> i64 {
+        let name = key.to_string();
+        match settings::all_rows().find(|row| row.key == name) {
+            Some(row) => self.settings.get_i32(&name, row.default_i32()) as i64,
+            None => 0,
+        }
+    }
+
     /// Removes every key of one table, restoring the model defaults.
     #[func]
     pub fn settings_reset(&mut self, category: GString) -> bool {

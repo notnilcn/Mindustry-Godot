@@ -206,16 +206,16 @@ func _open_host() -> void:
 		ui.call("open_dialog", "host", "")
 
 
-## `PausedDialog.showQuitConfirm` (`@quit.confirm`); quitting returns to the
-## standalone menu. The exit save / `logic.reset` teardown is not ported
-## (save/load plumbing is reserved); the sim is parked paused behind the menu.
+## `PausedDialog.showQuitConfirm` (`@quit.confirm`); quitting runs the exit save
+## (`runExitSave` writes the current autosave slot through the IO seam) before
+## returning to the standalone menu.
 func _confirm_quit() -> void:
 	var ui := _ui()
 	if ui != null:
 		_pending_quit = true
 		ui.call("show_confirm", _t("@quit.confirm"))
 		return
-	_quit_to_menu()
+	_quit_with_exit_save()
 
 
 func _connect_confirm() -> void:
@@ -235,7 +235,7 @@ func _on_confirm(confirmed: bool) -> void:
 		return
 	_pending_quit = false
 	if confirmed:
-		_quit_to_menu()
+		_quit_with_exit_save()
 
 
 ## `PlanetDialog.abandonSectorConfirm`: clears the sector base/items and drops
@@ -247,6 +247,15 @@ func _abandon_sector() -> void:
 	var cleared: Variant = campaign.call("abandon_sector")
 	if bool(cleared):
 		_quit_to_menu()
+
+
+## `PausedDialog.showQuitConfirm`'s quit runnable: `runExitSave()` writes the
+## current autosave slot (and `logic.reset`s the match), then the menu shows.
+func _quit_with_exit_save() -> void:
+	var campaign := get_node_or_null("/root/Spine/MindCampaign")
+	if campaign != null and campaign.has_method("run_exit_save"):
+		campaign.call("run_exit_save")
+	_quit_to_menu()
 
 
 func _quit_to_menu() -> void:

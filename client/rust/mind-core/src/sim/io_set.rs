@@ -213,6 +213,15 @@ impl Sim {
         self.io.push_response(response);
     }
 
+    /// Runs both queued IO boundaries immediately without advancing the tick.
+    ///
+    /// Hosts use it to flush an exit save while the fixed-step pump is paused;
+    /// the normal path is [`Sim::tick`], which pumps the same boundaries.
+    pub fn flush_io(&mut self) {
+        self.pump_io(IoSet::Capture);
+        self.pump_io(IoSet::Apply);
+    }
+
     /// Runs the named IO boundary. Called by [`Sim::tick`] at the exact Java
     /// positions; there is no mid-tick IO (plan 04 §3.10).
     pub(crate) fn pump_io(&mut self, set: IoSet) {
@@ -316,5 +325,16 @@ mod tests {
         sim.tick().expect("tick");
         assert_eq!(sim.io_pending(), 1);
         assert!(!sim.io.has_handler());
+    }
+
+    #[test]
+    fn flush_io_runs_the_boundaries_without_a_tick() {
+        let mut sim = Sim::new(1, 4, 4, BlockId::AIR, BlockId::AIR);
+        sim.set_io_handler(Box::<DeferringIoHandler>::default());
+        sim.request_save(std::env::temp_dir().join("flush.msav"), false);
+        assert_eq!(sim.io_pending(), 1);
+        sim.flush_io();
+        assert_eq!(sim.io_pending(), 0);
+        assert_eq!(sim.tick_count(), 0, "no tick advanced");
     }
 }

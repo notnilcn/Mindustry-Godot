@@ -212,24 +212,23 @@ impl Saves {
         }
     }
 
-    /// `Saves.update`. Returns the outcome; `save_current` must be a live-game
-    /// write context (node-06 world; `mind-core` never touches the world here).
-    pub fn update(
+    /// `Saves.update` policy half: playtime accrual and the autosave cadence
+    /// decision. `autosaved` reports that `save_interval_minutes` was crossed
+    /// and the current slot must be written; the caller performs the write
+    /// ([`Saves::update`] inlines a `WriteContext` write, the live host queues
+    /// it at the `IoSet` seam).
+    pub fn update_policy(
         &mut self,
         update: SavesUpdate,
         settings: &SettingsStore,
-        fs: &dyn FileSystem,
-        paths: &Paths,
-        ctx: &WriteContext,
-        options: &SaveOptions,
+        save_interval_minutes: i32,
     ) -> SavesUpdateResult {
         let mut result = SavesUpdateResult::default();
-        let playing = update.is_game && !(update.paused_with_dialog);
+        let playing = update.is_game && !update.paused_with_dialog;
         if playing && self.current.is_some() {
-            if let Some(last) = self.last_timestamp {
+            if self.last_timestamp.is_some() {
                 result.playtime_added = update.delta_ticks as i64 * 1000 / 60;
                 self.total_playtime += result.playtime_added;
-                let _ = last;
             }
             self.last_timestamp = Some(update.delta_ticks);
         }
@@ -242,23 +241,39 @@ impl Saves {
                 .is_some_and(|slot| slot.is_autosave(settings));
         if autosave {
             self.time += update.delta_ticks as f32 / 60.0;
-            let interval = settings
-                .get_i32(KEY_SAVE_INTERVAL, DEFAULT_SAVE_INTERVAL_MINUTES)
-                .max(0) as f32
-                * 60.0;
+            let interval = save_interval_minutes.max(0) as f32 * 60.0;
             if self.time > interval {
-                if let Some(index) = self.current {
-                    self.saving = true;
-                    if let Some(slot) = self.slots.get_mut(index)
-                        && slot.save(fs, paths, ctx, options).is_ok()
-                    {
-                        result.autosaved = true;
-                    }
-                }
+                self.saving = true;
                 self.time = 0.0;
+                result.autosaved = true;
             }
         } else {
             self.time = 0.0;
+        }
+        result
+    }
+
+    /// `Saves.update`. Returns the outcome; the current slot is written inline
+    /// through `ctx` (node-06 world; `mind-core` never touches the world here).
+    pub fn update(
+        &mut self,
+        update: SavesUpdate,
+        settings: &SettingsStore,
+        fs: &dyn FileSystem,
+        paths: &Paths,
+        ctx: &WriteContext,
+        options: &SaveOptions,
+    ) -> SavesUpdateResult {
+        let interval = settings.get_i32(KEY_SAVE_INTERVAL, DEFAULT_SAVE_INTERVAL_MINUTES);
+        let mut result = self.update_policy(update, settings, interval);
+        if result.autosaved {
+            let mut saved = false;
+            if let Some(index) = self.current
+                && let Some(slot) = self.slots.get_mut(index)
+            {
+                saved = slot.save(fs, paths, ctx, options).is_ok();
+            }
+            result.autosaved = saved;
         }
         result
     }
@@ -305,18 +320,17 @@ impl Saves {
         paths.sector_save(planet, id as u32)
     }
 
-    /// `Saves.saveSector`: creates/updates the sector slot and writes it.
-    #[allow(clippy::too_many_arguments)]
-    pub fn save_sector(
+    /// `Saves.saveSector` slot bookkeeping without the world write: creates or
+    /// reuses the sector's autosave slot, records `last-sector-save` and makes
+    /// it `current` (`SaveSlot.save`'s `state.isGame()` branch; the live host
+    /// queues the world write at the `IoSet` seam afterwards).
+    pub fn prepare_sector_slot(
         &mut self,
-        fs: &dyn FileSystem,
-        paths: &Paths,
         settings: &mut SettingsStore,
+        paths: &Paths,
         planet: &str,
         id: u16,
-        ctx: &WriteContext,
-        options: &SaveOptions,
-    ) -> Result<usize, IoError> {
+    ) -> usize {
         let file = self.get_sector_file(paths, planet, id);
         let index = match self.slots.iter().position(|slot| slot.file == file) {
             Some(index) => index,
@@ -329,9 +343,44 @@ impl Saves {
             }
         };
         self.slots[index].set_autosave(settings, true);
-        self.slots[index].save(fs, paths, ctx, options)?;
         self.last_sector_save = Some(file);
         settings.put_string(KEY_LAST_SECTOR_SAVE, &self.slots[index].name(settings));
+        self.current = Some(index);
+        index
+    }
+
+    /// Makes the slot backed by `file` current (`SaveSlot.load`/`save` set
+    /// `current` for the live slot), creating the entry when the file is not
+    /// yet listed (a sector save queued earlier this session).
+    pub fn set_current_by_file(&mut self, settings: &mut SettingsStore, file: &Path) -> usize {
+        let index = match self.slots.iter().position(|slot| slot.file == file) {
+            Some(index) => index,
+            None => {
+                let slot = SaveSlot::new(file.to_path_buf());
+                slot.set_name(settings, &slot.index());
+                let index = self.slots.len();
+                self.slots.push(slot);
+                index
+            }
+        };
+        self.current = Some(index);
+        index
+    }
+
+    /// `Saves.saveSector`: creates/updates the sector slot and writes it.
+    #[allow(clippy::too_many_arguments)]
+    pub fn save_sector(
+        &mut self,
+        fs: &dyn FileSystem,
+        paths: &Paths,
+        settings: &mut SettingsStore,
+        planet: &str,
+        id: u16,
+        ctx: &WriteContext,
+        options: &SaveOptions,
+    ) -> Result<usize, IoError> {
+        let index = self.prepare_sector_slot(settings, paths, planet, id);
+        self.slots[index].save(fs, paths, ctx, options)?;
         Ok(index)
     }
 
@@ -639,6 +688,91 @@ mod tests {
         assert!(saves.is_saving());
         saves.finish_saving();
         assert!(!saves.is_saving());
+    }
+
+    #[test]
+    fn update_policy_accrues_playtime_and_suspends_while_paused() {
+        let mut settings = SettingsStore::new();
+        settings.put_i32(KEY_SAVE_INTERVAL, 1);
+        let mut saves = Saves::new();
+        saves
+            .slots
+            .push(SaveSlot::new(PathBuf::from("/data/saves/0.msav")));
+        saves.current = Some(0);
+        saves.slots[0].set_autosave(&mut settings, true);
+        let update = SavesUpdate {
+            delta_ticks: 60,
+            is_game: true,
+            paused_with_dialog: false,
+            game_over: false,
+            is_campaign: true,
+        };
+        // The first update seeds the timestamp; later updates accrue 1 s each.
+        assert_eq!(saves.update_policy(update, &settings, 1).playtime_added, 0);
+        assert_eq!(
+            saves.update_policy(update, &settings, 1).playtime_added,
+            1000
+        );
+        assert_eq!(saves.get_total_playtime(), 1000);
+        // A paused-with-dialog update suspends playtime (Saves.java:205).
+        let paused = SavesUpdate {
+            paused_with_dialog: true,
+            ..update
+        };
+        assert_eq!(saves.update_policy(paused, &settings, 1).playtime_added, 0);
+        assert_eq!(saves.get_total_playtime(), 1000);
+    }
+
+    #[test]
+    fn prepare_sector_slot_makes_it_current_and_autosaved() {
+        let fs = MockFs::new();
+        let paths = Paths::new("/data");
+        let mut settings = SettingsStore::new();
+        let mut saves = Saves::new();
+        let ctx = meta_ctx(r#"{"sector":"serpulo-15"}"#, &[]);
+        let file = paths.sector_save("serpulo", 15);
+
+        let index = saves.prepare_sector_slot(&mut settings, &paths, "serpulo", 15);
+        assert_eq!(saves.current, Some(index), "fresh sector slot is current");
+        assert!(saves.slots[index].is_autosave(&settings));
+        assert_eq!(saves.get_last_sector().map(|slot| &slot.file), Some(&file));
+        assert_eq!(
+            settings.get_string(KEY_LAST_SECTOR_SAVE, "<none>"),
+            "sector-serpulo-15"
+        );
+        // The second call reuses the slot instead of duplicating it.
+        assert_eq!(
+            saves.prepare_sector_slot(&mut settings, &paths, "serpulo", 15),
+            index
+        );
+        // The writing half still lands the file and keeps `current`.
+        saves
+            .save_sector(
+                &fs,
+                &paths,
+                &mut settings,
+                "serpulo",
+                15,
+                &ctx,
+                &SaveOptions::new(),
+            )
+            .unwrap();
+        assert!(fs.exists(&file));
+        assert_eq!(saves.current, Some(index));
+    }
+
+    #[test]
+    fn set_current_by_file_creates_a_missing_slot() {
+        let paths = Paths::new("/data");
+        let mut settings = SettingsStore::new();
+        let mut saves = Saves::new();
+        let file = paths.sector_save("serpulo", 15);
+        let index = saves.set_current_by_file(&mut settings, &file);
+        assert_eq!(saves.current, Some(index));
+        assert_eq!(saves.slots[index].file, file);
+        // Reuses the existing entry.
+        assert_eq!(saves.set_current_by_file(&mut settings, &file), index);
+        assert_eq!(saves.slots.len(), 1);
     }
 
     #[test]
