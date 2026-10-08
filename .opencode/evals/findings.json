@@ -1,6 +1,6 @@
 {
   "format": 2,
-  "updated": "2026-10-08T01:37:36+00:00",
+  "updated": "2026-10-08T02:10:51+00:00",
   "findings": [
     {
       "id": "EV-0001",
@@ -1600,7 +1600,7 @@
       "id": "EV-0048",
       "area": "game/sim",
       "severity": "S1",
-      "status": "godot-open",
+      "status": "godot-unverified",
       "title": "No unit/wave/bullet/AI runtime live: no enemies spawn, move, or fight",
       "expected": "Logic.java:464 updates Groups.unit/Groups.bullet; ai/WaveSpawner.java spawns wave groups on the wave timer",
       "actual": "schedule.rs:346-409 has no unit/combat/wave systems; WaveSpawner is test/headless-only; combat/ai drivers are reachable only via harnesses (combat/harness.rs, ai/harness.rs)",
@@ -1625,16 +1625,19 @@
         "2026-10-07T12:12:23+00:00: released: Blocked: umbrella feature, not a finding-scoped fix. Verified no live unit runtime exists: sim/schedule.rs registers no system in EntitySet::UpdateUnits/UpdateBullets/CollideBullets/PhysicsUnits or TickSet::WaveTimer/RunWave; Sim::group_counts hardcodes unit/bullet 0 (sim/mod.rs:407-409); ai/harness.rs UnitHarness + combat/harness.rs run on a separate BuildHarness world and are not reachable from Sim; sim/runtime.rs owns only the block runtime. Closing the repro (run_wave -> units spawning/moving/fighting with live bullets) requires new sim integration: UnitRuntime resource (units/pathfinder/rng/bullets/spawner), schedule systems for physics+AI+weapons+collision, wave timer/run-wave driver wired to campaign Session, spawn-overlay extraction at sector launch, team-stats/group_counts/checksum integration, and mind-gdext install on launch. Needs the identifier to split EV-0048 into child findings (e.g. live wave spawn driver, live unit AI/movement, live weapons/bullets/collision, runtime group/checksum surfaces). Excluded from this session's fix claim loop.",
         "2026-10-07T14:53:35+00:00: claimed by oc-6651 for writer (session loop-2)",
         "2026-10-07T14:58:23+00:00: released: writer blocker (no commit): umbrella feature, independently re-verified. sim/schedule.rs:346-425 registers no UpdateUnits/UpdateBullets/CollideBullets/PhysicsUnits/WaveTimer/RunWave system; sim/mod.rs:390-417 group_counts hardcodes unit:0 bullet:0; Sim has no unit/bullet runtime resource; ai/harness.rs:33 + combat/harness.rs:29 run on a private BuildHarness world unreachable from Sim; ai/wave_spawner.rs has no live caller; game/runtime.rs:189-204 wave timer only increments. Needs identifier split into child findings (live wave-spawn driver; live unit physics/AI/movement; live weapons/bullets/collision; runtime group/checksum surfaces). cargo test -p mind-core sim: 74 passed, baseline green.",
-        "2026-10-08T01:28:25+00:00: claimed by oc-29086 for writer (session loop-1)"
+        "2026-10-08T01:28:25+00:00: claimed by oc-29086 for writer (session loop-1)",
+        "2026-10-08T02:06:22+00:00: [godot-open] commit 0fab4f6 (+7eb73d3): live unit runtime installed on Sim (non-send UnitRuntime: content/grid/pathfinder/units/bullets/WaveSpawner), scheduled UpdateUnits/UpdateBullets/CollideBullets/RunWave/AfterGameUpdate systems, WaveSpawner driven by the campaign timer and MindCampaign.run_wave, group_counts unit/bullet live, SimCommand::SpawnUnit honored",
+        "2026-10-08T02:10:21+00:00: released: writer commit 0fab4f6; handing to godot eval",
+        "2026-10-08T02:10:51+00:00: claimed by oc-122508 for godot-eval (session loop-1)"
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
-      "last_verified": "2026-10-08T01:28:25+00:00",
+      "last_verified": "2026-10-08T02:10:51+00:00",
       "session": "loop-1",
-      "prev_status": "open",
-      "owner": "oc-29086",
-      "claimed_at": "2026-10-08T01:28:25+00:00",
-      "claimed_for": "writer"
+      "prev_status": "godot-open",
+      "owner": "oc-122508",
+      "claimed_at": "2026-10-08T02:10:51+00:00",
+      "claimed_for": "godot-eval"
     },
     {
       "id": "EV-0049",
