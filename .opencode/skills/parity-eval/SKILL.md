@@ -252,13 +252,19 @@ Clean teardown: restore pause/camera, `godot_game stop`, then record the log.
   that the fallback was used, and never hardcode coordinates.
 - **Screenshot staleness.** With the editor maximized over the game window,
   `godot_screenshot game` can return the last presented frame — identical bytes
-  across real state changes. Call `get_window().move_to_foreground()` in an
-  eval first (validated), or capture the X screen with computer-mcp and crop
-  with `capture_screen.py --rect` using `DisplayServer.window_get_position()`
-  and `DisplayServer.window_get_size()`.
-- **Error breakpoints.** An eval body that errors stops in the editor Debugger;
-  `godot_log errors` and clear the buffer before the scenario so stale errors
-  are not attributed to the run.
+  across real state changes, and `Engine.get_frames_drawn()` can stay pinned
+  while `get_process_frames()` advances (render loop dead, state evals alive).
+  Call `get_window().grab_focus()` in an eval first (validated; the older
+  `move_to_foreground()` is deprecated and logs an ERROR), or capture the X
+  screen with computer-mcp and crop with `capture_screen.py --rect` using
+  `DisplayServer.window_get_position()` and `DisplayServer.window_get_size()`.
+  A pinned `frames_drawn` outlives most workarounds: `godot_game stop` + `play`
+  is the reliable fix.
+- **Error breakpoints.** An eval body that errors (or times out) stops in the
+  editor Debugger and pins the frame loop while evals keep answering; check
+  `godot_debugger sessions` (`paused: true`) and recover with `stop` + `play` —
+  `resume` re-breaks. Clear `godot_log` before the scenario so stale errors are
+  not attributed to the run.
 
 ## 4. Java leg
 
@@ -313,6 +319,43 @@ Java gotchas:
 - Prefer keyboard shortcuts and menu paths that exist in both clients; when a
   click coordinate is needed, derive it from the current Java screenshot at the
   recorded window size and store the coordinate in the run notes.
+
+### Java-leg input and capture (hard-won)
+
+- The screenshot returned by a `click`/`mouse_move`/`key_press` call is the
+  previous frame (menus and highlights appear one call late). Take a separate
+  `capture_screen.py` capture before judging what an action did.
+- `key_press` holds the key long enough for X auto-repeat to fire again: an
+  Escape can open and immediately re-close the pause dialog. For toggles send
+  `key_down` then `key_up` as two calls.
+- A `button_down` can stay logically held across later calls (an old world drag
+  keeps applying). Send an explicit `button_up` before expecting a fresh click.
+- On the Xvfb fallback the window needs a first key press to take focus (the
+  first Escape/J is a no-op) — send it twice. On Xwayland, XTest input lands
+  directly.
+- `list_windows`/`get_window_info` and the window-geometry actions are not
+  implemented on Linux. Read the origin/size from
+  `DISPLAY=$PARITY_DISPLAY xwininfo -root -children`, capture with
+  `capture_screen.py --window-title Mindustry` (python-xlib; no xdotool needed
+  on Xwayland) or `--rect x,y,w,h`; click coords are screen coords = window
+  origin + element offset read from the current screenshot.
+- No scroll action exists: send a one-shot pynput scroll from `$MCP_VENV` python
+  (`from pynput.mouse import Controller; Controller().scroll(0,-6)`); discrete
+  scroll events do not need the persistent pointer that one-shot moves do.
+- Timed combos (the game's category + tens/units block-select inside a 400 ms
+  window) cannot be sent as separate MCP calls — each round trip breaks the
+  window. Use one persistent pynput process with ~40–70 ms gaps (see
+  `runs/l2-20261008-051657-ev0055-rts-select-twin/java/key_seq.py`).
+- The Custom Rules dialog drops injected keyboard input: do not type into
+  numeric rule fields — trigger the wave with the HUD skip button (survival)
+  and read the in-game HUD after every rules edit (a stray click can silently
+  toggle `Waves` off).
+- On a fresh Java data dir, Play → Campaign first shows a `Select Starting
+  Campaign` planet dialog (Serpulo photo → OK) before the planet page; missing
+  the photo leaves Erekir selected.
+- Launch detached: `setsid .opencode/loops/bin/run-java.sh ... &` survives a
+  shell-tool timeout; plain `nohup ... &` is killed with the tool's process
+  group. The JVM pid is the `pgrep -f Mindustry.jar` match, not the wrapper pid.
 
 ## 5. Comparison order
 
@@ -503,7 +546,18 @@ Before scripting a new scenario, check whether an entry already exists in
   computer-mcp MCP tools or `parity-click.sh`; the same applies to any helper
   that moves and clicks in separate processes.
 - Eval bodies with `for`/`while` time out; split heavy expressions. A `null`
-  result with `ok: true` usually means the body errored.
+  result with `ok: true` usually means the body errored — and an errored or
+  timed-out eval can trip break-on-error and pin the frame loop while later
+  evals still answer. Check `godot_debugger sessions`; recover with
+  `godot_game stop` + `play` (`resume` re-breaks).
+- A rebuilt `libmind_gdext.so` is not picked up by an already-running editor
+  (the library is mmap'd at editor start): relaunch the loop editor before
+  `godot_game play` when the build postdates the editor launch. Cheap probes:
+  `nm -C client/bin/rust/debug/libmind_gdext.so | grep <new-symbol>` before,
+  `grep libmind_gdext /proc/<game pid>/maps` + `sha256sum` after.
+- The editor-embedded game window cannot be resized (`window_set_size` no-ops)
+  — record `DisplayServer.window_get_size()` instead of planning a pixel diff
+  around a requested size.
 - `godot_screenshot burst` blocks the round-trip; keep bursts tiny or take
   individual captures.
 - Don't re-run the headless goldens as "evaluation"; the harness already owns

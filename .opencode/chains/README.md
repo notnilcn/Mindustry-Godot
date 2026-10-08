@@ -17,21 +17,33 @@ touch, which precondition is easy to miss.
 | `pause-step-interact.md` | pause, step, API and mouse place/break, input flush |
 | `input-controls.md` | no-scenario world, keyboard input vs `get_input_state_json`, API comparison |
 | `ui-control-click.md` | runtime-created Button click (menu Play, paused Settings) → pressed counter + submenu/dialog stack read-back (EV-0062) |
+| `editor-maps-row-click.md` | menu Editor → live map registry (18 rows) → row click → `EditorDialog.visible` + `MindEditor.status` file/size (EV-0038) |
 | `rts-select-orders.md` | command mode → drag/tap/double-tap select → right-click order vs `pending_command_count`/`commands_applied` (EV-0055) |
 | `probe-hud.md` | state JSON, inspector, screenshot, logs |
 | `enter-campaign.md` | main menu → planet dialog → sector → launch (UI and facade variants) |
+| `host-match-from-pause.md` | pause `@hostserver` → host dialog port field/runHost → `MindNet.create_match` vs `in_lobby` + `relay_match` row (EV-0059) |
+| `paused-dialog-buttons.md` | campaign launch → Escape → paused dialog entry/rect dump (desktop set, `@objective` full text) (EV-0063) |
+| `join-direct-connect.md` | main menu Join Game → Add Server address → OK → `MindNet.connect_to` vs `browsing` + live `all_matches` rows (EV-0060) |
 | `sector-preset-rules.md` | campaign launch → `get_rules_json` vs preset captureWave/winWave (EV-0049) |
 | `ground-zero-fresh-launch.md` | clear leftover sector saves → restart → UI launch → core/entity/game-over assertions (EV-0037) |
+| `game-over-loss.md` | `load_sector`/`start_sector` serpulo 170 → live zero-core game over → game-over dialog opens, HUD flag deferred, frames keep advancing (EV-0061) |
 | `ground-zero-production-probe.md` | fresh Ground Zero → placed drill on overlay ore + adjacent core → deterministic first-delivery bracket (EV-0047) |
+| `factory-recipe-probe.md` | fresh Frozen Forest (serpulo/86) → drill on coal + graphite-press + core sink → graphite bracket at 600/1200 (EV-0058) |
 | `campaign-rules-dialog.md` | menu → campaign planet page → `campaign.difficulty` rail button / MindUi `open_dialog` → body + liveness + close |
 | `campaign-save-load.md` | campaign facade → launch → save / list / load a slot |
 | `load-game-dialog.md` | main menu → Load Game → live slot list → card click queues + applies a load |
 | `research-purchase.md` | campaign launch → research dialog → root rail → purchase a locked node |
 | `placement-picker-audit.md` | campaign launch → in-game placement picker → catalog filtering / icon / clipping audit (EV-0013) |
 | `java-reference-leg.md` | Java reference: launch → drive → capture → quit (computer-mcp) |
+| `java-join-dedicated-server.md` | Java reference: `server:dist` dedicated server on 6567 → Join Game LAN-discovery row → connect into it (EV-0060) |
 | `java-custom-survival-wave.md` | Java reference: custom survival game → skip/timer wave → spawn/move/combat captures |
+| `java-campaign-loss.md` | Java reference: campaign sector → pause `Abandon` → core self-destruct → `GameOverDialog` + `Continue` (EV-0061 twin) |
 | `units-live-wave-runtime.md` | Godot: fresh groundZero → `run_wave` → live unit/bullet assertions (EV-0048) |
+| `hud-wave-enemies-skip.md` | fresh groundZero → MindHud wave/enemies/status text vs fragment mirror + skip button `canSkipWave` + capture toast (EV-0053) |
 | `command-mode-hold-vs-tap.md` | Twin: Java Shift-hold affordance (Command Mode panel) vs Godot `command_mode` state, hold + `commandmodehold=false` tap branches (EV-0044) |
+| `placement-rotation.md` | select conveyor → R rotates pending (`input_state_json.rotation`) → mouse place → dump tile `rot` → R over placed building cycles `rot` mod 4 (EV-0056) |
+| `custom-game-map-list.md` | menu Play → Custom Game → `DialogLayer/custom._maps()` live rows (18, real width/height/author/path) + Editor cross-check (EV-0039) |
+| `campaign-live-views-capture.md` | planet dialog live sector state → `capture_sector` → panel/read-model update (EV-0051) |
 
 ## Entry schema
 

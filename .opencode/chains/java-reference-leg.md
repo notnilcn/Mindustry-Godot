@@ -11,7 +11,7 @@ preconditions:
   - computer-mcp registered and opencode started with DISPLAY set (it imports pynput at module load; without an X connection its tools vanish).
   - One client at a time on the loop display (`$PARITY_DISPLAY`; Xwayland with Weston's WM by default, Xvfb with no WM on the software fallback).
 tools: [computer-mcp_mouse_move, computer-mcp_click, computer-mcp_drag, computer-mcp_type, computer-mcp_key_press, computer-mcp_key_down, computer-mcp_key_up, computer-mcp_screenshot, computer-mcp_list_windows, computer-mcp_get_window_info]
-last_verified: 2026-10-08 9efd068 (runs/l2-20261007-163042-twin-java-ref); 2026-10-08 a1ca816 loop-1 (runs/20261008-143432-ev0062-twin); 2026-10-08 986cda3 loop-2 (runs/l2-20261008-150205-input_controls-twin)
+last_verified: 2026-10-08 9efd068 (runs/l2-20261007-163042-twin-java-ref); 2026-10-08 a1ca816 loop-1 (runs/20261008-143432-ev0062-twin); 2026-10-08 986cda3 loop-2 (runs/l2-20261008-150205-input_controls-twin); 2026-10-08 1d8f75b loop-1 (runs/20261008-105728-ev0059-host-twin); 2026-10-08 1d8f75b loop-1 EV-0038 (runs/20261008-121029-ev0038-editor-row-twin); 2026-10-08 1d8f75b loop-1 EV-0039 (runs/20261008-221916-ev0039-twin)
 ---
 
 # java-reference-leg
@@ -121,6 +121,110 @@ run): `parity_ensure_display` started `mind1-java` and resolved
 returned a non-blank window frame (mean 85.7 / std 48.7) with a correct
 `region`; a `parity-click.sh` click landed (the target Quit entry closed the
 client, which exited cleanly). No Xvfb was involved.
+
+## Verified run (loop-1 twin, 2026-10-08, EV-0059 host flow, 1152x648)
+
+Launched with `run-java.sh -width 1152 -height 648 -maximized false`; the client
+lands at `+70+63` (xwininfo absolute upper-left), so screen = window + (70,63).
+Sequence that reached the host ground truth (run
+`runs/20261008-105728-ev0059-host-twin`, JVM pid 25568/25570):
+
+1. Menu `Play` (350,216) -> submenu `Custom Game` (547,356) -> map list.
+   The MapPlayDialog's bottom `Back`/`Play` row was input-dead at this geometry
+   (hover/focus never applied; verified pointer position), so the in-game entry
+   used `Play` -> `Load Game` (546,425) -> click a save card (whole card loads;
+   Archipelago survival at (370,513)). Verifying a loaded save works too.
+2. In-game `key_down escape` + `key_up escape` (split calls) -> pause dialog.
+   `Host Multiplayer Game` at (646,440); the dialog titled the same shows
+   `Name:` + `Port: 6567` as field text.
+3. `Host` click with an empty name -> `@noname` "Pick a player name first."
+   (upstream guard). Java TextFields drop injected characters (caret moves, no
+   text), so set the name offline through Arc `Settings` (`settings.bin`) or
+   reuse a seeded data dir before launching.
+4. With a name, `Host` -> `Opening server…` load fragment -> `net.host(6567)`:
+   `ss -ltnup | grep 6567` shows TCP LISTEN + UDP owned by the JVM; the dialog
+   closes and the pause `Host Multiplayer Game`/`Load Game` entries are
+   disabled while `net.active()`.
+5. Click reliability: verify the X pointer position (pynput read-back) before
+   each click; a move+click with a short fixed sleep can land at the previous
+   cursor position. Details in `computer-mcp-learnings.md`. Quit with
+   `kill -TERM` on the recorded `java -jar ...Mindustry.jar` pid.
+
+## Verified run (loop-1 twin, 2026-10-08, EV-0038, 1152x648)
+
+Editor maps flow at 1152x648, window origin +70+63, JVM pid 84648 (run
+`runs/20261008-121029-ev0038-editor-row-twin`). The persistent computer-mcp
+server was already Broken pipe at leg start (display alive, window captures
+fine), so every click went through `parity-click.sh`:
+
+1. Main menu `Editor` (313,354) → Maps grid with the live registry
+   (`java/step-03-editor-maps.png`).
+2. `Archipelago` card (425,313) → Map Info dialog (Map Name/Author,
+   `Open In Editor`, disabled `Delete`) (`java/step-05-archipelago-info.png`).
+3. `Open In Editor` (490,518) → `Loading…` → MapEditor with the map rendered
+   (`java/step-07-map-editor-loaded.png`).
+4. Quit with `kill -TERM` on the JVM pid.
+
+Both the Editor menu entry and the Archipelago card consumed the first click
+after a fresh launch (the capture showed hover only); a second click opened the
+dialog. Evidence: `java/step-02-after-editor-click.png`,
+`java/step-04-archipelago-info.png` (hover-only).
+
+## Verified run (loop-1 twin, 2026-10-08, EV-0039, 1152x648, Xwayland :2)
+
+Custom Game map-list leg at 1152x648 (`run-java.sh -width 1152 -height 648
+-maximized false`), window at +70+63, JVM pid 94767 (run
+`runs/20261008-221916-ev0039-twin`). The persistent computer-mcp server was
+Broken pipe at leg start (display alive, window captures fine); all input went
+through `/tmp/opencode/click.py` (pynput one-shot: move, read the pointer back
+within 1 px, 0.25 s settle, click) plus one-shot pynput scrolls.
+
+1. `Play` (screen 302,213): the first click only highlighted the button; a
+   second click opened the submenu (Campaign/Join Game/Custom Game/Load Game).
+2. `Custom Game` row (screen 520,352; window 450,289): the first solo click
+   closed the submenu without opening the grid; after reopening the submenu,
+   sending two clicks 120 ms apart at the same point reached the grid and then
+   the MapPlayDialog (title `Mud Flats`). Budget two sends and verify by
+   capture. Submenu rows showed no hover highlight (unlike the main-menu
+   buttons), so hover-diff probing cannot locate them — use the light-text
+   pixel bands of `step-04-play-submenu.png`.
+3. The grid scrolled with one-shot `pynput.mouse.Controller().scroll(0,-4)`
+   x6 over the grid (no MCP scroll action): row 3 Molten Lake/Mud Flats/
+   Passage(PvP)/Shattered/Tendrils, row 4 Triad/Veins(PvP)/Wasteland = 18.
+4. MapPlayDialog `Back` (screen 540,655) responded to a single click this run
+   (the EV-0059 note about the input-dead bottom row did not reproduce).
+5. Quit `kill -TERM` on the `java -jar .*Mindustry.jar` pid (gone within ~5 s).
+
+## Verified run (loop-1 twin, 2026-10-08, EV-0051, 1152x648, Xwayland :2)
+
+Campaign planet-map leg at 1152x648 (`run-java.sh -width 1152 -height 648
+-maximized false`), window +70+63, JVM pid 108885 (run
+`runs/20261008-223232-ev0051-campaign-live-views-twin`). The persistent
+computer-mcp server was Broken pipe at leg start again; all input via
+`/tmp/opencode/click.py` and one-shot pynput Escape. Screen coords =
+window + (70,63):
+
+1. Menu `Play` (screen 310,216) → submenu; `Campaign` (550,216): the first
+   click on the row only highlights, a second click opens the planet page
+   directly (the loop's data dir has `sector-serpulo-170.msav`; Serpulo
+   `startSector = 170`, so no first-run chooser).
+2. Ground Zero hex (655,388) opens the side panel (not owned: `Threat: Low`,
+   Resources icons, `Launch`); hovering shows `[ Ground Zero ]`, while the
+   white locked-preset icon (696,359) tooltips `[ Locked ]` and is not
+   selectable.
+3. The `Launch` button's text measures at window y 602-630 (screen y ~679);
+   the attached PNG is scaled in the model view, so measure with PIL
+   (`Image.open(...).convert("L")`, bright-pixel row bands) before clicking.
+   Launching Ground Zero loads its tutorial (`Obtain: 0/15 Copper`).
+4. In-game Escape (one-shot pynput press/release, no auto-repeat) → pause menu;
+   `Save & Quit` (645,474) → confirm `OK` (747,420) → main menu; the campaign
+   save is rewritten. Reopen Play → Campaign: the map shows the `Sectors /
+   1 under attack` banner, the Ground Zero hex carries the yellow warning
+   marker, and its panel reads `Under attack!`, `Stats`, action `Go`.
+
+Evidence: `java/step-06-sector-click2.png` (not owned), `step-12-after-launch.png`
+(tutorial), `step-17-planet-after.png` (warning marker), `step-19-gz-panel-after.png`
+(`Under attack!`/`Go`), `java/notes.md`.
 
 ## Success signals
 

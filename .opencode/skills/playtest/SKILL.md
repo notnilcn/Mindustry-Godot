@@ -18,12 +18,40 @@ Typical flow: `server/build.sh` (local publish + bindings) → `godot_game play`
 Generic UI-driving mechanics (CLICK/DRAG coordinates, eval pitfalls, stall diagnosis) live in the MCP itself — **follow them, don't re-derive here**:
 
 - `playtest` MCP prompt — the interactive + deterministic workflow with exact tool JSON.
-- The `open_godot_mcp` addon docs under `client/addons/open_godot_mcp/` (`docs/`, handler headers) — short reminders at the call site.
+- The `open_godot_mcp` addon sources (`client/addons/open_godot_mcp/handlers/`) and the MCP checkout docs (`../Open-Godot-MCP/Docs/` when present) — short reminders at the call site.
 
-Project-specific sequences of these calls live in `.opencode/chains/` (e.g.
-`boot-and-identity`, `golden-checksum`, `enter-campaign`). Check the matching
-chain before composing calls; after a confirmed change, update its step list —
-the chains README carries the schema. Do not copy sequences into this skill.
+Project-specific sequences of these calls live in `.opencode/chains/` — one
+file per chain with exact tool calls, success signals, failure modes and the
+last run that verified it. Pick the task from the table below, read that chain
+before composing calls, and update its step list after a confirmed change (the
+chains README carries the schema). Do not copy sequences into this skill.
+
+| Task | Chain |
+|---|---|
+| Attach: bridge health → `game.tscn` → runtime connected → pid stamp | `boot-and-identity` |
+| Prove engine state matches a committed golden | `golden-checksum` |
+| Pause/step; API and mouse place/break; input flush | `pause-step-interact` |
+| Keyboard/command-mode state in the no-scenario world | `input-controls` |
+| Click a runtime UI button and verify via read-back | `ui-control-click` |
+| RTS command mode, unit selection, right-click orders | `rts-select-orders` |
+| Read sim/HUD state, inspector, screenshot, logs | `probe-hud` |
+| Menu → campaign planet → sector → launch | `enter-campaign` |
+| Fresh Ground Zero launch: clear saves → restart → core assertions | `ground-zero-fresh-launch` |
+| Launch a sector and assert preset rules | `sector-preset-rules` |
+| Save / list / load campaign slots | `campaign-save-load` |
+| Load Game dialog: live slot list → card load | `load-game-dialog` |
+| Campaign difficulty dialog: open, body, close | `campaign-rules-dialog` |
+| Research dialog: select root, purchase node | `research-purchase` |
+| Ground Zero production: placed drill → core delivery | `ground-zero-production-probe` |
+| Placement picker: catalog filtering / icon / clipping audit | `placement-picker-audit` |
+| Live waves: `run_wave` → unit/bullet assertions | `units-live-wave-runtime` |
+| Pause menu → host a match | `host-match-from-pause` |
+| Shift command mode: hold vs tap (twin) | `command-mode-hold-vs-tap` |
+
+`boot-and-identity` runs first in any session; every other row assumes a
+connected runtime. The two Java-reference chains (`java-reference-leg`,
+`java-custom-survival-wave`) target computer-mcp and belong to the
+`parity-eval` twin leg, not to Godot playtesting.
 
 The MCP server is a stdio process (`open-godot-mcp`, binary `~/.local/bin/open-godot-mcp`, bridge default **ws://127.0.0.1:6970**, overridden per parity loop by `$PARITY_BRIDGE_PORT` through the `.opencode/loops/mcp-bin` PATH shim). Every tool takes `action` plus an optional `params` object; action-specific arguments go inside `params` (e.g. `godot_editor_edit {"action":"open_scene","params":{"path":"res://..."}}`).
 
@@ -87,6 +115,8 @@ godot_exec {"action":"call","params":{"node_path":"/root/Spine/SimHost","method"
 godot_exec {"action":"call","params":{"node_path":"/root/Spine/SimHost","method":"break_block","args":[3, 5]}}                 # -> true
 ```
 
+`true` is not a placement result: the live runtime can reject an occupied/blocked tile and still return true (only a `[D] place command rejected at (x, y)` log line remains). Read tiles back from `get_state_json()`. Odd-size blocks anchor on the given tile; even-size blocks use it as the top-left.
+
 ### 4. Mouse place/break (real input path)
 
 1. Resolve the tile center: `godot_exec {"action":"eval","params":{"code":"return get_node(\"/root/Spine/World/Camera2D\").tile_to_screen(7, 7)"}}` → `{x, y}` viewport coords.
@@ -96,7 +126,7 @@ godot_exec {"action":"call","params":{"node_path":"/root/Spine/SimHost","method"
 
 ### 5. Pause + step
 
-`godot_exec {"action":"call","params":{"node_path":"/root/Spine/SimHost","method":"set_paused","args":[true]}}` then `godot_exec {"action":"eval","params":{"code":"return get_node(\"/root/Spine/SimHost\").step(10)"}}` → new tick. `step(0)` is a no-op that returns the current tick.
+`godot_exec {"action":"call","params":{"node_path":"/root/Spine/SimHost","method":"set_paused","args":[true]}}` then `godot_exec {"action":"eval","params":{"code":"return get_node(\"/root/Spine/SimHost\").step(10)"}}` → new tick. `step(0)` is a no-op that returns the current tick. Chunk large advances (e.g. 6–10 × `step(600)`) — one huge step can exceed the 15 s eval budget, and a timed-out eval keeps running and blocks later calls.
 
 ### 6. `get_state_json` assertions
 
@@ -120,9 +150,10 @@ godot_exec {"action":"call","params":{"node_path":"/root/Spine/SimHost","method"
 1. Run `tools/mcp-smoke.sh` first — it isolates bridge/identity/checksum issues from your recipe.
 2. `godot_log {"action":"errors"}` (clear first for a clean window), then `godot_health check`, then `godot_game {"action":"status"}`.
 3. The headless oracle is the cheaper ground truth: `cargo run -p mind-headless -- run spine_place_break --json` and `... run spine_determinism --json` from the repo root.
-4. A wedged game: `godot_game {"action":"stop"}` then play again. Do not kill the editor unless the bridge itself is unresponsive; relaunch it with the command from Session start.
+4. A wedged game: check `godot_debugger sessions` first — an eval that errored or timed out trips the editor break-on-error (`paused: true`), pinning the frame loop while `godot_exec` still answers; `resume` re-breaks. Recover with `godot_game {"action":"stop"}` then play again. Do not kill the editor unless the bridge itself is unresponsive; relaunch it with the command from Session start.
 5. `godot_exec` failing with `RUNTIME_NOT_CONNECTED` means no game process is connected — play first (recipes 1–2 need the game, editor-only tools do not).
 6. **`godot_game play` with no `scene` param looks successful but does not attach the runtime** (`status` → `runtime_connected: false`, `instance_count: 0`). Always play `res://scenes/game.tscn` explicitly (§Session start 3); this is the usual cause of a "broken" MCP session.
+7. **Screenshots that never change**: verify `Engine.get_frames_drawn()` advances across two evals — a pinned counter while `Time.get_ticks_msec()` advances means rendering is frozen (the editor-embedded game can spawn without drawing); restart stop+play rather than forcing a repaint. Prefer `get_window().grab_focus()` before a capture; `move_to_foreground()` is deprecated and logs an ERROR.
 
 # Part 2 — SpacetimeDB CLI (`mindustry_godot`)
 

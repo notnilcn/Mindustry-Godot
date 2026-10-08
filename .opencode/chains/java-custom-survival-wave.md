@@ -18,7 +18,7 @@ preconditions:
     (reference run: 900x700+190+10 — coordinates below are screen coords for
     that geometry, re-derive from `xwininfo -root -children` otherwise).
 tools: [computer-mcp_mouse_move, computer-mcp_click, computer-mcp_type, computer-mcp_key_press, computer-mcp_screenshot]
-last_verified: 2026-10-08 a1ca816 (runs/20261008-040830-ev0048-live-unit-runtime-twin)
+last_verified: 2026-10-08 a1ca816 (runs/20261008-040830-ev0048-live-unit-runtime-twin); 2026-10-08 1d8f75b loop-1 twin 1152x648 (runs/20261008-225009-ev0053-hud-twin)
 ---
 
 # java-custom-survival-wave
@@ -63,6 +63,28 @@ last_verified: 2026-10-08 a1ca816 (runs/20261008-040830-ev0048-live-unit-runtime
 - Evidence run: `runs/20261008-040830-ev0048-live-unit-runtime-twin/java/`
   (step-05, step-08/09, step-10-*/tmp-fire-grid, step-11; Wave 2 / 1 Enemy
   Remaining, ~278 px approach, flash, Game Over `Waves Defeated 3`).
+
+## Verified run (loop-1 twin, 2026-10-08, 1152x648, Xwayland :2)
+
+EV-0053 twin Java leg, JVM pid 126779, window +70+63 (run
+`runs/20261008-225009-ev0053-hud-twin`). The persistent computer-mcp server was
+Broken pipe at the first call; input used `parity-click.sh` plus a one-shot
+pynput double-click (`/tmp/opencode/click2.py`, two clicks 120 ms apart) for
+the submenu row:
+
+1. `Play` screen (310,216) — one click opened the submenu.
+2. `Custom Game` row screen (560,353) — a single click only highlighted; the
+   120 ms double-click opened the map list.
+3. Card preview screen (816,325) opened the MapPlayDialog for **Debris Field**
+   (column 3; the survival map list has spawns, so it was kept instead of
+   re-aiming for Domain). `Play` screen (755,654) loaded the map.
+4. In-game HUD baseline at 1152x648: `Wave 1` + `Wave in 3:59` + white skip
+   triangle at screen (380,106). Note the wave pane is top-left; the status
+   text itself is the ground truth.
+5. Click the skip triangle (380,106): `Wave 2` + `1 Enemy Remaining` +
+   `Wave in 1:59`, and the triangle disappears (`canSkipWave` false;
+   `imageDisabledColor = Color.clear` at `HudFragment.java:494-497`).
+6. Quit with `kill -TERM` on the JVM pid (custom game, no save to preserve).
 
 ## Failure modes
 

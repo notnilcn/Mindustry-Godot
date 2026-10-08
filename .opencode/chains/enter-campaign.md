@@ -83,14 +83,14 @@ stocks its live module.
   Play (230,149) → Campaign (460,149) → serpulo card (412,194) → OK (499,631),
   each as discrete `mouse_button` press/release + `Input.flush_buffered_events()`
   (a `sequence` call timed out on this host once; discrete calls are the safe form).
-- The sector panel's action is read from `CampaignViews::vanilla_fixture()` in this
-  build: `MindUi.campaign_views()` falls back to the fixture when
-  `MindCampaign.campaign_views_json` is absent, and the dialog caches it at `_ready()`,
-  so groundZero always renders `@sectors.go` (resume) even with no saves. Clearing
-  campaign saves mid-process does not refresh the dialog — restart the game so the
-  cache is rebuilt. The `go` click still launches fresh when the sector has no save
-  (`play_sector` → `play_new_sector`); verify freshness from the
-  `MindCampaign ready (0 save slot(s))` log and `wasCaptured=false`, not the label.
+- The sector panel derives state live: `MindCampaign.campaign_views_json(planet)`
+  projects `CampaignViews::from_campaign()` and the dialogs prefer it over the
+  fixture (fix `1d8f75b`; sequence in `campaign-live-views-capture.md`). Flags
+  refresh on every dialog open (`shown()` → `refresh_campaign_views`), so a
+  capture is visible on reopen without restarting; the fixture only serves when
+  the facade/endpoint is absent. Verify freshness from the dialog's own
+  `campaign_views()` row plus the `MindCampaign ready (N save slot(s))` log, not
+  the label alone.
 - Campaign bootstrap/launch gaps (EV-0035 family) can make step 3 fail before any
   click is wrong. Record the facade result and stop; do not hunt random coordinates.
 - `hasCore: false` after the facade launch means the running binary predates

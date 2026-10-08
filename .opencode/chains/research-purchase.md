@@ -31,9 +31,11 @@ last_verified: 2026-10-08 9efd068 (runs/l2-20261008-012103-ev0052-research-purch
    godot_exec {"action":"eval","params":{"code":"Input.flush_buffered_events()\nvar d = get_node(\"/root/Spine/Ui/UiRoot/DialogLayer/research\")\nreturn {\"root_name\": d._root_name, \"rows\": d._nodes.get_children().size()}"}}
    ```
 
-3. `_select_root` rebuilds rows without a layout pass and the MindTable queued
-   sort does not run, so all rows stay overlapped at y=38. Force it before
-   resolving centers:
+3. `_select_root` left both rebuilt tables unsorted before 417d400 and the
+   queued MindTable sort does not run, so rows stayed overlapped at y=38 and
+   this manual nudge was required. Since 417d400 the dialog sorts the rail and
+   the node table on every rebuild (EV-0042, see `research-root-switch.md`), so
+   the call below is a harmless no-op on current checkouts:
 
    ```
    godot_exec {"action":"eval","params":{"code":"var d = get_node(\"/root/Spine/Ui/UiRoot/DialogLayer/research\")\nd._nodes.sort_now()\nreturn true"}}
