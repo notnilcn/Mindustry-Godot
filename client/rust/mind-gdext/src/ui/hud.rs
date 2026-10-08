@@ -71,7 +71,7 @@ pub struct MindHud {
     /// Completed ticks.
     #[var]
     tick: i64,
-    /// `state.wave` (campaign read model).
+    /// `state.wave` (1-based: `PlaySession.wave + 1`, `GameState.java:17`).
     #[var]
     wave: i32,
     /// `state.enemies` (campaign read model).
@@ -343,7 +343,10 @@ impl MindHud {
         let attack_mode = dict_bool(&state, "attack");
         let wait_enemies = dict_bool(&state, "waitEnemies");
         let win_wave = dict_i64(&state, "winWave") as i32;
-        let wave = dict_i64(&state, "wave") as i32;
+        // `PlaySession.wave` is the 0-based spawn index; the HUD shows Java's
+        // `state.wave`, which starts at 1 (`GameState.java:17`) and is what the
+        // `wave.cap`/`isWaitingWave` comparisons use.
+        let wave = dict_i64(&state, "wave") as i32 + 1;
         let enemies = dict_i64(&state, "enemies") as i32;
         let wavetime = dict_f32(&state, "wavetime");
         let wave_timer = dict_bool(&state, "waveTimer");

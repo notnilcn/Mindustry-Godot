@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "wave_timer",
-      "text": "Wave 5\n5"
+      "text": "Wave 5\nNext wave in 5"
     },
     {
       "name": "wave_cap_enemies",

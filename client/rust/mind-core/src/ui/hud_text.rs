@@ -124,7 +124,8 @@ pub fn status_text(status: &HudStatus, bundle: &Bundle, iconc: &Iconc) -> String
         if status.waiting_wave {
             out.push_str(bundle.get("wave.waveInProgress"));
         } else {
-            out.push_str(&waiting_time(status.wavetime_ticks));
+            // `waitingf = new IntFormat("wave.waiting", …)` (HudFragment.java:892).
+            out.push_str(&bundle.format("wave.waiting", &[&waiting_time(status.wavetime_ticks)]));
         }
     } else if status.enemies == 0 {
         out.push_str(bundle.get("waiting"));
@@ -201,7 +202,7 @@ mod tests {
 
     fn bundle() -> Bundle {
         Bundle::from_layers(vec![parse_properties(
-            "wave=Wave {0}\nwave.cap=Wave {0} / {1}\nwave.enemy=Enemy {0}\nwave.enemies=Enemies {0}\nwave.enemycore=Enemy Core {0}\nwave.enemycores=Enemy Cores {0}\nwave.waiting=Next wave in {0}\nwave.waveInProgress=Wave in progress\nwaiting=Waiting\nsector.curcapture=Capturing sector\nrules.unitfactoryactivation.objective=Activate a unit factory in {0}\n",
+            "wave=Wave {0}\nwave.cap=Wave {0} / {1}\nwave.enemy=Enemy {0}\nwave.enemies=Enemies {0}\nwave.enemycore=Enemy Core {0}\nwave.enemycores=Enemy Cores {0}\nwave.waiting=[lightgray]Wave in {0}\nwave.waveInProgress=Wave in progress\nwaiting=Waiting\nsector.curcapture=Capturing sector\nrules.unitfactoryactivation.objective=Activate a unit factory in {0}\n",
         )])
     }
 
@@ -221,7 +222,7 @@ mod tests {
             ..Default::default()
         };
         let text = status_text(&status, &bundle(), &iconc());
-        assert_eq!(text, "Wave 5\n5");
+        assert_eq!(text, "Wave 5\n[lightgray]Wave in 5");
     }
 
     #[test]
@@ -298,7 +299,10 @@ mod tests {
             wavetime_ticks: 600.0,
             ..Default::default()
         };
-        assert!(status_text(&status, &bundle(), &iconc()).ends_with("10"));
+        assert_eq!(
+            status_text(&status, &bundle(), &iconc()),
+            "Wave 1\n[lightgray]Wave in 10"
+        );
 
         let waiting = HudStatus {
             waves: true,

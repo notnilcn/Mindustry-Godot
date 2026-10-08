@@ -280,7 +280,7 @@
       "kind": "harness",
       "path": "client/rust/mind-core/tests/goldens/ui/hud_text.json",
       "owner_plan": "14",
-      "sha256": "7230ea2467581c66c30fa70c6b2c5e8b906f82f8d7ed2fb1092bf054ef685849"
+      "sha256": "2d86037d0ecbd0f13b89369c25768738e6623ec8e6166ce5970eaf56068f7a00"
     },
     {
       "id": "harness_ui_menu_tree",
