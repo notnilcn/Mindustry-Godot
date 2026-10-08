@@ -539,3 +539,50 @@ If nothing new happened, no entry.
 - Evidence: `runs/l2-20261008-145144-ev0013-block-picker-godot/` (EV-0013
   godot-pass; pid 179192; the rewritten `godot/state-04-fresh-groundzero.json`
   and the 8-category post-research read in `godot/state-05-after-research.json`).
+
+## 2026-10-08 — loop-2 worktree runtime dir exceeds the 108-byte UNIX socket limit; killed editors leave embedder sockets
+
+- The worktree `.opencode/loops/bin/run-godot-editor.sh` resolves loop vars
+  relative to its own location, so a loop-2 launch from
+  `Mindustry-Godot-loop2/.opencode/...` uses the worktree loop dir. Godot's
+  Wayland embedder socket path there
+  (`.../Mindustry-Godot-loop2/.opencode/loops/run/loop-2/wayland/godot-wayland-0`,
+  108 chars + NUL) is over the 108-byte limit: the editor logs `socket path
+  "..." plus null terminator exceeds 108 bytes` / `Can't connect to a Wayland
+  display` and falls back to X11, where the worktree Xwayland `:3` had already
+  died (`X connection to :3 broken` killed the embedded game). Launch loop-2
+  through the main checkout instead — `$PARITY_MAIN/.opencode/loops/bin/
+  run-godot-editor.sh` — whose `.../Mindustry-Godot/.opencode/loops/run/loop-2/
+  wayland` dir is 102 bytes and matches the session env/MCP paths.
+- A killed (`godot_editor_edit quit` or SIGTERM) editor leaves its
+  `godot-wayland-*` socket + `.lock` behind; the next editor's bind fails while
+  the path exists (`Can't bind embedding socket`), so remove the stale files in
+  `$PARITY_WAYLAND_DIR` before relaunching. Beware: a stale socket can also be
+  held by an unrelated desktop process, so `ss -xlp` (not the file alone) tells
+  you whether a listener is live.
+- The worktree launch also spawned duplicate `wayland-mind2`/`mind2-java`
+  weston compositors under the worktree dir while the main-path ones (session
+  env) stayed up; the duplicate java weston's Xwayland died mid-run. Use the
+  main wrapper so the session's compositors are reused.
+- Evidence: `$PARITY_LOOP_DIR/logs/editor.log` 2026-10-08 20:30-20:35;
+  `runs/l2-20261008-203338-input_controls-godot/`.
+
+## 2026-10-08 — hints panel swallows center clicks; edge pan drifts the camera between evals
+
+- After ~8 s of playtime the HUD `hints` fragment shows its full-screen
+  `Panel` with `mouse_filter` STOP; `MindInput.ui_captures_at` then drops world
+  presses at the point, so a left tap on a placed building looks dead
+  (`block_config` stays hidden, `action_count` unchanged). Exhaust the
+  catalogue before clicking (`hints.set("_next", 27)` + `complete_hint()`) or
+  click off-center; one eval probing STOP hits at the point
+  (`find_children("*", "Control", true, false).filter(...)`) localizes it.
+- On the headless compositor the OS pointer parks at a window edge, so
+  `MindCamera2D` edge-pans every frame: the camera drifted from (128,128) to
+  (-3947,-3963) between two evals because every mouse injection was overridden
+  by auto-pan. Call `Camera2D.set_process(false)` before `center_on_tile` and
+  resolve `tile_to_screen` in a **later** eval (the canvas transform updates at
+  frame end, so the same-eval point after a recenter is stale); restore
+  `set_process(true)` before teardown.
+- Reusable sequence in `chains/block-config-fragment.md`; evidence
+  `runs/l2-20261008-203338-input_controls-godot/` (pid 249159; fragment
+  `_config.options` 22 after the fix).

@@ -117,3 +117,14 @@ last_verified: 2026-10-08 761a483 (runs/20261008-020931-input_controls-twin, run
   right-press broke the survivor). One discrete `godot_input` call per event
   for the sweep tail; a clean 6-tile sweep then reads `commands_applied`
   18 -> 24 (verified 2026-10-08 761a483, twin pid 249867).
+- The HUD `hints` fragment shows after ~8 s of playtime and its full-screen
+  Panel has mouse_filter STOP, so `MindInput.ui_captures_at` drops world
+  presses at the point: exhaust it before clicking
+  (`hints.set("_next", 27); hints.complete_hint()`), or click off-center
+  (verified 2026-10-08 780efa9, `chains/block-config-fragment.md`).
+- The camera edge-pans on the headless compositor (the OS pointer parks at a
+  window edge), drifting thousands of pixels between evals; call
+  `Camera2D.set_process(false)` before resolving `tile_to_screen`, and resolve
+  the point in a **later** eval than `center_on_tile` (the canvas transform
+  updates at frame end). Restore `set_process(true)` before teardown
+  (verified 2026-10-08 780efa9, EV-0045 run).
