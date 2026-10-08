@@ -6,12 +6,12 @@
  * Every opencode process takes one lease on its first MCP tool call and
  * refreshes it on later calls (`.opencode/skills/parity-eval/scripts/mcp_slot.py`).
  * When the registry is full, workflow agents listed in `MCP_SLOT_GUARD_AGENTS`
- * (default `gap-identifier,parity-orchestrator,parity-evaluator,twin-evaluator`)
+ * (default `gap-identifier,parity-orchestrator,parity-writer,twin-evaluator`)
  * get their call denied;
  * everyone else is warned and allowed, because the guard must never deadlock a
- * human's session. The two slots are what the loops and their evaluator legs
- * share. `parity-evaluator` is additionally denied every `computer-mcp_*` tool:
- * it is the Godot-only stage, and the Java reference belongs to the twin
+ * human's session. The two slots are what the loops and their fix/twin legs
+ * share. `parity-writer` is additionally denied every `computer-mcp_*` tool:
+ * its Godot leg uses open-godot-mcp, and the Java reference belongs to the twin
  * evaluator. `MCP_SLOT_GUARD=off` disables the guard entirely.
  *
  * Failure policy: acquire errors other than "limit" fail open with a console
@@ -34,7 +34,7 @@ const OWNER = `oc-${process.pid}`
 const QUIET_MS = 60_000
 const GATED = (
   process.env.MCP_SLOT_GUARD_AGENTS ??
-  "gap-identifier,parity-orchestrator,parity-evaluator,twin-evaluator"
+  "gap-identifier,parity-orchestrator,parity-writer,twin-evaluator"
 )
   .split(",")
   .map((name) => name.trim())
@@ -42,7 +42,7 @@ const GATED = (
 
 // Tools that specific agents may never call, regardless of slot state.
 const DENIED: Record<string, RegExp> = {
-  "parity-evaluator": /^computer-mcp_/,
+  "parity-writer": /^computer-mcp_/,
 }
 
 type AcquireResult = { ok: true; degraded?: boolean } | { ok: false }

@@ -70,6 +70,6 @@ Body sections: `## Steps` (exact tool + action + params, one step per call),
   the repo-root `open-godot-mcp-learnings.md` / `computer-mcp-learnings.md`,
   not here.
 
-Consumers: the `twin-evaluator` and `gap-identifier` subagents,
-`parity-orchestrator`, `parity-evaluator`, `parity-writer`, and any playtest
-session. Skills point here; they do not duplicate the sequences.
+Consumers: the `gap-identifier`, `parity-writer`, and `twin-evaluator`
+subagents, the `parity-orchestrator` / `twin-orchestrator` contracts, and any
+playtest session. Skills point here; they do not duplicate the sequences.

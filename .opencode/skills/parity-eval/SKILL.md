@@ -11,10 +11,10 @@ description: >-
 # Skill: parity-eval — Godot and Java↔Godot twin-run evaluation
 
 Three agents consume this skill: the `gap-identifier` for the code-level half
-(candidate seeding and code-evidence triage, no run), the `parity-evaluator`
-for the Godot-only stage (`godot-pass` / `godot-open` while the writer's fix is
-in flight), and the `twin-evaluator` for the final Java↔Godot twin run
-(`twin-verified` / `open`). Read
+(candidate seeding and code-evidence triage, no run), the `parity-writer` for
+the fix and its Godot leg (`godot-pass` / `godot-open` while it works the
+item), and the `twin-evaluator` for the final Java↔Godot twin run
+(`twin-verified` / `open`), spawned by `/eval-gaps`. Read
 [`../playtest/SKILL.md`](../playtest/SKILL.md) first for the Godot MCP launch
 flow, node map, pid-stamp rules, and eval pitfalls; this skill adds the Java
 reference leg, the comparison protocol, and the evidence/ledger contract. Do
@@ -165,9 +165,10 @@ is missing" from an unseen PNG: run `frame_diff.py` for metrics and
 
 Within this loop, one scenario at a time, Java first, Godot second. Parallel
 loops run the same protocol simultaneously on their own displays. The
-`parity-evaluator` runs only the Godot leg; the `twin-evaluator` runs both legs
-for `godot-pass` items, and only one twin evaluator runs across all sessions at
-a time (global twin lease).
+`parity-writer` runs the Godot leg itself, as part of each fix round; the
+`twin-evaluator`, spawned by `/eval-gaps`, runs both legs for `godot-pass`
+items, and only one twin evaluator runs across all sessions at a time (global
+twin lease).
 
 ```
 pick scope → create run dir → JAVA leg (capture) → quit Java
@@ -335,32 +336,34 @@ takes the lock around every read-modify-write, so `add`/`claim` from concurrent
 sessions can never duplicate ids or lose entries. Use the script; never
 hand-edit. In a loop worktree call it through the main checkout:
 `RF="${PARITY_MAIN:-.}/.opencode/skills/parity-eval/scripts/record_finding.py"`.
-Phase statuses: `open` (writer queue) → `godot-open` (writer working, then
-awaiting the Godot leg) → `godot-unverified` (Godot leg in flight) →
-`godot-pass` (Godot leg agreed; waits for this session's twin) →
-`twin-unverified` (twin in flight) → `twin-verified` (terminal), plus `wontfix`
-(accepted deviation). A claim is a cross-session lock: a fresh `owner` hides
-the item from pickers; `release` restores the pre-claim status and `reap`
-collects dead-session claims older than `--older-than-minutes` (default 90).
-Every claim carries a `session` label; `writer` retries, `godot-eval` picks and
-`twin` picks only see the same session's items, so a loop never verifies
-another worktree's code. `godot-pass` items are session-local by design; a
-later run of the same loop picks them up.
+Phase statuses: `open` (writer queue) → `godot-open` (writer fixing and
+running its own Godot leg) → `godot-pass` (Godot leg agreed; waits for
+`/eval-gaps`) → `twin-unverified` (twin in flight) → `twin-verified`
+(terminal), plus `wontfix` (accepted deviation). `godot-unverified` is the
+marker for a legacy interrupted Godot leg; the writer reclaims it. A claim is a
+cross-session lock: a fresh `owner` hides the item from pickers; `release`
+restores the pre-claim status and `reap` collects dead-session claims older
+than `--older-than-minutes` (default 90). Every claim carries a `session`
+label; `writer` retries and `twin` picks only see the same session's items, so
+a loop never verifies another worktree's code. `godot-pass` items are
+session-local by design; `/eval-gaps`, run in the same loop's session before
+`/merge-loops`, claims them for twin.
 
 The gap identifier owns `add --source code` and code-evidence `wontfix`; the
-parity evaluator owns `godot-pass`/`godot-open`; the twin evaluator owns
-`twin-verified`/`open` verdicts via `verify`; the orchestrator claims writer
-batches and drives each item through the pipeline one at a time. Every
-candidate carries a fix plan in its `plan` field — inline Markdown (seam,
+parity writer owns `godot-pass`/`godot-open` via `release`; the twin evaluator
+owns `twin-verified`/`open` verdicts via `verify`; `/fix-gaps` claims writer
+batches and `/eval-gaps` claims twin batches, each driven one item at a time.
+Every candidate carries a fix plan in its `plan` field — inline Markdown (seam,
 files, steps, check), not a plan number — so a claim payload hands the writer
-the sketch without any extra file lookup; an evaluator that fails an item
-refreshes that plan from its run evidence before the next writer round.
+the sketch without any extra file lookup; the writer's failed Godot leg or the
+twin evaluator's failed run refreshes that plan from the run evidence before
+the next writer round.
 
 ```bash
 python3 "$RF" summary
 python3 "$RF" list --status open --session "loop-${PARITY_LOOP:-1}"
 python3 "$RF" claim --for writer --session "loop-${PARITY_LOOP:-1}" --count 3  # exits 3 when none
-python3 "$RF" claim --for godot-eval --id EV-0001 --session "loop-${PARITY_LOOP:-1}"
+python3 "$RF" claim --for twin --session "loop-${PARITY_LOOP:-1}" --count 3    # exits 3 when none
 python3 "$RF" release --id EV-0001 --status godot-pass \
   --note "expected behavior observed at <pid>" --evidence "runs/.../godot/step-04.png"
 python3 "$RF" release --id EV-0001 --note "writer blocked: <reason>"
@@ -493,6 +496,5 @@ Before scripting a new scenario, check whether an entry already exists in
   then has no tool to call. Relaunch with `DISPLAY` set (loop shims or the
   global config env) instead of improvising a headless Java leg.
 - Never write a finding without an artifact path. Never mark a phase passed
-  without a fresh repro. Never edit game code. Never record a verdict from a
-  code reading — code evidence can only seed a candidate or settle it as
-  `wontfix`.
+  without a fresh repro. Never record a verdict from a code reading — code
+  evidence can only seed a candidate or settle it as `wontfix`.

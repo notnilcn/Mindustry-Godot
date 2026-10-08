@@ -51,9 +51,12 @@ loop bridge port, Wayland socket and XDG dirs.
   each carrying a fix plan in its `plan` field, and does not need a loop.
 - `/fix-gaps` runs per loop. The ledger `session` label is `$PARITY_SESSION`
   or `loop-$PARITY_LOOP`; a loop works its claimed batch one item at a time,
-  only verifies its own `godot-pass` items, and the twin evaluator runs under
-  a global lease (`.opencode/evals/twin-evaluator`, one item at a time across
-  sessions).
+  and its `parity-writer` fixes each item and verifies it in the running Godot
+  client before releasing it `godot-pass`.
+- `/eval-gaps` runs in the same loop session before `/merge-loops`: it claims
+  that session's `godot-pass` items for twin and drives one twin evaluator per
+  item under the global lease (`.opencode/evals/twin-evaluator`, one item at a
+  time across sessions).
 - `/merge-loops` runs from the main checkout after a loop's fix cycle returns:
   it merges the loop branch into `main`, runs `tools/ci.sh`, syncs the loop
   worktree back from main, and tears the worktree and its runtime dir down

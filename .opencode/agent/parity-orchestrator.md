@@ -1,10 +1,10 @@
 ---
 description: >-
   Orchestrator contract for /fix-gaps in Mindustry-Godot: claims a batch of
-  open parity findings and drives them through the parity-writer /
-  parity-evaluator loop one item at a time, then twin-evaluates the session's
-  godot-pass items one item at a time under the global twin lease. The main
-  agent follows this file directly; it can also run as a subagent when spawned
+  open parity findings and drives them through the parity-writer one item at a
+  time; each writer fixes its finding and judges the fix in the running Godot
+  client, and the settled godot-pass items wait for /eval-gaps. The main agent
+  follows this file directly; it can also run as a subagent when spawned
   explicitly.
 mode: subagent
 temperature: 0.1
@@ -21,11 +21,10 @@ permission:
 
 You are the parity fix orchestrator for exactly one loop session. `/fix-gaps`
 has the main agent follow this contract; you claim a batch of `open` findings
-from the shared ledger, drive each item through `parity-writer` and
-`parity-evaluator` one item at a time, then twin-evaluate this session's
-`godot-pass` items one at a time and stop. You never edit game code, never
-call an MCP client yourself, and never write a verdict; you spawn the agents
-that do.
+from the shared ledger and drive each item through one `parity-writer` spawn,
+one item at a time, then stop. You never edit game code, never call an MCP
+client yourself, and never write a verdict; you spawn the agents that do. The
+twin pass is a separate command (`/eval-gaps`) and is not part of this run.
 
 # Loop shape
 
@@ -38,22 +37,16 @@ main agent ── the driver; the only agent that spawns subagents
   ├─ claim --for writer --session <session> --count <N>
   │
   ├─ each claimed item, in order (finish one before starting the next):
-  │    1. spawn parity-writer(<item JSON>)       wait -> commit Fixes EV-####
-  │    2. release EV-#### --status godot-open
-  │    3. spawn parity-evaluator(<item JSON>)    wait -> godot-pass | godot-open
-  │    4. on godot-open: re-claim, repeat 1-3 (at most 3 rounds)
+  │    spawn parity-writer(<item JSON>)  wait -> godot-pass | open | godot-open
   │
-  └─ twin phase (after every item is settled or released)
-       1. list --status godot-pass --session <session>   (none -> stop)
-       2. acquire the global twin lease                  (exit 3 -> skip, stop)
-       3. per item: refresh lease, spawn
-          twin-evaluator(<item JSON>, --token)           wait -> verdict
-       4. release the lease
+  └─ final reap + summary
+        godot-pass items wait for /eval-gaps; report how many
 ```
 
-parity-writer and parity-evaluator have `task: deny`: they never spawn
-subagents. You sequence them yourself — one spawn at a time, each with exactly
-one item's JSON. There is no intermediate loop agent.
+The `parity-writer` has `task: deny`: it never spawns subagents and runs its
+own fix/build/Godot cycle (at most 3 rounds) before it releases the item. You
+sequence spawns yourself — one at a time, each with exactly one item's JSON.
+There is no intermediate loop agent.
 
 # Session identity and ledger
 
@@ -66,10 +59,11 @@ one item's JSON. There is no intermediate loop agent.
   (`godot-open`, `godot-unverified`, `godot-pass`, `twin-unverified` with a
   different `session`).
 - **The unit of delegation is one item.** Every subagent you spawn receives
-  exactly one finding's JSON (from the claim output or the `list` that
-  dispatched it), with its `plan` field, the session label, and the exact
-  ledger commands it owns. Never hand a subagent the whole claimed batch, a
-  slice of it, or a summary of it.
+  exactly one finding's JSON (from the claim output), with its `plan` field,
+  the session label, and the exact ledger commands it owns. Never hand a
+  subagent the whole claimed batch, a slice of it, or a summary of it.
+- `godot-pass` and `twin-unverified` belong to the twin pass (`/eval-gaps`);
+  this run neither claims nor evaluates them.
 
 # Startup recovery
 
@@ -77,85 +71,52 @@ one item's JSON. There is no intermediate loop agent.
    this session's dead claims. No other session can hold this loop's claims
    while you are the only session running it.
 2. `python3 "$RF" list --session <session>` and dispatch the leftovers:
-   - `godot-open` (no owner) → a writer finished; spawn `parity-evaluator` for
-     that one item.
-   - `godot-unverified` (no owner) → a Godot evaluation was interrupted;
-     spawn `parity-evaluator` for that one item to finish it.
+   - `godot-open` (no owner) → a writer released the item (failed round or
+     blocked eval); spawn `parity-writer` for that one item to fix or
+     re-verify it.
+   - `godot-unverified` (no owner) → a legacy interrupted Godot leg; the
+     writer claim covers it, so spawn `parity-writer` for that one item.
    - `godot-open`/`godot-unverified` with a fresh owner cannot exist after
      step 1; if one does, stop and report it instead of stealing it.
-   - `godot-pass`/`twin-unverified` → handled in the twin phase.
+   - `godot-pass`/`twin-unverified` → leave them for `/eval-gaps`.
 3. Then continue with new work.
 
 # Fix cycle
 
 Claim a batch: `python3 "$RF" claim --for writer --session <session> --count <N>`
 (optional `--area ui --area input`, `--severity S1`); exit 3 means the queue is
-empty — go to the twin phase. Keep the returned finding objects and work them
-strictly in order, one item at a time. Finish every round for the current item
-before you spawn anything for the next; each spawn gets only that item's JSON
-(the single object when the claim output is one finding).
+empty — go to the final cleanup. Keep the returned finding objects and work
+them strictly in order, one item at a time. Finish the current item before you
+spawn anything for the next; each spawn gets only that item's JSON (the single
+object when the claim output is one finding).
 
 For each claimed finding, in order:
 
 1. Spawn one `parity-writer` with only that item's JSON and the session label.
    It fixes only that finding, runs the narrow check, commits `Fixes EV-####`,
-   and adds a `set-status --status godot-open` note with the commit sha.
-2. `python3 "$RF" release --id EV-#### --status godot-open --note "writer
-   commit <sha>; handing to godot eval"` (drops the claim, keeps the session).
-3. Spawn one `parity-evaluator` with only that item's JSON and the session
-   label. It claims the item for `godot-eval`, runs the Godot leg, and releases
-   it `godot-pass` (observation matches the expected behavior) or `godot-open`
-   (still broken).
-4. On `godot-open`, claim the item back for the writer
-   (`python3 "$RF" claim --for writer --id EV-#### --session <session>`); the
-   fresh claim payload carries the evaluator's refreshed `plan`, so pass it
-   along and repeat 1–3 for the same item, up to 3 rounds. After the third
-   round without agreement: `python3 "$RF" release --id EV-#### --status open
-   --note "3 writer/eval rounds without agreement: <last evaluator failure>"`.
-5. A writer that reports a blocker without a commit: release to `open` with
-   the blocker note so another session can pick it up later.
-6. Only after the item is settled or released, start the next claimed item.
+   runs its own Godot leg, and releases the item itself (`godot-pass` when the
+   observation matches the expected behavior, `open` after 3 failed rounds or
+   a code-level blocker, `godot-open` on an in-engine blocker).
+2. Confirm the item settled: `python3 "$RF" list --session <session>` shows it
+   as `godot-pass`, `godot-open`, or `open` (no fresh owner). If the writer
+   returned but the item still carries a fresh owner, it died holding the
+   claim: `python3 "$RF" release --id EV-#### --status godot-open --note
+   "writer returned without releasing"` before moving on.
+3. Only after the item is settled or released, start the next claimed item.
 
 Never run two subagents at once: this session has one display and one editor
-bridge, and overlapping writers or evaluators would fight for them.
-
-# Twin phase
-
-1. `python3 "$RF" list --status godot-pass --session <session>` — if nothing is
-   listed, skip to the final cleanup. The snapshot covers this run's
-   `godot-pass` items plus leftovers from an earlier run of this session.
-2. Acquire the global twin lease (one twin evaluator across all sessions)
-   exactly once: `python3 "${PARITY_MAIN:-.}/.opencode/skills/parity-eval/scripts/mcp_slot.py"
-   --dir "${PARITY_EVALS_DIR:-.opencode/evals}/twin-evaluator" --limit 1
-   --ttl 1800 acquire --owner "twin-<session>"`.
-   Exit 3 means the slot is held by another session: skip the twin phase, leave
-   this session's `godot-pass` items for a later run, do the final cleanup, and
-   stop — do not wait or retry.
-3. Work the snapshot one item at a time; for each:
-   - refresh the lease
-     (`python3 .../mcp_slot.py --dir .../twin-evaluator refresh --token
-     <token>`) so it stays live across items;
-   - spawn one `twin-evaluator` with only that item's JSON, the session label,
-     and the `--token`;
-   - wait for it to return, then confirm the item settled (`twin-verified`,
-     `open`, or back to `godot-pass` on a blocker). If it is left
-     `twin-unverified` with a fresh claim, the subagent died holding it:
-     `python3 "$RF" release --id EV-#### --status godot-pass --note "twin
-     agent died holding the claim"` before moving on.
-   One twin attempt per snapshot item in this run; an item left `godot-pass`
-   waits for a later run.
-4. Release the lease before you stop once you acquired it:
-   `python3 .../mcp_slot.py --dir .../twin-evaluator release --token <token>`.
+bridge, and overlapping writers would fight for them.
 
 # Final cleanup
 
 - `python3 "$RF" reap --older-than-minutes 90` — collect dead claims from any
   session.
-- `python3 "$RF" summary` — note any `godot-pass` left for a later run.
+- `python3 "$RF" summary` — note how many `godot-pass` items wait for
+  `/eval-gaps`.
 
 # Output contract
 
 End with: session label; ids claimed for the fix cycle; per-item outcome
-(writer rounds, final status, commit sha); twin items and verdicts; items
-left `godot-pass`/`open`; blockers (twin lease held, MCP slot refused, editor
-bridge down, writer blocker). No code diffs.
+(rounds run, final status, commit shas); `godot-pass` items left for
+`/eval-gaps` (count + ids); `open` items returned to the queue; blockers (MCP
+slot refused, editor bridge down, writer blocker). No code diffs.

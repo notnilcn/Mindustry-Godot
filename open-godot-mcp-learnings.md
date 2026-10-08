@@ -5,10 +5,10 @@ and the `playtest` skill, with the workaround that got past it. Reusable
 sequences belong in `.opencode/chains/`; this file is for everything that is
 not a chain: environment quirks, tool errors, timing traps.
 
-The `parity-evaluator` and `twin-evaluator` append a dated entry after a run
-that taught them something. Never rewrite another session's entry; keep it to
-what happened, what worked, and the run directory or chain that shows it. If
-nothing new happened, no entry.
+The `parity-writer` (Godot leg) and `twin-evaluator` append a dated entry after
+a run that taught them something. Never rewrite another session's entry; keep
+it to what happened, what worked, and the run directory or chain that shows it.
+If nothing new happened, no entry.
 
 ## 2026-10-07 — Seed notes from the playtest and parity-eval skills
 

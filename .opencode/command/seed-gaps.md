@@ -21,7 +21,7 @@ Rules:
   a duplicate symptom.
 - Record every new candidate through the ledger helper with `--source code`
   and `--status open`, both sides' file:line in `--evidence`, and a repro
-  sketch the evaluators can run later.
+  sketch the writer can run later.
 - Every candidate carries a fix plan in its `plan` field: a short Markdown
   sketch of the seam, the files to touch with file:line, the ordered fix
   steps, and the check that proves it, written from the code you already read.

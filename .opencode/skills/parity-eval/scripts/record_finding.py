@@ -4,22 +4,24 @@
 
 Lifecycle:
 
-    open -> godot-open -> godot-unverified -> godot-pass -> twin-unverified -> twin-verified
-                     ^          | fail                       | fail
-                     +----------+                            +-> open
+    open -> godot-open -> godot-pass -> twin-unverified -> twin-verified
+              ^   | fail      | fail                | fail
+              |   +-> open    +-> open              +-> open
+              +-- godot-unverified (legacy in-flight mark the writer reclaims)
 
 The gap identifier seeds code-sourced candidates with `add --source code`
 (status `open`), each carrying a Markdown fix sketch in the `plan` field.
 A loop session claims a batch for its writer with
 `claim --for writer --session loop-N` and works the items one at a time; the
-parity evaluator claims one item (`claim --for godot-eval --id EV-####`) before
-running the Godot leg; the session's twin evaluator claims one `godot-pass`
-item (`claim --for twin --id EV-####`) for the Java-vs-Godot twin run.
+writer fixes each item, runs its own Godot leg, and releases it `godot-pass`
+(fixed) or `open` (still broken). The session's twin evaluator, spawned by
+`/eval-gaps`, works a `godot-pass` item the orchestrator claimed with
+`claim --for twin --id EV-####` for the Java-vs-Godot twin run.
 
 Every claim is a cross-session lock: a finding with a fresh `owner` is
 invisible to pickers until the owner releases it or the claim goes stale and
 `reap` restores it. Findings carry a `session` label set at first claim;
-`writer` retry picks, `godot-eval` picks and `twin` picks are restricted to
+`writer` retry picks and `twin` picks are restricted to
 that session, so a loop never verifies another loop's worktree. Parallel
 sessions share one ledger: `PARITY_LEDGER` overrides the default path, and
 every mutating command holds `<ledger>.lock` for the whole read-modify-write.
@@ -35,7 +37,7 @@ button to the planet dialog. Check: headless campaign_launch step 1." \
         --evidence runs/20261005-120000-boot_menu/godot/step-04.png
     record_finding.py set-plan --id EV-0001 --plan "<Markdown fix sketch>"
     record_finding.py claim --for writer --session loop-2 --count 3
-    record_finding.py claim --for godot-eval --id EV-0001 --session loop-2
+    record_finding.py claim --for twin --session loop-2 --count 3
     record_finding.py release --id EV-0001 --status godot-pass --note "repro passes"
     record_finding.py verify --id EV-0001 --status twin-verified \
         --note "twin run at 0706963" --evidence runs/.../step-04.png
@@ -77,18 +79,17 @@ STATUSES = (
 SETTABLE = STATUSES
 # Statuses a finding is finished with for the whole workflow.
 TERMINAL = ("twin-verified", "wontfix")
-CLAIM_KINDS = ("writer", "godot-eval", "twin")
+CLAIM_KINDS = ("writer", "twin")
 # Status each claim kind writes while its actor holds the claim.
 CLAIM_STATUS = {
     "writer": "godot-open",
-    "godot-eval": "godot-unverified",
     "twin": "twin-unverified",
 }
-# Which statuses each kind may claim. `godot-open` is shared: a released item
-# awaits the parity evaluator, a fresh owner means a writer is on it.
+# Which statuses each kind may claim. The writer claims the global `open`
+# queue, `godot-open` retries, and legacy `godot-unverified` items whose Godot
+# leg was interrupted.
 POOLS = {
-    "writer": ("open", "godot-open"),
-    "godot-eval": ("godot-open", "godot-unverified"),
+    "writer": ("open", "godot-open", "godot-unverified"),
     "twin": ("godot-pass", "twin-unverified"),
 }
 # Statuses from the pre-two-stage workflow, mapped on load so old ledgers keep
@@ -663,7 +664,7 @@ def main() -> int:
         dest="for_",
         required=True,
         choices=CLAIM_KINDS,
-        help="worker kind: writer, godot-eval, or twin",
+        help="worker kind: writer or twin",
     )
     p_claim.add_argument("--id", help="claim this exact finding (e.g. EV-0001)")
     p_claim.add_argument(

@@ -28,7 +28,7 @@ you are about to touch.
 | `bench/` | Recorded performance baselines (`baselines.json`, `editor_baseline.json`). |
 | `docs/` | Operator-facing platform and packaging notes. |
 | `.github/workflows/` | `ci.yml` (push/PR gate) and `parity-nightly.yml`. |
-| `.opencode/` | Agent workflow: `agent/{gap-identifier,parity-orchestrator,parity-evaluator,parity-writer,twin-evaluator}.md`, `command/{seed-gaps,fix-gaps,merge-loops}.md`, `loops/` (per-session worktree/display/bridge isolation and wrappers), `chains/` (project MCP call sequences), `plugin/` (MCP slot guard), `evals/` (gap ledger + run artifacts), and the `skills/playtest` + `skills/parity-eval` skills. Cross-session tool friction is logged at the repo root in `open-godot-mcp-learnings.md` and `computer-mcp-learnings.md`. |
+| `.opencode/` | Agent workflow: `agent/{gap-identifier,parity-orchestrator,parity-writer,twin-orchestrator,twin-evaluator}.md`, `command/{seed-gaps,fix-gaps,eval-gaps,merge-loops}.md`, `loops/` (per-session worktree/display/bridge isolation and wrappers), `chains/` (project MCP call sequences), `plugin/` (MCP slot guard), `evals/` (gap ledger + run artifacts), and the `skills/playtest` + `skills/parity-eval` skills. Cross-session tool friction is logged at the repo root in `open-godot-mcp-learnings.md` and `computer-mcp-learnings.md`. |
 
 ## Documentation map
 
