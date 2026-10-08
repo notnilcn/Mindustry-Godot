@@ -412,8 +412,10 @@ set `wontfix`.
 
 Titles name the player-visible symptom, not the presumed code cause. One
 finding per independent symptom; link an existing id in notes instead of
-duplicating. If `edit` is denied for an evals path, fall back to the script and
-bash (`record_finding.py` for the ledger, `mkdir`/redirection for reports).
+duplicating. Agent `edit` permission covers `**/evals/**`; if the shared evals
+dir is outside the session's worktree and the tool still refuses the path,
+fall back to the script and bash (`record_finding.py` for the ledger,
+`mkdir`/redirection for reports).
 
 Write `report.md` with this shape:
 

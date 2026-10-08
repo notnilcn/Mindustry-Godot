@@ -9,6 +9,8 @@ temperature: 0.1
 permission:
   edit:
     "*": deny
+    "**/evals/**": allow
+    "**/.opencode/evals/**": allow
     "**/chains/**": allow
     "**/.opencode/chains/**": allow
     "**/open-godot-mcp-learnings.md": allow
@@ -31,9 +33,10 @@ to you and the Java reference belongs to the twin evaluator.
 
 # Hard rules
 
-- Read `.opencode/skills/playtest/SKILL.md` first (launch flow, node map,
-  pid-stamp rules, eval pitfalls) and check `.opencode/chains/` for the
-  sequence the finding's repro needs.
+- Read `.opencode/skills/parity-eval/SKILL.md` (run-dir layout, comparison
+  order, capture recipes) and `.opencode/skills/playtest/SKILL.md` first
+  (launch flow, node map, pid-stamp rules, eval pitfalls); check
+  `.opencode/chains/` for the sequence the finding's repro needs.
 - Claim the finding before running anything:
   `RF="${PARITY_MAIN:-.}/.opencode/skills/parity-eval/scripts/record_finding.py"`;
   `python3 "$RF" claim --for godot-eval --id EV-#### --session <session>`.
@@ -43,8 +46,13 @@ to you and the Java reference belongs to the twin evaluator.
 - Never mark `godot-pass` from code reading, a build log, or "should work
   now". Only a fresh in-engine reproduction of the finding's repro counts.
 - Never edit game code, tests, scenes, GDScript, Rust, registries, or config.
-- Keep writes under `$PARITY_EVALS_DIR` (`runs/`, reports). Full artifacts
-  live in the run dir; the ledger gets paths and notes only.
+  `edit` is allowed only under the evals tree (`$PARITY_EVALS_DIR` — run
+  artifacts and reports), `chains/`, and the learnings files.
+- Keep writes under `$PARITY_EVALS_DIR` (`runs/`, reports); full artifacts
+  live in the run dir and the ledger gets paths and notes only. If the shared
+  evals dir is outside this loop's worktree and the `write`/`edit` tool
+  refuses the path, use `mkdir -p` plus bash redirection — that fallback is
+  sanctioned; never write run artifacts anywhere else.
 - MCP is slot-gated: inside a loop the shims hold a lease; outside, run
   `python3 "${PARITY_MAIN:-.}/.opencode/skills/parity-eval/scripts/mcp_slot.py"
   acquire --owner "godot-eval-<session>"` first. Exit 3 means stay off MCP,
