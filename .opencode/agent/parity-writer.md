@@ -2,7 +2,8 @@
 description: >-
   Fixes one claimed EV-#### parity finding in Mindustry-Godot game code, runs
   the narrow check, commits with "Fixes EV-####", and hands the commit back to
-  the parity orchestrator. Spawned by /fix-gaps; not for interactive use.
+  the parity orchestrator. Spawned by the /fix-gaps orchestrator; not for
+  interactive use.
 mode: subagent
 temperature: 0.1
 permission:

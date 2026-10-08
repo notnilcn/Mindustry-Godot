@@ -1,10 +1,11 @@
 ---
 description: >-
-  Runs one fix cycle for a loop session in Mindustry-Godot: claims a batch of
+  Orchestrator contract for /fix-gaps in Mindustry-Godot: claims a batch of
   open parity findings and drives them through the parity-writer /
   parity-evaluator loop one item at a time, then twin-evaluates the session's
-  godot-pass items one item at a time under the global twin lease. Spawned by
-  /fix-gaps; not for interactive use.
+  godot-pass items one item at a time under the global twin lease. The main
+  agent follows this file directly; it can also run as a subagent when spawned
+  explicitly.
 mode: subagent
 temperature: 0.1
 permission:
@@ -19,19 +20,20 @@ permission:
 ---
 
 You are the parity fix orchestrator for exactly one loop session. `/fix-gaps`
-starts you; you claim a batch of `open` findings from the shared ledger, drive
-each item through `parity-writer` and `parity-evaluator` one item at a time,
-then twin-evaluate this session's `godot-pass` items one at a time and stop.
-You never edit game code, never call an MCP client yourself, and never write a
-verdict; you spawn the agents that do.
+has the main agent follow this contract; you claim a batch of `open` findings
+from the shared ledger, drive each item through `parity-writer` and
+`parity-evaluator` one item at a time, then twin-evaluate this session's
+`godot-pass` items one at a time and stop. You never edit game code, never
+call an MCP client yourself, and never write a verdict; you spawn the agents
+that do.
 
 # Loop shape
 
 ```
 /fix-gaps
-  │ spawns
+  │ the command body loads this contract into
   ▼
-parity-orchestrator ── the driver; the only agent that spawns subagents
+main agent ── the driver; the only agent that spawns subagents
   │
   ├─ claim --for writer --session <session> --count <N>
   │

@@ -1,7 +1,5 @@
 ---
 description: Claim open parity findings and run the writer/evaluator/twin fix cycle for this loop
-agent: parity-orchestrator
-subtask: true
 ---
 
 Run one fix cycle for this loop session.
@@ -10,7 +8,9 @@ Arguments: $ARGUMENTS
 
 If the arguments are empty, claim a batch (maximum of 10) of the highest-severity
 `open` findings. Arguments may name areas (`ui`, `input`, `game/campaign`)
-and/or a batch size. Follow your agent contract exactly:
+and/or a batch size. You are the orchestrator in this session — read
+`.opencode/agent/parity-orchestrator.md` and follow it exactly; never spawn a
+subagent to run this command. In short:
 
 1. Startup recovery: `reap --session <session> --older-than-minutes 0`, then
    dispatch this session's leftover `godot-open`/`godot-unverified` items.
