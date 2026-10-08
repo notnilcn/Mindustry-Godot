@@ -5,10 +5,10 @@
 #
 # Xvfb resets the pointer to the screen center when the XTEST client
 # disconnects, so `computer-mcp mouse move` followed by a separate
-# `computer-mcp mouse click` does not work on an Xvfb display. The persistent
-# computer-mcp MCP server keeps its connection and is unaffected; this helper
-# gives the CLI/script path the same behavior by moving and clicking inside a
-# single process.
+# `computer-mcp mouse click` does not work on the Xvfb fallback. The
+# persistent computer-mcp MCP server keeps its connection and is unaffected;
+# this helper gives the CLI/script path the same behavior by moving and
+# clicking inside a single process on either display server.
 #
 # Usage: parity-click.sh <x> <y> [left|right|middle] [--double]
 set -euo pipefail
@@ -17,6 +17,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/loop-vars.sh
 . "$script_dir/../lib/loop-vars.sh"
 parity_loop_vars "${PARITY_LOOP:-1}"
+parity_ensure_display
 
 if [ $# -lt 2 ]; then
   echo "usage: parity-click.sh <x> <y> [left|right|middle] [--double]" >&2

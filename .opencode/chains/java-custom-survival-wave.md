@@ -40,7 +40,7 @@ last_verified: 2026-10-08 a1ca816 (runs/20261008-040830-ev0048-live-unit-runtime
    (skip) triangle at ~(500,53). The triangle is `HudFragment`'s skip button →
    `Logic.skipWave()` → `runWave()`.
 5. Click the skip triangle, wait ~2 s, capture:
-   `.opencode/skills/parity-eval/scripts/capture_screen.py --rect <window> --output <run>/java/step-05-wave1-triggered.png`
+   `.opencode/skills/parity-eval/scripts/capture_screen.py --window-title Mindustry --output <run>/java/step-05-wave1-triggered.png`
    Expect `Wave N+1 / k Enemy Remaining`.
 6. Follow the unit: it spawns at a map spawn point and paths to the player core.
    Zoom out with a one-shot pynput scroll if needed:
@@ -70,11 +70,12 @@ last_verified: 2026-10-08 a1ca816 (runs/20261008-040830-ev0048-live-unit-runtime
   untouched and use the skip button.
 - Campaign Ground Zero: skip button is disabled (`waveSending:false`) and no
   timer wave arrives — do not wait there; use a default map in Custom Game.
-- The whole window captures are 900x700 at +190+10; `capture_screen.py
-  --window-title` needs `xdotool` (absent) and falls back to the full monitor —
-  use `--rect`.
-- `computer-mcp_click`'s attached screenshot shows the previous frame; always
-  re-capture before interpreting. Java needs a first key press to focus the Xvfb
+- Whole-window captures read the game window directly (`--window-title
+  Mindustry`, no xdotool needed); on Xwayland the monitor/root grab is black,
+  so window capture is the only reliable path there.
+- `computer-mcp_click`'s attached screenshot shows the previous frame (and is
+  black on Xwayland); always re-capture with `capture_screen.py` before
+  interpreting. On the Xvfb fallback Java needs a first key press to focus the
   window; send Escape/J twice.
 - Killing the JVM with `kill -TERM <java-pid>` is fine for custom games (no
   sector save to preserve); main-menu Quit takes more blind clicks.

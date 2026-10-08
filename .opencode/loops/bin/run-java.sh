@@ -4,8 +4,9 @@
 # Launch the Java Mindustry reference for this parity loop with display and
 # per-loop user data (settings/saves) isolation. The real home's Mindustry
 # data dir is copied in once, so each loop starts from the normalized
-# settings without sharing the live one. The loop's Xvfb is started when the
-# display is down.
+# settings without sharing the live one. The display comes from the loop's
+# dedicated weston + Xwayland compositor (GPU), started when down; a missing
+# weston/Xwayland or PARITY_JAVA_DISPLAY=x11 falls back to Xvfb (software GL).
 #
 # Usage: run-java.sh [extra java args...]
 set -euo pipefail

@@ -8,8 +8,9 @@
 #
 # Godot renders on this loop's headless weston compositor (Wayland + GPU):
 # Xvfb has no DRI3, so Godot on Xvfb falls back to llvmpipe software rendering
-# and pins the CPU. The Java reference stays on Xvfb; see ../README.md. Set
-# PARITY_GODOT_DISPLAY=x11 to force the X11/Xvfb path.
+# and pins the CPU. The Java reference has its own headless weston + Xwayland
+# compositor (also GPU); see ../README.md. Set PARITY_GODOT_DISPLAY=x11 to
+# force the Godot X11/Xvfb path.
 #
 # Usage: run-godot-editor.sh [extra godot args...]
 set -euo pipefail
@@ -32,7 +33,7 @@ else
   echo "[parity-loop $PARITY_LOOP] editor: using Xvfb $PARITY_DISPLAY (software rendering)" >&2
 fi
 
-# Xvfb still backs the Java reference leg and X11-only tooling.
+# Resolve the Java X display (starts the java weston/Xwayland when down).
 parity_ensure_display
 
 godot="${GODOT_BIN:-}"

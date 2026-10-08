@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-only
 #
-# Stop a parity loop's Xvfb and weston compositor (and optionally remove its
-# worktree / runtime dir). It never kills editors, game clients, or opencode
-# sessions; stop those from the loop session first.
+# Stop a parity loop's display servers - the dedicated java weston/Xwayland
+# compositor (GPU), the Godot weston compositor, and a leftover Xvfb software
+# fallback (and optionally remove its worktree / runtime dir). It never kills
+# editors, game clients, or opencode sessions; stop those from the loop
+# session first.
 #
 # Usage: stop-loop.sh <loop-id> [--remove-worktree] [--purge]
 set -euo pipefail
@@ -41,6 +43,17 @@ if [ -f "$PARITY_LOOP_DIR/xvfb.pid" ]; then
   rm -f "$PARITY_LOOP_DIR/xvfb.pid"
 else
   echo "[loop $PARITY_LOOP] no Xvfb pidfile"
+fi
+
+if [ -f "$PARITY_LOOP_DIR/java-weston.pid" ]; then
+  pid="$(cat "$PARITY_LOOP_DIR/java-weston.pid")"
+  if kill -0 "$pid" 2>/dev/null && tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | grep -q 'weston'; then
+    echo "[loop $PARITY_LOOP] stopping java weston/Xwayland $PARITY_JAVA_WAYLAND_SOCKET (pid $pid)"
+    kill "$pid"
+  fi
+  rm -f "$PARITY_LOOP_DIR/java-weston.pid"
+else
+  echo "[loop $PARITY_LOOP] no java weston pidfile"
 fi
 
 if [ -f "$PARITY_LOOP_DIR/weston.pid" ]; then

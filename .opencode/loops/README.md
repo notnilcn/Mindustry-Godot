@@ -5,14 +5,16 @@ git worktree (loops ≥ 2), user-data dirs, and run-dir prefix. Parallel loops
 never share a display, and the shared ledger (`.opencode/evals/findings.json`)
 is the only cross-loop coordination point.
 
-Each loop runs two display servers. Xvfb (the `PARITY_DISPLAY` X display) backs
-the Java reference and X11-only tooling. A headless `weston` compositor with
-the GL renderer hosts the Godot editor and games on a Wayland socket
-(`PARITY_WAYLAND_SOCKET`, e.g. `wayland-mind1`) with its runtime dir under
-`PARITY_WAYLAND_DIR` (`run/loop-N/wayland`). Godot on Xvfb falls back to
-llvmpipe software rendering because Xvfb has no DRI3; weston keeps Godot on the
-GPU. Install weston once (`apt install weston`); without it the editor falls
-back to Xvfb, and `PARITY_GODOT_DISPLAY=x11` forces that path.
+Each loop runs two headless `weston` compositors with the GL renderer, so both
+clients render on the GPU. One backs the Java reference's X display with the
+`xwayland` module (`PARITY_DISPLAY`; the Xwayland display number is discovered
+at startup under `run/loop-N/xwayland`, socket `mindN-java`). The other hosts
+the Godot editor and games on a Wayland socket (`PARITY_WAYLAND_SOCKET`, e.g.
+`wayland-mind1`) with its runtime dir under `PARITY_WAYLAND_DIR`
+(`run/loop-N/wayland`). Xvfb is the software fallback for the Java side
+(llvmpipe; Xvfb has no DRI3): `PARITY_JAVA_DISPLAY=x11` forces it, and a
+missing weston/Xwayland falls back to it automatically. Install weston once
+(`apt install weston`); `PARITY_GODOT_DISPLAY=x11` forces the Godot fallback.
 
 ## Usage
 
@@ -20,30 +22,34 @@ back to Xvfb, and `PARITY_GODOT_DISPLAY=x11` forces that path.
 .opencode/loops/bin/start-loop.sh 1            # prepare loop 1, print env
 .opencode/loops/bin/start-loop.sh 2 --run      # prepare + exec opencode --auto
 .opencode/loops/bin/status-loops.sh            # per-loop processes/ports
-.opencode/loops/bin/stop-loop.sh 2             # stop Xvfb/weston for one loop
+.opencode/loops/bin/stop-loop.sh 2             # stop a loop's display servers
 ```
 
 `--run` launches opencode in the loop worktree with `--auto` (explicit deny
 rules still hold). Pass `--no-auto` to keep permission prompts. The launch
-helpers start the loop's Xvfb and weston when down; `run-godot-editor.sh` runs
-the editor on the loop's weston (GPU) and `run-java.sh` runs the Java reference
-on the X display, both with the loop's bridge port and user-data isolation.
-`start-loop.sh` exports `WAYLAND_DISPLAY`/`XDG_RUNTIME_DIR` for the session, so
-a bare `godot` launch also lands on the GPU compositor.
+helpers start the loop's java weston/Xwayland and Godot weston when down;
+`run-godot-editor.sh` runs the editor on the loop's weston (GPU) and
+`run-java.sh` runs the Java reference on the Xwayland display (GPU), both with
+the loop's bridge port and user-data isolation. `start-loop.sh` exports
+`WAYLAND_DISPLAY`/`XDG_RUNTIME_DIR` for the session, so a bare `godot` launch
+also lands on the GPU compositor.
 
 ## Loop map
 
-| Loop | Xvfb display | Godot Wayland socket | Bridge | Worktree | Branch | Run prefix |
+| Loop | Java X display | Godot Wayland socket | Bridge | Worktree | Branch | Run prefix |
 |---|---|---|---|---|---|---|
-| 1 | inherited or `:10` | `wayland-mind1` | 6970 | the main checkout | current | `""` |
-| N ≥ 2 | `:(9+N)` | `wayland-mindN` | `6970+10(N-1)` | `../Mindustry-Godot-loopN` | `parity/loop-N` | `lN-` |
+| 1 | Xwayland `:N` (discovered; Xvfb `:10` fallback) | `wayland-mind1` | 6970 | the main checkout | current | `""` |
+| N ≥ 2 | Xwayland `:N` (discovered; Xvfb `:(9+N)` fallback) | `wayland-mindN` | `6970+10(N-1)` | `../Mindustry-Godot-loopN` | `parity/loop-N` | `lN-` |
 
-`loop-vars.sh` exports `PARITY_LOOP`, `PARITY_DISPLAY`, `PARITY_WAYLAND_SOCKET`,
-`PARITY_WAYLAND_DIR`, `PARITY_BRIDGE_PORT`, `PARITY_DAP_PORT`, `PARITY_LSP_PORT`,
-`PARITY_WORKTREE`, `PARITY_EVALS_DIR`, `PARITY_LEDGER`, `PARITY_RUN_PREFIX`,
-`PARITY_LOOP_DIR`, and `PARITY_MCP_BIN`. The `mcp-bin/` shims are prepended to
-`PATH`, pinning computer-mcp to the loop X display and open-godot-mcp to the
-loop bridge port, Wayland socket and XDG dirs.
+`loop-vars.sh` exports `PARITY_LOOP`, `PARITY_DISPLAY`,
+`PARITY_JAVA_WAYLAND_SOCKET`, `PARITY_JAVA_WAYLAND_DIR`,
+`PARITY_WAYLAND_SOCKET`, `PARITY_WAYLAND_DIR`, `PARITY_BRIDGE_PORT`,
+`PARITY_DAP_PORT`, `PARITY_LSP_PORT`, `PARITY_WORKTREE`, `PARITY_EVALS_DIR`,
+`PARITY_LEDGER`, `PARITY_RUN_PREFIX`, `PARITY_LOOP_DIR`, and `PARITY_MCP_BIN`.
+Call `parity_ensure_display` to resolve `PARITY_DISPLAY` (starts the server
+when down; sets `PARITY_DISPLAY_SERVER=xwayland|xvfb`). The `mcp-bin/` shims are
+prepended to `PATH`, pinning computer-mcp to the loop X display and
+open-godot-mcp to the loop bridge port, Wayland socket and XDG dirs.
 
 ## Workflow integration
 

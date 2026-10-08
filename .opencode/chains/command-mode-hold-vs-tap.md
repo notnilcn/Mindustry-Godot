@@ -7,7 +7,7 @@ applies_when: >-
   from the keyboard, hold-vs-tap semantics, or the `commandmodehold` setting.
 preconditions:
   - Loop manifest exported; Java jar built; computer-mcp registered with DISPLAY set at opencode start.
-  - One X11 client at a time on the loop display (Xvfb has no WM).
+  - One client at a time on the loop display (`$PARITY_DISPLAY`; Xwayland with Weston's WM by default, Xvfb with no WM on the software fallback).
   - Godot leg after boot-and-identity (res://scenes/game.tscn played with the explicit scene param, runtime_connected true, pid stamped); res://scenarios/input_controls is absent, the default empty world is the stage.
 tools:
   - computer-mcp_mouse_move

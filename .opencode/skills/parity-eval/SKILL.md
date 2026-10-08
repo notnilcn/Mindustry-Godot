@@ -50,23 +50,27 @@ Host installs are resolved through environment overrides (`GODOT_BIN`,
 Sessions started with `.opencode/loops/bin/start-loop.sh <N> --run` export the
 loop manifest and prepend `.opencode/loops/mcp-bin` to `PATH`, so bare
 `computer-mcp` / `open-godot-mcp` (and the opencode MCP servers) are pinned to
-this loop's displays and editor bridge port. Loop 1 is the main checkout on an
-inherited X display or `:10`; loops >= 2 run on `:(9+N)` in
-`../Mindustry-Godot-loopN` worktrees on branch `parity/loop-N`. The launch
-helpers (and the MCP shims) start that loop's Xvfb (Java/X11) and its headless
-weston compositor (Godot on the GPU) when they are down. Read
-`.opencode/loops/README.md` before starting or stopping a loop.
+this loop's displays and editor bridge port. Loop 1 is the main checkout;
+loops >= 2 run in `../Mindustry-Godot-loopN` worktrees on branch `parity/loop-N`.
+The launch helpers (and the MCP shims) start that loop's two headless weston
+compositors when they are down: one with the Xwayland module backs the Java
+reference's X display (GPU; its display number is discovered at startup and
+exported as `PARITY_DISPLAY`), the other hosts Godot on the GPU. Xvfb is the
+software fallback for the Java side (`PARITY_JAVA_DISPLAY=x11` forces it;
+fallback display `:10`, `:11`, …). Read `.opencode/loops/README.md` before
+starting or stopping a loop.
 
 | Variable | Meaning |
 |---|---|
 | `PARITY_LOOP` | loop id |
-| `PARITY_DISPLAY` | the loop's Xvfb display (`:10`, `:11`, …) for Java/X11 |
+| `PARITY_DISPLAY` | the loop's Java X display: the java weston's Xwayland display on the GPU (number discovered at startup), or Xvfb (`:10`, `:11`, …) on the software fallback |
 | `PARITY_WAYLAND_SOCKET`, `PARITY_WAYLAND_DIR` | Godot's weston/Wayland socket (`wayland-mind1`, …) and its runtime dir |
+| `PARITY_JAVA_WAYLAND_SOCKET`, `PARITY_JAVA_WAYLAND_DIR` | Java's weston/Wayland socket (`mind1-java`, …) and its runtime dir |
 | `PARITY_BRIDGE_PORT` | editor addon listen port / MCP adopt port (6970, 6980, …) |
 | `PARITY_WORKTREE` | checkout this loop runs in |
 | `PARITY_EVALS_DIR`, `PARITY_LEDGER` | shared evals dir and flock-protected ledger |
 | `PARITY_RUN_PREFIX` | prefix run dirs with this (`l2-…` for loop 2) |
-| `PARITY_LOOP_DIR` | per-loop runtime dir (xvfb pid/log, client user data) |
+| `PARITY_LOOP_DIR` | per-loop runtime dir (display pid/logs, client user data) |
 
 Rules:
 
@@ -89,10 +93,11 @@ Rules:
 - Ledger writes go to `$PARITY_LEDGER` (the scripts' default via env), which is
   shared by all loops and serialized by a file lock. Run dirs live under
   `$PARITY_EVALS_DIR/runs/${PARITY_RUN_PREFIX}<stamp>-<scenario>/`.
-- On an Xvfb display a one-shot `computer-mcp mouse move` does not persist: the
-  pointer snaps back to screen center when the XTEST client disconnects. Drive
-  the Java leg with the persistent computer-mcp MCP tools, or click with
-  `.opencode/loops/bin/parity-click.sh <x> <y> [button]` (single process).
+- On the Xvfb software fallback a one-shot `computer-mcp mouse move` does not
+  persist: the pointer snaps back to screen center when the XTEST client
+  disconnects. Drive the Java leg with the persistent computer-mcp MCP tools,
+  or click with `.opencode/loops/bin/parity-click.sh <x> <y> [button]` (single
+  process, works on both display servers).
 
 ## 1. Preconditions
 
@@ -148,14 +153,19 @@ JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 bash ../Mindustry/gradlew \
 ```
 
 **Display.** The Godot client renders on the loop's headless weston compositor
-(`$PARITY_WAYLAND_SOCKET`, GL on the GPU), so rasterization no longer burns CPU
-and frame capture stays responsive. The Java reference renders with Mesa
-`llvmpipe` (software GL) on the loop's Xvfb display (`$PARITY_DISPLAY`: loop 1
-is an inherited display or `:10`, loops >= 2 are Xvfb at `:(9+N)`; expect
-~5–15 FPS and budget CPU for it). The loop wrappers start both servers when
-down. `godot_screenshot game` needs a windowed game, not `--headless`.
-Always check a capture is non-blank (`capture_screen.py` and `frame_diff.py`
-report mean/stddev) before treating a black frame as a finding.
+(`$PARITY_WAYLAND_SOCKET`, GL on the GPU), and the Java reference renders on
+the loop's dedicated weston + Xwayland compositor (`$PARITY_DISPLAY`, GL on
+the GPU; its display number is discovered at startup). Both launch wrappers
+start their server when down. On Xwayland the X root window holds no GPU
+pixels, so mss/root grabs (including `computer-mcp screenshot`) come back
+black: capture the game window instead with
+`capture_screen.py --window-title Mindustry` (a bare capture retries the
+window automatically and says so in its report). `PARITY_JAVA_DISPLAY=x11` or
+a missing weston/Xwayland falls back to Xvfb (llvmpipe, ~5–15 FPS), where
+root captures work. `godot_screenshot game` needs a windowed game, not
+`--headless`. Always check a capture is non-blank (`capture_screen.py` and
+`frame_diff.py` report mean/stddev) before treating a black frame as a
+finding.
 
 **Vision.** If the session model cannot accept images, never write "the button
 is missing" from an unseen PNG: run `frame_diff.py` for metrics and
@@ -254,10 +264,10 @@ Clean teardown: restore pause/camera, `godot_game stop`, then record the log.
 ## 4. Java leg
 
 The reference is driven at the OS level with computer-mcp (mouse, keyboard,
-screenshot, window state). There is no semantic API. The working launch →
-drive → capture → quit sequence lives in
-`.opencode/chains/java-reference-leg.md`; friction that is not a reusable
-sequence goes to `computer-mcp-learnings.md` at the repo root.
+window state). There is no semantic API. The working launch → drive → capture
+→ quit sequence lives in `.opencode/chains/java-reference-leg.md`; friction
+that is not a reusable sequence goes to `computer-mcp-learnings.md` at the
+repo root.
 
 ```bash
 RUN="$PARITY_EVALS_DIR/runs/${PARITY_RUN_PREFIX}<stamp>-<scenario>"
@@ -269,18 +279,24 @@ until grep -q "Total time to load" "$RUN/java/game.log"; do sleep 2; done
 ```
 
 Drive with the computer-mcp MCP tools (`click`, `double_click`, `drag`,
-`mouse_move`, `type`, `key_press`, `key_down`, `key_up`, `screenshot`,
-`list_windows`, `get_window_info`). Those tools go to the loop's persistent
-computer-mcp server, so pointer state survives between calls. For scripted CLI
-clicks use `.opencode/loops/bin/parity-click.sh <x> <y> [button]`; a bare
+`mouse_move`, `type`, `key_press`, `key_down`, `key_up`, `list_windows`,
+`get_window_info`). Those tools go to the loop's persistent computer-mcp
+server, so pointer state survives between calls. `computer-mcp screenshot`
+grabs the X root through mss, which is black on the Xwayland display; capture
+frames to disk with `capture_screen.py` instead. For scripted CLI clicks use
+`.opencode/loops/bin/parity-click.sh <x> <y> [button]`; a bare
 `computer-mcp mouse move` followed by a separate `computer-mcp mouse click`
 does **not** work on an Xvfb display (the pointer resets to center when the
 one-shot XTEST client exits). Capture to disk with:
 
 ```bash
 "$MCP_VENV/bin/python" .opencode/skills/parity-eval/scripts/capture_screen.py \
-  --output "$RUN/java/step-01-menu.png"
+  --window-title Mindustry --output "$RUN/java/step-01-menu.png"
 ```
+
+`--window-title` reads the game window directly (XGetImage); a bare capture
+tries the monitor first and retries the window when that grab is blank, so the
+report's `capture`/`note` fields tell you which path ran.
 
 Quit gracefully via the main menu Quit button; if the process lingers, kill the
 pid recorded at launch, and note it in `run.json`.
@@ -291,9 +307,10 @@ Java gotchas:
   once from `~/.local/share/Mindustry`; normalize them inside the loop (window
   size, UI scale, language, music/SFX volume) and record the values in
   `run.json`. `settings_backups/` keeps prior snapshots.
-- For the Java leg each loop owns its Xvfb display, and Xvfb has no WM: run
-  one X11 client at a time in this loop so it owns focus, and never start a
-  Java client on another loop's display.
+- For the Java leg each loop owns its X display (`$PARITY_DISPLAY`): Xwayland
+  on the GPU with Weston's window manager by default, Xvfb (no WM) on the
+  software fallback. Run one client at a time and never start a Java client on
+  another loop's display.
 - Prefer keyboard shortcuts and menu paths that exist in both clients; when a
   click coordinate is needed, derive it from the current Java screenshot at the
   recorded window size and store the coordinate in the run notes.
@@ -482,10 +499,10 @@ Before scripting a new scenario, check whether an entry already exists in
 - `godot_instance launch_editor` allocates ports from its own local index and
   ignores the loop map; launch editors only through `run-godot-editor.sh`.
   Never run `open-godot-mcp --shutdown-all` — it kills sibling loops' servers.
-- On Xvfb, a one-shot `computer-mcp mouse move` snaps back to screen center
-  when the process exits. Use the persistent computer-mcp MCP tools or
-  `parity-click.sh`; the same applies to any helper that moves and clicks in
-  separate processes.
+- On the Xvfb software fallback, a one-shot `computer-mcp mouse move` snaps
+  back to screen center when the process exits. Use the persistent
+  computer-mcp MCP tools or `parity-click.sh`; the same applies to any helper
+  that moves and clicks in separate processes.
 - Eval bodies with `for`/`while` time out; split heavy expressions. A `null`
   result with `ok: true` usually means the body errored.
 - `godot_screenshot burst` blocks the round-trip; keep bursts tiny or take

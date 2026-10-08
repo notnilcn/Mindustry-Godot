@@ -151,3 +151,24 @@ happened, no entry.
 - The response screenshot still lags one action (known); every judgment in this
   run used a separate `capture_screen.py` crop.
 - Evidence: `runs/l2-20261008-051657-ev0055-rts-select-twin/java/notes.md`.
+
+## 2026-10-08 — Java leg on the GPU: java weston + Xwayland; root captures are black
+
+- The Java reference now runs on a dedicated headless `weston` + Xwayland
+  compositor (`mindN-java` socket; `PARITY_DISPLAY` is the discovered Xwayland
+  display, e.g. `:1`), so the client logs `AMD Radeon 780M (radeonsi ...)` and
+  8.4 GB VRAM instead of llvmpipe. Xvfb stays as the software fallback
+  (`PARITY_JAVA_DISPLAY=x11` or missing weston/Xwayland).
+- On Xwayland the X root window holds no GPU pixels: `mss`/`computer-mcp
+  screenshot` and root crops (`--rect`) come back pure black. Window capture
+  works: `capture_screen.py --window-title Mindustry` finds the window through
+  python-xlib (no xdotool) and reads the live client area with XGetImage; a
+  bare capture retries the window when the monitor grab is blank, and the
+  report carries `capture`/`region`/`note`/`window_id`.
+- XTest input (computer-mcp and `parity-click.sh`) lands unchanged under
+  Xwayland, and Weston's XWM manages the window. The Xvfb "first key press only
+  focuses" caveat is scoped to the Xvfb fallback.
+- Sessions started before the change still have computer-mcp pinned to the old
+  Xvfb `:10`; restart loop sessions (`start-loop.sh`) so the shim resolves the
+  Xwayland display. `status-loops.sh` prints the resolved display and server
+  (`xway(pid N)` vs `xvfb(pid N)`).

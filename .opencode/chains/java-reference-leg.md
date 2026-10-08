@@ -9,7 +9,7 @@ preconditions:
   - Loop manifest exported (`start-loop.sh`): PARITY_DISPLAY, PARITY_LOOP_DIR, PARITY_EVALS_DIR, PARITY_RUN_PREFIX.
   - JDK 17 present (`bootstrap.sh --check`) and the reference jar built at `../Mindustry/desktop/build/libs/Mindustry.jar`.
   - computer-mcp registered and opencode started with DISPLAY set (it imports pynput at module load; without an X connection its tools vanish).
-  - One client at a time on the loop display (Xvfb has no window manager).
+  - One client at a time on the loop display (`$PARITY_DISPLAY`; Xwayland with Weston's WM by default, Xvfb with no WM on the software fallback).
 tools: [computer-mcp_mouse_move, computer-mcp_click, computer-mcp_drag, computer-mcp_type, computer-mcp_key_press, computer-mcp_key_down, computer-mcp_key_up, computer-mcp_screenshot, computer-mcp_list_windows, computer-mcp_get_window_info]
 last_verified: 2026-10-08 9efd068 (runs/l2-20261007-163042-twin-java-ref); 2026-10-08 a1ca816 loop-1 (runs/20261008-143432-ev0062-twin); 2026-10-08 986cda3 loop-2 (runs/l2-20261008-150205-input_controls-twin)
 ---
@@ -35,22 +35,25 @@ last_verified: 2026-10-08 9efd068 (runs/l2-20261007-163042-twin-java-ref); 2026-
    ```
 
 3. Capture the initial frame (bootstrap venv; `capture_screen.py` prints
-   mean/stddev so a blank frame is caught before it becomes a finding). When
-   `xdotool` is absent, `--window-title` warns `window not found via xdotool;
-   captured full monitor` and returns the full 1280x720 screen — read the window
-   geometry from `DISPLAY=:N xwininfo -root -children` and crop with `--rect
-   <origin-x>,<origin-y>,<w>,<h>` instead:
+   mean/stddev so a blank frame is caught before it becomes a finding). Read
+   the game window directly with `--window-title`: on the Xwayland display the
+   X root holds no GPU pixels, so mss/root captures come back black. A bare
+   capture grabs the monitor and automatically retries the window when that is
+   blank. The report's `region` is the window origin/size in screen
+   coordinates — use it to turn an element offset in the capture into a click
+   coordinate:
 
    ```bash
-   DISPLAY=:11 "$HOME/.local/share/uv/tools/computer-mcp/bin/python" \
+   DISPLAY="$PARITY_DISPLAY" "$HOME/.local/share/uv/tools/computer-mcp/bin/python" \
      .opencode/skills/parity-eval/scripts/capture_screen.py \
-     --rect 190,10,900,700 --output "$RUN/java/step-01-menu.png"
+     --window-title Mindustry --output "$RUN/java/step-01-menu.png"
    ```
 
 4. Drive the flow with the persistent computer-mcp MCP tools
    (`computer-mcp_mouse_move`, `computer-mcp_click`, `computer-mcp_drag`,
-   `computer-mcp_type`, `computer-mcp_key_press`, ...), re-capturing after each
-   named step. For a scripted CLI click use
+   `computer-mcp_type`, `computer-mcp_key_press`, ...), re-capturing with
+   `capture_screen.py` after each named step (`computer-mcp screenshot`
+   captures the X root and is black on Xwayland). For a scripted CLI click use
    `.opencode/loops/bin/parity-click.sh <x> <y> [button]` (single process); a
    bare `computer-mcp mouse move` followed by a separate `computer-mcp mouse
    click` does not work on Xvfb — the pointer resets to screen center when the
@@ -108,6 +111,17 @@ returns to the byte-identical baseline (run
 `chains/command-mode-hold-vs-tap.md`). Quit with `kill -TERM` on the JVM pid; the
 Xvfb root only shows the loop's Godot editor window afterwards.
 
+## Verified run (loop-1, 2026-10-08, Xwayland GPU path)
+
+The java weston + Xwayland path was verified at the wrapper level (no scenario
+run): `parity_ensure_display` started `mind1-java` and resolved
+`PARITY_DISPLAY=:1` with `PARITY_DISPLAY_SERVER=xwayland`; `run-java.sh` logged
+`[GL] Version: ... AMD Radeon 780M Graphics (radeonsi ...)` and
+`Total available VRAM: 8.4 GB`; `capture_screen.py --window-title Mindustry`
+returned a non-blank window frame (mean 85.7 / std 48.7) with a correct
+`region`; a `parity-click.sh` click landed (the target Quit entry closed the
+client, which exited cleanly). No Xvfb was involved.
+
 ## Success signals
 
 - Readiness line present; the first capture is non-blank.
@@ -132,10 +146,15 @@ Xvfb root only shows the loop's Godot editor window afterwards.
 - Launching with `nohup … &` inside a shell-tool command does not survive the
   tool timeout (the process group is killed). Use
   `setsid .opencode/loops/bin/run-java.sh >"$RUN/java/game.log" 2>&1 </dev/null &`.
-- The first key press after a click only focuses the Xvfb window; send the
-  binding twice (observed for Escape and J). A held left button can also stay
-  logically down across MCP calls (mining continues); send an explicit
-  `computer-mcp_button_up` before expecting a fresh click to act.
+- Black captures on the Java leg: on Xwayland the X root holds no GPU pixels,
+  so `computer-mcp screenshot` and `--rect`/monitor grabs come back black. Use
+  `--window-title Mindustry` (or a bare capture, which retries the window) and
+  confirm the report's `blank` field is false before interpreting anything.
+- On the Xvfb fallback the first key press after a click only focuses the
+  window; send the binding twice (observed for Escape and J). A held left
+  button can also stay logically down across MCP calls (mining continues);
+  send an explicit `computer-mcp_button_up` before expecting a fresh click to
+  act.
 - The loop wrappers resolve `PARITY_LOOP_DIR` against the **worktree-local**
   `.opencode/loops`, so the Java data dir is
   `<worktree>/.opencode/loops/run/loop-N/xdg-data/Mindustry`, not the
