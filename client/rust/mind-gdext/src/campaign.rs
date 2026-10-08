@@ -846,6 +846,59 @@ impl MindCampaign {
         }
     }
 
+    /// M5 campaign dialog read models as live JSON (`CampaignViews`).
+    ///
+    /// The planet-14 dialogs prefer this endpoint over
+    /// `MindUi.campaign_views()`'s deterministic fixture: sector
+    /// owned/captured/locked flags, stats and planet rows are projected from
+    /// the running `Campaign` every call, so a capture (`capture_sector`) is
+    /// visible on the next refresh. `planet` is a content name; empty selects
+    /// the planet being played, else the default starting planet.
+    #[func]
+    pub fn campaign_views_json(&self, planet: GString) -> GString {
+        let Some(campaign) = self.campaign.as_ref() else {
+            return GString::from("{}");
+        };
+        let Some(registry) = self.registry.as_ref() else {
+            return GString::from("{}");
+        };
+        let name = planet.to_string();
+        let active = if name.is_empty() {
+            self.session
+                .sector
+                .map(|(planet, _)| planet)
+                .or_else(|| campaign.planet_id_by_name("serpulo"))
+                .or_else(|| {
+                    campaign
+                        .order
+                        .first()
+                        .and_then(|id| campaign.planets.get(id))
+                        .map(|planet| planet.id)
+                })
+        } else {
+            campaign.planet_id_by_name(&name)
+        };
+        let Some(active) = active else {
+            return GString::from("{}");
+        };
+        let mut schematics = Schematics::new();
+        schematics.load_loadouts(registry);
+        let mut views = mind_core::ui::campaign::CampaignViews::from_campaign(
+            campaign,
+            registry,
+            &schematics,
+            active,
+        );
+        // The map-registry dialogs read `maps` from the same endpoint; keep the
+        // built-in rows the fixture path feeds them.
+        views.maps = mind_core::ui::campaign::default_map_entries();
+        GString::from(
+            serde_json::to_string(&views)
+                .unwrap_or_else(|_| String::from("{}"))
+                .as_str(),
+        )
+    }
+
     /// Completes an objective by index (`complete_objective` relay target).
     #[func]
     pub fn complete_objective(&mut self, index: i64) -> bool {
