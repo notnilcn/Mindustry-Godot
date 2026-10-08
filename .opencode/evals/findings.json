@@ -1,6 +1,6 @@
 {
   "format": 2,
-  "updated": "2026-10-08T12:59:35+00:00",
+  "updated": "2026-10-08T14:57:16+00:00",
   "findings": [
     {
       "id": "EV-0001",
@@ -390,7 +390,7 @@
       "id": "EV-0013",
       "area": "ui/hud",
       "severity": "S3",
-      "status": "godot-pass",
+      "status": "twin-unverified",
       "title": "In-game block picker is a text list without block or category icons",
       "expected": "Java: in-game block picker at bottom-right shows unlocked blocks as 46px icon buttons and categories as 50px icon buttons (ui.getIcon(cat.name())); locked/empty categories hidden",
       "actual": "Godot: placement panel is a 976px-wide text UI at x=354 (clipped past the 1152px viewport) with Search + category text row (Turret..Logic) + 28 icon-less text block Buttons (Duo, Scatter, ...); all category names shown",
@@ -440,12 +440,17 @@
         "2026-10-08T04:49:48+00:00: [godot-open] commit 986cda3: resolver marks requirement-bearing blocks Shown (2-arg requirements parity) so world/editor content stays out of the picker; catalog now filters visible/placeable/environmentBuildable (planet-aware, shownPlanets tree pass ordered before Block.post_init); fresh Ground Zero catalog is empty, duo-unlocked yields exactly duo",
         "2026-10-08T04:50:01+00:00: released: writer round 3: commit 986cda3 (real buildability gate: Shown/Hidden + placeablePlayer + environmentBuildable + planet-aware catalog; keeps unlock filter); mind-core 1805/0, mind-gdext 20/0, clippy+fmt clean; handing to godot eval",
         "2026-10-08T04:50:22+00:00: claimed by oc-175157 for godot-eval (session loop-2)",
-        "2026-10-08T04:59:32+00:00: released: Fresh Ground Zero (serpulo:15) in-engine at 986cda3 (lib sha256 5239759ee3492b319522a912b22bfe178824f7e0ae0871c4ba1745873cf41131, editor pid 177021, game pid 179192, 1152x648, wasCaptured=false/hasCore=true): MindCampaign.block_catalog_json() and MindUi.block_catalog_json() both return 0 categories and the placement panel renders 0 category/block buttons (old 7352edb build served 187 non-buildable world/editor rows here). Positive direction: research('duo') (real tech API, spends core copper) -> catalog/panel render 8 categories as 50x50 buttons and turret duo+scatter as 46px-min buttons; locked late turrets and empty categories absent. Icons environment-limited: assets_region_count()==0, no sprites.atlas.json in this worktree (icon half judged on the atlas worktree, EV-0017). Out-of-seam residual flagged: the same research call ran check_auto_unlocks and granted 60 extra nodes (unlocked 9->70, log 'research auto-unlocked 60 content') because game/tech_tree.rs tests empty node.requirements instead of effective_requirements - not the catalog filter (catalog was empty with zero block bits and mirrors the store exactly); same 9->70 already recorded in EV-0052 twin notes; candidate for a new tech-tree finding."
+        "2026-10-08T04:59:32+00:00: released: Fresh Ground Zero (serpulo:15) in-engine at 986cda3 (lib sha256 5239759ee3492b319522a912b22bfe178824f7e0ae0871c4ba1745873cf41131, editor pid 177021, game pid 179192, 1152x648, wasCaptured=false/hasCore=true): MindCampaign.block_catalog_json() and MindUi.block_catalog_json() both return 0 categories and the placement panel renders 0 category/block buttons (old 7352edb build served 187 non-buildable world/editor rows here). Positive direction: research('duo') (real tech API, spends core copper) -> catalog/panel render 8 categories as 50x50 buttons and turret duo+scatter as 46px-min buttons; locked late turrets and empty categories absent. Icons environment-limited: assets_region_count()==0, no sprites.atlas.json in this worktree (icon half judged on the atlas worktree, EV-0017). Out-of-seam residual flagged: the same research call ran check_auto_unlocks and granted 60 extra nodes (unlocked 9->70, log 'research auto-unlocked 60 content') because game/tech_tree.rs tests empty node.requirements instead of effective_requirements - not the catalog filter (catalog was empty with zero block bits and mirrors the store exactly); same 9->70 already recorded in EV-0052 twin notes; candidate for a new tech-tree finding.",
+        "2026-10-08T14:53:04+00:00: claimed by oc-153360 for twin (session loop-2)"
       ],
       "plan": "Plan 14 (PlacementFragment palette), round 3. 7352edb fixed the unlock path: MindCampaign.block_catalog_json is reachable and both endpoints serve the settings-filtered catalog (locked foreshadow/spectre/meltdown/malign/duo/conveyor absent; 8/10 categories hidden). Residual: the filter admits non-buildable world/editor rows, so at fresh Ground Zero (no build-menu block unlocked) the picker renders 187 block buttons (distribution:186 = air, spawn, remove-wall, build1..16, water/stone floors, ores, legacy factories, command-center; effect:1 = core-bastion) while Java getUnlockedByCategory shows none.\n\nSeam: buildability admission in the placement-catalog filter. mind_core::ui::campaign::block_catalog_with uses block.build_time > 0, but post_init assigns 20.0 to requirement-less blocks (client/rust/mind-core/src/content/registries/blocks/mod.rs:2654-2668), so floors/walls/props/editor content leak; the generated specs also leave build_visibility unpopulated (Hidden) for ordinary content, so the explicit non-build variant skip does not catch them.\n\nFiles:\n- client/rust/mind-core/src/ui/campaign.rs: filter on a real build-menu bit plus the Java unlocked(block) companions (visible/buildable/placeable/environmentBuildable) instead of the build_time proxy; keep empty-category hiding and the unlock filter intact.\n- client/rust/mind-core/src/content/registries/blocks/mod.rs (plus per-family specs like environment.rs/distribution.rs): give build-menu content an explicit shown/buildable marker (or derive it the way Java requirements(Category, BuildVisibility.shown, ...) does) so world blocks (floors/walls/props/ores/spawn/build1..16/legacy/editor) are distinguishable from player buildables.\n\nSteps: mark real buildables; filter the catalog (and MindUi fallback) on that marker plus placeability/environment support; keep 7352edb's unlock filtering and cache invalidation; keep EV-0017's 46px/icon_max_width behavior on an atlas-bearing worktree.\n\nCheck: fresh Ground Zero (sector 15) launch as in runs/l2-20261008-142848-ev0013-block-picker-godot -> MindCampaign.block_catalog_json() and MindUi.block_catalog_json() contain zero categories (no build-menu block unlocked) and the placement panel renders no category/block buttons; after a <name>-unlocked research bit (or the mind-core unit test) exactly that block appears; icons re-checked on a worktree with a generated sprites atlas.",
       "first_seen": "2026-10-05T07:18:31+00:00",
-      "last_verified": "2026-10-08T04:59:32+00:00",
-      "session": "loop-2"
+      "last_verified": "2026-10-08T14:53:04+00:00",
+      "session": "loop-2",
+      "prev_status": "godot-pass",
+      "owner": "oc-153360",
+      "claimed_at": "2026-10-08T14:53:04+00:00",
+      "claimed_for": "twin"
     },
     {
       "id": "EV-0014",
@@ -783,7 +788,7 @@
       "id": "EV-0024",
       "area": "ui/settings",
       "severity": "S3",
-      "status": "godot-pass",
+      "status": "twin-unverified",
       "title": "Game Data exposes 2 of the reference's 9 data actions",
       "expected": "Java: Clear Game Data..., Clear Planet Data, Clear Saves, Clear Research, Clear Campaign Saves, Export Data, Import Data, Open Data Folder, Export Crash Logs",
       "actual": "Godot: only Clear Saves and Open Data Folder are listed (DataActions const); the other seven actions are absent",
@@ -816,12 +821,17 @@
         "2026-10-08T03:41:17+00:00: claimed by oc-28660 for godot-eval (session loop-2)",
         "2026-10-08T05:59:25+00:00: reaped stale claim (oc-28660, was godot-unverified); restored godot-open",
         "2026-10-08T08:37:28+00:00: claimed by oc-8679 for writer (session loop-2)",
-        "2026-10-08T09:57:27+00:00: released: menu > Settings > Game Data renders all nine actions in upstream order (pids 180250/186793, window 1152x648, commit 7991049); each click path exercised: clear-saves -> 'cleared non-sector saves', clear-research -> 'cleared research (0 unlock(s))', clear-campaign-saves -> 'cleared campaign saves for 7 planet(s)', clear-planet-data -> planet pane; clear-data -> '[ui] cleared game data (4 data-root, 1 user file(s))' + exit; export-data zip 646 B (settings.bin), import-data 2 files + exit, open-folder true, export-crash-logs 25635 B; no 'not ported' log entry. Native chooser unavailable headless (FEATURE_NATIVE_DIALOG=false) so the export/import/crash endpoints the handlers call were driven in-engine."
+        "2026-10-08T09:57:27+00:00: released: menu > Settings > Game Data renders all nine actions in upstream order (pids 180250/186793, window 1152x648, commit 7991049); each click path exercised: clear-saves -> 'cleared non-sector saves', clear-research -> 'cleared research (0 unlock(s))', clear-campaign-saves -> 'cleared campaign saves for 7 planet(s)', clear-planet-data -> planet pane; clear-data -> '[ui] cleared game data (4 data-root, 1 user file(s))' + exit; export-data zip 646 B (settings.bin), import-data 2 files + exit, open-folder true, export-crash-logs 25635 B; no 'not ported' log entry. Native chooser unavailable headless (FEATURE_NATIVE_DIALOG=false) so the export/import/crash endpoints the handlers call were driven in-engine.",
+        "2026-10-08T14:53:04+00:00: claimed by oc-153360 for twin (session loop-2)"
       ],
       "plan": "14",
       "first_seen": "2026-10-06T07:58:09+00:00",
-      "last_verified": "2026-10-08T09:57:27+00:00",
-      "session": "loop-2"
+      "last_verified": "2026-10-08T14:53:04+00:00",
+      "session": "loop-2",
+      "prev_status": "godot-pass",
+      "owner": "oc-153360",
+      "claimed_at": "2026-10-08T14:53:04+00:00",
+      "claimed_for": "twin"
     },
     {
       "id": "EV-0025",
@@ -928,7 +938,7 @@
       "id": "EV-0028",
       "area": "ui/dialogs",
       "severity": "S3",
-      "status": "godot-pass",
+      "status": "twin-unverified",
       "title": "Core Database dialog lists no content and uses category tabs instead of the reference's planet tabs",
       "expected": "Java: Core Database has all/Serpulo/Erekir tabs and an Items/Blocks content grid of locked/unlocked entries",
       "actual": "Godot: tabs are items/blocks/units/liquids (raw ids), the content area is the placeholder '<none>', and no content entries are rendered",
@@ -948,12 +958,17 @@
         "2026-10-08T03:17:30+00:00: reaped stale claim (oc-33825, was godot-open); restored godot-open",
         "2026-10-08T08:37:28+00:00: claimed by oc-8679 for writer (session loop-2)",
         "2026-10-08T10:12:26+00:00: [godot-open] commit b656e03: DatabaseDialog planet tabs + databaseCategory/Tag grid from the live MindCampaign registry; database_json model + mind-core ui::database tests",
-        "2026-10-08T10:15:53+00:00: released: Core Database renders the reference planet tabs (All/Erekir/Serpulo) and a populated locked/unlocked content grid at commit b656e03: All tab = 321 cells over Items/Blocks(crafting/defense/effect/distribution/liquid/power/production/turret/units/logic)/Fluids/Units grids, 5 unlocked (copper,sand,core-bastion,water,alpha) + 316 locks; Serpulo tab filters to 189; unlocked copper opens ContentInfoDialog. Godot pid 214901 (instance 1), window 1152x648, captured frames 5295-19262"
+        "2026-10-08T10:15:53+00:00: released: Core Database renders the reference planet tabs (All/Erekir/Serpulo) and a populated locked/unlocked content grid at commit b656e03: All tab = 321 cells over Items/Blocks(crafting/defense/effect/distribution/liquid/power/production/turret/units/logic)/Fluids/Units grids, 5 unlocked (copper,sand,core-bastion,water,alpha) + 316 locks; Serpulo tab filters to 189; unlocked copper opens ContentInfoDialog. Godot pid 214901 (instance 1), window 1152x648, captured frames 5295-19262",
+        "2026-10-08T14:53:04+00:00: claimed by oc-153360 for twin (session loop-2)"
       ],
       "plan": "14",
       "first_seen": "2026-10-06T07:58:16+00:00",
-      "last_verified": "2026-10-08T10:15:53+00:00",
-      "session": "loop-2"
+      "last_verified": "2026-10-08T14:53:04+00:00",
+      "session": "loop-2",
+      "prev_status": "godot-pass",
+      "owner": "oc-153360",
+      "claimed_at": "2026-10-08T14:53:04+00:00",
+      "claimed_for": "twin"
     },
     {
       "id": "EV-0029",
@@ -1407,7 +1422,7 @@
       "id": "EV-0042",
       "area": "ui/campaign",
       "severity": "S3",
-      "status": "godot-pass",
+      "status": "twin-unverified",
       "title": "Research root rail rows overlap after switching roots (MindTable not re-sorted)",
       "expected": "Java: clicking a tech-tree root in the left rail keeps the roots as a vertical list; the active root stays clickable and the node table shows that root's nodes",
       "actual": "Godot: ResearchDialog._select_root/_rebuild_roots clears and re-adds the root MindTable but never re-sorts it, so after clicking the second root both root buttons stack at (8,38) (techtree.serpulo 160x34 and techtree.<null> 148x34) and the first root can no longer be clicked; the initial build is fine because show_dialog's _resort_tables sorts it",
@@ -1428,13 +1443,18 @@
         "2026-10-08T03:17:30+00:00: reaped stale claim (oc-33825, was godot-open); restored godot-open",
         "2026-10-08T08:37:28+00:00: claimed by oc-8679 for writer (session loop-2)",
         "2026-10-08T10:20:56+00:00: [godot-open] commit 417d400: _rebuild_roots/_rebuild_nodes now force sort_now() + deferred sort_now() after a runtime rebuild (the queued sort does not run for these nested MindTables)",
-        "2026-10-08T10:24:08+00:00: released: expected vertical root rail observed at pid 225044 (commit 417d400): after emitting pressed on techtree.<null> the same-frame read shows techtree.serpulo (10,40,176,34) and techtree.<null> (10,78,176,34), <null> button_pressed, 222 node rows at y=40/78; real-input clicks switched serpulo->null and null->serpulo with the rail vertical; godot_log errors [] after a cleared window. Pre-fix pid 223008 (b656e03) reproduced the (8,38) stack persisting 2622 frames."
+        "2026-10-08T10:24:08+00:00: released: expected vertical root rail observed at pid 225044 (commit 417d400): after emitting pressed on techtree.<null> the same-frame read shows techtree.serpulo (10,40,176,34) and techtree.<null> (10,78,176,34), <null> button_pressed, 222 node rows at y=40/78; real-input clicks switched serpulo->null and null->serpulo with the rail vertical; godot_log errors [] after a cleared window. Pre-fix pid 223008 (b656e03) reproduced the (8,38) stack persisting 2622 frames.",
+        "2026-10-08T14:53:04+00:00: claimed by oc-153360 for twin (session loop-2)"
       ],
       "plan": "14",
       "first_seen": "2026-10-06T21:36:58+00:00",
-      "last_verified": "2026-10-08T10:24:08+00:00",
+      "last_verified": "2026-10-08T14:53:04+00:00",
       "found_by_loop": "6",
-      "session": "loop-2"
+      "session": "loop-2",
+      "prev_status": "godot-pass",
+      "owner": "oc-153360",
+      "claimed_at": "2026-10-08T14:53:04+00:00",
+      "claimed_for": "twin"
     },
     {
       "id": "EV-0043",
@@ -1530,7 +1550,7 @@
       "id": "EV-0045",
       "area": "ui/config",
       "severity": "S3",
-      "status": "godot-pass",
+      "status": "twin-unverified",
       "title": "Sorter config panel opens with no item options",
       "expected": "Java: Sorter is configurable with an Item config (Sorter.java:37 config(Item.class, ...)), so its config fragment shows the item filter list.",
       "actual": "Godot: right-clicking a placed sorter opens OverlayLayer/block_config with the correct block/x/y but _config.options == [] (empty grid; only clear + close), so no filter can be picked.",
@@ -1547,13 +1567,18 @@
         "2026-10-08T03:17:30+00:00: reaped stale claim (oc-33825, was godot-open); restored godot-open",
         "2026-10-08T08:37:28+00:00: claimed by oc-8679 for writer (session loop-2)",
         "2026-10-08T10:30:49+00:00: [godot-open] commit 780efa9: sorter behavior declares ConfigKind::Item; config_spec reads the declared kind so the item options populate",
-        "2026-10-08T10:43:20+00:00: released: sorter config fragment shows the item picker: left tap and block_info(F1) on a placed sorter both open block_config with block=sorter x=18 y=16 and 22 item options (copper..dormant-cyst) at commit 780efa9; game pid 249159, tick 15030 (tap) / 12580 (F1)"
+        "2026-10-08T10:43:20+00:00: released: sorter config fragment shows the item picker: left tap and block_info(F1) on a placed sorter both open block_config with block=sorter x=18 y=16 and 22 item options (copper..dormant-cyst) at commit 780efa9; game pid 249159, tick 15030 (tap) / 12580 (F1)",
+        "2026-10-08T14:53:04+00:00: claimed by oc-153360 for twin (session loop-2)"
       ],
       "plan": "15",
       "first_seen": "2026-10-06T21:50:19+00:00",
-      "last_verified": "2026-10-08T10:43:20+00:00",
+      "last_verified": "2026-10-08T14:53:04+00:00",
       "found_by_loop": "7",
-      "session": "loop-2"
+      "session": "loop-2",
+      "prev_status": "godot-pass",
+      "owner": "oc-153360",
+      "claimed_at": "2026-10-08T14:53:04+00:00",
+      "claimed_for": "twin"
     },
     {
       "id": "EV-0046",
@@ -1859,7 +1884,7 @@
       "id": "EV-0053",
       "area": "ui/hud",
       "severity": "S2",
-      "status": "open",
+      "status": "godot-pass",
       "title": "HUD shows no wave, enemies, objectives, or capture/lose toasts",
       "expected": "HudFragment.java:1132-1150 composes wave/enemy/wavetime text, :1088-1107 objectives, :502-510 skip-wave button, :1234-1236 canSkipWave",
       "actual": "hud.rs:39-44 declares wave/enemies but refresh :175-190 never assigns them; hud_text.rs:53-134 composer has no producer; hud_fragment.gd:50-51 reads only status_text",
@@ -1874,7 +1899,8 @@
         "../Mindustry/core/src/mindustry/ui/fragments/HudFragment.java:502-510",
         "../Mindustry/core/src/mindustry/ui/fragments/HudFragment.java:1088-1107",
         ".opencode/evals/runs/20261008-192317-ev0053-hud-wave-enemies/godot/state-02-baseline-hud.json, .opencode/evals/runs/20261008-192317-ev0053-hud-wave-enemies/godot/state-04-wave1-hud.json, .opencode/evals/runs/20261008-192317-ev0053-hud-wave-enemies/godot/state-03-capture-toast.json, .opencode/evals/runs/20261008-192317-ev0053-hud-wave-enemies/report.md",
-        ".opencode/evals/runs/20261008-225009-ev0053-hud-twin/godot/state-01-baseline-hud.json, .opencode/evals/runs/20261008-225009-ev0053-hud-twin/godot/state-02-wave1-hud.json, .opencode/evals/runs/20261008-225009-ev0053-hud-twin/godot/step-02-hud-crop.png, .opencode/evals/runs/20261008-225009-ev0053-hud-twin/java/step-07-hud-crop.png, .opencode/evals/runs/20261008-225009-ev0053-hud-twin/java/step-08-hud-crop.png, .opencode/evals/runs/20261008-225009-ev0053-hud-twin/report.md"
+        ".opencode/evals/runs/20261008-225009-ev0053-hud-twin/godot/state-01-baseline-hud.json, .opencode/evals/runs/20261008-225009-ev0053-hud-twin/godot/state-02-wave1-hud.json, .opencode/evals/runs/20261008-225009-ev0053-hud-twin/godot/step-02-hud-crop.png, .opencode/evals/runs/20261008-225009-ev0053-hud-twin/java/step-07-hud-crop.png, .opencode/evals/runs/20261008-225009-ev0053-hud-twin/java/step-08-hud-crop.png, .opencode/evals/runs/20261008-225009-ev0053-hud-twin/report.md",
+        "runs/20261008-235231-ev0053-hud-wave-godot/godot/state-01-baseline-hud.json, runs/20261008-235231-ev0053-hud-wave-godot/godot/state-02-wave1-hud.json, runs/20261008-235231-ev0053-hud-wave-godot/godot/step-01-hud-crop.png, runs/20261008-235231-ev0053-hud-wave-godot/godot/step-02-hud-crop.png, runs/20261008-235231-ev0053-hud-wave-godot/report.md"
       ],
       "notes": [
         "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
@@ -1888,11 +1914,15 @@
         "2026-10-08T09:32:28+00:00: released: Godot leg passed at 1d8f75b (fix e34adb8): fresh serpulo:15 via start_sector_with_loadout, HUD status went Wave 0/10 4:00 -> Wave 1/10 + '1 Enemy Remaining' 1:59 after run_wave (MindHud wave=1/enemies=1, fragment Status label mirrors), skip button visible at 0 enemies and hidden at 1, capture edge emitted 'Sector groundZero Captured!' through MindHud.toast -> MindUi.toast -> OverlayLayer label; pid 147174, tick 1061; errors empty",
         "2026-10-08T10:55:56+00:00: claimed by twin-loop-1 for twin (session loop-1)",
         "2026-10-08T12:59:30+00:00: [verify] twin fail: fresh both-leg run at 1d8f75b (fix e34adb8) \u2014 producers are live (real skip click drives run_wave; enemies text and capture toast/status match), but two player-visible texts still differ from Java: (1) wave counter one less at every equivalent state \u2014 Godot groundZero baseline 'Wave 0/10' vs Java survival 'Wave 1', after first skip 'Wave 1/10' vs 'Wave 2'; (2) next-wave line missing Java's wave.waiting composition \u2014 Godot '4:00'/'1:59' (accent at 0 enemies) vs Java '[lightgray]Wave in 3:59'/'Wave in 1:59'. Godot pid 131412, Java JVM 126779, 1152x648 both.",
-        "2026-10-08T12:59:35+00:00: [plan] updated from the failed twin run (.opencode/evals/runs/20261008-225009-ev0053-hud-twin)"
+        "2026-10-08T12:59:35+00:00: [plan] updated from the failed twin run (.opencode/evals/runs/20261008-225009-ev0053-hud-twin)",
+        "2026-10-08T13:48:38+00:00: claimed by oc-31397 for writer (session loop-1)",
+        "2026-10-08T13:52:30+00:00: [godot-open] commit e54169e: HUD presents PlaySession.wave+1 (Java state.wave) and composes the countdown through wave.waiting; goldens re-recorded; cargo test/clippy/parity goldens green",
+        "2026-10-08T13:55:15+00:00: released: writer Godot leg at pid 48759: fresh serpulo:15 launch tick 0 -> MindHud.wave=1, status 'Wave 1/10' + lightgray 'Wave in 4:00'; after run_wave+step(11) tick 11 (1 enemy) -> wave=2, 'Wave 2/10' + '1 Enemy Remaining' + 'Wave in 1:59'; fragment Status mirrors both, skip visible->hidden, errors []"
       ],
       "plan": "Seam: the HUD producers are live but the composed status text still diverges from HudFragment.java:1132-1150 (twin run .opencode/evals/runs/20261008-225009-ev0053-hud-twin). (1) Wave counter: hud.rs feeds the raw 0-based PlaySession.wave (play.rs:154 starts at 0) into HudStatus.wave, so Godot shows 'Wave 0/10' at a fresh launch and 'Wave 1/10' after the first skip, while Java GameState.wave starts at 1 (GameState.java:17) and shows 'Wave 1' / 'Wave 2' at the same states. (2) Next-wave text: hud_text::status_text appends waiting_time() as bare m:ss ('4:00', '1:59', accent while 0 enemies) instead of Java waitingf = bundle.format('wave.waiting', m:ss) ('[lightgray]Wave in 4:00', bundle.properties:459).\n\nFiles: client/rust/mind-gdext/src/ui/hud.rs (refresh_campaign wave read, waiting_wave/winWave comparison), client/rust/mind-core/src/ui/hud_text.rs (timer via the wave.waiting bundle key; wave.cap condition against the Java-equivalent wave), client/rust/mind-core/src/ui/hud_text.rs tests.\n\nSteps: present the HUD-facing wave as session.wave + 1 (Java state.wave) and use the same value wherever the HUD path compares against winWave (waiting_wave/wave.cap) so the branches stay consistent; compose the countdown through bundle.format('wave.waiting', ...) keeping the wave.waveInProgress branch; update the hud_text unit expectations. Do not change the sim spawn index or capture timing (not exercised by this run).\n\nCheck: fresh serpulo:15 loadout launch shows 'Wave 1/10' + 'Wave in 4:00' at tick 0, and after run_wave + step(11) 'Wave 2/10' + '1 Enemy Remaining' + 'Wave in 1:59', fragment Status mirrors; Java reference for the same states: runs/20261008-225009-ev0053-hud-twin/java/step-07-hud-crop.png ('Wave 1', 'Wave in 3:59') and step-08-hud-crop.png ('Wave 2', '1 Enemy Remaining', 'Wave in 1:59').",
       "first_seen": "2026-10-06T23:24:28+00:00",
-      "last_verified": "2026-10-08T12:59:30+00:00"
+      "last_verified": "2026-10-08T13:55:15+00:00",
+      "session": "loop-1"
     },
     {
       "id": "EV-0054",
@@ -1979,7 +2009,7 @@
       "id": "EV-0056",
       "area": "input/placement",
       "severity": "S2",
-      "status": "godot-pass",
+      "status": "twin-verified",
       "title": "No block rotation: everything places at rotation 0 and cannot be rotated",
       "expected": "DesktopInput.java:834-846 rotate key/rotatePlans; :898-899 Call.rotateBlock on placed buildings (rotation = mod(rot+dir,4))",
       "actual": "sim_host.rs:168-173 place has no rotation; sim/mod.rs:259-264 always rot:0; determinism/command.rs:230-240 drops Place.rotation; project.godot has no [input]; SimCommand::Rotate :493-510 has no UI caller",
@@ -1991,7 +2021,11 @@
         "client/rust/mind-core/src/sim/mod.rs:259-264",
         "client/rust/mind-core/src/determinism/command.rs:230-240",
         "../Mindustry/core/src/mindustry/input/DesktopInput.java:834-846",
-        "/home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-185444-ev0056-rotation-godot/godot/step-08-rotateplaced-cycle.json,/home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-185444-ev0056-rotation-godot/godot/step-04-place-rot2.json,/home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-185444-ev0056-rotation-godot/report.md,/home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-184642-ev0056-rotation-godot/godot/step-03-place-rot2-dump-rot0.json"
+        "/home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-185444-ev0056-rotation-godot/godot/step-08-rotateplaced-cycle.json,/home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-185444-ev0056-rotation-godot/godot/step-04-place-rot2.json,/home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-185444-ev0056-rotation-godot/report.md,/home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-184642-ev0056-rotation-godot/godot/step-03-place-rot2-dump-rot0.json",
+        "runs/l2-20261009-001432-ev0056-rotation-twin/godot/step-results.json",
+        "runs/l2-20261009-001432-ev0056-rotation-twin/godot/step-13-game.png",
+        "runs/l2-20261009-001432-ev0056-rotation-twin/java/notes.md",
+        "runs/l2-20261009-001432-ev0056-rotation-twin/report.md"
       ],
       "notes": [
         "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
@@ -2001,18 +2035,19 @@
         "2026-10-08T03:17:30+00:00: reaped stale claim (oc-33825, was godot-open); restored godot-open",
         "2026-10-08T08:37:28+00:00: claimed by oc-8679 for writer (session loop-2)",
         "2026-10-08T08:53:31+00:00: [godot-open] commit 996f288: state dump now reads BuildingComp.rot so the repro's tile-rotation oracle reports placed/rotated buildings",
-        "2026-10-08T08:57:06+00:00: released: pid 71447 (editor 70093, lib post-996f288): R rotates the pending conveyor 1->2 (input state JSON), mouse place at (15,15) yields get_state_json rot=2, and R over the placed building enqueues one SimCommand::Rotate per press with dump rot cycling 2->3->0->1->2"
+        "2026-10-08T08:57:06+00:00: released: pid 71447 (editor 70093, lib post-996f288): R rotates the pending conveyor 1->2 (input state JSON), mouse place at (15,15) yields get_state_json rot=2, and R over the placed building enqueues one SimCommand::Rotate per press with dump rot cycling 2->3->0->1->2",
+        "2026-10-08T14:48:45+00:00: [verify] twin run 2026-10-09 loop-2: fresh Godot pid 135151 (2027fbe, lib post-996f288): R rotates pending conveyor 1->2, wheel rotates +-1 mod 4 (2->3->2); hold-left preview [15,15,rot 2,block 257] -> step(1) dump tile conveyor rot=2; clear_building + R over placed cycles dump rot 2->3->0->1->2, one pending Rotate per press (last_action=rotateplaced). Matches DesktopInput.java:834-846/898-899 + Call.rotateBlock mod(rot+dir,4). Java reference (upstream 2cd7aeec) launched and driven into a world on the loop display; its rotation path not pixel-isolated (no OCR/vision; XTEST focus loss between one-shot processes; catalog scroll-focus consumes the wheel) so reference semantics come from the cited source lines. Gesture deviation observed: Godot R-alone rotates pending/placed (finding repro), Java default needs the rotate axis (scroll) and hold-R+scroll for placed; Godot wheel over a placed building zooms where Java suppresses zoom with R held. Claim-state note: ledger read godot-pass/unowned at verify time despite the orchestrator claim (od-77875) \u2014 verified single-item under the held global twin lease."
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
-      "last_verified": "2026-10-08T08:57:06+00:00",
+      "last_verified": "2026-10-08T14:48:45+00:00",
       "session": "loop-2"
     },
     {
       "id": "EV-0057",
       "area": "input",
       "severity": "S2",
-      "status": "godot-pass",
+      "status": "twin-unverified",
       "title": "Keybinds are cosmetic: rebinding pan/boost keys changes nothing in game",
       "expected": "DesktopInput.java:239-295 reads Binding.boost/moveX/moveY for pan/boost; Binding.java:8-103 defines the binds",
       "actual": "input/mod.rs:102-109,200-212 loads/persists/rebinds BindingState but no gameplay consumer; camera.rs:91-108 hardcodes A/D/W/S+arrows+Shift; project.godot has no [input] section",
@@ -2034,18 +2069,23 @@
         "2026-10-08T01:32:11+00:00: claimed by oc-33825 for writer (session loop-2)",
         "2026-10-08T03:17:30+00:00: reaped stale claim (oc-33825, was godot-open); restored godot-open",
         "2026-10-08T08:37:28+00:00: claimed by oc-8679 for writer (session loop-2)",
-        "2026-10-08T09:07:58+00:00: released: Rebind Pan Left (move_x) + Boost in Settings>Controls via the real dialog capture path, then held-key camera probes at HEAD 996f288 (fix 652f319): pid 83855 - U -> pan_axis [1,0], 1.864 px/frame (normal expected 1.862), camera moved 1638.5px over 879 frames; old A -> [0,0]/0px over 777 frames; old D -> [0,0]; U+K -> boost_pressed true, 6.214 px/frame = 3.335x normal (expected 15/4.5=3.333); old Shift -> boost_pressed false, normal speed. Restart pid 96741 loads 2 rebinds from user://keybinds.json (move_x=|u, boost=k; boot log 'MindInput ready (88 keybinds, 2 rebinds)') and consumes them (U -> [1,0], A -> [0,0], K -> boost true). Known worktree asset-manifest boot errors only (same as prior runs); no new error entries."
+        "2026-10-08T09:07:58+00:00: released: Rebind Pan Left (move_x) + Boost in Settings>Controls via the real dialog capture path, then held-key camera probes at HEAD 996f288 (fix 652f319): pid 83855 - U -> pan_axis [1,0], 1.864 px/frame (normal expected 1.862), camera moved 1638.5px over 879 frames; old A -> [0,0]/0px over 777 frames; old D -> [0,0]; U+K -> boost_pressed true, 6.214 px/frame = 3.335x normal (expected 15/4.5=3.333); old Shift -> boost_pressed false, normal speed. Restart pid 96741 loads 2 rebinds from user://keybinds.json (move_x=|u, boost=k; boot log 'MindInput ready (88 keybinds, 2 rebinds)') and consumes them (U -> [1,0], A -> [0,0], K -> boost true). Known worktree asset-manifest boot errors only (same as prior runs); no new error entries.",
+        "2026-10-08T14:53:04+00:00: claimed by oc-153360 for twin (session loop-2)"
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
-      "last_verified": "2026-10-08T09:07:58+00:00",
-      "session": "loop-2"
+      "last_verified": "2026-10-08T14:53:04+00:00",
+      "session": "loop-2",
+      "prev_status": "godot-pass",
+      "owner": "oc-153360",
+      "claimed_at": "2026-10-08T14:53:04+00:00",
+      "claimed_for": "twin"
     },
     {
       "id": "EV-0058",
       "area": "content/blocks",
       "severity": "S2",
-      "status": "godot-pass",
+      "status": "twin-unverified",
       "title": "16 of 27 factory recipes missing: graphite/silicon/plastanium crafters emit nothing",
       "expected": "Blocks.java:1041 graphite-press, :1086 silicon-crucible, :1120 plastanium-compressor, :1138 phase-weaver, :1170 cryofluid-mixer, :1191 pyratite-mixer, :1206 blast-mixer and the Erekir heat crafters define outputs",
       "actual": "block_kind_data.rs:640-782 apply_vanilla_knobs is the only recipe source and covers 11 of 27 crafters; production.rs:237-251 consumes inputs and resets progress with empty output_items",
@@ -2068,12 +2108,17 @@
         "2026-10-08T03:17:30+00:00: reaped stale claim (oc-33825, was godot-open); restored godot-open",
         "2026-10-08T08:37:28+00:00: claimed by oc-8679 for writer (session loop-2)",
         "2026-10-08T09:27:33+00:00: [godot-open] commit fac6ae5: crafters accept delivered inputs (BuildingComp.acceptItem/handleItem, GenericCrafter getMaximumAccepted) so the drill->press->core repro can feed coal; headless transfer repro + factory recipe table tests added; recipes were already at HEAD from 9c51747",
-        "2026-10-08T09:32:09+00:00: released: Fresh pid-stamped serpulo:86 (frozenForest) run at fac6ae5: broke the map core, placed mechanical-drill (106,55) on ore-coal -> graphite-press (108,55) -> core-shard (111,55); core_items_json {} at tick 0, {graphite:1} at tick 600, {graphite:3} at tick 1200 (checksum 88421ba91eb63a6d), godot_log errors empty; pid 148326, library sha256 33cc05cf9e8b74277e947e7aafa48ef734c70a964b0206e546ee7afc03c70da5. Viewport was frozen (frames_drawn pinned) so the verdict rests on the structured JSON; screenshots recorded as frozen artifacts."
+        "2026-10-08T09:32:09+00:00: released: Fresh pid-stamped serpulo:86 (frozenForest) run at fac6ae5: broke the map core, placed mechanical-drill (106,55) on ore-coal -> graphite-press (108,55) -> core-shard (111,55); core_items_json {} at tick 0, {graphite:1} at tick 600, {graphite:3} at tick 1200 (checksum 88421ba91eb63a6d), godot_log errors empty; pid 148326, library sha256 33cc05cf9e8b74277e947e7aafa48ef734c70a964b0206e546ee7afc03c70da5. Viewport was frozen (frames_drawn pinned) so the verdict rests on the structured JSON; screenshots recorded as frozen artifacts.",
+        "2026-10-08T14:53:04+00:00: claimed by oc-153360 for twin (session loop-2)"
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
-      "last_verified": "2026-10-08T09:32:09+00:00",
-      "session": "loop-2"
+      "last_verified": "2026-10-08T14:53:04+00:00",
+      "session": "loop-2",
+      "prev_status": "godot-pass",
+      "owner": "oc-153360",
+      "claimed_at": "2026-10-08T14:53:04+00:00",
+      "claimed_for": "twin"
     },
     {
       "id": "EV-0059",
@@ -2255,7 +2300,7 @@
       "id": "EV-0063",
       "area": "ui/dialogs",
       "severity": "S2",
-      "status": "godot-pass",
+      "status": "twin-unverified",
       "title": "Paused dialog is missing the desktop campaign buttons (Abandon, Host, Map Objective) and shows the mobile Planet Map",
       "expected": "PausedDialog.java desktop campaign branch: @objective (when the sector preset has a description), @abandon, @back, @settings, @hostserver, @quit; Planet Map/Research belong to the mobile campaign branch",
       "actual": "Godot paused dialog in a launched serpulo:170 sector renders Back/Settings/Planet Map/Quit only; no Abandon, no Host, no Map Objective",
@@ -2280,13 +2325,265 @@
         "2026-10-08T09:37:26+00:00: [godot-open] commit b568977: deferred the paused-dialog mobile @planetmap gate out of the MindUi.open_dialog mutable bind (reentrant MindUi.is_mobile() panicked 'bind() failed, already bound' and wedged the UI on open); ui_widgets_check now opens the dialog through MindUi and fails on the reentry",
         "2026-10-08T09:42:47+00:00: [godot-open] commit 0185994: get_sector_state resolves the sector preset description from the live Core.bundle (sector.<preset>.description) when the empty-MemoryBundle registry leaves UnlockableContent.description unset, so the @objective gate can fire (two mind-gdext unit tests added)",
         "2026-10-08T09:44:54+00:00: [godot-open] commit 7991049: the paused dialog now stacks the desktop entries in upstream rows (objective+abandon / back+settings / hostserver / quit; planetmap mobile-only own row) instead of one flat HBox that pushed Objective and Quit off-screen (panel min 1511 > 1152 window); ui_widgets_check asserts the panel min width and is fully green (failed=0)",
-        "2026-10-08T09:48:38+00:00: released: fresh pid 171106 (loop-2, HEAD 7991049): one real Escape opened DialogLayer/paused with stack ['paused'] and no panic; groundZero (serpulo:15, presetDescription 127 chars) rendered @objective(Map Objective)/@abandon/@back/@settings/@hostserver(Host Multiplayer Game)/@quit in upstream rows with @planetmap hidden, and a real click on Map Objective opened full_text with the groundZero description; literal serpulo:170 repro showed Abandon/Back/Settings/Host Multiplayer Game/Quit, no Map Objective (no preset) and no Planet Map; panel 560x400 inside 1152x648; headless ui_widgets_check failed=0; 2 mind-gdext unit tests pass; no error-log entries in the decisive segment"
+        "2026-10-08T09:48:38+00:00: released: fresh pid 171106 (loop-2, HEAD 7991049): one real Escape opened DialogLayer/paused with stack ['paused'] and no panic; groundZero (serpulo:15, presetDescription 127 chars) rendered @objective(Map Objective)/@abandon/@back/@settings/@hostserver(Host Multiplayer Game)/@quit in upstream rows with @planetmap hidden, and a real click on Map Objective opened full_text with the groundZero description; literal serpulo:170 repro showed Abandon/Back/Settings/Host Multiplayer Game/Quit, no Map Objective (no preset) and no Planet Map; panel 560x400 inside 1152x648; headless ui_widgets_check failed=0; 2 mind-gdext unit tests pass; no error-log entries in the decisive segment",
+        "2026-10-08T14:53:04+00:00: claimed by oc-153360 for twin (session loop-2)"
       ],
       "plan": null,
       "first_seen": "2026-10-07T10:43:53+00:00",
-      "last_verified": "2026-10-08T09:48:38+00:00",
+      "last_verified": "2026-10-08T14:53:04+00:00",
       "found_by_loop": "1",
-      "session": "loop-2"
+      "session": "loop-2",
+      "prev_status": "godot-pass",
+      "owner": "oc-153360",
+      "claimed_at": "2026-10-08T14:53:04+00:00",
+      "claimed_for": "twin"
+    },
+    {
+      "id": "EV-0064",
+      "area": "game/saves",
+      "severity": "S2",
+      "status": "godot-pass",
+      "title": "Autosave never fires and playtime stays 0; quitting to the menu or desktop writes no exit save",
+      "expected": "Control.java:678 calls saves.update() every frame (autosave interval + playtime accumulation); Saves.java:204-239; PausedDialog.java:161-172,185-216 runExitSave writes the current autosave slot then logic.reset; CampaignCompleteDialog.java:22-25 @menu repeats it; Control.java:598-608 saves the current autosave on application dispose",
+      "actual": "saves.rs:217-264 Saves::update/SavesUpdate are referenced only by their own unit tests (saves.rs:615-641); no mind-gdext caller, campaign.rs:227-333 pump_runtime never advances Saves or playtime, campaign.rs:114-117 exit_tree persists settings only; paused_dialog.gd:209-211 states the exit save is not ported and :252-259 _quit_to_menu only pauses and shows the menu; campaign_complete_dialog.gd:51-58 @menu exits without saving; planet stats playtime stays 0 (stats.rs:139 test-only); the Save Interval slider is inert",
+      "repro": "Godot: boot, start_sector('serpulo',15), set Save Interval to 1 minute, record sha256+mtime of user://saves/sector-serpulo-15.msav, place a block, run >3600 playing sim ticks; the file is byte-identical and no autosave fires; playtime (CampaignViews playtime_ms / planet stats) stays 0; pause > Quit > confirm parks at the menu with no fresh write. Java: same sector with saveinterval=1 -> a save lands after 60s; pause > Quit -> runExitSave writes sector-serpulo-15.msav before logic.reset; @menu on campaign complete repeats it",
+      "source": "code",
+      "confidence": "high",
+      "evidence": [
+        "client/rust/mind-core/src/game/saves.rs:217-264",
+        "client/rust/mind-core/src/game/saves.rs:615-641",
+        "client/rust/mind-gdext/src/campaign.rs:227-333",
+        "client/rust/mind-gdext/src/campaign.rs:114-117",
+        "client/ui/dialogs/paused_dialog.gd:209-211",
+        "client/ui/dialogs/paused_dialog.gd:252-259",
+        "client/ui/dialogs/campaign_complete_dialog.gd:51-58",
+        "client/ui/fragments/menu_fragment.gd:327-328",
+        "../Mindustry/core/src/mindustry/core/Control.java:678",
+        "../Mindustry/core/src/mindustry/game/Saves.java:204-239",
+        "../Mindustry/core/src/mindustry/ui/dialogs/PausedDialog.java:161-172",
+        "../Mindustry/core/src/mindustry/ui/dialogs/PausedDialog.java:185-216",
+        "../Mindustry/core/src/mindustry/ui/dialogs/CampaignCompleteDialog.java:22-25",
+        "../Mindustry/core/src/mindustry/core/Control.java:598-608",
+        ".opencode/evals/runs/20261009-003000-ev0064-autosave-playtime-godot/run.json",
+        ".opencode/evals/runs/20261009-003000-ev0064-autosave-playtime-godot/report.md",
+        ".opencode/evals/runs/20261009-003000-ev0064-autosave-playtime-godot/godot/step-02-autosave.txt",
+        ".opencode/evals/runs/20261009-003000-ev0064-autosave-playtime-godot/godot/step-05-exit-save.txt",
+        ".opencode/evals/runs/20261009-003000-ev0064-autosave-playtime-godot/godot/step-09-after-dispose.txt",
+        ".opencode/evals/runs/20261009-003000-ev0064-autosave-playtime-godot/godot/game.log"
+      ],
+      "notes": [
+        "2026-10-08T13:48:38+00:00: claimed by oc-31397 for writer (session loop-1)",
+        "2026-10-08T14:23:57+00:00: [godot-open] commit 0e2b958: Saves::update_policy pumped from MindCampaign (playtime+planet stats, autosave via IoSet), current slot assigned on launch, run_exit_save wired to pause/campaign-complete/dispose",
+        "2026-10-08T14:27:15+00:00: [godot-open] round 2: 7f57318 persists launch slot bookkeeping (name/autosave/last-sector-save) with the launch; round 1 0e2b958 wired the policy",
+        "2026-10-08T14:36:25+00:00: released: obs pid 114589: fresh serpulo:15 with saveinterval=10 (UI min; 600s effective) wrote launch save 6052e16a, autosave queued at tick 36946 and file changed 7d54c381, get_total_playtime/campaign_views playtime_ms=615273; pause dialog open + 600 step ticks left playtime/file unchanged; pause>Quit>confirm wrote 8445c5fb and landed on menu; campaign_complete @menu wrote again; clean get_tree().quit (pid 120806) wrote c22098c3 (Control.dispose); log errors empty"
+      ],
+      "plan": "Seam: no host drives the `Saves` save-policy pump and no exit-save path exists; `Saves.current` is never assigned by the live flow (`saves.rs:375` only in `import_save`), so even a wired `update` could not autosave.\n\nFiles: `client/rust/mind-gdext/src/campaign.rs` (`pump_runtime` :227-333, `exit_tree` :114-117, launch save request :484-502); `client/rust/mind-core/src/game/saves.rs` (`update` :217-264, `on_state_change` :207-213, `finish_saving` :267-269); `client/rust/mind-gdext/src/sim_host.rs` (`advance_steps` :1293, `request_save` :757); `client/ui/dialogs/paused_dialog.gd` (:212-259); `client/ui/dialogs/campaign_complete_dialog.gd` (:51-58).\n\nSteps: (1) pump `Saves::update` from `MindCampaign::pump_runtime` on fixed-tick deltas with `SavesUpdate { is_game, paused_with_dialog (MindUi stack), game_over, is_campaign }`; on `autosaved` route the write through the existing IO seam (`host.request_save(user://saves/<current>.msav)`) and schedule `finish_saving` after 3 ticks. (2) Assign `Saves.current` when the sector autosave slot is created/loaded (upstream `SaveSlot.save/load` sets it, Saves.java:322,336) \u2014 e.g. a `set_current_by_file` after the launch save request; make `save_sector` set it too. (3) Implement the campaign branch of playtime (`is_campaign` -> `planet.stats.playtime += added`, Saves.java:210-212) and the `on_state_change(Menu)` reset, then expose `get_total_playtime` (Saves.java:237-239) on `MindCampaign` for HUD/dialog views. (4) Add `MindCampaign.run_exit_save()` that writes the current autosave slot through the IO seam and resets to menu; call it from paused_dialog `_confirm_quit`/`_quit_to_menu`, campaign_complete `_exit_to_menu`, and `exit_tree` (upstream `Control.dispose`, :598-608).\n\nCheck: fresh serpulo:15 with saveinterval=1: after 61s of playing ticks `user://saves/sector-serpulo-15.msav` sha changes once and `get_total_playtime()` > 0, unchanged while paused-with-dialog; pause > Quit > confirm writes once more and lands on the menu; `cargo test -p mind-core game::saves` plus a mind-gdext wiring test.",
+      "first_seen": "2026-10-08T13:38:59+00:00",
+      "last_verified": "2026-10-08T14:36:25+00:00",
+      "session": "loop-1"
+    },
+    {
+      "id": "EV-0065",
+      "area": "io/save",
+      "severity": "S2",
+      "status": "godot-pass",
+      "title": "Loading a save restores terrain only: units, plans, markers, rules and building runtime are not restored",
+      "expected": "Upstream SaveVersion.java:80-88 writes meta/patches/content/map/entities/markers/custom; :114-151 writeMeta stores real saved/playtime/wave/tick/stats/rules/nocores; :457-461 writeEntities stores team build plans + world entities (units); :463-465 writeMarkers; SaveSlot.load (Saves.java:314-328) applies rules/wave and links buildings; SaveSlot.save (:330-341) stamps the slot",
+      "actual": "SimIoHandler::save (sim_io.rs:146-164) uses WriteContext::meta_only and sets only content+map; sim_io.rs:155 calls base_meta_tags(w,h,0,name) whose v1.rs:1048-1071 constants are saved=0/playtime=0/wave=0/tick=0/wavetime=0/stats={}/rules={}/nocores=true; v1.rs:98-116 emits empty entities (0 id mappings/0 plans/0 world entities) and markers (0) because ctx.entities/markers are None; SimIoHandler::load (sim_io.rs:167-196) drops Context::pending_buildings and assigns sim.grid only. Live paths: MindCampaign.save_slot (campaign.rs:1211-1223), the sector autosave (campaign.rs:497-502) and load_slot (campaign.rs:1229-1243) route through SimIoHandler via sim_host.rs:757-765. Sector resume (sim_host.rs:928-930,981) materializes buildings but the file still has no units/markers and fake meta",
+      "repro": "In-engine: fresh load_sector('serpulo',15)+start_sector -> 61 materialized buildings; place a graphite-press; MindCampaign.save_slot('ev0xxx'); SimHost.step until io_pending==0. Dump meta/entities/markers of user://saves/ev0xxx.msav (SaveIo::get_meta / `mind-headless io dump-meta`): saved=0, playtime=0, wave=0, tick=0, stats={}, rules={}, entities region 0 mappings/0 plans/0 world entities, markers 0. Restart client, Load Game -> card -> MindCampaign.load_slot('ev0xxx') + step: get_state_json still lists the press tile but SimHost.get_group_counts().build==0 and the press never crafts (no ECS building), and no unit from the save appears. Java twin: same build+save+quit+Load Game keeps the press crafting, units present, wave/rules resumed (Saves.java:314-328)",
+      "source": "code",
+      "confidence": "high",
+      "evidence": [
+        "client/rust/mind-core/src/io/sim_io.rs:146",
+        "client/rust/mind-core/src/io/sim_io.rs:155",
+        "client/rust/mind-core/src/io/sim_io.rs:167",
+        "client/rust/mind-core/src/io/sim_io.rs:192",
+        "client/rust/mind-core/src/io/save/version.rs:47",
+        "client/rust/mind-core/src/io/save/version.rs:68",
+        "client/rust/mind-core/src/io/save/versions/v1.rs:98",
+        "client/rust/mind-core/src/io/save/versions/v1.rs:109",
+        "client/rust/mind-core/src/io/save/versions/v1.rs:1048",
+        "client/rust/mind-core/src/world/context.rs:25",
+        "client/rust/mind-gdext/src/campaign.rs:497",
+        "client/rust/mind-gdext/src/campaign.rs:1211",
+        "client/rust/mind-gdext/src/campaign.rs:1229",
+        "client/rust/mind-gdext/src/sim_host.rs:757",
+        "client/rust/mind-gdext/src/sim_host.rs:928",
+        "client/rust/mind-gdext/src/sim_host.rs:981",
+        "../Mindustry/core/src/mindustry/io/SaveVersion.java:80",
+        "../Mindustry/core/src/mindustry/io/SaveVersion.java:114",
+        "../Mindustry/core/src/mindustry/io/SaveVersion.java:419",
+        "../Mindustry/core/src/mindustry/io/SaveVersion.java:463",
+        "../Mindustry/core/src/mindustry/game/Saves.java:314",
+        "../Mindustry/core/src/mindustry/game/Saves.java:330",
+        "runs/20261009-005513-ev0065-save-restore-godot-2/godot/state-steps.json",
+        "runs/20261009-005513-ev0065-save-restore-godot-2/godot/meta-dump.json",
+        "runs/20261009-005513-ev0065-save-restore-godot-2/report.md"
+      ],
+      "notes": [
+        "Adjacent, not duplicates: EV-0036 (IO queue drain; its twin run restored a tile-only world because the fixture had only a wall), EV-0037 (materialize on sector resume; this record's building half is the request_load/load_slot path), EV-0049 (launch-time preset rules), EV-0064 (autosave/exit-save pump + playtime accumulation). Source: code read of both sides per seed brief; evaluator repro pending.",
+        "2026-10-08T13:48:38+00:00: claimed by oc-31397 for writer (session loop-1)",
+        "2026-10-08T14:47:38+00:00: [godot-open] commit 648d554: live-sim save writes real meta (tick/playtime/wave/rules/stats/nocores), units+plans (entities), session markers; load materializes decoded buildings into the ECS runtime, respawns units, applies rules/wave/stats/markers/plans to the session and MindCampaign.load_slot applies the saved meta",
+        "2026-10-08T14:57:16+00:00: released: Fresh groundZero (serpulo:15) launch -> drill+core+wave unit -> save_slot('ev0065r2'): meta dump now saved=12568/playtime=10016/wave=1/tick=606/stats real/rules real (sector serpulo-15)/nocores=false. Restart (pid 162375) + set_paused(true) + MindCampaign.load_slot + step(4): build 0->62, unit 0->1, copper 3 restored, playtime 10016, rules byte-equal to save meta (3652 chars); log 'sim_io load: materialized 62 building(s)'; paused step(600)x2 copper 3->6->10 (restored drill keeps mining); godot_log errors empty. Commits 648d554 + af9dac2."
+      ],
+      "plan": "Seam: SimIoHandler (mind-core io/sim_io.rs) is the only live save/load executor; its WriteContext carries no entities/markers/patches sources and constant meta tags, and its load drops the decoded building queue and never applies rules/wave. Upstream fills all seven regions (SaveVersion.java:80-88) and SaveSlot.load applies them (Saves.java:314-328). Adjacent records: EV-0064 owns the autosave/exit-save pump and playtime accumulation; EV-0049 owns launch-time preset rules; EV-0037's materialize fix already re-owns buildings on sector resume, so scope the building half of this record to the request_load/load_slot path.\n\nFiles: client/rust/mind-core/src/io/sim_io.rs:146-196; client/rust/mind-core/src/io/save/versions/v1.rs:1048-1071 (caller-driven meta instead of constants); client/rust/mind-core/src/io/save/version.rs:47-79 (WriteContext already has entities/markers/patches/custom - supply them); client/rust/mind-core/src/world/map_source.rs (live EntitySource adapter: team plans + units, mirroring writeTeamBlocks/writeWorldEntities); client/rust/mind-gdext/src/sim_host.rs:757-765 and client/rust/mind-gdext/src/campaign.rs:497-502,1211-1224 (pass live wave/tick/stats/rules/playtime and sector/map name into the save; on load apply decoded buildings/rules).\n\nSteps: (1) replace base_meta_tags(w,h,0,name) at sim_io.rs:155 with tags computed from the live session (wave, tick, wavetime, stats, rules JSON via JsonIo, nocores from default-team cores) plus playtime (EV-0064 provides get_total_playtime); (2) implement the live EntitySource (team build plans + world entities/units) and MarkersIo and set ctx.entities/ctx.markers so v1.rs:98-116 writes real payloads; (3) make SimIoHandler::load retain and return the decoded pending_buildings + parsed rules and have the host materialize them (Sim::materialize_map_buildings, runtime.rs:602) and apply rules/wave to the session - or route load_slot through MindSimHost::load_sector's load_grid_file path (sim_host.rs:928-981); (4) clear/replace stale ECS building/unit entities before swapping the grid.\n\nCheck: cargo test -p mind-core io plus an in-engine round trip: Ground Zero -> place press -> save -> meta dump shows saved/playtime/wave/tick non-zero and rules equal to get_rules_json(); restart -> load_slot -> group_counts().build>0, the press crafts (core items rise), saved units present. Keep live_sim_save_then_load_roundtrips and live_runtime_core_save_then_load_roundtrips green.",
+      "first_seen": "2026-10-08T13:39:55+00:00",
+      "last_verified": "2026-10-08T14:57:16+00:00",
+      "session": "loop-1"
+    },
+    {
+      "id": "EV-0066",
+      "area": "ui/dialogs",
+      "severity": "S2",
+      "status": "godot-open",
+      "title": "Manual saving is impossible: the in-game pause menu has no Save entry and the Save dialog is unreachable",
+      "expected": "Java: PausedDialog.java:89-93 (desktop, non-campaign, non-editor) adds @savegame -> save.show and @loadgame -> load.show; SaveDialog.java:26-31 new-save row -> control.saves.addSave(name); SaveDialog.java:35-41 card click -> @save.overwrite -> slot.save(), with the slot list from LoadDialog.java:92",
+      "actual": "Godot: paused_dialog.gd:49-73 builds only objective/abandon/back/settings/planetmap/hostserver/quit; dialogs_manifest.json:22 marks save menu_openable false and no open_dialog(save) caller exists; save_dialog.gd:11,57,62 emits save_requested with zero listeners; campaign.rs:1211-1226 save_slot has zero GDScript callers (only list_save_slots/load_slot are called, from load_dialog.gd:56-59,249-256)",
+      "repro": "launch a non-campaign map (Play > Custom Game > a builtin map, or MindCampaign.start_map(MindPreview.maps_list[0].name)); press Escape; dump DialogLayer/paused Buttons: only back/settings/hostserver/quit plus hidden campaign entries, no savegame/loadgame; then MindUi.open_dialog(\"save\"), click the @save.new row and answer the text prompt evalslot; SimHost.io_pending() stays 0 and user://saves/evalslot.msav never appears",
+      "source": "code",
+      "confidence": "high",
+      "evidence": [
+        "client/ui/dialogs/paused_dialog.gd:49-73",
+        "client/ui/dialogs/save_dialog.gd:11",
+        "client/ui/dialogs/save_dialog.gd:57-62",
+        "client/ui/dialogs_manifest.json:22",
+        "client/rust/mind-gdext/src/campaign.rs:1211-1226",
+        "client/rust/mind-gdext/src/campaign.rs:1488",
+        "client/ui/dialogs/load_dialog.gd:56-59",
+        "client/tools/ui_widgets_check.gd:345-367",
+        "../Mindustry/core/src/mindustry/ui/dialogs/PausedDialog.java:89-93",
+        "../Mindustry/core/src/mindustry/ui/dialogs/PausedDialog.java:124",
+        "../Mindustry/core/src/mindustry/ui/dialogs/SaveDialog.java:26-31",
+        "../Mindustry/core/src/mindustry/ui/dialogs/SaveDialog.java:35-41",
+        "../Mindustry/core/src/mindustry/ui/dialogs/LoadDialog.java:92"
+      ],
+      "notes": [
+        "Distinct from EV-0064 (autosave/exit-save pump), EV-0065 (save contents), EV-0036 (IO drain), EV-0054 (load-side UI); EV-0050/EV-0063 fixed the pause menu itself and the campaign branch, which upstream does not give save/load. This is the non-campaign manual-save entry point plus the dead save_requested signal.",
+        "2026-10-08T13:50:53+00:00: claimed by oc-35376 for writer (session loop-2)"
+      ],
+      "plan": "Seam: the pause menu never creates the upstream desktop @savegame/@loadgame entries and save_dialog.gd emits save_requested with no listener, so MindCampaign.save_slot (campaign.rs:1211) has no client caller.\n\nFiles: client/ui/dialogs/paused_dialog.gd (_build :40-73, _add_to :88-97); client/ui/dialogs/save_dialog.gd (:11, :28-62); client/ui/dialogs/load_dialog.gd (:56-59 live listing pattern); client/ui/dialogs_manifest.json (:22); client/tools/ui_widgets_check.gd (SaveCampaignStub :71-86, load oracle :345-367).\n\nSteps: (1) In save_dialog.gd _ready connect save_requested to a handler that guards has_method and calls /root/Spine/MindCampaign.save_slot(slot); for an existing slot show MindUi.show_confirm(\"@overwrite\", \"@save.overwrite\") before emitting (upstream SaveDialog.java:35-41) and fill _grid from MindCampaign.list_save_slots() like load_dialog.gd:56-59 (context slots still win). (2) In paused_dialog.gd _build add the upstream desktop entries after the back/settings row and before host: @savegame -> open_dialog save, @loadgame -> open_dialog load (PausedDialog.java:89-93), named savegame/loadgame, visible only when not campaign and not editor (add an editor flag to MindCampaign.get_sector_state or read MindEditor for the upstream !state.isEditor() gate). Keep dialogs_manifest.json:22 menu_openable false (upstream SaveDialog hides while state.isMenu, SaveDialog.java:16-20). (3) Extend the ui_widgets_check SaveCampaignStub with save_slot recording and assert the paused button set plus the new-save row.\n\nCheck: headless godot4 --headless --path client --script res://tools/ui_widgets_check.gd with the new save assertions; in-engine: launch a non-campaign map (MindCampaign.start_map(<builtin from MindPreview.maps_list>) or Play > Custom Game), Escape -> paused Buttons include savegame/loadgame (Java reference PausedDialog.java:91); click Save, click @save.new, answer the name prompt evalsave, step(120) -> SimHost.io_pending drains 1 to 0 and user://saves/evalsave.msav exists; list_save_slots() shows it.",
+      "first_seen": "2026-10-08T13:44:06+00:00",
+      "last_verified": "2026-10-08T13:50:53+00:00",
+      "session": "loop-2",
+      "prev_status": "open",
+      "owner": "oc-35376",
+      "claimed_at": "2026-10-08T13:50:53+00:00",
+      "claimed_for": "writer"
+    },
+    {
+      "id": "EV-0067",
+      "area": "ui/dialogs",
+      "severity": "S2",
+      "status": "godot-open",
+      "title": "Load Game card action icons (autosave, delete, rename, export) and Import Save do nothing",
+      "expected": "LoadDialog.java:121-145 wires every card icon: Icon.save toggles slot.setAutosave, Icon.trash confirms (@save.delete.confirm) then slot.delete(), Icon.pencil prompts @save.rename then slot.setName, Icon.export runs FileChooser.export to slot.exportFile; LoadDialog.java:198-221 @save.import opens FileChooser.open(msav), checks SaveIO.isSaveValid, rejects sector saves with @save.nocampaign, and calls control.saves.importSave(file) (Saves.java:273-282) which copies through importFile (Saves.java:461-471) and adds the slot",
+      "actual": "load_dialog.gd:174-177 creates the four card icon buttons via _icon_action (:211-218), which connects no handler; the only live card connection is the card body pressed at :155 (selection/load, fixed by EV-0054). _open_import (:259-264) opens file_chooser with {open: true} and no extensions filter, and nothing in the load flow consumes file_chosen (file_chooser_dialog.gd:96-98; only consumer in the tree is editor_maps_dialog.gd:142-150). MindCampaign exposes only list_save_slots/save_slot/load_slot/clear_saves (campaign.rs:1488, :1211, :1229, :1332); no per-slot delete/rename/autosave/export/import entry point, although the core implements them (saves.rs:358 import_save; slot.rs:67 set_name, :77 set_autosave, :149 delete, :160 import_file, :179 export_file)",
+      "repro": "Godot: boot game.tscn, MindCampaign.save_slot(evalslot), open Load Game (Play > Load Game) with the slot listed; click the card trash / pencil / export icons -> no confirm dialog, no text prompt, no file dialog; click the save (toggle) icon -> settings key save-<n>-autosave is unchanged afterwards; click @save.import, pick an .msav in the chooser -> the chooser closes but list_save_slots() count is unchanged and no card appears. Java twin: LoadDialog card trash shows @save.delete.confirm then removes the card; pencil renames it; export writes the file via a native chooser; @save.import adds a card and the slot is loaded",
+      "source": "code",
+      "confidence": "high",
+      "evidence": [
+        "client/ui/dialogs/load_dialog.gd:155",
+        "client/ui/dialogs/load_dialog.gd:174-177",
+        "client/ui/dialogs/load_dialog.gd:211-218",
+        "client/ui/dialogs/load_dialog.gd:259-264",
+        "client/ui/dialogs/file_chooser_dialog.gd:96-98",
+        "client/ui/dialogs/editor_maps_dialog.gd:142-150",
+        "client/rust/mind-gdext/src/campaign.rs:1211",
+        "client/rust/mind-gdext/src/campaign.rs:1229",
+        "client/rust/mind-gdext/src/campaign.rs:1332",
+        "client/rust/mind-gdext/src/campaign.rs:1488",
+        "client/rust/mind-core/src/game/saves.rs:358",
+        "client/rust/mind-core/src/io/save/slot.rs:67",
+        "client/rust/mind-core/src/io/save/slot.rs:149",
+        "client/rust/mind-core/src/io/save/slot.rs:160",
+        "client/rust/mind-core/src/io/save/slot.rs:179",
+        "../Mindustry/core/src/mindustry/ui/dialogs/LoadDialog.java:121-145",
+        "../Mindustry/core/src/mindustry/ui/dialogs/LoadDialog.java:198-221",
+        "../Mindustry/core/src/mindustry/game/Saves.java:273-282"
+      ],
+      "notes": [
+        "2026-10-08T13:50:53+00:00: claimed by oc-35376 for writer (session loop-2)"
+      ],
+      "plan": "Seam: load_dialog.gd builds its non-load card actions with no handlers and opens the import chooser with no consumer, while MindCampaign exposes no per-slot action facade; the core Saves/SaveSlot operations exist but have no client caller.\n\nFiles: client/ui/dialogs/load_dialog.gd (:149-218 card and icon factory, :259-264 _open_import); client/ui/dialogs/file_chooser_dialog.gd (:33-42 context extensions, :96-98 file_chosen); client/rust/mind-gdext/src/campaign.rs (near :1488 list_save_slots; reuse sanitize_slot_name :1852 and the user://saves scan); client/rust/mind-core/src/game/saves.rs (:358 import_save); client/rust/mind-core/src/io/save/slot.rs (:67 set_name, :77 set_autosave, :149 delete, :160 import_file, :179 export_file); client/tools/ui_widgets_check.gd (:76 SaveCampaignStub).\n\nSteps: (1) Add MindCampaign #[func]s that resolve the slot by the card file/stem through the same user://saves scan as list_save_slots: set_slot_autosave(name, enabled) -> SaveSlot::set_autosave + persist settings; delete_save_slot(name) -> SaveSlot::delete and refresh; rename_save_slot(name, new_name) -> SaveSlot::set_name + persist; export_save_slot(name, to) -> SaveSlot::export_file, passing the live-slot embed context when has_external_assets; import_save_file(from) -> Saves::import_save(fs, paths, settings, from) then persist and return the rebuilt listing. (2) In load_dialog.gd give _icon_action an action id and connect pressed: save -> set_slot_autosave and re-render; trash -> MindUi.show_confirm(@confirm, @save.delete.confirm) then delete_save_slot + _rebuild_list; pencil -> text prompt prefilled with the slot name then rename_save_slot + _rebuild_list (mirror LoadDialog.java:121-136); export -> open the chooser with {save: true, extensions: [msav], default_path}, show @save.export.needsload when has_external_assets and the slot is playing, else on file_chosen call export_save_slot (LoadDialog.java:139-145); keep the pending action on the dialog. (3) _open_import: pass extensions: [msav] and connect file_chosen one-shot to a handler that validates the picked file through SaveIO meta (invalid -> @save.import.invalid; meta.rules.sector -> @save.nocampaign), calls import_save_file, then _rebuild_list (LoadDialog.java:198-221); disconnect the prior listener because the chooser node is static and persists. (4) Extend ui_widgets_check.gd SaveCampaignStub with recording stubs for the new methods and assert each icon press routes to its call and that _open_import offers the msav filter.\n\nCheck: godot4 --headless --path client --script res://tools/ui_widgets_check.gd with the new assertions; in-engine: save_slot(evalslot), open Load Game, trash -> confirm -> list_save_slots shrinks and user://saves/evalslot.msav is gone; pencil -> new card label; save icon -> save-<n>-autosave flips in user://settings.json; export -> chooser -> the copy exists; Import Save -> pick a copied .msav -> a new card appears and loads. cargo test -p mind-core game::saves io::save.",
+      "first_seen": "2026-10-08T13:45:20+00:00",
+      "last_verified": "2026-10-08T13:50:53+00:00",
+      "session": "loop-2",
+      "prev_status": "open",
+      "owner": "oc-35376",
+      "claimed_at": "2026-10-08T13:50:53+00:00",
+      "claimed_for": "writer"
+    },
+    {
+      "id": "EV-0068",
+      "area": "ui/dialogs",
+      "severity": "S3",
+      "status": "open",
+      "title": "Load Game save cards render no preview and blank/unknown map, mode, wave, playtime and date lines",
+      "expected": "Java: Saves.savePreview writes previews/save_slot_<index>.png from renderer.minimap.getPixmap() on every save (Saves.java:343-355) and previewTexture() loads it (Saves.java:357-367); LoadDialog.java:154-165 swaps the nomap border image for that texture, and :167-181 prints save.map (getMap, Saves.java:397-399), mode/getWave (Saves.java:433-447), autosave, save.playtime (getPlayTime, :385-387) and getDate (:393-395)",
+      "actual": "Godot: list_save_slots emits only name/file/sector/autosave (campaign.rs:1488-1515) while load_dialog.gd:221-238 reads map/mode/wave/playtime_ms/date, so cards show @unknown, empty mode, wave 0, empty playtime and no date; load_dialog.gd:186-195 keeps a Panel + map glyph placeholder (comment: no save texture is exposed yet). No live code writes previews/save_slot_*.png: queue_preview_rerender (slot.rs:199-206) is called only by SaveSlot::save (slot.rs:137), which the live request_save paths (campaign.rs:499-502, :1211-1223) bypass, and requested_preview (slot.rs:27-28) has no reader outside tests",
+      "repro": "Godot: boot game.tscn, launch a non-campaign map or start_sector(serpulo,15); MindCampaign.save_slot(evcard) (or let the launch save fire); SimHost.step(120) until io_pending()==0 -> user://saves/evcard.msav exists but user://previews/save_slot_evcard.png does not. Open Load Game (Play > Load Game): the card preview child is a Panel + map glyph with no Texture2D anywhere under it, and the metadata labels read @save.map with unknown, a bare /wave 0, @save.playtime with an empty value, and no date line. Java twin: same save + Load Game -> card shows the minimap texture and lines with map name, mode/wave, autosave, playtime and formatted date",
+      "source": "code",
+      "confidence": "high",
+      "evidence": [
+        "../Mindustry/core/src/mindustry/game/Saves.java:343-355",
+        "../Mindustry/core/src/mindustry/game/Saves.java:357-367",
+        "../Mindustry/core/src/mindustry/ui/dialogs/LoadDialog.java:154-165",
+        "../Mindustry/core/src/mindustry/ui/dialogs/LoadDialog.java:167-181",
+        "../Mindustry/core/src/mindustry/game/Saves.java:385-399",
+        "../Mindustry/core/src/mindustry/game/Saves.java:433-447",
+        "client/rust/mind-gdext/src/campaign.rs:1488-1515",
+        "client/rust/mind-gdext/src/campaign.rs:1211-1223",
+        "client/rust/mind-core/src/io/save/slot.rs:199-206",
+        "client/rust/mind-core/src/io/save/slot.rs:27-28",
+        "client/rust/mind-core/src/io/save/slot.rs:137",
+        "client/rust/mind-core/src/io/fs.rs:459-460",
+        "client/ui/dialogs/load_dialog.gd:186-195",
+        "client/ui/dialogs/load_dialog.gd:221-238"
+      ],
+      "notes": [],
+      "plan": "Seam: MindCampaign.list_save_slots (campaign.rs:1488-1515) drops the presentation fields SaveMeta already carries for every listed slot, and no live path writes previews/save_slot_<stem>.png, so load_dialog.gd never receives a texture and falls back to defaults. EV-0065 owns raw meta values, EV-0064 owns playtime accumulation, EV-0067 owns card action icons; this record owns card presentation only.\n\nFiles: client/rust/mind-gdext/src/campaign.rs (list_save_slots :1488-1515; save paths :499-502, :1211-1223); client/rust/mind-core/src/io/save/slot.rs (:57-59 preview_path, :199-206 queue_preview_rerender, :27-28 requested_preview); client/rust/mind-core/src/io/map/mod.rs (:90-108 generate_preview) and io/map/preview.rs (:253 generate_preview_from_tiles); client/rust/mind-core/src/io/sim_io.rs (:146-164 builds SimMapSource); client/ui/dialogs/load_dialog.gd (:186-195 preview placeholder, :221-238 meta lines).\n\nSteps: (1) In list_save_slots, emit the fields the card reads from the meta already loaded by mind_core::io::save::slot::list_save_slots (imported at campaign.rs:43, called :1497): map = meta.map_name, wave = meta.wave, playtime_ms = meta.time_played, timestamp = meta.timestamp, mode derived from rules_json with the port Rules model (pvp/editor/attack_mode/infinite_resources, Rules.java:276-288), plus has_preview/preview_file from slot.preview_path(paths) (fs.rs:459-460). (2) Write the preview pixels at save completion: regenerate the saved map image from the same SimMapSource used at sim_io.rs:154 via generate_preview_from_tiles + encode_png (io/map), or from the render minimap CPU image, and write previews/save_slot_<stem>.png beside the saves dir (upstream Saves.java:343-355 uses renderer.minimap.getPixmap()); thread it through the save seam (SimIoHandler::save or a MindCampaign post-drain step deriving the root from the globalized save path) and clear requested_preview. (3) In load_dialog.gd replace the Panel/map glyph with a TextureRect; when has_preview load the PNG (Image.load_png_from_buffer + ImageTexture.create_from_image, pattern at editor/preview.rs:201-229) or expose a MindCampaign preview getter; keep the nomap glyph otherwise (LoadDialog.java:152-164). (4) Feed the new keys into _meta_lines: translate mode via @mode.<mode>.name, format playtime from ms (Strings.formatMillis equivalent) and append the date from timestamp.\n\nCheck: cargo test -p mind-core io; ui_widgets_check.gd SaveCampaignStub returns the new keys and asserts the card has a TextureRect with a texture when the preview PNG exists and labels contain map/wave/playtime/date; in-engine: save a slot -> user://previews/save_slot_evcard.png exists (PNG magic) and the Load Game card shows it with non-blank lines; Java reference LoadDialog.java:154-181.",
+      "first_seen": "2026-10-08T13:45:49+00:00",
+      "last_verified": "2026-10-08T13:45:49+00:00"
+    },
+    {
+      "id": "EV-0069",
+      "area": "ui/dialogs",
+      "severity": "S2",
+      "status": "godot-open",
+      "title": "Loading a save never warns about missing mods or a corrupt file: no cautious_load prompt and no load-error message",
+      "expected": "Saves.java:401-410 SaveSlot.cautiousLoad diffs the slot getMods() against loaded mods and shows a \"@warning\" + Core.bundle.format(\"mod.missing\", ...) confirm before the load runs; LoadDialog.java:224-263 runs slot.load() inside that cautiousLoad and catches SaveException with logic.reset() + ui.showErrorMessage(\"@save.corrupted\")",
+      "actual": "saves.rs:420-428 Saves::cautious_load/MissingModsReport has no caller outside its unit test (saves.rs:655-670); load_dialog.gd:241-256 _select -> _load_slot calls campaign_call(\"load_slot\") with no mod pre-check and no error handling, and list_save_slots (campaign.rs:1488-1515) exposes no mods row; MindCampaign.load_slot (campaign.rs:1229-1244) queues request_load, whose failure (sim_io.rs:188-190 IoStatus::Failed) lands in sim.io.responses and the only drain (io_set.rs:202) has no mind-gdext/GDScript consumer, so nothing is shown; grep finds no @save.corrupted or @mod.missing reference anywhere in client/",
+      "repro": "Godot: fresh boot, MindCampaign.start_sector(\"serpulo\",15), step, MindCampaign.save_slot(\"evmods\") until SimHost.io_pending()==0 and user://saves/evmods.msav exists. (a) Missing mods: craft a save whose meta mods tag is non-empty (adopt the saves.rs:655-670 MockFs fixture, or write a fixture save with tags mods=[\"notloadedmod\"]) and copy it to user://saves; open Load Game, click the card -> no @warning/mod.missing confirm appears (DialogLayer/OverlayLayer have no prompt) and load_slot proceeds anyway. (b) Corrupt: with the Load dialog already open (listing built), overwrite user://saves/evmods.msav with 64 zero bytes, then click the card -> the dialog closes, the pre-click world keeps running and no error box/toast appears; godot_log shows only the Rust-side log line. Java twin: same crafted mod-missing slot -> cautiousLoad shows the warning confirm before loading; corrupt file -> SaveException -> ui.showErrorMessage(\"@save.corrupted\")",
+      "source": "code",
+      "confidence": "high",
+      "evidence": [
+        "client/rust/mind-core/src/game/saves.rs:420",
+        "client/rust/mind-core/src/game/saves.rs:655",
+        "client/ui/dialogs/load_dialog.gd:241",
+        "client/ui/dialogs/load_dialog.gd:256",
+        "client/rust/mind-gdext/src/campaign.rs:1229",
+        "client/rust/mind-gdext/src/campaign.rs:1242",
+        "client/rust/mind-gdext/src/campaign.rs:1488",
+        "client/rust/mind-core/src/io/sim_io.rs:188",
+        "client/rust/mind-core/src/sim/io_set.rs:202",
+        "client/rust/mind-gdext/src/mods.rs:226",
+        "../Mindustry/core/src/mindustry/game/Saves.java:401",
+        "../Mindustry/core/src/mindustry/game/Saves.java:406",
+        "../Mindustry/core/src/mindustry/ui/dialogs/LoadDialog.java:225",
+        "../Mindustry/core/src/mindustry/ui/dialogs/LoadDialog.java:256",
+        "../Mindustry/core/src/mindustry/ui/dialogs/LoadDialog.java:259"
+      ],
+      "notes": [
+        "2026-10-08T13:50:53+00:00: claimed by oc-35376 for writer (session loop-2)"
+      ],
+      "plan": "Seam: LoadDialog.runLoadSave's two user-facing guards are missing. GDScript _select -> _load_slot calls MindCampaign.load_slot directly (load_dialog.gd:241-256) without the cautious mod diff (Saves.java:401-410), and the facade neither reports missing mods nor surfaces the queued load outcome, so the SaveException -> \"@save.corrupted\" path (LoadDialog.java:256-260) has no equivalent.\n\nFiles: client/ui/dialogs/load_dialog.gd:241-256; client/rust/mind-gdext/src/campaign.rs:1229-1244,1488-1515; client/rust/mind-core/src/game/saves.rs:420-428; client/rust/mind-gdext/src/mods.rs:226-232; client/rust/mind-gdext/src/sim_host.rs:761-771 and the io pump in advance_steps; client/rust/mind-gdext/src/ui/ui_host.rs:325-365 (show_info/show_confirm); client/rust/mind-core/src/ui/prompts.rs:21-41 (\"show_error\" helper).\n\nSteps: (1) expose the slot requirement: add mods (slot.get_mods()) to the list_save_slots row (campaign.rs:1488-1515) or add MindCampaign.cautious_load(slot_name) returning Saves::cautious_load(slot, MindMods.mod_strings()). (2) In load_dialog.gd _load_slot, when the missing list is non-empty show MindUi.show_confirm(\"@warning\", bundle-format(\"mod.missing\", missing.join(\"\\n\"))) and call load_slot only after resolve_confirm(true); cancel returns. (3) Surface failure: drain the IoResponse at the tick boundary (add io_responses_json/load_failed on MindSimHost next to take_io_requests_json, sim_host.rs:773-797) and consume it in the campaign/ui layer to show the \"show_error\" prompt with \"@save.corrupted\" plus the upstream logic.reset() semantics. (4) Do not re-implement the backup fallback; it stays mechanical (io/save/mod.rs:120-164), only add the prompt. (5) Extend client/tools/ui_widgets_check.gd with a stub campaign that reports missing mods and a failed load; assert the confirm and error prompts.\n\nCheck: in-engine crafted mod-missing slot -> card click shows the warning confirm; Cancel leaves the sim untouched, OK loads; corrupt slot -> card click shows the \"@save.corrupted\" error prompt instead of a silent no-op and the sim keeps its prior state; cargo test -p mind-core game::saves and the godot ui_widgets_check stay green.",
+      "first_seen": "2026-10-08T13:46:06+00:00",
+      "last_verified": "2026-10-08T13:50:53+00:00",
+      "session": "loop-2",
+      "prev_status": "open",
+      "owner": "oc-35376",
+      "claimed_at": "2026-10-08T13:50:53+00:00",
+      "claimed_for": "writer"
     }
   ]
 }
