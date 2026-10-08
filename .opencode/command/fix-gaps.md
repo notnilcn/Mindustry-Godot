@@ -8,7 +8,7 @@ Run one fix cycle for this loop session.
 
 Arguments: $ARGUMENTS
 
-If the arguments are empty, claim a small batch (3) of the highest-severity
+If the arguments are empty, claim a batch (maximum of 10) of the highest-severity
 `open` findings. Arguments may name areas (`ui`, `input`, `game/campaign`)
 and/or a batch size. Follow your agent contract exactly:
 

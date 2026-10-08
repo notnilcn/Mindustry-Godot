@@ -16,5 +16,7 @@ In the main checkout, merge the branch after inspecting
 loop-<N>`. First commit any pending main workflow/ledger changes and the
 uncommitted `.opencode/chains/` edits in `../Mindustry-Godot-loop<N>`; then
 `git merge --no-ff <branch>`, resolve conflicts, run `tools/ci.sh`, and finally
-`git -C ../Mindustry-Godot-loop<N> merge main`. Do not push. Report the commit
-list, conflicts, and check result.
+`git -C ../Mindustry-Godot-loop<N> merge main`. Then tear the finished loop
+down with `.opencode/loops/bin/stop-loop.sh <N> --remove-worktree --purge`,
+only after the loop session has ended; the branch stays for a later restart.
+Do not push. Report the commit list, conflicts, and check result.

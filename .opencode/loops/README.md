@@ -42,8 +42,9 @@ display and open-godot-mcp to the loop bridge port and XDG dirs.
   a global lease (`.opencode/evals/twin-evaluator`, one item at a time across
   sessions).
 - `/merge-loops` runs from the main checkout after a loop's fix cycle returns:
-  it merges the loop branch into `main`, runs `tools/ci.sh`, and syncs the
-  loop worktree back from main.
+  it merges the loop branch into `main`, runs `tools/ci.sh`, syncs the loop
+  worktree back from main, and tears the worktree and its runtime dir down
+  with `stop-loop.sh --remove-worktree --purge` (the loop branch stays).
 - A restarted loop recovers its own dead claims with
   `record_finding.py reap --session loop-N --older-than-minutes 0`.
 - `start-loop.sh` refuses to launch when the worktree's workflow files
