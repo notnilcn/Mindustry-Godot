@@ -1,14 +1,14 @@
 ---
 id: boot-and-identity
 title: Editor bridge → game scene → runtime connected → pid stamp
-status: seeded
+status: verified
 applies_when: Start of any MCP session; after an editor, game, or branch/worktree change.
 preconditions:
   - Godot editor running with the open_godot_mcp addon bridge up.
   - No other editor holds this loop's bridge port (PARITY_BRIDGE_PORT, default 6970).
   - open-godot-mcp needs no DISPLAY on the opencode side; the editor needs a display (the loop wrapper provides the weston/Wayland GPU compositor, Xvfb is the software fallback).
 tools: [godot_health, godot_editor_read, godot_editor_edit, godot_game, godot_exec]
-last_verified: not yet (seeded from .opencode/skills/playtest/SKILL.md §Session start)
+last_verified: 2026-10-08 a1ca816 (runs/20261008-133538-ev0062-ui-click-godot; twin re-run runs/20261008-143432-ev0062-twin, pid 145410)
 ---
 
 # boot-and-identity

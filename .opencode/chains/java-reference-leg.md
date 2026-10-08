@@ -11,7 +11,7 @@ preconditions:
   - computer-mcp registered and opencode started with DISPLAY set (it imports pynput at module load; without an X connection its tools vanish).
   - One client at a time on the loop display (Xvfb has no window manager).
 tools: [computer-mcp_mouse_move, computer-mcp_click, computer-mcp_drag, computer-mcp_type, computer-mcp_key_press, computer-mcp_key_down, computer-mcp_key_up, computer-mcp_screenshot, computer-mcp_list_windows, computer-mcp_get_window_info]
-last_verified: 2026-10-08 9efd068 (runs/l2-20261007-163042-twin-java-ref)
+last_verified: 2026-10-08 9efd068 (runs/l2-20261007-163042-twin-java-ref); 2026-10-08 a1ca816 loop-1 (runs/20261008-143432-ev0062-twin); 2026-10-08 986cda3 loop-2 (runs/l2-20261008-150205-input_controls-twin)
 ---
 
 # java-reference-leg
@@ -35,11 +35,16 @@ last_verified: 2026-10-08 9efd068 (runs/l2-20261007-163042-twin-java-ref)
    ```
 
 3. Capture the initial frame (bootstrap venv; `capture_screen.py` prints
-   mean/stddev so a blank frame is caught before it becomes a finding):
+   mean/stddev so a blank frame is caught before it becomes a finding). When
+   `xdotool` is absent, `--window-title` warns `window not found via xdotool;
+   captured full monitor` and returns the full 1280x720 screen — read the window
+   geometry from `DISPLAY=:N xwininfo -root -children` and crop with `--rect
+   <origin-x>,<origin-y>,<w>,<h>` instead:
 
    ```bash
-   "$MCP_VENV/bin/python" .opencode/skills/parity-eval/scripts/capture_screen.py \
-     --output "$RUN/java/step-01-menu.png"
+   DISPLAY=:11 "$HOME/.local/share/uv/tools/computer-mcp/bin/python" \
+     .opencode/skills/parity-eval/scripts/capture_screen.py \
+     --rect 190,10,900,700 --output "$RUN/java/step-01-menu.png"
    ```
 
 4. Drive the flow with the persistent computer-mcp MCP tools
@@ -78,6 +83,30 @@ sweep needed:
    hover popup shows the requirement (`Copper 0/10` → `10/10` → `Researched`).
 4. Quit: `kill -TERM <java-pid>` (a desktop campaign has no Save Game; the sector
    save is written at launch and on exit). Screen clean afterwards.
+
+## Verified run (loop-1 twin, 2026-10-08, EV-0062)
+
+Ground truth for paused-dialog buttons, same 900x700 window at +190+10:
+mouse `Play` (410,187) -> submenu `Custom Game` (648,327) -> `Archipelago` card
+(640,200) -> MapPlay `Play` (747,628) -> `key_down escape` + `key_up escape`
+(split calls) -> pause-dialog `Settings` (754,281) opens the Settings dialog.
+Use split `key_down`/`key_up`: a held `key_press escape` auto-repeats and
+re-toggles the pause dialog closed (see computer-mcp-learnings.md). Quit with
+`kill -TERM` on the `java -jar .*Mindustry.jar` pid; the display is clean
+afterwards. Run: `runs/20261008-143432-ev0062-twin` (JVM pid 140283,
+`java/notes.md`).
+
+## Verified run (loop-2 twin, 2026-10-08, EV-0044, 986cda3)
+
+A fresh campaign on a fresh data dir has one extra first-run dialog before the
+planet page: Play (405,185) -> Campaign (647,188) -> `Select Starting Campaign`:
+Serpulo photo (477,310) -> OK (640,673) -> planet page with `Ground Zero`
+selected -> Launch (640,677). In-game, `Shift` held swaps the bottom panel to
+`Command Mode` / `[no units]` and the diamond command cursor appears; release
+returns to the byte-identical baseline (run
+`runs/l2-20261008-150205-input_controls-twin`, JVM pid 190927; exact sequence in
+`chains/command-mode-hold-vs-tap.md`). Quit with `kill -TERM` on the JVM pid; the
+Xvfb root only shows the loop's Godot editor window afterwards.
 
 ## Success signals
 

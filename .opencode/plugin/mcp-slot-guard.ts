@@ -15,8 +15,9 @@
  * evaluator. `MCP_SLOT_GUARD=off` disables the guard entirely.
  *
  * Failure policy: acquire errors other than "limit" fail open with a console
- * warning; a failed refresh falls through to acquire, so an agent that
- * released the lease explicitly cannot leave one call unaccounted. A process
+ * warning; a refresh or release whose lease an agent already released (exit 4)
+ * is silent and falls through to acquire, so explicit releases cannot leave one
+ * call unaccounted or spam the console. A process
  * that has made no MCP call for `QUIET_MS` releases its lease so waiting loops
  * can take the slot; its next call re-acquires. The script path is resolved
  * from the project directory, so loop worktrees share the main checkout's
@@ -84,7 +85,11 @@ export default (async ({ directory }) => {
       run(["refresh", "--token", token])
       return true
     } catch (error) {
-      console.error(`[mcp-slot-guard] refresh failed: ${String(error)}`)
+      // Exit 4 is unknown-token: an agent released the lease explicitly (the
+      // end-of-stage contract); acquire() below takes a new one.
+      if ((error as { status?: number }).status !== 4) {
+        console.error(`[mcp-slot-guard] refresh failed: ${String(error)}`)
+      }
       token = null
       return false
     }
@@ -96,7 +101,11 @@ export default (async ({ directory }) => {
       // By key: also cleans up a lease an agent released or replaced.
       run(["release", "--key", OWNER])
     } catch (error) {
-      console.error(`[mcp-slot-guard] release failed: ${String(error)}`)
+      // Exit 4 is unknown-key: an agent already released the lease, which is
+      // the normal case this cleanup exists for, so it is not an error.
+      if ((error as { status?: number }).status !== 4) {
+        console.error(`[mcp-slot-guard] release failed: ${String(error)}`)
+      }
     }
     token = null
   }

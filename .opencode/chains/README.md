@@ -16,6 +16,7 @@ touch, which precondition is easy to miss.
 | `golden-checksum.md` | `load_scenario` + `step(60)` + checksum vs committed golden |
 | `pause-step-interact.md` | pause, step, API and mouse place/break, input flush |
 | `input-controls.md` | no-scenario world, keyboard input vs `get_input_state_json`, API comparison |
+| `ui-control-click.md` | runtime-created Button click (menu Play, paused Settings) → pressed counter + submenu/dialog stack read-back (EV-0062) |
 | `probe-hud.md` | state JSON, inspector, screenshot, logs |
 | `enter-campaign.md` | main menu → planet dialog → sector → launch (UI and facade variants) |
 | `sector-preset-rules.md` | campaign launch → `get_rules_json` vs preset captureWave/winWave (EV-0049) |
@@ -26,6 +27,9 @@ touch, which precondition is easy to miss.
 | `load-game-dialog.md` | main menu → Load Game → live slot list → card click queues + applies a load |
 | `research-purchase.md` | campaign launch → research dialog → root rail → purchase a locked node |
 | `java-reference-leg.md` | Java reference: launch → drive → capture → quit (computer-mcp) |
+| `java-custom-survival-wave.md` | Java reference: custom survival game → skip/timer wave → spawn/move/combat captures |
+| `units-live-wave-runtime.md` | Godot: fresh groundZero → `run_wave` → live unit/bullet assertions (EV-0048) |
+| `command-mode-hold-vs-tap.md` | Twin: Java Shift-hold affordance (Command Mode panel) vs Godot `command_mode` state, hold + `commandmodehold=false` tap branches (EV-0044) |
 
 ## Entry schema
 

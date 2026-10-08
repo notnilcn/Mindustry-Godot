@@ -71,3 +71,83 @@ happened, no entry.
   notes still hold.
 - Settlement runs: `runs/l2-20261008-034014-ev0054-load-game-twin`,
   `runs/l2-20261008-034337-ev0047-production-twin` (both twin-verified).
+
+## 2026-10-08 — loop-1 twin Java leg (EV-0048): custom-game rules dialog input, lagging call screenshots, pynput scroll
+
+- The Custom Rules dialog drops injected keyboard input: typing `10` into the
+  "Initial Wave Spacing" number field (and into the dialog's own search box)
+  produced no visible change, while the Custom Game map-search field had accepted
+  typed text earlier in the same session. Workaround: leave numeric rule fields
+  alone and trigger the wave with the HUD skip button (survival). A single
+  unverified click on the "Waves" checkbox silently turned waves off; only the
+  empty in-game status pane revealed it — read the in-game HUD after any rules
+  edit.
+- The screenshot attached to `computer-mcp_click` / `mouse_move` / `key_press`
+  is the previous frame (menus/submenus/highlights appear one call late). Always
+  take a separate `computer-mcp_screenshot` before acting on what a call
+  returned.
+- computer-mcp has no scroll tool and `xdotool` is absent; zooming the Java
+  camera worked with a one-shot pynput scroll from the computer-mcp venv —
+  `DISPLAY=:N "$MCP_VENV/bin/python" -c "from pynput.mouse import Controller;
+  Controller().scroll(0,-6)"` (discrete scroll events do not need the persistent
+  pointer that one-shot moves do).
+- Pre-check a Java wave reference before driving: `maps/serpulo/groundZero.msav`
+  decompresses (zlib) to rules with `waveTimer:false, waveSending:false`; the
+  campaign sector's waves are world-processor/objective-flag gated and the HUD
+  skip button is disabled. Reusable custom-survival sequence:
+  `chains/java-custom-survival-wave.md`.
+- Evidence: `runs/20261008-040830-ev0048-live-unit-runtime-twin/java/notes.md`.
+
+## 2026-10-08 — loop-1 twin Java leg (EV-0062): held Escape auto-repeats and re-toggles the pause dialog
+
+- Opening the Java pause dialog: the first `key_press escape` after a mouse
+  click was swallowed by window focus (known), the second opened the dialog,
+  but `computer-mcp_key_press` held the key long enough for X auto-repeat to
+  fire another Escape, closing the dialog again before the next capture (the
+  game was running ~3 s later). Split `computer-mcp_key_down` +
+  `computer-mcp_key_up` in two calls opened the dialog and it stayed open.
+- The screenshot attached to `click`/`mouse_move` is still the previous frame
+  (re-confirmed); always capture separately before judging what a click did.
+- Evidence: `runs/20261008-143432-ev0062-twin/java/` (`notes.md`; step-06 is
+  the open pause dialog after the split key events, step-07 the settings
+  dialog). Ground-truth path added to `chains/java-reference-leg.md`.
+
+## 2026-10-08 — loop-2 twin Java leg (EV-0044): `--window-title` capture needs xdotool; first-run campaign dialog
+
+- `capture_screen.py --window-title Mindustry` printed `window not found via
+  xdotool; captured full monitor` (xdotool/wmctrl absent on this host) and
+  returned the whole 1280x720 screen. Workaround that worked: read
+  `DISPLAY=:11 xwininfo -root -children` for `"Mindustry": 900x700+190+10`, then
+  capture with `--rect 190,10,900,700`. `chains/java-reference-leg.md` step 3
+  now records this.
+- On a **fresh** Java data dir, Play -> Campaign opens a `Select Starting
+  Campaign` dialog (Serpulo/Erekir planet photos) before the planet page; the
+  click must land on the planet photo (Serpulo at (477,310)), then OK (640,673),
+  then the usual Ground Zero Launch (640,677). Missing the photo leaves Erekir
+  selected. Route recorded in `chains/java-reference-leg.md`.
+- Split `key_down`/`key_up` calls for a plain `shift` hold/release worked; the
+  response screenshot still lags one frame (known).
+- Evidence: `runs/l2-20261008-150205-input_controls-twin/java/notes.md`
+  (JVM pid 190927, 900x700).
+
+## 2026-10-08 — loop-2 twin Java leg (EV-0055): timed key combos, no scroll tool, catalog index vs grid
+
+- The in-game number-key block-select combo (`PlacementFragment.updatePick`)
+  requires the category key and the tens/units keys inside a 400 ms window;
+  `computer-mcp_key_press` round trips routinely exceed it, so a combo fired as
+  three separate calls degenerates into three successive *category* selections
+  (observed: 3 -> distribution, 1 -> turret, 4 -> liquid). Workaround: one
+  persistent pynput process sending the whole combo with 40/70 ms gaps
+  (`runs/l2-20261008-051657-ev0055-rts-select-twin/java/key_seq.py`), the same
+  persistent-connection idea as `parity-click.sh` for clicks.
+- computer-mcp exposes no scroll-wheel action, so a Java ScrollPane cannot be
+  scrolled directly. The block catalog's hidden entries were reachable with the
+  number combo instead; the Payload Source item picker has its own search field
+  (ItemSelection adds one when the list is long), where "flare" returned 0 hits
+  and "stell" 1 (the Erekir-planet map filters serpulo content). Select by combo
+  and read the top table's block name — the visible catalog grid may be scrolled
+  from a previous session (`blockPane.setScrollYForce`) and cannot be indexed
+  by eye.
+- The response screenshot still lags one action (known); every judgment in this
+  run used a separate `capture_screen.py` crop.
+- Evidence: `runs/l2-20261008-051657-ev0055-rts-select-twin/java/notes.md`.

@@ -303,3 +303,144 @@ If nothing new happened, no entry.
 - Evidence: `runs/l2-20261008-034337-ev0047-production-twin/` (twin sweep, pid
   267163; `godot/map-probe.json`, `godot/game.log`) and
   `runs/l2-20261008-034014-ev0054-load-game-twin/`.
+
+## 2026-10-08 — an *errored* eval (not just a timeout) stalls the loop; camera transform lags a frame; paused HUD covers the center probe point
+
+- An eval body that errors trips break-on-error and pins the frame loop just like
+  a timeout: a probe using a guessed dialog button path
+  (`/root/Spine/Ui/UiRoot/DialogLayer/paused/settings`) logged `Node not found`
+  plus `has_meta` on a null instance, and `Engine.get_process_frames()` stayed at
+  10368 for ~14 s (`godot_log errors` shows the cause). Recovery is
+  `godot_game stop` + `play` (restart, do not resume). Locate dialog buttons with
+  `paused.find_child("settings", true, false)` — the real path is
+  `/root/Spine/Ui/UiRoot/DialogLayer/paused/Center/Panel/Layout/Buttons/settings`,
+  not a direct child of the dialog (which also cost a 15 s TIMEOUT).
+- `Camera2D.tile_to_screen`/`screen_to_tile` read the viewport canvas transform,
+  which updates on the next frame after `center_on_tile`/`pan_to`: reading back in
+  the same eval returns stale coordinates (tile (16,16) resolved to (5841,5589)
+  instead of (576,324)). Resolve click coordinates one MCP round-trip after moving
+  the camera.
+- While paused, the viewport center is covered by the STOP
+  `HudGroup/hud/PausedBanner` and the lower-right by `HudGroup/placement/Panel`.
+  A paused world-click probe aimed at center reads `pending_command_count == 0`
+  and looks like an input regression; probe a point whose
+  `gui_get_hovered_control()` is a PASS control (or none) first — at (200,200)
+  hovered was `HudGroup/hud` (PASS), the click enqueued (`pending` 1), and
+  `step(1)` applied a conveyor at tile (4,12).
+- Evidence: `runs/20261008-133538-ev0062-ui-click-godot/` (EV-0062 godot-pass,
+  pid 20583; `godot/state-05-world-input-regression.json`).
+
+## 2026-10-08 — `godot_exec` budget is 15 s, not 30 s; a timed-out `step(50000)` keeps running and freezes the campaign HUD mirror
+
+- A single `SimHost.step(50000)` eval returned
+  `TIMEOUT ... timed out after 15.0s` (the earlier 6.6 MB-dump entry says 30 s —
+  the wrapper's actual budget on this host is 15 s). The game does **not**
+  abort the eval: the step ran to completion (`get_tick()` came back at
+  +50000), and every later eval blocked until it finished (`sleep 20` + poll,
+  then a cheap eval answered again).
+- After that timed-out step the campaign HUD mirror went stale in a way that
+  outlived the timeout: `MindCampaign.get_hud_state()` kept returning the
+  pre-step `wavetime`/`enemies` (wavetime 7184.54 unchanged across a `step(600)`
+  and a later pump), while `SimHost.get_group_counts()` stayed correct. For
+  live-runtime liveness, assert on `get_group_counts()` / `str()` aggregates,
+  not the mirrored HUD.
+- Budget workaround: chunk large advances (e.g. 6-10 × `step(600)`) and read the
+  group counts each chunk; unit movement/weapons evidence is then visible
+  without any single long call.
+- Also confirmed for the EV-0048 leg: `place_block` can return `true` while the
+  live block runtime rejects the tile — the only trace is a `[D] place command
+  rejected at (x, y)` info line and an unchanged `build` group count.
+- Evidence: `runs/20261008-134638-ev0048-live-unit-runtime-godot/` (EV-0048
+  godot-pass, pid 36615; `run.json` anomalies, `report.md`).
+
+## 2026-10-08 — a rebuilt GDExtension is not picked up by a running loop editor; verify what the game actually mapped
+
+- The loop-2 editor (pid 17601, started 13:35) was already running when the
+  writer's fix `ca81672` was committed at 14:00 and the extension rebuilt at
+  14:02. `godot_game play` starts the game *inside* the editor process, which
+  mmap'd `libmind_gdext.so` at editor start: playing without restarting the
+  editor would have evaluated the pre-fix code even though the file on disk was
+  new. The library mtime/sha alone cannot tell you what a long-lived editor
+  loaded.
+- Workaround: compare the built `client/bin/rust/debug/libmind_gdext.so`
+  mtime/sha against the fix commit; rebuild with `tools/build.sh` when it
+  predates the commit; then kill the editor and relaunch
+  `.opencode/loops/bin/run-godot-editor.sh` before `godot_game play`. Cheap
+  pre-flight on the artifact: `nm -C <so> | grep <new-symbol>` (the pre-fix .so
+  had no `read_command_mode_hold`/`update_command_mode`). Post-play proof of what
+  is loaded: `grep libmind_gdext /proc/<game pid>/maps` plus a `sha256sum` of
+  that path.
+- Evidence: `.opencode/evals/runs/l2-20261008-140421-input_controls-godot/`
+  (EV-0044 godot-pass, game pid 81133; `godot/rts-evidence.json` library block).
+
+## 2026-10-08 — loop-1 twin Godot leg (EV-0048): no new friction
+
+- Explicitly nothing new: the `units-live-wave-runtime` chain ran unchanged at
+  a1ca816 (fresh groundZero checksum `4353bdfd835ec038`, `run_wave` + `step(1)`
+  -> unit 0->1 at checksum `9f527206f0c78da9`, second wave -> 4 units, bullets
+  by tick 420, empty error log). Recorded for the next twin evaluator; no entry
+  beyond this one. Evidence:
+  `runs/20261008-040830-ev0048-live-unit-runtime-twin/godot/`.
+
+## 2026-10-08 — loop-1 twin Godot leg (EV-0062): window resize no-op, `move_to_foreground()` deprecation in the error log, `center_on_tile` applies next frame
+
+- `get_window().size = Vector2i(900,700)` did not stick (the next read still
+  reported 1152x648). Record the actual window size instead of assuming the
+  resize took effect.
+- `get_window().move_to_foreground()` (the screenshot-staleness workaround)
+  records an ERROR in the log: `The "move_to_foreground()" method is
+  deprecated, use "grab_focus()" instead.` It was the only non-empty error-log
+  artifact of this run; clearing the log and re-doing one click gave
+  `godot_log errors: []`. Prefer `grab_focus()` for the staleness workaround.
+- `MindCamera2D.center_on_tile(x,y)` takes effect on the next frame:
+  `screen_to_tile()` in the same eval read a stale transform ((-270,-262)
+  instead of (4,12)); after a frame the mapping was (200,200) -> (4,12) as in
+  the EV-0062 godot-pass run.
+- No other friction: `boot-and-identity` + `ui-control-click` ran unchanged at
+  a1ca816 (pid 145410, frames 614..21295, errors [] after the clean click).
+  Evidence: `runs/20261008-143432-ev0062-twin/godot/`.
+
+## 2026-10-08 — loop-2 twin Godot leg (EV-0044): eval `await` stalls the frame loop; the editor game is embedded and cannot be resized
+
+- `godot_exec` eval code containing `await get_tree().process_frame` (without the
+  eval `await` param) errored with `Trying to call an async function without
+  "await".` and wedged the frame loop: `Engine.get_process_frames()` stayed at
+  1372 while `Time.get_ticks_msec()` advanced 4.4 s across two reads, and a
+  `window_set_size` from the same eval never applied. Recovery per the existing
+  rule: `godot_game stop` + `play` (new pid 197940), re-stamp before any input.
+  The quoted log error is the probe's own, not a game defect.
+- The editor game runs **embedded**: `DisplayServer.window_set_size(Vector2i(900,700))`
+  returns but the next read still reports 1152x648 and the log says `Embedded
+  window can't be resized.` Do not plan a pixel comparison around matching the
+  Java window size; for EV-0044 the Godot side compared structured input state.
+- Evidence artifact that worked: append one JSON line per probe from the eval
+  with `FileAccess.open("user://ev0044-evidence.jsonl", FileAccess.READ_WRITE)` +
+  `seek_end()`/`store_line()`, then copy the file out of
+  `<worktree>/.opencode/loops/run/loop-2/xdg-data/godot/app_userdata/Mindustry-Godot/`
+  into the run dir — the exact eval-produced samples survive as evidence.
+- `get_window().move_to_foreground()` re-confirmed the EV-0062 deprecation ERROR
+  in the log; prefer `grab_focus()`.
+- Evidence: `runs/l2-20261008-150205-input_controls-twin/` (`godot/rts-evidence.jsonl`,
+  `godot/log-errors.json`, `run.json`).
+
+## 2026-10-08 — loop-2 twin Godot leg (EV-0055): `toggle_command_mode()` is transient under hold-mode; tap radius
+
+- `MindInput.toggle_command_mode()` returns true and `get_input_state_json`
+  reads `command_mode: true` when sampled in the **same** `godot_exec` eval, but
+  a separate read one frame later is false again while Shift is up: with the
+  default `commandmodehold=true` the update recomputes
+  `command_mode = keyDown(shift)` every frame, so the API latch only survives
+  within the frame. For a persistent command mode hold Shift (the player path);
+  use the API only as a same-eval positive control.
+- The `set_selectable_units_json` seam takes **world pixels** (TILESIZE=8) and a
+  tap selects the closest commandable unit within `UNIT_TAP_RADIUS` (11 world
+  px) of the cursor; a tap outside that radius silently reads as empty ground
+  and clears the selection. Registration order/visible icons do not matter —
+  the unit must sit at the tap point's world coords. `chains/rts-select-orders.md`
+  corrected accordingly.
+- `get_window().move_to_foreground()` re-confirmed the already-logged
+  deprecation ERROR (`use "grab_focus()" instead`); it was the only error entry
+  and landed after all input probes. Prefer `grab_focus()` and attribute the
+  entry in the report when the workaround is used.
+- Evidence: `runs/l2-20261008-051657-ev0055-rts-select-twin/godot/rts-evidence.json`,
+  `godot/step-01-command-mode-selected.png`.
