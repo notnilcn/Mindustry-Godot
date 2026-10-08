@@ -589,9 +589,6 @@ impl MindCampaign {
         if let Some(host) = self.host() {
             self.last_pump_tick = host.bind().get_tick().max(0) as u64;
         }
-        // Persist attempts/rules; the live tile save is queued for the next IO
-        // tick (`Control.playNewSector` -> `saves.saveSector`).
-        self.persist();
         self.invalidate_ui_block_catalog();
         if installed
             && let Some(save_name) = self
@@ -622,6 +619,10 @@ impl MindCampaign {
                 }
             }
         }
+        // Persist attempts/rules and the launch slot bookkeeping (name,
+        // autosave flag, `last-sector-save`); the live tile save is queued for
+        // the next IO tick (`Control.playNewSector` -> `saves.saveSector`).
+        self.persist();
         self.runtime_installed && !events.is_empty()
     }
 
