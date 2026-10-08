@@ -17,6 +17,7 @@ pub mod logic;
 pub mod reset;
 pub mod runtime;
 pub mod schedule;
+pub mod unit_runtime;
 pub mod world_apply;
 
 use bevy_ecs::schedule::Schedule;
@@ -338,7 +339,11 @@ impl Sim {
         let Some(runtime) = self.block_runtime.as_mut() else {
             return false;
         };
-        runtime.place(&mut self.ecs.0, &mut self.grid, x, y, block, rot, team)
+        let placed = runtime.place(&mut self.ecs.0, &mut self.grid, x, y, block, rot, team);
+        if placed {
+            self.refresh_unit_runtime();
+        }
+        placed
     }
 
     /// Breaks through the opt-in live runtime; `false` when absent or rejected.
@@ -346,9 +351,13 @@ impl Sim {
         let Some(runtime) = self.block_runtime.as_mut() else {
             return false;
         };
-        runtime
+        let broken = runtime
             .break_block(&mut self.ecs.0, &mut self.grid, x, y)
-            .is_some()
+            .is_some();
+        if broken {
+            self.refresh_unit_runtime();
+        }
+        broken
     }
 
     /// Advances the simulation by one fixed step and flushes queued events.
@@ -402,11 +411,20 @@ impl Sim {
             .iter_entities()
             .filter(|entity| entity.get::<crate::ecs::BuildingComp>().is_some())
             .count();
+        // Live unit/bullet halves of `Groups` (present only once the opt-in
+        // unit runtime is installed).
+        let (unit, bullet) = match self.ecs.0.get_non_send::<unit_runtime::UnitRuntime>() {
+            Some(runtime) => (
+                runtime.unit_count(&self.ecs.0),
+                runtime.bullet_count(&self.ecs.0),
+            ),
+            None => (0, 0),
+        };
         let mut counts = std::collections::BTreeMap::new();
         counts.insert("all", all);
-        counts.insert("unit", 0);
+        counts.insert("unit", unit);
         counts.insert("build", build);
-        counts.insert("bullet", 0);
+        counts.insert("bullet", bullet);
         counts.insert("player", 0);
         counts.insert("effect", 0);
         counts.insert("weather", 0);
@@ -529,6 +547,25 @@ impl Sim {
                 self.controlled_unit = None;
                 self.commands_applied = self.commands_applied.wrapping_add(1);
                 return Ok(());
+            }
+            SimCommand::SpawnUnit { unit, x, y, team } => {
+                // Host/harness spawn: only the live unit runtime can carry it
+                // (`spawn_unit_def` inserts the full unit component closure).
+                if self.has_unit_runtime() {
+                    let ecs = &mut self.ecs.0;
+                    let Some(mut runtime) = ecs.remove_non_send::<unit_runtime::UnitRuntime>()
+                    else {
+                        return Err(CommandError::Unsupported("spawn_unit"));
+                    };
+                    let id = crate::content::UnitTypeId::new(*unit);
+                    let entity = runtime.spawn_by_id(ecs, id, *team, *x, *y, 0.0);
+                    ecs.insert_non_send(runtime);
+                    if entity.is_none() {
+                        return Err(CommandError::UnknownContent(*unit));
+                    }
+                    self.commands_applied = self.commands_applied.wrapping_add(1);
+                    return Ok(());
+                }
             }
             SimCommand::BuildingControlSelect { x, y } => {
                 self.control_building = Some(TilePos::new(*x, *y));

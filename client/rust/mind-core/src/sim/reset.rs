@@ -62,6 +62,16 @@ impl super::Sim {
             self.ecs.0.clear_entities();
         }
         self.grid.fill(BlockId::AIR, BlockId::AIR);
+        // Live units/bullets are despawned above; clear the runtime's lists and
+        // respawn window so the next world starts clean (`Groups.clear`).
+        let grid = self.grid.clone();
+        if let Some(mut runtime) = self
+            .ecs
+            .0
+            .get_non_send_mut::<super::unit_runtime::UnitRuntime>()
+        {
+            runtime.reset(&grid);
+        }
         self.time.clear();
         self.clock.reset();
         self.state = GameState::new(State::Menu);

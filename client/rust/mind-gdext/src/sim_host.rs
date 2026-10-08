@@ -982,6 +982,9 @@ impl MindSimHost {
         if materialized > 0 {
             log::info!("load_sector: materialized {materialized} map building(s)");
         }
+        // The unit runtime snapshotted the grid before materialization; keep its
+        // terrain/path tiles in sync with the live map.
+        self.sim.refresh_unit_runtime();
         // The fresh `Sim` carries no IO executor; re-wire the seams so a queued
         // `request_save`/`request_load` drains at the next `IoSet` boundary.
         self.install_sim_seams();
@@ -1041,8 +1044,18 @@ impl MindSimHost {
             self.sector_spawns,
             apply_loadout,
         );
+        // The wave spawner spawns/rebuilds path tiles for the session's wave
+        // team (`rules.waveTeam`).
+        self.sim.set_unit_wave_team(runtime.session.wave_team());
         self.put_campaign_runtime(runtime);
         Some(sync)
+    }
+
+    /// Queues the spawn of `wave` (0-based) on the live unit runtime; the
+    /// `TickSet::RunWave` system emits it on the next tick. No-op without the
+    /// runtime. Rust-only seam for `MindCampaign.run_wave`.
+    pub fn request_wave_spawn(&mut self, wave: i32) {
+        self.sim.request_wave_spawn(wave);
     }
 
     /// Applies `Planet.sectorCaptureReplacements` to the loaded tile floors
@@ -1225,16 +1238,21 @@ impl MindSimHost {
     /// run. Idempotent; returns `false` when the content snapshot is unavailable
     /// or the table fails to build.
     fn install_live_block_runtime(&mut self) -> bool {
-        if self.sim.has_block_runtime() {
-            return true;
+        if !self.sim.has_block_runtime()
+            && let Err(error) = self.sim.install_block_runtime()
+        {
+            log::warn!("live block runtime install failed: {error}");
+            return false;
         }
-        match self.sim.install_block_runtime() {
-            Ok(()) => true,
-            Err(error) => {
-                log::warn!("live block runtime install failed: {error}");
-                false
-            }
+        // EV-0048: the live unit/combat runtime rides on the same content/world;
+        // a failed install keeps buildings working but leaves units inert.
+        if !self.sim.has_unit_runtime()
+            && let Err(error) = self.sim.install_unit_runtime()
+        {
+            log::warn!("live unit runtime install failed: {error}");
+            return false;
         }
+        true
     }
 
     /// Applies one immediate command; `false` when `mind-core` rejects it.

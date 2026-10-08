@@ -505,7 +505,7 @@ impl SimRuntime {
 }
 
 /// Boots the vanilla content registry the way the harness does.
-fn load_vanilla_content() -> Result<ContentRegistry, RuntimeError> {
+pub(crate) fn load_vanilla_content() -> Result<ContentRegistry, RuntimeError> {
     let mut content = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)?;
     content.init()?;
     content.post_init()?;
@@ -609,7 +609,11 @@ impl Sim {
         let Some(runtime) = block_runtime.as_mut() else {
             return 0;
         };
-        runtime.materialize_buildings(&mut ecs.0, grid, pending)
+        let spawned = runtime.materialize_buildings(&mut ecs.0, grid, pending);
+        // Keep the unit runtime's terrain/path snapshot in sync with the newly
+        // linked map buildings.
+        self.refresh_unit_runtime();
+        spawned
     }
 
     /// Rebuilds every power graph from proximity (`World.endMapLoad` path).

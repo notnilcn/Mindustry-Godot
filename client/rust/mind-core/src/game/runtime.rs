@@ -194,6 +194,13 @@ pub fn campaign_tick_system(world: &mut World) {
             runtime.session.wavetime = (runtime.session.wavetime - 1.0 / TICKS_PER_SECOND).max(0.0);
             if runtime.session.wavetime <= 0.0 {
                 runtime.events.push(run_wave_campaign(&mut runtime.session));
+                // `Logic.runWave` -> `WaveSpawner.spawnEnemies`: the live unit
+                // runtime spawns the pre-increment wave in `TickSet::RunWave`.
+                if let Some(mut unit_runtime) =
+                    world.get_non_send_mut::<crate::sim::unit_runtime::UnitRuntime>()
+                {
+                    unit_runtime.pending_wave = Some(runtime.session.wave - 1);
+                }
                 // `WaveEvent` listener: `stats.wavesLasted++`.
                 if let Some((planet, _)) = runtime.session.sector
                     && let Some(stats) = runtime.campaign.stats_for_mut(planet)

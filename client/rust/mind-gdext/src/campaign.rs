@@ -556,7 +556,8 @@ impl MindCampaign {
     }
 
     /// Advances the wave counter (`Logic.runWave`), mirroring into the live
-    /// runtime when one is installed.
+    /// runtime when one is installed. The live unit runtime spawns the wave on
+    /// the next `TickSet::RunWave` tick (`WaveSpawner.spawnEnemies`).
     #[func]
     pub fn run_wave(&mut self) -> bool {
         let _ = run_wave_campaign(&mut self.session);
@@ -564,7 +565,9 @@ impl MindCampaign {
             let taken = host.bind_mut().take_campaign_runtime();
             if let Some(mut runtime) = taken {
                 let _ = run_wave_campaign(&mut runtime.session);
+                let wave = runtime.session.wave;
                 host.bind_mut().put_campaign_runtime(runtime);
+                host.bind_mut().request_wave_spawn(wave - 1);
             }
         }
         true

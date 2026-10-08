@@ -421,6 +421,23 @@ pub fn build_sim_schedule() -> Schedule {
     schedule
         .add_systems(crate::game::runtime::game_state_tick_system.in_set(TickSet::GameStateCheck));
     // ---- end campaign wiring ----
+    // ---- live unit/combat wiring (EV-0048): no-op unless `sim::unit_runtime`
+    // installed its non-send `UnitRuntime` resource. Owns only the unit/bullet
+    // entity sets and the wave-spawn slot; never reorders the sets above.
+    schedule.add_systems(
+        crate::sim::unit_runtime::unit_update_system.in_set(EntitySet::UpdateUnits),
+    );
+    schedule.add_systems(
+        crate::sim::unit_runtime::bullet_update_system.in_set(EntitySet::UpdateBullets),
+    );
+    schedule.add_systems(
+        crate::sim::unit_runtime::bullet_collide_system.in_set(EntitySet::CollideBullets),
+    );
+    schedule.add_systems(crate::sim::unit_runtime::run_wave_system.in_set(TickSet::RunWave));
+    schedule.add_systems(
+        crate::sim::unit_runtime::enemy_count_system.in_set(TickSet::AfterGameUpdate),
+    );
+    // ---- end live unit/combat wiring ----
     schedule
 }
 
