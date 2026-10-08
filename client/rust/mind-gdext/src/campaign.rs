@@ -18,9 +18,10 @@ use godot::classes::{FileAccess, INode, Node, ProjectSettings};
 use godot::obj::Base;
 use godot::prelude::*;
 
+use mind_core::assets::bundle::Bundle;
 use mind_core::content::registries::planets::GeneratorKind;
 use mind_core::content::{
-    ContentRef, ContentRegistry, ContentType, MemoryBundle, PlanetId, create_base_content,
+    ContentRef, ContentRegistry, ContentType, MemoryBundle, PlanetId, SectorId, create_base_content,
 };
 use mind_core::game::campaign_rules::CampaignRules;
 use mind_core::game::objectives::CampaignObjectiveContext;
@@ -65,6 +66,9 @@ pub struct MindCampaign {
     epoch: RulesEpoch,
     reloader: HostReloader,
     content_error: Option<String>,
+    /// Live `Core.bundle` (`assets/bundles/*`); the content registry boots with
+    /// an empty `MemoryBundle`, so unlock descriptions resolve from here.
+    bundle: Bundle,
     /// A `CampaignRuntime` is installed in the live sim host.
     runtime_installed: bool,
     /// The last captured sector was the planet's last (campaign victory).
@@ -85,6 +89,7 @@ impl INode for MindCampaign {
             epoch: RulesEpoch::new(),
             reloader: HostReloader::default(),
             content_error: None,
+            bundle: Bundle::new(),
             runtime_installed: false,
             campaign_complete: false,
         }
@@ -111,6 +116,34 @@ impl INode for MindCampaign {
     }
 }
 
+/// `state.rules.sector.preset.description` for the paused dialog's
+/// `@objective` entry (`PausedDialog.java:76-80`).
+///
+/// The campaign registry boots with an empty `MemoryBundle`, so
+/// `UnlockableContent.description` is usually unset; fall back to the live
+/// bundle's `sector.<preset>.description` key (`UnlockableContent.java:91`
+/// loads it through `Core.bundle`).
+fn resolve_preset_description(
+    registry: Option<&ContentRegistry>,
+    bundle: &Bundle,
+    preset: Option<SectorId>,
+) -> String {
+    let Some(def) = preset.and_then(|preset| registry.and_then(|registry| registry.sector(preset)))
+    else {
+        return String::new();
+    };
+    def.unlock
+        .description
+        .clone()
+        .filter(|description| !description.is_empty())
+        .or_else(|| {
+            bundle
+                .get_or_null(&format!("sector.{}.description", def.name))
+                .map(str::to_owned)
+        })
+        .unwrap_or_default()
+}
+
 #[godot_api]
 impl MindCampaign {
     /// Rebuilds the campaign content (runs from `ready()` and on
@@ -124,6 +157,12 @@ impl MindCampaign {
             .to_string();
         self.paths = Paths::new(root);
         self.settings = SettingsStore::load(&NativeFs, &self.paths);
+        // Keep the live bundle for `Core.bundle`-sourced text (unlock
+        // descriptions) that the empty-`MemoryBundle` registry lacks.
+        self.bundle = crate::assets::bundle::load_bundle(
+            &crate::assets::loader::resolve_assets_dir(),
+            &crate::assets::loader::resolve_locale(),
+        );
 
         let bundle = MemoryBundle::new();
         let store = SettingsUnlockStore::new(&mut self.settings);
@@ -945,16 +984,13 @@ impl MindCampaign {
                     .to_variant(),
             );
             // `PausedDialog.rebuild` `showObjective`: the preset description
-            // feeds the `@objective` full-text dialog.
-            let preset_description = record
-                .and_then(|sector| sector.preset)
-                .and_then(|preset| {
-                    self.registry
-                        .as_ref()
-                        .and_then(|registry| registry.sector(preset))
-                })
-                .and_then(|preset| preset.unlock.description.clone())
-                .unwrap_or_default();
+            // feeds the `@objective` full-text dialog (`UnlockableContent`
+            // resolves it from `Core.bundle`).
+            let preset_description = resolve_preset_description(
+                self.registry.as_ref(),
+                &self.bundle,
+                record.and_then(|sector| sector.preset),
+            );
             dict.set(
                 &key("presetDescription"),
                 &preset_description.as_str().to_variant(),
@@ -1760,5 +1796,58 @@ fn clear_sector_record(
         sector.save = None;
         sector.being_played = false;
         sector.clear_info(settings, planet_name);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mind_core::assets::bundle::parse_properties;
+    use mind_core::content::MemoryUnlockStore;
+
+    /// EV-0063: the registry boots with an empty `MemoryBundle`, so the paused
+    /// dialog's `@objective` gate must resolve the description from the live
+    /// `Core.bundle` key (`sector.<preset>.description`).
+    #[test]
+    fn preset_description_falls_back_to_the_live_bundle() {
+        let registry =
+            match create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true) {
+                Ok(registry) => registry,
+                Err(error) => panic!("base content: {error}"),
+            };
+        let Some(preset) = registry.sector_by_name("groundZero") else {
+            panic!("groundZero preset missing");
+        };
+        assert!(
+            preset.unlock.description.is_none(),
+            "empty MemoryBundle must leave the registry description unset"
+        );
+        let properties = parse_properties("sector.groundZero.description = Defend the sector.");
+        let bundle = Bundle::from_layers(vec![properties]);
+        assert_eq!(
+            resolve_preset_description(Some(&registry), &bundle, Some(preset.id)),
+            "Defend the sector."
+        );
+    }
+
+    /// A registry built with the description keeps precedence over the bundle.
+    #[test]
+    fn preset_description_prefers_the_registry_value() {
+        let content =
+            MemoryBundle::with_pairs([("sector.groundZero.description", "Registry text")]);
+        let registry = match create_base_content(&content, &MemoryUnlockStore::new(), true) {
+            Ok(registry) => registry,
+            Err(error) => panic!("base content: {error}"),
+        };
+        let Some(preset) = registry.sector_by_name("groundZero") else {
+            panic!("groundZero preset missing");
+        };
+        let bundle = Bundle::from_layers(vec![parse_properties(
+            "sector.groundZero.description = Bundle text",
+        )]);
+        assert_eq!(
+            resolve_preset_description(Some(&registry), &bundle, Some(preset.id)),
+            "Registry text"
+        );
     }
 }
