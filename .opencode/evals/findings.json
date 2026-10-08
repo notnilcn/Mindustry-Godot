@@ -1,6 +1,6 @@
 {
   "format": 2,
-  "updated": "2026-10-08T05:59:25+00:00",
+  "updated": "2026-10-08T12:59:35+00:00",
   "findings": [
     {
       "id": "EV-0001",
@@ -783,7 +783,7 @@
       "id": "EV-0024",
       "area": "ui/settings",
       "severity": "S3",
-      "status": "godot-open",
+      "status": "godot-pass",
       "title": "Game Data exposes 2 of the reference's 9 data actions",
       "expected": "Java: Clear Game Data..., Clear Planet Data, Clear Saves, Clear Research, Clear Campaign Saves, Export Data, Import Data, Open Data Folder, Export Crash Logs",
       "actual": "Godot: only Clear Saves and Open Data Folder are listed (DataActions const); the other seven actions are absent",
@@ -791,7 +791,14 @@
       "evidence": [
         "runs/20261006-172828-settings_ui/godot/step-06-settings-data.png",
         "runs/20261006-172828-settings_ui/godot/state-gamedata-actions.json",
-        "runs/20261006-172828-settings_ui/java/step-08-settings-data.png"
+        "runs/20261006-172828-settings_ui/java/step-08-settings-data.png",
+        "runs/l2-20261008-195122-ev0024-gamedata-godot/run.json",
+        "runs/l2-20261008-195122-ev0024-gamedata-godot/report.md",
+        "runs/l2-20261008-195122-ev0024-gamedata-godot/godot/state-gamedata-actions.json",
+        "runs/l2-20261008-195122-ev0024-gamedata-godot/godot/step-01-settings-gamedata.png",
+        "runs/l2-20261008-195122-ev0024-gamedata-godot/godot/export-data.zip",
+        "runs/l2-20261008-195122-ev0024-gamedata-godot/godot/export-crash-logs.txt",
+        "runs/l2-20261008-195122-ev0024-gamedata-godot/godot/log-events.json"
       ],
       "notes": [
         "2026-10-06T09:58:29+00:00: claimed by loop-1",
@@ -807,11 +814,13 @@
         "2026-10-08T01:32:11+00:00: claimed by oc-33825 for writer (session loop-2)",
         "2026-10-08T03:17:30+00:00: reaped stale claim (oc-33825, was godot-open); restored godot-open",
         "2026-10-08T03:41:17+00:00: claimed by oc-28660 for godot-eval (session loop-2)",
-        "2026-10-08T05:59:25+00:00: reaped stale claim (oc-28660, was godot-unverified); restored godot-open"
+        "2026-10-08T05:59:25+00:00: reaped stale claim (oc-28660, was godot-unverified); restored godot-open",
+        "2026-10-08T08:37:28+00:00: claimed by oc-8679 for writer (session loop-2)",
+        "2026-10-08T09:57:27+00:00: released: menu > Settings > Game Data renders all nine actions in upstream order (pids 180250/186793, window 1152x648, commit 7991049); each click path exercised: clear-saves -> 'cleared non-sector saves', clear-research -> 'cleared research (0 unlock(s))', clear-campaign-saves -> 'cleared campaign saves for 7 planet(s)', clear-planet-data -> planet pane; clear-data -> '[ui] cleared game data (4 data-root, 1 user file(s))' + exit; export-data zip 646 B (settings.bin), import-data 2 files + exit, open-folder true, export-crash-logs 25635 B; no 'not ported' log entry. Native chooser unavailable headless (FEATURE_NATIVE_DIALOG=false) so the export/import/crash endpoints the handlers call were driven in-engine."
       ],
       "plan": "14",
       "first_seen": "2026-10-06T07:58:09+00:00",
-      "last_verified": "2026-10-08T03:41:17+00:00",
+      "last_verified": "2026-10-08T09:57:27+00:00",
       "session": "loop-2"
     },
     {
@@ -919,7 +928,7 @@
       "id": "EV-0028",
       "area": "ui/dialogs",
       "severity": "S3",
-      "status": "godot-open",
+      "status": "godot-pass",
       "title": "Core Database dialog lists no content and uses category tabs instead of the reference's planet tabs",
       "expected": "Java: Core Database has all/Serpulo/Erekir tabs and an Items/Blocks content grid of locked/unlocked entries",
       "actual": "Godot: tabs are items/blocks/units/liquids (raw ids), the content area is the placeholder '<none>', and no content entries are rendered",
@@ -927,7 +936,8 @@
       "evidence": [
         "runs/20261006-172828-ui_dialogs/godot/step-05-database.png",
         "runs/20261006-172828-ui_dialogs/godot/state-database-stub.json",
-        "runs/20261006-172828-ui_dialogs/java/step-07-database.png"
+        "runs/20261006-172828-ui_dialogs/java/step-07-database.png",
+        "runs/l2-20261008-201236-ui_dialogs-godot/godot/state-01-database.json runs/l2-20261008-201236-ui_dialogs-godot/godot/step-01-database.png runs/l2-20261008-201236-ui_dialogs-godot/godot/step-03-database-scrolled.png runs/l2-20261008-201236-ui_dialogs-godot/godot/state-02-serpulo-tab.json runs/l2-20261008-201236-ui_dialogs-godot/godot/state-03-content-copper.json runs/l2-20261008-201236-ui_dialogs-godot/report.md"
       ],
       "notes": [
         "2026-10-06T10:32:23+00:00: claimed by loop-1",
@@ -935,11 +945,14 @@
         "2026-10-07T05:15:39+00:00: [needs-evaluation] Landed agent/menu-reachability 28e5403: database rows filter by search and content info opens.",
         "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open",
         "2026-10-08T01:32:11+00:00: claimed by oc-33825 for writer (session loop-2)",
-        "2026-10-08T03:17:30+00:00: reaped stale claim (oc-33825, was godot-open); restored godot-open"
+        "2026-10-08T03:17:30+00:00: reaped stale claim (oc-33825, was godot-open); restored godot-open",
+        "2026-10-08T08:37:28+00:00: claimed by oc-8679 for writer (session loop-2)",
+        "2026-10-08T10:12:26+00:00: [godot-open] commit b656e03: DatabaseDialog planet tabs + databaseCategory/Tag grid from the live MindCampaign registry; database_json model + mind-core ui::database tests",
+        "2026-10-08T10:15:53+00:00: released: Core Database renders the reference planet tabs (All/Erekir/Serpulo) and a populated locked/unlocked content grid at commit b656e03: All tab = 321 cells over Items/Blocks(crafting/defense/effect/distribution/liquid/power/production/turret/units/logic)/Fluids/Units grids, 5 unlocked (copper,sand,core-bastion,water,alpha) + 316 locks; Serpulo tab filters to 189; unlocked copper opens ContentInfoDialog. Godot pid 214901 (instance 1), window 1152x648, captured frames 5295-19262"
       ],
       "plan": "14",
       "first_seen": "2026-10-06T07:58:16+00:00",
-      "last_verified": "2026-10-08T01:32:11+00:00",
+      "last_verified": "2026-10-08T10:15:53+00:00",
       "session": "loop-2"
     },
     {
@@ -1235,7 +1248,7 @@
       "id": "EV-0038",
       "area": "ui/editor",
       "severity": "S2",
-      "status": "godot-open",
+      "status": "twin-verified",
       "title": "Editor > Maps: clicking a map row does nothing; the map editor never opens",
       "expected": "Java: Editor > Maps lists the map registry; clicking a row opens MapEditor (ui.editor.show())",
       "actual": "Godot: clicking 'archipelago' leaves editor_maps open; MindEditor.begin_edit_map returns false with @editor.errorload (the ENOENT is the get_meta backup fallback masking the real parse error); EditorDialog.visible stays false. Built-in assets/maps/default/*.msav are legacy MSAV v4/v5 and MapIo::create_map/get_meta_bytes does not route the legacy container.",
@@ -1248,7 +1261,9 @@
         "runs/20261007-111053-ev0038-verify/godot/state-01-player-path.json",
         "runs/20261007-111053-ev0038-verify/godot/step-02-row-click-failed.png",
         "runs/20261007-111053-ev0038-verify/java/step-03-map-editor.png",
-        "runs/20261007-111053-ev0038-verify/report.md"
+        "runs/20261007-111053-ev0038-verify/report.md",
+        "runs/20261008-190113-ev0038-editor-row-godot/godot/state-02-editor-maps-registry.json,runs/20261008-190113-ev0038-editor-row-godot/godot/state-03-row-click-archipelago.json,runs/20261008-190113-ev0038-editor-row-godot/godot/state-04-first-row-caldera.json,runs/20261008-190113-ev0038-editor-row-godot/godot/log-errors.json,runs/20261008-190113-ev0038-editor-row-godot/report.md",
+        "runs/20261008-121029-ev0038-editor-row-twin/godot/state-02-editor-maps-registry.json,runs/20261008-121029-ev0038-editor-row-twin/godot/state-03-row-click-archipelago.json,runs/20261008-121029-ev0038-editor-row-twin/godot/state-04-first-row-caldera.json,runs/20261008-121029-ev0038-editor-row-twin/godot/log-errors.json,runs/20261008-121029-ev0038-editor-row-twin/java/step-05-archipelago-info.png,runs/20261008-121029-ev0038-editor-row-twin/java/step-07-map-editor-loaded.png,runs/20261008-121029-ev0038-editor-row-twin/godot/step-05-map-editor-archipelago.png,runs/20261008-121029-ev0038-editor-row-twin/report.md"
       ],
       "notes": [
         "Same root cause empties MindPreview (EV added for the registry); Import opens file_chooser and Back closes the browser, so only the row->editor step fails.",
@@ -1262,11 +1277,15 @@
         "2026-10-08T01:28:25+00:00: claimed by oc-29086 for writer (session loop-1)",
         "2026-10-08T03:17:17+00:00: reaped stale claim (oc-29086, was godot-open); restored godot-open",
         "2026-10-08T04:05:53+00:00: claimed by oc-2598 for writer (session loop-1)",
-        "2026-10-08T04:06:47+00:00: released: orchestrator loop-1: writer claim released without a writer round; fix a1413e8 already an ancestor of main; pending step is the Godot evaluation, deferred per operator instruction"
+        "2026-10-08T04:06:47+00:00: released: orchestrator loop-1: writer claim released without a writer round; fix a1413e8 already an ancestor of main; pending step is the Godot evaluation, deferred per operator instruction",
+        "2026-10-08T08:35:39+00:00: claimed by orchestrator-loop-1 for writer (session loop-1)",
+        "2026-10-08T09:05:50+00:00: released: Godot leg pass at pid 87432 (frames 30106 at final read; GDExtension built 2026-10-08 17:54, editor started 18:37, commit afd380f): menu > Editor (player input) opens editor_maps with the live 18-map registry; clicking Archipelago (center 572,137) closes it and opens /root/Spine/Ui/EditorDialog with MindEditor.status file=assets/maps/default/archipelago.msav 500x500, last_error {}; clicking the literal first row (Ancient Caldera, maps_list[0], center 572,99) loads caldera.msav 256x256 the same way; godot_log errors empty. Fix commit a1413e8 (legacy MSAV routing) plus 846d928 (registry) and 8d94320 (runtime-Control click capture) already in main; no code change this round.",
+        "2026-10-08T10:55:56+00:00: claimed by twin-loop-1 for twin (session loop-1)",
+        "2026-10-08T12:16:44+00:00: [verify] Twin parity at 1d8f75b (Java 2cd7aeec): Java pid 84648 (1152x648, +70+63) Editor>Maps lists the live registry; Archipelago card -> Map Info (Archipelago/Anuke) -> Open In Editor -> MapEditor renders Archipelago. Godot pid 87556 (editor pid 32931, gdext sha 66998e8c built after HEAD): menu Editor click (runtime-created button, center 230,289) opens editor_maps with 18 live rows (Ancient Caldera first, Archipelago second); Archipelago row (572,137) -> EditorDialog visible, MindEditor.status file=assets/maps/default/archipelago.msav 500x500 last_error {}; first row Ancient Caldera (572,99, via LeftTools/BackButton) -> caldera.msav 256x256 last_error {}. No editor/load errors. Out-of-scope: map canvas still plan-19 stub (step-05 vs step-06 differ 31/746496 px; frames_drawn 1630->2538->9473)."
       ],
       "plan": "19",
       "first_seen": "2026-10-06T21:01:00+00:00",
-      "last_verified": "2026-10-08T04:06:47+00:00",
+      "last_verified": "2026-10-08T12:16:44+00:00",
       "found_by_loop": "4",
       "session": "loop-1"
     },
@@ -1274,7 +1293,7 @@
       "id": "EV-0039",
       "area": "ui/custom_game",
       "severity": "S2",
-      "status": "godot-open",
+      "status": "twin-verified",
       "title": "Map registry is always empty: Custom Game and Editor list 0x0 name-only fixtures, not live maps",
       "expected": "Java: Custom Game / Editor map lists come from the live Maps registry with real map metadata and previews",
       "actual": "Godot: MindPreview.map_count()==0 and maps_list()==[] after refresh (it scans only user://maps, which is empty on a fresh dir); MapIo::create_map cannot read the built-in legacy MSAV files, so the live registry never populates. Dialogs fall back to MindUi.campaign_views()['maps'] = default_map_entries(): 18 rows with width=0,height=0, no author and no path.",
@@ -1284,7 +1303,9 @@
         "runs/20261007-212335-ev0039-verify/godot/state-01-registry.json",
         "runs/20261007-212335-ev0039-verify/godot/game.log",
         "runs/20261007-212335-ev0039-verify/java/step-02-custom-game.png",
-        "runs/20261007-212335-ev0039-verify/report.md"
+        "runs/20261007-212335-ev0039-verify/report.md",
+        "runs/20261008-190748-ev0039-custom-game-godot/godot/state-02-custom-game.json,runs/20261008-190748-ev0039-custom-game-godot/godot/state-01-registry.json,runs/20261008-190748-ev0039-custom-game-godot/godot/state-03-editor-maps.json,runs/20261008-190748-ev0039-custom-game-godot/godot/game.log,runs/20261008-190748-ev0039-custom-game-godot/report.md",
+        "runs/20261008-221916-ev0039-twin/godot/state-01-registry.json,runs/20261008-221916-ev0039-twin/godot/state-02-custom-game.json,runs/20261008-221916-ev0039-twin/godot/state-03-editor-maps.json,runs/20261008-221916-ev0039-twin/godot/state-04-fresh-boot.json,runs/20261008-221916-ev0039-twin/godot/game.log,runs/20261008-221916-ev0039-twin/godot/step-01-custom-dialog.png,runs/20261008-221916-ev0039-twin/godot/step-02-editor-maps.png,runs/20261008-221916-ev0039-twin/godot/step-03-map-play.png,runs/20261008-221916-ev0039-twin/java/step-08-custom-grid.png,runs/20261008-221916-ev0039-twin/java/step-09-custom-grid-scrolled.png,runs/20261008-221916-ev0039-twin/java/step-07-customgame-click2.png,runs/20261008-221916-ev0039-twin/java/builtin-msav-metadata.json,runs/20261008-221916-ev0039-twin/run.json,runs/20261008-221916-ev0039-twin/report.md"
       ],
       "notes": [
         "Blocks EV-0038 too: the same create_map/MSAV gap leaves the editor list on fixtures. Mode/rules application is separately BLOCKED-BY-INTEGRATION (MindCampaign.start_map_mode absent).",
@@ -1298,11 +1319,15 @@
         "2026-10-08T01:28:25+00:00: claimed by oc-29086 for writer (session loop-1)",
         "2026-10-08T03:17:17+00:00: reaped stale claim (oc-29086, was godot-open); restored godot-open",
         "2026-10-08T04:05:53+00:00: claimed by oc-2598 for writer (session loop-1)",
-        "2026-10-08T04:06:47+00:00: released: orchestrator loop-1: writer claim released without a writer round; fix 846d928 already an ancestor of main; pending step is the Godot evaluation, deferred per operator instruction"
+        "2026-10-08T04:06:47+00:00: released: orchestrator loop-1: writer claim released without a writer round; fix 846d928 already an ancestor of main; pending step is the Godot evaluation, deferred per operator instruction",
+        "2026-10-08T08:35:39+00:00: claimed by orchestrator-loop-1 for writer (session loop-1)",
+        "2026-10-08T09:10:22+00:00: released: Fresh boot pid 101131 at afd380f (fix 846d928 ancestor; libmind_gdext sha e08a7a03, built 17:54): log 'MindPreview ready (18 maps)'; map_count()==18, maps_list() 18 rows with real metadata. Play > Custom Game via injected clicks opened stack ['custom'] (frames 5553); dialog _maps() = 18 rows, all width/height>0 with real assets/maps/default paths, zero 0x0 rows (Ancient Caldera 256x256/Anuke, Archipelago 500x500, Debris Field 400x400). Editor list also 18 live rows (frames 11320). No error-level logs; headless test builtin_registry_loads_legacy_assets ok. Preview pixels remain plan-19 placeholder (out of scope).",
+        "2026-10-08T10:55:56+00:00: claimed by twin-loop-1 for twin (session loop-1)",
+        "2026-10-08T12:29:20+00:00: [verify] twin run: Java pid 94767 (1152x648, Xwayland :2) Custom Game grid shows the 18 live built-ins with real previews (MapPlayDialog on card click); Godot pids 99383+104609 at HEAD 1d8f75b, lib sha 66998e8c: map_count 18, maps_list 18 rows, Custom Game _maps() all_live=true/any_zero_dim=false, Editor _maps() 18 live rows, card click -> stack [custom,map_play]; Godot rows match the built-in MSAV headers exactly (name/width/height/author, mind-headless maps list) and canyon is excluded on both sides; log clean. Ordering/MapPlay-title/preview differences are out of scope, see report."
       ],
       "plan": "19",
       "first_seen": "2026-10-06T21:01:03+00:00",
-      "last_verified": "2026-10-08T04:06:47+00:00",
+      "last_verified": "2026-10-08T12:29:20+00:00",
       "found_by_loop": "4",
       "session": "loop-1"
     },
@@ -1382,7 +1407,7 @@
       "id": "EV-0042",
       "area": "ui/campaign",
       "severity": "S3",
-      "status": "godot-open",
+      "status": "godot-pass",
       "title": "Research root rail rows overlap after switching roots (MindTable not re-sorted)",
       "expected": "Java: clicking a tech-tree root in the left rail keeps the roots as a vertical list; the active root stays clickable and the node table shows that root's nodes",
       "actual": "Godot: ResearchDialog._select_root/_rebuild_roots clears and re-adds the root MindTable but never re-sorts it, so after clicking the second root both root buttons stack at (8,38) (techtree.serpulo 160x34 and techtree.<null> 148x34) and the first root can no longer be clicked; the initial build is fine because show_dialog's _resort_tables sorts it",
@@ -1390,17 +1415,24 @@
       "evidence": [
         "runs/l6-20261007-071337-research/godot/state-01-research.json",
         "runs/l6-20261007-071337-research/godot/step-02-research-rail-overlap.png",
-        "runs/l6-20261007-071337-research/godot/step-01-research-dialog.png"
+        "runs/l6-20261007-071337-research/godot/step-01-research-dialog.png",
+        "runs/l2-20261008-201920-ev0042-research-rail-godot/godot/state-01-postfix-after-switch-emit.json",
+        "runs/l2-20261008-201920-ev0042-research-rail-godot/godot/state-02-postfix-real-click-cycles.json",
+        "runs/l2-20261008-201920-ev0042-research-rail-godot/godot/state-00-prefix.json",
+        "runs/l2-20261008-201920-ev0042-research-rail-godot/godot/step-03-postfix-rail-vertical.png"
       ],
       "notes": [
         "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/campaign-ui e30a2e3: research root rail re-sorted on root switch.",
         "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open",
         "2026-10-08T01:32:11+00:00: claimed by oc-33825 for writer (session loop-2)",
-        "2026-10-08T03:17:30+00:00: reaped stale claim (oc-33825, was godot-open); restored godot-open"
+        "2026-10-08T03:17:30+00:00: reaped stale claim (oc-33825, was godot-open); restored godot-open",
+        "2026-10-08T08:37:28+00:00: claimed by oc-8679 for writer (session loop-2)",
+        "2026-10-08T10:20:56+00:00: [godot-open] commit 417d400: _rebuild_roots/_rebuild_nodes now force sort_now() + deferred sort_now() after a runtime rebuild (the queued sort does not run for these nested MindTables)",
+        "2026-10-08T10:24:08+00:00: released: expected vertical root rail observed at pid 225044 (commit 417d400): after emitting pressed on techtree.<null> the same-frame read shows techtree.serpulo (10,40,176,34) and techtree.<null> (10,78,176,34), <null> button_pressed, 222 node rows at y=40/78; real-input clicks switched serpulo->null and null->serpulo with the rail vertical; godot_log errors [] after a cleared window. Pre-fix pid 223008 (b656e03) reproduced the (8,38) stack persisting 2622 frames."
       ],
       "plan": "14",
       "first_seen": "2026-10-06T21:36:58+00:00",
-      "last_verified": "2026-10-08T01:32:11+00:00",
+      "last_verified": "2026-10-08T10:24:08+00:00",
       "found_by_loop": "6",
       "session": "loop-2"
     },
@@ -1498,24 +1530,28 @@
       "id": "EV-0045",
       "area": "ui/config",
       "severity": "S3",
-      "status": "godot-open",
+      "status": "godot-pass",
       "title": "Sorter config panel opens with no item options",
       "expected": "Java: Sorter is configurable with an Item config (Sorter.java:37 config(Item.class, ...)), so its config fragment shows the item filter list.",
       "actual": "Godot: right-clicking a placed sorter opens OverlayLayer/block_config with the correct block/x/y but _config.options == [] (empty grid; only clear + close), so no filter can be picked.",
       "repro": "scenario input_controls (Godot leg): select sorter, place at tile 18,16, right-click it; block_config.visible==true and block_config._config.options.size()==0",
       "evidence": [
-        "runs/l7-20261007-074043-input_controls/godot/config-evidence.json"
+        "runs/l7-20261007-074043-input_controls/godot/config-evidence.json",
+        "runs/l2-20261008-203338-input_controls-godot/godot/config-evidence.json + runs/l2-20261008-203338-input_controls-godot/report.md + runs/l2-20261008-203338-input_controls-godot/godot/step-02-left-tap-config.png"
       ],
       "notes": [
         "screenshot: runs/l7-20261007-074043-input_controls/godot/step-02-sorter-config-empty-options.png. config_spec builds options only from def.has_items (all items) or def.has_liquids (all liquids); the Sorter def sets neither. Submitting is separately blocked (Configure arm), this is the read-model gap.",
         "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/input-controls cfe850f/106b4bc: config fragment populated at the click position.",
         "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open",
         "2026-10-08T01:32:11+00:00: claimed by oc-33825 for writer (session loop-2)",
-        "2026-10-08T03:17:30+00:00: reaped stale claim (oc-33825, was godot-open); restored godot-open"
+        "2026-10-08T03:17:30+00:00: reaped stale claim (oc-33825, was godot-open); restored godot-open",
+        "2026-10-08T08:37:28+00:00: claimed by oc-8679 for writer (session loop-2)",
+        "2026-10-08T10:30:49+00:00: [godot-open] commit 780efa9: sorter behavior declares ConfigKind::Item; config_spec reads the declared kind so the item options populate",
+        "2026-10-08T10:43:20+00:00: released: sorter config fragment shows the item picker: left tap and block_info(F1) on a placed sorter both open block_config with block=sorter x=18 y=16 and 22 item options (copper..dormant-cyst) at commit 780efa9; game pid 249159, tick 15030 (tap) / 12580 (F1)"
       ],
       "plan": "15",
       "first_seen": "2026-10-06T21:50:19+00:00",
-      "last_verified": "2026-10-08T01:32:11+00:00",
+      "last_verified": "2026-10-08T10:43:20+00:00",
       "found_by_loop": "7",
       "session": "loop-2"
     },
@@ -1736,7 +1772,7 @@
       "id": "EV-0051",
       "area": "game/campaign",
       "severity": "S2",
-      "status": "godot-open",
+      "status": "twin-verified",
       "title": "Planet map is a frozen fixture: owned/captured/locked sector state never updates",
       "expected": "PlanetDialog.java:414-462,1304-1328 derives sector color, action label and stats live from Sector.hasBase()/isCaptured()/preset.unlocked()",
       "actual": "ui_host.rs:465-476 caches CampaignViews::vanilla_fixture() forever; the fixture pre-owns Ground Zero/Salt Flats (ui/campaign.rs:792-810); MindCampaign.get_sector_state has no GDScript caller",
@@ -1747,7 +1783,9 @@
         "client/rust/mind-gdext/src/ui/ui_host.rs:465-476",
         "client/rust/mind-core/src/ui/campaign.rs:792-810",
         "../Mindustry/core/src/mindustry/ui/dialogs/PlanetDialog.java:414-462",
-        "../Mindustry/core/src/mindustry/ui/dialogs/PlanetDialog.java:1304-1328"
+        "../Mindustry/core/src/mindustry/ui/dialogs/PlanetDialog.java:1304-1328",
+        "runs/20261008-191650-ev0051-campaign-live-views-godot/godot/state-01-planet-view-before-capture.json, runs/20261008-191650-ev0051-campaign-live-views-godot/godot/state-02-planet-view-after-capture.json, runs/20261008-191650-ev0051-campaign-live-views-godot/report.md",
+        "runs/20261008-223232-ev0051-campaign-live-views-twin/report.md, runs/20261008-223232-ev0051-campaign-live-views-twin/godot/state-01-planet-view-before-capture.json, runs/20261008-223232-ev0051-campaign-live-views-twin/godot/state-02-planet-view-after-capture.json, runs/20261008-223232-ev0051-campaign-live-views-twin/godot/step-03-gz-owned-attacked.png, runs/20261008-223232-ev0051-campaign-live-views-twin/godot/step-04-planet-after-capture.png, runs/20261008-223232-ev0051-campaign-live-views-twin/java/step-19-gz-panel-after.png, runs/20261008-223232-ev0051-campaign-live-views-twin/java/step-06-sector-click2.png"
       ],
       "notes": [
         "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
@@ -1756,11 +1794,16 @@
         "2026-10-08T01:28:25+00:00: claimed by oc-29086 for writer (session loop-1)",
         "2026-10-08T03:17:17+00:00: reaped stale claim (oc-29086, was godot-open); restored godot-open",
         "2026-10-08T04:05:53+00:00: claimed by oc-2598 for writer (session loop-1)",
-        "2026-10-08T04:06:47+00:00: released: orchestrator loop-1: writer claim released without a writer round; fix b390354 already an ancestor of main and campaign_views prefers the live call; pending step is the Godot evaluation, deferred per operator instruction"
+        "2026-10-08T04:06:47+00:00: released: orchestrator loop-1: writer claim released without a writer round; fix b390354 already an ancestor of main and campaign_views prefers the live call; pending step is the Godot evaluation, deferred per operator instruction",
+        "2026-10-08T08:35:39+00:00: claimed by orchestrator-loop-1 for writer (session loop-1)",
+        "2026-10-08T09:15:39+00:00: [godot-open] commit 1d8f75b: MindCampaign.campaign_views_json projects live CampaignViews (sectors/planets/stats) so the planet dialog's live path exists; mind-core test live_projection_tracks_sector_capture",
+        "2026-10-08T09:21:25+00:00: released: expected behavior observed at pid 123288: the planet dialog's own campaign_views() flipped groundZero captured false->true / attacked+frozen true->false and the panel action @sectors.go->@sectors.resume after MindCampaign.start_sector_with_loadout+capture_sector, with no process restart; MindUi.campaign_views_json delegates to the same live projection; godot_log errors empty",
+        "2026-10-08T10:55:56+00:00: claimed by twin-loop-1 for twin (session loop-1)",
+        "2026-10-08T12:45:20+00:00: [verify] twin parity at 1152x648 both legs (Godot pid 116138, Java 108885): the planet dialog's own campaign_views() reads live not fixture (groundZero attacked=true/frozen=true/captured=false, saltFlats locked=true/captured=false vs fixture captured=true on both); capture_sector flips groundZero captured false->true / attacked+frozen true->false + panel label Go->Resume in the same pid, and MindUi.campaign_views_json agrees; Java PlanetDialog derives the same live presentation (launch Ground Zero -> owned+under attack -> map warning + panel Under attack!/Stats/Go). Save persisted. godot_log: one startup launchid.dat warning, no scenario errors."
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
-      "last_verified": "2026-10-08T04:06:47+00:00",
+      "last_verified": "2026-10-08T12:45:20+00:00",
       "session": "loop-1"
     },
     {
@@ -1816,7 +1859,7 @@
       "id": "EV-0053",
       "area": "ui/hud",
       "severity": "S2",
-      "status": "godot-open",
+      "status": "open",
       "title": "HUD shows no wave, enemies, objectives, or capture/lose toasts",
       "expected": "HudFragment.java:1132-1150 composes wave/enemy/wavetime text, :1088-1107 objectives, :502-510 skip-wave button, :1234-1236 canSkipWave",
       "actual": "hud.rs:39-44 declares wave/enemies but refresh :175-190 never assigns them; hud_text.rs:53-134 composer has no producer; hud_fragment.gd:50-51 reads only status_text",
@@ -1829,7 +1872,9 @@
         "client/rust/mind-core/src/ui/hud_text.rs:53-134",
         "client/ui/fragments/hud_fragment.gd:50-51",
         "../Mindustry/core/src/mindustry/ui/fragments/HudFragment.java:502-510",
-        "../Mindustry/core/src/mindustry/ui/fragments/HudFragment.java:1088-1107"
+        "../Mindustry/core/src/mindustry/ui/fragments/HudFragment.java:1088-1107",
+        ".opencode/evals/runs/20261008-192317-ev0053-hud-wave-enemies/godot/state-02-baseline-hud.json, .opencode/evals/runs/20261008-192317-ev0053-hud-wave-enemies/godot/state-04-wave1-hud.json, .opencode/evals/runs/20261008-192317-ev0053-hud-wave-enemies/godot/state-03-capture-toast.json, .opencode/evals/runs/20261008-192317-ev0053-hud-wave-enemies/report.md",
+        ".opencode/evals/runs/20261008-225009-ev0053-hud-twin/godot/state-01-baseline-hud.json, .opencode/evals/runs/20261008-225009-ev0053-hud-twin/godot/state-02-wave1-hud.json, .opencode/evals/runs/20261008-225009-ev0053-hud-twin/godot/step-02-hud-crop.png, .opencode/evals/runs/20261008-225009-ev0053-hud-twin/java/step-07-hud-crop.png, .opencode/evals/runs/20261008-225009-ev0053-hud-twin/java/step-08-hud-crop.png, .opencode/evals/runs/20261008-225009-ev0053-hud-twin/report.md"
       ],
       "notes": [
         "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
@@ -1838,12 +1883,16 @@
         "2026-10-08T01:28:25+00:00: claimed by oc-29086 for writer (session loop-1)",
         "2026-10-08T03:17:17+00:00: reaped stale claim (oc-29086, was godot-open); restored godot-open",
         "2026-10-08T04:05:53+00:00: claimed by oc-2598 for writer (session loop-1)",
-        "2026-10-08T04:06:47+00:00: released: orchestrator loop-1: writer claim released without a writer round; fix e34adb8 already an ancestor of main and hud.rs has the producers; pending step is the Godot evaluation, deferred per operator instruction"
+        "2026-10-08T04:06:47+00:00: released: orchestrator loop-1: writer claim released without a writer round; fix e34adb8 already an ancestor of main and hud.rs has the producers; pending step is the Godot evaluation, deferred per operator instruction",
+        "2026-10-08T08:35:39+00:00: claimed by orchestrator-loop-1 for writer (session loop-1)",
+        "2026-10-08T09:32:28+00:00: released: Godot leg passed at 1d8f75b (fix e34adb8): fresh serpulo:15 via start_sector_with_loadout, HUD status went Wave 0/10 4:00 -> Wave 1/10 + '1 Enemy Remaining' 1:59 after run_wave (MindHud wave=1/enemies=1, fragment Status label mirrors), skip button visible at 0 enemies and hidden at 1, capture edge emitted 'Sector groundZero Captured!' through MindHud.toast -> MindUi.toast -> OverlayLayer label; pid 147174, tick 1061; errors empty",
+        "2026-10-08T10:55:56+00:00: claimed by twin-loop-1 for twin (session loop-1)",
+        "2026-10-08T12:59:30+00:00: [verify] twin fail: fresh both-leg run at 1d8f75b (fix e34adb8) \u2014 producers are live (real skip click drives run_wave; enemies text and capture toast/status match), but two player-visible texts still differ from Java: (1) wave counter one less at every equivalent state \u2014 Godot groundZero baseline 'Wave 0/10' vs Java survival 'Wave 1', after first skip 'Wave 1/10' vs 'Wave 2'; (2) next-wave line missing Java's wave.waiting composition \u2014 Godot '4:00'/'1:59' (accent at 0 enemies) vs Java '[lightgray]Wave in 3:59'/'Wave in 1:59'. Godot pid 131412, Java JVM 126779, 1152x648 both.",
+        "2026-10-08T12:59:35+00:00: [plan] updated from the failed twin run (.opencode/evals/runs/20261008-225009-ev0053-hud-twin)"
       ],
-      "plan": null,
+      "plan": "Seam: the HUD producers are live but the composed status text still diverges from HudFragment.java:1132-1150 (twin run .opencode/evals/runs/20261008-225009-ev0053-hud-twin). (1) Wave counter: hud.rs feeds the raw 0-based PlaySession.wave (play.rs:154 starts at 0) into HudStatus.wave, so Godot shows 'Wave 0/10' at a fresh launch and 'Wave 1/10' after the first skip, while Java GameState.wave starts at 1 (GameState.java:17) and shows 'Wave 1' / 'Wave 2' at the same states. (2) Next-wave text: hud_text::status_text appends waiting_time() as bare m:ss ('4:00', '1:59', accent while 0 enemies) instead of Java waitingf = bundle.format('wave.waiting', m:ss) ('[lightgray]Wave in 4:00', bundle.properties:459).\n\nFiles: client/rust/mind-gdext/src/ui/hud.rs (refresh_campaign wave read, waiting_wave/winWave comparison), client/rust/mind-core/src/ui/hud_text.rs (timer via the wave.waiting bundle key; wave.cap condition against the Java-equivalent wave), client/rust/mind-core/src/ui/hud_text.rs tests.\n\nSteps: present the HUD-facing wave as session.wave + 1 (Java state.wave) and use the same value wherever the HUD path compares against winWave (waiting_wave/wave.cap) so the branches stay consistent; compose the countdown through bundle.format('wave.waiting', ...) keeping the wave.waveInProgress branch; update the hud_text unit expectations. Do not change the sim spawn index or capture timing (not exercised by this run).\n\nCheck: fresh serpulo:15 loadout launch shows 'Wave 1/10' + 'Wave in 4:00' at tick 0, and after run_wave + step(11) 'Wave 2/10' + '1 Enemy Remaining' + 'Wave in 1:59', fragment Status mirrors; Java reference for the same states: runs/20261008-225009-ev0053-hud-twin/java/step-07-hud-crop.png ('Wave 1', 'Wave in 3:59') and step-08-hud-crop.png ('Wave 2', '1 Enemy Remaining', 'Wave in 1:59').",
       "first_seen": "2026-10-06T23:24:28+00:00",
-      "last_verified": "2026-10-08T04:06:47+00:00",
-      "session": "loop-1"
+      "last_verified": "2026-10-08T12:59:30+00:00"
     },
     {
       "id": "EV-0054",
@@ -1930,7 +1979,7 @@
       "id": "EV-0056",
       "area": "input/placement",
       "severity": "S2",
-      "status": "godot-open",
+      "status": "godot-pass",
       "title": "No block rotation: everything places at rotation 0 and cannot be rotated",
       "expected": "DesktopInput.java:834-846 rotate key/rotatePlans; :898-899 Call.rotateBlock on placed buildings (rotation = mod(rot+dir,4))",
       "actual": "sim_host.rs:168-173 place has no rotation; sim/mod.rs:259-264 always rot:0; determinism/command.rs:230-240 drops Place.rotation; project.godot has no [input]; SimCommand::Rotate :493-510 has no UI caller",
@@ -1941,25 +1990,29 @@
         "client/rust/mind-gdext/src/sim_host.rs:168-173",
         "client/rust/mind-core/src/sim/mod.rs:259-264",
         "client/rust/mind-core/src/determinism/command.rs:230-240",
-        "../Mindustry/core/src/mindustry/input/DesktopInput.java:834-846"
+        "../Mindustry/core/src/mindustry/input/DesktopInput.java:834-846",
+        "/home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-185444-ev0056-rotation-godot/godot/step-08-rotateplaced-cycle.json,/home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-185444-ev0056-rotation-godot/godot/step-04-place-rot2.json,/home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-185444-ev0056-rotation-godot/report.md,/home/clintonnguyen/g/code_examples/Mindustry-Godot/.opencode/evals/runs/l2-20261008-184642-ev0056-rotation-godot/godot/step-03-place-rot2-dump-rot0.json"
       ],
       "notes": [
         "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
         "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/input-controls 652f319: placement rotation.",
         "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open",
         "2026-10-08T01:32:11+00:00: claimed by oc-33825 for writer (session loop-2)",
-        "2026-10-08T03:17:30+00:00: reaped stale claim (oc-33825, was godot-open); restored godot-open"
+        "2026-10-08T03:17:30+00:00: reaped stale claim (oc-33825, was godot-open); restored godot-open",
+        "2026-10-08T08:37:28+00:00: claimed by oc-8679 for writer (session loop-2)",
+        "2026-10-08T08:53:31+00:00: [godot-open] commit 996f288: state dump now reads BuildingComp.rot so the repro's tile-rotation oracle reports placed/rotated buildings",
+        "2026-10-08T08:57:06+00:00: released: pid 71447 (editor 70093, lib post-996f288): R rotates the pending conveyor 1->2 (input state JSON), mouse place at (15,15) yields get_state_json rot=2, and R over the placed building enqueues one SimCommand::Rotate per press with dump rot cycling 2->3->0->1->2"
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
-      "last_verified": "2026-10-08T01:32:11+00:00",
+      "last_verified": "2026-10-08T08:57:06+00:00",
       "session": "loop-2"
     },
     {
       "id": "EV-0057",
       "area": "input",
       "severity": "S2",
-      "status": "godot-open",
+      "status": "godot-pass",
       "title": "Keybinds are cosmetic: rebinding pan/boost keys changes nothing in game",
       "expected": "DesktopInput.java:239-295 reads Binding.boost/moveX/moveY for pan/boost; Binding.java:8-103 defines the binds",
       "actual": "input/mod.rs:102-109,200-212 loads/persists/rebinds BindingState but no gameplay consumer; camera.rs:91-108 hardcodes A/D/W/S+arrows+Shift; project.godot has no [input] section",
@@ -1971,25 +2024,28 @@
         "client/rust/mind-gdext/src/camera.rs:91-108",
         "client/project.godot",
         "../Mindustry/core/src/mindustry/input/DesktopInput.java:239-295",
-        "../Mindustry/core/src/mindustry/input/Binding.java:8-103"
+        "../Mindustry/core/src/mindustry/input/Binding.java:8-103",
+        "runs/l2-20261008-190017-ev0057-keybind-rebind-godot/run.json; runs/l2-20261008-190017-ev0057-keybind-rebind-godot/report.md; runs/l2-20261008-190017-ev0057-keybind-rebind-godot/godot/keybinds.json; runs/l2-20261008-190017-ev0057-keybind-rebind-godot/godot/game.log; runs/l2-20261008-190017-ev0057-keybind-rebind-godot/godot/step-01-controls-movex-U.png"
       ],
       "notes": [
         "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
         "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/input-controls 652f319: binding state consumed by camera/hotkeys.",
         "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open",
         "2026-10-08T01:32:11+00:00: claimed by oc-33825 for writer (session loop-2)",
-        "2026-10-08T03:17:30+00:00: reaped stale claim (oc-33825, was godot-open); restored godot-open"
+        "2026-10-08T03:17:30+00:00: reaped stale claim (oc-33825, was godot-open); restored godot-open",
+        "2026-10-08T08:37:28+00:00: claimed by oc-8679 for writer (session loop-2)",
+        "2026-10-08T09:07:58+00:00: released: Rebind Pan Left (move_x) + Boost in Settings>Controls via the real dialog capture path, then held-key camera probes at HEAD 996f288 (fix 652f319): pid 83855 - U -> pan_axis [1,0], 1.864 px/frame (normal expected 1.862), camera moved 1638.5px over 879 frames; old A -> [0,0]/0px over 777 frames; old D -> [0,0]; U+K -> boost_pressed true, 6.214 px/frame = 3.335x normal (expected 15/4.5=3.333); old Shift -> boost_pressed false, normal speed. Restart pid 96741 loads 2 rebinds from user://keybinds.json (move_x=|u, boost=k; boot log 'MindInput ready (88 keybinds, 2 rebinds)') and consumes them (U -> [1,0], A -> [0,0], K -> boost true). Known worktree asset-manifest boot errors only (same as prior runs); no new error entries."
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
-      "last_verified": "2026-10-08T01:32:11+00:00",
+      "last_verified": "2026-10-08T09:07:58+00:00",
       "session": "loop-2"
     },
     {
       "id": "EV-0058",
       "area": "content/blocks",
       "severity": "S2",
-      "status": "godot-open",
+      "status": "godot-pass",
       "title": "16 of 27 factory recipes missing: graphite/silicon/plastanium crafters emit nothing",
       "expected": "Blocks.java:1041 graphite-press, :1086 silicon-crucible, :1120 plastanium-compressor, :1138 phase-weaver, :1170 cryofluid-mixer, :1191 pyratite-mixer, :1206 blast-mixer and the Erekir heat crafters define outputs",
       "actual": "block_kind_data.rs:640-782 apply_vanilla_knobs is the only recipe source and covers 11 of 27 crafters; production.rs:237-251 consumes inputs and resets progress with empty output_items",
@@ -2001,25 +2057,29 @@
         "client/rust/mind-core/src/world/behavior/production.rs:237-251",
         "../Mindustry/core/src/mindustry/content/Blocks.java:1041",
         "../Mindustry/core/src/mindustry/content/Blocks.java:1086",
-        "../Mindustry/core/src/mindustry/content/Blocks.java:1655"
+        "../Mindustry/core/src/mindustry/content/Blocks.java:1655",
+        "runs/l2-20261008-192815-ev0058-factory-recipes-godot/godot/step-02-production.json, runs/l2-20261008-192815-ev0058-factory-recipes-godot/godot/step-01-load-place.json, runs/l2-20261008-192815-ev0058-factory-recipes-godot/godot/step-03-log.json, runs/l2-20261008-192815-ev0058-factory-recipes-godot/run.json, runs/l2-20261008-192815-ev0058-factory-recipes-godot/report.md"
       ],
       "notes": [
         "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
         "2026-10-07T05:15:40+00:00: [needs-evaluation] Landed agent/content-behaviors 9c51747: 16 missing factory recipes and pump/drill knobs.",
         "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open",
         "2026-10-08T01:32:11+00:00: claimed by oc-33825 for writer (session loop-2)",
-        "2026-10-08T03:17:30+00:00: reaped stale claim (oc-33825, was godot-open); restored godot-open"
+        "2026-10-08T03:17:30+00:00: reaped stale claim (oc-33825, was godot-open); restored godot-open",
+        "2026-10-08T08:37:28+00:00: claimed by oc-8679 for writer (session loop-2)",
+        "2026-10-08T09:27:33+00:00: [godot-open] commit fac6ae5: crafters accept delivered inputs (BuildingComp.acceptItem/handleItem, GenericCrafter getMaximumAccepted) so the drill->press->core repro can feed coal; headless transfer repro + factory recipe table tests added; recipes were already at HEAD from 9c51747",
+        "2026-10-08T09:32:09+00:00: released: Fresh pid-stamped serpulo:86 (frozenForest) run at fac6ae5: broke the map core, placed mechanical-drill (106,55) on ore-coal -> graphite-press (108,55) -> core-shard (111,55); core_items_json {} at tick 0, {graphite:1} at tick 600, {graphite:3} at tick 1200 (checksum 88421ba91eb63a6d), godot_log errors empty; pid 148326, library sha256 33cc05cf9e8b74277e947e7aafa48ef734c70a964b0206e546ee7afc03c70da5. Viewport was frozen (frames_drawn pinned) so the verdict rests on the structured JSON; screenshots recorded as frozen artifacts."
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
-      "last_verified": "2026-10-08T01:32:11+00:00",
+      "last_verified": "2026-10-08T09:32:09+00:00",
       "session": "loop-2"
     },
     {
       "id": "EV-0059",
       "area": "net/multiplayer",
       "severity": "S1",
-      "status": "godot-open",
+      "status": "twin-verified",
       "title": "Hosting is impossible: no Host entry anywhere and host_requested has no listener",
       "expected": "PausedDialog.java:98-105,152 @hostserver -> ui.host.show(); HostDialog.java:51-73 port field + runHost()",
       "actual": "host_dialog.gd:11,56-60 emits host_requested with no listener; no Host entry in menu_fragment.gd:33-49 or the HUD; MindNet.create_match :224-243 has no GDScript caller",
@@ -2032,7 +2092,13 @@
         "client/ui/fragments/menu_fragment.gd:33-49",
         "client/rust/mind-gdext/src/net/mod.rs:224-243",
         "../Mindustry/core/src/mindustry/ui/dialogs/PausedDialog.java:98-105",
-        "../Mindustry/core/src/mindustry/ui/dialogs/HostDialog.java:51-73"
+        "../Mindustry/core/src/mindustry/ui/dialogs/HostDialog.java:51-73",
+        "runs/20261008-083744-ev0059-host-godot/godot/state-03-host-dialog.json",
+        "runs/20261008-083744-ev0059-host-godot/godot/state-04-hosted-in-lobby.json",
+        "runs/20261008-083744-ev0059-host-godot/godot/state-05-client-observes-created-match.json",
+        "runs/20261008-083744-ev0059-host-godot/godot/server-relay-match.txt",
+        "runs/20261008-083744-ev0059-host-godot/report.md",
+        "runs/20261008-105728-ev0059-host-twin/report.md; runs/20261008-105728-ev0059-host-twin/godot/state-steps.json; runs/20261008-105728-ev0059-host-twin/godot/step-04-in-lobby.png; runs/20261008-105728-ev0059-host-twin/godot/server-relay-match.txt; runs/20261008-105728-ev0059-host-twin/java/step-08b-host-dialog3.png; runs/20261008-105728-ev0059-host-twin/java/step-28-hosted.png; runs/20261008-105728-ev0059-host-twin/java/listener-6567.txt"
       ],
       "notes": [
         "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
@@ -2043,18 +2109,23 @@
         "2026-10-08T01:28:25+00:00: claimed by oc-29086 for writer (session loop-1)",
         "2026-10-08T03:17:17+00:00: reaped stale claim (oc-29086, was godot-open); restored godot-open",
         "2026-10-08T04:05:53+00:00: claimed by oc-2598 for writer (session loop-1)",
-        "2026-10-08T04:06:47+00:00: released: orchestrator loop-1: writer claim released without a writer round; fix 8d8dde8 already an ancestor of main and ui_root wires host_requested -> MindNet.create_match; pending step is the Godot evaluation, deferred per operator instruction"
+        "2026-10-08T04:06:47+00:00: released: orchestrator loop-1: writer claim released without a writer round; fix 8d8dde8 already an ancestor of main and ui_root wires host_requested -> MindNet.create_match; pending step is the Godot evaluation, deferred per operator instruction",
+        "2026-10-08T08:35:39+00:00: claimed by orchestrator-loop-1 for writer (session loop-1)",
+        "2026-10-08T08:41:16+00:00: [godot-open] commit afd380f: host dialog port field is prefilled with 6567 (text, not placeholder) so _port_valid() passes and runHost emits host_requested; pre-fix in-engine repro showed the Host click never emitted",
+        "2026-10-08T08:44:19+00:00: released: afd380f in-engine pass at pid 19772 (frames 7297): pause @hostserver click opened the host dialog with port text 6567 / _port_valid true, the dialog Host click emitted host_requested (count 1) and closed the dialog, and MindNet session went offline->browsing->in_lobby; server relay_match row match_id 1 (map spine, survival, public, 1/8, created_by=host=client identity) and the client saw it via get_public_matches_json; godot_log errors empty. Pre-fix (6445964, pid 15176) the same click emitted nothing because the port field was placeholder-only.",
+        "2026-10-08T10:55:56+00:00: claimed by twin-loop-1 for twin (session loop-1)",
+        "2026-10-08T11:24:01+00:00: [verify] twin run at 1d8f75b (fix afd380f ancestor): Godot pid 33491 fresh editor - pause hostserver enabled -> dialog stack [paused,host] port_text 6567 port_valid true signal_connected true -> real Host click emit_count 1, dialog closed, MindNet in_lobby, relay_match match_id 4097 (spine/survival/public/1-of-8, created_by==host==client identity) seen via get_public_matches_json, host entry disabled while active, godot_log errors []. Java pid 25568/25570 reference - custom game pause Host Multiplayer Game -> HostDialog Port 6567 text -> @noname guard with empty name -> runHost binds tcp+udp 6567, dialog closes, pause entries disabled while net.active. Window 1152x648 both."
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
-      "last_verified": "2026-10-08T04:06:47+00:00",
+      "last_verified": "2026-10-08T11:24:01+00:00",
       "session": "loop-1"
     },
     {
       "id": "EV-0060",
       "area": "net/multiplayer",
       "severity": "S1",
-      "status": "godot-open",
+      "status": "twin-verified",
       "title": "Join Game never connects: Connect emits a signal nobody listens to",
       "expected": "JoinDialog.java:403-412 local discovery, :626-645 connect -> net.connect(ip,port), :675-682 safeConnect version gate",
       "actual": "join_dialog.gd:12,240-245 emits connect_requested with no listener; global/remote sections are static :99-115; MindNet.join_match takes a numeric match id and has no GDScript caller (net/mod.rs:54-56,174,261)",
@@ -2067,7 +2138,9 @@
         "client/ui/dialogs/join_dialog.gd:240-245",
         "client/rust/mind-gdext/src/net/mod.rs:54-56",
         "../Mindustry/core/src/mindustry/ui/dialogs/JoinDialog.java:403-412",
-        "../Mindustry/core/src/mindustry/ui/dialogs/JoinDialog.java:626-651"
+        "../Mindustry/core/src/mindustry/ui/dialogs/JoinDialog.java:626-651",
+        "runs/20261008-184534-ev0060-join-godot/godot/state-05-after-connect.json,runs/20261008-184534-ev0060-join-godot/godot/game.log",
+        "runs/20261008-112749-ev0060-join-twin/godot/state-connect-56882.json,runs/20261008-112749-ev0060-join-twin/godot/step-07-public-list.png,runs/20261008-112749-ev0060-join-twin/godot/game.log,runs/20261008-112749-ev0060-join-twin/java/game.log,runs/20261008-112749-ev0060-join-twin/java/dedicated-server.log,runs/20261008-112749-ev0060-join-twin/java/step-05-join-dialog-clean.png,runs/20261008-112749-ev0060-join-twin/java/step-16-in-game.png"
       ],
       "notes": [
         "Seeded from the 2026-10-06 code-audit inventory (plans/gap1..8.md, .opencode/evals/20261006-player-facing-gap-inventory.md); candidate only, evaluator in-engine repro pending.",
@@ -2078,18 +2151,22 @@
         "2026-10-08T01:28:25+00:00: claimed by oc-29086 for writer (session loop-1)",
         "2026-10-08T03:17:17+00:00: reaped stale claim (oc-29086, was godot-open); restored godot-open",
         "2026-10-08T04:05:53+00:00: claimed by oc-2598 for writer (session loop-1)",
-        "2026-10-08T04:06:47+00:00: released: orchestrator loop-1: writer claim released without a writer round; fix f5ef052 already an ancestor of main and ui_root wires connect_requested -> MindNet.connect_to; pending step is the Godot evaluation, deferred per operator instruction"
+        "2026-10-08T04:06:47+00:00: released: orchestrator loop-1: writer claim released without a writer round; fix f5ef052 already an ancestor of main and ui_root wires connect_requested -> MindNet.connect_to; pending step is the Godot evaluation, deferred per operator instruction",
+        "2026-10-08T08:35:39+00:00: claimed by orchestrator-loop-1 for writer (session loop-1)",
+        "2026-10-08T08:52:18+00:00: released: Join Game connect path verified in-engine: fresh game.tscn pid 50570 at afd380f; real clicks Play>Join Game, Add Server, OK with 127.0.0.1; net_state offline->browsing, log 'Client handshake done' + 'MindNet.connect_to: browsing http://127.0.0.1:3000/mindustry' + lobby subscriptions, get_public_matches_json returned live match 1 (spine/Lobby), error log empty",
+        "2026-10-08T10:55:56+00:00: claimed by twin-loop-1 for twin (session loop-1)",
+        "2026-10-08T11:45:57+00:00: [verify] Twin parity at 1d8f75b (fix f5ef052 ancestor): fresh Godot pids 51583/54225/56882 real input Play>Join Game>Add Server>127.0.0.1>OK -> net offline->browsing, 'Client handshake done' + 'MindNet.connect_to: browsing http://127.0.0.1:3000/mindustry' + lobby subscriptions, public_matches rows 1+4097, reopened dialog renders 2 'spine survival 1/8' rows, errors []. Java pid 42858 reference: Join Game Local Servers discovery row (dedicated server 6567, Triad/Survival) -> row click -> 'Received world data: 29.4 kB' + server 'tester has connected.' + ESTABLISHED 6567; community row hit the custom-build version gate. Java bottom dialog row input-dead at 1152x648 (tooling), connect driven via discovery row."
       ],
       "plan": null,
       "first_seen": "2026-10-06T23:24:28+00:00",
-      "last_verified": "2026-10-08T04:06:47+00:00",
+      "last_verified": "2026-10-08T11:45:57+00:00",
       "session": "loop-1"
     },
     {
       "id": "EV-0061",
       "area": "ui/dialogs",
       "severity": "S1",
-      "status": "godot-open",
+      "status": "twin-verified",
       "title": "Campaign loss panics the client in the game-over dialog path (MindUi::hud_set_visible Gd bind_mut 'already bound')",
       "expected": "Java: a sector loss fires GameOverEvent and opens GameOverDialog (ui/dialogs/GameOverDialog.java); the client keeps running",
       "actual": "Godot: once checkGameState sets gameOver on a campaign sector, hud_fragment._open_game_over opens the dialog; the dialog shown() -> _hud_set(false) -> MindUiRoot 'hud_set_visible' call reaches MindUi::hud_set_visible and panics 'Gd<T>::bind_mut() failed, already bound; T = mind_gdext::ui::ui_host::MindUi' (godot-core storage/mod.rs:38). A crash report is written and the frame loop stalls (Engine.get_process_frames stops advancing).",
@@ -2100,7 +2177,12 @@
         "runs/20261007-185524-ev0046-verify/godot/crash-report-hud-set-visible-2.txt",
         "runs/20261007-185524-ev0046-verify/godot/crash-report-hud-set-visible-1.txt",
         "runs/20261007-185524-ev0046-verify/godot/state-poststep600.json",
-        "runs/20261007-185524-ev0046-verify/godot/editor.log"
+        "runs/20261007-185524-ev0046-verify/godot/editor.log",
+        "runs/20261008-185511-ev0061-game-over-godot/godot/state-03-gameover.json",
+        "runs/20261008-185511-ev0061-game-over-godot/godot/state-05-final.json",
+        "runs/20261008-185511-ev0061-game-over-godot/godot/state-06-dialog-node.json",
+        "runs/20261008-185511-ev0061-game-over-godot/report.md",
+        "runs/20261008-215055-ev0061-game-over-twin/report.md,runs/20261008-215055-ev0061-game-over-twin/java/step-09-game-over.png,runs/20261008-215055-ev0061-game-over-twin/java/step-10-continue-planet.png,runs/20261008-215055-ev0061-game-over-twin/godot/state-03-gameover.json,runs/20261008-215055-ev0061-game-over-twin/godot/state-04-live.json,runs/20261008-215055-ev0061-game-over-twin/godot/state-05-dialog-node.json,runs/20261008-215055-ev0061-game-over-twin/godot/state-06-second-instance.json,runs/20261008-215055-ev0061-game-over-twin/godot/log-errors.json"
       ],
       "notes": [
         "2026-10-07T11:08:28+00:00: claimed by fix-ui-oc-4734 for fix",
@@ -2110,11 +2192,16 @@
         "2026-10-08T01:28:25+00:00: claimed by oc-29086 for writer (session loop-1)",
         "2026-10-08T03:17:17+00:00: reaped stale claim (oc-29086, was godot-open); restored godot-open",
         "2026-10-08T03:41:23+00:00: claimed by oc-28943 for godot-eval (session loop-1)",
-        "2026-10-08T04:41:46+00:00: reaped stale claim (oc-28943, was godot-unverified); restored godot-open"
+        "2026-10-08T04:41:46+00:00: reaped stale claim (oc-28943, was godot-unverified); restored godot-open",
+        "2026-10-08T08:35:39+00:00: claimed by orchestrator-loop-1 for writer (session loop-1)",
+        "2026-10-08T08:58:01+00:00: [godot-open] commit 4b02254 (ancestor of HEAD): game_over_dialog defers hud_set_visible out of shown()/hidden(); verified in-engine this round \u2014 Godot leg complete, releasing godot-pass",
+        "2026-10-08T08:58:01+00:00: released: expected behavior observed in the running client: fresh pid 74313, load_sector('serpulo',170)+start_sector('serpulo',170); live GameStateCheck set gameOver=true/hasCore=false at tick 299 and the HUD watcher opened the game-over dialog ('restart', is_dialog_shown=true, node visible 1152x648) with hud_visible=false and no bind_mut panic; process frames 2118->2655->6213 and tick 299->521->1995 kept advancing, godot_log errors empty, no new crash report",
+        "2026-10-08T10:55:56+00:00: claimed by twin-loop-1 for twin (session loop-1)",
+        "2026-10-08T12:08:32+00:00: [verify] twin parity at 1d8f75b (fix 4b02254 ancestor; Java 2cd7aeecf1): Java pid 72553 campaign Ground Zero (Java's sector 170) loss via pause > Abandon > confirm -> GameOverEvent -> GameOverDialog 'Sector Ground Zero lost!' with stats + Continue; Continue opened the planet map; no exception. Godot pid 78253 load_sector+start_sector('serpulo',170): game_over=true/hasCore=false at tick 421, HUD watcher opened restart (stack [restart], hud_visible=false, node visible 1152x648, action button 'Continue' connected); frames 1854->4230 and tick 421->1406 kept advancing, godot_log errors (incl warnings) empty, no new crash report; second fresh pass pid 80270 same result (tick 805->1040, frames 5065->5632). Run runs/20261008-215055-ev0061-game-over-twin."
       ],
       "plan": null,
       "first_seen": "2026-10-07T09:14:08+00:00",
-      "last_verified": "2026-10-08T03:41:23+00:00",
+      "last_verified": "2026-10-08T12:08:32+00:00",
       "found_by_loop": "1",
       "session": "loop-1"
     },
@@ -2168,7 +2255,7 @@
       "id": "EV-0063",
       "area": "ui/dialogs",
       "severity": "S2",
-      "status": "godot-open",
+      "status": "godot-pass",
       "title": "Paused dialog is missing the desktop campaign buttons (Abandon, Host, Map Objective) and shows the mobile Planet Map",
       "expected": "PausedDialog.java desktop campaign branch: @objective (when the sector preset has a description), @abandon, @back, @settings, @hostserver, @quit; Planet Map/Research belong to the mobile campaign branch",
       "actual": "Godot paused dialog in a launched serpulo:170 sector renders Back/Settings/Planet Map/Quit only; no Abandon, no Host, no Map Objective",
@@ -2178,7 +2265,8 @@
       "evidence": [
         ".opencode/evals/runs/20261007-102842-ev0050-verify/godot/state-paused-dialog-buttons.json",
         ".opencode/evals/runs/20261007-102842-ev0050-verify/java/step-08-pause-dialog.png",
-        "../Mindustry/core/src/mindustry/ui/dialogs/PausedDialog.java:73-109 desktop branch"
+        "../Mindustry/core/src/mindustry/ui/dialogs/PausedDialog.java:73-109 desktop branch",
+        "runs/l2-20261008-193444-ev0063-paused-dialog-godot/run.json runs/l2-20261008-193444-ev0063-paused-dialog-godot/report.md runs/l2-20261008-193444-ev0063-paused-dialog-godot/godot/state-01-groundzero-buttons.json runs/l2-20261008-193444-ev0063-paused-dialog-godot/godot/state-02-objective-fulltext.json runs/l2-20261008-193444-ev0063-paused-dialog-godot/godot/state-03-serpulo170-buttons.json runs/l2-20261008-193444-ev0063-paused-dialog-godot/godot/step-01-paused-groundzero.png runs/l2-20261008-193444-ev0063-paused-dialog-godot/godot/step-02-objective-fulltext.png runs/l2-20261008-193444-ev0063-paused-dialog-godot/godot/step-03-paused-serpulo170.png runs/l2-20261008-193444-ev0063-paused-dialog-godot/godot/game.log runs/l2-20261008-193444-ev0063-paused-dialog-godot/godot/ui_widgets_check.log runs/l2-20261008-193444-ev0063-paused-dialog-godot/godot/mind_gdext_tests.log"
       ],
       "notes": [
         "Residual divergence found while verifying EV-0050 (verified-fixed for the 'no pause menu at all' symptom). The missing Host entry also relates to EV-0059.",
@@ -2187,11 +2275,16 @@
         "2026-10-07T14:05:56+00:00: migrated status needs-evaluation -> godot-open",
         "2026-10-07T14:05:56+00:00: migrated: cleared legacy claim (fix-ui-oc-4734)",
         "2026-10-08T01:32:11+00:00: claimed by oc-33825 for writer (session loop-2)",
-        "2026-10-08T03:17:30+00:00: reaped stale claim (oc-33825, was godot-open); restored godot-open"
+        "2026-10-08T03:17:30+00:00: reaped stale claim (oc-33825, was godot-open); restored godot-open",
+        "2026-10-08T08:37:28+00:00: claimed by oc-8679 for writer (session loop-2)",
+        "2026-10-08T09:37:26+00:00: [godot-open] commit b568977: deferred the paused-dialog mobile @planetmap gate out of the MindUi.open_dialog mutable bind (reentrant MindUi.is_mobile() panicked 'bind() failed, already bound' and wedged the UI on open); ui_widgets_check now opens the dialog through MindUi and fails on the reentry",
+        "2026-10-08T09:42:47+00:00: [godot-open] commit 0185994: get_sector_state resolves the sector preset description from the live Core.bundle (sector.<preset>.description) when the empty-MemoryBundle registry leaves UnlockableContent.description unset, so the @objective gate can fire (two mind-gdext unit tests added)",
+        "2026-10-08T09:44:54+00:00: [godot-open] commit 7991049: the paused dialog now stacks the desktop entries in upstream rows (objective+abandon / back+settings / hostserver / quit; planetmap mobile-only own row) instead of one flat HBox that pushed Objective and Quit off-screen (panel min 1511 > 1152 window); ui_widgets_check asserts the panel min width and is fully green (failed=0)",
+        "2026-10-08T09:48:38+00:00: released: fresh pid 171106 (loop-2, HEAD 7991049): one real Escape opened DialogLayer/paused with stack ['paused'] and no panic; groundZero (serpulo:15, presetDescription 127 chars) rendered @objective(Map Objective)/@abandon/@back/@settings/@hostserver(Host Multiplayer Game)/@quit in upstream rows with @planetmap hidden, and a real click on Map Objective opened full_text with the groundZero description; literal serpulo:170 repro showed Abandon/Back/Settings/Host Multiplayer Game/Quit, no Map Objective (no preset) and no Planet Map; panel 560x400 inside 1152x648; headless ui_widgets_check failed=0; 2 mind-gdext unit tests pass; no error-log entries in the decisive segment"
       ],
       "plan": null,
       "first_seen": "2026-10-07T10:43:53+00:00",
-      "last_verified": "2026-10-08T01:32:11+00:00",
+      "last_verified": "2026-10-08T09:48:38+00:00",
       "found_by_loop": "1",
       "session": "loop-2"
     }
