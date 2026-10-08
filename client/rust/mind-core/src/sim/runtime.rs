@@ -416,6 +416,17 @@ impl SimRuntime {
         for entity in &spawned {
             let _ = update_proximity(ecs, grid, &self.content, *entity);
         }
+        // `Drill.countOre` is grid-derived state the tile reader cannot carry:
+        // without it a materialized drill has no `dominantItem` and never mines
+        // (`SimRuntime::place` does the same after `Tile.setBlock`).
+        for entity in &spawned {
+            crate::world::behavior::production::refresh_drill_ore(
+                ecs,
+                grid,
+                &self.content,
+                *entity,
+            );
+        }
         for entity in &spawned {
             self.merge_power_graph(ecs, grid, *entity);
         }
@@ -707,6 +718,40 @@ mod tests {
         let sync = sync_session_with_sim(&mut session, &mut sim.ecs.0, &content, 0, false);
         assert_eq!(sync.player_cores, 1);
         assert_eq!(session.player_core_count(), 1);
+    }
+
+    /// A materialized drill must get its grid-derived `dominantItem` back, or a
+    /// loaded save's drill stays inert (`Drill.countOre`; EV-0065).
+    #[test]
+    fn materialize_refreshes_drill_ore() {
+        use crate::entities::comp::building::DrillState;
+        use crate::world::TilePos;
+
+        let content = registry();
+        let drill = content.block_id("mechanical-drill").expect("drill");
+        let ore = content.block_id("ore-copper").expect("ore-copper");
+        let copper = content.item_id("copper").expect("copper");
+        let mut sim = Sim::new(1, 16, 16, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("runtime");
+        let pos = TilePos::new(5, 5);
+        // The reader writes the block and tile data without the ECS entity.
+        sim.grid.set_block(pos, drill, 1, 0).expect("tile block");
+        let index = sim.grid.index(pos).expect("index");
+        sim.grid.tiles.geti_mut(index).overlay = ore;
+        let extracted = sim.materialize_map_buildings(&[(
+            index,
+            DecodedBase {
+                team: 1,
+                rotation: 0,
+                health: 80.0,
+                ..DecodedBase::default()
+            },
+        )]);
+        assert_eq!(extracted, 1);
+        let entity = sim.grid.entity_at(pos).expect("entity linked");
+        let state = sim.ecs.0.get::<DrillState>(entity).expect("DrillState");
+        assert_eq!(state.dominant_item, Some(copper));
+        assert_eq!(state.dominant_items, 1, "one ore tile under the 2x2 drill");
     }
 
     /// The evaluator's EV-0047 repro at the core level: load the vendored
