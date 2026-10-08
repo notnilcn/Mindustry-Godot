@@ -616,6 +616,33 @@ impl Sim {
         spawned
     }
 
+    /// Drops every sim entity and resets live-runtime bookkeeping ahead of a
+    /// save-load grid swap (`Groups.clear`; the caller assigns the new grid).
+    ///
+    /// Unlike [`Sim::reset`] the phase/tick header, schedule and the runtime
+    /// resources (`BlockTable`, `BuildRules`, `ModuleDims`, `PowerGrids`) stay
+    /// installed, so the loaded world can materialize its buildings immediately.
+    /// Units/bullets are despawned here; the caller re-snapshots the unit
+    /// runtime onto the new grid (`UnitRuntime::reset`/`refresh_grid`).
+    pub fn clear_world_for_load(&mut self) {
+        let entities: Vec<Entity> = self
+            .ecs
+            .0
+            .iter_entities()
+            .filter(|entity| entity.contains::<crate::ecs::EntitySeq>())
+            .map(|entity| entity.id())
+            .collect();
+        for entity in entities {
+            self.ecs.0.despawn(entity);
+        }
+        if let Some(runtime) = self.block_runtime.as_mut() {
+            runtime.reset();
+            self.ecs
+                .0
+                .insert_resource(crate::world::blocks::power::PowerGrids::new());
+        }
+    }
+
     /// Rebuilds every power graph from proximity (`World.endMapLoad` path).
     pub fn rebuild_power_graphs(&mut self) {
         let Some(mut graphs) = self.ecs.0.remove_resource::<PowerGrids>() else {

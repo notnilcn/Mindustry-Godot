@@ -5,30 +5,317 @@
 //!
 //! The plan-04 `MindIo` gdext autoload delegates to [`SimIoHandler`]: requests
 //! queued through [`crate::sim::Sim::request_save`]/`request_load` are fulfilled
-//! at the `IoSet::Capture`/`IoSet::Apply` boundary against the live grid. The
-//! tile `map` region is written through plan-06's [`EcsMapSource`] and read back
-//! through the plan-06 [`Context`].
+//! at the `IoSet::Capture`/`IoSet::Apply` boundary against the live world. All
+//! seven regions are written (`SaveVersion.java:80-88`): real meta tags
+//! (`:114-151`), the tile `map` through plan-06's [`EcsMapSource`], the live
+//! units + team build plans (`:457-465`) and the session's map markers.
 //!
-//! Entity/building payloads larger than the tile map remain a plan-07 seam: the
-//! load side decodes buildings into `Context::pending_buildings` (consumed by an
-//! ECS owner later); the handler restores the tile grid and leaves ECS rebuild to
-//! the caller, exactly as the headless `io roundtrip` path documents.
+//! The load side applies the decoded buildings to the live runtime (materialize
+//! queue), respawns the saved units and restores rules/wave/stats/markers/plans
+//! onto the installed [`CampaignRuntime`] session — the `SaveSlot.load` half
+//! (`Saves.java:314-328`).
 
 use std::path::Path;
 
+use bevy_ecs::entity::Entity;
+use bevy_ecs::prelude::Resource;
+
 use crate::content::{
-    ContentError, ContentRegistry, MemoryBundle, MemoryUnlockStore, create_base_content,
+    BlockKind, ContentError, ContentRegistry, MemoryBundle, MemoryUnlockStore, create_base_content,
 };
-use crate::ecs::BuildingComp;
-use crate::entities::comp::Building;
-use crate::io::IoResult;
+use crate::ecs::{BuildingComp, EntitySeq};
+use crate::entities::comp::unit::comp::{UnitCore, UnitTypeComp};
+use crate::entities::comp::{Building, Health, Pos, TeamComp};
+use crate::game::map_markers::MapMarkers;
+use crate::game::runtime::CampaignRuntime;
+use crate::game::teams::{BlockPlan, Teams};
 use crate::io::fs::{FileSystem, NativeFs};
-use crate::io::save::state::MapSource;
+use crate::io::save::chunk::SaveScratch;
+use crate::io::save::state::{EntitySink, EntitySource, MapSource, MarkersIo, TeamPlan};
 use crate::io::save::versions::v1::base_meta_tags;
 use crate::io::save::{SaveIo, SaveOptions, SaveReadState, WriteContext};
-use crate::io::wire::WireWriter;
+use crate::io::wire::{WireReader, WireWriter};
+use crate::io::{IoError, IoResult, StringMap};
+use crate::sim::unit_runtime::UnitRuntime;
 use crate::sim::{IoHandler, IoRequest, IoResponse, IoStatus, Sim};
+use crate::world::config::{ConfigValue, config_to_type_value, type_value_to_config};
 use crate::world::{Context, EcsMapSource, WorldGrid};
+
+/// Reserved class id for the native live-sim unit chunk.
+///
+/// Upstream keys `writeWorldEntities` chunks by the unit type's generated class
+/// id (`classids.properties`); native v1 stores the content name inside the
+/// chunk instead, so one append-only id covers every unit type. Kept clear of
+/// the upstream table (max id 49 at this revision).
+pub const SIM_UNIT_CLASS_ID: u8 = 0xF0;
+
+/// Revision of the [`SIM_UNIT_CLASS_ID`] chunk payload (append-only).
+pub const SIM_UNIT_REVISION: u16 = 1;
+
+/// Host-supplied playtime for the `meta` region (`Saves.getTotalPlaytime`).
+///
+/// Playtime is host bookkeeping (`game::saves::Saves`), not sim state, so the
+/// host stashes it here before the `IoSet::Capture` boundary.
+#[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SavePlaytime {
+    /// Accumulated playtime in milliseconds.
+    pub millis: i64,
+}
+
+impl Sim {
+    /// Stores host playtime for the next save (`Saves.getTotalPlaytime`).
+    pub fn set_save_playtime(&mut self, millis: i64) {
+        if let Some(mut source) = self.ecs.0.get_resource_mut::<SavePlaytime>() {
+            source.millis = millis;
+        } else {
+            self.ecs.0.insert_resource(SavePlaytime { millis });
+        }
+    }
+
+    /// Stored playtime in milliseconds (`0` when the host never set it).
+    pub fn save_playtime_ms(&self) -> i64 {
+        self.ecs
+            .0
+            .get_resource::<SavePlaytime>()
+            .map_or(0, |source| source.millis)
+    }
+}
+
+/// One decoded live-unit record (`SaveVersion.writeWorldEntities`).
+#[derive(Debug, Clone, PartialEq)]
+struct DecodedUnit {
+    /// Content unit name (`UnitType.name`).
+    name: String,
+    /// Team id.
+    team: u8,
+    /// World-pixel x.
+    x: f32,
+    /// World-pixel y.
+    y: f32,
+    /// Facing angle in degrees.
+    rotation: f32,
+    /// Current health.
+    health: f32,
+}
+
+/// Read-side entity sink collecting the native live-unit chunks.
+#[derive(Default)]
+struct LiveEntitySink {
+    units: Vec<DecodedUnit>,
+}
+
+impl EntitySink for LiveEntitySink {
+    fn supports_class(&self, class_id: u8, _custom_name: Option<&str>) -> bool {
+        class_id == SIM_UNIT_CLASS_ID
+    }
+
+    fn read_entity(
+        &mut self,
+        class_id: u8,
+        _custom_name: Option<&str>,
+        _id: i32,
+        r: &mut WireReader,
+    ) -> IoResult<()> {
+        if class_id != SIM_UNIT_CLASS_ID {
+            return Err(IoError::corrupt(format!(
+                "unknown live entity class id {class_id}"
+            )));
+        }
+        let revision = r.us()?;
+        if revision != SIM_UNIT_REVISION {
+            return Err(IoError::corrupt(format!(
+                "unsupported live unit revision {revision}"
+            )));
+        }
+        self.units.push(DecodedUnit {
+            name: r.str()?,
+            team: r.ub()?,
+            x: r.f()?,
+            y: r.f()?,
+            rotation: r.f()?,
+            health: r.f()?,
+        });
+        Ok(())
+    }
+
+    fn after_read_all(&mut self) {}
+}
+
+/// Write-side entity source over the live `UnitRuntime` and campaign teams.
+struct LiveEntitySource<'a> {
+    sim: &'a Sim,
+}
+
+impl EntitySource for LiveEntitySource<'_> {
+    fn team_plans(&self) -> Vec<(i32, Vec<TeamPlan>)> {
+        let Some(runtime) = self.sim.ecs.0.get_resource::<CampaignRuntime>() else {
+            return Vec::new();
+        };
+        let teams = &runtime.session.teams;
+        teams
+            .active
+            .iter()
+            .filter_map(|team| {
+                let data = teams.get_or_null(*team)?;
+                if data.plans.is_empty() {
+                    return None;
+                }
+                let plans = data
+                    .plans
+                    .iter()
+                    .map(|plan| TeamPlan {
+                        x: plan.x,
+                        y: plan.y,
+                        rotation: i16::from(plan.rotation),
+                        block: plan.block,
+                        config: config_to_type_value(
+                            plan.config.as_ref().unwrap_or(&ConfigValue::None),
+                        ),
+                    })
+                    .collect();
+                Some((i32::from(team.0), plans))
+            })
+            .collect()
+    }
+
+    fn entity_count(&self) -> usize {
+        self.sim
+            .unit_runtime()
+            .map(|runtime| runtime.unit_count(&self.sim.ecs.0))
+            .unwrap_or(0)
+    }
+
+    fn write_entities(&self, w: &mut WireWriter, scratch: &mut SaveScratch) -> IoResult<()> {
+        let world = &self.sim.ecs.0;
+        let Some(runtime) = world.get_non_send::<UnitRuntime>() else {
+            return Ok(());
+        };
+        let mut live: Vec<(u64, Entity)> = runtime
+            .units
+            .iter()
+            .copied()
+            .filter(|entity| world.get_entity(*entity).is_ok())
+            .map(|entity| {
+                (
+                    world
+                        .get::<EntitySeq>(entity)
+                        .map(|seq| seq.0)
+                        .unwrap_or(u64::MAX),
+                    entity,
+                )
+            })
+            .collect();
+        live.sort_by_key(|(seq, entity)| (*seq, entity.index()));
+        for (seq, entity) in live {
+            let (Some(core), Some(unit), Some(pos)) = (
+                world.get::<UnitCore>(entity),
+                world.get::<UnitTypeComp>(entity),
+                world.get::<Pos>(entity),
+            ) else {
+                continue;
+            };
+            let Some(name) = runtime
+                .content
+                .unit(unit.type_id)
+                .map(|def| def.name.clone())
+            else {
+                continue;
+            };
+            let team = world.get::<TeamComp>(entity).map(|t| t.team).unwrap_or(0);
+            let health = world.get::<Health>(entity).map(|h| h.health).unwrap_or(0.0);
+            scratch.write_chunk(w, |chunk| {
+                chunk.ub(SIM_UNIT_CLASS_ID);
+                chunk.i(seq as i32);
+                chunk.us(SIM_UNIT_REVISION);
+                chunk.str(&name)?;
+                chunk.ub(team);
+                chunk.f(pos.x);
+                chunk.f(pos.y);
+                chunk.f(core.rotation);
+                chunk.f(health);
+                Ok(())
+            })?;
+        }
+        Ok(())
+    }
+}
+
+/// Restores decoded team build plans onto the live session (`readTeamBlocks`).
+fn apply_team_plans(teams: &mut Teams, plans: Vec<(i32, Vec<TeamPlan>)>) {
+    for (team, team_plans) in plans {
+        let Ok(team) = u8::try_from(team) else {
+            continue;
+        };
+        let data = teams.get(crate::ecs::TeamId(team));
+        data.plans.clear();
+        for plan in team_plans {
+            data.plans.push_back(BlockPlan {
+                x: plan.x,
+                y: plan.y,
+                rotation: plan.rotation as i8,
+                block: plan.block,
+                config: Some(type_value_to_config(&plan.config)),
+                removed: false,
+            });
+        }
+    }
+}
+
+/// The live `meta` tag set (`SaveVersion.writeMeta`, `SaveVersion.java:114-151`).
+fn live_meta_tags(
+    sim: &Sim,
+    content: &ContentRegistry,
+    width: u16,
+    height: u16,
+    name: &str,
+) -> StringMap {
+    let session = sim
+        .ecs
+        .0
+        .get_resource::<CampaignRuntime>()
+        .map(|runtime| &runtime.session);
+    let wave = session.map_or(0, |session| session.wave);
+    let mut tags = base_meta_tags(width, height, wave, name);
+    tags.insert("saved".to_owned(), sim.platform().millis().to_string());
+    tags.insert("playtime".to_owned(), sim.save_playtime_ms().to_string());
+    tags.insert("tick".to_owned(), sim.tick_count().to_string());
+    if let Some(session) = session {
+        tags.insert("wavetime".to_owned(), session.wavetime.to_string());
+        tags.insert(
+            "stats".to_owned(),
+            serde_json::to_string(&session.stats).unwrap_or_else(|_| "{}".to_owned()),
+        );
+        tags.insert(
+            "rules".to_owned(),
+            serde_json::to_string(&session.rules).unwrap_or_else(|_| "{}".to_owned()),
+        );
+        tags.insert("playerteam".to_owned(), session.default_team().to_string());
+        tags.insert(
+            "nocores".to_owned(),
+            (session.player_core_count() == 0).to_string(),
+        );
+    } else {
+        // No live campaign session: classify the default team's cores from the
+        // ECS (`state.rules.defaultTeam.cores().isEmpty()`).
+        let default_team = crate::game::rules::Rules::default().default_team;
+        let cores = sim
+            .ecs
+            .0
+            .iter_entities()
+            .filter(|entity| {
+                entity.get::<BuildingComp>().is_some_and(|comp| {
+                    comp.team.0 == default_team
+                        && content
+                            .block(comp.block)
+                            .is_some_and(|def| def.kind == BlockKind::CoreBlock)
+                })
+            })
+            .count();
+        tags.insert("playerteam".to_owned(), default_team.to_string());
+        tags.insert("nocores".to_owned(), (cores == 0).to_string());
+    }
+    tags
+}
 
 /// [`MapSource`] over the live grid that resolves multiblock centers from either
 /// plan-07 [`Building`] entities or the P0 [`BuildingComp`] the base `Sim` uses.
@@ -152,18 +439,31 @@ impl SimIoHandler {
         let height = sim.grid.tiles.height as u16;
         let name = if as_map { "map" } else { "sim" };
         let source = SimMapSource::new(&sim.grid, &content, &sim.ecs.0);
-        let mut tags = base_meta_tags(width, height, 0, name);
+        let entities = LiveEntitySource { sim };
+        let markers: Option<&dyn MarkersIo> = sim
+            .ecs
+            .0
+            .get_resource::<CampaignRuntime>()
+            .map(|runtime| &runtime.session.markers as &dyn MarkersIo);
+        let mut tags = live_meta_tags(sim, &content, width, height, name);
         tags.insert("name".to_owned(), name.to_owned());
         let mut ctx = WriteContext::meta_only(tags);
         ctx.content = Some(&content);
         ctx.map = Some(&source);
+        ctx.entities = Some(&entities);
+        ctx.markers = markers;
         match SaveIo::save(&NativeFs, path, &ctx, &self.options) {
             Ok(()) => IoStatus::Ok,
             Err(error) => IoStatus::Failed(error.to_string()),
         }
     }
 
-    /// Applies one load request from `path` onto the live grid.
+    /// Applies one load request from `path` onto the live world.
+    ///
+    /// The decoded buildings are materialized into the live block runtime, the
+    /// saved units respawn into the unit runtime, and the decoded
+    /// rules/wave/stats/markers/plans are applied to the installed campaign
+    /// session (`SaveSlot.load`, `Saves.java:314-328`).
     fn load(&mut self, sim: &mut Sim, path: &Path) -> IoStatus {
         let content = match boot_registry() {
             Ok(content) => content,
@@ -178,20 +478,78 @@ impl SimIoHandler {
             Err(error) => return IoStatus::Failed(error.to_string()),
         };
         let mut loaded = WorldGrid::new(0, 0);
+        let mut entities = LiveEntitySink::default();
+        let mut markers = MapMarkers::new();
+        let plans;
+        let pending;
+        let tags;
+        let rules;
+        let stats;
         {
             let mut context = Context::new(&mut loaded, &content);
             let mut read = SaveReadState {
                 context: Some(&mut context),
                 content: Some(&mut mapper),
+                entities: Some(&mut entities),
+                markers: Some(&mut markers),
                 ..SaveReadState::default()
             };
             if let Err(error) = SaveIo::load_bytes(&bytes, &mut read) {
                 return IoStatus::Failed(error.to_string());
             }
+            plans = std::mem::take(&mut read.team_plans);
+            tags = read.tags.clone();
+            rules = read.rules.take();
+            stats = read.stats.take();
+            drop(read);
+            pending = context.take_pending_buildings();
         }
-        // Tile-only restore: buildings decoded into `Context::pending_buildings`
-        // need a plan-07 ECS owner; the map/tile contract is exact.
+        // The loaded header tick resumes the fixed-step counter (`readMeta`).
+        if let Some(tick) = tags.get("tick").and_then(|value| value.parse::<u64>().ok()) {
+            sim.state.tick = tick;
+        }
+        // Replace the live world: drop the previous entities/bookkeeping, swap
+        // the grid, then rebuild the ECS the tile model points at.
+        sim.clear_world_for_load();
         sim.grid = loaded;
+        let grid = sim.grid.clone();
+        if let Some(mut unit_runtime) = sim.ecs.0.get_non_send_mut::<UnitRuntime>() {
+            unit_runtime.reset(&grid);
+        }
+        let materialized = sim.materialize_map_buildings(&pending);
+        if materialized > 0 {
+            log::info!("sim_io load: materialized {materialized} building(s) from `{path:?}`");
+        }
+        for unit in &entities.units {
+            if let Some(entity) =
+                sim.spawn_live_unit(&unit.name, unit.team, unit.x, unit.y, unit.rotation)
+                && unit.health > 0.0
+                && let Some(mut health) = sim.ecs.0.get_mut::<Health>(entity)
+            {
+                health.health = unit.health;
+            }
+        }
+        if let Some(mut runtime) = sim.ecs.0.remove_resource::<CampaignRuntime>() {
+            if let Some(rules) = rules {
+                runtime.session.rules = rules;
+            }
+            if let Some(stats) = stats {
+                runtime.session.stats = stats;
+            }
+            if let Some(wave) = tags.get("wave").and_then(|value| value.parse::<i32>().ok()) {
+                runtime.session.wave = wave;
+            }
+            if let Some(wavetime) = tags
+                .get("wavetime")
+                .and_then(|value| value.parse::<f32>().ok())
+            {
+                runtime.session.wavetime = wavetime;
+            }
+            runtime.session.markers = markers;
+            apply_team_plans(&mut runtime.session.teams, plans);
+            runtime.session.phase = crate::game::State::Playing;
+            sim.ecs.0.insert_resource(runtime);
+        }
         IoStatus::Ok
     }
 }
@@ -332,5 +690,72 @@ mod tests {
         let responses = sim.take_io_responses();
         assert_eq!(responses.len(), 1);
         assert!(matches!(responses[0].status, IoStatus::Failed(_)));
+    }
+
+    /// The live unit chunk's reserved class id must stay clear of the upstream
+    /// `classids.properties` table (append-only ABI).
+    #[test]
+    fn live_unit_class_id_is_reserved() {
+        let mapping = crate::entities::mapping::EntityMapping::load_default();
+        assert!(
+            mapping.name_of(u16::from(SIM_UNIT_CLASS_ID)).is_none(),
+            "SIM_UNIT_CLASS_ID collides with an upstream class id"
+        );
+        assert_eq!(SIM_UNIT_REVISION, 1);
+    }
+
+    /// A live save must carry real meta (`tick`/`playtime`) and the entities
+    /// region must round-trip the placed building and the live unit: load
+    /// materializes the building into the ECS runtime and respawns the unit.
+    #[test]
+    fn live_sim_save_then_load_restores_entities_and_meta() {
+        let mut sim = Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        let core = sim.content().id("core-shard").expect("core-shard");
+        sim.apply(Command::Place {
+            x: 5,
+            y: 5,
+            block: core,
+        })
+        .expect("place core");
+        for _ in 0..5 {
+            sim.tick().expect("tick");
+        }
+        sim.spawn_live_unit("dagger", 1, 64.0, 64.0, 0.0)
+            .expect("spawn unit");
+        sim.set_save_playtime(4321);
+        sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
+
+        let path = temp_path("live-entities-roundtrip");
+        let _ = std::fs::remove_file(&path);
+        sim.request_save(&path, false);
+        sim.tick().expect("capture tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses.len(), 1, "one save response: {responses:?}");
+        assert_eq!(responses[0].status, IoStatus::Ok);
+
+        let meta = SaveIo::get_meta(&NativeFs, &path).expect("meta");
+        assert_eq!(meta.time_played, 4321, "host playtime lands in the meta");
+        let saved_tick: u64 = meta
+            .tags
+            .get("tick")
+            .and_then(|tick| tick.parse().ok())
+            .expect("tick tag");
+        assert!(saved_tick > 0, "tick tag is live: {saved_tick}");
+
+        // Wipe the live world; the load must rebuild it from the file.
+        sim.grid.fill(BlockId::AIR, BlockId::AIR);
+        sim.request_load(&path);
+        sim.tick().expect("apply tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses.len(), 1, "one load response: {responses:?}");
+        assert_eq!(responses[0].status, IoStatus::Ok, "save reloads");
+        assert_eq!(sim.grid.block_at(TilePos::new(5, 5)), Some(core));
+        assert_eq!(sim.group_counts().get("build"), Some(&1));
+        assert_eq!(sim.group_counts().get("unit"), Some(&1));
+        assert!(sim.tick_count() >= saved_tick, "tick header resumes");
+
+        let _ = std::fs::remove_file(&path);
     }
 }

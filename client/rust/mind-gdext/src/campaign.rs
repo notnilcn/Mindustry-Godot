@@ -43,8 +43,11 @@ use mind_core::game::universe::{Campaign, TurnContext};
 use mind_core::game::world_reloader::HostReloader;
 use mind_core::io::FileSystem;
 use mind_core::io::fs::{NativeFs, Paths};
+use mind_core::io::json::quote_bare_keys;
+use mind_core::io::json::rules::GameStats;
 use mind_core::io::save::slot::list_save_slots as list_slot_files;
 use mind_core::io::settings::{KEY_SAVE_INTERVAL, SettingsStore};
+use mind_core::io::{SaveIo, SaveMeta};
 use mind_core::random::JavaRandom;
 use mind_core::render::g3d::grid::PlanetGrid;
 use mind_core::render::g3d::mesh_data::build_planet_grid;
@@ -300,6 +303,10 @@ impl MindCampaign {
         } else {
             SavesUpdateResult::default()
         };
+        // `SaveVersion.writeMeta` reads `control.saves.getTotalPlaytime()`; pass
+        // the host-accrued value into the sim before any save boundary.
+        let total_playtime = self.saves.total_playtime;
+        host.bind_mut().set_save_playtime(total_playtime);
         // `Saves.java:210-212`: campaign playtime also lands in the planet stats
         // (the runtime copy is authoritative while the sector is live).
         if saves_result.playtime_added > 0
@@ -1339,6 +1346,8 @@ impl MindCampaign {
         if slot.is_empty() {
             return false;
         }
+        let total_playtime = self.saves.total_playtime;
+        host.bind_mut().set_save_playtime(total_playtime);
         host.bind_mut().request_save(
             GString::from(format!("user://saves/{slot}.msav").as_str()),
             false,
@@ -1361,6 +1370,23 @@ impl MindCampaign {
         if !FileAccess::file_exists(&path) {
             log::warn!("load_slot: `{path}` does not exist");
             return false;
+        }
+        // `SaveSlot.load` (`Saves.java:314-328`): apply the saved meta to the
+        // live session (rules/wave/timer/stats) and resume its playtime before
+        // the world swap lands at the IO boundary.
+        let native = ProjectSettings::singleton().globalize_path(&path);
+        if let Ok(bytes) = NativeFs.read(std::path::Path::new(native.to_string().as_str()))
+            && let Ok(meta) = SaveIo::get_meta_bytes(&bytes)
+        {
+            apply_loaded_meta(&mut self.session, &meta);
+            self.saves.total_playtime = meta.time_played;
+            let taken = host.bind_mut().take_campaign_runtime();
+            if let Some(mut runtime) = taken {
+                apply_loaded_meta(&mut runtime.session, &meta);
+                host.bind_mut().put_campaign_runtime(runtime);
+            }
+        } else {
+            log::warn!("load_slot: `{path}` meta unavailable; session rules not applied");
         }
         host.bind_mut().request_load(GString::from(path.as_str()));
         true
@@ -2008,6 +2034,33 @@ fn collect_unlocked(registry: &ContentRegistry) -> Vec<String> {
         .filter(|content| tech_tree::content_unlocked(registry, *content))
         .filter_map(|content| tech_tree::content_name(registry, content))
         .collect()
+}
+
+/// `SaveSlot.load` meta half (`Saves.java:314-328`): the saved rules/wave,
+/// wave timer and stats replace the live session's, and the loaded match is
+/// playing (`readMeta`/`readRules`).
+fn apply_loaded_meta(session: &mut PlaySession, meta: &SaveMeta) {
+    if let Ok(rules) = serde_json::from_str::<Rules>(&quote_bare_keys(&meta.rules_json)) {
+        session.rules = rules;
+    } else {
+        log::warn!("load: rules JSON did not parse; session rules kept");
+    }
+    session.wave = meta.wave;
+    if let Some(wavetime) = meta
+        .tags
+        .get("wavetime")
+        .and_then(|value| value.parse::<f32>().ok())
+    {
+        session.wavetime = wavetime;
+    }
+    if let Some(stats) = meta
+        .tags
+        .get("stats")
+        .and_then(|value| serde_json::from_str::<GameStats>(value).ok())
+    {
+        session.stats = stats;
+    }
+    session.phase = State::Playing;
 }
 
 /// Sanitizes a save-slot name into a file stem (alphanumerics, `-`, `_`).

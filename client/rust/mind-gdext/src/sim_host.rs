@@ -770,6 +770,13 @@ impl MindSimHost {
         self.sim.io_pending() as i64
     }
 
+    /// Stores host playtime (`Saves.getTotalPlaytime`) for the next save's meta
+    /// region (`SaveVersion.writeMeta`).
+    #[func]
+    pub fn set_save_playtime(&mut self, millis: i64) {
+        self.sim.set_save_playtime(millis);
+    }
+
     /// Runs queued save/load requests at their `IoSet` boundaries without
     /// advancing the sim (the exit-save flush while the pump is paused).
     pub fn flush_io(&mut self) {
