@@ -8,7 +8,7 @@ preconditions:
   - Fresh serpulo:15 launch (no leftover sector save) for deterministic values; low map ids differ from upstream preset ids (groundZero is sector 15 here, 170 upstream).
   - MindHud/MindUi are autoloads at /root/MindHud and /root/MindUi, NOT under /root/Spine.
 tools: [godot_health, godot_editor_read, godot_editor_edit, godot_game, godot_exec, godot_log, godot_screenshot]
-last_verified: 2026-10-08 1d8f75b (runs/20261008-192317-ev0053-hud-wave-enemies; twin runs/20261008-225009-ev0053-hud-twin, pid 131412)
+last_verified: 2026-10-08 e54169e (runs/20261008-235231-ev0053-hud-wave-godot, pid 48759; earlier twin runs/20261008-225009-ev0053-hud-twin, pid 131412)
 ---
 
 # hud-wave-enemies-skip
@@ -45,8 +45,10 @@ last_verified: 2026-10-08 1d8f75b (runs/20261008-192317-ev0053-hud-wave-enemies;
    godot_exec {"action":"eval","params":{"code":"var h = get_node(\"/root/MindHud\")\nvar c = get_node(\"/root/Spine/MindCampaign\")\nvar frag = get_node(\"/root/Spine/Ui/UiRoot/HudGroup/hud\")\nvar status = frag.get_node(\"WavesStack/WavesMain/Status\")\nvar skip = frag.get_node_or_null(\"WavesStack/WavesMain/WaveButtons/skip\")\nreturn {\"pid\": OS.get_process_id(), \"tick\": get_node(\"/root/Spine/SimHost\").get_tick(), \"hud_state\": c.get_hud_state(), \"hud_wave\": h.get(\"wave\"), \"hud_enemies\": h.get(\"enemies\"), \"hud_wavetime\": h.get(\"wavetime\"), \"hud_status_text\": str(h.get(\"status_text\")), \"status_label_text\": status.text, \"skip_button_visible\": (skip != null and skip.visible)}"}}
    ```
 
-   Expect status `Wave 0/10\n4:00` (wave.cap + countdown) and
-   `skip_button_visible: true` (`waves && enemies <= 0 && has_core`).
+   Expect (`e54169e`+) `hud_state.wave: 0` (0-based session index) but
+   `hud_wave: 1` (`MindHud.wave` is Java `state.wave` = session + 1) and status
+   `Wave 1/10\n[lightgray]Wave in 4:00` (wave.cap + `wave.waiting` composition)
+   plus `skip_button_visible: true` (`waves && enemies <= 0 && has_core`).
 
 5. Force a wave and let the enemy count register: `run_wave()` + `step(6)`,
    then `step(5)`, then wait ≥0.2 s:
@@ -56,8 +58,9 @@ last_verified: 2026-10-08 1d8f75b (runs/20261008-192317-ev0053-hud-wave-enemies;
    ```
 
    Expect `unit: 1` after the first step and `enemies: 1` in `get_hud_state`
-   after the second; then the same read as step 4 shows
-   `Wave 1/10\n1 Enemy Remaining\n1:59` and `skip_button_visible: false`.
+   after the second; then the same read as step 4 shows `hud_wave: 2`,
+   `Wave 2/10\n1 Enemy Remaining\n[lightgray]Wave in 1:59` and
+   `skip_button_visible: false`.
 
 6. Capture-toast edge (only when the wasCaptured/capture branch is under test):
 
@@ -120,6 +123,13 @@ last_verified: 2026-10-08 1d8f75b (runs/20261008-192317-ev0053-hud-wave-enemies;
   (`step(30)`) until `io_pending == 0` and the fragment's 0.2 s refresh hides
   the overlay, then the skip control hovers. The writer run never clicked, so
   its reads were unaffected.
+- Right after `set_menu_visible(false)` the boot cover fade still runs (~1 s),
+  so a full-screen capture is dark (`frame_diff` mean_rgb ~22 vs ~70 once
+  settled) and the first/second captures look ~100% changed for that reason,
+  not sim drift; the text is still legible. Wait out the fade or crop the Status
+  rect with `godot_screenshot {"action":"region","params":{"rect":{"x":490,
+  "y":0,"width":212,"height":100},"source":"game"}}` after resolving
+  `status.get_global_rect()` (viewport 490,0 171x78 at 1152x648 in this run).
 - The capture toast label is transient: reading `OverlayLayer` ~0.6 s after
   `capture_sector()` came back with no text child. The signal recorders still
   prove the chain; to verify the render hop, call
@@ -137,8 +147,8 @@ last_verified: 2026-10-08 1d8f75b (runs/20261008-192317-ev0053-hud-wave-enemies;
   `coords:"viewport"` (hover it first and check `gui_get_hovered_control()`
   names `skip`), then run an eval with `Input.flush_buffered_events()` reading
   `MindCampaign.get_hud_state()`: wave 0→1 and wavetime 14400→7200 without
-  calling `run_wave` directly. `step(11)` then registers `unit: 1` and
-  `enemies: 1`, and the skip button hides.
+  calling `run_wave` directly (`MindHud.wave` 1→2). `step(11)` then registers
+  `unit: 1` and `enemies: 1`, and the skip button hides.
 - The wave pane renders top-center at 1152x648 (Java's sits top-left); the
   composed text is read from `WavesStack/WavesMain/Status`, not from the
   top-left corner.

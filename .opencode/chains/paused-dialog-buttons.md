@@ -95,6 +95,10 @@ last_verified: 2026-10-08 7991049 (runs/l2-20261008-193444-ev0063-paused-dialog-
 ## Variants
 
 - Non-campaign sector: `@abandon` and `@objective` hide, `@back`/`@settings`/
-  `@hostserver`/`@quit` stay.
+  `@hostserver`/`@quit` stay, and (EV-0066, 2027fbe) `@savegame`/`@loadgame`
+  show in the row below back/settings; `@loadgame` is disabled while a match
+  is active. The save/load continuation is `chains/pause-save-dialog.md`.
+- Editor session (`get_sector_state().editor = true`): `@savegame`/`@loadgame`
+  hide (upstream `!state.isEditor()`).
 - Mobile preview (`MindUi.set_mobile_preview(true)`): `@planetmap` becomes
   visible after the deferred gate resolves (one frame).

@@ -31,6 +31,7 @@ touch, which precondition is easy to miss.
 | `factory-recipe-probe.md` | fresh Frozen Forest (serpulo/86) → drill on coal + graphite-press + core sink → graphite bracket at 600/1200 (EV-0058) |
 | `campaign-rules-dialog.md` | menu → campaign planet page → `campaign.difficulty` rail button / MindUi `open_dialog` → body + liveness + close |
 | `campaign-save-load.md` | campaign facade → launch → save / list / load a slot |
+| `campaign-autosave-exit-save.md` | fresh/resumed serpulo:15 → launch save → stepped autosave interval → pause Quit / campaign_complete `@menu` / clean-quit dispose exit saves (EV-0064) |
 | `load-game-dialog.md` | main menu → Load Game → live slot list → card click queues + applies a load |
 | `research-purchase.md` | campaign launch → research dialog → root rail → purchase a locked node |
 | `placement-picker-audit.md` | campaign launch → in-game placement picker → catalog filtering / icon / clipping audit (EV-0013) |

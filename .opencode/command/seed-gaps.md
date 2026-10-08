@@ -1,11 +1,10 @@
 ---
-description: Seed the parity findings ledger with code-sourced candidates and fix plans (status open)
-agent: gap-identifier
-subtask: true
+description: Seed the parity ledger by surface-scanning both repos, then one deep-read subagent per candidate
 ---
 
-Seed the shared parity ledger with code-sourced candidate findings, each
-carrying a fix plan.
+Run one gap-seeding scan: a cheap surface pass over the Java reference and the
+port, then one deep-read subagent per surviving candidate hypothesis to fill
+the ledger.
 
 Scope: $ARGUMENTS
 
@@ -14,21 +13,27 @@ saves, content, multiplayer, editor, rendering, menus). Otherwise treat the
 argument as an area prefix (e.g. `ui/menu`), a list of areas, or an explicit
 instruction.
 
-Rules:
+You are the orchestrator in this session — read
+`.opencode/agent/gap-orchestrator.md` and follow it exactly; never spawn a
+subagent to run this command. In short:
 
-- Dedupe against `.opencode/evals/findings.json` and the seed inventory in
-  `.opencode/evals/`; append a note to an existing `EV-####` instead of adding
-  a duplicate symptom.
-- Record every new candidate through the ledger helper with `--source code`
-  and `--status open`, both sides' file:line in `--evidence`, and a repro
-  sketch the writer can run later.
-- Every candidate carries a fix plan in its `plan` field: a short Markdown
-  sketch of the seam, the files to touch with file:line, the ordered fix
-  steps, and the check that proves it, written from the code you already read.
-  Pass it on `add --plan "<text>"`; when you sharpen or refresh an existing
-  `open`/`godot-open` item that still has no plan (or only an old plan
-  number), give it one with the `set-plan` command.
-- Do not fix anything and do not run in-engine verification.
-- End with the output contract from your agent definition: ids added, ids
-  deduped, `wontfix` decisions with the file:line that settles them, areas
-  scanned, areas uncovered, blockers.
+1. Phase 1, surface scan (no deep reading): dedupe against
+   `.opencode/evals/findings.json` and the seed inventory in `.opencode/evals/`,
+   read the AGENTS.md maps on both sides, compare file/type inventories, and
+   run `.opencode/skills/parity-eval/scripts/surface_scan.py <path>` to dump
+   declarations. Keep only falsifiable candidate hypotheses: an upstream
+   surface with no plausible port counterpart, or a counterpart that looks
+   stubbed, each with its upstream file:line and the port paths already
+   checked.
+2. Phase 2, one candidate per subagent: spawn a `gap-identifier` for each
+   surviving hypothesis with only that hypothesis. It deep-reads the actual
+   files on both sides and either records a new `EV-####` (`--source code
+   --status open`, both sides' file:line in `--evidence`, a repro sketch, and
+   an inline-Markdown fix plan), appends a dedupe note to an existing id, or
+   rejects the hypothesis with the file:line that refutes it. Spawn in waves
+   of at most 3 and never hand a subagent more than one candidate.
+3. Phase 3, audit the new records (evidence, repro, plan, status) and report
+   the output contract: ids added, ids deduped, hypotheses rejected, areas
+   scanned, areas uncovered, blockers.
+
+Do not fix anything and do not run in-engine verification.

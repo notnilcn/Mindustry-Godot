@@ -8,7 +8,7 @@
  * Every opencode process takes one lease on its first MCP tool call and
  * refreshes it on later calls (`.opencode/skills/parity-eval/scripts/mcp_slot.py`).
  * When the registry is full, workflow agents listed in `MCP_SLOT_GUARD_AGENTS`
- * (default `gap-identifier,parity-orchestrator,parity-writer,twin-evaluator`)
+ * (default `gap-identifier,gap-orchestrator,parity-orchestrator,parity-writer,twin-evaluator`)
  * get their call denied;
  * everyone else is warned and allowed, because the guard must never deadlock a
  * human's session. `parity-writer` is additionally denied every
@@ -37,7 +37,7 @@ const OWNER = `oc-${process.pid}`
 const QUIET_MS = 60_000
 const GATED = (
   process.env.MCP_SLOT_GUARD_AGENTS ??
-  "gap-identifier,parity-orchestrator,parity-writer,twin-evaluator"
+  "gap-identifier,gap-orchestrator,parity-orchestrator,parity-writer,twin-evaluator"
 )
   .split(",")
   .map((name) => name.trim())

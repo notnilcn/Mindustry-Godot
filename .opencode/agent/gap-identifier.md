@@ -96,6 +96,30 @@ parity writer's and twin evaluator's job.
    another session owns the claim, never `verify`. When a run contradicts a
    code reading, the run wins.
 
+# Per-candidate seed mode
+
+When `/seed-gaps` hands you exactly one candidate hypothesis (with the upstream
+file:line and the port paths the orchestrator already checked), confirm or
+refute that hypothesis only. Do not pick areas, do not widen the search, and
+make no MCP calls. Deep-read both sides around the brief's file:line, trace the
+live caller, then:
+
+- confirmed → record it with one `add --source code --status open`: both
+  sides' file:line in `--evidence`, a repro sketch, and the inline-Markdown
+  plan;
+- already known → append a note to the existing id through
+  `set-status --id EV-#### --status <its current status> --note "..."` and
+  report the dedupe instead of adding a duplicate; if that item still has no
+  plan (or only a plan number), give it one with `set-plan`;
+- refuted → write nothing; return the upstream and port file:line that refute
+  it.
+
+Concurrent per-candidate subagents share the ledger, so re-check it
+immediately before writing; the orchestrator partitions candidates, but a late
+duplicate is always possible. Return exactly one line:
+`recorded EV-####: <title>`, `deduped into EV-####: <why>`, or
+`rejected: <file:line>`.
+
 # Ledger contract
 
 ```bash

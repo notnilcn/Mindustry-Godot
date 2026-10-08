@@ -1033,3 +1033,81 @@ If nothing new happened, no entry.
 - Reusable sequence in `chains/block-config-fragment.md`; evidence
   `runs/l2-20261008-203338-input_controls-godot/` (pid 249159; fragment
   `_config.options` 22 after the fix).
+
+## 2026-10-09 — loop-2 worktree-wrapper launch hang repeats; `godot_input action=text` drops keystrokes
+
+- Launching `.opencode/loops/bin/run-godot-editor.sh` from the loop-2 worktree
+  (instead of `$PARITY_MAIN/.opencode/loops/bin/run-godot-editor.sh`) reproduced
+  the 2026-10-08 entry: it started duplicate `wayland-mind2`/`mind2-java`
+  westons under the worktree runtime dir and the editor fell back to X11 on the
+  worktree Xwayland `:3`, which died. Then `godot_game status` timed out and
+  every later MCP call reported `BRIDGE_NOT_CONNECTED` while `ss -ltnp` showed
+  `127.0.0.1:6980` LISTEN with a growing backlog (the editor was hung on the
+  dead embedded game; the game pid stayed a zombie). Recovery: kill the editor
+  and the duplicate westons, `rm` the stale `godot-wayland-0{,.lock}` in
+  `$PARITY_WAYLAND_DIR` (no live listener per `ss -xlp`), relaunch with the main
+  wrapper (`[parity-loop 2] editor: display=:2` and no "starting weston" line is
+  the tell). Evidence: `$PARITY_LOOP_DIR/logs/editor.log` 2026-10-09 00:01;
+  `runs/l2-20261009-000205-ev0066-save-menu-godot/`.
+- `godot_input {"action":"text"}` does not type into a focused `LineEdit` with
+  this addon: `runtime_autoload.gd _input_text` sends one `InputEventKey`
+  object for both the press and the release in the same frame, and the engine
+  discards it ("input event object is being parsed more than once in the same
+  frame", logged as an error). The field stays empty and the prompt's OK stays
+  disabled. Workaround: set `field.text` in an eval and emit the field's own
+  `text_changed` (`f.text_changed.emit(str(f.text))`; assigning `text` alone
+  does not emit it), then click OK with real mouse input — everything after OK
+  is the real UI path. Sequence:
+  `chains/pause-save-dialog.md` step 5.
+
+## 2026-10-09 — Rust-only methods are not eval-reachable; `godot_game stop` skips the scene teardown
+
+- Calling a `mind-gdext` method that is `pub fn` without `#[func]` from
+  `godot_exec` (here `MindSimHost.tile_region`) errors with `Invalid call.
+  Nonexistent function`, times the eval out after 15 s and trips break-on-error
+  (`godot_debugger sessions` -> `paused: true`), pinning the frame loop; recover
+  with `godot_game stop` + `play` (resume re-breaks). Probe tiles through a
+  `#[func]` sibling instead: `MindCampaign.write_schematic_selection(x,y,x,y)`
+  returns `""` for air and a base64 `.msch` payload for a placed block, without
+  the multi-MB `get_state_json` dump. Evidence:
+  `runs/20261009-003000-ev0064-autosave-playtime-godot/`.
+- `godot_game stop` terminates the game process without running a scene
+  teardown, so `Node.exit_tree` hooks (`MindCampaign`'s `Control.dispose` exit
+  save) never fire; an msav mtime that does not move after `stop` is not
+  evidence a dispose hook is missing. Exercise the dispose path with a clean
+  quit: `godot_exec eval "get_tree().quit()"` (the eval may not return; the
+  write lands), then check the file mtime/sha and the editor log.
+  Evidence: same run, steps 08-09 (`saved on exit` only appears after the clean
+  quit).
+- Save-interval trap for repro design: the Settings slider is
+  `sliderPref("saveinterval", 60, 10, 5*120, 10, seconds)` (`SettingsMenuDialog.java:373`;
+  `MindUi.settings_set` clamps to the same bounds), and `Saves.update` keeps
+  upstream's `time > saveinterval * 60` math, so the shortest interval a player
+  can set is 10 -> **600 s of playing ticks** (>= 36000 ticks), not the 60 s the
+  label suggests (`setting.seconds` formats the raw value). Chunk
+  `step(5000..12000)` while paused-without-dialog to cross it; the pump consumes
+  each chunk's delta on the next frame.
+
+## 2026-10-09 — save/load restore leg: positional dump-meta, unpaused post-restart pump, stale editor lib
+
+- `mind-headless io dump-meta` takes the save path **positionally**; `--file`
+  is rejected (`error: unexpected argument '--file' found`). Use
+  `client/bin/rust/debug/mind-headless io dump-meta <file> --json`. Needed for
+  the EV-0065 meta evidence; `runs/20261009-005513-ev0065-save-restore-godot-2/godot/meta-dump.json`.
+- After `godot_game stop` + `play` the fresh sim is **unpaused**: the fixed-step
+  pump advances during each MCP round-trip, so a post-load "no production"
+  reading over `step(600)` was confounded (the returned tick had jumped ~1000
+  ticks past the pre-step value). Always `SimHost.set_paused(true)` before
+  `load_slot`/`step` measurements; the deterministic replay then showed copper
+  3 → 6 → 10. The round-1 run dir (`...005006-ev0065-save-restore-godot`) keeps
+  the confounded trace; round 2 is the verified one.
+- The editor must be relaunched after `tools/build.sh`: the loop's running
+  editor (pid 113152, started 00:29) still had the previous
+  `libmind_gdext.so` mmap'd; `godot_game play` bindings advertised the new
+  method but the engine ran the old code. Kill+relaunch via
+  `.opencode/loops/bin/run-godot-editor.sh` before the run (the skill already
+  documents this; this run re-confirmed the cost — `runs/20261009-005513-ev0065-save-restore-godot-2/`).
+- Grid-derived behavior state is not part of the save format: `materialize_map_buildings`
+  now calls `refresh_drill_ore` for spawned drills, or a loaded save's drill
+  keeps `dominantItem = None` and never mines (this was the EV-0065 production
+  half; see `chains/campaign-save-restore.md`).

@@ -40,7 +40,7 @@ skill:
 | `parity/golden_manifest.json`, `parity/scenario_catalog.json` | Simulation goldens/checksums. |
 | `.opencode/evals/` | Ledger + run artifacts + MCP slot leases. |
 | `.opencode/chains/` | Project MCP call sequences; consult before composing calls, keep updated after a confirmed change. |
-| `.opencode/skills/parity-eval/scripts/` | `bootstrap.sh`, `capture_screen.py`, `frame_diff.py`, `record_finding.py`, `mcp_slot.py`. |
+| `.opencode/skills/parity-eval/scripts/` | `bootstrap.sh`, `capture_screen.py`, `frame_diff.py`, `surface_scan.py`, `record_finding.py`, `mcp_slot.py`. |
 
 Host installs are resolved through environment overrides (`GODOT_BIN`,
 `MINDY_SRC`, `JAVA17_HOME`, `MCP_VENV`); never hardcode absolute paths.
@@ -444,6 +444,9 @@ python3 "$RF" verify --id EV-0002 --status open --note "twin fail: <what differs
 
 ### Code-level candidates and triage
 
+`/seed-gaps` first surface-scans both trees (AGENTS.md maps, file names,
+`surface_scan.py`) and then spawns one `gap-identifier` per surviving candidate
+hypothesis; each subagent records only what it confirms against the real files.
 The gap identifier records candidates without running anything; `add` starts
 them in the writer queue (`open`) with a fix plan in `--plan`:
 
