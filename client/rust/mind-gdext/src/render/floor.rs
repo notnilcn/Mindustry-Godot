@@ -83,6 +83,8 @@ struct Quad {
     v1: f32,
     /// RGBA8888 tint.
     color: u32,
+    /// Overlay sprites need the y-flip camera's v swap (round 18).
+    v_flip: bool,
 }
 
 /// A quad before its region is resolved.
@@ -95,6 +97,8 @@ struct PendingQuad {
     color: u32,
     /// Plain floors pick a per-tile texture variant (`Floor.variant`).
     variant: bool,
+    /// Overlay floors need the v swap (see [`Quad::v_flip`]).
+    v_flip: bool,
 }
 
 /// Per-chunk baked nodes (`Vec` indexed by `CacheLayerId.id()`).
@@ -278,11 +282,11 @@ impl FloorRenderer {
                         continue;
                     }
                     let tile = world.tile(tx, ty);
-                    let quad = match host.content_registry() {
-                        Some(content) => tile_quad(world, content, tile, layer),
-                        None => None,
+                    let quads = match host.content_registry() {
+                        Some(content) => tile_quads(world, content, tile, layer),
+                        None => SmallVec::new(),
                     };
-                    if let Some(quad) = quad {
+                    for quad in quads {
                         let resolved = if quad.variant {
                             self.resolve_variant(&quad.region, tx, ty)
                         } else {
@@ -300,6 +304,7 @@ impl FloorRenderer {
                             u1: uv[2],
                             v1: uv[3],
                             color: quad.color,
+                            v_flip: quad.v_flip,
                         });
                     }
                 }
@@ -428,21 +433,32 @@ impl FloorRenderer {
     }
 }
 
-/// `cacheChunkLayer` draw decision for one tile/layer (base + overlay only).
-fn tile_quad(
+/// `cacheChunkLayer` draw decision for one tile/layer (base floor, then the
+/// overlay floor, then the wall block).
+///
+/// `Floor.drawBase` draws `drawMain` (the base floor, per-tile variant) and
+/// then `drawOverlay` -> `OverlayFloor.drawBase` (the ore overlay, per-tile
+/// variant) into the same normal layer; the port emits both quads in that
+/// order. Walls stay a separate cache layer.
+fn tile_quads(
     world: &WorldGrid,
     content: &ContentRegistry,
     tile: &Tile,
     layer: CacheLayerId,
-) -> Option<PendingQuad> {
+) -> SmallVec<[PendingQuad; 2]> {
+    let mut out = SmallVec::new();
     let size = TILESIZE as f32;
-    let cx = (tile.x as f32 + 0.5) * size;
-    let cy = (tile.y as f32 + 0.5) * size;
+    // Java world convention: tile (x, y)'s centre is `(x * tilesize, y * tilesize)`
+    // (`Tile.worldx()`; Arc's `Draw.rect(region, x, y)` centres the sprite there).
+    let cx = tile.x as f32 * size;
+    let cy = tile.y as f32 * size;
 
     if layer == CacheLayerId::Walls {
-        let block = content.block(tile.block)?;
+        let Some(block) = content.block(tile.block) else {
+            return out;
+        };
         if block_cache_layer(block) == CacheLayerId::Walls {
-            return Some(PendingQuad {
+            out.push(PendingQuad {
                 region: block.region.clone(),
                 cx,
                 cy,
@@ -450,44 +466,54 @@ fn tile_quad(
                 h: block.size.max(1) as f32 * size,
                 color: 0xffff_ffff,
                 variant: false,
+                v_flip: false,
             });
         }
-        return None;
+        return out;
     }
 
-    // Overlays bake into the normal floor layer (`Floor.drawBase`).
-    if layer == CacheLayerId::Normal
+    let mut floor_drawn = false;
+    if let Some(floor) = content.block(tile.floor)
+        && floor_cache_layer(floor) == layer
+    {
+        let accessible = is_accessible(world, content, tile.x as i32, tile.y as i32);
+        let wall_layer = content
+            .block(tile.block)
+            .is_some_and(|block| block_cache_layer(block) == CacheLayerId::Walls);
+        if accessible || !wall_layer {
+            floor_drawn = true;
+            out.push(PendingQuad {
+                region: floor.region.clone(),
+                cx,
+                cy,
+                w: size,
+                h: size,
+                color: 0xffff_ffff,
+                variant: true,
+                v_flip: false,
+            });
+        }
+    }
+
+    // `Floor.drawOverlay`: an overlay floor draws on top of the base floor it
+    // belongs to, with its own per-tile variant (`OverlayFloor.drawBase`).
+    if floor_drawn
         && tile.overlay != BlockId::AIR
         && let Some(overlay) = content.block(tile.overlay)
     {
-        return Some(PendingQuad {
+        out.push(PendingQuad {
             region: overlay.region.clone(),
             cx,
             cy,
             w: size,
             h: size,
             color: 0xffff_ffff,
-            variant: false,
+            variant: true,
+            v_flip: true,
         });
     }
 
-    let floor = content.block(tile.floor)?;
-    if floor_cache_layer(floor) != layer {
-        return None;
-    }
-    let accessible = is_accessible(world, content, tile.x as i32, tile.y as i32);
-    let wall_layer = content
-        .block(tile.block)
-        .is_some_and(|block| block_cache_layer(block) == CacheLayerId::Walls);
-    (accessible || !wall_layer).then(|| PendingQuad {
-        region: floor.region.clone(),
-        cx,
-        cy,
-        w: size,
-        h: size,
-        color: 0xffff_ffff,
-        variant: true,
-    })
+    out
 }
 
 /// The page/UV tuple for a resolved (or placeholder) region.
@@ -513,11 +539,16 @@ fn build_mesh(quads: &[Quad], grow: f32) -> Option<Gd<ArrayMesh>> {
         let w = quad.w + grow * 2.0;
         let h = quad.h + grow * 2.0;
         let color = color_from(quad.color);
+        let (v_top, v_bottom) = if quad.v_flip {
+            (quad.v1, quad.v0)
+        } else {
+            (quad.v0, quad.v1)
+        };
         let corners = [
-            (x, y, quad.u0, quad.v0),
-            (x + w, y, quad.u1, quad.v0),
-            (x + w, y + h, quad.u1, quad.v1),
-            (x, y + h, quad.u0, quad.v1),
+            (x, y, quad.u0, v_top),
+            (x + w, y, quad.u1, v_top),
+            (x + w, y + h, quad.u1, v_bottom),
+            (x, y + h, quad.u0, v_bottom),
         ];
         for index in [0usize, 1, 2, 0, 2, 3] {
             let (vx, vy, u, v) = corners[index];

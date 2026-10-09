@@ -1574,6 +1574,18 @@ impl MindSimHost {
         Vec::new()
     }
 
+    /// Owning team of the building at `(x, y)` (`Tile.team()`; `None` when the
+    /// tile has no building). Rust-only seam for the block renderer's team
+    /// overlays (`Block.drawTeamOverlay`).
+    pub fn building_team(&self, x: i32, y: i32) -> Option<u8> {
+        let entity = self.sim.grid.tile(x, y).build?;
+        self.sim
+            .ecs
+            .0
+            .get::<mind_core::ecs::BuildingComp>(entity)
+            .map(|comp| comp.team.0)
+    }
+
     /// `Team.items().remove(item, amount)` on the first core of `team`; returns
     /// the removed amount (`0` without a matching core/item). Rust-only seam for
     /// the campaign research spend.
@@ -1818,7 +1830,9 @@ fn parse_capture_args() -> Option<CaptureRequest> {
 }
 
 /// Rendered center of the first core in row-major order, matching the block
-/// renderer's `(tile + 0.5) * TILESIZE + Block.offset` quad center.
+/// renderer's `anchor_tile * TILESIZE + Block.offset` quad center (Java
+/// `Tile.worldx()` convention; the anchor tile is the centre tile for odd
+/// multiblocks).
 ///
 /// Upstream `Player.bestCore()` picks the player team's core; the port's tile
 /// model carries no team, so this returns the first core tile scanned.

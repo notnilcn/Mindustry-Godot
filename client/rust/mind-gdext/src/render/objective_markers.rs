@@ -115,13 +115,21 @@ impl INode2D for MindObjectiveMarkers {
                 .draw_polyline_ex(&points, Color::from_rgba(0.53, 0.53, 0.53, 1.0))
                 .width(3.0 * zoom * 0.25)
                 .done();
+            // `Lines.stroke(scaleFactor, color)` over the gray outline.
+            self.base_mut()
+                .draw_polyline_ex(&points, marker.color)
+                .width(1.0 * zoom * 0.25)
+                .done();
 
             let Some(font) = font.clone() else {
                 continue;
             };
-            // `textHeight * fontSize` in world units -> screen px.
-            let font_size = (marker.text_height.max(1.0) * marker.font_size.max(0.1) * zoom)
-                .clamp(8.0, 64.0) as i32;
+            // WorldLabel: font scale `0.25 * fontSize` on the 16 px outline
+            // font, scaled by the camera zoom; the label centre sits
+            // `(radius + textHeight)` world units above the marker.
+            let font_size =
+                (16.0 * 0.25 * marker.font_size.max(0.1) * zoom).clamp(8.0, 64.0) as i32;
+            let label_lift = (marker.radius + marker.text_height) * zoom;
             let line_height = font_size as f32 * 1.2;
             let mut line_index = 0.0;
             for line in marker.text.split('\n') {
@@ -132,14 +140,14 @@ impl INode2D for MindObjectiveMarkers {
                 let size = font.get_string_size_ex(line).font_size(font_size).done();
                 let origin = Vector2::new(
                     screen.x - size.x * 0.5,
-                    screen.y - size.y * 0.5 + line_index * line_height,
+                    screen.y - size.y * 0.5 - label_lift + line_index * line_height,
                 );
                 let background = Rect2::new(
                     origin - Vector2::new(6.0, 2.0),
                     size + Vector2::new(12.0, 4.0),
                 );
                 self.base_mut()
-                    .draw_rect_ex(background, Color::from_rgba(0.0, 0.0, 0.0, 0.62))
+                    .draw_rect_ex(background, Color::from_rgba(0.0, 0.0, 0.0, 0.3))
                     .done();
                 let text = GString::from(line);
                 self.base_mut()
@@ -151,7 +159,7 @@ impl INode2D for MindObjectiveMarkers {
                 self.base_mut()
                     .draw_string_ex(&font, origin, &text)
                     .font_size(font_size)
-                    .modulate(marker.color)
+                    .modulate(Color::WHITE)
                     .done();
                 line_index += 1.0;
             }

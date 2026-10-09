@@ -166,11 +166,12 @@ fn build_unit_mesh(quads: &[UnitQuad]) -> Option<Gd<ArrayMesh>> {
         let (sin, cos) = (radians.sin(), radians.cos());
         let hw = quad.w / 2.0;
         let hh = quad.h / 2.0;
+        // y-flip camera compensation (round 18): unit sprites are top-row-first.
         let corners = [
-            (-hw, -hh, u0, v0),
-            (hw, -hh, u1, v0),
-            (hw, hh, u1, v1),
-            (-hw, hh, u0, v1),
+            (-hw, -hh, u0, v1),
+            (hw, -hh, u1, v1),
+            (hw, hh, u1, v0),
+            (-hw, hh, u0, v0),
         ];
         for index in [0usize, 1, 2, 0, 2, 3] {
             let (lx, ly, u, v) = corners[index];

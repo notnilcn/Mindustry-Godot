@@ -118,7 +118,7 @@ impl OverlayRenderer {
             return;
         }
         self.node.set_visible(true);
-        if let Some(mesh) = build_mesh(&quads, 0.0) {
+        if let Some(mesh) = build_mesh(&quads, 0.0, false) {
             self.node.set_mesh(&mesh.upcast::<Mesh>());
         }
     }

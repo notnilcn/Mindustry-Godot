@@ -119,14 +119,53 @@ impl BlockRenderer {
                 let texture = resolved.and_then(|r| r.texture);
                 let entry = groups.entry(page).or_insert((texture, Vec::new()));
                 let w = def.size.max(1) as f32 * size;
+                // Java anchors a building sprite at its footprint centre
+                // (`Building.x = tile.drawx() + Block.offset`, `Tile.drawx =
+                // x*tilesize`); the scan yields the first row-major tile, so odd
+                // sizes shift to the centre tile and `Block.offset` covers the
+                // even-size half-tile.
+                let anchor_x = (tile.x + (def.size - 1) / 2) as f32 * size + def.offset;
+                let anchor_y = (tile.y + (def.size - 1) / 2) as f32 * size + def.offset;
                 entry.1.push(Quad {
-                    cx: (tile.x as f32 + 0.5) * size + def.offset,
-                    cy: (tile.y as f32 + 0.5) * size + def.offset,
+                    cx: anchor_x,
+                    cy: anchor_y,
                     w,
                     h: w,
                     uv,
                     color: 0xffff_ffff,
                 });
+                // `Block.drawTeamOverlay` -> `Building.drawTeam`: the per-team
+                // pre-coloured region (`<name>-team-<team>`) over the base
+                // sprite, else the `<name>-team` mask tinted with the team
+                // colour (`BlockRenderer` draws it after the base).
+                if def.draw_team_overlay
+                    && let Some(team) = host.building_team(tile.x, tile.y)
+                {
+                    let team_name = mind_core::game::team::Team::get(team).name.clone();
+                    let (resolved, tint) = match self
+                        .resolver
+                        .resolve(&format!("{}-team-{}", def.name, team_name))
+                    {
+                        Some(region) => (Some(region), 0xffff_ffff),
+                        None => (
+                            self.resolver.resolve(&format!("{}-team", def.name)),
+                            mind_core::game::team::Team::get(team).color.to_rgba8888(),
+                        ),
+                    };
+                    if let Some(region) = resolved {
+                        let entry = groups
+                            .entry(region.page)
+                            .or_insert((region.texture.clone(), Vec::new()));
+                        entry.1.push(Quad {
+                            cx: anchor_x,
+                            cy: anchor_y,
+                            w,
+                            h: w,
+                            uv: region.uv,
+                            color: tint,
+                        });
+                    }
+                }
                 dynamic += 1;
             }
         }
@@ -144,7 +183,7 @@ impl BlockRenderer {
             if quads.is_empty() {
                 continue;
             }
-            let Some(mesh) = build_mesh(&quads, GROW) else {
+            let Some(mesh) = build_mesh(&quads, GROW, true) else {
                 continue;
             };
             let node = if index < self.nodes.len() {

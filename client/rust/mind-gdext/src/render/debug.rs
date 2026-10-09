@@ -103,8 +103,8 @@ impl DebugCollisionRenderer {
                     if !solid {
                         continue;
                     }
-                    let cx = (x as f32 + 0.5) * size;
-                    let cy = (y as f32 + 0.5) * size;
+                    let cx = x as f32 * size;
+                    let cy = y as f32 * size;
                     quads.push(Quad {
                         cx,
                         cy,
@@ -134,7 +134,7 @@ impl DebugCollisionRenderer {
             (quads, hitboxes)
         };
 
-        if let Some(mesh) = build_mesh(&quads, 0.0) {
+        if let Some(mesh) = build_mesh(&quads, 0.0, false) {
             self.node.set_mesh(&mesh.upcast::<Mesh>());
         }
         self.stats.hitboxes = hitboxes;

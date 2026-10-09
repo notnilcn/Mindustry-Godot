@@ -155,7 +155,7 @@ impl RegionResolver {
 }
 
 /// Builds an `ArrayMesh` from quads (two triangles each).
-pub fn build_mesh(quads: &[Quad], grow: f32) -> Option<Gd<ArrayMesh>> {
+pub fn build_mesh(quads: &[Quad], grow: f32, flip_v: bool) -> Option<Gd<ArrayMesh>> {
     let mut tool = SurfaceTool::new_gd();
     tool.begin(PrimitiveType::TRIANGLES);
     for quad in quads {
@@ -165,11 +165,15 @@ pub fn build_mesh(quads: &[Quad], grow: f32) -> Option<Gd<ArrayMesh>> {
         let h = quad.h + grow * 2.0;
         let color = color_from(quad.color);
         let [u0, v0, u1, v1] = quad.uv;
+        // World tile sprites are drawn through the y-flip camera (round 3), so
+        // their v axis is swapped to keep the sprite upright; screen-space
+        // overlays (fog, underwater) pass `flip_v = false`.
+        let (v_top, v_bottom) = if flip_v { (v1, v0) } else { (v0, v1) };
         let corners = [
-            (x, y, u0, v0),
-            (x + w, y, u1, v0),
-            (x + w, y + h, u1, v1),
-            (x, y + h, u0, v1),
+            (x, y, u0, v_top),
+            (x + w, y, u1, v_top),
+            (x + w, y + h, u1, v_bottom),
+            (x, y + h, u0, v_bottom),
         ];
         for index in [0usize, 1, 2, 0, 2, 3] {
             let (vx, vy, u, v) = corners[index];

@@ -143,7 +143,7 @@ impl ShadowRenderer {
         if let (Some(shadow_texture), Some(dark_texture)) = (shadow_texture, dark_texture) {
             shadow_material.set_shader_parameter("u_texture", &shadow_texture.to_variant());
             dark_material.set_shader_parameter("u_texture", &dark_texture.to_variant());
-            if let Some(mesh) = build_mesh(&[world_quad(width, height)], 0.0) {
+            if let Some(mesh) = build_mesh(&[world_quad(width, height)], 0.0, false) {
                 let mesh = mesh.upcast::<Mesh>();
                 self.shadow_node.set_mesh(&mesh);
                 self.dark_node.set_mesh(&mesh);

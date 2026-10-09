@@ -126,8 +126,8 @@ impl LightRenderer {
                         continue;
                     }
                     self.accumulator.add(
-                        (tx as f32 + 0.5) * size,
-                        (ty as f32 + 0.5) * size,
+                        tx as f32 * size,
+                        ty as f32 * size,
                         def.size.max(1) as f32 * size * 2.0,
                         [1.0, 0.92, 0.75, 1.0],
                         1.0,
@@ -168,7 +168,7 @@ impl LightRenderer {
             "u_ambient",
             &Color::from_rgba(0.01, 0.01, 0.04, 0.99).to_variant(),
         );
-        if let Some(mesh) = build_mesh(&[world_quad(width, height)], 0.0) {
+        if let Some(mesh) = build_mesh(&[world_quad(width, height)], 0.0, false) {
             self.node.set_mesh(&mesh.upcast::<Mesh>());
             self.node.set_material(&material.upcast::<Material>());
         }
@@ -189,8 +189,8 @@ fn stamp_circle(map: &mut [f32], width: i32, height: i32, cx: f32, cy: f32, radi
     let y2 = ((cy + radius) / unit).ceil() as i32;
     for y in y1.max(0)..y2.min(height) {
         for x in x1.max(0)..x2.min(width) {
-            let dx = (x as f32 + 0.5) * unit - cx;
-            let dy = (y as f32 + 0.5) * unit - cy;
+            let dx = x as f32 * unit - cx;
+            let dy = y as f32 * unit - cy;
             let d = (dx * dx + dy * dy).sqrt();
             if d >= radius {
                 continue;
@@ -222,8 +222,8 @@ mod tests {
     #[test]
     fn stamp_circle_is_brightest_at_tile_center() {
         let mut map = vec![0.0f32; 16];
-        // Tile (1,1) centre is world (12,12); stamp exactly there.
-        stamp_circle(&mut map, 4, 4, 12.0, 12.0, 16.0);
+        // Tile (1,1) centre is world (8,8) (Java `Tile.worldx()`); stamp there.
+        stamp_circle(&mut map, 4, 4, 8.0, 8.0, 16.0);
         assert!((map[1 + 4] - 1.0).abs() < 1e-3);
         assert!(map.iter().all(|v| (0.0..=1.0).contains(v)));
     }

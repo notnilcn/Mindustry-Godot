@@ -94,6 +94,27 @@ func _setup_status_style() -> void:
 	box.content_margin_right = 12.0
 	box.content_margin_bottom = 12.0
 	status_label.add_theme_stylebox_override("normal", box)
+	_setup_status_icon_fallback()
+
+
+## Content icons (`item.emoji()` -> PUA glyph from `icons.properties`) render
+## through the icon font; give the status label an isolated font copy whose
+## fallbacks include it so mixed Latin+glyph text renders.
+func _setup_status_icon_fallback() -> void:
+	var assets := MindWidgets.assets()
+	if assets == null or not assets.has_method("icon_font"):
+		return
+	var icon: Variant = assets.call("icon_font")
+	if not (icon is FontFile) or icon == null:
+		return
+	var base := status_label.get_theme_font("normal_font")
+	if base == null:
+		return
+	var font := base.duplicate() as FontFile
+	if font == null:
+		return
+	font.fallbacks = [icon]
+	status_label.add_theme_font_override("normal_font", font)
 
 
 func _process(delta: float) -> void:
@@ -133,7 +154,9 @@ func refresh() -> void:
 		return
 	var status := str(_hud.get("status_text"))
 	if status_label != null:
-		status_label.text = "[left]" + status
+		# Java's `makeStatusTable` labelWrap cell is centred in the wavepane table
+		# (HudFragment: `table.labelWrap(...)`), not left-aligned.
+		status_label.text = "[center]" + status
 		status_label.visible = not status.is_empty()
 	if info_label != null:
 		info_label.visible = false

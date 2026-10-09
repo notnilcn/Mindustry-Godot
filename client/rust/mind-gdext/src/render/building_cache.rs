@@ -203,9 +203,11 @@ impl BuildingCacheRenderer {
                     let texture = resolved.and_then(|r| r.texture);
                     let entry = groups.entry(page).or_insert((texture, Vec::new()));
                     let w = def.size.max(1) as f32 * size;
+                    let anchor_x = (tx + (def.size - 1) / 2) as f32 * size + def.offset;
+                    let anchor_y = (ty + (def.size - 1) / 2) as f32 * size + def.offset;
                     entry.1.push(Quad {
-                        cx: (tx as f32 + 0.5) * size + def.offset,
-                        cy: (ty as f32 + 0.5) * size + def.offset,
+                        cx: anchor_x,
+                        cy: anchor_y,
                         w,
                         h: w,
                         uv,
@@ -226,7 +228,7 @@ impl BuildingCacheRenderer {
             if quads.is_empty() {
                 continue;
             }
-            let Some(mesh) = build_mesh(&quads, 0.0) else {
+            let Some(mesh) = build_mesh(&quads, 0.0, true) else {
                 continue;
             };
             let mut node = MeshInstance2D::new_alloc();

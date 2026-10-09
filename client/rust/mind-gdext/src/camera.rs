@@ -269,33 +269,32 @@ impl MindCamera2D {
     /// Viewport position → tile `(x, y)`.
     ///
     /// `(x, y)` is a viewport-space point (e.g. `InputEventMouse.position`);
-    /// the tile is `floor(world / TILESIZE)`.
+    /// the tile centre is `(x * 8, y * 8)` (Java `Tile.worldx()`), so the tile
+    /// index is `floor((world + 4) / 8)`.
     #[func]
     pub fn screen_to_tile(&self, x: f64, y: f64) -> Vector2i {
         let canvas = self.base().get_canvas_transform();
         let world = canvas.affine_inverse() * Vector2::new(x as f32, y as f32);
         let size = TILESIZE as f32;
         Vector2i::new(
-            (world.x / size).floor() as i32,
-            (world.y / size).floor() as i32,
+            ((world.x + size / 2.0) / size).floor() as i32,
+            ((world.y + size / 2.0) / size).floor() as i32,
         )
     }
 
     /// Tile `(x, y)` → its **center** in viewport coordinates.
     ///
     /// This is the exact point to feed `godot_input mouse_button` with
-    /// `coords: "viewport"` (see `§7c` step 6): `(x + 0.5, y + 0.5) * TILESIZE`
-    /// transformed by the camera's canvas transform.
+    /// `coords: "viewport"` (see `§7c` step 6): `(x, y) * TILESIZE` (Java
+    /// `Tile.worldx()`) transformed by the camera's canvas transform.
     #[func]
     pub fn tile_to_screen(&self, x: i32, y: i32) -> Vector2 {
-        let world = Vector2::new(
-            (x as f32 + 0.5) * TILESIZE as f32,
-            (y as f32 + 0.5) * TILESIZE as f32,
-        );
+        let world = Vector2::new(x as f32 * TILESIZE as f32, y as f32 * TILESIZE as f32);
         self.base().get_canvas_transform() * world
     }
 
-    /// Centers the camera on tile `(x, y)` (`tile + 0.5` center).
+    /// Centers the camera on tile `(x, y)` (`x * TILESIZE` center, Java
+    /// `Tile.worldx()`).
     #[func]
     pub fn center_on_tile(&mut self, x: i32, y: i32) {
         self.camera.center_on_tile(x, y);

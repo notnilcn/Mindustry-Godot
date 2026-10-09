@@ -26,14 +26,21 @@ offset_right = 412.0
 offset_bottom = 60.0
 grow_horizontal = 1
 grow_vertical = 2
-theme_type_variation = &"defaultDialog"
+theme_type_variation = &"none"
 
 [node name="Layout" type="VBoxContainer" parent="Panel" unique_id=1358841326]
 layout_mode = 2
 theme_override_constants/separation = 6
+alignment = 1
 
-[node name="Label" type="RichTextLabel" parent="Panel/Layout" unique_id=345942507]
+[node name="Box" type="PanelContainer" parent="Panel/Layout" unique_id=8273645192]
 layout_mode = 2
+size_flags_horizontal = 0
+theme_type_variation = &"black5"
+
+[node name="Label" type="RichTextLabel" parent="Panel/Layout/Box" unique_id=345942507]
+layout_mode = 2
+custom_minimum_size = Vector2(400, 0)
 script = ExtResource("2_rich")
 
 [node name="Skip" type="Button" parent="Panel/Layout" unique_id=345942508]

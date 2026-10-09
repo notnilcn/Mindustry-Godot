@@ -368,10 +368,9 @@ impl CameraState {
 
     /// Centers on tile `(x, y)` (tile center).
     pub fn center_on_tile(&mut self, x: i32, y: i32) {
-        self.position = (
-            (x as f32 + 0.5) * TILESIZE as f32,
-            (y as f32 + 0.5) * TILESIZE as f32,
-        );
+        // Java world convention: tile (x, y)'s centre is `(x * tilesize, y * tilesize)`
+        // (`Tile.worldx`; the tile rect spans `[x*8-4, x*8+4)`).
+        self.position = (x as f32 * TILESIZE as f32, y as f32 * TILESIZE as f32);
     }
 
     /// `InputHandler.spectate`/lock-to-target: snap the center to a world point.

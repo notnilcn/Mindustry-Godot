@@ -226,7 +226,23 @@ pub fn round_amount(number: i32) -> i32 {
 /// * `[tag]` / `[]` color tags against [`color_tag`] and `#rrggbb(aa)`.
 /// * Unknown tags, unknown `:tokens:` and lone `[` stay literal (`[lb]`).
 pub fn render_markup(s: &str, iconc: &Iconc) -> String {
-    let normalized = normalize_pua(s, iconc);
+    render_markup_impl(s, iconc, false)
+}
+
+/// Like [`render_markup`] but emits content icons as their raw PUA glyph
+/// character instead of `[icon name="…"]` tags, so labels whose font stack
+/// includes the icon font (e.g. the HUD status label) draw real glyphs
+/// (`unit.emoji()`/`item.emoji()` parity, PAR-0037 round 21).
+pub fn render_markup_text_icons(s: &str, iconc: &Iconc) -> String {
+    render_markup_impl(s, iconc, true)
+}
+
+fn render_markup_impl(s: &str, iconc: &Iconc, icons_as_text: bool) -> String {
+    let normalized = if icons_as_text {
+        s.to_owned()
+    } else {
+        normalize_pua(s, iconc)
+    };
     let mut out = String::with_capacity(normalized.len() + 16);
     let chars: Vec<char> = normalized.chars().collect();
     // Color stack: index 0 is the implicit default (no color).
@@ -284,8 +300,14 @@ pub fn render_markup(s: &str, iconc: &Iconc) -> String {
             // Try to consume a `:name:` icon token.
             if let Some(rel) = chars[i + 1..].iter().position(|&ch| ch == ':') {
                 let name: String = chars[i + 1..i + 1 + rel].iter().collect();
-                if !name.is_empty() && iconc.get(&name).is_some() {
-                    out.push_str(&format!("[icon name=\"{name}\"]"));
+                if !name.is_empty()
+                    && let Some(ch) = iconc.get(&name)
+                {
+                    if icons_as_text {
+                        out.push(ch);
+                    } else {
+                        out.push_str(&format!("[icon name=\"{name}\"]"));
+                    }
                     i += rel + 2;
                     continue;
                 }

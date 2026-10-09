@@ -16,19 +16,18 @@ var _catalog: Dictionary = {}
 
 @onready var panel: PanelContainer = get_node_or_null("Panel")
 @onready var search: LineEdit = get_node_or_null("Panel/Layout/Search")
-@onready var categories: HBoxContainer = get_node_or_null("Panel/Layout/Categories")
+@onready var categories: GridContainer = get_node_or_null("Panel/Layout/Categories")
 @onready var blocks: GridContainer = get_node_or_null("Panel/Layout/Scroll/Blocks")
 
 
 func _ready() -> void:
-	# `PlacementFragment`'s block grid is the collapsed `blocksSelect` pane
-	# (`Java PlacementFragment.java:679`); the bottom-right icon bar is the only
-	# always-visible piece. Collapse the panel here (the manifest bind only
-	# touches the fragment root) and open through `open_palette()` (category
-	# hotkeys) so a fresh sector frame matches the Java HUD.
-	visible = false
+	# `PlacementFragment.blockCatTable` is `full.bottom().right()` with
+	# `visible(() -> ui.hudfrag.shown())`: the block pane is part of the standard
+	# HUD, not a collapsed tab. The manifest bind owns the fragment root, so the
+	# panel itself stays visible here and `close_palette()` remains for callers
+	# that need the old collapsed behaviour.
 	if panel != null:
-		panel.visible = false
+		panel.visible = true
 	if search != null:
 		search.text_changed.connect(func(_value: String) -> void: _rebuild())
 	# The HUD starts hidden in the menu; the catalogue is rebuilt on every reveal

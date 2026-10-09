@@ -954,11 +954,11 @@ impl DesktopBridge {
         Some((tile.x, tile.y))
     }
 
-    /// World pixel center of the cursor tile.
+    /// World pixel center of the cursor tile (Java `Tile.worldx()`).
     fn cursor_world(&self) -> Option<(f32, f32)> {
         let (x, y) = self.cursor_tile()?;
         let unit = mind_core::config::TILESIZE as f32;
-        Some(((x as f32 + 0.5) * unit, (y as f32 + 0.5) * unit))
+        Some((x as f32 * unit, y as f32 * unit))
     }
 
     /// Closest commandable unit under the cursor (`tapCommandUnit`).
@@ -1428,11 +1428,12 @@ impl DesktopBridge {
     }
 }
 
-/// Camera world coordinate for a viewport point (screen→tile center).
+/// Camera world coordinate for a viewport point (screen→tile center;
+/// Java `Tile.worldx()` convention: the centre is `x * tilesize`).
 fn camera_world_corner(camera: &Gd<MindCamera2D>, x: f32, y: f32) -> (f32, f32) {
     let tile = camera.bind().screen_to_tile(x as f64, y as f64);
     let unit = mind_core::config::TILESIZE as f32;
-    ((tile.x as f32 + 0.5) * unit, (tile.y as f32 + 0.5) * unit)
+    (tile.x as f32 * unit, tile.y as f32 * unit)
 }
 
 #[cfg(test)]

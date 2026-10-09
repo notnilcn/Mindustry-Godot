@@ -426,8 +426,17 @@ impl MindHud {
         {
             mission = rules.mission.clone().unwrap_or_default();
             let runtime = MapObjectivesRuntime::from_rules(&rules);
+            let core_items = self
+                .host
+                .clone()
+                .map(|mut host| host.call("core_items_json", &[]).to_string())
+                .and_then(|json| {
+                    serde_json::from_str::<std::collections::HashMap<String, i32>>(&json).ok()
+                })
+                .unwrap_or_default();
             let locale = HudLocale {
                 bundle: &self.bundle,
+                core_items: &core_items,
             };
             for index in 0..runtime.len() {
                 if !runtime.qualified(index) {
@@ -465,7 +474,7 @@ impl MindHud {
         };
         let composed = hud_text::status_text(&status, &self.bundle, &self.iconc);
         // The HUD labels are `MindRichLabel` (BBCode); translate Arc markup.
-        let bbcode = mind_core::ui::text::render_markup(&composed, &self.iconc);
+        let bbcode = mind_core::ui::text::render_markup_text_icons(&composed, &self.iconc);
         self.status_text = GString::from(bbcode.as_str());
 
         self.refresh_position();
@@ -556,6 +565,9 @@ impl MindHud {
 /// `Objective.text()` localization over the client bundle.
 struct HudLocale<'a> {
     bundle: &'a Bundle,
+    /// Live stored item counts (`state.rules.defaultTeam.items()`, read from the
+    /// core's item module) keyed by content name.
+    core_items: &'a std::collections::HashMap<String, i32>,
 }
 
 impl ObjectiveLocale for HudLocale<'_> {
@@ -572,6 +584,20 @@ impl ObjectiveLocale for HudLocale<'_> {
 
     fn get(&self, key: &str) -> String {
         self.bundle.get(key).to_owned()
+    }
+
+    fn item_count(&self, item: &str) -> i32 {
+        *self.core_items.get(item).unwrap_or(&0)
+    }
+
+    fn item_name(&self, item: &str) -> String {
+        let key = format!("item.{item}.name");
+        let name = self.bundle.get(&key);
+        if name == key {
+            item.to_owned()
+        } else {
+            name.to_owned()
+        }
     }
 }
 

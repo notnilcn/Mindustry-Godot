@@ -86,7 +86,7 @@ impl FogRenderer {
             uv: [0.0, 0.0, 1.0, 1.0],
             color: to_bits(color),
         };
-        if let Some(mesh) = build_mesh(&[quad], 0.0) {
+        if let Some(mesh) = build_mesh(&[quad], 0.0, false) {
             self.node.set_mesh(&mesh.upcast::<Mesh>());
         }
         // Events are consumed by the plan-12 static target once it lands.

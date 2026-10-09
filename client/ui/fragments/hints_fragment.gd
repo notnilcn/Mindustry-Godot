@@ -58,7 +58,7 @@ var _ui: Node = null
 var _last_camera := Vector2.ZERO
 var _last_zoom := 0.0
 
-@onready var _label: RichTextLabel = get_node_or_null("Panel/Layout/Label")
+@onready var _label: RichTextLabel = get_node_or_null("Panel/Layout/Box/Label")
 @onready var _skip: Button = get_node_or_null("Panel/Layout/Skip")
 
 

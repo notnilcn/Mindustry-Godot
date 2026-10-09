@@ -9,8 +9,8 @@ anchor_left = 1.0
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -640.0
-offset_top = -260.0
+offset_left = -312.0
+offset_top = -272.0
 grow_horizontal = 0
 grow_vertical = 0
 mouse_filter = 1
@@ -23,23 +23,23 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-theme_type_variation = &"defaultPane"
+theme_type_variation = &"black6"
 
-[node name="Layout" type="VBoxContainer" parent="Panel" unique_id=1488696584]
+[node name="Layout" type="HBoxContainer" parent="Panel" unique_id=1488696584]
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="Search" type="LineEdit" parent="Panel/Layout" unique_id=337038990]
-layout_mode = 2
-
-[node name="Categories" type="HBoxContainer" parent="Panel/Layout" unique_id=110755601]
-layout_mode = 2
-
 [node name="Scroll" type="ScrollContainer" parent="Panel/Layout"]
 layout_mode = 2
-size_flags_vertical = 3
+custom_minimum_size = Vector2(197, 194)
+size_flags_vertical = 0
 
 [node name="Blocks" type="GridContainer" parent="Panel/Layout/Scroll" unique_id=1692868212]
 layout_mode = 2
 size_flags_horizontal = 3
-columns = 10
+columns = 4
+
+[node name="Categories" type="GridContainer" parent="Panel/Layout" unique_id=110755601]
+layout_mode = 2
+size_flags_vertical = 0
+columns = 2

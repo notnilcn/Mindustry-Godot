@@ -59,6 +59,16 @@ pub trait ObjectiveLocale {
     fn map_locale(&self, _key: &str) -> Option<String> {
         None
     }
+    /// `state.rules.defaultTeam.items().get(item)` — the live stored count the
+    /// `Item`/`CoreItem` objective text shows. Defaults to 0 (headless/no live
+    /// team), matching a fresh sector core.
+    fn item_count(&self, _item: &str) -> i32 {
+        0
+    }
+    /// `UnlockableContent.localizedName` for an item (`item.<name>.name`).
+    fn item_name(&self, item: &str) -> String {
+        item.to_owned()
+    }
 }
 
 /// Pass-through locale used by headless tests and until plan 14 wires a bundle.
@@ -523,14 +533,37 @@ fn objective_text(objective: &MapObjective, locale: &dyn ObjectiveLocale) -> Opt
         MapObjective::Produce(o) => {
             Some(locale.format("objective.produce", &[o.content.as_deref().unwrap_or("")]))
         }
-        MapObjective::Item(o) => Some(locale.format(
-            "objective.item",
-            &[o.item.as_deref().unwrap_or(""), &o.amount.to_string()],
-        )),
-        MapObjective::CoreItem(o) => Some(locale.format(
-            "objective.coreitem",
-            &[o.item.as_deref().unwrap_or(""), &o.amount.to_string()],
-        )),
+        MapObjective::Item(o) => {
+            let item = o.item.as_deref().unwrap_or("");
+            // `ItemObjective.text()`: stored count, amount, `emoji() + " "`,
+            // localized name (`MapObjectives.java:377`). The emoji is the
+            // content icon glyph: `:name:` resolves through the bundle
+            // `format_icons` pass against `Iconc` (`icons.properties`).
+            Some(locale.format(
+                "objective.item",
+                &[
+                    &locale.item_count(item).to_string(),
+                    &o.amount.to_string(),
+                    &format!(":{}: ", item),
+                    &locale.item_name(item),
+                ],
+            ))
+        }
+        MapObjective::CoreItem(o) => {
+            let item = o.item.as_deref().unwrap_or("");
+            // `CoreItemObjective.text()` (`MapObjectives.java:410`): same order;
+            // the port reads the core's stored count until `stats.coreItemCount`
+            // lands.
+            Some(locale.format(
+                "objective.coreitem",
+                &[
+                    &locale.item_count(item).to_string(),
+                    &o.amount.to_string(),
+                    &format!(":{}: ", item),
+                    &locale.item_name(item),
+                ],
+            ))
+        }
         MapObjective::BuildCount(o) => Some(locale.format(
             "objective.build",
             &[o.block.as_deref().unwrap_or(""), &o.count.to_string()],

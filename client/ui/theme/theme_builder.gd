@@ -75,9 +75,16 @@ static func _apply_manifest(theme: Theme, manifest: Dictionary) -> void:
 static func _style_variation(theme: Theme, base: String, name: String) -> void:
 	match base:
 		"Button":
-			theme.set_stylebox("normal", name, flat(Color(0.18, 0.20, 0.24, 1.0)))
-			theme.set_stylebox("hover", name, flat(Color(0.24, 0.27, 0.32, 1.0)))
-			theme.set_stylebox("pressed", name, flat(Color(0.13, 0.15, 0.18, 1.0)))
+			if name == "nonet":
+				# `Styles.nonet`: no background/border at all (hint skip).
+				theme.set_stylebox("normal", name, StyleBoxEmpty.new())
+				theme.set_stylebox("hover", name, StyleBoxEmpty.new())
+				theme.set_stylebox("pressed", name, StyleBoxEmpty.new())
+				theme.set_stylebox("disabled", name, StyleBoxEmpty.new())
+			else:
+				theme.set_stylebox("normal", name, flat(Color(0.18, 0.20, 0.24, 1.0)))
+				theme.set_stylebox("hover", name, flat(Color(0.24, 0.27, 0.32, 1.0)))
+				theme.set_stylebox("pressed", name, flat(Color(0.13, 0.15, 0.18, 1.0)))
 			theme.set_color("font_color", name, Color(0.92, 0.92, 0.92))
 		"PanelContainer":
 			if name == "fullDialog":
@@ -90,8 +97,13 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 				empty.content_margin_top = 4.0
 				empty.content_margin_bottom = 4.0
 				theme.set_stylebox("panel", name, empty)
+			elif name == "none":
+				theme.set_stylebox("panel", name, StyleBoxEmpty.new())
 			else:
-				theme.set_stylebox("panel", name, flat(MindStyles.GRAY_PANEL))
+				# Named drawables carry their Java alpha (`Styles.black`,
+				# `black3`, `black5`, `black6`, `black8`, `black9`); the rest of
+				# the manifest group keeps the pane colour.
+				theme.set_stylebox("panel", name, flat(_drawable_color(name)))
 		"RichTextLabel":
 			theme.set_color("default_color", name, Color(0.92, 0.92, 0.92))
 		"HSlider":
@@ -121,3 +133,23 @@ static func flat(color: Color) -> StyleBoxFlat:
 	box.corner_radius_bottom_left = 3
 	box.corner_radius_bottom_right = 3
 	return box
+
+
+## `Styles` drawable colour: the named translucent blacks keep their Java
+## alpha; every other drawable stays the pane colour.
+static func _drawable_color(name: String) -> Color:
+	match name:
+		"black":
+			return MindStyles.BLACK
+		"black3":
+			return MindStyles.BLACK_3
+		"black5":
+			return MindStyles.BLACK_5
+		"black6":
+			return MindStyles.BLACK_6
+		"black8":
+			return MindStyles.BLACK_8
+		"black9":
+			return MindStyles.BLACK_9
+		_:
+			return MindStyles.GRAY_PANEL
