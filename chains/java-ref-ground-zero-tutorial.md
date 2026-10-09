@@ -15,7 +15,7 @@ preconditions:
     before forcing a fresh profile.
   - Java only: the Godot client stays down for the whole soak.
 tools: [computer-mcp_mouse_move, computer-mcp_click, computer-mcp_drag, computer-mcp_key_press, computer-mcp_key_down, computer-mcp_key_up, window_ctl.py, capture_screen.py]
-last_verified: R00 recorded 2026-10-09 in runs/20261009-065416-ref-ground-zero (fresh launch -> tutorial start); R01-R16 pending
+last_verified: R00-R06 recorded 2026-10-09 (runs/20261009-065416-ref-ground-zero); cold-boot R01 resume replay (twin) 2026-10-10 runs/20261009-150509-PAR-0037-twin (JVM pids 193769/197845, Java 2cd7aee)
 ---
 
 # java-ref-ground-zero-tutorial
@@ -372,3 +372,47 @@ Zero hex > Go (R01 flow) → this row.
   sector save exists; record `profile: resumed` on the item.
 - Long-timer rows may be paused after the preceding row, with the wait resumed
   in the next iteration; the chunked sleeps and captures are identical.
+
+## Twin resume replay — cold boot to the resumed world (2026-10-10, PAR-0037 twin)
+
+Reproduced R01 from a **cold client boot** (no prior session) against the
+installed checkpoint. Artifacts + structured settle:
+`runs/20261009-150509-PAR-0037-twin/` (JVM pids 193769/197845).
+
+0. **Checkpoint install (client down).** Move the live
+   `parity-java-home/.local/share/Mindustry/saves/sector-serpulo-170*.msav`
+   aside, then copy
+   `runs/20261009-065416-ref-ground-zero/checkpoints/r01-sector-serpulo-170.msav`
+   to `<saves>/sector-serpulo-170.msav` (sha256 `95b20b88…`). Decompress-verify
+   the meta (`java/verify_msav.py`): `,loadout:[],`,
+   `objectives[0] {class:Item, @gz.mine, amount:15}`, `sectorPreset groundZero`.
+1. **Hint-flag caveat.** The resume frame's left hint box is governed by the
+   persisted `desktopMove-hint-done` bool in `settings.bin` (set true by any
+   earlier WASD movement). The stored reference `r01-05-resume.png` was captured
+   while it was **false**; with `true` the fresh frame differs from the reference
+   in that region only (meanabs 27 there, ≤4 elsewhere). Reset it offline while
+   the client is stopped with the tiny arc `Settings` program kept in the twin
+   run dir:
+
+   ```bash
+   /usr/lib/jvm/java-17-openjdk-amd64/bin/java \
+     -cp "../Mindustry/desktop/build/libs/Mindustry.jar:$RUN/java/settingsfix" \
+     SetSettings "$PWD/parity-java-home/.local/share/Mindustry" desktopMove-hint-done false
+   # SetSettings.java: new arc.Settings(); setDataDirectory(new Fi(dir)); load(); put(k, v); forceSave();
+   ```
+
+   Back up `settings.bin` first (`java/settings-pre-rerun.bin`). Leave the flag
+   false to keep the reference frame reproducible.
+2. **Navigation** (screen = image + (50,98); window via `move Mindustry 45 69`):
+   Play (280,247) → Campaign (527,249) → [chooser only if `campaignselect`
+   false: Serpulo (464,338) → OK (627,705)] → Ground Zero hex (627,420) →
+   `Go` (626,714) → 6 s retake + 7 s final. The sector panel action reads `Go`
+   while a save exists (`Launch` otherwise). Screen coords verified 1152x648,
+   client +50+98, 2026-10-10.
+3. **Quit:** Escape (split `key_down`/`key_up`) → Save & Quit (626,508) →
+   confirm OK (726,456) → menu Quit (305,598); JVM exits in ~1 s.
+
+Verified: fresh `java/resume-2.png` vs the stored reference = changed 0.00507,
+mean_abs [0.53,0.49,0.41], coarse 0.21, palette 0.0066; status/copper/hint
+regions ≤0.01. Residual = block-pane icons (later research state) + the
+animated objective-marker blob (`diff/java2-vs-reference-heatmap.png`).

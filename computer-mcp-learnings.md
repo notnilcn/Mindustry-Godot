@@ -507,3 +507,28 @@ displays); those paths no longer exist, but the workarounds still apply.
   variable assignment outside the backgrounded group (or use a subshell).
 - Evidence: `runs/20261009-141406-PAR-0056-twin/` (`java/step-00..04*.png`,
   `diff/step-0*.json`, `java/game.log` readiness 2597 ms, JVM pid 134983).
+
+## 2026-10-10 — PAR-0037 twin Java leg: the resume frame's missing hint box is a persisted settings flag, not a render difference
+
+- Symptom: a cold-boot resume of the installed `r01-sector-serpulo-170.msav`
+  rendered 97.6% identical to the stored reference frame, but the left hint box
+  (`Use [WASD] to move.` + Skip) was absent (that region meanabs 27; everything
+  else <=4; full changed_fraction 0.024 vs 0.005 after the fix).
+- Cause: `HintsFragment.DefaultHint.finished()` reads
+  `Core.settings.getBool("<name>-hint-done")`; the reference soak's R02 movement
+  set `desktopMove-hint-done=true`, so the hint never shows again on that
+  profile even though the save resumes at objective 0.
+- Workaround (client stopped, offline): run a tiny Java program against the
+  Mindustry jar —
+  `new arc.Settings(); s.setDataDirectory(new Fi(dir)); s.load();
+  s.put("desktopMove-hint-done", false); s.forceSave();` — kept at
+  `runs/20261009-150509-PAR-0037-twin/java/settingsfix/SetSettings.java`
+  (settings.bin backed up as `java/settings-pre-rerun.bin`). After the reset the
+  fresh frame reproduces the stored reference: changed 0.00507, mean_abs
+  [0.53,0.49,0.41], hint/status/copper regions <=0.01.
+- The flag was left false so the captured frame stays reproducible from the
+  profile; restore the backup to revert.
+- Note: this run's Play click landed on the first try (mouse_move before click);
+  the earlier "first click swallowed" friction did not recur.
+- Run: `runs/20261009-150509-PAR-0037-twin/` (JVM pids 193769 run 1, 197845 run 2;
+  both quit gracefully via menu Quit).

@@ -1473,3 +1473,34 @@ those paths no longer exist, but the workarounds still apply.
   block/render metadata headlessly (`mind-headless content ...`) or from the source instead.
   Recover with `godot_game stop` + `play` (re-walk/re-load).
 - Run: `runs/20261009-132040-PAR-0037/` (round 13 leg).
+
+## 2026-10-10 — PAR-0037 twin Godot leg: three eval-timeout pins (for-loop, get_viewport hover, if-block hide) — single-statement evals are the safe form
+
+- Symptom: three `godot_exec eval` calls timed out (15 s) and left
+  `godot_debugger sessions` -> `paused: true` while trivial evals still
+  answered; each cost a `godot_game stop` + `play` recovery and a re-walk.
+  Failing bodies: (a) `for ch in dl.get_children():` building a visibility list
+  (same class as the round-9 `tile_blocks()` + `for` timeout); (b) a hover probe
+  starting `var c = get_viewport().gui_get_hovered_control()` — the eval node is
+  not in a viewport, so the call errors on a null receiver; (c) a
+  statement-level `if n != null: n.visible = false` hiding
+  `HudGroup/performance`, around which the game log recorded
+  `Parameter "mesh" is null.` (engine error) at the same minute.
+- Workaround: keep every eval a single statement or a pure ternary chain. The
+  same operations as single-statement evals returned instantly and cleanly (both
+  overlay hides; per-node probes). Hover reads from evals must use
+  `get_tree().root.gui_get_hovered_control()`, not `get_viewport()`. Recover a
+  pinned loop with `stop` + `play`; the campaign save slot survives, only the UI
+  walk must be replayed.
+- Evidence: `runs/20261009-150509-PAR-0037-twin/` (`godot/log-errors.json`,
+  `run.json` game pids 199781/200047/201354/202345/204104; the final run hid
+  both overlays with single-statement evals and captured the clean frame).
+
+## 2026-10-10 — PAR-0037 twin: the chooser OK -> `_selected_sector == -1` race recurred once and self-resolved on the next probe
+
+- Symptom: after Play -> Campaign -> Serpulo card -> OK, the immediate probe read
+  `_selected_sector: -1` / action `@sectors.launch` (round-10 class); the next
+  probe in a separate call read `sel 15`, `groundZero`, `@sectors.go` with no
+  re-walk. In the following walk the same click landed with `sel 15` immediately.
+- Workaround unchanged: never resolve a click from a `-1` probe; re-probe once.
+- Run: `runs/20261009-150509-PAR-0037-twin/`.
