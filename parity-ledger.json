@@ -1,6 +1,6 @@
 {
  "schema": "mindustry-godot/parity-ledger@2",
- "updated": "2026-10-09T10:11:22Z",
+ "updated": "2026-10-09T10:15:11Z",
  "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction chains. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
  "focus": {
   "kind": "area",
@@ -8892,7 +8892,7 @@
    "parent": "PAR-0019",
    "status": "in-progress",
    "chain": "chains/java-ref-ground-zero-tutorial.md",
-   "updated": "2026-10-09T10:11:22Z",
+   "updated": "2026-10-09T10:15:11Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
     "to": "resumed Ground Zero tutorial (objective 0) via the planet page's Go",
@@ -9199,10 +9199,16 @@
        "145,55_snow": 22.57,
        "120,60_snow": 7.81
       }
-     }
+     },
+     "status": "interrupted-in-flight",
+     "inflight": [
+      "hints_fragment.gd (working tree, uncommitted): the 15s timed auto-advance is replaced by Java's trigger model - hints now persist until their trigger fires; `desktopMove` completes when the camera moves (>0.5px, the port has no player entity so the shared WASD bindings pan the camera) and `zoom` when the camera zoom changes. NOT yet run through the GDScript import gate or the Godot leg.",
+      "Floor-edge investigation INCONCLUSIVE: ice-bottom-edge scanlines differed up to 32px (1 tile) at x1100, but the camera mapping derived from orange-pixel centroids was contaminated (the Java mech and the copper ore both match the orange mask), so the tile coordinates used for those comparisons are not trustworthy. Establish a clean landmark before concluding a floor-content difference.",
+      "Round-9 next steps remain: validate the hint edits (GODOT_BIN=~/.local/bin/godot bash tools/godot.sh --headless --editor --quit --path client), then the leg; then the floor edge/content question with a verified mapping; then the bottom-right icon bar (Java HudFragment lines 370-445, mobile buttons; desktop set to re-derive), marker label style, ore overlay, core sprite, objective text 4-arg format."
+     ]
     },
     "commit": null,
-    "summary": "round 8 matched the camera to the reference viewpos via the core-anchor spawn convention; round 9 targets ice/floor edge rendering and the hint box/icon bar",
+    "summary": "round 9 interrupted in flight (hint trigger model edited, unverified; floor-edge question open pending a clean coordinate landmark)",
     "run": "runs/20261009-085712-PAR-0037/"
    },
    "verified": null,

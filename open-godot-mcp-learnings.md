@@ -1214,6 +1214,17 @@ those paths no longer exist, but the workarounds still apply.
   positive that cost analysis time in rounds 7-8. Assert
   `0 <= x < 1152` and `0 <= y < 648` for both crop corners (or use
   `crop(box)` only after clamping) before trusting any tile comparison.
+- Color-mask landmarks for camera mapping must be unique: an "orange" mask
+  (r>150, 60<g<170, b<110) matches the Java player mech AND the copper ore as
+  well as the core's centre, so centroid-derived cameras came out inconsistent
+  (round 9: implied Java camera (1030.8,447.7) vs the known viewpos
+  (1032.0,440.3)). Pick a landmark with no confusers, or verify the mapping
+  against a second independent feature, before using screen->tile math for a
+  verdict.
+- Orphaned game processes survive `godot_game stop` + editor kills across many
+  rounds and burn ~30-200% CPU each (rounds 1-9 left seven of them). After a
+  session ends, sweep `pgrep -f "Mindustry-Godot/client" | grep -v session2`
+  (leave sibling-loop worktrees alone) and kill the game children.
 - The planet dialog sector panel exposes raw bundle markup in
   `RichTextLabel.text` (`[scarlet]Under attack!`,
   `[red]:warning:[accent] Sector currently under attack...`) and renders it
