@@ -20,6 +20,7 @@ pub mod schedule;
 pub mod unit_runtime;
 pub mod world_apply;
 
+use bevy_ecs::entity::Entity;
 use bevy_ecs::schedule::Schedule;
 use serde_json::Error as JsonError;
 
@@ -174,6 +175,8 @@ pub struct Sim {
     block_runtime: Option<runtime::SimRuntime>,
     /// Currently possessed unit (`unitControl`); `None` means the player unit.
     controlled_unit: Option<i32>,
+    /// The campaign player unit entity (`Player.unit()`); runtime-only.
+    player_unit: Option<Entity>,
     /// Currently selected controllable building (`buildingControlSelect`).
     control_building: Option<TilePos>,
 
@@ -209,6 +212,7 @@ impl Sim {
             world_apply: None,
             block_runtime: None,
             controlled_unit: None,
+            player_unit: None,
             control_building: None,
             seed,
             selected_block: BlockId::STONE_WALL,

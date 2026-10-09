@@ -98,18 +98,34 @@ impl ICamera2D for MindCamera2D {
         self.follow_world();
 
         let delta_frames = (delta * 60.0) as f32;
+        // Possessed unit: the move axis drives the unit (`MindSimHost` uploads
+        // it each tick) and the camera follows the unit instead of panning
+        // (`DesktopInput.updateMovement` / `:283-289`).
+        let player = self
+            .host
+            .as_ref()
+            .and_then(|host| host.bind().player_unit_position());
         let (axis_x, axis_y) = self.pan_axis();
         let boost = self.boost_pressed();
-        if axis_x != 0.0 || axis_y != 0.0 || self.pan_pressed() {
+        if let Some((player_x, player_y)) = player {
+            self.follow_target = Some((player_x, player_y));
+            if self.pan_pressed() {
+                // Middle-mouse pan holds the lock off until released.
+                self.follow_target = None;
+            }
+        } else if axis_x != 0.0 || axis_y != 0.0 || self.pan_pressed() {
             // Manual pan detaches the follow lock (`DesktopInput.panning`).
             self.follow_target = None;
         }
         if let Some((target_x, target_y)) = self.follow_target {
             self.camera.follow(target_x, target_y, true, delta_frames);
         }
-        self.camera.pan_axis(axis_x, axis_y, delta_frames, boost);
+        if player.is_none() {
+            self.camera.pan_axis(axis_x, axis_y, delta_frames, boost);
+        }
 
-        if self.mouse_inside
+        if player.is_none()
+            && self.mouse_inside
             && self.gameplay_active()
             && let Some(viewport) = self.base().get_viewport()
         {

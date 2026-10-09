@@ -1000,6 +1000,12 @@ impl DesktopBridge {
             return;
         }
         if self.controller.state.block.is_none() {
+            // `InputHandler.tryStopMine`/`tryBeginMine`: a no-selection left
+            // press on a mineable tile orders the player unit to mine it (and a
+            // press on the active tile stops mining).
+            if self.try_mine_at(x, y) {
+                return;
+            }
             // No placement selected: a left tap is `tileTapped`
             // (`InputHandler.java:1973`), which owns config/inventory.
             self.tile_tapped(x, y);
@@ -1027,6 +1033,27 @@ impl DesktopBridge {
             DragKind::SelectRect => self.commit_select(drag),
             DragKind::Break => {}
         }
+    }
+
+    /// `InputHandler.tryStopMine`/`tryBeginMine`: toggles the player unit's
+    /// mine order for a no-selection left press. Returns `true` when consumed.
+    fn try_mine_at(&self, x: i32, y: i32) -> bool {
+        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+            return false;
+        };
+        let Some(mut host) = self.host.clone() else {
+            return false;
+        };
+        let mut guard = host.bind_mut();
+        if !guard.player_can_mine(tx, ty) {
+            return false;
+        }
+        if guard.player_mine_target() == Some((tx, ty)) {
+            guard.set_player_mine(None);
+        } else {
+            guard.set_player_mine(Some((tx, ty)));
+        }
+        true
     }
 
     /// `tileTapped` (`InputHandler.java:1973`): a left tap on a placed building

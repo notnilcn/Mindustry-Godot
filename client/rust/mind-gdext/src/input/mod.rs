@@ -749,6 +749,12 @@ impl MindInput {
         Vector2::new(x, y)
     }
 
+    /// Whether a placement block is selected (`state.block`); `false` after the
+    /// deselect key clears it (`InputHandler.tryBeginMine` gate).
+    pub fn block_selected(&self) -> bool {
+        self.bridge.controller.state.block.is_some()
+    }
+
     /// `boost` binding held (`MindCamera2D` poll).
     #[func]
     pub fn boost_pressed(&self) -> bool {

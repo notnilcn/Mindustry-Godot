@@ -1253,3 +1253,106 @@ those paths no longer exist, but the workarounds still apply.
   `get_node("/root/Spine/World/Camera2D").recenter_player()` (snaps to and
   follows the best core). Run: `runs/20261009-052658-seed-campaign/`
   (iteration 4, PAR-0031).
+
+## 2026-10-09 — session-2 worktree missing generated asset outputs (placeholder-quad renderer); exec timeout after chooser OK
+
+- Symptom: session-2 game boot logs `[E] [assets] missing manifest
+  .../assets/sprites/sprites.atlas.json`, `[W] MindWorldRenderer: atlas
+  manifest unavailable; using placeholder quads`, `[W] [shaders] index
+  missing: .../assets/shaders/shader.index.json`. `assets/sprites/` has 12
+  entries vs 19 in the main checkout; the generated pipeline outputs
+  (`sprites*.png`, `sprites.atlas.json`, `fallback/`, `block_colors.png`,
+  `assets/icons/icon_codes.json`, `assets/sounds.index.json`, `assets/locales`,
+  `assets/shaders/godot/`, `assets/shaders/shader.index.json`) are gitignored
+  and were never seeded by `tools/parity-session.sh` (it copies only
+  `client/bin/rust` and `client/.godot`). Workaround: run `bash tools/pack.sh
+  pack` in the session worktree (self-contained; do not copy outputs from
+  another checkout that may be on a different commit; `tools/pack.sh` is not
+  executable in the worktree, invoke it with `bash`). Run:
+  `runs/20261009-085822-PAR-0044/`.
+- Symptom: a `godot_exec` eval timed out after 15 s immediately after clicking
+  OK in the `campaign.select` chooser (planet page opening); the game stayed
+  alive (fps 90, pid unchanged) and later evals answered. Workaround: retry
+  after the dialog transition settles; avoid evals during planet-view load.
+  Run: `runs/20261009-085822-PAR-0044/`.
+
+## 2026-10-09 — `godot_exec` eval with a nested `var` in an `if` block pauses the game (break-on-error)
+
+- Symptom: an eval of the shape `if dlg:\n vis = dlg.visible\n var t =
+  dlg.get_node_or_null(...)` timed out after 15 s and left
+  `godot_debugger sessions` -> `paused: true` while a trivial eval still
+  answered and `Time.get_ticks_msec()` advanced but `SimHost.get_tick()` was
+  frozen. Two evals in a row; every retry of the same body re-broke.
+- Cause: the eval wrapper rejects/mangles a `var` declaration nested inside an
+  `if` block; the body errors, break-on-error pins the frame loop.
+- Workaround: keep every declaration at the top level of the eval body and
+  guard later:
+  `var vis = false\nif dlg: vis = dlg.visible\nvar tn = null\nif dlg: tn = ...`.
+  After a timeout always check `godot_debugger sessions` and recover with
+  `godot_game stop` + `play` (re-stamp the pid); `resume` re-breaks.
+- Run: `runs/20261009-085822-PAR-0044/`.
+
+## 2026-10-09 — launch path: 3-arg `start_sector` call errors and pauses the game (break-on-error)
+
+- Symptom: clicking Launch in the `launch_loadout` dialog logged
+  `godot-rust function call failed: MindCampaign::start_sector() Reason: function
+  has 2 parameters, but received 3 arguments` + `Error calling method from
+  'callv'`; the sector still loaded and `spawn_player_unit: alpha at (1028.0,
+  436.0)` ran, but `godot_debugger sessions` showed `paused: true` and
+  `SimHost.get_tick()` froze while `Time.get_ticks_msec()` advanced.
+- Cause: `client/ui/dialogs/planet_dialog.gd::_launch` called
+  `campaign.callv("start_sector", [planet, sector, loadout])` when a loadout
+  index was selected; the real 3-arg entry point is
+  `MindCampaign.start_sector_with_loadout(planet, sector, loadout_json)` and the
+  dialog only has the index (no item stacks). The error aborted the call, the
+  `result == null` fallback then launched without the loadout, yet the engine had
+  already broken.
+- Workaround/fix: the dialog now calls the 2-arg `start_sector` directly
+  (loadout selection remains unimplemented; tracked by PAR-0054). Recover a
+  paused game with `godot_game stop` + `play` (re-walk the launch).
+- Run: `runs/20261009-092821-PAR-0044/`.
+
+## 2026-10-09 — `godot_input sequence` frame_delay is process frames, not sim ticks; timer hints advance across tool gaps
+
+- Symptom: a 54-frame S hold moved the player ~40 tiles (~108 sim ticks) instead of
+  the reference's ~20 tiles; the after-S capture showed `hint.desktopShoot`
+  instead of `hint.zoom` because 15 s of wall time passed between the movement
+  call and the screenshot (assistant think time), so the timer auto-advanced.
+- Cause: `sequence` awaits `get_tree().process_frame`, so the hold length is
+  wall time = frames/fps; the sim catch-up pumps ~60 ticks/s regardless. And
+  the hint driver's 15 s fallback keeps running between tool calls.
+- Workaround: drive exact sim ticks with `set_paused(true)` + `SimHost.step(54)`
+  + `set_paused(false)` between key down/up, and keep movement + capture in ONE
+  `execute` block (pad with a few dummy evals for the camera lerp to settle);
+  never rely on think-time gaps for settle.
+- Run: `runs/20261009-092821-PAR-0044/`.
+
+## 2026-10-09 — world clicks are consumed by `MindInput`; `MindSimHost::unhandled_input` never fires
+
+- Symptom: `godot_input mouse_button` on a world tile (resolved via
+  `Camera2D.tile_to_screen`, `coords: viewport`) placed nothing and produced no
+  `mouse tile ... applied` log; `gui_get_hovered_control()` reported
+  `HudGroup/hud` (mouse_filter PASS), and setting `hud`/`UiRoot` to IGNORE
+  changed nothing.
+- Cause: `mind-gdext/src/input/mod.rs::MindInput::input` handles every world
+  mouse press itself: it skips when a STOP-filter control owns the point, then
+  calls `bridge.handle(...)` and `mark_input_handled()` (viewport
+  `set_input_as_handled`), so `MindSimHost::unhandled_input` is dead code for
+  real clicks. World-click semantics (placement drags, `tileTapped`) live in
+  `mind-gdext/src/input/desktop.rs` and enqueue `SimCommand`s through
+  `enqueue_commands` -> `MindSimHost::enqueue_sim_command`.
+- Workaround: implement new world-click behavior in `desktop.rs` (this is where
+  PAR-0045's `tryBeginMine`/`tryStopMine` mining order landed), never in
+  `unhandled_input`.
+- Run: `runs/20261009-095320-PAR-0045/`.
+
+## 2026-10-09 — editor died mid-leg; orphan game process from a killed editor
+
+- Symptom: `godot_exec` started failing with `BRIDGE_NOT_CONNECTED
+  (host=127.0.0.1:6980)`; `pgrep` showed no editor for the session worktree but a
+  stale game process (`--editor-pid 77445` from an earlier relaunch) still alive.
+- Workaround: kill the orphan game process, relaunch the editor with
+  `runs/20261009-092821-PAR-0044/relaunch-editor.sh`; re-walk from the menu.
+- Also: a GDScript call to a non-`#[func]` Rust method (`player_can_mine`) errors
+  and trips break-on-error; `godot_debugger resume` does not stick — recover with
+  `godot_game stop` + `play`. Run: `runs/20261009-095320-PAR-0045/`.

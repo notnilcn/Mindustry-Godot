@@ -17,6 +17,7 @@ use godot::obj::{Base, Singleton};
 use godot::prelude::*;
 
 use crate::camera::MindCamera2D;
+use crate::input::MindInput;
 use crate::settings;
 use mind_core::audio::{AudioSinkRes, SharedAudioLog};
 use mind_core::command::Command;
@@ -81,6 +82,9 @@ pub struct MindSimHost {
     audio_log: SharedAudioLog,
     /// Rules resolved by the last `load_sector` (preset map/generator/save).
     sector_rules: Option<Rules>,
+    /// Sibling `Input`; the player move axis is uploaded to the sim each frame
+    /// (`DesktopInput.updateMovement`).
+    input: Option<Gd<MindInput>>,
     /// Enemy spawn-overlay count of the last loaded sector grid.
     sector_spawns: i32,
 }
@@ -107,6 +111,7 @@ impl INode for MindSimHost {
             pending_commands: VecDeque::new(),
             audio_log: SharedAudioLog::new(),
             sector_rules: None,
+            input: None,
             sector_spawns: 0,
         }
     }
@@ -134,6 +139,11 @@ impl INode for MindSimHost {
         if steps == 0 {
             return;
         }
+        // `DesktopInput.updateMovement`: the axis reaches the player unit each
+        // tick; the same axis no longer pans the camera while a player exists
+        // (`MindCamera2D::process`).
+        let (axis_x, axis_y) = self.player_axis();
+        self.sim.set_player_input(axis_x, axis_y);
         self.advance_steps(steps);
         self.emit_state();
         self.emit_world_changed();
@@ -227,6 +237,10 @@ impl MindSimHost {
         // behaviors. Scenario loads keep the frozen P0 path on purpose: the
         // committed checksum goldens are recorded against `Sim::from_scenario`.
         self.install_live_block_runtime();
+
+        // Sibling `Input` owns the binding state; the player move axis is read
+        // here each frame and uploaded to the sim (`DesktopInput.updateMovement`).
+        self.input = self.base().try_get_node_as::<MindInput>("../Input");
 
         if let Some(saved) = settings::read()
             && let Some(name) = saved.selected_block
@@ -1213,9 +1227,119 @@ impl MindSimHost {
         first_core_position(&self.sim.grid, self.content_snapshot.as_ref()?)
     }
 
+    /// Binding-driven move axis from the sibling `Input`. `MindInput.pan_axis`
+    /// is the shared `move_x`/`move_y` axis; with a player unit it drives the
+    /// unit instead of the camera (`DesktopInput.updateMovement`).
+    fn player_axis(&self) -> (f32, f32) {
+        let Some(input) = self.input.clone() else {
+            return (0.0, 0.0);
+        };
+        let axis = input.bind().pan_axis();
+        (axis.x, axis.y)
+    }
+
+    /// Player unit world position (`Player` mirror) for the camera follow.
+    pub fn player_unit_position(&self) -> Option<(f32, f32)> {
+        self.sim.player_unit_position()
+    }
+
+    /// `InputHandler.canMine` for the player unit (world-input seam).
+    pub fn player_can_mine(&self, x: i16, y: i16) -> bool {
+        self.sim.player_can_mine(x, y)
+    }
+
+    /// The player unit's ordered mine tile (world-input seam).
+    pub fn player_mine_target(&self) -> Option<(i16, i16)> {
+        self.sim.player_mine_tile().map(|tile| (tile.x(), tile.y()))
+    }
+
+    /// Sets/clears the player mine order (`tryBeginMine`/`tryStopMine`).
+    pub fn set_player_mine(&mut self, tile: Option<(i16, i16)>) {
+        self.sim
+            .set_player_mine_tile(tile.map(|(x, y)| mind_core::world::TilePos::new(x, y)));
+    }
+
+    /// Spawns the campaign player unit at the best core (`CoreBlock.playerSpawn`
+    /// → `UnitTypes.alpha`, rotation 90). Idempotent per world load.
+    #[func]
+    pub fn spawn_player_unit(&mut self) -> bool {
+        if self.sim.player_unit_position().is_some() {
+            return true;
+        }
+        let Some((x, y)) = self.best_core_position() else {
+            log::warn!("spawn_player_unit: no core in the loaded sector");
+            return false;
+        };
+        // `Team.sharded` (team 0) is the default player team.
+        let spawned = self.sim.spawn_player_unit("alpha", 0, x, y, 90.0).is_some();
+        if spawned {
+            log::info!("spawn_player_unit: alpha at ({x:.1}, {y:.1})");
+        }
+        spawned
+    }
+
+    /// Whether the player possesses a unit (`Player.unit() != null`).
+    #[func]
+    pub fn has_player_unit(&self) -> bool {
+        self.sim.player_unit().is_some()
+    }
+
+    /// Whether the move axis reached the player unit
+    /// (`HintsFragment.desktopMove` trigger).
+    #[func]
+    pub fn player_unit_moved(&self) -> bool {
+        self.sim.player_unit_moved()
+    }
+
+    /// The player unit's ordered mine tile as `[x, y]`, or `[]` when idle.
+    #[func]
+    pub fn player_mine_tile(&self) -> Vec<i32> {
+        self.sim
+            .player_mine_tile()
+            .map(|tile| vec![tile.x() as i32, tile.y() as i32])
+            .unwrap_or_default()
+    }
+
+    /// Total ore produced by the player unit (tutorial counter evidence).
+    #[func]
+    pub fn player_mined_count(&self) -> i64 {
+        self.sim.player_mined_count()
+    }
+
     /// Read-only world grid for the plan-16 floor/block bakers.
     pub fn grid(&self) -> &mind_core::world::WorldGrid {
         &self.sim.grid
+    }
+
+    /// Live unit draw list — `(x, y, rotation degrees, region name, flying,
+    /// low altitude)` — for the plan-16 unit pass. Empty without the runtime.
+    pub fn unit_draws(&self) -> Vec<(f32, f32, f32, String, bool, bool)> {
+        use mind_core::entities::comp::Pos;
+        use mind_core::entities::comp::unit::comp::{UnitCore, UnitTypeComp};
+        let Some(runtime) = self.sim.unit_runtime() else {
+            return Vec::new();
+        };
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return Vec::new();
+        };
+        runtime
+            .units
+            .iter()
+            .filter_map(|entity| {
+                let pos = self.sim.ecs.0.get::<Pos>(*entity)?;
+                let core = self.sim.ecs.0.get::<UnitCore>(*entity)?;
+                let type_comp = self.sim.ecs.0.get::<UnitTypeComp>(*entity)?;
+                let def = content.unit(type_comp.type_id)?;
+                Some((
+                    pos.x,
+                    pos.y,
+                    core.rotation,
+                    def.name.clone(),
+                    def.flying,
+                    def.low_altitude,
+                ))
+            })
+            .collect()
     }
 
     /// Plan-18 sim audio log (`MindAudio` drains it; Rust-only seam).

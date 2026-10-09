@@ -56,6 +56,10 @@ pub struct ResolvedRegion {
     pub texture: Option<Gd<Texture2D>>,
     /// Normalized `[u0, v0, u1, v1]`.
     pub uv: [f32; 4],
+    /// Region width in pixels.
+    pub w: f32,
+    /// Region height in pixels.
+    pub h: f32,
 }
 
 /// One baked quad.
@@ -144,6 +148,8 @@ impl RegionResolver {
                 (slice[0] + slice[2]) as f32 / width,
                 (slice[1] + slice[3]) as f32 / height,
             ],
+            w: slice[2] as f32,
+            h: slice[3] as f32,
         })
     }
 }
