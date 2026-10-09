@@ -541,8 +541,9 @@ Append new items with the next `PAR-####` id and set `parent`/`surface`/
 run), `reference` (Java evidence recorded by a soak, §2b; the Godot walk is
 still open), `in-progress`, `mismatch`, `fixing`, `verified` (closed —
 `verified.mode` is `seed` for a sweep observation, `chain` for a full both-leg
-pass, or `reference` for a Godot-only pass against a stored Java frame),
-`blocked`, `wontfix`.
+pass, `reference` for a Godot-only pass against a stored Java frame, or `twin`
+for the twin-verifier subagent's fresh Java+Godot pair — the only mode that
+settles a reference-backed item), `blocked`, `wontfix`.
 A `verified.mode: "seed"` item may be reopened if a later chain run contradicts
 it. Its `chain` may point at `chains/seed-survey.md` until the item is re-run,
 fixed, or needs item-specific preconditions, at which point write its own file.
