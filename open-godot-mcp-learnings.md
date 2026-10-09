@@ -1570,3 +1570,13 @@ those paths no longer exist, but the workarounds still apply.
   marker (`godot/crop-target-preview.png` empty); the press+release at the same viewport
   point placed at (136,52). Judge placement from `get_state_json`, not the preview.
 - Run: `runs/20261009-162304-PAR-0046-twin/` (final pid 280832; first attempt 279613).
+
+## 2026-10-10 — PAR-0049: port research persists across launches; the fork needs `clear_research` + a relaunch
+
+- Symptom: fresh launch after the PAR-0046 twin showed the Mechanical Drill row
+  DISABLED (already unlocked) and the Pneumatic Drill enabled in the research dialog:
+  the port's user:// settings carry `<name>-unlocked`/research state written by the
+  previous run's purchase (`clear_planet_campaign_saves` clears saves, not research).
+- Workaround: call `MindCampaign.clear_research()` (or clear_planet_research(planet))
+  BEFORE stop+play + the sector launch, so the tutorial starts with the drill locked.
+- Run: `runs/20261009-164959-PAR-0049/`.

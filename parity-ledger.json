@@ -1,6 +1,6 @@
 {
  "schema": "mindustry-godot/parity-ledger@2",
- "updated": "2026-10-09T16:49:23Z",
+ "updated": "2026-10-09T17:28:30Z",
  "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction chains. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
  "focus": {
   "kind": "area",
@@ -11335,9 +11335,9 @@
    "title": "Tutorial: research and place conveyors so the drill feeds the core",
    "surface": "world",
    "parent": "PAR-0046",
-   "status": "reference",
+   "status": "in-progress",
    "chain": "chains/java-ref-ground-zero-tutorial.md",
-   "updated": "2026-10-09T07:35:00Z",
+   "updated": "2026-10-09T17:28:30Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
     "to": "Ground Zero tutorial objective 2 (Move into Core: 0/5 Copper)",
@@ -11508,7 +11508,42 @@
    "steps": [],
    "mismatch": null,
    "fix": {
-    "status": "open"
+    "status": "godot-pass",
+    "summary": "Round 1: the fork is reached (drill placed, objective 2 active) and the line places; the remaining gaps for the action are (i) CoreItem objectives have no counter in the port (objective 2 'Move into Core: 0/5 Copper' can never advance), (ii) the player unit keeps mining under a placed building (Java getMineResult requires tile.block()==air), (iii) the unit offload must not increment coreItemCount (Java transferItemTo -> handleStack; belts -> handleItem).",
+    "plan": {
+     "round": 1,
+     "state": "round 1 landed: fork -> conveyor line -> deliveries -> objective 2 complete, objective 3 active; staged for the twin",
+     "mismatch": "In-engine (runs/20261009-164959-PAR-0049/): fork ok (drill at (136,52), obj2 active); the conveyor line places (135..131,53 + (131,54) pending) but object 2 has no completion source: Java MapObjectives.CoreItemObjective reads state.stats.coreItemCount (incremented in CoreBlock.handleItem for the default team), which the port lacks entirely (GameStats has no core_item_count; RuntimeObjectiveEnv.core_item_count returns 0). Also the unit's mine order persists on (137,53) UNDER the placed drill (Java validMine requires the floor/overlay tile block to be air), so the port's unit keeps remotely mining.",
+     "seam": "client/rust/mind-core/src/game/stats.rs (counter) + world/blocks/storage/core_block.rs (handle_item increment) + ai/types/player.rs (can_mine_tile air check; offload via handleStack) + world/blocks/distribution/transfer.rs (dispatch_handle_stack) + game/runtime.rs (env core_item_count)",
+     "files": [
+      "client/rust/mind-core/src/game/stats.rs",
+      "client/rust/mind-core/src/world/blocks/storage/core_block.rs",
+      "client/rust/mind-core/src/ai/types/player.rs",
+      "client/rust/mind-core/src/world/blocks/distribution/transfer.rs",
+      "client/rust/mind-core/src/game/runtime.rs"
+     ],
+     "approach": "1) GameStats.core_item_count: IndexMap<String,i32> (serde default, append) + add_core_item(); CoreBehavior.handle_item increments when team==hooks.default_team (Java CoreBlock.handleItem:889). 2) transfer::dispatch_handle_stack(world,target,item,amount) mirroring dispatch_handle_item; the player offload uses it (Java transferItemTo -> handleStack, no counter). 3) can_mine_tile: floor/overlay drop only when tile.block == AIR (Java MinerComp.getMineResult). 4) RuntimeObjectiveEnv.core_item_count reads session.stats.core_item_count.",
+     "prerequisites": [],
+     "narrow_check": [
+      "cargo test -p mind-core (incl. new focused test: belt-style handleItem bumps core_item_count, the player offload does not)",
+      "cargo clippy -p mind-core --all-targets -- -D warnings",
+      "cargo fmt --all -- --check",
+      "tools/build.sh + editor relaunch before the Godot leg"
+     ],
+     "evidence": [
+      "run dir runs/20261009-164959-PAR-0049/: fork (drill placed, obj2 active), conveyor line placed (135..132,53 west; corner 131,53 north; 131,54 west; verified rots in the world dump), deliveries observed (core-debug intakes name=Some(copper) team=Some(1) default=Some(1); belt len draining; core copper rising), objective state after: obj1 true, obj2 (coreitem 5) true, obj3 active; action frame godot/r05-action-delivered.png + diff (coarse 16.54, presentation class)",
+      "narrow check: cargo test -p mind-core (1828), clippy workspace -D warnings, fmt --check, tools/build.sh; final lib relaunched",
+      "line geometry lesson (y-up rotations): rotation 1 = north (+y); the first corner attempt used rotation 3 and stalled (next=None) - recorded in the chain"
+     ],
+     "landed": [
+      "client/rust/mind-core/src/world/blocks/distribution/conveyor.rs: facing_edge (Edges.getFacingEdge) for multiblock sources in accept_item/handle_item (a 2x2 drill's anchor was diagonal to the belt and rejected; now the footprint edge closest to the belt is used) + test multiblock_source_accepts_through_its_facing_edge",
+      "client/rust/mind-core/src/world/blocks/storage/core_block.rs: handle_item bumps session.stats.coreItemCount for default-team intakes (Java CoreBlock.handleItem:889; belt/dump transfers only)",
+      "client/rust/mind-core/src/world/blocks/distribution/transfer.rs: dispatch_handle_stack (handleStack forwarder); the player offload uses it so it does not count toward coreItemCount (Java transferItemTo)",
+      "client/rust/mind-core/src/game/runtime.rs: RuntimeObjectiveEnv.core_item_count reads the stats counter (CoreItem objectives)",
+      "client/rust/mind-core/src/ai/types/player.rs: can_mine_tile requires tile.block == air (Java getMineResult; the unit no longer mines under the placed drill) + test player_cannot_mine_under_a_building",
+      "tests: core_item_count_counts_transfers_not_the_player_offload"
+     ]
+    }
    },
    "verified": null,
    "reference": {
@@ -11657,6 +11692,10 @@
      }
     ],
     "note": "R05 reference soak. Conveyor researched from its tree node (found after panning; hover info 'Conveyor / Copper 5/5'), selected via the '.' category-next binding, rotated with one-shot pynput scroll, placed click-by-click (7 tiles: 4 row + corner + 2 column). Deliveries start immediately; objective 2 clears and the panel advances. Hiccups logged: category-button click does nothing (use '.'), computer-mcp drag places only one tile (place per click)."
+   },
+   "claim": {
+    "by": "godot-walk-s1",
+    "at": "2026-10-09T16:49:59Z"
    }
   },
   {
