@@ -49,6 +49,7 @@ mod overlays;
 mod pixelate;
 mod shaders;
 mod shadow;
+mod units;
 
 pub use blocks::BlockRenderer;
 pub use building_cache::BuildingCacheRenderer;
@@ -65,6 +66,7 @@ pub use overlays::OverlayRenderer;
 pub use pixelate::Pixelator;
 pub use shaders::ShaderRegistry;
 pub use shadow::ShadowRenderer;
+pub use units::UnitRenderer;
 
 /// Per-frame render counters exposed through `MindRender.get_render_stats()`.
 #[derive(Debug, Default, Clone)]
@@ -87,6 +89,8 @@ pub struct RenderStats {
     pub dynamic_sprites: i64,
     /// Cached-building sprites emitted this frame.
     pub cached_sprites: i64,
+    /// Live unit sprites emitted this frame.
+    pub unit_sprites: i64,
     /// Regions that fell back to `error`/placeholder this frame.
     pub missing_regions: i64,
     /// Shaders loaded by the `ShaderRegistry` (plan 16 M8).
@@ -215,6 +219,7 @@ pub struct MindWorldRenderer {
     visibility_dirty: bool,
     floor: Option<FloorRenderer>,
     blocks: Option<BlockRenderer>,
+    units: Option<UnitRenderer>,
     building_cache: Option<BuildingCacheRenderer>,
     shadow: Option<ShadowRenderer>,
     light: Option<LightRenderer>,
@@ -251,6 +256,7 @@ impl INode2D for MindWorldRenderer {
             visibility_dirty: false,
             floor: None,
             blocks: None,
+            units: None,
             building_cache: None,
             shadow: None,
             light: None,
@@ -420,6 +426,16 @@ impl MindWorldRenderer {
         if let Some(block_band) = self.band_node_at(BandKey::base(Layer::Block)) {
             self.blocks = Some(BlockRenderer::new(host.clone(), assets, block_band));
         }
+        let unit_bands = vec![
+            self.band_node_at(BandKey::base(Layer::GroundUnit)),
+            self.band_node_at(BandKey::base(Layer::FlyingUnitLow)),
+            self.band_node_at(BandKey::base(Layer::FlyingUnit)),
+        ];
+        self.units = Some(UnitRenderer::new(
+            host.clone(),
+            self.assets.clone(),
+            unit_bands,
+        ));
         if let Some(light_band) = self.band_node_at(BandKey::base(Layer::Light)) {
             self.light = Some(LightRenderer::new(host.clone(), light_band, &self.shaders));
         }
@@ -531,6 +547,13 @@ impl MindWorldRenderer {
         }
         self.stats.mesh_rebuilds = mesh_rebuilds;
         self.stats.stage_trace.push(String::from("blocks"));
+        if let Some(units) = self.units.as_mut() {
+            units.update();
+            let unit_stats = units.stats();
+            self.stats.unit_sprites = unit_stats.sprites;
+            self.stats.missing_regions += unit_stats.missing_regions as i64;
+        }
+        self.stats.stage_trace.push(String::from("units"));
         if let Some(shadow) = self.shadow.as_mut() {
             shadow.update(false);
             let shadow_stats = shadow.stats();

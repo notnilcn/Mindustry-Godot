@@ -590,6 +590,16 @@ impl MindCampaign {
             }
         }
 
+        // `CoreBlock.playerSpawn` (upstream `Trigger.newGame` → `player.set(core)`):
+        // spawn the player mech at the best core so `player.unit()` is live after
+        // the launch and WASD drives it instead of the camera.
+        if installed
+            && let Some(mut host) = self.host()
+            && !host.bind_mut().spawn_player_unit()
+        {
+            log::warn!("start_sector: player unit spawn failed");
+        }
+
         self.registry = Some(registry);
         self.campaign = Some(campaign);
         self.runtime_installed = installed;

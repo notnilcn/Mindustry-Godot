@@ -76,6 +76,12 @@ func _process(delta: float) -> void:
 	if _is_paused():
 		return
 	if not _current.is_empty():
+		if _current == "desktopMove":
+			# Upstream `desktopMove` has no timer: it completes on the first
+			# non-zero move axis (HintsFragment.java:170).
+			if _player_unit_moved():
+				complete_hint()
+			return
 		_elapsed += delta
 		if _elapsed >= HINT_DURATION:
 			complete_hint()
@@ -83,6 +89,13 @@ func _process(delta: float) -> void:
 	_playtime += delta
 	if _playtime >= PLAYTIME_GATE:
 		_show_next()
+
+
+## Upstream `HintsFragment.desktopMove`: the hint completes on the first
+## non-zero move axis (`Core.input.axis(Binding.moveX/moveY)`).
+func _player_unit_moved() -> bool:
+	var host := get_node_or_null("/root/Spine/SimHost")
+	return host != null and host.has_method("player_unit_moved") and bool(host.call("player_unit_moved"))
 
 
 ## The hint overlay shows only during a live (non-menu) game and when the HUD

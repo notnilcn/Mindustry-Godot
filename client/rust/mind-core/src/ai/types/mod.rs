@@ -21,6 +21,7 @@ pub mod logic;
 pub mod miner;
 pub mod missile;
 pub mod no_ai;
+pub mod player;
 pub mod player_bridge;
 pub mod prebuild;
 pub mod repair;

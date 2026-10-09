@@ -30,6 +30,7 @@ use crate::ai::controller::{AiKind, ControllerSlot};
 use crate::ai::pathfinder::Pathfinder;
 use crate::ai::types::flying::update_flying;
 use crate::ai::types::ground::update_ground;
+use crate::ai::types::player::PlayerInput;
 use crate::ai::wave_spawner::WaveSpawner;
 use crate::audio::AudioSinkRes;
 use crate::combat::bullet::{self, CombatCtx};
@@ -373,6 +374,67 @@ impl Sim {
         ecs.insert_non_send(runtime);
         entity
     }
+
+    /// Uploads the player movement axis (`Core.input.axis(Binding.moveX/Y)`)
+    /// for the ticks that follow; read by
+    /// [`crate::ai::types::player::update_player`].
+    pub fn set_player_input(&mut self, axis_x: f32, axis_y: f32) {
+        let moved = self
+            .ecs
+            .0
+            .get_resource::<PlayerInput>()
+            .is_some_and(|input| input.moved);
+        self.ecs.0.insert_resource(PlayerInput {
+            axis_x,
+            axis_y,
+            moved,
+        });
+    }
+
+    /// Spawns the controlled player unit (`CoreBlock.playerSpawn` with the core
+    /// type's unit) and rebinds its controller to [`AiKind::Player`]. The
+    /// `comp::Player` marker puts it in the `player` group; `PlayerInput` drives
+    /// it from the next tick.
+    pub fn spawn_player_unit(
+        &mut self,
+        name: &str,
+        team: u8,
+        x: f32,
+        y: f32,
+        rotation: f32,
+    ) -> Option<Entity> {
+        let entity = self.spawn_live_unit(name, team, x, y, rotation)?;
+        if let Some(mut slot) = self.ecs.0.get_mut::<ControllerSlot>(entity) {
+            slot.kind = AiKind::Player;
+            slot.target = None;
+        }
+        self.ecs
+            .0
+            .entity_mut(entity)
+            .insert(crate::entities::comp::Player);
+        self.player_unit = Some(entity);
+        Some(entity)
+    }
+
+    /// The controlled player unit entity, if any.
+    pub fn player_unit(&self) -> Option<Entity> {
+        self.player_unit
+    }
+
+    /// World-pixel position of the player unit (`Player.x/y` mirror).
+    pub fn player_unit_position(&self) -> Option<(f32, f32)> {
+        let entity = self.player_unit?;
+        self.ecs.0.get::<Pos>(entity).map(|pos| (pos.x, pos.y))
+    }
+
+    /// Whether a non-zero movement axis has reached the player unit since the
+    /// last world load (`HintsFragment.desktopMove` trigger).
+    pub fn player_unit_moved(&self) -> bool {
+        self.ecs
+            .0
+            .get_resource::<PlayerInput>()
+            .is_some_and(|input| input.moved)
+    }
 }
 
 /// `EntitySet::UpdateUnits` system: `GroundAI`/`FlyingAI` target + move,
@@ -408,28 +470,35 @@ pub fn unit_update_system(world: &mut World) {
             .map(|team| team.team)
             .unwrap_or(0);
 
-        // `GroundAI.updateMovement`/`FlyingAI`: pick a core/building anchor and
-        // an in-range mount target. Spawned wave units have no command, so the
-        // anchor supplies their move target.
-        let (anchor_tile, mount_target) = acquire_target(world, &runtime, &queries, entity, team);
-        set_mount_targets(world, entity, mount_target);
+        if slot.kind == AiKind::Player {
+            // `Player` possession: the host-uploaded axis drives the unit
+            // (`DesktopInput.updateMovement`); no target acquisition or pathing.
+            crate::ai::types::player::update_player(world, &runtime.content, entity);
+        } else {
+            // `GroundAI.updateMovement`/`FlyingAI`: pick a core/building anchor
+            // and an in-range mount target. Spawned wave units have no command,
+            // so the anchor supplies their move target.
+            let (anchor_tile, mount_target) =
+                acquire_target(world, &runtime, &queries, entity, team);
+            set_mount_targets(world, entity, mount_target);
 
-        let move_target = slot.target.or(anchor_tile);
-        if let Some(target) = move_target {
-            let flying = slot.kind == AiKind::Flying
-                || world
-                    .get::<PhysicsComp>(entity)
-                    .is_some_and(|physics| physics.flying);
-            let arrived = if flying {
-                update_flying(world, entity, target)
-            } else {
-                let UnitRuntime {
-                    grid, pathfinder, ..
-                } = &mut runtime;
-                update_ground(world, grid, pathfinder, team, entity, target)
-            };
-            if arrived && let Some(mut stored) = world.get_mut::<ControllerSlot>(entity) {
-                stored.target = None;
+            let move_target = slot.target.or(anchor_tile);
+            if let Some(target) = move_target {
+                let flying = slot.kind == AiKind::Flying
+                    || world
+                        .get::<PhysicsComp>(entity)
+                        .is_some_and(|physics| physics.flying);
+                let arrived = if flying {
+                    update_flying(world, entity, target)
+                } else {
+                    let UnitRuntime {
+                        grid, pathfinder, ..
+                    } = &mut runtime;
+                    update_ground(world, grid, pathfinder, team, entity, target)
+                };
+                if arrived && let Some(mut stored) = world.get_mut::<ControllerSlot>(entity) {
+                    stored.target = None;
+                }
             }
         }
 
