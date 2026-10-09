@@ -49,6 +49,10 @@ type UnitBucket = (Option<Gd<Texture2D>>, Vec<UnitQuad>);
 pub struct UnitRenderer {
     host: Gd<MindSimHost>,
     resolver: RegionResolver,
+    /// `Draw.scl` equivalent: the port's atlas ships the 4x sprite set
+    /// (`scale_marker` width 4), so region pixels are divided by the marker
+    /// width to get world pixels (`Control.java:330`).
+    sprite_scale: f32,
     /// `[ground, flyingUnitLow, flyingUnit]` band nodes (index = bucket;
     /// `None` when a band is absent).
     bands: Vec<Option<Gd<Node2D>>>,
@@ -65,9 +69,13 @@ impl UnitRenderer {
         assets: Option<Gd<crate::assets::MindAssets>>,
         bands: Vec<Option<Gd<Node2D>>>,
     ) -> Self {
+        let mut resolver = RegionResolver::new(assets);
+        let marker = resolver.resolve("scale_marker");
+        let sprite_scale = marker.map(|region| 1.0 / region.w.max(1.0)).unwrap_or(1.0);
         Self {
             host,
-            resolver: RegionResolver::new(assets),
+            resolver,
+            sprite_scale,
             bands,
             nodes: HashMap::new(),
             stats: UnitStats::default(),
@@ -101,8 +109,8 @@ impl UnitRenderer {
             entry.1.push(UnitQuad {
                 cx: x,
                 cy: y,
-                w: resolved.w,
-                h: resolved.h,
+                w: resolved.w * self.sprite_scale,
+                h: resolved.h * self.sprite_scale,
                 rot: rotation,
                 uv: resolved.uv,
                 color: 0xffff_ffff,
