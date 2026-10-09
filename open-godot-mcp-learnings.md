@@ -1176,3 +1176,76 @@ those paths no longer exist, but the workarounds still apply.
   `get_node("/root/Spine/World/Camera2D").recenter_player()` (snaps to and
   follows the best core). Run: `runs/20261009-052658-seed-campaign/`
   (iteration 4, PAR-0031).
+
+## 2026-10-09 — session-2 worktree missing generated asset outputs (placeholder-quad renderer); exec timeout after chooser OK
+
+- Symptom: session-2 game boot logs `[E] [assets] missing manifest
+  .../assets/sprites/sprites.atlas.json`, `[W] MindWorldRenderer: atlas
+  manifest unavailable; using placeholder quads`, `[W] [shaders] index
+  missing: .../assets/shaders/shader.index.json`. `assets/sprites/` has 12
+  entries vs 19 in the main checkout; the generated pipeline outputs
+  (`sprites*.png`, `sprites.atlas.json`, `fallback/`, `block_colors.png`,
+  `assets/icons/icon_codes.json`, `assets/sounds.index.json`, `assets/locales`,
+  `assets/shaders/godot/`, `assets/shaders/shader.index.json`) are gitignored
+  and were never seeded by `tools/parity-session.sh` (it copies only
+  `client/bin/rust` and `client/.godot`). Workaround: run `bash tools/pack.sh
+  pack` in the session worktree (self-contained; do not copy outputs from
+  another checkout that may be on a different commit; `tools/pack.sh` is not
+  executable in the worktree, invoke it with `bash`). Run:
+  `runs/20261009-085822-PAR-0044/`.
+- Symptom: a `godot_exec` eval timed out after 15 s immediately after clicking
+  OK in the `campaign.select` chooser (planet page opening); the game stayed
+  alive (fps 90, pid unchanged) and later evals answered. Workaround: retry
+  after the dialog transition settles; avoid evals during planet-view load.
+  Run: `runs/20261009-085822-PAR-0044/`.
+
+## 2026-10-09 — `godot_exec` eval with a nested `var` in an `if` block pauses the game (break-on-error)
+
+- Symptom: an eval of the shape `if dlg:\n vis = dlg.visible\n var t =
+  dlg.get_node_or_null(...)` timed out after 15 s and left
+  `godot_debugger sessions` -> `paused: true` while a trivial eval still
+  answered and `Time.get_ticks_msec()` advanced but `SimHost.get_tick()` was
+  frozen. Two evals in a row; every retry of the same body re-broke.
+- Cause: the eval wrapper rejects/mangles a `var` declaration nested inside an
+  `if` block; the body errors, break-on-error pins the frame loop.
+- Workaround: keep every declaration at the top level of the eval body and
+  guard later:
+  `var vis = false\nif dlg: vis = dlg.visible\nvar tn = null\nif dlg: tn = ...`.
+  After a timeout always check `godot_debugger sessions` and recover with
+  `godot_game stop` + `play` (re-stamp the pid); `resume` re-breaks.
+- Run: `runs/20261009-085822-PAR-0044/`.
+
+## 2026-10-09 — launch path: 3-arg `start_sector` call errors and pauses the game (break-on-error)
+
+- Symptom: clicking Launch in the `launch_loadout` dialog logged
+  `godot-rust function call failed: MindCampaign::start_sector() Reason: function
+  has 2 parameters, but received 3 arguments` + `Error calling method from
+  'callv'`; the sector still loaded and `spawn_player_unit: alpha at (1028.0,
+  436.0)` ran, but `godot_debugger sessions` showed `paused: true` and
+  `SimHost.get_tick()` froze while `Time.get_ticks_msec()` advanced.
+- Cause: `client/ui/dialogs/planet_dialog.gd::_launch` called
+  `campaign.callv("start_sector", [planet, sector, loadout])` when a loadout
+  index was selected; the real 3-arg entry point is
+  `MindCampaign.start_sector_with_loadout(planet, sector, loadout_json)` and the
+  dialog only has the index (no item stacks). The error aborted the call, the
+  `result == null` fallback then launched without the loadout, yet the engine had
+  already broken.
+- Workaround/fix: the dialog now calls the 2-arg `start_sector` directly
+  (loadout selection remains unimplemented; tracked by PAR-0054). Recover a
+  paused game with `godot_game stop` + `play` (re-walk the launch).
+- Run: `runs/20261009-092821-PAR-0044/`.
+
+## 2026-10-09 — `godot_input sequence` frame_delay is process frames, not sim ticks; timer hints advance across tool gaps
+
+- Symptom: a 54-frame S hold moved the player ~40 tiles (~108 sim ticks) instead of
+  the reference's ~20 tiles; the after-S capture showed `hint.desktopShoot`
+  instead of `hint.zoom` because 15 s of wall time passed between the movement
+  call and the screenshot (assistant think time), so the timer auto-advanced.
+- Cause: `sequence` awaits `get_tree().process_frame`, so the hold length is
+  wall time = frames/fps; the sim catch-up pumps ~60 ticks/s regardless. And
+  the hint driver's 15 s fallback keeps running between tool calls.
+- Workaround: drive exact sim ticks with `set_paused(true)` + `SimHost.step(54)`
+  + `set_paused(false)` between key down/up, and keep movement + capture in ONE
+  `execute` block (pad with a few dummy evals for the camera lerp to settle);
+  never rely on think-time gaps for settle.
+- Run: `runs/20261009-092821-PAR-0044/`.
