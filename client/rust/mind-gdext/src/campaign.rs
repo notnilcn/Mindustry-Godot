@@ -522,11 +522,19 @@ impl MindCampaign {
             return false;
         }
 
-        // Optional launch loadout (GAP-10).
-        if !loadout_json.to_string().trim().is_empty()
-            && let Ok(stacks) = serde_json::from_str::<
-                Vec<mind_core::io::json::content_serde::JsonItemStack>,
-            >(&loadout_json.to_string())
+        // Optional launch loadout (GAP-10). A campaign launch without an
+        // explicit loadout carries an EMPTY loadout: the `Rules` default
+        // (`copper x100`) is the custom-game default and must not stock a
+        // campaign core. Java's reference Ground Zero resume save stores
+        // `loadout:[]` (runs/20261009-065416-ref-ground-zero/checkpoints/
+        // r01-sector-serpulo-170.msav, decompressed meta) and starts with an
+        // empty core; `FileMapGenerator`/`Logic.play` then clear the core and
+        // add nothing (PAR-0056).
+        if loadout_json.to_string().trim().is_empty() {
+            self.session.rules.loadout.clear();
+        } else if let Ok(stacks) = serde_json::from_str::<
+            Vec<mind_core::io::json::content_serde::JsonItemStack>,
+        >(&loadout_json.to_string())
         {
             self.session.rules.loadout = stacks;
         }
