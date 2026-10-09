@@ -1,6 +1,6 @@
 {
  "schema": "mindustry-godot/parity-ledger@2",
- "updated": "2026-10-09T09:32:12Z",
+ "updated": "2026-10-09T09:43:10Z",
  "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction chains. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
  "focus": {
   "kind": "area",
@@ -8892,7 +8892,7 @@
    "parent": "PAR-0019",
    "status": "in-progress",
    "chain": "chains/java-ref-ground-zero-tutorial.md",
-   "updated": "2026-10-09T09:32:12Z",
+   "updated": "2026-10-09T09:43:10Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
     "to": "resumed Ground Zero tutorial (objective 0) via the planet page's Go",
@@ -9108,48 +9108,69 @@
       "size_match": true
      },
      "note": "Palette collapsed and minimap top-right; residual = objective world-text marker (center prompt), status text format/counts, icon bar, minimap content, hint state, core sprite, camera offset."
+    },
+    "round6": {
+     "godot_frame": "runs/20261009-085712-PAR-0037/godot/step-12-resumed-r6.png",
+     "diff": "runs/20261009-085712-PAR-0037/diff/step-12-resume-r6.json",
+     "metrics": {
+      "changed_fraction": 0.65459,
+      "mean_abs_rgb": [
+       54.03,
+       53.56,
+       51.23
+      ],
+      "coarse_layout_max_channel_mean": 43.27,
+      "palette_distance": 0.251,
+      "size_match": true
+     },
+     "note": "Objective world-label pass landed (localized text renders at the marker position); residual dominated by per-tile floor texture variants (snow 40% changed), hint box, icon bar, label style."
     }
    },
    "fix": {
     "status": "godot-open",
     "plan": {
-     "round": 6,
+     "round": 7,
      "done": [
-      "Round 5 (working tree): placement_fragment now collapses its Panel by default (Java blocksSelect collapsed pane) with open_palette()/close_palette() and category-hotkey open; the manifest bind only touches the fragment root so the collapse lives on the Panel child. hud_fragment MinimapBox moved bottom-right -> top-right (992,10) matching Java's minimap/position top().right(). chains/placement-picker-audit.md step 4 now opens the palette explicitly and reads the Panel visibility; the open/read steps were validated in-engine at fresh GZ (pid 129929: panel open, 0 categories/blocks - the documented fresh-GZ result).",
-      "Leg re-run (pid 129929): palette collapsed, minimap visible top-right, copper field below the core. Metrics: changed_fraction 0.65262 (was 0.69492), mean_abs [53.21,52.9,50.8] (was [59.5,57.24,53.68]), coarse 44.37 (was 49.38), palette 0.2747 (was 0.3003)."
+      "Round 6 (working tree): objective world-label pass landed - MindCampaign.objective_markers_json() emits the running objectives' ShapeText markers (localized via the live bundle, Arc markup/`:icon:` tokens stripped; unit test marker_text_strips_arc_markup) and MindObjectiveMarkers (render/objective_markers.rs, mounted in a CanvasLayer by MindWorldRenderer::build_markers) projects world positions through the camera canvas transform and draws the polygon + WorldLabel-style background/outline text. Verified in-engine: marker JSON [{'class':'ShapeText','x':1096,'y':424,'text':'Move near the  copper ore on the ground and click to begin mining.'}], the node exists, and the label renders at the marker position (step-12-r6 capture).",
+      "Round-6 leg (pid 140824): changed_fraction 0.65459 (was 0.65262), mean_abs [54.03,53.56,51.23], palette_distance 0.2510 (was 0.2747), coarse 43.27 - the marker region now partially matches but the label style (font/background) still differs."
      ],
-     "seam": "Round-6 heatmap (diff/step-10-resume-r5-heatmap.png) hot regions, largest first: (a) the tutorial prompt bar 'Move near the copper ore on the ground and click to begin mining.' - in Java this is the objective's world-space ShapeText marker at (1096,424) rendered as a world label; the port renders no objective markers/labels (map markers exist in mind-core but no world-label pass); (b) status text format - Java 'Obtain: 0/15 Copper' (objective.item = '[accent]Obtain: [][lightgray]{0}[]/{1}\\n{2}[lightgray]{3}' with count/emoji/name) vs the port's 2-arg call producing 'Obtain: copper/15'; (c) bottom-right icon bar (Schematics/Database/Tech Tree/Planet) absent in the port; (d) minimap content (Java shows terrain + viewport rect; the port's widget shows a black panel with a blob); (e) hint state differs (Java 'Use [WASD] to move.' vs port 'Scroll to zoom in or out.' - the port advanced to hint.zoom); (f) core sprite renders light grey vs Java's dark core (sprite/palette), plus the ~1-tile camera follow offset.",
+     "seam": "Round-7 root cause pinned for the largest remaining region: the world floor texture variants. The atlas ships snow1..snow3/basalt1..3 (no bare `snow`/`basalt`); `region_geometry_with_variants` resolves the FIRST candidate (`snow1`) for every tile, while Java picks per tile via `Floor.variant(x, y, count) = Mathf.randomSeed(Point2.pack(x, y), 0, count-1)` (Floor.java:300-302). Result: the port renders one variant everywhere and the snow pattern differs per tile (snow crop 40-43% changed, mean ~13) while the scale/period matches (autocorrelation peaks at 32px in both). Fix: choose the tile's variant geometry with Java's hash in the floor bake.",
      "files": [
-      "objective world-label pass (new, view-only): Java MapObjectives.ShapeTextMarker flags = WorldLabel.flagBackground|flagOutline, text localized from the marker text (gz.mine -> 'Move near the :ore-copper: copper ore on the ground and click to begin mining.'), textHeight/fontSize/radius/rotation; mind-core already has MapMarkers (game/map_markers.rs) and a WorldLabel relay type (ui/builder/ui_relay.rs) but no mind-gdext world-label renderer; add a pass over session.rules.objectives markers drawn in world space behind the HUD",
-      "client/rust/mind-core/src/game/map_objectives.rs objective_text 4-arg formats + ObjectiveLocale count/emoji hooks; RuntimeObjectiveEnv counts wiring",
-      "bottom-right icon bar fragment (new element; Java HudFragment info table / menu buttons)",
-      "minimap provider content (get_texture region rendering in the widget)",
-      "hint selection source (HintsFragment rotation state) and the core sprite render"
+      "client/rust/mind-gdext/src/render/floor.rs (bake: pick the per-tile variant geometry)",
+      "client/rust/mind-gdext/src/render/atlas_bind.rs (variant candidate list -> resolve all variants, not the first)",
+      "mind-core ArcRand/JavaRandom for Mathf.randomSeed equivalence (Point2.pack(x,y) seed)"
      ],
-     "approach": "Round 6: land the two highest-area items first - the objective world-text marker (center prompt) and the status text format with the live count; then the icon bar. Keep each in its own step with a capture pair.",
+     "approach": "Round 7: resolve the floor's variant geometry list once per floor name, then in the chunk bake index it by `Mathf.randomSeed(Point2.pack(x, y), 0, count-1)` (verify the port's random helper matches Java's; tests in mind-core random). Re-bake; compare the snow crop changed% (target < 5%).",
      "prerequisites": [
-      "Objective text counts need the live env adapters (team_has_item/core_item_count/placed_block_count currently stubs) - if the counts are not cheap to wire, ship the 4-arg format with a zero count and file the count wiring as its own item.",
-      "Objective markers are view-only render data (never feed the sim); Java MapObjectives markers render via ShapeDraw/TextDraw."
+      "Tile overlays (ore) may use the same variant logic (OverlayFloor.drawMain) - check the ore renderer's texture choice too (the copper field is 83% changed).",
+      "After the floor variant fix, the remaining hot regions are the hint box (Java hint text/box geometry), the bottom-right icon bar (absent), the objective label style, the status text format, the minimap content and the core sprite."
      ],
-     "narrow_check": "Rust: cargo test -p mind-core game && cargo clippy -p mind-gdext --all-targets -- -D warnings && tools/build.sh (editor relaunch after); GDScript: GODOT_BIN=~/.local/bin/godot bash tools/godot.sh --headless --editor --quit --path client",
+     "narrow_check": "cargo test -p mind-core render && cargo clippy -p mind-gdext --all-targets -- -D warnings && tools/build.sh (editor relaunch after)",
      "evidence": {
-      "godot_frame_round5": "runs/20261009-085712-PAR-0037/godot/step-10-resumed-r5.png",
-      "godot_fork_round5": "runs/20261009-085712-PAR-0037/godot/step-09-fork-r5.png",
-      "diff_round5": "runs/20261009-085712-PAR-0037/diff/step-10-resume-r5.json",
-      "heatmap_round5": "runs/20261009-085712-PAR-0037/diff/step-10-resume-r5-heatmap.png",
-      "audit_open_probe": {
-       "panel_open": true,
-       "categories": 0,
-       "blocks": 0
+      "godot_frame_round6": "runs/20261009-085712-PAR-0037/godot/step-12-resumed-r6.png",
+      "diff_round6": "runs/20261009-085712-PAR-0037/diff/step-12-resume-r6.json",
+      "snow_crop": {
+       "changed_pct": 40,
+       "mean": [
+        13.6,
+        10.5,
+        7.2
+       ],
+       "period_px": 32
       },
-      "prompt_source": {
-       "java": "MapObjectives.java:855-918 ShapeTextMarker/WorldLabel background+outline",
-       "port": "no WorldLabel render pass in mind-gdext; MapMarkers containers exist in mind-core"
-      }
+      "atlas": {
+       "snow_variants": [
+        "snow1",
+        "snow2",
+        "snow3"
+       ],
+       "bare_snow": false
+      },
+      "java": "core/src/mindustry/world/blocks/environment/Floor.java:300-302 variant()"
      }
     },
     "commit": null,
-    "summary": "round 5 collapsed the placement palette and moved the minimap; round 6 targets the objective world-text marker and status text format",
+    "summary": "round 6 added the objective world-label pass; round 7 fixes the per-tile floor texture variant selection",
     "run": "runs/20261009-085712-PAR-0037/"
    },
    "verified": null,
@@ -11323,6 +11344,68 @@
     "prior_status": "seeded",
     "note": "implemented inside PAR-0044 fix round 1"
    }
+  },
+  {
+   "id": "PAR-0054",
+   "title": "Launch: loadout dialog calls a non-existent 3-arg start_sector (arity error + break-on-error pause)",
+   "surface": "campaign",
+   "parent": "PAR-0024",
+   "status": "in-progress",
+   "chain": "chains/java-ref-ground-zero-tutorial.md",
+   "updated": "2026-10-09T09:34:06Z",
+   "discovered_by": "runs/20261009-092821-PAR-0044/",
+   "claim": {
+    "by": "godot-walk-s2",
+    "at": "2026-10-09T09:34:06Z",
+    "prior_status": "seeded",
+    "note": "fixed in PAR-0044 round 2 (planet_dialog.gd call site)"
+   },
+   "path": {
+    "to": "Ground Zero launch via the launch_loadout dialog Launch button",
+    "java": [],
+    "godot": [],
+    "confirm": {
+     "godot": "log has no `function has 2 parameters` error; SimHost tick advances after launch",
+     "java": null
+    },
+    "last_replayed": "runs/20261009-092821-PAR-0044/"
+   },
+   "run": "runs/20261009-092821-PAR-0044/",
+   "reproduce": {
+    "java": [],
+    "godot": [],
+    "compare": []
+   },
+   "steps": [],
+   "mismatch": {
+    "step": "launch_loadout dialog Launch (367,503)",
+    "java_frame": null,
+    "godot_frame": null,
+    "diff": null,
+    "note": "godot-rust arity error + break-on-error pause; the fallback started the sector without the loadout selection",
+    "evidence": [
+     "godot log: `godot-rust function call failed: MindCampaign::start_sector() Reason: function has 2 parameters, but received 3 arguments`",
+     "godot log: `Error calling method from 'callv': 'MindCampaign::start_sector': .`",
+     "godot_debugger sessions: paused true; SimHost.get_tick() frozen at 1262"
+    ]
+   },
+   "fix": {
+    "status": "godot-pass-pending",
+    "commit": null,
+    "summary": "planet_dialog.gd now calls the 2-arg start_sector directly; loadout-index selection still unimplemented",
+    "plan": {
+     "round": 1,
+     "seam": "GDScript UI -> MindCampaign facade call",
+     "files": [
+      "client/ui/dialogs/planet_dialog.gd"
+     ],
+     "approach": "drop the 3-arg callv; keep the fallback behavior the broken path already produced",
+     "narrow_check": "godot headless import/parse + launch run",
+     "round_note": "covered by the PAR-0044 round-2 run"
+    }
+   },
+   "verified": null,
+   "reference": null
   }
  ]
 }
