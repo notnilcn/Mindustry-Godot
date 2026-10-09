@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@2",
-  "updated": "2026-10-09T07:35:00Z",
+  "updated": "2026-10-09T07:39:30Z",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction chains. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -10586,6 +10586,232 @@
       },
       "verified": null,
       "note": "Revealed by R05's hint after objective 2 completed. Not mirrored yet."
+    },
+    {
+      "id": "PAR-0051",
+      "title": "Tutorial: place more drills; mine 100 copper (objective 3)",
+      "surface": "world",
+      "parent": "PAR-0049",
+      "status": "reference",
+      "chain": "chains/java-ref-ground-zero-tutorial.md",
+      "updated": "2026-10-09T07:39:30Z",
+      "discovered_by": "runs/20261009-065416-ref-ground-zero/",
+      "path": {
+        "to": "Ground Zero tutorial objective 3 (Move into Core: 24/100 Copper)",
+        "java": [
+          {
+            "tool": "computer-mcp_key_down/key_up",
+            "params": {
+              "key": ",",
+              "note": "categoryPrev: production category; Mechanical Drill auto-selected"
+            }
+          },
+          {
+            "tool": "computer-mcp_mouse_move",
+            "params": {
+              "x": 769,
+              "y": 609,
+              "note": "hover image (719,511) - preview confirmed valid ('Drill Speed: 0.36/s'); an earlier attempt at image (687,479) was rejected (boulder at image 650-694,474-520)"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 769,
+              "y": 609,
+              "note": "place 2nd Mechanical Drill (footprint image 687-751,479-543)"
+            }
+          },
+          {
+            "tool": "computer-mcp_key_down/key_up",
+            "params": {
+              "key": ".",
+              "note": "distribution; conveyor selected"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 753,
+              "y": 561,
+              "note": "column into the existing row: image (703,463),(703,431),(703,399),(703,367), north-facing"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r06-04-100.png"
+            }
+          }
+        ],
+        "godot": [],
+        "confirm": {
+          "java": "runs/20261009-065416-ref-ground-zero/java/r06-00-now.png (24/100)",
+          "godot": "HudGroup visible"
+        },
+        "last_replayed": "runs/20261009-065416-ref-ground-zero/"
+      },
+      "run": "runs/20261009-065416-ref-ground-zero/",
+      "reproduce": {
+        "java": [
+          {
+            "tool": "computer-mcp_key_down/key_up",
+            "params": {
+              "key": ",",
+              "note": "categoryPrev: production category; Mechanical Drill auto-selected"
+            }
+          },
+          {
+            "tool": "computer-mcp_mouse_move",
+            "params": {
+              "x": 769,
+              "y": 609,
+              "note": "hover image (719,511) - preview confirmed valid ('Drill Speed: 0.36/s'); an earlier attempt at image (687,479) was rejected (boulder at image 650-694,474-520)"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 769,
+              "y": 609,
+              "note": "place 2nd Mechanical Drill (footprint image 687-751,479-543)"
+            }
+          },
+          {
+            "tool": "computer-mcp_key_down/key_up",
+            "params": {
+              "key": ".",
+              "note": "distribution; conveyor selected"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 753,
+              "y": 561,
+              "note": "column into the existing row: image (703,463),(703,431),(703,399),(703,367), north-facing"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r06-04-100.png"
+            }
+          }
+        ],
+        "godot": [],
+        "compare": []
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open"
+      },
+      "verified": null,
+      "reference": {
+        "captured": "2026-10-09T07:38:40Z",
+        "profile": "resumed",
+        "run": "runs/20261009-065416-ref-ground-zero/",
+        "frames": {
+          "fork": "runs/20261009-065416-ref-ground-zero/java/r06-00-now.png",
+          "action": "runs/20261009-065416-ref-ground-zero/java/r06-04-100.png",
+          "support": [
+            "runs/20261009-065416-ref-ground-zero/java/r06-01-production.png",
+            "runs/20261009-065416-ref-ground-zero/java/r06-02-preview.png",
+            "runs/20261009-065416-ref-ground-zero/java/r06-03-seconddrill.png"
+          ]
+        },
+        "settle": [
+          {
+            "after": ", key",
+            "wait_ms": 1000
+          },
+          {
+            "after": "hover drill spot",
+            "wait_ms": 900,
+            "note": "preview validated before the click"
+          },
+          {
+            "after": "click place 2nd drill",
+            "wait_ms": 1000
+          },
+          {
+            "after": ". key",
+            "wait_ms": 900
+          },
+          {
+            "after": "4 column clicks",
+            "wait_ms": 450,
+            "note": "north-facing, feeds the row at (703,335)"
+          },
+          {
+            "after": "counter 100",
+            "wait_ms": 40000,
+            "note": "75/100 -> complete; r06-04 shows the next objective"
+          }
+        ],
+        "expected": {
+          "bundle": [
+            "gz.drills",
+            "objective 3 CoreItem 100"
+          ],
+          "objective_after": "Move into Core: 0/25 Lead (the lead objective, gz.lead) - R07",
+          "state": "2nd drill (footprint image 687-751,479-543) + 4-tile north column (x=703) placed; items visible on the column; counter crossed 100 within ~40 s of the placement"
+        },
+        "chain": "chains/java-ref-ground-zero-tutorial.md",
+        "checkpoint": "runs/20261009-065416-ref-ground-zero/checkpoints/r06-sector-serpulo-170.msav",
+        "checkpoint_note": "autosave copied after the objective completed (mtime changed from R05)",
+        "java_path": [
+          {
+            "tool": "computer-mcp_key_down/key_up",
+            "params": {
+              "key": ",",
+              "note": "categoryPrev: production category; Mechanical Drill auto-selected"
+            }
+          },
+          {
+            "tool": "computer-mcp_mouse_move",
+            "params": {
+              "x": 769,
+              "y": 609,
+              "note": "hover image (719,511) - preview confirmed valid ('Drill Speed: 0.36/s'); an earlier attempt at image (687,479) was rejected (boulder at image 650-694,474-520)"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 769,
+              "y": 609,
+              "note": "place 2nd Mechanical Drill (footprint image 687-751,479-543)"
+            }
+          },
+          {
+            "tool": "computer-mcp_key_down/key_up",
+            "params": {
+              "key": ".",
+              "note": "distribution; conveyor selected"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 753,
+              "y": 561,
+              "note": "column into the existing row: image (703,463),(703,431),(703,399),(703,367), north-facing"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r06-04-100.png"
+            }
+          }
+        ],
+        "note": "R06 reference soak. One more drill placed on the copper field south-west of the first, with a 4-tile column into the existing row; the first attempt (image 687,479) was rejected because of a boulder at image 650-694,474-520 - the placement preview (hover + capture) catches this before the click. The objective advanced to lead."
+      }
     }
   ]
 }

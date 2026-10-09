@@ -282,6 +282,29 @@ core 3×3 at x 527-623 → 32 px tiles; row centered on the core's middle row
 Hiccups (see `computer-mcp-learnings.md`, 2026-10-09): category-button click
 inert (use `.`); `computer-mcp.drag` places only one tile (click per tile).
 
+## R06 — more drills; 100 copper (recorded 2026-10-09)
+
+Action: place a second Mechanical Drill on the copper field with a short column
+into the existing row; wait out the counter. Fork `java/r06-00-now.png`
+(24/100); action `java/r06-04-100.png` (objective advanced to `0/25 Lead`);
+support `r06-01-production.png`, `r06-02-preview.png`, `r06-03-seconddrill.png`.
+
+| image | screen | call | settle |
+|---|---|---|---|
+| — | — | `,` (categoryPrev → production; drill auto-selected) | 1000 ms |
+| (719,511) | (769,609) | hover the 2nd drill spot — preview valid (`Drill Speed: 0.36/s`) | 900 ms |
+| (719,511) | (769,609) | click to place (footprint x 687-751, y 479-543) | 1000 ms |
+| — | — | `.` (distribution → conveyor) | 900 ms |
+| (703,463)(703,431)(703,399)(703,367) | (753,561)(753,529)(753,497)(753,465) | north-facing column into the row tile (703,335) | 450 ms each |
+| — | — | wait for the counter | 40 s |
+
+Notes: an earlier click at image (687,479) placed nothing — the boulder at image
+650-694,474-520 blocks that 2×2; hover + capture the placement preview before
+every click (valid = solid ghost + `Drill Speed` tooltip). The counter (75/100
+at 17:36) crossed 100 ~40 s after the second drill started delivering, and the
+panel advanced to `Move into Core: 0/25 Lead` (objective 9). Autosave copied to
+`checkpoints/r06-sector-serpulo-170.msav`.
+
 ## Wait marks
 
 | after | wait | why |
