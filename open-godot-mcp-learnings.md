@@ -1140,3 +1140,39 @@ those paths no longer exist, but the workarounds still apply.
   (4.0->5.0); upstream suppresses zoom while `rotateplaced` is held.
 - Evidence: `runs/l2-20261009-001432-ev0056-rotation-twin/` (`godot/step-results.json`,
   pid 135151; `godot/log-errors.json` empty).
+
+## 2026-10-09 — campaign-views eval times out; sector panel markup is a finding, not a label bug
+
+- `godot_exec` eval calling `MindCampaign.campaign_views_json("serpulo")` timed
+  out after 30 s from the planet dialog; `godot_debugger sessions` reported
+  `paused: false` afterwards and later evals answered. Avoid the campaign-views
+  endpoint in eval; read `get_sector_state()` plus the dialog's
+  RichTextLabel/Label text instead.
+- The planet dialog sector panel exposes raw bundle markup in
+  `RichTextLabel.text` (`[scarlet]Under attack!`,
+  `[red]:warning:[accent] Sector currently under attack...`) and renders it
+  literally on screen (PAR-0016) — record as a parity finding, not a
+  measurement problem.
+- Run: `runs/20261009-052658-seed-campaign/`.
+
+- State alignment for campaign comparisons: back up
+  `app_userdata/Mindustry-Godot/{saves,config}`, call
+  `MindCampaign.clear_campaign_saves()` (`@settings.clearcampaignsaves`
+  semantics: planet stats, sector info, sector save slots), then
+  `godot_game stop` + `play`; the first-run chooser returns and the fresh
+  sector panel matches Java's fields. Used 2026-10-09:
+  `runs/20261009-052658-seed-campaign/` (iteration 2).
+
+- In-game captures include two debug overlays with no Java counterpart:
+  `HudGroup/hud/FpsBox/{Fps,Memory,Ping}` and
+  `HudGroup/performance/Panel/Label` (fps/cpu/mem). Set those nodes'
+  `visible = false` in an eval before world captures, or the pixel diff is
+  dominated by them. Run: `runs/20261009-052658-seed-campaign/` (iteration 3).
+
+- Camera drift during idle in-game probes: with the OS pointer parked near the
+  game-window edge, the port edge-pans continuously (`Camera2D` center reached
+  y=32870 on a 256x256 map) and captures show an empty world while the HUD
+  stays live. Park the pointer mid-window to stop it; recover with
+  `get_node("/root/Spine/World/Camera2D").recenter_player()` (snaps to and
+  follows the best core). Run: `runs/20261009-052658-seed-campaign/`
+  (iteration 4, PAR-0031).

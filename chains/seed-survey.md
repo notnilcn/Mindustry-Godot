@@ -13,7 +13,7 @@ preconditions:
   - One surface (or one depth level) per sweep — do not chase the whole tree in one run.
 tools: [computer-mcp_mouse_move, computer-mcp_click, computer-mcp_key_down, computer-mcp_key_up, computer-mcp_screenshot, godot_health, godot_editor_read, godot_editor_edit, godot_game, godot_exec, godot_input, godot_screenshot, godot_log]
 path: none — this chain is the root recipe; items it finds store their own boot-replay path.
-last_verified: not yet (recipe; both boot legs are verified in java-reference-leg and boot-and-identity)
+last_verified: 2026-10-09 runs/20261009-052658-seed-campaign (campaign surface: boot → Play > Campaign → first-run chooser → planet page; both legs; first mismatch recorded PAR-0015; see chains/campaign-planet-page-seed.md)
 ---
 
 # seed-survey

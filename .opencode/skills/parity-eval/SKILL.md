@@ -91,10 +91,16 @@ text through structured state (see §5).
 `.opencode/parity-session/`): it starts Xvfb `:10`, optionally a headless
 weston for the Godot editor (`--gpu-godot`), launches the editor and waits for
 the bridge port. `--run` then execs opencode at the workspace root, and
-`--stop` tears the session down. Run it before a remote `/goal` or `/loop`
+`--stop` tears the session down. `--session N` (N >= 2) starts a parallel
+session on the same host: display `:(9+N)`, bridge `6970+10(N-1)`, a worktree
+`../Mindustry-Godot-sessionN` with seeded build caches and its own Java data
+dir, and session-local MCP wiring (PATH shims plus an `opencode.json` project
+override); the ledger and `runs/` are symlinked to the main checkout so claims
+and reference frames are shared. Run it before a remote `/goal` or `/loop`
 session; the Java client is still launched by the session itself (below).
 `ssh` has no `DISPLAY`, and the computer-mcp MCP entry is pinned to
-`DISPLAY=:10.0` in the global opencode config — keep the session on `:10`.
+`DISPLAY=:10.0` in the global opencode config — keep session 1 on `:10` (the
+other sessions override the MCP endpoints themselves).
 
 ### Launch both clients on `:10`
 
@@ -170,8 +176,9 @@ and outranks the default queue.
      `path` first, sweep its surface, and create the items there.
 3. **No focus** — seed sweep when `seeding.last_sweep` is `null` or the frontier
    has unrecorded surfaces (§2); otherwise the first non-`verified` item
-   (`seeded`, `in-progress`, `mismatch`, `fixing`, or `blocked` with a clear
-   next check) in ledger order (§3).
+   (`seeded`, `reference`, `in-progress`, `mismatch`, `fixing`, or `blocked`
+   with a clear next check) in ledger order (§3). A `reference` item runs the
+   Godot-only walk in §3b.
 
 A named item or area always beats the global queue; the global queue resumes
 when `focus` is `null`. One sweep surface or one item per iteration. Never
@@ -223,6 +230,133 @@ fresh artifacts from both legs. It explores, classifies, and records — it does
    frontier entry, writing the run report, and committing docs only (never a
    code fix in a sweep).
 
+## 2b. Reference soak (Java-only pre-load)
+
+A **reference soak** records what the Java client does for one player action so
+a later Godot run can be judged against **stored** evidence: one client per run,
+no live second leg, no window juggling. It is the fast path into flows the port
+does not implement yet. A soak records — it never fixes, diffs, or issues a
+parity verdict.
+
+Per action it produces three artifacts:
+
+- reference frame(s) in `runs/<stamp>-ref-<area>/java/`;
+- the re-runnable sequence (checkpoint -> fork -> action + settle waits) in
+  `chains/java-ref-<area>.md`;
+- one ledger item with a `reference` block and `status: "reference"`.
+
+### 2b.1 Action table (Ground Zero basics)
+
+The Ground Zero tutorial is an objective graph stored inside
+`../Mindustry/core/assets/maps/serpulo/groundZero.msav` (bundle keys `gz.*`,
+plus `hint.desktopMove` and `objective.*`). Rows in practical play order:
+
+| # | action | expected Java state | oracle keys |
+|---|---|---|---|
+| R00 | fresh profile: Play > Campaign > Serpulo > OK > Launch | planet page -> loading -> tutorial start | `gz.mine`, `hint.desktopMove` |
+| R01 | resume: Save & Quit after a checkpoint, then Play > Campaign > Ground Zero hex > Go | tutorial resumes at the current objective | objective HUD text |
+| R02 | move (WASD) near the copper ore | hint `Use [WASD] to move.`; camera follows | `hint.desktopMove` |
+| R03 | click the copper ore to begin mining | mining starts; `Obtain: 0/15 Copper` | objective 0 (`Item 15`, `gz.mine`) |
+| R04 | tech tree -> research Mechanical Drill -> select it in the production menu -> place on copper | drill placed; objective clears | objective 1 (`BuildCount mechanical-drill`, `gz.research`) |
+| R05 | research and place conveyors so the drill feeds the core | core receives 5 | objective 2 (`CoreItem 5`, `gz.conveyors`) |
+| R06 | place more drills; mine 100 copper | core reaches 100 | objective 3 (`CoreItem 100`, `gz.drills`) |
+| R07 | drill lead; mine 25 lead | core reaches 25 lead | objective 9 (`CoreItem lead 25`, `gz.lead`) |
+| R08 | move the camera up to the defense area | camera pans north | `gz.moveup` marker on objective 6 |
+| R09 | research and place 2 Duo turrets | 2 duos built | objective 6 (`BuildCount duo 2`, `gz.turrets`) |
+| R10 | supply the Duos with copper (conveyors) | `duoAmmo` flag set | objective 15 (`Flag duoAmmo`, `gz.duoammo`, `gz.supplyturret`) |
+| R11 | place 6 copper walls around the turrets | 6 walls built | objective 7 (`BuildCount copper-wall 6`, `gz.walls`) |
+| R12 | wait out the wave timers: 300 s, 180 s, 180 s (zone3 spawns the wave) | wave announced/started | objectives 4/5/8 (`gz.zone1..3`) |
+| R13 | after the wave, research and place a Scatter turret | scatter built | objective 11 (`BuildCount scatter`, `gz.aa`) |
+| R14 | supply the Scatter with lead | `scatterAmmo` flag set | objective 16 (`Flag scatterAmmo`, `gz.scatterammo`) |
+| R15 | defend: survive the assault | enemies destroyed | objectives 12/13 (`gz.defend`, `objective.enemiesapproaching`) |
+| R16 | finish: keep defending into the capture timer | `allowWaves` timer runs | objective 14 (`gz.finish`) |
+
+Amounts and parents come from the map's parsed objective graph (2026-10-09);
+rows overlap in play, so a soak records the first practical pass in prompt
+order. R00/R01 and the tutorial fork may already have items from a seed sweep
+(PAR-0028/0029/0030/0031) — attach the `reference` block to those instead of
+duplicating them.
+
+### 2b.2 Recording rules
+
+- **Java only.** Boot and drive the reference as in §0; the Godot client stays
+  down. `capture_screen.py --window-title Mindustry` is the camera; raise the
+  window before every capture.
+- **One continuous client.** Boot once per soak and keep the state across
+  iterations instead of replaying from boot per row. Reboot only when R00 needs
+  a fresh profile (back up
+  `parity-java-home/.local/share/Mindustry/saves/` first and say so in
+  `run.json`).
+- **Fast-forward in one call.** The prefix from the row's checkpoint to its
+  fork is one `execute` call issuing all calls back-to-back — no per-step
+  captures or diffs.
+- **Wait inside the chain.** Unskippable animations need explicit waits between
+  calls: the boot log gate (`until grep -q "Total time to load"`), a short
+  `sleep` after each menu/dialog input (fades), a retake after Launch (loading
+  bar), and chunked `sleep`s for the R12 timers (300/180/180 s). Long waits bank
+  write-up time and poll in <=60 s chunks so no tool call has to hold for
+  minutes. Record the wait that worked per row in the chain's `settle`.
+- **Mid-animation captures are retaken, never recorded.** A frame captured
+  before the objective/prompt settles is retaken after the recorded wait; a
+  retake is not a finding.
+- **Checkpoint after every action.** Best effort, in order: the pause menu's
+  save slot; else copy the fresh
+  `parity-java-home/.local/share/Mindustry/saves/*.msav` and verify its mtime
+  changed; else fall back to replaying the full prefix next time. Record the
+  surviving path in `reference.checkpoint`.
+- **Fork rule.** Any interactive element seen in passing gets a ledger item
+  before the row closes (§2 step 5).
+
+### 2b.3 Item shape
+
+```json
+{
+  "id": "PAR-00NN", "title": "Tutorial: mine copper by clicking the ore",
+  "surface": "world", "parent": "PAR-00MM", "status": "reference",
+  "chain": "chains/java-ref-ground-zero-tutorial.md",
+  "discovered_by": "runs/<stamp>-ref-ground-zero/",
+  "path": {"to": "Ground Zero tutorial, objective 'Obtain 0/15 Copper'",
+           "java": ["<checkpoint + fork calls>"], "godot": [],
+           "confirm": {"java": "java/step-03-fork.png"}},
+  "reference": {
+    "captured": "<ISO8601>", "profile": "fresh|resumed",
+    "run": "runs/<stamp>-ref-ground-zero/",
+    "frames": {"fork": "java/step-03-fork.png", "action": "java/step-03-mine.png"},
+    "settle": [{"after": "click ore", "wait_ms": 500}],
+    "expected": {"bundle": ["gz.mine"], "objective": "Obtain: 0/15 Copper"},
+    "chain": "chains/java-ref-ground-zero-tutorial.md",
+    "checkpoint": "parity-java-home/.local/share/Mindustry/saves/<file>.msav"
+  },
+  "reproduce": {"java": ["<action calls>", "capture_screen.py ..."],
+                "godot": [], "compare": []},
+  "steps": [], "mismatch": null, "fix": {"status": "open"}, "verified": null
+}
+```
+
+`status: "reference"` means Java evidence recorded, Godot walk still open. It
+is not a verdict: §3b either closes the item as `verified.mode: "reference"` or
+opens a mismatch with a fresh Java pair.
+
+### 2b.4 Parallelism
+
+One agent is the default and stays fast because the Godot leg is absent; the
+mutable resource is the single Java client, not the model, and the tutorial is
+linear — a second agent only helps if it can start from a checkpoint of the
+first agent's state. If the operator runs one, it must have its own
+loop/display/data dir (`../.opencode/loops/bin/start-loop.sh N --run` from the
+workspace root: own display, bridge, worktree, Java data dir), start from a
+copy of the checkpoint that precedes its first row, and own a disjoint row
+range; the two serialize `parity-ledger.json` writes with an exclusive `flock`
+on `parity-ledger.json.lock` (re-read, apply, write, release). Never run two
+clients on one display or one data dir.
+
+### 2b.5 Hiccups
+
+§0 applies unchanged: a click that only focused the window, a dropped key, a
+maximized window, a blank capture, a field that drops input, a save slot that
+never lands — one dated entry in `computer-mcp-learnings.md` immediately, and
+the wait that fixed it into the chain.
+
 ## 3. Item run: fast-forward, then mirror
 
 Pick the first non-`verified` item in `parity-ledger.json` (or the item the
@@ -248,6 +382,27 @@ goal names). For that item:
    (`last_verified`, steps, and its path if navigation proved fragile), continue
    to the next item.
 6. First mismatch → **stop the item run** and switch to fix mode (§5).
+
+### 3b. Reference-backed run (Godot only)
+
+When the picked item carries a `reference` block (`status: "reference"`), the
+Java side is the recorded reference instead of a live client:
+
+1. Keep the Godot client as in step 2; the Java client stays down. Stamp the
+   Godot pid/commit in `run.json` and verify `reference.frames.action` exists
+   and is non-blank.
+2. Fast-forward the item's **Godot** path to the same fork and mirror the action
+   as in step 4. Compare with §4 using `reference.frames.action` as the Java
+   side.
+3. Pass → `verified: {mode: "reference", run: <this run>, reference: <ref run>}`
+   and bump the chain's `last_verified`. Record the step with `java_frame`
+   pointing at `<reference.run>/<reference.frames.action>` and the fresh
+   `godot_frame`/`diff`.
+4. Fail → re-run the Java leg once from `reference.checkpoint` and recapture the
+   same frame. If the fresh Java frame reproduces the reference, treat the Godot
+   leg as the mismatch (§5) with the fresh pair; if it does not, refresh the
+   reference item (frame, waits) and retry — never file a mismatch against a
+   stale reference.
 
 Hard rules:
 
@@ -306,6 +461,13 @@ Work in the strongest evidence class available (cheapest first):
 3. **Text** — bundle keys / dialog text read from structured state (no OCR).
 4. **Frames** — the gate above; a layout-region difference is a presentation
    finding, a palette-only difference usually a shader/asset finding.
+
+A reference-backed run is evidence class 4 with recorded Java provenance: the
+Java side is `reference.frames.action` from `reference.run` (window capture at
+1152x648), the Godot side is the fresh capture. Name both paths in the run
+report and the diff JSON so the comparison stays reproducible. Do not mix a
+reference pass into `chain` runs: if a live Java frame is captured, the item is
+a normal §3 run.
 
 ## 5. Mismatch → fix → verify
 
@@ -376,8 +538,11 @@ Update `updated`, `path.last_replayed`, `steps`, `mismatch`, `fix`, `verified`
 after every run; a seed sweep also maintains `seeding.last_sweep`/`frontier`.
 Append new items with the next `PAR-####` id and set `parent`/`surface`/
 `discovered_by`. Statuses: `seeded` (discovered or compiled, no fresh matched
-run), `in-progress`, `mismatch`, `fixing`, `verified` (closed — `verified.mode`
-separates a `seed` observation from a full `chain` pass), `blocked`, `wontfix`.
+run), `reference` (Java evidence recorded by a soak, §2b; the Godot walk is
+still open), `in-progress`, `mismatch`, `fixing`, `verified` (closed —
+`verified.mode` is `seed` for a sweep observation, `chain` for a full both-leg
+pass, or `reference` for a Godot-only pass against a stored Java frame),
+`blocked`, `wontfix`.
 A `verified.mode: "seed"` item may be reopened if a later chain run contradicts
 it. Its `chain` may point at `chains/seed-survey.md` until the item is re-run,
 fixed, or needs item-specific preconditions, at which point write its own file.
@@ -390,8 +555,8 @@ hardcoded click coordinates unless measured from the current capture, status
 `verified` only with a run dir + pid/commit in `last_verified`. A chain splits
 into `## Path (fast-forward)` — navigation, replayed back-to-back per leg, not
 evidence — and `## Steps (under test)` — the mirrored part behind the gate.
-Java-leg sequences go in `java-*.md` files; a mixed item names both servers in
-`tools`.
+Java-leg sequences go in `java-*.md` files (soak sequences are
+`java-ref-*.md`); a mixed item names both servers in `tools`.
 
 ### Learnings
 

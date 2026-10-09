@@ -61,5 +61,7 @@ session.json
 # Parity run artifacts + persistent Java reference data dir
 runs/
 parity-java-home/
+# Shared ledger claim lock (parity-session.sh also adds it to .git/info/exclude)
+parity-ledger.json.lock
 
 screenshots_for_ai/
