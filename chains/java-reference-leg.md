@@ -39,10 +39,12 @@ last_verified: not yet (single-display :10 recipe; legacy loop-era runs are kept
    until grep -q "Total time to load" "$RUN/java/game.log"; do sleep 2; done
    ```
 
-3. Raise the Java window (the Godot editor shares `:10`), then capture the
-   initial frame with `capture_screen.py` (it prints mean/stddev, so a blank
-   frame is caught before it becomes a finding). `--window-title` reads the game
-   window directly:
+3. Normalize the window before anything reads it: if it opened maximized,
+   `window_ctl.py unmaximize Mindustry` first (a maximized window ignores
+   `resize`), then `window_ctl.py resize Mindustry 1152 648`. Raise it (the
+   Godot editor shares `:10`), then capture the initial frame with
+   `capture_screen.py` (it prints mean/stddev, so a blank frame is caught before
+   it becomes a finding). `--window-title` reads the game window directly:
 
    ```bash
    DISPLAY=:10 "$HOME/.local/share/uv/tools/computer-mcp/bin/python" \

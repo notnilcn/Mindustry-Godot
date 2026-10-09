@@ -34,7 +34,7 @@ calls.
    ```
 
    Follow `java-reference-leg` §Steps 1–3 (detached launch, readiness line,
-   resize/raise/capture) and `boot-and-identity` §Steps 1–6 (bridge, identity,
+   unmaximize/resize/raise/capture) and `boot-and-identity` §Steps 1–6 (bridge, identity,
    `game.tscn`, play, pid stamp). Stamp both pids in `$RUN/run.json` and record
    the normalized Java geometry.
 

@@ -35,7 +35,8 @@ record.
 
 | Path | Role |
 |---|---|
-| `parity-ledger.json` | Machine-readable queue + proof + coverage record: items, `path` fast-forwards, `seeding.last_sweep`/`frontier`. Read before picking work; update after every step, mismatch, and fix. |
+| `parity-ledger.json` | Machine-readable queue + proof + coverage record: items, `path` fast-forwards, `focus` scope, `seeding.last_sweep`/`frontier`. Read before picking work; update after every step, mismatch, and fix. |
+| `WORKFLOW_PROMPTS.md` | Canonical `/goal` and `/loop` paste-text (scope + hiccup rules). Keep in sync with this skill; the skill wins on conflict. |
 | `chains/` | Canonical per-flow MCP call sequences with a `## Path (fast-forward)` section (navigation, not evidence) and `## Steps (under test)` (the mirrored part); schema in `chains/README.md`. Consult before composing calls; update/bump after a confirmed run. |
 | `runs/<stamp>-<item>/` | Run artifacts: `java/`, `godot/`, `diff/`, `run.json`, `report.md`. Gitignored. |
 | `computer-mcp-learnings.md`, `open-godot-mcp-learnings.md` | Friction + workarounds that are not chains. Append a dated entry when a run taught you something. |
@@ -47,6 +48,25 @@ counts as a gameplay check; the CLI is only for arranging and inspecting the
 server side, exactly as the playtest skill describes.
 
 ## 0. Session setup
+
+### Hiccups: log them when they happen (do this before Preconditions)
+
+A **hiccup** is any friction that costs a retry: a tool error, a window that
+opened maximized, input that did not land, a blank capture, a stale editor
+binary, a bridge drop, a dialog path that moved. The moment it happens — before
+continuing the run — append a dated entry to the matching learnings file:
+
+- `computer-mcp-learnings.md` — Java leg, `window_ctl.py` / `capture_screen.py`,
+  X display, pynput workarounds.
+- `open-godot-mcp-learnings.md` — Godot editor/bridge, `godot_*` calls, frame
+  loop, screenshots, node/eval traps.
+
+Each entry: symptom, the exact failing tool call + params, the workaround that
+worked (or the blocker if none), and the run dir or chain that shows it. One
+entry per distinct issue per session; add a bullet to it if it recurs with more
+detail. The end-of-item step only verifies nothing was missed — a hiccup that
+exists only in the session log was not recorded. Never rewrite another
+session's entry.
 
 ### Preconditions
 
@@ -63,6 +83,18 @@ tools/mcp-smoke.sh      # when the Godot bridge is in doubt
 `bootstrap.sh --check` still validates JDK 17, the MCP servers and the optional
 host tools. `tesseract` is **not** installed, so OCR is unavailable — compare
 text through structured state (see §5).
+
+### SSH / no-display sessions
+
+`tools/parity-session.sh` prepares the workflow's hardcoded environment
+(display `:10`, editor bridge `6970`, runtime state under the gitignored
+`.opencode/parity-session/`): it starts Xvfb `:10`, optionally a headless
+weston for the Godot editor (`--gpu-godot`), launches the editor and waits for
+the bridge port. `--run` then execs opencode at the workspace root, and
+`--stop` tears the session down. Run it before a remote `/goal` or `/loop`
+session; the Java client is still launched by the session itself (below).
+`ssh` has no `DISPLAY`, and the computer-mcp MCP entry is pinned to
+`DISPLAY=:10.0` in the global opencode config — keep the session on `:10`.
 
 ### Launch both clients on `:10`
 
@@ -107,9 +139,10 @@ Record the values in `run.json`; all of them persist in `parity-java-home/`:
 - Java window **1152x648**, windowed, UI scale 1.0, language `en`, music/SFX
   volume 0. Normalize once interactively; if text fields drop injected input
   (known), resize/move the window instead:
-  `DISPLAY=:10 "$MCP_PY" .opencode/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648`
-  and `... move Mindustry 40 40`. The embedded Godot game is fixed at
-  1152x648 — never try to resize it.
+  `DISPLAY=:10 "$MCP_PY" .opencode/skills/parity-eval/scripts/window_ctl.py unmaximize Mindustry`,
+  then `... resize Mindustry 1152 648`, then `... move Mindustry 40 40`. A
+  maximized window ignores `resize` — drop the WM state first. The embedded
+  Godot game is fixed at 1152x648 — never try to resize it.
 - Java saves/settings live in `parity-java-home/`; keep that directory stable
   so scenarios start from the same state. Delete its `saves/` only to test a
   fresh profile, and say so in `run.json`.
@@ -122,20 +155,28 @@ Record the values in `run.json`; all of them persist in `parity-java-home/`:
 
 ## 1. Picking work
 
-Read `parity-ledger.json` first. Iteration types, in priority order:
+Read `parity-ledger.json` first; its top-level `focus` is the operator's scope
+and outranks the default queue.
 
-1. **Operator request** — an explicit "seed" runs a seed sweep (§2); a named
-   `PAR-####` runs that item (§3).
-2. **Seed sweep** — when `seeding.last_sweep` is `null`, or `frontier` has
-   unrecorded surfaces and the ledger is thin, sweep the shallowest unfinished
-   surface (§2). A seed sweep still uses both clients and the gate; it is not
-   free-form play.
-3. **Item run** — otherwise the first non-`verified` item (`seeded`,
-   `in-progress`, `mismatch`, `fixing`, or `blocked` with a clear next check),
-   in ledger order (§3).
+1. **Operator instruction** — "work on `Play > Campaign`", "do PAR-0012", "seed
+   the editor" updates `focus` (when it is meant to persist), is stamped in
+   `run.json`, and is followed immediately.
+2. **Ledger `focus`** — resolve it against the items:
+   - `kind: "item"` → run that `PAR-####` next.
+   - `kind: "area"` | `"path"` → an item is in scope when `surface`, `title`,
+     `chain`, `parent` lineage, or `path.to` matches the focus `target`/`path`
+     tokens (case-insensitive). Run the first in-scope non-`verified` item.
+   - No in-scope items exist yet → seed that area (§2): replay the focus fork's
+     `path` first, sweep its surface, and create the items there.
+3. **No focus** — seed sweep when `seeding.last_sweep` is `null` or the frontier
+   has unrecorded surfaces (§2); otherwise the first non-`verified` item
+   (`seeded`, `in-progress`, `mismatch`, `fixing`, or `blocked` with a clear
+   next check) in ledger order (§3).
 
-One sweep surface or one item per iteration. Never combine a fix and a fresh
-hunt step; commit a fix (`Fixes PAR-####`) before moving on.
+A named item or area always beats the global queue; the global queue resumes
+when `focus` is `null`. One sweep surface or one item per iteration. Never
+combine a fix and a fresh hunt step; commit a fix (`Fixes PAR-####`) before
+moving on.
 
 ## 2. Seed sweep: the live frontier
 
@@ -143,9 +184,11 @@ A seed sweep turns "what is there to compare?" into ledger items backed by
 fresh artifacts from both legs. It explores, classifies, and records — it does
 **not** fix.
 
-1. Boot both clients fresh into the root state; that boot replay is the `path`
-   of every item the sweep discovers. Create `runs/<stamp>-seed-<area>/` with
-   `seed/` for frame pairs and stamp the pids/commits in `run.json`.
+1. Reach the sweep's surface: boot both clients fresh and, when the sweep is
+   scoped to a deeper fork (`focus`), replay the focus `path` (§3 step 3)
+   before the first snapshot. Boot + focus replay is the `path` of every item
+   the sweep discovers. Create `runs/<stamp>-seed-<area>/` with `seed/` for
+   frame pairs and stamp the pids/commits in `run.json`.
 2. Snapshot the current surface on both sides and record the pair
    (`seed/step-NN-<surface>-java.png`, `seed/step-NN-<surface>-godot.png`):
    - **Java**: capture the window; the capture *is* the enumeration — read the
@@ -353,8 +396,10 @@ Java-leg sequences go in `java-*.md` files; a mixed item names both servers in
 ### Learnings
 
 Friction that is not a reusable chain goes to the repo-root learnings files as
-one dated entry: what happened, what worked, the run or chain that shows it.
-Never rewrite another session's entry.
+one dated entry, written **the moment the hiccup happens** (§0): what happened,
+the exact failing call, what worked, the run or chain that shows it. Java/X-leg
+friction in `computer-mcp-learnings.md`; Godot/bridge friction in
+`open-godot-mcp-learnings.md`. Never rewrite another session's entry.
 
 ### Run report
 

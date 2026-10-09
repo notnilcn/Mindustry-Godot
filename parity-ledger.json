@@ -1,7 +1,14 @@
 {
   "schema": "mindustry-godot/parity-ledger@2",
-  "updated": "2026-10-09T00:00:00Z",
+  "updated": "2026-10-09T04:36:08Z",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction chains. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
+  "focus": {
+    "kind": "area",
+    "target": "campaign",
+    "path": "Play > Campaign",
+    "note": "operator: start with everything after Play > Campaign (planet page and deeper); set to null to resume the global queue",
+    "updated": "2026-10-09T04:49:53Z"
+  },
   "environment": {
     "display": ":10",
     "java": {
@@ -20,12 +27,27 @@
   },
   "conventions": {
     "ids": "PAR-####, monotonically increasing; never reuse",
-    "status": ["seeded", "in-progress", "mismatch", "fixing", "verified", "blocked", "wontfix"],
+    "status": [
+      "seeded",
+      "in-progress",
+      "mismatch",
+      "fixing",
+      "verified",
+      "blocked",
+      "wontfix"
+    ],
     "status_notes": {
       "seeded": "discovered or compiled from a chain; no fresh matched run yet",
       "verified": "closed; evidence class in verified.mode (seed = one observation per leg in a seed sweep, chain = full path+steps re-run under the gate)",
       "mismatch": "a run stopped here with fresh artifacts from both legs (a seed sweep can open an item as mismatch directly)",
       "blocked": "cannot be run (client will not launch, bridge down, ...); the failing tool call is recorded in mismatch or fix"
+    },
+    "focus": {
+      "role": "Operator scope; wins over the default queue. kind=item runs that PAR-####; kind=area|path runs the first non-verified item whose surface/title/chain/parent lineage/path.to matches the target/path tokens, or seeds that area when none exist yet. Copy into run.json and bump updated when changed; null resumes the global queue.",
+      "example": "{kind: 'area', target: 'campaign', path: 'Play > Campaign'}"
+    },
+    "hiccups": {
+      "rule": "The moment friction costs a retry (tool error, maximized window, blank capture, dropped input, stale binary, bridge drop), append a dated entry to computer-mcp-learnings.md (Java/X leg) or open-godot-mcp-learnings.md (Godot/bridge leg) with symptom, failing call, workaround, run dir — before continuing. The end-of-item step only verifies nothing was missed."
     },
     "discovery": {
       "rule": "No newly revealed interactive surface is left unrecorded: before leaving a fork (in a seed sweep or a normal item run), append one item per visible control/action with parent, surface, path and discovered_by.",
@@ -70,14 +92,34 @@
         "to": "state the item starts from",
         "java": [],
         "godot": [],
-        "confirm": { "godot": "<structured check>", "java": "<capture path or check>" },
+        "confirm": {
+          "godot": "<structured check>",
+          "java": "<capture path or check>"
+        },
         "last_replayed": null
       },
       "run": "runs/<dir>/ or null",
-      "reproduce": { "java": [], "godot": [], "compare": [] },
-      "steps": [{ "n": 1, "action": "click Play", "java_frame": "java/step-01.png", "godot_frame": "godot/step-01.png", "diff": "diff/step-01.json", "verdict": "match" }],
+      "reproduce": {
+        "java": [],
+        "godot": [],
+        "compare": []
+      },
+      "steps": [
+        {
+          "n": 1,
+          "action": "click Play",
+          "java_frame": "java/step-01.png",
+          "godot_frame": "godot/step-01.png",
+          "diff": "diff/step-01.json",
+          "verdict": "match"
+        }
+      ],
       "mismatch": null,
-      "fix": { "status": "open", "commit": null, "summary": null },
+      "fix": {
+        "status": "open",
+        "commit": null,
+        "summary": null
+      },
       "verified": null
     }
   },
@@ -99,45 +141,1853 @@
       "path": {
         "to": "fresh main menu on both clients",
         "java": [
-          { "tool": "shell", "params": { "cmd": "setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/<run>/java/game.log 2>&1 </dev/null &" } },
-          { "tool": "shell", "params": { "cmd": "until grep -q 'Total time to load' runs/<run>/java/game.log; do sleep 2; done" } },
-          { "tool": "shell", "params": { "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648" } },
-          { "tool": "shell", "params": { "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry" } }
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/<run>/java/game.log 2>&1 </dev/null &"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "until grep -q 'Total time to load' runs/<run>/java/game.log; do sleep 2; done"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry"
+            }
+          }
         ],
         "godot": [
-          { "tool": "godot_health", "params": { "action": "check" } },
-          { "tool": "godot_editor_read", "params": { "action": "state" } },
-          { "tool": "godot_editor_edit", "params": { "action": "open_scene", "params": { "path": "res://scenes/game.tscn" } } },
-          { "tool": "godot_game", "params": { "action": "play", "params": { "scene": "res://scenes/game.tscn" } } },
-          { "tool": "godot_game", "params": { "action": "status" } }
+          {
+            "tool": "godot_health",
+            "params": {
+              "action": "check"
+            }
+          },
+          {
+            "tool": "godot_editor_read",
+            "params": {
+              "action": "state"
+            }
+          },
+          {
+            "tool": "godot_editor_edit",
+            "params": {
+              "action": "open_scene",
+              "params": {
+                "path": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "status"
+            }
+          }
         ],
-        "confirm": { "godot": "runtime_connected: true; MenuGroup.visible true after fade-in", "java": "java/step-01-menu.png non-blank" },
+        "confirm": {
+          "godot": "runtime_connected: true; MenuGroup.visible true after fade-in",
+          "java": "java/step-01-menu.png non-blank"
+        },
         "last_replayed": null
       },
       "run": null,
       "reproduce": {
         "java": [
-          { "tool": "shell", "params": { "cmd": "setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/<run>/java/game.log 2>&1 </dev/null &" } },
-          { "tool": "shell", "params": { "cmd": "until grep -q 'Total time to load' runs/<run>/java/game.log; do sleep 2; done" } },
-          { "tool": "shell", "params": { "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648" } },
-          { "tool": "shell", "params": { "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry" } },
-          { "tool": "capture_screen.py", "params": { "--window-title": "Mindustry", "--output": "runs/<run>/java/step-01-menu.png" } }
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/<run>/java/game.log 2>&1 </dev/null &"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "until grep -q 'Total time to load' runs/<run>/java/game.log; do sleep 2; done"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/<run>/java/step-01-menu.png"
+            }
+          }
         ],
         "godot": [
-          { "tool": "godot_health", "params": { "action": "check" } },
-          { "tool": "godot_editor_read", "params": { "action": "state" } },
-          { "tool": "godot_editor_edit", "params": { "action": "open_scene", "params": { "path": "res://scenes/game.tscn" } } },
-          { "tool": "godot_game", "params": { "action": "play", "params": { "scene": "res://scenes/game.tscn" } } },
-          { "tool": "godot_game", "params": { "action": "status" } },
-          { "tool": "godot_screenshot", "params": { "action": "game" } }
+          {
+            "tool": "godot_health",
+            "params": {
+              "action": "check"
+            }
+          },
+          {
+            "tool": "godot_editor_read",
+            "params": {
+              "action": "state"
+            }
+          },
+          {
+            "tool": "godot_editor_edit",
+            "params": {
+              "action": "open_scene",
+              "params": {
+                "path": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "status"
+            }
+          },
+          {
+            "tool": "godot_screenshot",
+            "params": {
+              "action": "game"
+            }
+          }
         ],
         "compare": [
-          { "tool": "frame_diff.py", "params": { "--java": "runs/<run>/java/step-01-menu.png", "--godot": "runs/<run>/godot/step-01-menu.png", "--out-json": "runs/<run>/diff/step-01.json" } }
+          {
+            "tool": "frame_diff.py",
+            "params": {
+              "--java": "runs/<run>/java/step-01-menu.png",
+              "--godot": "runs/<run>/godot/step-01-menu.png",
+              "--out-json": "runs/<run>/diff/step-01.json"
+            }
+          }
         ]
       },
       "steps": [],
       "mismatch": null,
-      "fix": { "status": "open", "commit": null, "summary": null },
+      "fix": {
+        "status": "open",
+        "commit": null,
+        "summary": null
+      },
+      "verified": null
+    },
+    {
+      "id": "PAR-0002",
+      "title": "Boot menu: Play button opens the Play submenu",
+      "surface": "boot",
+      "parent": "PAR-0001",
+      "status": "seeded",
+      "chain": "chains/seed-survey.md",
+      "updated": "2026-10-09T04:36:08Z",
+      "discovered_by": "runs/20261009-043149-seed-boot/",
+      "path": {
+        "to": "fresh main menu on both clients",
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cd $REPO && setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/20261009-043149-seed-boot/java/game.log 2>&1 </dev/null &"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "until grep -q 'Total time to load' runs/20261009-043149-seed-boot/java/game.log; do sleep 2; done"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py unmaximize Mindustry"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_health",
+            "params": {
+              "action": "check"
+            }
+          },
+          {
+            "tool": "godot_editor_read",
+            "params": {
+              "action": "state"
+            }
+          },
+          {
+            "tool": "godot_editor_edit",
+            "params": {
+              "action": "open_scene",
+              "params": {
+                "path": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "status"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "return {\"pid\": OS.get_process_id(), \"tick\": get_node(\"/root/Spine/SimHost\").get_tick()}"
+              }
+            }
+          }
+        ],
+        "confirm": {
+          "godot": "runtime_connected: true; MenuGroup visible",
+          "java": "seed/step-01-boot-java.png non-blank"
+        },
+        "last_replayed": "runs/20261009-043149-seed-boot/"
+      },
+      "run": null,
+      "reproduce": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cd $REPO && setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/20261009-043149-seed-boot/java/game.log 2>&1 </dev/null &"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "until grep -q 'Total time to load' runs/20261009-043149-seed-boot/java/game.log; do sleep 2; done"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py unmaximize Mindustry"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 275,
+              "y": 218,
+              "button": "left",
+              "note": "re-measure from the run capture; image (230,149) + window origin"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-043149-seed-boot/seed/step-02-play-java.png"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_health",
+            "params": {
+              "action": "check"
+            }
+          },
+          {
+            "tool": "godot_editor_read",
+            "params": {
+              "action": "state"
+            }
+          },
+          {
+            "tool": "godot_editor_edit",
+            "params": {
+              "action": "open_scene",
+              "params": {
+                "path": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "status"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "return {\"pid\": OS.get_process_id(), \"tick\": get_node(\"/root/Spine/SimHost\").get_tick()}"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "mouse_button",
+              "params": {
+                "button": "MOUSE_BUTTON_LEFT",
+                "position": {
+                  "x": 230,
+                  "y": 149
+                },
+                "coords": "viewport",
+                "pressed": true
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "mouse_button",
+              "params": {
+                "button": "MOUSE_BUTTON_LEFT",
+                "position": {
+                  "x": 230,
+                  "y": 149
+                },
+                "coords": "viewport",
+                "pressed": false
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "Input.flush_buffered_events()"
+              }
+            }
+          },
+          {
+            "tool": "godot_screenshot",
+            "params": {
+              "action": "game"
+            }
+          }
+        ],
+        "compare": []
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open",
+        "commit": null,
+        "summary": null
+      },
+      "verified": null
+    },
+    {
+      "id": "PAR-0003",
+      "title": "Boot menu: Database button opens the Database submenu",
+      "surface": "boot",
+      "parent": "PAR-0001",
+      "status": "seeded",
+      "chain": "chains/seed-survey.md",
+      "updated": "2026-10-09T04:36:08Z",
+      "discovered_by": "runs/20261009-043149-seed-boot/",
+      "path": {
+        "to": "fresh main menu on both clients",
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cd $REPO && setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/20261009-043149-seed-boot/java/game.log 2>&1 </dev/null &"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "until grep -q 'Total time to load' runs/20261009-043149-seed-boot/java/game.log; do sleep 2; done"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py unmaximize Mindustry"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_health",
+            "params": {
+              "action": "check"
+            }
+          },
+          {
+            "tool": "godot_editor_read",
+            "params": {
+              "action": "state"
+            }
+          },
+          {
+            "tool": "godot_editor_edit",
+            "params": {
+              "action": "open_scene",
+              "params": {
+                "path": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "status"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "return {\"pid\": OS.get_process_id(), \"tick\": get_node(\"/root/Spine/SimHost\").get_tick()}"
+              }
+            }
+          }
+        ],
+        "confirm": {
+          "godot": "runtime_connected: true; MenuGroup visible",
+          "java": "seed/step-01-boot-java.png non-blank"
+        },
+        "last_replayed": "runs/20261009-043149-seed-boot/"
+      },
+      "run": null,
+      "reproduce": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cd $REPO && setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/20261009-043149-seed-boot/java/game.log 2>&1 </dev/null &"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "until grep -q 'Total time to load' runs/20261009-043149-seed-boot/java/game.log; do sleep 2; done"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py unmaximize Mindustry"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 275,
+              "y": 288,
+              "button": "left"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-043149-seed-boot/seed/step-03-database-java.png"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_health",
+            "params": {
+              "action": "check"
+            }
+          },
+          {
+            "tool": "godot_editor_read",
+            "params": {
+              "action": "state"
+            }
+          },
+          {
+            "tool": "godot_editor_edit",
+            "params": {
+              "action": "open_scene",
+              "params": {
+                "path": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "status"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "return {\"pid\": OS.get_process_id(), \"tick\": get_node(\"/root/Spine/SimHost\").get_tick()}"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "mouse_button",
+              "params": {
+                "button": "MOUSE_BUTTON_LEFT",
+                "position": {
+                  "x": 230,
+                  "y": 219
+                },
+                "coords": "viewport",
+                "pressed": true
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "mouse_button",
+              "params": {
+                "button": "MOUSE_BUTTON_LEFT",
+                "position": {
+                  "x": 230,
+                  "y": 219
+                },
+                "coords": "viewport",
+                "pressed": false
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "Input.flush_buffered_events()"
+              }
+            }
+          },
+          {
+            "tool": "godot_screenshot",
+            "params": {
+              "action": "game"
+            }
+          }
+        ],
+        "compare": []
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open",
+        "commit": null,
+        "summary": null
+      },
+      "verified": null
+    },
+    {
+      "id": "PAR-0004",
+      "title": "Boot menu: Editor button opens the maps/editor dialog",
+      "surface": "boot",
+      "parent": "PAR-0001",
+      "status": "seeded",
+      "chain": "chains/seed-survey.md",
+      "updated": "2026-10-09T04:36:08Z",
+      "discovered_by": "runs/20261009-043149-seed-boot/",
+      "path": {
+        "to": "fresh main menu on both clients",
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cd $REPO && setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/20261009-043149-seed-boot/java/game.log 2>&1 </dev/null &"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "until grep -q 'Total time to load' runs/20261009-043149-seed-boot/java/game.log; do sleep 2; done"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py unmaximize Mindustry"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_health",
+            "params": {
+              "action": "check"
+            }
+          },
+          {
+            "tool": "godot_editor_read",
+            "params": {
+              "action": "state"
+            }
+          },
+          {
+            "tool": "godot_editor_edit",
+            "params": {
+              "action": "open_scene",
+              "params": {
+                "path": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "status"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "return {\"pid\": OS.get_process_id(), \"tick\": get_node(\"/root/Spine/SimHost\").get_tick()}"
+              }
+            }
+          }
+        ],
+        "confirm": {
+          "godot": "runtime_connected: true; MenuGroup visible",
+          "java": "seed/step-01-boot-java.png non-blank"
+        },
+        "last_replayed": "runs/20261009-043149-seed-boot/"
+      },
+      "run": null,
+      "reproduce": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cd $REPO && setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/20261009-043149-seed-boot/java/game.log 2>&1 </dev/null &"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "until grep -q 'Total time to load' runs/20261009-043149-seed-boot/java/game.log; do sleep 2; done"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py unmaximize Mindustry"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 275,
+              "y": 358,
+              "button": "left"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-043149-seed-boot/seed/step-04-editor-java.png"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_health",
+            "params": {
+              "action": "check"
+            }
+          },
+          {
+            "tool": "godot_editor_read",
+            "params": {
+              "action": "state"
+            }
+          },
+          {
+            "tool": "godot_editor_edit",
+            "params": {
+              "action": "open_scene",
+              "params": {
+                "path": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "status"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "return {\"pid\": OS.get_process_id(), \"tick\": get_node(\"/root/Spine/SimHost\").get_tick()}"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "mouse_button",
+              "params": {
+                "button": "MOUSE_BUTTON_LEFT",
+                "position": {
+                  "x": 230,
+                  "y": 289
+                },
+                "coords": "viewport",
+                "pressed": true
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "mouse_button",
+              "params": {
+                "button": "MOUSE_BUTTON_LEFT",
+                "position": {
+                  "x": 230,
+                  "y": 289
+                },
+                "coords": "viewport",
+                "pressed": false
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "Input.flush_buffered_events()"
+              }
+            }
+          },
+          {
+            "tool": "godot_screenshot",
+            "params": {
+              "action": "game"
+            }
+          }
+        ],
+        "compare": []
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open",
+        "commit": null,
+        "summary": null
+      },
+      "verified": null
+    },
+    {
+      "id": "PAR-0005",
+      "title": "Boot menu: Mods button opens the Mods dialog",
+      "surface": "boot",
+      "parent": "PAR-0001",
+      "status": "seeded",
+      "chain": "chains/seed-survey.md",
+      "updated": "2026-10-09T04:36:08Z",
+      "discovered_by": "runs/20261009-043149-seed-boot/",
+      "path": {
+        "to": "fresh main menu on both clients",
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cd $REPO && setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/20261009-043149-seed-boot/java/game.log 2>&1 </dev/null &"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "until grep -q 'Total time to load' runs/20261009-043149-seed-boot/java/game.log; do sleep 2; done"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py unmaximize Mindustry"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_health",
+            "params": {
+              "action": "check"
+            }
+          },
+          {
+            "tool": "godot_editor_read",
+            "params": {
+              "action": "state"
+            }
+          },
+          {
+            "tool": "godot_editor_edit",
+            "params": {
+              "action": "open_scene",
+              "params": {
+                "path": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "status"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "return {\"pid\": OS.get_process_id(), \"tick\": get_node(\"/root/Spine/SimHost\").get_tick()}"
+              }
+            }
+          }
+        ],
+        "confirm": {
+          "godot": "runtime_connected: true; MenuGroup visible",
+          "java": "seed/step-01-boot-java.png non-blank"
+        },
+        "last_replayed": "runs/20261009-043149-seed-boot/"
+      },
+      "run": null,
+      "reproduce": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cd $REPO && setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/20261009-043149-seed-boot/java/game.log 2>&1 </dev/null &"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "until grep -q 'Total time to load' runs/20261009-043149-seed-boot/java/game.log; do sleep 2; done"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py unmaximize Mindustry"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 275,
+              "y": 428,
+              "button": "left"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-043149-seed-boot/seed/step-05-mods-java.png"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_health",
+            "params": {
+              "action": "check"
+            }
+          },
+          {
+            "tool": "godot_editor_read",
+            "params": {
+              "action": "state"
+            }
+          },
+          {
+            "tool": "godot_editor_edit",
+            "params": {
+              "action": "open_scene",
+              "params": {
+                "path": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "status"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "return {\"pid\": OS.get_process_id(), \"tick\": get_node(\"/root/Spine/SimHost\").get_tick()}"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "mouse_button",
+              "params": {
+                "button": "MOUSE_BUTTON_LEFT",
+                "position": {
+                  "x": 230,
+                  "y": 359
+                },
+                "coords": "viewport",
+                "pressed": true
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "mouse_button",
+              "params": {
+                "button": "MOUSE_BUTTON_LEFT",
+                "position": {
+                  "x": 230,
+                  "y": 359
+                },
+                "coords": "viewport",
+                "pressed": false
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "Input.flush_buffered_events()"
+              }
+            }
+          },
+          {
+            "tool": "godot_screenshot",
+            "params": {
+              "action": "game"
+            }
+          }
+        ],
+        "compare": []
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open",
+        "commit": null,
+        "summary": null
+      },
+      "verified": null
+    },
+    {
+      "id": "PAR-0006",
+      "title": "Boot menu: Settings button opens the Settings dialog",
+      "surface": "boot",
+      "parent": "PAR-0001",
+      "status": "seeded",
+      "chain": "chains/seed-survey.md",
+      "updated": "2026-10-09T04:36:08Z",
+      "discovered_by": "runs/20261009-043149-seed-boot/",
+      "path": {
+        "to": "fresh main menu on both clients",
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cd $REPO && setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/20261009-043149-seed-boot/java/game.log 2>&1 </dev/null &"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "until grep -q 'Total time to load' runs/20261009-043149-seed-boot/java/game.log; do sleep 2; done"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py unmaximize Mindustry"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_health",
+            "params": {
+              "action": "check"
+            }
+          },
+          {
+            "tool": "godot_editor_read",
+            "params": {
+              "action": "state"
+            }
+          },
+          {
+            "tool": "godot_editor_edit",
+            "params": {
+              "action": "open_scene",
+              "params": {
+                "path": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "status"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "return {\"pid\": OS.get_process_id(), \"tick\": get_node(\"/root/Spine/SimHost\").get_tick()}"
+              }
+            }
+          }
+        ],
+        "confirm": {
+          "godot": "runtime_connected: true; MenuGroup visible",
+          "java": "seed/step-01-boot-java.png non-blank"
+        },
+        "last_replayed": "runs/20261009-043149-seed-boot/"
+      },
+      "run": null,
+      "reproduce": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cd $REPO && setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/20261009-043149-seed-boot/java/game.log 2>&1 </dev/null &"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "until grep -q 'Total time to load' runs/20261009-043149-seed-boot/java/game.log; do sleep 2; done"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py unmaximize Mindustry"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 275,
+              "y": 498,
+              "button": "left"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-043149-seed-boot/seed/step-06-settings-java.png"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_health",
+            "params": {
+              "action": "check"
+            }
+          },
+          {
+            "tool": "godot_editor_read",
+            "params": {
+              "action": "state"
+            }
+          },
+          {
+            "tool": "godot_editor_edit",
+            "params": {
+              "action": "open_scene",
+              "params": {
+                "path": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "status"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "return {\"pid\": OS.get_process_id(), \"tick\": get_node(\"/root/Spine/SimHost\").get_tick()}"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "mouse_button",
+              "params": {
+                "button": "MOUSE_BUTTON_LEFT",
+                "position": {
+                  "x": 230,
+                  "y": 429
+                },
+                "coords": "viewport",
+                "pressed": true
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "mouse_button",
+              "params": {
+                "button": "MOUSE_BUTTON_LEFT",
+                "position": {
+                  "x": 230,
+                  "y": 429
+                },
+                "coords": "viewport",
+                "pressed": false
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "Input.flush_buffered_events()"
+              }
+            }
+          },
+          {
+            "tool": "godot_screenshot",
+            "params": {
+              "action": "game"
+            }
+          }
+        ],
+        "compare": []
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open",
+        "commit": null,
+        "summary": null
+      },
+      "verified": null
+    },
+    {
+      "id": "PAR-0007",
+      "title": "Boot menu: Quit button exits the client (classify at teardown)",
+      "surface": "boot",
+      "parent": "PAR-0001",
+      "status": "seeded",
+      "chain": "chains/seed-survey.md",
+      "updated": "2026-10-09T04:36:08Z",
+      "discovered_by": "runs/20261009-043149-seed-boot/",
+      "path": {
+        "to": "fresh main menu on both clients",
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cd $REPO && setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/20261009-043149-seed-boot/java/game.log 2>&1 </dev/null &"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "until grep -q 'Total time to load' runs/20261009-043149-seed-boot/java/game.log; do sleep 2; done"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py unmaximize Mindustry"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_health",
+            "params": {
+              "action": "check"
+            }
+          },
+          {
+            "tool": "godot_editor_read",
+            "params": {
+              "action": "state"
+            }
+          },
+          {
+            "tool": "godot_editor_edit",
+            "params": {
+              "action": "open_scene",
+              "params": {
+                "path": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "status"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "return {\"pid\": OS.get_process_id(), \"tick\": get_node(\"/root/Spine/SimHost\").get_tick()}"
+              }
+            }
+          }
+        ],
+        "confirm": {
+          "godot": "runtime_connected: true; MenuGroup visible",
+          "java": "seed/step-01-boot-java.png non-blank"
+        },
+        "last_replayed": "runs/20261009-043149-seed-boot/"
+      },
+      "run": null,
+      "reproduce": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cd $REPO && setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/20261009-043149-seed-boot/java/game.log 2>&1 </dev/null &"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "until grep -q 'Total time to load' runs/20261009-043149-seed-boot/java/game.log; do sleep 2; done"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py unmaximize Mindustry"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 275,
+              "y": 568,
+              "button": "left",
+              "note": "destructive; sweep teardown only"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-043149-seed-boot/seed/step-99-quit-java.png"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_health",
+            "params": {
+              "action": "check"
+            }
+          },
+          {
+            "tool": "godot_editor_read",
+            "params": {
+              "action": "state"
+            }
+          },
+          {
+            "tool": "godot_editor_edit",
+            "params": {
+              "action": "open_scene",
+              "params": {
+                "path": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "status"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "return {\"pid\": OS.get_process_id(), \"tick\": get_node(\"/root/Spine/SimHost\").get_tick()}"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "mouse_button",
+              "params": {
+                "button": "MOUSE_BUTTON_LEFT",
+                "position": {
+                  "x": 230,
+                  "y": 499
+                },
+                "coords": "viewport",
+                "pressed": true
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "mouse_button",
+              "params": {
+                "button": "MOUSE_BUTTON_LEFT",
+                "position": {
+                  "x": 230,
+                  "y": 499
+                },
+                "coords": "viewport",
+                "pressed": false
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "Input.flush_buffered_events()"
+              }
+            }
+          }
+        ],
+        "compare": []
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open",
+        "commit": null,
+        "summary": null
+      },
+      "verified": null
+    },
+    {
+      "id": "PAR-0008",
+      "title": "Boot menu: Discord button renders banner + icon and opens the Discord dialog",
+      "surface": "boot",
+      "parent": "PAR-0001",
+      "status": "seeded",
+      "chain": "chains/seed-survey.md",
+      "updated": "2026-10-09T04:36:08Z",
+      "discovered_by": "runs/20261009-043149-seed-boot/",
+      "path": {
+        "to": "fresh main menu on both clients",
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cd $REPO && setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/20261009-043149-seed-boot/java/game.log 2>&1 </dev/null &"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "until grep -q 'Total time to load' runs/20261009-043149-seed-boot/java/game.log; do sleep 2; done"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py unmaximize Mindustry"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_health",
+            "params": {
+              "action": "check"
+            }
+          },
+          {
+            "tool": "godot_editor_read",
+            "params": {
+              "action": "state"
+            }
+          },
+          {
+            "tool": "godot_editor_edit",
+            "params": {
+              "action": "open_scene",
+              "params": {
+                "path": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "status"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "return {\"pid\": OS.get_process_id(), \"tick\": get_node(\"/root/Spine/SimHost\").get_tick()}"
+              }
+            }
+          }
+        ],
+        "confirm": {
+          "godot": "runtime_connected: true; MenuGroup visible",
+          "java": "seed/step-01-boot-java.png non-blank"
+        },
+        "last_replayed": "runs/20261009-043149-seed-boot/"
+      },
+      "run": null,
+      "reproduce": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "cd $REPO && setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/20261009-043149-seed-boot/java/game.log 2>&1 </dev/null &"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "until grep -q 'Total time to load' runs/20261009-043149-seed-boot/java/game.log; do sleep 2; done"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py unmaximize Mindustry"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_health",
+            "params": {
+              "action": "check"
+            }
+          },
+          {
+            "tool": "godot_editor_read",
+            "params": {
+              "action": "state"
+            }
+          },
+          {
+            "tool": "godot_editor_edit",
+            "params": {
+              "action": "open_scene",
+              "params": {
+                "path": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "status"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "return {\"pid\": OS.get_process_id(), \"tick\": get_node(\"/root/Spine/SimHost\").get_tick()}"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var b = get_node(\"/root/Spine/Ui/UiRoot/MenuGroup/menu/Discord\")\nreturn {\"rect\": b.get_global_rect()}"
+              }
+            }
+          }
+        ],
+        "compare": []
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open",
+        "commit": null,
+        "summary": null
+      },
       "verified": null
     }
   ]

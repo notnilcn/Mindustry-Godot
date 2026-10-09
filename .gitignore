@@ -32,6 +32,7 @@ out/
 
 # Editor workspace state
 .obsidian/
+*.swp
 
 # OS shell metadata (junk inside vendored addon trees)
 desktop.ini

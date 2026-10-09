@@ -5,10 +5,11 @@ and the `playtest` skill, with the workaround that got past it. Reusable
 sequences belong in `chains/`; this file is for everything that is not a chain:
 environment quirks, tool errors, timing traps.
 
-The `/loop` or `/goal` session appends a dated entry after a run that taught it
-something. Never rewrite another session's entry; keep it to what happened,
-what worked, and the run directory or chain that shows it. If nothing new
-happened, no entry.
+The `/loop` or `/goal` session appends a dated entry **the moment friction costs
+a retry** (a hiccup) — not only at the end of a run — with the exact failing
+call, what worked, and the run directory or chain that shows it. One entry per
+distinct issue per session; add bullets to it if it recurs. Never rewrite
+another session's entry. If nothing new happened, no entry.
 
 Entries dated before 2026-10-09 describe the retired dual-loop workflow
 (`.opencode/loops`, `PARITY_LOOP_DIR`, weston/Xvfb displays, worktree editors);

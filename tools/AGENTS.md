@@ -18,6 +18,7 @@
 | `export.sh` | Plan-22 export wrapper: checks the matching Godot 4.7.2 export templates, runs a headless export for a platform preset, and optionally verifies the artifact. Outputs default under the gitignored `client/bin/export/`. |
 | `version.sh` | Write `client/assets/version.properties` (upstream key set) from flags and git state. |
 | `mcp-smoke.sh` + `mcp_smoke.py` | In-engine MCP spine smoke over a stdio `open-godot-mcp` server; needs the editor already running. |
+| `parity-session.sh` | SSH/no-display session bootstrap for the parity workflow: Xvfb `:10` (optionally headless weston for Godot), Godot editor on bridge 6970, env summary; `--run` execs opencode at the workspace root, `--stop` tears down. |
 | `watch.sh` | Watch `client/rust/**` for `.rs`/`Cargo.toml` edits and re-run `build.sh`; ignores `client/rust/target/` and `client/bin/`. |
 
 ## Responsibilities
@@ -33,6 +34,7 @@
 - `associate.sh` mirrors `mind_core::platform::assoc`: a Linux `.desktop` under `$XDG_DATA_HOME` (plus `update-desktop-database` / `xdg-mime` when available). `MIND_EXE` overrides the exported binary path.
 `export.sh` resolves the Godot binary (`$GODOT_BIN` → `godot4`), derives the `<ver>.stable` templates directory (`~/.local/share/godot/export_templates/`; `GODOT_TEMPLATES_DIR` overrides), and fails with an install hint when it is absent. `--platform` selects the preset (`windows`→`Windows Desktop`), `--preset` overrides it, and `--out` selects the artifact path.
 - `mcp-smoke.sh` execs `python3 tools/mcp_smoke.py`, which spawns its own stdio `open-godot-mcp` server (bridge `ws://127.0.0.1:6970`) and drives `res://scenes/game.tscn` end-to-end. Flags: `--mcp-bin`, `--repo-root`, `--server-arg`, `--keep-running`, `--verbose`; `OPEN_GODOT_MCP_BIN` overrides binary discovery. Exits `0` pass, `1` assertion/tool failure, `2` bridge not connected.
+- `parity-session.sh` is the only script that manages displays: it starts Xvfb `:10` (matching the hardcoded computer-mcp `DISPLAY` in the global opencode config) and the editor bridge, with runtime state under the gitignored `.opencode/parity-session/`. It never starts the Java client — the parity-eval skill does that per run.
 
 ## Conventions
 
