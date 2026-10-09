@@ -64,15 +64,19 @@ step instead; keep movement + capture in one tool block.
 ## Success signals
 
 - `has_player_unit: true` and `unit` group count > 0 after launch; the mech
-  sprite is drawn (currently at the port's zoom 4 → a large sprite).
-- Camera follows: after S the camera leaves the core (`(1028, ~436)` →
-  `(1028, ~110)`); after W it returns (`(1028, ~433)`).
+  sprite is drawn at the atlas-scale-correct size (region px / `scale_marker`
+  width = 11.5 world px for alpha → ~46 px at zoom 4, matching the reference).
+- Camera follows: after a 54-tick S hold the camera leaves the core
+  (`(1028, ~436)` → `(1028, ~279)`); a 54-tick W hold returns it (`(1028, ~441)`).
 - Hint transitions on the first movement: `HudGroup/hints/.../Label` goes
-  `hint.desktopMove` → `hint.zoom` and stays there (round-2 frames).
+  `hint.desktopMove` → `hint.zoom` and stays there (round-3 frames).
 - No `MindCampaign::start_sector` arity error in the log (PAR-0054 fix).
 
 ## Failure modes
 
+- Do not infer zoom from sprite size: both clients render ~32 px/tile (zoom 4);
+  a giant unit means the sprite-scale compensation is missing (`scale_marker`),
+  not that the camera zoom is wrong.
 - `godot_exec` bodies: no nested `var` in `if` blocks and no multi-statement
   `if` blocks — the wrapper errors and break-on-error pauses the frame loop
   (`godot_debugger sessions` → `paused: true`); recover `stop` + `play`
@@ -82,5 +86,5 @@ step instead; keep movement + capture in one tool block.
 - A `godot_input sequence` hold length is fps-dependent; use pause+step for
   tick-exact holds.
 - Frame comparison is blocked by the fork divergences owned by PAR-0028
-  (tutorial objective HUD, wave state, terrain) and the camera zoom item
-  (port zoom 4 vs the Java reference's zoom): the §4 gate cannot pass yet.
+  (tutorial objective HUD, wave state, terrain/lighting): the §4 gate cannot
+  pass yet.
