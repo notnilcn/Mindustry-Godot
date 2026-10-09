@@ -1605,3 +1605,105 @@ those paths no longer exist, but the workarounds still apply.
   use `MindCampaign.get_objective_state()` and `SimHost.get_group_counts()` for the R05-family
   asserts. Same run also logged `Parameter "mesh" is null.` alongside the `Wrong texture
   folder` world-sprite placeholder labels for the placed drill/conveyors (icons render fine).
+
+## 2026-10-10 — the 2026-10-09 gap list is folded in; running servers still serve the old strings
+
+- Closed since the 2026-10-09 entry: the docs no longer teach `godot_input text`
+  (`Docs/03-Realtime-Testing/Interactive-Playtest.md` TYPE/WHEEL sections and
+  `Docs/02-Tools/Input.md` now carry the fresh-InputEventKey recipe, wheel
+  injection, the flush rule, and the fade-click rule), and the front-facing
+  strings gained the overnight traps — single-statement evals, a method that
+  does not exist on the called class pinning the loop, `MindRender.get_stats()`,
+  for-loops over dialog children, the `play`/eval attach race, post-launch
+  deferred evals, palette auto-renames, and sentinel-probe clicks.
+- Both skills carry them too, and `.opencode/skills/parity-eval/SKILL.md` was
+  synced to the WORKFLOW_PROMPTS.md ledger protocol it had drifted from (claim
+  under flock, `fix.plan` resume, the twin settle).
+- Tool schemas still load at server-process start: the three server pairs alive
+  before these edits predate them. Restart the MCP/session before trusting the
+  descriptions an agent sees (the uv-tool install was refreshed at edit time).
+- Evidence: `git diff` in `../Open-Godot-MCP` (tools/prompts/server + Docs) and
+  both skills; `uv tool install --reinstall ../Open-Godot-MCP` output.
+
+## 2026-10-10 — silent break-on-error during a rotation replay: null eval results, frames pinned
+
+- Symptom: four `godot_exec eval` "readTile" results (flush + `step(1)` + a
+  `for t in tiles` scan + input-state read) came back `ok:true, result:null` in a
+  burst; `Engine.get_process_frames()` then read a constant 1908 while eval
+  calls still answered, and `godot_debugger sessions` reported `paused: true`.
+  `godot_log errors` was empty (the break is debugger-side; the eval wrapper
+  can still return null results while the session is paused, and
+  `SimHost.step(n)` still advances the tick).
+- Exact calls: `godot_exec eval {"code":"Input.flush_buffered_events()...for t
+  in st[\"world\"][\"tiles\"]...last_action..."}` x4 after 8 discrete R
+  press/release `godot_input` calls in the placement-rotation chain; recovery
+  probe `godot_debugger {"action":"sessions"}` -> `[{active:true,paused:true}]`.
+- Workaround: recover with `godot_game stop` + `play` (resume re-breaks); then
+  drive one read per round-trip and read the tile with a single targeted scan.
+  A paused-at-error session still applies `SimHost.step`, so a test can appear
+  to progress while the visual pump is frozen — read `get_process_frames()`
+  twice before trusting frames or captures.
+- Run: `runs/20261010-084701-placement-rotation/` (pid 485970; the rotation
+  values before the break were captured in the response transcript).
+- Bullet (same day, recovered session pid 487152): the suspect is one *compound*
+  eval body — `Input.flush_buffered_events()` + `SimHost.step(1)` +
+  `JSON.parse_string(get_state_json())` + a `for` tile scan + an input-state
+  read. Replayed alone it TIMED OUT at 15 s and pinned the debugger again
+  (`sessions paused:true`, frames 978 constant, tick still advanced by `step`).
+  Split it: `step(1)` in one eval, the tile read via
+  `str(get_state_json()).find/substr` in a second, the input state as a bare
+  `get_input_state_json()` string in a third.
+
+## 2026-10-10 — Escape lands on the LoadingLayer branch after a facade launch (pause dialog never opens)
+
+- Symptom: after `start_sector_with_loadout` + `set_paused(true)`, three
+  `godot_input key Escape` (and one `push_input(InputEventKey)` fallback) left
+  `dialog_stack []` — `UiRoot._on_escape()` consumes Escape while
+  `LoadingLayer/loading.visible` is true (`client/ui/ui_root.gd:91-95`), so the
+  key only hits the loading branch. `io_pending` was 1 because the sim was
+  paused, so the launch IO job never drained; after `step(30)` the flag cleared
+  but `loading.visible` stayed true for another poll cycle.
+- Exact calls: `godot_input {"action":"key","params":{"key":"Escape"}}` x3 with
+  a `get_node("/root/Spine/Ui/UiRoot/LoadingLayer/loading").visible` probe
+  between; the eval fallback `get_viewport().push_input(InputEventKey KEY_ESCAPE)`
+  behaved identically.
+- Workaround: `step(30)` to drain IO, wait one loading-fragment poll (~0.2 s)
+  until `loading.visible == false`, then Escape opens `paused`.
+- Run: `runs/20261010-085323-paused-dialog-buttons/` (pid 488187).
+
+## 2026-10-10 — `MindUi.dialog_stack()` right after the Custom Game click panics the Rust autoload
+
+- Symptom: an eval that read `str(get_node("/root/MindUi").call("dialog_stack"))`
+  immediately after the Custom Game click TIMED OUT at 15 s; `godot_log errors`
+  then carried a crash report and `panic before unwinding into Godot: Gd<T>::bind()
+  failed, already bound; T = mind_gdext::ui::ui_host::MindUi ... in
+  MindUi::dialog_stack()`. Crash reports:
+  `crash-report-10_10_2026_09_04_17.txt`, `..._09_04_52.txt`, `..._09_05_48.txt`.
+- Exact call: `godot_exec {"action":"eval","params":{"code":"Input.flush_buffered_events()\nreturn str(get_node(\"/root/MindUi\").call(\"dialog_stack\"))"}}`
+  issued in the same execute chain as the Custom Game click
+  (`runs/20261010-090352-custom-game-map-list/`, pid 494734/495421).
+- It is a **build-window race, not persistent**: opening the dialog, waiting
+  ~4 s, then `has_dialog()` -> true and `dialog_stack()` -> `["custom"]` both
+  succeed (pid 496365, same run dir). The dialog's build path holds the mutable
+  MindUi bind for a few frames after the click.
+- Bullet (same day, pid 497422): the same panic fires on the **close** side —
+  two Escapes (content -> database -> menu) followed by an immediate
+  `dialog_stack()` wrote `crash-report-10_10_2026_09_09_19.txt`
+  (`in MindUi::dialog_stack()`) and pinned the loop. Treat every dialog
+  open/close as needing a settle beat before any `MindUi.dialog_stack()` read;
+  `has_dialog()` and `DialogLayer/<name>.visible` did not panic.
+- Workaround: after opening a runtime-built dialog, wait/settle before any
+  `MindUi.*` stack read; probe with `DialogLayer/<name>.visible` /
+  `_maps().size()` first, and derive row flags from
+  `str(<dialog>.call("_maps"))` host-side rather than iterating rows in-eval
+  (`all`/`any`/`map`/`slice` and even a plain `for r in rows:` over the rows
+  array also timed out — the safest read is a single expression).
+- Run: `runs/20261010-090352-custom-game-map-list/`.
+
+- Bullet (same day, database audit, pid 496365): `dlg.get_node_or_null("tab-serpulo")`
+  returned null (the tab is not a direct child) and the chained
+  `(b as Control).get_global_rect()` on the null instance tripped
+  break-on-error -> 15 s timeout + `debugger sessions paused:true`. Resolve dialog
+  children with `find_children("<name>", "Button", true, false)[0]`, never a
+  guessed direct path; a null deref pins exactly like a bad method call.
+  Run: `runs/20261010-090740-database-grid-audit/`.

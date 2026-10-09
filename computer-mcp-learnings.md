@@ -593,3 +593,17 @@ displays); those paths no longer exist, but the workarounds still apply.
   effect) - the recorded `.` flow did work after the tree was closed from the same state.
 - Run: `runs/20261010-060551-PAR-0049-twin/` (`java/r05-29-researched.png`, node hover
   `java/sweep/conveyor-hover.png`).
+
+## 2026-10-10 — strings updated again: focus vs stacking, click-dead fallback, Broken pipe
+
+- The installed `mcp.py` descriptions now carry: explicit `button_down` +
+  `button_up` two-call fallback when a click is dead but a `mouse_move` hover
+  changed the frame; `_NET_ACTIVE_WINDOW` focus switching on
+  `click`/`switch_to_window` (raising/stacking the window is not focus); and
+  the `Display connection closed by server: [Errno 32] Broken pipe` recovery
+  (restart the MCP server or fall back to one-shot pynput helpers) on
+  `mouse_move`.
+- Same install-only caveat as the 2026-10-09 entry: the strings live only in
+  the uv-tool site-packages, and a `uv tool reinstall/upgrade` reverts them.
+- Evidence: `mcp.py` mtime 2026-10-10, `py_compile` clean; running servers must
+  be restarted to serve the new text.
