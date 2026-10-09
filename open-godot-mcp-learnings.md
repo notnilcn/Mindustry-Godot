@@ -1249,3 +1249,33 @@ those paths no longer exist, but the workarounds still apply.
   `execute` block (pad with a few dummy evals for the camera lerp to settle);
   never rely on think-time gaps for settle.
 - Run: `runs/20261009-092821-PAR-0044/`.
+
+## 2026-10-09 — world clicks are consumed by `MindInput`; `MindSimHost::unhandled_input` never fires
+
+- Symptom: `godot_input mouse_button` on a world tile (resolved via
+  `Camera2D.tile_to_screen`, `coords: viewport`) placed nothing and produced no
+  `mouse tile ... applied` log; `gui_get_hovered_control()` reported
+  `HudGroup/hud` (mouse_filter PASS), and setting `hud`/`UiRoot` to IGNORE
+  changed nothing.
+- Cause: `mind-gdext/src/input/mod.rs::MindInput::input` handles every world
+  mouse press itself: it skips when a STOP-filter control owns the point, then
+  calls `bridge.handle(...)` and `mark_input_handled()` (viewport
+  `set_input_as_handled`), so `MindSimHost::unhandled_input` is dead code for
+  real clicks. World-click semantics (placement drags, `tileTapped`) live in
+  `mind-gdext/src/input/desktop.rs` and enqueue `SimCommand`s through
+  `enqueue_commands` -> `MindSimHost::enqueue_sim_command`.
+- Workaround: implement new world-click behavior in `desktop.rs` (this is where
+  PAR-0045's `tryBeginMine`/`tryStopMine` mining order landed), never in
+  `unhandled_input`.
+- Run: `runs/20261009-095320-PAR-0045/`.
+
+## 2026-10-09 — editor died mid-leg; orphan game process from a killed editor
+
+- Symptom: `godot_exec` started failing with `BRIDGE_NOT_CONNECTED
+  (host=127.0.0.1:6980)`; `pgrep` showed no editor for the session worktree but a
+  stale game process (`--editor-pid 77445` from an earlier relaunch) still alive.
+- Workaround: kill the orphan game process, relaunch the editor with
+  `runs/20261009-092821-PAR-0044/relaunch-editor.sh`; re-walk from the menu.
+- Also: a GDScript call to a non-`#[func]` Rust method (`player_can_mine`) errors
+  and trips break-on-error; `godot_debugger resume` does not stick — recover with
+  `godot_game stop` + `play`. Run: `runs/20261009-095320-PAR-0045/`.
