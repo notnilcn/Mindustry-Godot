@@ -11,7 +11,7 @@ preconditions:
   - The fork (objective 1 active) needs the core to hold >= 15 copper: click the tutorial ore tile (137,53) with no block selected and let the player offload run (MinerComp offload branch, PAR-0046 round 1).
   - The session worktree is built (tools/build.sh) and the editor relaunched.
 tools: [godot_exec, godot_input, godot_game, godot_screenshot, godot_log]
-last_verified: 2026-10-10 commit pending (runs/20261009-153006-PAR-0046/, pid 263804)
+last_verified: 2026-10-10 commit 6fb36fe (76cce64 lib), twin run runs/20261009-162304-PAR-0046-twin/ (pid 280832; writer leg runs/20261009-153006-PAR-0046/, pid 263804)
 ---
 
 # ground-zero-drill-placement
@@ -22,9 +22,11 @@ patch)`. Java side: `chains/java-ref-ground-zero-tutorial.md` R04.
 
 ## Steps
 
-1. **Fork** — launch the sector (`load_sector`+`start_sector`+`step(3)`),
-   wait 5 s, `set_menu_visible(false)`, press/release `q` (clear the block
-   selection), flush. Resolve the tutorial ore and click it:
+1. **Fork** — launch the sector: `SimHost.load_sector("serpulo",15)` (node
+   `/root/Spine/SimHost` — NOT MindCampaign, that method does not exist),
+   `MindCampaign.start_sector("serpulo",15)`, `SimHost.step(3)`; wait ~6 s,
+   `UiRoot.set_menu_visible(false)` (`/root/Spine/Ui/UiRoot`), press/release `q`
+   (clear the block selection), flush. Resolve the tutorial ore and click it:
 
    ```
    godot_exec {"action":"eval","params":{"code":"return str(get_node(\"/root/Spine/World/Camera2D\").call(\"tile_to_screen\", 137, 53))"}}
@@ -105,4 +107,16 @@ patch)`. Java side: `chains/java-ref-ground-zero-tutorial.md` R04.
   the objective state comes from `get_objective_state`/`campaign_views_json`.
 - Eval errors (unverified facade methods) pin the loop: recover with
   `godot_game stop` + `play` — the fork state is not saved, so the chain above
-  must be replayed.
+  must be replayed. `/root/MindInput` does not exist (the input node is
+  `/root/Spine/Input`); an eval calling `get_input_state_json` on the bad path
+  errored and pinned the frame loop (twin run 2026-10-10). Also: `stop`
+  autosaves the campaign, so re-run `clear_planet_campaign_saves` after the
+  restart.
+- After the research unlock + palette collapse/expand the category buttons can
+  still be auto-renamed (`@Button@NNNN`) even with the calls one eval apart;
+  resolve them by iterating the container, skipping `is_queued_for_deletion()`,
+  and matching `tooltip_text` ("Production").
+- The placement hover ghost may not render from an injected `mouse_motion`
+  (twin run 2026-10-10: empty marker in the hover frame); the press+release at
+  the same point still places — judge the placement from `get_state_json`, not
+  the preview.

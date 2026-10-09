@@ -1544,3 +1544,29 @@ those paths no longer exist, but the workarounds still apply.
 - Workaround: drive the collapse/expand as two separate calls (one frame apart), then
   resolve targets by iterating the container and skipping `is_queued_for_deletion()` nodes.
 - Run: `runs/20261009-153006-PAR-0046/`.
+- Recurrence 2026-10-10 (PAR-0046 twin): with the research unlock reloading the pane, the
+  category buttons were STILL auto-renamed (`@Button@NNNN`) even though close/open ran in
+  separate evals. Resolve by iterating `p.categories.get_children()` and matching
+  `tooltip_text` ("Production"), never by node name; the block button kept its
+  `block-mechanical-drill` name. Run: `runs/20261009-162304-PAR-0046-twin/`.
+
+## 2026-10-10 — PAR-0046 twin: `/root/MindInput` does not exist; a flush eval on it pinned the frame loop
+
+- Symptom: after a direct `load_sector` launch, an eval doing
+  `Input.flush_buffered_events()` + `get_node("/root/MindInput").get_input_state_json()`
+  timed out; `Engine.get_process_frames()` then froze (1132 for minutes) while evals still
+  answered, `SimHost.is_paused()` false, `get_tree().paused` false.
+- Cause: the input autoload path is `/root/Spine/Input`, not `/root/MindInput` — the null
+  lookup errored (`Node not found: "/root/MindInput"` + null-instance `get_input_state_json`)
+  and break-on-error pinned the frame loop.
+- Workaround: keep the flush eval minimal (`Input.flush_buffered_events()` + pid), read the
+  selection from `SimHost.selected_block()`; recover the pin with `godot_game stop` + `play`.
+  `stop` autosaves the campaign, so re-run `clear_planet_campaign_saves` after the restart
+  (the save slot reappeared in the next boot).
+- Also: `MindCampaign.load_sector` is invalid (the method is on `SimHost`); the wrapper
+  still timed out at 15 s and the error landed in the log — split
+  `SimHost.load_sector` / `MindCampaign.start_sector` / `SimHost.step(3)` into evals.
+- Placement hover: an injected `mouse_motion` did not render the drill ghost over the
+  marker (`godot/crop-target-preview.png` empty); the press+release at the same viewport
+  point placed at (136,52). Judge placement from `get_state_json`, not the preview.
+- Run: `runs/20261009-162304-PAR-0046-twin/` (final pid 280832; first attempt 279613).

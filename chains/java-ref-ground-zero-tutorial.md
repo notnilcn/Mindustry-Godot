@@ -416,3 +416,41 @@ Verified: fresh `java/resume-2.png` vs the stored reference = changed 0.00507,
 mean_abs [0.53,0.49,0.41], coarse 0.21, palette 0.0066; status/copper/hint
 regions ≤0.01. Residual = block-pane icons (later research state) + the
 animated objective-marker blob (`diff/java2-vs-reference-heatmap.png`).
+
+## Twin R04 replay — research + place the Mechanical Drill (2026-10-10, PAR-0046 twin)
+
+Reproduced R04 from the stored **r03** checkpoint after resetting the profile's
+persisted research (`settings.bin` `req-*` / `*-unlocked` keys survive the soak).
+Run `runs/20261009-162304-PAR-0046-twin/` (JVM pids 270950/273720/275387/277234;
+recorded leg pid 277234).
+
+0. **Profile reset (client down, back up `settings.bin` first).** The soak's
+   R04/R05 research persists globally: `req-mechanical-drill-copper 10->0`,
+   `req-conveyor-copper 5->0`, `mechanical-drill-unlocked true->false`,
+   `conveyor-unlocked true->false`, plus the hint pair that matches the stored
+   fork frame (`desktopMove-hint-done false->true`, `zoom-hint-done true->false`).
+   Driver: `java/settingsfix/TweakSettings.java` (`arc.Settings`, `put`,
+   `forceSave`; `key=int:v` / `key=bool:v` args). Without the reset the drill
+   node resumes gold/"Researched" and no spend happens.
+1. **Checkpoint.** Install `checkpoints/r03-sector-serpulo-170.msav`
+   (sha256 `9bc8cf8d...`); wipe `saves/*.msav*` first — the client rewrites the
+   live save and moves the installed file to
+   `sector-serpulo-170.msav-backup.msav`. The r03 meta already has
+   `objectives[0] completed:true`, so the resume opens at the R04 fork (panel
+   `Build: 1x Mechanical Drill`) with the mine order live (core copper climbs
+   83 -> 1.0k+). The r02 checkpoint resumes mid-S (its autosave fired after the
+   S hold) and is not at the field.
+2. **Navigation** as R01: Play `(280,247)` -> Campaign `(527,249)` -> GZ hex
+   `(628,420)` -> `Go` `(628,714)`; wait 13 s. Fresh fork vs the stored
+   `java/r04-03-world.png`: changed 0.06111, mean_abs [4.13,4.08,4.01]
+   (residual = the stored frame's post-research pane + counter + marker blob).
+3. **R04 action** (screen = image + (50,98)): tech tree `(1024,725)` -> core node
+   `(628,493)` -> Mechanical Drill node `(490,410)` — grey border, click spends
+   10 (popup `Mechanical Drill / Researched`; settings
+   `req-mechanical-drill-copper 0->10`, `mechanical-drill-unlocked false->true`)
+   -> Escape -> drill button `(933,525)` -> hover/click the gold target
+   `(832,545)` -> panel advances to `Move into Core: 0/5 Copper` (objective 2).
+   Fresh action vs the stored `r04-05-placed.png`: changed 0.03603, mean_abs
+   [1.22,1.09,0.91].
+4. **Quit:** Escape -> Save & Quit `(627,506)` -> OK `(726,456)` -> menu Quit
+   `(305,598)`; JVM exits < 3 s.

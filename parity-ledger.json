@@ -1,6 +1,6 @@
 {
  "schema": "mindustry-godot/parity-ledger@2",
- "updated": "2026-10-09T16:21:40Z",
+ "updated": "2026-10-09T16:49:23Z",
  "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction chains. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
  "focus": {
   "kind": "area",
@@ -10853,9 +10853,9 @@
    "title": "Tutorial: research the Mechanical Drill, select it in the block picker, place it on copper",
    "surface": "world",
    "parent": "PAR-0028",
-   "status": "in-progress",
+   "status": "verified",
    "chain": "chains/java-ref-ground-zero-tutorial.md",
-   "updated": "2026-10-09T16:21:40Z",
+   "updated": "2026-10-09T16:49:23Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
     "to": "Ground Zero tutorial objective 1 (Build: 1x Mechanical Drill)",
@@ -11030,8 +11030,8 @@
    "steps": [],
    "mismatch": null,
    "fix": {
-    "status": "godot-pass",
-    "summary": "Round 1: the fork (objective 1 active) is unreachable in the port because Java's MinerComp offload branch is unimplemented: the player unit never deposits mined items into the core, so the tutorial counter ('Obtain: 0/15 Copper' = core items) can never advance and the research spend (10 copper from the core) is unreachable.",
+    "status": "closed",
+    "summary": "Round 1: the fork (objective 1 active) is unreachable in the port because Java's MinerComp offload branch is unimplemented: the player unit never deposits mined items into the core, so the tutorial counter ('Obtain: 0/15 Copper' = core items) can never advance and the research spend (10 copper from the core) is unreachable. Twin-verified 2026-10-10 (runs/20261009-162304-PAR-0046-twin/).",
     "plan": {
      "round": 1,
      "state": "round 1 landed: action verified in-engine (fork -> research -> place -> objective 1 complete, objective 2 active); staged for the twin",
@@ -11066,7 +11066,15 @@
      ]
     }
    },
-   "verified": null,
+   "verified": {
+    "mode": "twin",
+    "date": "2026-10-09T16:49:23Z",
+    "writer_run": "runs/20261009-153006-PAR-0046/",
+    "twin_run": "runs/20261009-162304-PAR-0046-twin/",
+    "java_frame": "runs/20261009-162304-PAR-0046-twin/java/action.png",
+    "godot_frame": "runs/20261009-162304-PAR-0046-twin/godot/action.png",
+    "note": "Twin re-ran both legs fresh. Java: resumed the r03 checkpoint, re-mined to the R04 fork (Build: 1x Mechanical Drill), replayed the R04 clicks (tech tree -> Mechanical Drill research, settings req-mechanical-drill-copper 0->10 and mechanical-drill-unlocked true after the click -> Escape -> drill button -> gold target); fresh frames reproduce the stored references (fork 0.06111, action 0.03603) and the panel advanced to 'Move into Core: 0/5 Copper'. Godot (pids 280832; final lib 76cce64): fork (mined 85, core 85 copper, obj0 completed), research (mechanical-drill unlocked true), picker (selected_block mechanical-drill), placement on the marker; objective state after: obj0 true, obj1 (buildcount mechanical-drill) true, obj2 (coreitem) active; get_state_json lists mechanical-drill at (136,52). Twin pair frames: 0.58039 / [34.35,34.78,34.69] / coarse 20.57 - the documented presentation class, supporting only; the settle rests on the both-leg structured states (skill 4). Objective env counts, the player-team placement path and the mined-ore offload all verified end to end."
+   },
    "reference": {
     "captured": "2026-10-09T07:17:38Z",
     "profile": "resumed",

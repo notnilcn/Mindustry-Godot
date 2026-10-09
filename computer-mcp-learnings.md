@@ -532,3 +532,30 @@ displays); those paths no longer exist, but the workarounds still apply.
   the earlier "first click swallowed" friction did not recur.
 - Run: `runs/20261009-150509-PAR-0037-twin/` (JVM pids 193769 run 1, 197845 run 2;
   both quit gracefully via menu Quit).
+
+## 2026-10-10 — PAR-0046 twin Java leg: campaign research persists in settings.bin; the .msav you install gets backed up and rewritten
+
+- Symptom: resuming the stored r03 checkpoint, the tech tree's Mechanical Drill node
+  rendered gold and the popup read `Researched` — the R04 action was already done on the
+  profile, so the click could not spend 10 copper.
+- Cause: campaign research is global in `parity-java-home/.../settings.bin` as
+  `req-<content>-<item>` ints (finished requirement amounts) + `<content>-unlocked` bools
+  (`TechTree.TechNode.setupRequirements` loads them at startup); the reference soak's
+  R04/R05 set them and they survive every later launch.
+- Workaround (client stopped, back up settings.bin first): set
+  `req-mechanical-drill-copper=0`, `req-conveyor-copper=0`,
+  `mechanical-drill-unlocked=false`, `conveyor-unlocked=false` (+
+  `desktopMove-hint-done=true`, `zoom-hint-done=false` to match the stored fork frame)
+  with the tiny arc program
+  `runs/20261009-162304-PAR-0046-twin/java/settingsfix/TweakSettings.java`
+  (`key=int:v`/`key=bool:v`, prints before/after, `forceSave`). The after-action values
+  (`req-mechanical-drill-copper` 0->10, `mechanical-drill-unlocked` false->true) are the
+  spend evidence for the R04 action.
+- Save-file mechanics learned while installing checkpoints: the client rewrites
+  `saves/sector-serpulo-170.msav` (autosave at launch + interval + Save & Quit) and moves
+  the previously installed file to `sector-serpulo-170.msav-backup.msav`; wipe
+  `saves/*.msav*` (both files) before every install. The r03 checkpoint carries
+  `objectives[0] completed:true` and a live mine order (core copper climbs on resume);
+  the r02 checkpoint resumes mid-S (its autosave fired after the S hold) — not at the
+  copper field.
+- Run: `runs/20261009-162304-PAR-0046-twin/` (JVM pids 270950/273720/275387/277234).
