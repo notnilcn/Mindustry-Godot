@@ -84,6 +84,17 @@ impl SimRuntimeConfig {
     }
 }
 
+/// Content name → dense-id index for scheduled systems that resolve content
+/// names over the ECS (`ObjectiveEnv.team_has_item`/`placed_block_count`);
+/// built once by the runtime install from its content registry.
+#[derive(bevy_ecs::prelude::Resource, Debug, Default)]
+pub struct ContentIndex {
+    /// Item name → dense id (`ContentRegistry::item_id`).
+    pub item_ids: std::collections::HashMap<String, u16>,
+    /// Block name → dense id (`ContentRegistry::block_id`).
+    pub block_ids: std::collections::HashMap<String, u16>,
+}
+
 /// Spawns runtime buildings for [`WorldCtx`] tile ops.
 struct SimHooks {
     seq: AtomicU64,
@@ -572,6 +583,18 @@ impl Sim {
         let table = BlockTable::build_default(&content)?;
         let item_count = content.items().len();
         let liquid_count = content.liquids().len();
+        let mut content_index = ContentIndex::default();
+        for item in content.items() {
+            content_index
+                .item_ids
+                .insert(item.name.clone(), item.id.index() as u16);
+        }
+        for block in content.blocks() {
+            content_index
+                .block_ids
+                .insert(block.name.clone(), block.id.index() as u16);
+        }
+        self.ecs.0.insert_resource(content_index);
         self.ecs.0.insert_resource(table);
         self.ecs.0.init_resource::<BuildRules>();
         self.ecs.0.init_resource::<BuildClock>();
@@ -718,6 +741,16 @@ mod tests {
         let sync = sync_session_with_sim(&mut session, &mut sim.ecs.0, &content, 0, false);
         assert_eq!(sync.player_cores, 1);
         assert_eq!(session.player_core_count(), 1);
+        // Placements carry `session.default_team` (`Team.sharded`), not the
+        // `BuildRules` default (derelict).
+        assert_eq!(
+            sim.ecs
+                .0
+                .get_resource::<BuildRules>()
+                .map(|rules| rules.default_team),
+            Some(1),
+            "build rules follow the session default team"
+        );
     }
 
     /// A materialized drill must get its grid-derived `dominantItem` back, or a

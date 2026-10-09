@@ -1243,6 +1243,24 @@ impl MindSimHost {
         self.sim.player_unit_position()
     }
 
+    /// Team a local placement carries (`state.rules.defaultTeam`; the live
+    /// campaign session wins over the build-guard fallback).
+    pub fn player_team(&self) -> u8 {
+        self.sim
+            .ecs
+            .0
+            .get_resource::<mind_core::game::runtime::CampaignRuntime>()
+            .map(|runtime| runtime.session.rules.default_team)
+            .or_else(|| {
+                self.sim
+                    .ecs
+                    .0
+                    .get_resource::<mind_core::world::limits::BuildRules>()
+                    .map(|rules| rules.default_team)
+            })
+            .unwrap_or(mind_core::ecs::TeamId::SHARDED.0)
+    }
+
     /// `InputHandler.canMine` for the player unit (world-input seam).
     pub fn player_can_mine(&self, x: i16, y: i16) -> bool {
         self.sim.player_can_mine(x, y)
@@ -1270,10 +1288,17 @@ impl MindSimHost {
             log::warn!("spawn_player_unit: no core in the loaded sector");
             return false;
         };
-        // `Team.sharded` (team 0) is the default player team.
-        let spawned = self.sim.spawn_player_unit("alpha", 0, x, y, 90.0).is_some();
+        // `CoreBlock.playerSpawn` spawns on `rules.defaultTeam`
+        // (`Team.sharded` = 1 for the campaign, not `TeamId::SHARDED`).
+        let team = self
+            .last_sector_rules()
+            .map_or(1, |rules| rules.default_team);
+        let spawned = self
+            .sim
+            .spawn_player_unit("alpha", team, x, y, 90.0)
+            .is_some();
         if spawned {
-            log::info!("spawn_player_unit: alpha at ({x:.1}, {y:.1})");
+            log::info!("spawn_player_unit: alpha team {team} at ({x:.1}, {y:.1})");
         }
         spawned
     }

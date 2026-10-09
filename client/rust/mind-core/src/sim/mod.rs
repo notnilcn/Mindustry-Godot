@@ -265,16 +265,27 @@ impl Sim {
                 let pos = TilePos::new(x, y);
                 self.grid.index(pos)?;
                 if self.block_runtime.is_some() {
+                    // Java: a placement carries the player's team
+                    // (`state.rules.defaultTeam`); prefer the live campaign
+                    // session, then the build guard resource.
                     let team = self
                         .ecs
                         .0
-                        .get_resource::<crate::world::limits::BuildRules>()
-                        .map_or(TeamId::SHARDED.0, |rules| rules.default_team);
+                        .get_resource::<crate::game::runtime::CampaignRuntime>()
+                        .map(|runtime| runtime.session.rules.default_team)
+                        .or_else(|| {
+                            self.ecs
+                                .0
+                                .get_resource::<crate::world::limits::BuildRules>()
+                                .map(|rules| rules.default_team)
+                        })
+                        .unwrap_or(TeamId::SHARDED.0);
                     if self.runtime_place(x, y, block, 0, team) {
                         self.push_event(SimEvent::BlockPlacedEvent(BlockPlacedEvent {
                             x,
                             y,
                             block,
+                            team,
                         }));
                     } else {
                         log::debug!(
@@ -298,6 +309,7 @@ impl Sim {
                             x,
                             y,
                             block,
+                            team: TeamId::SHARDED.0,
                         }));
                     } else {
                         log::debug!(
@@ -730,6 +742,7 @@ impl Sim {
                             x: *x,
                             y: *y,
                             block: id,
+                            team: *team,
                         }));
                     } else {
                         log::debug!(
@@ -1006,6 +1019,18 @@ impl Sim {
         }
         let pending = std::mem::take(&mut self.pending_events);
         for event in pending {
+            // `Logic`'s `BlockBuildEndEvent` listener: a player-team placement
+            // bumps the live match's `stats.placedBlockCount`.
+            if let SimEvent::BlockPlacedEvent(placed) = &event
+                && let Ok(name) = self.content.name(placed.block)
+                && let Some(mut runtime) = self
+                    .ecs
+                    .0
+                    .get_resource_mut::<crate::game::runtime::CampaignRuntime>()
+                && runtime.session.rules.default_team == placed.team
+            {
+                runtime.session.stats.add_placed(name, 1);
+            }
             let record = dump::block_event_record(self, &event);
             if let Some(record) = record {
                 self.event_log.push(record);

@@ -1234,6 +1234,13 @@ impl DesktopBridge {
                 block,
             )];
         }
+        // Java `InputHandler.placeBlock` places on `player.team()` — the
+        // campaign's default team (`Team.sharded`), not the derelict id.
+        let team = self
+            .host
+            .clone()
+            .map(|host| host.bind().player_team())
+            .unwrap_or(0);
         let commands: Vec<SimCommand> = plans
             .iter()
             .take(DRAG_TILE_CAP)
@@ -1243,7 +1250,7 @@ impl DesktopBridge {
                 y: plan.y as i16,
                 block: plan.block.raw(),
                 rotation: plan.rotation as i8,
-                team: 0,
+                team,
                 player: None,
             })
             .collect();

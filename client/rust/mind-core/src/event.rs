@@ -42,6 +42,8 @@ pub struct BlockPlacedEvent {
     pub y: i16,
     /// Placed block.
     pub block: BlockId,
+    /// Owning team (`BlockBuildEndEvent.team`).
+    pub team: u8,
 }
 
 /// Event fired after a block is broken.
@@ -221,6 +223,7 @@ mod tests {
             x: 4,
             y: 5,
             block: BlockId::STONE_WALL,
+            team: 1,
         }));
 
         assert_eq!(*order.borrow(), vec![1, 2, 3]);

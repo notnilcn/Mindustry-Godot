@@ -17,11 +17,15 @@ use bevy_ecs::entity::Entity;
 use bevy_ecs::resource::Resource;
 use bevy_ecs::world::World;
 
-use crate::content::ContentRegistry;
+use crate::content::{ContentRegistry, ItemId};
 use crate::entities::comp::unit::comp::{
     ItemsComp, MinerComp, PhysicsComp, StatusComp, UnitCore, UnitTypeComp,
 };
-use crate::entities::comp::{Pos, Vel};
+use crate::entities::comp::{Building, Pos, TeamComp, Vel};
+use crate::world::blocks::distribution::transfer::{
+    dispatch_get_maximum_accepted, dispatch_handle_item, item_count,
+};
+use crate::world::blocks::storage::core_block::CoreBuild;
 use crate::world::{TilePos, WorldGrid};
 
 use super::ground::{normalize_angle, tile_center};
@@ -240,11 +244,90 @@ fn update_mining(
     if input.mine_timer >= threshold {
         input.mine_timer = 0.0;
         input.mined += 1;
-        if let Some(mut stored) = world.get_mut::<ItemsComp>(entity) {
+        // `MinerComp.update` offload branch: `offloadImmediately()` is true for
+        // the player, so the mined item transfers into `closestCore()` when it
+        // is within `Vars.mineTransferRange` and accepts the stack.
+        if !offload_into_core(world, entity, pos.x, pos.y, item)
+            && let Some(mut stored) = world.get_mut::<ItemsComp>(entity)
+        {
             stored.add_item(item, 1);
         }
     }
     set_mining(world, entity, Some(tile), true);
+}
+
+/// `Vars.mineTransferRange`: the core-transfer radius shared by all units.
+const MINE_TRANSFER_RANGE: f32 = 220.0;
+
+/// `MinerComp.update` core-transfer branch for the player unit
+/// (`offloadImmediately()` is true for players): the mined item goes into
+/// `closestCore()` when the core is within [`MINE_TRANSFER_RANGE`] and accepts
+/// one (`core.acceptStack(item, 1, this) == 1`). Returns `true` when the item
+/// left the unit.
+fn offload_into_core(world: &mut World, entity: Entity, x: f32, y: f32, item: ItemId) -> bool {
+    let Some(team) = world.get::<TeamComp>(entity).map(|t| t.team) else {
+        return false;
+    };
+    let Some((core, cx, cy)) = closest_core(world, x, y, team) else {
+        return false;
+    };
+    let dx = cx - x;
+    let dy = cy - y;
+    if dx * dx + dy * dy > MINE_TRANSFER_RANGE * MINE_TRANSFER_RANGE {
+        return false;
+    }
+    let cap = dispatch_get_maximum_accepted(world, core, item);
+    let cur = item_count(world, core, item);
+    if cap - cur < 1 {
+        return false;
+    }
+    dispatch_handle_item(world, core, entity, item);
+    true
+}
+
+/// `Teams.closestCore(x, y, team)`: nearest team core with its world position;
+/// ties break by the stable entity index. The core's position is its anchor
+/// tile's corner (`Building.x`/`y`), the centre for the odd multiblocks the
+/// campaign fields.
+fn closest_core(world: &World, x: f32, y: f32, team: u8) -> Option<(Entity, f32, f32)> {
+    let mut best: Option<(f32, _, Entity)> = None;
+    for entity_ref in world.iter_entities() {
+        let id = entity_ref.id();
+        if entity_ref.get::<TeamComp>().map(|t| t.team) != Some(team) {
+            continue;
+        }
+        if entity_ref.get::<CoreBuild>().is_none() {
+            continue;
+        }
+        let Some(building) = entity_ref.get::<Building>() else {
+            continue;
+        };
+        let unit = crate::config::TILESIZE as f32;
+        let (cx, cy) = (
+            building.tile.x() as f32 * unit,
+            building.tile.y() as f32 * unit,
+        );
+        let dx = cx - x;
+        let dy = cy - y;
+        let dist2 = dx * dx + dy * dy;
+        let better = match best {
+            None => true,
+            Some((best_dist, best_index, _)) => {
+                dist2 < best_dist || (dist2 == best_dist && id.index() < best_index)
+            }
+        };
+        if better {
+            best = Some((dist2, id.index(), id));
+        }
+    }
+    let (_, _, core) = best?;
+    let building = world.get::<Building>(core)?;
+    let unit = crate::config::TILESIZE as f32;
+    Some((
+        core,
+        building.tile.x() as f32 * unit,
+        building.tile.y() as f32 * unit,
+    ))
 }
 
 /// Clears the ordered tile and timer.
@@ -366,5 +449,89 @@ mod tests {
         let after = sim.player_unit_position().expect("player position");
         assert_eq!(before, after, "no axis -> no movement");
         assert!(!sim.player_unit_moved(), "moved flag stays clear");
+    }
+
+    #[test]
+    fn player_offloads_mined_ore_into_the_core() {
+        use crate::world::blocks::storage::core_block::CoreBuild;
+        use crate::world::modules::ItemModule;
+
+        let mut sim = Sim::new(
+            1,
+            64,
+            64,
+            crate::content::BlockId::AIR,
+            crate::content::BlockId::AIR,
+        );
+        let Ok(()) = sim.install_unit_runtime() else {
+            panic!("unit runtime installs");
+        };
+        let Ok(()) = sim.install_block_runtime() else {
+            panic!("block runtime installs");
+        };
+        let Some(core) = sim
+            .unit_runtime()
+            .and_then(|runtime| runtime.content.block_id("core-shard"))
+        else {
+            panic!("core-shard exists");
+        };
+        // core-shard is 3x3; anchor (14,14) -> footprint (13,13)..(15,15).
+        let Ok(()) = sim.apply(crate::command::Command::Place {
+            x: 14,
+            y: 14,
+            block: core,
+        }) else {
+            panic!("core places");
+        };
+        let Some(ore) = sim
+            .unit_runtime()
+            .and_then(|runtime| runtime.content.block_id("ore-copper"))
+        else {
+            panic!("ore-copper exists");
+        };
+        let index = sim.grid.tiles.index(12, 12);
+        sim.grid.tiles.geti_mut(index).overlay = ore;
+        sim.refresh_unit_runtime();
+        // The unit mines at (12,12); the core anchor (14,14) is ~23 units away,
+        // well inside `mineTransferRange` (220).
+        let Some(entity) = sim.spawn_player_unit("alpha", 0, 100.0, 100.0, 0.0) else {
+            panic!("player unit spawns");
+        };
+        sim.set_player_mine_tile(Some(crate::world::TilePos::new(12, 12)));
+        let Some(copper) = sim
+            .unit_runtime()
+            .and_then(|runtime| runtime.content.item_id("copper"))
+        else {
+            panic!("copper exists");
+        };
+        for _ in 0..40 {
+            let Ok(()) = sim.tick() else {
+                panic!("tick");
+            };
+        }
+        assert!(
+            sim.player_mined_count() >= 1,
+            "mined {}",
+            sim.player_mined_count()
+        );
+        // `offloadImmediately()` (player): mined items leave the unit.
+        let held = sim
+            .ecs
+            .0
+            .get::<crate::entities::comp::unit::comp::ItemsComp>(entity)
+            .and_then(|items| items.item)
+            .map(|(_, amount)| amount)
+            .unwrap_or(0);
+        assert_eq!(held, 0, "player offload must not stack");
+        let mut core_copper = 0;
+        for entity_ref in sim.ecs.0.iter_entities() {
+            if entity_ref.get::<CoreBuild>().is_none() {
+                continue;
+            }
+            if let Some(module) = entity_ref.get::<ItemModule>() {
+                core_copper = module.get(copper);
+            }
+        }
+        assert!(core_copper >= 1, "core received copper: {core_copper}");
     }
 }

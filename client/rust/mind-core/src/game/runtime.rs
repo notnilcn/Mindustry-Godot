@@ -19,12 +19,16 @@ use bevy_ecs::world::World;
 use super::map_objectives::{ObjectiveEnv, ObjectiveRunParams};
 use super::play::{PlayEvent, PlaySession, apply_sector_loss, check_game_state, run_wave_campaign};
 use super::rules::Rules;
+use super::stats::GameStats;
 use super::teams::Teams;
 use super::universe::Campaign;
-use crate::content::{BlockKind, ContentRegistry};
+use crate::content::{BlockKind, ContentRegistry, ItemId};
 use crate::ecs::{BuildingComp, TeamId};
+use crate::entities::comp::TeamComp;
 use crate::game::State;
 use crate::render::g3d::grid::PlanetGrid;
+use crate::sim::runtime::ContentIndex;
+use crate::world::blocks::storage::core_block::CoreBuild;
 use crate::world::modules::ItemModule;
 
 /// Sim ticks per second (fixed rate).
@@ -122,6 +126,12 @@ pub fn sync_session_with_sim(
     session.teams = Teams::new();
     let default_team = session.default_team();
     let wave_team = session.wave_team();
+    // `World.setRules`: player placements carry `state.rules.defaultTeam`
+    // (`Team.sharded` = 1 for the campaign); the build guard resource starts at
+    // the derelict id, so sync it with the loaded session.
+    if let Some(mut rules) = world.get_resource_mut::<crate::world::limits::BuildRules>() {
+        rules.default_team = default_team;
+    }
     let mut sync = SessionSync::default();
     for (entity, team, _) in &cores {
         session
@@ -304,6 +314,9 @@ pub fn objectives_tick_system(world: &mut World) {
             rules: &rules_snapshot,
             teams: &runtime.session.teams,
             unlocked: &runtime.unlocked_content,
+            stats: &runtime.session.stats,
+            world,
+            index: world.get_resource::<ContentIndex>(),
         };
         runtime
             .session
@@ -319,13 +332,15 @@ pub fn objectives_tick_system(world: &mut World) {
     world.insert_resource(runtime);
 }
 
-/// Minimal live-world objective environment: rules flags/`researched` and the
-/// session team registry. Sim-backed counts land with the plan-07/08 ECS
-/// adapters.
+/// Live-world objective environment: rules flags/`researched`, the session
+/// team registry, the live match stats and the ECS-backed item/block counts.
 struct RuntimeObjectiveEnv<'a> {
     rules: &'a Rules,
     teams: &'a Teams,
     unlocked: &'a std::collections::HashSet<String>,
+    stats: &'a GameStats,
+    world: &'a World,
+    index: Option<&'a ContentIndex>,
 }
 
 impl ObjectiveEnv for RuntimeObjectiveEnv<'_> {
@@ -333,16 +348,42 @@ impl ObjectiveEnv for RuntimeObjectiveEnv<'_> {
         self.rules.researched.iter().any(|name| name == content) || self.unlocked.contains(content)
     }
 
-    fn team_has_item(&self, _team: u8, _item: &str, amount: i32) -> bool {
-        amount <= 0
+    /// `Team.items()`: the sum of the team's live cores (`ItemObjective`).
+    fn team_has_item(&self, team: u8, item: &str, amount: i32) -> bool {
+        if amount <= 0 {
+            return true;
+        }
+        let Some(&item_id) = self.index.and_then(|index| index.item_ids.get(item)) else {
+            return false;
+        };
+        let item = ItemId::new(item_id);
+        let mut count = 0;
+        for entity_ref in self.world.iter_entities() {
+            if entity_ref.get::<TeamComp>().map(|t| t.team) != Some(team) {
+                continue;
+            }
+            if entity_ref.get::<CoreBuild>().is_none() {
+                continue;
+            }
+            if let Some(module) = entity_ref.get::<ItemModule>() {
+                count += module.get(item);
+            }
+        }
+        count >= amount
     }
 
     fn core_item_count(&self, _item: &str) -> i32 {
         0
     }
 
-    fn placed_block_count(&self, _block: &str) -> i32 {
-        0
+    /// `state.stats.placedBlockCount.get(block, 0)` (`BuildCount`): bumped by
+    /// the placement-event listener on [`super::super::sim::Sim`].
+    fn placed_block_count(&self, block: &str) -> i32 {
+        self.stats
+            .placed_block_count
+            .get(block)
+            .copied()
+            .unwrap_or(0)
     }
 
     fn unit_count(&self, _team: u8, _unit: &str) -> i32 {
