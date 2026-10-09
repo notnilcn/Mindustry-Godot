@@ -1,14 +1,18 @@
 # computer-mcp learnings
 
 Operational friction hit while driving the Java reference through computer-mcp
-(the twin evaluator's Java leg), with the workaround that got past it. Reusable
-sequences belong in `.opencode/chains/` (`java-reference-leg.md`); this file is
+(the Java leg of a mirrored parity run), with the workaround that got past it.
+Reusable sequences belong in `chains/` (`java-reference-leg.md`); this file is
 for the friction that is not a chain.
 
-The `twin-evaluator` appends a dated entry after a run that taught it
+The `/loop` or `/goal` session appends a dated entry after a run that taught it
 something. Never rewrite another session's entry; keep it to what happened,
 what worked, and the run directory or chain that shows it. If nothing new
 happened, no entry.
+
+Entries dated before 2026-10-09 describe the retired dual-loop workflow
+(`.opencode/loops`, `PARITY_LOOP_DIR`, `parity-click.sh`, Xvfb/Xwayland loop
+displays); those paths no longer exist, but the workarounds still apply.
 
 ## 2026-10-07 — Seed notes from the parity-eval skill
 

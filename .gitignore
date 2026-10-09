@@ -51,7 +51,14 @@ __pycache__/
 session.json
 .kimi-code/
 
-# Parity loop ledger lock (record_finding.py)
-.opencode/evals/findings.json.lock
+# OpenCode loop/goal plugin runtime state
+.opencode/opencode-loop/
+.opencode/goals/
+.opencode/goal-sequences/
+.opencode/goal-locks/
+
+# Parity run artifacts + persistent Java reference data dir
+runs/
+parity-java-home/
 
 screenshots_for_ai/

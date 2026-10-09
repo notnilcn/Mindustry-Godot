@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Orientation-level declaration scan for Java, Rust and GDScript sources.
 
-`/seed-gaps` uses this to build candidate hypotheses cheaply: it prints the
-type and function declarations of a file or directory tree as
+A `/loop` or `/goal` parity session uses this to build candidate hypotheses
+cheaply: it prints the type and function declarations of a file or directory
+tree as
 
     path:line<TAB>kind<TAB>name
 

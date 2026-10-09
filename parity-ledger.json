@@ -1,0 +1,86 @@
+{
+  "schema": "mindustry-godot/parity-ledger@1",
+  "updated": "2026-10-09T00:00:00Z",
+  "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction chains.",
+  "environment": {
+    "display": ":10",
+    "java": {
+      "jar": "../Mindustry/desktop/build/libs/Mindustry.jar",
+      "data_dir": "parity-java-home/",
+      "window": "1152x648 windowed, UI scale 1.0, language en, volumes 0",
+      "launch": "setsid env DISPLAY=:10 HOME=parity-java-home XDG_DATA_HOME=parity-java-home/.local/share XDG_CONFIG_HOME=parity-java-home/.config XDG_CACHE_HOME=parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar"
+    },
+    "godot": {
+      "editor_bridge": "ws://127.0.0.1:6970",
+      "editor_launch": "OPEN_GODOT_MCP_PORT=6970 setsid godot --editor --path client",
+      "game_scene": "res://scenes/game.tscn",
+      "embedded_size": "1152x648 (fixed)"
+    },
+    "notes": "Both clients run concurrently on :10. Raise the Java window before capturing it (window_ctl.py raise Mindustry); the Godot game is captured through MCP."
+  },
+  "conventions": {
+    "ids": "PAR-####, monotonically increasing; never reuse",
+    "status": ["seeded", "in-progress", "mismatch", "fixing", "verified", "blocked", "wontfix"],
+    "run_dir": "runs/<YYYYMMDD-HHMMSS>-<item>/ with java/, godot/, diff/, run.json, report.md",
+    "compare_gate": {
+      "size_match": true,
+      "diff.changed_fraction_max": 0.005,
+      "diff.mean_abs_rgb_max": 12,
+      "coarse_layout.max_channel_mean_max": 6,
+      "palette_distance_max": 0.05,
+      "blank_frames": "retake, never a mismatch",
+      "calibration": "record original gate, new numbers, reason, and frame pair in the item before changing"
+    },
+    "reproduce_format": {
+      "tool": "<mcp tool name or script name>",
+      "params": "<arguments object or CLI flags>"
+    },
+    "item_template": {
+      "id": "PAR-0002",
+      "title": "player-visible symptom",
+      "status": "seeded",
+      "chain": "chains/<name>.md",
+      "updated": "ISO8601",
+      "run": "runs/<dir>/ or null",
+      "reproduce": { "java": [], "godot": [] },
+      "steps": [{ "n": 1, "action": "click Play", "java_frame": "java/step-01.png", "godot_frame": "godot/step-01.png", "diff": "diff/step-01.json", "verdict": "match" }],
+      "mismatch": null,
+      "fix": { "status": "open", "commit": null, "summary": null },
+      "verified": null
+    }
+  },
+  "items": [
+    {
+      "id": "PAR-0001",
+      "title": "Boot parity: Java main menu vs Godot main menu render",
+      "status": "seeded",
+      "chain": "chains/boot-and-identity.md",
+      "updated": "2026-10-09T00:00:00Z",
+      "run": null,
+      "reproduce": {
+        "java": [
+          { "tool": "shell", "params": { "cmd": "setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/<run>/java/game.log 2>&1 </dev/null &" } },
+          { "tool": "shell", "params": { "cmd": "until grep -q 'Total time to load' runs/<run>/java/game.log; do sleep 2; done" } },
+          { "tool": "shell", "params": { "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648" } },
+          { "tool": "shell", "params": { "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry" } },
+          { "tool": "capture_screen.py", "params": { "--window-title": "Mindustry", "--output": "runs/<run>/java/step-01-menu.png" } }
+        ],
+        "godot": [
+          { "tool": "godot_health", "params": { "action": "check" } },
+          { "tool": "godot_editor_read", "params": { "action": "state" } },
+          { "tool": "godot_editor_edit", "params": { "action": "open_scene", "params": { "path": "res://scenes/game.tscn" } } },
+          { "tool": "godot_game", "params": { "action": "play", "params": { "scene": "res://scenes/game.tscn" } } },
+          { "tool": "godot_game", "params": { "action": "status" } },
+          { "tool": "godot_screenshot", "params": { "action": "game" } }
+        ],
+        "compare": [
+          { "tool": "frame_diff.py", "params": { "--java": "runs/<run>/java/step-01-menu.png", "--godot": "runs/<run>/godot/step-01-menu.png", "--out-json": "runs/<run>/diff/step-01.json" } }
+        ]
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": { "status": "open", "commit": null, "summary": null },
+      "verified": null
+    }
+  ]
+}

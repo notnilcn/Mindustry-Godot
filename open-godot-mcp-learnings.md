@@ -2,13 +2,17 @@
 
 Operational friction hit while driving the Godot client through open-godot-mcp
 and the `playtest` skill, with the workaround that got past it. Reusable
-sequences belong in `.opencode/chains/`; this file is for everything that is
-not a chain: environment quirks, tool errors, timing traps.
+sequences belong in `chains/`; this file is for everything that is not a chain:
+environment quirks, tool errors, timing traps.
 
-The `parity-writer` (Godot leg) and `twin-evaluator` append a dated entry after
-a run that taught them something. Never rewrite another session's entry; keep
-it to what happened, what worked, and the run directory or chain that shows it.
-If nothing new happened, no entry.
+The `/loop` or `/goal` session appends a dated entry after a run that taught it
+something. Never rewrite another session's entry; keep it to what happened,
+what worked, and the run directory or chain that shows it. If nothing new
+happened, no entry.
+
+Entries dated before 2026-10-09 describe the retired dual-loop workflow
+(`.opencode/loops`, `PARITY_LOOP_DIR`, weston/Xvfb displays, worktree editors);
+those paths no longer exist, but the workarounds still apply.
 
 ## 2026-10-07 — Seed notes from the playtest and parity-eval skills
 

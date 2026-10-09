@@ -143,4 +143,4 @@ if [ "$CHECK_ONLY" -eq 0 ]; then
 fi
 check_deps
 
-log "next: tools/build.sh && JAVA_HOME=$JAVA17_HOME bash ../Mindustry/gradlew -p ../Mindustry tools:pack desktop:dist"
+log "next: tools/build.sh; Java reference jar: ../Mindustry/desktop/build/libs/Mindustry.jar (rebuild: JAVA_HOME=$JAVA17_HOME bash ../Mindustry/gradlew -p ../Mindustry tools:pack desktop:dist)"

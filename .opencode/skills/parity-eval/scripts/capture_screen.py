@@ -2,17 +2,18 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Capture the Java reference's X11 window (or a screen crop) to PNG.
 
-The loop's Java display is Xwayland on a headless weston compositor: the X
-root window carries no GPU pixels there, so mss/root grabs come back black,
-while the Xvfb fallback composites normally. Window capture reads the live
-client area with XGetImage and is the reliable path on both servers, so
-`--window-title` finds a window by WM_NAME through Xlib (no xdotool needed).
-Without a title the script grabs the monitor first and, when that image is
-blank, retries the "Mindustry" window and records the fallback in the report.
+The Java reference and the Godot editor share display :10. Window capture
+reads the live client area with XGetImage through python-xlib (no xdotool
+needed) and is the reliable path, so `--window-title` finds a window by
+WM_NAME; raise the Java window first (`window_ctl.py raise Mindustry`) when
+the editor overlaps it. Without a title the script grabs the monitor first
+and, when that image is blank, retries the "Mindustry" window and records the
+fallback in the report.
 
 Used by the parity-eval skill for the Java reference leg, where no in-engine
 screenshot API exists. Requires mss (installed with computer-mcp); window
-capture additionally uses python-xlib and Pillow from the same venv.
+capture additionally uses python-xlib and Pillow from the same venv. Shell
+invocations need `DISPLAY=:10`.
 
 Examples:
     capture_screen.py --output run/java/step-01.png

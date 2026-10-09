@@ -1,573 +1,357 @@
 ---
 name: parity-eval
 description: >-
-  Twin-run parity evaluation for Mindustry-Godot: drive the Java Mindustry
-  reference with computer-mcp and the Godot client with open-godot-mcp,
-  capture evidence, compare, and update the gap ledger under .opencode/evals/.
-  Use when evaluating parity, playtesting the running client, auditing a
-  system against upstream, or verifying a claimed port fix in-engine.
+  Mirrored Java↔Godot parity runs for Mindustry-Godot: launch both clients on
+  the shared display :10, drive the Java reference with computer-mcp and the
+  Godot client with open-godot-mcp, mirror every action, screenshot-compare
+  until the first mismatch, then stop and fix the Godot side and document the
+  item. Use when running the /loop or /goal parity process, evaluating parity,
+  auditing a system against upstream, or verifying a port fix in-engine.
 ---
 
-# Skill: parity-eval — Godot and Java↔Godot twin-run evaluation
+# Skill: parity-eval — mirrored Java↔Godot parity hunting
 
-Three agents consume this skill: the `gap-identifier` for the code-level half
-(candidate seeding and code-evidence triage, no run), the `parity-writer` for
-the fix and its Godot leg (`godot-pass` / `godot-open` while it works the
-item), and the `twin-evaluator` for the final Java↔Godot twin run
-(`twin-verified` / `open`), spawned by `/eval-gaps`. Read
-[`../playtest/SKILL.md`](../playtest/SKILL.md) first for the Godot MCP launch
-flow, node map, pid-stamp rules, and eval pitfalls; this skill adds the Java
-reference leg, the comparison protocol, and the evidence/ledger contract. Do
-not duplicate the playtest skill here — where they disagree, the playtest skill
-is authoritative for the Godot side. Project call sequences live in
-`.opencode/chains/`; consult the matching chain before composing MCP calls.
+One session drives both clients **concurrently on the same display** (`:10`).
+The Java reference is operated at the OS level with computer-mcp; the Godot
+client is driven through open-godot-mcp. Every scenario is a lock-step mirror:
+do the same action on both sides, capture both windows, diff the frames, and
+when a diff crosses the gate **stop the sweep, fix the Godot side, re-run, and
+record everything**.
 
-**Anything a player does goes through a game client.** `spacetime call` never
-counts as a gameplay check. The `spacetime` CLI is only for arranging and
-inspecting the server side, exactly as described in the playtest skill.
+The work is driven by the `@bybrawe/opencode-loop` (`/loop`) and
+`@bybrawe/opencode-goal` (`/goal`) plugins. A goal or prompt-loop owns one
+autonomous session; `parity-ledger.json` is its durable work queue and proof
+record.
 
-## Repository map
-
-Run everything from the `Mindustry-Godot` repo root. The parent workspace also
-holds the reference checkout and the root `.opencode` symlink that loads this
-skill:
+## Document map
 
 | Path | Role |
 |---|---|
-| `client/` | Godot 4.7 project (`res://`). |
-| `../Mindustry` | Java reference (upstream `2cd7aeec…`, per `parity/upstream.lock`). |
-| `parity/mcp_catalog.json` | Authoritative in-engine scenario queue (ids, scenes, steps, screenshots). |
-| `parity/golden_manifest.json`, `parity/scenario_catalog.json` | Simulation goldens/checksums. |
-| `.opencode/evals/` | Ledger + run artifacts + MCP slot leases. |
-| `.opencode/chains/` | Project MCP call sequences; consult before composing calls, keep updated after a confirmed change. |
-| `.opencode/skills/parity-eval/scripts/` | `bootstrap.sh`, `capture_screen.py`, `frame_diff.py`, `surface_scan.py`, `record_finding.py`, `mcp_slot.py`. |
+| `parity-ledger.json` | Machine-readable queue + proof. Read before picking work; update after every step, mismatch, and fix. |
+| `chains/` | Canonical per-flow MCP call sequences (schema in `chains/README.md`). Consult before composing calls; update/bump after a confirmed run. |
+| `runs/<stamp>-<item>/` | Run artifacts: `java/`, `godot/`, `diff/`, `run.json`, `report.md`. Gitignored. |
+| `computer-mcp-learnings.md`, `open-godot-mcp-learnings.md` | Friction + workarounds that are not chains. Append a dated entry when a run taught you something. |
+| `parity/mcp_catalog.json`, `parity/scenario_catalog.json`, `parity/golden_manifest.json` | Committed oracle data (harness-owned). Do not duplicate it here. |
+| `.opencode/skills/playtest/SKILL.md` | Godot MCP mechanics. Read it first; this skill only adds the Java leg, the mirror loop, the comparison gate, and the documentation contract. |
 
-Host installs are resolved through environment overrides (`GODOT_BIN`,
-`MINDY_SRC`, `JAVA17_HOME`, `MCP_VENV`); never hardcode absolute paths.
+**Anything a player does goes through a game client.** `spacetime call` never
+counts as a gameplay check; the CLI is only for arranging and inspecting the
+server side, exactly as the playtest skill describes.
 
-## 0. Parallel loops — resource isolation
+## 0. Session setup
 
-Sessions started with `.opencode/loops/bin/start-loop.sh <N> --run` export the
-loop manifest and prepend `.opencode/loops/mcp-bin` to `PATH`, so bare
-`computer-mcp` / `open-godot-mcp` (and the opencode MCP servers) are pinned to
-this loop's displays and editor bridge port. Loop 1 is the main checkout;
-loops >= 2 run in `../Mindustry-Godot-loopN` worktrees on branch `parity/loop-N`.
-The launch helpers (and the MCP shims) start that loop's two headless weston
-compositors when they are down: one with the Xwayland module backs the Java
-reference's X display (GPU; its display number is discovered at startup and
-exported as `PARITY_DISPLAY`), the other hosts Godot on the GPU. Xvfb is the
-software fallback for the Java side (`PARITY_JAVA_DISPLAY=x11` forces it;
-fallback display `:10`, `:11`, …). Read `.opencode/loops/README.md` before
-starting or stopping a loop.
+### Preconditions
 
-| Variable | Meaning |
+Run from the `Mindustry-Godot` repo root. Check once per session; stop and
+report a blocker instead of improvising system installs.
+
+```bash
+MCP_PY="${MCP_PY:-$HOME/.local/share/uv/tools/computer-mcp/bin/python}"  # mss+PIL+python-xlib
+ls ../Mindustry/desktop/build/libs/Mindustry.jar                        # Java reference
+tools/build.sh          # only when Rust sources changed; syncs scenarios
+tools/mcp-smoke.sh      # when the Godot bridge is in doubt
+```
+
+`bootstrap.sh --check` still validates JDK 17, the MCP servers and the optional
+host tools. `tesseract` is **not** installed, so OCR is unavailable — compare
+text through structured state (see §3).
+
+### Launch both clients on `:10`
+
+Shell commands need `DISPLAY=:10` for any X tool (`capture_screen.py`,
+`window_ctl.py`, `xwininfo`); the MCP servers already have it from the global
+opencode config.
+
+Java reference (detached; `setsid` survives the shell-tool timeout where plain
+`nohup ... &` does not):
+
+```bash
+JAR=../Mindustry/desktop/build/libs/Mindustry.jar
+JAVA=/usr/lib/jvm/java-17-openjdk-amd64/bin/java
+JHOME="$PWD/parity-java-home"                    # persistent, gitignored
+mkdir -p "$JHOME/.local/share" "$JHOME/.config" "$JHOME/.cache"
+setsid env DISPLAY=:10 HOME="$JHOME" \
+  XDG_DATA_HOME="$JHOME/.local/share" XDG_CONFIG_HOME="$JHOME/.config" \
+  XDG_CACHE_HOME="$JHOME/.cache" \
+  "$JAVA" -jar "$JAR" >>"runs/java-console.log" 2>&1 &
+# readiness is a log line, not a fixed sleep (first launch is slow):
+until grep -q "Total time to load" runs/java-console.log; do sleep 2; done
+```
+
+Godot editor (only when `godot_health check` says the bridge is down; it stays
+up across runs and must be relaunched after every `tools/build.sh`):
+
+```bash
+OPEN_GODOT_MCP_PORT=6970 setsid "${GODOT_BIN:-godot}" --editor \
+  --path client >>runs/editor-console.log 2>&1 &
+```
+
+Then follow the playtest skill: `godot_health check` → `godot_editor_read
+state` (`project_path` contains `mindustry-godot`) → `godot_editor_edit
+open_scene res://scenes/game.tscn` → `godot_game play` **with**
+`{"scene":"res://scenes/game.tscn"}` → `godot_game status` shows
+`runtime_connected: true` → pid-stamp.
+
+### Normalize before comparing
+
+Record the values in `run.json`; all of them persist in `parity-java-home/`:
+
+- Java window **1152x648**, windowed, UI scale 1.0, language `en`, music/SFX
+  volume 0. Normalize once interactively; if text fields drop injected input
+  (known), resize/move the window instead:
+  `DISPLAY=:10 "$MCP_PY" .opencode/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648`
+  and `... move Mindustry 40 40`. The embedded Godot game is fixed at
+  1152x648 — never try to resize it.
+- Java saves/settings live in `parity-java-home/`; keep that directory stable
+  so scenarios start from the same state. Delete its `saves/` only to test a
+  fresh profile, and say so in `run.json`.
+- Both windows may be maximized/overlapping; `godot_screenshot` reads the game
+  viewport texture, but Java captures read the X window, so **raise it first**:
+
+  ```bash
+  DISPLAY=:10 "$MCP_PY" .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry
+  ```
+
+## 1. The mirror loop
+
+Pick the first non-`verified` item in `parity-ledger.json` (or the scenario the
+goal names). For that item:
+
+1. Read its chain in `chains/` and the ledger entry; note both legs' sequences.
+2. Reset both clients to the same boot state (restart or return both to the
+   main menu) and stamp the pids/commits in `run.json`.
+3. For each step of the chain, alternately:
+   - **Java**: `raise Mindustry` → perform the action with `computer-mcp_*` →
+     `capture_screen.py --window-title Mindustry` → `runs/<run>/java/step-NN.png`.
+   - **Godot**: perform the equivalent action with `godot_*` → capture the game
+     with `godot_screenshot` (or the viewport) → `runs/<run>/godot/step-NN.png`.
+   - **Compare**: `frame_diff.py` the two captures → `runs/<run>/diff/step-NN.json`;
+     apply the gate in §2.
+4. All steps match → mark the item `verified`, bump the chain (`last_verified`,
+   steps), continue to the next item.
+5. First mismatch → **stop the sweep** and switch to fix mode (§4).
+
+Hard rules:
+
+- One mirrored action pair per step. Never leap several UI states ahead on one
+  side and then "catch up" the other; the failure must be reproducible at a
+  named step.
+- Only compare stable frames. Menus/dialogs are naturally stable. In-game
+  scenes are not: pause the Java client and `SimHost.set_paused(true)` the
+  Godot client (or `step()` both to the same tick) before capturing. Never diff
+  mid-animation.
+- If a capture comes back blank (metrics `blank: true`) or the action clearly
+  did not land, re-take it — do not classify a capture failure as a parity
+  mismatch. Log the retake in `run.json`.
+- The tool response of a Java `click`/`mouse_move`/`key_press` shows the
+  previous frame; always capture separately before judging what it did.
+
+## 2. Comparison gate
+
+```bash
+DISPLAY=:10 "$MCP_PY" .opencode/skills/parity-eval/scripts/frame_diff.py \
+  --java  runs/<run>/java/step-NN.png \
+  --godot runs/<run>/godot/step-NN.png \
+  --out-json runs/<run>/diff/step-NN.json \
+  --out-heatmap runs/<run>/diff/step-NN-heatmap.png \
+  --out-side-by-side runs/<run>/diff/step-NN-side.png
+```
+
+Default gate (plan-23 tolerance), all must hold:
+
+| metric | match when |
 |---|---|
-| `PARITY_LOOP` | loop id |
-| `PARITY_DISPLAY` | the loop's Java X display: the java weston's Xwayland display on the GPU (number discovered at startup), or Xvfb (`:10`, `:11`, …) on the software fallback |
-| `PARITY_WAYLAND_SOCKET`, `PARITY_WAYLAND_DIR` | Godot's weston/Wayland socket (`wayland-mind1`, …) and its runtime dir |
-| `PARITY_JAVA_WAYLAND_SOCKET`, `PARITY_JAVA_WAYLAND_DIR` | Java's weston/Wayland socket (`mind1-java`, …) and its runtime dir |
-| `PARITY_BRIDGE_PORT` | editor addon listen port / MCP adopt port (6970, 6980, …) |
-| `PARITY_WORKTREE` | checkout this loop runs in |
-| `PARITY_EVALS_DIR`, `PARITY_LEDGER` | shared evals dir and flock-protected ledger |
-| `PARITY_RUN_PREFIX` | prefix run dirs with this (`l2-…` for loop 2) |
-| `PARITY_LOOP_DIR` | per-loop runtime dir (display pid/logs, client user data) |
+| `size_match` | `true` (both 1152x648) |
+| `diff.changed_fraction` | `<= 0.005` |
+| `diff.mean_abs_rgb` (each channel) | `<= 12` |
+| `coarse_layout.max_channel_mean` | `<= 6` |
+| `palette_distance` | `<= 0.05` |
+| stats | neither frame `blank` |
 
-Rules:
+Anything else is a **mismatch**. Calibration is allowed only with evidence:
+record the original gate, the new numbers, the reason (e.g. known font
+rasterization), and the calibration frame pair in the ledger entry. Never
+widen silently; never widen past the plan-23 numbers except for a documented
+Java-vs-Godot rendering difference that is itself tracked as an item.
 
-- Loops are isolated; within one loop, drive one client at a time (Java then
-  Godot). Different loops may run concurrently — never share a display.
-- **MCP is slot-tracked**: before the first MCP call in a session not covered
-  by a loop process lease, run
-  `.opencode/skills/parity-eval/scripts/mcp_slot.py acquire --owner <label>`.
-  The cap is off by default (`MCP_SLOT_LIMIT=0`); with a positive limit, exit 3
-  means the host is at that limit — stay code-only or stop. `refresh` between
-  calls; when an MCP run ends, release the slot with `mcp_slot.py release`
-  (bare form uses `$MCP_SLOT_OWNER_KEY`, `--token`/`--key` also work).
-- Launch clients only through `.opencode/loops/bin/run-godot-editor.sh` and
-  `.opencode/loops/bin/run-java.sh`; they set the Godot Wayland compositor /
-  Java X display, bridge port, and per-loop user-data dirs. Never use
-  `godot_instance launch_editor` (it
-  allocates ports from its own local index, ignoring the loop map) and never
-  run `open-godot-mcp --shutdown-all` (it kills sibling loops' servers).
-- Ledger writes go to `$PARITY_LEDGER` (the scripts' default via env), which is
-  shared by all loops and serialized by a file lock. Run dirs live under
-  `$PARITY_EVALS_DIR/runs/${PARITY_RUN_PREFIX}<stamp>-<scenario>/`.
-- On the Xvfb software fallback a one-shot `computer-mcp mouse move` does not
-  persist: the pointer snaps back to screen center when the XTEST client
-  disconnects. Drive the Java leg with the persistent computer-mcp MCP tools,
-  or click with `.opencode/loops/bin/parity-click.sh <x> <y> [button]` (single
-  process, works on both display servers).
+Work in the strongest evidence class available (cheapest first):
 
-## 1. Preconditions
+1. **Committed oracle** — Godot `get_checksum()`/`get_state_json()` vs
+   `parity/scenario_catalog.json` / `golden_manifest.json`.
+2. **Structured state** — both clients' non-visual values (HUD item counts,
+   wave number, prices, config).
+3. **Text** — bundle keys / dialog text read from structured state (no OCR).
+4. **Frames** — the gate above; a layout-region difference is a presentation
+   finding, a palette-only difference usually a shader/asset finding.
 
-Run the bootstrap check before any scenario. If anything fails, stop and report
-the blocker; do not improvise system installs (there is no passwordless sudo).
+## 3. Mismatch → fix → verify
 
-```bash
-MCP_VENV="${MCP_VENV:-$HOME/.local/share/mcp-venv}"
-".opencode/skills/parity-eval/scripts/bootstrap.sh" --check
+On the first mismatch:
+
+1. **Record the stop point in `parity-ledger.json` before touching code**: step
+   number, the two screenshots, the diff JSON, the metric values, and the exact
+   MCP call sequences for both legs up to that step (copy from the run log; the
+   chain has the canonical full sequence).
+2. Diagnose on the Godot side with the playtest skill (structured state first:
+   checksum, `get_state_json`, HUD JSON, dialog nodes). If pixels disagree but
+   structured state agrees, the finding is presentation-layer; if state
+   disagrees, find the sim/UI seam.
+3. Implement the fix in `client/` (GDScript) or `client/rust/` (Rust).
+4. Run the narrow check (`cargo test -p mind-core ...`, `cargo clippy`,
+   `tools/build.sh` as applicable).
+5. After `tools/build.sh`, **relaunch the editor** — a running editor has the
+   old `libmind_gdext.so` mmap'd.
+6. Re-run the scenario from the top. The item becomes `verified` only when the
+   whole chain passes; a fixed step that reveals the next mismatch stays in the
+   same item (record the new stop point).
+7. Update the docs (§5) and commit: code fix first (`Fixes <PAR-ID>`), docs in
+   a separate commit.
+
+A code reading can seed a candidate or settle one as `wontfix`, but only a
+fresh in-engine repro can mark an item fixed.
+
+## 4. Documentation contract
+
+### `parity-ledger.json`
+
+The single source of progress. Shape (one `items[]` entry per item):
+
+```json
+{
+  "id": "PAR-0001", "title": "player-visible symptom", "status": "mismatch",
+  "chain": "chains/enter-campaign.md", "updated": "2026-10-09T12:00:00Z",
+  "run": "runs/20261009-120000-enter-campaign/",
+  "reproduce": {
+    "java": [{"tool": "computer-mcp_click", "params": {"x": 310, "y": 216, "button": "left"}},
+             {"tool": "capture_screen.py", "params": {"--window-title": "Mindustry"}}],
+    "godot": [{"tool": "godot_input", "params": {"action": "mouse_button", "params": {"button": "MOUSE_BUTTON_LEFT"}}},
+              {"tool": "godot_screenshot", "params": {"action": "game"}}]
+  },
+  "steps": [{"n": 1, "action": "click Play", "diff": "diff/step-01.json", "verdict": "match"}],
+  "mismatch": {"step": 4, "signals": {"changed_fraction": 0.21},
+               "java_frame": "java/step-04.png", "godot_frame": "godot/step-04.png"},
+  "fix": {"status": "open", "commit": null, "summary": null},
+  "verified": null
+}
 ```
 
-`bootstrap.sh` provisions, idempotently:
+Update `updated`, `steps`, `mismatch`, `fix`, `verified` after every run; append
+new items with the next `PAR-####` id. Statuses: `seeded`, `in-progress`,
+`mismatch`, `fixing`, `verified`, `blocked`, `wontfix`.
 
-- `computer-mcp` (PyPI, 0.0.7, pinned with `--with "mcp<2"` because its
-  `@server.list_tools()` API was removed in MCP SDK 2.x) and `open-godot-mcp`
-  (`notnilcn/Open-Godot-MCP`, installed as `uv` tools so both executables land
-  in `~/.local/bin`, where the global opencode `mcp` config calls them by bare
-  name). The installed server version must match the vendored addon
-  `client/addons/open_godot_mcp/plugin.cfg` (`0.1.10`).
-- A JDK 17: an existing Java 17 on `PATH`/`JAVA_HOME`/`/usr/lib/jvm` is used;
-  otherwise Temurin is downloaded into `$JAVA17_HOME`
-  (`$HOME/.local/share/jdks/temurin-17`). The repo's `settings.gradle` enforces
-  17 and `/tmp` JDKs are ephemeral.
-- Optional host tools. `xdotool`/`wmctrl` are only needed for window-geometry
-  automation; without them, capture the full screen and run one client at a
-  time. `tesseract` enables OCR text comparison; it is optional.
+### Chains
 
-Additional preconditions:
+After a confirmed run, update (or create) the matching `chains/<name>.md`
+following `chains/README.md`: exact tool + action + parameter JSON per step, no
+hardcoded click coordinates unless measured from the current capture, status
+`verified` only with a run dir + pid/commit in `last_verified`. Java-leg
+sequences go in `java-*.md` files; a mixed item names both servers in `tools`.
 
-```bash
-tools/build.sh                       # mind-gdext + mind-headless; syncs scenarios
-"${GODOT_BIN:-godot4}" --version     # this host ships the binary as `godot`
-java -version                        # must be 17.x; bootstrap.sh prints JAVA_HOME
-tools/mcp-smoke.sh                   # when in doubt: isolates bridge/identity/checksum issues
-```
+### Learnings
 
-**computer-mcp needs `DISPLAY` at opencode process start.** It imports
-`pynput` at module load, so without an X connection the server exits and
-opencode silently drops its tools. Confirm the `computer-mcp_*` tools are
-present before attempting the Java leg; a displayless SSH session must export
-`DISPLAY` before launching opencode (or set it in the global config
-`environment`). The loop shims already supply `$PARITY_DISPLAY`, and
-open-godot-mcp has no such requirement.
+Friction that is not a reusable chain goes to the repo-root learnings files as
+one dated entry: what happened, what worked, the run or chain that shows it.
+Never rewrite another session's entry.
 
-The Java reference needs a one-time build (also packs sprites); first run
-downloads Gradle 9.x and Arc from jitpack. Use the `JAVA_HOME` printed by
-`bootstrap.sh` (distro JDK: `/usr/lib/jvm/java-17-openjdk-amd64`; Temurin:
-`$HOME/.local/share/jdks/temurin-17`):
+### Run report
 
-```bash
-JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 bash ../Mindustry/gradlew \
-  -p ../Mindustry tools:pack desktop:dist
-```
-
-**Display.** The Godot client renders on the loop's headless weston compositor
-(`$PARITY_WAYLAND_SOCKET`, GL on the GPU), and the Java reference renders on
-the loop's dedicated weston + Xwayland compositor (`$PARITY_DISPLAY`, GL on
-the GPU; its display number is discovered at startup). Both launch wrappers
-start their server when down. On Xwayland the X root window holds no GPU
-pixels, so mss/root grabs (including `computer-mcp screenshot`) come back
-black: capture the game window instead with
-`capture_screen.py --window-title Mindustry` (a bare capture retries the
-window automatically and says so in its report). `PARITY_JAVA_DISPLAY=x11` or
-a missing weston/Xwayland falls back to Xvfb (llvmpipe, ~5–15 FPS), where
-root captures work. `godot_screenshot game` needs a windowed game, not
-`--headless`. Always check a capture is non-blank (`capture_screen.py` and
-`frame_diff.py` report mean/stddev) before treating a black frame as a
-finding.
-
-**Vision.** If the session model cannot accept images, never write "the button
-is missing" from an unseen PNG: run `frame_diff.py` for metrics and
-`capture_screen.py --ocr` for text, and say the claim is metric-based.
-
-## 2. Twin-run protocol
-
-Within this loop, one scenario at a time, Java first, Godot second. Parallel
-loops run the same protocol simultaneously on their own displays. The
-`parity-writer` runs the Godot leg itself, as part of each fix round; the
-`twin-evaluator`, spawned by `/eval-gaps`, runs both legs for `godot-pass`
-items, and only one twin evaluator runs across all sessions at a time (global
-twin lease).
-
-```
-pick scope → create run dir → JAVA leg (capture) → quit Java
-           → GODOT leg (capture) → quit Godot → compare → ledger + report
-```
-
-Run directory and naming (`$PARITY_EVALS_DIR` is shared, so keep the loop
-prefix; `$PARITY_RUN_PREFIX` is empty for loop 1 and `l<N>-` otherwise):
-
-```
-$PARITY_EVALS_DIR/runs/${PARITY_RUN_PREFIX}<YYYYMMDD-HHMMSS>-<scenario>/
-  run.json          # scenario id, loop id, versions/commits, window size, host, outcome
-  java/  step-<nn>-<name>.png | game.log | notes.md
-  godot/ step-<nn>-<name>.png | game.log | state-<nn>.json
-  diff/  step-<nn>.json | step-<nn>-heatmap.png
-  report.md
-```
-
-Fixed comparison setup (record it in `run.json`): same screen/window size
-(e.g. `DisplayServer.window_set_size(Vector2i(1280,720))` on Godot; normalize
-the Java window in its settings), UI scale 1.0, language `en`, same sector/seed,
-and the same camera pose per capture step.
-
-## 3. Godot leg
-
-Follow the playtest skill exactly: `godot_health check` → editor identity
-(`godot_editor_read state` → `project_path` contains the loop worktree, not a
-sibling checkout) → `godot_editor_edit open_scene` → `godot_game play` **with**
-`{"scene":"res://scenes/game.tscn"}` → `godot_game status` with
-`runtime_connected: true`. Launch the editor if the bridge is down, through the
-loop wrapper (it starts weston and pins the Godot Wayland socket, also keeping
-`$PARITY_DISPLAY` for Java and `$PARITY_BRIDGE_PORT`; the MCP shim adopts the
-same port):
-
-```bash
-nohup .opencode/loops/bin/run-godot-editor.sh \
-  >"$PARITY_LOOP_DIR/logs/editor.log" 2>&1 &
-```
-
-Useful evaluator moves, all pid-stamped:
-
-- Golden check: `load_scenario` + `step(60)` in one loop-free eval, then
-  compare `get_checksum()` to the committed golden before pausing.
-- Debug step: `MindSimHost.set_paused(true)` then `step(n)` for exact ticks;
-  `_input` still applies while paused.
-- State: `get_state_json()` for tiles/entities/events; assert on parsed JSON,
-  never substrings.
-- HUD/UI: `MindHud`/`MindUi` properties and JSON endpoints, then
-  `godot_screenshot game`.
-- Input: `godot_input` with `coords: "viewport"` from
-  `Camera2D.tile_to_screen(x, y)`; never hardcode click points.
-- Logs: `godot_log clear` before a step, `godot_log errors` after; a scenario
-  only passes with an empty error log.
-
-Clean teardown: restore pause/camera, `godot_game stop`, then record the log.
-
-### Input and capture gotchas (local host)
-
-- **Prefer discrete `godot_input` calls over `sequence`.** The awaited
-  `sequence` handler awaits `process_frame` inside a debugger call and can hit
-  the 15 s `call_runtime` timeout; `mouse_motion`/`mouse_button`/`key` return
-  immediately.
-- **Injected events sit in the accumulated-input buffer.** After a
-  `godot_input` press/release, run an eval that calls
-  `Input.flush_buffered_events()` and then asserts the target state
-  (`visible`, `get_tree().root.gui_get_hovered_control()`, dialog stack). A
-  click that is never flushed looks like a dead UI.
-- **Eval fallback when `godot_input` still does not land** (validated): build
-  the events in eval and call `get_viewport().push_input(down)` /
-  `push_input(up)` synchronously; resolve the point from
-  `(control as Control).get_global_rect().get_center()`. Record in `run.json`
-  that the fallback was used, and never hardcode coordinates.
-- **Screenshot staleness.** With the editor maximized over the game window,
-  `godot_screenshot game` can return the last presented frame — identical bytes
-  across real state changes, and `Engine.get_frames_drawn()` can stay pinned
-  while `get_process_frames()` advances (render loop dead, state evals alive).
-  Call `get_window().grab_focus()` in an eval first (validated; the older
-  `move_to_foreground()` is deprecated and logs an ERROR), or capture the X
-  screen with computer-mcp and crop with `capture_screen.py --rect` using
-  `DisplayServer.window_get_position()` and `DisplayServer.window_get_size()`.
-  A pinned `frames_drawn` outlives most workarounds: `godot_game stop` + `play`
-  is the reliable fix.
-- **Error breakpoints.** An eval body that errors (or times out) stops in the
-  editor Debugger and pins the frame loop while evals keep answering; check
-  `godot_debugger sessions` (`paused: true`) and recover with `stop` + `play` —
-  `resume` re-breaks. Clear `godot_log` before the scenario so stale errors are
-  not attributed to the run.
-
-## 4. Java leg
-
-The reference is driven at the OS level with computer-mcp (mouse, keyboard,
-window state). There is no semantic API. The working launch → drive → capture
-→ quit sequence lives in `.opencode/chains/java-reference-leg.md`; friction
-that is not a reusable sequence goes to `computer-mcp-learnings.md` at the
-repo root.
-
-```bash
-RUN="$PARITY_EVALS_DIR/runs/${PARITY_RUN_PREFIX}<stamp>-<scenario>"
-# launch through the loop wrapper: it sets DISPLAY, a seeded per-loop HOME,
-# and per-loop XDG dirs so settings/saves never race another loop
-.opencode/loops/bin/run-java.sh >"$RUN/java/game.log" 2>&1 &
-# readiness signal in the log, not a fixed sleep:
-until grep -q "Total time to load" "$RUN/java/game.log"; do sleep 2; done
-```
-
-Drive with the computer-mcp MCP tools (`click`, `double_click`, `drag`,
-`mouse_move`, `type`, `key_press`, `key_down`, `key_up`, `list_windows`,
-`get_window_info`). Those tools go to the loop's persistent computer-mcp
-server, so pointer state survives between calls. `computer-mcp screenshot`
-grabs the X root through mss, which is black on the Xwayland display; capture
-frames to disk with `capture_screen.py` instead. For scripted CLI clicks use
-`.opencode/loops/bin/parity-click.sh <x> <y> [button]`; a bare
-`computer-mcp mouse move` followed by a separate `computer-mcp mouse click`
-does **not** work on an Xvfb display (the pointer resets to center when the
-one-shot XTEST client exits). Capture to disk with:
-
-```bash
-"$MCP_VENV/bin/python" .opencode/skills/parity-eval/scripts/capture_screen.py \
-  --window-title Mindustry --output "$RUN/java/step-01-menu.png"
-```
-
-`--window-title` reads the game window directly (XGetImage); a bare capture
-tries the monitor first and retries the window when that grab is blank, so the
-report's `capture`/`note` fields tell you which path ran.
-
-Quit gracefully via the main menu Quit button; if the process lingers, kill the
-pid recorded at launch, and note it in `run.json`.
-
-Java gotchas:
-
-- Settings live in the loop's seeded HOME (`$PARITY_LOOP_DIR/home`), copied
-  once from `~/.local/share/Mindustry`; normalize them inside the loop (window
-  size, UI scale, language, music/SFX volume) and record the values in
-  `run.json`. `settings_backups/` keeps prior snapshots.
-- For the Java leg each loop owns its X display (`$PARITY_DISPLAY`): Xwayland
-  on the GPU with Weston's window manager by default, Xvfb (no WM) on the
-  software fallback. Run one client at a time and never start a Java client on
-  another loop's display.
-- Prefer keyboard shortcuts and menu paths that exist in both clients; when a
-  click coordinate is needed, derive it from the current Java screenshot at the
-  recorded window size and store the coordinate in the run notes.
-
-### Java-leg input and capture (hard-won)
-
-- The screenshot returned by a `click`/`mouse_move`/`key_press` call is the
-  previous frame (menus and highlights appear one call late). Take a separate
-  `capture_screen.py` capture before judging what an action did.
-- `key_press` holds the key long enough for X auto-repeat to fire again: an
-  Escape can open and immediately re-close the pause dialog. For toggles send
-  `key_down` then `key_up` as two calls.
-- A `button_down` can stay logically held across later calls (an old world drag
-  keeps applying). Send an explicit `button_up` before expecting a fresh click.
-- On the Xvfb fallback the window needs a first key press to take focus (the
-  first Escape/J is a no-op) — send it twice. On Xwayland, XTest input lands
-  directly.
-- `list_windows`/`get_window_info` and the window-geometry actions are not
-  implemented on Linux. Read the origin/size from
-  `DISPLAY=$PARITY_DISPLAY xwininfo -root -children`, capture with
-  `capture_screen.py --window-title Mindustry` (python-xlib; no xdotool needed
-  on Xwayland) or `--rect x,y,w,h`; click coords are screen coords = window
-  origin + element offset read from the current screenshot.
-- No scroll action exists: send a one-shot pynput scroll from `$MCP_VENV` python
-  (`from pynput.mouse import Controller; Controller().scroll(0,-6)`); discrete
-  scroll events do not need the persistent pointer that one-shot moves do.
-- Timed combos (the game's category + tens/units block-select inside a 400 ms
-  window) cannot be sent as separate MCP calls — each round trip breaks the
-  window. Use one persistent pynput process with ~40–70 ms gaps (see
-  `runs/l2-20261008-051657-ev0055-rts-select-twin/java/key_seq.py`).
-- The Custom Rules dialog drops injected keyboard input: do not type into
-  numeric rule fields — trigger the wave with the HUD skip button (survival)
-  and read the in-game HUD after every rules edit (a stray click can silently
-  toggle `Waves` off).
-- On a fresh Java data dir, Play → Campaign first shows a `Select Starting
-  Campaign` planet dialog (Serpulo photo → OK) before the planet page; missing
-  the photo leaves Erekir selected.
-- Launch detached: `setsid .opencode/loops/bin/run-java.sh ... &` survives a
-  shell-tool timeout; plain `nohup ... &` is killed with the tool's process
-  group. The JVM pid is the `pgrep -f Mindustry.jar` match, not the wrapper pid.
-
-## 5. Comparison order
-
-Cheapest and most trustworthy first:
-
-1. **Committed oracle.** Godot `get_checksum()` / `get_state_json()` against
-   `parity/scenario_catalog.json` / `golden_manifest.json`. A mismatch is an
-   automatic S1/S2 finding with the exact tick and checksum in evidence.
-2. **Structured state.** Non-visual behavior that both clients expose
-   (HUD item counts, wave number, building config, prices) — compare values,
-   not pixels.
-3. **Text.** `capture_screen.py --ocr` or dialog text / bundle keys; missing or
-   mistranslated strings are findings with the OCR output as evidence.
-4. **Frames.** Only when size and pose match:
-
-   ```bash
-   "$MCP_VENV/bin/python" .opencode/skills/parity-eval/scripts/frame_diff.py \
-     --java "$RUN/java/step-03-game.png" --godot "$RUN/godot/step-03-game.png" \
-     --out-json "$RUN/diff/step-03.json" \
-     --out-heatmap "$RUN/diff/step-03-heatmap.png"
-   ```
-
-   The script reports size mismatch, blank frames, mean/std, changed-pixel
-   ratio, coarse-layout diff, and palette distance. A layout-region difference
-   is a presentation finding; a palette-only difference is usually a shader or
-   asset finding. Software-GL timing jitter means never diff mid-animation
-   frames — pause both clients for captures whenever possible.
-
-Record the strongest evidence class that shows the mismatch, plus a human
-repro. "Looks different" is not a finding.
-
-## 6. Ledger and reports
-
-`$PARITY_LEDGER` (default `.opencode/evals/findings.json`) is machine-readable,
-shared by all parallel sessions, and protected by a file lock: `record_finding.py`
-takes the lock around every read-modify-write, so `add`/`claim` from concurrent
-sessions can never duplicate ids or lose entries. Use the script; never
-hand-edit. In a loop worktree call it through the main checkout:
-`RF="${PARITY_MAIN:-.}/.opencode/skills/parity-eval/scripts/record_finding.py"`.
-Phase statuses: `open` (writer queue) → `godot-open` (writer fixing and
-running its own Godot leg) → `godot-pass` (Godot leg agreed; waits for
-`/eval-gaps`) → `twin-unverified` (twin in flight) → `twin-verified`
-(terminal), plus `wontfix` (accepted deviation). `godot-unverified` is the
-marker for a legacy interrupted Godot leg; the writer reclaims it. A claim is a
-cross-session lock: a fresh `owner` hides the item from pickers; `release`
-restores the pre-claim status and `reap` collects dead-session claims older
-than `--older-than-minutes` (default 90). Every claim carries a `session`
-label; `writer` retries and `twin` picks only see the same session's items, so
-a loop never verifies another worktree's code. `godot-pass` items are
-session-local by design; `/eval-gaps`, run in the same loop's session before
-`/merge-loops`, claims them for twin.
-
-The gap identifier owns `add --source code` and code-evidence `wontfix`; the
-parity writer owns `godot-pass`/`godot-open` via `release`; the twin evaluator
-owns `twin-verified`/`open` verdicts via `verify`; `/fix-gaps` claims writer
-batches and `/eval-gaps` claims twin batches, each driven one item at a time.
-Every candidate carries a fix plan in its `plan` field — inline Markdown (seam,
-files, steps, check), not a plan number — so a claim payload hands the writer
-the sketch without any extra file lookup; the writer's failed Godot leg or the
-twin evaluator's failed run refreshes that plan from the run evidence before
-the next writer round.
-
-```bash
-python3 "$RF" summary
-python3 "$RF" list --status open --session "loop-${PARITY_LOOP:-1}"
-python3 "$RF" claim --for writer --session "loop-${PARITY_LOOP:-1}" --count 3  # exits 3 when none
-python3 "$RF" claim --for twin --session "loop-${PARITY_LOOP:-1}" --count 3    # exits 3 when none
-python3 "$RF" release --id EV-0001 --status godot-pass \
-  --note "expected behavior observed at <pid>" --evidence "runs/.../godot/step-04.png"
-python3 "$RF" release --id EV-0001 --note "writer blocked: <reason>"
-python3 "$RF" reap --older-than-minutes 90             # recover dead-session claims
-python3 "$RF" reap --session "loop-2" --older-than-minutes 0  # a restarted loop's dead claims
-python3 "$RF" add \
-  --area ui/menu --severity S2 --title "Campaign button does not open the planet view" \
-  --expected "Java: Play > Campaign opens Serpulo planet view" \
-  --actual "Godot: click leaves the menu unchanged; no dialog bound" \
-  --repro "scenario boot_menu step 4" \
-  --plan "Seam: menu button emits no signal. Steps: bind Campaign to the planet dialog; hide the Workshop button. Check: headless boot_menu step 4." \
-  --evidence "runs/${PARITY_RUN_PREFIX}<stamp>-boot_menu/godot/step-04.png"
-python3 "$RF" set-plan --id EV-0001 --plan "<Markdown fix sketch>"
-python3 "$RF" verify \
-  --id EV-0001 --status twin-verified --note "twin run at <commit>" \
-  --evidence "runs/${PARITY_RUN_PREFIX}<stamp2>-boot_menu/godot/step-04.png"
-python3 "$RF" verify --id EV-0002 --status open --note "twin fail: <what differs>"
-```
-
-### Code-level candidates and triage
-
-`/seed-gaps` first surface-scans both trees (AGENTS.md maps, file names,
-`surface_scan.py`) and then spawns one `gap-identifier` per surviving candidate
-hypothesis; each subagent records only what it confirms against the real files.
-The gap identifier records candidates without running anything; `add` starts
-them in the writer queue (`open`) with a fix plan in `--plan`:
-
-```bash
-python3 "$RF" add \
-  --area game/campaign --severity S1 --source code --confidence high \
-  --title "Launch never applies the sector rules" \
-  --expected "World.java:265-330 applies the preset rules on launch" \
-  --actual "campaign.rs:124 calls play_new_sector with Rules::default()" \
-  --repro "start_sector('serpulo',170); eval rules.waves" \
-  --plan "Seam: campaign.rs:124 skips the preset rules. Steps: resolve the preset, pass its Rules to play_new_sector, add the headless case. Check: cargo test -p mind-core campaign." \
-  --evidence client/rust/mind-gdext/src/campaign.rs:124 \
-  --evidence ../Mindustry/core/src/mindustry/core/World.java:265
-python3 "$RF" set-plan --id EV-0001 --plan "<Markdown fix sketch>" \
-  --note "plan added while sharpening the repro"
-python3 "$RF" set-status --id EV-0001 --status wontfix \
-  --note "handled by the shared Rules path" \
-  --evidence client/rust/mind-gdext/src/campaign.rs:120
-```
-
-Rules for code-sourced records: both sides' file:line in `--evidence`, a repro
-sketch the evaluator can execute later, a `plan` sketch (seam, files, steps,
-check) in inline Markdown, one symptom per record, and dedupe notes on
-existing ids instead of new records. Code evidence never closes a
-finding as fixed; a fresh in-engine reproduction is the only path to
-`godot-pass` and `twin-verified`, and only a reading that settles the gap may
-set `wontfix`.
-
-Titles name the player-visible symptom, not the presumed code cause. One
-finding per independent symptom; link an existing id in notes instead of
-duplicating. Agent `edit` permission covers `**/evals/**`; if the shared evals
-dir is outside the session's worktree and the tool still refuses the path,
-fall back to the script and bash (`record_finding.py` for the ledger,
-`mkdir`/redirection for reports).
-
-Write `report.md` with this shape:
+`runs/<stamp>-<item>/report.md`:
 
 ```markdown
-# <scenario> — <date> (<godot commit>, Java <upstream short sha>)
+# <item> — <date> (<godot commit>, Java <upstream short sha>)
 
-- Result: <parity | gaps | blocked>
-- Window/setup: <size>, <pose>, <settings snapshot ref>
+- Result: <parity | mismatch | blocked>
+- Setup: display :10, windows <java 1152x648 @ x,y> <godot embedded 1152x648>, settings snapshot ref
 
-## Findings
-| id | sev | step | symptom | evidence |
-|----|-----|------|---------|----------|
+## Steps
+| # | action | java frame | godot frame | diff json | verdict |
 
-## Verified
-| id | status | re-run | evidence |
-|----|--------|--------|----------|
+## Mismatch
+- step: <n>; signals: <metrics>; heatmap: <path>
 
-## Blocked / not covered
-- <step>: <exact blocker>
+## Fix
+- commit: <sha>; check: <command>; re-run: <run dir>
 
 ## Raw artifacts
-- java/: ...
-- godot/: ...
+- java/: ... godot/: ... diff/: ...
 ```
 
-## 7. Scenario catalog (grow as coverage increases)
+## 5. Java-leg gotchas (computer-mcp)
 
-Start with the high-value flows; `parity/mcp_catalog.json` is the long-form
-queue and should win where ids overlap.
+- `list_windows`/`get_window_info` are not implemented on Linux; use
+  `window_ctl.py list` or `xwininfo -root -children`, and
+  `window_ctl.py raise Mindustry` before every Java capture.
+- The screenshot attached to a `click`/`mouse_move`/`key_press` response is the
+  previous frame. Capture separately.
+- `key_press` holds long enough for X auto-repeat: for toggles split
+  `key_down` + `key_up` across two calls. Send an explicit `button_up` before
+  expecting a fresh click; a world `button_down` can stay logically held.
+- No scroll action exists: one-shot pynput from `$MCP_PY`
+  (`from pynput.mouse import Controller; Controller().scroll(0,-6)`).
+- Timed key combos (the in-game block-select combo inside 400 ms) need one
+  persistent pynput process, not separate MCP calls.
+- Java text fields frequently drop injected input; prefer menu paths and
+  shortcuts that exist in both clients, or write settings offline (see
+  `computer-mcp-learnings.md`, EV-0059) while the client is stopped.
+- Fresh Java data dir: Play → Campaign shows a `Select Starting Campaign`
+  dialog (Serpulo photo → OK) before the planet page.
+- Never `pkill -f "<jar>"`: the pattern matches the tool shell itself. Record
+  the pid from `pgrep -f 'Mindustry[.]jar'` and kill only that.
+- Quit gracefully via the main menu; if the process lingers, kill the recorded
+  pid and note it in `run.json`.
 
-| id | goal | oracle |
+## 6. Godot-leg gotchas (open-godot-mcp)
+
+- `godot_game play` without `params.scene` attaches nothing; always pass
+  `res://scenes/game.tscn`.
+- Injected input sits in the accumulated-input buffer: flush with
+  `Input.flush_buffered_events()` in an eval and assert the target state.
+- An errored or timed-out `godot_exec` can trip break-on-error and pin the
+  frame loop while evals still answer; recover with `godot_game stop` + `play`
+  (`resume` re-breaks). Keep eval bodies loop-free and never `await` in them.
+- `frames_drawn` pinning is not proof of stale captures, and liveness is not
+  proof of fresh ones: cross-check capture content against structured state.
+- Rust methods without `#[func]` are not eval-reachable; use a `#[func]`
+  sibling or the real input path.
+- `SimHost.place_block` returns true even when the runtime rejects the tile;
+  assert placed tiles from `get_state_json()`.
+- STOP Controls swallow world clicks (paused banner at viewport center, hints
+  panel, `LoadingLayer`); probe `gui_get_hovered_control()` before concluding
+  an input is dead.
+- Camera transforms update one frame after `center_on_tile`/`pan_to`; resolve
+  click coordinates in a later eval. Edge-pan drifts the camera while the
+  pointer idles at a screen edge — park the pointer or disable camera process.
+- The editor-embedded game cannot be resized (fixed 1152x648).
+
+## 7. Scenario queue
+
+Growing coverage; `parity/mcp_catalog.json` wins where ids overlap. Seed each
+item in the ledger from the matching chain.
+
+| id | goal | primary oracle |
 |---|---|---|
-| `boot_menu` | Boot to main menu; logo, background, button tree, submenus | frame + OCR |
-| `settings_ui` | Settings dialog tabs/values/apply; language, video, controls | OCR + frame |
-| `campaign_launch` | Play → Campaign → Serpulo → Ground Zero → launch | frame + state |
-| `hud_ingame` | Core items HUD, wave counter, catalog, minimap, toolbar | state JSON + frame |
-| `placement_basic` | Select, place, rotate, configure, break a block | state JSON + frame |
-| `logistics_flow` | Drill → conveyor → core item movement | HUD values + state |
-| `power_grid` | Generator → consumer graph, battery charge | state JSON |
-| `combat_wave` | Summon wave, turret fire, HP/damage, death FX | frame + state |
-| `units_move` | Spawn/move/attack-order a unit; pathing and animation | frame + state |
-| `logic_program` | Place processor, edit code, run message/arithmetic | frame + state |
-| `ui_dialogs` | Each manifest dialog opens and renders (sweep) | OCR + frame |
-| `input_zoom_pan` | Camera zoom/pan bounds, place-line, selection box | frame + camera JSON |
-| `save_load` | Save slot, reload, checksum/state equality | state JSON |
-| `editor_basic` | Map editor open, paint, save | frame + state |
-| `mp_host_join` | Host/join over STDB (server leg via `spacetime` CLI) | server rows + client state |
+| `boot-and-identity` | boot → main menu; logo, background, button tree, submenus | frame |
+| `ui-control-click` | click runtime buttons; verify via read-back | frame + node state |
+| `enter-campaign` | Play → Campaign → planet → sector → launch | frame + state |
+| `sector-preset-rules` | launch sector; assert preset rules | state JSON |
+| `ground-zero-fresh-launch` | fresh Ground Zero: core/entity assertions | state JSON |
+| `hud-wave-enemies-skip` | HUD wave counter, skip button, toasts | state JSON + frame |
+| `rts-select-orders` / `placement-rotation` | command mode, select, order; place/rotate/break | state JSON + frame |
+| `ground-zero-production-probe` | drill → core item delivery | state JSON |
+| `pause-step-interact` | pause menu, step, API and mouse place/break | state JSON |
+| `campaign-save-load` / `campaign-save-restore` | save, reload, equality | state JSON + frame |
+| `editor-maps-row-click` / `custom-game-map-list` | editor/custom game map flows | frame + editor state |
+| `settings-gamedata-actions` / `database-grid-audit` | settings dialogs, database grid | frame + state |
+| `join-direct-connect` / `host-match-from-pause` | join/host flows | server rows + client state |
 
-Before scripting a new scenario, check whether an entry already exists in
-`parity/mcp_catalog.json` and reuse its id, scene, steps, and screenshot names.
+## 8. Known limits
 
-## 8. Pitfalls
-
-- `godot_game play` without the explicit `params.scene` looks successful but
-  attaches nothing; every later `godot_exec` fails with `RUNTIME_NOT_CONNECTED`.
-- Each loop's editor addon listens on `$PARITY_BRIDGE_PORT` (6970, 6980, …) and
-  the MCP shim adopts exactly that port. Identity-check `project_path` every
-  session: with several loops running, a wrong-port editor is easy to adopt.
-- Two runtimes (editor game + stale instance) make a misrouted eval look
-  successful; pid-stamp everything.
-- `godot_instance launch_editor` allocates ports from its own local index and
-  ignores the loop map; launch editors only through `run-godot-editor.sh`.
-  Never run `open-godot-mcp --shutdown-all` — it kills sibling loops' servers.
-- On the Xvfb software fallback, a one-shot `computer-mcp mouse move` snaps
-  back to screen center when the process exits. Use the persistent
-  computer-mcp MCP tools or `parity-click.sh`; the same applies to any helper
-  that moves and clicks in separate processes.
-- Eval bodies with `for`/`while` time out; split heavy expressions. A `null`
-  result with `ok: true` usually means the body errored — and an errored or
-  timed-out eval can trip break-on-error and pin the frame loop while later
-  evals still answer. Check `godot_debugger sessions`; recover with
-  `godot_game stop` + `play` (`resume` re-breaks).
-- A rebuilt `libmind_gdext.so` is not picked up by an already-running editor
-  (the library is mmap'd at editor start): relaunch the loop editor before
-  `godot_game play` when the build postdates the editor launch. Cheap probes:
-  `nm -C client/bin/rust/debug/libmind_gdext.so | grep <new-symbol>` before,
-  `grep libmind_gdext /proc/<game pid>/maps` + `sha256sum` after.
-- The editor-embedded game window cannot be resized (`window_set_size` no-ops)
-  — record `DisplayServer.window_get_size()` instead of planning a pixel diff
-  around a requested size.
-- `godot_screenshot burst` blocks the round-trip; keep bursts tiny or take
-  individual captures.
-- Don't re-run the headless goldens as "evaluation"; the harness already owns
-  that. In-engine time is for the view/input/flow layers the harness cannot see.
-- A displayless opencode session silently drops `computer-mcp`; the Java leg
-  then has no tool to call. Relaunch with `DISPLAY` set (loop shims or the
-  global config env) instead of improvising a headless Java leg.
-- Never write a finding without an artifact path. Never mark a phase passed
-  without a fresh repro. Never record a verdict from a code reading — code
-  evidence can only seed a candidate or settle it as `wontfix`.
+- No OCR (`tesseract` absent): text parity is judged from structured state and
+  bundle keys; screenshots stay metric-based.
+- Java has no semantic API; every Java assertion is OS-level (click, key,
+  window capture) or a screenshot metric.
+- The two clients will never be byte-identical (font rasterization, shaders).
+  The gate is the tolerance above, not equality; a local difference smaller
+  than the gate is not a finding.
+- If the session model cannot see images, judge from `frame_diff.py` metrics,
+  the heatmap path, and structured state — and say the claim is metric-based.
