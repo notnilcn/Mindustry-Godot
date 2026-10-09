@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@2",
-  "updated": "2026-10-09T07:12:30Z",
+  "updated": "2026-10-09T07:13:40Z",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction chains. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -9638,6 +9638,148 @@
           }
         ],
         "note": "R02 reference soak. Movement landed (mech visible, camera follows, hint transitioned on first movement); both directions exercised (S then W) to prove the input and camera. Key hold: key_down + busy-wait + key_up in one execute call."
+      }
+    },
+    {
+      "id": "PAR-0045",
+      "title": "Campaign world: click copper ore to begin mining (objective 0 -> 1)",
+      "surface": "world",
+      "parent": "PAR-0028",
+      "status": "reference",
+      "chain": "chains/java-ref-ground-zero-tutorial.md",
+      "updated": "2026-10-09T07:13:40Z",
+      "discovered_by": "runs/20261009-065416-ref-ground-zero/",
+      "path": {
+        "to": "Ground Zero tutorial start (objective Obtain: 0/15 Copper)",
+        "java": [
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 882,
+              "y": 510,
+              "note": "copper ore tile under the tutorial highlight (image 832,412; gold diamond cursor)"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r03-01-mine.png"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r03-02-mine.png",
+              "note": "+6 s: counter 39 -> 74"
+            }
+          }
+        ],
+        "godot": [],
+        "confirm": {
+          "java": "runs/20261009-065416-ref-ground-zero/java/r02-04-after-w.png (pre-click)",
+          "godot": "HudGroup visible"
+        },
+        "last_replayed": "runs/20261009-065416-ref-ground-zero/"
+      },
+      "run": "runs/20261009-065416-ref-ground-zero/",
+      "reproduce": {
+        "java": [
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 882,
+              "y": 510,
+              "note": "copper ore tile under the tutorial highlight (image 832,412; gold diamond cursor)"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r03-01-mine.png"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r03-02-mine.png",
+              "note": "+6 s: counter 39 -> 74"
+            }
+          }
+        ],
+        "godot": [],
+        "compare": []
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open"
+      },
+      "verified": null,
+      "reference": {
+        "captured": "2026-10-09T07:12:45Z",
+        "profile": "resumed",
+        "run": "runs/20261009-065416-ref-ground-zero/",
+        "frames": {
+          "fork": "runs/20261009-065416-ref-ground-zero/java/r02-04-after-w.png",
+          "action": "runs/20261009-065416-ref-ground-zero/java/r03-02-mine.png",
+          "support": [
+            "runs/20261009-065416-ref-ground-zero/java/r03-01-mine.png"
+          ]
+        },
+        "settle": [
+          {
+            "after": "click ore",
+            "wait_ms": 3500,
+            "note": "r03-01: counter already 39; objective advanced"
+          },
+          {
+            "after": "mining",
+            "wait_ms": 6000,
+            "note": "r03-02: counter 74"
+          }
+        ],
+        "expected": {
+          "bundle": [
+            "gz.mine"
+          ],
+          "objective_after": "Build: 1x Mechanical Drill (objective 0 completed as the mined copper crossed 15)",
+          "prompt": "Research the Mechanical Drill, then select it in the menu in the bottom right. Click on a copper patch to place it.",
+          "counter": "core-copper HUD top-center appears: 39 at +3.5 s, 74 at +9.5 s",
+          "state": "the mech mines the highlighted copper tile; the objective panel advances to the drill objective"
+        },
+        "chain": "chains/java-ref-ground-zero-tutorial.md",
+        "checkpoint": "runs/20261009-065416-ref-ground-zero/checkpoints/r03-sector-serpulo-170.msav",
+        "checkpoint_note": "autosave mtime 17:13:01 (changed from R02's 17:11:01)",
+        "java_path": [
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 882,
+              "y": 510,
+              "note": "copper ore tile under the tutorial highlight (image 832,412; gold diamond cursor)"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r03-01-mine.png"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r03-02-mine.png",
+              "note": "+6 s: counter 39 -> 74"
+            }
+          }
+        ],
+        "note": "R03 reference soak. The single ore click starts mining; the tutorial counter climbs fast (39 -> 74 in 6 s), objective 0 completes as soon as mined copper >= 15, and the panel switches to Build: 1x Mechanical Drill. No intermediate 'Obtain: N/15' frame was captured (by +3.5 s the objective had already advanced); the fork frame shows the pre-click 'Obtain: 0/15' state."
       }
     }
   ]

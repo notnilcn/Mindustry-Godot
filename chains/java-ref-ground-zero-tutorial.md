@@ -207,6 +207,24 @@ of the field; 900 ms of W returned to the field (r02-04 vs r02-00: changed
 0.043). Autosave `sector-serpulo-170.msav` mtime 17:11:01 (changed from
 17:07:02) → `checkpoints/r02-sector-serpulo-170.msav`.
 
+## R03 — click copper ore (recorded 2026-10-09)
+
+Action: click the tutorial-highlighted copper tile. Fork
+`java/r02-04-after-w.png` (objective `Obtain: 0/15 Copper`); action
+`java/r03-02-mine.png` (+9.5 s); support `java/r03-01-mine.png` (+3.5 s).
+
+| after | wait | frame |
+|---|---|---|
+| click ore (image 832,412 → screen 882,510) | 3500 ms | r03-01 (counter 39; panel already `Build: 1x Mechanical Drill`) |
+| mining | 6000 ms | r03-02 (counter 74, recorded) |
+
+Observed: the mech mines the highlighted tile; the core-copper HUD appears
+top-center and climbs fast (39 → 74 in 6 s); objective 0 (`Item 15`, `gz.mine`)
+completes as soon as the mined copper crosses 15, so the panel switches to
+objective 1 (`Build: 1x Mechanical Drill`) before the first capture — the
+pre-click `Obtain: 0/15` state is the fork frame. Autosave mtime 17:13:02
+(changed from 17:11:01) → `checkpoints/r03-sector-serpulo-170.msav`.
+
 ## Wait marks
 
 | after | wait | why |
