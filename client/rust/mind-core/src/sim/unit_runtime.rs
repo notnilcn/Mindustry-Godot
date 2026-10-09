@@ -379,16 +379,63 @@ impl Sim {
     /// for the ticks that follow; read by
     /// [`crate::ai::types::player::update_player`].
     pub fn set_player_input(&mut self, axis_x: f32, axis_y: f32) {
-        let moved = self
+        let mut input = self
             .ecs
             .0
             .get_resource::<PlayerInput>()
-            .is_some_and(|input| input.moved);
-        self.ecs.0.insert_resource(PlayerInput {
-            axis_x,
-            axis_y,
-            moved,
-        });
+            .copied()
+            .unwrap_or_default();
+        input.axis_x = axis_x;
+        input.axis_y = axis_y;
+        self.ecs.0.insert_resource(input);
+    }
+
+    /// Sets or clears the player unit's mine order
+    /// (`InputHandler.tryBeginMine`/`tryStopMine` set `player.unit().mineTile`).
+    pub fn set_player_mine_tile(&mut self, tile: Option<TilePos>) {
+        let mut input = self
+            .ecs
+            .0
+            .get_resource::<PlayerInput>()
+            .copied()
+            .unwrap_or_default();
+        input.mine_tile = tile;
+        input.mine_timer = 0.0;
+        self.ecs.0.insert_resource(input);
+    }
+
+    /// The player unit's ordered mine tile, if any.
+    pub fn player_mine_tile(&self) -> Option<TilePos> {
+        self.ecs
+            .0
+            .get_resource::<PlayerInput>()
+            .and_then(|input| input.mine_tile)
+    }
+
+    /// Total ore produced by the player unit (tutorial counter evidence).
+    pub fn player_mined_count(&self) -> i64 {
+        self.ecs
+            .0
+            .get_resource::<PlayerInput>()
+            .map(|input| input.mined)
+            .unwrap_or(0)
+    }
+
+    /// `InputHandler.canMine` for the player unit; `false` without one.
+    pub fn player_can_mine(&self, x: i16, y: i16) -> bool {
+        let Some(entity) = self.player_unit else {
+            return false;
+        };
+        let Some(runtime) = self.unit_runtime() else {
+            return false;
+        };
+        crate::ai::types::player::can_mine_tile(
+            &self.ecs.0,
+            &runtime.grid,
+            &runtime.content,
+            entity,
+            TilePos::new(x, y),
+        )
     }
 
     /// Spawns the controlled player unit (`CoreBlock.playerSpawn` with the core
@@ -473,7 +520,7 @@ pub fn unit_update_system(world: &mut World) {
         if slot.kind == AiKind::Player {
             // `Player` possession: the host-uploaded axis drives the unit
             // (`DesktopInput.updateMovement`); no target acquisition or pathing.
-            crate::ai::types::player::update_player(world, &runtime.content, entity);
+            crate::ai::types::player::update_player(world, &runtime.grid, &runtime.content, entity);
         } else {
             // `GroundAI.updateMovement`/`FlyingAI`: pick a core/building anchor
             // and an in-range mount target. Spawned wave units have no command,

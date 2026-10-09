@@ -1243,6 +1243,22 @@ impl MindSimHost {
         self.sim.player_unit_position()
     }
 
+    /// `InputHandler.canMine` for the player unit (world-input seam).
+    pub fn player_can_mine(&self, x: i16, y: i16) -> bool {
+        self.sim.player_can_mine(x, y)
+    }
+
+    /// The player unit's ordered mine tile (world-input seam).
+    pub fn player_mine_target(&self) -> Option<(i16, i16)> {
+        self.sim.player_mine_tile().map(|tile| (tile.x(), tile.y()))
+    }
+
+    /// Sets/clears the player mine order (`tryBeginMine`/`tryStopMine`).
+    pub fn set_player_mine(&mut self, tile: Option<(i16, i16)>) {
+        self.sim
+            .set_player_mine_tile(tile.map(|(x, y)| mind_core::world::TilePos::new(x, y)));
+    }
+
     /// Spawns the campaign player unit at the best core (`CoreBlock.playerSpawn`
     /// → `UnitTypes.alpha`, rotation 90). Idempotent per world load.
     #[func]
@@ -1273,6 +1289,21 @@ impl MindSimHost {
     #[func]
     pub fn player_unit_moved(&self) -> bool {
         self.sim.player_unit_moved()
+    }
+
+    /// The player unit's ordered mine tile as `[x, y]`, or `[]` when idle.
+    #[func]
+    pub fn player_mine_tile(&self) -> Vec<i32> {
+        self.sim
+            .player_mine_tile()
+            .map(|tile| vec![tile.x() as i32, tile.y() as i32])
+            .unwrap_or_default()
+    }
+
+    /// Total ore produced by the player unit (tutorial counter evidence).
+    #[func]
+    pub fn player_mined_count(&self) -> i64 {
+        self.sim.player_mined_count()
     }
 
     /// Read-only world grid for the plan-16 floor/block bakers.

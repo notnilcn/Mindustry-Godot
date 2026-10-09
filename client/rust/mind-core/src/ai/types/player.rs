@@ -18,12 +18,16 @@ use bevy_ecs::resource::Resource;
 use bevy_ecs::world::World;
 
 use crate::content::ContentRegistry;
-use crate::entities::comp::unit::comp::{PhysicsComp, StatusComp, UnitCore};
+use crate::entities::comp::unit::comp::{
+    ItemsComp, MinerComp, PhysicsComp, StatusComp, UnitCore, UnitTypeComp,
+};
 use crate::entities::comp::{Pos, Vel};
+use crate::world::{TilePos, WorldGrid};
 
-use super::ground::normalize_angle;
+use super::ground::{normalize_angle, tile_center};
 
-/// Host-uploaded player movement axis (`Core.input.axis(Binding.moveX/Y)`).
+/// Host-uploaded player movement axis (`Core.input.axis(Binding.moveX/Y)`) plus
+/// the mining order state (`InputHandler.tryBeginMine` + `MinerComp.mineTimer`).
 #[derive(Resource, Debug, Clone, Copy, Default)]
 pub struct PlayerInput {
     /// Horizontal axis in `[-1, 1]` (positive = east).
@@ -32,12 +36,23 @@ pub struct PlayerInput {
     pub axis_y: f32,
     /// Latched once a non-zero axis reached a player unit (hint trigger).
     pub moved: bool,
+    /// Ordered mine tile (`Player.unit().mineTile` via `tryBeginMine`).
+    pub mine_tile: Option<TilePos>,
+    /// Mining progress in ticks (`MinerComp.mineTimer`).
+    pub mine_timer: f32,
+    /// Total ore produced by the player unit (evidence/hint hook).
+    pub mined: i64,
 }
 
 /// Runs one player-controller tick for `entity`; returns `true` when a non-zero
 /// axis was applied this tick (`HintsFragment.desktopMove` trigger).
-pub fn update_player(world: &mut World, content: &ContentRegistry, entity: Entity) -> bool {
-    let Some(input) = world.get_resource::<PlayerInput>().copied() else {
+pub fn update_player(
+    world: &mut World,
+    grid: &WorldGrid,
+    content: &ContentRegistry,
+    entity: Entity,
+) -> bool {
+    let Some(mut input) = world.get_resource::<PlayerInput>().copied() else {
         return false;
     };
     let Some(mut pos) = world.get::<Pos>(entity).copied() else {
@@ -114,10 +129,136 @@ pub fn update_player(world: &mut World, content: &ContentRegistry, entity: Entit
     if let Some(mut stored) = world.get_mut::<UnitCore>(entity) {
         *stored = core;
     }
-    if moving && let Some(mut stored) = world.get_resource_mut::<PlayerInput>() {
-        stored.moved = true;
+    // `MinerComp.update`: progress the ordered mine tile and yield the ore.
+    update_mining(world, grid, content, entity, &mut input);
+    if moving {
+        input.moved = true;
     }
+    world.insert_resource(input);
     moving
+}
+
+/// `InputHandler.canMine`: the tile holds a drop the unit's tier can mine
+/// (`core/src/mindustry/input/InputHandler.java:2045`).
+pub fn can_mine_tile(
+    world: &World,
+    grid: &WorldGrid,
+    content: &ContentRegistry,
+    entity: Entity,
+    tile: TilePos,
+) -> bool {
+    let Some(def) = world
+        .get::<UnitTypeComp>(entity)
+        .and_then(|comp| content.unit(comp.type_id))
+    else {
+        return false;
+    };
+    let (tx, ty) = (tile.x() as i32, tile.y() as i32);
+    if tx < 0 || ty < 0 || tx >= grid.width() || ty >= grid.height() {
+        return false;
+    }
+    // `validMine`: wall drop or ore-overlay drop.
+    let cell = grid.tiles.get(tx, ty);
+    let drop = cell
+        .drop(content)
+        .or_else(|| content.block(cell.overlay).and_then(|def| def.item_drop));
+    let Some(item) = drop else {
+        return false;
+    };
+    // Tier gate (`CanMine`: drop hardness <= mine tier).
+    content.item(item).map(|def| def.hardness).unwrap_or(0) <= def.mine_tier
+}
+
+/// `MinerComp.update`: validate the ordered tile, advance the mine timer and
+/// add the ore drop to the unit's inventory.
+///
+/// Ports `core/src/mindustry/entities/comp/MinerComp.java:68-122` (core
+/// transfer/offload branches are plan-08/12 logistics; the tutorial's counter
+/// counts production, so the produced count is tracked here).
+fn update_mining(
+    world: &mut World,
+    grid: &WorldGrid,
+    content: &ContentRegistry,
+    entity: Entity,
+    input: &mut PlayerInput,
+) {
+    let Some(tile) = input.mine_tile else {
+        set_mining(world, entity, None, false);
+        return;
+    };
+    if !can_mine_tile(world, grid, content, entity, tile) {
+        clear_mine_order(input);
+        set_mining(world, entity, None, false);
+        return;
+    }
+    let Some(def) = world
+        .get::<UnitTypeComp>(entity)
+        .and_then(|comp| content.unit(comp.type_id))
+    else {
+        return;
+    };
+    let (tx, ty) = (tile.x() as i32, tile.y() as i32);
+    let cell = grid.tiles.get(tx, ty);
+    let Some(item) = cell
+        .drop(content)
+        .or_else(|| content.block(cell.overlay).and_then(|def| def.item_drop))
+    else {
+        return;
+    };
+    let hardness = content.item(item).map(|def| def.hardness).unwrap_or(0);
+    let Some(pos) = world.get::<Pos>(entity).copied() else {
+        return;
+    };
+    let (cx, cy) = tile_center(tx, ty);
+    let range = def.mine_range.max(40.0);
+    if (cx - pos.x).powi(2) + (cy - pos.y).powi(2) > range * range {
+        // Keep the order; the unit is not in range yet.
+        set_mining(world, entity, Some(tile), false);
+        return;
+    }
+    // Single-stack inventory (`acceptsItem`): another item or a full stack
+    // cancels the order (upstream clears `mineTile`).
+    let items = world.get::<ItemsComp>(entity).copied().unwrap_or_default();
+    let capacity = def.item_capacity.max(1);
+    let accepted = match items.item {
+        None => true,
+        Some((held, amount)) => held == item && amount < capacity,
+    };
+    if !accepted {
+        clear_mine_order(input);
+        set_mining(world, entity, None, false);
+        return;
+    }
+    // `rate = Time.delta * mineSpeed`; threshold `50 + hardness*15` or `50+15`.
+    input.mine_timer += def.mine_speed.max(0.0);
+    let threshold = 50.0
+        + if def.mine_hardness_scaling {
+            hardness as f32 * 15.0
+        } else {
+            15.0
+        };
+    if input.mine_timer >= threshold {
+        input.mine_timer = 0.0;
+        input.mined += 1;
+        if let Some(mut stored) = world.get_mut::<ItemsComp>(entity) {
+            stored.add_item(item, 1);
+        }
+    }
+    set_mining(world, entity, Some(tile), true);
+}
+
+/// Clears the ordered tile and timer.
+fn clear_mine_order(input: &mut PlayerInput) {
+    input.mine_tile = None;
+    input.mine_timer = 0.0;
+}
+
+/// Writes the unit's `MinerComp` state (`mineTile`/`mining`).
+fn set_mining(world: &mut World, entity: Entity, tile: Option<TilePos>, mining: bool) {
+    if let Some(mut stored) = world.get_mut::<MinerComp>(entity) {
+        stored.mine_tile = tile;
+        stored.mining = mining;
+    }
 }
 
 /// `Angles.moveToward`: shortest signed angular step toward `to`.
@@ -161,6 +302,43 @@ mod tests {
         let pos = sim.player_unit_position().expect("player position");
         assert!(pos.0 > 100.0, "player moved east: {pos:?}");
         assert!(sim.player_unit_moved(), "moved flag latched");
+    }
+
+    #[test]
+    fn player_mines_an_ore_overlay() {
+        let mut sim = Sim::new(
+            1,
+            64,
+            64,
+            crate::content::BlockId::AIR,
+            crate::content::BlockId::AIR,
+        );
+        let Ok(()) = sim.install_unit_runtime() else {
+            panic!("unit runtime installs");
+        };
+        let Some(ore) = sim
+            .unit_runtime()
+            .and_then(|runtime| runtime.content.block_id("ore-copper"))
+        else {
+            panic!("ore-copper exists");
+        };
+        let index = sim.grid.tiles.index(12, 12);
+        sim.grid.tiles.geti_mut(index).overlay = ore;
+        sim.refresh_unit_runtime();
+        let Some(_entity) = sim.spawn_player_unit("alpha", 0, 100.0, 100.0, 0.0) else {
+            panic!("player unit spawns");
+        };
+        sim.set_player_mine_tile(Some(crate::world::TilePos::new(12, 12)));
+        for _ in 0..40 {
+            let Ok(()) = sim.tick() else {
+                panic!("tick");
+            };
+        }
+        assert!(
+            sim.player_mined_count() >= 1,
+            "mined {}",
+            sim.player_mined_count()
+        );
     }
 
     #[test]
