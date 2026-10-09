@@ -13,7 +13,7 @@ preconditions:
   - Port research persists across launches; call `MindCampaign.clear_research()`
     before a fresh launch (see open-godot-mcp-learnings.md).
 tools: [godot_exec, godot_input, godot_game, godot_screenshot, godot_log]
-last_verified: 2026-10-10 commit pending (runs/20261009-164959-PAR-0049/, pid 320985)
+last_verified: 2026-10-10 twin run runs/20261010-060551-PAR-0049-twin/ (pid 421467, commit bfc640a / lib fa9afe0) - replayed fresh end-to-end; writer leg runs/20261009-164959-PAR-0049/ (pid 320985)
 ---
 
 # ground-zero-conveyor-line
@@ -99,3 +99,33 @@ Core: 0/5 Copper) completes; objective 3 becomes current`. Java side:
   set and one to settle; resolve the target row in a later eval.
 - Eval errors pin the frame loop: recover with `godot_game stop` + `play` and
   replay from step 1 (the fork is not saved).
+
+## Twin verification (2026-10-10, PAR-0049 twin)
+
+Replayed the whole chain fresh on the final lib (`runs/20261010-060551-PAR-0049-twin/`,
+runtime pids 418995 -> 420222 -> 421467, recorded pid 421467). Path: `clear_research()` +
+`clear_planet_campaign_saves("serpulo")` -> `SimHost.load_sector("serpulo",15)` ->
+`MindCampaign.start_sector("serpulo",15)` -> `step(3)` -> `set_menu_visible(false)` -> `q` ->
+ore `(832,388)` -> mine `[137,53]` -> obj0 true; R04 research-row `(660,237)` click -> Escape ->
+palette reload -> Production `(1123,405)` -> `block-mechanical-drill` `(866,403)` -> place
+`(784,436)` -> obj1 true (the placement click had to be re-sent once; judge from the objective
+state, not the preview). R05: Distribution `(1069,459)` -> `block-conveyor` `(866,403)` ->
+rotation 1 -> one wheel-up press = 2 (west) -> row `(768,388)(736,388)(704,388)(672,388)` ->
+wheel-down = 1 -> corner `(640,388)` -> wheel-up = 2 -> `(640,356)`.
+
+Verified in the world dump (stash `get_state_json()` in a meta, scan slices; build_count
+61->68): `135..132,53 rot 2`, `131,53 rot 1`, `131,54 rot 2`; obj0/obj1/obj2 true, obj3 active.
+`obj2` (`CoreItem 5`) stayed false through minutes of mining + an idle placed drill and only
+flipped once the line connected - the belt-intake path is the completion source.
+
+Caveats from the twin run:
+
+- `campaign_views_json` times out (30 s, blacklisted) and `core_items_json` is **not a method**
+  on this lib (`Invalid call. Nonexistent function 'core_items_json (via call)' in base
+  'MindCampaign'`) - calling it pins the frame loop (recover `stop`+`play`). Do not call
+  `core_items_json` in the port; use `get_objective_state()` and the group counts.
+- The palette category buttons can be auto-renamed; resolve them by iterating the
+  `Categories` container (or read `placement._selected_category`), and the block buttons keep
+  their `block-<name>` names.
+- The drill/conveyor world sprites still render as `Wrong texture folder` placeholder labels
+  in this worktree (same in the writer's verified frame); the icons render fine.

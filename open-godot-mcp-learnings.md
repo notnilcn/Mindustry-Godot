@@ -1580,3 +1580,28 @@ those paths no longer exist, but the workarounds still apply.
 - Workaround: call `MindCampaign.clear_research()` (or clear_planet_research(planet))
   BEFORE stop+play + the sector launch, so the tutorial starts with the drill locked.
 - Run: `runs/20261009-164959-PAR-0049/`.
+
+## 2026-10-10 — PAR-0049 twin Godot leg: one eval combining `core_items_json` + `get_objective_state().slice()` timed out and pinned the loop
+
+- Symptom: after the tutorial ore click (pid 418995, mine [137,53]), the object-state probe
+  `{"pid": OS.get_process_id(), "core": str(c.call("core_items_json")), "obj0": str(c.call("get_objective_state").slice(0,600))}`
+  timed out (15 s); the follow-up probe also timed out (blocked); `godot_debugger sessions`
+  -> `paused: true` (break-on-error pin) while a trivial eval still answered (tick advancing
+  in between). The first call of this shape cannot be split from the culprit by the log alone;
+  `get_objective_state` alone (str(), no slice) and `clear_research`/`start_sector` had all
+  answered instantly earlier in the same session.
+- Workaround: recover with `godot_game stop` + `play` (new pid 420222, `paused:false`); the
+  replay restarts from `clear_research` + `clear_planet_campaign_saves` — do not call the combo
+  again; call `core_items_json` and `get_objective_state` separately and never `.slice()` the
+  result of `call()`.
+- Evidence: run `runs/20261010-060551-PAR-0049-twin/` (godot leg, pid 418995 -> 420222).
+
+- Follow-up 2026-10-10 (same PAR-0049 twin run, final investigation): the pin is caused by
+  **`core_items_json` not existing on `MindCampaign` in the final lib** — the game log records
+  `Invalid call. Nonexistent function 'core_items_json (via call)' in base 'MindCampaign'.`
+  and the errored eval trips break-on-error (the eval wrapper times out at 15 s while the loop
+  stays `paused: true`). Calling it alone reproduces the pin. `campaign_views_json` (the
+  documented slow one) timed out at 30 s WITHOUT pinning the loop. Both calls must be avoided;
+  use `MindCampaign.get_objective_state()` and `SimHost.get_group_counts()` for the R05-family
+  asserts. Same run also logged `Parameter "mesh" is null.` alongside the `Wrong texture
+  folder` world-sprite placeholder labels for the placed drill/conveyors (icons render fine).

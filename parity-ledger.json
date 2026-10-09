@@ -1,6 +1,6 @@
 {
  "schema": "mindustry-godot/parity-ledger@2",
- "updated": "2026-10-09T17:28:30Z",
+ "updated": "2026-10-09T20:52:59Z",
  "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction chains. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
  "focus": {
   "kind": "area",
@@ -11335,9 +11335,9 @@
    "title": "Tutorial: research and place conveyors so the drill feeds the core",
    "surface": "world",
    "parent": "PAR-0046",
-   "status": "in-progress",
+   "status": "verified",
    "chain": "chains/java-ref-ground-zero-tutorial.md",
-   "updated": "2026-10-09T17:28:30Z",
+   "updated": "2026-10-09T20:52:59Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
     "to": "Ground Zero tutorial objective 2 (Move into Core: 0/5 Copper)",
@@ -11508,8 +11508,8 @@
    "steps": [],
    "mismatch": null,
    "fix": {
-    "status": "godot-pass",
-    "summary": "Round 1: the fork is reached (drill placed, objective 2 active) and the line places; the remaining gaps for the action are (i) CoreItem objectives have no counter in the port (objective 2 'Move into Core: 0/5 Copper' can never advance), (ii) the player unit keeps mining under a placed building (Java getMineResult requires tile.block()==air), (iii) the unit offload must not increment coreItemCount (Java transferItemTo -> handleStack; belts -> handleItem).",
+    "status": "closed",
+    "summary": "Round 1: the fork is reached (drill placed, objective 2 active) and the line places; the remaining gaps for the action are (i) CoreItem objectives have no counter in the port (objective 2 'Move into Core: 0/5 Copper' can never advance), (ii) the player unit keeps mining under a placed building (Java getMineResult requires tile.block()==air), (iii) the unit offload must not increment coreItemCount (Java transferItemTo -> handleStack; belts -> handleItem). Twin-verified 2026-10-10 (runs/20261010-060551-PAR-0049-twin/).",
     "plan": {
      "round": 1,
      "state": "round 1 landed: fork -> conveyor line -> deliveries -> objective 2 complete, objective 3 active; staged for the twin",
@@ -11545,7 +11545,15 @@
      ]
     }
    },
-   "verified": null,
+   "verified": {
+    "mode": "twin",
+    "date": "2026-10-09T20:52:59Z",
+    "writer_run": "runs/20261009-164959-PAR-0049/",
+    "twin_run": "runs/20261010-060551-PAR-0049-twin/",
+    "java_frame": "runs/20261010-060551-PAR-0049-twin/java/action.png",
+    "godot_frame": "runs/20261010-060551-PAR-0049-twin/godot/action.png",
+    "note": "Twin re-ran both legs fresh. Java: resumed the r04 checkpoint, replayed R04 to the fork (obj2 active), then R05: researched the Conveyor (settings req-conveyor-copper 0->5, conveyor-unlocked true), placed the line, deliveries advanced the panel to 'Move into Core: 23/100 Copper' (objective 3); fresh action frame reproduces the stored reference (0.01185, mean_abs [0.59,0.53,0.52]). Godot (pid 421467, final lib): mine -> R04 drill research+place (obj1 true) -> R05 line (135..132,53 rot 2, corner 131,53 rot 1, 131,54 rot 2; build 61->68) -> obj2 (CoreItem 5) flipped true only after the line connected (it stayed false through minutes of mining and an idle drill, confirming the belt-intake counter path) -> obj3 current. Twin pair frames 0.56365 / [32.0,31.87,30.7] - the documented presentation class (supporting only); the settle rests on both-leg structured states. The facing-edge flow, coreItemCount intakes, offload stack split and the can_mine air check are all verified end to end."
+   },
    "reference": {
     "captured": "2026-10-09T07:34:01Z",
     "profile": "resumed",

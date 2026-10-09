@@ -15,7 +15,7 @@ preconditions:
     before forcing a fresh profile.
   - Java only: the Godot client stays down for the whole soak.
 tools: [computer-mcp_mouse_move, computer-mcp_click, computer-mcp_drag, computer-mcp_key_press, computer-mcp_key_down, computer-mcp_key_up, window_ctl.py, capture_screen.py]
-last_verified: R00-R06 recorded 2026-10-09 (runs/20261009-065416-ref-ground-zero); cold-boot R01 resume replay (twin) 2026-10-10 runs/20261009-150509-PAR-0037-twin (JVM pids 193769/197845, Java 2cd7aee)
+last_verified: R00-R06 recorded 2026-10-09 (runs/20261009-065416-ref-ground-zero); cold-boot R01 resume replay (twin) 2026-10-10 runs/20261009-150509-PAR-0037-twin (JVM pids 193769/197845, Java 2cd7aee); R05 twin replay 2026-10-10 runs/20261010-060551-PAR-0049-twin (JVM pid 404033; R04 replay + conveyor research + line + deliveries; fork 0.03936 / action 0.01185 vs stored refs)
 ---
 
 # java-ref-ground-zero-tutorial
@@ -454,3 +454,41 @@ recorded leg pid 277234).
    [1.22,1.09,0.91].
 4. **Quit:** Escape -> Save & Quit `(627,506)` -> OK `(726,456)` -> menu Quit
    `(305,598)`; JVM exits < 3 s.
+
+## Twin R05 replay — research + place conveyors, drill feeds the core (2026-10-10, PAR-0049 twin)
+
+Replayed R05 from the stored `checkpoints/r04-sector-serpulo-170.msav` after a cold boot.
+Run `runs/20261010-060551-PAR-0049-twin/` (JVM pid 404033; client +50+98; stored fork/action
+refs reproduced: fork `0.03936` / mean_abs [2.76,2.84,3.16]; action `0.01185` / [0.59,0.53,0.52]).
+
+0. **The r04 checkpoint is the PRE-placement fork, not post-R04.** Resume
+   (`Play (280,247)` -> `Campaign (527,249)` -> GZ hex `(626,420)` -> `Go (626,714)`, 13 s) opens
+   objective 1 `Build: 1x Mechanical Drill` with the empty gold marker
+   (`java/step-09-resume.png`). The R04 fast-forward must run first: the drill is already
+   `mechanical-drill-unlocked true` in `settings.bin`, so the pane shows it; click the drill
+   button `(929,524)` -> hover/click the marker `(832,545)` -> objective 2
+   `Move into Core: 0/5 Copper` (`java/r04-placed.png`). The R04 research click
+   (`(628,493)` core node, `(490,410)` drill node) is only needed when the profile was reset.
+1. **Profile for the R05 action** (read offline with a no-save `arc.Settings` reader): the
+   conveyor must be locked/affordable — `req-conveyor-copper 0`, `conveyor-unlocked false`
+   (the soak's post-R04 state already is).
+2. **Conveyor node hunt (the slow part).** The recorded table's two drags
+   (`(800,300)->(420,300)`, `(150,300)->(1100,300)`, content follows the pointer)
+   did NOT land the node at `(61,311)` this time; the dialog keeps its last pan across
+   close/reopen. The node is a gold belt icon hanging **above the root's horizontal bus**
+   (root `Core: Shard` on the bus; `Ground Zero`/copper hang below it); it is left of the
+   root by ~2 child positions. Found after a right-pan sweep; hover shows
+   `Conveyor / Copper 5 / 5 / Transports items forward.` — always verify the popup before
+   clicking. Click spends 5 copper (`settings req-conveyor-copper 0->5`,
+   `conveyor-unlocked false->true`) and reveals the junction child above
+   (`java/r05-29-researched.png`).
+3. **Line** exactly as the recorded table: Escape -> `.` (distribution + conveyor auto-selected,
+   `Conveyor / Key [3,1]`) -> one `scroll(0,-2)` rotates one 90 degree step; verify the arrow
+   (W) before the row: clicks `(785,433)(753,433)(721,433)(689,433)` + corner `(817,433)`;
+   `scroll(0,-2)` -> N -> `(817,497)(817,465)` (`java/r05-33-row.png`, `java/r05-35-line.png`).
+   Nuggets ride the belt immediately; the panel advances to `Move into Core: 23/100 Copper`
+   (objective 3) with the "Expand the mining operation." prompt in ~25 s (`java/action.png`).
+4. **Quit**: Escape -> `Save & Quit (626,508)` -> OK `(726,456)` -> menu Quit `(305,598)`; JVM
+   exits. Hiccup: computer-mcp clicks do not land while the Godot editor holds X focus — focus
+   the client first (EWMH `_NET_ACTIVE_WINDOW` + `set_input_focus`, then one-shot pynput;
+   helper `java_input.py` in the run dir; see `computer-mcp-learnings.md` 2026-10-10).

@@ -559,3 +559,37 @@ displays); those paths no longer exist, but the workarounds still apply.
   the r02 checkpoint resumes mid-S (its autosave fired after the S hold) — not at the
   copper field.
 - Run: `runs/20261009-162304-PAR-0046-twin/` (JVM pids 270950/273720/275387/277234).
+
+## 2026-10-10 — PAR-0049 twin Java leg: clicks never landed while the Godot editor held focus (`_NET_ACTIVE_WINDOW` stayed on the editor)
+
+- Symptom: after a fresh Java launch + `window_ctl.py raise/resize/move` (client +50+98 1152x648,
+  JVM pid 404033), five Play clicks (2× `click`, 1× `button_down`+`button_up`, 1× one-shot pynput
+  120 ms) left the main menu byte-stable. `_NET_CLIENT_LIST_STACKING` showed Mindustry on top, but
+  `_NET_ACTIVE_WINDOW` and the input focus stayed on the Godot editor (0x6800002); one `click`
+  response reported `mouse_position (1783,51)` although the preceding `mouse_move` read back
+  (280,247) — the focus-click race from the tool description.
+- Failing calls: `computer-mcp.click {"button":"left"}` after `computer-mcp.mouse_move
+  {"x":280,"y":247}`; `computer-mcp.set_window_topmost {"hwnd":113246228,"topmost":true}` →
+  `{"error":"Window management not yet implemented for Linux"}`. `window_ctl.py raise` stacks but
+  does not focus.
+- Workaround (worked): switch focus from python-xlib first — send the EWMH `_NET_ACTIVE_WINDOW`
+  ClientMessage to root, `client.set_input_focus(X.RevertToParent, X.CurrentTime)`, `d.sync()`;
+  verify `_NET_ACTIVE_WINDOW == 0x6c00014`, then move+press/release with a one-shot pynput
+  `Controller` (press/release 120 ms apart). With focus switched, the very next click opened the
+  Play submenu. Kept as `java/java_input.py` in the run dir (focus + move/click/key/scroll).
+- Evidence: `runs/20261010-060551-PAR-0049-twin/java/step-01..06-*.png` (menu unchanged),
+  `/tmp/par0049-play-focus.png` (submenu open after the focus switch).
+
+## 2026-10-10 — PAR-0049 twin Java leg: the R05 Conveyor node is view-relative; the recorded pan table did not reproduce it
+
+- The soak's R05 table (`pan drag (800,300)->(420,300)` then `(150,300)->(1100,300)`, node at
+  image (61,311)) landed elsewhere on the twin replay (the dialog keeps its last pan across
+  close/reopen, and the same drags land a different content offset). Finding the `Conveyor`
+  node took a long manual pan sweep; the only reliable identification is the hover popup
+  (`Conveyor / Copper 5 / 5 / Transports items forward.`) and the gold belt icon hanging
+  above the root's horizontal bus, ~2 child positions left of the `Ground Zero`/copper chain.
+  Budget for the hunt or seek the node visually; do not trust a single pan replay.
+- Also: `.` did not always switch the picker category (regression unknown, maybe a focus
+  effect) - the recorded `.` flow did work after the tree was closed from the same state.
+- Run: `runs/20261010-060551-PAR-0049-twin/` (`java/r05-29-researched.png`, node hover
+  `java/sweep/conveyor-hover.png`).
