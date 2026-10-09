@@ -11,6 +11,7 @@ Examples:
     window_ctl.py list
     window_ctl.py raise Mindustry
     window_ctl.py move Mindustry 40 40
+    window_ctl.py unmaximize Mindustry      # before resize when maximized
     window_ctl.py resize Mindustry 1152 648
 
 Run it with a python that has python-xlib (the computer-mcp uv-tool python
@@ -23,7 +24,7 @@ import argparse
 import sys
 
 try:
-    from Xlib import X, display
+    from Xlib import X, display, protocol
 except ImportError:  # pragma: no cover - environment guard
     sys.exit("python-xlib is missing; run with the computer-mcp uv-tool python")
 
@@ -61,6 +62,7 @@ def main() -> int:
         ("raise", "stack the window above its siblings (unobscure)"),
         ("move", "move the window to x y"),
         ("resize", "resize the window to width height"),
+        ("unmaximize", "remove the maximized WM state so resize takes effect"),
     ):
         p = sub.add_parser(name, help=helptext)
         p.add_argument("title", help=MATCH_HELP)
@@ -113,6 +115,20 @@ def main() -> int:
             win.configure(x=args.x, y=args.y)
         elif args.action == "resize":
             win.configure(width=args.width, height=args.height)
+        elif args.action == "unmaximize":
+            # A maximized window ignores XConfigureWindow; ask the WM to drop
+            # the state first (same message a titlebar double-click sends).
+            atom = d.intern_atom("_NET_WM_STATE")
+            state = [
+                d.intern_atom("_NET_WM_STATE_MAXIMIZED_HORZ"),
+                d.intern_atom("_NET_WM_STATE_MAXIMIZED_VERT"),
+            ]
+            event = protocol.event.ClientMessage(
+                window=win, client_type=atom, data=(32, [0, *state, 1, 0])
+            )
+            root.send_event(
+                event, event_mask=X.SubstructureRedirectMask | X.SubstructureNotifyMask
+            )
         d.sync()
         geo = win.get_geometry()
         print(

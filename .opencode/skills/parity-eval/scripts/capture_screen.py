@@ -75,32 +75,41 @@ def window_rect(title: str) -> tuple[int, int, int, int] | None:
 
 
 def find_window(title: str):
-    """Return (display, window) for the first WM_NAME match, or (display, None)."""
+    """Return (display, window) for the best WM_NAME match, or (display, None).
+
+    An exact (case-insensitive) title wins over a substring match so a helper
+    window whose title merely contains the game name (a terminal running the
+    parity session, for example) cannot shadow the game window.
+    """
     display = Xlib.display.Display()
-    found = None
+    exact = None
+    partial = None
 
     def walk(win) -> None:
-        nonlocal found
-        if found is not None:
+        nonlocal exact, partial
+        if exact is not None:
             return
         try:
             name = win.get_wm_name()
             geom = win.get_geometry()
             if (
                 name
-                and title.lower() in str(name).lower()
                 and geom.width >= MIN_WINDOW_SIZE
                 and geom.height >= MIN_WINDOW_SIZE
             ):
-                found = win
-                return
+                sname = str(name)
+                if sname.lower() == title.lower():
+                    exact = win
+                    return
+                if partial is None and title.lower() in sname.lower():
+                    partial = win
             for child in win.query_tree().children:
                 walk(child)
         except Exception:  # noqa: BLE001 - broken/unmapped windows are skipped
             return
 
     walk(display.screen().root)
-    return display, found
+    return display, exact if exact is not None else partial
 
 
 def capture_window(title: str):
