@@ -1148,6 +1148,30 @@ those paths no longer exist, but the workarounds still apply.
   `paused: false` afterwards and later evals answered. Avoid the campaign-views
   endpoint in eval; read `get_sector_state()` plus the dialog's
   RichTextLabel/Label text instead.
+- Recurrence (godot-walk-s1, `runs/20261009-085712-PAR-0037/`, pid 78152): a
+  follow-up eval doing `JSON.parse_string(campaign_views_json(...))` + a
+  `for` loop over `sectors` timed out after 15 s and this time tripped
+  break-on-error — `godot_debugger sessions` showed `paused: true` and the
+  frame loop pinned. Same rule applies: keep `campaign_views_json` out of
+  eval bodies (parse the dialog's own labels), and recover with
+  `godot_game stop` + `play` (`resume` re-breaks).
+- Recurrence 2 (same session/run, pid 80031): even a plain
+  `menu.find_children("*","Button",true,false).filter(...)` + `for` loop with
+  `get_path_to`/`get_global_rect` per button timed out and pinned the loop
+  again. Treat *any* eval body that builds a list with a loop as unsafe on
+  this host; query one known node per eval (`get_children()[i]`, single
+  `get_global_rect().get_center()`) or use native `.map` on a filtered array
+  if a list is unavoidable.
+- Recurrence 3 (same session/run, pid 96741): `JSON.parse_string(get_state_json())`
+  plus `tiles.filter(...)` over the sparse tile list timed out and pinned the
+  loop. The full state dump is megabytes; never parse+filter it inside an eval.
+  Query tile info through a purpose-built endpoint or a `step`-free
+  targeted check instead. Recovery remains `godot_game stop` + `play` (the
+  resumed sector is re-created by the scripted prefix in ~4 calls).
+- Resolve button centers **after** `PlanetDialog._show_planet()` in a *later*
+  eval: calling `_show_planet` and resolving the sector-panel action in one
+  eval returns pre-sort coordinates (Go read as (93,652) once). The deferred
+  `sort_now` needs a frame; a second eval gives the settled (576,613).
 - The planet dialog sector panel exposes raw bundle markup in
   `RichTextLabel.text` (`[scarlet]Under attack!`,
   `[red]:warning:[accent] Sector currently under attack...`) and renders it
