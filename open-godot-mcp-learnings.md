@@ -1202,6 +1202,13 @@ those paths no longer exist, but the workarounds still apply.
   fragment `_ready` that hides its own root. Collapse an inner child (e.g.
   `placement`'s `Panel`) instead of the fragment root. Run:
   `runs/20261009-085712-PAR-0037/` (round 5).
+- gdext 0.5 enum paths are module-scoped, not class-nested:
+  `godot::classes::canvas_item::TextureFilter::NEAREST` compiles while
+  `godot::classes::CanvasItem::TextureFilter` fails with E0223 (cost one
+  build+editor cycle in round 7). `CanvasItem.texture_filter` is inherited by
+  children (`PARENT_NODE`), so setting it once on `MindWorldRenderer` covers
+  every band mesh; at integer camera positions nearest vs linear renders
+  identically (sub-pixel sampling only).
 - The planet dialog sector panel exposes raw bundle markup in
   `RichTextLabel.text` (`[scarlet]Under attack!`,
   `[red]:warning:[accent] Sector currently under attack...`) and renders it
