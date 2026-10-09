@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@2",
-  "updated": "2026-10-09T07:09:30Z",
+  "updated": "2026-10-09T07:12:30Z",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction chains. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -9466,6 +9466,179 @@
       },
       "verified": null,
       "note": "Revealed by R01. Action not mirrored yet."
+    },
+    {
+      "id": "PAR-0044",
+      "title": "Campaign world: WASD movement (hint transition + camera follow)",
+      "surface": "world",
+      "parent": "PAR-0028",
+      "status": "reference",
+      "chain": "chains/java-ref-ground-zero-tutorial.md",
+      "updated": "2026-10-09T07:12:30Z",
+      "discovered_by": "runs/20261009-065416-ref-ground-zero/",
+      "path": {
+        "to": "Ground Zero tutorial start (objective Obtain: 0/15 Copper)",
+        "java": [
+          {
+            "tool": "computer-mcp_key_down+key_up",
+            "params": {
+              "key": "s",
+              "note": "hold 900 ms (busy-wait between the two calls) -> mech moves south"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r02-01-move.png",
+              "note": "south view: plateau edge, hint advanced to 'Scroll to zoom in or out.'"
+            }
+          },
+          {
+            "tool": "computer-mcp_key_down+key_up",
+            "params": {
+              "key": "w",
+              "note": "hold 900 ms -> moves back north toward the copper field"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r02-04-after-w.png"
+            }
+          }
+        ],
+        "godot": [],
+        "confirm": {
+          "java": "runs/20261009-065416-ref-ground-zero/java/r02-00-before.png (hint 'Use [WASD] to move.')",
+          "godot": "HudGroup visible"
+        },
+        "last_replayed": "runs/20261009-065416-ref-ground-zero/"
+      },
+      "run": "runs/20261009-065416-ref-ground-zero/",
+      "reproduce": {
+        "java": [
+          {
+            "tool": "computer-mcp_key_down+key_up",
+            "params": {
+              "key": "s",
+              "note": "hold 900 ms (busy-wait between the two calls) -> mech moves south"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r02-01-move.png",
+              "note": "south view: plateau edge, hint advanced to 'Scroll to zoom in or out.'"
+            }
+          },
+          {
+            "tool": "computer-mcp_key_down+key_up",
+            "params": {
+              "key": "w",
+              "note": "hold 900 ms -> moves back north toward the copper field"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r02-04-after-w.png"
+            }
+          }
+        ],
+        "godot": [],
+        "compare": []
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open"
+      },
+      "verified": null,
+      "reference": {
+        "captured": "2026-10-09T07:11:09Z",
+        "profile": "resumed",
+        "run": "runs/20261009-065416-ref-ground-zero/",
+        "frames": {
+          "fork": "runs/20261009-065416-ref-ground-zero/java/r02-00-before.png",
+          "action": "runs/20261009-065416-ref-ground-zero/java/r02-04-after-w.png",
+          "support": [
+            "runs/20261009-065416-ref-ground-zero/java/r02-01-move.png",
+            "runs/20261009-065416-ref-ground-zero/java/r02-02-move-retake.png",
+            "runs/20261009-065416-ref-ground-zero/java/r02-03-stable.png"
+          ]
+        },
+        "settle": [
+          {
+            "after": "hold S",
+            "wait_ms": 900,
+            "note": "key_down s -> busy-wait -> key_up"
+          },
+          {
+            "after": "S release",
+            "wait_ms": 1200,
+            "note": "r02-01; +2 s retake r02-02 (same view); r02-03 at +60 s shows the camera settled (frame_diff 0.043 vs r02-01)"
+          },
+          {
+            "after": "hold W",
+            "wait_ms": 900
+          },
+          {
+            "after": "W release",
+            "wait_ms": 1200,
+            "note": "r02-04 (recorded): back at the copper field, hint still the zoom hint"
+          }
+        ],
+        "expected": {
+          "bundle": [
+            "hint.desktopMove",
+            "hint.zoom"
+          ],
+          "hint_before": "Use [WASD] to move. (hint.desktopMove, bundle.properties:2340)",
+          "hint_after": "Scroll to zoom in or out. (hint.zoom, bundle.properties:2341)",
+          "prompt": "Move near the copper ore on the ground and click to begin mining. (unchanged)",
+          "objective": "Obtain: 0/15 Copper (unchanged)",
+          "observation": "the camera follows the player; after 900 ms of S the view showed the snow plateau edge south of the field; 900 ms of W returned to the copper field (r02-04 vs r02-00 changed_fraction 0.48)"
+        },
+        "chain": "chains/java-ref-ground-zero-tutorial.md",
+        "checkpoint": "runs/20261009-065416-ref-ground-zero/checkpoints/r02-sector-serpulo-170.msav",
+        "checkpoint_note": "autosave mtime 17:11:01 (changed from R01's 17:07:02); copied before the next autosave",
+        "java_path": [
+          {
+            "tool": "computer-mcp_key_down+key_up",
+            "params": {
+              "key": "s",
+              "note": "hold 900 ms (busy-wait between the two calls) -> mech moves south"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r02-01-move.png",
+              "note": "south view: plateau edge, hint advanced to 'Scroll to zoom in or out.'"
+            }
+          },
+          {
+            "tool": "computer-mcp_key_down+key_up",
+            "params": {
+              "key": "w",
+              "note": "hold 900 ms -> moves back north toward the copper field"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r02-04-after-w.png"
+            }
+          }
+        ],
+        "note": "R02 reference soak. Movement landed (mech visible, camera follows, hint transitioned on first movement); both directions exercised (S then W) to prove the input and camera. Key hold: key_down + busy-wait + key_up in one execute call."
+      }
     }
   ]
 }

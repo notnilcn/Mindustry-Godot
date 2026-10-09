@@ -183,6 +183,30 @@ and the resumed frame is pixel-identical to the R00 tutorial start
 autosave was rewritten by Save & Quit (`sector-serpulo-170.msav` mtime 17:07:02
 vs R00's 17:02:30) → copied to `checkpoints/r01-sector-serpulo-170.msav`.
 
+## R02 — WASD movement (recorded 2026-10-09)
+
+Action: hold `S` 900 ms, then hold `W` 900 ms (both as `key_down` + busy-wait +
+`key_up` in one `execute` call). Reference frames: `java/r02-00-before.png`
+(fork: hint `Use [WASD] to move.`, objective 0), `java/r02-04-after-w.png`
+(recorded: back at the copper field, hint `Scroll to zoom in or out.`),
+supporting `r02-01-move.png` (south view after S), `r02-02` (retake), `r02-03`
+(camera settled, +60 s).
+
+| after | wait | frame |
+|---|---|---|
+| hold S (key_down → busy-wait 900 ms → key_up) | 1200 ms | r02-01 |
+| hold W (same) | 1200 ms | r02-04 (recorded) |
+
+Observed: the mech moves and the camera follows; the first movement advances
+the rotating hint from `hint.desktopMove` ("Use [WASD] to move.",
+bundle.properties:2340) to `hint.zoom` ("Scroll to zoom in or out.", :2341)
+while the prompt `Move near the copper ore on the ground and click to begin
+mining.` and objective 0 stay. 900 ms of S showed the snow plateau edge south
+of the field; 900 ms of W returned to the field (r02-04 vs r02-00: changed
+0.48). Camera stable at the new pose (r02-01 vs r02-03 at +60 s: changed
+0.043). Autosave `sector-serpulo-170.msav` mtime 17:11:01 (changed from
+17:07:02) → `checkpoints/r02-sector-serpulo-170.msav`.
+
 ## Wait marks
 
 | after | wait | why |
