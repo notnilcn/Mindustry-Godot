@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@2",
-  "updated": "2026-10-09T07:13:40Z",
+  "updated": "2026-10-09T07:18:30Z",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction chains. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -9781,6 +9781,442 @@
         ],
         "note": "R03 reference soak. The single ore click starts mining; the tutorial counter climbs fast (39 -> 74 in 6 s), objective 0 completes as soon as mined copper >= 15, and the panel switches to Build: 1x Mechanical Drill. No intermediate 'Obtain: N/15' frame was captured (by +3.5 s the objective had already advanced); the fork frame shows the pre-click 'Obtain: 0/15' state."
       }
+    },
+    {
+      "id": "PAR-0046",
+      "title": "Tutorial: research the Mechanical Drill, select it in the block picker, place it on copper",
+      "surface": "world",
+      "parent": "PAR-0028",
+      "status": "reference",
+      "chain": "chains/java-ref-ground-zero-tutorial.md",
+      "updated": "2026-10-09T07:18:30Z",
+      "discovered_by": "runs/20261009-065416-ref-ground-zero/",
+      "path": {
+        "to": "Ground Zero tutorial objective 1 (Build: 1x Mechanical Drill)",
+        "java": [
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 1024,
+              "y": 725,
+              "note": "tech tree icon in the bottom bar (image 974,627)"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r04-00-techtree.png"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 628,
+              "y": 493,
+              "note": "core node (image 578,395) - info only: Core: Shard / Researched"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 490,
+              "y": 410,
+              "note": "Mechanical Drill node (image 440,312, grey = selectable+affordable); desktop click spends immediately (ResearchDialog.java:483): copper -10"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r04-02-drillnode.png"
+            }
+          },
+          {
+            "tool": "computer-mcp_key_down/key_up",
+            "params": {
+              "key": "escape",
+              "note": "close the tech tree"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 933,
+              "y": 525,
+              "note": "Mechanical Drill block button in the bottom-right block picker (image 883,427)"
+            }
+          },
+          {
+            "tool": "computer-mcp_mouse_move",
+            "params": {
+              "x": 832,
+              "y": 545,
+              "note": "hover the tutorial's gold 2x2 target (image 782,447); preview confirmed with r04-04"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 832,
+              "y": 545,
+              "note": "place the drill"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r04-05-placed.png"
+            }
+          }
+        ],
+        "godot": [],
+        "confirm": {
+          "java": "runs/20261009-065416-ref-ground-zero/java/r04-03-world.png (world, objective 1 active)",
+          "godot": "HudGroup visible"
+        },
+        "last_replayed": "runs/20261009-065416-ref-ground-zero/"
+      },
+      "run": "runs/20261009-065416-ref-ground-zero/",
+      "reproduce": {
+        "java": [
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 1024,
+              "y": 725,
+              "note": "tech tree icon in the bottom bar (image 974,627)"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r04-00-techtree.png"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 628,
+              "y": 493,
+              "note": "core node (image 578,395) - info only: Core: Shard / Researched"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 490,
+              "y": 410,
+              "note": "Mechanical Drill node (image 440,312, grey = selectable+affordable); desktop click spends immediately (ResearchDialog.java:483): copper -10"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r04-02-drillnode.png"
+            }
+          },
+          {
+            "tool": "computer-mcp_key_down/key_up",
+            "params": {
+              "key": "escape",
+              "note": "close the tech tree"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 933,
+              "y": 525,
+              "note": "Mechanical Drill block button in the bottom-right block picker (image 883,427)"
+            }
+          },
+          {
+            "tool": "computer-mcp_mouse_move",
+            "params": {
+              "x": 832,
+              "y": 545,
+              "note": "hover the tutorial's gold 2x2 target (image 782,447); preview confirmed with r04-04"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 832,
+              "y": 545,
+              "note": "place the drill"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r04-05-placed.png"
+            }
+          }
+        ],
+        "godot": [],
+        "compare": []
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open"
+      },
+      "verified": null,
+      "reference": {
+        "captured": "2026-10-09T07:17:38Z",
+        "profile": "resumed",
+        "run": "runs/20261009-065416-ref-ground-zero/",
+        "frames": {
+          "fork": "runs/20261009-065416-ref-ground-zero/java/r04-03-world.png",
+          "action": "runs/20261009-065416-ref-ground-zero/java/r04-05-placed.png",
+          "support": [
+            "runs/20261009-065416-ref-ground-zero/java/r04-00-techtree.png",
+            "runs/20261009-065416-ref-ground-zero/java/r04-01-nodeinfo.png",
+            "runs/20261009-065416-ref-ground-zero/java/r04-02-drillnode.png",
+            "runs/20261009-065416-ref-ground-zero/java/r04-04-preview.png"
+          ]
+        },
+        "settle": [
+          {
+            "after": "click tree icon",
+            "wait_ms": 1800,
+            "note": "r04-00: tech tree; Planet Items 670 Copper"
+          },
+          {
+            "after": "click core node",
+            "wait_ms": 1200,
+            "note": "info panel Core: Shard / Researched"
+          },
+          {
+            "after": "click drill node",
+            "wait_ms": 1200,
+            "note": "spends 10 copper immediately (desktop); 670 -> 660"
+          },
+          {
+            "after": "Escape close",
+            "wait_ms": 1200
+          },
+          {
+            "after": "click drill block button",
+            "wait_ms": 900,
+            "note": "block info panel: Mechanical Drill / Key [2,1] / Copper 12"
+          },
+          {
+            "after": "hover gold target",
+            "wait_ms": 700,
+            "note": "r04-04: placement preview on the 2x2 target"
+          },
+          {
+            "after": "click place",
+            "wait_ms": 1500,
+            "note": "r04-05: drill placed; objective 1 clears"
+          }
+        ],
+        "expected": {
+          "bundle": [
+            "gz.research",
+            "objective 1 BuildCount mechanical-drill"
+          ],
+          "research_cost": "copper -10 (Blocks.java mechanicalDrill researchCost; UI: clicking a selectable locked node spends on desktop, ResearchDialog.java:483)",
+          "build_cost": "copper -12 (Category.production, 2x2)",
+          "objective_after": "Move into Core: 0/5 Copper (objective 2) with conveyor prompt",
+          "state": "drill placed on the highlighted copper patch; placement preview was on the gold 2x2 target before the click"
+        },
+        "chain": "chains/java-ref-ground-zero-tutorial.md",
+        "checkpoint": "runs/20261009-065416-ref-ground-zero/checkpoints/r04-sector-serpulo-170.msav",
+        "checkpoint_note": "autosave copied after the placement (mtime changed from R03's 17:13:02)",
+        "java_path": [
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 1024,
+              "y": 725,
+              "note": "tech tree icon in the bottom bar (image 974,627)"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r04-00-techtree.png"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 628,
+              "y": 493,
+              "note": "core node (image 578,395) - info only: Core: Shard / Researched"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 490,
+              "y": 410,
+              "note": "Mechanical Drill node (image 440,312, grey = selectable+affordable); desktop click spends immediately (ResearchDialog.java:483): copper -10"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r04-02-drillnode.png"
+            }
+          },
+          {
+            "tool": "computer-mcp_key_down/key_up",
+            "params": {
+              "key": "escape",
+              "note": "close the tech tree"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 933,
+              "y": 525,
+              "note": "Mechanical Drill block button in the bottom-right block picker (image 883,427)"
+            }
+          },
+          {
+            "tool": "computer-mcp_mouse_move",
+            "params": {
+              "x": 832,
+              "y": 545,
+              "note": "hover the tutorial's gold 2x2 target (image 782,447); preview confirmed with r04-04"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 832,
+              "y": 545,
+              "note": "place the drill"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r04-05-placed.png"
+            }
+          }
+        ],
+        "note": "R04 reference soak. The tech tree node click researches directly on desktop (no confirm button); the block picker appears in the bottom-right after the research (drill block button + category button), the info panel shows the drill stats, and the click at the gold 2x2 target places it. New fork items: PAR-0047 (tech tree dialog controls), PAR-0048 (block picker surface)."
+      }
+    },
+    {
+      "id": "PAR-0047",
+      "title": "Tech tree dialog: Back / Core Database / planet tab / node research click",
+      "surface": "world",
+      "parent": "PAR-0046",
+      "status": "seeded",
+      "chain": "chains/java-ref-ground-zero-tutorial.md",
+      "updated": "2026-10-09T07:18:30Z",
+      "discovered_by": "runs/20261009-065416-ref-ground-zero/",
+      "path": {
+        "to": "tech tree open (groundZero)",
+        "java": [],
+        "godot": [],
+        "confirm": {
+          "java": "runs/20261009-065416-ref-ground-zero/java/r04-00-techtree.png"
+        },
+        "last_replayed": null
+      },
+      "run": "runs/20261009-065416-ref-ground-zero/",
+      "reproduce": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "image_centers": {
+                "Back": [
+                  437,
+                  603
+                ],
+                "Core Database": [
+                  678,
+                  603
+                ],
+                "Serpulo tab": [
+                  578,
+                  33
+                ],
+                "node_click": "spends when selectable+affordable (desktop), else shows info on hover"
+              },
+              "screen": "image + (50,98)"
+            }
+          }
+        ],
+        "godot": [],
+        "compare": []
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open"
+      },
+      "verified": null,
+      "note": "Revealed by R04. Planet Items counter (top-left, 670 copper) and the researchable-node semantics recorded; Back/Core Database not yet mirrored."
+    },
+    {
+      "id": "PAR-0048",
+      "title": "Campaign world: block picker (bottom-right) - category button + block grid",
+      "surface": "world",
+      "parent": "PAR-0046",
+      "status": "seeded",
+      "chain": "chains/java-ref-ground-zero-tutorial.md",
+      "updated": "2026-10-09T07:18:30Z",
+      "discovered_by": "runs/20261009-065416-ref-ground-zero/",
+      "path": {
+        "to": "world after researching the drill",
+        "java": [],
+        "godot": [],
+        "confirm": {
+          "java": "runs/20261009-065416-ref-ground-zero/java/r04-04-preview.png"
+        },
+        "last_replayed": null
+      },
+      "run": "runs/20261009-065416-ref-ground-zero/",
+      "reproduce": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "image_centers": {
+                "drill_block_button": [
+                  883,
+                  427
+                ],
+                "category_button": [
+                  1076,
+                  427
+                ],
+                "info_panel_help": [
+                  1120,
+                  325
+                ]
+              },
+              "screen": "image + (50,98)"
+            }
+          }
+        ],
+        "godot": [],
+        "compare": []
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open"
+      },
+      "verified": null,
+      "note": "Revealed by R04 after the drill research: the PlacementFragment grid + category column become visible at the bottom-right, with a block info panel (name/key/cost/Drill Speed) and a '?' help button. Category icons/behavior not yet mirrored."
     }
   ]
 }

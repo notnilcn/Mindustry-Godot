@@ -225,6 +225,32 @@ objective 1 (`Build: 1x Mechanical Drill`) before the first capture — the
 pre-click `Obtain: 0/15` state is the fork frame. Autosave mtime 17:13:02
 (changed from 17:11:01) → `checkpoints/r03-sector-serpulo-170.msav`.
 
+## R04 — research + place the Mechanical Drill (recorded 2026-10-09)
+
+Action: tech tree → research Mechanical Drill → block picker → place on the
+gold 2×2 target. Fork `java/r04-03-world.png` (objective 1); action
+`java/r04-05-placed.png`; support `r04-00` (tree open), `r04-01` (Core: Shard
+researched), `r04-02` (after the drill research, copper 660), `r04-04`
+(placement preview).
+
+| image | screen | call | settle |
+|---|---|---|---|
+| (974,627) | (1024,725) | tech-tree icon in the bottom bar | 1800 ms |
+| (578,395) | (628,493) | core node | 1200 ms (info: Core: Shard / Researched) |
+| (440,312) | (490,410) | Mechanical Drill node | 1200 ms — spends 10 copper immediately (desktop click on a selectable+affordable locked node spends, ResearchDialog.java:483) |
+| — | — | Escape closes the tree | 1200 ms |
+| (883,427) | (933,525) | drill block button in the picker | 900 ms (block info: Key [2,1], Copper 12) |
+| (782,447) | (832,545) | hover the gold 2×2 target | 700 ms (placement preview, r04-04) |
+| (782,447) | (832,545) | click to place | 1500 ms (r04-05) |
+
+Observed: research costs `researchCost` copper 10 and building 12
+(`Blocks.java`); the block picker's grid + category column become visible in
+the bottom-right once the drill is unlocked; the drill is 2×2
+(`Category.production`) and the gold highlight marks the placement area. On
+placement the objective advances from `Build: 1x Mechanical Drill` to
+`Move into Core: 0/5 Copper` with the conveyor prompt. Autosave copied to
+`checkpoints/r04-sector-serpulo-170.msav`.
+
 ## Wait marks
 
 | after | wait | why |
