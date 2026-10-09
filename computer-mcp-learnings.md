@@ -377,3 +377,43 @@ displays); those paths no longer exist, but the workarounds still apply.
   rotation to the input. Evidence:
   `runs/l2-20261009-001432-ev0056-rotation-twin/java/notes.md`,
   `java/step-81.png`, `java/step-82-world.png`.
+
+## 2026-10-09 — single-display :10 Java leg: obscured window captures read black; resize keeps the old center
+
+- `godot_game play` maps/raises the Godot editor+game windows over `Mindustry`
+  on :10; after that `capture_screen.py --window-title Mindustry` returned
+  mean 1.3 / std 13.3 (byte-dark) while the JVM was alive — Xvfb keeps no
+  backing store, so the obscured X11 window reads back black. Raise Java
+  (`window_ctl.py raise Mindustry`) **immediately before every capture and
+  every click**; the next Godot play/status action re-raises the editor above it.
+- `window_ctl.py resize Mindustry 1152 648` from the 900x700 window keeps the
+  old centered origin (x=190) and pushes the right edge off-screen
+  (190+1152 > 1280); follow the resize with `window_ctl.py move Mindustry 45 69`.
+- Run: `runs/20261009-052658-seed-campaign/` (java step-00c black vs step-00d
+  good; corrected temporal calibration `diff/calib-java-temporal.json`).
+
+## 2026-10-09 — reference soak R00: the first click after a fresh launch is swallowed; client origin differs from the frame origin
+
+- On the xrdp Xorg `:10`, the R00 fast-forward batch (Play → Campaign → Serpulo
+  → OK → Launch as one `execute` call) left the main menu unchanged
+  (`runs/20261009-065416-ref-ground-zero/java/r00-01-launch.png`). The first
+  click delivered to the freshly launched GLFW window is consumed by
+  activation; every later click in the batch then hit a menu whose submenu had
+  never opened. Fix: verify the opening click with a `capture_screen.py` frame
+  and re-send it — the re-sent Play click opened the submenu
+  (`java/probe-click-play.png`). Chain updated with the wait that made it land.
+- `window_ctl.py move Mindustry 45 69` positions the **WM frame** at +45+69;
+  the client area is at **+50+98** (xfwm4 decorations +5/+29). Screen click
+  coords are `window image + capture region origin`
+  (`region [50,98,1152,648]` from `capture_screen.py`), not +45+69.
+- Fresh-profile prep: emptying `parity-java-home/.local/share/Mindustry/saves/`
+  is not enough to bring back Java's first-run `Select Starting Campaign`
+  chooser — the `campaignselect=true` flag persists in
+  `parity-java-home/.local/share/Mindustry/settings.bin`. Reset it offline
+  while the client is stopped (settings.bin backed up first), otherwise
+  Play > Campaign goes straight to the planet page.
+- Client reboot: a client that dies between rows must be relaunched with a
+  **fresh log file**, or the `until grep -q "Total time to load"` gate passes
+  on the old log instantly. The R00 soak log is
+  `runs/20261009-065416-ref-ground-zero/java/game.log`; the dead instance's log
+  is kept as `java/game-prerun.log`.
