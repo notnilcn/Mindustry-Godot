@@ -6,6 +6,14 @@ chain (or bump one to `verified`) after a run confirms the sequence. A chain
 covers one leg (Godot via `godot_*`; Java via `computer-mcp_*`) or both legs of
 a mirrored parity item.
 
+A chain has two kinds of sequence:
+
+- **Path (fast-forward)** — navigation to the item's fork, replayed back-to-back
+  per leg as one tool-call chain. It is not evidence: never capture or diff its
+  steps; confirm the fork once per leg and mirror what happens next.
+- **Steps (under test)** — the action(s) after the fork, mirrored one pair per
+  step and judged by the comparison gate.
+
 Generic MCP mechanics stay in the skills; this directory holds only what is
 specific to this project: which sequence enters a flow, which node/method to
 touch, which precondition is easy to miss.
@@ -21,6 +29,7 @@ touch, which precondition is easy to miss.
 
 | File | Chain |
 |---|---|
+| `seed-survey.md` | seed sweep: boot both clients → enumerate a surface → one ledger item per element → classify with one action pair |
 | `boot-and-identity.md` | editor bridge → `game.tscn` → runtime connected → pid stamp |
 | `golden-checksum.md` | `load_scenario` + `step(60)` + checksum vs committed golden |
 | `pause-step-interact.md` | pause, step, API and mouse place/break, input flush |
@@ -73,12 +82,14 @@ applies_when: when this sequence is the right one to run
 preconditions:
   - bridge up, runtime connected, display/env requirements
 tools: [godot_health, godot_editor_read, ...]
+path: none | one-line summary of the fast-forward this chain replays   # optional
 last_verified: <date> <commit> (<run dir>) | not yet
 ---
 ```
 
-Body sections: `## Steps` (exact tool + action + params, one step per call),
-`## Success signals`, `## Failure modes`, `## Variants`.
+Body sections: `## Path (fast-forward)` (optional; navigation only),
+`## Steps (under test)` (exact tool + action + params, one step per call, behind
+the gate), `## Success signals`, `## Failure modes`, `## Variants`.
 
 ## Rules
 
@@ -90,6 +101,14 @@ Body sections: `## Steps` (exact tool + action + params, one step per call),
 - **Steps are exact.** Tool name, action, and the parameter JSON that worked.
   No prose-only sequences, no hardcoded click coordinates — resolve controls
   through `get_global_rect().get_center()`.
+- **The path is not evidence.** A `## Path` replays navigation back-to-back per
+  leg (one tool-call chain per leg); never capture or diff its steps. Confirm
+  the fork once per leg (Godot: structured state; Java: one capture), then
+  mirror `## Steps` under the comparison gate. Coordinates in either section
+  are re-measured from the current capture.
+- **Fork prefixes are shared, paths are per item.** Several ledger items may
+  share a navigation prefix; each item still carries its own exact call list
+  and replays it independently — never assume a client sits at the fork.
 - **Preconditions include the host.** Servers that need a display or another
   process-start environment variable belong in `preconditions`. Both legs now
   share display `:10`: computer-mcp gets `DISPLAY=:10.0` from the global

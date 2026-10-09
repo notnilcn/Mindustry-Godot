@@ -1,7 +1,7 @@
 {
-  "schema": "mindustry-godot/parity-ledger@1",
+  "schema": "mindustry-godot/parity-ledger@2",
   "updated": "2026-10-09T00:00:00Z",
-  "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction chains.",
+  "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction chains. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "environment": {
     "display": ":10",
     "java": {
@@ -21,7 +21,29 @@
   "conventions": {
     "ids": "PAR-####, monotonically increasing; never reuse",
     "status": ["seeded", "in-progress", "mismatch", "fixing", "verified", "blocked", "wontfix"],
-    "run_dir": "runs/<YYYYMMDD-HHMMSS>-<item>/ with java/, godot/, diff/, run.json, report.md",
+    "status_notes": {
+      "seeded": "discovered or compiled from a chain; no fresh matched run yet",
+      "verified": "closed; evidence class in verified.mode (seed = one observation per leg in a seed sweep, chain = full path+steps re-run under the gate)",
+      "mismatch": "a run stopped here with fresh artifacts from both legs (a seed sweep can open an item as mismatch directly)",
+      "blocked": "cannot be run (client will not launch, bridge down, ...); the failing tool call is recorded in mismatch or fix"
+    },
+    "discovery": {
+      "rule": "No newly revealed interactive surface is left unrecorded: before leaving a fork (in a seed sweep or a normal item run), append one item per visible control/action with parent, surface, path and discovered_by.",
+      "seed_sweep": "A bounded breadth-first walk over both live clients from the boot state; one surface per sweep. For each element: act once per leg, capture both, frame_diff under the gate. A match closes as verified.mode=seed; a divergence opens as mismatch with the exact calls. Sweeps never fix.",
+      "wait_for": "operator request, seeding.last_sweep == null, or the frontier is non-empty and the ledger is thin"
+    },
+    "path": {
+      "role": "Fast-forward navigation to the item's fork. Replayed back-to-back once per leg in a single tool-call chain (one execute call per leg); never captured or diffed per step. Only the action under test is mirrored step by step.",
+      "fields": {
+        "to": "the fork state the item starts from (after this replay)",
+        "java": "ordered computer-mcp/shell calls to reach the fork",
+        "godot": "ordered godot_* calls to reach the fork",
+        "confirm": "one positive fork check per leg (Godot: structured state read; Java: one capture path)",
+        "last_replayed": "run dir of the last successful path replay, or null"
+      },
+      "shared_forks": "Several items may share a path prefix; each item still carries its own exact call list and replays it independently. Never assume a client is already at the fork."
+    },
+    "run_dir": "runs/<YYYYMMDD-HHMMSS>-<item>/ with java/, godot/, diff/, run.json, report.md; seed sweeps use runs/<stamp>-seed-<area>/ with seed/ pairs",
     "compare_gate": {
       "size_match": true,
       "diff.changed_fraction_max": 0.005,
@@ -37,25 +59,61 @@
     },
     "item_template": {
       "id": "PAR-0002",
-      "title": "player-visible symptom",
+      "title": "player-visible symptom or action",
+      "surface": "menu | campaign | hud | world | editor | settings | database | mods | multiplayer | boot",
+      "parent": "PAR-0001 or null (the fork item that revealed it)",
       "status": "seeded",
       "chain": "chains/<name>.md",
       "updated": "ISO8601",
+      "discovered_by": "runs/<dir>/ or null",
+      "path": {
+        "to": "state the item starts from",
+        "java": [],
+        "godot": [],
+        "confirm": { "godot": "<structured check>", "java": "<capture path or check>" },
+        "last_replayed": null
+      },
       "run": "runs/<dir>/ or null",
-      "reproduce": { "java": [], "godot": [] },
+      "reproduce": { "java": [], "godot": [], "compare": [] },
       "steps": [{ "n": 1, "action": "click Play", "java_frame": "java/step-01.png", "godot_frame": "godot/step-01.png", "diff": "diff/step-01.json", "verdict": "match" }],
       "mismatch": null,
       "fix": { "status": "open", "commit": null, "summary": null },
       "verified": null
     }
   },
+  "seeding": {
+    "last_sweep": null,
+    "rule": "A sweep appends every newly revealed interactive surface to frontier[] and one item per control to items[] before moving on; the next sweep pops the first frontier entry.",
+    "frontier": []
+  },
   "items": [
     {
       "id": "PAR-0001",
       "title": "Boot parity: Java main menu vs Godot main menu render",
+      "surface": "boot",
+      "parent": null,
       "status": "seeded",
       "chain": "chains/boot-and-identity.md",
       "updated": "2026-10-09T00:00:00Z",
+      "discovered_by": null,
+      "path": {
+        "to": "fresh main menu on both clients",
+        "java": [
+          { "tool": "shell", "params": { "cmd": "setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/<run>/java/game.log 2>&1 </dev/null &" } },
+          { "tool": "shell", "params": { "cmd": "until grep -q 'Total time to load' runs/<run>/java/game.log; do sleep 2; done" } },
+          { "tool": "shell", "params": { "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648" } },
+          { "tool": "shell", "params": { "cmd": "DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry" } }
+        ],
+        "godot": [
+          { "tool": "godot_health", "params": { "action": "check" } },
+          { "tool": "godot_editor_read", "params": { "action": "state" } },
+          { "tool": "godot_editor_edit", "params": { "action": "open_scene", "params": { "path": "res://scenes/game.tscn" } } },
+          { "tool": "godot_game", "params": { "action": "play", "params": { "scene": "res://scenes/game.tscn" } } },
+          { "tool": "godot_game", "params": { "action": "status" } }
+        ],
+        "confirm": { "godot": "runtime_connected: true; MenuGroup.visible true after fade-in", "java": "java/step-01-menu.png non-blank" },
+        "last_replayed": null
+      },
       "run": null,
       "reproduce": {
         "java": [
