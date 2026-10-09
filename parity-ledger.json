@@ -1,6 +1,6 @@
 {
  "schema": "mindustry-godot/parity-ledger@2",
- "updated": "2026-10-09T15:29:16Z",
+ "updated": "2026-10-09T16:21:40Z",
  "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction chains. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
  "focus": {
   "kind": "area",
@@ -10853,9 +10853,9 @@
    "title": "Tutorial: research the Mechanical Drill, select it in the block picker, place it on copper",
    "surface": "world",
    "parent": "PAR-0028",
-   "status": "reference",
+   "status": "in-progress",
    "chain": "chains/java-ref-ground-zero-tutorial.md",
-   "updated": "2026-10-09T10:19:10Z",
+   "updated": "2026-10-09T16:21:40Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
     "to": "Ground Zero tutorial objective 1 (Build: 1x Mechanical Drill)",
@@ -11030,7 +11030,41 @@
    "steps": [],
    "mismatch": null,
    "fix": {
-    "status": "open"
+    "status": "godot-pass",
+    "summary": "Round 1: the fork (objective 1 active) is unreachable in the port because Java's MinerComp offload branch is unimplemented: the player unit never deposits mined items into the core, so the tutorial counter ('Obtain: 0/15 Copper' = core items) can never advance and the research spend (10 copper from the core) is unreachable.",
+    "plan": {
+     "round": 1,
+     "state": "round 1 landed: action verified in-engine (fork -> research -> place -> objective 1 complete, objective 2 active); staged for the twin",
+     "mismatch": "Godot HUD status 'Obtain: 0/15 Copper' while player_mined_count=6 and core_items_json={} (runs/20261009-153006-PAR-0046/). Java reference fork runs/20261009-065416-ref-ground-zero/java/r04-03-world.png has objective 1 active because MinerComp.update() offloads mined ore into closestCore() when within Vars.mineTransferRange=220 (offloadImmediately()==true for the player, MinerComp.java:74,100).",
+     "seam": "update_mining() mine-tick branch in client/rust/mind-core/src/ai/types/player.rs (the Player controller tick)",
+     "files": [
+      "client/rust/mind-core/src/ai/types/player.rs"
+     ],
+     "approach": "Before falling back to the unit stack: find the nearest core of the unit's team (nearest by squared distance to Building.tile world corner, ties by stable entity index), require within MINE_TRANSFER_RANGE=220.0, require dispatch_get_maximum_accepted - item_count >= 1 (Java core.acceptStack(item,1,this)==1), then dispatch_handle_item (core handle_item adds 1 and fires the campaign handle_core_item hook); only otherwise add to the unit ItemsComp (existing behavior). Player-only offloadImmediately semantics; no held-item dump branch (Java skips it for the player).",
+     "prerequisites": [
+      "PAR-0058 (new seeded item): the unit->core offload surface this round implements"
+     ],
+     "narrow_check": [
+      "new focused test player_offloads_mined_ore_into_the_core (Sim fixture: core-shard at (14,14), ore-copper overlay at (12,12), alpha at (100,100), tick 40 -> core copper >= 1, unit stack stays empty)",
+      "cargo test -p mind-core",
+      "cargo clippy -p mind-core --all-targets -- -D warnings",
+      "cargo fmt --all -- --check",
+      "tools/build.sh + editor relaunch before the Godot leg"
+     ],
+     "evidence": [
+      "run dir runs/20261009-153006-PAR-0046/: fork (core copper, HUD Obtain, objective 0 completed), research purchase (campaign_views mechanical-drill unlocked true, core debited), placement (drill at (136,52)), after-state get_objective_state: obj0 true, obj1 true, obj2 active; action frame godot/r04-action-placed.png + diff/r04-action-placed.json (changed_fraction 0.58922, presentation class)",
+      "editor log (run of the instrumented build): 'placed-debug: block=ContentId(325) team=1 campaign_default=Some(1)' + 'incremented mechanical-drill count'",
+      "narrow check: cargo test -p mind-core (1825), -p mind-gdext (26), clippy workspace -D warnings, fmt --check, tools/build.sh"
+     ],
+     "landed": [
+      "client/rust/mind-core/src/ai/types/player.rs: MinerComp offload branch for the player (mined items transfer into the closest team core within Vars.mineTransferRange=220, acceptStack==1) + focused test player_offloads_mined_ore_into_the_core",
+      "client/rust/mind-gdext/src/sim_host.rs: spawn_player_unit uses rules.default_team (sharded=1), not the literal 0; new Rust-only player_team()",
+      "client/rust/mind-gdext/src/input/desktop.rs: commit_place queues SimCommand::Place with the player team (was hardcoded 0)",
+      "client/rust/mind-core/src/sim/mod.rs: apply(Command::Place) prefers the campaign session default team; BlockPlacedEvent carries team (event.rs); flush_events bumps session.stats.placedBlockCount for player-team placements (Logic BlockBuildEndEvent)",
+      "client/rust/mind-core/src/sim/runtime.rs: ContentIndex (name->id) resource built at runtime install; BuildRules.default_team sync assertion",
+      "client/rust/mind-core/src/game/runtime.rs: RuntimeObjectiveEnv team_has_item (ECS cores; ItemObjective) + placed_block_count (GameStats; BuildCountObjective); sync_session_with_sim writes BuildRules.default_team"
+     ]
+    }
    },
    "verified": null,
    "reference": {
@@ -11177,10 +11211,8 @@
     "note": "R04 reference soak. The tech tree node click researches directly on desktop (no confirm button); the block picker appears in the bottom-right after the research (drill block button + category button), the info panel shows the drill stats, and the click at the gold 2x2 target places it. New fork items: PAR-0047 (tech tree dialog controls), PAR-0048 (block picker surface)."
    },
    "claim": {
-    "by": "godot-walk-s2",
-    "at": "2026-10-09T10:18:12Z",
-    "released_at": "2026-10-09T10:19:10Z",
-    "reason": "session paused by operator before any run work; clean release back to the queue"
+    "by": "godot-walk-s1",
+    "at": "2026-10-09T15:30:06Z"
    }
   },
   {
@@ -12345,6 +12377,55 @@
     }
    },
    "verified": null
+  },
+  {
+   "id": "PAR-0058",
+   "title": "Tutorial: the player unit offloads mined ore into the nearest core within mineTransferRange (MinerComp offload branch)",
+   "surface": "world",
+   "parent": "PAR-0046",
+   "status": "seeded",
+   "chain": "chains/ground-zero-click-mining.md",
+   "updated": "2026-10-09T16:21:40Z",
+   "discovered_by": "runs/20261009-153006-PAR-0046/",
+   "path": {
+    "to": "Ground Zero launched sector, player mining the tutorial copper tile within 220 units of the core",
+    "java": [],
+    "godot": [],
+    "confirm": {
+     "java": "MinerComp.java:100 core transfer branch (offloadImmediately), Vars.mineTransferRange=220",
+     "godot": "core_items_json grows while player_mined_count grows at the ore"
+    },
+    "last_replayed": null
+   },
+   "run": "runs/20261009-153006-PAR-0046/",
+   "reproduce": {
+    "java": [
+     {
+      "tool": "note",
+      "params": {
+       "evidence": "Mindustry/core/src/mindustry/entities/comp/MinerComp.java:74,100; Vars.java:105 mineTransferRange=220f"
+      }
+     }
+    ],
+    "godot": [
+     {
+      "tool": "note",
+      "params": {
+       "evidence": "pre-fix: mined=6, core {} (runs/20261009-153006-PAR-0046/); implemented as PAR-0046's prerequisite, to be settled in PAR-0046's twin"
+      }
+     }
+    ],
+    "compare": [
+     {
+      "tool": "note",
+      "params": {
+       "java": "core copper +1 per mined item within 220",
+       "godot": "core_items_json copper climbs; unit stack stays empty (test player_offloads_mined_ore_into_the_core)"
+      }
+     }
+    ]
+   },
+   "note": "Fork rule item discovered while constructing PAR-0046's fork; the offload branch is implemented under PAR-0046's round 1 (prerequisite) and this item tracks the standalone surface for its own walk. Implemented with PAR-0046 round 1 (player.rs offload branch; test player_offloads_mined_ore_into_the_core); exercised by PAR-0046's fork construction; own walk pending."
   }
  ]
 }

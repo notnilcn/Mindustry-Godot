@@ -1504,3 +1504,43 @@ those paths no longer exist, but the workarounds still apply.
   re-walk. In the following walk the same click landed with `sel 15` immediately.
 - Workaround unchanged: never resolve a click from a `-1` probe; re-probe once.
 - Run: `runs/20261009-150509-PAR-0037-twin/`.
+
+## 2026-10-10 — PAR-0046: `player_unit_position` is Rust-only (not `#[func]`); calling it from an eval pins the loop
+
+- Symptom: an eval combining `Camera2D.tile_to_screen(137,53)` with
+  `SimHost.call("player_unit_position")` timed out (15 s) and
+  `godot_debugger sessions` -> `paused: true` (tick frozen while trivial evals answered).
+- Cause: `player_unit_position` has no `#[func]`; the invalid call errors and trips break-on-error.
+- Workaround: read the player position through `get_state_json()` entities or the camera
+  position, or use the `#[func]` `player_mine_tile`/`player_mined_count`; never call Rust-only
+  helpers from an eval. Recover with `godot_game stop` + `play`.
+- Run: `runs/20261009-153006-PAR-0046/`.
+
+- Recurrence 2026-10-10 (PAR-0046): even a SINGLE-statement `set_menu_visible(false)` eval right
+  after a facade `load_sector`+`start_sector` timed out and pinned the loop (the launch still has
+  deferred work queued). Wait a few seconds (or poll a trivial eval) after the launch before any
+  UI eval; recover with stop+play. Run: `runs/20261009-153006-PAR-0046/`.
+
+## 2026-10-10 — PAR-0046: `MindUi.active_dialog` is not a method; calling it pins the loop
+
+- Symptom: eval `ui.call("active_dialog")` (combined with `objective_markers_json`)
+  timed out; `godot_debugger sessions` -> paused:true. The fork + research state in
+  the running game was lost to the mandatory stop+play recovery.
+- Cause: `active_dialog` does not exist on MindUi; the invalid call errors and trips
+  break-on-error. `objective_markers_json` (MindCampaign) is a valid #[func].
+- Workaround: probe dialog visibility via the dialog node itself
+  (`DialogLayer/research.visible`) or `visible_dialog`-style #[var]s; never call
+  unverified facade methods from evals. Recover with godot_game stop+play.
+- Run: `runs/20261009-153006-PAR-0046/`.
+
+## 2026-10-10 — PAR-0046: same-frame close_palette+open_palette leaves auto-renamed duplicate buttons; get_node on the stale name pins the loop
+
+- Symptom: after `p.call("close_palette")` + `p.call("open_palette")` in ONE eval, the
+  categories grid held both generations (8 named + 8 `@Button@NNNN` auto-renames); the
+  next eval's `categories.get_node("category-production")` hit the dying node / null and
+  `(null as Control).get_global_rect()` errored -> break-on-error pin (state lost to stop+play).
+- Cause: `_build_categories`/`_rebuild` `queue_free()` the old children and immediately add
+  the new ones; same-frame the names still collide, so Godot renames the NEW buttons.
+- Workaround: drive the collapse/expand as two separate calls (one frame apart), then
+  resolve targets by iterating the container and skipping `is_queued_for_deletion()` nodes.
+- Run: `runs/20261009-153006-PAR-0046/`.
