@@ -268,6 +268,18 @@ impl BuildingBehavior for CoreBehavior {
         if let Some(mut items) = world.get_mut::<ItemModule>(e) {
             items.add(item, 1, cap.max(0));
         }
+        // `CoreBlock.handleItem`: default-team intakes count toward
+        // `state.stats.coreItemCount` (belt/dump transfers; the player offload
+        // goes through `handle_stack` instead and does not count).
+        if let Some(name) = world
+            .get_resource::<crate::sim::runtime::ContentIndex>()
+            .and_then(|index| index.item_names.get(item.index()).cloned())
+            && let Some(mut runtime) =
+                world.get_resource_mut::<crate::game::runtime::CampaignRuntime>()
+            && Some(runtime.session.rules.default_team) == team
+        {
+            runtime.session.stats.add_core_item(&name, 1);
+        }
         if team == Some(h.default_team()) && h.is_campaign() {
             h.handle_core_item(item, 1);
         }

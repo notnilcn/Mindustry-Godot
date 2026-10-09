@@ -372,8 +372,8 @@ impl ObjectiveEnv for RuntimeObjectiveEnv<'_> {
         count >= amount
     }
 
-    fn core_item_count(&self, _item: &str) -> i32 {
-        0
+    fn core_item_count(&self, item: &str) -> i32 {
+        self.stats.core_item_count.get(item).copied().unwrap_or(0)
     }
 
     /// `state.stats.placedBlockCount.get(block, 0)` (`BuildCount`): bumped by

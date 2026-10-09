@@ -133,6 +133,21 @@ pub fn dispatch_handle_item(world: &mut World, target: Entity, src: Entity, item
     inst.behavior.handle_item(world, target, src, item);
 }
 
+/// Dispatches `handleStack` to `target`'s registered behavior (item transfers
+/// that bypass `handleItem`'s statistics, e.g. `Call.transferItemTo`).
+pub fn dispatch_handle_stack(world: &mut World, target: Entity, item: ItemId, amount: i32) {
+    let Some(block) = world.get::<Building>(target).map(|b| b.block) else {
+        return;
+    };
+    let Some(inst) = world
+        .get_resource::<BlockTable>()
+        .and_then(|table| table.instance(block))
+    else {
+        return;
+    };
+    inst.behavior.handle_stack(world, target, item, amount);
+}
+
 /// Dispatches `canDump` to `target`'s registered behavior.
 pub fn dispatch_can_dump(world: &World, target: Entity, src: Entity, item: ItemId) -> bool {
     let Some(block) = world.get::<Building>(target).map(|b| b.block) else {

@@ -406,18 +406,17 @@ impl BuildingBehavior for ConveyorBehavior {
         if len as usize >= CAPACITY {
             return false;
         }
-        let (Some(source_tile), Some(tile)) = (
-            world.get::<Building>(source).map(|b| b.tile),
+        let (Some(source_building), Some(tile)) = (
+            world.get::<Building>(source),
             world.get::<Building>(e).map(|b| b.tile),
         ) else {
             return false;
         };
-        let rel = relative_to(
-            source_tile.x() as i32,
-            source_tile.y() as i32,
-            tile.x() as i32,
-            tile.y() as i32,
-        );
+        // `Edges.getFacingEdge`: a multiblock source contributes its footprint
+        // tile closest to the belt, not its anchor.
+        let (face_x, face_y) =
+            facing_edge(world, source_building, tile.x() as i32, tile.y() as i32);
+        let rel = relative_to(face_x, face_y, tile.x() as i32, tile.y() as i32);
         if rel < 0 {
             return false;
         }
@@ -448,18 +447,15 @@ impl BuildingBehavior for ConveyorBehavior {
         if len as usize >= CAPACITY {
             return;
         }
-        let (Some(source_tile), Some(tile)) = (
-            world.get::<Building>(source).map(|b| b.tile),
+        let (Some(source_building), Some(tile)) = (
+            world.get::<Building>(source),
             world.get::<Building>(e).map(|b| b.tile),
         ) else {
             return;
         };
-        let rel = relative_to(
-            source_tile.x() as i32,
-            source_tile.y() as i32,
-            tile.x() as i32,
-            tile.y() as i32,
-        );
+        let (face_x, face_y) =
+            facing_edge(world, source_building, tile.x() as i32, tile.y() as i32);
+        let rel = relative_to(face_x, face_y, tile.x() as i32, tile.y() as i32);
         let ang = rel - rotation as i8;
         let x = if ang == -1 || ang == 3 {
             1.0
@@ -660,6 +656,24 @@ pub(crate) fn approach(from: f32, to: f32, speed: f32) -> f32 {
     from + (to - from).clamp(-speed, speed)
 }
 
+/// `Edges.getFacingEdge(Tile, Tile)`: the source footprint tile closest to the
+/// target (`anchor + clamp(target - anchor, -(size-1)/2, size/2)`); a 1x1
+/// source returns its own tile. Used so multiblock sources (e.g. a 2x2 drill)
+/// interact with belts through their true facing edge.
+pub(crate) fn facing_edge(world: &World, source: &Building, tx: i32, ty: i32) -> (i32, i32) {
+    let size = world
+        .get_resource::<BlockTable>()
+        .and_then(|table| table.instance(source.block))
+        .map(|inst| inst.def.size.max(1))
+        .unwrap_or(1);
+    let lo = -((size - 1) / 2);
+    let hi = size / 2;
+    (
+        source.tile.x() as i32 + (tx - source.tile.x() as i32).clamp(lo, hi),
+        source.tile.y() as i32 + (ty - source.tile.y() as i32).clamp(lo, hi),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -761,6 +775,29 @@ mod tests {
             "next={next:?} nextc={nextc:?} aligned={aligned} accepts={accepts} second_len={second_len}"
         );
         assert_eq!(second_len, 1);
+    }
+
+    #[test]
+    fn multiblock_source_accepts_through_its_facing_edge() {
+        let mut harness = crate::world::BuildHarness::new(16, 16, 7);
+        let copper = harness.content().item_id("copper").expect("copper");
+        let conveyor = harness.content().block_id("conveyor").expect("conveyor");
+        let drill = harness
+            .content()
+            .block_id("mechanical-drill")
+            .expect("mechanical-drill");
+        // Drill 2x2 anchored (5,5) -> footprint (5,5)-(6,6); belt at (4,6)
+        // west of the footprint's `(5,6)` edge, facing west so the drill feeds
+        // its back. The anchor (5,5) is diagonal to the belt (rejected before
+        // `Edges.getFacingEdge`); the facing edge (5,6) is cardinal and accepts.
+        assert!(harness.place(5, 5, drill, 0, true));
+        assert!(harness.place(4, 6, conveyor, 2, true));
+        let belt = harness.build_at(4, 6).expect("belt");
+        let drill_entity = harness.build_at(5, 5).expect("drill");
+        assert!(
+            transfer::dispatch_accept_item(&harness.world, belt, drill_entity, copper),
+            "belt accepts from the drill's facing edge"
+        );
     }
 
     #[test]

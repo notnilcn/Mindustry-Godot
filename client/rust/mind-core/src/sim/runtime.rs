@@ -91,6 +91,8 @@ impl SimRuntimeConfig {
 pub struct ContentIndex {
     /// Item name → dense id (`ContentRegistry::item_id`).
     pub item_ids: std::collections::HashMap<String, u16>,
+    /// Dense item id → name (id-indexed; `ContentRegistry::items` order).
+    pub item_names: Vec<String>,
     /// Block name → dense id (`ContentRegistry::block_id`).
     pub block_ids: std::collections::HashMap<String, u16>,
 }
@@ -589,6 +591,11 @@ impl Sim {
                 .item_ids
                 .insert(item.name.clone(), item.id.index() as u16);
         }
+        content_index.item_names = content
+            .items()
+            .iter()
+            .map(|item| item.name.clone())
+            .collect();
         for block in content.blocks() {
             content_index
                 .block_ids
@@ -699,6 +706,71 @@ mod tests {
     fn registry() -> ContentRegistry {
         create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
             .expect("content boot")
+    }
+
+    /// `CoreBlock.handleItem` bumps `stats.coreItemCount` for default-team
+    /// intakes (belt/dump transfers), while `handleStack` (the player offload
+    /// path) does not.
+    #[test]
+    fn core_item_count_counts_transfers_not_the_player_offload() {
+        use crate::game::planet::EmptyNeighborhood;
+        use crate::game::runtime::CampaignRuntime;
+        use crate::game::universe::Campaign;
+        use crate::world::blocks::distribution::transfer::{
+            dispatch_handle_item, dispatch_handle_stack,
+        };
+
+        let content = registry();
+        let core = content.block_id("core-shard").expect("core-shard");
+        let copper = content.item_id("copper").expect("copper");
+        let mut sim = Sim::new(1, 16, 16, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("runtime");
+        sim.ecs
+            .0
+            .get_resource_mut::<crate::world::limits::BuildRules>()
+            .expect("build rules")
+            .default_team = 1;
+        let pos = TilePos::new(5, 6);
+        assert!(
+            sim.apply(crate::command::Command::Place {
+                x: 5,
+                y: 6,
+                block: core,
+            })
+            .is_ok()
+        );
+        let core_entity = sim.grid.entity_at(pos).expect("core entity");
+        let campaign = Campaign::from_registry(&content, &EmptyNeighborhood);
+        sim.ecs.0.insert_resource(CampaignRuntime::new(
+            PlaySession::new(Rules {
+                default_team: 1,
+                ..Rules::default()
+            }),
+            campaign,
+        ));
+
+        dispatch_handle_item(&mut sim.ecs.0, core_entity, core_entity, copper);
+        let after_item = sim.ecs.0.get_resource::<CampaignRuntime>().map(|runtime| {
+            runtime
+                .session
+                .stats
+                .core_item_count
+                .get("copper")
+                .copied()
+                .unwrap_or(0)
+        });
+        assert_eq!(after_item, Some(1), "belt/dump intake counts");
+        dispatch_handle_stack(&mut sim.ecs.0, core_entity, copper, 2);
+        let after_stack = sim.ecs.0.get_resource::<CampaignRuntime>().map(|runtime| {
+            runtime
+                .session
+                .stats
+                .core_item_count
+                .get("copper")
+                .copied()
+                .unwrap_or(0)
+        });
+        assert_eq!(after_stack, Some(1), "offload stack path does not count");
     }
 
     /// A loaded map carries tile blocks with no ECS entities; materializing the

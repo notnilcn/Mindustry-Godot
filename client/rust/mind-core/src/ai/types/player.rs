@@ -23,7 +23,7 @@ use crate::entities::comp::unit::comp::{
 };
 use crate::entities::comp::{Building, Pos, TeamComp, Vel};
 use crate::world::blocks::distribution::transfer::{
-    dispatch_get_maximum_accepted, dispatch_handle_item, item_count,
+    dispatch_get_maximum_accepted, dispatch_handle_stack, item_count,
 };
 use crate::world::blocks::storage::core_block::CoreBuild;
 use crate::world::{TilePos, WorldGrid};
@@ -161,8 +161,12 @@ pub fn can_mine_tile(
     if tx < 0 || ty < 0 || tx >= grid.width() || ty >= grid.height() {
         return false;
     }
-    // `validMine`: wall drop or ore-overlay drop.
+    // `getMineResult`: floor/overlay mining requires the tile block to be air
+    // (`tile.block() == Blocks.air`); a placed building covers the ore.
     let cell = grid.tiles.get(tx, ty);
+    if cell.block != crate::content::BlockId::AIR {
+        return false;
+    }
     let drop = cell
         .drop(content)
         .or_else(|| content.block(cell.overlay).and_then(|def| def.item_drop));
@@ -281,7 +285,9 @@ fn offload_into_core(world: &mut World, entity: Entity, x: f32, y: f32, item: It
     if cap - cur < 1 {
         return false;
     }
-    dispatch_handle_item(world, core, entity, item);
+    // `Call.transferItemTo` reaches the core through `handleStack` (the offload
+    // does not count toward `stats.coreItemCount`).
+    dispatch_handle_stack(world, core, item, 1);
     true
 }
 
@@ -533,5 +539,60 @@ mod tests {
             }
         }
         assert!(core_copper >= 1, "core received copper: {core_copper}");
+    }
+
+    #[test]
+    fn player_cannot_mine_under_a_building() {
+        let mut sim = Sim::new(
+            1,
+            64,
+            64,
+            crate::content::BlockId::AIR,
+            crate::content::BlockId::AIR,
+        );
+        let Ok(()) = sim.install_unit_runtime() else {
+            panic!("unit runtime installs");
+        };
+        let Ok(()) = sim.install_block_runtime() else {
+            panic!("block runtime installs");
+        };
+        let Some(ore) = sim
+            .unit_runtime()
+            .and_then(|runtime| runtime.content.block_id("ore-copper"))
+        else {
+            panic!("ore-copper exists");
+        };
+        let Some(conveyor) = sim
+            .unit_runtime()
+            .and_then(|runtime| runtime.content.block_id("conveyor"))
+        else {
+            panic!("conveyor exists");
+        };
+        let index = sim.grid.tiles.index(12, 12);
+        sim.grid.tiles.geti_mut(index).overlay = ore;
+        sim.refresh_unit_runtime();
+        // `getMineResult` requires `tile.block() == air`; the building covers it.
+        let Ok(()) = sim.apply(crate::command::Command::Place {
+            x: 12,
+            y: 12,
+            block: conveyor,
+        }) else {
+            panic!("conveyor places over the ore");
+        };
+        let Some(_entity) = sim.spawn_player_unit("alpha", 0, 100.0, 100.0, 0.0) else {
+            panic!("player unit spawns");
+        };
+        sim.set_player_mine_tile(Some(crate::world::TilePos::new(12, 12)));
+        for _ in 0..20 {
+            let Ok(()) = sim.tick() else {
+                panic!("tick");
+            };
+        }
+        assert_eq!(
+            sim.player_mine_tile(),
+            None,
+            "mine order clears under a building"
+        );
+        assert_eq!(sim.player_mined_count(), 0, "nothing mined under the block");
     }
 }
