@@ -744,15 +744,13 @@ func _launch(planet_name: String, sector_id: int, loadout: int = -1, resume: boo
 		if resume and campaign.has_method("play_sector"):
 			started = bool(campaign.call("play_sector", planet_name, sector_id))
 		elif campaign.has_method("start_sector"):
-			if loadout >= 0:
-				var result: Variant = campaign.callv("start_sector", [planet_name, sector_id, loadout])
-				if result == null:
-					# Facade without the optional loadout parameter yet: relaunch
-					# without the selection rather than refusing to enter.
-					result = campaign.call("start_sector", planet_name, sector_id)
-				started = bool(result)
-			else:
-				started = bool(campaign.call("start_sector", planet_name, sector_id))
+			# `MindCampaign.start_sector(planet, sector)` takes no loadout
+			# parameter, and `start_sector_with_loadout` expects item-stack JSON
+			# the dialog does not build yet. Launch without the selection instead
+			# of calling a 3-arg `start_sector` (that `callv` errored with
+			# "function has 2 parameters" and tripped break-on-error, pausing the
+			# game even though the fallback then started the sector).
+			started = bool(campaign.call("start_sector", planet_name, sector_id))
 	_close()
 	if started:
 		_enter_game()
