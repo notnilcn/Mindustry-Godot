@@ -66,12 +66,13 @@ func handle(tool: String, action: String, params: Dictionary) -> Dictionary:
 ## Consuming-project call-chain ledger (recommended)
 
 Downstream projects should keep a ledger of proven MCP call sequences — for
-example one markdown file per chain under `.opencode/chains/` — and have their
-agents consult it before composing calls. Each entry records when the chain
-applies, its preconditions (including process-start environment such as
-`DISPLAY` for servers that need one), the exact tool calls, success signals,
-failure modes, and the last run that verified it. Treat seeded entries as
-claims and promote them to verified only with a run artifact.
+example a single machine-readable ledger file with one entry per flow (the
+Mindustry-Godot project uses `parity-ledger.json`) — and have their agents
+consult it before composing calls. Each entry records when the flow applies,
+its preconditions (including process-start environment such as `DISPLAY` for
+servers that need one), the exact tool calls, success signals, failure modes,
+and the last run that verified it. Treat seeded entries as claims and promote
+them to verified only with a run artifact.
 
 Keep that ledger in the consuming project. This addon and `Docs/` stay generic:
 they describe the tools, not any one project's flow. `README.md` carries the

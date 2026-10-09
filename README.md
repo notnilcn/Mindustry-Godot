@@ -47,10 +47,10 @@ tools/mcp-smoke.sh             # in-engine MCP smoke (needs the editor running)
 
 In-engine workflows (launch, node map, pid-stamped
 evals) are in [`.opencode/skills/playtest/SKILL.md`](.opencode/skills/playtest/SKILL.md).
-The Java↔Godot parity hunt (seed sweeps + fast-forward/replay chains) is in
+The Java↔Godot parity hunt (seed sweeps + fast-forward/replay sequences) is in
 [`.opencode/skills/parity-eval/SKILL.md`](.opencode/skills/parity-eval/SKILL.md);
-its queue and proof record is `parity-ledger.json` and its re-runnable
-sequences are in `chains/`. `.github/workflows/ci.yml` runs the Rust/STDB/Godot-import jobs on push/PR to `main`.
+its queue, proof record and re-runnable sequences are `parity-ledger.json`
+(each item embeds its `path`/`reproduce`/`steps`). `.github/workflows/ci.yml` runs the Rust/STDB/Godot-import jobs on push/PR to `main`.
 
 ## License
 

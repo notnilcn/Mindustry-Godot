@@ -507,8 +507,7 @@ if [ "$session" -ge 2 ]; then
 EOF
 else
   cat <<EOF
-  ledger:       ${MAIN_REPO#"$WORKSPACE_ROOT"/}/parity-ledger.json
-  chains:       ${MAIN_REPO#"$WORKSPACE_ROOT"/}/chains/
+  ledger:       ${MAIN_REPO#"$WORKSPACE_ROOT"/}/parity-ledger.json   (items embed path/reproduce/steps)
   run prefix:   '${MAIN_REPO#"$WORKSPACE_ROOT"/}/runs/'
   prompts:      ${MAIN_REPO#"$WORKSPACE_ROOT"/}/WORKFLOW_PROMPTS.md
 EOF

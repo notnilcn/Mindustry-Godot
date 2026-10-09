@@ -35,11 +35,10 @@ record.
 
 | Path | Role |
 |---|---|
-| `parity-ledger.json` | Machine-readable queue + proof + coverage record: items, `path` fast-forwards, `focus` scope, `seeding.last_sweep`/`frontier`. Read before picking work; update after every step, mismatch, and fix. |
+| `parity-ledger.json` | Machine-readable queue + proof + coverage record: items with their embedded `path`/`reproduce`/`steps` sequences, `focus` scope, `seeding.last_sweep`/`frontier`. The single source for re-runnable calls (there is no `chains/` directory). Read before picking work; update after every step, mismatch, and fix. |
 | `WORKFLOW_PROMPTS.md` | Canonical `/goal` and `/loop` paste-text (scope + hiccup rules). Keep in sync with this skill; the skill wins on conflict. |
-| `chains/` | Canonical per-flow MCP call sequences with a `## Path (fast-forward)` section (navigation, not evidence) and `## Steps (under test)` (the mirrored part); schema in `chains/README.md`. Consult before composing calls; update/bump after a confirmed run. |
 | `runs/<stamp>-<item>/` | Run artifacts: `java/`, `godot/`, `diff/`, `run.json`, `report.md`. Gitignored. |
-| `computer-mcp-learnings.md`, `open-godot-mcp-learnings.md` | Friction + workarounds that are not chains. Append a dated entry when a run taught you something. |
+| `computer-mcp-learnings.md`, `open-godot-mcp-learnings.md` | Friction + workarounds that are not reusable sequences. Append a dated entry when a run taught you something. |
 | `parity/mcp_catalog.json`, `parity/scenario_catalog.json`, `parity/golden_manifest.json` | Committed oracle data (harness-owned). Do not duplicate it here. |
 | `.opencode/skills/playtest/SKILL.md` | Godot MCP mechanics. Read it first; this skill adds the Java leg, the seed sweep, the path fast-forward, the comparison gate, and the documentation contract. |
 
@@ -151,7 +150,12 @@ Record the values in `run.json`; all of them persist in `parity-java-home/`:
   Godot game is fixed at 1152x648 — never try to resize it.
 - Java saves/settings live in `parity-java-home/`; keep that directory stable
   so scenarios start from the same state. Delete its `saves/` only to test a
-  fresh profile, and say so in `run.json`.
+  fresh profile, and say so in `run.json`. `settings.bin` also carries state
+  that silently changes later frames — hint flags (`<name>-hint-done`) and
+  research progress (`req-<content>-<item>` ints, `<content>-unlocked` bools).
+  When a stored reference must reproduce, reset the specific keys offline with
+  a small `arc.Settings` program while the client is stopped (back the file up
+  first; examples in the PAR-0037/PAR-0046 runs) and record it in `run.json`.
 - Both windows may be maximized/overlapping; `godot_screenshot` reads the game
   viewport texture, but Java captures read the X window, so **raise it first**:
 
@@ -185,6 +189,12 @@ when `focus` is `null`. One sweep surface or one item per iteration. Never
 combine a fix and a fresh hunt step; commit a fix (`Fixes PAR-####`) before
 moving on.
 
+Before running a picked item, take the exclusive flock on
+`parity-ledger.json.lock`, re-read the ledger, write `status: "in-progress"`
+plus a `claim {by, at}` with the session label, and release the lock. Skip
+items a live session holds and reap claims older than 90 minutes; an item that
+already carries a `fix.plan` resumes from it instead of re-planning.
+
 ## 2. Seed sweep: the live frontier
 
 A seed sweep turns "what is there to compare?" into ledger items backed by
@@ -200,15 +210,18 @@ fresh artifacts from both legs. It explores, classifies, and records — it does
    (`seed/step-NN-<surface>-java.png`, `seed/step-NN-<surface>-godot.png`):
    - **Java**: capture the window; the capture *is* the enumeration — read the
      visible labels, buttons, rows and affordances from the image.
-   - **Godot**: `godot_screenshot` plus a control-listing eval so every visible
-     `Control` gets a node path and center (recipe in `chains/seed-survey.md`).
+   - **Godot**: `godot_screenshot` plus a loop-free control-listing eval so
+     every visible `Control` gets a node path and center: e.g.
+     `var root = get_node("/root/Spine/Ui/UiRoot")` plus
+     `root.find_children("*", "Button", true, false).filter(func(b): return b.is_visible_in_tree()).map(func(b): return {"path": str(b.get_path()), "text": str((b as BaseButton).text), "center": (b as Control).get_global_rect().get_center()})`
+     (swap the class for `Range`/`LineEdit`; keep the eval single-statement).
    `frame_diff.py` the pair under the §4 gate; that is the surface-render check.
 3. Write one ledger item per interactive element/action found — in-game actions
    too (move, shoot, mine, place, drag, rotate, select, pause, skip wave), not
    just buttons. Each item gets a player-visible `title`, `surface`, `parent`
    (the fork item that revealed it), `path` (exact replay to this fork),
-   `status: "seeded"`, a `chain` file (`chains/seed-survey.md` is fine until the
-   item needs its own), and `discovered_by` = this sweep.
+   `status: "seeded"`, a `reproduce` block seeded from the sweep's exact calls
+   (refine it when the item graduates), and `discovered_by` = this sweep.
 4. Classify each new element in the same sweep when it is cheap: act once per
    leg (Java first: `raise` → action → capture; Godot: action →
    `godot_screenshot`), `frame_diff.py` the pair, apply §4.
@@ -241,8 +254,8 @@ parity verdict.
 Per action it produces three artifacts:
 
 - reference frame(s) in `runs/<stamp>-ref-<area>/java/`;
-- the re-runnable sequence (checkpoint -> fork -> action + settle waits) in
-  `chains/java-ref-<area>.md`;
+- the re-runnable sequence (checkpoint -> fork -> action + settle waits)
+  embedded in the item (`reference.java_path` + `reference.settle`);
 - one ledger item with a `reference` block and `status: "reference"`.
 
 ### 2b.1 Action table (Ground Zero basics)
@@ -303,7 +316,10 @@ duplicating them.
   save slot; else copy the fresh
   `parity-java-home/.local/share/Mindustry/saves/*.msav` and verify its mtime
   changed; else fall back to replaying the full prefix next time. Record the
-  surviving path in `reference.checkpoint`.
+  surviving path in `reference.checkpoint`. Before installing a checkpoint,
+  wipe `saves/*.msav*` — the client rewrites the slot at launch/autosave/Save
+  & Quit and moves a previously installed file to
+  `<name>.msav-backup.msav`.
 - **Fork rule.** Any interactive element seen in passing gets a ledger item
   before the row closes (§2 step 5).
 
@@ -313,7 +329,6 @@ duplicating them.
 {
   "id": "PAR-00NN", "title": "Tutorial: mine copper by clicking the ore",
   "surface": "world", "parent": "PAR-00MM", "status": "reference",
-  "chain": "chains/java-ref-ground-zero-tutorial.md",
   "discovered_by": "runs/<stamp>-ref-ground-zero/",
   "path": {"to": "Ground Zero tutorial, objective 'Obtain 0/15 Copper'",
            "java": ["<checkpoint + fork calls>"], "godot": [],
@@ -324,7 +339,6 @@ duplicating them.
     "frames": {"fork": "java/step-03-fork.png", "action": "java/step-03-mine.png"},
     "settle": [{"after": "click ore", "wait_ms": 500}],
     "expected": {"bundle": ["gz.mine"], "objective": "Obtain: 0/15 Copper"},
-    "chain": "chains/java-ref-ground-zero-tutorial.md",
     "checkpoint": "parity-java-home/.local/share/Mindustry/saves/<file>.msav"
   },
   "reproduce": {"java": ["<action calls>", "capture_screen.py ..."],
@@ -334,8 +348,9 @@ duplicating them.
 ```
 
 `status: "reference"` means Java evidence recorded, Godot walk still open. It
-is not a verdict: §3b either closes the item as `verified.mode: "reference"` or
-opens a mismatch with a fresh Java pair.
+is not a verdict by itself: §3b closes the item — `verified.mode: "reference"`
+for a no-fix Godot-only pass against the stored frame, `verified.mode: "twin"`
+when a code fix landed — or opens a mismatch with a fresh Java pair.
 
 ### 2b.4 Parallelism
 
@@ -355,22 +370,28 @@ clients on one display or one data dir.
 §0 applies unchanged: a click that only focused the window, a dropped key, a
 maximized window, a blank capture, a field that drops input, a save slot that
 never lands — one dated entry in `computer-mcp-learnings.md` immediately, and
-the wait that fixed it into the chain.
+the wait that fixed it into the item's recorded sequence.
 
 ## 3. Item run: fast-forward, then mirror
 
 Pick the first non-`verified` item in `parity-ledger.json` (or the item the
 goal names). For that item:
 
-1. Read its chain in `chains/` and the ledger entry; note `path` and `steps`.
+1. Read the ledger entry; note `path`, `reproduce` and `steps`, and resume
+   from the item's `fix.plan` when one exists instead of re-planning.
 2. Reset both clients to the same boot state (restart or return both to the
    main menu) and stamp the pids/commits in `run.json`.
 3. **Fast-forward to the fork.** Replay the item's `path` once per leg as a
    single tool-call chain — one `execute` call per leg issuing all of that
-   leg's calls in order. Do **not** capture or diff navigation steps; a wrong
-   turn is a path bug to fix in the chain, not a parity mismatch. Confirm the
-   fork once per leg (Godot: the structured check in `path.confirm`; Java: one
-   capture), then start `steps` with both clients at the same fork.
+   leg's calls in order, with explicit settle waits inside the chain for the
+   unskippable animations (menu fades, loading bars, prompt transitions). A
+   click can return `ok` and still have missed while a submenu faded: probe
+   the expected node (`DialogLayer/...` visible, submenu list built) between
+   fade-dependent clicks and re-walk from the menu on a miss. Do **not**
+   capture or diff navigation steps; a wrong turn is a path bug to fix in the
+   item, not a parity mismatch. Confirm the fork once per leg (Godot: the
+   structured check in `path.confirm`; Java: one capture), then start `steps`
+   with both clients at the same fork.
 4. **Mirror the action under test.** For each step of `steps`, alternately:
    - **Java**: `raise Mindustry` → perform the action with `computer-mcp_*` →
      `capture_screen.py --window-title Mindustry` → `runs/<run>/java/step-NN.png`.
@@ -378,9 +399,9 @@ goal names). For that item:
      with `godot_screenshot` (or the viewport) → `runs/<run>/godot/step-NN.png`.
    - **Compare**: `frame_diff.py` the two captures → `runs/<run>/diff/step-NN.json`;
      apply the gate in §4.
-5. All steps match → mark the item `verified` (`mode: "chain"`), bump the chain
-   (`last_verified`, steps, and its path if navigation proved fragile), continue
-   to the next item.
+5. All steps match → mark the item `verified` (`mode: "chain"`), update the
+   item (steps, `updated`, and its `path` if navigation proved fragile),
+   continue to the next item.
 6. First mismatch → **stop the item run** and switch to fix mode (§5).
 
 ### 3b. Reference-backed run (Godot only)
@@ -391,13 +412,23 @@ Java side is the recorded reference instead of a live client:
 1. Keep the Godot client as in step 2; the Java client stays down. Stamp the
    Godot pid/commit in `run.json` and verify `reference.frames.action` exists
    and is non-blank.
-2. Fast-forward the item's **Godot** path to the same fork and mirror the action
-   as in step 4. Compare with §4 using `reference.frames.action` as the Java
-   side.
-3. Pass → `verified: {mode: "reference", run: <this run>, reference: <ref run>}`
-   and bump the chain's `last_verified`. Record the step with `java_frame`
-   pointing at `<reference.run>/<reference.frames.action>` and the fresh
-   `godot_frame`/`diff`.
+2. Fast-forward the item's **Godot** path to the same fork as one `execute`
+   chain with the same in-chain waits and mirror the action as in step 4.
+   Compare with §4 using `reference.frames.action` as the Java side.
+3. Pass → settle the item. Both `reference` and `twin` close a reference item:
+   with no code change, close directly as `verified: {mode: "reference", run:
+   <this run>, reference: <ref run>}` (record `java_frame` from
+   `<reference.run>/<reference.frames.action>` and the fresh `godot_frame`/
+   `diff`). After a code fix the Godot-only pass is not yet a verdict: while
+   holding the claim, spawn exactly one twin-verifier subagent (the
+   twin-evaluator agent when registered, else general) to re-run the item from
+   the fork on both legs, fast-forwarding each leg as one execute chain with
+   its in-chain waits, and mirror the action once per leg under the §4 gate.
+   Match → `verified: {mode: "twin", writer_run: <this run>, twin_run: <twin
+   run>, java_frame: <twin Java frame>, godot_frame: <twin Godot frame>}`, and
+   bump the item's `updated`/`path.last_replayed`; mismatch → status `mismatch`
+   with the fresh pair and a `fix.plan` refreshed from the twin evidence (the
+   item re-enters the queue).
 4. Fail → re-run the Java leg once from `reference.checkpoint` and recapture the
    same frame. If the fresh Java frame reproduces the reference, treat the Godot
    leg as the mismatch (§5) with the fresh pair; if it does not, refresh the
@@ -476,10 +507,12 @@ On the first mismatch:
 1. **Record the stop point in `parity-ledger.json` before touching code**: step
    number, the two screenshots, the diff JSON, the metric values, and the exact
    MCP call sequences for both legs up to that step (copy from the run log; the
-   chain has the canonical full sequence). A mismatch recorded by a seed sweep
-   already has this evidence: reproduce it once (path replay + the failing
-   step) so the fix starts from a fresh stop, then treat the item like any
-   other.
+   item's `path`/`reproduce` has the canonical full sequence). Write a `fix.plan {round, state,
+   done[], next, ...}` into the item before the first code edit and refresh it
+   after every failed round, so an interrupted run resumes from it. A mismatch
+   recorded by a seed sweep already has this evidence: reproduce it once (path
+   replay + the failing step) so the fix starts from a fresh stop, then treat
+   the item like any other.
 2. Diagnose on the Godot side with the playtest skill (structured state first:
    checksum, `get_state_json`, HUD JSON, dialog nodes). If pixels disagree but
    structured state agrees, the finding is presentation-layer; if state
@@ -509,7 +542,7 @@ The single source of progress. Shape (one `items[]` entry per item):
 {
   "id": "PAR-0002", "title": "player-visible symptom", "status": "verified",
   "surface": "menu", "parent": "PAR-0001",
-  "chain": "chains/enter-campaign.md", "updated": "2026-10-09T12:00:00Z",
+  "updated": "2026-10-09T12:00:00Z",
   "discovered_by": "runs/20261009-110000-seed-menu/",
   "path": {
     "to": "fresh main menu on both clients",
@@ -536,34 +569,42 @@ The single source of progress. Shape (one `items[]` entry per item):
 
 Update `updated`, `path.last_replayed`, `steps`, `mismatch`, `fix`, `verified`
 after every run; a seed sweep also maintains `seeding.last_sweep`/`frontier`.
+`claim {by, at}` (written under the `parity-ledger.json.lock` flock before a
+run) and `fix.plan` (written before the first code edit) are part of the live
+protocol — §1/§5.
 Append new items with the next `PAR-####` id and set `parent`/`surface`/
 `discovered_by`. Statuses: `seeded` (discovered or compiled, no fresh matched
 run), `reference` (Java evidence recorded by a soak, §2b; the Godot walk is
 still open), `in-progress`, `mismatch`, `fixing`, `verified` (closed —
 `verified.mode` is `seed` for a sweep observation, `chain` for a full both-leg
 pass, `reference` for a Godot-only pass against a stored Java frame, or `twin`
-for a fresh Java+Godot pair captured by the twin-verifier subagent, the only
-mode that marks a reference item settled), `blocked`, `wontfix`.
-A `verified.mode: "seed"` item may be reopened if a later chain run contradicts
-it. Its `chain` may point at `chains/seed-survey.md` until the item is re-run,
-fixed, or needs item-specific preconditions, at which point write its own file.
+for a fresh Java+Godot pair captured by the twin-verifier subagent; `reference`
+and `twin` both settle a reference item — a no-fix walk may close as
+`reference`, a walk that landed a code fix settles as `twin`), `blocked`,
+`wontfix`.
+A `verified.mode: "seed"` item may be reopened if a later item run contradicts
+it. Its stored sequence may stay minimal until the item is re-run, fixed, or
+needs item-specific preconditions, at which point fill out its
+`path`/`reproduce`/`steps`.
 
-### Chains
+### Item sequences
 
-After a confirmed run, update (or create) the matching `chains/<name>.md`
-following `chains/README.md`: exact tool + action + parameter JSON per step, no
-hardcoded click coordinates unless measured from the current capture, status
-`verified` only with a run dir + pid/commit in `last_verified`. A chain splits
-into `## Path (fast-forward)` — navigation, replayed back-to-back per leg, not
-evidence — and `## Steps (under test)` — the mirrored part behind the gate.
-Java-leg sequences go in `java-*.md` files (soak sequences are
-`java-ref-*.md`); a mixed item names both servers in `tools`.
+Every item embeds its own calls — there is no `chains/` directory. After a
+confirmed run, update the item: `path` (navigation to the fork, replayed
+back-to-back once per leg in a single `execute` call; not evidence) and
+`steps` (the mirrored part behind the gate) / `reproduce` (the exact tool +
+action + parameter JSON that ran), with fresh frame/diff paths and the run
+dir. No hardcoded click coordinates unless measured from the current capture;
+`verified.mode: "chain"` requires a fresh run dir (pid/commit in `run.json`).
+A Java soak's calls live in `reference.java_path` + `reference.settle`; a
+mixed item carries both legs' call lists, each entry naming its tool
+(`godot_*` / `computer-mcp_*` / shell scripts).
 
 ### Learnings
 
-Friction that is not a reusable chain goes to the repo-root learnings files as
+Friction that is not a reusable sequence goes to the repo-root learnings files as
 one dated entry, written **the moment the hiccup happens** (§0): what happened,
-the exact failing call, what worked, the run or chain that shows it. Java/X-leg
+the exact failing call, what worked, the run that shows it. Java/X-leg
 friction in `computer-mcp-learnings.md`; Godot/bridge friction in
 `open-godot-mcp-learnings.md`. Never rewrite another session's entry.
 
@@ -616,6 +657,26 @@ friction in `computer-mcp-learnings.md`; Godot/bridge friction in
   the pid from `pgrep -f 'Mindustry[.]jar'` and kill only that.
 - Quit gracefully via the main menu; if the process lingers, kill the recorded
   pid and note it in `run.json`.
+- Window stacking is not focus: on X11 `window_ctl.py raise` can leave
+  `_NET_ACTIVE_WINDOW` (and input focus) on the Godot editor, and every click
+  is dropped while the Java window is topmost (PAR-0049). Before blaming the
+  click path, read `_NET_ACTIVE_WINDOW` (xprop) and, if it is wrong, switch
+  focus from python-xlib (`_NET_ACTIVE_WINDOW` ClientMessage +
+  `set_input_focus`, the `java_input.py` helper in that run), then click.
+- When a `click` looks dead but a `mouse_move` hover changed the frame, send
+  explicit `button_down` + `button_up` as two calls instead of `click`
+  (PAR-0056).
+- Resume/soak forks also depend on `settings.bin` state (hint flags, research
+  progress) that outlives the save file — reset it offline (see §0) before
+  re-capturing a stored reference, and wipe `saves/*.msav*` (including
+  `<name>.msav-backup.msav`) before installing a checkpoint.
+- Tech-tree nodes are view-relative: the dialog keeps its last pan across
+  close/reopen, so a recorded pan table does not reproduce — identify a node
+  by its hover popup and budget a pan hunt (PAR-0049). The `.`/`,` category
+  switch can also drop a press; verify the selected category.
+- Keep the launch shell simple: a `cd repo && RUN=… && setsid java … &` list
+  backgrounds the whole `&&` chain, so a poll in the same shell reads an empty
+  `$RUN` — assign variables outside the backgrounded group.
 
 ## 8. Godot-leg gotchas (open-godot-mcp)
 
@@ -639,11 +700,32 @@ friction in `computer-mcp-learnings.md`; Godot/bridge friction in
   click coordinates in a later eval. Edge-pan drifts the camera while the
   pointer idles at a screen edge — park the pointer or disable camera process.
 - The editor-embedded game cannot be resized (fixed 1152x648).
+- Never issue an eval in the same round-trip as `godot_game play` (it races
+  the attach: `RUNTIME_NOT_CONNECTED`); read `godot_game status` first. After a
+  sector launch the runtime still has deferred UI work — wait/poll before UI
+  evals, and keep evals to a single statement.
+- A nonexistent facade method errors and pins the loop like any bad eval body
+  (`get_hud_state` is on `/root/Spine/MindCampaign`, not `SimHost`;
+  `MindUi.active_dialog` does not exist; `core_items_json` is not on
+  `MindCampaign` in this build; `player_unit_position` is Rust-only;
+  `MindRender.get_stats()` and `.slice()` on a `call()` result are eval-toxic)
+  — check `has_method`/the exposing class first.
+- `/root/MindInput` does not exist — the input facade is `/root/Spine/Input`.
+- Research unlocks persist in `user://config/settings.bin` across relaunches;
+  `clear_planet_campaign_saves` does not clear them — call
+  `MindCampaign.clear_research()` before a fork that expects locked tech.
+- Same-frame palette close+open leaves auto-renamed duplicate buttons; drive it
+  as two calls and resolve targets by `tooltip_text`, skipping
+  `is_queued_for_deletion()` nodes — a `get_node()` on the stale name pins.
+- After the chooser OK, a probe in the same call can read
+  `_selected_sector == -1` (planet view still building); never resolve a click
+  from a negative probe — re-probe once, it self-resolves.
 
 ## 9. Scenario queue
 
 Growing coverage; `parity/mcp_catalog.json` wins where ids overlap. Seed live
-surface with `seed-survey`; reuse the matching chain where one exists.
+surface with a seed sweep; reuse the matching item's stored sequence where one
+exists (scan item titles in `parity-ledger.json`).
 
 | id | goal | primary oracle |
 |---|---|---|

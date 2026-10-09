@@ -1,7 +1,7 @@
 {
- "schema": "mindustry-godot/parity-ledger@2",
- "updated": "2026-10-09T20:52:59Z",
- "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction chains. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
+ "schema": "mindustry-godot/parity-ledger@3",
+ "updated": "2026-10-09T21:45:27Z",
+ "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
  "focus": {
   "kind": "area",
   "target": "campaign",
@@ -38,14 +38,14 @@
    "wontfix"
   ],
   "status_notes": {
-   "seeded": "discovered or compiled from a chain; no fresh matched run yet",
-   "verified": "closed; evidence class in verified.mode (seed = one observation per leg in a seed sweep, chain = full path+steps re-run under the gate, reference = fresh Godot run gated against a stored Java reference frame, twin = fresh Java+Godot pair captured by the twin-verifier subagent - the only mode that settles a reference item)",
+   "seeded": "discovered or compiled from an existing sequence; no fresh matched run yet",
+   "verified": "closed; evidence class in verified.mode (seed = one observation per leg in a seed sweep, chain = full path+steps re-run under the gate, reference = fresh Godot run gated against a stored Java reference frame, twin = fresh Java+Godot pair captured by the twin-verifier subagent). reference and twin both settle a reference item: a no-fix Godot-only pass may close directly as reference; a walk that landed a code fix (or a run wanting independent verification) settles as twin.",
    "mismatch": "a run stopped here with fresh artifacts from both legs (a seed sweep can open an item as mismatch directly)",
    "blocked": "cannot be run (client will not launch, bridge down, ...); the failing tool call is recorded in mismatch or fix",
    "reference": "Java-side reference evidence recorded by a soak (skill \u00a72b); not a verdict \u2014 the Godot walk (verified.mode=reference, skill \u00a73b) is still open"
   },
   "focus": {
-   "role": "Operator scope; wins over the default queue. kind=item runs that PAR-####; kind=area|path runs the first non-verified item whose surface/title/chain/parent lineage/path.to matches the target/path tokens, or seeds that area when none exist yet. Copy into run.json and bump updated when changed; null resumes the global queue.",
+   "role": "Operator scope; wins over the default queue. kind=item runs that PAR-####; kind=area|path runs the first non-verified item whose surface/title/parent lineage/path.to matches the target/path tokens, or seeds that area when none exist yet. Copy into run.json and bump updated when changed; null resumes the global queue.",
    "example": "{kind: 'area', target: 'campaign', path: 'Play > Campaign'}"
   },
   "hiccups": {
@@ -87,7 +87,6 @@
    "surface": "menu | campaign | hud | world | editor | settings | database | mods | multiplayer | boot",
    "parent": "PAR-0001 or null (the fork item that revealed it)",
    "status": "seeded",
-   "chain": "chains/<name>.md",
    "updated": "ISO8601",
    "discovered_by": "runs/<dir>/ or null",
    "reference": null,
@@ -136,8 +135,16 @@
     "reference.frames": "{fork, action, ...} relative to the run dir",
     "reference.settle": "[{after, wait_ms}] the waits that made the action land",
     "reference.expected": "{bundle: [keys], objective: text}",
-    "reference.chain": "chains/java-ref-<area>.md",
     "reference.checkpoint": "save path for the next replay, or null"
+   }
+  },
+  "sequences": {
+   "role": "The ledger is the single source for re-runnable sequences (there is no chains/ directory). Every item embeds its own calls: path = fast-forward navigation to the fork, replayed back-to-back once per leg as one execute chain (never captured or diffed per step; confirm the fork once per leg); reproduce = the exact calls for the action under test; steps = the mirrored steps with frames/diffs; reference.java_path + reference.settle = stored Java soak evidence.",
+   "ref": {
+    "tool": "parity-ledger.json",
+    "params": {
+     "ref": "<path|reproduce|steps>.<java|godot>"
+    }
    }
   }
  },
@@ -179,7 +186,6 @@
    "surface": "boot",
    "parent": null,
    "status": "seeded",
-   "chain": "chains/boot-and-identity.md",
    "updated": "2026-10-09T05:35:23Z",
    "discovered_by": null,
    "path": {
@@ -416,7 +422,6 @@
    "surface": "boot",
    "parent": "PAR-0001",
    "status": "seeded",
-   "chain": "chains/seed-survey.md",
    "updated": "2026-10-09T04:36:08Z",
    "discovered_by": "runs/20261009-043149-seed-boot/",
    "path": {
@@ -665,7 +670,6 @@
    "surface": "boot",
    "parent": "PAR-0001",
    "status": "seeded",
-   "chain": "chains/seed-survey.md",
    "updated": "2026-10-09T04:36:08Z",
    "discovered_by": "runs/20261009-043149-seed-boot/",
    "path": {
@@ -913,7 +917,6 @@
    "surface": "boot",
    "parent": "PAR-0001",
    "status": "seeded",
-   "chain": "chains/seed-survey.md",
    "updated": "2026-10-09T04:36:08Z",
    "discovered_by": "runs/20261009-043149-seed-boot/",
    "path": {
@@ -1161,7 +1164,6 @@
    "surface": "boot",
    "parent": "PAR-0001",
    "status": "seeded",
-   "chain": "chains/seed-survey.md",
    "updated": "2026-10-09T04:36:08Z",
    "discovered_by": "runs/20261009-043149-seed-boot/",
    "path": {
@@ -1409,7 +1411,6 @@
    "surface": "boot",
    "parent": "PAR-0001",
    "status": "seeded",
-   "chain": "chains/seed-survey.md",
    "updated": "2026-10-09T04:36:08Z",
    "discovered_by": "runs/20261009-043149-seed-boot/",
    "path": {
@@ -1657,7 +1658,6 @@
    "surface": "boot",
    "parent": "PAR-0001",
    "status": "seeded",
-   "chain": "chains/seed-survey.md",
    "updated": "2026-10-09T04:36:08Z",
    "discovered_by": "runs/20261009-043149-seed-boot/",
    "path": {
@@ -1900,7 +1900,6 @@
    "surface": "boot",
    "parent": "PAR-0001",
    "status": "seeded",
-   "chain": "chains/seed-survey.md",
    "updated": "2026-10-09T04:36:08Z",
    "discovered_by": "runs/20261009-043149-seed-boot/",
    "path": {
@@ -2097,7 +2096,6 @@
    "surface": "campaign",
    "parent": "PAR-0002",
    "status": "verified",
-   "chain": "chains/campaign-planet-page-seed.md",
    "updated": "2026-10-09T05:36:12Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
@@ -2401,18 +2399,18 @@
    "reproduce": {
     "java": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "java",
+       "ref": "path.java (fast-forward) + steps[]",
        "coords": "window +45+69; Play(275,218) Campaign(522,220) Serpulo(459,309) OK(622,676)"
       }
      }
     ],
     "godot": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "godot",
+       "ref": "path.godot (fast-forward) + steps[]",
        "coords": "viewport; Play(230,149) Campaign(460,149) Serpulo(412,194) OK(499,634)"
       }
      }
@@ -2452,7 +2450,6 @@
    "surface": "campaign",
    "parent": "PAR-0002",
    "status": "mismatch",
-   "chain": "chains/campaign-planet-page-seed.md",
    "updated": "2026-10-09T05:35:23Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
@@ -2756,18 +2753,18 @@
    "reproduce": {
     "java": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "java",
+       "ref": "path.java (fast-forward) + steps[]",
        "coords": "window +45+69; Play(275,218) Campaign(522,220) Serpulo(459,309) OK(622,676)"
       }
      }
     ],
     "godot": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "godot",
+       "ref": "path.godot (fast-forward) + steps[]",
        "coords": "viewport; Play(230,149) Campaign(460,149) Serpulo(412,194) OK(499,634)"
       }
      }
@@ -2994,7 +2991,6 @@
    "surface": "campaign",
    "parent": "PAR-0002",
    "status": "seeded",
-   "chain": "chains/campaign-planet-page-seed.md",
    "updated": "2026-10-09T05:35:23Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
@@ -3298,18 +3294,18 @@
    "reproduce": {
     "java": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "java",
+       "ref": "path.java (fast-forward) + steps[]",
        "coords": "window +45+69; Play(275,218) Campaign(522,220) Serpulo(459,309) OK(622,676)"
       }
      }
     ],
     "godot": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "godot",
+       "ref": "path.godot (fast-forward) + steps[]",
        "coords": "viewport; Play(230,149) Campaign(460,149) Serpulo(412,194) OK(499,634)"
       }
      }
@@ -3341,7 +3337,6 @@
    "surface": "campaign",
    "parent": "PAR-0002",
    "status": "verified",
-   "chain": "chains/campaign-planet-page-seed.md",
    "updated": "2026-10-09T07:06:00Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
@@ -3645,18 +3640,18 @@
    "reproduce": {
     "java": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "java",
+       "ref": "path.java (fast-forward) + steps[]",
        "coords": "window +45+69; Play(275,218) Campaign(522,220) Serpulo(459,309) OK(622,676)"
       }
      }
     ],
     "godot": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "godot",
+       "ref": "path.godot (fast-forward) + steps[]",
        "coords": "viewport; Play(230,149) Campaign(460,149) Serpulo(412,194) OK(499,634)"
       }
      }
@@ -3697,7 +3692,6 @@
    "surface": "campaign",
    "parent": "PAR-0002",
    "status": "seeded",
-   "chain": "chains/campaign-planet-page-seed.md",
    "updated": "2026-10-09T05:35:23Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
@@ -4001,18 +3995,18 @@
    "reproduce": {
     "java": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "java",
+       "ref": "path.java (fast-forward) + steps[]",
        "coords": "window +45+69; Play(275,218) Campaign(522,220) Serpulo(459,309) OK(622,676)"
       }
      }
     ],
     "godot": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "godot",
+       "ref": "path.godot (fast-forward) + steps[]",
        "coords": "viewport; Play(230,149) Campaign(460,149) Serpulo(412,194) OK(499,634)"
       }
      }
@@ -4044,7 +4038,6 @@
    "surface": "campaign",
    "parent": "PAR-0002",
    "status": "mismatch",
-   "chain": "chains/campaign-planet-page-seed.md",
    "updated": "2026-10-09T05:35:23Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
@@ -4348,18 +4341,18 @@
    "reproduce": {
     "java": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "java",
+       "ref": "path.java (fast-forward) + steps[]",
        "coords": "window +45+69; Play(275,218) Campaign(522,220) Serpulo(459,309) OK(622,676)"
       }
      }
     ],
     "godot": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "godot",
+       "ref": "path.godot (fast-forward) + steps[]",
        "coords": "viewport; Play(230,149) Campaign(460,149) Serpulo(412,194) OK(499,634)"
       }
      }
@@ -4412,7 +4405,6 @@
    "surface": "campaign",
    "parent": "PAR-0002",
    "status": "mismatch",
-   "chain": "chains/campaign-planet-page-seed.md",
    "updated": "2026-10-09T05:39:56Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
@@ -4716,18 +4708,18 @@
    "reproduce": {
     "java": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "java",
+       "ref": "path.java (fast-forward) + steps[]",
        "coords": "window +45+69; Play(275,218) Campaign(522,220) Serpulo(459,309) OK(622,676)"
       }
      }
     ],
     "godot": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "godot",
+       "ref": "path.godot (fast-forward) + steps[]",
        "coords": "viewport; Play(230,149) Campaign(460,149) Serpulo(412,194) OK(499,634)"
       }
      }
@@ -4846,7 +4838,6 @@
    "surface": "campaign",
    "parent": "PAR-0002",
    "status": "mismatch",
-   "chain": "chains/campaign-planet-page-seed.md",
    "updated": "2026-10-09T05:42:42Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
@@ -5150,18 +5141,18 @@
    "reproduce": {
     "java": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "java",
+       "ref": "path.java (fast-forward) + steps[]",
        "coords": "window +45+69; Play(275,218) Campaign(522,220) Serpulo(459,309) OK(622,676)"
       }
      }
     ],
     "godot": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "godot",
+       "ref": "path.godot (fast-forward) + steps[]",
        "coords": "viewport; Play(230,149) Campaign(460,149) Serpulo(412,194) OK(499,634)"
       }
      }
@@ -5219,7 +5210,6 @@
    "surface": "campaign",
    "parent": "PAR-0002",
    "status": "mismatch",
-   "chain": "chains/campaign-planet-page-seed.md",
    "updated": "2026-10-09T05:39:56Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
@@ -5523,18 +5513,18 @@
    "reproduce": {
     "java": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "java",
+       "ref": "path.java (fast-forward) + steps[]",
        "coords": "window +45+69; Play(275,218) Campaign(522,220) Serpulo(459,309) OK(622,676)"
       }
      }
     ],
     "godot": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "godot",
+       "ref": "path.godot (fast-forward) + steps[]",
        "coords": "viewport; Play(230,149) Campaign(460,149) Serpulo(412,194) OK(499,634)"
       }
      }
@@ -5578,7 +5568,6 @@
    "surface": "campaign",
    "parent": "PAR-0002",
    "status": "seeded",
-   "chain": "chains/campaign-planet-page-seed.md",
    "updated": "2026-10-09T05:35:23Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
@@ -5882,18 +5871,18 @@
    "reproduce": {
     "java": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "java",
+       "ref": "path.java (fast-forward) + steps[]",
        "coords": "window +45+69; Play(275,218) Campaign(522,220) Serpulo(459,309) OK(622,676)"
       }
      }
     ],
     "godot": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "godot",
+       "ref": "path.godot (fast-forward) + steps[]",
        "coords": "viewport; Play(230,149) Campaign(460,149) Serpulo(412,194) OK(499,634)"
       }
      }
@@ -5925,7 +5914,6 @@
    "surface": "campaign",
    "parent": "PAR-0002",
    "status": "mismatch",
-   "chain": "chains/campaign-planet-page-seed.md",
    "updated": "2026-10-09T07:06:00Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
@@ -6229,18 +6217,18 @@
    "reproduce": {
     "java": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "java",
+       "ref": "path.java (fast-forward) + steps[]",
        "coords": "window +45+69; Play(275,218) Campaign(522,220) Serpulo(459,309) OK(622,676)"
       }
      }
     ],
     "godot": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "godot",
+       "ref": "path.godot (fast-forward) + steps[]",
        "coords": "viewport; Play(230,149) Campaign(460,149) Serpulo(412,194) OK(499,634)"
       }
      }
@@ -6342,7 +6330,6 @@
       "note": "r00-02 retaken at +14 s as r00-03; identical metrics (mean 194.46/194.47, std 65.76); r00-03 is the reference"
      }
     ],
-    "chain": "chains/java-ref-ground-zero-tutorial.md",
     "checkpoint": "runs/20261009-065416-ref-ground-zero/checkpoints/r00-sector-serpulo-170.msav",
     "java_path": [
      {
@@ -6427,7 +6414,6 @@
    "surface": "campaign",
    "parent": "PAR-0002",
    "status": "seeded",
-   "chain": "chains/campaign-planet-page-seed.md",
    "updated": "2026-10-09T05:35:23Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
@@ -6731,18 +6717,18 @@
    "reproduce": {
     "java": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "java",
+       "ref": "path.java (fast-forward) + steps[]",
        "coords": "window +45+69; Play(275,218) Campaign(522,220) Serpulo(459,309) OK(622,676)"
       }
      }
     ],
     "godot": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "godot",
+       "ref": "path.godot (fast-forward) + steps[]",
        "coords": "viewport; Play(230,149) Campaign(460,149) Serpulo(412,194) OK(499,634)"
       }
      }
@@ -6774,7 +6760,6 @@
    "surface": "campaign",
    "parent": "PAR-0002",
    "status": "seeded",
-   "chain": "chains/campaign-planet-page-seed.md",
    "updated": "2026-10-09T05:35:23Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
@@ -7078,18 +7063,18 @@
    "reproduce": {
     "java": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "java",
+       "ref": "path.java (fast-forward) + steps[]",
        "coords": "window +45+69; Play(275,218) Campaign(522,220) Serpulo(459,309) OK(622,676)"
       }
      }
     ],
     "godot": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "godot",
+       "ref": "path.godot (fast-forward) + steps[]",
        "coords": "viewport; Play(230,149) Campaign(460,149) Serpulo(412,194) OK(499,634)"
       }
      }
@@ -7121,7 +7106,6 @@
    "surface": "campaign",
    "parent": "PAR-0002",
    "status": "seeded",
-   "chain": "chains/campaign-planet-page-seed.md",
    "updated": "2026-10-09T05:35:23Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
@@ -7425,18 +7409,18 @@
    "reproduce": {
     "java": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "java",
+       "ref": "path.java (fast-forward) + steps[]",
        "coords": "window +45+69; Play(275,218) Campaign(522,220) Serpulo(459,309) OK(622,676)"
       }
      }
     ],
     "godot": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "godot",
+       "ref": "path.godot (fast-forward) + steps[]",
        "coords": "viewport; Play(230,149) Campaign(460,149) Serpulo(412,194) OK(499,634)"
       }
      }
@@ -7468,7 +7452,6 @@
    "surface": "campaign",
    "parent": "PAR-0002",
    "status": "seeded",
-   "chain": "chains/campaign-planet-page-seed.md",
    "updated": "2026-10-09T05:35:23Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
@@ -7772,18 +7755,18 @@
    "reproduce": {
     "java": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "java",
+       "ref": "path.java (fast-forward) + steps[]",
        "coords": "window +45+69; Play(275,218) Campaign(522,220) Serpulo(459,309) OK(622,676)"
       }
      }
     ],
     "godot": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "godot",
+       "ref": "path.godot (fast-forward) + steps[]",
        "coords": "viewport; Play(230,149) Campaign(460,149) Serpulo(412,194) OK(499,634)"
       }
      }
@@ -7815,7 +7798,6 @@
    "surface": "campaign",
    "parent": "PAR-0019",
    "status": "mismatch",
-   "chain": "chains/campaign-planet-page-seed.md",
    "updated": "2026-10-09T05:39:56Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
@@ -7855,9 +7837,9 @@
     "java": [],
     "godot": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "godot-configure-loadout"
+       "ref": "path.godot-configure-loadout (fast-forward) + steps[]"
       }
      }
     ],
@@ -7917,7 +7899,6 @@
    "surface": "campaign",
    "parent": "PAR-0024",
    "status": "seeded",
-   "chain": "chains/campaign-planet-page-seed.md",
    "updated": "2026-10-09T05:42:06Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
@@ -7957,9 +7938,9 @@
     "java": [],
     "godot": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "godot-configure-loadout"
+       "ref": "path.godot-configure-loadout (fast-forward) + steps[]"
       }
      }
     ],
@@ -7981,7 +7962,6 @@
    "surface": "campaign",
    "parent": "PAR-0024",
    "status": "seeded",
-   "chain": "chains/campaign-planet-page-seed.md",
    "updated": "2026-10-09T05:39:56Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
@@ -8021,9 +8001,9 @@
     "java": [],
     "godot": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "godot-configure-loadout"
+       "ref": "path.godot-configure-loadout (fast-forward) + steps[]"
       }
      }
     ],
@@ -8045,7 +8025,6 @@
    "surface": "campaign",
    "parent": "PAR-0024",
    "status": "seeded",
-   "chain": "chains/campaign-planet-page-seed.md",
    "updated": "2026-10-09T05:39:56Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
@@ -8085,9 +8064,9 @@
     "java": [],
     "godot": [
      {
-      "tool": "chains/campaign-planet-page-seed.md",
+      "tool": "parity-ledger.json",
       "params": {
-       "leg": "godot-configure-loadout"
+       "ref": "path.godot-configure-loadout (fast-forward) + steps[]"
       }
      }
     ],
@@ -8109,7 +8088,6 @@
    "surface": "world",
    "parent": "PAR-0019",
    "status": "mismatch",
-   "chain": "chains/campaign-world-tutorial-seed.md",
    "updated": "2026-10-09T07:06:00Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
@@ -8338,7 +8316,6 @@
       "note": "r00-02 retaken at +14 s as r00-03; identical metrics (mean 194.46/194.47, std 65.76); r00-03 is the reference"
      }
     ],
-    "chain": "chains/java-ref-ground-zero-tutorial.md",
     "checkpoint": "runs/20261009-065416-ref-ground-zero/checkpoints/r00-sector-serpulo-170.msav",
     "java_path": [
      {
@@ -8427,7 +8404,6 @@
    "surface": "world",
    "parent": "PAR-0028",
    "status": "seeded",
-   "chain": "chains/campaign-world-tutorial-seed.md",
    "updated": "2026-10-09T05:42:06Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
@@ -8482,7 +8458,6 @@
    "surface": "world",
    "parent": "PAR-0028",
    "status": "seeded",
-   "chain": "chains/campaign-world-tutorial-seed.md",
    "updated": "2026-10-09T05:42:06Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
@@ -8527,7 +8502,6 @@
    "surface": "world",
    "parent": "PAR-0028",
    "status": "mismatch",
-   "chain": "chains/campaign-world-tutorial-seed.md",
    "updated": "2026-10-09T05:55:42Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
@@ -8647,7 +8621,6 @@
    "surface": "world",
    "parent": "PAR-0028",
    "status": "seeded",
-   "chain": "chains/campaign-world-tutorial-seed.md",
    "updated": "2026-10-09T07:06:00Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
@@ -8699,7 +8672,6 @@
    "surface": "world",
    "parent": "PAR-0028",
    "status": "seeded",
-   "chain": "chains/campaign-world-tutorial-seed.md",
    "updated": "2026-10-09T07:06:00Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
@@ -8747,7 +8719,6 @@
    "surface": "world",
    "parent": "PAR-0028",
    "status": "seeded",
-   "chain": "chains/campaign-world-tutorial-seed.md",
    "updated": "2026-10-09T07:06:00Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
@@ -8795,7 +8766,6 @@
    "surface": "world",
    "parent": "PAR-0028",
    "status": "seeded",
-   "chain": "chains/campaign-world-tutorial-seed.md",
    "updated": "2026-10-09T07:06:00Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
@@ -8843,7 +8813,6 @@
    "surface": "world",
    "parent": "PAR-0028",
    "status": "seeded",
-   "chain": "chains/campaign-world-tutorial-seed.md",
    "updated": "2026-10-09T07:06:00Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
@@ -8891,7 +8860,6 @@
    "surface": "world",
    "parent": "PAR-0019",
    "status": "verified",
-   "chain": "chains/java-ref-ground-zero-tutorial.md",
    "updated": "2026-10-09T15:29:16Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
@@ -9699,7 +9667,7 @@
     "twin_run": "runs/20261009-150509-PAR-0037-twin/",
     "java_frame": "runs/20261009-150509-PAR-0037-twin/java/resume-2.png",
     "godot_frame": "runs/20261009-150509-PAR-0037-twin/godot/resume.png",
-    "note": "Twin re-ran both legs fresh. Java: installed the reference checkpoint r01-sector-serpulo-170.msav, resumed via the R01 path (Play > Campaign > hex > Go); its fresh frame reproduces the stored reference (changed_fraction 0.00507, mean_abs [0.53,0.49,0.41], coarse 0.21) and the meta confirms the Ground Zero objective graph (Item amount:15). Godot (fresh process, pid 204104): clear saves -> load_sector+start_sector+step(3) -> run_exit_save -> UI Play > Campaign > sector 15 > Go -> sector_state campaign:true sector:15 hasCore/hasSave true, core_items_json {}, HUD status 'Obtain: 0/15 Copper' (with the item glyph), camera (1032,440), tile_to_screen(129,55) (576,324). Twin pair frames: 0.47283 / [22.26,20.68,16.93] / coarse 8.84 - the calibrated presentation class (item calibration block), not the settle basis. Settled on the strongest evidence class (structured state, skill 4) with fresh both-leg frames as supporting artifacts. Twin also added chains/ground-zero-resume-godot.md and bumped chains/java-ref-ground-zero-tutorial.md."
+    "note": "Twin re-ran both legs fresh. Java: installed the reference checkpoint r01-sector-serpulo-170.msav, resumed via the R01 path (Play > Campaign > hex > Go); its fresh frame reproduces the stored reference (changed_fraction 0.00507, mean_abs [0.53,0.49,0.41], coarse 0.21) and the meta confirms the Ground Zero objective graph (Item amount:15). Godot (fresh process, pid 204104): clear saves -> load_sector+start_sector+step(3) -> run_exit_save -> UI Play > Campaign > sector 15 > Go -> sector_state campaign:true sector:15 hasCore/hasSave true, core_items_json {}, HUD status 'Obtain: 0/15 Copper' (with the item glyph), camera (1032,440), tile_to_screen(129,55) (576,324). Twin pair frames: 0.47283 / [22.26,20.68,16.93] / coarse 8.84 - the calibrated presentation class (item calibration block), not the settle basis. Settled on the strongest evidence class (structured state, skill 4) with fresh both-leg frames as supporting artifacts. Twin also recorded the Godot-side resume sequence and refreshed the Java reference entry."
    },
    "reference": {
     "captured": "2026-10-09T07:08:24Z",
@@ -9752,7 +9720,6 @@
      "hint": "Use [WASD] to move.",
      "state": "resumed world identical to the pre-quit frame (frame_diff r00-03 vs r01-05: changed_fraction 0.00011, mean_abs 0.01)"
     },
-    "chain": "chains/java-ref-ground-zero-tutorial.md",
     "checkpoint": "runs/20261009-065416-ref-ground-zero/checkpoints/r01-sector-serpulo-170.msav",
     "checkpoint_note": "live parity-java-home/.local/share/Mindustry/saves/sector-serpulo-170.msav written by Save & Quit (mtime 17:07:02 changed from R00's 17:02:30); copied before the next autosave",
     "java_path": [
@@ -9900,7 +9867,6 @@
    "surface": "world",
    "parent": "PAR-0028",
    "status": "seeded",
-   "chain": "chains/java-ref-ground-zero-tutorial.md",
    "updated": "2026-10-09T07:09:30Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
@@ -9946,7 +9912,6 @@
    "surface": "world",
    "parent": "PAR-0038",
    "status": "seeded",
-   "chain": "chains/java-ref-ground-zero-tutorial.md",
    "updated": "2026-10-09T07:09:30Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
@@ -9993,7 +9958,6 @@
    "surface": "world",
    "parent": "PAR-0038",
    "status": "seeded",
-   "chain": "chains/java-ref-ground-zero-tutorial.md",
    "updated": "2026-10-09T07:09:30Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
@@ -10040,7 +10004,6 @@
    "surface": "world",
    "parent": "PAR-0038",
    "status": "seeded",
-   "chain": "chains/java-ref-ground-zero-tutorial.md",
    "updated": "2026-10-09T07:09:30Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
@@ -10087,7 +10050,6 @@
    "surface": "world",
    "parent": "PAR-0038",
    "status": "seeded",
-   "chain": "chains/java-ref-ground-zero-tutorial.md",
    "updated": "2026-10-09T07:09:30Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
@@ -10134,7 +10096,6 @@
    "surface": "world",
    "parent": "PAR-0038",
    "status": "seeded",
-   "chain": "chains/java-ref-ground-zero-tutorial.md",
    "updated": "2026-10-09T07:09:30Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
@@ -10181,7 +10142,6 @@
    "surface": "world",
    "parent": "PAR-0028",
    "status": "blocked",
-   "chain": "chains/java-ref-ground-zero-tutorial.md",
    "updated": "2026-10-09T09:52:50Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
@@ -10554,7 +10514,6 @@
      "objective": "Obtain: 0/15 Copper (unchanged)",
      "observation": "the camera follows the player; after 900 ms of S the view showed the snow plateau edge south of the field; 900 ms of W returned to the copper field (r02-04 vs r02-00 changed_fraction 0.48)"
     },
-    "chain": "chains/java-ref-ground-zero-tutorial.md",
     "checkpoint": "runs/20261009-065416-ref-ground-zero/checkpoints/r02-sector-serpulo-170.msav",
     "checkpoint_note": "autosave mtime 17:11:01 (changed from R01's 17:07:02); copied before the next autosave",
     "java_path": [
@@ -10607,7 +10566,6 @@
    "surface": "world",
    "parent": "PAR-0028",
    "status": "blocked",
-   "chain": "chains/java-ref-ground-zero-tutorial.md",
    "updated": "2026-10-09T10:17:34Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
@@ -10807,7 +10765,6 @@
      "counter": "core-copper HUD top-center appears: 39 at +3.5 s, 74 at +9.5 s",
      "state": "the mech mines the highlighted copper tile; the objective panel advances to the drill objective"
     },
-    "chain": "chains/java-ref-ground-zero-tutorial.md",
     "checkpoint": "runs/20261009-065416-ref-ground-zero/checkpoints/r03-sector-serpulo-170.msav",
     "checkpoint_note": "autosave mtime 17:13:01 (changed from R02's 17:11:01)",
     "java_path": [
@@ -10854,7 +10811,6 @@
    "surface": "world",
    "parent": "PAR-0028",
    "status": "verified",
-   "chain": "chains/java-ref-ground-zero-tutorial.md",
    "updated": "2026-10-09T16:49:23Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
@@ -11135,7 +11091,6 @@
      "objective_after": "Move into Core: 0/5 Copper (objective 2) with conveyor prompt",
      "state": "drill placed on the highlighted copper patch; placement preview was on the gold 2x2 target before the click"
     },
-    "chain": "chains/java-ref-ground-zero-tutorial.md",
     "checkpoint": "runs/20261009-065416-ref-ground-zero/checkpoints/r04-sector-serpulo-170.msav",
     "checkpoint_note": "autosave copied after the placement (mtime changed from R03's 17:13:02)",
     "java_path": [
@@ -11229,7 +11184,6 @@
    "surface": "world",
    "parent": "PAR-0046",
    "status": "seeded",
-   "chain": "chains/java-ref-ground-zero-tutorial.md",
    "updated": "2026-10-09T07:18:30Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
@@ -11283,7 +11237,6 @@
    "surface": "world",
    "parent": "PAR-0046",
    "status": "seeded",
-   "chain": "chains/java-ref-ground-zero-tutorial.md",
    "updated": "2026-10-09T07:18:30Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
@@ -11336,7 +11289,6 @@
    "surface": "world",
    "parent": "PAR-0046",
    "status": "verified",
-   "chain": "chains/java-ref-ground-zero-tutorial.md",
    "updated": "2026-10-09T20:52:59Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
@@ -11620,7 +11572,6 @@
      "objective_after": "Move into Core: 24/100 Copper (objective 3) with the 'Expand the mining operation. Place more Mechanical Drills. Mine 100 copper.' prompt and hint 'Right-click and drag to break blocks.'",
      "flow": "drill dumps to any adjacent transporter (BuildingComp.dump proximity loop); copper nuggets visible on the belt; core copper 2.9k -> 4.0k while delivering"
     },
-    "chain": "chains/java-ref-ground-zero-tutorial.md",
     "checkpoint": "runs/20261009-065416-ref-ground-zero/checkpoints/r05-sector-serpulo-170.msav",
     "checkpoint_note": "autosave copied after the deliveries (mtime changed from R04)",
     "java_path": [
@@ -11712,7 +11663,6 @@
    "surface": "world",
    "parent": "PAR-0049",
    "status": "seeded",
-   "chain": "chains/java-ref-ground-zero-tutorial.md",
    "updated": "2026-10-09T07:35:00Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
@@ -11752,7 +11702,6 @@
    "surface": "world",
    "parent": "PAR-0049",
    "status": "reference",
-   "chain": "chains/java-ref-ground-zero-tutorial.md",
    "updated": "2026-10-09T07:39:30Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
@@ -11919,7 +11868,6 @@
      "objective_after": "Move into Core: 0/25 Lead (the lead objective, gz.lead) - R07",
      "state": "2nd drill (footprint image 687-751,479-543) + 4-tile north column (x=703) placed; items visible on the column; counter crossed 100 within ~40 s of the placement"
     },
-    "chain": "chains/java-ref-ground-zero-tutorial.md",
     "checkpoint": "runs/20261009-065416-ref-ground-zero/checkpoints/r06-sector-serpulo-170.msav",
     "checkpoint_note": "autosave copied after the objective completed (mtime changed from R05)",
     "java_path": [
@@ -11978,7 +11926,6 @@
    "surface": "world",
    "parent": "PAR-0028",
    "status": "blocked",
-   "chain": "chains/java-ref-ground-zero-tutorial.md",
    "updated": "2026-10-09T10:19:10Z",
    "discovered_by": "runs/20261009-085822-PAR-0044/",
    "path": {
@@ -12026,7 +11973,6 @@
    "surface": "world",
    "parent": "PAR-0028",
    "status": "blocked",
-   "chain": "chains/java-ref-ground-zero-tutorial.md",
    "updated": "2026-10-09T10:19:10Z",
    "discovered_by": "runs/20261009-085822-PAR-0044/",
    "path": {
@@ -12074,7 +12020,6 @@
    "surface": "campaign",
    "parent": "PAR-0024",
    "status": "blocked",
-   "chain": "chains/java-ref-ground-zero-tutorial.md",
    "updated": "2026-10-09T10:19:23Z",
    "discovered_by": "runs/20261009-092821-PAR-0044/",
    "claim": {
@@ -12149,7 +12094,6 @@
    "surface": "world",
    "parent": "PAR-0053",
    "status": "blocked",
-   "chain": "chains/ground-zero-wasd-movement.md",
    "updated": "2026-10-09T10:19:23Z",
    "discovered_by": "runs/20261009-092821-PAR-0044/",
    "path": {
@@ -12225,7 +12169,6 @@
    "surface": "world",
    "parent": "PAR-0045",
    "status": "verified",
-   "chain": "chains/ground-zero-fresh-launch.md",
    "updated": "2026-10-09T14:23:44Z",
    "discovered_by": "runs/20261009-132040-PAR-0037/",
    "path": {
@@ -12341,7 +12284,6 @@
    "surface": "hud",
    "parent": "PAR-0037",
    "status": "seeded",
-   "chain": "chains/probe-hud.md",
    "updated": "2026-10-09T14:23:44Z",
    "discovered_by": "runs/20261009-132040-PAR-0037/",
    "path": {
@@ -12439,7 +12381,6 @@
    "surface": "world",
    "parent": "PAR-0046",
    "status": "seeded",
-   "chain": "chains/ground-zero-click-mining.md",
    "updated": "2026-10-09T16:21:40Z",
    "discovered_by": "runs/20261009-153006-PAR-0046/",
    "path": {
