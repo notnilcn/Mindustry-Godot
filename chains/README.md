@@ -1,12 +1,21 @@
 # MCP call-chain ledger
 
-Proven, project-specific sequences of open-godot-mcp calls for Mindustry-Godot.
-Agents consult the matching chain before composing their own tool calls and
-append a chain (or bump one to `verified`) after a run confirms the sequence.
+Proven, project-specific sequences of MCP calls for Mindustry-Godot. Agents
+consult the matching chain before composing their own tool calls and append a
+chain (or bump one to `verified`) after a run confirms the sequence. A chain
+covers one leg (Godot via `godot_*`; Java via `computer-mcp_*`) or both legs of
+a mirrored parity item.
 
 Generic MCP mechanics stay in the skills; this directory holds only what is
 specific to this project: which sequence enters a flow, which node/method to
 touch, which precondition is easy to miss.
+
+> Historical note: entries dated before 2026-10-09 reference the retired
+> dual-loop workflow (`.opencode/loops`, `.opencode/evals/runs`, `PARITY_*`
+> variables, `EV-####` ledger ids). Those paths no longer exist; treat the
+> sequences as recipes, not as live paths. Current runs live in
+> `runs/<stamp>-<item>/`, progress lives in `parity-ledger.json`, and work is
+> driven by the `/loop` / `/goal` plugins.
 
 ## Layout
 
@@ -45,6 +54,13 @@ touch, which precondition is easy to miss.
 | `placement-rotation.md` | select conveyor → R and wheel rotate pending (`input_state_json.rotation`) → mouse place → dump tile `rot` → R over placed building cycles `rot` mod 4 (EV-0056) |
 | `custom-game-map-list.md` | menu Play → Custom Game → `DialogLayer/custom._maps()` live rows (18, real width/height/author/path) + Editor cross-check (EV-0039) |
 | `campaign-live-views-capture.md` | planet dialog live sector state → `capture_sector` → panel/read-model update (EV-0051) |
+| `block-config-fragment.md` | place a configurable block → `block_config` fragment → config options read-back |
+| `campaign-save-restore.md` | save a campaign slot → reload it → production/state equality |
+| `database-grid-audit.md` | settings/database grid scroll + cell click → content rows |
+| `keybind-rebind-camera.md` | settings Controls → rebind a camera key → held-key pan read-back |
+| `pause-save-dialog.md` | paused menu → Save Game dialog → slot write |
+| `research-root-switch.md` | research dialog → switch root rail → node list rebuild |
+| `settings-gamedata-actions.md` | settings Game Data → export/import/clear actions |
 
 ## Entry schema
 
@@ -75,20 +91,20 @@ Body sections: `## Steps` (exact tool + action + params, one step per call),
   No prose-only sequences, no hardcoded click coordinates — resolve controls
   through `get_global_rect().get_center()`.
 - **Preconditions include the host.** Servers that need a display or another
-  process-start environment variable belong in `preconditions`; the Java leg
-  (computer-mcp) needs `DISPLAY` at opencode start, the Godot leg does not (the
-  loop wrapper hands it the weston/Wayland compositor through
-  `WAYLAND_DISPLAY`/`XDG_RUNTIME_DIR`).
+  process-start environment variable belong in `preconditions`. Both legs now
+  share display `:10`: computer-mcp gets `DISPLAY=:10.0` from the global
+  opencode config, and the Godot editor runs there too (bridge port 6970).
+  Raise the Java window (`window_ctl.py raise Mindustry`) before a Java capture.
 - **Keep it current.** When a step fails at the same commit, fix the chain in
   the same change that fixes the tooling.
 - **Server-tag each chain.** The Godot leg uses open-godot-mcp (`godot_*`
   tools); the Java leg uses computer-mcp (`computer-mcp_*` tools, or
-  `parity-click.sh` for scripted clicks). Name the server in the chain's
-  `tools` list so the next agent picks the right protocol.
+  `window_ctl.py` / `capture_screen.py` for window ops and captures). Name the
+  server in the chain's `tools` list so the next agent picks the right protocol.
 - **Friction is not a chain.** One-off tool errors and their workarounds go to
   the repo-root `open-godot-mcp-learnings.md` / `computer-mcp-learnings.md`,
   not here.
 
-Consumers: the `gap-identifier`, `parity-writer`, and `twin-evaluator`
-subagents, the `parity-orchestrator` / `twin-orchestrator` contracts, and any
-playtest session. Skills point here; they do not duplicate the sequences.
+Consumers: the `/loop` and `/goal` parity sessions driven through the
+`parity-eval` skill, and any playtest session. Skills point here; they do not
+duplicate the sequences.

@@ -1,5 +1,0 @@
-# Run artifacts are local evidence, not repo content.
-runs/
-findings.json.lock
-slots.lock
-mcp-slots/

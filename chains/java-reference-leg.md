@@ -3,29 +3,34 @@ id: java-reference-leg
 title: Java reference — launch, drive a menu flow, capture, quit
 status: seeded
 applies_when: >-
-  The twin evaluator needs the Java leg of a reproduction (or any session needs
-  a reference capture) inside a parity loop.
+  A parity session needs the Java leg of a mirrored item (reference capture) on
+  the shared display :10.
 preconditions:
-  - Loop manifest exported (`start-loop.sh`): PARITY_DISPLAY, PARITY_LOOP_DIR, PARITY_EVALS_DIR, PARITY_RUN_PREFIX.
   - JDK 17 present (`bootstrap.sh --check`) and the reference jar built at `../Mindustry/desktop/build/libs/Mindustry.jar`.
-  - computer-mcp registered and opencode started with DISPLAY set (it imports pynput at module load; without an X connection its tools vanish).
-  - One client at a time on the loop display (`$PARITY_DISPLAY`; Xwayland with Weston's WM by default, Xvfb with no WM on the software fallback).
-tools: [computer-mcp_mouse_move, computer-mcp_click, computer-mcp_drag, computer-mcp_type, computer-mcp_key_press, computer-mcp_key_down, computer-mcp_key_up, computer-mcp_screenshot, computer-mcp_list_windows, computer-mcp_get_window_info]
-last_verified: 2026-10-09 2027fbe loop-2 EV-0056 (runs/l2-20261009-001432-ev0056-rotation-twin, Xwayland :2, world reached; rotation pixel-isolation not covered); 2026-10-08 9efd068 (runs/l2-20261007-163042-twin-java-ref); 2026-10-08 a1ca816 loop-1 (runs/20261008-143432-ev0062-twin); 2026-10-08 986cda3 loop-2 (runs/l2-20261008-150205-input_controls-twin); 2026-10-08 1d8f75b loop-1 (runs/20261008-105728-ev0059-host-twin); 2026-10-08 1d8f75b loop-1 EV-0038 (runs/20261008-121029-ev0038-editor-row-twin); 2026-10-08 1d8f75b loop-1 EV-0039 (runs/20261008-221916-ev0039-twin)
+  - computer-mcp registered and pointed at `DISPLAY=:10.0` (global opencode config); the Godot editor shares :10, so always raise the Java window before capturing.
+  - Persistent Java data dir `parity-java-home/` normalized (1152x648, UI scale 1.0, language en, volumes 0) and stable across runs.
+tools: [computer-mcp_mouse_move, computer-mcp_click, computer-mcp_drag, computer-mcp_type, computer-mcp_key_press, computer-mcp_key_down, computer-mcp_key_up, computer-mcp_screenshot]
+last_verified: not yet (single-display :10 recipe; legacy loop-era runs are kept in the Verified-run sections below)
 ---
 
 # java-reference-leg
 
 ## Steps
 
-1. Create the run dir and launch through the loop wrapper (it sets DISPLAY, the
-   per-loop seeded HOME and the loop's XDG dirs):
+1. Create the run dir and launch detached (`setsid` survives the shell-tool
+   timeout; a plain `nohup ... &` is killed with the tool's process group):
 
    ```bash
-   RUN="$PARITY_EVALS_DIR/runs/${PARITY_RUN_PREFIX}<stamp>-<scenario>"
+   RUN="runs/$(date -u +%Y%m%d-%H%M%S)-<item>"
    mkdir -p "$RUN/java"
-   nohup .opencode/loops/bin/run-java.sh >"$RUN/java/game.log" 2>&1 &
-   echo $! > "$RUN/java/client.pid"
+   JAR=../Mindustry/desktop/build/libs/Mindustry.jar
+   JHOME="$PWD/parity-java-home"          # persistent, gitignored
+   setsid env DISPLAY=:10 HOME="$JHOME" \
+     XDG_DATA_HOME="$JHOME/.local/share" XDG_CONFIG_HOME="$JHOME/.config" \
+     XDG_CACHE_HOME="$JHOME/.cache" \
+     /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar "$JAR" \
+     >"$RUN/java/game.log" 2>&1 </dev/null &
+   pgrep -f 'Mindustry[.]jar' > "$RUN/java/java.pid"
    ```
 
 2. Wait for the readiness line instead of a fixed sleep:
@@ -34,33 +39,40 @@ last_verified: 2026-10-09 2027fbe loop-2 EV-0056 (runs/l2-20261009-001432-ev0056
    until grep -q "Total time to load" "$RUN/java/game.log"; do sleep 2; done
    ```
 
-3. Capture the initial frame (bootstrap venv; `capture_screen.py` prints
-   mean/stddev so a blank frame is caught before it becomes a finding). Read
-   the game window directly with `--window-title`: on the Xwayland display the
-   X root holds no GPU pixels, so mss/root captures come back black. A bare
-   capture grabs the monitor and automatically retries the window when that is
-   blank. The report's `region` is the window origin/size in screen
-   coordinates — use it to turn an element offset in the capture into a click
-   coordinate:
+3. Raise the Java window (the Godot editor shares `:10`), then capture the
+   initial frame with `capture_screen.py` (it prints mean/stddev, so a blank
+   frame is caught before it becomes a finding). `--window-title` reads the game
+   window directly:
 
    ```bash
-   DISPLAY="$PARITY_DISPLAY" "$HOME/.local/share/uv/tools/computer-mcp/bin/python" \
+   DISPLAY=:10 "$HOME/.local/share/uv/tools/computer-mcp/bin/python" \
+     .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry
+   DISPLAY=:10 "$HOME/.local/share/uv/tools/computer-mcp/bin/python" \
      .opencode/skills/parity-eval/scripts/capture_screen.py \
      --window-title Mindustry --output "$RUN/java/step-01-menu.png"
    ```
 
+   The report's `region` is the window origin/size in screen coordinates — use
+   it to turn an element offset in the capture into a click coordinate.
+
 4. Drive the flow with the persistent computer-mcp MCP tools
    (`computer-mcp_mouse_move`, `computer-mcp_click`, `computer-mcp_drag`,
    `computer-mcp_type`, `computer-mcp_key_press`, ...), re-capturing with
-   `capture_screen.py` after each named step (`computer-mcp screenshot`
-   captures the X root and is black on Xwayland). For a scripted CLI click use
-   `.opencode/loops/bin/parity-click.sh <x> <y> [button]` (single process); a
-   bare `computer-mcp mouse move` followed by a separate `computer-mcp mouse
-   click` does not work on Xvfb — the pointer resets to screen center when the
-   one-shot XTEST client exits.
+   `capture_screen.py` after each named step. The response screenshot of a
+   `click`/`mouse_move`/`key_press` is the previous frame — always capture
+   separately before judging an action. For scroll and timed key combos use
+   one-shot or persistent pynput from the computer-mcp uv-tool python (see
+   `computer-mcp-learnings.md`).
 
 5. Quit gracefully through the main-menu Quit button. If the process lingers,
-   kill the pid from `client.pid` and note it in `run.json`.
+   kill the recorded pid (`kill -TERM "$(cat "$RUN/java/java.pid")"`) and note
+   it in `run.json`. Never `pkill -f` a loose jar pattern: it also matches the
+   tool shell itself.
+
+> Historical: the Verified-run sections below predate the single-display setup
+> (retired loop wrappers, Xvfb/Xwayland loop displays). Keep them for the
+> click-coordinate tables and flow ground truth; the launch steps above
+> supersede them.
 
 ## Verified run (loop-2 twin, 2026-10-08, 9efd068)
 
