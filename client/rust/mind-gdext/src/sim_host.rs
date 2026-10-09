@@ -1946,10 +1946,7 @@ mod tests {
                 }
             }
         }
-        assert_eq!(
-            first_core_position(&grid, &registry),
-            Some((1032.0, 440.0))
-        );
+        assert_eq!(first_core_position(&grid, &registry), Some((1032.0, 440.0)));
     }
 
     #[test]

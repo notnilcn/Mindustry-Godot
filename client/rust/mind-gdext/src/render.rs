@@ -15,7 +15,9 @@ use godot::builtin::{
     Vector2i,
 };
 use godot::classes::notify::{CanvasItemNotification, NodeNotification};
-use godot::classes::{Camera2D, CanvasLayer, INode, INode2D, Image, ImageTexture, Node, Node2D, Viewport};
+use godot::classes::{
+    Camera2D, CanvasLayer, INode, INode2D, Image, ImageTexture, Node, Node2D, Viewport,
+};
 use godot::obj::{Base, WithBaseField};
 use godot::prelude::*;
 

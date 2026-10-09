@@ -108,10 +108,7 @@ impl INode2D for MindObjectiveMarkers {
                 let angle = marker.rotation.to_radians()
                     + (i % sides) as f32 * std::f32::consts::TAU / sides as f32;
                 points.push(
-                    screen
-                        + Vector2::new(angle.cos(), -angle.sin())
-                            * (marker.radius + 1.0)
-                            * zoom,
+                    screen + Vector2::new(angle.cos(), -angle.sin()) * (marker.radius + 1.0) * zoom,
                 );
             }
             self.base_mut()
@@ -123,9 +120,8 @@ impl INode2D for MindObjectiveMarkers {
                 continue;
             };
             // `textHeight * fontSize` in world units -> screen px.
-            let font_size =
-                (marker.text_height.max(1.0) * marker.font_size.max(0.1) * zoom).clamp(8.0, 64.0)
-                    as i32;
+            let font_size = (marker.text_height.max(1.0) * marker.font_size.max(0.1) * zoom)
+                .clamp(8.0, 64.0) as i32;
             let line_height = font_size as f32 * 1.2;
             let mut line_index = 0.0;
             for line in marker.text.split('\n') {
@@ -133,10 +129,7 @@ impl INode2D for MindObjectiveMarkers {
                     line_index += 1.0;
                     continue;
                 }
-                let size = font
-                    .get_string_size_ex(line)
-                    .font_size(font_size)
-                    .done();
+                let size = font.get_string_size_ex(line).font_size(font_size).done();
                 let origin = Vector2::new(
                     screen.x - size.x * 0.5,
                     screen.y - size.y * 0.5 + line_index * line_height,
@@ -194,10 +187,7 @@ fn parse_rows(json: &str) -> Vec<MarkerRow> {
                 ),
                 text: row.get("text")?.as_str()?.to_owned(),
                 radius: row.get("radius").and_then(|v| v.as_f64()).unwrap_or(6.0) as f32,
-                rotation: row
-                    .get("rotation")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(0.0) as f32,
+                rotation: row.get("rotation").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32,
                 sides: row.get("sides").and_then(|v| v.as_i64()).unwrap_or(4) as i32,
                 color: Color::from_rgba(
                     color.first()?.as_f64()? as f32,
@@ -209,10 +199,7 @@ fn parse_rows(json: &str) -> Vec<MarkerRow> {
                     .get("textHeight")
                     .and_then(|v| v.as_f64())
                     .unwrap_or(7.0) as f32,
-                font_size: row
-                    .get("fontSize")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(1.0) as f32,
+                font_size: row.get("fontSize").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
             })
         })
         .collect()
