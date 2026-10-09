@@ -417,3 +417,29 @@ displays); those paths no longer exist, but the workarounds still apply.
   on the old log instantly. The R00 soak log is
   `runs/20261009-065416-ref-ground-zero/java/game.log`; the dead instance's log
   is kept as `java/game-prerun.log`.
+
+## 2026-10-09 — reference soak R04/R05: clipped category button, drag placement, scroll rotation, tech-tree hunting
+
+- **Block-picker category button is clipped and inert.** With two unlocked
+  categories the bottom-right PlacementFragment renders the second button half
+  past the window edge (image ~1105-1152, y 397-447); clicking it (screen
+  1168/1180, 520-524) never switched categories
+  (`runs/20261009-065416-ref-ground-zero/java/r05-16-category.png`,
+  `r05-17-cat2.png`). Workaround: the block-category keybindings
+  `Binding.categoryNext` `.` / `categoryPrev` `,` (Binding.java:68-69) — one `.`
+  key_down+key_up switched production -> distribution and auto-selected the
+  conveyor (`r05-18-catnext.png`).
+- **`computer-mcp.drag` does not lay conveyor lines.** Two drags
+  ((818,497)->(818,433), then ->(690,433)) placed exactly ONE conveyor
+  (`r05-19-conveyors.png`): the MCP drag moves the pointer without the
+  intermediate motion stream Java's drag-placement consumes. Workaround: place
+  one tile per `mouse_move`+`click`, and rotate with a one-shot pynput
+  `Controller().scroll(0,-2)` = one 90° step; verify the placement arrow in a
+  capture before clicking (it points W then N here, `r05-rot-zoom3.png`).
+- **Tech-tree node hunting.** Locked subtrees are invisible (`checkNodes`,
+  ResearchDialog.java:395-403); pan the tree by dragging the background
+  (`ElementGestureListener.pan`, :190-195) — a rightward drag reveals content to
+  the left. Scroll-to-zoom never reaches the dialog's `scrolled` listener (the
+  tree view holds scroll focus), so pan instead. Node hover shows the info
+  panel (`hovered()` sets `hoverNode`); clicking a selectable+affordable locked
+  node spends and unlocks immediately on desktop (:483).

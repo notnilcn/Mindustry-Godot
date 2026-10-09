@@ -251,6 +251,37 @@ placement the objective advances from `Build: 1x Mechanical Drill` to
 `Move into Core: 0/5 Copper` with the conveyor prompt. Autosave copied to
 `checkpoints/r04-sector-serpulo-170.msav`.
 
+## R05 — research + place conveyors; core receives copper (recorded 2026-10-09)
+
+Action: research the Conveyor in the tree → select it in the block picker →
+place a 7-tile line from the drill to the core → deliveries. Fork
+`java/r05-18-catnext.png` (conveyor selected, objective 2); action
+`java/r05-22-delivered2.png` (objective 3 at 24/100); support
+`r05-14-researched.png` (tree), `r05-20-line.png` (line + item on belt),
+`r05-21-delivered.png`.
+
+| image | screen | call | settle |
+|---|---|---|---|
+| (974,627) | (1024,725) | tech-tree icon | 2000 ms |
+| pan | drag (800,300)→(420,300), then (150,300)→(1100,300) | tree background | 900 ms each — drag RIGHT reveals left content |
+| (61,311) | (111,409) | Conveyor node (hover: `Conveyor / Copper 5/5`; click spends 5 copper) | 1200 ms |
+| — | — | Escape closes the tree | 1500 ms |
+| `.` | — | `Binding.categoryNext`: distribution category + auto-select conveyor (the clipped category button does nothing) | 1200 ms |
+| — | scroll(0,-2) | rotate 90° (one-shot pynput); verify the placement arrow in a capture | 1000 ms |
+| row | clicks (785,433)(753,433)(721,433)(689,433) + corner (817,433) | place west-facing conveyors at image y=335, x 735/703/671/639 + 767 | 450 ms each |
+| column | scroll(0,-2) → N; clicks (817,497)(817,465) | north-facing tiles at image (767,399)/(767,367) | 500 ms each |
+
+Observed: the drill dumps to ANY adjacent transporter (`BuildingComp.dump`
+proximity loop), so the line can leave from the drill's north side; copper
+nuggets ride the belt west into the core (core 2.9k → 4.0k); objective 2
+completes within ~20 s of the first delivery and the panel advances to
+`Move into Core: 24/100 Copper` (objective 3) with the "Expand the mining
+operation…" prompt and `Right-click and drag to break blocks.` hint. Grid used:
+core 3×3 at x 527-623 → 32 px tiles; row centered on the core's middle row
+(y≈335). Autosave mtime 17:34:03 → `checkpoints/r05-sector-serpulo-170.msav`.
+Hiccups (see `computer-mcp-learnings.md`, 2026-10-09): category-button click
+inert (use `.`); `computer-mcp.drag` places only one tile (click per tile).
+
 ## Wait marks
 
 | after | wait | why |
