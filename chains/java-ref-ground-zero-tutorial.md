@@ -152,6 +152,37 @@ this relaunch was consumed by window activation — a 5-click batch left the men
 unchanged (`java/r00-01-launch.png`); a capture + re-send opened the submenu
 (`java/probe-click-play.png`).
 
+## R01 — resume from Save & Quit (recorded 2026-10-09)
+
+Same client (no reboot). Action: Escape → pause → Save & Quit → confirm → menu
+→ Play → Campaign → Ground Zero hex → Go. Reference frames:
+`java/r01-00-pause.png` (pause dialog), `java/r01-01-quitconfirm.png` (Confirm
+"Are you sure you want to quit?"), `java/r01-02-menu.png` (menu after
+`@saving`), `java/r01-03-planet.png` (planet page: hex alert, "Sectors — 1
+under attack"), `java/r01-04-sectorpanel.png` (Ground Zero / Under attack! /
+Resources / Stats / Go), `java/r01-05-resume.png` (recorded; +5 s retake
+`r01-06` identical).
+
+### Action (screen = image + (50,98); busy-wait settles)
+
+| image | screen | call | settle |
+|---|---|---|---|
+| — | — | `key_down`+`key_up` Escape | 1000 ms |
+| (576,410) | (626,508) | Save & Quit | 900 ms (quit confirm) |
+| (676,358) | (726,456) | confirm OK | 4000 ms (`@saving` → menu) |
+| (230,149) | (280,247) | Play | 900 ms |
+| (477,151) | (527,249) | Campaign | 2800 ms (no chooser) |
+| (577,322) | (627,420) | Ground Zero hex | 1200 ms (sector panel) |
+| (576,616) | (626,714) | Go | 13000 ms (loading + world); +5 s retake |
+
+The tutorial's zone timer fired around the 300 s mark while the client idled in
+R00, so the planet page flagged the sector "1 under attack" (hex warning
+triangle) and the action button read `Go`; Go resumed the stored save anyway
+and the resumed frame is pixel-identical to the R00 tutorial start
+(`frame_diff` r00-03 vs r01-05: changed_fraction 0.00011, mean_abs 0.01). The
+autosave was rewritten by Save & Quit (`sector-serpulo-170.msav` mtime 17:07:02
+vs R00's 17:02:30) → copied to `checkpoints/r01-sector-serpulo-170.msav`.
+
 ## Wait marks
 
 | after | wait | why |

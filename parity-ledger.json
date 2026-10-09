@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@2",
-  "updated": "2026-10-09T07:06:00Z",
+  "updated": "2026-10-09T07:09:30Z",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction chains. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -8884,6 +8884,588 @@
       },
       "verified": null,
       "note": "Revealed by R00 (bottom-right icon bar, campaign-visible). Action not mirrored yet."
+    },
+    {
+      "id": "PAR-0037",
+      "title": "Campaign world: resume a saved Ground Zero sector (Save & Quit -> Campaign -> hex -> Go)",
+      "surface": "world",
+      "parent": "PAR-0019",
+      "status": "reference",
+      "chain": "chains/java-ref-ground-zero-tutorial.md",
+      "updated": "2026-10-09T07:09:30Z",
+      "discovered_by": "runs/20261009-065416-ref-ground-zero/",
+      "path": {
+        "to": "resumed Ground Zero tutorial (objective 0) via the planet page's Go",
+        "java": [
+          {
+            "tool": "computer-mcp_key_down/key_up",
+            "params": {
+              "key": "escape",
+              "note": "in-game -> pause dialog (image Menu; buttons Map Objective/Abandon/Back/Settings/Host/Save & Quit)"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 626,
+              "y": 508,
+              "note": "Save & Quit (image 576,410)"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r01-01-quitconfirm.png"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 726,
+              "y": 456,
+              "note": "confirm OK (image 676,358; 'Are you sure you want to quit?')"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r01-02-menu.png",
+              "note": "after @saving + logic.reset -> main menu"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 280,
+              "y": 247,
+              "note": "Play"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 527,
+              "y": 249,
+              "note": "Campaign (no chooser: campaignselect=true)"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r01-03-planet.png",
+              "note": "planet page: Ground Zero hex alert, 'Sectors - 1 under attack'"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 627,
+              "y": 420,
+              "note": "Ground Zero hex (image 577,322)"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r01-04-sectorpanel.png",
+              "note": "panel: Ground Zero / Under attack! / Resources / Stats / Go"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 626,
+              "y": 714,
+              "note": "Go (image 576,616) -> loading -> resumed world"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r01-05-resume.png"
+            }
+          }
+        ],
+        "godot": [],
+        "confirm": {
+          "java": "runs/20261009-065416-ref-ground-zero/java/r01-05-resume.png (objective Obtain: 0/15 Copper)",
+          "godot": "sector_state campaign:true"
+        },
+        "last_replayed": "runs/20261009-065416-ref-ground-zero/"
+      },
+      "run": "runs/20261009-065416-ref-ground-zero/",
+      "reproduce": {
+        "java": [
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r01-04-sectorpanel.png",
+              "note": "panel: Ground Zero / Under attack! / Resources / Stats / Go"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 626,
+              "y": 714,
+              "note": "Go (image 576,616) -> loading -> resumed world"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r01-05-resume.png"
+            }
+          }
+        ],
+        "godot": [],
+        "compare": []
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open"
+      },
+      "verified": null,
+      "reference": {
+        "captured": "2026-10-09T07:08:24Z",
+        "profile": "resumed",
+        "run": "runs/20261009-065416-ref-ground-zero/",
+        "frames": {
+          "fork": "runs/20261009-065416-ref-ground-zero/java/r01-04-sectorpanel.png",
+          "action": "runs/20261009-065416-ref-ground-zero/java/r01-05-resume.png",
+          "retake": "runs/20261009-065416-ref-ground-zero/java/r01-06-resume-retake.png"
+        },
+        "settle": [
+          {
+            "after": "Escape key_down+key_up",
+            "wait_ms": 1000
+          },
+          {
+            "after": "click Save & Quit",
+            "wait_ms": 900,
+            "note": "quit-confirm appears"
+          },
+          {
+            "after": "click confirm OK",
+            "wait_ms": 4000,
+            "note": "@saving + reset to menu"
+          },
+          {
+            "after": "click Play",
+            "wait_ms": 900
+          },
+          {
+            "after": "click Campaign",
+            "wait_ms": 2800,
+            "note": "planet page"
+          },
+          {
+            "after": "click Ground Zero hex",
+            "wait_ms": 1200,
+            "note": "sector panel + Go"
+          },
+          {
+            "after": "click Go",
+            "wait_ms": 13000,
+            "note": "loading + world; +5 s retake identical"
+          }
+        ],
+        "expected": {
+          "action_button": "Go",
+          "panel": "Ground Zero / Under attack! / Resources / Stats / Go",
+          "objective": "Obtain: 0/15 Copper",
+          "hint": "Use [WASD] to move.",
+          "state": "resumed world identical to the pre-quit frame (frame_diff r00-03 vs r01-05: changed_fraction 0.00011, mean_abs 0.01)"
+        },
+        "chain": "chains/java-ref-ground-zero-tutorial.md",
+        "checkpoint": "runs/20261009-065416-ref-ground-zero/checkpoints/r01-sector-serpulo-170.msav",
+        "checkpoint_note": "live parity-java-home/.local/share/Mindustry/saves/sector-serpulo-170.msav written by Save & Quit (mtime 17:07:02 changed from R00's 17:02:30); copied before the next autosave",
+        "java_path": [
+          {
+            "tool": "computer-mcp_key_down/key_up",
+            "params": {
+              "key": "escape",
+              "note": "in-game -> pause dialog (image Menu; buttons Map Objective/Abandon/Back/Settings/Host/Save & Quit)"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 626,
+              "y": 508,
+              "note": "Save & Quit (image 576,410)"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r01-01-quitconfirm.png"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 726,
+              "y": 456,
+              "note": "confirm OK (image 676,358; 'Are you sure you want to quit?')"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r01-02-menu.png",
+              "note": "after @saving + logic.reset -> main menu"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 280,
+              "y": 247,
+              "note": "Play"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 527,
+              "y": 249,
+              "note": "Campaign (no chooser: campaignselect=true)"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r01-03-planet.png",
+              "note": "planet page: Ground Zero hex alert, 'Sectors - 1 under attack'"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 627,
+              "y": 420,
+              "note": "Ground Zero hex (image 577,322)"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r01-04-sectorpanel.png",
+              "note": "panel: Ground Zero / Under attack! / Resources / Stats / Go"
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "x": 626,
+              "y": 714,
+              "note": "Go (image 576,616) -> loading -> resumed world"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r01-05-resume.png"
+            }
+          }
+        ],
+        "note": "R01 reference soak. Save & Quit (pause > Save & Quit > confirm OK) saves the autosave sector and resets to the menu; Play > Campaign goes straight to the planet page (campaignselect=true); the Ground Zero hex carries a '1 under attack' alert and the action button reads Go; Go resumes the stored sector. Also covers the pause dialog's Save & Quit control and the quit-confirm dialog (Cancel/OK); Cancel not exercised."
+      }
+    },
+    {
+      "id": "PAR-0038",
+      "title": "Campaign world: pause dialog (Escape) with its button set",
+      "surface": "world",
+      "parent": "PAR-0028",
+      "status": "seeded",
+      "chain": "chains/java-ref-ground-zero-tutorial.md",
+      "updated": "2026-10-09T07:09:30Z",
+      "discovered_by": "runs/20261009-065416-ref-ground-zero/",
+      "path": {
+        "to": "in-game Ground Zero, Escape pressed",
+        "java": [],
+        "godot": [],
+        "confirm": {
+          "java": "runs/20261009-065416-ref-ground-zero/java/r01-00-pause.png"
+        },
+        "last_replayed": null
+      },
+      "run": "runs/20261009-065416-ref-ground-zero/",
+      "reproduce": {
+        "java": [
+          {
+            "tool": "computer-mcp_key_down/key_up",
+            "params": {
+              "key": "escape"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/20261009-065416-ref-ground-zero/java/r01-00-pause.png"
+            }
+          }
+        ],
+        "godot": [],
+        "compare": []
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open"
+      },
+      "verified": null,
+      "note": "Revealed by R01 (2026-10-09) while pausing the tutorial: image centers Map Objective (460,216), Abandon (690,216), Back (460,281), Settings (690,281), Host Multiplayer Game (575,345), Save & Quit (576,410); screen = image + (50,98). Save & Quit and the quit-confirm are recorded in PAR-0037."
+    },
+    {
+      "id": "PAR-0039",
+      "title": "Pause: Map Objective opens the sector objective text",
+      "surface": "world",
+      "parent": "PAR-0038",
+      "status": "seeded",
+      "chain": "chains/java-ref-ground-zero-tutorial.md",
+      "updated": "2026-10-09T07:09:30Z",
+      "discovered_by": "runs/20261009-065416-ref-ground-zero/",
+      "path": {
+        "to": "pause dialog",
+        "java": [],
+        "godot": [],
+        "confirm": {
+          "java": "runs/20261009-065416-ref-ground-zero/java/r01-00-pause.png"
+        },
+        "last_replayed": null
+      },
+      "run": "runs/20261009-065416-ref-ground-zero/",
+      "reproduce": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "image_center": [
+                460,
+                216
+              ],
+              "screen_center": [
+                510,
+                314
+              ],
+              "source": "PausedDialog @objective (showObjective when the sector preset has a description; groundZero description_len 127)"
+            }
+          }
+        ],
+        "godot": [],
+        "compare": []
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open"
+      },
+      "verified": null,
+      "note": "Revealed by R01. Action not mirrored yet."
+    },
+    {
+      "id": "PAR-0040",
+      "title": "Pause: Abandon sector confirm flow",
+      "surface": "world",
+      "parent": "PAR-0038",
+      "status": "seeded",
+      "chain": "chains/java-ref-ground-zero-tutorial.md",
+      "updated": "2026-10-09T07:09:30Z",
+      "discovered_by": "runs/20261009-065416-ref-ground-zero/",
+      "path": {
+        "to": "pause dialog",
+        "java": [],
+        "godot": [],
+        "confirm": {
+          "java": "runs/20261009-065416-ref-ground-zero/java/r01-00-pause.png"
+        },
+        "last_replayed": null
+      },
+      "run": "runs/20261009-065416-ref-ground-zero/",
+      "reproduce": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "image_center": [
+                690,
+                216
+              ],
+              "screen_center": [
+                740,
+                314
+              ],
+              "source": "PausedDialog @abandon -> ui.planet.abandonSectorConfirm"
+            }
+          }
+        ],
+        "godot": [],
+        "compare": []
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open"
+      },
+      "verified": null,
+      "note": "Revealed by R01. Destructive; action not mirrored yet."
+    },
+    {
+      "id": "PAR-0041",
+      "title": "Pause: Back resumes play",
+      "surface": "world",
+      "parent": "PAR-0038",
+      "status": "seeded",
+      "chain": "chains/java-ref-ground-zero-tutorial.md",
+      "updated": "2026-10-09T07:09:30Z",
+      "discovered_by": "runs/20261009-065416-ref-ground-zero/",
+      "path": {
+        "to": "pause dialog",
+        "java": [],
+        "godot": [],
+        "confirm": {
+          "java": "runs/20261009-065416-ref-ground-zero/java/r01-00-pause.png"
+        },
+        "last_replayed": null
+      },
+      "run": "runs/20261009-065416-ref-ground-zero/",
+      "reproduce": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "image_center": [
+                460,
+                281
+              ],
+              "screen_center": [
+                510,
+                379
+              ],
+              "source": "PausedDialog @back (name back)"
+            }
+          }
+        ],
+        "godot": [],
+        "compare": []
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open"
+      },
+      "verified": null,
+      "note": "Revealed by R01. Action not mirrored yet."
+    },
+    {
+      "id": "PAR-0042",
+      "title": "Pause: Settings opens the settings dialog",
+      "surface": "world",
+      "parent": "PAR-0038",
+      "status": "seeded",
+      "chain": "chains/java-ref-ground-zero-tutorial.md",
+      "updated": "2026-10-09T07:09:30Z",
+      "discovered_by": "runs/20261009-065416-ref-ground-zero/",
+      "path": {
+        "to": "pause dialog",
+        "java": [],
+        "godot": [],
+        "confirm": {
+          "java": "runs/20261009-065416-ref-ground-zero/java/r01-00-pause.png"
+        },
+        "last_replayed": null
+      },
+      "run": "runs/20261009-065416-ref-ground-zero/",
+      "reproduce": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "image_center": [
+                690,
+                281
+              ],
+              "screen_center": [
+                740,
+                379
+              ],
+              "source": "PausedDialog @settings"
+            }
+          }
+        ],
+        "godot": [],
+        "compare": []
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open"
+      },
+      "verified": null,
+      "note": "Revealed by R01. Action not mirrored yet."
+    },
+    {
+      "id": "PAR-0043",
+      "title": "Pause: Host Multiplayer Game opens the host dialog",
+      "surface": "world",
+      "parent": "PAR-0038",
+      "status": "seeded",
+      "chain": "chains/java-ref-ground-zero-tutorial.md",
+      "updated": "2026-10-09T07:09:30Z",
+      "discovered_by": "runs/20261009-065416-ref-ground-zero/",
+      "path": {
+        "to": "pause dialog",
+        "java": [],
+        "godot": [],
+        "confirm": {
+          "java": "runs/20261009-065416-ref-ground-zero/java/r01-00-pause.png"
+        },
+        "last_replayed": null
+      },
+      "run": "runs/20261009-065416-ref-ground-zero/",
+      "reproduce": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "image_center": [
+                575,
+                345
+              ],
+              "screen_center": [
+                625,
+                443
+              ],
+              "source": "PausedDialog @hostserver -> ui.host.show"
+            }
+          }
+        ],
+        "godot": [],
+        "compare": []
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open"
+      },
+      "verified": null,
+      "note": "Revealed by R01. Action not mirrored yet."
     }
   ]
 }
