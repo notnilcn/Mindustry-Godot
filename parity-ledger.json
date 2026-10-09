@@ -1,6 +1,6 @@
 {
  "schema": "mindustry-godot/parity-ledger@2",
- "updated": "2026-10-09T09:13:30Z",
+ "updated": "2026-10-09T09:21:35Z",
  "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction chains. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
  "focus": {
   "kind": "area",
@@ -8892,7 +8892,7 @@
    "parent": "PAR-0019",
    "status": "in-progress",
    "chain": "chains/java-ref-ground-zero-tutorial.md",
-   "updated": "2026-10-09T09:13:12Z",
+   "updated": "2026-10-09T09:21:35Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
     "to": "resumed Ground Zero tutorial (objective 0) via the planet page's Go",
@@ -9060,69 +9060,82 @@
       "palette_distance": 0.3953
      },
      "note": "State half fixed (objectives 17, waveTimer false, no auto-waves, objective HUD text); residual divergence is world render palette + HUD fragment layout (see fix.plan round 2)."
+    },
+    "round3": {
+     "godot_frame": "runs/20261009-085712-PAR-0037/godot/step-06-resumed-r3.png",
+     "diff": "runs/20261009-085712-PAR-0037/diff/step-06-resume-r3.json",
+     "metrics": {
+      "changed_fraction": 0.70779,
+      "mean_abs_rgb": [
+       63.54,
+       61.95,
+       58.58
+      ],
+      "coarse_layout_max_channel_mean": 54.89,
+      "palette_distance": 0.3242,
+      "size_match": true
+     },
+     "note": "World y-flip fix applied and live: orientation now matches Java (copper below the core) and matched snow patches agree within ~2/255; residual is HUD fragment layout (objective panel, hint box, prompt, block-info, minimap, icon bar)."
     }
    },
    "fix": {
     "status": "godot-open",
     "plan": {
-     "round": 2,
+     "round": 4,
      "done": [
-      "ROUND 1 FIX IN WORKING TREE (uncommitted; no 'Fixes' commit until the Godot leg passes): campaign.rs merge_map_rules() now carries map.objectives/objective_flags/wave_timer for preset maps; start_sector_with_loadout() rebuilds session.objectives = MapObjectivesRuntime::from_rules(&session.rules) after the merge. Narrow check green: cargo test -p mind-gdext preset_map_rules (new), cargo clippy -p mind-gdext --all-targets -- -D warnings, tools/build.sh; editor relaunched (pid 96399) so the rebuilt lib is live.",
-      "Godot leg re-run (pid 96741): fresh launch and resume now carry objectives=17 and waveTimer=false; no auto-wave spawns (wave 0, unit 0 at tick 1061 vs Wave 2/1 unit before); HUD status shows the objective text 'Obtain: copper/15' instead of the wave lines."
+      "Round 3 (working tree, uncommitted until the leg passes): MindCamera2D::process and MindRender::set_camera_pose now write set_zoom(Vector2::new(zoom, -zoom)) - the Java/Arc y-up projection. Live leg (pid 110974, editor 109804): zoom {x:4,y:-4}, copper tile (132,48) maps BELOW the core (129,55) (704,516 vs 608,292), matching Java; screen_to_tile(tile_to_screen(100,100)) round-trips, so input stays consistent.",
+      "Round-3 metrics improved: changed_fraction 0.70779 (was 0.71862), mean_abs_rgb [63.54,61.95,58.58] (was [70.51,71.62,72.33]), coarse_layout max 54.89 (was 69.04), palette_distance 0.3242 (was 0.3953).",
+      "With the world flipped and the camera aligned, matched snow patches now agree: Java [229.5,235.7,241.9] vs Godot [231.6,237.7,243.6] (~2/255). The earlier 'palette gap' (161 vs 192) was the mirrored/un-aligned world, not a colour pipeline bug."
      ],
-     "seam": "Remaining frame divergence is presentation-layer, not the resume flow: (a) world render brightness/palette (Java snow mean ~192-203 vs Godot ~161-170; whole-frame mean_abs_rgb ~70 with changed_fraction 0.718); a vertical-flip hypothesis was tested and rejected (A vs flip(B) 85.7 worse than A vs B 70.5). (b) HUD fragments: the corner minimap is absent (HudGroup.minimap is the fullscreen overlay, visible=false), HudGroup.hints renders a large centered panel with the world hint + Skip covering the viewport centre where Java draws the core, HudGroup.placement renders a dark box at (512,388,640,260), and the hud status label renders top-centre clipped at y=0 vs Java's top-left wavepane panel. (c) world palette/lighting at the tutorial start needs the render env checked (rules.lighting=false via preset.no_lighting is wired; the residual is in the render passes).",
+     "seam": "The residual diff is HUD layout (heatmap diff/step-06-resume-r3-heatmap.png): Java draws the objective/status panel top-left on the wavepane texture ('Obtain: 0/15 Copper' + icon), a compact hint box at the left edge with Skip beneath it, the prompt bar centre ('Move near the copper ore...'), the block-info panel at the right ('Copper'), the corner minimap top-right and the bottom-right icon bar. The port draws a single centred status label clipped at y=0 ('Obtain: copper'), a large centred hints panel covering the core, no corner minimap (HudGroup.minimap is the fullscreen overlay, hidden), and a dark placement/block-info box at (512,388,640,260) covering the copper field.",
      "files": [
-      "client/rust/mind-gdext/src/campaign.rs (already fixed in the working tree)",
-      "client/ui/fragments/hints_fragment.gd (+ scene) for the hint panel layout",
-      "corner minimap fragment (HudFragment minimap element) - absent, overlay-only MinimapFragment",
-      "client/ui/fragments/placement_fragment.gd / block-info panel",
-      "render palette: client/rust/mind-gdext/src/render/* (env/light) vs Java Pal/lighting"
+      "client/ui/fragments/hints_fragment.gd + client/scenes/ui/fragments/hints_fragment.tscn (panel position/size: Java left edge, compact)",
+      "client/ui/fragments/hud_fragment.gd + hud_fragment.tscn (status table top-left on the wavepane style; wave/core-item widgets)",
+      "corner minimap: HudFragment's minimap element is absent (only the fullscreen overlay fragment exists)",
+      "client/ui/fragments/placement_fragment.gd (dark box covering the world; block-info panel right side missing)"
      ],
-     "next_checks": [
-      "Assert camera settle (cam.position ~ (1028,436), zoom 4; Java viewpos (1032.0,440.3) from the reference save meta) and frame freshness (Engine.get_frames_drawn() advances) before every world capture.",
-      "Sample matched terrain patches (same tile region, no UI) to separate render palette from layout: if snow patches differ by >12 mean per channel, the fix is in the render env/light passes (plan 16), tracked with PAR-0015/PAR-0028.",
-      "HUD fragment work: hint panel position/size parity (Java top-left wavepane), corner minimap, block-info/placement panel, status label position/format - the PAR-0028 launch-state scope."
+     "approach": "Round 4: HUD fragment layout parity in GDScript/scenes, one fragment per step with a captured pair each; Java HudFragment.makeStatusTable is the reference for the status panel (top-left, wavepane background). No Rust unless a facade property is missing.",
+     "prerequisites": [
+      "Camera follow target differs by ~1 tile: port camera settles at (1028,436) vs Java viewpos (1032.0,440.3); the core renders at (608,292) vs Java (576,324). Check the follow target (player unit spawn position) after the HUD work; it contributes a constant ~16-32 px shift.",
+      "Do not treat the round-1/round-3 code fixes as landed: both live in the working tree only; they need a passing leg before the 'Fixes PAR-0037' commit."
      ],
-     "prerequisites": "PAR-0028 (Ground Zero launch state: tutorial objectives vs waves) owns the same HUD/render gaps at the launch frame; PAR-0037 cannot pass the frame gate until that presentation work lands. This item's resume-specific half (save -> Go -> objective state present) is now fixed and unit-tested.",
-     "narrow_check": "cargo test -p mind-gdext && cargo clippy -p mind-gdext --all-targets -- -D warnings && tools/build.sh",
+     "narrow_check": "GDScript/scene work: bash tools/godot.sh --headless --editor --quit --path client (import/parse gate) + the Godot leg itself",
      "evidence": {
-      "java_frame": "runs/20261009-065416-ref-ground-zero/java/r01-05-resume.png",
-      "godot_frame": "runs/20261009-085712-PAR-0037/godot/step-04-resumed-r2.png",
-      "godot_fork": "runs/20261009-085712-PAR-0037/godot/step-03-fork.png",
-      "diff": "runs/20261009-085712-PAR-0037/diff/step-04-resume-r2.json",
-      "metrics": {
-       "changed_fraction": 0.71862,
-       "mean_abs_rgb": [
-        70.51,
-        71.62,
-        72.33
+      "godot_frame_round3": "runs/20261009-085712-PAR-0037/godot/step-06-resumed-r3.png",
+      "godot_fork_round3": "runs/20261009-085712-PAR-0037/godot/step-05-fork-r3.png",
+      "diff_round3": "runs/20261009-085712-PAR-0037/diff/step-06-resume-r3.json",
+      "heatmap_round3": "runs/20261009-085712-PAR-0037/diff/step-06-resume-r3-heatmap.png",
+      "snow_patch_match": {
+       "java": [
+        229.5,
+        235.7,
+        241.9
        ],
-       "coarse_layout_max_channel_mean": 69.04,
-       "palette_distance": 0.3953,
-       "size_match": true
+       "godot": [
+        231.6,
+        237.7,
+        243.6
+       ]
       },
-      "state": {
-       "godot_objectives_n": 17,
-       "godot_wave_timer": false,
-       "godot_status": "Obtain: copper/15",
-       "godot_sector": "campaign:true sector:15 hasCore:true hasSave:true wave:0 unit:0"
-      },
-      "flip_test": {
-       "a_vs_b": [
-        70.51,
-        71.62,
-        72.33
+      "flip_probe": {
+       "zoom": "4,-4",
+       "ore_screen": [
+        704,
+        516
        ],
-       "a_vs_flip_b": [
-        85.75,
-        85.73,
-        89.72
+       "core_screen": [
+        608,
+        292
+       ],
+       "roundtrip": [
+        100,
+        100
        ]
       }
      }
     },
     "commit": null,
-    "summary": "objective graph now carried into campaign session rules; resume produces the tutorial objective state",
+    "summary": "round 3 flipped the rendered y axis (Java y-up parity); round 4 targets HUD fragment layout",
     "run": "runs/20261009-085712-PAR-0037/"
    },
    "verified": null,

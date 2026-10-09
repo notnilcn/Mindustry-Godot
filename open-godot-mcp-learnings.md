@@ -1172,6 +1172,20 @@ those paths no longer exist, but the workarounds still apply.
   eval: calling `_show_planet` and resolving the sector-panel action in one
   eval returns pre-sort coordinates (Go read as (93,652) once). The deferred
   `sort_now` needs a frame; a second eval gives the settled (576,613).
+- A facade-path run (`load_sector` + `start_sector` without the planet-dialog
+  Go click) leaves `MenuGroup` visible: the resume world renders *behind* the
+  menu and a `godot_screenshot game` shows the logo/sidebar over the baked
+  menu background, not the live world. Call
+  `UiRoot.set_menu_visible(false)` before judging or capturing a facade-run
+  world. Cost one probe capture (runs/20261009-085712-PAR-0037/godot/probe-flip.png).
+- The world render was y-inverted vs the Java reference (fixed 2026-10-09 in
+  the PAR-0037 working tree): Godot 2D maps +y to screen-down while Java/Arc
+  projects +y to screen-up, so `MindCamera2D` now writes
+  `set_zoom(Vector2(zoom, -zoom))`. A quick orientation check after any camera
+  change: `tile_to_screen(132,48)` (groundZero copper) must sit BELOW
+  `tile_to_screen(129,55)` (the core); ground-truth rows come from the map
+  file (core rows 54-56, copper rows 41-53). Run:
+  `runs/20261009-085712-PAR-0037/`.
 - The planet dialog sector panel exposes raw bundle markup in
   `RichTextLabel.text` (`[scarlet]Under attack!`,
   `[red]:warning:[accent] Sector currently under attack...`) and renders it
