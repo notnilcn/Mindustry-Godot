@@ -1209,6 +1209,11 @@ those paths no longer exist, but the workarounds still apply.
   children (`PARENT_NODE`), so setting it once on `MindWorldRenderer` covers
   every band mesh; at integer camera positions nearest vs linear renders
   identically (sub-pixel sampling only).
+- PIL crops outside the image bounds return empty/black images, so two
+  off-screen crops compare as a 0.0 diff and look "pixel-identical" - a false
+  positive that cost analysis time in rounds 7-8. Assert
+  `0 <= x < 1152` and `0 <= y < 648` for both crop corners (or use
+  `crop(box)` only after clamping) before trusting any tile comparison.
 - The planet dialog sector panel exposes raw bundle markup in
   `RichTextLabel.text` (`[scarlet]Under attack!`,
   `[red]:warning:[accent] Sector currently under attack...`) and renders it

@@ -1,6 +1,6 @@
 {
  "schema": "mindustry-godot/parity-ledger@2",
- "updated": "2026-10-09T10:00:20Z",
+ "updated": "2026-10-09T10:11:22Z",
  "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction chains. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
  "focus": {
   "kind": "area",
@@ -8892,7 +8892,7 @@
    "parent": "PAR-0019",
    "status": "in-progress",
    "chain": "chains/java-ref-ground-zero-tutorial.md",
-   "updated": "2026-10-09T10:00:20Z",
+   "updated": "2026-10-09T10:11:22Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
     "to": "resumed Ground Zero tutorial (objective 0) via the planet page's Go",
@@ -9139,49 +9139,70 @@
       "palette_distance": 0.2512,
       "size_match": true
      },
-     "note": "Floor variants now match Java per tile (several tiles pixel-identical); remaining snow diff is the (4,4.3)-world-unit camera offset (fractional y)."
+     "note": "Floor variants now match Java per tile (several tiles pixel-identical); remaining snow diff is the (4,4.3)-world-unit camera offset (fractional y).",
+     "correction": "the 'tiles pixel-identical' claim was an off-screen PIL crop artifact; on-screen tiles still differ (residuals 7.8-22.6). The variant fix stands via the golden hash test."
+    },
+    "round8": {
+     "godot_frame": "runs/20261009-085712-PAR-0037/godot/step-18-resumed-r8.png",
+     "diff": "runs/20261009-085712-PAR-0037/diff/step-18-resume-r8.json",
+     "metrics": {
+      "changed_fraction": 0.63668,
+      "mean_abs_rgb": [
+       53.04,
+       52.69,
+       50.81
+      ],
+      "coarse_layout_max_channel_mean": 43.24,
+      "palette_distance": 0.2419,
+      "size_match": true
+     },
+     "note": "Camera now matches the reference viewpos (1032,440 vs 1032.0,440.298); residual: ice/snow edge+texture rendering, hint box/text, icon bar, marker label style, ore overlay, core sprite."
     }
    },
    "fix": {
     "status": "godot-open",
     "plan": {
-     "round": 8,
+     "round": 9,
      "done": [
-      "Round 7 (working tree): per-tile floor texture variants ported exactly - mind-core math::rand_arc gains `random_seed_int` (Arc Mathf.randomSeed: reseed, power-of-two extra draw, nextInt(max-min+1)+min) and `pack_point2` (Point2.pack with the short cast), pinned by a golden test generated from the reference arc-core jar; floor.rs resolves the floor's numbered variants (snow1..3 etc.) and picks per tile via `Mathf.randomSeed(Point2.pack(x,y), 0, count-1)`. MindWorldRenderer sets CanvasItem TextureFilter::NEAREST (Java samples the atlas nearest; no-op at integer alignment but parity-correct). Clippy/tests (1821) / build green; editor relaunched.",
-      "Leg re-run (pid 166081): changed_fraction 0.6418 (was 0.65459), mean_abs [53.54,53.17,51.04] (was [54.03,53.56,51.23]), palette 0.2512. Per-tile probes prove the floor fix: tiles (150,40)/(120,70) render PIXEL-IDENTICAL to Java (0.0 diff) and (135,65) matches exactly at a 6px offset; the residual snow ~39% is sub-pixel camera misalignment, not texture."
+      "Round 8 (working tree): camera/anchor parity - `first_core_position` now returns Java's spawn anchor (`core.pos()` -> anchor tile, `tile.worldx/worldy()` = the tile corner): map-loaded multiblocks fill the footprint (row-major first tile = min corner -> anchor = pos - size_offset) while tool-placed blocks store only the anchor; the candidate tile being the same core disambiguates. Unit tests: anchor-corner (24,40), Command::Place at (129,55) -> (1032,440), footprint 128-130x54-56 -> (1032,440).",
+      "Leg re-run (pid 185507): camera settles at (1032,440) exactly matching the reference viewpos (1032.0,440.298); changed_fraction 0.6418 -> 0.63668, mean_abs [53.04,52.69,50.81], palette 0.2512 -> 0.2419."
      ],
-     "seam": "Round-8 root cause: camera position parity. Java `viewpos` in the reference save is (1032.0, 440.29807) and the reference frame is captured from it; the port's follow settles at (1028, 436) - a (4, 4.3) world-unit offset (16, 17.2 px at zoom 4), whose fractional part (~1px in y) keeps most world pixels on a different texel phase (snow crop best integer shift still leaves mean ~9.5; several tiles match 0.0 when the crop compensates the offset). The offset comes from the port's player/camera target position vs the Java save's stored viewpos (player position).",
+     "correction": "Round-7's 'tiles pixel-identical' evidence was an artifact: the probed tiles (150,40)/(120,70) were OFF-SCREEN and PIL cropped empty images that compare as 0.0. On-screen tiles (140,60 ice, 145,55 snow, 120,60 snow) still differ (best integer-shift residuals 7.8-22.6). The floor-variant fix itself stands (golden-pinned hash + r6->r7 render delta) but pixel-level floor equality is NOT yet established.",
+     "seam": "Round-9 targets, largest first: (a) ice/snow floor rendering: the ice bottom edge at x1100 is 1 tile higher in the port (296 vs 328) and the ice/snow boundary scanlines differ 0-20px - check `Floor.edges` (ice-edge 3x3 autotile) and the ice-snow/blendGroup blending; also whether snow/ice tile textures or their edge blending differ (a tile (145,55) crop shows Java ice vs port snow at a boundary area - verify with correct on-screen coordinates first). (b) The biggest non-floor regions: hint box 93% changed (Java text 'Use [WASD] to move.' vs port 'Scroll to zoom in or out.' + box geometry), bottom-right icon bar 96% (absent in the port), marker label style 84% (font/background), copper field 82% (ore overlay rendering), core sprite, status text format 'Obtain: copper/15' vs '0/15 Copper', minimap content 49%.",
      "files": [
-      "client/rust/mind-gdext/src/camera.rs (follow_world snap / follow target) and the player spawn position on resume (campaign runtime spawn vs the save's saved position)",
-      "possibly mind-core entity spawn/position restore on sector resume"
+      "client/rust/mind-gdext/src/render/floor.rs + atlas_bind.rs (edge/autotile regions, ice-edge)",
+      "hint rotation state (use the first hint 'desktopMove' at this state) and hint box geometry/text",
+      "bottom-right icon bar element (Schematics/Database/TechTree/Planet)",
+      "objective marker label styling; ore overlay variant/wiring; core sprite path; objective text 4-arg format"
      ],
-     "approach": "Round 8: make the revived sector's player position (and thus the camera target) match the Java save exactly; verify camera == (1032.0, 440.3) at the same fork, then re-run and re-measure the snow crops (target: exact-match, changed% < 5%).",
+     "approach": "Round 9: verify the floor boundary/edge rendering on-screen (correct crop coordinates), then land the hint box geometry+text and the icon bar; keep each with a capture pair.",
      "prerequisites": [
-      "If the player spawn position is fixed by the map's spawn/core position rather than saved, compare the port's spawn point math with Java's `World.loadSector` -> `player.set(core pos)`/save `viewpos` restore.",
-      "Then the remaining hot regions: hint box geometry/text (93%), bottom-right icon bar (96%), marker label style (84%), copper field 82% (ore rendering may share the variant logic - check OverlayFloor), core sprite, status text format, minimap content."
+      "Do not reuse off-screen crop results; assert 0 <= crop x <= 1152 and 0 <= y <= 648 before trusting a comparison.",
+      "The player entity remains absent (the camera targets the core anchor); Java's viewpos is the player position (440.298 fractional), so a final ~0.3-world-unit camera difference persists until a player unit exists."
      ],
      "narrow_check": "cargo test -p mind-core --lib && cargo clippy -p mind-gdext --all-targets -- -D warnings && tools/build.sh",
      "evidence": {
-      "godot_frame_round7": "runs/20261009-085712-PAR-0037/godot/step-16-resumed-r7b.png",
-      "diff_round7": "runs/20261009-085712-PAR-0037/diff/step-14-resume-r7.json",
-      "golden": "mind-core math::rand_arc mathf_tests (arc-core jar values, 2026-10-09)",
-      "tile_matches": {
-       "150,40": "0.0",
-       "120,70": "0.0",
-       "135,65": "0.0 at (-6,-6)"
+      "godot_frame_round8": "runs/20261009-085712-PAR-0037/godot/step-18-resumed-r8.png",
+      "diff_round8": "runs/20261009-085712-PAR-0037/diff/step-18-resume-r8.json",
+      "camera": {
+       "port": [
+        1032,
+        440
+       ],
+       "java_viewpos": [
+        1032.0,
+        440.29807
+       ]
       },
-      "java_viewpos": [
-       1032.0,
-       440.29807
-      ],
-      "godot_cam": [
-       1028,
-       436
-      ]
+      "on_screen_tile_residuals": {
+       "140,60_ice": 12.31,
+       "145,55_snow": 22.57,
+       "120,60_snow": 7.81
+      }
      }
     },
     "commit": null,
-    "summary": "round 7 ported the per-tile floor variants (golden-tested); round 8 targets the camera/player position offset",
+    "summary": "round 8 matched the camera to the reference viewpos via the core-anchor spawn convention; round 9 targets ice/floor edge rendering and the hint box/icon bar",
     "run": "runs/20261009-085712-PAR-0037/"
    },
    "verified": null,
