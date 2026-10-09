@@ -25,6 +25,7 @@ use mind_core::content::{
 };
 use mind_core::game::State;
 use mind_core::game::campaign_rules::CampaignRules;
+use mind_core::game::map_objectives::MapObjectivesRuntime;
 use mind_core::game::objectives::CampaignObjectiveContext;
 use mind_core::game::planet::EmptyNeighborhood;
 use mind_core::game::play::{
@@ -561,6 +562,11 @@ impl MindCampaign {
         {
             merge_map_rules(&mut self.session.rules, &map_rules, preset_id.is_some());
         }
+        // `Logic.play` installs the map objective executor from the final rules;
+        // the play-flow events ran before the map merge above, so rebuild the
+        // runtime here or the tutorial's first objective never qualifies
+        // (PAR-0037: resumed Ground Zero showed no objective state).
+        self.session.objectives = MapObjectivesRuntime::from_rules(&self.session.rules);
 
         // Install the runtime and register the live cores/spawns (GAP-9).
         let mut installed = false;
@@ -1127,6 +1133,64 @@ impl MindCampaign {
             out.push(&row);
         }
         out
+    }
+
+    /// `MapObjectives` world-marker draw list for the running objectives
+    /// (view-only; `MindObjectiveMarkers` projects the positions through the
+    /// camera). `ShapeText` markers with the `world` flag off are omitted.
+    #[func]
+    pub fn objective_markers_json(&self) -> GString {
+        let mut rows: Vec<serde_json::Value> = Vec::new();
+        for index in self.session.objectives.running_indices() {
+            let Some(objective) = self.session.objectives.get(index) else {
+                continue;
+            };
+            for marker in &objective.common().markers {
+                let mind_core::io::json::objectives::ObjectiveMarker::ShapeText(marker) = marker
+                else {
+                    continue;
+                };
+                if marker.world == 0 {
+                    continue;
+                }
+                rows.push(serde_json::json!({
+                    "class": "ShapeText",
+                    "x": marker.pos.x,
+                    "y": marker.pos.y,
+                    "text": self.localized_marker_text(&marker.text),
+                    "radius": marker.radius,
+                    "rotation": marker.rotation,
+                    "sides": marker.sides,
+                    "color": [
+                        marker.color.0.r,
+                        marker.color.0.g,
+                        marker.color.0.b,
+                        marker.color.0.a,
+                    ],
+                    "textHeight": marker.text_height,
+                    "fontSize": marker.font_size,
+                }));
+            }
+        }
+        GString::from(serde_json::Value::Array(rows).to_string().as_str())
+    }
+
+    /// `ShapeTextMarker.fetchText`: a leading `@` resolves through the live
+    /// bundle; Arc markup and `:icon:` tokens are stripped for the plain world
+    /// label (atlas-backed icons arrive with the label pass follow-up).
+    fn localized_marker_text(&self, raw: &str) -> String {
+        let resolved = match raw.trim().strip_prefix('@') {
+            Some(key) => {
+                let value = self.bundle.get(key);
+                if value.is_empty() || value == key {
+                    raw.to_owned()
+                } else {
+                    value.to_owned()
+                }
+            }
+            None => raw.to_owned(),
+        };
+        strip_arc_markup(&resolved)
     }
 
     /// Current sector/rules summary.
@@ -2018,10 +2082,60 @@ impl MindCampaign {
 /// Merges the loaded map/generator's wave rules into the session rules without/// clobbering the preset/campaign fold (`World.loadSector` ordering). For a
 /// preset-launched sector the preset wins; a planet-generated sector adopts the
 /// generator's `generate_rules` wave/win settings.
+/// Strips Arc markup (`[accent]`, `[]`) and `:icon:` tokens from a marker
+/// label so the plain-text world label renders (icons are a follow-up).
+fn strip_arc_markup(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '[' => {
+                for inner in chars.by_ref() {
+                    if inner == ']' {
+                        break;
+                    }
+                }
+            }
+            ':' => {
+                let mut token = String::new();
+                let mut closed = false;
+                for inner in chars.by_ref() {
+                    if inner == ':' {
+                        closed = true;
+                        break;
+                    }
+                    if inner.is_whitespace() || token.len() > 40 {
+                        break;
+                    }
+                    token.push(inner);
+                }
+                if !closed {
+                    out.push(':');
+                    out.push_str(&token);
+                }
+            }
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// `SaveVersion.readRules` + `World.setSectorRules` map half: the loaded map
+/// rules feed the session. A preset map replaces `state.rules` wholesale in
+/// Java (`FileMapGenerator.generate` -> `SaveIO.load(map.file)`), so its wave
+/// gating and in-map objective graph must survive the merge; a generated
+/// sector only inherits the wave settings.
 fn merge_map_rules(session: &mut Rules, map: &Rules, has_preset: bool) {
     if !map.spawns.is_empty() {
         session.spawns = map.spawns.clone();
     }
+    // The Ground Zero tutorial lives in the map's rules: `waveTimer:false`
+    // holds the auto-wave off until an objective adds `spawnWave`, and the
+    // 17-objective graph drives the objective HUD (`gz.*`). Dropping these
+    // launched the tutorial sector as an always-wave sector (PAR-0028/PAR-0037).
+    session.wave_timer = map.wave_timer;
+    session.objectives = map.objectives.clone();
+    session.objective_flags = map.objective_flags.clone();
     if has_preset {
         return;
     }
@@ -2143,5 +2257,42 @@ mod tests {
             resolve_preset_description(Some(&registry), &bundle, Some(preset.id)),
             "Registry text"
         );
+    }
+
+    /// PAR-0037: a preset map's rules replace `state.rules` in Java
+    /// (`FileMapGenerator.generate` -> `SaveIO.load(map.file)`), so the merge
+    /// must carry the objective graph, its flags and the `waveTimer` gate into
+    /// the session or the tutorial launches as a wave sector.
+    #[test]
+    fn preset_map_rules_carry_objectives_and_wave_timer() {
+        let objectives = match mind_core::io::json::objectives::MapObjectives::from_json(
+            r#"[{"class":"Item","amount":15,"markers":[{"class":"Text","text":"@gz.mine"}]}]"#,
+        ) {
+            Ok(objectives) => objectives,
+            Err(error) => panic!("fixture objectives must parse: {error}"),
+        };
+        let map = Rules {
+            wave_timer: false,
+            objectives,
+            objective_flags: std::iter::once("spawnWave".to_owned()).collect(),
+            ..Rules::default()
+        };
+
+        let mut session = Rules::default();
+        merge_map_rules(&mut session, &map, true);
+
+        assert!(!session.wave_timer, "map waveTimer:false must win");
+        assert_eq!(session.objectives.len(), 1);
+        assert!(session.objective_flags.contains("spawnWave"));
+    }
+
+    /// PAR-0037: the world-label text drops Arc markup and `:icon:` tokens.
+    #[test]
+    fn marker_text_strips_arc_markup() {
+        assert_eq!(
+            strip_arc_markup("Move near the :ore-copper: [accent]copper ore[] on the ground"),
+            "Move near the  copper ore on the ground"
+        );
+        assert_eq!(strip_arc_markup("no markup 1:30"), "no markup 1:30");
     }
 }

@@ -15,7 +15,7 @@ use godot::builtin::{
     Vector2i,
 };
 use godot::classes::notify::{CanvasItemNotification, NodeNotification};
-use godot::classes::{Camera2D, INode, INode2D, Image, ImageTexture, Node, Node2D, Viewport};
+use godot::classes::{Camera2D, CanvasLayer, INode, INode2D, Image, ImageTexture, Node, Node2D, Viewport};
 use godot::obj::{Base, WithBaseField};
 use godot::prelude::*;
 
@@ -45,6 +45,7 @@ mod light;
 mod load;
 mod menu;
 mod minimap;
+mod objective_markers;
 mod overlays;
 mod pixelate;
 mod shaders;
@@ -61,6 +62,7 @@ pub use light::LightRenderer;
 pub use load::LoadRenderer;
 pub use menu::MenuRenderer;
 pub use minimap::MindMinimap;
+pub use objective_markers::MindObjectiveMarkers;
 pub use overlays::OverlayRenderer;
 pub use pixelate::Pixelator;
 pub use shaders::ShaderRegistry;
@@ -291,6 +293,12 @@ impl MindWorldRenderer {
     /// Rebuilds the Godot-derived pipeline state (adopts persisted band
     /// children) after `ready()` or a hot reload.
     fn bootstrap(&mut self) {
+        // Mindustry renders the world atlas with nearest sampling (crisp
+        // pixel-art floors/blocks); Godot's default canvas filter is linear,
+        // which softens every world edge. Children inherit the parent node's
+        // filter, so one set here covers all band meshes.
+        self.base_mut()
+            .set_texture_filter(godot::classes::canvas_item::TextureFilter::NEAREST);
         if let Some(host) = self.base().try_get_node_as::<MindSimHost>("../../SimHost") {
             self.host = Some(host);
         } else {
@@ -298,7 +306,34 @@ impl MindWorldRenderer {
         }
         self.build_bands();
         self.build_floor();
+        self.build_markers();
         log::info!("MindWorldRenderer ready ({} bands)", self.band_nodes.len());
+    }
+
+    /// `MapObjectives` world-label pass: a `CanvasLayer` above the world bands
+    /// and below the HUD (`Ui` follows in the tree, so same-layer coverage
+    /// keeps the labels behind the HUD).
+    fn build_markers(&mut self) {
+        // code-instantiated: render-pass layer (mirrors the band nodes); one
+        // layer + one pass, adopted across hot reloads.
+        let mut layer = match self
+            .base()
+            .get_node_or_null("ObjectiveMarkers")
+            .and_then(|node| node.try_cast::<CanvasLayer>().ok())
+        {
+            Some(layer) => layer,
+            None => {
+                let mut layer = CanvasLayer::new_alloc();
+                layer.set_name("ObjectiveMarkers");
+                self.base_mut().add_child(&layer);
+                layer
+            }
+        };
+        if layer.get_node_or_null("Markers").is_none() {
+            let mut node = MindObjectiveMarkers::new_alloc();
+            node.set_name("Markers");
+            layer.add_child(&node);
+        }
     }
 
     /// Creates one `Node2D` per band with `z_as_relative = false`.
@@ -1165,7 +1200,9 @@ impl MindRender {
             (y + 0.5) as f32 * size as f32,
         ));
         let zoom = (zoom as f32).max(0.01);
-        camera.set_zoom(Vector2::new(zoom, zoom));
+        // Same Java y-up projection as `MindCamera2D::process`: Godot 2D is
+        // y-down, so the rendered y axis is negated.
+        camera.set_zoom(Vector2::new(zoom, -zoom));
     }
 
     /// The renderer's counters as a dictionary (`tick` refreshed first).

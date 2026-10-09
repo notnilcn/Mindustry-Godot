@@ -1700,13 +1700,33 @@ fn parse_capture_args() -> Option<CaptureRequest> {
 /// model carries no team, so this returns the first core tile scanned.
 fn first_core_position(grid: &WorldGrid, content: &ContentRegistry) -> Option<(f32, f32)> {
     let unit = mind_core::config::TILESIZE as f32;
+    let is_core = |x: i32, y: i32| -> bool {
+        if x < 0 || y < 0 || x >= grid.width() || y >= grid.height() {
+            return false;
+        }
+        content
+            .block(grid.tile(x, y).block)
+            .is_some_and(|def| def.kind == BlockKind::CoreBlock)
+    };
     grid.iter_row_major().find_map(|(pos, index)| {
         let def = content.block(grid.block_id_at(index))?;
         (def.kind == BlockKind::CoreBlock).then(|| {
-            (
-                (pos.x() as f32 + 0.5) * unit + def.offset,
-                (pos.y() as f32 + 0.5) * unit + def.offset,
-            )
+            // Java `World.setSectorRules` -> `sector.info.spawnPosition =
+            // core.pos()` uses the building's ANCHOR tile (the centre for odd
+            // multiblocks) and the player spawns at `tile.worldx()/worldy()`
+            // (the tile's corner, not its centre). Map-loaded multiblocks fill
+            // the whole footprint (the row-major first tile is the min corner,
+            // so the anchor is `pos - size_offset`); tool-placed blocks may
+            // store only the anchor tile. The candidate `pos - size_offset`
+            // being the same core disambiguates the two conventions.
+            let candidate_x = pos.x() as i32 - def.size_offset;
+            let candidate_y = pos.y() as i32 - def.size_offset;
+            let anchor = if is_core(candidate_x, candidate_y) {
+                (candidate_x, candidate_y)
+            } else {
+                (pos.x() as i32, pos.y() as i32)
+            };
+            (anchor.0 as f32 * unit, anchor.1 as f32 * unit)
         })
     })
 }
@@ -1734,24 +1754,21 @@ mod tests {
     }
 
     #[test]
-    fn best_core_position_uses_the_core_tile_center() {
+    fn best_core_position_uses_the_anchor_tile_corner() {
         let registry = base_registry();
         let Some(core) = registry.block_id("core-shard") else {
             panic!("core-shard missing");
         };
-        let Some(def) = registry.block(core) else {
-            panic!("core-shard def missing");
-        };
-        let offset = def.offset;
         let mut grid = WorldGrid::new(8, 8);
         grid.fill(BlockId::AIR, BlockId::AIR);
         if grid.set_block(TilePos::new(3, 5), core, 0, 0).is_err() {
             panic!("set_block failed");
         }
         let unit = mind_core::config::TILESIZE as f32;
+        // Java's spawn is `tile.worldx()/worldy()` of the anchor tile.
         assert_eq!(
             first_core_position(&grid, &registry),
-            Some(((3.0 + 0.5) * unit + offset, (5.0 + 0.5) * unit + offset))
+            Some((3.0 * unit, 5.0 * unit))
         );
     }
 
@@ -1761,6 +1778,54 @@ mod tests {
         let mut grid = WorldGrid::new(4, 4);
         grid.fill(BlockId::AIR, BlockId::AIR);
         assert_eq!(first_core_position(&grid, &registry), None);
+    }
+
+    /// PAR-0037: Java spawns the player at the core's anchor-tile corner
+    /// (`core.pos()` -> `tile.worldx/worldy()`), so a 3x3 `core-shard` placed
+    /// with its centre at (129, 55) must report `(129*8, 55*8)` - the
+    /// reference Ground Zero `viewpos` is `(1032.0, 440.3)`.
+    #[test]
+    fn core_position_matches_the_java_spawn_anchor() {
+        let registry = base_registry();
+        let Some(core) = registry.block_id("core-shard") else {
+            panic!("core-shard missing");
+        };
+        let mut sim = Sim::new(1, 256, 256, BlockId::AIR, BlockId::AIR);
+        if let Err(error) = sim.apply(Command::Place {
+            x: 129,
+            y: 55,
+            block: core,
+        }) {
+            panic!("place core failed: {error}");
+        }
+        assert_eq!(
+            first_core_position(&sim.grid, &registry),
+            Some((1032.0, 440.0))
+        );
+    }
+
+    /// The map-loader convention: a 3x3 footprint filled across tiles
+    /// 128-130 x 54-56 (min corner first in row-major) must resolve to the
+    /// same anchor `(129, 55)` -> `(1032, 440)`.
+    #[test]
+    fn map_loaded_footprint_resolves_to_the_anchor_corner() {
+        let registry = base_registry();
+        let Some(core) = registry.block_id("core-shard") else {
+            panic!("core-shard missing");
+        };
+        let mut grid = WorldGrid::new(256, 256);
+        grid.fill(BlockId::AIR, BlockId::AIR);
+        for y in 54..=56 {
+            for x in 128..=130 {
+                if grid.set_block(TilePos::new(x, y), core, 0, 0).is_err() {
+                    panic!("set_block failed at ({x},{y})");
+                }
+            }
+        }
+        assert_eq!(
+            first_core_position(&grid, &registry),
+            Some((1032.0, 440.0))
+        );
     }
 
     #[test]

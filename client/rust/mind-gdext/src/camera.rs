@@ -132,7 +132,13 @@ impl ICamera2D for MindCamera2D {
 
         let zoom = self.camera.camerascale.max(0.01);
         if zoom != self.shadow_scale {
-            self.base_mut().set_zoom(Vector2::new(zoom, zoom));
+            // Java/Arc projects world `+y` to screen-up (`Camera.unproject`
+            // flips the y axis); Godot 2D maps `+y` to screen-down. The world
+            // coordinates already match Java numerically (core at file rows
+            // 54-56, camera ~= Java `viewpos`), so negate the rendered y axis
+            // here: the canvas transform flips and `tile_to_screen`/
+            // `screen_to_tile` (both built from it) follow.
+            self.base_mut().set_zoom(Vector2::new(zoom, -zoom));
             self.shadow_scale = zoom;
         }
         let (x, y) = self.camera.render_position();

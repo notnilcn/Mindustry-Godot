@@ -27,6 +27,7 @@ use godot::prelude::*;
 
 use mind_core::config::TILESIZE;
 use mind_core::content::{BlockId, ContentRegistry};
+use mind_core::math::rand_arc::{pack_point2, random_seed_int};
 use mind_core::render::floor_cache::{CHUNK_SIZE, FloorChunkGrid};
 use mind_core::render::layer::CacheLayerId;
 use mind_core::render::list::{block_cache_layer, floor_cache_layer, is_accessible};
@@ -92,6 +93,8 @@ struct PendingQuad {
     w: f32,
     h: f32,
     color: u32,
+    /// Plain floors pick a per-tile texture variant (`Floor.variant`).
+    variant: bool,
 }
 
 /// Per-chunk baked nodes (`Vec` indexed by `CacheLayerId.id()`).
@@ -125,6 +128,8 @@ pub struct FloorRenderer {
     revision: i64,
     /// Region-name → resolved geometry (never strings per frame).
     regions: HashMap<String, Option<ResolvedRegion>>,
+    /// Floor region name → variant count (`Floor.variantRegions.len()`).
+    variant_counts: HashMap<String, usize>,
     /// Chunk linear index → baked nodes.
     chunks: BTreeMap<usize, ChunkMeshes>,
     stats: FloorStats,
@@ -146,6 +151,7 @@ impl FloorRenderer {
             grid: FloorChunkGrid::new(width, height),
             dims: (width, height),
             regions: HashMap::new(),
+            variant_counts: HashMap::new(),
             chunks: BTreeMap::new(),
             stats: FloorStats::default(),
         }
@@ -277,7 +283,11 @@ impl FloorRenderer {
                         None => None,
                     };
                     if let Some(quad) = quad {
-                        let resolved = self.resolve(&quad.region);
+                        let resolved = if quad.variant {
+                            self.resolve_variant(&quad.region, tx, ty)
+                        } else {
+                            self.resolve(&quad.region)
+                        };
                         let (page, texture, uv) = resolved_uv(&resolved);
                         let entry = groups.entry(page).or_insert((texture, Vec::new()));
                         entry.1.push(Quad {
@@ -333,6 +343,50 @@ impl FloorRenderer {
         let resolved = self.lookup(name);
         self.regions.insert(name.to_owned(), resolved.clone());
         resolved
+    }
+
+    /// `Floor.variantRegions.len()`: the numbered atlas variants
+    /// (`name1..nameN`) when present, else the bare region (one variant).
+    fn variant_count(&mut self, name: &str) -> usize {
+        if let Some(count) = self.variant_counts.get(name) {
+            return *count;
+        }
+        let count = match self.assets.clone() {
+            Some(assets) => {
+                let assets = assets.bind();
+                if !assets.region_geometry(GString::from(name)).is_empty() {
+                    1
+                } else {
+                    let mut count = 0usize;
+                    for index in 1..=4 {
+                        let candidate = format!("{name}{index}");
+                        if assets
+                            .region_geometry(GString::from(candidate.as_str()))
+                            .is_empty()
+                        {
+                            break;
+                        }
+                        count = index;
+                    }
+                    count
+                }
+            }
+            None => 1,
+        }
+        .max(1);
+        self.variant_counts.insert(name.to_owned(), count);
+        count
+    }
+
+    /// `Floor.drawMain` plain-floor variant: `variant(x, y, count)` picks the
+    /// numbered region with Arc `Mathf.randomSeed(Point2.pack(x, y), 0, count-1)`.
+    fn resolve_variant(&mut self, name: &str, x: i32, y: i32) -> Option<ResolvedRegion> {
+        let count = self.variant_count(name);
+        if count <= 1 {
+            return self.resolve(name);
+        }
+        let index = random_seed_int(pack_point2(x, y), 0, count as i32 - 1);
+        self.resolve(&format!("{name}{}", index + 1))
     }
 
     fn lookup(&mut self, name: &str) -> Option<ResolvedRegion> {
@@ -395,6 +449,7 @@ fn tile_quad(
                 w: block.size.max(1) as f32 * size,
                 h: block.size.max(1) as f32 * size,
                 color: 0xffff_ffff,
+                variant: false,
             });
         }
         return None;
@@ -412,6 +467,7 @@ fn tile_quad(
             w: size,
             h: size,
             color: 0xffff_ffff,
+            variant: false,
         });
     }
 
@@ -430,6 +486,7 @@ fn tile_quad(
         w: size,
         h: size,
         color: 0xffff_ffff,
+        variant: true,
     })
 }
 

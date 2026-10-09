@@ -15,16 +15,16 @@ script = ExtResource("1_hints")
 
 [node name="Panel" type="PanelContainer" parent="." unique_id=1358841325]
 layout_mode = 1
-anchors_preset = 8
-anchor_left = 0.5
+anchors_preset = 4
+anchor_left = 0.0
 anchor_top = 0.5
-anchor_right = 0.5
+anchor_right = 0.0
 anchor_bottom = 0.5
-offset_left = -220.0
+offset_left = 0.0
 offset_top = -60.0
-offset_right = 220.0
+offset_right = 412.0
 offset_bottom = 60.0
-grow_horizontal = 2
+grow_horizontal = 1
 grow_vertical = 2
 theme_type_variation = &"defaultDialog"
 
@@ -39,5 +39,6 @@ script = ExtResource("2_rich")
 [node name="Skip" type="Button" parent="Panel/Layout" unique_id=345942508]
 layout_mode = 2
 size_flags_horizontal = 0
+custom_minimum_size = Vector2(112, 40)
 theme_type_variation = &"nonet"
 text = "Skip"

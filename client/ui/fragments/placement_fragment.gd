@@ -14,12 +14,21 @@ extends Control
 var _selected_category := 0
 var _catalog: Dictionary = {}
 
+@onready var panel: PanelContainer = get_node_or_null("Panel")
 @onready var search: LineEdit = get_node_or_null("Panel/Layout/Search")
 @onready var categories: HBoxContainer = get_node_or_null("Panel/Layout/Categories")
 @onready var blocks: GridContainer = get_node_or_null("Panel/Layout/Scroll/Blocks")
 
 
 func _ready() -> void:
+	# `PlacementFragment`'s block grid is the collapsed `blocksSelect` pane
+	# (`Java PlacementFragment.java:679`); the bottom-right icon bar is the only
+	# always-visible piece. Collapse the panel here (the manifest bind only
+	# touches the fragment root) and open through `open_palette()` (category
+	# hotkeys) so a fresh sector frame matches the Java HUD.
+	visible = false
+	if panel != null:
+		panel.visible = false
 	if search != null:
 		search.text_changed.connect(func(_value: String) -> void: _rebuild())
 	# The HUD starts hidden in the menu; the catalogue is rebuilt on every reveal
@@ -34,9 +43,26 @@ func _ready() -> void:
 	_ensure_loaded()
 
 
+## Opens the collapsed block-select pane (`blocksSelect` collapser expanded).
+func open_palette() -> void:
+	if panel != null:
+		panel.visible = true
+	visible = true
+	_ensure_loaded()
+
+
+## Collapses the block-select pane back to the HUD.
+func close_palette() -> void:
+	if panel != null:
+		panel.visible = false
+	_ensure_loaded()
+
+
 func _on_hotkey(action: String) -> void:
 	if action != "category_prev" and action != "category_next":
 		return
+	if panel == null or not panel.visible:
+		open_palette()
 	var count := int(_catalog.get("categories", []).size())
 	if count <= 0:
 		return

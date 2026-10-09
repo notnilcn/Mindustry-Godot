@@ -161,6 +161,58 @@ impl ArcRand {
     }
 }
 
+/// Arc `Mathf.isPowerOfTwo(int)`: `n != 0 && (n & (n - 1)) == 0`.
+const fn is_power_of_two(n: i32) -> bool {
+    n != 0 && (n & (n - 1)) == 0
+}
+
+/// Arc `Mathf.randomSeed(long seed, int min, int max)`: reseeds the shared
+/// `seedr`, takes the extra draw Arc performs when `max` is a power of two,
+/// then returns `nextInt(max - min + 1) + min`.
+pub fn random_seed_int(seed: u64, min: i32, max: i32) -> i32 {
+    let mut rand = ArcRand::new(seed);
+    if is_power_of_two(max) {
+        rand.next_int();
+    }
+    rand.next_int_bound(max - min + 1) + min
+}
+
+/// Arc `Point2.pack(int x, int y)`: `((short)x << 16) | (y & 0xFFFF)`,
+/// sign-extended to the Java `long` seed.
+pub fn pack_point2(x: i32, y: i32) -> u64 {
+    let packed = ((x as i16 as i32) << 16) | ((y as i16 as u16) as i32);
+    packed as i64 as u64
+}
+
+#[cfg(test)]
+mod mathf_tests {
+    use super::*;
+
+    /// Golden values produced with the reference `arc-core` jar
+    /// (`Mathf.randomSeed(Point2.pack(x, y), 0, max)`, 2026-10-09).
+    #[test]
+    fn random_seed_int_matches_arc_goldens() {
+        let cases: [(i32, i32, i32, i32); 9] = [
+            (128, 55, 1, 1),
+            (128, 55, 2, 1),
+            (128, 55, 3, 2),
+            (129, 55, 2, 1),
+            (130, 55, 2, 2),
+            (132, 48, 2, 2),
+            (100, 100, 2, 0),
+            (0, 0, 2, 1),
+            (255, 255, 2, 0),
+        ];
+        for (x, y, max, expected) in cases {
+            assert_eq!(
+                random_seed_int(pack_point2(x, y), 0, max),
+                expected,
+                "({x},{y},0,{max})"
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

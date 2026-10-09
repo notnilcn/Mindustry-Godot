@@ -1,6 +1,6 @@
 {
  "schema": "mindustry-godot/parity-ledger@2",
- "updated": "2026-10-09T10:15:11Z",
+ "updated": "2026-10-09T10:19:23Z",
  "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction chains. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
  "focus": {
   "kind": "area",
@@ -10080,9 +10080,9 @@
    "title": "Campaign world: click copper ore to begin mining (objective 0 -> 1)",
    "surface": "world",
    "parent": "PAR-0028",
-   "status": "mismatch",
+   "status": "blocked",
    "chain": "chains/java-ref-ground-zero-tutorial.md",
-   "updated": "2026-10-09T09:54:46Z",
+   "updated": "2026-10-09T10:17:34Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
     "to": "Ground Zero tutorial start (objective Obtain: 0/15 Copper)",
@@ -10164,6 +10164,14 @@
      "godot_frame": "runs/20261009-095320-PAR-0045/godot/step-click.png",
      "diff": "runs/20261009-095320-PAR-0045/diff/step-click.json",
      "verdict": "mismatch"
+    },
+    {
+     "n": "click ore (round 2)",
+     "action": "Q clear selection; click tile (137,53); D hold into range",
+     "java_frame": "runs/20261009-065416-ref-ground-zero/java/r03-02-mine.png",
+     "godot_frame": "runs/20261009-095320-PAR-0045/godot/r2-fork.png",
+     "diff": "runs/20261009-095320-PAR-0045/diff/step-click.json",
+     "verdict": "gate-fail (blocked on PAR-0028); signal pass: mine [137,53], mined 4"
     }
    ],
    "mismatch": {
@@ -10191,11 +10199,11 @@
     ]
    },
    "fix": {
-    "status": "planned",
+    "status": "godot-signals-pass",
     "commit": null,
     "summary": null,
     "plan": {
-     "round": 1,
+     "round": 2,
      "mismatch_evidence": {
       "changed_fraction": 0.76977,
       "mean_abs_rgb": [
@@ -10217,7 +10225,27 @@
       "client/rust/mind-core/src/ai/types/miner.rs (reuse drop/tier checks)"
      ],
      "approach": "Mirror InputHandler.tryBeginMine/tryStopMine on the player unit (canMine: tile.drop or overlay item_drop, tier <= mine_tier); add a per-tick mining pass that advances mineTimer by mine_speed and adds the ore drop to the unit's ItemsComp (upstream MinerComp.update).",
-     "narrow_check": "cargo test -p mind-core; cargo clippy -p mind-core -p mind-gdext --all-targets -- -D warnings; tools/build.sh; Godot leg"
+     "narrow_check": "cargo test -p mind-core; cargo clippy -p mind-core -p mind-gdext --all-targets -- -D warnings; tools/build.sh; Godot leg",
+     "implementation": {
+      "changed": [
+       "mind-core/src/ai/types/player.rs (PlayerInput.mine_tile/mine_timer/mined; update_mining = MinerComp.update port; can_mine_tile)",
+       "mind-core/src/sim/unit_runtime.rs (Sim::{set_player_mine_tile,player_mine_tile,player_mined_count,player_can_mine})",
+       "mind-gdext/src/input/desktop.rs (try_mine_at on the no-selection left press: InputHandler.tryBeginMine/tryStopMine)",
+       "mind-gdext/src/sim_host.rs (player_can_mine/player_mine_target/set_player_mine; player_mine_tile/player_mined_count #[func])"
+      ],
+      "checks": {
+       "cargo test -p mind-core": "1823 passed",
+       "cargo clippy -p mind-core -p mind-gdext --all-targets -- -D warnings": "clean",
+       "tools/build.sh": "done"
+      },
+      "engine": {
+       "pid": 192138,
+       "order": "[137,53]",
+       "mined": 4,
+       "note": "click sets the order; a real-time D hold brings the unit in range and mining yields copper"
+      },
+      "commit": "80e2684 (neutral; the frame gate is blocked on PAR-0028)"
+     }
     }
    },
    "verified": null,
@@ -10286,8 +10314,13 @@
    "claim": {
     "by": "godot-walk-s2",
     "at": "2026-10-09T09:53:20Z",
-    "prior_status": "reference"
-   }
+    "released_at": "2026-10-09T10:17:34Z",
+    "reason": "click-mining implemented + engine-validated; frame gate blocked on PAR-0028"
+   },
+   "blocked_on": [
+    "PAR-0028"
+   ],
+   "blocked_note": "Own signal engine-verified: no-selection left click on tile (137,53) sets player_mine_tile [137,53] and the unit produces copper (player_mined_count 0 -> 4). The \u00a74 frame gate stays blocked on PAR-0028 (objective counter/HUD, wave state, terrain): step-click 0.76977 changed."
   },
   {
    "id": "PAR-0046",
@@ -10296,7 +10329,7 @@
    "parent": "PAR-0028",
    "status": "reference",
    "chain": "chains/java-ref-ground-zero-tutorial.md",
-   "updated": "2026-10-09T07:18:30Z",
+   "updated": "2026-10-09T10:19:10Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
     "to": "Ground Zero tutorial objective 1 (Build: 1x Mechanical Drill)",
@@ -10616,6 +10649,12 @@
      }
     ],
     "note": "R04 reference soak. The tech tree node click researches directly on desktop (no confirm button); the block picker appears in the bottom-right after the research (drill block button + category button), the info panel shows the drill stats, and the click at the gold 2x2 target places it. New fork items: PAR-0047 (tech tree dialog controls), PAR-0048 (block picker surface)."
+   },
+   "claim": {
+    "by": "godot-walk-s2",
+    "at": "2026-10-09T10:18:12Z",
+    "released_at": "2026-10-09T10:19:10Z",
+    "reason": "session paused by operator before any run work; clean release back to the queue"
    }
   },
   {
@@ -11325,9 +11364,9 @@
    "title": "Campaign world: player mech spawns on sector launch (Ground Zero)",
    "surface": "world",
    "parent": "PAR-0028",
-   "status": "in-progress",
+   "status": "blocked",
    "chain": "chains/java-ref-ground-zero-tutorial.md",
-   "updated": "2026-10-09T09:44:47Z",
+   "updated": "2026-10-09T10:19:10Z",
    "discovered_by": "runs/20261009-085822-PAR-0044/",
    "path": {
     "to": "Ground Zero launched in the Godot client (sector 15, campaign:true, hasCore:true)",
@@ -11359,17 +11398,23 @@
     "by": "godot-walk-s2",
     "at": "2026-10-09T09:27:44Z",
     "prior_status": "seeded",
-    "note": "implemented inside PAR-0044 fix round 1"
-   }
+    "note": "implemented inside PAR-0044 fix round 1",
+    "released_at": "2026-10-09T10:19:10Z",
+    "reason": "blocked on PAR-0044"
+   },
+   "blocked_on": [
+    "PAR-0044"
+   ],
+   "blocked_note": "player mech spawn implemented + engine-observed; settles with PAR-0044"
   },
   {
    "id": "PAR-0053",
    "title": "Render: live units are not drawn (no unit view pass)",
    "surface": "world",
    "parent": "PAR-0028",
-   "status": "in-progress",
+   "status": "blocked",
    "chain": "chains/java-ref-ground-zero-tutorial.md",
-   "updated": "2026-10-09T09:44:47Z",
+   "updated": "2026-10-09T10:19:10Z",
    "discovered_by": "runs/20261009-085822-PAR-0044/",
    "path": {
     "to": "Ground Zero launched in the Godot client (sector 15, campaign:true, hasCore:true)",
@@ -11401,23 +11446,31 @@
     "by": "godot-walk-s2",
     "at": "2026-10-09T09:27:44Z",
     "prior_status": "seeded",
-    "note": "implemented inside PAR-0044 fix round 1"
-   }
+    "note": "implemented inside PAR-0044 fix round 1",
+    "released_at": "2026-10-09T10:19:10Z",
+    "reason": "blocked on PAR-0044"
+   },
+   "blocked_on": [
+    "PAR-0044"
+   ],
+   "blocked_note": "unit view pass implemented (scale_marker fix PAR-0055); settles with PAR-0044"
   },
   {
    "id": "PAR-0054",
    "title": "Launch: loadout dialog calls a non-existent 3-arg start_sector (arity error + break-on-error pause)",
    "surface": "campaign",
    "parent": "PAR-0024",
-   "status": "in-progress",
+   "status": "blocked",
    "chain": "chains/java-ref-ground-zero-tutorial.md",
-   "updated": "2026-10-09T09:44:55Z",
+   "updated": "2026-10-09T10:19:23Z",
    "discovered_by": "runs/20261009-092821-PAR-0044/",
    "claim": {
     "by": "godot-walk-s2",
     "at": "2026-10-09T09:34:06Z",
     "prior_status": "seeded",
-    "note": "fixed in PAR-0044 round 2 (planet_dialog.gd call site)"
+    "note": "fixed in PAR-0044 round 2 (planet_dialog.gd call site)",
+    "released_at": "2026-10-09T10:19:10Z",
+    "reason": "fix godot-pass; awaiting twin evaluation, claim released for the session pause"
    },
    "path": {
     "to": "Ground Zero launch via the launch_loadout dialog Launch button",
@@ -11473,16 +11526,18 @@
     }
    },
    "verified": null,
-   "reference": null
+   "reference": null,
+   "blocked_on": [],
+   "blocked_note": "Fix godot-pass (planet_dialog.gd 2-arg start_sector; clean launches in runs/20261009-092821-PAR-0044/). Awaiting twin evaluation; blocked state keeps the claim from being reaped into the wrong status."
   },
   {
    "id": "PAR-0055",
    "title": "Unit render: sprites draw at raw atlas pixels (4x) \u2014 missing Draw.scl = 1/scale_marker.width",
    "surface": "world",
    "parent": "PAR-0053",
-   "status": "in-progress",
+   "status": "blocked",
    "chain": "chains/ground-zero-wasd-movement.md",
-   "updated": "2026-10-09T09:52:50Z",
+   "updated": "2026-10-09T10:19:23Z",
    "discovered_by": "runs/20261009-092821-PAR-0044/",
    "path": {
     "to": "Ground Zero launched in the Godot client",
@@ -11544,8 +11599,12 @@
     "by": "godot-walk-s2",
     "at": "2026-10-09T09:48:38Z",
     "prior_status": "seeded",
-    "note": "fixed in PAR-0044 round 2 (render/units.rs sprite_scale)"
-   }
+    "note": "fixed in PAR-0044 round 2 (render/units.rs sprite_scale)",
+    "released_at": "2026-10-09T10:19:10Z",
+    "reason": "fix godot-pass; awaiting twin evaluation, claim released for the session pause"
+   },
+   "blocked_on": [],
+   "blocked_note": "Fix godot-pass (unit sprites scaled by scale_marker; r3-fork mech ~30x45 px matching the reference). Awaiting twin evaluation; blocked state keeps the claim from being reaped into the wrong status."
   }
  ]
 }

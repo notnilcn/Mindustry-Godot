@@ -40,6 +40,7 @@ func _ready() -> void:
 	_hud = get_node_or_null("/root/MindHud")
 	_localize_banners()
 	_build_wave_buttons()
+	_setup_status_style()
 	if _hud != null:
 		if _hud.has_signal("hud_text"):
 			_hud.connect("hud_text", _on_hud_text)
@@ -68,6 +69,31 @@ func _connect_minimap() -> void:
 		minimap_widget.zoom_changed.connect(_on_minimap_zoom)
 	if not minimap_widget.tapped.is_connected(_on_minimap_tapped):
 		minimap_widget.tapped.connect(_on_minimap_tapped)
+
+
+## `HudFragment.makeStatusTable`: the status table draws on `Tex.wavepane`
+## (36x27 ninepatch, splits 12). Built from the atlas region so the objective
+## panel matches the Java top-left readout instead of a bare label.
+func _setup_status_style() -> void:
+	if status_label == null:
+		return
+	var assets := MindWidgets.assets()
+	if assets == null or not assets.has_method("find_region"):
+		return
+	var texture: Variant = assets.call("find_region", "wavepane")
+	if not (texture is Texture2D):
+		return
+	var box := StyleBoxTexture.new()
+	box.texture = texture
+	box.texture_margin_left = 12.0
+	box.texture_margin_top = 12.0
+	box.texture_margin_right = 12.0
+	box.texture_margin_bottom = 12.0
+	box.content_margin_left = 12.0
+	box.content_margin_top = 12.0
+	box.content_margin_right = 12.0
+	box.content_margin_bottom = 12.0
+	status_label.add_theme_stylebox_override("normal", box)
 
 
 func _process(delta: float) -> void:
@@ -107,7 +133,7 @@ func refresh() -> void:
 		return
 	var status := str(_hud.get("status_text"))
 	if status_label != null:
-		status_label.text = "[center]" + status
+		status_label.text = "[left]" + status
 		status_label.visible = not status.is_empty()
 	if info_label != null:
 		info_label.visible = false

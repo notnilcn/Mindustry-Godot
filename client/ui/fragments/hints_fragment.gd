@@ -43,14 +43,17 @@ const HINTS := [
 
 ## `HintsFragment` gate: total playtime must exceed 8000 ms before a hint shows.
 const PLAYTIME_GATE := 8.0
-## Timed auto-advance (trigger-driven completion is not ported yet).
-const HINT_DURATION := 15.0
+## Camera-movement threshold that counts as "the player moved" for the
+## `desktopMove`/`zoom` trigger hints (the port has no player entity yet, so the
+## shared WASD/scroll bindings drive the camera).
+const MOVE_EPSILON := 0.5
 
 var _current := ""
 var _next := 0
 var _playtime := 0.0
-var _elapsed := 0.0
 var _ui: Node = null
+var _last_camera := Vector2.ZERO
+var _last_zoom := 0.0
 
 @onready var _label: RichTextLabel = get_node_or_null("Panel/Layout/Label")
 @onready var _skip: Button = get_node_or_null("Panel/Layout/Skip")
@@ -65,6 +68,7 @@ func _ready() -> void:
 		_skip.text = _t("@hint.skip")
 		if not _skip.pressed.is_connected(complete_hint):
 			_skip.pressed.connect(complete_hint)
+	_snapshot_camera()
 	set_process(true)
 
 
@@ -75,14 +79,38 @@ func _process(delta: float) -> void:
 		return
 	if _is_paused():
 		return
+	_check_trigger()
 	if not _current.is_empty():
-		_elapsed += delta
-		if _elapsed >= HINT_DURATION:
-			complete_hint()
 		return
 	_playtime += delta
 	if _playtime >= PLAYTIME_GATE:
 		_show_next()
+
+
+## Upstream hints complete on their trigger, not a timer (`DesktopHint`
+## predicate). `desktopMove` completes when the movement bindings move the
+## camera; `zoom` when the scroll changes the zoom.
+func _check_trigger() -> void:
+	if _current.is_empty():
+		return
+	var camera := get_node_or_null("/root/Spine/World/Camera2D")
+	if camera == null:
+		return
+	var position: Vector2 = camera.get("position")
+	var zoom := float(camera.get("zoom").x)
+	var moved := position.distance_to(_last_camera) > MOVE_EPSILON
+	var zoomed := absf(zoom - _last_zoom) > 0.01
+	_last_camera = position
+	_last_zoom = zoom
+	if (_current == "desktopMove" and moved) or (_current == "zoom" and zoomed):
+		complete_hint()
+
+
+func _snapshot_camera() -> void:
+	var camera := get_node_or_null("/root/Spine/World/Camera2D")
+	if camera != null:
+		_last_camera = camera.get("position")
+		_last_zoom = float(camera.get("zoom").x)
 
 
 ## The hint overlay shows only during a live (non-menu) game and when the HUD
@@ -113,14 +141,14 @@ func show_hint(hint_name: String) -> void:
 	if _label != null:
 		_label.text = MindWidgets.markup("@hint.%s" % hint_name)
 	_current = hint_name
-	_elapsed = 0.0
+	_snapshot_camera()
 	visible = true
 
 
 ## Completes/hides the current hint and arms the next one.
 func complete_hint() -> void:
 	_current = ""
-	_elapsed = 0.0
+	_snapshot_camera()
 	visible = false
 
 
