@@ -1,7 +1,7 @@
 ---
 id: java-reference-leg
 title: Java reference — launch, drive a menu flow, capture, quit
-status: seeded
+status: verified
 applies_when: >-
   A parity session needs the Java leg of a mirrored item (reference capture) on
   the shared display :10.
@@ -10,7 +10,7 @@ preconditions:
   - computer-mcp registered and pointed at `DISPLAY=:10.0` (global opencode config); the Godot editor shares :10, so always raise the Java window before capturing.
   - Persistent Java data dir `parity-java-home/` normalized (1152x648, UI scale 1.0, language en, volumes 0) and stable across runs.
 tools: [computer-mcp_mouse_move, computer-mcp_click, computer-mcp_drag, computer-mcp_type, computer-mcp_key_press, computer-mcp_key_down, computer-mcp_key_up, computer-mcp_screenshot]
-last_verified: not yet (single-display :10 recipe; legacy loop-era runs are kept in the Verified-run sections below)
+last_verified: 2026-10-09 session-1 twin PAR-0056 (16a58ca+working-tree, runs/20261009-141406-PAR-0056-twin/, JVM pid 134983; single-display :10 recipe; legacy loop-era runs are kept in the Verified-run sections below)
 ---
 
 # java-reference-leg
@@ -264,6 +264,32 @@ click first in the same process; without OCR (tesseract absent) and with a
 non-vision model the catalog/selection state cannot be read, so this leg
 reached a playable world but could not pixel-isolate the rotation path
 (`runs/l2-20261009-001432-ev0056-rotation-twin/java/notes.md`).
+
+## Verified run (session-1 twin, 2026-10-09, PAR-0056, xrdp Xorg :10, 1152x648)
+
+The current single-display recipe in Steps 1-5 verified end-to-end: detached
+`setsid env DISPLAY=:10 HOME=$PWD/parity-java-home …` launch (readiness
+`Total time to load: 2597ms`), `window_ctl.py unmaximize Mindustry` +
+`resize Mindustry 1152 648` + `move Mindustry 45 69` + `raise` → client area
+**+50+98** 1152x648 (xfwm4 +5/+29; screen = image + (50,98)), then
+Play → Campaign → chooser Serpulo → OK → Ground Zero hex → Launch → tutorial
+(`Obtain: 0/15 Copper`) → Escape → Save & Quit → confirm OK → menu.
+
+Recorded screen coords: Play (307,247), Campaign (527,249), Serpulo card
+(464,338), OK (627,705), GZ hex (627,420), Launch (627,710), Save & Quit
+(626,510), confirm OK (728,456), main-menu Quit (307,591).
+
+Two surprises: `computer-mcp.click` did not open Play on the fresh window
+(byte-identical frames twice) while explicit `button_down` + `button_up` did
+(see computer-mcp-learnings.md, 2026-10-09); and a fresh profile needs more
+than emptied saves — `campaignselect` in `settings.bin` must be false for the
+first-run chooser (back up settings.bin, flip it offline). Save meta check:
+zlib-decompress `sector-serpulo-170.msav` and assert `,loadout:[],` in the
+meta region (helper: PAR-0056 run `java/verify_msav.py`). Quit cleanly via the
+menu Quit button (pid gone < 3 s).
+
+Evidence: `runs/20261009-141406-PAR-0056-twin/` (JVM pid 134983;
+`java/fresh-launch.png`, `java/save-meta-loadout.txt`, `java/step-12-menu-after.png`).
 
 ## Success signals
 

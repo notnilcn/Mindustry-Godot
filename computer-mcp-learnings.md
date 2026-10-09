@@ -463,3 +463,47 @@ displays); those paths no longer exist, but the workarounds still apply.
   the R06 checkpoint so the next soak resumes from the good state; the sector
   map was parsed offline with `runs/20261009-065416-ref-ground-zero/tools/parse_msav.py`
   (ores/blocks/floors) to locate the lead deposit without in-game wandering.
+
+## 2026-10-09 — description edits live only in the uv-tool install; a home-tree grep hangs the shell
+
+- The learning-driven tool descriptions in `mcp.py` (previous-frame screenshots,
+  first-click focus, pointer race, text fields, no scroll, obscured captures,
+  WM-frame offsets, auto-pause) exist only at
+  `/home/clintonnguyen/.local/share/uv/tools/computer-mcp/lib/python3.12/site-packages/computer_mcp/mcp.py`.
+  There is no computer-mcp source checkout on this host (`find` found only the
+  uv cache and the install), so a `uv tool reinstall/upgrade` would silently
+  revert the front-facing strings — keep the edits in a tracked patch/checkout
+  if they must survive.
+- Failing call while looking for that checkout: `grep -rn "Obscured X11 windows
+  read back BLACK" /home/clintonnguyen/g /home/clintonnguyen/.opencode` exceeded
+  the shell-tool timeout and had to be aborted. What worked: `find
+  /home/clintonnguyen -maxdepth 4 -name pyproject.toml -path "*computer*"`.
+  Scope recursive searches to a known subdir; never grep the whole home tree.
+- Tool schemas load at server-process start: of the three live
+  computer-mcp/open-godot-mcp pairs at 23:41, the 22:36 and 22:38 pairs predate
+  the 23:34-23:36 edits and still serve the old text. Restart the session/MCP
+  after editing front-facing strings.
+- Still not in any tool description: the dead persistent X connection
+  (`Display connection closed by server: [Errno 32] Broken pipe`) and the
+  one-shot pynput fallback for click/key/scroll once the persistent server is
+  unusable.
+- Evidence: process table and `stat` mtimes at 2026-10-09 23:41 (both uv-tool
+  installs touched 23:35:35 / 23:36:18).
+
+## 2026-10-09 — session-1 twin PAR-0056 Java leg: `click` was dead at the fresh menu; explicit `button_down` + `button_up` landed
+
+- After the fresh launch + `window_ctl.py raise Mindustry`, two
+  `mouse_move` → `click` sends at the Play row (response `mouse_position`
+  read-back correct, screen 280/307,247) left byte-identical frames
+  (`frame_diff` changed_fraction 0.0). A `mouse_move` to the same row changed
+  the frame (Play hover highlight, changed_fraction 0.033), so motion events
+  reached the window; two separate `button_down` + `button_up` calls then
+  opened the submenu (changed_fraction 0.20). When a menu `click` looks dead on
+  this host, hover to confirm the pointer is over the window, then send
+  `button_down` + `button_up` as two calls instead of the `click` action.
+- Launch-command hazard: `cd repo && RUN=… && setsid java … >"$RUN/java/game.log" … &`
+  backgrounds the whole `&&` list; a poll in the same shell then sees an empty
+  `$RUN` and burns its full timeout while the client is actually up. Keep the
+  variable assignment outside the backgrounded group (or use a subshell).
+- Evidence: `runs/20261009-141406-PAR-0056-twin/` (`java/step-00..04*.png`,
+  `diff/step-0*.json`, `java/game.log` readiness 2597 ms, JVM pid 134983).

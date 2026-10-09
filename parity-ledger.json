@@ -1,6 +1,6 @@
 {
  "schema": "mindustry-godot/parity-ledger@2",
- "updated": "2026-10-09T10:19:23Z",
+ "updated": "2026-10-09T14:23:44Z",
  "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction chains. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
  "focus": {
   "kind": "area",
@@ -8892,7 +8892,7 @@
    "parent": "PAR-0019",
    "status": "in-progress",
    "chain": "chains/java-ref-ground-zero-tutorial.md",
-   "updated": "2026-10-09T10:15:11Z",
+   "updated": "2026-10-09T14:23:44Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
     "to": "resumed Ground Zero tutorial (objective 0) via the planet page's Go",
@@ -8991,14 +8991,61 @@
       }
      }
     ],
-    "godot": [],
+    "godot": [
+     {
+      "tool": "godot_game",
+      "params": {
+       "action": "play",
+       "params": {
+        "scene": "res://scenes/game.tscn"
+       }
+      }
+     },
+     {
+      "tool": "godot_exec",
+      "params": {
+       "action": "eval",
+       "params": {
+        "code": "var h = get_node(\"/root/Spine/SimHost\")\nvar c = get_node(\"/root/Spine/MindCampaign\")\nh.load_sector(\"serpulo\", 15)\nc.start_sector(\"serpulo\", 15)\nh.step(3)\nc.run_exit_save()  # writes user://saves/sector-serpulo-15.msav and resets to menu"
+       }
+      }
+     },
+     {
+      "tool": "godot_input",
+      "params": {
+       "action": "mouse_button",
+       "note": "Play (230,149); discrete press+release then Input.flush_buffered_events()"
+      }
+     },
+     {
+      "tool": "godot_input",
+      "params": {
+       "action": "mouse_button",
+       "note": "Campaign submenu (460,149); flush"
+      }
+     },
+     {
+      "tool": "godot_input",
+      "params": {
+       "action": "mouse_button",
+       "note": "chooser: serpulo card (412,194), then OK (499,634); flush each"
+      }
+     },
+     {
+      "tool": "godot_exec",
+      "params": {
+       "action": "eval",
+       "note": "fork confirm: _selected_sector 15; sector_state.campaign false; action button at (576,613) with @sectors.go"
+      }
+     }
+    ],
     "confirm": {
      "java": "runs/20261009-065416-ref-ground-zero/java/r01-05-resume.png (objective Obtain: 0/15 Copper)",
-     "godot": "sector_state campaign:true"
+     "godot": "planet dialog visible, _selected_sector=15, sector action label @sectors.go (Go) at (576,613); after Go: sector_state campaign:true hasCore:true hasSave:true"
     },
-    "last_replayed": "runs/20261009-065416-ref-ground-zero/"
+    "last_replayed": "runs/20261009-132040-PAR-0037/"
    },
-   "run": "runs/20261009-085712-PAR-0037/",
+   "run": "runs/20261009-132040-PAR-0037/",
    "reproduce": {
     "java": [
      {
@@ -9157,58 +9204,222 @@
       "size_match": true
      },
      "note": "Camera now matches the reference viewpos (1032,440 vs 1032.0,440.298); residual: ice/snow edge+texture rendering, hint box/text, icon bar, marker label style, ore overlay, core sprite."
+    },
+    "round9": {
+     "godot_frame": "runs/20261009-132040-PAR-0037/godot/step-03-resumed-r9-fixed.png",
+     "diff": "runs/20261009-132040-PAR-0037/diff/step-03-resume-r9-fixed.json",
+     "metrics": {
+      "changed_fraction": 0.58797,
+      "mean_abs_rgb": [
+       39.08,
+       39.62,
+       38.77
+      ],
+      "coarse_layout_max_channel_mean": 27.23,
+      "palette_distance": 0.1738,
+      "size_match": true
+     },
+     "baseline_round9": {
+      "changed_fraction": 0.63674,
+      "mean_abs_rgb": [
+       53.04,
+       52.69,
+       50.81
+      ],
+      "coarse_layout_max_channel_mean": 43.3,
+      "palette_distance": 0.241
+     },
+     "region_meanabs_before_after": {
+      "hint_box": [
+       56.2,
+       23.5
+      ],
+      "copper_field": [
+       82.7,
+       39.0
+      ],
+      "marker_label": [
+       79.3,
+       69.6
+      ],
+      "bottom_left": [
+       24.6,
+       14.3
+      ],
+      "core_area": [
+       28.9,
+       28.6
+      ],
+      "status_panel": [
+       30.4,
+       30.4
+      ],
+      "minimap": [
+       53.8,
+       53.8
+      ],
+      "icon_bar": [
+       133.4,
+       133.4
+      ]
+     },
+     "note": "Floor restored under ore overlays + per-tile overlay variants (copper field half fixed: Java-copper pixel match 18.2%; remaining is variant/sub-pixel); hint box now black5 + skip outside (200,300: 50,55,63 -> 228,235,241); marker label background 0.3/white text/lifted 52px. Icon bar (Java PlacementFragment blockCatTable, bottom-right 344x272 pane) still missing - deferred to round 10; status text format deferred."
+    },
+    "round10": {
+     "godot_frame": "runs/20261009-132040-PAR-0037/godot/step-04-resumed-r10-pane.png",
+     "diff": "runs/20261009-132040-PAR-0037/diff/step-04-resume-r10-pane.json",
+     "metrics": {
+      "changed_fraction": 0.51208,
+      "mean_abs_rgb": [
+       25.93,
+       26.28,
+       24.15
+      ],
+      "coarse_layout_max_channel_mean": 12.18,
+      "palette_distance": 0.1089,
+      "size_match": true
+     },
+     "previous_round9": {
+      "changed_fraction": 0.58797,
+      "mean_abs_rgb": [
+       39.08,
+       39.62,
+       38.77
+      ],
+      "coarse_layout_max_channel_mean": 27.23,
+      "palette_distance": 0.1738
+     },
+     "region_meanabs_r9_to_r10": {
+      "icon_bar": [
+       133.7,
+       13.2
+      ],
+      "block_pane_cols": [
+       137.7,
+       7.4
+      ],
+      "marker_label": [
+       69.6,
+       25.1
+      ],
+      "copper_field": [
+       39.0,
+       38.5
+      ],
+      "status_panel": [
+       30.4,
+       30.4
+      ],
+      "minimap": [
+       53.8,
+       53.8
+      ],
+      "core_area": [
+       28.6,
+       28.6
+      ]
+     },
+     "note": "Placement pane re-laid out to Java PlacementFragment.blockCatTable (bottom-right 840..1152 x 376..648, black6 pane, 4-col block grid 197x194, 2-col 50px categories) and shown by default while the HUD is up (Java: visible(() -> ui.hudfrag.shown())). (1000,600) 255 -> 102 vs Java 90; (1096,424) 193,191,251 -> 77,76,101 vs Java 78,77,101."
+    },
+    "round10b": {
+     "godot_frame": "runs/20261009-132040-PAR-0037/godot/step-05-resumed-r10b-status.png",
+     "diff": "runs/20261009-132040-PAR-0037/diff/step-05-resume-r10b-status.json",
+     "metrics": {
+      "changed_fraction": 0.51218,
+      "mean_abs_rgb": [
+       25.95,
+       26.32,
+       24.18
+      ],
+      "coarse_layout_max_channel_mean": 12.2,
+      "palette_distance": 0.1086,
+      "size_match": true
+     },
+     "note": "Objective text rebuilt to Java's `objective.item` 4-arg order: live text is now `[left][accent]Obtain: [/color][lightgray]100[/]/15\\n [lightgray]Copper[/]` (Java: `Obtain: 0/15\\n<icon> Copper`). Frame metric flat because (a) the port core stocks 100 copper (filed PAR-0056) so the count differs, (b) the item glyph is not ported. status_panel region 30.4 -> 31.0."
+    },
+    "round11": {
+     "godot_frame": "runs/20261009-132040-PAR-0037/godot/step-06-resumed-r11-core.png",
+     "diff": "runs/20261009-132040-PAR-0037/diff/step-06-resume-r11-core.json",
+     "metrics": {
+      "changed_fraction": 0.51205,
+      "mean_abs_rgb": [
+       25.94,
+       26.31,
+       24.18
+      ],
+      "coarse_layout_max_channel_mean": 12.21,
+      "palette_distance": 0.1089,
+      "size_match": true
+     },
+     "note": "PAR-0056 fixed (empty launch loadout): the resumed fork now carries an empty core like the Java reference; live HUD status 'Obtain: 0/15 Copper'. Full metric flat (0.51218 -> 0.51205) because the text region residual is dominated by font/layout and the missing item glyph; region status_panel 31.0 -> 30.7."
+    },
+    "round12": {
+     "godot_frame": "runs/20261009-132040-PAR-0037/godot/step-08-resumed-r12b-minimap-color.png",
+     "diff": "runs/20261009-132040-PAR-0037/diff/step-08-resume-r12b.json",
+     "metrics": {
+      "changed_fraction": 0.51682,
+      "mean_abs_rgb": [
+       26.76,
+       27.16,
+       25.14
+      ],
+      "coarse_layout_max_channel_mean": 13.5,
+      "palette_distance": 0.1121,
+      "size_match": true
+     },
+     "previous_round11": {
+      "changed_fraction": 0.51205,
+      "mean_abs_rgb": [
+       25.94,
+       26.31,
+       24.18
+      ]
+     },
+     "note": "Minimap partial: (1) mind_minimap.gd now draws Java's camera-centred region crop (baseSize 16 x zoom 4 = 128-tile crop; MinimapRenderer.getRegion) instead of the whole map, default zoom 4; (2) BlockPalette gains set_map_color and MindAssets.region_center_color samples block-<name>-full centres (Java Block.load mapColor), so the minimap texture now carries terrain colours (snow 224,232,240) instead of the per-id fallback grey. Gate regressed 0.51205 -> 0.51682 because the revealed-area EXTENT now mismatches: Java's minimap crop is mostly black shroud with a ~64px revealed cluster; the port reveals a larger area at full brightness. Content-inset region metric 42 (r10b) -> 78 (r12b). Round 13 must land the shroud half together with these fixes. REVERTED 2026-10-10: the four files restored to the round-11 tree; the minimap work moved to PAR-0057 (with the crop+colours evidence and the world-content finding). PAR-0037 best-known state is round 11 (0.51205)."
+    },
+    "round13": {
+     "note": "Diagnosis only (no capture pair recorded): the core block sprite does not render. Hiding Band_block_0/Band_blockBuilding_0/Band_darkness_0 left the dark pixels over the core footprint unchanged ((608,292) (65,67,70) in both), so the dark is the map floor under the core (Java shows the bright core sprite over it); the true core centre is screen (592,308) for camera (1032,440) + tile_to_screen(129,55). BlockDrawMeta defaults draw_dynamic=true, so the exclusion is elsewhere (visible_blocks multiblock dedupe / draw path / offset). Hiccups this round: batched setup eval and MindRender.get_stats() both timed out and pinned the loop (logged)."
     }
    },
    "fix": {
     "status": "godot-open",
     "plan": {
-     "round": 9,
+     "round": 14,
+     "state": "round 13 diagnostic: core sprite missing (floor shows through); round 14 = fix the core draw path",
      "done": [
-      "Round 8 (working tree): camera/anchor parity - `first_core_position` now returns Java's spawn anchor (`core.pos()` -> anchor tile, `tile.worldx/worldy()` = the tile corner): map-loaded multiblocks fill the footprint (row-major first tile = min corner -> anchor = pos - size_offset) while tool-placed blocks store only the anchor; the candidate tile being the same core disambiguates. Unit tests: anchor-corner (24,40), Command::Place at (129,55) -> (1032,440), footprint 128-130x54-56 -> (1032,440).",
-      "Leg re-run (pid 185507): camera settles at (1032,440) exactly matching the reference viewpos (1032.0,440.298); changed_fraction 0.6418 -> 0.63668, mean_abs [53.04,52.69,50.81], palette 0.2512 -> 0.2419."
+      "Round 9 landed in client/ (working tree, uncommitted): render/floor.rs floor+overlay quads with per-tile variants; theme_builder.gd named black alphas + nonet/none transparency; hints_fragment.tscn/gd black5 box + skip outside; objective_markers.rs label style/offset/size + colored marker stroke.",
+      "Checks green: cargo fmt --all --check; cargo clippy -p mind-core -p mind-gdext --all-targets -- -D warnings; cargo test -p mind-core (1824 passed); tools/build.sh; headless Godot import gate.",
+      "Godot leg (pid 94174, new lib): changed_fraction 0.63674 -> 0.58797, mean_abs [53.04,52.69,50.81] -> [39.08,39.62,38.77], coarse 43.3 -> 27.23, palette 0.241 -> 0.1738. Regions: hint_box 56->23, copper_field 83->39, marker 79->70, bottom_left 25->14.",
+      "Round 10a: placement pane re-laid out (bottom-right 840..1152 x 376..648, black6, 4-col grid + 2-col categories) and shown while the HUD shows; icon_bar 133.7 -> 13.2, block_pane_cols 137.7 -> 7.4, full 0.58797 -> 0.51208.",
+      "Round 10b: map_objectives Item/CoreItem text now Java's 4-arg order (count/amount/icon/name) with live count from core_items_json + localized item name; verified live text shape; full 0.51218 (flat), status_panel 31.0.",
+      "PAR-0056 filed: fresh start_sector('serpulo',15) leaves the core with 100 copper (Java Logic.play clears it) so the objective reads 100/15 and completes instantly.",
+      "Round 11: PAR-0056 fixed in campaign.rs (empty launch loadout); fresh launch core_items {} + rules.loadout [] matching the Java save meta; resumed status text 'Obtain: 0/15 Copper'; leg frame step-06 (pid 118308).",
+      "Round 12 (partial): minimap widget region crop + map colours sampled from the atlas (see mismatch.round12); gate regressed pending the shroud extent fix."
      ],
-     "correction": "Round-7's 'tiles pixel-identical' evidence was an artifact: the probed tiles (150,40)/(120,70) were OFF-SCREEN and PIL cropped empty images that compare as 0.0. On-screen tiles (140,60 ice, 145,55 snow, 120,60 snow) still differ (best integer-shift residuals 7.8-22.6). The floor-variant fix itself stands (golden-pinned hash + r6->r7 render delta) but pixel-level floor equality is NOT yet established.",
-     "seam": "Round-9 targets, largest first: (a) ice/snow floor rendering: the ice bottom edge at x1100 is 1 tile higher in the port (296 vs 328) and the ice/snow boundary scanlines differ 0-20px - check `Floor.edges` (ice-edge 3x3 autotile) and the ice-snow/blendGroup blending; also whether snow/ice tile textures or their edge blending differ (a tile (145,55) crop shows Java ice vs port snow at a boundary area - verify with correct on-screen coordinates first). (b) The biggest non-floor regions: hint box 93% changed (Java text 'Use [WASD] to move.' vs port 'Scroll to zoom in or out.' + box geometry), bottom-right icon bar 96% (absent in the port), marker label style 84% (font/background), copper field 82% (ore overlay rendering), core sprite, status text format 'Obtain: copper/15' vs '0/15 Copper', minimap content 49%.",
+     "seam": "Round 14: fix the missing core sprite - check visible_blocks inclusion for the core (draw_dynamic/cache_layer metadata path), the multiblock dedupe (seen.insert(entity) draws at the first row-major tile vs the centre tile + def.offset), and whether blocks.rs skips CoreBlock via the building-cache path. Then the remaining targets: ore dots (38.5), item glyph, camera follow (Java viewpos (1032.0,440.2983) confirmed by the twin save meta; the port camera is at (1032,440)).",
      "files": [
-      "client/rust/mind-gdext/src/render/floor.rs + atlas_bind.rs (edge/autotile regions, ice-edge)",
-      "hint rotation state (use the first hint 'desktopMove' at this state) and hint box geometry/text",
-      "bottom-right icon bar element (Schematics/Database/TechTree/Planet)",
-      "objective marker label styling; ore overlay variant/wiring; core sprite path; objective text 4-arg format"
+      "client/rust/mind-gdext/src/render/objective_markers.rs (residual)",
+      "client/rust/mind-gdext/src/render/floor.rs (wave/ore variant re-check)",
+      "client/rust/mind-gdext/src/camera.rs (follow player unit position)",
+      "client/rust/mind-gdext/src/render/blocks.rs (core sprite)"
      ],
-     "approach": "Round 9: verify the floor boundary/edge rendering on-screen (correct crop coordinates), then land the hint box geometry+text and the icon bar; keep each with a capture pair.",
+     "approach": "Round 11: fix PAR-0056 (empty fresh core, verified as '{}' from core_items_json right after start_sector) so the objective/status text matches Java's 0/15 and the tutorial progression isn't pre-completed; then minimap content and the camera-follow seam with fresh capture pairs.",
      "prerequisites": [
-      "Do not reuse off-screen crop results; assert 0 <= crop x <= 1152 and 0 <= y <= 648 before trusting a comparison.",
-      "The player entity remains absent (the camera targets the core anchor); Java's viewpos is the player position (440.298 fractional), so a final ~0.3-world-unit camera difference persists until a player unit exists."
+      "Round-9 working tree must be committed or carried forward before round 10 edits (uncommitted by contract - no Godot-pass yet).",
+      "Do not reuse off-screen crop results (0<=x<1152, 0<=y<648 before trusting a crop).",
+      "The port's player unit exists but the camera still targets the core anchor; treat the 0.298-world-unit viewpos difference as a known residual until the camera follow parity lands."
      ],
-     "narrow_check": "cargo test -p mind-core --lib && cargo clippy -p mind-gdext --all-targets -- -D warnings && tools/build.sh",
+     "narrow_check": "cargo fmt --all -- --check; cargo clippy -p mind-core -p mind-gdext --all-targets -- -D warnings; cargo test -p mind-core; tools/build.sh; GODOT_BIN=$HOME/.local/bin/godot bash tools/godot.sh --headless --editor --quit --path client; relaunch editor; re-run the Godot leg",
      "evidence": {
-      "godot_frame_round8": "runs/20261009-085712-PAR-0037/godot/step-18-resumed-r8.png",
-      "diff_round8": "runs/20261009-085712-PAR-0037/diff/step-18-resume-r8.json",
-      "camera": {
-       "port": [
-        1032,
-        440
-       ],
-       "java_viewpos": [
-        1032.0,
-        440.29807
-       ]
-      },
-      "on_screen_tile_residuals": {
-       "140,60_ice": 12.31,
-       "145,55_snow": 22.57,
-       "120,60_snow": 7.81
-      }
-     },
-     "status": "interrupted-in-flight",
-     "inflight": [
-      "hints_fragment.gd (working tree, uncommitted): the 15s timed auto-advance is replaced by Java's trigger model - hints now persist until their trigger fires; `desktopMove` completes when the camera moves (>0.5px, the port has no player entity so the shared WASD bindings pan the camera) and `zoom` when the camera zoom changes. NOT yet run through the GDScript import gate or the Godot leg.",
-      "Floor-edge investigation INCONCLUSIVE: ice-bottom-edge scanlines differed up to 32px (1 tile) at x1100, but the camera mapping derived from orange-pixel centroids was contaminated (the Java mech and the copper ore both match the orange mask), so the tile coordinates used for those comparisons are not trustworthy. Establish a clean landmark before concluding a floor-content difference.",
-      "Round-9 next steps remain: validate the hint edits (GODOT_BIN=~/.local/bin/godot bash tools/godot.sh --headless --editor --quit --path client), then the leg; then the floor edge/content question with a verified mapping; then the bottom-right icon bar (Java HudFragment lines 370-445, mobile buttons; desktop set to re-derive), marker label style, ore overlay, core sprite, objective text 4-arg format."
-     ]
+      "frame_round9_fixed": "runs/20261009-132040-PAR-0037/godot/step-03-resumed-r9-fixed.png",
+      "diff_round9_fixed": "runs/20261009-132040-PAR-0037/diff/step-03-resume-r9-fixed.json",
+      "heatmap": "runs/20261009-132040-PAR-0037/diff/step-03-resume-r9-fixed-heatmap.png",
+      "frame_round9_baseline": "runs/20261009-132040-PAR-0037/godot/step-02-resumed-r9.png",
+      "diff_round9_baseline": "runs/20261009-132040-PAR-0037/diff/step-02-resume-r9.json"
+     }
     },
     "commit": null,
-    "summary": "round 9 interrupted in flight (hint trigger model edited, unverified; floor-edge question open pending a clean coordinate landmark)",
+    "summary": "round 9-11 landed (ore floor+variants, hint box, marker label, placement pane, objective text, launch core stock): gate 0.63674 -> 0.51205; round 12 minimap reverted to PAR-0057; round 13: ore dots, core sprite, item glyph, camera follow",
     "run": "runs/20261009-085712-PAR-0037/"
    },
    "verified": null,
@@ -9365,7 +9576,7 @@
    },
    "claim": {
     "by": "godot-walk-s1",
-    "at": "2026-10-09T08:57:12Z"
+    "at": "2026-10-09T13:20:40Z"
    }
   },
   {
@@ -11605,6 +11816,220 @@
    },
    "blocked_on": [],
    "blocked_note": "Fix godot-pass (unit sprites scaled by scale_marker; r3-fork mech ~30x45 px matching the reference). Awaiting twin evaluation; blocked state keeps the claim from being reaped into the wrong status."
+  },
+  {
+   "id": "PAR-0056",
+   "title": "Fresh Ground Zero launch stocks the core with 100 copper (Java: empty core)",
+   "surface": "world",
+   "parent": "PAR-0045",
+   "status": "verified",
+   "chain": "chains/ground-zero-fresh-launch.md",
+   "updated": "2026-10-09T14:23:44Z",
+   "discovered_by": "runs/20261009-132040-PAR-0037/",
+   "path": {
+    "to": "fresh Ground Zero launch (core items readback)",
+    "java": [],
+    "godot": [
+     {
+      "tool": "godot_game",
+      "params": {
+       "action": "play",
+       "params": {
+        "scene": "res://scenes/game.tscn"
+       }
+      }
+     },
+     {
+      "tool": "godot_exec",
+      "params": {
+       "action": "eval",
+       "params": {
+        "code": "var h = get_node(\"/root/Spine/SimHost\")\nvar c = get_node(\"/root/Spine/MindCampaign\")\nh.load_sector(\"serpulo\", 15)\nc.start_sector(\"serpulo\", 15)\nreturn str(h.call(\"core_items_json\"))"
+       }
+      }
+     }
+    ],
+    "confirm": {
+     "godot": "core_items_json == '{}' (Java reference R00/R01 objective 'Obtain: 0/15 Copper')"
+    },
+    "last_replayed": null
+   },
+   "run": "runs/20261009-132040-PAR-0037/",
+   "reproduce": {
+    "java": [
+     {
+      "tool": "note",
+      "params": {
+       "evidence": "runs/20261009-065416-ref-ground-zero/java/r01-05-resume.png objective 'Obtain: 0/15 Copper'; Java Logic.play clears the core then adds rules.loadout (Logic.java:277-286)"
+      }
+     }
+    ],
+    "godot": [
+     {
+      "tool": "godot_exec",
+      "params": {
+       "action": "eval",
+       "params": {
+        "code": "h.load_sector(\"serpulo\",15); c.start_sector(\"serpulo\",15); h.call(\"core_items_json\")"
+       }
+      }
+     },
+     {
+      "tool": "godot_exec",
+      "params": {
+       "action": "eval",
+       "params": {
+        "code": "get_node(\"/root/Spine/Ui/UiRoot/HudGroup/hud/WavesStack/WavesMain/Status\").text"
+       }
+      }
+     }
+    ],
+    "compare": []
+   },
+   "steps": [
+    {
+     "n": 1,
+     "action": "fresh launch core readback after the fix",
+     "java_frame": "runs/20261009-065416-ref-ground-zero/checkpoints/r01-sector-serpulo-170.msav (meta loadout:[])",
+     "godot_frame": null,
+     "diff": null,
+     "verdict": "signals pass: core_items_json == '{}', rules.loadout == [] (was {\"copper\":100} / [copper x100])"
+    }
+   ],
+   "mismatch": {
+    "step": "fresh start_sector('serpulo',15) core stock",
+    "java_frame": null,
+    "godot_frame": null,
+    "metrics": null,
+    "note": "Before: rules.loadout defaulted to [copper x100] (custom-game default) and the launch applied it, so a fresh Ground Zero core started with 100 copper; Java's reference resumed save meta stores loadout:[] and the core starts empty (decompressed r01-sector-serpulo-170.msav meta: loadout:[])."
+   },
+   "fix": {
+    "status": "closed",
+    "commit": null,
+    "summary": "MindCampaign.start_sector_with_loadout clears session.rules.loadout when no explicit loadout_json is passed, so a campaign launch carries an empty loadout (the Rules default copper x100 is custom-game-only). Fresh probe (pid 118308): core_items_json == '{}', get_rules_json loadout:[], resumed HUD status 'Obtain: 0/15 Copper'. Twin-verified 2026-10-09 (runs/20261009-141406-PAR-0056-twin/).",
+    "plan": {
+     "round": 1,
+     "seam": "campaign launch loadout seed",
+     "files": [
+      "client/rust/mind-gdext/src/campaign.rs (start_sector_with_loadout)"
+     ],
+     "approach": "clear rules.loadout on an empty loadout_json; keep the explicit-loadout path unchanged",
+     "narrow_check": "cargo fmt --check; cargo clippy -p mind-gdext --all-targets -- -D warnings; cargo test -p mind-core; tools/build.sh; editor relaunch; fresh-launch core probe",
+     "evidence": {
+      "fresh_core": "core_items_json '{}' (pid 118308)",
+      "rules": "get_rules_json loadout:[]",
+      "java_oracle": "runs/20261009-065416-ref-ground-zero/checkpoints/r01-sector-serpulo-170.msav meta loadout:[] (zlib-decompressed)"
+     }
+    }
+   },
+   "verified": {
+    "mode": "twin",
+    "date": "2026-10-09T14:23:44Z",
+    "writer_run": "runs/20261009-132040-PAR-0037/",
+    "twin_run": "runs/20261009-141406-PAR-0056-twin/",
+    "java_frame": "runs/20261009-141406-PAR-0056-twin/java/fresh-launch.png",
+    "godot_frame": "runs/20261009-141406-PAR-0056-twin/godot/fresh-launch.png",
+    "note": "Twin re-ran both legs fresh: Java (fresh profile, chooser -> Serpulo -> Ground Zero launch, Save & Quit) save meta decompressed contains ',loadout:[],' with objective Item amount:15 / @gz.mine; Godot (fresh process pid 138752) core_items_json=='{}', rules loadout:[] , HUD 'Obtain: 0/15 Copper'. Structured-state verdict (skill 4 class 2); report runs/20261009-141406-PAR-0056-twin/report.md."
+   },
+   "note": "Discovered during PAR-0037 round 10b: after a fresh start_sector('serpulo',15) the live core reports {\"copper\":100}; Java's fresh Ground Zero core is empty (the tutorial's first objective is Obtain 0/15 Copper) and Logic.play clears the core before adding rules.loadout. Likely seam: MindCampaign.apply_launch_loadout (play.rs:316) runs before/against the campaign-side team inventory while the sim core's ItemModule keeps the map-materialized stock, so the clear never reaches the live core. Consequence: the HUD objective text shows 'Obtain: 100/15' and the tutorial Item objective is instantly complete (100 >= 15), diverging from Java's progression."
+  },
+  {
+   "id": "PAR-0057",
+   "title": "HUD minimap: widget shows the whole map with fallback-grey terrain colours",
+   "surface": "hud",
+   "parent": "PAR-0037",
+   "status": "seeded",
+   "chain": "chains/probe-hud.md",
+   "updated": "2026-10-09T14:23:44Z",
+   "discovered_by": "runs/20261009-132040-PAR-0037/",
+   "path": {
+    "to": "Ground Zero resumed world, HUD minimap at (992,10) 140x140",
+    "java": [],
+    "godot": [
+     {
+      "tool": "godot_game",
+      "params": {
+       "action": "play",
+       "params": {
+        "scene": "res://scenes/game.tscn"
+       }
+      }
+     },
+     {
+      "tool": "godot_exec",
+      "params": {
+       "action": "eval",
+       "params": {
+        "code": "get_node(\"/root/Spine/World/MinimapProvider\").call(\"get_texture\").get_image().get_pixel(x, 255-y)"
+       }
+      }
+     }
+    ],
+    "confirm": {
+     "godot": "widget region crop per MinimapRenderer.getRegion; terrain colours from block-<name>-full centres",
+     "java": "runs/20261009-065416-ref-ground-zero/java/r01-05-resume.png minimap: black shroud + small terraincoloured cluster"
+    },
+    "last_replayed": null
+   },
+   "run": "runs/20261009-132040-PAR-0037/",
+   "reproduce": {
+    "java": [
+     {
+      "tool": "note",
+      "params": {
+       "evidence": "runs/20261009-065416-ref-ground-zero/java/r01-05-resume.png (minimap region (992,10)-(1132,150)): mostly black shroud with a ~64px terrain-coloured cluster; snow tiles read (179,183,187)"
+      }
+     }
+    ],
+    "godot": [
+     {
+      "tool": "godot_exec",
+      "params": {
+       "action": "eval",
+       "params": {
+        "code": "minimap texture probes: (129,20)=(224,232,240) snow, (100,100) snow vs Java black; whole-map draw + per-id fallback grey before the round-12 fix"
+       }
+      }
+     }
+    ],
+    "compare": [
+     {
+      "tool": "frame_diff.py",
+      "params": {
+       "--java": "runs/20261009-065416-ref-ground-zero/java/r01-05-resume.png",
+       "--godot": "runs/20261009-132040-PAR-0037/godot/step-08-resumed-r12b-minimap-color.png"
+      }
+     }
+    ]
+   },
+   "steps": [],
+   "mismatch": null,
+   "fix": {
+    "status": "open",
+    "commit": null,
+    "summary": null,
+    "plan": {
+     "round": 0,
+     "state": "seeded with a reverted first attempt; ready to resume",
+     "attempt_1": "Round 12 (2026-10-10, reverted): widget drew Java's camera-centred region crop (`MinimapRenderer.getRegion`: sz = clamp(16*zoom, 16, min(w,h)); default zoom 4) and `MindAssets.region_center_color` + `BlockPalette::set_map_color` filled map colours from `block-<name>-full` centres (Java `Block.load`). Result: minimap texture got real terrain colours (snow 224,232,240) but the gate regressed 0.51205 -> 0.51682 (widget region 47.0 -> 80.4, inset content 42 -> 78) because the revealed-area EXTENT mismatches: Java's crop is mostly black with a small cluster, the port reveals a larger area at full brightness. Reverted to the round-11 tree; evidence kept here.",
+     "finding": "Java minimap black is NOT (only) darkness: at mapped widget pixels, Java reads black where the port reads snow map colour for the same world tiles (e.g. world (129,20) and (100,100): java (0,0,0) vs port snow) while the spawn cluster agrees (java (179,183,187) vs port snow). Java `MapIO.colorFor` gives black only for black-coloured blocks/floors or `world.getDarkness >= 4` via `tile.isDarkened()` (solid+fillsTile blocks' `data` BFS) - so Java's world has solid dark blocks (or darkness data) at those tiles where the port's reads snow. Both clients load the same `assets/maps/serpulo/groundZero.msav`, so this looks like a world-content/loader divergence (or a map-orientation difference in the minimap path), NOT a modifier issue. Twin-run lead: the Java save meta for Ground Zero carries limitMapArea:true, limitX:90, limitY:20, limitWidth:70, limitHeight:60 (sector rect 70x60 at 90,20) - the minimap region outside this rect (and the border-darkness edge blend) is a strong candidate for the black extent seen in Java; compare the port's rules/map content against this rect.",
+     "seam": "Before re-landing the crop+colours: compare the port's world content against Java's at the mismatching tiles (map loader vs save round-trip; check for dropped outer/static blocks or a y-orientation difference in the minimap texture write). Then land the crop + colours + the shroud identity together and re-run.",
+     "files": [
+      "client/ui/widgets/mind_minimap.gd",
+      "client/rust/mind-gdext/src/render/minimap.rs",
+      "client/rust/mind-gdext/src/assets/atlas.rs",
+      "client/rust/mind-core/src/io/map/preview.rs",
+      "client/rust/mind-core/src/io/map/mod.rs (map loader if the content diverges)"
+     ],
+     "narrow_check": "cargo fmt --check; cargo clippy -p mind-core -p mind-gdext --all-targets -- -D warnings; cargo test -p mind-core; tools/build.sh; editor relaunch; minimap texture probes + frame_diff",
+     "evidence": {
+      "reverted_frame": "runs/20261009-132040-PAR-0037/godot/step-08-resumed-r12b-minimap-color.png",
+      "reverted_diff": "runs/20261009-132040-PAR-0037/diff/step-08-resume-r12b.json",
+      "best_known": "runs/20261009-132040-PAR-0037/godot/step-06-resumed-r11-core.png (0.51205)"
+     }
+    }
+   },
+   "verified": null
   }
  ]
 }

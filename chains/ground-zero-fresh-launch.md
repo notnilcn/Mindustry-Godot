@@ -8,7 +8,7 @@ preconditions:
   - Ground Zero is serpulo sector 15 (170 is a plain generated sector with no preset map).
   - "No sector save may exist for serpulo-15: a leftover autosave forces the resume branch and hides the fresh-launch behavior."
 tools: [godot_health, godot_game, godot_exec, godot_input, godot_screenshot, godot_log]
-last_verified: 2026-10-08 986cda3 (re-run in runs/l2-20261008-145144-ev0013-block-picker-godot; originally 9efd068, runs/l2-20261008-014155-ev0037-core-launch-godot)
+last_verified: 2026-10-09 16a58ca+working-tree (PAR-0056 core-stock fix; runs/20261009-132040-PAR-0037/ leg pid 118308: fresh core `{}`, rules.loadout `[]`, resumed status "Obtain: 0/15 Copper"; previously 986cda3, runs/l2-20261008-145144-ev0013-block-picker-godot; twin re-run 2026-10-09 runs/20261009-141406-PAR-0056-twin/ fresh pid 138752: core `{}`, loadout `[]`, HUD "Obtain: 0/15 Copper"; Java meta loadout:[])
 ---
 
 # ground-zero-fresh-launch
@@ -72,7 +72,21 @@ last_verified: 2026-10-08 986cda3 (re-run in runs/l2-20261008-145144-ev0013-bloc
    `PlaySession::player_core_count()` reads). Then `h.step(60)` and re-read
    `get_hud_state()` to prove the first `GameStateCheck` ticks keep `gameOver=false`.
 
-8. Teardown: `godot_game stop`; no pause/camera state was changed beyond the dialogs'
+8. **Core stock (PAR-0056).** A fresh campaign launch carries an EMPTY loadout
+   (`start_sector_with_loadout` clears `rules.loadout` when no explicit
+   `loadout_json` is passed; the `Rules` default `copper x100` is the
+   custom-game default). Assert both sides, pid-stamped:
+
+   ```
+   godot_exec {"action":"eval","params":{"code":"var h = get_node(\"/root/Spine/SimHost\")\nvar c = get_node(\"/root/Spine/MindCampaign\")\nreturn {\"pid\": OS.get_process_id(), \"core_items\": str(h.call(\"core_items_json\")), \"loadout_seg\": str(c.call(\"get_rules_json\")).substr(str(c.call(\"get_rules_json\")).find(\"loadout\"), 20)}"}}
+   ```
+
+   Expect `core_items == "{}"` and `loadout_seg` starting `loadout":[]`, and the
+   HUD status `Obtain: 0/15 Copper` (not `100/15`). Java oracle: the reference
+   resume save's decompressed meta stores `loadout:[]`
+   (`runs/20261009-065416-ref-ground-zero/checkpoints/r01-sector-serpulo-170.msav`).
+
+9. Teardown: `godot_game stop`; no pause/camera state was changed beyond the dialogs'
    own pause governor.
 
 ## Success signals

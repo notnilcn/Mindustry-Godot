@@ -1356,3 +1356,120 @@ those paths no longer exist, but the workarounds still apply.
 - Also: a GDScript call to a non-`#[func]` Rust method (`player_can_mine`) errors
   and trips break-on-error; `godot_debugger resume` does not stick — recover with
   `godot_game stop` + `play`. Run: `runs/20261009-095320-PAR-0045/`.
+
+## 2026-10-09 — PAR-0037 round 9: `tile_blocks()` + `for` loop in one eval timed out and pinned the frame loop
+
+- Symptom: `godot_exec` eval walking `SimHost.tile_blocks()` (whole-map block list) with a
+  GDScript `for` loop timed out after 15 s; `godot_debugger sessions` then reported
+  `paused: true` while `get_tick()` still answered. The loop-free rule applies to the
+  *loop body budget*, not just `while`: `tile_blocks()` alone is already heavy.
+- Failing call: `godot_exec {"action":"eval","params":{"code":"var blocks = h.tile_blocks() ... for tb in blocks: ..."}}`
+- Workaround: never iterate `tile_blocks()` in an eval; probe tiles from `get_state_json()`
+  parsed host-side, or add a targeted `#[func]` accessor. Recover the pinned loop with
+  `godot_game stop` + `play` (re-walk the fork; the campaign save survives the restart).
+- Run: `runs/20261009-132040-PAR-0037/`.
+
+## 2026-10-09 — PAR-0037 round 9: byte-identical captures are not proof of staleness on a static scene; band-hide probes localise a render diff
+
+- Symptom: `godot_screenshot game` returned the exact same `size_bytes` (and bytes) across two
+  processes (pid 79240, pid 82352) and repeated calls; initial reading suspected a stale
+  capture, but `Engine.get_frames_drawn()` advanced 15343 -> 15349 and the scene updates.
+  Cause: the resumed Ground Zero world is static (no waves, hint fixed, player idle), so the
+  encoding is identical. Do not classify identity as staleness without a state change.
+- Useful technique from the same round: to tell a **world-render** difference from a **UI**
+  difference, hide the layers one at a time and re-capture — `get_node("/root/Spine/Ui").visible
+  = false`, then `World/Renderer` band nodes (`Band_floor_*`, `Band_block*`, `ObjectiveMarkers`).
+  The grey copper field stayed after hiding UI (world), disappeared only with the floor bands
+  hidden, which located the missing floor under ore overlays in `render/floor.rs`.
+- Run: `runs/20261009-132040-PAR-0037/`.
+
+## 2026-10-09 — strings updated, but a running MCP keeps serving its boot-time copy; docs still teach the broken `text`
+
+- The 2026-10-09 pass folded this file's entries into the tool descriptions
+  (`input.py`, `exec_tool.py`, `game.py`, `screenshot.py`, `filesystem.py`,
+  `batch.py`, `debugger.py`, `game_time.py`), the `server.py` instructions and
+  the `playtest` prompt, plus `.opencode/skills/playtest/SKILL.md` — all
+  uncommitted working-tree edits; the uv-tool install
+  (`~/.local/share/uv/tools/open-godot-mcp/...`) was refreshed to match. No
+  front-facing string is stale relative to the files.
+- Tool schemas load at server-process start: at 23:41 three
+  open-godot-mcp/computer-mcp pairs were alive (22:36, 22:38, 23:37); the first
+  two predate the 23:34-23:36 edits and still advertise the old text. Restart
+  the MCP/session after editing front-facing strings; do not re-verify the file
+  against a stale running server.
+- Still uncovered (chain-only or project code guidance, not in the strings):
+  `MindUi.toast` method-vs-signal (connect by name), sim is unpaused after
+  `stop`+`play` (set_paused before `load_slot`/`step` measurements), a
+  data-driven fragment rebuild read in the same eval sees queue_freed children,
+  `MindUi.campaign_views()` fixture fallback, pre-`_ready` UI reads right after
+  `play`, `tools/godot.sh` needing `GODOT_BIN`.
+- Docs lag: `../Open-Godot-MCP/Docs/03-Realtime-Testing/Interactive-Playtest.md`
+  still says TYPE = `grab_focus()` + `godot_input text` (the broken path the
+  tool description now forbids), and `Docs/02-Tools/Input.md` lacks the
+  text/wheel/flush notes — update them before pointing agents at the docs.
+- Evidence: `git diff` in `../Open-Godot-MCP` (10 files) and the skill; process
+  table at 2026-10-09 23:41; uv-tool mtimes 23:35:35 / 23:36:18.
+
+## 2026-10-09 — PAR-0037 rounds 10: probe right after the chooser OK can read `_selected_sector=-1` (planet view still building)
+
+- Symptom: after Play/Campaign (first-run chooser) + card + OK, an eval in the same `execute`
+  chain read `_selected_sector: -1` and no sector-action button; clicking the (then -1,-1)
+  resolved point mistimed and the dialog closed. Recovered by re-walking from the menu:
+  the second card+OK pass read `_selected_sector: 15` and the Go button at (576,613).
+- Likely cause: `_show_planet` runs `refresh_campaign_views` + panel rebuild; a probe issued
+  in the same round-trip can observe the pre-populated view (`campaign_section("sectors")`
+  still empty) so `_default_sector` finds nothing.
+- Workaround: after clicking OK in the chooser, run the fork-probe as its own `execute`
+  call (or click OK a second time and re-probe) before resolving the sector action; never
+  resolve a click point from a `-1` probe.
+- Run: `runs/20261009-132040-PAR-0037/` (round 10 leg). Second occurrence in two legs.
+
+## 2026-10-09 — PAR-0037 round 10: `get_hud_state` is a MindCampaign method; calling it on `/root/Spine/SimHost` errors and pins the frame loop
+
+- Symptom: `godot_exec` eval `var h = get_node("/root/Spine/SimHost"); h.call("get_hud_state")` timed
+  out after 15 s; the game log then showed `Invalid call. Nonexistent function 'get_hud_state (via
+  call)' in base 'MindSimHost'`, `godot_debugger sessions` -> `paused: true`.
+- Cause: `get_hud_state` lives on `MindCampaign`, not `MindSimHost`; the errored eval trips
+  break-on-error and pins rendering while later evals still answer.
+- Workaround: call `get_hud_state` on `/root/Spine/MindCampaign` only; recover a pinned loop with
+  `godot_game stop` + `play`. Prefer one known method per eval and check the exposing class first.
+- Run: `runs/20261009-132040-PAR-0037/` (round 10 leg).
+
+## 2026-10-09 — PAR-0037 round 11: eval issued in the same call as `godot_game play` races the runtime attach
+
+- Symptom: a `godot_exec` in the same `execute` block as `godot_game play` failed with
+  `RUNTIME_NOT_CONNECTED: No active debugger session`; the next call after a `godot_game status`
+  worked.
+- Workaround: `godot_game play` -> `godot_game status` (`runtime_connected: true`) -> evals;
+  never issue the first eval in the same block that starts the game.
+- Run: `runs/20261009-132040-PAR-0037/` (round 11).
+
+## 2026-10-09 — PAR-0037 round 12: Play/Campaign clicks can miss while the submenu fades; probe between clicks
+
+- Symptom: Play (230,149) + Campaign (460,149) issued in one `execute` returned "ok" but the
+  planet dialog never opened (`DialogLayer/planet.visible == false`, `dialog_stack == []`); the
+  follow-up card/OK clicks landed on the bare menu.
+- Cause: the Play submenu buttons only appear after the fade-in; a click in the same round-trip
+  as the Play click can land before the submenu exists.
+- Workaround: drive the menu walk one click per `execute` and probe `DialogLayer/planet.visible`
+  (or the submenu button list) before the next click; on a miss re-walk from the menu.
+- Run: `runs/20261009-132040-PAR-0037/` (round 12 leg). Third variant of menu-path flakiness
+  this session (see the chooser-OK and play-race entries).
+
+## 2026-10-10 — PAR-0037 round 13: batched view-setup eval (menu hide + overlay hide + center_on_tile) timed out mid-launch
+
+- Symptom: right after a facade `load_sector` + `start_sector`, one eval doing
+  `UiRoot.set_menu_visible(false)` + hiding FpsBox/performance + `Camera2D.center_on_tile(129,55)`
+  timed out (30 s) and `godot_debugger sessions` went `paused: true` with the tick frozen at 3.
+- Workaround: keep view setup to one simple statement per eval after a sector launch (the launch
+  still has deferred UI work queued); recover a pinned loop with `godot_game stop` + `play`.
+- Run: `runs/20261009-132040-PAR-0037/` (round 13 leg).
+
+## 2026-10-10 — PAR-0037 round 13: `MindRender.get_stats()` eval timed out and pinned the loop
+
+- Symptom: `godot_exec {"action":"eval","params":{"code":"var r = get_node(\"/root/Spine/MindRender\")\nreturn {\"stats\": str(r.call(\"get_stats\"))}"}}` timed out (15 s) mid-session;
+  `godot_debugger sessions` -> `paused: true` while trivial evals still answered.
+- Workaround: do not call `MindRender.get_stats()` from an eval while a sector is loaded; read
+  block/render metadata headlessly (`mind-headless content ...`) or from the source instead.
+  Recover with `godot_game stop` + `play` (re-walk/re-load).
+- Run: `runs/20261009-132040-PAR-0037/` (round 13 leg).
