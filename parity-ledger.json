@@ -1,6 +1,6 @@
 {
  "schema": "mindustry-godot/parity-ledger@2",
- "updated": "2026-10-09T09:31:21Z",
+ "updated": "2026-10-09T09:32:12Z",
  "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction chains. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
  "focus": {
   "kind": "area",
@@ -8892,7 +8892,7 @@
    "parent": "PAR-0019",
    "status": "in-progress",
    "chain": "chains/java-ref-ground-zero-tutorial.md",
-   "updated": "2026-10-09T09:31:21Z",
+   "updated": "2026-10-09T09:32:12Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
     "to": "resumed Ground Zero tutorial (objective 0) via the planet page's Go",
@@ -9120,7 +9120,7 @@
      ],
      "seam": "Round-6 heatmap (diff/step-10-resume-r5-heatmap.png) hot regions, largest first: (a) the tutorial prompt bar 'Move near the copper ore on the ground and click to begin mining.' - in Java this is the objective's world-space ShapeText marker at (1096,424) rendered as a world label; the port renders no objective markers/labels (map markers exist in mind-core but no world-label pass); (b) status text format - Java 'Obtain: 0/15 Copper' (objective.item = '[accent]Obtain: [][lightgray]{0}[]/{1}\\n{2}[lightgray]{3}' with count/emoji/name) vs the port's 2-arg call producing 'Obtain: copper/15'; (c) bottom-right icon bar (Schematics/Database/Tech Tree/Planet) absent in the port; (d) minimap content (Java shows terrain + viewport rect; the port's widget shows a black panel with a blob); (e) hint state differs (Java 'Use [WASD] to move.' vs port 'Scroll to zoom in or out.' - the port advanced to hint.zoom); (f) core sprite renders light grey vs Java's dark core (sprite/palette), plus the ~1-tile camera follow offset.",
      "files": [
-      "world objective marker/label pass (mind-core render or mind-gdext render): ShapeText/Text markers",
+      "objective world-label pass (new, view-only): Java MapObjectives.ShapeTextMarker flags = WorldLabel.flagBackground|flagOutline, text localized from the marker text (gz.mine -> 'Move near the :ore-copper: copper ore on the ground and click to begin mining.'), textHeight/fontSize/radius/rotation; mind-core already has MapMarkers (game/map_markers.rs) and a WorldLabel relay type (ui/builder/ui_relay.rs) but no mind-gdext world-label renderer; add a pass over session.rules.objectives markers drawn in world space behind the HUD",
       "client/rust/mind-core/src/game/map_objectives.rs objective_text 4-arg formats + ObjectiveLocale count/emoji hooks; RuntimeObjectiveEnv counts wiring",
       "bottom-right icon bar fragment (new element; Java HudFragment info table / menu buttons)",
       "minimap provider content (get_texture region rendering in the widget)",
@@ -9141,6 +9141,10 @@
        "panel_open": true,
        "categories": 0,
        "blocks": 0
+      },
+      "prompt_source": {
+       "java": "MapObjectives.java:855-918 ShapeTextMarker/WorldLabel background+outline",
+       "port": "no WorldLabel render pass in mind-gdext; MapMarkers containers exist in mind-core"
       }
      }
     },
