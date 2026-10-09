@@ -1,6 +1,6 @@
 {
  "schema": "mindustry-godot/parity-ledger@2",
- "updated": "2026-10-09T09:43:10Z",
+ "updated": "2026-10-09T10:00:20Z",
  "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction chains. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
  "focus": {
   "kind": "area",
@@ -8892,7 +8892,7 @@
    "parent": "PAR-0019",
    "status": "in-progress",
    "chain": "chains/java-ref-ground-zero-tutorial.md",
-   "updated": "2026-10-09T09:43:10Z",
+   "updated": "2026-10-09T10:00:20Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
     "to": "resumed Ground Zero tutorial (objective 0) via the planet page's Go",
@@ -9124,53 +9124,64 @@
       "size_match": true
      },
      "note": "Objective world-label pass landed (localized text renders at the marker position); residual dominated by per-tile floor texture variants (snow 40% changed), hint box, icon bar, label style."
+    },
+    "round7": {
+     "godot_frame": "runs/20261009-085712-PAR-0037/godot/step-16-resumed-r7b.png",
+     "diff": "runs/20261009-085712-PAR-0037/diff/step-14-resume-r7.json",
+     "metrics": {
+      "changed_fraction": 0.6418,
+      "mean_abs_rgb": [
+       53.54,
+       53.17,
+       51.04
+      ],
+      "coarse_layout_max_channel_mean": 43.25,
+      "palette_distance": 0.2512,
+      "size_match": true
+     },
+     "note": "Floor variants now match Java per tile (several tiles pixel-identical); remaining snow diff is the (4,4.3)-world-unit camera offset (fractional y)."
     }
    },
    "fix": {
     "status": "godot-open",
     "plan": {
-     "round": 7,
+     "round": 8,
      "done": [
-      "Round 6 (working tree): objective world-label pass landed - MindCampaign.objective_markers_json() emits the running objectives' ShapeText markers (localized via the live bundle, Arc markup/`:icon:` tokens stripped; unit test marker_text_strips_arc_markup) and MindObjectiveMarkers (render/objective_markers.rs, mounted in a CanvasLayer by MindWorldRenderer::build_markers) projects world positions through the camera canvas transform and draws the polygon + WorldLabel-style background/outline text. Verified in-engine: marker JSON [{'class':'ShapeText','x':1096,'y':424,'text':'Move near the  copper ore on the ground and click to begin mining.'}], the node exists, and the label renders at the marker position (step-12-r6 capture).",
-      "Round-6 leg (pid 140824): changed_fraction 0.65459 (was 0.65262), mean_abs [54.03,53.56,51.23], palette_distance 0.2510 (was 0.2747), coarse 43.27 - the marker region now partially matches but the label style (font/background) still differs."
+      "Round 7 (working tree): per-tile floor texture variants ported exactly - mind-core math::rand_arc gains `random_seed_int` (Arc Mathf.randomSeed: reseed, power-of-two extra draw, nextInt(max-min+1)+min) and `pack_point2` (Point2.pack with the short cast), pinned by a golden test generated from the reference arc-core jar; floor.rs resolves the floor's numbered variants (snow1..3 etc.) and picks per tile via `Mathf.randomSeed(Point2.pack(x,y), 0, count-1)`. MindWorldRenderer sets CanvasItem TextureFilter::NEAREST (Java samples the atlas nearest; no-op at integer alignment but parity-correct). Clippy/tests (1821) / build green; editor relaunched.",
+      "Leg re-run (pid 166081): changed_fraction 0.6418 (was 0.65459), mean_abs [53.54,53.17,51.04] (was [54.03,53.56,51.23]), palette 0.2512. Per-tile probes prove the floor fix: tiles (150,40)/(120,70) render PIXEL-IDENTICAL to Java (0.0 diff) and (135,65) matches exactly at a 6px offset; the residual snow ~39% is sub-pixel camera misalignment, not texture."
      ],
-     "seam": "Round-7 root cause pinned for the largest remaining region: the world floor texture variants. The atlas ships snow1..snow3/basalt1..3 (no bare `snow`/`basalt`); `region_geometry_with_variants` resolves the FIRST candidate (`snow1`) for every tile, while Java picks per tile via `Floor.variant(x, y, count) = Mathf.randomSeed(Point2.pack(x, y), 0, count-1)` (Floor.java:300-302). Result: the port renders one variant everywhere and the snow pattern differs per tile (snow crop 40-43% changed, mean ~13) while the scale/period matches (autocorrelation peaks at 32px in both). Fix: choose the tile's variant geometry with Java's hash in the floor bake.",
+     "seam": "Round-8 root cause: camera position parity. Java `viewpos` in the reference save is (1032.0, 440.29807) and the reference frame is captured from it; the port's follow settles at (1028, 436) - a (4, 4.3) world-unit offset (16, 17.2 px at zoom 4), whose fractional part (~1px in y) keeps most world pixels on a different texel phase (snow crop best integer shift still leaves mean ~9.5; several tiles match 0.0 when the crop compensates the offset). The offset comes from the port's player/camera target position vs the Java save's stored viewpos (player position).",
      "files": [
-      "client/rust/mind-gdext/src/render/floor.rs (bake: pick the per-tile variant geometry)",
-      "client/rust/mind-gdext/src/render/atlas_bind.rs (variant candidate list -> resolve all variants, not the first)",
-      "mind-core ArcRand/JavaRandom for Mathf.randomSeed equivalence (Point2.pack(x,y) seed)"
+      "client/rust/mind-gdext/src/camera.rs (follow_world snap / follow target) and the player spawn position on resume (campaign runtime spawn vs the save's saved position)",
+      "possibly mind-core entity spawn/position restore on sector resume"
      ],
-     "approach": "Round 7: resolve the floor's variant geometry list once per floor name, then in the chunk bake index it by `Mathf.randomSeed(Point2.pack(x, y), 0, count-1)` (verify the port's random helper matches Java's; tests in mind-core random). Re-bake; compare the snow crop changed% (target < 5%).",
+     "approach": "Round 8: make the revived sector's player position (and thus the camera target) match the Java save exactly; verify camera == (1032.0, 440.3) at the same fork, then re-run and re-measure the snow crops (target: exact-match, changed% < 5%).",
      "prerequisites": [
-      "Tile overlays (ore) may use the same variant logic (OverlayFloor.drawMain) - check the ore renderer's texture choice too (the copper field is 83% changed).",
-      "After the floor variant fix, the remaining hot regions are the hint box (Java hint text/box geometry), the bottom-right icon bar (absent), the objective label style, the status text format, the minimap content and the core sprite."
+      "If the player spawn position is fixed by the map's spawn/core position rather than saved, compare the port's spawn point math with Java's `World.loadSector` -> `player.set(core pos)`/save `viewpos` restore.",
+      "Then the remaining hot regions: hint box geometry/text (93%), bottom-right icon bar (96%), marker label style (84%), copper field 82% (ore rendering may share the variant logic - check OverlayFloor), core sprite, status text format, minimap content."
      ],
-     "narrow_check": "cargo test -p mind-core render && cargo clippy -p mind-gdext --all-targets -- -D warnings && tools/build.sh (editor relaunch after)",
+     "narrow_check": "cargo test -p mind-core --lib && cargo clippy -p mind-gdext --all-targets -- -D warnings && tools/build.sh",
      "evidence": {
-      "godot_frame_round6": "runs/20261009-085712-PAR-0037/godot/step-12-resumed-r6.png",
-      "diff_round6": "runs/20261009-085712-PAR-0037/diff/step-12-resume-r6.json",
-      "snow_crop": {
-       "changed_pct": 40,
-       "mean": [
-        13.6,
-        10.5,
-        7.2
-       ],
-       "period_px": 32
+      "godot_frame_round7": "runs/20261009-085712-PAR-0037/godot/step-16-resumed-r7b.png",
+      "diff_round7": "runs/20261009-085712-PAR-0037/diff/step-14-resume-r7.json",
+      "golden": "mind-core math::rand_arc mathf_tests (arc-core jar values, 2026-10-09)",
+      "tile_matches": {
+       "150,40": "0.0",
+       "120,70": "0.0",
+       "135,65": "0.0 at (-6,-6)"
       },
-      "atlas": {
-       "snow_variants": [
-        "snow1",
-        "snow2",
-        "snow3"
-       ],
-       "bare_snow": false
-      },
-      "java": "core/src/mindustry/world/blocks/environment/Floor.java:300-302 variant()"
+      "java_viewpos": [
+       1032.0,
+       440.29807
+      ],
+      "godot_cam": [
+       1028,
+       436
+      ]
      }
     },
     "commit": null,
-    "summary": "round 6 added the objective world-label pass; round 7 fixes the per-tile floor texture variant selection",
+    "summary": "round 7 ported the per-tile floor variants (golden-tested); round 8 targets the camera/player position offset",
     "run": "runs/20261009-085712-PAR-0037/"
    },
    "verified": null,
@@ -9616,9 +9627,9 @@
    "title": "Campaign world: WASD movement (hint transition + camera follow)",
    "surface": "world",
    "parent": "PAR-0028",
-   "status": "in-progress",
+   "status": "blocked",
    "chain": "chains/java-ref-ground-zero-tutorial.md",
-   "updated": "2026-10-09T09:27:44Z",
+   "updated": "2026-10-09T09:52:50Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
     "to": "Ground Zero tutorial start (objective Obtain: 0/15 Copper)",
@@ -9688,9 +9699,9 @@
      "java": "runs/20261009-065416-ref-ground-zero/java/r02-00-before.png (hint 'Use [WASD] to move.')",
      "godot": "sector_state campaign:true, hasCore:true, sector:15; HudGroup visible"
     },
-    "last_replayed": "runs/20261009-085822-PAR-0044/"
+    "last_replayed": "runs/20261009-092821-PAR-0044/"
    },
-   "run": "runs/20261009-085822-PAR-0044/",
+   "run": "runs/20261009-092821-PAR-0044/",
    "reproduce": {
     "java": [
      {
@@ -9728,191 +9739,110 @@
    },
    "steps": [
     {
-     "n": "fork",
-     "action": "Ground Zero launched (resumed save, wave 2)",
+     "n": "fork (round 2)",
+     "action": "Ground Zero launched, fresh process; hint desktopMove; player mech live",
      "java_frame": "runs/20261009-065416-ref-ground-zero/java/r02-00-before.png",
-     "godot_frame": "runs/20261009-085822-PAR-0044/godot/fork.png",
-     "diff": "runs/20261009-085822-PAR-0044/diff/fork.json",
-     "verdict": "mismatch"
+     "godot_frame": "runs/20261009-092821-PAR-0044/godot/fork.png",
+     "diff": "runs/20261009-092821-PAR-0044/diff/fork.json",
+     "verdict": "gate-fail (blocked)"
     },
     {
-     "n": "step-s",
-     "action": "hold S 900 ms (54 frames)",
+     "n": "step-s (round 2)",
+     "action": "key down s; set_paused(true); SimHost.step(54); key up s; unpause; settle",
      "java_frame": "runs/20261009-065416-ref-ground-zero/java/r02-01-move.png",
-     "godot_frame": "runs/20261009-085822-PAR-0044/godot/step-s.png",
-     "diff": "runs/20261009-085822-PAR-0044/diff/step-s.json",
-     "verdict": "mismatch"
+     "godot_frame": "runs/20261009-092821-PAR-0044/godot/step-s.png",
+     "diff": "runs/20261009-092821-PAR-0044/diff/step-s.json",
+     "verdict": "gate-fail (blocked); signals pass: camera (1028,436)->(1028,110.5), hint -> zoom"
     },
     {
-     "n": "step-w",
-     "action": "hold W 900 ms (54 frames)",
+     "n": "step-w (round 2)",
+     "action": "key down w; set_paused(true); SimHost.step(54); key up w; unpause; settle",
      "java_frame": "runs/20261009-065416-ref-ground-zero/java/r02-04-after-w.png",
-     "godot_frame": "runs/20261009-085822-PAR-0044/godot/step-w.png",
-     "diff": "runs/20261009-085822-PAR-0044/diff/step-w.json",
-     "verdict": "mismatch"
+     "godot_frame": "runs/20261009-092821-PAR-0044/godot/step-w.png",
+     "diff": "runs/20261009-092821-PAR-0044/diff/step-w.json",
+     "verdict": "gate-fail (blocked); signals pass: camera back (1028,433), hint stays zoom"
+    },
+    {
+     "n": "fork (round 3, unit scale fixed)",
+     "action": "Ground Zero launched; mech at 30x45 px (matches reference)",
+     "java_frame": "runs/20261009-065416-ref-ground-zero/java/r02-00-before.png",
+     "godot_frame": "runs/20261009-092821-PAR-0044/godot/r3-fork.png",
+     "diff": "runs/20261009-092821-PAR-0044/diff/r3-fork.json",
+     "verdict": "gate-fail (blocked on PAR-0028)"
+    },
+    {
+     "n": "step-s (round 3)",
+     "action": "54-tick S hold",
+     "java_frame": "runs/20261009-065416-ref-ground-zero/java/r02-01-move.png",
+     "godot_frame": "runs/20261009-092821-PAR-0044/godot/r3-step-s.png",
+     "diff": "runs/20261009-092821-PAR-0044/diff/r3-step-s.json",
+     "verdict": "gate-fail (blocked); camera (1028,436)->(1028,278.9), hint -> zoom"
+    },
+    {
+     "n": "step-w (round 3)",
+     "action": "54-tick W hold",
+     "java_frame": "runs/20261009-065416-ref-ground-zero/java/r02-04-after-w.png",
+     "godot_frame": "runs/20261009-092821-PAR-0044/godot/r3-step-w.png",
+     "diff": "runs/20261009-092821-PAR-0044/diff/r3-step-w.json",
+     "verdict": "gate-fail (blocked); camera back (1028,441), hint stays zoom"
     }
    ],
    "mismatch": {
-    "step": "fork + step-s + step-w all diverge",
+    "step": "frame gate at fork + both steps; item signals verified in-engine",
     "java_frame": "runs/20261009-065416-ref-ground-zero/java/r02-04-after-w.png",
-    "godot_frame": "runs/20261009-085822-PAR-0044/godot/step-w.png",
-    "diff": "runs/20261009-085822-PAR-0044/diff/step-w.json",
+    "godot_frame": "runs/20261009-092821-PAR-0044/godot/step-w.png",
+    "diff": "runs/20261009-092821-PAR-0044/diff/step-w.json",
     "metrics": {
      "fork": {
-      "changed_fraction": 0.72139,
+      "changed_fraction": 0.72479,
       "mean_abs_rgb": [
-       70.41,
-       71.36,
-       72.28
+       70.96,
+       71.95,
+       72.82
       ],
-      "coarse_layout_max_channel_mean": 68.79,
-      "palette_distance": 0.3958
+      "coarse_layout_max_channel_mean": 69.43,
+      "palette_distance": 0.3953
      },
      "step_s": {
-      "changed_fraction": 0.80502,
+      "changed_fraction": 0.94529,
       "mean_abs_rgb": [
-       112.02,
-       114.13,
-       118.35
+       128.99,
+       131.31,
+       135.75
       ],
-      "coarse_layout_max_channel_mean": 116.16,
-      "palette_distance": 0.6013
+      "coarse_layout_max_channel_mean": 131.26,
+      "palette_distance": 0.3218
      },
      "step_w": {
-      "changed_fraction": 0.70993,
+      "changed_fraction": 0.81002,
       "mean_abs_rgb": [
-       70.14,
-       71.17,
-       72.08
+       73.4,
+       73.86,
+       73.72
       ],
-      "coarse_layout_max_channel_mean": 68.97,
-      "palette_distance": 0.405
+      "coarse_layout_max_channel_mean": 69.5,
+      "palette_distance": 0.4014
      }
     },
-    "note": "Godot Ground Zero has no tutorial objective panel and no player entity (SimHost group_counts player=0 unit=0); the hint bar is timer-driven (showed 'Right-click and drag to break blocks.', raw-markup shoot hint at other times), never 'Use [WASD] to move.'; holding S pans the Camera2D (1028,433)->(1028,109.7) off-map into a black frame (PAR-0031), W pans back; no mech is rendered or moved; the state is a resumed wave save ('Wave 2/10 / 1 Enemy Remaining') instead of the tutorial start.",
+    "note": "Blocked on PAR-0028 (no tutorial objective HUD, wave state, terrain) and PAR-0055 (zoom 4 vs ~1/4 scale). Item signals pass: spawn log 'alpha at (1028.0, 436.0)', camera follow, hint desktopMove->zoom.",
     "evidence": [
-     "runs/20261009-085822-PAR-0044/godot/fork.png",
-     "runs/20261009-085822-PAR-0044/godot/step-s.png",
-     "runs/20261009-085822-PAR-0044/godot/step-w.png",
-     "runs/20261009-085822-PAR-0044/diff/fork.json",
-     "runs/20261009-085822-PAR-0044/diff/step-s.json",
-     "runs/20261009-085822-PAR-0044/diff/step-w.json",
-     "godot eval: group_counts {all:61, build:61, player:0, unit:0}, sector_state {campaign:true, hasCore:true, sector:15, wave:1}",
-     "godot eval: hint label 'Right-click and drag to break blocks.' (HudGroup/hints/Panel/Layout/Label)",
-     "godot eval: Camera2D position (1028,109.72) after S hold, (1028,433.37) after W hold, zoom 4"
-    ],
-    "reproduce": {
-     "godot": [
-      {
-       "tool": "godot_game",
-       "params": {
-        "action": "play",
-        "params": {
-         "scene": "res://scenes/game.tscn"
-        }
-       }
-      },
-      {
-       "tool": "godot_input",
-       "params": {
-        "action": "mouse_button",
-        "note": "Play 230,149; Campaign 460,149; Serpulo card 412,194; OK 499,634; Launch 576,613; loadout Launch 367,503"
-       }
-      },
-      {
-       "tool": "godot_exec",
-       "params": {
-        "action": "eval",
-        "note": "hide HudGroup/hud/FpsBox + HudGroup/performance; read hint label"
-       }
-      },
-      {
-       "tool": "godot_screenshot",
-       "params": {
-        "action": "game"
-       }
-      },
-      {
-       "tool": "godot_input",
-       "params": {
-        "action": "sequence",
-        "params": {
-         "steps": [
-          {
-           "type": "key",
-           "params": {
-            "key": "s",
-            "pressed": true
-           }
-          },
-          {
-           "type": "key",
-           "params": {
-            "key": "s",
-            "pressed": false
-           }
-          }
-         ],
-         "frame_delay": 54
-        }
-       }
-      },
-      {
-       "tool": "godot_screenshot",
-       "params": {
-        "action": "game"
-       }
-      },
-      {
-       "tool": "godot_input",
-       "params": {
-        "action": "sequence",
-        "params": {
-         "steps": [
-          {
-           "type": "key",
-           "params": {
-            "key": "w",
-            "pressed": true
-           }
-          },
-          {
-           "type": "key",
-           "params": {
-            "key": "w",
-            "pressed": false
-           }
-          }
-         ],
-         "frame_delay": 54
-        }
-       }
-      },
-      {
-       "tool": "godot_screenshot",
-       "params": {
-        "action": "game"
-       }
-      }
-     ],
-     "compare": [
-      {
-       "tool": "frame_diff.py",
-       "params": {
-        "--java": "runs/20261009-065416-ref-ground-zero/java/r02-04-after-w.png",
-        "--godot": "runs/20261009-085822-PAR-0044/godot/step-w.png",
-        "--out-json": "runs/20261009-085822-PAR-0044/diff/step-w.json"
-       }
-      }
-     ]
-    }
+     "runs/20261009-092821-PAR-0044/godot/fork.png",
+     "runs/20261009-092821-PAR-0044/godot/step-s.png",
+     "runs/20261009-092821-PAR-0044/godot/step-w.png",
+     "runs/20261009-092821-PAR-0044/diff/fork.json",
+     "runs/20261009-092821-PAR-0044/diff/step-s.json",
+     "runs/20261009-092821-PAR-0044/diff/step-w.json",
+     "godot log: spawn_player_unit: alpha at (1028.0, 436.0)",
+     "godot eval: camera (1028,436) -> (1028,110.5) -> (1028,433); zoom 4",
+     "godot eval: hint 'Use [color=#ffd37fff][lb][lb]WASD][/color] to move.' -> 'Scroll to zoom in or out.'"
+    ]
    },
    "fix": {
-    "status": "planned",
+    "status": "godot-signals-pass",
     "commit": null,
     "summary": null,
     "plan": {
-     "round": 1,
+     "round": 2,
      "mismatch_evidence": {
       "fork": {
        "changed_fraction": 0.72139,
@@ -9997,6 +9927,31 @@
        "editor relaunch (old lib mmap)",
        "Godot leg re-run + frame_diff under the gate"
       ]
+     },
+     "round2": {
+      "state": "implemented + engine-validated; frame gate blocked on PAR-0028/PAR-0055",
+      "changed": [
+       "mind-core/src/ai/types/player.rs (new)",
+       "mind-core/src/ai/types/mod.rs",
+       "mind-core/src/sim/unit_runtime.rs",
+       "mind-core/src/sim/mod.rs",
+       "mind-gdext/src/sim_host.rs",
+       "mind-gdext/src/campaign.rs",
+       "mind-gdext/src/camera.rs",
+       "mind-gdext/src/render.rs",
+       "mind-gdext/src/render/units.rs (new)",
+       "mind-gdext/src/render/atlas_bind.rs",
+       "client/ui/fragments/hints_fragment.gd",
+       "client/ui/dialogs/planet_dialog.gd (PAR-0054)"
+      ],
+      "checks": {
+       "cargo fmt": "clean",
+       "cargo clippy -p mind-core -p mind-gdext --all-targets -- -D warnings": "clean",
+       "cargo test -p mind-core": "1822 passed",
+       "tools/build.sh": "done",
+       "godot leg": "spawn + movement + camera follow + hint transition verified in-engine; frame gate blocked"
+      },
+      "next": "resolve PAR-0028 (tutorial objective HUD/state, terrain) and PAR-0055 (zoom), then re-run the leg and spawn the twin"
      }
     }
    },
@@ -10084,18 +10039,23 @@
    },
    "claim": {
     "by": "godot-walk-s2",
-    "at": "2026-10-09T08:58:22Z",
-    "prior_status": "reference"
-   }
+    "at": "2026-10-09T09:48:44Z",
+    "released_at": "2026-10-09T09:52:50Z",
+    "reason": "unit-scale fix validated; blocked on PAR-0028 (tutorial HUD/state, terrain/lighting)"
+   },
+   "blocked_on": [
+    "PAR-0028"
+   ],
+   "blocked_note": "Own signals engine-verified with round-3 frames (54-tick holds: camera 436->278.9->441; hint desktopMove->zoom; mech at the correct sprite scale). Frame gate blocked on PAR-0028 (tutorial objective HUD/state + terrain/lighting): fork 0.72153, step-s 0.93497, step-w 0.78164 changed."
   },
   {
    "id": "PAR-0045",
    "title": "Campaign world: click copper ore to begin mining (objective 0 -> 1)",
    "surface": "world",
    "parent": "PAR-0028",
-   "status": "reference",
+   "status": "mismatch",
    "chain": "chains/java-ref-ground-zero-tutorial.md",
-   "updated": "2026-10-09T07:13:40Z",
+   "updated": "2026-10-09T09:54:46Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
     "to": "Ground Zero tutorial start (objective Obtain: 0/15 Copper)",
@@ -10131,7 +10091,7 @@
     },
     "last_replayed": "runs/20261009-065416-ref-ground-zero/"
    },
-   "run": "runs/20261009-065416-ref-ground-zero/",
+   "run": "runs/20261009-095320-PAR-0045/",
    "reproduce": {
     "java": [
      {
@@ -10161,10 +10121,77 @@
     "godot": [],
     "compare": []
    },
-   "steps": [],
-   "mismatch": null,
+   "steps": [
+    {
+     "n": "fork",
+     "action": "post-W field state; Q clears the block selection",
+     "java_frame": "runs/20261009-065416-ref-ground-zero/java/r02-04-after-w.png",
+     "godot_frame": "runs/20261009-095320-PAR-0045/godot/fork.png",
+     "diff": null,
+     "verdict": "reachable"
+    },
+    {
+     "n": "click ore",
+     "action": "click tile (137,53) -> viewport (864,268)",
+     "java_frame": "runs/20261009-065416-ref-ground-zero/java/r03-02-mine.png",
+     "godot_frame": "runs/20261009-095320-PAR-0045/godot/step-click.png",
+     "diff": "runs/20261009-095320-PAR-0045/diff/step-click.json",
+     "verdict": "mismatch"
+    }
+   ],
+   "mismatch": {
+    "step": "left-click on the highlighted ore tile with no block selected",
+    "java_frame": "runs/20261009-065416-ref-ground-zero/java/r03-02-mine.png",
+    "godot_frame": "runs/20261009-095320-PAR-0045/godot/step-click.png",
+    "diff": "runs/20261009-095320-PAR-0045/diff/step-click.json",
+    "metrics": {
+     "changed_fraction": 0.76977,
+     "mean_abs_rgb": [
+      69.87,
+      69.76,
+      69.41
+     ],
+     "coarse_layout_max_channel_mean": 65.05,
+     "palette_distance": 0.4084
+    },
+    "note": "The port maps every left click to Command::Place with the sim's selected block; with the selection cleared nothing happens. No player-mining input path exists (upstream InputHandler.tryBeginMine/tryStopMine sets player.unit().mineTile), and no mining extraction tick yields ore, so the counter never appears. Reference: mining starts, counter 39 -> 74 over 6 s.",
+    "evidence": [
+     "runs/20261009-095320-PAR-0045/godot/fork.png",
+     "runs/20261009-095320-PAR-0045/godot/step-click.png",
+     "runs/20261009-095320-PAR-0045/diff/step-click.json",
+     "godot eval: get_input_state_json block:null last_action:clear_building",
+     "godot eval after click: group_counts build 61 unchanged"
+    ]
+   },
    "fix": {
-    "status": "open"
+    "status": "planned",
+    "commit": null,
+    "summary": null,
+    "plan": {
+     "round": 1,
+     "mismatch_evidence": {
+      "changed_fraction": 0.76977,
+      "mean_abs_rgb": [
+       69.87,
+       69.76,
+       69.41
+      ],
+      "diff": "runs/20261009-095320-PAR-0045/diff/step-click.json"
+     },
+     "seam": "left-click with no block selection -> player unit mine tile; mining tick yields ore; counter/objective HUD (PAR-0028)",
+     "prerequisites": [
+      "PAR-0028: the objective counter/panel (mined-copper count) does not exist in the port",
+      "player mining tick: MinerComp has mine_tile/mining but no extraction (mine_speed/tier progress, ore drop -> items)"
+     ],
+     "files": [
+      "client/rust/mind-gdext/src/sim_host.rs (unhandled_input: block-selection gate -> mine command)",
+      "client/rust/mind-core/src/sim/unit_runtime.rs or sim/mod.rs (Sim::set_player_mine_tile + mining tick)",
+      "client/rust/mind-core/src/entities/comp/unit/comp.rs (MinerComp timer/progress fields)",
+      "client/rust/mind-core/src/ai/types/miner.rs (reuse drop/tier checks)"
+     ],
+     "approach": "Mirror InputHandler.tryBeginMine/tryStopMine on the player unit (canMine: tile.drop or overlay item_drop, tier <= mine_tier); add a per-tick mining pass that advances mineTimer by mine_speed and adds the ore drop to the unit's ItemsComp (upstream MinerComp.update).",
+     "narrow_check": "cargo test -p mind-core; cargo clippy -p mind-core -p mind-gdext --all-targets -- -D warnings; tools/build.sh; Godot leg"
+    }
    },
    "verified": null,
    "reference": {
@@ -10228,6 +10255,11 @@
      }
     ],
     "note": "R03 reference soak. The single ore click starts mining; the tutorial counter climbs fast (39 -> 74 in 6 s), objective 0 completes as soon as mined copper >= 15, and the panel switches to Build: 1x Mechanical Drill. No intermediate 'Obtain: N/15' frame was captured (by +3.5 s the objective had already advanced); the fork frame shows the pre-click 'Obtain: 0/15' state."
+   },
+   "claim": {
+    "by": "godot-walk-s2",
+    "at": "2026-10-09T09:53:20Z",
+    "prior_status": "reference"
    }
   },
   {
@@ -11268,7 +11300,7 @@
    "parent": "PAR-0028",
    "status": "in-progress",
    "chain": "chains/java-ref-ground-zero-tutorial.md",
-   "updated": "2026-10-09T09:27:44Z",
+   "updated": "2026-10-09T09:44:47Z",
    "discovered_by": "runs/20261009-085822-PAR-0044/",
    "path": {
     "to": "Ground Zero launched in the Godot client (sector 15, campaign:true, hasCore:true)",
@@ -11295,7 +11327,7 @@
    },
    "verified": null,
    "reference": null,
-   "note": "Prerequisite for PAR-0044: no player unit exists after launch (group_counts player=0/unit=0). comp::Player/PlayerComp and AiKind::Player exist; update_player is empty and no entity is ever spawned. Upstream: Control.java:198-203 player.set(core) -> CoreBlock.requestSpawn/playerSpawn with core unitType (alpha).",
+   "note": "Round-2 engine evidence: log `spawn_player_unit: alpha at (1028.0, 436.0)`, has_player_unit true; awaited verification with PAR-0044.",
    "claim": {
     "by": "godot-walk-s2",
     "at": "2026-10-09T09:27:44Z",
@@ -11310,7 +11342,7 @@
    "parent": "PAR-0028",
    "status": "in-progress",
    "chain": "chains/java-ref-ground-zero-tutorial.md",
-   "updated": "2026-10-09T09:27:44Z",
+   "updated": "2026-10-09T09:44:47Z",
    "discovered_by": "runs/20261009-085822-PAR-0044/",
    "path": {
     "to": "Ground Zero launched in the Godot client (sector 15, campaign:true, hasCore:true)",
@@ -11337,7 +11369,7 @@
    },
    "verified": null,
    "reference": null,
-   "note": "Prerequisite for PAR-0044: Layer::GroundUnit/FlyingUnit band nodes exist but no pass writes them (chains/units-live-wave-runtime.md: 'Units are not rendered yet'). The reference frames show the player mech.",
+   "note": "Round-2 engine evidence: the mech renders in godot/fork.png and godot/step-s.png (46px alpha region at zoom 4); awaited verification with PAR-0044.",
    "claim": {
     "by": "godot-walk-s2",
     "at": "2026-10-09T09:27:44Z",
@@ -11352,7 +11384,7 @@
    "parent": "PAR-0024",
    "status": "in-progress",
    "chain": "chains/java-ref-ground-zero-tutorial.md",
-   "updated": "2026-10-09T09:34:06Z",
+   "updated": "2026-10-09T09:44:55Z",
    "discovered_by": "runs/20261009-092821-PAR-0044/",
    "claim": {
     "by": "godot-walk-s2",
@@ -11376,7 +11408,16 @@
     "godot": [],
     "compare": []
    },
-   "steps": [],
+   "steps": [
+    {
+     "n": 1,
+     "action": "launch with the fixed call site",
+     "java_frame": null,
+     "godot_frame": "runs/20261009-092821-PAR-0044/godot/fork.png",
+     "diff": null,
+     "verdict": "pass (no arity error; sector live)"
+    }
+   ],
    "mismatch": {
     "step": "launch_loadout dialog Launch (367,503)",
     "java_frame": null,
@@ -11390,9 +11431,9 @@
     ]
    },
    "fix": {
-    "status": "godot-pass-pending",
+    "status": "godot-pass",
     "commit": null,
-    "summary": "planet_dialog.gd now calls the 2-arg start_sector directly; loadout-index selection still unimplemented",
+    "summary": "planet_dialog.gd calls the 2-arg start_sector directly; round-2 launches log no arity error and the sector starts (spawn_player_unit runs).",
     "plan": {
      "round": 1,
      "seam": "GDScript UI -> MindCampaign facade call",
@@ -11406,6 +11447,78 @@
    },
    "verified": null,
    "reference": null
+  },
+  {
+   "id": "PAR-0055",
+   "title": "Unit render: sprites draw at raw atlas pixels (4x) \u2014 missing Draw.scl = 1/scale_marker.width",
+   "surface": "world",
+   "parent": "PAR-0053",
+   "status": "in-progress",
+   "chain": "chains/ground-zero-wasd-movement.md",
+   "updated": "2026-10-09T09:52:50Z",
+   "discovered_by": "runs/20261009-092821-PAR-0044/",
+   "path": {
+    "to": "Ground Zero launched in the Godot client",
+    "java": [],
+    "godot": [],
+    "confirm": {
+     "godot": "Camera2D.zoom == 4",
+     "java": null
+    },
+    "last_replayed": "runs/20261009-092821-PAR-0044/"
+   },
+   "run": "runs/20261009-092821-PAR-0044/",
+   "reproduce": {
+    "java": [],
+    "godot": [],
+    "compare": []
+   },
+   "steps": [
+    {
+     "n": 1,
+     "action": "fork capture after the unit-scale fix",
+     "java_frame": "runs/20261009-065416-ref-ground-zero/java/r02-00-before.png",
+     "godot_frame": "runs/20261009-092821-PAR-0044/godot/r3-fork.png",
+     "diff": "runs/20261009-092821-PAR-0044/diff/r3-fork.json",
+     "verdict": "pass (sprite scale matches)"
+    }
+   ],
+   "mismatch": {
+    "step": "unit sprite size at Ground Zero",
+    "java_frame": "runs/20261009-065416-ref-ground-zero/java/r02-00-before.png",
+    "godot_frame": "runs/20261009-092821-PAR-0044/godot/fork.png",
+    "diff": "runs/20261009-092821-PAR-0044/diff/fork.json",
+    "note": "alpha region 46x46; scale_marker width 4; Java draws 46/4 = 11.5 world px (~46 px at zoom 4); the port drew 46 world px (~184 px).",
+    "evidence": [
+     "assets/sprites/sprites.atlas.json: scale_marker w=4; alpha w=46 at page 0",
+     "reference frame r02-00 mech measures ~40-50 px; port fork blob ~184 px",
+     "Control.java:330 Draw.scl = 1f / Core.atlas.find(\"scale_marker\").width"
+    ]
+   },
+   "fix": {
+    "status": "godot-pass",
+    "commit": null,
+    "summary": "render/units.rs scales unit quads by 1/scale_marker.width; round-3 frame shows the mech at ~30x45 px matching the reference ~38x45 px.",
+    "plan": {
+     "round": 1,
+     "seam": "unit draw pass sprite scale",
+     "files": [
+      "client/rust/mind-gdext/src/render/units.rs"
+     ],
+     "approach": "resolve scale_marker via the atlas and scale unit quad w/h by 1/marker.width",
+     "narrow_check": "cargo clippy -p mind-gdext --all-targets -- -D warnings; tools/build.sh; Godot leg",
+     "round_note": "verified with the PAR-0044 round-2 leg re-run"
+    }
+   },
+   "verified": null,
+   "reference": null,
+   "note": "Corrected finding: the camera zoom matches the reference (port Camera2D.zoom 4; Java's tutorial frames are ~32 px/tile; the 1-tile tutorial diamond measures ~40 px in r02-00). The real divergence is sprite scale: the port's atlas is the 4x sprite set (`scale_marker` region 4x4 in assets/sprites/sprites.atlas.json), and Java compensates with `Draw.scl = 1f / Core.atlas.find(\"scale_marker\").width` (Control.java:330) while the port's unit pass drew the 46px alpha region at 46 world px. Reference mech ~40-50 px on screen; port blob ~184 px. Fix: divide region pixel size by the scale_marker width.",
+   "claim": {
+    "by": "godot-walk-s2",
+    "at": "2026-10-09T09:48:38Z",
+    "prior_status": "seeded",
+    "note": "fixed in PAR-0044 round 2 (render/units.rs sprite_scale)"
+   }
   }
  ]
 }
