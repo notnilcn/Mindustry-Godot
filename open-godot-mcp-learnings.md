@@ -1191,6 +1191,17 @@ those paths no longer exist, but the workarounds still apply.
   import/parse gate needs `GODOT_BIN=$HOME/.local/bin/godot bash tools/godot.sh
   --headless --editor --quit --path client` (plain `tools/godot.sh` exits with
   "no Godot binary found"). Used 2026-10-09 for the round-4 HUD scene changes.
+- UI state read immediately after `godot_game play` can be pre-`_ready`/
+  pre-bind: a probe in the same evaluate-call as the first play reported the
+  placement panel visible and `clear_planet_campaign_saves` returning false,
+  while the same probe one call later was correct. Re-query UI/campaign state
+  after the first eval before concluding a scene/script change failed (cost two
+  restarts + an editor relaunch chasing a phantom stale script, round 5).
+- Fragment **root** visibility is manifest-driven: `ui_root._bind` sets
+  `instance.visible` from the fragment entry's `hidden` flag, overriding a
+  fragment `_ready` that hides its own root. Collapse an inner child (e.g.
+  `placement`'s `Panel`) instead of the fragment root. Run:
+  `runs/20261009-085712-PAR-0037/` (round 5).
 - The planet dialog sector panel exposes raw bundle markup in
   `RichTextLabel.text` (`[scarlet]Under attack!`,
   `[red]:warning:[accent] Sector currently under attack...`) and renders it

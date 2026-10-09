@@ -8,6 +8,7 @@ preconditions:
   - Fresh campaign profile if the check depends on the starting unlock set; clear leftover sector saves (`clear_planet_campaign_saves("serpulo")` + restart) and assert `list_save_slots() == []` and `MindCampaign.get_tech_state().unlocked == 9` before launching. Persistent `user://config/settings.bin` unlocks survive restarts (see learnings 2026-10-08).
   - The editor process must postdate the built `libmind_gdext.so`; a loop editor started before `tools/build.sh` may hold the previous library. Relaunch it after a rebuild (killed 14:03 editor, relaunched 14:28 over the 14:24 build in the verified run) and confirm in-engine with `MindCampaign.has_method("block_catalog_json")` (false = stale/pre-fix binary).
   - Icon checks need the generated `assets/sprites/sprites.atlas.json` in the worktree (gitignored, made by `tools/pack.sh`); probe `MindAssets.region_count() > 0` first or the run only proves the text fallback.
+  - "Changed 2026-10-09 (PAR-0037 round 5, working tree): the palette starts collapsed like Java's `blocksSelect` pane; step 4 opens it with `open_palette()` before reading and reports the Panel child's visibility. The open/read steps were validated in-engine at fresh GZ (pid 129929: panel open, 0 categories/0 blocks - the documented fresh-GZ result); the full audit (icons/clipping) predates the collapse - re-run to re-bump `last_verified`."
 tools: [godot_health, godot_editor_read, godot_editor_edit, godot_game, godot_exec, godot_input, godot_screenshot, godot_log]
 last_verified: 2026-10-08 986cda3 (runs/l2-20261008-145144-ev0013-block-picker-godot)
 ---
@@ -57,10 +58,17 @@ last_verified: 2026-10-08 986cda3 (runs/l2-20261008-145144-ev0013-block-picker-g
    follow-up eval (or one frame later) before judging counts (hit while re-reading after
    `clear_planet_research`).
 
-4. Audit the panel at `/root/Spine/Ui/UiRoot/HudGroup/placement`:
+4. Audit the panel at `/root/Spine/Ui/UiRoot/HudGroup/placement`. The block
+   grid is the collapsed `blocksSelect` pane (Java `PlacementFragment.java:679`)
+   and starts hidden — open it first (a category hotkey does the same through
+   `_on_hotkey`), then read the panel in a follow-up eval:
 
    ```
-   godot_exec {"action":"eval","params":{"code":"var p = get_node(\"/root/Spine/Ui/UiRoot/HudGroup/placement\")\nvar r = (p as Control).get_global_rect()\nvar cats = []\nfor b in p.get_node(\"Panel/Layout/Categories\").get_children():\n\tvar br = (b as Control).get_global_rect()\n\tcats.append({\"name\": str(b.name), \"w\": int(br.size.x), \"h\": int(br.size.y), \"icon\": b.icon != null, \"glyph_child\": b.get_child_count() > 0})\nvar blocks = []\nfor b in p.get_node(\"Panel/Layout/Scroll/Blocks\").get_children():\n\tvar br = (b as Control).get_global_rect()\n\tblocks.append({\"name\": str(b.name), \"w\": int(br.size.x), \"has_icon\": b.icon != null, \"text\": str(b.text)})\nreturn {\"pid\": OS.get_process_id(), \"panel_rect\": {\"x\": int(r.position.x), \"y\": int(r.position.y), \"w\": int(r.size.x), \"h\": int(r.size.y)}, \"visible\": p.is_visible_in_tree(), \"selected\": p.get(\"_selected_category\"), \"categories\": cats, \"blocks\": blocks}"}}
+   godot_exec {"action":"eval","params":{"code":"var p = get_node(\"/root/Spine/Ui/UiRoot/HudGroup/placement\")\np.call(\"open_palette\")\nreturn {\"open\": p.is_visible_in_tree()}"}}
+   ```
+
+   ```
+   godot_exec {"action":"eval","params":{"code":"var p = get_node(\"/root/Spine/Ui/UiRoot/HudGroup/placement\")\nvar r = (p as Control).get_global_rect()\nvar cats = []\nfor b in p.get_node(\"Panel/Layout/Categories\").get_children():\n\tvar br = (b as Control).get_global_rect()\n\tcats.append({\"name\": str(b.name), \"w\": int(br.size.x), \"h\": int(br.size.y), \"icon\": b.icon != null, \"glyph_child\": b.get_child_count() > 0})\nvar blocks = []\nfor b in p.get_node(\"Panel/Layout/Scroll/Blocks\").get_children():\n\tvar br = (b as Control).get_global_rect()\n\tblocks.append({\"name\": str(b.name), \"w\": int(br.size.x), \"has_icon\": b.icon != null, \"text\": str(b.text)})\nreturn {\"pid\": OS.get_process_id(), \"panel_rect\": {\"x\": int(r.position.x), \"y\": int(r.position.y), \"w\": int(r.size.x), \"h\": int(r.size.y)}, \"panel_visible\": p.get_node(\"Panel\").is_visible_in_tree(), \"selected\": p.get(\"_selected_category\"), \"categories\": cats, \"blocks\": blocks}"}}
    ```
 
 5. Cross-check the catalog endpoint and the live unlock state (the assertion for filtering):

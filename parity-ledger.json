@@ -1,6 +1,6 @@
 {
  "schema": "mindustry-godot/parity-ledger@2",
- "updated": "2026-10-09T09:26:40Z",
+ "updated": "2026-10-09T09:31:21Z",
  "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction chains. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
  "focus": {
   "kind": "area",
@@ -8892,7 +8892,7 @@
    "parent": "PAR-0019",
    "status": "in-progress",
    "chain": "chains/java-ref-ground-zero-tutorial.md",
-   "updated": "2026-10-09T09:26:40Z",
+   "updated": "2026-10-09T09:31:21Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
     "to": "resumed Ground Zero tutorial (objective 0) via the planet page's Go",
@@ -9092,44 +9092,60 @@
       "size_match": true
      },
      "note": "HUD layout round: status panel top-left with wavepane + hint box left-aligned landed; residual = placement palette box, corner minimap, block-info panel, objective text format."
+    },
+    "round5": {
+     "godot_frame": "runs/20261009-085712-PAR-0037/godot/step-10-resumed-r5.png",
+     "diff": "runs/20261009-085712-PAR-0037/diff/step-10-resume-r5.json",
+     "metrics": {
+      "changed_fraction": 0.65262,
+      "mean_abs_rgb": [
+       53.21,
+       52.9,
+       50.8
+      ],
+      "coarse_layout_max_channel_mean": 44.37,
+      "palette_distance": 0.2747,
+      "size_match": true
+     },
+     "note": "Palette collapsed and minimap top-right; residual = objective world-text marker (center prompt), status text format/counts, icon bar, minimap content, hint state, core sprite, camera offset."
     }
    },
    "fix": {
     "status": "godot-open",
     "plan": {
-     "round": 5,
+     "round": 6,
      "done": [
-      "Round 4 (working tree): HUD fragment layout parity in GDScript/scenes - hud_fragment.tscn WavesStack moved to top-left (4,4, width 329) and the Status label draws on the atlas `wavepane` ninepatch (StyleBoxTexture, splits 12) with left-aligned text; hints_fragment.tscn Panel moved from screen-centre to the left edge, vertically centred, 412 wide, Skip 112x40. Godot headless import/parse gate green (`GODOT_BIN=~/.local/bin/godot bash tools/godot.sh --headless --editor --quit --path client`).",
-      "Leg re-run (pid 118865): status rect (4,4,329,76) top-left with wavepane, hint box at the left edge, the core now visible at the centre. Metrics improved: changed_fraction 0.69492 (was 0.70779), mean_abs [59.5,57.24,53.68] (was [63.54,61.95,58.58]), coarse 49.38 (was 54.89), palette 0.3003 (was 0.3242)."
+      "Round 5 (working tree): placement_fragment now collapses its Panel by default (Java blocksSelect collapsed pane) with open_palette()/close_palette() and category-hotkey open; the manifest bind only touches the fragment root so the collapse lives on the Panel child. hud_fragment MinimapBox moved bottom-right -> top-right (992,10) matching Java's minimap/position top().right(). chains/placement-picker-audit.md step 4 now opens the palette explicitly and reads the Panel visibility; the open/read steps were validated in-engine at fresh GZ (pid 129929: panel open, 0 categories/blocks - the documented fresh-GZ result).",
+      "Leg re-run (pid 129929): palette collapsed, minimap visible top-right, copper field below the core. Metrics: changed_fraction 0.65262 (was 0.69492), mean_abs [53.21,52.9,50.8] (was [59.5,57.24,53.68]), coarse 44.37 (was 49.38), palette 0.2747 (was 0.3003)."
      ],
-     "seam": "Remaining frame diff, largest first: (a) the placement palette Panel (HudGroup/placement, rect 512,388,640,260) renders always and covers the bottom-right world - Java's block grid is a collapsed pane (PlacementFragment blocksSelect, Java PlacementFragment.java:679) with only the bottom-right icon bar visible; (b) no corner minimap top-right (Java HudFragment 'minimap/position' -> `t.top().right()`); the port's MinimapBox (140x140 + Position) is anchored bottom-right and hidden under the palette; (c) no block-info/hover panel at the right ('Copper'); (d) status text format: Java objective.item = '[accent]Obtain: [][lightgray]{0}[]/{1}\\n{2}[lightgray]{3}' with (team item count, amount, emoji, localized name); mind-core map_objectives.rs objective_text passes 2 args (item name, amount) so the frame shows 'Obtain: copper/15'. Live counts need the RuntimeObjectiveEnv stubs wired (team_has_item/core_item_count return 0).",
+     "seam": "Round-6 heatmap (diff/step-10-resume-r5-heatmap.png) hot regions, largest first: (a) the tutorial prompt bar 'Move near the copper ore on the ground and click to begin mining.' - in Java this is the objective's world-space ShapeText marker at (1096,424) rendered as a world label; the port renders no objective markers/labels (map markers exist in mind-core but no world-label pass); (b) status text format - Java 'Obtain: 0/15 Copper' (objective.item = '[accent]Obtain: [][lightgray]{0}[]/{1}\\n{2}[lightgray]{3}' with count/emoji/name) vs the port's 2-arg call producing 'Obtain: copper/15'; (c) bottom-right icon bar (Schematics/Database/Tech Tree/Planet) absent in the port; (d) minimap content (Java shows terrain + viewport rect; the port's widget shows a black panel with a blob); (e) hint state differs (Java 'Use [WASD] to move.' vs port 'Scroll to zoom in or out.' - the port advanced to hint.zoom); (f) core sprite renders light grey vs Java's dark core (sprite/palette), plus the ~1-tile camera follow offset.",
      "files": [
-      "client/scenes/ui/ui_root.tscn + placement_fragment(.gd/.tscn): collapse the palette by default; open on block-select/category input; update chains/placement-picker-audit.md to open it explicitly",
-      "client/scenes/ui/fragments/hud_fragment.tscn: MinimapBox anchors bottom-right -> top-right (Java HudFragment minimap/position top().right())",
-      "block-info/hover panel (PlacementFragment 'hover info box') - wire the display rows once MindHud hover data exists",
-      "client/rust/mind-core/src/game/map_objectives.rs: objective_text 4-arg formats for Item/CoreItem/BuildCount + ObjectiveLocale count/emoji/name hooks; wire RuntimeObjectiveEnv counts"
+      "world objective marker/label pass (mind-core render or mind-gdext render): ShapeText/Text markers",
+      "client/rust/mind-core/src/game/map_objectives.rs objective_text 4-arg formats + ObjectiveLocale count/emoji hooks; RuntimeObjectiveEnv counts wiring",
+      "bottom-right icon bar fragment (new element; Java HudFragment info table / menu buttons)",
+      "minimap provider content (get_texture region rendering in the widget)",
+      "hint selection source (HintsFragment rotation state) and the core sprite render"
      ],
-     "approach": "Round 5: (1) placement palette collapsed by default with an explicit open path (keeps the audit flow working and removes the 640x260 dark block); (2) MinimapBox to top-right and check the widget renders terrain; (3) objective text format fix with the HUD-side counts if cheap, else file the count wiring as its own prerequisite.",
+     "approach": "Round 6: land the two highest-area items first - the objective world-text marker (center prompt) and the status text format with the live count; then the icon bar. Keep each in its own step with a capture pair.",
      "prerequisites": [
-      "Placement-picker-audit chain (verified, last_verified 2026-10-08 986cda3) assumes the palette is visible right after launch; collapsing it requires updating that chain with the open step and re-running it before the change counts as settled.",
-      "The placement palette visibility is a port design simplification, not a Java behavior; parity requires the collapsed state at launch."
+      "Objective text counts need the live env adapters (team_has_item/core_item_count/placed_block_count currently stubs) - if the counts are not cheap to wire, ship the 4-arg format with a zero count and file the count wiring as its own item.",
+      "Objective markers are view-only render data (never feed the sim); Java MapObjectives markers render via ShapeDraw/TextDraw."
      ],
-     "narrow_check": "GDScript/scenes: GODOT_BIN=~/.local/bin/godot bash tools/godot.sh --headless --editor --quit --path client; Rust: cargo test -p mind-core game && cargo clippy -p mind-gdext --all-targets -- -D warnings && tools/build.sh",
+     "narrow_check": "Rust: cargo test -p mind-core game && cargo clippy -p mind-gdext --all-targets -- -D warnings && tools/build.sh (editor relaunch after); GDScript: GODOT_BIN=~/.local/bin/godot bash tools/godot.sh --headless --editor --quit --path client",
      "evidence": {
-      "godot_frame_round4": "runs/20261009-085712-PAR-0037/godot/step-08-resumed-r4.png",
-      "godot_fork_round4": "runs/20261009-085712-PAR-0037/godot/step-07-fork-r4.png",
-      "diff_round4": "runs/20261009-085712-PAR-0037/diff/step-08-resume-r4.json",
-      "heatmap_round4": "runs/20261009-085712-PAR-0037/diff/step-08-resume-r4-heatmap.png",
-      "status_rect": [
-       4,
-       4,
-       329,
-       76
-      ]
+      "godot_frame_round5": "runs/20261009-085712-PAR-0037/godot/step-10-resumed-r5.png",
+      "godot_fork_round5": "runs/20261009-085712-PAR-0037/godot/step-09-fork-r5.png",
+      "diff_round5": "runs/20261009-085712-PAR-0037/diff/step-10-resume-r5.json",
+      "heatmap_round5": "runs/20261009-085712-PAR-0037/diff/step-10-resume-r5-heatmap.png",
+      "audit_open_probe": {
+       "panel_open": true,
+       "categories": 0,
+       "blocks": 0
+      }
      }
     },
     "commit": null,
-    "summary": "round 4 landed status/hints layout; round 5 targets the placement palette collapse, corner minimap and objective text format",
+    "summary": "round 5 collapsed the placement palette and moved the minimap; round 6 targets the objective world-text marker and status text format",
     "run": "runs/20261009-085712-PAR-0037/"
    },
    "verified": null,
@@ -9577,7 +9593,7 @@
    "parent": "PAR-0028",
    "status": "in-progress",
    "chain": "chains/java-ref-ground-zero-tutorial.md",
-   "updated": "2026-10-09T09:12:33Z",
+   "updated": "2026-10-09T09:27:44Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
     "to": "Ground Zero tutorial start (objective Obtain: 0/15 Copper)",
@@ -9928,7 +9944,35 @@
      "approach": "Port the upstream seam: (1) mind-core gains a PlayerInput resource + an AiKind::Player branch in the unit update (axis -> movePref -> Vel/Pos, rotation toward aim) that skips target acquisition/pathing; (2) on campaign sector launch spawn one player unit at the best core (upstream Control.java:198-203 player.set(core) -> CoreBlock.requestSpawn -> playerSpawn with core unitType) and store its entity; (3) upload MindInput.pan_axis each frame into the sim, stop feeding it to the camera while a player unit exists, and make the camera follow the player unit position; (4) render units through the existing band plan; (5) complete the desktopMove hint from a first non-zero move axis while a player unit exists.",
      "narrow_check": "cargo fmt --all -- --check; cargo clippy -p mind-core -p mind-gdext --all-targets -- -D warnings; cargo test -p mind-core; tools/build.sh; relaunch editor; re-run the Godot leg",
      "risks": "P0 golden spine_place_break e53c9277bb8c28d1 must stay (player path active only when a player unit exists); avoid touching serialized component order; content ids append-only",
-     "explore_report": "runs/20261009-085822-PAR-0044/explore-report.md"
+     "explore_report": "runs/20261009-085822-PAR-0044/explore-report.md",
+     "implementation": {
+      "round": 1,
+      "state": "code complete; build + editor relaunch + Godot leg pending",
+      "changed": [
+       "mind-core/src/ai/types/player.rs (new: PlayerInput resource + update_player: DesktopInput.updateMovement, UnitComp.movePref/moveAt/rotateMove)",
+       "mind-core/src/ai/types/mod.rs",
+       "mind-core/src/sim/unit_runtime.rs (AiKind::Player branch in unit_update_system; Sim::set_player_input/spawn_player_unit/player_unit/player_unit_position/player_unit_moved)",
+       "mind-core/src/sim/mod.rs (Sim.player_unit field)",
+       "mind-gdext/src/sim_host.rs (Input sibling; per-frame axis upload; spawn_player_unit at best core; player_unit_moved/has_player_unit; unit_draws)",
+       "mind-gdext/src/campaign.rs (spawn after sync_campaign_session)",
+       "mind-gdext/src/camera.rs (follows player unit; move axis no longer pans while possessed; edge-pan suspended)",
+       "mind-gdext/src/render/units.rs (new: rotated-quad unit pass per unit band/page)",
+       "mind-gdext/src/render.rs (pass registration + unit_sprites stat)",
+       "mind-gdext/src/render/atlas_bind.rs (ResolvedRegion w/h)",
+       "client/ui/fragments/hints_fragment.gd (desktopMove completes on first player movement)"
+      ],
+      "checks": {
+       "cargo fmt --all": "clean",
+       "cargo clippy -p mind-core -p mind-gdext --all-targets -- -D warnings": "clean",
+       "cargo test -p mind-core": "1822 passed, 0 failed",
+       "tools/build.sh": "running"
+      },
+      "pending": [
+       "tools/build.sh",
+       "editor relaunch (old lib mmap)",
+       "Godot leg re-run + frame_diff under the gate"
+      ]
+     }
     }
    },
    "verified": null,
@@ -11197,9 +11241,9 @@
    "title": "Campaign world: player mech spawns on sector launch (Ground Zero)",
    "surface": "world",
    "parent": "PAR-0028",
-   "status": "seeded",
+   "status": "in-progress",
    "chain": "chains/java-ref-ground-zero-tutorial.md",
-   "updated": "2026-10-09T09:12:14Z",
+   "updated": "2026-10-09T09:27:44Z",
    "discovered_by": "runs/20261009-085822-PAR-0044/",
    "path": {
     "to": "Ground Zero launched in the Godot client (sector 15, campaign:true, hasCore:true)",
@@ -11226,16 +11270,22 @@
    },
    "verified": null,
    "reference": null,
-   "note": "Prerequisite for PAR-0044: no player unit exists after launch (group_counts player=0/unit=0). comp::Player/PlayerComp and AiKind::Player exist; update_player is empty and no entity is ever spawned. Upstream: Control.java:198-203 player.set(core) -> CoreBlock.requestSpawn/playerSpawn with core unitType (alpha)."
+   "note": "Prerequisite for PAR-0044: no player unit exists after launch (group_counts player=0/unit=0). comp::Player/PlayerComp and AiKind::Player exist; update_player is empty and no entity is ever spawned. Upstream: Control.java:198-203 player.set(core) -> CoreBlock.requestSpawn/playerSpawn with core unitType (alpha).",
+   "claim": {
+    "by": "godot-walk-s2",
+    "at": "2026-10-09T09:27:44Z",
+    "prior_status": "seeded",
+    "note": "implemented inside PAR-0044 fix round 1"
+   }
   },
   {
    "id": "PAR-0053",
    "title": "Render: live units are not drawn (no unit view pass)",
    "surface": "world",
    "parent": "PAR-0028",
-   "status": "seeded",
+   "status": "in-progress",
    "chain": "chains/java-ref-ground-zero-tutorial.md",
-   "updated": "2026-10-09T09:12:14Z",
+   "updated": "2026-10-09T09:27:44Z",
    "discovered_by": "runs/20261009-085822-PAR-0044/",
    "path": {
     "to": "Ground Zero launched in the Godot client (sector 15, campaign:true, hasCore:true)",
@@ -11262,7 +11312,13 @@
    },
    "verified": null,
    "reference": null,
-   "note": "Prerequisite for PAR-0044: Layer::GroundUnit/FlyingUnit band nodes exist but no pass writes them (chains/units-live-wave-runtime.md: 'Units are not rendered yet'). The reference frames show the player mech."
+   "note": "Prerequisite for PAR-0044: Layer::GroundUnit/FlyingUnit band nodes exist but no pass writes them (chains/units-live-wave-runtime.md: 'Units are not rendered yet'). The reference frames show the player mech.",
+   "claim": {
+    "by": "godot-walk-s2",
+    "at": "2026-10-09T09:27:44Z",
+    "prior_status": "seeded",
+    "note": "implemented inside PAR-0044 fix round 1"
+   }
   }
  ]
 }
