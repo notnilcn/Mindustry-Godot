@@ -1186,6 +1186,11 @@ those paths no longer exist, but the workarounds still apply.
   `tile_to_screen(129,55)` (the core); ground-truth rows come from the map
   file (core rows 54-56, copper rows 41-53). Run:
   `runs/20261009-085712-PAR-0037/`.
+- `tools/godot.sh` resolves only `$GODOT_BIN` -> `godot4` -> `godot4-mono`;
+  this host ships the binary as `~/.local/bin/godot`, so the headless
+  import/parse gate needs `GODOT_BIN=$HOME/.local/bin/godot bash tools/godot.sh
+  --headless --editor --quit --path client` (plain `tools/godot.sh` exits with
+  "no Godot binary found"). Used 2026-10-09 for the round-4 HUD scene changes.
 - The planet dialog sector panel exposes raw bundle markup in
   `RichTextLabel.text` (`[scarlet]Under attack!`,
   `[red]:warning:[accent] Sector currently under attack...`) and renders it

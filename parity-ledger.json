@@ -1,6 +1,6 @@
 {
  "schema": "mindustry-godot/parity-ledger@2",
- "updated": "2026-10-09T09:21:35Z",
+ "updated": "2026-10-09T09:26:40Z",
  "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction chains. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
  "focus": {
   "kind": "area",
@@ -8892,7 +8892,7 @@
    "parent": "PAR-0019",
    "status": "in-progress",
    "chain": "chains/java-ref-ground-zero-tutorial.md",
-   "updated": "2026-10-09T09:21:35Z",
+   "updated": "2026-10-09T09:26:40Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
     "to": "resumed Ground Zero tutorial (objective 0) via the planet page's Go",
@@ -9076,66 +9076,60 @@
       "size_match": true
      },
      "note": "World y-flip fix applied and live: orientation now matches Java (copper below the core) and matched snow patches agree within ~2/255; residual is HUD fragment layout (objective panel, hint box, prompt, block-info, minimap, icon bar)."
+    },
+    "round4": {
+     "godot_frame": "runs/20261009-085712-PAR-0037/godot/step-08-resumed-r4.png",
+     "diff": "runs/20261009-085712-PAR-0037/diff/step-08-resume-r4.json",
+     "metrics": {
+      "changed_fraction": 0.69492,
+      "mean_abs_rgb": [
+       59.5,
+       57.24,
+       53.68
+      ],
+      "coarse_layout_max_channel_mean": 49.38,
+      "palette_distance": 0.3003,
+      "size_match": true
+     },
+     "note": "HUD layout round: status panel top-left with wavepane + hint box left-aligned landed; residual = placement palette box, corner minimap, block-info panel, objective text format."
     }
    },
    "fix": {
     "status": "godot-open",
     "plan": {
-     "round": 4,
+     "round": 5,
      "done": [
-      "Round 3 (working tree, uncommitted until the leg passes): MindCamera2D::process and MindRender::set_camera_pose now write set_zoom(Vector2::new(zoom, -zoom)) - the Java/Arc y-up projection. Live leg (pid 110974, editor 109804): zoom {x:4,y:-4}, copper tile (132,48) maps BELOW the core (129,55) (704,516 vs 608,292), matching Java; screen_to_tile(tile_to_screen(100,100)) round-trips, so input stays consistent.",
-      "Round-3 metrics improved: changed_fraction 0.70779 (was 0.71862), mean_abs_rgb [63.54,61.95,58.58] (was [70.51,71.62,72.33]), coarse_layout max 54.89 (was 69.04), palette_distance 0.3242 (was 0.3953).",
-      "With the world flipped and the camera aligned, matched snow patches now agree: Java [229.5,235.7,241.9] vs Godot [231.6,237.7,243.6] (~2/255). The earlier 'palette gap' (161 vs 192) was the mirrored/un-aligned world, not a colour pipeline bug."
+      "Round 4 (working tree): HUD fragment layout parity in GDScript/scenes - hud_fragment.tscn WavesStack moved to top-left (4,4, width 329) and the Status label draws on the atlas `wavepane` ninepatch (StyleBoxTexture, splits 12) with left-aligned text; hints_fragment.tscn Panel moved from screen-centre to the left edge, vertically centred, 412 wide, Skip 112x40. Godot headless import/parse gate green (`GODOT_BIN=~/.local/bin/godot bash tools/godot.sh --headless --editor --quit --path client`).",
+      "Leg re-run (pid 118865): status rect (4,4,329,76) top-left with wavepane, hint box at the left edge, the core now visible at the centre. Metrics improved: changed_fraction 0.69492 (was 0.70779), mean_abs [59.5,57.24,53.68] (was [63.54,61.95,58.58]), coarse 49.38 (was 54.89), palette 0.3003 (was 0.3242)."
      ],
-     "seam": "The residual diff is HUD layout (heatmap diff/step-06-resume-r3-heatmap.png): Java draws the objective/status panel top-left on the wavepane texture ('Obtain: 0/15 Copper' + icon), a compact hint box at the left edge with Skip beneath it, the prompt bar centre ('Move near the copper ore...'), the block-info panel at the right ('Copper'), the corner minimap top-right and the bottom-right icon bar. The port draws a single centred status label clipped at y=0 ('Obtain: copper'), a large centred hints panel covering the core, no corner minimap (HudGroup.minimap is the fullscreen overlay, hidden), and a dark placement/block-info box at (512,388,640,260) covering the copper field.",
+     "seam": "Remaining frame diff, largest first: (a) the placement palette Panel (HudGroup/placement, rect 512,388,640,260) renders always and covers the bottom-right world - Java's block grid is a collapsed pane (PlacementFragment blocksSelect, Java PlacementFragment.java:679) with only the bottom-right icon bar visible; (b) no corner minimap top-right (Java HudFragment 'minimap/position' -> `t.top().right()`); the port's MinimapBox (140x140 + Position) is anchored bottom-right and hidden under the palette; (c) no block-info/hover panel at the right ('Copper'); (d) status text format: Java objective.item = '[accent]Obtain: [][lightgray]{0}[]/{1}\\n{2}[lightgray]{3}' with (team item count, amount, emoji, localized name); mind-core map_objectives.rs objective_text passes 2 args (item name, amount) so the frame shows 'Obtain: copper/15'. Live counts need the RuntimeObjectiveEnv stubs wired (team_has_item/core_item_count return 0).",
      "files": [
-      "client/ui/fragments/hints_fragment.gd + client/scenes/ui/fragments/hints_fragment.tscn (panel position/size: Java left edge, compact)",
-      "client/ui/fragments/hud_fragment.gd + hud_fragment.tscn (status table top-left on the wavepane style; wave/core-item widgets)",
-      "corner minimap: HudFragment's minimap element is absent (only the fullscreen overlay fragment exists)",
-      "client/ui/fragments/placement_fragment.gd (dark box covering the world; block-info panel right side missing)"
+      "client/scenes/ui/ui_root.tscn + placement_fragment(.gd/.tscn): collapse the palette by default; open on block-select/category input; update chains/placement-picker-audit.md to open it explicitly",
+      "client/scenes/ui/fragments/hud_fragment.tscn: MinimapBox anchors bottom-right -> top-right (Java HudFragment minimap/position top().right())",
+      "block-info/hover panel (PlacementFragment 'hover info box') - wire the display rows once MindHud hover data exists",
+      "client/rust/mind-core/src/game/map_objectives.rs: objective_text 4-arg formats for Item/CoreItem/BuildCount + ObjectiveLocale count/emoji/name hooks; wire RuntimeObjectiveEnv counts"
      ],
-     "approach": "Round 4: HUD fragment layout parity in GDScript/scenes, one fragment per step with a captured pair each; Java HudFragment.makeStatusTable is the reference for the status panel (top-left, wavepane background). No Rust unless a facade property is missing.",
+     "approach": "Round 5: (1) placement palette collapsed by default with an explicit open path (keeps the audit flow working and removes the 640x260 dark block); (2) MinimapBox to top-right and check the widget renders terrain; (3) objective text format fix with the HUD-side counts if cheap, else file the count wiring as its own prerequisite.",
      "prerequisites": [
-      "Camera follow target differs by ~1 tile: port camera settles at (1028,436) vs Java viewpos (1032.0,440.3); the core renders at (608,292) vs Java (576,324). Check the follow target (player unit spawn position) after the HUD work; it contributes a constant ~16-32 px shift.",
-      "Do not treat the round-1/round-3 code fixes as landed: both live in the working tree only; they need a passing leg before the 'Fixes PAR-0037' commit."
+      "Placement-picker-audit chain (verified, last_verified 2026-10-08 986cda3) assumes the palette is visible right after launch; collapsing it requires updating that chain with the open step and re-running it before the change counts as settled.",
+      "The placement palette visibility is a port design simplification, not a Java behavior; parity requires the collapsed state at launch."
      ],
-     "narrow_check": "GDScript/scene work: bash tools/godot.sh --headless --editor --quit --path client (import/parse gate) + the Godot leg itself",
+     "narrow_check": "GDScript/scenes: GODOT_BIN=~/.local/bin/godot bash tools/godot.sh --headless --editor --quit --path client; Rust: cargo test -p mind-core game && cargo clippy -p mind-gdext --all-targets -- -D warnings && tools/build.sh",
      "evidence": {
-      "godot_frame_round3": "runs/20261009-085712-PAR-0037/godot/step-06-resumed-r3.png",
-      "godot_fork_round3": "runs/20261009-085712-PAR-0037/godot/step-05-fork-r3.png",
-      "diff_round3": "runs/20261009-085712-PAR-0037/diff/step-06-resume-r3.json",
-      "heatmap_round3": "runs/20261009-085712-PAR-0037/diff/step-06-resume-r3-heatmap.png",
-      "snow_patch_match": {
-       "java": [
-        229.5,
-        235.7,
-        241.9
-       ],
-       "godot": [
-        231.6,
-        237.7,
-        243.6
-       ]
-      },
-      "flip_probe": {
-       "zoom": "4,-4",
-       "ore_screen": [
-        704,
-        516
-       ],
-       "core_screen": [
-        608,
-        292
-       ],
-       "roundtrip": [
-        100,
-        100
-       ]
-      }
+      "godot_frame_round4": "runs/20261009-085712-PAR-0037/godot/step-08-resumed-r4.png",
+      "godot_fork_round4": "runs/20261009-085712-PAR-0037/godot/step-07-fork-r4.png",
+      "diff_round4": "runs/20261009-085712-PAR-0037/diff/step-08-resume-r4.json",
+      "heatmap_round4": "runs/20261009-085712-PAR-0037/diff/step-08-resume-r4-heatmap.png",
+      "status_rect": [
+       4,
+       4,
+       329,
+       76
+      ]
      }
     },
     "commit": null,
-    "summary": "round 3 flipped the rendered y axis (Java y-up parity); round 4 targets HUD fragment layout",
+    "summary": "round 4 landed status/hints layout; round 5 targets the placement palette collapse, corner minimap and objective text format",
     "run": "runs/20261009-085712-PAR-0037/"
    },
    "verified": null,
