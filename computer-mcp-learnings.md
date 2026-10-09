@@ -443,3 +443,23 @@ displays); those paths no longer exist, but the workarounds still apply.
   tree view holds scroll focus), so pan instead. Node hover shows the info
   panel (`hovered()` sets `hoverNode`); clicking a selectable+affordable locked
   node spends and unlocks immediately on desktop (:483).
+
+## 2026-10-09 — soak R07 teardown: auto-pause on focus loss; off-island wandering
+
+- The Java client auto-paused (`< Paused >` banner, top-center) when a terminal
+  window took focus at ~17:48; keyboard input sent while unfocused is dropped
+  (space did not unpause). Check for the banner and re-raise/click the game
+  window before suspecting dropped keys; a paused client is a safe teardown
+  point. Run: `runs/20261009-065416-ref-ground-zero/java/r07-06-back.png` vs
+  `r07-07-unpaused.png`.
+- WASD exploration walked the player mech off the playable island: the view
+  turns black (void), the minimap player marker sits outside the landmass blob,
+  and the mech stops taking movement input there
+  (`r07-04-south.png`, `r07-05-south2.png`, `r07-06-back.png`). Explore with
+  short holds and watch the minimap; the R07 lead walk is ~10-12 tiles **west**
+  of the core (lead tiles x108-113, y40-50), not north.
+- Teardown: killed the recorded JVM pid (18498; never `pkill -f`) and restored
+  `parity-java-home/.local/share/Mindustry/saves/sector-serpulo-170.msav` from
+  the R06 checkpoint so the next soak resumes from the good state; the sector
+  map was parsed offline with `runs/20261009-065416-ref-ground-zero/tools/parse_msav.py`
+  (ores/blocks/floors) to locate the lead deposit without in-game wandering.

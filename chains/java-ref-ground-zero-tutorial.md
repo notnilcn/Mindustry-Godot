@@ -305,6 +305,31 @@ at 17:36) crossed 100 ~40 s after the second drill started delivering, and the
 panel advanced to `Move into Core: 0/25 Lead` (objective 9). Autosave copied to
 `checkpoints/r06-sector-serpulo-170.msav`.
 
+## R07 — lead reconnaissance notes (in progress; soak stopped 2026-10-09)
+
+The lead objective (`Move into Core: 0/25 Lead`) is active after R06. Lead
+deposit located from the map file (`tools/parse_msav.py` in the run dir parses
+`groundZero.msav`): `ore-lead` tiles **x 108-113, y 40-50**; copper patch
+x 124-140, y 44-53; core ~tile (129,51). Calibration: image (832,412) = tile
+(137,53) at 32 px/tile, screen = image + (50,98), so the lead patch sits ~16
+tiles **west** of the core.
+
+Intended route: walk **west only** ~10-12 tiles (watch the minimap), place a
+drill on the lead (~tiles 110-113,44-47), run a conveyor row east into the
+core's west side, wait for 25 lead.
+
+What went wrong: the first exploration hold was W (2.5 s), which took the mech
+to the map's north edge; the correction walk then pushed it south off the
+playable island into the black void (minimap marker below the landmass blob)
+and it stopped taking movement input. It then ignored keys entirely because the
+client had auto-paused (`< Paused >` banner) when a terminal window took focus.
+
+Session end (operator stop): client killed (pid 18498); the live sector save was
+rolled back to `checkpoints/r06-sector-serpulo-170.msav` so the next soak
+resumes at the lead objective with the mech at the core (see `run.json`
+`session_end`). Resume: chain step 0 → normalize → Play > Campaign > Ground
+Zero hex > Go (R01 flow) → this row.
+
 ## Wait marks
 
 | after | wait | why |
