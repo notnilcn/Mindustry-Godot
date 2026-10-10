@@ -1753,3 +1753,14 @@ those paths no longer exist, but the workarounds still apply.
   and call `get_viewport().push_input(down/up)` in one eval — worked every time
   when `godot_input` press/release did not (menu settle race).
 - Run dir: `runs/20261011-085604-PAR-0010/`.
+
+## 2026-10-11 — PAR-0011: execute-tool JS syntax error in a long chained script
+
+- Symptom: a single `execute` call with a ~75-line fast-forward chain (nested
+  template literals for the push_input helpers + long single-quoted eval bodies)
+  failed with `Unexpected token (62:545)` before any tool ran; the same chain split
+  across two calls worked unchanged.
+- Workaround: keep execute chains short and build eval code strings by
+  concatenation (`"..." + cx + "..."`) instead of embedding long template literals
+  and mixed quotes in one helper.
+- Run dir: `runs/20261011-092614-PAR-0011/`.

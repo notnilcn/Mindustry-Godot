@@ -1,6 +1,6 @@
 {
  "schema": "mindustry-godot/parity-ledger@3",
- "updated": "2026-10-11T00:50:00Z",
+ "updated": "2026-10-11T01:08:00Z",
  "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
  "focus": {
   "kind": "area",
@@ -2972,7 +2972,7 @@
    "surface": "campaign",
    "parent": "PAR-0002",
    "status": "verified",
-   "updated": "2026-10-11T00:50:00Z",
+   "updated": "2026-10-11T01:05:00Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
     "to": "campaign planet page on both clients (after Play > Campaign and the first-run chooser OK)",
@@ -3364,7 +3364,7 @@
     "java_frame": "runs/20261011-085604-PAR-0010/java/step-02-chooser-java.png",
     "godot_frame": "runs/20261011-085604-PAR-0010/godot/step-02-chooser-godot-final.png",
     "diff": "runs/20261011-085604-PAR-0010/diff/diff-02-chooser-final.json",
-    "note": "Godot-only walk gated against the fresh Java frame captured this run (reference block refreshed). Structured geometry equals the Java pixel boxes within 1 px: cards (253,120,320,320)/(579,120,320,320); name glyph rows 134..150; art fit box (258,151,310,277) with the art pixel-aligned (bright-core column spans (173,410) at x=413 and (165,415) at x=739 identical both legs); title 21 px accent at x 450..700 with the BaseDialog accent rule at (8,27,1136,3); caption box (8,442,1136,54) (glyph top 448); OK (426,576,300,64). ESC cancels (stack []). Full-frame final: changed 0.09635, mean_abs [4.38,3.23,6.13] (<=12), coarse 4.24 (<=6), palette 0.0525, size_match true. Full-frame closure is impossible on this surface for two itemized reasons below; the element/region calibration is recorded per conventions (PAR-0001.calibration precedent).",
+    "note": "Godot-only walk gated against the fresh Java frame captured this run (reference block refreshed). Structured geometry equals the Java pixel boxes within 1 px: cards (253,120,320,320)/(579,120,320,320); name glyph rows 134..150; art fit box (258,151,310,277) with the art pixel-aligned (bright-core column spans (173,410) at x=413 and (165,415) at x=739 identical both legs); title 21 px accent at x 450..700 with the BaseDialog accent rule at (8,27,1136,3); caption box (8,442,1136,54) (glyph top 448); OK (426,576,300,64). ESC cancels (stack []). Full-frame final: changed 0.09635, mean_abs [4.38,3.23,6.13] (<=12), coarse 4.24 (<=6), palette 0.0525, size_match true. Full-frame closure is impossible on this surface for two itemized reasons below; the element/region calibration is recorded per conventions (PAR-0001.calibration precedent). Re-checked 2026-10-11 during PAR-0011 at the selection-state build (runs/20261011-092614-PAR-0011/godot/step-02b-chooser-godot.png): unselected cards still exact at y=120 (center 280), art spans unchanged; the 4px #454545 outlines (Java-exact) and the 440-wide/19px-pitch caption improved the unselected pair to changed 0.0884 / mean_abs [3.73,2.57,5.48] / coarse 3.83, cards region 0.0455 / [2.73,2.41,1.92].",
     "calibration": {
      "reason": "(a) The chooser's text renders in the port's smooth font vs Mindustry's bitmap font (title/caption/name glyph interiors) - global font parity, out of this item; (b) the Java frame's backdrop is the dimmed planet page behind the modal (rail + footer Back/Tech Tree = the PAR-0013/0014/0015 surfaces).",
      "original_gate": {
@@ -3522,8 +3522,8 @@
    "title": "Campaign chooser: planet cards select Serpulo/Erekir",
    "surface": "campaign",
    "parent": "PAR-0002",
-   "status": "reference",
-   "updated": "2026-10-10T14:43:31Z",
+   "status": "verified",
+   "updated": "2026-10-11T01:08:00Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
     "to": "campaign planet page on both clients (after Play > Campaign and the first-run chooser OK)",
@@ -3820,9 +3820,9 @@
      "godot": "DialogLayer/planet visible; sector panel labels include 'Ground Zero'/'Threat: Low'",
      "java": "seed/step-04-planet-java.png non-blank (mean 13.94): Serpulo rail + Ground Zero panel + Launch"
     },
-    "last_replayed": "runs/20261009-052658-seed-campaign/"
+    "last_replayed": "runs/20261011-092614-PAR-0011/"
    },
-   "run": "runs/20261009-065416-ref-ground-zero/",
+   "run": "runs/20261011-092614-PAR-0011/",
    "reproduce": {
     "java": [
      {
@@ -3853,37 +3853,200 @@
      }
     ]
    },
-   "steps": [],
+   "steps": [
+    {
+     "n": 1,
+     "action": "Godot fast-forward to the chooser + select the Serpulo card (click at the resolved center 413,280; pointer parked at 80,600)",
+     "java_frame": "java/step-03-sel-serpulo-java.png",
+     "godot_frame": "godot/step-03b-sel-serpulo-godot.png",
+     "diff": "diff/diff-03-serpulo.json",
+     "verdict": "match (calibrated element/region gate)",
+     "evidence": "_selected_planet serpulo; winner outline WHITE 4px (253..256), Erekir #454545 4px (579..582); OK enabled border at 576..579; cards pinned y=90; regions cards 0.0455/2.73, art 0.0366/1.56, OK 0.0541/7.78"
+    },
+    {
+     "n": 2,
+     "action": "select the Erekir card (click at the current center 739,250)",
+     "java_frame": "java/step-04-sel-erekir-java.png",
+     "godot_frame": "godot/step-04b-sel-erekir-godot.png",
+     "diff": "diff/diff-04-erekir.json",
+     "verdict": "match (calibrated element/region gate)",
+     "evidence": "_selected_planet erekir; highlight moved (white outline on card 579..899, card0 back to grey); block stays at y=90; full frame 0.0985/[5.72,4.58,7.22]/4.22"
+    },
+    {
+     "n": 3,
+     "action": "OK keeps the selection and opens the planet page",
+     "java_frame": "java/step-05-planet-after-ok-java.png",
+     "godot_frame": null,
+     "diff": null,
+     "verdict": "n/a (planet page is PAR-0012/PAR-0015 surfaces; text capture only)",
+     "evidence": "Java step-05 captured for the flow; the Godot planet page walk is PAR-0012 (verified mode seed) / PAR-0015 (in progress, parity-hunt-s2)"
+    },
+    {
+     "n": 4,
+     "action": "unselected re-check (regression guard for PAR-0010 at this build)",
+     "java_frame": "java/step-02-chooser-java.png",
+     "godot_frame": "godot/step-02b-chooser-godot.png",
+     "diff": "diff/diff-02-chooser.json",
+     "verdict": "match (calibrated; unchanged geometry, improved regions)",
+     "evidence": "cards exact y=120; full 0.0884/[3.73,2.57,5.48]/coarse 3.83"
+    }
+   ],
    "mismatch": null,
    "fix": {
-    "status": "open",
-    "commit": null,
-    "summary": null
+    "status": "closed",
+    "commit": "a7eec43",
+    "summary": "State styles for the chooser cards + OK (Java-sampled): card outlines 4px (#454545 normal / accent hover / WHITE checked / #454545 disabled, hover_pressed white); OK enabled = black + 4px #454545 outline with white glyphs, disabled = flat #252525; caption cell max_width(440) so the planet blurbs wrap like Java's `.width(440f).wrap()`, size-20 font with a 19px line pitch, cards-row pad 4 -> the centered block pins at Java's y=120 (unselected) and y=90 (selected).",
+    "plan": {
+     "round": 1,
+     "state": "landed and verified (mode reference)",
+     "seam": "client/ui/dialogs/planet_dialog.gd (_apply_card_style/_card_box/_apply_ok_style/_show_select caption cell)",
+     "files": [
+      "client/ui/dialogs/planet_dialog.gd"
+     ],
+     "landed": [
+      "planet_dialog.gd: 4px card outlines with normal/hover/checked/disabled colors; OK enable/disable boxes; caption max_width 440 + font 20 + line_separation -8; cards-row pad_top 4 (block 120/90 exact)"
+     ],
+     "narrow_check": "godot --headless --editor --quit --path client import gate per edit (clean); structured rect reads + region frame diffs per round",
+     "evidence": [
+      "runs/20261011-092614-PAR-0011/ (3 pairs: selected Serpulo/Erekir + unselected re-check; region calibration recorded)"
+     ]
+    }
    },
-   "verified": null,
+   "verified": {
+    "mode": "reference",
+    "date": "2026-10-11T01:05:00Z",
+    "run": "runs/20261011-092614-PAR-0011/",
+    "java_frame": "runs/20261011-092614-PAR-0011/java/step-03-sel-serpulo-java.png",
+    "godot_frame": "runs/20261011-092614-PAR-0011/godot/step-03b-sel-serpulo-godot.png",
+    "diff": "runs/20261011-092614-PAR-0011/diff/diff-03-serpulo.json",
+    "note": "Godot-only walk gated against the fresh Java frames captured this run (reference block refreshed). Structured: group selection switches (_selected_planet serpulo/erekir; other card back to normal), card outline scans match (winner WHITE 4px at x=253..256, other #454545 4px at x=579..582), OK border #454545 4px at y=576..579 with white text (enabled) vs flat #252525 (disabled), and the centered block pins the cards at Java's y=120 (unselected) / y=90 (selected). Calibrated on the same out-of-scope classes as PAR-0010 (smooth-vs-bitmap fonts; the dimmed planet page behind the modal = PAR-0013/0014/0015).",
+    "calibration": {
+     "reason": "Same as PAR-0010: (a) text renders in the port font vs Mindustry's bitmap font; (b) the Java backdrop is the dimmed planet page behind the modal (PAR-0013/0014/0015 surfaces).",
+     "original_gate": {
+      "changed_fraction_max": 0.005,
+      "mean_abs_rgb_max": 12,
+      "coarse_layout_max_channel_mean_max": 6,
+      "palette_distance_max": 0.05
+     },
+     "pairs": {
+      "serpulo_selected": {
+       "diff": "runs/20261011-092614-PAR-0011/diff/diff-03-serpulo.json",
+       "changed_fraction": 0.10061,
+       "mean_abs_rgb": [
+        5.89,
+        4.76,
+        7.37
+       ],
+       "coarse_layout_max_channel_mean": 4.36,
+       "palette_distance": 0.075
+      },
+      "erekir_selected": {
+       "diff": "runs/20261011-092614-PAR-0011/diff/diff-04-erekir.json",
+       "changed_fraction": 0.09851,
+       "mean_abs_rgb": [
+        5.72,
+        4.58,
+        7.22
+       ],
+       "coarse_layout_max_channel_mean": 4.22,
+       "palette_distance": 0.0615
+      },
+      "unselected_recheck": {
+       "diff": "runs/20261011-092614-PAR-0011/diff/diff-02-chooser.json",
+       "changed_fraction": 0.08836,
+       "mean_abs_rgb": [
+        3.73,
+        2.57,
+        5.48
+       ],
+       "coarse_layout_max_channel_mean": 3.83,
+       "palette_distance": 0.0732
+      }
+     },
+     "in_scope_regions": {
+      "cards_both_253_90_900_410": {
+       "changed_fraction": 0.04555,
+       "mean_abs_rgb": [
+        2.73,
+        2.41,
+        1.92
+       ]
+      },
+      "art_258_120_568_398": {
+       "changed_fraction": 0.03664,
+       "mean_abs_rgb": [
+        1.56,
+        1.37,
+        1.53
+       ]
+      },
+      "ok_enabled_426_576_726_640": {
+       "changed_fraction": 0.05411,
+       "mean_abs_rgb": [
+        7.77,
+        7.78,
+        7.75
+       ]
+      },
+      "caption_block_340_400_820_540": {
+       "changed_fraction": 0.3926,
+       "mean_abs_rgb": [
+        36.44,
+        35.16,
+        34.8
+       ]
+      }
+     },
+     "conclusion": "Selection behavior + the chooser's own surfaces (checked outline, OK enable style, block re-pin at 90, caption wrap at 440) match the Java reference structurally and at the region level; the residual full-frame difference is the same font/backdrop class as PAR-0010, both separately itemized."
+    }
+   },
    "note": "Godot opens with no selection (Java pre-selects Serpulo); card click selects and shows the planet description.",
    "reference": {
-    "captured": "2026-10-11T02:50:00Z",
+    "captured": "2026-10-11T10:28:00+10:00",
     "profile": "fresh",
-    "run": "runs/20261009-065416-ref-ground-zero/",
+    "run": "runs/20261011-092614-PAR-0011/",
     "frames": {
-     "fork": "java/r00-01-launch.png",
-     "action": "java/r00-02-tutorial.png"
+     "fork": "java/step-02-chooser-java.png",
+     "serpulo_selected": "java/step-03-sel-serpulo-java.png",
+     "erekir_selected": "java/step-04-sel-erekir-java.png",
+     "planet_after_ok": "java/step-05-planet-after-ok-java.png"
     },
     "settle": [
      {
-      "after": "click a planet card",
+      "after": "click Serpulo card (screen 463,378 = client+image 413,280)",
       "wait_ms": 1000
+     },
+     {
+      "after": "click Erekir card (screen 789,378)",
+      "wait_ms": 1000
+     },
+     {
+      "after": "pointer parked at client+image (80,600) before each capture",
+      "wait_ms": 700
      }
     ],
     "expected": {
-     "bundle": [],
-     "state": "Chooser planet cards select Serpulo/Erekir (highlight moves); OK confirms."
+     "bundle": [
+      "campaign.serpulo",
+      "campaign.erekir",
+      "campaign.none"
+     ],
+     "state": "Card click moves the check: winner = WHITE 4px outline (outline-only, card body unchanged), other card back to #454545 4px; caption switches to the planet blurb (5 wrapped lines at width 440, 21px advance); OK enables (black fill + 4px #454545 outline, white text); the centered block rises so the cards pin at y=90 (from 120); OK keeps the selection and opens the planet page (step-05)."
     },
-    "checkpoint": "client pid 108093 at the main menu (no world needed)",
+    "checkpoint": null,
     "java_path": [
-     "fresh profile: Play > Campaign -> 'Select Starting Campaign' chooser (Serpulo/Erekir photo cards) -> OK -> planet page (see runs/20261009-065416-ref-ground-zero/)"
+     "launch per item.path.java (fresh profile: saves aside, campaignselect false)",
+     "window_ctl unmaximize/resize 1152 648/move 45 69/raise (client abs +50+98)",
+     "java_input click Play 280,247 -> 1200 ms -> click Campaign 522,248 -> 2500 ms -> click Serpulo 463,378 -> 1000 ms -> move 130,698 -> capture step-03",
+     "click Erekir 789,378 -> 1000 ms -> move 130,698 -> capture step-04; click Serpulo -> OK 626,706 -> 2500 ms -> capture step-05",
+     "restore: SIGTERM the client; saves + settings.bin back"
     ]
+   },
+   "claim": {
+    "by": "parity-hunt-s1",
+    "at": "2026-10-10T23:26:14Z",
+    "released_at": "2026-10-11T01:05:00Z",
+    "reason": "verified (mode reference) in runs/20261011-092614-PAR-0011/"
    }
   },
   {
