@@ -17,8 +17,10 @@ extends MindDialog
 ## Emitted when a sector is launched (kept for parity with the M5 seam).
 signal sector_activated(planet: String, sector: int)
 
-const CARD_SIZE := Vector2(320.0, 300.0)
+const CARD_SIZE := Vector2(320.0, 320.0)
 const DISC_SIZE := 170.0
+## Java card outline (`Styles.togglet`, sampled from the reference frame pair).
+const CARD_OUTLINE := Color(0.27, 0.27, 0.27)
 
 var _root: MindTable = null
 var _selected_planet: String = ""
@@ -87,19 +89,30 @@ func _clear_root() -> void:
 # --- Select Starting Campaign -------------------------------------------------
 
 ## `PlanetDialog` first-run chooser: `@campaign.select` with the two campaign
-## planets as mutually exclusive toggle cards and an `@ok` button.
+## planets as mutually exclusive toggle cards and an `@ok` button. The cards
+## block (cards + caption) is vertically centered in the dialog body like the
+## Java BaseDialog's centered `cont` table (cards at y=120 at 648 px height).
 func _show_select() -> void:
-	set_title_text(_t("@campaign.select"))
+	set_title_key("@campaign.select")
 	_clear_root()
 	_set_planet_view_active(false)
+	_set_body_centered(true)
 	refresh_campaign_views()
 
 	var choices := _campaign_planets()
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
-	row.add_theme_constant_override("separation", 8)
-	_root.add(row).grow_x_axis().set_align(0).pad(6)
+	row.add_theme_constant_override("separation", 6)
+	# Java title glyphs start at y=6 with the fullDialog top margin at 0; an 11 px
+	# top pad (body is centered) lands the cards at Java's y=120.
+	_root.add(row).grow_x_axis().set_align(0).set_pad_top(11)
 	_root.row()
+
+	# Java's BaseDialog title renders at ~23 px glyphs (blocky font); the port's
+	# default 18 px title is visibly smaller. 21 matches the reference width
+	# (254 px) with glyph height within 2 px.
+	if title_label != null:
+		title_label.add_theme_font_size_override("font_size", 21)
 
 	var group := ButtonGroup.new()
 	group.allow_unpress = true
@@ -107,6 +120,10 @@ func _show_select() -> void:
 	caption.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	caption.custom_minimum_size.x = 440.0
 	caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	# Java `Styles.outlineLabel` line advance is 22 px; the port font at the
+	# default size advances 24, so trim the RichTextLabel line separation.
+	caption.add_theme_font_size_override("normal_font_size", 20)
+	caption.add_theme_constant_override("line_separation", -2)
 
 	for planet_variant in choices:
 		var planet: Dictionary = planet_variant
@@ -123,13 +140,78 @@ func _show_select() -> void:
 		card.button_pressed = str(planet.get("name", "")) == _selected_planet
 		row.add_child(card)
 
-	_root.add(caption).grow_x_axis().set_align(0).pad(8)
+	_root.add(caption).grow_x_axis().set_align(0).set_pad_top(2)
 	_root.row()
 
 	clear_buttons()
-	_ok_button = add_button(_t("@ok"), _on_select_ok, "ok", 300.0)
+	# Java: a single `@ok` `.size(300f, 64f)`; the dialog's `@back` was a
+	# Godot-only addition (the Java corner `@back`/`@techtree` belong to the
+	# planet page behind the modal — PAR-0013/0014).
+	_ok_button = add_button(_t("@ok"), _on_select_ok, "ok")
+	_ok_button.custom_minimum_size = Vector2(300.0, 64.0)
+	_apply_ok_style(_ok_button)
+	_reflow_ok_row(_ok_button)
 	_ok_button.disabled = _selected_planet.is_empty()
-	add_button(_t("@back"), _close, "left")
+
+
+## Java `Button` draws the icon at the left edge and the label centered in the
+## remaining width; the port's shared icon row centers icon+label as one group.
+func _reflow_ok_row(button: Button) -> void:
+	if button.get_child_count() == 0:
+		return
+	var row := button.get_child(0) as HBoxContainer
+	if row == null or row.get_child_count() != 2:
+		return
+	# Java's check glyph renders ~36 px; the shared row uses the 18 px default.
+	var icon := row.get_child(0)
+	if icon is Label:
+		icon.add_theme_font_size_override("font_size", 36)
+	row.alignment = BoxContainer.ALIGNMENT_BEGIN
+	var left := Control.new()
+	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	left.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(left)
+	row.move_child(left, 1)
+	var right := Control.new()
+	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(right)
+
+
+## Java centers the `cont` table between the title and the button bar; the port
+## body is a ScrollContainer, so disable its vertical scroll (which stretches
+## the content column) and center the column for the chooser alone.
+func _set_body_centered(centered: bool) -> void:
+	if body != null:
+		body.vertical_scroll_mode = (
+			ScrollContainer.SCROLL_MODE_DISABLED if centered else ScrollContainer.SCROLL_MODE_AUTO
+		)
+	if cont != null:
+		cont.alignment = (
+			BoxContainer.ALIGNMENT_CENTER if centered else BoxContainer.ALIGNMENT_BEGIN
+		)
+		# A ScrollContainer only stretches its child when the child expands;
+		# without this the content column keeps its minimum height and the
+		# alignment has no free space to center in.
+		cont.size_flags_vertical = (
+			Control.SIZE_EXPAND_FILL if centered else Control.SIZE_FILL
+		)
+
+
+## Java `Styles.button` OK look at the reference frame: #252525 fill, 6 px
+## corners (the M0 theme flat box is square and darker). Scoped to the chooser
+## button; a theme-wide arc-Button style is a separate surface.
+func _apply_ok_style(button: Button) -> void:
+	for state in ["normal", "hover", "pressed", "disabled"]:
+		var box := StyleBoxFlat.new()
+		box.bg_color = Color(0.145, 0.145, 0.145)
+		box.corner_radius_top_left = 6
+		box.corner_radius_top_right = 6
+		box.corner_radius_bottom_left = 6
+		box.corner_radius_bottom_right = 6
+		box.content_margin_left = 12.0
+		box.content_margin_right = 12.0
+		button.add_theme_stylebox_override(state, box)
 
 
 ## The two campaign starting choices in reference order (`PlanetDialog` lists
@@ -151,27 +233,42 @@ func _make_planet_card(planet: Dictionary) -> Button:
 	var card := MindWidgets.button("")
 	card.toggle_mode = true
 	card.custom_minimum_size = CARD_SIZE
-	var column := VBoxContainer.new()
-	column.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	column.alignment = BoxContainer.ALIGNMENT_CENTER
-	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	card.add_child(column)
-	var name_label := MindWidgets.label(_localized_planet(planet))
-	name_label.add_theme_color_override("default_color", MindStyles.ACCENT)
-	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	column.add_child(name_label)
+	_apply_card_style(card)
 	var texture := _planet_texture(planet)
 	if texture != null:
+		# Java: `.image(...).grow().scaling(Scaling.fit)` below the name row.
+		# Fit box measured from the reference frame pair: (card+5, card+31)
+		# 310x277 -> art 277x277 at (card+5+16, card+31); the name row overlaps
+		# the texture's transparent top margin.
 		var image := TextureRect.new()
 		image.texture = texture
-		image.custom_minimum_size = Vector2(DISC_SIZE, DISC_SIZE)
+		image.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		image.offset_left = 5.0
+		image.offset_top = 31.0
+		image.offset_right = -5.0
+		image.offset_bottom = -12.0
 		image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		image.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 		image.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		column.add_child(image)
-	else:
+		card.add_child(image)
+	var column := VBoxContainer.new()
+	column.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# Name row only: glyphs at card+14 (Java 134..150 for a card at 120).
+	column.offset_left = 5.0
+	column.offset_top = 8.0
+	column.offset_right = -5.0
+	column.offset_bottom = -8.0
+	column.alignment = BoxContainer.ALIGNMENT_BEGIN
+	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_child(column)
+	var name_label := MindWidgets.label(_localized_planet(planet))
+	name_label.add_theme_color_override("default_color", MindStyles.ACCENT)
+	name_label.add_theme_font_size_override("normal_font_size", 21)
+	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	column.add_child(name_label)
+	if texture == null:
 		var disc := Panel.new()
 		disc.custom_minimum_size = Vector2(DISC_SIZE, DISC_SIZE)
 		disc.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
@@ -179,6 +276,36 @@ func _make_planet_card(planet: Dictionary) -> Button:
 		disc.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		column.add_child(disc)
 	return card
+
+
+## `Styles.togglet` card look (sampled from the Java reference frame): black
+## interior, 2 px grey outline, 4 px radius; the pressed (selected) state takes
+## the accent outline. The M0 theme's flat placeholders do not carry it.
+func _apply_card_style(card: Button) -> void:
+	card.add_theme_stylebox_override("normal", _card_box(CARD_OUTLINE))
+	card.add_theme_stylebox_override("hover", _card_box(CARD_OUTLINE))
+	card.add_theme_stylebox_override("pressed", _card_box(MindStyles.ACCENT))
+	card.add_theme_stylebox_override("hover_pressed", _card_box(MindStyles.ACCENT))
+	card.add_theme_stylebox_override("disabled", _card_box(CARD_OUTLINE))
+
+
+func _card_box(border: Color) -> StyleBoxFlat:
+	var box := StyleBoxFlat.new()
+	box.bg_color = Color.BLACK
+	box.border_width_left = 2
+	box.border_width_top = 2
+	box.border_width_right = 2
+	box.border_width_bottom = 2
+	box.border_color = border
+	box.corner_radius_top_left = 4
+	box.corner_radius_top_right = 4
+	box.corner_radius_bottom_left = 4
+	box.corner_radius_bottom_right = 4
+	box.content_margin_left = 5.0
+	box.content_margin_right = 5.0
+	box.content_margin_top = 6.0
+	box.content_margin_bottom = 5.0
+	return box
 
 
 ## Vendored `sprites/planets/<name>.png` (`PlanetDialog.planetTextures`), or
@@ -225,6 +352,7 @@ func _show_planet(planet_name: String) -> void:
 	set_title_text("")
 	_clear_root()
 	_set_planet_view_active(true)
+	_set_body_centered(false)
 	refresh_campaign_views(planet_name)
 
 	var view := _planet_view()
