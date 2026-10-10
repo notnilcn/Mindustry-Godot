@@ -11,7 +11,7 @@ preconditions:
   - Java window raised immediately before every capture; Godot bridge on 6970.
   - Godot launch flow: planet page → sector action (576,613) → Configure Loadout
     → Launch (367,503). Java: Launch (621,676) free-launches directly.
-tools: [computer-mcp_mouse_move, computer-mcp_click, window_ctl.py, capture_screen.py, frame_diff.py, godot_input, godot_exec, godot_screenshot, godot_log]
+tools: [java_input.py, window_ctl.py, capture_screen.py, frame_diff.py, godot_input, godot_exec, godot_screenshot, godot_log]
 last_verified: 2026-10-09 runs/20261009-052658-seed-campaign (iter 3 world-tutorial sweep, PAR-0028; iter 4 fresh relaunch + camera recenter, PAR-0031)
 ---
 
@@ -20,7 +20,7 @@ last_verified: 2026-10-09 runs/20261009-052658-seed-campaign (iter 3 world-tutor
 ## Steps
 
 1. Java free launch (from the fresh planet page, window +45+69):
-   `computer-mcp_mouse_move {x:621,y:676}` + `click` → loading bar → tutorial
+   `java_input.py move 621 676` + `java_input.py click 621 676 left` → loading bar → tutorial
    world. Current step-1 UI: objective `Obtain: 0/15 Copper`; prompts
    `Use [WASD] to move.` / `Move near the copper ore on the ground and click to
    begin mining.`; `Skip`.

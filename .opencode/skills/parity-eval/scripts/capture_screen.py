@@ -11,9 +11,8 @@ and, when that image is blank, retries the "Mindustry" window and records the
 fallback in the report.
 
 Used by the parity-eval skill for the Java reference leg, where no in-engine
-screenshot API exists. Requires mss (installed with computer-mcp); window
-capture additionally uses python-xlib and Pillow from the same venv. Shell
-invocations need `DISPLAY=:10`.
+screenshot API exists. Requires mss/Pillow/python-xlib from the parity-eval
+helper venv (bootstrap.sh; $PARITY_PY). Shell invocations need `DISPLAY=:10`.
 
 Examples:
     capture_screen.py --output run/java/step-01.png
@@ -34,7 +33,7 @@ try:
     import mss
     import mss.tools
 except ImportError:  # pragma: no cover - environment guard
-    sys.exit("mss is missing; run bootstrap.sh to create the MCP venv")
+    sys.exit("mss is missing; run bootstrap.sh to create the parity-eval helper venv")
 
 try:
     from PIL import Image

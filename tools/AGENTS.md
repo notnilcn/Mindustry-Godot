@@ -34,7 +34,7 @@
 - `associate.sh` mirrors `mind_core::platform::assoc`: a Linux `.desktop` under `$XDG_DATA_HOME` (plus `update-desktop-database` / `xdg-mime` when available). `MIND_EXE` overrides the exported binary path.
 `export.sh` resolves the Godot binary (`$GODOT_BIN` → `godot4`), derives the `<ver>.stable` templates directory (`~/.local/share/godot/export_templates/`; `GODOT_TEMPLATES_DIR` overrides), and fails with an install hint when it is absent. `--platform` selects the preset (`windows`→`Windows Desktop`), `--preset` overrides it, and `--out` selects the artifact path.
 - `mcp-smoke.sh` execs `python3 tools/mcp_smoke.py`, which spawns its own stdio `open-godot-mcp` server (bridge `ws://127.0.0.1:6970`) and drives `res://scenes/game.tscn` end-to-end. Flags: `--mcp-bin`, `--repo-root`, `--server-arg`, `--keep-running`, `--verbose`; `OPEN_GODOT_MCP_BIN` overrides binary discovery. Exits `0` pass, `1` assertion/tool failure, `2` bridge not connected.
-- `parity-session.sh` is the only script that manages displays: it starts Xvfb `:10` (matching the hardcoded computer-mcp `DISPLAY` in the global opencode config) and the editor bridge, with runtime state under the gitignored `.opencode/parity-session/`. It never starts the Java client — the parity-eval skill does that per run.
+- `parity-session.sh` is the only script that manages displays: it starts Xvfb `:10` (the Java-leg display; sessions N >= 2 use `:(9+N)`) and the editor bridge, with runtime state under the gitignored `.opencode/parity-session/`. It never starts the Java client — the parity-eval skill does that per run.
 
 ## Conventions
 

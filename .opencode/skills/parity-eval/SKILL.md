@@ -13,9 +13,14 @@ description: >-
 
 # Skill: parity-eval — Java↔Godot parity hunting
 
-One session drives both clients **concurrently on the same display** (`:10`).
-The Java reference is operated at the OS level with computer-mcp; the Godot
-client is driven through open-godot-mcp. Work comes in two iteration types:
+Work is **Godot-first**: an item with recorded reference evidence walks against
+it with only the Godot client (§3b); the Java reference is booted only to record
+or refresh that evidence (§2b), for an item without it, or for an
+operator-requested twin check. When both clients are up they share one display
+(`:10`). The Java reference is operated at the OS level with the shell helpers
+in `scripts/` (`java_input.py`, `window_ctl.py`, `capture_screen.py`); the
+Godot client is driven through open-godot-mcp. Work comes in two iteration
+types:
 
 - **Seed sweep** — explore both clients from a known state, record every
   interactive element and player action as a ledger item, and close the ones
@@ -38,7 +43,7 @@ record.
 | `parity-ledger.json` | Machine-readable queue + proof + coverage record: items with their embedded `path`/`reproduce`/`steps` sequences, `focus` scope, `seeding.last_sweep`/`frontier`. The single source for re-runnable calls (there is no `chains/` directory). Read before picking work; update after every step, mismatch, and fix. |
 | `WORKFLOW_PROMPTS.md` | Canonical `/goal` and `/loop` paste-text (scope + hiccup rules). Keep in sync with this skill; the skill wins on conflict. |
 | `runs/<stamp>-<item>/` | Run artifacts: `java/`, `godot/`, `diff/`, `run.json`, `report.md`. Gitignored. |
-| `computer-mcp-learnings.md`, `open-godot-mcp-learnings.md` | Friction + workarounds that are not reusable sequences. Append a dated entry when a run taught you something. |
+| `java-leg-learnings.md`, `open-godot-mcp-learnings.md` | Friction + workarounds that are not reusable sequences. Append a dated entry when a run taught you something. |
 | `parity/mcp_catalog.json`, `parity/scenario_catalog.json`, `parity/golden_manifest.json` | Committed oracle data (harness-owned). Do not duplicate it here. |
 | `.opencode/skills/playtest/SKILL.md` | Godot MCP mechanics. Read it first; this skill adds the Java leg, the seed sweep, the path fast-forward, the comparison gate, and the documentation contract. |
 
@@ -55,8 +60,8 @@ opened maximized, input that did not land, a blank capture, a stale editor
 binary, a bridge drop, a dialog path that moved. The moment it happens — before
 continuing the run — append a dated entry to the matching learnings file:
 
-- `computer-mcp-learnings.md` — Java leg, `window_ctl.py` / `capture_screen.py`,
-  X display, pynput workarounds.
+- `java-leg-learnings.md` — Java leg (`java_input.py` / `window_ctl.py` /
+  `capture_screen.py`), X display, pynput workarounds.
 - `open-godot-mcp-learnings.md` — Godot editor/bridge, `godot_*` calls, frame
   loop, screenshots, node/eval traps.
 
@@ -73,15 +78,16 @@ Run from the `Mindustry-Godot` repo root. Check once per session; stop and
 report a blocker instead of improvising system installs.
 
 ```bash
-MCP_PY="${MCP_PY:-$HOME/.local/share/uv/tools/computer-mcp/bin/python}"  # mss+PIL+python-xlib
+PARITY_PY="${PARITY_PY:-$HOME/.local/share/parity-eval/venv/bin/python}"  # mss+PIL+python-xlib+pynput
 ls ../Mindustry/desktop/build/libs/Mindustry.jar                        # Java reference
 tools/build.sh          # only when Rust sources changed; syncs scenarios
 tools/mcp-smoke.sh      # when the Godot bridge is in doubt
 ```
 
-`bootstrap.sh --check` still validates JDK 17, the MCP servers and the optional
-host tools. `tesseract` is **not** installed, so OCR is unavailable — compare
-text through structured state (see §5).
+`bootstrap.sh --check` validates JDK 17, open-godot-mcp, the Java-leg helper
+venv (`$PARITY_PY`) and the optional host tools. `tesseract` is **not**
+installed, so OCR is unavailable — compare text through structured state (see
+§5).
 
 ### SSH / no-display sessions
 
@@ -97,15 +103,16 @@ dir, and session-local MCP wiring (PATH shims plus an `opencode.json` project
 override); the ledger and `runs/` are symlinked to the main checkout so claims
 and reference frames are shared. Run it before a remote `/goal` or `/loop`
 session; the Java client is still launched by the session itself (below).
-`ssh` has no `DISPLAY`, and the computer-mcp MCP entry is pinned to
-`DISPLAY=:10.0` in the global opencode config — keep session 1 on `:10` (the
-other sessions override the MCP endpoints themselves).
+`ssh` has no `DISPLAY`: the Java-leg helpers take it per call, and
+`parity-session.sh --run` exports the session display into the shell, so every
+session can drive its own X server. Session 1 stays on `:10` because the shared
+reference frames in `runs/` were captured there.
 
 ### Launch both clients on `:10`
 
 Shell commands need `DISPLAY=:10` for any X tool (`capture_screen.py`,
-`window_ctl.py`, `xwininfo`); the MCP servers already have it from the global
-opencode config.
+`window_ctl.py`, `java_input.py`, `xwininfo`); run the helper scripts with
+`$PARITY_PY`.
 
 Java reference (detached; `setsid` survives the shell-tool timeout where plain
 `nohup ... &` does not):
@@ -119,8 +126,9 @@ setsid env DISPLAY=:10 HOME="$JHOME" \
   XDG_DATA_HOME="$JHOME/.local/share" XDG_CONFIG_HOME="$JHOME/.config" \
   XDG_CACHE_HOME="$JHOME/.cache" \
   "$JAVA" -jar "$JAR" >>"runs/java-console.log" 2>&1 &
-# readiness is a log line, not a fixed sleep (first launch is slow):
-until grep -q "Total time to load" runs/java-console.log; do sleep 2; done
+# readiness is a log line, not a fixed sleep (first launch is slow); bound it:
+timeout 180 bash -c 'until grep -q "Total time to load" runs/java-console.log; do sleep 2; done' \
+  || echo "launch gate timed out; see runs/java-console.log" >&2
 ```
 
 Godot editor (only when `godot_health check` says the bridge is down; it stays
@@ -144,7 +152,7 @@ Record the values in `run.json`; all of them persist in `parity-java-home/`:
 - Java window **1152x648**, windowed, UI scale 1.0, language `en`, music/SFX
   volume 0. Normalize once interactively; if text fields drop injected input
   (known), resize/move the window instead:
-  `DISPLAY=:10 "$MCP_PY" .opencode/skills/parity-eval/scripts/window_ctl.py unmaximize Mindustry`,
+  `DISPLAY=:10 "$PARITY_PY" .opencode/skills/parity-eval/scripts/window_ctl.py unmaximize Mindustry`,
   then `... resize Mindustry 1152 648`, then `... move Mindustry 40 40`. A
   maximized window ignores `resize` — drop the WM state first. The embedded
   Godot game is fixed at 1152x648 — never try to resize it.
@@ -160,7 +168,7 @@ Record the values in `run.json`; all of them persist in `parity-java-home/`:
   viewport texture, but Java captures read the X window, so **raise it first**:
 
   ```bash
-  DISPLAY=:10 "$MCP_PY" .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry
+  DISPLAY=:10 "$PARITY_PY" .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry
   ```
 
 ## 1. Picking work
@@ -303,12 +311,16 @@ duplicating them.
 - **Fast-forward in one call.** The prefix from the row's checkpoint to its
   fork is one `execute` call issuing all calls back-to-back — no per-step
   captures or diffs.
-- **Wait inside the chain.** Unskippable animations need explicit waits between
-  calls: the boot log gate (`until grep -q "Total time to load"`), a short
-  `sleep` after each menu/dialog input (fades), a retake after Launch (loading
-  bar), and chunked `sleep`s for the R12 timers (300/180/180 s). Long waits bank
-  write-up time and poll in <=60 s chunks so no tool call has to hold for
-  minutes. Record the wait that worked per row in the chain's `settle`.
+- **Wait inside the chain, with timeouts.** Unskippable animations need
+  explicit waits between calls: the boot log gate (`timeout 180 bash -c 'until
+  grep -q "Total time to load" …; do sleep 2; done'`), a short `sleep` after
+  each menu/dialog input (fades), a retake after Launch (loading bar), and
+  chunked `sleep`s for the R12 timers (300/180/180 s). Every shell call carries
+  an explicit `timeout` (`30` helper/capture, `90` a sleep or poll chunk, `180`
+  a launch gate); long waits bank write-up time and poll in <=60 s chunks so no
+  tool call has to hold for minutes. A timed-out call is a hiccup: record it,
+  kill only the recorded pid if a client half-died, and continue or mark the
+  item blocked. Record the wait that worked per row in the chain's `settle`.
 - **Mid-animation captures are retaken, never recorded.** A frame captured
   before the objective/prompt settles is retaken after the recorded wait; a
   retake is not a finding.
@@ -349,8 +361,9 @@ duplicating them.
 
 `status: "reference"` means Java evidence recorded, Godot walk still open. It
 is not a verdict by itself: §3b closes the item — `verified.mode: "reference"`
-for a no-fix Godot-only pass against the stored frame, `verified.mode: "twin"`
-when a code fix landed — or opens a mismatch with a fresh Java pair.
+for a Godot-only pass against the stored frame (no-fix, or after a code fix once
+the full chain re-runs green), `verified.mode: "twin"` only when the operator
+asks for an independent pair — or opens a mismatch with a fresh Java pair.
 
 ### 2b.4 Parallelism
 
@@ -369,7 +382,7 @@ clients on one display or one data dir.
 
 §0 applies unchanged: a click that only focused the window, a dropped key, a
 maximized window, a blank capture, a field that drops input, a save slot that
-never lands — one dated entry in `computer-mcp-learnings.md` immediately, and
+never lands — one dated entry in `java-leg-learnings.md` immediately, and
 the wait that fixed it into the item's recorded sequence.
 
 ## 3. Item run: fast-forward, then mirror
@@ -393,7 +406,8 @@ goal names). For that item:
    structured check in `path.confirm`; Java: one capture), then start `steps`
    with both clients at the same fork.
 4. **Mirror the action under test.** For each step of `steps`, alternately:
-   - **Java**: `raise Mindustry` → perform the action with `computer-mcp_*` →
+   - **Java**: `window_ctl.py raise Mindustry` → perform the action with
+     `java_input.py` (`seq` for a timed combo) →
      `capture_screen.py --window-title Mindustry` → `runs/<run>/java/step-NN.png`.
    - **Godot**: perform the equivalent action with `godot_*` → capture the game
      with `godot_screenshot` (or the viewport) → `runs/<run>/godot/step-NN.png`.
@@ -410,25 +424,28 @@ When the picked item carries a `reference` block (`status: "reference"`), the
 Java side is the recorded reference instead of a live client:
 
 1. Keep the Godot client as in step 2; the Java client stays down. Stamp the
-   Godot pid/commit in `run.json` and verify `reference.frames.action` exists
-   and is non-blank.
+   Godot pid/commit in `run.json` and verify the `reference.frames` block has a
+   usable fork frame and action/result frame, non-blank (key names vary by soak:
+   `action`, or the state/result frame named for the surface).
 2. Fast-forward the item's **Godot** path to the same fork as one `execute`
    chain with the same in-chain waits and mirror the action as in step 4.
-   Compare with §4 using `reference.frames.action` as the Java side.
-3. Pass → settle the item. Both `reference` and `twin` close a reference item:
-   with no code change, close directly as `verified: {mode: "reference", run:
-   <this run>, reference: <ref run>}` (record `java_frame` from
-   `<reference.run>/<reference.frames.action>` and the fresh `godot_frame`/
-   `diff`). After a code fix the Godot-only pass is not yet a verdict: while
-   holding the claim, spawn exactly one twin-verifier subagent (the
-   twin-evaluator agent when registered, else general) to re-run the item from
-   the fork on both legs, fast-forwarding each leg as one execute chain with
-   its in-chain waits, and mirror the action once per leg under the §4 gate.
-   Match → `verified: {mode: "twin", writer_run: <this run>, twin_run: <twin
-   run>, java_frame: <twin Java frame>, godot_frame: <twin Godot frame>}`, and
-   bump the item's `updated`/`path.last_replayed`; mismatch → status `mismatch`
-   with the fresh pair and a `fix.plan` refreshed from the twin evidence (the
-   item re-enters the queue).
+   Compare with §4 using the reference's action/result frame as the Java side.
+3. Pass → settle the item as `verified: {mode: "reference", run: <this run>,
+   reference: <ref run>}`, and bump the item's `updated`/`path.last_replayed`
+   (record `java_frame` from the reference's action/result frame under
+   `<reference.run>/` and the fresh `godot_frame`/`diff`). This holds after a
+   code fix too: the requirement is the fresh full-chain re-run under §4
+   against adequate stored evidence, with the fix's `fix.plan`/round evidence
+   on the item. Twin verification is
+   the optional stronger settle: only when the operator asks for an independent
+   pair, spawn exactly one twin-verifier subagent (the twin-evaluator agent when
+   registered, else general) to re-run the item from the fork on both legs —
+   fast-forwarding each leg as one execute chain with its in-chain waits and
+   mirroring the action once per leg under the §4 gate — and settle
+   `verified: {mode: "twin", writer_run: <this run>, twin_run: <twin run>,
+   java_frame: <twin Java frame>, godot_frame: <twin Godot frame>}`; a twin
+   mismatch → status `mismatch` with the fresh pair and a `fix.plan` refreshed
+   from the twin evidence (the item re-enters the queue).
 4. Fail → re-run the Java leg once from `reference.checkpoint` and recapture the
    same frame. If the fresh Java frame reproduces the reference, treat the Godot
    leg as the mismatch (§5) with the fresh pair; if it does not, refresh the
@@ -450,15 +467,15 @@ Hard rules:
 - If a capture comes back blank (metrics `blank: true`) or the action clearly
   did not land, re-take it — do not classify a capture failure as a parity
   mismatch. Log the retake in `run.json`.
-- The tool response of a Java `click`/`mouse_move`/`key_press` shows the
-  previous frame; always capture separately before judging what it did.
+- Java helper calls return JSON, never a frame; always capture separately
+  (`capture_screen.py`) before judging what an action did.
 - Every run also seeds: when the fork reveals interactive surface with no
   ledger item, append the items (see §2 step 5) before moving past it.
 
 ## 4. Comparison gate
 
 ```bash
-DISPLAY=:10 "$MCP_PY" .opencode/skills/parity-eval/scripts/frame_diff.py \
+DISPLAY=:10 "$PARITY_PY" .opencode/skills/parity-eval/scripts/frame_diff.py \
   --java  runs/<run>/java/step-NN.png \
   --godot runs/<run>/godot/step-NN.png \
   --out-json runs/<run>/diff/step-NN.json \
@@ -494,11 +511,11 @@ Work in the strongest evidence class available (cheapest first):
    finding, a palette-only difference usually a shader/asset finding.
 
 A reference-backed run is evidence class 4 with recorded Java provenance: the
-Java side is `reference.frames.action` from `reference.run` (window capture at
-1152x648), the Godot side is the fresh capture. Name both paths in the run
-report and the diff JSON so the comparison stays reproducible. Do not mix a
-reference pass into `chain` runs: if a live Java frame is captured, the item is
-a normal §3 run.
+Java side is the reference's action/result frame from `reference.run` (window
+capture at 1152x648), the Godot side is the fresh capture. Name both paths in
+the run report and the diff JSON so the comparison stays reproducible. Do not
+mix a reference pass into `chain` runs: if a live Java frame is captured, the
+item is a normal §3 run.
 
 ## 5. Mismatch → fix → verify
 
@@ -506,7 +523,7 @@ On the first mismatch:
 
 1. **Record the stop point in `parity-ledger.json` before touching code**: step
    number, the two screenshots, the diff JSON, the metric values, and the exact
-   MCP call sequences for both legs up to that step (copy from the run log; the
+   tool-call sequences for both legs up to that step (copy from the run log; the
    item's `path`/`reproduce` has the canonical full sequence). Write a `fix.plan {round, state,
    done[], next, ...}` into the item before the first code edit and refresh it
    after every failed round, so an interrupted run resumes from it. A mismatch
@@ -546,15 +563,15 @@ The single source of progress. Shape (one `items[]` entry per item):
   "discovered_by": "runs/20261009-110000-seed-menu/",
   "path": {
     "to": "fresh main menu on both clients",
-    "java": [{"tool": "computer-mcp_click", "params": {"x": 310, "y": 216, "button": "left"}}],
+    "java": [{"cmd": "DISPLAY=:10 \"$PARITY_PY\" .opencode/skills/parity-eval/scripts/java_input.py click 310 216 left"}],
     "godot": [{"tool": "godot_input", "params": {"action": "mouse_button", "params": {"button": "MOUSE_BUTTON_LEFT", "position": {"x": 0, "y": 0}, "coords": "viewport", "pressed": true}}}],
     "confirm": {"godot": "MenuGroup.visible and DialogLayer empty", "java": "seed/step-01-menu-java.png"},
     "last_replayed": "runs/20261009-120000-enter-campaign/"
   },
   "run": "runs/20261009-120000-enter-campaign/",
   "reproduce": {
-    "java": [{"tool": "computer-mcp_click", "params": {"x": 310, "y": 216, "button": "left"}},
-             {"tool": "capture_screen.py", "params": {"--window-title": "Mindustry"}}],
+    "java": [{"cmd": "DISPLAY=:10 \"$PARITY_PY\" .opencode/skills/parity-eval/scripts/java_input.py click 310 216 left"},
+             {"cmd": "DISPLAY=:10 \"$PARITY_PY\" .opencode/skills/parity-eval/scripts/capture_screen.py --window-title Mindustry --output java/step-01.png"}],
     "godot": [{"tool": "godot_input", "params": {"action": "mouse_button", "params": {"button": "MOUSE_BUTTON_LEFT"}}},
               {"tool": "godot_screenshot", "params": {"action": "game"}}],
     "compare": [{"tool": "frame_diff.py", "params": {"--java": "java/step-01.png", "--godot": "godot/step-01.png", "--out-json": "diff/step-01.json"}}]
@@ -577,10 +594,10 @@ Append new items with the next `PAR-####` id and set `parent`/`surface`/
 run), `reference` (Java evidence recorded by a soak, §2b; the Godot walk is
 still open), `in-progress`, `mismatch`, `fixing`, `verified` (closed —
 `verified.mode` is `seed` for a sweep observation, `chain` for a full both-leg
-pass, `reference` for a Godot-only pass against a stored Java frame, or `twin`
-for a fresh Java+Godot pair captured by the twin-verifier subagent; `reference`
-and `twin` both settle a reference item — a no-fix walk may close as
-`reference`, a walk that landed a code fix settles as `twin`), `blocked`,
+pass, `reference` for a Godot-only pass against a stored Java frame (including
+after a code fix whose full chain re-runs green), or `twin` for an
+operator-requested fresh Java+Godot pair captured by the twin-verifier
+subagent), `blocked`,
 `wontfix`.
 A `verified.mode: "seed"` item may be reopened if a later item run contradicts
 it. Its stored sequence may stay minimal until the item is re-run, fixed, or
@@ -592,20 +609,20 @@ needs item-specific preconditions, at which point fill out its
 Every item embeds its own calls — there is no `chains/` directory. After a
 confirmed run, update the item: `path` (navigation to the fork, replayed
 back-to-back once per leg in a single `execute` call; not evidence) and
-`steps` (the mirrored part behind the gate) / `reproduce` (the exact tool +
-action + parameter JSON that ran), with fresh frame/diff paths and the run
+`steps` (the mirrored part behind the gate) / `reproduce` (the exact command
+or tool call that ran), with fresh frame/diff paths and the run
 dir. No hardcoded click coordinates unless measured from the current capture;
 `verified.mode: "chain"` requires a fresh run dir (pid/commit in `run.json`).
 A Java soak's calls live in `reference.java_path` + `reference.settle`; a
 mixed item carries both legs' call lists, each entry naming its tool
-(`godot_*` / `computer-mcp_*` / shell scripts).
+(`godot_*` tools; Java shell helper `cmd` entries).
 
 ### Learnings
 
 Friction that is not a reusable sequence goes to the repo-root learnings files as
 one dated entry, written **the moment the hiccup happens** (§0): what happened,
 the exact failing call, what worked, the run that shows it. Java/X-leg
-friction in `computer-mcp-learnings.md`; Godot/bridge friction in
+friction in `java-leg-learnings.md`; Godot/bridge friction in
 `open-godot-mcp-learnings.md`. Never rewrite another session's entry.
 
 ### Run report
@@ -634,38 +651,36 @@ friction in `computer-mcp-learnings.md`; Godot/bridge friction in
 - java/: ... godot/: ... diff/: ...
 ```
 
-## 7. Java-leg gotchas (computer-mcp)
+## 7. Java-leg gotchas (shell helpers)
 
-- `list_windows`/`get_window_info` are not implemented on Linux; use
-  `window_ctl.py list` or `xwininfo -root -children`, and
-  `window_ctl.py raise Mindustry` before every Java capture.
-- The screenshot attached to a `click`/`mouse_move`/`key_press` response is the
-  previous frame. Capture separately.
-- `key_press` holds long enough for X auto-repeat: for toggles split
-  `key_down` + `key_up` across two calls. Send an explicit `button_up` before
-  expecting a fresh click; a world `button_down` can stay logically held.
-- No scroll action exists: one-shot pynput from `$MCP_PY`
-  (`from pynput.mouse import Controller; Controller().scroll(0,-6)`).
-- Timed key combos (the in-game block-select combo inside 400 ms) need one
-  persistent pynput process, not separate MCP calls.
+- Run every helper with `$PARITY_PY` and `DISPLAY=:10`; `window_ctl.py list`
+  (or `xwininfo -root -children`) enumerates windows, and
+  `window_ctl.py raise Mindustry` must precede every Java capture when the
+  Godot editor overlaps the window.
+- Every `java_input.py` call re-activates the Java window (EWMH
+  `_NET_ACTIVE_WINDOW` + `set_input_focus`) before acting; `window_ctl.py
+  raise` only restacks the window — stacking is not focus, so a raise can
+  leave `_NET_ACTIVE_WINDOW` on the Godot editor (PAR-0049). When a click still
+  looks dead, check `_NET_ACTIVE_WINDOW` (xprop), fall back to
+  `send_event_click.py X Y` (XSendEvent bypasses the SDL click path), and use
+  `record_input.py SECONDS` to prove whether the event reached the window.
+- A held button survives between calls: send `java_input.py mouseup X Y` before
+  expecting a fresh standalone click after a world `mousedown`. When a `click`
+  looks dead but a `move` hover changed the frame, use `mousedown` + `mouseup`
+  as two calls instead (PAR-0056).
+- For toggles (Escape) prefer `keydown` + `keyup` as two calls so the key is
+  not held through X auto-repeat. Timed key combos (the in-game block-select
+  combo inside 400 ms) go through one `java_input.py seq '[...]'` call — one
+  process, one focus.
 - Java text fields frequently drop injected input; prefer menu paths and
   shortcuts that exist in both clients, or write settings offline (see
-  `computer-mcp-learnings.md`, EV-0059) while the client is stopped.
+  `java-leg-learnings.md`, EV-0059) while the client is stopped.
 - Fresh Java data dir: Play → Campaign shows a `Select Starting Campaign`
   dialog (Serpulo photo → OK) before the planet page.
 - Never `pkill -f "<jar>"`: the pattern matches the tool shell itself. Record
   the pid from `pgrep -f 'Mindustry[.]jar'` and kill only that.
 - Quit gracefully via the main menu; if the process lingers, kill the recorded
   pid and note it in `run.json`.
-- Window stacking is not focus: on X11 `window_ctl.py raise` can leave
-  `_NET_ACTIVE_WINDOW` (and input focus) on the Godot editor, and every click
-  is dropped while the Java window is topmost (PAR-0049). Before blaming the
-  click path, read `_NET_ACTIVE_WINDOW` (xprop) and, if it is wrong, switch
-  focus from python-xlib (`_NET_ACTIVE_WINDOW` ClientMessage +
-  `set_input_focus`, the `java_input.py` helper in that run), then click.
-- When a `click` looks dead but a `mouse_move` hover changed the frame, send
-  explicit `button_down` + `button_up` as two calls instead of `click`
-  (PAR-0056).
 - Resume/soak forks also depend on `settings.bin` state (hint flags, research
   progress) that outlives the save file — reset it offline (see §0) before
   re-capturing a stored reference, and wipe `saves/*.msav*` (including
@@ -677,6 +692,10 @@ friction in `computer-mcp-learnings.md`; Godot/bridge friction in
 - Keep the launch shell simple: a `cd repo && RUN=… && setsid java … &` list
   backgrounds the whole `&&` chain, so a poll in the same shell reads an empty
   `$RUN` — assign variables outside the backgrounded group.
+- Never run an unbounded shell command: wrap helpers/captures/polls in
+  `timeout N` (`30` helper or capture, `90` a wait chunk, `180` a launch gate).
+  A timed-out call is a hiccup to log (kill only the recorded pid), not an
+  unbounded `until`/`sleep` that stalls the session.
 
 ## 8. Godot-leg gotchas (open-godot-mcp)
 

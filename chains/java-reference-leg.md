@@ -7,9 +7,9 @@ applies_when: >-
   the shared display :10.
 preconditions:
   - JDK 17 present (`bootstrap.sh --check`) and the reference jar built at `../Mindustry/desktop/build/libs/Mindustry.jar`.
-  - computer-mcp registered and pointed at `DISPLAY=:10.0` (global opencode config); the Godot editor shares :10, so always raise the Java window before capturing.
+  - "Java-leg shell helpers: scripts in `.opencode/skills/parity-eval/scripts/`, run with `$PARITY_PY` (bootstrap.sh) and `DISPLAY=:10`. The Godot editor shares :10, so always raise the Java window before capturing."
   - Persistent Java data dir `parity-java-home/` normalized (1152x648, UI scale 1.0, language en, volumes 0) and stable across runs.
-tools: [computer-mcp_mouse_move, computer-mcp_click, computer-mcp_drag, computer-mcp_type, computer-mcp_key_press, computer-mcp_key_down, computer-mcp_key_up, computer-mcp_screenshot]
+tools: [java_input.py, window_ctl.py, capture_screen.py]
 last_verified: 2026-10-09 session-1 twin PAR-0056 (16a58ca+working-tree, runs/20261009-141406-PAR-0056-twin/, JVM pid 134983; single-display :10 recipe; legacy loop-era runs are kept in the Verified-run sections below)
 ---
 
@@ -36,7 +36,8 @@ last_verified: 2026-10-09 session-1 twin PAR-0056 (16a58ca+working-tree, runs/20
 2. Wait for the readiness line instead of a fixed sleep:
 
    ```bash
-   until grep -q "Total time to load" "$RUN/java/game.log"; do sleep 2; done
+   timeout 180 bash -c 'until grep -q "Total time to load" "$RUN/java/game.log"; do sleep 2; done' \
+     || echo "launch gate timed out; see $RUN/java/game.log" >&2
    ```
 
 3. Normalize the window before anything reads it: if it opened maximized,
@@ -47,9 +48,9 @@ last_verified: 2026-10-09 session-1 twin PAR-0056 (16a58ca+working-tree, runs/20
    it becomes a finding). `--window-title` reads the game window directly:
 
    ```bash
-   DISPLAY=:10 "$HOME/.local/share/uv/tools/computer-mcp/bin/python" \
+   DISPLAY=:10 "$PARITY_PY" \
      .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry
-   DISPLAY=:10 "$HOME/.local/share/uv/tools/computer-mcp/bin/python" \
+   DISPLAY=:10 "$PARITY_PY" \
      .opencode/skills/parity-eval/scripts/capture_screen.py \
      --window-title Mindustry --output "$RUN/java/step-01-menu.png"
    ```
@@ -57,14 +58,13 @@ last_verified: 2026-10-09 session-1 twin PAR-0056 (16a58ca+working-tree, runs/20
    The report's `region` is the window origin/size in screen coordinates — use
    it to turn an element offset in the capture into a click coordinate.
 
-4. Drive the flow with the persistent computer-mcp MCP tools
-   (`computer-mcp_mouse_move`, `computer-mcp_click`, `computer-mcp_drag`,
-   `computer-mcp_type`, `computer-mcp_key_press`, ...), re-capturing with
-   `capture_screen.py` after each named step. The response screenshot of a
-   `click`/`mouse_move`/`key_press` is the previous frame — always capture
+4. Drive the flow with the Java-leg shell helpers (`java_input.py move`,
+   `java_input.py click`, `java_input.py drag`, `java_input.py type`,
+   `java_input.py key`, ...), re-capturing with `capture_screen.py` after each
+   named step. Helper calls print JSON, never a frame — always capture
    separately before judging an action. For scroll and timed key combos use
-   one-shot or persistent pynput from the computer-mcp uv-tool python (see
-   `computer-mcp-learnings.md`).
+   `java_input.py scroll` / `java_input.py seq` (one process, one focus; see
+   `java-leg-learnings.md`).
 
 5. Quit gracefully through the main-menu Quit button. If the process lingers,
    kill the recorded pid (`kill -TERM "$(cat "$RUN/java/java.pid")"`) and note
@@ -88,9 +88,9 @@ sweep needed:
    `pgrep -f Mindustry.jar` match, not the wrapper pid.
 2. Geometry: `DISPLAY=:11 xwininfo -root -children` → `"Mindustry": 900x700+190+10`.
    Window-cropped captures via
-   `DISPLAY=:11 "$HOME/.local/share/uv/tools/computer-mcp/bin/python"
+   `DISPLAY=:11 "$PARITY_PY"
    .opencode/skills/parity-eval/scripts/capture_screen.py --window-title Mindustry
-   --output …` (mss lives in the computer-mcp uv tool).
+   --output …` (bootstrap.sh creates the helper venv).
 3. Menu coordinates observed at 900x700 (screen coords): Play (350,187);
    submenu Campaign/Join/Custom/Load at y 188/258/328/397, x 645;
    Load Game Back (533,670); Custom Game map card (635,260); MapPlay Play (747,629);
@@ -108,7 +108,7 @@ mouse `Play` (410,187) -> submenu `Custom Game` (648,327) -> `Archipelago` card
 (640,200) -> MapPlay `Play` (747,628) -> `key_down escape` + `key_up escape`
 (split calls) -> pause-dialog `Settings` (754,281) opens the Settings dialog.
 Use split `key_down`/`key_up`: a held `key_press escape` auto-repeats and
-re-toggles the pause dialog closed (see computer-mcp-learnings.md). Quit with
+re-toggles the pause dialog closed (see java-leg-learnings.md). Quit with
 `kill -TERM` on the `java -jar .*Mindustry.jar` pid; the display is clean
 afterwards. Run: `runs/20261008-143432-ev0062-twin` (JVM pid 140283,
 `java/notes.md`).
@@ -161,7 +161,7 @@ Sequence that reached the host ground truth (run
    disabled while `net.active()`.
 5. Click reliability: verify the X pointer position (pynput read-back) before
    each click; a move+click with a short fixed sleep can land at the previous
-   cursor position. Details in `computer-mcp-learnings.md`. Quit with
+   cursor position. Details in `java-leg-learnings.md`. Quit with
    `kill -TERM` on the recorded `java -jar ...Mindustry.jar` pid.
 
 ## Verified run (loop-1 twin, 2026-10-08, EV-0038, 1152x648)
@@ -203,7 +203,8 @@ within 1 px, 0.25 s settle, click) plus one-shot pynput scrolls.
    buttons), so hover-diff probing cannot locate them — use the light-text
    pixel bands of `step-04-play-submenu.png`.
 3. The grid scrolled with one-shot `pynput.mouse.Controller().scroll(0,-4)`
-   x6 over the grid (no MCP scroll action): row 3 Molten Lake/Mud Flats/
+   x6 over the grid (no scroll action existed then — `java_input.py scroll`
+   now covers it): row 3 Molten Lake/Mud Flats/
    Passage(PvP)/Shattered/Tendrils, row 4 Triad/Veins(PvP)/Wasteland = 18.
 4. MapPlayDialog `Back` (screen 540,655) responded to a single click this run
    (the EV-0059 note about the input-dead bottom row did not reproduce).
@@ -244,7 +245,7 @@ Evidence: `java/step-06-sector-click2.png` (not owned), `step-12-after-launch.pn
 
 The worktree wrapper resolves its own runtime dirs: from this worktree it
 started a second java weston and Xwayland `:3`, while the session's persistent
-computer-mcp server is pinned to `:2`. Pin the client to the MCP display and
+computer-mcp server is pinned to `:2`. Pin the client to `:2` and
 keep GLFW off Wayland:
 
 ```bash
@@ -281,7 +282,7 @@ Recorded screen coords: Play (307,247), Campaign (527,249), Serpulo card
 
 Two surprises: `computer-mcp.click` did not open Play on the fresh window
 (byte-identical frames twice) while explicit `button_down` + `button_up` did
-(see computer-mcp-learnings.md, 2026-10-09); and a fresh profile needs more
+(see java-leg-learnings.md, 2026-10-09); and a fresh profile needs more
 than emptied saves — `campaignselect` in `settings.bin` must be false for the
 first-run chooser (back up settings.bin, flip it offline). Save meta check:
 zlib-decompress `sector-serpulo-170.msav` and assert `,loadout:[],` in the
@@ -299,31 +300,33 @@ Evidence: `runs/20261009-141406-PAR-0056-twin/` (JVM pid 134983;
 
 ## Failure modes
 
-- `computer-mcp_*` tools missing: opencode was started without `DISPLAY`;
-  relaunch with the loop shims and report the blocker instead of improvising a
-  headless Java leg.
+- Java-leg helpers unavailable: `bootstrap.sh` has not been run (no
+  `$PARITY_PY`) or a call ran without `DISPLAY=:10`; run the bootstrap / set
+  the display and report the blocker instead of improvising a headless Java leg.
 - Clicks land nowhere: another client owns the display, or the window moved.
   Re-read the screenshot and recompute the coordinate; never reuse coordinates
   blindly.
 - Settings/saves differ from the Godot run: normalize inside the loop's seeded
   HOME (`window size, UI scale, language, volume`) and record the snapshot in
   `run.json`; `settings_backups/` keeps prior snapshots.
-- `computer-mcp_list_windows` / `get_window_info` return
-  `Window management not yet implemented for Linux`. Use
-  `DISPLAY=:N xwininfo -root -children` for the window id/geometry; click
-  screen coords = window origin + element offset in the screenshot.
+- The retired `computer-mcp` window tools returned
+  `Window management not yet implemented for Linux` (historical). Use
+  `window_ctl.py list` or `DISPLAY=:N xwininfo -root -children` for the window
+  id/geometry; click screen coords = window origin + element offset in the
+  screenshot.
 - Launching with `nohup … &` inside a shell-tool command does not survive the
   tool timeout (the process group is killed). Use
   `setsid .opencode/loops/bin/run-java.sh >"$RUN/java/game.log" 2>&1 </dev/null &`.
 - Black captures on the Java leg: on Xwayland the X root holds no GPU pixels,
-  so `computer-mcp screenshot` and `--rect`/monitor grabs come back black. Use
-  `--window-title Mindustry` (or a bare capture, which retries the window) and
-  confirm the report's `blank` field is false before interpreting anything.
+  so root/`--rect`/monitor grabs come back black. Use
+  `capture_screen.py --window-title Mindustry` (or a bare capture, which retries
+  the window) and confirm the report's `blank` field is false before
+  interpreting anything.
 - On the Xvfb fallback the first key press after a click only focuses the
   window; send the binding twice (observed for Escape and J). A held left
-  button can also stay logically down across MCP calls (mining continues);
-  send an explicit `computer-mcp_button_up` before expecting a fresh click to
-  act.
+  button can also stay logically down across helper calls (mining continues);
+  send an explicit `java_input.py mouseup X Y left` (at the held click's
+  coordinates) before expecting a fresh click to act.
 - The loop wrappers resolve `PARITY_LOOP_DIR` against the **worktree-local**
   `.opencode/loops`, so the Java data dir is
   `<worktree>/.opencode/loops/run/loop-N/xdg-data/Mindustry`, not the
@@ -331,7 +334,8 @@ Evidence: `runs/20261009-141406-PAR-0056-twin/` (JVM pid 134983;
 
 ## Variants
 
-- Keyboard-only navigation: send `computer-mcp_key_press` sequences when the
-  path exists in both clients.
+- Keyboard-only navigation: send `java_input.py key NAME` sequences (one
+  process per binding, or a single `seq` batch) when the path exists in both
+  clients.
 - Window geometry automation (`xdotool`/`wmctrl`) is optional; without it,
   capture the full screen and run one client at a time.

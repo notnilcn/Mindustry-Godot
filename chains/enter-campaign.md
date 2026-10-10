@@ -6,7 +6,7 @@ applies_when: Entering or observing the campaign flow, from menu to launched sec
 preconditions:
   - boot-and-identity completed (game in the main menu, runtime connected).
   - UI clicks resolve control centers via eval; never hardcode coordinates.
-  - Java reference leg (optional comparison) needs computer-mcp with DISPLAY set at opencode process start.
+  - "Java-leg shell helpers (optional comparison): scripts in `.opencode/skills/parity-eval/scripts/`, run with `$PARITY_PY` (bootstrap.sh) and `DISPLAY=:10`."
 tools: [godot_exec, godot_input, godot_screenshot, godot_log]
 last_verified: 2026-10-09 ad25ae5 UI variant through the launch-loadout confirm (pid 129492: sector 15, hasCore=true, build=61, step(60) tick 70, gameOver=false, winWave=10; single opencode `execute` call, 40 chained MCP calls); 2026-10-08 9efd068 facade launch + loadout (runs/l2-20261008-012103-ev0052-research-purchase-godot); UI Play→Campaign→serpulo→OK→sector-panel action (runs/l2-20261008-014155-ev0037-core-launch-godot, re-verified a1ca816 in runs/l2-20261008-133536-ev0013-block-picker-godot)
 ---
@@ -126,5 +126,6 @@ stocks its live module.
   `e85732c` (map-building materialization) or the sector has no preset map; use
   groundZero (sector 15), not 170. A stocked core also requires the loadout to
   pass `start_sector_with_loadout`, not the bare `start_sector`.
-- Java comparison: computer-mcp crashes at import without `DISPLAY` (pynput),
-  and opencode silently drops its tools; the Godot leg is unaffected.
+- Java comparison (historical): `computer-mcp` crashed at import without
+  `DISPLAY` (pynput) and opencode silently dropped its tools; the Godot leg is
+  unaffected. The Java leg now runs `java_input.py` with `DISPLAY=:10`.

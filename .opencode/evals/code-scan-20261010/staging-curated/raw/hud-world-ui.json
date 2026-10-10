@@ -1,0 +1,457 @@
+[
+  {
+    "title": "Unit factories, reconstructors and payload blocks cannot be configured: the panel is empty or lists unrelated items",
+    "surface": "hud",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Live client, campaign or custom game: place a ground-factory / additive-reconstructor / constructor / payload-router / payload-source (sandbox) and left-tap it with no block selected.",
+      "java": [],
+      "godot": [],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "Java: place a ground-factory, tap it -> the panel lists its unit plans (dagger/crawler/nova); picking a plan calls configure(index) which sets UnitFactoryBuild.currentPlan (UnitFactory.java:59-75, 285-320).",
+        "Java: tap an additive-reconstructor -> the panel lists the unit command icons and applies configure(command) (Reconstructor.java:215-233).",
+        "Java: tap a constructor -> the panel lists producible payload blocks (Constructor.java:67-70); payload-router/payload-source list blocks+units (PayloadRouter.java:183-190, PayloadSource.java:113-117)."
+      ],
+      "godot": [
+        "Godot: place a ground-factory and tap it -> the panel shows a button for every item in the game (config_spec builds item options because def.has_items is true, desktop.rs:1376-1387) and pressing one does nothing: UnitFactoryBehavior has no configured() override (client/rust/mind-core/src/world/blocks/units/behavior.rs:114-189; trait default is a no-op at behavior/mod.rs:230).",
+        "Tap an additive-reconstructor or payload-source -> the panel renders only the clear row and X (no declared kinds and no has_items/has_liquids, desktop.rs:1372-1411), so no unit/block can be chosen.",
+        "Tap a constructor or payload-router -> the panel lists items, but the behaviors only accept ConfigValue::Block/Unit (constructor.rs:122-147; payload_router.rs:266), so each submitted item is dropped."
+      ],
+      "compare": [
+        "Java renders each block's real unit/block picker and applies the selection; the port renders an item list (or an empty panel) and the submit is a no-op, so factory plans, reconstructor commands and payload recipes can never be chosen."
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "MindInput.config_spec (client/rust/mind-gdext/src/input/desktop.rs:1360) only emits Item/Liquid options and only marks BlockKind::LogicBlock as text; the unit/block choice needs per-behavior ConfigKind declarations, their configured() handlers, and a fragment submit kind that carries the option kind.",
+        "files": [
+          "client/rust/mind-gdext/src/input/desktop.rs:1360",
+          "client/rust/mind-gdext/src/input/desktop.rs:1400",
+          "client/ui/fragments/block_config_fragment.gd:77",
+          "client/rust/mind-core/src/world/behavior/mod.rs:219",
+          "client/rust/mind-core/src/world/blocks/units/behavior.rs:114",
+          "client/rust/mind-core/src/world/blocks/units/behavior.rs:218",
+          "client/rust/mind-core/src/world/blocks/payloads/constructor.rs:122",
+          "client/rust/mind-core/src/world/blocks/payloads/payload_source.rs:135",
+          "client/rust/mind-core/src/sim/runtime.rs:203"
+        ],
+        "approach": "1) Declare accepted kinds per behavior (config_kinds): UnitFactory -> Number (Java sends the plan index), Constructor/PayloadRouter/PayloadSource -> Block/Unit (their configured() already handles those, constructor.rs:122 and payload_source.rs:135). 2) In config_spec, when a block declares Block/Unit (or its kind is Constructor/PayloadSource/PayloadRouter), add option rows that carry both the content name and its kind; the name already resolves to a typed Block/Unit through resolve_config (runtime.rs:214-221). 3) Emit the option kind through block_config_fragment.gd so the button submits 'content' with the right name (the fragment's _submit path already maps 'content' to ConfigValue::String -> typed content). 4) Implement configured() for UnitFactoryBehavior: write UnitFactoryBuild.current_plan with bounds clamp and reset progress when it changes (mirror UnitFactory.java:59-75); a factory's command row can follow once RTS unit commands land. 5) Keep the item/liquid fallback for undeclared blocks. 6) Narrow check: cargo test -p mind-core world::blocks::units plus an in-engine tap on a ground-factory that selects crawler and asserts current_plan == 1 via SimHost state JSON.",
+        "narrow_check": "cargo test -p mind-core world::blocks::units and an in-engine ground-factory tap that changes UnitFactoryBuild.current_plan (state JSON).",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/world/blocks/units/UnitFactory.java:285",
+            "../Mindustry/core/src/mindustry/world/blocks/units/UnitFactory.java:59",
+            "../Mindustry/core/src/mindustry/world/blocks/units/Reconstructor.java:215",
+            "../Mindustry/core/src/mindustry/world/blocks/payloads/Constructor.java:67",
+            "../Mindustry/core/src/mindustry/world/blocks/payloads/PayloadRouter.java:183",
+            "../Mindustry/core/src/mindustry/world/blocks/payloads/PayloadSource.java:113",
+            "../Mindustry/core/src/mindustry/ui/fragments/BlockConfigFragment.java:47"
+          ],
+          "godot": [
+            "client/rust/mind-gdext/src/input/desktop.rs:1360",
+            "client/rust/mind-gdext/src/input/desktop.rs:1400",
+            "client/rust/mind-core/src/world/behavior/mod.rs:230",
+            "client/rust/mind-core/src/world/blocks/units/behavior.rs:114",
+            "client/rust/mind-core/src/world/blocks/units/behavior.rs:218",
+            "client/rust/mind-core/src/world/blocks/payloads/constructor.rs:122",
+            "client/rust/mind-core/src/world/blocks/payloads/payload_source.rs:135",
+            "client/rust/mind-core/src/content/registries/blocks/sandbox.rs:114"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (hud-world-ui): S2 high confidence - the unit/production side of the game is unconfigurable, so a factory can only ever build its default plan and a reconstructor cannot be given a command; payload rout/source selection (Erekir) is equally unreachable. This is the per-block-config half of BlockConfigFragment; the item/liquid pickers for sorters/unloaders/duct-routers do work. Distinct from the logic-scan switch/message items. In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/world/blocks/units/UnitFactory.java:285",
+      "../Mindustry/core/src/mindustry/world/blocks/units/Reconstructor.java:215",
+      "../Mindustry/core/src/mindustry/world/blocks/payloads/Constructor.java:67",
+      "../Mindustry/core/src/mindustry/world/blocks/payloads/PayloadSource.java:113",
+      "../Mindustry/core/src/mindustry/ui/fragments/BlockConfigFragment.java:47",
+      "client/rust/mind-gdext/src/input/desktop.rs:1360",
+      "client/rust/mind-gdext/src/input/desktop.rs:1400",
+      "client/rust/mind-core/src/world/behavior/mod.rs:230",
+      "client/rust/mind-core/src/world/blocks/units/behavior.rs:114"
+    ]
+  },
+  {
+    "title": "Message and illuminator blocks open an empty config panel: message text and light colour cannot be edited",
+    "surface": "hud",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Live client: place a message block (custom game / editor map) or an illuminator and left-tap it.",
+      "java": [],
+      "godot": [],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "Java: tap a message block -> a pencil button opens the @editmessage TextArea dialog; OK calls configure(text) (MessageBlock.java:109-140).",
+        "Java: tap an illuminator -> a pencil opens the colour picker; OK calls configure(rgba int) (LightBlock.java:109-133)."
+      ],
+      "godot": [
+        "Godot: tap a message block -> config_spec sets text:true only for BlockKind::LogicBlock (desktop.rs:1400) and the block has no items/liquids, so the fragment takes the options branch and renders only the clear row + X (block_config_fragment.gd:58-100); there is no pencil and no editor.",
+        "Even if the field appeared, a 'string' submit is lowered to ConfigValue::String (input/mod.rs:884) and then to SimValue::Content(value) (command_emit.rs:254), so resolve_config rejects arbitrary text as an unknown content name (sim/runtime.rs:214-231); MessageBehavior::configured already accepts ConfigValue::String (logic/blocks/message.rs:56-70).",
+        "Tap an illuminator -> the same empty panel and no behavior stores a colour: default_behavior has no LightBlock arm (behavior/mod.rs:498-605)."
+      ],
+      "compare": [
+        "Java opens a text/colour editor and stores the value; the port shows an empty panel and has no wire channel that can carry arbitrary text or a colour."
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "config_spec's text flag (desktop.rs:1400) and the string config wire path (input/mod.rs:884 -> command_emit.rs:248 -> sim/runtime.rs:203): kind 'string' must stop being encoded as a content name.",
+        "files": [
+          "client/rust/mind-gdext/src/input/desktop.rs:1400",
+          "client/rust/mind-gdext/src/input/mod.rs:874",
+          "client/rust/mind-core/src/input/command_emit.rs:248",
+          "client/rust/mind-core/src/sim/runtime.rs:203",
+          "client/ui/fragments/block_config_fragment.gd:58",
+          "client/rust/mind-core/src/logic/blocks/message.rs:56",
+          "client/rust/mind-core/src/world/behavior/mod.rs:498"
+        ],
+        "approach": "1) Emit text:true (or a 'message' kind) from config_spec for BlockKind::MessageBlock; the fragment's existing LineEdit then submits 'string' (block_config_fragment.gd:64-74). 2) Give the fixed-step config command a real text channel: add a ConfigValue/String variant to determinism::ConfigValue (or send Bytes) and map WorldConfigValue::String to it in to_sim_config, so resolve_config passes the raw string through instead of looking it up as content; keep name->content resolution for item/liquid/block options. 3) For the illuminator, add a LightBlock behavior storing the packed rgba int with a Number/Int configured() and a colour-picker control in the fragment (Java LightBlock.java:109-133). 4) Narrow check: cargo test -p mind-core sim with a Configure('set x 1' / message text) landing in the block state, plus in-engine: message block tap -> type -> OK -> state JSON shows the text.",
+        "narrow_check": "cargo test -p mind-core sim (msg string configure round-trip) and an in-engine message-block text edit reflected in SimHost state JSON.",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/world/blocks/logic/MessageBlock.java:109",
+            "../Mindustry/core/src/mindustry/world/blocks/power/LightBlock.java:109"
+          ],
+          "godot": [
+            "client/rust/mind-gdext/src/input/desktop.rs:1400",
+            "client/rust/mind-gdext/src/input/mod.rs:884",
+            "client/rust/mind-core/src/input/command_emit.rs:254",
+            "client/rust/mind-core/src/sim/runtime.rs:214",
+            "client/ui/fragments/block_config_fragment.gd:58",
+            "client/rust/mind-core/src/logic/blocks/message.rs:56",
+            "client/rust/mind-core/src/world/behavior/mod.rs:498"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (hud-world-ui): S3 high confidence - message blocks (a staple of Erekir/editor maps) and illuminators can never be edited, so their content is stuck at the default. The string->Content encoding is shared with the logic-editor gap recorded as 'No in-game logic editor: processor code cannot be viewed or edited...' (logic code-scan item); this record covers the different block family and the missing text flag. In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/world/blocks/logic/MessageBlock.java:109",
+      "../Mindustry/core/src/mindustry/world/blocks/power/LightBlock.java:109",
+      "client/rust/mind-gdext/src/input/desktop.rs:1400",
+      "client/rust/mind-gdext/src/input/mod.rs:884",
+      "client/rust/mind-core/src/input/command_emit.rs:254",
+      "client/ui/fragments/block_config_fragment.gd:58",
+      "client/rust/mind-core/src/logic/blocks/message.rs:56"
+    ]
+  },
+  {
+    "title": "Selecting a block shows no info panel: no name, hotkey, requirement/cost rows or '?' content button",
+    "surface": "hud",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Live client, any game mode: select a block in the bottom-right palette and look above it (and hover any placed building with no block selected).",
+      "java": [],
+      "godot": [],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "Java: select a block -> the pane above the category rail shows icon + localized name + block-select hotkey, a '?' button opening the content database, and one row per requirement with core-stock colouring; an unplaceable reason row appears when the block cannot be placed (PlacementFragment.java:344-438, 391-395, 399-428, 784-787).",
+        "Java: with no block selected, hovering a placed building shows its Displayable info in the same pane (PlacementFragment.java:433-436)."
+      ],
+      "godot": [
+        "Godot: select any block -> only the grid cell checks; there is no info pane in the fragment (its own header admits the box is pending, placement_fragment.gd:6-10) and the scene has only Search/Categories/Blocks (placement_fragment.tscn:19-45).",
+        "Hover a building -> nothing reads a hover/displayable model: client/rust/mind-core/src/ui/display.rs:48 (HoverInfo) has no consumer in mind-gdext/GDScript and no requirement, cost or '?' control is wired."
+      ],
+      "compare": [
+        "Java always shows the selected block's name, requirements against core stock and a database '?' button; the port shows no block details at all, so players cannot see costs or open the block's info before placing."
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "PlacementFragment has no top info table; the selected-block view model lives unused in client/rust/mind-core/src/ui/display.rs and needs a MindHud/MindUi JSON surface plus the scene cell.",
+        "files": [
+          "client/ui/fragments/placement_fragment.gd:161",
+          "client/scenes/ui/fragments/placement_fragment.tscn:19",
+          "client/rust/mind-core/src/ui/display.rs:48",
+          "client/rust/mind-gdext/src/ui/hud.rs:256"
+        ],
+        "approach": "1) Expose a selected-block/hover info JSON (name bundle key, unlocked flag, requirements with amounts and current core counts via the existing core_items read model, unplaceable reason, hotkey) from MindHud/MindUi. 2) Add the Java-style top pane to placement_fragment.tscn above the category rail and populate it in placement_fragment.gd on selection/hover change (PlacementFragment.java:344-438): icon, label, '?' button calling MindUi.open_dialog('content', block), requirement rows coloured by core stock, and the unplaceable reason row. 3) Feed the hovered Displayable half from display.rs HoverInfo when the hover provider lands; the selected-block half is self-contained. 4) Narrow check: select a block and assert the pane shows its localized name and one requirement row, and that '?' opens the content dialog for it.",
+        "narrow_check": "In-engine: select a block, assert the info pane text/requirements; press '?' and assert the content dialog opens. Headless: a ui test covering the new info JSON for a block with requirements.",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/ui/fragments/PlacementFragment.java:344",
+            "../Mindustry/core/src/mindustry/ui/fragments/PlacementFragment.java:391",
+            "../Mindustry/core/src/mindustry/ui/fragments/PlacementFragment.java:399",
+            "../Mindustry/core/src/mindustry/ui/fragments/PlacementFragment.java:784",
+            "../Mindustry/core/src/mindustry/ui/fragments/PlacementFragment.java:433"
+          ],
+          "godot": [
+            "client/ui/fragments/placement_fragment.gd:6",
+            "client/ui/fragments/placement_fragment.gd:161",
+            "client/scenes/ui/fragments/placement_fragment.tscn:19",
+            "client/rust/mind-core/src/ui/display.rs:48"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (hud-world-ui): S3 high confidence - the whole upper half of the placement fragment is missing, so block costs/unlock state and the database shortcut are invisible. PAR-0048 verifies only the category button + block grid; PAR-0065 covers the custom-game grid rows, not this pane. In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/ui/fragments/PlacementFragment.java:344",
+      "../Mindustry/core/src/mindustry/ui/fragments/PlacementFragment.java:391",
+      "../Mindustry/core/src/mindustry/ui/fragments/PlacementFragment.java:784",
+      "client/ui/fragments/placement_fragment.gd:6",
+      "client/ui/fragments/placement_fragment.gd:161",
+      "client/scenes/ui/fragments/placement_fragment.tscn:19",
+      "client/rust/mind-core/src/ui/display.rs:48"
+    ]
+  },
+  {
+    "title": "Holding Shift shows no command panel: the block palette stays and no unit/stance/command buttons appear",
+    "surface": "hud",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Live client with player-team units: hold Shift (command mode) and drag-select, then look at the bottom-right HUD.",
+      "java": [],
+      "godot": [],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "Java: with command mode on, PlacementFragment swaps the block palette for commandTable (mainStack.update, PlacementFragment.java:446-455): a '@commandmode.name' header, selected unit stacks grouped by type, stance and command icon rows, and per-type select/remove (PlacementFragment.java:471-475, 500-560, 628-668)."
+      ],
+      "godot": [
+        "Godot: MindInput does toggle command mode on the Shift edge (desktop.rs:526-532; PAR-0063 verified the keyboard state), but no GDScript or scene references command mode at all (grep client/ui for command_mode/selectedUnits is empty); placement_fragment.gd only ever builds the category rail and block grid (lines 107-204, scene lines 19-45), so holding Shift leaves the block palette unchanged with no unit list, stance row or command buttons.",
+        "The selection event exists (MindInput.selection_changed, input/mod.rs:195) but nothing listens to it in the UI layer."
+      ],
+      "compare": [
+        "Java replaces the palette with the command panel and drives mouse commands/stances from it; the port shows nothing new, so RTS commands are only reachable by hotkeys (and not at all until the selection feed lands)."
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "placement_fragment.gd + its scene: Java's commandTable/mainStack swap has no port; unit rows come from the RTS selection surface (Input.selection_changed / selection_json).",
+        "files": [
+          "client/ui/fragments/placement_fragment.gd:161",
+          "client/scenes/ui/fragments/placement_fragment.tscn:19",
+          "client/rust/mind-gdext/src/input/mod.rs:195",
+          "client/rust/mind-gdext/src/input/desktop.rs:526"
+        ],
+        "approach": "1) Add a command-panel node beside the block palette in placement_fragment.tscn. 2) Connect MindInput.selection_changed and the hotkey('command_mode') signal and swap palette <-> command panel exactly like Java's mainStack.update (PlacementFragment.java:446-455). 3) Render grouped unit-type rows from selection_json plus stance/command buttons that call the existing MindInput stub paths behind the unit_stance_* / unit_command_* bindings (desktop.rs:544-554); grey buttons the selected unit types do not allow. 4) Narrow check: in-engine hold Shift and assert the command panel is visible, and after a drag-select it lists the selected type (depends on the selection feed recorded in the units-ai 'RTS unit selection and orders do nothing' item).",
+        "narrow_check": "In-engine: hold Shift -> command panel visible; drag-select one unit -> its type row appears (requires the selection feed).",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/ui/fragments/PlacementFragment.java:449",
+            "../Mindustry/core/src/mindustry/ui/fragments/PlacementFragment.java:474",
+            "../Mindustry/core/src/mindustry/ui/fragments/PlacementFragment.java:500"
+          ],
+          "godot": [
+            "client/ui/fragments/placement_fragment.gd:161",
+            "client/scenes/ui/fragments/placement_fragment.tscn:19",
+            "client/rust/mind-gdext/src/input/mod.rs:195",
+            "client/rust/mind-gdext/src/input/desktop.rs:526"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (hud-world-ui): S3 high confidence - the command-mode HUD half is entirely absent, so command mode currently has no on-screen affordance. Shares the fix surface with the units-ai item 'RTS unit selection and orders do nothing: the selectable list is never fed and commands never reach live units' (that item covers selection/order behavior; this one covers the missing panel). In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/ui/fragments/PlacementFragment.java:449",
+      "../Mindustry/core/src/mindustry/ui/fragments/PlacementFragment.java:474",
+      "client/ui/fragments/placement_fragment.gd:161",
+      "client/scenes/ui/fragments/placement_fragment.tscn:19",
+      "client/rust/mind-gdext/src/input/mod.rs:195",
+      "client/rust/mind-gdext/src/input/desktop.rs:526"
+    ]
+  },
+  {
+    "title": "Enemy attacks on your buildings never mark the minimap: no pulsing red attack indicators",
+    "surface": "hud",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Live client, any game mode: let an enemy damage a player-team building, then open the fullscreen minimap (or watch the HUD minimap).",
+      "java": [],
+      "godot": [],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "Java: a BuildDamageEvent on a player-team building calls indicators.add(tile) (Control.java:68-71); Control ticks indicators.update() while playing (Control.java:711); MinimapRenderer draws pulsing orange->scarlet squares for each live indicator in fullscreen mode (MinimapRenderer.java:253-274)."
+      ],
+      "godot": [
+        "Godot: mind-core/src/game/attack_indicators.rs:33 exists but has no live caller (the only reference is mind-headless/src/campaign_scenarios.rs:646); nothing subscribes to BuildDamageEvent (defined at world/events.rs:125 but never emitted in mind-core) and neither render/minimap.rs nor ui/widgets/mind_minimap.gd (draw at :51-74) draws any indicator."
+      ],
+      "compare": [
+        "Java shows where the base is being hit from on the minimap; the port never records or draws an indicator, so players have no minimap alert."
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "No wiring from building damage to AttackIndicators (mind-core/src/game/attack_indicators.rs) and no minimap draw pass; the data must reach the minimap provider / MindMinimapWidget.",
+        "files": [
+          "client/rust/mind-core/src/game/attack_indicators.rs:33",
+          "client/rust/mind-core/src/world/events.rs:125",
+          "client/rust/mind-gdext/src/render/minimap.rs",
+          "client/ui/widgets/mind_minimap.gd:51"
+        ],
+        "approach": "1) Insert AttackIndicators as a sim/campaign resource and add the missing BuildDamageEvent emission when the live combat runtime damages a player-team building (mirror Control.java:68-71); tick AttackIndicators::update in the fixed step while playing (Control.java:711). 2) Expose attack_indicators_json() (packed pos + elapsed ticks) through the minimap provider (World/MinimapProvider) or MindHud. 3) Draw the pulsing squares in mind_minimap.gd (and the fullscreen fragment) using the Java geometry (radius = fin*5 + tilesize - 2, colour lerp orange->scarlet, MinimapRenderer.java:253-274), clipped to the minimap rect. 4) Narrow check: cargo test -p mind-core attack_indicators (add/expire) plus in-engine: damage a player building and assert an indicator row appears and draws.",
+        "narrow_check": "cargo test -p mind-core game::attack and an in-engine building-damage -> indicator pixel/row check.",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/core/Control.java:68",
+            "../Mindustry/core/src/mindustry/core/Control.java:711",
+            "../Mindustry/core/src/mindustry/graphics/MinimapRenderer.java:253",
+            "../Mindustry/core/src/mindustry/graphics/MinimapRenderer.java:274"
+          ],
+          "godot": [
+            "client/rust/mind-core/src/game/attack_indicators.rs:33",
+            "client/rust/mind-headless/src/campaign_scenarios.rs:646",
+            "client/rust/mind-core/src/world/events.rs:125",
+            "client/ui/widgets/mind_minimap.gd:51"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (hud-world-ui): S3 high confidence for the dead display path - AttackIndicators is never fed and never drawn. Observation depends on enemy damage reaching player buildings (turret/enemy-AI gaps in the combat/units-ai scans), so the evaluator should force-damage a building or use a sandbox scenario. PAR-0032/0057 cover minimap rendering only; no ledger item covers indicators. In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/core/Control.java:68",
+      "../Mindustry/core/src/mindustry/graphics/MinimapRenderer.java:253",
+      "client/rust/mind-core/src/game/attack_indicators.rs:33",
+      "client/rust/mind-headless/src/campaign_scenarios.rs:646",
+      "client/rust/mind-core/src/world/events.rs:125",
+      "client/ui/widgets/mind_minimap.gd:51"
+    ]
+  },
+  {
+    "title": "F6 does nothing: no power/liquid/item status bars are drawn over buildings",
+    "surface": "world",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Live client with placed consumer buildings (drill/turret/power node): press F6 and watch for status bars over the blocks.",
+      "java": [],
+      "godot": [],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "Java: F6 toggles the 'blockstatus' setting (DesktopInput.java:455-457); Renderer.drawStatus reads it into the render flag (Renderer.java:170); BlockRenderer calls drawStatus() for every visible consumer building when enabled (BlockRenderer.java:825-833), which draws the power/liquid/item bars (BuildingComp.java:1221)."
+      ],
+      "godot": [
+        "Godot: pressing F6 fires the 'toggle_block_status' binding (binding.rs:763) into MindInput's dispatch_action, which has no arm for it (desktop.rs:481-600), so no setting or render flag changes.",
+        "Even with a flag forced, no status-bar pass exists: the render scan computes tile_with_consumer_view (mind-core/src/render/scan.rs:82) but no mind-gdext pass reads it, and render/blocks.rs:9 documents status bars as unlanded (M3/M4)."
+      ],
+      "compare": [
+        "Java's F6 reveals per-building power/liquid/item fill bars; the port's F6 is inert and no bar geometry is drawn."
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "MindInput dispatch (client/rust/mind-gdext/src/input/desktop.rs:481) has no 'toggle_block_status' arm, and no render pass consumes tile_with_consumer_view (mind-core/src/render/scan.rs:82).",
+        "files": [
+          "client/rust/mind-gdext/src/input/desktop.rs:481",
+          "client/rust/mind-core/src/input/binding.rs:763",
+          "client/rust/mind-core/src/render/scan.rs:82",
+          "client/rust/mind-gdext/src/render/blocks.rs:9",
+          "client/rust/mind-gdext/src/render/overlays.rs:1"
+        ],
+        "approach": "1) Add a 'toggle_block_status' arm to dispatch_action that flips a persisted 'blockstatus' flag (default false, like Java's graphics.checkPref) and fire the hotkey signal. 2) Add a status-bar draw pass (new pass under Layer.overlay or extend overlays.rs) that consumes the scan's tile_with_consumer_view and draws each building's module ratios (PowerModule.status, LiquidModule.current/capacity, ItemModule.total/capacity) as the Java bar strips (Building.drawStatus -> BuildingComp.java:1221). 3) Gate the pass on the flag and Lod level 2 like Java. 4) Narrow check: in-engine place a fed consumer, press F6, assert bar quads appear (RenderStats counter) and pressing again removes them; headless: assert the flag round-trips through MindInput.",
+        "narrow_check": "In-engine F6 toggle with a consumer building visible: bar draw count > 0 on enable, 0 on disable.",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/input/DesktopInput.java:455",
+            "../Mindustry/core/src/mindustry/core/Renderer.java:170",
+            "../Mindustry/core/src/mindustry/graphics/BlockRenderer.java:825",
+            "../Mindustry/core/src/mindustry/entities/comp/BuildingComp.java:1221"
+          ],
+          "godot": [
+            "client/rust/mind-gdext/src/input/desktop.rs:481",
+            "client/rust/mind-core/src/input/binding.rs:763",
+            "client/rust/mind-core/src/render/scan.rs:82",
+            "client/rust/mind-gdext/src/render/blocks.rs:9"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (hud-world-ui): S3 high confidence - the concrete F6 control is dead and the in-world block status readout (power/liquid/items) never renders; core-items HUD (CoreItemsDisplay) and wave pane do work, so this is the missing per-building status half of lead 8. Bars default off in Java, so the repro must enable F6. In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/input/DesktopInput.java:455",
+      "../Mindustry/core/src/mindustry/core/Renderer.java:170",
+      "../Mindustry/core/src/mindustry/graphics/BlockRenderer.java:825",
+      "../Mindustry/core/src/mindustry/entities/comp/BuildingComp.java:1221",
+      "client/rust/mind-gdext/src/input/desktop.rs:481",
+      "client/rust/mind-core/src/input/binding.rs:763",
+      "client/rust/mind-core/src/render/scan.rs:82",
+      "client/rust/mind-gdext/src/render/blocks.rs:9"
+    ]
+  }
+]

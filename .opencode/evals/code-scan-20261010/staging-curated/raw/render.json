@@ -1,0 +1,689 @@
+[
+  {
+    "title": "Units render as one flat body sprite: no mech legs, weapon barrels, health cell or shadows",
+    "surface": "world",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Ground Zero launched in the Godot client, player mech near the core at zoom 4, compared against the Java reference frames",
+      "java": [
+        {
+          "tool": "note",
+          "params": {
+            "text": "Java draws each unit through UnitType.draw (UnitType.java:1471-1591): shadow, mech legs/tank treads, outline, body, health cell, weapons at mount offsets, engines, items, light, shields, parts, abilities; invoked by Renderer.java:433 (Groups.draw.draw)."
+          }
+        }
+      ],
+      "godot": [
+        {
+          "tool": "godot_exec",
+          "params": {
+            "action": "eval",
+            "params": {
+              "code": "var r = get_node(\"/root/Spine/MindRender\"); return str(r.get_render_stats())"
+            }
+          }
+        }
+      ],
+      "confirm": {
+        "godot": "unit_sprites > 0 (units are drawn) but each unit is a single body quad with white tint and no sub-parts",
+        "java": "alpha mech frame shows legs, outline and body composition"
+      },
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        {
+          "tool": "note",
+          "params": {
+            "evidence": "runs/20261009-065416-ref-ground-zero/ Java Ground Zero frames show the alpha mech composed of body + legs + outline."
+          }
+        }
+      ],
+      "godot": [
+        {
+          "tool": "godot_exec",
+          "params": {
+            "action": "eval",
+            "params": {
+              "code": "var fx = get_node(\"/root/Spine/MindFx\"); var r = get_node(\"/root/Spine/MindRender\"); return {\"unit_sprites\": str(r.get_render_stats().unit_sprites), \"host_has_player\": str(get_node(\"/root/Spine/SimHost\").has_player_unit())}"
+            }
+          }
+        },
+        {
+          "tool": "godot_game",
+          "params": {
+            "action": "screenshot",
+            "params": {
+              "path": "user://mech-composition.png"
+            }
+          }
+        }
+      ],
+      "compare": [
+        {
+          "tool": "frame_diff.py",
+          "params": {
+            "--java": "runs/20261009-065416-ref-ground-zero/java/r02-00-before.png",
+            "--godot": "user://mech-composition.png",
+            "note": "crop the mech bounds; expect the Godot unit to lack the Java leg/outline pixels"
+          }
+        }
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "MindSimHost::unit_draws (client/rust/mind-gdext/src/sim_host.rs:1341) returns a 6-tuple (x, y, rotation, region, flying, lowAltitude) and UnitRenderer (client/rust/mind-gdext/src/render/units.rs:91) draws exactly one quad per unit with color 0xffffffff.",
+        "files": [
+          "client/rust/mind-gdext/src/sim_host.rs:1341",
+          "client/rust/mind-gdext/src/render/units.rs:49",
+          "client/rust/mind-gdext/src/render/units.rs:159",
+          "client/rust/mind-core/src/entities/comp/unit/comp.rs:329",
+          "client/rust/mind-gdext/src/render/atlas_bind.rs:83"
+        ],
+        "approach": "Replace the unit draw tuple with a view struct carrying team, health fraction, elevation/elevation state, per-weapon mount (region name, rotation, recoil, heat, warmup) and mech/leg walk state read from the live ECS. In UnitRenderer, draw in Java order: shadow quad, legs (`<name>-leg`/`-leg-base`) or treads (`<name>-treads`) with walk extension, outline (`<name>-outline`), body (`<name>`), health cell (`<name>-cell`, `<name>` color lerp), then weapon regions at their mount offsets; batch as today per (band, atlas page) and keep the scale_marker divide from PAR-0055.",
+        "narrow_check": "cargo test -p mind-core render && cargo check -p mind-gdext; tools/build.sh; in-engine Ground Zero screenshot at zoom 4 where the mech shows legs/outline and a weapon region (frame_diff against the Java reference).",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/type/UnitType.java:1471",
+            "../Mindustry/core/src/mindustry/type/UnitType.java:1494",
+            "../Mindustry/core/src/mindustry/type/UnitType.java:1734",
+            "../Mindustry/core/src/mindustry/entities/comp/UnitComp.java:965",
+            "../Mindustry/core/src/mindustry/core/Renderer.java:433"
+          ],
+          "godot": [
+            "client/rust/mind-gdext/src/render/units.rs:91",
+            "client/rust/mind-gdext/src/render/units.rs:116",
+            "client/rust/mind-gdext/src/sim_host.rs:1341"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (render): S3, confidence high. The live unit pass draws one rotated quad per unit from a 6-field tuple; upstream UnitType.draw composes shadow/legs/treads/outline/body/cell/weapons/engines/parts (UnitType.java:1471-1591). Player impact: the player mech and every wave enemy read as static cut-outs with no walk animation, aim-able weapons or health cell. Related but distinct ledger items: PAR-0053 (units drawn at all) and PAR-0055 (sprite scale). In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/type/UnitType.java:1471",
+      "../Mindustry/core/src/mindustry/type/UnitType.java:1555",
+      "../Mindustry/core/src/mindustry/entities/comp/UnitComp.java:965",
+      "client/rust/mind-gdext/src/render/units.rs:91",
+      "client/rust/mind-gdext/src/render/units.rs:116",
+      "client/rust/mind-gdext/src/sim_host.rs:1341"
+    ]
+  },
+  {
+    "title": "Campaign weather never happens: no rain, snow, sandstorm or fog",
+    "surface": "world",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "A launched campaign sector whose terrain yields weather in Java (World.java:303 calls planet.generator.addWeather on every sector load), watched for a few minutes",
+      "java": [
+        {
+          "tool": "note",
+          "params": {
+            "text": "Java: Rules.weather is filled at World.java:303 by PlanetGenerator.addWeather (PlanetGenerator.java:102-160; rain+fog, snow, sandstorm or sporestorm by dominant floor); Logic.java:377-390 starts events and Weather.java:326-341 draws them at Layer.weather/Layer.debris with renderer.weatherAlpha."
+          }
+        }
+      ],
+      "godot": [
+        {
+          "tool": "godot_exec",
+          "params": {
+            "action": "eval",
+            "params": {
+              "code": "var c = get_node(\"/root/Spine/MindCampaign\"); return c.get_rules_json()"
+            }
+          }
+        }
+      ],
+      "confirm": {
+        "godot": "rules JSON has weather: [] after launch; no WeatherRuntime entity ever exists; MindFx.weather_active() stays false without the MCP probe",
+        "java": "sector rules carry WeatherEntry list; weather states spawn and render"
+      },
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        {
+          "tool": "note",
+          "params": {
+            "evidence": "Load a weather-bearing sector in the Java client (sand/snow/water-dominant terrain); within minutes a sandstorm/fog/rain starts and draws at Layer.weather."
+          }
+        }
+      ],
+      "godot": [
+        {
+          "tool": "godot_exec",
+          "params": {
+            "action": "eval",
+            "params": {
+              "code": "var c = get_node(\"/root/Spine/MindCampaign\"); var j = JSON.parse_string(str(c.get_rules_json())); return str(j.get(\"weather\"))"
+            }
+          }
+        },
+        {
+          "tool": "note",
+          "params": {
+            "text": "Code trace: PlanetGenerator.add_weather is a no-op stub (mind-core/src/maps/generators/planet.rs:345), WeatherRuntime::update_weather_state has no non-test caller (entities/comp/weather.rs:115), and MindFx.set_weather is an MCP-only probe (mind-gdext/src/fx.rs:624)."
+          }
+        }
+      ],
+      "compare": [
+        {
+          "tool": "note",
+          "params": {
+            "text": "No Java/Godot frame pair exists for weather yet; capture both legs on the same sector and diff a frame pair after the same number of ticks."
+          }
+        }
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "The whole weather pipeline is stubbed: Rules.weather is never populated (client/rust/mind-core/src/maps/generators/planet.rs:345 no-op), no system spawns or ticks WeatherRuntime (client/rust/mind-core/src/entities/comp/weather.rs:115; schedule slot WeatherAndAi exists at client/rust/mind-core/src/sim/schedule.rs:284), and the view is never fed (client/rust/mind-gdext/src/fx.rs:624).",
+        "files": [
+          "client/rust/mind-core/src/maps/generators/planet.rs:345",
+          "client/rust/mind-core/src/entities/comp/weather.rs:115",
+          "client/rust/mind-core/src/sim/schedule.rs:284",
+          "client/rust/mind-core/src/game/rules.rs:577",
+          "client/rust/mind-gdext/src/fx.rs:624",
+          "client/rust/mind-gdext/src/sim_host.rs:1486"
+        ],
+        "approach": "Port the four missing links in order: (1) implement PlanetGenerator::add_weather over the live grid (dominant floor/snow/rain-sand classification, Java PlanetGenerator.java:102-160) and call it on sector launch (Java World.java:303); (2) add the per-tick WeatherAndAi system that decrements rules.weather cooldowns, creates a WeatherRuntime entity (Weather.create) and calls update_weather_state while any is live, re-applying the status via the existing apply_weather_status; (3) expose the active weather state (id/intensity/opacity/wind/life) through MindSimHost so the frame path (not an MCP probe) fills MindFx's weather slot and view rect; (4) draw over/under at Layer::Weather/Layer::Debris with the ported weather fx bodies.",
+        "narrow_check": "cargo test -p mind-core weather && a headless scenario asserting a WeatherRuntime spawns once a cooldown elapses and applies wet; in-engine a rain sector shows rain and MindFx.weather_active() is true without any MCP set_weather call.",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/core/World.java:303",
+            "../Mindustry/core/src/mindustry/core/Logic.java:377",
+            "../Mindustry/core/src/mindustry/type/Weather.java:326",
+            "../Mindustry/core/src/mindustry/maps/generators/PlanetGenerator.java:144"
+          ],
+          "godot": [
+            "client/rust/mind-core/src/maps/generators/planet.rs:345",
+            "client/rust/mind-core/src/entities/comp/weather.rs:115",
+            "client/rust/mind-gdext/src/fx.rs:624"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (render): S3, confidence high. Java fills Rules.weather on every sector load (World.java:303) and runs/renders it (Logic.java:377-390, Weather.java:326-341); the port has weather content, Rules.weather plumbing and a WeatherRuntime update body but no scheduler and no live view bridge, so no weather of any kind occurs in campaign play (and the rain=wet / sporestorm statuses never apply). In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/core/World.java:303",
+      "../Mindustry/core/src/mindustry/core/Logic.java:377",
+      "../Mindustry/core/src/mindustry/type/Weather.java:326",
+      "client/rust/mind-core/src/maps/generators/planet.rs:345",
+      "client/rust/mind-core/src/entities/comp/weather.rs:115",
+      "client/rust/mind-gdext/src/fx.rs:624"
+    ]
+  },
+  {
+    "title": "Effect, decal and weather sprites draw as flat colour rectangles (no atlas region execution in the FX pass)",
+    "surface": "world",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "MindFx dev probe: set_weather('rain', ...) or spawn_effect on the running client, screenshot and compare with the Java weather/effect art",
+      "java": [
+        {
+          "tool": "note",
+          "params": {
+            "text": "Java effects/decals/weather draw atlas regions and line/noise primitives: Weather.drawOver at Layer.weather (Weather.java:326-341), underwater rays/caustics/particles (EnvRenderers.java:30-80), Effect.render region draws."
+          }
+        }
+      ],
+      "godot": [
+        {
+          "tool": "godot_exec",
+          "params": {
+            "action": "eval",
+            "params": {
+              "code": "var fx = get_node(\"/root/Spine/MindFx\"); fx.set_weather(\"rain\", 1.0, 1.0, 1.0, 0.0, 600.0, 512, 512, 600, 400); return str(fx.weather_active())"
+            }
+          }
+        }
+      ],
+      "confirm": {
+        "godot": "screenshot shows uniform colour rectangles for the weather field; MindFx.deferred_prim_count() grows because NoiseLayer/ShaderBlit/Polyline prims return false",
+        "java": "rain renders as art/lines, underwater as rays + caustics noise"
+      },
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        {
+          "tool": "note",
+          "params": {
+            "evidence": "Reference art: Java rain/underwater frames; Weather.drawNoise/drawParticles (Weather.java:243-245) and EnvRenderers rays regions."
+          }
+        }
+      ],
+      "godot": [
+        {
+          "tool": "godot_exec",
+          "params": {
+            "action": "eval",
+            "params": {
+              "code": "var fx = get_node(\"/root/Spine/MindFx\"); var id = fx.spawn_effect(\"smoke\", 512, 512, 0); fx.set_weather(\"rain\", 1.0, 1.0, 1.0, 0.0, 600.0, 512, 512, 600, 400); return {\"effect\": str(id), \"deferred\": str(fx.deferred_prim_count()), \"calls\": str(fx.draw_call_count())}"
+            }
+          }
+        }
+      ],
+      "compare": [
+        {
+          "tool": "frame_diff.py",
+          "params": {
+            "--java": "Java weather/effect reference frame (rain or underwater)",
+            "--godot": "probe screenshot",
+            "note": "expect the Godot leg to show solid colour quads instead of textured regions"
+          }
+        }
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "MindFx::draw_prim: the PrimKind::Region arm draws a filled debug rect (client/rust/mind-gdext/src/fx.rs:273-282) and NoiseLayer/ShaderBlit/Polyline return false into missed_events (client/rust/mind-gdext/src/fx.rs:284-288); the region resolver (client/rust/mind-gdext/src/render/atlas_bind.rs:105) is module-private to crate::render (declared at client/rust/mind-gdext/src/render.rs:38).",
+        "files": [
+          "client/rust/mind-gdext/src/fx.rs:273",
+          "client/rust/mind-gdext/src/fx.rs:284",
+          "client/rust/mind-gdext/src/render/atlas_bind.rs:83",
+          "client/rust/mind-gdext/src/render.rs:38",
+          "client/rust/mind-gdext/src/render.rs:417"
+        ],
+        "approach": "Give MindFx a RegionResolver built from the MindAssets autoload (re-export atlas_bind from render.rs or lift the resolver to a shared module). In draw_prim, draw PrimKind::Region as a textured quad using the resolved page texture + UVs (respect color tint, rotation, wrap and the y-flip convention used by build_mesh), instead of the debug rect. Execute ShaderBlit with the loaded shader (caustics) and NoiseLayer with the ported noise-layer math (Weather.drawNoiseLayers) rather than dropping them; keep unsupported prims counted explicitly. WeatherFx already emits Region/NoiseLayer prims so this is the executor half only.",
+        "narrow_check": "cargo test -p mind-core render; tools/build.sh; the MindFx probe screenshot shows textured rain/effect art and deferred_prim_count stops growing for NoiseLayer/ShaderBlit cases.",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/graphics/EnvRenderers.java:30",
+            "../Mindustry/core/src/mindustry/type/Weather.java:243"
+          ],
+          "godot": [
+            "client/rust/mind-gdext/src/fx.rs:273",
+            "client/rust/mind-gdext/src/fx.rs:284",
+            "client/rust/mind-gdext/src/render/atlas_bind.rs:105"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (render): S3, confidence high. The plan-17 draw program already emits region/noise/shader prims, but the executor draws PrimKind::Region as a flat filled rect and drops NoiseLayer/ShaderBlit/Polyline, so every effect sprite, decal, trail region, weather particle/rain and underwater ray/caustic executes wrong the moment the FX path is exercised (dev probes today; live once the FX sink lands, see the sim_host/noop-fx chain at client/rust/mind-core/src/sim/unit_runtime.rs:127). In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/graphics/EnvRenderers.java:30",
+      "client/rust/mind-gdext/src/fx.rs:273",
+      "client/rust/mind-gdext/src/fx.rs:284",
+      "client/rust/mind-gdext/src/render/atlas_bind.rs:105",
+      "client/rust/mind-gdext/src/render.rs:38"
+    ]
+  },
+  {
+    "title": "Shields are invisible: force-projector domes and unit shield bubbles never render",
+    "surface": "world",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "A sector where a powered ForceProjector is placed (sandbox/infinite resources), stepped for a few ticks; compare the dome against Java",
+      "java": [
+        {
+          "tool": "note",
+          "params": {
+            "text": "Java brackets Layer.shields/Layer.buildBeam with the effect buffer and blits Shaders.shield (Renderer.java:403-414); unit shields draw inside UnitType.drawShield (UnitType.java:1555-1557, 1643) and projectors draw their polygon dome (ForceProjector.java:305-308)."
+          }
+        }
+      ],
+      "godot": [
+        {
+          "tool": "godot_exec",
+          "params": {
+            "action": "eval",
+            "params": {
+              "code": "var r = get_node(\"/root/Spine/MindRender\"); return {\"shield_shader\": str(r.shield_available()), \"stats\": str(r.get_render_stats())}"
+            }
+          }
+        }
+      ],
+      "confirm": {
+        "godot": "shield_available() true and a placed projector's state exists, but no pass draws it; screenshots show no dome",
+        "java": "polygon dome visible around the projector"
+      },
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        {
+          "tool": "note",
+          "params": {
+            "evidence": "Java ForceProjector renders a translucent polygon shield (ForceProjector.java:305-308 + Renderer.java:403-414); any shielded unit shows a bubble (UnitType.java:1555-1557)."
+          }
+        }
+      ],
+      "godot": [
+        {
+          "tool": "godot_exec",
+          "params": {
+            "action": "eval",
+            "params": {
+              "code": "var host = get_node(\"/root/Spine/SimHost\"); host.place_block(20, 20, \"force-projector\"); host.step(30); return \"placed\""
+            }
+          }
+        },
+        {
+          "tool": "godot_game",
+          "params": {
+            "action": "screenshot",
+            "params": {
+              "path": "user://projector.png"
+            }
+          }
+        }
+      ],
+      "compare": [
+        {
+          "tool": "frame_diff.py",
+          "params": {
+            "--java": "Java projector frame",
+            "--godot": "user://projector.png"
+          }
+        }
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "No shield pass in the frame pipeline (client/rust/mind-gdext/src/render.rs:543-682) and no host accessor; the view-state producers already exist and have no caller: ForceProjectorState::draw_state (client/rust/mind-core/src/world/blocks/defense/shields.rs:133) and ShieldDrawState (client/rust/mind-core/src/combat/view.rs:125); the shield shader is loaded but the bracket is never opened (client/rust/mind-gdext/src/render.rs:738 only probes availability).",
+        "files": [
+          "client/rust/mind-gdext/src/render.rs:543",
+          "client/rust/mind-gdext/src/render.rs:738",
+          "client/rust/mind-core/src/world/blocks/defense/shields.rs:133",
+          "client/rust/mind-core/src/combat/view.rs:125",
+          "client/rust/mind-core/src/entities/comp/unit/comp.rs:329"
+        ],
+        "approach": "(1) Add a MindSimHost accessor that collects shield draw states from visible projector state components (ForceProjectorState::draw_state, x/y from the building entity) plus unit shields (shield/shield_alpha on the unit comp), gated by the camera view. (2) Add a shield pass parented at Layer::Shields that draws the polygon bubble (upstream sides/rotation/radius, hit/broken modulation) using the already-loaded shield shader; if the shield shader is unavailable, skip like Renderer.java:403. (3) Draw build beams under the same effect-buffer story (Renderer.java:410-413) once builder state is exposed.",
+        "narrow_check": "cargo test -p mind-core world && cargo check -p mind-gdext; tools/build.sh; in-engine: place a powered ForceProjector and screenshot a visible dome (frame_diff against Java), or spawn a shielded unit and diff the bubble.",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/core/Renderer.java:403",
+            "../Mindustry/core/src/mindustry/type/UnitType.java:1555",
+            "../Mindustry/core/src/mindustry/world/blocks/defense/ForceProjector.java:305"
+          ],
+          "godot": [
+            "client/rust/mind-gdext/src/render.rs:738",
+            "client/rust/mind-core/src/world/blocks/defense/shields.rs:133",
+            "client/rust/mind-core/src/combat/view.rs:125"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (render): S3, confidence high (code), medium on early-campaign reachability (ForceProjector is a mid-game block). Java composites unit/projector shields through the effect buffer + Shaders.shield (Renderer.java:403-414); the port loads shield.gdshader, exposes shield_available(), and has both view-state builders, but nothing consumes them and the frame has no shield pass. Build beams (the sibling half of the same upstream bracket, Renderer.java:410-413) are likewise undrawn. In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/core/Renderer.java:403",
+      "../Mindustry/core/src/mindustry/type/UnitType.java:1555",
+      "../Mindustry/core/src/mindustry/world/blocks/defense/ForceProjector.java:305",
+      "client/rust/mind-gdext/src/render.rs:738",
+      "client/rust/mind-core/src/world/blocks/defense/shields.rs:133",
+      "client/rust/mind-core/src/combat/view.rs:125"
+    ]
+  },
+  {
+    "title": "Items travelling on conveyor belts are invisible",
+    "surface": "world",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Ground Zero tutorial repaved in PAR-0049 (drill -> conveyor -> core) with items flowing",
+      "java": [
+        {
+          "tool": "note",
+          "params": {
+            "text": "Java Conveyor.draw draws each item in the belt slots at its interpolated position with item.fullIcon (Conveyor.java:144-177, item loop 166-176); drawCached conveyors show the same through the cache bake."
+          }
+        }
+      ],
+      "godot": [
+        {
+          "tool": "note",
+          "params": {
+            "text": "The block passes draw only def.region per block (client/rust/mind-gdext/src/render/blocks.rs:104-136); there is no item-on-belt draw or host accessor anywhere in mind-gdext."
+          }
+        }
+      ],
+      "confirm": {
+        "godot": "drill->conveyor->core flow is verified (PAR-0049) but the belt pixels stay empty while the core copper count rises",
+        "java": "copper pips visibly ride the belt"
+      },
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        {
+          "tool": "note",
+          "params": {
+            "evidence": "Java Ground Zero frames after the conveyor objective show copper items on the belt (runs/20261009-* tutorial legs)."
+          }
+        }
+      ],
+      "godot": [
+        {
+          "tool": "godot_exec",
+          "params": {
+            "action": "eval",
+            "params": {
+              "code": "var host = get_node(\"/root/Spine/SimHost\"); return host.get_state_json()"
+            }
+          }
+        },
+        {
+          "tool": "godot_game",
+          "params": {
+            "action": "screenshot",
+            "params": {
+              "path": "user://belt.png"
+            }
+          }
+        }
+      ],
+      "compare": [
+        {
+          "tool": "frame_diff.py",
+          "params": {
+            "--java": "Java tutorial belt frame",
+            "--godot": "user://belt.png",
+            "note": "crop the conveyor run; Godot has no item pixels"
+          }
+        }
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "Missing logistics item sub-pass: BlockRenderer draws only BlockDef::region (client/rust/mind-gdext/src/render/blocks.rs:104-136); the live belt slots (ids/xs/ys) exist on ConveyorBuild (client/rust/mind-core/src/world/blocks/distribution/conveyor.rs:35-66) but no MindSimHost accessor exposes them and no renderer draws them.",
+        "files": [
+          "client/rust/mind-gdext/src/render/blocks.rs:104",
+          "client/rust/mind-gdext/src/render/blocks.rs:113",
+          "client/rust/mind-gdext/src/sim_host.rs:1341",
+          "client/rust/mind-core/src/world/blocks/distribution/conveyor.rs:35",
+          "client/rust/mind-gdext/src/render/atlas_bind.rs:83"
+        ],
+        "approach": "Add a MindSimHost accessor returning visible logistics item draws (conveyor ids/xs/ys projected to world position at rotation, plus duct/stack-conveyor equivalents if their state mirrors upstream) from the live ECS. In a pass parented to the block band at Layer::Block - 0.1 (upstream order, Java Conveyor.java:166-176), resolve each item's full-icon region and draw it at the interpolated position with the scale-marker divide and per-page mesh batching used by UnitRenderer. Keep the belt frame/arrow animation (regions[blendbits][frame]) as a follow-up in the same pass.",
+        "narrow_check": "cargo test -p mind-core world; tools/build.sh; in-engine Ground Zero drill->conveyor->core screenshot shows copper pips moving along the belt (frame_diff vs Java); item count per belt matches ConveyorBuild.len.",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/world/blocks/distribution/Conveyor.java:144",
+            "../Mindustry/core/src/mindustry/world/blocks/distribution/Conveyor.java:166"
+          ],
+          "godot": [
+            "client/rust/mind-gdext/src/render/blocks.rs:104",
+            "client/rust/mind-core/src/world/blocks/distribution/conveyor.rs:35"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (render): S3, confidence high. Conveyors are the first logistics block the tutorial teaches (PAR-0049 verified the item flow) and Java draws every belt item (Conveyor.java:144-177); the port's block pass draws only the static block region, so belts look idle while the core fills up. Only ground truth is left out here: chest/duct item visuals. In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/world/blocks/distribution/Conveyor.java:144",
+      "../Mindustry/core/src/mindustry/world/blocks/distribution/Conveyor.java:166",
+      "client/rust/mind-gdext/src/render/blocks.rs:104",
+      "client/rust/mind-gdext/src/render/blocks.rs:113",
+      "client/rust/mind-core/src/world/blocks/distribution/conveyor.rs:35"
+    ]
+  },
+  {
+    "title": "Sector launch has no landing cutscene: the core does not drop in and the camera does not zoom",
+    "surface": "world",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Planet page -> Ground Zero -> Go, capturing frames during the first two seconds after the world loads, Java vs Godot",
+      "java": [
+        {
+          "tool": "note",
+          "params": {
+            "text": "Java Control.java:205-222 plays renderer.showLanding(core) on every core sector load unless skipcoreanimation; Renderer.java:180-196 drives landTime/weatherAlpha and Renderer.java:420-427 draws the animator at Layer.space (LaunchAnimator.drawLaunch)."
+          }
+        }
+      ],
+      "godot": [
+        {
+          "tool": "godot_exec",
+          "params": {
+            "action": "eval",
+            "params": {
+              "code": "var r = get_node(\"/root/Spine/MindRender\"); return str(r.get_render_stats().stage_trace)"
+            }
+          }
+        }
+      ],
+      "confirm": {
+        "godot": "stage_trace only pushes the literal string 'cutscene'; no Cutscene object exists and the world appears at full scale immediately",
+        "java": "step-11 frames show the camera zoomed on the descending core"
+      },
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        {
+          "tool": "note",
+          "params": {
+            "evidence": "runs/20261009-052658-seed-campaign/seed/step-11-java-launching.png (Java launching frame)."
+          }
+        }
+      ],
+      "godot": [
+        {
+          "tool": "godot_game",
+          "params": {
+            "action": "screenshot",
+            "params": {
+              "path": "user://launch-first-second.png"
+            }
+          }
+        },
+        {
+          "tool": "note",
+          "params": {
+            "text": "Compare with runs/20261009-052658-seed-campaign/godot/step-launched.png: the port world is already static at normal zoom."
+          }
+        }
+      ],
+      "compare": [
+        {
+          "tool": "frame_diff.py",
+          "params": {
+            "--java": "runs/20261009-052658-seed-campaign/seed/step-11-java-launching.png",
+            "--godot": "user://launch-first-second.png"
+          }
+        }
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "The cutscene state machine exists Godot-free (client/rust/mind-core/src/render/cutscene.rs:24-114) but no mind-gdext code references Cutscene/LaunchAnimator; render.rs only records the stage name (client/rust/mind-gdext/src/render.rs:549) and campaign.rs play_sector loads the world directly (client/rust/mind-gdext/src/campaign.rs:544).",
+        "files": [
+          "client/rust/mind-core/src/render/cutscene.rs:24",
+          "client/rust/mind-gdext/src/render.rs:543",
+          "client/rust/mind-gdext/src/render.rs:549",
+          "client/rust/mind-gdext/src/campaign.rs:544",
+          "client/rust/mind-gdext/src/render/pixelate.rs:52"
+        ],
+        "approach": "(1) Own a render::cutscene::Cutscene in the world renderer/campaign view state and trigger show_landing(core) when a core sector finishes loading (Java Control.java:205-222), with the core's LaunchAnimator implementation (Java world/blocks/LaunchAnimator.java). (2) Tick it paused-aware in the frame path (Renderer.java:180-196 semantics) and feed camerascale/land_scale into the camera zoom and the Pixelator (the cutscene flag at render/pixelate.rs:52 is currently always passed false at render.rs:667). (3) Draw the launch animator at Layer::Space (Renderer.java:420-427) and hand weather_alpha to the weather pass.",
+        "narrow_check": "cargo test -p mind-core render; tools/build.sh; launch Ground Zero and capture frames for the first 2 s: the camera zoom/core drop matches the Java step-11 frames (frame_diff), and MindRender.get_render_stats().stage_trace reports a live cutscene.",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/core/Control.java:205",
+            "../Mindustry/core/src/mindustry/core/Renderer.java:180",
+            "../Mindustry/core/src/mindustry/core/Renderer.java:420",
+            "../Mindustry/core/src/mindustry/core/Renderer.java:567",
+            "../Mindustry/core/src/mindustry/world/blocks/LaunchAnimator.java:9"
+          ],
+          "godot": [
+            "client/rust/mind-core/src/render/cutscene.rs:24",
+            "client/rust/mind-gdext/src/render.rs:549",
+            "client/rust/mind-gdext/src/campaign.rs:544"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (render): S3, confidence high on the missing wiring (Cutscene/LaunchAnimator have no caller outside tests; Control.java:205-222 plays the landing on every core sector). Player impact: launching any campaign sector jumps straight to the static world instead of Java's core-drop/camera-zoom cutscene; the ledger's launch-flow items (PAR-0019/0024/0025) cover the dialogs, not the animation. In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/core/Control.java:205",
+      "../Mindustry/core/src/mindustry/core/Renderer.java:420",
+      "../Mindustry/core/src/mindustry/world/blocks/LaunchAnimator.java:9",
+      "client/rust/mind-core/src/render/cutscene.rs:24",
+      "client/rust/mind-gdext/src/render.rs:549",
+      "client/rust/mind-gdext/src/campaign.rs:544"
+    ]
+  }
+]

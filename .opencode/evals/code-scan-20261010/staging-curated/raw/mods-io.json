@@ -1,0 +1,359 @@
+[
+  {
+    "title": "Installing a mod changes nothing in the game: modded blocks, items and units never appear",
+    "surface": "mods",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Boot the Mods dialog (root/MindMods list()) then follow a modded content name into the live registry boot: client/rust/mind-gdext/src/sim_host.rs:216 (create_base_content with an empty MemoryBundle) and client/rust/mind-gdext/src/assets/atlas.rs:78 (FileTree::new() with no mod overlay). Both show mod content/assets never enter the shipped client.",
+      "java": [],
+      "godot": [],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "Copy a JSON content mod (e.g. a mod shipping content/items + content/blocks) into the Java mods directory and launch Mindustry.",
+        "The mod's block/item appear in the build palette and database with <mod>-prefixed names."
+      ],
+      "godot": [
+        "Copy parity/mod_fixtures/basic (or any JSON content mod) into user://mods and launch client/.",
+        "Open the Mods dialog: the mod is listed Enabled.",
+        "Open the build palette / database / content info: no <mod>-prefixed block or item exists (MindSimHost.content_snapshot has no mod records)."
+      ],
+      "compare": [
+        "Java registers mod content via content.createModContent() (ClientLauncher.java:164-171 -> Mods.loadContent, Mods.java:836); the port's live boot only runs create_base_content() with no ModsContentProvider, so the modded block/item is absent."
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "client/rust/mind-gdext/src/mods.rs:65 (bootstrap runs Mods::load only) and client/rust/mind-gdext/src/sim_host.rs:216 (content registry booted from MemoryBundle::new() with no ModsContentProvider); no live caller of Mods::collect_content_files (client/rust/mind-core/src/mods/provider.rs:72).",
+        "files": [
+          "client/rust/mind-gdext/src/mods.rs:65",
+          "client/rust/mind-gdext/src/sim_host.rs:216",
+          "client/rust/mind-gdext/src/campaign.rs:184",
+          "client/rust/mind-gdext/src/editor/mod.rs:111",
+          "client/rust/mind-gdext/src/assets/atlas.rs:78",
+          "client/rust/mind-core/src/mods/provider.rs:72"
+        ],
+        "approach": "(1) Add a MindMods content accessor alongside list()/errors() that returns the enabled mods' content files (Mods::collect_content_files) plus ModsOverlay for the loaded Mods instance. (2) Wherever the live client boots a ContentRegistry (MindSimHost::bootstrap, MindCampaign, MindEditor), run registry.init() then registry.create_mod_content(&mut ModsContentProvider::new(files)) and the ModDataManager patch pass, matching upstream ClientLauncher.java:164-171 (createBaseContent -> loadScripts -> createModContent) and Mods.loadContent (Mods.java:836). (3) Feed the mod overlay into MindAssets: populate the FileTree used at atlas.rs:78 and append the overlay pages so mod sprites/bundles resolve, then publish content_counts so the database/palette see the new records. (4) Add a headless probe for the wiring.",
+        "narrow_check": "Run client/ headless (or a gdext boot probe) with parity/mod_fixtures/basic installed under user://mods and assert MindSimHost's content snapshot reports 'basic-mod-test-wall' and 'basic-mod-test-ingot' after boot; the same fixture already passes via `mind-headless mods content --fixture basic`.",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/ClientLauncher.java:164",
+            "../Mindustry/core/src/mindustry/mod/Mods.java:836"
+          ],
+          "godot": [
+            "client/rust/mind-gdext/src/mods.rs:65",
+            "client/rust/mind-gdext/src/sim_host.rs:216",
+            "client/rust/mind-gdext/src/assets/atlas.rs:78"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (mods-io): S2 high confidence, whole mods feature inert. The shipped client never calls Mods::collect_content_files/create_mod_content (grep: only mind-headless/src/exec.rs:1614-1639 and mind-core tests), and MindAssets builds FileTree::new() with no mod files, so installed mods have no gameplay or visual effect. Player impact: install/import flows look like they work (dialog lists the mod, requires-reload banner) but nothing changes in-game. Related: the script-mod item (same bootstrap seam, different symptom) and the enable-flag persistence item. In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/ClientLauncher.java:164",
+      "../Mindustry/core/src/mindustry/mod/Mods.java:836",
+      "client/rust/mind-gdext/src/mods.rs:65",
+      "client/rust/mind-gdext/src/sim_host.rs:216",
+      "client/rust/mind-gdext/src/assets/atlas.rs:78",
+      "client/rust/mind-core/src/mods/provider.rs:72",
+      "client/rust/mind-headless/src/exec.rs:1617"
+    ]
+  },
+  {
+    "title": "Mods that ship scripts never run and get no unsupported warning",
+    "surface": "mods",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Start at client/rust/mind-gdext/src/mods.rs:65 (bootstrap) and confirm Mods::load_scripts (client/rust/mind-core/src/mods/mod.rs:449) has no caller outside tests; then check the Mods dialog row for a mod with user://mods/<mod>/scripts/main.js.",
+      "java": [],
+      "godot": [],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "Install a mod shipping scripts/main.js that logs or registers behavior, launch Mindustry, and observe the script's effect (and the @mod.scripts.disable error dialog path on failure, Mods.java:671)."
+      ],
+      "godot": [
+        "Install a mod shipping scripts/main.js under user://mods and launch client/.",
+        "Open the Mods dialog: the mod shows Enabled, no error/@mod.errors row; nothing the script would do happens."
+      ],
+      "compare": [
+        "Java runs every enabled mod's script through Rhino at boot (ClientLauncher.java:170 -> Mods.loadScripts, Mods.java:803-836); the port's autoload never calls load_scripts, so scripts are silently skipped and script mods are not even flagged unsupported (the mark lives inside load_scripts, mods/mod.rs:471-480)."
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "client/rust/mind-gdext/src/mods.rs:65-88 (MindMods::bootstrap calls Mods::load but never Mods::load_scripts); the ScriptHost seam exists but no live caller installs or drives it.",
+        "files": [
+          "client/rust/mind-gdext/src/mods.rs:65",
+          "client/rust/mind-core/src/mods/mod.rs:449",
+          "client/rust/mind-core/src/mods/mod.rs:440",
+          "client/rust/mind-core/src/mods/script.rs:49",
+          "client/ui/dialogs/mods_dialog.gd:142"
+        ],
+        "approach": "(1) Call self.mods.load_scripts(&NativeFs) from MindMods::bootstrap right after load (upstream order: ClientLauncher.java:170 runs loadScripts before createModContent), so NoScriptHost logs the warning and marks the mod state Unsupported + ScriptsUnsupported. (2) Surface it: mods_dialog.gd:142-172 already maps state unsupported -> @mod.blacklisted with the reason; make sure the errors()/@mod.errors path shows the script reason (it will once the state/reason is set). (3) Add the promised migration hint for has_scripts/java rows (plans/20 §3.10) so the player knows the mod's code half is unavailable. (4) Leave an opt-in ScriptHost hook (Mods::set_script_host) for the OD1 WASM decision; no engine work required for the classification fix.",
+        "narrow_check": "Godot probe: user://mods/s/scripts/main.js present -> MindMods.list()[s].state == 'unsupported' and MindMods.errors() contains 'script mods are not supported in this build'; existing cargo test -p mind-core mods::script_mod_marked_unsupported keeps the core half green.",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/ClientLauncher.java:170",
+            "../Mindustry/core/src/mindustry/mod/Mods.java:803"
+          ],
+          "godot": [
+            "client/rust/mind-gdext/src/mods.rs:65",
+            "client/rust/mind-core/src/mods/mod.rs:449",
+            "client/rust/mind-core/src/mods/script.rs:49"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (mods-io): S2 high confidence. OD1 deliberately ships NoScriptHost (script engine itself is an accepted deviation), but the port also skipped the classification half: grep shows Mods::load_scripts has no caller outside mods/mod.rs tests, so a script mod stays Enabled and the dialog never says anything. Player impact: script mods (most Mindustry mods) look healthy and do nothing. Related: content-wiring item (same MindMods boot seam) and the crash-recovery item (failed mods). In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/ClientLauncher.java:170",
+      "../Mindustry/core/src/mindustry/mod/Mods.java:803",
+      "../Mindustry/core/src/mindustry/mod/Mods.java:671",
+      "client/rust/mind-gdext/src/mods.rs:65",
+      "client/rust/mind-core/src/mods/mod.rs:449",
+      "client/rust/mind-core/src/mods/mod.rs:183",
+      "client/rust/mind-core/src/mods/script.rs:56"
+    ]
+  },
+  {
+    "title": "Disabling a mod does not stick: after a restart every mod is enabled again",
+    "surface": "mods",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Start at client/rust/mind-gdext/src/mods.rs:44 (settings: SettingsStore::new()) and confirm no SettingsStore::load/force_save/flush_if_dirty call in that file; compare the working pattern at client/rust/mind-gdext/src/ui/ui_host.rs:806/957.",
+      "java": [],
+      "godot": [],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "Disable a mod in the Java Mods dialog, restart, and open the dialog: the mod is still disabled (Core.settings 'mod-<name>-enabled' persisted)."
+      ],
+      "godot": [
+        "Open the Mods dialog, toggle a mod off, quit the client, relaunch, and open the Mods dialog again.",
+        "The mod is enabled again; user://config/settings.bin has no mod-<name>-enabled key."
+      ],
+      "compare": [
+        "Upstream Mods.setEnabled writes 'mod-<name>-enabled' to the persistent Core.settings (Mods.java:973-983; read back at Mods.java:1297-1299). The port writes only to an in-memory SettingsStore created at MindMods init (mods.rs:44) and never loaded from or flushed to disk, so the flag is lost at exit."
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "client/rust/mind-gdext/src/mods.rs:44 (SettingsStore::new() instead of load-from-disk) and no persist call after set_enabled/import_mod/remove_mod (mods.rs:119/131/169).",
+        "files": [
+          "client/rust/mind-gdext/src/mods.rs:44",
+          "client/rust/mind-gdext/src/mods.rs:65",
+          "client/rust/mind-gdext/src/mods.rs:119",
+          "client/rust/mind-gdext/src/ui/ui_host.rs:806",
+          "client/rust/mind-gdext/src/ui/ui_host.rs:957",
+          "client/rust/mind-gdext/src/campaign.rs:173"
+        ],
+        "approach": "(1) In MindMods::init/ready, replace SettingsStore::new() with SettingsStore::load(&NativeFs, &Paths::resolve(None)) (the pattern at ui_host.rs:806) so mod-<name>-enabled/-failed survive boots. (2) Persist after every mutation (set_enabled, import_mod, remove_mod) with force_save or flush_if_dirty, reusing ui_host.rs:957's persist_settings shape, or flush on exit alongside MindSimHost's existing exit_tree settings write. (3) Keep bootstrap loading with that store so Mods::load's should_be_enabled reads the persisted flag.",
+        "narrow_check": "Godot probe: MindMods.set_enabled('x', false) -> quit -> relaunch -> MindMods.list()['x'].enabled == false and user://config/settings.bin contains mod-x-enabled=false; then re-enable and confirm the flag flips back.",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/mod/Mods.java:973",
+            "../Mindustry/core/src/mindustry/mod/Mods.java:1297"
+          ],
+          "godot": [
+            "client/rust/mind-gdext/src/mods.rs:44",
+            "client/rust/mind-gdext/src/mods.rs:119",
+            "client/rust/mind-gdext/src/ui/ui_host.rs:957"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (mods-io): S2 high confidence. Plain-04 SettingsStore persists only on explicit flush; MindMods holds a private store that is never loaded or saved (grep for flush/force_save/load in mods.rs is empty), so both enable flags and the import 'failed' flag reset every boot. Player impact: the Mods dialog's enable toggle is session-local; the requires-reload banner promises a restart that silently undoes the choice. Related: crash-recovery item uses the same unpinned mod-<name>-failed key. In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/mod/Mods.java:973",
+      "../Mindustry/core/src/mindustry/mod/Mods.java:1297",
+      "client/rust/mind-gdext/src/mods.rs:44",
+      "client/rust/mind-gdext/src/mods.rs:119",
+      "client/rust/mind-gdext/src/campaign.rs:173",
+      "client/rust/mind-gdext/src/ui/ui_host.rs:957"
+    ]
+  },
+  {
+    "title": "After a mod-caused crash the client keeps loading every mod and offers no Restore button",
+    "surface": "mods",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Start at client/rust/mind-gdext/src/platform/mod.rs:92 (check_launch result is only logged) and confirm set_failed_to_launch/skip_mod_loading have no live caller; then check client/ui/dialogs/mods_dialog.gd:63 for the missing restore action.",
+      "java": [],
+      "godot": [],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "Kill Mindustry before a successful launch (leftover launchid.dat), then restart with an enabled mod: the mod is disabled and marked failed, an '@mods.initfailed' notice shows, and the Mods dialog offers '@mods.restore' to re-enable failed mods."
+      ],
+      "godot": [
+        "Leave a launchid.dat in the data root, restart client/: only a '[platform] previous launch may have crashed' log line appears.",
+        "Open the Mods dialog: every mod is still enabled, there is no Restore button and no 'mods disabled' notice."
+      ],
+      "compare": [
+        "Upstream wires launchid.dat -> failedToLaunch (Vars.java:397-407), has Mods.load disable previously-enabled mods and set mod-<name>-failed when skipModLoading (Mods.java:1222-1227), shows @mods.initfailed at ClientLoad (Control.java:75-80) and puts @mods.restore in ModsDialog when any mod failed (ModsDialog.java:55-60). The port has the marker and the core API but no caller: desktop::check_launch's result is only logged (platform/mod.rs:92-97)."
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "client/rust/mind-gdext/src/platform/mod.rs:92-97 (check_launch bool never reaches Mods) and client/rust/mind-core/src/mods/mod.rs:233-240 (skip_mod_loading/set_failed_to_launch are dead API); the dialog has no restore action (client/ui/dialogs/mods_dialog.gd:63-70).",
+        "files": [
+          "client/rust/mind-gdext/src/platform/mod.rs:92",
+          "client/rust/mind-gdext/src/platform/desktop.rs:35",
+          "client/rust/mind-gdext/src/mods.rs:65",
+          "client/rust/mind-core/src/mods/mod.rs:233",
+          "client/rust/mind-core/src/mods/mod.rs:243",
+          "client/ui/dialogs/mods_dialog.gd:63"
+        ],
+        "approach": "(1) Route the failed-launch signal: MindPlatform's check_launch result (or a re-read in MindMods::bootstrap of <data>/launchid.dat) calls Mods::set_failed_to_launch(true) before Mods::load. (2) In Mods::load, mirror upstream Mods.java:1222-1227: when skip_mod_loading() && modcrashdisable, write mod-<name>-enabled=false and mod-<name>-failed=wasEnabled for every mod so the next boot comes up mod-free instead of crash-looping. (3) Show the '@mods.initfailed' info once after boot (key already exists at assets/bundles/bundle.properties:144; upstream Control.java:75-80). (4) Add the '@mods.restore' button (bundle.properties:148) to mods_dialog.gd's action row when any Mods::list() row reports failed(), re-enabling each failed mod and refreshing (upstream ModsDialog.java:55-60). (5) Clear the failed flag on a successful launch (finish_launch hook).",
+        "narrow_check": "Godot probe: write <data>/launchid.dat, relaunch, assert MindMods.list() rows are disabled with failed=true and the '@mods.initfailed' notice was shown; press Restore and assert rows are enabled again; finish_launch + clean boot leaves mod-<name>-failed=false.",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/Vars.java:397",
+            "../Mindustry/core/src/mindustry/mod/Mods.java:1222",
+            "../Mindustry/core/src/mindustry/core/Control.java:75",
+            "../Mindustry/core/src/mindustry/ui/dialogs/ModsDialog.java:55"
+          ],
+          "godot": [
+            "client/rust/mind-gdext/src/platform/mod.rs:92",
+            "client/rust/mind-core/src/mods/mod.rs:233",
+            "client/ui/dialogs/mods_dialog.gd:63"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (mods-io): S2 high confidence on the missing flow (impact currently reduced because mods cannot crash the client yet - see the mod-content-wiring item; once mods load, this is the only in-game recovery from a bad mod). launchid.dat is written/removed correctly (platform/desktop.rs:35-48) and '@mods.initfailed'/'@mods.restore' both exist in assets/bundles/bundle.properties:144/148 but are referenced nowhere in GDScript. In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/Vars.java:397",
+      "../Mindustry/core/src/mindustry/mod/Mods.java:1222",
+      "../Mindustry/core/src/mindustry/mod/Mods.java:509",
+      "../Mindustry/core/src/mindustry/core/Control.java:75",
+      "../Mindustry/core/src/mindustry/ui/dialogs/ModsDialog.java:55",
+      "client/rust/mind-gdext/src/platform/mod.rs:92",
+      "client/rust/mind-gdext/src/platform/desktop.rs:35",
+      "client/rust/mind-core/src/mods/mod.rs:233",
+      "client/ui/dialogs/mods_dialog.gd:63"
+    ]
+  },
+  {
+    "title": "Exported builds ship without the game assets: sprites render as placeholder quads and fonts/bundles are missing",
+    "surface": "boot",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Start at client/export_presets.cfg:18-19 (no export_files/include_filter) and tools/export.sh:68 (bare godot export); then check client/rust/mind-gdext/src/assets/loader.rs:32-58, whose res://assets and <project>/../assets probes both miss beside an export.",
+      "java": [],
+      "godot": [],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "Run the upstream desktop jar/launcher: sprites/fonts/bundles are read from the asset tree shipped inside the game package (atlas 'sprites/sprites.aatls', ClientLauncher.java:160; fonts/font.woff, Fonts.java:30), so text and sprites render."
+      ],
+      "godot": [
+        "tools/export.sh --platform windows --verify (or any platform with templates), run the artifact with a data dir, and watch the logs: '[assets] missing manifest .../sprites/sprites.atlas.json' and placeholder quads/wrong text.",
+        "Alternatively unzip/scan the export output: no assets/sprites/sprites.atlas.json, fonts/ or bundles/ entries are packaged."
+      ],
+      "compare": [
+        "Upstream packages its assets with the game; the port's packed asset tree lives outside the Godot project (repo-root assets/, client/assets does not exist) and neither export_presets.cfg nor tools/export.sh copies it, so resolve_assets_dir falls back to a missing ../assets and every atlas/font/bundle lookup goes placeholder. The plan-22 launch smoke already recorded this exact gap (plans/22_PLATFORM_EXPORT_IMPLEMENTATION_PLAN.md:718)."
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "Export packaging: client/export_presets.cfg:18-19 (all_resources + empty include_filter, no export_files) and tools/export.sh:64-76 (Godot export only), consumed by client/rust/mind-gdext/src/assets/loader.rs:32-58.",
+        "files": [
+          "client/export_presets.cfg:18",
+          "tools/export.sh:68",
+          "client/rust/mind-gdext/src/assets/loader.rs:32",
+          "client/rust/mind-gdext/src/assets/loader.rs:45"
+        ],
+        "approach": "(1) Add an assets-packaging step to the export path: copy the packed repo-root assets/ tree next to the artifact so <exe dir>/../assets resolves (the dev fallback at loader.rs:52), or list it as export_files in the preset so it lands at res://assets; keep it in sync with `mind-tools pack` output (tools/pack.sh). (2) Make --verify assert the packaged tree contains sprites/sprites.atlas.json (+ fonts/ and bundles/) and fail otherwise. (3) Document/support the ProjectSettings mindustry/assets_dir override (loader.rs:15) for non-standard layouts. (4) Re-run the plan-22 launch smoke (exported exe, --headless --data-dir, --quit-after 180) and assert no 'missing manifest' line plus a non-zero MindAssets region count/font count instead of placeholder quads.",
+        "narrow_check": "tools/export.sh --platform linux --verify && ./Mindustry-Godot.x86_64 --headless --data-dir /tmp/mg-export --quit-after 180: logs show no '[assets] missing manifest' and MindAssets reports the packed region/font counts (>0) rather than placeholder fallbacks.",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/ClientLauncher.java:160",
+            "../Mindustry/core/src/mindustry/ui/Fonts.java:30"
+          ],
+          "godot": [
+            "client/export_presets.cfg:18",
+            "tools/export.sh:68",
+            "client/rust/mind-gdext/src/assets/loader.rs:45"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (mods-io): S2 high confidence (player-visible only in exported builds; editor/dev runs load the repo assets via the ../assets fallback). Confirmed by code (no packaging step, no preset filter) and by the plan-22 launch smoke note (plans/22:718). Player impact: an exported game launches but renders placeholder quads for every sprite and loses localized text/fonts; plan 24 W3 tracks it as 'ship assets/ in exports'. In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/ClientLauncher.java:160",
+      "../Mindustry/core/src/mindustry/ui/Fonts.java:30",
+      "client/export_presets.cfg:18",
+      "client/export_presets.cfg:19",
+      "tools/export.sh:68",
+      "client/rust/mind-gdext/src/assets/loader.rs:45",
+      "plans/22_PLATFORM_EXPORT_IMPLEMENTATION_PLAN.md:718"
+    ]
+  }
+]

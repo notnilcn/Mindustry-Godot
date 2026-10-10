@@ -72,7 +72,7 @@ last_verified: not yet (seeded from .opencode/skills/playtest/SKILL.md §Recipes
 
 - `godot_screenshot game` can return identical bytes across different states
   while the editor covers the window; use `move_to_foreground` or capture the X
-  screen with computer-mcp and crop.
+  screen with `capture_screen.py --window-title Mindustry` and crop.
 - `godot_screenshot burst` blocks its round-trip for the whole burst; keep
   bursts tiny (≈4 frames / ≤500 ms).
 - An eval body that errors stops in the editor Debugger; clear the log buffer

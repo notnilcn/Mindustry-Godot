@@ -11,7 +11,7 @@ preconditions:
   - Java window normalized to 1152x648; the Godot game is the embedded 1152x648 viewport.
   - parity-ledger.json readable; note the next PAR-#### id and the current seeding.last_sweep/frontier.
   - One surface (or one depth level) per sweep — do not chase the whole tree in one run.
-tools: [computer-mcp_mouse_move, computer-mcp_click, computer-mcp_key_down, computer-mcp_key_up, computer-mcp_screenshot, godot_health, godot_editor_read, godot_editor_edit, godot_game, godot_exec, godot_input, godot_screenshot, godot_log]
+tools: [java_input.py, window_ctl.py, capture_screen.py, godot_health, godot_editor_read, godot_editor_edit, godot_game, godot_exec, godot_input, godot_screenshot, godot_log]
 path: none — this chain is the root recipe; items it finds store their own boot-replay path.
 last_verified: 2026-10-09 runs/20261009-052658-seed-campaign (campaign surface: boot → Play > Campaign → first-run chooser → planet page; both legs; first mismatch recorded PAR-0015; see chains/campaign-planet-page-seed.md)
 ---
@@ -83,8 +83,8 @@ calls.
 
    ```
    window_ctl.py raise Mindustry
-   computer-mcp_mouse_move {"x": X, "y": Y}
-   computer-mcp_click {"x": X, "y": Y, "button": "left"}
+   java_input.py move X Y
+   java_input.py click X Y left
    capture_screen.py --window-title Mindustry --output "$RUN/seed/step-NN-<element>-java.png"
    ```
 
@@ -109,8 +109,8 @@ calls.
    reproduces the recorded stop once, then fixes; the sweep never edits code.
 
 6. Return both clients to the fork before the next element and confirm it:
-   Java `computer-mcp_key_down {"key": "escape"}` + `computer-mcp_key_up
-   {"key": "escape"}` (split calls; click the window first if focus was lost),
+   Java `java_input.py keydown escape` + `java_input.py keyup escape` (split
+   calls; every `java_input.py` action re-activates the window first),
    or the dialog's Back/cancel control; Godot the same via `godot_input` or the
    dialog close button. Re-capture / re-list and assert the surface is
    unchanged. For destructive entries (Quit, Abandon), classify on the confirm

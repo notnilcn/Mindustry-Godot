@@ -1,0 +1,437 @@
+[
+  {
+    "title": "Researching any tech node (or capturing any sector) free-unlocks the objective-free early tech tree",
+    "surface": "campaign",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Campaign -> Serpulo -> Ground Zero -> research the Mechanical Drill -> reopen the Tech Tree",
+      "java": ["PlanetDialog/TechTree dialog", "ResearchDialog.spend -> UnlockEvent -> Control.checkAutoUnlocks"],
+      "godot": ["res://scenes/ui/ui_root.tscn research dialog", "MindCampaign.research() sweep"],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "gradlew desktop:run; fresh profile; play groundZero; research mechanicalDrill; open the tech tree",
+        "only mechanicalDrill (+ already-unlocked/zero-requirement nodes) is unlocked; conveyor/junction/mechanical-pump still require their copper research"
+      ],
+      "godot": [
+        "launch Serpulo/Ground Zero on a fresh profile; research mechanical-drill; reopen the tech tree",
+        "conveyor, junction, router, distributor, sorter, item-bridge, core-foundation, core-nucleus, mechanical-pump, conduit chain, graphite-press, laser-drill, ... are already unlocked and their costs were never paid"
+      ],
+      "compare": [
+        "diff the unlocked node set after the first research; upstream unlocks only zero-requirement objective-free nodes, the port unlocks the whole objective-free subtree reachable from the root"
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "mind-core::game::tech_tree::check_auto_unlocks keys off the stored TechNode.requirements list, which content::tech::TechTreeBuilder leaves empty for every default-built vanilla node",
+        "files": [
+          "client/rust/mind-core/src/content/tech/mod.rs:306",
+          "client/rust/mind-core/src/game/tech_tree.rs:344",
+          "client/rust/mind-gdext/src/campaign.rs:936"
+        ],
+        "approach": "1) Materialize `content_research_requirements()` (and the multiplier scaling already used by `effective_requirements`) into `TechNode.requirements`/`finished_requirements` when `at_full_inner` gets no explicit list, mirroring `TechTree.node(content, children)` -> `content.researchRequirements()` (TechTree.java:31-33/167-175); keep ids/order untouched but re-record affected campaign goldens and `CHECKSUM_VERSION`-adjacent outputs if the stored lists change observable dumps. 2) Also insert the upstream `Research(dependency)` objectives from `content.getDependencies()` so node gating matches, or make `check_auto_unlocks` consult `effective_requirements()` instead of the stored list. 3) Add the regression scenario: after a research/capture sweep, `conveyor` must still be locked and `mechanical-drill` must require its real copper cost.",
+        "narrow_check": "cargo test -p mind-core game::tech_tree && a new headless campaign check that runs one check_auto_unlocks sweep on a fresh registry and asserts `conveyor` is NOT unlocked",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/core/Control.java:350",
+            "../Mindustry/core/src/mindustry/content/TechTree.java:31",
+            "../Mindustry/core/src/mindustry/content/TechTree.java:167"
+          ],
+          "godot": [
+            "client/rust/mind-core/src/content/tech/mod.rs:306",
+            "client/rust/mind-core/src/game/tech_tree.rs:319",
+            "client/rust/mind-core/src/game/tech_tree.rs:344",
+            "client/rust/mind-gdext/src/campaign.rs:457",
+            "client/rust/mind-gdext/src/campaign.rs:936"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (campaign): S2/high. Upstream checkAutoUnlocks tests node.requirements.length == 0 against the list materialized from content.researchRequirements() at node build; the port's generated trees leave requirements empty (TechTreeBuilder::at_full_inner sets Vec::new() when no explicit list, mod.rs:306-316) and check_auto_unlocks tests that stored list (tech_tree.rs:344), so any research that unlocks something (campaign.rs:931-938) or any sector capture (campaign.rs:447-461) sweeps and unlocks every not-yet-unlocked node whose parent chain is unlocked and whose objectives are complete, free of cost. Blocked only for nodes with explicit SectorComplete/OnSector/Produce objectives. The plan-24/plan-12 note documents this as an 'explicit-list residual'. In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/core/Control.java:350",
+      "../Mindustry/core/src/mindustry/content/TechTree.java:31",
+      "../Mindustry/core/src/mindustry/content/TechTree.java:167",
+      "client/rust/mind-core/src/content/tech/mod.rs:306",
+      "client/rust/mind-core/src/game/tech_tree.rs:319",
+      "client/rust/mind-core/src/game/tech_tree.rs:344",
+      "client/rust/mind-gdext/src/campaign.rs:457",
+      "client/rust/mind-gdext/src/campaign.rs:936"
+    ]
+  },
+  {
+    "title": "Campaign sector progression is forgotten after a client restart (captures, attempts, stored items, import/export routes reset)",
+    "surface": "campaign",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Campaign -> capture a sector -> save & quit -> relaunch the client -> planet page sector panel",
+      "java": ["Planet.init() -> Sector.loadInfo()", "Logic SaveLoadEvent -> SectorInfo.write()"],
+      "godot": ["MindCampaign.bootstrap -> Campaign.load_all", "planet page sector panel"],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "gradlew desktop:run; capture frozenForest; quit; relaunch",
+        "the planet page still shows the sector captured with its attempt count, stored items and (for legacy bases) import/export destination"
+      ],
+      "godot": [
+        "capture any sector; quit to the menu and restart the client; reopen the planet page",
+        "was_captured/attempts/items/production/origin/destination are back to defaults; the next campaign turn's production pass writes those defaults over the stored `<planet>-s-<id>-info` JSON (universe.rs:653)"
+      ],
+      "compare": [
+        "compare the sector record (`<planet>-s-<id>-info`) and the panel rows before/after a relaunch"
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "game::universe::Campaign::load_all / MindCampaign::bootstrap never call SectorInfoState::load_info, and the resume path never applies SectorInfoState::write (upstream Planet.init -> sector.loadInfo and Logic SaveLoadEvent -> info.write)",
+        "files": [
+          "client/rust/mind-core/src/game/universe.rs:732",
+          "client/rust/mind-core/src/game/sector.rs:489",
+          "client/rust/mind-gdext/src/campaign.rs:192",
+          "client/rust/mind-core/src/game/play.rs:433"
+        ],
+        "approach": "1) In `Campaign::load_all` (after `planet.load_rules`/`load_stats`) iterate planets/sectors and call `sector.load_info(settings, &planet.name)` so `was_captured`/`attempts`/items/production/waves/origin/destination survive restarts (Planet.java:459-463). 2) On `play_sector` (and the host resume path), apply the stored record to the session before `RulesLoad`: wave/winWave/waves/attack plus the stored item pool written into the player core (`SectorInfo.write`, upstream Logic.java:78-86). 3) Ensure the production-pass `save_info` (universe.rs:653) only runs after the load, so it stops clobbering the stored JSON with defaults.",
+        "narrow_check": "cargo test -p mind-core game && the headless round-trip already sketched in mind-headless campaign_scenarios.rs:414-420 (save_info -> rebuild -> load_info asserts the record survives)",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/type/Planet.java:462",
+            "../Mindustry/core/src/mindustry/type/Sector.java:105",
+            "../Mindustry/core/src/mindustry/core/Logic.java:78"
+          ],
+          "godot": [
+            "client/rust/mind-core/src/game/universe.rs:732",
+            "client/rust/mind-core/src/game/sector.rs:489",
+            "client/rust/mind-gdext/src/campaign.rs:199"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (campaign): S2/high. `SectorInfoState::load_info` has no non-test caller; `Campaign::load_all` loads only planet rules/stats and universe counters (universe.rs:732-738), and `MindCampaign::bootstrap` only re-derives `sector.save` from files (campaign.rs:199-206). `SectorInfoState::write` (the resume-time apply, sector.rs:369) is also uncalled. The production pass then calls `save_info` on the default-initialized record (universe.rs:653), overwriting the stored JSON. Player impact: after any restart the campaign forgets which sectors were captured, their attempts/wave/item pools and their inter-sector routes; `initial` capture bookkeeping (stats/last-sector victory) can re-fire. Related but distinct from PAR-0037 (Ground Zero world round-trip, verified). In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/type/Planet.java:462",
+      "../Mindustry/core/src/mindustry/type/Sector.java:105",
+      "../Mindustry/core/src/mindustry/core/Logic.java:78",
+      "client/rust/mind-core/src/game/universe.rs:732",
+      "client/rust/mind-core/src/game/universe.rs:653",
+      "client/rust/mind-core/src/game/sector.rs:489",
+      "client/rust/mind-core/src/game/sector.rs:369",
+      "client/rust/mind-gdext/src/campaign.rs:199"
+    ]
+  },
+  {
+    "title": "Sectors never report or accumulate production while you play them (offline production, exports and the sector panel stay empty)",
+    "surface": "campaign",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Campaign -> play a sector with production -> Save & Quit -> planet page sector panel (and wait a campaign turn)",
+      "java": ["Logic.update -> state.rules.sector.info.update()", "SaveVersion.writeMeta -> info.prepare + saveInfo"],
+      "godot": ["MindCampaign.pump_runtime (no sector-info update)", "MindSimHost save (no prepare)"],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "gradlew desktop:run; build a drill + core in a sector; wait a few seconds; hover the sector on the planet page",
+        "the panel shows production/export/import rates and stored items; after leaving, turns add the produced items to the sector pool"
+      ],
+      "godot": [
+        "build production, Save & Quit, reopen the planet page",
+        "production/export/import/stored rows are empty (sector.info.production/items never populated) and the offline turns add nothing"
+      ],
+      "compare": [
+        "compare the sector panel stats and the `<planet>-s-<id>-info` JSON after playing a producing sector"
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "the live campaign never feeds or refreshes SectorInfo: no caller of SectorInfoState::update/prepare/write and CoreCampaignHooks defaults to a no-op, so the production_pass/export_import_pass maps stay empty",
+        "files": [
+          "client/rust/mind-core/src/game/sector.rs:324",
+          "client/rust/mind-core/src/game/sector.rs:334",
+          "client/rust/mind-core/src/world/blocks/storage/core_block.rs:116",
+          "client/rust/mind-core/src/game/runtime.rs:183",
+          "client/rust/mind-core/src/io/sim_io.rs:264"
+        ],
+        "approach": "1) Implement `CoreCampaignHooks` over the live `CampaignRuntime` so core item deltas reach the played sector's `handle_core_item`/`handle_production` (upstream CoreBlock.java:794/808/881/895); wire LaunchPad/LandingPad import/export when those blocks land. 2) In `campaign_tick_system` or a new `TickSet::Campaign` system, call `sector.info.update(1/60, item_index_of)` for the played sector each tick (Logic.java:538) and flush on the autosave cadence. 3) At the save boundary (`SimIoHandler::save` / `live_meta_tags`), build a `CoreSnapshot` from the world and call `SectorInfoState::prepare` + `save_info` (SaveVersion.java:116-118).",
+        "narrow_check": "cargo test -p mind-core world::blocks::storage + a headless scenario that runs a core-fed production line for N ticks, then asserts the sector's production window/items are non-zero and survive a save/load",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/core/Logic.java:538",
+            "../Mindustry/core/src/mindustry/io/SaveVersion.java:117",
+            "../Mindustry/core/src/mindustry/game/SectorInfo.java:260",
+            "../Mindustry/core/src/mindustry/world/blocks/storage/CoreBlock.java:794"
+          ],
+          "godot": [
+            "client/rust/mind-core/src/game/sector.rs:324",
+            "client/rust/mind-core/src/game/sector.rs:334",
+            "client/rust/mind-core/src/world/blocks/storage/core_block.rs:56",
+            "client/rust/mind-core/src/io/sim_io.rs:264"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (campaign): S2/high. `SectorInfoState::update` (sector.rs:324) and `prepare` (sector.rs:334) have zero non-test callers; the only `CoreCampaignHooks` impl is a test `Incinerating` (core_block.rs:442-455) so `handle_core_item` never records live deltas; `SimIoHandler`'s live meta write (sim_io.rs:264-299) never runs `prepare`/`saveInfo`. `Campaign::run_turn`'s production/import passes (universe.rs:588-656) read `info.production`/`info.export`, which therefore stay empty: offline production and legacy-pad imports/exports are dead, and the planet panel's production/export/import/stored rows never populate. Sibling of the sector-info load item above. Related existing items (do not duplicate): PAR-0015/PAR-0016 render the panel itself. In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/core/Logic.java:538",
+      "../Mindustry/core/src/mindustry/io/SaveVersion.java:117",
+      "../Mindustry/core/src/mindustry/game/SectorInfo.java:260",
+      "../Mindustry/core/src/mindustry/world/blocks/storage/CoreBlock.java:794",
+      "client/rust/mind-core/src/game/sector.rs:324",
+      "client/rust/mind-core/src/game/sector.rs:334",
+      "client/rust/mind-core/src/world/blocks/storage/core_block.rs:56",
+      "client/rust/mind-core/src/io/sim_io.rs:264",
+      "client/rust/mind-core/src/game/universe.rs:588"
+    ]
+  },
+  {
+    "title": "Campaign attack/submission sectors are absent: those planet cells never load their authored maps and never count as enemy bases",
+    "surface": "campaign",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Campaign -> Serpulo planet page -> submission/attack cells (e.g. sector id 76) next to an owned base",
+      "java": ["SectorPresets.load -> SectorSubmissions.registerSectors()", "Planet.getData().attackSectors"],
+      "godot": ["create_base_content -> content::registries::sectors::load -> register_sector_submissions (no-op)"],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "gradlew desktop:run; capture an area next to sector 76; the cell renders as a crux enemy base and is landable",
+        "landing loads assets/maps/serpulo/hidden/76.msav with sector.generateEnemyBase=true (attack sector)"
+      ],
+      "godot": [
+        "same position in the port: the cell has no preset, no enemy-base colour/marker, and the planet page marks it locked; sector id 76 can never resolve assets/maps/serpulo/hidden/76.msav (load_preset_map_grid needs a preset, sim_host.rs:1747-1782)"
+      ],
+      "compare": [
+        "compare the planet-page layer for the 49 submission/attack cells and the launched map: authored hidden .msav + enemy base vs locked procedural cell"
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "content::registries::sectors::register_sector_submissions is a no-op and the planet JSON's attackSectors/presets are never applied at runtime (PlanetDef::load_planet_data is write-only; create_base_content hardcodes IdentityRemap)",
+        "files": [
+          "client/rust/mind-core/src/content/registries/sectors.rs:227",
+          "client/rust/mind-core/src/content/registries/planets.rs:304",
+          "client/rust/mind-core/src/content/registries/mod.rs:57",
+          "client/rust/mind-core/src/maps/planet/serpulo.rs:1359"
+        ],
+        "approach": "1) Port `SectorSubmissions.registerSectors()` into the hook: 46 `register`/`registerSurvival` presets plus fallenVessel/geothermalStronghold/cruxscape, each `SectorPresetDef` named `sector-<planet>-<id>` with `file_name: Some(\"hidden/<id>\")`, `require_unlock=false`, upstream difficulty and (for captureWave<=0) `sector.generate_enemy_base=true`, appended at the same load-order position (before the Erekir presets, matching SectorPresets.java:161) so existing ids stay stable. 2) Apply `assets/planets/<name>.json` at content init: `attackSectors` -> `generate_enemy_base=true` and `presets` -> a real `SectorRemapProvider` instead of `IdentityRemap` (both the runtime cell ids and the UI already ships the JSON). 3) Confirm `load_preset_map_grid` resolves the shipped 46 files under `assets/maps/serpulo/hidden/`.",
+        "narrow_check": "cargo test -p mind-core content::registries::sectors (assert 95 presets and hidden `<id>` resolution) + a headless scenario launching `serpulo:76` that asserts `has_enemy_base()` and the hidden map's dimensions",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/content/SectorPresets.java:161",
+            "../Mindustry/core/src/mindustry/maps/SectorSubmissions.java:27",
+            "../Mindustry/core/src/mindustry/maps/SectorSubmissions.java:141",
+            "../Mindustry/core/src/mindustry/type/Planet.java:482"
+          ],
+          "godot": [
+            "client/rust/mind-core/src/content/registries/sectors.rs:227",
+            "client/rust/mind-core/src/content/registries/sectors.rs:311",
+            "client/rust/mind-core/src/content/registries/planets.rs:304",
+            "client/rust/mind-core/src/game/sector.rs:559"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (campaign): S2/high. `parity/reports/jvm_golden_diff.md` records 46 port vs 95 JVM sector presets; the 49 missing are `SectorSubmissions.registerSectors()` (46 register() + 3 direct `new SectorPreset`: fallenVessel, geothermalStronghold, cruxscape), all `requireUnlock=false` with authored maps under `assets/maps/serpulo/hidden/<id>.msav` (46 files shipped in the port). `register_sector_submissions` is an intentional no-op (sectors.rs:226-229). Independently, `PlanetData.attackSectors` is never applied (Planet.java:482; port `load_planet_data` set but never read, planets.rs:304/666; `planet_view` only forwards `presets` to the UI, campaign.rs:1959-1980). Impact: those cells have `preset=None`/`generate_enemy_base=false`, so `has_enemy_base()` is false (sector.rs:559), the Serpulo generator sees no attack sector (maps/planet/serpulo.rs:1359), and the UI's coarse `unlocked = has_base() || always_unlocked` (ui/campaign.rs:552) locks them. No ledger item covers this. In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/content/SectorPresets.java:161",
+      "../Mindustry/core/src/mindustry/maps/SectorSubmissions.java:27",
+      "../Mindustry/core/src/mindustry/maps/SectorSubmissions.java:141",
+      "../Mindustry/core/src/mindustry/type/Planet.java:482",
+      "client/rust/mind-core/src/content/registries/sectors.rs:227",
+      "client/rust/mind-core/src/content/registries/sectors.rs:311",
+      "client/rust/mind-core/src/content/registries/planets.rs:304",
+      "client/rust/mind-core/src/game/sector.rs:559",
+      "client/rust/mind-core/src/maps/planet/serpulo.rs:1359"
+    ]
+  },
+  {
+    "title": "Losing a sector and re-attacking it restores your base instead of applying the loss damage",
+    "surface": "campaign",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Campaign -> Serpulo -> lose a sector (core destroyed while attacked) -> planet page -> re-launch the sector",
+      "java": ["Control.playSector -> SectorInfo.write/prepare + SectorDamage.apply(1f)"],
+      "godot": ["MindCampaign.start_sector -> play_sector (resume branch)"],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "build a defended base in a Serpulo sector, let the core fall, return to the planet page and re-launch",
+        "most defenses are destroyed by SectorDamage(1f), the base is rebuilt from the saved plans; the match resumes from the sector record"
+      ],
+      "godot": [
+        "same steps in the port: the launch takes the resume branch (play_sector.rs:415-431 sees the stale has_core=true) and loads the last save as-is",
+        "maps::sector_damage::apply has no live caller, so no simulated loss damage and no plan-based restore happen"
+      ],
+      "compare": [
+        "count surviving turrets/blocks after re-launching a lost sector in both clients"
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "game::play::play_sector branch selection (has_core from the never-refreshed sector record) and the missing mind-core::maps::sector_damage::apply call in the lost-sector replay path",
+        "files": [
+          "client/rust/mind-core/src/game/play.rs:427",
+          "client/rust/mind-core/src/maps/sector_damage.rs:92",
+          "client/rust/mind-gdext/src/campaign.rs:543"
+        ],
+        "approach": "1) Decide `hasBase` like upstream: after the host loads the save, treat the sector as lost when the loaded world has no default-team cores (or the record's prepared has_core is false), not from the stale in-memory boolean (Control.java:456/465). 2) On that branch re-place the planet's default core at `sector.info.spawn_position`, run `maps::sector_damage::apply(tiles, content, state, 1.0, rng, fx)` to destroy most defenses (Control.java:482), then restore the previously captured plans/buildings (upstream keeps `previousPlans`/`previousBuildings` and replays them onto the fresh world). 3) Keep Erekir `clearSectorOnLose=true` behavior unchanged.",
+        "narrow_check": "headless scenario: build + save a sector, remove the player core, replay via play_sector, assert the surviving building count dropped and the prior plans are present; cargo test -p mind-core maps::sector_damage",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/core/Control.java:456",
+            "../Mindustry/core/src/mindustry/core/Control.java:465",
+            "../Mindustry/core/src/mindustry/core/Control.java:482"
+          ],
+          "godot": [
+            "client/rust/mind-core/src/game/play.rs:400",
+            "client/rust/mind-core/src/game/play.rs:427",
+            "client/rust/mind-core/src/maps/sector_damage.rs:92"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (campaign): S2/medium. play_sector's own comment says the damaged-core re-derivation is deferred and 'the sector is relaunched fresh, matching upstream's hadNoCore fallback' (play.rs:400-403), but the code only relaunches when `!has_save || !has_core`; has_core is set true at launch (campaign.rs:593) and never refreshed (the sibling sector-info load/prepare gaps), so a lost Serpulo sector (clearSectorOnLose=false) resumes the last save unchanged. `maps::sector_damage::apply` (sector_damage.rs:92) is called only from tests. Player impact: re-attacking a lost sector starts from the intact saved base rather than upstream's damaged base + rebuild plans; the base-less resume also has no core/plan restore. Related existing item: PAR-0040 covers the Abandon flow, not the loss/damage simulation. In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/core/Control.java:456",
+      "../Mindustry/core/src/mindustry/core/Control.java:465",
+      "../Mindustry/core/src/mindustry/core/Control.java:482",
+      "client/rust/mind-core/src/game/play.rs:400",
+      "client/rust/mind-core/src/game/play.rs:427",
+      "client/rust/mind-core/src/maps/sector_damage.rs:92",
+      "client/rust/mind-gdext/src/campaign.rs:593"
+    ]
+  },
+  {
+    "title": "The launch loadout picked in Configure Loadout is ignored - every campaign launch uses the empty/default loadout",
+    "surface": "ui",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Campaign -> planet page -> Launch -> Configure Loadout -> pick a non-default schematic -> Launch",
+      "java": ["PlanetDialog.playSelected -> LaunchLoadoutDialog -> universe.updateLoadout(core, selected)"],
+      "godot": ["res://ui/dialogs/planet_dialog.gd _sector_action_pressed -> _open_launch_loadout -> _launch"],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "gradlew desktop:run; launch from an owned sector into a free one; pick a different loadout schematic (and edit resources)",
+        "the launched core uses the selected schematic + resources"
+      ],
+      "godot": [
+        "same flow: launch_loadout emits the chosen `index`, planet_dialog forwards it to _launch, but _launch drops the parameter and calls the 2-arg start_sector",
+        "every launch carries the empty loadout (campaign.rs:533-534 clears rules.loadout), so the selection has no effect"
+      ],
+      "compare": [
+        "compare the launched core's item JSON after picking a non-default loadout"
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "client/ui/dialogs/planet_dialog.gd::_launch ignores its `loadout` parameter, and MindCampaign::start_sector_with_loadout has no live caller",
+        "files": [
+          "client/ui/dialogs/planet_dialog.gd:732",
+          "client/rust/mind-gdext/src/campaign.rs:479"
+        ],
+        "approach": "1) Resolve the chosen schematic index (launch_loadout_dialog.gd:14-15) into its item stacks - add a `MindCampaign.get_loadout_stacks(index)` or extend `start_sector_with_loadout` to take the schematic index - and have `_launch` call it instead of the 2-arg `start_sector`. 2) Apply upstream's launcher rules: free launch (findLauncher == null) clears the loadout and uses the basic loadout (PlanetDialog.java:1401); a launch from a base removes the schematic's requirement items from the source sector before landing (from.removeItems(loadout.requirements())). 3) Persist the choice with `universe.updateLoadout(core, file)` so the next dialog preselects it.",
+        "narrow_check": "Rust/GDScript test that `start_sector_with_loadout('serpulo', <fresh sector>, stacks)` lands a core carrying the stacks, plus an in-engine launch with a non-default loadout asserting the core item JSON",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/ui/dialogs/LaunchLoadoutDialog.java:151",
+            "../Mindustry/core/src/mindustry/ui/dialogs/PlanetDialog.java:1401",
+            "../Mindustry/core/src/mindustry/ui/dialogs/PlanetDialog.java:1407"
+          ],
+          "godot": [
+            "client/ui/dialogs/planet_dialog.gd:732",
+            "client/ui/dialogs/planet_dialog.gd:753",
+            "client/ui/dialogs/launch_loadout_dialog.gd:14",
+            "client/rust/mind-gdext/src/campaign.rs:479"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (campaign): S3/high. `_launch(planet, sector, loadout, resume)` receives the chosen schematic index (planet_dialog.gd:732/753, launch_loadout_dialog.gd:14-15) but never uses it; `start_sector_with_loadout` is only called from `start_sector` with an empty string (campaign.rs:473-474, 533-534). Adjacent ledger item: PAR-0054 recorded the earlier 3-arg arity error/break-on-error pause in this same flow; this is the residual silent no-op now that the 2-arg call works, so it is filed as a distinct symptom. Also note PAR-0024 (the dialog appearing on a free launch) is a separate mismatch. In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/ui/dialogs/LaunchLoadoutDialog.java:151",
+      "../Mindustry/core/src/mindustry/ui/dialogs/PlanetDialog.java:1401",
+      "client/ui/dialogs/planet_dialog.gd:732",
+      "client/ui/dialogs/planet_dialog.gd:753",
+      "client/ui/dialogs/launch_loadout_dialog.gd:14",
+      "client/rust/mind-gdext/src/campaign.rs:474",
+      "client/rust/mind-gdext/src/campaign.rs:479"
+    ]
+  }
+]

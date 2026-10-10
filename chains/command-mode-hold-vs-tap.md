@@ -6,14 +6,11 @@ applies_when: >-
   Twin-evaluating EV-0044-family findings: default RTS command-mode reachability
   from the keyboard, hold-vs-tap semantics, or the `commandmodehold` setting.
 preconditions:
-  - Loop manifest exported; Java jar built; computer-mcp registered with DISPLAY set at opencode start.
+  - "Loop manifest exported; Java jar built; Java-leg shell helpers: scripts in `.opencode/skills/parity-eval/scripts/`, run with `$PARITY_PY` (bootstrap.sh) and `DISPLAY=:10`."
   - One client at a time on the loop display (`$PARITY_DISPLAY`; Xwayland with Weston's WM by default, Xvfb with no WM on the software fallback).
   - Godot leg after boot-and-identity (res://scenes/game.tscn played with the explicit scene param, runtime_connected true, pid stamped); res://scenarios/input_controls is absent, the default empty world is the stage.
 tools:
-  - computer-mcp_mouse_move
-  - computer-mcp_click
-  - computer-mcp_key_down
-  - computer-mcp_key_up
+  - java_input.py
   - godot_exec
   - godot_input
   - godot_game
@@ -31,7 +28,7 @@ The gate (`DesktopInput.java:300-302`) requires `block == null`, no field/dialog
 no live player unit with `canBoost` sharing the key. A fresh campaign launch controls
 no unit, so the boost guard is inactive and the gate passes.
 
-## Java leg (computer-mcp, 900x700+190+10 at loop-2)
+## Java leg (shell helpers, 900x700+190+10 at loop-2)
 
 1. Launch via the loop wrapper (`chains/java-reference-leg.md` step 1) and poll the
    log for `Total time to load`. On a fresh data dir the campaign route includes the
@@ -42,8 +39,8 @@ no unit, so the boost guard is inactive and the gate passes.
    catalog pre-research (no placement block selected), no dialog/field. The tutorial
    hint is a label with a Skip button and does not close the gate.
 3. Capture two baselines ~3 s apart, then hold the key with
-   `computer-mcp_key_down {"key":"shift"}`, capture twice while held, release with
-   `computer-mcp_key_up {"key":"shift"}`, capture after ~3 s.
+   `java_input.py keydown shift`, capture twice while held, release with
+   `java_input.py keyup shift`, capture after ~3 s.
 4. Measure with `frame_diff.py`; the command-mode affordance is the bottom panel
    swapping from the block catalog to `Command Mode` / `[no units]`
    (`PlacementFragment.java:447-475`, bundle `commandmode.name`) plus the golden

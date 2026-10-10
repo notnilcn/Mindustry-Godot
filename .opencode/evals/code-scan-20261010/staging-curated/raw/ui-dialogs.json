@@ -1,0 +1,477 @@
+[
+  {
+    "title": "Custom Rules dialog renders no rule rows, so Customize and in-game rule editing cannot change any rule",
+    "surface": "ui",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Custom Game -> pick a map -> Customize (or open_dialog(\"custom_rules\", {\"rules\": ...}) directly; the port's pause menu has no rules entry)",
+      "java": [
+        "../Mindustry/core/src/mindustry/ui/dialogs/CustomRulesDialog.java:116",
+        "../Mindustry/core/src/mindustry/ui/dialogs/MapPlayDialog.java:75",
+        "../Mindustry/core/src/mindustry/ui/dialogs/PausedDialog.java:27"
+      ],
+      "godot": [
+        "client/ui/dialogs/custom_rules_dialog.gd:49",
+        "client/ui/dialogs/map_play_dialog.gd:76",
+        "client/ui/dialogs/paused_dialog.gd:44"
+      ],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "Launch the pinned Java client; open Custom Game, pick any map, press Customize: the dialog shows a search field, a 7-category rail and ~100 editable rows (check/number/team builders, CustomRulesDialog.java:140-206).",
+        "Toggle @rules.infiniteresources, close, press Play: the map starts with infinite resources (MapPlayDialog.java:75 applies the edited Rules object).",
+        "In a custom game, pause -> the book (customize) button appears when rules are editable and applies the edited Rules on dialog hide (PausedDialog.java:27-37)."
+      ],
+      "godot": [
+        "Start the Godot client; open Custom Game (PAR-0066 may error in the build window - open_dialog(\"map_play\", {\"map\": ...}) bypasses it) -> Customize.",
+        "Observe: only the 7 category buttons and a category title render - zero rule rows and no search; custom_rules_dialog.gd:49-53 adds exactly one header label and never reads or writes a Rules value.",
+        "Pause a custom game: no rules/book entry exists (paused_dialog.gd:44-86 builds only objective/abandon/back/settings/save/load/planet/host/quit)."
+      ],
+      "compare": [
+        "Java exposes the whole Rules model for editing and hands the edited Rules to playMap/setRules; the Godot dialog cannot read or write a single rule - map_play_dialog.gd:115-118 even documents that the dialog does not produce rules yet."
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "client/ui/dialogs/custom_rules_dialog.gd:49 (_rebuild) renders only a header because there is no Rules descriptor/JSON read-write path from the Rules model, and paused_dialog.gd never opens the dialog at all (Java PausedDialog.java:27-34).",
+        "files": [
+          "client/ui/dialogs/custom_rules_dialog.gd:49",
+          "client/ui/dialogs/map_play_dialog.gd:76",
+          "client/ui/dialogs/paused_dialog.gd:44",
+          "client/rust/mind-gdext/src/campaign.rs:782",
+          "client/rust/mind-core/src/io/json/rules.rs:613"
+        ],
+        "approach": "1) Add a rules getter next to MindCampaign.set_rules_json (campaign.rs:782) that serializes the live Rules through mind_core::io::json::rules so the dialog can seed rows and map_play can round-trip edited JSON. 2) Port the CustomRulesDialog row builders (search + category rail + check/number/text/team with enable predicates, CustomRulesDialog.java:122-360) into custom_rules_dialog.gd over a descriptor table of Rules fields; edits accumulate into a local Rules JSON. 3) map_play_dialog._open_rules passes the current rules JSON into the dialog context and stores the edited JSON back into _rules_json when custom_rules closes. 4) Add the paused-dialog book button (visible when allowEditRules && (server || !net.active()), PausedDialog.java:27-37) that opens custom_rules and applies on hide via set_rules_json.",
+        "narrow_check": "MCP: open_dialog(\"custom_rules\", {\"rules\": <json>}) -> count editable rows > 0; toggle waves/infinite resources, close, and read the applied rules back through the campaign facade; headless test that an edited field survives the descriptor -> JSON -> Rules round trip.",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/ui/dialogs/CustomRulesDialog.java:116",
+            "../Mindustry/core/src/mindustry/ui/dialogs/CustomRulesDialog.java:149",
+            "../Mindustry/core/src/mindustry/ui/dialogs/MapPlayDialog.java:75",
+            "../Mindustry/core/src/mindustry/ui/dialogs/PausedDialog.java:27"
+          ],
+          "godot": [
+            "client/ui/dialogs/custom_rules_dialog.gd:49",
+            "client/ui/dialogs/map_play_dialog.gd:115",
+            "client/ui/dialogs/paused_dialog.gd:44"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (ui-dialogs): S2, high confidence. Player impact: the entire custom-rules editing surface is absent - Customize is an empty shell and the pause menu has no rule-edit entry, so custom game and sandbox rule changes are impossible. PAR-0066 only blocks the Custom Game window for the repro; the dialog can be opened directly. Related dialogs but distinct symptoms: PAR-0023 (campaign difficulty), PAR-0024 (launch loadout).",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/ui/dialogs/CustomRulesDialog.java:116",
+      "../Mindustry/core/src/mindustry/ui/dialogs/CustomRulesDialog.java:149",
+      "../Mindustry/core/src/mindustry/ui/dialogs/PausedDialog.java:27",
+      "../Mindustry/core/src/mindustry/ui/dialogs/MapPlayDialog.java:75",
+      "client/ui/dialogs/custom_rules_dialog.gd:49",
+      "client/ui/dialogs/map_play_dialog.gd:115",
+      "client/ui/dialogs/paused_dialog.gd:44"
+    ]
+  },
+  {
+    "title": "Map Play 'Play' neither loads the selected map nor applies the selected gamemode",
+    "surface": "menu",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Custom Game -> map tile -> Map Play dialog -> Play (or open_dialog(\"map_play\", {\"map\": \"...\"}) then Play)",
+      "java": [
+        "../Mindustry/core/src/mindustry/ui/dialogs/MapPlayDialog.java:54",
+        "../Mindustry/core/src/mindustry/ui/dialogs/MapPlayDialog.java:87",
+        "../Mindustry/core/src/mindustry/core/Control.java:400"
+      ],
+      "godot": [
+        "client/ui/dialogs/map_play_dialog.gd:88",
+        "client/rust/mind-gdext/src/campaign.rs:662",
+        "client/rust/mind-gdext/src/sim_host.rs:939"
+      ],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "Java: Custom Game -> pick a built-in map -> select Sandbox -> Play: the selected map terrain loads and rules become sandbox/infinite resources (MapPlayDialog.java:54-64 builds rules = map.applyRules(mode); :87-93 calls control.playMap(map, rules, playtesting) -> Control.java:400-417).",
+        "Modes that are invalid for the map are disabled (MapPlayDialog.java:61), and the playtest flag sets state.playtestingMap (Control.java:413)."
+      ],
+      "godot": [
+        "Godot: same flow, or open map_play directly; select Sandbox and press Play.",
+        "map_play_dialog.gd:88-99 emits play_requested (grep: no listeners anywhere) and calls MindCampaign.start_map(name) because start_map_mode does not exist (line 95 probes has_method; only this file mentions the name).",
+        "campaign.rs:662-668 start_map clones session.rules, sets mode_name and calls play_map - the map name is never resolved to terrain and the mode is never applied; the sim host is not reloaded (only load_sector at sim_host.rs:939 loads a grid, and only for campaign sectors).",
+        "Observe: the previously loaded world stays (or an empty menu world), and rules keep the prior session values - sandbox shows no infinite resources, PvP/attack flags never set."
+      ],
+      "compare": [
+        "Java loads the chosen map file and applies Gamemode rules before play; Godot drops mode/playtest/rules and never touches the world grid, so the Play button is effectively a rules no-op on the old world."
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "client/ui/dialogs/map_play_dialog.gd:88 (_play) plus the missing MindCampaign.start_map_mode / MindSimHost.load_map facade; campaign.rs:662 start_map ignores both the map name and the gamemode.",
+        "files": [
+          "client/ui/dialogs/map_play_dialog.gd:88",
+          "client/rust/mind-gdext/src/campaign.rs:662",
+          "client/rust/mind-gdext/src/sim_host.rs:939",
+          "client/rust/mind-core/src/game/gamemode.rs:70",
+          "client/rust/mind-core/src/maps/mod.rs:235",
+          "client/rust/mind-core/src/maps/map.rs:163"
+        ],
+        "approach": "1) Add the load half: MindSimHost.load_map(name, rules_json) resolving the map the same way the Custom Game grid does (Maps/CustomGame registry) and loading its grid through the existing load machinery (load_grid_file sim_host.rs:1786; Maps::load_map_file maps/mod.rs:235). 2) Add MindCampaign.start_map_mode(map, mode, playtest, rules_json): start from the map's own rules (Map::rules maps/map.rs:163), apply Gamemode::apply (gamemode.rs:70), override with rules_json, then call play_map once with those rules and install the runtime the way start_sector does. 3) Make map_play_dialog._play require start_map_mode and fail loudly instead of the silent start_map fallback (line 97-99); keep _rules_json synced from Customize. 4) Carry the playtest flag (Control.java:413 state.playtestingMap + resumeAfterPlaytest) or route the editor's playtest through MindEditor.playtest (editor/mod.rs:1106). 5) Disable invalid modes with Gamemode::valid(map) (gamemode.rs:108), matching MapPlayDialog.java:61.",
+        "narrow_check": "Headless: start_map_mode on a built-in map with mode=sandbox -> session rules have infinite_resources == true and the loaded grid dimensions match the map header; mode=attack on a 1-team map is rejected like upstream. MCP: Play a map as Sandbox and read MindSimHost.get_state_json() + campaign rules.",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/ui/dialogs/MapPlayDialog.java:54",
+            "../Mindustry/core/src/mindustry/ui/dialogs/MapPlayDialog.java:87",
+            "../Mindustry/core/src/mindustry/core/Control.java:400"
+          ],
+          "godot": [
+            "client/ui/dialogs/map_play_dialog.gd:88",
+            "client/rust/mind-gdext/src/campaign.rs:662",
+            "client/rust/mind-gdext/src/sim_host.rs:939"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (ui-dialogs): S2, high confidence. Player impact: the Custom Game/PvP/attack/sandbox play flow silently starts the wrong world with the wrong rules; mode buttons and Playtest appear functional but have no effect (play_requested has no listeners and start_map_mode is referenced but absent). PAR-0065 covers only the map grid, PAR-0066 the dialog build panic - both distinct.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/ui/dialogs/MapPlayDialog.java:54",
+      "../Mindustry/core/src/mindustry/ui/dialogs/MapPlayDialog.java:87",
+      "../Mindustry/core/src/mindustry/core/Control.java:400",
+      "client/ui/dialogs/map_play_dialog.gd:88",
+      "client/rust/mind-gdext/src/campaign.rs:662",
+      "client/rust/mind-gdext/src/sim_host.rs:939"
+    ]
+  },
+  {
+    "title": "Load Game 'Import Save' does nothing: no .msav is imported after picking a file",
+    "surface": "ui",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Pause (non-campaign) or menu -> Load Game -> @save.import -> pick a .msav in the fallback file chooser",
+      "java": [
+        "../Mindustry/core/src/mindustry/ui/dialogs/LoadDialog.java:199",
+        "../Mindustry/core/src/mindustry/ui/dialogs/FileChooserDialog.java:140"
+      ],
+      "godot": [
+        "client/ui/dialogs/load_dialog.gd:259",
+        "client/ui/dialogs/file_chooser_dialog.gd:95",
+        "client/rust/mind-core/src/game/saves.rs:406"
+      ],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "Java: pause -> Load Game -> Import Save -> chooser filtered to msav -> picking a valid .msav imports it into the slot grid (LoadDialog.java:199-223); invalid saves show @save.import.invalid and campaign saves @save.nocampaign."
+      ],
+      "godot": [
+        "Godot: Load Game -> @save.import -> file_chooser opens with no extension filter (load_dialog.gd:259-264 passes only {\"open\": true}).",
+        "Click a file: file_chooser_dialog.gd:95-98 emits file_chosen and hides, but no node is connected (grep client/) - only editor_maps_dialog.gd:144-147 listens - so the slot grid never refreshes and no slot is created. No error is shown either.",
+        "Saves.import_save exists in mind-core (saves.rs:406-423) but has no GDExt binding (grep import_save under client/rust/mind-gdext -> none); the drag-drop classifier platform/desktop.rs:59-78 only logs and returns true."
+      ],
+      "compare": [
+        "Java imports the picked file through control.saves.importSave and rebuilds the grid; Godot emits the path into the void and the file is silently discarded (button and chooser both look functional)."
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "client/ui/dialogs/load_dialog.gd:259 (_open_import) never listens to file_chooser.file_chosen, and there is no GDExt import_save binding; Saves::import_save (mind-core saves.rs:406) is dead code.",
+        "files": [
+          "client/ui/dialogs/load_dialog.gd:259",
+          "client/ui/dialogs/file_chooser_dialog.gd:95",
+          "client/rust/mind-core/src/game/saves.rs:406",
+          "client/rust/mind-gdext/src/platform/desktop.rs:59"
+        ],
+        "approach": "1) Expose MindCampaign.import_save(path) calling Saves::import_save (saves.rs:406) through the same settings/paths/filesystem handles list_save_slots uses; return an error kind so the dialog can show @save.import.invalid / @save.nocampaign. 2) In load_dialog._open_import, connect the file_chooser file_chosen (and chooser_cancelled) before opening, pass extensions [\"msav\"], call import_save on selection, then refresh the grid or show the error toast. 3) Route the existing dropped-file path (platform/desktop.rs:59 handle_file_import) into import_save instead of the log-only branch.",
+        "narrow_check": "Headless: copy a fixture .msav to a temp dir -> import_save -> list_save_slots grows by one and loading it round-trips the same checksum; importing a junk file returns the invalid error. MCP: pick a .msav in the chooser -> a row appears in the Load Game grid.",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/ui/dialogs/LoadDialog.java:199",
+            "../Mindustry/core/src/mindustry/ui/dialogs/FileChooserDialog.java:140"
+          ],
+          "godot": [
+            "client/ui/dialogs/load_dialog.gd:259",
+            "client/ui/dialogs/file_chooser_dialog.gd:95",
+            "client/rust/mind-core/src/game/saves.rs:406"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (ui-dialogs): S2, high confidence (lead 3, file chooser residual from plan 24 s7 plan 14). Player impact: saves cannot be brought in from outside the client; upstream's Import Save is the documented migration path. The fallback chooser itself is otherwise wired (navigation/extension filter), only the import end is missing. Distinct from PAR-0024/PAR-0037 (launch/save-resume flows).",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/ui/dialogs/LoadDialog.java:199",
+      "client/ui/dialogs/load_dialog.gd:259",
+      "client/ui/dialogs/file_chooser_dialog.gd:95",
+      "client/rust/mind-core/src/game/saves.rs:406",
+      "client/rust/mind-gdext/src/platform/desktop.rs:59"
+    ]
+  },
+  {
+    "title": "Choosing a language shows the restart prompt but is never persisted - the UI stays English after restart",
+    "surface": "settings",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Menu -> Settings -> Language (or the settings category action) -> click a language -> restart the client",
+      "java": [
+        "../Mindustry/core/src/mindustry/ui/dialogs/LanguageDialog.java:78"
+      ],
+      "godot": [
+        "client/ui/dialogs/language_dialog.gd:72",
+        "client/rust/mind-gdext/src/assets/loader.rs:18"
+      ],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "Java: Settings -> Language -> click Deutsch: settings 'locale' is written, player.locale updates, the restart prompt shows; after restart the UI is German (LanguageDialog.java:78-83)."
+      ],
+      "godot": [
+        "Godot: Settings -> Language -> click Deutsch: language_dialog.gd:72-77 emits locale_selected and shows @language.restart.",
+        "locale_selected has no listener (grep client/** -> only the signal declaration and the emit), and the locale key the bundle reads (LOCALE_SETTING = \"mindustry/locale\", assets/loader.rs:18-29) is never written anywhere (grep mindustry/locale -> read-only).",
+        "After restart the bundle is still English and project setting mindustry/locale is unset; re-opening the dialog shows English selected."
+      ],
+      "compare": [
+        "Java persists locale in Core.settings and the next boot resolves it; Godot's dialog is a UI shell whose only effect is the info toast."
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "client/ui/dialogs/language_dialog.gd:72 (_select) emits an unconnected signal; assets/loader.rs:18 LOCALE_SETTING is read-only, so the selection never reaches the bundle resolution.",
+        "files": [
+          "client/ui/dialogs/language_dialog.gd:72",
+          "client/rust/mind-gdext/src/assets/loader.rs:18",
+          "client/ui/ui_root.gd:310"
+        ],
+        "approach": "1) Add a MindUi.set_locale(locale) (or connect locale_selected in ui_root's dialog-intent wiring) that writes ProjectSettings \"mindustry/locale\" and saves it, plus the Core.settings-parity 'locale' value. 2) language_dialog._select calls it before showing @language.restart and tracks the chosen locale as current so the row renders checked. 3) No runtime bundle swap is needed - the atlas already loads the bundle from resolve_locale() at boot (assets/atlas.rs:163), matching upstream's restart requirement.",
+        "narrow_check": "MCP: select de -> ProjectSettings.get_setting(\"mindustry/locale\") == \"de\"; relaunch -> MindAssets.bundle_get(\"@settings\") returns the German string and re-opening the dialog shows de checked.",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/ui/dialogs/LanguageDialog.java:78"
+          ],
+          "godot": [
+            "client/ui/dialogs/language_dialog.gd:72",
+            "client/rust/mind-gdext/src/assets/loader.rs:18"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (ui-dialogs): S3, high confidence. Player impact: locale selection is inert - the player picks a language, is told to restart, and gets English again; non-English players cannot use the translated bundles already shipped in assets/locales. The locale list itself renders from MindAssets.locales().",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/ui/dialogs/LanguageDialog.java:78",
+      "client/ui/dialogs/language_dialog.gd:72",
+      "client/rust/mind-gdext/src/assets/loader.rs:18"
+    ]
+  },
+  {
+    "title": "Join Game forgets added servers and the Remote server list is always empty",
+    "surface": "multiplayer",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Menu -> Join Game -> @server.add -> type an address -> OK -> restart the client -> Join Game again",
+      "java": [
+        "../Mindustry/core/src/mindustry/ui/dialogs/JoinDialog.java:80",
+        "../Mindustry/core/src/mindustry/ui/dialogs/JoinDialog.java:328",
+        "../Mindustry/core/src/mindustry/ui/dialogs/JoinDialog.java:689",
+        "../Mindustry/core/src/mindustry/ui/dialogs/JoinDialog.java:773"
+      ],
+      "godot": [
+        "client/ui/dialogs/join_dialog.gd:301",
+        "client/ui/dialogs/join_dialog.gd:110",
+        "client/ui/dialogs/join_dialog.gd:184"
+      ],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "Java: Join Game -> @server.add -> enter an ip -> OK: the server is persisted to settings (JoinDialog.java:106 saveServers, :773-775) and appears under @servers.remote with ping/map details (section :328, refreshRemote :237-256).",
+        "Restart the client: loadServers (:64-70, :689-691) restores the list and the saved server still renders."
+      ],
+      "godot": [
+        "Godot: Join Game -> @server.add -> address -> OK: _submit_add (join_dialog.gd:301-307) only emits connect_requested; there is no settings read/write anywhere in the dialog.",
+        "The @servers.remote group body is a fixed 4px spacer (join_dialog.gd:110-112), and the local list consumes _context['servers'] (:184) which no live caller ever supplies (menu_fragment.gd:36/54 opens join with an empty context).",
+        "After restart the address is gone and the Remote group is still blank; there is no edit/delete/reorder for saved servers."
+      ],
+      "compare": [
+        "Java persists and lists saved servers (settings-backed) independent of the transport; Godot's add flow is fire-and-forget and its Remote section has no data source at all."
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "client/ui/dialogs/join_dialog.gd:301 (_submit_add) persists nothing and _build_sections:110 renders a spacer for @servers.remote; no server-list persistence path exists in the facade.",
+        "files": [
+          "client/ui/dialogs/join_dialog.gd:301",
+          "client/ui/dialogs/join_dialog.gd:110",
+          "client/rust/mind-gdext/src/ui/ui_host.rs:614"
+        ],
+        "approach": "1) Add a JSON accessor pair to the settings store (e.g. MindUi.servers_json()/set_servers_json() over SettingsStore, mirroring Core.settings.getJson(\"servers\")); ui_host.rs:614 settings_set is the existing seam. 2) Load the list on ready/shown and render each entry in the Remote body with connect (connect_requested) and delete actions; persist on add and delete. 3) Keep the local group honest: LAN discovery (net.discoverServers) has no SpacetimeDB equivalent, so leave @hosts.none instead of faking rows. 4) Add the rename/edit path and row reordering (JoinDialog.java:106-117, :217-235) after persistence exists.",
+        "narrow_check": "MCP: add server '1.2.3.4:6567' -> servers_json contains it; restart the client -> the row still renders under Remote and reconnects. Java twin run: same add survives restart.",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/ui/dialogs/JoinDialog.java:80",
+            "../Mindustry/core/src/mindustry/ui/dialogs/JoinDialog.java:328",
+            "../Mindustry/core/src/mindustry/ui/dialogs/JoinDialog.java:689",
+            "../Mindustry/core/src/mindustry/ui/dialogs/JoinDialog.java:773"
+          ],
+          "godot": [
+            "client/ui/dialogs/join_dialog.gd:301",
+            "client/ui/dialogs/join_dialog.gd:110",
+            "client/ui/dialogs/join_dialog.gd:184"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (ui-dialogs): S3, high confidence. Player impact: direct-connect servers must be retyped every session; the Remote section advertises a feature that cannot ever populate. The Global/public list is live (MindNet.get_public_matches_json), so only the saved-server path is missing. Related plan-21 residual but the persistence half is transport-independent.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/ui/dialogs/JoinDialog.java:80",
+      "../Mindustry/core/src/mindustry/ui/dialogs/JoinDialog.java:328",
+      "../Mindustry/core/src/mindustry/ui/dialogs/JoinDialog.java:689",
+      "../Mindustry/core/src/mindustry/ui/dialogs/JoinDialog.java:773",
+      "client/ui/dialogs/join_dialog.gd:301",
+      "client/ui/dialogs/join_dialog.gd:110",
+      "client/ui/dialogs/join_dialog.gd:184"
+    ]
+  },
+  {
+    "title": "Server Bans/Admins management is dead: player-list entries open nothing and the dialogs have no roster or unban/unadmin action",
+    "surface": "multiplayer",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "In a live match: toggle the player list (Tab upstream) -> @server.bans / @server.admins",
+      "java": [
+        "../Mindustry/core/src/mindustry/ui/fragments/PlayerListFragment.java:65",
+        "../Mindustry/core/src/mindustry/ui/dialogs/BansDialog.java:43",
+        "../Mindustry/core/src/mindustry/ui/dialogs/AdminsDialog.java:43",
+        "../Mindustry/core/src/mindustry/input/DesktopInput.java:233"
+      ],
+      "godot": [
+        "client/ui/fragments/player_list_fragment.gd:86",
+        "client/ui/dialogs_manifest.json:27",
+        "client/ui/dialogs/admins_dialog.gd:26",
+        "client/ui/dialogs/bans_dialog.gd:25"
+      ],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "Java: in an active match press Tab -> the player list opens; @server.bans renders a row per ban with an unban (cancel) button + confirm (BansDialog.java:30-55, :43-44); @server.admins un-admins the same way (AdminsDialog.java:30-58, :43-44); both are disabled for clients (PlayerListFragment.java:65-66)."
+      ],
+      "godot": [
+        "The player list cannot be opened: the PLAYER_LIST binding (binding.rs:769, Tab) has no consumer - desktop.rs:555-563 maps only minimap/console and ui_root.gd handles only ESC/M/F8 - so Tab does nothing.",
+        "If the fragment is shown by hand, its menu buttons call _open(\"@server.bans\") -> trim_prefix(\"@\") -> ui.open_dialog(\"server.bans\") (player_list_fragment.gd:86-100); the registry names are 'bans'/'admins' (dialogs_manifest.json:27-28), so ui_host.rs:181-186 logs \"unknown dialog 'server.bans'\" and returns false. No dialog opens.",
+        "Even opened directly, admins_dialog.gd:26-36 / bans_dialog.gd:25-35 render only label rows from a _context that no caller supplies (empty state forever) and have no unban/unadmin button."
+      ],
+      "compare": [
+        "Java: the player list is reachable in any match and both dialogs read NetServer.admins and perform unban/unadmin with confirm. Godot: unreachable list, unregistered dialog names, no roster source, no actions."
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "player_list_fragment.gd:88-91 opens unregistered 'server.bans'/'server.admins'; desktop.rs:555 has no player_list effect; admins_dialog.gd:26 / bans_dialog.gd:25 have no roster source or unban/unadmin controls.",
+        "files": [
+          "client/ui/fragments/player_list_fragment.gd:88",
+          "client/rust/mind-gdext/src/input/desktop.rs:555",
+          "client/ui/dialogs/admins_dialog.gd:26",
+          "client/ui/dialogs/bans_dialog.gd:25",
+          "client/rust/mind-core/src/input/binding.rs:769"
+        ],
+        "approach": "1) Open the registered names: 'bans'/'admins' (drop the 'server.' prefix) so the dialogs at least show their @server.*.none empty state. 2) Consume PLAYER_LIST: push Effect::ToggleFragment(\"player_list\") from desktop.rs:555 like minimap/console, gated on an active session (DesktopInput.java:233-234). 3) Source the roster: expose the host's admin/ban store (mind-headless/src/server/admin.rs; commands.rs:160-180) through MindNet/MindUi as JSON and pass it in the open_dialog context; keep the empty state honest when unavailable. 4) Add per-row unadmin/unban buttons with show_confirm, mirroring AdminsDialog.java:43-58 and BansDialog.java:43-55, disabled for clients.",
+        "narrow_check": "MCP: start a host session -> toggle the player list -> click Bans: dialog_stack contains 'bans' and the dialog shows @server.bans.none (or the live roster); add an admin server-side -> the row appears and unadmin removes it after confirm.",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/ui/fragments/PlayerListFragment.java:65",
+            "../Mindustry/core/src/mindustry/ui/dialogs/BansDialog.java:43",
+            "../Mindustry/core/src/mindustry/ui/dialogs/AdminsDialog.java:43",
+            "../Mindustry/core/src/mindustry/input/DesktopInput.java:233"
+          ],
+          "godot": [
+            "client/ui/fragments/player_list_fragment.gd:88",
+            "client/rust/mind-gdext/src/input/desktop.rs:555",
+            "client/ui/dialogs/admins_dialog.gd:26",
+            "client/ui/dialogs/bans_dialog.gd:25"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (ui-dialogs): S3, high confidence. Player impact: server admins cannot manage bans/admins from the UI; three independent code reads (binding consumer, dialog-name mismatch, missing controls) each block the flow. Reachability caveat: the player list fragment is shipped (ui_root.tscn:162) but currently un-togglable, so in-engine verification needs the list forced visible or step 2 fixed first. Not a duplicate of PAR-0043 (host dialog opens) or the plan-21 console commands.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/ui/fragments/PlayerListFragment.java:65",
+      "../Mindustry/core/src/mindustry/ui/dialogs/BansDialog.java:43",
+      "../Mindustry/core/src/mindustry/ui/dialogs/AdminsDialog.java:43",
+      "../Mindustry/core/src/mindustry/input/DesktopInput.java:233",
+      "client/ui/fragments/player_list_fragment.gd:88",
+      "client/rust/mind-gdext/src/input/desktop.rs:555",
+      "client/ui/dialogs/admins_dialog.gd:26",
+      "client/ui/dialogs/bans_dialog.gd:25",
+      "client/ui/dialogs_manifest.json:27"
+    ]
+  }
+]

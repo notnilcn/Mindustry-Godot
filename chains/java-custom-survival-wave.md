@@ -7,9 +7,10 @@ applies_when: >-
   WaveSpawner/Groups liveness) as player-visible ground truth and the campaign
   sector is tutorial-gated or cannot trigger a wave quickly.
 preconditions:
-  - Loop manifest exported (`start-loop.sh`); Java client launched via
-    `.opencode/loops/bin/run-java.sh`; computer-mcp tools present (DISPLAY set at
-    opencode start).
+  - "Loop manifest exported (`start-loop.sh`); Java client launched via
+    `.opencode/loops/bin/run-java.sh`; Java-leg shell helpers: scripts in
+    `.opencode/skills/parity-eval/scripts/`, run with `$PARITY_PY` (bootstrap.sh)
+    and `DISPLAY=:10`."
   - Campaign Ground Zero (Java sector 170) cannot be used for timer/skip waves:
     its msav rules are `waveTimer:false, waveSending:false` and waves come from a
     world-processor script gated on `objectiveFlags[spawnWave]`. Use a default
@@ -17,7 +18,7 @@ preconditions:
   - One client at a time on the loop display; Java window recorded once
     (reference run: 900x700+190+10 — coordinates below are screen coords for
     that geometry, re-derive from `xwininfo -root -children` otherwise).
-tools: [computer-mcp_mouse_move, computer-mcp_click, computer-mcp_type, computer-mcp_key_press, computer-mcp_screenshot]
+tools: [java_input.py, capture_screen.py]
 last_verified: 2026-10-08 a1ca816 (runs/20261008-040830-ev0048-live-unit-runtime-twin); 2026-10-08 1d8f75b loop-1 twin 1152x648 (runs/20261008-225009-ev0053-hud-twin)
 ---
 
@@ -26,14 +27,14 @@ last_verified: 2026-10-08 a1ca816 (runs/20261008-040830-ev0048-live-unit-runtime
 ## Steps
 
 1. Main menu → Play (350,187) → Custom Game (645,328). The submenu/cards need a
-   fresh `computer-mcp_screenshot` after each click (input-call screenshots lag
-   one frame).
+   fresh `capture_screen.py --window-title Mindustry` capture after each click
+   (input calls return JSON, not a frame).
 2. In the map list, click a survival-capable card (one-core icon; e.g. Domain at
    (426,548) preview). The gamemode dialog opens for that map.
 3. Keep **Survival** selected (shortens nothing on its own: `play()` sets
    `wavetime = waveSpacing * 2` = 8 min by default). Do **not** use
    "Customize Rules" to edit numeric fields — injected keyboard input is dropped
-   in that dialog (see `computer-mcp-learnings.md`); a mis-read checkbox can turn
+   in that dialog (see `java-leg-learnings.md`); a mis-read checkbox can turn
    Waves off and the in-game status pane then renders empty. Click **Play**
    (747,628).
 4. In game, read the top-left status pane: `Wave N / Wave in mm:ss` plus a play
@@ -43,9 +44,7 @@ last_verified: 2026-10-08 a1ca816 (runs/20261008-040830-ev0048-live-unit-runtime
    `.opencode/skills/parity-eval/scripts/capture_screen.py --window-title Mindustry --output <run>/java/step-05-wave1-triggered.png`
    Expect `Wave N+1 / k Enemy Remaining`.
 6. Follow the unit: it spawns at a map spawn point and paths to the player core.
-   Zoom out with a one-shot pynput scroll if needed:
-   `DISPLAY=:N "$MCP_VENV/bin/python" -c "from pynput.mouse import Controller; Controller().scroll(0,-6)"`
-   (discrete events land; xdotool/computer-mcp have no scroll).
+   Zoom out with `java_input.py scroll -6` if needed (discrete events land).
 7. Capture approach and combat: full-window captures every few seconds until the
    unit is adjacent to the core; rapid core crops (10 x ~0.18 s) catch the
    muzzle/impact flash; the HUD banner `< Core is under attack! >` appears.
@@ -95,10 +94,9 @@ the submenu row:
 - Whole-window captures read the game window directly (`--window-title
   Mindustry`, no xdotool needed); on Xwayland the monitor/root grab is black,
   so window capture is the only reliable path there.
-- `computer-mcp_click`'s attached screenshot shows the previous frame (and is
-  black on Xwayland); always re-capture with `capture_screen.py` before
-  interpreting. On the Xvfb fallback Java needs a first key press to focus the
-  window; send Escape/J twice.
+- Always re-capture with `capture_screen.py` before interpreting; an input call
+  returns JSON, not a frame. On the Xvfb fallback Java needs a first key press
+  to focus the window; send Escape/J twice.
 - Killing the JVM with `kill -TERM <java-pid>` is fine for custom games (no
   sector save to preserve); main-menu Quit takes more blind clicks.
 

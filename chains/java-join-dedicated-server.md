@@ -10,13 +10,14 @@ preconditions:
   - JDK 17 (bootstrap.sh) and the reference checkout built
     (`../Mindustry/desktop/build/libs/Mindustry.jar`); `gradlew server:dist`
     for `../Mindustry/server/build/libs/server-release.jar`.
-  - `DISPLAY` set at opencode start (computer-mcp); one client at a time on the
-    loop display.
+  - "Java-leg shell helpers: scripts in `.opencode/skills/parity-eval/scripts/`,
+    run with `$PARITY_PY` (bootstrap.sh) and `DISPLAY=:10`; one client at a time
+    on the loop display."
   - Port 6567 is host-global and shared across loops: check
     `ss -ltunp | grep 6567` before starting a server.
   - Client data dir is the worktree-local `.../loop-N/xdg-data/Mindustry`;
     settings edits happen while the client is stopped.
-tools: [computer-mcp_mouse_move, computer-mcp_click, computer-mcp_key_down, computer-mcp_key_up, computer-mcp_type, bash]
+tools: [java_input.py, capture_screen.py, bash]
 last_verified: 2026-10-08 1d8f75b (runs/20261008-112749-ev0060-join-twin)
 ---
 
@@ -57,7 +58,8 @@ last_verified: 2026-10-08 1d8f75b (runs/20261008-112749-ev0060-join-twin)
    ```bash
    setsid .opencode/loops/bin/run-java.sh -width 1152 -height 648 -maximized false \
      >"$RUN/java/game.log" 2>&1 </dev/null &
-   until grep -q "Total time to load" "$RUN/java/game.log"; do sleep 2; done
+   timeout 180 bash -c 'until grep -q "Total time to load" "$RUN/java/game.log"; do sleep 2; done' \
+     || echo "launch gate timed out; see $RUN/java/game.log" >&2
    ```
 
    Capture with `capture_screen.py --window-title Mindustry`; screen coords =

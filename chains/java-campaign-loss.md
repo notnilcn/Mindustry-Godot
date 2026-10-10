@@ -12,13 +12,13 @@ preconditions:
   - A campaign save with a captured sector exists in the loop's
     `xdg-data/Mindustry/saves` (the seeded dir has Ground Zero). A fresh dir
     first shows the "Select Starting Campaign" dialog (Serpulo photo → OK).
-  - Persistent `computer-mcp_*` tools work on the loop display, or
-    `parity-click.sh` / a pynput one-shot is used. A compositor restart breaks
-    the persistent server's X connection (`Broken pipe`) while one-shots keep
-    working (computer-mcp-learnings.md).
+  - "Java-leg shell helpers: scripts in `.opencode/skills/parity-eval/scripts/`,
+    run with `$PARITY_PY` (bootstrap.sh) and `DISPLAY=:10`. (Historical: a
+    compositor restart broke the persistent `computer-mcp` server's X connection
+    — `Broken pipe` — while one-shot calls kept working; `java-leg-learnings.md`.)"
   - `Escape` reached the pause menu: on the Xvfb fallback the first key press
     only focuses the window (send it twice).
-tools: [computer-mcp_mouse_move, computer-mcp_click, computer-mcp_key_press, parity-click.sh, capture_screen.py]
+tools: [java_input.py, capture_screen.py]
 last_verified: 2026-10-08 1d8f75b (runs/20261008-215055-ev0061-game-over-twin, JVM pid 72553)
 ---
 
@@ -38,7 +38,7 @@ last_verified: 2026-10-08 1d8f75b (runs/20261008-215055-ev0061-game-over-twin, J
    Poll `game.log` for `Total time to load`; record the JVM pid
    (`pgrep -f Mindustry.jar`).
 
-2. `mouse_move`/`parity-click.sh` `Play` (350,216 works; 300,213 is the button
+2. `java_input.py click 350 216 left` `Play` (350,216 works; 300,213 is the button
    centre at 1152x648) → the Play submenu opens (it stays open until toggled
    off; a click that looks dead usually means the client froze, see Failure
    modes).
@@ -53,7 +53,7 @@ last_verified: 2026-10-08 1d8f75b (runs/20261008-215055-ev0061-game-over-twin, J
 
 5. `Go` (646,678) → the sector loads (Ground Zero has its player core).
 
-6. Key tap `Escape` (pynput `Key.esc`; plain `"Escape"` raises ValueError) →
+6. Key tap `Escape` (`java_input.py key escape`) →
    pause menu. Its `Abandon` entry is only present while the sector is being
    played (`state.rules.sector`), and it calls
    `ui.planet.abandonSectorConfirm` (PausedDialog.java:82).
@@ -84,8 +84,8 @@ last_verified: 2026-10-08 1d8f75b (runs/20261008-215055-ev0061-game-over-twin, J
   (jstack shows the main thread in `arc.backend.sdl.jni.SDL.SDL_GL_SwapWindow`).
   Kill the client and relaunch through `run-java.sh`; the wrapper restarts the
   Xwayland compositor when it is down. Killing the java weston also breaks the
-  persistent computer-mcp server (`Broken pipe`) — use `parity-click.sh` /
-  pynput one-shots for the rest of the leg.
+  persistent computer-mcp server (`Broken pipe`, historical) — use
+  `java_input.py` (one fresh process per call) for the rest of the leg.
 - Button Y estimates from the attached screenshot can be ~50 px off; confirm
   the target with a hover capture diff before clicking.
 

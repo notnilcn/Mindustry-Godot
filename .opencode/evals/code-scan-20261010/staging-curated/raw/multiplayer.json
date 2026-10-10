@@ -1,0 +1,536 @@
+[
+ {
+  "title": "Multiplayer: world actions do not synchronize between clients",
+  "surface": "multiplayer",
+  "parent": null,
+  "status": "seeded",
+  "discovered_by": null,
+  "path": {
+   "to": "Live online match (STDB host, --db or --pN): the local player places and breaks blocks while a second identity watches the same match",
+   "java": [
+    "../Mindustry/core/src/mindustry/world/Tile.java:386",
+    "../Mindustry/core/src/mindustry/world/Tile.java:848",
+    "../Mindustry/core/src/mindustry/core/NetServer.java:906"
+   ],
+   "godot": [
+    "client/rust/mind-gdext/src/sim_host.rs:186",
+    "client/rust/mind-gdext/src/net/relay.rs:22"
+   ],
+   "confirm": {},
+   "last_replayed": null
+  },
+  "run": null,
+  "reproduce": {
+   "java": [
+    "Run the pinned server (./gradlew server:run, then `host`), join two desktop clients at 127.0.0.1:6567.",
+    "Client A places a conveyor/drill: client B's world shows the same block at the same tile; the tile mutation travels as the Tile.setTile @Remote (Tile.java:386-396, Tile.java:848) and the server applies/rebroadcasts it.",
+    "Client A breaks the block: B sees the removal (Call.removeTile, Tile.java:386)."
+   ],
+   "godot": [
+    "Start an online client (godot --path client -- --db); host a match via MindNet.create_match (or the paused Host dialog) and drive the session to in_lobby/in_game.",
+    "Place a block with the normal input path (left click on the world, GUI not consumed; MindSimHost.unhandled_input -> apply_command, sim_host.rs:186-191).",
+    "Read MindNet.last_applied_command_id()/relay_queue_depth() and `spacetime sql mindustry \"SELECT command_id,kind FROM match_command ORDER BY command_id DESC LIMIT 3\"`: the local sim changed but no match_command row for the local action exists.",
+    "On a second identity in the match read get_state_json(): the tile is unchanged; a foreign send_command_json({\"op\":\"place\",\"block\":\"conveyor\"}) is ignored because relay.rs kind_to_sim only maps PlaceBlock/BreakBlock and block_id only resolves \"router\"."
+   ],
+   "compare": [
+    "Java: every world mutation made by a client is sent to the server and rebroadcast, so both clients converge. Godot: the shipped input path never calls MindNet.send_command_json/emit_command, so nothing is published; and the inbound mapping drops every CommandKind except PlaceBlock/BreakBlock, with any non-router block name resolving to block id 0."
+   ]
+  },
+  "steps": [],
+  "mismatch": null,
+  "fix": {
+   "status": "open",
+   "commit": null,
+   "summary": null,
+   "plan": {
+    "round": 0,
+    "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+    "seam": "client/rust/mind-gdext/src/sim_host.rs:186-191 applies local place/break directly into Sim::apply with no relay hand-off; the only publication seam client/rust/mind-gdext/src/net/mod.rs:740 (MindNet.emit_command, via send_command_json:443) has no shipped caller, and the inbound mapping client/rust/mind-gdext/src/net/relay.rs:22 is a stub.",
+    "files": [
+     "client/rust/mind-gdext/src/sim_host.rs:186",
+     "client/rust/mind-gdext/src/net/mod.rs:443",
+     "client/rust/mind-gdext/src/net/mod.rs:740",
+     "client/rust/mind-gdext/src/net/relay.rs:22",
+     "client/rust/mind-gdext/src/net/relay.rs:43"
+    ],
+    "approach": "1) Give MindSimHost a relay-publish hook: on an accepted local Place/Break (sim_host.rs:186-191) it resolves the selected block's content NAME and forwards (x,y,block name,rotation) to MindNet, which sends it through CommandSender::send (net/mod.rs:740) instead of only applying locally; keep the local apply as the prediction and let the own-echo skip (relay.rs:111) drop the duplicate. 2) Replace the relay.rs:43 1-name block mirror with the live ContentRegistry name->id lookup so foreign blocks resolve to the real id (currently only \"router\" -> 1, everything else -> 0). 3) Expand RelayRuntime::kind_to_sim (relay.rs:22-39) to the full CommandKind set that affects the sim (ConfigBlock, Rotate, UnitCommand/UnitStance/UnitCommandQueue, PlayerSpawn, SetRule/SetRules, SkipWave/RunWave, AdminSwitchTeam, LogicSync, ...), mapping to canonical SimCommand at tick boundaries. 4) Add a two-client scenario/golden so the published row and the applied state are asserted.",
+    "narrow_check": "Two-client live check: A places a conveyor while B watches; `spacetime sql mindustry \"SELECT kind FROM match_command ORDER BY command_id DESC LIMIT 1\"` returns the PlaceBlock row and B's SimHost.get_state_json() shows the same tile; then A sends MindNet.send_command_json({\"op\":\"place\",\"x\":..,\"y\":..,\"block\":\"conveyor\"}) and B applies conveyor (not air). A headless two-client relay scenario can assert the same without a window.",
+    "evidence": {
+     "java": [
+      "../Mindustry/core/src/mindustry/world/Tile.java:386",
+      "../Mindustry/core/src/mindustry/world/Tile.java:848",
+      "../Mindustry/core/src/mindustry/core/NetServer.java:906"
+     ],
+     "godot": [
+      "client/rust/mind-gdext/src/sim_host.rs:186",
+      "client/rust/mind-gdext/src/net/mod.rs:443",
+      "client/rust/mind-gdext/src/net/mod.rs:740",
+      "client/rust/mind-gdext/src/net/relay.rs:22",
+      "client/rust/mind-gdext/src/net/relay.rs:43"
+     ]
+    }
+   }
+  },
+  "verified": null,
+  "note": "Code-scan 2026-10-10 (multiplayer): S2, high confidence. Player impact: in a live match nothing the player does is published - the relay log stays empty, remote clients see a frozen world, and foreign non-place/break actions (configs, rotation, unit orders, rules, waves, team switch) are silently dropped. Context: the outbound half and the inbound stub are the same seam (the relay is receive-only for the shipped input path); block configs also arrive as air because block_id only knows \"router\". In-engine verification pending.",
+  "evidence": [
+   "../Mindustry/core/src/mindustry/world/Tile.java:386",
+   "../Mindustry/core/src/mindustry/world/Tile.java:848",
+   "../Mindustry/core/src/mindustry/core/NetServer.java:906",
+   "client/rust/mind-gdext/src/sim_host.rs:186",
+   "client/rust/mind-gdext/src/net/mod.rs:443",
+   "client/rust/mind-gdext/src/net/mod.rs:740",
+   "client/rust/mind-gdext/src/net/relay.rs:22",
+   "client/rust/mind-gdext/src/net/relay.rs:43"
+  ]
+ },
+ {
+  "title": "Multiplayer: in-game chat is inert (sent messages reach nobody, incoming messages never render; /t, /a and /votekick have no handler)",
+  "surface": "multiplayer",
+  "parent": null,
+  "status": "seeded",
+  "discovered_by": null,
+  "path": {
+   "to": "Live online match: press Enter / submit a message in the chat fragment, then send one from a second identity",
+   "java": [
+    "../Mindustry/core/src/mindustry/ui/fragments/ChatFragment.java:63",
+    "../Mindustry/core/src/mindustry/core/NetClient.java:333",
+    "../Mindustry/core/src/mindustry/core/NetServer.java:394"
+   ],
+   "godot": [
+    "client/ui/fragments/chat_fragment.gd:72",
+    "client/rust/mind-gdext/src/ui/ui_host.rs:533",
+    "client/rust/mind-gdext/src/net/mod.rs:592"
+   ],
+   "confirm": {},
+   "last_replayed": null
+  },
+  "run": null,
+  "reproduce": {
+   "java": [
+    "Java server + two clients in a match: client A presses Enter (ChatFragment.java:63-66 toggles when net.active()), types hi and submits.",
+    "Client B's chat log shows hi is broadcast; the server path is the NetClient.sendChatMessage @Remote (NetClient.java:333) and the peer render is ChatFragment.addMessage.",
+    "B types /votekick <A> reason and /vote y: the server vote session replies (NetServer.java:394-475, gated by Config.enableVotekick, Administration.java:539)."
+   ],
+   "godot": [
+    "Open a live match and call get_node(\"/root/MindUi\").chat_send(\"hello\",\"normal\") (or submit in the chat fragment): it returns true but only re-emits the local chat_message signal (ui_host.rs:533-542); nothing listens and no reducer runs.",
+    "Check `spacetime sql mindustry \"SELECT chat_id,text FROM match_chat ORDER BY chat_id DESC LIMIT 3\"`: no row from the UI path (MindNet.send_chat, net/mod.rs:592, has no caller at all).",
+    "Insert a row as the peer (second client or reducer call) and re-read the chat fragment log: add_message is never invoked because MindNet never binds my_match_chat (attach_binders, net/mod.rs:222-234; the table is in GAME_TABLES, waves.rs:43).",
+    "Press Enter in game: the \"chat\" binding (binding.rs:775) falls through the desktop bridge `_ => {}` (desktop.rs:599), so the fragment is not even opened. enableVotekick exists only as a config spec (config.rs:106-108) and PlayerAction::Vote only fails (player_list.rs:26,151-163)."
+   ],
+   "compare": [
+    "Java: chat toggles on Enter while net.active(), travels to the server, is filtered/broadcast and rendered in every peer's ChatFragment; /t, /a and /votekick are server-parsed client commands. Godot: the chat fragment is unreachable from input, submit is a local-only signal, MindNet.send_chat has no caller, and no my_match_chat binder feeds add_message - chat and its command surface (including vote-kick) are fully inert."
+   ]
+  },
+  "steps": [],
+  "mismatch": null,
+  "fix": {
+   "status": "open",
+   "commit": null,
+   "summary": null,
+   "plan": {
+    "round": 0,
+    "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+    "seam": "client/rust/mind-gdext/src/ui/ui_host.rs:533-542 (chat_send emits a signal only) has no consumer; client/rust/mind-gdext/src/net/mod.rs:592 (MindNet.send_chat) and the my_match_chat table (waves.rs:43) are never wired; the chat/player_list input bindings die at client/rust/mind-gdext/src/input/desktop.rs:599.",
+    "files": [
+     "client/rust/mind-gdext/src/ui/ui_host.rs:533",
+     "client/ui/fragments/chat_fragment.gd:72",
+     "client/rust/mind-gdext/src/net/mod.rs:592",
+     "client/rust/mind-gdext/src/net/mod.rs:222",
+     "client/rust/mind-gdext/src/input/desktop.rs:599",
+     "client/rust/mind-headless/src/server/config.rs:106"
+    ],
+    "approach": "1) Route the fragment submit to the relay: connect the chat fragment's send to /root/Spine/MindNet.send_chat (or have MindUi hold a MindNet handle) and map the fragment mode to ChatKind (normal->All, team->Team, admin->System/admin check); keep the local buffer as echo. 2) Bind MyMatchChatTableAccessor in MindNet.attach_binders (net/mod.rs:222), drain rows and forward sender/kind/text to the chat fragment's add_message with the same rolling-log behaviour. 3) Handle the \"chat\" binding in the desktop bridge to toggle the fragment and set FocusState.chat_shown (same for \"player_list\" if not covered by the player-list finding). 4) Parse `/`-commands server-side or in a client command dispatcher; for vote-kick add the upstream session (NetServer.java:394-475): >=3 players, enableVotekick gate, target checks, vote/cooldown, cancel-by-admin, kick on pass, and a player-list vote button. 5) Only then decide the per-match chat-filter scope (chat-filter finding).",
+    "narrow_check": "Live match: submit through the chat fragment -> `spacetime sql mindustry \"SELECT text FROM match_chat ORDER BY chat_id DESC LIMIT 1\"` shows the sanitized row for the sender identity, and a second identity's chat fragment _log contains it. A chat-command unit/headless test covers /votekick -> session -> kick path with enableVotekick on/off.",
+    "evidence": {
+     "java": [
+      "../Mindustry/core/src/mindustry/ui/fragments/ChatFragment.java:63",
+      "../Mindustry/core/src/mindustry/ui/fragments/ChatFragment.java:239",
+      "../Mindustry/core/src/mindustry/core/NetClient.java:333",
+      "../Mindustry/core/src/mindustry/core/NetServer.java:394",
+      "../Mindustry/core/src/mindustry/core/NetServer.java:475"
+     ],
+     "godot": [
+      "client/ui/fragments/chat_fragment.gd:72",
+      "client/ui/fragments/chat_fragment.gd:101",
+      "client/rust/mind-gdext/src/ui/ui_host.rs:533",
+      "client/rust/mind-gdext/src/net/mod.rs:592",
+      "client/rust/mind-gdext/src/net/mod.rs:222",
+      "client/rust/mind-gdext/src/input/desktop.rs:599",
+      "client/rust/mind-headless/src/server/config.rs:106"
+     ]
+    }
+   }
+  },
+  "verified": null,
+  "note": "Code-scan 2026-10-10 (multiplayer): S2, high confidence. Player impact: no multiplayer chat in either direction and no non-admin moderation path; the Java /t, /a and /votekick client commands have no receiver, so a griefer cannot be vote-kicked by players and enableVotekick only exists as a dead config key. Context: the lead-1 chat + vote-kick family grouped tightly (send, receive and command surface share the same unwired seam). In-engine verification pending.",
+  "evidence": [
+   "../Mindustry/core/src/mindustry/ui/fragments/ChatFragment.java:63",
+   "../Mindustry/core/src/mindustry/core/NetClient.java:333",
+   "../Mindustry/core/src/mindustry/core/NetServer.java:394",
+   "../Mindustry/core/src/mindustry/core/NetServer.java:475",
+   "client/ui/fragments/chat_fragment.gd:72",
+   "client/ui/fragments/chat_fragment.gd:101",
+   "client/rust/mind-gdext/src/ui/ui_host.rs:533",
+   "client/rust/mind-gdext/src/net/mod.rs:592",
+   "client/rust/mind-gdext/src/net/mod.rs:222",
+   "client/rust/mind-gdext/src/input/desktop.rs:599",
+   "client/rust/mind-headless/src/server/config.rs:106",
+   "client/rust/mind-core/src/ui/player_list.rs:26"
+  ]
+ },
+ {
+  "title": "Multiplayer: the player list is always empty and its kick/ban/trace/team actions cannot execute; Admins/Bans dialogs always show 'none'",
+  "surface": "multiplayer",
+  "parent": null,
+  "status": "seeded",
+  "discovered_by": null,
+  "path": {
+   "to": "Live match with two members (host/admin + peer): open the player list (Tab) or call MindUi.player_list_json/player_action; open the Admins/Bans dialogs",
+   "java": [
+    "../Mindustry/core/src/mindustry/ui/fragments/PlayerListFragment.java:61",
+    "../Mindustry/core/src/mindustry/core/NetServer.java:906",
+    "../Mindustry/core/src/mindustry/core/NetClient.java:415"
+   ],
+   "godot": [
+    "client/rust/mind-gdext/src/ui/ui_host.rs:547",
+    "client/ui/fragments/player_list_fragment.gd:53",
+    "client/ui/dialogs/admins_dialog.gd:30"
+   ],
+   "confirm": {},
+   "last_replayed": null
+  },
+  "run": null,
+  "reproduce": {
+   "java": [
+    "Java server + two clients; client A is admin/host; press Tab (Binding.playerList, DesktopInput.java:233) to open the player list.",
+    "Click the peer row menu: Ban/Kick/Trace/Team/Admin buttons are present (PlayerListFragment.java:149-247); Kick sends AdminAction.kick via Call.adminRequest and the peer disconnects; Trace opens TraceDialog from the traceInfo reply (NetClient.java:415).",
+    "Press @server.bans / @server.admins: the dialogs list netServer.admins data (AdminsDialog.java:32-49, BansDialog.java:32-50) and unadmin/unban work."
+   ],
+   "godot": [
+    "In a live match call get_node(\"/root/MindUi\").player_list_json(): it is hard-coded \"[]\" (ui_host.rs:559) even though MindNet.get_members_json() has rows; the fragment therefore renders only @players.notfound (player_list_fragment.gd:53-72).",
+    "Call MindUi.player_action(\"peer\",\"kick\"): always false (ui_host.rs:547-554); PlayerListModel::dispatch also returns RelayUnavailable (player_list.rs:151-163), so no admin reducer (Connector::admin_kick/admin_ban/admin_switch_team, connector.rs:824-934) is ever sent and `spacetime sql mindustry \"SELECT action FROM admin_action_log ...\"` stays empty.",
+    "Open admins/bans (or ui.open_dialog(\"admins\",\"\")): the dialogs read _context.admins/_context.banned (admins_dialog.gd:30, bans_dialog.gd:29) but player_list_fragment._open passes \"\" (player_list_fragment.gd:97-100), so they always show @server.admins.none / @server.bans.none; trace has no reducer/view at all (only the dialog shell trace_dialog.gd:25-34).",
+    "Press Tab: the player_list binding (binding.rs:769) falls through `_ => {}` (desktop.rs:599) - there is no live toggle; a kicked peer also never sees my_kick (waves.rs:37, never bound in net/mod.rs:222-234)."
+   ],
+   "compare": [
+    "Java: the in-game player list is the admin surface - it lists every player and issues kick/ban/trace/switchTeam via Call.adminRequest; the bans/admins dialogs read NetServer.admins; a kicked client gets the Kick packet. Godot: the roster is a constant empty array, every row action is a constant false, the dialogs have no data source, trace has no backend, and the kick notification is unbound."
+   ]
+  },
+  "steps": [],
+  "mismatch": null,
+  "fix": {
+   "status": "open",
+   "commit": null,
+   "summary": null,
+   "plan": {
+    "round": 0,
+    "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+    "seam": "client/rust/mind-gdext/src/ui/ui_host.rs:547-561 returns constants instead of forwarding to MindNet; the client binds no moderation views (all_bans/all_admins/all_whitelist/my_kick) in client/rust/mind-gdext/src/net/mod.rs:222-234, and the dialog context is never filled (client/ui/fragments/player_list_fragment.gd:97).",
+    "files": [
+     "client/rust/mind-gdext/src/ui/ui_host.rs:547",
+     "client/rust/mind-gdext/src/ui/ui_host.rs:559",
+     "client/ui/fragments/player_list_fragment.gd:53",
+     "client/ui/fragments/player_list_fragment.gd:97",
+     "client/rust/mind-gdext/src/net/mod.rs:222",
+     "client/rust/mind-core/src/ui/player_list.rs:151",
+     "client/ui/dialogs/admins_dialog.gd:30"
+    ],
+    "approach": "1) Feed MindUi.player_list_json from MindNet's live mirrors (get_members_json net/mod.rs:414 plus remote player states/roles) with the PlayerSummary fields (name/team/admin/dead/local/connection/ping) the fragment expects. 2) Implement MindUi.player_action dispatch: Spectate -> local camera, Kick/Ban/Team -> Connector::admin_kick/admin_ban/admin_switch_team (connector.rs:824-934) gated on host/admin role from my_match_members; Trace needs a new admin trace payload (no reducer/view exists - add one or scope it out explicitly). 3) Bind all_bans/all_admins/all_whitelist (admin views) in MindNet and pass the rows as the open_dialog context from player_list_fragment._open; add the missing trace data path (upstream TraceInfo -> NetClient.traceInfo, NetClient.java:415). 4) Bind my_kick (waves.rs:37) and show the kick reason / return to menu. 5) Wire the player_list binding (desktop.rs) to toggle the fragment.",
+    "narrow_check": "Two-identity match: MindUi.player_list_json() lists the peer; player_action(peer,\"kick\") makes an admin_kick row appear (`spacetime sql mindustry \"SELECT * FROM admin_action_log ORDER BY at DESC LIMIT 1\"`) and the peer's client leaves through the my_kick path; the Admins dialog shows the roster (not @server.admins.none) after a grant. A headless NetHost/admin scenario asserts the reducer calls without a window.",
+    "evidence": {
+     "java": [
+      "../Mindustry/core/src/mindustry/ui/fragments/PlayerListFragment.java:61",
+      "../Mindustry/core/src/mindustry/ui/fragments/PlayerListFragment.java:149",
+      "../Mindustry/core/src/mindustry/core/NetServer.java:906",
+      "../Mindustry/core/src/mindustry/core/NetServer.java:937",
+      "../Mindustry/core/src/mindustry/core/NetClient.java:415"
+     ],
+     "godot": [
+      "client/rust/mind-gdext/src/ui/ui_host.rs:547",
+      "client/rust/mind-gdext/src/ui/ui_host.rs:559",
+      "client/ui/fragments/player_list_fragment.gd:53",
+      "client/ui/fragments/player_list_fragment.gd:97",
+      "client/rust/mind-gdext/src/net/mod.rs:222",
+      "client/rust/mind-core/src/ui/player_list.rs:151",
+      "client/ui/dialogs/admins_dialog.gd:30",
+      "client/ui/dialogs/bans_dialog.gd:29"
+     ]
+    }
+   }
+  },
+  "verified": null,
+  "note": "Code-scan 2026-10-10 (multiplayer): S2, high confidence. Player impact: hosts/admins cannot see who is in the match nor kick/ban/trace/switch-team from the client; the Admins/Bans dialogs always render their empty state and a kicked peer is never notified. Context: lead 2 (admin console/UI reachability) for the client side; the server-side reducers exist (Connector::admin_kick/admin_ban/admin_switch_team) but have no UI caller, and trace has no server surface at all. The pause dialog's Host entry (PAR-0043) is unaffected. In-engine verification pending.",
+  "evidence": [
+   "../Mindustry/core/src/mindustry/ui/fragments/PlayerListFragment.java:61",
+   "../Mindustry/core/src/mindustry/ui/fragments/PlayerListFragment.java:149",
+   "../Mindustry/core/src/mindustry/core/NetServer.java:906",
+   "../Mindustry/core/src/mindustry/core/NetClient.java:415",
+   "client/rust/mind-gdext/src/ui/ui_host.rs:547",
+   "client/rust/mind-gdext/src/ui/ui_host.rs:559",
+   "client/ui/fragments/player_list_fragment.gd:53",
+   "client/ui/fragments/player_list_fragment.gd:97",
+   "client/rust/mind-gdext/src/net/mod.rs:222",
+   "client/rust/mind-core/src/ui/player_list.rs:151",
+   "client/ui/dialogs/admins_dialog.gd:30",
+   "client/ui/dialogs/bans_dialog.gd:29",
+   "client/rust/mind-stdb/src/waves.rs:37",
+   "client/rust/mind-gdext/src/input/desktop.rs:599"
+  ]
+ },
+ {
+  "title": "Multiplayer: joining a running match does not sync the world (no late-join map load or snapshot catch-up)",
+  "surface": "multiplayer",
+  "parent": null,
+  "status": "seeded",
+  "discovered_by": null,
+  "path": {
+   "to": "Second client joins a match that is already Running (host created + started the match, then the joiner calls MindNet.join_match)",
+   "java": [
+    "../Mindustry/core/src/mindustry/core/NetServer.java:955",
+    "../Mindustry/core/src/mindustry/core/NetServer.java:547"
+   ],
+   "godot": [
+    "client/rust/mind-gdext/src/net/mod.rs:338",
+    "client/rust/mind-gdext/src/net/mod.rs:798",
+    "client/rust/mind-stdb/src/snapshot.rs:296"
+   ],
+   "confirm": {},
+   "last_replayed": null
+  },
+  "run": null,
+  "reproduce": {
+   "java": [
+    "Java server + client A start and play a match; connect client B afterwards.",
+    "B runs the connect handshake and the server sends the world (NetServer.requestWorld -> sendWorldData, NetServer.java:955-959, WorldReloader) plus the state snapshot, so B is in sync with A's tiles, units and wave state."
+   ],
+   "godot": [
+    "Client A hosts (create_match) and starts the match; client B joins with MindNet.join_match(id, \"\").",
+    "On B read session_state()/get_match_state_json() plus SimHost.get_tick()/get_checksum(): B reaches in_game but nothing loads the match's map/seed (join_match only drives the session state machine, net/mod.rs:338-367; drain_match_rows only mirrors JSON, net/mod.rs:662-684).",
+    "Read MindNet.snapshot_progress() and `spacetime sql mindustry \"SELECT snapshot_id FROM match_snapshot\"`: progress stays 0 and no snapshot request happens; request_snapshot is only triggered on an in-game desync (net/mod.rs:798-801).",
+    "Force the request path (MindNet.request_snapshot()): the Snapshot wave is subscribed but no my_match_snapshot_chunks binder exists (attach_binders, net/mod.rs:222-234) and SnapshotProgress/reassemble have no live caller (snapshot.rs:296/517; SaveIo::load_bytes is used only for campaign map files, sim_host.rs:1798), so the blob is never reassembled or applied."
+   ],
+   "compare": [
+    "Java: a late joiner receives the world/state stream and converges to the host. Godot: joining a Running match only flips SessionState; the joiner keeps its own unrelated sim, no snapshot is requested/reassembled/applied and the command tail after the snapshot watermark is not replayed (plans/21_MULTIPLAYER_IMPLEMENTATION_PLAN.md:447 still lists the late-join sequence unchecked)."
+   ]
+  },
+  "steps": [],
+  "mismatch": null,
+  "fix": {
+   "status": "open",
+   "commit": null,
+   "summary": null,
+   "plan": {
+    "round": 0,
+    "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+    "seam": "client/rust/mind-gdext/src/net/mod.rs:338-367 (join_match) never loads the match map nor runs a late-join sequence; request_snapshot fires only on desync (net/mod.rs:798-801), my_match_snapshot_chunks is never bound (net/mod.rs:222-234) and nothing applies a reassembled snapshot to the sim.",
+    "files": [
+     "client/rust/mind-gdext/src/net/mod.rs:338",
+     "client/rust/mind-gdext/src/net/mod.rs:662",
+     "client/rust/mind-gdext/src/net/mod.rs:798",
+     "client/rust/mind-gdext/src/net/mod.rs:222",
+     "client/rust/mind-stdb/src/snapshot.rs:296",
+     "client/rust/mind-stdb/src/waves.rs:50"
+    ],
+    "approach": "1) Add the late-join sequence on observe_match with status Running (and after Resync/reconnect): subscribe the Snapshot wave, bind my_match_snapshot_chunks, call request_snapshot and feed rows into SnapshotProgress/reassemble (mind-stdb helpers already exist). 2) Apply the reassembled blob through the plan-04 entity/save codec into the live sim (Sim/sim_host need a net restore entry; today SaveIo::load_bytes serves only campaign preset maps, sim_host.rs:1798) after regenerating terrain from header.map_id/map_seed and applying header.rules_json/wave state. 3) Replay the ordered command tail after header.command_id (CommandRing::tail_after) and only then exit_snapshot_sync. 4) Make reconnect follow the same path when the member row survives and the match is still Running (plans/21 section 3.8 line 241).",
+    "narrow_check": "Two-client live check: B joins a Running match; MindNet.snapshot_progress() reaches 1.0, session_state() goes snapshot_sync -> in_game, and B's scoped checksum/tile state equal A's after the tail replay. A headless mp_late_join scenario (fixture snapshot + tail) asserts reassembly and watermark ordering without a window.",
+    "evidence": {
+     "java": [
+      "../Mindustry/core/src/mindustry/core/NetServer.java:955",
+      "../Mindustry/core/src/mindustry/core/NetServer.java:547"
+     ],
+     "godot": [
+      "client/rust/mind-gdext/src/net/mod.rs:338",
+      "client/rust/mind-gdext/src/net/mod.rs:662",
+      "client/rust/mind-gdext/src/net/mod.rs:798",
+      "client/rust/mind-gdext/src/net/mod.rs:222",
+      "client/rust/mind-stdb/src/snapshot.rs:296",
+      "client/rust/mind-stdb/src/waves.rs:50"
+     ]
+    }
+   }
+  },
+  "verified": null,
+  "note": "Code-scan 2026-10-10 (multiplayer): S2, high confidence. Player impact: a player joining a match already in progress never receives the host's world/state, so their sim diverges immediately and no snapshot correction is possible (the request path exists but the chunks are never consumed or applied). Context: plans/21:447 still lists 'late-join sequence; reconnect path' as open and plans/24:190 lists the live late-join timing as deferred; reconnect shares the same missing catch-up. In-engine verification pending.",
+  "evidence": [
+   "../Mindustry/core/src/mindustry/core/NetServer.java:955",
+   "../Mindustry/core/src/mindustry/core/NetServer.java:547",
+   "client/rust/mind-gdext/src/net/mod.rs:338",
+   "client/rust/mind-gdext/src/net/mod.rs:662",
+   "client/rust/mind-gdext/src/net/mod.rs:798",
+   "client/rust/mind-gdext/src/net/mod.rs:222",
+   "client/rust/mind-stdb/src/snapshot.rs:296",
+   "client/rust/mind-stdb/src/waves.rs:50",
+   "client/rust/mind-gdext/src/sim_host.rs:1798"
+  ]
+ },
+ {
+  "title": "Dedicated server: the host command never creates a networked match, so no client can join and kick/say/runwave do nothing",
+  "surface": "multiplayer",
+  "parent": null,
+  "status": "seeded",
+  "discovered_by": null,
+  "path": {
+   "to": "mind-headless serve (or server) boot, console `host <map> <mode>` then `status`, `kick <name>`, `runwave`, and a client looking at all_matches",
+   "java": [
+    "../Mindustry/server/src/mindustry/server/ServerControl.java:512",
+    "../Mindustry/server/src/mindustry/server/ServerControl.java:560",
+    "../Mindustry/core/src/mindustry/core/NetServer.java:1083"
+   ],
+   "godot": [
+    "client/rust/mind-headless/src/server/commands.rs:378",
+    "client/rust/mind-headless/src/server/net_host.rs:277",
+    "client/rust/mind-headless/src/server/dedicated.rs:193"
+   ],
+   "confirm": {},
+   "last_replayed": null
+  },
+  "run": null,
+  "reproduce": {
+   "java": [
+    "Run ./gradlew server:run; enter `host <map> survival`: ServerControl.java:512-563 loads the map and calls netServer.openServer() (ServerControl.java:560, NetServer.java:1083), so the server is listed/joinable and kick/say act on connected players."
+   ],
+   "godot": [
+    "Boot the dedicated shape: `cargo run --manifest-path client/rust/Cargo.toml -p mind-headless -- serve --config-dir /tmp/mgsrv --stdb-host http://127.0.0.1:3000` (serve composes `host <map> <mode>` at dedicated.rs:193-198) or `... server`; then send `host synthetic survival`.",
+    "Send `status` and `players`: the console host command went through LocalHost (commands.rs:381), so the report is the local synthetic fixture with 0 players; `spacetime sql mindustry \"SELECT match_id,map_id,status FROM relay_match\"` returns no row because NetHost::host (net_host.rs:277-302, the create_match path) is never called.",
+    "Send `kick <name>` / `say hi` / `runwave`: kick and say go to state.net (commands.rs:466/435) whose session has no match, so they fail with 'no match is hosted' (or act offline-mirror-only), and runwave increments the local fixture wave (commands.rs:775-780 -> host.rs:351-355) instead of emitting admin_run_wave (net_host.rs:324-335)."
+   ],
+   "compare": [
+    "Java: `host` opens the real server (openServer) and all console admin verbs act on the live connection. Godot: ServerState keeps LocalHost for host/stop/status/runwave and NetHost only for admin verbs, so the STDB match is never created - the server is invisible in all_matches, no client can join, and kick/say cannot target anyone."
+   ]
+  },
+  "steps": [],
+  "mismatch": null,
+  "fix": {
+   "status": "open",
+   "commit": null,
+   "summary": null,
+   "plan": {
+    "round": 0,
+    "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+    "seam": "client/rust/mind-headless/src/server/commands.rs:378-385 (cmd_host -> state.host.host, LocalHost) never calls NetHost::host (client/rust/mind-headless/src/server/net_host.rs:277-302), so the STDB session has no match; stop/status/runwave are split the same way (commands.rs:290, 775).",
+    "files": [
+     "client/rust/mind-headless/src/server/commands.rs:378",
+     "client/rust/mind-headless/src/server/commands.rs:290",
+     "client/rust/mind-headless/src/server/commands.rs:775",
+     "client/rust/mind-headless/src/server/net_host.rs:277",
+     "client/rust/mind-headless/src/server/dedicated.rs:193",
+     "client/rust/mind-headless/src/server/mod.rs:216"
+    ],
+    "approach": "1) Make the console `host` drive the networked host: keep the LocalHost fixture only for offline mode and call NetHost::host (net_host.rs:277) when online, so create_match runs and the Lobby/Game waves are subscribed. 2) Route `stop` to NetHost::stop (leave_match) and `runwave` to NetHost::run_wave (admin_run_wave, net_host.rs:324) whenever a networked match is hosted (LocalHost stays for the offline fixture). 3) Report NetHost status/players in `status` and keep `players`/kick/say on state.net. 4) Feed the parsed --match-config (map/seed/visibility/max_players) into HostParams instead of the defaults, and wire the serve auto-pause/rotation decisions (dedicated.rs should_pause/next_map currently have no caller). 5) Exercise it in the MIND_STDB_IT two-peer integration test.",
+    "narrow_check": "`serve` + `host synthetic survival` against a local SpacetimeDB: `spacetime sql mindustry \"SELECT match_id,map_id,status FROM relay_match\"` returns one Lobby/Running row, a Godot client's Join/Global list shows it and can join, and `kick <name>` returns success against the live member row instead of 'no match is hosted'.",
+    "evidence": {
+     "java": [
+      "../Mindustry/server/src/mindustry/server/ServerControl.java:512",
+      "../Mindustry/server/src/mindustry/server/ServerControl.java:560",
+      "../Mindustry/core/src/mindustry/core/NetServer.java:1083"
+     ],
+     "godot": [
+      "client/rust/mind-headless/src/server/commands.rs:378",
+      "client/rust/mind-headless/src/server/commands.rs:290",
+      "client/rust/mind-headless/src/server/commands.rs:775",
+      "client/rust/mind-headless/src/server/net_host.rs:277",
+      "client/rust/mind-headless/src/server/dedicated.rs:193",
+      "client/rust/mind-headless/src/server/mod.rs:216"
+     ]
+    }
+   }
+  },
+  "verified": null,
+  "note": "Code-scan 2026-10-10 (multiplayer): S2, high confidence. Player impact: the dedicated-server flow cannot host - no match row exists, so the server never appears in the browser, nobody can join, and the admin console verbs (kick/say/players/runwave) act on nothing or on a local synthetic fixture. Context: lead 2 (server console admin reachability); NetHost::host is dead code and the serve path reuses the local command. In-engine verification pending.",
+  "evidence": [
+   "../Mindustry/server/src/mindustry/server/ServerControl.java:512",
+   "../Mindustry/server/src/mindustry/server/ServerControl.java:560",
+   "../Mindustry/core/src/mindustry/core/NetServer.java:1083",
+   "client/rust/mind-headless/src/server/commands.rs:378",
+   "client/rust/mind-headless/src/server/commands.rs:290",
+   "client/rust/mind-headless/src/server/commands.rs:775",
+   "client/rust/mind-headless/src/server/net_host.rs:277",
+   "client/rust/mind-headless/src/server/dedicated.rs:193",
+   "client/rust/mind-headless/src/server/mod.rs:216"
+  ]
+ },
+ {
+  "title": "Chat filters/mutes are database-global and apply to every match on the SpacetimeDB database, not per match",
+  "surface": "multiplayer",
+  "parent": null,
+  "status": "seeded",
+  "discovered_by": null,
+  "path": {
+   "to": "One SpacetimeDB database hosting two concurrent matches; an admin adds a mute filter from one match and a player posts the pattern in the other",
+   "java": [
+    "../Mindustry/core/src/mindustry/net/Administration.java:28",
+    "../Mindustry/core/src/mindustry/net/Administration.java:153",
+    "../Mindustry/core/src/mindustry/core/NetClient.java:364"
+   ],
+   "godot": [
+    "server/spacetimedb/src/chat/mod.rs:29",
+    "server/spacetimedb/src/chat/mod.rs:126",
+    "plans/24_DEFERRED_ITEMS_SWEEP_PLAN.md:192"
+   ],
+   "confirm": {},
+   "last_replayed": null
+  },
+  "run": null,
+  "reproduce": {
+   "java": [
+    "Java is one server = one match, so Administration.chatFilters (Administration.java:28) applies only to that server's players via filterMessage (Administration.java:153-160, applied in NetClient.java:364 and NetServer.java:374): a filter added by the server admin affects exactly the live match."
+   ],
+   "godot": [
+    "Create two matches in the same database (or reason from the schema): chat_filter/chat_rate have no match_id (chat/mod.rs:29-81), so send_chat loads every filter row for whichever match is calling (chat/mod.rs:128-143) and a mute pattern added for match A drops the same text in match B.",
+    "Check the management surface too: no client or console caller invokes Connector::admin_add_chat_filter/admin_remove_chat_filter (connector.rs:889-905) - there is currently no UI/console way to manage filters at all."
+   ],
+   "compare": [
+    "Upstream: filters are server-global which equals per-match (one match per server); the message path is filterMessage before broadcast. Godot: the filter/mute table is shared by every match in the database, and with no management surface the admin cannot scope or even edit filters. plans/24:192 records this as an accepted deviation awaiting the authoritative sim - keep open, do not mark wontfix."
+   ]
+  },
+  "steps": [],
+  "mismatch": null,
+  "fix": {
+   "status": "open",
+   "commit": null,
+   "summary": null,
+   "plan": {
+    "round": 0,
+    "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+    "seam": "server/spacetimedb/src/chat/mod.rs:29-81 defines chat_filter/chat_rate at database scope (no match_id) and chat/mod.rs:126-143 filters every message against the global table; no client surface calls the admin filter reducers (client/rust/mind-stdb/src/connector.rs:889).",
+    "files": [
+     "server/spacetimedb/src/chat/mod.rs:29",
+     "server/spacetimedb/src/chat/mod.rs:66",
+     "server/spacetimedb/src/chat/mod.rs:126",
+     "client/rust/mind-stdb/src/connector.rs:889",
+     "client/rust/mind-stdb/src/waves.rs:43"
+    ],
+    "approach": "1) Record the decision: plans/24:192 accepts the global scope until the authoritative sim; this item keeps the deviation visible and must not be closed as fixed without that decision. 2) If per-match is chosen, add match_id to chat_filter (append-only ABI: keep the old accessor, add an index by match) and scope the filter query to the caller's match in send_chat, leaving server_config rate windows global. 3) Wire a management surface: either a Connector-backed admin UI/console (admin_add_chat_filter/admin_remove_chat_filter are never called) or keep it reducer-only and document it. 4) Cover both matches with a server-module test asserting the filter only mutes its own match after the split.",
+    "narrow_check": "Two matches in one database: add a mute filter in match A, post the pattern in match B - currently dropped; after the decision/fix it is only dropped in match A (server chat tests + an MIND_STDB_IT live check).",
+    "evidence": {
+     "java": [
+      "../Mindustry/core/src/mindustry/net/Administration.java:28",
+      "../Mindustry/core/src/mindustry/net/Administration.java:153",
+      "../Mindustry/core/src/mindustry/core/NetClient.java:364"
+     ],
+     "godot": [
+      "server/spacetimedb/src/chat/mod.rs:29",
+      "server/spacetimedb/src/chat/mod.rs:66",
+      "server/spacetimedb/src/chat/mod.rs:126",
+      "client/rust/mind-stdb/src/connector.rs:889",
+      "client/rust/mind-stdb/src/waves.rs:43"
+     ]
+    }
+   }
+  },
+  "verified": null,
+  "note": "Code-scan 2026-10-10 (multiplayer): S3, medium confidence. Player impact: an admin's chat filter/mute affects players in every match sharing the database, and there is no UI/console to manage filters at all. Context: plans/24_DEFERRED_ITEMS_SWEEP_PLAN.md:192 records 'Per-match chat filters await the authoritative sim (accepted deviation)' - this item is the recorded deviation pending decision, keep open and do not mark wontfix; it is currently masked by the inert chat transport (chat finding) which must be wired first. In-engine verification pending.",
+  "evidence": [
+   "../Mindustry/core/src/mindustry/net/Administration.java:28",
+   "../Mindustry/core/src/mindustry/net/Administration.java:153",
+   "../Mindustry/core/src/mindustry/core/NetClient.java:364",
+   "server/spacetimedb/src/chat/mod.rs:29",
+   "server/spacetimedb/src/chat/mod.rs:66",
+   "server/spacetimedb/src/chat/mod.rs:126",
+   "client/rust/mind-stdb/src/connector.rs:889",
+   "client/rust/mind-stdb/src/waves.rs:43",
+   "plans/24_DEFERRED_ITEMS_SWEEP_PLAN.md:192"
+  ]
+ }
+]

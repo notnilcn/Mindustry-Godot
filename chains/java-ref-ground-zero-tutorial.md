@@ -8,13 +8,14 @@ applies_when: >-
   its checkpoint.
 preconditions:
   - JDK 17 and the built reference jar at `../Mindustry/desktop/build/libs/Mindustry.jar`.
-  - Display `:10`; computer-mcp registered against it. The Godot editor may
-    share the display, so raise Mindustry before every capture.
+  - "Java-leg shell helpers: scripts in `.opencode/skills/parity-eval/scripts/`,
+    run with `$PARITY_PY` (bootstrap.sh) and `DISPLAY=:10`. The Godot editor may
+    share the display, so raise Mindustry before every capture."
   - `parity-java-home/` normalized (1152x648, UI scale 1.0, language en,
     volumes 0); back up `parity-java-home/.local/share/Mindustry/saves/`
     before forcing a fresh profile.
   - Java only: the Godot client stays down for the whole soak.
-tools: [computer-mcp_mouse_move, computer-mcp_click, computer-mcp_drag, computer-mcp_key_press, computer-mcp_key_down, computer-mcp_key_up, window_ctl.py, capture_screen.py]
+tools: [java_input.py, window_ctl.py, capture_screen.py]
 last_verified: R00-R06 recorded 2026-10-09 (runs/20261009-065416-ref-ground-zero); cold-boot R01 resume replay (twin) 2026-10-10 runs/20261009-150509-PAR-0037-twin (JVM pids 193769/197845, Java 2cd7aee); R05 twin replay 2026-10-10 runs/20261010-060551-PAR-0049-twin (JVM pid 404033; R04 replay + conveyor research + line + deliveries; fork 0.03936 / action 0.01185 vs stored refs)
 ---
 
@@ -40,11 +41,12 @@ plans and are replaced by the recorded sequence on the first soak run.
      -jar ../Mindustry/desktop/build/libs/Mindustry.jar \
      >"$RUN/java/game.log" 2>&1 </dev/null &
    pgrep -f 'Mindustry[.]jar' > "$RUN/java/java.pid"
-   until grep -q "Total time to load" "$RUN/java/game.log"; do sleep 2; done
-   DISPLAY=:10 "$MCP_PY" .opencode/skills/parity-eval/scripts/window_ctl.py unmaximize Mindustry
-   DISPLAY=:10 "$MCP_PY" .opencode/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648
-   DISPLAY=:10 "$MCP_PY" .opencode/skills/parity-eval/scripts/window_ctl.py move Mindustry 45 69
-   DISPLAY=:10 "$MCP_PY" .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry
+   timeout 180 bash -c 'until grep -q "Total time to load" "$RUN/java/game.log"; do sleep 2; done' \
+     || echo "launch gate timed out; see $RUN/java/game.log" >&2
+   DISPLAY=:10 "$PARITY_PY" .opencode/skills/parity-eval/scripts/window_ctl.py unmaximize Mindustry
+   DISPLAY=:10 "$PARITY_PY" .opencode/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648
+   DISPLAY=:10 "$PARITY_PY" .opencode/skills/parity-eval/scripts/window_ctl.py move Mindustry 45 69
+   DISPLAY=:10 "$PARITY_PY" .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry
    ```
 
    Capture `java/step-00-boot.png`; the report's `region` gives the window
@@ -120,8 +122,9 @@ setsid env DISPLAY=:10 HOME="$PWD/parity-java-home" \
   /usr/lib/jvm/java-17-openjdk-amd64/bin/java \
   -jar ../Mindustry/desktop/build/libs/Mindustry.jar \
   >>"$RUN/java/game.log" 2>&1 </dev/null &
-# gate (fresh log file, or the old "Total time to load" matches instantly):
-until grep -q "Total time to load" "$RUN/java/game.log"; do sleep 2; done
+# gate (fresh log file, or the old "Total time to load" matches instantly); bounded:
+timeout 180 bash -c 'until grep -q "Total time to load" "$RUN/java/game.log"; do sleep 2; done' \
+  || echo "launch gate timed out; see $RUN/java/game.log" >&2
 window_ctl.py unmaximize Mindustry; window_ctl.py resize Mindustry 1152 648
 window_ctl.py move Mindustry 45 69; window_ctl.py raise Mindustry
 # measured: xwininfo -name Mindustry -> client +50+98 1152x648
@@ -147,7 +150,7 @@ Checkpoint (autosave, mtime moved after the launch): the Java tutorial sector
 save is `sector-serpulo-170.msav` (Ground Zero = sector 170 here); copied to
 `checkpoints/r00-sector-serpulo-170.msav`.
 
-Hiccup (see `computer-mcp-learnings.md`, 2026-10-09): the first click after
+Hiccup (see `java-leg-learnings.md`, 2026-10-09): the first click after
 this relaunch was consumed by window activation — a 5-click batch left the menu
 unchanged (`java/r00-01-launch.png`); a capture + re-send opened the submenu
 (`java/probe-click-play.png`).
@@ -279,7 +282,7 @@ completes within ~20 s of the first delivery and the panel advances to
 operation…" prompt and `Right-click and drag to break blocks.` hint. Grid used:
 core 3×3 at x 527-623 → 32 px tiles; row centered on the core's middle row
 (y≈335). Autosave mtime 17:34:03 → `checkpoints/r05-sector-serpulo-170.msav`.
-Hiccups (see `computer-mcp-learnings.md`, 2026-10-09): category-button click
+Hiccups (see `java-leg-learnings.md`, 2026-10-09): category-button click
 inert (use `.`); `computer-mcp.drag` places only one tile (click per tile).
 
 ## R06 — more drills; 100 copper (recorded 2026-10-09)
@@ -334,7 +337,7 @@ Zero hex > Go (R01 flow) → this row.
 
 | after | wait | why |
 |---|---|---|
-| boot launch | `until grep -q "Total time to load"` | first launch is slow; no fixed sleep |
+| boot launch | `timeout 180 bash -c 'until grep -q "Total time to load" …'` | first launch is slow; bounded gate, no fixed sleep |
 | first click after (re)launch/raise | re-send once after a capture shows no reaction | window activation swallows the first click (2026-10-09) |
 | any menu click | 300-500 ms | dialog/menu fade |
 | Play > Campaign (fresh) | capture-check, then input | first-run chooser appears after a fade |
@@ -357,8 +360,9 @@ Zero hex > Go (R01 flow) → this row.
   verify with a capture and send the click again.
 - A move+click can land at the previous pointer position unless the pointer
   read-back settles; prefer one click per named step and verify via capture.
-- Held left button persists across MCP calls (mining continues): send an
-  explicit `computer-mcp_button_up` before a fresh click.
+- Held left button persists across helper calls (mining continues): send an
+  explicit `java_input.py mouseup X Y left` (at the held click's coordinates)
+  before a fresh click.
 - Text fields drop injected input (save slot names) — prefer the save slot that
   already exists, or copy `parity-java-home/.local/share/Mindustry/saves/*.msav`
   instead.
@@ -491,4 +495,4 @@ refs reproduced: fork `0.03936` / mean_abs [2.76,2.84,3.16]; action `0.01185` / 
 4. **Quit**: Escape -> `Save & Quit (626,508)` -> OK `(726,456)` -> menu Quit `(305,598)`; JVM
    exits. Hiccup: computer-mcp clicks do not land while the Godot editor holds X focus — focus
    the client first (EWMH `_NET_ACTIVE_WINDOW` + `set_input_focus`, then one-shot pynput;
-   helper `java_input.py` in the run dir; see `computer-mcp-learnings.md` 2026-10-10).
+   helper `java_input.py` in the run dir; see `java-leg-learnings.md` 2026-10-10).

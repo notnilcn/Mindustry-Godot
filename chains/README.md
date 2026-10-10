@@ -3,8 +3,9 @@
 Proven, project-specific sequences of MCP calls for Mindustry-Godot. Agents
 consult the matching chain before composing their own tool calls and append a
 chain (or bump one to `verified`) after a run confirms the sequence. A chain
-covers one leg (Godot via `godot_*`; Java via `computer-mcp_*`) or both legs of
-a mirrored parity item.
+covers one leg (Godot via `godot_*`; Java via the shell helpers
+`java_input.py` / `window_ctl.py` / `capture_screen.py`) or both legs of a
+mirrored parity item.
 
 A chain has two kinds of sequence:
 
@@ -24,6 +25,34 @@ touch, which precondition is easy to miss.
 > sequences as recipes, not as live paths. Current runs live in
 > `runs/<stamp>-<item>/`, progress lives in `parity-ledger.json`, and work is
 > driven by the `/loop` / `/goal` plugins.
+
+## Java-leg tooling (computer-mcp retired 2026-10-11)
+
+The Java reference leg runs through the parity-eval shell helpers in
+`.opencode/skills/parity-eval/scripts/`, executed with the helper venv python
+(`PARITY_PY="${PARITY_PY:-$HOME/.local/share/parity-eval/venv/bin/python}"`,
+created by `bootstrap.sh`) and `DISPLAY=:10` per call. Chains recorded before
+2026-10-11 name `computer-mcp_*` tools; convert them with:
+
+| retired computer-mcp call | shell helper |
+|---|---|
+| `mouse_move {x,y}` | `java_input.py move X Y` |
+| `click {x,y,button}` | `java_input.py click X Y BUTTON` |
+| `double_click {x,y,button}` | `java_input.py dblclick X Y BUTTON` |
+| `button_down` / `button_up {button}` | `java_input.py mousedown` / `mouseup X Y BUTTON` |
+| `drag {start,end}` | `java_input.py drag X1 Y1 X2 Y2 left 300` |
+| `key_press {key}` | `java_input.py key NAME 60` (toggles: `keydown` + `keyup`) |
+| `key_down` / `key_up {key}` | `java_input.py keydown` / `keyup NAME` |
+| `type {text}` | `java_input.py type TEXT` |
+| `screenshot[_window]` | `capture_screen.py --window-title Mindustry --output PATH` |
+| window ops / focus | `window_ctl.py raise/move/resize/unmaximize/list`; every `java_input.py` action activates the window first |
+| scroll | `java_input.py scroll N` |
+| timed key combos | `java_input.py seq '[[...]]'` (one process, one focus) |
+
+`java_input.py` gives every call a fresh focus (EWMH `_NET_ACTIVE_WINDOW` +
+`set_input_focus`), so a click cannot be swallowed as the activation click;
+`send_event_click.py` is the XSendEvent fallback and `record_input.py` proves
+delivery. Friction goes to `java-leg-learnings.md`.
 
 ## Layout
 
@@ -53,7 +82,7 @@ touch, which precondition is easy to miss.
 | `load-game-dialog.md` | main menu → Load Game → live slot list → card click queues + applies a load |
 | `research-purchase.md` | campaign launch → research dialog → root rail → purchase a locked node |
 | `placement-picker-audit.md` | campaign launch → in-game placement picker → catalog filtering / icon / clipping audit (EV-0013) |
-| `java-reference-leg.md` | Java reference: launch → drive → capture → quit (computer-mcp) |
+| `java-reference-leg.md` | Java reference: launch → drive → capture → quit (shell helpers) |
 | `java-join-dedicated-server.md` | Java reference: `server:dist` dedicated server on 6567 → Join Game LAN-discovery row → connect into it (EV-0060) |
 | `java-custom-survival-wave.md` | Java reference: custom survival game → skip/timer wave → spawn/move/combat captures |
 | `java-campaign-loss.md` | Java reference: campaign sector → pause `Abandon` → core self-destruct → `GameOverDialog` + `Continue` (EV-0061 twin) |
@@ -110,18 +139,19 @@ the gate), `## Success signals`, `## Failure modes`, `## Variants`.
   share a navigation prefix; each item still carries its own exact call list
   and replays it independently — never assume a client sits at the fork.
 - **Preconditions include the host.** Servers that need a display or another
-  process-start environment variable belong in `preconditions`. Both legs now
-  share display `:10`: computer-mcp gets `DISPLAY=:10.0` from the global
-  opencode config, and the Godot editor runs there too (bridge port 6970).
-  Raise the Java window (`window_ctl.py raise Mindustry`) before a Java capture.
+  process-start environment variable belong in `preconditions`. Both legs share
+  display `:10`: the Java helpers take `DISPLAY=:10` per call (run with
+  `$PARITY_PY`; `parity-session.sh --run` exports the session display), and the
+  Godot editor runs there too (bridge port 6970). Raise the Java window
+  (`window_ctl.py raise Mindustry`) before a Java capture.
 - **Keep it current.** When a step fails at the same commit, fix the chain in
   the same change that fixes the tooling.
 - **Server-tag each chain.** The Godot leg uses open-godot-mcp (`godot_*`
-  tools); the Java leg uses computer-mcp (`computer-mcp_*` tools, or
-  `window_ctl.py` / `capture_screen.py` for window ops and captures). Name the
-  server in the chain's `tools` list so the next agent picks the right protocol.
+  tools); the Java leg uses the shell helpers (`java_input.py` for input,
+  `window_ctl.py` for window ops, `capture_screen.py` for captures). Name the
+  scripts in the chain's `tools` list so the next agent picks the right path.
 - **Friction is not a chain.** One-off tool errors and their workarounds go to
-  the repo-root `open-godot-mcp-learnings.md` / `computer-mcp-learnings.md`,
+  the repo-root `open-godot-mcp-learnings.md` / `java-leg-learnings.md`,
   not here.
 
 Consumers: the `/loop` and `/goal` parity sessions driven through the

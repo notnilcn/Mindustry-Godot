@@ -1,0 +1,480 @@
+[
+  {
+    "title": "Placed turrets never target or fire in live play",
+    "surface": "world",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Live client (campaign or custom game): place a duo fed by a copper belt and spawn a hostile unit within 160 px of the tile center.",
+      "java": [],
+      "godot": [],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "Launch the pinned Java client on Ground Zero (or any sector) with sandbox cheats enabled.",
+        "Place a duo turret, feed copper to it with conveyors/drives, and spawn a hostile dagger about 4 tiles away.",
+        "Observe: the turret rotates, fires within one reload (20 ticks) and consumes copper ammo."
+      ],
+      "godot": [
+        "In the Godot client start a campaign sector or custom game; place a duo with a copper conveyor line feeding it and spawn/keep a hostile unit inside range 160 (5 tiles).",
+        "Read MindSimHost.get_state_json()/block_items_json(x,y) over 60 steps and inspect bullet entities and the turret item module.",
+        "Observe: no rotation, no bullets, ammo never changes, and the building entity never receives a TurretState component."
+      ],
+      "compare": [
+        "Java: turret acquires the target, fires and depletes ammo. Godot: the turret kind resolves to NoopBehavior so it never fires at all; the gap is registration, not targeting math."
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "Live content/registry: the plan-10 turret ammo bullets are test-only, so defense::register (client/rust/mind-core/src/world/blocks/defense/behaviors.rs:424) never installs TurretBehavior in the shipped client; default_behavior maps every turret kind to NoopBehavior (client/rust/mind-core/src/world/behavior/mod.rs:565).",
+        "files": [
+          "client/rust/mind-core/src/world/blocks/defense/behaviors.rs:424",
+          "client/rust/mind-core/src/combat/harness.rs:1084",
+          "client/rust/mind-core/src/sim/runtime.rs:566",
+          "client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs:440",
+          "client/rust/mind-core/src/content/registries/blocks/turrets.rs:27"
+        ],
+        "approach": "1) Promote the plan-10 turret ammo bullets out of CombatHarness: either register them from the vanilla bullet wave (content/registries/bullets.rs) or call turrets::register_bullets from load_vanilla_content (sim/runtime.rs:532-537) so every live content boot has them. 2) Drop the fixture_names() gate in defense::register and register each TURRET_BLOCKS entry whose ammo resolves (keep the ammo_in_content drift guard). 3) Add consume_coolant/has_liquids and the per-turret liquid_capacity values from the JVM golden to content/registries/blocks/turrets.rs (duo etc. currently omit has_liquids so LiquidModule is never created, update.rs:112). 4) Delete or repoint the fixture_names bridge and update the harness tests to use the shared registry. Keep TURRET_BLOCKS as the single source of truth.",
+        "narrow_check": "cargo test -p mind-core --lib defense:: plus a live-runtime test: install the block runtime from create_base_content, place duo with copper in its ItemModule, spawn a target unit within 160 px, tick 60 and assert a bullet entity exists and ammo decreased; assert BlockTable::get_named(duo).behavior is not NoopBehavior.",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/world/blocks/defense/turrets/Turret.java:496",
+            "../Mindustry/core/src/mindustry/world/blocks/defense/turrets/Turret.java:740",
+            "../Mindustry/core/src/mindustry/content/Blocks.java:3276"
+          ],
+          "godot": [
+            "client/rust/mind-core/src/world/behavior/mod.rs:565",
+            "client/rust/mind-core/src/world/blocks/defense/behaviors.rs:424",
+            "client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs:486",
+            "client/rust/mind-core/src/combat/harness.rs:1084",
+            "client/rust/mind-core/src/sim/runtime.rs:557"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (blocks-behavior): S2 high. The only code that installs turret behaviors is gated on the plan-10 fixture bullet map (defense/behaviors.rs:424), which is set only by CombatHarness (combat/harness.rs:1084); the live install path (sim/runtime.rs:557-568 -> load_vanilla_content -> BlockTable::build_default -> default_registry world/blocks/mod.rs:33) never calls register_bullets, and default_behavior maps every turret kind to NoopBehavior (world/behavior/mod.rs:565-573). Player impact: turrets never acquire targets, shoot, consume ammo, or take coolant; the defense half of the campaign is unplayable. Related to lead 1(b)/(f): the turret defs also omit consume_coolant/has_liquids (turrets.rs:27-40 and siblings; has_liquids is derived only from consumers, blocks/mod.rs:2736-2746) and the live force-projector passes coolant 0 (defense/behaviors.rs:72), so coolant needs wiring even after registration. In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/world/blocks/defense/turrets/Turret.java:496",
+      "../Mindustry/core/src/mindustry/world/blocks/defense/turrets/Turret.java:740",
+      "../Mindustry/core/src/mindustry/content/Blocks.java:3276",
+      "client/rust/mind-core/src/world/behavior/mod.rs:565",
+      "client/rust/mind-core/src/world/blocks/defense/behaviors.rs:424",
+      "client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs:486",
+      "client/rust/mind-core/src/combat/harness.rs:1084",
+      "client/rust/mind-core/src/sim/runtime.rs:557",
+      "client/rust/mind-core/src/content/registries/blocks/turrets.rs:27"
+    ]
+  },
+  {
+    "title": "Fuel generators produce no power: conveyors cannot insert coal/radioactive fuel",
+    "surface": "world",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Live client: place a combustion-generator, run a coal conveyor into it, and watch the power graph/battery.",
+      "java": [],
+      "godot": [],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "Launch the pinned Java client, place a combustion-generator and a coal conveyor feeding it, plus a battery on the same grid.",
+        "Observe: the generator accepts coal, warms up and charges the battery."
+      ],
+      "godot": [
+        "In the Godot client place a combustion-generator with a coal conveyor into it and a battery connected.",
+        "Read get_state_json()/power info over 120 steps: GeneratorState.generate_time stays 0, production_efficiency stays 0, PowerProduction stays 0 and the battery never charges.",
+        "Headless spot-check: after install_block_runtime, call transfer::dispatch_accept_item(generator, conveyor, coal) and observe false."
+      ],
+      "compare": [
+        "Java: coal enters via the generic BuildingComp.acceptItem and the generator produces 1 power/tick. Godot: the registered ConsumeGeneratorBehavior has no accept_item override, so belt input is rejected and the filter gate keeps efficiency 0 forever."
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "BuildingBehavior::accept_item/handle_item defaults return false/no-op (client/rust/mind-core/src/world/behavior/mod.rs:256), so ConsumeGeneratorBehavior (client/rust/mind-core/src/world/blocks/power/behavior.rs:185) must override both; generator specs also need has_items per the JVM golden.",
+        "files": [
+          "client/rust/mind-core/src/world/blocks/power/behavior.rs:185",
+          "client/rust/mind-core/src/world/behavior/mod.rs:256",
+          "client/rust/mind-core/src/content/registries/blocks/power.rs:116",
+          "client/rust/mind-core/src/world/blocks/power/generator.rs:458"
+        ],
+        "approach": "1) Implement accept_item/handle_item on ConsumeGeneratorBehavior to match upstream BuildingComp.acceptItem: accept when the item passes the config filter (flammability >= min / radioactivity >= min) and module.get < max accepted, then add one to the ItemModule (use transfer::default_handle_item semantics, transfer.rs:47). 2) Set has_items=true (and item_capacity from Blocks.java) on combustion-generator, steam-generator, rtg-generator and neoplasia-reactor specs, or derive has_items from any item consumer inside BlockDef::init_self (blocks/mod.rs:2733-2752 currently derives only liquids/power); this also fixes the JVM golden has_items rows. 3) Apply the same generic accept/handle default to other item consumers that rely on it (Fracker/oil-extractor, reconstructors) rather than duplicating per family. 4) Add a regression test through the real transfer path, not direct module injection.",
+        "narrow_check": "cargo test -p mind-core world::blocks::power: spawn a combustion-generator + conveyor via BuildHarness, push one coal with transfer::dump, and assert accept/handle succeed and GeneratorState.warmup/production_efficiency become > 0 within 60 ticks with PowerProduction > 0.",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/content/Blocks.java:2523",
+            "../Mindustry/core/src/mindustry/world/consumers/ConsumeItemFilter.java:26",
+            "../Mindustry/core/src/mindustry/world/blocks/power/ConsumeGenerator.java:111",
+            "../Mindustry/core/src/mindustry/entities/comp/BuildingComp.java:869"
+          ],
+          "godot": [
+            "client/rust/mind-core/src/world/blocks/power/behavior.rs:185",
+            "client/rust/mind-core/src/world/behavior/mod.rs:256",
+            "client/rust/mind-core/src/world/blocks/distribution/transfer.rs:109",
+            "client/rust/mind-core/src/world/blocks/power/generator.rs:458",
+            "client/rust/mind-core/src/content/registries/blocks/power.rs:116"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (blocks-behavior): S2 high. Combustion/steam/RTG/neoplasia generators register ConsumeGeneratorBehavior (power/behavior.rs:819-826, 829-840, 851-858, 898-917) which never overrides accept_item/handle_item, so the trait defaults reject every item (world/behavior/mod.rs:256-264) and belts feeding a generator stall (transfer.rs:109-120, 454-465). Upstream items enter via BuildingComp.acceptItem (entities/comp/BuildingComp.java:869-871) and ConsumeItemFilter sets hasItems=true (consumers/ConsumeItemFilter.java:26) - which is why the JVM golden shows has_items=true while the port specs omit it (content/registries/blocks/power.rs:116-127). The generator filter gate also stays 0 with an empty module and generate_time 0 (power/generator.rs:458-476), so a fresh generator can never bootstrap. Player impact: no early power from coal/oil chains; power-gated blocks stay dead. In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/content/Blocks.java:2523",
+      "../Mindustry/core/src/mindustry/world/consumers/ConsumeItemFilter.java:26",
+      "../Mindustry/core/src/mindustry/world/blocks/power/ConsumeGenerator.java:111",
+      "../Mindustry/core/src/mindustry/entities/comp/BuildingComp.java:869",
+      "client/rust/mind-core/src/world/blocks/power/behavior.rs:185",
+      "client/rust/mind-core/src/world/behavior/mod.rs:256",
+      "client/rust/mind-core/src/world/blocks/distribution/transfer.rs:109",
+      "client/rust/mind-core/src/world/blocks/power/generator.rs:458",
+      "client/rust/mind-core/src/content/registries/blocks/power.rs:116"
+    ]
+  },
+  {
+    "title": "Reconstructors cannot be supplied with items and upgrade units without the item/power cost",
+    "surface": "world",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Live client: place an additive-reconstructor and run a silicon+graphite belt into it.",
+      "java": [],
+      "godot": [],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "Launch the pinned Java client on Serpulo; place an additive-reconstructor and belt silicon+graphite into it.",
+        "Observe: items enter (up to 80), power+items gate efficiency, and a unit on the pad takes 600 ticks to upgrade while consuming the stack."
+      ],
+      "godot": [
+        "In the Godot client place an additive-reconstructor with a silicon+graphite conveyor and a unit on the pad.",
+        "Read block_items_json over 120 steps: the belt backs up and no items ever enter; if items are injected directly the upgrade still completes in 120 ticks and removes nothing.",
+        "Headless spot-check: dispatch_accept_item(reconstructor, conveyor, silicon) is false and the Consume::Items gate returns 0 because no ItemModule exists."
+      ],
+      "compare": [
+        "Java: reconstructor accepts items, consumes them on completion and gates progress on efficiency. Godot: no item module, belt input rejected, and progress uses a hardcoded 1.0 scale with construct_time 120."
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "Reconstructor specs lack has_items/item_capacity (client/rust/mind-core/src/content/registries/blocks/units.rs:121) and ReconstructorBehavior (client/rust/mind-core/src/world/blocks/units/behavior.rs:218) has no accept_item/handle_item; progress bypasses edelta and per-block constructTime.",
+        "files": [
+          "client/rust/mind-core/src/content/registries/blocks/units.rs:121",
+          "client/rust/mind-core/src/content/registries/blocks/units_erekir.rs:95",
+          "client/rust/mind-core/src/world/blocks/units/behavior.rs:218",
+          "client/rust/mind-core/src/world/blocks/units/mod.rs:206",
+          "client/rust/mind-core/src/world/update.rs:517"
+        ],
+        "approach": "1) Add has_items=true and the Blocks.java item_capacity (80/260/1700/2000; refabricators 80/120/100/200) to every Reconstructor spec, or derive has_items from any Consume::Items consumer inside BlockDef::init_self (blocks/mod.rs:2733-2752). 2) Implement accept_item/handle_item on ReconstructorBehavior using the consumed stacks and def.item_capacity. 3) Make ReconstructorBuild::update take edelta (efficiency*timeScale) and a per-block construct time (Blocks.java:6343 = 600, 6363 = 1800, 6385 = 5400, 6406 = 14400) instead of the hardcoded 120.0, and remove the consumed stacks on completion like upstream consume(). 4) Extend the units tests to fill the reconstructor through the real transfer path, not direct module injection.",
+        "narrow_check": "cargo test -p mind-core world::blocks::units: place additive-reconstructor, dump 40 silicon + 40 graphite via transfer::dump, assert the ItemModule holds them, tick 600 with efficiency 1 and assert a spawned unit plus the removed items; with efficiency 0 assert no progress.",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/content/Blocks.java:6336",
+            "../Mindustry/core/src/mindustry/world/blocks/units/Reconstructor.java:326",
+            "../Mindustry/core/src/mindustry/world/consumers/ConsumeItems.java:24",
+            "../Mindustry/core/src/mindustry/entities/comp/BuildingComp.java:869"
+          ],
+          "godot": [
+            "client/rust/mind-core/src/content/registries/blocks/units.rs:121",
+            "client/rust/mind-core/src/world/blocks/units/behavior.rs:218",
+            "client/rust/mind-core/src/world/blocks/units/behavior.rs:227",
+            "client/rust/mind-core/src/world/update.rs:517",
+            "client/rust/mind-core/src/world/update.rs:109",
+            "client/rust/mind-core/src/world/blocks/units/mod.rs:206"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (blocks-behavior): S2 high. Every Reconstructor spec omits has_items (content/registries/blocks/units.rs:121-147; units_erekir.rs:95-115 etc.), so no ItemModule is created (world/update.rs:109-111) and the generic Consume::Items gate is permanently 0 (world/update.rs:517-527); ReconstructorBehavior also never overrides accept_item/handle_item (world/blocks/units/behavior.rs:218-233), so belts cannot fill it. Upstream ConsumeItems sets hasItems=true (ConsumeItems.java:24) and the generic BuildingComp.acceptItem admits the items (BuildingComp.java:869). The port progression also ignores efficiency/timeScale and hardcodes construct_time 120 (units/behavior.rs:227-230, units/mod.rs:206) while upstream gates progress on efficiency and per-block constructTime. Player impact: the Serpulo upgrade chain cannot be supplied and upgrades cost nothing where a payload lands; unit factories keep working only because UnitFactoryBehavior computes per-item capacities itself (units/behavior.rs:149-188). The golden diff also shows item_capacity 10 vs 60-2000 for factories/reconstructors. In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/content/Blocks.java:6336",
+      "../Mindustry/core/src/mindustry/world/blocks/units/Reconstructor.java:326",
+      "../Mindustry/core/src/mindustry/world/consumers/ConsumeItems.java:24",
+      "../Mindustry/core/src/mindustry/entities/comp/BuildingComp.java:869",
+      "client/rust/mind-core/src/content/registries/blocks/units.rs:121",
+      "client/rust/mind-core/src/world/blocks/units/behavior.rs:218",
+      "client/rust/mind-core/src/world/blocks/units/behavior.rs:227",
+      "client/rust/mind-core/src/world/update.rs:517",
+      "client/rust/mind-core/src/world/update.rs:109",
+      "client/rust/mind-core/src/world/blocks/units/mod.rs:206"
+    ]
+  },
+  {
+    "title": "Sandbox sources/voids do nothing: sources never output and voids never drain",
+    "surface": "world",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Live client (sandbox custom game): item-source -> conveyor, item-void at the belt end, liquid-source -> conduit, power-source -> battery.",
+      "java": [],
+      "godot": [],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "Launch the pinned Java client in a sandbox custom game; place item-source (configured copper) next to a conveyor, item-void at the end, liquid-source into a conduit/void, power-source onto a battery.",
+        "Observe: the source dumps items and power/liquid flows into the voids."
+      ],
+      "godot": [
+        "In the Godot client sandbox custom game, repeat the same setup.",
+        "Read get_state_json()/block_items_json and the power/liquid module state: item-source fills its own module but nothing moves; item-void rejects items; liquid-source stays empty; power-source produces 0 and the battery never charges."
+      ],
+      "compare": [
+        "Java: all six sandbox source/sink blocks execute their updateTile/accept path. Godot: only the item-source fill half exists; sinks reject and liquid/power helpers are never called."
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "world/behavior/sandbox.rs SandboxBehavior (the family fallback for every BlockKind source/void) does not dispatch on kind_data and never calls the power::sandbox helpers.",
+        "files": [
+          "client/rust/mind-core/src/world/behavior/sandbox.rs:32",
+          "client/rust/mind-core/src/world/blocks/power/sandbox.rs:31",
+          "client/rust/mind-core/src/world/blocks/power/behavior.rs:803",
+          "client/rust/mind-core/src/content/registries/blocks/sandbox.rs:54",
+          "client/rust/mind-core/src/world/behavior/mod.rs:599"
+        ],
+        "approach": "1) Extend SandboxBehavior::update_tile to match the block kind_data: ItemSource -> dump the configured item on the 60/itemsPerSecond timer; LiquidSource -> call update_liquid_source with capacity 10000 and the configured liquid; LiquidVoid -> call update_liquid_void (clear every tick); PowerSource/PowerVoid -> call update_power_source/update_power_void. 2) Add accept_item/handle_item for ItemVoid (accept when enabled, discard) and ItemSource (return false), and accept_liquid/handle_liquid for LiquidVoid; liquid acceptance needs a LiquidNode because movement::accept_liquid reads LiquidNode (liquid/movement.rs:95-113), so insert one in create_state for the liquid source/void. 3) Register the four power/sandbox names in power::register or dispatch them from SandboxBehavior. 4) Keep the existing config read/write for item/liquid selection.",
+        "narrow_check": "cargo test -p mind-core world: BuildHarness sandbox tests - item-source dumps copper into an adjacent conveyor/vault over 60 ticks; item-void accepts and discards; liquid-source fills an adjacent conduit; power-source raises a battery PowerModule; liquid-void module drains to 0 after receiving liquid.",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/world/blocks/sandbox/ItemSource.java:90",
+            "../Mindustry/core/src/mindustry/world/blocks/sandbox/ItemVoid.java:33",
+            "../Mindustry/core/src/mindustry/world/blocks/sandbox/LiquidSource.java:62",
+            "../Mindustry/core/src/mindustry/world/blocks/sandbox/LiquidVoid.java:34",
+            "../Mindustry/core/src/mindustry/world/blocks/sandbox/PowerSource.java:30"
+          ],
+          "godot": [
+            "client/rust/mind-core/src/world/behavior/sandbox.rs:32",
+            "client/rust/mind-core/src/world/blocks/power/sandbox.rs:31",
+            "client/rust/mind-core/src/world/blocks/power/behavior.rs:803",
+            "client/rust/mind-core/src/world/behavior/mod.rs:599",
+            "client/rust/mind-core/src/content/registries/blocks/sandbox.rs:54"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (blocks-behavior): S3 high. SandboxBehavior only rounds itemsPerSecond into the item-source module (world/behavior/sandbox.rs:32-56) and never dumps; item-void/liquid-void/power-source/power-void fall through to the same behavior via the family match (world/behavior/mod.rs:599-604) and do not override accept_item/accept_liquid, so the defaults reject everything (world/behavior/mod.rs:256-264, 313-316). The port already has the correct tick helpers in world/blocks/power/sandbox.rs:31-62 (update_power_source/update_power_void/update_liquid_source/update_liquid_void) but a workspace grep finds no caller outside their own test, and power::register (power/behavior.rs:803) registers no power-source/power-void. Upstream: ItemSource.updateTile dumps (ItemSource.java:90-103), ItemVoid.acceptItem returns enabled (ItemVoid.java:33), LiquidSource fills+dumps (LiquidSource.java:62), LiquidVoid accepts (LiquidVoid.java:34), PowerSource produces powerProduction (PowerSource.java:7,30). Player impact: sandbox/custom games cannot be set up (no infinite items/liquids/power; voids back up belts/conduits). In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/world/blocks/sandbox/ItemSource.java:90",
+      "../Mindustry/core/src/mindustry/world/blocks/sandbox/ItemVoid.java:33",
+      "../Mindustry/core/src/mindustry/world/blocks/sandbox/LiquidSource.java:62",
+      "../Mindustry/core/src/mindustry/world/blocks/sandbox/LiquidVoid.java:34",
+      "../Mindustry/core/src/mindustry/world/blocks/sandbox/PowerSource.java:30",
+      "client/rust/mind-core/src/world/behavior/sandbox.rs:32",
+      "client/rust/mind-core/src/world/blocks/power/sandbox.rs:31",
+      "client/rust/mind-core/src/world/blocks/power/behavior.rs:803",
+      "client/rust/mind-core/src/world/behavior/mod.rs:599",
+      "client/rust/mind-core/src/content/registries/blocks/sandbox.rs:54"
+    ]
+  },
+  {
+    "title": "Pumps produce water on any ground and ignore the floor liquid (oil/slag/cryofluid)",
+    "surface": "world",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Live client: place a mechanical-pump on plain stone, then a rotary-pump on tar, then a water-extractor on a ground-water tile.",
+      "java": [],
+      "godot": [],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "Launch the pinned Java client; mechanical-pump cannot be placed on dry stone (canPlaceOn requires a liquid floor); on a water tile it pumps water; a rotary-pump on tar pumps oil; water-extractor places only where the map env includes ground water."
+      ],
+      "godot": [
+        "In the Godot client place a mechanical-pump on plain stone: placement succeeds and the pump produces water every tick.",
+        "Place a rotary-pump on tar: it produces water instead of oil.",
+        "Try to place a water-extractor anywhere: placement is rejected even on ground water."
+      ],
+      "compare": [
+        "Java: pump yield and placement derive from tile.floor().liquidDrop. Godot: WATER is hardcoded, canPlaceOn is always true and valid_place only checks Terrestrial, so yields and placement diverge."
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "PumpBehavior/SolidPumpBehavior (client/rust/mind-core/src/world/behavior/production.rs:571-641) never read FloorDef.liquid_drop/liquid_multiplier; placement env is hardcoded in world/build.rs.",
+        "files": [
+          "client/rust/mind-core/src/world/behavior/production.rs:571",
+          "client/rust/mind-core/src/world/behavior/production.rs:608",
+          "client/rust/mind-core/src/world/build.rs:41",
+          "client/rust/mind-core/src/world/build.rs:154",
+          "client/rust/mind-core/src/content/registries/blocks/production.rs:117"
+        ],
+        "approach": "1) Give PumpBehavior a footprint floor scan (content.block(tile.floor).liquid_drop + liquid_multiplier over the size x size footprint) recomputed on placement/proximity like upstream onProximityUpdate, and produce that liquid with amount * pumpAmount * edelta clamped to remaining capacity. 2) Implement the Pump canPlaceOn (at least one footprint tile with liquidDrop) behind build::can_place_on and call it from valid_place_at. 3) For SolidPump/Fracker, scale output by validTiles/attribute (floor attributes) instead of unconditional production, and restore the attribute index (block_kind_data.rs:850-863 currently forces -1). 4) Fix env evaluation so valid_place_at uses the map/sector env mask instead of hardcoded EnvFlag::Terrestrial, letting water-extractor's GroundWater requirement (production.rs:117) be satisfied; add accept_item/handle_item to SolidPumpBehavior so oil-extractor's sand consumer can be supplied.",
+        "narrow_check": "cargo test -p mind-core world: mechanical-pump on plain stone is rejected and, when forced, produces nothing; on a water floor it produces water at 7/60 * liquidMultiplier; rotary-pump on tar produces oil; water-extractor places when the env mask includes GroundWater.",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/world/blocks/production/Pump.java:150",
+            "../Mindustry/core/src/mindustry/world/blocks/production/Pump.java:84",
+            "../Mindustry/core/src/mindustry/content/Blocks.java:2299",
+            "../Mindustry/core/src/mindustry/content/Blocks.java:292",
+            "../Mindustry/core/src/mindustry/content/Blocks.java:2939"
+          ],
+          "godot": [
+            "client/rust/mind-core/src/world/behavior/production.rs:571",
+            "client/rust/mind-core/src/world/behavior/production.rs:608",
+            "client/rust/mind-core/src/world/build.rs:41",
+            "client/rust/mind-core/src/world/build.rs:154",
+            "client/rust/mind-core/src/content/registries/blocks/production.rs:117",
+            "client/rust/mind-core/src/content/registries/blocks/environment.rs:255",
+            "client/rust/mind-core/src/world/block_kind_data.rs:850"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (blocks-behavior): S2 high. PumpBehavior adds LiquidId::WATER every tick whenever efficiency > 0 with no floor read (world/behavior/production.rs:571-594), and SolidPumpBehavior/Fracker likewise emit their result (water/oil) regardless of tile (production.rs:608-641; attribute forced to -1 in block_kind_data.rs:850-863). Upstream derives liquidDrop/amount from the footprint via canPump (floor().liquidDrop != null, Pump.java:150-193) and canPlaceOn rejects dry tiles (Pump.java:83-97); tar yields oil (Blocks.java:292; the port content has the data at environment.rs:255) and water floors yield water. Placement is also wrong: can_place_on is hardcoded true (world/build.rs:41) and valid_place_at only checks EnvFlag::Terrestrial (world/build.rs:154), so water-extractor's env_required=[GroundWater] (production.rs:117) makes it unplaceable everywhere while mechanical-pump places on dry sand. Oil-extractor's sand consumer is also unsatisfiable through belts (same accept_item root as the generator/reconstructor findings). Player impact: infinite water anywhere, no oil pumping on tar, no water extractor. In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/world/blocks/production/Pump.java:150",
+      "../Mindustry/core/src/mindustry/world/blocks/production/Pump.java:84",
+      "../Mindustry/core/src/mindustry/content/Blocks.java:2299",
+      "../Mindustry/core/src/mindustry/content/Blocks.java:292",
+      "../Mindustry/core/src/mindustry/content/Blocks.java:2939",
+      "client/rust/mind-core/src/world/behavior/production.rs:571",
+      "client/rust/mind-core/src/world/behavior/production.rs:608",
+      "client/rust/mind-core/src/world/build.rs:41",
+      "client/rust/mind-core/src/world/build.rs:154",
+      "client/rust/mind-core/src/content/registries/blocks/production.rs:117",
+      "client/rust/mind-core/src/content/registries/blocks/environment.rs:255",
+      "client/rust/mind-core/src/world/block_kind_data.rs:850"
+    ]
+  },
+  {
+    "title": "Erekir beam drills and cliff crushers never produce (plasma-bore/cliff-crusher inert)",
+    "surface": "world",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Live client (Erekir custom game): plasma-bore facing a tungsten/beryllium wall; cliff-crusher next to a sand wall.",
+      "java": [],
+      "godot": [],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "Launch the pinned Java client on Erekir; place a plasma-bore facing a beryllium/tungsten wall and a cliff-crusher next to sand walls.",
+        "Observe: the beam drill mines the wall drop of the faced tiles; the cliff crusher outputs sand."
+      ],
+      "godot": [
+        "In the Godot client on Erekir, place a plasma-bore facing a wall and a cliff-crusher beside sand walls, both powered.",
+        "Read block_items_json over several craft cycles: nothing is ever produced and no beam targets exist."
+      ],
+      "compare": [
+        "Java: beam drills mine facing wallDrop() tiles and wall crafters output their item from matching walls. Godot: BeamDrillBehavior returns before mining (no BeamDrill arm) and the WallCrafter path has no dominant item, so both stay empty."
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": null,
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "world/behavior/production.rs: BeamDrillBehavior aliases the footprint DrillBehavior path, and the DrillBehavior kind match/refresh_drill_ore never take a WallCrafter path.",
+        "files": [
+          "client/rust/mind-core/src/world/behavior/production.rs:356",
+          "client/rust/mind-core/src/world/behavior/production.rs:457",
+          "client/rust/mind-core/src/world/behavior/production.rs:550",
+          "client/rust/mind-core/src/world/behavior/mod.rs:579",
+          "client/rust/mind-core/src/world/block_kind_data.rs:960"
+        ],
+        "approach": "1) Implement a real BeamDrillBehavior: compute the facing tiles along rotation with def.range (size rows; upstream updateFacing), select wallDrop() tiles by tier and blocked items, produce one item per faced tile per drillTime/multiplier tick into the ItemModule, and dump on the dump timer. 2) Implement a WallCrafterBehavior producing def.output when solid tiles in front carry the sand attribute (sum > 0) with drillTime and the liquid/item boosters; register K::WallCrafter to it and keep refresh_drill_ore for Drill/BurstDrill only. 3) Populate the wall sand attribute data (sand-wall/dune-wall/regolith-wall attributes: sand, Blocks.java:674-676, 616-624) and stop forcing attribute=-1 in set_wall_crafter (block_kind_data.rs:960-966). 4) Add headless tests for both blocks.",
+        "narrow_check": "cargo test -p mind-core world::behavior::production: BuildHarness tests place a wall tile in front of plasma-bore/cliff-crusher and assert the expected item appears after drillTime ticks, and that no floor-ore mining happens when facing a wall.",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/world/blocks/production/BeamDrill.java:255",
+            "../Mindustry/core/src/mindustry/world/blocks/production/BeamDrill.java:375",
+            "../Mindustry/core/src/mindustry/world/blocks/production/WallCrafter.java:187",
+            "../Mindustry/core/src/mindustry/content/Blocks.java:3057",
+            "../Mindustry/core/src/mindustry/content/Blocks.java:3163"
+          ],
+          "godot": [
+            "client/rust/mind-core/src/world/behavior/production.rs:356",
+            "client/rust/mind-core/src/world/behavior/production.rs:471",
+            "client/rust/mind-core/src/world/behavior/production.rs:550",
+            "client/rust/mind-core/src/world/behavior/production.rs:379",
+            "client/rust/mind-core/src/world/block_kind_data.rs:887",
+            "client/rust/mind-core/src/world/block_kind_data.rs:960"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (blocks-behavior): S2 high (Erekir-scoped). BeamDrillBehavior delegates to DrillBehavior (world/behavior/production.rs:550-558), whose kind match has no BeamDrill arm and returns early (production.rs:356-364), so plasma-bore/large-plasma-bore never mine; upstream BeamDrill mines wallDrop() of the tiles in front along rotation/range (BeamDrill.java:244-262, updateFacing at :375), not footprint floor ore. WallCrafter hits a second dead path: DrillBehavior builds an empty DrillDef for it (production.rs:359-362), refresh_drill_ore ignores WallCrafter (production.rs:471-476) so dominant_item stays None and update returns (production.rs:379-385), while upstream WallCrafter produces its fixed output from adjacent walls of the configured attribute (WallCrafter.java:187-223, Blocks.java:3163-3196). The output item is configured but unused (block_kind_data.rs:887-888) and the wall sand attribute data is missing in the port registry. Player impact: Erekir tungsten/beryllium/sand cannot be produced. In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/world/blocks/production/BeamDrill.java:255",
+      "../Mindustry/core/src/mindustry/world/blocks/production/BeamDrill.java:375",
+      "../Mindustry/core/src/mindustry/world/blocks/production/WallCrafter.java:187",
+      "../Mindustry/core/src/mindustry/content/Blocks.java:3057",
+      "../Mindustry/core/src/mindustry/content/Blocks.java:3163",
+      "client/rust/mind-core/src/world/behavior/production.rs:356",
+      "client/rust/mind-core/src/world/behavior/production.rs:471",
+      "client/rust/mind-core/src/world/behavior/production.rs:550",
+      "client/rust/mind-core/src/world/behavior/production.rs:379",
+      "client/rust/mind-core/src/world/block_kind_data.rs:887",
+      "client/rust/mind-core/src/world/block_kind_data.rs:960"
+    ]
+  }
+]

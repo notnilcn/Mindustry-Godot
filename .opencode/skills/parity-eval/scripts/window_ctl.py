@@ -14,8 +14,8 @@ Examples:
     window_ctl.py unmaximize Mindustry      # before resize when maximized
     window_ctl.py resize Mindustry 1152 648
 
-Run it with a python that has python-xlib (the computer-mcp uv-tool python
-does): ~/.local/share/uv/tools/computer-mcp/bin/python
+Run it with the parity-eval helper venv python (bootstrap.sh creates it):
+$PARITY_PY (default ~/.local/share/parity-eval/venv/bin/python)
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ import sys
 try:
     from Xlib import X, display, protocol
 except ImportError:  # pragma: no cover - environment guard
-    sys.exit("python-xlib is missing; run with the computer-mcp uv-tool python")
+    sys.exit("python-xlib is missing; run with the parity-eval helper venv python (bootstrap.sh)")
 
 MATCH_HELP = "exact WM_NAME (case-insensitive); use --contains for a substring"
 

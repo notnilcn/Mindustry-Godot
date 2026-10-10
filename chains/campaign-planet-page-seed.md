@@ -14,7 +14,7 @@ preconditions:
   - Raise the Java window immediately BEFORE every Java capture and click: the
     `godot_game play` action raises the editor/game over Java and an obscured X11
     window reads back black (calibration below).
-tools: [computer-mcp_mouse_move, computer-mcp_click, window_ctl.py, capture_screen.py, frame_diff.py, godot_health, godot_editor_read, godot_editor_edit, godot_game, godot_exec, godot_input, godot_screenshot]
+tools: [java_input.py, window_ctl.py, capture_screen.py, frame_diff.py, godot_health, godot_editor_read, godot_editor_edit, godot_game, godot_exec, godot_input, godot_screenshot]
 last_verified: 2026-10-09 runs/20261009-052658-seed-campaign (iter 1: both legs reached DialogLayer/planet, PAR-0015 mismatch; iter 2: Godot saves cleared + chooser re-replayed, aligned pair diff-10-planet-aligned.json, Launch classification PAR-0019/0024)
 ---
 
@@ -32,15 +32,16 @@ setsid env DISPLAY=:10 HOME="$JHOME" XDG_DATA_HOME="$JHOME/.local/share" \
   XDG_CONFIG_HOME="$JHOME/.config" XDG_CACHE_HOME="$JHOME/.cache" \
   /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar \
   >"$RUN/java/game.log" 2>&1 </dev/null &
-until grep -q "Total time to load" "$RUN/java/game.log"; do sleep 2; done
-MCP_PY="$HOME/.local/share/uv/tools/computer-mcp/bin/python"
-DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py unmaximize Mindustry
-DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648
-DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py move Mindustry 45 69   # required; resize keeps the old center
-DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry
+timeout 180 bash -c 'until grep -q "Total time to load" "$RUN/java/game.log"; do sleep 2; done' \
+  || echo "launch gate timed out; see $RUN/java/game.log" >&2
+PARITY_PY="${PARITY_PY:-$HOME/.local/share/parity-eval/venv/bin/python}"
+DISPLAY=:10 $PARITY_PY .opencode/skills/parity-eval/scripts/window_ctl.py unmaximize Mindustry
+DISPLAY=:10 $PARITY_PY .opencode/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648
+DISPLAY=:10 $PARITY_PY .opencode/skills/parity-eval/scripts/window_ctl.py move Mindustry 45 69   # required; resize keeps the old center
+DISPLAY=:10 $PARITY_PY .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry
 ```
 
-Clicks (persistent computer-mcp; `click` acts at the current pointer):
+Clicks (`java_input.py click <screen X> <screen Y> left`; every call activates the window first):
 
 | step | screen | image | result |
 |---|---|---|---|
@@ -52,8 +53,8 @@ Clicks (persistent computer-mcp; `click` acts at the current pointer):
 Capture (raise first, every time):
 
 ```bash
-DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry
-DISPLAY=:10 $MCP_PY .opencode/skills/parity-eval/scripts/capture_screen.py \
+DISPLAY=:10 $PARITY_PY .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry
+DISPLAY=:10 $PARITY_PY .opencode/skills/parity-eval/scripts/capture_screen.py \
   --window-title Mindustry --output "$RUN/seed/step-04-planet-java.png"
 # -> region [45,69,1152,648], mean 13.94, non-blank (starfield background is dark)
 ```
@@ -82,7 +83,7 @@ godot_screenshot {"action":"game"}   # copy the returned mcp_screenshots path in
 ## Compare + calibration
 
 ```bash
-$MCP_PY .opencode/skills/parity-eval/scripts/frame_diff.py \
+$PARITY_PY .opencode/skills/parity-eval/scripts/frame_diff.py \
   --java "$RUN/seed/step-04-planet-java.png" --godot "$RUN/seed/step-05-planet-godot.png" \
   --out-json "$RUN/diff/diff-05-planet.json"
 # changed 0.545, mean_abs [18.6,14.9,27.6], coarse 19.8, palette 0.31 -> MISMATCH (PAR-0015)
@@ -151,7 +152,7 @@ gold hover border only because the pointer was left on it.
 ## Failure modes
 
 - Black Java captures: the Godot play window raised over Java; re-raise before
-  every capture/click (`computer-mcp-learnings.md`, 2026-10-09 entry).
+  every capture/click (`java-leg-learnings.md`, 2026-10-09 entry).
 - `capture_screen.py` under a chained `VAR=... && DISPLAY=:10 ...` call can lose
   DISPLAY (Bad display name ""); use `env DISPLAY=:10 <python> ...` instead.
 - `godot_exec` on `MindCampaign.campaign_views_json("serpulo")` times out (30 s);

@@ -1,0 +1,429 @@
+[
+  {
+    "title": "Ground units move at full speed across slow terrain (floor speed multipliers ignored)",
+    "surface": "world",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "campaign/in-engine: control a ground mech (player unit or Dagger) over stone vs deep water and measure per-tick displacement",
+      "java": [],
+      "godot": [],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "reference Ground Zero (or any map with deep-water/sand-water): move a ground unit onto deep water; per-tick speed drops by Floor.speedMultiplier (deep-water 0.2) via UnitComp.speed()/floorSpeedMultiplier()",
+        "flyers/hoovering use Blocks.air (1.0); a possessed flyer additionally gets the strafePenalty lerp"
+      ],
+      "godot": [
+        "same map in the Godot client or headless unit harness: move the same unit onto deep water; per-tick displacement is unchanged from stone",
+        "code: ai/types/ground.rs:113-120 and ai/types/flying.rs:47-58 compute speed as physics.speed * status.speed_multiplier only; ai/types/player.rs:74-77 has the comment that boost/floor/strafe multipliers are not modeled; world::behavior::environment::floor_speed_multiplier has no movement caller (only crawl.rs:87 / tank.rs:95 tread kinematics and water_move tests)"
+      ],
+      "compare": [
+        "per-tick displacement ratio deep-water/stone should equal pow(Floor.speedMultiplier, type.floorMultiplier) (e.g. 0.2 for a mech); the port shows 1.0"
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": "Movement speed ignores the walked floor's speed multiplier, type.floorMultiplier, boost and strafe multipliers.",
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "client/rust/mind-core/src/ai/ai_controller.rs:54 (AiCtx::pref_speed) plus the per-controller copies in ai/types/ground.rs:113, ai/types/flying.rs:51 and ai/types/player.rs:74",
+        "files": [
+          "client/rust/mind-core/src/ai/ai_controller.rs:54",
+          "client/rust/mind-core/src/ai/types/ground.rs:113",
+          "client/rust/mind-core/src/ai/types/flying.rs:51",
+          "client/rust/mind-core/src/ai/types/player.rs:74",
+          "client/rust/mind-core/src/world/behavior/environment.rs:92",
+          "client/rust/mind-core/src/entities/comp/unit/movement.rs:29"
+        ],
+        "approach": "1) Add one shared `unit_speed(world, grid, content, entity) -> f32` porting UnitComp.speed(): `PhysicsComp.speed` * straight-strafe penalty (only for possessed flyers: lerp(1, type.strafe_penalty, angle_dist(vel.angle(), rotation)/180)) * boost lerp(1, boostMultiplier, elevation) * `pow(floor_meta.speed_multiplier, def.floor_multiplier)` (air/1.0 for flying or hovering) * `StatusComp.speed_multiplier`. 2) Replace the four local speed computations (pref_speed, update_ground, update_flying, update_player) with that call so terrain slows all movement paths. 3) Keep crawl/tank tread slowdown semantics on top (their own floor_speed_multiplier bodies stay). 4) Add a harness test that spawns a Dagger on stone vs on deep-water tiles and asserts the deep-water per-tick displacement is ~0.2x with the status multiplier at 1.",
+        "narrow_check": "cargo test -p mind-core ai:: (with the new terrain-speed harness test) plus a headless per-tick displacement scenario",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/entities/comp/UnitComp.java:107",
+            "../Mindustry/core/src/mindustry/entities/comp/UnitComp.java:192",
+            "../Mindustry/core/src/mindustry/entities/units/AIController.java:434"
+          ],
+          "godot": [
+            "client/rust/mind-core/src/ai/ai_controller.rs:54",
+            "client/rust/mind-core/src/ai/types/player.rs:74",
+            "client/rust/mind-core/src/world/behavior/environment.rs:92"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (units-ai): S3, high confidence (code reading). Player impact: units cross deep water, ice, sludge and sand-water at full speed instead of the upstream floor-scaled speed, and possessed flyers skip the strafe penalty; terrain-based defences (slow water, drown zones) lose their effect. The helper world::behavior::environment::floor_speed_multiplier:92 exists but no movement path calls it; crawl.rs:87 and tank.rs:95 only scale tread animation. In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/entities/comp/UnitComp.java:107",
+      "../Mindustry/core/src/mindustry/entities/comp/UnitComp.java:192",
+      "../Mindustry/core/src/mindustry/entities/units/AIController.java:434",
+      "client/rust/mind-core/src/ai/ai_controller.rs:54",
+      "client/rust/mind-core/src/ai/types/player.rs:74",
+      "client/rust/mind-core/src/world/behavior/environment.rs:92"
+    ]
+  },
+  {
+    "title": "Carrier units cannot pick up or drop blocks/units (payload pickup/drop is a no-op)",
+    "surface": "world",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Erekir (or Serpulo `mega`) payload-capable unit: press [ near a ground unit or block, then ] to drop",
+      "java": [],
+      "godot": [],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "reference: control a payload unit, press [ near a ground unit/block: InputHandler.tryPickupPayload picks it up and the payload list grows; ] drops it (PayloadComp.pickup/dropLastPayload)"
+      ],
+      "godot": [
+        "in-game: with a carrier unit, press [ (pickupCargo binding) or ] -> the client logs `relay command rejected by sim: command unsupported: payload` (input/desktop.rs:542-543 routes the binding to RemoteAction::Payload; sim/mod.rs:635-644 returns CommandError::Unsupported(\"payload\"))",
+        "code: unit PayloadComp carries only `capacity` (entities/comp/unit/comp.rs:249-254) and sim/world_apply.rs:17-18 documents the pickup/drop runtime as unported"
+      ],
+      "compare": [
+        "after [ the carrier's payload list grows and the carried object follows the unit; in the port no payload attaches and no drop is possible"
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": "The unit payload carrier (Payloadc) is unported: pickup/drop commands are rejected and there is no carrier state.",
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "client/rust/mind-core/src/sim/mod.rs:635 (`SimCommand::Payload` arm) connected to the live unit runtime; carrier state in entities/comp/unit/comp.rs:249 (`PayloadComp`)",
+        "files": [
+          "client/rust/mind-core/src/sim/mod.rs:635",
+          "client/rust/mind-core/src/entities/comp/unit/comp.rs:249",
+          "client/rust/mind-core/src/entities/comp/unit/lifecycle.rs:218",
+          "client/rust/mind-core/src/sim/unit_runtime.rs:491",
+          "client/rust/mind-core/src/sim/world_apply.rs:17"
+        ],
+        "approach": "1) Extend PayloadComp toward the upstream Payloadc shape: ordered payload handles, payloadUsed()/capacity check, canPickup(Unit)/canPickup(Building)/canPickupPayload with hit-size and team rules. 2) Port PayloadComp.pickup(Unit)/pickup(Building)/dropLastPayload/tryDropPayload/dropUnit/dropBlock against the plan-08 WorldCtx/BlockPayload building-holder seams and keep a PickupEvent-equivalent hook. 3) Route SimCommand::Payload (PickupUnit/Drop and the target-kind variants) to the live controlled unit instead of returning CommandError::Unsupported; keep carried payloads positioned/rotated each tick in the unit runtime and drop them on order/death. 4) Extend the native save unit chunk (SIM_UNIT_REVISION + 1 in io/sim_io.rs) to persist the carrier payload list. 5) Test: headless spawn a carrier plus a target unit, apply the Payload pickup command, assert payloadUsed() > 0, then drop and assert the world entity reappears.",
+        "narrow_check": "cargo test -p mind-core sim (new payload pickup/drop headless case) plus an in-engine [ / ] carrier check",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/input/InputHandler.java:1039",
+            "../Mindustry/core/src/mindustry/entities/comp/PayloadComp.java:78",
+            "../Mindustry/core/src/mindustry/entities/comp/PayloadComp.java:121",
+            "../Mindustry/core/src/mindustry/entities/comp/PayloadComp.java:133"
+          ],
+          "godot": [
+            "client/rust/mind-core/src/sim/mod.rs:635",
+            "client/rust/mind-core/src/entities/comp/unit/comp.rs:249",
+            "client/rust/mind-core/src/sim/world_apply.rs:17"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (units-ai): S2, high confidence (code reading). Player impact: the Erekir carrier loop (units ferrying turrets/walls/units by air) cannot be played at all; pressing the bound pickup/drop keys produces a rejected command log and no payload ever appears. Distinct from PAR-0044/0052/0053/0055 (player mech movement/spawn/render) and from the building-holder path. In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/input/InputHandler.java:1039",
+      "../Mindustry/core/src/mindustry/entities/comp/PayloadComp.java:78",
+      "../Mindustry/core/src/mindustry/entities/comp/PayloadComp.java:133",
+      "client/rust/mind-core/src/sim/mod.rs:635",
+      "client/rust/mind-core/src/entities/comp/unit/comp.rs:249",
+      "client/rust/mind-core/src/sim/world_apply.rs:17"
+    ]
+  },
+  {
+    "title": "Scathe turret fires inert rounds: no missile unit spawns and it deals no damage",
+    "surface": "world",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Erekir campaign with scathe researched (or a headless CombatHarness `scathe` fixture with carbide/phase/surge ammo) fired at an enemy",
+      "java": [],
+      "godot": [],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "reference: scathe with carbide/phase-fabric/surge-alloy spawns scathe-missile MissileUnitType rounds (Blocks.java:5257/5345/5450, surge splits at :5506) that fly, home and explode on death; BulletType.spawnUnit create path is BulletType.java:932-940"
+      ],
+      "godot": [
+        "place scathe with carbide and fire: total_shots increases but no missile entity exists and the target loses no health; advanced.rs:891-909 registers scathe_carbide/phase/surge as BulletKind::Empty with speed 0.0/lifetime 1.0 because the missile unit defs and spawnUnit path are absent",
+        "content parity: rust unit registry = 65 entries vs JVM dump 70; jvm-only names are scathe-missile, scathe-missile-phase, scathe-missile-surge, scathe-missile-surge-split, turret-unit-build-tower (parity/reports/jvm_golden_diff.md unit row)"
+      ],
+      "compare": [
+        "after firing, a scathe-missile unit exists and damage lands; the port has no missile unit and no damage from the carrier"
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": "The four turret-created scathe missile units and the build-tower proxy unit are missing; scathe ammo is registered as inert Empty bullets.",
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "client/rust/mind-core/src/world/blocks/defense/turrets/advanced.rs:886 (Empty carrier ammo) plus the missing content/registries/units defs and the BulletDef spawnUnit create branch",
+        "files": [
+          "client/rust/mind-core/src/world/blocks/defense/turrets/advanced.rs:886",
+          "client/rust/mind-core/src/combat/bullet/spawn.rs:85",
+          "client/rust/mind-core/src/content/registries/units/erekir.rs:1",
+          "client/rust/mind-core/src/content/registries/blocks/turrets.rs:543"
+        ],
+        "approach": "1) Register the four Blocks.java turret-created missile units (scathe-missile, scathe-missile-phase, scathe-missile-surge, scathe-missile-surge-split) as MissileUnitType defs (speed/maxRange/lifetime/hitSize/engine/trail/death explosion/weapon, surge split on death); note the hidden `turret-unit-build-tower` from BuildTurret.java:56 is the 5th JVM-only entry - the port's direct ConstructState advance (turrets/mod.rs:1310) covers the build function, so record it as an accepted omission only if the build beam/control visuals are also accepted. 2) Add `spawn_unit`/`despawn_unit` fields to BulletDef and port the BulletType.spawnUnit create branch (spawn the unit at the bullet position/team, apply missileAccelTime and initial velocity, register with the unit runtime). 3) Re-register scathe_carbide/phase/surge as real carriers that spawn those units instead of BulletKind::Empty. 4) Update the content golden to 70 units and add a test that firing scathe spawns a missile unit that damages a target.",
+        "narrow_check": "cargo test -p mind-core combat (new scathe_missile_spawns_and_damages) plus the content count check (unit = 70)",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/content/Blocks.java:5257",
+            "../Mindustry/core/src/mindustry/content/Blocks.java:5450",
+            "../Mindustry/core/src/mindustry/entities/bullet/BulletType.java:932",
+            "../Mindustry/core/src/mindustry/world/blocks/defense/BuildTurret.java:56"
+          ],
+          "godot": [
+            "client/rust/mind-core/src/world/blocks/defense/turrets/advanced.rs:886",
+            "client/rust/mind-core/src/world/blocks/defense/turrets/advanced.rs:1598",
+            "parity/reports/jvm_golden_diff.md:1"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (units-ai): S3, high confidence (code reading; the port comment at advanced.rs:886-890 documents the blocker). Player impact: the Erekir tier-4 missile turret is a decorative no-damage building - it fires an invisible 1-tick Empty carrier and neither the missile flight nor its explosion damage exists. The registry gap (65 vs 70) is the same root cause; the 5th JVM-only unit is the hidden BuildTurret proxy. In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/content/Blocks.java:5257",
+      "../Mindustry/core/src/mindustry/content/Blocks.java:5450",
+      "../Mindustry/core/src/mindustry/entities/bullet/BulletType.java:932",
+      "../Mindustry/core/src/mindustry/world/blocks/defense/BuildTurret.java:56",
+      "client/rust/mind-core/src/world/blocks/defense/turrets/advanced.rs:886",
+      "client/rust/mind-core/src/world/blocks/defense/turrets/advanced.rs:1598"
+    ]
+  },
+  {
+    "title": "Enemy attack/base AI never runs: no RTS squads and no BaseBuilderAI construction in the live sim",
+    "surface": "campaign",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Serpulo attack-mode sector with the campaign RTS-AI option enabled (or a custom game with rules.rtsAi/buildAi)",
+      "java": [],
+      "godot": [],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "reference attack sector with rtsAi: Logic.update calls data.rtsAi.update() per active team (Logic.java:562-571), RtsAI forms squads, assigns attack/defend targets and orders CommandAI units; with buildAi the enemy base places schematics via BaseBuilderAI.update(); prebuildAi spawns core units"
+      ],
+      "godot": [
+        "launch the same sector: enemy units only walk toward the nearest enemy building (sim/unit_runtime.rs:833-877 acquire_target -> update_ground); no squad orders, no base construction, no core prebuild units",
+        "code: ai/rts_ai.rs:469 ensure_rts_ai and :479 update, and ai/base_builder_ai.rs:580 ensure_build_ai and :594 update_team_data, have no caller outside ai/ tests (grep only finds the ai/mod.rs re-exports); TeamData (game/teams.rs:117-119) is never a live resource and no schedule entry runs a per-team AI tick"
+      ],
+      "compare": [
+        "enemy teams react to intrusions and expand; the port has no per-team AI update in the live schedule"
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": "Logic.update's per-team BaseBuilderAI/RtsAI/PrebuildAI calls are not wired to the live sim; the modules are harness-only.",
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "client/rust/mind-core/src/sim/unit_runtime.rs (no per-team AI system) with client/rust/mind-core/src/ai/rts_ai.rs:479 and base_builder_ai.rs:594 having no live caller",
+        "files": [
+          "client/rust/mind-core/src/sim/unit_runtime.rs:491",
+          "client/rust/mind-core/src/ai/rts_ai.rs:469",
+          "client/rust/mind-core/src/ai/base_builder_ai.rs:580",
+          "client/rust/mind-core/src/game/teams.rs:117",
+          "client/rust/mind-core/src/sim/schedule.rs:427"
+        ],
+        "approach": "1) Add a scheduled team-AI system (new entry in the live unit/combat wiring block of sim/schedule.rs) that iterates the active TeamData list on CampaignRuntime.session.teams and mirrors Logic.java:562-571: when rules.team_rule(team).rts_ai call rts_ai::update (and port the remaining RtsAI.update body: squad stats, defend/attack target weighting, unit orders), when rules.build_ai call update_team_data with a BaseBuildInput built from the live grid/BlockIndexer/cores/bases, and when rules.prebuild_ai spawn core units flagged to the core tile. 2) Consume BaseBuildActions/TeamData.plans through the live block runtime plan queue so builds become real placements. 3) Make RTS-ordered enemy units run the CommandAI branch of unit_update_system (see the RTS command finding). 4) Seed the builders deterministically from the sim RNG streams. 5) Test: a headless attack-mode session with rtsAi/buildAi on must produce a squad target and a build plan within N ticks, and the new checksum must be recorded if goldens move.",
+        "narrow_check": "cargo test -p mind-core ai:: plus a headless attack-sector scenario asserting an enemy squad target/plan appears",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/core/Logic.java:562",
+            "../Mindustry/core/src/mindustry/core/Logic.java:573",
+            "../Mindustry/core/src/mindustry/ai/RtsAI.java:80",
+            "../Mindustry/core/src/mindustry/ai/BaseBuilderAI.java:51"
+          ],
+          "godot": [
+            "client/rust/mind-core/src/ai/rts_ai.rs:479",
+            "client/rust/mind-core/src/ai/base_builder_ai.rs:594",
+            "client/rust/mind-core/src/game/teams.rs:117",
+            "client/rust/mind-core/src/sim/unit_runtime.rs:833"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (units-ai): S3 high confidence for the dead wiring (visible whenever rules.rtsAi/buildAi is on, which makes it S2 for those configurations). Player impact: Serpulo attack sectors with the campaign RTS-AI option (default off) have no enemy squad commander, so enemies never defend or launch coordinated attacks; custom games with buildAi never see the enemy base expand or rebuild; prebuildAi core defenders never spawn. The port's own ai/rts_ai.rs header says the TeamData wiring is plan 12. In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/core/Logic.java:562",
+      "../Mindustry/core/src/mindustry/core/Logic.java:573",
+      "../Mindustry/core/src/mindustry/ai/RtsAI.java:80",
+      "../Mindustry/core/src/mindustry/ai/BaseBuilderAI.java:51",
+      "client/rust/mind-core/src/ai/rts_ai.rs:479",
+      "client/rust/mind-core/src/ai/base_builder_ai.rs:594",
+      "client/rust/mind-core/src/sim/unit_runtime.rs:833"
+    ]
+  },
+  {
+    "title": "RTS unit selection and orders do nothing: the selectable list is never fed and commands never reach live units",
+    "surface": "input",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "campaign/in-game command mode (Shift) drag-select units, then right-click a move target or click a stance",
+      "java": [],
+      "godot": [],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "reference: shift-drag selects player units and right-click issues commandUnits -> CommandAI moves/attacks; setUnitCommand/setUnitStance switch command and stances (InputHandler.java:310/411/446)"
+      ],
+      "godot": [
+        "in-game: enter command mode and drag-select; the selection stays empty because nothing calls MindInput.set_selectable_units_json (only the definition at input/mod.rs:791 and the setter at desktop.rs:280 exist; no GDScript/scene caller), so Input.selection_json() returns []",
+        "apply a UnitCommand anyway: Sim::command routes UnitCommand to the relay-only UnitCommandRuntime (sim/mod.rs:546-556 -> sim/command.rs:139 apply_unit_command) whose BTreeMap is empty unless spawn_command_unit was called (only sim tests call it), so nothing is applied; live units never read CommandAiState because unit_update_system (sim/unit_runtime.rs:520-550) only branches on Player/Ground/Flying and never inspects the CommandAiState component"
+      ],
+      "compare": [
+        "after a drag the selection count is > 0 and the ordered units move; in the port the selection is always empty and no unit reacts to any order"
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": "Two dead seams: the input selectable-unit list is never populated, and SimCommand::UnitCommand only mutates a relay bookkeeping map disconnected from the live units.",
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "client/rust/mind-gdext/src/input/desktop.rs:195 `selectable` (never fed) and client/rust/mind-core/src/sim/mod.rs:546 (UnitCommand routed to a relay-only runtime)",
+        "files": [
+          "client/rust/mind-gdext/src/input/desktop.rs:195",
+          "client/rust/mind-gdext/src/input/desktop.rs:280",
+          "client/rust/mind-core/src/sim/mod.rs:546",
+          "client/rust/mind-core/src/sim/command.rs:139",
+          "client/rust/mind-core/src/sim/unit_runtime.rs:520"
+        ],
+        "approach": "1) Feed the selectable list from the sim host: after each tick publish the player-team commandable units from UnitRuntime.units as `{id,type,x,y,team,commandable}` through MindInput.set_selectable_units_json (or an internal host call) so drag/tap selection works. 2) Resolve SimCommand::UnitCommand/UnitStance against live ECS units: map the relay ids to entities and write ControllerSlot.target / a CommandAiState component (or keep the UnitCommandRuntime but register every live unit in it) instead of mutating a disconnected BTreeMap. 3) Add an AiKind::Command branch to unit_update_system that drives movement/attack from CommandAiState.target_pos/attack_target/queue (moveTo + pathfind + stances), replacing the Ground/Flying fallback for ordered units. 4) Test: headless spawn a dagger, apply UnitCommand via Sim::command, step N ticks and assert displacement; in-engine assert Input.selection_json() returns the dragged unit and the unit moves to the clicked tile.",
+        "narrow_check": "cargo test -p mind-core sim (new live-unit command movement case) plus an in-engine drag-select -> right-click check",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/input/InputHandler.java:310",
+            "../Mindustry/core/src/mindustry/ai/types/CommandAI.java:117",
+            "../Mindustry/core/src/mindustry/io/TypeIO.java:776"
+          ],
+          "godot": [
+            "client/rust/mind-gdext/src/input/desktop.rs:195",
+            "client/rust/mind-core/src/sim/mod.rs:546",
+            "client/rust/mind-core/src/sim/command.rs:139",
+            "client/rust/mind-core/src/sim/unit_runtime.rs:520"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (units-ai): S2, high confidence (code reading). Player impact: the RTS control layer is completely inert - no unit can be box-selected or tap-selected, and move/attack/stance orders are no-ops. This subsumes the dead unit_command_runtime/unit_stance_runtime reachability: both are only reached through the relay path that has no live units. Distinct from PAR-0063 (that item verified the keyboard input-state JSON, not unit selection or command application). In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/input/InputHandler.java:310",
+      "../Mindustry/core/src/mindustry/ai/types/CommandAI.java:117",
+      "client/rust/mind-gdext/src/input/desktop.rs:195",
+      "client/rust/mind-core/src/sim/mod.rs:546",
+      "client/rust/mind-core/src/sim/command.rs:139",
+      "client/rust/mind-core/src/sim/unit_runtime.rs:520"
+    ]
+  },
+  {
+    "title": "Direct bullet hits pass through units: only splash/EMP/ability damage can kill them",
+    "surface": "world",
+    "parent": null,
+    "status": "seeded",
+    "discovered_by": null,
+    "path": {
+      "to": "Ground Zero wave defense: let a wave Dagger stand next to a Duo or another Dagger and fire",
+      "java": [],
+      "godot": [],
+      "confirm": {},
+      "last_replayed": null
+    },
+    "run": null,
+    "reproduce": {
+      "java": [
+        "reference: Logic.update runs Groups.bullet.update() then Groups.bullet.collide() (Logic.java:495-496); the collide pass walks EntityCollisions.checkCollide (EntityCollisions.java:144-167/218-243) and BulletComp.collision (BulletComp.java:124-143) so basic projectiles damage units and notify the unit controller"
+      ],
+      "godot": [
+        "live runtime: two hostile daggers in weapon range (or a target unit in front of a firing turret) shoot each other indefinitely with both at full health; bullet collision only raycasts tile.build (combat/bullet/mod.rs:724-889 `collide_bullet`), and EntitySet::PhysicsBullets/PhysicsUnits in sim/schedule.rs:427-437 have no registered systems at all",
+        "only splash (damage/damage_area hits units), EMP radius, abilities/status DoT and the unit-branch of hit_building (unreachable: hit_building is only ever called with building targets from collide_bullet/point/sap) can reduce unit health"
+      ],
+      "compare": [
+        "a basic bullet hit on a unit reduces its health (armor-aware) and a dagger dies after the expected number of hits; in the port the unit health never changes"
+      ]
+    },
+    "steps": [],
+    "mismatch": null,
+    "fix": {
+      "status": "open",
+      "commit": null,
+      "summary": "The bullet-vs-unit collision pass (Groups.bullet.collide/EntityCollisions) is missing; collide_bullet handles buildings only.",
+      "plan": {
+        "round": 0,
+        "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+        "seam": "client/rust/mind-core/src/combat/bullet/mod.rs:724 (`collide_bullet`, buildings-only) plus the empty EntitySet::PhysicsBullets slot in sim/schedule.rs:427-437",
+        "files": [
+          "client/rust/mind-core/src/combat/bullet/mod.rs:724",
+          "client/rust/mind-core/src/sim/schedule.rs:427",
+          "client/rust/mind-core/src/sim/unit_runtime.rs:663",
+          "client/rust/mind-core/src/combat/damage/area.rs:207"
+        ],
+        "approach": "1) Port EntityCollisions.checkCollide for bullets against units: for each live bullet sweep its hitbox (Bullet.hit_size, last -> current position) against hostile units from UnitRuntime.units, honoring BulletType.collidesAir/collidesGround, pierce/collided list, sticky and team rules. 2) On overlap run the same hit pipeline as buildings (`hit_bullet` + behavior_hit + `BulletType.hitEntity`) and apply damage through the armor-aware `damage_entity` (area.rs:207) so unit armor, armor_override and armor_multiplier work (the current hit_building unit branch forces armor 0 at mod.rs:527-531) and fold in the `Rule`/team damage multipliers there. 3) Register the pass in CollideBullets after the tile raycast (or extend bullet_collide_system) and, optionally, port unit-vs-unit push for PhysicsUnits. 4) Record any checksum/golden movement caused by the new collisions. 5) Test: headless dagger-vs-dagger scenario asserts health drops per hit and the unit dies after the expected shot count.",
+        "narrow_check": "cargo test -p mind-core combat (new bullet_damages_unit test) plus a headless wave-defense scenario where a Duo kills a Dagger",
+        "evidence": {
+          "java": [
+            "../Mindustry/core/src/mindustry/core/Logic.java:495",
+            "../Mindustry/core/src/mindustry/entities/EntityCollisions.java:218",
+            "../Mindustry/core/src/mindustry/entities/comp/BulletComp.java:116",
+            "../Mindustry/core/src/mindustry/entities/comp/BulletComp.java:124"
+          ],
+          "godot": [
+            "client/rust/mind-core/src/combat/bullet/mod.rs:724",
+            "client/rust/mind-core/src/sim/schedule.rs:427",
+            "client/rust/mind-core/src/combat/bullet/mod.rs:527"
+          ]
+        }
+      }
+    },
+    "verified": null,
+    "note": "Code-scan 2026-10-10 (units-ai): S2, high confidence (code reading). Player impact: units cannot be killed by direct-fire weapons - wave enemies walk through bullet fire unharmed unless the weapon has splash (Scatter/Fuse) or the bullet is laser/EMP/line based (which also only scans buildings via collide_line), so normal wave defense and unit-vs-unit combat are non-functional; unit health can only drop via splash/ability/status. The same gap also means units never take collision damage from each other. In-engine verification pending.",
+    "evidence": [
+      "../Mindustry/core/src/mindustry/core/Logic.java:495",
+      "../Mindustry/core/src/mindustry/entities/EntityCollisions.java:218",
+      "../Mindustry/core/src/mindustry/entities/comp/BulletComp.java:116",
+      "../Mindustry/core/src/mindustry/entities/comp/BulletComp.java:124",
+      "client/rust/mind-core/src/combat/bullet/mod.rs:724",
+      "client/rust/mind-core/src/sim/schedule.rs:427"
+    ]
+  }
+]

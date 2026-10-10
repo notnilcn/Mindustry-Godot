@@ -1,0 +1,550 @@
+[
+ {
+  "title": "Live gameplay shows no bullet impacts, explosions, smoke, wreck or spawn effects (and no screen shake)",
+  "surface": "world",
+  "parent": null,
+  "status": "seeded",
+  "discovered_by": null,
+  "path": {
+   "to": "in-engine: launch a campaign sector, fire a turret (or let a bullet hit a wall), step ~120 ticks, then read MindFx.live_effect_count()/dump_effects() and screenshot the impact",
+   "java": [
+    "../Mindustry/core/src/mindustry/entities/bullet/BulletType.java:563",
+    "../Mindustry/core/src/mindustry/entities/Effect.java:125",
+    "../Mindustry/core/src/mindustry/entities/comp/EffectStateComp.java:20"
+   ],
+   "godot": [
+    "client/rust/mind-core/src/sim/unit_runtime.rs:127",
+    "client/rust/mind-core/src/sim/unit_runtime.rs:91",
+    "client/rust/mind-core/src/combat/bullet/mod.rs:560",
+    "client/rust/mind-gdext/src/fx.rs:427",
+    "client/rust/mind-gdext/src/sim_host.rs:294"
+   ],
+   "confirm": {
+    "assertion": "a live bullet impact / turret shot increments MindFx.live_effect_count() and draws an effect",
+    "java_expected": "BulletType.hit calls hitEffect.at(...) (BulletType.java:563) which enqueues an EffectState, and EffectStateComp.update renders it every tick (EffectStateComp.java:20)",
+    "godot_expected": "live_effect_count() stays 0: ctx.fx.effect(...) (combat/bullet/mod.rs:560) lands on UnitRuntime.fx = noop_fx() (unit_runtime.rs:127), and nothing pushes into the FxBus that MindFx::tick_view drains (fx.rs:427)"
+   },
+   "last_replayed": null
+  },
+  "run": null,
+  "reproduce": {
+   "java": [
+    "Run the pinned JVM Mindustry (computer-mcp), start a custom game, place a `duo`/`hail` with ammo and shoot a wall or an enemy.",
+    "Observe the impact sparks/explosion sprites and the screen shake on despawn effects."
+   ],
+   "godot": [
+    "Launch the Godot client (open-godot-mcp) on a sector with the live block/unit runtime installed, fire a turret into a target for ~120 ticks.",
+    "Read MindFx.live_effect_count()/dump_effects() (0 live effects), screenshot the frame (no impact pixels) and read MindCamera2D.get_state()['shake_intensity']."
+   ],
+   "compare": [
+    "Java: every hit/despawn/shoot enqueues an Effect that the renderer draws and shakes the camera; Godot: the sim-side FxHandle is the no-op sink and the MindFx bus has no producer, so no effect or shake ever appears."
+   ]
+  },
+  "steps": [],
+  "mismatch": null,
+  "fix": {
+   "status": "open",
+   "commit": null,
+   "summary": null,
+   "plan": {
+    "round": 0,
+    "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+    "seam": "Sim-to-view FX delivery is unwired: UnitRuntime.fx is noop_fx() (client/rust/mind-core/src/sim/unit_runtime.rs:127) with no installer, and MindFx::bus() (client/rust/mind-gdext/src/fx.rs:421) has no producer, so tick_view (fx.rs:427) drains an empty queue every tick.",
+    "files": [
+     "client/rust/mind-core/src/sim/unit_runtime.rs:127",
+     "client/rust/mind-core/src/sim/unit_runtime.rs:91",
+     "client/rust/mind-core/src/sim/mod.rs:354",
+     "client/rust/mind-gdext/src/sim_host.rs:294",
+     "client/rust/mind-gdext/src/fx.rs:421",
+     "client/rust/mind-gdext/src/fx.rs:427",
+     "client/rust/mind-gdext/src/camera.rs:405"
+    ],
+    "approach": "1) Hold a shared Arc<FxBus> on MindSimHost next to audio_log (sim_host.rs:75-90) and install it as the live runtime's FxHandle in install_sim_seams (sim_host.rs:294) every time a fresh Sim is installed, mirroring the existing AudioSinkRes install (sim_host.rs:303-305); add the matching Sim/UnitRuntime setter next to unit_runtime.rs:91 (the harness-only set_fx at combat/harness.rs:809 is the shape to copy). 2) Share the same handle with MindFx: replace the private FxBus field (fx.rs:47-48) with the host's Arc and set it from MindSimHost::ready/bootstrap via the existing fx_host lookup (sim_host.rs:262). 3) MindFx::tick_view (fx.rs:427) then drains real Effect/Decal/Shake events into the pools. 4) Route the drained FxEvent::Shake to MindCamera2D::apply_shake_event (camera.rs:405) instead of only MindFx.shake (fx.rs:456, which nothing reads). 5) Leave Sound/Light/Trail routing unchanged (audio already flows through AudioSinkRes; light/trail are follow-ups).",
+    "narrow_check": "In-engine: fire a turret in a live sector and assert MindFx.live_effect_count() > 0 in the tick after the hit (dump_effects shows the hit effect id); cargo test -p mind-core (fx_scenarios.rs:558 already proves sim checksums are identical with and without a recording FxBus).",
+    "evidence": {
+     "java": [
+      "../Mindustry/core/src/mindustry/entities/bullet/BulletType.java:563",
+      "../Mindustry/core/src/mindustry/entities/Effect.java:125",
+      "../Mindustry/core/src/mindustry/entities/comp/EffectStateComp.java:20"
+     ],
+     "godot": [
+      "client/rust/mind-core/src/sim/unit_runtime.rs:127",
+      "client/rust/mind-core/src/sim/unit_runtime.rs:91",
+      "client/rust/mind-core/src/combat/bullet/mod.rs:560",
+      "client/rust/mind-gdext/src/fx.rs:427",
+      "client/rust/mind-gdext/src/fx.rs:421",
+      "client/rust/mind-gdext/src/sim_host.rs:294",
+      "client/rust/mind-gdext/src/camera.rs:405"
+     ]
+    }
+   }
+  },
+  "verified": null,
+  "note": "Code-scan 2026-10-10 (audio-fx): S2/high confidence. Every sim-side fx.effect/fx.shake call (bullet hit/despawn, turret fire, fires, unit death/wreck) lands on the no-op handle because nothing installs the plan-17 FxBus into the live UnitRuntime, and the MindFx node exists and ticks but its queue has no producer; players never see an explosion, impact spark, smoke, spawn effect or screen shake. The separate 'no live batch executor' lead was rejected: MindFx::draw (fx.rs:100-125) does consume the compiled DrawProgram. In-engine verification pending.",
+  "evidence": [
+   "../Mindustry/core/src/mindustry/entities/bullet/BulletType.java:563",
+   "../Mindustry/core/src/mindustry/entities/Effect.java:125",
+   "../Mindustry/core/src/mindustry/entities/comp/EffectStateComp.java:20",
+   "client/rust/mind-core/src/sim/unit_runtime.rs:127",
+   "client/rust/mind-core/src/sim/unit_runtime.rs:91",
+   "client/rust/mind-core/src/combat/bullet/mod.rs:560",
+   "client/rust/mind-gdext/src/fx.rs:427",
+   "client/rust/mind-gdext/src/fx.rs:421",
+   "client/rust/mind-gdext/src/sim_host.rs:294",
+   "client/rust/mind-gdext/src/camera.rs:405"
+  ]
+ },
+ {
+  "title": "Effects, decals and turret parts draw as flat colored quads instead of atlas sprites",
+  "surface": "world",
+  "parent": null,
+  "status": "seeded",
+  "discovered_by": null,
+  "path": {
+   "to": "in-engine: MindFx.spawn_effect(\"rubble\", x, y, 0) (or spawn a scorch decal / turret draw) and screenshot it against the Java sprite for the same effect",
+   "java": [
+    "../Mindustry/core/src/mindustry/content/Fx.java:340",
+    "../Mindustry/core/src/mindustry/content/Fx.java:328",
+    "../Mindustry/core/src/mindustry/content/Fx.java:2794"
+   ],
+   "godot": [
+    "client/rust/mind-gdext/src/fx.rs:273",
+    "client/rust/mind-gdext/src/fx.rs:382",
+    "client/rust/mind-core/src/fx/parts/draw.rs:99",
+    "client/rust/mind-gdext/src/render/atlas_bind.rs:105"
+   ],
+   "confirm": {
+    "assertion": "a region-based effect/decal/turret part renders its atlas texture",
+    "java_expected": "effects draw their atlas region with Draw.rect(reg, ...) (Fx.java:340/2794), so the effect shows the sprite art",
+    "godot_expected": "PrimKind::Region is drawn with draw_rect_ex as a solid quad (fx.rs:276-282) and turret parts resolve through AllRegions::new(32.0) (fx.rs:382 -> parts/draw.rs:99-111); no texture is bound anywhere in the FX path"
+   },
+   "last_replayed": null
+  },
+  "run": null,
+  "reproduce": {
+   "java": [
+    "JVM client: trigger a unit wreck / rubble scatter / scorch decal and screenshot the sprite pixels."
+   ],
+   "godot": [
+    "Godot client: MindFx.spawn_effect(\"rubble\", x, y, 0), wait one frame and screenshot.",
+    "The pixels are a flat tinted rectangle (draw_rect_ex) with no sprite detail, unlike the same effect in Java."
+   ],
+   "compare": [
+    "Same effect id at the same position: Java shows the region sprite; Godot shows a solid colored quad sized from the region metadata."
+   ]
+  },
+  "steps": [],
+  "mismatch": null,
+  "fix": {
+   "status": "open",
+   "commit": null,
+   "summary": null,
+   "plan": {
+    "round": 0,
+    "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+    "seam": "The FX executor has no atlas resolver: MindFx::draw_prim renders PrimKind::Region as a debug draw_rect_ex (client/rust/mind-gdext/src/fx.rs:273-283) and append_turret_prims feeds AllRegions (every name found at 32 px) into build_turret (fx.rs:378-392; mind-core/src/fx/parts/draw.rs:99-111); the plan-03/16 resolver (RegionResolver, render/atlas_bind.rs:83-110; MindAssets.region_geometry, assets/atlas.rs:315) is never reached from the FX path.",
+    "files": [
+     "client/rust/mind-gdext/src/fx.rs:273",
+     "client/rust/mind-gdext/src/fx.rs:299",
+     "client/rust/mind-gdext/src/fx.rs:378",
+     "client/rust/mind-core/src/fx/parts/draw.rs:99",
+     "client/rust/mind-gdext/src/render/atlas_bind.rs:91",
+     "client/rust/mind-gdext/src/assets/atlas.rs:315"
+    ],
+    "approach": "1) Give MindFx a RegionResolver built from the MindAssets autoload (same construction as the render passes, render/atlas_bind.rs:91) and resolve PrimKind::Region{region} by region.0 (mind-core/src/render/draw.rs:32 carries the name). 2) In draw_prim replace the debug draw_rect_ex with draw_texture_rect_region using the resolved page texture + UV + pixel size, applying the prim rotation via draw_set_transform and honoring the prim blend. 3) Resolve decal prims through the same resolver (fx.rs:299-313) and pass an atlas-backed RegionLookup into append_turret_prims instead of AllRegions::new(32.0) (fx.rs:382). 4) Keep the error fallback color for unresolved names and expose RegionResolver::missing() in the probes so the check can assert zero missing.",
+    "narrow_check": "In-engine: spawn rubble/scorch and screenshot - sprite pixels present, no flat quad; a probe over the resolved regions reports 0 missing; cargo test -p mind-core stays green.",
+    "evidence": {
+     "java": [
+      "../Mindustry/core/src/mindustry/content/Fx.java:340",
+      "../Mindustry/core/src/mindustry/content/Fx.java:328",
+      "../Mindustry/core/src/mindustry/content/Fx.java:2794"
+     ],
+     "godot": [
+      "client/rust/mind-gdext/src/fx.rs:273",
+      "client/rust/mind-gdext/src/fx.rs:382",
+      "client/rust/mind-core/src/fx/parts/draw.rs:99",
+      "client/rust/mind-gdext/src/render/atlas_bind.rs:105",
+      "client/rust/mind-gdext/src/assets/atlas.rs:315"
+     ]
+    }
+   }
+  },
+  "verified": null,
+  "note": "Code-scan 2026-10-10 (audio-fx): S3/high confidence. Leads 1 and 3 confirmed: effect/decal Region prims draw as solid debug rectangles (fx.rs:273-283, 'until the atlas resolver is wired') and turret part regions all resolve to a 32-px placeholder (AllRegions), so no effect or turret sprite can appear even when the effect is spawned. Player impact: all FX would look like colored blobs. In-engine verification pending.",
+  "evidence": [
+   "../Mindustry/core/src/mindustry/content/Fx.java:340",
+   "../Mindustry/core/src/mindustry/content/Fx.java:328",
+   "../Mindustry/core/src/mindustry/content/Fx.java:2794",
+   "client/rust/mind-gdext/src/fx.rs:273",
+   "client/rust/mind-gdext/src/fx.rs:382",
+   "client/rust/mind-core/src/fx/parts/draw.rs:99",
+   "client/rust/mind-gdext/src/render/atlas_bind.rs:105",
+   "client/rust/mind-gdext/src/assets/atlas.rs:315"
+  ]
+ },
+ {
+  "title": "Loop sounds (conveyors, drills, factories) and ambient loops never play in live play",
+  "surface": "world",
+  "parent": null,
+  "status": "seeded",
+  "discovered_by": null,
+  "path": {
+   "to": "in-game: build a copper conveyor line, then read MindAudio.loop_voice_count(\"loopConveyor\")/loop_volume() and listen for the conveyor hum",
+   "java": [
+    "../Mindustry/core/src/mindustry/audio/SoundControl.java:187",
+    "../Mindustry/core/src/mindustry/audio/SoundControl.java:410",
+    "../Mindustry/core/src/mindustry/audio/SoundControl.java:419",
+    "../Mindustry/core/src/mindustry/audio/SoundControl.java:518"
+   ],
+   "godot": [
+    "client/rust/mind-gdext/src/audio/mod.rs:311",
+    "client/rust/mind-core/src/audio/loops.rs:121",
+    "client/rust/mind-core/src/audio/loops.rs:432",
+    "client/rust/mind-core/src/audio/sim.rs:179"
+   ],
+   "confirm": {
+    "assertion": "a running conveyor starts and maintains a loop voice",
+    "java_expected": "SoundControl.updateLoops starts a looping voice per accumulated sound (sound.loop(curVolume, pitch, pan), SoundControl.java:410-468) with ambientvol scaling (:419) and merges the ambient poller (:518)",
+    "godot_expected": "the client only accumulates (LoopMixer::accumulate, audio/mod.rs:311-329); LoopMixer::update (loops.rs:121) is never called and no LoopOutput impl exists in mind-gdext, so loop_voice_count stays 0 and no looping stream plays"
+   },
+   "last_replayed": null
+  },
+  "run": null,
+  "reproduce": {
+   "java": [
+    "JVM client: place a conveyor fed by a drill/core and listen to the conveyor loop; pause/leave the game and confirm it stops."
+   ],
+   "godot": [
+    "Godot client: place a conveyor with copper, run 120 ticks, read MindAudio.loop_voice_count(\"loopConveyor\") and loop_volume(\"loopConveyor\").",
+    "Both stay 0 and the client is silent (also no drill/factory/crafter hum and no weather/ambient loop)."
+   ],
+   "compare": [
+    "Java loops continuously while the building runs and stops when it stops; Godot never starts a loop voice because the accumulated mix is never flushed (and live buildings emit no LoopAdd)."
+   ]
+  },
+  "steps": [],
+  "mismatch": null,
+  "fix": {
+   "status": "open",
+   "commit": null,
+   "summary": null,
+   "plan": {
+    "round": 0,
+    "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+    "seam": "MindAudio::apply_events only calls LoopMixer::accumulate (client/rust/mind-gdext/src/audio/mod.rs:311-329); LoopMixer::update (mind-core/src/audio/loops.rs:121-178) is never called and mind-gdext has no LoopOutput implementation (only tests/headless, loops.rs:535 / mind-headless audio_scenarios.rs:487); the live sim also has no loop emitters (emit_loop_add/emit_loop_instance, audio/sim.rs:179-206, are called only from tests) and AmbientPoller (loops.rs:432-482) is never constructed.",
+    "files": [
+     "client/rust/mind-gdext/src/audio/mod.rs:273",
+     "client/rust/mind-gdext/src/audio/mod.rs:311",
+     "client/rust/mind-gdext/src/audio/mod.rs:348",
+     "client/rust/mind-core/src/audio/loops.rs:121",
+     "client/rust/mind-core/src/audio/loops.rs:180",
+     "client/rust/mind-core/src/audio/loops.rs:432",
+     "client/rust/mind-core/src/audio/sim.rs:179",
+     "client/rust/mind-gdext/src/audio/voices.rs:1"
+    ],
+    "approach": "1) Implement LoopOutput over VoicePool (start/update/stop/is_playing a looping stream fetched with StreamCache::sound(name, true), keeping a voice-id map). 2) Call self.mixer.update(ambientvol/100, in_game, paused, listener, &mut out) once per frame in MindAudio::process (audio/mod.rs:151-205) after apply_events, with in_game = state != \"menu\" (and stop_all on leaving game, loops.rs:193). 3) Emit AudioEvent::LoopAdd from the live building update for conveyor/drill/crafter ticks via AudioSinkRes (upstream BuildingComp.update -> shouldAmbientSound; SoundIds already exist), so the accumulator is actually fed in live play. 4) Wire the 20 Hz AmbientPoller (loops.rs:449) over an AmbientSnapshot built from the same sim/view data and merge with merge_ambient (loops.rs:180-193).",
+    "narrow_check": "In-engine: place a conveyor with copper and assert MindAudio.loop_voice_count(\"loopConveyor\") > 0 and loop_volume follows the mix; cargo test -p mind-core audio covers the mixer state machine.",
+    "evidence": {
+     "java": [
+      "../Mindustry/core/src/mindustry/audio/SoundControl.java:187",
+      "../Mindustry/core/src/mindustry/audio/SoundControl.java:410",
+      "../Mindustry/core/src/mindustry/audio/SoundControl.java:419",
+      "../Mindustry/core/src/mindustry/audio/SoundControl.java:518"
+     ],
+     "godot": [
+      "client/rust/mind-gdext/src/audio/mod.rs:311",
+      "client/rust/mind-gdext/src/audio/mod.rs:348",
+      "client/rust/mind-core/src/audio/loops.rs:121",
+      "client/rust/mind-core/src/audio/loops.rs:432",
+      "client/rust/mind-core/src/audio/sim.rs:179"
+     ]
+    }
+   }
+  },
+  "verified": null,
+  "note": "Code-scan 2026-10-10 (audio-fx): S3/high confidence. Lead 4 confirmed: the LoopMixer only accumulates and is never updated to voices, no LoopAdd is emitted by live buildings, and the AmbientPoller is unwired, so conveyor/drill/factory hums and ambient loops are silent. In-engine verification pending.",
+  "evidence": [
+   "../Mindustry/core/src/mindustry/audio/SoundControl.java:187",
+   "../Mindustry/core/src/mindustry/audio/SoundControl.java:410",
+   "../Mindustry/core/src/mindustry/audio/SoundControl.java:419",
+   "../Mindustry/core/src/mindustry/audio/SoundControl.java:518",
+   "client/rust/mind-gdext/src/audio/mod.rs:311",
+   "client/rust/mind-gdext/src/audio/mod.rs:348",
+   "client/rust/mind-core/src/audio/loops.rs:121",
+   "client/rust/mind-core/src/audio/loops.rs:432",
+   "client/rust/mind-core/src/audio/sim.rs:179"
+  ]
+ },
+ {
+  "title": "Main menu never plays menu.ogg - it stays silent or starts a random in-game track",
+  "surface": "menu",
+  "parent": null,
+  "status": "seeded",
+  "discovered_by": null,
+  "path": {
+   "to": "boot the client to the main menu and read MindAudio.current_track()/current_track_playing() while the menu is shown",
+   "java": [
+    "../Mindustry/core/src/mindustry/audio/SoundControl.java:156",
+    "../Mindustry/core/src/mindustry/audio/SoundControl.java:163"
+   ],
+   "godot": [
+    "client/rust/mind-gdext/src/audio/mod.rs:243",
+    "client/rust/mind-gdext/src/sim_host.rs:97",
+    "client/rust/mind-core/src/sim/mod.rs:193",
+    "client/rust/mind-core/src/audio/music.rs:478"
+   ],
+   "confirm": {
+    "assertion": "with the main menu shown, MindAudio.current_track() == \"menu\"",
+    "java_expected": "state.isMenu() -> play(Musics.menu) (SoundControl.java:156-163) starts menu.ogg immediately and keeps it playing",
+    "godot_expected": "the sim boots in Playing (Sim::new, sim/mod.rs:193-200) and no client code sets State::Menu, so music_context (audio/mod.rs:243-263) reports is_menu=false and MusicPlayer::update (music.rs:478-535) takes the in-game branch: silence(), then a random gameN track as soon as the interval/chance gate passes"
+   },
+   "last_replayed": null
+  },
+  "run": null,
+  "reproduce": {
+   "java": [
+    "JVM client: open the main menu and observe the menu music starting and looping."
+   ],
+   "godot": [
+    "Godot client: boot to the main menu and read MindAudio.current_track()/current_track_playing() (empty, or a random gameN once the chance gate rolls).",
+    "Enter a sector and return to the menu: the menu still never selects the menu track."
+   ],
+   "compare": [
+    "Java plays menu.ogg at the menu; Godot never selects it (it either plays a random in-game track or nothing), because the sim phase never reflects the menu state."
+   ]
+  },
+  "steps": [],
+  "mismatch": null,
+  "fix": {
+   "status": "open",
+   "commit": null,
+   "summary": null,
+   "plan": {
+    "round": 0,
+    "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+    "seam": "MindAudio::music_context derives is_menu from MindSimHost.get_state() (client/rust/mind-gdext/src/audio/mod.rs:243-263), but the client never puts the sim in State::Menu: Sim::new starts Playing (mind-core/src/sim/mod.rs:193-200), the only set_phase call is Playing on sector load (sim_host.rs:995), and the exit-to-menu path resets only the campaign session (campaign.rs:1499-1512).",
+    "files": [
+     "client/rust/mind-gdext/src/audio/mod.rs:243",
+     "client/rust/mind-gdext/src/sim_host.rs:97",
+     "client/rust/mind-gdext/src/sim_host.rs:995",
+     "client/rust/mind-core/src/sim/mod.rs:193",
+     "client/rust/mind-core/src/audio/music.rs:478",
+     "client/rust/mind-gdext/src/campaign.rs:1499"
+    ],
+    "approach": "1) Put the sim in State::Menu at boot (MindSimHost::init/bootstrap, sim_host.rs:96-118) and on every return-to-menu path (MindCampaign.exit_to_menu/run_exit_save, campaign.rs:1499-1512) via sim.set_phase(State::Menu). 2) Keep Playing on sector/map load (sim_host.rs:995). 3) In music_context also fill planet_ui_visible/editor_ui_visible from the Planet/editor visibility so launchMusic/editor select like upstream (music.rs:513-520). 4) Initialize MusicPlayer::last_played_ms from the first frame's now_ms (music.rs:530-534) so the in-game random gate does not treat the wall-clock epoch gap as an elapsed interval.",
+    "narrow_check": "Boot the client: MindAudio.current_track() == \"menu\" while the menu is shown and current_track_playing() is true; after entering a sector the track is a gameN and no menu track plays; cargo test -p mind-core audio covers the selection state machine.",
+    "evidence": {
+     "java": [
+      "../Mindustry/core/src/mindustry/audio/SoundControl.java:156",
+      "../Mindustry/core/src/mindustry/audio/SoundControl.java:163"
+     ],
+     "godot": [
+      "client/rust/mind-gdext/src/audio/mod.rs:243",
+      "client/rust/mind-gdext/src/audio/mod.rs:251",
+      "client/rust/mind-gdext/src/sim_host.rs:97",
+      "client/rust/mind-core/src/sim/mod.rs:193",
+      "client/rust/mind-core/src/audio/music.rs:478",
+      "client/rust/mind-gdext/src/sim_host.rs:995"
+     ]
+    }
+   }
+  },
+  "verified": null,
+  "note": "Code-scan 2026-10-10 (audio-fx): S3/high confidence. Lead 5 confirmed with a concrete failure: the menu music branch is unreachable because the sim phase is always Playing (or paused inside a game), so menu.ogg never plays and the in-game random-music gate can fire at the menu. In-engine verification pending.",
+  "evidence": [
+   "../Mindustry/core/src/mindustry/audio/SoundControl.java:156",
+   "../Mindustry/core/src/mindustry/audio/SoundControl.java:163",
+   "client/rust/mind-gdext/src/audio/mod.rs:243",
+   "client/rust/mind-gdext/src/audio/mod.rs:251",
+   "client/rust/mind-gdext/src/sim_host.rs:97",
+   "client/rust/mind-core/src/sim/mod.rs:193",
+   "client/rust/mind-core/src/audio/music.rs:478",
+   "client/rust/mind-gdext/src/sim_host.rs:995"
+  ]
+ },
+ {
+  "title": "Placing, breaking and destroying blocks makes no sound in live play",
+  "surface": "world",
+  "parent": null,
+  "status": "seeded",
+  "discovered_by": null,
+  "path": {
+   "to": "in-game: place and break a wall/drill in a live sector and check MindAudio.events_applied/pending_events plus the audible cue",
+   "java": [
+    "../Mindustry/core/src/mindustry/world/blocks/ConstructBlock.java:115",
+    "../Mindustry/core/src/mindustry/world/blocks/ConstructBlock.java:65",
+    "../Mindustry/core/src/mindustry/entities/comp/BuildingComp.java:1542",
+    "../Mindustry/core/src/mindustry/world/Block.java:1374"
+   ],
+   "godot": [
+    "client/rust/mind-core/src/sim/runtime.rs:241",
+    "client/rust/mind-core/src/sim/runtime.rs:319",
+    "client/rust/mind-core/src/world/harness.rs:398",
+    "client/rust/mind-core/src/audio/sim.rs:88"
+   ],
+   "confirm": {
+    "assertion": "a live place/break/destroy produces a block sound event applied by MindAudio",
+    "java_expected": "ConstructBlock plays block.placeSound/breakSound (ConstructBlock.java:115/65) and building destruction plays destroySound (BuildingComp.java:1542); Block.java:1374-1379 defaults the break sound by size",
+    "godot_expected": "SimRuntime::place (sim/runtime.rs:241-316) and break_block (sim/runtime.rs:319-364) mutate the grid without touching AudioSinkRes, and the only callers of the block sound emitters are BuildHarness (world/harness.rs:398-410), so nothing enters the audio log"
+   },
+   "last_replayed": null
+  },
+  "run": null,
+  "reproduce": {
+   "java": [
+    "JVM client: place and break blocks and hear blockPlace1/blockBreak1; destroy a building and hear its destroy sound."
+   ],
+   "godot": [
+    "Godot client: place and break a wall via mouse, then destroy a building.",
+    "MindAudio.pending_events()/events_applied show no block sound events and the action is silent."
+   ],
+   "compare": [
+    "Java gives audible placement/break/destroy feedback; the Godot live tile-op path emits nothing (the emitters are harness-only)."
+   ]
+  },
+  "steps": [],
+  "mismatch": null,
+  "fix": {
+   "status": "open",
+   "commit": null,
+   "summary": null,
+   "plan": {
+    "round": 0,
+    "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+    "seam": "Live tile ops never call the block sound emitters (mind-core/src/audio/sim.rs:88-103): SimRuntime::place (sim/runtime.rs:241) and break_block (sim/runtime.rs:319) handle only grid/ECS state, while the only callers of emit_block_place/break are BuildHarness::finish (world/harness.rs:398-410).",
+    "files": [
+     "client/rust/mind-core/src/sim/runtime.rs:241",
+     "client/rust/mind-core/src/sim/runtime.rs:319",
+     "client/rust/mind-core/src/sim/mod.rs:354",
+     "client/rust/mind-core/src/world/harness.rs:398",
+     "client/rust/mind-core/src/audio/sim.rs:88",
+     "client/rust/mind-core/src/audio/sim.rs:99"
+    ],
+    "approach": "1) Emit from the live path: in Sim::runtime_place/runtime_break (sim/mod.rs:354-377) or inside SimRuntime::place/break_block (sim/runtime.rs:241/319), call emit_block_place/emit_block_break with the tile center and block size, passing the world AudioSinkRes (remove/insert the resource as the unit runtime already does, unit_runtime.rs:572-576). 2) Reproduce ConstructBlock.shouldPlay's ~32 ms global rate gate (modeled at harness.rs:400-406) and the placePitchChange/breakPitchChange pitch rules. 3) Add emit_block_destroy on the building-death path (BuildingComp.java:1542) with the RandomSound alternates (audio/sim.rs:61-85). 4) Optional follow-up: route the destroy effect/decal through the Fx bus once FX delivery lands.",
+    "narrow_check": "Headless: mirror the audio/sim.rs:326-339 test with a recording AudioSinkRes over Sim::apply(Place/Break) and assert blockPlace1/blockBreak1; in-engine: after a place and a break, MindAudio.events_applied increases and the sounds are audible.",
+    "evidence": {
+     "java": [
+      "../Mindustry/core/src/mindustry/world/blocks/ConstructBlock.java:115",
+      "../Mindustry/core/src/mindustry/world/blocks/ConstructBlock.java:65",
+      "../Mindustry/core/src/mindustry/entities/comp/BuildingComp.java:1542",
+      "../Mindustry/core/src/mindustry/world/Block.java:1374"
+     ],
+     "godot": [
+      "client/rust/mind-core/src/sim/runtime.rs:241",
+      "client/rust/mind-core/src/sim/runtime.rs:319",
+      "client/rust/mind-core/src/world/harness.rs:398",
+      "client/rust/mind-core/src/audio/sim.rs:88"
+     ]
+    }
+   }
+  },
+  "verified": null,
+  "note": "Code-scan 2026-10-10 (audio-fx): S3/high confidence. Extra finding from reading the audio call sites: block placement/break/destruction sounds exist only behind the test BuildHarness, so the live client's build actions are silent even though the same events are emitted for turrets/shots and units (turrets/mod.rs:1478, lifecycle.rs:276). In-engine verification pending.",
+  "evidence": [
+   "../Mindustry/core/src/mindustry/world/blocks/ConstructBlock.java:115",
+   "../Mindustry/core/src/mindustry/world/blocks/ConstructBlock.java:65",
+   "../Mindustry/core/src/mindustry/entities/comp/BuildingComp.java:1542",
+   "../Mindustry/core/src/mindustry/world/Block.java:1374",
+   "client/rust/mind-core/src/sim/runtime.rs:241",
+   "client/rust/mind-core/src/sim/runtime.rs:319",
+   "client/rust/mind-core/src/world/harness.rs:398",
+   "client/rust/mind-core/src/audio/sim.rs:88"
+  ]
+ },
+ {
+  "title": "Settings sound sliders (music/sfx/ambient volume) never change what the client plays",
+  "surface": "settings",
+  "parent": null,
+  "status": "seeded",
+  "discovered_by": null,
+  "path": {
+   "to": "open Settings -> Sound, drag Music volume to 0, then read MindAudio.stats() and listen to music/effects",
+   "java": [
+    "../Mindustry/core/src/mindustry/audio/SoundControl.java:260",
+    "../Mindustry/core/src/mindustry/audio/SoundControl.java:332",
+    "../Mindustry/core/src/mindustry/audio/SoundControl.java:419",
+    "../Mindustry/core/src/mindustry/core/Control.java:211"
+   ],
+   "godot": [
+    "client/ui/dialogs/settings_menu_dialog.gd:455",
+    "client/rust/mind-gdext/src/audio/mod.rs:69",
+    "client/rust/mind-gdext/src/audio/mod.rs:670",
+    "client/scenes/game.tscn:9"
+   ],
+   "confirm": {
+    "assertion": "setting musicvol to 0 mutes music and MindAudio.stats().musicvol reads 0",
+    "java_expected": "musicvol drives volumeMultiplier/shouldPlay (SoundControl.java:260/332) and ambientvol scales loops (:419); the setting is read live (e.g. Control.java:211-217 applies it when a core lands)",
+    "godot_expected": "the dialog writes the store via MindUi.settings_set but its live-mixer mirror looks up /root/MindAudio (settings_menu_dialog.gd:458) while the node lives at /root/Spine/MindAudio (game.tscn:9-15), and MindAudio::ready never loads the store (audio/mod.rs:108-149; defaults at :69-78), so stats()['musicvol'] stays 100 and playback is unchanged"
+   },
+   "last_replayed": null
+  },
+  "run": null,
+  "reproduce": {
+   "java": [
+    "JVM client: set Music volume to 0 -> music stops; set it back -> music returns; restart -> the value persists."
+   ],
+   "godot": [
+    "Godot client: Settings -> Sound, drag Music volume to 0.",
+    "MindAudio.stats()['musicvol'] stays 100, the current track keeps playing, and after relaunch it is still 100."
+   ],
+   "compare": [
+    "Java's sliders change loudness immediately and persist; the Godot sliders only write the settings store and never reach the mixer."
+   ]
+  },
+  "steps": [],
+  "mismatch": null,
+  "fix": {
+   "status": "open",
+   "commit": null,
+   "summary": null,
+   "plan": {
+    "round": 0,
+    "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+    "seam": "The settings dialog's live-audio mirror uses the wrong node path (/root/MindAudio, client/ui/dialogs/settings_menu_dialog.gd:458; the node is /root/Spine/MindAudio, client/scenes/game.tscn:9-15) and the Rust driver never loads persisted values at ready (client/rust/mind-gdext/src/audio/mod.rs:108-149), so MindAudio::set_setting (audio/mod.rs:670-686) is unreachable from the UI and bus volumes are never set from settings.",
+    "files": [
+     "client/ui/dialogs/settings_menu_dialog.gd:455",
+     "client/scenes/game.tscn:9",
+     "client/rust/mind-gdext/src/audio/mod.rs:69",
+     "client/rust/mind-gdext/src/audio/mod.rs:108",
+     "client/rust/mind-gdext/src/audio/mod.rs:670",
+     "client/rust/mind-gdext/src/ui/ui_host.rs:614",
+     "client/rust/mind-core/src/ui/settings.rs:257"
+    ],
+    "approach": "1) Fix the GDScript lookup to /root/Spine/MindAudio (or resolve the node from the scene root) in settings_menu_dialog.gd:458. 2) In MindAudio::ready load musicvol/sfxvol/ambientvol/alwaysmusic from the plan-04 settings store so values survive restart (the Rust Settings mirror already exists, audio/mod.rs:62-78). 3) Apply the values: sfxvol already scales one-shots (sfx_scale, audio/mod.rs:265-267) and musicvol flows into MusicContext (audio/mod.rs:243-263) once the mirror is live; add explicit Music/Sound bus volume application if bus-level parity is wanted. 4) Gate ambientvol on the loop mixer once the loop-voice item lands.",
+    "narrow_check": "In-engine: set Music 0 -> MindAudio.stats()['musicvol'] == 0 and current_track_playing() false/volume 0; relaunch -> persisted 0; the sfx slider scales play_oneshot loudness.",
+    "evidence": {
+     "java": [
+      "../Mindustry/core/src/mindustry/audio/SoundControl.java:260",
+      "../Mindustry/core/src/mindustry/audio/SoundControl.java:332",
+      "../Mindustry/core/src/mindustry/audio/SoundControl.java:419",
+      "../Mindustry/core/src/mindustry/core/Control.java:211"
+     ],
+     "godot": [
+      "client/ui/dialogs/settings_menu_dialog.gd:455",
+      "client/ui/dialogs/settings_menu_dialog.gd:458",
+      "client/scenes/game.tscn:9",
+      "client/scenes/game.tscn:15",
+      "client/rust/mind-gdext/src/audio/mod.rs:69",
+      "client/rust/mind-gdext/src/audio/mod.rs:670",
+      "client/rust/mind-gdext/src/ui/ui_host.rs:614"
+     ]
+    }
+   }
+  },
+  "verified": null,
+  "note": "Code-scan 2026-10-10 (audio-fx): S3/high confidence. Extra finding from reading the settings-to-audio path: the sound page's mirror lookup points at /root/MindAudio (the node is /root/Spine/MindAudio) and MindAudio has no store load at ready, so volume sliders can never affect playback. In-engine verification pending.",
+  "evidence": [
+   "../Mindustry/core/src/mindustry/audio/SoundControl.java:260",
+   "../Mindustry/core/src/mindustry/audio/SoundControl.java:332",
+   "../Mindustry/core/src/mindustry/audio/SoundControl.java:419",
+   "../Mindustry/core/src/mindustry/core/Control.java:211",
+   "client/ui/dialogs/settings_menu_dialog.gd:455",
+   "client/ui/dialogs/settings_menu_dialog.gd:458",
+   "client/scenes/game.tscn:9",
+   "client/scenes/game.tscn:15",
+   "client/rust/mind-gdext/src/audio/mod.rs:69",
+   "client/rust/mind-gdext/src/audio/mod.rs:670",
+   "client/rust/mind-gdext/src/ui/ui_host.rs:614"
+  ]
+ }
+]

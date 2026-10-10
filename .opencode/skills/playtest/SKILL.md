@@ -38,9 +38,9 @@ are folded in):
 - pause dialog + buttons → PAR-0038..0043; minimap/radar probe → PAR-0057
 
 The boot/attach recipes below run first in any session; every other flow
-assumes a connected runtime. Java-leg sequences (computer-mcp) belong to the
-mirrored parity runs in the `parity-eval` skill; e.g. the Ground Zero soak
-lives in the `reference.java_path` blocks of PAR-0019/PAR-0028.
+assumes a connected runtime. Java-leg sequences (shell helpers, parity-eval)
+belong to the mirrored parity runs in the `parity-eval` skill; e.g. the Ground
+Zero soak lives in the `reference.java_path` blocks of PAR-0019/PAR-0028.
 
 The MCP server is a stdio process (`open-godot-mcp`, binary `~/.local/bin/open-godot-mcp`, bridge default **ws://127.0.0.1:6970**, override with `OPEN_GODOT_MCP_PORT` before the editor starts). Every tool takes `action` plus an optional `params` object; action-specific arguments go inside `params` (e.g. `godot_editor_edit {"action":"open_scene","params":{"path":"res://..."}}`).
 
