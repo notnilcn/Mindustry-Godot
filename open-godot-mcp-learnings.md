@@ -1707,3 +1707,57 @@ those paths no longer exist, but the workarounds still apply.
   children with `find_children("<name>", "Button", true, false)[0]`, never a
   guessed direct path; a null deref pins exactly like a bad method call.
   Run: `runs/20261010-090740-database-grid-audit/`.
+
+## 2026-10-11 — bare autoload identifier in an eval body pins the loop (session 2, display :11, bridge 6980)
+
+- Symptom: the first eval after `godot_game play` timed out at 15 s; `godot_debugger
+  sessions` then reported `paused: true` (break-on-error pin), while a trivial
+  `OS.get_process_id()` eval still answered (pid 364376).
+- Exact failing call: `godot_exec {"action":"eval","params":{"code":"return
+  {\"pid\": OS.get_process_id(), \"menu\": MenuGroup.visible, \"project\":
+  ProjectSettings.globalize_path(\"res://\")}"}}` — `MenuGroup` is not resolvable
+  as a bare identifier in the eval body (autoloads exist as scene nodes, not eval
+  globals).
+- Workaround: read UI nodes via `get_node("/root/Spine/Ui/UiRoot/MenuGroup")`
+  (`/root/MindUi`, `/root/MindHud` for the Rust autoloads); recover a pinned loop
+  with `godot_game stop` + `play`.
+- Run: `runs/20261011-091537-PAR-0015/`.
+
+- Bullet (2026-10-11, session 2 bootstrap): the session-2 worktree is created with
+  seeded cargo caches but **no pack outputs** — booting the client without a pack
+  shows raw bundle keys in every label and `[assets] ready ok=false ... regions=0`
+  in `godot_log errors` ("atlas manifest unavailable; using placeholder quads").
+  Workaround: run `bash tools/pack.sh pack` once in the worktree (the file is not
+  executable in a fresh worktree, so call it through `bash`; ~1 min with warm
+  caches), then `godot_game stop` + `play`. `tools/godot.sh` similarly needs
+  `GODOT_BIN=$HOME/.local/bin/godot` in the session shell (no `godot4` on PATH).
+  Run: `runs/20261011-091537-PAR-0015/` (pack.log, parse-gate.log).
+
+- Bullet (2026-10-11, session 2): an editor relaunch done from the session shell without the
+  parity-session XDG env silently moves the client's `user://` to the global
+  `~/.local/share/godot/app_userdata/Mindustry-Godot` (the screenshot path is the tell:
+  `/home/<user>/.local/share/godot/...` instead of
+  `Mindustry-Godot/.opencode/parity-session/session-2/xdg-data/godot/...`). That breaks the
+  one-data-dir-per-session rule. Relaunch with the session env explicitly:
+  `XDG_DATA_HOME=<repo>/.opencode/parity-session/session-2/xdg-data XDG_CONFIG_HOME=.../xdg-config
+  XDG_CACHE_HOME=.../xdg-cache DISPLAY=:11 OPEN_GODOT_MCP_PORT=6980 godot --editor --path client`.
+  Run: `runs/20261011-091537-PAR-0015/`.
+
+## 2026-10-11 — additive glow in the transparent SubViewport needs the backdrop inside the viewport (session 2)
+
+- Symptom: wiring `atmosphere.gdshader` (blend_add) onto a billboard in the
+  transparent `SubViewport` rendered a big BLACK parallelogram over the starfield —
+  `ALPHA = 1.0` on cleared pixels made the viewport texture opaque black, and the
+  `ViewportContainer` composites with MIX (it cannot add to the 2D `$Space` behind it).
+  A follow-up `ALPHA = clamp(luma)` fix removed the black but dimmed the halo by the
+  composite's alpha² term.
+- Workaround that matches Java: keep the starfield INSIDE the viewport — a camera-facing
+  `Background` quad (space.png, `uv1_scale/offset` reproducing the 2D
+  `STRETCH_KEEP_ASPECT_COVERED` crop, `DEPTH_DRAW_DISABLED`, priority -10) makes the
+  viewport opaque, then the additive atmosphere (ALPHA=1) composites the halo over the
+  stars with no black. Also: a `ShaderMaterial` has no billboard flag — face the quad by
+  copying `camera.rotation` when the camera moves.
+- Run: `runs/20261011-091537-PAR-0015/` (steps r3/r4/r5 + `godot/atmos-off.png`).
+- Bullet (same run): `const X := Vector3(...).normalized()` is not a constant expression
+  in GDScript (parse error at the const, surfaced only on scene load) — precompute the
+  literal or make it a `static var`.
