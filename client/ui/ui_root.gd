@@ -108,6 +108,9 @@ func _on_escape() -> bool:
 			top = str(stack[stack.size() - 1])
 		if top == "restart" or top == "campaign_complete":
 			return false
+		var top_dialog := get_node_or_null("DialogLayer/%s" % top)
+		if top_dialog != null and top_dialog.has_method("blocks_escape") and bool(top_dialog.call("blocks_escape")):
+			return false
 		ui.call("close_top_dialog")
 		return true
 	if menu_group.visible:

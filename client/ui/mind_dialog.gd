@@ -358,6 +358,13 @@ func shown() -> void:
 	pass
 
 
+## Whether ESC must not close this dialog. Java dialogs consume the key when
+## modal and only close when `closeOnBack`/`addCloseButton` registered a
+## listener (`arc Dialog.java:455-470`); the default stays closable.
+func blocks_escape() -> bool:
+	return false
+
+
 ## Hook for subclasses to tear down on hide (BaseDialog.hidden).
 func hidden() -> void:
 	pass

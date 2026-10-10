@@ -26,6 +26,9 @@ var _root: MindTable = null
 var _selected_planet: String = ""
 var _selected_sector: int = -1
 var _ok_button: Button = null
+## True while the first-run chooser is up (`_show_select`): the Java chooser is
+## modal and has no close path — ESC/back must not dismiss it (PAR-0013).
+var _chooser_active := false
 ## Planet whose campaign-complete screen was already announced (control flow).
 var _complete_announced := ""
 
@@ -97,6 +100,7 @@ func _show_select() -> void:
 	_clear_root()
 	_set_planet_view_active(false)
 	_set_body_centered(true)
+	_chooser_active = true
 	refresh_campaign_views()
 
 	var choices := _campaign_planets()
@@ -183,6 +187,14 @@ func _reflow_ok_row(button: Button) -> void:
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	right.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(right)
+
+
+## The first-run chooser is not escapable in Java (PAR-0013): the BaseDialog
+## overlay consumes ESC and no `closeOnBack` listener is registered, so the
+## only exit is choosing a planet and pressing OK. The planet page behind it
+## keeps the normal ESC path.
+func blocks_escape() -> bool:
+	return _chooser_active
 
 
 ## Java centers the `cont` table between the title and the button bar; the port
@@ -372,6 +384,7 @@ func _on_select_ok() -> void:
 ## panel (`@sectors` readout with the in-panel action button).
 func _show_planet(planet_name: String) -> void:
 	_selected_planet = planet_name
+	_chooser_active = false
 	set_title_text("")
 	_clear_root()
 	_set_planet_view_active(true)
