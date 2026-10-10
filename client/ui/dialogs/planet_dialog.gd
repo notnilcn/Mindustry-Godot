@@ -103,9 +103,10 @@ func _show_select() -> void:
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_theme_constant_override("separation", 6)
-	# Java title glyphs start at y=6 with the fullDialog top margin at 0; an 11 px
-	# top pad (body is centered) lands the cards at Java's y=120.
-	_root.add(row).grow_x_axis().set_align(0).set_pad_top(11)
+	# Java title glyphs start at y=6 with the fullDialog top margin at 0; a 4 px
+	# top pad (body is centered) lands the unselected cards at Java's y=120 and
+	# the selected state at y=90.
+	_root.add(row).grow_x_axis().set_align(0).set_pad_top(4)
 	_root.row()
 
 	# Java's BaseDialog title renders at ~23 px glyphs (blocky font); the port's
@@ -120,10 +121,13 @@ func _show_select() -> void:
 	caption.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	caption.custom_minimum_size.x = 440.0
 	caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	# Java `Styles.outlineLabel` line advance is 22 px; the port font at the
-	# default size advances 24, so trim the RichTextLabel line separation.
+	# Java `Styles.outlineLabel` line advance is 21 px at the reference frames;
+	# size 20 advances 27, so the -8 separation lands a 19 px pitch: the
+	# unselected two-line caption shrinks to 46 px and the five-line planet
+	# blurb to 106, which keeps the centered block at Java's card y=120
+	# (unselected) and y=90 (selected).
 	caption.add_theme_font_size_override("normal_font_size", 20)
-	caption.add_theme_constant_override("line_separation", -2)
+	caption.add_theme_constant_override("line_separation", -8)
 
 	for planet_variant in choices:
 		var planet: Dictionary = planet_variant
@@ -140,7 +144,10 @@ func _show_select() -> void:
 		card.button_pressed = str(planet.get("name", "")) == _selected_planet
 		row.add_child(card)
 
-	_root.add(caption).grow_x_axis().set_align(0).set_pad_top(2)
+	# `max_width(440)` mirrors the Java `.width(440f).wrap()` caption cell: the
+	# label wraps at 440 and centers (a grown full-width cell would wrap at the
+	# dialog width and lay the long planet blurbs on single lines).
+	_root.add(caption).grow_x_axis().set_max_width(440.0).set_pad_top(2)
 	_root.row()
 
 	clear_buttons()
@@ -198,13 +205,19 @@ func _set_body_centered(centered: bool) -> void:
 		)
 
 
-## Java `Styles.button` OK look at the reference frame: #252525 fill, 6 px
-## corners (the M0 theme flat box is square and darker). Scoped to the chooser
-## button; a theme-wide arc-Button style is a separate surface.
+## Java `Styles.button` OK states at the reference frames: enabled = black fill
+## with a 4 px #454545 outline (white icon/text); disabled = flat #252525 with
+## grey text. Scoped to the chooser button; a theme-wide arc-Button style is a
+## separate surface.
 func _apply_ok_style(button: Button) -> void:
-	for state in ["normal", "hover", "pressed", "disabled"]:
+	for state in ["normal", "hover", "pressed"]:
 		var box := StyleBoxFlat.new()
-		box.bg_color = Color(0.145, 0.145, 0.145)
+		box.bg_color = Color.BLACK
+		box.border_width_left = 4
+		box.border_width_top = 4
+		box.border_width_right = 4
+		box.border_width_bottom = 4
+		box.border_color = CARD_OUTLINE
 		box.corner_radius_top_left = 6
 		box.corner_radius_top_right = 6
 		box.corner_radius_bottom_left = 6
@@ -212,6 +225,15 @@ func _apply_ok_style(button: Button) -> void:
 		box.content_margin_left = 12.0
 		box.content_margin_right = 12.0
 		button.add_theme_stylebox_override(state, box)
+	var disabled := StyleBoxFlat.new()
+	disabled.bg_color = Color(0.145, 0.145, 0.145)
+	disabled.corner_radius_top_left = 6
+	disabled.corner_radius_top_right = 6
+	disabled.corner_radius_bottom_left = 6
+	disabled.corner_radius_bottom_right = 6
+	disabled.content_margin_left = 12.0
+	disabled.content_margin_right = 12.0
+	button.add_theme_stylebox_override("disabled", disabled)
 
 
 ## The two campaign starting choices in reference order (`PlanetDialog` lists
@@ -278,24 +300,25 @@ func _make_planet_card(planet: Dictionary) -> Button:
 	return card
 
 
-## `Styles.togglet` card look (sampled from the Java reference frame): black
-## interior, 2 px grey outline, 4 px radius; the pressed (selected) state takes
-## the accent outline. The M0 theme's flat placeholders do not carry it.
+## `Styles.togglet` card states sampled from the Java reference frames: the
+## outlines are 4 px; hover takes the accent, the checked state white (arc
+## `Button` checked drawable), the disabled state the normal outline. The M0
+## theme's flat placeholders do not carry this.
 func _apply_card_style(card: Button) -> void:
 	card.add_theme_stylebox_override("normal", _card_box(CARD_OUTLINE))
-	card.add_theme_stylebox_override("hover", _card_box(CARD_OUTLINE))
-	card.add_theme_stylebox_override("pressed", _card_box(MindStyles.ACCENT))
-	card.add_theme_stylebox_override("hover_pressed", _card_box(MindStyles.ACCENT))
+	card.add_theme_stylebox_override("hover", _card_box(MindStyles.ACCENT))
+	card.add_theme_stylebox_override("pressed", _card_box(Color.WHITE))
+	card.add_theme_stylebox_override("hover_pressed", _card_box(Color.WHITE))
 	card.add_theme_stylebox_override("disabled", _card_box(CARD_OUTLINE))
 
 
 func _card_box(border: Color) -> StyleBoxFlat:
 	var box := StyleBoxFlat.new()
 	box.bg_color = Color.BLACK
-	box.border_width_left = 2
-	box.border_width_top = 2
-	box.border_width_right = 2
-	box.border_width_bottom = 2
+	box.border_width_left = 4
+	box.border_width_top = 4
+	box.border_width_right = 4
+	box.border_width_bottom = 4
 	box.border_color = border
 	box.corner_radius_top_left = 4
 	box.corner_radius_top_right = 4
