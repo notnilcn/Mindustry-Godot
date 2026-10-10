@@ -1761,3 +1761,59 @@ those paths no longer exist, but the workarounds still apply.
 - Bullet (same run): `const X := Vector3(...).normalized()` is not a constant expression
   in GDScript (parse error at the const, surfaced only on scene load) — precompute the
   literal or make it a `static var`.
+## 2026-10-11 — PAR-0010 Godot leg: menu clicks miss until the menu layout settles
+
+- Symptom: fresh `stop`+`play`, then `godot_input` press/release at the hardcoded
+  Play row (viewport 230,149) returns `ok: true` but `MenuGroup/menu/Submenu.visible`
+  stays false; three retries with 700 ms waits all missed. The same coordinates
+  land fine once the menu has been up for a while (earlier runs with a longer gap
+  before the click worked first try).
+- Cause: the Play button's `get_global_rect()` right after boot is not settled —
+  center `(230, 35)` at +2.5 s vs `y ≈ 114` after the menu layout pass runs; a
+  click at (230,149) hits nothing. Injected input was never the problem.
+- Workaround (validated): poll an eval on the target button's global rect until
+  `y` stabilizes, then click its `get_global_rect().get_center()` — never a
+  hardcoded row coordinate. `get_viewport().push_input(...)` remains the fallback
+  when a click at a *settled* rect still does not land.
+- Extra: an eval statement typo (`global_position = c` missing the `up.` prefix)
+  errors at runtime and trips break-on-error, pinning the frame loop (later evals
+  answer, `godot_debugger sessions` shows `paused: true`); recover with
+  `stop`+`play`. Keep duplicate-building evals fully prefixed.
+- Run dir: `runs/20261011-085604-PAR-0010/`.
+
+## 2026-10-11 — PAR-0010: tools/godot.sh needs GODOT_BIN on this host
+
+- Symptom: `bash tools/godot.sh --headless --editor --quit --path client` exits
+  with "no Godot binary found" — the wrapper looks for `godot4`/`godot4-mono`,
+  but this host ships the binary as `godot` (`~/.local/bin/godot`).
+- Workaround: `export GODOT_BIN=$(command -v godot)` before the call (the
+  parity-session wrapper already resolves `godot` itself, which is why the editor
+  launch works without it).
+- Run dir: `runs/20261011-085604-PAR-0010/`.
+
+## 2026-10-11 — PAR-0010: eval runtime errors pin the loop; the call times out
+
+- Symptom: `godot_exec eval` returns `TIMEOUT ("Runtime call 'exec' timed out
+  after 15.0s")` even though later evals answer; `godot_debugger sessions` shows
+  `paused: true`. Two instances this run: a `d._root` dynamic property access on
+  a `Node`-typed value, and `global_position = c` missing the `up.` prefix — both
+  are runtime errors that trip the editor break-on-error and stop the frame loop
+  mid-call, so the eval never returns.
+- Workaround: recover with `godot_game stop` + `play` (`resume` re-breaks); write
+  eval bodies defensively (`d.get("_root")`, fully prefixed duplicates) and keep
+  them loop-free.
+- Validated fallback for flaky clicks: resolve `get_global_rect().get_center()`
+  and call `get_viewport().push_input(down/up)` in one eval — worked every time
+  when `godot_input` press/release did not (menu settle race).
+- Run dir: `runs/20261011-085604-PAR-0010/`.
+
+## 2026-10-11 — PAR-0011: execute-tool JS syntax error in a long chained script
+
+- Symptom: a single `execute` call with a ~75-line fast-forward chain (nested
+  template literals for the push_input helpers + long single-quoted eval bodies)
+  failed with `Unexpected token (62:545)` before any tool ran; the same chain split
+  across two calls worked unchanged.
+- Workaround: keep execute chains short and build eval code strings by
+  concatenation (`"..." + cx + "..."`) instead of embedding long template literals
+  and mixed quotes in one helper.
+- Run dir: `runs/20261011-092614-PAR-0011/`.

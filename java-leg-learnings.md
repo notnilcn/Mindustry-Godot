@@ -710,3 +710,21 @@ displays); those paths no longer exist, but the workarounds still apply.
 - §2b.1 Ground Zero rows: R00-R06 recorded via the GZ run items (PAR-0032-0051 + runs/20261009-065416-ref-ground-zero); the later rows attach to the covering items instead of new records: R07 (lead) -> the drill/ore surfaces (PAR-0071/0075/0079 refs), R08 (camera) -> PAR-0031, R09/R10 (duos/ammo) -> PAR-0086/0087, R11 (walls) -> PAR-0050/0073/0098, R12 (waves) -> PAR-0096/0139, R13/R14 (scatter/ammo) -> PAR-0086, R15/R16 (defend/finish) -> PAR-0084 (recorded blocker: needs a throwaway profile for the loss). No duplicate rows were created.
 - The blocker group (PAR-0115-0125, 0136) is staged: `runs/20261010-234250-ref-PAR-0070-combat-fx/` holds the Mods dialog (empty fixture), the host/join dialogs, the persisted Join-Game server entry, and the dedicated-server console log (server-release.jar boots; `host` opens port 6567). The AGENTS.md blocker table's Status column now reads staged per row.
 - The soak produced no parity verdicts (no item flipped to verified); mismatch/blocked statuses were preserved and only gained reference blocks.
+
+## 2026-10-11 — PAR-0010 resume: SetSettings needs the Mindustry jar on the classpath
+
+- Symptom: `java SetSettings <datadir> campaignselect false` run from
+  `runs/20261010-142753-PAR-0010/java/settingsfix/` (its `.class` in cwd) dies
+  with `NoClassDefFoundError: arc/Settings` — the bare classpath has only `.`.
+- Exact call: `/usr/lib/jvm/java-17-openjdk-amd64/bin/java SetSettings .../parity-java-home/.local/share/Mindustry campaignselect false`
+  -> `Exception in thread "main" java.lang.NoClassDefFoundError: arc/Settings`.
+- Workaround: run from the repo root with the fat jar first on the classpath:
+  `java -cp "../Mindustry/desktop/build/libs/Mindustry.jar:runs/20261010-142753-PAR-0010/java/settingsfix" SetSettings <datadir> campaignselect false`.
+- Run dir: `runs/20261011-085604-PAR-0010/` (this run; claim stamped before the rename).
+
+## 2026-10-11 — PAR-0010 launch: readiness gate ran from the wrong cwd
+
+- Symptom: the launch call mixed a backgrounded compound `cd ... && RUN=... && setsid ... >$RUN/java/game.log &` with a foreground `timeout 180 bash -c 'until grep -q ... runs/<stamp>/java/game.log'`; the foreground parts run in the shell tool's cwd (workspace root), so the gate grepped `/home/clintonnguyen/g/code_examples/runs/...` and spun 90 iterations of "No such file or directory" until the 180 s timeout (exit 124). The client itself was healthy (load 2616 ms).
+- Exact call: `timeout 180 bash -c 'until grep -q "Total time to load" runs/20261011-085604-PAR-0010/java/game.log; do sleep 2; done'` from `/home/clintonnguyen/g/code_examples`.
+- Workaround: use the absolute path in the gate (`/home/.../Mindustry-Godot/runs/<stamp>/java/game.log`) or pass an explicit workdir; never start a foreground readiness gate in the same call as a backgrounded `cd ... && ...` list.
+- Run dir: `runs/20261011-085604-PAR-0010/`.

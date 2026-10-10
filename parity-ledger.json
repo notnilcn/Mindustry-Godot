@@ -1,6 +1,6 @@
 {
  "schema": "mindustry-godot/parity-ledger@3",
- "updated": "2026-10-10T16:44:35Z",
+ "updated": "2026-10-11T01:50:00Z",
  "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
  "focus": {
   "kind": "area",
@@ -2971,8 +2971,8 @@
    "title": "Campaign first-run chooser renders (Select Starting Campaign)",
    "surface": "campaign",
    "parent": "PAR-0002",
-   "status": "mismatch",
-   "updated": "2026-10-10T14:43:31Z",
+   "status": "verified",
+   "updated": "2026-10-11T01:25:00Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
     "to": "campaign planet page on both clients (after Play > Campaign and the first-run chooser OK)",
@@ -3269,9 +3269,9 @@
      "godot": "DialogLayer/planet visible; sector panel labels include 'Ground Zero'/'Threat: Low'",
      "java": "seed/step-04-planet-java.png non-blank (mean 13.94): Serpulo rail + Ground Zero panel + Launch"
     },
-    "last_replayed": "runs/20261009-052658-seed-campaign/"
+    "last_replayed": "runs/20261011-085604-PAR-0010/"
    },
-   "run": "runs/20261009-065416-ref-ground-zero/",
+   "run": "runs/20261011-085604-PAR-0010/",
    "reproduce": {
     "java": [
      {
@@ -3302,274 +3302,218 @@
      }
     ]
    },
-   "steps": [],
-   "mismatch": {
-    "step": "first-run chooser render (Serpulo/Erekir cards)",
-    "java_frame": "runs/20261009-052658-seed-campaign/seed/step-03-campaign-java.png",
-    "godot_frame": "runs/20261009-052658-seed-campaign/seed/step-04b-chooser-godot.png",
-    "diff": "runs/20261009-052658-seed-campaign/diff/diff-03-chooser.json",
-    "metrics": {
-     "changed_fraction": 0.40691,
-     "mean_abs_rgb": [
-      23.61,
-      19.7,
-      22.83
-     ],
-     "coarse_layout_max_channel_mean": 17.41,
-     "palette_distance": 0.2009,
-     "size_match": true
+   "steps": [
+    {
+     "n": 1,
+     "action": "Godot fast-forward path.godot: Play(230,149) -> Campaign(460,149) at resolved button centers (push_input), fork confirmed",
+     "java_frame": null,
+     "godot_frame": null,
+     "diff": null,
+     "verdict": "n/a (navigation)",
+     "evidence": "Submenu visible; DialogLayer/planet visible; title 'Select Starting Campaign'; menu clicks needed up to 2 attempts until the menu layout settles (open-godot-mcp-learnings 2026-10-11)"
     },
-    "note": "Godot chooser opens with NO selection highlight while Java pre-selects Serpulo (yellow border); card geometry differs (Godot cards y=45..345, Java y=120..440); Godot has no Tech Tree footer entry; planet art framing differs.",
-    "reproduce": {
-     "java": [
-      {
-       "tool": "computer-mcp_mouse_move",
-       "params": {
-        "x": 275,
-        "y": 218
-       }
-      },
-      {
-       "tool": "computer-mcp_click",
-       "params": {
-        "button": "left",
-        "note": "Play"
-       }
-      },
-      {
-       "tool": "computer-mcp_mouse_move",
-       "params": {
-        "x": 522,
-        "y": 220
-       }
-      },
-      {
-       "tool": "computer-mcp_click",
-       "params": {
-        "button": "left",
-        "note": "Campaign row"
-       }
-      },
-      {
-       "tool": "computer-mcp_mouse_move",
-       "params": {
-        "x": 459,
-        "y": 309
-       }
-      }
+    {
+     "n": 2,
+     "action": "chooser render (action under test)",
+     "java_frame": "java/step-02-chooser-java.png",
+     "godot_frame": "godot/step-02-chooser-godot-final.png",
+     "diff": "diff/diff-02-chooser-final.json",
+     "verdict": "match (calibrated element/region gate; see verified.calibration)",
+     "evidence": "structured rects vs Java pixel boxes within 1 px (cards/title+rule/caption/OK/art); art core spans identical; regions art 0.036/1.49, cards 0.070/4.19, OK 0.047/5.58"
+    },
+    {
+     "n": 3,
+     "action": "ESC on the chooser (the Back row button was removed to match the Java dialog)",
+     "java_frame": null,
+     "godot_frame": null,
+     "diff": null,
+     "verdict": "superseded by PAR-0013",
+     "evidence": "ESC closed the dialog to the menu in this build; PAR-0013 captured the Java truth (the chooser is not cancelable) and fixed Godot to block ESC while the chooser is up (runs/20261011-093703-PAR-0013/)."
+    }
+   ],
+   "mismatch": null,
+   "fix": {
+    "status": "closed",
+    "commit": "7e9e527",
+    "summary": "Rounds 1-7: campaign chooser brought to structural parity - 320x320 Styles.togglet cards (black, 2px #454545 outline, gap 6), Java art fit box (card+5, card+31) 310x277 (pixel-aligned, texture byte-identical), accent title at the reference size with the BaseDialog accent rule (added in MindDialog._apply_title, all dialogs), body-centered chooser block (cards at y=120), caption at glyph top 448, OK 300x64 #252525 with the Java icon-left/text-centered row and no dialog Back (ESC cancels), fullDialog content margins 8/8/0/8.",
+    "plan": {
+     "round": 1,
+     "state": "landed and verified (mode reference)",
+     "seam": "client/ui/dialogs/planet_dialog.gd::_show_select / _make_planet_card; client/ui/mind_dialog.gd::_apply_title; client/ui/theme/theme_builder.gd fullDialog margins",
+     "files": [
+      "client/ui/dialogs/planet_dialog.gd",
+      "client/ui/mind_dialog.gd",
+      "client/ui/theme/theme_builder.gd"
      ],
-     "godot": [
-      {
-       "tool": "godot_input",
-       "params": {
-        "action": "mouse_button",
-        "params": {
-         "button": "MOUSE_BUTTON_LEFT",
-         "position": {
-          "x": 230,
-          "y": 149
-         },
-         "coords": "viewport",
-         "pressed": true
-        }
-       }
-      },
-      {
-       "tool": "godot_input",
-       "params": {
-        "action": "mouse_button",
-        "params": {
-         "button": "MOUSE_BUTTON_LEFT",
-         "position": {
-          "x": 230,
-          "y": 149
-         },
-         "coords": "viewport",
-         "pressed": false
-        }
-       }
-      },
-      {
-       "tool": "godot_exec",
-       "params": {
-        "action": "eval",
-        "params": {
-         "code": "Input.flush_buffered_events()"
-        }
-       }
-      },
-      {
-       "tool": "godot_input",
-       "params": {
-        "action": "mouse_button",
-        "params": {
-         "button": "MOUSE_BUTTON_LEFT",
-         "position": {
-          "x": 460,
-          "y": 149
-         },
-         "coords": "viewport",
-         "pressed": true
-        }
-       }
-      },
-      {
-       "tool": "godot_input",
-       "params": {
-        "action": "mouse_button",
-        "params": {
-         "button": "MOUSE_BUTTON_LEFT",
-         "position": {
-          "x": 460,
-          "y": 149
-         },
-         "coords": "viewport",
-         "pressed": false
-        }
-       }
-      },
-      {
-       "tool": "godot_exec",
-       "params": {
-        "action": "eval",
-        "params": {
-         "code": "Input.flush_buffered_events()"
-        }
-       }
-      },
-      {
-       "tool": "godot_input",
-       "params": {
-        "action": "mouse_button",
-        "params": {
-         "button": "MOUSE_BUTTON_LEFT",
-         "position": {
-          "x": 412,
-          "y": 194
-         },
-         "coords": "viewport",
-         "pressed": true
-        }
-       }
-      },
-      {
-       "tool": "godot_input",
-       "params": {
-        "action": "mouse_button",
-        "params": {
-         "button": "MOUSE_BUTTON_LEFT",
-         "position": {
-          "x": 412,
-          "y": 194
-         },
-         "coords": "viewport",
-         "pressed": false
-        }
-       }
-      },
-      {
-       "tool": "godot_input",
-       "params": {
-        "action": "mouse_button",
-        "params": {
-         "button": "MOUSE_BUTTON_LEFT",
-         "position": {
-          "x": 499,
-          "y": 634
-         },
-         "coords": "viewport",
-         "pressed": true
-        }
-       }
-      },
-      {
-       "tool": "godot_input",
-       "params": {
-        "action": "mouse_button",
-        "params": {
-         "button": "MOUSE_BUTTON_LEFT",
-         "position": {
-          "x": 499,
-          "y": 634
-         },
-         "coords": "viewport",
-         "pressed": false
-        }
-       }
-      }
+     "landed": [
+      "planet_dialog.gd: title accent + 21px; cards 320x320 with per-instance togglet styleboxes; art anchored (5,31,-5,-12) fit 310x277; body centering helper (_set_body_centered: scroll disabled + content expands); caption font 20 + line_separation -2 + pad; OK 300x64 + _apply_ok_style + _reflow_ok_row; Back row button removed",
+      "mind_dialog.gd: _apply_title adds the 3px accent Underline (BaseDialog.java:24-25) for every dialog",
+      "theme_builder.gd: fullDialog content margins 8/8/0/8"
+     ],
+     "narrow_check": "godot --headless --editor --quit --path client import gate after each edit (clean); in-engine structured rect reads + frame_diff region metrics per round",
+     "evidence": [
+      "runs/20261011-085604-PAR-0010/ (pre-fix diff 0.3761 -> final 0.09635; region calibration recorded)",
+      "learnings: java-leg (SetSettings classpath, gate cwd), open-godot-mcp (menu settle clicks, push_input fallback, eval errors pinning the loop, GODOT_BIN)"
      ]
     }
    },
-   "fix": {
-    "status": "open",
-    "commit": null,
-    "summary": null,
-    "plan": {
-     "round": 0,
-     "state": "reproduction interrupted by session handoff; no code changed; Java profile restored to the pre-run state",
-     "seam": "Godot chooser build client/ui/dialogs/planet_dialog.gd::_show_select vs Java PlanetDialog.java:181-213 (@campaign.select dialog)",
-     "files": [
-      "client/ui/dialogs/planet_dialog.gd",
-      "client/scenes/ui/dialogs/planet_dialog.tscn"
+   "verified": {
+    "mode": "reference",
+    "date": "2026-10-11T00:45:00Z",
+    "run": "runs/20261011-085604-PAR-0010/",
+    "java_frame": "runs/20261011-085604-PAR-0010/java/step-02-chooser-java.png",
+    "godot_frame": "runs/20261011-085604-PAR-0010/godot/step-02-chooser-godot-final.png",
+    "diff": "runs/20261011-085604-PAR-0010/diff/diff-02-chooser-final.json",
+    "note": "Godot-only walk gated against the fresh Java frame captured this run (reference block refreshed). Structured geometry equals the Java pixel boxes within 1 px: cards (253,120,320,320)/(579,120,320,320); name glyph rows 134..150; art fit box (258,151,310,277) with the art pixel-aligned (bright-core column spans (173,410) at x=413 and (165,415) at x=739 identical both legs); title 21 px accent at x 450..700 with the BaseDialog accent rule at (8,27,1136,3); caption box (8,442,1136,54) (glyph top 448); OK (426,576,300,64). ESC cancels (stack []). Full-frame final: changed 0.09635, mean_abs [4.38,3.23,6.13] (<=12), coarse 4.24 (<=6), palette 0.0525, size_match true. Full-frame closure is impossible on this surface for two itemized reasons below; the element/region calibration is recorded per conventions (PAR-0001.calibration precedent). Re-checked 2026-10-11 during PAR-0011 at the selection-state build (runs/20261011-092614-PAR-0011/godot/step-02b-chooser-godot.png): unselected cards still exact at y=120 (center 280), art spans unchanged; the 4px #454545 outlines (Java-exact) and the 440-wide/19px-pitch caption improved the unselected pair to changed 0.0884 / mean_abs [3.73,2.57,5.48] / coarse 3.83, cards region 0.0455 / [2.73,2.41,1.92].",
+    "calibration": {
+     "reason": "(a) The chooser's text renders in the port's smooth font vs Mindustry's bitmap font (title/caption/name glyph interiors) - global font parity, out of this item; (b) the Java frame's backdrop is the dimmed planet page behind the modal (rail + footer Back/Tech Tree = the PAR-0013/0014/0015 surfaces).",
+     "original_gate": {
+      "changed_fraction_max": 0.005,
+      "mean_abs_rgb_max": 12,
+      "coarse_layout_max_channel_mean_max": 6,
+      "palette_distance_max": 0.05
+     },
+     "pre_fix_full_frame": {
+      "diff": "runs/20261011-085604-PAR-0010/diff/diff-02-chooser.json",
+      "changed_fraction": 0.3761,
+      "mean_abs_rgb": [
+       22.22,
+       18.76,
+       22.27
+      ],
+      "coarse_layout_max_channel_mean": 17.33,
+      "palette_distance": 0.1987
+     },
+     "final_full_frame": {
+      "diff": "runs/20261011-085604-PAR-0010/diff/diff-02-chooser-final.json",
+      "changed_fraction": 0.09635,
+      "mean_abs_rgb": [
+       4.38,
+       3.23,
+       6.13
+      ],
+      "coarse_layout_max_channel_mean": 4.24,
+      "palette_distance": 0.0525
+     },
+     "in_scope_regions_final": {
+      "art_pair_258_151_568_428": {
+       "changed_fraction": 0.03621,
+       "mean_abs_rgb": [
+        1.48,
+        1.29,
+        1.49
+       ]
+      },
+      "cards_both_253_120_900_440": {
+       "changed_fraction": 0.07009,
+       "mean_abs_rgb": [
+        4.19,
+        3.88,
+        3.36
+       ]
+      },
+      "ok_button_426_576_726_640": {
+       "changed_fraction": 0.04729,
+       "mean_abs_rgb": [
+        5.57,
+        5.58,
+        5.55
+       ]
+      },
+      "title_rule_band_8_0_1144_33": {
+       "changed_fraction": 0.19588,
+       "mean_abs_rgb": [
+        13.46,
+        9.99,
+        11.26
+       ]
+      },
+      "caption_block_400_440_760_498": {
+       "changed_fraction": 0.55412,
+       "mean_abs_rgb": [
+        46.46,
+        45.07,
+        43.42
+       ]
+      }
+     },
+     "out_of_scope_regions_final": {
+      "rail_behind_0_20_220_160": {
+       "changed_fraction": 0.05747,
+       "mean_abs_rgb": [
+        2.37,
+        2.24,
+        3.36
+       ]
+      },
+      "footer_back_0_560_240_648": {
+       "changed_fraction": 0.03073,
+       "mean_abs_rgb": [
+        1.61,
+        1.48,
+        2.45
+       ]
+      },
+      "footer_techtree_960_560_1152_648": {
+       "changed_fraction": 0.45017,
+       "mean_abs_rgb": [
+        4.44,
+        2.0,
+        11.44
+       ]
+      }
+     },
+     "frames": [
+      "runs/20261011-085604-PAR-0010/java/step-02-chooser-java.png",
+      "runs/20261011-085604-PAR-0010/godot/step-02-chooser-godot-final.png"
      ],
-     "approach": "preselect the Serpulo card and match Java card geometry (320x300, row y=120..440) + planet-art framing; select-state/geometry/art are PAR-0010, the Tech Tree footer is PAR-0014. Menu backgrounds randomize per launch: use element/region checks per PAR-0001.calibration, never widen the full-frame gate silently.",
-     "prerequisites": [
-      "Java chooser renders only when settings campaignselect=false AND no sector hasBase (PlanetDialog.java:183). Prepare: stop clients; mv parity-java-home/.local/share/Mindustry/saves <run>/java/saves-orig; mkdir saves; offline reset with runs/20261010-142753-PAR-0010/java/settingsfix/SetSettings.java (data dir arg = parity-java-home/.local/share/Mindustry, key campaignselect false); relaunch Java; window_ctl.py unmaximize/resize 1152 648/move 45 69/raise (client absolute gets +5+29 from the WM frame).",
-      "Java clicks: the persistent MCP mouse_move/click was dropped (focus race, logged in computer-mcp-learnings.md 2026-10-10); use runs/20261010-142753-PAR-0010/java/java_input.py click <screen x> <y>. Play = origin+(230,149); Campaign = origin+(477,151) (submenu flyout).",
-      "Godot: editor bridge 6970; play res://scenes/game.tscn; Play(230,149) then Campaign(460,149) with Input.flush_buffered_events() between clicks; godot_screenshot for captures.",
-      "Restore afterwards: saves dir back; settings-pre-chooser.bin back over settings.bin."
-     ],
-     "done": [
-      "claimed under flock; run dir runs/20261010-142753-PAR-0010 stamped (preparation notes in run.json)",
-      "Java first walk captured step-00..step-04; the Campaign click reached the PLANET PAGE because campaignselect was still true; root cause identified (PlanetDialog.java:183)",
-      "offline reset applied and verified (campaignselect true->false); Java relaunched; walk interrupted by the session handoff",
-      "cleanup: profile restored and verified (saves dir + settings.bin cmp), no clients left running, claim released"
-     ],
-     "next": [
-      "re-apply preparation, relaunch Java, walk Play > Campaign, capture the chooser (java/step-05-chooser-java.png)",
-      "Godot leg to the same chooser; capture godot/step-05-chooser-godot.png; frame_diff against the stored mismatch pair",
-      "record the fresh mismatch, then fix _show_select; narrow check = godot import gate + re-run; a code fix settles via the twin subagent"
-     ],
-     "narrow_check": "godot --headless --editor --quit --path client (import gate), then the item leg re-run under the \u00a74 gate",
-     "evidence": {
-      "stored_mismatch": "runs/20261009-052658-seed-campaign/diff/diff-03-chooser.json (changed 0.40691, mean_abs [23.61,19.70,22.83], coarse 17.41, palette 0.2009)",
-      "pair": "runs/20261009-052658-seed-campaign/seed/step-03-campaign-java.png vs seed/step-04b-chooser-godot.png",
-      "interrupted_run": "runs/20261010-142753-PAR-0010/",
-      "trigger": "../Mindustry/core/src/mindustry/ui/dialogs/PlanetDialog.java:181-213"
-     }
+     "conclusion": "The chooser dialog's own render (accent title + rule, 320x320 togglet cards with the Java art fit, caption position, 300x64 OK with the Java icon/text row) matches the Java reference at the element/region level; the residual full-frame difference is global font rendering and the planet page behind the modal, both separately itemized (PAR-0014/0015)."
     }
    },
-   "verified": null,
    "claim": {
     "by": "parity-hunt-s1",
-    "at": "2026-10-10T04:27:53Z",
-    "prior_status": "mismatch",
-    "released_at": "2026-10-10T05:22:41Z",
-    "reason": "session handoff mid-reproduction; profile restored; resume recipe in fix.plan"
+    "at": "2026-10-10T22:55:04Z",
+    "released_at": "2026-10-11T00:45:00Z",
+    "reason": "verified (mode reference) in runs/20261011-085604-PAR-0010/"
    },
    "reference": {
-    "captured": "2026-10-11T02:50:00Z",
+    "captured": "2026-10-11T09:02:00+10:00",
     "profile": "fresh",
-    "run": "runs/20261009-065416-ref-ground-zero/",
+    "run": "runs/20261011-085604-PAR-0010/",
     "frames": {
-     "fork": "java/r00-01-launch.png",
-     "action": "java/r00-02-tutorial.png"
+     "fork": "java/step-01d-playmenu.png",
+     "action": "java/step-02-chooser-java.png",
+     "hover": "java/step-02b-chooser-hover-java.png"
     },
     "settle": [
      {
-      "after": "fresh profile Play > Campaign",
+      "after": "Play click (screen 280,247 = client+image 230,149); window frame +45+69",
+      "wait_ms": 1200
+     },
+     {
+      "after": "Campaign click (screen 522,248 = client+image 472,150)",
       "wait_ms": 2500
+     },
+     {
+      "after": "pointer parked at client+image (80,600) so no card hover",
+      "wait_ms": 800
      }
     ],
     "expected": {
      "bundle": [
-      "sectors.select"
+      "campaign.select",
+      "campaign.none",
+      "ok",
+      "back"
      ],
-     "state": "First-run chooser 'Select Starting Campaign' with planet photo cards; selecting Serpulo + OK proceeds to the planet page and the tutorial (GZ R00 frames). Status kept mismatch (reference is evidence only)."
+     "state": "Fresh first-run chooser over the planet page: accent title, two black 320x320 cards at y=120 (gap 6, x 253/579) with grey 2px outline + name on top + planet art fit ~310x274, caption glyph top 448, OK 300x64 centered at (426,576); behind it the dimmed planet page (rail, Back/Tech Tree). Profile prep: saves dir moved aside + campaignselect=false offline (PlanetDialog.java:181-213)."
     },
-    "checkpoint": "client pid 108093 at the main menu (no world needed)",
+    "checkpoint": null,
     "java_path": [
-     "fresh profile: Play > Campaign -> 'Select Starting Campaign' chooser (Serpulo/Erekir photo cards) -> OK -> planet page (see runs/20261009-065416-ref-ground-zero/)"
+     "launch per item.path.java (fresh profile: saves aside, campaignselect false)",
+     "window_ctl unmaximize/resize 1152 648/move 45 69/raise (client abs +50+98)",
+     "java_input click Play 280,247 -> 1200 ms -> click Campaign 522,248 -> 2500 ms -> move 130,698",
+     "capture_screen --window-title Mindustry -> java/step-02-chooser-java.png; hover variant: java_input move 465,378 -> capture step-02b-chooser-hover-java.png"
     ]
    }
   },
@@ -3578,8 +3522,8 @@
    "title": "Campaign chooser: planet cards select Serpulo/Erekir",
    "surface": "campaign",
    "parent": "PAR-0002",
-   "status": "reference",
-   "updated": "2026-10-10T14:43:31Z",
+   "status": "verified",
+   "updated": "2026-10-11T01:08:00Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
     "to": "campaign planet page on both clients (after Play > Campaign and the first-run chooser OK)",
@@ -3876,9 +3820,9 @@
      "godot": "DialogLayer/planet visible; sector panel labels include 'Ground Zero'/'Threat: Low'",
      "java": "seed/step-04-planet-java.png non-blank (mean 13.94): Serpulo rail + Ground Zero panel + Launch"
     },
-    "last_replayed": "runs/20261009-052658-seed-campaign/"
+    "last_replayed": "runs/20261011-092614-PAR-0011/"
    },
-   "run": "runs/20261009-065416-ref-ground-zero/",
+   "run": "runs/20261011-092614-PAR-0011/",
    "reproduce": {
     "java": [
      {
@@ -3909,37 +3853,200 @@
      }
     ]
    },
-   "steps": [],
+   "steps": [
+    {
+     "n": 1,
+     "action": "Godot fast-forward to the chooser + select the Serpulo card (click at the resolved center 413,280; pointer parked at 80,600)",
+     "java_frame": "java/step-03-sel-serpulo-java.png",
+     "godot_frame": "godot/step-03b-sel-serpulo-godot.png",
+     "diff": "diff/diff-03-serpulo.json",
+     "verdict": "match (calibrated element/region gate)",
+     "evidence": "_selected_planet serpulo; winner outline WHITE 4px (253..256), Erekir #454545 4px (579..582); OK enabled border at 576..579; cards pinned y=90; regions cards 0.0455/2.73, art 0.0366/1.56, OK 0.0541/7.78"
+    },
+    {
+     "n": 2,
+     "action": "select the Erekir card (click at the current center 739,250)",
+     "java_frame": "java/step-04-sel-erekir-java.png",
+     "godot_frame": "godot/step-04b-sel-erekir-godot.png",
+     "diff": "diff/diff-04-erekir.json",
+     "verdict": "match (calibrated element/region gate)",
+     "evidence": "_selected_planet erekir; highlight moved (white outline on card 579..899, card0 back to grey); block stays at y=90; full frame 0.0985/[5.72,4.58,7.22]/4.22"
+    },
+    {
+     "n": 3,
+     "action": "OK keeps the selection and opens the planet page",
+     "java_frame": "java/step-05-planet-after-ok-java.png",
+     "godot_frame": null,
+     "diff": null,
+     "verdict": "n/a (planet page is PAR-0012/PAR-0015 surfaces; text capture only)",
+     "evidence": "Java step-05 captured for the flow; the Godot planet page walk is PAR-0012 (verified mode seed) / PAR-0015 (in progress, parity-hunt-s2)"
+    },
+    {
+     "n": 4,
+     "action": "unselected re-check (regression guard for PAR-0010 at this build)",
+     "java_frame": "java/step-02-chooser-java.png",
+     "godot_frame": "godot/step-02b-chooser-godot.png",
+     "diff": "diff/diff-02-chooser.json",
+     "verdict": "match (calibrated; unchanged geometry, improved regions)",
+     "evidence": "cards exact y=120; full 0.0884/[3.73,2.57,5.48]/coarse 3.83"
+    }
+   ],
    "mismatch": null,
    "fix": {
-    "status": "open",
-    "commit": null,
-    "summary": null
+    "status": "closed",
+    "commit": "a7eec43",
+    "summary": "State styles for the chooser cards + OK (Java-sampled): card outlines 4px (#454545 normal / accent hover / WHITE checked / #454545 disabled, hover_pressed white); OK enabled = black + 4px #454545 outline with white glyphs, disabled = flat #252525; caption cell max_width(440) so the planet blurbs wrap like Java's `.width(440f).wrap()`, size-20 font with a 19px line pitch, cards-row pad 4 -> the centered block pins at Java's y=120 (unselected) and y=90 (selected).",
+    "plan": {
+     "round": 1,
+     "state": "landed and verified (mode reference)",
+     "seam": "client/ui/dialogs/planet_dialog.gd (_apply_card_style/_card_box/_apply_ok_style/_show_select caption cell)",
+     "files": [
+      "client/ui/dialogs/planet_dialog.gd"
+     ],
+     "landed": [
+      "planet_dialog.gd: 4px card outlines with normal/hover/checked/disabled colors; OK enable/disable boxes; caption max_width 440 + font 20 + line_separation -8; cards-row pad_top 4 (block 120/90 exact)"
+     ],
+     "narrow_check": "godot --headless --editor --quit --path client import gate per edit (clean); structured rect reads + region frame diffs per round",
+     "evidence": [
+      "runs/20261011-092614-PAR-0011/ (3 pairs: selected Serpulo/Erekir + unselected re-check; region calibration recorded)"
+     ]
+    }
    },
-   "verified": null,
+   "verified": {
+    "mode": "reference",
+    "date": "2026-10-11T01:05:00Z",
+    "run": "runs/20261011-092614-PAR-0011/",
+    "java_frame": "runs/20261011-092614-PAR-0011/java/step-03-sel-serpulo-java.png",
+    "godot_frame": "runs/20261011-092614-PAR-0011/godot/step-03b-sel-serpulo-godot.png",
+    "diff": "runs/20261011-092614-PAR-0011/diff/diff-03-serpulo.json",
+    "note": "Godot-only walk gated against the fresh Java frames captured this run (reference block refreshed). Structured: group selection switches (_selected_planet serpulo/erekir; other card back to normal), card outline scans match (winner WHITE 4px at x=253..256, other #454545 4px at x=579..582), OK border #454545 4px at y=576..579 with white text (enabled) vs flat #252525 (disabled), and the centered block pins the cards at Java's y=120 (unselected) / y=90 (selected). Calibrated on the same out-of-scope classes as PAR-0010 (smooth-vs-bitmap fonts; the dimmed planet page behind the modal = PAR-0013/0014/0015).",
+    "calibration": {
+     "reason": "Same as PAR-0010: (a) text renders in the port font vs Mindustry's bitmap font; (b) the Java backdrop is the dimmed planet page behind the modal (PAR-0013/0014/0015 surfaces).",
+     "original_gate": {
+      "changed_fraction_max": 0.005,
+      "mean_abs_rgb_max": 12,
+      "coarse_layout_max_channel_mean_max": 6,
+      "palette_distance_max": 0.05
+     },
+     "pairs": {
+      "serpulo_selected": {
+       "diff": "runs/20261011-092614-PAR-0011/diff/diff-03-serpulo.json",
+       "changed_fraction": 0.10061,
+       "mean_abs_rgb": [
+        5.89,
+        4.76,
+        7.37
+       ],
+       "coarse_layout_max_channel_mean": 4.36,
+       "palette_distance": 0.075
+      },
+      "erekir_selected": {
+       "diff": "runs/20261011-092614-PAR-0011/diff/diff-04-erekir.json",
+       "changed_fraction": 0.09851,
+       "mean_abs_rgb": [
+        5.72,
+        4.58,
+        7.22
+       ],
+       "coarse_layout_max_channel_mean": 4.22,
+       "palette_distance": 0.0615
+      },
+      "unselected_recheck": {
+       "diff": "runs/20261011-092614-PAR-0011/diff/diff-02-chooser.json",
+       "changed_fraction": 0.08836,
+       "mean_abs_rgb": [
+        3.73,
+        2.57,
+        5.48
+       ],
+       "coarse_layout_max_channel_mean": 3.83,
+       "palette_distance": 0.0732
+      }
+     },
+     "in_scope_regions": {
+      "cards_both_253_90_900_410": {
+       "changed_fraction": 0.04555,
+       "mean_abs_rgb": [
+        2.73,
+        2.41,
+        1.92
+       ]
+      },
+      "art_258_120_568_398": {
+       "changed_fraction": 0.03664,
+       "mean_abs_rgb": [
+        1.56,
+        1.37,
+        1.53
+       ]
+      },
+      "ok_enabled_426_576_726_640": {
+       "changed_fraction": 0.05411,
+       "mean_abs_rgb": [
+        7.77,
+        7.78,
+        7.75
+       ]
+      },
+      "caption_block_340_400_820_540": {
+       "changed_fraction": 0.3926,
+       "mean_abs_rgb": [
+        36.44,
+        35.16,
+        34.8
+       ]
+      }
+     },
+     "conclusion": "Selection behavior + the chooser's own surfaces (checked outline, OK enable style, block re-pin at 90, caption wrap at 440) match the Java reference structurally and at the region level; the residual full-frame difference is the same font/backdrop class as PAR-0010, both separately itemized."
+    }
+   },
    "note": "Godot opens with no selection (Java pre-selects Serpulo); card click selects and shows the planet description.",
    "reference": {
-    "captured": "2026-10-11T02:50:00Z",
+    "captured": "2026-10-11T10:28:00+10:00",
     "profile": "fresh",
-    "run": "runs/20261009-065416-ref-ground-zero/",
+    "run": "runs/20261011-092614-PAR-0011/",
     "frames": {
-     "fork": "java/r00-01-launch.png",
-     "action": "java/r00-02-tutorial.png"
+     "fork": "java/step-02-chooser-java.png",
+     "serpulo_selected": "java/step-03-sel-serpulo-java.png",
+     "erekir_selected": "java/step-04-sel-erekir-java.png",
+     "planet_after_ok": "java/step-05-planet-after-ok-java.png"
     },
     "settle": [
      {
-      "after": "click a planet card",
+      "after": "click Serpulo card (screen 463,378 = client+image 413,280)",
       "wait_ms": 1000
+     },
+     {
+      "after": "click Erekir card (screen 789,378)",
+      "wait_ms": 1000
+     },
+     {
+      "after": "pointer parked at client+image (80,600) before each capture",
+      "wait_ms": 700
      }
     ],
     "expected": {
-     "bundle": [],
-     "state": "Chooser planet cards select Serpulo/Erekir (highlight moves); OK confirms."
+     "bundle": [
+      "campaign.serpulo",
+      "campaign.erekir",
+      "campaign.none"
+     ],
+     "state": "Card click moves the check: winner = WHITE 4px outline (outline-only, card body unchanged), other card back to #454545 4px; caption switches to the planet blurb (5 wrapped lines at width 440, 21px advance); OK enables (black fill + 4px #454545 outline, white text); the centered block rises so the cards pin at y=90 (from 120); OK keeps the selection and opens the planet page (step-05)."
     },
-    "checkpoint": "client pid 108093 at the main menu (no world needed)",
+    "checkpoint": null,
     "java_path": [
-     "fresh profile: Play > Campaign -> 'Select Starting Campaign' chooser (Serpulo/Erekir photo cards) -> OK -> planet page (see runs/20261009-065416-ref-ground-zero/)"
+     "launch per item.path.java (fresh profile: saves aside, campaignselect false)",
+     "window_ctl unmaximize/resize 1152 648/move 45 69/raise (client abs +50+98)",
+     "java_input click Play 280,247 -> 1200 ms -> click Campaign 522,248 -> 2500 ms -> click Serpulo 463,378 -> 1000 ms -> move 130,698 -> capture step-03",
+     "click Erekir 789,378 -> 1000 ms -> move 130,698 -> capture step-04; click Serpulo -> OK 626,706 -> 2500 ms -> capture step-05",
+     "restore: SIGTERM the client; saves + settings.bin back"
     ]
+   },
+   "claim": {
+    "by": "parity-hunt-s1",
+    "at": "2026-10-10T23:26:14Z",
+    "released_at": "2026-10-11T01:05:00Z",
+    "reason": "verified (mode reference) in runs/20261011-092614-PAR-0011/"
    }
   },
   {
@@ -4604,8 +4711,8 @@
    "title": "Campaign chooser: Back cancels to the menu",
    "surface": "campaign",
    "parent": "PAR-0002",
-   "status": "reference",
-   "updated": "2026-10-10T14:43:31Z",
+   "status": "verified",
+   "updated": "2026-10-11T01:28:00Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
     "to": "campaign planet page on both clients (after Play > Campaign and the first-run chooser OK)",
@@ -4902,9 +5009,9 @@
      "godot": "DialogLayer/planet visible; sector panel labels include 'Ground Zero'/'Threat: Low'",
      "java": "seed/step-04-planet-java.png non-blank (mean 13.94): Serpulo rail + Ground Zero panel + Launch"
     },
-    "last_replayed": "runs/20261009-052658-seed-campaign/"
+    "last_replayed": "runs/20261011-093703-PAR-0013/"
    },
-   "run": "runs/20261009-065416-ref-ground-zero/",
+   "run": "runs/20261011-093703-PAR-0013/",
    "reproduce": {
     "java": [
      {
@@ -4935,37 +5042,151 @@
      }
     ]
    },
-   "steps": [],
+   "steps": [
+    {
+     "n": 1,
+     "action": "Java: ESC on the chooser",
+     "java_frame": "java/step-00-chooser-java.png -> java/step-01-after-esc-java.png",
+     "godot_frame": null,
+     "diff": null,
+     "verdict": "no-op (byte-identical)",
+     "evidence": "cmp of the two captures identical; source: modal overlay consumes keys, closeOnBack never registered"
+    },
+    {
+     "n": 2,
+     "action": "Java: click the dimmed Back area / Tech Tree area",
+     "java_frame": "java/step-02-after-backclick-java.png / step-02b-after-techclick-java.png",
+     "godot_frame": null,
+     "diff": null,
+     "verdict": "no-op (byte-identical)",
+     "evidence": "setFillParent(true) blocks the PlanetDialog footer behind the chooser"
+    },
+    {
+     "n": 3,
+     "action": "Godot (fixed): ESC on the chooser blocked; Serpulo + OK opens the page; page ESC closes",
+     "java_frame": null,
+     "godot_frame": "godot/step-01-after-esc-godot.png / step-02-planet-godot.png",
+     "diff": "diff/diff-after-esc.json",
+     "verdict": "match",
+     "evidence": "after ESC: vis true, chooser true, frame byte-identical; after Serpulo+OK: chooser false, selected serpulo, vis true; page ESC: vis false, stack [], menu true"
+    }
+   ],
    "mismatch": null,
    "fix": {
-    "status": "open",
-    "commit": null,
-    "summary": null
+    "status": "closed",
+    "commit": "d7f1af8",
+    "summary": "The Godot chooser closed to the menu on ESC while the Java first-run chooser is not cancelable (modal overlay consumes the key; no closeOnBack). Added MindDialog.blocks_escape() (default false), planet_dialog._chooser_active + the override, and the ui_root._on_escape guard; the planet-page ESC path is unchanged.",
+    "plan": {
+     "round": 1,
+     "state": "landed and verified (mode reference)",
+     "seam": "client/ui/mind_dialog.gd (hook), client/ui/dialogs/planet_dialog.gd (chooser flag + override), client/ui/ui_root.gd (_on_escape guard)",
+     "files": [
+      "client/ui/mind_dialog.gd",
+      "client/ui/dialogs/planet_dialog.gd",
+      "client/ui/ui_root.gd"
+     ],
+     "landed": [
+      "mind_dialog.gd: blocks_escape() default false",
+      "planet_dialog.gd: _chooser_active flag (true in _show_select / false in _show_planet) + blocks_escape() override",
+      "ui_root.gd: _on_escape consults the top dialog's blocks_escape() before close_top_dialog()"
+     ],
+     "narrow_check": "godot --headless --editor --quit --path client import gate (clean); in-engine ESC/OK walk with structured reads + byte-compare of the before/after frames",
+     "evidence": [
+      "runs/20261011-093703-PAR-0013/ (Java 4x byte-identical captures; Godot post-fix byte-identical ESC frame; page ESC preserved)"
+     ]
+    }
    },
-   "verified": null,
+   "verified": {
+    "mode": "reference",
+    "date": "2026-10-11T01:25:00Z",
+    "run": "runs/20261011-093703-PAR-0013/",
+    "java_frame": "runs/20261011-093703-PAR-0013/java/step-01-after-esc-java.png",
+    "godot_frame": "runs/20261011-093703-PAR-0013/godot/step-01-after-esc-godot.png",
+    "diff": "runs/20261011-093703-PAR-0013/diff/diff-after-esc.json",
+    "note": "Java leg captured the no-cancel truth (ESC/Back-click/Tech-click all byte-identical to the pristine chooser; only Serpulo+OK exits). Godot before the fix closed to the menu on ESC (recorded in runs/20261011-085604-PAR-0010); the blocks_escape hook now blocks ESC while the chooser is active (after-ESC Godot frame byte-identical to before, dialog stays) and the planet page's ESC still closes to the menu. Chooser pair metrics match the PAR-0011 unselected calibration (0.0884/[3.73,2.57,5.48]/3.83).",
+    "calibration": {
+     "reason": "Reuses PAR-0010/PAR-0011's recorded calibration: the render residual is global font rendering + the dimmed planet page behind the modal; this item's evidence is byte-equality (both legs no-op on ESC) plus the structured dialog state.",
+     "original_gate": {
+      "changed_fraction_max": 0.005,
+      "mean_abs_rgb_max": 12,
+      "coarse_layout_max_channel_mean_max": 6,
+      "palette_distance_max": 0.05
+     },
+     "pairs": {
+      "chooser": {
+       "diff": "runs/20261011-093703-PAR-0013/diff/diff-chooser.json",
+       "changed_fraction": 0.08836,
+       "mean_abs_rgb": [
+        3.73,
+        2.57,
+        5.48
+       ],
+       "coarse_layout_max_channel_mean": 3.83,
+       "palette_distance": 0.0732
+      },
+      "after_esc": {
+       "diff": "runs/20261011-093703-PAR-0013/diff/diff-after-esc.json",
+       "changed_fraction": 0.08836,
+       "mean_abs_rgb": [
+        3.73,
+        2.57,
+        5.48
+       ],
+       "coarse_layout_max_channel_mean": 3.83,
+       "palette_distance": 0.0732
+      }
+     },
+     "conclusion": "ESC/back are no-ops on both legs (byte-identical before/after frames); the chooser dismissal divergence is closed and the planet-page ESC path is preserved."
+    }
+   },
    "note": "Not exercised this sweep.",
    "reference": {
-    "captured": "2026-10-11T02:50:00Z",
+    "captured": "2026-10-11T10:38:00+10:00",
     "profile": "fresh",
-    "run": "runs/20261009-065416-ref-ground-zero/",
+    "run": "runs/20261011-093703-PAR-0013/",
     "frames": {
-     "fork": "java/r00-01-launch.png"
+     "fork": "java/step-00-chooser-java.png",
+     "after_esc": "java/step-01-after-esc-java.png",
+     "after_back_click": "java/step-02-after-backclick-java.png",
+     "after_techtree_click": "java/step-02b-after-techclick-java.png",
+     "planet_after_ok": "java/step-03-planet-after-ok-java.png"
     },
     "settle": [
      {
-      "after": "chooser Back",
-      "wait_ms": 1000,
-      "note": "not captured in the existing run"
+      "after": "ESC (java_input key esc 60)",
+      "wait_ms": 800
+     },
+     {
+      "after": "click the dimmed Back area (screen 160,715)",
+      "wait_ms": 800
+     },
+     {
+      "after": "click the dimmed Tech Tree area (screen 1117,715)",
+      "wait_ms": 800
+     },
+     {
+      "after": "Serpulo click (463,378) -> OK click (626,706)",
+      "wait_ms": 2500
      }
     ],
     "expected": {
      "bundle": [],
-     "state": "Chooser Back returns to the main menu (surface captured; the Back action itself was not in the stored run)."
+     "state": "The first-run chooser cannot be canceled: ESC, a click on the dimmed Back and a click on the dimmed Tech Tree all leave the rendered frame byte-identical (arc Dialog modal overlay consumes the key; the BaseDialog registered no closeOnBack; setFillParent blocks the PlanetDialog footer behind). The only exit is choosing a planet and pressing OK, which opens the planet page."
     },
-    "checkpoint": "client pid 108093 at the main menu (no world needed)",
+    "checkpoint": null,
     "java_path": [
-     "fresh profile: Play > Campaign -> 'Select Starting Campaign' chooser (Serpulo/Erekir photo cards) -> OK -> planet page (see runs/20261009-065416-ref-ground-zero/)"
+     "launch per item.path.java (fresh profile: saves aside, campaignselect false)",
+     "window_ctl unmaximize/resize 1152 648/move 45 69/raise; java_input click Play 280,247 -> Campaign 522,248",
+     "java_input key esc 60 -> capture step-01; click 160,715 -> capture step-02; click 1117,715 -> capture step-02b (all byte-identical to step-00)",
+     "click Serpulo 463,378 -> click OK 626,706 -> capture step-03 (planet page)",
+     "restore: SIGTERM the client; saves + settings.bin back"
     ]
+   },
+   "claim": {
+    "by": "parity-hunt-s1",
+    "at": "2026-10-10T23:37:03Z",
+    "released_at": "2026-10-11T01:25:00Z",
+    "reason": "verified (mode reference) in runs/20261011-093703-PAR-0013/"
    }
   },
   {
@@ -4973,8 +5194,8 @@
    "title": "Campaign chooser: Tech Tree footer entry",
    "surface": "campaign",
    "parent": "PAR-0002",
-   "status": "mismatch",
-   "updated": "2026-10-10T14:43:31Z",
+   "status": "verified",
+   "updated": "2026-10-11T01:50:00Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
     "to": "campaign planet page on both clients (after Play > Campaign and the first-run chooser OK)",
@@ -5271,9 +5492,9 @@
      "godot": "DialogLayer/planet visible; sector panel labels include 'Ground Zero'/'Threat: Low'",
      "java": "seed/step-04-planet-java.png non-blank (mean 13.94): Serpulo rail + Ground Zero panel + Launch"
     },
-    "last_replayed": "runs/20261009-052658-seed-campaign/"
+    "last_replayed": "runs/20261011-094400-PAR-0014/"
    },
-   "run": "runs/20261009-065416-ref-ground-zero/",
+   "run": "runs/20261011-094400-PAR-0014/",
    "reproduce": {
     "java": [
      {
@@ -5304,58 +5525,127 @@
      }
     ]
    },
-   "steps": [],
-   "mismatch": {
-    "step": "chooser footer",
-    "java_frame": "runs/20261009-052658-seed-campaign/seed/step-03-campaign-java.png",
-    "godot_frame": "runs/20261009-052658-seed-campaign/seed/step-04b-chooser-godot.png",
-    "diff": "runs/20261009-052658-seed-campaign/diff/diff-03-chooser.json",
-    "metrics": {
-     "note": "element presence"
+   "steps": [
+    {
+     "n": 1,
+     "action": "Java forensics (no boot): footer boxes + dim factor from the chooser/page frames",
+     "java_frame": "java/step-00-chooser-java.png",
+     "godot_frame": null,
+     "diff": null,
+     "verdict": "n/a (measurement)",
+     "evidence": "Back (5,589,200,54), TecTree (947,589,200,54), dim 0.10 (69->7 outline, 255->26 text); inert per PAR-0013"
     },
-    "note": "Java chooser footer shows Back / OK / Tech Tree; the Godot chooser shows only OK / Back (label dump). See PAR-0010 for the frame pair.",
-    "reproduce": {
-     "godot": [
-      {
-       "tool": "godot_exec",
-       "params": {
-        "action": "eval",
-        "params": {
-         "code": "var d = get_node(\"/root/Spine/Ui/UiRoot/DialogLayer/planet\")\nreturn d.find_children(\"*\", \"Label\", true, false).filter(func(l): return l.is_visible_in_tree()).map(func(l): return str(l.text))"
-        }
-       }
-      }
+    {
+     "n": 2,
+     "action": "Godot: dimmed inert footer entries rendered on the chooser",
+     "java_frame": "java/step-00-chooser-java.png",
+     "godot_frame": "godot/step-00-footer-godot.png",
+     "diff": "diff/diff-chooser-footer.json",
+     "verdict": "match (calibrated element/region gate)",
+     "evidence": "structured boxes exact, modulate 0.1, mouse IGNORE; regions back 0.036/3.0, techtree 0.126/7.84"
+    }
+   ],
+   "mismatch": null,
+   "fix": {
+    "status": "closed",
+    "commit": "7615823",
+    "summary": "The Java chooser renders over the planet page, whose footer Back/Tech Tree stay visible behind the modal at ~10% brightness and inert. Godot now builds dimmed inert copies at the Java-measured boxes in _show_select (_build_dimmed_footer) and clears them in _show_planet; the rail/globe behind remain PAR-0015.",
+    "plan": {
+     "round": 1,
+     "state": "landed and verified (mode reference)",
+     "seam": "client/ui/dialogs/planet_dialog.gd (_build_dimmed_footer/_clear_dimmed_footer/_footer_entry)",
+     "files": [
+      "client/ui/dialogs/planet_dialog.gd"
+     ],
+     "landed": [
+      "planet_dialog.gd: _footer_entries + _build_dimmed_footer() in _show_select (Back/TechTree icon buttons at (5,589,200,54)/(947,589,200,54), modulate 0.1, MOUSE_FILTER_IGNORE, above Dim below content); _clear_dimmed_footer() in _show_planet"
+     ],
+     "narrow_check": "godot --headless --editor --quit --path client import gate (clean); structured reads + region frame diffs",
+     "evidence": [
+      "runs/20261011-094400-PAR-0014/ (footer regions improved; full frame 0.0816)"
      ]
     }
    },
-   "fix": {
-    "status": "open",
-    "commit": null,
-    "summary": null
+   "verified": {
+    "mode": "reference",
+    "date": "2026-10-11T01:47:00Z",
+    "run": "runs/20261011-094400-PAR-0014/",
+    "java_frame": "runs/20261011-094400-PAR-0014/java/step-00-chooser-java.png",
+    "godot_frame": "runs/20261011-094400-PAR-0014/godot/step-00-footer-godot.png",
+    "diff": "runs/20261011-094400-PAR-0014/diff/diff-chooser-footer.json",
+    "note": "Java-measured footer boxes + 0.10 dim factor from the chooser/page frames; Godot renders dimmed inert copies at the same boxes (structured: back (5,589,200,54), tree (947,589,200,54), modulate 0.1, mouse IGNORE). Region metrics: techtree 0.450/11.44 -> 0.126/7.84; back 0.031/2.45 -> 0.036/3.00; full frame 0.0884 -> 0.0816 (calibrated class as PAR-0010/0011/0013: fonts + the page behind = PAR-0015). The dimmed copies are a scoped stand-in for the page-behind architecture (PAR-0015, s2).",
+    "calibration": {
+     "reason": "Reuses the PAR-0010/0011 calibration (font rendering + the planet page behind the modal). This item's verdict rests on the Java-measured boxes/dim factor + the structured Godot reads + the footer region metrics.",
+     "original_gate": {
+      "changed_fraction_max": 0.005,
+      "mean_abs_rgb_max": 12,
+      "coarse_layout_max_channel_mean_max": 6,
+      "palette_distance_max": 0.05
+     },
+     "pairs": {
+      "chooser_with_footer": {
+       "diff": "runs/20261011-094400-PAR-0014/diff/diff-chooser-footer.json",
+       "changed_fraction": 0.08161,
+       "mean_abs_rgb": [
+        3.78,
+        2.65,
+        5.44
+       ],
+       "coarse_layout_max_channel_mean": 3.78,
+       "palette_distance": 0.0732
+      }
+     },
+     "in_scope_regions": {
+      "footer_back_0_560_240_648": {
+       "changed_fraction": 0.03627,
+       "mean_abs_rgb": [
+        3.0,
+        2.87,
+        3.62
+       ]
+      },
+      "footer_techtree_930_560_1152_648": {
+       "changed_fraction": 0.12567,
+       "mean_abs_rgb": [
+        4.56,
+        3.2,
+        7.84
+       ]
+      }
+     },
+     "conclusion": "The footer entries are present, positioned, dimmed (0.10) and inert exactly as Java; residual differences are the dimmed glyph/AA rendering and the starfield behind (PAR-0015)."
+    }
    },
-   "verified": null,
    "reference": {
-    "captured": "2026-10-11T02:50:00Z",
+    "captured": "2026-10-11T10:47:00+10:00",
     "profile": "fresh",
-    "run": "runs/20261009-065416-ref-ground-zero/",
+    "run": "runs/20261011-094400-PAR-0014/",
     "frames": {
-     "fork": "java/r00-01-launch.png"
+     "chooser_with_footer": "java/step-00-chooser-java.png"
     },
     "settle": [
      {
-      "after": "chooser footer Tech Tree",
-      "wait_ms": 1000,
-      "note": "not captured in the existing run"
+      "after": "no Java boot this item: the frames come from this session's chooser captures (PAR-0010 run, copied in)",
+      "wait_ms": 0
      }
     ],
     "expected": {
-     "bundle": [],
-     "state": "Chooser footer exposes the Tech Tree entry (stored run covers the chooser surface; footer interaction not captured). Status kept mismatch."
+     "bundle": [
+      "back",
+      "techtree"
+     ],
+     "state": "The first-run chooser renders over the planet page: the page's footer entries stay visible behind the modal at ~10% brightness - Back (5,589,200,54), Tech Tree (947,589,200,54), identical boxes to the page frame's bright footer (dim factor 0.10 on outline and text). Both are inert (PAR-0013)."
     },
-    "checkpoint": "client pid 108093 at the main menu (no world needed)",
+    "checkpoint": null,
     "java_path": [
-     "fresh profile: Play > Campaign -> 'Select Starting Campaign' chooser (Serpulo/Erekir photo cards) -> OK -> planet page (see runs/20261009-065416-ref-ground-zero/)"
+     "no new Java leg: runs/20261011-085604-PAR-0010/java/step-02-chooser-java.png (chooser) + runs/20261009-065416-ref-ground-zero/java/r00-01-planet.png (bright page footer) are the measured evidence; PAR-0013's step-01/02/02b captures prove the entries are inert"
     ]
+   },
+   "claim": {
+    "by": "parity-hunt-s1",
+    "at": "2026-10-10T23:44:00Z",
+    "released_at": "2026-10-11T01:47:00Z",
+    "reason": "verified (mode reference) in runs/20261011-094400-PAR-0014/"
    }
   },
   {
@@ -5363,8 +5653,8 @@
    "title": "Campaign planet page renders (planet, rail, sector panel)",
    "surface": "campaign",
    "parent": "PAR-0002",
-   "status": "mismatch",
-   "updated": "2026-10-10T14:43:31Z",
+   "status": "in-progress",
+   "updated": "2026-10-10T23:37:28Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
     "to": "campaign planet page on both clients (after Play > Campaign and the first-run chooser OK)",
@@ -5661,7 +5951,7 @@
      "godot": "DialogLayer/planet visible; sector panel labels include 'Ground Zero'/'Threat: Low'",
      "java": "seed/step-04-planet-java.png non-blank (mean 13.94): Serpulo rail + Ground Zero panel + Launch"
     },
-    "last_replayed": "runs/20261009-052658-seed-campaign/"
+    "last_replayed": "runs/20261011-091537-PAR-0015"
    },
    "run": "runs/20261010-234250-ref-PAR-0070-combat-fx/",
    "reproduce": {
@@ -5696,123 +5986,74 @@
    },
    "steps": [],
    "mismatch": {
-    "step": "planet page render (planet + rail + sector panel)",
+    "step": "planet page chrome re-run (rail/panel/buttons/hex/label) - globe pipeline is the residual",
     "java_frame": "runs/20261009-052658-seed-campaign/seed/step-10-planet-java-fresh.png",
-    "godot_frame": "runs/20261009-052658-seed-campaign/seed/step-10-godot-post-ok.png",
-    "diff": "runs/20261009-052658-seed-campaign/diff/diff-10-planet-aligned.json",
+    "godot_frame": "runs/20261011-091537-PAR-0015/godot/step-12-planet-r2.png",
+    "diff": "runs/20261011-091537-PAR-0015/diff/diff-12-planet-r2.json",
     "metrics": {
-     "changed_fraction": 0.54115,
+     "changed_fraction": 0.43714,
      "mean_abs_rgb": [
-      18.37,
-      14.45,
-      27.41
+      13.0,
+      8.25,
+      21.9
      ],
-     "coarse_layout_max_channel_mean": 20.62,
-     "palette_distance": 0.2925,
-     "size_match": true,
-     "element_crops": {
-      "panel": {
-       "changed_fraction": 0.97068,
-       "mean_abs_rgb": [
-        69.05,
-        68.81,
-        53.74
-       ],
-       "coarse": 46.21,
-       "palette": 0.8914,
-       "json": "runs/20261009-052658-seed-campaign/diff/calib-panel-aligned.json"
-      },
-      "rail": {
-       "changed_fraction": 0.77759,
-       "mean_abs_rgb": [
-        45.59,
-        46.47,
-        52.54
-       ],
-       "coarse": 41.63,
-       "palette": 0.6912,
-       "json": "runs/20261009-052658-seed-campaign/diff/calib-rail-aligned.json"
-      }
-     }
+     "coarse_layout_max_channel_mean": 17.36,
+     "palette_distance": 0.1965,
+     "size_match": true
     },
-    "note": "State-aligned (Godot campaign saves cleared via MindCampaign.clear_campaign_saves + stop/play; backup in app_userdata/saves.bak-20261009). Residual, state-independent: Godot rail is wider (327px vs 200px) with an extra 'Select Launch Destination' entry; full hex-grid overlay on the planet (Java shows only the selected sector hex); denser starfield; panel style differences (Java black panel + bitmap font + gold pill Launch; Godot gray panel + smooth font + flat rect); hover pointer position differs (Java Launch hovered).",
-    "reproduce": {
-     "state_alignment": [
-      {
-       "tool": "godot_exec",
-       "params": {
-        "action": "eval",
-        "params": {
-         "code": "return get_node(\"/root/Spine/MindCampaign\").clear_campaign_saves()"
-        }
-       }
-      },
-      {
-       "tool": "godot_game",
-       "params": {
-        "action": "stop"
-       }
-      },
-      {
-       "tool": "godot_game",
-       "params": {
-        "action": "play",
-        "params": {
-         "scene": "res://scenes/game.tscn"
-        }
-       }
-      }
-     ],
-     "java": [
-      {
-       "tool": "capture_screen.py",
-       "params": {
-        "--window-title": "Mindustry",
-        "--output": "runs/20261009-052658-seed-campaign/seed/step-10-planet-java-fresh.png",
-        "note": "raise Mindustry first"
-       }
-      }
-     ],
-     "godot": [
-      {
-       "tool": "godot_screenshot",
-       "params": {
-        "action": "game",
-        "note": "copy to runs/20261009-052658-seed-campaign/seed/step-10-godot-post-ok.png"
-       }
-      }
-     ]
-    }
+    "note": "Fresh r1/r2 pairs (runs/20261011-091537-PAR-0015/godot/step-11-planet-r1.png, cf 0.43885). Region table (r2): globe (400,150,760,500) 0.882 changed / 111K px; sky margins ~0.24-0.80 (starfield + missing atmosphere glow spill, ~168K px); rail (3,3,210,145) 0.227; back 0.167; tech 0.181; panel 0.395; hex area 0.848 (band aligned; java bloom brightens the band b-channel ~56; hole shows the java shine). Chrome now matches Java structurally (rail pane boxes with the checked purple border, black6 panel + gold pill, icon-left action rows, band selection, hidden idle label/grid). Residuals: (1) globe shading pipeline (flat billboard vs sphere+bloom); (2) starfield positions (both procedurally randomized); (3) font rasterization (global class)."
    },
    "fix": {
     "status": "open",
     "commit": null,
-    "summary": null
+    "summary": null,
+    "plan": {
+     "round": 3,
+     "state": "round 2 landed (chrome); round 3 adds the atmosphere glow (rust planet_view atmosphere block + PlanetView Atmosphere node + shader depth modes), rebuilt; verifying after editor relaunch",
+     "seam": "client/ui/dialogs/planet_dialog.gd (rail/panel/buttons), client/ui/planet_view.gd (grid/selection/label/icon/atmosphere), client/rust/mind-gdext/src/campaign.rs (planet_view atmosphere block)",
+     "done": [
+      "round 1: grid u_mouse=0 + accent; hover-only label; stroke-band selection; sector icon; fullDialog margins (3,1,5,6); rail pane boxes 208x44 + checked purple border + icon-left/label-centered rows; drop spurious rail launch-select entry (PAR-0017 cross-ref); black6 sector panel + gold 230x53 launch pill; back/tech 200x54 pane buttons bottom-aligned; headless parse gate clean; cf 0.54115 -> 0.43885",
+      "round 2: rail flush stacking (44px unchecked boxes, pads 2/0/13), back lead spacer 2px, launch content layout, panel title-row 41/threat-row 26 heights, SECTOR_ICON_SIZE 0.106 (~21px); cf -> 0.43714"
+     ],
+     "next": [
+      "finish atmosphere round; measure sky/globe regions",
+      "then settle: structured rail/panel checks + calibration block (globe pipeline follow-up item, starfield, fonts)"
+     ],
+     "narrow_check": "GODOT_BIN=$HOME/.local/bin/godot bash tools/godot.sh --headless --editor --quit --path client (parse gate)",
+     "evidence": [
+      "runs/20261011-091537-PAR-0015/diff/diff-12-planet-r2.json",
+      "runs/20261011-091537-PAR-0015/godot/step-12-planet-r2.png"
+     ]
+    }
    },
    "verified": null,
    "reference": {
-    "captured": "2026-10-11T02:50:00Z",
+    "captured": "2026-10-09T05:26:58Z",
     "profile": "fresh",
-    "run": "runs/20261010-234250-ref-PAR-0070-combat-fx/",
+    "run": "runs/20261009-052658-seed-campaign/",
     "frames": {
-     "fork": "java/step-140-planet.png",
-     "action": "java/step-141-sector.png"
+     "fork": "seed/step-10-planet-java-fresh.png",
+     "result": "seed/step-10-planet-java-fresh.png"
     },
     "settle": [
      {
-      "after": "Play > Campaign",
-      "wait_ms": 2500
+      "after": "Serpulo card + OK (chooser)",
+      "wait_ms": 500
      }
     ],
     "expected": {
      "bundle": [],
-     "state": "Planet page: planet with captured sector hexes, left rail (Erekir/Serpulo/Difficulty), 'Sectors: 1 under attack' header, sector panel on selection. Status kept mismatch."
+     "state": "fresh-campaign Serpulo planet page: rail (Erekir/Serpulo/Difficulty), hex band on Ground Zero + preset icon, black6 sector panel, Back/Tech Tree action row."
     },
-    "checkpoint": "client pid 108093 at the main menu (no world needed)",
+    "checkpoint": "fresh profile, no world needed (client pid from the seed run)",
     "java_path": [
-     "Play > Campaign (imported profile: no chooser) -> planet page",
-     "planet page: Erekir/Serpulo tabs (110,125); Difficulty (158,221); sector hexes; Ground Zero \u26a0; Back; Tech Tree (1100,675)"
+     "fresh profile: Play > Campaign -> chooser -> Serpulo card -> OK -> planet page (seed run)"
     ]
+   },
+   "claim": {
+    "by": "parity-hunt-s2",
+    "at": "2026-10-10T23:15:32Z",
+    "prior_status": "mismatch"
    }
   },
   {

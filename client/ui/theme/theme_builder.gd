@@ -94,8 +94,12 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 				var empty := StyleBoxEmpty.new()
 				empty.content_margin_left = 8.0
 				empty.content_margin_right = 8.0
-				empty.content_margin_top = 4.0
-				empty.content_margin_bottom = 4.0
+				# The Java title text starts at y=6 in the reference frame (no
+				# top inset above the title row).
+				empty.content_margin_top = 0.0
+				# Java's full dialogs leave 8 px below the button row
+				# (`PlanetDialog` OK at y=640 of 648).
+				empty.content_margin_bottom = 8.0
 				theme.set_stylebox("panel", name, empty)
 			elif name == "none":
 				theme.set_stylebox("panel", name, StyleBoxEmpty.new())

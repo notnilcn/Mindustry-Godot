@@ -91,6 +91,24 @@ func _apply_title() -> void:
 	title_label.text = title_text
 	title_label.visible = not title_text.is_empty()
 	title_label.add_theme_color_override("font_color", title_color)
+	_ensure_title_underline()
+
+
+## `BaseDialog.java:24-25`: a 3 px accent rule (white texture tinted `Pal.accent`)
+## under the title row spanning the dialog width, sitting flush with the title
+## cell's bottom padding — the port's flat title row lacked it.
+func _ensure_title_underline() -> void:
+	if title_label.get_node_or_null("Underline") != null:
+		return
+	# code-instantiated: the rule is part of the shared dialog shell.
+	var line := ColorRect.new()
+	line.name = "Underline"
+	line.color = MindStyles.ACCENT
+	line.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	line.offset_top = -3.0
+	line.offset_bottom = 0.0
+	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	title_label.add_child(line)
 
 
 ## Shows the dialog (called by `MindUi`; also safe to call directly).
@@ -338,6 +356,13 @@ func content_table() -> MindTable:
 ## Hook for subclasses to rebuild dynamic content when shown (BaseDialog.shown).
 func shown() -> void:
 	pass
+
+
+## Whether ESC must not close this dialog. Java dialogs consume the key when
+## modal and only close when `closeOnBack`/`addCloseButton` registered a
+## listener (`arc Dialog.java:455-470`); the default stays closable.
+func blocks_escape() -> bool:
+	return false
 
 
 ## Hook for subclasses to tear down on hide (BaseDialog.hidden).
