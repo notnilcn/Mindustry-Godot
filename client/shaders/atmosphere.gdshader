@@ -3,7 +3,11 @@
 // Ported from: core/assets/shaders/atmosphere.frag + atmosphere.vert (plan 16 §3.9).
 
 shader_type spatial;
-render_mode unshaded, blend_add, cull_disabled;
+// Java `Planet.drawAtmosphere` maps to `Gl.depthMask(false)` + additive; the
+// port draws it inside the opaque SubViewport (3D space backdrop + body), so
+// the depth test is disabled and draw order (render_priority) keeps the body
+// on top of the glow.
+render_mode unshaded, blend_add, cull_disabled, depth_test_disabled, depth_draw_never;
 
 uniform float u_innerRadius;
 uniform float u_outerRadius;
@@ -109,6 +113,9 @@ void fragment() {
 	e.y = min(e.y, f.x);
 
 	vec3 result = inScatter(eye, dir, e, l);
+	// Java adds the scattering over the skybox inside the world frame; the port
+	// draws it additively inside the SubViewport, whose 3D space backdrop keeps
+	// the starfield inside the same frame (alpha 1 = the container copy).
 	ALBEDO = result;
 	ALPHA = 1.0;
 }

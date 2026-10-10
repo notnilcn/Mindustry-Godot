@@ -19,6 +19,10 @@ signal sector_activated(planet: String, sector: int)
 
 const CARD_SIZE := Vector2(320.0, 300.0)
 const DISC_SIZE := 170.0
+## `Tex.pane` border in the reference frames (#454545) and the checked rail row's
+## `Tex.buttonDown` outline (125, 64, 127).
+const OUTLINE_GRAY := Color(0.27, 0.27, 0.27)
+const OUTLINE_CHECKED := Color(125.0 / 255.0, 64.0 / 255.0, 127.0 / 255.0)
 
 var _root: MindTable = null
 var _selected_planet: String = ""
@@ -33,6 +37,7 @@ func _ready() -> void:
 	should_pause = true
 	full_dialog = true
 	super._ready()
+	_apply_full_dialog_margins()
 	_add_space_backdrop()
 	_build()
 	_show_select()
@@ -49,6 +54,9 @@ func shown() -> void:
 
 func hidden() -> void:
 	_set_planet_view_active(false)
+	var view := _planet_view()
+	if view != null:
+		view.set_hover(-1)
 
 
 func _build() -> void:
@@ -82,6 +90,53 @@ func _add_space_backdrop() -> void:
 func _clear_root() -> void:
 	if _root != null:
 		_root.clear_children()
+
+
+## `Styles.fullDialog` (`windowEmpty`) margins; the reference frame puts the rail
+## pane at (3, 3), the action row at x=5/x=1146 and 6 px above the bottom edge.
+func _apply_full_dialog_margins() -> void:
+	var panel := get_node_or_null("Center/Panel") as PanelContainer
+	if panel == null:
+		return
+	var box := StyleBoxEmpty.new()
+	box.content_margin_left = 3.0
+	box.content_margin_right = 5.0
+	box.content_margin_top = 1.0
+	box.content_margin_bottom = 6.0
+	panel.add_theme_stylebox_override("panel", box)
+
+
+## `Tex.pane`/flat button box: black fill with a flat border (Java rail rows and
+## the action-row buttons sampled #454545; the checked rail row takes
+## `Tex.buttonDown`'s `(125, 64, 127)` outline).
+func _pane_box(fill: Color, border: Color, width: float = 4.0, radius: float = 2.0, bottom_width: float = -1.0) -> StyleBoxFlat:
+	var box := StyleBoxFlat.new()
+	box.bg_color = fill
+	box.border_width_left = int(width)
+	box.border_width_top = int(width)
+	box.border_width_right = int(width)
+	box.border_width_bottom = int(bottom_width if bottom_width >= 0.0 else width)
+	box.border_color = border
+	box.corner_radius_top_left = int(radius)
+	box.corner_radius_top_right = int(radius)
+	box.corner_radius_bottom_left = int(radius)
+	box.corner_radius_bottom_right = int(radius)
+	box.content_margin_left = 2.0
+	box.content_margin_right = 2.0
+	box.content_margin_top = 2.0
+	box.content_margin_bottom = 2.0
+	return box
+
+
+## Applies the pane look to one button (`Styles.flatTogglet` over `Tex.pane`).
+## The unchecked rail pane draws no bottom edge (the next pane's border closes
+## the stack, sampled from the reference frame).
+func _apply_pane_button(button: Button, border: Color, bottom_border: float = 4.0) -> void:
+	var fill := Color(0.0, 0.0, 0.0, 1.0)
+	button.add_theme_stylebox_override("normal", _pane_box(fill, border, 4.0, 2.0, bottom_border))
+	button.add_theme_stylebox_override("hover", _pane_box(fill, border, 4.0, 2.0, bottom_border))
+	button.add_theme_stylebox_override("pressed", _pane_box(fill, border))
+	button.add_theme_stylebox_override("disabled", _pane_box(fill, border, 4.0, 2.0, bottom_border))
 
 
 # --- Select Starting Campaign -------------------------------------------------
@@ -234,7 +289,7 @@ func _show_planet(planet_name: String) -> void:
 	# code-instantiated: the planet rail is the data-driven Planets list.
 	var rail := MindTable.new()
 	rail.custom_minimum_size.x = 208.0
-	_root.add(rail).pad(12).set_align(0)
+	_root.add(rail).pad(0).set_align(0)
 	_build_rail(rail, planet_name)
 
 	var selected := _find_sector(planet_name, _selected_sector)
@@ -243,17 +298,34 @@ func _show_planet(planet_name: String) -> void:
 		_selected_sector = int(selected.get("id", -1))
 	if view != null and not selected.is_empty():
 		view.focus_tile(view.view_tile(selected))
-		view.set_sector_label(_localized_sector(selected))
+		view.set_sector_icon(str(selected.get("preset", "")))
 
 	clear_buttons()
-	var back := add_button(_t("@back"), _close, "left", 200.0)
-	back.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	# `PlanetDialog` action row: `@back`/`@techtree` are `button(text, icon)`
+	# cells — icon at the left margin, label centered in what remains; the
+	# reference row starts 2 px right of the rail's pane edge.
 	if buttons != null:
-		buttons.add_child(_spacer())
-		buttons.add_child(_build_sector_panel(selected))
-		buttons.add_child(_spacer())
-	var tech_tree := add_button(_t("@techtree"), _open_tech_tree, "tree", 200.0)
-	tech_tree.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		var lead := Control.new()
+		lead.custom_minimum_size.x = 2.0
+		buttons.add_child(lead)
+		buttons.move_child(lead, 0)
+	var back := MindWidgets.button("")
+	back.custom_minimum_size = Vector2(200.0, 54.0)
+	back.size_flags_vertical = Control.SIZE_SHRINK_END
+	_apply_pane_button(back, OUTLINE_GRAY)
+	_build_rail_content(back, MindWidgets.glyph("left", 20), _t("@back"))
+	back.pressed.connect(_close)
+	buttons.add_child(back)
+	buttons.add_child(_spacer())
+	buttons.add_child(_build_sector_panel(selected))
+	buttons.add_child(_spacer())
+	var tech_tree := MindWidgets.button("")
+	tech_tree.custom_minimum_size = Vector2(200.0, 54.0)
+	tech_tree.size_flags_vertical = Control.SIZE_SHRINK_END
+	_apply_pane_button(tech_tree, OUTLINE_GRAY)
+	_build_rail_content(tech_tree, MindWidgets.glyph("tree", 20), _t("@techtree"))
+	tech_tree.pressed.connect(_open_tech_tree)
+	buttons.add_child(tech_tree)
 	# Cells added after `show_dialog` need an explicit re-sort (MinTable is manual).
 	_root.call_deferred("sort_now")
 	rail.call_deferred("sort_now")
@@ -305,26 +377,31 @@ func _build_rail(rail: MindTable, planet_name: String) -> void:
 	for planet_variant in campaign_section("planets"):
 		var planet: Dictionary = planet_variant
 		by_name[str(planet.get("name", ""))] = planet
+	var first_planet := true
 	for name in ["erekir", "serpulo"]:
 		if not by_name.has(name):
 			continue
 		var planet: Dictionary = by_name[name]
 		if not bool(planet.get("visible", true)):
 			continue
-		rail.add(_make_planet_button(planet, name == planet_name)).grow_x_axis().pad(2)
+		var cell := rail.add(_make_planet_button(planet, name == planet_name)).grow_x_axis()
+		cell.set_pad_left(0).set_pad_right(0).set_pad_bottom(0)
+		cell.set_pad_top(2 if first_planet else 0)
+		first_planet = false
 		rail.row()
 	# code-instantiated: `@campaign.difficulty` opens the campaign rules dialog.
-	var difficulty := MindWidgets.icon_button("book", _t("@campaign.difficulty"), "flatTogglet")
+	var difficulty := Button.new()
+	difficulty.theme_type_variation = "flatTogglet"
 	difficulty.custom_minimum_size = Vector2(208.0, 40.0)
+	_apply_pane_button(difficulty, OUTLINE_GRAY)
+	_build_rail_content(difficulty, MindWidgets.glyph("book", 20), _t("@campaign.difficulty"))
 	difficulty.pressed.connect(_open_campaign_rules)
-	rail.add(difficulty).grow_x_axis().pad(2).set_pad_top(12)
+	rail.add(difficulty).grow_x_axis().set_pad_left(0).set_pad_right(0) \
+		.set_pad_top(13).set_pad_bottom(2)
 	rail.row()
-	# `SectorSelectDialog` destination picker (launch-pad/accelerator flow).
-	var select := MindWidgets.icon_button("map", _t("@sectors.launchselect"), "flatTogglet")
-	select.custom_minimum_size = Vector2(208.0, 40.0)
-	select.pressed.connect(_open_sector_select)
-	rail.add(select).grow_x_axis().pad(2)
-	rail.row()
+	# `@sectors.launchselect` is launch-mode info text, not a rail entry
+	# (`PlanetDialog.java:708-714`); the `SectorSelectDialog` seam stays in
+	# `_open_sector_select` for the launch-pad flow.
 
 
 func _make_planet_button(planet: Dictionary, selected: bool) -> Button:
@@ -334,47 +411,64 @@ func _make_planet_button(planet: Dictionary, selected: bool) -> Button:
 	button.theme_type_variation = "flatTogglet"
 	button.toggle_mode = true
 	button.button_pressed = selected
-	button.custom_minimum_size = Vector2(200.0, 40.0)
+	button.custom_minimum_size = Vector2(208.0, 44.0)
+	_apply_pane_button(button, OUTLINE_GRAY, 0.0)
+	button.add_theme_stylebox_override("pressed", _pane_box(Color.BLACK, OUTLINE_CHECKED))
+	button.add_theme_stylebox_override("hover_pressed", _pane_box(Color.BLACK, OUTLINE_CHECKED))
+	var icon: Control = null
+	var texture := _planet_texture(planet)
+	if texture != null:
+		var image := TextureRect.new()
+		image.texture = texture
+		image.custom_minimum_size = Vector2(20.0, 20.0)
+		image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		image.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		icon = image
+	_build_rail_content(button, icon, _localized_planet(planet))
+	button.pressed.connect(func() -> void: _show_planet(str(planet.get("name", ""))))
+	return button
+
+
+## `planetTable.button(name, icon, Styles.flatTogglet)`: the icon sits at the
+## left margin (10 px in Java, ~13 px to its pixel row) and the label centers in
+## the space that remains to the right of it.
+func _build_rail_content(button: Button, icon: Control, label_text: String) -> void:
+	# code-instantiated: rail content rows are data-driven per planet/preset.
 	var row := HBoxContainer.new()
-	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.alignment = BoxContainer.ALIGNMENT_BEGIN
 	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	row.offset_left = 13.0
+	row.offset_right = -8.0
 	row.add_theme_constant_override("separation", 8)
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	button.add_child(row)
-	var texture := _planet_texture(planet)
-	if texture != null:
-		var icon := TextureRect.new()
-		icon.texture = texture
-		icon.custom_minimum_size = Vector2(24.0, 24.0)
-		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if icon != null:
 		row.add_child(icon)
-	var label := MindWidgets.label(_localized_planet(planet))
+	var label := MindWidgets.label(label_text)
 	# `RichTextLabel` min width collapses under word wrap inside a bare HBox;
 	# rail labels are single-line, so disable wrapping.
 	label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(label)
-	button.pressed.connect(func() -> void: _show_planet(str(planet.get("name", ""))))
-	button.ready.connect(
-		func():
-			button.custom_minimum_size.x = maxf(
-				button.custom_minimum_size.x, row.get_combined_minimum_size().x + 20.0
-			)
-	)
-	return button
 
 
 ## The selected-sector readout (`PlanetDialog.updateSelected`): flags, stats,
 ## threat and the state-dependent action button (`resume`/`go`/`launch`/locked).
 func _build_sector_panel(sector: Dictionary) -> Control:
 	# code-instantiated: bottom-center readout rebuilt per selected sector.
+	# Java builds it as a `Styles.black6` table (230 px wide, flush with the
+	# action row) with a gold `@sectors.launch` accented button.
 	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(240.0, 0.0)
+	panel.custom_minimum_size = Vector2(230.0, 0.0)
+	panel.add_theme_stylebox_override(
+		"panel", _pane_box(Color(0.0, 0.0, 0.0, 0.6), Color(0.0, 0.0, 0.0, 0.0), 0.0, 0.0)
+	)
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 4)
+	column.add_theme_constant_override("separation", 0)
 	panel.add_child(column)
 	if sector.is_empty():
 		column.add_child(MindWidgets.label(_t("@sectors.select")))
@@ -383,6 +477,9 @@ func _build_sector_panel(sector: Dictionary) -> Control:
 	var title_row := HBoxContainer.new()
 	title_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	title_row.add_theme_constant_override("separation", 6)
+	# Java: panel top 514 -> title glyphs 528-552 -> divider 557 (`Styles.black6`
+	# table with a 40 px title cell); heights sampled from the reference frame.
+	title_row.custom_minimum_size = Vector2(0.0, 41.0)
 	column.add_child(title_row)
 	var title := MindWidgets.label(_localized_sector(sector))
 	title.add_theme_color_override("default_color", MindStyles.ACCENT)
@@ -392,13 +489,14 @@ func _build_sector_panel(sector: Dictionary) -> Control:
 	var preset := str(sector.get("preset", ""))
 	if not preset.is_empty():
 		var icon := MindWidgets.image("sector-%s" % preset)
-		icon.custom_minimum_size = Vector2(28.0, 28.0)
+		icon.custom_minimum_size = Vector2(20.0, 20.0)
 		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		title_row.add_child(icon)
 
 	var divider := ColorRect.new()
 	divider.color = MindStyles.ACCENT
 	divider.custom_minimum_size = Vector2(0.0, 3.0)
+	divider.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	column.add_child(divider)
 
 	for state_key in _sector_state_labels(sector):
@@ -410,13 +508,25 @@ func _build_sector_panel(sector: Dictionary) -> Control:
 		_build_sector_stats(column, sector)
 	else:
 		var threat := str(sector.get("threat_band", "low"))
-		column.add_child(
-			MindWidgets.label("%s %s" % [_t("@sectors.threat"), _t("@threat.%s" % threat)])
+		var threat_label := MindWidgets.label(
+			"%s %s" % [_t("@sectors.threat"), _t("@threat.%s" % threat)]
 		)
+		threat_label.custom_minimum_size = Vector2(0.0, 26.0)
+		threat_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		column.add_child(threat_label)
 
 	var action := _sector_action(sector)
-	var launch := MindWidgets.icon_button(str(action.get("icon", "play")), _t(str(action.get("label", "@sectors.launch"))))
-	launch.custom_minimum_size = Vector2(170.0, 54.0)
+	var launch := MindWidgets.button("")
+	launch.custom_minimum_size = Vector2(230.0, 53.0)
+	launch.add_theme_stylebox_override("normal", _pane_box(Color(0.0, 0.0, 0.0, 1.0), MindStyles.ACCENT))
+	launch.add_theme_stylebox_override("hover", _pane_box(Color(0.0, 0.0, 0.0, 1.0), MindStyles.ACCENT))
+	launch.add_theme_stylebox_override("pressed", _pane_box(Color(0.0, 0.0, 0.0, 1.0), MindStyles.ACCENT))
+	launch.add_theme_stylebox_override("disabled", _pane_box(Color(0.0, 0.0, 0.0, 1.0), MindStyles.ACCENT))
+	_build_rail_content(
+		launch,
+		MindWidgets.glyph(str(action.get("icon", "play")), 20),
+		_t(str(action.get("label", "@sectors.launch")))
+	)
 	launch.disabled = bool(action.get("disabled", false))
 	var state_tooltip := PackedStringArray()
 	for state_key in _sector_state_labels(sector):
@@ -587,21 +697,47 @@ func _select_view_tile(tile: int) -> void:
 ## Empty-screen left clicks pick the sector under the cursor while the globe is
 ## up; UI regions (rail, bottom bar) are excluded.
 func _input(event: InputEvent) -> void:
-	if not visible or not (event is InputEventMouseButton):
+	if not visible:
+		return
+	if event is InputEventMouseMotion:
+		var view := _planet_view()
+		if view != null and view.visible:
+			_update_hover(view, (event as InputEventMouseMotion).position)
+		return
+	if not (event is InputEventMouseButton):
 		return
 	var click := event as InputEventMouseButton
 	if click.button_index != MOUSE_BUTTON_LEFT or not click.pressed:
 		return
-	var view := _planet_view()
-	if view == null or not view.visible:
+	var mouse_view := _planet_view()
+	if mouse_view == null or not mouse_view.visible:
 		return
 	if _over_ui(click.position):
 		return
-	var tile := view.pick(click.position)
+	var tile := mouse_view.pick(click.position)
 	if tile < 0:
 		return
 	_select_view_tile(tile)
 	get_viewport().set_input_as_handled()
+
+
+## `PlanetDialog` hover: the sector under the cursor fades the grid in around it
+## and draws the `[ name ]` label (`hoverLabel`); locked sectors draw none here.
+func _update_hover(view: PlanetView, point: Vector2) -> void:
+	var tile := -1
+	if not _over_ui(point):
+		tile = view.pick(point)
+	if tile == view.hover_tile:
+		return
+	var name_text := ""
+	if tile >= 0:
+		for sector_variant in _planet_sectors(_selected_planet):
+			var sector: Dictionary = sector_variant
+			if view.view_tile(sector) == tile and not bool(sector.get("locked", false)):
+				name_text = _localized_sector(sector)
+				break
+	view.set_sector_label(name_text)
+	view.set_hover(tile)
 
 
 func _over_ui(point: Vector2) -> bool:

@@ -62,4 +62,8 @@ current = true
 
 [node name="Selection" type="MeshInstance3D" parent="ViewportContainer/SubViewport"]
 
+[node name="Atmosphere" type="MeshInstance3D" parent="ViewportContainer/SubViewport"]
+
+[node name="Background" type="MeshInstance3D" parent="ViewportContainer/SubViewport"]
+
 [node name="Outline" type="MeshInstance3D" parent="ViewportContainer/SubViewport"]
