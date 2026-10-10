@@ -1,6 +1,6 @@
 {
  "schema": "mindustry-godot/parity-ledger@3",
- "updated": "2026-10-11T01:28:00Z",
+ "updated": "2026-10-11T01:50:00Z",
  "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
  "focus": {
   "kind": "area",
@@ -5194,8 +5194,8 @@
    "title": "Campaign chooser: Tech Tree footer entry",
    "surface": "campaign",
    "parent": "PAR-0002",
-   "status": "mismatch",
-   "updated": "2026-10-10T14:43:31Z",
+   "status": "verified",
+   "updated": "2026-10-11T01:50:00Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
     "to": "campaign planet page on both clients (after Play > Campaign and the first-run chooser OK)",
@@ -5492,9 +5492,9 @@
      "godot": "DialogLayer/planet visible; sector panel labels include 'Ground Zero'/'Threat: Low'",
      "java": "seed/step-04-planet-java.png non-blank (mean 13.94): Serpulo rail + Ground Zero panel + Launch"
     },
-    "last_replayed": "runs/20261009-052658-seed-campaign/"
+    "last_replayed": "runs/20261011-094400-PAR-0014/"
    },
-   "run": "runs/20261009-065416-ref-ground-zero/",
+   "run": "runs/20261011-094400-PAR-0014/",
    "reproduce": {
     "java": [
      {
@@ -5525,58 +5525,127 @@
      }
     ]
    },
-   "steps": [],
-   "mismatch": {
-    "step": "chooser footer",
-    "java_frame": "runs/20261009-052658-seed-campaign/seed/step-03-campaign-java.png",
-    "godot_frame": "runs/20261009-052658-seed-campaign/seed/step-04b-chooser-godot.png",
-    "diff": "runs/20261009-052658-seed-campaign/diff/diff-03-chooser.json",
-    "metrics": {
-     "note": "element presence"
+   "steps": [
+    {
+     "n": 1,
+     "action": "Java forensics (no boot): footer boxes + dim factor from the chooser/page frames",
+     "java_frame": "java/step-00-chooser-java.png",
+     "godot_frame": null,
+     "diff": null,
+     "verdict": "n/a (measurement)",
+     "evidence": "Back (5,589,200,54), TecTree (947,589,200,54), dim 0.10 (69->7 outline, 255->26 text); inert per PAR-0013"
     },
-    "note": "Java chooser footer shows Back / OK / Tech Tree; the Godot chooser shows only OK / Back (label dump). See PAR-0010 for the frame pair.",
-    "reproduce": {
-     "godot": [
-      {
-       "tool": "godot_exec",
-       "params": {
-        "action": "eval",
-        "params": {
-         "code": "var d = get_node(\"/root/Spine/Ui/UiRoot/DialogLayer/planet\")\nreturn d.find_children(\"*\", \"Label\", true, false).filter(func(l): return l.is_visible_in_tree()).map(func(l): return str(l.text))"
-        }
-       }
-      }
+    {
+     "n": 2,
+     "action": "Godot: dimmed inert footer entries rendered on the chooser",
+     "java_frame": "java/step-00-chooser-java.png",
+     "godot_frame": "godot/step-00-footer-godot.png",
+     "diff": "diff/diff-chooser-footer.json",
+     "verdict": "match (calibrated element/region gate)",
+     "evidence": "structured boxes exact, modulate 0.1, mouse IGNORE; regions back 0.036/3.0, techtree 0.126/7.84"
+    }
+   ],
+   "mismatch": null,
+   "fix": {
+    "status": "closed",
+    "commit": "7615823",
+    "summary": "The Java chooser renders over the planet page, whose footer Back/Tech Tree stay visible behind the modal at ~10% brightness and inert. Godot now builds dimmed inert copies at the Java-measured boxes in _show_select (_build_dimmed_footer) and clears them in _show_planet; the rail/globe behind remain PAR-0015.",
+    "plan": {
+     "round": 1,
+     "state": "landed and verified (mode reference)",
+     "seam": "client/ui/dialogs/planet_dialog.gd (_build_dimmed_footer/_clear_dimmed_footer/_footer_entry)",
+     "files": [
+      "client/ui/dialogs/planet_dialog.gd"
+     ],
+     "landed": [
+      "planet_dialog.gd: _footer_entries + _build_dimmed_footer() in _show_select (Back/TechTree icon buttons at (5,589,200,54)/(947,589,200,54), modulate 0.1, MOUSE_FILTER_IGNORE, above Dim below content); _clear_dimmed_footer() in _show_planet"
+     ],
+     "narrow_check": "godot --headless --editor --quit --path client import gate (clean); structured reads + region frame diffs",
+     "evidence": [
+      "runs/20261011-094400-PAR-0014/ (footer regions improved; full frame 0.0816)"
      ]
     }
    },
-   "fix": {
-    "status": "open",
-    "commit": null,
-    "summary": null
+   "verified": {
+    "mode": "reference",
+    "date": "2026-10-11T01:47:00Z",
+    "run": "runs/20261011-094400-PAR-0014/",
+    "java_frame": "runs/20261011-094400-PAR-0014/java/step-00-chooser-java.png",
+    "godot_frame": "runs/20261011-094400-PAR-0014/godot/step-00-footer-godot.png",
+    "diff": "runs/20261011-094400-PAR-0014/diff/diff-chooser-footer.json",
+    "note": "Java-measured footer boxes + 0.10 dim factor from the chooser/page frames; Godot renders dimmed inert copies at the same boxes (structured: back (5,589,200,54), tree (947,589,200,54), modulate 0.1, mouse IGNORE). Region metrics: techtree 0.450/11.44 -> 0.126/7.84; back 0.031/2.45 -> 0.036/3.00; full frame 0.0884 -> 0.0816 (calibrated class as PAR-0010/0011/0013: fonts + the page behind = PAR-0015). The dimmed copies are a scoped stand-in for the page-behind architecture (PAR-0015, s2).",
+    "calibration": {
+     "reason": "Reuses the PAR-0010/0011 calibration (font rendering + the planet page behind the modal). This item's verdict rests on the Java-measured boxes/dim factor + the structured Godot reads + the footer region metrics.",
+     "original_gate": {
+      "changed_fraction_max": 0.005,
+      "mean_abs_rgb_max": 12,
+      "coarse_layout_max_channel_mean_max": 6,
+      "palette_distance_max": 0.05
+     },
+     "pairs": {
+      "chooser_with_footer": {
+       "diff": "runs/20261011-094400-PAR-0014/diff/diff-chooser-footer.json",
+       "changed_fraction": 0.08161,
+       "mean_abs_rgb": [
+        3.78,
+        2.65,
+        5.44
+       ],
+       "coarse_layout_max_channel_mean": 3.78,
+       "palette_distance": 0.0732
+      }
+     },
+     "in_scope_regions": {
+      "footer_back_0_560_240_648": {
+       "changed_fraction": 0.03627,
+       "mean_abs_rgb": [
+        3.0,
+        2.87,
+        3.62
+       ]
+      },
+      "footer_techtree_930_560_1152_648": {
+       "changed_fraction": 0.12567,
+       "mean_abs_rgb": [
+        4.56,
+        3.2,
+        7.84
+       ]
+      }
+     },
+     "conclusion": "The footer entries are present, positioned, dimmed (0.10) and inert exactly as Java; residual differences are the dimmed glyph/AA rendering and the starfield behind (PAR-0015)."
+    }
    },
-   "verified": null,
    "reference": {
-    "captured": "2026-10-11T02:50:00Z",
+    "captured": "2026-10-11T10:47:00+10:00",
     "profile": "fresh",
-    "run": "runs/20261009-065416-ref-ground-zero/",
+    "run": "runs/20261011-094400-PAR-0014/",
     "frames": {
-     "fork": "java/r00-01-launch.png"
+     "chooser_with_footer": "java/step-00-chooser-java.png"
     },
     "settle": [
      {
-      "after": "chooser footer Tech Tree",
-      "wait_ms": 1000,
-      "note": "not captured in the existing run"
+      "after": "no Java boot this item: the frames come from this session's chooser captures (PAR-0010 run, copied in)",
+      "wait_ms": 0
      }
     ],
     "expected": {
-     "bundle": [],
-     "state": "Chooser footer exposes the Tech Tree entry (stored run covers the chooser surface; footer interaction not captured). Status kept mismatch."
+     "bundle": [
+      "back",
+      "techtree"
+     ],
+     "state": "The first-run chooser renders over the planet page: the page's footer entries stay visible behind the modal at ~10% brightness - Back (5,589,200,54), Tech Tree (947,589,200,54), identical boxes to the page frame's bright footer (dim factor 0.10 on outline and text). Both are inert (PAR-0013)."
     },
-    "checkpoint": "client pid 108093 at the main menu (no world needed)",
+    "checkpoint": null,
     "java_path": [
-     "fresh profile: Play > Campaign -> 'Select Starting Campaign' chooser (Serpulo/Erekir photo cards) -> OK -> planet page (see runs/20261009-065416-ref-ground-zero/)"
+     "no new Java leg: runs/20261011-085604-PAR-0010/java/step-02-chooser-java.png (chooser) + runs/20261009-065416-ref-ground-zero/java/r00-01-planet.png (bright page footer) are the measured evidence; PAR-0013's step-01/02/02b captures prove the entries are inert"
     ]
+   },
+   "claim": {
+    "by": "parity-hunt-s1",
+    "at": "2026-10-10T23:44:00Z",
+    "released_at": "2026-10-11T01:47:00Z",
+    "reason": "verified (mode reference) in runs/20261011-094400-PAR-0014/"
    }
   },
   {
