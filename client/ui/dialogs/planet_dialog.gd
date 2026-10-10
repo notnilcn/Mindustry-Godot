@@ -29,6 +29,10 @@ var _ok_button: Button = null
 ## True while the first-run chooser is up (`_show_select`): the Java chooser is
 ## modal and has no close path — ESC/back must not dismiss it (PAR-0013).
 var _chooser_active := false
+## Dimmed planet-page footer entries shown behind the first-run chooser
+## (PAR-0014): the Java chooser sits over the planet page, whose footer stays
+## visible at ~10% brightness and inert (fill-parent modal blocks clicks).
+var _footer_entries: Array[Button] = []
 ## Planet whose campaign-complete screen was already announced (control flow).
 var _complete_announced := ""
 
@@ -155,6 +159,7 @@ func _show_select() -> void:
 	_root.row()
 
 	clear_buttons()
+	_build_dimmed_footer()
 	# Java: a single `@ok` `.size(300f, 64f)`; the dialog's `@back` was a
 	# Godot-only addition (the Java corner `@back`/`@techtree` belong to the
 	# planet page behind the modal — PAR-0013/0014).
@@ -195,6 +200,44 @@ func _reflow_ok_row(button: Button) -> void:
 ## keeps the normal ESC path.
 func blocks_escape() -> bool:
 	return _chooser_active
+
+
+## The Java chooser sits over the planet page: the page's footer Back/Tech Tree
+## entries stay visible at ~10% brightness behind the modal and stay inert
+## (fill-parent modal blocks clicks — PAR-0013). Only the footer is mirrored
+## here; the rail/globe behind are PAR-0015. Positions are the Java-measured
+## boxes at 1152x648: Back (5,589,200,54), Tech Tree (947,589,200,54).
+func _build_dimmed_footer() -> void:
+	_clear_dimmed_footer()
+	_footer_entries.append(_footer_entry("@back", "left", true))
+	_footer_entries.append(_footer_entry("@techtree", "tree", false))
+
+
+func _clear_dimmed_footer() -> void:
+	for button in _footer_entries:
+		if is_instance_valid(button):
+			button.queue_free()
+	_footer_entries.clear()
+
+
+func _footer_entry(text_key: String, icon: String, left: bool) -> Button:
+	# code-instantiated: dimmed copies of the planet page's footer entries.
+	var button := MindWidgets.icon_button(icon, _t(text_key))
+	button.custom_minimum_size = Vector2(200.0, 54.0)
+	button.set_anchors_preset(
+		Control.PRESET_BOTTOM_LEFT if left else Control.PRESET_BOTTOM_RIGHT
+	)
+	button.offset_left = 5.0 if left else -205.0
+	button.offset_right = 205.0 if left else -5.0
+	button.offset_top = -59.0
+	button.offset_bottom = -5.0
+	button.modulate = Color(0.1, 0.1, 0.1)
+	button.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	button.focus_mode = Control.FOCUS_NONE
+	add_child(button)
+	# Above the `Dim` overlay, below the centered panel content.
+	move_child(button, 2)
+	return button
 
 
 ## Java centers the `cont` table between the title and the button bar; the port
@@ -385,6 +428,7 @@ func _on_select_ok() -> void:
 func _show_planet(planet_name: String) -> void:
 	_selected_planet = planet_name
 	_chooser_active = false
+	_clear_dimmed_footer()
 	set_title_text("")
 	_clear_root()
 	_set_planet_view_active(true)
