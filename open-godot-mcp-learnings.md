@@ -2136,3 +2136,20 @@ healthy bridge afterwards. Run: the PAR-0066 verification session.
   (`godot_debugger sessions` -> `paused:true`; recover with stop+play) - an evaled `Dictionary`
   key miss counts as an error, so guard `has()`/`get()` in evals.
 - Run: runs/20261011-203001-PAR-0139-r2/.
+
+- Bullet (2026-10-11, PAR-0140 round 1, stopped): command mode (RTS) is gated by
+  `DesktopBridge::command_mode_allowed` = `state.block.is_none() && !text_focus && !ui_dialog`.
+  Two live-client gate bugs found on the way: (a) `Sim.selected_block` defaulted to STONE_WALL so
+  `player.block` was never null (upstream starts with none) - now AIR, with
+  `sync_selected_block`/`select_block_by_name` mapping AIR to *no selection*; (b) the placement
+  fragment's boot `set_catalog_category(...)` called `select_catalog_block(0)` and auto-selected
+  the category's first block ("duo") - removed. Debugging notes: `MindInput.get_input_state_json()`
+  is the best structured probe (`block`, `command_mode`, `action_count`, `last_action`,
+  `selected_units`); `Input.push_event('{"t":"KeyDown","code":"shiftLeft"}')` / `inject_key` is the
+  reliable key path for MCP staging (the runtime autoload's `Input.parse_input_event` press did not
+  flip the held state), and a KeyUp edge is what clears a hold-latched command mode. Residual after
+  the two fixes: the input state still showed `block:"duo"` with `action_count:0` while
+  `SimHost.selected_block()` was `air` - the writer is still unidentified (resume from the item's
+  fix.plan). Also: `apply_sim_command_json` now accepts px/py-only spawn_unit JSON (the old shared
+  x/y guard rejected it).
+- Run: runs/20261011-203146-PAR-0140/ (partial).

@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T20:30:46+10:00",
+  "updated": "2026-10-11T21:54:51+10:00",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -27886,17 +27886,30 @@
       "title": "RTS unit selection and orders do nothing: the selectable list is never fed and commands never reach live units",
       "surface": "input",
       "parent": null,
-      "status": "reference",
-      "updated": "2026-10-10T16:39:59Z",
+      "status": "fixing",
+      "updated": "2026-10-11T21:54:51+10:00",
       "discovered_by": null,
       "path": {
-        "to": "campaign/in-game command mode (Shift) drag-select units, then right-click a move target or click a stance",
-        "java": [],
-        "godot": [],
-        "confirm": {},
-        "last_replayed": null
+        "to": "campaign/in-game command mode (Shift) drag-select units, then right-click a move target",
+        "java": [
+          "reference frames (runs/20261010-234250-ref-PAR-0070-combat-fx/): step-288-f.png shows the Java command panel ('Command Mode' + '[no units]'); step-277/370 show the Ground Factory config (the wave-team note: no selection/order frame was captured - the action half is judged structurally)"
+        ],
+        "godot": [
+          "godot_game play res://scenes/game.tscn",
+          "MindCampaign.clear_planet_campaign_saves('serpulo')",
+          "SimHost.load_sector('serpulo', 170); MindCampaign.start_sector('serpulo', 170)",
+          "SimHost.apply_sim_command_json('{\"op\":\"spawn_unit\",\"unit\":0,\"px\":1132.0,\"py\":440.0,\"team\":1}')  # dagger index 0",
+          "probe: SimHost.selectable_units_json() -> [{id:EntitySeq,type,x,y,team,commandable}]",
+          "Input.push_event('{\"t\":\"KeyDown\",\"code\":\"shiftLeft\"}') -> Input.command_mode()",
+          "Input.push_event drag: MouseButton(left,down,x,y) + MouseMove + MouseButton(left,up,x,y) -> Input.selection_json()",
+          "right-click at the target tile via push_event -> poll SimHost.selectable_units_json positions"
+        ],
+        "confirm": {
+          "godot": "Input.command_mode() true while shiftLeft is held; Input.selection_json() contains the dragged unit's EntitySeq; the ordered unit's (x,y) from selectable_units_json moves toward the clicked tile"
+        },
+        "last_replayed": "runs/20261011-203146-PAR-0140/ (partial: selection/order mouse chain not yet captured; command-mode gate debugging)"
       },
-      "run": "runs/20261010-234250-ref-PAR-0070-combat-fx/",
+      "run": "runs/20261011-203146-PAR-0140/",
       "reproduce": {
         "java": [
           "spawn a unit, select it in command mode, issue a move order, capture the selection + the order"
@@ -27911,37 +27924,34 @@
       "fix": {
         "status": "open",
         "commit": null,
-        "summary": "Two dead seams: the input selectable-unit list is never populated, and SimCommand::UnitCommand only mutates a relay bookkeeping map disconnected from the live units.",
+        "summary": "Round-1 code landed: the selectable list is published every frame, wire UnitCommands apply to live units, the input filters use the live team, and boot has no block selected. The in-engine selection/order chain is still being staged (a residual 'duo' block selection in the input bridge keeps the command-mode gate closed; found while stopping).",
         "plan": {
-          "round": 0,
-          "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
-          "seam": "client/rust/mind-gdext/src/input/desktop.rs:195 `selectable` (never fed) and client/rust/mind-core/src/sim/mod.rs:546 (UnitCommand routed to a relay-only runtime)",
-          "files": [
-            "client/rust/mind-gdext/src/input/desktop.rs:195",
-            "client/rust/mind-gdext/src/input/desktop.rs:280",
-            "client/rust/mind-core/src/sim/mod.rs:546",
-            "client/rust/mind-core/src/sim/command.rs:139",
-            "client/rust/mind-core/src/sim/unit_runtime.rs:520"
+          "round": 1,
+          "state": "code + unit tests green; in-engine chain incomplete (command-mode gate) - resumable",
+          "done": [
+            "MindSimHost::publish_selectable_units each frame + selectable_units_json probe (sim.selectable_units_json lists live units by EntitySeq)",
+            "Sim::apply_live_unit_command: wire UnitCommand ids resolve to live units (default team only), command 0 sets ControllerSlot.target (resolve_wire_target for position/unit/building targets); relay fallback kept for net/test ids; tests live_unit_command_sets_a_move_target + selectable_units_json_lists_live_units",
+            "input player-team fix: desktop.rs filters with MindSimHost.default_team() instead of hardcoded 0",
+            "no-block boot: Sim.selected_block defaults AIR; sync_selected_block/select_block_by_name map AIR -> no selection; set_catalog_category no longer auto-selects the first block (it kept player.block non-null so command mode never opened)",
+            "apply_sim_command_json ops spawn_unit + unit_command (MCP staging; x/y parsing fixed to allow px/py-only)"
           ],
-          "approach": "1) Feed the selectable list from the sim host: after each tick publish the player-team commandable units from UnitRuntime.units as `{id,type,x,y,team,commandable}` through MindInput.set_selectable_units_json (or an internal host call) so drag/tap selection works. 2) Resolve SimCommand::UnitCommand/UnitStance against live ECS units: map the relay ids to entities and write ControllerSlot.target / a CommandAiState component (or keep the UnitCommandRuntime but register every live unit in it) instead of mutating a disconnected BTreeMap. 3) Add an AiKind::Command branch to unit_update_system that drives movement/attack from CommandAiState.target_pos/attack_target/queue (moveTo + pathfind + stances), replacing the Ground/Flying fallback for ordered units. 4) Test: headless spawn a dagger, apply UnitCommand via Sim::command, step N ticks and assert displacement; in-engine assert Input.selection_json() returns the dragged unit and the unit moves to the clicked tile.",
-          "narrow_check": "cargo test -p mind-core sim (new live-unit command movement case) plus an in-engine drag-select -> right-click check",
-          "evidence": {
-            "java": [
-              "../Mindustry/core/src/mindustry/input/InputHandler.java:310",
-              "../Mindustry/core/src/mindustry/ai/types/CommandAI.java:117",
-              "../Mindustry/core/src/mindustry/io/TypeIO.java:776"
-            ],
-            "godot": [
-              "client/rust/mind-gdext/src/input/desktop.rs:195",
-              "client/rust/mind-core/src/sim/mod.rs:546",
-              "client/rust/mind-core/src/sim/command.rs:139",
-              "client/rust/mind-core/src/sim/unit_runtime.rs:520"
-            ]
-          }
+          "next": [
+            "Find why the input bridge state.block still reads 'duo' with action_count 0 while SimHost.selected_block() is 'air' (candidates: an early sync_selected_block before the host's AIR default landed, or another state.block writer) - instrument the writers or re-run after a clean play; then command_mode must latch via inject_key/push_event KeyDown shiftLeft (release with KeyUp)",
+            "Drag-select via push_event mouse events around a spawned friendly dagger; assert Input.selection_json() contains its EntitySeq (fed by publish_selectable_units)",
+            "Right-click a target tile; assert the unit's (x,y) from selectable_units_json moves toward it (the wire -> SimCommand::UnitCommand -> apply_live_unit_command path)",
+            "Capture a frame for the record (no stored Java selection/order frame; the command panel surface is PAR-0095) and settle as reference with the calibration note",
+            "Out of round 1: non-move commands/stances on live units; the command panel UI (PAR-0095); AiKind::Command branch (queue/attack semantics)"
+          ],
+          "narrow_check": "cargo test -p mind-core -p mind-gdext (1853 + integration green), clippy/fmt; in-engine chain per path.godot",
+          "evidence": [
+            "client/rust/mind-core/src/sim/mod.rs (apply_live_unit_command)",
+            "client/rust/mind-gdext/src/sim_host.rs (publish_selectable_units, apply_sim_command_json)",
+            "client/rust/mind-gdext/src/input/desktop.rs (player_team)"
+          ]
         }
       },
       "verified": null,
-      "note": "Code-scan 2026-10-10 (units-ai): S2, high confidence (code reading). Player impact: the RTS control layer is completely inert - no unit can be box-selected or tap-selected, and move/attack/stance orders are no-ops. This subsumes the dead unit_command_runtime/unit_stance_runtime reachability: both are only reached through the relay path that has no live units. Distinct from PAR-0063 (that item verified the keyboard input-state JSON, not unit selection or command application). In-engine verification pending.",
+      "note": "Code-scan 2026-10-10 (units-ai): S2, high confidence (code reading). Player impact: the RTS control layer is completely inert - no unit can be box-selected or tap-selected, and move/attack/stance orders are no-ops. This subsumes the dead unit_command_runtime/unit_stance_runtime reachability: both are only reached through the relay path that has no live units. Distinct from PAR-0063 (that item verified the keyboard input-state JSON, not unit selection or command application). In-engine verification pending. 2026-10-11 (round 1, stopped by operator): live selectable feed + live UnitCommand application + team/no-block input gates landed with unit tests; the in-engine drag-select -> order chain is staged in path.godot but was blocked on the command-mode gate (input state still selects a 'duo' block with action_count 0 - the gate requires no block; boot fixes landed for the default and set_catalog_category, residual writer to find). Resume from fix.plan.next.",
       "evidence": [
         "../Mindustry/core/src/mindustry/input/InputHandler.java:310",
         "../Mindustry/core/src/mindustry/ai/types/CommandAI.java:117",
@@ -27986,6 +27996,13 @@
           "the command panel: hold the command key (Command Mode / [no units])",
           "feed a ground factory (item source silicon) -> a Dagger spawns -> click it -> the selected panel + orders"
         ]
+      },
+      "claim": {
+        "by": "parity-hunt-s1",
+        "at": "2026-10-11T20:31:46+10:00",
+        "prior_status": "reference",
+        "released_at": "2026-10-11T21:55:00+10:00",
+        "reason": "operator stop: round-1 code landed and committed; in-engine chain resumes from fix.plan round 1"
       }
     },
     {
