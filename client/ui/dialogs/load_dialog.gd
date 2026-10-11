@@ -28,6 +28,8 @@ var _grid: MindTable = null
 var _hidden: Dictionary = {}
 ## Slot rows for the current open (`Saves.getSaveSlots` snapshot).
 var _slots: Array = []
+## Registered map names (`SaveMeta` map lookup), filled lazily.
+var _map_names: Dictionary = {}
 
 
 func _ready() -> void:
@@ -151,7 +153,8 @@ func _build_card(slot: Dictionary) -> Button:
 	# code-instantiated: save cards are data-driven from the save-slot listing.
 	var card := MindWidgets.button("")
 	card.theme_type_variation = "grayt"
-	card.custom_minimum_size = Vector2(400, 160)
+	# Five meta lines (map, mode/wave, autosave, playtime, date) + the title row.
+	card.custom_minimum_size = Vector2(400, 196)
 	card.pressed.connect(_select.bind(slot))
 
 	# code-instantiated: card body follows the slot data; ignores clicks so the
@@ -208,6 +211,41 @@ func _build_card(slot: Dictionary) -> Button:
 	return card
 
 
+## `SaveMeta.map`: the registered map whose name matches the save's
+## `mapname`, else `@unknown`.
+func _resolve_map(map_name: String) -> String:
+	if map_name.is_empty():
+		return _t("@unknown")
+	if _map_names.is_empty():
+		var preview := get_node_or_null("/root/Spine/MindPreview")
+		if preview != null and preview.has_method("maps_list"):
+			for row in preview.call("maps_list"):
+				_map_names[str((row as Dictionary).get("name", ""))] = true
+	return map_name if _map_names.has(map_name) else _t("@unknown")
+
+
+## `Strings.formatMillis`: `H:MM:SS`.
+func _format_millis(millis: int) -> String:
+	var sign := "-" if millis < 0 else ""
+	millis = absi(millis)
+	return "%s%d:%02d:%02d" % [sign, millis / 3600000, (millis % 3600000) / 60000, (millis % 60000) / 1000]
+
+
+## `SaveSlot.getDate` (`DateFormat.getDateTimeInstance()`, en-US medium:
+## `Oct 12, 2026, 12:54:33 AM`) in the local time zone.
+func _format_date(timestamp_ms: int) -> String:
+	var bias := int(Time.get_time_zone_from_system().get("bias", 0)) * 60
+	var dt := Time.get_datetime_dict_from_unix_time(timestamp_ms / 1000 + bias)
+	var months := ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+	var hour := int(dt.hour) % 12
+	if hour == 0:
+		hour = 12
+	return "%s %d, %d, %d:%02d:%02d %s" % [
+		months[int(dt.month) - 1], int(dt.day), int(dt.year), hour, int(dt.minute), int(dt.second),
+		"PM" if int(dt.hour) >= 12 else "AM",
+	]
+
+
 func _icon_action(icon_name: String, style: String, is_pressed: bool) -> Button:
 	# code-instantiated: card action buttons are per-slot (no static scene).
 	var button := MindWidgets.icon_button(icon_name, "", style)
@@ -219,14 +257,20 @@ func _icon_action(icon_name: String, style: String, is_pressed: bool) -> Button:
 
 
 func _meta_lines(slot: Dictionary) -> Array:
-	var map_name := str(slot.get("map", _t("@unknown")))
+	var map_name := str(slot.get("map", ""))
+	if map_name.is_empty():
+		map_name = _resolve_map(str(slot.get("map_name", "")))
 	var mode := str(slot.get("mode", ""))
 	if not mode.is_empty():
 		mode = _t("@mode.%s.name" % mode)
 	var wave := int(slot.get("wave", 0))
 	var autosave := bool(slot.get("autosave", false))
-	var playtime := str(slot.get("playtime_ms", slot.get("playtime", "")))
+	var playtime := str(slot.get("playtime", ""))
+	if slot.has("playtime_ms"):
+		playtime = _format_millis(int(slot.get("playtime_ms", 0)))
 	var date := str(slot.get("date", ""))
+	if date.is_empty() and int(slot.get("timestamp_ms", 0)) > 0:
+		date = _format_date(int(slot.get("timestamp_ms", 0)))
 	var lines := [
 		_fmt("@save.map", [map_name]),
 		"%s /%s" % [mode, _fmt("@save.wave", [wave])],

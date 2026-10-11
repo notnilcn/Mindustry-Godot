@@ -36,7 +36,7 @@ use mind_core::game::rules::Rules;
 use mind_core::game::rules_event::{RulesEpoch, apply_set_rules};
 use mind_core::game::runtime::CampaignRuntime;
 use mind_core::game::saves::{
-    DEFAULT_SAVE_INTERVAL_MINUTES, Saves, SavesUpdate, SavesUpdateResult,
+    DEFAULT_SAVE_INTERVAL_SECONDS, Saves, SavesUpdate, SavesUpdateResult,
 };
 use mind_core::game::schematics::Schematics;
 use mind_core::game::tech_tree::{self, SettingsUnlockStore};
@@ -189,11 +189,20 @@ impl MindCampaign {
                 if let Err(error) = registry.init().and_then(|()| registry.post_init()) {
                     log::error!("MindCampaign content lifecycle failed: {error}");
                 }
-                let mut campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
-                campaign.load_all(&self.settings);
+                // `Vars.init`: `control.saves.load()` runs its legacy sector
+                // remap (moving `sector-serpulo-15.msav` to Ground Zero's
+                // current cell and migrating `<planet>-s-<id>-info`) before the
+                // planets read sector info (`Sector.loadInfo` after remap).
                 self.saves = Saves::new();
                 self.saves
                     .load(&NativeFs, &self.paths, &registry, &mut self.settings);
+                if self.saves.had_serpulo_remaps
+                    && let Err(error) = self.settings.force_save(&NativeFs, &self.paths)
+                {
+                    log::warn!("sector remap settings flush failed: {error}");
+                }
+                let mut campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
+                campaign.load_all(&self.settings);
                 // `Saves.load` assigns sector save files; reflect them on the
                 // runtime sectors so launches take the resume branch (C-3).
                 for planet in campaign.planets.values_mut() {
@@ -238,10 +247,10 @@ impl MindCampaign {
     /// Live `saveinterval` (`Core.settings.getInt`): read from the `MindUi`
     /// settings store so a mid-session slider change takes effect, falling back
     /// to this facade's boot-time copy.
-    fn live_save_interval_minutes(&self) -> i32 {
+    fn live_save_interval_seconds(&self) -> i32 {
         let fallback = self
             .settings
-            .get_i32(KEY_SAVE_INTERVAL, DEFAULT_SAVE_INTERVAL_MINUTES);
+            .get_i32(KEY_SAVE_INTERVAL, DEFAULT_SAVE_INTERVAL_SECONDS);
         let Some(mut ui) = self.base().get_node_or_null("/root/MindUi") else {
             return fallback;
         };
@@ -299,7 +308,7 @@ impl MindCampaign {
             self.saves.update_policy(
                 saves_update,
                 &self.settings,
-                self.live_save_interval_minutes(),
+                self.live_save_interval_seconds(),
             )
         } else {
             SavesUpdateResult::default()
@@ -1350,6 +1359,25 @@ impl MindCampaign {
                     .unwrap_or(false)
                     .to_variant(),
             );
+            // `state.getSector().preset` name (hint predicates: `isTutorial`,
+            // `presetLaunch`), empty for a generated sector.
+            let preset_name = record
+                .and_then(|sector| sector.preset)
+                .and_then(|preset| {
+                    self.registry
+                        .as_ref()
+                        .and_then(|registry| registry.sector(preset))
+                        .map(|def| def.name.clone())
+                })
+                .unwrap_or_default();
+            dict.set(&key("preset"), &preset_name.as_str().to_variant());
+            dict.set(
+                &key("captured"),
+                &record
+                    .map(|sector| sector.is_captured(None))
+                    .unwrap_or(false)
+                    .to_variant(),
+            );
             // `PausedDialog.rebuild` `showObjective`: the preset description
             // feeds the `@objective` full-text dialog (`UnlockableContent`
             // resolves it from `Core.bundle`).
@@ -1951,6 +1979,25 @@ impl MindCampaign {
                 &GString::from("autosave"),
                 &slot.is_autosave(&self.settings).to_variant(),
             );
+            // `SaveSlot.getMap/mode/getWave/getPlayTime/getDate` meta reads;
+            // the dialog resolves `map_name` against the map registry
+            // (`SaveMeta`: `maps.all().find(m -> m.name().equals(map))`).
+            if let Some(meta) = slot.meta.as_ref() {
+                row.set(
+                    &GString::from("map_name"),
+                    &meta.map_name.as_str().to_variant(),
+                );
+                row.set(&GString::from("wave"), &i64::from(meta.wave).to_variant());
+                row.set(
+                    &GString::from("playtime_ms"),
+                    &meta.time_played.to_variant(),
+                );
+                row.set(&GString::from("timestamp_ms"), &meta.timestamp.to_variant());
+                let mode = serde_json::from_str::<Rules>(&quote_bare_keys(&meta.rules_json))
+                    .map(|rules| rules.mode().name())
+                    .unwrap_or("survival");
+                row.set(&GString::from("mode"), &mode.to_variant());
+            }
             out.push(&row);
         }
         out

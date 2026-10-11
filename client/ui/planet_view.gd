@@ -59,6 +59,17 @@ var _sector_label_text := ""
 ## Preset whose icon is drawn inside the selected hex (`renderProjections`).
 var _sector_icon_preset := ""
 var _sector_icon: MeshInstance3D = null
+## Per-sector status layer (`renderSectors` fills/rings + `renderProjections`
+## icons), rebuilt from the `campaign_views` sector rows.
+var _markers: Node3D = null
+var _sectors: Array = []
+
+## `Team.sharded/crux/derelict.color`.
+const SHARDED := Color(1.0, 0.827, 0.498)
+const CRUX := Color(0.949, 0.333, 0.333)
+const DERELICT := Color(0.302, 0.306, 0.345)
+## `PlanetRenderer.shadowColor`.
+const SHADOW := Color(0.0, 0.0, 0.0, 0.7)
 
 
 func _ready() -> void:
@@ -112,6 +123,7 @@ func set_planet(name: String) -> bool:
 	if data.is_empty():
 		return false
 	planet = name
+	_sectors = []
 	_tiles = data.get("tiles", PackedVector3Array())
 	_corners = data.get("corners", PackedVector3Array())
 	_tile_corners = data.get("tile_corners", [])
@@ -122,12 +134,195 @@ func set_planet(name: String) -> bool:
 	return true
 
 
+## `PlanetDialog.renderSectors` + `renderProjections` for every sector but the
+## selected one: selectable/unlocked cells get a status ring (based = sharded,
+## based + enemy = sharded/crux, unlocked preset = derelict/white, locked preset
+## = gray, enemy base = crux), the rest a 70% shadow fill; icons are the warning
+## glyph for attacked sectors, the preset icon for unlocked base-less presets,
+## a padlock for the next locked preset, else the sector's own icon.
+func set_sectors(sectors: Array) -> void:
+	_sectors = sectors
+	_rebuild_markers()
+
+
+func _rebuild_markers() -> void:
+	if _markers == null:
+		# code-instantiated: marker layer content is driven by the sector rows.
+		_markers = Node3D.new()
+		_markers.name = "SectorMarkers"
+		$ViewportContainer/SubViewport.add_child(_markers)
+	for child in _markers.get_children():
+		child.queue_free()
+	if _tile_corners.is_empty():
+		return
+	var verts := PackedVector3Array()
+	var colors := PackedColorArray()
+	var arad := float(data.get("outline", 1.17)) + 0.001
+	for sector_variant in _sectors:
+		var sector: Dictionary = sector_variant
+		var tile := view_tile(sector)
+		if tile < 0 or tile >= _tile_corners.size() or tile == selected_tile:
+			continue
+		var color: Variant = _status_color(sector)
+		if bool(sector.get("selectable", false)) or bool(sector.get("unlocked", false)):
+			if color != null:
+				var ring: Color = color
+				ring = Color(ring.r * 0.8, ring.g * 0.8, ring.b * 0.8, 1.0)
+				_append_ring(verts, colors, tile, arad, 0.026, ring)
+		else:
+			_append_fill(verts, colors, tile, arad, SHADOW)
+		_add_icon(sector, tile)
+	if verts.is_empty():
+		return
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_COLOR] = colors
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	var instance := MeshInstance3D.new()
+	instance.mesh = mesh
+	var material := _overlay_material()
+	# Depth-tested so the globe disc hides the far hemisphere.
+	material.no_depth_test = false
+	material.render_priority = 5
+	instance.material_override = material
+	_markers.add_child(instance)
+
+
+## `renderSectors` ring color (null = no ring).
+func _status_color(sector: Dictionary) -> Variant:
+	if bool(sector.get("has_base", false)):
+		return SHARDED.lerp(CRUX, 0.5 if bool(sector.get("has_enemy_base", false)) else 0.0)
+	if not str(sector.get("preset", "")).is_empty() and bool(sector.get("require_unlock", false)):
+		# `derelict.lerp(white, absin(time, 10, 1))`: static midpoint.
+		return DERELICT.lerp(Color.WHITE, 0.5) if bool(sector.get("preset_unlocked", false)) else Color.GRAY
+	if bool(sector.get("has_enemy_base", false)):
+		return CRUX
+	return null
+
+
+func _tile_outer(tile: int, arad: float) -> PackedVector3Array:
+	var out := PackedVector3Array()
+	for id in _tile_corners[tile]:
+		out.append(_corners[id] * arad)
+	return out
+
+
+func _append_fill(verts: PackedVector3Array, colors: PackedColorArray, tile: int, arad: float, color: Color) -> void:
+	var outers := _tile_outer(tile, arad)
+	var center := _tiles[tile] * arad
+	for i in outers.size():
+		verts.append(center)
+		verts.append(outers[i])
+		verts.append(outers[(i + 1) % outers.size()])
+		for _k in 3:
+			colors.append(color)
+
+
+func _append_ring(verts: PackedVector3Array, colors: PackedColorArray, tile: int, arad: float, stroke: float, color: Color) -> void:
+	var outers := _tile_outer(tile, arad)
+	var center := _tiles[tile] * arad
+	var inners := PackedVector3Array()
+	for outer in outers:
+		var offset: Vector3 = outer - center
+		inners.append(center + offset.normalized() * (offset.length() - stroke))
+	for i in outers.size():
+		var j := (i + 1) % outers.size()
+		verts.append(outers[i])
+		verts.append(outers[j])
+		verts.append(inners[j])
+		verts.append(outers[i])
+		verts.append(inners[j])
+		verts.append(inners[i])
+		for _k in 6:
+			colors.append(color)
+
+
+## `renderProjections` icon for one sector.
+func _add_icon(sector: Dictionary, tile: int) -> void:
+	var preset := str(sector.get("preset", ""))
+	var has_base := bool(sector.get("has_base", false))
+	var glyph := ""
+	var region := ""
+	var color := Color.WHITE
+	if bool(sector.get("attacked", false)):
+		glyph = "warn"
+		color = SHARDED
+	elif not has_base and not preset.is_empty() and bool(sector.get("require_unlock", false)) \
+			and bool(sector.get("preset_unlocked", false)) and _opt(sector, "icon").is_empty() \
+			and _opt(sector, "content_icon").is_empty():
+		region = "sector-%s" % preset
+	elif bool(sector.get("lock_icon", false)):
+		glyph = "lock"
+	else:
+		# `Sector.icon()`: contentIcon, info.icon, else an unlocked preset's icon.
+		var content_icon := _opt(sector, "content_icon")
+		var icon := _opt(sector, "icon")
+		if not content_icon.is_empty():
+			region = content_icon
+		elif not icon.is_empty():
+			glyph = icon
+		elif not preset.is_empty() and bool(sector.get("require_unlock", false)) and bool(sector.get("preset_unlocked", false)):
+			region = "sector-%s" % preset
+	var position := _tiles[tile].normalized() * (float(data.get("outline", 1.17)) + 0.004)
+	if not region.is_empty():
+		var assets := MindWidgets.assets()
+		var texture: Texture2D = null
+		if assets != null:
+			texture = assets.call("find_region", region) as Texture2D
+			if texture == null and not region.begins_with("sector-"):
+				for prefix in ["item", "block", "unit", "liquid"]:
+					texture = assets.call("find_region", "%s-%s-ui" % [prefix, region]) as Texture2D
+					if texture != null:
+						break
+		if texture == null:
+			return
+		# code-instantiated: one billboard per marked sector.
+		var sprite := Sprite3D.new()
+		sprite.texture = texture
+		sprite.pixel_size = SECTOR_ICON_SIZE / maxf(float(texture.get_width()), 1.0)
+		sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
+		sprite.render_priority = 7
+		sprite.position = position
+		_markers.add_child(sprite)
+		return
+	var text := MindIcons.glyph(glyph)
+	if text.is_empty():
+		return
+	# code-instantiated: one icon-font glyph per marked sector.
+	var label := Label3D.new()
+	label.text = text
+	var assets := MindWidgets.assets()
+	if assets != null:
+		var font: Variant = assets.call("icon_font")
+		if font is Font:
+			label.font = font
+	label.font_size = 64
+	label.outline_size = 0
+	label.pixel_size = SECTOR_ICON_SIZE / 64.0
+	label.modulate = color
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.render_priority = 7
+	label.position = position
+	_markers.add_child(label)
+
+
+## Optional string field of a read-model row (`null` -> "").
+func _opt(row: Dictionary, key: String) -> String:
+	var value: Variant = row.get(key, null)
+	return "" if value == null else str(value)
+
+
 ## Centers the camera on a tile and highlights its hex (`PlanetDialog.lookAt`).
 ## `u_mouse` stays at the origin (the planet is not hovered), so the sector grid
 ## fades out exactly like `Planet.renderSectors` with a ray that misses
 ## (`Shaders.planetGrid.mouse.lerp(Vec3.Zero)`).
 func focus_tile(tile: int) -> void:
 	selected_tile = tile
+	if not _sectors.is_empty():
+		_rebuild_markers()
 	var direction := Vector3.FORWARD
 	if tile >= 0 and tile < _tiles.size():
 		direction = _tiles[tile].normalized()
@@ -149,6 +344,8 @@ func clear_selection() -> void:
 	_sector_icon_preset = ""
 	_clear_highlight()
 	_rebuild_sector_icon()
+	if not _sectors.is_empty():
+		_rebuild_markers()
 
 
 ## Sets the hovered tile (`PlanetDialog.hovered`): the grid fades in around it,

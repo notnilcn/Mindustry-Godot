@@ -679,6 +679,22 @@ impl MindUi {
         true
     }
 
+    /// `HintsFragment.DefaultHint.finished`: the persisted
+    /// `<name>-hint-done` flag (an imported Java profile carries its own).
+    #[func]
+    pub fn hint_finished(&self, name: GString) -> bool {
+        self.settings.get_bool(&format!("{name}-hint-done"), false)
+    }
+
+    /// `HintsFragment.DefaultHint.finish`: `Core.settings.put(name +
+    /// "-hint-done", true)`.
+    #[func]
+    pub fn hint_finish(&mut self, name: GString) -> bool {
+        self.settings.put_bool(&format!("{name}-hint-done"), true);
+        self.persist_settings();
+        true
+    }
+
     /// `Control.java:640` `uiscalechanged`: whether the UI scale was changed
     /// since the last confirmed boot.
     #[func]

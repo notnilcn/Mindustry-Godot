@@ -16,7 +16,7 @@
 
 use std::time::{Duration, Instant};
 
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -116,6 +116,13 @@ impl SettingValue {
 #[derive(Debug)]
 pub struct SettingsStore {
     map: IndexMap<String, SettingValue>,
+    /// Keys put/removed since the last save. Several facades (UI, campaign,
+    /// sim host) each hold a store over the one `settings.bin` (upstream has a
+    /// single `Core.settings`); saving merges only these keys onto the file so
+    /// one store's stale snapshot never clobbers another's writes.
+    changed: IndexSet<String>,
+    /// `clear()` ran since the last save: the save replaces the file.
+    cleared: bool,
     dirty: bool,
     last_mutation: Option<Instant>,
     debounce: Duration,
@@ -132,6 +139,8 @@ impl SettingsStore {
     pub fn new() -> Self {
         Self {
             map: IndexMap::new(),
+            changed: IndexSet::new(),
+            cleared: false,
             dirty: false,
             last_mutation: None,
             debounce: DEFAULT_FLUSH_DEBOUNCE,
@@ -185,6 +194,7 @@ impl SettingsStore {
     pub fn remove(&mut self, key: &str) -> bool {
         let removed = self.map.shift_remove(key).is_some();
         if removed {
+            self.changed.insert(key.to_owned());
             self.mark_dirty();
         }
         removed
@@ -194,6 +204,8 @@ impl SettingsStore {
     pub fn clear(&mut self) {
         if !self.map.is_empty() {
             self.map.clear();
+            self.changed.clear();
+            self.cleared = true;
             self.mark_dirty();
         }
     }
@@ -268,11 +280,17 @@ impl SettingsStore {
         }
     }
 
-    /// `Settings.getJson`: parsed JSON value, `None` when absent. A corrupt
+    /// `Settings.getJson`: parsed JSON value (native JSON text or Java's
+    /// UBJson bytes), `None` when absent. A corrupt
     /// JSON payload is an error (untrusted-input rule), not a panic.
     pub fn get_json<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>, IoError> {
         match self.map.get(key) {
             Some(SettingValue::Json(raw)) => Ok(Some(serde_json::from_str(raw)?)),
+            // Java `Settings.putJson` stores UBJson bytes (type 5); an imported
+            // profile keeps them verbatim (`Settings.getJson` -> `UBJsonReader`).
+            Some(SettingValue::Bytes(bytes)) => Ok(Some(serde_json::from_value(
+                crate::io::json::ubjson::read_ubjson(bytes)?,
+            )?)),
             Some(other) => Err(IoError::corrupt(format!(
                 "settings key `{key}` holds {:?}, not JSON",
                 other.type_tag()
@@ -326,6 +344,7 @@ impl SettingsStore {
     /// Inserts a typed value and marks the store dirty.
     pub fn put(&mut self, key: &str, value: SettingValue) {
         self.map.insert(key.to_owned(), value);
+        self.changed.insert(key.to_owned());
         self.mark_dirty();
     }
 
@@ -353,9 +372,36 @@ impl SettingsStore {
 
     /// Serializes and atomically writes `config/settings.bin`
     /// (`Settings.save`): tmp + sync + rename.
+    ///
+    /// The keys this store changed are merged onto the current file contents
+    /// (other stores' writes survive), and the store adopts the merged map. An
+    /// unreadable file falls back to this store's own map.
     pub fn force_save(&mut self, fs: &dyn FileSystem, paths: &Paths) -> Result<(), IoError> {
+        let file = paths.settings_file();
+        let on_disk = if self.cleared {
+            None
+        } else {
+            fs.read(&file)
+                .ok()
+                .and_then(|bytes| read_settings(&bytes).ok())
+        };
+        if let Some(mut merged) = on_disk {
+            for key in &self.changed {
+                match self.map.get(key) {
+                    Some(value) => {
+                        merged.insert(key.clone(), value.clone());
+                    }
+                    None => {
+                        merged.shift_remove(key);
+                    }
+                }
+            }
+            self.map = merged;
+        }
         let bytes = write_settings(&self.map)?;
-        fs.write_atomic(&paths.settings_file(), &bytes)?;
+        fs.write_atomic(&file, &bytes)?;
+        self.changed.clear();
+        self.cleared = false;
         self.dirty = false;
         self.last_mutation = None;
         Ok(())
@@ -566,6 +612,54 @@ fn java_utf(wire: &mut WireReader) -> Result<String, IoError> {
 mod tests {
     use super::*;
     use crate::io::fs::MockFs;
+
+    /// Two stores over one file: saving one never reverts the other's keys.
+    #[test]
+    fn force_save_merges_changes_across_stores() {
+        let fs = MockFs::new();
+        let paths = Paths::new("/data");
+        let mut seed = SettingsStore::new();
+        seed.put_i32("a", 1);
+        seed.put_i32("b", 1);
+        seed.force_save(&fs, &paths).unwrap();
+
+        let mut ui = SettingsStore::load(&fs, &paths);
+        let mut campaign = SettingsStore::load(&fs, &paths);
+        campaign.put_i32("a", 2);
+        campaign.remove("b");
+        campaign.force_save(&fs, &paths).unwrap();
+        ui.put_bool("hint-done", true);
+        ui.force_save(&fs, &paths).unwrap();
+
+        let reloaded = SettingsStore::load(&fs, &paths);
+        assert_eq!(reloaded.get_i32("a", 0), 2);
+        assert!(!reloaded.has("b"));
+        assert!(reloaded.get_bool("hint-done", false));
+        assert_eq!(
+            ui.get_i32("a", 0),
+            2,
+            "the saving store adopts the merged map"
+        );
+    }
+
+    /// Java `Settings.putJson` bytes (UBJson, type 5) from an imported
+    /// profile read through `get_json` like native JSON text.
+    #[test]
+    fn get_json_decodes_java_ubjson_bytes() {
+        let mut store = SettingsStore::new();
+        // {"shown":T,"winWave":i10}
+        let mut bytes = vec![b'{', b'i', 5];
+        bytes.extend_from_slice(b"shown");
+        bytes.push(b'T');
+        bytes.extend_from_slice(&[b'i', 7]);
+        bytes.extend_from_slice(b"winWave");
+        bytes.extend_from_slice(&[b'i', 10, b'}']);
+        store.put_bytes("serpulo-s-15-info", &bytes);
+        let info: crate::io::json::SectorInfo =
+            store.get_json("serpulo-s-15-info").unwrap().unwrap();
+        assert!(info.shown);
+        assert_eq!(info.win_wave, 10);
+    }
 
     #[test]
     fn reads_arc_settings_file() {
