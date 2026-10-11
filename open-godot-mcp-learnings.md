@@ -1847,3 +1847,16 @@ Run: runs/20261011-112541-PAR-0038/.
 timeout note). Read the dialog's cached `_campaign_views_cache` instead (a
 cheap script-var read) or query through a file dump. Run:
 runs/20261011-114802-PAR-0048/.
+
+## 2026-10-11 — PAR-0050: heavy evals timeout AND trip break-on-error
+`tile_blocks()` (the whole-grid walk) and `MindCampaign.section_json("research")`
+both blow the 15 s exec budget inside `godot_exec`; per the tool docs both are
+known-timeout bodies. Worse, each timed-out eval tripped break-on-error:
+`godot_debugger sessions` reported `paused: true` while plain evals still
+answered - the frame loop was pinned and no input/placement would land.
+Recovery: `godot_game stop` + `play` (resume re-breaks). To read the tech/block
+state, use cheap reads (the research dialog's `_campaign_views_cache`, a
+specific node) and never `tile_blocks()`/`section_json` in eval. Also: world
+placements/breaks must go through `godot_input` (the real OS cursor); synthetic
+`get_viewport().push_input` works for Control clicks but not for the world
+placement path. Run: runs/20261011-115026-PAR-0050/.

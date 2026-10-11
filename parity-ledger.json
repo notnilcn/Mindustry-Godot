@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T01:50:19Z",
+  "updated": "2026-10-11T01:54:08Z",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -16364,7 +16364,7 @@
       "surface": "world",
       "parent": "PAR-0049",
       "status": "reference",
-      "updated": "2026-10-10T14:47:09Z",
+      "updated": "2026-10-11T01:54:08Z",
       "discovered_by": "runs/20261009-065416-ref-ground-zero/",
       "path": {
         "to": "Ground Zero tutorial objective 3",
@@ -16395,7 +16395,7 @@
         "status": "open"
       },
       "verified": null,
-      "note": "Revealed by R05's hint after objective 2 completed. Not mirrored yet.",
+      "note": "Plan (resumable, runs/20261011-115026-PAR-0050/): world placement/break must use godot_input (real OS cursor), not synthetic push_input. Two placement attempts at (700,300) left only the cursor ghost - likely gated by the tutorial objective 0 ('click to begin mining'); next: click the ORE first (godot_input), then select the conveyor via the picker, place with the PAR-0049 pattern (discrete press -> an eval of wall time -> release), then break with a held right-button press (separate calls for the final motion/release per the tool docs). Compare with java/step-75-hover-conv + step-76-after-breakhold. NOTE: tile_blocks()/section_json evals time out AND trip break-on-error (recover stop+play) - logged in open-godot-mcp-learnings.md.",
       "reference": {
         "captured": "2026-10-11T03:00:00Z",
         "profile": "fresh",
@@ -16421,6 +16421,12 @@
         "java_path": [
           "select nothing (right-click cancels), right-hold on a built block 1.5 s, release; capture before/after"
         ]
+      },
+      "claim": {
+        "by": "parity-hunt-s1",
+        "at": "2026-10-11T01:50:26Z",
+        "prior_status": "reference",
+        "released_at": "2026-10-11T01:54:08Z"
       }
     },
     {
