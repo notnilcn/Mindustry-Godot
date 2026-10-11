@@ -1829,3 +1829,9 @@ those paths no longer exist, but the workarounds still apply.
   then probe `DialogLayer/planet.visible` and RE-PROBE once before concluding a miss (the
   dialog appears a few frames after the click).
 - Run: `runs/20261011-095656-PAR-0018/`.
+
+- Bullet (2026-10-11, session 2): `pgrep -f 'godot --path .../session2/client'` matches the
+  tool shell's OWN command line → a `kill $(pgrep -f ...)` loop SIGTERMed the session shell
+  mid-command ("Killed by SIGTERM"). Same trap as the `pkill -f <jar>` warning in
+  `java-leg-learnings.md`. Use `pgrep -x godot`/exact pids from a separate probe, or filter
+  `pgrep -f pattern | grep -v $$`.
