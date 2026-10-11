@@ -241,7 +241,7 @@ impl EntitySource for LiveEntitySource<'_> {
 }
 
 /// Restores decoded team build plans onto the live session (`readTeamBlocks`).
-fn apply_team_plans(teams: &mut Teams, plans: Vec<(i32, Vec<TeamPlan>)>) {
+pub fn apply_team_plans(teams: &mut Teams, plans: Vec<(i32, Vec<TeamPlan>)>) {
     for (team, team_plans) in plans {
         let Ok(team) = u8::try_from(team) else {
             continue;

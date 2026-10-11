@@ -573,6 +573,75 @@ fn sim_command_unit_state_is_deterministic() {
 }
 
 #[test]
+fn lost_sector_capture_and_derelict_restore() {
+    use crate::ecs::BuildingComp;
+    use crate::game::team::DERELICT;
+
+    let mut sim = Sim::new(7, 16, 16, BlockId::AIR, BlockId::AIR);
+    sim.install_block_runtime().expect("runtime installs");
+    let wall = sim.content().id("copper-wall").expect("copper-wall");
+    let core = sim.content().id("core-shard").expect("core-shard");
+    sim.apply(Command::Place {
+        x: 2,
+        y: 2,
+        block: core,
+    })
+    .expect("core placed");
+    for (x, y) in [(4, 4), (5, 4), (6, 4)] {
+        sim.apply(Command::Place { x, y, block: wall })
+            .expect("wall placed");
+    }
+    let placed_team = sim
+        .ecs
+        .0
+        .get::<BuildingComp>(
+            sim.grid
+                .entity_at(TilePos::new(4, 4))
+                .expect("wall entity"),
+        )
+        .expect("building comp")
+        .team
+        .0;
+
+    // No spawn overlays: the damage pass only kills the cores, so the walls are
+    // the surviving-base payload (`Control.playSector`'s previousBuildings).
+    let (survivors, derelicts) = sim.capture_lost_sector(placed_team, 2);
+    assert!(derelicts.is_empty(), "no derelicts in this world");
+    assert_eq!(survivors.len(), 3, "non-core buildings survive");
+    assert!(
+        sim.grid.entity_at(TilePos::new(2, 2)).is_none(),
+        "the core is destroyed by `SectorDamage(1f)`"
+    );
+
+    // Restore one survivor as a derelict on a clear tile.
+    let entry = survivors[0];
+    assert!(sim.place_replay_building(
+        10,
+        10,
+        entry.block,
+        entry.rot,
+        DERELICT.0,
+        entry.health
+    ));
+    let entity = sim
+        .grid
+        .entity_at(TilePos::new(10, 10))
+        .expect("restored entity");
+    let comp = sim.ecs.0.get::<BuildingComp>(entity).expect("comp");
+    assert_eq!(comp.block, entry.block);
+    assert_eq!(comp.team.0, DERELICT.0, "restored as a derelict");
+    assert!(
+        sim.ecs
+            .0
+            .get::<crate::entities::comp::health::Health>(entity)
+            .is_some(),
+        "restored buildings carry health"
+    );
+    // Occupied tiles are refused.
+    assert!(!sim.place_replay_building(10, 10, entry.block, entry.rot, DERELICT.0, 10.0));
+}
+
+#[test]
 fn block_runtime_provisions_and_ticks_placed_buildings() {
     use crate::ecs::BuildingComp;
     use crate::entities::comp::{Building, Health};

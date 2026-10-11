@@ -536,6 +536,22 @@ pub(crate) fn load_vanilla_content() -> Result<ContentRegistry, RuntimeError> {
     Ok(content)
 }
 
+/// One building captured for the lost-sector replay (`Control.playSector`'s
+/// `previousBuildings`/`previousDerelicts` payload).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ReplayBuilding {
+    /// Tile x.
+    pub x: i16,
+    /// Tile y.
+    pub y: i16,
+    /// Block content id.
+    pub block: crate::content::BlockId,
+    /// Rotation.
+    pub rot: u8,
+    /// Current health.
+    pub health: f32,
+}
+
 impl Sim {
     /// Whether the opt-in live building runtime is installed.
     pub fn has_block_runtime(&self) -> bool {
@@ -655,6 +671,172 @@ impl Sim {
         // linked map buildings.
         self.refresh_unit_runtime();
         spawned
+    }
+
+    /// `Control.playSector`'s lost-sector half: `SectorDamage.apply(1f)` over the
+    /// loaded (lost) world destroying the marked buildings, then the surviving
+    /// default-team buildings and derelicts as the replay payload
+    /// (`Control.java:482-537`).
+    pub fn capture_lost_sector(
+        &mut self,
+        default_team: u8,
+        wave_team: u8,
+    ) -> (Vec<ReplayBuilding>, Vec<ReplayBuilding>) {
+        let Sim {
+            grid,
+            ecs,
+            block_runtime,
+            ..
+        } = self;
+        let Some(runtime) = block_runtime.as_mut() else {
+            return (Vec::new(), Vec::new());
+        };
+
+        // `SectorDamage.apply` state: spawn overlays + every live building.
+        let mut spawns: Vec<(i32, i32)> = Vec::new();
+        for tile in grid.tiles.array() {
+            if runtime
+                .content
+                .block(tile.overlay)
+                .is_some_and(|def| def.kind == crate::content::BlockKind::SpawnBlock)
+            {
+                spawns.push((i32::from(tile.x), i32::from(tile.y)));
+            }
+        }
+        let mut buildings: Vec<crate::maps::sector_damage::DamageBuilding> = Vec::new();
+        let mut owners: Vec<Entity> = Vec::new();
+        for (_seq, entity, comp) in ecs.entities_by_seq() {
+            let Some(def) = runtime.content.block(comp.block) else {
+                continue;
+            };
+            let health = ecs
+                .0
+                .get::<crate::entities::comp::health::Health>(entity)
+                .map(|entry| entry.health)
+                .unwrap_or(def.health as f32);
+            buildings.push(crate::maps::sector_damage::DamageBuilding::new(
+                i32::from(comp.pos.x()),
+                i32::from(comp.pos.y()),
+                comp.team.0,
+                health,
+                def.size,
+                def.kind == crate::content::BlockKind::CoreBlock,
+            ));
+            owners.push(entity);
+        }
+        let mut state = crate::maps::sector_damage::SectorDamageState {
+            default_team,
+            wave_team,
+            spawns,
+            buildings,
+        };
+        let mut rng = crate::determinism::SimRng::new(u64::from(default_team).wrapping_add(1));
+        crate::maps::sector_damage::apply(
+            &grid.tiles,
+            &runtime.content,
+            &mut state,
+            1.0,
+            &mut rng,
+            &crate::maps::sector_damage::NoopDamageFx,
+        );
+        // Remove the buildings the damage marked (`Control.java:482`'s pass).
+        let mut log = crate::world::ops::WorldEventLog::default();
+        for (index, building) in state.buildings.iter().enumerate() {
+            if !building.removed {
+                continue;
+            }
+            let Some(entity) = owners.get(index).copied() else {
+                continue;
+            };
+            if ecs.0.get_entity(entity).is_err() {
+                continue;
+            }
+            let mut ctx = crate::world::ops::WorldCtx {
+                grid: &mut *grid,
+                content: &runtime.content,
+                ecs: &mut ecs.0,
+                hooks: &runtime.hooks,
+                render: &runtime.render,
+                log: &mut log,
+            };
+            ctx.clear_building(entity);
+        }
+
+        // Survivor payload: default-team buildings (cores excluded) + derelicts.
+        let mut survivors = Vec::new();
+        let mut derelicts = Vec::new();
+        for (_seq, entity, comp) in ecs.entities_by_seq() {
+            let Some(def) = runtime.content.block(comp.block) else {
+                continue;
+            };
+            if def.kind == crate::content::BlockKind::CoreBlock {
+                continue;
+            }
+            let health = ecs
+                .0
+                .get::<crate::entities::comp::health::Health>(entity)
+                .map(|entry| entry.health)
+                .unwrap_or(def.health as f32);
+            let entry = ReplayBuilding {
+                x: comp.pos.x(),
+                y: comp.pos.y(),
+                block: comp.block,
+                rot: comp.rot,
+                health,
+            };
+            if comp.team.0 == default_team {
+                survivors.push(entry);
+            } else if comp.team.0 == crate::game::team::DERELICT.0 {
+                derelicts.push(entry);
+            }
+        }
+        (survivors, derelicts)
+    }
+
+    /// Places one replay building owned by `team` on an empty tile
+    /// (`tile.setBlock` in `Control.playSector`'s restore; the `validPlace` gate
+    /// is approximated by an air check). Returns whether the block was placed.
+    pub fn place_replay_building(
+        &mut self,
+        x: i16,
+        y: i16,
+        block: crate::content::BlockId,
+        rot: u8,
+        team: u8,
+        health: f32,
+    ) -> bool {
+        let Sim {
+            grid,
+            ecs,
+            block_runtime,
+            ..
+        } = self;
+        let Some(runtime) = block_runtime.as_mut() else {
+            return false;
+        };
+        if grid.tiles.get(i32::from(x), i32::from(y)).block != crate::content::BlockId::AIR {
+            return false;
+        }
+        let mut log = crate::world::ops::WorldEventLog::default();
+        {
+            let mut ctx = crate::world::ops::WorldCtx {
+                grid: &mut *grid,
+                content: &runtime.content,
+                ecs: &mut ecs.0,
+                hooks: &runtime.hooks,
+                render: &runtime.render,
+                log: &mut log,
+            };
+            ctx.set_block(x, y, block, team, rot);
+        }
+        if let Some(entity) = grid.entity_at(crate::world::TilePos::new(x, y))
+            && let Some(mut hp) = ecs
+                .0
+                .get_mut::<crate::entities::comp::health::Health>(entity)
+        {
+            hp.health = health.clamp(1.0, hp.max_health.max(1.0));
+        }
+        true
     }
 
     /// Drops every sim entity and resets live-runtime bookkeeping ahead of a

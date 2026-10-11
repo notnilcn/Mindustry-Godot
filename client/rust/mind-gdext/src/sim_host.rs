@@ -82,6 +82,11 @@ pub struct MindSimHost {
     audio_log: SharedAudioLog,
     /// Rules resolved by the last `load_sector` (preset map/generator/save).
     sector_rules: Option<Rules>,
+    /// Team build plans carried by the last `load_sector` save
+    /// (`SaveReadState.team_plans`); `MindCampaign.start_sector` applies them to
+    /// the installed runtime (the lost-sector replay restores its survivors'
+    /// plans alongside).
+    sector_plans: Vec<(i32, Vec<mind_core::io::save::state::TeamPlan>)>,
     /// Sibling `Input`; the player move axis is uploaded to the sim each frame
     /// (`DesktopInput.updateMovement`).
     input: Option<Gd<MindInput>>,
@@ -111,6 +116,7 @@ impl INode for MindSimHost {
             pending_commands: VecDeque::new(),
             audio_log: SharedAudioLog::new(),
             sector_rules: None,
+            sector_plans: Vec::new(),
             input: None,
             sector_spawns: 0,
         }
@@ -937,10 +943,16 @@ impl MindSimHost {
     /// Returns `false` when the planet generator, map and save are all missing.
     #[func]
     pub fn load_sector(&mut self, planet: GString, sector: i32) -> bool {
+        let planet_name = planet.to_string();
+        self.load_sector_world(&planet_name, sector, true)
+    }
+
+    /// Shared `World.loadSector` build: `use_save` selects the resume source
+    /// (the lost-sector replay reloads fresh with `false`).
+    fn load_sector_world(&mut self, planet_name: &str, sector: i32, use_save: bool) -> bool {
         if sector < 0 {
             return false;
         }
-        let planet_name = planet.to_string();
         // A new world invalidates the previous campaign runtime.
         self.sim.ecs.0.remove_resource::<CampaignRuntime>();
         // Take the registry out so the generator can borrow it while the sim is
@@ -951,19 +963,19 @@ impl MindSimHost {
         };
         const SECTOR_SIZE: i32 = 128;
         // `Control.playSector`: an existing sector save is the resume source.
-        let save_path = sector_save_path(&planet_name, sector as u16);
-        let loaded = if std::path::Path::new(&save_path).is_file() {
+        let save_path = sector_save_path(planet_name, sector as u16);
+        let loaded = if use_save && std::path::Path::new(&save_path).is_file() {
             log::info!("load_sector: resuming `{planet_name}:{sector}` from `{save_path}`");
             load_grid_file(&save_path, &mut registry)
         } else {
             // `World.loadSector`: a preset sector uses its stored designed map
             // (`SectorPreset.generator` / `FileMapGenerator`); planet sectors
             // fall back to the planet generator.
-            load_preset_map_grid(&planet_name, sector as u16, &mut registry)
+            load_preset_map_grid(planet_name, sector as u16, &mut registry)
         };
         let generated = if loaded.is_none() {
             mind_core::maps::planet::generate_sector(
-                &planet_name,
+                planet_name,
                 sector as u16,
                 1,
                 SECTOR_SIZE,
@@ -973,10 +985,20 @@ impl MindSimHost {
         } else {
             None
         };
-        let (grid, rules, pending_buildings) = match loaded {
-            Some(loaded) => (loaded.grid, loaded.rules, loaded.pending_buildings),
+        let (grid, rules, pending_buildings, plans) = match loaded {
+            Some(loaded) => (
+                loaded.grid,
+                loaded.rules,
+                loaded.pending_buildings,
+                loaded.plans,
+            ),
             None => match generated {
-                Some(generated) => (generated.grid, Some(generated.rules), Vec::new()),
+                Some(generated) => (
+                    generated.grid,
+                    Some(generated.rules),
+                    Vec::new(),
+                    Vec::new(),
+                ),
                 None => {
                     self.content_snapshot = Some(registry);
                     log::warn!("load_sector: no map or generator for planet `{planet_name}`");
@@ -986,6 +1008,7 @@ impl MindSimHost {
         };
         self.sector_spawns = count_spawns(&grid, &registry);
         self.sector_rules = rules;
+        self.sector_plans = plans;
         self.content_snapshot = Some(registry);
 
         // Reuse a fresh sim and swap in the loaded/generated grid; a new
@@ -1029,6 +1052,102 @@ impl MindSimHost {
     /// Enemy spawn-overlay count of the last loaded sector grid.
     pub fn sector_spawn_count(&self) -> i32 {
         self.sector_spawns
+    }
+
+    /// Takes the plans carried by the last `load_sector` save (`apply_team_plans`
+    /// input); clears the stash.
+    pub fn take_sector_plans(&mut self) -> Vec<(i32, Vec<mind_core::io::save::state::TeamPlan>)> {
+        std::mem::take(&mut self.sector_plans)
+    }
+
+    /// Default-team core count in the live world (the lost-sector probe; the
+    /// session's `Teams.cores` is not installed on a fresh load).
+    pub fn player_core_blocks(&self, team: u8) -> usize {
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return 0;
+        };
+        self.sim
+            .ecs
+            .entities_by_seq()
+            .into_iter()
+            .filter(|(_, _, comp)| {
+                comp.team.0 == team
+                    && content
+                        .block(comp.block)
+                        .is_some_and(|def| def.kind == BlockKind::CoreBlock)
+            })
+            .count()
+    }
+
+    /// `Control.playSector`'s lost-sector replay (`Control.java:456-537`): the
+    /// loaded (lost) world's survivors are snapshotted after `SectorDamage(1f)`,
+    /// the sector reloads fresh with the default core at `(spawn_x, spawn_y)`,
+    /// and the survivors come back as derelicts. Returns the restored survivors
+    /// (the facade adds their plans alongside the carried save plans).
+    pub fn replay_lost_sector(
+        &mut self,
+        planet: GString,
+        sector: i32,
+        spawn_x: i32,
+        spawn_y: i32,
+    ) -> Vec<mind_core::sim::runtime::ReplayBuilding> {
+        if sector < 0 {
+            return Vec::new();
+        }
+        let planet_name = planet.to_string();
+        let (default_team, wave_team) = self
+            .sector_rules
+            .as_ref()
+            .map(|rules| (rules.default_team, rules.wave_team))
+            .unwrap_or((1, 2));
+        // `SectorDamage.apply(1f)` + the survivor/derelict snapshot.
+        let (survivors, derelicts) = self.sim.capture_lost_sector(default_team, wave_team);
+        let plans = self.take_sector_plans();
+        // Fresh sector world (`playNewSector`; the save was the snapshot source).
+        if !self.load_sector_world(&planet_name, sector, false) {
+            return Vec::new();
+        }
+        // Restore the default core at the record's spawn position
+        // (`spawn.setBlock(sector.planet.defaultCore, ...)`).
+        if self.player_core_blocks(default_team) == 0
+            && let Some(core_name) = self
+                .content_snapshot
+                .as_ref()
+                .and_then(|registry| registry.planet_by_name(&planet_name))
+                .and_then(|planet| planet.default_core.clone())
+            && let Some(core) = self
+                .content_snapshot
+                .as_ref()
+                .and_then(|registry| registry.block_id(&core_name))
+        {
+            self.sim.place_replay_building(
+                spawn_x as i16,
+                spawn_y as i16,
+                core,
+                0,
+                default_team,
+                1000.0,
+            );
+        }
+        // Previous derelicts first, then the survivors as derelicts
+        // (`changeTeam(Team.derelict)`), each on a free tile.
+        let mut restored = Vec::new();
+        for entry in derelicts.into_iter().chain(survivors.iter().copied()) {
+            if self.sim.place_replay_building(
+                entry.x,
+                entry.y,
+                entry.block,
+                entry.rot,
+                mind_core::game::team::DERELICT.0,
+                entry.health,
+            ) {
+                restored.push(entry);
+            }
+        }
+        // Hand the carried save plans back to the facade (the runtime applies
+        // them with the restored survivors).
+        self.sector_plans = plans;
+        restored
     }
 
     /// Installs (replacing any previous) the live campaign runtime resource so
@@ -1744,6 +1863,9 @@ struct LoadedGrid {
     rules: Option<Rules>,
     /// Decoded building payloads `(tile index, base)` awaiting ECS spawn.
     pending_buildings: Vec<(usize, mind_core::world::building_io::DecodedBase)>,
+    /// Team build plans carried by the save (`SaveReadState.team_plans`); the
+    /// campaign runtime applies them (`apply_team_plans`).
+    plans: Vec<(i32, Vec<mind_core::io::save::state::TeamPlan>)>,
 }
 
 /// Native path of a campaign sector save (`user://saves/sector-<planet>-<id>.msav`).
@@ -1805,21 +1927,26 @@ fn load_grid_file(path: &str, registry: &mut ContentRegistry) -> Option<LoadedGr
     let bytes = FileAccess::get_file_as_bytes(path);
     let mut grid = WorldGrid::new(0, 0);
     grid.begin_map_load();
-    let (result, rules, pending_buildings) = {
+    let (result, rules, pending_buildings, plans) = {
         let mut context = EditorContext::new(&mut grid, registry);
-        let (result, rules) = {
+        let (result, rules, plans) = {
             let mut state = SaveReadState {
                 context: Some(&mut context),
                 content: Some(registry),
                 ..SaveReadState::default()
             };
             let result = SaveIo::load_bytes(bytes.as_slice(), &mut state);
-            (result, state.rules.clone())
+            (
+                result,
+                state.rules.clone(),
+                std::mem::take(&mut state.team_plans),
+            )
         };
         (
             result,
             rules,
             std::mem::take(&mut context.pending_buildings),
+            plans,
         )
     };
     if let Err(error) = result {
@@ -1831,6 +1958,7 @@ fn load_grid_file(path: &str, registry: &mut ContentRegistry) -> Option<LoadedGr
         grid,
         rules,
         pending_buildings,
+        plans,
     })
 }
 

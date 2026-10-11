@@ -372,6 +372,10 @@ impl MindCampaign {
                         self.saving_finish_tick = Some(tick.saturating_add(3));
                         log::info!("game-over save queued (`{}`)", file.display());
                     }
+                    // `SaveVersion.writeMeta` persists the sector record next to
+                    // the save (spawn position + prepared core state), which the
+                    // lost-sector replay reads on the re-attack.
+                    self.persist_sector_record();
                     dirty = true;
                 }
                 _ => {}
@@ -521,6 +525,7 @@ impl MindCampaign {
         let require_unlock = record.preset_require_unlock;
         let preset_id = record.preset;
         let has_save = record.has_save();
+        let spawn_position = record.info.info.spawn_position;
         let tech_unlocked = preset_id.is_none_or(|preset| {
             tech_tree::content_unlocked(&registry, ContentRef::of(ContentType::Sector, preset))
         });
@@ -529,6 +534,40 @@ impl MindCampaign {
             self.registry = Some(registry);
             self.campaign = Some(campaign);
             return false;
+        }
+
+        // `Control.playSector`'s no-core branch (`Control.java:456-465`): the
+        // loaded save's world has no default-team core (the sector was lost
+        // while it still has a save). Run the lost-sector replay - `SectorDamage`
+        // snapshot, fresh reload, core + derelict restore (PAR-0084).
+        let default_team = self.session.rules.default_team;
+        let lost_replay = has_save
+            && spawn_position != 0
+            && self
+                .host()
+                .map(|host| host.bind().player_core_blocks(default_team) == 0)
+                .unwrap_or(false);
+        let mut restored_survivors = Vec::new();
+        if lost_replay {
+            let (spawn_x, spawn_y) = mind_core::world::pos::unpack(spawn_position);
+            restored_survivors = self
+                .host()
+                .map(|mut host| {
+                    host.bind_mut().replay_lost_sector(
+                        planet.clone(),
+                        sector,
+                        i32::from(spawn_x),
+                        i32::from(spawn_y),
+                    )
+                })
+                .unwrap_or_default();
+            if let Some(sector_record) = campaign.sector_mut(planet_id, sector_id) {
+                sector_record.info.info.has_core = true;
+            }
+            log::info!(
+                "start_sector: lost-sector replay for `{planet_name}:{sector_id}` restored {} survivor(s)",
+                restored_survivors.len()
+            );
         }
 
         // Optional launch loadout (GAP-10). A campaign launch without an
@@ -549,7 +588,7 @@ impl MindCampaign {
         }
 
         self.reloader = HostReloader::default();
-        let events = if has_save {
+        let events = if has_save && !lost_replay {
             play_sector(
                 &mut self.session,
                 &mut campaign,
@@ -584,6 +623,29 @@ impl MindCampaign {
         // runtime here or the tutorial's first objective never qualifies
         // (PAR-0037: resumed Ground Zero showed no objective state).
         self.session.objectives = MapObjectivesRuntime::from_rules(&self.session.rules);
+
+        // `apply_team_plans`: the resume save's build plans (and the replay's
+        // restored survivors) land in the live session's team data before the
+        // runtime snapshot is taken (PAR-0084).
+        if (has_save || lost_replay)
+            && let Some(mut host) = self.host()
+        {
+            let carried = host.bind_mut().take_sector_plans();
+            mind_core::io::sim_io::apply_team_plans(&mut self.session.teams, carried);
+        }
+        if lost_replay && !restored_survivors.is_empty() {
+            let data = self.session.teams.get(mind_core::ecs::TeamId(default_team));
+            for entry in &restored_survivors {
+                data.plans.push_back(mind_core::game::teams::BlockPlan {
+                    x: entry.x,
+                    y: entry.y,
+                    rotation: entry.rot as i8,
+                    block: entry.block,
+                    config: None,
+                    removed: false,
+                });
+            }
+        }
 
         // Install the runtime and register the live cores/spawns (GAP-9).
         let mut installed = false;
