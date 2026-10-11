@@ -594,11 +594,7 @@ fn lost_sector_capture_and_derelict_restore() {
     let placed_team = sim
         .ecs
         .0
-        .get::<BuildingComp>(
-            sim.grid
-                .entity_at(TilePos::new(4, 4))
-                .expect("wall entity"),
-        )
+        .get::<BuildingComp>(sim.grid.entity_at(TilePos::new(4, 4)).expect("wall entity"))
         .expect("building comp")
         .team
         .0;
@@ -615,14 +611,7 @@ fn lost_sector_capture_and_derelict_restore() {
 
     // Restore one survivor as a derelict on a clear tile.
     let entry = survivors[0];
-    assert!(sim.place_replay_building(
-        10,
-        10,
-        entry.block,
-        entry.rot,
-        DERELICT.0,
-        entry.health
-    ));
+    assert!(sim.place_replay_building(10, 10, entry.block, entry.rot, DERELICT.0, entry.health));
     let entity = sim
         .grid
         .entity_at(TilePos::new(10, 10))
