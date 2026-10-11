@@ -125,6 +125,24 @@ pub fn default_handle_liquid(
     }
 }
 
+/// `BuildingComp.acceptItem` default: `block.consumesItem(item) &&
+/// items.get(item) < getMaximumAccepted(item)` (item capacity).
+pub fn consumer_accept_item(world: &World, e: Entity, item: crate::content::ItemId) -> bool {
+    use crate::world::blocks::distribution::transfer;
+    world.get::<crate::world::modules::ItemModule>(e).is_some()
+        && block_consumes_item(world, e, item)
+        && transfer::item_count(world, e, item) < transfer::item_capacity(world, e)
+}
+
+/// `BuildingComp.acceptLiquid` default: `block.hasLiquids &&
+/// block.consumesLiquid(liquid)`.
+pub fn consumer_accept_liquid(world: &World, e: Entity, liquid: crate::content::LiquidId) -> bool {
+    world
+        .get::<crate::world::modules::LiquidModule>(e)
+        .is_some()
+        && block_consumes_liquid(world, e, liquid)
+}
+
 fn instance(
     world: &World,
     e: Entity,

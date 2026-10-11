@@ -202,6 +202,11 @@ pub struct SandboxState {
 pub struct PumpState {
     /// Warmup (`warmup`).
     pub warmup: f32,
+    /// `PumpBuild.liquidDrop`: the floor liquid under the footprint
+    /// (recomputed on placement/proximity; not serialized upstream).
+    pub liquid_drop: Option<crate::content::LiquidId>,
+    /// `PumpBuild.amount`: summed `Floor.liquidMultiplier` of pumpable tiles.
+    pub amount: f32,
 }
 
 /// `Accelerator`/`LandingPad`/`LaunchPad` build state.

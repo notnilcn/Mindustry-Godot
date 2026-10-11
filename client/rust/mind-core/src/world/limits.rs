@@ -42,6 +42,8 @@ pub struct BuildRules {
     pub banned_blocks: Vec<BlockId>,
     /// Per-team block limits (`Rules.blockLimits`).
     pub block_limits: IndexMap<(u8, BlockId), u32>,
+    /// `Rules.env` (Java `Env` bits; `Vars.defaultEnv` = 233).
+    pub env: i32,
 }
 
 impl Default for BuildRules {
@@ -60,6 +62,7 @@ impl Default for BuildRules {
             default_team: 0,
             banned_blocks: Vec::new(),
             block_limits: IndexMap::new(),
+            env: crate::io::json::rules::DEFAULT_ENV,
         }
     }
 }
