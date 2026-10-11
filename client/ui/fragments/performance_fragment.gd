@@ -10,7 +10,10 @@ extends Control
 
 
 func _process(_delta: float) -> void:
-	if _label == null:
+	# `t.visible(() -> Core.settings.getBool("showperformance"))` (default off).
+	var ui := get_node_or_null("/root/MindUi")
+	visible = ui != null and bool(ui.call("settings_get_bool", "showperformance"))
+	if _label == null or not visible:
 		return
 	var fps := Performance.get_monitor(Performance.TIME_FPS)
 	var process_ms := Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0
