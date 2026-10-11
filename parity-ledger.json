@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T21:54:51+10:00",
+  "updated": "2026-10-11T22:43:08+10:00",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -25786,11 +25786,9 @@
         ]
       },
       "claim": {
-        "by": "parity-hunt-s1",
-        "at": "2026-10-11T20:31:46+10:00",
-        "prior_status": "reference",
-        "released_at": "2026-10-11T21:55:00+10:00",
-        "reason": "operator stop: round-1 code landed and committed; in-engine chain resumes from fix.plan round 1"
+        "by": "claude-loop-s1",
+        "at": "2026-10-11T22:43:08+10:00",
+        "prior_status": "fixing"
       }
     },
     {

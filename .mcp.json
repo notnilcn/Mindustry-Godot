@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "open-godot-mcp": {
+      "type": "stdio",
+      "command": "open-godot-mcp",
+      "args": [],
+      "env": { "OPEN_GODOT_MCP_PORT": "6970" }
+    }
+  }
+}

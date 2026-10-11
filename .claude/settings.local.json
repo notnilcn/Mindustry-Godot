@@ -1,0 +1,7 @@
+{
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": ["open-godot-mcp"],
+  "permissions": {
+    "allow": ["mcp__open-godot-mcp"]
+  }
+}
