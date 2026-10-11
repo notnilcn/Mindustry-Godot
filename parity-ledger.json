@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T01:37:28Z",
+  "updated": "2026-10-11T01:43:39Z",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -12984,97 +12984,39 @@
       "title": "Pause: Map Objective opens the sector objective text",
       "surface": "world",
       "parent": "PAR-0038",
-      "status": "reference",
-      "updated": "2026-10-11T01:37:28Z",
+      "status": "verified",
+      "updated": "2026-10-11T01:43:39Z",
       "discovered_by": "runs/20261009-065416-ref-ground-zero/",
       "path": {
-        "to": "pause dialog",
+        "to": "in-game Ground Zero pause > Map Objective",
         "java": [],
         "godot": [
           {
             "tool": "godot_exec",
             "params": {
-              "action": "eval",
-              "code": "return str(get_node(\\\"/root/Spine/MindCampaign\\\").clear_planet_campaign_saves(\\\"serpulo\\\"))"
-            },
-            "note": "deterministic fresh launch"
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "return get_node(\\\"/root/Spine/SimHost\\\").load_sector(\\\"serpulo\\\", 15)"
+              "code": "pause -> click the objective button (351,203,220,55 centre) -> MindUi.dialog_stack() == [paused, full_text]"
             }
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "var c = get_node(\\\"/root/Spine/MindCampaign\\\")\\nvar h = get_node(\\\"/root/Spine/SimHost\\\")\\nvar root = get_node(\\\"/root/Spine/Ui/UiRoot\\\")\\nvar loadout = JSON.stringify([{\\\"item\\\": \\\"copper\\\", \\\"amount\\\": 500}, {\\\"item\\\": \\\"lead\\\", \\\"amount\\\": 500}])\\nvar ok = c.start_sector_with_loadout(\\\"serpulo\\\", 15, loadout)\\nroot.call(\\\"set_menu_visible\\\", false)\\nh.set_paused(true)\\nvar state = c.get_sector_state()\\nreturn {\\\"started\\\": ok, \\\"sector\\\": state.get(\\\"sector\\\"), \\\"presetDescription_len\\\": str(state.get(\\\"presetDescription\\\", \\\"\\\")).length(), \\\"paused\\\": h.is_paused()}"
-            },
-            "note": "presetDescription_len 127 for groundZero"
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "return get_node(\\\"/root/Spine/SimHost\\\").step(30)"
-            },
-            "note": "drain the launch IO job; while io_pending=1 the LoadingLayer branch consumes Escape"
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "var loading = get_node(\\\"/root/Spine/Ui/UiRoot/LoadingLayer/loading\\\")\\nreturn {\\\"loading_visible\\\": loading.visible, \\\"io_pending\\\": get_node(\\\"/root/Spine/SimHost\\\").io_pending()}"
-            },
-            "note": "poll until loading_visible false (one fragment refresh after io drains)"
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "key",
-              "key": "Escape",
-              "pressed": true
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "key",
-              "key": "Escape",
-              "pressed": false
-            }
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "Input.flush_buffered_events()\\nvar ui = get_node(\\\"/root/MindUi\\\")\\nvar h = get_node(\\\"/root/Spine/SimHost\\\")\\nvar paused = get_node_or_null(\\\"/root/Spine/Ui/UiRoot/DialogLayer/paused\\\")\\nreturn {\\\"stack\\\": ui.call(\\\"dialog_stack\\\"), \\\"paused_visible\\\": paused != null and paused.visible, \\\"is_paused\\\": h.is_paused(), \\\"tick\\\": h.get_tick()}"
-            },
-            "note": "stack [paused]; tick held"
           }
         ],
         "confirm": {
-          "java": "runs/20261009-065416-ref-ground-zero/java/r01-00-pause.png"
+          "godot": "stack [paused, full_text] + the body text matches the Java string",
+          "java": "r00-05-objective-text.png non-blank"
         },
-        "last_replayed": "runs/20261010-085323-paused-dialog-buttons/"
+        "last_replayed": "runs/20261011-113747-PAR-0039/ (Java: ... > ESC > Map Objective (510,315) > r00-05; Godot: resume > ESC > objective (461,230) > full_text)"
       },
-      "run": "runs/20261009-065416-ref-ground-zero/",
+      "run": "runs/20261011-113747-PAR-0039/",
       "reproduce": {
         "java": [
           {
-            "tool": "note",
+            "tool": "shell",
             "params": {
-              "image_center": [
-                460,
-                216
-              ],
-              "screen_center": [
-                510,
-                314
-              ],
-              "source": "PausedDialog @objective (showObjective when the sector preset has a description; groundZero description_len 127)"
+              "cmd": "saves aside + SetSettings campaignselect false + launch; walk to the tutorial; ESC; click (510,315)"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "capture_screen.py --window-title Mindustry -> r00-05-objective-text.png"
             }
           }
         ],
@@ -13082,55 +13024,47 @@
           {
             "tool": "godot_exec",
             "params": {
-              "action": "eval",
-              "code": "var b = get_node(\\\"/root/Spine/Ui/UiRoot/DialogLayer/paused\\\").find_child(\\\"objective\\\", true, false) as Control\\nvar c = b.get_global_rect().get_center()\\nreturn {\\\"x\\\": int(c.x), \\\"y\\\": int(c.y)}"
-            },
-            "note": "(453,429)"
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "button": "MOUSE_BUTTON_LEFT",
-              "position": {
-                "x": 453,
-                "y": 429
-              },
-              "coords": "viewport",
-              "pressed": true
+              "code": "resume GZ -> ESC -> click the objective button -> capture"
             }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "button": "MOUSE_BUTTON_LEFT",
-              "position": {
-                "x": 453,
-                "y": 429
-              },
-              "coords": "viewport",
-              "pressed": false
-            }
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "Input.flush_buffered_events()\\nvar ui = get_node(\\\"/root/MindUi\\\")\\nvar ft = get_node_or_null(\\\"/root/Spine/Ui/UiRoot/DialogLayer/full_text\\\")\\nreturn {\\\"stack\\\": str(ui.call(\\\"dialog_stack\\\")), \\\"full_text_visible\\\": ft != null and ft.visible, \\\"title\\\": str(ft.find_child(\\\"Title\\\", true, false).text) if ft != null else \\\"\\\"}"
-            },
-            "note": "stack [paused, full_text]; title Map Objective; body 127 chars (groundZero preset description)"
           }
         ],
-        "compare": []
+        "compare": [
+          "godot/hud-91-objective-text-after.png vs java/r00-05-objective-text.png: changed 0.812, mean_abs 23.8, palette 0.773 (from 0.978/72.7/0.938)"
+        ]
       },
-      "steps": [],
-      "mismatch": null,
+      "steps": [
+        {
+          "action": "pause > Map Objective",
+          "result": "the full-text dialog opens with the sector description"
+        },
+        {
+          "check": "the text matches the Java panel exactly; pre-fix the surface was boxed + undimmed + left-aligned"
+        },
+        {
+          "fix": "full_text_dialog.gd: full_dialog + Dim 0.9 + centred body"
+        },
+        {
+          "check": "post-fix the centred text renders over the dark world, matching r00-05"
+        }
+      ],
+      "mismatch": {
+        "step": "pre-fix full-text surface: boxed panel over the undimmed world, left-aligned",
+        "godot_frame": "runs/20261011-113747-PAR-0039/godot/hud-90-objective-text.png",
+        "java_frame": "runs/20261011-113747-PAR-0039/java/r00-05-objective-text.png",
+        "diff": "runs/20261011-113747-PAR-0039/diff/objective-text-after.json"
+      },
       "fix": {
-        "status": "open"
+        "status": "done",
+        "commit": "4d72a03",
+        "summary": "full_text_dialog.gd: full-dialog style, 0.9 dim, centred body (FullTextDialog.java:19)"
       },
-      "verified": null,
-      "note": "Plan (resumable): the action frame (the objective text dialog) is missing from the stored reference, so batch one Java leg for PAR-0039 + PAR-0040: fresh profile -> tutorial -> ESC -> Map Objective (screen = client (50,98) + the r01-00 button at (460,216) -> (510,314)) -> capture the fullText objective panel; then Abandon -> capture the confirm. Share the boot; store frames on both items. The Godot chain then: resume GZ -> ESC -> click the objective button (351,203,220,55 centre) -> check MindUi.dialog_stack() == [full_text] with the groundZero description; Back resumes.",
+      "verified": {
+        "mode": "chain",
+        "run": "runs/20261011-113747-PAR-0039/",
+        "reference": "runs/20261011-113747-PAR-0039/java/",
+        "at": "2026-10-11T01:43:34Z"
+      },
+      "note": "Both legs live: the Java leg captured the previously-missing action frame (r00-05) and the Godot chain matches the exact text after the presentation fix. Residue seeded: PAR-0149 (stacked dialogs) and the PAR-0146-family banner-over-dim.",
       "reference": {
         "captured": "2026-10-09T07:00:00Z",
         "profile": "fresh",
@@ -13157,9 +13091,9 @@
       },
       "claim": {
         "by": "parity-hunt-s1",
-        "at": "2026-10-11T01:37:07Z",
+        "at": "2026-10-11T01:37:47Z",
         "prior_status": "reference",
-        "released_at": "2026-10-11T01:37:28Z"
+        "released_at": "2026-10-11T01:43:34Z"
       }
     },
     {
@@ -13167,110 +13101,75 @@
       "title": "Pause: Abandon sector confirm flow",
       "surface": "world",
       "parent": "PAR-0038",
-      "status": "reference",
-      "updated": "2026-10-10T14:39:55Z",
+      "status": "verified",
+      "updated": "2026-10-11T01:43:34Z",
       "discovered_by": "runs/20261009-065416-ref-ground-zero/",
       "path": {
-        "to": "pause dialog",
+        "to": "in-game Ground Zero pause > Abandon",
         "java": [],
         "godot": [
           {
             "tool": "godot_exec",
             "params": {
-              "action": "eval",
-              "code": "return str(get_node(\\\"/root/Spine/MindCampaign\\\").clear_planet_campaign_saves(\\\"serpulo\\\"))"
-            },
-            "note": "deterministic fresh launch"
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "return get_node(\\\"/root/Spine/SimHost\\\").load_sector(\\\"serpulo\\\", 15)"
+              "code": "pause -> click abandon (579,203,220,55 centre) -> the confirm prompt with the Java text"
             }
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "var c = get_node(\\\"/root/Spine/MindCampaign\\\")\\nvar h = get_node(\\\"/root/Spine/SimHost\\\")\\nvar root = get_node(\\\"/root/Spine/Ui/UiRoot\\\")\\nvar loadout = JSON.stringify([{\\\"item\\\": \\\"copper\\\", \\\"amount\\\": 500}, {\\\"item\\\": \\\"lead\\\", \\\"amount\\\": 500}])\\nvar ok = c.start_sector_with_loadout(\\\"serpulo\\\", 15, loadout)\\nroot.call(\\\"set_menu_visible\\\", false)\\nh.set_paused(true)\\nvar state = c.get_sector_state()\\nreturn {\\\"started\\\": ok, \\\"sector\\\": state.get(\\\"sector\\\"), \\\"presetDescription_len\\\": str(state.get(\\\"presetDescription\\\", \\\"\\\")).length(), \\\"paused\\\": h.is_paused()}"
-            },
-            "note": "presetDescription_len 127 for groundZero"
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "return get_node(\\\"/root/Spine/SimHost\\\").step(30)"
-            },
-            "note": "drain the launch IO job; while io_pending=1 the LoadingLayer branch consumes Escape"
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "var loading = get_node(\\\"/root/Spine/Ui/UiRoot/LoadingLayer/loading\\\")\\nreturn {\\\"loading_visible\\\": loading.visible, \\\"io_pending\\\": get_node(\\\"/root/Spine/SimHost\\\").io_pending()}"
-            },
-            "note": "poll until loading_visible false (one fragment refresh after io drains)"
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "key",
-              "key": "Escape",
-              "pressed": true
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "key",
-              "key": "Escape",
-              "pressed": false
-            }
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "Input.flush_buffered_events()\\nvar ui = get_node(\\\"/root/MindUi\\\")\\nvar h = get_node(\\\"/root/Spine/SimHost\\\")\\nvar paused = get_node_or_null(\\\"/root/Spine/Ui/UiRoot/DialogLayer/paused\\\")\\nreturn {\\\"stack\\\": ui.call(\\\"dialog_stack\\\"), \\\"paused_visible\\\": paused != null and paused.visible, \\\"is_paused\\\": h.is_paused(), \\\"tick\\\": h.get_tick()}"
-            },
-            "note": "stack [paused]; tick held"
           }
         ],
         "confirm": {
-          "java": "runs/20261009-065416-ref-ground-zero/java/r01-00-pause.png"
+          "godot": "the confirm prompt appears with the exact Java body text",
+          "java": "r00-06-abandon-confirm.png non-blank"
         },
-        "last_replayed": "runs/20261010-085323-paused-dialog-buttons/"
+        "last_replayed": "runs/20261011-114226-PAR-0040/ (Java: pause > Abandon (740,315) > r00-06; Godot: pause > Abandon (691,230) > the prompt)"
       },
-      "run": "runs/20261009-065416-ref-ground-zero/",
+      "run": "runs/20261011-114226-PAR-0040/",
       "reproduce": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "image_center": [
-                690,
-                216
-              ],
-              "screen_center": [
-                740,
-                314
-              ],
-              "source": "PausedDialog @abandon -> ui.planet.abandonSectorConfirm"
+              "frame": "runs/20261011-113747-PAR-0039/java/r00-06-abandon-confirm.png"
             }
           }
         ],
-        "godot": [],
-        "compare": []
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "pause -> click abandon -> read the confirm prompt text"
+            }
+          }
+        ],
+        "compare": [
+          "godot/hud-95-abandon-confirm.png vs java/r00-06-abandon-confirm-java.png: changed 0.153, palette 0.159 (dark frames); the surface gap is PAR-0150"
+        ]
       },
-      "steps": [],
-      "mismatch": null,
+      "steps": [
+        {
+          "action": "pause > Abandon",
+          "result": "the confirm appears with 'This sector's core(s) will self-destruct. Continue?'"
+        },
+        {
+          "check": "the body text matches the Java Confirm dialog exactly; the port renders an inline Yes/No prompt (seeded PAR-0150)"
+        }
+      ],
+      "mismatch": {
+        "step": "the confirm surface: the port's inline prompt vs the Java modal Confirm BaseDialog (Cancel/OK)",
+        "godot_frame": "runs/20261011-114226-PAR-0040/godot/hud-95-abandon-confirm.png",
+        "java_frame": "runs/20261011-114226-PAR-0040/java/r00-06-abandon-confirm-java.png",
+        "diff": "runs/20261011-114226-PAR-0040/diff/abandon-confirm.json",
+        "seeded": "PAR-0150"
+      },
       "fix": {
-        "status": "open"
+        "status": "none-needed",
+        "summary": "the flow + text verified; the confirm surface parity is PAR-0150"
       },
-      "verified": null,
-      "note": "Revealed by R01. Destructive; action not mirrored yet. Godot fork replayed 2026-10-10 at 7825590 (run dir runs/20261010-085323-paused-dialog-buttons/): launch -> drain IO -> Escape opens paused; desktop campaign set dumped; objective full_text 127 chars.",
+      "verified": {
+        "mode": "chain",
+        "run": "runs/20261011-114226-PAR-0040/",
+        "reference": "runs/20261011-113747-PAR-0039/java/",
+        "at": "2026-10-11T01:43:34Z"
+      },
+      "note": "Verified the abandon confirm flow with the exact Java text against the frame from the PAR-0039 Java leg. The shared confirm surface (inline prompt vs BaseDialog) is seeded as PAR-0150; the stacking behavior as PAR-0149.",
       "reference": {
         "captured": "2026-10-09T07:00:00Z",
         "profile": "fresh",
@@ -13294,6 +13193,12 @@
         "java_path": [
           "launch -> window normalize -> Play > Campaign > Serpulo OK -> Ground Zero -> Launch (R00 frames) -> in-game HUD (R00-R07 frames)"
         ]
+      },
+      "claim": {
+        "by": "parity-hunt-s1",
+        "at": "2026-10-11T01:42:26Z",
+        "prior_status": "reference",
+        "released_at": "2026-10-11T01:43:34Z"
       }
     },
     {
@@ -28785,6 +28690,102 @@
       },
       "verified": null,
       "note": "Revealed by PAR-0038's dim measurement. Audit which MindDialogs map to Java defaultDialog (dim ~0.9) vs fullDialog (no dim: planet/research/custom game/load) and align the shared Dim accordingly; PAR-0038 fixed only the pause instance."
+    },
+    {
+      "id": "PAR-0149",
+      "title": "Stacked dialogs: the port hides the lower dialog when another opens; Java renders it dimmed behind the top one",
+      "surface": "ui",
+      "parent": "PAR-0039",
+      "status": "seeded",
+      "updated": "2026-10-11T01:43:34Z",
+      "discovered_by": "runs/20261011-113747-PAR-0039/",
+      "path": {
+        "to": "any stacked dialog (pause > full_text/confirm)",
+        "java": [],
+        "godot": [],
+        "confirm": {
+          "godot": "DialogLayer/paused.visible under a second dialog",
+          "java": "the lower dialog visible (dimmed)"
+        },
+        "last_replayed": null
+      },
+      "run": "runs/20261011-113747-PAR-0039/",
+      "reproduce": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "frame": "runs/20261011-113747-PAR-0039/java/r00-05-objective-text.png (the pause buttons visible behind the text)"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "pause -> objective -> DialogLayer/paused.visible == false (stack [paused, full_text])"
+            }
+          }
+        ],
+        "compare": [
+          "the Java keeps the lower dialog rendered (faded); the port's MindUi hide/restore behavior differs"
+        ]
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open"
+      },
+      "verified": null,
+      "note": "Revealed by PAR-0039. The Rust MindUi stack show/hide hides the previous dialog's node; Java dialogs all stay drawn (the top one over the lower, both dimmed)."
+    },
+    {
+      "id": "PAR-0150",
+      "title": "Confirms: the port renders an inline Yes/No prompt; Java shows a modal Confirm BaseDialog (title, body, Cancel/OK)",
+      "surface": "ui",
+      "parent": "PAR-0040",
+      "status": "seeded",
+      "updated": "2026-10-11T01:43:34Z",
+      "discovered_by": "runs/20261011-114226-PAR-0040/",
+      "path": {
+        "to": "any confirm (pause > Abandon, quit confirm)",
+        "java": [],
+        "godot": [],
+        "confirm": {
+          "godot": "the prompt surface",
+          "java": "the Confirm dialog"
+        },
+        "last_replayed": null
+      },
+      "run": "runs/20261011-114226-PAR-0040/",
+      "reproduce": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "frame": "runs/20261011-114226-PAR-0040/java/r00-06-abandon-confirm-java.png (title 'Confirm', centred body, Cancel/OK)"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "frame": "runs/20261011-114226-PAR-0040/godot/hud-95-abandon-confirm.png (inline row near the pause buttons, Yes/No)"
+            }
+          }
+        ],
+        "compare": [
+          "r00-06 vs hud-95: changed 0.153, palette 0.159"
+        ]
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open"
+      },
+      "verified": null,
+      "note": "Revealed by PAR-0040. Java `ui.showConfirm(title, text, cb)` opens a BaseDialog with @cancel/@ok buttons; the port's MindUi.show_confirm renders an inline prompt (also used by the quit confirm)."
     }
   ]
 }
