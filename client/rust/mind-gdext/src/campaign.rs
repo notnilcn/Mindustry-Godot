@@ -689,6 +689,9 @@ impl MindCampaign {
         };
         if captured {
             self.pump_runtime();
+            // `Logic.sectorCapture`'s "save, just in case": the capture
+            // bookkeeping must be on disk before a restart (PAR-0081).
+            self.persist_sector_record();
             return true;
         }
         // Menu fallback on the facade copy.
@@ -1508,6 +1511,9 @@ impl MindCampaign {
             queued = true;
             log::info!("saved on exit (`{}`)", file.display());
         }
+        // `SectorInfo.write()`/`saveInfo` on exit: the live wave/attack bookkeeping
+        // lands in the stored record before the runtime is dropped (PAR-0081).
+        self.persist_sector_record();
         // `StateChangeEvent(menu)`: clears current/playtime (`logic.reset`).
         self.saves.on_state_change(State::Menu);
         self.saving_finish_tick = None;
@@ -1518,6 +1524,44 @@ impl MindCampaign {
         }
         self.persist();
         queued
+    }
+
+    /// `run_exit_save` / capture bookkeeping: writes the live sector's stored
+    /// record (`SectorInfo.write()` + `Sector.saveInfo`) so captures, wave
+    /// progress and item pools survive a client restart (PAR-0081).
+    fn persist_sector_record(&mut self) {
+        let Some((planet, sector_id)) = self.session.sector else {
+            return;
+        };
+        let Some(planet_name) = self
+            .registry
+            .as_ref()
+            .and_then(|registry| registry.planet(planet))
+            .map(|record| record.name.clone())
+        else {
+            return;
+        };
+        let wave = self.session.wave;
+        let rules = self.session.rules.clone();
+        let Some(campaign) = self.campaign.as_mut() else {
+            return;
+        };
+        let Some(sector) = campaign.sector_mut(planet, sector_id) else {
+            return;
+        };
+        sector.info.info.wave = wave;
+        sector.info.info.waves = rules.waves;
+        sector.info.info.wave_spacing = rules.wave_spacing;
+        sector.info.info.win_wave = rules.win_wave;
+        sector.info.info.attack = rules.attack_mode;
+        if let Err(error) = sector.save_info(&mut self.settings, &planet_name) {
+            log::warn!("sector record persist failed: {error}");
+        }
+        // `put_json` only marks the store dirty; flush so the record is on disk
+        // before any restart (the capture path calls this after `pump_runtime`).
+        if let Err(error) = self.settings.force_save(&NativeFs, &self.paths) {
+            log::warn!("sector record flush failed: {error}");
+        }
     }
 
     /// `PlanetDialog.abandonSectorConfirm` (persisted half): clears the active

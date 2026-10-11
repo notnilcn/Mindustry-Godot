@@ -733,6 +733,13 @@ impl Campaign {
         for planet in self.planets.values_mut() {
             planet.load_rules(settings);
             planet.load_stats(settings);
+            // `Planet.load` -> each `sector.loadInfo()`: the stored per-sector
+            // record (captures, attempts, wave progress, item pools, routes)
+            // must survive a client restart (PAR-0081).
+            let planet_name = planet.name.clone();
+            for sector in &mut planet.sectors {
+                sector.load_info(settings, &planet_name);
+            }
         }
         self.universe.load(settings);
     }
@@ -778,6 +785,28 @@ mod tests {
         reloaded.load(&settings);
         assert_eq!(reloaded.seconds, 120);
         assert_eq!(reloaded.turn, 1);
+    }
+
+    #[test]
+    fn load_all_restores_sector_info() {
+        let (registry, mut campaign, planet) = serpulo();
+        let mut settings = SettingsStore::new();
+        // Capture bookkeeping as the gameplay path leaves it on sector 15.
+        let sector = campaign.sector_mut(planet, 15).unwrap();
+        sector.info.info.was_captured = true;
+        sector.info.info.attempts = 3;
+        sector.info.info.items.insert("copper".to_owned(), 250);
+        assert!(sector.save_info(&mut settings, "serpulo").is_ok());
+
+        // A fresh boot (`MindCampaign::bootstrap` -> `Campaign::load_all`)
+        // reloads the stored records (PAR-0081).
+        let mut rebuilt =
+            Campaign::from_registry(&registry, &crate::game::planet::EmptyNeighborhood);
+        rebuilt.load_all(&settings);
+        let record = &rebuilt.sector(planet, 15).unwrap().info.info;
+        assert!(record.was_captured, "capture survives a restart");
+        assert_eq!(record.attempts, 3);
+        assert_eq!(record.items.get("copper"), Some(&250));
     }
 
     #[test]

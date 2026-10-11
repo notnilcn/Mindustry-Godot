@@ -441,6 +441,18 @@ pub fn play_sector(
     if let Some(sector) = campaign.sector_mut(planet, sector_id) {
         sector.being_played = true;
     }
+    // `SectorInfo.write()` on the resume path (`Logic` `SaveLoadEvent`): the
+    // stored record's wave progress/attack state applies over the preset rules.
+    if let Some(record) = campaign
+        .sector(planet, sector_id)
+        .map(|sector| sector.info.info.clone())
+    {
+        session.wave = record.wave;
+        session.rules.waves = record.waves;
+        session.rules.wave_spacing = record.wave_spacing;
+        session.rules.win_wave = record.win_wave;
+        session.rules.attack_mode = record.attack;
+    }
     let incoming = session.rules.clone();
     let load = apply_rules_load(&mut session.rules, incoming, true, epoch);
     session.phase = State::Playing;
