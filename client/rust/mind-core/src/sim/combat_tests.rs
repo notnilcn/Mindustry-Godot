@@ -101,3 +101,84 @@ fn placed_duo_kills_enemy_dagger() {
         "dagger killed by the duo"
     );
 }
+
+fn shots_in(sim_setup: impl Fn(&mut Sim, Entity), ticks: usize) -> (i32, f32) {
+    let mut sim = live_sim(48);
+    let duo = place(&mut sim, 20, 20, "duo", 1);
+    feed(&mut sim, duo, "copper", 10);
+    sim_setup(&mut sim, duo);
+    let _ = sim
+        .spawn_live_unit("fortress", 2, 20.0 * 8.0 + 90.0, 20.0 * 8.0, 180.0)
+        .expect("fortress");
+    let start = sim
+        .ecs
+        .0
+        .get::<crate::world::blocks::defense::turrets::TurretState>(duo)
+        .map_or(0, |s| s.total_ammo);
+    for _ in 0..ticks {
+        sim.tick().expect("tick");
+    }
+    let end = sim
+        .ecs
+        .0
+        .get::<crate::world::blocks::defense::turrets::TurretState>(duo)
+        .map_or(0, |s| s.total_ammo);
+    let water = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .liquid_id("water")
+        .expect("water");
+    let left = sim
+        .ecs
+        .0
+        .get::<crate::world::modules::LiquidModule>(duo)
+        .map_or(0.0, |l| l.get(water));
+    (start - end, left)
+}
+
+/// PAR-0087: a duo accepts water coolant (capacity 20) and fires faster
+/// while consuming it; slag/oil are rejected by the `ConsumeCoolant` filter.
+#[test]
+fn duo_water_coolant_speeds_fire_and_drains() {
+    use crate::world::blocks::defense::turrets::{accept_liquid, handle_liquid};
+    let mut sim = live_sim(16);
+    let duo = place(&mut sim, 5, 5, "duo", 1);
+    let content = &sim.unit_runtime().expect("rt").content;
+    let (water, slag, oil, cryo) = (
+        content.liquid_id("water").expect("water"),
+        content.liquid_id("slag").expect("slag"),
+        content.liquid_id("oil").expect("oil"),
+        content.liquid_id("cryofluid").expect("cryo"),
+    );
+    assert!(accept_liquid(&sim.ecs.0, duo, water), "water accepted");
+    assert!(accept_liquid(&sim.ecs.0, duo, cryo), "cryofluid accepted");
+    assert!(!accept_liquid(&sim.ecs.0, duo, slag), "slag rejected (hot)");
+    assert!(
+        !accept_liquid(&sim.ecs.0, duo, oil),
+        "oil rejected (flammable)"
+    );
+    handle_liquid(&mut sim.ecs.0, duo, water, 100.0);
+    let stored = sim
+        .ecs
+        .0
+        .get::<crate::world::modules::LiquidModule>(duo)
+        .map_or(0.0, |l| l.get(water));
+    assert_eq!(stored, 20.0, "clamped to duo liquidCapacity 20");
+
+    let (dry, _) = shots_in(|_, _| {}, 240);
+    let (wet, left) = shots_in(
+        |sim, duo| {
+            let water = sim
+                .unit_runtime()
+                .expect("rt")
+                .content
+                .liquid_id("water")
+                .expect("water");
+            handle_liquid(&mut sim.ecs.0, duo, water, 20.0);
+        },
+        240,
+    );
+    assert!(wet > dry, "coolant sped up fire: wet {wet} > dry {dry}");
+    assert!(left < 20.0, "coolant drained ({left} left)");
+}

@@ -221,6 +221,10 @@ pub struct TurretConfig {
     pub coolant_multiplier: f32,
     /// Coolant units consumed per tick (`ConsumeCoolant.amount`); `0` = no coolant.
     pub coolant_amount: f32,
+    /// Liquids the coolant consumer accepts, in content order
+    /// (`ConsumeCoolant` filter: `coolant && !gas && temperature <= 0.5 &&
+    /// flammability < 0.1`, or the single `ConsumeLiquid` liquid).
+    pub coolant_liquids: Vec<LiquidId>,
     /// `Turret.heatRequirement` (`<0` = none).
     pub heat_requirement: f32,
     /// `Turret.maxHeatEfficiency`.
@@ -510,6 +514,101 @@ pub fn config_for(
     name: &str,
     names: &BTreeMap<String, BulletId>,
 ) -> Option<TurretConfig> {
+    let mut config = config_for_inner(content, name, names)?;
+    apply_block_coolant(content, name, &mut config);
+    // Harness fixtures (`test-item`, ...) carry a coolant amount but no block
+    // consumer: default to the `consumeCoolant` liquid filter.
+    if config.uses_coolant() && config.coolant_liquids.is_empty() {
+        config.coolant_liquids = coolant_filter(content, true, false);
+    }
+    Some(config)
+}
+
+/// `ConsumeCoolant.filter`: `coolant && (allowLiquid && !gas || allowGas &&
+/// gas) && temperature <= maxTemp(0.5) && flammability < maxFlammability(0.1)`.
+fn coolant_filter(content: &ContentRegistry, allow_liquid: bool, allow_gas: bool) -> Vec<LiquidId> {
+    content
+        .liquids()
+        .iter()
+        .filter(|l| {
+            l.coolant
+                && ((allow_liquid && !l.gas) || (allow_gas && l.gas))
+                && l.temperature <= 0.5
+                && l.flammability < 0.1
+        })
+        .map(|l| l.id)
+        .collect()
+}
+
+/// `Blocks.java` `coolantMultiplier` for the vanilla turrets that declare a
+/// coolant consumer (absent = the `BaseTurret` default 5, or the class
+/// default: `LaserTurret`/`ContinuousTurret`/`TractorBeamTurret` 1,
+/// `PointDefenseTurret` 2).
+const COOLANT_MULTIPLIERS: &[(&str, f32)] = &[
+    ("duo", 10.0),
+    ("scorch", 1.5),
+    ("hail", 10.0),
+    ("arc", 30.0),
+    ("foreshadow", 0.4),
+    ("spectre", 0.5),
+    ("meltdown", 1.0),
+    ("breach", 15.0),
+    ("diffuse", 15.0),
+    ("titan", 3.75),
+    ("disperse", 6.25),
+    ("scathe", 15.0),
+    ("smite", 15.0),
+];
+
+/// `BaseTurret.init`: the coolant consumer comes from the block's content
+/// spec (`coolant = consumeCoolant(x)` / `consume(new ConsumeLiquid(water,
+/// x))`, both made optional), so the config mirrors the content data
+/// (PAR-0087).
+fn apply_block_coolant(content: &ContentRegistry, name: &str, config: &mut TurretConfig) {
+    use crate::content::Consume;
+    let Some(def) = content.block_id(name).and_then(|id| content.block(id)) else {
+        return;
+    };
+    let mut found = false;
+    for spec in &def.consumes {
+        match &spec.consume {
+            Consume::Coolant {
+                amount,
+                allow_liquid,
+                allow_gas,
+            } => {
+                config.coolant_amount = *amount;
+                // `ConsumeCoolant` filter (maxTemp 0.5, maxFlammability 0.1).
+                config.coolant_liquids = coolant_filter(content, *allow_liquid, *allow_gas);
+                found = true;
+            }
+            Consume::Liquid { liquid, amount } if spec.optional => {
+                config.coolant_amount = *amount;
+                config.coolant_liquids = vec![*liquid];
+                found = true;
+            }
+            _ => {}
+        }
+    }
+    if !found {
+        return;
+    }
+    config.coolant_multiplier = COOLANT_MULTIPLIERS
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, m)| *m)
+        .unwrap_or(match config.kind {
+            TurretKind::Laser | TurretKind::Continuous | TurretKind::TractorBeam => 1.0,
+            TurretKind::PointDefense => 2.0,
+            _ => 5.0,
+        });
+}
+
+fn config_for_inner(
+    content: &ContentRegistry,
+    name: &str,
+    names: &BTreeMap<String, BulletId>,
+) -> Option<TurretConfig> {
     let item = |n: &str| content.item_id(n);
     let liquid = |n: &str| content.liquid_id(n);
     let bullet = |n: &str| names.get(n).copied();
@@ -576,6 +675,7 @@ pub fn config_for(
                 activation_time: 0.0,
                 coolant_multiplier: 10.0,
                 coolant_amount: 0.1,
+                coolant_liquids: Vec::new(),
                 heat_requirement: -1.0,
                 max_heat_efficiency: 3.0,
                 kind: TurretKind::Item,
@@ -633,6 +733,7 @@ pub fn config_for(
                 activation_time: 0.0,
                 coolant_multiplier: 10.0,
                 coolant_amount: 0.1,
+                coolant_liquids: Vec::new(),
                 heat_requirement: -1.0,
                 max_heat_efficiency: 3.0,
                 kind: TurretKind::Item,
@@ -690,6 +791,7 @@ pub fn config_for(
                 activation_time: 0.0,
                 coolant_multiplier: 0.0,
                 coolant_amount: 0.0,
+                coolant_liquids: Vec::new(),
                 heat_requirement: -1.0,
                 max_heat_efficiency: 3.0,
                 kind: TurretKind::Item,
@@ -747,6 +849,7 @@ pub fn config_for(
                 activation_time: 0.0,
                 coolant_multiplier: 0.0,
                 coolant_amount: 0.0,
+                coolant_liquids: Vec::new(),
                 heat_requirement: -1.0,
                 max_heat_efficiency: 3.0,
                 kind: TurretKind::Item,
@@ -948,7 +1051,10 @@ pub fn accept_liquid(world: &World, e: Entity, liquid: LiquidId) -> bool {
         return false;
     };
     let TurretAmmo::Liquid(ammo) = &state.config.ammo else {
-        return false;
+        // `Building.acceptLiquid`: `hasLiquids && consumesLiquid(liquid)` —
+        // the coolant consumer's filter (PAR-0087).
+        return state.config.coolant_liquids.contains(&liquid)
+            && world.get::<LiquidModule>(e).is_some();
     };
     if !ammo.iter().any(|entry| entry.liquid == liquid) {
         return false;
@@ -974,13 +1080,29 @@ pub fn accept_liquid(world: &World, e: Entity, liquid: LiquidId) -> bool {
 
 /// `LiquidTurretBuild.handleLiquid` (only fills the storage module).
 pub fn handle_liquid(world: &mut World, e: Entity, liquid: LiquidId, amount: f32) {
-    let capacity = world
-        .get::<TurretState>(e)
-        .and_then(|state| match &state.config.ammo {
-            TurretAmmo::Liquid(_) => Some(60.0f32),
-            _ => None,
+    // `Building.handleLiquid` fills up to the block's `liquidCapacity`
+    // (duo 20, wave 10, tsunami 40; PAR-0087). Fixture turrets without a
+    // placed block fall back to the old 60-unit liquid-ammo capacity.
+    let block_capacity = world
+        .get::<crate::entities::comp::Building>(e)
+        .map(|b| b.block)
+        .and_then(|block| {
+            world
+                .get_resource::<crate::world::block::BlockTable>()
+                .and_then(|table| table.instance(block))
         })
-        .unwrap_or(0.0);
+        .map(|inst| inst.def.liquid_capacity);
+    let capacity = match block_capacity {
+        Some(capacity) if capacity > 0.0 => capacity,
+        _ => world
+            .get::<TurretState>(e)
+            .map(|state| match &state.config.ammo {
+                TurretAmmo::Liquid(_) => 60.0f32,
+                _ if state.config.uses_coolant() => 20.0,
+                _ => 0.0,
+            })
+            .unwrap_or(0.0),
+    };
     if let Some(mut liquids) = world.get_mut::<LiquidModule>(e) {
         liquids.add(liquid, amount, capacity);
     }
@@ -1269,24 +1391,38 @@ fn handle_reload(
     if state.reload_counter < config.reload {
         let ammo = peek_ammo_state(state, ctx.world, e);
         state.reload_counter += config.ammo_reload_multiplier(ammo, ctx.content) * eff;
-        if config.uses_coolant()
-            && let Some(liquids) = ctx.world.get::<LiquidModule>(e)
-        {
-            // Coolant capacity from the current liquid (`Liquid.heatCapacity`).
-            let mut capacity = 0.0f32;
-            for (index, amount) in liquids.liquids.iter().enumerate() {
-                if *amount > 0.0 {
-                    let id = LiquidId::new(index as u16);
-                    if let Some(liquid) = ctx.content.liquid(id)
-                        && liquid.coolant
-                    {
-                        capacity = capacity.max(liquid.heat_capacity);
-                    }
+        // `ReloadTurretBuild.updateCooling` (`coolant.efficiency > 0 &&
+        // efficiency > 0`): `getConsumed` picks the stored filter liquid,
+        // `coolant.update` drains it and the reload gains
+        // `amount * edelta * heatCapacity * coolantMultiplier * ammoReloadMultiplier`.
+        if config.uses_coolant() && eff > 0.0 {
+            let consumed = ctx.world.get::<LiquidModule>(e).and_then(|liquids| {
+                config
+                    .coolant_liquids
+                    .iter()
+                    .copied()
+                    .filter(|l| liquids.get(*l) > 0.0)
+                    .max_by(|a, b| {
+                        liquids
+                            .get(*a)
+                            .partial_cmp(&liquids.get(*b))
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .map(|l| (l, liquids.get(l)))
+            });
+            if let Some((liquid, stored)) = consumed {
+                let needed = config.coolant_amount * eff;
+                let coolant_eff = (stored / needed.max(1e-8)).min(1.0);
+                let capacity = ctx.content.liquid(liquid).map_or(0.4, |l| l.heat_capacity);
+                if let Some(mut liquids) = ctx.world.get_mut::<LiquidModule>(e) {
+                    liquids.remove(liquid, needed);
                 }
-            }
-            if capacity > 0.0 {
-                state.reload_counter +=
-                    config.coolant_amount * capacity * config.coolant_multiplier;
+                state.reload_counter += config.coolant_amount
+                    * coolant_eff
+                    * eff
+                    * capacity
+                    * config.coolant_multiplier
+                    * config.ammo_reload_multiplier(ammo, ctx.content);
             }
         }
     }

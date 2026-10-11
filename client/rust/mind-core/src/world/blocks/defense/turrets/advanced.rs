@@ -1051,6 +1051,7 @@ pub fn base_config(kind: TurretKind, ammo: TurretAmmo) -> TurretConfig {
         activation_time: 0.0,
         coolant_multiplier: 1.0,
         coolant_amount: 0.0,
+        coolant_liquids: Vec::new(),
         heat_requirement: -1.0,
         max_heat_efficiency: 3.0,
         kind,

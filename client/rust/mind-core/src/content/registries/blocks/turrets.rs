@@ -36,6 +36,9 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         has_items: Some(true),
         solid: Some(true),
         update: Some(true),
+        // `BaseTurret.init`: `coolant.optional = true; coolant.update = false` (PAR-0087).
+        consumes: vec![consume_optional(consume_coolant(0.1f32, true, false)).update(false)],
+        has_liquids: Some(true),
         ..spec("duo", BlockKind::ItemTurret)
     })?;
 
@@ -52,6 +55,9 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         has_items: Some(true),
         solid: Some(true),
         update: Some(true),
+        // `BaseTurret.init`: `coolant.optional = true; coolant.update = false` (PAR-0087).
+        consumes: vec![consume_optional(consume_coolant(0.2f32, true, false)).update(false)],
+        has_liquids: Some(true),
         ..spec("scatter", BlockKind::ItemTurret)
     })?;
 
@@ -66,6 +72,9 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         has_items: Some(true),
         solid: Some(true),
         update: Some(true),
+        // `BaseTurret.init`: `coolant.optional = true; coolant.update = false` (PAR-0087).
+        consumes: vec![consume_optional(consume_coolant(0.1f32, true, false)).update(false)],
+        has_liquids: Some(true),
         ..spec("scorch", BlockKind::ItemTurret)
     })?;
 
@@ -80,6 +89,9 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         has_items: Some(true),
         solid: Some(true),
         update: Some(true),
+        // `BaseTurret.init`: `coolant.optional = true; coolant.update = false` (PAR-0087).
+        consumes: vec![consume_optional(consume_coolant(0.1f32, true, false)).update(false)],
+        has_liquids: Some(true),
         ..spec("hail", BlockKind::ItemTurret)
     })?;
 
@@ -119,7 +131,11 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         has_power: Some(true),
         solid: Some(true),
         update: Some(true),
-        consumes: vec![consume_power(6.0f32)],
+        consumes: vec![
+            consume_power(6.0f32),
+            consume_optional(consume_coolant(0.2f32, true, false)).update(false),
+        ],
+        has_liquids: Some(true),
         ..spec("lancer", BlockKind::PowerTurret)
     })?;
 
@@ -135,7 +151,11 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         has_power: Some(true),
         solid: Some(true),
         update: Some(true),
-        consumes: vec![consume_power(3.3f32)],
+        consumes: vec![
+            consume_power(3.3f32),
+            consume_optional(consume_coolant(0.1f32, true, false)).update(false),
+        ],
+        has_liquids: Some(true),
         ..spec("arc", BlockKind::PowerTurret)
     })?;
 
@@ -176,6 +196,9 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         env_enabled: Some(EnvMask::of(vec![EnvFlag::Space, EnvFlag::Terrestrial])),
         solid: Some(true),
         update: Some(true),
+        // `BaseTurret.init`: `coolant.optional = true; coolant.update = false` (PAR-0087).
+        consumes: vec![consume_optional(consume_coolant(0.3f32, true, false)).update(false)],
+        has_liquids: Some(true),
         ..spec("swarmer", BlockKind::ItemTurret)
     })?;
 
@@ -195,6 +218,9 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         has_items: Some(true),
         solid: Some(true),
         update: Some(true),
+        // `BaseTurret.init`: `coolant.optional = true; coolant.update = false` (PAR-0087).
+        consumes: vec![consume_optional(consume_coolant(0.2f32, true, false)).update(false)],
+        has_liquids: Some(true),
         ..spec("salvo", BlockKind::ItemTurret)
     })?;
 
@@ -256,6 +282,9 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         env_enabled: Some(EnvMask::of(vec![EnvFlag::Space, EnvFlag::Terrestrial])),
         solid: Some(true),
         update: Some(true),
+        // `BaseTurret.init`: `coolant.optional = true; coolant.update = false` (PAR-0087).
+        consumes: vec![consume_optional(consume_coolant(0.3f32, true, false)).update(false)],
+        has_liquids: Some(true),
         ..spec("fuse", BlockKind::ItemTurret)
     })?;
 
@@ -275,6 +304,9 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         has_items: Some(true),
         solid: Some(true),
         update: Some(true),
+        // `BaseTurret.init`: `coolant.optional = true; coolant.update = false` (PAR-0087).
+        consumes: vec![consume_optional(consume_coolant(0.3f32, true, false)).update(false)],
+        has_liquids: Some(true),
         ..spec("ripple", BlockKind::ItemTurret)
     })?;
 
@@ -294,6 +326,9 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         has_items: Some(true),
         solid: Some(true),
         update: Some(true),
+        // `BaseTurret.init`: `coolant.optional = true; coolant.update = false` (PAR-0087).
+        consumes: vec![consume_optional(consume_coolant(0.3f32, true, false)).update(false)],
+        has_liquids: Some(true),
         ..spec("cyclone", BlockKind::ItemTurret)
     })?;
 
@@ -316,7 +351,11 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         env_enabled: Some(EnvMask::of(vec![EnvFlag::Space, EnvFlag::Terrestrial])),
         solid: Some(true),
         update: Some(true),
-        consumes: vec![consume_power(1e+01f32)],
+        consumes: vec![
+            consume_power(1e+01f32),
+            consume_optional(consume_coolant(1.0f32, true, false)).update(false),
+        ],
+        has_liquids: Some(true),
         ..spec("foreshadow", BlockKind::ItemTurret)
     })?;
 
@@ -338,6 +377,9 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         has_items: Some(true),
         solid: Some(true),
         update: Some(true),
+        // `BaseTurret.init`: `coolant.optional = true; coolant.update = false` (PAR-0087).
+        consumes: vec![consume_optional(consume_coolant(1.0f32, true, false)).update(false)],
+        has_liquids: Some(true),
         ..spec("spectre", BlockKind::ItemTurret)
     })?;
 
@@ -360,7 +402,11 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         env_enabled: Some(EnvMask::of(vec![EnvFlag::Space, EnvFlag::Terrestrial])),
         solid: Some(true),
         update: Some(true),
-        consumes: vec![consume_power(17.0f32)],
+        consumes: vec![
+            consume_power(17.0f32),
+            consume_optional(consume_coolant(0.5f32, true, false)).update(false),
+        ],
+        has_liquids: Some(true),
         ..spec("meltdown", BlockKind::LaserTurret)
     })?;
 
@@ -383,6 +429,9 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         env_enabled: Some(EnvMask::of(vec![EnvFlag::Space, EnvFlag::Terrestrial])),
         solid: Some(true),
         update: Some(true),
+        // `BaseTurret.init`: `coolant.optional = true; coolant.update = false` (PAR-0087).
+        consumes: vec![consume_optional(consume_liquid("water", 15.0f32 / 60.0f32)).update(false)],
+        has_liquids: Some(true),
         ..spec("breach", BlockKind::ItemTurret)
     })?;
 
@@ -404,6 +453,9 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         env_enabled: Some(EnvMask::of(vec![EnvFlag::Space, EnvFlag::Terrestrial])),
         solid: Some(true),
         update: Some(true),
+        // `BaseTurret.init`: `coolant.optional = true; coolant.update = false` (PAR-0087).
+        consumes: vec![consume_optional(consume_liquid("water", 15.0f32 / 60.0f32)).update(false)],
+        has_liquids: Some(true),
         ..spec("diffuse", BlockKind::ItemTurret)
     })?;
 
@@ -449,7 +501,11 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         has_items: Some(true),
         solid: Some(true),
         update: Some(true),
-        consumes: vec![consume_liquid("hydrogen", 0.083333336f32)],
+        consumes: vec![
+            consume_liquid("hydrogen", 0.083333336f32),
+            consume_optional(consume_liquid("water", 30.0f32 / 60.0f32)).update(false),
+        ],
+        has_liquids: Some(true),
         ..spec("titan", BlockKind::ItemTurret)
     })?;
 
@@ -470,6 +526,9 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         has_items: Some(true),
         solid: Some(true),
         update: Some(true),
+        // `BaseTurret.init`: `coolant.optional = true; coolant.update = false` (PAR-0087).
+        consumes: vec![consume_optional(consume_liquid("water", 20.0f32 / 60.0f32)).update(false)],
+        has_liquids: Some(true),
         ..spec("disperse", BlockKind::ItemTurret)
     })?;
 
@@ -540,6 +599,9 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         env_enabled: Some(EnvMask::of(vec![EnvFlag::Space, EnvFlag::Terrestrial])),
         solid: Some(true),
         update: Some(true),
+        // `BaseTurret.init`: `coolant.optional = true; coolant.update = false` (PAR-0087).
+        consumes: vec![consume_optional(consume_liquid("water", 15.0f32 / 60.0f32)).update(false)],
+        has_liquids: Some(true),
         ..spec("scathe", BlockKind::ItemTurret)
     })?;
 
@@ -562,6 +624,9 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         env_enabled: Some(EnvMask::of(vec![EnvFlag::Space, EnvFlag::Terrestrial])),
         solid: Some(true),
         update: Some(true),
+        // `BaseTurret.init`: `coolant.optional = true; coolant.update = false` (PAR-0087).
+        consumes: vec![consume_optional(consume_liquid("water", 15.0f32 / 60.0f32)).update(false)],
+        has_liquids: Some(true),
         ..spec("smite", BlockKind::ItemTurret)
     })?;
 
