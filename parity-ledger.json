@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T01:46:30Z",
+  "updated": "2026-10-11T01:47:55Z",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -15253,113 +15253,33 @@
       "title": "Tech tree dialog: Back / Core Database / planet tab / node research click",
       "surface": "world",
       "parent": "PAR-0046",
-      "status": "reference",
-      "updated": "2026-10-11T00:17:12Z",
+      "status": "blocked",
+      "updated": "2026-10-11T01:47:55Z",
       "discovered_by": "runs/20261009-065416-ref-ground-zero/",
       "path": {
-        "to": "tech tree open (groundZero)",
+        "to": "in-game Ground Zero > tree button > research dialog",
         "java": [],
         "godot": [
           {
             "tool": "godot_exec",
             "params": {
-              "action": "eval",
-              "code": "var ui = get_node(\\\"/root/MindUi\\\")\\nreturn str(ui.open_dialog(\\\"research\\\", JSON.stringify({\\\"planet\\\": \\\"serpulo\\\"})))"
+              "code": "input-tree 968,620 -> stack [research]; info 211,53 -> [research, content]; ESC x2 -> [] playing"
             }
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "var d = get_node(\\\"/root/Spine/Ui/UiRoot/DialogLayer/research\\\")\\nvar c0 = d._roots.get_child(0)\\nvar c1 = d._roots.get_child(1)\\nvar r0 = (c0 as Control).get_global_rect()\\nvar r1 = (c1 as Control).get_global_rect()\\nreturn {\\\"root_name\\\": d._root_name, \\\"rail0\\\": [int(r0.position.x), int(r0.position.y), int(r0.size.x), int(r0.size.y)], \\\"rail1\\\": [int(r1.position.x), int(r1.position.y), int(r1.size.x), int(r1.size.y)], \\\"pressed\\\": [c0.button_pressed, c1.button_pressed], \\\"node_rows\\\": d._nodes.get_children().size()}"
-            },
-            "note": "fresh fixture: serpulo pressed, rails (10,40) and (10,78) 176x34"
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "var d = get_node(\\\"/root/Spine/Ui/UiRoot/DialogLayer/research\\\")\\nvar b1 = d._roots.get_child(1)\\nb1.emit_signal(\\\"pressed\\\")\\nvar c0 = d._roots.get_child(0)\\nvar c1 = d._roots.get_child(1)\\nvar r0 = (c0 as Control).get_global_rect()\\nvar r1 = (c1 as Control).get_global_rect()\\nvar n0 = (d._nodes.get_child(0) as Control).get_global_rect()\\nreturn {\\\"root_name\\\": d._root_name, \\\"rail0\\\": [int(r0.position.x), int(r0.position.y), int(r0.size.x), int(r0.size.y)], \\\"rail1\\\": [int(r1.position.x), int(r1.position.y), int(r1.size.x), int(r1.size.y)], \\\"pressed\\\": [c0.button_pressed, c1.button_pressed], \\\"node_rows\\\": d._nodes.get_children().size(), \\\"node_row0\\\": [int(n0.position.x), int(n0.position.y)]}"
-            },
-            "note": "exact EV-0042 repro: <null> root, 222 rows, rails stay vertical (no stacked queue_sort bug)"
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "var d = get_node(\\\"/root/Spine/Ui/UiRoot/DialogLayer/research\\\")\\nvar p = (d._roots.get_child(0) as Control).get_global_rect().get_center()\\nreturn {\\\"x\\\": int(p.x), \\\"y\\\": int(p.y)}"
-            },
-            "note": "real-input path (stronger): target (98,57)"
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "button": "MOUSE_BUTTON_LEFT",
-              "position": {
-                "x": 98,
-                "y": 57
-              },
-              "coords": "viewport",
-              "pressed": true
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "button": "MOUSE_BUTTON_LEFT",
-              "position": {
-                "x": 98,
-                "y": 57
-              },
-              "coords": "viewport",
-              "pressed": false
-            }
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "Input.flush_buffered_events()\\nvar d = get_node(\\\"/root/Spine/Ui/UiRoot/DialogLayer/research\\\")\\nreturn {\\\"root_name\\\": d._root_name, \\\"node_rows\\\": d._nodes.get_children().size()}"
-            },
-            "note": "back to serpulo, 1 row"
-          },
-          {
-            "tool": "godot_screenshot",
-            "params": {
-              "action": "game"
-            },
-            "note": "-> godot/step-04-root-serpulo.png"
           }
         ],
         "confirm": {
-          "java": "runs/20261009-065416-ref-ground-zero/java/r04-00-techtree.png"
+          "godot": "the dialog opens and escape returns to the world",
+          "java": "r04-03-world.png"
         },
-        "last_replayed": "runs/20261010-090321-research-root-switch/"
+        "last_replayed": "runs/20261011-114657-PAR-0047/ (tree button -> research; info -> content; hover tooltips; ESC -> world)"
       },
-      "run": "runs/20261009-065416-ref-ground-zero/",
+      "run": "runs/20261011-114657-PAR-0047/",
       "reproduce": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "image_centers": {
-                "Back": [
-                  437,
-                  603
-                ],
-                "Core Database": [
-                  678,
-                  603
-                ],
-                "Serpulo tab": [
-                  578,
-                  33
-                ],
-                "node_click": "spends when selectable+affordable (desktop), else shows info on hover"
-              },
-              "screen": "image + (50,98)"
+              "frames": "runs/20261009-065416-ref-ground-zero/java/r05-02-hover.png + r05-14-researched.png + r04-03-world.png"
             }
           }
         ],
@@ -15367,85 +15287,33 @@
           {
             "tool": "godot_exec",
             "params": {
-              "action": "eval",
-              "code": "var ui = get_node(\\\"/root/MindUi\\\")\\nreturn str(ui.open_dialog(\\\"research\\\", JSON.stringify({\\\"planet\\\": \\\"serpulo\\\"})))"
+              "code": "tree button -> research; hover rows; info; ESC"
             }
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "var d = get_node(\\\"/root/Spine/Ui/UiRoot/DialogLayer/research\\\")\\nvar c0 = d._roots.get_child(0)\\nvar c1 = d._roots.get_child(1)\\nvar r0 = (c0 as Control).get_global_rect()\\nvar r1 = (c1 as Control).get_global_rect()\\nreturn {\\\"root_name\\\": d._root_name, \\\"rail0\\\": [int(r0.position.x), int(r0.position.y), int(r0.size.x), int(r0.size.y)], \\\"rail1\\\": [int(r1.position.x), int(r1.position.y), int(r1.size.x), int(r1.size.y)], \\\"pressed\\\": [c0.button_pressed, c1.button_pressed], \\\"node_rows\\\": d._nodes.get_children().size()}"
-            },
-            "note": "fresh fixture: serpulo pressed, rails (10,40) and (10,78) 176x34"
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "var d = get_node(\\\"/root/Spine/Ui/UiRoot/DialogLayer/research\\\")\\nvar b1 = d._roots.get_child(1)\\nb1.emit_signal(\\\"pressed\\\")\\nvar c0 = d._roots.get_child(0)\\nvar c1 = d._roots.get_child(1)\\nvar r0 = (c0 as Control).get_global_rect()\\nvar r1 = (c1 as Control).get_global_rect()\\nvar n0 = (d._nodes.get_child(0) as Control).get_global_rect()\\nreturn {\\\"root_name\\\": d._root_name, \\\"rail0\\\": [int(r0.position.x), int(r0.position.y), int(r0.size.x), int(r0.size.y)], \\\"rail1\\\": [int(r1.position.x), int(r1.position.y), int(r1.size.x), int(r1.size.y)], \\\"pressed\\\": [c0.button_pressed, c1.button_pressed], \\\"node_rows\\\": d._nodes.get_children().size(), \\\"node_row0\\\": [int(n0.position.x), int(n0.position.y)]}"
-            },
-            "note": "exact EV-0042 repro: <null> root, 222 rows, rails stay vertical (no stacked queue_sort bug)"
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "var d = get_node(\\\"/root/Spine/Ui/UiRoot/DialogLayer/research\\\")\\nvar p = (d._roots.get_child(0) as Control).get_global_rect().get_center()\\nreturn {\\\"x\\\": int(p.x), \\\"y\\\": int(p.y)}"
-            },
-            "note": "real-input path (stronger): target (98,57)"
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "button": "MOUSE_BUTTON_LEFT",
-              "position": {
-                "x": 98,
-                "y": 57
-              },
-              "coords": "viewport",
-              "pressed": true
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "button": "MOUSE_BUTTON_LEFT",
-              "position": {
-                "x": 98,
-                "y": 57
-              },
-              "coords": "viewport",
-              "pressed": false
-            }
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "Input.flush_buffered_events()\\nvar d = get_node(\\\"/root/Spine/Ui/UiRoot/DialogLayer/research\\\")\\nreturn {\\\"root_name\\\": d._root_name, \\\"node_rows\\\": d._nodes.get_children().size()}"
-            },
-            "note": "back to serpulo, 1 row"
-          },
-          {
-            "tool": "godot_screenshot",
-            "params": {
-              "action": "game"
-            },
-            "note": "-> godot/step-04-root-serpulo.png"
           }
         ],
-        "compare": []
+        "compare": [
+          "the research/hover halves require PAR-0145's node rows"
+        ]
       },
-      "steps": [],
+      "steps": [
+        {
+          "action": "open research from the in-game tree button",
+          "result": "dialog [research]; one disabled core-shard row; rail Serpulo + techtree.<null>"
+        },
+        {
+          "check": "info opens [research, content]; the tooltips render; ESC returns to the world"
+        },
+        {
+          "blocked": "the research click + node hover popups need PAR-0145 (view root grouping + node surface)"
+        }
+      ],
       "mismatch": null,
       "fix": {
-        "status": "open"
+        "status": "blocked-on-PAR-0145",
+        "summary": "the research-row data/layout is PAR-0145; this item resumes after it"
       },
       "verified": null,
-      "note": "Revealed by R04. Planet Items counter (top-left, 670 copper) and the researchable-node semantics recorded; Back/Core Database not yet mirrored. Root-switch replayed 2026-10-10 at 7825590 (runs/20261010-090321-research-root-switch/): rail geometry vertical after both the emit_signal repro and a real click; <null> 222 rows / serpulo 1 row.",
+      "note": "Blocked half: the research click (r05-14) and node hover popups (r05-02) are not exercisable - campaign_views.research has only node[0] rooted 'serpulo' and the dialog shows one disabled row + techtree.<null>. Verified half: info dialog, tooltips, escape/back to the world.",
       "reference": {
         "captured": "2026-10-09T07:00:00Z",
         "profile": "fresh",
@@ -15471,7 +15339,13 @@
           "launch -> window normalize -> Play > Campaign > Serpulo OK -> Ground Zero -> Launch (R00 frames) -> in-game HUD (R00-R07 frames)"
         ]
       },
-      "evidence_note": "Planet-page Tech Tree open (PAR-0021 run runs/20261011-100525-PAR-0021): DialogLayer/research opens with the Serpulo tab but (a) the tree renders empty, (b) a raw label \"techtree.<null>\" shows under the tab (a formatted key with a null argument), (c) it opens over the menu backdrop (MenuGroup/menu visuals) instead of stacking over the planet view (Java keeps the planet page behind). Frames: runs/20261011-100525-PAR-0021/godot/step-01-techtree.png vs runs/20261009-065416-ref-ground-zero/java/r05-01-tree.png (Java: full tree + Back/Core Database, no raw label). Rules dialog (PAR-0023 run runs/20261011-101019-PAR-0023): opens over the menu backdrop instead of stacking over the planet view (same stack divergence as the planet-page Tech Tree). Frame: runs/20261011-101019-PAR-0023/godot/step-02-erekir-rules.png."
+      "evidence_note": "Planet-page Tech Tree open (PAR-0021 run runs/20261011-100525-PAR-0021): DialogLayer/research opens with the Serpulo tab but (a) the tree renders empty, (b) a raw label \"techtree.<null>\" shows under the tab (a formatted key with a null argument), (c) it opens over the menu backdrop (MenuGroup/menu visuals) instead of stacking over the planet view (Java keeps the planet page behind). Frames: runs/20261011-100525-PAR-0021/godot/step-01-techtree.png vs runs/20261009-065416-ref-ground-zero/java/r05-01-tree.png (Java: full tree + Back/Core Database, no raw label). Rules dialog (PAR-0023 run runs/20261011-101019-PAR-0023): opens over the menu backdrop instead of stacking over the planet view (same stack divergence as the planet-page Tech Tree). Frame: runs/20261011-101019-PAR-0023/godot/step-02-erekir-rules.png.",
+      "claim": {
+        "by": "parity-hunt-s1",
+        "at": "2026-10-11T01:46:57Z",
+        "prior_status": "reference",
+        "released_at": "2026-10-11T01:47:55Z"
+      }
     },
     {
       "id": "PAR-0048",
