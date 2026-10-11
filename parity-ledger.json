@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T16:24:18+10:00",
+  "updated": "2026-10-11T16:26:23+10:00",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -21126,8 +21126,8 @@
       "title": "Sectors never report or accumulate production while you play them (offline production, exports and the sector panel stay empty)",
       "surface": "campaign",
       "parent": null,
-      "status": "reference",
-      "updated": "2026-10-10T14:39:03Z",
+      "status": "in-progress",
+      "updated": "2026-10-11T16:26:23+10:00",
       "discovered_by": null,
       "path": {
         "to": "Campaign -> play a sector with production -> Save & Quit -> planet page sector panel (and wait a campaign turn)",
@@ -21142,7 +21142,7 @@
         "confirm": {},
         "last_replayed": null
       },
-      "run": "runs/20261010-234250-ref-PAR-0070-combat-fx/",
+      "run": "runs/20261011-162529-PAR-0082/",
       "reproduce": {
         "java": [
           "gradlew desktop:run; build a drill + core in a sector; wait a few seconds; hover the sector on the planet page",
@@ -21157,24 +21157,40 @@
         ]
       },
       "steps": [],
-      "mismatch": null,
+      "mismatch": {
+        "step": "resume the captured Ground Zero -> mine 24 copper into the core -> Save & Quit -> read the sector record",
+        "java_frame": "runs/20261010-234250-ref-PAR-0070-combat-fx/java/step-141-sector.png",
+        "godot_frame": null,
+        "diff": null,
+        "note": "Structural mismatch: the record's items/production/rawProduction/export/imports stay {} after real production (core copper 24 at exit). Java: CoreBlock.handleItem -> SectorInfo.handleCoreItem and MinerComp -> handleProduction feed the sector info; Logic.java:538 ticks info.update; SaveVersion.writeMeta -> info.prepare copies the core snapshot into info.items. LIMITATION: the stored Java reference could not display the production rows (under-attack Ground Zero disables production), so verification is structural against the upstream semantics + the recorded surface.",
+        "metrics": {
+          "core_copper_at_exit": 24,
+          "record_items": {},
+          "record_production": {},
+          "record_raw_production": {}
+        },
+        "evidence": [
+          "runs/20261011-162529-PAR-0082/godot/state-01-record-empty-after-production.json",
+          "runs/20261010-234250-ref-PAR-0070-combat-fx/java/step-141-sector.png"
+        ]
+      },
       "fix": {
         "status": "open",
         "commit": null,
         "summary": null,
         "plan": {
-          "round": 0,
-          "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
-          "seam": "the live campaign never feeds or refreshes SectorInfo: no caller of SectorInfoState::update/prepare/write and CoreCampaignHooks defaults to a no-op, so the production_pass/export_import_pass maps stay empty",
+          "round": 1,
+          "state": "mismatch reproduced in-engine 2026-10-11 (run runs/20261011-162529-PAR-0082/); implementation deferred to the next iteration with this plan",
+          "seam": "the live campaign never feeds or refreshes SectorInfo: CoreCampaignHooks has no live impl (NoopCoreCampaignHooks installed), campaign_tick_system never drains deltas or ticks info.update, the miner never calls handle_production, and the save path never runs prepare/save_info",
           "files": [
-            "client/rust/mind-core/src/game/sector.rs:324",
-            "client/rust/mind-core/src/game/sector.rs:334",
-            "client/rust/mind-core/src/world/blocks/storage/core_block.rs:116",
-            "client/rust/mind-core/src/game/runtime.rs:183",
-            "client/rust/mind-core/src/io/sim_io.rs:264"
+            "client/rust/mind-core/src/world/blocks/storage/core_block.rs (CoreCampaignHooks impl + install)",
+            "client/rust/mind-core/src/game/runtime.rs (campaign_tick_system drain + update)",
+            "client/rust/mind-core/src/game/sector.rs (update/prepare already implemented)",
+            "client/rust/mind-core/src/ai/types/player.rs (miner handle_production, Java MinerComp.java:98)",
+            "client/rust/mind-core/src/io/sim_io.rs (save-boundary prepare)"
           ],
-          "approach": "1) Implement `CoreCampaignHooks` over the live `CampaignRuntime` so core item deltas reach the played sector's `handle_core_item`/`handle_production` (upstream CoreBlock.java:794/808/881/895); wire LaunchPad/LandingPad import/export when those blocks land. 2) In `campaign_tick_system` or a new `TickSet::Campaign` system, call `sector.info.update(1/60, item_index_of)` for the played sector each tick (Logic.java:538) and flush on the autosave cadence. 3) At the save boundary (`SimIoHandler::save` / `live_meta_tags`), build a `CoreSnapshot` from the world and call `SectorInfoState::prepare` + `save_info` (SaveVersion.java:116-118).",
-          "narrow_check": "cargo test -p mind-core world::blocks::storage + a headless scenario that runs a core-fed production line for N ticks, then asserts the sector's production window/items are non-zero and survive a save/load",
+          "approach": "1) Add a campaign hooks impl holding a shared Arc<Mutex<CampaignHookSnapshot>> {is_campaign, default_team, pending_core: Vec<(ItemId,i32)>, pending_production: Vec<(ItemId,i32)>}; the core_block call sites already invoke handle_core_item, so the impl only needs to queue. 2) Install CoreHooks(Arc::new(campaign_impl)) when a campaign runtime is set up (host put_campaign_runtime / the sim builder's campaign branch) and refresh the snapshot on session changes. 3) In campaign_tick_system: drain the queues into the played sector's info.handle_core_item/handle_production (index via the ContentIndex reverse map), then call info.update(1.0/TICKS_PER_SECOND, item_index_of) (Logic.java:538). 4) Call the hooks' handle_production from the miner's update_mining per mined item (MinerComp.java:98). 5) At the save boundary build a CoreSnapshot from the live world (cores' ItemModule + storage capacity + spawn) and call info.prepare + save_info before the meta write (SaveVersion.java:116-118); reuse MindCampaign::persist_sector_record for the record write/flush.",
+          "narrow_check": "cargo test -p mind-core world::blocks::storage + a headless scenario running a core-fed production line for N ticks asserting the sector's production window/items are non-zero and survive save/load; in-engine: resume a sector, mine/feed the core, Save & Quit, assert the record's items/production are non-empty",
           "evidence": {
             "java": [
               "../Mindustry/core/src/mindustry/core/Logic.java:538",
@@ -21183,10 +21199,9 @@
               "../Mindustry/core/src/mindustry/world/blocks/storage/CoreBlock.java:794"
             ],
             "godot": [
+              "runs/20261011-162529-PAR-0082/godot/state-01-record-empty-after-production.json",
               "client/rust/mind-core/src/game/sector.rs:324",
-              "client/rust/mind-core/src/game/sector.rs:334",
-              "client/rust/mind-core/src/world/blocks/storage/core_block.rs:56",
-              "client/rust/mind-core/src/io/sim_io.rs:264"
+              "client/rust/mind-core/src/game/runtime.rs:181"
             ]
           }
         }
@@ -21194,15 +21209,8 @@
       "verified": null,
       "note": "Code-scan 2026-10-10 (campaign): S2/high. `SectorInfoState::update` (sector.rs:324) and `prepare` (sector.rs:334) have zero non-test callers; the only `CoreCampaignHooks` impl is a test `Incinerating` (core_block.rs:442-455) so `handle_core_item` never records live deltas; `SimIoHandler`'s live meta write (sim_io.rs:264-299) never runs `prepare`/`saveInfo`. `Campaign::run_turn`'s production/import passes (universe.rs:588-656) read `info.production`/`info.export`, which therefore stay empty: offline production and legacy-pad imports/exports are dead, and the planet panel's production/export/import/stored rows never populate. Sibling of the sector-info load item above. Related existing items (do not duplicate): PAR-0015/PAR-0016 render the panel itself. In-engine verification pending.",
       "evidence": [
-        "../Mindustry/core/src/mindustry/core/Logic.java:538",
-        "../Mindustry/core/src/mindustry/io/SaveVersion.java:117",
-        "../Mindustry/core/src/mindustry/game/SectorInfo.java:260",
-        "../Mindustry/core/src/mindustry/world/blocks/storage/CoreBlock.java:794",
-        "client/rust/mind-core/src/game/sector.rs:324",
-        "client/rust/mind-core/src/game/sector.rs:334",
-        "client/rust/mind-core/src/world/blocks/storage/core_block.rs:56",
-        "client/rust/mind-core/src/io/sim_io.rs:264",
-        "client/rust/mind-core/src/game/universe.rs:588"
+        "runs/20261011-162529-PAR-0082/godot/state-01-record-empty-after-production.json",
+        "client/rust/mind-core/src/game/sector.rs:324"
       ],
       "reference": {
         "captured": "2026-10-11T01:00:00Z",
@@ -21230,6 +21238,13 @@
         "java_path": [
           "Play > Campaign -> select the sector -> panel captured; Stats under-attack variant"
         ]
+      },
+      "claim": {
+        "by": "parity-hunt-s1",
+        "at": "2026-10-11T16:25:29+10:00",
+        "prior_status": "reference",
+        "released_at": "2026-10-11T16:27:30+10:00",
+        "reason": "mismatch reproduced + round-1 fix plan recorded; implementation resumes from the plan"
       }
     },
     {
