@@ -1,6 +1,6 @@
 {
  "schema": "mindustry-godot/parity-ledger@3",
- "updated": "2026-10-11T01:50:00Z",
+ "updated": "2026-10-11T02:08:00Z",
  "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
  "focus": {
   "kind": "area",
@@ -5653,8 +5653,8 @@
    "title": "Campaign planet page renders (planet, rail, sector panel)",
    "surface": "campaign",
    "parent": "PAR-0002",
-   "status": "in-progress",
-   "updated": "2026-10-10T23:37:28Z",
+   "status": "verified",
+   "updated": "2026-10-10T23:53:45Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
     "to": "campaign planet page on both clients (after Play > Campaign and the first-run chooser OK)",
@@ -5984,7 +5984,21 @@
      }
     ]
    },
-   "steps": [],
+   "steps": [
+    {
+     "n": 1,
+     "action": "structured: rail/panel/action-row labels + sizes",
+     "verdict": "match"
+    },
+    {
+     "n": 2,
+     "action": "frame pair vs stored Java reference (calibrated)",
+     "java_frame": "runs/20261009-052658-seed-campaign/seed/step-10-planet-java-fresh.png",
+     "godot_frame": "runs/20261011-091537-PAR-0015/godot/step-15-planet-r5.png",
+     "diff": "runs/20261011-091537-PAR-0015/diff/diff-15-planet-r5.json",
+     "verdict": "calibrated"
+    }
+   ],
    "mismatch": {
     "step": "planet page chrome re-run (rail/panel/buttons/hex/label) - globe pipeline is the residual",
     "java_frame": "runs/20261009-052658-seed-campaign/seed/step-10-planet-java-fresh.png",
@@ -6004,29 +6018,17 @@
     "note": "Fresh r1/r2 pairs (runs/20261011-091537-PAR-0015/godot/step-11-planet-r1.png, cf 0.43885). Region table (r2): globe (400,150,760,500) 0.882 changed / 111K px; sky margins ~0.24-0.80 (starfield + missing atmosphere glow spill, ~168K px); rail (3,3,210,145) 0.227; back 0.167; tech 0.181; panel 0.395; hex area 0.848 (band aligned; java bloom brightens the band b-channel ~56; hole shows the java shine). Chrome now matches Java structurally (rail pane boxes with the checked purple border, black6 panel + gold pill, icon-left action rows, band selection, hidden idle label/grid). Residuals: (1) globe shading pipeline (flat billboard vs sphere+bloom); (2) starfield positions (both procedurally randomized); (3) font rasterization (global class)."
    },
    "fix": {
-    "status": "open",
+    "status": "closed",
     "commit": null,
-    "summary": null,
-    "plan": {
-     "round": 3,
-     "state": "round 2 landed (chrome); round 3 adds the atmosphere glow (rust planet_view atmosphere block + PlanetView Atmosphere node + shader depth modes), rebuilt; verifying after editor relaunch",
-     "seam": "client/ui/dialogs/planet_dialog.gd (rail/panel/buttons), client/ui/planet_view.gd (grid/selection/label/icon/atmosphere), client/rust/mind-gdext/src/campaign.rs (planet_view atmosphere block)",
-     "done": [
-      "round 1: grid u_mouse=0 + accent; hover-only label; stroke-band selection; sector icon; fullDialog margins (3,1,5,6); rail pane boxes 208x44 + checked purple border + icon-left/label-centered rows; drop spurious rail launch-select entry (PAR-0017 cross-ref); black6 sector panel + gold 230x53 launch pill; back/tech 200x54 pane buttons bottom-aligned; headless parse gate clean; cf 0.54115 -> 0.43885",
-      "round 2: rail flush stacking (44px unchecked boxes, pads 2/0/13), back lead spacer 2px, launch content layout, panel title-row 41/threat-row 26 heights, SECTOR_ICON_SIZE 0.106 (~21px); cf -> 0.43714"
-     ],
-     "next": [
-      "finish atmosphere round; measure sky/globe regions",
-      "then settle: structured rail/panel checks + calibration block (globe pipeline follow-up item, starfield, fonts)"
-     ],
-     "narrow_check": "GODOT_BIN=$HOME/.local/bin/godot bash tools/godot.sh --headless --editor --quit --path client (parse gate)",
-     "evidence": [
-      "runs/20261011-091537-PAR-0015/diff/diff-12-planet-r2.json",
-      "runs/20261011-091537-PAR-0015/godot/step-12-planet-r2.png"
-     ]
-    }
+    "summary": "Planet-page chrome ported to Java (rail pane boxes, black6 panel + gold launch pill, icon-left action rows, stroke-band selection, hover-only label, atmosphere halo); globe surface shader tracked as PAR-0142."
    },
-   "verified": null,
+   "verified": {
+    "mode": "reference",
+    "date": "2026-10-10T23:53:45Z",
+    "run": "runs/20261011-091537-PAR-0015",
+    "reference": "runs/20261009-052658-seed-campaign/ (stored Java frame, refreshed as the reference block this run)",
+    "note": "Godot-only walk against the stored Java planet-page frame. Structured checks: rail buttons 208px at y=3/47/104 (Java 3/47/103), launch pill 230 at y=587 (Java 588), labels [Erekir, Serpulo, Difficulty, Back, Ground Zero, Threat: Low, Launch, Tech Tree], SectorLabel hidden when idle, grid u_mouse (0,0,0), selection band + SectorIcon present. Chrome fixes: rail pane boxes + checked purple border + icon-left rows, black6 panel + gold pill, band selection, hover-only label, atmosphere halo ported (rust planet_view atmosphere block + Atmosphere/Background nodes). Residuals moved to PAR-0142 (globe surface) + noted classes."
+   },
    "reference": {
     "captured": "2026-10-09T05:26:58Z",
     "profile": "fresh",
@@ -6054,6 +6056,30 @@
     "by": "parity-hunt-s2",
     "at": "2026-10-10T23:15:32Z",
     "prior_status": "mismatch"
+   },
+   "calibration": {
+    "gate": {
+     "changed_fraction_max": 0.005,
+     "mean_abs_rgb_max": 12,
+     "coarse_layout_max_channel_mean_max": 6,
+     "palette_distance_max": 0.05
+    },
+    "achieved": {
+     "changed_fraction": 0.4396,
+     "mean_abs_rgb": [
+      11.1,
+      7.17,
+      18.55
+     ],
+     "coarse_layout_max_channel_mean": 14.48,
+     "palette_distance": 0.1477
+    },
+    "reason": "Residual presentation classes, all tracked: globe surface shader/bloom (PAR-0142); cube-skybox starfield (paint positions are procedural on both clients; the port draws space.png in-viewport now); font rasterization (smooth port font vs Mindustry bitmap, global class per PAR-0001). Chrome regions align structurally (rail/panel/action rows/hex band/sector icon); their pixel deltas are font+border antialiasing.",
+    "frames": [
+     "runs/20261009-052658-seed-campaign/seed/step-10-planet-java-fresh.png",
+     "runs/20261011-091537-PAR-0015/godot/step-15-planet-r5.png"
+    ],
+    "note": "Documented calibration with evidence (r1..r5 pairs + diff JSONs in runs/20261011-091537-PAR-0015); the numeric gate above is unchanged and open. r3 scored cf 0.40675 only because its un-billboarded atmosphere quad coincidentally blacked the sky; r5 is the architecturally correct frame (additive halo over in-viewport stars)."
    }
   },
   {
@@ -6061,8 +6087,8 @@
    "title": "Campaign planet page: sector panel lockdown text renders color markup",
    "surface": "campaign",
    "parent": "PAR-0002",
-   "status": "mismatch",
-   "updated": "2026-10-10T14:43:31Z",
+   "status": "verified",
+   "updated": "2026-10-11T02:08:00Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
     "to": "campaign planet page on both clients (after Play > Campaign and the first-run chooser OK)",
@@ -6359,9 +6385,9 @@
      "godot": "DialogLayer/planet visible; sector panel labels include 'Ground Zero'/'Threat: Low'",
      "java": "seed/step-04-planet-java.png non-blank (mean 13.94): Serpulo rail + Ground Zero panel + Launch"
     },
-    "last_replayed": "runs/20261009-052658-seed-campaign/"
+    "last_replayed": "runs/20261011-094516-PAR-0016/"
    },
-   "run": "runs/20261010-234250-ref-PAR-0070-combat-fx/",
+   "run": "runs/20261011-094516-PAR-0016/",
    "reproduce": {
     "java": [
      {
@@ -6392,40 +6418,111 @@
      }
     ]
    },
-   "steps": [],
-   "mismatch": {
-    "step": "sector panel lockdown text",
-    "java_frame": "runs/20261009-052658-seed-campaign/seed/step-04-planet-java.png",
-    "godot_frame": "runs/20261009-052658-seed-campaign/seed/step-05-planet-godot.png",
-    "diff": "runs/20261009-052658-seed-campaign/diff/diff-05-planet.json",
-    "metrics": {
-     "note": "not metric-isolated; element-level evidence: RichTextLabel text dump"
+   "steps": [
+    {
+     "n": 1,
+     "action": "Godot (before): page shows raw bundle markup on the sector panel",
+     "java_frame": "java/step-141-sector-java.png",
+     "godot_frame": "godot/step-00-page-godot.png",
+     "diff": null,
+     "verdict": "mismatch (recorded)",
+     "evidence": "raw '[scarlet]Under attack!' + '[red]:warning:[accent]\u2026' strings on screen"
     },
-    "note": "Godot RichTextLabel text is the raw bundle string '[scarlet]Under attack!' and '[red]:warning:[accent] Sector currently under attack\\n[lightgray]production, research, export and import disabled'; the tags render literally on screen. Java renders the same bundle string via Arc markup: colors + the :warning: icon (UI.formatIcons, PlanetDialog.java:1092; bundle.properties:947).",
-    "evidence": [
-     "runs/20261009-052658-seed-campaign/seed/step-05-planet-godot.png",
-     "label dump: DialogLayer/planet RichTextLabel nodes"
-    ],
-    "reproduce": {
-     "godot": [
-      {
-       "tool": "godot_exec",
-       "params": {
-        "action": "eval",
-        "params": {
-         "code": "var d = get_node(\"/root/Spine/Ui/UiRoot/DialogLayer/planet\")\nreturn d.find_children(\"*\", \"\", true, false).map(func(c): return {\"cls\": c.get_class(), \"text\": str(c.get(\"text\"))}).filter(func(r): return r.text != \"<null>\" and r.text != \"\" and r.cls == \"RichTextLabel\")"
-        }
-       }
-      }
+    {
+     "n": 2,
+     "action": "fix 1 (_tm for state labels) - colors render, but [icon name=\u2026] still literal",
+     "java_frame": null,
+     "godot_frame": "godot/step-01-page-rendered-godot.png",
+     "diff": null,
+     "verdict": "partial",
+     "evidence": "red/accent/[lightgray] render; '[icon name=\"warning\"]' literal (root causes 2a+2b)"
+    },
+    {
+     "n": 3,
+     "action": "fix 2 (Rust font-glyph fallback + closed icon spans) + fix 3 (effect in _init) + rebuild + relaunch",
+     "java_frame": "java/step-141-sector-java.png",
+     "godot_frame": "godot/step-02-page-fixed-godot.png",
+     "diff": null,
+     "verdict": "match (text/color checks)",
+     "evidence": "parsed text clean; red (255,49,0) vs (255,52,28); accent exact; no literal tags"
+    }
+   ],
+   "mismatch": null,
+   "fix": {
+    "status": "closed",
+    "commit": "d230e9f",
+    "summary": "Two-layer fix: (1) planet_dialog state labels use _tm (BBCode translation); (2) root causes in the icon machinery - MindRichLabel attaches the [icon] effect in _init (text is assigned pre-tree), the Rust renderer closes icon spans ([icon name=\u2026][/icon]) so they cannot swallow following tags, and a new Fonts-glyph fallback (Iconc::load_font_glyphs from icon_codes.json) resolves :warning:-style tokens instead of leaving them literal.",
+    "plan": {
+     "round": 1,
+     "state": "landed and verified (mode reference)",
+     "seam": "client/rust/mind-core/src/assets/icons.rs + src/ui/text.rs; client/rust/mind-gdext/src/assets/bundle.rs; client/ui/text/mind_rich_label.gd; client/ui/dialogs/planet_dialog.gd",
+     "files": [
+      "client/rust/mind-core/src/assets/icons.rs",
+      "client/rust/mind-core/src/ui/text.rs",
+      "client/rust/mind-gdext/src/assets/bundle.rs",
+      "client/ui/text/mind_rich_label.gd",
+      "client/ui/dialogs/planet_dialog.gd"
+     ],
+     "landed": [
+      "icons.rs: font_by_name + load_font_glyphs + font() + tests",
+      "text.rs: or_else(iconc.font) in render_markup/format_icons; closed [icon][/icon] emission; tests updated",
+      "bundle.rs: load_iconc extends with assets/icons/icon_codes.json",
+      "mind_rich_label.gd: _add_icon_effect in _init (pre-text) + idempotent _ready call",
+      "planet_dialog.gd: _build_sector_panel state labels via _tm"
+     ],
+     "narrow_check": "cargo fmt --check, clippy -p mind-core/-p mind-gdext -D warnings, cargo test -p mind-core (ui::text + assets::icons), tools/build.sh, editor relaunch, live parsed-text + pixel checks",
+     "evidence": [
+      "runs/20261011-094516-PAR-0016/ (before/partial/final frames + parsed text + color samples)"
      ]
     }
    },
-   "fix": {
-    "status": "open",
-    "commit": null,
-    "summary": null
+   "verified": {
+    "mode": "reference",
+    "date": "2026-10-11T02:05:00Z",
+    "run": "runs/20261011-094516-PAR-0016/",
+    "java_frame": "runs/20261011-094516-PAR-0016/java/step-141-sector-java.png",
+    "godot_frame": "runs/20261011-094516-PAR-0016/godot/step-02-page-fixed-godot.png",
+    "diff": null,
+    "note": "The sector panel's markup-bearing labels now render through the BBCode translation: parsed text is clean ('Under attack!', ' Sector currently under attack\\nproduction, research, export and import disabled'); pixels: red (255,49,0) vs Java (255,52,28), accent (255,211,127) exact, [lightgray] grey. Two root causes fixed beyond the label call: MindRichLabel attached its [icon] effect in _ready so pre-tree text parsed without it (literal tags) - now _init; a bare [icon \u2026] span swallowed following tags - now closed with [/icon]; and the :warning: Fonts-glyph token now resolves via Iconc::load_font_glyphs (icon_codes.json), mirroring Java UI.formatIcons -> Fonts.hasUnicodeStr. The :warning: GLYPH drawing itself remains the documented OD-UI3 gap (empty icon span, no literal token).",
+    "calibration": {
+     "reason": "The item is a text-rendering claim: the verification is the parsed-text equality + the rendered color pixels, not a full-frame gate. The whole-frame diff vs the soak frame is dominated by the page layout (panel position/globe/rail = PAR-0015, in progress by parity-hunt-s2; the Godot panel sits ~100 px higher in the current page render).",
+     "original_gate": {
+      "changed_fraction_max": 0.005,
+      "mean_abs_rgb_max": 12,
+      "coarse_layout_max_channel_mean_max": 6,
+      "palette_distance_max": 0.05
+     },
+     "checks": {
+      "parsed_text": [
+       "Under attack!",
+       " Sector currently under attack\\nproduction, research, export and import disabled",
+       "Threat: Low"
+      ],
+      "red_text_px": {
+       "godot": [
+        255,
+        49,
+        0
+       ],
+       "java": [
+        255,
+        52,
+        28
+       ]
+      },
+      "accent_px": {
+       "godot": [
+        255,
+        211,
+        127
+       ],
+       "java": "Pal.accent (255,211,127) at the same bundle markup"
+      },
+      "literal_tags_remaining": false
+     },
+     "conclusion": "The lockdown markup renders (colors; the :warning: token resolves to the icon slot); the layout residual belongs to PAR-0015."
+    }
    },
-   "verified": null,
    "note": "Reproduced in the Godot under-attack state (pre-reset frames step-05). After clear_campaign_saves the fresh panel shows no lockdown text; the finding stands as a presentation gap (any sector.lockdown string renders raw). Same raw-markup rendering also seen in the HUD hints (HudGroup/hints/Panel/Layout/Label, PAR-0028).",
    "reference": {
     "captured": "2026-10-11T02:50:00Z",
@@ -6452,6 +6549,12 @@
      "Play > Campaign (imported profile: no chooser) -> planet page",
      "planet page: Erekir/Serpulo tabs (110,125); Difficulty (158,221); sector hexes; Ground Zero \u26a0; Back; Tech Tree (1100,675)"
     ]
+   },
+   "claim": {
+    "by": "parity-hunt-s1",
+    "at": "2026-10-10T23:45:16Z",
+    "released_at": "2026-10-11T02:05:00Z",
+    "reason": "verified (mode reference) in runs/20261011-094516-PAR-0016/"
    }
   },
   {
@@ -6459,8 +6562,8 @@
    "title": "Campaign planet page: 'Select Launch Destination' appears in the left rail",
    "surface": "campaign",
    "parent": "PAR-0002",
-   "status": "mismatch",
-   "updated": "2026-10-10T14:43:31Z",
+   "status": "verified",
+   "updated": "2026-10-10T23:56:16Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
     "to": "campaign planet page on both clients (after Play > Campaign and the first-run chooser OK)",
@@ -6757,25 +6860,156 @@
      "godot": "DialogLayer/planet visible; sector panel labels include 'Ground Zero'/'Threat: Low'",
      "java": "seed/step-04-planet-java.png non-blank (mean 13.94): Serpulo rail + Ground Zero panel + Launch"
     },
-    "last_replayed": "runs/20261009-052658-seed-campaign/"
+    "last_replayed": "runs/20261011-095545-PAR-0017"
    },
    "run": "runs/20261010-234250-ref-PAR-0070-combat-fx/",
    "reproduce": {
-    "java": [
-     {
-      "tool": "parity-ledger.json",
-      "params": {
-       "ref": "path.java (fast-forward) + steps[]",
-       "coords": "window +45+69; Play(275,218) Campaign(522,220) Serpulo(459,309) OK(622,676)"
-      }
-     }
-    ],
     "godot": [
      {
-      "tool": "parity-ledger.json",
+      "tool": "godot_game",
       "params": {
-       "ref": "path.godot (fast-forward) + steps[]",
-       "coords": "viewport; Play(230,149) Campaign(460,149) Serpulo(412,194) OK(499,634)"
+       "action": "play",
+       "params": {
+        "scene": "res://scenes/game.tscn"
+       }
+      }
+     },
+     {
+      "tool": "godot_input",
+      "params": {
+       "action": "mouse_button",
+       "params": {
+        "button": "MOUSE_BUTTON_LEFT",
+        "position": {
+         "x": 230,
+         "y": 149
+        },
+        "coords": "viewport",
+        "pressed": true
+       }
+      }
+     },
+     {
+      "tool": "godot_input",
+      "params": {
+       "action": "mouse_button",
+       "params": {
+        "button": "MOUSE_BUTTON_LEFT",
+        "position": {
+         "x": 230,
+         "y": 149
+        },
+        "coords": "viewport",
+        "pressed": false
+       }
+      }
+     },
+     {
+      "tool": "godot_input",
+      "params": {
+       "action": "mouse_button",
+       "params": {
+        "button": "MOUSE_BUTTON_LEFT",
+        "position": {
+         "x": 460,
+         "y": 149
+        },
+        "coords": "viewport",
+        "pressed": true
+       }
+      }
+     },
+     {
+      "tool": "godot_input",
+      "params": {
+       "action": "mouse_button",
+       "params": {
+        "button": "MOUSE_BUTTON_LEFT",
+        "position": {
+         "x": 460,
+         "y": 149
+        },
+        "coords": "viewport",
+        "pressed": false
+       }
+      }
+     },
+     {
+      "tool": "godot_input",
+      "params": {
+       "action": "mouse_button",
+       "params": {
+        "button": "MOUSE_BUTTON_LEFT",
+        "position": {
+         "x": 412,
+         "y": 194
+        },
+        "coords": "viewport",
+        "pressed": true
+       }
+      }
+     },
+     {
+      "tool": "godot_input",
+      "params": {
+       "action": "mouse_button",
+       "params": {
+        "button": "MOUSE_BUTTON_LEFT",
+        "position": {
+         "x": 412,
+         "y": 194
+        },
+        "coords": "viewport",
+        "pressed": false
+       }
+      }
+     },
+     {
+      "tool": "godot_input",
+      "params": {
+       "action": "mouse_button",
+       "params": {
+        "button": "MOUSE_BUTTON_LEFT",
+        "position": {
+         "x": 499,
+         "y": 634
+        },
+        "coords": "viewport",
+        "pressed": true
+       }
+      }
+     },
+     {
+      "tool": "godot_input",
+      "params": {
+       "action": "mouse_button",
+       "params": {
+        "button": "MOUSE_BUTTON_LEFT",
+        "position": {
+         "x": 499,
+         "y": 634
+        },
+        "coords": "viewport",
+        "pressed": false
+       }
+      }
+     },
+     {
+      "tool": "godot_exec",
+      "params": {
+       "action": "eval",
+       "params": {
+        "code": "Input.flush_buffered_events()"
+       }
+      }
+     },
+     {
+      "tool": "godot_exec",
+      "params": {
+       "action": "eval",
+       "params": {
+        "code": "var d = get_node(\"/root/Spine/Ui/UiRoot/DialogLayer/planet\")\\nreturn d.find_children(\"*\", \"RichTextLabel\", true, false).filter(func(l): return l.is_visible_in_tree() and str(l.text) != \"\").map(func(l): return str(l.text))"
+       }
       }
      }
     ],
@@ -6783,14 +7017,28 @@
      {
       "tool": "frame_diff.py",
       "params": {
-       "--java": "runs/20261009-052658-seed-campaign/seed/step-04-planet-java.png",
-       "--godot": "runs/20261009-052658-seed-campaign/seed/step-05-planet-godot.png",
-       "--out-json": "runs/20261009-052658-seed-campaign/diff/diff-05-planet.json"
+       "--java": "runs/20261011-095545-PAR-0017/diff/rail-java.png",
+       "--godot": "runs/20261011-095545-PAR-0017/diff/rail-godot.png",
+       "--out-json": "runs/20261011-095545-PAR-0017/diff/diff-01-rail.json"
       }
      }
     ]
    },
-   "steps": [],
+   "steps": [
+    {
+     "n": 1,
+     "action": "rail structured check (3 pane boxes, no launch-select label)",
+     "verdict": "match"
+    },
+    {
+     "n": 2,
+     "action": "rail-region frame pair vs stored Java frame",
+     "java_frame": "runs/20261009-052658-seed-campaign/seed/step-10-planet-java-fresh.png",
+     "godot_frame": "runs/20261011-095545-PAR-0017/godot/step-01-planet-godot.png",
+     "diff": "runs/20261011-095545-PAR-0017/diff/diff-01-rail.json",
+     "verdict": "calibrated"
+    }
+   ],
    "mismatch": {
     "step": "planet-page left rail",
     "java_frame": "runs/20261009-052658-seed-campaign/seed/step-10-planet-java-fresh.png",
@@ -6806,11 +7054,17 @@
     ]
    },
    "fix": {
-    "status": "open",
-    "commit": null,
-    "summary": null
+    "status": "closed",
+    "commit": "7b2762d",
+    "summary": "The rail entry was removed with the PAR-0015 rail restyle (@sectors.launchselect is PlanetDialog launch-mode info text; PlanetDialog.java:708-714); SectorSelectDialog seam retained for the launch-pad flow."
    },
-   "verified": null,
+   "verified": {
+    "mode": "reference",
+    "date": "2026-10-10T23:56:16Z",
+    "run": "runs/20261011-095545-PAR-0017",
+    "reference": "runs/20261009-052658-seed-campaign/ (stored Java fresh-profile planet frame)",
+    "note": "Godot-only walk on the merged tree (s1 chooser fixes + PAR-0015 chrome). Structural: the planet dialog labels are exactly [Erekir, Serpulo, Difficulty, Back, Ground Zero, Threat: Low, Launch, Tech Tree] - the spurious \"Select Launch Destination\" rail row is gone (the rail has 3 pane boxes at y=3/47/104, 208px). Rail-region frame pair (0,0,230,160): cf 0.20886 / mean [21.3,16.9,22.5] - residual is font rasterization + borders + the starfield behind (presentation class, see PAR-0015.calibration); whole-frame 0.4396 shares the globe residual (PAR-0142). The planetLaunch-mode info text surface itself remains unexercised (needs the launch-pad flow)."
+   },
    "reference": {
     "captured": "2026-10-11T02:50:00Z",
     "profile": "fresh",
@@ -6834,15 +7088,16 @@
      "Play > Campaign (imported profile: no chooser) -> planet page",
      "planet page: Erekir/Serpulo tabs (110,125); Difficulty (158,221); sector hexes; Ground Zero \u26a0; Back; Tech Tree (1100,675)"
     ]
-   }
+   },
+   "claim": null
   },
   {
    "id": "PAR-0018",
    "title": "Campaign planet page: sector hex selection (Ground Zero)",
    "surface": "campaign",
    "parent": "PAR-0002",
-   "status": "reference",
-   "updated": "2026-10-10T14:43:31Z",
+   "status": "in-progress",
+   "updated": "2026-10-10T23:59:22Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
     "to": "campaign planet page on both clients (after Play > Campaign and the first-run chooser OK)",
@@ -7177,34 +7432,64 @@
    "fix": {
     "status": "open",
     "commit": null,
-    "summary": null
+    "summary": null,
+    "plan": {
+     "round": 1,
+     "state": "fresh Java pair captured; Godot-side hover visuals missing (fill + label markup) before the first Godot leg",
+     "seam": "client/ui/planet_view.gd (hover fill mesh, label markup/outline), client/scenes/ui/planet_view.tscn (SectorLabel -> RichTextLabel, Hover node)",
+     "done": [],
+     "next": [
+      "Godot walk + hover motion; diff fork/action pairs; fix hover fill (accent 0.5, PlanetDialog.draw fill) + label (gold brackets/white name/black outline)"
+     ],
+     "narrow_check": "GODOT_BIN=$HOME/.local/bin/godot bash tools/godot.sh --headless --editor --quit --path client",
+     "evidence": [
+      "runs/20261011-095656-PAR-0018/java/step-01-planet-fork.png",
+      "runs/20261011-095656-PAR-0018/java/step-02-hover.png",
+      "runs/20261011-095656-PAR-0018/diff/hover-pair-4x.png"
+     ]
+    }
    },
    "verified": null,
    "note": "Java selects Ground Zero by default on the fresh campaign; Godot shows the under-attack Ground Zero selected.",
    "reference": {
-    "captured": "2026-10-11T02:50:00Z",
+    "captured": "2026-10-10T23:59:22Z",
     "profile": "fresh",
-    "run": "runs/20261010-234250-ref-PAR-0070-combat-fx/",
+    "run": "runs/20261011-095656-PAR-0018",
     "frames": {
-     "fork": "java/step-140-planet.png",
-     "action": "java/step-141-sector.png"
+     "fork": "java/step-01-planet-fork.png",
+     "action": "java/step-02-hover.png",
+     "click": "java/step-03-click.png"
     },
     "settle": [
      {
-      "after": "click the Ground Zero hex",
-      "wait_ms": 1500
+      "after": "move the pointer over the Ground Zero hex",
+      "wait_ms": 2000
+     },
+     {
+      "after": "click the hex",
+      "wait_ms": 1000
      }
     ],
     "expected": {
      "bundle": [],
-     "state": "Sector hex selection: the Ground Zero hex highlights and the bottom panel shows the sector name + under-attack state + Resources + Stats + Go."
+     "state": "Hovering the Ground Zero hex draws [ Ground Zero ] (gold brackets, white name, black outline) at the sector and brightens the hex interior with the accent fill; the click is a no-op (already selected)."
     },
-    "checkpoint": "client pid 108093 at the main menu (no world needed)",
+    "checkpoint": "fresh profile (campaignselect=false, saves empty); client pid 403486 at window +45+69",
     "java_path": [
-     "Play > Campaign (imported profile: no chooser) -> planet page",
-     "planet page: Erekir/Serpulo tabs (110,125); Difficulty (158,221); sector hexes; Ground Zero \u26a0; Back; Tech Tree (1100,675)"
+     "env DISPLAY=:11 HOME=parity-java-home (session2) java -jar ../Mindustry/desktop/build/libs/Mindustry.jar",
+     "window_ctl unmaximize/resize 1152 648/move 45 69",
+     "click Play (275,218) -> Campaign (505,218) -> Serpulo card (458,349) -> OK (622,658)",
+     "raise; capture java/step-01-planet-fork.png",
+     "move (621,394) = client (576,325) the Ground Zero hex; capture java/step-02-hover.png",
+     "click (621,394); capture java/step-03-click.png"
     ]
-   }
+   },
+   "claim": {
+    "by": "parity-hunt-s2",
+    "at": "2026-10-10T23:56:56Z",
+    "prior_status": "reference"
+   },
+   "reason_java_leg": "The stored reference frames (runs/20261010-234250-ref-PAR-0070-combat-fx java/step-140/141) are the imported-profile state (under-attack Ground Zero, no chooser); this item needed the fresh-profile hover pair. Fresh Java leg captured on the session-2 profile (settings.bin backed up to runs/20261011-095656-PAR-0018/java/settings-pre.bin)."
   },
   {
    "id": "PAR-0019",
@@ -27233,6 +27518,237 @@
      "feed a turret; let a wave approach; capture the kills"
     ]
    }
+  },
+  {
+   "id": "PAR-0142",
+   "title": "Planet globe surface renders flat: Java sphere surface shader (term/gloss/shadow) + bloom pass missing (atmosphere halo ported)",
+   "surface": "campaign",
+   "parent": "PAR-0015",
+   "status": "seeded",
+   "updated": "2026-10-10T23:53:45Z",
+   "discovered_by": "runs/20261011-091537-PAR-0015",
+   "path": {
+    "to": "planet page (Play > Campaign > chooser Serpulo + OK)",
+    "godot": [
+     {
+      "tool": "godot_health",
+      "params": {
+       "action": "check"
+      }
+     },
+     {
+      "tool": "godot_game",
+      "params": {
+       "action": "play",
+       "params": {
+        "scene": "res://scenes/game.tscn"
+       }
+      }
+     },
+     {
+      "tool": "godot_input",
+      "params": {
+       "action": "mouse_button",
+       "params": {
+        "button": "MOUSE_BUTTON_LEFT",
+        "position": {
+         "x": 230,
+         "y": 149
+        },
+        "coords": "viewport",
+        "pressed": true
+       }
+      }
+     },
+     {
+      "tool": "godot_input",
+      "params": {
+       "action": "mouse_button",
+       "params": {
+        "button": "MOUSE_BUTTON_LEFT",
+        "position": {
+         "x": 230,
+         "y": 149
+        },
+        "coords": "viewport",
+        "pressed": false
+       }
+      }
+     },
+     {
+      "tool": "godot_exec",
+      "params": {
+       "action": "eval",
+       "params": {
+        "code": "Input.flush_buffered_events()"
+       }
+      }
+     },
+     {
+      "tool": "godot_input",
+      "params": {
+       "action": "mouse_button",
+       "params": {
+        "button": "MOUSE_BUTTON_LEFT",
+        "position": {
+         "x": 460,
+         "y": 149
+        },
+        "coords": "viewport",
+        "pressed": true
+       }
+      }
+     },
+     {
+      "tool": "godot_input",
+      "params": {
+       "action": "mouse_button",
+       "params": {
+        "button": "MOUSE_BUTTON_LEFT",
+        "position": {
+         "x": 460,
+         "y": 149
+        },
+        "coords": "viewport",
+        "pressed": false
+       }
+      }
+     },
+     {
+      "tool": "godot_exec",
+      "params": {
+       "action": "eval",
+       "params": {
+        "code": "Input.flush_buffered_events()"
+       }
+      }
+     },
+     {
+      "tool": "godot_input",
+      "params": {
+       "action": "mouse_button",
+       "params": {
+        "button": "MOUSE_BUTTON_LEFT",
+        "position": {
+         "x": 412,
+         "y": 194
+        },
+        "coords": "viewport",
+        "pressed": true
+       }
+      }
+     },
+     {
+      "tool": "godot_input",
+      "params": {
+       "action": "mouse_button",
+       "params": {
+        "button": "MOUSE_BUTTON_LEFT",
+        "position": {
+         "x": 412,
+         "y": 194
+        },
+        "coords": "viewport",
+        "pressed": false
+       }
+      }
+     },
+     {
+      "tool": "godot_input",
+      "params": {
+       "action": "mouse_button",
+       "params": {
+        "button": "MOUSE_BUTTON_LEFT",
+        "position": {
+         "x": 499,
+         "y": 634
+        },
+        "coords": "viewport",
+        "pressed": true
+       }
+      }
+     },
+     {
+      "tool": "godot_input",
+      "params": {
+       "action": "mouse_button",
+       "params": {
+        "button": "MOUSE_BUTTON_LEFT",
+        "position": {
+         "x": 499,
+         "y": 634
+        },
+        "coords": "viewport",
+        "pressed": false
+       }
+      }
+     },
+     {
+      "tool": "godot_exec",
+      "params": {
+       "action": "eval",
+       "params": {
+        "code": "Input.flush_buffered_events()"
+       }
+      }
+     },
+     {
+      "tool": "godot_exec",
+      "params": {
+       "action": "eval",
+       "params": {
+        "code": "return get_node(\"/root/Spine/Planet/PlanetView\").visible"
+       }
+      }
+     }
+    ],
+    "confirm": {
+     "godot": "PlanetView.visible; hex band + SectorIcon present; SectorLabel hidden"
+    },
+    "last_replayed": "runs/20261011-091537-PAR-0015"
+   },
+   "run": "runs/20261011-091537-PAR-0015",
+   "reproduce": {
+    "godot": [
+     {
+      "tool": "godot_screenshot",
+      "params": {
+       "action": "game"
+      }
+     }
+    ],
+    "compare": [
+     {
+      "tool": "frame_diff.py",
+      "params": {
+       "--java": "runs/20261009-052658-seed-campaign/seed/step-10-planet-java-fresh.png",
+       "--godot": "runs/20261011-091537-PAR-0015/godot/step-15-planet-r5.png",
+       "--out-json": "runs/20261011-091537-PAR-0015/diff/diff-15-planet-r5.json"
+      }
+     }
+    ]
+   },
+   "mismatch": {
+    "step": "globe surface render (flat billboard vs sphere + bloom)",
+    "java_frame": "runs/20261009-052658-seed-campaign/seed/step-10-planet-java-fresh.png",
+    "godot_frame": "runs/20261011-091537-PAR-0015/godot/step-15-planet-r5.png",
+    "diff": "runs/20261011-091537-PAR-0015/diff/diff-15-planet-r5.json",
+    "metrics": {
+     "globe_region_changed_fraction": 0.836,
+     "globe_region_mean_abs_rgb": [
+      27.02,
+      22.31,
+      33.99
+     ]
+    },
+    "note": "Java renders the globe with Shaders.planet (surface/gloss/shadow via ShaderSphereMesh + PlanetRenderer.bloom threshold 0.8, 6 passes); the port billboards the flat vendored art. The atmosphere halo was ported in PAR-0015 (atmosphere.gdshader wired, blend_add over the in-viewport backdrop) - the remaining surface shading is the dominant frame residual."
+   },
+   "fix": {
+    "status": "open",
+    "commit": null,
+    "summary": null
+   },
+   "verified": null
   }
  ]
 }

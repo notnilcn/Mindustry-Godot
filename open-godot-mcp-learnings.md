@@ -1764,3 +1764,17 @@ those paths no longer exist, but the workarounds still apply.
   concatenation (`"..." + cx + "..."`) instead of embedding long template literals
   and mixed quotes in one helper.
 - Run dir: `runs/20261011-092614-PAR-0011/`.
+
+## 2026-10-11 — PAR-0016: RichTextLabel `[icon]` tags rendered literally for pre-tree text
+
+- Symptom: every `[icon name="…"]` tag (all content icons in markup labels) rendered as
+  literal text. Two layers: (a) `MindRichLabel` attached its `MindIconEffect` in `_ready`,
+  but widgets assign `.text` before the label enters the tree — the BBCode was shaped with
+  no effect attached and adding the effect later does not re-parse; (b) a bare
+  `[icon name="…"]` opens an effect span that swallows every following tag as literal
+  content (a stray `[/color]` appeared in the parsed text).
+- Workaround (validated): attach the effect in `_init` (before any text assignment) and
+  close icon spans (`[icon name="…"][/icon]`). Diagnostic: `RichTextLabel.get_parsed_text()`
+  on a live label shows exactly what will draw — use it to tell "tag consumed" from
+  "tag literal".
+- Run dir: `runs/20261011-094516-PAR-0016/`.
