@@ -728,3 +728,20 @@ displays); those paths no longer exist, but the workarounds still apply.
 - Exact call: `timeout 180 bash -c 'until grep -q "Total time to load" runs/20261011-085604-PAR-0010/java/game.log; do sleep 2; done'` from `/home/clintonnguyen/g/code_examples`.
 - Workaround: use the absolute path in the gate (`/home/.../Mindustry-Godot/runs/<stamp>/java/game.log`) or pass an explicit workdir; never start a foreground readiness gate in the same call as a backgrounded `cd ... && ...` list.
 - Run dir: `runs/20261011-085604-PAR-0010/`.
+
+## 2026-10-11 — PAR-0033 Java leg: menu/submenu input + coordinate truth on :10
+
+- The Play submenu needs a **click** in this build: a hover only highlights the row
+  (runs/20261011-110622-PAR-0033/java/r00-05-hoverplay.png, no submenu); the click on
+  Play (client (230,149) -> screen (280,247)) opens the Campaign/Join/Custom/Load column
+  (r00-06). The soak's `+45+69` notes are stale for today's WM: the client area is at
+  **(50,98)** — verify with `xwininfo -id <win>` (Absolute upper-left) and the
+  `capture_screen.py` `region` field before clicking, never from memory.
+- The "Select Starting Campaign" chooser OK button's real box is y 575..635 (client):
+  clicks at y=574 hit the top border and did nothing through four attempts (no error,
+  no log line). Measure the button by cropping the bottom strip (the button's border
+  rows read ~255 luminance) before clicking; center (client (575,605) -> screen
+  (625,703)).
+- The sector Launch button on the fresh planet page: client (575,618) -> screen (625,716).
+- The input row for the record: the tutorial's paste/book/tree/map icons sit at client
+  x 851..1059, y 600..645 (glyph columns 853/905/954/1008).

@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T01:05:17Z",
+  "updated": "2026-10-11T01:21:10Z",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -11263,70 +11263,140 @@
       "title": "Campaign world HUD: Schematics button (paste icon) opens schematics",
       "surface": "world",
       "parent": "PAR-0028",
-      "status": "reference",
-      "updated": "2026-10-10T14:39:55Z",
+      "status": "verified",
+      "updated": "2026-10-11T01:21:10Z",
       "discovered_by": "runs/20261009-065416-ref-ground-zero/",
       "path": {
-        "to": "in-game Ground Zero tutorial start",
+        "to": "in-game Ground Zero (sector 15) with the block pane",
         "java": [],
-        "godot": [],
-        "confirm": {
-          "java": "runs/20261009-065416-ref-ground-zero/java/r00-03-tutorial.png (icon bar)",
-          "godot": "HudGroup visible"
-        },
-        "last_replayed": null
-      },
-      "run": "runs/20261009-065416-ref-ground-zero/",
-      "reproduce": {
-        "java": [
+        "godot": [
           {
-            "tool": "note",
+            "tool": "godot_game",
             "params": {
-              "image_center": [
-                875,
-                627
-              ],
-              "screen_center": [
-                925,
-                725
-              ],
-              "source": "../Mindustry/core/src/mindustry/input/DesktopInput.java:554-558 buildPlacementUI: Icon.paste -> ui.schematics.show(), tooltip @schematics"
+              "action": "play",
+              "scene": "res://scenes/game.tscn"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "Play > Campaign > chooser (Serpulo card, OK) > page action (576,611) -> in-game"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "var b = get_node('/root/Spine/Ui/UiRoot/HudGroup/placement/Panel/Layout/Left/InputBar/input-paste'); return b.get_global_rect()  # (840,596,48,48)"
             }
           }
         ],
-        "godot": [],
-        "compare": []
+        "confirm": {
+          "godot": "SimHost get_state()==playing; input-paste visible in the campaign",
+          "java": "r00-14-tutorial.png non-blank"
+        },
+        "last_replayed": "runs/20261011-110622-PAR-0033/ (Java: Play(280,247) Campaign(522,247) Serpulo(463,378) OK(625,703) Launch(625,716) paste(925,718); Godot: Play > Campaign > chooser > (576,611) > paste (864,620))"
       },
-      "steps": [],
-      "mismatch": null,
+      "run": "runs/20261011-110622-PAR-0033/",
+      "reproduce": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "saves aside + SetSettings campaignselect false + launch (DISPLAY=:10 HOME=parity-java-home); client area verified via xwininfo -id -> (50,98)"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "$PARITY_PY .opencode/skills/parity-eval/scripts/java_input.py click X Y left  # screen = client + (50,98); raise before each click"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "$PARITY_PY .opencode/skills/parity-eval/scripts/capture_screen.py --window-title Mindustry --output <frame>.png"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "Play > Campaign > chooser card (413,280) > OK (576,608) > page action (576,611) (GZ resume or Launch)"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "click the paste button centre via push_input -> MindUi.dialog_stack() == [\"schematics\"]"
+            }
+          }
+        ],
+        "compare": [
+          "frames: godot/hud-43-with-bar-flat.png + godot/hud-44-schematics-dialog-flat.png vs java/r00-14-tutorial.png + java/r00-15-schematics-dialog.png",
+          "region: bar strip mean ~33 / changed 0.53 (glyph AA + differing block icons behind); glyph columns align <=2px"
+        ]
+      },
+      "steps": [
+        {
+          "action": "Java leg (missing action frame): fresh profile -> tutorial -> paste click",
+          "result": "r00-15-schematics-dialog.png (Tags row + card grid + Back/Import)"
+        },
+        {
+          "check": "Godot pre-fix: no input row under the block pane (the buildPlacementUI buttons missing entirely)"
+        },
+        {
+          "fix": "add the input row (placement_fragment.tscn/.gd) + clearNonei transparent at rest (theme_builder.gd)"
+        },
+        {
+          "check": "Godot post-fix: 4 buttons 48px at (840/892/944/996,596); tree/map campaign-gated; paste -> dialog_stack [schematics]; Back -> []"
+        }
+      ],
+      "mismatch": {
+        "step": "pre-fix: the input row absent in the Godot tutorial (the Java frame shows paste/book/tree/map under the pane)",
+        "godot_frame": "runs/20261011-110622-PAR-0033/godot/hud-40-before.png",
+        "java_frame": "runs/20261011-110622-PAR-0033/java/r00-14-tutorial.png",
+        "diff": "runs/20261011-110622-PAR-0033/diff/bar-strip-flat-java-top-godot-bottom.png"
+      },
       "fix": {
-        "status": "open"
+        "status": "done",
+        "commit": "e62d7bf",
+        "summary": "input row added to the block pane (paste/book/tree/map, campaign-gated tree/map) + clearNonei transparent at rest; the four buttons match the Java glyph geometry <=2px and open their dialogs"
       },
-      "verified": null,
-      "note": "Revealed by R00 (bottom-right icon bar). Action not mirrored yet.",
+      "verified": {
+        "mode": "chain",
+        "run": "runs/20261011-110622-PAR-0033/",
+        "reference": "runs/20261011-110622-PAR-0033/java/",
+        "at": "2026-10-11T01:21:01Z"
+      },
+      "note": "Both legs live this run (the Java leg captured the previously-missing action frame). The input row is the shared prerequisite of PAR-0034/0035/0036, which still need their own action walks (the book/tree/map buttons are wired; the database action frame is already staged at runs/20261011-110622-PAR-0033/java/r00-16-database-dialog.png).",
       "reference": {
-        "captured": "2026-10-09T07:00:00Z",
+        "captured": "2026-10-11T01:21:01Z",
         "profile": "fresh",
-        "run": "runs/20261009-065416-ref-ground-zero/",
+        "run": "runs/20261011-110622-PAR-0033/java/",
         "frames": {
-          "fork": "java/r00-02-tutorial.png",
-          "action": "java/r07-00-world.png"
+          "fork": "java/r00-14-tutorial.png",
+          "action": "java/r00-15-schematics-dialog.png",
+          "bonus": "java/r00-16-database-dialog.png"
         },
         "settle": [
           {
-            "after": "capture the tutorial world HUD after launch",
-            "wait_ms": 1500
+            "after": "tutorial HUD + dialog click",
+            "wait_ms": 2000
           }
         ],
         "expected": {
-          "bundle": [],
-          "state": "In-game HUD top-right buttons row (Schematics/paste + Database/book + Tech Tree + Planet map) is present in the tutorial HUD; the schematics dialog open itself was not re-captured in the existing run.",
-          "note": "cross-linked from the Ground Zero reference run (the surface is the tutorial world HUD reached via Play > Campaign > Serpulo > OK > Ground Zero > Launch)"
+          "state": "Java tutorial HUD carries the input row (paste/book/tree/map at client x 851..1059, y 600..645); clicking paste opens the Schematics dialog (Tags row + card grid + Back/Import)."
         },
-        "checkpoint": "runs/20261009-065416-ref-ground-zero/ (R00-R06 tutorial state; parity-java-home)",
         "java_path": [
-          "launch -> window normalize -> Play > Campaign > Serpulo OK -> Ground Zero -> Launch (R00 frames) -> in-game HUD (R00-R07 frames)"
+          "fresh profile: Play(280,247) > Campaign(522,247) > Serpulo card(463,378) > OK(625,703) > Launch(625,716) > paste(925,718)"
         ]
+      },
+      "claim": {
+        "by": "parity-hunt-s1",
+        "at": "2026-10-11T01:06:22Z",
+        "prior_status": "reference",
+        "released_at": "2026-10-11T01:21:01Z"
       }
     },
     {
@@ -11335,7 +11405,7 @@
       "surface": "world",
       "parent": "PAR-0028",
       "status": "reference",
-      "updated": "2026-10-10T14:39:55Z",
+      "updated": "2026-10-11T01:21:01Z",
       "discovered_by": "runs/20261009-065416-ref-ground-zero/",
       "path": {
         "to": "in-game Ground Zero tutorial start",
@@ -11397,7 +11467,8 @@
         "checkpoint": "runs/20261009-065416-ref-ground-zero/ (R00-R06 tutorial state; parity-java-home)",
         "java_path": [
           "launch -> window normalize -> Play > Campaign > Serpulo OK -> Ground Zero -> Launch (R00 frames) -> in-game HUD (R00-R07 frames)"
-        ]
+        ],
+        "staged_action": "runs/20261011-110622-PAR-0033/java/r00-16-database-dialog.png (the Core Database dialog, fresh profile, captured during the PAR-0033 Java leg)"
       }
     },
     {
@@ -28330,6 +28401,54 @@
         "summary": null
       },
       "verified": null
+    },
+    {
+      "id": "PAR-0143",
+      "title": "Schematics dialog content: Java Tags filter row + card grid vs the port's list + details layout",
+      "surface": "ui",
+      "parent": "PAR-0033",
+      "status": "seeded",
+      "updated": "2026-10-11T01:21:01Z",
+      "discovered_by": "runs/20261011-110622-PAR-0033/",
+      "path": {
+        "to": "in-game > paste button > schematics dialog",
+        "java": [],
+        "godot": [],
+        "confirm": {
+          "godot": "MindUi.dialog_stack() == [schematics]",
+          "java": "r00-15-schematics-dialog.png"
+        },
+        "last_replayed": null
+      },
+      "run": "runs/20261011-110622-PAR-0033/",
+      "reproduce": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "frame": "runs/20261011-110622-PAR-0033/java/r00-15-schematics-dialog.png"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "frame": "runs/20261011-110622-PAR-0033/godot/hud-44-schematics-dialog-flat.png"
+            }
+          }
+        ],
+        "compare": [
+          "palette_distance 0.63, changed 0.919 (different dialog structure)"
+        ]
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open"
+      },
+      "verified": null,
+      "note": "Revealed by PAR-0033: the Java dialog has a Tags filter row (heart/Reactor/power/logic/... icons), a schematic CARD grid with per-card info/upload/edit/delete icons, and Back + Import Schematic... buttons; the port renders a left list + a details pane (3x3 tiles / item costs / Edit-Export-Icon Tag-Delete-Configure Loadout)."
     }
   ]
 }
