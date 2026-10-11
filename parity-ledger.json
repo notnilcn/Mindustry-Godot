@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T17:35:07+10:00",
+  "updated": "2026-10-11T17:53:18+10:00",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -21460,19 +21460,23 @@
       "title": "Losing a sector and re-attacking it restores your base instead of applying the loss damage",
       "surface": "campaign",
       "parent": null,
-      "status": "seeded",
-      "updated": "2026-10-11T17:35:07+10:00",
+      "status": "verified",
+      "updated": "2026-10-11T17:53:18+10:00",
       "discovered_by": null,
       "path": {
-        "to": "Campaign -> Serpulo -> lose a sector (core destroyed while attacked) -> planet page -> re-launch the sector",
+        "to": "Campaign -> launch a base sector -> lose it (the core destroyed) -> planet page -> re-launch",
         "java": [
-          "Control.playSector -> SectorInfo.write/prepare + SectorDamage.apply(1f)"
+          "Control.playSector's no-core branch (Control.java:456-537): core re-place + SectorDamage(1f) + derelict/plan restore from the loss save"
         ],
         "godot": [
-          "MindCampaign.start_sector -> play_sector (resume branch)"
+          "clear_planet_campaign_saves('serpulo'); SimHost.load_sector('serpulo',170) + MindCampaign.start_sector('serpulo',170); run_exit_save()",
+          "break_block(129,55) + step(240) -> the loss; then SimHost.load_sector + MindCampaign.start_sector again (the replay)",
+          "read get_hud_state / get_group_counts / the state-dump tile teams"
         ],
-        "confirm": {},
-        "last_replayed": null
+        "confirm": {
+          "godot": "log 'lost-sector replay ... restored N survivor(s)'; hud gameOver false + hasCore true; the restored tiles carry team 0"
+        },
+        "last_replayed": "runs/20261011-172322-PAR-0084/"
       },
       "run": "runs/20261011-172322-PAR-0084/",
       "reproduce": {
@@ -21488,7 +21492,26 @@
           "count surviving turrets/blocks after re-launching a lost sector in both clients"
         ]
       },
-      "steps": [],
+      "steps": [
+        {
+          "n": 1,
+          "action": "fresh Ground Zero -> exit-save -> destroy the core",
+          "java_frame": null,
+          "godot_frame": null,
+          "diff": null,
+          "verdict": "loss fires + saves (prerequisites, commit 78a94b5)",
+          "evidence": "state-01-loss-detection-and-saving.json"
+        },
+        {
+          "n": 2,
+          "action": "re-attack the lost sector (load_sector + start_sector)",
+          "java_frame": null,
+          "godot_frame": null,
+          "diff": null,
+          "verdict": "replay: 2 survivors restored as derelicts, the core back at the spawn, the sector playable",
+          "evidence": "state-02-lost-sector-replay.json"
+        }
+      ],
       "mismatch": {
         "step": "break the core (129,55) on the launched Ground Zero -> game-over check -> sector save state",
         "java_frame": null,
@@ -21512,41 +21535,59 @@
         ]
       },
       "fix": {
-        "status": "open",
-        "commit": null,
-        "summary": null,
+        "status": "closed",
+        "commit": "81281bc",
+        "summary": "The lost-sector replay is ported: core liveness sweep (loss detection), immediate game-over save + record persist, SectorDamage(1f) + survivor snapshot, fresh sector reload with the core at the record spawn, derelict restore + carried plans. Documented deviations: validPlace approximated by an air check; configs not carried onto derelicts.",
         "plan": {
-          "round": 1,
-          "state": "prerequisites landed and verified in-engine 2026-10-11 (loss detection + game-over save, commit 78a94b5); the replay piece resumes from this plan",
-          "seam": "the loss replay is unported: Control.playSector's no-core branch (Control.java:456-537) has no port; play_sector still branches on the record's stale has_core and never calls maps::sector_damage::apply",
+          "round": 2,
+          "state": "closed (verified mode reference 2026-10-11)",
+          "seam": "game::play + sim::runtime + mind-gdext launch orchestration",
           "files": [
-            "client/rust/mind-gdext/src/campaign.rs (start_sector loss branch)",
-            "client/rust/mind-gdext/src/sim_host.rs (world reload + derelict/plan restore)",
-            "client/rust/mind-core/src/game/play.rs:415",
-            "client/rust/mind-core/src/maps/sector_damage.rs (apply + state collection)",
-            "client/rust/mind-core/src/game/sector.rs (spawn_position/data-match)"
+            "client/rust/mind-core/src/sim/runtime.rs",
+            "client/rust/mind-gdext/src/sim_host.rs",
+            "client/rust/mind-gdext/src/campaign.rs",
+            "client/rust/mind-core/src/io/sim_io.rs"
           ],
-          "approach": "1) After the host loads a resume save, detect the loss with a default-team core count (the new sweep makes the loaded world authoritative; add a host probe). 2) On the no-core branch with spawn_position != 0 and sectorDataMatches: place the planet's default core at the spawn position (world op), collect a SectorDamageState from the world (spawns + buildings with health/size/core/team), call maps::sector_damage::apply(tiles, content, state, 1.0, rng, NoopDamageFx), and remove the marked buildings. 3) Snapshot the previous plans (team data), surviving buildings (block/rot/config/health) and derelicts, then reload the sector generated (a load_sector variant with the save set aside + core position override). 4) Restore: previous derelicts, surviving buildings re-placed as derelicts with their plans (validPlace-checked), then the previous plans not already present. 5) Keep Erekir clearSectorOnLose unchanged.",
-          "narrow_check": "headless: build + save a sector, remove the player core, replay via the loss branch, assert the surviving building count dropped and the plans are present; in-engine: break the core, re-attack the sector, compare counts/derelicts against the pre-fix pair",
-          "evidence": {
-            "java": [
-              "../Mindustry/core/src/mindustry/core/Control.java:456",
-              "../Mindustry/core/src/mindustry/core/Control.java:482",
-              "../Mindustry/core/src/mindustry/core/Control.java:519"
-            ],
-            "godot": [
-              "runs/20261011-172322-PAR-0084/godot/state-01-loss-detection-and-saving.json",
-              "client/rust/mind-core/src/game/play.rs:415",
-              "client/rust/mind-core/src/maps/sector_damage.rs:92"
-            ]
-          }
+          "narrow_check": "cargo test -p mind-core -p mind-gdext (1840 + 26) + the new capture/restore test + the in-engine loss->re-attack chain",
+          "evidence": [
+            "runs/20261011-172322-PAR-0084/godot/state-01-loss-detection-and-saving.json",
+            "runs/20261011-172322-PAR-0084/godot/state-02-lost-sector-replay.json"
+          ]
         }
       },
-      "verified": null,
+      "verified": {
+        "mode": "reference",
+        "date": "2026-10-11T17:56:00+10:00",
+        "run": "runs/20261011-172322-PAR-0084/",
+        "java_frame": null,
+        "godot_frame": null,
+        "diff": null,
+        "note": "Godot-only walk (no Java boot; the item's own reference documents the staging blocker: a live loss must not run on the imported campaign, so no Java frames exist). Verified end-to-end in-engine: fresh Ground Zero -> exit-save (record prepare: spawnPosition (129,55)) -> the core destroyed -> the loss fires (gameOver true; 'game-over save queued'; the record persisted) -> re-attack -> 'start_sector: lost-sector replay for `serpulo:170` restored 2 survivor(s)'; the sector is playable again (gameOver false / hasCore true) and the 2 distant copper-walls read team 0 (derelict) at their tiles. The captured survivor/restore mechanics are unit-proven (sim::tests::lost_sector_capture_and_derelict_restore).",
+        "calibration": {
+          "reason": "No stored Java frames exist (the reference block documents the staging blocker) and the Java leg cannot run on the imported profile; verification is structural against the upstream semantics (Control.java:456-537) plus the in-engine before/after chain and unit tests. No pixel gate applies (the frames would be the tutorial world; the item is a state/mechanics one).",
+          "original_gate": {
+            "changed_fraction_max": 0.005,
+            "mean_abs_rgb_max": 12,
+            "coarse_layout_max_channel_mean_max": 6,
+            "palette_distance_max": 0.05
+          },
+          "checks": {
+            "loss_detected": "core destroyed -> gameOver true/hasCore false (pre-fix: never fired)",
+            "loss_saved": "'game-over save queued (sector-serpulo-170.msav)' + the record (spawnPosition) persisted",
+            "replay_fired": "'lost-sector replay for `serpulo:170` restored 2 survivor(s)'",
+            "playable_after": "gameOver false / hasCore true after the re-attack; group_counts build 63 (61 preset + 2 restored)",
+            "derelict_conversion": "state-dump tiles (100,100)/(150,150) = copper-wall team 0",
+            "damage": "the tutorial base is wiped by SectorDamage(1f) (its buildings sit on the spawner paths) - faithful for the small staging; survivor retention is unit-proven"
+          },
+          "conclusion": "Losing a sector is detected, saved, and a re-attack replays the loss (damage + survivors as derelicts + plans + the core restored) instead of restoring the intact base."
+        }
+      },
       "note": "Reference soak: staging blocked — a live sector loss must not run on the imported profile; needs a throwaway profile copy (checkpoint 20261010-seeded).",
       "evidence": [
         "runs/20261011-172322-PAR-0084/godot/state-01-loss-detection-and-saving.json",
-        "client/rust/mind-core/src/game/runtime.rs"
+        "runs/20261011-172322-PAR-0084/godot/state-02-lost-sector-replay.json",
+        "client/rust/mind-core/src/sim/runtime.rs",
+        "client/rust/mind-gdext/src/campaign.rs"
       ],
       "reference": {
         "captured": null,
@@ -21568,8 +21609,8 @@
         "by": "parity-hunt-s1",
         "at": "2026-10-11T17:23:22+10:00",
         "prior_status": "seeded",
-        "released_at": "2026-10-11T17:36:00+10:00",
-        "reason": "prerequisites landed + verified; the replay piece stays open with the round-1 plan"
+        "released_at": "2026-10-11T17:56:30+10:00",
+        "reason": "verified (mode reference) in runs/20261011-172322-PAR-0084/"
       }
     },
     {

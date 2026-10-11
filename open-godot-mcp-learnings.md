@@ -2077,3 +2077,12 @@ healthy bridge afterwards. Run: the PAR-0066 verification session.
   `grep -A1 "#\[func\]" client/rust/mind-gdext/src/sim_host.rs`. Recover with `godot_game stop` + `play`.
   To find a building tile, parse `get_state_json()` (cheap on the 61-building Ground Zero) instead.
 - Run: the PAR-0084 loss staging (pid 197467/198336).
+
+- Bullet (2026-10-11, PAR-0084 replay staging): after `break_block` on a core + `set_paused(true)/step(N)/set_paused(false)`,
+  the loss HUD reads can lag 1-2 pumps behind (`hud gameOver:false/hasCore:true` immediately, `true/false` two calls
+  later) - re-probe before concluding the loss did not fire. The replay staging recipe that works:
+  `clear_planet_campaign_saves` -> `load_sector(170)+start_sector(170)` -> `run_exit_save()` (writes the save + the record
+  prepare with `spawnPosition`) -> resume -> `place_block(100,100,"copper-wall")` style distant survivors (the tiny tutorial
+  base is wiped by `SectorDamage(1f)`; distant blocks survive) -> `break_block(129,55)` -> step -> `load_sector(170)+start_sector(170)`
+  again -> expect `start_sector: lost-sector replay ... restored N survivor(s)` and the restored tiles at team 0 (derelict).
+- Run: runs/20261011-172322-PAR-0084/.
