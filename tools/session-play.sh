@@ -27,7 +27,15 @@ PORT=$((6970 + 10 * (N - 1)))
 export OPEN_GODOT_MCP_PORT="$PORT"
 G() { timeout "${T:-90}" python3 "$MAIN/tools/gmcp.py" --timeout 80 "$@"; }
 
+# Game processes outlive their editor; kill this checkout's games before a restart.
+kill_games() {
+  local client_dir
+  if [ "$N" -eq 1 ]; then client_dir="$MAIN/client"; else client_dir="$(cd "$MAIN/.." && pwd)/Mindustry-Godot-session$N/client"; fi
+  pkill -f -- "--path $client_dir --remote-debug" 2>/dev/null || true
+}
+
 if [ "$MODE" = restart ]; then
+  kill_games
   if [ "$N" -eq 1 ]; then
     pid=$(pgrep -f "godot --editor --path client$" | head -1 || true)
     [ -n "$pid" ] && kill "$pid" && sleep 3
