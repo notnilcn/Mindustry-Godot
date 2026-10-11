@@ -5,8 +5,9 @@
 ## Hint catalogue + display driver. The full upstream trigger model (placed
 ## blocks / input events / playtime save) is not ported; this driver shows the
 ## ordered catalogue one hint at a time once the playtime gate is met, with a
-## timed auto-advance and the upstream `@hint.skip` button. Completion is
-## in-memory for the session (no settings persistence yet).
+## timed auto-advance and the upstream `@hint.skip` button. Completion persists
+## as `<name>-hint-done` (`DefaultHint.finished/finish`) through `MindUi`, so an
+## imported Java profile's finished hints stay hidden.
 
 extends Control
 
@@ -166,10 +167,18 @@ func _is_paused() -> bool:
 
 
 func _show_next() -> void:
+	# `checkNext`: finished hints are dropped before the next one is chosen.
+	while _next < HINTS.size() and _hint_finished(HINTS[_next]):
+		_next += 1
 	if _next >= HINTS.size():
 		return
 	show_hint(HINTS[_next])
 	_next += 1
+
+
+## `DefaultHint.finished`: `Core.settings.getBool(name + "-hint-done")`.
+func _hint_finished(hint_name: String) -> bool:
+	return _ui != null and _ui.has_method("hint_finished") and bool(_ui.call("hint_finished", hint_name))
 
 
 ## Shows the hint by catalogue name (bundle `hint.<name>`).
@@ -184,6 +193,9 @@ func show_hint(hint_name: String) -> void:
 
 ## Completes/hides the current hint and arms the next one.
 func complete_hint() -> void:
+	# `HintsFragment.complete` -> `current.finish()` persists the flag.
+	if not _current.is_empty() and _ui != null and _ui.has_method("hint_finish"):
+		_ui.call("hint_finish", _current)
 	_current = ""
 	_elapsed = 0.0
 	_snapshot_camera()
