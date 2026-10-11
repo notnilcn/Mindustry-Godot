@@ -2030,3 +2030,21 @@ healthy bridge afterwards. Run: the PAR-0066 verification session.
   re-check `gui_get_hovered_control()` for a modal eater (a leftover `restart` dialog swallowed
   three Play clicks until its button was closed).
 - Run: runs/20261011-161201-PAR-0081/.
+
+- Bullet (2026-10-11, PAR-0082 walks): after a planet-page resume the planet dialog
+  LINGERS over the live world (hover = planet panel, SimHost.is_paused() true) while the
+  sector is already playing, so the first ore click lands on the dialog and sets no mine
+  order. Closing it with Back (109,615) once surfaced a "restart" dialog (empty button
+  list, vanished on the next probe) and a second Back left `dialogs: []` with the world
+  live. Also: a naive close-loop that clicks each modals
+
+- Bullet (2026-10-11, PAR-0082 walks): after a planet-page resume the planet dialog
+  LINGERS over the live world (hover = planet panel, `SimHost.is_paused()` true) while the
+  sector is already playing, so the first ore click lands on the dialog and sets no mine
+  order. Closing it with Back (109,615) once surfaced a "restart" dialog (empty button
+  list, vanished on the next probe) and a second Back left `dialogs: []` with the world
+  live. Also: a naive close-loop that clicks each modal's FIRST button picked the
+  Erekir planet-switch (107,25) instead of Back — resolve the Back button by position
+  (109,615) or by excluding the planet-rail buttons, and re-probe until `dialogs: []`
+  AND `is_paused() == false` before driving world input.
+- Run: runs/20261011-162529-PAR-0082/, runs/20261011-162705-PAR-0082/.
