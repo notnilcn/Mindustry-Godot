@@ -120,7 +120,7 @@ pub fn format_icons(s: &str, iconc: &Iconc) -> String {
     let mut check_icon = false;
     for token in s.split(':') {
         if check_icon {
-            if let Some(ch) = iconc.get(token) {
+            if let Some(ch) = iconc.get(token).or_else(|| iconc.font(token)) {
                 buffer.push(ch);
                 changed = true;
                 check_icon = false;
@@ -301,12 +301,15 @@ fn render_markup_impl(s: &str, iconc: &Iconc, icons_as_text: bool) -> String {
             if let Some(rel) = chars[i + 1..].iter().position(|&ch| ch == ':') {
                 let name: String = chars[i + 1..i + 1 + rel].iter().collect();
                 if !name.is_empty()
-                    && let Some(ch) = iconc.get(&name)
+                    && let Some(ch) = iconc.get(&name).or_else(|| iconc.font(&name))
                 {
                     if icons_as_text {
                         out.push(ch);
                     } else {
-                        out.push_str(&format!("[icon name=\"{name}\"]"));
+                        // A bare `[icon …]` opens an effect span that would
+                        // swallow every following tag as literal content; the
+                        // empty span consumes the tags cleanly.
+                        out.push_str(&format!("[icon name=\"{name}\"][/icon]"));
                     }
                     i += rel + 2;
                     continue;
@@ -399,10 +402,10 @@ mod tests {
         let table = iconc();
         let pua = table.unicode_str("spawn").unwrap();
         assert_eq!(normalize_pua(&pua, &table), ":spawn:");
-        assert_eq!(render_markup(&pua, &table), "[icon name=\"spawn\"]");
+        assert_eq!(render_markup(&pua, &table), "[icon name=\"spawn\"][/icon]");
         assert_eq!(
             render_markup(":copper: x", &table),
-            "[icon name=\"copper\"] x"
+            "[icon name=\"copper\"][/icon] x"
         );
     }
 
@@ -411,6 +414,25 @@ mod tests {
         assert_eq!(render_markup("[bogus]x", &iconc()), "[lb]bogus]x");
         assert_eq!(render_markup(":bogus:", &iconc()), ":bogus:");
         assert_eq!(render_markup("[", &iconc()), "[lb]");
+    }
+
+    #[test]
+    fn font_glyph_fallback_renders_icon_slot() {
+        // `UI.formatIcons` falls back to `Fonts.hasUnicodeStr` for tokens that
+        // are not content icons; `:warning:` must not stay literal (PAR-0016).
+        use crate::assets::icons::IconCodes;
+        let mut table = iconc();
+        table.load_font_glyphs(
+            &IconCodes::from_json(
+                r#"{"format":1,"glyphs":[{"name":"Warning","code":9888,"css":"warning"}]}"#,
+            )
+            .unwrap(),
+        );
+        assert_eq!(
+            render_markup("[red]:warning:[accent] x", &table),
+            "[color=#ff0000ff][icon name=\"warning\"][/icon][/color][color=#ffd37fff] x[/color]"
+        );
+        assert_eq!(format_icons(":warning: go", &table), "\u{26a0} go");
     }
 
     #[test]

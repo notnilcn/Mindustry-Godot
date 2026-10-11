@@ -51,5 +51,16 @@ pub fn load_iconc(assets_dir: &str) -> Iconc {
     if !FileAccess::file_exists(&path) {
         return Iconc::default();
     }
-    Iconc::from_properties(&FileAccess::get_file_as_string(&path).to_string())
+    let mut iconc = Iconc::from_properties(&FileAccess::get_file_as_string(&path).to_string());
+    // `Fonts` glyph fallback (`UI.formatIcons` consults it after `Iconc.codes`):
+    // register the fontgen glyphs (e.g. `:warning:`) so they resolve instead of
+    // staying literal (PAR-0016).
+    let codes_path = format!("{assets_dir}/icons/icon_codes.json");
+    if FileAccess::file_exists(&codes_path) {
+        let text = FileAccess::get_file_as_string(&codes_path).to_string();
+        if let Ok(codes) = mind_core::assets::icons::IconCodes::from_json(&text) {
+            iconc.load_font_glyphs(&codes);
+        }
+    }
+    iconc
 }

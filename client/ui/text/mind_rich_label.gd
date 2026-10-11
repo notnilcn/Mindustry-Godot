@@ -20,6 +20,11 @@ func _init() -> void:
 	autowrap_mode = TextServer.AUTOWRAP_OFF
 	fit_content = true
 	scroll_active = false
+	# The `[icon]` effect must be attached before the first text assignment:
+	# widgets assign `.text` before the label enters the tree, and a later
+	# `custom_effects` change does not re-parse the shaped text (PAR-0016 -
+	# `[icon name="…"]` rendered literally for every pre-tree assignment).
+	_add_icon_effect()
 
 
 func _ready() -> void:

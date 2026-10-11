@@ -610,7 +610,10 @@ func _build_sector_panel(sector: Dictionary) -> Control:
 	column.add_child(divider)
 
 	for state_key in _sector_state_labels(sector):
-		var label := MindWidgets.label(_t(state_key))
+		# Markup-bearing bundle strings (`[scarlet]Under attack!`, the
+		# `:warning:` lockdown briefing) must go through the BBCode translation,
+		# not the raw bundle (PAR-0016).
+		var label := MindWidgets.label(_tm(state_key))
 		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		column.add_child(label)
 

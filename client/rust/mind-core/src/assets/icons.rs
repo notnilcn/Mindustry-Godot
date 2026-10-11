@@ -23,6 +23,9 @@ pub struct Iconc {
     by_code: HashMap<u32, String>,
     textures: HashMap<String, String>,
     all: String,
+    /// Fontgen UI glyphs (`Fonts.hasUnicodeStr` fallback): `:token:`s that are
+    /// not content icons resolve here (e.g. `:warning:` → the ⚠ glyph).
+    font_by_name: HashMap<String, u32>,
 }
 
 impl Iconc {
@@ -82,6 +85,34 @@ impl Iconc {
     /// `Fonts.getUnicodeStr(name)`: the char as a string.
     pub fn unicode_str(&self, name: &str) -> Option<String> {
         self.get(name).map(|ch| ch.to_string())
+    }
+
+    /// `Fonts.hasUnicodeStr(name)` fallback: a fontgen UI glyph char
+    /// (`icon_codes.json`), consulted after the `Iconc` content table.
+    pub fn font(&self, name: &str) -> Option<char> {
+        self.font_by_name
+            .get(name)
+            .and_then(|code| char::from_u32(*code))
+    }
+
+    /// Registers the fontgen glyphs as the `Fonts` fallback table; both the
+    /// fontello name and the css suffix resolve (`Java UI.formatIcons` falls
+    /// back to `Fonts.hasUnicodeStr` for tokens outside `Iconc.codes`).
+    pub fn load_font_glyphs(&mut self, codes: &IconCodes) {
+        for glyph in &codes.glyphs {
+            for name in [glyph.name.as_str(), glyph.css.as_str()] {
+                if !name.is_empty() {
+                    self.font_by_name
+                        .entry(name.to_owned())
+                        .or_insert(glyph.code);
+                }
+            }
+        }
+    }
+
+    /// Number of registered fontgen fallback glyphs.
+    pub fn font_glyph_count(&self) -> usize {
+        self.font_by_name.len()
     }
 
     /// All icon chars in file order (the `Iconc.all` string upstream builds).
@@ -171,5 +202,23 @@ mod tests {
         assert_eq!(codes.get("Add").unwrap() as u32, 59411);
         assert_eq!(codes.glyph("Add").unwrap().css, "add");
         assert_eq!(codes.get("Nope"), None);
+    }
+
+    #[test]
+    fn font_glyph_fallback_registers_name_and_css() {
+        let mut table = Iconc::from_properties(PROPERTIES);
+        let codes = IconCodes::from_json(
+            r#"{"format":1,"glyphs":[{"name":"Warning","code":9888,"css":"warning"}]}"#,
+        )
+        .unwrap();
+        table.load_font_glyphs(&codes);
+        assert_eq!(table.font("warning"), Some('\u{26a0}'));
+        assert_eq!(table.font("Warning"), Some('\u{26a0}'));
+        assert_eq!(table.font("missing"), None);
+        assert_eq!(table.font_glyph_count(), 2);
+        // The content-icon table stays untouched (codes/len/all/texture unchanged).
+        assert_eq!(table.len(), 2);
+        assert_eq!(table.get("warning"), None);
+        assert_eq!(table.all().chars().count(), 2);
     }
 }
