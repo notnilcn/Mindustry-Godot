@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T02:13:31Z",
+  "updated": "2026-10-11T02:19:17Z",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -13926,7 +13926,7 @@
       "surface": "world",
       "parent": "PAR-0028",
       "status": "blocked",
-      "updated": "2026-10-11T02:13:31Z",
+      "updated": "2026-10-11T02:19:17Z",
       "discovered_by": "runs/20261009-065416-ref-ground-zero/",
       "path": {
         "to": "Ground Zero tutorial start (objective Obtain: 0/15 Copper)",
@@ -14044,7 +14044,7 @@
       },
       "fix": {
         "status": "blocked-on-investigation",
-        "summary": "the mining click gate (can_mine_tile) fails on ore tiles; trace the loader's cell.overlay/cell.block for the ore, then re-test"
+        "summary": "loader/pan/gate all excluded; next = probe one live cell's (block, overlay, floor) via a temporary SimHost debug fn, then fix and re-test"
       },
       "verified": null,
       "reference": {
@@ -14118,7 +14118,7 @@
         "PAR-0028"
       ],
       "blocked_note": "Own signal engine-verified: no-selection left click on tile (137,53) sets player_mine_tile [137,53] and the unit produces copper (player_mined_count 0 -> 4). The §4 frame gate stays blocked on PAR-0028 (objective counter/HUD, wave state, terrain): step-click 0.76977 changed.",
-      "note": "Investigated 2026-10-11 (runs/20261011-121147-PAR-0058/): the ore click never sets a mine order. Evidence: with proven-safe calls (godot_input sequence clicks + player_mine_tile), clicks mapped through Camera2D.screen_to_tile/tile_to_screen on the ore pixel (614,502, tile (130,49)) and neighbours (129..131,48..49) ALL leave player_mine_tile == []. The press gate is clear (no STOP controls at the points; gui_get_hovered_control == hud; no dialogs), and a fresh world (saves staged aside) behaves the same as the resumed save. Source: desktop.rs try_mine_at -> SimHost.player_can_mine -> ai/types/player.rs can_mine_tile, which requires cell.block == AIR and a drop (cell.drop or content.block(cell.overlay).item_drop; ore-copper carries item_drop copper per registries/blocks/ore.rs). In PAR-0050 the same click once landed a mine order (129,49) during the launch camera pan, so the path works for SOME tile/state. Hypothesis to prove next: the loaded grid's cell.block/cell.overlay for the ore tiles (block != AIR would fail can_mine while the renderer still draws the ore) - trace cell.overlay from the map/save loader (io/map loader -> grid.tiles) with a fixture test or a small probe returning ONE cell's (block, overlay, floor); then fix, rebuild, and re-run the tutorial mine click; PAR-0058 and PAR-0051 depend on it."
+      "note": "Investigated 2026-10-11 (runs/20261011-121147-PAR-0058/). Established: (1) the ore click never sets a mine order - godot_input clicks mapped through Camera2D.screen_to_tile/tile_to_screen onto the ore pixel (614,502) -> tile (130,49) and neighbours (129..131,48..49) all leave player_mine_tile == [], in BOTH a fresh world and the resumed save; (2) the press gate is clear (no STOP controls at the point, gui_get_hovered_control == hud, no dialogs, focus none); (3) the CAMERA was verified settled (two center reads identical 1.2 s apart) before the click, so the launch camera pan is not the cause; (4) a new regression test (io/save/mod.rs legacy_ground_zero_map_keeps_ore_overlays, features msav-import) proves the REAL groundZero.msav loads its copper OVERLAYS intact (map-wide count > 0 AND ore within 16 tiles of the core (129,55)), so the map-loader side and ore-copper's item_drop (registries/blocks/ore.rs) are correct. Remaining suspect: the LIVE sim grid/cell state or the can_mine read - next probe: add a temporary #[func] debug_tile(x,y) to SimHost returning (block, overlay, floor) for one tile (or a mind-headless scenario loading 'serpulo:15'), rebuild, and compare the live cell vs the test's; then fix and re-run the mine click. PAR-0058 waits on this."
     },
     {
       "id": "PAR-0046",
