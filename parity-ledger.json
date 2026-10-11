@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T22:43:08+10:00",
+  "updated": "2026-10-11T22:49:11+10:00",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -25697,7 +25697,7 @@
         },
         "last_replayed": "runs/20261011-203146-PAR-0140/ (partial: selection/order mouse chain not yet captured; command-mode gate debugging)"
       },
-      "run": "runs/20261011-203146-PAR-0140/",
+      "run": "runs/20261011-225200-PAR-0140-r2/",
       "reproduce": {
         "java": [
           "spawn a unit, select it in command mode, issue a move order, capture the selection + the order"
@@ -25707,15 +25707,44 @@
         ],
         "compare": []
       },
-      "steps": [],
-      "mismatch": null,
+      "steps": [
+        {
+          "n": 1,
+          "action": "Shift held (push_event KeyDown shiftLeft) + drag-select a spawned friendly dagger",
+          "godot_frame": "godot/step-01-selected.png",
+          "verdict": "partial: selection_json=[1000000002] OK; no selection overlay (Java drawCommanded) drawn"
+        },
+        {
+          "n": 2,
+          "action": "right-click a move target (world 960,400)",
+          "verdict": "mismatch: dagger ignores the order and keeps walking +y under GroundAI (y 470.5->500->529.5 per 60 ticks); a direct unit_command op is ignored too"
+        }
+      ],
+      "mismatch": {
+        "step": 2,
+        "signals": {
+          "dagger_y_after_order": [
+            470.5,
+            500.0,
+            529.5
+          ],
+          "target": [
+            960,
+            400
+          ],
+          "player_unit_commandable": true
+        },
+        "godot_frame": "godot/step-01-selected.png",
+        "java_frame": null,
+        "note": "structural (state) mismatch; Java: player-team units get CommandAI (UnitType.java:283) and stay idle until ordered, then path to targetPos (CommandAI.java:278+)"
+      },
       "fix": {
         "status": "open",
         "commit": null,
         "summary": "Round-1 code landed: the selectable list is published every frame, wire UnitCommands apply to live units, the input filters use the live team, and boot has no block selected. The in-engine selection/order chain is still being staged (a residual 'duo' block selection in the input bridge keeps the command-mode gate closed; found while stopping).",
         "plan": {
-          "round": 1,
-          "state": "code + unit tests green; in-engine chain incomplete (command-mode gate) - resumable",
+          "round": 2,
+          "state": "round 2 planned; delegated to a code subagent",
           "done": [
             "MindSimHost::publish_selectable_units each frame + selectable_units_json probe (sim.selectable_units_json lists live units by EntitySeq)",
             "Sim::apply_live_unit_command: wire UnitCommand ids resolve to live units (default team only), command 0 sets ControllerSlot.target (resolve_wire_target for position/unit/building targets); relay fallback kept for net/test ids; tests live_unit_command_sets_a_move_target + selectable_units_json_lists_live_units",
@@ -25724,17 +25753,21 @@
             "apply_sim_command_json ops spawn_unit + unit_command (MCP staging; x/y parsing fixed to allow px/py-only)"
           ],
           "next": [
-            "Find why the input bridge state.block still reads 'duo' with action_count 0 while SimHost.selected_block() is 'air' (candidates: an early sync_selected_block before the host's AIR default landed, or another state.block writer) - instrument the writers or re-run after a clean play; then command_mode must latch via inject_key/push_event KeyDown shiftLeft (release with KeyUp)",
-            "Drag-select via push_event mouse events around a spawned friendly dagger; assert Input.selection_json() contains its EntitySeq (fed by publish_selectable_units)",
-            "Right-click a target tile; assert the unit's (x,y) from selectable_units_json moves toward it (the wire -> SimCommand::UnitCommand -> apply_live_unit_command path)",
-            "Capture a frame for the record (no stored Java selection/order frame; the command panel surface is PAR-0095) and settle as reference with the calibration note",
-            "Out of round 1: non-move commands/stances on live units; the command panel UI (PAR-0095); AiKind::Command branch (queue/attack semantics)"
+            "subagent: CommandAI default for player-team playerControllable units; CommandAI movement to targetPos via control_pathfinder (ground) / straight-line (flying); commandable = AiKind::Command",
+            "re-run the in-engine chain: drag-select -> right-click -> dagger moves to target and stops; idle dagger stays put",
+            "seed PAR-0157 for the selection overlay (InputHandler.drawCommanded) - presentation half"
           ],
           "narrow_check": "cargo test -p mind-core -p mind-gdext (1853 + integration green), clippy/fmt; in-engine chain per path.godot",
           "evidence": [
             "client/rust/mind-core/src/sim/mod.rs (apply_live_unit_command)",
             "client/rust/mind-gdext/src/sim_host.rs (publish_selectable_units, apply_sim_command_json)",
             "client/rust/mind-gdext/src/input/desktop.rs (player_team)"
+          ],
+          "round2_findings": [
+            "round-1 duo residual does not reproduce on a clean play (block null)",
+            "player-team units spawn with GroundAI/FlyingAI (select_ai ignores team) -> they march toward the enemy instead of idling under CommandAI",
+            "move orders are ignored: slot.target is set but update_ground asks the team flowfield (Pathfinder.get_field(Cost::Ground, team, [target])) which does not route to an arbitrary tile; Java uses ControlPathfinder for CommandAI",
+            "selectable_units_json marks the player-controlled unit commandable (Java isCommandable = controller instanceof CommandAI)"
           ]
         }
       },
@@ -26247,7 +26280,7 @@
       "title": "Planet page opened from the in-game map button draws over the live world + HUD (Java covers with the space backdrop)",
       "surface": "ui",
       "parent": "PAR-0036",
-      "status": "seeded",
+      "status": "fixing",
       "updated": "2026-10-11T01:36:59Z",
       "discovered_by": "runs/20261011-112419-PAR-0036/",
       "path": {
@@ -26260,7 +26293,7 @@
         },
         "last_replayed": null
       },
-      "run": "runs/20261011-112419-PAR-0036/",
+      "run": "runs/20261011-230500-PAR-0147/",
       "reproduce": {
         "java": [
           {
@@ -26282,20 +26315,51 @@
           "changed 0.6411, palette 0.219; the world terrain is visible behind the page and the hint bar/picker/input row render above it"
         ]
       },
-      "steps": [],
+      "steps": [
+        {
+          "n": 1,
+          "action": "in-game map button (1027,619)",
+          "godot_frame": "runs/20261011-230500-PAR-0147/godot/step-00-ingame-map-open.png",
+          "verdict": "mismatch: chooser instead of the current planet page; hint overlay draws above the dialog"
+        }
+      ],
       "mismatch": null,
       "fix": {
-        "status": "open"
+        "status": "open",
+        "plan": {
+          "round": 1,
+          "state": "planned; delegated to a GDScript subagent",
+          "seam": "client/ui/dialogs/planet_dialog.gd (shown/hidden/_set_planet_view_active)",
+          "findings": [
+            "in-game map button -> planet dialog; MindUi.close_dialog(planet) -> MenuGroup.visible=true AND HudGroup.visible=true (hidden() -> _set_planet_view_active(false) forces menu + MenuBackground visible)",
+            "opened in-game with no prior planet selection the first-run chooser appears; Java PlanetDialog.show (PlanetDialog.java:244-252) views the current sector planet (state.rules.sector.planet)",
+            "the tutorial hint/objective overlay draws above the planet page (OverlayLayer above DialogLayer)"
+          ],
+          "steps": [
+            "capture the layer visibility (MenuGroup, MenuBackground, HudGroup, World) when the globe activates; restore exactly on deactivate instead of forcing the menu on",
+            "while the globe is active hide HudGroup and the World node draw so the space backdrop covers like Java",
+            "shown(): if MindCampaign.get_sector_state().planet is set (in-game), select that planet and skip the chooser",
+            "hide hint/objective overlays (OverlayLayer children that belong to the HUD) while the page is up, restore after"
+          ],
+          "next": [
+            "re-walk: in-game map button -> page covers world+HUD -> Back -> HudGroup visible, MenuGroup hidden, sim resumes"
+          ]
+        }
       },
       "verified": null,
-      "note": "Revealed by PAR-0036. Opened from the HUD, the port's planet dialog shows the live world through its backdrop and the world HUD above it; the Java PlanetDialog renders its own space scene and the HUD hides behind the modal. The campaign-path page (PAR-0015) is unaffected. Also observed on PAR-0038: the tutorial objective banner renders above the pause dialog's 0.9 dim (255 vs the Java's 81)."
+      "note": "Revealed by PAR-0036. Opened from the HUD, the port's planet dialog shows the live world through its backdrop and the world HUD above it; the Java PlanetDialog renders its own space scene and the HUD hides behind the modal. The campaign-path page (PAR-0015) is unaffected. Also observed on PAR-0038: the tutorial objective banner renders above the pause dialog's 0.9 dim (255 vs the Java's 81).",
+      "claim": {
+        "by": "claude-loop-s1",
+        "at": "2026-10-11T22:49:11+10:00",
+        "prior_status": "seeded"
+      }
     },
     {
       "id": "PAR-0147",
       "title": "Planet page Back from the in-game map button returns to the menu instead of resuming the sector",
       "surface": "ui",
       "parent": "PAR-0036",
-      "status": "seeded",
+      "status": "fixing",
       "updated": "2026-10-11T01:36:59Z",
       "discovered_by": "runs/20261011-112541-PAR-0038/",
       "path": {
@@ -26308,7 +26372,7 @@
         },
         "last_replayed": null
       },
-      "run": "runs/20261011-112541-PAR-0038/",
+      "run": "runs/20261011-230500-PAR-0147/",
       "reproduce": {
         "java": [],
         "godot": [
@@ -26323,13 +26387,44 @@
           "the Java PlanetDialog Back in-game only hides the dialog (PlanetDialog.java:598: state.isMenu() ? ui.menu.show() : hide)"
         ]
       },
-      "steps": [],
+      "steps": [
+        {
+          "n": 1,
+          "action": "in-game map button (1027,619) then close the planet dialog",
+          "godot_frame": "godot/step-01-after-close.png",
+          "verdict": "mismatch: MenuGroup.visible=true + HudGroup.visible=true after close (Java: page hides, game resumes, no menu)"
+        }
+      ],
       "mismatch": null,
       "fix": {
-        "status": "open"
+        "status": "open",
+        "plan": {
+          "round": 1,
+          "state": "planned; delegated to a GDScript subagent",
+          "seam": "client/ui/dialogs/planet_dialog.gd (shown/hidden/_set_planet_view_active)",
+          "findings": [
+            "in-game map button -> planet dialog; MindUi.close_dialog(planet) -> MenuGroup.visible=true AND HudGroup.visible=true (hidden() -> _set_planet_view_active(false) forces menu + MenuBackground visible)",
+            "opened in-game with no prior planet selection the first-run chooser appears; Java PlanetDialog.show (PlanetDialog.java:244-252) views the current sector planet (state.rules.sector.planet)",
+            "the tutorial hint/objective overlay draws above the planet page (OverlayLayer above DialogLayer)"
+          ],
+          "steps": [
+            "capture the layer visibility (MenuGroup, MenuBackground, HudGroup, World) when the globe activates; restore exactly on deactivate instead of forcing the menu on",
+            "while the globe is active hide HudGroup and the World node draw so the space backdrop covers like Java",
+            "shown(): if MindCampaign.get_sector_state().planet is set (in-game), select that planet and skip the chooser",
+            "hide hint/objective overlays (OverlayLayer children that belong to the HUD) while the page is up, restore after"
+          ],
+          "next": [
+            "re-walk: in-game map button -> page covers world+HUD -> Back -> HudGroup visible, MenuGroup hidden, sim resumes"
+          ]
+        }
       },
       "verified": null,
-      "note": "Revealed while probing PAR-0038 (the ESC did nothing because the menu group was left visible). Frame: runs/20261011-112541-PAR-0038/godot/menu-after-in-game-page-back.png (the menu with its background over the live HUD)."
+      "note": "Revealed while probing PAR-0038 (the ESC did nothing because the menu group was left visible). Frame: runs/20261011-112541-PAR-0038/godot/menu-after-in-game-page-back.png (the menu with its background over the live HUD).",
+      "claim": {
+        "by": "claude-loop-s1",
+        "at": "2026-10-11T22:49:11+10:00",
+        "prior_status": "seeded"
+      }
     },
     {
       "id": "PAR-0148",
@@ -26809,6 +26904,54 @@
       "verified": null,
       "note": "Seeded from the PAR-0139 round-2 verification: the RTS/base halves run, but `prebuildAi` core defenders and the estimateStats turret term remain unimplemented (both are small, self-contained).",
       "updated": "2026-10-11T20:30:46+10:00"
+    },
+    {
+      "id": "PAR-0157",
+      "title": "Command mode draws no selection overlay: selected units get no hexagon ring, target line or move-square (InputHandler.drawCommanded)",
+      "surface": "world",
+      "parent": "PAR-0140",
+      "status": "seeded",
+      "updated": "2026-10-11T22:47:41+10:00",
+      "discovered_by": "runs/20261011-225200-PAR-0140-r2/",
+      "path": {
+        "to": "Ground Zero, command mode (Shift held), a friendly dagger drag-selected",
+        "java": [],
+        "godot": [
+          "see PAR-0140 path.godot (spawn dagger, push_event Shift + drag)"
+        ],
+        "confirm": {
+          "godot": "Input.selection_json() lists the dagger"
+        }
+      },
+      "reproduce": {
+        "java": [
+          "hold Shift, drag over a friendly unit, capture"
+        ],
+        "godot": [
+          "godot_screenshot after the drag"
+        ],
+        "compare": []
+      },
+      "steps": [
+        {
+          "n": 1,
+          "action": "drag-select a dagger in command mode",
+          "godot_frame": "runs/20261011-225200-PAR-0140-r2/godot/step-01-selected.png",
+          "verdict": "godot draws nothing around the selected unit"
+        }
+      ],
+      "mismatch": null,
+      "fix": {
+        "status": "open",
+        "commit": null,
+        "summary": null,
+        "plan": {}
+      },
+      "verified": null,
+      "evidence": [
+        "../Mindustry/core/src/mindustry/input/InputHandler.java:1203-1300 (drawCommand/drawCommanded: Pal.accent hex poly rad=hitSize/unitSelectRadScl+1, Fill.lightInner, limitLine to targetPos, square 3.5 at the destination; Layer.plans / groundUnit-1 / overlayUI)"
+      ],
+      "note": "Seeded by the PAR-0140 round-2 walk (presentation half of RTS selection)."
     }
   ]
 }
