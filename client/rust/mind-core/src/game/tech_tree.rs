@@ -314,6 +314,12 @@ pub fn unlock(
 /// `Control.checkAutoUnlocks`: unlock every parent-unlocked, zero-requirement
 /// node with no incomplete objectives. Returns the newly-unlocked content.
 ///
+/// Upstream tests `node.requirements.length == 0` over the list materialized
+/// from `content.researchRequirements()` at `TechTree.node(...)`; the generated
+/// vanilla trees leave `TechNode.requirements` empty and derive the cost through
+/// [`effective_requirements`], so the gate must go through it too (the same
+/// predicate `ui::campaign::tech_node_auto_unlocks` uses).
+///
 /// Iterates in node order and unlocks immediately, so a child whose parent is
 /// unlocked earlier in the same pass is also handled (matching upstream).
 pub fn check_auto_unlocks(
@@ -341,7 +347,7 @@ pub fn check_auto_unlocks(
                 .and_then(|record| record.content)
                 .is_some_and(|parent_content| content_unlocked(registry, parent_content)),
         };
-        if !parent_unlocked || !node.requirements.is_empty() {
+        if !parent_unlocked || !effective_requirements(registry, reference).is_empty() {
             continue;
         }
         let objectives = node.objectives.clone();
@@ -693,18 +699,30 @@ mod tests {
         let (_parent_ref, child_ref, _, _) =
             synthetic_pair_with_child(&mut registry, BlockId::new(60_000));
         let unlocked = check_auto_unlocks(&mut registry, &mut store, &AllowAll);
-        // Every item that was auto-unlocked must have had no requirements.
+        // Every item that was auto-unlocked must have had no effective
+        // requirements (the generated vanilla trees derive them on demand).
         for content in &unlocked {
-            let node = registry
+            let index = registry
                 .tech()
                 .nodes
                 .iter()
-                .find(|node| node.content == Some(*content))
-                .unwrap();
-            assert!(node.requirements.is_empty());
+                .position(|node| node.content == Some(*content))
+                .expect("unlocked content has a node");
+            assert!(effective_requirements(&registry, TechNodeRef(index as u32)).is_empty());
             assert!(content_unlocked(&registry, *content));
         }
-        // The requirement-bearing child is not auto-unlocked.
+        // Derived-cost vanilla nodes stay locked (PAR-0080): the mechanical
+        // drill carries the explicit `researchCost` copper x10 and the conveyor
+        // chain the block cost formula, so neither may sweep in with the
+        // zero-cost roots.
+        for name in ["mechanical-drill", "conveyor", "mechanical-pump"] {
+            let content = registry.by_name(name).expect("vanilla content");
+            assert!(
+                !content_unlocked(&registry, content),
+                "{name} must stay locked after a fresh auto-unlock sweep"
+            );
+        }
+        // The requirement-bearing synthetic child is not auto-unlocked.
         let child_content = node_content(&registry, child_ref);
         assert!(!content_unlocked(&registry, child_content));
         // Idempotent: a second pass unlocks nothing new.

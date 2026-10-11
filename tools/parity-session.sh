@@ -192,8 +192,39 @@ link_shared() {
 }
 
 session_prepare() {
-  # 1) git worktree on its own branch.
+  # 1) git worktree on its own branch. A registered worktree whose directory
+  #    vanished, or whose .git file/checkout is missing (an interrupted or
+  #    previously cleaned setup), is repaired in place instead of being
+  #    assumed healthy and failing later at the Godot project check.
+  if git -C "$MAIN_REPO" worktree list --porcelain | grep -qxF "worktree $SESSION_REPO" \
+    && [ ! -d "$SESSION_REPO" ]; then
+    log "pruning stale worktree registration (directory missing): $SESSION_REPO"
+    git -C "$MAIN_REPO" worktree prune
+  fi
   if git -C "$MAIN_REPO" worktree list --porcelain | grep -qxF "worktree $SESSION_REPO"; then
+    repaired=0
+    if [ ! -e "$SESSION_REPO/.git" ] \
+      || ! git -C "$SESSION_REPO" rev-parse --git-dir >/dev/null 2>&1; then
+      log "repairing incomplete session worktree (missing .git): $SESSION_REPO"
+      git -C "$MAIN_REPO" worktree repair "$SESSION_REPO" >/dev/null 2>&1 || true
+      repaired=1
+    fi
+    if [ ! -e "$SESSION_REPO/.git" ] \
+      || ! git -C "$SESSION_REPO" rev-parse --git-dir >/dev/null 2>&1; then
+      echo "parity-session: $SESSION_REPO is registered but broken and could not be repaired." >&2
+      echo "  remove it ('git -C $MAIN_REPO worktree remove --force $SESSION_REPO') and re-run." >&2
+      exit 1
+    fi
+    if [ "$repaired" -eq 1 ] || [ ! -f "$SESSION_REPO/client/project.godot" ]; then
+      log "restoring missing tracked files in $SESSION_REPO"
+      # Restore only files git reports as deleted; local modifications survive.
+      git -C "$SESSION_REPO" ls-files -d -z |
+        xargs -0 -r -n 200 git -C "$SESSION_REPO" checkout --
+      if [ ! -f "$SESSION_REPO/client/project.godot" ]; then
+        log "checkout still incomplete; resetting $SESSION_REPO to its branch head"
+        git -C "$SESSION_REPO" reset --hard
+      fi
+    fi
     log "session worktree present: $SESSION_REPO"
   elif [ -e "$SESSION_REPO" ]; then
     echo "parity-session: $SESSION_REPO exists but is not a registered worktree" >&2

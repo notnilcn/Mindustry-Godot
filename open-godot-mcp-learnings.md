@@ -1968,3 +1968,43 @@ healthy bridge afterwards. Run: the PAR-0066 verification session.
   Always (a) kill the previous editor pid explicitly before relaunching, (b) gate the relaunch on the
   EXACT port line (`Bridge listening on ws://127.0.0.1:6980`), and (c) verify `godot_health` +
   `godot_game instances` pid after the game starts.
+
+## 2026-10-11 — parity-hunt start: session-1 editor + Xvfb were dead (stale "already started")
+
+- Symptom: `godot_health check` -> `{ok:false, error:{code:"BRIDGE_NOT_CONNECTED"}}` and
+  `godot_instance list` -> `{instances: []}`; the session-1 runtime pidfiles held dead pids
+  (`.opencode/parity-session/editor.pid` 571169, `.opencode/parity-session/xvfb.pid` 14271),
+  no `godot`/`Xvfb`/weston process on the host, nothing listening on 6970/6971/6980, and
+  `/tmp/.X11-unix/` held only the greeter `X0`. `runs/editor-console.log` was last written
+  13:30 and `.opencode/parity-session/xvfb.log` 13:52 — the session went down after the
+  PAR-0066 run and nobody restarted it.
+- Failing call: `godot_health check` at iteration 0 (the goal prompt assumes
+  `tools/parity-session.sh` already started the editor+bridge — it had not).
+- Workaround: re-run `tools/parity-session.sh` (session 1: Xvfb :10 + editor on bridge 6970)
+  and gate on the printed bridge line before any `godot_game play`; if the port never comes
+  up, read `runs/editor-console.log` tail (boot failure) before relaunching.
+- Run: the parity-hunt iteration at 2026-10-11T15:5x local (run dir stamped after the claim).
+
+## 2026-10-11 — eval calling non-#[func] SimHost Rust methods pins the loop (PAR-0080 walk)
+
+- Symptom: a PAR-0080 fork probe eval returned TIMEOUT (15 s) and afterwards
+  `godot_debugger sessions` showed `{active:true, paused:true}` with a trivial eval still
+  answering (`OS.get_process_id()` -> 68185) and `godot_game status` reporting a normal pid.
+- Failing call: `godot_exec eval` body calling `SimHost.player_unit_position()` and
+  `SimHost.player_can_mine(137,53)` — both `pub fn` in `sim_host.rs` **without** the
+  `#[func]` attribute (only `player_unit_moved`/`player_mine_tile`/`player_mined_count`
+  are exported). GDScript "Invalid call. Nonexistent function" errors trip the editor
+  break-on-error and pin the frame loop; the eval then burns its 15 s budget.
+  The mining chain (`chains/ground-zero-click-mining.md`) warns "player_can_mine is
+  Rust-only" — read the #[func] list before composing probes.
+- Workaround: recover with `godot_game stop` + `play` (`resume` re-breaks), then
+  re-launch/resume the sector; only call #[func]-exported methods.
+- Run: runs/20261011-155700-PAR-0080/ (new process pid 68185, paused after the bad probe).
+
+- Bullet (2026-10-11, parity-hunt PAR-0080): the same pin recurred via `SimHost.is_playing()` in an
+  eval body — `is_playing` is NOT in the `#[func]` list (only `is_paused`/`has_player_unit` are the
+  boolean probes; `get_sector_state()` on MindCampaign is fine). Before composing any eval probe,
+  grep the exported surface:
+  `python3 - <<.. re.findall(r"#\[func\]\\s*\\n\\s*pub fn (\\w+)", src)` over `sim_host.rs` /
+  `campaign.rs` / `camera.rs` (49/44/20 names as of af5c41d). Two pins in one run cost two
+  stop+play recoveries; the fresh sector launch survives only through the auto-written save slot.
