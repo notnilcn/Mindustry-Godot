@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T02:46:34Z",
+  "updated": "2026-10-11T02:47:05Z",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -16519,33 +16519,74 @@
       "title": "Campaign world: player mech spawns on sector launch (Ground Zero)",
       "surface": "world",
       "parent": "PAR-0028",
-      "status": "blocked",
-      "updated": "2026-10-10T14:47:09Z",
+      "status": "verified",
+      "updated": "2026-10-11T02:47:05Z",
       "discovered_by": "runs/20261009-085822-PAR-0044/",
       "path": {
-        "to": "Ground Zero launched in the Godot client (sector 15, campaign:true, hasCore:true)",
+        "to": "sector launch (Ground Zero), fresh or resumed",
         "java": [],
-        "godot": [],
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "SimHost.has_player_unit() == true; Camera2D centre == the spawn/core (1032,440)"
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "code": "hold W/S -> the camera centre moves with the unit (PAR-0044)"
+            }
+          }
+        ],
         "confirm": {
-          "godot": "sector_state campaign:true, hasCore:true, sector:15",
-          "java": null
+          "godot": "has_player_unit true at the core with the camera anchored on it",
+          "java": "r00-02-tutorial.png / r02-03-stable.png"
         },
-        "last_replayed": "runs/20261009-085822-PAR-0044/"
+        "last_replayed": "runs/20261011-123501-PAR-0045-fix/ + runs/20261011-124243-PAR-0051/ (spawn at (1032,440); WASD moves it)"
       },
-      "run": "runs/20261009-065416-ref-ground-zero/",
+      "run": "runs/20261011-123501-PAR-0045-fix/",
       "reproduce": {
-        "java": [],
-        "godot": [],
-        "compare": []
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "frames": "runs/20261009-065416-ref-ground-zero/java/r00-02-tutorial.png + r02-03-stable.png"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "has_player_unit / player_unit_position / player_unit_moved"
+            }
+          }
+        ],
+        "compare": [
+          "the mech spawns at the core on launch and moves with WASD (the render is PAR-0053's scope)"
+        ]
       },
-      "steps": [],
+      "steps": [
+        {
+          "action": "launch/resume GZ",
+          "result": "SimHost has_player_unit true; the camera anchored at the core (1032,440)"
+        },
+        {
+          "check": "WASD moves the unit and the camera follows (PAR-0044) - the old 'spawn path broken' note was stale"
+        }
+      ],
       "mismatch": null,
       "fix": {
-        "status": "open",
-        "commit": null,
-        "summary": null
+        "status": "none-needed",
+        "summary": "the spawn path works live (spawn_player_unit in the launch flow); the render gap is PAR-0053"
       },
-      "verified": null,
+      "verified": {
+        "mode": "reference",
+        "run": "runs/20261011-124243-PAR-0051/",
+        "reference": "runs/20261009-065416-ref-ground-zero/",
+        "at": "2026-10-11T02:47:05Z"
+      },
       "reference": {
         "captured": "2026-10-11T03:00:00Z",
         "profile": "fresh",
@@ -16571,13 +16612,13 @@
           "fresh tutorial launch; capture the spawn + movement"
         ]
       },
-      "note": "Round-2 engine evidence: log `spawn_player_unit: alpha at (1028.0, 436.0)`, has_player_unit true; awaited verification with PAR-0044.",
+      "note": "Unblocked and verified: the player mech spawns at the core on launch (has_player_unit true, the camera anchored at (1032,440), WASD moves it - PAR-0044). The draw pass remains PAR-0053's blocked scope; the previous 'mech spawn path broken' note predates the PAR-0028/0037-era fixes.",
       "claim": {
         "by": "godot-walk-s2",
         "at": "2026-10-09T09:27:44Z",
         "prior_status": "seeded",
         "note": "implemented inside PAR-0044 fix round 1",
-        "released_at": "2026-10-09T10:19:10Z",
+        "released_at": "2026-10-11T02:47:05Z",
         "reason": "blocked on PAR-0044"
       },
       "blocked_on": [
