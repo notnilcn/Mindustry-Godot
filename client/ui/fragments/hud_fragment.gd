@@ -151,7 +151,7 @@ func refresh() -> void:
 		waiting_banner.visible = bool(_hud.get("waiting"))
 	if position_label != null:
 		var position := str(_hud.get("position_text"))
-		position_label.text = "[right]" + position
+		position_label.text = "[center]" + position
 		position_label.visible = not position.is_empty()
 	_refresh_core_items()
 	_refresh_skip_button()
