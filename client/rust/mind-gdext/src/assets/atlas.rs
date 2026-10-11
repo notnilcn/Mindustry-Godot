@@ -173,6 +173,8 @@ impl MindAssets {
         self.iconc = load_iconc(&self.assets_dir);
         self.locales = load_locales(&self.assets_dir);
         self.fonts = FontSet::load(&self.assets_dir);
+        self.fonts
+            .register_content_icons(&self.iconc, &self.index, &self.pages);
         self.audio = AudioRegistry::load(&self.assets_dir);
         self.loaded = true;
         true
