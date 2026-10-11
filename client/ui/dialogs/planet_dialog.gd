@@ -926,6 +926,9 @@ func _input(event: InputEvent) -> void:
 	if tile < 0:
 		return
 	_select_view_tile(tile)
+	# The rebuild clears the hover; Java keeps `hovered` on the sector under the
+	# pointer after the click (`selected = hovered`), so re-apply it.
+	_update_hover(mouse_view, click.position)
 	get_viewport().set_input_as_handled()
 
 

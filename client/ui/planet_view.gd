@@ -31,13 +31,14 @@ const ACCENT := Color(1.0, 0.827, 0.498)
 const LIGHT_NORMAL := Vector3(0.9036, 0.1988, 0.3795)
 
 @onready var space: TextureRect = $Space
-@onready var sector_label: Label = $SectorLabel
+@onready var sector_label: RichTextLabel = $SectorLabel
 @onready var camera: Camera3D = $ViewportContainer/SubViewport/Camera
 @onready var background: MeshInstance3D = $ViewportContainer/SubViewport/Background
 @onready var body: MeshInstance3D = $ViewportContainer/SubViewport/Body
 @onready var atmosphere: MeshInstance3D = $ViewportContainer/SubViewport/Atmosphere
 @onready var grid: MeshInstance3D = $ViewportContainer/SubViewport/Grid
 @onready var selection: MeshInstance3D = $ViewportContainer/SubViewport/Selection
+@onready var hover_fill: MeshInstance3D = $ViewportContainer/SubViewport/Hover
 @onready var outline: MeshInstance3D = $ViewportContainer/SubViewport/Outline
 
 ## `planet_view` payload (grid topology, preset remap, render params).
@@ -141,8 +142,8 @@ func focus_tile(tile: int) -> void:
 	_rebuild_highlight()
 
 
-## Sets the hovered tile (`PlanetDialog.hovered`): the grid fades in around it
-## and the dialog draws the name label at its projected position.
+## Sets the hovered tile (`PlanetDialog.hovered`): the grid fades in around it,
+## the hex takes the accent hover fill and the dialog draws the name label.
 func set_hover(tile: int) -> void:
 	hover_tile = tile
 	if _grid_material != null:
@@ -150,7 +151,41 @@ func set_hover(tile: int) -> void:
 		if tile >= 0 and tile < _tiles.size():
 			mouse = _tiles[tile].normalized() * float(data.get("outline", 1.17))
 		_grid_material.set_shader_parameter("u_mouse", mouse)
+	_rebuild_hover_fill()
 	_update_label()
+
+
+## `PlanetDialog.draw`: `planets.fill(hovered, hoverColor.write().a(0.5f), -0.003f)`
+## paints the hovered hex with the accent at 50% just under the shell.
+func _rebuild_hover_fill() -> void:
+	hover_fill.mesh = null
+	if hover_tile < 0 or hover_tile >= _tile_corners.size():
+		return
+	var ids: PackedInt32Array = _tile_corners[hover_tile]
+	var arad := float(data.get("outline", 1.17)) - 0.003
+	var center := _tiles[hover_tile] * arad if hover_tile < _tiles.size() else Vector3.ZERO
+	var corners: Array = []
+	for id in ids:
+		corners.append(_corners[id] * arad)
+	var fan := PackedVector3Array()
+	var colors := PackedColorArray()
+	var accent_fill := Color(ACCENT.r, ACCENT.g, ACCENT.b, 0.5)
+	for i in corners.size():
+		fan.append(center)
+		fan.append(corners[i])
+		fan.append(corners[(i + 1) % corners.size()])
+		for _j in 3:
+			colors.append(accent_fill)
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = fan
+	arrays[Mesh.ARRAY_COLOR] = colors
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	hover_fill.mesh = mesh
+	var material := _overlay_material()
+	material.render_priority = 5
+	hover_fill.material_override = material
 
 
 ## Sets the preset whose icon is drawn at the selected sector
@@ -219,7 +254,10 @@ func _update_label() -> void:
 	if point == null:
 		sector_label.visible = false
 		return
-	sector_label.text = "[ %s ]" % _sector_label_text
+	# `PlanetDialog.draw`: `[accent][lb] [white]<name>[accent] ]` — gold
+	# brackets with the name in white (`Styles.outlineLabel` carries the black
+	# outline via the scene's theme overrides).
+	sector_label.text = "[color=#ffd37f][lb] [color=white]%s[color=#ffd37f] ]" % _sector_label_text
 	sector_label.visible = true
 	sector_label.reset_size()
 	sector_label.position = (point as Vector2) - sector_label.size * 0.5
