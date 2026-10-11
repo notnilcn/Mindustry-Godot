@@ -96,26 +96,43 @@ func _process(delta: float) -> void:
 
 ## Upstream hints complete on their trigger, not a timer (`DesktopHint`
 ## predicate). `desktopMove` completes on the first non-zero move axis
-## (HintsFragment.java:170) — the player unit via SimHost when present,
-## else the movement bindings moving the camera; `zoom` when the scroll
-## changes the zoom.
+## (HintsFragment.java:170) — the player unit via SimHost when present (the
+## authoritative hook); the camera-delta fallback only applies to hosts without
+## it (a launch camera pan must not complete the hint); `zoom` completes when
+## the scroll changes the zoom.
 func _check_trigger() -> void:
 	if _current.is_empty():
 		return
-	if _current == "desktopMove" and _player_unit_moved():
-		complete_hint()
+	if _current == "desktopMove":
+		var host := get_node_or_null("/root/Spine/SimHost")
+		if host != null and host.has_method("player_unit_moved"):
+			if bool(host.call("player_unit_moved")):
+				complete_hint()
+			return
+		if _camera_moved():
+			complete_hint()
 		return
 	var camera := get_node_or_null("/root/Spine/World/Camera2D")
 	if camera == null:
 		return
 	var position: Vector2 = camera.get("position")
 	var zoom := float(camera.get("zoom").x)
-	var moved := position.distance_to(_last_camera) > MOVE_EPSILON
-	var zoomed := absf(zoom - _last_zoom) > 0.01
 	_last_camera = position
+	var zoomed := absf(zoom - _last_zoom) > 0.01
 	_last_zoom = zoom
-	if (_current == "desktopMove" and moved) or (_current == "zoom" and zoomed):
+	if _current == "zoom" and zoomed:
 		complete_hint()
+
+
+## Camera-delta fallback for hosts without the player-unit hook.
+func _camera_moved() -> bool:
+	var camera := get_node_or_null("/root/Spine/World/Camera2D")
+	if camera == null:
+		return false
+	var position: Vector2 = camera.get("position")
+	var moved := position.distance_to(_last_camera) > MOVE_EPSILON
+	_last_camera = position
+	return moved
 
 
 func _snapshot_camera() -> void:
