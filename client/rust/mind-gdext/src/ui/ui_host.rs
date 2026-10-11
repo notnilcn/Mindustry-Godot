@@ -177,6 +177,12 @@ impl MindUi {
     }
 
     /// Opens a registered dialog, hiding any currently active one first.
+    ///
+    /// The GDScript `show_dialog`/`hide_dialog` calls run **deferred**: their
+    /// `shown()` builds are heavy and may re-enter `MindUi` (or an external
+    /// caller may query it during the build window), which panics with
+    /// `Gd<T>::bind() failed, already bound` while this `&mut self` is held
+    /// (PAR-0066). The stack/pause bookkeeping stays synchronous.
     #[func]
     pub fn open_dialog(&mut self, name: GString, ctx_json: GString) -> bool {
         let key = name.to_string();
@@ -189,12 +195,12 @@ impl MindUi {
             && let Some(mut previous) = self.dialogs.get(&top).cloned()
             && previous.has_method("hide_dialog")
         {
-            let _ = previous.call("hide_dialog", &[]);
+            let _ = previous.call_deferred("hide_dialog", &[]);
         }
         if node.has_method("set_context_json") && !ctx_json.is_empty() {
             let _ = node.call("set_context_json", &[ctx_json.to_variant()]);
         }
-        let _ = node.call("show_dialog", &[]);
+        let _ = node.call_deferred("show_dialog", &[]);
         let should_pause = self.pause_flags.get(&key).copied().unwrap_or(false);
         // Re-opening an already-stacked dialog must not double-count its pause.
         let was_open = self.stack.iter().any(|entry| entry == &key);
@@ -214,7 +220,7 @@ impl MindUi {
         if let Some(mut node) = self.dialogs.get(&key).cloned()
             && node.has_method("hide_dialog")
         {
-            let _ = node.call("hide_dialog", &[]);
+            let _ = node.call_deferred("hide_dialog", &[]);
         }
         let was_top = self.stack.last().is_some_and(|entry| entry == &key);
         let before = self.stack.len();
@@ -241,7 +247,7 @@ impl MindUi {
         if let Some(mut node) = self.dialogs.get(&top).cloned()
             && node.has_method("show_dialog")
         {
-            let _ = node.call("show_dialog", &[]);
+            let _ = node.call_deferred("show_dialog", &[]);
         }
     }
 
@@ -254,7 +260,7 @@ impl MindUi {
         if let Some(mut node) = self.dialogs.get(&key).cloned()
             && node.has_method("hide_dialog")
         {
-            let _ = node.call("hide_dialog", &[]);
+            let _ = node.call_deferred("hide_dialog", &[]);
         }
         if self.pause_flags.get(&key).copied().unwrap_or(false) {
             self.pop_pause();
