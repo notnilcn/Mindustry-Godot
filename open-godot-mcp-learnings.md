@@ -1790,3 +1790,11 @@ those paths no longer exist, but the workarounds still apply.
   (used for the 145 KB campaign views). Recover a paused game with `stop`+`play`.
 - Rule of thumb: any eval that needs iteration goes through map/filter or a file dump.
 - Run dir: `runs/20261011-100323-PAR-0019/`.
+
+## 2026-10-11 — PAR-0024: execute-chain typo (recurrence of the syntax class)
+
+- Symptom: a long single-`execute` walk failed with `Unexpected token (59:107)`
+  before any tool ran — an unbalanced quote in one eval string inside the chain.
+- Workaround: keep each execute chain to a few calls, or split; the concat-built
+  push_input helpers stay fine. Retry with the typo removed only.
+- Run dir: `runs/20261011-102658-PAR-0024/`.

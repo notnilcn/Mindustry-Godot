@@ -1,6 +1,6 @@
 {
  "schema": "mindustry-godot/parity-ledger@3",
- "updated": "2026-10-11T03:08:00Z",
+ "updated": "2026-10-11T03:35:00Z",
  "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
  "focus": {
   "kind": "area",
@@ -9915,8 +9915,8 @@
    "title": "Launch flow: 'Configure Loadout' dialog appears on a free launch",
    "surface": "campaign",
    "parent": "PAR-0019",
-   "status": "mismatch",
-   "updated": "2026-10-10T16:35:06Z",
+   "status": "verified",
+   "updated": "2026-10-11T03:35:00Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
     "to": "Godot 'Configure Loadout' dialog (DialogLayer/launch_loadout) over the menu",
@@ -9948,9 +9948,9 @@
     "confirm": {
      "godot": "DialogLayer/launch_loadout visible; buttons Launch(367,503) Resources(571,503) Back(780,503)"
     },
-    "last_replayed": "runs/20261009-052658-seed-campaign/"
+    "last_replayed": "runs/20261011-102658-PAR-0024/"
    },
-   "run": "runs/20261010-234250-ref-PAR-0070-combat-fx/",
+   "run": "runs/20261011-102658-PAR-0024/",
    "reproduce": {
     "java": [],
     "godot": [
@@ -9963,72 +9963,99 @@
     ],
     "compare": []
    },
-   "steps": [],
-   "mismatch": {
-    "step": "free-launch classification",
-    "java_frame": "runs/20261009-052658-seed-campaign/seed/step-11-java-launching.png",
-    "godot_frame": "runs/20261009-052658-seed-campaign/seed/step-11-godot-launchloadout.png",
-    "diff": null,
-    "metrics": {
-     "note": "element-level: dialog presence + geometry"
+   "steps": [
+    {
+     "n": 1,
+     "action": "stage the unbased Ground Zero (Godot saves dir aside); open the page: Launch action",
+     "java_frame": "java/step-10-planet-fork.png",
+     "godot_frame": null,
+     "diff": null,
+     "verdict": "fork ok",
+     "evidence": "dialog_stack [\"planet\"]; the panel action button 'Launch' at (576,611)"
     },
-    "note": "DialogLayer/launch_loadout visible with title 'Configure Loadout'; row Button 'basicShard' rect width 1188 (viewport 1152) truncated to 'basicSh...'; RichTextLabel '1800' at x=1463 off-screen; menu group visible behind (planet dialog hidden).",
-    "reproduce": {
-     "java": [
-      {
-       "tool": "computer-mcp_click",
-       "params": {
-        "x": 621,
-        "y": 676,
-        "note": "Launch; window +45+69"
-       }
-      }
+    {
+     "n": 2,
+     "action": "click Launch",
+     "java_frame": "java/step-11-java-launching.png",
+     "godot_frame": "godot/step-11-launching-godot.png",
+     "diff": null,
+     "verdict": "match (behavior + objective)",
+     "evidence": "stack [] at +1.5 s; loadout_vis false; world tick 10->35; HUD 'Obtain: 0/15 Copper'"
+    }
+   ],
+   "mismatch": null,
+   "fix": {
+    "status": "closed",
+    "commit": "c0cf6c7",
+    "summary": "Fixed by PAR-0019's free-launch branch (launch mode with an empty launcher -> start_sector directly, no Configure Loadout). Re-verified fresh for this item; the legit launcher-dialog render remains stage-blocked.",
+    "plan": {
+     "round": 1,
+     "state": "symptom fixed (PAR-0019) and re-verified; legit-case render stage-blocked",
+     "seam": "client/ui/dialogs/planet_dialog.gd::_sector_action_pressed (PAR-0019 c0cf6c7)",
+     "files": [
+      "client/ui/dialogs/planet_dialog.gd"
      ],
-     "godot": [
-      {
-       "tool": "godot_input",
-       "params": {
-        "action": "mouse_button",
-        "params": {
-         "button": "MOUSE_BUTTON_LEFT",
-         "position": {
-          "x": 576,
-          "y": 613
-         },
-         "coords": "viewport",
-         "pressed": true
-        }
-       }
-      }
+     "narrow_check": "staged fresh state + click Launch -> no dialog; the import gate for the underlying commit ran in PAR-0019",
+     "evidence": [
+      "runs/20261011-102658-PAR-0024/ (fresh no-dialog + objective pair)"
      ]
     }
    },
-   "fix": {
-    "status": "open",
-    "commit": null,
-    "summary": null
+   "verified": {
+    "mode": "reference",
+    "date": "2026-10-11T03:35:00Z",
+    "run": "runs/20261011-102658-PAR-0024/",
+    "java_frame": "runs/20261011-102658-PAR-0024/java/step-11-java-launching.png",
+    "godot_frame": "runs/20261011-102658-PAR-0024/godot/step-11-launching-godot.png",
+    "diff": null,
+    "note": "The recorded symptom (the Configure Loadout dialog appearing on a FREE launch) was fixed by PAR-0019's free-launch branch (commit c0cf6c7) and re-verified fresh: staged the unbased Ground Zero (saves aside), clicked Launch -> dialog_stack [] at +1.5 s, loadout_vis false, the world loaded (tick 10 -> 35), HUD up, objective 'Obtain: 0/15 Copper' matching the Java action frame. The world-render pixel class is PAR-0019's calibration. The legit launcher-dialog case remains stage-blocked (see reference.blocked_legit_case).",
+    "calibration": {
+     "reason": "Behavioral verification (no dialog + the tutorial world + the objective text) against the stored Java frames; the world-frame pixels are the separately itemized world-render class.",
+     "original_gate": {
+      "changed_fraction_max": 0.005,
+      "mean_abs_rgb_max": 12,
+      "coarse_layout_max_channel_mean_max": 6,
+      "palette_distance_max": 0.05
+     },
+     "checks": {
+      "dialog_after_launch": "[] (no launch_loadout; Java: no dialog)",
+      "world": "tick advancing (10 -> 35), HUD visible",
+      "objective": "Obtain: 0/15 Copper == the Java step-11 frame",
+      "no_dialog_node_trace": "DialogLayer/launch_loadout visible false"
+     },
+     "conclusion": "The free launch matches Java (no dialog, tutorial objective); the legit launcher-dialog render stays blocked on the documented staging."
+    }
    },
-   "verified": null,
    "note": "Reference soak: staging blocker: the imported Serpulo campaign has no launchable sector (the visible owned sectors read 'No Launch Sector': Stained Mountains + the under-attack Ground Zero; steps 359/360/361). A fresh-profile campaign progressed past a first sector capture is required.",
    "reference": {
-    "captured": null,
+    "captured": "2026-10-09T15:39:00Z",
     "profile": "fresh",
-    "run": "runs/20261010-234250-ref-PAR-0070-combat-fx/",
+    "run": "runs/20261011-102658-PAR-0024/",
     "frames": {
-     "planet": "java/step-359-serpulo.png",
-     "sector_panel": "java/step-360-sector.png",
-     "no_launch": "java/step-361-panel.png"
+     "fork": "java/step-10-planet-fork.png",
+     "action": "java/step-11-java-launching.png"
     },
-    "settle": [],
+    "settle": [
+     {
+      "after": "click Launch on the unbased Ground Zero (screen 621,676; window +45+69)",
+      "wait_ms": 6000
+     }
+    ],
     "expected": {
      "bundle": [],
-     "state": "Upstream: launching to a planet sector (from an adjacent owned base) opens the Configure Loadout dialog (LaunchLoadoutDialog: schematic picker + Resources + Launch; PlanetDialog.java:1401/1407).",
-     "blocked": "staging blocker: the imported Serpulo campaign has no launchable sector (the visible owned sectors read 'No Launch Sector': Stained Mountains + the under-attack Ground Zero; steps 359/360/361). A fresh-profile campaign progressed past a first sector capture is required."
+     "state": "Free launch: no dialog; the planet page closes, the launch loads, the tutorial world appears with 'Obtain: 0/15 Copper' and the move hint (no Configure Loadout)."
     },
+    "blocked_legit_case": "The launcher case (an adjacent owned base -> the Configure Loadout dialog) stays stage-blocked: the imported Serpulo campaign has no launchable sector (runs/20261010-234250-ref-PAR-0070-combat-fx steps 359/360/361 show 'No Launch Sector': Stained Mountains + the under-attack Ground Zero); a fresh-profile campaign progressed past a first sector capture is required. The dialog's render bugs from the old mismatch (basicShard row 1188 wide, '1800' at x=1463, menu behind) remain pending that stage; the dialog interactions are PAR-0025/0026/0027.",
     "checkpoint": null,
     "java_path": [
-     "fresh-profile campaign branch: capture a sector, then launch an adjacent sector -> the loadout dialog + the generated sector's core/base"
+     "fresh profile: Play > Campaign -> chooser -> Serpulo -> OK -> the page shows Ground Zero with Launch -> click Launch -> the tutorial world (step-11); no dialog"
     ]
+   },
+   "claim": {
+    "by": "parity-hunt-s1",
+    "at": "2026-10-11T00:26:58Z",
+    "released_at": "2026-10-11T03:35:00Z",
+    "reason": "verified (mode reference) in runs/20261011-102658-PAR-0024/"
    }
   },
   {
