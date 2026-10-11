@@ -1990,6 +1990,18 @@ impl MindCampaign {
             "icon_color",
             Color::from_rgba(icon.r, icon.g, icon.b, icon.a),
         );
+        // `PlanetRenderer.drawAtmosphere` uniforms: radii are
+        // `planet.radius + atmosphereRad{In,Out}`.
+        let atmosphere = def.atmosphere_color;
+        let mut atmos = VarDictionary::new();
+        atmos.set("has", def.has_atmosphere);
+        atmos.set(
+            "color",
+            Color::from_rgba(atmosphere.r, atmosphere.g, atmosphere.b, atmosphere.a),
+        );
+        atmos.set("rad_in", def.atmosphere_rad_in);
+        atmos.set("rad_out", def.atmosphere_rad_out);
+        out.set("atmosphere", &atmos);
         out.set("tiles", &tiles);
         out.set("corners", &corners);
         out.set("tile_corners", &tile_corners);

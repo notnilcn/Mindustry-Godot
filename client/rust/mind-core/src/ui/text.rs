@@ -264,6 +264,13 @@ fn render_markup_impl(s: &str, iconc: &Iconc, icons_as_text: bool) -> String {
     while i < chars.len() {
         let c = chars[i];
         if c == '[' {
+            // `[[` escapes a literal bracket (Java bundle convention, e.g.
+            // `hint.desktopMove = Use [accent][[WASD][] to move.`).
+            if chars.get(i + 1) == Some(&'[') {
+                out.push_str("[lb]");
+                i += 2;
+                continue;
+            }
             if let Some(end) = chars[i + 1..].iter().position(|&ch| ch == ']') {
                 let tag: String = chars[i + 1..i + 1 + end].iter().collect();
                 if tag.is_empty() {

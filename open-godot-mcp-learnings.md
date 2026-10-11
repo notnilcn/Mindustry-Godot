@@ -1708,6 +1708,59 @@ those paths no longer exist, but the workarounds still apply.
   guessed direct path; a null deref pins exactly like a bad method call.
   Run: `runs/20261010-090740-database-grid-audit/`.
 
+## 2026-10-11 — bare autoload identifier in an eval body pins the loop (session 2, display :11, bridge 6980)
+
+- Symptom: the first eval after `godot_game play` timed out at 15 s; `godot_debugger
+  sessions` then reported `paused: true` (break-on-error pin), while a trivial
+  `OS.get_process_id()` eval still answered (pid 364376).
+- Exact failing call: `godot_exec {"action":"eval","params":{"code":"return
+  {\"pid\": OS.get_process_id(), \"menu\": MenuGroup.visible, \"project\":
+  ProjectSettings.globalize_path(\"res://\")}"}}` — `MenuGroup` is not resolvable
+  as a bare identifier in the eval body (autoloads exist as scene nodes, not eval
+  globals).
+- Workaround: read UI nodes via `get_node("/root/Spine/Ui/UiRoot/MenuGroup")`
+  (`/root/MindUi`, `/root/MindHud` for the Rust autoloads); recover a pinned loop
+  with `godot_game stop` + `play`.
+- Run: `runs/20261011-091537-PAR-0015/`.
+
+- Bullet (2026-10-11, session 2 bootstrap): the session-2 worktree is created with
+  seeded cargo caches but **no pack outputs** — booting the client without a pack
+  shows raw bundle keys in every label and `[assets] ready ok=false ... regions=0`
+  in `godot_log errors` ("atlas manifest unavailable; using placeholder quads").
+  Workaround: run `bash tools/pack.sh pack` once in the worktree (the file is not
+  executable in a fresh worktree, so call it through `bash`; ~1 min with warm
+  caches), then `godot_game stop` + `play`. `tools/godot.sh` similarly needs
+  `GODOT_BIN=$HOME/.local/bin/godot` in the session shell (no `godot4` on PATH).
+  Run: `runs/20261011-091537-PAR-0015/` (pack.log, parse-gate.log).
+
+- Bullet (2026-10-11, session 2): an editor relaunch done from the session shell without the
+  parity-session XDG env silently moves the client's `user://` to the global
+  `~/.local/share/godot/app_userdata/Mindustry-Godot` (the screenshot path is the tell:
+  `/home/<user>/.local/share/godot/...` instead of
+  `Mindustry-Godot/.opencode/parity-session/session-2/xdg-data/godot/...`). That breaks the
+  one-data-dir-per-session rule. Relaunch with the session env explicitly:
+  `XDG_DATA_HOME=<repo>/.opencode/parity-session/session-2/xdg-data XDG_CONFIG_HOME=.../xdg-config
+  XDG_CACHE_HOME=.../xdg-cache DISPLAY=:11 OPEN_GODOT_MCP_PORT=6980 godot --editor --path client`.
+  Run: `runs/20261011-091537-PAR-0015/`.
+
+## 2026-10-11 — additive glow in the transparent SubViewport needs the backdrop inside the viewport (session 2)
+
+- Symptom: wiring `atmosphere.gdshader` (blend_add) onto a billboard in the
+  transparent `SubViewport` rendered a big BLACK parallelogram over the starfield —
+  `ALPHA = 1.0` on cleared pixels made the viewport texture opaque black, and the
+  `ViewportContainer` composites with MIX (it cannot add to the 2D `$Space` behind it).
+  A follow-up `ALPHA = clamp(luma)` fix removed the black but dimmed the halo by the
+  composite's alpha² term.
+- Workaround that matches Java: keep the starfield INSIDE the viewport — a camera-facing
+  `Background` quad (space.png, `uv1_scale/offset` reproducing the 2D
+  `STRETCH_KEEP_ASPECT_COVERED` crop, `DEPTH_DRAW_DISABLED`, priority -10) makes the
+  viewport opaque, then the additive atmosphere (ALPHA=1) composites the halo over the
+  stars with no black. Also: a `ShaderMaterial` has no billboard flag — face the quad by
+  copying `camera.rotation` when the camera moves.
+- Run: `runs/20261011-091537-PAR-0015/` (steps r3/r4/r5 + `godot/atmos-off.png`).
+- Bullet (same run): `const X := Vector3(...).normalized()` is not a constant expression
+  in GDScript (parse error at the const, surfaced only on scene load) — precompute the
+  literal or make it a `static var`.
 ## 2026-10-11 — PAR-0010 Godot leg: menu clicks miss until the menu layout settles
 
 - Symptom: fresh `stop`+`play`, then `godot_input` press/release at the hardcoded
@@ -1889,3 +1942,29 @@ Workaround: kill every game process whose `--editor-pid` is not alive:
   for pid in $(pgrep -f 'godot --path.*game.tscn'); do owner=$(tr '\0' ' ' < /proc/$pid/cmdline | grep -o 'editor-pid [0-9]*' | awk '{print $2}'); kill -0 $owner 2>/dev/null || kill -9 $pid; done
 then `nohup tools/parity-session.sh` again. Verified 12 -> 1 processes and a
 healthy bridge afterwards. Run: the PAR-0066 verification session.
+
+## 2026-10-11 — post-restart walks: menu clicks are swallowed during the boot fade (session 2)
+
+- Symptom: after `godot_game stop` + `play`, the first Play/Campaign click batch often
+  lands during the boot-cover fade: `godot_input` returns ok, the submenu opens from the
+  first click, the second click misses and the walk strands at the menu (`chooser:false`).
+  Recurred 3+ times across PAR-0015/PAR-0018/PAR-0017 walks.
+- Workaround that works every time: click Play, probe
+  `MenuGroup/menu/Submenu/Buttons.get_children().size()` (5 when open), click Campaign,
+  then probe `DialogLayer/planet.visible` and RE-PROBE once before concluding a miss (the
+  dialog appears a few frames after the click).
+- Run: `runs/20261011-095656-PAR-0018/`.
+
+- Bullet (2026-10-11, session 2): `pgrep -f 'godot --path .../session2/client'` matches the
+  tool shell's OWN command line → a `kill $(pgrep -f ...)` loop SIGTERMed the session shell
+  mid-command ("Killed by SIGTERM"). Same trap as the `pkill -f <jar>` warning in
+  `java-leg-learnings.md`. Use `pgrep -x godot`/exact pids from a separate probe, or filter
+  `pgrep -f pattern | grep -v $$`.
+
+- Bullet (2026-10-11, session 2): an editor relaunch whose predecessor is still alive makes the MCP addon
+  FALL BACK to another port (observed: new editor bound 6971 while the stale one held 6980, so the
+  session MCP kept talking to the old editor with the pre-build library). The old editor is easy to miss:
+  its cmdline is `godot --editor --path client` (relative) and does not contain the worktree name.
+  Always (a) kill the previous editor pid explicitly before relaunching, (b) gate the relaunch on the
+  EXACT port line (`Bridge listening on ws://127.0.0.1:6980`), and (c) verify `godot_health` +
+  `godot_game instances` pid after the game starts.

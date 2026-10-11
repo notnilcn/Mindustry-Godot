@@ -144,17 +144,87 @@ func is_shown() -> bool:
 
 
 ## Adds an `@back` close button to the button row (`addCloseButton`).
-func add_close_button(width: float = 210.0) -> Button:
+func add_close_button(width: float = 200.0) -> Button:
 	# code-instantiated: the close button is added by the dialog's own script at
-	# runtime (button row contents vary per dialog).
-	var button := Button.new()
-	button.text = _t("@back")
-	button.theme_type_variation = "defaultt"
+	# runtime (button row contents vary per dialog). Mirrors
+	# `BaseDialog.addCloseButton`: `button("@back", Icon.left).size(200f, 54f)`
+	# over the themed pane.
+	var button := MindWidgets.button("")
+	button.custom_minimum_size = Vector2(width, 54.0)
+	apply_pane_button(button, PANE_OUTLINE_GRAY)
+	build_button_content(button, MindWidgets.glyph("left", 20), _t("@back"))
 	button.pressed.connect(_close_pressed)
-	button.custom_minimum_size.x = width
 	if buttons != null:
 		buttons.add_child(button)
 	return button
+
+
+## `Tex.pane` border in the reference frames (#454545).
+const PANE_OUTLINE_GRAY := Color(0.27, 0.27, 0.27)
+
+
+## Pane style box (`Tex.pane`/flat button look): black fill with a flat border
+## (Java rail rows and action-row buttons sampled #454545; the checked rail row
+## takes `Tex.buttonDown`'s accent tint).
+func _pane_box(fill: Color, border: Color, width: float = 4.0, radius: float = 2.0, bottom_width: float = -1.0) -> StyleBoxFlat:
+	var box := StyleBoxFlat.new()
+	box.bg_color = fill
+	box.border_width_left = int(width)
+	box.border_width_top = int(width)
+	box.border_width_right = int(width)
+	box.border_width_bottom = int(bottom_width if bottom_width >= 0.0 else width)
+	box.border_color = border
+	box.corner_radius_top_left = int(radius)
+	box.corner_radius_top_right = int(radius)
+	box.corner_radius_bottom_left = int(radius)
+	box.corner_radius_bottom_right = int(radius)
+	box.content_margin_left = 2.0
+	box.content_margin_right = 2.0
+	box.content_margin_top = 2.0
+	box.content_margin_bottom = 2.0
+	return box
+
+
+## Applies the pane look to one button (`Styles.flatTogglet` over `Tex.pane`).
+## Unchecked toggles can drop the bottom edge (`bottom_border = 0`) where the
+## next pane's border closes the stack.
+func apply_pane_button(button: Button, border: Color, bottom_border: float = 4.0) -> void:
+	var fill := Color(0.0, 0.0, 0.0, 1.0)
+	button.add_theme_stylebox_override("normal", _pane_box(fill, border, 4.0, 2.0, bottom_border))
+	button.add_theme_stylebox_override("hover", _pane_box(fill, border, 4.0, 2.0, bottom_border))
+	button.add_theme_stylebox_override("pressed", _pane_box(fill, border))
+	button.add_theme_stylebox_override("disabled", _pane_box(fill, border, 4.0, 2.0, bottom_border))
+
+
+## Back-compat alias for the pre-promotion name (planet dialog call sites).
+func _apply_pane_button(button: Button, border: Color, bottom_border: float = 4.0) -> void:
+	apply_pane_button(button, border, bottom_border)
+
+
+## `planetTable.button(name, icon, Styles.flatTogglet)`: the icon sits at the
+## left margin (10 px in Java, ~13 px to its pixel row) and the label centers in
+## the space that remains to the right of it.
+func build_button_content(button: Button, icon: Control, label_text: String) -> void:
+	# code-instantiated: button content rows are data-driven per dialog.
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_BEGIN
+	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	row.offset_left = 13.0
+	row.offset_right = -8.0
+	row.add_theme_constant_override("separation", 8)
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	button.add_child(row)
+	if icon != null:
+		row.add_child(icon)
+	var label := MindWidgets.label(label_text)
+	# `RichTextLabel` min width collapses under word wrap inside a bare HBox;
+	# action-row labels are single-line, so disable wrapping.
+	label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(label)
 
 
 ## Closes through `MindUi` so the dialog stack and the pause governor stay in
