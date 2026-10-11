@@ -16,14 +16,17 @@ use godot::classes::{Mesh, MeshInstance2D, Node2D, Texture2D};
 use godot::prelude::*;
 
 use mind_core::config::TILESIZE;
+use mind_core::content::{BlockDef, BlockKind};
 use mind_core::render::scan::{CameraKey, CameraView, visible_blocks};
 
 use crate::sim_host::MindSimHost;
 
-use super::atlas_bind::{Quad, RegionResolver, build_mesh};
+use super::atlas_bind::{RegionResolver, ResolvedRegion};
+use super::units::{UnitQuad, build_unit_mesh};
 
-/// `BlockRenderer.growSprites` for dynamic sprites is off; 0 padding.
-const GROW: f32 = 0.0;
+/// `Pal.accent` (construct-site tint, `Draw.color(Pal.accent, ...)`).
+const ACCENT: u32 = 0xffd3_7fff;
+
 
 /// Block-renderer counters mirrored into `MindWorldRenderer`'s stats.
 #[derive(Clone, Copy, Debug, Default)]
@@ -45,6 +48,9 @@ pub struct BlockRenderer {
     nodes: Vec<Gd<MeshInstance2D>>,
     last_key: Option<CameraKey>,
     last_revision: i64,
+    /// Construct sites were drawn last frame: their progress animates without
+    /// a world-revision bump, so keep rebuilding while any are visible.
+    animating: bool,
     stats: BlockStats,
 }
 
@@ -62,6 +68,7 @@ impl BlockRenderer {
             nodes: Vec::new(),
             last_key: None,
             last_revision: i64::MIN,
+            animating: false,
             stats: BlockStats::default(),
         }
     }
@@ -75,7 +82,7 @@ impl BlockRenderer {
     fn needs_rebuild(&mut self, view: &CameraView) -> bool {
         let revision = self.host.clone().bind().world_revision();
         let key = CameraKey::from_view(view, TILESIZE as f32);
-        if self.last_key == Some(key) && self.last_revision == revision {
+        if !self.animating && self.last_key == Some(key) && self.last_revision == revision {
             return false;
         }
         self.last_key = Some(key);
@@ -89,9 +96,10 @@ impl BlockRenderer {
             return;
         }
 
-        let mut groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<Quad>)> = BTreeMap::new();
+        let mut groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<UnitQuad>)> = BTreeMap::new();
         let mut seen = HashSet::new();
         let mut dynamic = 0i64;
+        let mut animating = false;
         {
             let host = self.host.clone();
             let host = host.bind();
@@ -110,14 +118,6 @@ impl BlockRenderer {
                 {
                     continue;
                 }
-                let resolved = self.resolver.resolve(&def.region);
-                let page = resolved.as_ref().map(|r| r.page).unwrap_or(-1);
-                let uv = resolved
-                    .as_ref()
-                    .map(|r| r.uv)
-                    .unwrap_or([0.0, 0.0, 1.0, 1.0]);
-                let texture = resolved.and_then(|r| r.texture);
-                let entry = groups.entry(page).or_insert((texture, Vec::new()));
                 let w = def.size.max(1) as f32 * size;
                 // Java anchors a building sprite at its footprint centre
                 // (`Building.x = tile.drawx() + Block.offset`, `Tile.drawx =
@@ -126,14 +126,63 @@ impl BlockRenderer {
                 // even-size half-tile.
                 let anchor_x = (tile.x + (def.size - 1) / 2) as f32 * size + def.offset;
                 let anchor_y = (tile.y + (def.size - 1) / 2) as f32 * size + def.offset;
-                entry.1.push(Quad {
-                    cx: anchor_x,
-                    cy: anchor_y,
-                    w,
-                    h: w,
-                    uv,
-                    color: 0xffff_ffff,
-                });
+                let rotation = host.building_rotation(tile.x, tile.y);
+                let mut push = |region: &ResolvedRegion, rot: f32, color: u32, frac: f32| {
+                    let entry = groups
+                        .entry(region.page)
+                        .or_insert((region.texture.clone(), Vec::new()));
+                    let [u0, v0, u1, v1] = region.uv;
+                    // `frac < 1`: bottom-up reveal (world y-up; v1 is the
+                    // sprite's bottom row through the y-flip camera).
+                    let h = w * frac;
+                    entry.1.push(UnitQuad {
+                        cx: anchor_x,
+                        cy: anchor_y - (w - h) / 2.0,
+                        w,
+                        h,
+                        rot,
+                        uv: [u0, v1 - (v1 - v0) * frac, u1, v1],
+                        color,
+                    });
+                };
+
+                // `ConstructBuild.draw`: the target block's icon through the
+                // blockbuild shader, tinted `Pal.accent`. First slice: an
+                // accent ghost plus a bottom-up reveal at `progress`.
+                if def.kind == BlockKind::ConstructBlock {
+                    if let Some((current, progress)) = host.construct_draw(tile.x, tile.y)
+                        && let Some(target) = content.block(current)
+                        && let Some(region) = self.block_region(target)
+                    {
+                        let rot = if rotates_sprite(target) {
+                            f32::from(rotation) * 90.0
+                        } else {
+                            0.0
+                        };
+                        push(&region, rot, (ACCENT & !0xff) | 0x70, 1.0);
+                        let progress = progress.clamp(0.0, 1.0);
+                        if progress > 0.0 {
+                            push(&region, rot, 0xffff_ffff, progress);
+                        }
+                        animating = true;
+                        dynamic += 1;
+                    }
+                    continue;
+                }
+
+                let rot = if rotates_sprite(def) {
+                    f32::from(rotation) * 90.0
+                } else {
+                    0.0
+                };
+                match self.block_region(def) {
+                    Some(region) => push(&region, rot, 0xffff_ffff, 1.0),
+                    None => {
+                        if let Some(region) = self.resolver.resolve(&def.region) {
+                            push(&region, rot, 0xffff_ffff, 1.0);
+                        }
+                    }
+                }
                 // `Block.drawTeamOverlay` -> `Building.drawTeam`: the per-team
                 // pre-coloured region (`<name>-team-<team>`) over the base
                 // sprite, else the `<name>-team` mask tinted with the team
@@ -153,22 +202,13 @@ impl BlockRenderer {
                         ),
                     };
                     if let Some(region) = resolved {
-                        let entry = groups
-                            .entry(region.page)
-                            .or_insert((region.texture.clone(), Vec::new()));
-                        entry.1.push(Quad {
-                            cx: anchor_x,
-                            cy: anchor_y,
-                            w,
-                            h: w,
-                            uv: region.uv,
-                            color: tint,
-                        });
+                        push(&region, 0.0, tint, 1.0);
                     }
                 }
                 dynamic += 1;
             }
         }
+        self.animating = animating;
 
         self.apply_groups(groups);
         self.stats.dynamic_sprites = dynamic;
@@ -177,13 +217,24 @@ impl BlockRenderer {
     }
 
     /// Assigns the grouped page meshes to the pooled nodes, hiding spares.
-    fn apply_groups(&mut self, groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<Quad>)>) {
+    /// The in-world sprite for a block: the composed `block-<name>-full`
+    /// generated icon (base + top layers, e.g. turret base + barrel, drill
+    /// rotator/top) when the generator emitted one, else `Block.region`, else
+    /// the `Conveyor.regions[0][0]` frame. `None` when nothing is packed.
+    fn block_region(&mut self, def: &BlockDef) -> Option<ResolvedRegion> {
+        self.resolver
+            .find(&format!("block-{}-full", def.name))
+            .or_else(|| self.resolver.find(&def.region))
+            .or_else(|| self.resolver.find(&format!("{}-0-0", def.name)))
+    }
+
+    fn apply_groups(&mut self, groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<UnitQuad>)>) {
         let mut index = 0usize;
         for (_page, (texture, quads)) in groups {
             if quads.is_empty() {
                 continue;
             }
-            let Some(mesh) = build_mesh(&quads, GROW, true) else {
+            let Some(mesh) = build_unit_mesh(&quads) else {
                 continue;
             };
             let node = if index < self.nodes.len() {
@@ -208,4 +259,19 @@ impl BlockRenderer {
             node.set_visible(false);
         }
     }
+}
+
+/// Whether the block's sprite follows `Building.rotation` (`rotate` blocks
+/// that draw their region with `rotdeg()`: belts, conduits, ducts).
+fn rotates_sprite(def: &BlockDef) -> bool {
+    matches!(
+        def.kind,
+        BlockKind::Conveyor
+            | BlockKind::ArmoredConveyor
+            | BlockKind::StackConveyor
+            | BlockKind::Conduit
+            | BlockKind::ArmoredConduit
+            | BlockKind::Duct
+            | BlockKind::PayloadConveyor
+    )
 }

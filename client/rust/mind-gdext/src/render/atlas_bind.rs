@@ -111,10 +111,30 @@ impl RegionResolver {
         resolved
     }
 
+    /// Resolves a region without the `error` fallback (cached; `None` when
+    /// absent), for callers that walk a candidate chain (`Core.atlas.find`
+    /// with `isFound` checks).
+    pub fn find(&mut self, name: &str) -> Option<ResolvedRegion> {
+        let key = format!("\u{0}{name}");
+        if let Some(cached) = self.cache.get(&key) {
+            return cached.clone();
+        }
+        let resolved = self.lookup_with(name, false);
+        self.cache.insert(key, resolved.clone());
+        resolved
+    }
+
     fn lookup(&mut self, name: &str) -> Option<ResolvedRegion> {
+        self.lookup_with(name, true)
+    }
+
+    fn lookup_with(&mut self, name: &str, fallback: bool) -> Option<ResolvedRegion> {
         let assets = self.assets.clone()?;
         let assets = assets.bind();
         let mut geometry = region_geometry_with_variants(&assets, name);
+        if geometry.is_empty() && !fallback {
+            return None;
+        }
         if geometry.is_empty() && name != ERROR_REGION {
             self.missing += 1;
             geometry = assets.region_geometry(GString::from(ERROR_REGION));

@@ -1940,6 +1940,34 @@ impl MindSimHost {
         Vec::new()
     }
 
+    /// Building rotation (`Building.rotation`, quarter turns) at `(x, y)`;
+    /// `0` without a building. Rust-only seam for rotated block sprites.
+    pub fn building_rotation(&self, x: i32, y: i32) -> u8 {
+        self.sim
+            .grid
+            .tile(x, y)
+            .build
+            .and_then(|entity| {
+                self.sim
+                    .ecs
+                    .0
+                    .get::<mind_core::ecs::BuildingComp>(entity)
+                    .map(|comp| comp.rot)
+            })
+            .unwrap_or(0)
+    }
+
+    /// `ConstructBuild` draw state at `(x, y)`: `(current block, progress)`.
+    /// Rust-only seam for the construct-site sprite (`ConstructBuild.draw`).
+    pub fn construct_draw(&self, x: i32, y: i32) -> Option<(mind_core::content::BlockId, f32)> {
+        let entity = self.sim.grid.tile(x, y).build?;
+        self.sim
+            .ecs
+            .0
+            .get::<mind_core::world::construct::ConstructState>(entity)
+            .map(|state| (state.current, state.progress))
+    }
+
     /// Owning team of the building at `(x, y)` (`Tile.team()`; `None` when the
     /// tile has no building). Rust-only seam for the block renderer's team
     /// overlays (`Block.drawTeamOverlay`).
