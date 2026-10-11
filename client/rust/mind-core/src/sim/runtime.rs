@@ -146,7 +146,6 @@ impl WorldHooks for SimHooks {
 pub struct SimRuntime {
     config: SimRuntimeConfig,
     content: ContentRegistry,
-    counter: BlockCounter,
     hooks: SimHooks,
     log: WorldEventLog,
     render: NoopRenderHooks,
@@ -163,14 +162,9 @@ impl SimRuntime {
         &mut self.content
     }
 
-    /// Live block counter.
-    pub fn counter(&self) -> &BlockCounter {
-        &self.counter
-    }
-
     /// Clears runtime bookkeeping after [`Sim::reset`] (entities are gone).
-    pub(crate) fn reset(&mut self) {
-        self.counter = BlockCounter::new();
+    pub(crate) fn reset(&mut self, world: &mut World) {
+        world.insert_resource(BlockCounter::new());
     }
 
     /// Whether placement is allowed by the `BuildVisibility`/unlock gate.
@@ -259,11 +253,14 @@ impl SimRuntime {
             let Some(table) = world.get_resource::<BlockTable>() else {
                 return false;
             };
+            let Some(counter) = world.get_resource::<BlockCounter>() else {
+                return false;
+            };
             if !crate::world::build::valid_place(
                 &self.content,
                 table,
                 &rules,
-                &self.counter,
+                counter,
                 grid,
                 block,
                 team,
@@ -284,8 +281,10 @@ impl SimRuntime {
                 .unwrap_or(team);
             let _ = remove_from_proximity(world, old, &self.content);
             self.remove_power_graph(world, grid, old);
-            if old_block != BlockId::AIR {
-                self.counter.remove(old_team, old_block, 1);
+            if old_block != BlockId::AIR
+                && let Some(mut counter) = world.get_resource_mut::<BlockCounter>()
+            {
+                counter.remove(old_team, old_block, 1);
             }
         }
 
@@ -311,7 +310,9 @@ impl SimRuntime {
             );
             self.merge_power_graph(world, grid, entity);
         }
-        self.counter.add(team, block, 1);
+        if let Some(mut counter) = world.get_resource_mut::<BlockCounter>() {
+            counter.add(team, block, 1);
+        }
         true
     }
 
@@ -361,7 +362,9 @@ impl SimRuntime {
             };
             ctx.remove_block(x, y);
         }
-        self.counter.remove(team, block, 1);
+        if let Some(mut counter) = world.get_resource_mut::<BlockCounter>() {
+            counter.remove(team, block, 1);
+        }
         // `Tile.changed` re-runs proximity for the four neighbors.
         for (nx, ny) in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)] {
             if let Some(entity) = grid.entity_at(TilePos::new(nx, ny)) {
@@ -523,7 +526,10 @@ impl SimRuntime {
                 c.part(&liquids.current().to_bits());
             }
         }
-        c.part(&(self.counter.counts.len() as u64));
+        let counter_len = world
+            .get_resource::<BlockCounter>()
+            .map_or(0, |counter| counter.counts.len());
+        c.part(&(counter_len as u64));
         c.finish()
     }
 }
@@ -627,10 +633,13 @@ impl Sim {
             liquids: liquid_count,
         });
         self.ecs.0.insert_resource(PowerGrids::new());
+        // The live per-team block counter (`Build.validPlace` limits + the
+        // runtime checksum) is a world resource so scheduled systems (the
+        // campaign team AI) can read it (PAR-0139 round 2).
+        self.ecs.0.insert_resource(BlockCounter::new());
         self.block_runtime = Some(SimRuntime {
             config,
             content,
-            counter: BlockCounter::new(),
             hooks: SimHooks {
                 seq: AtomicU64::new(0),
                 item_count,
@@ -859,7 +868,7 @@ impl Sim {
             self.ecs.0.despawn(entity);
         }
         if let Some(runtime) = self.block_runtime.as_mut() {
-            runtime.reset();
+            runtime.reset(&mut self.ecs.0);
             self.ecs
                 .0
                 .insert_resource(crate::world::blocks::power::PowerGrids::new());

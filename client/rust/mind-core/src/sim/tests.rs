@@ -919,9 +919,8 @@ fn block_runtime_replaces_compatible_occupied_tile() {
             .block,
         upgraded
     );
-    let runtime = sim.block_runtime().expect("runtime");
-    assert_eq!(runtime.counter().count(0, wall), 0);
-    assert_eq!(runtime.counter().count(0, upgraded), 1);
+    assert_eq!(sim.block_counter().expect("counter").count(0, wall), 0);
+    assert_eq!(sim.block_counter().expect("counter").count(0, upgraded), 1);
 }
 
 #[test]

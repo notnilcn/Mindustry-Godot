@@ -29,56 +29,87 @@ pub const DEFAULT_ENV: i32 = 233;
 pub const TIME_TO_MINUTES: f32 = 60.0 * 60.0;
 
 /// One team's rule overrides (`Rules.TeamRule`).
+///
+/// Upstream's `JsonIO` runs Arc `Json` with `usePrototypes = false`, so every
+/// field equal to its prototype (the defaults below) is omitted; the port
+/// mirrors that with `skip_serializing_if` so a rules set with many team
+/// entries stays compact (the save `meta.rules` string is u16-length capped;
+/// a 256-entry default `teams` block otherwise exceeds 64 KiB and fails the
+/// save - PAR-0139).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct TeamRule {
     /// Ships spawn from the core (TODO upstream).
+    #[serde(skip_serializing_if = "is_true")]
     pub ai_core_spawn: bool,
     /// Core no-build protection applies.
+    #[serde(skip_serializing_if = "is_true")]
     pub protect_cores: bool,
     /// `placeRangeCheck` applies.
+    #[serde(skip_serializing_if = "is_true")]
     pub check_placement: bool,
     /// Blocks don't require power/resources.
+    #[serde(skip_serializing_if = "is_false")]
     pub cheat: bool,
     /// Core always full of every item.
+    #[serde(skip_serializing_if = "is_false")]
     pub fill_items: bool,
     /// Resources aren't consumed.
+    #[serde(skip_serializing_if = "is_false")]
     pub infinite_resources: bool,
     /// EXPERIMENTAL pre-built base AI.
+    #[serde(skip_serializing_if = "is_false")]
     pub prebuild_ai: bool,
     /// Random schematic builder AI.
+    #[serde(skip_serializing_if = "is_false")]
     pub build_ai: bool,
     /// Builder AI tier `[0, 1]`.
+    #[serde(skip_serializing_if = "is_one_f32")]
     pub build_ai_tier: f32,
     /// RTS unit AI.
+    #[serde(skip_serializing_if = "is_false")]
     pub rts_ai: bool,
     /// Minimum attack squad size.
+    #[serde(skip_serializing_if = "is_four")]
     pub rts_min_squad: i32,
     /// Maximum attack squad size.
+    #[serde(skip_serializing_if = "is_fifty")]
     pub rts_max_squad: i32,
     /// Minimum attack "advantage" weight.
+    #[serde(skip_serializing_if = "is_one_point_two")]
     pub rts_min_weight: f32,
     /// Unit factory activation delay.
+    #[serde(skip_serializing_if = "is_zero_f32")]
     pub unit_factory_activation_delay: f32,
     /// Unit build speed multiplier.
+    #[serde(skip_serializing_if = "is_one_f32")]
     pub unit_build_speed_multiplier: f32,
     /// Unit damage multiplier.
+    #[serde(skip_serializing_if = "is_one_f32")]
     pub unit_damage_multiplier: f32,
     /// Unit crash damage multiplier.
+    #[serde(skip_serializing_if = "is_one_f32")]
     pub unit_crash_damage_multiplier: f32,
     /// Unit mining speed multiplier.
+    #[serde(skip_serializing_if = "is_one_f32")]
     pub unit_mine_speed_multiplier: f32,
     /// Unit cost multiplier.
+    #[serde(skip_serializing_if = "is_one_f32")]
     pub unit_cost_multiplier: f32,
     /// Unit health multiplier.
+    #[serde(skip_serializing_if = "is_one_f32")]
     pub unit_health_multiplier: f32,
     /// Block health multiplier.
+    #[serde(skip_serializing_if = "is_one_f32")]
     pub block_health_multiplier: f32,
     /// Block damage multiplier.
+    #[serde(skip_serializing_if = "is_one_f32")]
     pub block_damage_multiplier: f32,
     /// Build speed multiplier.
+    #[serde(skip_serializing_if = "is_one_f32")]
     pub build_speed_multiplier: f32,
     /// Extra no-build radius.
+    #[serde(skip_serializing_if = "is_zero_f32")]
     pub extra_core_build_radius: f32,
 }
 
@@ -361,6 +392,30 @@ fn is_minus_one(value: &i32) -> bool {
 fn is_never(value: &i32) -> bool {
     *value == NEVER
 }
+fn is_true(value: &bool) -> bool {
+    *value
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+fn is_one_f32(value: &f32) -> bool {
+    *value == 1.0
+}
+
+fn is_four(value: &i32) -> bool {
+    *value == 4
+}
+
+fn is_fifty(value: &i32) -> bool {
+    *value == 50
+}
+
+fn is_one_point_two(value: &f32) -> bool {
+    *value == 1.2
+}
+
 fn is_zero_f32(value: &f32) -> bool {
     *value == 0.0
 }
@@ -989,6 +1044,29 @@ impl Default for SectorInfo {
 
 #[cfg(test)]
 mod tests {
+    /// A rules set carrying every team's (default) entry must serialize
+    /// compactly: the save `meta.rules` string is u16-length capped and the
+    /// authored campaign maps list all 256 team ids (PAR-0139).
+    #[test]
+    fn many_team_rules_serialize_compactly() {
+        let mut rules = Rules::default();
+        for team in 0..=255u8 {
+            rules.team_rule_mut(team);
+        }
+        let json = serde_json::to_string(&rules).expect("json");
+        assert!(
+            json.len() < u16::MAX as usize,
+            "256 default team rules stay within the save string cap ({} bytes)",
+            json.len()
+        );
+        let snippet = &json[json.find("teams").unwrap_or(0)..];
+        let snippet = &snippet[..120.min(snippet.len())];
+        assert!(
+            json.contains("\"teams\":{\"0\":{}"),
+            "default team rules serialize as empty objects: {snippet}"
+        );
+    }
+
     use super::*;
     use crate::io::json::MapObjective;
 

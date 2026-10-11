@@ -56,7 +56,7 @@ impl super::Sim {
                 .0
                 .insert_resource(crate::world::blocks::power::PowerGrids::new());
             if let Some(runtime) = self.block_runtime.as_mut() {
-                runtime.reset();
+                runtime.reset(&mut self.ecs.0);
             }
         } else {
             self.ecs.0.clear_entities();
@@ -153,21 +153,9 @@ mod tests {
             block: node,
         })
         .expect("place");
-        assert_eq!(
-            sim.block_runtime()
-                .expect("runtime")
-                .counter()
-                .count(0, node),
-            1
-        );
+        assert_eq!(sim.block_counter().expect("counter").count(0, node), 1);
         sim.reset();
-        assert_eq!(
-            sim.block_runtime()
-                .expect("runtime")
-                .counter()
-                .count(0, node),
-            0
-        );
+        assert_eq!(sim.block_counter().expect("counter").count(0, node), 0);
         assert_eq!(
             sim.ecs
                 .0

@@ -362,6 +362,36 @@ impl Sim {
         placed
     }
 
+    /// The live per-team block counter resource (`Build.validPlace` limits).
+    pub fn block_counter(&self) -> Option<&crate::world::limits::BlockCounter> {
+        self.ecs
+            .0
+            .get_resource::<crate::world::limits::BlockCounter>()
+    }
+
+    /// Applies a live block placement for an explicit team.
+    ///
+    /// `Command::Place` carries only the default team; the campaign AI queue
+    /// drain (`CampaignAiQueues` -> `Sim::place_for_team`) uses this entry
+    /// point so `BaseBuilderAI` plans land for their owning team (PAR-0139).
+    pub fn place_for_team(&mut self, x: i16, y: i16, block: BlockId, rot: u8, team: u8) -> bool {
+        if self.block_runtime.is_none() || self.content.name(block).is_err() {
+            return false;
+        }
+        if self.runtime_place(x, y, block, rot, team) {
+            self.push_event(SimEvent::BlockPlacedEvent(BlockPlacedEvent {
+                x,
+                y,
+                block,
+                team,
+            }));
+            true
+        } else {
+            log::debug!("team placement rejected at ({x}, {y}) for team {team}");
+            false
+        }
+    }
+
     /// Breaks through the opt-in live runtime; `false` when absent or rejected.
     fn runtime_break(&mut self, x: i16, y: i16) -> bool {
         let Some(runtime) = self.block_runtime.as_mut() else {

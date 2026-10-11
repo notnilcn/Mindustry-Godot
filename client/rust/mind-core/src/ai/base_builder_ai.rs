@@ -253,9 +253,13 @@ impl BaseBuilderAi {
                 };
                 let angle = input.rng.next_float() * std::f32::consts::TAU;
                 let len = input.rng.random_float(PLACE_RANGE);
-                let wx = pos.x() as i32 + (angle.cos() * len) as i32;
-                let wy = pos.y() as i32 + (angle.sin() * len) as i32;
-                let tile = input.grid.tiles.getc(wx, wy);
+                // Upstream scatters in WORLD pixels around the core
+                // (`world.tile(pos.x + trnsx(angle, len), ...)`); the port
+                // previously added pixel lengths to tile indices (PAR-0139).
+                let ts = crate::config::TILESIZE as f32;
+                let wx = (pos.x() as f32 + 0.5) * ts + angle.cos() * len;
+                let wy = (pos.y() as f32 + 0.5) * ts + angle.sin() * len;
+                let tile = input.grid.tiles.getc((wx / ts) as i32, (wy / ts) as i32);
                 let tx = tile.x as i32;
                 let ty = tile.y as i32;
 

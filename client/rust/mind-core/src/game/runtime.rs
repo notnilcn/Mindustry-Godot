@@ -25,17 +25,20 @@ use super::teams::Teams;
 use super::universe::Campaign;
 use crate::ai::controller::{AiKind, ControllerSlot};
 use crate::ai::rts_ai::{self, EnemyStat, MAX_TARGETS_CHECKED, RtsBuilding, RtsLiveUnit};
+use crate::ai::{BaseBuildInput, BaseRegistry, Cost};
 use crate::content::registries::blocks::BlockFlag;
-use crate::content::{BlockKind, ContentRegistry, ItemId};
+use crate::content::{BlockId, BlockKind, ContentRegistry, ItemId};
 use crate::ecs::{BuildingComp, EntitySeq, TeamId};
 use crate::entities::comp::unit::comp::{UnitCore, UnitTypeComp};
 use crate::entities::comp::{Health, Pos, TeamComp};
 use crate::game::State;
+use crate::math::ArcRand;
 use crate::render::g3d::grid::PlanetGrid;
 use crate::sim::runtime::ContentIndex;
 use crate::world::TilePos;
 use crate::world::block::BlockTable;
 use crate::world::blocks::storage::core_block::CoreBuild;
+use crate::world::limits::{BlockCounter, BuildRules};
 use crate::world::modules::ItemModule;
 
 /// Sim ticks per second (fixed rate).
@@ -133,6 +136,42 @@ pub fn reset_campaign_core_hooks(world: &mut World) {
     }
 }
 
+/// The loaded base-part catalogue (`Vars.bases`), supplied by the host from
+/// `assets/baseparts/*.msch`. The base-builder half of the team AI is skipped
+/// while this resource is absent (headless P0 worlds never pay for it).
+#[derive(Resource, Clone, Default)]
+pub struct BaseCatalog(pub Arc<BaseRegistry>);
+
+/// One queued AI placement (`team_ai_system` -> host pump).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AiPlaceRequest {
+    /// Owning team.
+    pub team: u8,
+    /// Tile x.
+    pub x: i16,
+    /// Tile y.
+    pub y: i16,
+    /// Block content id.
+    pub block: BlockId,
+    /// Rotation.
+    pub rot: u8,
+}
+
+/// Shared queue handle for [`AiPlaceRequest`]s (`CampaignCoreQueues` sibling);
+/// the host pump drains it at tick boundaries through `Sim::place_for_team`.
+#[derive(Resource, Clone, Default)]
+pub struct CampaignAiQueues(pub Arc<Mutex<Vec<AiPlaceRequest>>>);
+
+/// Installs the AI placement queue resource (idempotent).
+pub fn install_campaign_ai_queues(world: &mut World) -> Arc<Mutex<Vec<AiPlaceRequest>>> {
+    if let Some(existing) = world.get_resource::<CampaignAiQueues>() {
+        return existing.0.clone();
+    }
+    let queues = Arc::new(Mutex::new(Vec::new()));
+    world.insert_resource(CampaignAiQueues(queues.clone()));
+    queues
+}
+
 /// The campaign match runtime installed into the sim ECS world while a sector
 /// is loaded.
 #[derive(Resource)]
@@ -151,6 +190,11 @@ pub struct CampaignRuntime {
     pub is_client: bool,
     /// Unlocked content names (map objective `Research`/`Produce` predicates).
     pub unlocked_content: std::collections::HashSet<String>,
+    /// Deterministic team-AI randomness (`BaseBuilderAI` placement scatter).
+    ///
+    /// Upstream draws from the global `Mathf.random`; the live port keeps a
+    /// dedicated stream so a scenario replays byte-for-byte (PAR-0139).
+    pub ai_rng: ArcRand,
 }
 
 impl CampaignRuntime {
@@ -164,6 +208,7 @@ impl CampaignRuntime {
             turn_due: false,
             is_client: false,
             unlocked_content: std::collections::HashSet::new(),
+            ai_rng: ArcRand::new(0x5EED_0139),
         }
     }
 
@@ -209,6 +254,24 @@ pub fn sync_session_with_sim(
         }
     }
 
+    // A world load rebuilds the `Teams` registry to register the live cores,
+    // but upstream keeps every `TeamData` across `World.loadMap` (`Logic`
+    // only recreates teams on reset), so the carried save build plans must
+    // survive the rebuild (PAR-0139 round 2: the resumed sector's
+    // `apply_team_plans` plans were wiped here before the AI could drain
+    // them).
+    let carried_plans: Vec<(
+        u8,
+        std::collections::VecDeque<crate::game::teams::BlockPlan>,
+    )> = (0..=255u8)
+        .filter_map(|team| {
+            session
+                .teams
+                .get_or_null(TeamId(team))
+                .filter(|data| !data.plans.is_empty())
+                .map(|data| (team, data.plans.clone()))
+        })
+        .collect();
     session.teams = Teams::new();
     let default_team = session.default_team();
     let wave_team = session.wave_team();
@@ -229,6 +292,9 @@ pub fn sync_session_with_sim(
         if *team == wave_team {
             sync.wave_cores += 1;
         }
+    }
+    for (team, plans) in carried_plans {
+        session.teams.get(TeamId(team)).plans = plans;
     }
     sync.spawn_count = map_spawns.max(sync.wave_cores as i32);
     session.spawn_count = sync.spawn_count;
@@ -687,52 +753,188 @@ pub fn team_ai_system(world: &mut World) {
         let (units, buildings) = collect_team_ai_rows(world);
         for team in active {
             let rule = rules.team_rule(team.0).clone();
-            if !rule.rts_ai {
-                continue;
+            if rule.rts_ai {
+                rts_ai::ensure_rts_ai(runtime.session.teams.get(team));
             }
-            rts_ai::ensure_rts_ai(runtime.session.teams.get(team));
-            let team_units: Vec<RtsLiveUnit> = units
-                .iter()
-                .filter(|row| row.team == team.0)
-                .map(|row| row.to_live())
-                .collect();
-            if !team_units.iter().any(|unit| unit.idle) {
-                continue;
-            }
-            let targets = team_ai_targets(&buildings, team.0);
-            let damaged = team_ai_damaged(&buildings, team.0);
-            let enemy_stats = team_ai_enemy_stats(&units, team.0);
-            let Some(rts) = runtime.session.teams.get(team).rts_ai.as_mut() else {
-                continue;
-            };
-            let orders = rts.plan_live_orders(&rts_ai::RtsLiveInput {
-                min_squad: rule.rts_min_squad,
-                max_squad: rule.rts_max_squad,
-                min_weight: rule.rts_min_weight,
-                unit_cap: i32::MAX,
-                units: &team_units,
-                targets: &targets,
-                damaged: &damaged,
-                enemy_stats: &enemy_stats,
-            });
-            for order in &orders {
-                for &entity in &order.units {
-                    if let Some(mut slot) = world.get_mut::<ControllerSlot>(entity) {
-                        slot.target = Some(order.target);
+            let rts_ready = rule.rts_ai
+                && units.iter().any(|row| row.team == team.0 && row.idle)
+                && runtime
+                    .session
+                    .teams
+                    .get_or_null(team)
+                    .is_some_and(|data| data.rts_ai.is_some());
+            if rts_ready {
+                let team_units: Vec<RtsLiveUnit> = units
+                    .iter()
+                    .filter(|row| row.team == team.0)
+                    .map(|row| row.to_live())
+                    .collect();
+                let targets = team_ai_targets(&buildings, team.0);
+                let damaged = team_ai_damaged(&buildings, team.0);
+                let enemy_stats = team_ai_enemy_stats(&units, team.0);
+                let Some(rts) = runtime.session.teams.get(team).rts_ai.as_mut() else {
+                    continue;
+                };
+                let orders = rts.plan_live_orders(&rts_ai::RtsLiveInput {
+                    min_squad: rule.rts_min_squad,
+                    max_squad: rule.rts_max_squad,
+                    min_weight: rule.rts_min_weight,
+                    unit_cap: i32::MAX,
+                    units: &team_units,
+                    targets: &targets,
+                    damaged: &damaged,
+                    enemy_stats: &enemy_stats,
+                });
+                for order in &orders {
+                    for &entity in &order.units {
+                        if let Some(mut slot) = world.get_mut::<ControllerSlot>(entity) {
+                            slot.target = Some(order.target);
+                        }
                     }
+                    log::info!(
+                        "team ai: team {} squad of {} -> tile ({}, {}) ({})",
+                        team.0,
+                        order.units.len(),
+                        order.target.x(),
+                        order.target.y(),
+                        if order.defend { "defend" } else { "attack" }
+                    );
                 }
-                log::info!(
-                    "team ai: team {} squad of {} -> tile ({}, {}) ({})",
-                    team.0,
-                    order.units.len(),
-                    order.target.x(),
-                    order.target.y(),
-                    if order.defend { "defend" } else { "attack" }
-                );
+            }
+            if rule.build_ai {
+                run_team_base_builder(world, &mut runtime, team, &rule, &rules);
             }
         }
     }
     world.insert_resource(runtime);
+}
+
+/// Runs one `BaseBuilderAI.update` for `team` and enqueues the queued
+/// `BlockPlan`s as [`AiPlaceRequest`]s for the host pump (`Logic.update`'s
+/// `rules.buildAi` half; PAR-0139 round 2).
+fn run_team_base_builder(
+    world: &mut World,
+    runtime: &mut CampaignRuntime,
+    team: TeamId,
+    rule: &super::rules::TeamRule,
+    rules: &Rules,
+) {
+    let Some(catalog) = world.get_resource::<BaseCatalog>().cloned() else {
+        return;
+    };
+    let core_tiles = team_core_tiles(world, &runtime.session.teams, team.0);
+    if core_tiles.is_empty() {
+        return;
+    }
+    let enemy_cores = enemy_core_tiles(world, &runtime.session.teams, team.0);
+    let mut spawn_tiles: Vec<TilePos> = world
+        .get_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+        .map(|unit_runtime| unit_runtime.wave_spawner.spawns.clone())
+        .unwrap_or_default();
+    if spawn_tiles.is_empty() {
+        // `WaveSpawner.eachGroundSpawn`'s attack branch: without spawn-overlay
+        // tiles the wave-team cores seed the trace/placement positions.
+        spawn_tiles = core_tiles.clone();
+    }
+
+    let mut queued: Vec<AiPlaceRequest> = Vec::new();
+    let Some(mut unit_runtime) = world.remove_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+    else {
+        return;
+    };
+    {
+        let table = world.get_resource::<BlockTable>();
+        let build_rules = world.get_resource::<BuildRules>();
+        let counter = world.get_resource::<BlockCounter>();
+        if let (Some(table), Some(build_rules), Some(counter)) = (table, build_rules, counter) {
+            let crate::sim::unit_runtime::UnitRuntime {
+                grid,
+                content,
+                pathfinder,
+                ..
+            } = &mut unit_runtime;
+            let field = pathfinder.get_field(Cost::Ground, team.0, &enemy_cores);
+            let CampaignRuntime {
+                session, ai_rng, ..
+            } = runtime;
+            let data = session.teams.get(team);
+            if crate::ai::ensure_build_ai(data) {
+                log::info!("team ai: base builder enabled for team {}", team.0);
+            }
+            let mut input = BaseBuildInput {
+                content,
+                grid,
+                table,
+                build_rules,
+                counter,
+                team_rule: rule,
+                rules,
+                team: team.0,
+                cores: &core_tiles,
+                spawns: &spawn_tiles,
+                enemy_core_field: Some(field),
+                enemy_cores: &enemy_cores,
+                // `CoreBlock.unitType` content is not on `BlockDef` yet, so the
+                // core-unit cap stays at zero (plan note).
+                core_unit_count: 0,
+                bases: catalog.0.as_ref(),
+                rng: ai_rng,
+            };
+            let _ = crate::ai::update_base_build(data, &mut input);
+            while let Some(plan) = data.plans.pop_front() {
+                if plan.removed {
+                    continue;
+                }
+                queued.push(AiPlaceRequest {
+                    team: team.0,
+                    x: plan.x,
+                    y: plan.y,
+                    block: plan.block,
+                    rot: plan.rotation.max(0) as u8,
+                });
+            }
+        }
+    }
+    world.insert_non_send(unit_runtime);
+    if queued.is_empty() {
+        return;
+    }
+    if let Some(queues) = world.get_resource::<CampaignAiQueues>()
+        && let Ok(mut queue) = queues.0.lock()
+    {
+        queue.extend(queued.iter().copied());
+    }
+    log::info!(
+        "team ai: team {} base builder queued {} placement(s)",
+        team.0,
+        queued.len()
+    );
+}
+
+/// Tile positions of `team`'s live cores (`TeamData.cores` -> `BuildingComp`).
+fn team_core_tiles(world: &World, teams: &Teams, team: u8) -> Vec<TilePos> {
+    teams
+        .get_or_null(TeamId(team))
+        .map(|data| {
+            data.cores
+                .iter()
+                .filter_map(|entity| world.get::<BuildingComp>(*entity).map(|comp| comp.pos))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Tile positions of every other active team's cores (`Pathfinder.fieldCore`
+/// target set for the base builder's enemy path).
+fn enemy_core_tiles(world: &World, teams: &Teams, team: u8) -> Vec<TilePos> {
+    let mut out = Vec::new();
+    for other in &teams.active {
+        if other.0 == team {
+            continue;
+        }
+        out.extend(team_core_tiles(world, teams, other.0));
+    }
+    out
 }
 
 /// Collects the live unit/building rows the per-team AI reads this tick.
@@ -998,6 +1200,155 @@ mod tests {
             after > before,
             "ordered unit moves toward the core ({before} -> {after})"
         );
+    }
+
+    #[test]
+    fn sync_session_preserves_carried_team_plans() {
+        use crate::ecs::BuildingComp;
+        use crate::sim::unit_runtime::UnitRuntime;
+        use crate::world::WorldGrid;
+        use crate::world::limits::{BlockCounter, BuildRules};
+
+        let registry = {
+            let mut registry = content();
+            registry.init().expect("init");
+            registry
+        };
+        let table = BlockTable::build_default(&registry).expect("table");
+        let mut world = World::new();
+        let grid = WorldGrid::new(16, 16);
+        let runtime_content = {
+            let mut content = content();
+            content.init().expect("init");
+            content
+        };
+        world.insert_non_send(UnitRuntime::new(runtime_content, &grid, 2));
+        let core_inst = table.get_named("core-shard").expect("core-shard").clone();
+        let core = core_inst.spawn(
+            &mut world,
+            7,
+            TilePos::new(3, 3),
+            1,
+            0,
+            registry.items().len(),
+            registry.liquids().len(),
+        );
+        world.entity_mut(core).insert(BuildingComp {
+            pos: TilePos::new(3, 3),
+            block: registry.block_id("core-shard").expect("core id"),
+            team: TeamId(1),
+            rot: 0,
+        });
+        world.insert_resource(table);
+        world.insert_resource(BuildRules::default());
+        world.insert_resource(BlockCounter::new());
+
+        let mut session = PlaySession::new(Rules {
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        session
+            .teams
+            .get(TeamId(2))
+            .plans
+            .push_back(crate::game::teams::BlockPlan {
+                x: 9,
+                y: 9,
+                rotation: 1,
+                block: registry.block_id("copper-wall").expect("wall"),
+                config: None,
+                removed: false,
+            });
+        let sync = sync_session_with_sim(&mut session, &mut world, &registry, 0, false);
+        assert_eq!(sync.player_cores, 1);
+        let plans = &session.teams.get_or_null(TeamId(2)).expect("team 2").plans;
+        assert_eq!(plans.len(), 1, "carried plans survive the teams rebuild");
+        assert_eq!((plans[0].x, plans[0].y), (9, 9));
+    }
+
+    #[test]
+    fn team_ai_base_builder_queues_plans_for_the_host() {
+        use crate::ecs::BuildingComp;
+        use crate::sim::unit_runtime::UnitRuntime;
+        use crate::world::WorldGrid;
+        use crate::world::limits::{BlockCounter, BuildRules};
+
+        let registry = {
+            let mut registry = content();
+            registry.init().expect("init");
+            registry
+        };
+        let table = BlockTable::build_default(&registry).expect("table");
+        let mut world = World::new();
+        let grid = WorldGrid::new(32, 32);
+        let runtime_content = {
+            let mut content = content();
+            content.init().expect("init");
+            content
+        };
+        world.insert_non_send(UnitRuntime::new(runtime_content, &grid, 2));
+        let core_inst = table.get_named("core-shard").expect("core-shard").clone();
+        let core = core_inst.spawn(
+            &mut world,
+            3,
+            TilePos::new(16, 16),
+            2,
+            0,
+            registry.items().len(),
+            registry.liquids().len(),
+        );
+        world.entity_mut(core).insert(BuildingComp {
+            pos: TilePos::new(16, 16),
+            block: registry.block_id("core-shard").expect("core id"),
+            team: TeamId(2),
+            rot: 0,
+        });
+        world.insert_resource(table);
+        world.insert_resource(BuildRules::default());
+        world.insert_resource(BlockCounter::new());
+        world.insert_resource(BaseCatalog::default());
+        let queues = install_campaign_ai_queues(&mut world);
+
+        let campaign = campaign(&registry);
+        let mut session = PlaySession::new(Rules {
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        session.phase = State::Playing;
+        session.rules.team_rule_mut(2).build_ai = true;
+        session.teams.register_core(core, TeamId(2), &session.rules);
+        // A pending plan from the base builder (its `data.plans` queue).
+        session
+            .teams
+            .get(TeamId(2))
+            .plans
+            .push_back(crate::game::teams::BlockPlan {
+                x: 5,
+                y: 5,
+                rotation: 0,
+                block: registry.block_id("copper-wall").expect("wall"),
+                config: None,
+                removed: false,
+            });
+        world.insert_resource(CampaignRuntime::new(session, campaign));
+
+        team_ai_system(&mut world);
+
+        let runtime = world.remove_resource::<CampaignRuntime>().expect("runtime");
+        let data = runtime
+            .session
+            .teams
+            .get_or_null(TeamId(2))
+            .expect("team data");
+        assert!(data.build_ai.is_some(), "the base builder is created");
+        assert!(data.plans.is_empty(), "queued plans drained");
+        let queued = queues.lock().expect("queue").clone();
+        assert_eq!(queued.len(), 1, "one placement request queued");
+        assert_eq!(queued[0].team, 2);
+        assert_eq!((queued[0].x, queued[0].y), (5, 5));
+        world.insert_resource(runtime);
     }
 
     #[test]

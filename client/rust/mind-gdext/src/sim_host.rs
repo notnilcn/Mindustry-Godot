@@ -11,7 +11,9 @@
 use std::collections::VecDeque;
 
 use godot::classes::notify::NodeNotification;
-use godot::classes::{FileAccess, INode, InputEvent, InputEventMouseButton, Os, ProjectSettings};
+use godot::classes::{
+    DirAccess, FileAccess, INode, InputEvent, InputEventMouseButton, Os, ProjectSettings,
+};
 use godot::global::MouseButton;
 use godot::obj::{Base, Singleton};
 use godot::prelude::*;
@@ -829,6 +831,40 @@ impl MindSimHost {
         )
     }
 
+    /// Drains queued IO responses as JSON (`[{kind,path,as_map?,error?}]`), so
+    /// save/load failures are host-visible (`take_io_requests_json` response
+    /// half; the loading overlay only polls `io_pending`).
+    #[func]
+    pub fn take_io_responses_json(&mut self) -> GString {
+        let value: Vec<serde_json::Value> = self
+            .sim
+            .take_io_responses()
+            .iter()
+            .map(|response| {
+                let mut row = match &response.request {
+                    mind_core::sim::IoRequest::Save { path, as_map } => serde_json::json!({
+                        "kind": "save",
+                        "path": path.display().to_string(),
+                        "as_map": as_map,
+                    }),
+                    mind_core::sim::IoRequest::Load { path } => serde_json::json!({
+                        "kind": "load",
+                        "path": path.display().to_string(),
+                    }),
+                };
+                if let mind_core::sim::IoStatus::Failed(error) = &response.status {
+                    row["error"] = serde_json::Value::String(error.clone());
+                }
+                row
+            })
+            .collect();
+        GString::from(
+            serde_json::to_string(&value)
+                .unwrap_or_else(|_| String::from("[]"))
+                .as_str(),
+        )
+    }
+
     /// Delivers a `MindIo` result as JSON (`{kind,path,as_map?,error?}`).
     #[func]
     pub fn deliver_io_response_json(&mut self, json: GString) -> bool {
@@ -1009,6 +1045,9 @@ impl MindSimHost {
         self.sector_spawns = count_spawns(&grid, &registry);
         self.sector_rules = rules;
         self.sector_plans = plans;
+        // `Vars.bases` (PAR-0139): load before the registry moves into the
+        // content snapshot; the resource is inserted once the sim exists.
+        let base_catalog = load_base_catalog(&registry);
         self.content_snapshot = Some(registry);
 
         // Reuse a fresh sim and swap in the loaded/generated grid; a new
@@ -1025,6 +1064,14 @@ impl MindSimHost {
         // resources are installed before any entity exists so ECS indices stay
         // stable.
         self.install_live_block_runtime();
+        if let Some(catalog) = base_catalog {
+            self.sim
+                .ecs
+                .0
+                .insert_resource(mind_core::game::runtime::BaseCatalog(std::sync::Arc::new(
+                    catalog,
+                )));
+        }
         // `World.loadMap`'s building half: the reader decoded the map's tile
         // entities into the pending queue while the grid was built, so spawn
         // the ECS buildings (cores included) the campaign runtime/teams read.
@@ -1171,8 +1218,10 @@ impl MindSimHost {
     /// Puts a bookkept runtime back.
     pub fn put_campaign_runtime(&mut self, runtime: CampaignRuntime) {
         // The campaign core hooks queue `SectorInfo.handleCoreItem` deltas the
-        // campaign tick folds into the played sector (PAR-0082).
+        // campaign tick folds into the played sector (PAR-0082), and the AI
+        // queue carries the base-builder placements the pump drains (PAR-0139).
         mind_core::game::runtime::install_campaign_core_hooks(&mut self.sim.ecs.0);
+        mind_core::game::runtime::install_campaign_ai_queues(&mut self.sim.ecs.0);
         self.sim.ecs.0.insert_resource(runtime);
     }
 
@@ -1588,10 +1637,53 @@ impl MindSimHost {
         }
     }
 
+    /// Applies queued AI base placements for their owning team at the tick
+    /// boundary (`team_ai_system` -> `CampaignAiQueues`; PAR-0139).
+    fn drain_ai_placements(&mut self) {
+        let Some(queues) = self
+            .sim
+            .ecs
+            .0
+            .get_resource::<mind_core::game::runtime::CampaignAiQueues>()
+        else {
+            return;
+        };
+        let requests: Vec<mind_core::game::runtime::AiPlaceRequest> = match queues.0.lock() {
+            Ok(mut queue) => queue.drain(..).collect(),
+            Err(_) => return,
+        };
+        for request in requests {
+            let placed = self.sim.place_for_team(
+                request.x,
+                request.y,
+                request.block,
+                request.rot,
+                request.team,
+            );
+            if placed {
+                self.world_dirty = true;
+                log::info!(
+                    "campaign ai: placed team {} block at ({}, {})",
+                    request.team,
+                    request.x,
+                    request.y
+                );
+            } else {
+                log::debug!(
+                    "campaign ai: rejected team {} placement at ({}, {})",
+                    request.team,
+                    request.x,
+                    request.y
+                );
+            }
+        }
+    }
+
     /// Runs `steps` fixed steps, applying scenario commands before each tick.
     fn advance_steps(&mut self, steps: u32) {
         for _ in 0..steps {
             self.drain_pending_commands();
+            self.drain_ai_placements();
             let applied_before = self.sim.commands_applied();
             let result = if let Some(player) = self.player.as_mut() {
                 player.step(&mut self.sim)
@@ -1878,6 +1970,42 @@ fn sector_save_path(planet_name: &str, sector: u16) -> String {
         .join(format!("sector-{planet_name}-{sector}.msav"))
         .to_string_lossy()
         .into_owned()
+}
+
+/// Loads `Vars.bases`: reads every `baseparts/*.msch` under the resolved
+/// assets dir through the host file access and classifies them (PAR-0139).
+fn load_base_catalog(registry: &ContentRegistry) -> Option<mind_core::ai::BaseRegistry> {
+    let dir = format!("{}/baseparts", crate::assets::loader::resolve_assets_dir());
+    let files = DirAccess::get_files_at(&dir);
+    if files.is_empty() {
+        log::warn!("base catalog: no `.msch` files under `{dir}`");
+        return None;
+    }
+    let mut schematics = Vec::new();
+    for name in files.as_slice() {
+        let name = name.to_string();
+        if !name.ends_with(".msch") {
+            continue;
+        }
+        let path = format!("{dir}/{name}");
+        let bytes = FileAccess::get_file_as_bytes(&path);
+        match mind_core::game::schematics::read(bytes.as_slice(), registry) {
+            Ok(schematic) => schematics.push(schematic),
+            Err(error) => log::warn!("base catalog: `{path}` rejected: {error}"),
+        }
+    }
+    if schematics.is_empty() {
+        return None;
+    }
+    let mut bases = mind_core::ai::BaseRegistry::new();
+    bases.load(registry, schematics);
+    log::info!(
+        "base catalog: {} core part(s), {} part(s), {} resource part(s)",
+        bases.cores.len(),
+        bases.parts.len(),
+        bases.req_parts.len()
+    );
+    Some(bases)
 }
 
 /// `World.loadSector` preset branch: loads the preset's `maps/<planet>/<map>.msav`
