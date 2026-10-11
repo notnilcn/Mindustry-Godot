@@ -2153,3 +2153,13 @@ healthy bridge afterwards. Run: the PAR-0066 verification session.
   fix.plan). Also: `apply_sim_command_json` now accepts px/py-only spawn_unit JSON (the old shared
   x/y guard rejected it).
 - Run: runs/20261011-203146-PAR-0140/ (partial).
+
+## 2026-10-11 — Claude Code session: open-godot-mcp tools not registered
+Symptom: the Claude Code /loop session was started from the workspace root
+(`code_examples/`), so `Mindustry-Godot/.mcp.json` never loaded and no
+`mcp__open-godot-mcp__godot_*` tools existed (ToolSearch `+godot` -> none).
+Workaround: a one-shot stdio wrapper over `tools/mcp_smoke.py`'s `McpClient`:
+`~/.local/share/parity-eval/bin/gmcp <tool> '<json args>' [timeout]` (spawns a
+fresh `open-godot-mcp` per call; the bridge accepts multiple clients).
+`gmcp godot_health '{"action":"check"}'` -> bridge_connected true. Fix for good:
+start Claude Code inside `Mindustry-Godot/` (CLAUDE_GOAL_PROMPT.md says so).
