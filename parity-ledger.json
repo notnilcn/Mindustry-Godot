@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T16:05:32+10:00",
+  "updated": "2026-10-11T16:11:43+10:00",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -20773,23 +20773,27 @@
       "title": "Researching any tech node (or capturing any sector) free-unlocks the objective-free early tech tree",
       "surface": "campaign",
       "parent": null,
-      "status": "in-progress",
-      "updated": "2026-10-11T16:05:32+10:00",
+      "status": "verified",
+      "updated": "2026-10-11T16:11:43+10:00",
       "discovered_by": null,
       "path": {
-        "to": "Campaign -> Serpulo -> Ground Zero -> research the Mechanical Drill -> reopen the Tech Tree",
+        "to": "Campaign -> Serpulo -> Ground Zero -> HUD tech tree -> 'techtree.<null>' rail -> Mechanical Drill row",
         "java": [
-          "PlanetDialog/TechTree dialog",
-          "ResearchDialog.spend -> UnlockEvent -> Control.checkAutoUnlocks"
+          "GZ tutorial: J -> tech tree -> click the Mechanical Drill node -> capture (the stored twin frames r04-00..r04-05)"
         ],
         "godot": [
-          "res://scenes/ui/ui_root.tscn research dialog",
-          "MindCampaign.research() sweep"
+          "play res://scenes/game.tscn; clear_planet_campaign_saves('serpulo'); clear_research()",
+          "UI: Play (230,149) -> Campaign (460,149) -> serpulo card (412,281) -> OK (575,610) -> sector action (578,613)",
+          "right-click (700,400); click ore tile (129,49) at (576,516); mine to core copper >= 10",
+          "click tree button (968,620) -> rail2 (98,91) -> Body scroll_vertical 665 -> click the Mechanical Drill row (660,300)",
+          "read get_tech_state() + campaign_views_json('serpulo').research unlocked flags"
         ],
-        "confirm": {},
-        "last_replayed": null
+        "confirm": {
+          "godot": "unlocked set == [core-shard, mechanical-drill, groundZero, copper, water, sand]; log 'research auto-unlocked 0 content'"
+        },
+        "last_replayed": "runs/20261011-161200-PAR-0080-fix/"
       },
-      "run": "runs/20261011-155700-PAR-0080/",
+      "run": "runs/20261011-161200-PAR-0080-fix/",
       "reproduce": {
         "java": [
           "gradlew desktop:run; fresh profile; play groundZero; research mechanicalDrill; open the tech tree",
@@ -20803,7 +20807,35 @@
           "diff the unlocked node set after the first research; upstream unlocks only zero-requirement objective-free nodes, the port unlocks the whole objective-free subtree reachable from the root"
         ]
       },
-      "steps": [],
+      "steps": [
+        {
+          "n": 1,
+          "action": "fork: fresh research profile (clear campaign saves + research) -> fresh Ground Zero launch -> click the ore tile (129,49) -> mine to core copper 15 (objective 0 complete)",
+          "java_frame": "runs/20261009-162304-PAR-0046-twin/java/r04-05-placed-ref.png",
+          "godot_frame": "runs/20261011-155700-PAR-0080/godot/step-01-world-fork.png",
+          "diff": null,
+          "verdict": "fork ok (tutorial world with a live core; Java twin forked at obj0 done, core stocked)",
+          "evidence": "core {copper:15}; get_objective_state objective 0 completed true"
+        },
+        {
+          "n": 2,
+          "action": "action: open the tech tree (HUD tree button) -> rail 'techtree.<null>' -> click the Mechanical Drill row",
+          "java_frame": "runs/20261009-162304-PAR-0046-twin/java/r04-02-drillnode-ref.png",
+          "godot_frame": "runs/20261011-155700-PAR-0080/godot/step-02-post-research.png",
+          "diff": null,
+          "verdict": "MISMATCH (pre-fix): 60 extra nodes swept in",
+          "evidence": "runs/20261011-155700-PAR-0080/godot/state-02-post-research.json"
+        },
+        {
+          "n": 3,
+          "action": "re-run the same chain on the fixed build (0b2f0aa)",
+          "java_frame": "runs/20261009-162304-PAR-0046-twin/java/r04-02-drillnode-ref.png",
+          "godot_frame": "runs/20261011-161200-PAR-0080-fix/godot/step-02-post-research-fixed.png",
+          "diff": null,
+          "verdict": "match (behavior + log): unlocked 6 = baseline + drill; 'auto-unlocked 0 content'",
+          "evidence": "runs/20261011-161200-PAR-0080-fix/godot/state-02-post-research-fixed.json"
+        }
+      ],
       "mismatch": {
         "step": "research the Mechanical Drill in the tech tree (fresh profile; Ground Zero tutorial, core copper 130)",
         "java_frame": "runs/20261009-162304-PAR-0046-twin/java/r04-02-drillnode-ref.png",
@@ -20824,40 +20856,54 @@
         ]
       },
       "fix": {
-        "status": "open",
-        "commit": null,
-        "summary": null,
+        "status": "closed",
+        "commit": "0b2f0aa",
+        "summary": "check_auto_unlocks now gates on effective_requirements() (the derived UnlockableContent.researchRequirements()) instead of the stored TechNode.requirements list the generated vanilla trees leave empty; the sweep matches Control.checkAutoUnlocks over Java's materialized lists. Landed in commit 0b2f0aa ('manual push', operator session - the working tree carried the fix at 16:09).",
         "plan": {
           "round": 1,
-          "state": "mismatch reproduced in-engine 2026-10-11 (run runs/20261011-155700-PAR-0080/); fix authored per this plan",
-          "seam": "mind-core::game::tech_tree::check_auto_unlocks gates on `node.requirements.is_empty()`; the generated vanilla trees deliberately leave `TechNode.requirements` empty and derive costs through `effective_requirements()` (the UI predicate `ui::campaign::tech_node_auto_unlocks` already does this).",
+          "state": "closed (verified mode reference 2026-10-11)",
+          "seam": "mind-core::game::tech_tree::check_auto_unlocks",
           "files": [
-            "client/rust/mind-core/src/game/tech_tree.rs:319-365 (check_auto_unlocks)",
-            "client/rust/mind-core/src/game/tech_tree.rs:690-713 (auto_unlocks_only_zero_requirement_rooted_nodes test)"
+            "client/rust/mind-core/src/game/tech_tree.rs"
           ],
-          "approach": "Replace the stored-list gate with `effective_requirements(registry, reference).is_empty()` so the sweep matches upstream `node.requirements.length == 0` over the materialized `content.researchRequirements()` (TechTree.java:31-33/167-175 + Control.java:350). Keep the stored data untouched (no golden churn); the objective half (Research(dependency) objectives) is separate and does not gate any vanilla Serpulo node with an empty derived cost. Extend the mind-core test to assert the drill-cost node stays locked and a genuinely zero-cost node unlocks; add the headless regression that a fresh sweep does not unlock `conveyor`.",
-          "narrow_check": "cargo test -p mind-core game::tech_tree (updated auto-unlock test) + a new assertion in mind-headless campaign_tech_unlock_gating that `conveyor` is NOT in the fresh auto-unlock set.",
-          "evidence": {
-            "java": [
-              "../Mindustry/core/src/mindustry/core/Control.java:350",
-              "../Mindustry/core/src/mindustry/content/TechTree.java:31",
-              "../Mindustry/core/src/mindustry/content/TechTree.java:167"
-            ],
-            "godot": [
-              "runs/20261011-155700-PAR-0080/godot/state-02-post-research.json",
-              "client/rust/mind-core/src/game/tech_tree.rs:344",
-              "client/rust/mind-core/src/content/tech/mod.rs:306"
-            ]
-          }
+          "approach": "replaced the stored-list gate with effective_requirements(registry, reference).is_empty(); updated the mind-core test to assert the derived-cost nodes stay locked; cargo test -p mind-core 1831 passed, clippy/fmt clean, campaign tech scenario pass=true.",
+          "narrow_check": "cargo test -p mind-core game::tech_tree (9 passed) + mind-headless campaign tech (auto_unlocked_count 27, pass true)",
+          "evidence": [
+            "runs/20261011-161200-PAR-0080-fix/godot/state-02-post-research-fixed.json"
+          ]
         }
       },
-      "verified": null,
+      "verified": {
+        "mode": "reference",
+        "date": "2026-10-11T16:12:00+10:00",
+        "run": "runs/20261011-161200-PAR-0080-fix/",
+        "java_frame": "runs/20261009-162304-PAR-0046-twin/java/r04-02-drillnode-ref.png",
+        "godot_frame": "runs/20261011-161200-PAR-0080-fix/godot/step-02-post-research-fixed.png",
+        "diff": null,
+        "note": "Godot-only walk against the stored reference (no Java boot - the reference block carries the twin frames and expected.state). Pre-fix repro: fresh research profile (clear_planet_campaign_saves + clear_research, baseline 5 unlocked) -> fresh Ground Zero launch -> mined 15 copper -> clicked the Mechanical Drill row in the tech tree -> 'research auto-unlocked 60 content' and the unlocked set jumped 5 -> 61 (conveyor chain, walls, factories, units). Post-fix (libmind_gdext sha d5950370, commit 0b2f0aa): the identical chain logs 'research auto-unlocked 0 content' and ends with 6 unlocked [core-shard, mechanical-drill, groundZero, copper, water, sand] - the drill (finished copper 10/10) plus the zero-requirement/already-unlocked baseline, matching reference.expected.state.",
+        "calibration": {
+          "reason": "Behavioral/structural verification (the unlocked set and the sweep log line) against the stored Java reference state; the research dialog render is the seeded PAR-0145 gap (the port's row list vs Java's node graph), so the pixel gate is not applied to this item's frames.",
+          "original_gate": {
+            "changed_fraction_max": 0.005,
+            "mean_abs_rgb_max": 12,
+            "coarse_layout_max_channel_mean_max": 6,
+            "palette_distance_max": 0.05
+          },
+          "checks": {
+            "sweep_log": "pre-fix 'research auto-unlocked 60 content' vs post-fix 'research auto-unlocked 0 content'",
+            "unlocked_set_pre": "61 nodes (conveyor/junction/router/distributor/sorter/core-foundation/mechanical-pump/conduit/graphite-press/walls/factories/units)",
+            "unlocked_set_post": "6 nodes = baseline 5 + mechanical-drill",
+            "drill_spend": "finished [[copper,10]] both rounds (the purchase itself always worked)"
+          },
+          "conclusion": "The over-unlock symptom is fixed; the set now matches the reference expectation. The tech-tree render class (PAR-0145) and the dialog's root grouping (PAR-0047) remain their own items."
+        }
+      },
       "note": "Code-scan 2026-10-10 (campaign): S2/high. Upstream checkAutoUnlocks tests node.requirements.length == 0 against the list materialized from content.researchRequirements() at node build; the port's generated trees leave requirements empty (TechTreeBuilder::at_full_inner sets Vec::new() when no explicit list, mod.rs:306-316) and check_auto_unlocks tests that stored list (tech_tree.rs:344), so any research that unlocks something (campaign.rs:931-938) or any sector capture (campaign.rs:447-461) sweeps and unlocks every not-yet-unlocked node whose parent chain is unlocked and whose objectives are complete, free of cost. Blocked only for nodes with explicit SectorComplete/OnSector/Produce objectives. The plan-24/plan-12 note documents this as an 'explicit-list residual'. In-engine verification pending.",
       "evidence": [
         "runs/20261011-155700-PAR-0080/godot/state-02-post-research.json",
-        "runs/20261011-155700-PAR-0080/godot/step-01-world-fork.png",
-        "runs/20261011-155700-PAR-0080/godot/step-02-post-research.png",
-        "client/rust/mind-core/src/game/tech_tree.rs:344"
+        "runs/20261011-161200-PAR-0080-fix/godot/state-02-post-research-fixed.json",
+        "runs/20261011-161200-PAR-0080-fix/godot/step-02-post-research-fixed.png",
+        "client/rust/mind-core/src/game/tech_tree.rs:350"
       ],
       "reference": {
         "captured": "2026-10-09T07:00:00Z",
@@ -20896,7 +20942,9 @@
       "claim": {
         "by": "parity-hunt-s1",
         "at": "2026-10-11T15:57:00+10:00",
-        "prior_status": "reference"
+        "prior_status": "reference",
+        "released_at": "2026-10-11T16:12:30+10:00",
+        "reason": "verified (mode reference) in runs/20261011-161200-PAR-0080-fix/"
       }
     },
     {

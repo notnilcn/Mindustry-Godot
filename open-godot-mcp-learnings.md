@@ -2008,3 +2008,13 @@ healthy bridge afterwards. Run: the PAR-0066 verification session.
   `python3 - <<.. re.findall(r"#\[func\]\\s*\\n\\s*pub fn (\\w+)", src)` over `sim_host.rs` /
   `campaign.rs` / `camera.rs` (49/44/20 names as of af5c41d). Two pins in one run cost two
   stop+play recoveries; the fresh sector launch survives only through the auto-written save slot.
+
+- Bullet (2026-10-11, PAR-0080 fix round): after `tools/build.sh` the editor relaunch
+  (`tools/parity-session.sh --stop` then the plain run) printed the full "ready" summary
+  (bridge listening on 6970), but the editor process was gone within ~30 s — no crash
+  report (`~/.local/share/Mindustry-Godot/crashes/` newest was 13:29), no OOM (free -h
+  ~11 GiB available), pidfile already removed. A plain re-run of `tools/parity-session.sh`
+  started a stable editor (pid 80791) that answered `godot_health` immediately. If the
+  bridge is down right after a successful-looking launch summary, just relaunch once and
+  health-check; do not debug the corpse.
+- Run: runs/20261011-161200-PAR-0080-fix/ (post-fix re-run).
