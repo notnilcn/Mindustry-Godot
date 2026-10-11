@@ -1860,3 +1860,16 @@ specific node) and never `tile_blocks()`/`section_json` in eval. Also: world
 placements/breaks must go through `godot_input` (the real OS cursor); synthetic
 `get_viewport().push_input` works for Control clicks but not for the world
 placement path. Run: runs/20261011-115026-PAR-0050/.
+
+## 2026-10-11 — PAR-0045: the placement selection traps world clicks
+Symptom: with a block selected in the picker (`selected_block != air`), left
+clicks never mine/act on the world; selecting "air" on the SIM
+(`MindSimHost.select_block("air")`) does not clear the INPUT controller's own
+`state.block`, so the trap persists until the Java deselect path runs.
+Root cause: `DesktopInput.java:737` clears the block when the deselect binding
+(right mouse) fires while placing; the port's `right_press` always began
+breaking. Fixed in 3741270 (right press deselects first). Diagnostic lesson:
+`player_can_mine`/`tile_region`/`tile_blocks` are not eval-reachable; a
+temporary `#[func]` probe on SimHost (returning flat variant dicts) plus
+`Camera2D.tile_to_screen`/`screen_to_tile` solved it. Run:
+runs/20261011-123501-PAR-0045-fix/.
