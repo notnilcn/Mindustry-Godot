@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T01:43:39Z",
+  "updated": "2026-10-11T01:46:30Z",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -13206,110 +13206,65 @@
       "title": "Pause: Back resumes play",
       "surface": "world",
       "parent": "PAR-0038",
-      "status": "reference",
-      "updated": "2026-10-10T14:39:55Z",
+      "status": "verified",
+      "updated": "2026-10-11T01:44:46Z",
       "discovered_by": "runs/20261009-065416-ref-ground-zero/",
       "path": {
-        "to": "pause dialog",
+        "to": "in-game Ground Zero pause > Back",
         "java": [],
         "godot": [
           {
             "tool": "godot_exec",
             "params": {
-              "action": "eval",
-              "code": "return str(get_node(\\\"/root/Spine/MindCampaign\\\").clear_planet_campaign_saves(\\\"serpulo\\\"))"
-            },
-            "note": "deterministic fresh launch"
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "return get_node(\\\"/root/Spine/SimHost\\\").load_sector(\\\"serpulo\\\", 15)"
+              "code": "pause -> click the back button (351,203,220,55 row 2 centre (461,295.5)) -> stack [] + state playing"
             }
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "var c = get_node(\\\"/root/Spine/MindCampaign\\\")\\nvar h = get_node(\\\"/root/Spine/SimHost\\\")\\nvar root = get_node(\\\"/root/Spine/Ui/UiRoot\\\")\\nvar loadout = JSON.stringify([{\\\"item\\\": \\\"copper\\\", \\\"amount\\\": 500}, {\\\"item\\\": \\\"lead\\\", \\\"amount\\\": 500}])\\nvar ok = c.start_sector_with_loadout(\\\"serpulo\\\", 15, loadout)\\nroot.call(\\\"set_menu_visible\\\", false)\\nh.set_paused(true)\\nvar state = c.get_sector_state()\\nreturn {\\\"started\\\": ok, \\\"sector\\\": state.get(\\\"sector\\\"), \\\"presetDescription_len\\\": str(state.get(\\\"presetDescription\\\", \\\"\\\")).length(), \\\"paused\\\": h.is_paused()}"
-            },
-            "note": "presetDescription_len 127 for groundZero"
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "return get_node(\\\"/root/Spine/SimHost\\\").step(30)"
-            },
-            "note": "drain the launch IO job; while io_pending=1 the LoadingLayer branch consumes Escape"
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "var loading = get_node(\\\"/root/Spine/Ui/UiRoot/LoadingLayer/loading\\\")\\nreturn {\\\"loading_visible\\\": loading.visible, \\\"io_pending\\\": get_node(\\\"/root/Spine/SimHost\\\").io_pending()}"
-            },
-            "note": "poll until loading_visible false (one fragment refresh after io drains)"
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "key",
-              "key": "Escape",
-              "pressed": true
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "key",
-              "key": "Escape",
-              "pressed": false
-            }
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "Input.flush_buffered_events()\\nvar ui = get_node(\\\"/root/MindUi\\\")\\nvar h = get_node(\\\"/root/Spine/SimHost\\\")\\nvar paused = get_node_or_null(\\\"/root/Spine/Ui/UiRoot/DialogLayer/paused\\\")\\nreturn {\\\"stack\\\": ui.call(\\\"dialog_stack\\\"), \\\"paused_visible\\\": paused != null and paused.visible, \\\"is_paused\\\": h.is_paused(), \\\"tick\\\": h.get_tick()}"
-            },
-            "note": "stack [paused]; tick held"
           }
         ],
         "confirm": {
-          "java": "runs/20261009-065416-ref-ground-zero/java/r01-00-pause.png"
+          "godot": "stack [] and SimHost playing with the tick advancing",
+          "java": "r01-05-resume.png non-blank"
         },
-        "last_replayed": "runs/20261010-085323-paused-dialog-buttons/"
+        "last_replayed": "runs/20261011-114404-PAR-0041/ (pause -> Back (461,295.5) -> playing; tick 991->1000)"
       },
-      "run": "runs/20261009-065416-ref-ground-zero/",
+      "run": "runs/20261011-114404-PAR-0041/",
       "reproduce": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "image_center": [
-                460,
-                281
-              ],
-              "screen_center": [
-                510,
-                379
-              ],
-              "source": "PausedDialog @back (name back)"
+              "frames": "runs/20261009-065416-ref-ground-zero/java/r01-00-pause.png + r01-05-resume.png"
             }
           }
         ],
-        "godot": [],
-        "compare": []
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "pause -> click Back -> check stack/state/tick"
+            }
+          }
+        ],
+        "compare": [
+          "godot/hud-100-resumed.png vs java/r01-05-resume-java.png (informational)"
+        ]
       },
-      "steps": [],
+      "steps": [
+        {
+          "action": "pause > Back",
+          "result": "dialog closes, play resumes (state playing, tick advancing)"
+        }
+      ],
       "mismatch": null,
       "fix": {
-        "status": "open"
+        "status": "none-needed"
       },
-      "verified": null,
-      "note": "Revealed by R01. Action not mirrored yet. Godot fork replayed 2026-10-10 at 7825590 (run dir runs/20261010-085323-paused-dialog-buttons/): launch -> drain IO -> Escape opens paused; desktop campaign set dumped; objective full_text 127 chars.",
+      "verified": {
+        "mode": "reference",
+        "run": "runs/20261011-114404-PAR-0041/",
+        "reference": "runs/20261009-065416-ref-ground-zero/",
+        "at": "2026-10-11T01:44:46Z"
+      },
+      "note": "Control walk; no code change. Closed the abandon prompt with No first (the PAR-0040 flow).",
       "reference": {
         "captured": "2026-10-09T07:00:00Z",
         "profile": "fresh",
@@ -13333,6 +13288,12 @@
         "java_path": [
           "launch -> window normalize -> Play > Campaign > Serpulo OK -> Ground Zero -> Launch (R00 frames) -> in-game HUD (R00-R07 frames)"
         ]
+      },
+      "claim": {
+        "by": "parity-hunt-s1",
+        "at": "2026-10-11T01:44:04Z",
+        "prior_status": "reference",
+        "released_at": "2026-10-11T01:44:46Z"
       }
     },
     {
@@ -13340,110 +13301,65 @@
       "title": "Pause: Settings opens the settings dialog",
       "surface": "world",
       "parent": "PAR-0038",
-      "status": "reference",
-      "updated": "2026-10-10T14:39:55Z",
+      "status": "verified",
+      "updated": "2026-10-11T01:45:31Z",
       "discovered_by": "runs/20261009-065416-ref-ground-zero/",
       "path": {
-        "to": "pause dialog",
+        "to": "in-game Ground Zero pause > Settings",
         "java": [],
         "godot": [
           {
             "tool": "godot_exec",
             "params": {
-              "action": "eval",
-              "code": "return str(get_node(\\\"/root/Spine/MindCampaign\\\").clear_planet_campaign_saves(\\\"serpulo\\\"))"
-            },
-            "note": "deterministic fresh launch"
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "return get_node(\\\"/root/Spine/SimHost\\\").load_sector(\\\"serpulo\\\", 15)"
+              "code": "pause -> click settings (579,203,220,55 centre) -> stack [paused, settings]"
             }
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "var c = get_node(\\\"/root/Spine/MindCampaign\\\")\\nvar h = get_node(\\\"/root/Spine/SimHost\\\")\\nvar root = get_node(\\\"/root/Spine/Ui/UiRoot\\\")\\nvar loadout = JSON.stringify([{\\\"item\\\": \\\"copper\\\", \\\"amount\\\": 500}, {\\\"item\\\": \\\"lead\\\", \\\"amount\\\": 500}])\\nvar ok = c.start_sector_with_loadout(\\\"serpulo\\\", 15, loadout)\\nroot.call(\\\"set_menu_visible\\\", false)\\nh.set_paused(true)\\nvar state = c.get_sector_state()\\nreturn {\\\"started\\\": ok, \\\"sector\\\": state.get(\\\"sector\\\"), \\\"presetDescription_len\\\": str(state.get(\\\"presetDescription\\\", \\\"\\\")).length(), \\\"paused\\\": h.is_paused()}"
-            },
-            "note": "presetDescription_len 127 for groundZero"
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "return get_node(\\\"/root/Spine/SimHost\\\").step(30)"
-            },
-            "note": "drain the launch IO job; while io_pending=1 the LoadingLayer branch consumes Escape"
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "var loading = get_node(\\\"/root/Spine/Ui/UiRoot/LoadingLayer/loading\\\")\\nreturn {\\\"loading_visible\\\": loading.visible, \\\"io_pending\\\": get_node(\\\"/root/Spine/SimHost\\\").io_pending()}"
-            },
-            "note": "poll until loading_visible false (one fragment refresh after io drains)"
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "key",
-              "key": "Escape",
-              "pressed": true
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "key",
-              "key": "Escape",
-              "pressed": false
-            }
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "Input.flush_buffered_events()\\nvar ui = get_node(\\\"/root/MindUi\\\")\\nvar h = get_node(\\\"/root/Spine/SimHost\\\")\\nvar paused = get_node_or_null(\\\"/root/Spine/Ui/UiRoot/DialogLayer/paused\\\")\\nreturn {\\\"stack\\\": ui.call(\\\"dialog_stack\\\"), \\\"paused_visible\\\": paused != null and paused.visible, \\\"is_paused\\\": h.is_paused(), \\\"tick\\\": h.get_tick()}"
-            },
-            "note": "stack [paused]; tick held"
           }
         ],
         "confirm": {
-          "java": "runs/20261009-065416-ref-ground-zero/java/r01-00-pause.png"
+          "godot": "stack [paused, settings] + the settings dialog visible",
+          "java": "step-298-settings.png non-blank"
         },
-        "last_replayed": "runs/20261010-085323-paused-dialog-buttons/"
+        "last_replayed": "runs/20261011-114451-PAR-0042/ (ESC -> pause -> Settings (691,295.5) -> [paused, settings])"
       },
-      "run": "runs/20261009-065416-ref-ground-zero/",
+      "run": "runs/20261011-114451-PAR-0042/",
       "reproduce": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "image_center": [
-                690,
-                281
-              ],
-              "screen_center": [
-                740,
-                379
-              ],
-              "source": "PausedDialog @settings"
+              "frame": "runs/20261010-234250-ref-PAR-0070-combat-fx/java/step-298-settings.png (the settings dialog open, Game Data page)"
             }
           }
         ],
-        "godot": [],
-        "compare": []
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "ESC -> pause -> Settings -> check the stack + the dialog"
+            }
+          }
+        ],
+        "compare": [
+          "godot/hud-110-settings.png vs java/step-298-settings-java.png (informational; different pages/worlds)"
+        ]
       },
-      "steps": [],
+      "steps": [
+        {
+          "action": "pause > Settings",
+          "result": "the settings dialog opens over the pause"
+        }
+      ],
       "mismatch": null,
       "fix": {
-        "status": "open"
+        "status": "none-needed"
       },
-      "verified": null,
-      "note": "Revealed by R01. Action not mirrored yet. Godot fork replayed 2026-10-10 at 7825590 (run dir runs/20261010-085323-paused-dialog-buttons/): launch -> drain IO -> Escape opens paused; desktop campaign set dumped; objective full_text 127 chars.",
+      "verified": {
+        "mode": "reference",
+        "run": "runs/20261011-114451-PAR-0042/",
+        "reference": "runs/20261010-234250-ref-PAR-0070-combat-fx/",
+        "at": "2026-10-11T01:45:31Z"
+      },
+      "note": "Control walk; the settings content parity stays with the PAR-0074 family and the dim with PAR-0148.",
       "reference": {
         "captured": "2026-10-09T07:00:00Z",
         "profile": "fresh",
@@ -13467,6 +13383,12 @@
         "java_path": [
           "launch -> window normalize -> Play > Campaign > Serpulo OK -> Ground Zero -> Launch (R00 frames) -> in-game HUD (R00-R07 frames)"
         ]
+      },
+      "claim": {
+        "by": "parity-hunt-s1",
+        "at": "2026-10-11T01:44:51Z",
+        "prior_status": "reference",
+        "released_at": "2026-10-11T01:45:31Z"
       }
     },
     {
@@ -13474,110 +13396,75 @@
       "title": "Pause: Host Multiplayer Game opens the host dialog",
       "surface": "world",
       "parent": "PAR-0038",
-      "status": "reference",
-      "updated": "2026-10-10T14:39:55Z",
+      "status": "verified",
+      "updated": "2026-10-11T01:46:30Z",
       "discovered_by": "runs/20261009-065416-ref-ground-zero/",
       "path": {
-        "to": "pause dialog",
+        "to": "in-game Ground Zero pause > Host Multiplayer Game",
         "java": [],
         "godot": [
           {
             "tool": "godot_exec",
             "params": {
-              "action": "eval",
-              "code": "return str(get_node(\\\"/root/Spine/MindCampaign\\\").clear_planet_campaign_saves(\\\"serpulo\\\"))"
-            },
-            "note": "deterministic fresh launch"
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "return get_node(\\\"/root/Spine/SimHost\\\").load_sector(\\\"serpulo\\\", 15)"
+              "code": "pause -> click hostserver (450-wide row) -> stack [paused, host]"
             }
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "var c = get_node(\\\"/root/Spine/MindCampaign\\\")\\nvar h = get_node(\\\"/root/Spine/SimHost\\\")\\nvar root = get_node(\\\"/root/Spine/Ui/UiRoot\\\")\\nvar loadout = JSON.stringify([{\\\"item\\\": \\\"copper\\\", \\\"amount\\\": 500}, {\\\"item\\\": \\\"lead\\\", \\\"amount\\\": 500}])\\nvar ok = c.start_sector_with_loadout(\\\"serpulo\\\", 15, loadout)\\nroot.call(\\\"set_menu_visible\\\", false)\\nh.set_paused(true)\\nvar state = c.get_sector_state()\\nreturn {\\\"started\\\": ok, \\\"sector\\\": state.get(\\\"sector\\\"), \\\"presetDescription_len\\\": str(state.get(\\\"presetDescription\\\", \\\"\\\")).length(), \\\"paused\\\": h.is_paused()}"
-            },
-            "note": "presetDescription_len 127 for groundZero"
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "return get_node(\\\"/root/Spine/SimHost\\\").step(30)"
-            },
-            "note": "drain the launch IO job; while io_pending=1 the LoadingLayer branch consumes Escape"
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "var loading = get_node(\\\"/root/Spine/Ui/UiRoot/LoadingLayer/loading\\\")\\nreturn {\\\"loading_visible\\\": loading.visible, \\\"io_pending\\\": get_node(\\\"/root/Spine/SimHost\\\").io_pending()}"
-            },
-            "note": "poll until loading_visible false (one fragment refresh after io drains)"
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "key",
-              "key": "Escape",
-              "pressed": true
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "key",
-              "key": "Escape",
-              "pressed": false
-            }
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "Input.flush_buffered_events()\\nvar ui = get_node(\\\"/root/MindUi\\\")\\nvar h = get_node(\\\"/root/Spine/SimHost\\\")\\nvar paused = get_node_or_null(\\\"/root/Spine/Ui/UiRoot/DialogLayer/paused\\\")\\nreturn {\\\"stack\\\": ui.call(\\\"dialog_stack\\\"), \\\"paused_visible\\\": paused != null and paused.visible, \\\"is_paused\\\": h.is_paused(), \\\"tick\\\": h.get_tick()}"
-            },
-            "note": "stack [paused]; tick held"
           }
         ],
         "confirm": {
-          "java": "runs/20261009-065416-ref-ground-zero/java/r01-00-pause.png"
+          "godot": "stack [paused, host] + the host dialog visible",
+          "java": "step-375-host.png non-blank"
         },
-        "last_replayed": "runs/20261010-085323-paused-dialog-buttons/"
+        "last_replayed": "runs/20261011-114537-PAR-0043/ (ESC (close settings) -> pause -> Host (576,370.5) -> [paused, host])"
       },
-      "run": "runs/20261009-065416-ref-ground-zero/",
+      "run": "runs/20261011-114537-PAR-0043/",
       "reproduce": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "image_center": [
-                575,
-                345
-              ],
-              "screen_center": [
-                625,
-                443
-              ],
-              "source": "PausedDialog @hostserver -> ui.host.show"
+              "frame": "runs/20261010-234250-ref-PAR-0070-combat-fx/java/step-375-host.png"
             }
           }
         ],
-        "godot": [],
-        "compare": []
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "pause -> click hostserver -> check the stack + the dialog"
+            }
+          }
+        ],
+        "compare": [
+          "godot/hud-120-host.png vs java/step-375-host-java.png (informational; the content gap is PAR-0151)"
+        ]
       },
-      "steps": [],
-      "mismatch": null,
+      "steps": [
+        {
+          "action": "pause > Host Multiplayer Game",
+          "result": "the host dialog opens (stack [paused, host])"
+        },
+        {
+          "check": "the port shows a boxed layout with raw mode.* keys + no colour picker (seeded PAR-0151)"
+        }
+      ],
+      "mismatch": {
+        "step": "the host dialog content: Java floating Name/colour/Port/Host/? layout vs the port's boxed panel + raw keys",
+        "godot_frame": "runs/20261011-114537-PAR-0043/godot/hud-120-host.png",
+        "java_frame": "runs/20261011-114537-PAR-0043/java/step-375-host-java.png",
+        "diff": "runs/20261011-114537-PAR-0043/diff/host.json",
+        "seeded": "PAR-0151"
+      },
       "fix": {
-        "status": "open"
+        "status": "none-needed",
+        "summary": "the action verified; the host dialog content is PAR-0151"
       },
-      "verified": null,
-      "note": "Revealed by R01. Action not mirrored yet. Godot fork replayed 2026-10-10 at 7825590 (run dir runs/20261010-085323-paused-dialog-buttons/): launch -> drain IO -> Escape opens paused; desktop campaign set dumped; objective full_text 127 chars.",
+      "verified": {
+        "mode": "reference",
+        "run": "runs/20261011-114537-PAR-0043/",
+        "reference": "runs/20261010-234250-ref-PAR-0070-combat-fx/",
+        "at": "2026-10-11T01:46:30Z"
+      },
+      "note": "Verified the Host entry opens the host dialog against the PAR-0070 soak frame. The dialog content (layout, colour picker, mode labels) is seeded as PAR-0151.",
       "reference": {
         "captured": "2026-10-09T07:00:00Z",
         "profile": "fresh",
@@ -13601,6 +13488,12 @@
         "java_path": [
           "launch -> window normalize -> Play > Campaign > Serpulo OK -> Ground Zero -> Launch (R00 frames) -> in-game HUD (R00-R07 frames)"
         ]
+      },
+      "claim": {
+        "by": "parity-hunt-s1",
+        "at": "2026-10-11T01:45:37Z",
+        "prior_status": "reference",
+        "released_at": "2026-10-11T01:46:30Z"
       }
     },
     {
@@ -28786,6 +28679,54 @@
       },
       "verified": null,
       "note": "Revealed by PAR-0040. Java `ui.showConfirm(title, text, cb)` opens a BaseDialog with @cancel/@ok buttons; the port's MindUi.show_confirm renders an inline prompt (also used by the quit confirm)."
+    },
+    {
+      "id": "PAR-0151",
+      "title": "Host dialog content: Java's floating Name/colour-picker/Port/Host/? layout vs the port's boxed panel with raw mode.* keys",
+      "surface": "ui",
+      "parent": "PAR-0043",
+      "status": "seeded",
+      "updated": "2026-10-11T01:46:30Z",
+      "discovered_by": "runs/20261011-114537-PAR-0043/",
+      "path": {
+        "to": "pause > host multiplayer game",
+        "java": [],
+        "godot": [],
+        "confirm": {
+          "godot": "stack [paused, host]",
+          "java": "step-375-host.png"
+        },
+        "last_replayed": null
+      },
+      "run": "runs/20261011-114537-PAR-0043/",
+      "reproduce": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "frame": "runs/20261010-234250-ref-PAR-0070-combat-fx/java/step-375-host.png"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "frame": "runs/20261011-114537-PAR-0043/godot/hud-120-host.png"
+            }
+          }
+        ],
+        "compare": [
+          "changed 0.97854, palette 0.9563"
+        ]
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open"
+      },
+      "verified": null,
+      "note": "Revealed by PAR-0043. Java (step-375): floating over the dark dim - 'Name:' field + a colour-picker swatch, 'Port: 6567', a wide bordered Host button, a '?' options toggle and a bottom Back. The port: a boxed panel, the mode buttons inline with raw bundle keys ('mode.survival/mode.sandbox/mode.attack/mode.pvp/mode.editor'), no colour picker."
     }
   ]
 }
