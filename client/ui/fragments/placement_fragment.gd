@@ -11,13 +11,26 @@
 
 extends Control
 
+## Upstream `InputHandler.buildPlacementUI` (DesktopInput.java:545-562): the
+## four icon buttons under the block pane. `tree`/`map` are campaign-only
+## (`visible(() -> state.isCampaign())`).
+const INPUT_BUTTONS := [
+	{"icon": "paste", "tooltip": "@schematics", "dialog": "schematics"},
+	{"icon": "book", "tooltip": "@database", "dialog": "database"},
+	{"icon": "tree", "tooltip": "@research", "dialog": "research", "campaign_only": true},
+	{"icon": "map", "tooltip": "@planetmap", "dialog": "planet", "campaign_only": true},
+]
+
 var _selected_category := 0
 var _catalog: Dictionary = {}
+var _input_buttons: Array[Button] = []
+var _bar_campaign := false
 
 @onready var panel: PanelContainer = get_node_or_null("Panel")
 @onready var search: LineEdit = get_node_or_null("Panel/Layout/Search")
 @onready var categories: GridContainer = get_node_or_null("Panel/Layout/Categories")
-@onready var blocks: GridContainer = get_node_or_null("Panel/Layout/Scroll/Blocks")
+@onready var blocks: GridContainer = get_node_or_null("Panel/Layout/Left/Scroll/Blocks")
+@onready var input_bar: HBoxContainer = get_node_or_null("Panel/Layout/Left/InputBar")
 
 
 func _ready() -> void:
@@ -30,6 +43,7 @@ func _ready() -> void:
 		panel.visible = true
 	if search != null:
 		search.text_changed.connect(func(_value: String) -> void: _rebuild())
+	_build_input_bar()
 	# The HUD starts hidden in the menu; the catalogue is rebuilt on every reveal
 	# so a sector launch or research that happened while it was hidden is
 	# reflected instead of serving a stale category/block list.
@@ -39,7 +53,58 @@ func _ready() -> void:
 	var input := get_node_or_null("/root/Spine/Input")
 	if input != null and input.has_signal("hotkey") and not input.is_connected("hotkey", Callable(self, "_on_hotkey")):
 		input.connect("hotkey", Callable(self, "_on_hotkey"))
+	_refresh_input_bar()
 	_ensure_loaded()
+
+
+## Campaign-gated icon-row visibility, change-cached per frame (`hud.campaign`
+## refreshes on the `MindHud` cadence; `state.isCampaign()` upstream).
+func _process(_delta: float) -> void:
+	var in_campaign := _in_campaign()
+	if in_campaign != _bar_campaign:
+		_bar_campaign = in_campaign
+		_refresh_input_bar()
+
+
+## `InputHandler.buildPlacementUI` icon row: 48px glyph buttons left-aligned
+## under the pane; the dialog routing mirrors the menu's `MindUi.open_dialog`.
+func _build_input_bar() -> void:
+	if input_bar == null or not _input_buttons.is_empty():
+		return
+	for entry in INPUT_BUTTONS:
+		# code-instantiated: fixed upstream icon row (four desktop buttons).
+		var label := _bundle(str(entry.get("tooltip", "")), str(entry.get("icon", "")))
+		var button := MindWidgets.glyph_button(str(entry.get("icon", "")), label, "clearNonei")
+		button.name = "input-%s" % str(entry.get("icon", ""))
+		button.tooltip_text = label
+		button.custom_minimum_size = Vector2(48, 48)
+		button.set_meta("campaign_only", bool(entry.get("campaign_only", false)))
+		button.pressed.connect(_open_input_dialog.bind(str(entry.get("dialog", ""))))
+		input_bar.add_child(button)
+		_input_buttons.append(button)
+
+
+## `visible(() -> state.isCampaign())` on the research/planet buttons.
+func _refresh_input_bar() -> void:
+	var in_campaign := _in_campaign()
+	for button in _input_buttons:
+		if bool(button.get_meta("campaign_only", false)):
+			button.visible = in_campaign
+
+
+## `state.isCampaign()` through the read-only `MindHud` facade.
+func _in_campaign() -> bool:
+	var hud := get_node_or_null("/root/MindHud")
+	return hud != null and bool(hud.get("campaign"))
+
+
+func _open_input_dialog(dialog_name: String) -> void:
+	if dialog_name.is_empty():
+		return
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("open_dialog"):
+		ui.call("open_dialog", dialog_name, "{}")
+
 
 
 ## Opens the collapsed block-select pane (`blocksSelect` collapser expanded).

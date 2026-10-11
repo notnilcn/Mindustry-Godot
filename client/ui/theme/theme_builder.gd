@@ -81,6 +81,14 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 				theme.set_stylebox("hover", name, StyleBoxEmpty.new())
 				theme.set_stylebox("pressed", name, StyleBoxEmpty.new())
 				theme.set_stylebox("disabled", name, StyleBoxEmpty.new())
+			elif name == "clearNonei" or name == "clearNoneTogglei":
+				# `Styles.clearNonei` (Styles.java:316): `up = none` (fully
+				# transparent at rest), hover/pressed carry the flat highlight
+				# boxes; used by the HUD input row and the research dialog.
+				theme.set_stylebox("normal", name, StyleBoxEmpty.new())
+				theme.set_stylebox("hover", name, flat(Color(0.24, 0.27, 0.32, 0.85)))
+				theme.set_stylebox("pressed", name, flat(Color(0.13, 0.15, 0.18, 0.85)))
+				theme.set_stylebox("disabled", name, StyleBoxEmpty.new())
 			else:
 				theme.set_stylebox("normal", name, flat(Color(0.18, 0.20, 0.24, 1.0)))
 				theme.set_stylebox("hover", name, flat(Color(0.24, 0.27, 0.32, 1.0)))
