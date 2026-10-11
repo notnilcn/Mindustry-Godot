@@ -734,15 +734,15 @@ impl Sector {
     }
 }
 
-/// Packs a `(x, y)` tile position the way `Structs.pack`/`Point2.pack` does
-/// (`y << 16 | x & 0xffff`).
+/// Packs a `(x, y)` tile position the way Arc `Point2.pack` does
+/// (`(x << 16) | y & 0xffff`; x is the high half).
 pub const fn pack_position(x: i32, y: i32) -> i32 {
-    (x & 0xffff) | (y << 16)
+    (x << 16) | (y & 0xffff)
 }
 
 /// Unpacks a packed position.
 pub const fn unpack_position(packed: i32) -> (i32, i32) {
-    (packed & 0xffff, packed >> 16)
+    (packed >> 16, (packed as u16 as i16) as i32)
 }
 
 #[cfg(test)]

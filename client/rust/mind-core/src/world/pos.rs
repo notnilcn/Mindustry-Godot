@@ -32,7 +32,7 @@ impl TilePos {
     }
 
     /// Packs the position into one `i32` exactly like Arc `Point2.pack`
-    /// (`(x & 0xffff) | ((y & 0xffff) << 16)`).
+    /// (`((short) x) << 16 | ((short) y) & 0xffff`; x is the high half).
     pub const fn pack(self) -> i32 {
         pack(self.0, self.1)
     }
@@ -57,14 +57,15 @@ impl TilePos {
     }
 }
 
-/// Arc `Point2.pack`.
+/// Arc `Point2.pack`: x is the high half, y the low half
+/// (`((short) x) << 16 | ((short) y) & 0xffff`).
 pub const fn pack(x: i16, y: i16) -> i32 {
-    (x as u16 as i32) | ((y as u16 as i32) << 16)
+    ((x as i32) << 16) | (y as u16 as i32)
 }
 
 /// Arc `Point2.unpack`.
 pub const fn unpack(packed: i32) -> (i16, i16) {
-    (packed as u16 as i16, ((packed >> 16) as u16) as i16)
+    (((packed >> 16) as u16) as i16, packed as u16 as i16)
 }
 
 /// A float point pair (`Point2`/`Vec2`-shaped) used by edge polygons.
@@ -83,7 +84,10 @@ mod tests {
             assert_eq!(TilePos::from_pack(pos.pack()), pos);
             assert_eq!(pos.pack(), pack(x, y));
         }
-        // Arc's exact bit layout for a positive sample.
-        assert_eq!(TilePos::new(3, 4).pack(), 3 | (4 << 16));
+        // Arc's exact bit layout: x high, y low (`Point2.pack(3, 4)`).
+        assert_eq!(TilePos::new(3, 4).pack(), (3 << 16) | 4);
+        // Authored attack-map sample: `hidden/225` pins its spawn groups to
+        // `Point2.pack(95, 318) == 6226238` (PAR-0139).
+        assert_eq!(TilePos::new(95, 318).pack(), 6226238);
     }
 }

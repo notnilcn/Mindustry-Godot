@@ -70,7 +70,7 @@
       "kind": "harness",
       "path": "client/rust/mind-core/tests/golden/blocks_families.json",
       "owner_plan": "02",
-      "sha256": "bddcecea0af8d5f8219e56e8d4081e85399901bcfe9024b22291cb4fbddcd48b"
+      "sha256": "c1e1f5d6a9a1e283f5b16eeedf32fe02a77758d88bef214dc535c675409c1db6"
     },
     {
       "id": "harness_campaign_fog",

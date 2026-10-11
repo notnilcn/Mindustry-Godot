@@ -841,6 +841,7 @@ pub fn run_wave_system(world: &mut World) {
     });
     units.extend(spawned);
     *units_created += u64::from(emitted);
+    log::info!("wave spawn: emitted {emitted} unit(s) for wave {wave}");
     world.insert_non_send(runtime);
 }
 
@@ -1428,6 +1429,51 @@ mod msav_tests {
             sim.group_counts().get("unit").copied().unwrap_or(0) >= 1,
             "groundZero wave spawned a live unit: {:?}",
             sim.group_counts()
+        );
+    }
+
+    /// The authored attack map pins its spawn groups to the map's spawn
+    /// overlay tile with Arc `Point2.pack` order; the inverted `TilePos::pack`
+    /// silently dropped every pinned group (PAR-0139).
+    #[test]
+    fn hidden_225_pinned_spawn_matches_the_arc_pack_order() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../assets/maps/serpulo/hidden/225.msav");
+        let bytes = std::fs::read(&path).expect("map");
+        let mut content =
+            create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+                .expect("content");
+        let mut grid = WorldGrid::new(0, 0);
+        grid.begin_map_load();
+        let rules = {
+            let mut context = EditorContext::new(&mut grid, &content);
+            let mut state = SaveReadState {
+                context: Some(&mut context),
+                content: Some(&mut content),
+                ..SaveReadState::default()
+            };
+            SaveIo::load_bytes(&bytes, &mut state).expect("import");
+            state.rules
+        };
+        let rules = rules.expect("rules");
+        let spawn_id = content.block_id("spawn").expect("spawn");
+        let spawn_tile = grid
+            .tiles
+            .array()
+            .iter()
+            .find(|tile| tile.overlay == spawn_id)
+            .expect("authored spawn overlay");
+        assert_eq!(
+            (spawn_tile.x, spawn_tile.y),
+            (95, 318),
+            "the map's spawn overlay tile"
+        );
+        let game = SpawnGroup::from_json(&serde_json::to_value(&rules.spawns[0]).expect("json"))
+            .expect("group");
+        assert_eq!(
+            game.spawn,
+            TilePos::new(95, 318).pack(),
+            "the authored pin matches the Arc pack order"
         );
     }
 }
