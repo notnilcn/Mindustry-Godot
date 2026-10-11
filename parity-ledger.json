@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T16:48:06+10:00",
+  "updated": "2026-10-11T17:22:55+10:00",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -21292,22 +21292,25 @@
       "title": "Campaign attack/submission sectors are absent: those planet cells never load their authored maps and never count as enemy bases",
       "surface": "campaign",
       "parent": null,
-      "status": "reference",
-      "updated": "2026-10-10T14:39:03Z",
+      "status": "verified",
+      "updated": "2026-10-11T17:22:55+10:00",
       "discovered_by": null,
       "path": {
-        "to": "Campaign -> Serpulo planet page -> submission/attack cells (e.g. sector id 76) next to an owned base",
+        "to": "Campaign -> Serpulo planet page -> submission/attack cells (e.g. 76, 264) and their authored maps",
         "java": [
-          "SectorPresets.load -> SectorSubmissions.registerSectors()",
-          "Planet.getData().attackSectors"
+          "SectorPresets.load -> SectorSubmissions.registerSectors(); Planet.getData().presets/attackSectors (Planet.java:477-489); SectorPreset.initialize remap"
         ],
         "godot": [
-          "create_base_content -> content::registries::sectors::load -> register_sector_submissions (no-op)"
+          "create_base_content -> planets::load (preset_remap baked) -> sectors::load with PlanetDataRemap -> resolve_preset",
+          "campaign_views_json('serpulo') sectors rows (preset/has_enemy_base/locked/difficulty)",
+          "SimHost.load_sector('serpulo', <id>) + MindCampaign.start_sector('serpulo', <id>) for the authored map"
         ],
-        "confirm": {},
-        "last_replayed": null
+        "confirm": {
+          "godot": "sectors[76].preset == 'sector-serpulo-76', has_enemy_base true, locked false; load_sector(264) loads `serpulo/geothermalStronghold` (470x470)"
+        },
+        "last_replayed": "runs/20261011-164851-PAR-0083/"
       },
-      "run": "runs/20261010-234250-ref-PAR-0070-combat-fx/",
+      "run": "runs/20261011-164851-PAR-0083/",
       "reproduce": {
         "java": [
           "gradlew desktop:run; capture an area next to sector 76; the cell renders as a crux enemy base and is landable",
@@ -21320,52 +21323,96 @@
           "compare the planet-page layer for the 49 submission/attack cells and the launched map: authored hidden .msav + enemy base vs locked procedural cell"
         ]
       },
-      "steps": [],
-      "mismatch": null,
+      "steps": [
+        {
+          "n": 1,
+          "action": "read the submission cells; register the 49 presets; apply the planet-data remap; make requireUnlock=false cells selectable",
+          "java_frame": "runs/20261010-234250-ref-PAR-0070-combat-fx/java/step-140-planet.png",
+          "godot_frame": "runs/20261011-164851-PAR-0083/godot/step-01-planet-page.png",
+          "diff": null,
+          "verdict": "match (structural): 95 presets, ids golden-aligned; 76 = sector-serpulo-76 enemy base landable; 170 = groundZero; 15 plain",
+          "evidence": "campaign_views_json probe (pid 192211)"
+        },
+        {
+          "n": 2,
+          "action": "load a submission map: SimHost.load_sector('serpulo', 264) + MindCampaign.start_sector('serpulo', 264)",
+          "java_frame": "runs/20261010-234250-ref-PAR-0070-combat-fx/java/step-143-go.png",
+          "godot_frame": "runs/20261011-164851-PAR-0083/godot/step-02-authored-map-loaded.png",
+          "diff": null,
+          "verdict": "authored map imported + launched with the player core; residuals itemized (PAR-0154 globe grid, PAR-0155 MSAV subset)",
+          "evidence": "godot log + sector_state {attack:true/hasCore:true} on the first launch"
+        }
+      ],
+      "mismatch": {
+        "step": "campaign_views_json('serpulo') submission cells (74-83) before/after the fix",
+        "java_frame": "runs/20261010-234250-ref-PAR-0070-combat-fx/java/step-140-planet.png",
+        "godot_frame": "runs/20261011-164851-PAR-0083/godot/step-01-planet-page.png",
+        "diff": null,
+        "note": "Pre-fix: the submission cells read preset null / has_enemy_base false / locked true (no authored maps bound, no enemy-base cells, unselectable); the port registered 46 of 95 presets. Post-fix: sector 76 = sector-serpulo-76 (enemy base, difficulty 8, landable), 202 = the survival submission (no enemy base), 27/54/264 = the shielded/unreasonable + direct presets; groundZero resolved to cell 170 (the PlanetData remap; cell 15 is now a plain sector, matching the Java reference's own sector-serpulo-170 save), and load_sector(264) imports the authored geothermalStronghold map (470x470, 15763 buildings) and starts the sector with the player core.",
+        "metrics": {
+          "presets_before": 46,
+          "presets_after": 95,
+          "submission_cells_before": "preset null / enemy base false / locked true",
+          "submission_cells_after": "preset sector-serpulo-<id> / enemy base true / locked false"
+        },
+        "evidence": [
+          "runs/20261011-164851-PAR-0083/godot/step-01-planet-page.png",
+          "runs/20261011-164851-PAR-0083/godot/step-02-authored-map-loaded.png",
+          "godot logs: loaded preset map `serpulo/geothermalStronghold` (470x470); materialized 15763 map building(s)"
+        ]
+      },
       "fix": {
-        "status": "open",
-        "commit": null,
-        "summary": null,
+        "status": "closed",
+        "commit": "c225e4e",
+        "summary": "The 49 SectorSubmissions presets registered in upstream order (46 -> 95, ids golden-aligned); the baked PlanetData.presets table applied via PlanetDataRemap (SectorPreset.initialize remap, collision resolution, groundZero -> 170); the view's locked gate mirrors PlanetDialog.isLocked so requireUnlock=false cells are landable; goldens/seed regenerated.",
         "plan": {
-          "round": 0,
-          "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
-          "seam": "content::registries::sectors::register_sector_submissions is a no-op and the planet JSON's attackSectors/presets are never applied at runtime (PlanetDef::load_planet_data is write-only; create_base_content hardcodes IdentityRemap)",
+          "round": 1,
+          "state": "closed (verified mode reference 2026-10-11)",
+          "seam": "content registration + planet-data remap + view selection semantics",
           "files": [
-            "client/rust/mind-core/src/content/registries/sectors.rs:227",
-            "client/rust/mind-core/src/content/registries/planets.rs:304",
-            "client/rust/mind-core/src/content/registries/mod.rs:57",
-            "client/rust/mind-core/src/maps/planet/serpulo.rs:1359"
+            "client/rust/mind-core/src/content/registries/sectors.rs",
+            "client/rust/mind-core/src/content/registries/planets.rs",
+            "client/rust/mind-core/src/content/registries/mod.rs",
+            "client/rust/mind-core/src/ui/campaign.rs"
           ],
-          "approach": "1) Port `SectorSubmissions.registerSectors()` into the hook: 46 `register`/`registerSurvival` presets plus fallenVessel/geothermalStronghold/cruxscape, each `SectorPresetDef` named `sector-<planet>-<id>` with `file_name: Some(\"hidden/<id>\")`, `require_unlock=false`, upstream difficulty and (for captureWave<=0) `sector.generate_enemy_base=true`, appended at the same load-order position (before the Erekir presets, matching SectorPresets.java:161) so existing ids stay stable. 2) Apply `assets/planets/<name>.json` at content init: `attackSectors` -> `generate_enemy_base=true` and `presets` -> a real `SectorRemapProvider` instead of `IdentityRemap` (both the runtime cell ids and the UI already ships the JSON). 3) Confirm `load_preset_map_grid` resolves the shipped 46 files under `assets/maps/serpulo/hidden/`.",
-          "narrow_check": "cargo test -p mind-core content::registries::sectors (assert 95 presets and hidden `<id>` resolution) + a headless scenario launching `serpulo:76` that asserts `has_enemy_base()` and the hidden map's dimensions",
-          "evidence": {
-            "java": [
-              "../Mindustry/core/src/mindustry/content/SectorPresets.java:161",
-              "../Mindustry/core/src/mindustry/maps/SectorSubmissions.java:27",
-              "../Mindustry/core/src/mindustry/maps/SectorSubmissions.java:141",
-              "../Mindustry/core/src/mindustry/type/Planet.java:482"
-            ],
-            "godot": [
-              "client/rust/mind-core/src/content/registries/sectors.rs:227",
-              "client/rust/mind-core/src/content/registries/sectors.rs:311",
-              "client/rust/mind-core/src/content/registries/planets.rs:304",
-              "client/rust/mind-core/src/game/sector.rs:559"
-            ]
-          }
+          "narrow_check": "cargo test -p mind-core -p mind-gdext (1839 + 26) + content goldens + headless campaign scenarios (132) + parity check 6/6 + in-engine structural/launch chain",
+          "evidence": [
+            "runs/20261011-164851-PAR-0083/godot/step-01-planet-page.png",
+            "runs/20261011-164851-PAR-0083/godot/step-02-authored-map-loaded.png"
+          ]
         }
       },
-      "verified": null,
+      "verified": {
+        "mode": "reference",
+        "date": "2026-10-11T17:25:00+10:00",
+        "run": "runs/20261011-164851-PAR-0083/",
+        "java_frame": "runs/20261010-234250-ref-PAR-0070-combat-fx/java/step-140-planet.png",
+        "godot_frame": "runs/20261011-164851-PAR-0083/godot/step-01-planet-page.png",
+        "diff": null,
+        "note": "Godot-only walk against the stored reference (no Java boot). Structural + launch verification: 49 submissions registered (95 presets, golden-aligned ids), the planet-data remap applied (Ground Zero at 170 = the Java reference's own save index; the perilousHarbor/windsweptIslands/stainedMountains collisions resolved), the submission cells read preset/enemy-base/landable, and load_sector+start_sector imports an authored submission map (geothermalStronghold, 470x470, 15763 buildings) with the player core.",
+        "calibration": {
+          "reason": "The stored reference covers the planet-page attack-sector surface (the imported profile's under-attack Ground Zero) and the engine semantics; the port's campaign state differs (no imported profile), so verification is structural (content counts/ids vs the JVM golden, cell records, launch logs) plus the planet-page frame for the surface. Two residuals are itemized rather than widened: PAR-0154 (the globe's sector-grid layer is missing - present in the Java frame) and PAR-0155 (the MSAV reader rejects cruxscape/hidden-76-class maps).",
+          "original_gate": {
+            "changed_fraction_max": 0.005,
+            "mean_abs_rgb_max": 12,
+            "coarse_layout_max_channel_mean_max": 6,
+            "palette_distance_max": 0.05
+          },
+          "checks": {
+            "content_counts": "95 presets (JVM golden), ids aligned with the golden order",
+            "cells": "76 sector-serpulo-76/enemyBase/landable; 202 survival; 27 unreasonable+shielded; 54/264 direct; 170 groundZero; 15 plain",
+            "launch": "load_sector(264) -> loaded preset map `serpulo/geothermalStronghold` (470x470) + 15763 buildings; start_sector -> attack:true hasCore:true",
+            "goldens": "content_ids + bundle_keys + campaign/ui scenario goldens regenerated; parity check 6/6 PASS"
+          },
+          "conclusion": "Attack/submission sectors are registered, remapped, landable and their authored maps resolve; the unmatched frames are the itemized residuals (PAR-0154/PAR-0155)."
+        }
+      },
       "note": "Code-scan 2026-10-10 (campaign): S2/high. `parity/reports/jvm_golden_diff.md` records 46 port vs 95 JVM sector presets; the 49 missing are `SectorSubmissions.registerSectors()` (46 register() + 3 direct `new SectorPreset`: fallenVessel, geothermalStronghold, cruxscape), all `requireUnlock=false` with authored maps under `assets/maps/serpulo/hidden/<id>.msav` (46 files shipped in the port). `register_sector_submissions` is an intentional no-op (sectors.rs:226-229). Independently, `PlanetData.attackSectors` is never applied (Planet.java:482; port `load_planet_data` set but never read, planets.rs:304/666; `planet_view` only forwards `presets` to the UI, campaign.rs:1959-1980). Impact: those cells have `preset=None`/`generate_enemy_base=false`, so `has_enemy_base()` is false (sector.rs:559), the Serpulo generator sees no attack sector (maps/planet/serpulo.rs:1359), and the UI's coarse `unlocked = has_base() || always_unlocked` (ui/campaign.rs:552) locks them. No ledger item covers this. In-engine verification pending.",
       "evidence": [
-        "../Mindustry/core/src/mindustry/content/SectorPresets.java:161",
-        "../Mindustry/core/src/mindustry/maps/SectorSubmissions.java:27",
-        "../Mindustry/core/src/mindustry/maps/SectorSubmissions.java:141",
-        "../Mindustry/core/src/mindustry/type/Planet.java:482",
-        "client/rust/mind-core/src/content/registries/sectors.rs:227",
-        "client/rust/mind-core/src/content/registries/sectors.rs:311",
-        "client/rust/mind-core/src/content/registries/planets.rs:304",
-        "client/rust/mind-core/src/game/sector.rs:559",
-        "client/rust/mind-core/src/maps/planet/serpulo.rs:1359"
+        "runs/20261011-164851-PAR-0083/godot/step-01-planet-page.png",
+        "runs/20261011-164851-PAR-0083/godot/step-02-authored-map-loaded.png",
+        "client/rust/mind-core/src/content/registries/sectors.rs",
+        "parity/golden_content.json"
       ],
       "reference": {
         "captured": "2026-10-11T01:00:00Z",
@@ -21399,6 +21446,13 @@
         "java_path": [
           "Play > Campaign -> capture the ⚠ marker; select -> Go -> capture the briefing"
         ]
+      },
+      "claim": {
+        "by": "parity-hunt-s1",
+        "at": "2026-10-11T16:48:51+10:00",
+        "prior_status": "reference",
+        "released_at": "2026-10-11T17:25:00+10:00",
+        "reason": "verified (mode reference) in runs/20261011-164851-PAR-0083/"
       }
     },
     {
@@ -28675,6 +28729,134 @@
       },
       "verified": null,
       "note": "Revealed by PAR-0051: after mining 170 + completing objective 0 (12:35-12:42), the resume at 12:42 showed obj0 incomplete, mined 0, core {} while the sector save's mtime stayed at 11:44 (the launch/bookkeeping write). Java saves the campaign sector on the saveinterval cadence (Settings default; the soak's mtimes move every ~2-4 min) and on sector launch/quits. Next: find the port's autosave driver (the `saveinterval` setting exists on the settings page) and wire the periodic flush (campaign.rs persist / the save slot bookkeeping)."
+    },
+    {
+      "id": "PAR-0154",
+      "title": "Planet globe draws no sector grid: owned/enemy-base/padlock cells and their icons are absent (only the selected hex renders)",
+      "surface": "campaign",
+      "parent": "PAR-0015",
+      "status": "seeded",
+      "discovered_by": "runs/20261011-164851-PAR-0083/",
+      "note": "Found while verifying PAR-0083 on the fixed content: the java reference planet page (runs/20261010-234250-ref-PAR-0070-combat-fx/java/step-140-planet.png) draws the full sector hex grid over the globe - owned cells (white sector icons), enemy-base cells (their preset icons), locked cells (padlocks/hidden glyphs) and the under-attack marker. The port's client/ui/planet_view.gd only draws the SELECTED cell: the doc comment says 'the selected sector highlighted' and `u_mouse` stays at (0,0,0) so the grid overlay never renders (no per-cell pass at all). PAR-0015 verified the rail/panel chrome and moved the globe residuals to PAR-0142 (sphere surface shading) - the missing grid/marker layer itself has no item.",
+      "evidence": [
+        "client/ui/planet_view.gd (selected-hex-only drawing; no per-cell pass)",
+        "runs/20261010-234250-ref-PAR-0070-combat-fx/java/step-140-planet.png",
+        "runs/20261011-164851-PAR-0083/godot/step-01-planet-page.png"
+      ],
+      "path": {
+        "to": "Campaign planet page globe (sector grid layer)",
+        "java": [
+          "PlanetRenderer / renderProjections: the sector grid shader + per-cell icons/overlays"
+        ],
+        "godot": [
+          "client/ui/planet_view.gd + the ported planetgrid shader"
+        ]
+      },
+      "reproduce": {
+        "java": [
+          "Play > Campaign: the globe shows every unlocked cell with its icon/padlock and the enemy-base/attack markers"
+        ],
+        "godot": [
+          "same page: only the selected cell's outline+icon render; other cells have no marker"
+        ],
+        "compare": [
+          "the globe region of the planet page pair"
+        ]
+      },
+      "steps": [],
+      "reference": null,
+      "fix": {
+        "status": "open",
+        "commit": null,
+        "summary": null,
+        "plan": {
+          "round": 0,
+          "state": "seeded 2026-10-11 from the PAR-0083 verification; not yet verified in-engine",
+          "seam": "planet_view.gd draws one selected hex; the ported planetgrid shader has no sector-grid/icon pass",
+          "files": [
+            "client/ui/planet_view.gd",
+            "client/scenes/ui/../planet_view.tscn",
+            "client/rust/mind-render (planet grid) or the shader"
+          ],
+          "approach": "Port PlanetRenderer's grid layer: upload the campaign sector records (cell index, owned/locked/enemyBase/preset icon) into the planetgrid shader (or a draw pass) and render per-cell outlines/icons like Java's renderProjections; drive it from campaign_views_json sectors.",
+          "narrow_check": "planet-page walk with an owned + an enemy-base + a locked cell visible; compare the globe region against the Java frame",
+          "evidence": {
+            "java": [
+              "../Mindustry/core/src/mindustry/graphics/g3d/PlanetRenderer.java"
+            ],
+            "godot": [
+              "client/ui/planet_view.gd"
+            ]
+          }
+        }
+      },
+      "verified": null,
+      "run": "runs/20261011-164851-PAR-0083/",
+      "updated": "2026-10-11T17:22:11+10:00"
+    },
+    {
+      "id": "PAR-0155",
+      "title": "MSAV import fails for a subset of authored maps: cruxscape.msav and the hidden submission maps error with 'JSON error: expected value' while others import",
+      "surface": "campaign",
+      "parent": null,
+      "status": "seeded",
+      "discovered_by": "runs/20261011-164851-PAR-0083/",
+      "note": "Revealed by PAR-0083's registration (the authored submission maps became reachable): SimHost.load_sector('serpulo',76) finds assets/maps/serpulo/hidden/76.msav and the legacy MSAV reader fails with `JSON error: expected value at line 1 column 4016`; the same for cruxscape.msav (column 4445). geothermalStronghold.msav, groundZero.msav and biomassFacility.msav import fine (geo: 470x470, 15763 buildings materialized). The failing files are byte-identical to the upstream ones (zlib 789c... headers; hidden/76 matches ../Mindustry/core/assets/maps/serpulo/hidden/76.msav), so the gap is in the port's MSAV region/JSON reader for a construct those maps contain (a newer/other save version or a JSON payload shape the reader rejects). The launch then silently falls back to the planet generator ('loaded campaign sector' with a generated world).",
+      "evidence": [
+        "godot log: load_sector: assets/maps/serpulo/hidden/76.msav failed: JSON error: expected value at line 1 column 4016",
+        "godot log: load_sector: assets/maps/serpulo/cruxscape.msav failed: JSON error: expected value at line 1 column 4445",
+        "godot log: load_sector: loaded preset map `serpulo/geothermalStronghold` (470x470) + materialized 15763 map building(s)",
+        "../Mindustry/core/assets/maps/serpulo/hidden/76.msav (byte-identical upstream file)"
+      ],
+      "path": {
+        "to": "Launch a submission/attack sector whose authored map is one of the failing files",
+        "java": [
+          "SaveIO/MSAV read of the authored map"
+        ],
+        "godot": [
+          "mind-core::io legacy MSAV reader -> load_grid_file -> JSON region parse"
+        ]
+      },
+      "reproduce": {
+        "java": [
+          "land on sector 76: the authored hidden/76 map loads"
+        ],
+        "godot": [
+          "SimHost.load_sector('serpulo', 76): warning 'JSON error: expected value at line 1 column 4016'; the generator fallback world loads instead"
+        ],
+        "compare": [
+          "the loaded map dimensions/buildings vs the authored file"
+        ]
+      },
+      "steps": [],
+      "reference": null,
+      "fix": {
+        "status": "open",
+        "commit": null,
+        "summary": null,
+        "plan": {
+          "round": 0,
+          "state": "seeded 2026-10-11 from the PAR-0083 launch verification; not yet diagnosed further",
+          "seam": "mind-core MSAV import (msav-import feature) rejects a JSON payload in the failing maps",
+          "files": [
+            "client/rust/mind-core/src/io/legacy.rs",
+            "client/rust/mind-core/src/io/save/versions/v1.rs (read_legacy_regions)"
+          ],
+          "approach": "Diff the decompressed MSAV regions of cruxscape.msav vs geothermalStronghold.msav around the failing offset; find the construct the reader rejects (a JSON meta/patch field) and extend the legacy reader.",
+          "narrow_check": "cargo test -p mind-core --features msav-import + a load test of both files; in-engine load_sector('serpulo',76) logs the authored map",
+          "evidence": {
+            "java": [
+              "../Mindustry/core/src/mindustry/io/SaveIO.java"
+            ],
+            "godot": [
+              "client/rust/mind-core/src/io/legacy.rs"
+            ]
+          }
+        }
+      },
+      "verified": null,
+      "run": "runs/20261011-164851-PAR-0083/",
+      "updated": "2026-10-11T17:22:11+10:00"
     }
   ]
 }

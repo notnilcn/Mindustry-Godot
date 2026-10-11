@@ -2048,3 +2048,23 @@ healthy bridge afterwards. Run: the PAR-0066 verification session.
   (109,615) or by excluding the planet-rail buttons, and re-probe until `dialogs: []`
   AND `is_paused() == false` before driving world input.
 - Run: runs/20261011-162529-PAR-0082/, runs/20261011-162705-PAR-0082/.
+
+- Bullet (2026-10-11, PAR-0083): the `-p mind-headless` suite carried TWO pre-existing golden
+  drifts unrelated to the fix (the `ui text.json` golden was stale since the PAR-0016 markup
+  change - `render_markup` now emits `[icon name="x"][/icon]`; the `fx/fx_program_explosion.json`
+  golden differs in one f32 last bit). Regenerating a golden needs the right dump command:
+  `mind-headless ui <scenario> --dump <golden>` and `campaign tech/sector/play --dump` -
+  the campaign planet/sector args are FLAGS (`--planet serpulo --sector groundZero`), not
+  positionals; a positional form fails with a bare usage hint. Every regenerated golden must
+  update its `parity/golden_manifest.json` sha256 in the same commit or `parity check` fails.
+- Bullet (2026-10-11, PAR-0083): a facade-only `MindCampaign.start_sector(planet, id)` does NOT
+  load the map (the world stays stale and the launch ends in `spawn_player_unit: no core` +
+  game over). The working sequence is `SimHost.load_sector(planet, id)` FIRST, then
+  `MindCampaign.start_sector(planet, id)` (the documented chain facade variant); the 470x470
+  authored map load exceeds the 15 s eval budget, so the load eval TIMES OUT while the load
+  still completes - poll the log (`loaded preset map ...` / `materialized N map building(s)`)
+  instead of retrying, and expect the world to settle before reading state.
+- Bullet (2026-10-11, PAR-0083): launch leftovers stack dialogs and session state - after a
+  game-over ("Sector sector-serpulo-76 lost!") the client returns to the menu over the live
+  map; a fresh stop+play process is the reliable reset before a launch verification.
+- Run: runs/20261011-164851-PAR-0083/.
