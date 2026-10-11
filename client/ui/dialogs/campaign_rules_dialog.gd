@@ -71,24 +71,56 @@ func _rebuild() -> void:
 		return
 	_table.clear_children()
 	# code-instantiated: difficulty buttons are the data-driven Difficulty list.
+	# Java wraps the row in a `Tex.pane` frame: black flat buttons, the selected
+	# one outlined in `Pal.accent`.
+	var diff_frame := PanelContainer.new()
+	diff_frame.add_theme_stylebox_override(
+		"panel", _pane_box(Color(0.0, 0.0, 0.0, 0.85), PANE_OUTLINE_GRAY)
+	)
 	var diff_row := HBoxContainer.new()
+	diff_row.add_theme_constant_override("separation", 4)
+	diff_frame.add_child(diff_row)
 	for name in ["casual", "easy", "normal", "hard", "eradication"]:
 		var button := Button.new()
 		button.text = _t("@difficulty.%s" % name)
-		button.theme_type_variation = "flatTogglet"
 		button.toggle_mode = true
 		button.button_pressed = name == _difficulty
+		button.custom_minimum_size = Vector2(150.0, 40.0)
 		button.tooltip_text = _difficulty_tooltip(name)
+		# `Styles.flatTogglet` with `checked = Styles.flatDown` (accent outline).
+		apply_pane_button(button, PANE_OUTLINE_GRAY)
+		button.add_theme_stylebox_override("pressed", _pane_box(Color.BLACK, MindStyles.ACCENT))
+		button.add_theme_stylebox_override("hover_pressed", _pane_box(Color.BLACK, MindStyles.ACCENT))
 		button.pressed.connect(_set_difficulty.bind(name))
 		diff_row.add_child(button)
-	_table.add(diff_row).grow_x_axis().pad(4)
+	_table.add(diff_frame).grow_x_axis().pad(4)
 	_table.row()
 	for key in RULE_KEYS:
+		# `CampaignRulesDialog` visibility guards: the invasion toggle is only
+		# shown when the planet allows it, the RTS-AI toggle only when the
+		# planet shows the rule, and clear-on-lose only when the planet does not
+		# force it.
+		var planet_row := _find_planet()
+		if key == "sector_invasion" and not bool(planet_row.get("allow_sector_invasion", false)):
+			continue
+		if key == "rts_ai" and not bool(planet_row.get("show_rts_ai_rule", false)):
+			continue
+		if key == "clear_sector_on_lose" and bool(planet_row.get("clear_sector_on_lose", false)):
+			continue
 		# code-instantiated: rule toggles come from the plan-12 CampaignRules set.
 		var label := str(RULE_LABELS.get(key, key))
 		var check := MindWidgets.check(_t(label), bool(_toggles.get(key, false)), _toggle.bind(key))
 		_table.add(check).grow_x_axis().pad(2).left()
 		_table.row()
+
+
+## The active planet's read-model row (planet flags for the toggle guards).
+func _find_planet() -> Dictionary:
+	for planet_variant in campaign_section("planets"):
+		var planet: Dictionary = planet_variant
+		if str(planet.get("name", "")) == _planet:
+			return planet
+	return {}
 
 
 ## Localized `Difficulty.info()` tooltip from the multiplier table.

@@ -113,41 +113,6 @@ func _apply_full_dialog_margins() -> void:
 	panel.add_theme_stylebox_override("panel", box)
 
 
-## `Tex.pane`/flat button box: black fill with a flat border (Java rail rows and
-## the action-row buttons sampled #454545; the checked rail row takes
-## `Tex.buttonDown`'s `(125, 64, 127)` outline).
-func _pane_box(fill: Color, border: Color, width: float = 4.0, radius: float = 2.0, bottom_width: float = -1.0) -> StyleBoxFlat:
-	var box := StyleBoxFlat.new()
-	box.bg_color = fill
-	box.border_width_left = int(width)
-	box.border_width_top = int(width)
-	box.border_width_right = int(width)
-	box.border_width_bottom = int(bottom_width if bottom_width >= 0.0 else width)
-	box.border_color = border
-	box.corner_radius_top_left = int(radius)
-	box.corner_radius_top_right = int(radius)
-	box.corner_radius_bottom_left = int(radius)
-	box.corner_radius_bottom_right = int(radius)
-	box.content_margin_left = 2.0
-	box.content_margin_right = 2.0
-	box.content_margin_top = 2.0
-	box.content_margin_bottom = 2.0
-	return box
-
-
-## Applies the pane look to one button (`Styles.flatTogglet` over `Tex.pane`).
-## The unchecked rail pane draws no bottom edge (the next pane's border closes
-## the stack, sampled from the reference frame).
-func _apply_pane_button(button: Button, border: Color, bottom_border: float = 4.0) -> void:
-	var fill := Color(0.0, 0.0, 0.0, 1.0)
-	button.add_theme_stylebox_override("normal", _pane_box(fill, border, 4.0, 2.0, bottom_border))
-	button.add_theme_stylebox_override("hover", _pane_box(fill, border, 4.0, 2.0, bottom_border))
-	button.add_theme_stylebox_override("pressed", _pane_box(fill, border))
-	button.add_theme_stylebox_override("disabled", _pane_box(fill, border, 4.0, 2.0, bottom_border))
-
-
-# --- Select Starting Campaign -------------------------------------------------
-
 ## `PlanetDialog` first-run chooser: `@campaign.select` with the two campaign
 ## planets as mutually exclusive toggle cards and an `@ok` button. The cards
 ## block (cards + caption) is vertically centered in the dialog body like the
@@ -524,7 +489,7 @@ func _show_planet(planet_name: String, select_default := true) -> void:
 	back.custom_minimum_size = Vector2(200.0, 54.0)
 	back.size_flags_vertical = Control.SIZE_SHRINK_END
 	_apply_pane_button(back, OUTLINE_GRAY)
-	_build_rail_content(back, MindWidgets.glyph("left", 20), _t("@back"))
+	build_button_content(back, MindWidgets.glyph("left", 20), _t("@back"))
 	back.pressed.connect(_close)
 	buttons.add_child(back)
 	buttons.add_child(_spacer())
@@ -535,7 +500,7 @@ func _show_planet(planet_name: String, select_default := true) -> void:
 	tech_tree.custom_minimum_size = Vector2(200.0, 54.0)
 	tech_tree.size_flags_vertical = Control.SIZE_SHRINK_END
 	_apply_pane_button(tech_tree, OUTLINE_GRAY)
-	_build_rail_content(tech_tree, MindWidgets.glyph("tree", 20), _t("@techtree"))
+	build_button_content(tech_tree, MindWidgets.glyph("tree", 20), _t("@techtree"))
 	tech_tree.pressed.connect(_open_tech_tree)
 	buttons.add_child(tech_tree)
 	# Cells added after `show_dialog` need an explicit re-sort (MinTable is manual).
@@ -606,7 +571,7 @@ func _build_rail(rail: MindTable, planet_name: String) -> void:
 	difficulty.theme_type_variation = "flatTogglet"
 	difficulty.custom_minimum_size = Vector2(208.0, 40.0)
 	_apply_pane_button(difficulty, OUTLINE_GRAY)
-	_build_rail_content(difficulty, MindWidgets.glyph("book", 20), _t("@campaign.difficulty"))
+	build_button_content(difficulty, MindWidgets.glyph("book", 20), _t("@campaign.difficulty"))
 	difficulty.pressed.connect(_open_campaign_rules)
 	rail.add(difficulty).grow_x_axis().set_pad_left(0).set_pad_right(0) \
 		.set_pad_top(13).set_pad_bottom(2)
@@ -646,7 +611,7 @@ func _make_planet_button(planet: Dictionary, selected: bool) -> Button:
 		image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		image.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		icon = image
-	_build_rail_content(button, icon, _localized_planet(planet))
+	build_button_content(button, icon, _localized_planet(planet))
 	button.pressed.connect(func() -> void: _switch_planet(str(planet.get("name", ""))))
 	return button
 
@@ -658,32 +623,6 @@ func _switch_planet(planet_name: String) -> void:
 		return
 	_selected_sector = -1
 	_show_planet(planet_name, false)
-
-
-## `planetTable.button(name, icon, Styles.flatTogglet)`: the icon sits at the
-## left margin (10 px in Java, ~13 px to its pixel row) and the label centers in
-## the space that remains to the right of it.
-func _build_rail_content(button: Button, icon: Control, label_text: String) -> void:
-	# code-instantiated: rail content rows are data-driven per planet/preset.
-	var row := HBoxContainer.new()
-	row.alignment = BoxContainer.ALIGNMENT_BEGIN
-	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	row.offset_left = 13.0
-	row.offset_right = -8.0
-	row.add_theme_constant_override("separation", 8)
-	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	button.add_child(row)
-	if icon != null:
-		row.add_child(icon)
-	var label := MindWidgets.label(label_text)
-	# `RichTextLabel` min width collapses under word wrap inside a bare HBox;
-	# rail labels are single-line, so disable wrapping.
-	label.autowrap_mode = TextServer.AUTOWRAP_OFF
-	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	row.add_child(label)
 
 
 ## The selected-sector readout (`PlanetDialog.updateSelected`): flags, stats,
@@ -752,7 +691,7 @@ func _build_sector_panel(sector: Dictionary) -> Control:
 	launch.add_theme_stylebox_override("hover", _pane_box(Color(0.0, 0.0, 0.0, 1.0), MindStyles.ACCENT))
 	launch.add_theme_stylebox_override("pressed", _pane_box(Color(0.0, 0.0, 0.0, 1.0), MindStyles.ACCENT))
 	launch.add_theme_stylebox_override("disabled", _pane_box(Color(0.0, 0.0, 0.0, 1.0), MindStyles.ACCENT))
-	_build_rail_content(
+	build_button_content(
 		launch,
 		MindWidgets.glyph(str(action.get("icon", "play")), 20),
 		_t(str(action.get("label", "@sectors.launch")))

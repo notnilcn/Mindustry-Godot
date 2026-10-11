@@ -90,6 +90,14 @@ pub struct PlanetView {
     pub start_sector: u16,
     /// Planet-list icon color `rrggbb`.
     pub color: String,
+    /// `Planet.allowSectorInvasion`: the `@rules.invasions` toggle visibility
+    /// (`CampaignRulesDialog`).
+    pub allow_sector_invasion: bool,
+    /// `Planet.showRtsAIRule`: the `@rules.rtsai.campaign` toggle visibility.
+    pub show_rts_ai_rule: bool,
+    /// `Planet.clearSectorOnLose`: the `@rules.clearsectoronloss` toggle is
+    /// hidden when this planet forces it.
+    pub clear_sector_on_lose: bool,
     /// Tech tree name, when assigned.
     pub tech_tree: Option<String>,
     /// Playtime for this planet in milliseconds (`CampaignStats.playtime`).
@@ -496,7 +504,7 @@ fn planet_localized(registry: &ContentRegistry, name: &str) -> String {
 /// Builds one planet card.
 fn planet_view(registry: &ContentRegistry, planet: &Planet) -> PlanetView {
     let def = registry.planet(planet.id);
-    let (visible, accessible, has_grid, sector_count, start_sector, color, tech_tree) = def
+    let (visible, accessible, has_grid, sector_count, start_sector, color, tech_tree, invasions, rts_rule, clears_on_lose) = def
         .map(|def| {
             (
                 def.visible,
@@ -507,6 +515,9 @@ fn planet_view(registry: &ContentRegistry, planet: &Planet) -> PlanetView {
                 hex(&def.icon_color),
                 def.tech_tree
                     .and_then(|tree| registry.tech().tree(tree).map(|t| t.name.clone())),
+                def.allow_sector_invasion,
+                def.show_rts_ai_rule,
+                def.clear_sector_on_lose,
             )
         })
         .unwrap_or((
@@ -517,6 +528,9 @@ fn planet_view(registry: &ContentRegistry, planet: &Planet) -> PlanetView {
             planet.start_sector,
             String::from("ffffff"),
             None,
+            false,
+            false,
+            false,
         ));
     PlanetView {
         id: planet.id.raw(),
@@ -528,6 +542,9 @@ fn planet_view(registry: &ContentRegistry, planet: &Planet) -> PlanetView {
         sector_count,
         start_sector,
         color,
+        allow_sector_invasion: invasions,
+        show_rts_ai_rule: rts_rule,
+        clear_sector_on_lose: clears_on_lose,
         tech_tree,
         playtime_ms: planet.stats.playtime,
         sectors_captured: planet.stats.sectors_captured,
