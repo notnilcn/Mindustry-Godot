@@ -412,6 +412,12 @@ impl MindSimHost {
                 .and_then(|v| i16::try_from(v).ok())
         };
         let (x, y) = (coord("x"), coord("y"));
+        // Optional issuing player: `Some` routes place/break through the
+        // player unit's build queue like live input (PAR-0098).
+        let player = value
+            .get("player")
+            .and_then(|v| v.as_i64())
+            .map(|id| id as i32);
         let command = match op {
             "place" => {
                 let (Some(x), Some(y)) = (x, y) else {
@@ -430,7 +436,7 @@ impl MindSimHost {
                     block,
                     rotation,
                     team: 0,
-                    player: None,
+                    player,
                 }
             }
             "break" => {
@@ -438,7 +444,7 @@ impl MindSimHost {
                     log::warn!("apply_sim_command_json: break needs x,y");
                     return false;
                 };
-                SimCommand::Break { x, y, player: None }
+                SimCommand::Break { x, y, player }
             }
             "spawn_unit" => {
                 let unit = value.get("unit").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
@@ -1586,6 +1592,55 @@ impl MindSimHost {
     #[func]
     pub fn player_mined_count(&self) -> i64 {
         self.sim.player_mined_count()
+    }
+
+    /// Debug/playtest seam: adds `amount` of `item` to the player team's first
+    /// core (the Java console/sandbox `core.items.add`); returns the amount
+    /// accepted (negative removes).
+    #[func]
+    pub fn debug_add_core_items(&mut self, item: GString, amount: i64) -> i64 {
+        let team = self.player_team();
+        let amount = i32::try_from(amount).unwrap_or(0);
+        if amount < 0 {
+            return -i64::from(self.remove_player_core_items(team, &item.to_string(), -amount));
+        }
+        let Some(item) = self
+            .content_snapshot
+            .as_ref()
+            .and_then(|content| content.item_id(&item.to_string()))
+        else {
+            return 0;
+        };
+        let target = self
+            .sim
+            .ecs
+            .entities_by_seq()
+            .into_iter()
+            .find_map(|(_, entity, comp)| {
+                (comp.team.0 == team
+                    && self.sim.ecs.0.get::<ItemModule>(entity).is_some()
+                    && self
+                        .sim
+                        .ecs
+                        .0
+                        .get::<mind_core::world::blocks::storage::core_block::CoreBuild>(entity)
+                        .is_some())
+                .then_some(entity)
+            });
+        let Some(entity) = target else {
+            return 0;
+        };
+        let capacity = self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::world::blocks::storage::core_block::CoreBuild>(entity)
+            .map(|core| core.storage_capacity)
+            .unwrap_or(i32::MAX);
+        match self.sim.ecs.0.get_mut::<ItemModule>(entity) {
+            Some(mut module) => i64::from(module.add(item, amount, capacity)),
+            None => 0,
+        }
     }
 
     /// The player unit's build-plan queue as JSON (`BuilderComp.plans`, head
