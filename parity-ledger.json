@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T01:24:14Z",
+  "updated": "2026-10-11T01:25:35Z",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -11629,47 +11629,82 @@
       "title": "Campaign world HUD: Planet map button (map icon) opens the planet view",
       "surface": "world",
       "parent": "PAR-0028",
-      "status": "reference",
-      "updated": "2026-10-10T14:39:55Z",
+      "status": "verified",
+      "updated": "2026-10-11T01:25:35Z",
       "discovered_by": "runs/20261009-065416-ref-ground-zero/",
       "path": {
-        "to": "in-game Ground Zero tutorial start",
+        "to": "in-game Ground Zero (sector 15)",
         "java": [],
-        "godot": [],
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "var b = get_node('/root/Spine/Ui/UiRoot/HudGroup/placement/Panel/Layout/Left/InputBar/input-map'); b.visible and b.get_global_rect() == (996,596,48,48)"
+            }
+          }
+        ],
         "confirm": {
-          "java": "runs/20261009-065416-ref-ground-zero/java/r00-03-tutorial.png (icon bar)",
-          "godot": "HudGroup visible"
+          "godot": "MindUi.dialog_stack() == [planet]",
+          "java": "r01-04-sectorpanel.png non-blank"
         },
-        "last_replayed": null
+        "last_replayed": "runs/20261011-112419-PAR-0036/ (click input-map (1020,620) -> stack [planet]; Back (104,577) -> [])"
       },
-      "run": "runs/20261009-065416-ref-ground-zero/",
+      "run": "runs/20261011-112419-PAR-0036/",
       "reproduce": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "image_center": [
-                1024,
-                627
-              ],
-              "screen_center": [
-                1074,
-                725
-              ],
-              "source": "../Mindustry/core/src/mindustry/input/DesktopInput.java:568-570 buildPlacementUI: Icon.map -> ui.planet.show(), visible in campaign, tooltip @planetmap"
+              "frames": "runs/20261009-065416-ref-ground-zero/java/r01-03-planet.png + r01-04-sectorpanel.png"
             }
           }
         ],
-        "godot": [],
-        "compare": []
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "in-game -> click input-map centre via push_input"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "MindUi.dialog_stack() -> [planet]; Back (104,577) -> []"
+            }
+          }
+        ],
+        "compare": [
+          "godot/hud-70-planet-page.png vs java/r01-04-sectorpanel-java.png (the page opens from both paths; the in-game backdrop/z-order gap is PAR-0146)"
+        ]
       },
-      "steps": [],
-      "mismatch": null,
+      "steps": [
+        {
+          "action": "click the map button in the input row (campaign)",
+          "result": "planet page opens (stack [planet]) with the planet, rail and sector panel"
+        },
+        {
+          "check": "Back closes it; the in-game page draws over the live world/HUD (seeded PAR-0146)"
+        }
+      ],
+      "mismatch": {
+        "step": "in-game entry layering: the world + HUD show through/above the planet page (Java covers with the space backdrop)",
+        "godot_frame": "runs/20261011-112419-PAR-0036/godot/hud-70-planet-page.png",
+        "java_frame": "runs/20261011-112419-PAR-0036/java/r01-04-sectorpanel-java.png",
+        "diff": "runs/20261011-112419-PAR-0036/diff/planet-page.json",
+        "seeded": "PAR-0146"
+      },
       "fix": {
-        "status": "open"
+        "status": "none-needed",
+        "commit": "e62d7bf",
+        "summary": "the map button landed with the input row (e62d7bf); the in-game page backdrop/z-order gap is PAR-0146"
       },
-      "verified": null,
-      "note": "Revealed by R00 (bottom-right icon bar, campaign-visible). Action not mirrored yet.",
+      "verified": {
+        "mode": "reference",
+        "run": "runs/20261011-112419-PAR-0036/",
+        "reference": "runs/20261009-065416-ref-ground-zero/",
+        "at": "2026-10-11T01:25:35Z"
+      },
+      "note": "Verified the campaign-gated map button opens the planet page (same page as the campaign path). The in-game entry's backdrop (world visible through, HUD above) is seeded as PAR-0146.",
       "reference": {
         "captured": "2026-10-09T07:00:00Z",
         "profile": "fresh",
@@ -11693,6 +11728,12 @@
         "java_path": [
           "launch -> window normalize -> Play > Campaign > Serpulo OK -> Ground Zero -> Launch (R00 frames) -> in-game HUD (R00-R07 frames)"
         ]
+      },
+      "claim": {
+        "by": "parity-hunt-s1",
+        "at": "2026-10-11T01:24:19Z",
+        "prior_status": "reference",
+        "released_at": "2026-10-11T01:25:35Z"
       }
     },
     {
@@ -28626,6 +28667,54 @@
       },
       "verified": null,
       "note": "Revealed by PAR-0035. Java: ResearchDialog.treeLayout() (ResearchDialog.java:332-353) positions TechTreeNode cells as a connected graph (yellow connector lines, planet tab, pan/zoom, hover popups, purchase). Port: research_dialog.gd builds a root rail + node rows; the rail shows 'techtree.<null>' for nodes without a root (campaign_views.research has 223 nodes, only node[0] carries root 'serpulo'), and the rows overlap the rail. Requires: the view's tech-tree root grouping (or the Rust TechStore's roots) + a TreeLayout port (client/ui/layout/tree_layout.gd is a cursor-row stub) + the TechTreeNode widget. Cross-link PAR-0047."
+    },
+    {
+      "id": "PAR-0146",
+      "title": "Planet page opened from the in-game map button draws over the live world + HUD (Java covers with the space backdrop)",
+      "surface": "ui",
+      "parent": "PAR-0036",
+      "status": "seeded",
+      "updated": "2026-10-11T01:25:35Z",
+      "discovered_by": "runs/20261011-112419-PAR-0036/",
+      "path": {
+        "to": "in-game > map button > planet page",
+        "java": [],
+        "godot": [],
+        "confirm": {
+          "godot": "MindUi.dialog_stack() == [planet]",
+          "java": "r01-04-sectorpanel.png"
+        },
+        "last_replayed": null
+      },
+      "run": "runs/20261011-112419-PAR-0036/",
+      "reproduce": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "frame": "runs/20261009-065416-ref-ground-zero/java/r01-04-sectorpanel.png"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "frame": "runs/20261011-112419-PAR-0036/godot/hud-70-planet-page.png"
+            }
+          }
+        ],
+        "compare": [
+          "changed 0.6411, palette 0.219; the world terrain is visible behind the page and the hint bar/picker/input row render above it"
+        ]
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open"
+      },
+      "verified": null,
+      "note": "Revealed by PAR-0036. Opened from the HUD, the port's planet dialog shows the live world through its backdrop and the world HUD above it; the Java PlanetDialog renders its own space scene and the HUD hides behind the modal. The campaign-path page (PAR-0015) is unaffected."
     }
   ]
 }
