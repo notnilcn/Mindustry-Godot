@@ -1798,3 +1798,13 @@ those paths no longer exist, but the workarounds still apply.
 - Workaround: keep each execute chain to a few calls, or split; the concat-built
   push_input helpers stay fine. Retry with the typo removed only.
 - Run dir: `runs/20261011-102658-PAR-0024/`.
+
+## 2026-10-11 — PAR-0029: blocking delays starve the game clock (hint gate waits)
+
+- Symptom: waiting with `godot_exec` + `OS.delay_msec(9000)` did NOT advance the
+  hints fragment's 8 s playtime gate — the blocking sleep stops the main thread, so
+  `_process` deltas (and the capped fixed-step catch-up) never accumulate; after the
+  block the panel stayed hidden (`hints.vis false`).
+- Workaround: wait with real wall time on the SHELL side between execute calls
+  (`sleep 12`); the game runs unblocked and the gate passes (hint + Skip then show).
+- Run dir: `runs/20261011-102959-PAR-0029/`.
