@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T02:38:52Z",
+  "updated": "2026-10-11T02:46:34Z",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -16277,11 +16277,11 @@
       "title": "Tutorial: place more drills; mine 100 copper (objective 3)",
       "surface": "world",
       "parent": "PAR-0049",
-      "status": "reference",
-      "updated": "2026-10-09T07:39:30Z",
+      "status": "verified",
+      "updated": "2026-10-11T02:46:34Z",
       "discovered_by": "runs/20261009-065416-ref-ground-zero/",
       "path": {
-        "to": "Ground Zero tutorial objective 3 (Move into Core: 24/100 Copper)",
+        "to": "in-game Ground Zero (drill + conveyor column)",
         "java": [
           {
             "tool": "computer-mcp_key_down/key_up",
@@ -16329,71 +16329,82 @@
             }
           }
         ],
-        "godot": [],
+        "godot": [
+          {
+            "tool": "godot_input",
+            "params": {
+              "code": "right click deselect; left click the ore (129,49); pick block-mechanical-drill; place it; pick block-conveyor; place (129,50)..(129,54)"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "get_objective_state (obj1 buildcount completed) + core_items_json (145 -> 256 -> 271)"
+            }
+          }
+        ],
         "confirm": {
-          "java": "runs/20261009-065416-ref-ground-zero/java/r06-00-now.png (24/100)",
-          "godot": "HudGroup visible"
+          "godot": "objective 1 clears and the core copper grows from the production",
+          "java": "r06-04-100.png"
         },
-        "last_replayed": "runs/20261009-065416-ref-ground-zero/"
+        "last_replayed": "runs/20261011-124243-PAR-0051/ (mine 145 -> obj0; drill placed -> obj1; column (129,50..54); counter 271 with no manual mining)"
       },
-      "run": "runs/20261009-065416-ref-ground-zero/",
+      "run": "runs/20261011-124243-PAR-0051/",
       "reproduce": {
         "java": [
           {
-            "tool": "computer-mcp_key_down/key_up",
+            "tool": "note",
             "params": {
-              "key": ",",
-              "note": "categoryPrev: production category; Mechanical Drill auto-selected"
-            }
-          },
-          {
-            "tool": "computer-mcp_mouse_move",
-            "params": {
-              "x": 769,
-              "y": 609,
-              "note": "hover image (719,511) - preview confirmed valid ('Drill Speed: 0.36/s'); an earlier attempt at image (687,479) was rejected (boulder at image 650-694,474-520)"
-            }
-          },
-          {
-            "tool": "computer-mcp_click",
-            "params": {
-              "x": 769,
-              "y": 609,
-              "note": "place 2nd Mechanical Drill (footprint image 687-751,479-543)"
-            }
-          },
-          {
-            "tool": "computer-mcp_key_down/key_up",
-            "params": {
-              "key": ".",
-              "note": "distribution; conveyor selected"
-            }
-          },
-          {
-            "tool": "computer-mcp_click",
-            "params": {
-              "x": 753,
-              "y": 561,
-              "note": "column into the existing row: image (703,463),(703,431),(703,399),(703,367), north-facing"
-            }
-          },
-          {
-            "tool": "capture_screen.py",
-            "params": {
-              "--window-title": "Mindustry",
-              "--output": "runs/20261009-065416-ref-ground-zero/java/r06-04-100.png"
+              "frames": "runs/20261009-065416-ref-ground-zero/java/r06-00-now.png + r06-04-100.png"
             }
           }
         ],
-        "godot": [],
-        "compare": []
+        "godot": [
+          {
+            "tool": "godot_input",
+            "params": {
+              "code": "the walk above"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "get_objective_state + core_items_json before/after ~66 s"
+            }
+          }
+        ],
+        "compare": [
+          "the counter crosses 100 and the objective chain advances"
+        ]
       },
-      "steps": [],
+      "steps": [
+        {
+          "action": "mine 15 copper (obj0)",
+          "result": "mined 145, obj0 completed"
+        },
+        {
+          "action": "select + place the mechanical drill on the ore",
+          "result": "obj1 (buildcount) completed"
+        },
+        {
+          "action": "place the conveyor column (129,50..54) to the core",
+          "result": "the core copper grows 145 -> 256 -> 271 with no manual mining"
+        },
+        {
+          "check": "the placed sprites render as the PAR-0152 placeholder; no belt items can be judged yet"
+        }
+      ],
       "mismatch": null,
       "fix": {
-        "status": "open"
+        "status": "none-needed",
+        "summary": "the placements + production verified; the render gap is PAR-0152"
       },
-      "verified": null,
+      "verified": {
+        "mode": "reference",
+        "run": "runs/20261011-124243-PAR-0051/",
+        "reference": "runs/20261009-065416-ref-ground-zero/",
+        "at": "2026-10-11T02:46:34Z"
+      },
       "reference": {
         "captured": "2026-10-09T07:38:40Z",
         "profile": "resumed",
@@ -16494,7 +16505,14 @@
           }
         ],
         "note": "R06 reference soak. One more drill placed on the copper field south-west of the first, with a 4-tile column into the existing row; the first attempt (image 687,479) was rejected because of a boulder at image 650-694,474-520 - the placement preview (hover + capture) catches this before the click. The objective advanced to lead."
-      }
+      },
+      "claim": {
+        "by": "parity-hunt-s1",
+        "at": "2026-10-11T02:42:43Z",
+        "prior_status": "reference",
+        "released_at": "2026-10-11T02:46:34Z"
+      },
+      "note": "Verified the drill/column placement + the production counter (145 -> 271, no manual mining). Caveats: the sprites are the PAR-0152 placeholder (belt items unjudgeable); ~711 MB / 2.5 s CPU spikes recorded. The walk redid obj0 because the resume lost the previous mining - seeded as PAR-0153."
     },
     {
       "id": "PAR-0052",
@@ -28433,6 +28451,60 @@
       },
       "verified": null,
       "note": "Revealed by PAR-0050 (also noted in chains/ground-zero-conveyor-line.md:130). The placed block's world sprite = the 'Wrong texture folder' placeholder while the picker cell for the same conveyor renders its atlas region - the world block-sprite lookup/build path differs. Check the world renderer's region resolution for placed blocks (rotation variants like conveyor-0 / the build-plan sprite path)."
+    },
+    {
+      "id": "PAR-0153",
+      "title": "Campaign sector autosave never runs: resuming a sector loses the played progress (objectives, mined totals, core items)",
+      "surface": "campaign",
+      "parent": "PAR-0051",
+      "status": "seeded",
+      "updated": "2026-10-11T02:46:34Z",
+      "discovered_by": "runs/20261011-124243-PAR-0051/",
+      "path": {
+        "to": "play a sector, quit/restart, resume",
+        "java": [],
+        "godot": [],
+        "confirm": {
+          "godot": "the sector save mtime never advances while playing; the resume shows the pre-play objectives",
+          "java": "the Java autosaves on the saveinterval cadence"
+        },
+        "last_replayed": null
+      },
+      "run": "runs/20261011-124243-PAR-0051/",
+      "reproduce": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "evidence": "the soak checkpoints: autosave mtimes advance every ~2-4 min of play (R01 17:07:02 -> R02 17:11:01 -> R03 17:13:01...)"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "stat -c %y ~/.local/share/godot/app_userdata/Mindustry-Godot/saves/sector-serpulo-15.msav  # 2026-10-11 11:44 = the launch bookkeeping"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "after ~1 h of play + a restart: get_objective_state() obj0 completed == false, player_mined_count() == 0, core_items_json() == {}"
+            }
+          }
+        ],
+        "compare": [
+          "the port's save mtime did not advance across a long played session; the resume rolled back the objectives/mining/core"
+        ]
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open"
+      },
+      "verified": null,
+      "note": "Revealed by PAR-0051: after mining 170 + completing objective 0 (12:35-12:42), the resume at 12:42 showed obj0 incomplete, mined 0, core {} while the sector save's mtime stayed at 11:44 (the launch/bookkeeping write). Java saves the campaign sector on the saveinterval cadence (Settings default; the soak's mtimes move every ~2-4 min) and on sector launch/quits. Next: find the port's autosave driver (the `saveinterval` setting exists on the settings page) and wire the periodic flush (campaign.rs persist / the save slot bookkeeping)."
     }
   ]
 }
