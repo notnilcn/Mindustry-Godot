@@ -19,10 +19,8 @@ signal sector_activated(planet: String, sector: int)
 
 const CARD_SIZE := Vector2(320.0, 320.0)
 const DISC_SIZE := 170.0
-## `Tex.pane` border in the reference frames (#454545) and the checked rail row's
-## `Tex.buttonDown` outline (125, 64, 127).
+## `Tex.pane` border in the reference frames (#454545).
 const OUTLINE_GRAY := Color(0.27, 0.27, 0.27)
-const OUTLINE_CHECKED := Color(125.0 / 255.0, 64.0 / 255.0, 127.0 / 255.0)
 ## Java card outline (`Styles.togglet`, sampled from the reference frame pair).
 const CARD_OUTLINE := Color(0.27, 0.27, 0.27)
 
@@ -480,7 +478,7 @@ func _on_select_ok() -> void:
 
 ## `PlanetDialog.setup`: globe + left planet/difficulty rail + bottom sector
 ## panel (`@sectors` readout with the in-panel action button).
-func _show_planet(planet_name: String) -> void:
+func _show_planet(planet_name: String, select_default := true) -> void:
 	_selected_planet = planet_name
 	_chooser_active = false
 	_clear_dimmed_footer()
@@ -501,12 +499,17 @@ func _show_planet(planet_name: String) -> void:
 	_build_rail(rail, planet_name)
 
 	var selected := _find_sector(planet_name, _selected_sector)
-	if selected.is_empty():
+	if selected.is_empty() and select_default:
 		selected = _default_sector(planet_name)
 		_selected_sector = int(selected.get("id", -1))
-	if view != null and not selected.is_empty():
-		view.focus_tile(view.view_tile(selected))
-		view.set_sector_icon(str(selected.get("preset", "")))
+	if view != null:
+		if selected.is_empty():
+			# `PlanetDialog.viewPlanet`: a planet switch clears the selection
+			# (no panel, no band) and keeps the camera.
+			view.clear_selection()
+		else:
+			view.focus_tile(view.view_tile(selected))
+			view.set_sector_icon(str(selected.get("preset", "")))
 
 	clear_buttons()
 	# `PlanetDialog` action row: `@back`/`@techtree` are `button(text, icon)`
@@ -525,7 +528,8 @@ func _show_planet(planet_name: String) -> void:
 	back.pressed.connect(_close)
 	buttons.add_child(back)
 	buttons.add_child(_spacer())
-	buttons.add_child(_build_sector_panel(selected))
+	if not selected.is_empty():
+		buttons.add_child(_build_sector_panel(selected))
 	buttons.add_child(_spacer())
 	var tech_tree := MindWidgets.button("")
 	tech_tree.custom_minimum_size = Vector2(200.0, 54.0)
@@ -621,8 +625,17 @@ func _make_planet_button(planet: Dictionary, selected: bool) -> Button:
 	button.button_pressed = selected
 	button.custom_minimum_size = Vector2(208.0, 44.0)
 	_apply_pane_button(button, OUTLINE_GRAY, 0.0)
-	button.add_theme_stylebox_override("pressed", _pane_box(Color.BLACK, OUTLINE_CHECKED))
-	button.add_theme_stylebox_override("hover_pressed", _pane_box(Color.BLACK, OUTLINE_CHECKED))
+	# Checked outline: `Tex.buttonDown`'s accent border tinted by the planet's
+	# `iconColor` (sampled: Serpulo (125,64,127) = accent x 7d4dff; Erekir
+	# (255,121,51) = accent x ff9266).
+	var planet_color := Color.from_string(str(planet.get("color", "ffffff")), Color.WHITE)
+	var checked := Color(
+		MindStyles.ACCENT.r * planet_color.r,
+		MindStyles.ACCENT.g * planet_color.g,
+		MindStyles.ACCENT.b * planet_color.b
+	)
+	button.add_theme_stylebox_override("pressed", _pane_box(Color.BLACK, checked))
+	button.add_theme_stylebox_override("hover_pressed", _pane_box(Color.BLACK, checked))
 	var icon: Control = null
 	var texture := _planet_texture(planet)
 	if texture != null:
@@ -634,8 +647,17 @@ func _make_planet_button(planet: Dictionary, selected: bool) -> Button:
 		image.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		icon = image
 	_build_rail_content(button, icon, _localized_planet(planet))
-	button.pressed.connect(func() -> void: _show_planet(str(planet.get("name", ""))))
+	button.pressed.connect(func() -> void: _switch_planet(str(planet.get("name", ""))))
 	return button
+
+
+## `PlanetDialog.viewPlanet`: switching planets clears the selection (no sector
+## panel/band until one is picked).
+func _switch_planet(planet_name: String) -> void:
+	if planet_name == _selected_planet:
+		return
+	_selected_sector = -1
+	_show_planet(planet_name, false)
 
 
 ## `planetTable.button(name, icon, Styles.flatTogglet)`: the icon sits at the

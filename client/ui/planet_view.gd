@@ -142,6 +142,15 @@ func focus_tile(tile: int) -> void:
 	_rebuild_highlight()
 
 
+## Clears the selected sector highlight/icon without moving the camera
+## (`PlanetDialog.viewPlanet` keeps the camera and unsets `selected`).
+func clear_selection() -> void:
+	selected_tile = -1
+	_sector_icon_preset = ""
+	_clear_highlight()
+	_rebuild_sector_icon()
+
+
 ## Sets the hovered tile (`PlanetDialog.hovered`): the grid fades in around it,
 ## the hex takes the accent hover fill and the dialog draws the name label.
 func set_hover(tile: int) -> void:
