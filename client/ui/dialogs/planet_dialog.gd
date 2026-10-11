@@ -37,6 +37,16 @@ var _chooser_active := false
 var _footer_entries: Array[Button] = []
 ## Planet whose campaign-complete screen was already announced (control flow).
 var _complete_announced := ""
+## Stage layers hidden while the planet page covers the screen (PAR-0146/0147):
+## node path -> visibility captured when the page first covered the stage, so
+## closing it restores exactly what was showing before (the live game's HUD +
+## world, or the standalone menu). Empty while nothing is covered.
+var _saved_layers: Dictionary = {}
+
+const MENU_GROUP_PATH := "/root/Spine/Ui/UiRoot/MenuGroup"
+const MENU_BACKGROUND_PATH := "/root/Spine/Ui/MenuBackground"
+const HUD_GROUP_PATH := "/root/Spine/Ui/UiRoot/HudGroup"
+const WORLD_PATH := "/root/Spine/World"
 
 
 func _ready() -> void:
@@ -51,6 +61,9 @@ func _ready() -> void:
 
 
 func shown() -> void:
+	# "view current planet by default" (`PlanetDialog.show`): inside a campaign
+	# sector the page opens on that sector's planet, never the chooser.
+	_adopt_current_sector()
 	# A planet already chosen restores the planet view; otherwise the first-run
 	# chooser is shown (`PlanetDialog.shown`).
 	if _selected_planet.is_empty():
@@ -61,6 +74,9 @@ func shown() -> void:
 
 func hidden() -> void:
 	_set_planet_view_active(false)
+	# Back/ESC returns to whatever the page covered (the running sector or the
+	# menu), PAR-0147.
+	_restore_stage()
 	var view := _planet_view()
 	if view != null:
 		view.set_hover(-1)
@@ -68,6 +84,31 @@ func hidden() -> void:
 
 func _build() -> void:
 	_root = content_table()
+
+
+## `PlanetDialog.show`: `state.rules.sector != null` -> `state.planet =
+## sector.planet` (and the camera looks at that sector). Reads the live session
+## through `MindCampaign.get_sector_state`.
+func _adopt_current_sector() -> void:
+	var campaign := campaign_node()
+	if campaign == null or not campaign.has_method("get_sector_state"):
+		return
+	var state: Variant = campaign.call("get_sector_state")
+	if not (state is Dictionary):
+		return
+	var sector_state: Dictionary = state
+	if not bool(sector_state.get("campaign", false)):
+		return
+	var planet_name := str(sector_state.get("planet", ""))
+	if planet_name.is_empty():
+		return
+	if planet_name != _selected_planet:
+		_selected_sector = -1
+	_selected_planet = planet_name
+	refresh_campaign_views(planet_name)
+	var sector_id := int(sector_state.get("sector", -1))
+	if sector_id >= 0 and not _find_sector(planet_name, sector_id).is_empty():
+		_selected_sector = sector_id
 
 
 ## Full-screen starfield behind the chooser (`sprites/space.png`; the live g3d
@@ -824,9 +865,11 @@ func _planet_view() -> PlanetView:
 	return get_node_or_null("/root/Spine/Planet/PlanetView") as PlanetView
 
 
-## Toggles the globe layer, the dialog's own backdrop/dim, and the standalone
-## menu (the globe replaces the chooser backdrop and `PlanetDialog` draws over
-## an empty stage).
+## Toggles the globe layer and the dialog's own backdrop/dim. The globe page
+## covers the whole stage (`PlanetDialog` draws its space scene over
+## everything), so the menu, HUD and world are hidden while it is up and
+## restored on close (`_cover_stage`/`_restore_stage`). The chooser over the
+## standalone menu keeps the menu visible behind its dim.
 func _set_planet_view_active(active: bool) -> void:
 	var view := _planet_view()
 	if view != null:
@@ -837,12 +880,56 @@ func _set_planet_view_active(active: bool) -> void:
 	var dim := get_node_or_null("Dim")
 	if dim != null:
 		dim.visible = not active
-	var menu := get_node_or_null("/root/Spine/Ui/UiRoot/MenuGroup")
-	if menu != null:
-		menu.visible = not active
-	var menu_background := get_node_or_null("/root/Spine/Ui/MenuBackground")
-	if menu_background != null:
-		menu_background.visible = not active
+	if not visible:
+		# Boot `_ready` and `hidden()`: the stage is left alone (`hidden()`
+		# restores it explicitly).
+		return
+	if active or not _saved_layers.is_empty() or _hud_visible():
+		# Globe page, or anything shown over the live game: cover the stage.
+		_cover_stage()
+	else:
+		# Chooser over the standalone menu (nothing captured): the menu stays up.
+		_set_visible_at(MENU_GROUP_PATH, true)
+		_set_visible_at(MENU_BACKGROUND_PATH, true)
+
+
+func _hud_visible() -> bool:
+	var hud := get_node_or_null(HUD_GROUP_PATH) as CanvasItem
+	return hud != null and hud.visible
+
+
+## Captures (once) and hides every stage layer under the dialog: the menu and
+## its background, the HUD group (hints/objective text live there), the world
+## and the world's own `CanvasLayer`s (the renderer's `ObjectiveMarkers` layer
+## draws the objective marker/label and does not inherit `World` visibility).
+func _cover_stage() -> void:
+	if _saved_layers.is_empty():
+		var paths: Array[String] = [MENU_GROUP_PATH, MENU_BACKGROUND_PATH, HUD_GROUP_PATH, WORLD_PATH]
+		var world := get_node_or_null(WORLD_PATH)
+		if world != null:
+			for layer in world.find_children("*", "CanvasLayer", true, false):
+				paths.append(str(layer.get_path()))
+		for path in paths:
+			var node := get_node_or_null(path)
+			if node is CanvasItem or node is CanvasLayer:
+				_saved_layers[path] = bool(node.get("visible"))
+	for path: String in _saved_layers:
+		_set_visible_at(path, false)
+
+
+## Restores exactly the captured visibility (no-op when nothing was covered).
+## `_launch` closes first and then `_enter_game` switches to the HUD, so the
+## launch path still ends with the menu hidden and the HUD shown.
+func _restore_stage() -> void:
+	for path: String in _saved_layers:
+		_set_visible_at(path, bool(_saved_layers[path]))
+	_saved_layers.clear()
+
+
+func _set_visible_at(path: String, value: bool) -> void:
+	var node := get_node_or_null(path)
+	if node is CanvasItem or node is CanvasLayer:
+		node.set("visible", value)
 
 
 ## The sector selected on first open: the planet's start sector, else Ground
@@ -1089,6 +1176,13 @@ func _launch(planet_name: String, sector_id: int, loadout: int = -1, resume: boo
 
 ## Hides the standalone menu and shows the in-game HUD group (`MindUiRoot`).
 func _enter_game() -> void:
+	# `MindUi.close_dialog` hides deferred, so `hidden()` -> `_restore_stage()`
+	# runs after this: retarget the captured stage to the in-game layout.
+	for path: String in _saved_layers:
+		if path == MENU_GROUP_PATH or path == MENU_BACKGROUND_PATH:
+			_saved_layers[path] = false
+		elif path == HUD_GROUP_PATH:
+			_saved_layers[path] = true
 	var ui_root := get_node_or_null("/root/Spine/Ui/UiRoot")
 	if ui_root != null and ui_root.has_method("set_menu_visible"):
 		ui_root.call("set_menu_visible", false)
