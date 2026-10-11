@@ -1778,3 +1778,15 @@ those paths no longer exist, but the workarounds still apply.
   on a live label shows exactly what will draw — use it to tell "tag consumed" from
   "tag literal".
 - Run dir: `runs/20261011-094516-PAR-0016/`.
+
+## 2026-10-11 — PAR-0019: for-loop evals time out (recurrence) — use map/dump-to-file
+
+- Symptom (again): `godot_exec eval` bodies containing a `for` loop over the sector
+  views returned `TIMEOUT ("Runtime call 'exec' timed out after 15.0s")` and left the
+  game paused (`godot_debugger sessions` -> `paused: true`); later evals still answer.
+  Two occurrences this item (the 12-sector panel-label loop and the campaign-views loop).
+- Workaround (validated): loop-free evals — either GDScript `Array.map`/`filter`, or
+  dump the payload to `user://views.json` with FileAccess and parse it in the shell
+  (used for the 145 KB campaign views). Recover a paused game with `stop`+`play`.
+- Rule of thumb: any eval that needs iteration goes through map/filter or a file dump.
+- Run dir: `runs/20261011-100323-PAR-0019/`.

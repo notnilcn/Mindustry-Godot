@@ -1,6 +1,6 @@
 {
  "schema": "mindustry-godot/parity-ledger@3",
- "updated": "2026-10-11T02:08:00Z",
+ "updated": "2026-10-11T02:33:00Z",
  "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
  "focus": {
   "kind": "area",
@@ -7096,8 +7096,8 @@
    "title": "Campaign planet page: sector hex selection (Ground Zero)",
    "surface": "campaign",
    "parent": "PAR-0002",
-   "status": "in-progress",
-   "updated": "2026-10-10T23:59:22Z",
+   "status": "verified",
+   "updated": "2026-10-11T00:03:42Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
     "to": "campaign planet page on both clients (after Play > Campaign and the first-run chooser OK)",
@@ -7394,7 +7394,7 @@
      "godot": "DialogLayer/planet visible; sector panel labels include 'Ground Zero'/'Threat: Low'",
      "java": "seed/step-04-planet-java.png non-blank (mean 13.94): Serpulo rail + Ground Zero panel + Launch"
     },
-    "last_replayed": "runs/20261009-052658-seed-campaign/"
+    "last_replayed": "runs/20261011-095656-PAR-0018"
    },
    "run": "runs/20261010-234250-ref-PAR-0070-combat-fx/",
    "reproduce": {
@@ -7427,29 +7427,58 @@
      }
     ]
    },
-   "steps": [],
+   "steps": [
+    {
+     "n": 1,
+     "action": "fork frame pair",
+     "java_frame": "runs/20261011-095656-PAR-0018/java/step-01-planet-fork.png",
+     "godot_frame": "runs/20261011-095656-PAR-0018/godot/step-01-planet-fork.png",
+     "diff": "runs/20261011-095656-PAR-0018/diff/diff-fork.json",
+     "verdict": "calibrated"
+    },
+    {
+     "n": 2,
+     "action": "hover the Ground Zero hex",
+     "java_frame": "runs/20261011-095656-PAR-0018/java/step-02-hover.png",
+     "godot_frame": "runs/20261011-095656-PAR-0018/godot/step-02-hover.png",
+     "diff": "runs/20261011-095656-PAR-0018/diff/diff-hover.json",
+     "verdict": "match (hover elements; class residual)"
+    },
+    {
+     "n": 3,
+     "action": "click the hex (selection retained)",
+     "java_frame": "runs/20261011-095656-PAR-0018/java/step-03-click.png",
+     "godot_frame": "runs/20261011-095656-PAR-0018/godot/step-03-click.png",
+     "diff": "runs/20261011-095656-PAR-0018/diff/diff-click.json",
+     "verdict": "match (structured: selected 170, hover 170, label/fill visible)"
+    }
+   ],
    "mismatch": null,
    "fix": {
-    "status": "open",
-    "commit": null,
-    "summary": null,
+    "status": "closed",
+    "commit": "d84173c",
+    "summary": "Hover fill (accent a=0.5 at outline-0.003), RichTextLabel markup label (gold brackets/white/black outline), click keeps the hover (selected = hovered), off-planet clears hover/label/fill.",
     "plan": {
-     "round": 1,
-     "state": "fresh Java pair captured; Godot-side hover visuals missing (fill + label markup) before the first Godot leg",
-     "seam": "client/ui/planet_view.gd (hover fill mesh, label markup/outline), client/scenes/ui/planet_view.tscn (SectorLabel -> RichTextLabel, Hover node)",
-     "done": [],
-     "next": [
-      "Godot walk + hover motion; diff fork/action pairs; fix hover fill (accent 0.5, PlanetDialog.draw fill) + label (gold brackets/white name/black outline)"
+     "round": 2,
+     "state": "landed + re-run green",
+     "done": [
+      "round 1: fresh Java pair captured (session-2 profile, foreground build 403486; settings backed up); Godot hover fill + label markup + Hover node + RichTextLabel",
+      "round 2: label autowrap fix + click hover retention (_update_hover after _select_view_tile); re-run: hover 170, label/fill visible, click keeps them, off-planet clears them"
      ],
-     "narrow_check": "GODOT_BIN=$HOME/.local/bin/godot bash tools/godot.sh --headless --editor --quit --path client",
+     "narrow_check": "headless parse gate (clean)",
      "evidence": [
-      "runs/20261011-095656-PAR-0018/java/step-01-planet-fork.png",
-      "runs/20261011-095656-PAR-0018/java/step-02-hover.png",
-      "runs/20261011-095656-PAR-0018/diff/hover-pair-4x.png"
+      "runs/20261011-095656-PAR-0018/diff/diff-hover.json",
+      "runs/20261011-095656-PAR-0018/godot/step-02-hover.png"
      ]
     }
    },
-   "verified": null,
+   "verified": {
+    "mode": "reference",
+    "date": "2026-10-11T00:03:42Z",
+    "run": "runs/20261011-095656-PAR-0018",
+    "reference": "runs/20261011-095656-PAR-0018 (fresh Java pair captured this run; see reference block)",
+    "note": "Godot-only walk vs the FRESH Java pair: hover draws [ Ground Zero ] (gold brackets, white name, black outline) + the accent fill on the hex + the grid mouse fade; the click keeps hover/selection (Java selected = hovered) and off-planet clears them. Frame pairs ~0.454-0.455 cf - the surrounding globe/starfield/fonts + the Java sector planes cluster (locked-sector hex planes + icons, renderProjections) are the PAR-0142 presentation class; the hover elements themselves align (crop diff runs/20261011-095656-PAR-0018/diff/hover-java-vs-godot-r1.png)."
+   },
    "note": "Java selects Ground Zero by default on the fresh campaign; Godot shows the under-attack Ground Zero selected.",
    "reference": {
     "captured": "2026-10-10T23:59:22Z",
@@ -7484,11 +7513,7 @@
      "click (621,394); capture java/step-03-click.png"
     ]
    },
-   "claim": {
-    "by": "parity-hunt-s2",
-    "at": "2026-10-10T23:56:56Z",
-    "prior_status": "reference"
-   },
+   "claim": null,
    "reason_java_leg": "The stored reference frames (runs/20261010-234250-ref-PAR-0070-combat-fx java/step-140/141) are the imported-profile state (under-attack Ground Zero, no chooser); this item needed the fresh-profile hover pair. Fresh Java leg captured on the session-2 profile (settings.bin backed up to runs/20261011-095656-PAR-0018/java/settings-pre.bin)."
   },
   {
@@ -7496,8 +7521,8 @@
    "title": "Campaign planet page: sector action button (Launch / Go)",
    "surface": "campaign",
    "parent": "PAR-0002",
-   "status": "mismatch",
-   "updated": "2026-10-09T07:06:00Z",
+   "status": "verified",
+   "updated": "2026-10-11T02:33:00Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
     "to": "campaign planet page on both clients (after Play > Campaign and the first-run chooser OK)",
@@ -7794,9 +7819,9 @@
      "godot": "DialogLayer/planet visible; sector panel labels include 'Ground Zero'/'Threat: Low'",
      "java": "seed/step-04-planet-java.png non-blank (mean 13.94): Serpulo rail + Ground Zero panel + Launch"
     },
-    "last_replayed": "runs/20261009-052658-seed-campaign/"
+    "last_replayed": "runs/20261011-100323-PAR-0019/"
    },
-   "run": "runs/20261009-052658-seed-campaign",
+   "run": "runs/20261011-100323-PAR-0019/",
    "reproduce": {
     "java": [
      {
@@ -7827,53 +7852,90 @@
      }
     ]
    },
-   "steps": [],
-   "mismatch": {
-    "step": "sector action button classification (click Launch)",
-    "java_frame": "runs/20261009-052658-seed-campaign/seed/step-11-java-launching.png",
-    "godot_frame": "runs/20261009-052658-seed-campaign/seed/step-11-godot-launchloadout.png",
-    "diff": null,
-    "metrics": {
-     "java_mean": 194.44,
-     "note": "different surfaces: Java in the Ground Zero tutorial world; Godot in DialogLayer/launch_loadout"
+   "steps": [
+    {
+     "n": 1,
+     "action": "stage fresh Godot campaign state (saves aside); open the page: Ground Zero unbased, action 'Launch'",
+     "java_frame": "runs/20261009-065416-ref-ground-zero/java/r00-01-planet.png",
+     "godot_frame": "godot/step-00-fresh-page-godot.png",
+     "diff": null,
+     "verdict": "fork ok",
+     "evidence": "panel 'Ground Zero' + 'Threat: Low' + action button 'Launch' at (576,611)"
     },
-    "note": "Java free-launches Ground Zero directly (upstream PlanetDialog.java:1397-1403: mode==look && !sector.hasBase() && findLauncher(sector)==null -> universe.clearLoadoutInfo(); control.playSector(sector)) and lands in the tutorial (Obtain 0/15 Copper). Godot opens 'Configure Loadout' (DialogLayer/launch_loadout) over the main-menu background instead; its core row 'basicShard' overflows (rect width 1188 > viewport 1152, label truncated) and the '1800' RichTextLabel sits at x=1463 off-screen.",
-    "reproduce": {
-     "java": [
-      {
-       "tool": "computer-mcp_click",
-       "params": {
-        "x": 621,
-        "y": 676,
-        "note": "Launch; window +45+69"
-       }
-      }
+    {
+     "n": 2,
+     "action": "click Launch (pre-fix)",
+     "java_frame": "runs/20261009-065416-ref-ground-zero/java/r00-03-tutorial.png",
+     "godot_frame": "godot/step-01-loadout-dialog-godot.png",
+     "diff": null,
+     "verdict": "mismatch (recorded)",
+     "evidence": "stack [\"planet\",\"launch_loadout\"]; no world load"
+    },
+    {
+     "n": 3,
+     "action": "click Launch (post-fix)",
+     "java_frame": "runs/20261009-065416-ref-ground-zero/java/r00-03-tutorial.png",
+     "godot_frame": "godot/step-02-tutorial-godot.png",
+     "diff": "diff/diff-tutorial.json",
+     "verdict": "match (behavior + objective)",
+     "evidence": "stack [] at +1.5 s; loading; world tick 10->41; HUD 'Obtain: 0/15 Copper'"
+    }
+   ],
+   "mismatch": null,
+   "fix": {
+    "status": "closed",
+    "commit": "c0cf6c7",
+    "summary": "Launch-mode actions with no launcher now free-launch directly (Java look-mode: clearLoadoutInfo + playSector); the loadout dialog remains for the launcher case. _find_launcher approximates Java findLaunchCandidate with any has-base, non-attacked sector on the planet (the port's campaign model has no sector items/range yet - PAR-0082/0083).",
+    "plan": {
+     "round": 1,
+     "state": "landed and verified (mode reference)",
+     "seam": "client/ui/dialogs/planet_dialog.gd::_sector_action_pressed vs PlanetDialog.java:1394-1403",
+     "files": [
+      "client/ui/dialogs/planet_dialog.gd"
      ],
-     "godot": [
-      {
-       "tool": "godot_input",
-       "params": {
-        "action": "mouse_button",
-        "params": {
-         "button": "MOUSE_BUTTON_LEFT",
-         "position": {
-          "x": 576,
-          "y": 613
-         },
-         "coords": "viewport",
-         "pressed": true
-        }
-       }
-      }
+     "landed": [
+      "planet_dialog.gd: _sector_action_pressed free-launch branch + _find_launcher(planet_name)"
+     ],
+     "narrow_check": "godot --headless --editor --quit --path client import gate; fresh-state walk: Launch -> stack [] -> loading -> tutorial world with the objective text",
+     "evidence": [
+      "runs/20261011-100323-PAR-0019/ (pre-fix dialog frame + post-fix world frame + objective read; profile restored byte-identical)"
      ]
     }
    },
-   "fix": {
-    "status": "open",
-    "commit": null,
-    "summary": null
+   "verified": {
+    "mode": "reference",
+    "date": "2026-10-11T02:30:00Z",
+    "run": "runs/20261011-100323-PAR-0019/",
+    "java_frame": "runs/20261009-065416-ref-ground-zero/java/r00-03-tutorial.png",
+    "godot_frame": "runs/20261011-100323-PAR-0019/godot/step-02-tutorial-godot.png",
+    "diff": "runs/20261011-100323-PAR-0019/diff/diff-tutorial.json",
+    "note": "Stored reference covers the flow (no Java boot). Pre-fix the Launch click opened Configure Loadout (stack [\"planet\",\"launch_loadout\"]); post-fix the launch-mode action with no launcher free-launches: stack [] at +1.5 s, no dialog, loading transition, world running (tick 10->41, HUD up, not paused) and the tutorial objective 'Obtain: 0/15 Copper' matching the Java action frame. The Godot state was staged fresh for the walk (saves dir moved aside, restored byte-identical afterwards).",
+    "calibration": {
+     "reason": "The action's behavior + objective state are the verdict; the world-frame pixels differ by the known world-render class (units not drawn PAR-0053/PAR-0126, camera pose, landing cutscene PAR-0131, HUD fonts), so the full-frame gate does not apply to the launched world.",
+     "original_gate": {
+      "changed_fraction_max": 0.005,
+      "mean_abs_rgb_max": 12,
+      "coarse_layout_max_channel_mean_max": 6,
+      "palette_distance_max": 0.05
+     },
+     "checks": {
+      "dialog_after_launch": "[] (Java: no dialog)",
+      "world_state": "tick advancing, HUD visible, objective 'Obtain: 0/15\\n Copper' == Java r00-03-tutorial",
+      "world_frame": {
+       "diff": "runs/20261011-100323-PAR-0019/diff/diff-tutorial.json",
+       "changed_fraction": 0.50499,
+       "mean_abs_rgb": [
+        25.55,
+        23.91,
+        20.91
+       ],
+       "coarse": 12.44,
+       "class": "world render (separate items)"
+      }
+     },
+     "conclusion": "The free-launch path matches Java (no dialog, tutorial objective); the launched world's pixel differences are the separately itemized world-render surface (PAR-0053/0126/0131 and the s2 page-render set)."
+    }
    },
-   "verified": null,
    "note": "Java fresh state: 'Launch'; Godot under-attack state: 'Go'. State-dependent; verify after state alignment. | R00 (2026-10-09): Java Launch click at screen (627,710) free-launched to the tutorial start; reference block added (frames runs/20261009-065416-ref-ground-zero/java/r00-01-planet.png -> java/r00-03-tutorial.png).",
    "reference": {
     "captured": "2026-10-09T07:02:53Z",
@@ -7989,6 +8051,12 @@
      ],
      "state": "free launch (no loadout dialog); loading bar then tutorial world at image mean ~194"
     }
+   },
+   "claim": {
+    "by": "parity-hunt-s1",
+    "at": "2026-10-11T00:03:23Z",
+    "released_at": "2026-10-11T02:30:00Z",
+    "reason": "verified (mode reference) in runs/20261011-100323-PAR-0019/"
    }
   },
   {
@@ -7996,8 +8064,8 @@
    "title": "Campaign planet page: Back returns to the menu",
    "surface": "campaign",
    "parent": "PAR-0002",
-   "status": "reference",
-   "updated": "2026-10-10T14:43:31Z",
+   "status": "verified",
+   "updated": "2026-10-11T00:05:04Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
     "to": "campaign planet page on both clients (after Play > Campaign and the first-run chooser OK)",
@@ -8294,25 +8362,66 @@
      "godot": "DialogLayer/planet visible; sector panel labels include 'Ground Zero'/'Threat: Low'",
      "java": "seed/step-04-planet-java.png non-blank (mean 13.94): Serpulo rail + Ground Zero panel + Launch"
     },
-    "last_replayed": "runs/20261009-052658-seed-campaign/"
+    "last_replayed": "runs/20261011-100440-PAR-0020"
    },
    "run": "runs/20261010-234250-ref-PAR-0070-combat-fx/",
    "reproduce": {
-    "java": [
-     {
-      "tool": "parity-ledger.json",
-      "params": {
-       "ref": "path.java (fast-forward) + steps[]",
-       "coords": "window +45+69; Play(275,218) Campaign(522,220) Serpulo(459,309) OK(622,676)"
-      }
-     }
-    ],
     "godot": [
      {
-      "tool": "parity-ledger.json",
+      "tool": "godot_exec",
       "params": {
-       "ref": "path.godot (fast-forward) + steps[]",
-       "coords": "viewport; Play(230,149) Campaign(460,149) Serpulo(412,194) OK(499,634)"
+       "action": "eval",
+       "params": {
+        "code": "return get_node(\"/root/Spine/Planet/PlanetView\").visible"
+       }
+      }
+     },
+     {
+      "tool": "godot_input",
+      "params": {
+       "action": "mouse_button",
+       "params": {
+        "button": "MOUSE_BUTTON_LEFT",
+        "position": {
+         "x": 104,
+         "y": 615
+        },
+        "coords": "viewport",
+        "pressed": true
+       }
+      }
+     },
+     {
+      "tool": "godot_input",
+      "params": {
+       "action": "mouse_button",
+       "params": {
+        "button": "MOUSE_BUTTON_LEFT",
+        "position": {
+         "x": 104,
+         "y": 615
+        },
+        "coords": "viewport",
+        "pressed": false
+       }
+      }
+     },
+     {
+      "tool": "godot_exec",
+      "params": {
+       "action": "eval",
+       "params": {
+        "code": "Input.flush_buffered_events()"
+       }
+      }
+     },
+     {
+      "tool": "godot_exec",
+      "params": {
+       "action": "eval",
+       "params": {
+        "code": "return {\"menu\": get_node(\"/root/Spine/Ui/UiRoot/MenuGroup\").visible, \"planet\": get_node(\"/root/Spine/Ui/UiRoot/DialogLayer/planet\").visible, \"view\": get_node(\"/root/Spine/Planet/PlanetView\").visible}"
+       }
       }
      }
     ],
@@ -8320,54 +8429,72 @@
      {
       "tool": "frame_diff.py",
       "params": {
-       "--java": "runs/20261009-052658-seed-campaign/seed/step-04-planet-java.png",
-       "--godot": "runs/20261009-052658-seed-campaign/seed/step-05-planet-godot.png",
-       "--out-json": "runs/20261009-052658-seed-campaign/diff/diff-05-planet.json"
+       "--java": "runs/20261010-234250-ref-PAR-0070-combat-fx/java/menu-00-clean.png",
+       "--godot": "runs/20261011-100440-PAR-0020/godot/step-01-after-back.png",
+       "--out-json": "runs/20261011-100440-PAR-0020/diff/diff-after-back.json"
       }
      }
     ]
    },
-   "steps": [],
+   "steps": [
+    {
+     "n": 1,
+     "action": "click planet Back",
+     "java_frame": "runs/20261010-234250-ref-PAR-0070-combat-fx/java/menu-00-clean.png",
+     "godot_frame": "runs/20261011-100440-PAR-0020/godot/step-01-after-back.png",
+     "diff": "runs/20261011-100440-PAR-0020/diff/diff-after-back.json",
+     "verdict": "match (structured; background-randomization class on frames)"
+    }
+   ],
    "mismatch": null,
    "fix": {
-    "status": "open",
+    "status": "closed",
     "commit": null,
-    "summary": null
+    "summary": "No code change: the Back path already closes through MindUi and re-shows the menu (`_set_planet_view_active(false)`)."
    },
-   "verified": null,
+   "verified": {
+    "mode": "reference",
+    "date": "2026-10-11T00:05:04Z",
+    "run": "runs/20261011-100440-PAR-0020",
+    "reference": "runs/20261010-234250-ref-PAR-0070-combat-fx/ (stored frames refreshed)",
+    "note": "Godot-only walk: at the planet page (pid 409468), click Back (104,615 = the action row cell) -> structured result menu=true, planet dialog=false, PlanetView=false. Frame pair vs the stored Java menu capture cf 0.88026/mean [59.7,57.8,41.7] - the main-menu background is an independently randomized terrain bake on BOTH clients (documented class, PAR-0002 calibration), so the pair is supporting only; the settle is the navigation state."
+   },
    "note": "Not exercised this sweep.",
    "reference": {
     "captured": "2026-10-11T02:50:00Z",
     "profile": "fresh",
     "run": "runs/20261010-234250-ref-PAR-0070-combat-fx/",
     "frames": {
-     "fork": "java/step-146-techtree2.png"
+     "fork": "java/step-140-planet.png",
+     "action": "java/menu-00-clean.png"
     },
     "settle": [
      {
       "after": "planet Back",
       "wait_ms": 1500,
-      "note": "Back was used in-session; the return to the menu is evidenced by menu-00-clean captures after"
+      "note": "the menu captures follow the Back clicks (soak run)"
      }
     ],
     "expected": {
      "bundle": [],
-     "state": "Planet page Back returns to the main menu (observed in-session: the menu captures follow the Back clicks)."
+     "state": "Planet page Back returns to the main menu."
     },
     "checkpoint": "client pid 108093 at the main menu (no world needed)",
     "java_path": [
-     "Play > Campaign (imported profile: no chooser) -> planet page",
-     "planet page: Erekir/Serpulo tabs (110,125); Difficulty (158,221); sector hexes; Ground Zero \u26a0; Back; Tech Tree (1100,675)"
-    ]
-   }
+     "Play > Campaign -> planet page",
+     "click Back (110,675-ish) -> main menu (soak run menu-00-clean.png)"
+    ],
+    "note": "Frames refreshed from the stored soak captures (the previous fork frame pointed at a tech-tree capture; no Java boot needed - the pair exists in the soak run)."
+   },
+   "claim": null
   },
   {
    "id": "PAR-0021",
    "title": "Campaign planet page: Tech Tree opens research",
    "surface": "campaign",
    "parent": "PAR-0002",
-   "status": "reference",
-   "updated": "2026-10-10T14:43:31Z",
+   "status": "verified",
+   "updated": "2026-10-11T00:06:55Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
     "to": "campaign planet page on both clients (after Play > Campaign and the first-run chooser OK)",
@@ -8664,7 +8791,7 @@
      "godot": "DialogLayer/planet visible; sector panel labels include 'Ground Zero'/'Threat: Low'",
      "java": "seed/step-04-planet-java.png non-blank (mean 13.94): Serpulo rail + Ground Zero panel + Launch"
     },
-    "last_replayed": "runs/20261009-052658-seed-campaign/"
+    "last_replayed": "runs/20261011-100525-PAR-0021"
    },
    "run": "runs/20261010-234250-ref-PAR-0070-combat-fx/",
    "reproduce": {
@@ -8697,14 +8824,29 @@
      }
     ]
    },
-   "steps": [],
+   "steps": [
+    {
+     "n": 1,
+     "action": "click planet-page Tech Tree",
+     "java_frame": "runs/20261009-065416-ref-ground-zero/java/r05-01-tree.png",
+     "godot_frame": "runs/20261011-100525-PAR-0021/godot/step-01-techtree.png",
+     "diff": "runs/20261011-100525-PAR-0021/diff/diff-techtree.json",
+     "verdict": "match (dialog opens; content/backdrop divergences -> PAR-0047)"
+    }
+   ],
    "mismatch": null,
    "fix": {
-    "status": "open",
+    "status": "closed",
     "commit": null,
-    "summary": null
+    "summary": "No code change: the Tech Tree button wiring opens the research dialog."
    },
-   "verified": null,
+   "verified": {
+    "mode": "reference",
+    "date": "2026-10-11T00:06:55Z",
+    "run": "runs/20261011-100525-PAR-0021",
+    "reference": "runs/20261009-065416-ref-ground-zero/ (stored Java tech-tree action frame, cross-linked by the soak)",
+    "note": "Godot-only walk (fresh campaign, pid 412187): planet page -> click Tech Tree (1036,615) -> DialogLayer/research visible with the Serpulo tab and Back. The action (button opens the research dialog) is verified; the dialog CONTENT opened from the planet page diverges (empty tree + a raw \"techtree.<null>\" label; opens over the menu backdrop instead of the planet view) - recorded on PAR-0047 (dialog internals, still open) with this frame; frame pair vs the stored Java tree capture cf 0.71819 (different backdrop state: Java over the tutorial world)."
+   },
    "note": "Not exercised this sweep.",
    "reference": {
     "captured": "2026-10-11T02:50:00Z",
@@ -8730,15 +8872,16 @@
      "Play > Campaign (imported profile: no chooser) -> planet page",
      "planet page: Erekir/Serpulo tabs (110,125); Difficulty (158,221); sector hexes; Ground Zero \u26a0; Back; Tech Tree (1100,675)"
     ]
-   }
+   },
+   "claim": null
   },
   {
    "id": "PAR-0022",
    "title": "Campaign planet page: planet switch (Erekir/Serpulo)",
    "surface": "campaign",
    "parent": "PAR-0002",
-   "status": "reference",
-   "updated": "2026-10-10T14:43:31Z",
+   "status": "in-progress",
+   "updated": "2026-10-11T00:07:20Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
     "to": "campaign planet page on both clients (after Play > Campaign and the first-run chooser OK)",
@@ -9100,6 +9243,11 @@
      "Play > Campaign (imported profile: no chooser) -> planet page",
      "planet page: Erekir/Serpulo tabs (110,125); Difficulty (158,221); sector hexes; Ground Zero \u26a0; Back; Tech Tree (1100,675)"
     ]
+   },
+   "claim": {
+    "by": "parity-hunt-s2",
+    "at": "2026-10-11T00:07:20Z",
+    "prior_status": "reference"
    }
   },
   {
@@ -14702,7 +14850,7 @@
    "surface": "world",
    "parent": "PAR-0046",
    "status": "reference",
-   "updated": "2026-10-10T14:39:55Z",
+   "updated": "2026-10-11T00:06:55Z",
    "discovered_by": "runs/20261009-065416-ref-ground-zero/",
    "path": {
     "to": "tech tree open (groundZero)",
@@ -14918,7 +15066,8 @@
     "java_path": [
      "launch -> window normalize -> Play > Campaign > Serpulo OK -> Ground Zero -> Launch (R00 frames) -> in-game HUD (R00-R07 frames)"
     ]
-   }
+   },
+   "evidence_note": "Planet-page Tech Tree open (PAR-0021 run runs/20261011-100525-PAR-0021): DialogLayer/research opens with the Serpulo tab but (a) the tree renders empty, (b) a raw label \"techtree.<null>\" shows under the tab (a formatted key with a null argument), (c) it opens over the menu backdrop (MenuGroup/menu visuals) instead of stacking over the planet view (Java keeps the planet page behind). Frames: runs/20261011-100525-PAR-0021/godot/step-01-techtree.png vs runs/20261009-065416-ref-ground-zero/java/r05-01-tree.png (Java: full tree + Back/Core Database, no raw label)."
   },
   {
    "id": "PAR-0048",
