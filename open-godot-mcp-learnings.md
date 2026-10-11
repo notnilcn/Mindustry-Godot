@@ -2018,3 +2018,15 @@ healthy bridge afterwards. Run: the PAR-0066 verification session.
   bridge is down right after a successful-looking launch summary, just relaunch once and
   health-check; do not debug the corpse.
 - Run: runs/20261011-161200-PAR-0080-fix/ (post-fix re-run).
+
+- Bullet (2026-10-11, PAR-0081 walks): after `godot_game stop` + `play`, the first UI clicks
+  land before the game loop starts and the whole batch is swallowed — the frames probe reads
+  `{"frames":0}` for ~10-30 evals while the process boots, and the submenu-open probe then
+  races the click (it can report `sub:0` even when the click actually opened the menu a frame
+  later; a retry click then TOGGLES it closed). Workarounds that worked: gate the walk on a
+  frames poll (`frames > 120` via repeated trivial evals — no sleeps in Code Mode), click the
+  sidebar entry ONCE, then verify the *outcome* (planet dialog visible / submenu visible) with
+  a re-probe before clicking the next entry; if the outcome probe says closed, hover first and
+  re-check `gui_get_hovered_control()` for a modal eater (a leftover `restart` dialog swallowed
+  three Play clicks until its button was closed).
+- Run: runs/20261011-161201-PAR-0081/.

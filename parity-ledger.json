@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T16:11:43+10:00",
+  "updated": "2026-10-11T16:24:18+10:00",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -20952,23 +20952,27 @@
       "title": "Campaign sector progression is forgotten after a client restart (captures, attempts, stored items, import/export routes reset)",
       "surface": "campaign",
       "parent": null,
-      "status": "reference",
-      "updated": "2026-10-10T14:39:03Z",
+      "status": "verified",
+      "updated": "2026-10-11T16:24:18+10:00",
       "discovered_by": null,
       "path": {
-        "to": "Campaign -> capture a sector -> save & quit -> relaunch the client -> planet page sector panel",
+        "to": "Campaign -> launch Ground Zero -> capture / run a wave -> quit -> restart -> planet page sector panel + resume",
         "java": [
-          "Planet.init() -> Sector.loadInfo()",
-          "Logic SaveLoadEvent -> SectorInfo.write()"
+          "client relaunch -> Play > Campaign -> planet page keeps the captured sector hexes + panel (the stored twin frames)"
         ],
         "godot": [
-          "MindCampaign.bootstrap -> Campaign.load_all",
-          "planet page sector panel"
+          "play res://scenes/game.tscn; clear_planet_campaign_saves('serpulo') + clear_research()",
+          "UI: Play (230,149) -> Campaign (460,149) -> serpulo card (412,281) -> OK (575,610) -> sector action (578,613)",
+          "MindCampaign.capture_sector(); read campaign_views_json('serpulo') sectors[15]",
+          "godot_game stop + play; read sectors[15] again (captured survives)",
+          "optional: run_wave(); run_exit_save(); restart; resume via the planet page action; get_sector_state reads wave/waves from the record"
         ],
-        "confirm": {},
-        "last_replayed": null
+        "confirm": {
+          "godot": "sectors[15].captured == true after the restart; resume sector_state {wasCaptured:true, wave:1, waves:false}; settings.bin holds <planet>-s-15-info"
+        },
+        "last_replayed": "runs/20261011-161201-PAR-0081/"
       },
-      "run": "runs/20261010-234250-ref-PAR-0070-combat-fx/",
+      "run": "runs/20261011-161201-PAR-0081/",
       "reproduce": {
         "java": [
           "gradlew desktop:run; capture frozenForest; quit; relaunch",
@@ -20982,49 +20986,100 @@
           "compare the sector record (`<planet>-s-<id>-info`) and the panel rows before/after a relaunch"
         ]
       },
-      "steps": [],
-      "mismatch": null,
-      "fix": {
-        "status": "open",
-        "commit": null,
-        "summary": null,
-        "plan": {
-          "round": 0,
-          "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
-          "seam": "game::universe::Campaign::load_all / MindCampaign::bootstrap never call SectorInfoState::load_info, and the resume path never applies SectorInfoState::write (upstream Planet.init -> sector.loadInfo and Logic SaveLoadEvent -> info.write)",
-          "files": [
-            "client/rust/mind-core/src/game/universe.rs:732",
-            "client/rust/mind-core/src/game/sector.rs:489",
-            "client/rust/mind-gdext/src/campaign.rs:192",
-            "client/rust/mind-core/src/game/play.rs:433"
-          ],
-          "approach": "1) In `Campaign::load_all` (after `planet.load_rules`/`load_stats`) iterate planets/sectors and call `sector.load_info(settings, &planet.name)` so `was_captured`/`attempts`/items/production/waves/origin/destination survive restarts (Planet.java:459-463). 2) On `play_sector` (and the host resume path), apply the stored record to the session before `RulesLoad`: wave/winWave/waves/attack plus the stored item pool written into the player core (`SectorInfo.write`, upstream Logic.java:78-86). 3) Ensure the production-pass `save_info` (universe.rs:653) only runs after the load, so it stops clobbering the stored JSON with defaults.",
-          "narrow_check": "cargo test -p mind-core game && the headless round-trip already sketched in mind-headless campaign_scenarios.rs:414-420 (save_info -> rebuild -> load_info asserts the record survives)",
-          "evidence": {
-            "java": [
-              "../Mindustry/core/src/mindustry/type/Planet.java:462",
-              "../Mindustry/core/src/mindustry/type/Sector.java:105",
-              "../Mindustry/core/src/mindustry/core/Logic.java:78"
-            ],
-            "godot": [
-              "client/rust/mind-core/src/game/universe.rs:732",
-              "client/rust/mind-core/src/game/sector.rs:489",
-              "client/rust/mind-gdext/src/campaign.rs:199"
-            ]
+      "steps": [
+        {
+          "n": 1,
+          "action": "capture sector 15 on a launched Ground Zero (live runtime)",
+          "java_frame": "runs/20261010-234250-ref-PAR-0070-combat-fx/java/step-140-planet.png",
+          "godot_frame": "runs/20261011-161201-PAR-0081/godot/step-01-world-wave1-resumed-fixed.png",
+          "diff": null,
+          "verdict": "fork ok (capture bookkeeping {captured:true}, sectors_captured 1)",
+          "evidence": "godot/state-01-capture-restart-forgotten.json"
+        },
+        {
+          "n": 2,
+          "action": "client restart (stop+play) then read the sector record + planet page",
+          "java_frame": "runs/20261010-234250-ref-PAR-0070-combat-fx/java/step-141-sector.png",
+          "godot_frame": "runs/20261011-161201-PAR-0081/godot/step-02-planet-after-restart-fixed.png",
+          "diff": null,
+          "verdict": "MISMATCH pre-fix (captured:false) -> match post-fix (captured:true, page action 'Go')",
+          "evidence": "godot/state-02-restart-survives-fixed.json"
+        }
+      ],
+      "mismatch": {
+        "step": "capture sector 15 -> client restart (stop+play) -> read the sector record/panel",
+        "java_frame": "runs/20261010-234250-ref-PAR-0070-combat-fx/java/step-141-sector.png",
+        "godot_frame": null,
+        "diff": null,
+        "note": "Structural mismatch: before the restart sector 15 reads {captured:true, has_base:true} and complete.sectors_captured=1; after the client restart it reads {captured:false, attacked:true} (the capture is forgotten) while planet stats survive (sectors_captured still 1). Java keeps the stored `<planet>-s-<id>-info` record across restarts (Planet.load -> sector.loadInfo) and applies it on resume (Logic SaveLoadEvent -> info.write).",
+        "metrics": {
+          "before_restart": {
+            "captured": true,
+            "sectors_captured": 1
+          },
+          "after_restart": {
+            "captured": false,
+            "sectors_captured": 1
           }
+        },
+        "evidence": [
+          "runs/20261011-161201-PAR-0081/godot/state-01-capture-restart-forgotten.json",
+          "runs/20261010-234250-ref-PAR-0070-combat-fx/java/step-140-planet.png",
+          "runs/20261010-234250-ref-PAR-0070-combat-fx/java/step-141-sector.png"
+        ]
+      },
+      "fix": {
+        "status": "closed",
+        "commit": "c28884b",
+        "summary": "Campaign::load_all loads each sector's stored info (Planet.load -> sector.loadInfo); play_sector's from-save branch applies the stored record over the preset rules before RulesLoad (Logic SaveLoadEvent -> SectorInfo.write); MindCampaign::persist_sector_record writes+flushes the live record on capture and exit. New mind-core test load_all_restores_sector_info.",
+        "plan": {
+          "round": 1,
+          "state": "closed (verified mode reference 2026-10-11)",
+          "seam": "game::universe::Campaign::load_all + the resume path + the capture/exit persist",
+          "files": [
+            "client/rust/mind-core/src/game/universe.rs",
+            "client/rust/mind-core/src/game/play.rs",
+            "client/rust/mind-gdext/src/campaign.rs"
+          ],
+          "narrow_check": "cargo test -p mind-core -p mind-gdext (1838 + 26 passed), clippy/fmt clean, in-engine capture -> restart -> resume chain green",
+          "evidence": [
+            "runs/20261011-161201-PAR-0081/godot/state-01-capture-restart-forgotten.json",
+            "runs/20261011-161201-PAR-0081/godot/state-02-restart-survives-fixed.json"
+          ]
         }
       },
-      "verified": null,
+      "verified": {
+        "mode": "reference",
+        "date": "2026-10-11T16:24:00+10:00",
+        "run": "runs/20261011-161201-PAR-0081/",
+        "java_frame": "runs/20261010-234250-ref-PAR-0070-combat-fx/java/step-141-sector.png",
+        "godot_frame": "runs/20261011-161201-PAR-0081/godot/step-02-planet-after-restart-fixed.png",
+        "diff": null,
+        "note": "Godot-only walk against the stored reference (the Java frames show the imported campaign's planet page after a client restart: owned hexes, the Ground Zero panel with its action). Pre-fix repro: capture sector 15 -> restart -> the record reads captured:false/attacked:true (forgotten). Post-fix (commit c28884b): the capture writes the `<planet>-s-15-info` record to disk (wasCaptured:true), the restart reads it back (captured:true), the planet page shows the sector with the Go action, and a resume applies the stored record (waves:false, wave:1 after a run_wave + exit-save round trip).",
+        "calibration": {
+          "reason": "Behavioral/structural verification (the stored-settings record and the session state reads) against the stored Java reference state; the planet-page render class (flat globe, leftover HUD overlap) is itemized separately (PAR-0142/0146/0147), so no pixel gate is applied to this item's frames.",
+          "original_gate": {
+            "changed_fraction_max": 0.005,
+            "mean_abs_rgb_max": 12,
+            "coarse_layout_max_channel_mean_max": 6,
+            "palette_distance_max": 0.05
+          },
+          "checks": {
+            "record_on_disk": "settings.bin: `<planet>-s-15-info` {wasCaptured:true, waves:false, attack:false, attempts:1, winWave:10}",
+            "after_restart": "sector 15 {captured:true, attacked:false} (pre-fix: captured:false, attacked:true)",
+            "planet_page_action": "Ground Zero panel action reads 'Go' after the restart (pre-fix would read 'Launch')",
+            "resume_apply": "resume after restart reads wasCaptured:true, wave:1, waves:false (the record's values; the preset default would be wave:0, waves:true)",
+            "exit_save": "run_wave (wave 1) + run_exit_save writes wave:1 into the record; restart+resume still reads wave:1"
+          },
+          "conclusion": "Sector progression (captures, attempts, wave progress) survives client restarts and feeds resumes; matches the Java reference behavior."
+        }
+      },
       "note": "Code-scan 2026-10-10 (campaign): S2/high. `SectorInfoState::load_info` has no non-test caller; `Campaign::load_all` loads only planet rules/stats and universe counters (universe.rs:732-738), and `MindCampaign::bootstrap` only re-derives `sector.save` from files (campaign.rs:199-206). `SectorInfoState::write` (the resume-time apply, sector.rs:369) is also uncalled. The production pass then calls `save_info` on the default-initialized record (universe.rs:653), overwriting the stored JSON. Player impact: after any restart the campaign forgets which sectors were captured, their attempts/wave/item pools and their inter-sector routes; `initial` capture bookkeeping (stats/last-sector victory) can re-fire. Related but distinct from PAR-0037 (Ground Zero world round-trip, verified). In-engine verification pending.",
       "evidence": [
-        "../Mindustry/core/src/mindustry/type/Planet.java:462",
-        "../Mindustry/core/src/mindustry/type/Sector.java:105",
-        "../Mindustry/core/src/mindustry/core/Logic.java:78",
-        "client/rust/mind-core/src/game/universe.rs:732",
-        "client/rust/mind-core/src/game/universe.rs:653",
-        "client/rust/mind-core/src/game/sector.rs:489",
-        "client/rust/mind-core/src/game/sector.rs:369",
-        "client/rust/mind-gdext/src/campaign.rs:199"
+        "runs/20261011-161201-PAR-0081/godot/state-01-capture-restart-forgotten.json",
+        "runs/20261011-161201-PAR-0081/godot/state-02-restart-survives-fixed.json",
+        "runs/20261011-161201-PAR-0081/godot/step-02-planet-after-restart-fixed.png",
+        "client/rust/mind-core/src/game/universe.rs:732"
       ],
       "reference": {
         "captured": "2026-10-11T01:00:00Z",
@@ -21057,6 +21112,13 @@
         "java_path": [
           "client relaunch -> Play > Campaign -> capture the planet page + a sector panel"
         ]
+      },
+      "claim": {
+        "by": "parity-hunt-s1",
+        "at": "2026-10-11T16:12:01+10:00",
+        "prior_status": "reference",
+        "released_at": "2026-10-11T16:24:30+10:00",
+        "reason": "verified (mode reference) in runs/20261011-161201-PAR-0081/"
       }
     },
     {
