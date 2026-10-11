@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T19:23:24+10:00",
+  "updated": "2026-10-11T19:23:48+10:00",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -27733,7 +27733,7 @@
       "surface": "campaign",
       "parent": null,
       "status": "fixing",
-      "updated": "2026-10-11T19:23:24+10:00",
+      "updated": "2026-10-11T19:23:48+10:00",
       "discovered_by": null,
       "path": {
         "to": "Serpulo attack-mode sector with its map rules carrying the wave-team AI flags (hidden/225: rtsAi:true)",
@@ -27821,7 +27821,7 @@
         }
       },
       "verified": null,
-      "note": "Code-scan 2026-10-10 (units-ai): S3 high confidence for the dead wiring (visible whenever rules.rtsAi/buildAi is on, which makes it S2 for those configurations). Player impact: Serpulo attack sectors with the campaign RTS-AI option (default off) have no enemy squad commander, so enemies never defend or launch coordinated attacks; custom games with buildAi never see the enemy base expand or rebuild; prebuildAi core defenders never spawn. The port's own ai/rts_ai.rs header says the TeamData wiring is plan 12. In-engine verification pending. 2026-10-11 (round 1, parity-hunt-s1): the live RtsAI now runs (TickSet::WeatherAndAi team_ai_system) and ordered a 12-unit wave squad at tile (156,167) in attack sector hidden/225; prerequisites landed: map `teams` merge at launch (rtsAi reaches the session), attack-mode core spawn positions, and the Arc Point2.pack order (the authored spawn pins matched). BaseBuilderAI/prebuildAi halves + turret DPS in estimateStats stay open (see fix.plan).",
+      "note": "Code-scan 2026-10-10 (units-ai): S3 high confidence for the dead wiring (visible whenever rules.rtsAi/buildAi is on, which makes it S2 for those configurations). Player impact: Serpulo attack sectors with the campaign RTS-AI option (default off) have no enemy squad commander, so enemies never defend or launch coordinated attacks; custom games with buildAi never see the enemy base expand or rebuild; prebuildAi core defenders never spawn. The port's own ai/rts_ai.rs header says the TeamData wiring is plan 12. In-engine verification pending. 2026-10-11 (round 1, parity-hunt-s1): the live RtsAI now runs (TickSet::WeatherAndAi team_ai_system) and ordered a 12-unit wave squad at tile (156,167) in attack sector hidden/225; prerequisites landed: map `teams` merge at launch (rtsAi reaches the session), attack-mode core spawn positions, and the Arc Point2.pack order (the authored spawn pins matched). BaseBuilderAI/prebuildAi halves + turret DPS in estimateStats stay open (see fix.plan). NOTE (operator data): the Arc pack-order fix changes how already-written Godot sector saves decode `spawnPosition` (the port previously packed y-high); `clear_planet_campaign_saves('<planet>')` before replaying a sector whose save predates the fix, or the lost-sector replay uses a transposed spawn tile.",
       "evidence": [
         "runs/20261011-192234-PAR-0139/run.json",
         "runs/20261011-192234-PAR-0139/report.md",
