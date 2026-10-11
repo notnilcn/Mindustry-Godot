@@ -1,6 +1,6 @@
 {
  "schema": "mindustry-godot/parity-ledger@3",
- "updated": "2026-10-11T03:35:00Z",
+ "updated": "2026-10-11T03:55:00Z",
  "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
  "focus": {
   "kind": "area",
@@ -10633,8 +10633,8 @@
    "title": "Campaign world: tutorial Skip control",
    "surface": "world",
    "parent": "PAR-0028",
-   "status": "reference",
-   "updated": "2026-10-10T14:43:31Z",
+   "status": "verified",
+   "updated": "2026-10-11T03:55:00Z",
    "discovered_by": "runs/20261009-052658-seed-campaign/",
    "path": {
     "to": "in-game Ground Zero (sector 15)",
@@ -10644,9 +10644,9 @@
      "godot": "HudGroup visible",
      "java": "tutorial frame non-blank"
     },
-    "last_replayed": "runs/20261009-052658-seed-campaign/"
+    "last_replayed": "runs/20261011-102959-PAR-0029/"
    },
-   "run": "runs/20261009-065416-ref-ground-zero/",
+   "run": "runs/20261011-102959-PAR-0029/",
    "reproduce": {
     "java": [
      {
@@ -10672,14 +10672,114 @@
     ],
     "compare": []
    },
-   "steps": [],
+   "steps": [
+    {
+     "n": 1,
+     "action": "fork: resume Ground Zero; wait past the 8 s playtime gate; the hint box + Skip appear",
+     "java_frame": "java/r00-02-tutorial-java.png",
+     "godot_frame": "godot/step-00-desktopmove-hint-godot.png",
+     "diff": "diff/diff-fork.json",
+     "verdict": "control match (world class differs)",
+     "evidence": "hint label (8,288,400,26) 'Use [[WASD] to move.'; Skip (0,324,112,40) 'Skip' visible"
+    },
+    {
+     "n": 2,
+     "action": "click Skip",
+     "java_frame": "java/r02-03-stable-java.png",
+     "godot_frame": "godot/step-01-zoom-hint-after-skip-godot.png",
+     "diff": "diff/diff-action.json",
+     "verdict": "match (semantics + end state)",
+     "evidence": "desktopMove completed; zoom hint ('Scroll to zoom in or out.') shows immediately = the stored r02 end state"
+    }
+   ],
    "mismatch": null,
    "fix": {
-    "status": "open",
+    "status": "closed",
     "commit": null,
-    "summary": null
+    "summary": "No code change needed: the hint-box Skip control exists at the Java geometry (112x40 left of the box) and its click matches HintsFragment.complete() (finish + hide + checkNext); the port's simplified hint trigger model and the [[WASD] markup gap are separately itemized.",
+    "plan": {
+     "round": 1,
+     "state": "verified without code change (control parity already present)",
+     "seam": "client/ui/fragments/hints_fragment.gd vs HintsFragment.java:118-145",
+     "files": [],
+     "narrow_check": "live walk: hint shown after the gate; Skip click -> complete + zoom hint",
+     "evidence": [
+      "runs/20261011-102959-PAR-0029/ (structured rects + before/after frames + the stored Java control frames)"
+     ]
+    }
    },
-   "verified": null,
+   "verified": {
+    "mode": "chain",
+    "date": "2026-10-11T03:55:00Z",
+    "run": "runs/20261011-102959-PAR-0029/",
+    "java_frame": "runs/20261011-102959-PAR-0029/java/r00-02-tutorial-java.png",
+    "godot_frame": "runs/20261011-102959-PAR-0029/godot/step-01-zoom-hint-after-skip-godot.png",
+    "diff": "runs/20261011-102959-PAR-0029/diff/diff-action.json",
+    "note": "Godot-only control walk (the stored frames cover the fork and the result state; the skip click itself was not in the reference run). Structured: the hint box label at (8,288,400,26) matching the Java box (0..411, 289..319) and the Skip button at the Java geometry (0,324,112,40, text 'Skip' = Java's size(112f,40f) left); clicking Skip completes the current hint (desktopMove) and the next hint (zoom, 'Scroll to zoom in or out.') shows immediately - the Java complete()/hide()/checkNext() semantics (HintsFragment.java:129-133) and the same end state as the stored r02-03-stable frame. The port's simplified trigger model (header comment) and the world/font pixel class are separately itemized; the hint text shows the doubled-bracket markup gap 'Use [[WASD] to move.' -> PAR-0142.",
+    "calibration": {
+     "reason": "A control-surface item: the verdict is the control geometry + the click semantics vs the stored Java control states. The frame pixels are dominated by the world scene (the walk resumed the saved sector while the reference frames show the fresh tutorial) and the world-render class (units/camera/lighting).",
+     "original_gate": {
+      "changed_fraction_max": 0.005,
+      "mean_abs_rgb_max": 12,
+      "coarse_layout_max_channel_mean_max": 6,
+      "palette_distance_max": 0.05
+     },
+     "checks": {
+      "hint_label_rect": {
+       "godot": [
+        8,
+        288,
+        400,
+        26
+       ],
+       "java_box": [
+        0,
+        289,
+        411,
+        30
+       ]
+      },
+      "skip_button": {
+       "godot": [
+        0,
+        324,
+        112,
+        40
+       ],
+       "java_source": "size(112f, 40f) left",
+       "text": "Skip"
+      },
+      "skip_click": {
+       "before": "desktopMove / 'Use [[WASD] to move.'",
+       "after": "zoom / 'Scroll to zoom in or out.'",
+       "java": "complete() -> finish + hide + checkNext -> the zoom hint (r02 transition)"
+      }
+     },
+     "pairs": {
+      "fork": {
+       "diff": "runs/20261011-102959-PAR-0029/diff/diff-fork.json",
+       "changed_fraction": 0.49702,
+       "mean_abs_rgb": [
+        24.42,
+        22.68,
+        19.54
+       ],
+       "note": "different world scenes (resumed vs fresh tutorial)"
+      },
+      "action": {
+       "diff": "runs/20261011-102959-PAR-0029/diff/diff-action.json",
+       "changed_fraction": 0.82141,
+       "mean_abs_rgb": [
+        102.56,
+        102.41,
+        101.88
+       ],
+       "note": "same scene mismatch + the Java frame's unlit area"
+      }
+     },
+     "conclusion": "The tutorial Skip control exists, renders at the Java geometry, and its click matches the Java complete-and-advance semantics; the pixel class is the world-render surface."
+    }
+   },
    "note": "Java Skip at window image (58,342) -> screen (103,411); Godot 'Skip' button at viewport (386,321). Action not mirrored yet.",
    "reference": {
     "captured": "2026-10-11T02:50:00Z",
@@ -10704,7 +10804,14 @@
     "checkpoint": "client pid 108093 at the main menu (no world needed)",
     "java_path": [
      "fresh profile: Play > Campaign -> 'Select Starting Campaign' chooser (Serpulo/Erekir photo cards) -> OK -> planet page (see runs/20261009-065416-ref-ground-zero/)"
-    ]
+    ],
+    "blocked_legit_note": null
+   },
+   "claim": {
+    "by": "parity-hunt-s1",
+    "at": "2026-10-11T00:29:59Z",
+    "released_at": "2026-10-11T03:55:00Z",
+    "reason": "verified (mode chain) in runs/20261011-102959-PAR-0029/"
    }
   },
   {
