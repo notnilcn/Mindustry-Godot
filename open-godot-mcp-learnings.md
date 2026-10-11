@@ -2068,3 +2068,12 @@ healthy bridge afterwards. Run: the PAR-0066 verification session.
   game-over ("Sector sector-serpulo-76 lost!") the client returns to the menu over the live
   map; a fresh stop+play process is the reliable reset before a launch verification.
 - Run: runs/20261011-164851-PAR-0083/.
+
+- Bullet (2026-10-11, PAR-0084 staging): `SimHost.building_team(x, y)` is Rust-only (no `#[func]`); calling it
+  from an eval errors and trips break-on-error; the eval then times out after 15 s and the debugger
+  shows `sessions: paused:true` (trivial evals still answer and frames/tick keep advancing, which makes
+  the pin easy to misread as a slow world). THIRD instance of this trap in the session: before any
+  `h.call("<method>")`, grep the exported list with
+  `grep -A1 "#\[func\]" client/rust/mind-gdext/src/sim_host.rs`. Recover with `godot_game stop` + `play`.
+  To find a building tile, parse `get_state_json()` (cheap on the 61-building Ground Zero) instead.
+- Run: the PAR-0084 loss staging (pid 197467/198336).

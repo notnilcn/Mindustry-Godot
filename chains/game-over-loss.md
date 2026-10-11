@@ -1,12 +1,12 @@
 ---
 id: game-over-loss
-title: Force the campaign loss (zero-core sector 170) and assert the game-over dialog opens without the MindUi bind_mut panic
+title: Force the campaign loss (zero-core sector 15) and assert the game-over dialog opens without the MindUi bind_mut panic
 status: verified
 applies_when: Verifying the GameOverEvent -> GameOverDialog path (EV-0061 family), the deferred HUD toggle, or any dialog opened from a live HUD watcher; also the fastest way to reach a real game-over in-engine without UI navigation.
 preconditions:
   - boot-and-identity completed (game.tscn playing, runtime connected, pid stamped).
   - "`/root/MindHud` and `/root/MindUi` are autoloads at the tree root, NOT under /root/Spine: addressing /root/Spine/MindHud errors and an eval error trips break-on-error (frame loop pins, later evals time out)."
-  - "serpulo sector 15 is the groundZero preset (has a core); sector 170 is the preset-less generated sector, so it has hasCore=false and loses on the first GameStateCheck."
+  - "Parity-0083's planet-data remap inverted the old 15/170 pair: serpulo sector 170 is now the groundZero preset (has a core); sector 15 is the preset-less generated sector, so it has hasCore=false and loses on the first GameStateCheck."
 tools: [godot_health, godot_editor_read, godot_editor_edit, godot_game, godot_exec, godot_log]
 last_verified: 2026-10-08 1d8f75b twin (runs/20261008-215055-ev0061-game-over-twin, pids 78253/80270); 2026-10-08 afd380f writer (runs/20261008-185511-ev0061-game-over-godot, pid 74313)
 ---
@@ -28,13 +28,13 @@ last_verified: 2026-10-08 1d8f75b twin (runs/20261008-215055-ev0061-game-over-tw
 3. Load the preset-less sector on the sim host (tick resets to 0):
 
    ```
-   godot_exec {"action":"eval","params":{"code":"var h = get_node(\"/root/Spine/SimHost\")\nreturn {\"pid\": OS.get_process_id(), \"loaded\": h.load_sector(\"serpulo\", 170), \"tick\": h.get_tick()}"}}
+   godot_exec {"action":"eval","params":{"code":"var h = get_node(\"/root/Spine/SimHost\")\nreturn {\"pid\": OS.get_process_id(), \"loaded\": h.load_sector(\"serpulo\", 15), \"tick\": h.get_tick()}"}}
    ```
 
 4. Start the campaign sector (installs the live `CampaignRuntime`):
 
    ```
-   godot_exec {"action":"eval","params":{"code":"var c = get_node(\"/root/Spine/MindCampaign\")\nreturn {\"pid\": OS.get_process_id(), \"started\": c.start_sector(\"serpulo\", 170), \"sector_state\": c.get_sector_state(), \"tick\": get_node(\"/root/Spine/SimHost\").get_tick()}"}}
+   godot_exec {"action":"eval","params":{"code":"var c = get_node(\"/root/Spine/MindCampaign\")\nreturn {\"pid\": OS.get_process_id(), \"started\": c.start_sector(\"serpulo\", 15), \"sector_state\": c.get_sector_state(), \"tick\": get_node(\"/root/Spine/SimHost\").get_tick()}"}}
    ```
 
    Expect `started: true`, `campaign: true`, `hasCore: false`.
