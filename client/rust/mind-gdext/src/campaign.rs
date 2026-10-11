@@ -1282,7 +1282,9 @@ impl MindCampaign {
             }
             None => raw.to_owned(),
         };
-        strip_arc_markup(&resolved)
+        // Arc markup and `:icon:` tokens stay in: the world-label pass draws
+        // them as coloured runs with content-icon glyphs (`WorldLabel`).
+        resolved
     }
 
     /// Current sector/rules summary.
@@ -2275,44 +2277,6 @@ impl MindCampaign {
 /// Merges the loaded map/generator's wave rules into the session rules without/// clobbering the preset/campaign fold (`World.loadSector` ordering). For a
 /// preset-launched sector the preset wins; a planet-generated sector adopts the
 /// generator's `generate_rules` wave/win settings.
-/// Strips Arc markup (`[accent]`, `[]`) and `:icon:` tokens from a marker
-/// label so the plain-text world label renders (icons are a follow-up).
-fn strip_arc_markup(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut chars = text.chars().peekable();
-    while let Some(c) = chars.next() {
-        match c {
-            '[' => {
-                for inner in chars.by_ref() {
-                    if inner == ']' {
-                        break;
-                    }
-                }
-            }
-            ':' => {
-                let mut token = String::new();
-                let mut closed = false;
-                for inner in chars.by_ref() {
-                    if inner == ':' {
-                        closed = true;
-                        break;
-                    }
-                    if inner.is_whitespace() || token.len() > 40 {
-                        break;
-                    }
-                    token.push(inner);
-                }
-                if !closed {
-                    out.push(':');
-                    out.push_str(&token);
-                }
-            }
-            _ => out.push(c),
-        }
-    }
-    out
-}
-
 /// `SaveVersion.readRules` + `World.setSectorRules` map half: the loaded map
 /// rules feed the session. A preset map replaces `state.rules` wholesale in
 /// Java (`FileMapGenerator.generate` -> `SaveIO.load(map.file)`), so its wave
@@ -2495,15 +2459,5 @@ mod tests {
         );
         assert_eq!(session.objectives.len(), 1);
         assert!(session.objective_flags.contains("spawnWave"));
-    }
-
-    /// PAR-0037: the world-label text drops Arc markup and `:icon:` tokens.
-    #[test]
-    fn marker_text_strips_arc_markup() {
-        assert_eq!(
-            strip_arc_markup("Move near the :ore-copper: [accent]copper ore[] on the ground"),
-            "Move near the  copper ore on the ground"
-        );
-        assert_eq!(strip_arc_markup("no markup 1:30"), "no markup 1:30");
     }
 }

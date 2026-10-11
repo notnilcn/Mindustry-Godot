@@ -14,6 +14,11 @@ use godot::classes::{Camera2D, Control, INode2D, Node2D};
 use godot::obj::Base;
 use godot::prelude::*;
 
+use mind_core::assets::icons::Iconc;
+use mind_core::ui::text::markup_runs;
+
+use crate::assets::bundle::load_iconc;
+use crate::assets::loader::resolve_assets_dir;
 use crate::campaign::MindCampaign;
 
 /// One drawable marker row (world px + WorldLabel style).
@@ -39,6 +44,8 @@ pub struct MindObjectiveMarkers {
     source: Option<Gd<MindCampaign>>,
     accum: f64,
     last_json: String,
+    /// `:icon:` table for the label markup (`UI.formatIcons`).
+    iconc: Iconc,
 }
 
 #[godot_api]
@@ -51,6 +58,7 @@ impl INode2D for MindObjectiveMarkers {
             source: None,
             accum: 0.0,
             last_json: String::new(),
+            iconc: Iconc::default(),
         }
     }
 
@@ -137,30 +145,57 @@ impl INode2D for MindObjectiveMarkers {
                     line_index += 1.0;
                     continue;
                 }
-                let size = font.get_string_size_ex(line).font_size(font_size).done();
-                let origin = Vector2::new(
-                    screen.x - size.x * 0.5,
-                    screen.y - size.y * 0.5 - label_lift + line_index * line_height,
+                // `WorldLabel` draws with `markupEnabled`: coloured runs, icons
+                // as content-icon glyphs (font fallback), base colour white.
+                let runs = markup_runs(line, &self.iconc);
+                let widths: Vec<f32> = runs
+                    .iter()
+                    .map(|run| {
+                        font.get_string_size_ex(run.text.as_str())
+                            .font_size(font_size)
+                            .done()
+                            .x
+                    })
+                    .collect();
+                let width: f32 = widths.iter().sum();
+                let height = font.get_height_ex().font_size(font_size).done();
+                let ascent = font.get_ascent_ex().font_size(font_size).done();
+                let top = Vector2::new(
+                    screen.x - width * 0.5,
+                    screen.y - height * 0.5 - label_lift + line_index * line_height,
                 );
                 let background = Rect2::new(
-                    origin - Vector2::new(6.0, 2.0),
-                    size + Vector2::new(12.0, 4.0),
+                    top - Vector2::new(6.0, 2.0),
+                    Vector2::new(width, height) + Vector2::new(12.0, 4.0),
                 );
                 self.base_mut()
                     .draw_rect_ex(background, Color::from_rgba(0.0, 0.0, 0.0, 0.3))
                     .done();
-                let text = GString::from(line);
-                self.base_mut()
-                    .draw_string_outline_ex(&font, origin, &text)
-                    .font_size(font_size)
-                    .size(4)
-                    .modulate(Color::BLACK)
-                    .done();
-                self.base_mut()
-                    .draw_string_ex(&font, origin, &text)
-                    .font_size(font_size)
-                    .modulate(Color::WHITE)
-                    .done();
+                let mut x = top.x;
+                for (run, run_width) in runs.iter().zip(&widths) {
+                    let origin = Vector2::new(x, top.y + ascent);
+                    let text = GString::from(run.text.as_str());
+                    let color = run.color.map_or(Color::WHITE, |c| {
+                        Color::from_rgba8(
+                            (c >> 24) as u8,
+                            (c >> 16) as u8,
+                            (c >> 8) as u8,
+                            c as u8,
+                        )
+                    });
+                    self.base_mut()
+                        .draw_string_outline_ex(&font, origin, &text)
+                        .font_size(font_size)
+                        .size(4)
+                        .modulate(Color::BLACK)
+                        .done();
+                    self.base_mut()
+                        .draw_string_ex(&font, origin, &text)
+                        .font_size(font_size)
+                        .modulate(color)
+                        .done();
+                    x += run_width;
+                }
                 line_index += 1.0;
             }
         }
@@ -175,6 +210,7 @@ impl MindObjectiveMarkers {
         self.source = self
             .base()
             .try_get_node_as::<MindCampaign>("/root/Spine/MindCampaign");
+        self.iconc = load_iconc(&resolve_assets_dir());
     }
 }
 
