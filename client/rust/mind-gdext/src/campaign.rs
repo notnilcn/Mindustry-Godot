@@ -1977,6 +1977,25 @@ impl MindCampaign {
                 &GString::from("autosave"),
                 &slot.is_autosave(&self.settings).to_variant(),
             );
+            // `SaveSlot.getMap/mode/getWave/getPlayTime/getDate` meta reads;
+            // the dialog resolves `map_name` against the map registry
+            // (`SaveMeta`: `maps.all().find(m -> m.name().equals(map))`).
+            if let Some(meta) = slot.meta.as_ref() {
+                row.set(
+                    &GString::from("map_name"),
+                    &meta.map_name.as_str().to_variant(),
+                );
+                row.set(&GString::from("wave"), &i64::from(meta.wave).to_variant());
+                row.set(
+                    &GString::from("playtime_ms"),
+                    &meta.time_played.to_variant(),
+                );
+                row.set(&GString::from("timestamp_ms"), &meta.timestamp.to_variant());
+                let mode = serde_json::from_str::<Rules>(&quote_bare_keys(&meta.rules_json))
+                    .map(|rules| rules.mode().name())
+                    .unwrap_or("survival");
+                row.set(&GString::from("mode"), &mode.to_variant());
+            }
             out.push(&row);
         }
         out
