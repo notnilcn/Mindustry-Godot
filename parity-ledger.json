@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T02:47:05Z",
+  "updated": "2026-10-11T03:00:41Z",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -18733,151 +18733,81 @@
       "title": "MindUi.dialog_stack() panics (Gd bind already bound) in the Custom Game dialog build window",
       "surface": "ui",
       "parent": "PAR-0065",
-      "status": "mismatch",
-      "updated": "2026-10-10T14:47:09Z",
+      "status": "verified",
+      "updated": "2026-10-11T03:00:41Z",
       "discovered_by": "runs/20261010-090352-custom-game-map-list/",
       "path": {
         "to": "Custom Game dialog open via the menu walk",
         "java": [],
         "godot": [
           {
-            "tool": "godot_log",
+            "tool": "godot_input",
             "params": {
-              "action": "clear"
+              "code": "Play (230,149) then the Custom Game submenu row via the real input path"
             }
           },
           {
             "tool": "godot_exec",
             "params": {
-              "action": "eval",
-              "code": "var preview = get_node_or_null(\\\"/root/Spine/MindPreview\\\")\\nvar rows = preview.call(\\\"maps_list\\\") if preview != null else []\\nreturn {\\\"map_count\\\": (int(preview.call(\\\"map_count\\\")) if preview != null else -1), \\\"row_count\\\": rows.size(), \\\"first\\\": str(rows[0])}"
-            },
-            "note": "18 maps; first Ancient Caldera 256x256 Anuke assets/maps/default/caldera.msav"
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "button": "MOUSE_BUTTON_LEFT",
-              "position": {
-                "x": 230,
-                "y": 149
-              },
-              "coords": "viewport",
-              "pressed": true
-            },
-            "note": "Play (runtime Button; arm a pressed counter first if desired)"
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "button": "MOUSE_BUTTON_LEFT",
-              "position": {
-                "x": 230,
-                "y": 149
-              },
-              "coords": "viewport",
-              "pressed": false
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "button": "MOUSE_BUTTON_LEFT",
-              "position": {
-                "x": 460,
-                "y": 289
-              },
-              "coords": "viewport",
-              "pressed": true
-            },
-            "note": "Custom Game (Submenu/Buttons child 3)"
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "button": "MOUSE_BUTTON_LEFT",
-              "position": {
-                "x": 460,
-                "y": 289
-              },
-              "coords": "viewport",
-              "pressed": false
+              "code": "MindUi.dialog_stack() immediately after -> ['custom'], has_dialog true; the dialog visible one frame later"
             }
           }
         ],
         "confirm": {
-          "godot": "DialogLayer/custom visible"
+          "godot": "the immediate dialog_stack returns ['custom'] with no panic/timeout",
+          "java": "n/a (port-only crash)"
         },
-        "last_replayed": "runs/20261010-090352-custom-game-map-list/"
+        "last_replayed": "runs/20261011-130224-PAR-0066/ (godot_input clicks -> custom; immediate dialog_stack ['custom']; no panic)"
       },
-      "run": "runs/20261010-234250-ref-PAR-0070-combat-fx/",
+      "run": "runs/20261011-130224-PAR-0066/",
       "reproduce": {
         "java": [],
         "godot": [
           {
             "tool": "godot_input",
             "params": {
-              "action": "mouse_button",
-              "button": "MOUSE_BUTTON_LEFT",
-              "position": {
-                "x": 460,
-                "y": 289
-              },
-              "coords": "viewport",
-              "pressed": true
-            },
-            "note": "click Custom Game, then IMMEDIATELY:"
+              "code": "Play then Custom Game (the real input path)"
+            }
           },
           {
             "tool": "godot_exec",
             "params": {
-              "action": "eval",
-              "code": "Input.flush_buffered_events()\\nreturn str(get_node(\\\"/root/MindUi\\\").call(\\\"dialog_stack\\\"))"
-            },
-            "note": "TIMEOUT at 15 s"
-          },
-          {
-            "tool": "godot_log",
-            "params": {
-              "action": "errors",
-              "params": {
-                "include_warnings": true
-              }
-            },
-            "note": "[E] panic before unwinding into Godot: Gd<T>::bind() failed, already bound; T = mind_gdext::ui::ui_host::MindUi ... in MindUi::dialog_stack(); crash-report-10_10_2026_09_05_48.txt"
+              "code": "MindUi.dialog_stack() right after (pre-fix: timeout/panic; post-fix: ['custom'])"
+            }
           }
         ],
-        "compare": []
+        "compare": [
+          "no panic in the log; the stack + visibility correct"
+        ]
       },
       "steps": [
         {
-          "n": 1,
-          "action": "dialog_stack immediately after opening custom",
-          "java_frame": null,
-          "godot_frame": "godot/step-05-custom-18-rows.png",
-          "verdict": "mismatch",
-          "evidence": "panic in MindUi::dialog_stack(); crash reports 09_04_17/09_04_52/09_05_48. Waiting ~4 s then calling again returns [custom] - it is a build-window race, not a persistent bind."
+          "action": "reproduce the recorded shape pre-fix",
+          "result": "the immediate dialog_stack TIMED OUT (the Gd-already-bound panic)"
+        },
+        {
+          "fix": "7412adb (defer show_dialog/hide_dialog out of the &mut self hold)"
+        },
+        {
+          "check": "post-fix: ['custom'] immediately, has_dialog true, the dialog visible one frame later; no panic"
         }
       ],
       "mismatch": {
-        "step": 1,
-        "signals": {
-          "panic": "Gd<T>::bind() failed, already bound",
-          "crash_report": "/home/clintonnguyen/.local/share/Mindustry-Godot/crashes/crash-report-10_10_2026_09_05_48.txt",
-          "settle_workaround": "dialog_stack returns [custom] after ~4 s"
-        },
-        "java_frame": null,
-        "godot_frame": "godot/step-05-custom-18-rows.png"
+        "step": "the panic is gone; the same shape now returns cleanly",
+        "godot_frame": "runs/20261011-130224-PAR-0066/godot/custom-opened-no-panic.png",
+        "diff": null
       },
       "fix": {
-        "status": "open",
-        "summary": null
+        "status": "done",
+        "commit": "7412adb",
+        "summary": "dialog show/hide lifecycle deferred out of the MindUi borrow (open_dialog/close_dialog/reveal_top/close_top_dialog)"
       },
-      "verified": null,
+      "verified": {
+        "mode": "reference",
+        "run": "runs/20261011-130224-PAR-0066/",
+        "reference": null,
+        "at": "2026-10-11T03:00:41Z"
+      },
       "reference": {
         "captured": "2026-10-11T03:00:00Z",
         "profile": "fresh",
@@ -18900,6 +18830,10 @@
         "java_path": [
           "Play > Custom Game; capture; reopen later; capture"
         ]
+      },
+      "note": "Port-only crash: root cause = the &mut self hold across the GDScript dialog build; fixed by call_deferred for the lifecycle calls (bookkeeping stays sync). Pre-fix repro recorded (timeout on the immediate dialog_stack); post-fix returns ['custom']. Gates: mind-gdext 26 tests, fmt/clippy, import gate. Hiccup logged: the session's Vulkan TDR from 12 orphaned game processes (cleaned).",
+      "claim": {
+        "released_at": "2026-10-11T03:00:41Z"
       }
     },
     {

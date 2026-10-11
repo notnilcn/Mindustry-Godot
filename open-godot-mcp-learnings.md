@@ -1873,3 +1873,19 @@ breaking. Fixed in 3741270 (right press deselects first). Diagnostic lesson:
 temporary `#[func]` probe on SimHost (returning flat variant dicts) plus
 `Camera2D.tile_to_screen`/`screen_to_tile` solved it. Run:
 runs/20261011-123501-PAR-0045-fix/.
+
+## 2026-10-11 — Vulkan TDR killed the editor: clean up orphaned game processes
+Symptom: after a long session with many `godot_game stop/play` cycles the whole
+bridge died (`BRIDGE_NOT_CONNECTED`), `godot_game status` timed out, and
+`runs/editor-console.log` ended with:
+  `ERROR: Vulkan device was lost... driver resetting itself because it was
+   unresponsive for too long (TDR).` + `handle_crash: Program crashed with
+   signal 4`.
+Root cause: `pgrep -af "godot --path.*game.tscn"` showed **12** game processes -
+most orphaned (`--editor-pid` pointing at long-dead editors, spawned by earlier
+relaunches). On the software Vulkan stack (Xvfb :10) the accumulated contexts
+push the GPU path into a TDR and the editor dies with it.
+Workaround: kill every game process whose `--editor-pid` is not alive:
+  for pid in $(pgrep -f 'godot --path.*game.tscn'); do owner=$(tr '\0' ' ' < /proc/$pid/cmdline | grep -o 'editor-pid [0-9]*' | awk '{print $2}'); kill -0 $owner 2>/dev/null || kill -9 $pid; done
+then `nohup tools/parity-session.sh` again. Verified 12 -> 1 processes and a
+healthy bridge afterwards. Run: the PAR-0066 verification session.
