@@ -24,8 +24,9 @@ use crate::io::save::version::WriteContext;
 use crate::io::save::{SaveOptions, SaveReadState};
 use crate::io::settings::{KEY_LAST_SECTOR_SAVE, KEY_SAVE_INTERVAL, SettingsStore};
 
-/// `Vars.saveInterval` default (minutes) when the setting is absent.
-pub const DEFAULT_SAVE_INTERVAL_MINUTES: i32 = 10;
+/// `saveinterval` default in **seconds** when the setting is absent
+/// (`SettingsMenuDialog`: `sliderPref("saveinterval", 60, 10, 600, 10, seconds)`).
+pub const DEFAULT_SAVE_INTERVAL_SECONDS: i32 = 60;
 
 /// Legacy beta megabase Serpulo sectors removed by `Saves.clearOldMegabaseSectors`.
 pub const OLD_MEGABASE_SECTORS: [u16; 13] = [
@@ -223,7 +224,7 @@ impl Saves {
     }
 
     /// `Saves.update` policy half: playtime accrual and the autosave cadence
-    /// decision. `autosaved` reports that `save_interval_minutes` was crossed
+    /// decision. `autosaved` reports that `save_interval_seconds` was crossed
     /// and the current slot must be written; the caller performs the write
     /// ([`Saves::update`] inlines a `WriteContext` write, the live host queues
     /// it at the `IoSet` seam).
@@ -231,7 +232,7 @@ impl Saves {
         &mut self,
         update: SavesUpdate,
         settings: &SettingsStore,
-        save_interval_minutes: i32,
+        save_interval_seconds: i32,
     ) -> SavesUpdateResult {
         let mut result = SavesUpdateResult::default();
         let playing = update.is_game && !update.paused_with_dialog;
@@ -251,7 +252,9 @@ impl Saves {
                 .is_some_and(|slot| slot.is_autosave(settings));
         if autosave {
             self.time += update.delta_ticks as f32 / 60.0;
-            let interval = save_interval_minutes.max(0) as f32 * 60.0;
+            // `Saves.update`: `time > saveinterval * 60` in ticks, i.e. the
+            // setting is seconds (`self.time` accrues seconds).
+            let interval = save_interval_seconds.max(0) as f32;
             if self.time > interval {
                 self.saving = true;
                 self.time = 0.0;
@@ -274,7 +277,7 @@ impl Saves {
         ctx: &WriteContext,
         options: &SaveOptions,
     ) -> SavesUpdateResult {
-        let interval = settings.get_i32(KEY_SAVE_INTERVAL, DEFAULT_SAVE_INTERVAL_MINUTES);
+        let interval = settings.get_i32(KEY_SAVE_INTERVAL, DEFAULT_SAVE_INTERVAL_SECONDS);
         let mut result = self.update_policy(update, settings, interval);
         if result.autosaved {
             let mut saved = false;
@@ -655,7 +658,7 @@ mod tests {
         let fs = MockFs::new();
         let paths = Paths::new("/data");
         let mut settings = SettingsStore::new();
-        settings.put_i32(KEY_SAVE_INTERVAL, 1);
+        settings.put_i32(KEY_SAVE_INTERVAL, 60);
         let mut saves = Saves::new();
         let ctx = WriteContext::meta_only(base_meta_tags(8, 8, 1, "auto"));
         let index = saves
@@ -678,7 +681,7 @@ mod tests {
             game_over: false,
             is_campaign: false,
         };
-        // 1-minute interval; 30 s + 30 s + 1 s crosses it on the third update.
+        // 60-second interval (`saveinterval` is seconds); 30 s + 30 s + 1 s crosses it on the third update.
         let first = saves.update(update, &settings, &fs, &paths, &ctx, &SaveOptions::new());
         assert!(!first.autosaved);
         let second = saves.update(update, &settings, &fs, &paths, &ctx, &SaveOptions::new());

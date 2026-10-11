@@ -36,7 +36,7 @@ use mind_core::game::rules::Rules;
 use mind_core::game::rules_event::{RulesEpoch, apply_set_rules};
 use mind_core::game::runtime::CampaignRuntime;
 use mind_core::game::saves::{
-    DEFAULT_SAVE_INTERVAL_MINUTES, Saves, SavesUpdate, SavesUpdateResult,
+    DEFAULT_SAVE_INTERVAL_SECONDS, Saves, SavesUpdate, SavesUpdateResult,
 };
 use mind_core::game::schematics::Schematics;
 use mind_core::game::tech_tree::{self, SettingsUnlockStore};
@@ -247,10 +247,10 @@ impl MindCampaign {
     /// Live `saveinterval` (`Core.settings.getInt`): read from the `MindUi`
     /// settings store so a mid-session slider change takes effect, falling back
     /// to this facade's boot-time copy.
-    fn live_save_interval_minutes(&self) -> i32 {
+    fn live_save_interval_seconds(&self) -> i32 {
         let fallback = self
             .settings
-            .get_i32(KEY_SAVE_INTERVAL, DEFAULT_SAVE_INTERVAL_MINUTES);
+            .get_i32(KEY_SAVE_INTERVAL, DEFAULT_SAVE_INTERVAL_SECONDS);
         let Some(mut ui) = self.base().get_node_or_null("/root/MindUi") else {
             return fallback;
         };
@@ -308,7 +308,7 @@ impl MindCampaign {
             self.saves.update_policy(
                 saves_update,
                 &self.settings,
-                self.live_save_interval_minutes(),
+                self.live_save_interval_seconds(),
             )
         } else {
             SavesUpdateResult::default()
