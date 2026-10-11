@@ -1357,6 +1357,25 @@ impl MindCampaign {
                     .unwrap_or(false)
                     .to_variant(),
             );
+            // `state.getSector().preset` name (hint predicates: `isTutorial`,
+            // `presetLaunch`), empty for a generated sector.
+            let preset_name = record
+                .and_then(|sector| sector.preset)
+                .and_then(|preset| {
+                    self.registry
+                        .as_ref()
+                        .and_then(|registry| registry.sector(preset))
+                        .map(|def| def.name.clone())
+                })
+                .unwrap_or_default();
+            dict.set(&key("preset"), &preset_name.as_str().to_variant());
+            dict.set(
+                &key("captured"),
+                &record
+                    .map(|sector| sector.is_captured(None))
+                    .unwrap_or(false)
+                    .to_variant(),
+            );
             // `PausedDialog.rebuild` `showObjective`: the preset description
             // feeds the `@objective` full-text dialog (`UnlockableContent`
             // resolves it from `Core.bundle`).
