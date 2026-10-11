@@ -42,9 +42,13 @@ var _toggles: Dictionary = {}
 func _ready() -> void:
 	set_title_key("@campaign.difficulty")
 	should_pause = false
+	# The Java BaseDialog is full-screen: title at the top, content from the top,
+	# Back at the bottom center (`CampaignRulesDialog` sits over the planet page).
+	full_dialog = true
 	super._ready()
 	_table = content_table()
-	add_close_button()
+	var back := add_close_button(200.0)
+	back.custom_minimum_size.y = 60.0
 
 
 func shown() -> void:
@@ -70,25 +74,115 @@ func _rebuild() -> void:
 	if _table == null:
 		return
 	_table.clear_children()
-	# code-instantiated: difficulty buttons are the data-driven Difficulty list.
+	var column := VBoxContainer.new()
+	column.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	column.add_theme_constant_override("separation", 8)
+	# Java `current.table(Tex.button, ...)`: the five options live in a black,
+	# 4 px #454545-bordered box, 140x50 each, centered (`CampaignRulesDialog`).
+	var box := PanelContainer.new()
+	box.add_theme_stylebox_override("panel", _options_box())
 	var diff_row := HBoxContainer.new()
+	diff_row.add_theme_constant_override("separation", 0)
+	# code-instantiated: difficulty buttons are the data-driven Difficulty list.
 	for name in ["casual", "easy", "normal", "hard", "eradication"]:
 		var button := Button.new()
 		button.text = _t("@difficulty.%s" % name)
 		button.theme_type_variation = "flatTogglet"
 		button.toggle_mode = true
+		button.custom_minimum_size = Vector2(140.0, 50.0)
 		button.button_pressed = name == _difficulty
 		button.tooltip_text = _difficulty_tooltip(name)
 		button.pressed.connect(_set_difficulty.bind(name))
+		_apply_option_style(button)
 		diff_row.add_child(button)
-	_table.add(diff_row).grow_x_axis().pad(4)
-	_table.row()
+	box.add_child(diff_row)
+	column.add_child(box)
+	var planet_row := _planet_view_row(_planet)
 	for key in RULE_KEYS:
+		# `CampaignRulesDialog.rebuild` gates three checks by planet flags.
+		if not _rule_visible(key, planet_row):
+			continue
 		# code-instantiated: rule toggles come from the plan-12 CampaignRules set.
 		var label := str(RULE_LABELS.get(key, key))
 		var check := MindWidgets.check(_t(label), bool(_toggles.get(key, false)), _toggle.bind(key))
-		_table.add(check).grow_x_axis().pad(2).left()
-		_table.row()
+		# Java `Elems.check` rows are content-sized (grayPanel strip behind the
+		# indicator + label only), left-aligned under the options box.
+		check.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		column.add_child(check)
+	# No `grow_x_axis` on the column itself: a CenterContainer fills the cell and
+	# centers the content column (Java's table centers the box).
+	var center := CenterContainer.new()
+	center.add_child(column)
+	_table.add(center).grow_x_axis().set_align(0).set_pad_top(14)
+	_table.row()
+
+
+## `CampaignRulesDialog.rebuild` visibility gates: `sectorInvasion` only when
+## `allowSectorInvasion`, `rtsAI` only when `showRtsAIRule`, `clearSectorOnLose`
+## only when the flag is OFF (Erekir shows 4 rows, Serpulo 7).
+func _rule_visible(key: String, planet_row: Dictionary) -> bool:
+	match key:
+		"sector_invasion":
+			return bool(planet_row.get("allow_sector_invasion", false))
+		"rts_ai":
+			return bool(planet_row.get("show_rts_ai_rule", false))
+		"clear_sector_on_lose":
+			return not bool(planet_row.get("clear_sector_on_lose", false))
+		_:
+			return true
+
+
+func _planet_view_row(planet_name: String) -> Dictionary:
+	for planet_variant in campaign_section("planets"):
+		var planet: Dictionary = planet_variant
+		if str(planet.get("name", "")) == planet_name:
+			return planet
+	return {}
+
+
+## The `Tex.button`-styled options box (black fill, 4 px #454545 outline).
+func _options_box() -> StyleBoxFlat:
+	var box := StyleBoxFlat.new()
+	box.bg_color = Color.BLACK
+	box.border_width_left = 4
+	box.border_width_top = 4
+	box.border_width_right = 4
+	box.border_width_bottom = 4
+	box.border_color = Color(0.27, 0.27, 0.27)
+	box.corner_radius_top_left = 4
+	box.corner_radius_top_right = 4
+	box.corner_radius_bottom_left = 4
+	box.corner_radius_bottom_right = 4
+	box.content_margin_left = 8.0
+	box.content_margin_right = 8.0
+	box.content_margin_top = 8.0
+	box.content_margin_bottom = 8.0
+	return box
+
+
+## `flatTogglet`: unselected options are bare labels; the checked one gets the
+## accent 4 px outline (reference frame: the selected Normal option).
+func _apply_option_style(button: Button) -> void:
+	var empty := StyleBoxEmpty.new()
+	button.add_theme_stylebox_override("normal", empty)
+	button.add_theme_stylebox_override("hover", empty)
+	button.add_theme_stylebox_override("pressed", _accent_box())
+	button.add_theme_stylebox_override("hover_pressed", _accent_box())
+
+
+func _accent_box() -> StyleBoxFlat:
+	var box := StyleBoxFlat.new()
+	box.bg_color = Color.BLACK
+	box.border_width_left = 4
+	box.border_width_top = 4
+	box.border_width_right = 4
+	box.border_width_bottom = 4
+	box.border_color = MindStyles.ACCENT
+	box.corner_radius_top_left = 4
+	box.corner_radius_top_right = 4
+	box.corner_radius_bottom_left = 4
+	box.corner_radius_bottom_right = 4
+	return box
 
 
 ## Localized `Difficulty.info()` tooltip from the multiplier table.

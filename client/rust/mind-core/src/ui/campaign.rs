@@ -98,6 +98,13 @@ pub struct PlanetView {
     pub sectors_captured: i32,
     /// Lost sectors on this planet.
     pub sectors_lost: i32,
+    /// `Planet.allowSectorInvasion` (`CampaignRulesDialog` gates the
+    /// `@rules.invasions` toggle on it).
+    pub allow_sector_invasion: bool,
+    /// `Planet.showRtsAIRule` (gates `@rules.rtsai.campaign`).
+    pub show_rts_ai_rule: bool,
+    /// `Planet.clearSectorOnLose` (hides `@rules.clearsectoronloss` when true).
+    pub clear_sector_on_lose: bool,
 }
 
 /// One sector marker (`PlanetDialog`/`SectorSelectDialog`).
@@ -496,7 +503,7 @@ fn planet_localized(registry: &ContentRegistry, name: &str) -> String {
 /// Builds one planet card.
 fn planet_view(registry: &ContentRegistry, planet: &Planet) -> PlanetView {
     let def = registry.planet(planet.id);
-    let (visible, accessible, has_grid, sector_count, start_sector, color, tech_tree) = def
+    let (visible, accessible, has_grid, sector_count, start_sector, color, tech_tree, flags) = def
         .map(|def| {
             (
                 def.visible,
@@ -507,6 +514,11 @@ fn planet_view(registry: &ContentRegistry, planet: &Planet) -> PlanetView {
                 hex(&def.icon_color),
                 def.tech_tree
                     .and_then(|tree| registry.tech().tree(tree).map(|t| t.name.clone())),
+                (
+                    def.allow_sector_invasion,
+                    def.show_rts_ai_rule,
+                    def.clear_sector_on_lose,
+                ),
             )
         })
         .unwrap_or((
@@ -517,6 +529,7 @@ fn planet_view(registry: &ContentRegistry, planet: &Planet) -> PlanetView {
             planet.start_sector,
             String::from("ffffff"),
             None,
+            (false, false, false),
         ));
     PlanetView {
         id: planet.id.raw(),
@@ -532,6 +545,9 @@ fn planet_view(registry: &ContentRegistry, planet: &Planet) -> PlanetView {
         playtime_ms: planet.stats.playtime,
         sectors_captured: planet.stats.sectors_captured,
         sectors_lost: planet.stats.sectors_lost,
+        allow_sector_invasion: flags.0,
+        show_rts_ai_rule: flags.1,
+        clear_sector_on_lose: flags.2,
     }
 }
 
