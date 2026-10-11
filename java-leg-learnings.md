@@ -745,3 +745,17 @@ displays); those paths no longer exist, but the workarounds still apply.
 - The sector Launch button on the fresh planet page: client (575,618) -> screen (625,716).
 - The input row for the record: the tutorial's paste/book/tree/map icons sit at client
   x 851..1059, y 600..645 (glyph columns 853/905/954/1008).
+
+## 2026-10-11 — PAR-0039 leg: the Java client survived the kill (setsid pid)
+Symptom: after the PAR-0033 Java leg I killed "the launched pid" (468054) and
+restored the profile byte-identical - but `pgrep -af "Mindustry.jar"` an hour
+later still showed a live client (pid 468055). The number printed by the launch
+was the `setsid` wrapper (`$!`), not the JVM; the real java pid is the wrapper's
+child. The background client kept the tutorial open and autosaved into the
+"restored" saves dir, so the snapshot restore went stale (diff -r showed
+sector-serpulo-170.msav + backup changed, settings.bin byte 4).
+Workaround: kill by process scan (`pgrep -af "[j]ava -jar"` -> kill the java
+pid), THEN restore the saves dir from the snapshot again and `cmp` the settings;
+re-verify with `diff -r` after the kill, never trust the post-leg restore while
+a client may still hold the profile.
+Run: runs/20261011-113747-PAR-0039/.
