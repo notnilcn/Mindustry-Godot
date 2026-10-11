@@ -110,7 +110,28 @@ impl BlockRenderer {
                 {
                     continue;
                 }
-                let resolved = self.resolver.resolve(&def.region);
+                // `ConstructBuild.draw`: an in-progress construct block shows
+                // the block being built (accent tint; `Pal.remove` while
+                // deconstructing). The progress-reveal `blockbuild` shader is
+                // not ported; this is the static ghost (PAR-0098).
+                let (region_name, base_color) = match host.construct_at(tile.x, tile.y) {
+                    Some((current, _progress, deconstructing))
+                        if def.kind == mind_core::content::BlockKind::ConstructBlock =>
+                    {
+                        let name = content
+                            .block(current)
+                            .map(|current| current.region.clone())
+                            .unwrap_or_else(|| def.region.clone());
+                        let color = if deconstructing {
+                            0xe5_54_54_99
+                        } else {
+                            0xff_d3_7f_99
+                        };
+                        (name, color)
+                    }
+                    _ => (def.region.clone(), 0xffff_ffff),
+                };
+                let resolved = self.resolver.resolve(&region_name);
                 let page = resolved.as_ref().map(|r| r.page).unwrap_or(-1);
                 let uv = resolved
                     .as_ref()
@@ -132,7 +153,7 @@ impl BlockRenderer {
                     w,
                     h: w,
                     uv,
-                    color: 0xffff_ffff,
+                    color: base_color,
                 });
                 // `Block.drawTeamOverlay` -> `Building.drawTeam`: the per-team
                 // pre-coloured region (`<name>-team-<team>`) over the base

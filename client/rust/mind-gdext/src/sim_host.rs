@@ -1588,6 +1588,43 @@ impl MindSimHost {
         self.sim.player_mined_count()
     }
 
+    /// The player unit's build-plan queue as JSON (`BuilderComp.plans`, head
+    /// = active): `[{x, y, rotation, block, breaking, progress, stuck}]`.
+    #[func]
+    pub fn player_build_plans_json(&self) -> GString {
+        let rows: Vec<serde_json::Value> = self
+            .sim
+            .player_build_plans()
+            .iter()
+            .map(|plan| {
+                serde_json::json!({
+                    "x": plan.x,
+                    "y": plan.y,
+                    "rotation": plan.rotation,
+                    "block": self.sim.block_name_of(plan.block),
+                    "breaking": plan.breaking,
+                    "progress": plan.progress,
+                    "stuck": plan.stuck,
+                })
+            })
+            .collect();
+        GString::from(serde_json::Value::Array(rows).to_string().as_str())
+    }
+
+    /// Construct block state at `(x, y)` (`ConstructBuild`): `{block,
+    /// progress, deconstructing}`; empty when the tile is not under
+    /// construction.
+    #[func]
+    pub fn construct_progress(&self, x: i32, y: i32) -> Dictionary<GString, Variant> {
+        let mut out = Dictionary::new();
+        if let Some((block, progress, deconstructing)) = self.construct_at(x, y) {
+            out.set("block", &self.sim.block_name_of(block).to_variant());
+            out.set("progress", &f64::from(progress).to_variant());
+            out.set("deconstructing", &deconstructing.to_variant());
+        }
+        out
+    }
+
     /// Read-only world grid for the plan-16 floor/block bakers.
     pub fn grid(&self) -> &mind_core::world::WorldGrid {
         &self.sim.grid
@@ -1912,6 +1949,18 @@ impl MindSimHost {
             return out;
         }
         Vec::new()
+    }
+
+    /// Construct block state at `(x, y)` as `(current block, progress,
+    /// deconstructing)` (`ConstructBuild`; render seam).
+    pub fn construct_at(&self, x: i32, y: i32) -> Option<(BlockId, f32, bool)> {
+        let entity = self.sim.grid.tile(x, y).build?;
+        let state = self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::world::ConstructState>(entity)?;
+        Some((state.current, state.progress, state.active_deconstruct))
     }
 
     /// Owning team of the building at `(x, y)` (`Tile.team()`; `None` when the
