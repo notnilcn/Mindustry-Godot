@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T22:49:11+10:00",
+  "updated": "2026-10-11T22:57:57+10:00",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -26280,8 +26280,8 @@
       "title": "Planet page opened from the in-game map button draws over the live world + HUD (Java covers with the space backdrop)",
       "surface": "ui",
       "parent": "PAR-0036",
-      "status": "fixing",
-      "updated": "2026-10-11T01:36:59Z",
+      "status": "verified",
+      "updated": "2026-10-11T22:57:57+10:00",
       "discovered_by": "runs/20261011-112419-PAR-0036/",
       "path": {
         "to": "in-game > map button > planet page",
@@ -26291,7 +26291,7 @@
           "godot": "MindUi.dialog_stack() == [planet]",
           "java": "r01-04-sectorpanel.png"
         },
-        "last_replayed": null
+        "last_replayed": "runs/20261011-230500-PAR-0147/"
       },
       "run": "runs/20261011-230500-PAR-0147/",
       "reproduce": {
@@ -26321,14 +26321,20 @@
           "action": "in-game map button (1027,619)",
           "godot_frame": "runs/20261011-230500-PAR-0147/godot/step-00-ingame-map-open.png",
           "verdict": "mismatch: chooser instead of the current planet page; hint overlay draws above the dialog"
+        },
+        {
+          "n": 2,
+          "action": "fixed: in-game map button",
+          "godot_frame": "runs/20261011-230500-PAR-0147/godot/step-02-fixed-page.png",
+          "verdict": "match (structural): current planet page, world+HUD+markers hidden"
         }
       ],
       "mismatch": null,
       "fix": {
-        "status": "open",
+        "status": "closed",
         "plan": {
           "round": 1,
-          "state": "planned; delegated to a GDScript subagent",
+          "state": "landed and verified",
           "seam": "client/ui/dialogs/planet_dialog.gd (shown/hidden/_set_planet_view_active)",
           "findings": [
             "in-game map button -> planet dialog; MindUi.close_dialog(planet) -> MenuGroup.visible=true AND HudGroup.visible=true (hidden() -> _set_planet_view_active(false) forces menu + MenuBackground visible)",
@@ -26344,23 +26350,30 @@
           "next": [
             "re-walk: in-game map button -> page covers world+HUD -> Back -> HudGroup visible, MenuGroup hidden, sim resumes"
           ]
-        }
+        },
+        "commit": "b21bcbf",
+        "summary": "planet_dialog.gd: adopt the current sector planet on show; capture/hide MenuGroup, MenuBackground, HudGroup, World + world CanvasLayers while the page covers the stage, restore exactly on hide; _enter_game retargets the capture (deferred hide)."
       },
-      "verified": null,
-      "note": "Revealed by PAR-0036. Opened from the HUD, the port's planet dialog shows the live world through its backdrop and the world HUD above it; the Java PlanetDialog renders its own space scene and the HUD hides behind the modal. The campaign-path page (PAR-0015) is unaffected. Also observed on PAR-0038: the tutorial objective banner renders above the pause dialog's 0.9 dim (255 vs the Java's 81).",
-      "claim": {
-        "by": "claude-loop-s1",
-        "at": "2026-10-11T22:49:11+10:00",
-        "prior_status": "seeded"
-      }
+      "verified": {
+        "mode": "reference",
+        "date": "2026-10-11T22:57:57+10:00",
+        "run": "runs/20261011-230500-PAR-0147/",
+        "reference": "runs/20261009-065416-ref-ground-zero/",
+        "java_frame": "runs/20261009-065416-ref-ground-zero/java/r01-04-sectorpanel.png",
+        "godot_frame": "godot/step-02-fixed-page.png",
+        "diff": "diff/step-02.json",
+        "evidence_class": "structured state (layer visibility + dialog stack) + frame inspection",
+        "calibration": "frame gate not applied to the whole page: residuals are owned by PAR-0142 (globe shading), PAR-0154 (sector grid) and the differing sector state of the stored Java frame (under attack, resources, Sectors panel)"
+      },
+      "note": "Revealed by PAR-0036. Opened from the HUD, the port's planet dialog shows the live world through its backdrop and the world HUD above it; the Java PlanetDialog renders its own space scene and the HUD hides behind the modal. The campaign-path page (PAR-0015) is unaffected. Also observed on PAR-0038: the tutorial objective banner renders above the pause dialog's 0.9 dim (255 vs the Java's 81)."
     },
     {
       "id": "PAR-0147",
       "title": "Planet page Back from the in-game map button returns to the menu instead of resuming the sector",
       "surface": "ui",
       "parent": "PAR-0036",
-      "status": "fixing",
-      "updated": "2026-10-11T01:36:59Z",
+      "status": "verified",
+      "updated": "2026-10-11T22:57:57+10:00",
       "discovered_by": "runs/20261011-112541-PAR-0038/",
       "path": {
         "to": "in-game > map button > Back",
@@ -26370,7 +26383,7 @@
           "godot": "MenuGroup.visible after Back",
           "java": "PlanetDialog Back hides and resumes"
         },
-        "last_replayed": null
+        "last_replayed": "runs/20261011-230500-PAR-0147/"
       },
       "run": "runs/20261011-230500-PAR-0147/",
       "reproduce": {
@@ -26393,14 +26406,26 @@
           "action": "in-game map button (1027,619) then close the planet dialog",
           "godot_frame": "godot/step-01-after-close.png",
           "verdict": "mismatch: MenuGroup.visible=true + HudGroup.visible=true after close (Java: page hides, game resumes, no menu)"
+        },
+        {
+          "n": 2,
+          "action": "fixed: in-game map > Back",
+          "godot_frame": "godot/step-03-fixed-back.png",
+          "verdict": "match: MenuGroup false, HudGroup/World true, sim ticking"
+        },
+        {
+          "n": 3,
+          "action": "menu > Campaign > OK > Go > map > Back",
+          "godot_frame": "godot/step-04-launch-map-back.png",
+          "verdict": "match"
         }
       ],
       "mismatch": null,
       "fix": {
-        "status": "open",
+        "status": "closed",
         "plan": {
           "round": 1,
-          "state": "planned; delegated to a GDScript subagent",
+          "state": "landed and verified",
           "seam": "client/ui/dialogs/planet_dialog.gd (shown/hidden/_set_planet_view_active)",
           "findings": [
             "in-game map button -> planet dialog; MindUi.close_dialog(planet) -> MenuGroup.visible=true AND HudGroup.visible=true (hidden() -> _set_planet_view_active(false) forces menu + MenuBackground visible)",
@@ -26416,15 +26441,22 @@
           "next": [
             "re-walk: in-game map button -> page covers world+HUD -> Back -> HudGroup visible, MenuGroup hidden, sim resumes"
           ]
-        }
+        },
+        "commit": "b21bcbf",
+        "summary": "planet_dialog.gd: adopt the current sector planet on show; capture/hide MenuGroup, MenuBackground, HudGroup, World + world CanvasLayers while the page covers the stage, restore exactly on hide; _enter_game retargets the capture (deferred hide)."
       },
-      "verified": null,
-      "note": "Revealed while probing PAR-0038 (the ESC did nothing because the menu group was left visible). Frame: runs/20261011-112541-PAR-0038/godot/menu-after-in-game-page-back.png (the menu with its background over the live HUD).",
-      "claim": {
-        "by": "claude-loop-s1",
-        "at": "2026-10-11T22:49:11+10:00",
-        "prior_status": "seeded"
-      }
+      "verified": {
+        "mode": "reference",
+        "date": "2026-10-11T22:57:57+10:00",
+        "run": "runs/20261011-230500-PAR-0147/",
+        "reference": "runs/20261009-065416-ref-ground-zero/",
+        "java_frame": "runs/20261009-065416-ref-ground-zero/java/r01-04-sectorpanel.png",
+        "godot_frame": "godot/step-02-fixed-page.png",
+        "diff": "diff/step-02.json",
+        "evidence_class": "structured state (layer visibility + dialog stack) + frame inspection",
+        "calibration": "frame gate not applied to the whole page: residuals are owned by PAR-0142 (globe shading), PAR-0154 (sector grid) and the differing sector state of the stored Java frame (under attack, resources, Sectors panel)"
+      },
+      "note": "Revealed while probing PAR-0038 (the ESC did nothing because the menu group was left visible). Frame: runs/20261011-112541-PAR-0038/godot/menu-after-in-game-page-back.png (the menu with its background over the live HUD)."
     },
     {
       "id": "PAR-0148",
@@ -26952,6 +26984,50 @@
         "../Mindustry/core/src/mindustry/input/InputHandler.java:1203-1300 (drawCommand/drawCommanded: Pal.accent hex poly rad=hitSize/unitSelectRadScl+1, Fill.lightInner, limitLine to targetPos, square 3.5 at the destination; Layer.plans / groundUnit-1 / overlayUI)"
       ],
       "note": "Seeded by the PAR-0140 round-2 walk (presentation half of RTS selection)."
+    },
+    {
+      "id": "PAR-0158",
+      "title": "The Select Starting Campaign chooser reappears on every boot even after a planet was chosen and a sector has a base",
+      "surface": "campaign",
+      "parent": "PAR-0010",
+      "status": "seeded",
+      "updated": "2026-10-11T22:57:57+10:00",
+      "discovered_by": "runs/20261011-230500-PAR-0147/",
+      "path": {
+        "to": "fresh Godot boot with an existing Ground Zero save > Play > Campaign",
+        "java": [],
+        "godot": [
+          "godot_game play",
+          "click Play (230,149)",
+          "click Campaign (437,149)"
+        ],
+        "confirm": {
+          "godot": "chooser shown (Select Starting Campaign)"
+        }
+      },
+      "reproduce": {
+        "java": [
+          "Play > Campaign on a profile with campaignselect=true or a base sector -> planet page directly"
+        ],
+        "godot": [
+          "same; chooser appears"
+        ],
+        "compare": []
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open",
+        "commit": null,
+        "summary": null,
+        "plan": {}
+      },
+      "verified": null,
+      "evidence": [
+        "../Mindustry/core/src/mindustry/ui/dialogs/PlanetDialog.java:181-212 (chooser only when !settings campaignselect && no planet sector hasBase; OK puts campaignselect=true)",
+        "client/ui/dialogs/planet_dialog.gd shown(): chooser whenever _selected_planet is empty"
+      ],
+      "note": "Seen on every fresh Godot boot during the PAR-0147 walk while sector-serpulo-170.msav existed."
     }
   ]
 }
