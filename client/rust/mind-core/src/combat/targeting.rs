@@ -45,10 +45,12 @@ impl TargetQueries {
         Self { indexer, units }
     }
 
-    /// `Units.bestTarget`-equivalent: nearest enemy unit or building in range.
+    /// `Units.bestTarget`-equivalent: nearest enemy unit in range, else the
+    /// nearest enemy building (`Units.bestTarget` checks units first).
     ///
-    /// `target_air` gates units, `target_ground` + `target_blocks` gate
-    /// buildings, matching `Turret.findEnemy` (plan 10 §3.8).
+    /// Units pass the `Turret.findTarget` gate
+    /// `(e.isGrounded() || targetAir) && (!e.isGrounded() || targetGround)`;
+    /// buildings need `target_ground` + `target_blocks` (plan 10 §3.8).
     #[allow(clippy::too_many_arguments)] // mirrors `Units.bestTarget`
     pub fn closest_target(
         &self,
@@ -61,17 +63,16 @@ impl TargetQueries {
         target_ground: bool,
         target_blocks: bool,
     ) -> Option<Entity> {
-        let unit = if target_air {
-            self.closest_unit(world, team, x, y, range)
-        } else {
-            None
-        };
-        let building = if target_ground && target_blocks {
+        if let Some(unit) =
+            self.closest_unit_filtered(world, team, x, y, range, target_air, target_ground)
+        {
+            return Some(unit);
+        }
+        if target_ground && target_blocks {
             self.indexer.find_enemy_building(world, team, x, y, range)
         } else {
             None
-        };
-        closer(world, x, y, unit, building)
+        }
     }
 
     /// Nearest enemy unit in range (`Units.closestTarget` unit half).
@@ -83,22 +84,44 @@ impl TargetQueries {
         y: f32,
         range: f32,
     ) -> Option<Entity> {
-        let range2 = range * range;
+        self.closest_unit_filtered(world, team, x, y, range, true, true)
+    }
+
+    /// `Units.closestEnemy` with the air/ground gate: units within
+    /// `range + hitSize / 2`, dead units skipped.
+    #[allow(clippy::too_many_arguments)]
+    pub fn closest_unit_filtered(
+        &self,
+        world: &World,
+        team: u8,
+        x: f32,
+        y: f32,
+        range: f32,
+        target_air: bool,
+        target_ground: bool,
+    ) -> Option<Entity> {
         let mut best: Option<(f32, Entity)> = None;
         for &entity in &self.units {
             if world.get::<TeamComp>(entity).map(|t| t.team) == Some(team) {
                 continue;
             }
-            if world.get::<Health>(entity).is_none() {
+            if !world.get::<Health>(entity).is_some_and(|h| !h.dead) {
+                continue;
+            }
+            let flying = crate::combat::bullet::unit_is_flying(world, entity);
+            if !((flying && target_air) || (!flying && target_ground)) {
                 continue;
             }
             let Some(pos) = world.get::<Pos>(entity) else {
                 continue;
             };
+            let half = world
+                .get::<crate::entities::comp::unit::comp::HitboxComp>(entity)
+                .map_or(0.0, |h| h.hit_size / 2.0);
             let dx = pos.x - x;
             let dy = pos.y - y;
             let dist2 = dx * dx + dy * dy;
-            if dist2 > range2 {
+            if dist2 > (range + half) * (range + half) {
                 continue;
             }
             if is_closer(best, dist2, entity) {
@@ -148,28 +171,6 @@ fn is_closer(best: Option<(f32, Entity)>, dist2: f32, entity: Entity) -> bool {
     best.is_none_or(|(current, current_entity)| {
         dist2 < current || (dist2 == current && entity.index() < current_entity.index())
     })
-}
-
-/// Picks the closer of two target candidates (stable tie-break by index).
-fn closer(world: &World, x: f32, y: f32, a: Option<Entity>, b: Option<Entity>) -> Option<Entity> {
-    let dist2 = |entity: Entity| {
-        world
-            .get::<Pos>(entity)
-            .map(|pos| (pos.x - x).powi(2) + (pos.y - y).powi(2))
-            .unwrap_or(f32::INFINITY)
-    };
-    match (a, b) {
-        (None, None) => None,
-        (Some(entity), None) | (None, Some(entity)) => Some(entity),
-        (Some(a), Some(b)) => {
-            let (da, db) = (dist2(a), dist2(b));
-            if is_closer(Some((db, b)), da, a) {
-                Some(a)
-            } else {
-                Some(b)
-            }
-        }
-    }
 }
 
 #[cfg(test)]

@@ -484,9 +484,8 @@ pub fn read_settings(bytes: &[u8]) -> Result<IndexMap<String, SettingValue>, IoE
 /// Arc's tags (bool 0, int 1, long 2, float 3, string 4, binary 5). Values map
 /// onto the native typed variants so `importData` archives load as-is.
 pub fn read_arc_settings(bytes: &[u8]) -> Result<IndexMap<String, SettingValue>, IoError> {
-    let compressed = bytes.len() >= 2
-        && bytes[0] == 0x78
-        && matches!(bytes[1], 0x01 | 0x5E | 0x9C | 0xDA);
+    let compressed =
+        bytes.len() >= 2 && bytes[0] == 0x78 && matches!(bytes[1], 0x01 | 0x5E | 0x9C | 0xDA);
     let inflated;
     let data: &[u8] = if compressed {
         let mut out = Vec::new();

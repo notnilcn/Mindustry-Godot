@@ -530,6 +530,8 @@ impl Sim {
         self.pump_io(IoSet::Apply);
         self.triggers.fire(Trigger::Update, &mut self.ecs.0);
         self.schedule.run(&mut self.ecs.0);
+        // Zero-health units/buildings die (`HealthComp.damage` -> `kill`).
+        let _ = self.resolve_deaths();
         self.flush_events();
         self.time.update();
         self.clock.update(&mut self.ecs.0);
@@ -1191,5 +1193,7 @@ impl Sim {
 /// Entity kind byte used by the checksum stream (`0 = building`).
 pub const KIND_BUILDING: u8 = 0;
 
+#[cfg(test)]
+mod combat_tests;
 #[cfg(test)]
 mod tests;

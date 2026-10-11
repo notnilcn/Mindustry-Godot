@@ -297,10 +297,9 @@ fn ammo_in_content(config: &super::turrets::TurretConfig, content: &ContentRegis
 /// Registers the vanilla defense family into plan 07's registry.
 ///
 /// Projectors/mines/walls are always registered. Turrets and `build-tower` are
-/// registered when the plan-10 turret ammo fixtures are present in `content`
-/// (`CombatHarness` installs them; the fixture name map is a bridge until the
-/// ammo bullets join the base content registry — `content/registries/bullets.rs`
-/// is outside this family's ownership).
+/// registered when the turret ammo bullets are named in `content`
+/// (`turrets::install_turret_ammo` at live content boot, or the
+/// `CombatHarness` fixtures).
 pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
     // `Blocks.java:1921 mender`.
     registry.register_named(
@@ -421,7 +420,8 @@ pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
         }),
     );
 
-    if let Some(names) = super::turrets::fixture_names() {
+    let names = content.bullet_names();
+    if !names.is_empty() {
         for name in TURRET_BLOCKS {
             if let Some(config) = config_for(content, name, names)
                 && ammo_in_content(&config, content)

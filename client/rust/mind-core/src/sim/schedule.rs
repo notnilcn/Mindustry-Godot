@@ -429,6 +429,13 @@ pub fn build_sim_schedule() -> Schedule {
     // entity sets and the wave-spawn slot; never reorders the sets above.
     schedule
         .add_systems(crate::sim::unit_runtime::unit_update_system.in_set(EntitySet::UpdateUnits));
+    // PAR-0086: placed turrets (`TurretBuild.updateTile`) after the generic
+    // building pass, inside the same `Groups.build.update` slot.
+    schedule.add_systems(
+        crate::sim::unit_runtime::turret_update_system
+            .in_set(EntitySet::UpdateBuildings)
+            .after(crate::world::update::update_buildings),
+    );
     schedule.add_systems(
         crate::sim::unit_runtime::bullet_update_system.in_set(EntitySet::UpdateBullets),
     );

@@ -482,22 +482,23 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
     // M5/M6 remainder: the rest of the vanilla turret ammo tables (`Blocks.java`).
     advanced::register_bullets(content, names);
 
-    // Bridge for the plan-07 default registry: the fixture ammo bullets are not
-    // part of the base content registry yet, so the name map is cached here and
-    // read by `defense::register`.
-    let _ = FIXTURE_NAMES.set(names.clone());
+    // The ammo bullets are anonymous upstream; name them in the registry so
+    // `defense::register` (and the live `BlockTable`) can resolve each turret's
+    // ammo table against *this* registry's ids (PAR-0086).
+    for (name, id) in names.iter() {
+        content.name_bullet(name, *id);
+    }
 }
 
-/// Fixture bullet-name map installed by [`register_bullets`].
-///
-/// `None` until a content registry has been extended with the plan-10 fixtures;
-/// the ids are guarded against the caller's `ContentRegistry` bullet count by
-/// `defense::register`.
-static FIXTURE_NAMES: std::sync::OnceLock<BTreeMap<String, BulletId>> = std::sync::OnceLock::new();
-
-/// The named fixture bullet map ([`register_bullets`]) when installed.
-pub fn fixture_names() -> Option<&'static BTreeMap<String, BulletId>> {
-    FIXTURE_NAMES.get()
+/// Registers the vanilla turret ammo bullets into a booted registry once
+/// (idempotent). The live sim's content boot calls this so placed turrets get
+/// a real [`behavior::TurretBehavior`] instead of the inert default (PAR-0086).
+pub fn install_turret_ammo(content: &mut ContentRegistry) {
+    if content.bullet_by_name("duo_copper").is_some() {
+        return;
+    }
+    let mut names = BTreeMap::new();
+    register_bullets(content, &mut names);
 }
 
 /// Builds the resolved [`TurretConfig`] for a supported block name.
@@ -1533,7 +1534,8 @@ fn validate_target(ctx: &CombatCtx<'_>, _e: Entity, state: &TurretState) -> bool
     if ctx.world.get_entity(target).is_err() {
         return false;
     }
-    if ctx.world.get::<Health>(target).is_none() {
+    // `Units.invalidateTarget`: dead targets drop (range is unbounded).
+    if !ctx.world.get::<Health>(target).is_some_and(|h| !h.dead) {
         return false;
     }
     true

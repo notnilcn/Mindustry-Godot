@@ -348,7 +348,53 @@ impl SimRuntime {
         ) {
             return None;
         }
+        self.remove_building(world, grid, entity, x, y, team, block);
+        Some(block)
+    }
 
+    /// `Building.kill` -> `Call.buildDestroyed` server half: runs
+    /// `onDestroyed`/`afterDestroyed` and removes the building through the
+    /// tile ops without the break-permission gate. Returns the destroyed
+    /// block and its center tile (PAR-0141/PAR-0086 combat deaths).
+    pub(crate) fn destroy_building(
+        &mut self,
+        world: &mut World,
+        grid: &mut WorldGrid,
+        entity: Entity,
+    ) -> Option<(i16, i16, BlockId)> {
+        let building = world.get::<crate::entities::comp::Building>(entity)?;
+        let (pos, block) = (building.tile, building.block);
+        if grid.entity_at(pos) != Some(entity) || block == BlockId::AIR {
+            return None;
+        }
+        let team = world
+            .get::<crate::entities::comp::TeamComp>(entity)
+            .map(|team| team.team)
+            .unwrap_or(0);
+        if let Some(inst) = world
+            .get_resource::<BlockTable>()
+            .and_then(|table| table.instance(block))
+        {
+            inst.behavior.on_destroyed(world, entity);
+            inst.behavior.after_destroyed(world, entity);
+        }
+        let (x, y) = (pos.x(), pos.y());
+        self.remove_building(world, grid, entity, x, y, team, block);
+        Some((x, y, block))
+    }
+
+    /// Shared `Tile.remove` half of break/destroy.
+    #[allow(clippy::too_many_arguments)]
+    fn remove_building(
+        &mut self,
+        world: &mut World,
+        grid: &mut WorldGrid,
+        entity: Entity,
+        x: i16,
+        y: i16,
+        team: u8,
+        block: BlockId,
+    ) {
         let _ = remove_from_proximity(world, entity, &self.content);
         self.remove_power_graph(world, grid, entity);
         {
@@ -371,7 +417,6 @@ impl SimRuntime {
                 let _ = update_proximity(world, grid, &self.content, entity);
             }
         }
-        Some(block)
     }
 
     /// `World.loadMap`'s building half: spawns the ECS building entities for a
@@ -539,6 +584,9 @@ pub(crate) fn load_vanilla_content() -> Result<ContentRegistry, RuntimeError> {
     let mut content = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)?;
     content.init()?;
     content.post_init()?;
+    // `Blocks.java` turret `ammo(...)` tables: the anonymous ammo bullets join
+    // the registry so placed turrets resolve a live `TurretBehavior` (PAR-0086).
+    crate::world::blocks::defense::turrets::install_turret_ammo(&mut content);
     Ok(content)
 }
 

@@ -888,6 +888,292 @@ pub fn collide_bullet(ctx: &mut CombatCtx<'_>, bullet: Entity) -> CollisionOutco
     outcome
 }
 
+/// Whether a unit counts as flying for bullet/target gates
+/// (`UnitComp.isFlying`: `elevation >= 0.09`; flying unit types hover at
+/// elevation 1, mirrored here by [`PhysicsComp::flying`]).
+///
+/// [`PhysicsComp::flying`]: crate::entities::comp::unit::comp::PhysicsComp
+pub fn unit_is_flying(world: &World, unit: Entity) -> bool {
+    use crate::entities::comp::unit::comp::{PhysicsComp, UnitCore};
+    world.get::<PhysicsComp>(unit).is_some_and(|p| p.flying)
+        || world
+            .get::<UnitCore>(unit)
+            .is_some_and(|c| c.elevation >= 0.09)
+}
+
+/// `EntityCollisions.collide` swept AABB test (Arc port): `r1` moves by
+/// `(vx1, vy1)`, `r2` by `(vx2, vy2)`; returns the entry point of `r1`'s
+/// center on contact.
+#[allow(clippy::too_many_arguments)]
+fn swept_collide(
+    x1: f32,
+    y1: f32,
+    w1: f32,
+    h1: f32,
+    vx1: f32,
+    vy1: f32,
+    x2: f32,
+    y2: f32,
+    w2: f32,
+    h2: f32,
+    vx2: f32,
+    vy2: f32,
+) -> Option<(f32, f32)> {
+    let (px, py) = (vx1, vy1);
+    let vx1 = vx1 - vx2;
+    let vy1 = vy1 - vy2;
+    let (x_inv_entry, x_inv_exit) = if vx1 > 0.0 {
+        (x2 - (x1 + w1), (x2 + w2) - x1)
+    } else {
+        ((x2 + w2) - x1, x2 - (x1 + w1))
+    };
+    let (y_inv_entry, y_inv_exit) = if vy1 > 0.0 {
+        (y2 - (y1 + h1), (y2 + h2) - y1)
+    } else {
+        ((y2 + h2) - y1, y2 - (y1 + h1))
+    };
+    let x_entry = x_inv_entry / vx1;
+    let x_exit = x_inv_exit / vx1;
+    let y_entry = y_inv_entry / vy1;
+    let y_exit = y_inv_exit / vy1;
+    let entry = x_entry.max(y_entry);
+    let exit = x_exit.min(y_exit);
+    // Java float semantics: NaN comparisons are false, so `NaN` never rejects.
+    if entry > exit || x_exit < 0.0 || y_exit < 0.0 || x_entry > 1.0 || y_entry > 1.0 {
+        None
+    } else {
+        Some((x1 + w1 / 2.0 + px * entry, y1 + h1 / 2.0 + py * entry))
+    }
+}
+
+/// `Groups.bullet.collide()` unit half (`EntityCollisions.updateCollision` +
+/// `checkCollide`): tests one bullet's swept hitbox against the live enemy
+/// units and runs `BulletComp.collision` / `BulletType.hitEntity` on contact.
+///
+/// `units` must be in a stable (spawn/seq) order; the pass stops at the first
+/// non-piercing hit (`if(!solid.isAdded()) return`). Returns whether any unit
+/// was hit (PAR-0141).
+pub fn collide_units(ctx: &mut CombatCtx<'_>, bullet: Entity, units: &[Entity]) -> bool {
+    use crate::entities::comp::unit::comp::{HitboxComp, UnitCore, UnitTypeComp};
+    let Some(state) = ctx.bullet(bullet).cloned() else {
+        return false;
+    };
+    let Some(def) = ctx.content.bullet(state.def) else {
+        return false;
+    };
+    if !def.collides || state.sticky.is_some() || state.finished() {
+        return false;
+    }
+    let (collides_air, collides_ground, pierce, def_sticky) = (
+        def.collides_air,
+        def.collides_ground,
+        def.pierce,
+        def.sticky,
+    );
+    let team = ctx.team(bullet);
+    let Some((bx, by)) = ctx.pos(bullet) else {
+        return false;
+    };
+    let (lx, ly) = state.last;
+    let size = state.hit_size;
+    // `r1`: the bullet hitbox at its last position; `r2` merged with the
+    // current one bounds the broad phase (`updateCollision`).
+    let r1 = (lx - size / 2.0, ly - size / 2.0);
+    let (vax, vay) = (bx - lx, by - ly);
+    let (min_x, min_y) = (r1.0.min(bx - size / 2.0), r1.1.min(by - size / 2.0));
+    let (max_x, max_y) = (
+        (lx + size / 2.0).max(bx + size / 2.0),
+        (ly + size / 2.0).max(by + size / 2.0),
+    );
+    let mut any = false;
+    for &unit in units {
+        if unit == bullet || ctx.world.get_entity(unit).is_err() {
+            continue;
+        }
+        if ctx
+            .world
+            .get::<UnitCore>(unit)
+            .is_some_and(|core| core.dead)
+            || ctx.world.get::<Health>(unit).is_none_or(|h| h.dead)
+        {
+            continue;
+        }
+        // `Bullet.collides`: enemy team, air/ground gate, pierce memory.
+        if ctx.world.get::<TeamComp>(unit).map(|t| t.team) == Some(team) {
+            continue;
+        }
+        let flying = unit_is_flying(ctx.world, unit);
+        if !((flying && collides_air) || (!flying && collides_ground)) {
+            continue;
+        }
+        if pierce
+            && ctx
+                .bullet(bullet)
+                .is_some_and(|b| b.collided.contains(&unit))
+        {
+            continue;
+        }
+        // `Unit.collides`: `type.hittable(unit)`.
+        let hittable = ctx
+            .world
+            .get::<UnitTypeComp>(unit)
+            .and_then(|comp| ctx.content.unit(comp.type_id))
+            .is_none_or(|def| def.hittable);
+        if !hittable {
+            continue;
+        }
+        let Some(upos) = ctx.world.get::<Pos>(unit).copied() else {
+            continue;
+        };
+        let usize_ = ctx
+            .world
+            .get::<HitboxComp>(unit)
+            .map(|h| h.hit_size)
+            .unwrap_or(8.0);
+        let r2 = (upos.x - usize_ / 2.0, upos.y - usize_ / 2.0);
+        // Broad phase: the unit hitbox must overlap the merged bullet sweep.
+        if r2.0 > max_x || r2.0 + usize_ < min_x || r2.1 > max_y || r2.1 + usize_ < min_y {
+            continue;
+        }
+        let overlaps = r1.0 < r2.0 + usize_
+            && r1.0 + size > r2.0
+            && r1.1 < r2.1 + usize_
+            && r1.1 + size > r2.1;
+        let contact = if overlaps {
+            Some((bx, by))
+        } else {
+            swept_collide(
+                r1.0, r1.1, size, size, vax, vay, r2.0, r2.1, usize_, usize_, 0.0, 0.0,
+            )
+        };
+        let Some((cx, cy)) = contact else {
+            continue;
+        };
+        any = true;
+        // `BulletComp.collision`.
+        if def_sticky {
+            if let Some(mut b) = ctx.world.get_mut::<Bullet>(bullet) {
+                b.sticky = Some(unit);
+                b.sticky_x = cx - upos.x;
+                b.sticky_y = cy - upos.y;
+            }
+            return true;
+        }
+        behavior_hit(ctx, bullet, cx, cy, true);
+        let health = ctx.world.get::<Health>(unit).map_or(0.0, |h| h.health);
+        if pierce {
+            if let Some(mut b) = ctx.world.get_mut::<Bullet>(bullet) {
+                b.collided.push(unit);
+            }
+        } else if let Some(mut b) = ctx.world.get_mut::<Bullet>(bullet) {
+            b.set(HIT);
+        }
+        hit_entity(ctx, bullet, unit, health);
+        if ctx.bullet(bullet).is_none_or(Bullet::finished) {
+            break;
+        }
+    }
+    any
+}
+
+/// `BulletType.hitEntity` for a unit target: capped/armored damage, knockback,
+/// status and `handlePierce`.
+pub fn hit_entity(ctx: &mut CombatCtx<'_>, bullet: Entity, unit: Entity, health: f32) {
+    use crate::entities::comp::unit::ShieldComp;
+    use crate::entities::comp::unit::comp::UnitTypeComp;
+    let Some(state) = ctx.bullet(bullet).cloned() else {
+        return;
+    };
+    let Some(def) = ctx.content.bullet(state.def) else {
+        return;
+    };
+    let (max_fraction, pierce_armor, armor_mult) = (
+        def.max_damage_fraction,
+        def.pierce_armor,
+        def.armor_multiplier,
+    );
+    let (knockback, impact, status, status_duration, status_chance) = (
+        def.knockback,
+        def.impact,
+        def.status,
+        def.status_duration,
+        def.status_chance,
+    );
+    let (pierce_damage_factor, remove_after_pierce) =
+        (def.pierce_damage_factor, def.remove_after_pierce);
+    let mut damage = state.damage;
+    let mut health = health;
+    let shield = ctx
+        .world
+        .get::<ShieldComp>(unit)
+        .map_or(0.0, |s| s.shield.max(0.0));
+    if max_fraction > 0.0 {
+        let max_health = ctx.world.get::<Health>(unit).map_or(0.0, |h| h.max_health);
+        let cap = max_health * max_fraction + shield;
+        damage = damage.min(cap);
+        health = health.min(cap);
+    } else {
+        health += shield;
+    }
+    let _ = super::damage::area::damage_entity(
+        ctx.world,
+        ctx.content,
+        unit,
+        damage,
+        pierce_armor,
+        armor_mult,
+    );
+    // Knockback impulse (`unit.impulse(v)`: `vel += v / mass`, `mass = hitSize² π`).
+    let type_def = ctx
+        .world
+        .get::<UnitTypeComp>(unit)
+        .and_then(|comp| ctx.content.unit(comp.type_id));
+    let knock_mult = type_def.map_or(1.0, |d| d.knockback_multiplier);
+    let hit_size = type_def.map_or(8.0, |d| d.hit_size);
+    if knock_mult > 0.0 && knockback != 0.0 {
+        let (ux, uy) = ctx
+            .world
+            .get::<Pos>(unit)
+            .map_or((0.0, 0.0), |p| (p.x, p.y));
+        let (bx, by) = ctx.pos(bullet).unwrap_or(state.last);
+        let len = knockback * 80.0 * knock_mult;
+        let angle = if impact {
+            (state.rotation + if knockback < 0.0 { 180.0 } else { 0.0 }).to_radians()
+        } else {
+            (uy - by).atan2(ux - bx)
+        };
+        let mass = (hit_size * hit_size * std::f32::consts::PI).max(0.0001);
+        let (ix, iy) = if impact {
+            (angle.cos() * len.abs(), angle.sin() * len.abs())
+        } else {
+            (angle.cos() * len, angle.sin() * len)
+        };
+        if let Some(mut vel) = ctx.world.get_mut::<Vel>(unit) {
+            vel.x += ix / mass;
+            vel.y += iy / mass;
+        }
+    }
+    if status_chance >= 1.0 || ctx.rng.chance(RngStream::Sim, f64::from(status_chance)) {
+        super::damage::status::apply_status(ctx.world, unit, status, status_duration);
+    }
+    // `handlePierce`.
+    let sub = if pierce_damage_factor == 0.0 {
+        0.0
+    } else {
+        (health * pierce_damage_factor).max(0.0)
+    };
+    if let Some(mut b) = ctx.world.get_mut::<Bullet>(bullet) {
+        b.damage -= if sub.is_nan() {
+            b.damage
+        } else {
+            sub.min(b.damage)
+        };
+        if remove_after_pierce && b.damage <= 0.0 {
+            b.set(HIT);
+        }
+    }
+}
+
 /// Runs `despawned`/`removed` for a finishing bullet, then despawns it.
 pub fn finish_bullet(ctx: &mut CombatCtx<'_>, entity: Entity) {
     if let Some(state) = ctx.bullet(entity).cloned()

@@ -307,6 +307,104 @@ impl UnitRuntime {
 }
 
 impl Sim {
+    /// Death resolution after the entity pass (`HealthComp.damage` ->
+    /// `kill()`): live units at zero health are killed through their death
+    /// abilities (`UnitComp.killed`/`destroy`), and buildings at zero health
+    /// are destroyed through the tile ops (`Building.kill` ->
+    /// `Call.buildDestroyed`). Returns `(units, buildings)` removed.
+    ///
+    /// Without this pass damage only drained `Health` — nothing ever died in
+    /// the live sim (PAR-0141 / PAR-0086).
+    pub fn resolve_deaths(&mut self) -> (usize, usize) {
+        let mut killed_units = 0usize;
+        if let Some(mut runtime) = self.ecs.0.remove_non_send::<UnitRuntime>() {
+            let world = &mut self.ecs.0;
+            let dead: Vec<Entity> = runtime
+                .units
+                .iter()
+                .copied()
+                .filter(|entity| {
+                    world
+                        .get::<Health>(*entity)
+                        .is_some_and(|h| h.dead || (h.max_health > 0.0 && h.health <= 0.0))
+                })
+                .collect();
+            for entity in dead {
+                let UnitRuntime {
+                    content,
+                    grid,
+                    rng,
+                    seq,
+                    ..
+                } = &mut runtime;
+                let before = *seq;
+                if crate::entities::comp::unit::lifecycle::kill_unit_with_abilities(
+                    world,
+                    content,
+                    &grid.tiles,
+                    rng,
+                    seq,
+                    entity,
+                ) {
+                    killed_units += 1;
+                    runtime.units_removed += 1;
+                }
+                // Death-ability spawns (`SpawnDeathAbility`) join the live list.
+                if runtime.seq != before {
+                    let spawned: Vec<Entity> = world
+                        .iter_entities()
+                        .filter(|e| {
+                            e.get::<EntitySeq>()
+                                .is_some_and(|s| s.0 >= before && s.0 < runtime.seq)
+                                && e.get::<UnitTypeComp>().is_some()
+                        })
+                        .map(|e| e.id())
+                        .collect();
+                    runtime.units_created += spawned.len() as u64;
+                    runtime.units.extend(spawned);
+                }
+            }
+            runtime
+                .units
+                .retain(|entity| world.get_entity(*entity).is_ok());
+            world.insert_non_send(runtime);
+        }
+
+        let mut destroyed = 0usize;
+        if self.block_runtime.is_some() {
+            let mut dead: Vec<(u64, Entity)> = self
+                .ecs
+                .0
+                .iter_entities()
+                .filter(|e| {
+                    e.get::<Building>().is_some()
+                        && e.get::<Health>()
+                            .is_some_and(|h| h.dead || (h.max_health > 0.0 && h.health <= 0.0))
+                })
+                .map(|e| (e.get::<EntitySeq>().map_or(u64::MAX, |s| s.0), e.id()))
+                .collect();
+            dead.sort_unstable_by_key(|(seq, entity)| (*seq, entity.index()));
+            for (_, entity) in dead {
+                let Some(runtime) = self.block_runtime.as_mut() else {
+                    break;
+                };
+                if let Some((x, y, block)) =
+                    runtime.destroy_building(&mut self.ecs.0, &mut self.grid, entity)
+                {
+                    destroyed += 1;
+                    log::debug!("building destroyed at ({x}, {y}) block {}", block.raw());
+                    self.push_event(crate::event::SimEvent::BlockBrokenEvent(
+                        crate::event::BlockBrokenEvent { x, y, block },
+                    ));
+                }
+            }
+            if destroyed > 0 {
+                self.refresh_unit_runtime();
+            }
+        }
+        (killed_units, destroyed)
+    }
+
     /// Whether the opt-in live unit runtime is installed.
     pub fn has_unit_runtime(&self) -> bool {
         self.ecs.0.contains_non_send::<UnitRuntime>()
@@ -653,6 +751,44 @@ pub fn unit_update_system(world: &mut World) {
     world.insert_non_send(runtime);
 }
 
+/// `EntitySet::UpdateBuildings` turret half: `Turret.TurretBuild.updateTile`
+/// for every placed turret (`Groups.build.update`). Runs after the generic
+/// building pass; bullets fired here join the live bullet list (PAR-0086).
+pub fn turret_update_system(world: &mut World) {
+    let Some(mut runtime) = world.remove_non_send::<UnitRuntime>() else {
+        return;
+    };
+    let audio = world
+        .remove_resource::<AudioSinkRes>()
+        .unwrap_or_else(AudioSinkRes::noop);
+    let mut spawned: Vec<Entity> = Vec::new();
+    {
+        let UnitRuntime {
+            content,
+            grid,
+            rng,
+            fx,
+            seq,
+            ..
+        } = &mut runtime;
+        let mut ctx = CombatCtx {
+            world,
+            content,
+            grid,
+            rng,
+            fx: fx.as_ref(),
+            audio: &audio,
+            seq,
+            spawned: &mut spawned,
+        };
+        crate::world::blocks::defense::turrets::update_turrets(&mut ctx);
+    }
+    world.insert_resource(audio);
+    runtime.bullets_created += spawned.len() as u64;
+    runtime.bullets.extend(spawned);
+    world.insert_non_send(runtime);
+}
+
 /// `EntitySet::UpdateBullets` system: `Groups.bullet.update()` motion half.
 pub fn bullet_update_system(world: &mut World) {
     let Some(mut runtime) = world.remove_non_send::<UnitRuntime>() else {
@@ -736,8 +872,10 @@ pub fn bullet_collide_system(world: &mut World) {
             seq,
             bullets,
             bullets_removed,
+            units,
             ..
         } = &mut runtime;
+        let units: &[Entity] = units;
         let mut ctx = CombatCtx {
             world,
             content,
@@ -751,6 +889,11 @@ pub fn bullet_collide_system(world: &mut World) {
         for &entity in &list {
             if ctx.world.get_entity(entity).is_ok() && bullet::bullet_alive(ctx.world, entity) {
                 let _ = bullet::collide_bullet(&mut ctx, entity);
+            }
+            // `Groups.bullet.collide()` unit half (PAR-0141): direct hits on
+            // enemy units (`BulletComp.collision` -> `hitEntity`).
+            if ctx.world.get_entity(entity).is_ok() && bullet::bullet_alive(ctx.world, entity) {
+                let _ = bullet::collide_units(&mut ctx, entity, units);
             }
         }
         let mut alive: Vec<Entity> = Vec::with_capacity(list.len());

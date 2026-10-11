@@ -159,6 +159,11 @@ pub struct ContentRegistry {
     items_erekir_only: Vec<ItemId>,
     temporary_mapper: Option<TemporaryMapper>,
     region_audit: Option<RegionAudit>,
+    /// Named bullet lookup for the anonymous `Blocks.java` turret ammo
+    /// (`ammo(Items.copper, new BasicBulletType(...))` has no content name;
+    /// the port addresses each ammo bullet by a stable fixture key such as
+    /// `duo_copper`). Filled by `turrets::register_bullets` (PAR-0086).
+    bullet_names: BTreeMap<String, BulletId>,
 }
 
 impl ContentRegistry {
@@ -193,6 +198,7 @@ impl ContentRegistry {
             items_erekir_only: Vec::new(),
             temporary_mapper: None,
             region_audit: None,
+            bullet_names: BTreeMap::new(),
         }
     }
 
@@ -1085,6 +1091,21 @@ impl ContentRegistry {
     /// Bullet record by id.
     pub fn bullet(&self, id: BulletId) -> Option<&BulletDef> {
         self.bullets.get(id.index())
+    }
+
+    /// Names an anonymous bullet record (turret ammo fixture key).
+    pub fn name_bullet(&mut self, name: &str, id: BulletId) {
+        self.bullet_names.insert(name.to_owned(), id);
+    }
+
+    /// Bullet id by fixture key ([`Self::name_bullet`]).
+    pub fn bullet_by_name(&self, name: &str) -> Option<BulletId> {
+        self.bullet_names.get(name).copied()
+    }
+
+    /// The named bullet map ([`Self::name_bullet`]) in key order.
+    pub fn bullet_names(&self) -> &BTreeMap<String, BulletId> {
+        &self.bullet_names
     }
 
     /// Mutable bullet record by id.
