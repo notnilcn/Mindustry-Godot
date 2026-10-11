@@ -506,6 +506,69 @@ mod tests {
         assert_eq!(walls, 56078, "designed Ground Zero composition");
     }
 
+    /// PAR-0045: the designed map must keep its copper ore OVERLAYS (the mine
+    /// path's `can_mine_tile` reads `cell.overlay`'s `item_drop`; a lost
+    /// overlay leaves the ore click dead while the renderer still draws the
+    /// ore). Probes the real map, both the map-wide count and the core
+    /// neighbourhood the tutorial mine order targets.
+    #[cfg(feature = "msav-import")]
+    #[test]
+    fn legacy_ground_zero_map_keeps_ore_overlays() {
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+        use crate::editor::context::EditorContext;
+        use crate::world::WorldGrid;
+
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../assets/maps/serpulo/groundZero.msav");
+        let Ok(bytes) = std::fs::read(&path) else {
+            return;
+        };
+        let mut registry =
+            create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true).unwrap();
+        let mut grid = WorldGrid::new(0, 0);
+        grid.begin_map_load();
+        let result = {
+            let mut context = EditorContext::new(&mut grid, &registry);
+            let mut state = SaveReadState {
+                context: Some(&mut context),
+                content: Some(&mut registry),
+                ..SaveReadState::default()
+            };
+            SaveIo::load_bytes(&bytes, &mut state)
+        };
+        result.expect("ground zero map imports");
+        grid.end_map_load(&registry);
+
+        let copper = registry.block_by_name("ore-copper").unwrap().id;
+        let width = grid.tiles.width as usize;
+        let ore_tiles = grid
+            .tiles
+            .iter()
+            .filter(|tile| tile.overlay == copper)
+            .count();
+        assert!(
+            ore_tiles > 0,
+            "groundZero must keep its copper ore overlays"
+        );
+
+        // The player mech spawns at the core near tile (129,55); the tutorial's
+        // mine order targets ore within its neighbourhood (PAR-0045).
+        let near_core = grid
+            .tiles
+            .iter()
+            .enumerate()
+            .filter(|(index, tile)| {
+                let x = (index % width) as i32 - 129;
+                let y = (index / width) as i32 - 55;
+                tile.overlay == copper && x.abs() <= 16 && y.abs() <= 16
+            })
+            .count();
+        assert!(
+            near_core > 0,
+            "copper ore must exist within 16 tiles of the core ({near_core} tiles)"
+        );
+    }
+
     /// EV-0038: every built-in default map is a legacy MSAV v4/v5/v7 file.
     /// `MapIo::create_map` (meta-only list reads) and the full editor load
     /// (`MapEditor::begin_edit_map`) must route them through the `MSAV`
