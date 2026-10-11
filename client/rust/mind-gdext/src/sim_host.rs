@@ -1566,6 +1566,32 @@ impl MindSimHost {
         self.sim.player_unit().is_some()
     }
 
+    /// HUD status-table read model for the player unit (`player.dead()`,
+    /// `unit().healthf()`, `player.icon()` type name): `{dead, healthf, type}`.
+    /// `dead` is true (healthf 0) when the player has no unit.
+    #[func]
+    pub fn player_unit_status(&self) -> VarDictionary {
+        use mind_core::entities::comp::Health;
+        use mind_core::entities::comp::unit::comp::UnitTypeComp;
+        let mut dict = VarDictionary::new();
+        let entity = self.sim.player_unit();
+        let world = &self.sim.ecs.0;
+        let health = entity.and_then(|e| world.get::<Health>(e));
+        let type_name = entity
+            .and_then(|e| world.get::<UnitTypeComp>(e))
+            .and_then(|t| self.content_snapshot.as_ref()?.unit(t.type_id))
+            .map(|def| def.name.clone())
+            .unwrap_or_default();
+        let dead = health.is_none_or(|h| h.dead);
+        let healthf = health
+            .filter(|h| h.max_health > 0.0)
+            .map_or(0.0, |h| h.health / h.max_health);
+        dict.set("dead", dead);
+        dict.set("healthf", if dead { 0.0 } else { healthf });
+        dict.set("type", &GString::from(type_name.as_str()));
+        dict
+    }
+
     /// Whether the move axis reached the player unit
     /// (`HintsFragment.desktopMove` trigger).
     #[func]

@@ -19,7 +19,8 @@ var _hud: Node = null
 var _accum := 0.0
 var _game_over_shown := false
 
-@onready var status_label: RichTextLabel = get_node_or_null("WavesStack/WavesMain/Status")
+@onready var status_row: PanelContainer = get_node_or_null("WavesStack/WavesMain/StatusRow")
+@onready var status_label: RichTextLabel = get_node_or_null("WavesStack/WavesMain/StatusRow/Row/Status")
 @onready var info_label: RichTextLabel = get_node_or_null("WavesStack/WavesMain/Info")
 @onready var wave_buttons: HBoxContainer = get_node_or_null("WavesStack/WavesMain/WaveButtons")
 @onready var fps_label: Label = get_node_or_null("FpsBox/Fps")
@@ -75,7 +76,7 @@ func _connect_minimap() -> void:
 ## (36x27 ninepatch, splits 12). Built from the atlas region so the objective
 ## panel matches the Java top-left readout instead of a bare label.
 func _setup_status_style() -> void:
-	if status_label == null:
+	if status_row == null:
 		return
 	var assets := MindWidgets.assets()
 	if assets == null or not assets.has_method("find_region"):
@@ -89,11 +90,15 @@ func _setup_status_style() -> void:
 	box.texture_margin_top = 12.0
 	box.texture_margin_right = 12.0
 	box.texture_margin_bottom = 12.0
-	box.content_margin_left = 12.0
-	box.content_margin_top = 12.0
-	box.content_margin_right = 12.0
-	box.content_margin_bottom = 12.0
-	status_label.add_theme_stylebox_override("normal", box)
+	# `table.marginTop(0).marginBottom(4).marginLeft(4)`; the 120x80 player
+	# portrait cell sits inside, the status label to its right.
+	box.content_margin_left = 4.0
+	box.content_margin_top = 0.0
+	box.content_margin_right = 8.0
+	box.content_margin_bottom = 4.0
+	status_row.add_theme_stylebox_override("panel", box)
+	if status_label != null:
+		status_label.add_theme_stylebox_override("normal", StyleBoxEmpty.new())
 
 
 func _process(delta: float) -> void:

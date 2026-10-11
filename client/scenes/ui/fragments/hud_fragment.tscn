@@ -4,6 +4,7 @@
 [ext_resource type="PackedScene" path="res://scenes/ui/widgets/mind_minimap.tscn" id="2_minimap"]
 [ext_resource type="Script" uid="uid://da6xq1jjp24po" path="res://ui/text/mind_rich_label.gd" id="3_rich"]
 [ext_resource type="Script" uid="uid://cn6bp6oquv5tf" path="res://ui/widgets/core_items_display.gd" id="4_coreitems"]
+[ext_resource type="Script" path="res://ui/widgets/player_status.gd" id="5_playerstatus"]
 
 [node name="HudFragment" type="Control" unique_id=1693915975]
 layout_mode = 3
@@ -30,8 +31,23 @@ theme_override_constants/separation = 4
 layout_mode = 2
 theme_override_constants/separation = 2
 
-[node name="Status" type="RichTextLabel" parent="WavesStack/WavesMain" unique_id=399553049]
+[node name="StatusRow" type="PanelContainer" parent="WavesStack/WavesMain" unique_id=399553050]
 layout_mode = 2
+
+[node name="Row" type="HBoxContainer" parent="WavesStack/WavesMain/StatusRow" unique_id=399553051]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="PlayerStatus" type="Control" parent="WavesStack/WavesMain/StatusRow/Row" unique_id=399553052]
+custom_minimum_size = Vector2(120, 80)
+layout_mode = 2
+mouse_filter = 2
+script = ExtResource("5_playerstatus")
+
+[node name="Status" type="RichTextLabel" parent="WavesStack/WavesMain/StatusRow/Row" unique_id=399553049]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
 script = ExtResource("3_rich")
 
 [node name="Info" type="RichTextLabel" parent="WavesStack/WavesMain" unique_id=1511531312]
