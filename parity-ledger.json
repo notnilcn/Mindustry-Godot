@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T17:53:18+10:00",
+  "updated": "2026-10-11T18:10:20+10:00",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -28865,23 +28865,27 @@
       "title": "MSAV import fails for a subset of authored maps: cruxscape.msav and the hidden submission maps error with 'JSON error: expected value' while others import",
       "surface": "campaign",
       "parent": null,
-      "status": "seeded",
+      "status": "verified",
       "discovered_by": "runs/20261011-164851-PAR-0083/",
       "note": "Revealed by PAR-0083's registration (the authored submission maps became reachable): SimHost.load_sector('serpulo',76) finds assets/maps/serpulo/hidden/76.msav and the legacy MSAV reader fails with `JSON error: expected value at line 1 column 4016`; the same for cruxscape.msav (column 4445). geothermalStronghold.msav, groundZero.msav and biomassFacility.msav import fine (geo: 470x470, 15763 buildings materialized). The failing files are byte-identical to the upstream ones (zlib 789c... headers; hidden/76 matches ../Mindustry/core/assets/maps/serpulo/hidden/76.msav), so the gap is in the port's MSAV region/JSON reader for a construct those maps contain (a newer/other save version or a JSON payload shape the reader rejects). The launch then silently falls back to the planet generator ('loaded campaign sector' with a generated world).",
       "evidence": [
-        "godot log: load_sector: assets/maps/serpulo/hidden/76.msav failed: JSON error: expected value at line 1 column 4016",
-        "godot log: load_sector: assets/maps/serpulo/cruxscape.msav failed: JSON error: expected value at line 1 column 4445",
-        "godot log: load_sector: loaded preset map `serpulo/geothermalStronghold` (470x470) + materialized 15763 map building(s)",
-        "../Mindustry/core/assets/maps/serpulo/hidden/76.msav (byte-identical upstream file)"
+        "runs/20261011-175400-PAR-0155/godot/state-01-msav-infinity-fixed.json",
+        "client/rust/mind-core/tests/legacy_msav_import.rs",
+        "client/rust/mind-core/src/io/json/mod.rs"
       ],
       "path": {
-        "to": "Launch a submission/attack sector whose authored map is one of the failing files",
+        "to": "SimHost.load_sector + MindCampaign.start_sector on a submission/attack sector whose authored map carries Infinity rules",
         "java": [
-          "SaveIO/MSAV read of the authored map"
+          "SaveIO reads the authored MSAV (Arc JsonReader accepts bare Infinity)"
         ],
         "godot": [
-          "mind-core::io legacy MSAV reader -> load_grid_file -> JSON region parse"
-        ]
+          "load_sector('serpulo', 76) -> load_preset_map_grid -> SaveIo::load_bytes (msav-import) -> quote_bare_keys -> serde_json",
+          "start_sector('serpulo', 76); read the log + group counts + sector_state"
+        ],
+        "confirm": {
+          "godot": "log `loaded preset map `serpulo/hidden/76` (430x430)`; sector_state attack true/hasCore true; >6000 authored buildings"
+        },
+        "last_replayed": "runs/20261011-175400-PAR-0155/"
       },
       "reproduce": {
         "java": [
@@ -28894,35 +28898,79 @@
           "the loaded map dimensions/buildings vs the authored file"
         ]
       },
-      "steps": [],
+      "steps": [
+        {
+          "n": 1,
+          "action": "export/reproduce: load_sector('serpulo', 76) on the authored map",
+          "java_frame": null,
+          "godot_frame": null,
+          "diff": null,
+          "verdict": "pre-fix MISMATCH: `JSON error: expected value at line 1 column 4016`; the generator fallback world loaded",
+          "evidence": "../Mindustry-Godot/assets/maps/serpulo/hidden/76.msav (the Java-authored file)"
+        },
+        {
+          "n": 2,
+          "action": "fix the normalizer; re-run the load + launch",
+          "java_frame": null,
+          "godot_frame": null,
+          "diff": null,
+          "verdict": "match: `loaded preset map `serpulo/hidden/76` (430x430)`; attack sector with 6208 buildings + core",
+          "evidence": "runs/20261011-175400-PAR-0155/godot/state-01-msav-infinity-fixed.json"
+        }
+      ],
       "reference": null,
       "fix": {
-        "status": "open",
-        "commit": null,
-        "summary": null,
+        "status": "closed",
+        "commit": "09b5009",
+        "summary": "The legacy (MSAV) JSON normalizer now maps Arc's bare Infinity/-Infinity to the port's NEVER_F32 sentinel text, unblocking the 11 authored maps whose rules carry non-finite spawn scaling; regression tests cover the maps and the mapping.",
         "plan": {
-          "round": 0,
-          "state": "seeded 2026-10-11 from the PAR-0083 launch verification; not yet diagnosed further",
-          "seam": "mind-core MSAV import (msav-import feature) rejects a JSON payload in the failing maps",
+          "round": 1,
+          "state": "closed (verified mode reference 2026-10-11)",
+          "seam": "mind-core::io::json::quote_bare_keys (the legacy MSAV rules normalizer)",
           "files": [
-            "client/rust/mind-core/src/io/legacy.rs",
-            "client/rust/mind-core/src/io/save/versions/v1.rs (read_legacy_regions)"
+            "client/rust/mind-core/src/io/json/mod.rs",
+            "client/rust/mind-core/tests/legacy_msav_import.rs"
           ],
-          "approach": "Diff the decompressed MSAV regions of cruxscape.msav vs geothermalStronghold.msav around the failing offset; find the construct the reader rejects (a JSON meta/patch field) and extend the legacy reader.",
-          "narrow_check": "cargo test -p mind-core --features msav-import + a load test of both files; in-engine load_sector('serpulo',76) logs the authored map",
-          "evidence": {
-            "java": [
-              "../Mindustry/core/src/mindustry/io/SaveIO.java"
-            ],
-            "godot": [
-              "client/rust/mind-core/src/io/legacy.rs"
-            ]
-          }
+          "narrow_check": "cargo test -p mind-core --features msav-import (io::json + legacy_msav_import) + the in-engine load_sector('serpulo', 76) chain",
+          "evidence": [
+            "runs/20261011-175400-PAR-0155/godot/state-01-msav-infinity-fixed.json"
+          ]
         }
       },
-      "verified": null,
-      "run": "runs/20261011-164851-PAR-0083/",
-      "updated": "2026-10-11T17:22:11+10:00"
+      "verified": {
+        "mode": "reference",
+        "date": "2026-10-11T18:12:00+10:00",
+        "run": "runs/20261011-175400-PAR-0155/",
+        "java_frame": null,
+        "godot_frame": null,
+        "diff": null,
+        "note": "Godot-only walk; no Java boot. The reference for this item is the authored MSAV artifact itself (produced by the Java reference; its own header/meta carries the map identity) plus the expected behavior: the port must import it. Pre-fix: `load_sector('serpulo', 76)` failed with `JSON error: expected value at line 1 column 4016` and fell back to the generator. Post-fix (09b5009): `loaded preset map `serpulo/hidden/76` (430x430)` and `start_sector` materializes the authored attack sector (6208 buildings, attack true, hasCore true).",
+        "calibration": {
+          "reason": "No stored Java frames exist for the import (the failure/success is a parse of a Java-authored file, not a rendered surface); verification is the artifact import itself plus the regression tests. No pixel gate applies.",
+          "original_gate": {
+            "changed_fraction_max": 0.005,
+            "mean_abs_rgb_max": 12,
+            "coarse_layout_max_channel_mean_max": 6,
+            "palette_distance_max": 0.05
+          },
+          "checks": {
+            "root_cause": "bare `Infinity` float literals in 11 maps' rules (Arc JSON) rejected by strict serde_json",
+            "fix": "quote_bare_keys maps Infinity/-Infinity to NEVER_F32 text (Java +inf == the port's sentinel)",
+            "unit": "io::json bare-infinity test + tests/legacy_msav_import.rs (3 maps + the sentinel assertion)",
+            "in_engine": "hidden/76 (430x430) loads and launches as the authored attack sector; the control map (geothermalStronghold) still imports"
+          },
+          "conclusion": "The previously failing authored maps import and launch; the corpus has no other non-finite forms (NaN unsupported and unused)."
+        }
+      },
+      "run": "runs/20261011-175400-PAR-0155/",
+      "updated": "2026-10-11T18:10:20+10:00",
+      "claim": {
+        "by": "parity-hunt-s1",
+        "at": "2026-10-11T17:54:00+10:00",
+        "prior_status": "seeded",
+        "released_at": "2026-10-11T18:12:30+10:00",
+        "reason": "verified (mode reference) in runs/20261011-175400-PAR-0155/"
+      }
     }
   ]
 }

@@ -2086,3 +2086,12 @@ healthy bridge afterwards. Run: the PAR-0066 verification session.
   base is wiped by `SectorDamage(1f)`; distant blocks survive) -> `break_block(129,55)` -> step -> `load_sector(170)+start_sector(170)`
   again -> expect `start_sector: lost-sector replay ... restored N survivor(s)` and the restored tiles at team 0 (derelict).
 - Run: runs/20261011-172322-PAR-0084/.
+
+- Bullet (2026-10-11, PAR-0155): reproducing an import failure headlessly is fastest with a small
+  integration test that mirrors `MindSimHost::load_grid_file` (WorldGrid + `begin_map_load` +
+  `EditorContext::new(&mut grid, registry)` + `SaveReadState { context, content, .. }` +
+  `SaveIo::load_bytes` on the real `assets/maps/...` file) - it reproduced the exact
+  `JSON error: expected value at line 1 column NNNN` in seconds. Note `EditorContext::new` now takes
+  `&ContentRegistry` (no extra `&mut`), and the `--features msav-import` builds recompile the crate:
+  clippy/test calls for it need long timeouts (a 300 s wrapper timed out twice).
+- Run: runs/20261011-175400-PAR-0155/.
