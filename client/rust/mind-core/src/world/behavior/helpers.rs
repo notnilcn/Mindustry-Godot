@@ -75,6 +75,66 @@ pub trait ExplosionShield {
     }
 }
 
+/// `Block.consumesItem(item)` over the lowered generic consumers
+/// (`ConsumeItems` stacks; `Block.itemFilter`).
+pub fn block_consumes_item(world: &World, e: Entity, item: crate::content::ItemId) -> bool {
+    use crate::world::consumers::ConsumeInstanceKind;
+    instance(world, e).is_some_and(|inst| {
+        inst.consumers.all.iter().any(|consumer| {
+            matches!(&consumer.kind, ConsumeInstanceKind::Items(stacks)
+                if stacks.iter().any(|stack| stack.item == item))
+        })
+    })
+}
+
+/// `Block.consumesLiquid(liquid)` over the lowered generic consumers
+/// (`ConsumeLiquid`/`ConsumeLiquids`/`ConsumeCoolant`; `Block.liquidFilter`).
+pub fn block_consumes_liquid(world: &World, e: Entity, liquid: crate::content::LiquidId) -> bool {
+    use crate::world::consumers::ConsumeInstanceKind;
+    instance(world, e).is_some_and(|inst| {
+        inst.consumers
+            .all
+            .iter()
+            .any(|consumer| match &consumer.kind {
+                ConsumeInstanceKind::Liquid { liquid: wanted, .. } => *wanted == liquid,
+                ConsumeInstanceKind::Liquids(stacks) => {
+                    stacks.iter().any(|stack| stack.liquid == liquid)
+                }
+                _ => false,
+            })
+    })
+}
+
+/// `Block.liquidCapacity` for a building (0 when unknown).
+pub fn liquid_capacity(world: &World, e: Entity) -> f32 {
+    instance(world, e)
+        .map(|inst| inst.def.liquid_capacity.max(0.0))
+        .unwrap_or(0.0)
+}
+
+/// `BuildingComp.handleLiquid` default: `liquids.add(liquid, amount)`.
+pub fn default_handle_liquid(
+    world: &mut World,
+    e: Entity,
+    liquid: crate::content::LiquidId,
+    amount: f32,
+) {
+    let capacity = liquid_capacity(world, e);
+    if let Some(mut module) = world.get_mut::<crate::world::modules::LiquidModule>(e) {
+        module.add(liquid, amount, capacity);
+    }
+}
+
+fn instance(
+    world: &World,
+    e: Entity,
+) -> Option<std::sync::Arc<crate::world::block::BlockInstance>> {
+    let block = world.get::<crate::entities::comp::Building>(e)?.block;
+    world
+        .get_resource::<crate::world::block::BlockTable>()?
+        .instance(block)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

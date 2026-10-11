@@ -1221,4 +1221,6 @@ impl Sim {
 pub const KIND_BUILDING: u8 = 0;
 
 #[cfg(test)]
+mod production_tests;
+#[cfg(test)]
 mod tests;
