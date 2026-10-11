@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-only
 #
-# Resolves the Godot 4.7 binary ($GODOT_BIN -> godot4 -> godot4-mono), ensures it
-# is executable, and runs it against <repo>/client unless the caller already
-# passed --path. Set GODOT_VERBOSE=1 to print the resolved binary.
+# Resolves the Godot 4.7 binary ($GODOT_BIN -> godot4 -> godot4-mono -> godot),
+# ensures it is executable, and runs it against <repo>/client unless the caller
+# already passed --path. Set GODOT_VERBOSE=1 to print the resolved binary.
 
 set -euo pipefail
 
@@ -23,13 +23,17 @@ resolve_godot() {
     command -v godot4-mono
     return 0
   fi
+  if command -v godot >/dev/null 2>&1; then
+    command -v godot
+    return 0
+  fi
   return 1
 }
 
 if ! GODOT="$(resolve_godot)"; then
   echo "godot.sh: no Godot binary found." >&2
   echo "  Set GODOT_BIN to a Godot 4.7 binary, or install Godot 4.7.2 so that" >&2
-  echo "  'godot4' (preferred) or 'godot4-mono' (fallback) is on PATH." >&2
+  echo "  'godot4' (preferred), or 'godot4-mono'/'godot' (fallbacks) is on PATH." >&2
   exit 1
 fi
 

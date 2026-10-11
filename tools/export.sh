@@ -15,7 +15,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-GODOT_BIN="${GODOT_BIN:-$(command -v godot4 || command -v godot4-mono || true)}"
+GODOT_BIN="${GODOT_BIN:-$(command -v godot4 || command -v godot4-mono || command -v godot || true)}"
 PLATFORM="windows"
 TARGET="release"
 PRESET=""
