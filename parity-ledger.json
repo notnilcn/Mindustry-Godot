@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T16:26:23+10:00",
+  "updated": "2026-10-11T16:26:33+10:00",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -21126,8 +21126,8 @@
       "title": "Sectors never report or accumulate production while you play them (offline production, exports and the sector panel stay empty)",
       "surface": "campaign",
       "parent": null,
-      "status": "in-progress",
-      "updated": "2026-10-11T16:26:23+10:00",
+      "status": "reference",
+      "updated": "2026-10-11T16:26:33+10:00",
       "discovered_by": null,
       "path": {
         "to": "Campaign -> play a sector with production -> Save & Quit -> planet page sector panel (and wait a campaign turn)",
