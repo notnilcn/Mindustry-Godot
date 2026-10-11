@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T01:54:08Z",
+  "updated": "2026-10-11T02:08:44Z",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -16363,39 +16363,132 @@
       "title": "Campaign world: break blocks (right-click and drag)",
       "surface": "world",
       "parent": "PAR-0049",
-      "status": "reference",
-      "updated": "2026-10-11T01:54:08Z",
+      "status": "verified",
+      "updated": "2026-10-11T02:08:44Z",
       "discovered_by": "runs/20261009-065416-ref-ground-zero/",
       "path": {
-        "to": "Ground Zero tutorial objective 3",
+        "to": "in-game Ground Zero (a placed conveyor near the player)",
         "java": [],
-        "godot": [],
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "place_block(131,52,\"conveyor\"); var p = Camera2D.tile_to_screen(131,52) -> (640,420)"
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "mouse_motion",
+              "position": {
+                "x": 640,
+                "y": 420
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "mouse_button",
+              "button": "MOUSE_BUTTON_RIGHT",
+              "position": {
+                "x": 640,
+                "y": 420
+              },
+              "coords": "viewport",
+              "pressed": true
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "sleep 2"
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "mouse_button",
+              "button": "MOUSE_BUTTON_RIGHT",
+              "position": {
+                "x": 640,
+                "y": 420
+              },
+              "coords": "viewport",
+              "pressed": false
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "Input.flush_buffered_events()  # the block is removed"
+            }
+          }
+        ],
         "confirm": {
-          "java": "runs/20261009-065416-ref-ground-zero/java/r05-22-delivered2.png (hint visible)"
+          "godot": "the block is gone after the right hold/release (before/after captures)",
+          "java": "step-76-after-breakhold.png"
         },
-        "last_replayed": null
+        "last_replayed": "runs/20261011-115432-PAR-0050/ (place_block conveyor (131,52) -> right-hold (640,420) 2 s -> release -> the tile cleared)"
       },
-      "run": "runs/20261010-234250-ref-PAR-0070-combat-fx/",
+      "run": "runs/20261011-115432-PAR-0050/",
       "reproduce": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "hint_text": "Right-click and drag to break blocks.",
-              "note": "revealed by the objective-3 hint; break action not yet recorded"
+              "frames": "runs/20261010-234250-ref-PAR-0070-combat-fx/java/step-75-hover-conv.png + step-76-after-breakhold.png"
             }
           }
         ],
-        "godot": [],
-        "compare": []
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "place_block(131,52,\"conveyor\"); Camera2D.tile_to_screen(131,52)"
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "code": "mouse_motion -> RIGHT press -> sleep 2 -> RIGHT release -> flush (separate calls for the motion/release per the tool docs)"
+            }
+          }
+        ],
+        "compare": [
+          "the before/after captures show the tile cleared; the Java pair is informational (different world state)"
+        ]
       },
-      "steps": [],
-      "mismatch": null,
+      "steps": [
+        {
+          "action": "place a conveyor near the player",
+          "result": "the block exists; screen point (640,420) via tile_to_screen"
+        },
+        {
+          "action": "hold the right button over it (real input), then release",
+          "result": "the block is removed (desktop.rs right_press/right_release)"
+        },
+        {
+          "check": "the placed conveyor rendered the 'Wrong texture folder' placeholder in the world - seeded as PAR-0152"
+        }
+      ],
+      "mismatch": {
+        "step": "render gap: the placed conveyor shows the placeholder sprite before the break",
+        "godot_frame": "runs/20261011-115432-PAR-0050/godot/hud-160-conveyor-placed.png",
+        "java_frame": "runs/20261011-115432-PAR-0050/java/step-75-hover-conv-java.png",
+        "seeded": "PAR-0152"
+      },
       "fix": {
-        "status": "open"
+        "status": "none-needed",
+        "summary": "the break path verified live; the world-sprite placeholder is seeded as PAR-0152"
       },
-      "verified": null,
-      "note": "Plan (resumable, runs/20261011-115026-PAR-0050/): world placement/break must use godot_input (real OS cursor), not synthetic push_input. Two placement attempts at (700,300) left only the cursor ghost - likely gated by the tutorial objective 0 ('click to begin mining'); next: click the ORE first (godot_input), then select the conveyor via the picker, place with the PAR-0049 pattern (discrete press -> an eval of wall time -> release), then break with a held right-button press (separate calls for the final motion/release per the tool docs). Compare with java/step-75-hover-conv + step-76-after-breakhold. NOTE: tile_blocks()/section_json evals time out AND trip break-on-error (recover stop+play) - logged in open-godot-mcp-learnings.md.",
+      "verified": {
+        "mode": "reference",
+        "run": "runs/20261011-115432-PAR-0050/",
+        "reference": "runs/20261010-234250-ref-PAR-0070-combat-fx/",
+        "at": "2026-10-11T02:08:44Z"
+      },
+      "note": "Verified the break binding live (right press/hold/release removes a placed block). Findings: the placed conveyor renders the 'Wrong texture folder' placeholder in the live world (seeded PAR-0152; already in chains/ground-zero-conveyor-line.md:130); no break FX observed (PAR-0070 family). Input learnings logged: world clicks need godot_input and land only within unit range; heavy evals (player_can_mine/tile_region/tile_blocks) time out AND pin the loop.",
       "reference": {
         "captured": "2026-10-11T03:00:00Z",
         "profile": "fresh",
@@ -16424,9 +16517,9 @@
       },
       "claim": {
         "by": "parity-hunt-s1",
-        "at": "2026-10-11T01:50:26Z",
+        "at": "2026-10-11T01:54:32Z",
         "prior_status": "reference",
-        "released_at": "2026-10-11T01:54:08Z"
+        "released_at": "2026-10-11T02:08:44Z"
       }
     },
     {
@@ -28633,6 +28726,54 @@
       },
       "verified": null,
       "note": "Revealed by PAR-0043. Java (step-375): floating over the dark dim - 'Name:' field + a colour-picker swatch, 'Port: 6567', a wide bordered Host button, a '?' options toggle and a bottom Back. The port: a boxed panel, the mode buttons inline with raw bundle keys ('mode.survival/mode.sandbox/mode.attack/mode.pvp/mode.editor'), no colour picker."
+    },
+    {
+      "id": "PAR-0152",
+      "title": "Placed buildings render the 'Wrong texture folder' placeholder sprite in the live world",
+      "surface": "world",
+      "parent": "PAR-0050",
+      "status": "seeded",
+      "updated": "2026-10-11T02:08:44Z",
+      "discovered_by": "runs/20261011-115432-PAR-0050/",
+      "path": {
+        "to": "in-game: place a conveyor (scripted or built) and look at it",
+        "java": [],
+        "godot": [],
+        "confirm": {
+          "godot": "the sprite shows the white placeholder with 'Wrong texture folder'",
+          "java": "the conveyor sprite"
+        },
+        "last_replayed": null
+      },
+      "run": "runs/20261011-115432-PAR-0050/",
+      "reproduce": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "frame": "runs/20261010-234250-ref-PAR-0070-combat-fx/java/step-75-hover-conv.png"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "place_block(131,52,\"conveyor\") -> capture: the block renders the placeholder quad"
+            }
+          }
+        ],
+        "compare": [
+          "the picker icon for the same block renders correctly, so the region exists; the world render path misses it"
+        ]
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open"
+      },
+      "verified": null,
+      "note": "Revealed by PAR-0050 (also noted in chains/ground-zero-conveyor-line.md:130). The placed block's world sprite = the 'Wrong texture folder' placeholder while the picker cell for the same conveyor renders its atlas region - the world block-sprite lookup/build path differs. Check the world renderer's region resolution for placed blocks (rotation variants like conveyor-0 / the build-plan sprite path)."
     }
   ]
 }
