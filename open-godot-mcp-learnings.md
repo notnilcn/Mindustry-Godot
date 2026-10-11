@@ -1817,3 +1817,15 @@ those paths no longer exist, but the workarounds still apply.
   concatenation (`"..." + cx + "..."`) instead of embedding long template literals
   and mixed quotes in one helper.
 - Run dir: `runs/20261011-092614-PAR-0011/`.
+
+## 2026-10-11 — post-restart walks: menu clicks are swallowed during the boot fade (session 2)
+
+- Symptom: after `godot_game stop` + `play`, the first Play/Campaign click batch often
+  lands during the boot-cover fade: `godot_input` returns ok, the submenu opens from the
+  first click, the second click misses and the walk strands at the menu (`chooser:false`).
+  Recurred 3+ times across PAR-0015/PAR-0018/PAR-0017 walks.
+- Workaround that works every time: click Play, probe
+  `MenuGroup/menu/Submenu/Buttons.get_children().size()` (5 when open), click Campaign,
+  then probe `DialogLayer/planet.visible` and RE-PROBE once before concluding a miss (the
+  dialog appears a few frames after the click).
+- Run: `runs/20261011-095656-PAR-0018/`.
