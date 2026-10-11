@@ -1827,3 +1827,16 @@ records save presence at BOOT. Sequence for a truly fresh tutorial walk:
 log must say `MindCampaign ready (0 save slot(s))`), 4) then drive the menu walk.
 Verify with `grep "save slot" last_log.txt` before trusting a fresh-launch read.
 Run: runs/20261011-103326-PAR-0030/ (pre-fix boot A fresh / post-fix boot B resumed).
+
+## 2026-10-11 — Centring a dialog block inside MindDialog (PAR-0038)
+Symptom: the pause dialog's rows stayed top-aligned under the title after
+(a) giving the rows VBox `SIZE_SHRINK_CENTER` inside `Body/Content` and
+(b) adding expand spacers around it, and (c) setting the Body scroll mode to
+SCROLL_MODE_DISABLED. Root cause: `Body` is a ScrollContainer and `Content` a
+VBoxContainer that sizes to its children, so the scroll child never gets the
+viewport height and neither centre flag nor spacers have free space to claim.
+Workaround that worked: hide `Body` and add a `CenterContainer` (EXPAND_FILL)
+to `Center/Panel/Layout` just before the `Buttons` row, hosting the block; the
+Java `cont.grow()`-centred content then lands mid-screen (rows rect
+(351,203,450,260) vs the r01-00 reference's block around (350,190..440)).
+Run: runs/20261011-112541-PAR-0038/.

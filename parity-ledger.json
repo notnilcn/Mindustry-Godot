@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T01:36:59Z",
+  "updated": "2026-10-11T01:37:28Z",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -12985,7 +12985,7 @@
       "surface": "world",
       "parent": "PAR-0038",
       "status": "reference",
-      "updated": "2026-10-10T14:39:55Z",
+      "updated": "2026-10-11T01:37:28Z",
       "discovered_by": "runs/20261009-065416-ref-ground-zero/",
       "path": {
         "to": "pause dialog",
@@ -13130,7 +13130,7 @@
         "status": "open"
       },
       "verified": null,
-      "note": "Revealed by R01. Action not mirrored yet. Godot fork replayed 2026-10-10 at 7825590 (run dir runs/20261010-085323-paused-dialog-buttons/): launch -> drain IO -> Escape opens paused; desktop campaign set dumped; objective full_text 127 chars.",
+      "note": "Plan (resumable): the action frame (the objective text dialog) is missing from the stored reference, so batch one Java leg for PAR-0039 + PAR-0040: fresh profile -> tutorial -> ESC -> Map Objective (screen = client (50,98) + the r01-00 button at (460,216) -> (510,314)) -> capture the fullText objective panel; then Abandon -> capture the confirm. Share the boot; store frames on both items. The Godot chain then: resume GZ -> ESC -> click the objective button (351,203,220,55 centre) -> check MindUi.dialog_stack() == [full_text] with the groundZero description; Back resumes.",
       "reference": {
         "captured": "2026-10-09T07:00:00Z",
         "profile": "fresh",
@@ -13154,6 +13154,12 @@
         "java_path": [
           "launch -> window normalize -> Play > Campaign > Serpulo OK -> Ground Zero -> Launch (R00 frames) -> in-game HUD (R00-R07 frames)"
         ]
+      },
+      "claim": {
+        "by": "parity-hunt-s1",
+        "at": "2026-10-11T01:37:07Z",
+        "prior_status": "reference",
+        "released_at": "2026-10-11T01:37:28Z"
       }
     },
     {
