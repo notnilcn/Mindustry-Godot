@@ -1840,3 +1840,10 @@ to `Center/Panel/Layout` just before the `Buttons` row, hosting the block; the
 Java `cont.grow()`-centred content then lands mid-screen (rows rect
 (351,203,450,260) vs the r01-00 reference's block around (350,190..440)).
 Run: runs/20261011-112541-PAR-0038/.
+
+## 2026-10-11 — PAR-0048: section_json in an exec eval times out
+`MindCampaign.section_json("research")` parsed inside `godot_exec` exceeds the
+15s exec limit (223 nodes; same class as the seed's `campaign_views_json`
+timeout note). Read the dialog's cached `_campaign_views_cache` instead (a
+cheap script-var read) or query through a file dump. Run:
+runs/20261011-114802-PAR-0048/.

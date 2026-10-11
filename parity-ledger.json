@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T01:47:55Z",
+  "updated": "2026-10-11T01:50:19Z",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -15352,52 +15352,72 @@
       "title": "Campaign world: block picker (bottom-right) - category button + block grid",
       "surface": "world",
       "parent": "PAR-0046",
-      "status": "reference",
-      "updated": "2026-10-10T14:39:55Z",
+      "status": "verified",
+      "updated": "2026-10-11T01:50:19Z",
       "discovered_by": "runs/20261009-065416-ref-ground-zero/",
       "path": {
-        "to": "world after researching the drill",
+        "to": "in-game Ground Zero (block picker, bottom-right)",
         "java": [],
-        "godot": [],
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "click the Distribution category (1073,459) -> the grid fills; click block-conveyor -> selected_block() == conveyor"
+            }
+          }
+        ],
         "confirm": {
-          "java": "runs/20261009-065416-ref-ground-zero/java/r04-04-preview.png"
+          "godot": "the grid matches the category; the block click sets selected_block",
+          "java": "r05-16-distcategory.png non-blank"
         },
-        "last_replayed": null
+        "last_replayed": "runs/20261011-114802-PAR-0048/ (Distribution category (1073,459) -> 9 blocks; block-conveyor -> selected conveyor)"
       },
-      "run": "runs/20261009-065416-ref-ground-zero/",
+      "run": "runs/20261011-114802-PAR-0048/",
       "reproduce": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "image_centers": {
-                "drill_block_button": [
-                  883,
-                  427
-                ],
-                "category_button": [
-                  1076,
-                  427
-                ],
-                "info_panel_help": [
-                  1120,
-                  325
-                ]
-              },
-              "screen": "image + (50,98)"
+              "frames": "runs/20261009-065416-ref-ground-zero/java/r05-16-distcategory.png + r05-19-conveyors.png"
             }
           }
         ],
-        "godot": [],
-        "compare": []
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "click a category button -> read the grid names; click a block -> selected_block"
+            }
+          }
+        ],
+        "compare": [
+          "the grid set matches; the shown-count differs by the campaign tech state (PAR-0080)"
+        ]
       },
-      "steps": [],
+      "steps": [
+        {
+          "action": "click the Distribution category",
+          "result": "the grid fills with conveyor/junction/bridge-conveyor/sorter/inverted-sorter/router/distributor/overflow-gate/underflow-gate"
+        },
+        {
+          "action": "click the conveyor block",
+          "result": "SimHost.selected_block() == conveyor"
+        },
+        {
+          "check": "the shown set follows the campaign tech (61 unlocked in this session vs the Java r05-16's single conveyor) - the semantics are PAR-0080"
+        }
+      ],
       "mismatch": null,
       "fix": {
-        "status": "open"
+        "status": "none-needed"
       },
-      "verified": null,
-      "note": "Revealed by R04 after the drill research: the PlacementFragment grid + category column become visible at the bottom-right, with a block info panel (name/key/cost/Drill Speed) and a '?' help button. Category icons/behavior not yet mirrored.",
+      "verified": {
+        "mode": "reference",
+        "run": "runs/20261011-114802-PAR-0048/",
+        "reference": "runs/20261009-065416-ref-ground-zero/",
+        "at": "2026-10-11T01:50:19Z"
+      },
+      "note": "Picker mechanics verified (category switch + grid + selection). The shown block set is downstream of the auto-unlock/research semantics (PAR-0080); the port's session reports 61 unlocked, so the distribution grid shows all 9 vs the Java r05-16's conveyor-only (fresh-soak state). Category buttons carry auto names in the live tree (cosmetic).",
       "reference": {
         "captured": "2026-10-09T07:00:00Z",
         "profile": "fresh",
@@ -15422,6 +15442,12 @@
         "java_path": [
           "launch -> window normalize -> Play > Campaign > Serpulo OK -> Ground Zero -> Launch (R00 frames) -> in-game HUD (R00-R07 frames)"
         ]
+      },
+      "claim": {
+        "by": "parity-hunt-s1",
+        "at": "2026-10-11T01:48:02Z",
+        "prior_status": "reference",
+        "released_at": "2026-10-11T01:50:19Z"
       }
     },
     {
