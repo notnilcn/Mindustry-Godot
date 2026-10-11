@@ -27,7 +27,14 @@ var _pending_abandon := false
 func _ready() -> void:
 	set_title_key("@menu")
 	should_pause = true
+	full_dialog = true
 	super._ready()
+	# `Styles.defaultDialog` background (`Tex.windowEmpty`): the pause dims the
+	# world to ~10% (measured r01-00: an undimmed 255-lum ore reads 26), far
+	# darker than the shared `MindDialog` 0.55 dim.
+	var dim := get_node_or_null("Dim") as ColorRect
+	if dim != null:
+		dim.color = Color(0.0, 0.0, 0.0, 0.9)
 	_build()
 	_connect_confirm()
 
@@ -38,50 +45,63 @@ func _ready() -> void:
 ## `@planetmap`/`@research` are the mobile campaign branch.
 ##
 ## `PausedDialog.rebuild` stacks the desktop campaign entries in rows
-## (`PausedDialog.java:69-109`); `MindDialog.buttons` is a single HBox, so the
-## dialog builds its own row column inside it. One flat row overflows the
-## window once the campaign entries are present.
+## (`PausedDialog.java:69-109`); the Java rows live in the dialog's centered
+## content (`cont.defaults().width(220f).height(55).pad(5f)`), not the bottom
+## button row, so the port builds its own centered row column inside `cont`.
 func _build() -> void:
 	# code-instantiated: the pause dialog's fixed upstream row layout; the
 	# shared `buttons` HBox is a single row for every dialog.
 	var rows := VBoxContainer.new()
 	rows.name = "Rows"
-	rows.add_theme_constant_override("separation", 6)
-	if buttons != null:
-		buttons.add_child(rows)
+	rows.add_theme_constant_override("separation", 10)
+	# `cont.grow()` with the row table centred: the Java rows sit around
+	# mid-screen (r01-00), so host them in a centred filler between the title
+	# and the (empty) bottom button row instead of the scrollable body.
+	var layout := get_node_or_null("Center/Panel/Layout") as Container
+	if layout != null:
+		if body != null:
+			body.visible = false
+		var host := CenterContainer.new()
+		host.name = "RowsCenter"
+		host.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		host.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		layout.add_child(host)
+		if buttons != null:
+			layout.move_child(host, buttons.get_index())
+		host.add_child(rows)
 
 	var campaign_row := _row(rows)
-	_objective_button = _add_to(campaign_row, _t("@objective"), _open_objective, "info", 240.0)
+	_objective_button = _add_to(campaign_row, _t("@objective"), _open_objective, "info", 220.0)
 	_objective_button.name = "objective"
 	_objective_button.visible = false
-	_abandon_button = _add_to(campaign_row, _t("@abandon"), _confirm_abandon, "cancel", 240.0)
+	_abandon_button = _add_to(campaign_row, _t("@abandon"), _confirm_abandon, "cancel", 220.0)
 	_abandon_button.name = "abandon"
 	_abandon_button.visible = false
 
 	var navigation_row := _row(rows)
-	var back := _add_to(navigation_row, _t("@back"), _close_pressed, "left", 240.0)
+	var back := _add_to(navigation_row, _t("@back"), _close_pressed, "left", 220.0)
 	back.name = "back"
-	var settings_button := _add_to(navigation_row, _t("@settings"), _open_settings, "settings", 240.0)
+	var settings_button := _add_to(navigation_row, _t("@settings"), _open_settings, "settings", 220.0)
 	settings_button.name = "settings"
 
 	# Desktop non-campaign, non-editor entry set (`PausedDialog.java:89-93`);
 	# the campaign/mobile branch replaces it with `@research`/`@planetmap`.
 	var save_row := _row(rows)
-	_save_button = _add_to(save_row, _t("@savegame"), _open_save, "save", 240.0)
+	_save_button = _add_to(save_row, _t("@savegame"), _open_save, "save", 220.0)
 	_save_button.name = "savegame"
-	_load_button = _add_to(save_row, _t("@loadgame"), _open_load, "upload", 240.0)
+	_load_button = _add_to(save_row, _t("@loadgame"), _open_load, "upload", 220.0)
 	_load_button.name = "loadgame"
 
 	# Mobile campaign branch entry (`PausedDialog.java:140-149`); desktop keeps
 	# it hidden and takes no row space.
-	_planet_button = _add_to(rows, _t("@planetmap"), _open_planet, "map", 240.0)
+	_planet_button = _add_to(rows, _t("@planetmap"), _open_planet, "map", 220.0)
 	_planet_button.name = "planetmap"
 	_planet_button.visible = false
 
-	_host_button = _add_to(rows, _t("@hostserver"), _open_host, "host", 484.0)
+	_host_button = _add_to(rows, _t("@hostserver"), _open_host, "host", 450.0)
 	_host_button.name = "hostserver"
 	_host_button.disabled = _net_active()
-	_quit_button = _add_to(rows, _t("@quit"), _confirm_quit, "exit", 240.0)
+	_quit_button = _add_to(rows, _t("@quit"), _confirm_quit, "exit", 450.0)
 	_quit_button.name = "quit"
 
 
@@ -91,7 +111,7 @@ func _row(parent: Container) -> HBoxContainer:
 	# up); the shared button row is a single HBox.
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
-	row.add_theme_constant_override("separation", 6)
+	row.add_theme_constant_override("separation", 10)
 	parent.add_child(row)
 	return row
 
@@ -102,11 +122,30 @@ func _add_to(
 ) -> Button:
 	# code-instantiated: the entry set is fixed per the upstream rebuild branch.
 	var button := MindWidgets.icon_button(icon_name, text_value)
-	button.custom_minimum_size.x = width
+	# `cont.defaults().width(dw).height(55)` (`PausedDialog.java:75`).
+	button.custom_minimum_size = Vector2(width, 55.0)
 	if listener.is_valid():
 		button.pressed.connect(listener)
 	parent.add_child(button)
 	return button
+
+
+## Updates the visible label of an `MindWidgets.icon_button` (the text lives in
+## an icon row child next to the glyph label, so `Button.text` alone is not
+## enough; the glyph label is first).
+func _set_button_text(button: Button, value: String) -> void:
+	if button == null:
+		return
+	var labels: Array[Label] = []
+	for child in button.get_children():
+		if child is HBoxContainer:
+			for inner in child.get_children():
+				if inner is Label:
+					labels.append(inner)
+	if labels.is_empty():
+		button.text = value
+	else:
+		labels[labels.size() - 1].text = value
 
 
 func shown() -> void:
@@ -138,6 +177,10 @@ func _refresh_campaign_buttons() -> void:
 		# binds while calling `shown()`; resolve the mobile branch after that
 		# call returns (same deferral as the game-over HUD toggle, EV-0061).
 		_apply_planet_visibility.call_deferred(campaign)
+	if _quit_button != null:
+		# `PausedDialog.java:116`: the entry reads `@save.quit` while the
+		# current save is an autosave (every campaign sector save is one).
+		_set_button_text(_quit_button, _t("@save.quit" if campaign else "@quit"))
 
 
 ## Mobile-branch gate for `@planetmap`, deferred out of the `MindUi` bind.
