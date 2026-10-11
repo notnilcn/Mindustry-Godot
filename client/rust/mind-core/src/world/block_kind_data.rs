@@ -604,11 +604,17 @@ impl BlockKindData {
             BlockKind::Incinerator | BlockKind::ItemIncinerator => {
                 BlockKindData::Incinerator(IncineratorDef::default())
             }
-            BlockKind::ItemSource => BlockKindData::ItemSource(SandboxItemDef::default()),
+            // `ItemSource.itemsPerSecond = 100`.
+            BlockKind::ItemSource => BlockKindData::ItemSource(SandboxItemDef {
+                items_per_second: 100.0,
+            }),
             BlockKind::ItemVoid => BlockKindData::ItemVoid,
             BlockKind::LiquidSource => BlockKindData::LiquidSource(SandboxLiquidDef::default()),
             BlockKind::LiquidVoid => BlockKindData::LiquidVoid,
-            BlockKind::PowerSource => BlockKindData::PowerSource(SandboxPowerDef::default()),
+            // `Blocks.powerSource.powerProduction = 1000000f / 60f`.
+            BlockKind::PowerSource => BlockKindData::PowerSource(SandboxPowerDef {
+                power_production: 1_000_000.0 / 60.0,
+            }),
             BlockKind::PowerVoid => BlockKindData::PowerVoid,
             BlockKind::Accelerator => BlockKindData::Accelerator(AcceleratorDef::default()),
             BlockKind::LandingPad => BlockKindData::LandingPad(LandingPadDef::default()),

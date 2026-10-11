@@ -195,6 +195,8 @@ pub struct SandboxState {
     pub accumulator: f32,
     /// Configured item (item source).
     pub item: Option<ItemId>,
+    /// Configured liquid (`LiquidSource.source`).
+    pub liquid: Option<crate::content::LiquidId>,
 }
 
 /// `Pump`/`SolidPump` build state.
