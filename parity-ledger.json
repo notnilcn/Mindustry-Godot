@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T02:08:44Z",
+  "updated": "2026-10-11T02:13:31Z",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -13926,7 +13926,7 @@
       "surface": "world",
       "parent": "PAR-0028",
       "status": "blocked",
-      "updated": "2026-10-09T10:17:34Z",
+      "updated": "2026-10-11T02:13:31Z",
       "discovered_by": "runs/20261009-065416-ref-ground-zero/",
       "path": {
         "to": "Ground Zero tutorial start (objective Obtain: 0/15 Copper)",
@@ -14043,54 +14043,8 @@
         ]
       },
       "fix": {
-        "status": "godot-signals-pass",
-        "commit": null,
-        "summary": null,
-        "plan": {
-          "round": 2,
-          "mismatch_evidence": {
-            "changed_fraction": 0.76977,
-            "mean_abs_rgb": [
-              69.87,
-              69.76,
-              69.41
-            ],
-            "diff": "runs/20261009-095320-PAR-0045/diff/step-click.json"
-          },
-          "seam": "left-click with no block selection -> player unit mine tile; mining tick yields ore; counter/objective HUD (PAR-0028)",
-          "prerequisites": [
-            "PAR-0028: the objective counter/panel (mined-copper count) does not exist in the port",
-            "player mining tick: MinerComp has mine_tile/mining but no extraction (mine_speed/tier progress, ore drop -> items)"
-          ],
-          "files": [
-            "client/rust/mind-gdext/src/sim_host.rs (unhandled_input: block-selection gate -> mine command)",
-            "client/rust/mind-core/src/sim/unit_runtime.rs or sim/mod.rs (Sim::set_player_mine_tile + mining tick)",
-            "client/rust/mind-core/src/entities/comp/unit/comp.rs (MinerComp timer/progress fields)",
-            "client/rust/mind-core/src/ai/types/miner.rs (reuse drop/tier checks)"
-          ],
-          "approach": "Mirror InputHandler.tryBeginMine/tryStopMine on the player unit (canMine: tile.drop or overlay item_drop, tier <= mine_tier); add a per-tick mining pass that advances mineTimer by mine_speed and adds the ore drop to the unit's ItemsComp (upstream MinerComp.update).",
-          "narrow_check": "cargo test -p mind-core; cargo clippy -p mind-core -p mind-gdext --all-targets -- -D warnings; tools/build.sh; Godot leg",
-          "implementation": {
-            "changed": [
-              "mind-core/src/ai/types/player.rs (PlayerInput.mine_tile/mine_timer/mined; update_mining = MinerComp.update port; can_mine_tile)",
-              "mind-core/src/sim/unit_runtime.rs (Sim::{set_player_mine_tile,player_mine_tile,player_mined_count,player_can_mine})",
-              "mind-gdext/src/input/desktop.rs (try_mine_at on the no-selection left press: InputHandler.tryBeginMine/tryStopMine)",
-              "mind-gdext/src/sim_host.rs (player_can_mine/player_mine_target/set_player_mine; player_mine_tile/player_mined_count #[func])"
-            ],
-            "checks": {
-              "cargo test -p mind-core": "1823 passed",
-              "cargo clippy -p mind-core -p mind-gdext --all-targets -- -D warnings": "clean",
-              "tools/build.sh": "done"
-            },
-            "engine": {
-              "pid": 192138,
-              "order": "[137,53]",
-              "mined": 4,
-              "note": "click sets the order; a real-time D hold brings the unit in range and mining yields copper"
-            },
-            "commit": "80e2684 (neutral; the frame gate is blocked on PAR-0028)"
-          }
-        }
+        "status": "blocked-on-investigation",
+        "summary": "the mining click gate (can_mine_tile) fails on ore tiles; trace the loader's cell.overlay/cell.block for the ore, then re-test"
       },
       "verified": null,
       "reference": {
@@ -14163,7 +14117,8 @@
       "blocked_on": [
         "PAR-0028"
       ],
-      "blocked_note": "Own signal engine-verified: no-selection left click on tile (137,53) sets player_mine_tile [137,53] and the unit produces copper (player_mined_count 0 -> 4). The §4 frame gate stays blocked on PAR-0028 (objective counter/HUD, wave state, terrain): step-click 0.76977 changed."
+      "blocked_note": "Own signal engine-verified: no-selection left click on tile (137,53) sets player_mine_tile [137,53] and the unit produces copper (player_mined_count 0 -> 4). The §4 frame gate stays blocked on PAR-0028 (objective counter/HUD, wave state, terrain): step-click 0.76977 changed.",
+      "note": "Investigated 2026-10-11 (runs/20261011-121147-PAR-0058/): the ore click never sets a mine order. Evidence: with proven-safe calls (godot_input sequence clicks + player_mine_tile), clicks mapped through Camera2D.screen_to_tile/tile_to_screen on the ore pixel (614,502, tile (130,49)) and neighbours (129..131,48..49) ALL leave player_mine_tile == []. The press gate is clear (no STOP controls at the points; gui_get_hovered_control == hud; no dialogs), and a fresh world (saves staged aside) behaves the same as the resumed save. Source: desktop.rs try_mine_at -> SimHost.player_can_mine -> ai/types/player.rs can_mine_tile, which requires cell.block == AIR and a drop (cell.drop or content.block(cell.overlay).item_drop; ore-copper carries item_drop copper per registries/blocks/ore.rs). In PAR-0050 the same click once landed a mine order (129,49) during the launch camera pan, so the path works for SOME tile/state. Hypothesis to prove next: the loaded grid's cell.block/cell.overlay for the ore tiles (block != AIR would fail can_mine while the renderer still draws the ore) - trace cell.overlay from the map/save loader (io/map loader -> grid.tiles) with a fixture test or a small probe returning ONE cell's (block, overlay, floor); then fix, rebuild, and re-run the tutorial mine click; PAR-0058 and PAR-0051 depend on it."
     },
     {
       "id": "PAR-0046",
@@ -17322,8 +17277,8 @@
       "title": "Tutorial: the player unit offloads mined ore into the nearest core within mineTransferRange (MinerComp offload branch)",
       "surface": "world",
       "parent": "PAR-0046",
-      "status": "reference",
-      "updated": "2026-10-10T14:47:09Z",
+      "status": "blocked",
+      "updated": "2026-10-11T02:13:31Z",
       "discovered_by": "runs/20261009-153006-PAR-0046/",
       "path": {
         "to": "Ground Zero launched sector, player mining the tutorial copper tile within 220 units of the core",
@@ -17476,7 +17431,7 @@
           }
         ]
       },
-      "note": "Fork rule item discovered while constructing PAR-0046's fork; the offload branch is implemented under PAR-0046's round 1 (prerequisite) and this item tracks the standalone surface for its own walk. Implemented with PAR-0046 round 1 (player.rs offload branch; test player_offloads_mined_ore_into_the_core); exercised by PAR-0046's fork construction; own walk pending. Godot walk 2026-10-10 at 7825590 (runs/20261010-085531-ground-zero-drill-placement/): the ore click + player_mine_tile offloaded into the core while no conveyor existed - core_items_json reached copper 61 and objective 0 (Obtain 15 copper) completed; the unit stack observation was not re-read this run.",
+      "note": "Blocked on the mining click (PAR-0045): the offload flow needs the player unit to mine first. Tested 2026-10-11 (runs/20261011-121147-PAR-0058/): fresh world (saves staged) and resumed save both refuse the ore click (player_mine_tile stays [] for the ore pixel and its neighbours); the Java reference frames (r06-00-now -> r06-04-100: core copper 24 -> 100) stay adequate once the mine path works. Resumes after PAR-0045.",
       "reference": {
         "captured": "2026-10-11T03:00:00Z",
         "profile": "fresh",
@@ -17503,6 +17458,10 @@
         "java_path": [
           "run the tutorial to objective 3; capture the core item count"
         ]
+      },
+      "fix": {
+        "status": "blocked-on-PAR-0045",
+        "summary": "the offload verification resumes once the mine click lands"
       }
     },
     {
