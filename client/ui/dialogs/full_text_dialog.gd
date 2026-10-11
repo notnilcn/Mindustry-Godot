@@ -12,7 +12,16 @@ extends MindDialog
 
 func _ready() -> void:
 	should_pause = true
+	# `FullTextDialog.java`: `super("")` + `addCloseButton()` - the text floats
+	# over the defaultDialog backdrop (no boxed panel), so use the full-dialog
+	# style like the Java frame (r00-05).
+	full_dialog = true
 	super._ready()
+	# `Styles.defaultDialog` (windowEmpty) dims ~0.9; the shared MindDialog dim
+	# is 0.55 (same mapping as the pause dialog, PAR-0038/PAR-0148).
+	var dim := get_node_or_null("Dim") as ColorRect
+	if dim != null:
+		dim.color = Color(0.0, 0.0, 0.0, 0.9)
 	add_close_button()
 
 
@@ -43,4 +52,6 @@ func _set_content(dialog_title: String, text: String) -> void:
 		var label := MindWidgets.label(text)
 		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		# `FullTextDialog.java:19`: `.labelAlign(Align.center)`.
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		cont.add_child(label)
