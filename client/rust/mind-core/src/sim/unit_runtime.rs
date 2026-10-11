@@ -2027,6 +2027,124 @@ mod msav_tests {
         );
     }
 
+    /// PAR-0086/PAR-0141 end-to-end on Ground Zero: a mechanical drill on
+    /// copper ore feeds an adjacent duo, which shoots down wave daggers.
+    #[test]
+    fn ground_zero_drill_fed_duo_kills_wave_daggers() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../assets/maps/serpulo/groundZero.msav");
+        let Ok(bytes) = std::fs::read(&path) else {
+            return;
+        };
+        let mut content =
+            create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+                .expect("content");
+        let mut grid = WorldGrid::new(0, 0);
+        grid.begin_map_load();
+        let pending: Vec<(usize, DecodedBase)> = {
+            let mut context = EditorContext::new(&mut grid, &content);
+            let mut state = SaveReadState {
+                context: Some(&mut context),
+                content: Some(&mut content),
+                ..SaveReadState::default()
+            };
+            SaveIo::load_bytes(&bytes, &mut state).expect("map imports");
+            std::mem::take(&mut context.pending_buildings)
+        };
+        grid.end_map_load(&content);
+        let ore = content.block_id("ore-copper").expect("ore");
+        let (width, height) = (grid.tiles.width, grid.tiles.height);
+        let air = BlockId::AIR;
+        let mut sim = Sim::new(1, width, height, air, air);
+        sim.grid = grid;
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        assert!(sim.materialize_map_buildings(&pending) > 0, "core linked");
+        let core_block = content.block_id("core-shard").expect("core");
+        let core = sim
+            .grid
+            .tiles
+            .array()
+            .iter()
+            .find(|t| t.block == core_block)
+            .map(|t| (i32::from(t.x), i32::from(t.y)))
+            .expect("core tile");
+        // A free 2x2 copper patch (drill) with a free tile to its right (duo).
+        let free = |sim: &Sim, x: i32, y: i32| {
+            sim.grid
+                .tiles
+                .getn(x, y)
+                .is_some_and(|t| t.block == air && t.build.is_none())
+        };
+        let is_ore =
+            |sim: &Sim, x: i32, y: i32| sim.grid.tiles.getn(x, y).is_some_and(|t| t.overlay == ore);
+        let mut site = None;
+        'search: for r in 2..40 {
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    let (x, y) = (core.0 + dx, core.1 + dy);
+                    let cells = [(x, y), (x + 1, y), (x, y + 1), (x + 1, y + 1)];
+                    if cells
+                        .iter()
+                        .all(|&(cx, cy)| free(&sim, cx, cy) && is_ore(&sim, cx, cy))
+                        && free(&sim, x + 2, y)
+                    {
+                        site = Some((x, y));
+                        break 'search;
+                    }
+                }
+            }
+        }
+        let (dx, dy) = site.expect("copper patch near the core");
+        eprintln!(
+            "ground zero core {core:?} drill site ({dx}, {dy}) duo ({}, {dy})",
+            dx + 2
+        );
+        let drill = content.block_id("mechanical-drill").expect("drill").get();
+        let duo = content.block_id("duo").expect("duo").get();
+        for (x, y, block) in [(dx, dy, drill), (dx + 2, dy, duo)] {
+            sim.command(crate::determinism::SimCommand::Place {
+                x: x as i16,
+                y: y as i16,
+                block,
+                rotation: 0,
+                team: 1,
+                player: None,
+            })
+            .expect("place");
+        }
+        let duo_entity = sim.grid.tiles.get(dx + 2, dy).build.expect("duo built");
+        // Let the drill stock the duo (mechanical drill ~ one copper / 9 s).
+        for _ in 0..1800 {
+            sim.tick().expect("tick");
+        }
+        let ammo = sim
+            .ecs
+            .0
+            .get::<crate::world::blocks::defense::turrets::TurretState>(duo_entity)
+            .map(|s| s.total_ammo)
+            .unwrap_or(0);
+        assert!(ammo > 0, "the drill fed copper ammo into the duo");
+        let (px, py) = (
+            (dx + 2) as f32 * TILE_SIZE + 4.0,
+            dy as f32 * TILE_SIZE + 4.0,
+        );
+        let dagger = sim
+            .spawn_live_unit("dagger", 2, px + 70.0, py, 180.0)
+            .expect("dagger");
+        for _ in 0..1200 {
+            sim.tick().expect("tick");
+            if sim.ecs.0.get_entity(dagger).is_err() {
+                break;
+            }
+        }
+        assert!(
+            sim.ecs.0.get_entity(dagger).is_err(),
+            "the drill-fed duo killed the dagger (ammo {ammo}, health {:?})",
+            sim.ecs.0.get::<Health>(dagger).map(|h| h.health)
+        );
+    }
+
     /// The authored attack map pins its spawn groups to the map's spawn
     /// overlay tile with Arc `Point2.pack` order; the inverted `TilePos::pack`
     /// silently dropped every pinned group (PAR-0139).
