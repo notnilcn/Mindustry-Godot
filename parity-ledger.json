@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T03:00:41Z",
+  "updated": "2026-10-11T03:33:40Z",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -19830,7 +19830,7 @@
       "surface": "menu",
       "parent": null,
       "status": "reference",
-      "updated": "2026-10-10T14:39:03Z",
+      "updated": "2026-10-11T03:33:40Z",
       "discovered_by": null,
       "path": {
         "to": "boot the client to the main menu and read MindAudio.current_track()/current_track_playing() while the menu is shown",
@@ -19868,8 +19868,8 @@
         "commit": null,
         "summary": null,
         "plan": {
-          "round": 0,
-          "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+          "round": 1,
+          "state": "round 1 in progress on branch `agent/par0072-menu-music` (WIP commit 5bf5061, not merged). FIXED + NARROW-CHECKED: (1) the sim boots in State::Menu and the exit path flips back (LIVE-VERIFIED: get_state()=='menu' at the menu); (2) music_context fills planet_ui_visible/editor_ui_visible; (3) the audio assets dir prefers the live MindAssets root - resolve_assets_dir() came out 'res://../assets' in the game process and every music/sound lookup missed; (4) streams::music passed the un-normalized candidate to decode_bytes whose extension check matched neither ogg nor mp3 (menu_stream true after the fix); (5) last_played_ms seeds from the first frame clock. LIVE-VERIFIED after boot settle: current_track()=='menu' + current_track_playing()==true at the main menu. OPEN: (a) the engine never dispatches MindAudio's process virtual at boot (set_process(true)/PROCESS_MODE_ALWAYS/1s+5s boot timers all ineffective; a manual eval set_process works and frames_seen then counts) - a campaign->audio drive_frame bridge + a 5s repeating arm timer are the current workaround (audio ran with frames 10.7k in the last session, so the workaround can land); (b) derive is_menu as (state=='menu' OR the MenuGroup visible) so the planet page at the menu keeps the menu branch and plays planet.launchMusic (Java SoundControl.java:156-163; the port's governor flips the sim phase to Paused when the planet dialog opens, so state=='menu' alone is false there - the observed track stayed 'menu' instead of 'launch'); (c) remove the temporary debug_music_state probe; (d) re-run the full live matrix: menu -> menu/true; Play>Campaign page -> launch/true; back -> menu; enter a sector -> a gameN track; exit to menu -> menu again. Then merge the branch to main with the verification evidence.",
           "seam": "MindAudio::music_context derives is_menu from MindSimHost.get_state() (client/rust/mind-gdext/src/audio/mod.rs:243-263), but the client never puts the sim in State::Menu: Sim::new starts Playing (mind-core/src/sim/mod.rs:193-200), the only set_phase call is Playing on sector load (sim_host.rs:995), and the exit-to-menu path resets only the campaign session (campaign.rs:1499-1512).",
           "files": [
             "client/rust/mind-gdext/src/audio/mod.rs:243",
@@ -19879,8 +19879,8 @@
             "client/rust/mind-core/src/audio/music.rs:478",
             "client/rust/mind-gdext/src/campaign.rs:1499"
           ],
-          "approach": "1) Put the sim in State::Menu at boot (MindSimHost::init/bootstrap, sim_host.rs:96-118) and on every return-to-menu path (MindCampaign.exit_to_menu/run_exit_save, campaign.rs:1499-1512) via sim.set_phase(State::Menu). 2) Keep Playing on sector/map load (sim_host.rs:995). 3) In music_context also fill planet_ui_visible/editor_ui_visible from the Planet/editor visibility so launchMusic/editor select like upstream (music.rs:513-520). 4) Initialize MusicPlayer::last_played_ms from the first frame's now_ms (music.rs:530-534) so the in-game random gate does not treat the wall-clock epoch gap as an elapsed interval.",
-          "narrow_check": "Boot the client: MindAudio.current_track() == \"menu\" while the menu is shown and current_track_playing() is true; after entering a sector the track is a gameN and no menu track plays; cargo test -p mind-core audio covers the selection state machine.",
+          "approach": "Continue on branch `agent/par0072-menu-music` (git checkout agent/par0072-menu-music). 1) Patch audio/mod.rs music_context: let menu_ui = ui_visible('/root/Spine/Ui/UiRoot/MenuGroup'); let is_menu = state == 'menu' || menu_ui; (the ui_visible closure already exists). 2) Consider replacing the boot timer workaround by finding why the engine skips the MindAudio process virtual (compare the class registration with MindCampaign, whose process runs; the bridge in campaign.rs process + audio drive_frame already works as a fallback). 3) cargo fmt/clippy, tools/build.sh, relaunch the editor (kill the editor only after godot_game stop; sweep orphaned games). 4) Run the live matrix above via the MCP (godot_exec probes on /root/Spine/MindAudio current_track/current_track_playing + SimHost.get_state). 5) If green: remove the debug probe, amend/commit 'Fixes PAR-0072', update the ledger (status verified, path/reproduce/steps), commit the docs on main, then merge the branch.",
+          "narrow_check": "Live: at the main menu current_track()=='menu' && current_track_playing()==true; on the planet page from the menu the track=='launch'; entering a sector switches to a gameN track; returning to the menu restores 'menu'. cargo test -p mind-core audio (48 tests) covers the selection state machine; fmt/clippy/import gates must stay clean.",
           "evidence": {
             "java": [
               "../Mindustry/core/src/mindustry/audio/SoundControl.java:156",
@@ -19894,11 +19894,12 @@
               "client/rust/mind-core/src/audio/music.rs:478",
               "client/rust/mind-gdext/src/sim_host.rs:995"
             ]
-          }
+          },
+          "branch": "agent/par0072-menu-music (5bf5061)"
         }
       },
       "verified": null,
-      "note": "Code-scan 2026-10-10 (audio-fx): S3/high confidence. Lead 5 confirmed with a concrete failure: the menu music branch is unreachable because the sim phase is always Playing (or paused inside a game), so menu.ogg never plays and the in-game random-music gate can fire at the menu. In-engine verification pending.",
+      "note": "Round 1 done on branch agent/par0072-menu-music (see fix.plan.state): menu music LIVE-VERIFIED (menu|true); five root causes fixed; remaining = the process-virtual dispatch workaround + the is_menu/MenuGroup derivation + the full matrix re-run. Debug probe debug_music_state() still present on the branch.",
       "evidence": [
         "../Mindustry/core/src/mindustry/audio/SoundControl.java:156",
         "../Mindustry/core/src/mindustry/audio/SoundControl.java:163",
