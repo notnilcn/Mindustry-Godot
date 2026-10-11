@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T01:21:10Z",
+  "updated": "2026-10-11T01:22:15Z",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -11404,47 +11404,81 @@
       "title": "Campaign world HUD: Database button (book icon) opens the database",
       "surface": "world",
       "parent": "PAR-0028",
-      "status": "reference",
-      "updated": "2026-10-11T01:21:01Z",
+      "status": "verified",
+      "updated": "2026-10-11T01:22:15Z",
       "discovered_by": "runs/20261009-065416-ref-ground-zero/",
       "path": {
-        "to": "in-game Ground Zero tutorial start",
+        "to": "in-game Ground Zero (sector 15)",
         "java": [],
-        "godot": [],
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "var b = get_node('/root/Spine/Ui/UiRoot/HudGroup/placement/Panel/Layout/Left/InputBar/input-book'); b.visible and b.get_global_rect() == (892,596,48,48)"
+            }
+          }
+        ],
         "confirm": {
-          "java": "runs/20261009-065416-ref-ground-zero/java/r00-03-tutorial.png (icon bar)",
-          "godot": "HudGroup visible"
+          "godot": "MindUi.dialog_stack() == [database]",
+          "java": "r00-16-database-dialog.png non-blank"
         },
-        "last_replayed": null
+        "last_replayed": "runs/20261011-112115-PAR-0034/ (click input-book (916,620) -> stack [database]; Back (576,503) -> [])"
       },
-      "run": "runs/20261009-065416-ref-ground-zero/",
+      "run": "runs/20261011-112115-PAR-0034/",
       "reproduce": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "image_center": [
-                926,
-                627
-              ],
-              "screen_center": [
-                976,
-                725
-              ],
-              "source": "../Mindustry/core/src/mindustry/input/DesktopInput.java:560-562 buildPlacementUI: Icon.book -> ui.database.show(), tooltip @database"
+              "frame": "runs/20261011-110622-PAR-0033/java/r00-16-database-dialog.png (captured live in the PAR-0033 Java leg)"
             }
           }
         ],
-        "godot": [],
-        "compare": []
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "in-game (GZ resume) -> click input-book centre via push_input"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "MindUi.dialog_stack() -> [database]; click Back -> []"
+            }
+          }
+        ],
+        "compare": [
+          "godot/hud-50-database-dialog.png vs java/r00-16-database-dialog-java.png (dialog open on both sides; content differences seeded as PAR-0144)"
+        ]
       },
-      "steps": [],
-      "mismatch": null,
+      "steps": [
+        {
+          "action": "click the book button in the input row",
+          "result": "Core Database dialog opens (stack [database])"
+        },
+        {
+          "check": "Back closes it; the button row stays (paste/book/tree/map)"
+        }
+      ],
+      "mismatch": {
+        "step": "none for the claim; the dialog content differs (Java icon filter row vs the port's text buttons) - seeded as PAR-0144",
+        "godot_frame": "runs/20261011-112115-PAR-0034/godot/hud-50-database-dialog.png",
+        "java_frame": "runs/20261011-112115-PAR-0034/java/r00-16-database-dialog-java.png",
+        "diff": "runs/20261011-112115-PAR-0034/diff/database-dialog.json"
+      },
       "fix": {
-        "status": "open"
+        "status": "none-needed",
+        "commit": "e62d7bf",
+        "summary": "the button row landed with PAR-0033 (e62d7bf); this item verified the database action"
       },
-      "verified": null,
-      "note": "Revealed by R00 (bottom-right icon bar). Action not mirrored yet.",
+      "verified": {
+        "mode": "reference",
+        "run": "runs/20261011-112115-PAR-0034/",
+        "reference": "runs/20261011-110622-PAR-0033/java/",
+        "at": "2026-10-11T01:22:15Z"
+      },
+      "note": "Verified against the fresh Java action frame from the PAR-0033 leg. The filter-row icons-vs-text gap is seeded as PAR-0144; the lock-density difference is the Java full-unlock profile vs the fresh Godot campaign (state confound, recorded in the run).",
       "reference": {
         "captured": "2026-10-09T07:00:00Z",
         "profile": "fresh",
@@ -11469,6 +11503,12 @@
           "launch -> window normalize -> Play > Campaign > Serpulo OK -> Ground Zero -> Launch (R00 frames) -> in-game HUD (R00-R07 frames)"
         ],
         "staged_action": "runs/20261011-110622-PAR-0033/java/r00-16-database-dialog.png (the Core Database dialog, fresh profile, captured during the PAR-0033 Java leg)"
+      },
+      "claim": {
+        "by": "parity-hunt-s1",
+        "at": "2026-10-11T01:21:15Z",
+        "prior_status": "reference",
+        "released_at": "2026-10-11T01:22:15Z"
       }
     },
     {
@@ -28449,6 +28489,54 @@
       },
       "verified": null,
       "note": "Revealed by PAR-0033: the Java dialog has a Tags filter row (heart/Reactor/power/logic/... icons), a schematic CARD grid with per-card info/upload/edit/delete icons, and Back + Import Schematic... buttons; the port renders a left list + a details pane (3x3 tiles / item costs / Edit-Export-Icon Tag-Delete-Configure Loadout)."
+    },
+    {
+      "id": "PAR-0144",
+      "title": "Database dialog: planet filter row renders icons in Java (eye + planet glyphs) vs the port's All/Erekir/Serpulo text buttons",
+      "surface": "ui",
+      "parent": "PAR-0034",
+      "status": "seeded",
+      "updated": "2026-10-11T01:22:15Z",
+      "discovered_by": "runs/20261011-112115-PAR-0034/",
+      "path": {
+        "to": "in-game > book button > database dialog",
+        "java": [],
+        "godot": [],
+        "confirm": {
+          "godot": "MindUi.dialog_stack() == [database]",
+          "java": "r00-16 frame"
+        },
+        "last_replayed": null
+      },
+      "run": "runs/20261011-112115-PAR-0034/",
+      "reproduce": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "frame": "runs/20261011-112115-PAR-0034/java/r00-16-database-dialog-java.png"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "frame": "runs/20261011-112115-PAR-0034/godot/hud-50-database-dialog.png"
+            }
+          }
+        ],
+        "compare": [
+          "filter rows: java eye + orange/purple planet icons (checked = orange border); godot 'All' dark box + orange 'Erekir' + purple 'Serpulo' text"
+        ]
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open"
+      },
+      "verified": null,
+      "note": "Revealed by PAR-0034. Java DatabaseDialog planet tabs draw Icon.eye / the planet UI icons; the port's text buttons keep the planet colors but not the icon surface."
     }
   ]
 }
