@@ -82,8 +82,19 @@ if ! diff -r scenarios client/scenarios; then
 fi
 
 say "bench: bench_baseline budget (warn +20% / fail +50% vs ${BASE_P50_NS}/${BASE_P99_NS} ns)"
+# Build unpinned (all cores), then measure the single-threaded tick loop pinned
+# to one CPU. The baseline truth above was measured pinned; the tick loop only
+# runs ~24 ms of wall time, so unpinned runs absorb scheduler migration and
+# preemption spikes into the p99 tail (240 ns p50 / 591 ns p99 observed on an
+# idle host post-reboot, ~80% of unpinned runs over +50% here) while p50 stays
+# at baseline. taskset is util-linux; fall back to the unpinned cargo run.
+cargo build -q --release --manifest-path "$MANIFEST" -p mind-headless
+BENCH_CMD=(cargo run -q --release --manifest-path "$MANIFEST" -p mind-headless -- bench --ticks 100000 --scenario bench_baseline)
+if command -v taskset >/dev/null 2>&1; then
+  BENCH_CMD=(taskset -c "$(( $(nproc) - 1 ))" "${BENCH_CMD[@]}")
+fi
 set +e
-BENCH_JSON="$(cargo run -q --release --manifest-path "$MANIFEST" -p mind-headless -- bench --ticks 100000 --scenario bench_baseline)"
+BENCH_JSON="$("${BENCH_CMD[@]}")"
 BENCH_RC=$?
 set -e
 printf '  %s\n' "$BENCH_JSON"
