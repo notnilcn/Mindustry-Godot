@@ -845,6 +845,54 @@ pub fn run_wave_system(world: &mut World) {
     world.insert_non_send(runtime);
 }
 
+impl Sim {
+    /// Live selectable-unit snapshot for the RTS input layer
+    /// (`[{id,type,x,y,team,commandable}]`; `id` is the unit's `EntitySeq`).
+    ///
+    /// Published to `MindInput.set_selectable_units_json` every frame so
+    /// drag/tap selection and command mode have a list (PAR-0140). Upstream's
+    /// selectable list is `Units`-backed, so both teams are listed (the input
+    /// filters by team/`commandable`); `commandable` mirrors
+    /// `UnitType.playerControllable` on the live default team.
+    pub fn selectable_units_json(&self) -> String {
+        let Some(runtime) = self.ecs.0.get_non_send::<UnitRuntime>() else {
+            return String::from("[]");
+        };
+        let default_team = self.live_default_team();
+        let mut rows: Vec<serde_json::Value> = Vec::new();
+        for &entity in &runtime.units {
+            let Ok(entity_ref) = self.ecs.0.get_entity(entity) else {
+                continue;
+            };
+            if entity_ref.get::<UnitCore>().is_some_and(|core| core.dead) {
+                continue;
+            }
+            let (Some(seq), Some(pos), Some(team), Some(type_comp)) = (
+                entity_ref.get::<EntitySeq>(),
+                entity_ref.get::<Pos>(),
+                entity_ref.get::<TeamComp>(),
+                entity_ref.get::<UnitTypeComp>(),
+            ) else {
+                continue;
+            };
+            let commandable = team.team == default_team
+                && runtime
+                    .content
+                    .unit(type_comp.type_id)
+                    .is_some_and(|def| def.player_controllable);
+            rows.push(serde_json::json!({
+                "id": seq.0 as i32,
+                "type": type_comp.type_id.get() as i32,
+                "x": pos.x,
+                "y": pos.y,
+                "team": team.team,
+                "commandable": commandable,
+            }));
+        }
+        serde_json::to_string(&rows).unwrap_or_else(|_| String::from("[]"))
+    }
+}
+
 /// `WaveSpawner.eachGroundSpawn` core branch: a spawn tile near `(cx, cy)`
 /// stepped toward `(px, py)` until no solid tile lies within radius 3
 /// (`coreMargin = tilesize * 2`, `maxSteps = 30`, core size 3).
@@ -1210,6 +1258,155 @@ mod tests {
         );
         assert_eq!(sim.group_counts().get("unit"), Some(&1));
         assert!(sim.unit_runtime().expect("runtime").units_created == 1);
+    }
+
+    /// PAR-0140: a wire `UnitCommand` (`id` = `EntitySeq`) orders a live
+    /// default-team unit; other teams and the relay path stay untouched.
+    #[test]
+    fn live_unit_command_sets_a_move_target() {
+        let mut sim = Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR);
+        install(&mut sim);
+        if let Some(mut rules) = sim
+            .ecs
+            .0
+            .get_resource_mut::<crate::world::limits::BuildRules>()
+        {
+            rules.default_team = 1;
+        }
+        let dagger = sim
+            .unit_runtime()
+            .expect("runtime")
+            .content
+            .unit_by_name("dagger")
+            .expect("dagger")
+            .id
+            .get();
+        sim.command(SimCommand::SpawnUnit {
+            unit: dagger,
+            x: 32.0,
+            y: 32.0,
+            team: 1,
+        })
+        .expect("spawn friendly");
+        sim.command(SimCommand::SpawnUnit {
+            unit: dagger,
+            x: 64.0,
+            y: 64.0,
+            team: 2,
+        })
+        .expect("spawn enemy");
+        let friendly = sim.unit_runtime().expect("runtime").units[0];
+        let enemy = sim.unit_runtime().expect("runtime").units[1];
+        let friendly_id = sim
+            .ecs
+            .0
+            .get::<crate::ecs::EntitySeq>(friendly)
+            .expect("seq")
+            .0 as i32;
+        let enemy_id = sim
+            .ecs
+            .0
+            .get::<crate::ecs::EntitySeq>(enemy)
+            .expect("seq")
+            .0 as i32;
+
+        // Move order on both ids: only the default-team unit accepts.
+        sim.command(SimCommand::UnitCommand {
+            units: smallvec::smallvec![friendly_id, enemy_id],
+            command: 0,
+            x: 200.0,
+            y: 200.0,
+        })
+        .expect("command");
+        assert_eq!(
+            sim.ecs
+                .0
+                .get::<crate::ai::controller::ControllerSlot>(friendly)
+                .expect("slot")
+                .target,
+            Some(TilePos::new(25, 25)),
+            "the friendly unit is ordered at the wire target tile"
+        );
+        assert_eq!(
+            sim.ecs
+                .0
+                .get::<crate::ai::controller::ControllerSlot>(enemy)
+                .expect("slot")
+                .target,
+            None,
+            "an enemy id is not commandable"
+        );
+
+        // The order drives movement.
+        let before = sim.ecs.0.get::<Pos>(friendly).expect("pos").x;
+        for _ in 0..30 {
+            sim.tick().expect("tick");
+        }
+        let after = sim.ecs.0.get::<Pos>(friendly).expect("pos").x;
+        assert!(
+            after > before,
+            "the ordered unit moves toward the target ({before} -> {after})"
+        );
+    }
+
+    /// PAR-0140: the selectable snapshot lists live units by `EntitySeq` with
+    /// the player-team `commandable` flag.
+    #[test]
+    fn selectable_units_json_lists_live_units() {
+        let mut sim = Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR);
+        install(&mut sim);
+        if let Some(mut rules) = sim
+            .ecs
+            .0
+            .get_resource_mut::<crate::world::limits::BuildRules>()
+        {
+            rules.default_team = 1;
+        }
+        let dagger = sim
+            .unit_runtime()
+            .expect("runtime")
+            .content
+            .unit_by_name("dagger")
+            .expect("dagger")
+            .id
+            .get();
+        sim.command(SimCommand::SpawnUnit {
+            unit: dagger,
+            x: 32.0,
+            y: 32.0,
+            team: 1,
+        })
+        .expect("spawn friendly");
+        sim.command(SimCommand::SpawnUnit {
+            unit: dagger,
+            x: 64.0,
+            y: 64.0,
+            team: 2,
+        })
+        .expect("spawn enemy");
+        let friendly = sim.unit_runtime().expect("runtime").units[0];
+        let friendly_id = sim
+            .ecs
+            .0
+            .get::<crate::ecs::EntitySeq>(friendly)
+            .expect("seq")
+            .0 as i32;
+
+        let rows: serde_json::Value =
+            serde_json::from_str(&sim.selectable_units_json()).expect("json");
+        let rows = rows.as_array().expect("array");
+        assert_eq!(rows.len(), 2, "both live units are listed");
+        let friendly_row = rows
+            .iter()
+            .find(|row| row["id"].as_i64() == Some(i64::from(friendly_id)))
+            .expect("friendly row");
+        assert_eq!(friendly_row["team"].as_u64(), Some(1));
+        assert_eq!(friendly_row["commandable"].as_bool(), Some(true));
+        assert!(
+            rows.iter()
+                .any(|row| row["commandable"].as_bool() == Some(false)),
+            "the enemy unit is listed but not commandable"
+        );
     }
 
     /// The live campaign timer (`TickSet::Campaign` -> `runWave`) drives the

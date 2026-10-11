@@ -405,14 +405,19 @@ impl MindSimHost {
             return false;
         };
         let op = value.get("op").and_then(|v| v.as_str()).unwrap_or("");
-        let x = value.get("x").and_then(|v| v.as_i64()).unwrap_or(i64::MIN);
-        let y = value.get("y").and_then(|v| v.as_i64()).unwrap_or(i64::MIN);
-        let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
-            log::warn!("apply_sim_command_json: missing/oversized x,y");
-            return false;
+        let coord = |key: &str| {
+            value
+                .get(key)
+                .and_then(|v| v.as_i64())
+                .and_then(|v| i16::try_from(v).ok())
         };
+        let (x, y) = (coord("x"), coord("y"));
         let command = match op {
             "place" => {
+                let (Some(x), Some(y)) = (x, y) else {
+                    log::warn!("apply_sim_command_json: place needs x,y");
+                    return false;
+                };
                 let block = value.get("block").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
                 let rotation = value
                     .get("rotation")
@@ -428,7 +433,58 @@ impl MindSimHost {
                     player: None,
                 }
             }
-            "break" => SimCommand::Break { x, y, player: None },
+            "break" => {
+                let (Some(x), Some(y)) = (x, y) else {
+                    log::warn!("apply_sim_command_json: break needs x,y");
+                    return false;
+                };
+                SimCommand::Break { x, y, player: None }
+            }
+            "spawn_unit" => {
+                let unit = value.get("unit").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
+                let team = value.get("team").and_then(|v| v.as_u64()).unwrap_or(1) as u8;
+                let fx = value
+                    .get("px")
+                    .and_then(|v| v.as_f64())
+                    .or_else(|| x.map(f64::from))
+                    .unwrap_or(0.0);
+                let fy = value
+                    .get("py")
+                    .and_then(|v| v.as_f64())
+                    .or_else(|| y.map(f64::from))
+                    .unwrap_or(0.0);
+                SimCommand::SpawnUnit {
+                    unit,
+                    x: fx as f32,
+                    y: fy as f32,
+                    team,
+                }
+            }
+            "unit_command" => {
+                let units: smallvec::SmallVec<[i32; 32]> = value
+                    .get("units")
+                    .and_then(|v| v.as_array())
+                    .map(|rows| {
+                        rows.iter()
+                            .filter_map(|row| row.as_i64().map(|id| id as i32))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if units.is_empty() {
+                    log::warn!("apply_sim_command_json: unit_command without units");
+                    return false;
+                }
+                let command = value.get("command").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
+                // `unit_command` targets are world pixels (floats), not tiles.
+                let fx = value.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let fy = value.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                SimCommand::UnitCommand {
+                    units,
+                    command,
+                    x: fx as f32,
+                    y: fy as f32,
+                }
+            }
             other => {
                 log::warn!("apply_sim_command_json: unsupported op `{other}`");
                 return false;
@@ -436,6 +492,21 @@ impl MindSimHost {
         };
         self.pending_commands.push_back(command);
         true
+    }
+
+    /// `state.rules.defaultTeam` of the live session (campaign rules, then the
+    /// build guard resource). The RTS input layer filters selections by it
+    /// (`player.team().id`; PAR-0140).
+    #[func]
+    pub fn default_team(&self) -> i64 {
+        self.sim.live_default_team() as i64
+    }
+
+    /// Live selectable-unit snapshot (`[{id,type,x,y,team,commandable}]`, the
+    /// same rows fed to `MindInput`; PAR-0140 probe).
+    #[func]
+    pub fn selectable_units_json(&self) -> GString {
+        GString::from(self.sim.selectable_units_json().as_str())
     }
 
     /// Per-type content counts for the inspector `Content` tab (plan 02 §3.7).
@@ -1679,6 +1750,20 @@ impl MindSimHost {
         }
     }
 
+    /// Publishes the live selectable-unit snapshot to the sibling `Input`
+    /// (`MindInput.set_selectable_units_json`; PAR-0140): upstream feeds the
+    /// selectable list from `Units` each frame, so drag/tap selection and
+    /// command mode see live units.
+    fn publish_selectable_units(&mut self) {
+        let Some(mut input) = self.input.clone() else {
+            return;
+        };
+        let json = self.sim.selectable_units_json();
+        input
+            .bind_mut()
+            .set_selectable_units_json(GString::from(json.as_str()));
+    }
+
     /// Runs `steps` fixed steps, applying scenario commands before each tick.
     fn advance_steps(&mut self, steps: u32) {
         for _ in 0..steps {
@@ -1709,6 +1794,7 @@ impl MindSimHost {
             }
             self.tick_fx_view();
         }
+        self.publish_selectable_units();
     }
 
     /// Advances the plan-17 `MindFx` view by one fixed tick (sim→view hook).

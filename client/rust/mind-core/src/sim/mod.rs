@@ -215,7 +215,10 @@ impl Sim {
             player_unit: None,
             control_building: None,
             seed,
-            selected_block: BlockId::STONE_WALL,
+            // Upstream `player.block == null` at boot: no placement block is
+            // selected until the player picks one (the command-mode gate
+            // requires it; PAR-0140).
+            selected_block: BlockId::AIR,
             entity_seq: EntitySequencer::default(),
             commands_applied: 0,
             pending_events: Vec::new(),
@@ -351,6 +354,109 @@ impl Sim {
     }
 
     /// Places through the opt-in live runtime; `false` when absent or rejected.
+    /// `state.rules.defaultTeam`: the live campaign session, then the build
+    /// guard resource, then the sharded default.
+    pub fn live_default_team(&self) -> u8 {
+        self.ecs
+            .0
+            .get_resource::<crate::game::runtime::CampaignRuntime>()
+            .map(|runtime| runtime.session.rules.default_team)
+            .or_else(|| {
+                self.ecs
+                    .0
+                    .get_resource::<crate::world::limits::BuildRules>()
+                    .map(|rules| rules.default_team)
+            })
+            .unwrap_or(TeamId::SHARDED.0)
+    }
+
+    /// Applies a wire `UnitCommand` to **live** units (`id` = `EntitySeq`).
+    ///
+    /// Returns the number of units ordered; `0` routes the command to the
+    /// relay runtime (the net/test id space). `command == 0` is the emitter's
+    /// `commandUnits` marker: the wire target resolves through
+    /// [`resolve_wire_target`] (a packed unit id in `x`, else a world-pixel
+    /// position) and lands on the member's move target
+    /// (`ControllerSlot.target`). Non-move commands and stances are not
+    /// applied to live units yet (PAR-0140 round 1).
+    fn apply_live_unit_command(&mut self, ids: &[i32], command: u16, x: f32, y: f32) -> usize {
+        if command != MOVE_COMMAND.raw() {
+            return 0;
+        }
+        let Some(runtime) = self
+            .ecs
+            .0
+            .get_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+        else {
+            return 0;
+        };
+        if runtime.units.is_empty() {
+            return 0;
+        }
+        let default_team = self.live_default_team();
+        let target = resolve_wire_target(x, y);
+        let tile = match target {
+            crate::input::action::CommandTarget::Position { x, y } => {
+                let ts = crate::config::TILESIZE as f32;
+                Some(TilePos::new(
+                    (x / ts).floor() as i16,
+                    (y / ts).floor() as i16,
+                ))
+            }
+            crate::input::action::CommandTarget::Unit(target_id) => runtime
+                .units
+                .iter()
+                .find(|&&entity| {
+                    self.ecs
+                        .0
+                        .get::<crate::ecs::EntitySeq>(entity)
+                        .is_some_and(|seq| seq.0 as i32 == target_id)
+                })
+                .and_then(|&entity| self.ecs.0.get::<crate::entities::comp::Pos>(entity))
+                .map(|pos| {
+                    let ts = crate::config::TILESIZE as f32;
+                    TilePos::new((pos.x / ts).floor() as i16, (pos.y / ts).floor() as i16)
+                }),
+            crate::input::action::CommandTarget::Building(pos) => Some(pos),
+        };
+        let Some(tile) = tile else {
+            return 0;
+        };
+        let mut orders: Vec<(Entity, TilePos)> = Vec::new();
+        for &id in ids {
+            let Some(&entity) = runtime.units.iter().find(|&&entity| {
+                self.ecs
+                    .0
+                    .get::<crate::ecs::EntitySeq>(entity)
+                    .is_some_and(|seq| seq.0 as i32 == id)
+            }) else {
+                continue;
+            };
+            let team = self
+                .ecs
+                .0
+                .get::<crate::entities::comp::TeamComp>(entity)
+                .map(|team| team.team)
+                .unwrap_or(0);
+            if team != default_team {
+                continue;
+            }
+            orders.push((entity, tile));
+        }
+        let mut ordered = 0usize;
+        for (entity, tile) in orders {
+            if let Some(mut slot) = self
+                .ecs
+                .0
+                .get_mut::<crate::ai::controller::ControllerSlot>(entity)
+            {
+                slot.target = Some(tile);
+                ordered += 1;
+            }
+        }
+        ordered
+    }
+
     fn runtime_place(&mut self, x: i16, y: i16, block: BlockId, rot: u8, team: u8) -> bool {
         let Some(runtime) = self.block_runtime.as_mut() else {
             return false;
@@ -579,8 +685,12 @@ impl Sim {
                 x,
                 y,
             } => {
-                self.ensure_unit_commands()
-                    .apply_unit_command(units, *unit_command, *x, *y);
+                // Live units first (ids are `EntitySeq`; PAR-0140); the relay
+                // runtime keeps the wire-only/net bookkeeping path.
+                if self.apply_live_unit_command(units, *unit_command, *x, *y) == 0 {
+                    self.ensure_unit_commands()
+                        .apply_unit_command(units, *unit_command, *x, *y);
+                }
                 self.commands_applied = self.commands_applied.wrapping_add(1);
                 return Ok(());
             }

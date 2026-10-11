@@ -227,7 +227,14 @@ impl MindInput {
         if let Some(content) = guard.content_registry()
             && let Some(id) = content.block_id(&name)
         {
-            self.bridge.controller.state.select_block(Some(id));
+            // `player.block == null` at boot (`BlockId::AIR` is "no selection";
+            // the command-mode gate needs it; PAR-0140).
+            let selected = if id == mind_core::content::BlockId::AIR {
+                None
+            } else {
+                Some(id)
+            };
+            self.bridge.controller.state.select_block(selected);
         }
     }
 
@@ -830,7 +837,14 @@ impl MindInput {
         if let Some(content) = guard.content_registry()
             && let Some(id) = content.block_id(&name_text)
         {
-            self.bridge.controller.state.select_block(Some(id));
+            // `BlockId::AIR` means "no block selected" (`player.block == null`);
+            // the command-mode gate needs it (PAR-0140).
+            let selected = if id == mind_core::content::BlockId::AIR {
+                None
+            } else {
+                Some(id)
+            };
+            self.bridge.controller.state.select_block(selected);
         }
         true
     }
@@ -860,10 +874,13 @@ impl MindInput {
     }
 
     /// Sets the active catalogue category for the `1`..`0` binds.
+    ///
+    /// Only the category changes: upstream shows the category's blocks without
+    /// selecting one, and a boot auto-select kept `player.block` non-null (the
+    /// command-mode gate never opened; PAR-0140).
     #[func]
     pub fn set_catalog_category(&mut self, index: i64) {
         self.bridge.catalog_category = index.max(0) as usize;
-        self.bridge.select_catalog_block(0);
     }
 
     /// Submits a building config (`tileConfig`) through the sim command queue.

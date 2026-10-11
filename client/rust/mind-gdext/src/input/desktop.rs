@@ -669,6 +669,14 @@ impl DesktopBridge {
         }
     }
 
+    /// Live player team (`player.team().id`) for RTS selection filters.
+    fn player_team(&self) -> u8 {
+        self.host
+            .as_ref()
+            .map(|host| host.bind().default_team().clamp(0, 255) as u8)
+            .unwrap_or(0)
+    }
+
     fn select_all_units(&mut self, bindings: &BindingState, factories: bool) {
         // `selectAllUnits` only runs in command mode upstream; enabling it here
         // gives the player a direct entry point without first holding the
@@ -695,7 +703,7 @@ impl DesktopBridge {
             }
         };
         let mut out = SmallVec::new();
-        select_units_rect(&self.selectable, 0, rect, &mut out);
+        select_units_rect(&self.selectable, self.player_team(), rect, &mut out);
         self.controller.state.selected_units = out;
         self.controller.state.command_buildings.clear();
         self.emit_selection();
@@ -917,7 +925,7 @@ impl DesktopBridge {
         let queue = self.key_down(bindings, ids::COMMAND_QUEUE);
         let action = self
             .controller
-            .command_tap(&self.selectable, 0, x, y, queue);
+            .command_tap(&self.selectable, self.player_team(), x, y, queue);
         if let Some(action) = action {
             self.emit_action(action);
         }
@@ -964,7 +972,7 @@ impl DesktopBridge {
     /// Closest commandable unit under the cursor (`tapCommandUnit`).
     fn tap_unit_at_cursor(&self) -> Option<i32> {
         let (x, y) = self.cursor_world()?;
-        select_unit_tap(&self.selectable, 0, x, y, UNIT_TAP_RADIUS)
+        select_unit_tap(&self.selectable, self.player_team(), x, y, UNIT_TAP_RADIUS)
     }
 
     fn mouse_button(&mut self, bindings: &BindingState, button: &str, down: bool) {
@@ -1280,7 +1288,7 @@ impl DesktopBridge {
         let (y1, y2) = (drag.start.1.min(drag.last.1), drag.start.1.max(drag.last.1));
         if !drag.moved {
             if let Some((x, y)) = self.cursor_world() {
-                match select_unit_tap(&self.selectable, 0, x, y, UNIT_TAP_RADIUS) {
+                match select_unit_tap(&self.selectable, self.player_team(), x, y, UNIT_TAP_RADIUS) {
                     Some(id) => {
                         let now_ms = Time::singleton().get_ticks_msec();
                         let type_id = self
@@ -1295,7 +1303,12 @@ impl DesktopBridge {
                         if double_tap {
                             // Double tap selects every unit of the tapped type.
                             let mut out = SmallVec::new();
-                            select_typed_units(&self.selectable, 0, type_id.unwrap_or(0), &mut out);
+                            select_typed_units(
+                                &self.selectable,
+                                self.player_team(),
+                                type_id.unwrap_or(0),
+                                &mut out,
+                            );
                             self.controller.state.selected_units = out;
                         } else {
                             self.controller.state.selected_units.push(id);
@@ -1317,7 +1330,7 @@ impl DesktopBridge {
                 h: (y2 - y1 + 1) as f32 * unit,
             };
             let mut out = SmallVec::new();
-            select_units_rect(&self.selectable, 0, rect, &mut out);
+            select_units_rect(&self.selectable, self.player_team(), rect, &mut out);
             self.controller.state.selected_units = out;
             self.controller.state.command_rect = Some((rect.x, rect.y, rect.w, rect.h));
             self.controller.state.tapped_one = self.controller.state.selected_units.len() == 1;
