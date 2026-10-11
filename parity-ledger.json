@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T01:22:15Z",
+  "updated": "2026-10-11T01:24:14Z",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -11516,47 +11516,82 @@
       "title": "Campaign world HUD: Tech Tree button (tree icon) opens research",
       "surface": "world",
       "parent": "PAR-0028",
-      "status": "reference",
-      "updated": "2026-10-10T14:39:55Z",
+      "status": "verified",
+      "updated": "2026-10-11T01:24:14Z",
       "discovered_by": "runs/20261009-065416-ref-ground-zero/",
       "path": {
-        "to": "in-game Ground Zero tutorial start",
+        "to": "in-game Ground Zero (sector 15)",
         "java": [],
-        "godot": [],
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "var b = get_node('/root/Spine/Ui/UiRoot/HudGroup/placement/Panel/Layout/Left/InputBar/input-tree'); b.visible and b.get_global_rect() == (944,596,48,48)"
+            }
+          }
+        ],
         "confirm": {
-          "java": "runs/20261009-065416-ref-ground-zero/java/r00-03-tutorial.png (icon bar)",
-          "godot": "HudGroup visible"
+          "godot": "MindUi.dialog_stack() == [research]",
+          "java": "r05-01-tree.png non-blank"
         },
-        "last_replayed": null
+        "last_replayed": "runs/20261011-112224-PAR-0035/ (click input-tree (968,620) -> stack [research]; Back (576,623) -> [])"
       },
-      "run": "runs/20261009-065416-ref-ground-zero/",
+      "run": "runs/20261011-112224-PAR-0035/",
       "reproduce": {
         "java": [
           {
             "tool": "note",
             "params": {
-              "image_center": [
-                974,
-                627
-              ],
-              "screen_center": [
-                1024,
-                725
-              ],
-              "source": "../Mindustry/core/src/mindustry/input/DesktopInput.java:564-566 buildPlacementUI: Icon.tree -> ui.research.show(), visible in campaign, tooltip @research"
+              "frames": "runs/20261009-065416-ref-ground-zero/java/r05-01-tree.png + r04-00-techtree.png"
             }
           }
         ],
-        "godot": [],
-        "compare": []
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "in-game -> click input-tree centre via push_input"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "MindUi.dialog_stack() -> [research]; Back -> []"
+            }
+          }
+        ],
+        "compare": [
+          "godot/hud-60-research-dialog.png vs java/r05-01-tree-java.png (dialog open both sides; the interior content gap is PAR-0145)"
+        ]
       },
-      "steps": [],
-      "mismatch": null,
+      "steps": [
+        {
+          "action": "click the tree button in the input row (campaign)",
+          "result": "research dialog opens (stack [research])"
+        },
+        {
+          "check": "Back closes it; the dialog interior diverges (Java node graph vs the port's row list) - seeded PAR-0145"
+        }
+      ],
+      "mismatch": {
+        "step": "the dialog interior: Java's connected node graph vs the port's overlapping row list with techtree.<null> labels",
+        "godot_frame": "runs/20261011-112224-PAR-0035/godot/hud-60-research-dialog.png",
+        "java_frame": "runs/20261011-112224-PAR-0035/java/r05-01-tree-java.png",
+        "diff": "runs/20261011-112224-PAR-0035/diff/research-dialog.json",
+        "seeded": "PAR-0145"
+      },
       "fix": {
-        "status": "open"
+        "status": "none-needed",
+        "commit": "e62d7bf",
+        "summary": "the tree button landed with the input row (e62d7bf); the dialog content gap is PAR-0145"
       },
-      "verified": null,
-      "note": "Revealed by R00 (bottom-right icon bar, campaign-visible). Action not mirrored yet; R04 (research Mechanical Drill) will exercise the tree.",
+      "verified": {
+        "mode": "reference",
+        "run": "runs/20261011-112224-PAR-0035/",
+        "reference": "runs/20261009-065416-ref-ground-zero/",
+        "at": "2026-10-11T01:24:14Z"
+      },
+      "note": "Verified the campaign-gated tree button opens the research dialog. The interior (Java TechTreeNode graph + TreeLayout + connectors vs the port's row list) is seeded as PAR-0145; interactions stay with PAR-0047.",
       "reference": {
         "captured": "2026-10-09T07:00:00Z",
         "profile": "fresh",
@@ -11581,6 +11616,12 @@
         "java_path": [
           "launch -> window normalize -> Play > Campaign > Serpulo OK -> Ground Zero -> Launch (R00 frames) -> in-game HUD (R00-R07 frames)"
         ]
+      },
+      "claim": {
+        "by": "parity-hunt-s1",
+        "at": "2026-10-11T01:22:24Z",
+        "prior_status": "reference",
+        "released_at": "2026-10-11T01:24:14Z"
       }
     },
     {
@@ -28537,6 +28578,54 @@
       },
       "verified": null,
       "note": "Revealed by PAR-0034. Java DatabaseDialog planet tabs draw Icon.eye / the planet UI icons; the port's text buttons keep the planet colors but not the icon surface."
+    },
+    {
+      "id": "PAR-0145",
+      "title": "Research dialog content: Java's connected node graph (TechTreeNode + TreeLayout + connectors, planet tab, hover/purchase) vs the port's overlapping row list",
+      "surface": "ui",
+      "parent": "PAR-0035",
+      "status": "seeded",
+      "updated": "2026-10-11T01:24:14Z",
+      "discovered_by": "runs/20261011-112224-PAR-0035/",
+      "path": {
+        "to": "in-game > tree button > research dialog",
+        "java": [],
+        "godot": [],
+        "confirm": {
+          "godot": "MindUi.dialog_stack() == [research]",
+          "java": "r05-01-tree.png"
+        },
+        "last_replayed": null
+      },
+      "run": "runs/20261011-112224-PAR-0035/",
+      "reproduce": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "frames": "runs/20261009-065416-ref-ground-zero/java/r04-00-techtree.png, r05-01-tree.png, r05-07-zoom.png, r05-02-hover.png, r05-14-researched.png"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "frame": "runs/20261011-112224-PAR-0035/godot/hud-60-research-dialog.png"
+            }
+          }
+        ],
+        "compare": [
+          "palette 0.9026, changed 0.976"
+        ]
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open"
+      },
+      "verified": null,
+      "note": "Revealed by PAR-0035. Java: ResearchDialog.treeLayout() (ResearchDialog.java:332-353) positions TechTreeNode cells as a connected graph (yellow connector lines, planet tab, pan/zoom, hover popups, purchase). Port: research_dialog.gd builds a root rail + node rows; the rail shows 'techtree.<null>' for nodes without a root (campaign_views.research has 223 nodes, only node[0] carries root 'serpulo'), and the rows overlap the rail. Requires: the view's tech-tree root grouping (or the Rust TechStore's roots) + a TreeLayout port (client/ui/layout/tree_layout.gd is a cursor-row stub) + the TechTreeNode widget. Cross-link PAR-0047."
     }
   ]
 }
