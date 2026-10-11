@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T01:25:35Z",
+  "updated": "2026-10-11T01:36:59Z",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -12867,8 +12867,8 @@
       "title": "Campaign world: pause dialog (Escape) with its button set",
       "surface": "world",
       "parent": "PAR-0028",
-      "status": "reference",
-      "updated": "2026-10-10T14:39:55Z",
+      "status": "verified",
+      "updated": "2026-10-11T01:36:59Z",
       "discovered_by": "runs/20261009-065416-ref-ground-zero/",
       "path": {
         "to": "in-game Ground Zero, Escape pressed",
@@ -12877,86 +12877,23 @@
           {
             "tool": "godot_exec",
             "params": {
-              "action": "eval",
-              "code": "return str(get_node(\\\"/root/Spine/MindCampaign\\\").clear_planet_campaign_saves(\\\"serpulo\\\"))"
-            },
-            "note": "deterministic fresh launch"
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "return get_node(\\\"/root/Spine/SimHost\\\").load_sector(\\\"serpulo\\\", 15)"
+              "code": "get_viewport().push_input(ESC down/up) -> MindUi.dialog_stack() == [paused]"
             }
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "var c = get_node(\\\"/root/Spine/MindCampaign\\\")\\nvar h = get_node(\\\"/root/Spine/SimHost\\\")\\nvar root = get_node(\\\"/root/Spine/Ui/UiRoot\\\")\\nvar loadout = JSON.stringify([{\\\"item\\\": \\\"copper\\\", \\\"amount\\\": 500}, {\\\"item\\\": \\\"lead\\\", \\\"amount\\\": 500}])\\nvar ok = c.start_sector_with_loadout(\\\"serpulo\\\", 15, loadout)\\nroot.call(\\\"set_menu_visible\\\", false)\\nh.set_paused(true)\\nvar state = c.get_sector_state()\\nreturn {\\\"started\\\": ok, \\\"sector\\\": state.get(\\\"sector\\\"), \\\"presetDescription_len\\\": str(state.get(\\\"presetDescription\\\", \\\"\\\")).length(), \\\"paused\\\": h.is_paused()}"
-            },
-            "note": "presetDescription_len 127 for groundZero"
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "return get_node(\\\"/root/Spine/SimHost\\\").step(30)"
-            },
-            "note": "drain the launch IO job; while io_pending=1 the LoadingLayer branch consumes Escape"
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "var loading = get_node(\\\"/root/Spine/Ui/UiRoot/LoadingLayer/loading\\\")\\nreturn {\\\"loading_visible\\\": loading.visible, \\\"io_pending\\\": get_node(\\\"/root/Spine/SimHost\\\").io_pending()}"
-            },
-            "note": "poll until loading_visible false (one fragment refresh after io drains)"
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "key",
-              "key": "Escape",
-              "pressed": true
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "key",
-              "key": "Escape",
-              "pressed": false
-            }
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "Input.flush_buffered_events()\\nvar ui = get_node(\\\"/root/MindUi\\\")\\nvar h = get_node(\\\"/root/Spine/SimHost\\\")\\nvar paused = get_node_or_null(\\\"/root/Spine/Ui/UiRoot/DialogLayer/paused\\\")\\nreturn {\\\"stack\\\": ui.call(\\\"dialog_stack\\\"), \\\"paused_visible\\\": paused != null and paused.visible, \\\"is_paused\\\": h.is_paused(), \\\"tick\\\": h.get_tick()}"
-            },
-            "note": "stack [paused]; tick held"
           }
         ],
         "confirm": {
-          "java": "runs/20261009-065416-ref-ground-zero/java/r01-00-pause.png"
+          "godot": "dialog_stack()==[paused] and SimHost state paused",
+          "java": "r01-00-pause.png non-blank"
         },
-        "last_replayed": "runs/20261010-085323-paused-dialog-buttons/"
+        "last_replayed": "runs/20261011-112541-PAR-0038/ (resume GZ -> ESC -> [paused]; rows (351,203,450,260); quit labels [glyph, Save & Quit]; dim ore 26 == java 26)"
       },
-      "run": "runs/20261009-065416-ref-ground-zero/",
+      "run": "runs/20261011-112541-PAR-0038/",
       "reproduce": {
         "java": [
           {
-            "tool": "computer-mcp_key_down/key_up",
+            "tool": "note",
             "params": {
-              "key": "escape"
-            }
-          },
-          {
-            "tool": "capture_screen.py",
-            "params": {
-              "--window-title": "Mindustry",
-              "--output": "runs/20261009-065416-ref-ground-zero/java/r01-00-pause.png"
+              "frame": "runs/20261009-065416-ref-ground-zero/java/r01-00-pause.png"
             }
           }
         ],
@@ -12964,21 +12901,53 @@
           {
             "tool": "godot_exec",
             "params": {
-              "action": "eval",
-              "code": "var paused = get_node(\\\"/root/Spine/Ui/UiRoot/DialogLayer/paused\\\")\\nvar buttons = paused.find_children(\\\"*\\\", \\\"Button\\\", true, false).map(func(b): \\n\\tvar r = (b as Control).get_global_rect()\\n\\treturn {\\\"name\\\": str(b.name), \\\"visible\\\": b.visible, \\\"rect\\\": {\\\"x\\\": int(r.position.x), \\\"y\\\": int(r.position.y), \\\"w\\\": int(r.size.x), \\\"h\\\": int(r.size.y)}})\\nreturn {\\\"title\\\": str(paused.get_node(\\\"Center/Panel/Layout/Title\\\").text), \\\"buttons\\\": buttons}"
-            },
-            "note": "desktop campaign set at 7825590: objective/abandon/back/settings/hostserver/quit visible; planetmap+savegame/loadgame hidden; panel 560x400 at (296,124)"
+              "code": "resume GZ -> ESC via push_input"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "check stack + Rows rect + quit labels + the Dim alpha"
+            }
           }
         ],
-        "compare": []
+        "compare": [
+          "godot/hud-83-pause-final-dim.png vs java/r01-00-pause-java.png: changed 0.237, palette 0.144"
+        ]
       },
-      "steps": [],
-      "mismatch": null,
+      "steps": [
+        {
+          "action": "ESC in-game",
+          "result": "the pause dialog opens (stack [paused], sim paused)"
+        },
+        {
+          "check": "pre-fix: boxed panel, bottom rows, 'Quit' label, 0.55 dim"
+        },
+        {
+          "fix": "713624a (full_dialog + centred 220x450x55 rows + @save.quit + 0.9 dim)"
+        },
+        {
+          "check": "post-fix: rows (351,203,450,260), 'Save & Quit', the ore dimmed to 26/255 on both sides; diff 0.237/0.144"
+        }
+      ],
+      "mismatch": {
+        "step": "pre-fix pause dialog: boxed, bottom-anchored, Quit label, 0.55 dim",
+        "godot_frame": "runs/20261011-112541-PAR-0038/godot/hud-80-pause-dialog.png",
+        "java_frame": "runs/20261011-112541-PAR-0038/java/r01-00-pause-java.png",
+        "diff": "runs/20261011-112541-PAR-0038/diff/pause-final-dim.json"
+      },
       "fix": {
-        "status": "open"
+        "status": "done",
+        "commit": "713624a",
+        "summary": "pause dialog to the Java layout: full-dialog floating rows (220/450 x 55, centred), @save.quit in campaigns, 0.9 dim (measured parity)"
       },
-      "verified": null,
-      "note": "Revealed by R01 (2026-10-09) while pausing the tutorial: image centers Map Objective (460,216), Abandon (690,216), Back (460,281), Settings (690,281), Host Multiplayer Game (575,345), Save & Quit (576,410); screen = image + (50,98). Save & Quit and the quit-confirm are recorded in PAR-0037. Godot fork replayed 2026-10-10 at 7825590 (run dir runs/20261010-085323-paused-dialog-buttons/): launch -> drain IO -> Escape opens paused; desktop campaign set dumped; objective full_text 127 chars.",
+      "verified": {
+        "mode": "reference",
+        "run": "runs/20261011-112541-PAR-0038/",
+        "reference": "runs/20261009-065416-ref-ground-zero/",
+        "at": "2026-10-11T01:36:59Z"
+      },
+      "note": "Verified against r01-00 with the layout/label/dim fixes (713624a). Residue: the objective banner draws above the dim (PAR-0146 family) and the Java title arrows are absent. Findings from the probe: PAR-0147 (in-game planet page Back -> menu) and PAR-0148 (dialog backdrop audit).",
       "reference": {
         "captured": "2026-10-09T07:00:00Z",
         "profile": "fresh",
@@ -13002,6 +12971,12 @@
         "java_path": [
           "launch -> window normalize -> Play > Campaign > Serpulo OK -> Ground Zero -> Launch (R00 frames) -> in-game HUD (R00-R07 frames)"
         ]
+      },
+      "claim": {
+        "by": "parity-hunt-s1",
+        "at": "2026-10-11T01:25:41Z",
+        "prior_status": "reference",
+        "released_at": "2026-10-11T01:36:59Z"
       }
     },
     {
@@ -28674,7 +28649,7 @@
       "surface": "ui",
       "parent": "PAR-0036",
       "status": "seeded",
-      "updated": "2026-10-11T01:25:35Z",
+      "updated": "2026-10-11T01:36:59Z",
       "discovered_by": "runs/20261011-112419-PAR-0036/",
       "path": {
         "to": "in-game > map button > planet page",
@@ -28714,7 +28689,96 @@
         "status": "open"
       },
       "verified": null,
-      "note": "Revealed by PAR-0036. Opened from the HUD, the port's planet dialog shows the live world through its backdrop and the world HUD above it; the Java PlanetDialog renders its own space scene and the HUD hides behind the modal. The campaign-path page (PAR-0015) is unaffected."
+      "note": "Revealed by PAR-0036. Opened from the HUD, the port's planet dialog shows the live world through its backdrop and the world HUD above it; the Java PlanetDialog renders its own space scene and the HUD hides behind the modal. The campaign-path page (PAR-0015) is unaffected. Also observed on PAR-0038: the tutorial objective banner renders above the pause dialog's 0.9 dim (255 vs the Java's 81)."
+    },
+    {
+      "id": "PAR-0147",
+      "title": "Planet page Back from the in-game map button returns to the menu instead of resuming the sector",
+      "surface": "ui",
+      "parent": "PAR-0036",
+      "status": "seeded",
+      "updated": "2026-10-11T01:36:59Z",
+      "discovered_by": "runs/20261011-112541-PAR-0038/",
+      "path": {
+        "to": "in-game > map button > Back",
+        "java": [],
+        "godot": [],
+        "confirm": {
+          "godot": "MenuGroup.visible after Back",
+          "java": "PlanetDialog Back hides and resumes"
+        },
+        "last_replayed": null
+      },
+      "run": "runs/20261011-112541-PAR-0038/",
+      "reproduce": {
+        "java": [],
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "in-game -> input-map -> Back (104,577) -> MenuGroup.visible == true; the ESC pause then blocks (_on_escape returns false while menu_group.visible)"
+            }
+          }
+        ],
+        "compare": [
+          "the Java PlanetDialog Back in-game only hides the dialog (PlanetDialog.java:598: state.isMenu() ? ui.menu.show() : hide)"
+        ]
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open"
+      },
+      "verified": null,
+      "note": "Revealed while probing PAR-0038 (the ESC did nothing because the menu group was left visible). Frame: runs/20261011-112541-PAR-0038/godot/menu-after-in-game-page-back.png (the menu with its background over the live HUD)."
+    },
+    {
+      "id": "PAR-0148",
+      "title": "Dialog backdrop: Java defaultDialog dims ~0.9 and stacks on confirms; fullDialog surfaces carry no dim; the port shares one 0.55 Dim",
+      "surface": "ui",
+      "parent": "PAR-0038",
+      "status": "seeded",
+      "updated": "2026-10-11T01:36:59Z",
+      "discovered_by": "runs/20261011-112541-PAR-0038/",
+      "path": {
+        "to": "any in-game dialog",
+        "java": [],
+        "godot": [],
+        "confirm": {
+          "godot": "Dim color alpha",
+          "java": "measured ore luminance"
+        },
+        "last_replayed": null
+      },
+      "run": "runs/20261011-112541-PAR-0038/",
+      "reproduce": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "measurements": "r01-00 pause ore 26/255 (~0.90); r01-01 quitconfirm stacked ore 3.0; r04-00 tech tree ore 255 (no dim); r05-01 hint text 202 (no dim)"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "code": "MindDialog base Dim = Color(0,0,0,0.55); the paused dialog overrides to 0.9 (PAR-0038)"
+            }
+          }
+        ],
+        "compare": [
+          "a non-pause dialog still dims the world at 0.55 where Java has none (fullDialog) or ~0.9 (defaultDialog)"
+        ]
+      },
+      "steps": [],
+      "mismatch": null,
+      "fix": {
+        "status": "open"
+      },
+      "verified": null,
+      "note": "Revealed by PAR-0038's dim measurement. Audit which MindDialogs map to Java defaultDialog (dim ~0.9) vs fullDialog (no dim: planet/research/custom game/load) and align the shared Dim accordingly; PAR-0038 fixed only the pause instance."
     }
   ]
 }
