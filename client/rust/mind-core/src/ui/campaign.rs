@@ -657,6 +657,12 @@ pub fn sector_views(planet: &Planet, presets: &[SectorPresetDef]) -> Vec<SectorV
                 view.is_last = preset.is_last_sector;
                 view.capture_wave = preset.capture_wave;
                 view.difficulty = preset.difficulty;
+                // `PlanetDialog.isLocked`: only a locked, tech-gated preset on a
+                // base-less cell blocks selection; `requireUnlock = false`
+                // presets (map submissions) stay selectable even before their
+                // unlock flag is set.
+                view.locked =
+                    preset.require_unlock && !preset.unlock.unlocked() && !sector.has_base();
             }
             view
         })

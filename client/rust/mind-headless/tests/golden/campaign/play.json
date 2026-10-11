@@ -6,7 +6,7 @@
   "events": [
     "RulesLoad { from_save: false, rules_epoch: 1 }",
     "Play",
-    "SectorLaunch { planet: ContentId(5), sector: 15 }",
+    "SectorLaunch { planet: ContentId(5), sector: 170 }",
     "NewGame",
     "Wave",
     "Wave",
@@ -18,7 +18,7 @@
     "Wave",
     "Wave",
     "Wave",
-    "SectorCapture { planet: ContentId(5), sector: 15, initial: true }"
+    "SectorCapture { planet: ContentId(5), sector: 170, initial: true }"
   ],
   "lose_events": [
     "GameOver { winner: 2 }"
@@ -29,6 +29,6 @@
   "captured": true,
   "set_rules_open_ok": true,
   "set_rules_campaign_rejected": true,
-  "checksum": "24a590f37875b92f",
+  "checksum": "c95d2e6090e33853",
   "pass": true
 }

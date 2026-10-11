@@ -3,7 +3,7 @@
   "scenario": "campaign_sector_cycle",
   "planet": "serpulo",
   "sector": "groundZero",
-  "sector_id": 15,
+  "sector_id": 170,
   "preset_on_planet": true,
   "ticks": 600,
   "turn": 1,

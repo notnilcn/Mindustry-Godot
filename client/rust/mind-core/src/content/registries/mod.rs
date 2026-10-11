@@ -54,7 +54,8 @@ pub fn create_base_content(
     loadouts::load(&mut registry)?;
     weathers::load(&mut registry, bundle, store)?;
     planets::load(&mut registry, bundle, store)?;
-    sectors::load(&mut registry, bundle, store, &sectors::IdentityRemap)?;
+    let remap = sectors::PlanetDataRemap::from_registry(&registry);
+    sectors::load(&mut registry, bundle, store, &remap)?;
 
     // SerpuloTechTree.load
     let serpulo_planet = registry.planet_id("serpulo");

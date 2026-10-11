@@ -302,6 +302,9 @@ pub struct PlanetDef {
     pub enemy_core_spawn_replace: bool,
     /// Loads `planets/<name>.json`.
     pub load_planet_data: bool,
+    /// `PlanetData.presets` (`planets/<name>.json`): authored preset name ->
+    /// generated sector cell (`SectorPreset.initialize` remap).
+    pub preset_remap: Vec<(&'static str, i32)>,
     /// Enemy rebuild speed multiplier.
     pub enemy_build_speed_multiplier: f32,
     /// Enemy factory activation delay.
@@ -395,6 +398,7 @@ impl PlanetDef {
             clear_sector_on_lose: false,
             enemy_core_spawn_replace: false,
             load_planet_data: false,
+            preset_remap: Vec::new(),
             enemy_build_speed_multiplier: 1.0,
             enemy_factory_activation_delay: 0.0,
             launch_capacity_multiplier: 0.25,
@@ -683,6 +687,42 @@ pub fn load(
         planet.atmosphere_rad_in = 0.02;
         planet.atmosphere_rad_out = 0.3;
         planet.start_sector = 170;
+        // `Planet.getData().presets` (`assets/planets/serpulo.json`):
+        // `SectorPreset.initialize` remaps each authored preset to its generated
+        // cell (Planet.java:477-481). Baked here like the rest of the planet
+        // table; the file itself is Arc JSON.
+        planet.preset_remap = vec![
+            ("windsweptIslands", 97),
+            ("stainedMountains", 223),
+            ("weatheredChannels", 166),
+            ("extractionOutpost", 213),
+            ("coastline", 164),
+            ("navalFortress", 165),
+            ("frontier", 86),
+            ("sunkenPier", 173),
+            ("groundZero", 170),
+            ("mycelialBastion", 143),
+            ("crateredBattleground", 219),
+            ("facility32m", 65),
+            ("atolls", 75),
+            ("overgrowth", 142),
+            ("testingGrounds", 169),
+            ("frozenForest", 64),
+            ("littoralShipyard", 204),
+            ("saltFlats", 98),
+            ("taintedWoods", 145),
+            ("infestedCanyons", 85),
+            ("desolateRift", 271),
+            ("nuclearComplex", 228),
+            ("ruinousShores", 41),
+            ("planetaryTerminal", 217),
+            ("impact0078", 266),
+            ("perilousHarbor", 214),
+            ("fallenVessel", 95),
+            ("fungalPass", 221),
+            ("tarFields", 99),
+            ("biomassFacility", 23),
+        ];
         planet.unlock.always_unlocked = true;
         planet.allow_self_sector_launch = true;
         let spore = Rgba::from_hex("7457ce").unwrap_or(Rgba::WHITE);

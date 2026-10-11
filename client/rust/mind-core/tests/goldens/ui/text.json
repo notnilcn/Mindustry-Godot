@@ -37,7 +37,7 @@
     },
     {
       "input": ":copper: x",
-      "output": "[icon name=\"copper\"] x"
+      "output": "[icon name=\"copper\"][/icon] x"
     }
   ],
   "time": [

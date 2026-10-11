@@ -167,11 +167,11 @@ mod tests {
         assert!(!catalog.is_empty());
 
         // Byte-for-byte parity with the committed plan-21 vanilla seed
-        // (`server/spacetimedb/src/main/content_seed.rs`, 667 `VANILLA_CONTENT`
-        // pairs for the same `create_base_content` boot).
+        // (`server/spacetimedb/src/main/content_seed.rs`; regenerate with
+        // `server/gen_content_seed.sh` after content-data changes).
         assert_eq!(
             catalog.len(),
-            667,
+            716,
             "vanilla catalog must match the plan-21 content seed"
         );
 

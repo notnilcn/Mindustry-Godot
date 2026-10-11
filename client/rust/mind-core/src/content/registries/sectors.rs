@@ -45,6 +45,37 @@ pub struct IdentityRemap;
 
 impl SectorRemapProvider for IdentityRemap {}
 
+/// The baked `PlanetData.presets` tables (`assets/planets/<name>.json`):
+/// `SectorPreset.initialize` remaps each named preset to its generated cell.
+#[derive(Debug, Clone, Default)]
+pub struct PlanetDataRemap {
+    tables: Vec<(PlanetId, Vec<(&'static str, i32)>)>,
+}
+
+impl PlanetDataRemap {
+    /// Collects every planet's baked remap table from the loaded planets.
+    pub fn from_registry(registry: &ContentRegistry) -> Self {
+        let tables = registry
+            .planets()
+            .iter()
+            .filter(|planet| !planet.preset_remap.is_empty())
+            .map(|planet| (planet.id, planet.preset_remap.clone()))
+            .collect();
+        Self { tables }
+    }
+}
+
+impl SectorRemapProvider for PlanetDataRemap {
+    fn preset_remap(&self, planet: PlanetId, name: &str, fallback: i32) -> i32 {
+        self.tables
+            .iter()
+            .find(|(id, _)| *id == planet)
+            .and_then(|(_, table)| table.iter().find(|(preset, _)| *preset == name))
+            .map(|(_, cell)| *cell)
+            .unwrap_or(fallback)
+    }
+}
+
 /// Rules override kind tag (`Cons<Rules>`; values in plan 12).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RuleOverrideKind {
@@ -223,9 +254,180 @@ impl Unlockable for SectorPresetDef {
     }
 }
 
-/// `SectorSubmissions.registerSectors()` hook (plan 19 map submissions).
-pub fn register_sector_submissions(_registry: &mut ContentRegistry) {
-    // Intentionally empty until plan 19 lands map-submission sectors.
+/// `SectorSubmissions.registerSectors()`: 45 Serpulo map-submission presets
+/// (each `sector-serpulo-<id>` with the authored `hidden/<id>` map; the
+/// capture-wave-less ones mark their planet cell `generateEnemyBase`), the
+/// survival submission `sector-serpulo-202` and the three direct names, in
+/// upstream call order (after the Serpulo presets, before Erekir;
+/// `SectorPresets.java:161`).
+pub fn register_sector_submissions(
+    registry: &mut ContentRegistry,
+    bundle: &dyn BundleView,
+    store: &dyn UnlockStore,
+) -> Result<Vec<SectorId>, ContentError> {
+    let Some(serpulo) = registry.planet_by_name("serpulo").map(|planet| planet.id) else {
+        return Ok(Vec::new());
+    };
+    let mut ids = Vec::with_capacity(49);
+
+    /// `SectorSubmissions.registerSector`: name `sector-serpulo-<id>`, hidden
+    /// map, no unlock requirement; `captureWave <= 0` marks an enemy base cell.
+    #[allow(clippy::too_many_arguments)]
+    fn add(
+        registry: &mut ContentRegistry,
+        bundle: &dyn BundleView,
+        store: &dyn UnlockStore,
+        serpulo: PlanetId,
+        name: String,
+        sector: i32,
+        capture_wave: i32,
+        difficulty: f32,
+        show_hidden: bool,
+    ) -> Result<SectorId, ContentError> {
+        let mut preset = SectorPresetDef::new(&name, serpulo, sector, bundle, store);
+        if sector >= 0 {
+            preset.file_name = Some(format!("hidden/{sector}"));
+        }
+        preset.require_unlock = false;
+        if difficulty > 0.0 {
+            preset.difficulty = difficulty;
+        }
+        preset.show_hidden = show_hidden;
+        if capture_wave > 0 {
+            preset.capture_wave = capture_wave;
+        } else if sector >= 0
+            && let Some(planet) = registry.planet_mut(serpulo)
+            && let Some(cell) = planet.sectors.get_mut(sector as usize)
+        {
+            cell.generate_enemy_base = true;
+        }
+        registry.add_sector(preset)
+    }
+
+    macro_rules! register {
+        ($id:literal, $difficulty:expr) => {
+            ids.push(add(
+                registry,
+                bundle,
+                store,
+                serpulo,
+                format!("sector-serpulo-{}", $id),
+                $id,
+                -1,
+                $difficulty,
+                false,
+            )?);
+        };
+        ($id:literal, $difficulty:expr, $show_hidden:expr) => {
+            ids.push(add(
+                registry,
+                bundle,
+                store,
+                serpulo,
+                format!("sector-serpulo-{}", $id),
+                $id,
+                -1,
+                $difficulty,
+                $show_hidden,
+            )?);
+        };
+    }
+
+    // region submissions (upstream source order)
+    register!(76, sector_difficulty::EXTREME as f32);
+    register!(47, sector_difficulty::EXTREME as f32);
+    register!(225, sector_difficulty::EXTREME as f32);
+    register!(111, sector_difficulty::ERADICATION as f32);
+    register!(176, sector_difficulty::EXTREME as f32);
+    register!(13, sector_difficulty::EXTREME as f32);
+    register!(259, sector_difficulty::EXTREME as f32);
+    register!(192, sector_difficulty::EXTREME as f32);
+    register!(127, sector_difficulty::EXTREME as f32);
+    register!(207, sector_difficulty::EXTREME as f32);
+    register!(94, sector_difficulty::HIGH as f32);
+    register!(16, sector_difficulty::HIGH as f32);
+    register!(116, sector_difficulty::HIGH as f32);
+    register!(69, sector_difficulty::HIGH as f32);
+    register!(92, sector_difficulty::EXTREME as f32);
+    register!(197, sector_difficulty::EXTREME as f32);
+    register!(67, sector_difficulty::ERADICATION as f32);
+    register!(180, sector_difficulty::EXTREME as f32);
+    register!(55, sector_difficulty::ERADICATION as f32);
+    register!(19, sector_difficulty::EXTREME as f32);
+    register!(200, sector_difficulty::MEDIUM as f32);
+    register!(191, sector_difficulty::ERADICATION as f32);
+    register!(6, sector_difficulty::EXTREME as f32);
+    register!(265, sector_difficulty::EXTREME as f32);
+    register!(161, sector_difficulty::EXTREME as f32);
+    register!(24, sector_difficulty::EXTREME as f32);
+    register!(263, sector_difficulty::ERADICATION as f32);
+    register!(66, sector_difficulty::EXTREME as f32);
+    register!(248, sector_difficulty::HIGH as f32);
+    register!(133, sector_difficulty::EXTREME as f32);
+    register!(185, sector_difficulty::HIGH as f32);
+    register!(254, sector_difficulty::ERADICATION as f32);
+    register!(0, sector_difficulty::EXTREME as f32);
+    register!(30, sector_difficulty::ERADICATION as f32);
+    register!(20, sector_difficulty::EXTREME as f32);
+    register!(162, sector_difficulty::ERADICATION as f32);
+    register!(230, sector_difficulty::HIGH as f32);
+    register!(240, sector_difficulty::EXTREME as f32);
+
+    // megabases
+    register!(246, sector_difficulty::ERADICATION as f32);
+    register!(244, sector_difficulty::ERADICATION as f32);
+    register!(242, sector_difficulty::ERADICATION as f32);
+    register!(243, sector_difficulty::ERADICATION as f32);
+    register!(247, sector_difficulty::ERADICATION as f32);
+    register!(245, sector_difficulty::ERADICATION as f32);
+    let shielded = add(
+        registry,
+        bundle,
+        store,
+        serpulo,
+        String::from("sector-serpulo-27"),
+        27,
+        -1,
+        sector_difficulty::UNREASONABLE as f32,
+        true,
+    )?;
+    // `Planets.serpulo.sectors.get(27).preset.shieldSectors.addAll(246, 244, 242)`.
+    if let Some(preset) = registry.sector_mut(shielded) {
+        preset.shield_sectors = vec![246, 244, 242];
+    }
+    ids.push(shielded);
+
+    // `registerSurvival(202, ..., 33, high)`.
+    ids.push(add(
+        registry,
+        bundle,
+        store,
+        serpulo,
+        String::from("sector-serpulo-202"),
+        202,
+        33,
+        sector_difficulty::HIGH as f32,
+        false,
+    )?);
+
+    // Direct presets (`fallenVessel`/`geothermalStronghold`/`cruxscape`).
+    let mut fallen = SectorPresetDef::new("fallenVessel", serpulo, -1, bundle, store);
+    fallen.require_unlock = false;
+    fallen.capture_wave = 70;
+    fallen.difficulty = sector_difficulty::EXTREME as f32;
+    ids.push(registry.add_sector(fallen)?);
+
+    let mut stronghold = SectorPresetDef::new("geothermalStronghold", serpulo, 264, bundle, store);
+    stronghold.require_unlock = false;
+    stronghold.difficulty = sector_difficulty::ERADICATION as f32;
+    ids.push(registry.add_sector(stronghold)?);
+
+    let mut cruxscape = SectorPresetDef::new("cruxscape", serpulo, 54, bundle, store);
+    cruxscape.require_unlock = false;
+    cruxscape.difficulty = sector_difficulty::ERADICATION as f32;
+    ids.push(registry.add_sector(cruxscape)?);
+    // endregion
+    Ok(ids)
 }
 
 /// Resolves one preset's planet/sector and assigns `planet.sectors[i].preset`
@@ -577,7 +779,7 @@ pub fn load(
         }
     );
 
-    register_sector_submissions(registry);
+    ids.extend(register_sector_submissions(registry, bundle, store)?);
     // endregion
 
     // region erekir
@@ -741,7 +943,7 @@ mod tests {
     #[test]
     fn presets_resolve() {
         let registry = test_registry();
-        assert_eq!(registry.sectors().len(), 46, "preset count");
+        assert_eq!(registry.sectors().len(), 95, "preset count");
         for preset in registry.sectors() {
             let planet = registry
                 .planet(preset.planet)
@@ -758,17 +960,62 @@ mod tests {
             assert_eq!(
                 sector.preset,
                 Some(preset.id),
-                "{}: planet.sector round-trip",
-                preset.name
+                "{}: planet.sector round-trip (cell {} holds {:?})",
+                preset.name,
+                preset.sector,
+                sector.preset
             );
         }
-        // Negative authored index wraps like Java `%` + `== -1 -> 0`.
+        // Negative authored index wraps like Java `%` + `== -1 -> 0` when the
+        // planet data has no remap entry; `sunkenPier` is remapped to cell 173
+        // by `assets/planets/serpulo.json` (`SectorPreset.initialize`).
         let sunken = registry.sector_by_name("sunkenPier").unwrap();
         assert_eq!(sunken.original_position, -1);
-        assert_eq!(sunken.sector, 0);
+        assert_eq!(sunken.sector, 173);
+        let ground_zero = registry.sector_by_name("groundZero").unwrap();
+        assert_eq!(ground_zero.original_position, 15);
+        assert_eq!(ground_zero.sector, 170);
         // Difficulty constants.
         assert_eq!(sector_difficulty::ERADICATION, 10);
         // Hidden rule: no description -> hidden (empty test bundle).
         assert!(sunken.is_hidden());
+
+        // `SectorSubmissions.registerSectors()`: the authored submission presets
+        // carry their hidden maps and mark enemy-base cells; the survival entry
+        // keeps its capture wave.
+        let attack = registry.sector_by_name("sector-serpulo-76").unwrap();
+        assert!(!attack.require_unlock, "submissions never require unlock");
+        assert_eq!(attack.file_name.as_deref(), Some("hidden/76"));
+        assert_eq!(attack.difficulty, 8.0);
+        assert!(
+            registry
+                .planet(attack.planet)
+                .unwrap()
+                .sectors
+                .get(76)
+                .unwrap()
+                .generate_enemy_base,
+            "an attack submission marks its planet cell"
+        );
+        let survival = registry.sector_by_name("sector-serpulo-202").unwrap();
+        assert_eq!(survival.capture_wave, 33);
+        assert_eq!(survival.difficulty, 5.0);
+        assert!(
+            !registry
+                .planet(survival.planet)
+                .unwrap()
+                .sectors
+                .get(202)
+                .unwrap()
+                .generate_enemy_base,
+            "a survival submission is not an enemy-base cell"
+        );
+        let shielded = registry.sector_by_name("sector-serpulo-27").unwrap();
+        assert!(shielded.show_hidden);
+        assert_eq!(shielded.shield_sectors, vec![246, 244, 242]);
+        let fallen = registry.sector_by_name("fallenVessel").unwrap();
+        assert!(!fallen.require_unlock);
+        assert_eq!(fallen.capture_wave, 70);
+        assert_eq!(fallen.file_name, None);
     }
 }

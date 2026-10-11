@@ -19,7 +19,7 @@
       "kind": "oracle",
       "path": "parity/bundle_keys.json",
       "owner_plan": "02/03",
-      "sha256": "8c6e048da19675bf4bfad579442e17bd47c69f3fad320a8d4bddae3a3f36611c",
+      "sha256": "59cf4d5d8314edc9cd86048627a5f28023140e1fe39072eb10863a2041cf31e1",
       "regen": "mind-tools pack (bundle index)"
     },
     {
@@ -27,7 +27,7 @@
       "kind": "oracle",
       "path": "parity/golden_content.json",
       "owner_plan": "02",
-      "sha256": "86b9cacb14b86291625042e088525e4148f7af0ac68ff01ed1ca0f289fed5f01",
+      "sha256": "be69bbdc9ae23a8dbc58f5e3138686a69647efac4b92663f02e34a57c4dfa061",
       "regen": "cargo run -p mind-headless -- content dump"
     },
     {
@@ -91,7 +91,7 @@
       "kind": "harness",
       "path": "client/rust/mind-headless/tests/golden/campaign/play.json",
       "owner_plan": "12",
-      "sha256": "a564cd5e44c8e1822e2da964c05fb1af6551ccd22060149fe57324f68a70c1a5"
+      "sha256": "5917566e5a360158d641d5735cb1796969674894c42ed204f55f87c855d7a22a"
     },
     {
       "id": "harness_campaign_rules_roundtrip",
@@ -112,14 +112,14 @@
       "kind": "harness",
       "path": "client/rust/mind-headless/tests/golden/campaign/sector_cycle.json",
       "owner_plan": "12",
-      "sha256": "ae2dc11899667c3b22a806b884d547b72a221a7b504adf091cec6b636b36a594"
+      "sha256": "2d3705c90546a54c4e40e199a62044e796b3bb5edf891bf47343807b822cd314"
     },
     {
       "id": "harness_campaign_tech_unlock_gating",
       "kind": "harness",
       "path": "client/rust/mind-headless/tests/golden/campaign/tech_unlock_gating.json",
       "owner_plan": "12",
-      "sha256": "2360d1944339bddb53ab083c9c0b8a553536c7f73a73eb0ed911a74fd756fcc8"
+      "sha256": "037d8c66127f44ade16e213953ca9c75c6d594c6d57d12708542fe611003f81b"
     },
     {
       "id": "harness_campaign_turn",
@@ -294,7 +294,7 @@
       "kind": "harness",
       "path": "client/rust/mind-core/tests/goldens/ui/text.json",
       "owner_plan": "14",
-      "sha256": "7fcffb280bc20c672d68beec845de04c2362b6278c71e6b09f692e860efc1185"
+      "sha256": "95a49659668f4a2a79e5ed5c5a232537e3fc4524394275748ab62895c6a3b2b2"
     },
     {
       "id": "harness_ui_ui_keys",
@@ -477,7 +477,7 @@
       "kind": "harness",
       "path": "client/rust/mind-core/tests/goldens/ui/campaign.json",
       "owner_plan": "14",
-      "sha256": "4866ebbc17ea5cdbfb21c22a2453f219795d3c87327f74bad2b3b9052002262b"
+      "sha256": "afa63ea8d93b98156b537d1388248b0339f2bb1b89809f656b47622932131f6f"
     },
     {
       "id": "harness_ui_chat_console",

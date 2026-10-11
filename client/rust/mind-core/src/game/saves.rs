@@ -810,15 +810,18 @@ mod tests {
         let registry = registry();
         let serpulo = registry.planet_id("serpulo").unwrap();
         // Explicit preset tag: a save at sector 16 that belongs to groundZero
-        // (resolved sector 15) is remapped to 15.
+        // (resolved sector 170 after the planet-data remap) is remapped to 170.
         assert_eq!(
             plan_remap(&registry, serpulo, 16, Some("groundZero")),
-            Some(15)
+            Some(170)
         );
         // Already at the destination -> no remap.
-        assert_eq!(plan_remap(&registry, serpulo, 15, Some("groundZero")), None);
+        assert_eq!(
+            plan_remap(&registry, serpulo, 170, Some("groundZero")),
+            None
+        );
         // Unknown preset tag -> no remap.
-        assert_eq!(plan_remap(&registry, serpulo, 15, Some("nope")), None);
+        assert_eq!(plan_remap(&registry, serpulo, 170, Some("nope")), None);
         // Legacy (no tag) with no preset authored at the saved index -> none.
         assert_eq!(plan_remap(&registry, serpulo, 9999, None), None);
     }

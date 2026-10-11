@@ -198,7 +198,7 @@
     }
   ],
   "sample_sector": {
-    "id": 15,
+    "id": 170,
     "planet": "serpulo",
     "preset": "groundZero",
     "name": "groundZero",
@@ -215,7 +215,15 @@
     "shielded": false,
     "has_enemy_base": false,
     "is_last": false,
-    "capture_wave": 10
+    "capture_wave": 10,
+    "stats": {
+      "attempts": 0,
+      "wave": 0,
+      "production": [],
+      "export": [],
+      "import": [],
+      "stored": []
+    }
   },
   "sample_research": {
     "index": 143,
@@ -259,5 +267,5 @@
     "waves_lasted": 12,
     "next_planet": "erekir"
   },
-  "checksum": "2c124f6b42fc393e"
+  "checksum": "eb26d0a039ac9e3e"
 }
