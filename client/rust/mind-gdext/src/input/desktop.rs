@@ -1149,7 +1149,13 @@ impl DesktopBridge {
                     let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
                         continue;
                     };
-                    commands.push(SimCommand::Break { x, y, player: None });
+                    // `player: Some` routes to the player unit's build queue
+                    // (`InputHandler.removeSelection`; PAR-0098).
+                    commands.push(SimCommand::Break {
+                        x,
+                        y,
+                        player: Some(0),
+                    });
                 }
             }
         }
@@ -1271,7 +1277,9 @@ impl DesktopBridge {
                 block: plan.block.raw(),
                 rotation: plan.rotation as i8,
                 team,
-                player: None,
+                // Player input queues on the player unit (`flushPlans` ->
+                // `BuilderComp.addBuild`); the builder constructs it (PAR-0098).
+                player: Some(0),
             })
             .collect();
         self.enqueue_commands(&commands);

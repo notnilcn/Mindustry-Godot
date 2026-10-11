@@ -195,6 +195,8 @@ pub struct SandboxState {
     pub accumulator: f32,
     /// Configured item (item source).
     pub item: Option<ItemId>,
+    /// Configured liquid (`LiquidSource.source`).
+    pub liquid: Option<crate::content::LiquidId>,
 }
 
 /// `Pump`/`SolidPump` build state.
@@ -202,6 +204,11 @@ pub struct SandboxState {
 pub struct PumpState {
     /// Warmup (`warmup`).
     pub warmup: f32,
+    /// `PumpBuild.liquidDrop`: the floor liquid under the footprint
+    /// (recomputed on placement/proximity; not serialized upstream).
+    pub liquid_drop: Option<crate::content::LiquidId>,
+    /// `PumpBuild.amount`: summed `Floor.liquidMultiplier` of pumpable tiles.
+    pub amount: f32,
 }
 
 /// `Accelerator`/`LandingPad`/`LaunchPad` build state.

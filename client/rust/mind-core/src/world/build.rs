@@ -37,6 +37,43 @@ pub fn supports_env(def: &BlockDef, env: EnvFlag) -> bool {
     def.env_enabled.contains(env) || def.env_enabled.is_empty()
 }
 
+/// Java `Env` bit of a flag (`mindustry.world.meta.Env`).
+const fn java_env_bit(flag: EnvFlag) -> i32 {
+    match flag {
+        EnvFlag::Terrestrial => 1,
+        EnvFlag::Space => 1 << 1,
+        EnvFlag::Underwater => 1 << 2,
+        EnvFlag::Spores => 1 << 3,
+        EnvFlag::Scorching => 1 << 4,
+        EnvFlag::GroundOil => 1 << 5,
+        EnvFlag::GroundWater => 1 << 6,
+        EnvFlag::Oxygen => 1 << 7,
+    }
+}
+
+fn mask_bits(mask: &crate::content::EnvMask, empty: i32) -> i32 {
+    if mask.any {
+        return -1;
+    }
+    if mask.flags.is_empty() {
+        return empty;
+    }
+    mask.flags
+        .iter()
+        .fold(0, |bits, flag| bits | java_env_bit(*flag))
+}
+
+/// `Block.supportsEnv(env)` against a Java `Env` bitmask (`Rules.env`):
+/// `(envEnabled & env) != 0 && (envDisabled & env) == 0 && (envRequired == 0
+/// || (envRequired & env) == envRequired)`. An unset `envEnabled` is the
+/// upstream default `Env.terrestrial`.
+pub fn supports_env_bits(def: &BlockDef, env: i32) -> bool {
+    let enabled = mask_bits(&def.env_enabled, java_env_bit(EnvFlag::Terrestrial));
+    let disabled = mask_bits(&def.env_disabled, 0);
+    let required = mask_bits(&def.env_required, 0);
+    (enabled & env) != 0 && (disabled & env) == 0 && (required == 0 || (required & env) == required)
+}
+
 /// `Block.canPlaceOn`.
 pub fn can_place_on(_def: &BlockDef, _team: u8, _rot: u8) -> bool {
     true
@@ -151,7 +188,7 @@ pub fn valid_place_at(
     if counter.is_over_limit(rules, team, block) {
         return false;
     }
-    if !supports_env(def, EnvFlag::Terrestrial) {
+    if !supports_env_bits(def, rules.env) {
         return false;
     }
     // Darkness >= 3 blocks placement.
@@ -188,8 +225,44 @@ pub fn valid_place_at(
             }
         }
     }
+    if def.kind == crate::content::BlockKind::Pump && !pump_can_place_on(content, grid, size, x, y)
+    {
+        return false;
+    }
     let _ = (table, can_place_on);
     true
+}
+
+/// `Pump.canPlaceOn`: every pumpable tile of the footprint drops the same
+/// liquid and at least one exists (PAR-0078).
+fn pump_can_place_on(
+    content: &ContentRegistry,
+    grid: &WorldGrid,
+    size: i32,
+    x: i32,
+    y: i32,
+) -> bool {
+    let offset = -(size - 1) / 2;
+    let mut last = None;
+    for dx in 0..size {
+        for dy in 0..size {
+            let (tx, ty) = (x + offset + dx, y + offset + dy);
+            if !grid.tiles.in_bounds(tx, ty) {
+                continue;
+            }
+            let Some(drop) = content
+                .block(grid.tile(tx, ty).floor)
+                .and_then(|floor| floor.liquid_drop)
+            else {
+                continue;
+            };
+            if last.is_some_and(|last| last != drop) {
+                return false;
+            }
+            last = Some(drop);
+        }
+    }
+    last.is_some()
 }
 
 /// `Build.contactsGround` — whether a block footprint touches solid ground.

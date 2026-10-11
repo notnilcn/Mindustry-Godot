@@ -94,7 +94,10 @@ fn lookup(world: &World, grid: Option<&WorldGrid>, entity: Entity, dir: u8) -> O
 /// `LiquidBlock`/`Building.acceptLiquid` using the plan-09 [`LiquidNode`] seam.
 pub fn accept_liquid(world: &World, entity: Entity, source: Entity, liquid: LiquidId) -> bool {
     let Some(node) = world.get::<LiquidNode>(entity) else {
-        return false;
+        // Non-liquid-block buildings (crafters, generators, turrets, ...):
+        // their behavior's `acceptLiquid` (`BuildingComp.acceptLiquid`).
+        return dispatch_behavior(world, entity)
+            .is_some_and(|behavior| behavior.accept_liquid(world, entity, source, liquid));
     };
     if !node.accepts {
         return false;
@@ -114,10 +117,13 @@ pub fn accept_liquid(world: &World, entity: Entity, source: Entity, liquid: Liqu
 
 /// `Building.handleLiquid`.
 pub fn handle_liquid(world: &mut World, entity: Entity, liquid: LiquidId, amount: f32) {
-    let capacity = world
-        .get::<LiquidNode>(entity)
-        .map(|node| node.capacity)
-        .unwrap_or(0.0);
+    if world.get::<LiquidNode>(entity).is_none() {
+        if let Some(behavior) = dispatch_behavior(world, entity) {
+            behavior.handle_liquid(world, entity, entity, liquid, amount);
+        }
+        return;
+    }
+    let capacity = node_capacity(world, entity);
     if let Some(mut module) = world.get_mut::<LiquidModule>(entity) {
         module.add(liquid, amount, capacity);
     }
@@ -189,10 +195,7 @@ pub fn transfer_liquid(
     amount: f32,
     liquid: LiquidId,
 ) {
-    let next_capacity = world
-        .get::<LiquidNode>(next)
-        .map(|node| node.capacity)
-        .unwrap_or(0.0);
+    let next_capacity = node_capacity(world, next);
     let stored = world
         .get::<LiquidModule>(next)
         .map(|module| module.get(liquid))
@@ -252,9 +255,10 @@ fn dump_liquid_impl(
     output_dir: i32,
     grid: Option<&WorldGrid>,
 ) {
-    let Some(capacity) = world.get::<LiquidNode>(entity).map(|node| node.capacity) else {
+    let capacity = node_capacity(world, entity);
+    if capacity <= 0.0 {
         return;
-    };
+    }
     let stored = world
         .get::<LiquidModule>(entity)
         .map(|module| module.get(liquid))
@@ -296,12 +300,10 @@ fn dump_liquid_impl(
         if destination == entity {
             continue;
         }
-        let Some(dest_capacity) = world
-            .get::<LiquidNode>(destination)
-            .map(|node| node.capacity)
-        else {
+        let dest_capacity = node_capacity(world, destination);
+        if dest_capacity <= 0.0 {
             continue;
-        };
+        }
         if !can_dump_liquid(destination, liquid) {
             continue;
         }
@@ -351,13 +353,11 @@ fn move_liquid_impl(
         return 0.0;
     }
     let next = get_liquid_destination_impl(&*world, next, entity, liquid, grid);
-    let Some(capacity) = world.get::<LiquidNode>(entity).map(|node| node.capacity) else {
+    let capacity = node_capacity(world, entity);
+    if capacity <= 0.0 {
         return 0.0;
-    };
-    let next_capacity = world
-        .get::<LiquidNode>(next)
-        .map(|node| node.capacity)
-        .unwrap_or(0.0);
+    }
+    let next_capacity = node_capacity(world, next);
     let same_team = world
         .get::<crate::entities::comp::TeamComp>(entity)
         .map(|team| team.team)
@@ -372,9 +372,10 @@ fn move_liquid_impl(
         .get::<LiquidModule>(next)
         .map(|module| module.get(liquid))
         .unwrap_or(0.0);
+    // Buildings without a `LiquidNode` defer to `acceptLiquid` below.
     let accepts = world
         .get::<LiquidNode>(next)
-        .is_some_and(|node| node.accepts);
+        .is_none_or(|node| node.accepts);
 
     if same_team && accepts && stored > 0.0 && next_capacity > 0.0 {
         let pressure = world
@@ -445,4 +446,27 @@ fn move_liquid_forward_impl(
         module.remove(liquid, leak);
     }
     (0.0, leak)
+}
+
+/// `Block.liquidCapacity` of a building: the [`LiquidNode`] seam for liquid
+/// blocks, else the block definition (`0` without a liquid module).
+pub fn node_capacity(world: &World, entity: Entity) -> f32 {
+    if let Some(node) = world.get::<LiquidNode>(entity) {
+        return node.capacity;
+    }
+    if world.get::<LiquidModule>(entity).is_none() {
+        return 0.0;
+    }
+    crate::world::behavior::helpers::liquid_capacity(world, entity)
+}
+
+fn dispatch_behavior(
+    world: &World,
+    entity: Entity,
+) -> Option<std::sync::Arc<dyn crate::world::behavior::BuildingBehavior>> {
+    let block = world.get::<Building>(entity)?.block;
+    world
+        .get_resource::<crate::world::block::BlockTable>()?
+        .instance(block)
+        .map(|inst| inst.behavior.clone())
 }

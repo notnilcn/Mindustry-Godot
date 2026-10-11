@@ -173,7 +173,7 @@ impl SimRuntime {
     /// excludes sandbox/editor-only content and locked content, matching the
     /// task's placement rules (K-9). Outside a campaign `unlockedNow()` is
     /// always true, so only the visibility half applies.
-    fn placement_allowed(&self, block: BlockId) -> bool {
+    pub(crate) fn placement_allowed(&self, block: BlockId) -> bool {
         if !self.config.placement_gate {
             return true;
         }
@@ -242,6 +242,26 @@ impl SimRuntime {
         rot: u8,
         team: u8,
     ) -> bool {
+        if !self.can_place(world, grid, x, y, block, rot, team) {
+            return false;
+        }
+        self.set_block_raw(world, grid, x, y, block, rot, team);
+        true
+    }
+
+    /// `Build.validPlace` plus the visibility/unlock gate
+    /// (`BuilderComp.allowBuildCurrent`).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn can_place(
+        &self,
+        world: &World,
+        grid: &WorldGrid,
+        x: i16,
+        y: i16,
+        block: BlockId,
+        rot: u8,
+        team: u8,
+    ) -> bool {
         if !self.placement_allowed(block) {
             return false;
         }
@@ -249,29 +269,39 @@ impl SimRuntime {
             .get_resource::<BuildRules>()
             .cloned()
             .unwrap_or_default();
-        {
-            let Some(table) = world.get_resource::<BlockTable>() else {
-                return false;
-            };
-            let Some(counter) = world.get_resource::<BlockCounter>() else {
-                return false;
-            };
-            if !crate::world::build::valid_place(
-                &self.content,
-                table,
-                &rules,
-                counter,
-                grid,
-                block,
-                team,
-                rot,
-                i32::from(x),
-                i32::from(y),
-            ) {
-                return false;
-            }
-        }
+        let Some(table) = world.get_resource::<BlockTable>() else {
+            return false;
+        };
+        let Some(counter) = world.get_resource::<BlockCounter>() else {
+            return false;
+        };
+        crate::world::build::valid_place(
+            &self.content,
+            table,
+            &rules,
+            counter,
+            grid,
+            block,
+            team,
+            rot,
+            i32::from(x),
+            i32::from(y),
+        )
+    }
 
+    /// `Tile.setBlock` without validation: replaces whatever occupies the
+    /// footprint, then relinks proximity, drill ore, power and the counter.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn set_block_raw(
+        &mut self,
+        world: &mut World,
+        grid: &mut WorldGrid,
+        x: i16,
+        y: i16,
+        block: BlockId,
+        rot: u8,
+        team: u8,
+    ) {
         let pos = TilePos::new(x, y);
         if let Some(old) = grid.entity_at(pos) {
             let old_block = grid.block_at(pos).unwrap_or(BlockId::AIR);
@@ -313,6 +343,115 @@ impl SimRuntime {
         if let Some(mut counter) = world.get_resource_mut::<BlockCounter>() {
             counter.add(team, block, 1);
         }
+    }
+
+    /// `ConstructBlock.get(size)`: the `build<size>` singleton.
+    pub(crate) fn construct_block(&self, size: i32) -> Option<BlockId> {
+        self.content.block_id(&format!("build{size}"))
+    }
+
+    /// `Build.beginPlace`: swaps the footprint to the matching `ConstructBlock`
+    /// and attaches a fresh [`crate::world::ConstructState`]. Returns `false`
+    /// when the placement is invalid.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn begin_place(
+        &mut self,
+        world: &mut World,
+        grid: &mut WorldGrid,
+        x: i16,
+        y: i16,
+        block: BlockId,
+        rot: u8,
+        team: u8,
+        cost_multiplier: f32,
+    ) -> bool {
+        if !self.can_place(world, grid, x, y, block, rot, team) {
+            return false;
+        }
+        let Some(def) = self.content.block(block) else {
+            return false;
+        };
+        let (size, build_time, requirements) = (def.size, def.build_time, def.requirements.clone());
+        let Some(sub) = self.construct_block(size) else {
+            // No construct singleton for this size: fall back to the
+            // instant-build convention.
+            self.set_block_raw(world, grid, x, y, block, rot, team);
+            return true;
+        };
+        let pos = TilePos::new(x, y);
+        let previous = grid.block_at(pos).unwrap_or(BlockId::AIR);
+        let previous_size = self
+            .content
+            .block(previous)
+            .map(|def| def.size)
+            .unwrap_or(1);
+        let previous = if previous != BlockId::AIR && previous_size == size {
+            previous
+        } else {
+            BlockId::AIR
+        };
+        self.set_block_raw(world, grid, x, y, sub, rot, team);
+        let Some(entity) = grid.entity_at(pos) else {
+            return false;
+        };
+        let mut state = crate::world::ConstructState::construct(previous, block, 0.0);
+        state.set_construct(previous, block, build_time, &requirements, cost_multiplier);
+        world.entity_mut(entity).insert(state);
+        true
+    }
+
+    /// `Build.beginBreak`: swaps the building to its `ConstructBlock` in the
+    /// deconstruct state. Returns `false` when the break is invalid.
+    pub(crate) fn begin_break(
+        &mut self,
+        world: &mut World,
+        grid: &mut WorldGrid,
+        x: i16,
+        y: i16,
+        team: u8,
+        cost_multiplier: f32,
+    ) -> bool {
+        let pos = TilePos::new(x, y);
+        let Some(entity) = grid.entity_at(pos) else {
+            return false;
+        };
+        let rules = world
+            .get_resource::<BuildRules>()
+            .cloned()
+            .unwrap_or_default();
+        if !crate::world::build::valid_break(
+            &self.content,
+            grid,
+            &rules,
+            team,
+            i32::from(x),
+            i32::from(y),
+        ) {
+            return false;
+        }
+        let previous = grid.block_at(pos).unwrap_or(BlockId::AIR);
+        let Some(def) = self.content.block(previous) else {
+            return false;
+        };
+        let (size, build_time, requirements) = (def.size, def.build_time, def.requirements.clone());
+        let building = world
+            .get::<crate::entities::comp::Building>(entity)
+            .map(|b| b.tile);
+        let anchor = building.unwrap_or(pos);
+        let rot = world
+            .get::<BuildingComp>(entity)
+            .map(|comp| comp.rot)
+            .unwrap_or(0);
+        let Some(sub) = self.construct_block(size) else {
+            return self.break_block(world, grid, x, y).is_some();
+        };
+        self.set_block_raw(world, grid, anchor.x(), anchor.y(), sub, rot, team);
+        let Some(entity) = grid.entity_at(anchor) else {
+            return false;
+        };
+        let mut state = crate::world::ConstructState::deconstruct(previous, 0.0);
+        state.set_deconstruct(previous, build_time, &requirements, cost_multiplier);
+        world.entity_mut(entity).insert(state);
         true
     }
 
@@ -348,6 +487,28 @@ impl SimRuntime {
         ) {
             return None;
         }
+        self.remove_building(world, grid, entity, x, y, team, block);
+        Some(block)
+    }
+
+    /// `Tile.remove` without validation (`ConstructBlock.deconstructFinish`).
+    pub(crate) fn remove_block_raw(
+        &mut self,
+        world: &mut World,
+        grid: &mut WorldGrid,
+        x: i16,
+        y: i16,
+    ) -> Option<BlockId> {
+        let pos = TilePos::new(x, y);
+        let entity = grid.entity_at(pos)?;
+        let block = grid.block_at(pos).unwrap_or(BlockId::AIR);
+        if block == BlockId::AIR {
+            return None;
+        }
+        let team = world
+            .get::<crate::entities::comp::TeamComp>(entity)
+            .map(|team| team.team)
+            .unwrap_or(0);
         self.remove_building(world, grid, entity, x, y, team, block);
         Some(block)
     }
@@ -495,6 +656,11 @@ impl SimRuntime {
     }
 
     /// Recomputes proximity for the tile at `(x, y)` and its four neighbors.
+    /// Re-links proximity around `(x, y)` (`Building.updateProximity`).
+    pub(crate) fn refresh_proximity(&self, world: &mut World, grid: &WorldGrid, x: i16, y: i16) {
+        self.refresh_proximity_at(world, grid, x, y);
+    }
+
     fn refresh_proximity_at(&self, world: &mut World, grid: &WorldGrid, x: i16, y: i16) {
         if let Some(entity) = grid.entity_at(TilePos::new(x, y)) {
             let _ = update_proximity(world, grid, &self.content, entity);

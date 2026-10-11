@@ -6,6 +6,7 @@
 //! and `GameState`; the reserved slot order lives in [`crate::schedule`].
 
 pub mod boot;
+pub mod builder;
 pub mod clock;
 pub mod command;
 pub mod config;
@@ -530,6 +531,9 @@ impl Sim {
         self.pump_io(IoSet::Apply);
         self.triggers.fire(Trigger::Update, &mut self.ecs.0);
         self.schedule.run(&mut self.ecs.0);
+        // `BuilderComp.update` (PAR-0098): player build plans drive the
+        // construct blocks after the entity update pass.
+        self.update_builders();
         // Zero-health units/buildings die (`HealthComp.damage` -> `kill`).
         let _ = self.resolve_deaths();
         self.flush_events();
@@ -874,7 +878,6 @@ impl Sim {
                 // The live runtime honors rotation/team end-to-end; without it the
                 // P0 path below still drops rotation (no rotation-aware `Command`).
                 if self.block_runtime.is_some() {
-                    let _ = player;
                     let id = BlockId::new(*block);
                     if self.content.name(id).is_err() {
                         return Err(CommandError::UnknownContent(*block));
@@ -887,6 +890,16 @@ impl Sim {
                         return Err(CommandError::InvalidTarget);
                     }
                     let rot = u8::try_from((*rotation).rem_euclid(4)).unwrap_or(0);
+                    // Player input queues a build plan on the player unit
+                    // (`InputHandler.flushPlans` -> `BuilderComp.addBuild`);
+                    // the builder pass constructs it over time (PAR-0098).
+                    if player.is_some() && self.player_can_build() {
+                        if !self.queue_player_place(*x, *y, id, rot) {
+                            log::debug!("player plan rejected at ({x}, {y})");
+                        }
+                        self.commands_applied = self.commands_applied.wrapping_add(1);
+                        return Ok(());
+                    }
                     if self.runtime_place(*x, *y, id, rot, *team) {
                         self.push_event(SimEvent::BlockPlacedEvent(BlockPlacedEvent {
                             x: *x,
@@ -902,6 +915,22 @@ impl Sim {
                     self.commands_applied = self.commands_applied.wrapping_add(1);
                     return Ok(());
                 }
+            }
+            SimCommand::Break {
+                x,
+                y,
+                player: Some(_),
+            } if self.player_can_build() => {
+                // `InputHandler.removeSelection` -> a deconstruction plan.
+                let pos = TilePos::new(*x, *y);
+                if self.grid.index(pos).is_err() {
+                    return Err(CommandError::InvalidTarget);
+                }
+                if !self.queue_player_break(*x, *y) {
+                    log::debug!("player break plan rejected at ({x}, {y})");
+                }
+                self.commands_applied = self.commands_applied.wrapping_add(1);
+                return Ok(());
             }
             SimCommand::Configure { x, y, value } => {
                 // `InputHandler` configure: apply the value to the target
@@ -1195,5 +1224,7 @@ pub const KIND_BUILDING: u8 = 0;
 
 #[cfg(test)]
 mod combat_tests;
+#[cfg(test)]
+mod production_tests;
 #[cfg(test)]
 mod tests;

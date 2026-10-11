@@ -1,0 +1,947 @@
+// Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
+// SPDX-License-Identifier: GPL-3.0-only
+
+//! Live builder-unit construction: the player unit's build-plan queue and the
+//! per-tick `BuilderComp.updateBuildLogic` pass that drives
+//! `ConstructBlock.ConstructBuild` progress (PAR-0098).
+//!
+//! Ported from `core/src/mindustry/entities/comp/BuilderComp.java`
+//! (`validatePlans`, `updateBuildLogic`, `shouldSkip`, `addBuild`),
+//! `core/src/mindustry/world/Build.java` (`beginPlace`/`beginBreak`) and
+//! `core/src/mindustry/world/blocks/ConstructBlock.java`
+//! (`construct`/`deconstruct`/`constructFinish`/`deconstructFinish`).
+//!
+//! Player input (`SimCommand::Place`/`Break` carrying `player: Some(_)`)
+//! queues plans on the player unit instead of mutating tiles; the builder pass
+//! then swaps the footprint to a `build<size>` construct block, advances it at
+//! `1 / buildCost * buildSpeed * buildSpeedMultiplier * rules.buildSpeed(team)`
+//! per tick while the unit is within `buildRange`, draws the requirements from
+//! the team core as progress accrues (refunding on deconstruction), and sets
+//! the real block when done. API placements (`player: None`, MCP/tests/AI)
+//! keep the instant-build convention.
+
+use std::collections::VecDeque;
+
+use bevy_ecs::component::Component;
+use bevy_ecs::entity::Entity;
+use bevy_ecs::world::World;
+
+use crate::content::{BlockId, ContentRegistry};
+use crate::ecs::{BuildingComp, EntitySeq};
+use crate::entities::comp::unit::comp::{StatusComp, UnitTypeComp};
+use crate::entities::comp::{Building, Pos, TeamComp};
+use crate::event::{BlockBrokenEvent, BlockPlacedEvent, SimEvent};
+use crate::world::blocks::storage::core_block::CoreBuild;
+use crate::world::construct::{BuildEconomy, CoreInventory};
+use crate::world::modules::ItemModule;
+use crate::world::{ConstructState, TilePos, WorldGrid};
+
+use super::Sim;
+use super::runtime::SimRuntime;
+
+/// Team id of `Team.derelict`.
+const DERELICT: u8 = 0;
+
+/// One queued build plan (`BuildPlan` with its transient builder fields).
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnitBuildPlan {
+    /// Target tile x (block centre).
+    pub x: i16,
+    /// Target tile y (block centre).
+    pub y: i16,
+    /// Placement rotation.
+    pub rotation: u8,
+    /// Block to place (`AIR` for a deconstruction).
+    pub block: BlockId,
+    /// Whether this is a deconstruction order.
+    pub breaking: bool,
+    /// `BuildPlan.initialized`: the construct block was begun.
+    pub initialized: bool,
+    /// `BuildPlan.stuck`: no progress on the last attempt.
+    pub stuck: bool,
+    /// `BuildPlan.progress` mirror of the construct progress.
+    pub progress: f32,
+}
+
+impl UnitBuildPlan {
+    /// A placement plan.
+    pub fn place(x: i16, y: i16, rotation: u8, block: BlockId) -> Self {
+        Self {
+            x,
+            y,
+            rotation,
+            block,
+            breaking: false,
+            initialized: false,
+            stuck: false,
+            progress: 0.0,
+        }
+    }
+
+    /// A deconstruction plan.
+    pub fn break_plan(x: i16, y: i16) -> Self {
+        Self {
+            breaking: true,
+            ..Self::place(x, y, 0, BlockId::AIR)
+        }
+    }
+
+    fn tile(&self) -> TilePos {
+        TilePos::new(self.x, self.y)
+    }
+}
+
+/// `BuilderComp.plans` + `buildCounter` on a builder unit.
+#[derive(Debug, Clone, Default, Component)]
+pub struct BuilderPlans {
+    /// The plan queue; the head is the active plan.
+    pub plans: VecDeque<UnitBuildPlan>,
+    /// `buildCounter` (ticks of build work banked, capped at 10).
+    pub build_counter: f32,
+}
+
+impl BuilderPlans {
+    /// `BuilderComp.addBuild(place, tail)`: replaces a same-position plan.
+    pub fn add_build(&mut self, plan: UnitBuildPlan, tail: bool) {
+        self.plans
+            .retain(|other| other.x != plan.x || other.y != plan.y);
+        if tail {
+            self.plans.push_back(plan);
+        } else {
+            self.plans.push_front(plan);
+        }
+    }
+}
+
+/// The rule reads `updateBuildLogic` needs, resolved once per tick.
+#[derive(Debug, Clone, Copy)]
+struct BuildRuleView {
+    /// `state.rules.infiniteResources`.
+    state_infinite: bool,
+    /// `rules.instantBuild`.
+    instant_build: bool,
+    /// `state.rules.buildSpeed(team)`.
+    build_speed: f32,
+    economy: BuildEconomy,
+}
+
+impl BuildRuleView {
+    fn read(world: &World, team: u8) -> Self {
+        if let Some(runtime) = world.get_resource::<crate::game::runtime::CampaignRuntime>() {
+            let rules = &runtime.session.rules;
+            return Self {
+                state_infinite: rules.infinite_resources,
+                instant_build: rules.instant_build,
+                build_speed: rules.build_speed(team),
+                economy: BuildEconomy {
+                    cost_multiplier: rules.build_cost_multiplier,
+                    refund_multiplier: rules.deconstruct_refund_multiplier,
+                    infinite: rules.is_infinite_resources(team),
+                },
+            };
+        }
+        let rules = world
+            .get_resource::<crate::world::limits::BuildRules>()
+            .cloned()
+            .unwrap_or_default();
+        let infinite = rules.infinite_resources || rules.cheat;
+        Self {
+            state_infinite: infinite,
+            instant_build: rules.instant_build,
+            build_speed: 1.0,
+            economy: BuildEconomy {
+                cost_multiplier: rules.build_cost_multiplier,
+                refund_multiplier: rules.deconstruct_refund_multiplier,
+                infinite,
+            },
+        }
+    }
+}
+
+/// `Unit.core()` → `team.core()`: the team's first core (lowest entity seq).
+fn team_core(world: &World, team: u8) -> Option<Entity> {
+    let mut best: Option<(u64, Entity)> = None;
+    for entity in world.iter_entities() {
+        if entity.get::<CoreBuild>().is_none()
+            || entity.get::<TeamComp>().map(|t| t.team) != Some(team)
+        {
+            continue;
+        }
+        let seq = entity.get::<EntitySeq>().map(|s| s.0).unwrap_or(u64::MAX);
+        if best.is_none_or(|(best_seq, _)| seq < best_seq) {
+            best = Some((seq, entity.id()));
+        }
+    }
+    best.map(|(_, entity)| entity)
+}
+
+fn building_team(world: &World, entity: Entity) -> u8 {
+    world
+        .get::<TeamComp>(entity)
+        .map(|t| t.team)
+        .unwrap_or(DERELICT)
+}
+
+/// `BuilderComp.validatePlans`: drops plans that are already satisfied.
+fn validate_plans(
+    plans: &mut BuilderPlans,
+    world: &World,
+    grid: &WorldGrid,
+    content: &ContentRegistry,
+) {
+    plans.plans.retain(|plan| {
+        let pos = plan.tile();
+        if grid.index(pos).is_err() {
+            return false;
+        }
+        let block = grid.block_at(pos).unwrap_or(BlockId::AIR);
+        if plan.breaking {
+            return block != BlockId::AIR;
+        }
+        let build = grid.entity_at(pos);
+        let same_derelict = build.is_some_and(|entity| {
+            block == plan.block
+                && world.get::<Building>(entity).map(|b| b.tile) == Some(pos)
+                && building_team(world, entity) == DERELICT
+        });
+        let rotates = content
+            .block(plan.block)
+            .is_some_and(|def| crate::world::block::kind_rotates(def.kind));
+        let same_rotation = build.is_some_and(|entity| {
+            world.get::<Building>(entity).map(|b| b.rotation) == Some(plan.rotation)
+        });
+        let done = ((same_rotation && !same_derelict) || !rotates)
+            && block == plan.block
+            && !same_derelict;
+        !done
+    });
+}
+
+/// `BuilderComp.shouldSkip`: a plan the core cannot fund right now.
+fn should_skip(
+    plan: &UnitBuildPlan,
+    core: Option<&ItemModule>,
+    content: &ContentRegistry,
+    rules: &BuildRuleView,
+) -> bool {
+    let Some(core) = core else {
+        return false;
+    };
+    if rules.economy.infinite || plan.breaking {
+        return false;
+    }
+    let Some(def) = content.block(plan.block) else {
+        return false;
+    };
+    let has_all = def
+        .requirements
+        .iter()
+        .all(|stack| core.get(stack.item) >= stack.amount);
+    (plan.stuck && !has_all)
+        || def.requirements.iter().any(|stack| {
+            core.get(stack.item) < stack.amount.min(15)
+                && (stack.amount as f32 * rules.economy.cost_multiplier).round() as i32 > 0
+        })
+}
+
+/// Tile centre in world pixels (`Tile.worldx()`).
+fn tile_world(pos: TilePos) -> (f32, f32) {
+    let unit = crate::config::TILESIZE as f32;
+    (f32::from(pos.x()) * unit, f32::from(pos.y()) * unit)
+}
+
+fn within(ux: f32, uy: f32, pos: TilePos, range: f32) -> bool {
+    let (tx, ty) = tile_world(pos);
+    let (dx, dy) = (tx - ux, ty - uy);
+    dx * dx + dy * dy <= range * range
+}
+
+/// Result of one builder pass.
+#[derive(Default)]
+struct BuilderOutcome {
+    /// The grid changed (construct begun/finished/removed or rotated).
+    changed: bool,
+    events: Vec<SimEvent>,
+}
+
+/// `BuilderComp.updateBuildLogic` for one builder unit.
+fn update_builder(
+    world: &mut World,
+    grid: &mut WorldGrid,
+    runtime: &mut SimRuntime,
+    unit: Entity,
+    plans: &mut BuilderPlans,
+) -> BuilderOutcome {
+    let mut out = BuilderOutcome::default();
+    let Some(type_id) = world.get::<UnitTypeComp>(unit).map(|comp| comp.type_id) else {
+        return out;
+    };
+    let Some((build_speed, build_range)) = runtime
+        .content()
+        .unit(type_id)
+        .map(|def| (def.build_speed, def.build_range))
+    else {
+        return out;
+    };
+    if build_speed <= 0.0 {
+        return out;
+    }
+    validate_plans(plans, world, grid, runtime.content());
+
+    let speed_multiplier = world
+        .get::<StatusComp>(unit)
+        .map(|status| status.build_speed_multiplier)
+        .unwrap_or(1.0);
+    if speed_multiplier <= 0.0 {
+        return out;
+    }
+    let team = building_team(world, unit);
+    let rules = BuildRuleView::read(world, team);
+    let place_dst = if rules.state_infinite {
+        f32::MAX.sqrt()
+    } else {
+        build_range
+    };
+
+    plans.build_counter += 1.0;
+    if !plans.build_counter.is_finite() {
+        plans.build_counter = 0.0;
+    }
+    plans.build_counter = plans.build_counter.min(10.0);
+
+    let instant = rules.instant_build && rules.state_infinite;
+    let max_per_frame = if instant { plans.plans.len() } else { 10 };
+    let mut count = 0usize;
+
+    let core = team_core(world, team);
+    if core.is_none() && !rules.economy.infinite {
+        return out;
+    }
+    let Some((ux, uy)) = world.get::<Pos>(unit).map(|pos| (pos.x, pos.y)) else {
+        return out;
+    };
+
+    while (plans.build_counter >= 1.0 || instant)
+        && count < max_per_frame
+        && !plans.plans.is_empty()
+    {
+        count += 1;
+        plans.build_counter -= 1.0;
+
+        // Find the next build plan: rotate the queue to the first in-range
+        // plan the core can fund (`shouldSkip`).
+        if plans.plans.len() > 1 {
+            let size = plans.plans.len();
+            let mut total = 0usize;
+            let mut best_dst = f32::MAX;
+            let mut found_any = false;
+            let mut best_index: Option<usize> = None;
+            while total < size {
+                let Some(plan) = plans.plans.front().cloned() else {
+                    break;
+                };
+                let (tx, ty) = tile_world(plan.tile());
+                let dst = (tx - ux) * (tx - ux) + (ty - uy) * (ty - uy);
+                let in_range = dst <= place_dst * place_dst;
+                let core_items = core.and_then(|core| world.get::<ItemModule>(core));
+                if in_range && !should_skip(&plan, core_items, runtime.content(), &rules) {
+                    found_any = true;
+                    break;
+                } else if in_range && dst < best_dst {
+                    best_index = Some(total);
+                    best_dst = dst;
+                }
+                plans.plans.rotate_left(1);
+                total += 1;
+            }
+            if !found_any
+                && let Some(best_index) = best_index.filter(|index| *index > 0)
+                && let Some(head) = plans.plans.front()
+                && !within(ux, uy, head.tile(), place_dst)
+            {
+                plans.plans.rotate_left(best_index);
+            }
+        }
+
+        let Some(mut current) = plans.plans.front().cloned() else {
+            break;
+        };
+        let pos = current.tile();
+        if !within(ux, uy, pos, place_dst) {
+            continue;
+        }
+
+        let allow_current = current.breaking || runtime.placement_allowed(current.block);
+        let construct_at = |world: &World, grid: &WorldGrid| {
+            grid.entity_at(pos)
+                .filter(|entity| world.get::<ConstructState>(*entity).is_some())
+        };
+
+        match construct_at(world, grid) {
+            None => {
+                if !current.initialized && !current.breaking && allow_current {
+                    // Quick rotation of an existing same block
+                    // (`Build.beginPlace` auto-rotate branch).
+                    if let Some(entity) = grid.entity_at(pos)
+                        && grid.block_at(pos) == Some(current.block)
+                        && building_team(world, entity) == team
+                        && runtime
+                            .content()
+                            .block(current.block)
+                            .is_some_and(|def| def.quick_rotate)
+                    {
+                        if let Some(mut building) = world.get_mut::<Building>(entity) {
+                            building.rotation = current.rotation;
+                        }
+                        if let Some(mut comp) = world.get_mut::<BuildingComp>(entity) {
+                            comp.rot = current.rotation;
+                        }
+                        runtime.refresh_proximity(world, grid, pos.x(), pos.y());
+                        crate::world::update::no_sleep(world, entity);
+                        plans.plans.pop_front();
+                        out.changed = true;
+                        continue;
+                    }
+                    if !runtime.can_place(
+                        world,
+                        grid,
+                        pos.x(),
+                        pos.y(),
+                        current.block,
+                        current.rotation,
+                        team,
+                    ) {
+                        plans.plans.pop_front();
+                        continue;
+                    }
+                    let has_all = rules.economy.infinite
+                        || runtime.content().block(current.block).is_some_and(|def| {
+                            let items = core.and_then(|core| world.get::<ItemModule>(core));
+                            def.requirements.iter().all(|stack| {
+                                let need = ((stack.amount as f32 * rules.economy.cost_multiplier)
+                                    .round() as i32)
+                                    .min(1);
+                                items.is_some_and(|items| items.get(stack.item) >= need)
+                            })
+                        });
+                    if has_all {
+                        if runtime.begin_place(
+                            world,
+                            grid,
+                            pos.x(),
+                            pos.y(),
+                            current.block,
+                            current.rotation,
+                            team,
+                            rules.economy.cost_multiplier,
+                        ) {
+                            out.changed = true;
+                        }
+                    } else {
+                        current.stuck = true;
+                        if let Some(head) = plans.plans.front_mut() {
+                            head.stuck = true;
+                        }
+                    }
+                } else if !current.initialized
+                    && current.breaking
+                    && grid.entity_at(pos).is_some_and(|entity| {
+                        let owner = building_team(world, entity);
+                        owner == team || owner == DERELICT
+                    })
+                {
+                    if runtime.begin_break(
+                        world,
+                        grid,
+                        pos.x(),
+                        pos.y(),
+                        team,
+                        rules.economy.cost_multiplier,
+                    ) {
+                        out.changed = true;
+                    } else {
+                        plans.plans.pop_front();
+                        continue;
+                    }
+                } else {
+                    plans.plans.pop_front();
+                    continue;
+                }
+            }
+            Some(entity) => {
+                let owner = building_team(world, entity);
+                let state_current = world
+                    .get::<ConstructState>(entity)
+                    .map(|state| state.current);
+                let anchor = world.get::<Building>(entity).map(|b| b.tile);
+                if (owner != team && owner != DERELICT)
+                    || (!current.breaking
+                        && (state_current != Some(current.block) || anchor != Some(pos)))
+                {
+                    plans.plans.pop_front();
+                    continue;
+                }
+            }
+        }
+
+        let Some(entity) = construct_at(world, grid) else {
+            continue;
+        };
+        if !current.initialized {
+            current.initialized = true;
+        }
+        let Some(mut state) = world.get::<ConstructState>(entity).cloned() else {
+            continue;
+        };
+        let requirements = runtime
+            .content()
+            .block(state.current)
+            .map(|def| def.requirements.clone())
+            .unwrap_or_default();
+        let cost = if state.build_cost > 0.0 {
+            state.build_cost
+        } else {
+            1.0
+        };
+        let bs = 1.0 / cost * build_speed * speed_multiplier * rules.build_speed;
+        let capacity = core
+            .and_then(|core| world.get::<CoreBuild>(core))
+            .map(|build| build.storage_capacity)
+            .unwrap_or(0);
+
+        let finished = {
+            let mut module = core.and_then(|core| world.get_mut::<ItemModule>(core));
+            let inventory = module
+                .as_deref_mut()
+                .map(|items| CoreInventory { items, capacity });
+            if current.breaking {
+                state.deconstruct_step(
+                    &requirements,
+                    inventory,
+                    bs,
+                    &rules.economy,
+                    rules.state_infinite,
+                )
+            } else if allow_current {
+                state.construct_step(
+                    &requirements,
+                    inventory,
+                    bs,
+                    &rules.economy,
+                    rules.state_infinite,
+                )
+            } else {
+                false
+            }
+        };
+        current.stuck = (current.progress - state.progress).abs() < f32::EPSILON;
+        current.progress = state.progress;
+        let anchor = world.get::<Building>(entity).map(|b| b.tile).unwrap_or(pos);
+        let rotation = world
+            .get::<Building>(entity)
+            .map(|b| b.rotation)
+            .unwrap_or(current.rotation);
+        world.entity_mut(entity).insert(state.clone());
+        if let Some(head) = plans.plans.front_mut() {
+            *head = current.clone();
+        }
+
+        if finished {
+            if current.breaking {
+                // `ConstructBlock.deconstructFinish` -> `tile.remove()`.
+                if runtime
+                    .remove_block_raw(world, grid, anchor.x(), anchor.y())
+                    .is_some()
+                {
+                    out.events
+                        .push(SimEvent::BlockBrokenEvent(BlockBrokenEvent {
+                            x: anchor.x(),
+                            y: anchor.y(),
+                            block: state.current,
+                        }));
+                }
+            } else {
+                // `ConstructBlock.constructFinish` -> `tile.setBlock(block, team, rotation)`.
+                runtime.set_block_raw(
+                    world,
+                    grid,
+                    anchor.x(),
+                    anchor.y(),
+                    state.current,
+                    rotation,
+                    team,
+                );
+                out.events
+                    .push(SimEvent::BlockPlacedEvent(BlockPlacedEvent {
+                        x: anchor.x(),
+                        y: anchor.y(),
+                        block: state.current,
+                        team,
+                    }));
+            }
+            out.changed = true;
+        }
+    }
+    out
+}
+
+impl Sim {
+    /// Whether `SimCommand::Place`/`Break` from player input should queue on
+    /// the player unit (`InputHandler.flushPlans`) rather than apply
+    /// instantly: a live block runtime and a player unit that can build.
+    pub(crate) fn player_can_build(&self) -> bool {
+        let (Some(unit), Some(runtime)) = (self.player_unit, self.block_runtime.as_ref()) else {
+            return false;
+        };
+        self.ecs
+            .0
+            .get::<UnitTypeComp>(unit)
+            .and_then(|comp| runtime.content().unit(comp.type_id))
+            .is_some_and(|def| def.build_speed > 0.0)
+    }
+
+    /// Queues a placement on the player unit (`InputHandler.flushPlans` ->
+    /// `player.unit().addBuild(plan)`); invalid placements are dropped.
+    pub fn queue_player_place(&mut self, x: i16, y: i16, block: BlockId, rotation: u8) -> bool {
+        let Some(unit) = self.player_unit else {
+            return false;
+        };
+        let team = self.live_default_team();
+        let Some(runtime) = self.block_runtime.as_ref() else {
+            return false;
+        };
+        if !runtime.can_place(&self.ecs.0, &self.grid, x, y, block, rotation, team) {
+            return false;
+        }
+        let mut plan = UnitBuildPlan::place(x, y, rotation, block);
+        // `addBuild`: carry the progress of an in-flight construct block.
+        if let Some(entity) = self.grid.entity_at(TilePos::new(x, y))
+            && let Some(state) = self.ecs.0.get::<ConstructState>(entity)
+        {
+            plan.progress = state.progress;
+        }
+        self.with_player_plans(unit, |plans| plans.add_build(plan, true));
+        true
+    }
+
+    /// Queues a deconstruction on the player unit
+    /// (`InputHandler.removeSelection`); a queued placement covering the tile
+    /// is removed instead.
+    pub fn queue_player_break(&mut self, x: i16, y: i16) -> bool {
+        let Some(unit) = self.player_unit else {
+            return false;
+        };
+        let content_sizes: Option<Vec<(i16, i16, i32)>> = {
+            let runtime = self.block_runtime.as_ref();
+            self.ecs.0.get::<BuilderPlans>(unit).map(|plans| {
+                plans
+                    .plans
+                    .iter()
+                    .filter(|plan| !plan.breaking)
+                    .map(|plan| {
+                        let size = runtime
+                            .and_then(|runtime| runtime.content().block(plan.block))
+                            .map(|def| def.size)
+                            .unwrap_or(1);
+                        (plan.x, plan.y, size)
+                    })
+                    .collect()
+            })
+        };
+        if let Some(sizes) = content_sizes {
+            let hit = sizes.into_iter().find(|(px, py, size)| {
+                let lo = -((size - 1) / 2);
+                let hi = size / 2;
+                let (dx, dy) = (i32::from(x - px), i32::from(y - py));
+                dx >= lo && dx <= hi && dy >= lo && dy <= hi
+            });
+            if let Some((px, py, _)) = hit {
+                self.with_player_plans(unit, |plans| {
+                    plans
+                        .plans
+                        .retain(|plan| plan.breaking || plan.x != px || plan.y != py);
+                });
+                return true;
+            }
+        }
+        let pos = TilePos::new(x, y);
+        if self.grid.index(pos).is_err() {
+            return false;
+        }
+        let Some(entity) = self.grid.entity_at(pos) else {
+            return false;
+        };
+        let anchor = self
+            .ecs
+            .0
+            .get::<Building>(entity)
+            .map(|b| b.tile)
+            .unwrap_or(pos);
+        let team = self.live_default_team();
+        let rules = self
+            .ecs
+            .0
+            .get_resource::<crate::world::limits::BuildRules>()
+            .cloned()
+            .unwrap_or_default();
+        let Some(runtime) = self.block_runtime.as_ref() else {
+            return false;
+        };
+        if !crate::world::build::valid_break(
+            runtime.content(),
+            &self.grid,
+            &rules,
+            team,
+            i32::from(anchor.x()),
+            i32::from(anchor.y()),
+        ) {
+            return false;
+        }
+        self.with_player_plans(unit, |plans| {
+            plans.add_build(UnitBuildPlan::break_plan(anchor.x(), anchor.y()), true);
+        });
+        true
+    }
+
+    fn with_player_plans(&mut self, unit: Entity, f: impl FnOnce(&mut BuilderPlans)) {
+        let Ok(mut entity) = self.ecs.0.get_entity_mut(unit) else {
+            return;
+        };
+        match entity.get_mut::<BuilderPlans>() {
+            Some(mut plans) => f(&mut plans),
+            None => {
+                let mut plans = BuilderPlans::default();
+                f(&mut plans);
+                entity.insert(plans);
+            }
+        }
+    }
+
+    /// The player unit's queued plans in queue order (head = active).
+    pub fn player_build_plans(&self) -> Vec<UnitBuildPlan> {
+        self.player_unit
+            .and_then(|unit| self.ecs.0.get::<BuilderPlans>(unit))
+            .map(|plans| plans.plans.iter().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// Clears the player unit's queue (`BuilderComp.clearBuilding`).
+    pub fn clear_player_build_plans(&mut self) {
+        if let Some(unit) = self.player_unit
+            && let Some(mut plans) = self.ecs.0.get_mut::<BuilderPlans>(unit)
+        {
+            plans.plans.clear();
+        }
+    }
+
+    /// Construct progress at `(x, y)` as `(current block, progress,
+    /// deconstructing)`, if the tile holds a construct block.
+    pub fn construct_progress(&self, x: i16, y: i16) -> Option<(BlockId, f32, bool)> {
+        let entity = self.grid.entity_at(TilePos::new(x, y))?;
+        let state = self.ecs.0.get::<ConstructState>(entity)?;
+        Some((state.current, state.progress, state.active_deconstruct))
+    }
+
+    /// Runs `BuilderComp.updateBuildLogic` for every builder unit with plans
+    /// (today the player unit). Called once per tick from [`Sim::tick`].
+    pub(crate) fn update_builders(&mut self) {
+        let Some(unit) = self.player_unit else {
+            return;
+        };
+        if self.ecs.0.get_entity(unit).is_err() {
+            return;
+        }
+        let Some(mut plans) = self
+            .ecs
+            .0
+            .get_mut::<BuilderPlans>(unit)
+            .map(|mut p| std::mem::take(&mut *p))
+        else {
+            return;
+        };
+        if plans.plans.is_empty() {
+            self.with_player_plans(unit, |slot| *slot = plans);
+            return;
+        }
+        let Some(mut runtime) = self.block_runtime.take() else {
+            self.with_player_plans(unit, |slot| *slot = plans);
+            return;
+        };
+        let outcome = update_builder(
+            &mut self.ecs.0,
+            &mut self.grid,
+            &mut runtime,
+            unit,
+            &mut plans,
+        );
+        self.block_runtime = Some(runtime);
+        self.with_player_plans(unit, |slot| *slot = plans);
+        for event in outcome.events {
+            self.push_event(event);
+        }
+        if outcome.changed {
+            self.refresh_unit_runtime();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::determinism::SimCommand;
+
+    fn sim_with_player() -> (Sim, Entity, u16, BlockId) {
+        let mut sim = Sim::new(7, 64, 64, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        let core_id = sim.world_block_id("core-shard").expect("core");
+        sim.command(SimCommand::Place {
+            x: 10,
+            y: 10,
+            block: core_id,
+            rotation: 0,
+            team: 1,
+            player: None,
+        })
+        .expect("core placed");
+        let wall = BlockId::new(sim.world_block_id("copper-wall").expect("wall"));
+        let unit = sim
+            .spawn_player_unit("alpha", 1, 80.0, 80.0, 0.0)
+            .expect("player unit");
+        (sim, unit, core_id, wall)
+    }
+
+    fn core_copper(sim: &Sim) -> i32 {
+        let runtime = sim.block_runtime().expect("runtime");
+        let copper = runtime.content().item_id("copper").expect("copper");
+        let core = team_core(&sim.ecs.0, 1).expect("core");
+        sim.ecs
+            .0
+            .get::<ItemModule>(core)
+            .map(|m| m.get(copper))
+            .unwrap_or(0)
+    }
+
+    fn set_core_copper(sim: &mut Sim, amount: i32) {
+        let copper = sim
+            .block_runtime()
+            .expect("runtime")
+            .content()
+            .item_id("copper")
+            .expect("copper");
+        let core = team_core(&sim.ecs.0, 1).expect("core");
+        let mut module = sim.ecs.0.get_mut::<ItemModule>(core).expect("items");
+        let have = module.get(copper);
+        module.remove(copper, have);
+        module.add(copper, amount, 100_000);
+    }
+
+    #[test]
+    fn player_place_builds_over_time_and_spends_core_items() {
+        let (mut sim, _unit, _core, wall) = sim_with_player();
+        set_core_copper(&mut sim, 100);
+        sim.command(SimCommand::Place {
+            x: 14,
+            y: 10,
+            block: wall.raw(),
+            rotation: 0,
+            team: 1,
+            player: Some(0),
+        })
+        .expect("queued");
+        assert_eq!(sim.player_build_plans().len(), 1, "plan queued, not placed");
+        assert_ne!(sim.grid.block_at(TilePos::new(14, 10)), Some(wall));
+        sim.tick().expect("tick");
+        let (current, progress, _) = sim
+            .construct_progress(14, 10)
+            .expect("construct block begun");
+        assert_eq!(current, wall);
+        assert!(progress > 0.0 && progress < 1.0, "progress {progress}");
+        // copper-wall: 6 copper, buildTime = 6 * 0.5 = 3 ticks... alpha 0.5
+        // speed -> ~6 ticks.
+        for _ in 0..60 {
+            sim.tick().expect("tick");
+        }
+        assert_eq!(
+            sim.grid.block_at(TilePos::new(14, 10)),
+            Some(wall),
+            "finished"
+        );
+        assert!(sim.player_build_plans().is_empty());
+        assert_eq!(core_copper(&sim), 94, "requirements drawn from the core");
+    }
+
+    #[test]
+    fn out_of_range_plans_wait_for_the_builder() {
+        let (mut sim, _unit, _core, wall) = sim_with_player();
+        set_core_copper(&mut sim, 100);
+        // 220 px build range = 27.5 tiles; the unit is at tile (10, 10).
+        sim.command(SimCommand::Place {
+            x: 50,
+            y: 50,
+            block: wall.raw(),
+            rotation: 0,
+            team: 1,
+            player: Some(0),
+        })
+        .expect("queued");
+        for _ in 0..30 {
+            sim.tick().expect("tick");
+        }
+        assert!(sim.construct_progress(50, 50).is_none());
+        assert_eq!(sim.player_build_plans().len(), 1);
+    }
+
+    #[test]
+    fn no_items_means_no_construction() {
+        let (mut sim, _unit, _core, wall) = sim_with_player();
+        set_core_copper(&mut sim, 0);
+        sim.command(SimCommand::Place {
+            x: 14,
+            y: 10,
+            block: wall.raw(),
+            rotation: 0,
+            team: 1,
+            player: Some(0),
+        })
+        .expect("queued");
+        for _ in 0..30 {
+            sim.tick().expect("tick");
+        }
+        assert_ne!(sim.grid.block_at(TilePos::new(14, 10)), Some(wall));
+        assert_eq!(sim.player_build_plans().len(), 1, "plan stays queued");
+    }
+
+    #[test]
+    fn player_break_deconstructs_and_refunds() {
+        let (mut sim, _unit, _core, wall) = sim_with_player();
+        sim.command(SimCommand::Place {
+            x: 14,
+            y: 10,
+            block: wall.raw(),
+            rotation: 0,
+            team: 1,
+            player: None,
+        })
+        .expect("instant API place");
+        assert_eq!(sim.grid.block_at(TilePos::new(14, 10)), Some(wall));
+        set_core_copper(&mut sim, 10);
+        sim.command(SimCommand::Break {
+            x: 14,
+            y: 10,
+            player: Some(0),
+        })
+        .expect("queued break");
+        assert_eq!(
+            sim.grid.block_at(TilePos::new(14, 10)),
+            Some(wall),
+            "not instant"
+        );
+        for _ in 0..60 {
+            sim.tick().expect("tick");
+        }
+        assert_eq!(sim.grid.block_at(TilePos::new(14, 10)), Some(BlockId::AIR));
+        // 6 copper * 0.5 refund.
+        assert_eq!(core_copper(&sim), 13);
+    }
+}

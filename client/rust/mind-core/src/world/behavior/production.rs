@@ -182,6 +182,16 @@ impl BuildingBehavior for CrafterBehavior {
                 }
             }
         }
+        // `dumpOutputs()` liquid half: `dumpLiquid(output.liquid, 2f, dir)`.
+        for (liquid, _) in &crafter.output_liquids {
+            crate::world::blocks::liquid::movement::dump_liquid_proximity(
+                world,
+                e,
+                LiquidId::new(*liquid),
+                2.0,
+                -1,
+            );
+        }
     }
 
     fn efficiency_scale(&self, world: &mut World, e: Entity) -> f32 {
@@ -209,6 +219,23 @@ impl BuildingBehavior for CrafterBehavior {
     /// `BuildingComp.handleItem` default (one item into the module).
     fn handle_item(&self, world: &mut World, e: Entity, src: Entity, item: ItemId) {
         transfer::default_handle_item(world, e, src, item);
+    }
+
+    /// `BuildingComp.acceptLiquid` default (consumed liquids only).
+    fn accept_liquid(&self, world: &World, e: Entity, _src: Entity, liquid: LiquidId) -> bool {
+        crate::world::behavior::helpers::consumer_accept_liquid(world, e, liquid)
+    }
+
+    /// `BuildingComp.handleLiquid` default.
+    fn handle_liquid(
+        &self,
+        world: &mut World,
+        e: Entity,
+        _src: Entity,
+        liquid: LiquidId,
+        amount: f32,
+    ) {
+        crate::world::behavior::helpers::default_handle_liquid(world, e, liquid, amount);
     }
 
     /// `BuildingComp.acceptStack` default (`acceptItem` + capacity headroom).
@@ -468,6 +495,10 @@ pub fn refresh_drill_ore(
     };
     let tile = building.tile;
     let size = inst.def.size.max(1);
+    if matches!(inst.kind_data, BlockKindData::Pump(_)) {
+        refresh_pump_floor(world, grid, content, e, tile, size);
+        return;
+    }
     let (tier, blocked) = match &inst.kind_data {
         BlockKindData::Drill(def) => (def.tier, def.blocked_items.clone()),
         BlockKindData::BurstDrill(def) => (def.drill.tier, def.drill.blocked_items.clone()),
@@ -486,6 +517,40 @@ pub fn refresh_drill_ore(
     if let Some(mut state) = world.get_mut::<DrillState>(e) {
         state.dominant_item = item;
         state.dominant_items = count;
+    }
+}
+
+/// `PumpBuild.onProximityUpdate`: the footprint's floor `liquidDrop` and the
+/// summed `liquidMultiplier` of every pumpable tile (PAR-0078).
+fn refresh_pump_floor(
+    world: &mut World,
+    grid: &WorldGrid,
+    content: &ContentRegistry,
+    e: Entity,
+    tile: crate::world::TilePos,
+    size: i32,
+) {
+    let lo = -((size - 1) / 2);
+    let mut drop = None;
+    let mut amount = 0.0f32;
+    for dx in lo..lo + size {
+        for dy in lo..lo + size {
+            let (tx, ty) = (i32::from(tile.x()) + dx, i32::from(tile.y()) + dy);
+            if !grid.tiles.in_bounds(tx, ty) {
+                continue;
+            }
+            let Some(floor) = content.block(grid.tile(tx, ty).floor) else {
+                continue;
+            };
+            if let Some(liquid) = floor.liquid_drop {
+                drop = Some(liquid);
+                amount += floor.liquid_multiplier;
+            }
+        }
+    }
+    if let Some(mut state) = world.get_mut::<PumpState>(e) {
+        state.liquid_drop = drop;
+        state.amount = amount;
     }
 }
 
@@ -568,11 +633,13 @@ impl BuildingBehavior for PumpBehavior {
         }
     }
 
+    /// `PumpBuild.updateTile`: pump the floor's `liquidDrop` at
+    /// `amount * pumpAmount * edelta()`, then `dumpLiquid(liquidDrop)`.
     fn update_tile(&self, world: &mut World, e: Entity) {
         let Some(inst) = instance(world, e) else {
             return;
         };
-        let amount = match &inst.kind_data {
+        let pump_amount = match &inst.kind_data {
             BlockKindData::Pump(def) => def.pump_amount,
             _ => return,
         };
@@ -580,17 +647,34 @@ impl BuildingBehavior for PumpBehavior {
             .get::<Building>(e)
             .map(|building| building.efficiency)
             .unwrap_or(0.0);
-        if efficiency <= 0.0 {
+        let Some((drop, amount)) = world
+            .get::<PumpState>(e)
+            .map(|state| (state.liquid_drop, state.amount))
+        else {
             return;
-        }
+        };
         let capacity = liquid_capacity(world, e);
-        produce_liquid(
-            world,
-            e,
-            LiquidId::WATER,
-            amount * edelta(world, e),
-            capacity,
-        );
+        if efficiency > 0.0
+            && let Some(liquid) = drop
+        {
+            let stored = world
+                .get::<LiquidModule>(e)
+                .map(|module| module.get(liquid))
+                .unwrap_or(0.0);
+            let max_pump = (capacity - stored).min(amount * pump_amount * edelta(world, e));
+            produce_liquid(world, e, liquid, max_pump, capacity);
+            if let Some(mut state) = world.get_mut::<PumpState>(e) {
+                state.warmup =
+                    approach(state.warmup, if max_pump > 0.001 { 1.0 } else { 0.0 }, 0.02);
+            }
+        } else if let Some(mut state) = world.get_mut::<PumpState>(e) {
+            state.warmup = approach(state.warmup, 0.0, 0.02);
+        }
+        if let Some(liquid) = drop {
+            crate::world::blocks::liquid::movement::dump_liquid_proximity(
+                world, e, liquid, 2.0, -1,
+            );
+        }
     }
 }
 
@@ -599,6 +683,34 @@ impl BuildingBehavior for PumpBehavior {
 pub struct SolidPumpBehavior;
 
 impl BuildingBehavior for SolidPumpBehavior {
+    /// `BuildingComp.acceptItem` default (`Fracker` consumes sand).
+    fn accept_item(&self, world: &World, e: Entity, _src: Entity, item: ItemId) -> bool {
+        crate::world::behavior::helpers::consumer_accept_item(world, e, item)
+    }
+
+    fn handle_item(&self, world: &mut World, e: Entity, src: Entity, item: ItemId) {
+        transfer::default_handle_item(world, e, src, item);
+    }
+
+    fn get_maximum_accepted(&self, world: &World, e: Entity, _item: ItemId) -> i32 {
+        transfer::item_capacity(world, e)
+    }
+
+    fn accept_liquid(&self, world: &World, e: Entity, _src: Entity, liquid: LiquidId) -> bool {
+        crate::world::behavior::helpers::consumer_accept_liquid(world, e, liquid)
+    }
+
+    fn handle_liquid(
+        &self,
+        world: &mut World,
+        e: Entity,
+        _src: Entity,
+        liquid: LiquidId,
+        amount: f32,
+    ) {
+        crate::world::behavior::helpers::default_handle_liquid(world, e, liquid, amount);
+    }
+
     fn create_state(&self, world: &mut World, e: Entity) {
         if world.get::<PumpState>(e).is_none() {
             world.entity_mut(e).insert(PumpState::default());
@@ -624,19 +736,20 @@ impl BuildingBehavior for SolidPumpBehavior {
             };
             state.warmup = approach(state.warmup, if efficiency > 0.0 { 1.0 } else { 0.0 }, 0.02);
         }
-        if efficiency <= 0.0 {
-            return;
-        }
-        let capacity = liquid_capacity(world, e);
         let liquid = result.map(LiquidId::new).unwrap_or(LiquidId::WATER);
-        let warmup = world.get::<PumpState>(e).map(|s| s.warmup).unwrap_or(1.0);
-        produce_liquid(
-            world,
-            e,
-            liquid,
-            amount * edelta(world, e) * warmup,
-            capacity,
-        );
+        if efficiency > 0.0 {
+            let capacity = liquid_capacity(world, e);
+            let warmup = world.get::<PumpState>(e).map(|s| s.warmup).unwrap_or(1.0);
+            produce_liquid(
+                world,
+                e,
+                liquid,
+                amount * edelta(world, e) * warmup,
+                capacity,
+            );
+        }
+        // `SolidPumpBuild.updateTile`: `dumpLiquid(result)` every tick.
+        crate::world::blocks::liquid::movement::dump_liquid_proximity(world, e, liquid, 2.0, -1);
     }
 }
 

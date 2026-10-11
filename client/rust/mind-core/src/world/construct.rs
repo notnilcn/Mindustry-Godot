@@ -13,7 +13,7 @@ use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
 use smallvec::SmallVec;
 
-use crate::content::BlockId;
+use crate::content::{BlockId, ItemStack};
 use crate::world::config::ConfigValue;
 
 /// Per-construction state (`ConstructBuild` fields; plan 07 §3.7).
@@ -104,6 +104,246 @@ impl ConstructState {
         }
         self.progress -= amount / self.build_cost;
         (self.progress <= 0.0, refund_multiplier)
+    }
+}
+
+/// Rule inputs to [`ConstructState::construct`]/[`ConstructState::deconstruct`]
+/// (`state.rules` / `team.rules()` reads in `ConstructBuild`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BuildEconomy {
+    /// `Rules.buildCostMultiplier`.
+    pub cost_multiplier: f32,
+    /// `Rules.deconstructRefundMultiplier`.
+    pub refund_multiplier: f32,
+    /// `state.rules.infiniteResources || team.rules().infiniteResources`.
+    pub infinite: bool,
+}
+
+impl Default for BuildEconomy {
+    fn default() -> Self {
+        Self {
+            cost_multiplier: 1.0,
+            refund_multiplier: 0.5,
+            infinite: false,
+        }
+    }
+}
+
+/// The builder's team core inventory (`core.items` + `core.storageCapacity`).
+pub struct CoreInventory<'a> {
+    /// Core item module.
+    pub items: &'a mut crate::world::modules::ItemModule,
+    /// `CoreBuild.storageCapacity`.
+    pub capacity: i32,
+}
+
+/// `Math.round` (half-up) for the requirement scaling.
+fn java_round(value: f32) -> i32 {
+    (value + 0.5).floor() as i32
+}
+
+impl ConstructState {
+    /// `ConstructBuild.setConstruct(previous, block)`.
+    pub fn set_construct(
+        &mut self,
+        previous: BlockId,
+        current: BlockId,
+        build_time: f32,
+        requirements: &[ItemStack],
+        cost_multiplier: f32,
+    ) {
+        self.construct_color = 0.0;
+        self.was_constructing = true;
+        self.current = current;
+        self.previous = previous;
+        self.build_cost = build_time * cost_multiplier;
+        self.items_left = requirements
+            .iter()
+            .map(|stack| java_round(stack.amount as f32 * cost_multiplier))
+            .collect();
+        self.accumulator = smallvec::smallvec![0.0; requirements.len()];
+        self.total_accumulator = smallvec::smallvec![0.0; requirements.len()];
+    }
+
+    /// `ConstructBuild.setDeconstruct(previous)`.
+    pub fn set_deconstruct(
+        &mut self,
+        previous: BlockId,
+        build_time: f32,
+        requirements: &[ItemStack],
+        cost_multiplier: f32,
+    ) {
+        self.construct_color = 1.0;
+        self.was_constructing = false;
+        self.previous = previous;
+        self.progress = 1.0;
+        self.current = previous;
+        self.build_cost = build_time * cost_multiplier;
+        self.items_left = smallvec::smallvec![0; requirements.len()];
+        self.accumulator = smallvec::smallvec![0.0; requirements.len()];
+        self.total_accumulator = smallvec::smallvec![0.0; requirements.len()];
+    }
+
+    /// `ConstructBuild.checkRequired`: the progress the core inventory can fund
+    /// this step; consumes the funded items when `remove`.
+    fn check_required(
+        &mut self,
+        requirements: &[ItemStack],
+        inventory: &mut crate::world::modules::ItemModule,
+        amount: f32,
+        remove: bool,
+        eco: &BuildEconomy,
+    ) -> f32 {
+        let mut max_progress = amount;
+        for (i, stack) in requirements.iter().enumerate() {
+            if self.items_left.get(i).copied().unwrap_or(0) == 0 {
+                continue;
+            }
+            let scaled = java_round(eco.cost_multiplier * stack.amount as f32);
+            let required = self.accumulator[i] as i32;
+            let have = inventory.get(stack.item);
+            if have == 0 && scaled != 0 {
+                max_progress = 0.0;
+            } else if required > 0 {
+                let max_use = required.min(have);
+                let fraction = max_use as f32 / required as f32;
+                max_progress = max_progress.min(max_progress * fraction);
+                self.accumulator[i] -= max_use as f32;
+                if remove && !eco.infinite {
+                    inventory.remove(stack.item, max_use);
+                    self.items_left[i] -= max_use;
+                }
+            }
+        }
+        max_progress
+    }
+
+    /// `ConstructBuild.construct(builder, core, amount, config)`: advances the
+    /// build by `amount` (already divided by `buildCost`), drawing the
+    /// requirements from `core` as progress accrues. Returns `true` when the
+    /// block may be finished (`constructed`).
+    pub fn construct_step(
+        &mut self,
+        requirements: &[ItemStack],
+        mut core: Option<CoreInventory<'_>>,
+        amount: f32,
+        eco: &BuildEconomy,
+        state_infinite: bool,
+    ) -> bool {
+        self.was_constructing = true;
+        self.active_deconstruct = false;
+        if self.accumulator.len() != requirements.len()
+            || self.total_accumulator.len() != requirements.len()
+        {
+            return false;
+        }
+        let mut max_progress = match core.as_mut() {
+            Some(core) if !eco.infinite => {
+                self.check_required(requirements, core.items, amount, false, eco)
+            }
+            _ => amount,
+        };
+        for (i, stack) in requirements.iter().enumerate() {
+            let req = java_round(eco.cost_multiplier * stack.amount as f32) as f32;
+            self.accumulator[i] += (req * max_progress).min(req - self.total_accumulator[i]);
+            self.total_accumulator[i] = (self.total_accumulator[i] + req * max_progress).min(req);
+        }
+        if let Some(core) = core.as_mut()
+            && !eco.infinite
+        {
+            max_progress = self.check_required(requirements, core.items, max_progress, true, eco);
+        }
+        self.progress = (self.progress + max_progress).clamp(0.0, 1.0);
+
+        if self.progress >= 1.0 || state_infinite {
+            if !eco.infinite {
+                for (i, stack) in requirements.iter().enumerate() {
+                    let left = self.items_left[i];
+                    if left > 0 {
+                        match core.as_mut() {
+                            Some(core) if core.items.get(stack.item) >= left => {
+                                core.items.remove(stack.item, left);
+                                self.items_left[i] = 0;
+                            }
+                            _ => return false,
+                        }
+                    }
+                }
+            }
+            return true;
+        }
+        false
+    }
+
+    /// `ConstructBuild.deconstruct(builder, core, amount)`: refunds the scaled
+    /// requirements into `core` as progress drains. Returns `true` when the
+    /// tile should be removed (`deconstructFinish`).
+    pub fn deconstruct_step(
+        &mut self,
+        requirements: &[ItemStack],
+        mut core: Option<CoreInventory<'_>>,
+        amount: f32,
+        eco: &BuildEconomy,
+        state_infinite: bool,
+    ) -> bool {
+        if self.was_constructing {
+            self.accumulator.iter_mut().for_each(|value| *value = 0.0);
+            self.total_accumulator
+                .iter_mut()
+                .for_each(|value| *value = 0.0);
+        }
+        self.was_constructing = false;
+        self.active_deconstruct = true;
+        if self.accumulator.len() != requirements.len()
+            || self.total_accumulator.len() != requirements.len()
+            || self.items_left.len() != requirements.len()
+        {
+            return false;
+        }
+        let refund = eco.refund_multiplier;
+        let clamped = amount.min(self.progress);
+        for (i, stack) in requirements.iter().enumerate() {
+            let req = java_round(eco.cost_multiplier * stack.amount as f32) as f32;
+            self.accumulator[i] +=
+                (clamped * refund * req).min(refund * req - self.total_accumulator[i]);
+            self.total_accumulator[i] =
+                (self.total_accumulator[i] + req * clamped * refund).min(req);
+            let accumulated = self.accumulator[i] as i32;
+            if clamped > 0.0 && accumulated > 0 {
+                match core.as_mut() {
+                    Some(core) => {
+                        let accepting = accumulated
+                            .min(core.capacity - core.items.get(stack.item))
+                            .max(0);
+                        if !state_infinite {
+                            core.items.add(stack.item, accepting, core.capacity);
+                        }
+                        self.items_left[i] += accepting;
+                        self.accumulator[i] -= accepting as f32;
+                    }
+                    None => self.accumulator[i] -= accumulated as f32,
+                }
+            }
+        }
+        self.progress = (self.progress - amount).clamp(0.0, 1.0);
+        if self.progress <= 0.0 || state_infinite {
+            if let Some(core) = core.as_mut()
+                && !state_infinite
+            {
+                for (i, stack) in requirements.iter().enumerate() {
+                    let target = java_round(
+                        stack.amount as f32 * eco.cost_multiplier * eco.refund_multiplier,
+                    );
+                    let remaining = target - self.items_left[i];
+                    let room = core.capacity - core.items.get(stack.item);
+                    core.items
+                        .add(stack.item, remaining.clamp(0, room.max(0)), core.capacity);
+                    self.items_left[i] = target;
+                }
+            }
+            return true;
+        }
+        false
     }
 }
 

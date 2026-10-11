@@ -30,9 +30,13 @@ use bevy_ecs::entity::Entity;
 use bevy_ecs::prelude::Resource;
 use bevy_ecs::world::World;
 
-use crate::content::{Attribute, ContentRegistry, LiquidId};
+use crate::content::{Attribute, ContentRegistry, ItemId, LiquidId};
 use crate::entities::comp::Building;
+use crate::world::behavior::helpers::{
+    block_consumes_item, block_consumes_liquid, default_handle_liquid,
+};
 use crate::world::behavior::{BehaviorRegistry, BuildingBehavior};
+use crate::world::blocks::distribution::transfer;
 use crate::world::blocks::heat::HeatState;
 use crate::world::blocks::power::PowerProduction;
 use crate::world::blocks::power::explosion::{ReactorExplosion, fire_explosion};
@@ -214,6 +218,112 @@ impl BuildingBehavior for ConsumeGeneratorBehavior {
             .unwrap_or(0.0);
         fire_generator_explosion(world, e, &self.config, warmup, true);
     }
+
+    /// `BuildingComp.acceptItem`: `block.consumesItem(item) && items.get(item) <
+    /// getMaximumAccepted(item)`; the filter consumers
+    /// (`ConsumeItemFlammable`/`ConsumeItemRadioactive`) feed `itemFilter`
+    /// (PAR-0075).
+    fn accept_item(&self, world: &World, e: Entity, _src: Entity, item: ItemId) -> bool {
+        self.generator_consumes_item(world, e, item)
+            && transfer::item_count(world, e, item) < transfer::item_capacity(world, e)
+            && world.get::<ItemModule>(e).is_some()
+    }
+
+    fn handle_item(&self, world: &mut World, e: Entity, src: Entity, item: ItemId) {
+        transfer::default_handle_item(world, e, src, item);
+    }
+
+    fn get_maximum_accepted(&self, world: &World, e: Entity, _item: ItemId) -> i32 {
+        transfer::item_capacity(world, e)
+    }
+
+    fn accept_stack(
+        &self,
+        world: &World,
+        e: Entity,
+        item: ItemId,
+        amount: i32,
+        source: Option<Entity>,
+    ) -> i32 {
+        let same_team = source.is_none_or(|src| {
+            world
+                .get::<crate::entities::comp::TeamComp>(src)
+                .zip(world.get::<crate::entities::comp::TeamComp>(e))
+                .is_some_and(|(a, b)| a.team == b.team)
+        });
+        if same_team && self.accept_item(world, e, source.unwrap_or(e), item) {
+            (transfer::item_capacity(world, e) - transfer::item_count(world, e, item))
+                .min(amount)
+                .max(0)
+        } else {
+            0
+        }
+    }
+
+    fn handle_stack(&self, world: &mut World, e: Entity, item: ItemId, amount: i32) {
+        transfer::default_handle_stack(world, e, item, amount);
+    }
+
+    /// `BuildingComp.acceptLiquid`: `block.hasLiquids &&
+    /// block.consumesLiquid(liquid)` (filter consumers included).
+    fn accept_liquid(&self, world: &World, e: Entity, _src: Entity, liquid: LiquidId) -> bool {
+        world.get::<LiquidModule>(e).is_some() && self.generator_consumes_liquid(world, e, liquid)
+    }
+
+    fn handle_liquid(
+        &self,
+        world: &mut World,
+        e: Entity,
+        _src: Entity,
+        liquid: LiquidId,
+        amount: f32,
+    ) {
+        default_handle_liquid(world, e, liquid, amount);
+    }
+}
+
+impl ConsumeGeneratorBehavior {
+    /// `Block.itemFilter[item]` for a generator: the generic item consumers
+    /// plus the generator's filter consumer.
+    fn generator_consumes_item(&self, world: &World, e: Entity, item: ItemId) -> bool {
+        let filtered = match &self.config.filter_item {
+            Some(GeneratorFilter::ItemFlammable { min }) => self
+                .item_flammability
+                .get(item.index())
+                .is_some_and(|value| value >= min),
+            Some(GeneratorFilter::ItemRadioactive { min }) => self
+                .item_radioactivity
+                .get(item.index())
+                .is_some_and(|value| value >= min),
+            Some(GeneratorFilter::Items { stacks }) => {
+                stacks.iter().any(|(wanted, _)| *wanted == item)
+            }
+            _ => false,
+        };
+        filtered
+            || self
+                .config
+                .trigger_items
+                .iter()
+                .any(|(wanted, _)| *wanted == item)
+            || block_consumes_item(world, e, item)
+    }
+
+    /// `Block.liquidFilter[liquid]` for a generator.
+    fn generator_consumes_liquid(&self, world: &World, e: Entity, liquid: LiquidId) -> bool {
+        let filtered = match &self.config.filter_liquid {
+            Some(GeneratorFilter::LiquidFlammable { min, .. }) => self
+                .liquid_flammability
+                .get(liquid.index())
+                .is_some_and(|value| value >= min),
+            Some(GeneratorFilter::Liquid { liquid: wanted, .. }) => *wanted == liquid,
+            Some(GeneratorFilter::Liquids { stacks }) => {
+                stacks.iter().any(|(wanted, _)| *wanted == liquid)
+            }
+            _ => false,
+        };
+        filtered || block_consumes_liquid(world, e, liquid)
+    }
 }
 
 /// `HeaterGenerator` behavior: `ConsumeGenerator` plus the heat ramp
@@ -263,6 +373,48 @@ impl BuildingBehavior for HeaterGeneratorBehavior {
             .map(|state| state.warmup)
             .unwrap_or(0.0);
         fire_generator_explosion(world, e, &self.generator.config, warmup, true);
+    }
+
+    fn accept_item(&self, world: &World, e: Entity, src: Entity, item: ItemId) -> bool {
+        self.generator.accept_item(world, e, src, item)
+    }
+
+    fn handle_item(&self, world: &mut World, e: Entity, src: Entity, item: ItemId) {
+        self.generator.handle_item(world, e, src, item);
+    }
+
+    fn get_maximum_accepted(&self, world: &World, e: Entity, item: ItemId) -> i32 {
+        self.generator.get_maximum_accepted(world, e, item)
+    }
+
+    fn accept_stack(
+        &self,
+        world: &World,
+        e: Entity,
+        item: ItemId,
+        amount: i32,
+        source: Option<Entity>,
+    ) -> i32 {
+        self.generator.accept_stack(world, e, item, amount, source)
+    }
+
+    fn handle_stack(&self, world: &mut World, e: Entity, item: ItemId, amount: i32) {
+        self.generator.handle_stack(world, e, item, amount);
+    }
+
+    fn accept_liquid(&self, world: &World, e: Entity, src: Entity, liquid: LiquidId) -> bool {
+        self.generator.accept_liquid(world, e, src, liquid)
+    }
+
+    fn handle_liquid(
+        &self,
+        world: &mut World,
+        e: Entity,
+        src: Entity,
+        liquid: LiquidId,
+        amount: f32,
+    ) {
+        self.generator.handle_liquid(world, e, src, liquid, amount);
     }
 }
 
