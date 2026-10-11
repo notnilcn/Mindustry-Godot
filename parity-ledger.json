@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T18:10:20+10:00",
+  "updated": "2026-10-11T19:23:24+10:00",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -27732,17 +27732,27 @@
       "title": "Enemy attack/base AI never runs: no RTS squads and no BaseBuilderAI construction in the live sim",
       "surface": "campaign",
       "parent": null,
-      "status": "in-progress",
-      "updated": "2026-10-11T18:12:08+10:00",
+      "status": "fixing",
+      "updated": "2026-10-11T19:23:24+10:00",
       "discovered_by": null,
       "path": {
-        "to": "Serpulo attack-mode sector with the campaign RTS-AI option enabled (or a custom game with rules.rtsAi/buildAi)",
-        "java": [],
-        "godot": [],
-        "confirm": {},
-        "last_replayed": null
+        "to": "Serpulo attack-mode sector with its map rules carrying the wave-team AI flags (hidden/225: rtsAi:true)",
+        "java": [
+          "reference frames only (runs/20261010-234250-ref-PAR-0070-combat-fx/): the RTS/base halves had no Java capture (needs an enemy base)"
+        ],
+        "godot": [
+          "SimHost.load_sector('serpulo', 225) (log: loaded preset map `serpulo/hidden/225` (414x414))",
+          "MindCampaign.start_sector('serpulo', 225); rules JSON: attackMode true, teams[2].rtsAi true, rtsMaxSquad 15",
+          "MindCampaign.run_wave()",
+          "read godot_log: wave spawn lines + `team ai: team 2 squad of N -> tile (x, y) (attack)`",
+          "read SimHost.get_group_counts (unit 13 = player + 12 wave units)"
+        ],
+        "confirm": {
+          "godot": "log `wave spawn: emitted 12 unit(s) for wave 0` + at least one `team ai: team 2 squad of ... (attack)` line; group_counts unit=13"
+        },
+        "last_replayed": "runs/20261011-192234-PAR-0139/"
       },
-      "run": "runs/20261010-234250-ref-PAR-0070-combat-fx/",
+      "run": "runs/20261011-192234-PAR-0139/",
       "reproduce": {
         "java": [
           "reference attack sector with rtsAi: Logic.update calls data.rtsAi.update() per active team (Logic.java:562-571), RtsAI forms squads, assigns attack/defend targets and orders CommandAI units; with buildAi the enemy base places schematics via BaseBuilderAI.update(); prebuildAi spawns core units"
@@ -27755,51 +27765,68 @@
           "enemy teams react to intrusions and expand; the port has no per-team AI update in the live schedule"
         ]
       },
-      "steps": [],
+      "steps": [
+        {
+          "n": 1,
+          "action": "clear saves, load hidden/225, launch as attack sector; assert rules",
+          "java_frame": null,
+          "godot_frame": null,
+          "diff": null,
+          "verdict": "match: attackMode true + teams[2].rtsAi true (pre-fix the launch merge dropped the map teams: rtsAi false, rtsMaxSquad 15)"
+        },
+        {
+          "n": 2,
+          "action": "run_wave() -> wave spawner",
+          "java_frame": null,
+          "godot_frame": null,
+          "diff": null,
+          "verdict": "match: `wave spawn: emitted 12 unit(s) for wave 0` (pre-fix: emitted 0 - the inverted TilePos::pack never matched the authored pins `spawn:6226238` = Point2.pack(95,318))"
+        },
+        {
+          "n": 3,
+          "action": "let the live team-AI tick; read the log + counts",
+          "java_frame": null,
+          "godot_frame": "godot/step-03-after-order.png",
+          "diff": null,
+          "verdict": "match: `team ai: team 2 squad of 12 -> tile (156, 167) (attack)`; unit 13"
+        }
+      ],
       "mismatch": null,
       "fix": {
         "status": "open",
-        "commit": null,
-        "summary": "Logic.update's per-team BaseBuilderAI/RtsAI/PrebuildAI calls are not wired to the live sim; the modules are harness-only.",
+        "commit": "e3a62c6",
+        "summary": "Round 1 lands the live per-team RTS AI (team_ai_system in TickSet::WeatherAndAi + RtsAi::plan_live_orders: squad BFS, defense aggressor, weighted target, orders on ControllerSlot.target) plus its prerequisites: the map's `teams` block now merges into the launch rules (the wave team's rtsAi reaches the session), attack-mode waves spawn at stepped-out wave-team-core positions, and TilePos::pack now matches Arc Point2.pack order (the authored pinned spawn groups matched again). BaseBuilderAI/prebuildAi halves remain.",
         "plan": {
-          "round": 0,
-          "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
-          "seam": "client/rust/mind-core/src/sim/unit_runtime.rs (no per-team AI system) with client/rust/mind-core/src/ai/rts_ai.rs:479 and base_builder_ai.rs:594 having no live caller",
-          "files": [
-            "client/rust/mind-core/src/sim/unit_runtime.rs:491",
-            "client/rust/mind-core/src/ai/rts_ai.rs:469",
-            "client/rust/mind-core/src/ai/base_builder_ai.rs:580",
-            "client/rust/mind-core/src/game/teams.rs:117",
-            "client/rust/mind-core/src/sim/schedule.rs:427"
+          "round": 1,
+          "state": "round 1 done; narrow check + in-engine re-run green (runs/20261011-192234-PAR-0139/); base half open",
+          "done": [
+            "mind-gdext/src/campaign.rs merge_map_rules folds the map teams",
+            "world/pos.rs + game/sector.rs Arc pack order (x high); golden wall_door checksum regen + manifest hash",
+            "sim/unit_runtime.rs run_wave_system core-spawn branch + core_spawn_position helper + tests",
+            "game/runtime.rs team_ai_system + ai/rts_ai.rs plan_live_orders + unit tests + in-engine order line"
           ],
-          "approach": "1) Add a scheduled team-AI system (new entry in the live unit/combat wiring block of sim/schedule.rs) that iterates the active TeamData list on CampaignRuntime.session.teams and mirrors Logic.java:562-571: when rules.team_rule(team).rts_ai call rts_ai::update (and port the remaining RtsAI.update body: squad stats, defend/attack target weighting, unit orders), when rules.build_ai call update_team_data with a BaseBuildInput built from the live grid/BlockIndexer/cores/bases, and when rules.prebuild_ai spawn core units flagged to the core tile. 2) Consume BaseBuildActions/TeamData.plans through the live block runtime plan queue so builds become real placements. 3) Make RTS-ordered enemy units run the CommandAI branch of unit_update_system (see the RTS command finding). 4) Seed the builders deterministically from the sim RNG streams. 5) Test: a headless attack-mode session with rtsAi/buildAi on must produce a squad target and a build plan within N ticks, and the new checksum must be recorded if goldens move.",
-          "narrow_check": "cargo test -p mind-core ai:: plus a headless attack-sector scenario asserting an enemy squad target/plan appears",
-          "evidence": {
-            "java": [
-              "../Mindustry/core/src/mindustry/core/Logic.java:562",
-              "../Mindustry/core/src/mindustry/core/Logic.java:573",
-              "../Mindustry/core/src/mindustry/ai/RtsAI.java:80",
-              "../Mindustry/core/src/mindustry/ai/BaseBuilderAI.java:51"
-            ],
-            "godot": [
-              "client/rust/mind-core/src/ai/rts_ai.rs:479",
-              "client/rust/mind-core/src/ai/base_builder_ai.rs:594",
-              "client/rust/mind-core/src/game/teams.rs:117",
-              "client/rust/mind-core/src/sim/unit_runtime.rs:833"
-            ]
-          }
+          "seam": "game/runtime.rs team_ai_system; ai/rts_ai.rs plan_live_orders; sim/unit_runtime.rs run_wave_system; mind-gdext/src/campaign.rs merge_map_rules; world/pos.rs pack",
+          "next": [
+            "BaseBuilderAI live wiring: load BaseRegistry from assets/baseparts (*.msch via io::save/schematic read) into a resource, build BaseBuildInput from UnitRuntime.grid/content + BlockTable + BuildRules + BlockCounter + session team cores/spawns + Pathfinder field_core, call ensure_build_ai/update_team_data when rules.build_ai && !pvp, and consume TeamData.plans through a team-aware placement seam (Command::Place has no team parameter) or a builder-unit driver (ai/types/builder.rs + prebuild.rs exist).",
+            "prebuildAi core-unit spawns: core block unitType metadata (BlockDef has none yet; add a name->unit map).",
+            "estimateStats second half: enemy turret DPS rows in team_ai_enemy_stats.",
+            "invalidTarget set from CommandAI.unreachableBuildings; mobilization unit flags (no live flag field yet)."
+          ],
+          "narrow_check": "cargo test -p mind-core -p mind-gdext; --features msav-import hidden_225_pinned; clippy/fmt; in-engine load+start(225)+run_wave -> emitted>0 + team ai line",
+          "evidence": [
+            "runs/20261011-192234-PAR-0139/run.json",
+            "runs/20261011-192234-PAR-0139/report.md",
+            "runs/20261011-192234-PAR-0139/godot/step-03-after-order.png"
+          ]
         }
       },
       "verified": null,
-      "note": "Code-scan 2026-10-10 (units-ai): S3 high confidence for the dead wiring (visible whenever rules.rtsAi/buildAi is on, which makes it S2 for those configurations). Player impact: Serpulo attack sectors with the campaign RTS-AI option (default off) have no enemy squad commander, so enemies never defend or launch coordinated attacks; custom games with buildAi never see the enemy base expand or rebuild; prebuildAi core defenders never spawn. The port's own ai/rts_ai.rs header says the TeamData wiring is plan 12. In-engine verification pending.",
+      "note": "Code-scan 2026-10-10 (units-ai): S3 high confidence for the dead wiring (visible whenever rules.rtsAi/buildAi is on, which makes it S2 for those configurations). Player impact: Serpulo attack sectors with the campaign RTS-AI option (default off) have no enemy squad commander, so enemies never defend or launch coordinated attacks; custom games with buildAi never see the enemy base expand or rebuild; prebuildAi core defenders never spawn. The port's own ai/rts_ai.rs header says the TeamData wiring is plan 12. In-engine verification pending. 2026-10-11 (round 1, parity-hunt-s1): the live RtsAI now runs (TickSet::WeatherAndAi team_ai_system) and ordered a 12-unit wave squad at tile (156,167) in attack sector hidden/225; prerequisites landed: map `teams` merge at launch (rtsAi reaches the session), attack-mode core spawn positions, and the Arc Point2.pack order (the authored spawn pins matched). BaseBuilderAI/prebuildAi halves + turret DPS in estimateStats stay open (see fix.plan).",
       "evidence": [
-        "../Mindustry/core/src/mindustry/core/Logic.java:562",
-        "../Mindustry/core/src/mindustry/core/Logic.java:573",
-        "../Mindustry/core/src/mindustry/ai/RtsAI.java:80",
-        "../Mindustry/core/src/mindustry/ai/BaseBuilderAI.java:51",
-        "client/rust/mind-core/src/ai/rts_ai.rs:479",
-        "client/rust/mind-core/src/ai/base_builder_ai.rs:594",
-        "client/rust/mind-core/src/sim/unit_runtime.rs:833"
+        "runs/20261011-192234-PAR-0139/run.json",
+        "runs/20261011-192234-PAR-0139/report.md",
+        "runs/20261011-192234-PAR-0139/godot/step-03-after-order.png",
+        "godot log: wave spawn emitted 12 unit(s) for wave 0; team ai: team 2 squad of 12 -> tile (156, 167) (attack)"
       ],
       "reference": {
         "captured": "2026-10-11T18:00:00Z",
@@ -27832,7 +27859,9 @@
       "claim": {
         "by": "parity-hunt-s1",
         "at": "2026-10-11T18:12:08+10:00",
-        "prior_status": "reference"
+        "prior_status": "reference",
+        "released_at": "2026-10-11T19:25:00+10:00",
+        "reason": "round 1 landed (RTS half live + verified); item stays open for the BaseBuilderAI/prebuildAi halves"
       }
     },
     {

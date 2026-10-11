@@ -2095,3 +2095,21 @@ healthy bridge afterwards. Run: the PAR-0066 verification session.
   `&ContentRegistry` (no extra `&mut`), and the `--features msav-import` builds recompile the crate:
   clippy/test calls for it need long timeouts (a 300 s wrapper timed out twice).
 - Run: runs/20261011-175400-PAR-0155/.
+
+- Bullet (2026-10-11, PAR-0139 round 1): after `tools/parity-session.sh --stop` + restart, the
+  first 30-60 s of `godot_health`/`godot_exec` calls return `BRIDGE_NOT_CONNECTED` (the editor is
+  still booting); wrap the first game call in a retry loop (`godot_health` until `bridge_connected`,
+  then `godot_exec` until it answers) instead of assuming the printed "editor bridge listening"
+  line means ready. Also: with a 11837-building attack sector presented, the editor game pumps at
+  ~2 ticks/s (tick delta 100 in 50 s of wall time) - long in-game waits (unit travel across the
+  map) are impractical; judge from logs + structured state (`get_group_counts`, rules JSON) and use
+  the headless unit tests for movement/order assertions.
+- Bullet (2026-10-11, PAR-0139 round 1): embedding Rust code with backticks/`'` inside a
+  `bash -lc 'python3 - <<"PYEOF" ...'` heredoc breaks on the shell quoting; write the patch script
+  to `/tmp/opencode/*.py` with the write tool and run `python3 <file>` instead.
+- Bullet (2026-10-11, PAR-0139 round 1): a parity-ABI change that moves a packed value inside a
+  hashed field (here `world::pos::pack` order -> the `door.link` in the wall_door harness
+  checksum) fails `tests/blocks_golden.rs`; update the golden value + re-hash the file into
+  `parity/golden_manifest.json` in the same commit (and keep the manifest's `\u00a7` escapes intact
+  when rewriting - a pretty-print rewrite unescapes them).
+- Run: runs/20261011-192234-PAR-0139/.
