@@ -363,6 +363,15 @@ impl MindCampaign {
                 }
                 mind_core::game::play::PlayEvent::GameOver { .. }
                 | mind_core::game::play::PlayEvent::SectorLose { .. } => {
+                    // `Control` GameOverEvent (`Control.java:188-195`): save the
+                    // game-over state immediately, so a later re-attack loads
+                    // the destroyed base (PAR-0084).
+                    if let Some(file) = self.saves.current_slot().map(|slot| slot.file.clone()) {
+                        host.bind_mut()
+                            .request_save(GString::from(file.to_string_lossy().as_ref()), false);
+                        self.saving_finish_tick = Some(tick.saturating_add(3));
+                        log::info!("game-over save queued (`{}`)", file.display());
+                    }
                     dirty = true;
                 }
                 _ => {}

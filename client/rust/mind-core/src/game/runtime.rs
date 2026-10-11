@@ -300,6 +300,32 @@ pub fn campaign_tick_system(world: &mut World) {
             }
         }
 
+        // `Teams.unregisterCore` on destroyed cores: the port's break/combat
+        // paths despawn the building entity without touching the session's team
+        // data (upstream unregisters at `CoreBuild.destroy`), so
+        // `player_core_count`/`wave_core_count` would keep counting dead cores
+        // and the loss/attack-win checks never fire. A liveness sweep keeps the
+        // counts honest (PAR-0084).
+        let rules = runtime.session.rules.clone();
+        for team_raw in [rules.default_team, rules.wave_team] {
+            let team = TeamId(team_raw);
+            let dead: Vec<Entity> = runtime
+                .session
+                .teams
+                .get_or_null(team)
+                .map(|data| {
+                    data.cores
+                        .iter()
+                        .copied()
+                        .filter(|entity| world.get_entity(*entity).is_err())
+                        .collect()
+                })
+                .unwrap_or_default();
+            for entity in dead {
+                runtime.session.teams.unregister_core(entity, team, &rules);
+            }
+        }
+
         // `SectorInfo.handleCoreItem`/`handleProduction` deltas queued by the
         // core/miner paths land in the played sector's info, then
         // `SectorInfo.update` refreshes the statistic windows (Logic.java:538).
@@ -677,6 +703,51 @@ mod tests {
         let sector = runtime.campaign.sector(planet, sector_id).expect("sector");
         assert_eq!(sector.info.windows.core_deltas[copper.index()], 3);
         assert_eq!(sector.info.windows.production_deltas[copper.index()], 5);
+    }
+
+    #[test]
+    fn destroyed_cores_unregister_on_the_campaign_tick() {
+        let registry = content();
+        let campaign = campaign(&registry);
+        let planet = campaign.planet_id_by_name("serpulo").unwrap();
+        let sector_id = registry.sector_by_name("groundZero").unwrap().sector;
+        let mut session = PlaySession::new(Rules {
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        session.sector = Some((planet, sector_id));
+        session.phase = State::Playing;
+        let mut world = World::new();
+        install_campaign_core_hooks(&mut world);
+        // A world entity standing in for the core building.
+        let core = world.spawn_empty().id();
+        session
+            .teams
+            .register_core(core, TeamId(session.default_team()), &session.rules);
+        world.insert_resource(CampaignRuntime::new(session, campaign));
+
+        campaign_tick_system(&mut world);
+        assert_eq!(
+            world
+                .get_resource::<CampaignRuntime>()
+                .expect("runtime")
+                .session
+                .player_core_count(),
+            1,
+            "a live core stays registered"
+        );
+
+        world.despawn(core);
+        campaign_tick_system(&mut world);
+        let runtime = world
+            .remove_resource::<CampaignRuntime>()
+            .expect("runtime installed");
+        assert_eq!(
+            runtime.session.player_core_count(),
+            0,
+            "a destroyed core unregisters (the loss check can fire)"
+        );
     }
 
     #[test]
