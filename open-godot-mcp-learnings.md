@@ -1808,3 +1808,22 @@ those paths no longer exist, but the workarounds still apply.
 - Workaround: wait with real wall time on the SHELL side between execute calls
   (`sleep 12`); the game runs unblocked and the gate passes (hint + Skip then show).
 - Run dir: `runs/20261011-102959-PAR-0029/`.
+
+## 2026-10-11 — Fresh-launch verification resumed a stale save (PAR-0030)
+Symptom: after rebuilding libmind_gdext.so + relaunching the editor, a "fresh tutorial"
+walk read `MindHud.wave_sending == true` although `merge_map_rules` sets it from the
+map (`waveSending:false` in groundZero.msav) — and the unit test for the exact parse
+passed, and a map-rules probe showed both `waveTimer:false` (merged) and `waveSending`
+(not) coming from the same `Rules` object. Root cause was state, not code: the
+pre-fix walk's launch had already written
+`~/.local/share/godot/app_userdata/Mindustry-Godot/saves/sector-serpulo-15.msav`,
+so the post-fix game boot read `MindCampaign ready (1 save slot(s))` and the sector
+launch took the RESUME path (`load_sector: resuming serpulo:15`) — the save carried
+the pre-fix rules (wave_sending=true). The fix never ran.
+Workaround: staging the `saves/` dir aside is not enough by itself; the campaign
+records save presence at BOOT. Sequence for a truly fresh tutorial walk:
+1) `godot_game stop` (no autosaves while moving dirs),
+2) move `saves/` aside, 3) `godot_game play res://scenes/game.tscn` (rebootstrap:
+log must say `MindCampaign ready (0 save slot(s))`), 4) then drive the menu walk.
+Verify with `grep "save slot" last_log.txt` before trusting a fresh-launch read.
+Run: runs/20261011-103326-PAR-0030/ (pre-fix boot A fresh / post-fix boot B resumed).
