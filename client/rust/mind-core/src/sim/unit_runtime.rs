@@ -754,7 +754,7 @@ pub fn run_wave_system(world: &mut World) {
 
     // `WaveSpawner` spawn tiles are the `spawn` overlay tiles of the live grid
     // (`TileOverlayChangeEvent` rebuild covers map loads here).
-    let spawns: Vec<TilePos> = runtime
+    let mut spawns: Vec<TilePos> = runtime
         .grid
         .tiles
         .array()
@@ -767,6 +767,56 @@ pub fn run_wave_system(world: &mut World) {
         })
         .map(|tile| TilePos::new(tile.x, tile.y))
         .collect();
+
+    // `WaveSpawner.eachGroundSpawn` core branch (`WaveSpawner.java:134-173`):
+    // with `rules.wavesSpawnAtCores` in attack mode every wave-team core is
+    // also a spawn position, stepped toward the first player core until the
+    // 3x3 tile area is clear (PAR-0139 prerequisite: attack sectors author no
+    // spawn-overlay tiles, so enemy units only enter this way).
+    if let Some(campaign) = world.get_resource::<CampaignRuntime>() {
+        let rules = campaign.session.rules.clone();
+        if rules.waves_spawn_at_cores && rules.attack_mode {
+            let player_core = campaign
+                .session
+                .teams
+                .get_or_null(crate::ecs::TeamId(rules.default_team))
+                .and_then(|data| data.cores.first().copied())
+                .and_then(|core| world.get::<Pos>(core).map(|pos| (pos.x, pos.y)));
+            if let Some((px, py)) = player_core {
+                let wave_cores: Vec<Entity> = campaign
+                    .session
+                    .teams
+                    .get_or_null(crate::ecs::TeamId(wave_team))
+                    .map(|data| data.cores.clone())
+                    .unwrap_or_default();
+                for core in wave_cores {
+                    if let Some(pos) = world.get::<Pos>(core)
+                        && let Some(tile) = core_spawn_position(
+                            &runtime.grid,
+                            &runtime.content,
+                            pos.x,
+                            pos.y,
+                            px,
+                            py,
+                        )
+                    {
+                        spawns.push(tile);
+                    }
+                }
+            }
+        }
+    }
+    log::info!(
+        "wave spawn: wave {wave} with {} group(s), {} spawn position(s), attack_mode {}, spawn_at_cores {}",
+        groups.len(),
+        spawns.len(),
+        world
+            .get_resource::<CampaignRuntime>()
+            .is_some_and(|campaign| campaign.session.rules.attack_mode),
+        world
+            .get_resource::<CampaignRuntime>()
+            .is_some_and(|campaign| campaign.session.rules.waves_spawn_at_cores),
+    );
     runtime.wave_spawner.set_spawns(spawns);
 
     let UnitRuntime {
@@ -792,6 +842,51 @@ pub fn run_wave_system(world: &mut World) {
     units.extend(spawned);
     *units_created += u64::from(emitted);
     world.insert_non_send(runtime);
+}
+
+/// `WaveSpawner.eachGroundSpawn` core branch: a spawn tile near `(cx, cy)`
+/// stepped toward `(px, py)` until no solid tile lies within radius 3
+/// (`coreMargin = tilesize * 2`, `maxSteps = 30`, core size 3).
+fn core_spawn_position(
+    grid: &WorldGrid,
+    content: &ContentRegistry,
+    cx: f32,
+    cy: f32,
+    px: f32,
+    py: f32,
+) -> Option<TilePos> {
+    let tile = crate::config::TILESIZE as f32;
+    let (dx, dy) = (px - cx, py - cy);
+    let len = (dx * dx + dy * dy).sqrt();
+    if len <= f32::EPSILON {
+        return None;
+    }
+    let limit = (tile * 2.0 + tile * 1.5 * std::f32::consts::SQRT_2).min(len);
+    let mut offset = limit;
+    for _ in 0..30 {
+        let tx = ((cx + dx / len * offset) / tile).round() as i32;
+        let ty = ((cy + dy / len * offset) / tile).round() as i32;
+        let mut blocked = false;
+        for ox in -3..=3i32 {
+            for oy in -3..=3i32 {
+                if ox * ox + oy * oy > 9 {
+                    continue;
+                }
+                if grid.tiles.getc(tx + ox, ty + oy).solid(content) {
+                    blocked = true;
+                    break;
+                }
+            }
+            if blocked {
+                break;
+            }
+        }
+        if !blocked {
+            return Some(TilePos::new(tx as i16, ty as i16));
+        }
+        offset += tile * 1.1;
+    }
+    None
 }
 
 /// `TickSet::AfterGameUpdate` system: mirrors the live enemy count and spawn
@@ -1177,6 +1272,100 @@ mod tests {
             "campaign timer spawned a live unit"
         );
         sim.ecs.0.insert_resource(runtime);
+    }
+
+    /// Attack-mode waves spawn near the wave team's cores (`WaveSpawner`
+    /// `wavesSpawnAtCores`; PAR-0139 prerequisite: attack sectors author no
+    /// spawn-overlay tiles, so enemy units only enter this way).
+    #[test]
+    fn attack_mode_waves_spawn_near_enemy_cores() {
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+        use crate::ecs::BuildingComp;
+        use crate::ecs::TeamId;
+        use crate::game::State;
+        use crate::game::planet::EmptyNeighborhood;
+        use crate::game::play::PlaySession;
+        use crate::game::rules::Rules;
+        use crate::game::runtime::CampaignRuntime;
+        use crate::game::universe::Campaign;
+        use crate::world::block::BlockTable as Table;
+
+        let registry = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+            .expect("content");
+        let campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
+        let mut session = PlaySession::new(Rules {
+            waves: false,
+            attack_mode: true,
+            waves_spawn_at_cores: true,
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        session.phase = State::Playing;
+
+        let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+
+        // Materialize a player core and the wave team's core (the spawn anchor).
+        let table: Table = sim.ecs.0.get_resource::<Table>().expect("table").clone();
+        let core_inst = table.get_named("core-shard").expect("core-shard").clone();
+        let core_block = registry.block_id("core-shard").expect("core-shard id");
+        let spawn_core = |sim: &mut Sim, seq: u64, tile: TilePos, team: u8| -> Entity {
+            let entity = core_inst.spawn(
+                &mut sim.ecs.0,
+                seq,
+                tile,
+                team,
+                0,
+                registry.items().len(),
+                registry.liquids().len(),
+            );
+            sim.ecs.0.entity_mut(entity).insert(BuildingComp {
+                pos: tile,
+                block: core_block,
+                team: TeamId(team),
+                rot: 0,
+            });
+            entity
+        };
+        let player_core = spawn_core(&mut sim, 10, TilePos::new(12, 32), 1);
+        let enemy_core = spawn_core(&mut sim, 11, TilePos::new(48, 32), 2);
+        session
+            .teams
+            .register_core(player_core, TeamId(1), &session.rules);
+        session
+            .teams
+            .register_core(enemy_core, TeamId(2), &session.rules);
+
+        sim.ecs
+            .0
+            .insert_resource(CampaignRuntime::new(session, campaign));
+        sim.set_unit_wave_team(2);
+        sim.refresh_unit_runtime();
+        sim.request_wave_spawn(0);
+        for _ in 0..10 {
+            sim.tick().expect("tick");
+        }
+
+        let ts = crate::config::TILESIZE as f32;
+        let runtime = sim.unit_runtime().expect("runtime");
+        let mut spawned_near_core = 0;
+        for &entity in &runtime.units {
+            if let Some(pos) = sim.ecs.0.get::<Pos>(entity)
+                && let Some(team) = sim.ecs.0.get::<TeamComp>(entity)
+                && team.team == 2
+                && pos.x > 32.0 * ts
+            {
+                spawned_near_core += 1;
+            }
+        }
+        assert!(
+            spawned_near_core >= 1,
+            "wave units spawned near the enemy core (units: {}, near: {})",
+            runtime.units.len(),
+            spawned_near_core
+        );
     }
 }
 

@@ -2332,6 +2332,16 @@ fn merge_map_rules(session: &mut Rules, map: &Rules, has_preset: bool) {
     session.wave_sending = map.wave_sending;
     session.objectives = map.objectives.clone();
     session.objective_flags = map.objective_flags.clone();
+    // The map's own team rules carry the attack-sector AI flags (`rtsAi`/
+    // `buildAi`/`fillItems` on the wave team; the hidden campaign maps set
+    // them in the map's `teams` block). Upstream `SaveVersion.readRules`
+    // replaces the whole `Rules` with the map's before the preset
+    // `rules.get` overlay, so fold the map's per-team entries through
+    // (PAR-0139: without this the enemy AI flags never reach the live
+    // session).
+    for (team, rule) in &map.teams.0 {
+        *session.team_rule_mut(*team) = rule.clone();
+    }
     if has_preset {
         return;
     }

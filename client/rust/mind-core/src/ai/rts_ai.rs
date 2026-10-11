@@ -480,6 +480,235 @@ pub fn update(rts: &mut RtsAi) -> bool {
     rts.update_timer(120.0)
 }
 
+/// Squad clustering radius in world pixels (`RtsAI.squadRadius`).
+pub const SQUAD_RADIUS: f32 = 60.0;
+/// Squad re-assignment period in ticks (`RtsAI.update` `60 * 2`).
+pub const UPDATE_INTERVAL: f32 = 120.0;
+/// Maximum targets checked per update (`RtsAI.maxTargetsChecked`).
+pub const MAX_TARGETS_CHECKED: usize = 15;
+/// Aggressor search radius around a defended building (`checkRange`).
+pub const DEFEND_CHECK_RANGE: f32 = 350.0;
+
+/// One live unit row for [`RtsAi::plan_live_orders`].
+///
+/// Carries the [`RtsUnit`] projection (squad grouping) plus the
+/// [`SquadMember`] projection (`handleSquad` stats) from one live entity.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RtsLiveUnit {
+    /// Entity handle.
+    pub entity: Entity,
+    /// World x.
+    pub x: f32,
+    /// World y.
+    pub y: f32,
+    /// Mobilization flag (`unit.flag`; the live port has no flag field yet).
+    pub flag: i32,
+    /// Whether the unit has no order and is not attacking (`CommandAI` idle).
+    pub idle: bool,
+    /// Unit hit size (BFS radius term).
+    pub hit_size: f32,
+    /// Effective health.
+    pub health: f32,
+    /// Estimated DPS.
+    pub dps: f32,
+    /// Can target air.
+    pub target_air: bool,
+    /// Can target ground.
+    pub target_ground: bool,
+    /// Water unit (`WaterMovec`).
+    pub naval: bool,
+    /// Flying unit.
+    pub flying: bool,
+}
+
+impl RtsLiveUnit {
+    /// The [`RtsUnit`] projection (squad BFS row).
+    pub const fn as_unit(&self) -> RtsUnit {
+        RtsUnit {
+            entity: self.entity,
+            x: self.x,
+            y: self.y,
+            flag: self.flag,
+            idle: self.idle,
+            hit_size: self.hit_size,
+        }
+    }
+
+    /// The [`SquadMember`] projection (`handleSquad` stats row).
+    pub const fn as_member(&self) -> SquadMember {
+        SquadMember {
+            x: self.x,
+            y: self.y,
+            health: self.health,
+            dps: self.dps,
+            target_air: self.target_air,
+            target_ground: self.target_ground,
+            naval: self.naval,
+            flying: self.flying,
+            flag: self.flag,
+        }
+    }
+}
+
+/// One live squad order (`handleSquad` output; the live driver applies it).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SquadOrder {
+    /// Member entities, in stable order.
+    pub units: Vec<Entity>,
+    /// Movement target tile (attack target or defend position).
+    pub target: TilePos,
+    /// Whether the order is a defense response (`defend != null`).
+    pub defend: bool,
+}
+
+/// Live inputs for one `RtsAI.update` composition.
+pub struct RtsLiveInput<'a> {
+    /// `Rule.rtsMinSquad`.
+    pub min_squad: i32,
+    /// `Rule.rtsMaxSquad`.
+    pub max_squad: i32,
+    /// `Rule.rtsMinWeight`.
+    pub min_weight: f32,
+    /// Team unit cap (`Units.getCap`).
+    pub unit_cap: i32,
+    /// All live units of the team (stable order).
+    pub units: &'a [RtsLiveUnit],
+    /// Enemy candidate buildings in flag-priority order (`findTarget` pool).
+    pub targets: &'a [RtsBuilding],
+    /// Own damaged buildings (`damagedSet` snapshot).
+    pub damaged: &'a [RtsBuilding],
+    /// Enemy combatants for `estimateStats`.
+    pub enemy_stats: &'a [EnemyStat],
+}
+
+impl RtsAi {
+    /// Live `RTSAI.update` composition (`assignSquads` + `handleSquad`).
+    ///
+    /// Runs the 120-tick assignment timer, BFS-clusters the idle rows and
+    /// returns one [`SquadOrder`] per squad that found a defense aggressor or an
+    /// attack target. Upstream orders ride `CommandAI.commandPosition`/
+    /// `commandTarget`; the live driver maps an order to the member's move
+    /// target (the port's live unit controller has no command queue yet).
+    ///
+    /// Deviations from `RtsAI.java`, all deterministic: the candidate shuffle
+    /// is replaced by the stable flag-priority order (like
+    /// [`Self::assign_squads_bfs`]); the unreachable-building set is empty (no
+    /// live `CommandAI.unreachableBuildings`); the flag mobilization write is
+    /// skipped (no live unit flag field).
+    pub fn plan_live_orders(&mut self, input: &RtsLiveInput<'_>) -> Vec<SquadOrder> {
+        if !self.update_timer(UPDATE_INTERVAL) {
+            return Vec::new();
+        }
+        self.squads.clear();
+        if input.units.is_empty() {
+            return Vec::new();
+        }
+        let rows: Vec<RtsUnit> = input.units.iter().map(RtsLiveUnit::as_unit).collect();
+        self.assign_squads_bfs(&rows, SQUAD_RADIUS);
+
+        let mut assigned: std::collections::BTreeSet<Entity> = std::collections::BTreeSet::new();
+        let invalid: std::collections::BTreeSet<TilePos> = std::collections::BTreeSet::new();
+        let mut orders = Vec::new();
+        let squads = self.squads.clone();
+        for (index, squad) in squads.iter().enumerate() {
+            let members: Vec<RtsLiveUnit> = input
+                .units
+                .iter()
+                .filter(|unit| squad.units.contains(&unit.entity))
+                .copied()
+                .collect();
+            if members.is_empty() {
+                continue;
+            }
+            let member_rows: Vec<SquadMember> =
+                members.iter().map(RtsLiveUnit::as_member).collect();
+            let stats = SquadStats::aggregate(&member_rows);
+            let size = member_rows.len();
+
+            let mut order: Option<(TilePos, bool)> = None;
+
+            // Defense branch (`handleSquad` `damaged` half): rush the best
+            // damaged building when an aggressor is found near it.
+            if !input.damaged.is_empty()
+                && !stats.naval
+                && let Some((build, _in_core)) =
+                    Self::plan_defend(&stats, size, input.damaged, input.min_squad)
+                && let Some((ax, ay)) =
+                    nearest_aggressor(&stats, input.enemy_stats, build.x, build.y)
+            {
+                order = Some((world_to_tile(ax, ay), true));
+            }
+
+            // Attack branch (`findTarget`).
+            if order.is_none() {
+                let check_weight = members.first().is_some_and(|unit| unit.flag == 0);
+                if let Some(target) = Self::find_target_weighted(
+                    input.targets,
+                    stats.x,
+                    stats.y,
+                    size as i32,
+                    stats.dps,
+                    stats.health,
+                    check_weight,
+                    stats.flying,
+                    input.min_squad,
+                    input.min_weight,
+                    input.max_squad,
+                    input.unit_cap,
+                    &mut assigned,
+                    &invalid,
+                    input.enemy_stats,
+                ) {
+                    order = Some((target.pos, false));
+                }
+            }
+
+            if let Some((target, defend)) = order {
+                if let Some(squad) = self.squads.get_mut(index) {
+                    squad.target = Some(target);
+                }
+                orders.push(SquadOrder {
+                    units: squad.units.clone(),
+                    target,
+                    defend,
+                });
+            }
+        }
+        orders
+    }
+}
+
+/// Nearest enemy combatant able to hit this squad within [`DEFEND_CHECK_RANGE`]
+/// of `(x, y)` (`Units.closestEnemy` with the target-ability filter).
+fn nearest_aggressor(
+    stats: &SquadStats,
+    enemy_stats: &[EnemyStat],
+    x: f32,
+    y: f32,
+) -> Option<(f32, f32)> {
+    let range2 = DEFEND_CHECK_RANGE * DEFEND_CHECK_RANGE;
+    let mut best: Option<(f32, f32, f32)> = None;
+    for stat in enemy_stats {
+        // `Unit.checkTarget(tair, tground)`: a grounded enemy needs the squad's
+        // ground capability, a flying one its air capability.
+        let targetable = (stat.air && stats.target_air) || (!stat.air && stats.target_ground);
+        if !targetable {
+            continue;
+        }
+        let d2 = (stat.x - x).powi(2) + (stat.y - y).powi(2);
+        if d2 <= range2 && best.is_none_or(|(best_d2, _, _)| d2 < best_d2) {
+            best = Some((d2, stat.x, stat.y));
+        }
+    }
+    best.map(|(_, x, y)| (x, y))
+}
+
+/// World pixels → tile position (`World.toTile`, rounded).
+fn world_to_tile(x: f32, y: f32) -> TilePos {
+    let tile = crate::config::TILESIZE as f32;
+    TilePos::new((x / tile).round() as i16, (y / tile).round() as i16)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -694,5 +923,110 @@ mod tests {
         let candidates = [TilePos::new(5, 5), TilePos::new(9, 9)];
         let target = RtsAi::find_target(&rts.squads, &candidates, 0.0, 0.0);
         assert_eq!(target, Some(TilePos::new(9, 9)));
+    }
+
+    fn live_unit(entity: u32, x: f32, y: f32) -> RtsLiveUnit {
+        RtsLiveUnit {
+            entity: Entity::from_raw_u32(entity).expect("entity"),
+            x,
+            y,
+            flag: 0,
+            idle: true,
+            hit_size: 8.0,
+            health: 100.0,
+            dps: 10.0,
+            target_air: false,
+            target_ground: true,
+            naval: false,
+            flying: false,
+        }
+    }
+
+    fn live_building(entity: u32, tile: TilePos, in_core: bool) -> RtsBuilding {
+        let tile_size = crate::config::TILESIZE as f32;
+        RtsBuilding {
+            entity: Entity::from_raw_u32(entity).expect("entity"),
+            pos: tile,
+            x: (tile.x() as f32 + 0.5) * tile_size,
+            y: (tile.y() as f32 + 0.5) * tile_size,
+            in_core,
+        }
+    }
+
+    #[test]
+    fn plan_live_orders_groups_idle_units_and_assigns_a_target() {
+        let units = [live_unit(1, 0.0, 0.0), live_unit(2, 10.0, 0.0)];
+        let target = live_building(3, TilePos::new(10, 10), false);
+        let mut rts = RtsAi::new();
+        let input = RtsLiveInput {
+            min_squad: 1,
+            max_squad: 15,
+            min_weight: 0.0,
+            unit_cap: 100,
+            units: &units,
+            targets: &[target],
+            damaged: &[],
+            enemy_stats: &[],
+        };
+        let orders = rts.plan_live_orders(&input);
+        assert_eq!(orders.len(), 1, "one squad order");
+        assert!(!orders[0].defend);
+        assert_eq!(orders[0].target, TilePos::new(10, 10));
+        assert_eq!(orders[0].units.len(), 2, "both clustered units ordered");
+        // The 120-tick timer gates the next update.
+        assert!(rts.plan_live_orders(&input).is_empty());
+    }
+
+    #[test]
+    fn plan_live_orders_min_squad_can_hold_a_squad_back() {
+        let units = [live_unit(1, 0.0, 0.0)];
+        let target = live_building(2, TilePos::new(4, 4), false);
+        let mut rts = RtsAi::new();
+        let input = RtsLiveInput {
+            min_squad: 4,
+            max_squad: 15,
+            min_weight: 1.2,
+            unit_cap: 100,
+            units: &units,
+            targets: &[target],
+            damaged: &[],
+            enemy_stats: &[],
+        };
+        assert!(
+            rts.plan_live_orders(&input).is_empty(),
+            "below rtsMinSquad -> no attack order"
+        );
+    }
+
+    #[test]
+    fn plan_live_orders_defense_targets_the_aggressor() {
+        let units = [live_unit(1, 0.0, 0.0)];
+        let damaged = [live_building(2, TilePos::new(0, 0), false)];
+        let aggressor = EnemyStat {
+            x: 40.0,
+            y: 0.0,
+            health: 100.0,
+            dps: 5.0,
+            range: 50.0,
+            target_air: false,
+            target_ground: true,
+            air: false,
+        };
+        let mut rts = RtsAi::new();
+        let input = RtsLiveInput {
+            min_squad: 1,
+            max_squad: 15,
+            min_weight: 0.0,
+            unit_cap: 100,
+            units: &units,
+            targets: &[],
+            damaged: &damaged,
+            enemy_stats: &[aggressor],
+        };
+        let orders = rts.plan_live_orders(&input);
+        assert_eq!(orders.len(), 1);
+        assert!(orders[0].defend, "defense order");
+        // 40 world px at TILESIZE 8 -> tile (5, 0).
+        assert_eq!(orders[0].target, TilePos::new(5, 0));
     }
 }

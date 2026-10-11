@@ -23,12 +23,18 @@ use super::rules::Rules;
 use super::stats::GameStats;
 use super::teams::Teams;
 use super::universe::Campaign;
+use crate::ai::controller::{AiKind, ControllerSlot};
+use crate::ai::rts_ai::{self, EnemyStat, MAX_TARGETS_CHECKED, RtsBuilding, RtsLiveUnit};
+use crate::content::registries::blocks::BlockFlag;
 use crate::content::{BlockKind, ContentRegistry, ItemId};
-use crate::ecs::{BuildingComp, TeamId};
-use crate::entities::comp::TeamComp;
+use crate::ecs::{BuildingComp, EntitySeq, TeamId};
+use crate::entities::comp::unit::comp::{UnitCore, UnitTypeComp};
+use crate::entities::comp::{Health, Pos, TeamComp};
 use crate::game::State;
 use crate::render::g3d::grid::PlanetGrid;
 use crate::sim::runtime::ContentIndex;
+use crate::world::TilePos;
+use crate::world::block::BlockTable;
 use crate::world::blocks::storage::core_block::CoreBuild;
 use crate::world::modules::ItemModule;
 
@@ -593,6 +599,299 @@ pub fn game_state_tick_system(world: &mut World) {
     world.insert_resource(runtime);
 }
 
+/// `RtsAI.flags`: candidate target priority order.
+const TARGET_FLAGS: [BlockFlag; 5] = [
+    BlockFlag::Generator,
+    BlockFlag::Factory,
+    BlockFlag::Core,
+    BlockFlag::Battery,
+    BlockFlag::Drill,
+];
+
+/// One live unit row for the per-team AI snapshot.
+#[derive(Debug, Clone, Copy)]
+struct TeamAiUnitRow {
+    entity: Entity,
+    team: u8,
+    x: f32,
+    y: f32,
+    range: f32,
+    hit_size: f32,
+    health: f32,
+    dps: f32,
+    target_air: bool,
+    target_ground: bool,
+    flying: bool,
+    naval: bool,
+    idle: bool,
+}
+
+impl TeamAiUnitRow {
+    /// The [`RtsLiveUnit`] projection (`unit.flag` is 0: the live port has no
+    /// flag field yet).
+    fn to_live(self) -> RtsLiveUnit {
+        RtsLiveUnit {
+            entity: self.entity,
+            x: self.x,
+            y: self.y,
+            flag: 0,
+            idle: self.idle,
+            hit_size: self.hit_size,
+            health: self.health,
+            dps: self.dps,
+            target_air: self.target_air,
+            target_ground: self.target_ground,
+            naval: self.naval,
+            flying: self.flying,
+        }
+    }
+}
+
+/// One live building row for the per-team AI snapshot.
+#[derive(Debug, Clone, Copy)]
+struct TeamAiBuildingRow {
+    entity: Entity,
+    seq: u64,
+    team: u8,
+    pos: TilePos,
+    x: f32,
+    y: f32,
+    in_core: bool,
+    flag_rank: Option<usize>,
+    damaged: bool,
+}
+
+/// `TickSet::WeatherAndAi`: the per-active-team `RtsAI` update
+/// (`Logic.update`: `for(TeamData data : state.teams.getActive())`, PAR-0139).
+///
+/// Round 1 wires the RTS half (`TeamRule.rtsAi`): squads are grouped from the
+/// live idle units, weighted targets are picked from the live enemy buildings
+/// (flag priority: generator/factory/core/battery/drill) and every order lands
+/// on the member's live move target (`ControllerSlot.target`; upstream issues
+/// `CommandAI.commandTarget`/`commandPosition`). The `BaseBuilderAI`/
+/// `prebuildAi` halves stay unwired (no live `BaseRegistry` load / core
+/// `unitType` content yet) and are tracked in the PAR-0139 fix plan.
+pub fn team_ai_system(world: &mut World) {
+    let Some(mut runtime) = world.remove_resource::<CampaignRuntime>() else {
+        return;
+    };
+    if runtime.session.phase != State::Playing || runtime.is_client {
+        world.insert_resource(runtime);
+        return;
+    }
+    let rules = runtime.session.rules.clone();
+    // `if(rules.buildAi && !state.rules.pvp)` and the RTS guard share the
+    // PvP exclusion upstream; the whole per-team block is host-only.
+    if !rules.pvp {
+        let active = runtime.session.teams.active.clone();
+        let (units, buildings) = collect_team_ai_rows(world);
+        for team in active {
+            let rule = rules.team_rule(team.0).clone();
+            if !rule.rts_ai {
+                continue;
+            }
+            rts_ai::ensure_rts_ai(runtime.session.teams.get(team));
+            let team_units: Vec<RtsLiveUnit> = units
+                .iter()
+                .filter(|row| row.team == team.0)
+                .map(|row| row.to_live())
+                .collect();
+            if !team_units.iter().any(|unit| unit.idle) {
+                continue;
+            }
+            let targets = team_ai_targets(&buildings, team.0);
+            let damaged = team_ai_damaged(&buildings, team.0);
+            let enemy_stats = team_ai_enemy_stats(&units, team.0);
+            let Some(rts) = runtime.session.teams.get(team).rts_ai.as_mut() else {
+                continue;
+            };
+            let orders = rts.plan_live_orders(&rts_ai::RtsLiveInput {
+                min_squad: rule.rts_min_squad,
+                max_squad: rule.rts_max_squad,
+                min_weight: rule.rts_min_weight,
+                unit_cap: i32::MAX,
+                units: &team_units,
+                targets: &targets,
+                damaged: &damaged,
+                enemy_stats: &enemy_stats,
+            });
+            for order in &orders {
+                for &entity in &order.units {
+                    if let Some(mut slot) = world.get_mut::<ControllerSlot>(entity) {
+                        slot.target = Some(order.target);
+                    }
+                }
+                log::info!(
+                    "team ai: team {} squad of {} -> tile ({}, {}) ({})",
+                    team.0,
+                    order.units.len(),
+                    order.target.x(),
+                    order.target.y(),
+                    if order.defend { "defend" } else { "attack" }
+                );
+            }
+        }
+    }
+    world.insert_resource(runtime);
+}
+
+/// Collects the live unit/building rows the per-team AI reads this tick.
+fn collect_team_ai_rows(world: &World) -> (Vec<TeamAiUnitRow>, Vec<TeamAiBuildingRow>) {
+    let mut units = Vec::new();
+    if let Some(unit_runtime) = world.get_non_send::<crate::sim::unit_runtime::UnitRuntime>() {
+        for &entity in &unit_runtime.units {
+            let Ok(entity_ref) = world.get_entity(entity) else {
+                continue;
+            };
+            let Some(team) = entity_ref.get::<TeamComp>() else {
+                continue;
+            };
+            let Some(pos) = entity_ref.get::<Pos>() else {
+                continue;
+            };
+            let Some(core) = entity_ref.get::<UnitCore>() else {
+                continue;
+            };
+            if core.dead {
+                continue;
+            }
+            let Some(def) = entity_ref
+                .get::<UnitTypeComp>()
+                .and_then(|comp| unit_runtime.content.unit(comp.type_id))
+            else {
+                continue;
+            };
+            // `CommandAI` idle: no order and not attacking (the live controller
+            // stores the order in `ControllerSlot.target`).
+            let idle = entity_ref
+                .get::<ControllerSlot>()
+                .is_some_and(|slot| slot.kind != AiKind::Player && slot.target.is_none());
+            let health = entity_ref
+                .get::<Health>()
+                .map_or(def.health, |health| health.health);
+            units.push(TeamAiUnitRow {
+                entity,
+                team: team.team,
+                x: pos.x,
+                y: pos.y,
+                range: def.range.max(def.max_range),
+                hit_size: def.hit_size,
+                health,
+                dps: def.dps_estimate,
+                target_air: def.target_air,
+                target_ground: def.target_ground,
+                flying: def.flying,
+                naval: def.naval,
+                idle,
+            });
+        }
+    }
+
+    let mut buildings = Vec::new();
+    let table = world.get_resource::<BlockTable>();
+    for entity_ref in world.iter_entities() {
+        let Some(comp) = entity_ref.get::<BuildingComp>() else {
+            continue;
+        };
+        let Some(pos) = entity_ref.get::<Pos>() else {
+            continue;
+        };
+        let Some(def) = table
+            .and_then(|table| table.get(comp.block))
+            .map(|instance| instance.def.clone())
+        else {
+            continue;
+        };
+        let seq = entity_ref.get::<EntitySeq>().map_or(u64::MAX, |seq| seq.0);
+        // Damaged snapshot: the live port has no `BuildDamageEvent` listener
+        // yet, so `damagedSet` is approximated by live health below max.
+        let damaged = entity_ref
+            .get::<Health>()
+            .is_some_and(|health| health.health > 0.0 && health.health < health.max_health);
+        buildings.push(TeamAiBuildingRow {
+            entity: entity_ref.id(),
+            seq,
+            team: comp.team.0,
+            pos: comp.pos,
+            x: pos.x,
+            y: pos.y,
+            in_core: def.flags.contains(&BlockFlag::Core),
+            flag_rank: TARGET_FLAGS
+                .iter()
+                .position(|flag| def.flags.contains(flag)),
+            damaged,
+        });
+    }
+    (units, buildings)
+}
+
+/// `findTarget` candidate pool: enemy buildings carrying one of [`TARGET_FLAGS`],
+/// in flag-priority then spawn order, truncated to [`MAX_TARGETS_CHECKED`].
+///
+/// Upstream shuffles the pool before truncating (`Mathf.random`); the port keeps
+/// stable order so a scenario replays deterministically.
+fn team_ai_targets(buildings: &[TeamAiBuildingRow], team: u8) -> Vec<RtsBuilding> {
+    let mut rows: Vec<(usize, u64, RtsBuilding)> = buildings
+        .iter()
+        .filter(|row| row.team != team)
+        .filter_map(|row| {
+            Some((
+                row.flag_rank?,
+                row.seq,
+                RtsBuilding {
+                    entity: row.entity,
+                    pos: row.pos,
+                    x: row.x,
+                    y: row.y,
+                    in_core: row.in_core,
+                },
+            ))
+        })
+        .collect();
+    rows.sort_by_key(|(rank, seq, _)| (*rank, *seq));
+    rows.truncate(MAX_TARGETS_CHECKED);
+    rows.into_iter().map(|(_, _, row)| row).collect()
+}
+
+/// `damagedSet` snapshot: the team's damaged buildings.
+fn team_ai_damaged(buildings: &[TeamAiBuildingRow], team: u8) -> Vec<RtsBuilding> {
+    buildings
+        .iter()
+        .filter(|row| row.team == team && row.damaged)
+        .map(|row| RtsBuilding {
+            entity: row.entity,
+            pos: row.pos,
+            x: row.x,
+            y: row.y,
+            in_core: row.in_core,
+        })
+        .collect()
+}
+
+/// `estimateStats` enemy rows: every live enemy unit.
+///
+/// Upstream also folds enemy turret buildings (health + `estimateDps`) into the
+/// score; the live port has no turret DPS estimate yet, so only units
+/// contribute (tracked in the fix plan).
+fn team_ai_enemy_stats(units: &[TeamAiUnitRow], team: u8) -> Vec<EnemyStat> {
+    units
+        .iter()
+        .filter(|row| row.team != team)
+        .map(|row| EnemyStat {
+            x: row.x,
+            y: row.y,
+            health: row.health,
+            dps: row.dps,
+            range: row.range,
+            target_air: row.target_air,
+            target_ground: row.target_ground,
+            // The enemy's own mobility state (used by the defense aggressor
+            // filter; `estimateStats` ignores it).
+            air: row.flying,
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -612,7 +911,93 @@ mod tests {
         campaign_tick_system(&mut world);
         objectives_tick_system(&mut world);
         game_state_tick_system(&mut world);
+        team_ai_system(&mut world);
         assert!(world.get_resource::<CampaignRuntime>().is_none());
+    }
+
+    #[test]
+    fn team_ai_orders_idle_wave_units_at_an_enemy_core() {
+        use crate::ai::ControllerSlot;
+        use crate::sim::unit_runtime::{UnitRuntime, unit_update_system};
+        use crate::world::WorldGrid;
+
+        let registry = {
+            let mut registry = content();
+            registry.init().expect("init");
+            registry
+        };
+        let table = crate::world::block::BlockTable::build_default(&registry).expect("table");
+        let mut world = World::new();
+
+        // Live wave-team units near the map corner.
+        let grid = WorldGrid::new(32, 32);
+        let runtime_content = {
+            let mut content = content();
+            content.init().expect("init");
+            content
+        };
+        let mut unit_runtime = UnitRuntime::new(runtime_content, &grid, 2);
+        let a = unit_runtime
+            .spawn(&mut world, "dagger", 2, 8.0, 8.0, 0.0)
+            .expect("unit a");
+        let b = unit_runtime
+            .spawn(&mut world, "dagger", 2, 24.0, 8.0, 0.0)
+            .expect("unit b");
+        world.insert_non_send(unit_runtime);
+
+        // The player core is the enemy target (BuildingComp mirrors the live
+        // `SimHooks::new_building` insert).
+        let core_inst = table.get_named("core-shard").expect("core-shard").clone();
+        let core = core_inst.spawn(
+            &mut world,
+            1,
+            TilePos::new(20, 20),
+            1,
+            0,
+            registry.items().len(),
+            registry.liquids().len(),
+        );
+        world.entity_mut(core).insert(BuildingComp {
+            pos: TilePos::new(20, 20),
+            block: registry.block_id("core-shard").expect("core-shard id"),
+            team: TeamId(1),
+            rot: 0,
+        });
+        world.insert_resource(table);
+
+        let campaign = campaign(&registry);
+        let mut session = PlaySession::new(Rules {
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        session.phase = State::Playing;
+        {
+            let rule = session.rules.team_rule_mut(2);
+            rule.rts_ai = true;
+            rule.rts_min_squad = 1;
+        }
+        world.insert_resource(CampaignRuntime::new(session, campaign));
+
+        team_ai_system(&mut world);
+
+        let slot_a = world.get::<ControllerSlot>(a).expect("slot a").target;
+        let slot_b = world.get::<ControllerSlot>(b).expect("slot b").target;
+        assert_eq!(
+            slot_a,
+            Some(TilePos::new(20, 20)),
+            "the squad attacks the enemy core ({slot_a:?})"
+        );
+        assert_eq!(slot_b, slot_a, "both clustered units share the order");
+
+        // The order drives the live movement system.
+        let before = world.get::<Pos>(a).expect("pos a").x;
+        unit_update_system(&mut world);
+        let after = world.get::<Pos>(a).expect("pos a").x;
+        assert!(
+            after > before,
+            "ordered unit moves toward the core ({before} -> {after})"
+        );
     }
 
     #[test]

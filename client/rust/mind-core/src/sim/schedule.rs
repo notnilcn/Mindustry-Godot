@@ -420,6 +420,9 @@ pub fn build_sim_schedule() -> Schedule {
     schedule.add_systems(crate::game::runtime::objectives_tick_system.in_set(TickSet::Objectives));
     schedule
         .add_systems(crate::game::runtime::game_state_tick_system.in_set(TickSet::GameStateCheck));
+    // PAR-0139: the per-active-team RTS AI (`Logic.update` weather/AI block);
+    // no-op unless the campaign runtime is installed.
+    schedule.add_systems(crate::game::runtime::team_ai_system.in_set(TickSet::WeatherAndAi));
     // ---- end campaign wiring ----
     // ---- live unit/combat wiring (EV-0048): no-op unless `sim::unit_runtime`
     // installed its non-send `UnitRuntime` resource. Owns only the unit/bullet

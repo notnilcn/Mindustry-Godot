@@ -27732,8 +27732,8 @@
       "title": "Enemy attack/base AI never runs: no RTS squads and no BaseBuilderAI construction in the live sim",
       "surface": "campaign",
       "parent": null,
-      "status": "reference",
-      "updated": "2026-10-10T16:22:59Z",
+      "status": "in-progress",
+      "updated": "2026-10-11T18:12:08+10:00",
       "discovered_by": null,
       "path": {
         "to": "Serpulo attack-mode sector with the campaign RTS-AI option enabled (or a custom game with rules.rtsAi/buildAi)",
@@ -27828,6 +27828,11 @@
         "java_path": [
           "skip waves; capture the enemies' spawn->core path + attack"
         ]
+      },
+      "claim": {
+        "by": "parity-hunt-s1",
+        "at": "2026-10-11T18:12:08+10:00",
+        "prior_status": "reference"
       }
     },
     {
