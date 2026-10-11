@@ -1090,6 +1090,18 @@ impl DesktopBridge {
             self.command_tap(bindings);
             return;
         }
+        // `DesktopInput.java:737` (`Binding.deselect` shares the right button
+        // with breaking): while placing, the press clears the block selection
+        // instead of entering breaking mode - otherwise every left press stays
+        // trapped in the placement branch and ore clicks can never mine
+        // (PAR-0045).
+        if self.controller.state.block.is_some() {
+            self.controller.state.select_block(None);
+            if let Some(mut host) = self.host.clone() {
+                host.bind_mut().select_block(GString::from("air"));
+            }
+            return;
+        }
         // `Binding.breakBlock` (`DesktopInput.pollInputPlayer`): the right
         // button always enters breaking mode; config/inventory open on the
         // left tap.
