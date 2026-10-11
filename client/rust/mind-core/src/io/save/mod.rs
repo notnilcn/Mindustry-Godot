@@ -553,16 +553,32 @@ mod tests {
 
         // The player mech spawns at the core near tile (129,55); the tutorial's
         // mine order targets ore within its neighbourhood (PAR-0045).
-        let near_core = grid
-            .tiles
-            .iter()
-            .enumerate()
-            .filter(|(index, tile)| {
-                let x = (index % width) as i32 - 129;
-                let y = (index / width) as i32 - 55;
-                tile.overlay == copper && x.abs() <= 16 && y.abs() <= 16
-            })
-            .count();
+        let mut nearest: Option<(i32, i32, i32)> = None;
+        let mut near_core = 0usize;
+        for (index, tile) in grid.tiles.iter().enumerate() {
+            if tile.overlay != copper {
+                continue;
+            }
+            let x = (index % width) as i32 - 129;
+            let y = (index / width) as i32 - 55;
+            if x.abs() > 16 || y.abs() > 16 {
+                continue;
+            }
+            near_core += 1;
+            let distance = x * x + y * y;
+            if nearest.is_none_or(|(best, _, _)| distance < best) {
+                nearest = Some((distance, (index % width) as i32, (index / width) as i32));
+            }
+        }
+        if let Some((_, ox, oy)) = nearest {
+            eprintln!("nearest copper ore to the core: tile ({ox}, {oy})");
+        }
+        eprintln!("ore-copper raw id: {}", copper.raw());
+        for def in registry.blocks().iter() {
+            if def.id.raw() == 167 || def.name == "ore-copper" {
+                eprintln!("block raw {} = {}", def.id.raw(), def.name);
+            }
+        }
         assert!(
             near_core > 0,
             "copper ore must exist within 16 tiles of the core ({near_core} tiles)"
