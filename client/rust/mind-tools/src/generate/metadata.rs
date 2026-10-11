@@ -608,11 +608,13 @@ pub fn generated_icons(ctx: &IconCtx) -> Vec<String> {
             }
         }
         // `Conveyor.icons()`: regions[0][0] (`@-#1-#2`, lengths {7,4}).
-        BlockKind::Conveyor => vec![format!("{name}-0-0")],
+        BlockKind::Conveyor | BlockKind::ArmoredConveyor => vec![format!("{name}-0-0")],
         // `Duct.icons()`: `duct-bottom` + topRegions[0] (`@-top-#`, length 5).
         BlockKind::Duct => vec![String::from("duct-bottom"), format!("{name}-top-0")],
         // `Conduit.icons()`: `conduit-bottom` + topRegions[0].
-        BlockKind::Conduit => vec![String::from("conduit-bottom"), format!("{name}-top-0")],
+        BlockKind::Conduit | BlockKind::ArmoredConduit => {
+            vec![String::from("conduit-bottom"), format!("{name}-top-0")]
+        }
         // `Sorter.icons()` / `ItemSource.icons()`.
         BlockKind::Sorter | BlockKind::ItemSource => {
             vec![String::from("source-bottom"), region.to_owned()]

@@ -31,15 +31,15 @@ pub struct UnitStats {
 
 /// One rotated unit quad.
 #[derive(Clone, Copy)]
-struct UnitQuad {
-    cx: f32,
-    cy: f32,
-    w: f32,
-    h: f32,
+pub(crate) struct UnitQuad {
+    pub(crate) cx: f32,
+    pub(crate) cy: f32,
+    pub(crate) w: f32,
+    pub(crate) h: f32,
     /// Sprite rotation in degrees (upstream `unit.rotation`).
-    rot: f32,
-    uv: [f32; 4],
-    color: u32,
+    pub(crate) rot: f32,
+    pub(crate) uv: [f32; 4],
+    pub(crate) color: u32,
 }
 
 /// One `(band, atlas page)` bucket: its texture and quads.
@@ -156,7 +156,7 @@ impl UnitRenderer {
 }
 
 /// Builds an `ArrayMesh` from rotated quads (two triangles each).
-fn build_unit_mesh(quads: &[UnitQuad]) -> Option<Gd<ArrayMesh>> {
+pub(crate) fn build_unit_mesh(quads: &[UnitQuad]) -> Option<Gd<ArrayMesh>> {
     let mut tool = SurfaceTool::new_gd();
     tool.begin(PrimitiveType::TRIANGLES);
     for quad in quads {

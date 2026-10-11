@@ -30,6 +30,27 @@ use crate::sim_host::MindSimHost;
 
 use super::atlas_bind::color_from;
 
+/// Reads row 0 of `sprites/block_colors.png` as packed `rgba8888` per block id
+/// (empty when the pack output is absent).
+fn load_block_colors() -> Vec<u32> {
+    let path = format!(
+        "{}/sprites/block_colors.png",
+        crate::assets::loader::resolve_assets_dir()
+    );
+    if !godot::classes::FileAccess::file_exists(&path) {
+        log::warn!("MindMinimap: missing {path}; minimap uses registry colours");
+        return Vec::new();
+    }
+    let bytes = godot::classes::FileAccess::get_file_as_bytes(&path);
+    let mut image = Image::new_gd();
+    if image.load_png_from_buffer(&bytes) != godot::global::Error::OK {
+        return Vec::new();
+    }
+    (0..image.get_width())
+        .map(|x| image.get_pixel(x, 0).to_u32(godot::builtin::ColorChannelOrder::RGBA))
+        .collect()
+}
+
 /// `MindMinimap` — the plan-14 minimap provider (plan 16 §3.7).
 #[derive(GodotClass)]
 #[class(base=Node2D)]
@@ -45,6 +66,8 @@ pub struct MindMinimap {
     counter: f32,
     dirty: HashSet<i32>,
     last_revision: i64,
+    /// `sprites/block_colors.png` row 0 (`ContentLoader.loadColors`), loaded once.
+    block_colors: Option<Vec<u32>>,
 }
 
 #[godot_api]
@@ -62,6 +85,7 @@ impl INode2D for MindMinimap {
             counter: 0.0,
             dirty: HashSet::new(),
             last_revision: i64::MIN,
+            block_colors: None,
         }
     }
 
@@ -126,12 +150,14 @@ impl MindMinimap {
             if width <= 0 || height <= 0 {
                 return;
             }
-            let palette = BlockPalette::of(content);
+            let mut palette = BlockPalette::of(content);
+            palette.apply_block_colors(self.block_colors.get_or_insert_with(load_block_colors));
             let mut rgba = Vec::with_capacity(width as usize * height as usize * 4);
             for y in 0..height {
                 // Top row first: `pixmap.set(x, height - 1 - y)`.
                 for x in 0..width {
-                    let color = self.tile_color(&palette, world, content, x, y);
+                    let team = host.building_team(x, y).unwrap_or(0);
+                    let color = self.tile_color(&palette, world, content, x, y, team);
                     rgba.extend_from_slice(&color.to_be_bytes());
                 }
             }
@@ -190,7 +216,8 @@ impl MindMinimap {
         for index in indices {
             let x = index % width;
             let y = index / width;
-            let color = self.tile_color(&palette, world, content, x, y);
+            let team = host.building_team(x, y).unwrap_or(0);
+            let color = self.tile_color(&palette, world, content, x, y, team);
             // Texture is top-row-first.
             image.set_pixel(x, height - 1 - y, color_from(color));
         }
@@ -205,6 +232,7 @@ impl MindMinimap {
         content: &mind_core::content::ContentRegistry,
         x: i32,
         y: i32,
+        team: u8,
     ) -> u32 {
         let tile = world.tile(x, y);
         let wall = tile.block.raw();
@@ -213,7 +241,8 @@ impl MindMinimap {
         let real = wall;
 
         // `real.minimapColor(tile)` falls through to `MapIO.colorFor`.
-        let mut color = color_for(palette, real, floor, overlay, 0);
+        // `real.synthetic() -> tile.getTeam().color`.
+        let mut color = color_for(palette, real, floor, overlay, team);
         color = shade(
             color,
             mind_core::render::minimap::darkness_multiplier(get_static_darkness(
@@ -251,9 +280,13 @@ impl MindMinimap {
         };
         let host = host.bind();
         let (width, height) = host.world_size();
-        // Camera position is not available on the provider without a
-        // scene lookup; the plan-14 widget supplies the camera transform.
-        region_for_camera(0.0, 0.0, TILESIZE as f32, width, height, self.zoom)
+        // `Core.camera.position` (world px, y-up): the sibling `World/Camera2D`.
+        let camera = self
+            .base()
+            .try_get_node_as::<godot::classes::Camera2D>("../Camera2D")
+            .map(|camera| camera.get_position())
+            .unwrap_or_default();
+        region_for_camera(camera.x, camera.y, TILESIZE as f32, width, height, self.zoom)
     }
 }
 
@@ -359,6 +392,7 @@ impl MindMinimap {
         if x < 0 || y < 0 || x >= world.width() || y >= world.height() {
             return 0;
         }
-        self.tile_color(&palette, world, content, x, y) as i64
+        let team = host.building_team(x, y).unwrap_or(0);
+        self.tile_color(&palette, world, content, x, y, team) as i64
     }
 }

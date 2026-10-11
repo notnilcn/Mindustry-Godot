@@ -112,6 +112,21 @@ impl BlockPalette {
         }
     }
 
+    /// `ContentLoader.loadColors`: row 0 of `sprites/block_colors.png` holds
+    /// one packed `rgba8888` per block id; `0`/`255` (no colour) are skipped,
+    /// otherwise the colour becomes the opaque `mapColor` and `hasColor` is set.
+    pub fn apply_block_colors(&mut self, row: &[u32]) {
+        for (id, &color) in row.iter().enumerate().take(self.map_colors.len()) {
+            if color == 0 || color == 255 {
+                continue;
+            }
+            self.map_colors[id] = Some(color | 0xff);
+            if let Some(flag) = self.has_color.get_mut(id) {
+                *flag = true;
+            }
+        }
+    }
+
     /// `Block.size` (1 for unknown/air ids).
     pub fn block_size(&self, id: u16) -> i32 {
         self.get(&self.sizes, id).unwrap_or(1).max(1)
@@ -235,17 +250,17 @@ pub fn color_for(palette: &BlockPalette, wall: u16, floor: u16, overlay: u16, te
     palette.map_color(overlay)
 }
 
-/// Team color (`Team.<t>.color.rgba8888`); placeholder palette until plan 12
-/// owns `Team` (derelict gray + the six base-team hues, deterministic).
+/// Team color (`Team.<t>.color.rgba8888`, `game/Team.java` base teams;
+/// ids past `neoplastic` get a random HSV upstream and fall back to derelict).
 pub fn team_color(team: u8) -> u32 {
     match team {
-        0 => 0x4d4e58ff,
-        1 => 0x2a9df4ff, // sharded blue
-        2 => 0xe84c3dff, // crux red
-        3 => 0x9b59b6ff, // malis purple
-        4 => 0x2ecc71ff, // green
-        5 => 0x3498dbff, // blue
-        _ => 0xf1c40fff, // neoplastic yellow-ish
+        1 => 0xffd37fff, // sharded (`Pal.accent`)
+        2 => 0xf25555ff, // crux
+        3 => 0xa27ce5ff, // malis
+        4 => 0x54d67dff, // green
+        5 => 0x6c87fdff, // blue
+        6 => 0xe05438ff, // neoplastic
+        _ => 0x4d4e58ff, // derelict
     }
 }
 
@@ -608,6 +623,18 @@ pub fn decode_png(bytes: &[u8]) -> IoResult<PreviewImage> {
 mod tests {
     use super::*;
     use crate::content::test_support::test_registry;
+
+    #[test]
+    fn block_colors_row_overrides_map_color() {
+        let registry = test_registry();
+        let mut palette = BlockPalette::of(&registry);
+        let before = palette.map_color(1);
+        palette.apply_block_colors(&[0, 0x11223380, 255]);
+        assert_eq!(palette.map_color(1), 0x112233ff);
+        assert_ne!(before, 0x112233ff);
+        // `0`/`255` entries keep the registry colour.
+        assert_eq!(palette.map_color(0), BlockPalette::of(&registry).map_color(0));
+    }
 
     #[test]
     fn png_roundtrip_preserves_pixels() {

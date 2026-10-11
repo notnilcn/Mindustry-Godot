@@ -21,7 +21,11 @@ const INPUT_BUTTONS := [
 	{"icon": "map", "tooltip": "@planetmap", "dialog": "planet", "campaign_only": true},
 ]
 
-var _selected_category := 0
+## `-1` = pick `Category.distribution` on the next rail build (`currentCategory`
+## default, reset on `WorldLoadEvent`).
+var _selected_category := -1
+## Sim tick seen at the last reveal; a smaller tick means a new world loaded.
+var _last_tick := -1
 var _catalog: Dictionary = {}
 var _input_buttons: Array[Button] = []
 var _bar_campaign := false
@@ -140,6 +144,13 @@ func _on_hotkey(action: String) -> void:
 func _ensure_loaded() -> void:
 	if not is_visible_in_tree():
 		return
+	# `Events.on(WorldLoadEvent) -> currentCategory = Category.distribution`.
+	var host := get_node_or_null("/root/Spine/SimHost")
+	if host != null and host.has_method("get_tick"):
+		var tick := int(host.call("get_tick"))
+		if tick < _last_tick:
+			_selected_category = -1
+		_last_tick = tick
 	_load_catalog()
 
 
@@ -179,8 +190,12 @@ func _build_categories() -> void:
 	var list: Array = _catalog.get("categories", [])
 	if list.is_empty():
 		return
-	if _selected_category >= list.size():
+	if _selected_category < 0 or _selected_category >= list.size():
 		_selected_category = 0
+		for index in list.size():
+			if str((list[index] as Dictionary).get("name", "")) == "distribution":
+				_selected_category = index
+				break
 	# `ButtonGroup`: exactly the active category is checked (`rebuildCategory`).
 	var group := ButtonGroup.new()
 	for index in list.size():

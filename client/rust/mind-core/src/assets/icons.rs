@@ -82,6 +82,19 @@ impl Iconc {
         self.textures.get(name).map(String::as_str)
     }
 
+    /// Every `(code, textureName)` pair (`Fonts.loadContentIcons` input),
+    /// sorted by code so glyph registration is deterministic.
+    pub fn entries(&self) -> Vec<(u32, &str)> {
+        let mut out: Vec<(u32, &str)> = self
+            .by_code
+            .iter()
+            .filter_map(|(code, name)| self.texture(name).map(|tex| (*code, tex)))
+            .filter(|(_, tex)| !tex.is_empty())
+            .collect();
+        out.sort_unstable_by_key(|(code, _)| *code);
+        out
+    }
+
     /// `Fonts.getUnicodeStr(name)`: the char as a string.
     pub fn unicode_str(&self, name: &str) -> Option<String> {
         self.get(name).map(|ch| ch.to_string())
@@ -192,6 +205,10 @@ mod tests {
         assert_eq!(table.unicode_str("spawn").unwrap().chars().count(), 1);
         assert_eq!(table.all().chars().count(), 2);
         assert_eq!(table.get("missing"), None);
+        assert_eq!(
+            table.entries(),
+            vec![(63742, "block-deepwater-ui"), (63743, "block-spawn-ui")]
+        );
     }
 
     #[test]

@@ -91,6 +91,14 @@ impl INode for MindAssets {
         }
     }
 
+    fn enter_tree(&mut self) {
+        // At boot the autoloads and the main scene enter the tree in one
+        // top-down pass before any `_ready` runs, so `UiRoot._enter_tree`
+        // builds the theme (default font = `font.woff`) before `ready()`.
+        // Loading here keeps fonts/atlas available to every `_enter_tree`.
+        self.load_assets();
+    }
+
     fn ready(&mut self) {
         self.bootstrap();
     }
@@ -165,6 +173,8 @@ impl MindAssets {
         self.iconc = load_iconc(&self.assets_dir);
         self.locales = load_locales(&self.assets_dir);
         self.fonts = FontSet::load(&self.assets_dir);
+        self.fonts
+            .register_content_icons(&self.iconc, &self.index, &self.pages);
         self.audio = AudioRegistry::load(&self.assets_dir);
         self.loaded = true;
         true

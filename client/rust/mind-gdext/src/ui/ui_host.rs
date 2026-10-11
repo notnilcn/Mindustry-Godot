@@ -654,6 +654,18 @@ impl MindUi {
         }
     }
 
+    /// Reads one known checkbox setting (`Core.settings.getBool(key)` with the
+    /// row default; `false` for an unknown key). The HUD reads display toggles
+    /// such as `showperformance`/`fps` through this.
+    #[func]
+    pub fn settings_get_bool(&self, key: GString) -> bool {
+        let name = key.to_string();
+        match settings::all_rows().find(|row| row.key == name) {
+            Some(row) => self.settings.get_bool(&name, row.default_bool()),
+            None => false,
+        }
+    }
+
     /// Removes every key of one table, restoring the model defaults.
     #[func]
     pub fn settings_reset(&mut self, category: GString) -> bool {

@@ -136,6 +136,71 @@ pub fn format_icons(s: &str, iconc: &Iconc) -> String {
     if changed { buffer } else { s.to_owned() }
 }
 
+/// One run of [`markup_runs`]: text drawn in one colour (`None` = the
+/// caller's base colour).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MarkupRun {
+    /// Run text (icons already substituted as their glyph chars).
+    pub text: String,
+    /// `0xRRGGBBAA`, or `None` for the base colour.
+    pub color: Option<u32>,
+}
+
+/// Splits Arc markup into coloured runs for direct `draw_string` callers
+/// (`Font.draw` with `markupEnabled`, e.g. `WorldLabel`): `:name:` tokens go
+/// through [`format_icons`], `[tag]` pushes a colour, `[]` pops, `[[` is a
+/// literal bracket and unknown tags stay literal.
+pub fn markup_runs(s: &str, iconc: &Iconc) -> Vec<MarkupRun> {
+    let text = format_icons(s, iconc);
+    let chars: Vec<char> = text.chars().collect();
+    let mut runs: Vec<MarkupRun> = Vec::new();
+    let mut stack: Vec<Option<u32>> = vec![None];
+    let mut current = String::new();
+    let flush = |runs: &mut Vec<MarkupRun>, current: &mut String, color: Option<u32>| {
+        if !current.is_empty() {
+            runs.push(MarkupRun {
+                text: std::mem::take(current),
+                color,
+            });
+        }
+    };
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '[' {
+            if chars.get(i + 1) == Some(&'[') {
+                current.push('[');
+                i += 2;
+                continue;
+            }
+            if let Some(end) = chars[i + 1..].iter().position(|&ch| ch == ']') {
+                let tag: String = chars[i + 1..i + 1 + end].iter().collect();
+                let top = *stack.last().unwrap_or(&None);
+                if tag.is_empty() {
+                    flush(&mut runs, &mut current, top);
+                    stack.pop();
+                    if stack.is_empty() {
+                        stack.push(None);
+                    }
+                    i += end + 2;
+                    continue;
+                }
+                if let Some(color) = color_tag(&tag).or_else(|| parse_color_tag(&tag)) {
+                    flush(&mut runs, &mut current, top);
+                    stack.push(Some(color));
+                    i += end + 2;
+                    continue;
+                }
+            }
+        }
+        current.push(c);
+        i += 1;
+    }
+    let top = *stack.last().unwrap_or(&None);
+    flush(&mut runs, &mut current, top);
+    runs
+}
+
 /// `UI.formatTime`: `0:ss`, `m:ss` or `h:mm:ss` from a tick count.
 pub fn format_time(ticks: f32) -> String {
     let seconds = (ticks / 60.0) as i64;
@@ -364,6 +429,21 @@ pub fn normalize_pua(s: &str, iconc: &Iconc) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn markup_runs_split_colors_and_icons() {
+        let iconc = Iconc::from_properties("63000=ore-copper|block-ore-copper-ui\n");
+        let runs = markup_runs("Move near the :ore-copper: [accent]copper ore[] on [[x]", &iconc);
+        let icon = char::from_u32(63000).unwrap();
+        assert_eq!(runs.len(), 3);
+        assert_eq!(runs[0].text, format!("Move near the {icon} "));
+        assert_eq!(runs[0].color, None);
+        assert_eq!(runs[1].text, "copper ore");
+        assert_eq!(runs[1].color, color_tag("accent"));
+        assert_eq!(runs[2].text, " on [x]");
+        assert_eq!(runs[2].color, None);
+        assert_eq!(markup_runs("[nope] 1:30", &iconc)[0].text, "[nope] 1:30");
+    }
 
     fn iconc() -> Iconc {
         Iconc::from_properties("63743=spawn|block-spawn-ui\n63742=copper|item-copper-ui\n")
