@@ -83,6 +83,12 @@ def main() -> int:
                     break
             if data is None:
                 data = _find_png(raw)
+            src = (raw.get("structuredContent") or {}).get("path")
+            if data is None and src:
+                import shutil
+                shutil.copyfile(src, a.screenshot)
+                print(json.dumps({"ok": True, "screenshot": a.screenshot}))
+                return 0
             if data is None:
                 print(json.dumps({"ok": False, "error": "no image in screenshot result", "raw": str(raw)[:2000]}))
                 return 1
