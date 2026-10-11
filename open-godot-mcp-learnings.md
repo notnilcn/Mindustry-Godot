@@ -2113,3 +2113,26 @@ healthy bridge afterwards. Run: the PAR-0066 verification session.
   `parity/golden_manifest.json` in the same commit (and keep the manifest's `\u00a7` escapes intact
   when rewriting - a pretty-print rewrite unescapes them).
 - Run: runs/20261011-192234-PAR-0139/.
+- Bullet (2026-10-11, PAR-0139 round 2): stale game processes accumulate across `tools/parity-session.sh --stop` + restart cycles: after ~6 restarts, TEN orphaned `godot --scene res://scenes/game.tscn` processes (editors long dead, `--editor-pid <dead>`) were still running at ~90-100% CPU each, starving the live editor/game (sim pumped ~2 ticks/s) and the bridge (`godot_health` BRIDGE_NOT_CONNECTED while the editor process was alive). Cleanup: list `ps aux | grep scenes/game.tscn | grep -v grep` and kill every pid whose `--editor-pid` arg is not the current `parity-session/editor.pid` (`for pid ...; tr "\0" " " < /proc/$pid/cmdline | grep -o -- "--editor-pid [0-9]*"`). Do this before long in-engine runs.
+
+- Bullet (2026-10-11, PAR-0139 round 2): `Error writing region "meta"` = silent sector-save failures.
+  The save writer caps a single wire string at `u16::MAX` bytes; the merged campaign rules (the
+  map's 256-team `teams` block) serialized to 152,950 bytes because the port's `TeamRule` wrote all
+  23 fields per entry (upstream `JsonIO` runs Arc `Json` with `usePrototypes=false`). Fix: per-field
+  `skip_serializing_if` (defaults omitted -> `{"teams":{"0":{}...}}`, 11.8 KB). Because nothing read
+  `Sim::take_io_responses`, the failure was invisible: `MindSimHost.take_io_responses_json` now
+  drains `[{kind,path,as_map?,error?}]`. Check it after `request_save`.
+- Bullet (2026-10-11, PAR-0139 round 2): a system-only view of the ECS world hides `Sim`-private
+  state. `BlockCounter` lived on `SimRuntime` (a `Sim` field), so `team_ai_system` could not read
+  it and silently skipped the base-builder half (`world.get_resource::<BlockCounter>()` = None).
+  Moved it to a world resource (place/break/checksum/reset updated). Same trap class as the
+  earlier "Rust-only #[func]" notes: before wiring a system, check where each input actually lives.
+- Bullet (2026-10-11, PAR-0139 round 2): staging rules a campaign map cannot carry (`buildAi`) is
+  done offline on the sector save: patch the MGRS meta `rules` string
+  (`/tmp/opencode/patch_sector_rules.py`), and to prove an AI plan->placement chain deterministically
+  seed team plans into the entities region (`/tmp/opencode/seed_save_plans.py <save> <team> x,y,block...`).
+  Natural BaseBuilderAI placement runs at the upstream 1% empty-chance per attempt, so seeded plans
+  are the practical evidence path; an errored eval can trip break-on-error and pin the frame loop
+  (`godot_debugger sessions` -> `paused:true`; recover with stop+play) - an evaled `Dictionary`
+  key miss counts as an error, so guard `has()`/`get()` in evals.
+- Run: runs/20261011-203001-PAR-0139-r2/.
