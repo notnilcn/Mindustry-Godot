@@ -210,6 +210,8 @@ block-arkyic-vent-full
 block-arkyic-vent-ui
 block-arkyic-wall-full
 block-arkyic-wall-ui
+block-armored-conveyor-full
+block-armored-conveyor-ui
 block-armored-duct-full
 block-armored-duct-ui
 block-atmospheric-concentrator-full
@@ -590,6 +592,8 @@ block-plastanium-compressor-ui
 block-plastanium-conveyor-ui
 block-plastanium-wall-large-ui
 block-plastanium-wall-ui
+block-plated-conduit-full
+block-plated-conduit-ui
 block-pneumatic-drill-full
 block-pneumatic-drill-ui
 block-pooled-cryofluid-ui
@@ -637,6 +641,8 @@ block-regolith-wall-full
 block-regolith-wall-ui
 block-reinforced-bridge-conduit-full
 block-reinforced-bridge-conduit-ui
+block-reinforced-conduit-full
+block-reinforced-conduit-ui
 block-reinforced-container-full
 block-reinforced-container-ui
 block-reinforced-liquid-container-full
