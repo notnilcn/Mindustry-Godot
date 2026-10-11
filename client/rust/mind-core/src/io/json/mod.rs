@@ -98,6 +98,19 @@ pub fn quote_bare_keys(text: &str) -> String {
                 next += 1;
             }
             let key = next < chars.len() && chars[next] == ':';
+            // Arc `Json` writes non-finite floats as bare literals; strict JSON
+            // has no `Infinity`, and the port's JSON model stores Java's
+            // `Float.POSITIVE_INFINITY` as `NEVER_F32` (`i32::MAX as f32`, see
+            // `io::json::rules::NEVER_F32`) - the legacy import maps it there.
+            // (`NaN` has no sentinel; none of the shipped maps use it.)
+            if !key && (token == "Infinity" || token == "-Infinity") {
+                out.push_str(if token == "Infinity" {
+                    "2147483648.0"
+                } else {
+                    "-2147483648.0"
+                });
+                continue;
+            }
             if key || !is_literal(&token) {
                 out.push('"');
                 out.push_str(&token);
@@ -239,5 +252,24 @@ mod tests {
         assert_eq!(parsed["neg"], serde_json::json!(-2));
         assert_eq!(parsed["arr"][4]["a"], Value::String("b".to_owned()));
         assert_eq!(parsed["quoted"], Value::String("a:b".to_owned()));
+    }
+
+    #[test]
+    fn arc_json_bare_infinity_maps_to_never_f32() {
+        // Arc `Json` writes non-finite floats bare; strict JSON has no
+        // `Infinity` (PAR-0155: the authored campaign maps carry
+        // `scaling:Infinity` rules).
+        let arc = r#"{scaling:Infinity,neg:-Infinity,finite:1.5}"#;
+        let strict = super::quote_bare_keys(arc);
+        let parsed: Value = serde_json::from_str(&strict).expect("strict json");
+        assert_eq!(
+            parsed["scaling"].as_f64(),
+            Some(crate::io::json::rules::NEVER_F32 as f64)
+        );
+        assert_eq!(
+            parsed["neg"].as_f64(),
+            Some(-(crate::io::json::rules::NEVER_F32 as f64))
+        );
+        assert_eq!(parsed["finite"].as_f64(), Some(1.5));
     }
 }
