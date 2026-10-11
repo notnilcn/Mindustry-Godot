@@ -724,7 +724,27 @@ func _sector_action_pressed(planet_name: String, sector_id: int, mode: String) -
 	if mode == "resume" or mode == "go":
 		_launch(planet_name, sector_id, -1, true)
 		return
+	# `PlanetDialog.playSelected` look mode: a launch with no base and no launch
+	# candidate is a FREE launch - `universe.clearLoadoutInfo()` +
+	# `control.playSector(sector)`, no dialog (PlanetDialog.java:1394-1403). The
+	# loadout dialog only appears when a launcher sector exists.
+	if _find_launcher(planet_name).is_empty():
+		_launch(planet_name, sector_id)
+		return
 	_open_launch_loadout(planet_name, sector_id)
+
+
+## `PlanetDialog.findLauncher` stand-in: the sector a launch would originate
+## from, when one exists. Java's `PlanetGenerator.findLaunchCandidate` also
+## requires range and loadout items; the port's campaign model has neither yet
+## (PAR-0082/0083), so a has-base, non-attacked sector on the same planet is
+## the approximation this item records.
+func _find_launcher(planet_name: String) -> Dictionary:
+	for sector_variant in _planet_sectors(planet_name):
+		var sector: Dictionary = sector_variant
+		if bool(sector.get("has_base", false)) and not bool(sector.get("attacked", false)):
+			return sector
+	return {}
 
 
 # --- Planet view glue ---------------------------------------------------------
