@@ -2152,6 +2152,9 @@ fn merge_map_rules(session: &mut Rules, map: &Rules, has_preset: bool) {
     // 17-objective graph drives the objective HUD (`gz.*`). Dropping these
     // launched the tutorial sector as an always-wave sector (PAR-0028/PAR-0037).
     session.wave_timer = map.wave_timer;
+    // `waveSending:false` (the tutorial map) disables the HUD's skip-wave
+    // button (`canSkipWave`) - PAR-0030.
+    session.wave_sending = map.wave_sending;
     session.objectives = map.objectives.clone();
     session.objective_flags = map.objective_flags.clone();
     if has_preset {
@@ -2291,6 +2294,7 @@ mod tests {
         };
         let map = Rules {
             wave_timer: false,
+            wave_sending: false,
             objectives,
             objective_flags: std::iter::once("spawnWave".to_owned()).collect(),
             ..Rules::default()
@@ -2300,6 +2304,10 @@ mod tests {
         merge_map_rules(&mut session, &map, true);
 
         assert!(!session.wave_timer, "map waveTimer:false must win");
+        assert!(
+            !session.wave_sending,
+            "map waveSending:false must win (canSkipWave gate - PAR-0030)"
+        );
         assert_eq!(session.objectives.len(), 1);
         assert!(session.objective_flags.contains("spawnWave"));
     }

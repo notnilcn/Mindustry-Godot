@@ -189,13 +189,19 @@ func _set_placeholder() -> void:
 		_skip_button.visible = false
 
 
-## `HudFragment.canSkipWave` (client half): waves enabled and no enemies left.
+## `HudFragment.canSkipWave` (client half): waves enabled, wave sending on,
+## no enemies left, not mid-spawn (`state.rules.waveSending` is false in the
+## tutorial map, so the skip stays hidden there - PAR-0030).
 func _refresh_skip_button() -> void:
 	if _skip_button == null:
 		return
 	var waves := bool(_hud.get("waves"))
+	var sending := bool(_hud.get("wave_sending"))
+	var spawning := bool(_hud.get("is_spawning"))
 	var enemies := int(_hud.get("enemies"))
-	_skip_button.visible = waves and enemies <= 0 and bool(_hud.get("has_core"))
+	_skip_button.visible = (
+		waves and sending and not spawning and enemies <= 0 and bool(_hud.get("has_core"))
+	)
 
 
 ## `Logic.skipWave` via the existing campaign facade (`run_wave`).

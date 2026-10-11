@@ -89,6 +89,13 @@ pub struct MindHud {
     /// `state.rules.waveTimer`.
     #[var]
     wave_timer: bool,
+    /// `state.rules.waveSending` (`canSkipWave` gate; false in the tutorial
+    /// map, hiding the skip-wave button - PAR-0030).
+    #[var]
+    wave_sending: bool,
+    /// `PlaySession.is_spawning` (`canSkipWave`'s `!spawner.isSpawning()`).
+    #[var]
+    is_spawning: bool,
     /// `state.isCampaign()`.
     #[var]
     campaign: bool,
@@ -157,6 +164,8 @@ impl INode for MindHud {
             win_wave: 0,
             waves: false,
             wave_timer: false,
+            wave_sending: false,
+            is_spawning: false,
             campaign: false,
             game_over: false,
             won: false,
@@ -350,6 +359,8 @@ impl MindHud {
         let enemies = dict_i64(&state, "enemies") as i32;
         let wavetime = dict_f32(&state, "wavetime");
         let wave_timer = dict_bool(&state, "waveTimer");
+        let wave_sending = dict_bool(&state, "waveSending");
+        let is_spawning = dict_bool(&state, "isSpawning");
         let waves = dict_bool(&state, "waves");
         let game_over = dict_bool(&state, "gameOver");
         let after_game_over = dict_bool(&state, "afterGameOver");
@@ -410,6 +421,8 @@ impl MindHud {
         self.win_wave = win_wave;
         self.waves = waves;
         self.wave_timer = wave_timer;
+        self.wave_sending = wave_sending;
+        self.is_spawning = is_spawning;
         self.game_over = game_over;
         self.won = won;
         self.has_core = has_core;

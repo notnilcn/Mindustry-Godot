@@ -1184,4 +1184,19 @@ mod tests {
         assert_eq!(back.objectives, rules.objectives);
         assert_eq!(back.objectives.get(1).unwrap().common().parents, vec![0]);
     }
+
+    #[test]
+    fn wave_sending_parses_from_legacy_bare_json() {
+        // PAR-0030: the groundZero map's rules tag is Arc-style bare JSON;
+        // `waveSending:false` must reach `Rules.wave_sending` so the HUD's
+        // `canSkipWave` gate stays closed in the tutorial.
+        let text = crate::io::json::quote_bare_keys(
+            "{teams:{},waveTimer:false,waveSending:false,waves:true,winWave:10}",
+        );
+        let rules: Rules = crate::io::json::JsonIo::read(&text).unwrap();
+        assert!(!rules.wave_sending, "waveSending:false must parse");
+        assert!(!rules.wave_timer);
+        assert!(rules.waves);
+        assert_eq!(rules.win_wave, 10);
+    }
 }
