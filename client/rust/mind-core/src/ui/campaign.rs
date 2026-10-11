@@ -117,8 +117,12 @@ pub struct SectorView {
     pub planet: String,
     /// Preset content name, when the sector is authored.
     pub preset: Option<String>,
-    /// Display name (preset name or `sector-<planet>-<id>` fallback).
+    /// Display name (`Sector.name()`: `info.name`, preset, single-sector
+    /// planet name, else the grid index).
     pub name: String,
+    /// The player renamed the sector (`info.name` set): the dialog shows
+    /// `name` verbatim instead of the localized preset name.
+    pub named: bool,
     /// Preset difficulty (0-10; `-1` when unassigned).
     pub difficulty: f32,
     /// Aggregated threat (0-1).
@@ -168,6 +172,9 @@ pub struct SectorStatsView {
     pub import: Vec<(String, i32)>,
     /// `(item, amount)` stored rows (`sector.items()` off-play: the record pool).
     pub stored: Vec<(String, i32)>,
+    /// `sector.info.resources` content names (`@sectors.resources` icon row;
+    /// `Sector.loadInfo` folds the legacy `water` block into the liquid).
+    pub resources: Vec<String>,
 }
 
 /// One tech-tree node (`ResearchDialog`).
@@ -575,11 +582,27 @@ fn planet_view(registry: &ContentRegistry, planet: &Planet) -> PlanetView {
 
 /// Builds one sector marker.
 fn sector_view(planet: &Planet, sector: &Sector) -> SectorView {
-    let name = sector
-        .preset_name
+    // `Sector.name()`: a player-set `info.name` wins, then the preset name
+    // (localized by the dialog), then the planet name for single-sector
+    // planets, then the bare grid index (`id + ""`).
+    let info_name = sector
+        .info
+        .info
+        .name
         .clone()
-        .unwrap_or_else(|| format!("{}-sector-{}", planet.name, sector.id));
+        .filter(|name| !name.is_empty());
+    let named = info_name.is_some();
+    let name = info_name
+        .or_else(|| sector.preset_name.clone())
+        .unwrap_or_else(|| {
+            if planet.sectors.len() == 1 {
+                planet.name.clone()
+            } else {
+                sector.id.to_string()
+            }
+        });
     SectorView {
+        named,
         id: sector.id,
         planet: planet.name.clone(),
         preset: sector.preset_name.clone(),
@@ -631,6 +654,15 @@ fn sector_stats_view(sector: &Sector) -> SectorStatsView {
             .filter(|(_, amount)| **amount > 0)
             .map(|(name, amount)| (name.clone(), *amount))
             .collect(),
+        resources: {
+            let mut resources: Vec<String> = Vec::new();
+            for name in &info.resources {
+                if !resources.contains(name) {
+                    resources.push(name.clone());
+                }
+            }
+            resources
+        },
     }
 }
 

@@ -37,6 +37,10 @@ var _chooser_active := false
 var _footer_entries: Array[Button] = []
 ## Planet whose campaign-complete screen was already announced (control flow).
 var _complete_announced := ""
+## `PlanetDialog.sectorsShown` / `searchText` (top-right sector list).
+var _sectors_shown := false
+var _sector_search := ""
+var _sector_list: VBoxContainer = null
 ## Stage layers hidden while the planet page covers the screen (PAR-0146/0147):
 ## node path -> visibility captured when the page first covered the stage, so
 ## closing it restores exactly what was showing before (the live game's HUD +
@@ -80,6 +84,7 @@ func shown() -> void:
 
 
 func hidden() -> void:
+	_remove_sector_list()
 	_set_planet_view_active(false)
 	# Back/ESC returns to whatever the page covered (the running sector or the
 	# menu), PAR-0147.
@@ -200,6 +205,7 @@ func _apply_full_dialog_margins() -> void:
 ## block (cards + caption) is vertically centered in the dialog body like the
 ## Java BaseDialog's centered `cont` table (cards at y=120 at 648 px height).
 func _show_select() -> void:
+	_remove_sector_list()
 	set_title_key("@campaign.select")
 	_clear_root()
 	_set_planet_view_active(false)
@@ -544,6 +550,7 @@ func _show_planet(planet_name: String, select_default := true) -> void:
 	rail.custom_minimum_size.x = 208.0
 	_root.add(rail).pad(0).set_align(0)
 	_build_rail(rail, planet_name)
+	_build_sector_list(planet_name)
 
 	var selected := _find_sector(planet_name, _selected_sector)
 	if selected.is_empty() and select_default:
@@ -620,6 +627,152 @@ func _maybe_show_campaign_complete() -> void:
 		return
 	_complete_announced = planet
 	ui.call("open_dialog", "campaign_complete", JSON.stringify(complete))
+
+
+## `PlanetDialog.rebuildExpand`: when the planet has a based sector, a
+## top-right `@sectorlist` toggle (with the `sectorlist.attacked` count) over a
+## collapsible, searchable list of the based sectors (`rebuildList`: attacked
+## first, then most played).
+func _build_sector_list(planet_name: String) -> void:
+	_remove_sector_list()
+	var based: Array = []
+	var attacked := 0
+	for sector_variant in _planet_sectors(planet_name):
+		var sector: Dictionary = sector_variant
+		if bool(sector.get("attacked", false)):
+			attacked += 1
+		if bool(sector.get("has_base", false)):
+			based.append(sector)
+	if based.is_empty():
+		return
+	based.sort_custom(_sector_list_before)
+	# code-instantiated: rebuilt with the planet view; content is the live
+	# based-sector set.
+	_sector_list = VBoxContainer.new()
+	_sector_list.name = "SectorList"
+	_sector_list.add_theme_constant_override("separation", 0)
+	_sector_list.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	_sector_list.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_sector_list.offset_left = -295.0
+	_sector_list.offset_right = -5.0
+	_sector_list.offset_top = 3.0
+	_sector_list.custom_minimum_size = Vector2(290.0, 0.0)
+	add_child(_sector_list)
+
+	var toggle := Button.new()
+	toggle.toggle_mode = true
+	toggle.button_pressed = _sectors_shown
+	toggle.custom_minimum_size = Vector2(290.0, 60.0)
+	_apply_pane_button(toggle, OUTLINE_GRAY)
+	var raw := _t("@sectorlist")
+	if attacked > 0:
+		var assets := MindWidgets.assets()
+		var count := "[red]%d[]" % attacked
+		var line := str(assets.call("bundle_format", "sectorlist.attacked", PackedStringArray([count]))) \
+			if assets != null else count
+		raw += "\n[red]\u26a0[lightgray] " + line
+	var row := HBoxContainer.new()
+	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	row.offset_left = 7.0
+	row.offset_right = -7.0
+	row.add_theme_constant_override("separation", 8)
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	toggle.add_child(row)
+	row.add_child(MindWidgets.glyph("up-open" if _sectors_shown else "down-open", 22))
+	var caption := MindWidgets.label(MindWidgets.markup(raw))
+	caption.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	caption.fit_content = true
+	caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	caption.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	caption.autowrap_mode = TextServer.AUTOWRAP_OFF
+	caption.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(caption)
+	toggle.pressed.connect(func() -> void:
+		_sectors_shown = not _sectors_shown
+		_build_sector_list(_selected_planet))
+	_sector_list.add_child(toggle)
+	if not _sectors_shown:
+		return
+
+	var panel := PanelContainer.new()
+	panel.add_theme_stylebox_override(
+		"panel", _pane_box(Color(0.0, 0.0, 0.0, 0.8), Color(0.0, 0.0, 0.0, 0.0), 0.0, 0.0)
+	)
+	_sector_list.add_child(panel)
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 3)
+	panel.add_child(column)
+	var search_row := HBoxContainer.new()
+	search_row.add_child(MindWidgets.glyph("zoom", 22))
+	var field := LineEdit.new()
+	field.text = _sector_search
+	field.custom_minimum_size = Vector2(0.0, 50.0)
+	field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	search_row.add_child(field)
+	column.add_child(search_row)
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.custom_minimum_size = Vector2(0.0, 320.0)
+	column.add_child(scroll)
+	var entries := VBoxContainer.new()
+	entries.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(entries)
+	field.text_changed.connect(func(text: String) -> void:
+		_sector_search = text
+		_fill_sector_entries(entries, based))
+	_fill_sector_entries(entries, based)
+
+
+## `rebuildList` order: attacked sectors first, then by save playtime (desc).
+func _sector_list_before(a: Dictionary, b: Dictionary) -> bool:
+	var attacked_a := bool(a.get("attacked", false))
+	var attacked_b := bool(b.get("attacked", false))
+	if attacked_a != attacked_b:
+		return attacked_a
+	var stats_a: Dictionary = a.get("stats", {})
+	var stats_b: Dictionary = b.get("stats", {})
+	return int(stats_a.get("playtime_ms", 0)) > int(stats_b.get("playtime_ms", 0))
+
+
+## `rebuildList.readd`: one `Styles.underlineb` row per based sector matching the
+## search text (warning glyph when attacked, else the preset icon).
+func _fill_sector_entries(entries: VBoxContainer, based: Array) -> void:
+	for child in entries.get_children():
+		child.queue_free()
+	var needle := _sector_search.to_lower()
+	for sector_variant in based:
+		var sector: Dictionary = sector_variant
+		var title := _localized_sector(sector)
+		if not needle.is_empty() and not title.to_lower().contains(needle):
+			continue
+		var entry := Button.new()
+		entry.toggle_mode = true
+		entry.button_pressed = int(sector.get("id", -1)) == _selected_sector
+		entry.custom_minimum_size = Vector2(0.0, 40.0)
+		_apply_pane_button(entry, OUTLINE_GRAY, 3.0)
+		var icon: Control = null
+		var preset := str(sector.get("preset", ""))
+		if bool(sector.get("attacked", false)):
+			icon = MindWidgets.glyph("warn", 18, MindStyles.ACCENT)
+		elif not preset.is_empty():
+			var image := MindWidgets.image("sector-%s" % preset)
+			image.custom_minimum_size = Vector2(20.0, 20.0)
+			image.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			icon = image
+		build_button_content(entry, icon, title)
+		var sector_id := int(sector.get("id", -1))
+		entry.pressed.connect(func() -> void:
+			_selected_sector = sector_id
+			_show_planet(_selected_planet))
+		entries.add_child(entry)
+	if entries.get_child_count() == 0:
+		entries.add_child(MindWidgets.label(_tm("@none.found")))
+
+
+func _remove_sector_list() -> void:
+	if _sector_list != null:
+		_sector_list.queue_free()
+		_sector_list = null
 
 
 ## Expands between the edge buttons and the centered sector panel
@@ -750,17 +903,10 @@ func _build_sector_panel(sector: Dictionary) -> Control:
 	divider.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	column.add_child(divider)
 
-	for state_key in _sector_state_labels(sector):
-		# Markup-bearing bundle strings (`[scarlet]Under attack!`, the
-		# `:warning:` lockdown briefing) must go through the BBCode translation,
-		# not the raw bundle (PAR-0016).
-		var label := MindWidgets.label(_tm(state_key))
-		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		column.add_child(label)
-
-	if bool(sector.get("has_base", false)):
-		_build_sector_stats(column, sector)
-	else:
+	# `updateSelected` order: threat (base-less only), the state line, the
+	# `@sectors.resources` icon row, then the `@stats` button (`showStats`).
+	var has_base := bool(sector.get("has_base", false))
+	if not has_base:
 		var threat := str(sector.get("threat_band", "low"))
 		var threat_label := MindWidgets.label(
 			"%s %s" % [_t("@sectors.threat"), _t("@threat.%s" % threat)]
@@ -768,6 +914,43 @@ func _build_sector_panel(sector: Dictionary) -> Control:
 		threat_label.custom_minimum_size = Vector2(0.0, 26.0)
 		threat_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		column.add_child(threat_label)
+
+	for state_key in _sector_state_labels(sector):
+		# Markup-bearing bundle strings (`[scarlet]Under attack!`) must go
+		# through the BBCode translation, not the raw bundle (PAR-0016).
+		var label := MindWidgets.label(_tm(state_key))
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		column.add_child(label)
+
+	var stats: Dictionary = sector.get("stats", {})
+	var resources: Array = stats.get("resources", [])
+	if bool(sector.get("has_save", false)) and not resources.is_empty():
+		var resource_row := HBoxContainer.new()
+		resource_row.add_theme_constant_override("separation", 3)
+		var spacer := Control.new()
+		spacer.custom_minimum_size = Vector2(7.0, 0.0)
+		resource_row.add_child(spacer)
+		resource_row.add_child(MindWidgets.label(_t("@sectors.resources")))
+		for resource in resources:
+			var texture := _content_icon(str(resource))
+			if texture == null:
+				continue
+			var image := TextureRect.new()
+			image.texture = texture
+			image.custom_minimum_size = Vector2(20.0, 20.0)
+			image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			image.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			resource_row.add_child(image)
+		column.add_child(resource_row)
+
+	if has_base:
+		var stats_button := MindWidgets.button("")
+		stats_button.theme_type_variation = "cleart"
+		stats_button.custom_minimum_size = Vector2(0.0, 40.0)
+		build_button_content(stats_button, MindWidgets.glyph("info", 20), _t("@stats"))
+		stats_button.pressed.connect(func() -> void: _show_sector_stats(sector))
+		column.add_child(stats_button)
 
 	var action := _sector_action(sector)
 	var launch := MindWidgets.button("")
@@ -799,8 +982,6 @@ func _sector_state_labels(sector: Dictionary) -> PackedStringArray:
 	var out := PackedStringArray()
 	if bool(sector.get("attacked", false)):
 		out.append("@sectors.underattack")
-		if bool(sector.get("frozen", false)):
-			out.append("@sector.lockdown")
 	elif bool(sector.get("has_base", false)) and bool(sector.get("has_enemy_base", false)):
 		out.append("@sectors.vulnerable")
 	elif not bool(sector.get("has_base", false)) and bool(sector.get("has_enemy_base", false)):
@@ -808,32 +989,46 @@ func _sector_state_labels(sector: Dictionary) -> PackedStringArray:
 	return out
 
 
-## `PlanetDialog.showStats` rows, rendered inline when the live view carries a
-## `stats` dictionary: playtime/attempts/wave/threat plus production, export,
-## import and stored items.
-func _build_sector_stats(column: VBoxContainer, sector: Dictionary) -> void:
+## `PlanetDialog.showStats`: the sector's attempts/wave/threat, resources,
+## lockdown notice and production/export/import/stored rows, shown through the
+## `full_text` dialog titled with the sector name.
+func _show_sector_stats(sector: Dictionary) -> void:
 	var stats: Dictionary = sector.get("stats", {})
-	var threat := str(sector.get("threat_band", "low"))
-	column.add_child(
-		MindWidgets.label("%s %s" % [_t("@sectors.threat"), _t("@threat.%s" % threat)])
-	)
-	if stats.is_empty():
-		return
+	var lines := PackedStringArray()
 	if int(stats.get("playtime_ms", 0)) > 0:
-		column.add_child(
-			MindWidgets.label("%s %s" % [_t("@sectors.time"), format_time_ms(int(stats.get("playtime_ms", 0)))])
-		)
+		lines.append("%s [color=#ffd37f]%s[/color]" % [_t("@sectors.time"), format_time_ms(int(stats.get("playtime_ms", 0)))])
 	if int(stats.get("attempts", 0)) > 0:
-		column.add_child(MindWidgets.label("%s %d" % [_t("@sectors.attempts"), int(stats.get("attempts", 0))]))
+		lines.append("%s [color=#ffd37f]%d[/color]" % [_t("@sectors.attempts"), int(stats.get("attempts", 0))])
 	if int(stats.get("wave", 0)) > 0:
-		column.add_child(MindWidgets.label("%s %d" % [_t("@sectors.wave"), int(stats.get("wave", 0))]))
+		lines.append("%s [color=#ffd37f]%d[/color]" % [_t("@sectors.wave"), int(stats.get("wave", 0))])
+	if bool(sector.get("attacked", false)) or not bool(sector.get("has_base", false)):
+		var threat := str(sector.get("threat_band", "low"))
+		lines.append("%s [color=#ffd37f]%s[/color]" % [_t("@sectors.threat"), _t("@threat.%s" % threat)])
+	if bool(sector.get("frozen", false)):
+		lines.append(_tm("@sector.lockdown"))
 	for key in ["production", "export", "import"]:
 		var line := _stat_line("@sectors.%s" % key, stats.get(key, []))
 		if not line.is_empty():
-			column.add_child(MindWidgets.label(line))
+			lines.append(line)
 	var stored := _stat_line("@sectors.stored", stats.get("stored", []))
 	if not stored.is_empty():
-		column.add_child(MindWidgets.label(stored))
+		lines.append(stored)
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null:
+		ui.call(
+			"open_dialog", "full_text",
+			JSON.stringify({"title": _localized_sector(sector), "text": "\n".join(lines)})
+		)
+
+
+## `UnlockableContent.uiIcon` for a resource name (`item-<name>-ui`, then
+## `liquid-<name>-ui`).
+func _content_icon(content_name: String) -> Texture2D:
+	for prefix in ["item", "liquid", "block"]:
+		var texture := MindWidgets.icon_texture("%s-%s-ui" % [prefix, content_name])
+		if texture != null:
+			return texture
+	return null
 
 
 ## `label item amount` line for a `[[name, value]]` stats list ("" when empty).
@@ -1066,6 +1261,8 @@ func _update_hover(view: PlanetView, point: Vector2) -> void:
 func _over_ui(point: Vector2) -> bool:
 	if _root != null and _root.get_global_rect().has_point(point):
 		return true
+	if _sector_list != null and _sector_list.get_global_rect().has_point(point):
+		return true
 	return buttons != null and buttons.get_global_rect().has_point(point)
 
 
@@ -1082,6 +1279,8 @@ func _localized_planet(planet: Dictionary) -> String:
 
 ## Localized sector label (`sector.<preset>.name`).
 func _localized_sector(sector: Dictionary) -> String:
+	if bool(sector.get("named", false)):
+		return str(sector.get("name", ""))
 	var preset := str(sector.get("preset", ""))
 	if not preset.is_empty():
 		var key := "sector.%s.name" % preset
