@@ -20,6 +20,16 @@ pub const MAX_BLOCK_SIZE: i32 = 16;
 /// Environment override for the data directory (`Vars` parity, OD-R9).
 pub const DATA_DIR_ENV: &str = "MINDUSTRY_GODOT_DATA_DIR";
 
+/// Host-installed data root (the engine's `user://`), so every facade shares
+/// upstream's single `Core.settings.getDataDirectory()`.
+static DATA_DIR_OVERRIDE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Pins [`default_data_dir`] for this process (first call wins); the
+/// [`DATA_DIR_ENV`] variable still takes precedence.
+pub fn set_default_data_dir(dir: impl Into<PathBuf>) {
+    let _ = DATA_DIR_OVERRIDE.set(dir.into());
+}
+
 /// Minimal configuration carried by P0 hosts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MindConfig {
@@ -56,12 +66,16 @@ impl MindConfig {
 
 /// Resolves the default data directory.
 ///
-/// Order: `MINDUSTRY_GODOT_DATA_DIR`, then `$XDG_DATA_HOME/Mindustry-Godot`,
+/// Order: `MINDUSTRY_GODOT_DATA_DIR`, then the host override ([`set_default_data_dir`]),
+/// then `$XDG_DATA_HOME/Mindustry-Godot`,
 /// then `$HOME/.local/share/Mindustry-Godot` (Linux), then the current
 /// directory as a last resort.
 pub fn default_data_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os(DATA_DIR_ENV) {
         return PathBuf::from(dir);
+    }
+    if let Some(dir) = DATA_DIR_OVERRIDE.get() {
+        return dir.clone();
     }
     if let Some(xdg) = std::env::var_os("XDG_DATA_HOME") {
         return PathBuf::from(xdg).join(APP_NAME);

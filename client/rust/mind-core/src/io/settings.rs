@@ -430,7 +430,8 @@ pub fn read_settings(bytes: &[u8]) -> Result<IndexMap<String, SettingValue>, IoE
         return Err(IoError::UnexpectedEof);
     }
     if bytes[..4] != SETTINGS_MAGIC {
-        return Err(IoError::corrupt("bad settings magic"));
+        // A Java `settings.bin` (Game Data import or a copied profile).
+        return read_arc_settings(bytes);
     }
     let version = u16::from_be_bytes([bytes[4], bytes[5]]);
     if version != SETTINGS_VERSION {
@@ -478,10 +479,114 @@ pub fn read_settings(bytes: &[u8]) -> Result<IndexMap<String, SettingValue>, IoE
     Ok(map)
 }
 
+/// Parses an upstream Arc `settings.bin` (`Settings.loadValues`): optional
+/// zlib wrapper, `i32` count, then `readUTF` key + type byte + payload with
+/// Arc's tags (bool 0, int 1, long 2, float 3, string 4, binary 5). Values map
+/// onto the native typed variants so `importData` archives load as-is.
+pub fn read_arc_settings(bytes: &[u8]) -> Result<IndexMap<String, SettingValue>, IoError> {
+    let compressed = bytes.len() >= 2
+        && bytes[0] == 0x78
+        && matches!(bytes[1], 0x01 | 0x5E | 0x9C | 0xDA);
+    let inflated;
+    let data: &[u8] = if compressed {
+        let mut out = Vec::new();
+        std::io::Read::read_to_end(&mut flate2::read::ZlibDecoder::new(bytes), &mut out)
+            .map_err(IoError::Io)?;
+        inflated = out;
+        &inflated
+    } else {
+        bytes
+    };
+    let mut wire = WireReader::new(data);
+    let amount = wire.i()?;
+    if amount <= 0 {
+        return Err(IoError::corrupt("0 values are not allowed."));
+    }
+    // The count is untrusted: reserve no more than the bytes could hold.
+    let mut map = IndexMap::with_capacity((amount as usize).min(data.len() / 4));
+    for _ in 0..amount {
+        let key = java_utf(&mut wire)?;
+        let value = match wire.ub()? {
+            0 => SettingValue::Bool(wire.bool()?),
+            1 => SettingValue::Int(wire.i()?),
+            2 => SettingValue::Long(wire.l()?),
+            3 => SettingValue::Float(wire.f()?),
+            4 => SettingValue::Str(java_utf(&mut wire)?),
+            5 => {
+                let len = wire.i()?;
+                if len < 0 || len as usize > MAX_SETTINGS_BYTES {
+                    return Err(IoError::TooLarge {
+                        limit: MAX_SETTINGS_BYTES,
+                        actual: len.max(0) as usize,
+                    });
+                }
+                SettingValue::Bytes(wire.bytes(len as usize)?.to_vec())
+            }
+            other => {
+                return Err(IoError::corrupt(format!("Unknown key type: {other}")));
+            }
+        };
+        map.insert(key, value);
+    }
+    Ok(map)
+}
+
+/// `DataInputStream.readUTF`: `u16` length + modified UTF-8 (`C0 80` nul,
+/// surrogate pairs as two 3-byte units).
+fn java_utf(wire: &mut WireReader) -> Result<String, IoError> {
+    let len = wire.us()? as usize;
+    let raw = wire.bytes(len)?;
+    if let Ok(text) = std::str::from_utf8(raw) {
+        return Ok(text.to_owned());
+    }
+    let mut units: Vec<u16> = Vec::with_capacity(len);
+    let mut i = 0;
+    while i < raw.len() {
+        let b = raw[i];
+        if b & 0x80 == 0 {
+            units.push(b as u16);
+            i += 1;
+        } else if b & 0xE0 == 0xC0 && i + 1 < raw.len() {
+            units.push((((b & 0x1F) as u16) << 6) | (raw[i + 1] & 0x3F) as u16);
+            i += 2;
+        } else if b & 0xF0 == 0xE0 && i + 2 < raw.len() {
+            units.push(
+                (((b & 0x0F) as u16) << 12)
+                    | (((raw[i + 1] & 0x3F) as u16) << 6)
+                    | (raw[i + 2] & 0x3F) as u16,
+            );
+            i += 3;
+        } else {
+            return Err(IoError::corrupt("malformed modified UTF-8 in settings"));
+        }
+    }
+    Ok(String::from_utf16_lossy(&units))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::io::fs::MockFs;
+
+    #[test]
+    fn reads_arc_settings_file() {
+        let mut raw = Vec::new();
+        raw.extend_from_slice(&3i32.to_be_bytes());
+        for (key, tag, payload) in [
+            ("duo-unlocked", 0u8, vec![1u8]),
+            ("turn", 1, 2140i32.to_be_bytes().to_vec()),
+            ("name", 4, [&3u16.to_be_bytes()[..], b"abc"].concat()),
+        ] {
+            raw.extend_from_slice(&(key.len() as u16).to_be_bytes());
+            raw.extend_from_slice(key.as_bytes());
+            raw.push(tag);
+            raw.extend_from_slice(&payload);
+        }
+        let map = read_settings(&raw).unwrap();
+        assert_eq!(map["duo-unlocked"], SettingValue::Bool(true));
+        assert_eq!(map["turn"], SettingValue::Int(2140));
+        assert_eq!(map["name"], SettingValue::Str("abc".into()));
+    }
 
     fn test_paths() -> Paths {
         Paths::new("/data")

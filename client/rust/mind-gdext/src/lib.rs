@@ -57,6 +57,13 @@ unsafe impl ExtensionLibrary for MindExtension {
         // Scene is this library's default `min_level()` and runs before the main
         // scene is instantiated, so the bridge is live for the first `_ready`.
         if stage == InitStage::Scene {
+            // One data root for every facade: settings, saves and imports all
+            // resolve under `user://` like the campaign store.
+            mind_core::config::set_default_data_dir(
+                godot::classes::ProjectSettings::singleton()
+                    .globalize_path("user://")
+                    .to_string(),
+            );
             log_bridge::install();
             // Chains the log bridge's hook so a panic flushes `last_log.txt`
             // before writing its `crashes/` report (plan 22 §3.4).
