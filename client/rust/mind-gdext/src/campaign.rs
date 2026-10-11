@@ -1527,8 +1527,9 @@ impl MindCampaign {
     }
 
     /// `run_exit_save` / capture bookkeeping: writes the live sector's stored
-    /// record (`SectorInfo.write()` + `Sector.saveInfo`) so captures, wave
-    /// progress and item pools survive a client restart (PAR-0081).
+    /// record (`SectorInfo.prepare` + `Sector.saveInfo`) so captures, wave
+    /// progress, item pools and the production windows survive a client restart
+    /// (PAR-0081/PAR-0082).
     fn persist_sector_record(&mut self) {
         let Some((planet, sector_id)) = self.session.sector else {
             return;
@@ -1543,18 +1544,39 @@ impl MindCampaign {
         };
         let wave = self.session.wave;
         let rules = self.session.rules.clone();
-        let Some(campaign) = self.campaign.as_mut() else {
+        // `SectorInfo.prepare(sector)` (`SaveVersion.writeMeta`): the live core
+        // snapshot lands in the record before it is written (PAR-0082).
+        let default_team = self.session.rules.default_team;
+        let snapshot = self
+            .host()
+            .and_then(|host| host.bind().campaign_core_snapshot(default_team));
+        // The live runtime owns the authoritative record (the campaign tick
+        // folds the core/production deltas into it); the facade clone only
+        // mirrors on events, so read the runtime's copy when a host is up.
+        let Some(mut record) = self.runtime_or_facade_record(planet, sector_id) else {
             return;
         };
-        let Some(sector) = campaign.sector_mut(planet, sector_id) else {
-            return;
-        };
-        sector.info.info.wave = wave;
-        sector.info.info.waves = rules.waves;
-        sector.info.info.wave_spacing = rules.wave_spacing;
-        sector.info.info.win_wave = rules.win_wave;
-        sector.info.info.attack = rules.attack_mode;
-        if let Err(error) = sector.save_info(&mut self.settings, &planet_name) {
+        if let Some(snapshot) = snapshot {
+            let mut prepared = mind_core::game::sector::SectorInfoState {
+                info: record,
+                ..Default::default()
+            };
+            prepared.prepare(&snapshot, true);
+            record = prepared.info;
+        }
+        record.wave = wave;
+        record.waves = rules.waves;
+        record.wave_spacing = rules.wave_spacing;
+        record.win_wave = rules.win_wave;
+        record.attack = rules.attack_mode;
+        // Keep the facade copy's record in step for the dialog views.
+        if let Some(campaign) = self.campaign.as_mut()
+            && let Some(sector) = campaign.sector_mut(planet, sector_id)
+        {
+            sector.info.info = record.clone();
+        }
+        let key = mind_core::game::sector::info_key(&planet_name, sector_id);
+        if let Err(error) = self.settings.put_json(&key, &record) {
             log::warn!("sector record persist failed: {error}");
         }
         // `put_json` only marks the store dirty; flush so the record is on disk
@@ -1562,6 +1584,32 @@ impl MindCampaign {
         if let Err(error) = self.settings.force_save(&NativeFs, &self.paths) {
             log::warn!("sector record flush failed: {error}");
         }
+    }
+
+    /// The live runtime's sector record when a host is attached, else the
+    /// facade copy's record.
+    fn runtime_or_facade_record(
+        &self,
+        planet: mind_core::content::PlanetId,
+        sector_id: u16,
+    ) -> Option<mind_core::io::json::rules::SectorInfo> {
+        if let Some(mut host) = self.host() {
+            let taken = host.bind_mut().take_campaign_runtime();
+            let record = taken
+                .as_ref()
+                .and_then(|runtime| runtime.campaign.sector(planet, sector_id))
+                .map(|sector| sector.info.info.clone());
+            if let Some(runtime) = taken {
+                host.bind_mut().put_campaign_runtime(runtime);
+            }
+            if record.is_some() {
+                return record;
+            }
+        }
+        self.campaign
+            .as_ref()
+            .and_then(|campaign| campaign.sector(planet, sector_id))
+            .map(|sector| sector.info.info.clone())
     }
 
     /// `PlanetDialog.abandonSectorConfirm` (persisted half): clears the active

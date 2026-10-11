@@ -52,6 +52,73 @@ pub struct CoreSnapshot {
     pub light_coverage: f32,
 }
 
+/// Builds the [`CoreSnapshot`] that `SectorInfo.prepare` consumes from the live
+/// sim world (`SectorInfo.prepare(sector)`: the default team's first core, its
+/// item module, capacity, spawn position, map dimensions and spawn count).
+pub fn core_snapshot_of(
+    sim: &crate::sim::Sim,
+    content: &crate::content::ContentRegistry,
+    default_team: u8,
+) -> CoreSnapshot {
+    let world = &sim.ecs.0;
+    let mut snapshot = CoreSnapshot {
+        best_core_type: "air".to_owned(),
+        width: sim.grid.tiles.width,
+        height: sim.grid.tiles.height,
+        ..CoreSnapshot::default()
+    };
+    snapshot.has_spawns = world
+        .get_resource::<crate::game::runtime::CampaignRuntime>()
+        .is_some_and(|runtime| runtime.session.spawn_count > 0);
+
+    // `state.rules.defaultTeam.core()`: the first core of the default team in
+    // entity order; `bestCoreType` is the largest core block (`TeamData`).
+    let mut best_size = 0;
+    let mut first_core: Option<bevy_ecs::entity::Entity> = None;
+    for (_seq, entity, comp) in sim.ecs.entities_by_seq() {
+        if comp.team.0 != default_team {
+            continue;
+        }
+        let Some(def) = content.block(comp.block) else {
+            continue;
+        };
+        if def.kind != crate::content::BlockKind::CoreBlock {
+            continue;
+        }
+        if def.size > best_size {
+            best_size = def.size;
+            snapshot.best_core_type = def.name.clone();
+        }
+        if first_core.is_none() {
+            first_core = Some(entity);
+        }
+    }
+    if let Some(entity) = first_core {
+        snapshot.has_core = true;
+        if let Some(core) = world.get::<super::super::world::blocks::storage::CoreBuild>(entity) {
+            snapshot.storage_capacity = core.storage_capacity;
+        }
+        if let Some(module) = world.get::<crate::world::modules::ItemModule>(entity) {
+            for (index, amount) in module.items.iter().enumerate() {
+                if *amount <= 0 {
+                    continue;
+                }
+                if let Some(item) = content.item(crate::content::ItemId::new(index as u16)) {
+                    snapshot.items.insert(item.name.clone(), *amount);
+                }
+            }
+        }
+        if let Some(pos) = world.get::<crate::entities::comp::Pos>(entity) {
+            let tile = (
+                (pos.x / crate::content::TILE_SIZE) as i16,
+                (pos.y / crate::content::TILE_SIZE) as i16,
+            );
+            snapshot.spawn_position = crate::world::TilePos::new(tile.0, tile.1).pack();
+        }
+    }
+    snapshot
+}
+
 /// Minimal sector/world view needed by `SectorInfo::write`.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct WriteTarget {
@@ -117,21 +184,24 @@ impl InfoWindows {
     fn update_delta_map(
         map: &mut IndexMap<String, ExportStat>,
         windows: &mut IndexMap<String, WindowedMean>,
-        deltas: &mut [i32],
-        index_of: impl Fn(&str) -> Option<usize>,
+        deltas: &[i32],
+        name_of: impl Fn(usize) -> Option<String>,
     ) {
         let mut taken = std::mem::take(windows);
-        for (name, stat) in map.iter_mut() {
+        // `SectorInfo.updateDelta(item, map, deltas)` for every item: entries are
+        // materialized on the first refresh, then fed the windowed deltas.
+        for (index, delta) in deltas.iter().enumerate() {
+            let Some(name) = name_of(index) else {
+                continue;
+            };
+            let stat = map.entry(name.clone()).or_default();
             let window = taken
-                .entry(name.clone())
+                .entry(name)
                 .or_insert_with(|| WindowedMean::new(VALUE_WINDOW));
             if !window.has_enough_data() && window.mean() == 0.0 {
                 window.fill(stat.mean);
             }
-            let delta = index_of(name)
-                .and_then(|i| deltas.get(i).copied())
-                .unwrap_or(0);
-            window.add(delta as f32);
+            window.add(*delta as f32);
             stat.mean = window.raw_mean();
         }
         *windows = taken;
@@ -249,7 +319,11 @@ impl SectorInfoState {
     }
 
     /// `SectorInfo.updateStats` for the export/import maps.
-    fn refresh_statistics(&mut self, index_of: &dyn Fn(&str) -> Option<usize>) {
+    fn refresh_statistics(
+        &mut self,
+        index_of: &dyn Fn(&str) -> Option<usize>,
+        name_of: &dyn Fn(usize) -> Option<String>,
+    ) {
         InfoWindows::update_stat_map(&mut self.info.export, &mut self.windows.export);
         InfoWindows::update_stat_map(&mut self.info.imports, &mut self.windows.imports);
 
@@ -264,14 +338,14 @@ impl SectorInfoState {
         InfoWindows::update_delta_map(
             &mut self.info.production,
             &mut self.windows.production,
-            &mut self.windows.core_deltas,
-            |name| index_of(name),
+            &self.windows.core_deltas,
+            name_of,
         );
         InfoWindows::update_delta_map(
             &mut self.info.raw_production,
             &mut self.windows.raw_production,
-            &mut self.windows.production_deltas,
-            |name| index_of(name),
+            &self.windows.production_deltas,
+            name_of,
         );
 
         for (name, stat) in self.info.production.iter_mut() {
@@ -321,13 +395,24 @@ impl SectorInfoState {
     }
 
     /// `SectorInfo.update()` (60-tick refresh; client gate is the caller's).
-    pub fn update(&mut self, seconds_delta: f32, item_index_of: &dyn Fn(&str) -> Option<usize>) {
+    ///
+    /// `item_count` is the live content item count: `updateDelta` materializes a
+    /// `production`/`rawProduction` entry for every item on each refresh.
+    pub fn update(
+        &mut self,
+        seconds_delta: f32,
+        item_index_of: &dyn Fn(&str) -> Option<usize>,
+        item_name_of: &dyn Fn(usize) -> Option<String>,
+        item_count: usize,
+    ) {
         self.windows.refresh_clock += seconds_delta;
         if self.windows.refresh_clock < REFRESH_PERIOD {
             return;
         }
         self.windows.refresh_clock %= REFRESH_PERIOD;
-        self.refresh_statistics(item_index_of);
+        self.windows.core_deltas.resize(item_count.max(1), 0);
+        self.windows.production_deltas.resize(item_count.max(1), 0);
+        self.refresh_statistics(item_index_of, item_name_of);
     }
 
     /// `SectorInfo.prepare(sector)`.
@@ -400,6 +485,11 @@ impl SectorInfoState {
     pub fn handle_item_export_stack(&mut self, name: &str, amount: i32) {
         self.handle_item_export(name, amount);
     }
+}
+
+/// Settings key `<planet>-s-<id>-info` (free form for external writers).
+pub fn info_key(planet_name: &str, sector_id: u16) -> String {
+    format!("{planet_name}-s-{sector_id}-info")
 }
 
 /// Sector runtime (`type/Sector.java`, runtime half).
@@ -482,7 +572,7 @@ impl Sector {
 
     /// Settings key `<planet>-s-<id>-info`.
     pub fn info_key(&self, planet_name: &str) -> String {
-        format!("{planet_name}-s-{}-info", self.id)
+        info_key(planet_name, self.id)
     }
 
     /// `Sector.loadInfo`.
@@ -677,11 +767,20 @@ mod tests {
             .or_default()
             .mean = 5.0;
         state.windows.refresh_clock = REFRESH_PERIOD;
-        state.update(0.0, &|name| match name {
-            "silicon" => Some(0),
-            "lead" => Some(1),
-            _ => None,
-        });
+        state.update(
+            0.0,
+            &|name| match name {
+                "silicon" => Some(0),
+                "lead" => Some(1),
+                _ => None,
+            },
+            &|index| match index {
+                0 => Some("silicon".to_owned()),
+                1 => Some("lead".to_owned()),
+                _ => None,
+            },
+            2,
+        );
         // Export was capped by raw production + core draw (draw is 0).
         assert!(state.get_export("silicon") <= 5.0 + 1e-3);
     }

@@ -15,6 +15,7 @@
 use bevy_ecs::entity::Entity;
 use bevy_ecs::prelude::Resource;
 use bevy_ecs::world::World;
+use std::sync::{Arc, Mutex};
 
 use super::map_objectives::{ObjectiveEnv, ObjectiveRunParams};
 use super::play::{PlayEvent, PlaySession, apply_sector_loss, check_game_state, run_wave_campaign};
@@ -45,6 +46,85 @@ pub struct SessionSync {
     pub wave_cores: usize,
     /// Enemy spawn-point count carried into `session.spawn_count`.
     pub spawn_count: i32,
+}
+
+/// Shared campaign hook state: the live session snapshot plus the deferred
+/// `SectorInfo.handleCoreItem`/`handleProduction` deltas queued by the core and
+/// miner paths (consumed by [`campaign_tick_system`]).
+#[derive(Debug, Default)]
+pub struct CampaignHookQueues {
+    /// `state.isCampaign()` snapshot (refreshed by the campaign tick).
+    pub is_campaign: bool,
+    /// `state.rules.defaultTeam` snapshot.
+    pub default_team: u8,
+    /// Pending `handleCoreItem` deltas `(item, amount)`.
+    pub core_deltas: Vec<(ItemId, i32)>,
+    /// Pending `handleProduction` deltas `(item, amount)`.
+    pub production_deltas: Vec<(ItemId, i32)>,
+}
+
+/// `CoreCampaignHooks` impl for a live campaign session: queues the deltas the
+/// campaign tick folds into the played sector's `SectorInfo` (plan 12 half of
+/// `CoreBlock.handleItem` -> `SectorInfo.handleCoreItem`).
+#[derive(Debug, Clone)]
+pub struct CampaignCoreHooks {
+    queues: Arc<Mutex<CampaignHookQueues>>,
+}
+
+impl crate::world::blocks::storage::CoreCampaignHooks for CampaignCoreHooks {
+    fn is_campaign(&self) -> bool {
+        self.queues
+            .lock()
+            .map(|queues| queues.is_campaign)
+            .unwrap_or(false)
+    }
+
+    fn default_team(&self) -> u8 {
+        self.queues
+            .lock()
+            .map(|queues| queues.default_team)
+            .unwrap_or(0)
+    }
+
+    fn handle_core_item(&self, item: ItemId, amount: i32) {
+        if let Ok(mut queues) = self.queues.lock() {
+            queues.core_deltas.push((item, amount));
+        }
+    }
+}
+
+/// The shared queue handle installed beside the campaign core hooks. The
+/// campaign tick, the core acceptance path and the miner all reach the same
+/// `Arc` through this resource / the hooks impl.
+#[derive(Resource, Clone)]
+pub struct CampaignCoreQueues(pub Arc<Mutex<CampaignHookQueues>>);
+
+/// Installs the campaign core hooks + queue handle (idempotent: the first
+/// install owns the shared handle; later calls keep it).
+pub fn install_campaign_core_hooks(world: &mut World) -> Arc<Mutex<CampaignHookQueues>> {
+    if let Some(existing) = world.get_resource::<CampaignCoreQueues>() {
+        return existing.0.clone();
+    }
+    let queues = Arc::new(Mutex::new(CampaignHookQueues::default()));
+    world.insert_resource(crate::world::blocks::storage::CoreHooks(Arc::new(
+        CampaignCoreHooks {
+            queues: queues.clone(),
+        },
+    )));
+    world.insert_resource(CampaignCoreQueues(queues.clone()));
+    queues
+}
+
+/// Clears the shared session snapshot and any pending deltas (menu / runtime
+/// removal): the hooks then answer `is_campaign: false` and drop new deltas.
+pub fn reset_campaign_core_hooks(world: &mut World) {
+    if let Some(queues) = world.get_resource::<CampaignCoreQueues>()
+        && let Ok(mut state) = queues.0.lock()
+    {
+        state.is_campaign = false;
+        state.core_deltas.clear();
+        state.production_deltas.clear();
+    }
 }
 
 /// The campaign match runtime installed into the sim ECS world while a sector
@@ -217,6 +297,47 @@ pub fn campaign_tick_system(world: &mut World) {
                 {
                     stats.waves_lasted += 1;
                 }
+            }
+        }
+
+        // `SectorInfo.handleCoreItem`/`handleProduction` deltas queued by the
+        // core/miner paths land in the played sector's info, then
+        // `SectorInfo.update` refreshes the statistic windows (Logic.java:538).
+        if let Some(queues) = world.get_resource::<CampaignCoreQueues>().cloned()
+            && let Ok(mut state) = queues.0.lock()
+        {
+            state.is_campaign = runtime.session.is_campaign();
+            state.default_team = runtime.session.rules.default_team;
+            let core_deltas = std::mem::take(&mut state.core_deltas);
+            let production_deltas = std::mem::take(&mut state.production_deltas);
+            drop(state);
+            if let Some((planet, sector_id)) = runtime.session.sector
+                && let Some(sector) = runtime.campaign.sector_mut(planet, sector_id)
+            {
+                for (item, amount) in core_deltas {
+                    sector.info.handle_core_item(item.index(), amount);
+                }
+                for (item, amount) in production_deltas {
+                    sector.info.handle_production(item.index(), amount);
+                }
+                let index_of = |name: &str| {
+                    world
+                        .get_resource::<ContentIndex>()
+                        .and_then(|index| index.item_ids.get(name).copied())
+                        .map(|id| id as usize)
+                };
+                let name_of = |index: usize| {
+                    world
+                        .get_resource::<ContentIndex>()
+                        .and_then(|content| content.item_names.get(index).cloned())
+                };
+                let item_count = world
+                    .get_resource::<ContentIndex>()
+                    .map(|content| content.item_names.len())
+                    .unwrap_or(0);
+                sector
+                    .info
+                    .update(1.0 / TICKS_PER_SECOND, &index_of, &name_of, item_count);
             }
         }
     }
@@ -514,6 +635,48 @@ mod tests {
                 .sector(planet, sector_id)
                 .is_some_and(|sector| sector.info.info.was_captured)
         );
+    }
+
+    #[test]
+    fn core_and_production_deltas_fold_into_the_sector_info() {
+        let registry = content();
+        let campaign = campaign(&registry);
+        let planet = campaign.planet_id_by_name("serpulo").unwrap();
+        let sector_id = registry.sector_by_name("groundZero").unwrap().sector;
+        let mut session = PlaySession::new(Rules {
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        session.sector = Some((planet, sector_id));
+        session.phase = State::Playing;
+        let mut world = World::new();
+        install_campaign_core_hooks(&mut world);
+        world.insert_resource(CampaignRuntime::new(session, campaign));
+
+        // A core accept queues through the installed hooks; a miner tick queues
+        // a production delta directly (Java `CoreBlock.handleItem` /
+        // `MinerComp.update` -> `SectorInfo.handleCoreItem`/`handleProduction`).
+        let hooks = world
+            .get_resource::<crate::world::blocks::storage::CoreHooks>()
+            .expect("hooks installed")
+            .0
+            .clone();
+        let copper = registry.item_id("copper").unwrap();
+        hooks.handle_core_item(copper, 3);
+        if let Some(queues) = world.get_resource::<CampaignCoreQueues>()
+            && let Ok(mut state) = queues.0.lock()
+        {
+            state.production_deltas.push((copper, 5));
+        }
+
+        campaign_tick_system(&mut world);
+        let runtime = world
+            .remove_resource::<CampaignRuntime>()
+            .expect("runtime installed");
+        let sector = runtime.campaign.sector(planet, sector_id).expect("sector");
+        assert_eq!(sector.info.windows.core_deltas[copper.index()], 3);
+        assert_eq!(sector.info.windows.production_deltas[copper.index()], 5);
     }
 
     #[test]

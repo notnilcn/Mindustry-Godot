@@ -1040,6 +1040,8 @@ impl MindSimHost {
     /// Removes the campaign runtime (menu/abort/new world).
     pub fn clear_campaign_runtime(&mut self) {
         self.sim.ecs.0.remove_resource::<CampaignRuntime>();
+        // The hooks answer `is_campaign: false` again and drop pending deltas.
+        mind_core::game::runtime::reset_campaign_core_hooks(&mut self.sim.ecs.0);
     }
 
     /// Takes the runtime out for host-side bookkeeping.
@@ -1049,7 +1051,23 @@ impl MindSimHost {
 
     /// Puts a bookkept runtime back.
     pub fn put_campaign_runtime(&mut self, runtime: CampaignRuntime) {
+        // The campaign core hooks queue `SectorInfo.handleCoreItem` deltas the
+        // campaign tick folds into the played sector (PAR-0082).
+        mind_core::game::runtime::install_campaign_core_hooks(&mut self.sim.ecs.0);
         self.sim.ecs.0.insert_resource(runtime);
+    }
+
+    /// Live core snapshot of `team` for `SectorInfo.prepare` (the save-time
+    /// sector record: items, capacity, spawn position, map facts). Rust-only
+    /// seam for `MindCampaign::persist_sector_record`.
+    pub fn campaign_core_snapshot(
+        &self,
+        team: u8,
+    ) -> Option<mind_core::game::sector::CoreSnapshot> {
+        let content = self.content_snapshot.as_ref()?;
+        Some(mind_core::game::sector::core_snapshot_of(
+            &self.sim, content, team,
+        ))
     }
 
     /// Registers the live world's cores into the installed session and reports

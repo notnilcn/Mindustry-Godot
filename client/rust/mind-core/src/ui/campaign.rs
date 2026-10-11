@@ -27,6 +27,7 @@ use crate::game::schematics::Schematics;
 use crate::game::sector::Sector;
 use crate::game::tech_tree;
 use crate::game::universe::Campaign;
+use crate::io::json::rules::ExportStat;
 
 /// One selectable campaign difficulty (`Difficulty.all`).
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -146,6 +147,27 @@ pub struct SectorView {
     pub is_last: bool,
     /// Capture wave (`0` = never).
     pub capture_wave: i32,
+    /// `PlanetDialog.showStats` data block (production/export/import/stored).
+    pub stats: SectorStatsView,
+}
+
+/// `PlanetDialog.showStats` data: per-minute rate rows for `production`,
+/// `export` and `import` (entries with `mean * 60 > 1`) plus attempts/wave and
+/// the stored item pool.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct SectorStatsView {
+    /// `sector.info.attempts`.
+    pub attempts: i32,
+    /// `sector.info.wave` when waves are live on a base sector.
+    pub wave: i32,
+    /// `(item, per-minute)` production rows.
+    pub production: Vec<(String, i32)>,
+    /// `(item, per-minute)` export rows.
+    pub export: Vec<(String, i32)>,
+    /// `(item, per-minute)` import rows.
+    pub import: Vec<(String, i32)>,
+    /// `(item, amount)` stored rows (`sector.items()` off-play: the record pool).
+    pub stored: Vec<(String, i32)>,
 }
 
 /// One tech-tree node (`ResearchDialog`).
@@ -576,6 +598,39 @@ fn sector_view(planet: &Planet, sector: &Sector) -> SectorView {
         has_enemy_base: sector.has_enemy_base(),
         is_last: sector_is_last(&planet.name, sector),
         capture_wave: sector.preset_capture_wave,
+        stats: sector_stats_view(sector),
+    }
+}
+
+/// `PlanetDialog.showStats` rows from the stored sector record: rate rows pass
+/// the `(int)(mean * 60) > 1` filter (per-minute totals), stored items only
+/// positive amounts.
+fn sector_stats_view(sector: &Sector) -> SectorStatsView {
+    let info = &sector.info.info;
+    let rates = |map: &indexmap::IndexMap<String, ExportStat>| -> Vec<(String, i32)> {
+        map.iter()
+            .filter_map(|(name, stat)| {
+                let per_minute = (stat.mean * 60.0) as i32;
+                (per_minute > 1).then(|| (name.clone(), per_minute))
+            })
+            .collect()
+    };
+    SectorStatsView {
+        attempts: info.attempts,
+        wave: if info.waves && sector.has_base() {
+            info.wave
+        } else {
+            0
+        },
+        production: rates(&info.production),
+        export: rates(&info.export),
+        import: rates(&info.imports),
+        stored: info
+            .items
+            .iter()
+            .filter(|(_, amount)| **amount > 0)
+            .map(|(name, amount)| (name.clone(), *amount))
+            .collect(),
     }
 }
 

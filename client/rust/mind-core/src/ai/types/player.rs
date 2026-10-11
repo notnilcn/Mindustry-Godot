@@ -248,6 +248,16 @@ fn update_mining(
     if input.mine_timer >= threshold {
         input.mine_timer = 0.0;
         input.mined += 1;
+        // `MinerComp.update` -> `SectorInfo.handleProduction`: the campaign tick
+        // folds the delta into the played sector's stats (Java MinerComp:98).
+        if let Some(queues) = world.get_resource::<crate::game::runtime::CampaignCoreQueues>()
+            && let Ok(mut state) = queues.0.lock()
+        {
+            let team = world.get::<TeamComp>(entity).map(|t| t.team);
+            if state.is_campaign && team == Some(state.default_team) {
+                state.production_deltas.push((item, 1));
+            }
+        }
         // `MinerComp.update` offload branch: `offloadImmediately()` is true for
         // the player, so the mined item transfers into `closestCore()` when it
         // is within `Vars.mineTransferRange` and accepts the stack.
