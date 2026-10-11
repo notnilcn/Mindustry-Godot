@@ -6,13 +6,14 @@
 //!
 //! Ported from `core/src/mindustry/io/JsonIO.java`. M6 completes the class-tag
 //! registry, content serializers with upstream fallbacks, and the full
-//! `Rules`/`GameStats`/`MapLocales`/`SectorInfo` field sets. `writeBytes`/
-//! `readBytes` (UBJson) are deliberately not ported (plan 04 §2.3 deviation 5:
-//! no production callers).
+//! `Rules`/`GameStats`/`MapLocales`/`SectorInfo` field sets. `writeBytes` is
+//! not ported (plan 04 §2.3 deviation 5); the UBJson *reader* ([`ubjson`])
+//! decodes Java `Settings.putJson` payloads from imported profiles.
 
 pub mod content_serde;
 pub mod objectives;
 pub mod rules;
+pub mod ubjson;
 
 pub use content_serde::{
     ColorHex, JsonItemStack, MusicContainer, SectorKey, attribute_from_name, attribute_name,
@@ -135,9 +136,15 @@ impl JsonIo {
         Ok(serde_json::to_string(value)?)
     }
 
-    /// `JsonIO.read`: strips the legacy prefix, then parses.
+    /// `JsonIO.read`: strips the legacy prefix, then parses. Arc's lenient
+    /// `Json` text (bare keys/strings, what Java writes into save meta
+    /// `rules`) is accepted by retrying through [`quote_bare_keys`].
     pub fn read<T: DeserializeOwned>(string: &str) -> IoResult<T> {
-        Ok(serde_json::from_str(&strip_legacy_prefix(string))?)
+        let text = strip_legacy_prefix(string);
+        match serde_json::from_str(&text) {
+            Ok(value) => Ok(value),
+            Err(strict) => serde_json::from_str(&quote_bare_keys(&text)).map_err(|_| strict.into()),
+        }
     }
 
     /// `JsonIO.read(base, string)` (`json.readFields`): overlays the parsed

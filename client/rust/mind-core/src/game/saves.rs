@@ -180,6 +180,12 @@ impl Saves {
         }
 
         // Phase 2: move the files into their destinations and migrate info.
+        let remapped: Vec<(PlanetId, u16)> = pending
+            .iter()
+            .filter_map(|(index, target, _)| {
+                sector_of_slot(registry, &self.slots[*index]).map(|(planet, _)| (planet, *target))
+            })
+            .collect();
         for (index, target, dest_file) in pending {
             let Some((planet, source_sector)) = sector_of_slot(registry, &self.slots[index]) else {
                 continue;
@@ -199,6 +205,10 @@ impl Saves {
             let tmp = self.slots[index].file.clone();
             if fs.rename(&tmp, &dest_file).is_ok() {
                 self.slots[index].file = dest_file;
+            }
+            // `remap.sourceSector.clearInfo()` unless another save moved into it.
+            if !remapped.contains(&(planet, source_sector)) {
+                settings.remove(&source_key);
             }
         }
     }
@@ -492,14 +502,14 @@ pub fn get_next_slot_file(fs: &dyn FileSystem, paths: &Paths) -> PathBuf {
 /// Parses `(planet, sector)` from a slot's rules JSON (`SaveSlot.getSector`).
 pub fn sector_of_slot(registry: &ContentRegistry, slot: &SaveSlot) -> Option<(PlanetId, u16)> {
     let meta = slot.meta.as_ref()?;
-    let rules: crate::io::json::Rules = serde_json::from_str(&meta.rules_json).ok()?;
+    let rules: crate::io::json::Rules = crate::io::json::JsonIo::read(&meta.rules_json).ok()?;
     rules.sector?.resolve(registry)
 }
 
 /// Whether a slot's rules reference a sector at all.
 fn sector_key_of(slot: &SaveSlot) -> Option<SectorKey> {
     let meta = slot.meta.as_ref()?;
-    let rules: crate::io::json::Rules = serde_json::from_str(&meta.rules_json).ok()?;
+    let rules: crate::io::json::Rules = crate::io::json::JsonIo::read(&meta.rules_json).ok()?;
     rules.sector
 }
 

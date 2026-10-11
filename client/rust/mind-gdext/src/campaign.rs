@@ -189,11 +189,20 @@ impl MindCampaign {
                 if let Err(error) = registry.init().and_then(|()| registry.post_init()) {
                     log::error!("MindCampaign content lifecycle failed: {error}");
                 }
-                let mut campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
-                campaign.load_all(&self.settings);
+                // `Vars.init`: `control.saves.load()` runs its legacy sector
+                // remap (moving `sector-serpulo-15.msav` to Ground Zero's
+                // current cell and migrating `<planet>-s-<id>-info`) before the
+                // planets read sector info (`Sector.loadInfo` after remap).
                 self.saves = Saves::new();
                 self.saves
                     .load(&NativeFs, &self.paths, &registry, &mut self.settings);
+                if self.saves.had_serpulo_remaps
+                    && let Err(error) = self.settings.force_save(&NativeFs, &self.paths)
+                {
+                    log::warn!("sector remap settings flush failed: {error}");
+                }
+                let mut campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
+                campaign.load_all(&self.settings);
                 // `Saves.load` assigns sector save files; reflect them on the
                 // runtime sectors so launches take the resume branch (C-3).
                 for planet in campaign.planets.values_mut() {

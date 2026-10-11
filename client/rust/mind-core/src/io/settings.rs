@@ -268,11 +268,17 @@ impl SettingsStore {
         }
     }
 
-    /// `Settings.getJson`: parsed JSON value, `None` when absent. A corrupt
+    /// `Settings.getJson`: parsed JSON value (native JSON text or Java's
+    /// UBJson bytes), `None` when absent. A corrupt
     /// JSON payload is an error (untrusted-input rule), not a panic.
     pub fn get_json<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>, IoError> {
         match self.map.get(key) {
             Some(SettingValue::Json(raw)) => Ok(Some(serde_json::from_str(raw)?)),
+            // Java `Settings.putJson` stores UBJson bytes (type 5); an imported
+            // profile keeps them verbatim (`Settings.getJson` -> `UBJsonReader`).
+            Some(SettingValue::Bytes(bytes)) => Ok(Some(serde_json::from_value(
+                crate::io::json::ubjson::read_ubjson(bytes)?,
+            )?)),
             Some(other) => Err(IoError::corrupt(format!(
                 "settings key `{key}` holds {:?}, not JSON",
                 other.type_tag()
@@ -484,9 +490,8 @@ pub fn read_settings(bytes: &[u8]) -> Result<IndexMap<String, SettingValue>, IoE
 /// Arc's tags (bool 0, int 1, long 2, float 3, string 4, binary 5). Values map
 /// onto the native typed variants so `importData` archives load as-is.
 pub fn read_arc_settings(bytes: &[u8]) -> Result<IndexMap<String, SettingValue>, IoError> {
-    let compressed = bytes.len() >= 2
-        && bytes[0] == 0x78
-        && matches!(bytes[1], 0x01 | 0x5E | 0x9C | 0xDA);
+    let compressed =
+        bytes.len() >= 2 && bytes[0] == 0x78 && matches!(bytes[1], 0x01 | 0x5E | 0x9C | 0xDA);
     let inflated;
     let data: &[u8] = if compressed {
         let mut out = Vec::new();
@@ -567,6 +572,27 @@ fn java_utf(wire: &mut WireReader) -> Result<String, IoError> {
 mod tests {
     use super::*;
     use crate::io::fs::MockFs;
+
+    /// Java `Settings.putJson` bytes (UBJson, type 5) from an imported
+    /// profile read through `get_json` like native JSON text.
+    #[test]
+    fn get_json_decodes_java_ubjson_bytes() {
+        let mut store = SettingsStore::new();
+        // {"shown":T,"winWave":i10}
+        let mut bytes = vec![b'{', b'i', 5];
+        bytes.extend_from_slice(b"shown");
+        bytes.push(b'T');
+        bytes.extend_from_slice(&[b'i', 7]);
+        bytes.extend_from_slice(b"winWave");
+        bytes.extend_from_slice(&[b'i', 10, b'}']);
+        store.put_bytes("serpulo-s-15-info", &bytes);
+        let info: crate::io::json::SectorInfo = store
+            .get_json("serpulo-s-15-info")
+            .unwrap()
+            .unwrap();
+        assert!(info.shown);
+        assert_eq!(info.win_wave, 10);
+    }
 
     #[test]
     fn reads_arc_settings_file() {
