@@ -141,6 +141,10 @@ impl ICamera2D for MindCamera2D {
                 self.follow_target = None;
             }
         }
+        // `MobileInput.pan` clamp for the manual/edge pans: without it the port
+        // edge-panned off the map indefinitely (PAR-0031; the pointer resting
+        // near a window edge walked the camera to y=32870 on a 256x256 map).
+        self.camera.clamp_position();
 
         self.camera.step_logic_cutscene(delta_frames);
         self.camera

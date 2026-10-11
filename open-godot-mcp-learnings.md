@@ -1835,3 +1835,11 @@ those paths no longer exist, but the workarounds still apply.
   mid-command ("Killed by SIGTERM"). Same trap as the `pkill -f <jar>` warning in
   `java-leg-learnings.md`. Use `pgrep -x godot`/exact pids from a separate probe, or filter
   `pgrep -f pattern | grep -v $$`.
+
+- Bullet (2026-10-11, session 2): an editor relaunch whose predecessor is still alive makes the MCP addon
+  FALL BACK to another port (observed: new editor bound 6971 while the stale one held 6980, so the
+  session MCP kept talking to the old editor with the pre-build library). The old editor is easy to miss:
+  its cmdline is `godot --editor --path client` (relative) and does not contain the worktree name.
+  Always (a) kill the previous editor pid explicitly before relaunching, (b) gate the relaunch on the
+  EXACT port line (`Bridge listening on ws://127.0.0.1:6980`), and (c) verify `godot_health` +
+  `godot_game instances` pid after the game starts.
