@@ -123,6 +123,20 @@ pub struct SectorView {
     /// The player renamed the sector (`info.name` set): the dialog shows
     /// `name` verbatim instead of the localized preset name.
     pub named: bool,
+    /// `PlanetDialog.canSelect` (look mode): the globe draws the cell's status
+    /// ring instead of the shadow fill.
+    pub selectable: bool,
+    /// `preset.requireUnlock`.
+    pub require_unlock: bool,
+    /// `preset.unlocked()`.
+    pub preset_unlocked: bool,
+    /// `renderProjections` padlock: a locked, tech-gated preset whose parent
+    /// node is unlocked.
+    pub lock_icon: bool,
+    /// `sector.info.icon` / `contentIcon` (player-chosen marker icon).
+    pub icon: Option<String>,
+    /// `sector.info.contentIcon` (content uiIcon; drawn white).
+    pub content_icon: Option<String>,
     /// Preset difficulty (0-10; `-1` when unassigned).
     pub difficulty: f32,
     /// Aggregated threat (0-1).
@@ -603,6 +617,12 @@ fn sector_view(planet: &Planet, sector: &Sector) -> SectorView {
         });
     SectorView {
         named,
+        selectable: false,
+        require_unlock: sector.preset_require_unlock,
+        preset_unlocked: false,
+        lock_icon: false,
+        icon: sector.info.info.icon.clone(),
+        content_icon: sector.info.info.content_icon.clone(),
         id: sector.id,
         planet: planet.name.clone(),
         preset: sector.preset_name.clone(),
@@ -672,6 +692,101 @@ fn sector_is_last(planet_name: &str, sector: &Sector) -> bool {
     // records the preset name, so prefer the per-sector content record below.
     let _ = planet_name;
     sector.preset.map(|_| false).unwrap_or(false)
+}
+
+/// `PlanetDialog.renderSectors/renderProjections` inputs that need the
+/// registry: `canSelect` (look mode), the preset unlock bit and the padlock.
+/// Neighbours come from the planet's `PlanetGrid` (`Sector.near()`).
+pub fn annotate_globe(
+    mut views: Vec<SectorView>,
+    registry: &ContentRegistry,
+    planet: &Planet,
+) -> Vec<SectorView> {
+    use crate::content::registries::planets::GeneratorKind;
+    use crate::content::{ContentRef, ContentType};
+
+    let Some(def) = registry.planet(planet.id) else {
+        return views;
+    };
+    let tech = registry.tech();
+    let node_of =
+        |content: ContentRef| tech.nodes.iter().find(|node| node.content == Some(content));
+    let grid = (def.sector_tiles > 0)
+        .then(|| crate::render::g3d::grid::PlanetGrid::create(def.sector_tiles as usize));
+    let near = |id: u16| -> Vec<usize> {
+        grid.as_ref()
+            .and_then(|grid| grid.tiles.get(id as usize))
+            .map(|tile| tile.tiles.clone())
+            .unwrap_or_default()
+    };
+    // `SerpuloPlanetGenerator.allowNumberedLaunch`: a based, unattacked sector
+    // with a size >= 4 core; other generators only need a based neighbour.
+    let core_size = |name: &str| {
+        registry
+            .block_by_name(name)
+            .map(|block| block.size)
+            .unwrap_or(0)
+    };
+    let numbered_launcher = |sector: &Sector| -> bool {
+        if def.generator == GeneratorKind::Serpulo {
+            sector.has_base()
+                && !sector.is_attacked(None)
+                && core_size(&sector.info.info.best_core_type) >= 4
+        } else {
+            sector.has_base()
+        }
+    };
+    for view in &mut views {
+        let Some(sector) = planet.sectors.get(view.id as usize) else {
+            continue;
+        };
+        let preset = sector.preset.and_then(|id| registry.sector(id));
+        let node =
+            preset.and_then(|preset| node_of(ContentRef::of(ContentType::Sector, preset.id)));
+        let preset_unlocked = preset.is_some_and(|preset| preset.unlock.unlocked());
+        view.preset_unlocked = preset_unlocked;
+        let parent_unlocked = node.and_then(|node| node.parent).map(|parent| {
+            tech.nodes
+                .get(parent.0 as usize)
+                .and_then(|parent| parent.content)
+                .is_none_or(|content| tech_tree::content_unlocked(registry, content))
+        });
+        view.lock_icon = preset.is_some_and(|preset| preset.require_unlock)
+            && !preset_unlocked
+            && node.is_some()
+            && parent_unlocked.unwrap_or(true);
+        view.selectable = if def.generator == GeneratorKind::None || sector.is_shielded() {
+            false
+        } else if sector.has_base() || sector.id == def.start_sector as u16 {
+            true
+        } else if preset.is_some_and(|preset| preset.require_unlock) {
+            preset_unlocked
+                || node.is_none()
+                || match node.and_then(|node| node.parent) {
+                    None => true,
+                    Some(parent) => tech.nodes.get(parent.0 as usize).is_some_and(|parent| {
+                        let unlocked = parent
+                            .content
+                            .is_none_or(|content| tech_tree::content_unlocked(registry, content));
+                        let preset_parent_based = match parent.content {
+                            Some(content) if content.type_ == ContentType::Sector => planet
+                                .sectors
+                                .iter()
+                                .find(|other| other.preset.map(|id| id.raw()) == Some(content.id))
+                                .is_some_and(Sector::has_base),
+                            _ => true,
+                        };
+                        unlocked && preset_parent_based
+                    }),
+                }
+        } else {
+            def.allow_launch_to_numbered
+                && near(sector.id)
+                    .iter()
+                    .any(|&other| planet.sectors.get(other).is_some_and(&numbered_launcher))
+        };
+    }
+    views
 }
 
 /// Builds the sector markers for a planet.
@@ -955,7 +1070,7 @@ impl CampaignViews {
                 .filter_map(|id| campaign.planets.get(id))
                 .map(|planet| planet_view(registry, planet))
                 .collect(),
-            sectors: sector_views(planet, presets),
+            sectors: annotate_globe(sector_views(planet, presets), registry, planet),
             research: research_views(registry, Some(active)),
             schematics: schematic_views(schematics, registry),
             loadouts: loadout_views(schematics, registry, &core_name),

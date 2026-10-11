@@ -544,6 +544,7 @@ func _show_planet(planet_name: String, select_default := true) -> void:
 	var view := _planet_view()
 	if view != null:
 		view.set_planet(planet_name)
+		view.set_sectors(_planet_sectors(planet_name))
 
 	# code-instantiated: the planet rail is the data-driven Planets list.
 	var rail := MindTable.new()
