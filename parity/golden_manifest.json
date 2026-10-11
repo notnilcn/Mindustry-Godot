@@ -315,7 +315,7 @@
       "kind": "harness",
       "path": "client/rust/mind-headless/tests/golden/units/units_legs_ik.json",
       "owner_plan": "11",
-      "sha256": "baaa59e0142851868f5b0900c5b43059087b777f03ee9ba65e83b5d0bf9119a5"
+      "sha256": "11894c35110eb63be273b312256d8c744558cc3de4b23e08183ec9b5acbdb0e0"
     },
     {
       "id": "harness_units_units_spawn_group",

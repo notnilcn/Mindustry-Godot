@@ -101,6 +101,42 @@ pub fn spawn_unit_def(
     head
 }
 
+/// `Team.isAI()` plus `team.rules().rtsAi` for `team`, read from the live
+/// world rules; `None` when the world carries no rules context.
+///
+/// With a live session (`CampaignRuntime`):
+/// `(rules.waves || rules.attackMode || state.isCampaign()) && team != rules.defaultTeam && !rules.pvp`
+/// (Team.java `isAI`). Without one, a block-runtime world (`BuildRules`)
+/// treats every team but `defaultTeam` as AI (waves assumed on), and derelict
+/// is always AI (port fallback: `BuildRules.default_team` starts at derelict
+/// before a session sets it).
+pub fn team_ai_flags(world: &World, team: u8) -> Option<(bool, bool)> {
+    if let Some(runtime) = world.get_resource::<crate::game::runtime::CampaignRuntime>() {
+        let session = &runtime.session;
+        let rules = &session.rules;
+        let is_ai = (rules.waves || rules.attack_mode || session.is_campaign())
+            && team != rules.default_team
+            && !rules.pvp;
+        return Some((is_ai, rules.team_rule(team).rts_ai));
+    }
+    world
+        .get_resource::<crate::world::limits::BuildRules>()
+        .map(|rules| (team != rules.default_team || team == 0, false))
+}
+
+/// `UnitType.controller.get(unit)` for a fresh unit on `team`
+/// (UnitType.java:283): `CommandAI` for player-controllable units on a non-AI
+/// (or RTS-AI) team, else the type's AI. Worlds without a rules context (the
+/// headless unit harness) keep the per-type AI ([`select_ai`]).
+pub fn select_team_controller(world: &World, unit: &UnitTypeDef, team: u8) -> AiKind {
+    match team_ai_flags(world, team) {
+        Some((team_is_ai, rts_ai)) => {
+            crate::ai::controller_registry::select_controller(unit, team_is_ai, rts_ai, false)
+        }
+        None => select_ai(unit),
+    }
+}
+
 /// Whether a def's component closure carries the segment chain marker
 /// (`Crawlc` extends `Segmentc` upstream).
 fn is_segmented(unit: &UnitTypeDef) -> bool {
@@ -140,7 +176,7 @@ fn spawn_single(
             },
             physics,
             core,
-            ControllerSlot::new(select_ai(unit)),
+            ControllerSlot::new(select_team_controller(world, unit, team)),
             EntitySeq(seq),
         ))
         .id();

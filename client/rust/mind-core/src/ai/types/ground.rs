@@ -134,19 +134,26 @@ pub fn update_ground(
     }
     let arrive = hit_size.max(DEFAULT_ARRIVE);
 
-    let dest = if current == target {
-        tile_center(target.x() as i32, target.y() as i32)
+    // Arrival is judged against the final target only: steering at an
+    // intermediate flowfield tile uses a zero radius, otherwise a unit sitting
+    // within `hitSize` of the next tile reported "arrived" on its first tick
+    // and its move order was dropped before it moved (PAR-0140).
+    let (dest, arrive) = if current == target {
+        (tile_center(target.x() as i32, target.y() as i32), arrive)
     } else {
-        let width = pathfinder.width;
-        let height = pathfinder.height;
-        let index = current.x() as usize + current.y() as usize * width as usize;
-        let next = pathfinder
-            .get_field(Cost::Ground, team, &[target])
-            .get_target_tile(index, width, height, true);
-        match next {
-            Some(next) => tile_center((next as i32) % width, (next as i32) / width),
-            None => tile_center(target.x() as i32, target.y() as i32),
-        }
+        let dest = {
+            let width = pathfinder.width;
+            let height = pathfinder.height;
+            let index = current.x() as usize + current.y() as usize * width as usize;
+            let next = pathfinder
+                .get_field(Cost::Ground, team, &[target])
+                .get_target_tile(index, width, height, true);
+            match next {
+                Some(next) => tile_center((next as i32) % width, (next as i32) / width),
+                None => tile_center(target.x() as i32, target.y() as i32),
+            }
+        };
+        (dest, 0.0)
     };
 
     let mut pos = pos;
@@ -158,7 +165,8 @@ pub fn update_ground(
         .get::<UnitCore>(entity)
         .copied()
         .unwrap_or(UnitCore::new(0.0));
-    let arrived = approach(&mut pos, &mut vel, &mut core, speed, dest.0, dest.1, arrive);
+    let arrived =
+        approach(&mut pos, &mut vel, &mut core, speed, dest.0, dest.1, arrive) && current == target;
     if let Some(mut stored) = world.get_mut::<Pos>(entity) {
         *stored = pos;
     }

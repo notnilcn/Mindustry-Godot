@@ -29,13 +29,29 @@ pub fn select_controller(
     rts_ai: bool,
     player_controlled: bool,
 ) -> AiKind {
+    use crate::content::registries::units::ControllerKind;
     if player_controlled {
         return AiKind::Player;
     }
-    if !unit.player_controllable || (team_is_ai && !rts_ai) {
-        select_ai(unit)
-    } else {
-        AiKind::Command
+    match unit.controller {
+        // `UnitType.controller` default (UnitType.java:283).
+        ControllerKind::Default => {
+            if !unit.player_controllable || (team_is_ai && !rts_ai) {
+                select_ai(unit)
+            } else {
+                AiKind::Command
+            }
+        }
+        // alpha/beta/gamma: `u.team.isAI() ? new BuilderAI(..) : new CommandAI()`.
+        ControllerKind::BuilderOrCommand => {
+            if team_is_ai {
+                AiKind::Builder
+            } else {
+                AiKind::Command
+            }
+        }
+        // Fixed per-type overrides (`BuilderAI`/`CargoAI`/`AssemblerAI`/...).
+        _ => select_ai(unit),
     }
 }
 
@@ -86,6 +102,23 @@ mod tests {
         );
         // Possessed -> `Player`.
         assert_eq!(select_controller(dagger, true, true, true), AiKind::Player);
+        // Player team (not an AI team) -> `CommandAI`.
+        assert_eq!(
+            select_controller(dagger, false, false, false),
+            AiKind::Command
+        );
+        // `BuilderOrCommand` (alpha/beta/gamma): builder on AI teams, command
+        // otherwise (UnitTypes.java `u.team.isAI() ? BuilderAI : CommandAI`).
+        let alpha = content.unit_by_name("alpha").expect("alpha");
+        assert_eq!(
+            select_controller(alpha, true, false, false),
+            AiKind::Builder
+        );
+        assert_eq!(select_controller(alpha, true, true, false), AiKind::Builder);
+        assert_eq!(
+            select_controller(alpha, false, false, false),
+            AiKind::Command
+        );
         // Non-player-controllable always gets its AI (`dummy` -> `NoAI`).
         let dummy = content.unit_by_name("dummy").expect("dummy");
         assert_eq!(select_controller(dummy, false, false, false), AiKind::NoAi);

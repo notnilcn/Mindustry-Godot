@@ -77,6 +77,12 @@ pub struct UnitRuntime {
     pub pathfinder: Pathfinder,
     /// Team the packed path tiles were built for.
     pub path_team: u8,
+    /// `Vars.controlPath`: per-goal ground fields for `CommandAI` move
+    /// orders. Passability is derived lazily from [`Self::pathfinder`]'s
+    /// packed tiles (the `solid` bit is team-independent).
+    pub control_path: crate::ai::ControlPathfinder,
+    /// Whether [`Self::control_path`] must re-read the path tiles.
+    pub control_path_dirty: bool,
     /// Wave team (`rules.waveTeam`) new spawns default to.
     pub wave_team: u8,
     /// Live units in spawn order.
@@ -117,6 +123,8 @@ impl UnitRuntime {
             grid: grid.clone(),
             pathfinder,
             path_team: wave_team,
+            control_path: crate::ai::ControlPathfinder::new(grid.width(), grid.height()),
+            control_path_dirty: true,
             wave_team,
             units: Vec::new(),
             bullets: Vec::new(),
@@ -140,6 +148,21 @@ impl UnitRuntime {
         self.grid = grid.clone();
         self.pathfinder
             .rebuild(&self.grid, &self.content, self.path_team);
+        self.control_path_dirty = true;
+    }
+
+    /// The control pathfinder with passability current to the last
+    /// [`Self::refresh_grid`] (`ControlPathfinder` world-update hook).
+    pub fn control_path(&mut self) -> &mut crate::ai::ControlPathfinder {
+        if self.control_path_dirty {
+            self.control_path.rebuild_passability(
+                self.pathfinder.width,
+                self.pathfinder.height,
+                &self.pathfinder.tiles,
+            );
+            self.control_path_dirty = false;
+        }
+        &mut self.control_path
     }
 
     /// Clears transient match state after `Logic.reset` (`Groups.clear`).
@@ -521,6 +544,37 @@ pub fn unit_update_system(world: &mut World) {
             // `Player` possession: the host-uploaded axis drives the unit
             // (`DesktopInput.updateMovement`); no target acquisition or pathing.
             crate::ai::types::player::update_player(world, &runtime.grid, &runtime.content, entity);
+        } else if slot.kind == AiKind::Command {
+            // `CommandAI.updateUnit` -> `defaultBehavior`: targeting runs for
+            // the weapons (`updateTargeting`, autoTarget), but movement only
+            // follows an explicit order (`targetPos`); with none the unit
+            // idles in place instead of walking to the core anchor.
+            let (_, mount_target) = acquire_target(world, &runtime, &queries, entity, team);
+            set_mount_targets(world, entity, mount_target);
+            match slot.target {
+                Some(target) => {
+                    let flying = world
+                        .get::<PhysicsComp>(entity)
+                        .is_some_and(|physics| physics.flying);
+                    let arrived = crate::ai::types::command::update_command_move(
+                        world,
+                        runtime.control_path(),
+                        entity,
+                        target,
+                        flying,
+                    );
+                    if arrived && let Some(mut stored) = world.get_mut::<ControllerSlot>(entity) {
+                        // `finishPath`: `targetPos = null`.
+                        stored.target = None;
+                    }
+                }
+                None => {
+                    if let Some(mut vel) = world.get_mut::<crate::entities::comp::Vel>(entity) {
+                        vel.x = 0.0;
+                        vel.y = 0.0;
+                    }
+                }
+            }
         } else {
             // `GroundAI.updateMovement`/`FlyingAI`: pick a core/building anchor
             // and an in-range mount target. Spawned wave units have no command,
@@ -852,8 +906,9 @@ impl Sim {
     /// Published to `MindInput.set_selectable_units_json` every frame so
     /// drag/tap selection and command mode have a list (PAR-0140). Upstream's
     /// selectable list is `Units`-backed, so both teams are listed (the input
-    /// filters by team/`commandable`); `commandable` mirrors
-    /// `UnitType.playerControllable` on the live default team.
+    /// filters by team/`commandable`); `commandable` is `Unit.isCommandable()`
+    /// (`controller instanceof CommandAI`) on the live default team, so the
+    /// player's own unit (`Player` controller) is never selectable.
     pub fn selectable_units_json(&self) -> String {
         let Some(runtime) = self.ecs.0.get_non_send::<UnitRuntime>() else {
             return String::from("[]");
@@ -876,10 +931,9 @@ impl Sim {
                 continue;
             };
             let commandable = team.team == default_team
-                && runtime
-                    .content
-                    .unit(type_comp.type_id)
-                    .is_some_and(|def| def.player_controllable);
+                && entity_ref
+                    .get::<ControllerSlot>()
+                    .is_some_and(|slot| slot.kind == AiKind::Command);
             rows.push(serde_json::json!({
                 "id": seq.0 as i32,
                 "type": type_comp.type_id.get() as i32,
@@ -1407,6 +1461,207 @@ mod tests {
                 .any(|row| row["commandable"].as_bool() == Some(false)),
             "the enemy unit is listed but not commandable"
         );
+    }
+
+    /// Live world with a block runtime and `defaultTeam = 1`; returns the
+    /// dagger content id.
+    fn player_team_world(size: i32) -> (Sim, u16) {
+        let mut sim = Sim::new(1, size, size, BlockId::AIR, BlockId::AIR);
+        install(&mut sim);
+        if let Some(mut rules) = sim
+            .ecs
+            .0
+            .get_resource_mut::<crate::world::limits::BuildRules>()
+        {
+            rules.default_team = 1;
+        }
+        let dagger = sim
+            .unit_runtime()
+            .expect("runtime")
+            .content
+            .unit_by_name("dagger")
+            .expect("dagger")
+            .id
+            .get();
+        (sim, dagger)
+    }
+
+    fn spawn_dagger(sim: &mut Sim, dagger: u16, x: f32, y: f32, team: u8) -> (Entity, i32) {
+        sim.command(SimCommand::SpawnUnit {
+            unit: dagger,
+            x,
+            y,
+            team,
+        })
+        .expect("spawn");
+        let entity = *sim
+            .unit_runtime()
+            .expect("runtime")
+            .units
+            .last()
+            .expect("spawned");
+        let id = sim.ecs.0.get::<EntitySeq>(entity).expect("seq").0 as i32;
+        (entity, id)
+    }
+
+    fn move_order(sim: &mut Sim, id: i32, x: f32, y: f32) {
+        sim.command(SimCommand::UnitCommand {
+            units: smallvec::smallvec![id],
+            command: 0,
+            x,
+            y,
+        })
+        .expect("command");
+    }
+
+    /// PAR-0140 (UnitType.java:283): a player-team dagger gets `CommandAI`
+    /// and idles without an order; a wave-team dagger keeps `GroundAI`.
+    #[test]
+    fn player_team_units_get_command_ai_and_idle() {
+        let (mut sim, dagger) = player_team_world(48);
+        let (friendly, _) = spawn_dagger(&mut sim, dagger, 160.0, 160.0, 1);
+        let (enemy, _) = spawn_dagger(&mut sim, dagger, 320.0, 320.0, 2);
+        let kind = |sim: &Sim, entity| {
+            sim.ecs
+                .0
+                .get::<crate::ai::controller::ControllerSlot>(entity)
+                .expect("slot")
+                .kind
+        };
+        assert_eq!(kind(&sim, friendly), AiKind::Command);
+        assert_eq!(kind(&sim, enemy), AiKind::Ground, "AI team keeps GroundAI");
+
+        let before = *sim.ecs.0.get::<Pos>(friendly).expect("pos");
+        for _ in 0..120 {
+            sim.tick().expect("tick");
+        }
+        let after = *sim.ecs.0.get::<Pos>(friendly).expect("pos");
+        assert_eq!(
+            (before.x, before.y),
+            (after.x, after.y),
+            "an unordered CommandAI unit does not walk to the core anchor"
+        );
+    }
+
+    /// PAR-0140: a MOVE order ~10 tiles away on open ground is reached
+    /// within the `CommandAI` arrival radius and the order clears.
+    #[test]
+    fn command_ai_move_order_arrives_and_clears() {
+        let (mut sim, dagger) = player_team_world(48);
+        let (unit, id) = spawn_dagger(&mut sim, dagger, 80.0, 80.0, 1);
+        // Tile (20, 16): world (160, 128) (`World.unconv`).
+        move_order(&mut sim, id, 160.0, 128.0);
+        let slot = |sim: &Sim| {
+            *sim.ecs
+                .0
+                .get::<crate::ai::controller::ControllerSlot>(unit)
+                .expect("slot")
+        };
+        assert_eq!(slot(&sim).target, Some(TilePos::new(20, 16)));
+        // Dagger speed 0.5 px/tick over ~89 px: well under 400 ticks.
+        let mut arrived_at = None;
+        for tick in 0..400 {
+            sim.tick().expect("tick");
+            if slot(&sim).target.is_none() {
+                arrived_at = Some(tick);
+                break;
+            }
+        }
+        assert!(arrived_at.is_some(), "the order finished");
+        let pos = *sim.ecs.0.get::<Pos>(unit).expect("pos");
+        let dist = ((pos.x - 160.0).powi(2) + (pos.y - 128.0).powi(2)).sqrt();
+        assert!(
+            dist <= crate::ai::types::command::command_arrival_radius(8.0, false) + 1e-3,
+            "arrived within the arrival radius ({dist})"
+        );
+        for _ in 0..60 {
+            sim.tick().expect("tick");
+        }
+        let rest = *sim.ecs.0.get::<Pos>(unit).expect("pos");
+        assert_eq!((pos.x, pos.y), (rest.x, rest.y), "idles after arrival");
+    }
+
+    /// PAR-0140: ground orders route around a wall through the control
+    /// pathfinder instead of stalling against it.
+    #[test]
+    fn command_ai_ground_order_routes_around_walls() {
+        let (mut sim, dagger) = player_team_world(48);
+        let wall = block_id(&sim, "copper-wall");
+        // A vertical wall at x = 20 spanning y = 4..=28, open above.
+        for y in 4..=28 {
+            assert!(
+                sim.command(SimCommand::Place {
+                    x: 20,
+                    y,
+                    block: wall,
+                    rotation: 0,
+                    team: 1,
+                    player: None,
+                })
+                .is_ok(),
+                "wall placed"
+            );
+        }
+        let (unit, id) = spawn_dagger(&mut sim, dagger, 12.0 * 8.0, 16.0 * 8.0, 1);
+        move_order(&mut sim, id, 28.0 * 8.0, 16.0 * 8.0);
+        let mut done = false;
+        for _ in 0..3000 {
+            sim.tick().expect("tick");
+            let slot = sim
+                .ecs
+                .0
+                .get::<crate::ai::controller::ControllerSlot>(unit)
+                .expect("slot");
+            if slot.target.is_none() {
+                done = true;
+                break;
+            }
+        }
+        let pos = *sim.ecs.0.get::<Pos>(unit).expect("pos");
+        assert!(done, "the detour order finished (at {}, {})", pos.x, pos.y);
+        assert!(pos.x > 21.0 * 8.0, "crossed to the far side of the wall");
+    }
+
+    /// PAR-0140: the player's own unit (`Player` controller) is listed but
+    /// not commandable, and a wire order naming it is ignored.
+    #[test]
+    fn player_unit_is_not_commandable() {
+        let (mut sim, dagger) = player_team_world(32);
+        let player = sim
+            .spawn_player_unit("alpha", 1, 64.0, 64.0, 0.0)
+            .expect("player unit");
+        let player_id = sim.ecs.0.get::<EntitySeq>(player).expect("seq").0 as i32;
+        let (friendly, friendly_id) = spawn_dagger(&mut sim, dagger, 96.0, 96.0, 1);
+
+        let rows: serde_json::Value =
+            serde_json::from_str(&sim.selectable_units_json()).expect("json");
+        let row = |id: i32| {
+            rows.as_array()
+                .expect("array")
+                .iter()
+                .find(|row| row["id"].as_i64() == Some(i64::from(id)))
+                .cloned()
+                .expect("row")
+        };
+        assert_eq!(row(player_id)["commandable"].as_bool(), Some(false));
+        assert_eq!(row(friendly_id)["commandable"].as_bool(), Some(true));
+
+        sim.command(SimCommand::UnitCommand {
+            units: smallvec::smallvec![player_id, friendly_id],
+            command: 0,
+            x: 200.0,
+            y: 200.0,
+        })
+        .expect("command");
+        let target = |entity| {
+            sim.ecs
+                .0
+                .get::<crate::ai::controller::ControllerSlot>(entity)
+                .expect("slot")
+                .target
+        };
+        assert_eq!(target(player), None, "the player unit ignores orders");
+        assert_eq!(target(friendly), Some(TilePos::new(25, 25)));
     }
 
     /// The live campaign timer (`TickSet::Campaign` -> `runWave`) drives the

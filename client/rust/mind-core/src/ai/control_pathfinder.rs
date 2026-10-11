@@ -30,7 +30,7 @@ use crate::world::{TilePos, WorldGrid};
 
 use super::astar::{self, AstarScratch, UniformCost};
 use super::pathfinder::cost::Cost;
-use super::pathfinder::path_tile;
+use super::pathfinder::path_tile::{self, PathTile};
 
 /// `ControlPathfinder.clusterSize`.
 pub const CLUSTER_SIZE: i32 = 12;
@@ -141,6 +141,42 @@ impl ControlPathfinder {
         self.fields.clear();
         self.build_portals();
         self.build_inner_edges();
+    }
+
+    /// Lightweight rebuild for the per-request field path only: refreshes the
+    /// ground passability from packed [`PathTile`]s and drops every cached goal
+    /// field, but skips the portal graph and the per-cluster inner-edge A*
+    /// ([`Self::build`] spends ~1 s there on a 256² map; the
+    /// [`Self::get_path_position`] field BFS never reads portals or edges).
+    /// Used by the live `CommandAI` movement (PAR-0140).
+    pub fn rebuild_passability(&mut self, width: i32, height: i32, tiles: &[PathTile]) {
+        self.width = width;
+        self.height = height;
+        self.passable = tiles
+            .iter()
+            .map(|tile| Cost::Ground.passable(*tile))
+            .collect();
+        self.cluster_w = (self.width + CLUSTER_SIZE - 1).max(0) / CLUSTER_SIZE;
+        self.cluster_h = (self.height + CLUSTER_SIZE - 1).max(0) / CLUSTER_SIZE;
+        let cluster_count = (self.cluster_w * self.cluster_h).max(0) as usize;
+        self.cluster_portals = vec![Vec::new(); cluster_count];
+        self.inner_edges = vec![Vec::new(); cluster_count];
+        self.portals.clear();
+        self.fields.clear();
+        self.updates = self.updates.wrapping_add(1);
+    }
+
+    /// Whether every tile on the Bresenham line `from -> to` is passable
+    /// (`ControlPathfinder.raycast` for the ground cost).
+    pub fn line_clear(&self, from: TilePos, to: TilePos) -> bool {
+        self.raycast(
+            from.x() as i32,
+            from.y() as i32,
+            to.x() as i32,
+            to.y() as i32,
+        )
+        .iter()
+        .all(|tile| self.at(tile.x() as i32, tile.y() as i32))
     }
 
     fn build_portals(&mut self) {

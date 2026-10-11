@@ -377,8 +377,9 @@ impl Sim {
     /// `commandUnits` marker: the wire target resolves through
     /// [`resolve_wire_target`] (a packed unit id in `x`, else a world-pixel
     /// position) and lands on the member's move target
-    /// (`ControllerSlot.target`). Non-move commands and stances are not
-    /// applied to live units yet (PAR-0140 round 1).
+    /// (`ControllerSlot.target`). Only default-team units whose controller is
+    /// `CommandAI` accept (`isCommandable`). Non-move commands and stances are
+    /// not applied to live units yet (PAR-0140).
     fn apply_live_unit_command(&mut self, ids: &[i32], command: u16, x: f32, y: f32) -> usize {
         if command != MOVE_COMMAND.raw() {
             return 0;
@@ -396,13 +397,11 @@ impl Sim {
         let default_team = self.live_default_team();
         let target = resolve_wire_target(x, y);
         let tile = match target {
-            crate::input::action::CommandTarget::Position { x, y } => {
-                let ts = crate::config::TILESIZE as f32;
-                Some(TilePos::new(
-                    (x / ts).floor() as i16,
-                    (y / ts).floor() as i16,
-                ))
-            }
+            // `World.toTile` (rounded): tile `t` spans `t*8 ± 4` world px.
+            crate::input::action::CommandTarget::Position { x, y } => Some(TilePos::new(
+                crate::world::WorldGrid::to_tile(x) as i16,
+                crate::world::WorldGrid::to_tile(y) as i16,
+            )),
             crate::input::action::CommandTarget::Unit(target_id) => runtime
                 .units
                 .iter()
@@ -414,8 +413,10 @@ impl Sim {
                 })
                 .and_then(|&entity| self.ecs.0.get::<crate::entities::comp::Pos>(entity))
                 .map(|pos| {
-                    let ts = crate::config::TILESIZE as f32;
-                    TilePos::new((pos.x / ts).floor() as i16, (pos.y / ts).floor() as i16)
+                    TilePos::new(
+                        crate::world::WorldGrid::to_tile(pos.x) as i16,
+                        crate::world::WorldGrid::to_tile(pos.y) as i16,
+                    )
                 }),
             crate::input::action::CommandTarget::Building(pos) => Some(pos),
         };
@@ -438,7 +439,14 @@ impl Sim {
                 .get::<crate::entities::comp::TeamComp>(entity)
                 .map(|team| team.team)
                 .unwrap_or(0);
-            if team != default_team {
+            // `unit.isCommandable()` (`controller instanceof CommandAI`): the
+            // player's own unit and AI-controlled units ignore orders.
+            let commandable = self
+                .ecs
+                .0
+                .get::<crate::ai::controller::ControllerSlot>(entity)
+                .is_some_and(|slot| slot.kind == crate::ai::controller::AiKind::Command);
+            if team != default_team || !commandable {
                 continue;
             }
             orders.push((entity, tile));

@@ -290,6 +290,155 @@ impl CommandAiState {
     }
 }
 
+/// Goal fields kept by the live control pathfinder before the cache is reset
+/// (bounds memory: one field is a full-map weight array).
+const MAX_LIVE_GOAL_FIELDS: usize = 32;
+
+/// Path tiles scanned ahead for the straight-line shortcut (`maxIterations`
+/// in `ControlPathfinder.getPathPosition`).
+const PATH_LOOKAHEAD: usize = 30;
+
+/// `CommandAI.defaultBehavior` arrival radius for the final point:
+/// `command.exactArrival && commandQueue.size == 0 ? 1f : Math.max(5f, unit.hitSize / 2f)`.
+pub fn command_arrival_radius(hit_size: f32, exact_arrival: bool) -> f32 {
+    if exact_arrival {
+        1.0
+    } else {
+        (hit_size / 2.0).max(5.0)
+    }
+}
+
+/// Live `CommandAI` move-command tick (PAR-0140): moves `entity` toward the
+/// world position of `target` (`World.unconv`: `tile * tilesize`).
+///
+/// Flying units move in a straight line (`moveTo(offsetedDestination)`).
+/// Ground units ask `control` (`controlPath.getPathPosition`): when the
+/// straight line to the target is passable they head for it directly,
+/// otherwise they steer at the furthest path tile (within
+/// [`PATH_LOOKAHEAD`]) still visible from their tile. An unreachable target
+/// leaves a player-team unit idle with its order kept (upstream only clears
+/// it for `team.isAI()`). Returns `true` once within
+/// [`command_arrival_radius`] of the target (`finishPath`).
+pub fn update_command_move(
+    world: &mut bevy_ecs::world::World,
+    control: &mut crate::ai::ControlPathfinder,
+    entity: bevy_ecs::entity::Entity,
+    target: crate::world::TilePos,
+    flying: bool,
+) -> bool {
+    use crate::entities::comp::unit::{HitboxComp, PhysicsComp, UnitCore};
+    use crate::entities::comp::{Pos, Vel};
+    use crate::world::{TilePos, WorldGrid};
+
+    let Some(pos) = world.get::<Pos>(entity).copied() else {
+        return false;
+    };
+    let speed = world
+        .get::<PhysicsComp>(entity)
+        .map(|physics| physics.speed)
+        .unwrap_or(1.0)
+        * world
+            .get::<crate::entities::comp::unit::comp::StatusComp>(entity)
+            .map(|status| status.speed_multiplier)
+            .unwrap_or(1.0);
+    let hit_size = world
+        .get::<HitboxComp>(entity)
+        .map(|hitbox| hitbox.hit_size)
+        .unwrap_or(0.0);
+    let dest = (
+        WorldGrid::unconv(target.x() as f32),
+        WorldGrid::unconv(target.y() as f32),
+    );
+    let arrive = command_arrival_radius(hit_size, false);
+    let within = |x: f32, y: f32| {
+        let (dx, dy) = (dest.0 - x, dest.1 - y);
+        dx * dx + dy * dy <= arrive * arrive
+    };
+
+    let mut vel = world
+        .get::<Vel>(entity)
+        .copied()
+        .unwrap_or(Vel { x: 0.0, y: 0.0 });
+    if within(pos.x, pos.y) {
+        vel.x = 0.0;
+        vel.y = 0.0;
+        if let Some(mut stored) = world.get_mut::<Vel>(entity) {
+            *stored = vel;
+        }
+        return true;
+    }
+
+    let move_target = if flying {
+        Some(dest)
+    } else {
+        let current = TilePos::new(
+            WorldGrid::to_tile(pos.x) as i16,
+            WorldGrid::to_tile(pos.y) as i16,
+        );
+        let tile_world = |tile: TilePos| {
+            (
+                WorldGrid::unconv(tile.x() as f32),
+                WorldGrid::unconv(tile.y() as f32),
+            )
+        };
+        if !control.at(current.x() as i32, current.y() as i32)
+            || control.line_clear(current, target)
+        {
+            // Trivially reachable in a straight line (or standing on a solid
+            // tile, where the field has no entry): head for the destination.
+            Some(dest)
+        } else {
+            let goal = target.x() as usize + target.y() as usize * control.width.max(0) as usize;
+            if control.fields.len() >= MAX_LIVE_GOAL_FIELDS && !control.fields.contains_key(&goal) {
+                control.fields.clear();
+            }
+            let result = control.get_path_position(current, target);
+            if result.unreachable {
+                None
+            } else {
+                let mut best = result.next;
+                for &tile in result.path.iter().take(PATH_LOOKAHEAD).skip(1) {
+                    if control.line_clear(current, tile) {
+                        best = Some(tile);
+                    } else {
+                        break;
+                    }
+                }
+                match best {
+                    Some(tile) if tile == target => Some(dest),
+                    Some(tile) => Some(tile_world(tile)),
+                    None => Some(dest),
+                }
+            }
+        }
+    };
+
+    let Some((mx, my)) = move_target else {
+        vel.x = 0.0;
+        vel.y = 0.0;
+        if let Some(mut stored) = world.get_mut::<Vel>(entity) {
+            *stored = vel;
+        }
+        return false;
+    };
+    let mut pos = pos;
+    let mut core = world
+        .get::<UnitCore>(entity)
+        .copied()
+        .unwrap_or(UnitCore::new(0.0));
+    let _ = super::ground::approach(&mut pos, &mut vel, &mut core, speed, mx, my, 0.0);
+    if let Some(mut stored) = world.get_mut::<Pos>(entity) {
+        *stored = pos;
+    }
+    if let Some(mut stored) = world.get_mut::<Vel>(entity) {
+        *stored = vel;
+    }
+    if let Some(mut stored) = world.get_mut::<UnitCore>(entity) {
+        *stored = core;
+    }
+    within(pos.x, pos.y)
+}
+
 /// Maps a command's `ControllerKind` to the runtime [`AiKind`].
 pub const fn ai_kind_from_controller(kind: ControllerKind) -> AiKind {
     match kind {

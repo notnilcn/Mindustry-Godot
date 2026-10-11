@@ -64,10 +64,17 @@ func shown() -> void:
 	# "view current planet by default" (`PlanetDialog.show`): inside a campaign
 	# sector the page opens on that sector's planet, never the chooser.
 	_adopt_current_sector()
-	# A planet already chosen restores the planet view; otherwise the first-run
-	# chooser is shown (`PlanetDialog.shown`).
+	# A planet already chosen restores the planet view. Otherwise the first-run
+	# chooser is shown only when no planet has a base (`PlanetDialog.java:183`
+	# `!settings.getBool("campaignselect") && !content.planets().contains(p ->
+	# p.sectors.contains(Sector::hasBase))`); a returning player opens straight
+	# on the planet page (PAR-0158).
 	if _selected_planet.is_empty():
-		_show_select()
+		var based := _planets_with_base()
+		if based.is_empty():
+			_show_select()
+		else:
+			_show_planet(_boot_planet(based))
 	else:
 		_show_planet(_selected_planet)
 
@@ -109,6 +116,40 @@ func _adopt_current_sector() -> void:
 	var sector_id := int(sector_state.get("sector", -1))
 	if sector_id >= 0 and not _find_sector(planet_name, sector_id).is_empty():
 		_selected_sector = sector_id
+
+
+## Names of the landable planets with at least one `Sector.hasBase` sector
+## (`content.planets().contains(p -> p.sectors.contains(Sector::hasBase))`).
+## The planet rows carry no base flag and the read model only projects the
+## requested planet's sectors, so each landable planet's `has_base` sector rows
+## are read through `campaign_views_json(planet)` without touching the shared
+## cache. Only runs while no planet is chosen yet (the first open of a session).
+func _planets_with_base() -> Array:
+	var out: Array = []
+	for planet_variant in campaign_section("planets"):
+		var planet: Dictionary = planet_variant
+		var planet_name := str(planet.get("name", ""))
+		if planet_name.is_empty() or not bool(planet.get("has_grid", true)):
+			continue
+		var views := _live_campaign_views(planet_name)
+		for sector_variant in views.get("sectors", []) as Array:
+			var sector: Dictionary = sector_variant
+			if bool(sector.get("has_base", false)):
+				out.append(planet_name)
+				break
+	return out
+
+
+## Planet the page opens on when the chooser is skipped (`PlanetDialog`
+## constructor: `state.planet = settings.getString("lastplanet", "serpulo")`,
+## then `show()` falls back to serpulo when that planet is not `selectable`).
+## The port has no GDScript accessor for the `lastplanet` key yet, so the Java
+## default (serpulo) is used when it is selectable (has a base or is the
+## always-unlocked start planet), else the first planet with a base.
+func _boot_planet(based: Array) -> String:
+	if based.has("serpulo") or not _find_planet("serpulo").is_empty():
+		return "serpulo"
+	return str(based[0])
 
 
 ## Full-screen starfield behind the chooser (`sprites/space.png`; the live g3d
