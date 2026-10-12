@@ -45,6 +45,13 @@ var _top_state := ""
 ## One-shot warning when the `block_select_01..10` binds are not all displayable
 ## (the key combo line is silently dropped otherwise).
 var _warned_block_select := false
+## Last block selection mirrored into the palette's checked cell (T4).
+var _last_selected := ""
+## Block name -> cell button for the current grid. Node *names* are not a
+## stable key: a double `_rebuild` in one frame (boot + world load) makes Godot
+## rename the new children to its auto-generated `@Button@N` names, so the
+## checked cell is resolved through this map instead.
+var _block_buttons: Dictionary = {}
 ## Requirement amount labels + their `(have, amount)` pairs, refreshed per frame.
 var _top_amounts: Array[RichTextLabel] = []
 var _top_requirements: Array[Dictionary] = []
@@ -87,6 +94,30 @@ func _process(_delta: float) -> void:
 		_bar_campaign = in_campaign
 		_refresh_input_bar()
 	_update_top_table()
+	_update_selection_highlight()
+
+
+## `PlacementFragment` per-frame `button.update`: the checked cell follows
+## `control.input.block` even when the selection changed outside a palette
+## click (`select_block_by_name`, hotkeys) — PlacementFragment.java:300-330.
+func _update_selection_highlight() -> void:
+	if blocks == null:
+		return
+	var host := get_node_or_null("/root/Spine/SimHost")
+	if host == null or not host.has_method("selected_block"):
+		return
+	var selected := str(host.call("selected_block"))
+	if selected == _last_selected:
+		return
+	_last_selected = selected
+	var active := _block_buttons.get(selected) as BaseButton
+	for button_variant in _block_buttons.values():
+		var button := button_variant as BaseButton
+		if button == null or not is_instance_valid(button):
+			continue
+		# `setPressedNoSignal`: the ButtonGroup must not re-fire `pressed`
+		# (which would re-select through `_select_block`).
+		button.set_pressed_no_signal(button == active)
 
 
 ## `Tex.buttonEdge2` ninepatch frame for the top table (splits 12, margin 5).
@@ -550,6 +581,10 @@ func _rebuild() -> void:
 		return
 	for child in blocks.get_children():
 		child.queue_free()
+	_block_buttons.clear()
+	# A rebuild re-creates the cells; force the next frame's highlight pass to
+	# re-apply instead of trusting the cached selection.
+	_last_selected = "\u0000"
 	# code-instantiated: block buttons come from the content catalogue filtered by
 	# category/search (data-driven, plan 02/07).
 	var list: Array = _catalog.get("categories", [])
@@ -589,3 +624,4 @@ func _rebuild() -> void:
 		button.pressed.connect(func() -> void:
 			_select_block(host, name))
 		blocks.add_child(button)
+		_block_buttons[name] = button
