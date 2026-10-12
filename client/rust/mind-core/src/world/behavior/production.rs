@@ -11,6 +11,8 @@
 //! `countOre` from `onProximityUpdate`). Item/liquid output uses the module API;
 //! cross-building transport is plans 08/09.
 
+use std::sync::Arc;
+
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
@@ -499,17 +501,60 @@ pub fn refresh_drill_ore(
         refresh_pump_floor(world, grid, content, e, tile, size);
         return;
     }
+    // `BeamDrill.updateFacing` / `WallCrafter.getEfficiency` scan the tiles in
+    // front instead of the footprint (PAR-0079).
+    if let BlockKindData::BeamDrill(def) = &inst.kind_data {
+        let Some(table) = world.get_resource::<crate::world::block::BlockTable>() else {
+            return;
+        };
+        let (drops, amount, last) = beam_facing_scan(
+            table,
+            grid,
+            tile,
+            size,
+            building.rotation,
+            def.range,
+            def.tier,
+            &def.blocked_items,
+            |item| content.item(item).map(|item| item.hardness).unwrap_or(0),
+        );
+        if let Some(mut state) = world.get_mut::<DrillState>(e) {
+            state.facing_amount = amount as f32;
+            state.facing_item = last;
+            state.dominant_item = last;
+            state.dominant_items = amount;
+            state.facing_drops = drops
+                .into_iter()
+                .map(|drop| drop.map(|item| item.raw()).unwrap_or(u16::MAX))
+                .collect();
+        }
+        return;
+    }
+    if let BlockKindData::WallCrafter(def) = &inst.kind_data {
+        let Some(table) = world.get_resource::<crate::world::block::BlockTable>() else {
+            return;
+        };
+        let eff =
+            wall_crafter_efficiency(table, grid, tile, size, building.rotation, &def.attribute);
+        if let Some(mut state) = world.get_mut::<DrillState>(e) {
+            state.facing_amount = eff;
+            state.dominant_item = def.output.map(ItemId::new);
+            state.dominant_items = if eff > 0.0 { 1 } else { 0 };
+        }
+        return;
+    }
     let (tier, blocked) = match &inst.kind_data {
         BlockKindData::Drill(def) => (def.tier, def.blocked_items.clone()),
         BlockKindData::BurstDrill(def) => (def.drill.tier, def.drill.blocked_items.clone()),
-        BlockKindData::BeamDrill(def) => (def.tier, def.blocked_items.clone()),
         _ => return,
     };
     let (item, count) = count_ore(
         content,
         grid,
-        tile.x() as i32,
-        tile.y() as i32,
+        // `Tile.getLinkedTilesAs(this, ...)`: the footprint is offset by
+        // `-(size-1)/2` from the centre tile (Java `x + i - (size-1)/2`).
+        i32::from(tile.x()) - (size - 1) / 2,
+        i32::from(tile.y()) - (size - 1) / 2,
         size,
         tier,
         &blocked,
@@ -592,13 +637,28 @@ pub fn count_ore(
     }
     let mut best: Option<(u16, u16)> = None;
     for (item, count) in counts {
+        // `Drill.countOre` sorts by (`lowPriority` ASC, amount ASC, id ASC) and
+        // takes the last: prefer non-low-priority items, then the highest
+        // amount, then the highest id.
+        let low_priority = |raw: u16| {
+            content
+                .item(ItemId::new(raw))
+                .is_some_and(|def| def.low_priority)
+        };
         best = match best {
-            Some((best_item, best_count))
-                if count < best_count || (count == best_count && item > best_item) =>
-            {
-                Some((best_item, best_count))
+            Some((best_item, best_count)) => {
+                let wins = match (low_priority(item), low_priority(best_item)) {
+                    (false, true) => true,
+                    (true, false) => false,
+                    _ => count > best_count || (count == best_count && item > best_item),
+                };
+                if wins {
+                    Some((item, count))
+                } else {
+                    Some((best_item, best_count))
+                }
             }
-            _ => Some((item, count)),
+            None => Some((item, count)),
         };
     }
     match best {
@@ -607,10 +667,175 @@ pub fn count_ore(
     }
 }
 
-/// `BeamDrill` behavior (beam target selection is plan 16; mining math is shared
-/// with [`DrillBehavior`]).
-#[derive(Debug, Default, Clone, Copy)]
-pub struct BeamDrillBehavior;
+/// `BeamDrill.updateFacing`: per facing edge, the first solid tile within
+/// `range` and its `wallDrop` (hardness <= tier, not blocked). Returns the
+/// per-edge drops, the valid-edge count (`facingAmount`) and the single common
+/// item (`lastItem`, `None` when the valid drops differ).
+#[allow(clippy::too_many_arguments)]
+pub fn beam_facing_scan(
+    table: &crate::world::block::BlockTable,
+    grid: &WorldGrid,
+    tile: crate::world::TilePos,
+    size: i32,
+    rotation: u8,
+    range: i32,
+    tier: i32,
+    blocked: &[u16],
+    hardness_of: impl Fn(ItemId) -> i32,
+) -> (smallvec::SmallVec<[Option<ItemId>; 9]>, u16, Option<ItemId>) {
+    let (dx, dy) = match rotation {
+        0 => (1, 0),
+        1 => (0, 1),
+        2 => (-1, 0),
+        _ => (0, -1),
+    };
+    let corner = -((size - 1) / 2);
+    let mut drops: smallvec::SmallVec<[Option<ItemId>; 9]> = smallvec::SmallVec::new();
+    let mut count = 0u16;
+    let mut last: Option<ItemId> = None;
+    let mut multiple = false;
+    for i in 0..size.max(1) {
+        // `Tile.nearbySide(x, y, rotation, i)`: the tile just outside the
+        // footprint's facing edge.
+        let (edge_x, edge_y) = match rotation {
+            0 => (
+                i32::from(tile.x()) + corner + size,
+                i32::from(tile.y()) + corner + i,
+            ),
+            1 => (
+                i32::from(tile.x()) + corner + i,
+                i32::from(tile.y()) + corner + size,
+            ),
+            2 => (
+                i32::from(tile.x()) + corner - 1,
+                i32::from(tile.y()) + corner + i,
+            ),
+            _ => (
+                i32::from(tile.x()) + corner + i,
+                i32::from(tile.y()) + corner - 1,
+            ),
+        };
+        let mut found = None;
+        for j in 0..range.max(1) {
+            let (rx, ry) = (edge_x + dx * j, edge_y + dy * j);
+            if !grid.tiles.in_bounds(rx, ry) {
+                break;
+            }
+            let other = grid.tile(rx, ry);
+            let Some(def) = table.get(other.block).map(|instance| &instance.def) else {
+                continue;
+            };
+            if !def.solid {
+                continue;
+            }
+            if let Some(drop) = def.item_drop
+                && hardness_of(drop) <= tier
+                && !blocked.contains(&drop.raw())
+            {
+                found = Some(drop);
+                if last.is_some() && last != found {
+                    multiple = true;
+                }
+                if last.is_none() {
+                    last = found;
+                }
+                count += 1;
+            }
+            break;
+        }
+        drops.push(found);
+    }
+    if multiple {
+        last = None;
+    }
+    (drops, count, last)
+}
+
+/// `WallCrafter.getEfficiency`: the summed `attribute` of the solid tiles
+/// directly in front of each facing edge (Java `switch` corner math).
+pub fn wall_crafter_efficiency(
+    table: &crate::world::block::BlockTable,
+    grid: &WorldGrid,
+    tile: crate::world::TilePos,
+    size: i32,
+    rotation: u8,
+    attribute: &str,
+) -> f32 {
+    let corner = -((size - 1) / 2);
+    let s = size.max(1);
+    let mut eff = 0.0f32;
+    for i in 0..s {
+        let (rx, ry) = match rotation {
+            0 => (
+                i32::from(tile.x()) + corner + s,
+                i32::from(tile.y()) + corner + i,
+            ),
+            1 => (
+                i32::from(tile.x()) + corner + i,
+                i32::from(tile.y()) + corner + s,
+            ),
+            2 => (
+                i32::from(tile.x()) + corner - 1,
+                i32::from(tile.y()) + corner + i,
+            ),
+            _ => (
+                i32::from(tile.x()) + corner + i,
+                i32::from(tile.y()) + corner - 1,
+            ),
+        };
+        if !grid.tiles.in_bounds(rx, ry) {
+            continue;
+        }
+        let other = grid.tile(rx, ry);
+        let Some(def) = table.get(other.block).map(|instance| &instance.def) else {
+            continue;
+        };
+        if !def.solid {
+            continue;
+        }
+        eff += def
+            .attributes
+            .iter()
+            .find(|(name, _)| name == attribute)
+            .map(|(_, value)| *value)
+            .unwrap_or(0.0);
+    }
+    eff
+}
+
+/// `BeamDrill` behavior (`BeamDrill$BeamDrillBuild.updateTile`).
+///
+/// `updateFacing` runs every tick upstream and reads wall drops plus item
+/// hardness, so the behavior captures the `Item.hardness` table (registered for
+/// the vanilla plasma bores; a mod beam drill registered through
+/// `default_behavior` gets an empty table and no hardness gate).
+#[derive(Debug, Clone)]
+pub struct BeamDrillBehavior {
+    /// `Item.hardness` per item index.
+    pub hardness: Arc<[i32]>,
+}
+
+impl Default for BeamDrillBehavior {
+    fn default() -> Self {
+        Self {
+            hardness: Arc::from([]),
+        }
+    }
+}
+
+impl BeamDrillBehavior {
+    /// Builds the behavior with the content item-hardness table.
+    pub fn from_content(content: &ContentRegistry) -> Self {
+        Self {
+            hardness: content
+                .items()
+                .iter()
+                .map(|item| item.hardness)
+                .collect::<Vec<_>>()
+                .into(),
+        }
+    }
+}
 
 impl BuildingBehavior for BeamDrillBehavior {
     fn create_state(&self, world: &mut World, e: Entity) {
@@ -618,9 +843,157 @@ impl BuildingBehavior for BeamDrillBehavior {
     }
 
     fn update_tile(&self, world: &mut World, e: Entity) {
-        DrillBehavior.update_tile(world, e);
+        let Some(inst) = instance(world, e) else {
+            return;
+        };
+        let drill_time = match &inst.kind_data {
+            BlockKindData::BeamDrill(def) => def.drill_time,
+            _ => return,
+        };
+        let item_capacity = inst.def.item_capacity;
+        let Some((time_scale, efficiency, optional)) = world.get::<Building>(e).map(|building| {
+            (
+                building.time_scale,
+                building.efficiency,
+                building.optional_efficiency,
+            )
+        }) else {
+            return;
+        };
+
+        // `if(timer(timerDump, dumpTime / timeScale)) dump(lastItem ...)`.
+        if crate::world::update::run_timer(world, e, 0, DUMP_TIME / time_scale.max(0.0001)) {
+            let facing = world
+                .get::<DrillState>(e)
+                .and_then(|state| state.facing_item);
+            let todump = facing.filter(|item| transfer::item_count(world, e, *item) > 0);
+            let _ = transfer::dump(world, e, todump);
+        }
+
+        // `multiplier = lerp(1, optionalBoostIntensity, optionalEfficiency)`.
+        let multiplier = 1.0 + (BEAM_OPTIONAL_BOOST_INTENSITY - 1.0) * optional;
+        let drill = (drill_time / multiplier.max(0.0001)).max(0.0001);
+        let edelta = crate::world::update::edelta(world, e);
+        let (amount, drops, finished) = {
+            let Some(mut state) = world.get_mut::<DrillState>(e) else {
+                return;
+            };
+            let amount = state.facing_amount;
+            state.last_drill_speed = (amount * multiplier * time_scale) / drill * efficiency;
+            state.warmup = approach(
+                state.warmup,
+                if efficiency > 0.0 { 1.0 } else { 0.0 },
+                1.0 / 60.0,
+            );
+            state.progress += edelta * multiplier;
+            let finished = state.progress >= drill;
+            if finished {
+                state.progress %= drill;
+            }
+            let drops: Vec<ItemId> = state
+                .facing_drops
+                .iter()
+                .filter(|drop| **drop != u16::MAX)
+                .map(|drop| ItemId::new(*drop))
+                .collect();
+            (amount, drops, finished)
+        };
+        let _ = amount;
+        if finished {
+            // `for(Tile tile : facing){ Item drop = tile.wallDrop(); if(items.total() < itemCapacity && drop != null){ items.add(drop, 1); produced(drop); } }`
+            let total = world
+                .get::<ItemModule>(e)
+                .map(ItemModule::total)
+                .unwrap_or(0);
+            // One item per valid facing edge, capped by the block's capacity.
+            let room = (item_capacity - total).max(0) as usize;
+            for drop in drops.into_iter().take(room) {
+                if let Some(mut items) = world.get_mut::<ItemModule>(e) {
+                    items.add(drop, 1, item_capacity);
+                }
+                self.produced(world, e, drop, 1);
+            }
+        }
     }
 }
+
+/// `WallCrafter` behavior (`WallCrafter$WallCrafterBuild.updateTile`): progress
+/// scales with the summed sand attribute of the tiles in front, and each
+/// completed cycle `offload`s its output.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct WallCrafterBehavior;
+
+impl BuildingBehavior for WallCrafterBehavior {
+    fn create_state(&self, world: &mut World, e: Entity) {
+        if world.get::<DrillState>(e).is_none() {
+            world.entity_mut(e).insert(DrillState::default());
+        }
+    }
+
+    fn update_tile(&self, world: &mut World, e: Entity) {
+        let Some(inst) = instance(world, e) else {
+            return;
+        };
+        let (drill_time, attribute, output) = match &inst.kind_data {
+            BlockKindData::WallCrafter(def) => (def.drill_time, def.attribute.clone(), def.output),
+            _ => return,
+        };
+        let Some((time_scale, efficiency)) = world
+            .get::<Building>(e)
+            .map(|building| (building.time_scale, building.efficiency))
+        else {
+            return;
+        };
+        let _ = &attribute;
+        let item_capacity = inst.def.item_capacity;
+        // `getEfficiency` is refreshed by `refresh_drill_ore` (placement/rotate);
+        // `facing_amount` carries the sum.
+        let eff = world
+            .get::<DrillState>(e)
+            .map(|state| state.facing_amount)
+            .unwrap_or(0.0);
+        let should_consume = output
+            .map(|item| transfer::item_count(world, e, ItemId::new(item)) < item_capacity)
+            .unwrap_or(false);
+        let edelta = crate::world::update::edelta(world, e);
+        if let Some(mut state) = world.get_mut::<DrillState>(e) {
+            state.facing_amount = eff;
+            state.last_drill_speed = eff * time_scale * efficiency;
+            state.warmup = approach(
+                state.warmup,
+                if efficiency > 0.0 { 1.0 } else { 0.0 },
+                1.0 / 40.0,
+            );
+        }
+        // `if(cons && (time += edelta() * eff) >= drillTime){ offload(output); time %= drillTime; }`
+        if should_consume && let Some(item) = output.map(ItemId::new) {
+            let finished = {
+                let Some(mut state) = world.get_mut::<DrillState>(e) else {
+                    return;
+                };
+                state.progress += edelta * eff;
+                if state.progress >= drill_time.max(0.0001) {
+                    state.progress %= drill_time.max(0.0001);
+                    true
+                } else {
+                    false
+                }
+            };
+            if finished {
+                transfer::offload(world, e, item);
+            }
+        }
+        // `if(timer(timerDump, dumpTime / timeScale)) dump(output);`
+        if crate::world::update::run_timer(world, e, 0, DUMP_TIME / time_scale.max(0.0001))
+            && let Some(item) = output.map(ItemId::new)
+        {
+            let _ = transfer::dump(world, e, Some(item));
+        }
+    }
+}
+
+/// `BeamDrill.optionalBoostIntensity`.
+pub const BEAM_OPTIONAL_BOOST_INTENSITY: f32 = 2.5;
 
 /// `Pump` behavior (`Pump.PumpBuild`); floor-liquid source is plan 06/09.
 #[derive(Debug, Default, Clone, Copy)]

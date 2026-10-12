@@ -797,6 +797,17 @@ impl Sim {
                     building.rotation = new_rot;
                 }
                 crate::world::update::no_sleep(&mut self.ecs.0, entity);
+                // Rotation matters for the facing scans (`BeamDrill.updateFacing`
+                // / `WallCrafter.getEfficiency`; PAR-0079 §5).
+                if let Some(runtime) = self.block_runtime.as_ref() {
+                    let content = runtime.content();
+                    crate::world::behavior::production::refresh_drill_ore(
+                        &mut self.ecs.0,
+                        &self.grid,
+                        content,
+                        entity,
+                    );
+                }
                 self.commands_applied = self.commands_applied.wrapping_add(1);
                 return Ok(());
             }
@@ -846,8 +857,10 @@ impl Sim {
                 return Ok(());
             }
             SimCommand::DeletePlans { positions } => {
-                // `InputHandler.deletePlans` over the plan-11 `BuildQueue`.
+                // `InputHandler.deletePlans`: the relay `BuildQueue` plus the
+                // player unit's own `BuilderPlans` queue (PAR-0098 §2a).
                 self.ensure_world_apply().apply_delete_plans(positions)?;
+                self.delete_player_plans(positions);
                 self.commands_applied = self.commands_applied.wrapping_add(1);
                 return Ok(());
             }

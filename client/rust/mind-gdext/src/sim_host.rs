@@ -133,6 +133,9 @@ pub struct MindSimHost {
     /// Monotonic world-load counter (`load_scenario`/`load_sector`), used by the
     /// camera rig to snap on every world load, including same-size reloads.
     world_loads: u64,
+    /// `InputHandler.locked()` mirror (PAR-0100): while set, the player axis is
+    /// forced to zero.
+    input_locked: bool,
     /// Plan-17 `MindFx` sibling (`../MindFx`); the one-way sim→view tick hook.
     fx_host: Option<Gd<Node>>,
     /// Plan-21 relay queue: commands drained and applied at the next tick
@@ -174,6 +177,7 @@ impl INode for MindSimHost {
             content_snapshot: None,
             revision: 0,
             world_loads: 0,
+            input_locked: false,
             fx_host: None,
             pending_commands: VecDeque::new(),
             audio_log: SharedAudioLog::new(),
@@ -702,6 +706,176 @@ impl MindSimHost {
         out.set(&GString::from("liquids"), liquids);
         out.set(&GString::from("heat_buildings"), heat);
         out
+    }
+
+    /// Building state at `(x, y)` (debug seam: `{block, enabled, efficiency,
+    /// potential_efficiency, optional_efficiency, time_scale}` plus
+    /// `{item, liquid, accumulator, emitted}` for sandbox sources/voids).
+    #[func]
+    pub fn building_debug(&self, x: i32, y: i32) -> Dictionary<GString, Variant> {
+        let mut out = Dictionary::<GString, Variant>::new();
+        let entity = self
+            .sim
+            .grid
+            .tiles
+            .in_bounds(x, y)
+            .then(|| self.sim.grid.tile(x, y).build)
+            .flatten();
+        let Some(entity) = entity else {
+            return out;
+        };
+        let world = &self.sim.ecs.0;
+        let Some(building) = world.get::<mind_core::entities::comp::Building>(entity) else {
+            return out;
+        };
+        {
+            let mut put = |key: &str, value: Variant| {
+                out.set(&GString::from(key), &value);
+            };
+            put("block", Variant::from(i64::from(building.block.raw())));
+            put("enabled", Variant::from(building.enabled));
+            put("efficiency", Variant::from(f64::from(building.efficiency)));
+            put(
+                "potential_efficiency",
+                Variant::from(f64::from(building.potential_efficiency)),
+            );
+            put(
+                "optional_efficiency",
+                Variant::from(f64::from(building.optional_efficiency)),
+            );
+            put("time_scale", Variant::from(f64::from(building.time_scale)));
+            // In-progress construction (`ConstructBuild`; PAR-0098 §2d).
+            if let Some(state) = world.get::<mind_core::world::construct::ConstructState>(entity) {
+                put(
+                    "construct_current",
+                    Variant::from(i64::from(state.current.raw())),
+                );
+                put(
+                    "construct_previous",
+                    Variant::from(i64::from(state.previous.raw())),
+                );
+                put(
+                    "construct_progress",
+                    Variant::from(f64::from(state.progress)),
+                );
+                put(
+                    "construct_deconstruct",
+                    Variant::from(state.active_deconstruct),
+                );
+            }
+            // Item module contents for `has_items` blocks (`{item: amount}`).
+            if let Some(content) = self.content_snapshot.as_ref()
+                && let Some(json) = block_items_json(&self.sim, content, x, y)
+            {
+                put("items_json", Variant::from(json.as_str()));
+            }
+            if let Some(state) = world.get::<mind_core::entities::comp::SandboxState>(entity) {
+                put(
+                    "sandbox_item",
+                    state
+                        .item
+                        .map(|item| Variant::from(i64::from(item.raw())))
+                        .unwrap_or(Variant::nil()),
+                );
+                put(
+                    "sandbox_liquid",
+                    state
+                        .liquid
+                        .map(|liquid| Variant::from(i64::from(liquid.raw())))
+                        .unwrap_or(Variant::nil()),
+                );
+                put("accumulator", Variant::from(f64::from(state.accumulator)));
+                put("emitted", Variant::from(i64::from(state.emitted)));
+            }
+        }
+        out
+    }
+
+    /// Building config readback (`Building.config()`) as JSON, for config-UI
+    /// verification (`{"type":"string","value":...}`, `{"type":"item","id":..}`,
+    /// `null` for no config).
+    #[func]
+    pub fn building_config_json(&self, x: i32, y: i32) -> GString {
+        let entity = self
+            .sim
+            .grid
+            .tiles
+            .in_bounds(x, y)
+            .then(|| self.sim.grid.tile(x, y).build)
+            .flatten();
+        let Some(entity) = entity else {
+            return GString::from("null");
+        };
+        let config = mind_core::world::config::read_config(&self.sim.ecs.0, entity);
+        let value = config_to_json(&config);
+        GString::from(value.to_string().as_str())
+    }
+
+    /// Building config readback as a plain string (`nil` for non-string configs).
+    #[func]
+    pub fn building_config_string(&self, x: i32, y: i32) -> Variant {
+        let entity = self
+            .sim
+            .grid
+            .tiles
+            .in_bounds(x, y)
+            .then(|| self.sim.grid.tile(x, y).build)
+            .flatten();
+        let Some(entity) = entity else {
+            return Variant::nil();
+        };
+        match mind_core::world::config::read_config(&self.sim.ecs.0, entity) {
+            mind_core::world::config::ConfigValue::String(text) => Variant::from(text.as_str()),
+            _ => Variant::nil(),
+        }
+    }
+
+    /// Packed RGBA color of a `LightBlock` at `(x, y)` (`nil` when absent).
+    #[func]
+    pub fn light_color(&self, x: i32, y: i32) -> Variant {
+        let entity = self
+            .sim
+            .grid
+            .tiles
+            .in_bounds(x, y)
+            .then(|| self.sim.grid.tile(x, y).build)
+            .flatten();
+        let Some(entity) = entity else {
+            return Variant::nil();
+        };
+        match self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::world::behavior::light::LightState>(entity)
+        {
+            Some(state) => Variant::from(i64::from(state.color)),
+            None => Variant::nil(),
+        }
+    }
+
+    /// `Building.enabled` at `(x, y)` (`nil` when the tile has no building).
+    #[func]
+    pub fn building_enabled(&self, x: i32, y: i32) -> Variant {
+        let entity = self
+            .sim
+            .grid
+            .tiles
+            .in_bounds(x, y)
+            .then(|| self.sim.grid.tile(x, y).build)
+            .flatten();
+        let Some(entity) = entity else {
+            return Variant::nil();
+        };
+        match self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::entities::comp::Building>(entity)
+        {
+            Some(building) => Variant::from(building.enabled),
+            None => Variant::nil(),
+        }
     }
 
     /// Power network values at `(x, y)` (`{graph_id, status, stored, init}`).
@@ -1559,11 +1733,25 @@ impl MindSimHost {
     /// is the shared `move_x`/`move_y` axis; with a player unit it drives the
     /// unit instead of the camera (`DesktopInput.updateMovement`).
     fn player_axis(&self) -> (f32, f32) {
+        if self.input_locked {
+            // `InputHandler.locked()`: movement is gated off (PAR-0100).
+            return (0.0, 0.0);
+        }
         let Some(input) = self.input.clone() else {
             return (0.0, 0.0);
         };
         let axis = input.bind().pan_axis();
         (axis.x, axis.y)
+    }
+
+    /// `InputHandler.locked()` push from `MindInput` (PAR-0100): while set, the
+    /// player axis is forced to zero.
+    #[func]
+    pub fn set_input_locked(&mut self, locked: bool) {
+        self.input_locked = locked;
+        if locked {
+            self.sim.set_player_input(0.0, 0.0);
+        }
     }
 
     /// Player unit world position (`Player` mirror) for the camera follow.
@@ -1790,10 +1978,22 @@ impl MindSimHost {
         GString::from(serde_json::Value::Array(rows).to_string().as_str())
     }
 
+    /// Clears the player unit's queued build plans (`Binding.clearBuilding`;
+    /// PAR-0098 §2a).
+    #[func]
+    pub fn clear_player_build_plans(&mut self) {
+        self.sim.clear_player_build_plans();
+    }
+
+    /// `BuilderComp.updateBuilding` (`InputHandler.update`; PAR-0098 §2b).
+    #[func]
+    pub fn set_player_building_paused(&mut self, paused: bool) {
+        self.sim.set_player_building_paused(paused);
+    }
+
     /// Construct block state at `(x, y)` (`ConstructBuild`): `{block,
     /// progress, deconstructing}`; empty when the tile is not under
-    /// construction.
-    #[func]
+    /// construction.    #[func]
     pub fn construct_progress(&self, x: i32, y: i32) -> Dictionary<GString, Variant> {
         let mut out = Dictionary::new();
         if let Some((block, progress, deconstructing)) = self.construct_at(x, y) {
@@ -2575,6 +2775,32 @@ fn core_items_json(sim: &Sim, content: &ContentRegistry) -> String {
 /// Item counts for the building at `(x, y)` as JSON; `None` when the tile has
 /// no item-capable building or its items total zero. See
 /// [`MindSimHost::block_items_json`].
+/// JSON view of a building's `config()` for the config-UI seams.
+fn config_to_json(value: &mind_core::world::config::ConfigValue) -> serde_json::Value {
+    use mind_core::world::config::ConfigValue as V;
+    use serde_json::json;
+    match value {
+        V::None => serde_json::Value::Null,
+        V::Item(id) => json!({"type": "item", "id": id.raw()}),
+        V::Liquid(id) => json!({"type": "liquid", "id": id.raw()}),
+        V::Block(id) => json!({"type": "block", "id": id.raw()}),
+        V::Unit(id) => json!({"type": "unit", "id": id.raw()}),
+        V::Content(type_, id) => json!({"type": "content", "content": type_.name(), "id": id}),
+        V::Point2(x, y) => json!({"type": "point", "x": x, "y": y}),
+        V::Point2Array(points) => json!({
+            "type": "point_array",
+            "points": points.iter().collect::<Vec<_>>()
+        }),
+        V::Number(number) => serde_json::Number::from_f64(*number)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
+        V::Bool(flag) => serde_json::Value::Bool(*flag),
+        V::Building(_) => json!({"type": "building"}),
+        V::Bytes(bytes) => json!({"type": "bytes", "len": bytes.len()}),
+        V::String(text) => json!({"type": "string", "value": text}),
+    }
+}
+
 fn block_items_json(sim: &Sim, content: &ContentRegistry, x: i32, y: i32) -> Option<String> {
     let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
         return None;

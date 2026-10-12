@@ -150,6 +150,12 @@ pub struct DrillState {
     pub dominant_item: Option<ItemId>,
     /// Number of dominant tiles (`dominantItems`).
     pub dominant_items: u16,
+    /// `BeamDrill.facingAmount`: valid facing edges (BeamDrill/WallCrafter).
+    pub facing_amount: f32,
+    /// `BeamDrill.lastItem`: the facing drop (`None` with mixed fronts).
+    pub facing_item: Option<ItemId>,
+    /// Per-edge facing drops (`BeamDrill.facing`; `u16::MAX` = no wall).
+    pub facing_drops: smallvec::SmallVec<[u16; 9]>,
 }
 
 /// `BeamDrill` build state.
@@ -197,6 +203,9 @@ pub struct SandboxState {
     pub item: Option<ItemId>,
     /// Configured liquid (`LiquidSource.source`).
     pub liquid: Option<crate::content::LiquidId>,
+    /// Debug counter for source emissions (PAR-0077 tests; never serialized,
+    /// `SandboxState` has no behavior `write`/`read`).
+    pub emitted: u32,
 }
 
 /// `Pump`/`SolidPump` build state.

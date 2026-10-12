@@ -139,8 +139,8 @@ impl UnitFactory {
 /// `UnitFactoryBuild` progress state (the mutable half).
 #[derive(Debug, Clone, Default, PartialEq, bevy_ecs::component::Component)]
 pub struct UnitFactoryBuild {
-    /// Selected plan index.
-    pub current_plan: usize,
+    /// Selected plan index (`-1` = none; Java `UnitFactoryBuild.currentPlan`).
+    pub current_plan: i32,
     /// Accumulated build time.
     pub progress: f32,
     /// Stored item counts indexed by item id.
@@ -151,7 +151,7 @@ impl UnitFactoryBuild {
     /// Creates a build for `plan_count` plans and `item_count` items.
     pub fn new(_plan_count: usize, item_count: usize) -> Self {
         Self {
-            current_plan: 0,
+            current_plan: -1,
             progress: 0.0,
             items: vec![0; item_count],
         }
@@ -160,10 +160,12 @@ impl UnitFactoryBuild {
     /// `UnitFactoryBuild.updateTile`: advance progress and produce a unit when
     /// the plan completes and its requirements are held.
     ///
-    /// Returns the produced unit and resets progress.
+    /// Returns the produced unit and resets progress. `None` while no plan is
+    /// selected (`currentPlan == -1`).
     pub fn update(&mut self, factory: &UnitFactory, time_scale: f32) -> Option<UnitTypeId> {
-        let plan = factory.plans.get(self.current_plan)?;
-        if !factory.should_consume(&self.items, self.current_plan) {
+        let index = usize::try_from(self.current_plan).ok()?;
+        let plan = factory.plans.get(index)?;
+        if !factory.should_consume(&self.items, index) {
             // Requirements not met: hold progress (upstream blocks consumption).
             return None;
         }
@@ -188,6 +190,9 @@ pub struct Reconstructor {
     pub upgrades: Vec<(UnitTypeId, UnitTypeId)>,
     /// Construct time in ticks.
     pub construct_time: f32,
+    /// `Reconstructor.capacities`: per-item max, `2x` the `ConsumeItems` stack
+    /// (`Reconstructor.initCapacities`).
+    pub capacities: Vec<i32>,
 }
 
 impl Reconstructor {
@@ -196,7 +201,19 @@ impl Reconstructor {
         Self {
             upgrades,
             construct_time,
+            capacities: Vec::new(),
         }
+    }
+
+    /// `Reconstructor.capacities[item.id]` (`getMaximumAccepted` base value).
+    pub fn capacity(&self, item: ItemId) -> i32 {
+        self.capacities.get(item.index()).copied().unwrap_or(0)
+    }
+
+    /// Whether the configured `ConsumeItems` stacks include `item`
+    /// (`Block.consumesItem`).
+    pub fn accepts(&self, item: ItemId) -> bool {
+        self.capacity(item) > 0
     }
 
     /// `ReconstructorBuild.payload` validation: whether `unit` can upgrade.
@@ -215,6 +232,8 @@ pub struct ReconstructorBuild {
     pub payload: Option<UnitTypeId>,
     /// Accumulated construct time.
     pub progress: f32,
+    /// Configured output command (`ReconstructorBuild.command`).
+    pub command: Option<u16>,
 }
 
 impl ReconstructorBuild {
@@ -232,17 +251,27 @@ impl ReconstructorBuild {
     }
 
     /// `ReconstructorBuild.updateTile`: advance the upgrade; on completion returns
-    /// the upgraded unit type.
-    pub fn update(&mut self, reconstructor: &Reconstructor, time_scale: f32) -> Option<UnitTypeId> {
+    /// the upgraded unit type and keeps `progress %= 1f` (Java does not reset).
+    pub fn update(
+        &mut self,
+        reconstructor: &Reconstructor,
+        delta_progress: f32,
+    ) -> Option<UnitTypeId> {
         let current = self.payload?;
         let target = reconstructor.can_upgrade(current)?;
-        self.progress += time_scale;
+        self.progress += delta_progress;
         if self.progress < reconstructor.construct_time {
             return None;
         }
         self.payload = None;
-        self.progress = 0.0;
+        self.progress %= 1.0;
         Some(target)
+    }
+
+    /// `ReconstructorBuild.constructing()`: a payload with a valid upgrade.
+    pub fn constructing(&self, reconstructor: &Reconstructor) -> bool {
+        self.payload
+            .is_some_and(|payload| reconstructor.can_upgrade(payload).is_some())
     }
 }
 
@@ -614,6 +643,7 @@ mod tests {
         assert!(factory.accepts(copper));
 
         let mut build = UnitFactoryBuild::new(1, factory.capacities.len());
+        build.current_plan = 0;
         build.items[copper.index()] = 20;
         // Not enough time yet.
         assert_eq!(build.update(&factory, 30.0), None);

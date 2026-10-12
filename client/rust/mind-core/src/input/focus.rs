@@ -54,6 +54,12 @@ impl InputLocks {
         Self::default()
     }
 
+    /// `InputHandler.locked()`: any active lock gates movement/shooting/building
+    /// (PAR-0100).
+    pub fn any(&self) -> bool {
+        self.dialog || self.cutscene || self.logic_cutscene || !self.custom.is_empty()
+    }
+
     /// `InputHandler.addLock`.
     pub fn add_lock(&mut self, id: LockId) {
         match id {
@@ -221,6 +227,22 @@ mod tests {
         assert!(guards.locks.remove_lock(LockId::Cutscene));
         assert!(!guards.locked());
         assert!(!guards.locks.remove_lock(LockId::Cutscene));
+    }
+
+    /// PAR-0100: `InputLocks::any()` mirrors `InputHandler.locked()`.
+    #[test]
+    fn locks_any_covers_every_variant() {
+        let mut locks = InputLocks::default();
+        assert!(!locks.any());
+        for id in [LockId::Dialog, LockId::Cutscene, LockId::LogicCutscene] {
+            locks.add_lock(id);
+            assert!(locks.any(), "{id:?} locks");
+            locks = InputLocks::default();
+        }
+        locks.add_lock(LockId::Custom(42));
+        assert!(locks.any(), "custom lock");
+        locks.remove_lock(LockId::Custom(42));
+        assert!(!locks.any());
     }
 
     #[test]

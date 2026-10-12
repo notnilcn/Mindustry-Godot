@@ -61,6 +61,14 @@ impl BuildingBehavior for PayloadSourceBehavior {
         }
     }
 
+    fn config_kinds(&self) -> &'static [crate::world::config::ConfigKind] {
+        // `PayloadSource.buildConfiguration`: blocks + units.
+        &[
+            crate::world::config::ConfigKind::Block,
+            crate::world::config::ConfigKind::Unit,
+        ]
+    }
+
     fn accept_payload(
         &self,
         _world: &World,

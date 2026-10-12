@@ -213,6 +213,9 @@ pub struct DesktopBridge {
     /// A dialog is open (`scene.hasDialog()`): key edges fire no bindings and
     /// the camera does not pan/zoom.
     pub ui_dialog: bool,
+    /// `InputHandler.locked()` mirror (PAR-0100): world clicks and scroll are
+    /// ignored while set.
+    pub locked: bool,
     /// `settings.getBool("commandmodehold", true)`: command mode follows the
     /// held command key when on (upstream default) and toggles on a key press
     /// when off.
@@ -247,6 +250,7 @@ impl DesktopBridge {
             last_tap_type: None,
             text_focus: false,
             ui_dialog: false,
+            locked: false,
             command_mode_hold: true,
         }
     }
@@ -389,9 +393,18 @@ impl DesktopBridge {
             }
             RawEvent::MouseButton { button, down, x, y } => {
                 self.mouse = (x, y);
+                if self.locked && down && (button == "left" || button == "right") {
+                    // `InputHandler.locked()`: world presses are gated off.
+                    return;
+                }
                 self.mouse_button(bindings, &button, down);
             }
-            RawEvent::Scroll { y, .. } => self.scroll(bindings, y),
+            RawEvent::Scroll { y, .. } => {
+                if self.locked {
+                    return;
+                }
+                self.scroll(bindings, y);
+            }
             RawEvent::Magnify { factor } => {
                 if let Some(mut camera) = self.camera.clone() {
                     camera.bind_mut().zoom_by((factor - 1.0) as f64);
@@ -501,11 +514,22 @@ impl DesktopBridge {
                 self.fire_hotkey("zoom");
             }
             "clear_building" => {
+                // `Binding.clearBuilding` (`DesktopInput.java:612`): the player's
+                // queue is cleared too (`player.unit().clearBuilding()`).
                 self.controller.state.select_block(None);
+                if let Some(mut host) = self.host.clone() {
+                    host.bind_mut().clear_player_build_plans();
+                }
                 self.fire_hotkey(name);
             }
             "pause_building" => {
+                // `DesktopInput.java:675`: toggles `isBuilding`, applied to the
+                // unit in `InputHandler.update` (`updateBuilding = isBuilding`).
                 self.controller.state.is_building = !self.controller.state.is_building;
+                if let Some(mut host) = self.host.clone() {
+                    host.bind_mut()
+                        .set_player_building_paused(!self.controller.state.is_building);
+                }
                 self.fire_hotkey(name);
             }
             "block_select_01" | "block_select_02" | "block_select_03" | "block_select_04"
@@ -1067,6 +1091,26 @@ impl DesktopBridge {
     /// `tileTapped` (`InputHandler.java:1973`): a left tap on a placed building
     /// opens its config UI, or its inventory when it stores items.
     fn tile_tapped(&mut self, x: i32, y: i32) {
+        // `SwitchBlock.SwitchBuild.configTapped`: a tap toggles `enabled` and
+        // returns false, so no panel opens (PAR-0108).
+        if self.block_kind_at(x, y) == Some(BlockKind::SwitchBlock) {
+            let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+                return;
+            };
+            let Some(host) = self.host.clone() else {
+                return;
+            };
+            let enabled = match host.bind().building_enabled(x, y).try_to::<bool>() {
+                Ok(enabled) => enabled,
+                Err(_) => return,
+            };
+            self.emit_action(RemoteAction::Configure {
+                x: tx,
+                y: ty,
+                value: mind_core::world::config::ConfigValue::Bool(!enabled),
+            });
+            return;
+        }
         if let Some(spec) = self.config_spec(x, y) {
             self.effects.push(Effect::OpenBlockConfig {
                 x,
@@ -1377,6 +1421,18 @@ impl DesktopBridge {
 
     // ---- world queries ----
 
+    /// Block kind at a tile (`None` out of bounds/unloaded).
+    pub fn block_kind_at(&self, x: i32, y: i32) -> Option<BlockKind> {
+        let host = self.host.clone()?;
+        let guard = host.bind();
+        let content = guard.content_registry()?;
+        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+            return None;
+        };
+        let block = guard.grid().block_at(TilePos::new(tx, ty))?;
+        content.block(block).map(|def| def.kind)
+    }
+
     /// Block name at a tile (`None` out of bounds/unloaded).
     pub fn block_name_at(&self, x: i32, y: i32) -> Option<String> {
         let host = self.host.clone()?;
@@ -1402,12 +1458,76 @@ impl DesktopBridge {
         if !def.configurable {
             return None;
         }
+        // `SwitchBlock.configTapped` toggles on tap; it never opens a panel.
+        if def.kind == BlockKind::SwitchBlock {
+            return None;
+        }
+        // `Reconstructor.buildConfiguration` lists the *held payload's* output
+        // unit commands; the static kinds table cannot express it, so no panel
+        // opens (the command is still configurable through
+        // `configure_building(x, y, "content", "<command>")`).
+        if def.kind == BlockKind::Reconstructor {
+            return None;
+        }
         let mut options: Vec<serde_json::Value> = Vec::new();
         // A behavior that declares its config kinds (`Block.config(...)`) owns
         // the picker; undeclared blocks keep the item/liquid-container fallback.
         let declared = guard.block_config_kinds(block);
-        let item_options =
-            declared.contains(&ConfigKind::Item) || (declared.is_empty() && def.has_items);
+        // `UnitFactory.buildConfiguration` / `PayloadSource`/`PayloadRouter`:
+        // factory plans (or every unit), plus sortable blocks for payloads.
+        if declared.contains(&ConfigKind::Unit) {
+            if def.unit_plans.is_empty() {
+                for entry in content.entries(ContentType::Unit) {
+                    if let Some(name) = entry.name {
+                        options.push(serde_json::json!({
+                            "name": name,
+                            "label": format!("unit.{name}.name"),
+                        }));
+                    }
+                }
+            } else {
+                for plan in &def.unit_plans {
+                    if let Some(unit) = content.unit(plan.unit) {
+                        let name = unit.name.clone();
+                        options.push(serde_json::json!({
+                            "name": name,
+                            "label": format!("unit.{name}.name"),
+                        }));
+                    }
+                }
+            }
+        }
+        if declared.contains(&ConfigKind::Block) {
+            // `Constructor.canProduce` size window (`Init` min/max block size);
+            // payload sources/routers sort any producible block.
+            let (min_size, max_size) = match def.name.as_str() {
+                "constructor" => (1, 2),
+                "large-constructor" => (3, 4),
+                _ => (1, i32::MAX),
+            };
+            for entry in content.entries(ContentType::Block) {
+                let Some(name) = entry.name else {
+                    continue;
+                };
+                let Some(candidate) = content.block_by_name(name) else {
+                    continue;
+                };
+                if candidate.removed
+                    || candidate.build_visibility == mind_core::content::BuildVisibility::Hidden
+                    || candidate.kind == BlockKind::CoreBlock
+                    || candidate.size < min_size
+                    || candidate.size > max_size
+                {
+                    continue;
+                }
+                options.push(serde_json::json!({
+                    "name": name,
+                    "label": format!("block.{name}.name"),
+                }));
+            }
+        }
+        let item_options = options.is_empty()
+            && (declared.contains(&ConfigKind::Item) || (declared.is_empty() && def.has_items));
         if item_options {
             for entry in content.entries(ContentType::Item) {
                 if let Some(name) = entry.name {
@@ -1430,18 +1550,43 @@ impl DesktopBridge {
                 }
             }
         }
-        let text = def.kind == BlockKind::LogicBlock;
-        Some(
-            serde_json::json!({
-                "title": format!("block.{}.name", def.name),
-                "block": def.name,
-                "x": x,
-                "y": y,
-                "text": text,
-                "options": options,
-            })
-            .to_string(),
-        )
+        let text = matches!(def.kind, BlockKind::LogicBlock | BlockKind::MessageBlock);
+        let multiline = def.kind == BlockKind::MessageBlock;
+        let color = def.kind == BlockKind::LightBlock;
+        // Current value readbacks (`MessageBlock.message` / `LightBuild.color`).
+        let current_text = if text {
+            guard
+                .building_config_string(x, y)
+                .try_to::<String>()
+                .ok()
+                .filter(|text| !text.is_empty())
+        } else {
+            None
+        };
+        let current_color = if color {
+            Some(guard.light_color(x, y).try_to::<i64>().unwrap_or_default())
+        } else {
+            None
+        };
+        let mut spec = serde_json::json!({
+            "title": format!("block.{}.name", def.name),
+            "block": def.name,
+            "x": x,
+            "y": y,
+            "text": text,
+            "multiline": multiline,
+            "color": color,
+            "options": options,
+        });
+        if let Some(current) = current_text {
+            spec["current"] = serde_json::Value::from(current);
+        }
+        if let Some(current) = current_color {
+            // The color picker replaces the option grid entirely.
+            spec["current"] = serde_json::Value::from(current);
+            spec["options"] = serde_json::Value::Array(Vec::new());
+        }
+        Some(spec.to_string())
     }
 
     fn enqueue_commands(&self, commands: &[SimCommand]) {

@@ -134,6 +134,12 @@ The core loop is done. The following items remain, in priority order.
   `SimCommand::DeletePlans{positions: smallvec![TilePos::new(14,10).pack()]}`, then
   assert 1 plan remains.
 
+**Status 2026-10-12:** done — the `SimCommand::DeletePlans` arm now also calls
+`Sim::delete_player_plans` (removes queued plans whose packed position is listed) and the
+`clear_building` key arm calls `MindSimHost::clear_player_build_plans`. In-engine on Ground Zero
+170: two queued copper-wall plans disappear after the injected `q` key. Evidence:
+`runs/20261012-session4/section2ab-evidence.json`.
+
 ### 2b. Pause building (`E`)
 - **Java:** `DesktopInput.java:675` toggles `isBuilding`, and
   `player.unit().updateBuilding = isBuilding` (`InputHandler.update`).
@@ -147,6 +153,13 @@ The core loop is done. The following items remain, in priority order.
   toggles `controller.state.is_building`: pass `!is_building`.
 - **Test:** pausing keeps `construct_progress` constant over 30 ticks.
 
+**Status 2026-10-12:** done — `BuilderPlans` gained `update_building` (default `true`, manual
+`Default` impl) and `update_builder` returns right after `validate_plans` when it is false; the
+`pause_building` key arm calls the new `MindSimHost::set_player_building_paused`, which inserts the
+lazily-created `BuilderPlans` when it is still missing. In-engine on Ground Zero 170: with the
+injected `e` key a queued wall plan held at progress 0.0 with an empty tile for 3 s, then built after
+the second `e`. Evidence: `runs/20261012-session4/section2ab-evidence.json`.
+
 ### 2c. Unit overlap check and the "stuck" skip
 - **Java:** `BuilderComp.java:150` `Build.checkNoUnitOverlap(block, x, y)`, where a
   ground unit standing on the footprint rotates the plan to the back of the queue.
@@ -155,6 +168,18 @@ The core loop is done. The following items remain, in priority order.
   overlaps the block footprint rectangle. If any is found, call
   `plans.plans.rotate_left(1); continue;`. Use `core/entities/comp/unit/comp.rs` `PhysicsComp`.
 - **Test:** a dagger spawned on the target tile delays construction until it is moved.
+
+**Status 2026-10-12:** done — `update_builder` now runs `Build.checkNoUnitOverlap` between
+`can_place` and the `has_all` funding check: a non-solid block skips the query, otherwise every
+ground unit (`UnitTypeComp` + `Pos`, `PhysicsComp.flying == false`) whose `HitboxComp` tile hitbox
+(`min(hitSize * 0.66, 7.8)`, `HitboxComp.hitboxTile`) intersects the footprint rect
+(`x * tilesize + offset - size * tilesize / 2`, Arc strict-overlap) rotates the plan to the back
+(`plans.plans.rotate_left(1)`). Test: `sim::builder::tests::unit_overlap_delays_construction`.
+In-engine on Ground Zero 170: a spawned dagger at (141,58) holds a queued copper-wall plan at
+progress 0.0 with an empty tile. Evidence: `runs/20261012-session4/section2c-evidence.json`.
+Divergence to record: the port has no boost/elevation state, so the filter is the unit type's
+`flying` flag; Java's `Units.anyEntities(ground=true)` tests `elevation < 0.001 && !allowLegStep`
+(hovering units at elevation 0 still block upstream).
 
 ### 2d. Save/load of an in-progress ConstructBlock
 - **Gap:** `ConstructBlock` has no behavior `write`/`read`
@@ -171,6 +196,27 @@ The core loop is done. The following items remain, in priority order.
   `build_time`/`requirements` (cost multiplier 1.0, or the BuildRules value if known).
 - **Test:** an IO round-trip of a sim mid-construction (look at existing tests in
   `core/world/building_io.rs` for the pattern) keeps `progress` and `current`.
+
+**Status 2026-10-12:** done (behavior IO) — new `core/world/behavior/construct.rs`
+(`ConstructBehavior`, `version() = 1`) writes/reads Java `ConstructBuild.write`/`read` exactly:
+`progress` (f32), `previous.id`/`current.id` (shorts), then the `accumulator`/`totalAccumulator`/
+`itemsLeft` triplets behind a count byte (`-1` when unset; `itemsLeft` revision >= 1). On read it
+inserts a `ConstructState` and rebuilds the economy through `set_construct`/`set_deconstruct`
+(the target block's `build_time`/`requirements`, `BuildRules.build_cost_multiplier`), keeping
+`current == previous` as the deconstruct signal, then restores `progress`/accumulators. Mapped in
+`default_behavior` (`K::ConstructBlock`). Tests:
+`world::behavior::construct::tests::construct_state_round_trips` and
+`world::building_io::tests::construct_block_progress_round_trips` (a `BuildingCodec` round-trip keeps
+progress 0.4, the target block and the rebuilt `items_left`).
+
+**Blocker found (needs a follow-up, outside this item's change list):** the save *reader* used by
+`load_sector`/`load_grid_file` is `EditorContext::read_building`, which decodes only `DecodedBase`
+and never calls the behavior `read`; the tile-entity chunk is length-prefixed so every per-kind body
+is silently skipped. In-engine: a construct block paused at progress 0.0417 before
+`MindCampaign.run_exit_save()` survives the reload as a tile/entity but comes back without its
+`ConstructState` (`construct_progress` absent). The same applies to turret ammo, crafter warmup,
+drill state and every other per-kind body. Evidence:
+`runs/20261012-session4/section2d-evidence.json`.
 
 ### 2e. Plan/queue drawing and build beam (coordinate with the rendering agent)
 - **Gap:** queued plans (`player_build_plans_json`) and the placement preview
@@ -303,6 +349,8 @@ The core loop is done. The following items remain, in priority order.
   works (`MindCampaign.start_map(name)` + `set_rules_json` with
   `"infiniteResources":true`); that is unverified.
 
+**Status 2026-10-12:** done — six per-kind behaviors (`ItemSourceBehavior`, `ItemVoidBehavior`, `LiquidSourceBehavior`, `LiquidVoidBehavior`, `PowerSourceBehavior`, `PowerVoidBehavior`) replace the single `SandboxBehavior`; `power-void` gained its `consumePower(f32::MAX)` and `item-void` its Java `solid/update` flags; ItemSource/LiquidSource gained Java `write`/`read` (LiquidSource revision 1); the `parity/golden_content.json` item-void fields were regenerated and audit-verified. In-engine on Ground Zero 170 (the host's `placement_gate` is off, so sandbox blocks are placeable there): the item source emitted exactly 1000 items in 600 stepped ticks (100/s) into the core; an adjacent item void halved that to exactly 500; the liquid source filled to 9986.67 and fed a conduit (6.67); the power source reported graph satisfaction 1.0 with the battery at status 1.0. Evidence: `runs/20261012-session4/PAR-0077-evidence.json`, `runs/20261012-session4/PAR-0077-sandbox-sources.png`.
+
 ---
 
 ## 4. PAR-0076: reconstructors cannot be supplied and upgrade for free
@@ -378,6 +426,26 @@ The core loop is done. The following items remain, in priority order.
   unloaders cannot see them. Do **not** copy that pattern. Use `ItemModule` for the
   reconstructor. Migrating the unit factory to `ItemModule` is a follow-up (§10).
 
+**Status 2026-10-12:** done — `BlockDef` gained `construct_time` (`Reconstructor.constructTime`:
+additive 600, multiplicative 1800, exponential 5400, tetrative 14400; Erekir refabricators
+1800/3000/2700/3600) and the reconstructor specs gained Java's `itemCapacity` values
+(`initCapacities`: 80/260/1700/2000 and 80/120/100/200); `Consume::Items` consumers now set
+`has_items`/`accepts_items` in `init_self` (Java `ConsumeItems.apply`). `ReconstructorBehavior`
+computes `capacities` like `initCapacities`, implements `accept_item`/`get_maximum_accepted`
+(`capacities[item] * rules.unitCost(team)`)/`handle_item`/`accept_stack`/`handle_stack`, and its
+`update_tile` advances `edelta * rules.unitBuildSpeed(team)` only while a valid payload is held,
+removes the `ConsumeItems` stacks (`trigger` with the `unitCost` multiplier) and spawns the upgrade;
+`ReconstructorBuild::update` takes the delta and keeps `progress %= 1f`. `parity/golden_content.json`
+regenerated (9 entries: `has_items` for neoplasia-reactor + the 8 reconstructors, `item_capacity`
+for the reconstructors) and audit-verified. Tests:
+`sim::production_tests::reconstructor_needs_items_and_time` (no items -> payload waits 700 ticks;
+40/40 + power-source -> mace in the 600..700 window and items consumed to 0) and
+`world::blocks::units::behavior::tests::additive_reconstructor_accepts_only_its_items`. In-engine
+Ground Zero 170: an item source feeding an additive reconstructor is rejected for copper and fills
+silicon to exactly 80 (2x the requirement) and stops. Evidence:
+`runs/20261012-session4/PAR-0076-evidence.json`. The payload-to-mace half is headless-only (no
+in-engine seam loads a unit payload into a reconstructor).
+
 ---
 
 ## 5. PAR-0079: Erekir plasma-bore and cliff-crusher never produce
@@ -441,6 +509,27 @@ The core loop is done. The following items remain, in priority order.
   `cliff_crusher_makes_sand_from_sand_walls`.
 - **In-engine:** blocked. The imported profile has no launchable Erekir sector (ledger
   note). Verify headless only.
+
+**Status 2026-10-12:** done (headless per the plan). `refresh_drill_ore` gained the facing
+scans: `beam_facing_scan` (Java `BeamDrill.updateFacing`: copy the facing edge via
+`Tile.nearbySide`, step `range`, take the first solid wall's `wallDrop` with
+`hardness <= tier` and not blocked) and `wall_crafter_efficiency` (Java
+`WallCrafter.getEfficiency`: the summed named attribute of the tiles directly in front),
+stored on `DrillState.facing_amount`/`facing_item`/`facing_drops`. `BeamDrillBehavior::update_tile`
+ports `BeamDrill.updateTile` (progress = `edelta * lerp(1, 2.5, optionalEfficiency)`, one item per
+valid facing edge per `drillTime`, dump timer) and the new `WallCrafterBehavior` ports
+`WallCrafter.updateTile` (progress = `edelta * eff`, `offload`/`dump` per `drillTime`).
+`valid_place_at` applies both `canPlaceOn` checks, `SimCommand::Rotate` re-runs
+`refresh_drill_ore`, and `world/blocks/production.rs::register` supplies the item-hardness table to
+the plasma bores. Two content gaps surfaced by the tests: the four `ore-wall-*` blocks were missing
+Java `StaticWall.solid` (so no facing scan could ever see them) and the vanilla walls were missing
+`Attribute.sand` (`stone-wall` 1, `dune-wall` 2, `sand-wall` 2, …); both are now ported and the
+golden was regenerated for the 4 `solid` flags (audit-verified). Tests:
+`sim::production_tests::plasma_bore_mines_wall_ore` and
+`sim::production_tests::cliff_crusher_makes_sand_from_sand_walls`. Evidence:
+`runs/20261012-session4/PAR-0079-evidence.json`. Deviation recorded: Java rescans the facing tiles
+every tick; the port scans at placement/rotation (`refresh_drill_ore`) and reads the cached facing
+state in `update_tile`.
 
 ---
 
@@ -512,6 +601,16 @@ How the config UI works today:
 5. Test: `core/sim` test: configure a `message` block with `Text("hello\nworld")` and
    assert `MessageBehavior::config` returns `String("hello\nworld")`.
 
+**Status 2026-10-12:** done — wire `ConfigValue::Text(String)` (encode tag 6, decode 6, log
+round-trip entry) lowers to `WorldConfigValue::String` in `resolve_config`;
+`MindInput.configure_building` routes `"string"`/`"int"` straight into the command queue
+(`SimCommand::Configure` with the wire value) instead of collapsing through
+`RemoteAction`/`to_sim_config`. New `MindSimHost` seams: `building_config_json`,
+`building_config_string` and `building_enabled`. Test:
+`sim::production_tests::message_block_accepts_text_config`. In-engine on Ground Zero 170:
+`configure_building(145,65,"string","hello\nworld")` on a placed `message` block reads back
+`building_config_json` = `{"type":"string","value":"hello\nworld"}`.
+
 ### 7.1 PAR-0108: switch toggle
 - **Java:** `J/world/blocks/logic/SwitchBlock.java:28` `config(Boolean.class, ...)` and
   `:58-62` `configTapped(){ configure(!enabled); clickSound.at(this); return false; }`.
@@ -529,6 +628,15 @@ How the config UI works today:
   `get_node("/root/Spine/Input").configure_building(130,55,"bool","true")`, then assert
   `building_enabled` flips. Add a Rust unit test for `SwitchBehavior` configured Bool
   (it may already exist).
+
+**Status 2026-10-12:** done — `tile_tapped` toggles a `SwitchBlock` through
+`RemoteAction::Configure{Bool(!enabled)}` and returns before the panel logic, and `config_spec`
+returns `None` for switches (`configTapped` opens nothing). New `block_kind_at(x,y)` query on the
+desktop bridge. Test: `logic::blocks::switch::tests::switch_config_toggles_enabled`. In-engine on
+Ground Zero 170: a real injected left click (`Input.parse_input_event` at
+`Camera2D.tile_to_screen(140,60)`) flipped a placed switch `true -> false` and a second click
+`false -> true`, with `building_config_json` reading back `true`. Evidence:
+`runs/20261012-session4/PAR-0108-evidence.json`.
 
 ### 7.2 PAR-0093: message and illuminator
 - **Message, Java:** `J/world/blocks/logic/MessageBlock.java:41-60` (`config(String)`:
@@ -561,6 +669,21 @@ How the config UI works today:
   Light rendering itself belongs to the render agent; expose
   `MindSimHost::light_color(x,y)`.
 - **Tests:** message `Text` round-trip (§7.0); `LightBehavior` configured/config round-trip.
+
+**Status 2026-10-12:** done — `MessageDef` now carries Java's `maxTextLength = 400`/`maxNewlines = 24`
+(the port defaulted to 0, so every non-empty message was rejected); `config_spec` marks
+`text`/`multiline` for `MessageBlock`, `color` for `LightBlock` (with `options` cleared) and emits the
+`current` readback (message text via `building_config_string`, color via the new
+`MindSimHost::light_color`); `configure_building` accepts unsigned 32-bit `"int"` values (colors are
+negative i32 in Java). New `core/world/behavior/light.rs`: `LightBehavior`/`LightState` (default
+`Pal.accent.rgba()` = `0xffd37fff`, `configured(Number)`, `config_kinds = [Number]`, revision-0
+`write`/`read` mirroring `LightBuild`), mapped in `default_behavior`. The fragment's text editor
+prefills `current`, uses a `TextEdit` for messages and gained a `ColorPickerButton` that submits
+`("int", str(color.to_rgba32()))`. Tests: `world::behavior::light::tests::{light_config_round_trip,
+light_color_round_trips_through_io}`. In-engine on Ground Zero 170: a placed illuminator shows the
+color spec (`current` 4292050943) and accepts `configure_building(...,"int","4278190335")`
+(`light_color` = 4278190335); a placed message shows `text`/`multiline` with its `current` text
+prefilled. Evidence: `runs/20261012-session4/PAR-0093-evidence.json`.
 
 ### 7.3 PAR-0092: unit factories, reconstructors and payload blocks
 - **Java:**
@@ -615,6 +738,27 @@ How the config UI works today:
   otherwise verify in-engine: tap a placed `ground-factory` and read the
   `block_config` node's `_config` via
   `return get_node("/root/Spine/Ui/UiRoot/OverlayLayer/block_config")._config`).
+
+**Status 2026-10-12:** done — `UnitFactoryBuild.current_plan` is now `i32` (`-1` = none, Java
+`currentPlan`), `created()` auto-selects the first *unlocked* plan, and the behavior implements
+`config_kinds = [Unit]`, `config` (plan index), `configured` (`Number` index / `Unit` lookup /
+`None` clears, progress reset on change) and revision-3 IO (`progress` + `currentPlan` short +
+unset `commandPos`/`command` via `TypeIO`). `ReconstructorBuild` gained `command: Option<u16>`
+with a `Content(UnitCommand, id)`/`None` config, `config()` readback and revision-3 IO
+(`progress`, nullable `commandPos`, `TypeIO` command) — applying the command to the upgraded
+unit's `CommandAI` and the reconstructor's command picker are recorded gaps (the static
+`config_kinds` table cannot express the held payload's output unit commands, so `config_spec`
+returns `None` for reconstructors; the command is still settable through
+`configure_building(x,y,"content","<command>")`). The constructor / payload-source / payload-router
+behaviors now declare their `config_kinds`, and `config_spec` lists factory plans
+(`unit.<name>.name`) or every unit, plus `Constructor.canProduce`-filtered blocks
+(`size` window 1..2 / 3..4, visible, non-core). Tests:
+`sim::production_tests::unit_factory_config_selects_plan`,
+`world::blocks::payloads::constructor::tests::payload_blocks_declare_config_kinds`. In-engine on
+Ground Zero 170: the air-factory panel lists `flare`/`mono` and
+`configure_building(136,62,"content","mono")` selects plan 1; the constructor panel lists 144
+size-filtered blocks starting with `graphite-press`/`silicon-smelter`/`kiln`. Evidence:
+`runs/20261012-session4/PAR-0092-evidence.json`.
 
 ### 7.4 Other config blocks: sanity sweep
 For each block, place it, tap it and configure it, then assert `config()` with a small
@@ -738,6 +882,17 @@ This avoids a seam per block.
   rect via `godot_input`, and assert the zoom is unchanged. With the console closed, the
   same event changes the zoom.
 
+**Status 2026-10-12:** done — `InputLocks::any()` (`InputHandler.locked()`); `MindInput`
+mirrors the lock state into `DesktopBridge.locked` and pushes it through the new
+`MindSimHost::set_input_locked` (forcing `player_axis` to zero). Scroll events are skipped when
+the lock is set, when the hovered control sits inside a `ScrollContainer` (`ui_scroll_at`) or when
+the `console`/`chat` HUD fragments are visible (`DesktopInput.java:478`); `DesktopBridge` ignores
+left/right presses and scroll while locked. Tests:
+`input::focus::tests::locks_any_covers_every_variant` (plus the existing `handle_scroll` test).
+In-engine on Ground Zero 170: with the console open a wheel event at the screen centre leaves the
+camera zoom at 4; with the console hidden the same event zooms to 5. Evidence:
+`runs/20261012-session4/PAR-0100-evidence.json`.
+
 ---
 
 ## 10. Broad per-family sweep: known broken or unverified
@@ -778,6 +933,19 @@ New gaps found during this work (not in the ledger yet; report them):
 6. The core starts with 0 items on a fresh Ground Zero. That matches Java for the
    tutorial, but means construction now really requires mining first. Expect players and
    tests to need `debug_add_core_items`.
+
+**Status 2026-10-12:** done — `refresh_drill_ore` now offsets the ore scan by `-(size-1)/2`
+(Java `Tile.getLinkedTilesAs`), `count_ore` applies Java's `Drill.countOre` ordering
+(`lowPriority` ASC, amount ASC, id ASC, last wins), and the `ConsumeGenerator` behavior dumps its
+`output_liquid` after the add (`dumpLiquid(liquid, 2f, -1)`). Tests:
+`sim::production_tests::laser_drill_counts_centered_footprint` (ore only under the left column of a
+3x3 laser drill at (8,8) counts 3; a tile the old `x..x+size` scan would have counted is ignored)
+and `sim::production_tests::generator_dumps_output_liquid` (a fed pyrolysis generator fills an
+adjacent conduit). In-engine on Ground Zero 170: a pyrolysis generator fed by slag + arkycite
+liquid sources ran at efficiency 1.0 and its conduit grew water (0.083 -> 0.25). Evidence:
+`runs/20261012-session4/section10-drill-generator-evidence.json`. Also found while here: drills have
+no `canPlaceOn` ore requirement in the port (`world/build.rs::can_place_on` is a stub), and
+`content/registries/blocks/*` never sets `destructible` for blocks that Java marks destructible-only.
 
 ---
 

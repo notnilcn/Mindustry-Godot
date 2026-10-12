@@ -130,6 +130,10 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         configurable: Some(true),
+        // `additiveReconstructor`: `initCapacities` -> `itemCapacity = 80`,
+        // `constructTime = 60 * 10`.
+        item_capacity: Some(80),
+        construct_time: Some(600.0),
         upgrades: vec![
             ("nova", "pulsar"),
             ("dagger", "mace"),
@@ -159,6 +163,10 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         configurable: Some(true),
+        // `multiplicativeReconstructor`: `itemCapacity = 260`,
+        // `constructTime = 60 * 30`.
+        item_capacity: Some(260),
+        construct_time: Some(1800.0),
         upgrades: vec![
             ("horizon", "zenith"),
             ("mace", "fortress"),
@@ -194,6 +202,10 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         configurable: Some(true),
+        // `exponentialReconstructor`: `itemCapacity = 1700`,
+        // `constructTime = 60 * 60 * 1.5`.
+        item_capacity: Some(1700),
+        construct_time: Some(5400.0),
         upgrades: vec![
             ("zenith", "antumbra"),
             ("spiroct", "arkyid"),
@@ -230,6 +242,10 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         configurable: Some(true),
+        // `tetrativeReconstructor`: `itemCapacity = 2000`,
+        // `constructTime = 60 * 60 * 4`.
+        item_capacity: Some(2000),
+        construct_time: Some(14400.0),
         upgrades: vec![
             ("antumbra", "eclipse"),
             ("arkyid", "toxopid"),

@@ -556,6 +556,75 @@ mod tests {
         assert_eq!(state.warmup, 0.25);
     }
 
+    /// PAR-0098 §2d: an in-progress `ConstructBuild` keeps its progress, its
+    /// target block and its accumulators across a `BuildingCodec` round-trip.
+    #[test]
+    fn construct_block_progress_round_trips() {
+        use crate::content::BlockId;
+        use crate::world::construct::ConstructState;
+
+        let content = test_registry();
+        let table = BlockTable::build_default(&content).expect("table");
+        let inst = table.get_named("build1").expect("build1").clone();
+        let mut world = EcsWorld::new();
+        world.insert_resource(BuildRules::default());
+        world.insert_resource(table);
+        let src = inst.spawn(
+            &mut world,
+            0,
+            TilePos::new(3, 3),
+            0,
+            0,
+            content.items().len(),
+            content.liquids().len(),
+        );
+        let wall = content.block_id("copper-wall").expect("copper-wall");
+        let (build_time, requirements) = {
+            let def = content.block(wall).expect("wall");
+            (def.build_time, def.requirements.clone())
+        };
+        let mut state = ConstructState::construct(BlockId::AIR, wall, 0.0);
+        state.set_construct(BlockId::AIR, wall, build_time, &requirements, 1.0);
+        state.progress = 0.4;
+        world.entity_mut(src).insert(state);
+        let expected_items_left = world
+            .get::<ConstructState>(src)
+            .map(|state| state.items_left.clone())
+            .unwrap_or_default();
+
+        let mut bytes = Vec::new();
+        {
+            let mut writer = WireWriter::new(&mut bytes);
+            BuildingCodec::write(&world, src, &mut writer, false).expect("write");
+        }
+        let inst = world
+            .get_resource::<BlockTable>()
+            .expect("table")
+            .get_named("build1")
+            .expect("build1")
+            .clone();
+        let dst = inst.spawn(
+            &mut world,
+            1,
+            TilePos::new(4, 4),
+            0,
+            0,
+            content.items().len(),
+            content.liquids().len(),
+        );
+        let mut reader = WireReader::new(&bytes);
+        BuildingCodec::read(&mut world, dst, &mut reader, 3).expect("read");
+        let state = world.get::<ConstructState>(dst).expect("construct state");
+        assert_eq!(state.progress, 0.4, "progress preserved");
+        assert_eq!(state.current, wall, "target block preserved");
+        assert_eq!(state.previous, BlockId::AIR);
+        assert_eq!(state.items_left, expected_items_left, "economy rebuilt");
+        assert!(
+            state.build_cost > 0.0,
+            "build cost rebuilt from the block def"
+        );
+    }
+
     #[test]
     fn building_revision_manifests_parse() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("revisions/buildings");

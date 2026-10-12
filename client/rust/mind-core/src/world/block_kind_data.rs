@@ -153,8 +153,8 @@ pub struct FrackerDef {
 pub struct WallCrafterDef {
     /// `WallCrafter.drillTime`.
     pub drill_time: f32,
-    /// `WallCrafter.attribute` index, `-1` = none.
-    pub attribute: i16,
+    /// `WallCrafter.attribute` name (Java `Attribute.sand`).
+    pub attribute: String,
     /// Item output (`WallCrafter.output`).
     pub output: Option<u16>,
 }
@@ -625,7 +625,12 @@ impl BlockKindData {
             BlockKind::LogicBlock => BlockKindData::Logic(LogicBlockDef::default()),
             BlockKind::MemoryBlock => BlockKindData::Memory(MemoryDef::default()),
             BlockKind::SwitchBlock => BlockKindData::Switch(SwitchDef::default()),
-            BlockKind::MessageBlock => BlockKindData::Message(MessageDef::default()),
+            // `MessageBlock.maxTextLength = 400`, `maxNewlines = 24`.
+            BlockKind::MessageBlock => BlockKindData::Message(MessageDef {
+                max_text: 400,
+                max_newlines: 24,
+                privileged: false,
+            }),
             BlockKind::LogicDisplay => BlockKindData::Display(DisplayDef::default()),
             BlockKind::TileableLogicDisplay => {
                 BlockKindData::TileableDisplay(TileableDisplayDef::default())
@@ -967,7 +972,9 @@ impl BlockKindData {
         if let BlockKindData::WallCrafter(def) = self {
             def.drill_time = drill_time;
             def.output = output;
-            def.attribute = -1;
+            // `WallCrafter.attribute = Attribute.sand` (the name-keyed form the
+            // port's `BlockDef.attributes` uses).
+            def.attribute = "sand".to_owned();
         }
     }
 

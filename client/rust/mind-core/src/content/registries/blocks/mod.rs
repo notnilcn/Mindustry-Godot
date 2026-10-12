@@ -1350,6 +1350,8 @@ pub struct BlockSpec {
     pub subclass: Option<BlockKind>,
     /// `GenericCrafter.craftTime` (ticks); plan 07 R2 reconciliation.
     pub craft_time: Option<f32>,
+    /// `Reconstructor.constructTime` (ticks).
+    pub construct_time: Option<f32>,
     /// `Block.commandable` (unit command center; plan 11/15 `commandBuilding`).
     pub commandable: Option<bool>,
     /// Floor/environment attributes (`Floor.attributes`; plan 09 R3 steam vents).
@@ -1445,6 +1447,7 @@ impl Default for BlockSpec {
             quick_rotate: None,
             subclass: None,
             craft_time: None,
+            construct_time: None,
             commandable: None,
             attributes: Vec::new(),
         }
@@ -2136,6 +2139,8 @@ pub struct BlockDef {
     pub subclass: BlockKind,
     /// `GenericCrafter.craftTime` (ticks); plan 07 R2 reconciliation.
     pub craft_time: f32,
+    /// `Reconstructor.constructTime` (ticks).
+    pub construct_time: f32,
     /// `Block.commandable` (unit command center; plan 11/15 `commandBuilding`).
     pub commandable: bool,
 }
@@ -2391,6 +2396,7 @@ impl BlockDef {
             quick_rotate: spec.quick_rotate.unwrap_or(true),
             subclass,
             craft_time: spec.craft_time.unwrap_or(0.0),
+            construct_time: spec.construct_time.unwrap_or(0.0),
             commandable: spec.commandable.unwrap_or(false),
         };
         if let Some(generate) = generate_icons {
@@ -2732,16 +2738,20 @@ impl Content for BlockDef {
 
         // `Consume.apply(Block)` flags: liquid consumers imply `hasLiquids`
         // (`ConsumeLiquidBase`/`ConsumeLiquids`/`ConsumeLiquidFilter`) and
-        // `ConsumePower` implies `hasPower`.
+        // `ConsumePower` implies `hasPower`. `ConsumeItems.apply` sets
+        // `hasItems`/`acceptsItems`.
         for spec in &self.consumes {
             match &spec.consume {
+                Consume::Items(_) => {
+                    self.has_items = true;
+                    self.accepts_items = true;
+                }
                 Consume::Liquid { .. } | Consume::Liquids(_) | Consume::Coolant { .. } => {
                     self.has_liquids = true;
                 }
                 Consume::Power { .. } => {
                     self.has_power = true;
                 }
-                _ => {}
             }
         }
 

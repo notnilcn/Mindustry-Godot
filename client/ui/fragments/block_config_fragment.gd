@@ -53,25 +53,72 @@ func _rebuild() -> void:
 	for child in body.get_children():
 		child.queue_free()
 	# code-instantiated: config rows come from the `config_spec` JSON (item or
-	# liquid option list / logic code field) produced by `MindInput`; the count
-	# is runtime content, not authorable in the scene.
-	if bool(_config.get("text", false)):
+	# liquid option list / logic code field / color picker) produced by
+	# `MindInput`; the count is runtime content, not authorable in the scene.
+	if bool(_config.get("color", false)):
+		_build_color_picker()
+	elif bool(_config.get("text", false)):
 		_build_text_editor()
 	else:
 		_build_options()
 
 
 func _build_text_editor() -> void:
-	var field := LineEdit.new()
+	# `MessageBlock.buildConfiguration` opens a text dialog; the illuminator-style
+	# color spec never reaches this branch.
+	var multiline := bool(_config.get("multiline", false))
+	var field: Control
+	if multiline:
+		var edit := TextEdit.new()
+		edit.custom_minimum_size = Vector2(240, 90)
+		edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+		edit.text = str(_config.get("current", ""))
+		field = edit
+	else:
+		var line := LineEdit.new()
+		line.text = str(_config.get("current", ""))
+		field = line
 	field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	body.add_child(field)
 	var row := HBoxContainer.new()
 	body.add_child(row)
 	var apply := Button.new()
 	apply.text = _t("@ok", "OK")
-	apply.pressed.connect(func() -> void: _submit("string", field.text))
+	apply.pressed.connect(func() -> void: _submit("string", _text_of(field)))
 	row.add_child(apply)
 	_add_close_button(row)
+
+
+## Reads the submitted text from a `LineEdit` or `TextEdit`.
+func _text_of(field: Control) -> String:
+	if field is TextEdit:
+		return (field as TextEdit).text
+	if field is LineEdit:
+		return (field as LineEdit).text
+	return ""
+
+
+## `LightBlock.buildConfiguration`: a color picker; the change submits the packed
+## `Color.rgba()` integer (`("int", str(color.to_rgba32()))`).
+func _build_color_picker() -> void:
+	# code-instantiated: the picker is one widget driven by the spec's
+	# `current` color; it has no scene-authorable per-building shape.
+	var picker := ColorPickerButton.new()
+	picker.custom_minimum_size = Vector2(160, 32)
+	picker.color = _rgba_from_int(int(_config.get("current", 0xffd37fff)))
+	body.add_child(picker)
+	var row := HBoxContainer.new()
+	body.add_child(row)
+	var apply := Button.new()
+	apply.text = _t("@ok", "OK")
+	apply.pressed.connect(func() -> void: _submit("int", str(picker.color.to_rgba32())))
+	row.add_child(apply)
+	_add_close_button(row)
+
+
+## `Color.rgba8888` → Godot `Color` (the packed value is `0xRRGGBBAA`).
+func _rgba_from_int(value: int) -> Color:
+	return Color8((value >> 24) & 0xff, (value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff)
 
 
 func _build_options() -> void:

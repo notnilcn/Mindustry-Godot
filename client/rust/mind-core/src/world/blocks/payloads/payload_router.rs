@@ -198,6 +198,14 @@ impl BuildingBehavior for PayloadRouterBehavior {
         }
     }
 
+    fn config_kinds(&self) -> &'static [crate::world::config::ConfigKind] {
+        // `PayloadRouter.buildConfiguration`: sortable blocks + units.
+        &[
+            crate::world::config::ConfigKind::Block,
+            crate::world::config::ConfigKind::Unit,
+        ]
+    }
+
     fn create_state(&self, world: &mut World, e: Entity) {
         self.conveyor.create_state(world, e);
         if world.get::<PayloadRouterBuild>(e).is_none() {

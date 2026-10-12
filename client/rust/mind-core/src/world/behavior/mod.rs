@@ -24,10 +24,12 @@ use super::modules::PowerGraphId;
 use super::stats::Stats;
 
 pub mod campaign;
+pub mod construct;
 pub mod defense;
 pub mod environment;
 pub mod helpers;
 pub mod legacy;
+pub mod light;
 pub mod production;
 pub mod sandbox;
 
@@ -496,6 +498,8 @@ pub fn resolve_behavior(def: &BlockDef, registry: &BehaviorRegistry) -> Arc<dyn 
 pub fn default_behavior(def: &BlockDef) -> Arc<dyn BuildingBehavior> {
     use crate::content::BlockKind as K;
     match def.kind {
+        // Construct blocks: IO only (`ConstructBuild.write`/`read`, PAR-0098 §2d).
+        K::ConstructBlock => Arc::new(construct::ConstructBehavior),
         K::Door => Arc::new(defense::DoorBehavior),
         K::AutoDoor => Arc::new(defense::AutoDoorBehavior),
         K::Wall | K::ShieldWall => Arc::new(defense::WallBehavior),
@@ -576,8 +580,11 @@ pub fn default_behavior(def: &BlockDef) -> Arc<dyn BuildingBehavior> {
         | K::AttributeCrafter
         | K::Separator
         | K::ItemIncinerator => Arc::new(production::CrafterBehavior),
-        K::Drill | K::BurstDrill | K::WallCrafter => Arc::new(production::DrillBehavior),
-        K::BeamDrill => Arc::new(production::BeamDrillBehavior),
+        K::Drill | K::BurstDrill => Arc::new(production::DrillBehavior),
+        // Erekir wall miners (PAR-0079): the vanilla plasma bores are registered
+        // with the item-hardness table in `blocks::default_registry`.
+        K::BeamDrill => Arc::new(production::BeamDrillBehavior::default()),
+        K::WallCrafter => Arc::new(production::WallCrafterBehavior),
         K::Pump => Arc::new(production::PumpBehavior),
         K::SolidPump | K::Fracker => Arc::new(production::SolidPumpBehavior),
         K::Incinerator => Arc::new(production::IncineratorBehavior),
@@ -596,8 +603,18 @@ pub fn default_behavior(def: &BlockDef) -> Arc<dyn BuildingBehavior> {
             Arc::new(crate::logic::blocks::DisplayBehavior)
         }
         K::CanvasBlock => Arc::new(crate::logic::blocks::CanvasBehavior),
+        // Illuminator (PAR-0093): integer color config + revision-0 IO.
+        K::LightBlock => Arc::new(light::LightBehavior),
+        // Sandbox sources/sinks (PAR-0077): per-kind behaviors so `config_kinds`
+        // and the accept/dump overrides match each Java inner class.
+        K::ItemSource => Arc::new(sandbox::ItemSourceBehavior),
+        K::ItemVoid => Arc::new(sandbox::ItemVoidBehavior),
+        K::LiquidSource => Arc::new(sandbox::LiquidSourceBehavior),
+        K::LiquidVoid => Arc::new(sandbox::LiquidVoidBehavior),
+        K::PowerSource => Arc::new(sandbox::PowerSourceBehavior),
+        K::PowerVoid => Arc::new(sandbox::PowerVoidBehavior),
         _ => match super::block_kind_data::BlockKindData::from_def(def).family() {
-            super::block_kind_data::BlockFamily::Sandbox => Arc::new(sandbox::SandboxBehavior),
+            super::block_kind_data::BlockFamily::Sandbox => Arc::new(NoopBehavior),
             super::block_kind_data::BlockFamily::Environment => {
                 Arc::new(environment::EnvironmentBehavior)
             }

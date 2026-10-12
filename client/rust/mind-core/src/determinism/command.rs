@@ -30,6 +30,8 @@ pub enum ConfigValue {
     Content(String),
     /// Raw byte payload (mod extension).
     Bytes(Vec<u8>),
+    /// Free text (`MessageBlock`/logic code); tag 6 on the wire.
+    Text(String),
 }
 
 /// A single simulation command (plan 05 §6.4).
@@ -654,6 +656,10 @@ fn encode_config(out: &mut Vec<u8>, value: &ConfigValue) {
             put_u8(out, 5);
             put_bytes(out, value);
         }
+        ConfigValue::Text(value) => {
+            put_u8(out, 6);
+            put_str(out, value);
+        }
     }
 }
 
@@ -896,6 +902,7 @@ fn decode_config(cur: &mut Cursor<'_>) -> Result<ConfigValue, CommandLogError> {
         3 => Ok(ConfigValue::Float(cur.f32()?)),
         4 => Ok(ConfigValue::Content(cur.string()?)),
         5 => Ok(ConfigValue::Bytes(cur.bytes()?)),
+        6 => Ok(ConfigValue::Text(cur.string()?)),
         other => Err(CommandLogError::UnknownOp(other)),
     }
 }
@@ -1160,6 +1167,14 @@ mod tests {
                 units: smallvec::smallvec![],
                 stance: 7,
                 enabled: false,
+            },
+        );
+        log.push(
+            25,
+            SimCommand::Configure {
+                x: 7,
+                y: 8,
+                value: ConfigValue::Text("hello\nworld".to_owned()),
             },
         );
         log

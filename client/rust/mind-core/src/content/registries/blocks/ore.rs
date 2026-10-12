@@ -94,6 +94,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
 
     sink.push(BlockSpec {
         wall_ore: Some(true),
+        solid: Some(true),
         item_drop: Some("thorium"),
         map_color: Some(rgba_hex("f9a3c7")),
         ..spec("ore-wall-thorium", BlockKind::OreBlock)
@@ -101,6 +102,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
 
     sink.push(BlockSpec {
         wall_ore: Some(true),
+        solid: Some(true),
         item_drop: Some("beryllium"),
         map_color: Some(rgba_hex("3a8f64")),
         ..spec("ore-wall-beryllium", BlockKind::OreBlock)
@@ -115,6 +117,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
 
     sink.push(BlockSpec {
         wall_ore: Some(true),
+        solid: Some(true),
         item_drop: Some("graphite"),
         map_color: Some(rgba_hex("b2c6d2")),
         ..spec("ore-wall-graphite", BlockKind::OreBlock)
@@ -122,6 +125,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
 
     sink.push(BlockSpec {
         wall_ore: Some(true),
+        solid: Some(true),
         item_drop: Some("tungsten"),
         map_color: Some(rgba_hex("768a9a")),
         ..spec("ore-wall-tungsten", BlockKind::OreBlock)

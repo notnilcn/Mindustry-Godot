@@ -146,3 +146,523 @@ fn conduit_feeds_a_liquid_consumer() {
         "generator got water"
     );
 }
+
+fn configure(sim: &mut Sim, x: i16, y: i16, value: crate::determinism::ConfigValue) {
+    sim.command(SimCommand::Configure { x, y, value })
+        .expect("configure");
+}
+
+fn stored_item(sim: &Sim, e: Entity, item: crate::content::ItemId) -> i32 {
+    sim.ecs
+        .0
+        .get::<crate::world::modules::ItemModule>(e)
+        .map(|module| module.get(item))
+        .unwrap_or(0)
+}
+
+fn emitted(sim: &Sim, e: Entity) -> u32 {
+    sim.ecs
+        .0
+        .get::<crate::entities::comp::SandboxState>(e)
+        .map(|state| state.emitted)
+        .unwrap_or(0)
+}
+
+/// PAR-0077: a configured item source emits copper into a conveyor, which
+/// forwards it into an item void; the void accepts and discards it.
+#[test]
+fn item_source_feeds_conveyor_into_void() {
+    let mut sim = runtime_sim();
+    let copper = item(&sim, "copper");
+    let source = place(&mut sim, "item-source", 5, 5);
+    let conveyor = place(&mut sim, "conveyor", 6, 5);
+    let sink = place(&mut sim, "item-void", 7, 5);
+    configure(
+        &mut sim,
+        5,
+        5,
+        crate::determinism::ConfigValue::Content("copper".to_owned()),
+    );
+    for _ in 0..120 {
+        sim.tick().expect("tick");
+    }
+    let count = emitted(&sim, source);
+    let belt_heat = sim
+        .ecs
+        .0
+        .get::<crate::world::blocks::distribution::conveyor::ConveyorBuild>(conveyor)
+        .map(|belt| belt.clog_heat)
+        .unwrap_or(1.0);
+    assert!(count >= 100, "source emitted {count} items in 120 ticks");
+    assert_eq!(
+        stored_item(&sim, source, copper),
+        0,
+        "source clears its buffer after each emission"
+    );
+    assert!(
+        stored_item(&sim, conveyor, copper) >= 1,
+        "belt received items from the source"
+    );
+    // A clogged belt approaches `clog_heat` 1; the void drains the front, so
+    // the belt keeps flowing.
+    assert!(
+        belt_heat < 0.5,
+        "belt is not clogged (void drains it): {belt_heat}"
+    );
+    let world = &mut sim.ecs.0;
+    assert!(
+        transfer::dispatch_accept_item(world, sink, conveyor, copper),
+        "item void accepts downstream items"
+    );
+    assert_eq!(stored_item(&sim, sink, copper), 0, "void stores nothing");
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<crate::world::modules::ItemModule>(sink)
+            .map(|module| module.total())
+            .unwrap_or(0),
+        0,
+        "void has no item storage at all"
+    );
+}
+
+/// PAR-0077: an unconfigured item source emits nothing and accepts nothing
+/// (Java default `outputItem = null`, `acceptItem` returns false).
+#[test]
+fn unconfigured_item_source_emits_nothing() {
+    let mut sim = runtime_sim();
+    let copper = item(&sim, "copper");
+    let source = place(&mut sim, "item-source", 5, 5);
+    let conveyor = place(&mut sim, "conveyor", 6, 5);
+    for _ in 0..60 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        emitted(&sim, source),
+        0,
+        "unconfigured source emits nothing"
+    );
+    assert_eq!(stored_item(&sim, conveyor, copper), 0);
+    let world = &mut sim.ecs.0;
+    assert!(
+        !transfer::dispatch_accept_item(world, source, source, copper),
+        "item source accepts nothing"
+    );
+}
+
+/// PAR-0077: a configured liquid source fills itself and dumps water into a
+/// conduit; clearing the config empties the source.
+#[test]
+fn liquid_source_fills_conduit() {
+    let mut sim = runtime_sim();
+    let water = liquid(&sim, "water");
+    let source = place(&mut sim, "liquid-source", 5, 5);
+    let conduit = place(&mut sim, "conduit", 6, 5);
+    configure(
+        &mut sim,
+        5,
+        5,
+        crate::determinism::ConfigValue::Content("water".to_owned()),
+    );
+    for _ in 0..30 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        stored_liquid(&sim, conduit, water) > 0.0,
+        "conduit carried water"
+    );
+    configure(&mut sim, 5, 5, crate::determinism::ConfigValue::None);
+    for _ in 0..5 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        stored_liquid(&sim, source, water),
+        0.0,
+        "cleared source empties its tank"
+    );
+}
+
+/// PAR-0077: a power source feeds an adjacent power consumer; the graph reports
+/// full satisfaction.
+#[test]
+fn power_source_powers_consumer() {
+    let mut sim = runtime_sim();
+    set_floor(&mut sim, 7, 5, "ore-copper");
+    let source = place(&mut sim, "power-source", 5, 5);
+    let drill = place(&mut sim, "laser-drill", 7, 5);
+    for _ in 0..30 {
+        sim.tick().expect("tick");
+    }
+    let production = sim
+        .ecs
+        .0
+        .get::<crate::world::blocks::power::PowerProduction>(source)
+        .map(|production| production.0)
+        .unwrap_or(0.0);
+    assert!(
+        (production - 1_000_000.0 / 60.0).abs() < 0.01,
+        "power source reports its production: {production}"
+    );
+    let graph = sim
+        .ecs
+        .0
+        .get::<crate::world::modules::PowerModule>(drill)
+        .map(|module| module.graph)
+        .unwrap_or_default();
+    let satisfaction = sim
+        .ecs
+        .0
+        .resource::<crate::world::blocks::power::PowerGrids>()
+        .graph(graph)
+        .map(|graph| graph.get_satisfaction())
+        .unwrap_or(0.0);
+    assert_eq!(satisfaction, 1.0, "power graph satisfaction");
+    let efficiency = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::Building>(drill)
+        .map(|building| building.efficiency)
+        .unwrap_or(0.0);
+    assert!(efficiency > 0.0, "drill became efficient: {efficiency}");
+}
+
+/// §10 sweep (laser/airblast drills): the ore footprint is centred on
+/// `Building.tile` (`Drill.countOre` over `Tile.getLinkedTilesAs`, offset
+/// `-(size-1)/2`), so ore under the left column of a 3x3 counts and a tile
+/// outside the footprint does not (the old scan ran `x..x+size` from the
+/// centre tile).
+#[test]
+fn laser_drill_counts_centered_footprint() {
+    let mut sim = runtime_sim();
+    for y in 7..=9 {
+        set_floor(&mut sim, 7, y, "ore-copper");
+    }
+    // Outside the footprint; the old `x..x+size` scan would have counted it.
+    set_floor(&mut sim, 10, 8, "ore-copper");
+    let drill = place(&mut sim, "laser-drill", 8, 8);
+    let (dominant, count) = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::DrillState>(drill)
+        .map(|state| (state.dominant_item, state.dominant_items))
+        .expect("drill state");
+    assert_eq!(count, 3, "only the left column is ore");
+    assert_eq!(dominant, Some(item(&sim, "copper")));
+}
+
+/// §10 sweep (generators with `outputLiquid`): `ConsumeGeneratorBuild.updateTile`
+/// calls `dumpLiquid(outputLiquid.liquid)` right after the output add, so a
+/// conduit next to the generator receives the produced liquid.
+#[test]
+fn generator_dumps_output_liquid() {
+    let mut sim = runtime_sim();
+    let generator = place(&mut sim, "pyrolysis-generator", 5, 5);
+    let conduit = place(&mut sim, "conduit", 7, 5);
+    let (slag, arkycite, water) = (
+        liquid(&sim, "slag"),
+        liquid(&sim, "arkycite"),
+        liquid(&sim, "water"),
+    );
+    {
+        let world = &mut sim.ecs.0;
+        if let Some(mut module) = world.get_mut::<crate::world::modules::LiquidModule>(generator) {
+            module.add(slag, 50.0, 150.0);
+            module.add(arkycite, 50.0, 150.0);
+        }
+    }
+    for _ in 0..120 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        stored_liquid(&sim, conduit, water) > 0.0,
+        "conduit received the dumped output liquid"
+    );
+}
+
+/// PAR-0076: an additive reconstructor only upgrades a payload with power and
+/// its 40 silicon + 40 graphite, after `constructTime` (600) ticks, and consumes
+/// those items on completion.
+#[test]
+fn reconstructor_needs_items_and_time() {
+    let mut sim = runtime_sim();
+    let _source = place(&mut sim, "power-source", 3, 5);
+    let rig = place(&mut sim, "additive-reconstructor", 5, 5);
+    let (silicon, graphite) = (item(&sim, "silicon"), item(&sim, "graphite"));
+    let dagger = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .unit_id("dagger")
+        .expect("dagger");
+    let mace = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .unit_id("mace")
+        .expect("mace");
+
+    // Load a dagger payload through the behavior hook (`acceptPayload`).
+    let inst = sim
+        .ecs
+        .0
+        .resource::<crate::world::block::BlockTable>()
+        .instance(
+            sim.ecs
+                .0
+                .get::<crate::entities::comp::Building>(rig)
+                .expect("building")
+                .block,
+        )
+        .expect("instance");
+    inst.behavior.handle_payload(
+        &mut sim.ecs.0,
+        rig,
+        rig,
+        crate::world::behavior::PayloadRef {
+            entity: None,
+            content: dagger.raw(),
+            is_block: false,
+        },
+    );
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<crate::world::blocks::units::ReconstructorBuild>(rig)
+            .and_then(|state| state.payload),
+        Some(dagger)
+    );
+
+    // No items: the payload waits, nothing spawns.
+    for _ in 0..700 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<crate::world::blocks::units::ReconstructorBuild>(rig)
+            .and_then(|state| state.payload),
+        Some(dagger),
+        "payload waits without items"
+    );
+    assert!(!spawned_unit(&sim, mace), "no upgrade without items");
+
+    // Feed the required stacks: the upgrade lands after constructTime ticks.
+    {
+        let world = &mut sim.ecs.0;
+        if let Some(mut items) = world.get_mut::<crate::world::modules::ItemModule>(rig) {
+            items.add(silicon, 40, 80);
+            items.add(graphite, 40, 80);
+        }
+    }
+    let start = sim.tick_count();
+    for _ in 0..900 {
+        sim.tick().expect("tick");
+        if spawned_unit(&sim, mace) {
+            break;
+        }
+    }
+    let elapsed = sim.tick_count() - start;
+    assert!(spawned_unit(&sim, mace), "upgraded to a mace");
+    assert!(
+        (600..=700).contains(&elapsed),
+        "construct time {elapsed} ticks"
+    );
+    assert_eq!(stored_item(&sim, rig, silicon), 0, "silicon consumed");
+    assert_eq!(stored_item(&sim, rig, graphite), 0, "graphite consumed");
+}
+
+/// §7.0 (config prerequisite): free text reaches a building through the wire
+/// `Text` value and reads back as the behavior's `String` config.
+#[test]
+fn message_block_accepts_text_config() {
+    let mut sim = runtime_sim();
+    let message = place(&mut sim, "message", 5, 5);
+    sim.command(SimCommand::Configure {
+        x: 5,
+        y: 5,
+        value: crate::determinism::ConfigValue::Text("hello\nworld".to_owned()),
+    })
+    .expect("configure");
+    assert_eq!(
+        crate::world::config::read_config(&sim.ecs.0, message),
+        crate::world::config::ConfigValue::String("hello\nworld".to_owned())
+    );
+}
+
+/// PAR-0092: `UnitFactory.config(UnitType.class)` selects the matching plan
+/// (resetting progress), `config()` reports the index and `None` clears it; with
+/// no plan selected nothing is produced even with the items in storage.
+#[test]
+fn unit_factory_config_selects_plan() {
+    let mut sim = runtime_sim();
+    let factory = place(&mut sim, "air-factory", 5, 5);
+    let silicon = item(&sim, "silicon");
+    let content_flare = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .unit_id("flare")
+        .expect("flare");
+    let mono = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .unit_id("mono")
+        .expect("mono");
+
+    // `created()` auto-selects the first *unlocked* plan; the test registry has
+    // none unlocked, so no plan is selected until one is configured.
+    assert_eq!(
+        crate::world::config::read_config(&sim.ecs.0, factory),
+        crate::world::config::ConfigValue::None
+    );
+
+    // Configure a plan by unit name (the config panel's content submit path).
+    sim.command(SimCommand::Configure {
+        x: 5,
+        y: 5,
+        value: crate::determinism::ConfigValue::Content("mono".to_owned()),
+    })
+    .expect("configure mono");
+    assert_eq!(
+        crate::world::config::read_config(&sim.ecs.0, factory),
+        crate::world::config::ConfigValue::Number(1.0)
+    );
+
+    // Clearing removes the plan: storage full of requirements still builds nothing.
+    sim.command(SimCommand::Configure {
+        x: 5,
+        y: 5,
+        value: crate::determinism::ConfigValue::None,
+    })
+    .expect("clear plan");
+    assert_eq!(
+        crate::world::config::read_config(&sim.ecs.0, factory),
+        crate::world::config::ConfigValue::None
+    );
+    {
+        let world = &mut sim.ecs.0;
+        if let Some(mut items) = world.get_mut::<crate::world::modules::ItemModule>(factory) {
+            items.add(silicon, 60, 100);
+        }
+    }
+    for _ in 0..120 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        !spawned_unit(&sim, content_flare) && !spawned_unit(&sim, mono),
+        "no plan selected -> nothing produced"
+    );
+
+    // Re-select flare: the 15 silicon plan completes after its 900 ticks.
+    sim.command(SimCommand::Configure {
+        x: 5,
+        y: 5,
+        value: crate::determinism::ConfigValue::Content("flare".to_owned()),
+    })
+    .expect("configure flare");
+    for _ in 0..1000 {
+        sim.tick().expect("tick");
+        if spawned_unit(&sim, content_flare) {
+            break;
+        }
+    }
+    assert!(spawned_unit(&sim, content_flare), "flare produced");
+}
+
+/// PAR-0079: a plasma bore mines the Erekir wall ore in front of it
+/// (`BeamDrill.updateFacing` + `canPlaceOn` scan the facing edge, not the
+/// footprint).
+#[test]
+fn plasma_bore_mines_wall_ore() {
+    let mut sim = runtime_sim();
+    // `ore-wall-beryllium` two tiles in front of the facing edge (rotation 0);
+    // `BeamDrill.canPlaceOn` requires it before the block can be placed.
+    let ore =
+        crate::content::BlockId::new(sim.world_block_id("ore-wall-beryllium").expect("ore wall"));
+    sim.grid.tiles.get_mut(9, 5).block = ore;
+    sim.grid.tiles.get_mut(9, 6).block = ore;
+    let _source = place(&mut sim, "power-source", 4, 5);
+    let bore = place(&mut sim, "plasma-bore", 5, 5);
+    {
+        let crate::sim::Sim {
+            grid,
+            ecs,
+            block_runtime,
+            ..
+        } = &mut sim;
+        let content = block_runtime.as_ref().expect("runtime").content();
+        crate::world::behavior::production::refresh_drill_ore(&mut ecs.0, grid, content, bore);
+    }
+    let state = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::DrillState>(bore)
+        .expect("drill state");
+    assert_eq!(
+        state.facing_amount, 2.0,
+        "two facing edges see the wall ore"
+    );
+
+    let beryllium = item(&sim, "beryllium");
+    for _ in 0..400 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        stored_item(&sim, bore, beryllium) > 0,
+        "plasma bore produced beryllium"
+    );
+}
+
+/// PAR-0079: a cliff crusher turns the sand attribute of the walls in front into
+/// sand (`WallCrafter.getEfficiency`/`updateTile`).
+#[test]
+fn cliff_crusher_makes_sand_from_sand_walls() {
+    let mut sim = runtime_sim();
+    // `sand-wall` carries `Attribute.sand = 2` (Java Blocks.java);
+    // `WallCrafter.canPlaceOn` requires it before the block can be placed.
+    let wall = crate::content::BlockId::new(sim.world_block_id("sand-wall").expect("sand-wall"));
+    sim.grid.tiles.get_mut(7, 5).block = wall;
+    sim.grid.tiles.get_mut(7, 6).block = wall;
+    let _source = place(&mut sim, "power-source", 4, 5);
+    let crusher = place(&mut sim, "cliff-crusher", 5, 5);
+    {
+        let crate::sim::Sim {
+            grid,
+            ecs,
+            block_runtime,
+            ..
+        } = &mut sim;
+        let content = block_runtime.as_ref().expect("runtime").content();
+        crate::world::behavior::production::refresh_drill_ore(&mut ecs.0, grid, content, crusher);
+    }
+    let eff = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::DrillState>(crusher)
+        .map(|state| state.facing_amount)
+        .unwrap_or(0.0);
+    assert_eq!(eff, 4.0, "two facing edges * sand 2");
+
+    let sand = item(&sim, "sand");
+    for _ in 0..40 {
+        sim.tick().expect("tick");
+    }
+    for _ in 0..400 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        stored_item(&sim, crusher, sand) > 0,
+        "cliff crusher produced sand"
+    );
+}
+
+/// Whether a unit of type `unit` exists in the sim.
+fn spawned_unit(sim: &Sim, unit: crate::content::UnitTypeId) -> bool {
+    sim.ecs.0.iter_entities().any(|entity| {
+        entity
+            .get::<crate::entities::comp::unit::UnitTypeComp>()
+            .map(|comp| comp.type_id)
+            == Some(unit)
+    })
+}
