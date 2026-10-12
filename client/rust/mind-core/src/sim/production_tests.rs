@@ -495,6 +495,7 @@ fn message_block_accepts_text_config() {
 #[test]
 fn unit_factory_config_selects_plan() {
     let mut sim = runtime_sim();
+    let _source = place(&mut sim, "power-source", 3, 5);
     let factory = place(&mut sim, "air-factory", 5, 5);
     let silicon = item(&sim, "silicon");
     let content_flare = sim
@@ -821,6 +822,58 @@ fn full_drill_stops() {
     assert_eq!(efficiency, 0.0, "full drill efficiency");
     assert_eq!(stored_item(&sim, drill, copper), 10, "buffer stays full");
     let _ = total;
+}
+
+/// T2 (`UnitFactory.updateTile`, `UnitFactory.java:400-450`): an unpowered
+/// ground factory produces nothing even with the plan's items loaded; powered,
+/// one dagger completes in the plan's 900 ticks and consumes 10 silicon + 10
+/// lead (`Blocks.java:6305`).
+#[test]
+fn unit_factory_needs_power() {
+    let mut sim = runtime_sim();
+    let factory = place(&mut sim, "ground-factory", 5, 5);
+    let (silicon, lead) = (item(&sim, "silicon"), item(&sim, "lead"));
+    {
+        let world = &mut sim.ecs.0;
+        if let Some(mut items) = world.get_mut::<crate::world::modules::ItemModule>(factory) {
+            items.add(silicon, 10, 60);
+            items.add(lead, 10, 60);
+        }
+    }
+    for _ in 0..3000 {
+        sim.tick().expect("tick");
+    }
+    let dagger = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .unit_id("dagger")
+        .expect("dagger");
+    assert!(
+        !spawned_unit(&sim, dagger),
+        "unpowered factory produces nothing"
+    );
+    assert_eq!(stored_item(&sim, factory, silicon), 10, "items untouched");
+
+    let _source = place(&mut sim, "power-source", 3, 5);
+    let start = sim.tick_count();
+    for _ in 0..1500 {
+        sim.tick().expect("tick");
+        if spawned_unit(&sim, dagger) {
+            break;
+        }
+    }
+    let elapsed = sim.tick_count() - start;
+    assert!(
+        spawned_unit(&sim, dagger),
+        "powered factory built the dagger"
+    );
+    assert!(
+        (900..=1000).contains(&elapsed),
+        "dagger build time {elapsed} ticks (plan time 900)"
+    );
+    assert_eq!(stored_item(&sim, factory, silicon), 0, "silicon consumed");
+    assert_eq!(stored_item(&sim, factory, lead), 0, "lead consumed");
 }
 
 /// Whether a unit of type `unit` exists in the sim.

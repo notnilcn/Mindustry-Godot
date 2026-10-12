@@ -23,6 +23,7 @@ use crate::content::{BlockKind, ContentRegistry, ItemId, UnitCommandId, UnitType
 use crate::entities::comp::unit::lifecycle::spawn_unit_def;
 use crate::entities::comp::{Pos, TeamComp};
 use crate::world::behavior::{BuildingBehavior, BuildingReader, BuildingWriter, PayloadRef};
+use crate::world::blocks::distribution::transfer;
 use crate::world::config::{ConfigKind, ConfigValue};
 use crate::world::modules::ItemModule;
 
@@ -48,13 +49,21 @@ fn next_unit_seq(world: &mut World) -> u64 {
 }
 
 /// Spawns `unit` at the center of building `e` (`UnitBlock` output path).
+///
+/// The spawned entity is adopted into the live [`UnitRuntime`] list (the same
+/// bookkeeping `UnitRuntime::spawn`/`SpawnedByBullet` do), so factory output
+/// updates, fights and is selectable instead of sitting inert.
 fn spawn_output_unit(world: &mut World, e: Entity, def: &UnitTypeDef) {
     let Some(pos) = world.get::<Pos>(e).copied() else {
         return;
     };
     let team = world.get::<TeamComp>(e).map(|t| t.team).unwrap_or(0);
     let seq = next_unit_seq(world);
-    let _ = spawn_unit_def(world, seq, def, team, pos.x, pos.y, 90.0);
+    let entity = spawn_unit_def(world, seq, def, team, pos.x, pos.y, 90.0);
+    if let Some(mut runtime) = world.get_non_send_mut::<crate::sim::unit_runtime::UnitRuntime>() {
+        runtime.units.push(entity);
+        runtime.units_created += 1;
+    }
 }
 
 /// Resolves every produced unit's [`UnitTypeDef`] from content.
@@ -81,8 +90,6 @@ pub struct UnitFactoryBehavior {
     pub factory: UnitFactory,
     /// Produced unit defs keyed by raw [`UnitTypeId`].
     pub units: BTreeMap<u16, Arc<UnitTypeDef>>,
-    /// Number of item slots (`ItemModule.items.len()`).
-    pub item_count: usize,
     /// `UnitFactoryBuild.created()` default plan: the first unlocked plan
     /// (`plans.indexOf(u -> u.unit.unlockedNow())`).
     pub default_plan: i32,
@@ -128,7 +135,6 @@ impl UnitFactoryBehavior {
         Self {
             factory,
             units,
-            item_count: content.items().len(),
             default_plan,
         }
     }
@@ -160,7 +166,7 @@ impl UnitFactoryBehavior {
 
 impl BuildingBehavior for UnitFactoryBehavior {
     fn create_state(&self, world: &mut World, e: Entity) {
-        let mut state = UnitFactoryBuild::new(self.factory.plans.len(), self.item_count);
+        let mut state = UnitFactoryBuild::new();
         // `UnitFactoryBuild.created()`: auto-set to the first plan.
         state.current_plan = self.default_plan;
         world.entity_mut(e).insert(state);
@@ -243,21 +249,26 @@ impl BuildingBehavior for UnitFactoryBehavior {
         let Some(mut state) = world.entity_mut(e).take::<UnitFactoryBuild>() else {
             return;
         };
-        if let Some(items) = world.get::<ItemModule>(e) {
-            for (index, slot) in state.items.iter_mut().enumerate() {
-                *slot = items.items.get(index).copied().unwrap_or(0);
-            }
-        }
+        // `time += edelta() * speedScl * Vars.state.rules.unitBuildSpeed(team)`
+        // and `progress += edelta() * unitBuildSpeed(team)`: `edelta()` carries
+        // `Building.efficiency`, so the power gate works through it.
+        let team = world.get::<TeamComp>(e).map(|t| t.team).unwrap_or(0);
+        let delta_progress = crate::world::update::edelta(world, e) * unit_build_speed(world, team);
         let plan_index = usize::try_from(state.current_plan).ok();
-        if let Some(unit) = state.update(&self.factory, 1.0) {
-            // `UnitFactoryBuild.updateTile`: remove the plan's requirements from
-            // the building's item storage (`items.remove` per stack).
+        let produced = world
+            .get::<ItemModule>(e)
+            .and_then(|items| state.update(&self.factory, delta_progress, items));
+        if let Some(unit) = produced {
+            // `consume()` with the `ConsumeItemDynamic` multiplier
+            // (`UnitFactory.java:108`: `c.multiplier = rules.unitCost(team)`).
             if let Some(index) = plan_index
                 && let Some(plan) = self.factory.plans.get(index)
-                && let Some(mut items) = world.get_mut::<ItemModule>(e)
             {
-                for (item, amount) in &plan.requirements {
-                    items.remove(*item, *amount);
+                let cost = unit_cost(world, team);
+                if let Some(mut items) = world.get_mut::<ItemModule>(e) {
+                    for (item, amount) in &plan.requirements {
+                        items.remove(*item, (*amount as f32 * cost).round() as i32);
+                    }
                 }
             }
             if let Some(def) = self.units.get(&unit.raw()) {
@@ -268,14 +279,10 @@ impl BuildingBehavior for UnitFactoryBehavior {
     }
 
     fn accept_item(&self, world: &World, e: Entity, _src: Entity, item: ItemId) -> bool {
-        let Some(state) = world.get::<UnitFactoryBuild>(e) else {
-            return false;
-        };
         if !self.factory.accepts(item) {
             return false;
         }
-        let held = state.items.get(item.index()).copied().unwrap_or(0);
-        held < self.factory.capacity(item)
+        transfer::item_count(world, e, item) < self.factory.capacity(item)
     }
 
     fn get_maximum_accepted(&self, _world: &World, _e: Entity, item: ItemId) -> i32 {
@@ -293,10 +300,7 @@ impl BuildingBehavior for UnitFactoryBehavior {
         if !self.accept_item(world, e, Entity::PLACEHOLDER, item) {
             return 0;
         }
-        let held = world
-            .get::<UnitFactoryBuild>(e)
-            .and_then(|state| state.items.get(item.index()).copied())
-            .unwrap_or(0);
+        let held = transfer::item_count(world, e, item);
         let free = (self.factory.capacity(item) - held).max(0);
         free.min(amount)
     }
@@ -1213,6 +1217,13 @@ mod tests {
         // test registry has none, so select the dagger plan explicitly.
         if let Some(mut state) = world.get_mut::<UnitFactoryBuild>(entity) {
             state.current_plan = 0;
+        }
+        // `UnitFactory.updateTile` only advances when `efficiency > 0`
+        // (`UnitFactory.java:406`); with no power graph in this harness the
+        // consumer status is the efficiency input (`ConsumePower.efficiency`),
+        // so mark the consumer satisfied as `PowerGraph.distributePower` would.
+        if let Some(mut power) = world.get_mut::<crate::world::modules::PowerModule>(entity) {
+            power.status = 1.0;
         }
         // `ground-factory` dagger plan time is 900 ticks.
         for _ in 0..1000 {
