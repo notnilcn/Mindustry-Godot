@@ -371,6 +371,19 @@ impl Sim {
             .unwrap_or(TeamId::SHARDED.0)
     }
 
+    /// `Build.validPlace` for an explicit team against the live block runtime
+    /// (`SimRuntime::can_place`).
+    ///
+    /// `false` when the runtime is absent or the placement is invalid. The API
+    /// placement seams (`place_block`, `apply_sim_command_json`) use it to
+    /// report rejections honestly instead of the old `Ok`-means-placed
+    /// behavior (T7, PAR-0165).
+    pub fn can_place_for_team(&self, x: i16, y: i16, block: BlockId, rot: u8, team: u8) -> bool {
+        self.block_runtime.as_ref().is_some_and(|runtime| {
+            runtime.can_place(&self.ecs.0, &self.grid, x, y, block, rot, team)
+        })
+    }
+
     /// Applies a wire `UnitCommand` to **live** units (`id` = `EntitySeq`).
     ///
     /// Returns the number of units ordered; `0` routes the command to the
