@@ -321,26 +321,22 @@ pub fn command_arrival_radius(hit_size: f32, exact_arrival: bool) -> f32 {
 /// [`command_arrival_radius`] of the target (`finishPath`).
 pub fn update_command_move(
     world: &mut bevy_ecs::world::World,
+    grid: &crate::world::WorldGrid,
+    content: &crate::content::ContentRegistry,
     control: &mut crate::ai::ControlPathfinder,
     entity: bevy_ecs::entity::Entity,
     target: crate::world::TilePos,
     flying: bool,
 ) -> bool {
-    use crate::entities::comp::unit::{HitboxComp, PhysicsComp, UnitCore};
+    use crate::entities::comp::unit::{HitboxComp, UnitCore};
     use crate::entities::comp::{Pos, Vel};
     use crate::world::{TilePos, WorldGrid};
 
     let Some(pos) = world.get::<Pos>(entity).copied() else {
         return false;
     };
-    let speed = world
-        .get::<PhysicsComp>(entity)
-        .map(|physics| physics.speed)
-        .unwrap_or(1.0)
-        * world
-            .get::<crate::entities::comp::unit::comp::StatusComp>(entity)
-            .map(|status| status.speed_multiplier)
-            .unwrap_or(1.0);
+    // `UnitComp.speed()` with floor/boost/status multipliers (PAR-0137).
+    let speed = crate::entities::comp::unit::movement::unit_speed(world, grid, content, entity);
     let hit_size = world
         .get::<HitboxComp>(entity)
         .map(|hitbox| hitbox.hit_size)

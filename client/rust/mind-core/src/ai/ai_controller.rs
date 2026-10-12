@@ -49,27 +49,11 @@ impl AiCtx<'_> {
             .unwrap_or(false)
     }
 
-    /// `prefSpeed`: `type.speed * (isBoosting ? boostMultiplier : 1)` scaled by
-    /// the status speed multiplier (`StatusComp.speedMultiplier`).
+    /// `prefSpeed`: `UnitComp.speed()` — type speed scaled by the strafe,
+    /// boost and floor speed multipliers (`StatusComp.speedMultiplier` lives in
+    /// the floor term).
     pub fn pref_speed(&self, unit: Entity) -> f32 {
-        let Some(physics) = self.world.get::<PhysicsComp>(unit) else {
-            return 1.0;
-        };
-        let boosting = self
-            .world
-            .get::<UnitCore>(unit)
-            .map(|core| core.boosting)
-            .unwrap_or(false);
-        let status_multiplier = self
-            .world
-            .get::<crate::entities::comp::unit::comp::StatusComp>(unit)
-            .map(|status| status.speed_multiplier)
-            .unwrap_or(1.0);
-        if boosting && physics.can_boost {
-            physics.speed * physics.boost_multiplier * status_multiplier
-        } else {
-            physics.speed * status_multiplier
-        }
+        crate::entities::comp::unit::movement::unit_speed(self.world, self.grid, self.content, unit)
     }
 
     /// `faceMovement(dx, dy)`: point the body along a movement vector.

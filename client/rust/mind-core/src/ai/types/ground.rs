@@ -8,7 +8,7 @@
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
-use crate::entities::comp::unit::{HitboxComp, PhysicsComp, UnitCore};
+use crate::entities::comp::unit::{HitboxComp, UnitCore};
 use crate::entities::comp::{Pos, Vel};
 use crate::world::{TilePos, WorldGrid};
 
@@ -101,29 +101,24 @@ pub fn approach(
 pub fn update_ground(
     world: &mut World,
     grid: &WorldGrid,
+    content: &crate::content::ContentRegistry,
     pathfinder: &mut Pathfinder,
     team: u8,
     entity: Entity,
     target: TilePos,
 ) -> bool {
-    let (pos, speed, hit_size) = {
+    let (pos, hit_size) = {
         let Some(pos) = world.get::<Pos>(entity).copied() else {
             return false;
         };
-        let speed = world
-            .get::<PhysicsComp>(entity)
-            .map(|physics| physics.speed)
-            .unwrap_or(1.0)
-            * world
-                .get::<crate::entities::comp::unit::comp::StatusComp>(entity)
-                .map(|status| status.speed_multiplier)
-                .unwrap_or(1.0);
         let hit_size = world
             .get::<HitboxComp>(entity)
             .map(|hitbox| hitbox.hit_size)
             .unwrap_or(0.0);
-        (pos, speed, hit_size)
+        (pos, hit_size)
     };
+    // `UnitComp.speed()` with floor/boost/status multipliers (PAR-0137).
+    let speed = crate::entities::comp::unit::movement::unit_speed(world, grid, content, entity);
 
     let current = TilePos::new(
         WorldGrid::to_tile(pos.x) as i16,

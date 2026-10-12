@@ -726,9 +726,19 @@ pub fn unit_update_system(world: &mut World) {
                     let flying = world
                         .get::<PhysicsComp>(entity)
                         .is_some_and(|physics| physics.flying);
+                    // Refresh the lazy control path before borrowing fields.
+                    runtime.control_path();
+                    let UnitRuntime {
+                        grid,
+                        content,
+                        control_path,
+                        ..
+                    } = &mut runtime;
                     let arrived = crate::ai::types::command::update_command_move(
                         world,
-                        runtime.control_path(),
+                        grid,
+                        content,
+                        control_path,
                         entity,
                         target,
                         flying,
@@ -792,12 +802,15 @@ pub fn unit_update_system(world: &mut World) {
                         .get::<PhysicsComp>(entity)
                         .is_some_and(|physics| physics.flying);
                 let arrived = if flying {
-                    update_flying(world, entity, target)
+                    update_flying(world, &runtime.grid, &runtime.content, entity, target)
                 } else {
                     let UnitRuntime {
-                        grid, pathfinder, ..
+                        grid,
+                        content,
+                        pathfinder,
+                        ..
                     } = &mut runtime;
-                    update_ground(world, grid, pathfinder, team, entity, target)
+                    update_ground(world, grid, content, pathfinder, team, entity, target)
                 };
                 if arrived && let Some(mut stored) = world.get_mut::<ControllerSlot>(entity) {
                     stored.target = None;

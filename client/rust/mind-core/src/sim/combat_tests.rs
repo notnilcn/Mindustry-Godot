@@ -408,3 +408,56 @@ fn live_ability_repair_field_heals() {
     let end = health(&sim, dagger).expect("alive");
     assert!(end > 50.0, "repair field healed live (50 -> {end})");
 }
+
+/// PAR-0137: `UnitComp.speed()` — a ground unit on `deep-water`
+/// (`speedMultiplier 0.2`) moves at most 0.25x its stone speed; a flying unit
+/// ignores the floor entirely.
+#[test]
+fn dagger_slowed_on_deep_water() {
+    let probe = live_sim(1);
+    let content = &probe.unit_runtime().expect("rt").content;
+    let stone = content.block_id("stone").expect("stone").get();
+    let deep = content.block_id("deep-water").expect("deep-water").get();
+    let air = BlockId::AIR.get();
+    drop(probe);
+
+    let displacement = |name: &str, floor: u16| -> f32 {
+        let mut sim = Sim::new(1, 40, 40, BlockId::new(floor), BlockId::new(air));
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        let unit = sim
+            .spawn_live_unit(name, 2, 100.0, 100.0, 0.0)
+            .expect("unit");
+        crate::entities::comp::unit::lifecycle::set_move_target(
+            &mut sim.ecs.0,
+            unit,
+            crate::world::TilePos::new(36, 12),
+        );
+        for _ in 0..60 {
+            sim.tick().expect("tick");
+        }
+        let pos = sim
+            .ecs
+            .0
+            .get::<Pos>(unit)
+            .map(|pos| (pos.x, pos.y))
+            .expect("pos");
+        ((pos.0 - 100.0).powi(2) + (pos.1 - 100.0).powi(2)).sqrt()
+    };
+
+    let dagger_stone = displacement("dagger", stone);
+    let dagger_water = displacement("dagger", deep);
+    let flare_stone = displacement("flare", stone);
+    let flare_water = displacement("flare", deep);
+    eprintln!(
+        "dagger stone {dagger_stone} water {dagger_water}; flare stone {flare_stone} water {flare_water}"
+    );
+    assert!(
+        dagger_water < 0.25 * dagger_stone,
+        "deep water slows the dagger ({dagger_water} vs {dagger_stone})"
+    );
+    assert!(
+        (flare_water - flare_stone).abs() < 0.001,
+        "flying units ignore the floor ({flare_water} vs {flare_stone})"
+    );
+}

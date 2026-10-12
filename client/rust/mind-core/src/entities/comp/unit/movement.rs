@@ -11,10 +11,13 @@
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
+use crate::ai::controller::{AiKind, ControllerSlot};
 use crate::content::ContentRegistry;
 use crate::entities::comp::unit::comp::{
-    CrawlComp, LegsComp, MechComp, TankComp, UnitTypeComp, WaterMoveComp,
+    CrawlComp, LegsComp, MechComp, PhysicsComp, StatusComp, TankComp, UnitCore, UnitTypeComp,
+    WaterMoveComp,
 };
+use crate::entities::comp::{Pos, Vel};
 use crate::world::WorldGrid;
 
 use super::crawl::update_crawl;
@@ -23,6 +26,95 @@ use super::mech::update_mech;
 use super::tank::update_tank;
 use super::tether::check_tether;
 use super::water_move::update_water_move;
+
+/// `UnitComp.speed()` (`UnitComp.java:190`) with `floorSpeedMultiplier`
+/// (`UnitComp.java:107`) and the `CrawlComp`/`TankComp` overrides
+/// (`CrawlComp.java:39`, `TankComp.java:117`).
+///
+/// `type.speed * strafePenalty * boost * floorSpeedMultiplier`, where the
+/// floor term carries the status speed multiplier (`speedMultiplier`), the
+/// floor's `speedMultiplier ^ type.floorMultiplier`, the deep-liquid crawl
+/// penalty (0.45) and the kind slowdown (`lastCrawlSlowdown`/`lastSlowdown`).
+pub fn unit_speed(world: &World, grid: &WorldGrid, content: &ContentRegistry, unit: Entity) -> f32 {
+    let Some(physics) = world.get::<PhysicsComp>(unit) else {
+        return 1.0;
+    };
+    let Some(def) = world
+        .get::<UnitTypeComp>(unit)
+        .and_then(|comp| content.unit(comp.type_id))
+    else {
+        return physics.speed;
+    };
+    let core = world
+        .get::<UnitCore>(unit)
+        .copied()
+        .unwrap_or(UnitCore::new(0.0));
+    let status_mult = world
+        .get::<StatusComp>(unit)
+        .map(|status| status.speed_multiplier)
+        .unwrap_or(1.0);
+
+    // `isFlying() || type.hovering ? Blocks.air.asFloor() : floorOn()`.
+    let flying = crate::combat::bullet::unit_is_flying(world, unit);
+    let floor = if flying || def.hovering {
+        status_mult
+    } else {
+        let floor_id = world
+            .get::<Pos>(unit)
+            .and_then(|pos| {
+                grid.tiles
+                    .getn(WorldGrid::to_tile(pos.x), WorldGrid::to_tile(pos.y))
+            })
+            .map(|tile| tile.floor);
+        let base = floor_id
+            .and_then(|id| content.block(id))
+            .map(|block| block.speed_multiplier)
+            .unwrap_or(1.0);
+        let deep = floor_id.is_some_and(|id| {
+            world
+                .get_resource::<crate::world::BlockTable>()
+                .is_some_and(|table| crate::world::behavior::environment::floor_is_deep(table, id))
+        });
+        let mut on = base;
+        let mut slow = 1.0f32;
+        if let Some(crawl) = world.get::<CrawlComp>(unit) {
+            // `CrawlComp.floorSpeedMultiplier`: deep floors use 0.45.
+            if deep {
+                on = 0.45;
+            }
+            slow = crawl.last_crawl_slowdown;
+        } else if let Some(tank) = world.get::<TankComp>(unit) {
+            slow = tank.last_slowdown;
+        }
+        on.powf(def.floor_multiplier) * status_mult * slow
+    };
+
+    // `strafePenalty`: airborne player units lose speed while strafing.
+    let strafe = if world
+        .get::<ControllerSlot>(unit)
+        .is_some_and(|slot| slot.kind == AiKind::Player)
+        && core.elevation >= 0.001
+    {
+        let vel = world
+            .get::<Vel>(unit)
+            .copied()
+            .unwrap_or(Vel { x: 0.0, y: 0.0 });
+        let vel_angle = vel.y.atan2(vel.x).to_degrees();
+        let t = crate::weapons::angle_dist(vel_angle, core.rotation) / 180.0;
+        1.0 + (def.strafe_penalty - 1.0) * t
+    } else {
+        1.0
+    };
+    // `boost = lerp(1, canBoost ? boostMultiplier : 1, elevation)`.
+    let boost_mult = if physics.can_boost {
+        physics.boost_multiplier
+    } else {
+        1.0
+    };
+    let boost = 1.0 + (boost_mult - 1.0) * core.elevation;
+
+    physics.speed * strafe * boost * floor
+}
 
 /// Advances every kind-specific movement state for `entity`.
 ///
