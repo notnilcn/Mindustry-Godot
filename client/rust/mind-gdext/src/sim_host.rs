@@ -62,6 +62,10 @@ pub struct MechDraw {
     pub stride: f32,
 }
 
+/// One command-overlay row: `(x, y, hit_size, flying, target_pos)`
+/// (`InputHandler.drawCommanded` inputs).
+pub type UnitCommandRow = (f32, f32, f32, bool, Option<(f32, f32)>);
+
 /// One live weapon mount (`Weapon.draw` inputs).
 pub struct WeaponDraw {
     /// Weapon region name (`Weapon.name`).
@@ -2557,6 +2561,49 @@ impl MindSimHost {
             -state.cur_recoil.max(0.0).powf(state.config.recoil_pow) * state.config.recoil;
         let (dx, dy) = mind_core::render::conveyor_items::trns(state.rotation, len, 0.0);
         Some((state.rotation, dx, dy, state.heat))
+    }
+
+    /// Command-overlay rows for the selected unit ids
+    /// (`InputHandler.drawCommanded`; T16/PAR-0157):
+    /// `(x, y, hit_size, flying, target_pos)` where `target_pos` is
+    /// `CommandAiState.target_pos` (`None` without a move command). Rust-only
+    /// seam for the overlay pass.
+    pub fn unit_command_view(&self, ids: &[i32]) -> Vec<UnitCommandRow> {
+        use mind_core::entities::comp::Pos;
+        use mind_core::entities::comp::unit::comp::UnitTypeComp;
+        let Some(runtime) = self.sim.unit_runtime() else {
+            return Vec::new();
+        };
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return Vec::new();
+        };
+        let wanted: std::collections::HashSet<i32> = ids.iter().copied().collect();
+        let mut out = Vec::new();
+        for &entity in &runtime.units {
+            let Ok(entity_ref) = self.sim.ecs.0.get_entity(entity) else {
+                continue;
+            };
+            let Some(seq) = entity_ref.get::<mind_core::ecs::EntitySeq>() else {
+                continue;
+            };
+            if !wanted.contains(&(seq.0 as i32)) {
+                continue;
+            }
+            let (Some(pos), Some(type_comp)) =
+                (entity_ref.get::<Pos>(), entity_ref.get::<UnitTypeComp>())
+            else {
+                continue;
+            };
+            let Some(def) = content.unit(type_comp.type_id) else {
+                continue;
+            };
+            let target = self
+                .sim
+                .unit_command_state(seq.0 as i32)
+                .and_then(|state| state.target_pos);
+            out.push((pos.x, pos.y, def.hit_size, def.flying, target));
+        }
+        out
     }
 
     /// Force-projector domes: `(x, y, real radius, sides, rotation degrees,

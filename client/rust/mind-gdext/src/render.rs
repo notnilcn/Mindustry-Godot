@@ -38,6 +38,7 @@ use crate::sim_host::MindSimHost;
 mod atlas_bind;
 mod blocks;
 mod building_cache;
+mod command_overlay;
 mod debug;
 mod env;
 mod floor;
@@ -234,6 +235,8 @@ pub struct MindWorldRenderer {
     status: Option<Gd<status::StatusRenderer>>,
     /// Shield domes/bubbles (`Layer.shields` band; T13/PAR-0129).
     shields: Option<Gd<shields::ShieldRenderer>>,
+    /// Command-mode selection overlay (`Layer.plans` band; T16/PAR-0157).
+    command_overlay: Option<Gd<command_overlay::CommandOverlay>>,
     env: Option<EnvRenderer>,
     fog: Option<FogRenderer>,
     overlays: Option<OverlayRenderer>,
@@ -273,6 +276,7 @@ impl INode2D for MindWorldRenderer {
             debug: None,
             status: None,
             shields: None,
+            command_overlay: None,
             env: None,
             fog: None,
             overlays: None,
@@ -523,6 +527,15 @@ impl MindWorldRenderer {
             // the pipeline, not by content.
             shield_band.clone().add_child(&node);
             self.shields = Some(node.clone());
+        }
+        // Command-mode selection overlay at `Layer.plans`
+        // (`InputHandler.drawCommanded`).
+        if let Some(plans_band) = self.band_node_at(BandKey::base(Layer::Plans)) {
+            let node = command_overlay::CommandOverlay::new_alloc();
+            // code-instantiated: one overlay pass; the node count is fixed by
+            // the pipeline, not by content.
+            plans_band.clone().add_child(&node);
+            self.command_overlay = Some(node.clone());
         }
         if let Some(light_band) = self.band_node_at(BandKey::base(Layer::Light)) {
             self.env = Some(EnvRenderer::new(light_band));
