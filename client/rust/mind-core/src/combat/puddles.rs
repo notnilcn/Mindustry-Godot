@@ -328,6 +328,19 @@ pub fn update_puddles(
                     None,
                 );
                 for unit in candidates {
+                    // `unitCons`: `unit.isGrounded() && !unit.type.hovering`
+                    // (PuddleComp.java:26).
+                    let grounded = world
+                        .get::<crate::entities::comp::unit::UnitCore>(unit)
+                        .is_none_or(|core| core.elevation < 0.001)
+                        && !crate::combat::bullet::unit_is_flying(world, unit);
+                    let hovering = world
+                        .get::<crate::entities::comp::unit::UnitTypeComp>(unit)
+                        .and_then(|comp| content.unit(comp.type_id))
+                        .is_some_and(|def| def.hovering);
+                    if !grounded || hovering {
+                        continue;
+                    }
                     let Some(pos) = world.get::<Pos>(unit) else {
                         continue;
                     };

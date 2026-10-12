@@ -520,7 +520,9 @@ impl Sim {
                         let spread = size as f32 * 4.0;
                         for (liquid, amount) in &spill {
                             let splash = (amount / 4.0).clamp(0.0, 10.0);
-                            let count = (amount / 5.0).clamp(0.0, 30.0) as i32;
+                            // Java loops `for(int i = 0; i < clamp(amount / 5, 0, 30); i++)`
+                            // over a float bound, i.e. `ceil` deposits.
+                            let count = (amount / 5.0).clamp(0.0, 30.0).ceil() as i32;
                             for _ in 0..count {
                                 let px = center.0
                                     + unit_runtime.rng.range(
@@ -1534,7 +1536,13 @@ impl Sim {
                 }
                 _ => false,
             };
-            if carrier_team != target_team
+            // `PayloadComp.canPickup(Unit)`: `type.pickupUnits` gate.
+            let pickup_units = ecs
+                .get::<UnitTypeComp>(carrier)
+                .and_then(|comp| runtime.content.unit(comp.type_id))
+                .is_some_and(|def| def.pickup_units);
+            if !pickup_units
+                || carrier_team != target_team
                 || !target_ai
                 || !target_grounded
                 || !target_allowed
@@ -1906,7 +1914,9 @@ fn nearest_enemy_building(world: &World, team: u8, x: f32, y: f32) -> Option<Ent
         let Some(comp) = entity.get::<BuildingComp>() else {
             continue;
         };
-        if comp.team.0 == team {
+        // Derelict (team 0) ruins are never an attack anchor
+        // (`BlockIndexer.findEnemyTile`, BlockIndexer.java:466).
+        if comp.team.0 == team || crate::ai::block_indexer::is_derelict(world, comp.team.0) {
             continue;
         }
         let Some((bx, by)) = building_center(world, entity.id()) else {

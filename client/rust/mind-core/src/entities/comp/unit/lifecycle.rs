@@ -154,7 +154,12 @@ fn spawn_single(
     y: f32,
     rotation: f32,
 ) -> Entity {
-    let core = UnitCore::new(rotation);
+    // `UnitType.create`: `unit.elevation = flying ? 1f : 0` (UnitType.java:566);
+    // `isFlying()`/`isGrounded()`, the boost lerp and the strafe penalty read it.
+    let mut core = UnitCore::new(rotation);
+    if unit.flying {
+        core.elevation = 1.0;
+    }
     let physics = PhysicsComp {
         speed: unit.speed,
         boost_multiplier: unit.boost_multiplier,

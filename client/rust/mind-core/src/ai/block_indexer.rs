@@ -240,7 +240,10 @@ impl BlockIndexer {
         let range2 = range * range;
         let mut best: Option<(f32, Entity)> = None;
         for &entity in &self.all {
-            if world.get::<TeamComp>(entity).map(|t| t.team) == Some(team) {
+            // `findEnemyTile`: skip own team and `Team.derelict` (id 0) unless
+            // `rules.coreCapture` (BlockIndexer.java:466).
+            let other = world.get::<TeamComp>(entity).map(|t| t.team);
+            if other == Some(team) || other.is_some_and(|other| is_derelict(world, other)) {
                 continue;
             }
             let Some(pos) = world.get::<Pos>(entity) else {
@@ -297,6 +300,23 @@ pub const fn flag_index(flag: BlockFlag) -> usize {
         BlockFlag::BlockRepair => 16,
         BlockFlag::Synced => 17,
     }
+}
+
+/// Whether `team` is `Team.derelict` in this world. Java reserves id 0 for
+/// derelict ruins (never targeted unless `rules.coreCapture`); the P0 spine and
+/// the plan harnesses use 0 as the player team, so 0 only counts as derelict
+/// when the live rules put the player elsewhere (campaign `defaultTeam = 1`).
+pub fn is_derelict(world: &World, team: u8) -> bool {
+    if team != 0 {
+        return false;
+    }
+    let campaign_default = world
+        .get_resource::<crate::game::runtime::CampaignRuntime>()
+        .map(|runtime| runtime.session.rules.default_team);
+    let build_default = world
+        .get_resource::<crate::world::limits::BuildRules>()
+        .map(|rules| rules.default_team);
+    campaign_default.is_some_and(|t| t != 0) || build_default.is_some_and(|t| t != 0)
 }
 
 #[cfg(test)]
