@@ -513,6 +513,14 @@ ability (e.g. `RepairFieldAbility`) heals allies live.
   still equal). If a committed golden in `mind-headless` changes, check whether
   it is one of the 6 pre-existing failures first.
 
+**Status 2026-10-12:** done — applier install in `1019d4f`, tests in `88e0cf8`.
+`install_unit_runtime_from` installs the content-backed `StatusApplier`; the
+live loop ticks `update_unit_status` + `update_unit_abilities` per unit via
+`update_kinematics` (already present on main). Tests:
+`live_status_burning_damages_unit`, `live_ability_repair_field_heals`.
+Vanilla live-update abilities spawn units only through `SpawnDeathAbility`,
+which `resolve_deaths` already adopts by seq range.
+
 ---
 
 ## 5. PAR-0137 — ground units ignore floor speed multipliers
