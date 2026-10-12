@@ -19,6 +19,63 @@ pub trait LaunchAnimator {
     fn zoom_launch(&self) -> f32;
     /// `endLaunch()`.
     fn end_launch(&mut self);
+    /// `Renderer`'s directional progress (`getLandTimeIn()`: 0->1 while
+    /// landing, 1->0 while launching). Pushed each update so `zoomLaunch` can
+    /// read it (default no-op for animators that track their own time).
+    fn set_land_time_in(&mut self, _fin: f32) {}
+}
+
+/// `CoreBlock.CoreBuild` land animator (`CoreBlock.java:359,655-658`):
+/// 160-tick drop-in whose camera zoom runs `Interp.pow3` from `landZoomFrom`
+/// (0.02) to `landZoomTo` (4) with the cutscene's directional progress.
+pub struct CoreLandAnimator {
+    duration: f32,
+    land_zoom_from: f32,
+    land_zoom_to: f32,
+    /// Directional `getLandTimeIn()` pushed by [`Cutscene::update`].
+    fin: f32,
+}
+
+impl CoreLandAnimator {
+    /// `CoreBuild` defaults (`CoreBlock.java:44-57`).
+    pub fn new() -> Self {
+        Self {
+            duration: 160.0,
+            land_zoom_from: 0.02,
+            land_zoom_to: 4.0,
+            fin: 0.0,
+        }
+    }
+}
+
+impl Default for CoreLandAnimator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LaunchAnimator for CoreLandAnimator {
+    fn launch_duration(&self) -> f32 {
+        self.duration
+    }
+
+    fn begin_launch(&mut self, _launching: bool) {}
+
+    fn update_launch(&mut self) {}
+
+    fn zoom_launch(&self) -> f32 {
+        crate::math::interp::Interp::Pow3.apply_range(
+            self.land_zoom_from,
+            self.land_zoom_to,
+            self.fin,
+        )
+    }
+
+    fn end_launch(&mut self) {}
+
+    fn set_land_time_in(&mut self, fin: f32) {
+        self.fin = fin;
+    }
 }
 
 /// `Renderer`'s launch/land state (`landTime`, `launching`, `weatherAlpha`).
@@ -124,11 +181,19 @@ impl Cutscene {
                 anim.update_launch();
             }
             self.weather_alpha = 0.0;
+            // `Renderer`: `camerascale = launchAnimator.zoomLaunch()` reads
+            // `getLandTimeIn()`; push the directional progress first.
+            let fin = self.get_land_time_in();
+            if let Some(anim) = self.animator.as_mut() {
+                anim.set_land_time_in(fin);
+            }
             if let Some(anim) = self.animator.as_ref() {
                 self.camerascale = anim.zoom_launch();
             }
             if !paused {
-                self.land_time -= delta_frames / 60.0;
+                // `launchDuration()` is in ticks (`CoreBlock.landDuration` 160)
+                // and `delta_frames` is `Time.delta` in frames.
+                self.land_time -= delta_frames;
             }
         } else {
             self.weather_alpha = lerp_delta(self.weather_alpha, 1.0, 0.08, delta_frames);
@@ -180,7 +245,8 @@ mod tests {
 
     fn mock() -> Mock {
         Mock {
-            duration: 1.0,
+            // One second of ticks (`Time.delta` frames).
+            duration: 60.0,
             zoom: 2.0,
             ticks: 0,
             began: false,
@@ -222,6 +288,26 @@ mod tests {
         let mut cutscene = Cutscene::new(4.0);
         cutscene.show_landing(Box::new(mock()));
         cutscene.update(70.0, false);
+        assert!(!cutscene.is_cutscene());
+        assert_eq!(cutscene.land_scale(), 1.0);
+    }
+
+    #[test]
+    fn core_land_animator_zoom_runs_from_to() {
+        let mut cutscene = Cutscene::new(2.0);
+        cutscene.show_landing(Box::new(CoreLandAnimator::new()));
+        // `landZoomFrom` at fin 0.
+        assert!((cutscene.camerascale() - 0.02).abs() < 1e-3);
+        // Halfway (80 of 160 ticks) the curve is strictly inside the range.
+        for _ in 0..80 {
+            cutscene.update(1.0, false);
+        }
+        let mid = cutscene.camerascale();
+        assert!(mid > 0.02 && mid < 4.0, "mid zoom {mid}");
+        // The cutscene ends after 160 ticks and the normal view returns.
+        for _ in 0..80 {
+            cutscene.update(1.0, false);
+        }
         assert!(!cutscene.is_cutscene());
         assert_eq!(cutscene.land_scale(), 1.0);
     }

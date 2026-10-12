@@ -695,6 +695,28 @@ impl MindCampaign {
             log::warn!("start_sector: player unit spawn failed");
         }
 
+        // `Trigger.newGame` (`Control.java:198-222`): the core drops in with the
+        // 160-tick landing cutscene unless `skipcoreanimation` or a PvP rule set
+        // (PAR-0131). The scaled core sprite/fade/announce ride the camera's
+        // `get_land_time_in` from the UI; the core block name is unused until
+        // that draw lands.
+        if installed
+            && !self.settings.get_bool("skipcoreanimation", false)
+            && !self.session.rules.pvp
+            && let Some(host) = self.host()
+            && let Some((core_x, core_y)) = host.bind().best_core_position()
+            && let Some(mut camera) = self.base().get_node_or_null("/root/Spine/World/Camera2D")
+        {
+            camera.call(
+                "show_landing",
+                &[
+                    core_x.to_variant(),
+                    core_y.to_variant(),
+                    GString::new().to_variant(),
+                ],
+            );
+        }
+
         self.registry = Some(registry);
         self.campaign = Some(campaign);
         self.runtime_installed = installed;
