@@ -107,7 +107,12 @@ impl UnitFactoryBehavior {
             .collect();
         let factory = UnitFactory::new(plans, content.items().len());
         let units = resolve_units(content, def.unit_plans.iter().map(|plan| plan.unit));
-        // `created()` auto-selects the first plan whose unit is unlocked.
+        // `created()` auto-selects the first plan whose unit is
+        // `unlockedNow()` (`unlocked() || !state.isCampaign()`). The live block
+        // runtime boots its own vanilla registry (`load_vanilla_content`), which
+        // never sees the campaign's research, so `unlocked()` here is false for
+        // researched units; fall back to the first plan instead of leaving a
+        // freshly placed factory idle (audit of PAR-0092).
         let default_plan = def
             .unit_plans
             .iter()
@@ -117,6 +122,7 @@ impl UnitFactoryBehavior {
                     .map(|unit| unit.unlock.unlocked())
                     .unwrap_or(false)
             })
+            .or((!def.unit_plans.is_empty()).then_some(0))
             .map(|index| index as i32)
             .unwrap_or(-1);
         Self {

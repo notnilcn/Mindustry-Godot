@@ -510,11 +510,12 @@ fn unit_factory_config_selects_plan() {
         .unit_id("mono")
         .expect("mono");
 
-    // `created()` auto-selects the first *unlocked* plan; the test registry has
-    // none unlocked, so no plan is selected until one is configured.
+    // `created()` auto-selects the first `unlockedNow()` plan; the runtime
+    // registry never carries campaign research, so the first plan (flare) is
+    // the fallback default.
     assert_eq!(
         crate::world::config::read_config(&sim.ecs.0, factory),
-        crate::world::config::ConfigValue::None
+        crate::world::config::ConfigValue::Number(0.0)
     );
 
     // Configure a plan by unit name (the config panel's content submit path).
