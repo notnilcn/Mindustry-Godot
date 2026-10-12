@@ -56,7 +56,8 @@ pub struct BulletSpawn {
     pub aim_y: f32,
     /// Aim tile.
     pub aim_tile: Option<(i16, i16)>,
-    /// Sticky target (plan 10 §3.3).
+    /// Aiming/attack target (Java `BulletType.create`'s `target` argument: it
+    /// seeds the aim tile for a building target, never a sticky attachment).
     pub target: Option<Entity>,
     /// Deterministic per-tick mover (`BulletComp.mover`; plan 10 M4).
     pub mover: Option<super::ShotMover>,
@@ -219,6 +220,18 @@ pub fn create(
         0.0
     };
 
+    // `BulletType.create`: the `target` argument only seeds `aimTile`
+    // (`target instanceof Building b ? b.tile : world.tileWorld(aimX, aimY)`);
+    // sticky attachment happens later on collision for `BulletType.sticky`
+    // bullets (`BulletComp.collision` -> `stickTo`).
+    let aim_tile = spawn.aim_tile.or_else(|| {
+        spawn.target.and_then(|target| {
+            world
+                .get::<crate::entities::comp::Building>(target)
+                .map(|building| (building.tile.x(), building.tile.y()))
+        })
+    });
+
     let bullet = Bullet {
         def: spawn.def,
         damage,
@@ -230,11 +243,11 @@ pub fn create(
         last: (spawn.x, spawn.y),
         aim: (spawn.aim_x, spawn.aim_y),
         origin: (spawn.x, spawn.y),
-        aim_tile: spawn.aim_tile,
+        aim_tile,
         time,
         lifetime,
         collided: smallvec::SmallVec::new(),
-        sticky: spawn.target,
+        sticky: None,
         sticky_x: 0.0,
         sticky_y: 0.0,
         flags: JUST_SPAWNED,

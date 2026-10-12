@@ -512,6 +512,14 @@ impl MindSimHost {
         GString::from(self.sim.selectable_units_json().as_str())
     }
 
+    /// Debug-only live unit dump: id, type, team, controller kind, position,
+    /// rotation, health, `can_shoot` and per-mount fire state. Read-only MCP
+    /// probe (`PAR-0088`/`§7`); never saved or synced.
+    #[func]
+    pub fn unit_debug_json(&self) -> GString {
+        GString::from(self.sim.unit_debug_json().as_str())
+    }
+
     /// Per-type content counts for the inspector `Content` tab (plan 02 §3.7).
     /// Read-only; plan 05 moves this to the sim-owned `Content` resource.
     #[func]

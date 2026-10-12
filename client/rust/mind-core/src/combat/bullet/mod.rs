@@ -897,17 +897,22 @@ pub fn collide_bullet(ctx: &mut CombatCtx<'_>, bullet: Entity) -> CollisionOutco
             return true;
         }
         if let Some(target) = tile.build {
-            // Sticky bullets attach instead of hitting (`BulletType.sticky` or a
-            // pre-assigned sticky target).
+            // `BulletComp.collision`: `BulletType.sticky` bullets attach on
+            // first contact (`stickTo`); an already-attached bullet does not
+            // re-hit its target. A pre-assigned *aim* target is not sticky
+            // (`BulletType.create` seeds `aimTile` only).
             if sticky == Some(target) || (def_sticky && sticky.is_none()) {
-                let offset = (
-                    ctx.pos(bullet).unwrap_or((0.0, 0.0)).0 - tx as f32 * tile_size,
-                    ctx.pos(bullet).unwrap_or((0.0, 0.0)).1 - ty as f32 * tile_size,
-                );
+                // Java `stickTo`: the offset is relative to the target's
+                // position (`x - other.x`).
+                let (bx, by) = ctx.pos(bullet).unwrap_or((0.0, 0.0));
+                let (ox, oy) = ctx
+                    .pos(target)
+                    .map(|(tx, ty)| (bx - tx, by - ty))
+                    .unwrap_or((bx - tx as f32 * tile_size, by - ty as f32 * tile_size));
                 if let Some(mut b) = ctx.world.get_mut::<Bullet>(bullet) {
                     b.sticky = Some(target);
-                    b.sticky_x = offset.0;
-                    b.sticky_y = offset.1;
+                    b.sticky_x = ox;
+                    b.sticky_y = oy;
                 }
                 outcome = CollisionOutcome::Stuck;
                 return true;

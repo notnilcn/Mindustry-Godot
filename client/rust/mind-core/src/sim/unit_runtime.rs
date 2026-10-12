@@ -1252,6 +1252,64 @@ impl Sim {
         }
         serde_json::to_string(&rows).unwrap_or_else(|_| String::from("[]"))
     }
+
+    /// Debug-only live unit dump (`id`, `type`, `team`, `kind`, position,
+    /// rotation, health, `can_shoot` and per-mount aim/fire state); MCP probes
+    /// only, never saved or synced.
+    pub fn unit_debug_json(&self) -> String {
+        let Some(runtime) = self.ecs.0.get_non_send::<UnitRuntime>() else {
+            return String::from("[]");
+        };
+        let mut rows: Vec<serde_json::Value> = Vec::new();
+        for &entity in &runtime.units {
+            let Ok(entity_ref) = self.ecs.0.get_entity(entity) else {
+                continue;
+            };
+            let Some(seq) = entity_ref.get::<EntitySeq>() else {
+                continue;
+            };
+            let type_name = entity_ref
+                .get::<UnitTypeComp>()
+                .and_then(|comp| runtime.content.unit(comp.type_id))
+                .map(|def| def.name.clone())
+                .unwrap_or_default();
+            let mounts: Vec<serde_json::Value> = entity_ref
+                .get::<crate::weapons::UnitWeapons>()
+                .map(|weapons| {
+                    weapons
+                        .mounts
+                        .iter()
+                        .map(|mount| {
+                            serde_json::json!({
+                                "shoot": mount.shoot,
+                                "aim": [mount.aim_x, mount.aim_y],
+                                "rotation": mount.rotation,
+                                "target_rotation": mount.target_rotation,
+                                "reload": mount.reload,
+                                "warmup": mount.warmup,
+                                "total_shots": mount.total_shots,
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            rows.push(serde_json::json!({
+                "id": seq.0 as i32,
+                "type": type_name,
+                "team": entity_ref.get::<TeamComp>().map(|team| team.team).unwrap_or(0),
+                "kind": entity_ref
+                    .get::<ControllerSlot>()
+                    .map(|slot| slot.kind.name())
+                    .unwrap_or("?"),
+                "pos": entity_ref.get::<Pos>().map(|pos| [pos.x, pos.y]),
+                "rotation": entity_ref.get::<UnitCore>().map(|core| core.rotation),
+                "health": entity_ref.get::<Health>().map(|health| health.health),
+                "can_shoot": entity_ref.get::<crate::weapons::UnitState>().map(|state| state.can_shoot),
+                "mounts": mounts,
+            }));
+        }
+        serde_json::to_string(&rows).unwrap_or_else(|_| String::from("[]"))
+    }
 }
 
 /// `WaveSpawner.eachGroundSpawn` core branch: a spawn tile near `(cx, cy)`
@@ -2307,6 +2365,154 @@ mod msav_tests {
             "the drill-fed duo killed the dagger (ammo {ammo}, health {:?})",
             sim.ecs.0.get::<Health>(dagger).map(|h| h.health)
         );
+    }
+
+    /// §7 (PAR-0139-adjacent): an undefended Ground Zero core with low health is
+    /// destroyed by wave daggers and the campaign reports game over.
+    #[test]
+    fn ground_zero_wave_destroys_undefended_core() {
+        use crate::ecs::TeamId;
+        use crate::game::State;
+        use crate::game::planet::EmptyNeighborhood;
+        use crate::game::play::PlaySession;
+        use crate::game::rules::Rules;
+        use crate::game::runtime::CampaignRuntime;
+        use crate::game::universe::Campaign;
+
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../assets/maps/serpulo/groundZero.msav");
+        let Ok(bytes) = std::fs::read(&path) else {
+            return;
+        };
+        let mut content =
+            create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+                .expect("content");
+        let mut grid = WorldGrid::new(0, 0);
+        grid.begin_map_load();
+        let pending: Vec<(usize, DecodedBase)> = {
+            let mut context = EditorContext::new(&mut grid, &content);
+            let mut state = SaveReadState {
+                context: Some(&mut context),
+                content: Some(&mut content),
+                ..SaveReadState::default()
+            };
+            SaveIo::load_bytes(&bytes, &mut state).expect("map imports");
+            std::mem::take(&mut context.pending_buildings)
+        };
+        grid.end_map_load(&content);
+        let (width, height) = (grid.tiles.width, grid.tiles.height);
+        let air = BlockId::AIR;
+        let mut sim = Sim::new(1, width, height, air, air);
+        sim.grid = grid;
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        assert!(sim.materialize_map_buildings(&pending) > 0, "core linked");
+        // Bullet-vs-building collision reads the runtime grid snapshot; refresh
+        // it after materializing the map's buildings (bullets otherwise fly
+        // through them).
+        sim.refresh_unit_runtime();
+        let core_block = content.block_id("core-shard").expect("core");
+        let (core_x, core_y, core) = sim
+            .grid
+            .tiles
+            .array()
+            .iter()
+            .find(|t| t.block == core_block)
+            .and_then(|t| t.build.map(|build| (i32::from(t.x), i32::from(t.y), build)))
+            .expect("core tile + entity");
+        // Keep the fight short (`Health.health = 50`); the check needs the core
+        // to die, not the whole base to fall.
+        sim.ecs
+            .0
+            .get_mut::<Health>(core)
+            .expect("core health")
+            .health = 50.0;
+
+        let campaign = Campaign::from_registry(&content, &EmptyNeighborhood);
+        let mut session = PlaySession::new(Rules {
+            waves: false,
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        session.phase = State::Playing;
+        // A sector makes `is_campaign()` true: wave-team units get their AI
+        // (`GroundAI`) instead of idling `CommandAI`, and `checkGameState`
+        // reports the sector loss when the core dies.
+        session.sector = content.planet_id("serpulo").map(|planet| (planet, 170));
+        session.teams.register_core(core, TeamId(1), &session.rules);
+        sim.ecs
+            .0
+            .insert_resource(CampaignRuntime::new(session, campaign));
+
+        // Three wave daggers ~10 tiles from the core walk in and shoot it.
+        // Find an open 3-tile column on passable terrain (the crater walls are
+        // solid rock; the tile-center deadlock at a boundary must be avoided).
+        let free_tile = |sim: &Sim, x: i32, y: i32| {
+            sim.grid
+                .tiles
+                .getn(x, y)
+                .is_some_and(|t| !t.solid(&content) && t.build.is_none())
+        };
+        let mut spawn_column = None;
+        'search: for r in 4..20 {
+            for (dx, dy) in [
+                (r, 0),
+                (-r, 0),
+                (0, r),
+                (0, -r),
+                (r, r),
+                (r, -r),
+                (-r, r),
+                (-r, -r),
+            ] {
+                let (x, y) = (core_x + dx, core_y + dy);
+                if (-1..=1).all(|offset| free_tile(&sim, x, y + offset)) {
+                    spawn_column = Some((x, y));
+                    break 'search;
+                }
+            }
+        }
+        let (sx, sy) = spawn_column.expect("open column near the core");
+        eprintln!("wave spawn column ({sx}, {sy}) core ({core_x}, {core_y})");
+        for offset in -1..=1 {
+            let _ = sim
+                .spawn_live_unit(
+                    "dagger",
+                    2,
+                    sx as f32 * TILE_SIZE + 4.0,
+                    (sy + offset) as f32 * TILE_SIZE + 4.5,
+                    180.0,
+                )
+                .expect("dagger");
+        }
+        let mut core_destroyed_at = None;
+        for tick in 0..3000 {
+            sim.tick().expect("tick");
+            if sim.grid.tiles.get(core_x, core_y).build.is_none() {
+                core_destroyed_at = Some(tick);
+                break;
+            }
+        }
+        // The campaign liveness sweep + `checkGameState` run on the tick after
+        // the core is removed.
+        for _ in 0..10 {
+            sim.tick().expect("tick");
+        }
+        let game_over = sim
+            .ecs
+            .0
+            .get_resource::<CampaignRuntime>()
+            .is_some_and(|runtime| runtime.session.game_over);
+        eprintln!(
+            "ground zero core destroyed at {core_destroyed_at:?}, game over {game_over}, units {:?}",
+            sim.group_counts()
+        );
+        assert!(
+            core_destroyed_at.is_some(),
+            "the wave destroyed the undefended core"
+        );
+        assert!(game_over, "the campaign reported game over (sector lost)");
     }
 
     /// The authored attack map pins its spawn groups to the map's spawn
