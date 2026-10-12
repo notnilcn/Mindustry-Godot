@@ -2059,6 +2059,175 @@ impl MindSimHost {
         Some((rot, items))
     }
 
+    /// Hover target at tile `(x, y)` (`PlacementFragment.hovered`): a unit
+    /// within 5 world px of the tile centre, else the tile's building, else the
+    /// tile's displayable drop (`Tile.displayable`/`Tile.display`).
+    /// `{kind, name, icon, label, team}`; empty when nothing is hovered.
+    #[func]
+    pub fn hover_info(&self, x: i32, y: i32) -> Dictionary<GString, Variant> {
+        let mut out = Dictionary::new();
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return out;
+        };
+        let size = mind_core::config::TILESIZE as f32;
+        let cx = x as f32 * size;
+        let cy = y as f32 * size;
+        // `Units.closestOverlap(player.team(), mouseWorld, 5f, ...)`: a unit
+        // under the cursor wins over the tile.
+        let unit = self
+            .unit_draws()
+            .into_iter()
+            .filter(|(ux, uy, ..)| (ux - cx).hypot(*uy - cy) <= 5.0)
+            .map(|(_, _, _, name, ..)| name)
+            .next();
+        if let Some(name) = unit {
+            out.set("kind", &"unit".to_variant());
+            out.set("name", &GString::from(name.as_str()).to_variant());
+            out.set(
+                "icon",
+                &GString::from(format!("unit-{name}-ui").as_str()).to_variant(),
+            );
+            out.set(
+                "label",
+                &GString::from(format!("unit.{name}.name").as_str()).to_variant(),
+            );
+            return out;
+        }
+        let tile = self.sim.grid.tile(x, y);
+        // `hoverTile.build.displayable()`: any live building.
+        if let Some(entity) = tile.build {
+            let build = self
+                .sim
+                .ecs
+                .0
+                .get::<mind_core::ecs::BuildingComp>(entity)
+                .and_then(|comp| content.block(comp.block));
+            if let Some(def) = build {
+                out.set("kind", &"building".to_variant());
+                out.set("name", &GString::from(def.name.as_str()).to_variant());
+                out.set(
+                    "icon",
+                    &GString::from(format!("block-{}-ui", def.name).as_str()).to_variant(),
+                );
+                out.set(
+                    "label",
+                    &GString::from(format!("block.{}.name", def.name).as_str()).to_variant(),
+                );
+                return out;
+            }
+        }
+        // `Tile.displayable()`: `(drop() != null && block == air) ||
+        // wallDrop() != null || (floor().liquidDrop != null && block == air)`.
+        let block = content.block(tile.block);
+        let overlay = content.block(tile.overlay);
+        let floor = content.block(tile.floor);
+        let air = tile.block == BlockId::AIR;
+        let drop = overlay
+            .and_then(|def| def.item_drop)
+            .or_else(|| floor.and_then(|def| def.item_drop));
+        let wall_drop = block
+            .filter(|def| def.solid)
+            .and_then(|def| def.item_drop)
+            .or_else(|| {
+                overlay
+                    .filter(|def| !air && def.wall_ore)
+                    .and_then(|def| def.item_drop)
+            });
+        let liquid_drop = floor.is_some_and(|def| def.liquid_drop.is_some());
+        if !((drop.is_some() && air) || wall_drop.is_some() || (liquid_drop && air)) {
+            return out;
+        }
+        // `Tile.display`: block drop -> overlay drop/wall drop -> floor.
+        let displayed = if block.is_some_and(|def| def.item_drop.is_some()) {
+            block
+        } else if overlay.is_some_and(|def| def.item_drop.is_some()) || wall_drop.is_some() {
+            overlay
+        } else {
+            floor
+        };
+        let Some(displayed) = displayed else {
+            return out;
+        };
+        out.set("kind", &"tile".to_variant());
+        // `OreBlock` carries the ore item's localized name and displays the
+        // item icon; plain walls/floors display their own ui icon.
+        if displayed.kind == BlockKind::OreBlock
+            && let Some(item_def) = displayed.item_drop.and_then(|item| content.item(item))
+        {
+            out.set("name", &GString::from(item_def.name.as_str()).to_variant());
+            out.set(
+                "icon",
+                &GString::from(format!("item-{}-ui", item_def.name).as_str()).to_variant(),
+            );
+            out.set(
+                "label",
+                &GString::from(format!("item.{}.name", item_def.name).as_str()).to_variant(),
+            );
+            return out;
+        }
+        out.set("name", &GString::from(displayed.name.as_str()).to_variant());
+        out.set(
+            "icon",
+            &GString::from(format!("block-{}-ui", displayed.name).as_str()).to_variant(),
+        );
+        out.set(
+            "label",
+            &GString::from(format!("block.{}.name", displayed.name).as_str()).to_variant(),
+        );
+        out
+    }
+
+    /// Build requirements of block `name` for the placement info table
+    /// (`PlacementFragment` requirement rows): JSON
+    /// `[{item, amount, have}]` — amount scaled by `Rules.buildCostMultiplier`
+    /// (`Math.round(stack.amount * multiplier)`) and `have` from the player's
+    /// first core (`player.core().items`).
+    #[func]
+    pub fn block_requirements_json(&self, name: GString) -> GString {
+        let empty = GString::from("[]");
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return empty;
+        };
+        let Some(def) = content.block_id(&name.to_string()) else {
+            return empty;
+        };
+        let Some(def) = content.block(def) else {
+            return empty;
+        };
+        let multiplier = self
+            .sim
+            .ecs
+            .0
+            .get_resource::<CampaignRuntime>()
+            .map(|runtime| runtime.session.rules.build_cost_multiplier)
+            .filter(|value| *value > 0.0)
+            .unwrap_or(1.0);
+        let team = self
+            .sim
+            .ecs
+            .0
+            .get_resource::<CampaignRuntime>()
+            .map(|runtime| runtime.session.rules.default_team)
+            .unwrap_or(0);
+        let core_items: std::collections::HashMap<String, i32> =
+            self.player_core_items(team).into_iter().collect();
+        let rows: Vec<serde_json::Value> = def
+            .requirements
+            .iter()
+            .filter_map(|stack| {
+                let item = content.item(stack.item)?;
+                let amount = (stack.amount as f32 * multiplier + 0.5).floor() as i32;
+                let have = core_items.get(&item.name).copied().unwrap_or(0);
+                Some(serde_json::json!({
+                    "item": item.name,
+                    "amount": amount,
+                    "have": have,
+                }))
+            })
+            .collect();
+        GString::from(serde_json::Value::Array(rows).to_string().as_str())
+    }
+
     /// Building rotation (`Building.rotation`, quarter turns) at `(x, y)`;
     /// `0` without a building. Rust-only seam for rotated block sprites.
     pub fn building_rotation(&self, x: i32, y: i32) -> u8 {

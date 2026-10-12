@@ -115,6 +115,19 @@ pub trait Displayable {
     fn hover_info(&self) -> HoverInfo;
 }
 
+/// `PlacementFragment` requirement-row amount colour: `[scarlet]` below half
+/// the need, `[accent]` below the need, else `[white]`
+/// (`amount < stackamount / 2f ? "[scarlet]" : amount < stackamount ? "[accent]" : "[white]"`).
+pub fn requirement_color(have: i32, need: i32) -> &'static str {
+    if (have as f32) < need as f32 / 2.0 {
+        "scarlet"
+    } else if have < need {
+        "accent"
+    } else {
+        "white"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -144,6 +157,19 @@ mod tests {
         };
         let rows = info.to_text_rows(&bundle(), &iconc());
         assert_eq!(rows[0].0, "\u{f8fe} wall");
+    }
+
+    #[test]
+    fn requirement_colour_boundaries() {
+        // `have < need / 2f` is a float compare: 1 < 3/2 = 1.5 -> scarlet.
+        assert_eq!(requirement_color(0, 1), "scarlet");
+        assert_eq!(requirement_color(0, 3), "scarlet");
+        assert_eq!(requirement_color(1, 3), "scarlet");
+        assert_eq!(requirement_color(2, 3), "accent");
+        assert_eq!(requirement_color(2, 2), "white");
+        assert_eq!(requirement_color(5, 2), "white");
+        // Zero requirement is always satisfied.
+        assert_eq!(requirement_color(0, 0), "white");
     }
 
     #[test]
