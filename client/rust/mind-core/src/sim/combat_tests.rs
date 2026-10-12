@@ -10,7 +10,7 @@ use bevy_ecs::entity::Entity;
 
 use crate::content::BlockId;
 use crate::determinism::SimCommand;
-use crate::entities::comp::{Health, Pos};
+use crate::entities::comp::{Health, Pos, Vel};
 
 use super::Sim;
 
@@ -533,6 +533,65 @@ fn boosting_nova_lifts_off() {
     assert!(
         crate::combat::bullet::unit_is_flying(&sim.ecs.0, nova),
         "lifted nova counts as flying"
+    );
+}
+
+/// T7: a team-2 flare keeps circling its building target and keeps firing
+/// (`FlyingAI.updateMovement` -> `AIController.circleAttack`, FlyingAI.java:15,
+/// AIController.java:318-351) instead of parking at the anchor tile.
+///
+/// Note: the flare's 9 damage / 80-tick reload cannot destroy a 320 hp copper
+/// wall inside 1200 ticks (135 damage), so the assertions are continuous
+/// circling, a growing shot count and wall damage.
+#[test]
+fn flare_circles_and_keeps_firing() {
+    let mut sim = live_sim(64);
+    let wall = place(&mut sim, 30, 10, "copper-wall", 1);
+    let wall_start = health(&sim, wall).expect("wall health");
+    let flare = sim
+        .spawn_live_unit("flare", 2, 6.0 * 8.0, 10.0 * 8.0, 0.0)
+        .expect("flare");
+    let shots = |sim: &Sim| {
+        sim.ecs
+            .0
+            .get::<crate::weapons::UnitWeapons>(flare)
+            .map(|weapons| weapons.mounts.iter().map(|m| m.total_shots).sum::<i32>())
+            .unwrap_or(0)
+    };
+    let mut shots_mid = 0;
+    let mut moving_ticks = 0;
+    let mut sampled = 0;
+    for tick in 0..1200 {
+        sim.tick().expect("tick");
+        let vel = sim
+            .ecs
+            .0
+            .get::<Vel>(flare)
+            .map(|vel| (vel.x * vel.x + vel.y * vel.y).sqrt())
+            .unwrap_or(0.0);
+        if tick > 120 {
+            sampled += 1;
+            if vel > 0.01 {
+                moving_ticks += 1;
+            }
+        }
+        if tick == 300 {
+            shots_mid = shots(&sim);
+        }
+    }
+    let shots_end = shots(&sim);
+    assert!(
+        sampled > 0 && moving_ticks * 10 >= sampled * 9,
+        "flare keeps circling: {moving_ticks}/{sampled} sampled ticks with speed"
+    );
+    assert!(
+        shots_end > shots_mid,
+        "flare keeps firing after tick 300 ({shots_mid} -> {shots_end})"
+    );
+    assert!(
+        health(&sim, wall).is_none_or(|hp| hp < wall_start),
+        "wall damaged while the flare circles: {:?}",
+        health(&sim, wall)
     );
 }
 

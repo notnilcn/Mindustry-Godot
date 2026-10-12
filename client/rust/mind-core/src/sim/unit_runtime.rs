@@ -28,7 +28,7 @@ use bevy_ecs::world::World;
 
 use crate::ai::controller::{AiKind, ControllerSlot};
 use crate::ai::pathfinder::Pathfinder;
-use crate::ai::types::flying::update_flying;
+use crate::ai::types::flying::{circle_attack, move_to, update_flying};
 use crate::ai::types::ground::update_ground;
 use crate::ai::types::missile::{MissileAi, MissileShooter, update_missile};
 use crate::ai::types::player::PlayerInput;
@@ -961,7 +961,38 @@ pub fn unit_update_system(world: &mut World) {
                         .get::<PhysicsComp>(entity)
                         .is_some_and(|physics| physics.flying);
                 let arrived = if flying {
-                    update_flying(world, &runtime.grid, &runtime.content, entity, target)
+                    // `FlyingAI.updateMovement` (FlyingAI.java:15-27): with a
+                    // live target, circle it (`circleTarget`) or close to
+                    // `range * 0.8` and look at it; with none, steer at the
+                    // anchor tile.
+                    let def = world
+                        .get::<UnitTypeComp>(entity)
+                        .and_then(|comp| runtime.content.unit(comp.type_id));
+                    match (mount_target, def) {
+                        (Some(mount), Some(def)) if def.circle_target => {
+                            circle_attack(
+                                world,
+                                &runtime.grid,
+                                &runtime.content,
+                                entity,
+                                mount,
+                                def.circle_target_radius,
+                            );
+                            false
+                        }
+                        (Some(mount), Some(def)) if def.range > 0.0 => {
+                            move_to(
+                                world,
+                                &runtime.grid,
+                                &runtime.content,
+                                entity,
+                                mount,
+                                def.range * 0.8,
+                            );
+                            false
+                        }
+                        _ => update_flying(world, &runtime.grid, &runtime.content, entity, target),
+                    }
                 } else {
                     let UnitRuntime {
                         grid,
