@@ -637,6 +637,66 @@ fn stacked_daggers_separate() {
     );
 }
 
+/// PAR-0138: `[` with no explicit target picks the closest unit around the
+/// *carrier* (`Units.closest(team, pay.x(), pay.y(), hitSize * 2f, ...)`,
+/// InputHandler.java:1043), not around the cursor.
+#[test]
+fn mega_pickup_without_target_uses_carrier_position() {
+    use crate::entities::comp::unit::comp::UnitPayloads;
+
+    let mut sim = live_sim(48);
+    let mega = sim
+        .spawn_player_unit("mega", 1, 100.0, 100.0, 0.0)
+        .expect("mega");
+    let _ = sim
+        .spawn_live_unit("dagger", 1, 110.0, 100.0, 0.0)
+        .expect("dagger");
+    assert!(
+        sim.apply_payload_command(0, 400.0, 400.0, None),
+        "the cursor is far away; the carrier-adjacent dagger is picked"
+    );
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<UnitPayloads>(mega)
+            .map(|payloads| payloads.stack.len()),
+        Some(1),
+        "one carried unit"
+    );
+}
+
+/// PAR-0138: with no unit in reach, `[` picks the building under the carrier
+/// (`world.buildWorld(pay.x(), pay.y())`, InputHandler.java:1045).
+#[test]
+fn mega_pickup_falls_back_to_building_under_carrier() {
+    use crate::entities::comp::unit::comp::UnitPayloads;
+
+    let mut sim = live_sim(48);
+    let mega = sim
+        .spawn_player_unit("mega", 1, 96.0, 96.0, 0.0)
+        .expect("mega");
+    // Tile (12,12) spans x 96..104, y 96..104: the carrier stands on it
+    // ((96,96) maps to tile 12 under both `World.tileWorld` truncation and the
+    // port's rounding `WorldGrid::to_tile`).
+    let _ = place(&mut sim, 12, 12, "copper-wall", 1);
+    assert!(
+        sim.apply_payload_command(0, 400.0, 400.0, None),
+        "no unit in reach; the wall under the carrier is picked"
+    );
+    assert!(
+        sim.grid.tiles.get(12, 12).build.is_none(),
+        "the wall left the grid"
+    );
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<UnitPayloads>(mega)
+            .map(|payloads| payloads.stack.len()),
+        Some(1),
+        "one carried building"
+    );
+}
+
 /// NEW-1: a status applied through the live applier ticks damage every tick
 /// (`StatusComp.update` in the live unit loop).
 #[test]

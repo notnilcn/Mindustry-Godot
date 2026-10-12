@@ -1703,6 +1703,13 @@ impl Sim {
                 .get::<crate::entities::comp::unit::comp::HitboxComp>(carrier)
                 .map(|hitbox| hitbox.hit_size)
                 .unwrap_or(0.0);
+            // `Units.closest(team, pay.x(), pay.y(), hitSize * 2f, ...)`: the
+            // search is centered on the carrier, not the cursor
+            // (`InputHandler.tryPickupPayload`, InputHandler.java:1043).
+            let (cx, cy) = ecs
+                .get::<Pos>(carrier)
+                .map(|pos| (pos.x, pos.y))
+                .unwrap_or((x, y));
             let mut near: Vec<(f32, Entity)> = runtime
                 .units
                 .iter()
@@ -1710,7 +1717,7 @@ impl Sim {
                 .filter(|entity| *entity != carrier)
                 .filter_map(|entity| {
                     let pos = ecs.get::<Pos>(entity)?;
-                    let (dx, dy) = (pos.x - x, pos.y - y);
+                    let (dx, dy) = (pos.x - cx, pos.y - cy);
                     let dist2 = dx * dx + dy * dy;
                     (dist2 <= (carrier_hit * 2.0).powi(2)).then_some((dist2, entity))
                 })
@@ -1754,7 +1761,9 @@ impl Sim {
             ) {
                 (Some(carrier_pos), Some(target_pos)) => {
                     let (dx, dy) = (target_pos.x - carrier_pos.x, target_pos.y - carrier_pos.y);
-                    (dx * dx + dy * dy).sqrt() <= carrier_hit * 2.0 + target_hit * 2.0
+                    // `u.within(unit, u.hitSize + unit.hitSize)`
+                    // (InputHandler.java:1043).
+                    (dx * dx + dy * dy).sqrt() <= carrier_hit + target_hit
                 }
                 _ => false,
             };
@@ -1797,7 +1806,17 @@ impl Sim {
             break;
         }
         ecs.insert_non_send(runtime);
-        changed
+        if changed {
+            return true;
+        }
+        // `else { Building build = world.buildWorld(pay.x(), pay.y()); ... }`
+        // (`InputHandler.java:1045-1052`): fall back to the building under the
+        // carrier.
+        let (cx, cy) = ecs
+            .get::<Pos>(carrier)
+            .map(|pos| (pos.x, pos.y))
+            .unwrap_or((x, y));
+        self.payload_pickup_build(carrier, cx, cy)
     }
 
     /// `InputHandler.requestBuildPayload` + `PayloadComp.canPickup(Building)`.
@@ -1853,7 +1872,11 @@ impl Sim {
             .map(|def| {
                 (
                     def.size as f32 * crate::config::TILESIZE as f32,
-                    def.kind != crate::content::BlockKind::CoreBlock,
+                    // `build.block.buildVisibility != BuildVisibility.hidden`
+                    // (InputHandler.java:1049).
+                    def.kind != crate::content::BlockKind::CoreBlock
+                        && def.build_visibility
+                            != crate::content::registries::blocks::BuildVisibility::Hidden,
                 )
             })
             .unwrap_or((0.0, false));
@@ -1902,22 +1925,14 @@ impl Sim {
 
     /// `InputHandler.requestDropPayload` + `PayloadComp.dropLastPayload`.
     fn payload_drop(&mut self, carrier: Entity, x: f32, y: f32) -> bool {
-        // `requestDropPayload`: clamp the drop point to `tilesize * 4` around
-        // the carrier.
+        // `InputHandler.tryDropPayload` -> `requestDropPayload(player,
+        // player.x, player.y)`: the payload lands at the carrier, never the
+        // cursor (`InputHandler.java:1058-1063`).
+        let _ = (x, y);
         let Some(carrier_pos) = self.ecs.0.get::<Pos>(carrier).copied() else {
             return false;
         };
-        let (dx, dy) = (x - carrier_pos.x, y - carrier_pos.y);
-        let len = (dx * dx + dy * dy).sqrt();
-        let limit = crate::config::TILESIZE as f32 * 4.0;
-        let (cx, cy) = if len > limit {
-            (
-                carrier_pos.x + dx / len * limit,
-                carrier_pos.y + dy / len * limit,
-            )
-        } else {
-            (x, y)
-        };
+        let (cx, cy) = (carrier_pos.x, carrier_pos.y);
         let Some(payload) = self
             .ecs
             .0
