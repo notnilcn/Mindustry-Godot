@@ -514,6 +514,27 @@ Pitfall: capturing Ground Zero mutates the session profile; re-import
 Commits: `Fixes PAR-0085: launch with the chosen loadout and launch resources`;
 separate commit for the PAR-0025/26/27 dialog-button parity.
 
+**Status 2026-10-12:** done — commits `abcb17e` (PAR-0085) and `27b59e4`
+(PAR-0025/0026/0027). Steps 1-4 landed; **step 5 (schematic core block) is the
+recorded remainder** of PAR-0085. In-engine fixture: captured Ground Zero,
+gave it 1200 stored copper, launched frozenForest with basicShard (copper 1000
++ lead 800) through Configure Loadout -> Launch; the new core's items are
+exactly `{"copper":1000,"lead":800}`, the launcher's stored copper dropped to
+200, `lastloadout-core-shard` was written (empty string: vanilla loadouts carry
+no `file`, matching Java's `schem.file == null` branch -
+`get_launch_resource_stacks` feeds the resource summary), and Resources opened
+the loadout dialog. Evidence: `launch-loadout.png`,
+`launch-resources-dialog.png`, `frozenforest-launch-loadout.png`. Also needed:
+`play.rs`/`runtime.rs` share `launch_loadout_applies()` because the port has no
+generator loadout seam (`Schematics.placeLaunchLoadout` in Java) and the
+live-core mirror still had the old `Logic.play` gate. Observed but not fixed
+(remainder/gaps): `launch_capacity` is absent from the campaign read model so
+the dialogs show capacity 0; `campaign_views_json` loads only vanilla loadouts
+(`Schematics.load_loadouts`), so imported `user://schematics/*.msch` never
+appear as rows with file names; PAR-0054 is closed by construction (`_launch`
+calls the 2-arg `start_sector`/`start_sector_with_loadout`, no 3-arg arity
+error). Profile was re-imported after the fixture.
+
 ---
 
 ### E. PAR-0131 — no landing cutscene
