@@ -580,8 +580,16 @@ fn plasma_bore_mines_wall_ore() {
     // `BeamDrill.canPlaceOn` requires it before the block can be placed.
     let ore =
         crate::content::BlockId::new(sim.world_block_id("ore-wall-beryllium").expect("ore wall"));
-    sim.grid.tiles.get_mut(9, 5).block = ore;
-    sim.grid.tiles.get_mut(9, 6).block = ore;
+    // Java maps put `ore-wall-*` as the *overlay* of a static wall
+    // (`Tile.wallDrop()`), never as the block itself.
+    let wall = crate::content::BlockId::new(
+        sim.world_block_id("beryllic-stone-wall").expect("static wall"),
+    );
+    for y in [5, 6] {
+        let tile = sim.grid.tiles.get_mut(9, y);
+        tile.block = wall;
+        tile.overlay = ore;
+    }
     let _source = place(&mut sim, "power-source", 4, 5);
     let bore = place(&mut sim, "plasma-bore", 5, 5);
     {

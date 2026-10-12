@@ -728,7 +728,20 @@ pub fn beam_facing_scan(
             if !def.solid {
                 continue;
             }
-            if let Some(drop) = def.item_drop
+            // `Tile.wallDrop()`: the solid block's own `itemDrop`, else a
+            // `wallOre` overlay's drop on a non-synthetic wall (`ore-wall-*` are
+            // overlays on static walls, not blocks).
+            let wall_drop = def.item_drop.or_else(|| {
+                if def.update || def.destructible {
+                    return None;
+                }
+                table
+                    .get(other.overlay)
+                    .map(|instance| &instance.def)
+                    .filter(|overlay| overlay.wall_ore)
+                    .and_then(|overlay| overlay.item_drop)
+            });
+            if let Some(drop) = wall_drop
                 && hardness_of(drop) <= tier
                 && !blocked.contains(&drop.raw())
             {
