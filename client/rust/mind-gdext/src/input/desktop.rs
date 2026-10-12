@@ -1118,6 +1118,30 @@ impl DesktopBridge {
             });
             return;
         }
+        // `Door.tapped` (`Door.java:148-154`, T13): a tap toggles unless a unit
+        // stands in an open door; `Door.configurable` is false upstream, so no
+        // panel opens. The 60-tick throttle lives in `DoorBehavior::configured`.
+        if matches!(
+            self.block_kind_at(x, y),
+            Some(BlockKind::Door | BlockKind::AutoDoor)
+        ) {
+            let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+                return;
+            };
+            let Some(host) = self.host.clone() else {
+                return;
+            };
+            let open = host.bind().building_config_json(x, y) == "true";
+            if open && host.bind().building_has_unit_overlap(x, y) {
+                return;
+            }
+            self.emit_action(RemoteAction::Configure {
+                x: tx,
+                y: ty,
+                value: mind_core::world::config::ConfigValue::Bool(!open),
+            });
+            return;
+        }
         if let Some(spec) = self.config_spec(x, y) {
             self.effects.push(Effect::OpenBlockConfig {
                 x,

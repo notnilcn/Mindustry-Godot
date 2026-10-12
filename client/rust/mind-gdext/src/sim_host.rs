@@ -2212,6 +2212,26 @@ impl MindSimHost {
         )
     }
 
+    /// `Units.anyEntities(tile)` for the door tap gate (`Door.java:148-154`;
+    /// T13): whether a ground unit overlaps the building at `(x, y)`.
+    #[func]
+    pub fn building_has_unit_overlap(&self, x: i32, y: i32) -> bool {
+        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+            return false;
+        };
+        if !self.sim.grid.tiles.in_bounds(x, y) {
+            return false;
+        }
+        let pos = mind_core::world::TilePos::new(tx, ty);
+        let Some(block) = self.sim.grid.block_at(pos) else {
+            return false;
+        };
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return false;
+        };
+        mind_core::sim::builder::unit_overlap_at(&self.sim.ecs.0, content, pos, block)
+    }
+
     /// Installs the opt-in live block runtime (plan-07 `BlockTable` + behaviors)
     /// over the host's content snapshot.
     ///

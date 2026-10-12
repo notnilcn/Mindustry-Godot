@@ -204,6 +204,20 @@ impl BuildingBehavior for DoorBehavior {
             ConfigValue::None => false,
             _ => return,
         };
+        // `Door.tapped` (`Door.java:148-154`): `origin().timer(timerToggle, 60f)`
+        // rejects a repeated tap within 60 ticks. The port compares `BuildClock`
+        // sim time (the door has no `updateTile` to tick a countdown).
+        let now = crate::world::update::build_time(world);
+        let throttled = world
+            .get::<DoorState>(e)
+            .and_then(|state| state.last_toggle)
+            .is_some_and(|last| now - last < 60.0);
+        if throttled {
+            return;
+        }
+        if let Some(mut state) = world.get_mut::<DoorState>(e) {
+            state.last_toggle = Some(now);
+        }
         set_open(world, e, open);
     }
 

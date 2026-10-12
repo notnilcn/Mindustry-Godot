@@ -277,7 +277,7 @@ fn within(ux: f32, uy: f32, pos: TilePos, range: f32) -> bool {
 /// `Build.checkNoUnitOverlap(type, x, y)`: whether no ground unit's tile hitbox
 /// overlaps the block footprint (`Units.anyEntities` with the default ground
 /// filter; `HitboxComp.hitboxTile` is `min(hitSize * 0.66, 7.8)`).
-fn no_unit_overlap(
+pub(crate) fn no_unit_overlap(
     world: &World,
     content: &crate::content::ContentRegistry,
     pos: TilePos,
@@ -290,6 +290,20 @@ fn no_unit_overlap(
         // `(!type.solid && !type.solidifes)` short-circuits the query.
         return true;
     }
+    !unit_overlap_at(world, content, pos, block)
+}
+
+/// `Units.anyEntities(tile)` with the default ground filter (T13 door tap):
+/// whether a grounded, non-legged unit's tile hitbox overlaps the footprint.
+pub fn unit_overlap_at(
+    world: &World,
+    content: &crate::content::ContentRegistry,
+    pos: TilePos,
+    block: BlockId,
+) -> bool {
+    let Some(def) = content.block(block) else {
+        return false;
+    };
     let unit = crate::config::TILESIZE as f32;
     let size = def.size.max(1) as f32;
     // `x * tilesize + offset - size * tilesize / 2` (Arc `Rect` strict overlap).
@@ -332,10 +346,10 @@ fn no_unit_overlap(
             && rect_y < hy + hit
             && rect_y + rect_size > hy
         {
-            return false;
+            return true;
         }
     }
-    true
+    false
 }
 
 /// Result of one builder pass.

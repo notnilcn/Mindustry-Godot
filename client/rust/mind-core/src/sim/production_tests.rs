@@ -1155,6 +1155,33 @@ fn plasma_bore_stops_when_ore_removed() {
     );
 }
 
+/// T13 (`Door.tapped`, `Door.java:148-154`): a tap toggles `open`; a second tap
+/// within 60 ticks is ignored (`origin().timer(timerToggle, 60f)`).
+#[test]
+fn door_toggles_and_throttles() {
+    let mut sim = runtime_sim();
+    let door = place(&mut sim, "door", 5, 5);
+    let is_open = |sim: &Sim| {
+        sim.ecs
+            .0
+            .get::<crate::entities::comp::DoorState>(door)
+            .map(|state| state.open)
+            .unwrap_or(false)
+    };
+    configure(&mut sim, 5, 5, crate::determinism::ConfigValue::Bool(true));
+    assert!(is_open(&sim), "opened on the first tap");
+    for _ in 0..10 {
+        sim.tick().expect("tick");
+    }
+    configure(&mut sim, 5, 5, crate::determinism::ConfigValue::Bool(false));
+    assert!(is_open(&sim), "second toggle within 60 ticks ignored");
+    for _ in 0..60 {
+        sim.tick().expect("tick");
+    }
+    configure(&mut sim, 5, 5, crate::determinism::ConfigValue::Bool(false));
+    assert!(!is_open(&sim), "closed after the throttle");
+}
+
 /// Whether a unit of type `unit` exists in the sim.
 fn spawned_unit(sim: &Sim, unit: crate::content::UnitTypeId) -> bool {
     sim.ecs.0.iter_entities().any(|entity| {

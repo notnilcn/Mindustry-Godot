@@ -189,6 +189,8 @@ pub struct DoorState {
     pub open: bool,
     /// Connected doors (`DoorBuild.chained`); unused by `AutoDoor`.
     pub chained: SmallVec<[Entity; 6]>,
+    /// Last accepted tap time in sim ticks (`timerToggle`; `None` = never).
+    pub last_toggle: Option<f32>,
 }
 
 /// `Radar` build state.
