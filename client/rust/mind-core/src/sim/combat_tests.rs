@@ -360,3 +360,51 @@ fn missile_dies_at_lifetime_and_explodes() {
         "wall destroyed after {launched} direct missile(s)"
     );
 }
+
+/// NEW-1: a status applied through the live applier ticks damage every tick
+/// (`StatusComp.update` in the live unit loop).
+#[test]
+fn live_status_burning_damages_unit() {
+    use crate::combat::damage::status::apply_status;
+    let mut sim = live_sim(32);
+    let dagger = sim
+        .spawn_live_unit("dagger", 1, 100.0, 100.0, 0.0)
+        .expect("dagger");
+    let burning = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .status_id("burning")
+        .expect("burning");
+    let start = health(&sim, dagger).expect("health");
+    apply_status(&mut sim.ecs.0, dagger, burning, 300.0);
+    for _ in 0..120 {
+        sim.tick().expect("tick");
+    }
+    let end = health(&sim, dagger).expect("alive");
+    assert!(end < start, "burning ticked live damage ({start} -> {end})");
+}
+
+/// NEW-1: a live `RepairFieldAbility` (`poly`) heals a damaged ally through
+/// the live ability update in the unit loop.
+#[test]
+fn live_ability_repair_field_heals() {
+    let mut sim = live_sim(48);
+    let _poly = sim
+        .spawn_live_unit("poly", 1, 200.0, 200.0, 0.0)
+        .expect("poly");
+    let dagger = sim
+        .spawn_live_unit("dagger", 1, 216.0, 200.0, 0.0)
+        .expect("dagger");
+    sim.ecs
+        .0
+        .get_mut::<Health>(dagger)
+        .expect("dagger health")
+        .health = 50.0;
+    // Poly's `RepairFieldAbility` reload is 480 ticks (`standard.rs` poly spec).
+    for _ in 0..520 {
+        sim.tick().expect("tick");
+    }
+    let end = health(&sim, dagger).expect("alive");
+    assert!(end > 50.0, "repair field healed live (50 -> {end})");
+}
