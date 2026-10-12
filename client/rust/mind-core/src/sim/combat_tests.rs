@@ -595,6 +595,48 @@ fn flare_circles_and_keeps_firing() {
     );
 }
 
+/// T8: `PhysicsProcess` pushes overlapping same-layer unit bodies apart
+/// (`PhysicsProcess.java:188-247`, body radius `hitSize * 0.6`); different
+/// collision layers never interact.
+#[test]
+fn stacked_daggers_separate() {
+    let mut sim = live_sim(32);
+    let a = sim
+        .spawn_live_unit("dagger", 1, 100.0, 100.0, 0.0)
+        .expect("dagger a");
+    let b = sim
+        .spawn_live_unit("dagger", 1, 100.0, 100.0, 0.0)
+        .expect("dagger b");
+    for _ in 0..60 {
+        sim.tick().expect("tick");
+    }
+    let pa = sim.ecs.0.get::<Pos>(a).copied().expect("pos a");
+    let pb = sim.ecs.0.get::<Pos>(b).copied().expect("pos b");
+    let dist = ((pa.x - pb.x).powi(2) + (pa.y - pb.y).powi(2)).sqrt();
+    assert!(
+        dist >= 8.6,
+        "stacked daggers separated to {dist} px (body sum = 9.6)"
+    );
+
+    // A flying flare and a grounded dagger share no layer: no push.
+    let flare = sim
+        .spawn_live_unit("flare", 1, 200.0, 200.0, 0.0)
+        .expect("flare");
+    let dagger = sim
+        .spawn_live_unit("dagger", 1, 200.0, 200.0, 0.0)
+        .expect("dagger c");
+    for _ in 0..30 {
+        sim.tick().expect("tick");
+    }
+    let pf = sim.ecs.0.get::<Pos>(flare).copied().expect("pos flare");
+    let pd = sim.ecs.0.get::<Pos>(dagger).copied().expect("pos dagger");
+    let layer_dist = ((pf.x - pd.x).powi(2) + (pf.y - pd.y).powi(2)).sqrt();
+    assert!(
+        layer_dist < 1.0,
+        "different layers do not push each other ({layer_dist} px)"
+    );
+}
+
 /// NEW-1: a status applied through the live applier ticks damage every tick
 /// (`StatusComp.update` in the live unit loop).
 #[test]
