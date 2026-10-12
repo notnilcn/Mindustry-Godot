@@ -445,6 +445,19 @@ then `apply_sim_command_json` `spawn_unit` at px 1160, py 396; poll
   that logic working when you add shoot-on-death (bullets, not units).
 - Determinism: no `HashMap`; sort adopted units by seq.
 
+**Status 2026-10-12:** done — commit 1019d4f. `spawnUnit` bullets spawn the
+missile (`BulletType.create` branch + `SpawnedByBullet` adoption), `TimedKillComp`
+counts up to the type lifetime, live `AiKind::Missile` dispatch steers at the
+shooter's aim and dies on enemy building contact, and `resolve_deaths` runs
+`shootOnDeath` before removal. `ExplosionBulletType` defaults added (golden
+regenerated for bullets 93/105/107, matching the JVM golden); `createPuddles` /
+`createIncend` / `createUnits` wired into `hit`/`despawned`. Tests:
+`spawn_unit_bullet_spawns_missile`, `timed_kill_counts_up`,
+`missile_dies_at_lifetime_and_explodes`, updated `missile_homes_toward_shooter_aim`.
+In-engine evidence in `runs/20261012-session2/PAR-0088-ingame.txt`.
+Scathe missile unit specs (step 9, optional) not done — section 11 blocker note
+still applies.
+
 ---
 
 ## 4. NEW-1 — live unit statuses and abilities never update
@@ -499,6 +512,14 @@ ability (e.g. `RepairFieldAbility`) heals allies live.
   now tick (e.g. `sim/unit_runtime.rs` determinism tests compare two runs —
   still equal). If a committed golden in `mind-headless` changes, check whether
   it is one of the 6 pre-existing failures first.
+
+**Status 2026-10-12:** done — applier install in `1019d4f`, tests in `88e0cf8`.
+`install_unit_runtime_from` installs the content-backed `StatusApplier`; the
+live loop ticks `update_unit_status` + `update_unit_abilities` per unit via
+`update_kinematics` (already present on main). Tests:
+`live_status_burning_damages_unit`, `live_ability_repair_field_heals`.
+Vanilla live-update abilities spawn units only through `SpawnDeathAbility`,
+which `resolve_deaths` already adopts by seq range.
 
 ---
 
@@ -584,6 +605,12 @@ multiplier still applies.
 - Ground pathing treats deep water as solid for most ground units; that is
   correct Java behavior.
 
+**Status 2026-10-12:** done — commit c13ccb1. `movement::unit_speed` ports
+`UnitComp.speed()`/`floorSpeedMultiplier()` plus the crawl/tank overrides and is
+used by ground/flying/command/player AI and `AiCtx::pref_speed`. Test
+`dagger_slowed_on_deep_water` (stone 30 px vs deep-water 6 px over 60 ticks;
+flares unaffected by the floor).
+
 ---
 
 ## 6. PAR-0140 — RTS selection and orders do nothing in-engine
@@ -666,6 +693,16 @@ using it. Then poll the unit position from `get_state_json()` entities (or
 `/home/clintonnguyen/g/code_examples/.claude/skills/playtest/SKILL.md` for the
 event JSON format) and `selection_json()`.
 
+**Status 2026-10-12:** done — commit fe71e74. The boot `settings.json` →
+`set_selected_block` restore is gone (the file is still written on exit;
+`player.block` is not persisted upstream). In-engine: with
+`"selected_block":"duo"` on disk before boot, input state reports
+`"block": null`, `toggle_command_mode()` is true, and an ordered dagger
+reached within 8.5 px of the target. Test `commanded_dagger_reaches_target`
+(campaign core + team-1 dagger + `SimCommand::UnitCommand`). Stances were left
+out — `move` is the scope keeper per §6.3 step 3. Evidence:
+`runs/20261012-session2/PAR-0140-ingame.txt`.
+
 ---
 
 ## 7. Wave attack / core loss verification (PAR-0139-adjacent)
@@ -705,6 +742,17 @@ client/rust/mind-gdext/src/campaign.rs | grep "fn "` (e.g. `run_wave`/`skip_wave
 Poll `get_group_count("unit")` and core tiles. Expect the core to take damage
 (no direct health getter: add a debug-only `#[func] fn building_health(x,y) -> f64`
 to `MindSimHost` if needed — debug reads are allowed in gdext).
+
+**Status 2026-10-12:** done — commit 4e71098. Root fix: `BulletType.create`'s
+`target` seeds only `aimTile`; the port stored it as `Bullet.sticky`, so
+unit-weapon bullets attached to their mount target without damaging it
+(turret bullets were unaffected). Test
+`ground_zero_wave_destroys_undefended_core` (feature `msav-import`): three wave
+daggers destroy the (health-pinned) player core at tick 18 and the campaign
+reports `game_over`. A read-only `unit_debug_json()` probe was added to
+`MindSimHost` for live weapon diagnosis (no rules in gdext, per §7.4).
+In-engine: wave daggers destroyed derelict walls (build 62 → 56, bullets in
+flight); evidence `runs/20261012-session2/PAR-0139-wave-ingame.txt`.
 
 ---
 
@@ -805,6 +853,15 @@ a tile damages a building there and burns out; `incendChance` bullets create fir
   incend_amount = 1, incend_spread = 0` hitting at (5,5) leaves a fire there
   (use `fires::has(&world, 5, 5)` right after the hit).
 
+**Status 2026-10-12:** done — commit 1e74c4d. `Sim::update_fires_and_puddles`
+runs both live passes against `Sim.grid.tiles` from `Sim::tick` (before
+`resolve_deaths`); the `PuddleComp` effects branch (liquid status to units in
+the rect, hot-liquid ignition, 40-tick re-arm) and `BuildingComp.splashLiquid`
+(destroyed liquid containers, `damageExplosions`) are ported. Tests:
+`live_puddle_evaporates` (wet + evaporation), `live_fire_burns_building`,
+`incend_bullet_creates_fire`, `live_destroyed_liquid_container_splashes`.
+`Damage.dynamicExplosion` for explosive contents still unported (noted in §12).
+
 ---
 
 ## 9. PAR-0090 — save/load drops fires and puddles
@@ -851,6 +908,14 @@ same tile/amount/time.
 via the same path the existing save/load round-trip test in `sim_io.rs` uses
 (find with `grep -n "fn .*round" mind-core/src/io/sim_io.rs`), load into a
 fresh sim, assert one `FireState` and one `PuddleState` with equal fields.
+
+**Status 2026-10-12:** done — commit 63b39b5. Fires/puddles get reserved class
+ids (`0xF1`/`0xF2`), are counted and written after units in tile order, decode
+into `DecodedFire`/`DecodedPuddle`, and respawn on load with zeroed transient
+accumulators. `clear_world_for_load` now also clears fires/puddles so a load
+cannot leak the previous world's spills. Test:
+`live_sim_save_keeps_fires_and_puddles` (fire at (7,7) + water puddle at
+(9,9) round-trip). `mind-headless io roundtrip` still passes.
 
 ---
 
@@ -916,6 +981,13 @@ intensity: 1.0, ..Default::default() }]`, spawn a dagger, tick 10, assert one
 Weather sectors (Frozen Forest) need a fresh profile; just verify with
 `get_group_counts()["weather"]` after editing rules is not possible from UI —
 rely on the unit test. Report the in-engine check as blocked by profile.
+
+**Status 2026-10-12:** done — commit 5eacb5e. `weather_system` (`Logic.updateWeather`
++ the `PlayEvent` cooldown seeding) runs in `TickSet::WeatherAndAi` before
+`team_ai_system`; the unit runtime rng drives durations/frequencies/wind,
+`group_counts()["weather"]` counts live weather, and `weather_water_attr` feeds
+the fire update. Test `weather_rain_spawns_and_wets_units`. In-engine check
+blocked by profile, as §10.5 expects.
 
 ---
 
@@ -990,6 +1062,15 @@ player unit: `sim.spawn_player_unit("mega", 1, x, y, 0.0)` (signature
 spawn team-1 dagger adjacent, apply `SimCommand::Payload{kind:0, target:Some(seq)}`,
 assert dagger entity gone and `UnitPayloads.stack.len()==1`, move carrier,
 `kind:2`, assert a dagger exists at the new spot.
+
+**Status 2026-10-12:** done — commit 627a093. Both slices landed:
+`UnitPayloads`/`CarriedPayload` on the carrier, `Sim::apply_payload_command`
+with `requestUnitPayload`/`requestBuildPayload`/`requestDropPayload` gates and
+the cursor fallback, `SimRuntime::pickup_building` (no refunds), drop places
+buildings through `runtime_place` and respawns units with stored health.
+Tests: `mega_picks_up_and_drops_dagger`, `mega_picks_up_and_drops_building`.
+Remaining (§11.3 step 4): `UnitPayloads` is not in the unit save chunk — a
+carried payload is lost on save/load.
 
 ---
 

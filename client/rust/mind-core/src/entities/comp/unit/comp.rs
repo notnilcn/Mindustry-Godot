@@ -253,6 +253,97 @@ pub struct PayloadComp {
     pub capacity: f32,
 }
 
+/// One carried payload (`Payload` subclass; the unit carrier's stack).
+///
+/// Ported from `PayloadComp.payloads` / `entities/units/UnitPayload.java`,
+/// `BuildPayload.java` (PAR-0138).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CarriedPayload {
+    /// A carried unit (`UnitPayload`): snapshot of the removed unit.
+    Unit {
+        /// Content type (`UnitType`).
+        type_id: UnitTypeId,
+        /// Owning team.
+        team: u8,
+        /// Health at pickup (`unit.health`).
+        health: f32,
+        /// Facing angle in degrees.
+        rotation: f32,
+    },
+    /// A carried building (`BuildPayload`).
+    Build {
+        /// Block content id.
+        block: BlockId,
+        /// Owning team.
+        team: u8,
+        /// Rotation in 90-degree steps.
+        rotation: u8,
+        /// Health at pickup (`build.health`).
+        health: f32,
+    },
+}
+
+/// Unit payload carrier stack (`PayloadComp.payloads`; PAR-0138).
+///
+/// `peek()` is the last element (upstream `Seq.peek`); `size()` is
+/// `payloadUsed()`'s input.
+#[derive(Debug, Clone, Default, PartialEq, Component)]
+pub struct UnitPayloads {
+    /// Carried payloads, oldest first.
+    pub stack: Vec<CarriedPayload>,
+}
+
+impl UnitPayloads {
+    /// `PayloadComp.payloadUsed()`: sum of `size * size` in world units².
+    ///
+    /// Unit payloads size at `hit_size` (world units); building payloads at
+    /// `block.size * tilesize`.
+    pub fn payload_used(&self, content: &crate::content::ContentRegistry) -> f32 {
+        self.stack
+            .iter()
+            .map(|payload| match payload {
+                CarriedPayload::Unit { type_id, .. } => content
+                    .unit(*type_id)
+                    .map(|def| def.hit_size * def.hit_size)
+                    .unwrap_or(0.0),
+                CarriedPayload::Build { block, .. } => {
+                    let size = content
+                        .block(*block)
+                        .map(|def| def.size as f32)
+                        .unwrap_or(1.0)
+                        * crate::config::TILESIZE as f32;
+                    size * size
+                }
+            })
+            .sum()
+    }
+
+    /// `Payload` size in world units (for the capacity check).
+    pub fn payload_size(
+        content: &crate::content::ContentRegistry,
+        payload: &CarriedPayload,
+    ) -> f32 {
+        match payload {
+            CarriedPayload::Unit { type_id, .. } => content
+                .unit(*type_id)
+                .map(|def| def.hit_size)
+                .unwrap_or(0.0),
+            CarriedPayload::Build { block, .. } => {
+                content
+                    .block(*block)
+                    .map(|def| def.size as f32)
+                    .unwrap_or(1.0)
+                    * crate::config::TILESIZE as f32
+            }
+        }
+    }
+
+    /// `PayloadComp.hasPayload()`.
+    pub fn has_payload(&self) -> bool {
+        !self.stack.is_empty()
+    }
+}
+
 /// Proxy unit over a building tile (`BlockUnitComp`).
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct BlockUnitComp {

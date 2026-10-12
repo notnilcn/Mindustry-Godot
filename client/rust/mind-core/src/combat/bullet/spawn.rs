@@ -8,6 +8,7 @@
 //! this plan owns only the payload shape ([`BulletSpawn`]) and guarantees that
 //! relayed and local creation are identical (plan 10 §3.5).
 
+use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
@@ -15,6 +16,12 @@ use crate::content::{BulletId, ContentRegistry};
 use crate::determinism::SimRng;
 
 use super::{Bullet, BulletData, JUST_SPAWNED, bullet_bundle};
+
+/// Marker for a unit spawned by a `spawnUnit` bullet (`BulletType.create`: the
+/// call returns no bullet, so the host cannot see it through the bullet drain).
+/// The unit runtime adopts marked units into `UnitRuntime.units`.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct SpawnedByBullet;
 
 /// Complete bullet-creation request (`BulletType.create` argument set).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -49,7 +56,8 @@ pub struct BulletSpawn {
     pub aim_y: f32,
     /// Aim tile.
     pub aim_tile: Option<(i16, i16)>,
-    /// Sticky target (plan 10 §3.3).
+    /// Aiming/attack target (Java `BulletType.create`'s `target` argument: it
+    /// seeds the aim tile for a building target, never a sticky attachment).
     pub target: Option<Entity>,
     /// Deterministic per-tick mover (`BulletComp.mover`; plan 10 M4).
     pub mover: Option<super::ShotMover>,
@@ -131,6 +139,42 @@ pub fn create(
         angle = 0.0;
     }
 
+    // `BulletType.create`: `if(spawnUnit != null)` spawn the unit instead of a
+    // bullet and return null (BulletType.java:932-961).
+    if let Some(unit_id) = def.spawn_unit {
+        let udef = content.unit(unit_id)?;
+        let entity = crate::entities::comp::unit::lifecycle::spawn_unit_def(
+            world, seq, udef, spawn.team, spawn.x, spawn.y, angle,
+        );
+        // "immediately spawn at top speed, since it was launched".
+        if udef.missile_accel_time <= 0.0 {
+            let rad = angle.to_radians();
+            if let Some(mut vel) = world.get_mut::<crate::entities::comp::Vel>(entity) {
+                vel.x = rad.cos() * udef.speed;
+                vel.y = rad.sin() * udef.speed;
+            }
+        }
+        // `if(spawned.controller() instanceof MissileAI ai) ai.shooter = shooter`.
+        if udef.controller == crate::content::registries::units::ControllerKind::Missile {
+            let shooter = spawn.shooter.or(spawn.owner);
+            world
+                .entity_mut(entity)
+                .insert(crate::ai::types::missile::MissileShooter(shooter));
+        }
+        // `if(killShooter && owner instanceof Healthc h && !h.dead()) h.kill();`
+        if def.kill_shooter
+            && let Some(owner) = spawn.owner
+            && let Some(mut health) = world.get_mut::<crate::entities::comp::Health>(owner)
+            && !health.dead
+        {
+            health.health = 0.0;
+            health.dead = true;
+        }
+        // The runtime adopts marked units after the pass (they are no bullet).
+        world.entity_mut(entity).insert(SpawnedByBullet);
+        return None;
+    }
+
     let velocity_rand = if def.velocity_scale_rand_min != 1.0 || def.velocity_scale_rand_max != 1.0
     {
         rng.range(
@@ -167,6 +211,26 @@ pub fn create(
         1.0
     };
     let lifetime = def.lifetime * spawn.lifetime_scl * life_rand;
+    // `BulletType.init(Bullet)`: `if(instantDisappear) b.time = lifetime + 1f;`
+    // (`BulletType.java:719-721`) — the bullet expires on its first update and
+    // runs `despawned` (which applies the splash for explosion bullets).
+    let time = if def.instant_disappear {
+        lifetime + 1.0
+    } else {
+        0.0
+    };
+
+    // `BulletType.create`: the `target` argument only seeds `aimTile`
+    // (`target instanceof Building b ? b.tile : world.tileWorld(aimX, aimY)`);
+    // sticky attachment happens later on collision for `BulletType.sticky`
+    // bullets (`BulletComp.collision` -> `stickTo`).
+    let aim_tile = spawn.aim_tile.or_else(|| {
+        spawn.target.and_then(|target| {
+            world
+                .get::<crate::entities::comp::Building>(target)
+                .map(|building| (building.tile.x(), building.tile.y()))
+        })
+    });
 
     let bullet = Bullet {
         def: spawn.def,
@@ -179,11 +243,11 @@ pub fn create(
         last: (spawn.x, spawn.y),
         aim: (spawn.aim_x, spawn.aim_y),
         origin: (spawn.x, spawn.y),
-        aim_tile: spawn.aim_tile,
-        time: 0.0,
+        aim_tile,
+        time,
         lifetime,
         collided: smallvec::SmallVec::new(),
-        sticky: spawn.target,
+        sticky: None,
         sticky_x: 0.0,
         sticky_y: 0.0,
         flags: JUST_SPAWNED,

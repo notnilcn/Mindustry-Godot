@@ -254,6 +254,8 @@ pub fn insert_kind_components(
         world.entity_mut(entity).insert(PayloadComp {
             capacity: unit.payload_capacity,
         });
+        // PAR-0138: the unit carrier's payload stack (`PayloadComp.payloads`).
+        world.entity_mut(entity).insert(UnitPayloads::default());
         // Plan 08 frozen API: payload-capable units are holders.
         world.entity_mut(entity).insert(PayloadHolder::default());
         world
@@ -276,9 +278,11 @@ pub fn insert_kind_components(
             .insert(UnitTetherComp { spawner: None });
     }
     if has(UnitComponent::TimedKill) {
+        // `TimedKillComp.lifetime` comes from `UnitType.lifetime` (MissileUnitType
+        // defaults to `60 * 1.7`); `time` counts up to it (`TimedKillComp.update`).
         world.entity_mut(entity).insert(TimedKillComp {
             time: 0.0,
-            lifetime: 0.0,
+            lifetime: unit.lifetime,
         });
     }
     if has(UnitComponent::TargetDummy) {

@@ -38,6 +38,8 @@ pub struct PuddleState {
     pub update_time: f32,
     /// Last ripple tick (`Puddle.lastRipple`).
     pub last_ripple: f32,
+    /// Particle effect timer (`Puddle.effectTime`, view-only).
+    pub effect_time: f32,
 }
 
 /// Finds the puddle entity at a tile (`Puddles.get`).
@@ -167,6 +169,7 @@ pub fn deposit(
                 accepting: 0.0,
                 update_time: 0.0,
                 last_ripple: rng.range(RngStream::Sim, 0.0, 40.0),
+                effect_time: rng.range(RngStream::Sim, 0.0, 50.0),
             },
         ))
         .id();
@@ -293,32 +296,74 @@ pub fn update_puddles(
                     }
                 }
             }
-            let Some(mut puddle) = world.get_mut::<PuddleState>(entity) else {
-                continue;
-            };
-            if cap_puddles {
-                puddle.amount = puddle.amount.clamp(0.0, MAX_LIQUID);
-            }
-            if puddle.amount <= 0.0 {
-                let _ = puddle;
-                remove(world, entity);
-                continue;
-            }
-            if tiles.in_bounds(tx as i32, ty as i32) {
-                tiles.set_puddle(tiles.index(tx as i32, ty as i32), Some(entity));
-            }
-            continue;
         }
 
+        let Some(mut puddle) = world.get_mut::<PuddleState>(entity) else {
+            continue;
+        };
         if cap_puddles {
             puddle.amount = puddle.amount.clamp(0.0, MAX_LIQUID);
         }
-
         if puddle.amount <= 0.0 {
             let _ = puddle;
             remove(world, entity);
             continue;
         }
+
+        // `PuddleComp.update` effects-only code: apply the liquid's status to
+        // units in the puddle, ignite hot liquids on buildings, and re-arm the
+        // 40-tick interval. `BuildingComp.puddleOn` is a base no-op upstream.
+        if puddle.amount >= MAX_LIQUID / 2.0 && puddle.update_time <= 0.0 {
+            puddle.update_time = 40.0;
+            let half = (puddle.amount / (MAX_LIQUID / 1.5)).clamp(0.0, 1.0) * 10.0 / 2.0;
+            let _ = puddle;
+            if def.effect != crate::content::StatusId::NONE {
+                let ts = crate::config::TILESIZE as f32;
+                let (cx, cy) = ((tx as f32 + 0.5) * ts, (ty as f32 + 0.5) * ts);
+                let candidates = crate::entities::comp::unit::queries::in_radius(
+                    world,
+                    cx,
+                    cy,
+                    half * std::f32::consts::SQRT_2 + 16.0,
+                    None,
+                );
+                for unit in candidates {
+                    let Some(pos) = world.get::<Pos>(unit) else {
+                        continue;
+                    };
+                    let hit_size = world
+                        .get::<crate::entities::comp::unit::HitboxComp>(unit)
+                        .map(|hitbox| hitbox.hit_size)
+                        .unwrap_or(0.0)
+                        / 2.0;
+                    // `Units.nearby(rect)`: unit bounds overlap the rect.
+                    if (pos.x - cx).abs() <= half + hit_size
+                        && (pos.y - cy).abs() <= half + hit_size
+                    {
+                        crate::combat::damage::status::apply_status(
+                            world,
+                            unit,
+                            def.effect,
+                            60.0 * 2.0,
+                        );
+                    }
+                }
+            }
+            if def.temperature > 0.7
+                && tiles
+                    .in_bounds(tx as i32, ty as i32)
+                    .then(|| tiles.get(tx as i32, ty as i32))
+                    .is_some_and(|tile| tile.build.is_some())
+                && rng.chance(RngStream::Sim, 0.5)
+            {
+                let _ = super::fires::create(world, tx, ty, rng);
+            }
+        }
+
+        let Some(mut puddle) = world.get_mut::<PuddleState>(entity) else {
+            continue;
+        };
+        puddle.update_time -= 1.0;
         if tiles.in_bounds(tx as i32, ty as i32) {
             tiles.set_puddle(tiles.index(tx as i32, ty as i32), Some(entity));
         }
@@ -575,6 +620,7 @@ mod tests {
             accepting: 1.0,
             update_time: 0.0,
             last_ripple: 0.0,
+            effect_time: 0.0,
         };
         let mut bytes = Vec::new();
         {

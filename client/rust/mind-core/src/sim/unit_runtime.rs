@@ -30,6 +30,7 @@ use crate::ai::controller::{AiKind, ControllerSlot};
 use crate::ai::pathfinder::Pathfinder;
 use crate::ai::types::flying::update_flying;
 use crate::ai::types::ground::update_ground;
+use crate::ai::types::missile::{MissileAi, MissileShooter, update_missile};
 use crate::ai::types::player::PlayerInput;
 use crate::ai::wave_spawner::WaveSpawner;
 use crate::audio::AudioSinkRes;
@@ -39,7 +40,7 @@ use crate::combat::view::{FxHandle, noop_fx};
 use crate::content::{BlockKind, ContentRegistry, UnitTypeId};
 use crate::determinism::{Checksum, Checksummer, SimRng};
 use crate::ecs::{BuildingComp, EntitySeq};
-use crate::entities::comp::unit::comp::{PhysicsComp, UnitCore, UnitTypeComp};
+use crate::entities::comp::unit::comp::{PhysicsComp, TimedKillComp, UnitCore, UnitTypeComp};
 use crate::entities::comp::unit::lifecycle::{spawn_unit, spawn_unit_def, sync_weapon_state};
 use crate::entities::comp::unit::movement;
 use crate::entities::comp::{Building, Health, Pos, TeamComp};
@@ -306,6 +307,70 @@ impl UnitRuntime {
     }
 }
 
+/// `UnitComp.destroy()` shoot-on-death half (`UnitComp.java:910-919`): every
+/// mount whose weapon has `shootOnDeath` and is not gated by
+/// `killShooter && totalShots > 0` fires once before the unit is removed.
+fn run_shoot_on_death(world: &mut World, runtime: &mut UnitRuntime, entity: Entity) {
+    sync_weapon_state(world, entity);
+    let state = world
+        .get::<crate::weapons::UnitState>(entity)
+        .copied()
+        .unwrap_or_default();
+    let Some(mut weapons) = world.entity_mut(entity).take::<UnitWeapons>() else {
+        return;
+    };
+    let UnitRuntime {
+        content,
+        grid,
+        rng,
+        fx,
+        seq,
+        ..
+    } = runtime;
+    let audio = world
+        .remove_resource::<AudioSinkRes>()
+        .unwrap_or_else(AudioSinkRes::noop);
+    let mut spawned: Vec<Entity> = Vec::new();
+    {
+        let mut ctx = CombatCtx {
+            world,
+            content,
+            grid,
+            rng,
+            fx: fx.as_ref(),
+            audio: &audio,
+            seq,
+            spawned: &mut spawned,
+        };
+        for i in 0..weapons.weapons.len() {
+            if i >= weapons.mounts.len() {
+                break;
+            }
+            if !weapons.weapons[i].shoot_on_death {
+                continue;
+            }
+            if weapons.weapons[i].bullet.kill_shooter && weapons.mounts[i].total_shots > 0 {
+                continue;
+            }
+            weapons.mounts[i].reload = 0.0;
+            weapons.mounts[i].shoot = true;
+            crate::weapons::update_weapon(
+                &mut ctx,
+                entity,
+                &state,
+                &weapons.weapons,
+                &mut weapons.mounts,
+                &mut weapons.pending,
+                i,
+            );
+        }
+    }
+    world.insert_resource(audio);
+    runtime.bullets_created += spawned.len() as u64;
+    runtime.bullets.extend(spawned);
+    world.entity_mut(entity).insert(weapons);
+}
+
 impl Sim {
     /// Death resolution after the entity pass (`HealthComp.damage` ->
     /// `kill()`): live units at zero health are killed through their death
@@ -330,6 +395,9 @@ impl Sim {
                 })
                 .collect();
             for entity in dead {
+                // `UnitComp.destroy()` fires `shootOnDeath` mounts first
+                // (PAR-0088); spawned bullets join the live list.
+                run_shoot_on_death(world, &mut runtime, entity);
                 let UnitRuntime {
                     content,
                     grid,
@@ -385,6 +453,56 @@ impl Sim {
                 .collect();
             dead.sort_unstable_by_key(|(seq, entity)| (*seq, entity.index()));
             for (_, entity) in dead {
+                // `BuildingComp.onDestroyed` -> `splashLiquid`: a liquid
+                // container spills `(amount/4).clamp(0,10)` per deposit, up to
+                // `(amount/5).clamp(0,30)` deposits scattered over the block
+                // footprint (`rules.damageExplosions` gate).
+                let damage_explosions = self
+                    .ecs
+                    .0
+                    .get_resource::<CampaignRuntime>()
+                    .map(|campaign| campaign.session.rules.damage_explosions)
+                    .unwrap_or(true);
+                let spill: Vec<(crate::content::LiquidId, f32)> = if damage_explosions {
+                    self.ecs
+                        .0
+                        .get::<crate::world::modules::LiquidModule>(entity)
+                        .map(|module| {
+                            module
+                                .liquids
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, amount)| **amount > 0.0)
+                                .map(|(id, amount)| {
+                                    (crate::content::LiquidId::new(id as u16), *amount)
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+                let (center, size) = self
+                    .ecs
+                    .0
+                    .get::<crate::entities::comp::Building>(entity)
+                    .map(|building| {
+                        let size = self
+                            .ecs
+                            .0
+                            .get_resource::<crate::world::BlockTable>()
+                            .and_then(|table| table.instance(building.block))
+                            .map(|instance| instance.def.size)
+                            .unwrap_or(1);
+                        (
+                            crate::world::BuildHarness::tile_center(
+                                building.tile.x() as i32,
+                                building.tile.y() as i32,
+                            ),
+                            size,
+                        )
+                    })
+                    .unwrap_or(((0.0, 0.0), 1));
                 let Some(runtime) = self.block_runtime.as_mut() else {
                     break;
                 };
@@ -396,6 +514,40 @@ impl Sim {
                     self.push_event(crate::event::SimEvent::BlockBrokenEvent(
                         crate::event::BlockBrokenEvent { x, y, block },
                     ));
+                    if !spill.is_empty()
+                        && let Some(mut unit_runtime) = self.ecs.0.remove_non_send::<UnitRuntime>()
+                    {
+                        let spread = size as f32 * 4.0;
+                        for (liquid, amount) in &spill {
+                            let splash = (amount / 4.0).clamp(0.0, 10.0);
+                            let count = (amount / 5.0).clamp(0.0, 30.0) as i32;
+                            for _ in 0..count {
+                                let px = center.0
+                                    + unit_runtime.rng.range(
+                                        crate::determinism::RngStream::Sim,
+                                        -spread,
+                                        spread,
+                                    );
+                                let py = center.1
+                                    + unit_runtime.rng.range(
+                                        crate::determinism::RngStream::Sim,
+                                        -spread,
+                                        spread,
+                                    );
+                                let _ = crate::combat::puddles::deposit(
+                                    &mut self.ecs.0,
+                                    &self.grid.tiles,
+                                    &unit_runtime.content,
+                                    crate::world::WorldGrid::to_tile(px) as i16,
+                                    crate::world::WorldGrid::to_tile(py) as i16,
+                                    *liquid,
+                                    splash,
+                                    &mut unit_runtime.rng,
+                                );
+                            }
+                        }
+                        self.ecs.0.insert_non_send(unit_runtime);
+                    }
                 }
             }
             if destroyed > 0 {
@@ -432,6 +584,10 @@ impl Sim {
 
     /// Installs the live unit runtime over a prebuilt content registry.
     pub fn install_unit_runtime_from(&mut self, content: ContentRegistry) {
+        // The content-backed status applier must exist before anything can
+        // apply a status (`StatusApplier` resource; NEW-1): install it while
+        // the registry is still owned here, then move it into the runtime.
+        crate::combat::damage::status::install_status_applier(&mut self.ecs.0, &content);
         let wave_team = crate::game::rules::Rules::default().wave_team;
         let runtime = UnitRuntime::new(content, &self.grid, wave_team);
         self.ecs.0.insert_non_send(runtime);
@@ -469,6 +625,38 @@ impl Sim {
             return;
         };
         runtime.refresh_grid(&grid);
+    }
+
+    /// `Groups.fires`/`Groups.puddles` update half of `Logic.updateEntities`:
+    /// advances every live fire and puddle one tick against the authoritative
+    /// tile grid (`Sim.grid`; the runtime snapshot is not on this path).
+    ///
+    /// `water_attr` is the active weathers' water attribute
+    /// (`weather_water_attr`; `0.0` with no weather).
+    pub fn update_fires_and_puddles(&mut self) {
+        let Some(mut runtime) = self.ecs.0.remove_non_send::<UnitRuntime>() else {
+            return;
+        };
+        let fx = runtime.fx.clone();
+        // `state.envAttrs.get(Attribute.water)` from the active weathers
+        // (PAR-0127); `0.0` when no weather is running.
+        let water_attr = crate::game::runtime::weather_water_attr(&self.ecs.0, &runtime.content);
+        crate::combat::fires::update_fires(
+            &mut self.ecs.0,
+            &mut self.grid.tiles,
+            &runtime.content,
+            &mut runtime.rng,
+            fx.as_ref(),
+            water_attr,
+        );
+        crate::combat::puddles::update_puddles(
+            &mut self.ecs.0,
+            &mut self.grid.tiles,
+            &runtime.content,
+            &mut runtime.rng,
+            fx.as_ref(),
+        );
+        self.ecs.0.insert_non_send(runtime);
     }
 
     /// Deterministic digest of the live unit runtime; empty when not installed.
@@ -654,9 +842,19 @@ pub fn unit_update_system(world: &mut World) {
                     let flying = world
                         .get::<PhysicsComp>(entity)
                         .is_some_and(|physics| physics.flying);
+                    // Refresh the lazy control path before borrowing fields.
+                    runtime.control_path();
+                    let UnitRuntime {
+                        grid,
+                        content,
+                        control_path,
+                        ..
+                    } = &mut runtime;
                     let arrived = crate::ai::types::command::update_command_move(
                         world,
-                        runtime.control_path(),
+                        grid,
+                        content,
+                        control_path,
                         entity,
                         target,
                         flying,
@@ -673,6 +871,38 @@ pub fn unit_update_system(world: &mut World) {
                     }
                 }
             }
+        } else if slot.kind == AiKind::Missile {
+            // `MissileAI.updateMovement` (live dispatch, PAR-0088): steer at
+            // the shooter's aim, always move forward, die on enemy-building
+            // contact or at the `TimedKill` lifetime.
+            let shooter = world
+                .get::<MissileShooter>(entity)
+                .map(|shooter| shooter.0)
+                .unwrap_or(None);
+            let mut state = MissileAi {
+                unit: Some(entity),
+                target: None,
+                shooter,
+            };
+            {
+                let UnitRuntime {
+                    content,
+                    grid,
+                    pathfinder,
+                    ..
+                } = &mut runtime;
+                let mut ctx = crate::ai::ai_controller::AiCtx {
+                    world,
+                    grid,
+                    content,
+                    pathfinder,
+                    team,
+                };
+                let _ = update_missile(&mut ctx, entity, &mut state);
+            }
+            if let Some(mut stored) = world.get_mut::<MissileShooter>(entity) {
+                stored.0 = state.shooter;
+            }
         } else {
             // `GroundAI.updateMovement`/`FlyingAI`: pick a core/building anchor
             // and an in-range mount target. Spawned wave units have no command,
@@ -688,12 +918,15 @@ pub fn unit_update_system(world: &mut World) {
                         .get::<PhysicsComp>(entity)
                         .is_some_and(|physics| physics.flying);
                 let arrived = if flying {
-                    update_flying(world, entity, target)
+                    update_flying(world, &runtime.grid, &runtime.content, entity, target)
                 } else {
                     let UnitRuntime {
-                        grid, pathfinder, ..
+                        grid,
+                        content,
+                        pathfinder,
+                        ..
                     } = &mut runtime;
-                    update_ground(world, grid, pathfinder, team, entity, target)
+                    update_ground(world, grid, content, pathfinder, team, entity, target)
                 };
                 if arrived && let Some(mut stored) = world.get_mut::<ControllerSlot>(entity) {
                     stored.target = None;
@@ -710,6 +943,20 @@ pub fn unit_update_system(world: &mut World) {
             };
             let _ =
                 movement::update_kinematics(world, &runtime.grid, &runtime.content, entity, delta);
+
+            // `TimedKillComp.update`: `time = min(time + delta, lifetime)`;
+            // at the lifetime the unit is marked dead and `resolve_deaths`
+            // runs the normal kill path (including `shootOnDeath`).
+            if let Some(mut timed) = world.get_mut::<TimedKillComp>(entity) {
+                timed.time = (timed.time + 1.0).min(timed.lifetime);
+                if timed.lifetime > 0.0
+                    && timed.time >= timed.lifetime
+                    && let Some(mut health) = world.get_mut::<Health>(entity)
+                {
+                    health.health = 0.0;
+                    health.dead = true;
+                }
+            }
         }
     }
 
@@ -746,9 +993,36 @@ pub fn unit_update_system(world: &mut World) {
         crate::weapons::update_weapons(&mut ctx);
     }
     world.insert_resource(audio);
+    // Units spawned by `spawnUnit` bullets bypass `spawned` (no bullet entity).
+    adopt_spawned_units(world, &mut runtime);
     runtime.bullets_created += spawned.len() as u64;
     runtime.bullets.extend(spawned);
     world.insert_non_send(runtime);
+}
+
+/// Adopts units spawned by `spawnUnit` bullets (`BulletType.create` returns no
+/// bullet for them, so the bullet drain cannot see them) into the live unit
+/// list. Call after any pass that can create bullets; ordering is
+/// `(EntitySeq, entity.index())`.
+fn adopt_spawned_units(world: &mut World, runtime: &mut UnitRuntime) {
+    let mut found: Vec<(u64, Entity)> = world
+        .iter_entities()
+        .filter(|entity| entity.contains::<crate::combat::bullet::spawn::SpawnedByBullet>())
+        .map(|entity| {
+            (
+                entity.get::<EntitySeq>().map_or(u64::MAX, |seq| seq.0),
+                entity.id(),
+            )
+        })
+        .collect();
+    found.sort_unstable_by_key(|(seq, entity)| (*seq, entity.index()));
+    for (_, entity) in found {
+        world
+            .entity_mut(entity)
+            .remove::<crate::combat::bullet::spawn::SpawnedByBullet>();
+        runtime.units.push(entity);
+        runtime.units_created += 1;
+    }
 }
 
 /// `EntitySet::UpdateBuildings` turret half: `Turret.TurretBuild.updateTile`
@@ -784,6 +1058,8 @@ pub fn turret_update_system(world: &mut World) {
         crate::world::blocks::defense::turrets::update_turrets(&mut ctx);
     }
     world.insert_resource(audio);
+    // Units spawned by `spawnUnit` bullets bypass `spawned` (no bullet entity).
+    adopt_spawned_units(world, &mut runtime);
     runtime.bullets_created += spawned.len() as u64;
     runtime.bullets.extend(spawned);
     world.insert_non_send(runtime);
@@ -844,6 +1120,8 @@ pub fn bullet_update_system(world: &mut World) {
         *bullets = alive;
     }
     world.insert_resource(audio);
+    // Units spawned by `spawnUnit` bullets bypass `spawned` (no bullet entity).
+    adopt_spawned_units(world, &mut runtime);
     runtime.bullets_created += spawned.len() as u64;
     runtime.bullets.extend(spawned);
     world.insert_non_send(runtime);
@@ -910,6 +1188,8 @@ pub fn bullet_collide_system(world: &mut World) {
         *bullets = alive;
     }
     world.insert_resource(audio);
+    // Units spawned by `spawnUnit` bullets bypass `spawned` (no bullet entity).
+    adopt_spawned_units(world, &mut runtime);
     runtime.bullets_created += spawned.len() as u64;
     runtime.bullets.extend(spawned);
     world.insert_non_send(runtime);
@@ -1087,6 +1367,408 @@ impl Sim {
             }));
         }
         serde_json::to_string(&rows).unwrap_or_else(|_| String::from("[]"))
+    }
+
+    /// Debug-only live unit dump (`id`, `type`, `team`, `kind`, position,
+    /// rotation, health, `can_shoot` and per-mount aim/fire state); MCP probes
+    /// only, never saved or synced.
+    pub fn unit_debug_json(&self) -> String {
+        let Some(runtime) = self.ecs.0.get_non_send::<UnitRuntime>() else {
+            return String::from("[]");
+        };
+        let mut rows: Vec<serde_json::Value> = Vec::new();
+        for &entity in &runtime.units {
+            let Ok(entity_ref) = self.ecs.0.get_entity(entity) else {
+                continue;
+            };
+            let Some(seq) = entity_ref.get::<EntitySeq>() else {
+                continue;
+            };
+            let type_name = entity_ref
+                .get::<UnitTypeComp>()
+                .and_then(|comp| runtime.content.unit(comp.type_id))
+                .map(|def| def.name.clone())
+                .unwrap_or_default();
+            let mounts: Vec<serde_json::Value> = entity_ref
+                .get::<crate::weapons::UnitWeapons>()
+                .map(|weapons| {
+                    weapons
+                        .mounts
+                        .iter()
+                        .map(|mount| {
+                            serde_json::json!({
+                                "shoot": mount.shoot,
+                                "aim": [mount.aim_x, mount.aim_y],
+                                "rotation": mount.rotation,
+                                "target_rotation": mount.target_rotation,
+                                "reload": mount.reload,
+                                "warmup": mount.warmup,
+                                "total_shots": mount.total_shots,
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            rows.push(serde_json::json!({
+                "id": seq.0 as i32,
+                "type": type_name,
+                "team": entity_ref.get::<TeamComp>().map(|team| team.team).unwrap_or(0),
+                "kind": entity_ref
+                    .get::<ControllerSlot>()
+                    .map(|slot| slot.kind.name())
+                    .unwrap_or("?"),
+                "pos": entity_ref.get::<Pos>().map(|pos| [pos.x, pos.y]),
+                "rotation": entity_ref.get::<UnitCore>().map(|core| core.rotation),
+                "health": entity_ref.get::<Health>().map(|health| health.health),
+                "can_shoot": entity_ref.get::<crate::weapons::UnitState>().map(|state| state.can_shoot),
+                "mounts": mounts,
+            }));
+        }
+        serde_json::to_string(&rows).unwrap_or_else(|_| String::from("[]"))
+    }
+}
+
+impl Sim {
+    /// `Payloadc` unit carrier command (`InputHandler.requestUnitPayload` /
+    /// `requestBuildPayload` / `requestDropPayload`; PAR-0138).
+    ///
+    /// `kind`: `0` pick up a unit (`target` = its `EntitySeq`), `1` pick up the
+    /// building at world `(x, y)`, `2` drop the last payload at `(x, y)`.
+    /// Returns whether the carrier's payload stack changed.
+    pub fn apply_payload_command(&mut self, kind: u8, x: f32, y: f32, target: Option<i32>) -> bool {
+        let Some(carrier) = self.player_unit() else {
+            return false;
+        };
+        match kind {
+            0 => self.payload_pickup_unit(carrier, x, y, target),
+            1 => self.payload_pickup_build(carrier, x, y),
+            2 => self.payload_drop(carrier, x, y),
+            _ => false,
+        }
+    }
+
+    /// `InputHandler.requestUnitPayload` + `PayloadComp.canPickup(Unit)`.
+    ///
+    /// With no explicit `target`, resolves the candidate like
+    /// `InputHandler.tryPickupPayload`: the closest unit to the cursor point
+    /// within the carrier's reach (`carrier.hitSize * 2`).
+    fn payload_pickup_unit(
+        &mut self,
+        carrier: Entity,
+        x: f32,
+        y: f32,
+        target: Option<i32>,
+    ) -> bool {
+        let ecs = &mut self.ecs.0;
+        let Some(mut runtime) = ecs.remove_non_send::<UnitRuntime>() else {
+            return false;
+        };
+        let mut changed = false;
+        let candidates: Vec<Entity> = if let Some(target_seq) = target {
+            runtime
+                .units
+                .iter()
+                .copied()
+                .filter(|entity| {
+                    ecs.get::<EntitySeq>(*entity)
+                        .is_some_and(|seq| seq.0 as i32 == target_seq)
+                })
+                .collect()
+        } else {
+            let carrier_hit = ecs
+                .get::<crate::entities::comp::unit::comp::HitboxComp>(carrier)
+                .map(|hitbox| hitbox.hit_size)
+                .unwrap_or(0.0);
+            let mut near: Vec<(f32, Entity)> = runtime
+                .units
+                .iter()
+                .copied()
+                .filter(|entity| *entity != carrier)
+                .filter_map(|entity| {
+                    let pos = ecs.get::<Pos>(entity)?;
+                    let (dx, dy) = (pos.x - x, pos.y - y);
+                    let dist2 = dx * dx + dy * dy;
+                    (dist2 <= (carrier_hit * 2.0).powi(2)).then_some((dist2, entity))
+                })
+                .collect();
+            near.sort_by_key(|(dist2, entity)| (dist2.to_bits(), entity.index()));
+            near.into_iter().map(|(_, entity)| entity).collect()
+        };
+        for target in candidates {
+            if target == carrier {
+                continue;
+            }
+            let team_of = |entity: Entity| ecs.get::<TeamComp>(entity).map(|t| t.team);
+            let carrier_team = team_of(carrier).unwrap_or(0);
+            let target_team = team_of(target).unwrap_or(0);
+            let target_ai = ecs
+                .get::<ControllerSlot>(target)
+                .is_some_and(|slot| slot.kind != AiKind::Player);
+            let target_grounded = ecs
+                .get::<UnitCore>(target)
+                .is_some_and(|core| core.elevation < 0.001);
+            let (target_id, target_hit, target_allowed) = ecs
+                .get::<UnitTypeComp>(target)
+                .and_then(|comp| runtime.content.unit(comp.type_id))
+                .map(|def| (def.id, def.hit_size, def.allowed_in_payloads))
+                .unwrap_or((crate::content::UnitTypeId::new(0), f32::MAX, false));
+            let carrier_hit = ecs
+                .get::<crate::entities::comp::unit::comp::HitboxComp>(carrier)
+                .map(|hitbox| hitbox.hit_size)
+                .unwrap_or(0.0);
+            let capacity = ecs
+                .get::<crate::entities::comp::unit::comp::PayloadComp>(carrier)
+                .map(|payload| payload.capacity)
+                .unwrap_or(0.0);
+            let used = ecs
+                .get::<crate::entities::comp::unit::comp::UnitPayloads>(carrier)
+                .map(|payloads| payloads.payload_used(&runtime.content))
+                .unwrap_or(0.0);
+            let within = match (
+                ecs.get::<Pos>(carrier).copied(),
+                ecs.get::<Pos>(target).copied(),
+            ) {
+                (Some(carrier_pos), Some(target_pos)) => {
+                    let (dx, dy) = (target_pos.x - carrier_pos.x, target_pos.y - carrier_pos.y);
+                    (dx * dx + dy * dy).sqrt() <= carrier_hit * 2.0 + target_hit * 2.0
+                }
+                _ => false,
+            };
+            if carrier_team != target_team
+                || !target_ai
+                || !target_grounded
+                || !target_allowed
+                || !within
+                || used + target_hit * target_hit > capacity + 0.001
+            {
+                continue;
+            }
+            let health = ecs.get::<Health>(target).map(|h| h.health).unwrap_or(0.0);
+            let rotation = ecs
+                .get::<UnitCore>(target)
+                .map(|c| c.rotation)
+                .unwrap_or(0.0);
+            runtime.units.retain(|entity| *entity != target);
+            runtime.units_removed += 1;
+            let _ = ecs.despawn(target);
+            if let Some(mut payloads) =
+                ecs.get_mut::<crate::entities::comp::unit::comp::UnitPayloads>(carrier)
+            {
+                payloads
+                    .stack
+                    .push(crate::entities::comp::unit::comp::CarriedPayload::Unit {
+                        type_id: target_id,
+                        team: target_team,
+                        health,
+                        rotation,
+                    });
+                changed = true;
+            }
+            break;
+        }
+        ecs.insert_non_send(runtime);
+        changed
+    }
+
+    /// `InputHandler.requestBuildPayload` + `PayloadComp.canPickup(Building)`.
+    fn payload_pickup_build(&mut self, carrier: Entity, x: f32, y: f32) -> bool {
+        let tx = WorldGrid::to_tile(x) as i16;
+        let ty = WorldGrid::to_tile(y) as i16;
+        let Some(build) = self
+            .grid
+            .tiles
+            .getn(tx as i32, ty as i32)
+            .and_then(|tile| tile.build)
+        else {
+            return false;
+        };
+        let Some(building) = self.ecs.0.get::<crate::entities::comp::Building>(build) else {
+            return false;
+        };
+        let (block, rotation) = (building.block, building.rotation);
+        let build_team = self
+            .ecs
+            .0
+            .get::<TeamComp>(build)
+            .map(|team| team.team)
+            .unwrap_or(0);
+        let health = self
+            .ecs
+            .0
+            .get::<Health>(build)
+            .map(|h| h.health)
+            .unwrap_or(0.0);
+
+        let ecs = &mut self.ecs.0;
+        let Some(runtime) = ecs.remove_non_send::<UnitRuntime>() else {
+            return false;
+        };
+        let carrier_team = ecs.get::<TeamComp>(carrier).map(|t| t.team).unwrap_or(0);
+        let carrier_pos = ecs.get::<Pos>(carrier).copied();
+        let carrier_hit = ecs
+            .get::<crate::entities::comp::unit::comp::HitboxComp>(carrier)
+            .map(|hitbox| hitbox.hit_size)
+            .unwrap_or(0.0);
+        let capacity = ecs
+            .get::<crate::entities::comp::unit::comp::PayloadComp>(carrier)
+            .map(|payload| payload.capacity)
+            .unwrap_or(0.0);
+        let used = ecs
+            .get::<crate::entities::comp::unit::comp::UnitPayloads>(carrier)
+            .map(|payloads| payloads.payload_used(&runtime.content))
+            .unwrap_or(0.0);
+        let (size, pickable) = runtime
+            .content
+            .block(block)
+            .map(|def| {
+                (
+                    def.size as f32 * crate::config::TILESIZE as f32,
+                    def.kind != crate::content::BlockKind::CoreBlock,
+                )
+            })
+            .unwrap_or((0.0, false));
+        let tile_size = crate::config::TILESIZE as f32;
+        let within = match (carrier_pos, building_center(ecs, build)) {
+            (Some(carrier_pos), Some((bx, by))) => {
+                let (dx, dy) = (bx - carrier_pos.x, by - carrier_pos.y);
+                (dx * dx + dy * dy).sqrt() <= size * 1.2 + tile_size * 5.0
+            }
+            _ => false,
+        };
+        let mut changed = false;
+        if build_team == carrier_team
+            && pickable
+            && within
+            && used + size * size <= capacity + 0.001
+            && let Some(rt) = self.block_runtime.as_mut()
+            && rt
+                .pickup_building(&mut self.ecs.0, &mut self.grid, build)
+                .is_some()
+        {
+            if let Some(mut payloads) = self
+                .ecs
+                .0
+                .get_mut::<crate::entities::comp::unit::comp::UnitPayloads>(carrier)
+            {
+                payloads
+                    .stack
+                    .push(crate::entities::comp::unit::comp::CarriedPayload::Build {
+                        block,
+                        team: carrier_team,
+                        rotation,
+                        health,
+                    });
+                changed = true;
+            }
+            let _ = carrier_hit;
+        }
+        self.ecs.0.insert_non_send(runtime);
+        if changed {
+            // The grid snapshot dropped the building.
+            self.refresh_unit_runtime();
+        }
+        changed
+    }
+
+    /// `InputHandler.requestDropPayload` + `PayloadComp.dropLastPayload`.
+    fn payload_drop(&mut self, carrier: Entity, x: f32, y: f32) -> bool {
+        // `requestDropPayload`: clamp the drop point to `tilesize * 4` around
+        // the carrier.
+        let Some(carrier_pos) = self.ecs.0.get::<Pos>(carrier).copied() else {
+            return false;
+        };
+        let (dx, dy) = (x - carrier_pos.x, y - carrier_pos.y);
+        let len = (dx * dx + dy * dy).sqrt();
+        let limit = crate::config::TILESIZE as f32 * 4.0;
+        let (cx, cy) = if len > limit {
+            (
+                carrier_pos.x + dx / len * limit,
+                carrier_pos.y + dy / len * limit,
+            )
+        } else {
+            (x, y)
+        };
+        let Some(payload) = self
+            .ecs
+            .0
+            .get::<crate::entities::comp::unit::comp::UnitPayloads>(carrier)
+            .and_then(|payloads| payloads.stack.last().copied())
+        else {
+            return false;
+        };
+        match payload {
+            crate::entities::comp::unit::comp::CarriedPayload::Unit {
+                type_id,
+                team,
+                health,
+                rotation,
+            } => {
+                let ecs = &mut self.ecs.0;
+                let Some(mut runtime) = ecs.remove_non_send::<UnitRuntime>() else {
+                    return false;
+                };
+                let Some(def) = runtime.content.unit(type_id) else {
+                    ecs.insert_non_send(runtime);
+                    return false;
+                };
+                let seq = runtime.seq;
+                runtime.seq = seq.wrapping_add(1);
+                let entity = crate::entities::comp::unit::lifecycle::spawn_unit_def(
+                    ecs, seq, def, team, cx, cy, rotation,
+                );
+                if let Some(mut stored) = ecs.get_mut::<Health>(entity) {
+                    stored.health = health;
+                }
+                runtime.units.push(entity);
+                runtime.units_created += 1;
+                if let Some(mut payloads) =
+                    ecs.get_mut::<crate::entities::comp::unit::comp::UnitPayloads>(carrier)
+                {
+                    let _ = payloads.stack.pop();
+                }
+                ecs.insert_non_send(runtime);
+                true
+            }
+            crate::entities::comp::unit::comp::CarriedPayload::Build {
+                block,
+                team,
+                rotation,
+                health,
+            } => {
+                let size = self
+                    .block_runtime
+                    .as_ref()
+                    .and_then(|runtime| runtime.content().block(block))
+                    .map(|def| def.size)
+                    .unwrap_or(1) as i16;
+                let offset = (size - 1) / 2;
+                let tx = WorldGrid::to_tile(cx) as i16 - offset;
+                let ty = WorldGrid::to_tile(cy) as i16 - offset;
+                // `tryDropPayload` -> `dropBlock`: keep carrying it when the
+                // placement is invalid (Java returns false and the stack is
+                // not popped).
+                if !self.runtime_place(tx, ty, block, rotation, team) {
+                    return false;
+                }
+                if let Some(build) = self
+                    .grid
+                    .tiles
+                    .getn(tx as i32 + offset as i32, ty as i32 + offset as i32)
+                    .and_then(|tile| tile.build)
+                    && let Some(mut stored) = self.ecs.0.get_mut::<Health>(build)
+                {
+                    stored.health = health;
+                }
+                if let Some(mut payloads) =
+                    self.ecs
+                        .0
+                        .get_mut::<crate::entities::comp::unit::comp::UnitPayloads>(carrier)
+                {
+                    let _ = payloads.stack.pop();
+                }
+                true
+            }
+        }
     }
 }
 
@@ -2143,6 +2825,154 @@ mod msav_tests {
             "the drill-fed duo killed the dagger (ammo {ammo}, health {:?})",
             sim.ecs.0.get::<Health>(dagger).map(|h| h.health)
         );
+    }
+
+    /// §7 (PAR-0139-adjacent): an undefended Ground Zero core with low health is
+    /// destroyed by wave daggers and the campaign reports game over.
+    #[test]
+    fn ground_zero_wave_destroys_undefended_core() {
+        use crate::ecs::TeamId;
+        use crate::game::State;
+        use crate::game::planet::EmptyNeighborhood;
+        use crate::game::play::PlaySession;
+        use crate::game::rules::Rules;
+        use crate::game::runtime::CampaignRuntime;
+        use crate::game::universe::Campaign;
+
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../assets/maps/serpulo/groundZero.msav");
+        let Ok(bytes) = std::fs::read(&path) else {
+            return;
+        };
+        let mut content =
+            create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+                .expect("content");
+        let mut grid = WorldGrid::new(0, 0);
+        grid.begin_map_load();
+        let pending: Vec<(usize, DecodedBase)> = {
+            let mut context = EditorContext::new(&mut grid, &content);
+            let mut state = SaveReadState {
+                context: Some(&mut context),
+                content: Some(&mut content),
+                ..SaveReadState::default()
+            };
+            SaveIo::load_bytes(&bytes, &mut state).expect("map imports");
+            std::mem::take(&mut context.pending_buildings)
+        };
+        grid.end_map_load(&content);
+        let (width, height) = (grid.tiles.width, grid.tiles.height);
+        let air = BlockId::AIR;
+        let mut sim = Sim::new(1, width, height, air, air);
+        sim.grid = grid;
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        assert!(sim.materialize_map_buildings(&pending) > 0, "core linked");
+        // Bullet-vs-building collision reads the runtime grid snapshot; refresh
+        // it after materializing the map's buildings (bullets otherwise fly
+        // through them).
+        sim.refresh_unit_runtime();
+        let core_block = content.block_id("core-shard").expect("core");
+        let (core_x, core_y, core) = sim
+            .grid
+            .tiles
+            .array()
+            .iter()
+            .find(|t| t.block == core_block)
+            .and_then(|t| t.build.map(|build| (i32::from(t.x), i32::from(t.y), build)))
+            .expect("core tile + entity");
+        // Keep the fight short (`Health.health = 50`); the check needs the core
+        // to die, not the whole base to fall.
+        sim.ecs
+            .0
+            .get_mut::<Health>(core)
+            .expect("core health")
+            .health = 50.0;
+
+        let campaign = Campaign::from_registry(&content, &EmptyNeighborhood);
+        let mut session = PlaySession::new(Rules {
+            waves: false,
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        session.phase = State::Playing;
+        // A sector makes `is_campaign()` true: wave-team units get their AI
+        // (`GroundAI`) instead of idling `CommandAI`, and `checkGameState`
+        // reports the sector loss when the core dies.
+        session.sector = content.planet_id("serpulo").map(|planet| (planet, 170));
+        session.teams.register_core(core, TeamId(1), &session.rules);
+        sim.ecs
+            .0
+            .insert_resource(CampaignRuntime::new(session, campaign));
+
+        // Three wave daggers ~10 tiles from the core walk in and shoot it.
+        // Find an open 3-tile column on passable terrain (the crater walls are
+        // solid rock; the tile-center deadlock at a boundary must be avoided).
+        let free_tile = |sim: &Sim, x: i32, y: i32| {
+            sim.grid
+                .tiles
+                .getn(x, y)
+                .is_some_and(|t| !t.solid(&content) && t.build.is_none())
+        };
+        let mut spawn_column = None;
+        'search: for r in 4..20 {
+            for (dx, dy) in [
+                (r, 0),
+                (-r, 0),
+                (0, r),
+                (0, -r),
+                (r, r),
+                (r, -r),
+                (-r, r),
+                (-r, -r),
+            ] {
+                let (x, y) = (core_x + dx, core_y + dy);
+                if (-1..=1).all(|offset| free_tile(&sim, x, y + offset)) {
+                    spawn_column = Some((x, y));
+                    break 'search;
+                }
+            }
+        }
+        let (sx, sy) = spawn_column.expect("open column near the core");
+        eprintln!("wave spawn column ({sx}, {sy}) core ({core_x}, {core_y})");
+        for offset in -1..=1 {
+            let _ = sim
+                .spawn_live_unit(
+                    "dagger",
+                    2,
+                    sx as f32 * TILE_SIZE + 4.0,
+                    (sy + offset) as f32 * TILE_SIZE + 4.5,
+                    180.0,
+                )
+                .expect("dagger");
+        }
+        let mut core_destroyed_at = None;
+        for tick in 0..3000 {
+            sim.tick().expect("tick");
+            if sim.grid.tiles.get(core_x, core_y).build.is_none() {
+                core_destroyed_at = Some(tick);
+                break;
+            }
+        }
+        // The campaign liveness sweep + `checkGameState` run on the tick after
+        // the core is removed.
+        for _ in 0..10 {
+            sim.tick().expect("tick");
+        }
+        let game_over = sim
+            .ecs
+            .0
+            .get_resource::<CampaignRuntime>()
+            .is_some_and(|runtime| runtime.session.game_over);
+        eprintln!(
+            "ground zero core destroyed at {core_destroyed_at:?}, game over {game_over}, units {:?}",
+            sim.group_counts()
+        );
+        assert!(
+            core_destroyed_at.is_some(),
+            "the wave destroyed the undefended core"
+        );
+        assert!(game_over, "the campaign reported game over (sector lost)");
     }
 
     /// The authored attack map pins its spawn groups to the map's spawn

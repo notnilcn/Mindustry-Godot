@@ -267,7 +267,7 @@ fn sim_command_applies_unit_command_and_control() {
 #[test]
 fn sim_command_rotates_placed_building() {
     use crate::command::Command;
-    use crate::determinism::{CommandError, SimCommand};
+    use crate::determinism::SimCommand;
 
     let mut sim = Sim::new(1, 16, 16, BlockId::AIR, BlockId::AIR);
     sim.apply(Command::Place {
@@ -315,18 +315,15 @@ fn sim_command_rotates_placed_building() {
     })
     .expect("delete plans");
 
-    // `Payload` stays blocked: the unit payload carrier (`Payloadc`) is not
-    // ported, so there is no runtime to apply against.
-    assert_eq!(
-        sim.command(SimCommand::Payload {
-            kind: 0,
-            x: 0.0,
-            y: 0.0,
-            target: None,
-        })
-        .unwrap_err(),
-        CommandError::Unsupported("payload")
-    );
+    // `Payload` now applies through the unit payload carrier (PAR-0138): with
+    // no player unit the pickup is a no-op, but the command is accepted.
+    sim.command(SimCommand::Payload {
+        kind: 0,
+        x: 0.0,
+        y: 0.0,
+        target: None,
+    })
+    .expect("payload is accepted");
 }
 
 #[test]

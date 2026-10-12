@@ -52,6 +52,18 @@ pub const SIM_UNIT_CLASS_ID: u8 = 0xF0;
 /// Revision of the [`SIM_UNIT_CLASS_ID`] chunk payload (append-only).
 pub const SIM_UNIT_REVISION: u16 = 1;
 
+/// Reserved class id for the native live-sim fire chunk (`FireComp`).
+pub const SIM_FIRE_CLASS_ID: u8 = 0xF1;
+
+/// Revision of the [`SIM_FIRE_CLASS_ID`] chunk payload (append-only).
+pub const SIM_FIRE_REVISION: u16 = 1;
+
+/// Reserved class id for the native live-sim puddle chunk (`PuddleComp`).
+pub const SIM_PUDDLE_CLASS_ID: u8 = 0xF2;
+
+/// Revision of the [`SIM_PUDDLE_CLASS_ID`] chunk payload (append-only).
+pub const SIM_PUDDLE_REVISION: u16 = 1;
+
 /// Host-supplied playtime for the `meta` region (`Saves.getTotalPlaytime`).
 ///
 /// Playtime is host bookkeeping (`game::saves::Saves`), not sim state, so the
@@ -98,15 +110,42 @@ struct DecodedUnit {
     health: f32,
 }
 
-/// Read-side entity sink collecting the native live-unit chunks.
+/// One decoded live fire record (`FireComp.read` sim fields).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DecodedFire {
+    /// Owning tile.
+    tile: (i16, i16),
+    /// Ticks lived.
+    time: f32,
+    /// Ticks to live.
+    lifetime: f32,
+}
+
+/// One decoded live puddle record (`PuddleComp.read` sim fields).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DecodedPuddle {
+    /// Owning tile.
+    tile: (i16, i16),
+    /// Liquid content id.
+    liquid: crate::content::LiquidId,
+    /// Current amount.
+    amount: f32,
+}
+
+/// Read-side entity sink collecting the native live-unit/fire/puddle chunks.
 #[derive(Default)]
 struct LiveEntitySink {
     units: Vec<DecodedUnit>,
+    fires: Vec<DecodedFire>,
+    puddles: Vec<DecodedPuddle>,
 }
 
 impl EntitySink for LiveEntitySink {
     fn supports_class(&self, class_id: u8, _custom_name: Option<&str>) -> bool {
-        class_id == SIM_UNIT_CLASS_ID
+        matches!(
+            class_id,
+            SIM_UNIT_CLASS_ID | SIM_FIRE_CLASS_ID | SIM_PUDDLE_CLASS_ID
+        )
     }
 
     fn read_entity(
@@ -116,25 +155,77 @@ impl EntitySink for LiveEntitySink {
         _id: i32,
         r: &mut WireReader,
     ) -> IoResult<()> {
-        if class_id != SIM_UNIT_CLASS_ID {
-            return Err(IoError::corrupt(format!(
-                "unknown live entity class id {class_id}"
-            )));
+        match class_id {
+            SIM_UNIT_CLASS_ID => {
+                let revision = r.us()?;
+                if revision != SIM_UNIT_REVISION {
+                    return Err(IoError::corrupt(format!(
+                        "unsupported live unit revision {revision}"
+                    )));
+                }
+                self.units.push(DecodedUnit {
+                    name: r.str()?,
+                    team: r.ub()?,
+                    x: r.f()?,
+                    y: r.f()?,
+                    rotation: r.f()?,
+                    health: r.f()?,
+                });
+            }
+            SIM_FIRE_CLASS_ID => {
+                let revision = r.us()?;
+                if revision != SIM_FIRE_REVISION {
+                    return Err(IoError::corrupt(format!(
+                        "unsupported live fire revision {revision}"
+                    )));
+                }
+                let mut state = crate::combat::fires::FireState {
+                    tile: (0, 0),
+                    time: 0.0,
+                    lifetime: 0.0,
+                    puddle_flammability: 0.0,
+                    spread_timer: 0.0,
+                    fireball_timer: 0.0,
+                    damage_timer: 0.0,
+                    warmup: 0.0,
+                    animation: 0.0,
+                };
+                crate::combat::fires::read_fire(&mut state, r, revision as u8)?;
+                self.fires.push(DecodedFire {
+                    tile: state.tile,
+                    time: state.time,
+                    lifetime: state.lifetime,
+                });
+            }
+            SIM_PUDDLE_CLASS_ID => {
+                let revision = r.us()?;
+                if revision != SIM_PUDDLE_REVISION {
+                    return Err(IoError::corrupt(format!(
+                        "unsupported live puddle revision {revision}"
+                    )));
+                }
+                let mut state = crate::combat::puddles::PuddleState {
+                    tile: (0, 0),
+                    liquid: crate::content::LiquidId::WATER,
+                    amount: 0.0,
+                    accepting: 0.0,
+                    update_time: 0.0,
+                    last_ripple: 0.0,
+                    effect_time: 0.0,
+                };
+                crate::combat::puddles::read_puddle(&mut state, r, revision as u8)?;
+                self.puddles.push(DecodedPuddle {
+                    tile: state.tile,
+                    liquid: state.liquid,
+                    amount: state.amount,
+                });
+            }
+            other => {
+                return Err(IoError::corrupt(format!(
+                    "unknown live entity class id {other}"
+                )));
+            }
         }
-        let revision = r.us()?;
-        if revision != SIM_UNIT_REVISION {
-            return Err(IoError::corrupt(format!(
-                "unsupported live unit revision {revision}"
-            )));
-        }
-        self.units.push(DecodedUnit {
-            name: r.str()?,
-            team: r.ub()?,
-            x: r.f()?,
-            y: r.f()?,
-            rotation: r.f()?,
-            health: r.f()?,
-        });
         Ok(())
     }
 
@@ -179,10 +270,25 @@ impl EntitySource for LiveEntitySource<'_> {
     }
 
     fn entity_count(&self) -> usize {
-        self.sim
+        let units = self
+            .sim
             .unit_runtime()
             .map(|runtime| runtime.unit_count(&self.sim.ecs.0))
-            .unwrap_or(0)
+            .unwrap_or(0);
+        let mut fires = 0usize;
+        let mut puddles = 0usize;
+        for entity in self.sim.ecs.0.iter_entities() {
+            if entity.get::<crate::combat::fires::FireState>().is_some() {
+                fires += 1;
+            }
+            if entity
+                .get::<crate::combat::puddles::PuddleState>()
+                .is_some()
+            {
+                puddles += 1;
+            }
+        }
+        units + fires + puddles
     }
 
     fn write_entities(&self, w: &mut WireWriter, scratch: &mut SaveScratch) -> IoResult<()> {
@@ -233,6 +339,37 @@ impl EntitySource for LiveEntitySource<'_> {
                 chunk.f(pos.y);
                 chunk.f(core.rotation);
                 chunk.f(health);
+                Ok(())
+            })?;
+        }
+        // Fires (`FireComp.write`: tile/time/lifetime) then puddles
+        // (`PuddleComp.write`: amount/tile/liquid), both in tile order (they
+        // carry no `EntitySeq`).
+        let mut fires: Vec<crate::combat::fires::FireState> = world
+            .iter_entities()
+            .filter_map(|entity| entity.get::<crate::combat::fires::FireState>().copied())
+            .collect();
+        fires.sort_by_key(|state| (state.tile.0, state.tile.1));
+        for state in fires {
+            scratch.write_chunk(w, |chunk| {
+                chunk.ub(SIM_FIRE_CLASS_ID);
+                chunk.i(0);
+                chunk.us(SIM_FIRE_REVISION);
+                crate::combat::fires::write_fire(&state, chunk)?;
+                Ok(())
+            })?;
+        }
+        let mut puddles: Vec<crate::combat::puddles::PuddleState> = world
+            .iter_entities()
+            .filter_map(|entity| entity.get::<crate::combat::puddles::PuddleState>().copied())
+            .collect();
+        puddles.sort_by_key(|state| (state.tile.0, state.tile.1));
+        for state in puddles {
+            scratch.write_chunk(w, |chunk| {
+                chunk.ub(SIM_PUDDLE_CLASS_ID);
+                chunk.i(0);
+                chunk.us(SIM_PUDDLE_REVISION);
+                crate::combat::puddles::write_puddle(&state, chunk)?;
                 Ok(())
             })?;
         }
@@ -529,6 +666,47 @@ impl SimIoHandler {
                 health.health = unit.health;
             }
         }
+        // Fires and puddles (`Groups.fires`/`Groups.puddles` recreate from
+        // their chunks; the tile-slot caches re-register on the next update
+        // pass). Accumulator fields are transient upstream and start zeroed.
+        let tile_size = crate::config::TILESIZE as f32;
+        for fire in &entities.fires {
+            sim.ecs.0.spawn((
+                Pos {
+                    x: (fire.tile.0 as f32 + 0.5) * tile_size,
+                    y: (fire.tile.1 as f32 + 0.5) * tile_size,
+                },
+                TeamComp { team: 0 },
+                crate::combat::fires::FireState {
+                    tile: fire.tile,
+                    time: fire.time,
+                    lifetime: fire.lifetime,
+                    puddle_flammability: 0.0,
+                    spread_timer: 0.0,
+                    fireball_timer: 0.0,
+                    damage_timer: 0.0,
+                    warmup: 0.0,
+                    animation: 0.0,
+                },
+            ));
+        }
+        for puddle in &entities.puddles {
+            sim.ecs.0.spawn((
+                Pos {
+                    x: (puddle.tile.0 as f32 + 0.5) * tile_size,
+                    y: (puddle.tile.1 as f32 + 0.5) * tile_size,
+                },
+                crate::combat::puddles::PuddleState {
+                    tile: puddle.tile,
+                    liquid: puddle.liquid,
+                    amount: puddle.amount,
+                    accepting: 0.0,
+                    update_time: 0.0,
+                    last_ripple: 0.0,
+                    effect_time: 0.0,
+                },
+            ));
+        }
         if let Some(mut runtime) = sim.ecs.0.remove_resource::<CampaignRuntime>() {
             if let Some(rules) = rules {
                 runtime.session.rules = rules;
@@ -692,16 +870,20 @@ mod tests {
         assert!(matches!(responses[0].status, IoStatus::Failed(_)));
     }
 
-    /// The live unit chunk's reserved class id must stay clear of the upstream
-    /// `classids.properties` table (append-only ABI).
+    /// The live unit/fire/puddle chunk class ids must stay clear of the
+    /// upstream `classids.properties` table (append-only ABI).
     #[test]
     fn live_unit_class_id_is_reserved() {
         let mapping = crate::entities::mapping::EntityMapping::load_default();
-        assert!(
-            mapping.name_of(u16::from(SIM_UNIT_CLASS_ID)).is_none(),
-            "SIM_UNIT_CLASS_ID collides with an upstream class id"
-        );
+        for id in [SIM_UNIT_CLASS_ID, SIM_FIRE_CLASS_ID, SIM_PUDDLE_CLASS_ID] {
+            assert!(
+                mapping.name_of(u16::from(id)).is_none(),
+                "class id {id} collides with an upstream class id"
+            );
+        }
         assert_eq!(SIM_UNIT_REVISION, 1);
+        assert_eq!(SIM_FIRE_REVISION, 1);
+        assert_eq!(SIM_PUDDLE_REVISION, 1);
     }
 
     /// A live save must carry real meta (`tick`/`playtime`) and the entities
@@ -755,6 +937,94 @@ mod tests {
         assert_eq!(sim.group_counts().get("build"), Some(&1));
         assert_eq!(sim.group_counts().get("unit"), Some(&1));
         assert!(sim.tick_count() >= saved_tick, "tick header resumes");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// PAR-0090: a live save keeps fires and puddles and the load restores
+    /// them with the same tile/amount/time.
+    #[test]
+    fn live_sim_save_keeps_fires_and_puddles() {
+        let mut sim = Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        let mut rng = crate::determinism::SimRng::new(5);
+        let fire = crate::combat::fires::create(&mut sim.ecs.0, 7, 7, &mut rng).expect("fire");
+        {
+            let world = &mut sim.ecs.0;
+            let mut runtime = world.remove_non_send::<UnitRuntime>().expect("runtime");
+            let water = runtime.content.liquid_id("water").expect("water");
+            let puddle = crate::combat::puddles::deposit(
+                world,
+                &sim.grid.tiles,
+                &runtime.content,
+                9,
+                9,
+                water,
+                30.0,
+                &mut runtime.rng,
+            );
+            assert!(puddle.is_some(), "puddle deposited");
+            world.insert_non_send(runtime);
+        }
+        sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
+
+        let path = temp_path("live-fires-puddles-roundtrip");
+        let _ = std::fs::remove_file(&path);
+        sim.request_save(&path, false);
+        sim.tick().expect("capture tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses.len(), 1, "one save response: {responses:?}");
+        assert_eq!(responses[0].status, IoStatus::Ok);
+        let fire_before = sim
+            .ecs
+            .0
+            .get::<crate::combat::fires::FireState>(fire)
+            .copied()
+            .expect("fire state");
+        let puddle_before = sim
+            .ecs
+            .0
+            .iter_entities()
+            .find_map(|entity| entity.get::<crate::combat::puddles::PuddleState>().copied())
+            .expect("puddle state");
+
+        sim.request_load(&path);
+        sim.tick().expect("apply tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses.len(), 1, "one load response: {responses:?}");
+        assert_eq!(responses[0].status, IoStatus::Ok, "save reloads");
+
+        let fires: Vec<crate::combat::fires::FireState> = sim
+            .ecs
+            .0
+            .iter_entities()
+            .filter_map(|entity| entity.get::<crate::combat::fires::FireState>().copied())
+            .collect();
+        assert_eq!(fires.len(), 1, "one fire restored");
+        assert_eq!(fires[0].tile, fire_before.tile);
+        // One tick (the load tick) advances the restored fire/puddle.
+        assert!(
+            (fires[0].time - fire_before.time - 1.0).abs() < 0.001,
+            "fire time resumes ({} vs {})",
+            fires[0].time,
+            fire_before.time
+        );
+        let puddles: Vec<crate::combat::puddles::PuddleState> = sim
+            .ecs
+            .0
+            .iter_entities()
+            .filter_map(|entity| entity.get::<crate::combat::puddles::PuddleState>().copied())
+            .collect();
+        assert_eq!(puddles.len(), 1, "one puddle restored");
+        assert_eq!(puddles[0].tile, puddle_before.tile);
+        assert_eq!(puddles[0].liquid, puddle_before.liquid);
+        assert!(
+            puddles[0].amount <= puddle_before.amount,
+            "puddle amount resumes ({} <= {})",
+            puddles[0].amount,
+            puddle_before.amount
+        );
 
         let _ = std::fs::remove_file(&path);
     }

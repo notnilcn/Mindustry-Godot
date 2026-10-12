@@ -161,11 +161,18 @@ impl UnitHarness {
             let slot = self.build.world.get::<ControllerSlot>(entity).copied();
             if let Some(target) = slot.and_then(|slot| slot.target) {
                 let arrived = if slot.is_some_and(|slot| slot.kind == AiKind::Flying) {
-                    update_flying(&mut self.build.world, entity, target)
+                    update_flying(
+                        &mut self.build.world,
+                        &self.build.grid,
+                        &self.build.content,
+                        entity,
+                        target,
+                    )
                 } else {
                     update_ground(
                         &mut self.build.world,
                         &self.build.grid,
+                        &self.build.content,
                         &mut self.pathfinder,
                         team,
                         entity,

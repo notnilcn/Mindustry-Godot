@@ -21,10 +21,16 @@ const SETTINGS_FORMAT: i64 = 1;
 #[derive(Debug, Default, Clone)]
 pub struct ClientSettings {
     /// Last selected block name.
+    #[allow(dead_code)] // read by the plan-04 Settings port; not restored at boot (PAR-0140)
     pub selected_block: Option<String>,
 }
 
 /// Reads `user://settings.json`; `None` when absent or unreadable.
+///
+/// Kept for the plan-04 Settings port; the sim host no longer restores
+/// `selected_block` at boot (`player.block` is session state upstream, and a
+/// restored block closes the command-mode gate; PAR-0140).
+#[allow(dead_code)] // reserved for the plan-04 Settings port
 pub fn read() -> Option<ClientSettings> {
     let native = native_path();
     let text = std::fs::read_to_string(&native).ok()?;

@@ -248,14 +248,11 @@ impl MindSimHost {
 
         // Sibling `Input` owns the binding state; the player move axis is read
         // here each frame and uploaded to the sim (`DesktopInput.updateMovement`).
+        // `player.block` is not persisted upstream; a restored block would close
+        // the command-mode gate (`command_mode_allowed`), so ordered RTS units
+        // could never be selected after a restart (PAR-0140). The selected block
+        // starts at AIR and the settings file is still written on exit.
         self.input = self.base().try_get_node_as::<MindInput>("../Input");
-
-        if let Some(saved) = settings::read()
-            && let Some(name) = saved.selected_block
-            && let Ok(id) = self.sim.content().id(&name)
-        {
-            let _ = self.sim.set_selected_block(id);
-        }
 
         self.capture = parse_capture_args();
         // The STDB connection is owned by the `StdbConnector` autoload (plan 01
@@ -513,6 +510,14 @@ impl MindSimHost {
     #[func]
     pub fn selectable_units_json(&self) -> GString {
         GString::from(self.sim.selectable_units_json().as_str())
+    }
+
+    /// Debug-only live unit dump: id, type, team, controller kind, position,
+    /// rotation, health, `can_shoot` and per-mount fire state. Read-only MCP
+    /// probe (`PAR-0088`/`§7`); never saved or synced.
+    #[func]
+    pub fn unit_debug_json(&self) -> GString {
+        GString::from(self.sim.unit_debug_json().as_str())
     }
 
     /// Per-type content counts for the inspector `Content` tab (plan 02 §3.7).

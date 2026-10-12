@@ -544,6 +544,29 @@ impl SimRuntime {
         Some((x, y, block))
     }
 
+    /// `Building.pickedUp` -> `tile.remove()` without the `onDestroyed`
+    /// refunds (PAR-0138 unit payload pickup). Returns the block and center
+    /// tile, like [`Self::destroy_building`].
+    pub(crate) fn pickup_building(
+        &mut self,
+        world: &mut World,
+        grid: &mut WorldGrid,
+        entity: Entity,
+    ) -> Option<(i16, i16, BlockId)> {
+        let building = world.get::<crate::entities::comp::Building>(entity)?;
+        let (pos, block) = (building.tile, building.block);
+        if grid.entity_at(pos) != Some(entity) || block == BlockId::AIR {
+            return None;
+        }
+        let team = world
+            .get::<crate::entities::comp::TeamComp>(entity)
+            .map(|team| team.team)
+            .unwrap_or(0);
+        let (x, y) = (pos.x(), pos.y());
+        self.remove_building(world, grid, entity, x, y, team, block);
+        Some((x, y, block))
+    }
+
     /// Shared `Tile.remove` half of break/destroy.
     #[allow(clippy::too_many_arguments)]
     fn remove_building(
@@ -1075,7 +1098,14 @@ impl Sim {
             .ecs
             .0
             .iter_entities()
-            .filter(|entity| entity.contains::<crate::ecs::EntitySeq>())
+            .filter(|entity| {
+                // Sim entities plus the fires/puddles that carry no
+                // `EntitySeq` (`Groups.clear` drops every group on a world
+                // reset; PAR-0090).
+                entity.contains::<crate::ecs::EntitySeq>()
+                    || entity.contains::<crate::combat::fires::FireState>()
+                    || entity.contains::<crate::combat::puddles::PuddleState>()
+            })
             .map(|entity| entity.id())
             .collect();
         for entity in entities {

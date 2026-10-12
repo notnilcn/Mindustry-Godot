@@ -14167,12 +14167,12 @@
           "bundle": null,
           "regions": [],
           "fields": {
-            "speed": 1.0,
-            "lifetime": 40.0,
+            "speed": 0.0,
+            "lifetime": 1.0,
             "damage": 1.0,
             "splash_damage": 140.0,
             "pierce": false,
-            "collides": true
+            "collides": false
           }
         },
         {
@@ -14359,12 +14359,12 @@
           "bundle": null,
           "regions": [],
           "fields": {
-            "speed": 1.0,
-            "lifetime": 40.0,
+            "speed": 0.0,
+            "lifetime": 1.0,
             "damage": 1.0,
             "splash_damage": 110.0,
             "pierce": false,
-            "collides": true
+            "collides": false
           }
         },
         {
@@ -14391,12 +14391,12 @@
           "bundle": null,
           "regions": [],
           "fields": {
-            "speed": 1.0,
-            "lifetime": 40.0,
+            "speed": 0.0,
+            "lifetime": 1.0,
             "damage": 1.0,
             "splash_damage": 140.0,
             "pierce": false,
-            "collides": true
+            "collides": false
           }
         },
         {

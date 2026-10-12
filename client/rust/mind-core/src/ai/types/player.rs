@@ -19,7 +19,7 @@ use bevy_ecs::world::World;
 
 use crate::content::{ContentRegistry, ItemId};
 use crate::entities::comp::unit::comp::{
-    ItemsComp, MinerComp, PhysicsComp, StatusComp, UnitCore, UnitTypeComp,
+    ItemsComp, MinerComp, PhysicsComp, UnitCore, UnitTypeComp,
 };
 use crate::entities::comp::{Building, Pos, TeamComp, Vel};
 use crate::world::blocks::distribution::transfer::{
@@ -68,16 +68,14 @@ pub fn update_player(
     let Some(mut core) = world.get::<UnitCore>(entity).copied() else {
         return false;
     };
-    let Some(physics) = world.get::<PhysicsComp>(entity).copied() else {
+    let Some(accel) = world
+        .get::<PhysicsComp>(entity)
+        .map(|physics| physics.accel)
+    else {
         return false;
     };
-    let speed_mult = world
-        .get::<StatusComp>(entity)
-        .map(|status| status.speed_multiplier)
-        .unwrap_or(1.0);
-    // `UnitComp.speed()`: boost/floor/strafe multipliers not modeled yet; base
-    // speed * status multiplier matches `PhysicsComp` construction.
-    let speed = physics.speed * speed_mult;
+    // `UnitComp.speed()` with floor/boost/strafe multipliers (PAR-0137).
+    let speed = crate::entities::comp::unit::movement::unit_speed(world, grid, content, entity);
     let (omni, rotate_speed) = world
         .get::<crate::entities::comp::unit::comp::UnitTypeComp>(entity)
         .and_then(|comp| content.unit(comp.type_id))
@@ -107,7 +105,7 @@ pub fn update_player(
     let target = (dir_x * target_len, dir_y * target_len);
 
     // `UnitComp.moveAt`: `vel += (target - vel).limit(accel * target.len())`.
-    let accel_limit = physics.accel * target_len;
+    let accel_limit = accel * target_len;
     let dx = target.0 - vel.x;
     let dy = target.1 - vel.y;
     let dist = (dx * dx + dy * dy).sqrt();

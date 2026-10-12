@@ -531,6 +531,10 @@ impl Sim {
         self.pump_io(IoSet::Apply);
         self.triggers.fire(Trigger::Update, &mut self.ecs.0);
         self.schedule.run(&mut self.ecs.0);
+        // `Groups.fires`/`Groups.puddles.update()` (`Logic.updateEntities`):
+        // fires burn/spread and puddles evaporate/apply statuses every tick
+        // (PAR-0091). Damage they deal is picked up by `resolve_deaths` below.
+        self.update_fires_and_puddles();
         // `BuilderComp.update` (PAR-0098): player build plans drive the
         // construct blocks after the entity update pass.
         self.update_builders();
@@ -586,6 +590,16 @@ impl Sim {
             ),
             None => (0, 0),
         };
+        let weather = self
+            .ecs
+            .0
+            .iter_entities()
+            .filter(|entity| {
+                entity
+                    .get::<crate::entities::comp::WeatherState>()
+                    .is_some()
+            })
+            .count();
         let mut counts = std::collections::BTreeMap::new();
         counts.insert("all", all);
         counts.insert("unit", unit);
@@ -593,7 +607,7 @@ impl Sim {
         counts.insert("bullet", bullet);
         counts.insert("player", 0);
         counts.insert("effect", 0);
-        counts.insert("weather", 0);
+        counts.insert("weather", weather);
         counts.insert("power_graph", 0);
         counts.insert("sync", 0);
         counts.insert("draw", 0);
@@ -786,15 +800,12 @@ impl Sim {
                 self.commands_applied = self.commands_applied.wrapping_add(1);
                 return Ok(());
             }
-            SimCommand::Payload { .. } => {
-                // Genuinely blocked: `SimCommand::Payload` is the player
-                // `Payloadc` carrier (multiple payloads; pick up a unit or a
-                // whole building). Plan 11's `PayloadComp` carries only
-                // `capacity`, and plan 08's `PayloadHolder`/`handle_payload` are
-                // the *building*-holder path, not the unit carrier; there is no
-                // reachable pickup/drop runtime to apply against. Reported
-                // explicitly (owner plan 08/11) rather than faked.
-                return Err(CommandError::Unsupported("payload"));
+            SimCommand::Payload { kind, x, y, target } => {
+                // `Payloadc` unit carrier (PAR-0138): pick up a unit/building or
+                // drop the last carried payload. No-op without a player unit.
+                let _ = self.apply_payload_command(*kind, *x, *y, *target);
+                self.commands_applied = self.commands_applied.wrapping_add(1);
+                return Ok(());
             }
             SimCommand::Inventory {
                 kind,
