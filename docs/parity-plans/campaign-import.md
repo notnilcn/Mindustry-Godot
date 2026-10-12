@@ -606,6 +606,20 @@ Pitfall: `sleep` granularity — gmcp calls take ~1 s each; pause the sim
 (`get_node("/root/Spine/SimHost").set_paused(true)`) to freeze a frame if needed.
 Commit: `Fixes PAR-0131: core landing cutscene (zoom, drop-in, fade, announce)`.
 
+**Status 2026-10-12:** **partial** — commit `bdc29ec` (camera zoom slice).
+Landed: `CoreLandAnimator` (160 ticks, `pow3(0.02, 4)`, push-driven
+`set_land_time_in`), tick-correct `Cutscene` clock, `MindCamera2D` owning the
+cutscene with `show_landing`/`is_cutscene`/`get_land_time_in` and replace-scale
+semantics (the plan's "multiply" would end at 4x the normal zoom; Java replaces
+the display scale, `Renderer.java:186,198`), and the `start_sector_with_loadout`
+trigger (`skipcoreanimation`/pvp gated) for fresh and resume. Verified in-engine:
+`cutscene-t1.png` right after `start_sector` shows the far `landZoomFrom 0.02`
+view (core a speck), `cutscene-t2/t3.png` the normal view after 160 ticks;
+`render::cutscene::tests::core_land_animator_zoom_runs_from_to`. **Remainder:**
+the scaled/rotated core drop-in sprite, the white fade overlay, the landing
+announce (`MindUi.announce` seam exists at `ui_host.rs:339`), and hiding the
+real core sprite while `is_cutscene`.
+
 ---
 
 ### F. PAR-0112 — planet-generated sectors have no core / enemy base
