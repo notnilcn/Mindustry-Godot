@@ -861,6 +861,17 @@ This avoids a seam per block.
   rect via `godot_input`, and assert the zoom is unchanged. With the console closed, the
   same event changes the zoom.
 
+**Status 2026-10-12:** done — `InputLocks::any()` (`InputHandler.locked()`); `MindInput`
+mirrors the lock state into `DesktopBridge.locked` and pushes it through the new
+`MindSimHost::set_input_locked` (forcing `player_axis` to zero). Scroll events are skipped when
+the lock is set, when the hovered control sits inside a `ScrollContainer` (`ui_scroll_at`) or when
+the `console`/`chat` HUD fragments are visible (`DesktopInput.java:478`); `DesktopBridge` ignores
+left/right presses and scroll while locked. Tests:
+`input::focus::tests::locks_any_covers_every_variant` (plus the existing `handle_scroll` test).
+In-engine on Ground Zero 170: with the console open a wheel event at the screen centre leaves the
+camera zoom at 4; with the console hidden the same event zooms to 5. Evidence:
+`runs/20261012-session4/PAR-0100-evidence.json`.
+
 ---
 
 ## 10. Broad per-family sweep: known broken or unverified

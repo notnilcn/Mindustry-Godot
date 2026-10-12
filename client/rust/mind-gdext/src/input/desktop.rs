@@ -213,6 +213,9 @@ pub struct DesktopBridge {
     /// A dialog is open (`scene.hasDialog()`): key edges fire no bindings and
     /// the camera does not pan/zoom.
     pub ui_dialog: bool,
+    /// `InputHandler.locked()` mirror (PAR-0100): world clicks and scroll are
+    /// ignored while set.
+    pub locked: bool,
     /// `settings.getBool("commandmodehold", true)`: command mode follows the
     /// held command key when on (upstream default) and toggles on a key press
     /// when off.
@@ -247,6 +250,7 @@ impl DesktopBridge {
             last_tap_type: None,
             text_focus: false,
             ui_dialog: false,
+            locked: false,
             command_mode_hold: true,
         }
     }
@@ -389,9 +393,18 @@ impl DesktopBridge {
             }
             RawEvent::MouseButton { button, down, x, y } => {
                 self.mouse = (x, y);
+                if self.locked && down && (button == "left" || button == "right") {
+                    // `InputHandler.locked()`: world presses are gated off.
+                    return;
+                }
                 self.mouse_button(bindings, &button, down);
             }
-            RawEvent::Scroll { y, .. } => self.scroll(bindings, y),
+            RawEvent::Scroll { y, .. } => {
+                if self.locked {
+                    return;
+                }
+                self.scroll(bindings, y);
+            }
             RawEvent::Magnify { factor } => {
                 if let Some(mut camera) = self.camera.clone() {
                     camera.bind_mut().zoom_by((factor - 1.0) as f64);

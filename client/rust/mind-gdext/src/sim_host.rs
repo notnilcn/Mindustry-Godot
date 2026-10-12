@@ -73,6 +73,9 @@ pub struct MindSimHost {
     /// Monotonic world-load counter (`load_scenario`/`load_sector`), used by the
     /// camera rig to snap on every world load, including same-size reloads.
     world_loads: u64,
+    /// `InputHandler.locked()` mirror (PAR-0100): while set, the player axis is
+    /// forced to zero.
+    input_locked: bool,
     /// Plan-17 `MindFx` sibling (`../MindFx`); the one-way sim→view tick hook.
     fx_host: Option<Gd<Node>>,
     /// Plan-21 relay queue: commands drained and applied at the next tick
@@ -114,6 +117,7 @@ impl INode for MindSimHost {
             content_snapshot: None,
             revision: 0,
             world_loads: 0,
+            input_locked: false,
             fx_host: None,
             pending_commands: VecDeque::new(),
             audio_log: SharedAudioLog::new(),
@@ -1664,11 +1668,25 @@ impl MindSimHost {
     /// is the shared `move_x`/`move_y` axis; with a player unit it drives the
     /// unit instead of the camera (`DesktopInput.updateMovement`).
     fn player_axis(&self) -> (f32, f32) {
+        if self.input_locked {
+            // `InputHandler.locked()`: movement is gated off (PAR-0100).
+            return (0.0, 0.0);
+        }
         let Some(input) = self.input.clone() else {
             return (0.0, 0.0);
         };
         let axis = input.bind().pan_axis();
         (axis.x, axis.y)
+    }
+
+    /// `InputHandler.locked()` push from `MindInput` (PAR-0100): while set, the
+    /// player axis is forced to zero.
+    #[func]
+    pub fn set_input_locked(&mut self, locked: bool) {
+        self.input_locked = locked;
+        if locked {
+            self.sim.set_player_input(0.0, 0.0);
+        }
     }
 
     /// Player unit world position (`Player` mirror) for the camera follow.

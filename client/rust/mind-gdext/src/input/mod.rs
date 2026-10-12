@@ -120,6 +120,13 @@ impl INode for MindInput {
         if needs_state {
             self.bridge.text_focus = self.text_field_focused();
             self.bridge.ui_dialog = dialog_open;
+            let locked = self.locks.any();
+            if self.bridge.locked != locked {
+                self.bridge.locked = locked;
+                if let Some(mut host) = self.bridge.host.clone() {
+                    host.bind_mut().set_input_locked(locked);
+                }
+            }
         }
         for raw in translated {
             // Touch gestures drive the mobile bridge directly (plan-14 mobile
@@ -128,6 +135,20 @@ impl INode for MindInput {
                 continue;
             }
             self.refresh_command_mode_hold(&raw);
+            // `DesktopInput.java:478`: the wheel only zooms while
+            // `!scene.hasScroll()` and no console/chat fragment is shown
+            // (PAR-0100).
+            if let RawEvent::Scroll { .. } = &raw {
+                if self.bridge.locked {
+                    self.mark_input_handled();
+                    continue;
+                }
+                let (mx, my) = self.bridge.mouse;
+                if self.ui_scroll_at(mx, my) || self.console_or_chat_visible() {
+                    self.mark_input_handled();
+                    continue;
+                }
+            }
             // World mouse presses: skip when a STOP-filter `Control` owns the
             // event position (upstream `!Core.scene.hasMouse()`); otherwise
             // consume the event so `MindSimHost::unhandled_input` cannot
@@ -168,6 +189,15 @@ impl INode for MindInput {
         self.last_event_count = pending.len();
         self.bridge.text_focus = self.text_field_focused();
         self.bridge.ui_dialog = self.dialog_open();
+        // `InputHandler.locked()`: the host zeroes the player axis while any
+        // lock is active (PAR-0100).
+        let locked = self.locks.any();
+        if self.bridge.locked != locked {
+            self.bridge.locked = locked;
+            if let Some(mut host) = self.bridge.host.clone() {
+                host.bind_mut().set_input_locked(locked);
+            }
+        }
         for event in pending {
             self.refresh_command_mode_hold(&event);
             self.bridge.handle(&self.bindings, event);
@@ -275,6 +305,58 @@ impl MindInput {
         }
         self.bridge
             .set_command_mode_hold(Self::read_command_mode_hold());
+    }
+
+    /// Whether the control under the point is inside a `ScrollContainer`
+    /// (`Core.scene.hasScroll()`; PAR-0100). Walks the hovered control's
+    /// ancestors, ignoring `mouse_filter`.
+    fn ui_scroll_at(&self, x: f32, y: f32) -> bool {
+        let tree = self.base().get_tree();
+        let root = tree.get_root();
+        let controls = root.find_children_ex("*").owned(false).done();
+        let point = Vector2::new(x, y);
+        for index in (0..controls.len()).rev() {
+            let Some(node) = controls.get(index) else {
+                continue;
+            };
+            let Ok(control) = node.clone().try_cast::<Control>() else {
+                continue;
+            };
+            if !control.is_visible_in_tree() {
+                continue;
+            }
+            if !control.get_global_rect().contains_point(point) {
+                continue;
+            }
+            let mut current: Option<Gd<Node>> = Some(control.upcast());
+            while let Some(node) = current {
+                if node
+                    .clone()
+                    .try_cast::<godot::classes::ScrollContainer>()
+                    .is_ok()
+                {
+                    return true;
+                }
+                current = node.get_parent();
+            }
+        }
+        false
+    }
+
+    /// Whether the console or chat fragment is visible (`consolefrag.shown()`
+    /// / `chatfrag.shown()`; PAR-0100).
+    fn console_or_chat_visible(&self) -> bool {
+        for path in [
+            "../Ui/UiRoot/HudGroup/console",
+            "../Ui/UiRoot/HudGroup/chat",
+        ] {
+            if let Some(fragment) = self.base().try_get_node_as::<Control>(path)
+                && fragment.is_visible_in_tree()
+            {
+                return true;
+            }
+        }
+        false
     }
 
     /// Whether a STOP-filter `Control` owns the given event position
