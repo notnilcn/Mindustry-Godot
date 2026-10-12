@@ -78,6 +78,9 @@ pub struct WeaponDraw {
     pub rotate: bool,
     /// Mirrored mount (`Weapon.flipSprite`).
     pub flip: bool,
+    /// Outline drawn over the body (`Weapon.top`); non-top weapons draw their
+    /// `<name>-outline` sprite under the body (`drawWeaponOutlines`).
+    pub top: bool,
     /// Visual recoil `0..1`.
     pub recoil: f32,
 }
@@ -2136,6 +2139,7 @@ impl MindSimHost {
                                     base_rotation: weapon.base_rotation,
                                     rotate: weapon.rotate,
                                     flip: weapon.flip_sprite,
+                                    top: weapon.top,
                                     recoil: mount.map(|mount| mount.recoil).unwrap_or(0.0),
                                 }
                             })

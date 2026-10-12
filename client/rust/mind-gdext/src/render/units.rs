@@ -191,6 +191,64 @@ impl UnitRenderer {
                 });
                 sprites += 1;
             }
+            // `drawOutline`/`drawWeaponOutlines` (`UnitType.java:1537-1539`):
+            // the unit's own `<name>-outline` (present for modded units with
+            // `alwaysCreateOutline`; vanilla bodies bake the outline into the
+            // region in place) and each non-top weapon's `<weapon>-outline`
+            // sprite (`Weapon.drawOutline`, same mount transform as the shot).
+            if let Some(outline) = self.resolver.find(&format!("{}-outline", unit.name)) {
+                let entry = groups
+                    .entry((bucket, outline.page))
+                    .or_insert((outline.texture.clone(), Vec::new()));
+                entry.1.push(UnitQuad {
+                    cx: unit.x,
+                    cy: unit.y,
+                    w: outline.w * self.sprite_scale,
+                    h: outline.h * self.sprite_scale,
+                    rot: unit.rotation - 90.0,
+                    uv: outline.uv,
+                    color: 0xffff_ffff,
+                });
+                sprites += 1;
+            }
+            for weapon in &unit.weapons {
+                if weapon.top {
+                    continue;
+                }
+                let Some(outline) = self.resolver.find(&format!("{}-outline", weapon.name)) else {
+                    continue;
+                };
+                let (wx, wy, wr) = mind_core::render::unit_draw::weapon_mount_transform(
+                    unit.x,
+                    unit.y,
+                    unit.rotation,
+                    weapon.x,
+                    weapon.y,
+                    weapon.rotate,
+                    weapon.mount_rotation,
+                    weapon.base_rotation,
+                    weapon.recoil,
+                );
+                let [u0, v0, u1, v1] = outline.uv;
+                let uv = if weapon.flip {
+                    [u1, v0, u0, v1]
+                } else {
+                    [u0, v0, u1, v1]
+                };
+                let entry = groups
+                    .entry((bucket, outline.page))
+                    .or_insert((outline.texture.clone(), Vec::new()));
+                entry.1.push(UnitQuad {
+                    cx: wx,
+                    cy: wy,
+                    w: outline.w * self.sprite_scale,
+                    h: outline.h * self.sprite_scale,
+                    rot: wr,
+                    uv,
+                    color: 0xffff_ffff,
+                });
+                sprites += 1;
+            }
             // `drawBody` (`rotation - 90`; the port draws trimmed sizes, which
             // is what Arc's `Draw.rect(region, x, y)` does for centered trims).
             {
