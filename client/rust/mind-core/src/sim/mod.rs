@@ -800,15 +800,12 @@ impl Sim {
                 self.commands_applied = self.commands_applied.wrapping_add(1);
                 return Ok(());
             }
-            SimCommand::Payload { .. } => {
-                // Genuinely blocked: `SimCommand::Payload` is the player
-                // `Payloadc` carrier (multiple payloads; pick up a unit or a
-                // whole building). Plan 11's `PayloadComp` carries only
-                // `capacity`, and plan 08's `PayloadHolder`/`handle_payload` are
-                // the *building*-holder path, not the unit carrier; there is no
-                // reachable pickup/drop runtime to apply against. Reported
-                // explicitly (owner plan 08/11) rather than faked.
-                return Err(CommandError::Unsupported("payload"));
+            SimCommand::Payload { kind, x, y, target } => {
+                // `Payloadc` unit carrier (PAR-0138): pick up a unit/building or
+                // drop the last carried payload. No-op without a player unit.
+                let _ = self.apply_payload_command(*kind, *x, *y, *target);
+                self.commands_applied = self.commands_applied.wrapping_add(1);
+                return Ok(());
             }
             SimCommand::Inventory {
                 kind,

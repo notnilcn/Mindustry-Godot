@@ -254,6 +254,8 @@ pub fn insert_kind_components(
         world.entity_mut(entity).insert(PayloadComp {
             capacity: unit.payload_capacity,
         });
+        // PAR-0138: the unit carrier's payload stack (`PayloadComp.payloads`).
+        world.entity_mut(entity).insert(UnitPayloads::default());
         // Plan 08 frozen API: payload-capable units are holders.
         world.entity_mut(entity).insert(PayloadHolder::default());
         world

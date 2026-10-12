@@ -784,3 +784,113 @@ fn weather_rain_spawns_and_wets_units() {
         "rain applied wet to the ground unit"
     );
 }
+
+/// PAR-0138: a player `mega` picks up an adjacent friendly dagger and drops it
+/// elsewhere (`requestUnitPayload` -> `dropLastPayload`).
+#[test]
+fn mega_picks_up_and_drops_dagger() {
+    use crate::entities::comp::unit::comp::{CarriedPayload, UnitPayloads};
+    let mut sim = live_sim(48);
+    let mega = sim
+        .spawn_player_unit("mega", 1, 100.0, 100.0, 0.0)
+        .expect("mega");
+    let dagger_type = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .unit_id("dagger")
+        .expect("dagger id");
+    let dagger = sim
+        .spawn_live_unit("dagger", 1, 110.0, 100.0, 0.0)
+        .expect("dagger");
+    let seq = sim
+        .ecs
+        .0
+        .get::<crate::ecs::EntitySeq>(dagger)
+        .expect("seq")
+        .0 as i32;
+    assert!(
+        sim.apply_payload_command(0, 0.0, 0.0, Some(seq)),
+        "the dagger is picked up"
+    );
+    assert!(
+        sim.ecs.0.get_entity(dagger).is_err(),
+        "the carried dagger left the world"
+    );
+    let stack = sim.ecs.0.get::<UnitPayloads>(mega).expect("payload stack");
+    assert_eq!(stack.stack.len(), 1, "one carried payload");
+    assert!(matches!(stack.stack[0], CarriedPayload::Unit { .. }));
+
+    // Move the carrier, then drop the payload at the new spot.
+    sim.ecs.0.get_mut::<Pos>(mega).expect("carrier pos").x = 200.0;
+    assert!(
+        sim.apply_payload_command(2, 200.0, 100.0, None),
+        "the payload is dropped"
+    );
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<UnitPayloads>(mega)
+            .map(|payloads| payloads.stack.len()),
+        Some(0),
+        "the stack is empty after the drop"
+    );
+    let dropped = sim.unit_runtime().expect("rt").units.iter().any(|entity| {
+        sim.ecs
+            .0
+            .get::<crate::entities::comp::unit::comp::UnitTypeComp>(*entity)
+            .is_some_and(|comp| comp.type_id == dagger_type)
+    });
+    assert!(dropped, "a dagger exists again at the drop point");
+}
+
+/// PAR-0138: a player `mega` picks up a friendly 1x1 building and places it
+/// back on drop (`requestBuildPayload` -> `dropBlock`).
+#[test]
+fn mega_picks_up_and_drops_building() {
+    use crate::entities::comp::unit::comp::{CarriedPayload, UnitPayloads};
+    let mut sim = live_sim(48);
+    let mega = sim
+        .spawn_player_unit("mega", 1, 100.0, 100.0, 0.0)
+        .expect("mega");
+    let wall = place(&mut sim, 14, 12, "copper-wall", 1);
+    // A point inside the wall tile (tile 14 spans x 112..120, y 96..104).
+    assert!(
+        sim.apply_payload_command(1, 115.0, 99.0, None),
+        "the wall is picked up"
+    );
+    assert!(
+        sim.grid.tiles.get(14, 12).build.is_none(),
+        "the wall left the grid"
+    );
+    assert!(
+        sim.ecs.0.get_entity(wall).is_err(),
+        "the wall entity is gone"
+    );
+    let stack = sim.ecs.0.get::<UnitPayloads>(mega).expect("payload stack");
+    assert_eq!(stack.stack.len(), 1);
+    assert!(matches!(stack.stack[0], CarriedPayload::Build { .. }));
+
+    // Move the carrier and drop: the wall must land on a real tile again.
+    sim.ecs.0.get_mut::<Pos>(mega).expect("carrier pos").x = 200.0;
+    assert!(
+        sim.apply_payload_command(2, 200.0, 100.0, None),
+        "the wall is dropped"
+    );
+    let placed = sim
+        .grid
+        .tiles
+        .array()
+        .iter()
+        .filter(|tile| tile.build.is_some())
+        .count();
+    assert_eq!(placed, 1, "the wall is back on the grid");
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<UnitPayloads>(mega)
+            .map(|payloads| payloads.stack.len()),
+        Some(0),
+        "the stack is empty after the drop"
+    );
+}
