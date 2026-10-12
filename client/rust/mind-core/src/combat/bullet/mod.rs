@@ -574,8 +574,12 @@ pub(crate) fn hit_bullet(
     if create_frags && def.frag_on_hit {
         create_frags_of(ctx, bullet, x, y);
     }
+    // `BulletType.hit` order: frags, puddles, incend, units, splash (Java
+    // `BulletType.java:562-580`). Suppression is not ported.
+    create_puddles(ctx, bullet, x, y);
+    create_incend(ctx, bullet, x, y);
+    create_units(ctx, bullet, x, y);
     create_splash_damage(ctx, bullet, x, y);
-    // createPuddles/createIncend/createUnits/suppression: M3/11.
 }
 
 /// Calls the kind-specific `BulletType.hit` override (or the base pipeline).
@@ -606,6 +610,9 @@ pub(crate) fn despawn_bullet(ctx: &mut CombatCtx<'_>, bullet: Entity) {
     let (x, y) = ctx.pos(bullet).unwrap_or((state.last.0, state.last.1));
     if despawn_hit {
         behavior_hit(ctx, bullet, x, y, false);
+    } else {
+        // `BulletType.despawned`: `createUnits(b, b.x, b.y)` when not a hit.
+        create_units(ctx, bullet, x, y);
     }
     if despawn_effect != crate::content::registries::fx_meta::EffectRef::default() {
         ctx.fx
@@ -718,6 +725,116 @@ fn create_splash_damage(ctx: &mut CombatCtx<'_>, bullet: Entity, x: f32, y: f32)
         def.splash_damage,
         opts,
     );
+}
+
+/// `BulletType.createPuddles` (`BulletType.java:597-604`): deposit `puddleAmount`
+/// puddles of `puddleLiquid` scattered within `puddleRange`.
+fn create_puddles(ctx: &mut CombatCtx<'_>, bullet: Entity, x: f32, y: f32) {
+    let Some(state) = ctx.bullet(bullet) else {
+        return;
+    };
+    let Some(def) = ctx.content.bullet(state.def) else {
+        return;
+    };
+    let (puddles, range, liquid, amount) = (
+        def.puddles,
+        def.puddle_range,
+        def.puddle_liquid,
+        def.puddle_amount,
+    );
+    if puddles <= 0 {
+        return;
+    }
+    for _ in 0..puddles {
+        let px = x + ctx.rng.range(RngStream::Sim, -range, range);
+        let py = y + ctx.rng.range(RngStream::Sim, -range, range);
+        let _ = super::puddles::deposit(
+            ctx.world,
+            &ctx.grid.tiles,
+            ctx.content,
+            WorldGrid::to_tile(px) as i16,
+            WorldGrid::to_tile(py) as i16,
+            liquid,
+            amount,
+            ctx.rng,
+        );
+    }
+}
+
+/// `BulletType.createIncend` (`BulletType.java:591-595`) via
+/// `Damage.createIncend` (`Damage.java:135-144`): chance-gated fires scattered
+/// within `incendSpread`.
+fn create_incend(ctx: &mut CombatCtx<'_>, bullet: Entity, x: f32, y: f32) {
+    let Some(state) = ctx.bullet(bullet) else {
+        return;
+    };
+    let Some(def) = ctx.content.bullet(state.def) else {
+        return;
+    };
+    let (chance, amount, spread) = (def.incend_chance, def.incend_amount, def.incend_spread);
+    if chance <= 0.0 || !ctx.rng.chance(RngStream::Sim, chance as f64) {
+        return;
+    }
+    for _ in 0..amount.max(0) {
+        let px = x + ctx.rng.range(RngStream::Sim, -spread, spread);
+        let py = y + ctx.rng.range(RngStream::Sim, -spread, spread);
+        let (tx, ty) = (WorldGrid::to_tile(px), WorldGrid::to_tile(py));
+        if ctx.grid.tiles.in_bounds(tx, ty) {
+            let _ = super::fires::create(ctx.world, tx as i16, ty as i16, ctx.rng);
+        }
+    }
+}
+
+/// `BulletType.createUnits` (`BulletType.java:638-647`): spawn
+/// `despawnUnitCount` units of `despawnUnit` scattered within
+/// `despawnUnitRadius`, facing outward or along the bullet rotation.
+fn create_units(ctx: &mut CombatCtx<'_>, bullet: Entity, x: f32, y: f32) {
+    let Some((def_id, rotation)) = ctx.bullet(bullet).map(|state| (state.def, state.rotation))
+    else {
+        return;
+    };
+    let Some(def) = ctx.content.bullet(def_id) else {
+        return;
+    };
+    let Some(unit_id) = def.despawn_unit else {
+        return;
+    };
+    if def.despawn_unit_count <= 0
+        || !ctx
+            .rng
+            .chance(RngStream::Sim, def.despawn_unit_chance as f64)
+    {
+        return;
+    }
+    let Some(udef) = ctx.content.unit(unit_id) else {
+        return;
+    };
+    let (count, radius, face_outwards, team) = (
+        def.despawn_unit_count,
+        def.despawn_unit_radius,
+        def.face_outwards,
+        ctx.team(bullet),
+    );
+    for _ in 0..count {
+        // `Tmp.v1.rnd(Mathf.random(despawnUnitRadius))`.
+        let len = ctx.rng.range(RngStream::Sim, 0.0, radius);
+        let angle = ctx.rng.range(RngStream::Sim, 0.0, 360.0);
+        let rad = angle.to_radians();
+        let (sx, sy) = (x + rad.cos() * len, y + rad.sin() * len);
+        let spawn_rotation = if face_outwards { angle } else { rotation };
+        let seq = *ctx.seq;
+        *ctx.seq = seq.wrapping_add(1);
+        let entity = crate::entities::comp::unit::lifecycle::spawn_unit_def(
+            ctx.world,
+            seq,
+            udef,
+            team,
+            sx,
+            sy,
+            spawn_rotation,
+        );
+        ctx.world.entity_mut(entity).insert(spawn::SpawnedByBullet);
+    }
 }
 
 /// Resolves bullet-vs-world collision for one bullet (`BulletComp.tileRaycast`).

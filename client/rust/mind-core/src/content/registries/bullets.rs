@@ -405,6 +405,14 @@ pub struct BulletDef {
     pub spawn_unit: Option<UnitTypeId>,
     /// Unit spawned on despawn.
     pub despawn_unit: Option<UnitTypeId>,
+    /// Number of `despawn_unit`s spawned (`BulletType.despawnUnitCount`, 1).
+    pub despawn_unit_count: i32,
+    /// Chance of spawning `despawn_unit`s (`BulletType.despawnUnitChance`, 1).
+    pub despawn_unit_chance: f32,
+    /// Scatter radius for `despawn_unit` spawns (`despawnUnitRadius`, 0.1).
+    pub despawn_unit_radius: f32,
+    /// Face spawned units outward (`BulletType.faceOutwards`, false).
+    pub face_outwards: bool,
     /// Suppression field range (`<0` disables).
     pub suppression_range: f32,
     /// Suppression status duration.
@@ -716,6 +724,10 @@ impl BulletDef {
             puddle_liquid: LiquidId::WATER,
             spawn_unit: None,
             despawn_unit: None,
+            despawn_unit_count: 1,
+            despawn_unit_chance: 1.0,
+            despawn_unit_radius: 0.1,
+            face_outwards: false,
             suppression_range: -1.0,
             suppression_duration: 60.0 * 8.0,
             suppression_effect_chance: 50.0,
@@ -940,7 +952,20 @@ impl BulletDef {
                 bullet.height = 10.0;
                 bullet.collides_ground = false;
             }
-            BulletKind::Explosion => {}
+            BulletKind::Explosion => {
+                // `ExplosionBulletType()` initializer (`ExplosionBulletType.java:20-31`):
+                // a non-drawing bullet that explodes and disappears instantly.
+                bullet.hittable = false;
+                bullet.lifetime = 1.0;
+                bullet.speed = 0.0;
+                bullet.range_override = 20.0;
+                bullet.shoot_effect = EffectRef::Named(EffectId::MASSIVE_EXPLOSION);
+                bullet.instant_disappear = true;
+                bullet.scaled_splash_damage = true;
+                bullet.kill_shooter = true;
+                bullet.collides = false;
+                bullet.keep_velocity = false;
+            }
             BulletKind::Rail => {
                 // `RailBulletType()` constructor.
                 bullet.speed = 0.0;

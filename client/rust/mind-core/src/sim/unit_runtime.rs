@@ -30,6 +30,7 @@ use crate::ai::controller::{AiKind, ControllerSlot};
 use crate::ai::pathfinder::Pathfinder;
 use crate::ai::types::flying::update_flying;
 use crate::ai::types::ground::update_ground;
+use crate::ai::types::missile::{MissileAi, MissileShooter, update_missile};
 use crate::ai::types::player::PlayerInput;
 use crate::ai::wave_spawner::WaveSpawner;
 use crate::audio::AudioSinkRes;
@@ -39,7 +40,7 @@ use crate::combat::view::{FxHandle, noop_fx};
 use crate::content::{BlockKind, ContentRegistry, UnitTypeId};
 use crate::determinism::{Checksum, Checksummer, SimRng};
 use crate::ecs::{BuildingComp, EntitySeq};
-use crate::entities::comp::unit::comp::{PhysicsComp, UnitCore, UnitTypeComp};
+use crate::entities::comp::unit::comp::{PhysicsComp, TimedKillComp, UnitCore, UnitTypeComp};
 use crate::entities::comp::unit::lifecycle::{spawn_unit, spawn_unit_def, sync_weapon_state};
 use crate::entities::comp::unit::movement;
 use crate::entities::comp::{Building, Health, Pos, TeamComp};
@@ -306,6 +307,70 @@ impl UnitRuntime {
     }
 }
 
+/// `UnitComp.destroy()` shoot-on-death half (`UnitComp.java:910-919`): every
+/// mount whose weapon has `shootOnDeath` and is not gated by
+/// `killShooter && totalShots > 0` fires once before the unit is removed.
+fn run_shoot_on_death(world: &mut World, runtime: &mut UnitRuntime, entity: Entity) {
+    sync_weapon_state(world, entity);
+    let state = world
+        .get::<crate::weapons::UnitState>(entity)
+        .copied()
+        .unwrap_or_default();
+    let Some(mut weapons) = world.entity_mut(entity).take::<UnitWeapons>() else {
+        return;
+    };
+    let UnitRuntime {
+        content,
+        grid,
+        rng,
+        fx,
+        seq,
+        ..
+    } = runtime;
+    let audio = world
+        .remove_resource::<AudioSinkRes>()
+        .unwrap_or_else(AudioSinkRes::noop);
+    let mut spawned: Vec<Entity> = Vec::new();
+    {
+        let mut ctx = CombatCtx {
+            world,
+            content,
+            grid,
+            rng,
+            fx: fx.as_ref(),
+            audio: &audio,
+            seq,
+            spawned: &mut spawned,
+        };
+        for i in 0..weapons.weapons.len() {
+            if i >= weapons.mounts.len() {
+                break;
+            }
+            if !weapons.weapons[i].shoot_on_death {
+                continue;
+            }
+            if weapons.weapons[i].bullet.kill_shooter && weapons.mounts[i].total_shots > 0 {
+                continue;
+            }
+            weapons.mounts[i].reload = 0.0;
+            weapons.mounts[i].shoot = true;
+            crate::weapons::update_weapon(
+                &mut ctx,
+                entity,
+                &state,
+                &weapons.weapons,
+                &mut weapons.mounts,
+                &mut weapons.pending,
+                i,
+            );
+        }
+    }
+    world.insert_resource(audio);
+    runtime.bullets_created += spawned.len() as u64;
+    runtime.bullets.extend(spawned);
+    world.entity_mut(entity).insert(weapons);
+}
+
 impl Sim {
     /// Death resolution after the entity pass (`HealthComp.damage` ->
     /// `kill()`): live units at zero health are killed through their death
@@ -330,6 +395,9 @@ impl Sim {
                 })
                 .collect();
             for entity in dead {
+                // `UnitComp.destroy()` fires `shootOnDeath` mounts first
+                // (PAR-0088); spawned bullets join the live list.
+                run_shoot_on_death(world, &mut runtime, entity);
                 let UnitRuntime {
                     content,
                     grid,
@@ -432,6 +500,10 @@ impl Sim {
 
     /// Installs the live unit runtime over a prebuilt content registry.
     pub fn install_unit_runtime_from(&mut self, content: ContentRegistry) {
+        // The content-backed status applier must exist before anything can
+        // apply a status (`StatusApplier` resource; NEW-1): install it while
+        // the registry is still owned here, then move it into the runtime.
+        crate::combat::damage::status::install_status_applier(&mut self.ecs.0, &content);
         let wave_team = crate::game::rules::Rules::default().wave_team;
         let runtime = UnitRuntime::new(content, &self.grid, wave_team);
         self.ecs.0.insert_non_send(runtime);
@@ -673,6 +745,38 @@ pub fn unit_update_system(world: &mut World) {
                     }
                 }
             }
+        } else if slot.kind == AiKind::Missile {
+            // `MissileAI.updateMovement` (live dispatch, PAR-0088): steer at
+            // the shooter's aim, always move forward, die on enemy-building
+            // contact or at the `TimedKill` lifetime.
+            let shooter = world
+                .get::<MissileShooter>(entity)
+                .map(|shooter| shooter.0)
+                .unwrap_or(None);
+            let mut state = MissileAi {
+                unit: Some(entity),
+                target: None,
+                shooter,
+            };
+            {
+                let UnitRuntime {
+                    content,
+                    grid,
+                    pathfinder,
+                    ..
+                } = &mut runtime;
+                let mut ctx = crate::ai::ai_controller::AiCtx {
+                    world,
+                    grid,
+                    content,
+                    pathfinder,
+                    team,
+                };
+                let _ = update_missile(&mut ctx, entity, &mut state);
+            }
+            if let Some(mut stored) = world.get_mut::<MissileShooter>(entity) {
+                stored.0 = state.shooter;
+            }
         } else {
             // `GroundAI.updateMovement`/`FlyingAI`: pick a core/building anchor
             // and an in-range mount target. Spawned wave units have no command,
@@ -710,6 +814,20 @@ pub fn unit_update_system(world: &mut World) {
             };
             let _ =
                 movement::update_kinematics(world, &runtime.grid, &runtime.content, entity, delta);
+
+            // `TimedKillComp.update`: `time = min(time + delta, lifetime)`;
+            // at the lifetime the unit is marked dead and `resolve_deaths`
+            // runs the normal kill path (including `shootOnDeath`).
+            if let Some(mut timed) = world.get_mut::<TimedKillComp>(entity) {
+                timed.time = (timed.time + 1.0).min(timed.lifetime);
+                if timed.lifetime > 0.0
+                    && timed.time >= timed.lifetime
+                    && let Some(mut health) = world.get_mut::<Health>(entity)
+                {
+                    health.health = 0.0;
+                    health.dead = true;
+                }
+            }
         }
     }
 
@@ -746,9 +864,36 @@ pub fn unit_update_system(world: &mut World) {
         crate::weapons::update_weapons(&mut ctx);
     }
     world.insert_resource(audio);
+    // Units spawned by `spawnUnit` bullets bypass `spawned` (no bullet entity).
+    adopt_spawned_units(world, &mut runtime);
     runtime.bullets_created += spawned.len() as u64;
     runtime.bullets.extend(spawned);
     world.insert_non_send(runtime);
+}
+
+/// Adopts units spawned by `spawnUnit` bullets (`BulletType.create` returns no
+/// bullet for them, so the bullet drain cannot see them) into the live unit
+/// list. Call after any pass that can create bullets; ordering is
+/// `(EntitySeq, entity.index())`.
+fn adopt_spawned_units(world: &mut World, runtime: &mut UnitRuntime) {
+    let mut found: Vec<(u64, Entity)> = world
+        .iter_entities()
+        .filter(|entity| entity.contains::<crate::combat::bullet::spawn::SpawnedByBullet>())
+        .map(|entity| {
+            (
+                entity.get::<EntitySeq>().map_or(u64::MAX, |seq| seq.0),
+                entity.id(),
+            )
+        })
+        .collect();
+    found.sort_unstable_by_key(|(seq, entity)| (*seq, entity.index()));
+    for (_, entity) in found {
+        world
+            .entity_mut(entity)
+            .remove::<crate::combat::bullet::spawn::SpawnedByBullet>();
+        runtime.units.push(entity);
+        runtime.units_created += 1;
+    }
 }
 
 /// `EntitySet::UpdateBuildings` turret half: `Turret.TurretBuild.updateTile`
@@ -784,6 +929,8 @@ pub fn turret_update_system(world: &mut World) {
         crate::world::blocks::defense::turrets::update_turrets(&mut ctx);
     }
     world.insert_resource(audio);
+    // Units spawned by `spawnUnit` bullets bypass `spawned` (no bullet entity).
+    adopt_spawned_units(world, &mut runtime);
     runtime.bullets_created += spawned.len() as u64;
     runtime.bullets.extend(spawned);
     world.insert_non_send(runtime);
@@ -844,6 +991,8 @@ pub fn bullet_update_system(world: &mut World) {
         *bullets = alive;
     }
     world.insert_resource(audio);
+    // Units spawned by `spawnUnit` bullets bypass `spawned` (no bullet entity).
+    adopt_spawned_units(world, &mut runtime);
     runtime.bullets_created += spawned.len() as u64;
     runtime.bullets.extend(spawned);
     world.insert_non_send(runtime);
@@ -910,6 +1059,8 @@ pub fn bullet_collide_system(world: &mut World) {
         *bullets = alive;
     }
     world.insert_resource(audio);
+    // Units spawned by `spawnUnit` bullets bypass `spawned` (no bullet entity).
+    adopt_spawned_units(world, &mut runtime);
     runtime.bullets_created += spawned.len() as u64;
     runtime.bullets.extend(spawned);
     world.insert_non_send(runtime);

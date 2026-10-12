@@ -276,9 +276,11 @@ pub fn insert_kind_components(
             .insert(UnitTetherComp { spawner: None });
     }
     if has(UnitComponent::TimedKill) {
+        // `TimedKillComp.lifetime` comes from `UnitType.lifetime` (MissileUnitType
+        // defaults to `60 * 1.7`); `time` counts up to it (`TimedKillComp.update`).
         world.entity_mut(entity).insert(TimedKillComp {
             time: 0.0,
-            lifetime: 0.0,
+            lifetime: unit.lifetime,
         });
     }
     if has(UnitComponent::TargetDummy) {
