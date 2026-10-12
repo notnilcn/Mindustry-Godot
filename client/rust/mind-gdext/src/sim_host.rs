@@ -21,6 +21,10 @@ use godot::prelude::*;
 use crate::camera::MindCamera2D;
 use crate::input::MindInput;
 use crate::settings;
+
+/// One belt slot as the renderer consumes it: `(item, xs, ys)` (`Conveyor.draw`
+/// item loop; `ConveyorBuild.ids/xs/ys`).
+pub type BeltItemSlot = (ItemId, f32, f32);
 use mind_core::audio::{AudioSinkRes, SharedAudioLog};
 use mind_core::command::Command;
 use mind_core::content::{
@@ -2032,6 +2036,29 @@ impl MindSimHost {
         Vec::new()
     }
 
+    /// Belt items at `(x, y)`: `(rotation, [(item, xs, ys); len])` for a
+    /// `Conveyor`/`ArmoredConveyor` (`Conveyor.draw` item loop). `None` when
+    /// the tile holds no belt. Rust-only seam for the block renderer.
+    pub fn conveyor_items(&self, x: i32, y: i32) -> Option<(u8, Vec<BeltItemSlot>)> {
+        let entity = self.sim.grid.tile(x, y).build?;
+        let rot = self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::ecs::BuildingComp>(entity)?
+            .rot;
+        let belt = self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::world::blocks::distribution::ConveyorBuild>(entity)?;
+        let mut items = Vec::with_capacity(belt.len as usize);
+        for i in 0..belt.len as usize {
+            items.push((belt.ids[i], belt.xs[i], belt.ys[i]));
+        }
+        Some((rot, items))
+    }
+
     /// Building rotation (`Building.rotation`, quarter turns) at `(x, y)`;
     /// `0` without a building. Rust-only seam for rotated block sprites.
     pub fn building_rotation(&self, x: i32, y: i32) -> u8 {
@@ -2076,10 +2103,24 @@ impl MindSimHost {
             .unwrap_or_else(|| "?".into());
         let kind = def.map(|def| format!("{:?}", def.kind)).unwrap_or_default();
         let sim_name = self.sim.block_name_of(tile.block);
+        let floor = self
+            .content_snapshot
+            .as_ref()
+            .and_then(|c| c.block(tile.floor))
+            .map(|def| def.name.clone())
+            .unwrap_or_default();
+        let overlay = self
+            .content_snapshot
+            .as_ref()
+            .and_then(|c| c.block(tile.overlay))
+            .map(|def| def.name.clone())
+            .unwrap_or_default();
         d.set("raw", &(tile.block.raw() as i64).to_variant());
         d.set("name", &GString::from(name.as_str()).to_variant());
         d.set("kind", &GString::from(kind.as_str()).to_variant());
         d.set("sim_name", &GString::from(sim_name.as_str()).to_variant());
+        d.set("floor", &GString::from(floor.as_str()).to_variant());
+        d.set("overlay", &GString::from(overlay.as_str()).to_variant());
         d.set("has_build", &tile.build.is_some().to_variant());
         d.set(
             "construct",

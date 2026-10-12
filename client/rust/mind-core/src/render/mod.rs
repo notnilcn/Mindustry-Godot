@@ -15,6 +15,7 @@ pub mod block_cache;
 pub mod block_sprite;
 pub mod bloom;
 pub mod commands;
+pub mod conveyor_items;
 pub mod cutscene;
 pub mod draw;
 pub mod draw_desc;
@@ -49,6 +50,7 @@ pub use block_cache::BuildingCacheGrid;
 pub use block_sprite::block_region_candidates;
 pub use bloom::{capture_z as bloom_capture_z, render_z as bloom_render_z};
 pub use commands::{Blend, CommandBuffer, DrawCmd, FillKind, LineKind, ShapeKind};
+pub use conveyor_items::{belt_item_positions, trns as trns_vec};
 pub use cutscene::{Cutscene, LaunchAnimator};
 pub use draw::{
     Blending, DrawPrim, DrawProgram, GPUPARTICLES_THRESHOLD, MAX_DRAW_CALLS_TARGET,
