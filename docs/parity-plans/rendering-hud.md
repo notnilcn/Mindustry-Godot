@@ -249,6 +249,8 @@ for(int i = 0; i < len; i++){
 **Verify.** `get_stats().dynamic_sprites` increases by the number of belt items; screenshot shows icons.
 **Pitfalls.** Item ids → names need the content registry (`content.item(id)`); the band for items is `Layer.block - 0.1` which is the same `Layer::Block` band — order inside the mesh decides overlap.
 
+**Status 2026-10-12:** done — commit `4c813b0`. `belt_item_positions` + the `conveyor_items` seam; item quads draw above the belt and the pass rebuilds while items are visible. Verified with a drill on `ore-copper` feeding a nine-belt line (`par0130-n1.png` vs `par0130-n3.png`). Duct/stack-conveyor items not done (their `current`/segment state is separate); belt frame animation (`regions[b][frame]`) still static frame 0.
+
 ---
 
 ### 3.3 Hover info (ore "Copper" popup) + PAR-0094 block info panel
