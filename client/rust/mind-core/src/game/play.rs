@@ -310,13 +310,27 @@ pub fn apply_sector_preset_rules(
     applied
 }
 
+/// Whether `Logic.play`'s starting-items half applies the launch loadout to the
+/// default team's core (`Logic.java:277`), extended with the port's launcher
+/// launch (see [`apply_launch_loadout`]).
+pub fn launch_loadout_applies(session: &PlaySession) -> bool {
+    !session.is_campaign()
+        || !session.allow_launch_loadout
+        || !session.rules.loadout.is_empty()
+        || session.add_starting_items
+}
+
 /// `Logic.play` starting-items half: clear the default team's core inventory
 /// and add the launch loadout. Core storage capacity is a plan-08/11 runtime
 /// concern here, so the add is unbounded.
 pub fn apply_launch_loadout(session: &mut PlaySession, registry: &ContentRegistry) {
-    let condition =
-        !session.is_campaign() || !session.allow_launch_loadout || session.add_starting_items;
-    if !condition {
+    // `Logic.play`'s condition (`Logic.java:277`) covers custom games,
+    // planets that disallow launch loadouts and presets that add starting
+    // items. Java's launcher launch applies the chosen loadout through the
+    // generator (`Schematics.placeLaunchLoadout`); the port has no generator
+    // loadout seam yet, so an explicit non-empty `rules.loadout` (set by
+    // `start_sector_with_loadout`) rides this path instead (PAR-0085).
+    if !launch_loadout_applies(session) {
         return;
     }
     let team = TeamId(session.default_team());
@@ -760,6 +774,46 @@ mod tests {
         // Planet/campaign fold applied.
         assert_eq!(session.rules.planet, "serpulo");
         assert_eq!(session.difficulty_wave_time_multiplier, 1.0);
+    }
+
+    #[test]
+    fn apply_launch_loadout_fills_core_with_stacks() {
+        use crate::io::json::content_serde::JsonItemStack;
+
+        let registry = content();
+        let planet = registry.planet_id("serpulo").unwrap();
+        let sector_id = registry.sector_by_name("groundZero").unwrap().sector;
+        let mut session = PlaySession::new(Rules::default());
+        session.sector = Some((planet, sector_id));
+        session.allow_launch_loadout = true;
+        session.rules.loadout = vec![
+            JsonItemStack {
+                item: Some("copper".to_owned()),
+                amount: 300,
+            },
+            JsonItemStack {
+                item: Some("lead".to_owned()),
+                amount: 200,
+            },
+        ];
+        let rules = session.rules.clone();
+        let team = TeamId(session.default_team());
+        let core = bevy_ecs::entity::Entity::from_raw_u32(77).expect("test entity");
+        session.teams.register_core(core, team, &rules);
+        assert!(
+            session
+                .teams
+                .get_or_null(team)
+                .is_some_and(|data| data.core().is_some()),
+            "core is registered before the launch loadout"
+        );
+
+        apply_launch_loadout(&mut session, &registry);
+
+        let items = session.teams.team_items(team).expect("team inventory");
+        assert_eq!(items.get(registry.item_id("copper").unwrap()), 300);
+        assert_eq!(items.get(registry.item_id("lead").unwrap()), 200);
+        assert_eq!(items.total(), 500, "exactly the launch loadout");
     }
 
     #[test]

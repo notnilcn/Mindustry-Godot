@@ -1457,9 +1457,39 @@ func _on_sector_select_chosen(sector_id: int) -> void:
 	_open_launch_loadout(_selected_planet, sector_id)
 
 
+## The loadout row for a `Schematics.all` index, or `{}`.
+func _find_loadout_row(index: int) -> Dictionary:
+	for loadout_variant in campaign_section("loadouts"):
+		var loadout: Dictionary = loadout_variant
+		if int(loadout.get("index", -1)) == index:
+			return loadout
+	return {}
+
+
+## `PlanetDialog.playSelected`: the chosen schematic's requirements merged with
+## `universe.getLaunchResources()` (sum per item) as `[{item, amount}]` stacks.
+func _loadout_launch_stacks(row: Dictionary) -> Array:
+	var totals: Dictionary = {}
+	for requirement in row.get("requirements", []):
+		var item := str(requirement[0])
+		totals[item] = int(totals.get(item, 0)) + int(requirement[1])
+	var campaign := campaign_node()
+	if campaign != null and campaign.has_method("get_launch_resource_stacks"):
+		var parsed: Variant = JSON.parse_string(str(campaign.call("get_launch_resource_stacks")))
+		if parsed is Dictionary:
+			for item in parsed:
+				var name := str(item)
+				totals[name] = int(totals.get(name, 0)) + int(parsed[item])
+	var stacks: Array = []
+	for item in totals:
+		stacks.append({"item": str(item), "amount": int(totals[item])})
+	return stacks
+
+
 ## Enters the sector. `resume` uses the existing-base path
-## (`Control.playSector`; WS2 contract) and `loadout` selects the launch
-## schematic (`universe.updateLoadout`; WS2 contract).
+## (`Control.playSector`); `loadout >= 0` is a launcher launch with the chosen
+## schematic's requirements + launch resources (`PlanetDialog.playSelected`);
+## `loadout < 0` is the free launch (`universe.clearLoadoutInfo`).
 func _launch(planet_name: String, sector_id: int, loadout: int = -1, resume: bool = false) -> void:
 	if sector_id < 0:
 		return
@@ -1474,13 +1504,31 @@ func _launch(planet_name: String, sector_id: int, loadout: int = -1, resume: boo
 	if campaign != null:
 		if resume and campaign.has_method("play_sector"):
 			started = bool(campaign.call("play_sector", planet_name, sector_id))
+		elif loadout >= 0 and campaign.has_method("start_sector_with_loadout"):
+			# `PlanetDialog.playSelected` launcher branch (PAR-0085): the chosen
+			# schematic's build cost plus `universe.getLaunchResources()` is
+			# removed from the launcher sector and stocked into the new core.
+			var row := _find_loadout_row(loadout)
+			var stacks := _loadout_launch_stacks(row)
+			var launcher := _find_launcher(planet_name)
+			if not launcher.is_empty():
+				campaign.call(
+					"remove_sector_items",
+					planet_name,
+					int(launcher.get("id", -1)),
+					JSON.stringify(stacks)
+				)
+			started = bool(campaign.call(
+				"start_sector_with_loadout",
+				planet_name,
+				sector_id,
+				JSON.stringify({"core": str(row.get("core", "")), "stacks": stacks})
+			))
 		elif campaign.has_method("start_sector"):
-			# `MindCampaign.start_sector(planet, sector)` takes no loadout
-			# parameter, and `start_sector_with_loadout` expects item-stack JSON
-			# the dialog does not build yet. Launch without the selection instead
-			# of calling a 3-arg `start_sector` (that `callv` errored with
-			# "function has 2 parameters" and tripped break-on-error, pausing the
-			# game even though the fallback then started the sector).
+			# Free launch with no launcher: `universe.clearLoadoutInfo()` then
+			# `control.playSector(sector)` (PAR-0085/PAR-0054).
+			if campaign.has_method("clear_loadout_info"):
+				campaign.call("clear_loadout_info")
 			started = bool(campaign.call("start_sector", planet_name, sector_id))
 	_close()
 	if started:

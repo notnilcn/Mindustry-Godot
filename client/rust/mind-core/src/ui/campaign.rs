@@ -268,6 +268,9 @@ pub struct LoadoutView {
     pub tiles: usize,
     /// Total requirement cost `(item name, amount)`.
     pub requirements: Vec<(String, i32)>,
+    /// On-disk file name when loaded from disk
+    /// (`Universe.updateLoadout`'s `schem.file`; `None` for vanilla loadouts).
+    pub file: Option<String>,
 }
 
 /// `CampaignCompleteDialog` view model.
@@ -944,6 +947,7 @@ pub fn loadout_views(
                 height: schematic.height,
                 tiles: schematic.tiles.len(),
                 requirements: requirement_pairs(registry, &schematic.requirements(registry)),
+                file: schematic.file.clone(),
             })
         })
         .collect()

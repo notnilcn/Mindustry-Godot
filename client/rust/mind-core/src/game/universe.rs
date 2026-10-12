@@ -788,6 +788,34 @@ mod tests {
     }
 
     #[test]
+    fn update_loadout_persists_key() {
+        let mut settings = SettingsStore::new();
+        let mut universe = Universe::new();
+        // `Universe.updateLoadout(block, schem)`: `lastloadout-<core>` records
+        // the schematic's file name (`Universe.java:124-127`).
+        universe.update_loadout(&mut settings, "core-shard", Some("big"));
+        assert_eq!(settings.get_string("lastloadout-core-shard", ""), "big");
+        assert_eq!(universe.get_loadout(&settings, "core-shard"), "big");
+        // A file-less schematic records the empty string (Java `schem.file == null`).
+        universe.update_loadout(&mut settings, "core-shard", None);
+        assert_eq!(settings.get_string("lastloadout-core-shard", ""), "");
+        // `clearLoadoutInfo` drops the key and the launch-resource sequence.
+        universe.update_loadout(&mut settings, "core-shard", Some("big"));
+        universe
+            .update_launch_resources(&mut settings, vec![1, 2, 3])
+            .unwrap();
+        universe.clear_loadout_info(&mut settings);
+        assert_eq!(settings.get_string("lastloadout-core-shard", ""), "");
+        assert!(
+            settings
+                .get_json::<Vec<i32>>(KEY_LAUNCH_RESOURCES)
+                .unwrap()
+                .is_none(),
+            "launch-resources-seq removed"
+        );
+    }
+
+    #[test]
     fn load_all_restores_sector_info() {
         let (registry, mut campaign, planet) = serpulo();
         let mut settings = SettingsStore::new();

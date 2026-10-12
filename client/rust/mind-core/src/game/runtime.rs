@@ -311,7 +311,7 @@ pub fn sync_session_with_sim(
         // there (`entity.items.clear()` + `items.add`); the live core module is
         // the authoritative store (`Team.items()`/`Sector.items()` while
         // playing), so mirror the loadout into it as well.
-        if !session.is_campaign() || !session.allow_launch_loadout || session.add_starting_items {
+        if super::play::launch_loadout_applies(session) {
             for (entity, team, capacity) in &cores {
                 if *team != default_team {
                     continue;

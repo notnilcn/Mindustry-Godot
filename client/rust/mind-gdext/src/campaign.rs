@@ -583,8 +583,8 @@ impl MindCampaign {
             );
         }
 
-        // Optional launch loadout (GAP-10). A campaign launch without an
-        // explicit loadout carries an EMPTY loadout: the `Rules` default
+        // Optional launch loadout (`GAP-10`/PAR-0085). A campaign launch without
+        // an explicit loadout carries an EMPTY loadout: the `Rules` default
         // (`copper x100`) is the custom-game default and must not stock a
         // campaign core. Java's reference Ground Zero resume save stores
         // `loadout:[]` (runs/20261009-065416-ref-ground-zero/checkpoints/
@@ -593,10 +593,7 @@ impl MindCampaign {
         // add nothing (PAR-0056).
         if loadout_json.to_string().trim().is_empty() {
             self.session.rules.loadout.clear();
-        } else if let Ok(stacks) = serde_json::from_str::<
-            Vec<mind_core::io::json::content_serde::JsonItemStack>,
-        >(&loadout_json.to_string())
-        {
+        } else if let Some(stacks) = parse_loadout_stacks(&loadout_json.to_string()) {
             self.session.rules.loadout = stacks;
         }
 
@@ -2100,6 +2097,36 @@ impl MindCampaign {
         out
     }
 
+    /// `Universe.getLaunchResources` as a `{item name: amount}` JSON object for
+    /// the launch dialogs (`LaunchLoadoutDialog` merges it with the schematic
+    /// requirements; PAR-0085). Only nonzero entries are reported.
+    #[func]
+    pub fn get_launch_resource_stacks(&mut self) -> GString {
+        let resources = self
+            .campaign
+            .as_mut()
+            .map(|campaign| {
+                campaign
+                    .universe
+                    .get_launch_resources(&self.settings)
+                    .to_vec()
+            })
+            .unwrap_or_default();
+        let Some(registry) = self.registry.as_ref() else {
+            return GString::from("{}");
+        };
+        let mut out = serde_json::Map::new();
+        for (index, item) in registry.items().iter().enumerate() {
+            let Some(amount) = resources.get(index).copied() else {
+                break;
+            };
+            if amount > 0 {
+                out.insert(item.name.clone(), serde_json::json!(amount));
+            }
+        }
+        GString::from(serde_json::Value::Object(out).to_string().as_str())
+    }
+
     /// `Universe.updateLaunchResources` from a JSON `[n, ...]` sequence.
     #[func]
     pub fn update_launch_resources_json(&mut self, json: GString) -> bool {
@@ -2142,6 +2169,55 @@ impl MindCampaign {
         campaign
             .universe
             .update_loadout(&mut self.settings, &core.to_string(), file_name);
+        self.persist();
+        true
+    }
+
+    /// `Universe.clearLoadoutInfo`: a free launch (no launcher sector) drops
+    /// the stored loadout + launch resources (`PlanetDialog.playSelected`).
+    #[func]
+    pub fn clear_loadout_info(&mut self) -> bool {
+        let Some(campaign) = self.campaign.as_mut() else {
+            return false;
+        };
+        campaign.universe.clear_loadout_info(&mut self.settings);
+        self.persist();
+        true
+    }
+
+    /// `Sector.removeItems`: subtracts `[{item, amount}]` stacks from a
+    /// sector's stored items (clamped at 0) and persists (PAR-0085 launch
+    /// cost, applied to the launcher sector before the launch).
+    #[func]
+    pub fn remove_sector_items(
+        &mut self,
+        planet: GString,
+        sector: i32,
+        stacks_json: GString,
+    ) -> bool {
+        if sector < 0 {
+            return false;
+        }
+        let Ok(stacks) = serde_json::from_str::<
+            Vec<mind_core::io::json::content_serde::JsonItemStack>,
+        >(&stacks_json.to_string()) else {
+            return false;
+        };
+        let planet_name = planet.to_string();
+        let Some(campaign) = self.campaign.as_mut() else {
+            return false;
+        };
+        let Some(planet_id) = campaign.planet_id_by_name(&planet_name) else {
+            return false;
+        };
+        let Some(record) = campaign.sector_mut(planet_id, sector as u16) else {
+            return false;
+        };
+        record.remove_items(
+            stacks
+                .iter()
+                .filter_map(|stack| stack.item.clone().map(|item| (item, stack.amount))),
+        );
         self.persist();
         true
     }
@@ -2428,6 +2504,17 @@ fn sanitize_slot_name(name: &str) -> String {
     name.chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_' || *c == '.')
         .collect()
+}
+
+/// Parses a launch-loadout payload: the dialog envelope
+/// `{"core": ..., "stacks": [...]}` (`PlanetDialog.playSelected`) or the legacy
+/// bare `[{item, amount}]` array.
+fn parse_loadout_stacks(
+    json: &str,
+) -> Option<Vec<mind_core::io::json::content_serde::JsonItemStack>> {
+    let value: serde_json::Value = serde_json::from_str(json).ok()?;
+    let stacks = value.get("stacks").cloned().unwrap_or(value);
+    serde_json::from_value(stacks).ok()
 }
 
 /// Clears one campaign sector's persisted base/items

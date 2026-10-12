@@ -84,7 +84,7 @@ func _rebuild() -> void:
 		_list.row()
 	# Live launch resources (`universe.getLaunchResources`): already-selected
 	# item totals shown alongside the schematic requirement totals above.
-	var resource_totals := campaign_json("get_launch_resources")
+	var resource_totals := _launch_resource_stacks()
 	if not resource_totals.is_empty():
 		var parts := PackedStringArray()
 		for item in resource_totals:
@@ -112,9 +112,38 @@ func _select(index: int) -> void:
 	_rebuild()
 
 
+## Live `universe.getLaunchResources` as `{item: amount}` (`{}` without the
+## facade or when nothing is staged).
+func _launch_resource_stacks() -> Dictionary:
+	var campaign := campaign_node()
+	if campaign == null or not campaign.has_method("get_launch_resource_stacks"):
+		return {}
+	var parsed: Variant = JSON.parse_string(str(campaign.call("get_launch_resource_stacks")))
+	return parsed if parsed is Dictionary else {}
+
+
+## The selected loadout row, or `{}`.
+func _find_selected_row() -> Dictionary:
+	for loadout_variant in campaign_section("loadouts"):
+		var loadout: Dictionary = loadout_variant
+		if int(loadout.get("index", -1)) == _selected:
+			return loadout
+	return {}
+
+
 func _confirm() -> void:
 	if _selected < 0:
 		return
+	# `Universe.updateLoadout(core, selected)` (`LaunchLoadoutDialog.java:150-152`):
+	# record the chosen schematic's file for the core before the planet dialog
+	# reads it back for the launch (PAR-0085). A file-less schematic records the
+	# empty string (Java `schem.file == null ? ""`).
+	var row := _find_selected_row()
+	var campaign := campaign_node()
+	if campaign != null and campaign.has_method("update_loadout"):
+		var file_value: Variant = row.get("file", "")
+		var file_name := "" if file_value == null else str(file_value)
+		campaign.call("update_loadout", str(row.get("core", "")), file_name)
 	loadout_chosen.emit(_selected)
 
 
