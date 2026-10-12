@@ -179,23 +179,6 @@ fn world_quad(width: i32, height: i32) -> Quad {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::world_quad;
-
-    /// `world_quad` anchors the texel grid half a tile up-left: with 8 px
-    /// tiles, a `2x2` map's centre is `(4, 4)` and the quad is `16x16`
-    /// (`BlockRenderer.java:484-492,503-518`; `Tile.worldx()`).
-    #[test]
-    fn world_quad_is_shifted_half_a_tile_up_left() {
-        let quad = world_quad(2, 2);
-        assert_eq!(quad.cx, 4.0);
-        assert_eq!(quad.cy, 4.0);
-        assert_eq!(quad.w, 16.0);
-        assert_eq!(quad.h, 16.0);
-    }
-}
-
 /// Encodes an f32 RGBA map to an RGBA8 `ImageTexture`.
 fn make_texture(width: i32, height: i32, pixels: &[[f32; 4]]) -> Option<Gd<ImageTexture>> {
     let mut bytes = Vec::with_capacity(pixels.len() * 4);
@@ -222,4 +205,21 @@ fn make_quad_node(band: &Gd<Node2D>) -> Gd<MeshInstance2D> {
     // count is fixed by the pipeline, not by content.
     band.clone().add_child(&node);
     node
+}
+
+#[cfg(test)]
+mod tests {
+    use super::world_quad;
+
+    /// `world_quad` anchors the texel grid half a tile up-left: with 8 px
+    /// tiles, a `2x2` map's centre is `(4, 4)` and the quad is `16x16`
+    /// (`BlockRenderer.java:484-492,503-518`; `Tile.worldx()`).
+    #[test]
+    fn world_quad_is_shifted_half_a_tile_up_left() {
+        let quad = world_quad(2, 2);
+        assert_eq!(quad.cx, 4.0);
+        assert_eq!(quad.cy, 4.0);
+        assert_eq!(quad.w, 16.0);
+        assert_eq!(quad.h, 16.0);
+    }
 }
