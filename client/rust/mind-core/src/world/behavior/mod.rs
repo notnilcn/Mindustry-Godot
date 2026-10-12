@@ -596,8 +596,16 @@ pub fn default_behavior(def: &BlockDef) -> Arc<dyn BuildingBehavior> {
             Arc::new(crate::logic::blocks::DisplayBehavior)
         }
         K::CanvasBlock => Arc::new(crate::logic::blocks::CanvasBehavior),
+        // Sandbox sources/sinks (PAR-0077): per-kind behaviors so `config_kinds`
+        // and the accept/dump overrides match each Java inner class.
+        K::ItemSource => Arc::new(sandbox::ItemSourceBehavior),
+        K::ItemVoid => Arc::new(sandbox::ItemVoidBehavior),
+        K::LiquidSource => Arc::new(sandbox::LiquidSourceBehavior),
+        K::LiquidVoid => Arc::new(sandbox::LiquidVoidBehavior),
+        K::PowerSource => Arc::new(sandbox::PowerSourceBehavior),
+        K::PowerVoid => Arc::new(sandbox::PowerVoidBehavior),
         _ => match super::block_kind_data::BlockKindData::from_def(def).family() {
-            super::block_kind_data::BlockFamily::Sandbox => Arc::new(sandbox::SandboxBehavior),
+            super::block_kind_data::BlockFamily::Sandbox => Arc::new(NoopBehavior),
             super::block_kind_data::BlockFamily::Environment => {
                 Arc::new(environment::EnvironmentBehavior)
             }

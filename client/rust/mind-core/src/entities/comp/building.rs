@@ -197,6 +197,9 @@ pub struct SandboxState {
     pub item: Option<ItemId>,
     /// Configured liquid (`LiquidSource.source`).
     pub liquid: Option<crate::content::LiquidId>,
+    /// Debug counter for source emissions (PAR-0077 tests; never serialized,
+    /// `SandboxState` has no behavior `write`/`read`).
+    pub emitted: u32,
 }
 
 /// `Pump`/`SolidPump` build state.

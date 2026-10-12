@@ -47,6 +47,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         env_enabled: Some(EnvMask::any()),
         solid: Some(true),
         update: Some(true),
+        // `PowerVoid` constructor: `consumePower(Float.MAX_VALUE)`.
+        consumes: vec![consume_power(f32::MAX)],
         always_unlocked: Some(true),
         ..spec("power-void", BlockKind::PowerVoid)
     })?;
@@ -68,6 +70,9 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         group: Some(BlockGroup::Transportation),
         build_visibility: Some(BuildVisibility::SandboxOnly),
         env_enabled: Some(EnvMask::any()),
+        // `ItemVoid` constructor: `update = solid = acceptsItems = true`.
+        solid: Some(true),
+        update: Some(true),
         always_unlocked: Some(true),
         ..spec("item-void", BlockKind::ItemVoid)
     })?;

@@ -303,6 +303,8 @@ The core loop is done. The following items remain, in priority order.
   works (`MindCampaign.start_map(name)` + `set_rules_json` with
   `"infiniteResources":true`); that is unverified.
 
+**Status 2026-10-12:** done — six per-kind behaviors (`ItemSourceBehavior`, `ItemVoidBehavior`, `LiquidSourceBehavior`, `LiquidVoidBehavior`, `PowerSourceBehavior`, `PowerVoidBehavior`) replace the single `SandboxBehavior`; `power-void` gained its `consumePower(f32::MAX)` and `item-void` its Java `solid/update` flags; ItemSource/LiquidSource gained Java `write`/`read` (LiquidSource revision 1); the `parity/golden_content.json` item-void fields were regenerated and audit-verified. In-engine on Ground Zero 170 (the host's `placement_gate` is off, so sandbox blocks are placeable there): the item source emitted exactly 1000 items in 600 stepped ticks (100/s) into the core; an adjacent item void halved that to exactly 500; the liquid source filled to 9986.67 and fed a conduit (6.67); the power source reported graph satisfaction 1.0 with the battery at status 1.0. Evidence: `runs/20261012-session4/PAR-0077-evidence.json`, `runs/20261012-session4/PAR-0077-sandbox-sources.png`.
+
 ---
 
 ## 4. PAR-0076: reconstructors cannot be supplied and upgrade for free

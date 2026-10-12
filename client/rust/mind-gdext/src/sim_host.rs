@@ -639,6 +639,64 @@ impl MindSimHost {
         out
     }
 
+    /// Building state at `(x, y)` (debug seam: `{block, enabled, efficiency,
+    /// potential_efficiency, optional_efficiency, time_scale}` plus
+    /// `{item, liquid, accumulator, emitted}` for sandbox sources/voids).
+    #[func]
+    pub fn building_debug(&self, x: i32, y: i32) -> Dictionary<GString, Variant> {
+        let mut out = Dictionary::<GString, Variant>::new();
+        let entity = self
+            .sim
+            .grid
+            .tiles
+            .in_bounds(x, y)
+            .then(|| self.sim.grid.tile(x, y).build)
+            .flatten();
+        let Some(entity) = entity else {
+            return out;
+        };
+        let world = &self.sim.ecs.0;
+        let Some(building) = world.get::<mind_core::entities::comp::Building>(entity) else {
+            return out;
+        };
+        {
+            let mut put = |key: &str, value: Variant| {
+                out.set(&GString::from(key), &value);
+            };
+            put("block", Variant::from(i64::from(building.block.raw())));
+            put("enabled", Variant::from(building.enabled));
+            put("efficiency", Variant::from(f64::from(building.efficiency)));
+            put(
+                "potential_efficiency",
+                Variant::from(f64::from(building.potential_efficiency)),
+            );
+            put(
+                "optional_efficiency",
+                Variant::from(f64::from(building.optional_efficiency)),
+            );
+            put("time_scale", Variant::from(f64::from(building.time_scale)));
+            if let Some(state) = world.get::<mind_core::entities::comp::SandboxState>(entity) {
+                put(
+                    "sandbox_item",
+                    state
+                        .item
+                        .map(|item| Variant::from(i64::from(item.raw())))
+                        .unwrap_or(Variant::nil()),
+                );
+                put(
+                    "sandbox_liquid",
+                    state
+                        .liquid
+                        .map(|liquid| Variant::from(i64::from(liquid.raw())))
+                        .unwrap_or(Variant::nil()),
+                );
+                put("accumulator", Variant::from(f64::from(state.accumulator)));
+                put("emitted", Variant::from(i64::from(state.emitted)));
+            }
+        }
+        out
+    }
+
     /// Power network values at `(x, y)` (`{graph_id, status, stored, init}`).
     #[func]
     pub fn power_debug(&self, x: i32, y: i32) -> Dictionary<GString, f64> {

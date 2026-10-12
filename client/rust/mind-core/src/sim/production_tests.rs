@@ -146,3 +146,182 @@ fn conduit_feeds_a_liquid_consumer() {
         "generator got water"
     );
 }
+
+fn configure(sim: &mut Sim, x: i16, y: i16, value: crate::determinism::ConfigValue) {
+    sim.command(SimCommand::Configure { x, y, value })
+        .expect("configure");
+}
+
+fn stored_item(sim: &Sim, e: Entity, item: crate::content::ItemId) -> i32 {
+    sim.ecs
+        .0
+        .get::<crate::world::modules::ItemModule>(e)
+        .map(|module| module.get(item))
+        .unwrap_or(0)
+}
+
+fn emitted(sim: &Sim, e: Entity) -> u32 {
+    sim.ecs
+        .0
+        .get::<crate::entities::comp::SandboxState>(e)
+        .map(|state| state.emitted)
+        .unwrap_or(0)
+}
+
+/// PAR-0077: a configured item source emits copper into a conveyor, which
+/// forwards it into an item void; the void accepts and discards it.
+#[test]
+fn item_source_feeds_conveyor_into_void() {
+    let mut sim = runtime_sim();
+    let copper = item(&sim, "copper");
+    let source = place(&mut sim, "item-source", 5, 5);
+    let conveyor = place(&mut sim, "conveyor", 6, 5);
+    let sink = place(&mut sim, "item-void", 7, 5);
+    configure(
+        &mut sim,
+        5,
+        5,
+        crate::determinism::ConfigValue::Content("copper".to_owned()),
+    );
+    for _ in 0..120 {
+        sim.tick().expect("tick");
+    }
+    let count = emitted(&sim, source);
+    let belt_heat = sim
+        .ecs
+        .0
+        .get::<crate::world::blocks::distribution::conveyor::ConveyorBuild>(conveyor)
+        .map(|belt| belt.clog_heat)
+        .unwrap_or(1.0);
+    assert!(count >= 100, "source emitted {count} items in 120 ticks");
+    assert_eq!(
+        stored_item(&sim, source, copper),
+        0,
+        "source clears its buffer after each emission"
+    );
+    assert!(
+        stored_item(&sim, conveyor, copper) >= 1,
+        "belt received items from the source"
+    );
+    // A clogged belt approaches `clog_heat` 1; the void drains the front, so
+    // the belt keeps flowing.
+    assert!(
+        belt_heat < 0.5,
+        "belt is not clogged (void drains it): {belt_heat}"
+    );
+    let world = &mut sim.ecs.0;
+    assert!(
+        transfer::dispatch_accept_item(world, sink, conveyor, copper),
+        "item void accepts downstream items"
+    );
+    assert_eq!(stored_item(&sim, sink, copper), 0, "void stores nothing");
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<crate::world::modules::ItemModule>(sink)
+            .map(|module| module.total())
+            .unwrap_or(0),
+        0,
+        "void has no item storage at all"
+    );
+}
+
+/// PAR-0077: an unconfigured item source emits nothing and accepts nothing
+/// (Java default `outputItem = null`, `acceptItem` returns false).
+#[test]
+fn unconfigured_item_source_emits_nothing() {
+    let mut sim = runtime_sim();
+    let copper = item(&sim, "copper");
+    let source = place(&mut sim, "item-source", 5, 5);
+    let conveyor = place(&mut sim, "conveyor", 6, 5);
+    for _ in 0..60 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        emitted(&sim, source),
+        0,
+        "unconfigured source emits nothing"
+    );
+    assert_eq!(stored_item(&sim, conveyor, copper), 0);
+    let world = &mut sim.ecs.0;
+    assert!(
+        !transfer::dispatch_accept_item(world, source, source, copper),
+        "item source accepts nothing"
+    );
+}
+
+/// PAR-0077: a configured liquid source fills itself and dumps water into a
+/// conduit; clearing the config empties the source.
+#[test]
+fn liquid_source_fills_conduit() {
+    let mut sim = runtime_sim();
+    let water = liquid(&sim, "water");
+    let source = place(&mut sim, "liquid-source", 5, 5);
+    let conduit = place(&mut sim, "conduit", 6, 5);
+    configure(
+        &mut sim,
+        5,
+        5,
+        crate::determinism::ConfigValue::Content("water".to_owned()),
+    );
+    for _ in 0..30 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        stored_liquid(&sim, conduit, water) > 0.0,
+        "conduit carried water"
+    );
+    configure(&mut sim, 5, 5, crate::determinism::ConfigValue::None);
+    for _ in 0..5 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        stored_liquid(&sim, source, water),
+        0.0,
+        "cleared source empties its tank"
+    );
+}
+
+/// PAR-0077: a power source feeds an adjacent power consumer; the graph reports
+/// full satisfaction.
+#[test]
+fn power_source_powers_consumer() {
+    let mut sim = runtime_sim();
+    set_floor(&mut sim, 7, 5, "ore-copper");
+    let source = place(&mut sim, "power-source", 5, 5);
+    let drill = place(&mut sim, "laser-drill", 7, 5);
+    for _ in 0..30 {
+        sim.tick().expect("tick");
+    }
+    let production = sim
+        .ecs
+        .0
+        .get::<crate::world::blocks::power::PowerProduction>(source)
+        .map(|production| production.0)
+        .unwrap_or(0.0);
+    assert!(
+        (production - 1_000_000.0 / 60.0).abs() < 0.01,
+        "power source reports its production: {production}"
+    );
+    let graph = sim
+        .ecs
+        .0
+        .get::<crate::world::modules::PowerModule>(drill)
+        .map(|module| module.graph)
+        .unwrap_or_default();
+    let satisfaction = sim
+        .ecs
+        .0
+        .resource::<crate::world::blocks::power::PowerGrids>()
+        .graph(graph)
+        .map(|graph| graph.get_satisfaction())
+        .unwrap_or(0.0);
+    assert_eq!(satisfaction, 1.0, "power graph satisfaction");
+    let efficiency = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::Building>(drill)
+        .map(|building| building.efficiency)
+        .unwrap_or(0.0);
+    assert!(efficiency > 0.0, "drill became efficient: {efficiency}");
+}
