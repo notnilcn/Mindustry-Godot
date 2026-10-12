@@ -595,6 +595,8 @@ func _maybe_show_remap_notice() -> void:
 		JSON.stringify({
 			"title": _t("@campaign.rework.title"),
 			"text": _tm("@campaign.rework.serpulo"),
+			"ok": true,
+			"keep_previous": true,
 		})
 	)
 

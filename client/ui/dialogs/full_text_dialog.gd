@@ -30,6 +30,11 @@ func shown() -> void:
 	var text := str(_context.get("text", ""))
 	if not text.is_empty():
 		_set_content(str(_context.get("title", "")), text)
+	# `PlanetDialog.java:216-222`: the Campaign Changes Notice is a BaseDialog
+	# with an `@ok` button (280x64, `Icon.ok`) instead of the generic close.
+	if bool(_context.get("ok", false)):
+		clear_buttons()
+		add_button(_t("@ok"), hide_dialog, "ok", 280.0)
 
 
 ## Sets the title/body and opens the dialog (`show(titleText, text)`).
@@ -52,6 +57,10 @@ func _set_content(dialog_title: String, text: String) -> void:
 		var label := MindWidgets.label(text)
 		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		# `PlanetDialog.java:216-222`: the notice body is centered with
+		# `maxWidth(500)`.
+		if bool(_context.get("ok", false)):
+			label.custom_minimum_size.x = 500.0
 		# `FullTextDialog.java:19`: `.labelAlign(Align.center)`.
 		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		cont.add_child(label)
