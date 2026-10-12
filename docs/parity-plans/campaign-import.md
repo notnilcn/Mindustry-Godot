@@ -233,6 +233,16 @@ restart (`tools/session-play.sh 5`) -> no notice. Screenshot
 `runs/20261012-session5/remap-notice.png`.
 Commit: `Planet page: one-time Serpulo remap notice (hadSerpuloRemaps)`.
 
+**Status 2026-10-12:** done — commit `fcc5c12`. Verified by re-extracting the
+zip's `saves/sector-serpulo-15.msav` while the game was stopped, so a live boot
+(rather than the importing process, which remaps and quits) performed the remap
+and could open the planet page: the notice shows once
+(`runs/20261012-session5/remap-notice.png`), reopening the page and a fresh
+restart show no notice, `serpulo-remaps-notice=true` on disk. Note: the
+MindUi/MindCampaign store fan-out (§H gap 1) means a `settings_put_flag` from
+MindUi does not reset MindCampaign's in-memory copy, so the dialog test needs a
+boot whose settings file carries the key.
+
 ---
 
 ### B. PAR-0153 — campaign sector autosave never runs
