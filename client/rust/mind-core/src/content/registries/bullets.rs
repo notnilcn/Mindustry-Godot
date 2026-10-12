@@ -403,6 +403,9 @@ pub struct BulletDef {
     pub puddle_liquid: LiquidId,
     /// Unit spawned instead of the bullet.
     pub spawn_unit: Option<UnitTypeId>,
+    /// `BulletType.hitUnder`: this bullet may hit `underBullets` buildings
+    /// without being aimed at them (`BulletType.java:185`).
+    pub hit_under: bool,
     /// Unit spawned on despawn.
     pub despawn_unit: Option<UnitTypeId>,
     /// Number of `despawn_unit`s spawned (`BulletType.despawnUnitCount`, 1).
@@ -723,6 +726,7 @@ impl BulletDef {
             puddle_amount: 5.0,
             puddle_liquid: LiquidId::WATER,
             spawn_unit: None,
+            hit_under: false,
             despawn_unit: None,
             despawn_unit_count: 1,
             despawn_unit_chance: 1.0,

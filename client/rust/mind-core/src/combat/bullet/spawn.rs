@@ -160,6 +160,11 @@ pub fn create(
             world
                 .entity_mut(entity)
                 .insert(crate::ai::types::missile::MissileShooter(shooter));
+            // `BulletType.create`'s `target` argument (`mount.target` for unit
+            // weapons, `null` for turrets) seeds the contact-death branch.
+            world
+                .entity_mut(entity)
+                .insert(crate::ai::types::missile::MissileTarget(spawn.target));
         }
         // `if(killShooter && owner instanceof Healthc h && !h.dead()) h.kill();`
         if def.kill_shooter
@@ -236,6 +241,7 @@ pub fn create(
         def: spawn.def,
         damage,
         building_damage_multiplier: def.building_damage_multiplier,
+        owner: spawn.owner,
         data: spawn.data,
         fdata: 0.0,
         rotation: angle,
@@ -260,6 +266,16 @@ pub fn create(
             seq, spawn.x, spawn.y, vel, spawn.team, bullet,
         ))
         .id();
+    // `BulletType.init` (`BulletType.java:713-716`): a `killShooter` bullet
+    // kills its owner as it is created (e.g. the crawler's death weapon).
+    if def.kill_shooter
+        && let Some(owner) = spawn.owner
+        && let Some(mut health) = world.get_mut::<crate::entities::comp::Health>(owner)
+        && !health.dead
+    {
+        health.health = 0.0;
+        health.dead = true;
+    }
     // Owner/shooter are retained on the spawn request for plan 11/21 consumers.
     let _ = (spawn.owner, spawn.shooter);
 

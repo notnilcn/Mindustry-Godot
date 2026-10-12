@@ -41,6 +41,12 @@ use super::{
 
 /// Registers the M5/M6 turret ammo fixture bullets (`Blocks.java` `ammoTypes`).
 pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<String, BulletId>) {
+    // `scathe` missile units (`Blocks.java:5251-5530` spawnUnit defs, registered
+    // by `units::special::scathe_missiles`). Resolved before the `add` closure
+    // borrows `content`; ids exist because units load before blocks.
+    let scathe_missile = content.unit_id("scathe-missile");
+    let scathe_missile_phase = content.unit_id("scathe-missile-phase");
+    let scathe_missile_surge = content.unit_id("scathe-missile-surge");
     let mut add = |name: &str, kind: BulletKind, configure: &dyn Fn(&mut BulletDef)| {
         let mut def = BulletDef::new(kind);
         configure(&mut def);
@@ -884,29 +890,34 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
     });
 
     // `scathe` (`ItemTurret`; `BulletType(0,0)` carriers whose payload is a
-    // spawned `scathe-missile` `MissileUnitType`). The missile unit defs and the
-    // `BulletType.spawnUnit` init path are plan 11 (`units/**`); until they land
-    // these are registered as `Empty` carriers so the turret + ammo resolve and
-    // fire. The missile flight/death explosion is recorded as a plan-10 blocker.
-    add("scathe_carbide", BulletKind::Empty, &|def| {
+    // spawned `scathe-missile` `MissileUnitType`; `Blocks.java:5251-5530`).
+    // `BulletType.range()` = `spawnUnit.lifetime * spawnUnit.speed`
+    // (BulletType.java:445), carried in `spawn_unit_range`.
+    add("scathe_carbide", BulletKind::Plain, &|def| {
         def.speed = 0.0;
+        def.damage = 0.0;
         def.lifetime = 1.0;
+        def.spawn_unit = scathe_missile;
+        def.spawn_unit_range = Some((60.0 * 5.5, 4.6));
         def.ammo_multiplier = 1.0;
-        def.building_damage_multiplier = 0.1;
     });
-    add("scathe_phase", BulletKind::Empty, &|def| {
+    add("scathe_phase", BulletKind::Plain, &|def| {
         def.speed = 0.0;
+        def.damage = 0.0;
         def.lifetime = 1.0;
+        def.spawn_unit = scathe_missile_phase;
+        def.spawn_unit_range = Some((60.0 * 9.77, 2.5));
         def.ammo_multiplier = 5.0;
         def.reload_multiplier = 0.8;
-        def.building_damage_multiplier = 0.1;
     });
-    add("scathe_surge", BulletKind::Empty, &|def| {
+    add("scathe_surge", BulletKind::Plain, &|def| {
         def.speed = 0.0;
+        def.damage = 0.0;
         def.lifetime = 1.0;
+        def.spawn_unit = scathe_missile_surge;
+        def.spawn_unit_range = Some((60.0 * 1.4, 4.4));
         def.ammo_multiplier = 1.0;
         def.reload_multiplier = 0.9;
-        def.building_damage_multiplier = 0.1;
     });
 
     // Cross-references (child defs must exist first).

@@ -23,6 +23,7 @@ use smallvec::SmallVec;
 use crate::audio::{AudioSinkRes, sim as audio_sim};
 use crate::content::{BulletId, ContentRegistry};
 use crate::determinism::{RngStream, SimRng};
+use crate::ecs::BuildingComp;
 use crate::entities::comp::{Health, Pos, TeamComp, Vel};
 use crate::fx::TrailChannelId;
 use crate::world::WorldGrid;
@@ -69,6 +70,8 @@ pub struct Bullet {
     pub damage: f32,
     /// Multiplier vs buildings (`BulletType.buildingDamageMultiplier`).
     pub building_damage_multiplier: f32,
+    /// Owning entity (`Bullet.owner`; healed by `BulletType.lifesteal`).
+    pub owner: Option<Entity>,
     /// Typed payload.
     pub data: BulletData,
     /// Effect parameter (`Bullet.fdata`).
@@ -854,6 +857,8 @@ pub fn collide_bullet(ctx: &mut CombatCtx<'_>, bullet: Entity) -> CollisionOutco
     let remove_after_pierce = def.remove_after_pierce;
     let pierce_cap = def.pierce_cap;
     let def_sticky = def.sticky;
+    let hit_under = def.hit_under;
+    let piercing = def.pierce;
     let max_damage_fraction = def.max_damage_fraction;
     let building_damage_multiplier = def.building_damage_multiplier;
     let _ = (max_damage_fraction, building_damage_multiplier);
@@ -897,6 +902,23 @@ pub fn collide_bullet(ctx: &mut CombatCtx<'_>, bullet: Entity) -> CollisionOutco
             return true;
         }
         if let Some(target) = tile.build {
+            // `BulletComp.checkUnderBuild` (BulletComp.java:212-225): a bullet
+            // passes over `underBullets` buildings unless it was aimed at that
+            // building, the def allows hitting under builds (`hitUnder`), the
+            // building is friendly, a piercing bullet has overshot its aim
+            // tile, or the bullet had no aim at all.
+            if !passes_under_build(
+                ctx,
+                &state,
+                bullet,
+                target,
+                hit_under,
+                piercing,
+                bullet_team,
+            ) {
+                // Skip this building; the raycast continues.
+                return false;
+            }
             // `BulletComp.collision`: `BulletType.sticky` bullets attach on
             // first contact (`stickTo`); an already-attached bullet does not
             // re-hit its target. A pre-assigned *aim* target is not sticky
@@ -994,6 +1016,15 @@ pub fn collide_bullet(ctx: &mut CombatCtx<'_>, bullet: Entity) -> CollisionOutco
             .getn(end_x, end_y)
             .and_then(|tile| tile.build)
             && target != bullet
+            && passes_under_build(
+                ctx,
+                &state,
+                bullet,
+                target,
+                hit_under,
+                piercing,
+                bullet_team,
+            )
         {
             let same_team = ctx.world.get::<TeamComp>(target).map(|t| t.team) == Some(bullet_team);
             if !same_team || collide_team {
@@ -1008,6 +1039,58 @@ pub fn collide_bullet(ctx: &mut CombatCtx<'_>, bullet: Entity) -> CollisionOutco
         }
     }
     outcome
+}
+
+/// `BulletComp.checkUnderBuild` (BulletComp.java:212-225): whether a bullet is
+/// allowed to hit `target` when it is an `underBullets` building.
+///
+/// A bullet passes over such a building unless it was aimed at it
+/// (`aimTile.build == build`), its def sets `hitUnder`, the building is
+/// friendly, a piercing bullet has already overshot its aim tile, or the bullet
+/// had no aim at all.
+fn passes_under_build(
+    ctx: &CombatCtx<'_>,
+    state: &Bullet,
+    bullet: Entity,
+    target: Entity,
+    hit_under: bool,
+    piercing: bool,
+    bullet_team: u8,
+) -> bool {
+    let under = ctx
+        .world
+        .get::<BuildingComp>(target)
+        .and_then(|comp| ctx.content.block(comp.block))
+        .is_some_and(|def| def.under_bullets);
+    if !under {
+        return true;
+    }
+    let aimed = state.aim_tile.is_some_and(|(ax, ay)| {
+        ctx.grid
+            .tiles
+            .getn(ax as i32, ay as i32)
+            .and_then(|tile| tile.build)
+            == Some(target)
+    });
+    if aimed || hit_under {
+        return true;
+    }
+    if ctx.world.get::<TeamComp>(target).map(|t| t.team) == Some(bullet_team) {
+        return true;
+    }
+    // `type.pierce && aimTile != null && Mathf.dst(x, y, originX, originY) >
+    // aimTile.dst(originX, originY) + 2f` — the tile distance uses the tile
+    // corner (`Tile.worldx/worldy`).
+    let tile_size = crate::config::TILESIZE as f32;
+    let overshot = piercing
+        && state.aim_tile.is_some_and(|(ax, ay)| {
+            let (ox, oy) = state.origin;
+            let (tx, ty) = (ax as f32 * tile_size, ay as f32 * tile_size);
+            let aim_dst = ((tx - ox).powi(2) + (ty - oy).powi(2)).sqrt();
+            let (px, py) = ctx.pos(bullet).unwrap_or(state.last);
+            ((px - ox).powi(2) + (py - oy).powi(2)).sqrt() > aim_dst + 2.0
+        });
+    overshot || state.aim == (-1.0, -1.0)
 }
 
 /// Whether a unit counts as flying for bullet/target gates
@@ -1237,6 +1320,19 @@ pub fn hit_entity(ctx: &mut CombatCtx<'_>, bullet: Entity, unit: Entity, health:
     } else {
         health += shield;
     }
+    // `if(lifesteal > 0f && b.owner instanceof Healthc o) o.heal(result *
+    // lifesteal)` with `result = max(min(h.health(), damage), 0)` — the
+    // pre-damage health (`BulletType.java:502-505`).
+    let lifesteal_heal = if def.lifesteal > 0.0 {
+        match (state.owner, ctx.world.get::<Health>(unit).map(|h| h.health)) {
+            (Some(owner), Some(target_health)) => {
+                Some((owner, target_health.min(damage).max(0.0) * def.lifesteal))
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
     let _ = super::damage::area::damage_entity(
         ctx.world,
         ctx.content,
@@ -1245,6 +1341,9 @@ pub fn hit_entity(ctx: &mut CombatCtx<'_>, bullet: Entity, unit: Entity, health:
         pierce_armor,
         armor_mult,
     );
+    if let Some((owner, amount)) = lifesteal_heal {
+        super::damage::area::heal_health(ctx.world, owner, amount);
+    }
     // Knockback impulse (`unit.impulse(v)`: `vel += v / mass`, `mass = hitSize² π`).
     let type_def = ctx
         .world

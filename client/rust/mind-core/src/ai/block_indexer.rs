@@ -84,6 +84,9 @@ pub struct BlockIndexer {
     damaged: Vec<Entity>,
     /// All indexed buildings.
     all: Vec<Entity>,
+    /// `BlockId -> Block.underBullets`, captured at rebuild
+    /// (`AIController.target`'s building predicate, AIController.java:282).
+    under_bullets: Vec<bool>,
 }
 
 impl BlockIndexer {
@@ -93,12 +96,18 @@ impl BlockIndexer {
             flags: vec![Vec::new(); TEAM_STRIDE * FLAG_COUNT],
             damaged: Vec::new(),
             all: Vec::new(),
+            under_bullets: Vec::new(),
         }
     }
 
     /// Rebuilds the index from scratch (`WorldLoadEvent`/`TileChangeEvent`).
     pub fn rebuild(&mut self, world: &mut World, content: &ContentRegistry) {
         self.clear();
+        self.under_bullets = content
+            .blocks()
+            .iter()
+            .map(|block| block.under_bullets)
+            .collect();
         let mut rows: Vec<(Entity, u8, Vec<BlockFlag>, bool)> = {
             let mut query = world.query::<(Entity, &Building, &TeamComp, &Health)>();
             query
@@ -236,6 +245,7 @@ impl BlockIndexer {
         x: f32,
         y: f32,
         range: f32,
+        allow_under_blocks: bool,
     ) -> Option<Entity> {
         let range2 = range * range;
         let mut best: Option<(f32, Entity)> = None;
@@ -245,6 +255,17 @@ impl BlockIndexer {
             let other = world.get::<TeamComp>(entity).map(|t| t.team);
             if other == Some(team) || other.is_some_and(|other| is_derelict(world, other)) {
                 continue;
+            }
+            // `AIController.target`: `targetUnderBlocks || !t.block.underBullets`
+            // (AIController.java:282).
+            if !allow_under_blocks {
+                let under = world
+                    .get::<crate::ecs::BuildingComp>(entity)
+                    .and_then(|comp| self.under_bullets.get(comp.block.raw() as usize).copied())
+                    .unwrap_or(false);
+                if under {
+                    continue;
+                }
             }
             let Some(pos) = world.get::<Pos>(entity) else {
                 continue;
@@ -310,9 +331,14 @@ pub fn is_derelict(world: &World, team: u8) -> bool {
     if team != 0 {
         return false;
     }
-    let campaign_default = world
-        .get_resource::<crate::game::runtime::CampaignRuntime>()
-        .map(|runtime| runtime.session.rules.default_team);
+    let campaign = world.get_resource::<crate::game::runtime::CampaignRuntime>();
+    // `findEnemyTile`: `enemy == Team.derelict && !state.rules.coreCapture`
+    // skips the derelict team; with `coreCapture` its blocks are capturable
+    // targets (BlockIndexer.java:466).
+    if campaign.is_some_and(|runtime| runtime.session.rules.core_capture) {
+        return false;
+    }
+    let campaign_default = campaign.map(|runtime| runtime.session.rules.default_team);
     let build_default = world
         .get_resource::<crate::world::limits::BuildRules>()
         .map(|rules| rules.default_team);

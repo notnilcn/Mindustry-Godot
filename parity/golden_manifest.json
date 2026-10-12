@@ -27,7 +27,7 @@
       "kind": "oracle",
       "path": "parity/golden_content.json",
       "owner_plan": "02",
-      "sha256": "234fb18c79c50e4c0b910367123529188f87a380cacd32f1259a1aee41764e42",
+      "sha256": "70e2c62d7b4325297710d22308bd31546adf07f343aee248a6e042668d91bd7a",
       "regen": "cargo run -p mind-headless -- content dump"
     },
     {
@@ -133,7 +133,7 @@
       "kind": "harness",
       "path": "client/rust/mind-core/tests/golden/combat.json",
       "owner_plan": "10",
-      "sha256": "abcb72690b0a9a12e5ea549cd319cb8f4bad22a0cc6bd3e75bac4e1bd39f616a"
+      "sha256": "536fa90af9788ef6e4145f1db3b5ce92ea1823226c5b88ca2308c1d397f4e9b6"
     },
     {
       "id": "harness_entitymeta",

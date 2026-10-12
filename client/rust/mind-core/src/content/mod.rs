@@ -543,11 +543,11 @@ mod content_framework {
         assert_eq!(registry.items().len(), 22);
         assert_eq!(registry.liquids().len(), 11);
         assert_eq!(registry.statuses().len(), 23);
-        // M5: 6 internal bullets + 106 `UnitTypes.java` weapon bullets (turret
-        // ammo from `Blocks.java` lands with plan 10, keeping this an
+        // M5: 6 internal bullets + 106 `UnitTypes.java` weapon bullets plus the
+        // `scathe` missile bullets from `Blocks.java` (keeping this an
         // upstream-prefix id space).
-        assert_eq!(registry.bullets().len(), 112);
-        assert_eq!(registry.units().len(), 65);
+        assert_eq!(registry.bullets().len(), 119);
+        assert_eq!(registry.units().len(), 69);
     }
 
     /// Serialization of `ContentType` must match `name()` (used by harness dumps).

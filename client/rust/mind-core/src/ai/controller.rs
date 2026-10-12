@@ -106,6 +106,14 @@ impl ControllerSlot {
     }
 }
 
+/// Active RTS command on a live unit (`CommandAI.command`, CommandAI.java:57-64).
+///
+/// The per-command controller switch (`CommandAI.updateUnit`'s
+/// `commandController`, e.g. `RepairAI`/`BuilderAI`/`MinerAI`) lands when the
+/// remaining AI kinds are dispatched.
+#[derive(bevy_ecs::component::Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct UnitCommandComp(pub u16);
+
 /// Seam trait for object controllers (plan 11 §3.5). M0 stores [`AiKind`] on the
 /// entity and dispatches through free functions; later milestones attach state.
 pub trait UnitController: Send {

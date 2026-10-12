@@ -50,7 +50,10 @@ use crate::world::{Context, EcsMapSource, WorldGrid};
 pub const SIM_UNIT_CLASS_ID: u8 = 0xF0;
 
 /// Revision of the [`SIM_UNIT_CLASS_ID`] chunk payload (append-only).
-pub const SIM_UNIT_REVISION: u16 = 1;
+///
+/// v2 appends the carried payload stack (`UnitPayloads.stack`: `u16 count` then
+/// per payload `u8 tag` + fields). v1 saves (no payloads) still load.
+pub const SIM_UNIT_REVISION: u16 = 2;
 
 /// Reserved class id for the native live-sim fire chunk (`FireComp`).
 pub const SIM_FIRE_CLASS_ID: u8 = 0xF1;
@@ -108,6 +111,8 @@ struct DecodedUnit {
     rotation: f32,
     /// Current health.
     health: f32,
+    /// Carried payload stack (revision 2+; empty in v1 saves).
+    payloads: Vec<crate::entities::comp::unit::comp::CarriedPayload>,
 }
 
 /// One decoded live fire record (`FireComp.read` sim fields).
@@ -158,19 +163,47 @@ impl EntitySink for LiveEntitySink {
         match class_id {
             SIM_UNIT_CLASS_ID => {
                 let revision = r.us()?;
-                if revision != SIM_UNIT_REVISION {
+                if revision != 1 && revision != SIM_UNIT_REVISION {
                     return Err(IoError::corrupt(format!(
                         "unsupported live unit revision {revision}"
                     )));
                 }
-                self.units.push(DecodedUnit {
+                let mut decoded = DecodedUnit {
                     name: r.str()?,
                     team: r.ub()?,
                     x: r.f()?,
                     y: r.f()?,
                     rotation: r.f()?,
                     health: r.f()?,
-                });
+                    payloads: Vec::new(),
+                };
+                if revision >= 2 {
+                    let count = r.us()?;
+                    for _ in 0..count {
+                        let tag = r.ub()?;
+                        let payload = match tag {
+                            0 => crate::entities::comp::unit::comp::CarriedPayload::Unit {
+                                type_id: crate::content::UnitTypeId::new(r.us()?),
+                                team: r.ub()?,
+                                health: r.f()?,
+                                rotation: r.f()?,
+                            },
+                            1 => crate::entities::comp::unit::comp::CarriedPayload::Build {
+                                block: crate::content::BlockId::new(r.us()?),
+                                team: r.ub()?,
+                                rotation: r.ub()?,
+                                health: r.f()?,
+                            },
+                            other => {
+                                return Err(IoError::corrupt(format!(
+                                    "unknown unit payload tag {other}"
+                                )));
+                            }
+                        };
+                        decoded.payloads.push(payload);
+                    }
+                }
+                self.units.push(decoded);
             }
             SIM_FIRE_CLASS_ID => {
                 let revision = r.us()?;
@@ -339,6 +372,40 @@ impl EntitySource for LiveEntitySource<'_> {
                 chunk.f(pos.y);
                 chunk.f(core.rotation);
                 chunk.f(health);
+                // Revision 2: carried payload stack (`UnitPayloads.stack`).
+                let payloads = world
+                    .get::<crate::entities::comp::unit::comp::UnitPayloads>(entity)
+                    .map(|payloads| payloads.stack.as_slice())
+                    .unwrap_or(&[]);
+                chunk.us(payloads.len().min(u16::MAX as usize) as u16);
+                for payload in payloads {
+                    match payload {
+                        crate::entities::comp::unit::comp::CarriedPayload::Unit {
+                            type_id,
+                            team,
+                            health,
+                            rotation,
+                        } => {
+                            chunk.ub(0);
+                            chunk.us(type_id.raw());
+                            chunk.ub(*team);
+                            chunk.f(*health);
+                            chunk.f(*rotation);
+                        }
+                        crate::entities::comp::unit::comp::CarriedPayload::Build {
+                            block,
+                            team,
+                            rotation,
+                            health,
+                        } => {
+                            chunk.ub(1);
+                            chunk.us(block.raw());
+                            chunk.ub(*team);
+                            chunk.ub(*rotation);
+                            chunk.f(*health);
+                        }
+                    }
+                }
                 Ok(())
             })?;
         }
@@ -660,10 +727,28 @@ impl SimIoHandler {
         for unit in &entities.units {
             if let Some(entity) =
                 sim.spawn_live_unit(&unit.name, unit.team, unit.x, unit.y, unit.rotation)
-                && unit.health > 0.0
-                && let Some(mut health) = sim.ecs.0.get_mut::<Health>(entity)
             {
-                health.health = unit.health;
+                if unit.health > 0.0
+                    && let Some(mut health) = sim.ecs.0.get_mut::<Health>(entity)
+                {
+                    health.health = unit.health;
+                }
+                // Revision 2: restore the carried payload stack.
+                if !unit.payloads.is_empty() {
+                    let stack = unit.payloads.clone();
+                    if let Some(mut payloads) =
+                        sim.ecs
+                            .0
+                            .get_mut::<crate::entities::comp::unit::comp::UnitPayloads>(entity)
+                    {
+                        payloads.stack = stack;
+                    } else {
+                        sim.ecs
+                            .0
+                            .entity_mut(entity)
+                            .insert(crate::entities::comp::unit::comp::UnitPayloads { stack });
+                    }
+                }
             }
         }
         // Fires and puddles (`Groups.fires`/`Groups.puddles` recreate from
@@ -881,7 +966,7 @@ mod tests {
                 "class id {id} collides with an upstream class id"
             );
         }
-        assert_eq!(SIM_UNIT_REVISION, 1);
+        assert_eq!(SIM_UNIT_REVISION, 2);
         assert_eq!(SIM_FIRE_REVISION, 1);
         assert_eq!(SIM_PUDDLE_REVISION, 1);
     }
@@ -937,6 +1022,81 @@ mod tests {
         assert_eq!(sim.group_counts().get("build"), Some(&1));
         assert_eq!(sim.group_counts().get("unit"), Some(&1));
         assert!(sim.tick_count() >= saved_tick, "tick header resumes");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// PAR-0138: a live save round-trips the carried payload stack (revision 2
+    /// unit chunk); a v1 save without payloads still loads.
+    #[test]
+    fn live_save_keeps_unit_payloads() {
+        use crate::entities::comp::unit::comp::{CarriedPayload, UnitPayloads};
+
+        let mut sim = Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        let mega = sim
+            .spawn_player_unit("mega", 1, 100.0, 100.0, 0.0)
+            .expect("mega");
+        sim.spawn_live_unit("dagger", 1, 110.0, 100.0, 0.0)
+            .expect("dagger");
+        assert!(
+            sim.apply_payload_command(0, 0.0, 0.0, None),
+            "the dagger is picked up"
+        );
+        let before = sim
+            .ecs
+            .0
+            .get::<UnitPayloads>(mega)
+            .expect("payloads")
+            .stack
+            .clone();
+        assert!(matches!(before.as_slice(), [CarriedPayload::Unit { .. }]));
+
+        sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
+        let path = temp_path("live-unit-payloads");
+        let _ = std::fs::remove_file(&path);
+        sim.request_save(&path, false);
+        sim.tick().expect("capture tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses.len(), 1, "one save response: {responses:?}");
+        assert_eq!(responses[0].status, IoStatus::Ok);
+
+        // Wipe the live world; the load must restore the carried stack.
+        sim.grid.fill(BlockId::AIR, BlockId::AIR);
+        sim.request_load(&path);
+        sim.tick().expect("apply tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses.len(), 1, "one load response: {responses:?}");
+        assert_eq!(responses[0].status, IoStatus::Ok, "save reloads");
+
+        let mega_id = sim
+            .unit_runtime()
+            .expect("rt")
+            .content
+            .unit_id("mega")
+            .expect("mega id");
+        let loaded = sim
+            .unit_runtime()
+            .expect("rt")
+            .units
+            .iter()
+            .copied()
+            .find(|entity| {
+                sim.ecs
+                    .0
+                    .get::<crate::entities::comp::unit::comp::UnitTypeComp>(*entity)
+                    .is_some_and(|comp| comp.type_id == mega_id)
+            })
+            .expect("mega respawned");
+        assert_eq!(
+            sim.ecs
+                .0
+                .get::<UnitPayloads>(loaded)
+                .map(|payloads| payloads.stack.clone()),
+            Some(before),
+            "the carried stack survived the round-trip"
+        );
 
         let _ = std::fs::remove_file(&path);
     }

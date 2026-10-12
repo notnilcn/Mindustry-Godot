@@ -10,7 +10,7 @@ use bevy_ecs::entity::Entity;
 
 use crate::content::BlockId;
 use crate::determinism::SimCommand;
-use crate::entities::comp::{Health, Pos};
+use crate::entities::comp::{Health, Pos, Vel};
 
 use super::Sim;
 
@@ -358,6 +358,795 @@ fn missile_dies_at_lifetime_and_explodes() {
     assert!(
         sim.grid.tiles.get(20, 12).build.is_none(),
         "wall destroyed after {launched} direct missile(s)"
+    );
+}
+
+/// T2: ordinary bullets fly over enemy `underBullets` buildings they were not
+/// aimed at (`BulletComp.checkUnderBuild`, BulletComp.java:212-225) — the
+/// dagger's shots cross the conveyor and hit the wall behind it.
+///
+/// The decoy is needed to aim the shot: units take precedence over buildings in
+/// `Units.closestTarget`, and a closer conveyor outranks a wall in building
+/// priority (`UnitSorts.buildingDefault`), so a dagger with only the wall and
+/// conveyor in range would target the conveyor itself.
+#[test]
+fn bullets_pass_over_enemy_conveyor() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+
+    let mut sim = live_sim(48);
+    let wall = place(&mut sim, 20, 10, "copper-wall", 1);
+    let conveyor = place(&mut sim, 15, 10, "conveyor", 1);
+    let wall_start = health(&sim, wall).expect("wall health");
+    let conveyor_start = health(&sim, conveyor).expect("conveyor health");
+    // Immobile enemy unit behind the wall: the dagger's primary target.
+    let decoy = sim
+        .spawn_live_unit("dagger", 1, 25.0 * 8.0, 10.0 * 8.0 + 4.0, 180.0)
+        .expect("decoy");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(decoy) {
+        slot.kind = AiKind::Player;
+    }
+    let _ = sim
+        .spawn_live_unit("dagger", 2, 10.0 * 8.0, 10.0 * 8.0 + 4.0, 0.0)
+        .expect("dagger");
+    for _ in 0..600 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        health(&sim, conveyor),
+        Some(conveyor_start),
+        "conveyor untouched (not the aimed tile)"
+    );
+    assert!(
+        health(&sim, wall).is_none_or(|hp| hp < wall_start),
+        "wall damaged by the bullet that passed over the conveyor: {:?}",
+        health(&sim, wall)
+    );
+}
+
+/// T1/PAR-0088: a carbide-fed `scathe` fires the `spawnUnit` carrier
+/// (`BulletType.create` spawns no bullet), the `scathe-missile` flies to the
+/// target and its shoot-on-death explosion kills it (`Blocks.java:5251-5330`).
+#[test]
+fn scathe_launches_missile_and_kills() {
+    use crate::entities::comp::unit::comp::UnitTypeComp;
+
+    let mut sim = live_sim(64);
+    let scathe = place(&mut sim, 10, 10, "scathe", 1);
+    feed(&mut sim, scathe, "carbide", 10);
+    let (tx, ty) = (10.0 * 8.0, 10.0 * 8.0);
+    let dagger = sim
+        .spawn_live_unit("dagger", 2, tx + 240.0, ty, 180.0)
+        .expect("dagger");
+    let missile_id = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .unit_id("scathe-missile")
+        .expect("scathe-missile");
+    let mut saw_missile = false;
+    for _ in 0..900 {
+        sim.tick().expect("tick");
+        if sim.unit_runtime().expect("rt").units.iter().any(|entity| {
+            sim.ecs
+                .0
+                .get::<UnitTypeComp>(*entity)
+                .is_some_and(|comp| comp.type_id == missile_id)
+        }) {
+            saw_missile = true;
+        }
+        if sim.ecs.0.get_entity(dagger).is_err() {
+            break;
+        }
+    }
+    assert!(saw_missile, "scathe launched a scathe-missile");
+    assert!(
+        sim.ecs.0.get_entity(dagger).is_err(),
+        "dagger killed by the missile's death explosion"
+    );
+}
+
+/// T2: a missile flies over an enemy `underBullets` conveyor it was not aimed
+/// at (`MissileAI.java:33-36`: `build == target || !build.block.underBullets`).
+///
+/// The scathe targets the unit first (`Units.closestTarget` checks units before
+/// buildings), so the missile's target is the dagger, not the conveyor on its
+/// flight path.
+#[test]
+fn missile_ignores_conveyor_below() {
+    let mut sim = live_sim(64);
+    let scathe = place(&mut sim, 10, 10, "scathe", 1);
+    feed(&mut sim, scathe, "carbide", 10);
+    let conveyor = place(&mut sim, 15, 10, "conveyor", 2);
+    let conveyor_start = health(&sim, conveyor).expect("conveyor health");
+    let dagger = sim
+        .spawn_live_unit("dagger", 2, 10.0 * 8.0 + 240.0, 10.0 * 8.0, 180.0)
+        .expect("dagger");
+    for _ in 0..900 {
+        sim.tick().expect("tick");
+        if sim.ecs.0.get_entity(dagger).is_err() {
+            break;
+        }
+    }
+    assert_eq!(
+        health(&sim, conveyor),
+        Some(conveyor_start),
+        "missile passed over the conveyor (not its target)"
+    );
+    assert!(
+        sim.ecs.0.get_entity(dagger).is_err(),
+        "dagger killed after the missile crossed the conveyor"
+    );
+}
+
+/// PAR-0137: `canBoost` mechs lift off while boosting
+/// (`UnitComp.updateBoosting`, UnitComp.java:121-130): elevation reaches 1,
+/// `unit_speed` gains the boost multiplier and the lifted unit counts as
+/// flying (ground-only bullets then skip it, `BulletComp.collision`).
+#[test]
+fn boosting_nova_lifts_off() {
+    use crate::entities::comp::unit::comp::UnitCore;
+
+    let mut sim = live_sim(48);
+    let (rise_speed, speed, boost_multiplier) = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        let id = content.unit_id("nova").expect("nova");
+        let def = content.unit(id).expect("nova def");
+        (def.rise_speed, def.speed, def.boost_multiplier)
+    };
+    let nova = sim
+        .spawn_live_unit("nova", 1, 100.0, 100.0, 0.0)
+        .expect("nova");
+    if let Some(mut core) = sim.ecs.0.get_mut::<UnitCore>(nova) {
+        core.boosting = true;
+    }
+    let ticks = (1.0 / rise_speed).ceil() as usize + 2;
+    for _ in 0..ticks {
+        sim.tick().expect("tick");
+        if let Some(mut core) = sim.ecs.0.get_mut::<UnitCore>(nova) {
+            core.boosting = true;
+        }
+    }
+    let elevation = sim
+        .ecs
+        .0
+        .get::<UnitCore>(nova)
+        .map(|core| core.elevation)
+        .expect("nova core");
+    assert!(
+        elevation >= 1.0,
+        "elevation reached 1 after {ticks} ticks ({elevation})"
+    );
+    assert!(speed > 0.0 && boost_multiplier > 1.0);
+    let speed_now = {
+        let runtime = sim.unit_runtime().expect("rt");
+        crate::entities::comp::unit::movement::unit_speed(
+            &sim.ecs.0,
+            &runtime.grid,
+            &runtime.content,
+            nova,
+        )
+    };
+    assert!(
+        (speed_now - speed * boost_multiplier).abs() < 0.01,
+        "boosted speed {speed_now} ~= {speed} * {boost_multiplier}"
+    );
+    assert!(
+        crate::combat::bullet::unit_is_flying(&sim.ecs.0, nova),
+        "lifted nova counts as flying"
+    );
+}
+
+/// T7: a team-2 flare keeps circling its building target and keeps firing
+/// (`FlyingAI.updateMovement` -> `AIController.circleAttack`, FlyingAI.java:15,
+/// AIController.java:318-351) instead of parking at the anchor tile.
+///
+/// Note: the flare's 9 damage / 80-tick reload cannot destroy a 320 hp copper
+/// wall inside 1200 ticks (135 damage), so the assertions are continuous
+/// circling, a growing shot count and wall damage.
+#[test]
+fn flare_circles_and_keeps_firing() {
+    let mut sim = live_sim(64);
+    let wall = place(&mut sim, 30, 10, "copper-wall", 1);
+    let wall_start = health(&sim, wall).expect("wall health");
+    let flare = sim
+        .spawn_live_unit("flare", 2, 6.0 * 8.0, 10.0 * 8.0, 0.0)
+        .expect("flare");
+    let shots = |sim: &Sim| {
+        sim.ecs
+            .0
+            .get::<crate::weapons::UnitWeapons>(flare)
+            .map(|weapons| weapons.mounts.iter().map(|m| m.total_shots).sum::<i32>())
+            .unwrap_or(0)
+    };
+    let mut shots_mid = 0;
+    let mut moving_ticks = 0;
+    let mut sampled = 0;
+    for tick in 0..1200 {
+        sim.tick().expect("tick");
+        let vel = sim
+            .ecs
+            .0
+            .get::<Vel>(flare)
+            .map(|vel| (vel.x * vel.x + vel.y * vel.y).sqrt())
+            .unwrap_or(0.0);
+        if tick > 120 {
+            sampled += 1;
+            if vel > 0.01 {
+                moving_ticks += 1;
+            }
+        }
+        if tick == 300 {
+            shots_mid = shots(&sim);
+        }
+    }
+    let shots_end = shots(&sim);
+    assert!(
+        sampled > 0 && moving_ticks * 10 >= sampled * 9,
+        "flare keeps circling: {moving_ticks}/{sampled} sampled ticks with speed"
+    );
+    assert!(
+        shots_end > shots_mid,
+        "flare keeps firing after tick 300 ({shots_mid} -> {shots_end})"
+    );
+    assert!(
+        health(&sim, wall).is_none_or(|hp| hp < wall_start),
+        "wall damaged while the flare circles: {:?}",
+        health(&sim, wall)
+    );
+}
+
+/// T8: `PhysicsProcess` pushes overlapping same-layer unit bodies apart
+/// (`PhysicsProcess.java:188-247`, body radius `hitSize * 0.6`); different
+/// collision layers never interact.
+#[test]
+fn stacked_daggers_separate() {
+    let mut sim = live_sim(32);
+    let a = sim
+        .spawn_live_unit("dagger", 1, 100.0, 100.0, 0.0)
+        .expect("dagger a");
+    let b = sim
+        .spawn_live_unit("dagger", 1, 100.0, 100.0, 0.0)
+        .expect("dagger b");
+    for _ in 0..60 {
+        sim.tick().expect("tick");
+    }
+    let pa = sim.ecs.0.get::<Pos>(a).copied().expect("pos a");
+    let pb = sim.ecs.0.get::<Pos>(b).copied().expect("pos b");
+    let dist = ((pa.x - pb.x).powi(2) + (pa.y - pb.y).powi(2)).sqrt();
+    assert!(
+        dist >= 8.6,
+        "stacked daggers separated to {dist} px (body sum = 9.6)"
+    );
+
+    // A flying flare and a grounded dagger share no layer: no push.
+    let flare = sim
+        .spawn_live_unit("flare", 1, 200.0, 200.0, 0.0)
+        .expect("flare");
+    let dagger = sim
+        .spawn_live_unit("dagger", 1, 200.0, 200.0, 0.0)
+        .expect("dagger c");
+    for _ in 0..30 {
+        sim.tick().expect("tick");
+    }
+    let pf = sim.ecs.0.get::<Pos>(flare).copied().expect("pos flare");
+    let pd = sim.ecs.0.get::<Pos>(dagger).copied().expect("pos dagger");
+    let layer_dist = ((pf.x - pd.x).powi(2) + (pf.y - pd.y).powi(2)).sqrt();
+    assert!(
+        layer_dist < 1.0,
+        "different layers do not push each other ({layer_dist} px)"
+    );
+}
+
+/// PAR-0138: `[` with no explicit target picks the closest unit around the
+/// *carrier* (`Units.closest(team, pay.x(), pay.y(), hitSize * 2f, ...)`,
+/// InputHandler.java:1043), not around the cursor.
+#[test]
+fn mega_pickup_without_target_uses_carrier_position() {
+    use crate::entities::comp::unit::comp::UnitPayloads;
+
+    let mut sim = live_sim(48);
+    let mega = sim
+        .spawn_player_unit("mega", 1, 100.0, 100.0, 0.0)
+        .expect("mega");
+    let _ = sim
+        .spawn_live_unit("dagger", 1, 110.0, 100.0, 0.0)
+        .expect("dagger");
+    assert!(
+        sim.apply_payload_command(0, 400.0, 400.0, None),
+        "the cursor is far away; the carrier-adjacent dagger is picked"
+    );
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<UnitPayloads>(mega)
+            .map(|payloads| payloads.stack.len()),
+        Some(1),
+        "one carried unit"
+    );
+}
+
+/// PAR-0138: with no unit in reach, `[` picks the building under the carrier
+/// (`world.buildWorld(pay.x(), pay.y())`, InputHandler.java:1045).
+#[test]
+fn mega_pickup_falls_back_to_building_under_carrier() {
+    use crate::entities::comp::unit::comp::UnitPayloads;
+
+    let mut sim = live_sim(48);
+    let mega = sim
+        .spawn_player_unit("mega", 1, 96.0, 96.0, 0.0)
+        .expect("mega");
+    // Tile (12,12) spans x 96..104, y 96..104: the carrier stands on it
+    // ((96,96) maps to tile 12 under both `World.tileWorld` truncation and the
+    // port's rounding `WorldGrid::to_tile`).
+    let _ = place(&mut sim, 12, 12, "copper-wall", 1);
+    assert!(
+        sim.apply_payload_command(0, 400.0, 400.0, None),
+        "no unit in reach; the wall under the carrier is picked"
+    );
+    assert!(
+        sim.grid.tiles.get(12, 12).build.is_none(),
+        "the wall left the grid"
+    );
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<UnitPayloads>(mega)
+            .map(|payloads| payloads.stack.len()),
+        Some(1),
+        "one carried building"
+    );
+}
+
+/// T15: `BulletType.lifesteal` heals the bullet owner by
+/// `min(target_health, damage) * lifesteal` before damage is applied
+/// (`BulletType.java:502-505`).
+#[test]
+fn lifesteal_bullet_heals_owner() {
+    use crate::content::BulletKind;
+    use crate::content::registries::bullets::BulletDef;
+
+    let mut sim = live_sim(32);
+    let owner = sim
+        .spawn_live_unit("dagger", 1, 100.0, 100.0, 0.0)
+        .expect("owner");
+    let target = sim
+        .spawn_live_unit("dagger", 2, 120.0, 100.0, 0.0)
+        .expect("target");
+    if let Some(mut health) = sim.ecs.0.get_mut::<Health>(owner) {
+        health.health = 50.0;
+    }
+    {
+        let world = &mut sim.ecs.0;
+        let mut runtime = world
+            .remove_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+            .expect("runtime");
+        let mut def = BulletDef::new(BulletKind::Basic);
+        def.speed = 0.0;
+        def.lifetime = 100.0;
+        def.damage = 40.0;
+        def.lifesteal = 0.5;
+        let id = runtime.content.add_bullet(def).expect("add bullet");
+        let audio = crate::audio::AudioSinkRes::noop();
+        let mut spawned = Vec::new();
+        {
+            let crate::sim::unit_runtime::UnitRuntime {
+                content,
+                grid,
+                rng,
+                fx,
+                seq,
+                ..
+            } = &mut runtime;
+            let mut ctx = crate::combat::bullet::CombatCtx {
+                world,
+                content,
+                grid,
+                rng,
+                fx: fx.as_ref(),
+                audio: &audio,
+                seq,
+                spawned: &mut spawned,
+            };
+            let spawn = crate::combat::BulletSpawn {
+                def: id,
+                owner: Some(owner),
+                x: 100.0,
+                y: 100.0,
+                ..crate::combat::BulletSpawn::default()
+            };
+            let entity = ctx.spawn(&spawn).expect("bullet");
+            crate::combat::bullet::hit_entity(&mut ctx, entity, target, 150.0);
+        }
+        world.insert_non_send(runtime);
+    }
+    let owner_health = health(&sim, owner).expect("owner health");
+    assert!(
+        (owner_health - 70.0).abs() < 0.5,
+        "owner healed by 40 * 0.5 = 20 (50 -> {owner_health})"
+    );
+}
+
+/// T17: a dying flying unit crashes with area damage around its position
+/// (`UnitComp.destroy` -> `Damage.damage(team, x, y, hitSize^0.94 * 1.25,
+/// hitSize^0.75 * crashDamageMultiplier * 2.5 * rules.unitCrashDamage(team))`,
+/// UnitComp.java:921-928).
+#[test]
+fn crashing_flare_damages_neighbours() {
+    let mut sim = live_sim(32);
+    let (wx, wy) = (15, 12);
+    let wall = place(&mut sim, wx, wy, "copper-wall", 1);
+    let wall_start = health(&sim, wall).expect("wall health");
+    let flare = sim
+        .spawn_live_unit(
+            "flare",
+            2,
+            wx as f32 * 8.0 + 4.0,
+            wy as f32 * 8.0 + 4.0,
+            0.0,
+        )
+        .expect("flare");
+    if let Some(mut health) = sim.ecs.0.get_mut::<Health>(flare) {
+        health.health = 0.0;
+        health.dead = true;
+    }
+    sim.tick().expect("tick");
+    assert!(
+        sim.ecs.0.get_entity(flare).is_err(),
+        "the crashed flare was removed"
+    );
+    assert!(
+        health(&sim, wall).is_none_or(|hp| hp < wall_start),
+        "the crash damaged the neighbouring wall: {:?}",
+        health(&sim, wall)
+    );
+}
+
+/// T16: destroying a rebuildable block pushes a ghost plan onto its team's
+/// queue (`Logic`'s `BlockDestroyEvent` -> `BuildingComp.addPlan(true)`,
+/// Logic.java:42-50).
+#[test]
+fn destroyed_building_leaves_rebuild_plan() {
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+
+    let mut sim = live_sim(32);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let mut session = PlaySession::new(Rules {
+        default_team: 1,
+        ..Rules::default()
+    });
+    session.phase = crate::game::State::Playing;
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+
+    let wall_block = block(&sim, "copper-wall");
+    let wall = place(&mut sim, 10, 10, "copper-wall", 1);
+    sim.ecs
+        .0
+        .get_mut::<Health>(wall)
+        .expect("wall health")
+        .health = 0.0;
+    sim.tick().expect("tick");
+
+    let campaign = sim
+        .ecs
+        .0
+        .get_resource::<CampaignRuntime>()
+        .expect("campaign");
+    let plans = &campaign
+        .session
+        .teams
+        .get_or_null(crate::ecs::TeamId(1))
+        .expect("team 1")
+        .plans;
+    assert!(
+        plans
+            .front()
+            .is_some_and(|plan| plan.block.raw() == wall_block && plan.x == 10 && plan.y == 10),
+        "ghost plan queued for the dead wall: {plans:?}"
+    );
+}
+
+/// T5: a destroyed container full of blast compound explodes with wave damage
+/// (`BuildingComp.onDestroyed` -> `Damage.dynamicExplosion`,
+/// BuildingComp.java:1490-1518).
+#[test]
+fn destroyed_blast_container_damages_neighbours() {
+    let mut sim = live_sim(48);
+    let container = place(&mut sim, 10, 10, "container", 1);
+    let wall = place(&mut sim, 12, 10, "copper-wall", 1);
+    let wall_start = health(&sim, wall).expect("wall health");
+    let blast = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .item_id("blast-compound")
+        .expect("blast-compound");
+    {
+        let Some(mut module) = sim
+            .ecs
+            .0
+            .get_mut::<crate::world::modules::ItemModule>(container)
+        else {
+            return; // no item module fixture
+        };
+        module.items[blast.index()] = 300;
+        module.total = 300;
+    }
+    sim.ecs
+        .0
+        .get_mut::<Health>(container)
+        .expect("container health")
+        .health = 0.0;
+    sim.tick().expect("tick");
+    assert!(
+        sim.ecs.0.get_entity(container).is_err(),
+        "the container was destroyed"
+    );
+    assert!(
+        health(&sim, wall).is_none_or(|hp| hp < wall_start),
+        "the explosion damaged the wall 2 tiles away: {:?}",
+        health(&sim, wall)
+    );
+}
+
+/// T5: a destroyed container full of flammable items leaves a fire
+/// (`fire = true` on the building-destroy explosion path).
+#[test]
+fn destroyed_coal_container_starts_fire() {
+    let mut sim = live_sim(48);
+    let container = place(&mut sim, 10, 10, "container", 1);
+    let coal = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .item_id("coal")
+        .expect("coal");
+    {
+        let Some(mut module) = sim
+            .ecs
+            .0
+            .get_mut::<crate::world::modules::ItemModule>(container)
+        else {
+            return;
+        };
+        module.items[coal.index()] = 300;
+        module.total = 300;
+    }
+    sim.ecs
+        .0
+        .get_mut::<Health>(container)
+        .expect("container health")
+        .health = 0.0;
+    sim.tick().expect("tick");
+    assert!(
+        sim.ecs.0.get_entity(container).is_err(),
+        "the container was destroyed"
+    );
+    let fire = (10..=11)
+        .any(|tx| (10..=11).any(|ty| crate::combat::fires::find_at(&sim.ecs.0, tx, ty).is_some()));
+    assert!(
+        fire,
+        "the coal explosion left a fire at the container tile (`World.toTile` of the block centre (84,84) rounds to (11,11) like Java's `Math.round`)"
+    );
+}
+
+/// PAR-0140: every registered command id is accepted for a commandable unit
+/// and stored on it (`CommandAI.command`, CommandAI.java:57-64); move orders
+/// keep the tile path.
+#[test]
+fn live_unit_command_switch_is_stored() {
+    use crate::ai::controller::{AiKind, ControllerSlot, UnitCommandComp};
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+
+    let mut sim = live_sim(48);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let session = PlaySession::new(Rules {
+        default_team: 1,
+        ..Rules::default()
+    });
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+
+    let unit = sim
+        .spawn_live_unit("poly", 1, 100.0, 100.0, 0.0)
+        .expect("poly");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(unit) {
+        slot.kind = AiKind::Command;
+    }
+    let id = sim.ecs.0.get::<crate::ecs::EntitySeq>(unit).expect("seq").0 as i32;
+    let (repair_id, poly_allows) = {
+        let runtime = sim.unit_runtime().expect("rt");
+        let repair = runtime
+            .content
+            .unit_command_by_name("repair")
+            .expect("repair command");
+        let allows = runtime
+            .content
+            .unit_id("poly")
+            .and_then(|id| runtime.content.unit(id))
+            .is_some_and(|def| crate::ai::unit_command_runtime::allows_command(def, repair.id));
+        (repair.id.raw(), allows)
+    };
+    assert!(poly_allows, "poly lists the repair command");
+    assert_eq!(
+        sim.apply_live_unit_command(&[id], repair_id, 0.0, 0.0),
+        1,
+        "the repair command is accepted"
+    );
+    assert_eq!(
+        sim.ecs.0.get::<UnitCommandComp>(unit).copied(),
+        Some(UnitCommandComp(repair_id)),
+        "the active command is stored on the unit"
+    );
+    // A move order keeps the ordered tile (and clears nothing else).
+    assert_eq!(
+        sim.apply_live_unit_command(&[id], crate::sim::command::MOVE_COMMAND.raw(), 200.0, 100.0),
+        1,
+        "move order accepted"
+    );
+    assert!(
+        sim.ecs
+            .0
+            .get::<ControllerSlot>(unit)
+            .and_then(|slot| slot.target)
+            .is_some(),
+        "move target set"
+    );
+}
+
+/// T12: the live AI aims with the `Predict.intercept` lead
+/// (`AIController.updateWeapons`, AIController.java:231): a slow shooter
+/// connects with a target moving perpendicular at full speed.
+#[test]
+fn mace_leads_a_moving_dagger() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::world::TilePos;
+
+    let mut sim = live_sim(64);
+    let shooter = sim
+        .spawn_live_unit("mace", 1, 100.0, 100.0, 0.0)
+        .expect("mace");
+    let target = sim
+        .spawn_live_unit("dagger", 2, 140.0, 100.0, 0.0)
+        .expect("target");
+    // Walk the target straight down (-y) at full speed.
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(target) {
+        slot.kind = AiKind::Command;
+        slot.target = Some(TilePos::new(17, 20));
+    }
+    let target_start = health(&sim, target).expect("target health");
+    let mut killed = false;
+    for _ in 0..600 {
+        sim.tick().expect("tick");
+        if sim.ecs.0.get_entity(target).is_err() {
+            killed = true;
+            break;
+        }
+    }
+    let target_end = health(&sim, target);
+    // The mace (74 damage) kills a 150 hp dagger in 3 connected shots; a
+    // no-lead aim hits nothing once the target has moved a bullet-flight away.
+    assert!(
+        killed || target_end.is_some_and(|hp| hp <= target_start - 3.0 * 74.0),
+        "the lead lets the mace connect (start {target_start}, end {target_end:?}, shooter {:?})",
+        health(&sim, shooter)
+    );
+}
+
+/// T14: the live dispatch runs `SuicideAI` for crawlers (`AiKind::Suicide`):
+/// the crawler rams a target and its death weapon fires on contact
+/// (`ai/types/suicide.rs`, `UnitTypes.crawler`).
+#[test]
+fn crawler_rams_and_explodes() {
+    let mut sim = live_sim(48);
+    let target = sim
+        .spawn_live_unit("dagger", 1, 150.0, 100.0, 0.0)
+        .expect("target dagger");
+    let target_start = health(&sim, target).expect("target health");
+    let crawler = sim
+        .spawn_live_unit("crawler", 2, 100.0, 100.0, 0.0)
+        .expect("crawler");
+    let mut ticks = 0;
+    while sim.ecs.0.get_entity(crawler).is_ok() && ticks < 400 {
+        sim.tick().expect("tick");
+        ticks += 1;
+    }
+    assert!(
+        sim.ecs.0.get_entity(crawler).is_err(),
+        "the crawler rammed the target and died ({ticks} ticks); pos {:?} weapons {:?}",
+        sim.ecs.0.get::<Pos>(crawler).map(|p| (p.x, p.y)),
+        sim.ecs
+            .0
+            .get::<crate::weapons::UnitWeapons>(crawler)
+            .map(|w| w
+                .mounts
+                .iter()
+                .map(|m| (m.total_shots, m.shoot, m.target.is_some()))
+                .collect::<Vec<_>>())
+    );
+    assert!(
+        health(&sim, target).is_none_or(|hp| hp < target_start),
+        "the crawler's death explosion damaged the target: {:?}",
+        health(&sim, target)
+    );
+}
+
+/// T14: a commanded builder runs `BuilderAI` (`AiKind::Builder`): it walks to
+/// the assigned tile and repairs the building there (`ai/types/builder.rs`).
+#[test]
+fn commanded_builder_repairs_target() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::world::TilePos;
+
+    let mut sim = live_sim(48);
+    let wall = place(&mut sim, 16, 12, "copper-wall", 1);
+    sim.ecs
+        .0
+        .get_mut::<Health>(wall)
+        .expect("wall health")
+        .health = 100.0;
+    let builder = sim
+        .spawn_live_unit("alpha", 1, 100.0, 100.0, 0.0)
+        .expect("alpha");
+    // `alpha`'s content controller is `BuilderOrCommand` -> `AiKind::Builder`
+    // for spawned units; assign the repair tile.
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(builder) {
+        slot.kind = AiKind::Builder;
+        slot.target = Some(TilePos::new(16, 12));
+    }
+    for _ in 0..120 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        health(&sim, wall).is_some_and(|hp| hp > 100.0),
+        "the builder repaired the wall: {:?}",
+        health(&sim, wall)
+    );
+    let pos = sim.ecs.0.get::<Pos>(builder).copied().expect("builder pos");
+    let dist = ((pos.x - 132.0).powi(2) + (pos.y - 100.0).powi(2)).sqrt();
+    assert!(dist < 40.0, "the builder closed on the target ({dist} px)");
+}
+
+/// T14: the `Boost` kind enables `UnitCore.boosting`, which lifts a mech
+/// (`BoostAI.defaultBehavior` + `UnitComp.updateBoosting`).
+#[test]
+fn boost_kind_lifts_mech() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::entities::comp::unit::comp::UnitCore;
+
+    let mut sim = live_sim(48);
+    let nova = sim
+        .spawn_live_unit("nova", 1, 100.0, 100.0, 0.0)
+        .expect("nova");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(nova) {
+        slot.kind = AiKind::Boost;
+    }
+    for _ in 0..20 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        sim.ecs
+            .0
+            .get::<UnitCore>(nova)
+            .is_some_and(|core| core.elevation >= 1.0),
+        "the boost kind lifted the mech: {:?}",
+        sim.ecs.0.get::<UnitCore>(nova).map(|core| core.elevation)
     );
 }
 

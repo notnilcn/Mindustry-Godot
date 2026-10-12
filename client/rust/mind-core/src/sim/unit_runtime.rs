@@ -28,7 +28,7 @@ use bevy_ecs::world::World;
 
 use crate::ai::controller::{AiKind, ControllerSlot};
 use crate::ai::pathfinder::Pathfinder;
-use crate::ai::types::flying::update_flying;
+use crate::ai::types::flying::{circle_attack, move_to, update_flying};
 use crate::ai::types::ground::update_ground;
 use crate::ai::types::missile::{MissileAi, MissileShooter, update_missile};
 use crate::ai::types::player::PlayerInput;
@@ -43,7 +43,7 @@ use crate::ecs::{BuildingComp, EntitySeq};
 use crate::entities::comp::unit::comp::{PhysicsComp, TimedKillComp, UnitCore, UnitTypeComp};
 use crate::entities::comp::unit::lifecycle::{spawn_unit, spawn_unit_def, sync_weapon_state};
 use crate::entities::comp::unit::movement;
-use crate::entities::comp::{Building, Health, Pos, TeamComp};
+use crate::entities::comp::{Building, Health, Pos, TeamComp, Vel};
 use crate::game::runtime::CampaignRuntime;
 use crate::game::spawn_group::SpawnGroup;
 use crate::game::waves::Waves;
@@ -398,6 +398,41 @@ impl Sim {
                 // `UnitComp.destroy()` fires `shootOnDeath` mounts first
                 // (PAR-0088); spawned bullets join the live list.
                 run_shoot_on_death(world, &mut runtime, entity);
+                // `UnitComp.destroy` crash damage (`UnitComp.java:921-928`): a
+                // flying unit with `createWreck`, not spawned by a core, crashes
+                // with area damage when `rules.unitCrashDamage(team) > 0`.
+                {
+                    let team = world.get::<TeamComp>(entity).map(|t| t.team).unwrap_or(0);
+                    let pos = world.get::<Pos>(entity).map(|p| (p.x, p.y));
+                    let def = world
+                        .get::<UnitTypeComp>(entity)
+                        .and_then(|comp| runtime.content.unit(comp.type_id));
+                    if let (Some((x, y)), Some(def)) = (pos, def) {
+                        let rules = world
+                            .get_resource::<CampaignRuntime>()
+                            .map(|runtime| runtime.session.rules.clone())
+                            .unwrap_or_default();
+                        let crash = rules.unit_crash_damage(team);
+                        let core_spawned = world
+                            .get::<UnitCore>(entity)
+                            .is_some_and(|core| core.spawned_by_core);
+                        if def.flying && !core_spawned && def.create_wreck && crash > 0.0 {
+                            let damage =
+                                def.hit_size.powf(0.75) * def.crash_damage_multiplier * 2.5 * crash;
+                            let radius = def.hit_size.powf(0.94) * 1.25;
+                            let _ = crate::combat::damage::area::damage_area(
+                                world,
+                                &runtime.content,
+                                Some(team),
+                                x,
+                                y,
+                                radius,
+                                damage,
+                                crate::combat::damage::area::DamageOptions::default(),
+                            );
+                        }
+                    }
+                }
                 let UnitRuntime {
                     content,
                     grid,
@@ -503,12 +538,70 @@ impl Sim {
                         )
                     })
                     .unwrap_or(((0.0, 0.0), 1));
+                // `Logic`'s `BlockDestroyEvent` handler: a rebuildable dead
+                // block appends a ghost plan to its team's queue
+                // (`tile.build.addPlan(true)`, Logic.java:42-50;
+                // `BuildingComp.addPlan`, BuildingComp.java:335-374).
+                let plan = self
+                    .ecs
+                    .0
+                    .get::<crate::entities::comp::Building>(entity)
+                    .map(|building| (building.tile, building.rotation as i8, building.block));
+                // `BuildingComp.onDestroyed` explosion terms
+                // (BuildingComp.java:1491-1508), read before the modules are
+                // removed with the building.
+                let explosion_terms = plan
+                    .and_then(|(_, _, block)| {
+                        let content = &self.unit_runtime()?.content;
+                        let def = content.block(block)?;
+                        Some(building_explosion_terms(&self.ecs.0, content, entity, def))
+                    })
+                    .unwrap_or((0.0, 0.0, 0.0));
+                let ghost = {
+                    let rebuildable = plan
+                        .and_then(|(_, _, block)| {
+                            self.unit_runtime()
+                                .and_then(|runtime| runtime.content.block(block))
+                                .map(|def| def.rebuildable)
+                        })
+                        .unwrap_or(true);
+                    let ghost_blocks = self
+                        .ecs
+                        .0
+                        .get_resource::<CampaignRuntime>()
+                        .map(|campaign| campaign.session.rules.ghost_blocks)
+                        .unwrap_or(true);
+                    ghost_blocks && rebuildable
+                };
+                let team = self
+                    .ecs
+                    .0
+                    .get::<TeamComp>(entity)
+                    .map(|team| team.team)
+                    .unwrap_or(0);
                 let Some(runtime) = self.block_runtime.as_mut() else {
                     break;
                 };
                 if let Some((x, y, block)) =
                     runtime.destroy_building(&mut self.ecs.0, &mut self.grid, entity)
                 {
+                    if ghost
+                        && let Some((tile, rotation, plan_block)) = plan
+                        && let Some(mut campaign) = self.ecs.0.get_resource_mut::<CampaignRuntime>()
+                    {
+                        let data = campaign.session.teams.get(crate::ecs::TeamId(team));
+                        // `checkPrevious`: drop existing plans on this tile.
+                        data.plans
+                            .retain(|plan| plan.x != tile.x() || plan.y != tile.y());
+                        data.plans.push_front(crate::game::teams::BlockPlan {
+                            x: tile.x(),
+                            y: tile.y(),
+                            rotation,
+                            block: plan_block,
+                            config: None,
+                            removed: false,
+                        });
+                    }
                     destroyed += 1;
                     log::debug!("building destroyed at ({x}, {y}) block {}", block.raw());
                     self.push_event(crate::event::SimEvent::BlockBrokenEvent(
@@ -549,6 +642,30 @@ impl Sim {
                             }
                         }
                         self.ecs.0.insert_non_send(unit_runtime);
+                    }
+                    // `BuildingComp.onDestroyed` -> `Damage.dynamicExplosion`
+                    // (BuildingComp.java:1518; fire comes from the 8-arg
+                    // overload, Damage.java:78-82).
+                    if damage_explosions {
+                        let (flammability, explosiveness, power) = explosion_terms;
+                        if let Some(mut unit_runtime) = self.ecs.0.remove_non_send::<UnitRuntime>()
+                        {
+                            crate::combat::damage::explosion::dynamic_explosion(
+                                &mut self.ecs.0,
+                                &unit_runtime.content,
+                                &mut unit_runtime.rng,
+                                center.0,
+                                center.1,
+                                flammability,
+                                explosiveness,
+                                power,
+                                size as f32 * crate::config::TILESIZE as f32 / 2.0,
+                                true,
+                                true,
+                                None,
+                            );
+                            self.ecs.0.insert_non_send(unit_runtime);
+                        }
                     }
                 }
             }
@@ -799,6 +916,207 @@ impl Sim {
 /// kind kinematics and the weapon pass (`Groups.unit.update()`).
 ///
 /// No-op unless the unit runtime is installed, so the P0 path is untouched.
+/// `BuildingComp.onDestroyed` explosion terms (`BuildingComp.java:1491-1508`):
+/// `(flammability, explosiveness, power)` summed over the live item/liquid/power
+/// modules. `explosionItemCap` caps item amounts at `item_capacity`; liquids
+/// count half; buffered power uses `power.status * capacity`. The per-block
+/// `baseExplosiveness`/`flammabilityScale`/`explosivenessScale` fields are not
+/// modelled by `BlockDef` yet (defaults 0/1 would apply).
+fn building_explosion_terms(
+    world: &World,
+    content: &ContentRegistry,
+    entity: Entity,
+    def: &crate::content::registries::blocks::BlockDef,
+) -> (f32, f32, f32) {
+    let mut explosiveness = 0.0f32;
+    let mut flammability = 0.0f32;
+    let mut power = 0.0f32;
+    if def.has_items
+        && let Some(module) = world.get::<crate::world::modules::ItemModule>(entity)
+    {
+        let cap = def.item_capacity.max(0);
+        for (index, amount) in module.items.iter().enumerate() {
+            // `Math.min(items.get(item), explosionItemCap())`.
+            let amount = (*amount).min(cap) as f32;
+            if amount <= 0.0 {
+                continue;
+            }
+            if let Some(item) = content.items().get(index) {
+                explosiveness += item.explosiveness * amount;
+                flammability += item.flammability * amount;
+                power += item.charge * amount.powf(1.1) * 150.0;
+            }
+        }
+    }
+    if def.has_liquids
+        && let Some(module) = world.get::<crate::world::modules::LiquidModule>(entity)
+    {
+        for (index, amount) in module.liquids.iter().enumerate() {
+            if *amount <= 0.0 {
+                continue;
+            }
+            if let Some(liquid) = content.liquids().get(index) {
+                flammability += liquid.flammability * *amount / 2.0;
+                explosiveness += liquid.explosiveness * *amount / 2.0;
+            }
+        }
+    }
+    if let Some(index) = def.cons_power
+        && let Some(consumer) = def.consumes.get(index)
+        && let crate::content::registries::blocks::Consume::Power { buffered, .. } =
+            consumer.consume
+        && buffered > 0.0
+        && let Some(module) = world.get::<crate::world::modules::PowerModule>(entity)
+    {
+        power += module.status * buffered;
+    }
+    (flammability, explosiveness, power)
+}
+
+/// One unit body for [`unit_physics_system`] (`PhysicsProcess.PhysicsBody`).
+struct PhysicsBody {
+    entity: Entity,
+    seq: u64,
+    x: f32,
+    y: f32,
+    radius: f32,
+    mass: f32,
+    layer: u8,
+}
+
+/// `UnitComp.collisionLayer` (`UnitComp.java:487-489`): legs layer for
+/// leg-stepping units, ground while grounded, flying otherwise
+/// (`PhysicsProcess.layerLegs`/`layerGround`/`layerFlying`).
+fn collision_layer(
+    world: &World,
+    def: &crate::content::registries::units::UnitTypeDef,
+    entity: Entity,
+) -> u8 {
+    if def.allow_leg_step && def.leg_physics_layer {
+        1
+    } else if crate::combat::bullet::unit_is_flying(world, entity) {
+        2
+    } else {
+        0
+    }
+}
+
+/// `PhysicsProcess` (`PhysicsProcess.java:188-247`): one relaxation pass over
+/// every physics-enabled unit, pairing only same-layer bodies.
+///
+/// `type.physics` units push each other apart when their
+/// `hitSize * unitCollisionRadiusScale` circles overlap; exact overlaps are
+/// separated in a random direction. Upstream runs this asynchronously with a
+/// quad tree and a `collided` flag; this port runs a deterministic O(n²) pass in
+/// `EntitySeq` order (fine below ~500 units) and applies each move immediately.
+/// Java writes bodies back through `entity.move(delta)`; pushes into solid tiles
+/// are dropped here to keep units out of walls.
+pub fn unit_physics_system(world: &mut World) {
+    let Some(mut runtime) = world.remove_non_send::<UnitRuntime>() else {
+        return;
+    };
+    let mut bodies: Vec<PhysicsBody> = Vec::with_capacity(runtime.units.len());
+    for &entity in &runtime.units {
+        let Some(def) = world
+            .get::<UnitTypeComp>(entity)
+            .and_then(|comp| runtime.content.unit(comp.type_id))
+        else {
+            continue;
+        };
+        // `PhysicsProcess.add`: `unit.type.physics` only.
+        if !def.physics {
+            continue;
+        }
+        if world
+            .get::<Health>(entity)
+            .is_some_and(|health| health.dead)
+        {
+            continue;
+        }
+        let Some(pos) = world.get::<Pos>(entity).copied() else {
+            continue;
+        };
+        let seq = world
+            .get::<EntitySeq>(entity)
+            .map(|seq| seq.0)
+            .unwrap_or(u64::MAX);
+        bodies.push(PhysicsBody {
+            entity,
+            seq,
+            x: pos.x,
+            y: pos.y,
+            // `body.radius = unit.hitSize * Vars.unitCollisionRadiusScale`.
+            radius: def.hit_size * 0.6,
+            // `PhysicsComp.mass()`: `hitSize² * π`.
+            mass: def.hit_size * def.hit_size * std::f32::consts::PI,
+            layer: collision_layer(world, def, entity),
+        });
+    }
+    bodies.sort_unstable_by_key(|body| (body.seq, body.entity.index()));
+
+    let len = bodies.len();
+    for i in 0..len {
+        for j in (i + 1)..len {
+            if bodies[i].layer != bodies[j].layer {
+                continue;
+            }
+            let rs = bodies[i].radius + bodies[j].radius;
+            let dx = bodies[i].x - bodies[j].x;
+            let dy = bodies[i].y - bodies[j].y;
+            let dst2 = dx * dx + dy * dy;
+            if dst2 >= rs * rs {
+                continue;
+            }
+            let dst = dst2.sqrt();
+            let (vx, vy) = if dst > 0.0 {
+                let scale = (rs - dst) / dst;
+                (dx * scale, dy * scale)
+            } else {
+                // `vec.trns(rand.random(360f), rs - dst)`.
+                let angle = runtime
+                    .rng
+                    .range(crate::determinism::RngStream::Sim, 0.0, 360.0)
+                    .to_radians();
+                (angle.cos() * rs, angle.sin() * rs)
+            };
+            let ms = bodies[i].mass + bodies[j].mass;
+            let m1 = bodies[j].mass / ms;
+            let m2 = bodies[i].mass / ms;
+            // `body += vec * (other.mass / ms) / 1.25`.
+            bodies[i].x += vx * m1 / 1.25;
+            bodies[i].y += vy * m1 / 1.25;
+            bodies[j].x -= vx * m2 / 1.25;
+            bodies[j].y -= vy * m2 / 1.25;
+        }
+    }
+
+    for body in &bodies {
+        let Some(old) = world.get::<Pos>(body.entity).copied() else {
+            continue;
+        };
+        if body.x == old.x && body.y == old.y {
+            continue;
+        }
+        // Keep pushes out of solid blocks (the AI/pathfinder never lets units
+        // enter them; the raw physics push would).
+        let solid = runtime
+            .grid
+            .tiles
+            .getn(WorldGrid::to_tile(body.x), WorldGrid::to_tile(body.y))
+            .is_some_and(|tile| {
+                crate::ai::pathfinder::path_tile::is_solid(&runtime.content, tile.block)
+            });
+        if solid {
+            continue;
+        }
+        if let Some(mut stored) = world.get_mut::<Pos>(body.entity) {
+            stored.x = body.x;
+            stored.y = body.y;
+        }
+    }
+    world.insert_non_send(runtime);
+}
+
 pub fn unit_update_system(world: &mut World) {
     let Some(mut runtime) = world.remove_non_send::<UnitRuntime>() else {
         return;
@@ -838,7 +1156,7 @@ pub fn unit_update_system(world: &mut World) {
             // follows an explicit order (`targetPos`); with none the unit
             // idles in place instead of walking to the core anchor.
             let (_, mount_target) = acquire_target(world, &runtime, &queries, entity, team);
-            set_mount_targets(world, entity, mount_target);
+            set_mount_targets(world, &runtime.content, entity, mount_target);
             match slot.target {
                 Some(target) => {
                     let flying = world
@@ -883,9 +1201,15 @@ pub fn unit_update_system(world: &mut World) {
                 .get::<MissileShooter>(entity)
                 .map(|shooter| shooter.0)
                 .unwrap_or(None);
+            // `AIController.target` snapshot from the shot's aimed entity
+            // (`BulletType.create` `target`; `MissileAI.java:33-36`).
+            let target = world
+                .get::<crate::ai::types::missile::MissileTarget>(entity)
+                .map(|target| target.0)
+                .unwrap_or(None);
             let mut state = MissileAi {
                 unit: Some(entity),
-                target: None,
+                target,
                 shooter,
             };
             {
@@ -907,13 +1231,126 @@ pub fn unit_update_system(world: &mut World) {
             if let Some(mut stored) = world.get_mut::<MissileShooter>(entity) {
                 stored.0 = state.shooter;
             }
+            // `AIController.updateTargeting` -> `updateWeapons`
+            // (AIController.java:114-116, 172-238): a controllable weapon finds
+            // its own target within `weapon.range()`. For the scathe missile the
+            // shoot-on-death explosion is a proximity fuse against ground units
+            // (`findTarget(mountX, mountY, wrange, bullet.collidesAir,
+            // bullet.collidesGround)`).
+            let mount_target = {
+                let def = world
+                    .get::<UnitTypeComp>(entity)
+                    .and_then(|comp| runtime.content.unit(comp.type_id));
+                def.and_then(|def| {
+                    let weapon = def.weapons.first()?;
+                    let range = weapon.range();
+                    let (air, ground) = runtime
+                        .content
+                        .bullet(weapon.bullet.id)
+                        .map(|bullet| (bullet.collides_air, bullet.collides_ground))
+                        .unwrap_or((false, true));
+                    let (x, y) = world.get::<Pos>(entity).map(|pos| (pos.x, pos.y))?;
+                    queries.closest_target(
+                        world,
+                        team,
+                        x,
+                        y,
+                        range,
+                        air,
+                        ground,
+                        true,
+                        def.target_under_blocks,
+                    )
+                })
+            };
+            set_mount_targets(world, &runtime.content, entity, mount_target);
+        } else if slot.kind == AiKind::Suicide {
+            // `SuicideAI.updateUnit` (`ai/types/suicide.rs`): ram the nearest
+            // hostile in a straight line (terrain ignored) and fire the
+            // close-range death weapon (`shootCone 180`).
+            let (_, mount_target) = acquire_target(world, &runtime, &queries, entity, team);
+            set_mount_targets(world, &runtime.content, entity, mount_target);
+            let mut state = crate::ai::types::suicide::SuicideAi {
+                unit: Some(entity),
+                target: mount_target,
+                suicidal: false,
+            };
+            {
+                let UnitRuntime {
+                    content,
+                    grid,
+                    pathfinder,
+                    ..
+                } = &mut runtime;
+                let mut ctx = crate::ai::ai_controller::AiCtx {
+                    world,
+                    grid,
+                    content,
+                    pathfinder,
+                    team,
+                };
+                let _ = crate::ai::types::suicide::update_suicide(&mut ctx, entity, &mut state);
+            }
+        } else if slot.kind == AiKind::Builder && slot.target.is_some() {
+            // `BuilderAI` (`ai/types/builder.rs`): walk to the assigned plan
+            // and repair it. Without a commanded tile the generic behavior
+            // below keeps the wave-unit approximation (the live build-plan
+            // machinery is not wired to `unit.plans` yet).
+            let mut state = crate::ai::types::builder::BuilderAi {
+                unit: Some(entity),
+                only_assist: false,
+                target: slot.target,
+                in_range: false,
+            };
+            {
+                let UnitRuntime {
+                    content,
+                    grid,
+                    pathfinder,
+                    ..
+                } = &mut runtime;
+                let mut ctx = crate::ai::ai_controller::AiCtx {
+                    world,
+                    grid,
+                    content,
+                    pathfinder,
+                    team,
+                };
+                let _ = crate::ai::types::builder::update_builder(&mut ctx, entity, &mut state);
+            }
+            let (_, mount_target) = acquire_target(world, &runtime, &queries, entity, team);
+            set_mount_targets(world, &runtime.content, entity, mount_target);
+        } else if slot.kind == AiKind::Boost {
+            // `BoostAI.defaultBehavior` (`ai/types/boost.rs`): enable boost
+            // without issuing movement; the lift-off runs in `update_kinematics`
+            // (`UnitComp.updateBoosting`).
+            let mut state = crate::ai::types::boost::BoostAi {
+                unit: Some(entity),
+                boosting: true,
+            };
+            {
+                let UnitRuntime {
+                    content,
+                    grid,
+                    pathfinder,
+                    ..
+                } = &mut runtime;
+                let mut ctx = crate::ai::ai_controller::AiCtx {
+                    world,
+                    grid,
+                    content,
+                    pathfinder,
+                    team,
+                };
+                crate::ai::types::boost::update_boost(&mut ctx, entity, &mut state);
+            }
         } else {
             // `GroundAI.updateMovement`/`FlyingAI`: pick a core/building anchor
             // and an in-range mount target. Spawned wave units have no command,
             // so the anchor supplies their move target.
             let (anchor_tile, mount_target) =
                 acquire_target(world, &runtime, &queries, entity, team);
-            set_mount_targets(world, entity, mount_target);
+            set_mount_targets(world, &runtime.content, entity, mount_target);
 
             let move_target = slot.target.or(anchor_tile);
             if let Some(target) = move_target {
@@ -922,7 +1359,38 @@ pub fn unit_update_system(world: &mut World) {
                         .get::<PhysicsComp>(entity)
                         .is_some_and(|physics| physics.flying);
                 let arrived = if flying {
-                    update_flying(world, &runtime.grid, &runtime.content, entity, target)
+                    // `FlyingAI.updateMovement` (FlyingAI.java:15-27): with a
+                    // live target, circle it (`circleTarget`) or close to
+                    // `range * 0.8` and look at it; with none, steer at the
+                    // anchor tile.
+                    let def = world
+                        .get::<UnitTypeComp>(entity)
+                        .and_then(|comp| runtime.content.unit(comp.type_id));
+                    match (mount_target, def) {
+                        (Some(mount), Some(def)) if def.circle_target => {
+                            circle_attack(
+                                world,
+                                &runtime.grid,
+                                &runtime.content,
+                                entity,
+                                mount,
+                                def.circle_target_radius,
+                            );
+                            false
+                        }
+                        (Some(mount), Some(def)) if def.range > 0.0 => {
+                            move_to(
+                                world,
+                                &runtime.grid,
+                                &runtime.content,
+                                entity,
+                                mount,
+                                def.range * 0.8,
+                            );
+                            false
+                        }
+                        _ => update_flying(world, &runtime.grid, &runtime.content, entity, target),
+                    }
                 } else {
                     let UnitRuntime {
                         grid,
@@ -1016,15 +1484,14 @@ pub fn unit_update_system(world: &mut World) {
 /// list. Call after any pass that can create bullets; ordering is
 /// `(EntitySeq, entity.index())`.
 fn adopt_spawned_units(world: &mut World, runtime: &mut UnitRuntime) {
-    let mut found: Vec<(u64, Entity)> = world
-        .iter_entities()
-        .filter(|entity| entity.contains::<crate::combat::bullet::spawn::SpawnedByBullet>())
-        .map(|entity| {
-            (
-                entity.get::<EntitySeq>().map_or(u64::MAX, |seq| seq.0),
-                entity.id(),
-            )
-        })
+    // T9: query only the `SpawnedByBullet` archetype instead of scanning every
+    // entity in the world. Ordering is restored by the sort below.
+    use bevy_ecs::query::With;
+    let mut query = world
+        .query_filtered::<(Entity, Option<&EntitySeq>), With<bullet::spawn::SpawnedByBullet>>();
+    let mut found: Vec<(u64, Entity)> = query
+        .iter(world)
+        .map(|(entity, seq)| (seq.map_or(u64::MAX, |seq| seq.0), entity))
         .collect();
     found.sort_unstable_by_key(|(seq, entity)| (*seq, entity.index()));
     for (_, entity) in found {
@@ -1490,6 +1957,13 @@ impl Sim {
                 .get::<crate::entities::comp::unit::comp::HitboxComp>(carrier)
                 .map(|hitbox| hitbox.hit_size)
                 .unwrap_or(0.0);
+            // `Units.closest(team, pay.x(), pay.y(), hitSize * 2f, ...)`: the
+            // search is centered on the carrier, not the cursor
+            // (`InputHandler.tryPickupPayload`, InputHandler.java:1043).
+            let (cx, cy) = ecs
+                .get::<Pos>(carrier)
+                .map(|pos| (pos.x, pos.y))
+                .unwrap_or((x, y));
             let mut near: Vec<(f32, Entity)> = runtime
                 .units
                 .iter()
@@ -1497,7 +1971,7 @@ impl Sim {
                 .filter(|entity| *entity != carrier)
                 .filter_map(|entity| {
                     let pos = ecs.get::<Pos>(entity)?;
-                    let (dx, dy) = (pos.x - x, pos.y - y);
+                    let (dx, dy) = (pos.x - cx, pos.y - cy);
                     let dist2 = dx * dx + dy * dy;
                     (dist2 <= (carrier_hit * 2.0).powi(2)).then_some((dist2, entity))
                 })
@@ -1541,7 +2015,9 @@ impl Sim {
             ) {
                 (Some(carrier_pos), Some(target_pos)) => {
                     let (dx, dy) = (target_pos.x - carrier_pos.x, target_pos.y - carrier_pos.y);
-                    (dx * dx + dy * dy).sqrt() <= carrier_hit * 2.0 + target_hit * 2.0
+                    // `u.within(unit, u.hitSize + unit.hitSize)`
+                    // (InputHandler.java:1043).
+                    (dx * dx + dy * dy).sqrt() <= carrier_hit + target_hit
                 }
                 _ => false,
             };
@@ -1584,7 +2060,17 @@ impl Sim {
             break;
         }
         ecs.insert_non_send(runtime);
-        changed
+        if changed {
+            return true;
+        }
+        // `else { Building build = world.buildWorld(pay.x(), pay.y()); ... }`
+        // (`InputHandler.java:1045-1052`): fall back to the building under the
+        // carrier.
+        let (cx, cy) = ecs
+            .get::<Pos>(carrier)
+            .map(|pos| (pos.x, pos.y))
+            .unwrap_or((x, y));
+        self.payload_pickup_build(carrier, cx, cy)
     }
 
     /// `InputHandler.requestBuildPayload` + `PayloadComp.canPickup(Building)`.
@@ -1640,7 +2126,11 @@ impl Sim {
             .map(|def| {
                 (
                     def.size as f32 * crate::config::TILESIZE as f32,
-                    def.kind != crate::content::BlockKind::CoreBlock,
+                    // `build.block.buildVisibility != BuildVisibility.hidden`
+                    // (InputHandler.java:1049).
+                    def.kind != crate::content::BlockKind::CoreBlock
+                        && def.build_visibility
+                            != crate::content::registries::blocks::BuildVisibility::Hidden,
                 )
             })
             .unwrap_or((0.0, false));
@@ -1689,22 +2179,14 @@ impl Sim {
 
     /// `InputHandler.requestDropPayload` + `PayloadComp.dropLastPayload`.
     fn payload_drop(&mut self, carrier: Entity, x: f32, y: f32) -> bool {
-        // `requestDropPayload`: clamp the drop point to `tilesize * 4` around
-        // the carrier.
+        // `InputHandler.tryDropPayload` -> `requestDropPayload(player,
+        // player.x, player.y)`: the payload lands at the carrier, never the
+        // cursor (`InputHandler.java:1058-1063`).
+        let _ = (x, y);
         let Some(carrier_pos) = self.ecs.0.get::<Pos>(carrier).copied() else {
             return false;
         };
-        let (dx, dy) = (x - carrier_pos.x, y - carrier_pos.y);
-        let len = (dx * dx + dy * dy).sqrt();
-        let limit = crate::config::TILESIZE as f32 * 4.0;
-        let (cx, cy) = if len > limit {
-            (
-                carrier_pos.x + dx / len * limit,
-                carrier_pos.y + dy / len * limit,
-            )
-        } else {
-            (x, y)
-        };
+        let (cx, cy) = (carrier_pos.x, carrier_pos.y);
         let Some(payload) = self
             .ecs
             .0
@@ -1880,7 +2362,7 @@ fn acquire_target(
     let Some(pos) = world.get::<Pos>(entity).copied() else {
         return (None, None);
     };
-    let (range, target_air, target_ground) = world
+    let (range, target_air, target_ground, target_under_blocks) = world
         .get::<UnitTypeComp>(entity)
         .and_then(|comp| runtime.content.unit(comp.type_id))
         .map(|def| {
@@ -1888,9 +2370,10 @@ fn acquire_target(
                 def.range.max(def.max_range).max(TILE_SIZE),
                 def.target_air,
                 def.target_ground,
+                def.target_under_blocks,
             )
         })
-        .unwrap_or((TILE_SIZE, true, true));
+        .unwrap_or((TILE_SIZE, true, true, true));
 
     let anchor = nearest_enemy_building(world, team, pos.x, pos.y);
     let in_range = queries.closest_target(
@@ -1902,6 +2385,7 @@ fn acquire_target(
         target_air,
         target_ground,
         true,
+        target_under_blocks,
     );
     let mount_target = in_range.or_else(|| {
         anchor.filter(|target| {
@@ -2015,7 +2499,31 @@ fn face_target(
     let speed_mult = world
         .get::<crate::entities::comp::unit::comp::StatusComp>(entity)
         .map_or(1.0, |status| status.speed_multiplier);
-    let angle = (tpos.y - pos.y).atan2(tpos.x - pos.x).to_degrees();
+    // `Predict.intercept(unit, target, unit.type.weapons.first().bullet)`
+    // (AIController.java:124).
+    let src_vel = world
+        .get::<Vel>(entity)
+        .copied()
+        .unwrap_or(Vel { x: 0.0, y: 0.0 });
+    let dst_vel = world
+        .get::<Vel>(target)
+        .copied()
+        .unwrap_or(Vel { x: 0.0, y: 0.0 });
+    let (bullet_speed, keep_velocity) = def
+        .weapons
+        .first()
+        .and_then(|weapon| content.bullet(weapon.bullet.id))
+        .map(|bullet| (bullet.speed, bullet.keep_velocity))
+        .unwrap_or((0.0, true));
+    let aim = crate::combat::targeting::intercept_positions(
+        (pos.x, pos.y),
+        (src_vel.x, src_vel.y),
+        (tpos.x, tpos.y),
+        (dst_vel.x, dst_vel.y),
+        keep_velocity,
+        bullet_speed,
+    );
+    let angle = (aim.1 - pos.y).atan2(aim.0 - pos.x).to_degrees();
     if let Some(mut core) = world.get_mut::<UnitCore>(entity) {
         core.rotation = crate::ai::types::missile::move_toward_angle(
             core.rotation,
@@ -2026,8 +2534,41 @@ fn face_target(
 }
 
 /// `AIController.target`: stores the mount target/aim and gates firing.
-fn set_mount_targets(world: &mut World, entity: Entity, target: Option<Entity>) {
-    let aim = target.and_then(|target| world.get::<Pos>(target).map(|pos| (pos.x, pos.y)));
+///
+/// The aim point is the `Predict.intercept(unit, target, weapon.bullet)` lead
+/// of the first weapon (`AIController.updateWeapons`, AIController.java:231).
+fn set_mount_targets(
+    world: &mut World,
+    content: &ContentRegistry,
+    entity: Entity,
+    target: Option<Entity>,
+) {
+    let aim = target.and_then(|target| {
+        let src = world.get::<Pos>(entity).copied()?;
+        let dst = world.get::<Pos>(target).copied()?;
+        let src_vel = world
+            .get::<Vel>(entity)
+            .copied()
+            .unwrap_or(Vel { x: 0.0, y: 0.0 });
+        let dst_vel = world
+            .get::<Vel>(target)
+            .copied()
+            .unwrap_or(Vel { x: 0.0, y: 0.0 });
+        let (bullet_speed, keep_velocity) = world
+            .get::<UnitWeapons>(entity)
+            .and_then(|weapons| weapons.weapons.first())
+            .and_then(|weapon| content.bullet(weapon.bullet.id))
+            .map(|bullet| (bullet.speed, bullet.keep_velocity))
+            .unwrap_or((0.0, true));
+        Some(crate::combat::targeting::intercept_positions(
+            (src.x, src.y),
+            (src_vel.x, src_vel.y),
+            (dst.x, dst.y),
+            (dst_vel.x, dst_vel.y),
+            keep_velocity,
+            bullet_speed,
+        ))
+    });
     let Some(mut weapons) = world.get_mut::<UnitWeapons>(entity) else {
         return;
     };
