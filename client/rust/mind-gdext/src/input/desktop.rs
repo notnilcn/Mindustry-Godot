@@ -600,6 +600,12 @@ impl DesktopBridge {
             }
             "block_info" => self.block_info_hotkey(),
             "pick" => self.pick_block(),
+            "toggle_block_status" => {
+                // `DesktopInput.java:455-457`: F6 flips `settings.blockstatus`;
+                // the HUD fragment owns the setting write and the marker pass
+                // reads it (`Renderer.drawStatus`).
+                self.fire_hotkey(name);
+            }
             "category_prev" | "category_next" => {
                 // The placement fragment owns the category rail; it reacts to
                 // the hotkey signal and pushes the new index back.

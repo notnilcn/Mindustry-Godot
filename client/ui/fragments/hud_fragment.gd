@@ -56,7 +56,27 @@ func _ready() -> void:
 		if _hud.has_signal("sector_event"):
 			_hud.connect("sector_event", _on_sector_event)
 	_connect_minimap()
+	# `DesktopInput.java:455-457`: F6 toggles the `blockstatus` setting (the
+	# input layer only emits the hotkey; the HUD owns the setting write).
+	var input := get_node_or_null("/root/Spine/Input")
+	if (
+		input != null
+		and input.has_signal("hotkey")
+		and not input.is_connected("hotkey", Callable(self, "_on_hotkey"))
+	):
+		input.connect("hotkey", Callable(self, "_on_hotkey"))
 	refresh()
+
+
+## View-toggle hotkeys owned by the HUD fragment (`Renderer.drawStatus`).
+func _on_hotkey(action: String) -> void:
+	if action != "toggle_block_status":
+		return
+	var ui := get_node_or_null("/root/MindUi")
+	if ui == null or not ui.has_method("settings_get_bool"):
+		return
+	var current := bool(ui.call("settings_get_bool", "blockstatus"))
+	ui.call("settings_set", "blockstatus", not current)
 
 
 ## `HudFragment.java:336-351`: the embedded minimap pans/zooms the camera and
@@ -118,16 +138,23 @@ func _localize_banners() -> void:
 		waiting_banner.text = "[center]" + MindWidgets.markup("@waiting.players")
 
 
-## `HudFragment.java:502-510`: icon-only skip-wave button next to the status
-## table. code-instantiated: the button's icon-font glyph is resolved through
+## `HudFragment.java:491-510`: the icon-only skip-wave button lives inside the
+## status table's row, right side, 40 px wide with `growY`
+## (`s.button(Icon.play, rightStyle, 30f, ...).growY().fillX().right().width(40f)`).
+## code-instantiated: the button's icon-font glyph is resolved through
 ## `MindIcons` and has no scene form.
 func _build_wave_buttons() -> void:
-	if wave_buttons == null or _skip_button != null:
+	if _skip_button != null:
+		return
+	var row := get_node_or_null("WavesStack/WavesMain/StatusRow/Row")
+	if row == null:
 		return
 	_skip_button = MindWidgets.icon_button(SKIP_ICON, "")
 	_skip_button.name = "skip"
+	_skip_button.custom_minimum_size = Vector2(40.0, 0.0)
+	_skip_button.size_flags_vertical = Control.SIZE_FILL
 	_skip_button.pressed.connect(_on_skip_wave)
-	wave_buttons.add_child(_skip_button)
+	row.add_child(_skip_button)
 
 
 ## Pulls the typed HUD properties and drives the widgets that are not simple

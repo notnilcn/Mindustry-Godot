@@ -97,6 +97,79 @@ func _draw_cropped(texture: Texture2D) -> void:
 	var scale := inner.size / region.size
 	var dest := Rect2(inner.position + (clipped.position - region.position) * scale, clipped.size * scale)
 	draw_texture_rect_region(texture, dest, clipped)
+	_draw_markers(inner, region, scale)
+
+
+## `MinimapRenderer.drawEntities` + `AttackIndicators.draw`: team-tinted unit
+## icons and the pulsing damage squares, mapped into the crop.
+func _draw_markers(inner: Rect2, region: Rect2, scale: Vector2) -> void:
+	var node := _provider_node()
+	if node == null:
+		return
+	var texture := _native_texture()
+	if texture == null:
+		return
+	var tex_size := texture.get_size()
+	# Attack indicators: `fin = (Time.globalTime / 30f) % 1f`,
+	# `rad = fin * 5 + tilesize - 2`, stroke `(1 - fin) * 4 + 0.5`,
+	# colour `orange.lerp(scarlet, clamp(time / 70f))` scaled into widget px.
+	if node.has_method("indicators_json"):
+		var parsed: Variant = JSON.parse_string(str(node.call("indicators_json")))
+		if parsed is Array:
+			var now_s := Time.get_ticks_msec() / 1000.0
+			var fin := fmod(now_s * 2.0, 1.0)
+			var world_to_widget := scale.x / TILE_SIZE
+			for row_variant in parsed as Array:
+				if not (row_variant is Array):
+					continue
+				var row: Array = row_variant
+				if row.size() < 3:
+					continue
+				var position := _map_point(inner, region, tex_size, float(row[0]), float(row[1]))
+				var rad := (fin * 5.0 + TILE_SIZE - 2.0) * world_to_widget
+				var stroke := ((1.0 - fin) * 4.0 + 0.5) * world_to_widget
+				var red := clampf(float(row[2]) / 70.0, 0.0, 1.0)
+				var color := Color(1.0, 0.647, 0.0).lerp(Color(1.0, 0.0, 0.196), red)
+				draw_rect(
+					Rect2(position - Vector2(rad, rad), Vector2(rad, rad) * 2.0),
+					color,
+					false,
+					stroke
+				)
+	# Units (`drawEntities`): `unit.icon()` tinted `unit.team.color`.
+	if node.has_method("minimap_units_json"):
+		var parsed: Variant = JSON.parse_string(str(node.call("minimap_units_json")))
+		if parsed is Array:
+			var icon_size := 8.0
+			for row_variant in parsed as Array:
+				if not (row_variant is Array):
+					continue
+				var row: Array = row_variant
+				if row.size() < 5:
+					continue
+				var name := str(row[3])
+				var texture_icon: Variant = MindWidgets.icon_texture("unit-%s-ui" % name)
+				if not (texture_icon is Texture2D):
+					continue
+				var position := _map_point(
+					inner, region, tex_size, float(row[0]) / TILE_SIZE, float(row[1]) / TILE_SIZE
+				)
+				var tint := Color(str(row[4]))
+				draw_set_transform(position, deg_to_rad(float(row[2]) - 90.0), Vector2.ONE)
+				draw_texture_rect(
+					texture_icon,
+					Rect2(-Vector2(icon_size, icon_size) / 2.0, Vector2(icon_size, icon_size)),
+					false,
+					tint
+				)
+				draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+## Tile `(tx, ty)` (world-pixel centre 0.5 offsets) → widget px inside the crop
+## (`MinimapRenderer` draws texture row 0 at the map top).
+func _map_point(inner: Rect2, region: Rect2, tex_size: Vector2, tx: float, ty: float) -> Vector2:
+	var texture_point := Vector2(tx + 0.5, (tex_size.y - 1.0 - ty) + 0.5)
+	return inner.position + (texture_point - region.position) * (inner.size / region.size)
 
 
 ## `Tex.pane` ninepatch (36x27, splits 12) from the atlas, built once.

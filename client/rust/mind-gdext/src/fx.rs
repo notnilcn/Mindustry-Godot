@@ -12,9 +12,12 @@
 
 use godot::builtin::{Color, GString, PackedVector2Array, Rect2, VarDictionary, Vector2};
 use godot::classes::notify::CanvasItemNotification;
-use godot::classes::{INode2D, Node2D};
+use godot::classes::{INode2D, Node2D, Texture2D};
 use godot::obj::{Base, WithBaseField};
 use godot::prelude::*;
+
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use smallvec::SmallVec;
 
@@ -44,7 +47,7 @@ fn to_color(color: Rgba) -> Color {
 #[class(base=Node2D)]
 pub struct MindFx {
     base: Base<Node2D>,
-    bus: FxBus,
+    bus: Arc<FxBus>,
     pool: FxPool,
     decals: DecalPool,
     trails: TrailRegistry,
@@ -61,6 +64,8 @@ pub struct MindFx {
     next_turret_handle: i64,
     /// Active env pass (plan 17 M6 `EnvRenderers` bodies).
     env: Option<EnvFxInput>,
+    /// `FxSink` → atlas texture cache (`RegionKey.0` → region, `None` = missing).
+    region_cache: HashMap<&'static str, Option<Gd<Texture2D>>>,
 }
 
 #[godot_api]
@@ -68,7 +73,7 @@ impl INode2D for MindFx {
     fn init(base: Base<Node2D>) -> Self {
         Self {
             base,
-            bus: FxBus::new(),
+            bus: Arc::new(FxBus::new()),
             pool: FxPool::default(),
             decals: DecalPool::default(),
             trails: TrailRegistry::new(),
@@ -83,6 +88,7 @@ impl INode2D for MindFx {
             turrets: Vec::new(),
             next_turret_handle: 1,
             env: None,
+            region_cache: HashMap::new(),
         }
     }
 
@@ -134,6 +140,13 @@ impl MindFx {
 
     /// Executes one primitive; returns whether it was drawn.
     fn draw_prim(&mut self, prim: &mind_core::render::draw::DrawPrim) -> bool {
+        // Resolve region textures before `base_mut()` so the cache borrow and
+        // the canvas-item borrow never overlap.
+        let region_texture = if let PrimKind::Region { region, .. } = &prim.kind {
+            self.region_texture(region.0)
+        } else {
+            None
+        };
         let mut base = self.base_mut();
         match &prim.kind {
             PrimKind::Circle {
@@ -271,21 +284,90 @@ impl MindFx {
                 true
             }
             PrimKind::Region {
-                x, y, w, h, color, ..
+                x,
+                y,
+                w,
+                h,
+                rotation_deg,
+                origin,
+                color,
+                mix,
+                ..
+            } => match region_texture {
+                Some(texture) => {
+                    // `Draw.mixcol(region, mix)` approximation: lerp the tint
+                    // toward the mix colour by the mix alpha.
+                    let mut final_color = to_color(*color);
+                    if let Some(mix) = mix {
+                        final_color = final_color.lerp(to_color(*mix), f64::from(mix.a));
+                    }
+                    // World space is y-up through the flipped camera, so the
+                    // texture needs the same vertical flip the world meshes
+                    // apply (`build_unit_mesh`'s top-row-first mapping).
+                    base.draw_set_transform_ex(Vector2::new(*x, *y))
+                        .rotation(rotation_deg.to_radians())
+                        .scale(Vector2::ONE)
+                        .done();
+                    base.draw_texture_rect_ex(
+                        &texture,
+                        Rect2::new(
+                            Vector2::new(-w * origin.0, -h * origin.1),
+                            Vector2::new(*w, *h),
+                        ),
+                        true,
+                    )
+                    .modulate(final_color)
+                    .done();
+                    base.draw_set_transform(Vector2::ZERO);
+                    true
+                }
+                None => {
+                    // Missing region: keep the old debug quad so the effect is
+                    // still visible (resolver misses are logged once per name).
+                    let rect =
+                        Rect2::new(Vector2::new(x - w / 2.0, y - h / 2.0), Vector2::new(*w, *h));
+                    base.draw_rect_ex(rect, to_color(*color)).filled(true).done();
+                    true
+                }
+            },
+            PrimKind::Polyline {
+                points,
+                stroke,
+                color,
             } => {
-                // Region binding is plan 03/16; draw a debug quad so the FX pass
-                // is visible in-engine until the atlas resolver is wired.
-                let rect = Rect2::new(Vector2::new(x - w / 2.0, y - h / 2.0), Vector2::new(*w, *h));
-                base.draw_rect_ex(rect, to_color(*color))
-                    .filled(true)
+                let packed: PackedVector2Array = points
+                    .iter()
+                    .map(|p| Vector2::new(p.0, p.1))
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .collect();
+                base.draw_polyline_ex(&packed, to_color(*color))
+                    .width(stroke.max(1.0))
                     .done();
                 true
             }
             // Executed by plan 16's pipeline (no CPU geometry).
-            PrimKind::NoiseLayer { .. }
-            | PrimKind::ShaderBlit { .. }
-            | PrimKind::Polyline { .. } => false,
+            PrimKind::NoiseLayer { .. } | PrimKind::ShaderBlit { .. } => false,
         }
+    }
+
+    /// Resolves `RegionKey.0` through the `MindAssets` atlas (`find_region`
+    /// returns an `AtlasTexture`); cached per name for the node's lifetime.
+    fn region_texture(&mut self, name: &'static str) -> Option<Gd<Texture2D>> {
+        if let Some(cached) = self.region_cache.get(name) {
+            return cached.clone();
+        }
+        let texture = self
+            .base()
+            .try_get_node_as::<crate::assets::MindAssets>("/root/MindAssets")
+            .and_then(|mut assets| {
+                assets
+                    .bind_mut()
+                    .find_region(GString::from(name))
+                    .map(|texture| texture.upcast::<Texture2D>())
+            });
+        self.region_cache.insert(name, texture.clone());
+        texture
     }
 
     /// Appends decal/trail/weather view prims to the frame program (plan 17 M6).
@@ -422,6 +504,12 @@ impl MindFx {
         &self.bus
     }
 
+    /// Shared handle for the sim's `FxSink` installation (`MindSimHost::
+    /// install_fx_sink`); `FxBus` is `Send + Sync` (internal mutex).
+    pub fn bus_handle(&self) -> Arc<FxBus> {
+        self.bus.clone()
+    }
+
     /// Drains the bus and advances the view pools by one tick.
     #[func]
     pub fn tick_view(&mut self) {
@@ -454,6 +542,19 @@ impl MindFx {
                     duration,
                 } => {
                     self.shake.add(intensity, duration.max(0.0));
+                    // `Renderer.shake`: the camera rig owns the offset; the
+                    // `screenshake` setting is applied in `ShakeState.offset`
+                    // (`RendererView.shakeIntensity * screenshake / 4 * 0.75`),
+                    // so pass the raw event through.
+                    if let Some(mut camera) = self
+                        .base()
+                        .try_get_node_as::<crate::camera::MindCamera2D>(
+                            "/root/Spine/World/Camera2D",
+                        )
+                    {
+                        camera.bind_mut()
+                            .apply_shake_event(f64::from(intensity), f64::from(duration));
+                    }
                 }
                 FxEvent::Decal {
                     region,

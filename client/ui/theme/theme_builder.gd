@@ -81,6 +81,17 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 				theme.set_stylebox("hover", name, StyleBoxEmpty.new())
 				theme.set_stylebox("pressed", name, StyleBoxEmpty.new())
 				theme.set_stylebox("disabled", name, StyleBoxEmpty.new())
+			elif name == "selecti":
+				# `Styles.selecti` (Styles.java:283-286): `checked = buttonSelect`
+				# (the accent 9-patch frame), `up = none`. The checked state is
+				# the accent frame around the cell; the cell itself stays
+				# transparent at rest and on hover.
+				theme.set_stylebox("normal", name, StyleBoxEmpty.new())
+				theme.set_stylebox("hover", name, StyleBoxEmpty.new())
+				theme.set_stylebox("disabled", name, StyleBoxEmpty.new())
+				var checked := _checked_frame()
+				theme.set_stylebox("pressed", name, checked)
+				theme.set_stylebox("hover_pressed", name, checked)
 			elif name == "clearNonei" or name == "clearNoneTogglei":
 				# `Styles.clearNonei` (Styles.java:316): `up = none` (fully
 				# transparent at rest), hover/pressed carry the flat highlight
@@ -130,6 +141,22 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 			theme.set_stylebox("panel", name, flat(MindStyles.GRAY_PANEL_DARK))
 		_:
 			pass
+
+
+## `Tex.buttonSelect` ninepatch (accent border, splits 4) for the
+## `Styles.selecti` checked state; falls back to the flat pressed box when the
+## atlas region is unavailable.
+static func _checked_frame() -> StyleBox:
+	var texture := MindWidgets.icon_texture("button-select")
+	if texture == null:
+		return flat(Color(0.13, 0.15, 0.18, 1.0))
+	var box := StyleBoxTexture.new()
+	box.texture = texture
+	box.texture_margin_left = 4.0
+	box.texture_margin_top = 4.0
+	box.texture_margin_right = 4.0
+	box.texture_margin_bottom = 4.0
+	return box
 
 
 ## Flat stylebox with the standard content margins (ninepatch replaces at M1).

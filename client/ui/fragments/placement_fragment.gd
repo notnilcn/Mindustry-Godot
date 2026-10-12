@@ -42,6 +42,16 @@ var _bar_campaign := false
 ## Last rendered top-table state (`b:<block>` or `h:<kind>:<name>`); the header
 ## rebuilds only when it changes (`PlacementFragment.lastDisplayState`).
 var _top_state := ""
+## One-shot warning when the `block_select_01..10` binds are not all displayable
+## (the key combo line is silently dropped otherwise).
+var _warned_block_select := false
+## Last block selection mirrored into the palette's checked cell (T4).
+var _last_selected := ""
+## Block name -> cell button for the current grid. Node *names* are not a
+## stable key: a double `_rebuild` in one frame (boot + world load) makes Godot
+## rename the new children to its auto-generated `@Button@N` names, so the
+## checked cell is resolved through this map instead.
+var _block_buttons: Dictionary = {}
 ## Requirement amount labels + their `(have, amount)` pairs, refreshed per frame.
 var _top_amounts: Array[RichTextLabel] = []
 var _top_requirements: Array[Dictionary] = []
@@ -84,6 +94,30 @@ func _process(_delta: float) -> void:
 		_bar_campaign = in_campaign
 		_refresh_input_bar()
 	_update_top_table()
+	_update_selection_highlight()
+
+
+## `PlacementFragment` per-frame `button.update`: the checked cell follows
+## `control.input.block` even when the selection changed outside a palette
+## click (`select_block_by_name`, hotkeys) — PlacementFragment.java:300-330.
+func _update_selection_highlight() -> void:
+	if blocks == null:
+		return
+	var host := get_node_or_null("/root/Spine/SimHost")
+	if host == null or not host.has_method("selected_block"):
+		return
+	var selected := str(host.call("selected_block"))
+	if selected == _last_selected:
+		return
+	_last_selected = selected
+	var active := _block_buttons.get(selected) as BaseButton
+	for button_variant in _block_buttons.values():
+		var button := button_variant as BaseButton
+		if button == null or not is_instance_valid(button):
+			continue
+		# `setPressedNoSignal`: the ButtonGroup must not re-fire `pressed`
+		# (which would re-select through `_select_block`).
+		button.set_pressed_no_signal(button == active)
 
 
 ## `Tex.buttonEdge2` ninepatch frame for the top table (splits 12, margin 5).
@@ -118,7 +152,15 @@ func _update_top_table() -> void:
 		if display == "air" or display == "remove-wall" or display == "remove-ore":
 			display = ""
 	var hover: Dictionary = {}
-	if display.is_empty() and host != null and host.has_method("hover_info"):
+	if display.is_empty() and host != null and host.has_method("hover_info_world"):
+		# `PlacementFragment.hovered`: the world unit test uses the cursor's
+		# world position (`Core.input.mouseWorldX/Y`), not the tile centre (T5).
+		var world: Variant = _mouse_world()
+		if world != null:
+			var info: Variant = host.call("hover_info_world", world.x, world.y)
+			if info is Dictionary and not str((info as Dictionary).get("kind", "")).is_empty():
+				hover = info
+	elif display.is_empty() and host != null and host.has_method("hover_info"):
 		var tile: Variant = _mouse_tile()
 		if tile != null:
 			var info: Variant = host.call("hover_info", int(tile.x), int(tile.y))
@@ -163,6 +205,20 @@ func _mouse_tile() -> Variant:
 	return camera.call("screen_to_tile", mouse.x, mouse.y)
 
 
+## The cursor in world pixels (`Core.input.mouseWorldX/Y`), or `null` while any
+## UI holds the mouse (same guard as `_mouse_tile`). T5: the hover unit test
+## must use this point, not the tile centre.
+func _mouse_world() -> Variant:
+	var hovered := get_tree().root.gui_get_hovered_control()
+	if hovered != null and hovered.mouse_filter == Control.MOUSE_FILTER_STOP:
+		return null
+	var camera := get_node_or_null("/root/Spine/World/Camera2D")
+	if camera == null or not camera.has_method("screen_to_world"):
+		return null
+	var mouse := get_viewport().get_mouse_position()
+	return camera.call("screen_to_world", mouse.x, mouse.y)
+
+
 ## Rebuilds the header + rows for a state change (`topTable.clear()` path).
 func _rebuild_top(display: String, hover: Dictionary) -> void:
 	for child in top_rows.get_children():
@@ -193,8 +249,13 @@ func _build_block_header(display: String) -> void:
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	header.add_child(icon)
 	var label := MindRichLabel.new()
+	# Java `labelWrap(...).left().width(190f).padLeft(5)` (PlacementFragment
+	# .java:371-395): the 190px label must fit both lines (name + key combo)
+	# instead of clipping them; only the spacer expands.
+	label.fit_content = true
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	label.custom_minimum_size = Vector2(190, 0)
-	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label.size_flags_horizontal = Control.SIZE_FILL
 	label.text = MindWidgets.markup("@block.%s.name" % display) + _key_combo(display)
 	header.add_child(label)
 	var spacer := Control.new()
@@ -324,15 +385,29 @@ func _key_combo(display: String) -> String:
 	if index < 0:
 		return ""
 	var binds := _block_select_displays()
-	if binds.size() < 10:
+	var displayable := 0
+	for bind in binds:
+		if not bind.is_empty():
+			displayable += 1
+	if displayable < 10:
+		if not _warned_block_select:
+			_warned_block_select = true
+			push_warning(
+				"placement: block_select_01..10 keybinds incomplete (%d/10 displayable); key combo line omitted"
+				% displayable
+			)
 		return ""
 	var ordinal := int(category.get("ordinal", 0))
 	var category_key: String = binds[mini(ordinal, 9)]
-	var units: String = binds[index % 10]
-	var combo := "%s,%s" % [category_key, units]
+	# `Core.bundle.format("placement.blockselectkeys", categoryKey)` +
+	# `(i < 10 ? "" : blockSelect[(i + 1) / 10 - 1] + ",") + blockSelect[i % 10]
+	# + "]"` (PlacementFragment.java:371-395).
+	var fmt := _bundle("placement.blockselectkeys", "\n[lightgray]Key: [{0},")
+	var combo := fmt.replace("{0}", category_key)
 	if index >= 10:
-		combo = "%s,%s" % [category_key, "%s,%s" % [binds[mini((index + 1) / 10 - 1, 9)], units]]
-	return "[color=#9a9a9a]\nKey: [%s][/color]" % combo
+		combo += "%s," % binds[mini((index + 1) / 10 - 1, 9)]
+	combo += "%s]" % binds[index % 10]
+	return MindWidgets.markup(combo)
 
 
 ## `block_select_01..10` key display strings from the input binding registry.
@@ -528,6 +603,10 @@ func _rebuild() -> void:
 		return
 	for child in blocks.get_children():
 		child.queue_free()
+	_block_buttons.clear()
+	# A rebuild re-creates the cells; force the next frame's highlight pass to
+	# re-apply instead of trusting the cached selection.
+	_last_selected = "\u0000"
 	# code-instantiated: block buttons come from the content catalogue filtered by
 	# category/search (data-driven, plan 02/07).
 	var list: Array = _catalog.get("categories", [])
@@ -567,3 +646,4 @@ func _rebuild() -> void:
 		button.pressed.connect(func() -> void:
 			_select_block(host, name))
 		blocks.add_child(button)
+		_block_buttons[name] = button

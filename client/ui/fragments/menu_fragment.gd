@@ -242,6 +242,9 @@ func _make_button(entry: Dictionary, size: Vector2) -> Button:
 	var label := Label.new()
 	label.text = _t(str(entry.get("text", "")))
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	# Arc's `TextButton` centres its label; the icon sits to the left
+	# (`MenuFragment.java:267-271` `.marginLeft(11f)`).
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(label)

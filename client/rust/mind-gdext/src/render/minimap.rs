@@ -72,6 +72,9 @@ pub struct MindMinimap {
     last_revision: i64,
     /// `sprites/block_colors.png` row 0 (`ContentLoader.loadColors`), loaded once.
     block_colors: Option<Vec<u32>>,
+    /// `AttackIndicators` rows `(tile x, tile y, age ticks)` for the pulsing
+    /// damage squares (`MinimapRenderer.java:253-275`).
+    indicators: Vec<(i32, i32, f32)>,
 }
 
 #[godot_api]
@@ -90,6 +93,7 @@ impl INode2D for MindMinimap {
             dirty: HashSet::new(),
             last_revision: i64::MIN,
             block_colors: None,
+            indicators: Vec::new(),
         }
     }
 
@@ -105,6 +109,13 @@ impl INode2D for MindMinimap {
     }
 
     fn process(&mut self, delta: f64) {
+        // `AttackIndicators.update`: `time += Time.delta` (seconds), removed at
+        // `duration = 15f * 60f` = 900 s (`AttackIndicators.java:11,40-50`).
+        const INDICATOR_LIFETIME_S: f32 = 15.0 * 60.0;
+        self.indicators.retain_mut(|(_, _, age)| {
+            *age += delta as f32;
+            *age < INDICATOR_LIFETIME_S
+        });
         let Some(host) = self.host.clone() else {
             return;
         };
@@ -345,6 +356,70 @@ impl MindMinimap {
             (x as f32 + rx) * TILESIZE as f32,
             (y as f32 + ry) * TILESIZE as f32,
         )
+    }
+
+    /// `AttackIndicators.add(x, y)`: pulse a damage marker at tile `(x, y)`
+    /// (existing rows restart their age). Rust/host-facing.
+    #[func]
+    pub fn add_indicator(&mut self, x: i32, y: i32) {
+        if let Some(row) = self
+            .indicators
+            .iter_mut()
+            .find(|(ix, iy, _)| *ix == x && *iy == y)
+        {
+            row.2 = 0.0;
+            return;
+        }
+        self.indicators.push((x, y, 0.0));
+    }
+
+    /// Damage indicators as `[[x, y, age ticks], ...]` (widget draw probe).
+    #[func]
+    pub fn indicators_json(&self) -> GString {
+        let rows: Vec<[f32; 3]> = self
+            .indicators
+            .iter()
+            .map(|(x, y, age)| [*x as f32, *y as f32, *age])
+            .collect();
+        GString::from(serde_json::Value::Array(
+            rows.into_iter()
+                .map(|row| {
+                    serde_json::Value::Array(
+                        row.into_iter()
+                            .map(|v| serde_json::json!(v))
+                            .collect(),
+                    )
+                })
+                .collect(),
+        )
+        .to_string()
+        .as_str())
+    }
+
+    /// Live units as `[[x world px, y world px, rotation, name, color], ...]`
+    /// (`MinimapRenderer.drawEntities`: `unit.icon()`, tinted `team.color`).
+    #[func]
+    pub fn minimap_units_json(&self) -> GString {
+        let Some(host) = self.host.clone() else {
+            return GString::from("[]");
+        };
+        let units = host.bind().unit_draws_full();
+        let rows: Vec<serde_json::Value> = units
+            .into_iter()
+            .map(|unit| {
+                let color = mind_core::game::team::Team::get(unit.team)
+                    .color
+                    .to_rgba8888();
+                serde_json::json!([
+                    unit.x,
+                    unit.y,
+                    unit.rotation,
+                    unit.name,
+                    format!("{color:08x}")
+                ])
+            })
+            .collect();
+        GString::from(serde_json::Value::Array(rows).to_string().as_str())
     }
 
     /// `MinimapRenderer.zoomBy`.

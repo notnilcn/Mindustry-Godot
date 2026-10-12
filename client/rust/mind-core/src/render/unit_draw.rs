@@ -150,9 +150,30 @@ pub fn cell_color(team_rgba: u32, healthf: f32, time: f32) -> u32 {
     (channel(24) << 24) | (channel(16) << 16) | (channel(8) << 8) | 0xff
 }
 
+/// `UnitType.drawShadow` world offset (`UnitType.java:1652-1654,1662`):
+/// `(shadowTX * e, shadowTY * e)` with `shadowTX = -12`, `shadowTY = -13`
+/// (`:44`) and `e = clamp(elevation, shadowElevation, 1) * shadowElevationScl`
+/// (flying units resolve `elevation = 1`, `shadowElevationScl = 1`, so `e = 1`).
+pub fn flying_shadow_offset(elevation: f32) -> (f32, f32) {
+    let e = elevation.clamp(0.0, 1.0);
+    (-12.0 * e, -13.0 * e)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `drawShadow` offsets the silhouette down-left by `(-12, -13) * e`
+    /// (`UnitType.java:44,1652-1654`).
+    #[test]
+    fn flying_shadow_offset_scales_with_elevation() {
+        assert_eq!(flying_shadow_offset(1.0), (-12.0, -13.0));
+        assert_eq!(flying_shadow_offset(0.0), (0.0, 0.0));
+        assert_eq!(flying_shadow_offset(0.5), (-6.0, -6.5));
+        // Out-of-range elevations clamp into 0..=1.
+        assert_eq!(flying_shadow_offset(2.0), (-12.0, -13.0));
+        assert_eq!(flying_shadow_offset(-1.0), (0.0, 0.0));
+    }
 
     #[test]
     fn walk_extend_folds_and_scales() {

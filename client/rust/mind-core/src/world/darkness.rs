@@ -126,10 +126,68 @@ pub fn get_static_darkness(grid: &WorldGrid, content: &ContentRegistry, x: i32, 
     0.0
 }
 
+/// `World.getDarkness` border component (`rules.borderDarkness`; callers take
+/// the max with [`get_static_darkness`]): with `border`, the distance to the
+/// play-area edge (or the map edge when no limit is set) fades in over
+/// `edgeBlend = 2` tiles to full black at `edgeDst <= 0`
+/// (`World.java:484-503`).
+pub fn border_darkness(grid: &WorldGrid, border: bool, limit: Option<(i32, i32, i32, i32)>, x: i32, y: i32) -> f32 {
+    if !border {
+        return 0.0;
+    }
+    const EDGE_BLEND: i32 = 2;
+    let edge_dst = match limit {
+        Some((lx, ly, lw, lh)) => (x - lx)
+            .min(y - ly)
+            .min(-(x - (lx + lw - 1)))
+            .min(-(y - (ly + lh - 1))),
+        None => x
+            .min(y)
+            .min(-(x - (grid.tiles.width - 1)))
+            .min(-(y - (grid.tiles.height - 1))),
+    };
+    if edge_dst <= EDGE_BLEND {
+        (EDGE_BLEND - edge_dst) as f32 * (4.0 / EDGE_BLEND as f32)
+    } else {
+        0.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::content::BlockId;
+
+    /// Border darkness ramps 4 at the edge to 0 two tiles inside, for both the
+    /// map-bounds and the `limit_area` variants (`World.java:489-501`).
+    #[test]
+    fn border_darkness_ramps_at_the_edge() {
+        let grid = WorldGrid::new(10, 10);
+        // Map bounds: x=0 -> 4, x=1 -> 2, x=2 -> 0.
+        assert_eq!(border_darkness(&grid, true, None, 0, 5), 4.0);
+        assert_eq!(border_darkness(&grid, true, None, 1, 5), 2.0);
+        assert_eq!(border_darkness(&grid, true, None, 2, 5), 0.0);
+        // Off the map clamps further out (still >= 4).
+        assert_eq!(border_darkness(&grid, true, None, -1, 5), 6.0);
+        // Border disabled.
+        assert_eq!(border_darkness(&grid, false, None, 0, 5), 0.0);
+    }
+
+    #[test]
+    fn border_darkness_uses_the_limit_rect() {
+        let grid = WorldGrid::new(16, 16);
+        let limit = Some((4, 4, 8, 8));
+        // Inside the limit rect, away from its edge.
+        assert_eq!(border_darkness(&grid, true, limit, 8, 8), 0.0);
+        // On the limit's left edge (x = 4) and two tiles in.
+        assert_eq!(border_darkness(&grid, true, limit, 4, 8), 4.0);
+        assert_eq!(border_darkness(&grid, true, limit, 6, 8), 0.0);
+        // Outside the limit (x = 3) is fully black (>= 4).
+        assert_eq!(border_darkness(&grid, true, limit, 3, 8), 6.0);
+        // Right/top edges of the rect (x = 11 = 4+8-1).
+        assert_eq!(border_darkness(&grid, true, limit, 11, 8), 4.0);
+        assert_eq!(border_darkness(&grid, true, limit, 8, 11), 4.0);
+    }
 
     #[test]
     fn darkness_bfs_marks_fully_enclosed_walls() {

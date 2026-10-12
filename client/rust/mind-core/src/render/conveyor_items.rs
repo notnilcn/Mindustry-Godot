@@ -81,7 +81,10 @@ mod tests {
         // `v2 = (0, -4)`, so `ys = 0.5` stays at the centre and `ys = 1` sits
         // half a tile ahead on +y.
         let points = belt_item_positions(10.0, 20.0, 1, &[0.0, 0.0], &[0.5, 1.0]);
-        assert!(points[0].0 - 10.0 < 1e-4 && points[0].1 - 20.0 < 1e-4);
+        assert!(
+            (points[0].0 - 10.0).abs() < 1e-4 && (points[0].1 - 20.0).abs() < 1e-4,
+            "centre stays at the anchor for ys = 0.5: {points:?}"
+        );
         assert!(points[1].0 - 10.0 < 1e-4 && (points[1].1 - 24.0).abs() < 1e-4);
     }
 

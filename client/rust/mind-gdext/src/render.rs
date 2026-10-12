@@ -38,6 +38,7 @@ use crate::sim_host::MindSimHost;
 mod atlas_bind;
 mod blocks;
 mod building_cache;
+mod command_overlay;
 mod debug;
 mod env;
 mod floor;
@@ -52,6 +53,8 @@ mod overlays;
 mod pixelate;
 mod shaders;
 mod shadow;
+mod shields;
+mod status;
 mod units;
 
 pub use blocks::BlockRenderer;
@@ -228,6 +231,12 @@ pub struct MindWorldRenderer {
     shadow: Option<ShadowRenderer>,
     light: Option<LightRenderer>,
     debug: Option<DebugCollisionRenderer>,
+    /// F6 status markers (`Layer.power` band; T14/PAR-0097).
+    status: Option<Gd<status::StatusRenderer>>,
+    /// Shield domes/bubbles (`Layer.shields` band; T13/PAR-0129).
+    shields: Option<Gd<shields::ShieldRenderer>>,
+    /// Command-mode selection overlay (`Layer.plans` band; T16/PAR-0157).
+    command_overlay: Option<Gd<command_overlay::CommandOverlay>>,
     env: Option<EnvRenderer>,
     fog: Option<FogRenderer>,
     overlays: Option<OverlayRenderer>,
@@ -265,6 +274,9 @@ impl INode2D for MindWorldRenderer {
             shadow: None,
             light: None,
             debug: None,
+            status: None,
+            shields: None,
+            command_overlay: None,
             env: None,
             fog: None,
             overlays: None,
@@ -397,6 +409,19 @@ impl MindWorldRenderer {
             );
             self.band_nodes.push(node);
         }
+
+        // The FX host (`/root/Spine/MindFx`) executes its whole program on one
+        // `Node2D`; park it at the `Layer.effect` band so combat FX covers the
+        // world bands but stays under fog/overlayUI (`Draw.z` for effects,
+        // `Layer.effect = 110`). Without this the node's default z sits under
+        // every non-floor band and effects are invisible.
+        if let Some(mut fx) = self
+            .base()
+            .get_node_or_null("/root/Spine/MindFx")
+            .and_then(|node| node.try_cast::<Node2D>().ok())
+        {
+            fx.set_z_index(self.band_plan.band(BandKey::base(Layer::Effect)));
+        }
     }
 
     /// Resolves the `Node2D` for a band key (append-only band plan).
@@ -460,13 +485,24 @@ impl MindWorldRenderer {
                 block_band,
             ));
         }
-        if let Some(block_band) = self.band_node_at(BandKey::base(Layer::Block)) {
-            self.blocks = Some(BlockRenderer::new(host.clone(), assets, block_band));
+        if let Some(block_band) = self.band_node_at(BandKey::base(Layer::Block))
+            && let Some(building_band) = self.band_node_at(BandKey::base(Layer::BlockBuilding))
+        {
+            self.blocks = Some(BlockRenderer::new(
+                host.clone(),
+                assets,
+                block_band,
+                building_band,
+                &self.shaders,
+            ));
         }
         let unit_bands = vec![
             self.band_node_at(BandKey::base(Layer::GroundUnit)),
             self.band_node_at(BandKey::base(Layer::FlyingUnitLow)),
             self.band_node_at(BandKey::base(Layer::FlyingUnit)),
+            // Bucket 3: `drawShadow` for flying units (`Math.min(Layer.darkness,
+            // z - 1f)`, `UnitType.java:1494-1497`).
+            self.band_node_at(BandKey::base(Layer::Darkness)),
         ];
         self.units = Some(UnitRenderer::new(
             host.clone(),
@@ -475,6 +511,31 @@ impl MindWorldRenderer {
         ));
         if let Some(light_band) = self.band_node_at(BandKey::base(Layer::Light)) {
             self.light = Some(LightRenderer::new(host.clone(), light_band, &self.shaders));
+        }
+        // F6 status markers under `Layer.power` (`BuildingComp.drawStatus`).
+        if let Some(power_band) = self.band_node_at(BandKey::base(Layer::Power)) {
+            let node = status::StatusRenderer::new_alloc();
+            // code-instantiated: one marker pass over the power band; the node
+            // count is fixed by the pipeline, not by content.
+            power_band.clone().add_child(&node);
+            self.status = Some(node.clone());
+        }
+        // Shield domes/bubbles at `Layer.shields` (`ForceProjector.drawShield`).
+        if let Some(shield_band) = self.band_node_at(BandKey::base(Layer::Shields)) {
+            let node = shields::ShieldRenderer::new_alloc();
+            // code-instantiated: one shield pass; the node count is fixed by
+            // the pipeline, not by content.
+            shield_band.clone().add_child(&node);
+            self.shields = Some(node.clone());
+        }
+        // Command-mode selection overlay at `Layer.plans`
+        // (`InputHandler.drawCommanded`).
+        if let Some(plans_band) = self.band_node_at(BandKey::base(Layer::Plans)) {
+            let node = command_overlay::CommandOverlay::new_alloc();
+            // code-instantiated: one overlay pass; the node count is fixed by
+            // the pipeline, not by content.
+            plans_band.clone().add_child(&node);
+            self.command_overlay = Some(node.clone());
         }
         if let Some(light_band) = self.band_node_at(BandKey::base(Layer::Light)) {
             self.env = Some(EnvRenderer::new(light_band));
@@ -730,6 +791,13 @@ impl MindWorldRenderer {
     #[func]
     pub fn get_stats(&self) -> VarDictionary {
         self.stats.to_dict()
+    }
+
+    /// `Lod.l2` from the last frame (`BlockRenderer` gates the F6 status
+    /// markers on it, `BlockRenderer.java:825-833`).
+    #[func]
+    pub fn stats_lod_l2(&self) -> bool {
+        self.stats.lod_l2
     }
 
     /// Whether the nullable `shield` shader resolved (plan 16 §3.9,

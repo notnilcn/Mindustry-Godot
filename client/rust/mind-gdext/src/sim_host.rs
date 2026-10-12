@@ -46,6 +46,8 @@ pub struct UnitDraw {
     pub healthf: f32,
     /// Flight elevation `0..=1` (`UnitCore.elevation`).
     pub elevation: f32,
+    /// Unit hit radius (`UnitType.hitSize`); `Units.closestOverlap` adds half.
+    pub hit_size: f32,
     /// Mech walk state (`MechComp`); `None` for non-mechs.
     pub mech: Option<MechDraw>,
     /// Live weapon mounts (`UnitWeapons`).
@@ -61,6 +63,10 @@ pub struct MechDraw {
     /// `UnitType.mechStride`.
     pub stride: f32,
 }
+
+/// One command-overlay row: `(x, y, hit_size, flying, target_pos)`
+/// (`InputHandler.drawCommanded` inputs).
+pub type UnitCommandRow = (f32, f32, f32, bool, Option<(f32, f32)>);
 
 /// One live weapon mount (`Weapon.draw` inputs).
 pub struct WeaponDraw {
@@ -78,6 +84,9 @@ pub struct WeaponDraw {
     pub rotate: bool,
     /// Mirrored mount (`Weapon.flipSprite`).
     pub flip: bool,
+    /// Outline drawn over the body (`Weapon.top`); non-top weapons draw their
+    /// `<name>-outline` sprite under the body (`drawWeaponOutlines`).
+    pub top: bool,
     /// Visual recoil `0..1`.
     pub recoil: f32,
 }
@@ -372,6 +381,28 @@ impl MindSimHost {
             .ecs
             .0
             .insert_resource(AudioSinkRes::new(self.audio_log.clone()));
+
+        // Combat FX (`Effect.at`/`Effect.shake`/decals) go to `MindFx`'s bus;
+        // a fresh `Sim` carries a fresh noop-sink unit runtime, so this runs
+        // after every replacement.
+        self.install_fx_sink();
+    }
+
+    /// Installs the live `MindFx` bus on the sim's unit runtime so every
+    /// `FxSink` call reaches the view instead of the noop sink (`MindFx` sits
+    /// at `/root/Spine/MindFx`; `FxBus` is `Send + Sync`). No-op when the FX
+    /// host or unit runtime is absent.
+    fn install_fx_sink(&mut self) {
+        let Some(bus) = self
+            .base()
+            .try_get_node_as::<crate::fx::MindFx>("/root/Spine/MindFx")
+            .map(|fx| fx.bind().bus_handle())
+        else {
+            return;
+        };
+        if let Some(mut runtime) = self.sim.unit_runtime_mut() {
+            runtime.fx = bus;
+        }
     }
 
     /// Places a block at `(x, y)` immediately (API path; MCP §7c step 5).
@@ -405,6 +436,35 @@ impl MindSimHost {
             return false;
         };
         let applied = self.apply_command(Command::Break { x, y });
+        if applied {
+            self.emit_state();
+            self.emit_world_changed();
+        }
+        applied
+    }
+
+    /// Places `block` at `(x, y)` with an explicit rotation (`0..3`) through the
+    /// same live-runtime path as [`Self::place_block`]. `Command::Place` always
+    /// carries rotation 0, so rotated belts/conduits need this test seam
+    /// (MCP §7c has no rotation field).
+    #[func]
+    pub fn place_block_rot(&mut self, x: i32, y: i32, block: GString, rot: i32) -> bool {
+        let name = block.to_string();
+        let id = match self.sim.content().id(&name) {
+            Ok(id) => id,
+            Err(_) => {
+                log::warn!("place_block_rot: unknown block `{name}`");
+                return false;
+            }
+        };
+        let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
+            log::warn!("place_block_rot: ({x}, {y}) does not fit in i16");
+            return false;
+        };
+        let team = self.sim.live_default_team();
+        let applied = self
+            .sim
+            .place_for_team(x, y, id, rot.clamp(0, 3) as u8, team);
         if applied {
             self.emit_state();
             self.emit_world_changed();
@@ -2107,6 +2167,7 @@ impl MindSimHost {
                                     base_rotation: weapon.base_rotation,
                                     rotate: weapon.rotate,
                                     flip: weapon.flip_sprite,
+                                    top: weapon.top,
                                     recoil: mount.map(|mount| mount.recoil).unwrap_or(0.0),
                                 }
                             })
@@ -2123,6 +2184,7 @@ impl MindSimHost {
                     team,
                     healthf,
                     elevation: core.elevation,
+                    hit_size: def.hit_size,
                     mech,
                     weapons,
                 })
@@ -2443,6 +2505,288 @@ impl MindSimHost {
         Some((rot, items))
     }
 
+    /// Belt sprite state at `(x, y)`: `(blendbits, sclx, scly, frame)` for a
+    /// `Conveyor`/`ArmoredConveyor` (`ConveyorBuild.draw` / `Autotiler`
+    /// blending cached by the sim on proximity updates). `None` when the tile
+    /// holds no belt. Rust-only seam for the block renderer.
+    pub fn belt_draw(&self, x: i32, y: i32) -> Option<(u8, f32, f32, i32)> {
+        let entity = self.tile_at(x, y)?.build?;
+        let content = self.content_snapshot.as_ref()?;
+        let def = content.block(self.sim.grid.tile(x, y).block)?;
+        let speed = mind_core::world::blocks::distribution::ConveyorBehavior::belt_speed(&def.name)?;
+        let world = &self.sim.ecs.0;
+        let (blend_bits, sclx, scly, clog_heat) = {
+            let belt = world
+                .get::<mind_core::world::blocks::distribution::ConveyorBuild>(entity)?;
+            (
+                belt.blend_bits,
+                f32::from(belt.blend_sclx),
+                f32::from(belt.blend_scly),
+                belt.clog_heat,
+            )
+        };
+        let building = world.get::<mind_core::entities::comp::Building>(entity)?;
+        let frame = mind_core::render::autotile::conveyor_frame(
+            self.sim.tick_count() as f32,
+            speed,
+            building.efficiency,
+            building.enabled,
+            clog_heat,
+        );
+        Some((blend_bits, sclx, scly, frame))
+    }
+
+    /// Drill draw state at `(x, y)`: `timeDrilled` (`Drill.DrillBuild.draw`
+    /// rotator angle = `timeDrilled * rotateSpeed`; `Drill.rotateSpeed = 2`).
+    /// `None` when the tile holds no drill. Rust-only seam for the block
+    /// renderer.
+    pub fn drill_draw(&self, x: i32, y: i32) -> Option<f32> {
+        let entity = self.tile_at(x, y)?.build?;
+        self.sim
+            .ecs
+            .0
+            .get::<mind_core::entities::comp::DrillState>(entity)
+            .map(|state| state.time_drilled)
+    }
+
+    /// Turret draw state at `(x, y)`: `(rotation degrees, recoil offset x,
+    /// recoil offset y, heat)` (`DrawTurret.draw`: `recoilOffset =
+    /// trns(rotation, -pow(curRecoil, recoilPow) * recoil)`, barrel rotation
+    /// `drawrot() = rotation - 90`). `None` without a turret.
+    pub fn turret_draw(&self, x: i32, y: i32) -> Option<(f32, f32, f32, f32)> {
+        let entity = self.tile_at(x, y)?.build?;
+        let state = self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::world::blocks::defense::turrets::TurretState>(entity)?;
+        let len =
+            -state.cur_recoil.max(0.0).powf(state.config.recoil_pow) * state.config.recoil;
+        let (dx, dy) = mind_core::render::conveyor_items::trns(state.rotation, len, 0.0);
+        Some((state.rotation, dx, dy, state.heat))
+    }
+
+    /// Command-overlay rows for the selected unit ids
+    /// (`InputHandler.drawCommanded`; T16/PAR-0157):
+    /// `(x, y, hit_size, flying, target_pos)` where `target_pos` is
+    /// `CommandAiState.target_pos` (`None` without a move command). Rust-only
+    /// seam for the overlay pass.
+    pub fn unit_command_view(&self, ids: &[i32]) -> Vec<UnitCommandRow> {
+        use mind_core::entities::comp::Pos;
+        use mind_core::entities::comp::unit::comp::UnitTypeComp;
+        let Some(runtime) = self.sim.unit_runtime() else {
+            return Vec::new();
+        };
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return Vec::new();
+        };
+        let wanted: std::collections::HashSet<i32> = ids.iter().copied().collect();
+        let mut out = Vec::new();
+        for &entity in &runtime.units {
+            let Ok(entity_ref) = self.sim.ecs.0.get_entity(entity) else {
+                continue;
+            };
+            let Some(seq) = entity_ref.get::<mind_core::ecs::EntitySeq>() else {
+                continue;
+            };
+            if !wanted.contains(&(seq.0 as i32)) {
+                continue;
+            }
+            let (Some(pos), Some(type_comp)) =
+                (entity_ref.get::<Pos>(), entity_ref.get::<UnitTypeComp>())
+            else {
+                continue;
+            };
+            let Some(def) = content.unit(type_comp.type_id) else {
+                continue;
+            };
+            let target = self
+                .sim
+                .unit_command_state(seq.0 as i32)
+                .and_then(|state| state.target_pos);
+            out.push((pos.x, pos.y, def.hit_size, def.flying, target));
+        }
+        out
+    }
+
+    /// Force-projector domes: `(x, y, real radius, sides, rotation degrees,
+    /// team, hit)` for every unbroken projector (`ForceProjector.drawShield`,
+    /// `ForceProjector.java:308-330`). Rust-only seam for the shield pass
+    /// (T13/PAR-0129).
+    pub fn force_shields(&self) -> Vec<(f32, f32, f32, u8, f32, u8, f32)> {
+        use mind_core::world::blocks::defense::shields::ForceProjectorState;
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for entity in self.sim.ecs.0.iter_entities() {
+            let Some(state) = entity.get::<ForceProjectorState>() else {
+                continue;
+            };
+            if state.broken {
+                continue;
+            }
+            let Some(building) = entity.get::<mind_core::entities::comp::Building>() else {
+                continue;
+            };
+            let Some(comp) = entity.get::<mind_core::ecs::BuildingComp>() else {
+                continue;
+            };
+            let Some(def) = content.block(building.block) else {
+                continue;
+            };
+            // `realRadius()` (the state method mirrors the Java formula).
+            let radius = state.real_radius();
+            if radius <= 0.001 {
+                continue;
+            }
+            out.push((
+                f32::from(building.tile.x()) * 8.0 + def.offset,
+                f32::from(building.tile.y()) * 8.0 + def.offset,
+                radius,
+                state.sides.clamp(3, 300) as u8,
+                state.shield_rotation,
+                comp.team.0,
+                state.hit,
+            ));
+        }
+        out
+    }
+
+    /// Unit shield bubbles: `(x, y, radius, alpha, team, hit)` for every unit
+    /// with a `ShieldComp` (`UnitType.drawShield`: radius `hitSize * 1.3`,
+    /// colour `shieldColor.lerp(white, clamp(hitTime/2)).a(0.7 * shieldAlpha)`;
+    /// the port has no `hitTime`, so hit is 0). Rust-only seam (T13).
+    pub fn unit_shields(&self) -> Vec<(f32, f32, f32, f32, u8, f32)> {
+        use mind_core::entities::comp::Pos;
+        use mind_core::entities::comp::unit::comp::{ShieldComp, UnitTypeComp};
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for entity in self.sim.ecs.0.iter_entities() {
+            let Some(_shield) = entity.get::<ShieldComp>() else {
+                continue;
+            };
+            let Some(pos) = entity.get::<Pos>() else {
+                continue;
+            };
+            let Some(type_comp) = entity.get::<UnitTypeComp>() else {
+                continue;
+            };
+            let Some(def) = content.unit(type_comp.type_id) else {
+                continue;
+            };
+            let team = entity
+                .get::<mind_core::entities::comp::TeamComp>()
+                .map(|comp| comp.team)
+                .unwrap_or(0);
+            out.push((
+                pos.x,
+                pos.y,
+                def.hit_size * 1.3,
+                0.55, // `shieldAlpha` default (`UnitType.shieldAlpha`)
+                team,
+                0.0,
+            ));
+        }
+        out
+    }
+
+    /// F6 status markers (`BuildingComp.drawStatus`/`status()`): one row per
+    /// player-team building with a non-empty `consumes` —
+    /// `(center tile x, center tile y, world x, world y, size, java_color)`.
+    /// Rust-only seam for the status pass (T14/PAR-0097).
+    pub fn building_statuses(&self) -> Vec<(i32, i32, f32, f32, i32, u32)> {
+        use mind_core::world::status::BlockStatus;
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return Vec::new();
+        };
+        let team = self.player_team();
+        let mut out = Vec::new();
+        for entity in self.sim.ecs.0.iter_entities() {
+            let Some(building) = entity.get::<mind_core::entities::comp::Building>() else {
+                continue;
+            };
+            let Some(comp) = entity.get::<mind_core::ecs::BuildingComp>() else {
+                continue;
+            };
+            if comp.team.0 != team {
+                continue;
+            }
+            let Some(def) = content.block(building.block) else {
+                continue;
+            };
+            if def.consumes.is_empty() {
+                continue;
+            }
+            // `BlockStatus.forBlock`: `!enabled` -> logicDisable, efficiency
+            // `<= 0` -> noInput, else active. Java's pulse condition
+            // `((state.tick / 30) % 1) < efficiency` is always true (integer
+            // modulo 1), so the marker is simply `active`
+            // (`BuildingComp.java:638-652`).
+            let status = if !building.enabled {
+                BlockStatus::LogicDisable
+            } else if building.efficiency <= 0.0 {
+                BlockStatus::NoInput
+            } else {
+                BlockStatus::Active
+            };
+            let size = def.size.max(1);
+            // `Building.tile` is the center tile; `Block.offset` recentres the
+            // even-size sprites (same convention as `blocks.rs`).
+            let cx = f32::from(building.tile.x()) * 8.0 + def.offset;
+            let cy = f32::from(building.tile.y()) * 8.0 + def.offset;
+            out.push((
+                i32::from(building.tile.x()),
+                i32::from(building.tile.y()),
+                cx,
+                cy,
+                size,
+                status.java_color(),
+            ));
+        }
+        out
+    }
+
+    /// Cursor hover at world pixels (`PlacementFragment.hovered`):
+    /// `Units.closestOverlap(player.team(), Core.input.mouseWorldX/Y, 5f,
+    /// u -> !u.isLocal() && u.displayable())` — the distance test adds half
+    /// the hit size, and the cursor position (not the tile centre) is used.
+    #[func]
+    pub fn hover_info_world(&self, wx: f32, wy: f32) -> Dictionary<GString, Variant> {
+        let size = mind_core::config::TILESIZE as f32;
+        let team = self.player_team();
+        let own = self.sim.player_unit_position();
+        let unit = self
+            .unit_draws_full()
+            .into_iter()
+            .filter(|unit| unit.team == team)
+            .filter(|unit| own != Some((unit.x, unit.y)))
+            .find(|unit| (unit.x - wx).hypot(unit.y - wy) <= 5.0 + unit.hit_size / 2.0)
+            .map(|unit| unit.name);
+        if let Some(name) = unit {
+            let mut out = Dictionary::new();
+            out.set("kind", &"unit".to_variant());
+            out.set("name", &GString::from(name.as_str()).to_variant());
+            out.set(
+                "icon",
+                &GString::from(format!("unit-{name}-ui").as_str()).to_variant(),
+            );
+            out.set(
+                "label",
+                &GString::from(format!("unit.{name}.name").as_str()).to_variant(),
+            );
+            return out;
+        }
+        // `world.tileWorld`/`screenToTile` fallback (Java recomputes the tile
+        // from the mouse world position).
+        self.hover_tile(
+            ((wx + size / 2.0) / size).floor() as i32,
+            ((wy + size / 2.0) / size).floor() as i32,
+        )
+    }
+
     /// Hover target at tile `(x, y)` (`PlacementFragment.hovered`): a unit
     /// within 5 world px of the tile centre, else the tile's building, else the
     /// tile's displayable drop (`Tile.displayable`/`Tile.display`).
@@ -2450,9 +2794,6 @@ impl MindSimHost {
     #[func]
     pub fn hover_info(&self, x: i32, y: i32) -> Dictionary<GString, Variant> {
         let mut out = Dictionary::new();
-        let Some(content) = self.content_snapshot.as_ref() else {
-            return out;
-        };
         let size = mind_core::config::TILESIZE as f32;
         let cx = x as f32 * size;
         let cy = y as f32 * size;
@@ -2482,6 +2823,16 @@ impl MindSimHost {
             );
             return out;
         }
+        // `world.tileWorld` is null off the map handled by `hover_tile`.
+        self.hover_tile(x, y)
+    }
+
+    /// Tile hover rows only (`hover_info` minus the unit test).
+    fn hover_tile(&self, x: i32, y: i32) -> Dictionary<GString, Variant> {
+        let mut out = Dictionary::new();
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return out;
+        };
         // `world.tileWorld` is null off the map: no hover info.
         if !self.sim.grid.tiles.in_bounds(x, y) {
             return out;
@@ -2713,6 +3064,19 @@ impl MindSimHost {
             "construct",
             &self.construct_draw(x, y).is_some().to_variant(),
         );
+        // `Rules.limitMapArea` play area (`World.getDarkness` border half);
+        // `null` when unrestricted.
+        match self.sim.grid.limit_area {
+            Some((lx, ly, lw, lh)) => {
+                let mut area = PackedInt32Array::new();
+                area.push(lx);
+                area.push(ly);
+                area.push(lw);
+                area.push(lh);
+                d.set("limit_area", &area.to_variant());
+            }
+            None => d.set("limit_area", &Variant::nil()),
+        }
         d
     }
 
