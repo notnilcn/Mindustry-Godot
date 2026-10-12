@@ -31,12 +31,13 @@ var _input_buttons: Array[Button] = []
 var _bar_campaign := false
 
 @onready var panel: PanelContainer = get_node_or_null("Panel")
-@onready var search: LineEdit = get_node_or_null("Panel/Layout/Search")
-@onready var categories: GridContainer = get_node_or_null("Panel/Layout/Categories")
-@onready var blocks: GridContainer = get_node_or_null("Panel/Layout/Left/Scroll/Blocks")
-@onready var input_bar: HBoxContainer = get_node_or_null("Panel/Layout/Left/InputBar")
-@onready var top_table: PanelContainer = get_node_or_null("Panel/Layout/Left/TopTable")
-@onready var top_rows: VBoxContainer = get_node_or_null("Panel/Layout/Left/TopTable/Rows")
+@onready var search: LineEdit = get_node_or_null("Panel/Frame/Layout/Search")
+@onready var categories: GridContainer = get_node_or_null("Panel/Frame/Layout/Categories")
+@onready var blocks: GridContainer = get_node_or_null("Panel/Frame/Layout/Left/Scroll/Blocks")
+@onready var input_bar: HBoxContainer = get_node_or_null("Panel/Frame/Layout/Left/InputBar")
+@onready var top_table: PanelContainer = get_node_or_null("Panel/Frame/TopTable")
+@onready var top_rows: VBoxContainer = get_node_or_null("Panel/Frame/TopTable/Rows")
+@onready var top_divider: ColorRect = get_node_or_null("Panel/Frame/TopDivider")
 
 ## Last rendered top-table state (`b:<block>` or `h:<kind>:<name>`); the header
 ## rebuilds only when it changes (`PlacementFragment.lastDisplayState`).
@@ -44,6 +45,9 @@ var _top_state := ""
 ## Requirement amount labels + their `(have, amount)` pairs, refreshed per frame.
 var _top_amounts: Array[RichTextLabel] = []
 var _top_requirements: Array[Dictionary] = []
+## Last live re-read of the requirement `have` counts (msec).
+var _top_refreshed_ms := 0
+const TOP_REFRESH_MS := 250
 
 
 func _ready() -> void:
@@ -121,19 +125,27 @@ func _update_top_table() -> void:
 			if info is Dictionary and not str((info as Dictionary).get("kind", "")).is_empty():
 				hover = info
 	if display.is_empty() and hover.is_empty():
-		top_table.visible = false
+		_set_top_visible(false)
 		return
-	top_table.visible = true
+	_set_top_visible(true)
 	var state := (
 		"b:%s" % display
 		if not display.is_empty()
 		else "h:%s:%s" % [str(hover.get("kind", "")), str(hover.get("name", ""))]
 	)
 	if state == _top_state:
-		_refresh_top_amounts()
+		if not display.is_empty():
+			_refresh_top_amounts(display)
 		return
 	_top_state = state
 	_rebuild_top(display, hover)
+
+
+## `visible(this::hasInfoBox)` on the top table and its `Pal.gray` rule.
+func _set_top_visible(shown: bool) -> void:
+	top_table.visible = shown
+	if top_divider != null:
+		top_divider.visible = shown
 
 
 ## The world tile under the cursor, or `null` while any UI holds the mouse
@@ -173,6 +185,8 @@ func _build_block_header(display: String) -> void:
 	header.add_theme_constant_override("separation", 4)
 	var icon := TextureRect.new()
 	icon.custom_minimum_size = Vector2(32, 32)
+	# `.size(8 * 4)` + `Scaling.fit`: never the texture's native size.
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.texture = MindWidgets.icon_texture("block-%s-ui" % display)
 	if icon.texture == null:
 		icon.texture = MindWidgets.icon_texture("block-%s-full" % display)
@@ -221,6 +235,7 @@ func _build_requirement_rows(display: String) -> void:
 		line.add_theme_constant_override("separation", 2)
 		var icon := TextureRect.new()
 		icon.custom_minimum_size = Vector2(16, 16)
+		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		var item := str(entry.get("item", ""))
 		icon.texture = MindWidgets.icon_texture("item-%s-ui" % item)
 		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
@@ -237,8 +252,20 @@ func _build_requirement_rows(display: String) -> void:
 		_top_requirements.append(entry)
 
 
-## Refreshes requirement amounts every frame (core inventory changes live).
-func _refresh_top_amounts() -> void:
+## Refreshes requirement amounts (core inventory changes live; the Java label
+## is a per-frame provider). Re-reads `have` from the sim at most every
+## `TOP_REFRESH` seconds; `display` empty keeps the cached rows.
+func _refresh_top_amounts(display: String = "") -> void:
+	var now := Time.get_ticks_msec()
+	if not display.is_empty() and now - _top_refreshed_ms >= TOP_REFRESH_MS:
+		_top_refreshed_ms = now
+		var host := get_node_or_null("/root/Spine/SimHost")
+		if host != null and host.has_method("block_requirements_json"):
+			var parsed: Variant = JSON.parse_string(str(host.call("block_requirements_json", display)))
+			if parsed is Array and (parsed as Array).size() == _top_requirements.size():
+				for index in _top_requirements.size():
+					if (parsed as Array)[index] is Dictionary:
+						_top_requirements[index] = (parsed as Array)[index]
 	for index in _top_amounts.size():
 		var entry: Dictionary = _top_requirements[index]
 		var have := int(entry.get("have", 0))
@@ -262,6 +289,8 @@ func _build_hover_row(hover: Dictionary) -> void:
 	row.add_theme_constant_override("separation", 4)
 	var icon := TextureRect.new()
 	icon.custom_minimum_size = Vector2(32, 32)
+	# `.size(8 * 4)` + `Scaling.fit`: never the texture's native size.
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	var icon_name := str(hover.get("icon", ""))
 	icon.texture = MindWidgets.icon_texture(icon_name)
 	if icon.texture == null and not icon_name.is_empty():

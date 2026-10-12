@@ -2424,7 +2424,7 @@ impl MindSimHost {
     /// `Conveyor`/`ArmoredConveyor` (`Conveyor.draw` item loop). `None` when
     /// the tile holds no belt. Rust-only seam for the block renderer.
     pub fn conveyor_items(&self, x: i32, y: i32) -> Option<(u8, Vec<BeltItemSlot>)> {
-        let entity = self.sim.grid.tiles.getn(x, y)?.build?;
+        let entity = self.tile_at(x, y)?.build?;
         let rot = self
             .sim
             .ecs
@@ -2458,12 +2458,17 @@ impl MindSimHost {
         let cy = y as f32 * size;
         // `Units.closestOverlap(player.team(), mouseWorld, 5f, ...)`: a unit
         // under the cursor wins over the tile.
+        // Only the player's team, never the player's own unit
+        // (`u -> !u.isLocal() && u.displayable()`).
+        let team = self.player_team();
+        let own = self.sim.player_unit_position();
         let unit = self
-            .unit_draws()
+            .unit_draws_full()
             .into_iter()
-            .filter(|(ux, uy, ..)| (ux - cx).hypot(*uy - cy) <= 5.0)
-            .map(|(_, _, _, name, ..)| name)
-            .next();
+            .filter(|unit| unit.team == team)
+            .filter(|unit| own != Some((unit.x, unit.y)))
+            .find(|unit| (unit.x - cx).hypot(unit.y - cy) <= 5.0)
+            .map(|unit| unit.name);
         if let Some(name) = unit {
             out.set("kind", &"unit".to_variant());
             out.set("name", &GString::from(name.as_str()).to_variant());
@@ -2537,19 +2542,32 @@ impl MindSimHost {
             return out;
         };
         out.set("kind", &"tile".to_variant());
-        // `OreBlock` carries the ore item's localized name and displays the
-        // item icon; plain walls/floors display their own ui icon.
+        // `OreBlock.getDisplayName` is the drop item's name, but the icon stays
+        // the ore block's own `uiIcon` (`Block.getDisplayIcon`).
         if displayed.kind == BlockKind::OreBlock
             && let Some(item_def) = displayed.item_drop.and_then(|item| content.item(item))
         {
             out.set("name", &GString::from(item_def.name.as_str()).to_variant());
             out.set(
                 "icon",
-                &GString::from(format!("item-{}-ui", item_def.name).as_str()).to_variant(),
+                &GString::from(format!("block-{}-ui", displayed.name).as_str()).to_variant(),
             );
             out.set(
                 "label",
                 &GString::from(format!("item.{}.name", item_def.name).as_str()).to_variant(),
+            );
+            return out;
+        }
+        // `Floor.getDisplayIcon/Name`: a liquid floor shows its liquid.
+        if let Some(liquid) = displayed.liquid_drop.and_then(|id| content.liquid(id)) {
+            out.set("name", &GString::from(liquid.name.as_str()).to_variant());
+            out.set(
+                "icon",
+                &GString::from(format!("liquid-{}-ui", liquid.name).as_str()).to_variant(),
+            );
+            out.set(
+                "label",
+                &GString::from(format!("liquid.{}.name", liquid.name).as_str()).to_variant(),
             );
             return out;
         }
@@ -2616,13 +2634,21 @@ impl MindSimHost {
         GString::from(serde_json::Value::Array(rows).to_string().as_str())
     }
 
+    /// Tile `(x, y)`; `None` off the map (`world.build`
+    /// returns null out of bounds). Every coordinate-taking render/HUD seam
+    /// goes through this: `WorldGrid::tile` panics (debug_assert) off-map.
+    fn tile_at(&self, x: i32, y: i32) -> Option<&mind_core::world::Tile> {
+        if !self.sim.grid.tiles.in_bounds(x, y) {
+            return None;
+        }
+        Some(self.sim.grid.tile(x, y))
+    }
+
     /// Building rotation (`Building.rotation`, quarter turns) at `(x, y)`;
     /// `0` without a building. Rust-only seam for rotated block sprites.
     pub fn building_rotation(&self, x: i32, y: i32) -> u8 {
-        self.sim
-            .grid
-            .tile(x, y)
-            .build
+        self.tile_at(x, y)
+            .and_then(|tile| tile.build)
             .and_then(|entity| {
                 self.sim
                     .ecs
@@ -2636,7 +2662,7 @@ impl MindSimHost {
     /// `ConstructBuild` draw state at `(x, y)`: `(current block, progress)`.
     /// Rust-only seam for the construct-site sprite (`ConstructBuild.draw`).
     pub fn construct_draw(&self, x: i32, y: i32) -> Option<(mind_core::content::BlockId, f32)> {
-        let entity = self.sim.grid.tiles.getn(x, y)?.build?;
+        let entity = self.tile_at(x, y)?.build?;
         self.sim
             .ecs
             .0
@@ -2693,7 +2719,7 @@ impl MindSimHost {
     /// Construct block state at `(x, y)` as `(current block, progress,
     /// deconstructing)` (`ConstructBuild`; render seam).
     pub fn construct_at(&self, x: i32, y: i32) -> Option<(BlockId, f32, bool)> {
-        let entity = self.sim.grid.tiles.getn(x, y)?.build?;
+        let entity = self.tile_at(x, y)?.build?;
         let state = self
             .sim
             .ecs
@@ -2706,7 +2732,7 @@ impl MindSimHost {
     /// tile has no building). Rust-only seam for the block renderer's team
     /// overlays (`Block.drawTeamOverlay`).
     pub fn building_team(&self, x: i32, y: i32) -> Option<u8> {
-        let entity = self.sim.grid.tiles.getn(x, y)?.build?;
+        let entity = self.tile_at(x, y)?.build?;
         self.sim
             .ecs
             .0

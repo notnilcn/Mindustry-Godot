@@ -207,7 +207,15 @@ impl BlockRenderer {
                         // `Conveyor.draw` item loop (`Draw.z(Layer.block -
                         // 0.1)`, above the belt): `Vars.itemSize` world-px
                         // `item-<name>` quads at their belt positions.
-                        if matches!(def.kind, BlockKind::Conveyor | BlockKind::ArmoredConveyor)
+                        // `ConveyorBuild.draw` runs every frame: items can
+                        // arrive on an empty belt without a world-revision
+                        // bump, so any visible belt keeps the pass rebuilding.
+                        let is_belt =
+                            matches!(def.kind, BlockKind::Conveyor | BlockKind::ArmoredConveyor);
+                        if is_belt {
+                            animating = true;
+                        }
+                        if is_belt
                             && let Some((belt_rot, items)) = host.conveyor_items(tile.x, tile.y)
                             && !items.is_empty()
                         {
