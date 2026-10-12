@@ -412,6 +412,35 @@ impl MindSimHost {
         applied
     }
 
+    /// Places `block` at `(x, y)` with an explicit rotation (`0..3`) through the
+    /// same live-runtime path as [`Self::place_block`]. `Command::Place` always
+    /// carries rotation 0, so rotated belts/conduits need this test seam
+    /// (MCP §7c has no rotation field).
+    #[func]
+    pub fn place_block_rot(&mut self, x: i32, y: i32, block: GString, rot: i32) -> bool {
+        let name = block.to_string();
+        let id = match self.sim.content().id(&name) {
+            Ok(id) => id,
+            Err(_) => {
+                log::warn!("place_block_rot: unknown block `{name}`");
+                return false;
+            }
+        };
+        let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
+            log::warn!("place_block_rot: ({x}, {y}) does not fit in i16");
+            return false;
+        };
+        let team = self.sim.live_default_team();
+        let applied = self
+            .sim
+            .place_for_team(x, y, id, rot.clamp(0, 3) as u8, team);
+        if applied {
+            self.emit_state();
+            self.emit_world_changed();
+        }
+        applied
+    }
+
     /// Canonical sparse state dump as pretty JSON (same schema as `mind-headless`).
     #[func]
     pub fn get_state_json(&self) -> GString {
@@ -2441,6 +2470,37 @@ impl MindSimHost {
             items.push((belt.ids[i], belt.xs[i], belt.ys[i]));
         }
         Some((rot, items))
+    }
+
+    /// Belt sprite state at `(x, y)`: `(blendbits, sclx, scly, frame)` for a
+    /// `Conveyor`/`ArmoredConveyor` (`ConveyorBuild.draw` / `Autotiler`
+    /// blending cached by the sim on proximity updates). `None` when the tile
+    /// holds no belt. Rust-only seam for the block renderer.
+    pub fn belt_draw(&self, x: i32, y: i32) -> Option<(u8, f32, f32, i32)> {
+        let entity = self.tile_at(x, y)?.build?;
+        let content = self.content_snapshot.as_ref()?;
+        let def = content.block(self.sim.grid.tile(x, y).block)?;
+        let speed = mind_core::world::blocks::distribution::ConveyorBehavior::belt_speed(&def.name)?;
+        let world = &self.sim.ecs.0;
+        let (blend_bits, sclx, scly, clog_heat) = {
+            let belt = world
+                .get::<mind_core::world::blocks::distribution::ConveyorBuild>(entity)?;
+            (
+                belt.blend_bits,
+                f32::from(belt.blend_sclx),
+                f32::from(belt.blend_scly),
+                belt.clog_heat,
+            )
+        };
+        let building = world.get::<mind_core::entities::comp::Building>(entity)?;
+        let frame = mind_core::render::autotile::conveyor_frame(
+            self.sim.tick_count() as f32,
+            speed,
+            building.efficiency,
+            building.enabled,
+            clog_heat,
+        );
+        Some((blend_bits, sclx, scly, frame))
     }
 
     /// Hover target at tile `(x, y)` (`PlacementFragment.hovered`): a unit

@@ -211,6 +211,17 @@ impl ConveyorBehavior {
         armored: true,
     };
 
+    /// `Conveyor.speed` for a belt content name (`Conveyor.draw` frame math);
+    /// `None` for anything that is not one of the vanilla belts.
+    pub fn belt_speed(name: &str) -> Option<f32> {
+        match name {
+            "conveyor" => Some(Self::BASE.speed),
+            "titanium-conveyor" => Some(Self::TITANIUM.speed),
+            "armored-conveyor" => Some(Self::ARMORED.speed),
+            _ => None,
+        }
+    }
+
     fn neighbor_dirs(world: &World, e: Entity) -> [Option<BlendNeighbor>; 4] {
         let mut dirs = [None; 4];
         let Some(building) = world.get::<Building>(e) else {
@@ -263,7 +274,11 @@ impl BuildingBehavior for ConveyorBehavior {
                     dirs,
                 };
                 let bits = build_blending(&adapter, tile, rotation, &[None; 4], true);
-                (bits[3] as u8, bits[4] as u8, bits[1] as i8, bits[2] as i8)
+                // `ConveyorBuild.onProximityUpdate` (Conveyor.java:215-219):
+                // `blendbits = bits[0]` (the autotile case, 0..4),
+                // `blending = bits[4]` (the non-square mask),
+                // `blendsclx/y = bits[1]/bits[2]`.
+                (bits[0] as u8, bits[4] as u8, bits[1] as i8, bits[2] as i8)
             }
             None => (0, 0, 1, 1),
         };
@@ -890,5 +905,21 @@ mod tests {
         }
         crate::world::update::building_update(&mut world, belt);
         assert!((world.get::<ConveyorBuild>(belt).expect("belt").ys[0] - 0.0801).abs() < 1e-5);
+    }
+
+    /// `Conveyor.draw` frame math looks the speed up by belt name
+    /// (`Blocks.java:2070-2097`: 0.035/0.0801/0.08).
+    #[test]
+    fn belt_speed_matches_the_content_definitions() {
+        assert_eq!(ConveyorBehavior::belt_speed("conveyor"), Some(0.035));
+        assert_eq!(
+            ConveyorBehavior::belt_speed("titanium-conveyor"),
+            Some(0.0801)
+        );
+        assert_eq!(
+            ConveyorBehavior::belt_speed("armored-conveyor"),
+            Some(0.08)
+        );
+        assert_eq!(ConveyorBehavior::belt_speed("junction"), None);
     }
 }

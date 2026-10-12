@@ -134,6 +134,7 @@ impl BlockRenderer {
                 let anchor_y = (tile.y + (def.size - 1) / 2) as f32 * size + def.offset;
                 let rotation = host.building_rotation(tile.x, tile.y);
                 let mut push = |region: &ResolvedRegion,
+                                uv: [f32; 4],
                                 cx: f32,
                                 cy: f32,
                                 quad_w: f32,
@@ -144,7 +145,7 @@ impl BlockRenderer {
                     let entry = groups
                         .entry(region.page)
                         .or_insert((region.texture.clone(), Vec::new()));
-                    let [u0, v0, u1, v1] = region.uv;
+                    let [u0, v0, u1, v1] = uv;
                     // `frac < 1`: bottom-up reveal (world y-up; v1 is the
                     // sprite's bottom row through the y-flip camera).
                     let h = quad_h * frac;
@@ -174,6 +175,7 @@ impl BlockRenderer {
                         };
                         push(
                             &region,
+                            region.uv,
                             anchor_x,
                             anchor_y,
                             w,
@@ -186,6 +188,7 @@ impl BlockRenderer {
                         if progress > 0.0 {
                             push(
                                 &region,
+                                region.uv,
                                 anchor_x,
                                 anchor_y,
                                 w,
@@ -206,20 +209,42 @@ impl BlockRenderer {
                 } else {
                     0.0
                 };
-                match self.block_region(def) {
-                    Some(region) => {
-                        push(&region, anchor_x, anchor_y, w, w, rot, 0xffff_ffff, 1.0);
-                        // `Conveyor.draw` item loop (`Draw.z(Layer.block -
-                        // 0.1)`, above the belt): `Vars.itemSize` world-px
-                        // `item-<name>` quads at their belt positions.
-                        // `ConveyorBuild.draw` runs every frame: items can
-                        // arrive on an empty belt without a world-revision
-                        // bump, so any visible belt keeps the pass rebuilding.
-                        let is_belt =
-                            matches!(def.kind, BlockKind::Conveyor | BlockKind::ArmoredConveyor);
-                        if is_belt {
-                            animating = true;
-                        }
+                let is_belt =
+                    matches!(def.kind, BlockKind::Conveyor | BlockKind::ArmoredConveyor);
+                if is_belt {
+                    // `ConveyorBuild.draw` runs every frame: a visible belt
+                    // keeps the pass rebuilding (items + the frame scroll).
+                    animating = true;
+                }
+                // `ConveyorBuild.draw`: `regions[blendbits][frame]` with the
+                // autotile scales from `Autotiler.buildBlending` (cached by
+                // the sim on proximity updates). A negative scale mirrors the
+                // sprite: swap the UVs like the unit weapon flips do.
+                let belt = if is_belt {
+                    host.belt_draw(tile.x, tile.y)
+                } else {
+                    None
+                };
+                let resolved = match belt {
+                    Some((blend_bits, sclx, scly, frame)) => self
+                        .resolver
+                        .find(&format!("{}-{}-{}", def.name, blend_bits, frame))
+                        .map(|region| {
+                            let [mut u0, v0, mut u1, v1] = region.uv;
+                            if sclx < 0.0 {
+                                std::mem::swap(&mut u0, &mut u1);
+                            }
+                            let (v0, v1) = if scly < 0.0 { (v1, v0) } else { (v0, v1) };
+                            (region, [u0, v0, u1, v1])
+                        }),
+                    None => self.block_region(def).map(|region| {
+                        let uv = region.uv;
+                        (region, uv)
+                    }),
+                };
+                match resolved {
+                    Some((region, uv)) => {
+                        push(&region, uv, anchor_x, anchor_y, w, w, rot, 0xffff_ffff, 1.0);
                         if is_belt
                             && let Some((belt_rot, items)) = host.conveyor_items(tile.x, tile.y)
                             && !items.is_empty()
@@ -262,7 +287,7 @@ impl BlockRenderer {
                         // `def.region`, no `<name>-0-0`): fall back to the
                         // `error` placeholder; the resolver logs the miss.
                         if let Some(region) = self.resolver.resolve(&def.region) {
-                            push(&region, anchor_x, anchor_y, w, w, rot, 0xffff_ffff, 1.0);
+                            push(&region, region.uv, anchor_x, anchor_y, w, w, rot, 0xffff_ffff, 1.0);
                         }
                     }
                 }
@@ -281,10 +306,11 @@ impl BlockRenderer {
                         .resolver
                         .find(&format!("{}-team-{}", def.name, team_name))
                     {
-                        push(&region, anchor_x, anchor_y, w, w, 0.0, 0xffff_ffff, 1.0);
+                        push(&region, region.uv, anchor_x, anchor_y, w, w, 0.0, 0xffff_ffff, 1.0);
                     } else if let Some(region) = self.resolver.find(&format!("{}-team", def.name)) {
                         push(
                             &region,
+                            region.uv,
                             anchor_x,
                             anchor_y,
                             w,
