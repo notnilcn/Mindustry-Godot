@@ -1049,6 +1049,44 @@ fn mace_leads_a_moving_dagger() {
     );
 }
 
+/// T14: the live dispatch runs `SuicideAI` for crawlers (`AiKind::Suicide`):
+/// the crawler rams a target and its death weapon fires on contact
+/// (`ai/types/suicide.rs`, `UnitTypes.crawler`).
+#[test]
+fn crawler_rams_and_explodes() {
+    let mut sim = live_sim(48);
+    let target = sim
+        .spawn_live_unit("dagger", 1, 150.0, 100.0, 0.0)
+        .expect("target dagger");
+    let target_start = health(&sim, target).expect("target health");
+    let crawler = sim
+        .spawn_live_unit("crawler", 2, 100.0, 100.0, 0.0)
+        .expect("crawler");
+    let mut ticks = 0;
+    while sim.ecs.0.get_entity(crawler).is_ok() && ticks < 400 {
+        sim.tick().expect("tick");
+        ticks += 1;
+    }
+    assert!(
+        sim.ecs.0.get_entity(crawler).is_err(),
+        "the crawler rammed the target and died ({ticks} ticks); pos {:?} weapons {:?}",
+        sim.ecs.0.get::<Pos>(crawler).map(|p| (p.x, p.y)),
+        sim.ecs
+            .0
+            .get::<crate::weapons::UnitWeapons>(crawler)
+            .map(|w| w
+                .mounts
+                .iter()
+                .map(|m| (m.total_shots, m.shoot, m.target.is_some()))
+                .collect::<Vec<_>>())
+    );
+    assert!(
+        health(&sim, target).is_none_or(|hp| hp < target_start),
+        "the crawler's death explosion damaged the target: {:?}",
+        health(&sim, target)
+    );
+}
+
 /// NEW-1: a status applied through the live applier ticks damage every tick
 /// (`StatusComp.update` in the live unit loop).
 #[test]

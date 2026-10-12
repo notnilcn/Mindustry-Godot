@@ -1264,6 +1264,33 @@ pub fn unit_update_system(world: &mut World) {
                 })
             };
             set_mount_targets(world, &runtime.content, entity, mount_target);
+        } else if slot.kind == AiKind::Suicide {
+            // `SuicideAI.updateUnit` (`ai/types/suicide.rs`): ram the nearest
+            // hostile in a straight line (terrain ignored) and fire the
+            // close-range death weapon (`shootCone 180`).
+            let (_, mount_target) = acquire_target(world, &runtime, &queries, entity, team);
+            set_mount_targets(world, &runtime.content, entity, mount_target);
+            let mut state = crate::ai::types::suicide::SuicideAi {
+                unit: Some(entity),
+                target: mount_target,
+                suicidal: false,
+            };
+            {
+                let UnitRuntime {
+                    content,
+                    grid,
+                    pathfinder,
+                    ..
+                } = &mut runtime;
+                let mut ctx = crate::ai::ai_controller::AiCtx {
+                    world,
+                    grid,
+                    content,
+                    pathfinder,
+                    team,
+                };
+                let _ = crate::ai::types::suicide::update_suicide(&mut ctx, entity, &mut state);
+            }
         } else {
             // `GroundAI.updateMovement`/`FlyingAI`: pick a core/building anchor
             // and an in-range mount target. Spawned wave units have no command,
