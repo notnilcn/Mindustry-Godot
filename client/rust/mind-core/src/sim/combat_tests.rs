@@ -461,3 +461,89 @@ fn dagger_slowed_on_deep_water() {
         "flying units ignore the floor ({flare_water} vs {flare_stone})"
     );
 }
+
+/// PAR-0140: a MOVE order issued through `SimCommand::UnitCommand` moves a
+/// campaign player-team dagger to the world point (the core half of the
+/// command-mode -> selection -> order chain).
+#[test]
+fn commanded_dagger_reaches_target() {
+    use crate::ecs::TeamId;
+    use crate::game::State;
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+    use crate::world::{BlockTable, TilePos};
+
+    let mut sim = live_sim(48);
+    let campaign = {
+        let registry = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(registry, &EmptyNeighborhood)
+    };
+    let mut session = PlaySession::new(Rules {
+        waves: false,
+        default_team: 1,
+        wave_team: 2,
+        ..Rules::default()
+    });
+    session.phase = State::Playing;
+
+    // Materialize a real player core so `checkGameState` keeps the session
+    // playing while the order runs (`campaign_wave_timer_spawns_live_units`).
+    let table: BlockTable = sim
+        .ecs
+        .0
+        .get_resource::<BlockTable>()
+        .expect("table")
+        .clone();
+    let core_block = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .block_id("core-shard")
+        .expect("core-shard");
+    let core_inst = table.get_named("core-shard").expect("core-shard").clone();
+    let core = core_inst.spawn(&mut sim.ecs.0, 10, TilePos::new(12, 32), 1, 0, 0, 0);
+    sim.ecs.0.entity_mut(core).insert(crate::ecs::BuildingComp {
+        pos: TilePos::new(12, 32),
+        block: core_block,
+        team: TeamId(1),
+        rot: 0,
+    });
+    session.teams.register_core(core, TeamId(1), &session.rules);
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+
+    let dagger = sim
+        .spawn_live_unit("dagger", 1, 100.0, 100.0, 0.0)
+        .expect("dagger");
+    assert_eq!(
+        crate::entities::comp::unit::lifecycle::ai_kind_of(&sim.ecs.0, dagger),
+        Some(crate::ai::controller::AiKind::Command),
+        "player-team campaign unit is commanded"
+    );
+    let id = sim
+        .ecs
+        .0
+        .get::<crate::ecs::EntitySeq>(dagger)
+        .expect("seq")
+        .0 as i32;
+    sim.command(SimCommand::UnitCommand {
+        units: smallvec::smallvec![id],
+        command: 0,
+        x: 260.0,
+        y: 100.0,
+    })
+    .expect("move order");
+    for _ in 0..600 {
+        sim.tick().expect("tick");
+    }
+    let pos = sim.ecs.0.get::<Pos>(dagger).expect("dagger alive");
+    let dist = ((pos.x - 260.0).powi(2) + (pos.y - 100.0).powi(2)).sqrt();
+    assert!(
+        dist < 16.0,
+        "commanded dagger reached the target ({dist} px)"
+    );
+}
