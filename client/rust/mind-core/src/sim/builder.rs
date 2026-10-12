@@ -28,7 +28,7 @@ use bevy_ecs::world::World;
 
 use crate::content::{BlockId, BlockKind, ContentRegistry};
 use crate::ecs::{BuildingComp, EntitySeq};
-use crate::entities::comp::unit::comp::{HitboxComp, PhysicsComp, StatusComp, UnitTypeComp};
+use crate::entities::comp::unit::comp::{HitboxComp, StatusComp, UnitTypeComp};
 use crate::entities::comp::{Building, Pos, TeamComp};
 use crate::event::{BlockBrokenEvent, BlockPlacedEvent, SimEvent};
 use crate::world::blocks::distribution::item_bridge::ItemBridgeBuild;
@@ -299,14 +299,22 @@ fn no_unit_overlap(
     let rect_size = size * unit;
 
     for entity in world.iter_entities() {
-        if entity.get::<UnitTypeComp>().is_none() {
+        let Some(type_comp) = entity.get::<UnitTypeComp>() else {
+            continue;
+        };
+        // `Units.anyEntities(.., ground = true)`: `isGrounded()` is
+        // `elevation < 0.001` (`UnitComp`/`ElevationMoveComp`) and legged units
+        // never block (`!unit.type.allowLegStep`, `Units.java:29-35`).
+        let grounded = entity
+            .get::<crate::entities::comp::unit::comp::UnitCore>()
+            .is_some_and(|core| core.elevation < 0.001);
+        if !grounded {
             continue;
         }
-        if entity
-            .get::<PhysicsComp>()
-            .is_none_or(|physics| physics.flying)
+        if content
+            .unit(type_comp.type_id)
+            .is_some_and(|def| def.allow_leg_step)
         {
-            // `Units.anyEntities(.., ground = true)` only counts grounded units.
             continue;
         }
         let Some(unit_pos) = entity.get::<Pos>() else {
@@ -1190,6 +1198,52 @@ mod tests {
             sim.grid.block_at(TilePos::new(14, 10)),
             Some(wall),
             "built after the unit moved"
+        );
+    }
+
+    /// T6 (`Units.java:29-35`): a legged unit (`atrax`, `allowLegStep`) on the
+    /// plan's footprint does not block construction.
+    #[test]
+    fn legged_unit_does_not_block_construction() {
+        let (mut sim, _unit, _core, wall) = sim_with_player();
+        set_core_copper(&mut sim, 100);
+        let runtime = sim.block_runtime().expect("runtime");
+        let atrax = runtime.content().unit_id("atrax").expect("atrax");
+        let def = runtime.content().unit(atrax).cloned().expect("atrax def");
+        assert!(def.allow_leg_step, "atrax is a legged unit");
+        let blocker = crate::entities::comp::unit::lifecycle::spawn_unit_def(
+            &mut sim.ecs.0,
+            43,
+            &def,
+            1,
+            14.0 * 8.0,
+            10.0 * 8.0,
+            90.0,
+        );
+        if let Some(mut slot) = sim
+            .ecs
+            .0
+            .get_mut::<crate::ai::controller::ControllerSlot>(blocker)
+        {
+            slot.kind = crate::ai::controller::AiKind::Command;
+            slot.target = None;
+        }
+        sim.command(SimCommand::Place {
+            x: 14,
+            y: 10,
+            block: wall.raw(),
+            rotation: 0,
+            team: 1,
+            player: Some(0),
+        })
+        .expect("queued");
+        for _ in 0..60 {
+            sim.tick().expect("tick");
+        }
+        assert_eq!(
+            sim.grid.block_at(TilePos::new(14, 10)),
+            Some(wall),
+            "the legged unit does not block the wall"
         );
     }
 
