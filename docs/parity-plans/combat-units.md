@@ -743,6 +743,17 @@ Poll `get_group_count("unit")` and core tiles. Expect the core to take damage
 (no direct health getter: add a debug-only `#[func] fn building_health(x,y) -> f64`
 to `MindSimHost` if needed — debug reads are allowed in gdext).
 
+**Status 2026-10-12:** done — commit 4e71098. Root fix: `BulletType.create`'s
+`target` seeds only `aimTile`; the port stored it as `Bullet.sticky`, so
+unit-weapon bullets attached to their mount target without damaging it
+(turret bullets were unaffected). Test
+`ground_zero_wave_destroys_undefended_core` (feature `msav-import`): three wave
+daggers destroy the (health-pinned) player core at tick 18 and the campaign
+reports `game_over`. A read-only `unit_debug_json()` probe was added to
+`MindSimHost` for live weapon diagnosis (no rules in gdext, per §7.4).
+In-engine: wave daggers destroyed derelict walls (build 62 → 56, bullets in
+flight); evidence `runs/20261012-session2/PAR-0139-wave-ingame.txt`.
+
 ---
 
 ## 8. PAR-0091 — fires and puddles never update live
