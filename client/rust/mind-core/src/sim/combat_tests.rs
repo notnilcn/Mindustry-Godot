@@ -894,3 +894,37 @@ fn mega_picks_up_and_drops_building() {
         "the stack is empty after the drop"
     );
 }
+
+/// Audit fix: an idle unit turns to face an in-range target
+/// (`AIController.faceTarget`) so its fixed weapons can fire. Before the fix a
+/// stationary dagger facing away from an enemy never shot.
+#[test]
+fn idle_unit_faces_and_shoots_target_behind_it() {
+    let mut sim = live_sim(48);
+    // Facing +x (rotation 0); the enemy sits behind it on -x.
+    let shooter = sim
+        .spawn_live_unit("dagger", 1, 200.0, 200.0, 0.0)
+        .expect("shooter");
+    let enemy = sim
+        .spawn_live_unit("dagger", 2, 150.0, 200.0, 0.0)
+        .expect("enemy");
+    // Keep the enemy passive and both units in place.
+    if let Some(mut weapons) = sim.ecs.0.get_mut::<crate::weapons::UnitWeapons>(enemy) {
+        weapons.mounts.clear();
+        weapons.weapons.clear();
+    }
+    let start = health(&sim, enemy).expect("enemy health");
+    for _ in 0..300 {
+        sim.tick().expect("tick");
+    }
+    let rotation = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::unit::UnitCore>(shooter)
+        .map(|core| core.rotation);
+    let end = health(&sim, enemy).unwrap_or(0.0);
+    assert!(
+        end < start,
+        "idle dagger shot the enemy behind it ({start} -> {end}, rotation {rotation:?})"
+    );
+}
