@@ -30,24 +30,27 @@ func _ready() -> void:
 
 func shown() -> void:
 	refresh_campaign_views(str(_context.get("planet", "")))
-	if _selected < 0:
-		for loadout_variant in campaign_section("loadouts"):
-			var loadout: Dictionary = loadout_variant
-			if bool(loadout.get("is_default", false)):
-				_selected = int(loadout.get("index", -1))
-				break
 	_rebuild()
 
 
 func _build() -> void:
 	_list = content_table()
-	_rebuild()
+
+
+## Loadout rows: the plan's launcher-core-compatible list (Java
+## `schematics.getLoadouts()` filtered by `entry.key.size <= core.size`), with
+## the planet-default rows as the pre-bootstrap fallback.
+func _loadout_rows() -> Array:
+	var rows: Array = _plan.get("loadouts", [])
+	if rows.is_empty():
+		return campaign_section("loadouts")
+	return rows
 
 
 ## The default core for the selected planet (`PlanetDef.default_core`), read from
 ## the live loadout rows instead of the planet name (`_selected_core` bug).
 func _selected_core() -> String:
-	for loadout_variant in campaign_section("loadouts"):
+	for loadout_variant in _loadout_rows():
 		var loadout: Dictionary = loadout_variant
 		var core := str(loadout.get("core", ""))
 		if not core.is_empty():
@@ -87,7 +90,21 @@ func _localized_from() -> String:
 func _rebuild() -> void:
 	_list.clear_children()
 	_plan = _launch_plan()
-	var loadouts := campaign_section("loadouts")
+	# Select a row the launcher's plan offers (default row preferred); the plan
+	# carries the requirements/capacity for the *selected* schematic, so a
+	# selection change rebuilds it.
+	var offered: Array = []
+	for loadout_variant in _loadout_rows():
+		offered.append(int((loadout_variant as Dictionary).get("index", -1)))
+	if not offered.has(_selected):
+		# The launcher-core default comes from the plan (`LauncherLoadout`'s
+		# `universe.getLoadout(core)` fallback); several cores' rows carry
+		# `is_default`, so the server's index is authoritative.
+		_selected = int(_plan.get("selected", -1))
+		if not offered.has(_selected) and not offered.is_empty():
+			_selected = int(offered[0])
+		_plan = _launch_plan()
+	var loadouts := _loadout_rows()
 	# `launch.from`: the launcher sector's name (`LaunchLoadoutDialog.java:165`).
 	if not _plan.is_empty():
 		_list.add(MindWidgets.label(MindWidgets.markup_format("@launch.from", [_localized_from()]))) \
@@ -209,7 +226,7 @@ func _launch_resource_stacks() -> Dictionary:
 
 ## The selected loadout row, or `{}`.
 func _find_selected_row() -> Dictionary:
-	for loadout_variant in campaign_section("loadouts"):
+	for loadout_variant in _loadout_rows():
 		var loadout: Dictionary = loadout_variant
 		if int(loadout.get("index", -1)) == _selected:
 			return loadout

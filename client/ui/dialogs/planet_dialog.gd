@@ -1558,7 +1558,11 @@ func _launch(planet_name: String, sector_id: int, loadout: int = -1, resume: boo
 				"start_sector_with_loadout",
 				planet_name,
 				sector_id,
-				JSON.stringify({"core": str(row.get("core", "")), "stacks": core_stacks})
+				JSON.stringify({
+					"core": str(row.get("core", "")),
+					"schematic": loadout,
+					"stacks": core_stacks,
+				})
 			))
 		elif campaign.has_method("start_sector"):
 			# Free launch with no launcher: `universe.clearLoadoutInfo()` then

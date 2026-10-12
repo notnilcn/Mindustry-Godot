@@ -290,6 +290,38 @@ impl SimRuntime {
         )
     }
 
+    /// `Schematics.placeLoadout` against the live runtime (launcher branch,
+    /// `game/Schematics.java:465-500`): places `schem` centered on its core
+    /// tile at `(x, y)` and returns the placed core entities.
+    #[allow(clippy::too_many_arguments)]
+    pub fn place_schematic(
+        &mut self,
+        world: &mut World,
+        grid: &mut WorldGrid,
+        schem: &crate::game::schematic::Schematic,
+        x: i16,
+        y: i16,
+        team: u8,
+        check: bool,
+    ) -> Vec<Entity> {
+        let mut ctx = WorldCtx {
+            grid,
+            content: &self.content,
+            ecs: world,
+            hooks: &self.hooks,
+            render: &self.render,
+            log: &mut self.log,
+        };
+        crate::game::schematics::place_loadout(
+            &mut ctx,
+            schem,
+            i32::from(x),
+            i32::from(y),
+            team,
+            check,
+        )
+    }
+
     /// `Tile.setBlock` without validation: replaces whatever occupies the
     /// footprint, then relinks proximity, drill ore, power and the counter.
     #[allow(clippy::too_many_arguments)]

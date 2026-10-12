@@ -284,7 +284,7 @@ impl MindCamera2D {
         self.world_loads = loads;
         let unit = TILESIZE as f32;
         self.camera.world_size = Some((width as f32 * unit, height as f32 * unit));
-        match host.bind().best_core_position() {
+        match host.bind().best_core_position_px() {
             Some((x, y)) => {
                 self.camera.pan_camera(x, y);
                 self.follow_target = Some((x, y));
@@ -388,7 +388,7 @@ impl MindCamera2D {
         let Some(host) = self.host.clone() else {
             return;
         };
-        let Some((x, y)) = host.bind().best_core_position() else {
+        let Some((x, y)) = host.bind().best_core_position_px() else {
             return;
         };
         self.camera.pan_camera(x, y);

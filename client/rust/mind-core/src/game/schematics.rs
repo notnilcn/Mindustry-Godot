@@ -1149,6 +1149,36 @@ mod tests {
         assert_eq!(building.block, core);
     }
 
+    /// `placeLaunchLoadout`: the loadout schematic's core replaces the map's
+    /// core at the launcher tile (PAR-0085 step 5).
+    #[test]
+    fn place_loadout_replaces_core_block() {
+        let mut harness = crate::world::harness::BuildHarness::new(32, 32, 7);
+        let shard = harness.content.block_id("core-shard").unwrap();
+        let foundation = harness.content.block_id("core-foundation").unwrap();
+        // The map's own core at (10, 10): a 3x3 shard.
+        assert!(harness.place(10, 10, shard, 0, true), "map core placed");
+        let mut schematics = Schematics::new();
+        schematics.load_loadouts(&harness.content);
+        let index = schematics
+            .get_default_loadout(foundation)
+            .expect("core-foundation loadout");
+        let schem = schematics.all[index].clone();
+
+        let cores = harness.with_ctx(|ctx| place_loadout(ctx, &schem, 10, 10, 0, true));
+        assert_eq!(cores.len(), 1, "one replacement core placed");
+        assert_eq!(
+            harness.block_at(10, 10),
+            foundation,
+            "the schematic's core replaced the map core at the anchor tile"
+        );
+        assert_eq!(
+            harness.content.block(foundation).unwrap().size,
+            4,
+            "core-foundation is a 4x4 core"
+        );
+    }
+
     #[test]
     fn rotate_point_config_fixes() {
         let registry = registry();

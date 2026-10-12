@@ -701,11 +701,13 @@ impl MindCampaign {
         // r01-sector-serpulo-170.msav, decompressed meta) and starts with an
         // empty core; `FileMapGenerator`/`Logic.play` then clear the core and
         // add nothing (PAR-0056).
-        if loadout_json.to_string().trim().is_empty() {
+        let loadout_payload = loadout_json.to_string();
+        if loadout_payload.trim().is_empty() {
             self.session.rules.loadout.clear();
-        } else if let Some(stacks) = parse_loadout_stacks(&loadout_json.to_string()) {
+        } else if let Some(stacks) = parse_loadout_stacks(&loadout_payload) {
             self.session.rules.loadout = stacks;
         }
+        let (launch_schematic, launch_stacks_json) = parse_launch_payload(&loadout_payload);
 
         self.reloader = HostReloader::default();
         let events = if has_save && !lost_replay {
@@ -773,6 +775,17 @@ impl MindCampaign {
             let mut runtime = CampaignRuntime::new(self.session.clone(), campaign.clone());
             runtime.set_unlocked_content(collect_unlocked(&registry));
             host.bind_mut().install_campaign_runtime(runtime);
+            // `Schematics.placeLaunchLoadout` (PAR-0085 step 5): a launcher
+            // launch replaces the map's core with the loadout schematic's core
+            // before the session sync registers and stocks it. Fresh launches
+            // only (`playNewSector`); a resume keeps the saved world unchanged.
+            if !has_save
+                && self.session.allow_launch_loadout
+                && let Some(index) = launch_schematic
+            {
+                host.bind_mut()
+                    .place_launch_loadout(index, GString::from(launch_stacks_json.as_str()));
+            }
             let sync = host.bind_mut().sync_campaign_session(&registry, !has_save);
             if let Some(sync) = sync {
                 if sync.player_cores > 0 {
@@ -824,7 +837,7 @@ impl MindCampaign {
             // call below (re-entrant `bind_mut` panic).
             && let Some((core_x, core_y)) = self
                 .host()
-                .and_then(|host| host.bind().best_core_position())
+                .and_then(|host| host.bind().best_core_position_px())
             && let Some(mut camera) = self.base().get_node_or_null("/root/Spine/World/Camera2D")
         {
             camera.call(
@@ -2456,6 +2469,7 @@ impl MindCampaign {
 
         // `universe.updateLaunchResources(resources)`: persist the recomputed
         // sequence so the launch path reads the same staged amounts.
+        let mut persist_resources = false;
         if destination_allow
             && max
             && let Some(campaign) = self.campaign.as_mut()
@@ -2468,18 +2482,44 @@ impl MindCampaign {
                     *slot = *amount;
                 }
             }
-            if campaign
+            persist_resources = campaign
                 .universe
                 .update_launch_resources(&mut self.settings, dense)
-                .is_ok()
-            {
-                self.persist();
-            }
+                .is_ok();
         }
 
         let mut total = requirements.clone();
         for (item, amount) in &planned {
             *total.entry(item.clone()).or_insert(0) += *amount;
+        }
+        // `LaunchLoadoutDialog` schematic grid (`entry.key.size <= core.size`):
+        // every loadout whose core is no larger than the launcher's core, in
+        // `Schematics.all` order (the dialog renders these as row buttons).
+        let core_size = core
+            .and_then(|core| registry.block(core))
+            .map(|block| block.size)
+            .unwrap_or(3);
+        let mut loadout_rows: Vec<serde_json::Value> = Vec::new();
+        for index in 0..schematics.all.len() {
+            let Some(loadout) = schematics.all.get(index) else {
+                continue;
+            };
+            let Some(loadout_core) = loadout.find_core(registry) else {
+                continue;
+            };
+            let Some(def) = registry.block(loadout_core) else {
+                continue;
+            };
+            if def.size > core_size {
+                continue;
+            }
+            loadout_rows.push(serde_json::json!({
+                "index": index,
+                "name": loadout.name(),
+                "core": def.name,
+                "is_default": schematics.get_default_loadout(loadout_core) == Some(index),
+                "file": loadout.file,
+            }));
         }
         let nonzero = |map: &indexmap::IndexMap<String, i32>| {
             let mut out = serde_json::Map::new();
@@ -2502,7 +2542,12 @@ impl MindCampaign {
             "valid": valid,
             "total": nonzero(&total),
             "preset_loadout": nonzero(&preset_loadout),
+            "loadouts": loadout_rows,
+            "selected": selected_index,
         });
+        if persist_resources {
+            self.persist();
+        }
         GString::from(value.to_string().as_str())
     }
 
@@ -2874,6 +2919,21 @@ fn parse_loadout_stacks(
     let value: serde_json::Value = serde_json::from_str(json).ok()?;
     let stacks = value.get("stacks").cloned().unwrap_or(value);
     serde_json::from_value(stacks).ok()
+}
+
+/// Launch payload split: the chosen schematic index (`Schematics.all`, `None`
+/// for the items-only fallback) and the `stacks` array JSON for
+/// `MindSimHost.place_launch_loadout`.
+fn parse_launch_payload(json: &str) -> (Option<i32>, String) {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
+        return (None, String::from("[]"));
+    };
+    let schematic = value
+        .get("schematic")
+        .and_then(serde_json::Value::as_i64)
+        .map(|index| index as i32);
+    let stacks = value.get("stacks").cloned().unwrap_or(value);
+    (schematic, stacks.to_string())
 }
 
 /// Clears one campaign sector's persisted base/items
