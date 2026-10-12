@@ -156,6 +156,41 @@ pub fn update_kinematics(
     if world.get::<WaterMoveComp>(entity).is_some() {
         update_water_move(world, entity, delta);
     }
+    // `UnitComp.updateBoosting` (`UnitComp.java:121-130`): a `canBoost` unit
+    // lifts off while boosting or standing on a solid block. The
+    // `isFlying() && !canLand()` term needs `Units.any` (overlapping grounded
+    // units) and is not ported; the boost/on-solid cases cover mechs.
+    if unit_def.can_boost
+        && !world
+            .get::<crate::entities::comp::Health>(entity)
+            .is_some_and(|health| health.dead)
+    {
+        let boosting = world
+            .get::<UnitCore>(entity)
+            .is_some_and(|core| core.boosting);
+        let on_solid = world
+            .get::<Pos>(entity)
+            .and_then(|pos| {
+                grid.tiles
+                    .getn(WorldGrid::to_tile(pos.x), WorldGrid::to_tile(pos.y))
+            })
+            .is_some_and(|tile| crate::ai::pathfinder::path_tile::is_solid(content, tile.block));
+        let should_boost = boosting || on_solid;
+        let speed = if should_boost {
+            unit_def.rise_speed
+        } else {
+            unit_def.descent_speed
+        };
+        let target = if should_boost { 1.0 } else { 0.0 };
+        if let Some(mut core) = world.get_mut::<UnitCore>(entity) {
+            // `Mathf.approachDelta`: linear approach, one tick of `speed`.
+            core.elevation = if (core.elevation - target).abs() <= speed {
+                target
+            } else {
+                core.elevation + (target - core.elevation).signum() * speed
+            };
+        }
+    }
     check_tether(world, entity);
     breaks
 }

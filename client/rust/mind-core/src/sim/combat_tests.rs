@@ -478,6 +478,64 @@ fn missile_ignores_conveyor_below() {
     );
 }
 
+/// PAR-0137: `canBoost` mechs lift off while boosting
+/// (`UnitComp.updateBoosting`, UnitComp.java:121-130): elevation reaches 1,
+/// `unit_speed` gains the boost multiplier and the lifted unit counts as
+/// flying (ground-only bullets then skip it, `BulletComp.collision`).
+#[test]
+fn boosting_nova_lifts_off() {
+    use crate::entities::comp::unit::comp::UnitCore;
+
+    let mut sim = live_sim(48);
+    let (rise_speed, speed, boost_multiplier) = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        let id = content.unit_id("nova").expect("nova");
+        let def = content.unit(id).expect("nova def");
+        (def.rise_speed, def.speed, def.boost_multiplier)
+    };
+    let nova = sim
+        .spawn_live_unit("nova", 1, 100.0, 100.0, 0.0)
+        .expect("nova");
+    if let Some(mut core) = sim.ecs.0.get_mut::<UnitCore>(nova) {
+        core.boosting = true;
+    }
+    let ticks = (1.0 / rise_speed).ceil() as usize + 2;
+    for _ in 0..ticks {
+        sim.tick().expect("tick");
+        if let Some(mut core) = sim.ecs.0.get_mut::<UnitCore>(nova) {
+            core.boosting = true;
+        }
+    }
+    let elevation = sim
+        .ecs
+        .0
+        .get::<UnitCore>(nova)
+        .map(|core| core.elevation)
+        .expect("nova core");
+    assert!(
+        elevation >= 1.0,
+        "elevation reached 1 after {ticks} ticks ({elevation})"
+    );
+    assert!(speed > 0.0 && boost_multiplier > 1.0);
+    let speed_now = {
+        let runtime = sim.unit_runtime().expect("rt");
+        crate::entities::comp::unit::movement::unit_speed(
+            &sim.ecs.0,
+            &runtime.grid,
+            &runtime.content,
+            nova,
+        )
+    };
+    assert!(
+        (speed_now - speed * boost_multiplier).abs() < 0.01,
+        "boosted speed {speed_now} ~= {speed} * {boost_multiplier}"
+    );
+    assert!(
+        crate::combat::bullet::unit_is_flying(&sim.ecs.0, nova),
+        "lifted nova counts as flying"
+    );
+}
+
 /// NEW-1: a status applied through the live applier ticks damage every tick
 /// (`StatusComp.update` in the live unit loop).
 #[test]
