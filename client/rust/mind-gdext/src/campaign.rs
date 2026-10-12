@@ -165,6 +165,15 @@ impl MindCampaign {
     /// `EXTENSION_RELOADED`, which does not re-run `ready()`). The registry and
     /// campaign are overwritten, so a re-run never duplicates them.
     fn bootstrap(&mut self) {
+        self.bootstrap_with(true);
+    }
+
+    /// [`Self::bootstrap`]; `run_saves_load = false` skips `Saves.load` (and
+    /// its legacy sector remap) for the post-import rebuild, which only exists
+    /// to stop the exit persist from writing pre-import state: Java's
+    /// `importData` exits without loading saves, so the remap - and the
+    /// one-time remap notice it arms - happen on the next boot.
+    fn bootstrap_with(&mut self, run_saves_load: bool) {
         // Campaign state lives in the same settings store the sim host writes
         // (`user://config/settings.bin`), so unlocks/rules survive restarts.
         let root = godot::classes::ProjectSettings::singleton()
@@ -194,8 +203,10 @@ impl MindCampaign {
                 // current cell and migrating `<planet>-s-<id>-info`) before the
                 // planets read sector info (`Sector.loadInfo` after remap).
                 self.saves = Saves::new();
-                self.saves
-                    .load(&NativeFs, &self.paths, &registry, &mut self.settings);
+                if run_saves_load {
+                    self.saves
+                        .load(&NativeFs, &self.paths, &registry, &mut self.settings);
+                }
                 if self.saves.had_serpulo_remaps
                     && let Err(error) = self.settings.force_save(&NativeFs, &self.paths)
                 {
@@ -242,6 +253,22 @@ impl MindCampaign {
             return false;
         }
         ui.call("has_dialog", &[]).try_to::<bool>().unwrap_or(false)
+    }
+
+    /// Live boolean setting from the `MindUi` store (the settings page writes
+    /// there; this facade's copy is a boot-time snapshot), falling back to
+    /// this facade's copy.
+    fn live_setting_flag(&self, key: &str) -> bool {
+        let fallback = self.settings.get_bool(key, false);
+        let Some(mut ui) = self.base().get_node_or_null("/root/MindUi") else {
+            return fallback;
+        };
+        if !ui.has_method("settings_get_flag") {
+            return fallback;
+        }
+        ui.call("settings_get_flag", &[GString::from(key).to_variant()])
+            .try_to::<bool>()
+            .unwrap_or(fallback)
     }
 
     /// Live `saveinterval` (`Core.settings.getInt`): read from the `MindUi`
@@ -700,11 +727,21 @@ impl MindCampaign {
         // (PAR-0131). The scaled core sprite/fade/announce ride the camera's
         // `get_land_time_in` from the UI; the core block name is unused until
         // that draw lands.
+        // Java fires `Trigger.newGame` only from `playNewSector`/`playMap`
+        // (Control.java:415,589); a plain resume (`slot.load`) has no landing.
+        let new_game = events
+            .iter()
+            .any(|event| matches!(event, mind_core::game::play::PlayEvent::NewGame));
         if installed
-            && !self.settings.get_bool("skipcoreanimation", false)
+            && new_game
+            && !self.live_setting_flag("skipcoreanimation")
             && !self.session.rules.pvp
-            && let Some(host) = self.host()
-            && let Some((core_x, core_y)) = host.bind().best_core_position()
+            // Read the core position in its own statement: a `host.bind()`
+            // temporary in the let-chain would stay borrowed across the camera
+            // call below (re-entrant `bind_mut` panic).
+            && let Some((core_x, core_y)) = self
+                .host()
+                .and_then(|host| host.bind().best_core_position())
             && let Some(mut camera) = self.base().get_node_or_null("/root/Spine/World/Camera2D")
         {
             camera.call(
@@ -2352,7 +2389,7 @@ impl MindCampaign {
     /// (`importData`'s `settings.load()` + `state = new GameState()` pair).
     #[func]
     pub fn reload_from_disk(&mut self) -> bool {
-        self.bootstrap();
+        self.bootstrap_with(false);
         self.content_error.is_none()
     }
 

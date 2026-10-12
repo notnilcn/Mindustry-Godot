@@ -58,6 +58,8 @@ pub struct MindCamera2D {
     /// `Renderer` launch/land cutscene (`landTime`/`camerascale`); drives the
     /// camera scale while `is_cutscene()` (PAR-0131).
     cutscene: Cutscene,
+    /// Whether the `MindInput` cutscene lock is currently raised.
+    cutscene_locked: bool,
 }
 
 #[godot_api]
@@ -76,6 +78,7 @@ impl ICamera2D for MindCamera2D {
             world_dims: (0, 0),
             world_loads: 0,
             cutscene: Cutscene::new(1.0),
+            cutscene_locked: false,
             follow_target: None,
         }
     }
@@ -164,11 +167,22 @@ impl ICamera2D for MindCamera2D {
             .map(|host| host.bind().is_paused())
             .unwrap_or(false);
         self.cutscene.update(delta_frames, sim_paused);
-        let zoom = if self.cutscene.is_cutscene() {
-            self.cutscene.land_scale().max(0.01)
-        } else {
-            self.camera.camerascale.max(0.01)
-        };
+        let in_cutscene = self.cutscene.is_cutscene();
+        let was_cutscene = std::mem::replace(&mut self.cutscene_locked, in_cutscene);
+        if in_cutscene {
+            // `Renderer.update` writes `camerascale = zoomLaunch()` into the
+            // renderer's own scale, so when the landing ends the normal
+            // `lerpDelta(camerascale, targetscale, 0.1)` eases from the last
+            // landing zoom instead of snapping (Renderer.java:160-199).
+            self.camera.camerascale = self.cutscene.camerascale();
+        }
+        if in_cutscene != was_cutscene
+            && let Some(mut input) = self.input.clone()
+        {
+            // `InputHandler.inputLocks` includes `renderer::isCutscene`.
+            input.bind_mut().set_cutscene_lock(in_cutscene);
+        }
+        let zoom = self.camera.camerascale.max(0.01);
         if zoom != self.shadow_scale {
             // Java/Arc projects world `+y` to screen-up (`Camera.unproject`
             // flips the y axis); Godot 2D maps `+y` to screen-down. The world
@@ -211,6 +225,9 @@ impl MindCamera2D {
         self.cutscene = Cutscene::new(self.camera.camerascale.max(0.01));
         self.cutscene
             .show_landing(Box::new(CoreLandAnimator::new()));
+        self.camera.camerascale = self.cutscene.camerascale();
+        // The input lock follows in `process` (no sim-host borrow from here:
+        // callers may hold one).
         true
     }
 

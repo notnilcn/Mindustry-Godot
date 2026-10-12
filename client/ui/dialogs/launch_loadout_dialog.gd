@@ -96,10 +96,12 @@ func _rebuild() -> void:
 	# `LaunchLoadoutDialog.java:41`: `buttons.defaults().size(160f, 64f);
 	# buttons.button("@back", Icon.left, this::hide)` — the back entry leads the
 	# row and cancels the launch (PAR-0027).
-	add_button(_t("@back"), hide_dialog, "left", 210.0)
-	add_button(_t("@launch.text"), _confirm, "ok", 200.0)
-	var resources := add_button(_t("@resources"), _open_loadout, "edit", 200.0)
+	# Java order: `@back`, (`@resources.max` toggle), `@resources`, `@launch.text`,
+	# each `size(160f, 64f)` (LaunchLoadoutDialog.java:40-41,125-152).
+	add_button(_t("@back"), hide_dialog, "left", 160.0)
+	var resources := add_button(_t("@resources"), _open_loadout, "edit", 160.0)
 	resources.disabled = _selected < 0
+	add_button(_t("@launch.text"), _confirm, "ok", 160.0)
 
 
 func _requirement_total(loadout: Dictionary) -> int:

@@ -1466,20 +1466,32 @@ func _find_loadout_row(index: int) -> Dictionary:
 	return {}
 
 
-## `PlanetDialog.playSelected`: the chosen schematic's requirements merged with
-## `universe.getLaunchResources()` (sum per item) as `[{item, amount}]` stacks.
+## `PlanetDialog.playSelected` launch cost: the chosen schematic's
+## requirements (`from.removeItems(loadout.requirements())`) plus
+## `universe.getLaunchResources()` (sum per item) as `[{item, amount}]` stacks,
+## removed from the launcher sector.
 func _loadout_launch_stacks(row: Dictionary) -> Array:
 	var totals: Dictionary = {}
 	for requirement in row.get("requirements", []):
 		var item := str(requirement[0])
 		totals[item] = int(totals.get(item, 0)) + int(requirement[1])
+	var resources := _launch_resource_totals()
+	for item in resources:
+		totals[item] = int(totals.get(item, 0)) + int(resources[item])
+	return _stacks_of(totals)
+
+
+## `universe.getLaunchResources()` as `{item: amount}`.
+func _launch_resource_totals() -> Dictionary:
 	var campaign := campaign_node()
 	if campaign != null and campaign.has_method("get_launch_resource_stacks"):
 		var parsed: Variant = JSON.parse_string(str(campaign.call("get_launch_resource_stacks")))
 		if parsed is Dictionary:
-			for item in parsed:
-				var name := str(item)
-				totals[name] = int(totals.get(name, 0)) + int(parsed[item])
+			return parsed
+	return {}
+
+
+func _stacks_of(totals: Dictionary) -> Array:
 	var stacks: Array = []
 	for item in totals:
 		stacks.append({"item": str(item), "amount": int(totals[item])})
@@ -1509,20 +1521,24 @@ func _launch(planet_name: String, sector_id: int, loadout: int = -1, resume: boo
 			# schematic's build cost plus `universe.getLaunchResources()` is
 			# removed from the launcher sector and stocked into the new core.
 			var row := _find_loadout_row(loadout)
-			var stacks := _loadout_launch_stacks(row)
+			var cost := _loadout_launch_stacks(row)
 			var launcher := _find_launcher(planet_name)
 			if not launcher.is_empty():
 				campaign.call(
 					"remove_sector_items",
 					planet_name,
 					int(launcher.get("id", -1)),
-					JSON.stringify(stacks)
+					JSON.stringify(cost)
 				)
+			# `Schematics.placeLaunchLoadout`: the placed core holds only the
+			# launch resources; the schematic requirements are its build cost
+			# (paid by the launcher above), not core contents.
+			var core_stacks := _stacks_of(_launch_resource_totals())
 			started = bool(campaign.call(
 				"start_sector_with_loadout",
 				planet_name,
 				sector_id,
-				JSON.stringify({"core": str(row.get("core", "")), "stacks": stacks})
+				JSON.stringify({"core": str(row.get("core", "")), "stacks": core_stacks})
 			))
 		elif campaign.has_method("start_sector"):
 			# Free launch with no launcher: `universe.clearLoadoutInfo()` then

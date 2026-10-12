@@ -655,6 +655,24 @@ impl MindInput {
         }
     }
 
+    /// `InputHandler.inputLocks`' `renderer.isCutscene()` entry: the camera
+    /// rig raises it while the landing/launch cutscene runs (PAR-0131) and
+    /// drops it when the animation ends. Pushes the change to the sim host.
+    #[func]
+    pub fn set_cutscene_lock(&mut self, locked: bool) {
+        if self.locks.cutscene == locked {
+            return;
+        }
+        self.locks.cutscene = locked;
+        let any = self.locks.any();
+        if self.bridge.locked != any {
+            self.bridge.locked = any;
+            if let Some(mut host) = self.bridge.host.clone() {
+                host.bind_mut().set_input_locked(any);
+            }
+        }
+    }
+
     /// Replaces the lock set from a JSON list of lock names.
     #[func]
     pub fn set_locks(&mut self, json: GString) -> bool {
