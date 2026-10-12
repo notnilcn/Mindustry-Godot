@@ -331,9 +331,14 @@ pub fn is_derelict(world: &World, team: u8) -> bool {
     if team != 0 {
         return false;
     }
-    let campaign_default = world
-        .get_resource::<crate::game::runtime::CampaignRuntime>()
-        .map(|runtime| runtime.session.rules.default_team);
+    let campaign = world.get_resource::<crate::game::runtime::CampaignRuntime>();
+    // `findEnemyTile`: `enemy == Team.derelict && !state.rules.coreCapture`
+    // skips the derelict team; with `coreCapture` its blocks are capturable
+    // targets (BlockIndexer.java:466).
+    if campaign.is_some_and(|runtime| runtime.session.rules.core_capture) {
+        return false;
+    }
+    let campaign_default = campaign.map(|runtime| runtime.session.rules.default_team);
     let build_default = world
         .get_resource::<crate::world::limits::BuildRules>()
         .map(|rules| rules.default_team);

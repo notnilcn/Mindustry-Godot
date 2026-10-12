@@ -107,7 +107,10 @@ impl TargetQueries {
     ) -> Option<Entity> {
         let mut best: Option<(f32, Entity)> = None;
         for &entity in &self.units {
-            if world.get::<TeamComp>(entity).map(|t| t.team) == Some(team) {
+            let other = world.get::<TeamComp>(entity).map(|t| t.team).unwrap_or(0);
+            // Derelict (team 0) units are never targets unless the rules allow
+            // capturing them (`BlockIndexer.java:466` via `is_derelict`).
+            if other == team || crate::ai::block_indexer::is_derelict(world, other) {
                 continue;
             }
             if !world.get::<Health>(entity).is_some_and(|h| !h.dead) {
@@ -220,6 +223,55 @@ mod tests {
                 )
                 .is_none(),
             "target_ground=false excludes buildings"
+        );
+    }
+
+    /// T10: derelict (team 0) units are skipped like derelict buildings unless
+    /// `rules.coreCapture` allows capturing them (`BlockIndexer.java:466`).
+    #[test]
+    fn derelict_units_are_not_targets_unless_core_capture() {
+        use crate::game::planet::EmptyNeighborhood;
+        use crate::game::play::PlaySession;
+        use crate::game::rules::Rules;
+        use crate::game::runtime::CampaignRuntime;
+        use crate::game::universe::Campaign;
+
+        let mut harness = CombatHarness::new(64, 64, 5);
+        let derelict = harness.spawn_test_unit(20.0, 30.0, 0, Vec::new());
+        let (x, y) = CombatHarness::tile_center(4, 30);
+
+        // Campaign world with a non-zero default team: team 0 is derelict.
+        let campaign = Campaign::from_registry(&harness.build.content, &EmptyNeighborhood);
+        let session = PlaySession::new(Rules {
+            default_team: 1,
+            ..Rules::default()
+        });
+        assert!(!session.rules.core_capture);
+        harness
+            .build
+            .world
+            .insert_resource(CampaignRuntime::new(session, campaign));
+        let targets = TargetQueries::build(&mut harness.build.world, &harness.build.content);
+        assert!(
+            targets
+                .closest_target(&harness.build.world, 1, x, y, 400.0, true, true, true, true)
+                .is_none(),
+            "derelict unit is not a target"
+        );
+
+        // `rules.coreCapture` turns derelict content into capturable targets.
+        let mut runtime = harness
+            .build
+            .world
+            .remove_resource::<CampaignRuntime>()
+            .expect("campaign runtime");
+        runtime.session.rules.core_capture = true;
+        harness.build.world.insert_resource(runtime);
+        let targets = TargetQueries::build(&mut harness.build.world, &harness.build.content);
+        assert_eq!(
+            targets.closest_target(&harness.build.world, 1, x, y, 400.0, true, true, true, true),
+            Some(derelict),
+            "coreCapture makes the derelict unit targetable"
         );
     }
 }
