@@ -693,6 +693,16 @@ using it. Then poll the unit position from `get_state_json()` entities (or
 `/home/clintonnguyen/g/code_examples/.claude/skills/playtest/SKILL.md` for the
 event JSON format) and `selection_json()`.
 
+**Status 2026-10-12:** done — commit fe71e74. The boot `settings.json` →
+`set_selected_block` restore is gone (the file is still written on exit;
+`player.block` is not persisted upstream). In-engine: with
+`"selected_block":"duo"` on disk before boot, input state reports
+`"block": null`, `toggle_command_mode()` is true, and an ordered dagger
+reached within 8.5 px of the target. Test `commanded_dagger_reaches_target`
+(campaign core + team-1 dagger + `SimCommand::UnitCommand`). Stances were left
+out — `move` is the scope keeper per §6.3 step 3. Evidence:
+`runs/20261012-session2/PAR-0140-ingame.txt`.
+
 ---
 
 ## 7. Wave attack / core loss verification (PAR-0139-adjacent)
