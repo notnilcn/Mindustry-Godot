@@ -202,6 +202,13 @@
     "planet": "serpulo",
     "preset": "groundZero",
     "name": "groundZero",
+    "named": false,
+    "selectable": true,
+    "require_unlock": true,
+    "preset_unlocked": true,
+    "lock_icon": false,
+    "icon": null,
+    "content_icon": null,
     "difficulty": 1.0,
     "threat": 0.0,
     "threat_band": "low",
@@ -222,7 +229,8 @@
       "production": [],
       "export": [],
       "import": [],
-      "stored": []
+      "stored": [],
+      "resources": []
     }
   },
   "sample_research": {
@@ -267,5 +275,5 @@
     "waves_lasted": 12,
     "next_planet": "erekir"
   },
-  "checksum": "eb26d0a039ac9e3e"
+  "checksum": "b94d564ad040dae5"
 }
