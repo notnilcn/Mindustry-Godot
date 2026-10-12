@@ -326,7 +326,9 @@ impl MindFx {
                     // still visible (resolver misses are logged once per name).
                     let rect =
                         Rect2::new(Vector2::new(x - w / 2.0, y - h / 2.0), Vector2::new(*w, *h));
-                    base.draw_rect_ex(rect, to_color(*color)).filled(true).done();
+                    base.draw_rect_ex(rect, to_color(*color))
+                        .filled(true)
+                        .done();
                     true
                 }
             },
@@ -546,13 +548,13 @@ impl MindFx {
                     // `screenshake` setting is applied in `ShakeState.offset`
                     // (`RendererView.shakeIntensity * screenshake / 4 * 0.75`),
                     // so pass the raw event through.
-                    if let Some(mut camera) = self
-                        .base()
-                        .try_get_node_as::<crate::camera::MindCamera2D>(
+                    if let Some(mut camera) =
+                        self.base().try_get_node_as::<crate::camera::MindCamera2D>(
                             "/root/Spine/World/Camera2D",
                         )
                     {
-                        camera.bind_mut()
+                        camera
+                            .bind_mut()
                             .apply_shake_event(f64::from(intensity), f64::from(duration));
                     }
                 }

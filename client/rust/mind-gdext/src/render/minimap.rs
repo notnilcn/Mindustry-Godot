@@ -381,19 +381,19 @@ impl MindMinimap {
             .iter()
             .map(|(x, y, age)| [*x as f32, *y as f32, *age])
             .collect();
-        GString::from(serde_json::Value::Array(
-            rows.into_iter()
-                .map(|row| {
-                    serde_json::Value::Array(
-                        row.into_iter()
-                            .map(|v| serde_json::json!(v))
-                            .collect(),
-                    )
-                })
-                .collect(),
+        GString::from(
+            serde_json::Value::Array(
+                rows.into_iter()
+                    .map(|row| {
+                        serde_json::Value::Array(
+                            row.into_iter().map(|v| serde_json::json!(v)).collect(),
+                        )
+                    })
+                    .collect(),
+            )
+            .to_string()
+            .as_str(),
         )
-        .to_string()
-        .as_str())
     }
 
     /// Live units as `[[x world px, y world px, rotation, name, color], ...]`

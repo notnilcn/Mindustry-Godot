@@ -2730,11 +2730,12 @@ impl MindSimHost {
         let entity = self.tile_at(x, y)?.build?;
         let content = self.content_snapshot.as_ref()?;
         let def = content.block(self.sim.grid.tile(x, y).block)?;
-        let speed = mind_core::world::blocks::distribution::ConveyorBehavior::belt_speed(&def.name)?;
+        let speed =
+            mind_core::world::blocks::distribution::ConveyorBehavior::belt_speed(&def.name)?;
         let world = &self.sim.ecs.0;
         let (blend_bits, sclx, scly, clog_heat) = {
-            let belt = world
-                .get::<mind_core::world::blocks::distribution::ConveyorBuild>(entity)?;
+            let belt =
+                world.get::<mind_core::world::blocks::distribution::ConveyorBuild>(entity)?;
             (
                 belt.blend_bits,
                 f32::from(belt.blend_sclx),
@@ -2777,8 +2778,7 @@ impl MindSimHost {
             .ecs
             .0
             .get::<mind_core::world::blocks::defense::turrets::TurretState>(entity)?;
-        let len =
-            -state.cur_recoil.max(0.0).powf(state.config.recoil_pow) * state.config.recoil;
+        let len = -state.cur_recoil.max(0.0).powf(state.config.recoil_pow) * state.config.recoil;
         let (dx, dy) = mind_core::render::conveyor_items::trns(state.rotation, len, 0.0);
         Some((state.rotation, dx, dy, state.heat))
     }

@@ -72,8 +72,8 @@ impl INode2D for CommandOverlay {
         if !input.bind().command_mode() {
             return;
         }
-        let ids: Vec<i32> = serde_json::from_str(&input.bind().selection_json().to_string())
-            .unwrap_or_default();
+        let ids: Vec<i32> =
+            serde_json::from_str(&input.bind().selection_json().to_string()).unwrap_or_default();
         if ids.is_empty() {
             return;
         }

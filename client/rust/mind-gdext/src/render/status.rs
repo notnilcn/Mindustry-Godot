@@ -121,8 +121,11 @@ impl StatusRenderer {
         self.base()
             .try_get_node_as::<Node>("/root/MindUi")
             .map(|mut ui| {
-                ui.call("settings_get_bool", &[GString::from("blockstatus").to_variant()])
-                    .booleanize()
+                ui.call(
+                    "settings_get_bool",
+                    &[GString::from("blockstatus").to_variant()],
+                )
+                .booleanize()
             })
             .unwrap_or(false)
     }
@@ -153,8 +156,14 @@ impl StatusRenderer {
         ];
         let min_x = corners.iter().map(|p| p.x).fold(f32::INFINITY, f32::min);
         let min_y = corners.iter().map(|p| p.y).fold(f32::INFINITY, f32::min);
-        let max_x = corners.iter().map(|p| p.x).fold(f32::NEG_INFINITY, f32::max);
-        let max_y = corners.iter().map(|p| p.y).fold(f32::NEG_INFINITY, f32::max);
+        let max_x = corners
+            .iter()
+            .map(|p| p.x)
+            .fold(f32::NEG_INFINITY, f32::max);
+        let max_y = corners
+            .iter()
+            .map(|p| p.y)
+            .fold(f32::NEG_INFINITY, f32::max);
         Some((min_x, min_y, max_x, max_y))
     }
 }

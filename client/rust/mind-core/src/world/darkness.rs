@@ -131,7 +131,13 @@ pub fn get_static_darkness(grid: &WorldGrid, content: &ContentRegistry, x: i32, 
 /// play-area edge (or the map edge when no limit is set) fades in over
 /// `edgeBlend = 2` tiles to full black at `edgeDst <= 0`
 /// (`World.java:484-503`).
-pub fn border_darkness(grid: &WorldGrid, border: bool, limit: Option<(i32, i32, i32, i32)>, x: i32, y: i32) -> f32 {
+pub fn border_darkness(
+    grid: &WorldGrid,
+    border: bool,
+    limit: Option<(i32, i32, i32, i32)>,
+    x: i32,
+    y: i32,
+) -> f32 {
     if !border {
         return 0.0;
     }

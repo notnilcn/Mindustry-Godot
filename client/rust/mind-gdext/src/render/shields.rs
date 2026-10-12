@@ -37,8 +37,7 @@ fn polygon(sides: u8, x: f32, y: f32, radius: f32, rotation_deg: f32) -> Vec<Vec
     let count = sides.max(3) as usize;
     let mut out: Vec<Vector2> = Vec::with_capacity(count);
     for i in 0..count {
-        let angle =
-            rotation_deg.to_radians() + i as f32 * std::f32::consts::TAU / count as f32;
+        let angle = rotation_deg.to_radians() + i as f32 * std::f32::consts::TAU / count as f32;
         out.push(Vector2::new(
             x + angle.cos() * radius,
             y + angle.sin() * radius,

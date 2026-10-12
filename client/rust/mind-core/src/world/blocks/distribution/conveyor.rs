@@ -916,10 +916,7 @@ mod tests {
             ConveyorBehavior::belt_speed("titanium-conveyor"),
             Some(0.0801)
         );
-        assert_eq!(
-            ConveyorBehavior::belt_speed("armored-conveyor"),
-            Some(0.08)
-        );
+        assert_eq!(ConveyorBehavior::belt_speed("armored-conveyor"), Some(0.08));
         assert_eq!(ConveyorBehavior::belt_speed("junction"), None);
     }
 }

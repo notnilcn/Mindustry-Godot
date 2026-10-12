@@ -132,7 +132,8 @@ impl BlockRenderer {
         // every block quad is in place, so a later belt can never cover an item
         // drawn earlier: `Conveyor.draw` runs its item loop at
         // `Layer.block - 0.1`, above all belts (drawn at `Layer.block - 0.2`).
-        let mut item_groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<UnitQuad>)> = BTreeMap::new();
+        let mut item_groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<UnitQuad>)> =
+            BTreeMap::new();
         // Construct sites draw through the `blockbuild` shader on their own
         // pooled nodes (T9).
         let mut sites: Vec<ConstructSite> = Vec::new();
@@ -230,8 +231,7 @@ impl BlockRenderer {
                 } else {
                     0.0
                 };
-                let is_belt =
-                    matches!(def.kind, BlockKind::Conveyor | BlockKind::ArmoredConveyor);
+                let is_belt = matches!(def.kind, BlockKind::Conveyor | BlockKind::ArmoredConveyor);
                 if is_belt {
                     // `ConveyorBuild.draw` runs every frame: a visible belt
                     // keeps the pass rebuilding (items + the frame scroll).
@@ -243,7 +243,17 @@ impl BlockRenderer {
                 if def.kind == BlockKind::Drill {
                     if let Some(time_drilled) = host.drill_draw(tile.x, tile.y) {
                         if let Some(base) = self.resolver.find(&def.region) {
-                            push(&base, base.uv, anchor_x, anchor_y, w, w, 0.0, 0xffff_ffff, 1.0);
+                            push(
+                                &base,
+                                base.uv,
+                                anchor_x,
+                                anchor_y,
+                                w,
+                                w,
+                                0.0,
+                                0xffff_ffff,
+                                1.0,
+                            );
                         }
                         if let Some(rotator) = self.resolver.find(&format!("{}-rotator", def.name))
                         {
@@ -260,7 +270,17 @@ impl BlockRenderer {
                             );
                         }
                         if let Some(top) = self.resolver.find(&format!("{}-top", def.name)) {
-                            push(&top, top.uv, anchor_x, anchor_y, w, w, 0.0, 0xffff_ffff, 1.0);
+                            push(
+                                &top,
+                                top.uv,
+                                anchor_x,
+                                anchor_y,
+                                w,
+                                w,
+                                0.0,
+                                0xffff_ffff,
+                                1.0,
+                            );
                         }
                         dynamic += 1;
                         animating = true;
@@ -278,7 +298,17 @@ impl BlockRenderer {
                         host.turret_draw(tile.x, tile.y)
                     {
                         if let Some(base) = self.resolver.find(&format!("block-{}", def.size)) {
-                            push(&base, base.uv, anchor_x, anchor_y, w, w, 0.0, 0xffff_ffff, 1.0);
+                            push(
+                                &base,
+                                base.uv,
+                                anchor_x,
+                                anchor_y,
+                                w,
+                                w,
+                                0.0,
+                                0xffff_ffff,
+                                1.0,
+                            );
                         }
                         let rot = rotation - 90.0;
                         let bx = anchor_x + recoil_x;
@@ -381,7 +411,17 @@ impl BlockRenderer {
                         // `def.region`, no `<name>-0-0`): fall back to the
                         // `error` placeholder; the resolver logs the miss.
                         if let Some(region) = self.resolver.resolve(&def.region) {
-                            push(&region, region.uv, anchor_x, anchor_y, w, w, rot, 0xffff_ffff, 1.0);
+                            push(
+                                &region,
+                                region.uv,
+                                anchor_x,
+                                anchor_y,
+                                w,
+                                w,
+                                rot,
+                                0xffff_ffff,
+                                1.0,
+                            );
                         }
                     }
                 }
@@ -400,7 +440,17 @@ impl BlockRenderer {
                         .resolver
                         .find(&format!("{}-team-{}", def.name, team_name))
                     {
-                        push(&region, region.uv, anchor_x, anchor_y, w, w, 0.0, 0xffff_ffff, 1.0);
+                        push(
+                            &region,
+                            region.uv,
+                            anchor_x,
+                            anchor_y,
+                            w,
+                            w,
+                            0.0,
+                            0xffff_ffff,
+                            1.0,
+                        );
                     } else if let Some(region) = self.resolver.find(&format!("{}-team", def.name)) {
                         push(
                             &region,
