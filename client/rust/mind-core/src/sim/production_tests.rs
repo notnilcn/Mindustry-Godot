@@ -584,7 +584,8 @@ fn plasma_bore_mines_wall_ore() {
     // Java maps put `ore-wall-*` as the *overlay* of a static wall
     // (`Tile.wallDrop()`), never as the block itself.
     let wall = crate::content::BlockId::new(
-        sim.world_block_id("beryllic-stone-wall").expect("static wall"),
+        sim.world_block_id("beryllic-stone-wall")
+            .expect("static wall"),
     );
     for y in [5, 6] {
         let tile = sim.grid.tiles.get_mut(9, y);
