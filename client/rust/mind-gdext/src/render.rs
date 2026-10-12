@@ -397,6 +397,19 @@ impl MindWorldRenderer {
             );
             self.band_nodes.push(node);
         }
+
+        // The FX host (`/root/Spine/MindFx`) executes its whole program on one
+        // `Node2D`; park it at the `Layer.effect` band so combat FX covers the
+        // world bands but stays under fog/overlayUI (`Draw.z` for effects,
+        // `Layer.effect = 110`). Without this the node's default z sits under
+        // every non-floor band and effects are invisible.
+        if let Some(mut fx) = self
+            .base()
+            .get_node_or_null("/root/Spine/MindFx")
+            .and_then(|node| node.try_cast::<Node2D>().ok())
+        {
+            fx.set_z_index(self.band_plan.band(BandKey::base(Layer::Effect)));
+        }
     }
 
     /// Resolves the `Node2D` for a band key (append-only band plan).

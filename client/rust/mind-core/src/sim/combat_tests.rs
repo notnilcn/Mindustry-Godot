@@ -928,3 +928,27 @@ fn idle_unit_faces_and_shoots_target_behind_it() {
         "idle dagger shot the enemy behind it ({start} -> {end}, rotation {rotation:?})"
     );
 }
+
+/// The live combat systems must emit through the installed `FxSink`; the
+/// gdext host swaps the noop sink for the `MindFx` bus at boot (T12/PAR-0070).
+#[test]
+fn live_combat_emits_fx_on_the_installed_sink() {
+    let mut sim = live_sim(48);
+    let bus = std::sync::Arc::new(crate::fx::sink::FxBus::new());
+    sim.unit_runtime_mut().expect("runtime").fx = bus.clone();
+    let duo = place(&mut sim, 20, 20, "duo", 1);
+    feed(&mut sim, duo, "copper", 10);
+    let (tx, ty) = (20.0 * 8.0, 20.0 * 8.0);
+    let _ = sim
+        .spawn_live_unit("dagger", 2, tx + 60.0, ty + 20.0, 180.0)
+        .expect("dagger");
+    let mut events = 0usize;
+    for _ in 0..900 {
+        sim.tick().expect("tick");
+        events += bus.drain().len();
+        if events > 0 {
+            break;
+        }
+    }
+    assert!(events > 0, "combat emitted no FxSink events");
+}

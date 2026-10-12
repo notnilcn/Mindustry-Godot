@@ -375,6 +375,28 @@ impl MindSimHost {
             .ecs
             .0
             .insert_resource(AudioSinkRes::new(self.audio_log.clone()));
+
+        // Combat FX (`Effect.at`/`Effect.shake`/decals) go to `MindFx`'s bus;
+        // a fresh `Sim` carries a fresh noop-sink unit runtime, so this runs
+        // after every replacement.
+        self.install_fx_sink();
+    }
+
+    /// Installs the live `MindFx` bus on the sim's unit runtime so every
+    /// `FxSink` call reaches the view instead of the noop sink (`MindFx` sits
+    /// at `/root/Spine/MindFx`; `FxBus` is `Send + Sync`). No-op when the FX
+    /// host or unit runtime is absent.
+    fn install_fx_sink(&mut self) {
+        let Some(bus) = self
+            .base()
+            .try_get_node_as::<crate::fx::MindFx>("/root/Spine/MindFx")
+            .map(|fx| fx.bind().bus_handle())
+        else {
+            return;
+        };
+        if let Some(mut runtime) = self.sim.unit_runtime_mut() {
+            runtime.fx = bus;
+        }
     }
 
     /// Places a block at `(x, y)` immediately (API path; MCP §7c step 5).
