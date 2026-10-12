@@ -138,16 +138,23 @@ func _localize_banners() -> void:
 		waiting_banner.text = "[center]" + MindWidgets.markup("@waiting.players")
 
 
-## `HudFragment.java:502-510`: icon-only skip-wave button next to the status
-## table. code-instantiated: the button's icon-font glyph is resolved through
+## `HudFragment.java:491-510`: the icon-only skip-wave button lives inside the
+## status table's row, right side, 40 px wide with `growY`
+## (`s.button(Icon.play, rightStyle, 30f, ...).growY().fillX().right().width(40f)`).
+## code-instantiated: the button's icon-font glyph is resolved through
 ## `MindIcons` and has no scene form.
 func _build_wave_buttons() -> void:
-	if wave_buttons == null or _skip_button != null:
+	if _skip_button != null:
+		return
+	var row := get_node_or_null("WavesStack/WavesMain/StatusRow/Row")
+	if row == null:
 		return
 	_skip_button = MindWidgets.icon_button(SKIP_ICON, "")
 	_skip_button.name = "skip"
+	_skip_button.custom_minimum_size = Vector2(40.0, 0.0)
+	_skip_button.size_flags_vertical = Control.SIZE_FILL
 	_skip_button.pressed.connect(_on_skip_wave)
-	wave_buttons.add_child(_skip_button)
+	row.add_child(_skip_button)
 
 
 ## Pulls the typed HUD properties and drives the widgets that are not simple
