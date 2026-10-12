@@ -1993,7 +1993,8 @@ impl MindSimHost {
 
     /// Construct block state at `(x, y)` (`ConstructBuild`): `{block,
     /// progress, deconstructing}`; empty when the tile is not under
-    /// construction.    #[func]
+    /// construction.
+    #[func]
     pub fn construct_progress(&self, x: i32, y: i32) -> Dictionary<GString, Variant> {
         let mut out = Dictionary::new();
         if let Some((block, progress, deconstructing)) = self.construct_at(x, y) {
