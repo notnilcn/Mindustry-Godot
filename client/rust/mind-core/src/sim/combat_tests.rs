@@ -1087,6 +1087,42 @@ fn crawler_rams_and_explodes() {
     );
 }
 
+/// T14: a commanded builder runs `BuilderAI` (`AiKind::Builder`): it walks to
+/// the assigned tile and repairs the building there (`ai/types/builder.rs`).
+#[test]
+fn commanded_builder_repairs_target() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::world::TilePos;
+
+    let mut sim = live_sim(48);
+    let wall = place(&mut sim, 16, 12, "copper-wall", 1);
+    sim.ecs
+        .0
+        .get_mut::<Health>(wall)
+        .expect("wall health")
+        .health = 100.0;
+    let builder = sim
+        .spawn_live_unit("alpha", 1, 100.0, 100.0, 0.0)
+        .expect("alpha");
+    // `alpha`'s content controller is `BuilderOrCommand` -> `AiKind::Builder`
+    // for spawned units; assign the repair tile.
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(builder) {
+        slot.kind = AiKind::Builder;
+        slot.target = Some(TilePos::new(16, 12));
+    }
+    for _ in 0..120 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        health(&sim, wall).is_some_and(|hp| hp > 100.0),
+        "the builder repaired the wall: {:?}",
+        health(&sim, wall)
+    );
+    let pos = sim.ecs.0.get::<Pos>(builder).copied().expect("builder pos");
+    let dist = ((pos.x - 132.0).powi(2) + (pos.y - 100.0).powi(2)).sqrt();
+    assert!(dist < 40.0, "the builder closed on the target ({dist} px)");
+}
+
 /// NEW-1: a status applied through the live applier ticks damage every tick
 /// (`StatusComp.update` in the live unit loop).
 #[test]

@@ -1291,6 +1291,35 @@ pub fn unit_update_system(world: &mut World) {
                 };
                 let _ = crate::ai::types::suicide::update_suicide(&mut ctx, entity, &mut state);
             }
+        } else if slot.kind == AiKind::Builder && slot.target.is_some() {
+            // `BuilderAI` (`ai/types/builder.rs`): walk to the assigned plan
+            // and repair it. Without a commanded tile the generic behavior
+            // below keeps the wave-unit approximation (the live build-plan
+            // machinery is not wired to `unit.plans` yet).
+            let mut state = crate::ai::types::builder::BuilderAi {
+                unit: Some(entity),
+                only_assist: false,
+                target: slot.target,
+                in_range: false,
+            };
+            {
+                let UnitRuntime {
+                    content,
+                    grid,
+                    pathfinder,
+                    ..
+                } = &mut runtime;
+                let mut ctx = crate::ai::ai_controller::AiCtx {
+                    world,
+                    grid,
+                    content,
+                    pathfinder,
+                    team,
+                };
+                let _ = crate::ai::types::builder::update_builder(&mut ctx, entity, &mut state);
+            }
+            let (_, mount_target) = acquire_target(world, &runtime, &queries, entity, team);
+            set_mount_targets(world, &runtime.content, entity, mount_target);
         } else {
             // `GroundAI.updateMovement`/`FlyingAI`: pick a core/building anchor
             // and an in-range mount target. Spawned wave units have no command,
