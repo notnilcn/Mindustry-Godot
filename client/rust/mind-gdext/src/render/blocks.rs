@@ -12,7 +12,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use godot::classes::{Mesh, MeshInstance2D, Node2D, Texture2D};
+use godot::classes::{Material, Mesh, MeshInstance2D, Node2D, Shader, ShaderMaterial, Texture2D};
 use godot::prelude::*;
 
 use mind_core::config::TILESIZE;
@@ -22,10 +22,13 @@ use mind_core::render::scan::{CameraKey, CameraView, visible_blocks};
 use crate::sim_host::MindSimHost;
 
 use super::atlas_bind::{RegionResolver, ResolvedRegion};
+use super::shaders::ShaderRegistry;
 use super::units::{UnitQuad, build_unit_mesh};
 
 /// `Pal.accent` (construct-site tint, `Draw.color(Pal.accent, ...)`).
 const ACCENT: u32 = 0xffd3_7fff;
+/// `Pal.remove` (deconstruct tint).
+const REMOVE: u32 = 0xe554_54ff;
 /// `Drill.rotateSpeed` (`Drill.java:59`): rotator degrees per `timeDrilled`.
 const DRILL_ROTATE_SPEED: f32 = 2.0;
 /// `Turret.heatColor = Pal.turretHeat` (`ab3400`); the alpha carries heat.
@@ -48,9 +51,16 @@ pub struct BlockStats {
 pub struct BlockRenderer {
     host: Gd<MindSimHost>,
     band_node: Gd<Node2D>,
+    /// `Layer.blockBuilding` band: one node per construct site (each carries
+    /// its own `blockbuild` uniforms).
+    building_band: Gd<Node2D>,
+    /// `Shaders.blockbuild` (`ConstructBlock.draw`).
+    construct_shader: Option<Gd<Shader>>,
     resolver: RegionResolver,
     /// Pooled per-page nodes (index → node); reused across rebuilds.
     nodes: Vec<Gd<MeshInstance2D>>,
+    /// Pooled construct-site nodes (index → node); reused across rebuilds.
+    construct_nodes: Vec<Gd<MeshInstance2D>>,
     last_key: Option<CameraKey>,
     last_revision: i64,
     /// Construct sites were drawn last frame: their progress animates without
@@ -59,18 +69,34 @@ pub struct BlockRenderer {
     stats: BlockStats,
 }
 
+/// One visible construct site (`ConstructBuild.draw`).
+struct ConstructSite {
+    region: ResolvedRegion,
+    x: f32,
+    y: f32,
+    size: f32,
+    rot: f32,
+    progress: f32,
+    color: u32,
+}
+
 impl BlockRenderer {
     /// Builds the renderer over the `Layer.block` band node.
     pub fn new(
         host: Gd<MindSimHost>,
         assets: Option<Gd<crate::assets::MindAssets>>,
         band_node: Gd<Node2D>,
+        building_band: Gd<Node2D>,
+        shaders: &ShaderRegistry,
     ) -> Self {
         Self {
             host,
             band_node,
+            building_band,
+            construct_shader: shaders.get("blockbuild"),
             resolver: RegionResolver::new(assets),
             nodes: Vec::new(),
+            construct_nodes: Vec::new(),
             last_key: None,
             last_revision: i64::MIN,
             animating: false,
@@ -107,6 +133,9 @@ impl BlockRenderer {
         // drawn earlier: `Conveyor.draw` runs its item loop at
         // `Layer.block - 0.1`, above all belts (drawn at `Layer.block - 0.2`).
         let mut item_groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<UnitQuad>)> = BTreeMap::new();
+        // Construct sites draw through the `blockbuild` shader on their own
+        // pooled nodes (T9).
+        let mut sites: Vec<ConstructSite> = Vec::new();
         let mut seen = HashSet::new();
         let mut dynamic = 0i64;
         let mut animating = false;
@@ -165,8 +194,8 @@ impl BlockRenderer {
                 };
 
                 // `ConstructBuild.draw`: the target block's icon through the
-                // blockbuild shader, tinted `Pal.accent`. First slice: an
-                // accent ghost plus a bottom-up reveal at `progress`.
+                // `blockbuild` shader (outline scan + diamond reveal), tinted
+                // `Pal.accent`/`Pal.remove`; one pooled node per site (T9).
                 if def.kind == BlockKind::ConstructBlock {
                     if let Some((current, progress)) = host.construct_draw(tile.x, tile.y)
                         && let Some(target) = content.block(current)
@@ -177,31 +206,19 @@ impl BlockRenderer {
                         } else {
                             0.0
                         };
-                        push(
-                            &region,
-                            region.uv,
-                            anchor_x,
-                            anchor_y,
-                            w,
-                            w,
+                        let deconstructing = host
+                            .construct_at(tile.x, tile.y)
+                            .map(|(_, _, deconstructing)| deconstructing)
+                            .unwrap_or(false);
+                        sites.push(ConstructSite {
+                            region,
+                            x: anchor_x,
+                            y: anchor_y,
+                            size: w,
                             rot,
-                            (ACCENT & !0xff) | 0x70,
-                            1.0,
-                        );
-                        let progress = progress.clamp(0.0, 1.0);
-                        if progress > 0.0 {
-                            push(
-                                &region,
-                                region.uv,
-                                anchor_x,
-                                anchor_y,
-                                w,
-                                w,
-                                rot,
-                                0xffff_ffff,
-                                progress,
-                            );
-                        }
+                            progress: progress.clamp(0.0, 1.0),
+                            color: if deconstructing { REMOVE } else { ACCENT },
+                        });
                         animating = true;
                         dynamic += 1;
                     }
@@ -410,6 +427,7 @@ impl BlockRenderer {
         }
 
         self.apply_groups(groups);
+        self.apply_construct_sites(sites);
         self.stats.dynamic_sprites = dynamic;
         self.stats.mesh_rebuilds += 1;
         self.stats.missing_regions = self.resolver.missing();
@@ -425,6 +443,74 @@ impl BlockRenderer {
         mind_core::render::block_region_candidates(&def.name, &def.region)
             .into_iter()
             .find_map(|name| self.resolver.find(&name))
+    }
+
+    /// Draws each visible construct site through its own `blockbuild` node
+    /// (`ConstructBlock.draw`: per-region shader uniforms, `Pal.accent` lerped
+    /// to `Pal.remove`), hiding pooled spares.
+    fn apply_construct_sites(&mut self, sites: Vec<ConstructSite>) {
+        let Some(shader) = self.construct_shader.clone() else {
+            return;
+        };
+        for (index, site) in sites.iter().enumerate() {
+            let node = if index < self.construct_nodes.len() {
+                self.construct_nodes[index].clone()
+            } else {
+                let node = MeshInstance2D::new_alloc();
+                // code-instantiated: one node per visible construct site (each
+                // carries its own u_uv/progress/time uniform set).
+                self.building_band.clone().add_child(&node);
+                self.construct_nodes.push(node.clone());
+                node
+            };
+            let Some(texture) = site.region.texture.clone() else {
+                continue;
+            };
+            let Some(mesh) = build_unit_mesh(&[UnitQuad {
+                cx: site.x,
+                cy: site.y,
+                w: site.size,
+                h: site.size,
+                rot: site.rot,
+                uv: site.region.uv,
+                color: 0xffff_ffff,
+            }]) else {
+                continue;
+            };
+            // `u_texsize` is the atlas *page* size: `ResolvedRegion.texture` is
+            // the page texture (`Shaders.blockbuild` sets it from
+            // `region.texture` in Java).
+            let (page_w, page_h) = (
+                texture.get_width().max(1) as f32,
+                texture.get_height().max(1) as f32,
+            );
+            let [u0, v0, u1, v1] = site.region.uv;
+            let mut material = ShaderMaterial::new_gd();
+            material.set_shader(&shader);
+            material.set_shader_parameter("u_texture", &texture.to_variant());
+            material.set_shader_parameter("u_texsize", &Vector2::new(page_w, page_h).to_variant());
+            material.set_shader_parameter("u_uv", &Vector2::new(u0, v0).to_variant());
+            material.set_shader_parameter("u_uv2", &Vector2::new(u1, v1).to_variant());
+            material.set_shader_parameter("u_progress", &site.progress.to_variant());
+            material.set_shader_parameter(
+                "u_time",
+                &(self.host.clone().bind().get_tick() as f32).to_variant(),
+            );
+            material.set_shader_parameter("u_alpha", &1.0f32.to_variant());
+            let mut node = node;
+            node.set_mesh(&mesh.upcast::<Mesh>());
+            node.set_material(&material.upcast::<Material>());
+            node.set_modulate(Color::from_rgba8(
+                ((site.color >> 24) & 0xff) as u8,
+                ((site.color >> 16) & 0xff) as u8,
+                ((site.color >> 8) & 0xff) as u8,
+                (site.color & 0xff) as u8,
+            ));
+            node.set_visible(true);
+        }
+        for node in self.construct_nodes.iter_mut().skip(sites.len()) {
+            node.set_visible(false);
+        }
     }
 
     fn apply_groups(&mut self, groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<UnitQuad>)>) {

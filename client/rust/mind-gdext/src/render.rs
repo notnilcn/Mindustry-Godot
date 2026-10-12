@@ -473,8 +473,16 @@ impl MindWorldRenderer {
                 block_band,
             ));
         }
-        if let Some(block_band) = self.band_node_at(BandKey::base(Layer::Block)) {
-            self.blocks = Some(BlockRenderer::new(host.clone(), assets, block_band));
+        if let Some(block_band) = self.band_node_at(BandKey::base(Layer::Block))
+            && let Some(building_band) = self.band_node_at(BandKey::base(Layer::BlockBuilding))
+        {
+            self.blocks = Some(BlockRenderer::new(
+                host.clone(),
+                assets,
+                block_band,
+                building_band,
+                &self.shaders,
+            ));
         }
         let unit_bands = vec![
             self.band_node_at(BandKey::base(Layer::GroundUnit)),
