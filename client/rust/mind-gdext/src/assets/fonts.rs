@@ -9,8 +9,8 @@
 //! integration is plan 14; this module only produces the resources + glyph API.
 
 use godot::builtin::{Array, Rect2, Vector2, Vector2i};
-use godot::classes::text_server::FixedSizeScaleMode;
 use godot::classes::image::Format;
+use godot::classes::text_server::FixedSizeScaleMode;
 use godot::classes::{FileAccess, Font, FontFile, Image, ImageTexture};
 use godot::global::Error;
 use godot::obj::NewGd;
@@ -135,8 +135,8 @@ fn build_content_icon_font(
     image: Gd<Image>,
 ) -> Gd<FontFile> {
     let s = CONTENT_ICON_FONT_SIZE;
-    let ascent = def.get_ascent_ex().font_size(s).done() as f32;
-    let descent = def.get_descent_ex().font_size(s).done() as f32;
+    let ascent = def.get_ascent_ex().font_size(s).done();
+    let descent = def.get_descent_ex().font_size(s).done();
     let line = (ascent + descent).max(1.0);
     let size = Vector2i::new(s, 0);
     let mut font = FontFile::new_gd();
@@ -165,7 +165,10 @@ fn build_content_icon_font(
             0,
             size,
             glyph,
-            Vector2::new(((line - w) / 2.0).floor(), -ascent + ((line - h) / 2.0).floor()),
+            Vector2::new(
+                ((line - w) / 2.0).floor(),
+                -ascent + ((line - h) / 2.0).floor(),
+            ),
         );
         font.set_glyph_size(0, size, glyph, Vector2::new(w, h));
         font.set_glyph_uv_rect(
