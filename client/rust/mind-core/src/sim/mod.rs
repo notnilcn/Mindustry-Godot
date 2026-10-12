@@ -835,8 +835,10 @@ impl Sim {
                 return Ok(());
             }
             SimCommand::DeletePlans { positions } => {
-                // `InputHandler.deletePlans` over the plan-11 `BuildQueue`.
+                // `InputHandler.deletePlans`: the relay `BuildQueue` plus the
+                // player unit's own `BuilderPlans` queue (PAR-0098 §2a).
                 self.ensure_world_apply().apply_delete_plans(positions)?;
+                self.delete_player_plans(positions);
                 self.commands_applied = self.commands_applied.wrapping_add(1);
                 return Ok(());
             }

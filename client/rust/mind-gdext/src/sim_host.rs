@@ -1843,10 +1843,22 @@ impl MindSimHost {
         GString::from(serde_json::Value::Array(rows).to_string().as_str())
     }
 
+    /// Clears the player unit's queued build plans (`Binding.clearBuilding`;
+    /// PAR-0098 §2a).
+    #[func]
+    pub fn clear_player_build_plans(&mut self) {
+        self.sim.clear_player_build_plans();
+    }
+
+    /// `BuilderComp.updateBuilding` (`InputHandler.update`; PAR-0098 §2b).
+    #[func]
+    pub fn set_player_building_paused(&mut self, paused: bool) {
+        self.sim.set_player_building_paused(paused);
+    }
+
     /// Construct block state at `(x, y)` (`ConstructBuild`): `{block,
     /// progress, deconstructing}`; empty when the tile is not under
-    /// construction.
-    #[func]
+    /// construction.    #[func]
     pub fn construct_progress(&self, x: i32, y: i32) -> Dictionary<GString, Variant> {
         let mut out = Dictionary::new();
         if let Some((block, progress, deconstructing)) = self.construct_at(x, y) {

@@ -501,11 +501,22 @@ impl DesktopBridge {
                 self.fire_hotkey("zoom");
             }
             "clear_building" => {
+                // `Binding.clearBuilding` (`DesktopInput.java:612`): the player's
+                // queue is cleared too (`player.unit().clearBuilding()`).
                 self.controller.state.select_block(None);
+                if let Some(mut host) = self.host.clone() {
+                    host.bind_mut().clear_player_build_plans();
+                }
                 self.fire_hotkey(name);
             }
             "pause_building" => {
+                // `DesktopInput.java:675`: toggles `isBuilding`, applied to the
+                // unit in `InputHandler.update` (`updateBuilding = isBuilding`).
                 self.controller.state.is_building = !self.controller.state.is_building;
+                if let Some(mut host) = self.host.clone() {
+                    host.bind_mut()
+                        .set_player_building_paused(!self.controller.state.is_building);
+                }
                 self.fire_hotkey(name);
             }
             "block_select_01" | "block_select_02" | "block_select_03" | "block_select_04"

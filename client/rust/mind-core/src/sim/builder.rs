@@ -92,12 +92,26 @@ impl UnitBuildPlan {
 }
 
 /// `BuilderComp.plans` + `buildCounter` on a builder unit.
-#[derive(Debug, Clone, Default, Component)]
+#[derive(Debug, Clone, Component)]
 pub struct BuilderPlans {
     /// The plan queue; the head is the active plan.
     pub plans: VecDeque<UnitBuildPlan>,
     /// `buildCounter` (ticks of build work banked, capped at 10).
     pub build_counter: f32,
+    /// `BuilderComp.updateBuilding`: whether the queue advances at all
+    /// (`BuilderComp.updateBuildLogic` returns early when false; PAR-0098 §2b).
+    pub update_building: bool,
+}
+
+impl Default for BuilderPlans {
+    fn default() -> Self {
+        Self {
+            plans: VecDeque::new(),
+            build_counter: 0.0,
+            // `BuilderComp.updateBuilding = true` upstream.
+            update_building: true,
+        }
+    }
 }
 
 impl BuilderPlans {
@@ -287,6 +301,10 @@ fn update_builder(
         return out;
     }
     validate_plans(plans, world, grid, runtime.content());
+    if !plans.update_building {
+        // `BuilderComp.updateBuildLogic`: `if(!updateBuilding) return;`.
+        return out;
+    }
 
     let speed_multiplier = world
         .get::<StatusComp>(unit)
@@ -734,6 +752,29 @@ impl Sim {
         }
     }
 
+    /// `BuilderComp.removeBuild`-style removal for the delete-plans command:
+    /// drops every queued plan whose [`TilePos::pack`] is in `positions`
+    /// (`InputHandler.deletePlans` over the player's own queue).
+    pub fn delete_player_plans(&mut self, positions: &[i32]) {
+        if let Some(unit) = self.player_unit
+            && let Some(mut plans) = self.ecs.0.get_mut::<BuilderPlans>(unit)
+        {
+            plans
+                .plans
+                .retain(|plan| !positions.contains(&TilePos::new(plan.x, plan.y).pack()));
+        }
+    }
+
+    /// `BuilderComp.updateBuilding` (`InputHandler.update`:
+    /// `player.unit().updateBuilding = isBuilding`; PAR-0098 §2b).
+    pub fn set_player_building_paused(&mut self, paused: bool) {
+        if let Some(unit) = self.player_unit {
+            // The component is inserted lazily by the first queued plan, so the
+            // pause flag must create it when absent.
+            self.with_player_plans(unit, |plans| plans.update_building = !paused);
+        }
+    }
+
     /// Construct progress at `(x, y)` as `(current block, progress,
     /// deconstructing)`, if the tile holds a construct block.
     pub fn construct_progress(&self, x: i16, y: i16) -> Option<(BlockId, f32, bool)> {
@@ -890,6 +931,72 @@ mod tests {
         }
         assert!(sim.construct_progress(50, 50).is_none());
         assert_eq!(sim.player_build_plans().len(), 1);
+    }
+
+    /// PAR-0098 §2a: `DeletePlans` drops the matching player queue entries
+    /// (`InputHandler.deletePlans`) and `clear_building` clears the queue.
+    #[test]
+    fn delete_plans_removes_player_plan() {
+        let (mut sim, _unit, _core, wall) = sim_with_player();
+        set_core_copper(&mut sim, 100);
+        for (x, y) in [(14, 10), (16, 10)] {
+            sim.command(SimCommand::Place {
+                x,
+                y,
+                block: wall.raw(),
+                rotation: 0,
+                team: 1,
+                player: Some(0),
+            })
+            .expect("queued");
+        }
+        assert_eq!(sim.player_build_plans().len(), 2);
+        sim.command(SimCommand::DeletePlans {
+            positions: smallvec::smallvec![TilePos::new(14, 10).pack()],
+        })
+        .expect("delete plans");
+        assert_eq!(sim.player_build_plans().len(), 1, "one plan removed");
+        assert_eq!(sim.player_build_plans()[0].x, 16);
+        sim.clear_player_build_plans();
+        assert!(sim.player_build_plans().is_empty(), "queue cleared");
+    }
+
+    /// PAR-0098 §2b: `updateBuilding = false` freezes the queue
+    /// (`BuilderComp.updateBuildLogic` returns early).
+    #[test]
+    fn pausing_building_holds_construct_progress() {
+        let (mut sim, _unit, _core, wall) = sim_with_player();
+        set_core_copper(&mut sim, 100);
+        // Pause before the first plan: the queue is created paused and the head
+        // never starts a construct block.
+        sim.set_player_building_paused(true);
+        sim.command(SimCommand::Place {
+            x: 14,
+            y: 10,
+            block: wall.raw(),
+            rotation: 0,
+            team: 1,
+            player: Some(0),
+        })
+        .expect("queued");
+        for _ in 0..30 {
+            sim.tick().expect("tick");
+        }
+        assert!(
+            sim.construct_progress(14, 10).is_none(),
+            "no construction while paused"
+        );
+        assert_eq!(sim.player_build_plans().len(), 1, "plan waits");
+        // Resume: the plan completes.
+        sim.set_player_building_paused(false);
+        for _ in 0..60 {
+            sim.tick().expect("tick");
+        }
+        assert_eq!(
+            sim.grid.block_at(TilePos::new(14, 10)),
+            Some(wall),
+            "resumed and finished"
+        );
     }
 
     #[test]

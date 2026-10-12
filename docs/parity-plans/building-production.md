@@ -134,6 +134,12 @@ The core loop is done. The following items remain, in priority order.
   `SimCommand::DeletePlans{positions: smallvec![TilePos::new(14,10).pack()]}`, then
   assert 1 plan remains.
 
+**Status 2026-10-12:** done — the `SimCommand::DeletePlans` arm now also calls
+`Sim::delete_player_plans` (removes queued plans whose packed position is listed) and the
+`clear_building` key arm calls `MindSimHost::clear_player_build_plans`. In-engine on Ground Zero
+170: two queued copper-wall plans disappear after the injected `q` key. Evidence:
+`runs/20261012-session4/section2ab-evidence.json`.
+
 ### 2b. Pause building (`E`)
 - **Java:** `DesktopInput.java:675` toggles `isBuilding`, and
   `player.unit().updateBuilding = isBuilding` (`InputHandler.update`).
@@ -146,6 +152,13 @@ The core loop is done. The following items remain, in priority order.
   `"pause_building"` arm in `gdext/input/desktop.rs` (around line 507), which already
   toggles `controller.state.is_building`: pass `!is_building`.
 - **Test:** pausing keeps `construct_progress` constant over 30 ticks.
+
+**Status 2026-10-12:** done — `BuilderPlans` gained `update_building` (default `true`, manual
+`Default` impl) and `update_builder` returns right after `validate_plans` when it is false; the
+`pause_building` key arm calls the new `MindSimHost::set_player_building_paused`, which inserts the
+lazily-created `BuilderPlans` when it is still missing. In-engine on Ground Zero 170: with the
+injected `e` key a queued wall plan held at progress 0.0 with an empty tile for 3 s, then built after
+the second `e`. Evidence: `runs/20261012-session4/section2ab-evidence.json`.
 
 ### 2c. Unit overlap check and the "stuck" skip
 - **Java:** `BuilderComp.java:150` `Build.checkNoUnitOverlap(block, x, y)`, where a
