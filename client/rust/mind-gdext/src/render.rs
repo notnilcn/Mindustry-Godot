@@ -467,6 +467,9 @@ impl MindWorldRenderer {
             self.band_node_at(BandKey::base(Layer::GroundUnit)),
             self.band_node_at(BandKey::base(Layer::FlyingUnitLow)),
             self.band_node_at(BandKey::base(Layer::FlyingUnit)),
+            // Bucket 3: `drawShadow` for flying units (`Math.min(Layer.darkness,
+            // z - 1f)`, `UnitType.java:1494-1497`).
+            self.band_node_at(BandKey::base(Layer::Darkness)),
         ];
         self.units = Some(UnitRenderer::new(
             host.clone(),

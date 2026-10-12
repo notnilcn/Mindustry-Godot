@@ -107,23 +107,32 @@ impl UnitRenderer {
             let Some(body) = self.resolver.resolve(&unit.name) else {
                 continue;
             };
-            // `drawSoftShadow`: `max(region.w, region.h) * region.scl() *
-            // softShadowScl * 1.6`, colour `(0,0,0,0.4)`.
-            if let Some(shadow) = self.resolver.find("circle-shadow") {
-                let size = body.w.max(body.h) * self.sprite_scale;
-                let entry = groups
-                    .entry((bucket, shadow.page))
-                    .or_insert((shadow.texture.clone(), Vec::new()));
-                entry.1.push(UnitQuad {
-                    cx: unit.x,
-                    cy: unit.y,
-                    w: size * 1.6,
-                    h: size * 1.6,
-                    rot: 0.0,
-                    uv: shadow.uv,
-                    color: 0x0000_0066,
-                });
-                sprites += 1;
+            // `UnitType.drawShadow` (`UnitType.java:1494-1497,1652-1664`):
+            // flying units (and any unit with a positive `shadowElevation`)
+            // draw a `Pal.shadow`-tinted silhouette of their full icon offset
+            // down-left, at `min(Layer.darkness, z - 1)` = Layer.darkness.
+            if unit.flying || unit.elevation > 0.0 {
+                let shadow = self
+                    .resolver
+                    .find(&format!("unit-{}-full", unit.name))
+                    .or_else(|| self.resolver.find(&unit.name));
+                if let Some(shadow) = shadow {
+                    let (ox, oy) =
+                        mind_core::render::unit_draw::flying_shadow_offset(unit.elevation);
+                    let entry = groups
+                        .entry((3, shadow.page))
+                        .or_insert((shadow.texture.clone(), Vec::new()));
+                    entry.1.push(UnitQuad {
+                        cx: unit.x + ox,
+                        cy: unit.y + oy,
+                        w: shadow.w * self.sprite_scale,
+                        h: shadow.h * self.sprite_scale,
+                        rot: unit.rotation - 90.0,
+                        uv: shadow.uv,
+                        color: 0x0000_0038,
+                    });
+                    sprites += 1;
+                }
             }
             // `drawMech`: two mirrored `<name>-leg` quads (`Mathf.signs`).
             if let Some(mech) = &unit.mech
@@ -162,6 +171,25 @@ impl UnitRenderer {
                     });
                     sprites += 1;
                 }
+            }
+            // `drawSoftShadow`: `max(region.w, region.h) * region.scl() *
+            // softShadowScl * 1.6`, colour `(0,0,0,0.4)`. Java draws it at
+            // `z - 0.01`, *over* the legs (`z - 0.02`) and under the body.
+            if let Some(shadow) = self.resolver.find("circle-shadow") {
+                let size = body.w.max(body.h) * self.sprite_scale;
+                let entry = groups
+                    .entry((bucket, shadow.page))
+                    .or_insert((shadow.texture.clone(), Vec::new()));
+                entry.1.push(UnitQuad {
+                    cx: unit.x,
+                    cy: unit.y,
+                    w: size * 1.6,
+                    h: size * 1.6,
+                    rot: 0.0,
+                    uv: shadow.uv,
+                    color: 0x0000_0066,
+                });
+                sprites += 1;
             }
             // `drawBody` (`rotation - 90`; the port draws trimmed sizes, which
             // is what Arc's `Draw.rect(region, x, y)` does for centered trims).
