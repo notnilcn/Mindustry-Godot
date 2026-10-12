@@ -2305,6 +2305,9 @@ pub fn load(sink: &mut dyn UnitSink) -> Result<(), ContentError> {
     standard::load(sink)?;
     erekir::load(sink)?;
     special::load(sink)?;
+    // `Blocks.java` `scathe` inline `spawnUnit` missiles (registered right
+    // after `dummy` so unit ids 65..68 match the JVM content order).
+    special::scathe_missiles(sink)?;
     Ok(())
 }
 
@@ -2520,7 +2523,7 @@ mod tests {
     #[test]
     fn entity_def_table_covers_all_units() {
         let registry = test_registry();
-        assert_eq!(registry.units().len(), 65, "65 unit records");
+        assert_eq!(registry.units().len(), 69, "69 unit records");
         let mut groups = std::collections::BTreeSet::new();
         for unit in registry.units() {
             assert!(
@@ -2746,7 +2749,7 @@ mod tests {
     fn bullet_ids_and_derivations() {
         let registry = test_registry();
         // The 6 internal bullets keep upstream ids (upstream-prefix space).
-        assert_eq!(registry.bullets().len(), 112);
+        assert_eq!(registry.bullets().len(), 119);
         let placeholder = registry
             .bullet(crate::content::registries::bullets::PLACEHOLDER)
             .unwrap();

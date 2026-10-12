@@ -361,6 +361,48 @@ fn missile_dies_at_lifetime_and_explodes() {
     );
 }
 
+/// T1/PAR-0088: a carbide-fed `scathe` fires the `spawnUnit` carrier
+/// (`BulletType.create` spawns no bullet), the `scathe-missile` flies to the
+/// target and its shoot-on-death explosion kills it (`Blocks.java:5251-5330`).
+#[test]
+fn scathe_launches_missile_and_kills() {
+    use crate::entities::comp::unit::comp::UnitTypeComp;
+
+    let mut sim = live_sim(64);
+    let scathe = place(&mut sim, 10, 10, "scathe", 1);
+    feed(&mut sim, scathe, "carbide", 10);
+    let (tx, ty) = (10.0 * 8.0, 10.0 * 8.0);
+    let dagger = sim
+        .spawn_live_unit("dagger", 2, tx + 240.0, ty, 180.0)
+        .expect("dagger");
+    let missile_id = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .unit_id("scathe-missile")
+        .expect("scathe-missile");
+    let mut saw_missile = false;
+    for _ in 0..900 {
+        sim.tick().expect("tick");
+        if sim.unit_runtime().expect("rt").units.iter().any(|entity| {
+            sim.ecs
+                .0
+                .get::<UnitTypeComp>(*entity)
+                .is_some_and(|comp| comp.type_id == missile_id)
+        }) {
+            saw_missile = true;
+        }
+        if sim.ecs.0.get_entity(dagger).is_err() {
+            break;
+        }
+    }
+    assert!(saw_missile, "scathe launched a scathe-missile");
+    assert!(
+        sim.ecs.0.get_entity(dagger).is_err(),
+        "dagger killed by the missile's death explosion"
+    );
+}
+
 /// NEW-1: a status applied through the live applier ticks damage every tick
 /// (`StatusComp.update` in the live unit loop).
 #[test]

@@ -38,6 +38,8 @@ pub const NEOPLASM_OUTLINE: Rgba = Rgba::from_rgba8888(0x2e191dff);
 pub const NEOPLASM1: Rgba = Rgba::from_rgba8888(0xf98f4aff);
 /// `Pal.powerLight`.
 pub const POWER_LIGHT: Rgba = Rgba::from_rgba8888(0xfbd367ff);
+/// `Pal.redLight` (`Pal.java:138`).
+pub const RED_LIGHT: Rgba = Rgba::from_rgba8888(0xfeb380ff);
 /// `Pal.sap`.
 pub const SAP: Rgba = Rgba::from_rgba8888(0x665c9fff);
 /// `Pal.sapBullet`.

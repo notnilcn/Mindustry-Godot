@@ -907,6 +907,29 @@ pub fn unit_update_system(world: &mut World) {
             if let Some(mut stored) = world.get_mut::<MissileShooter>(entity) {
                 stored.0 = state.shooter;
             }
+            // `AIController.updateTargeting` -> `updateWeapons`
+            // (AIController.java:114-116, 172-238): a controllable weapon finds
+            // its own target within `weapon.range()`. For the scathe missile the
+            // shoot-on-death explosion is a proximity fuse against ground units
+            // (`findTarget(mountX, mountY, wrange, bullet.collidesAir,
+            // bullet.collidesGround)`).
+            let mount_target = {
+                let def = world
+                    .get::<UnitTypeComp>(entity)
+                    .and_then(|comp| runtime.content.unit(comp.type_id));
+                def.and_then(|def| {
+                    let weapon = def.weapons.first()?;
+                    let range = weapon.range();
+                    let (air, ground) = runtime
+                        .content
+                        .bullet(weapon.bullet.id)
+                        .map(|bullet| (bullet.collides_air, bullet.collides_ground))
+                        .unwrap_or((false, true));
+                    let (x, y) = world.get::<Pos>(entity).map(|pos| (pos.x, pos.y))?;
+                    queries.closest_target(world, team, x, y, range, air, ground, true)
+                })
+            };
+            set_mount_targets(world, entity, mount_target);
         } else {
             // `GroundAI.updateMovement`/`FlyingAI`: pick a core/building anchor
             // and an in-range mount target. Spawned wave units have no command,

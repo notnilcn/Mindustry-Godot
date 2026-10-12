@@ -168,10 +168,11 @@ mod tests {
 
         // Byte-for-byte parity with the committed plan-21 vanilla seed
         // (`server/spacetimedb/src/main/content_seed.rs`; regenerate with
-        // `server/gen_content_seed.sh` after content-data changes).
+        // `server/gen_content_seed.sh` after content-data changes — the four
+        // `scathe` missiles added by T1 make the catalog 720).
         assert_eq!(
             catalog.len(),
-            716,
+            720,
             "vanilla catalog must match the plan-21 content seed"
         );
 

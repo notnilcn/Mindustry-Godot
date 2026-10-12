@@ -4,14 +4,14 @@
   "generator": "source-derived fallback (NUD-10): mind-headless content dump over parity/tools generators",
   "counts": {
     "block": 447,
-    "bullet": 112,
+    "bullet": 119,
     "item": 22,
     "liquid": 11,
     "planet": 7,
     "sector": 95,
     "status": 23,
     "team": 0,
-    "unit": 65,
+    "unit": 69,
     "unitCommand": 10,
     "unitStance": 30,
     "weather": 6
@@ -14462,6 +14462,118 @@
             "pierce": false,
             "collides": true
           }
+        },
+        {
+          "id": 112,
+          "name": null,
+          "kind": "ExplosionBulletType",
+          "localized": "",
+          "bundle": null,
+          "regions": [],
+          "fields": {
+            "speed": 0.0,
+            "lifetime": 1.0,
+            "damage": 1.0,
+            "splash_damage": 1000.0,
+            "pierce": false,
+            "collides": false
+          }
+        },
+        {
+          "id": 113,
+          "name": null,
+          "kind": "ArtilleryBulletType",
+          "localized": "",
+          "bundle": null,
+          "regions": [],
+          "fields": {
+            "speed": 3.4,
+            "lifetime": 23.0,
+            "damage": 32.0,
+            "splash_damage": 100.0,
+            "pierce": false,
+            "collides": false
+          }
+        },
+        {
+          "id": 114,
+          "name": null,
+          "kind": "ExplosionBulletType",
+          "localized": "",
+          "bundle": null,
+          "regions": [],
+          "fields": {
+            "speed": 0.0,
+            "lifetime": 1.0,
+            "damage": 1.0,
+            "splash_damage": 320.0,
+            "pierce": false,
+            "collides": false
+          }
+        },
+        {
+          "id": 115,
+          "name": null,
+          "kind": "ArtilleryBulletType",
+          "localized": "",
+          "bundle": null,
+          "regions": [],
+          "fields": {
+            "speed": 3.4,
+            "lifetime": 23.0,
+            "damage": 32.0,
+            "splash_damage": 120.0,
+            "pierce": false,
+            "collides": false
+          }
+        },
+        {
+          "id": 116,
+          "name": null,
+          "kind": "ExplosionBulletType",
+          "localized": "",
+          "bundle": null,
+          "regions": [],
+          "fields": {
+            "speed": 0.0,
+            "lifetime": 1.0,
+            "damage": 1.0,
+            "splash_damage": 1800.0,
+            "pierce": false,
+            "collides": false
+          }
+        },
+        {
+          "id": 117,
+          "name": null,
+          "kind": "BulletType",
+          "localized": "",
+          "bundle": null,
+          "regions": [],
+          "fields": {
+            "speed": 1.0,
+            "lifetime": 40.0,
+            "damage": 1.0,
+            "splash_damage": 0.0,
+            "pierce": false,
+            "collides": true
+          }
+        },
+        {
+          "id": 118,
+          "name": null,
+          "kind": "ExplosionBulletType",
+          "localized": "",
+          "bundle": null,
+          "regions": [],
+          "fields": {
+            "speed": 0.0,
+            "lifetime": 1.0,
+            "damage": 1.0,
+            "splash_damage": 180.0,
+            "pierce": false,
+            "collides": false
+          }
         }
       ]
     },
@@ -16531,6 +16643,102 @@
             "payload_capacity": 8.0,
             "hidden": true,
             "can_attack": false
+          }
+        },
+        {
+          "id": 65,
+          "name": "scathe-missile",
+          "kind": "MissileUnitType",
+          "localized": "scathe-missile",
+          "bundle": {
+            "name": "unit.scathe-missile.name"
+          },
+          "regions": [],
+          "fields": {
+            "health": 240.0,
+            "armor": 0.0,
+            "speed": 4.6,
+            "hit_size": 10.0,
+            "rotate_speed": 0.25,
+            "item_capacity": 40,
+            "range": 6.0,
+            "max_range": 6.0,
+            "fog_radius": 6.0,
+            "payload_capacity": 8.0,
+            "hidden": true,
+            "can_attack": true
+          }
+        },
+        {
+          "id": 66,
+          "name": "scathe-missile-phase",
+          "kind": "MissileUnitType",
+          "localized": "scathe-missile-phase",
+          "bundle": {
+            "name": "unit.scathe-missile-phase.name"
+          },
+          "regions": [],
+          "fields": {
+            "health": 500.0,
+            "armor": 0.0,
+            "speed": 2.5,
+            "hit_size": 10.0,
+            "rotate_speed": 0.2,
+            "item_capacity": 40,
+            "range": 6.0,
+            "max_range": 6.0,
+            "fog_radius": 6.0,
+            "payload_capacity": 8.0,
+            "hidden": true,
+            "can_attack": true
+          }
+        },
+        {
+          "id": 67,
+          "name": "scathe-missile-surge",
+          "kind": "MissileUnitType",
+          "localized": "scathe-missile-surge",
+          "bundle": {
+            "name": "unit.scathe-missile-surge.name"
+          },
+          "regions": [],
+          "fields": {
+            "health": 300.0,
+            "armor": 0.0,
+            "speed": 4.4,
+            "hit_size": 10.0,
+            "rotate_speed": 0.25,
+            "item_capacity": 40,
+            "range": 6.0,
+            "max_range": 6.0,
+            "fog_radius": 6.0,
+            "payload_capacity": 8.0,
+            "hidden": true,
+            "can_attack": true
+          }
+        },
+        {
+          "id": 68,
+          "name": "scathe-missile-surge-split",
+          "kind": "MissileUnitType",
+          "localized": "scathe-missile-surge-split",
+          "bundle": {
+            "name": "unit.scathe-missile-surge-split.name"
+          },
+          "regions": [],
+          "fields": {
+            "health": 50.0,
+            "armor": 0.0,
+            "speed": 4.8,
+            "hit_size": 6.0,
+            "rotate_speed": 1.4,
+            "item_capacity": 20,
+            "range": 6.0,
+            "max_range": 6.0,
+            "fog_radius": 6.0,
+            "payload_capacity": 8.0,
+            "hidden": true,
+            "can_attack": true
           }
         }
       ]

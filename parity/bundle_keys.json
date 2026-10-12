@@ -3591,6 +3591,10 @@
   "unit.disrupt-missile.name",
   "unit.dummy.name",
   "unit.quell-missile.name",
+  "unit.scathe-missile-phase.name",
+  "unit.scathe-missile-surge-split.name",
+  "unit.scathe-missile-surge.name",
+  "unit.scathe-missile.name",
   "weather.suspend-particles.name"
  ]
 }
