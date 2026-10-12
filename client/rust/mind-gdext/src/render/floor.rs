@@ -26,7 +26,7 @@ use godot::obj::NewGd;
 use godot::prelude::*;
 
 use mind_core::config::TILESIZE;
-use mind_core::content::{BlockId, ContentRegistry};
+use mind_core::content::{BlockId, BlockKind, ContentRegistry};
 use mind_core::math::rand_arc::{pack_point2, random_seed_int};
 use mind_core::render::floor_cache::{CHUNK_SIZE, FloorChunkGrid};
 use mind_core::render::layer::CacheLayerId;
@@ -399,6 +399,7 @@ impl FloorRenderer {
         let assets = assets.bind();
         let mut geometry = region_geometry_with_variants(&assets, name);
         if geometry.is_empty() && name != ERROR_REGION {
+            log::warn!("floor region missing: `{name}`");
             self.stats.missing_regions += 1;
             geometry = assets.region_geometry(GString::from(ERROR_REGION));
             if geometry.is_empty() {
@@ -473,8 +474,12 @@ fn tile_quads(
     }
 
     let mut floor_drawn = false;
+    // `AirBlock.drawBase()` overrides `Floor.drawBase` with an empty body, so
+    // an `air` floor contributes no base, no edges and no overlay
+    // (`AirBlock.java`; the region is never drawn, not even as `error`).
     if let Some(floor) = content.block(tile.floor)
         && floor_cache_layer(floor) == layer
+        && floor.kind != BlockKind::AirBlock
     {
         let accessible = is_accessible(world, content, tile.x as i32, tile.y as i32);
         let wall_layer = content

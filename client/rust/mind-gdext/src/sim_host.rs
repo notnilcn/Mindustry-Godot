@@ -2060,6 +2060,34 @@ impl MindSimHost {
             .map(|state| (state.current, state.progress))
     }
 
+    /// Debug probe (PAR-0152): block name/kind at a tile and whether the tile
+    /// holds a `ConstructState`. `sim_name` reads the sim's own content table
+    /// and `construct` the render seam, so a mismatch between them is visible.
+    #[func]
+    pub fn tile_debug(&self, x: i32, y: i32) -> Dictionary<GString, Variant> {
+        let mut d = Dictionary::new();
+        let tile = self.sim.grid.tile(x, y);
+        let def = self
+            .content_snapshot
+            .as_ref()
+            .and_then(|c| c.block(tile.block));
+        let name = def
+            .map(|def| def.name.clone())
+            .unwrap_or_else(|| "?".into());
+        let kind = def.map(|def| format!("{:?}", def.kind)).unwrap_or_default();
+        let sim_name = self.sim.block_name_of(tile.block);
+        d.set("raw", &(tile.block.raw() as i64).to_variant());
+        d.set("name", &GString::from(name.as_str()).to_variant());
+        d.set("kind", &GString::from(kind.as_str()).to_variant());
+        d.set("sim_name", &GString::from(sim_name.as_str()).to_variant());
+        d.set("has_build", &tile.build.is_some().to_variant());
+        d.set(
+            "construct",
+            &self.construct_draw(x, y).is_some().to_variant(),
+        );
+        d
+    }
+
     /// Construct block state at `(x, y)` as `(current block, progress,
     /// deconstructing)` (`ConstructBuild`; render seam).
     pub fn construct_at(&self, x: i32, y: i32) -> Option<(BlockId, f32, bool)> {

@@ -194,7 +194,13 @@ impl BuildingCacheRenderer {
                     if !meta.draw_cached || layer_of(meta.building_cache_layer) != layer {
                         continue;
                     }
-                    let resolved = self.resolver.resolve(&def.region);
+                    // Same candidate chain as the dynamic pass: `drawCached`
+                    // blocks may also lack their bare `Block.region` (PAR-0152).
+                    let resolved =
+                        mind_core::render::block_region_candidates(&def.name, &def.region)
+                            .into_iter()
+                            .find_map(|name| self.resolver.find(&name))
+                            .or_else(|| self.resolver.resolve(&def.region));
                     let page = resolved.as_ref().map(|r| r.page).unwrap_or(-1);
                     let uv = resolved
                         .as_ref()

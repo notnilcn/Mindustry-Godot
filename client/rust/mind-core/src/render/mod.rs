@@ -12,6 +12,7 @@
 
 pub mod bands;
 pub mod block_cache;
+pub mod block_sprite;
 pub mod bloom;
 pub mod commands;
 pub mod cutscene;
@@ -45,6 +46,7 @@ pub mod trail;
 
 pub use bands::{BandEntry, BandKey, BandPlan};
 pub use block_cache::BuildingCacheGrid;
+pub use block_sprite::block_region_candidates;
 pub use bloom::{capture_z as bloom_capture_z, render_z as bloom_render_z};
 pub use commands::{Blend, CommandBuffer, DrawCmd, FillKind, LineKind, ShapeKind};
 pub use cutscene::{Cutscene, LaunchAnimator};
