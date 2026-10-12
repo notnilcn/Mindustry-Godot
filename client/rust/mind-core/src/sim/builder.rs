@@ -28,7 +28,7 @@ use bevy_ecs::world::World;
 
 use crate::content::{BlockId, ContentRegistry};
 use crate::ecs::{BuildingComp, EntitySeq};
-use crate::entities::comp::unit::comp::{StatusComp, UnitTypeComp};
+use crate::entities::comp::unit::comp::{HitboxComp, PhysicsComp, StatusComp, UnitTypeComp};
 use crate::entities::comp::{Building, Pos, TeamComp};
 use crate::event::{BlockBrokenEvent, BlockPlacedEvent, SimEvent};
 use crate::world::blocks::storage::core_block::CoreBuild;
@@ -270,6 +270,62 @@ fn within(ux: f32, uy: f32, pos: TilePos, range: f32) -> bool {
     dx * dx + dy * dy <= range * range
 }
 
+/// `Build.checkNoUnitOverlap(type, x, y)`: whether no ground unit's tile hitbox
+/// overlaps the block footprint (`Units.anyEntities` with the default ground
+/// filter; `HitboxComp.hitboxTile` is `min(hitSize * 0.66, 7.8)`).
+fn no_unit_overlap(
+    world: &World,
+    content: &crate::content::ContentRegistry,
+    pos: TilePos,
+    block: BlockId,
+) -> bool {
+    let Some(def) = content.block(block) else {
+        return true;
+    };
+    if !def.solid {
+        // `(!type.solid && !type.solidifes)` short-circuits the query.
+        return true;
+    }
+    let unit = crate::config::TILESIZE as f32;
+    let size = def.size.max(1) as f32;
+    // `x * tilesize + offset - size * tilesize / 2` (Arc `Rect` strict overlap).
+    let offset = ((size as i32 + 1) % 2) as f32 * unit / 2.0;
+    let rect_x = f32::from(pos.x()) * unit + offset - size * unit / 2.0;
+    let rect_y = f32::from(pos.y()) * unit + offset - size * unit / 2.0;
+    let rect_size = size * unit;
+
+    for entity in world.iter_entities() {
+        if entity.get::<UnitTypeComp>().is_none() {
+            continue;
+        }
+        if entity
+            .get::<PhysicsComp>()
+            .is_none_or(|physics| physics.flying)
+        {
+            // `Units.anyEntities(.., ground = true)` only counts grounded units.
+            continue;
+        }
+        let Some(unit_pos) = entity.get::<Pos>() else {
+            continue;
+        };
+        let hit_size = entity
+            .get::<HitboxComp>()
+            .map(|hitbox| hitbox.hit_size)
+            .unwrap_or(0.0);
+        let hit = (hit_size * 0.66).min(7.8);
+        let hx = unit_pos.x - hit / 2.0;
+        let hy = unit_pos.y - hit / 2.0;
+        if rect_x < hx + hit
+            && rect_x + rect_size > hx
+            && rect_y < hy + hit
+            && rect_y + rect_size > hy
+        {
+            return false;
+        }
+    }
+    true
+}
+
 /// Result of one builder pass.
 #[derive(Default)]
 struct BuilderOutcome {
@@ -430,6 +486,13 @@ fn update_builder(
                         team,
                     ) {
                         plans.plans.pop_front();
+                        continue;
+                    }
+                    // `Build.checkNoUnitOverlap`: a ground unit standing on the
+                    // footprint rotates the plan to the back of the queue.
+                    if !no_unit_overlap(world, runtime.content(), pos, current.block) {
+                        plans.plans.rotate_left(1);
+                        out.changed = true;
                         continue;
                     }
                     let has_all = rules.economy.infinite
@@ -996,6 +1059,68 @@ mod tests {
             sim.grid.block_at(TilePos::new(14, 10)),
             Some(wall),
             "resumed and finished"
+        );
+    }
+
+    /// PAR-0098 §2c: a ground unit standing on the plan's footprint rotates the
+    /// plan to the back of the queue (`Build.checkNoUnitOverlap`); once it
+    /// moves away the plan proceeds.
+    #[test]
+    fn unit_overlap_delays_construction() {
+        let (mut sim, _unit, _core, wall) = sim_with_player();
+        set_core_copper(&mut sim, 100);
+        // A ground (`flying == false`) unit standing on the target tile.
+        let runtime = sim.block_runtime().expect("runtime");
+        let dagger = runtime.content().unit_id("dagger").expect("dagger");
+        let def = runtime.content().unit(dagger).cloned().expect("dagger def");
+        let blocker = crate::entities::comp::unit::lifecycle::spawn_unit_def(
+            &mut sim.ecs.0,
+            42,
+            &def,
+            1,
+            14.0 * 8.0,
+            10.0 * 8.0,
+            90.0,
+        );
+        // Keep it in place (`CommandAI` with no target idles).
+        if let Some(mut slot) = sim
+            .ecs
+            .0
+            .get_mut::<crate::ai::controller::ControllerSlot>(blocker)
+        {
+            slot.kind = crate::ai::controller::AiKind::Command;
+            slot.target = None;
+        }
+        sim.command(SimCommand::Place {
+            x: 14,
+            y: 10,
+            block: wall.raw(),
+            rotation: 0,
+            team: 1,
+            player: Some(0),
+        })
+        .expect("queued");
+        for _ in 0..30 {
+            sim.tick().expect("tick");
+        }
+        assert!(
+            sim.construct_progress(14, 10).is_none(),
+            "unit blocks the plan"
+        );
+        assert_eq!(sim.player_build_plans().len(), 1, "plan waits");
+
+        // Move the unit away: the plan starts and completes.
+        if let Some(mut pos) = sim.ecs.0.get_mut::<Pos>(blocker) {
+            pos.x = 20.0 * 8.0;
+            pos.y = 20.0 * 8.0;
+        }
+        for _ in 0..120 {
+            sim.tick().expect("tick");
+        }
+        assert_eq!(
+            sim.grid.block_at(TilePos::new(14, 10)),
+            Some(wall),
+            "built after the unit moved"
         );
     }
 

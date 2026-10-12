@@ -169,6 +169,18 @@ the second `e`. Evidence: `runs/20261012-session4/section2ab-evidence.json`.
   `plans.plans.rotate_left(1); continue;`. Use `core/entities/comp/unit/comp.rs` `PhysicsComp`.
 - **Test:** a dagger spawned on the target tile delays construction until it is moved.
 
+**Status 2026-10-12:** done — `update_builder` now runs `Build.checkNoUnitOverlap` between
+`can_place` and the `has_all` funding check: a non-solid block skips the query, otherwise every
+ground unit (`UnitTypeComp` + `Pos`, `PhysicsComp.flying == false`) whose `HitboxComp` tile hitbox
+(`min(hitSize * 0.66, 7.8)`, `HitboxComp.hitboxTile`) intersects the footprint rect
+(`x * tilesize + offset - size * tilesize / 2`, Arc strict-overlap) rotates the plan to the back
+(`plans.plans.rotate_left(1)`). Test: `sim::builder::tests::unit_overlap_delays_construction`.
+In-engine on Ground Zero 170: a spawned dagger at (141,58) holds a queued copper-wall plan at
+progress 0.0 with an empty tile. Evidence: `runs/20261012-session4/section2c-evidence.json`.
+Divergence to record: the port has no boost/elevation state, so the filter is the unit type's
+`flying` flag; Java's `Units.anyEntities(ground=true)` tests `elevation < 0.001 && !allowLegStep`
+(hovering units at elevation 0 still block upstream).
+
 ### 2d. Save/load of an in-progress ConstructBlock
 - **Gap:** `ConstructBlock` has no behavior `write`/`read`
   (`core/world/behavior/mod.rs:241-249` defaults). Java `ConstructBuild.write/read`
