@@ -1123,6 +1123,33 @@ fn commanded_builder_repairs_target() {
     assert!(dist < 40.0, "the builder closed on the target ({dist} px)");
 }
 
+/// T14: the `Boost` kind enables `UnitCore.boosting`, which lifts a mech
+/// (`BoostAI.defaultBehavior` + `UnitComp.updateBoosting`).
+#[test]
+fn boost_kind_lifts_mech() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::entities::comp::unit::comp::UnitCore;
+
+    let mut sim = live_sim(48);
+    let nova = sim
+        .spawn_live_unit("nova", 1, 100.0, 100.0, 0.0)
+        .expect("nova");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(nova) {
+        slot.kind = AiKind::Boost;
+    }
+    for _ in 0..20 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        sim.ecs
+            .0
+            .get::<UnitCore>(nova)
+            .is_some_and(|core| core.elevation >= 1.0),
+        "the boost kind lifted the mech: {:?}",
+        sim.ecs.0.get::<UnitCore>(nova).map(|core| core.elevation)
+    );
+}
+
 /// NEW-1: a status applied through the live applier ticks damage every tick
 /// (`StatusComp.update` in the live unit loop).
 #[test]

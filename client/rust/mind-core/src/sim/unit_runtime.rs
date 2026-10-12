@@ -1320,6 +1320,30 @@ pub fn unit_update_system(world: &mut World) {
             }
             let (_, mount_target) = acquire_target(world, &runtime, &queries, entity, team);
             set_mount_targets(world, &runtime.content, entity, mount_target);
+        } else if slot.kind == AiKind::Boost {
+            // `BoostAI.defaultBehavior` (`ai/types/boost.rs`): enable boost
+            // without issuing movement; the lift-off runs in `update_kinematics`
+            // (`UnitComp.updateBoosting`).
+            let mut state = crate::ai::types::boost::BoostAi {
+                unit: Some(entity),
+                boosting: true,
+            };
+            {
+                let UnitRuntime {
+                    content,
+                    grid,
+                    pathfinder,
+                    ..
+                } = &mut runtime;
+                let mut ctx = crate::ai::ai_controller::AiCtx {
+                    world,
+                    grid,
+                    content,
+                    pathfinder,
+                    team,
+                };
+                crate::ai::types::boost::update_boost(&mut ctx, entity, &mut state);
+            }
         } else {
             // `GroundAI.updateMovement`/`FlyingAI`: pick a core/building anchor
             // and an in-range mount target. Spawned wave units have no command,
