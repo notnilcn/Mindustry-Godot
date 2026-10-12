@@ -590,6 +590,16 @@ impl Sim {
             ),
             None => (0, 0),
         };
+        let weather = self
+            .ecs
+            .0
+            .iter_entities()
+            .filter(|entity| {
+                entity
+                    .get::<crate::entities::comp::WeatherState>()
+                    .is_some()
+            })
+            .count();
         let mut counts = std::collections::BTreeMap::new();
         counts.insert("all", all);
         counts.insert("unit", unit);
@@ -597,7 +607,7 @@ impl Sim {
         counts.insert("bullet", bullet);
         counts.insert("player", 0);
         counts.insert("effect", 0);
-        counts.insert("weather", 0);
+        counts.insert("weather", weather);
         counts.insert("power_graph", 0);
         counts.insert("sync", 0);
         counts.insert("draw", 0);

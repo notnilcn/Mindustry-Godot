@@ -631,20 +631,23 @@ impl Sim {
     /// advances every live fire and puddle one tick against the authoritative
     /// tile grid (`Sim.grid`; the runtime snapshot is not on this path).
     ///
-    /// `water_attr` is `state.envAttrs.get(Attribute.water)` (plan 12); `0.0`
-    /// until weather lands (PAR-0127).
+    /// `water_attr` is the active weathers' water attribute
+    /// (`weather_water_attr`; `0.0` with no weather).
     pub fn update_fires_and_puddles(&mut self) {
         let Some(mut runtime) = self.ecs.0.remove_non_send::<UnitRuntime>() else {
             return;
         };
         let fx = runtime.fx.clone();
+        // `state.envAttrs.get(Attribute.water)` from the active weathers
+        // (PAR-0127); `0.0` when no weather is running.
+        let water_attr = crate::game::runtime::weather_water_attr(&self.ecs.0, &runtime.content);
         crate::combat::fires::update_fires(
             &mut self.ecs.0,
             &mut self.grid.tiles,
             &runtime.content,
             &mut runtime.rng,
             fx.as_ref(),
-            0.0,
+            water_attr,
         );
         crate::combat::puddles::update_puddles(
             &mut self.ecs.0,

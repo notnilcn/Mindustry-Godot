@@ -726,3 +726,61 @@ fn live_destroyed_liquid_container_splashes() {
         .count();
     assert!(puddles > 0, "the tank spilled water puddles ({puddles})");
 }
+
+/// PAR-0127: `rules.weather = [rain always]` spawns a live `WeatherRuntime`
+/// and the rain wets a ground unit.
+#[test]
+fn weather_rain_spawns_and_wets_units() {
+    use crate::game::State;
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::{Rules, WeatherEntry};
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+
+    let mut sim = live_sim(32);
+    let campaign = {
+        let registry = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(registry, &EmptyNeighborhood)
+    };
+    let mut session = PlaySession::new(Rules {
+        default_team: 1,
+        wave_team: 2,
+        weather: vec![WeatherEntry {
+            weather: String::from("rain"),
+            always: true,
+            intensity: 1.0,
+            ..WeatherEntry::default()
+        }],
+        ..Rules::default()
+    });
+    session.phase = State::Playing;
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+
+    let dagger = sim
+        .spawn_live_unit("dagger", 1, 100.0, 100.0, 0.0)
+        .expect("dagger");
+    for _ in 0..10 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        sim.group_counts().get("weather").copied().unwrap_or(0),
+        1,
+        "one live weather entity"
+    );
+    let wet = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .status_id("wet")
+        .expect("wet");
+    assert!(
+        sim.ecs
+            .0
+            .get::<crate::entities::comp::unit::comp::StatusComp>(dagger)
+            .is_some_and(|status| status.has_effect_of(wet)),
+        "rain applied wet to the ground unit"
+    );
+}
