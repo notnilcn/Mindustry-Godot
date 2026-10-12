@@ -1641,7 +1641,22 @@ impl MindSimHost {
     /// `Sim::apply` path carries rotation `0` only; rotated schematics degrade
     /// to unrotated until the rotate relay command lands (I-2).
     pub fn place_block_at(&mut self, x: i16, y: i16, block: BlockId, rot: i8) -> bool {
-        let _ = rot;
+        // The live runtime carries rotation/team and routes through the real
+        // tile ops (`SimCommand::Place`); the P0 command has no rotation and is
+        // kept for runtime-less worlds (T18).
+        if self.sim.has_block_runtime() {
+            let rotation = rot.rem_euclid(4);
+            self.pending_commands.push_back(SimCommand::Place {
+                x,
+                y,
+                block: block.raw(),
+                rotation,
+                team: self.player_team(),
+                player: None,
+            });
+            self.world_dirty = true;
+            return true;
+        }
         match self.sim.apply(Command::Place { x, y, block }) {
             Ok(()) => {
                 self.world_dirty = true;
@@ -1652,6 +1667,18 @@ impl MindSimHost {
                 false
             }
         }
+    }
+
+    /// Whether player construction plans are accepted (`Sim::player_can_build`;
+    /// T18 schematic placement).
+    pub fn player_can_build(&self) -> bool {
+        self.sim.player_can_build()
+    }
+
+    /// Queues a player construction plan (`Sim::queue_player_place`; T18).
+    pub fn queue_player_place_at(&mut self, x: i16, y: i16, block: BlockId, rot: i8) -> bool {
+        let rotation = u8::try_from(rot).unwrap_or(0).rem_euclid(4);
+        self.sim.queue_player_place(x, y, block, rotation)
     }
 
     /// Name of the currently selected block.

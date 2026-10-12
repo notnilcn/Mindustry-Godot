@@ -761,7 +761,7 @@ impl Sim {
     /// Whether `SimCommand::Place`/`Break` from player input should queue on
     /// the player unit (`InputHandler.flushPlans`) rather than apply
     /// instantly: a live block runtime and a player unit that can build.
-    pub(crate) fn player_can_build(&self) -> bool {
+    pub fn player_can_build(&self) -> bool {
         let (Some(unit), Some(runtime)) = (self.player_unit, self.block_runtime.as_ref()) else {
             return false;
         };
@@ -1346,6 +1346,32 @@ mod tests {
             .map(|bridge| bridge.link)
             .unwrap_or(-1);
         assert_eq!(second_link, -1, "the second waits for a later bridge");
+    }
+
+    /// T18: a queued player placement keeps its rotation through the plan queue
+    /// and the finished block.
+    #[test]
+    fn queue_player_place_keeps_rotation() {
+        let (mut sim, _unit, _core, wall) = sim_with_player();
+        set_core_copper(&mut sim, 100);
+        assert!(sim.queue_player_place(14, 10, wall, 1), "plan queued");
+        let plans = sim.player_build_plans();
+        assert_eq!(plans.first().map(|plan| plan.rotation), Some(1));
+        for _ in 0..60 {
+            sim.tick().expect("tick");
+        }
+        let entity = sim
+            .grid
+            .entity_at(TilePos::new(14, 10))
+            .expect("wall built");
+        assert_eq!(
+            sim.ecs
+                .0
+                .get::<Building>(entity)
+                .map(|building| building.rotation),
+            Some(1),
+            "built block keeps the plan rotation"
+        );
     }
 
     #[test]
