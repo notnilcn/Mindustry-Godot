@@ -237,7 +237,27 @@ pub fn within(from: f32, to: f32, angle: f32) -> bool {
     angle_dist(from, to) <= angle
 }
 
-/// `Angles.moveToward(from, to, speed)`.
+/// Arc `Angles.moveToward(angle, to, speed)` (Angles.java:38-50): shortest
+/// arc on the circle; snaps to `to` within `speed`, otherwise steps from the
+/// `mod 360` angle. Mount rotations must use this, not the linear
+/// [`move_toward`] (a linear step toward an unnormalized target such as
+/// `-357` walks the long way round and gets pinned by `rotationLimit`).
+pub fn angles_move_toward(angle: f32, to: f32, speed: f32) -> f32 {
+    if angle_dist(angle, to).abs() < speed {
+        return to;
+    }
+    let angle = angle.rem_euclid(360.0);
+    let to = to.rem_euclid(360.0);
+    let forward = (angle - to).abs();
+    let backward = 360.0 - (angle - to).abs();
+    if (angle > to) == (backward > forward) {
+        angle - speed
+    } else {
+        angle + speed
+    }
+}
+
+/// Linear `Mathf.approach` (lengths/scalars, not angles).
 fn move_toward(from: f32, to: f32, speed: f32) -> f32 {
     if from < to {
         (from + speed).min(to)
@@ -395,7 +415,7 @@ pub fn update_weapon(
         let aim = (mounts[index].aim_x, mounts[index].aim_y);
         let mount = &mut mounts[index];
         mount.target_rotation = angle_to(axis_x, axis_y, aim.0, aim.1) - unit_rotation;
-        mount.rotation = move_toward(
+        mount.rotation = angles_move_toward(
             mount.rotation,
             mount.target_rotation,
             weapon.rotate_speed * delta,
@@ -403,7 +423,7 @@ pub fn update_weapon(
         if weapon.rotation_limit < 360.0 {
             let dst = angle_dist(mount.rotation, weapon.base_rotation);
             if dst > weapon.rotation_limit / 2.0 {
-                mount.rotation = move_toward(
+                mount.rotation = angles_move_toward(
                     mount.rotation,
                     weapon.base_rotation,
                     dst - weapon.rotation_limit / 2.0,
@@ -999,5 +1019,25 @@ mod tests {
             .unwrap_or(0.0);
         // def lifetime 100 * clamp(30/60) = 50.
         assert!((lifetime - 50.0).abs() < 1.0, "lifetime={lifetime}");
+    }
+}
+
+#[cfg(test)]
+mod angle_tests {
+    use super::angles_move_toward;
+
+    /// Arc `Angles.moveToward` takes the short arc: from 0 toward -357 (= +3)
+    /// it steps +2, not -2 the long way (anthicus mounts pinned at -35).
+    #[test]
+    fn angles_move_toward_takes_short_arc() {
+        let r = angles_move_toward(0.0, -357.0, 2.0);
+        assert!((r - 2.0).abs() < 1e-4, "short arc step, got {r}");
+        let snap = angles_move_toward(10.0, 11.0, 2.0);
+        assert_eq!(snap, 11.0, "snaps within speed");
+        let back = angles_move_toward(10.0, 350.0, 5.0);
+        assert!(
+            (back - 5.0).abs() < 1e-4,
+            "steps backward across 0, got {back}"
+        );
     }
 }

@@ -2650,6 +2650,8 @@ impl MindSimHost {
     #[func]
     pub fn tile_debug(&self, x: i32, y: i32) -> Dictionary<GString, Variant> {
         let mut d = Dictionary::new();
+        // Off-map coordinates from MCP/input must not panic (`Tiles::get`
+        // indexes unchecked).
         let Some(tile) = self.sim.grid.tiles.getn(x, y) else {
             return d;
         };

@@ -520,7 +520,9 @@ impl Sim {
                         let spread = size as f32 * 4.0;
                         for (liquid, amount) in &spill {
                             let splash = (amount / 4.0).clamp(0.0, 10.0);
-                            let count = (amount / 5.0).clamp(0.0, 30.0) as i32;
+                            // Java loops `for(int i = 0; i < clamp(amount / 5, 0, 30); i++)`
+                            // over a float bound, i.e. `ceil` deposits.
+                            let count = (amount / 5.0).clamp(0.0, 30.0).ceil() as i32;
                             for _ in 0..count {
                                 let px = center.0
                                     + unit_runtime.rng.range(
@@ -871,6 +873,8 @@ pub fn unit_update_system(world: &mut World) {
                     }
                 }
             }
+            // `CommandAI` -> `faceTarget()` (CommandAI.java:400/420).
+            face_target(world, &runtime.content, entity, mount_target);
         } else if slot.kind == AiKind::Missile {
             // `MissileAI.updateMovement` (live dispatch, PAR-0088): steer at
             // the shooter's aim, always move forward, die on enemy-building
@@ -931,6 +935,13 @@ pub fn unit_update_system(world: &mut World) {
                 if arrived && let Some(mut stored) = world.get_mut::<ControllerSlot>(entity) {
                     stored.target = None;
                 }
+            }
+            // `GroundAI.updateMovement` ends with `faceTarget()` (GroundAI.java:61).
+            let flying = world
+                .get::<PhysicsComp>(entity)
+                .is_some_and(|physics| physics.flying);
+            if !flying {
+                face_target(world, &runtime.content, entity, mount_target);
             }
         }
 
@@ -1534,7 +1545,13 @@ impl Sim {
                 }
                 _ => false,
             };
-            if carrier_team != target_team
+            // `PayloadComp.canPickup(Unit)`: `type.pickupUnits` gate.
+            let pickup_units = ecs
+                .get::<UnitTypeComp>(carrier)
+                .and_then(|comp| runtime.content.unit(comp.type_id))
+                .is_some_and(|def| def.pickup_units);
+            if !pickup_units
+                || carrier_team != target_team
                 || !target_ai
                 || !target_grounded
                 || !target_allowed
@@ -1906,7 +1923,9 @@ fn nearest_enemy_building(world: &World, team: u8, x: f32, y: f32) -> Option<Ent
         let Some(comp) = entity.get::<BuildingComp>() else {
             continue;
         };
-        if comp.team.0 == team {
+        // Derelict (team 0) ruins are never an attack anchor
+        // (`BlockIndexer.findEnemyTile`, BlockIndexer.java:466).
+        if comp.team.0 == team || crate::ai::block_indexer::is_derelict(world, comp.team.0) {
             continue;
         }
         let Some((bx, by)) = building_center(world, entity.id()) else {
@@ -1958,6 +1977,52 @@ fn tile_center(tile: TilePos) -> (f32, f32) {
         (tile.x() as f32 + 0.5) * TILE_SIZE,
         (tile.y() as f32 + 0.5) * TILE_SIZE,
     )
+}
+
+/// `AIController.faceTarget` (AIController.java:121-128): omni-movement
+/// units and mechs turn toward a valid in-range target when `type.faceTarget`
+/// and the type has weapons (`unit.lookAt`: `moveToward(rotation, angle,
+/// rotateSpeed * speedMultiplier)`, UnitComp.java:491). Moving units keep
+/// facing their velocity (already applied by the movement pass). The
+/// `Predict.intercept` lead is not ported (aims at the target position).
+fn face_target(
+    world: &mut World,
+    content: &ContentRegistry,
+    entity: Entity,
+    target: Option<Entity>,
+) {
+    let Some(target) = target else {
+        return;
+    };
+    let Some(def) = world
+        .get::<UnitTypeComp>(entity)
+        .and_then(|comp| content.unit(comp.type_id))
+    else {
+        return;
+    };
+    let mech = world
+        .get::<crate::entities::comp::unit::comp::MechComp>(entity)
+        .is_some();
+    if !(def.omni_movement || mech) || !def.face_target || def.weapons.is_empty() {
+        return;
+    }
+    let (Some(pos), Some(tpos)) = (
+        world.get::<Pos>(entity).copied(),
+        world.get::<Pos>(target).copied(),
+    ) else {
+        return;
+    };
+    let speed_mult = world
+        .get::<crate::entities::comp::unit::comp::StatusComp>(entity)
+        .map_or(1.0, |status| status.speed_multiplier);
+    let angle = (tpos.y - pos.y).atan2(tpos.x - pos.x).to_degrees();
+    if let Some(mut core) = world.get_mut::<UnitCore>(entity) {
+        core.rotation = crate::ai::types::missile::move_toward_angle(
+            core.rotation,
+            angle,
+            def.rotate_speed * speed_mult,
+        );
+    }
 }
 
 /// `AIController.target`: stores the mount target/aim and gates firing.
