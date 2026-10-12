@@ -489,6 +489,87 @@ fn message_block_accepts_text_config() {
     );
 }
 
+/// PAR-0092: `UnitFactory.config(UnitType.class)` selects the matching plan
+/// (resetting progress), `config()` reports the index and `None` clears it; with
+/// no plan selected nothing is produced even with the items in storage.
+#[test]
+fn unit_factory_config_selects_plan() {
+    let mut sim = runtime_sim();
+    let factory = place(&mut sim, "air-factory", 5, 5);
+    let silicon = item(&sim, "silicon");
+    let content_flare = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .unit_id("flare")
+        .expect("flare");
+    let mono = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .unit_id("mono")
+        .expect("mono");
+
+    // `created()` auto-selects the first *unlocked* plan; the test registry has
+    // none unlocked, so no plan is selected until one is configured.
+    assert_eq!(
+        crate::world::config::read_config(&sim.ecs.0, factory),
+        crate::world::config::ConfigValue::None
+    );
+
+    // Configure a plan by unit name (the config panel's content submit path).
+    sim.command(SimCommand::Configure {
+        x: 5,
+        y: 5,
+        value: crate::determinism::ConfigValue::Content("mono".to_owned()),
+    })
+    .expect("configure mono");
+    assert_eq!(
+        crate::world::config::read_config(&sim.ecs.0, factory),
+        crate::world::config::ConfigValue::Number(1.0)
+    );
+
+    // Clearing removes the plan: storage full of requirements still builds nothing.
+    sim.command(SimCommand::Configure {
+        x: 5,
+        y: 5,
+        value: crate::determinism::ConfigValue::None,
+    })
+    .expect("clear plan");
+    assert_eq!(
+        crate::world::config::read_config(&sim.ecs.0, factory),
+        crate::world::config::ConfigValue::None
+    );
+    {
+        let world = &mut sim.ecs.0;
+        if let Some(mut items) = world.get_mut::<crate::world::modules::ItemModule>(factory) {
+            items.add(silicon, 60, 100);
+        }
+    }
+    for _ in 0..120 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        !spawned_unit(&sim, content_flare) && !spawned_unit(&sim, mono),
+        "no plan selected -> nothing produced"
+    );
+
+    // Re-select flare: the 15 silicon plan completes after its 900 ticks.
+    sim.command(SimCommand::Configure {
+        x: 5,
+        y: 5,
+        value: crate::determinism::ConfigValue::Content("flare".to_owned()),
+    })
+    .expect("configure flare");
+    for _ in 0..1000 {
+        sim.tick().expect("tick");
+        if spawned_unit(&sim, content_flare) {
+            break;
+        }
+    }
+    assert!(spawned_unit(&sim, content_flare), "flare produced");
+}
+
 /// Whether a unit of type `unit` exists in the sim.
 fn spawned_unit(sim: &Sim, unit: crate::content::UnitTypeId) -> bool {
     sim.ecs.0.iter_entities().any(|entity| {

@@ -76,6 +76,11 @@ impl BuildingBehavior for ConstructorBehavior {
         ensure_producer_state(world, e);
     }
 
+    fn config_kinds(&self) -> &'static [crate::world::config::ConfigKind] {
+        // `Constructor.config(Block.class, ...)`: a producible-block picker.
+        &[crate::world::config::ConfigKind::Block]
+    }
+
     fn accept_item(
         &self,
         world: &World,
@@ -178,6 +183,33 @@ mod tests {
     use super::*;
     use crate::world::BuildHarness;
     use crate::world::modules::ItemModule;
+
+    /// PAR-0092: the payload blocks declare their config pickers
+    /// (`Constructor` -> blocks, `PayloadSource`/`PayloadRouter` -> blocks+units).
+    #[test]
+    fn payload_blocks_declare_config_kinds() {
+        use crate::world::config::ConfigKind;
+        let harness = BuildHarness::new(16, 16, 7);
+        let table = harness.world.resource::<crate::world::block::BlockTable>();
+        let kinds = |name: &str| {
+            table
+                .get_named(name)
+                .expect(name)
+                .behavior
+                .config_kinds()
+                .to_vec()
+        };
+        assert_eq!(kinds("constructor"), vec![ConfigKind::Block]);
+        assert_eq!(kinds("large-constructor"), vec![ConfigKind::Block]);
+        assert_eq!(
+            kinds("payload-source"),
+            vec![ConfigKind::Block, ConfigKind::Unit]
+        );
+        assert_eq!(
+            kinds("payload-router"),
+            vec![ConfigKind::Block, ConfigKind::Unit]
+        );
+    }
 
     #[test]
     fn constructor_produces_configured_recipe() {

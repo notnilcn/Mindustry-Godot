@@ -1438,12 +1438,72 @@ impl DesktopBridge {
         if def.kind == BlockKind::SwitchBlock {
             return None;
         }
+        // `Reconstructor.buildConfiguration` lists the *held payload's* output
+        // unit commands; the static kinds table cannot express it, so no panel
+        // opens (the command is still configurable through
+        // `configure_building(x, y, "content", "<command>")`).
+        if def.kind == BlockKind::Reconstructor {
+            return None;
+        }
         let mut options: Vec<serde_json::Value> = Vec::new();
         // A behavior that declares its config kinds (`Block.config(...)`) owns
         // the picker; undeclared blocks keep the item/liquid-container fallback.
         let declared = guard.block_config_kinds(block);
-        let item_options =
-            declared.contains(&ConfigKind::Item) || (declared.is_empty() && def.has_items);
+        // `UnitFactory.buildConfiguration` / `PayloadSource`/`PayloadRouter`:
+        // factory plans (or every unit), plus sortable blocks for payloads.
+        if declared.contains(&ConfigKind::Unit) {
+            if def.unit_plans.is_empty() {
+                for entry in content.entries(ContentType::Unit) {
+                    if let Some(name) = entry.name {
+                        options.push(serde_json::json!({
+                            "name": name,
+                            "label": format!("unit.{name}.name"),
+                        }));
+                    }
+                }
+            } else {
+                for plan in &def.unit_plans {
+                    if let Some(unit) = content.unit(plan.unit) {
+                        let name = unit.name.clone();
+                        options.push(serde_json::json!({
+                            "name": name,
+                            "label": format!("unit.{name}.name"),
+                        }));
+                    }
+                }
+            }
+        }
+        if declared.contains(&ConfigKind::Block) {
+            // `Constructor.canProduce` size window (`Init` min/max block size);
+            // payload sources/routers sort any producible block.
+            let (min_size, max_size) = match def.name.as_str() {
+                "constructor" => (1, 2),
+                "large-constructor" => (3, 4),
+                _ => (1, i32::MAX),
+            };
+            for entry in content.entries(ContentType::Block) {
+                let Some(name) = entry.name else {
+                    continue;
+                };
+                let Some(candidate) = content.block_by_name(name) else {
+                    continue;
+                };
+                if candidate.removed
+                    || candidate.build_visibility == mind_core::content::BuildVisibility::Hidden
+                    || candidate.kind == BlockKind::CoreBlock
+                    || candidate.size < min_size
+                    || candidate.size > max_size
+                {
+                    continue;
+                }
+                options.push(serde_json::json!({
+                    "name": name,
+                    "label": format!("block.{name}.name"),
+                }));
+            }
+        }
+        let item_options = options.is_empty()
+            && (declared.contains(&ConfigKind::Item) || (declared.is_empty() && def.has_items));
         if item_options {
             for entry in content.entries(ContentType::Item) {
                 if let Some(name) = entry.name {

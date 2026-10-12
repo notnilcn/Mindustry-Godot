@@ -672,6 +672,27 @@ prefilled. Evidence: `runs/20261012-session4/PAR-0093-evidence.json`.
   `block_config` node's `_config` via
   `return get_node("/root/Spine/Ui/UiRoot/OverlayLayer/block_config")._config`).
 
+**Status 2026-10-12:** done — `UnitFactoryBuild.current_plan` is now `i32` (`-1` = none, Java
+`currentPlan`), `created()` auto-selects the first *unlocked* plan, and the behavior implements
+`config_kinds = [Unit]`, `config` (plan index), `configured` (`Number` index / `Unit` lookup /
+`None` clears, progress reset on change) and revision-3 IO (`progress` + `currentPlan` short +
+unset `commandPos`/`command` via `TypeIO`). `ReconstructorBuild` gained `command: Option<u16>`
+with a `Content(UnitCommand, id)`/`None` config, `config()` readback and revision-3 IO
+(`progress`, nullable `commandPos`, `TypeIO` command) — applying the command to the upgraded
+unit's `CommandAI` and the reconstructor's command picker are recorded gaps (the static
+`config_kinds` table cannot express the held payload's output unit commands, so `config_spec`
+returns `None` for reconstructors; the command is still settable through
+`configure_building(x,y,"content","<command>")`). The constructor / payload-source / payload-router
+behaviors now declare their `config_kinds`, and `config_spec` lists factory plans
+(`unit.<name>.name`) or every unit, plus `Constructor.canProduce`-filtered blocks
+(`size` window 1..2 / 3..4, visible, non-core). Tests:
+`sim::production_tests::unit_factory_config_selects_plan`,
+`world::blocks::payloads::constructor::tests::payload_blocks_declare_config_kinds`. In-engine on
+Ground Zero 170: the air-factory panel lists `flare`/`mono` and
+`configure_building(136,62,"content","mono")` selects plan 1; the constructor panel lists 144
+size-filtered blocks starting with `graphite-press`/`silicon-smelter`/`kiln`. Evidence:
+`runs/20261012-session4/PAR-0092-evidence.json`.
+
 ### 7.4 Other config blocks: sanity sweep
 For each block, place it, tap it and configure it, then assert `config()` with a small
 `#[func] building_config_json(x,y)` seam (add it: return the behavior `config()` as JSON).

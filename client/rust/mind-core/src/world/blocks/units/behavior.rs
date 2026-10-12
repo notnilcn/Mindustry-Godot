@@ -19,10 +19,11 @@ use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
 use crate::content::registries::units::UnitTypeDef;
-use crate::content::{BlockKind, ContentRegistry, ItemId, UnitTypeId};
+use crate::content::{BlockKind, ContentRegistry, ItemId, UnitCommandId, UnitTypeId};
 use crate::entities::comp::unit::lifecycle::spawn_unit_def;
 use crate::entities::comp::{Pos, TeamComp};
-use crate::world::behavior::{BuildingBehavior, PayloadRef};
+use crate::world::behavior::{BuildingBehavior, BuildingReader, BuildingWriter, PayloadRef};
+use crate::world::config::{ConfigKind, ConfigValue};
 use crate::world::modules::ItemModule;
 
 use super::{
@@ -82,6 +83,9 @@ pub struct UnitFactoryBehavior {
     pub units: BTreeMap<u16, Arc<UnitTypeDef>>,
     /// Number of item slots (`ItemModule.items.len()`).
     pub item_count: usize,
+    /// `UnitFactoryBuild.created()` default plan: the first unlocked plan
+    /// (`plans.indexOf(u -> u.unit.unlockedNow())`).
+    pub default_plan: i32,
 }
 
 impl UnitFactoryBehavior {
@@ -103,20 +107,120 @@ impl UnitFactoryBehavior {
             .collect();
         let factory = UnitFactory::new(plans, content.items().len());
         let units = resolve_units(content, def.unit_plans.iter().map(|plan| plan.unit));
+        // `created()` auto-selects the first plan whose unit is unlocked.
+        let default_plan = def
+            .unit_plans
+            .iter()
+            .position(|plan| {
+                content
+                    .unit(plan.unit)
+                    .map(|unit| unit.unlock.unlocked())
+                    .unwrap_or(false)
+            })
+            .map(|index| index as i32)
+            .unwrap_or(-1);
         Self {
             factory,
             units,
             item_count: content.items().len(),
+            default_plan,
+        }
+    }
+
+    /// `UnitFactoryBuild.config()`: the selected plan index (`None` = unset).
+    fn plan_index(&self, world: &World, e: Entity) -> Option<usize> {
+        let state = world.get::<UnitFactoryBuild>(e)?;
+        usize::try_from(state.current_plan)
+            .ok()
+            .filter(|index| *index < self.factory.plans.len())
+    }
+
+    /// `Block.configurations` body for `Integer`/`UnitType`
+    /// (`UnitFactory.config`): clamp the index and reset progress.
+    fn set_plan(&self, world: &mut World, e: Entity, index: i32) {
+        let clamped = if index < 0 || index as usize >= self.factory.plans.len() {
+            -1
+        } else {
+            index
+        };
+        if let Some(mut state) = world.get_mut::<UnitFactoryBuild>(e)
+            && state.current_plan != clamped
+        {
+            state.current_plan = clamped;
+            state.progress = 0.0;
         }
     }
 }
 
 impl BuildingBehavior for UnitFactoryBehavior {
     fn create_state(&self, world: &mut World, e: Entity) {
-        world.entity_mut(e).insert(UnitFactoryBuild::new(
-            self.factory.plans.len(),
-            self.item_count,
-        ));
+        let mut state = UnitFactoryBuild::new(self.factory.plans.len(), self.item_count);
+        // `UnitFactoryBuild.created()`: auto-set to the first plan.
+        state.current_plan = self.default_plan;
+        world.entity_mut(e).insert(state);
+    }
+
+    fn config_kinds(&self) -> &'static [ConfigKind] {
+        // `UnitFactory.config(UnitType.class, ...)`.
+        &[ConfigKind::Unit]
+    }
+
+    fn config(&self, world: &World, e: Entity) -> ConfigValue {
+        self.plan_index(world, e)
+            .map(|index| ConfigValue::Number(index as f64))
+            .unwrap_or(ConfigValue::None)
+    }
+
+    fn configured(
+        &self,
+        world: &mut World,
+        e: Entity,
+        _player: Option<Entity>,
+        value: ConfigValue,
+    ) {
+        match value {
+            ConfigValue::Number(number) => self.set_plan(world, e, number as i64 as i32),
+            ConfigValue::Unit(unit) => {
+                match self.factory.plans.iter().position(|plan| plan.unit == unit) {
+                    Some(index) => self.set_plan(world, e, index as i32),
+                    None => self.set_plan(world, e, -1),
+                }
+            }
+            ConfigValue::None => self.set_plan(world, e, -1),
+            _ => {}
+        }
+    }
+
+    fn version(&self, _world: &World, _e: Entity) -> u8 {
+        // `UnitFactoryBuild.version() = 3`.
+        3
+    }
+
+    fn write(&self, world: &World, e: Entity, w: &mut BuildingWriter) {
+        // `UnitFactoryBuild.write`: progress (f32), currentPlan (short),
+        // commandPos (nullable vec), command (TypeIO command). The port has no
+        // command/commandPos state on factories, so both are written unset.
+        if let Some(state) = world.get::<UnitFactoryBuild>(e) {
+            w.f(state.progress);
+            w.s(state.current_plan as i16);
+        }
+        crate::io::typeio::codecs::write_vec_nullable(w, None);
+        crate::io::typeio::codecs::write_command(w, None);
+    }
+
+    fn read(&self, world: &mut World, e: Entity, r: &mut BuildingReader, revision: u8) {
+        let progress = r.f().unwrap_or(0.0);
+        let current_plan = r.s().unwrap_or(-1) as i32;
+        if revision >= 2 {
+            let _ = crate::io::typeio::codecs::read_vec_nullable(r);
+        }
+        if revision >= 3 {
+            let _ = crate::io::typeio::codecs::read_command(r);
+        }
+        if let Some(mut state) = world.get_mut::<UnitFactoryBuild>(e) {
+            state.progress = progress;
+            state.current_plan = current_plan;
+        }
     }
 
     fn update_tile(&self, world: &mut World, e: Entity) {
@@ -128,11 +232,12 @@ impl BuildingBehavior for UnitFactoryBehavior {
                 *slot = items.items.get(index).copied().unwrap_or(0);
             }
         }
-        let plan_index = state.current_plan;
+        let plan_index = usize::try_from(state.current_plan).ok();
         if let Some(unit) = state.update(&self.factory, 1.0) {
             // `UnitFactoryBuild.updateTile`: remove the plan's requirements from
             // the building's item storage (`items.remove` per stack).
-            if let Some(plan) = self.factory.plans.get(plan_index)
+            if let Some(index) = plan_index
+                && let Some(plan) = self.factory.plans.get(index)
                 && let Some(mut items) = world.get_mut::<ItemModule>(e)
             {
                 for (item, amount) in &plan.requirements {
@@ -301,6 +406,86 @@ impl BuildingBehavior for ReconstructorBehavior {
             .map(|items| items.get(item))
             .unwrap_or(0);
         held < self.maximum_accepted(world, e, item)
+    }
+
+    fn config_kinds(&self) -> &'static [ConfigKind] {
+        // `Reconstructor.config(UnitCommand.class, ...)` builds a *dynamic* list
+        // from the held payload's output unit type; the static kinds table can
+        // not express it, so the panel stays closed (see the plan note).
+        &[]
+    }
+
+    fn config(&self, world: &World, e: Entity) -> ConfigValue {
+        world
+            .get::<ReconstructorBuild>(e)
+            .and_then(|state| state.command)
+            .map(|command| ConfigValue::Content(crate::content::ContentType::UnitCommand, command))
+            .unwrap_or(ConfigValue::None)
+    }
+
+    fn configured(
+        &self,
+        world: &mut World,
+        e: Entity,
+        _player: Option<Entity>,
+        value: ConfigValue,
+    ) {
+        // `Reconstructor.config(UnitCommand.class, (tile, command) -> tile.command = command)`.
+        match value {
+            ConfigValue::Content(crate::content::ContentType::UnitCommand, id) => {
+                if let Some(mut state) = world.get_mut::<ReconstructorBuild>(e) {
+                    state.command = Some(id);
+                }
+            }
+            ConfigValue::None => {
+                if let Some(mut state) = world.get_mut::<ReconstructorBuild>(e) {
+                    state.command = None;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn version(&self, _world: &World, _e: Entity) -> u8 {
+        // `ReconstructorBuild.version() = 3`.
+        3
+    }
+
+    fn write(&self, world: &World, e: Entity, w: &mut BuildingWriter) {
+        // `ReconstructorBuild.write`: progress (f32), commandPos (nullable vec),
+        // command (TypeIO command). The port has no commandPos.
+        let (progress, command) = world
+            .get::<ReconstructorBuild>(e)
+            .map(|state| (state.progress, state.command))
+            .unwrap_or((0.0, None));
+        w.f(progress);
+        crate::io::typeio::codecs::write_vec_nullable(w, None);
+        crate::io::typeio::codecs::write_command(
+            w,
+            command.map(crate::content::UnitCommandId::new),
+        );
+    }
+
+    fn read(&self, world: &mut World, e: Entity, r: &mut BuildingReader, revision: u8) {
+        if revision < 1 {
+            return;
+        }
+        let progress = r.f().unwrap_or(0.0);
+        if revision >= 2 {
+            let _ = crate::io::typeio::codecs::read_vec_nullable(r);
+        }
+        let command = if revision >= 3 {
+            crate::io::typeio::codecs::read_command(r)
+                .ok()
+                .flatten()
+                .map(UnitCommandId::raw)
+        } else {
+            None
+        };
+        if let Some(mut state) = world.get_mut::<ReconstructorBuild>(e) {
+            state.progress = progress;
+            state.command = command;
+        }
     }
 
     fn get_maximum_accepted(&self, world: &World, e: Entity, item: ItemId) -> i32 {
@@ -998,6 +1183,11 @@ mod tests {
         if let Some(mut items) = world.get_mut::<ItemModule>(entity) {
             items.add(silicon, 20, 40);
             items.add(lead, 20, 40);
+        }
+        // `UnitFactoryBuild.created()` only auto-selects an *unlocked* plan; the
+        // test registry has none, so select the dagger plan explicitly.
+        if let Some(mut state) = world.get_mut::<UnitFactoryBuild>(entity) {
+            state.current_plan = 0;
         }
         // `ground-factory` dagger plan time is 900 ticks.
         for _ in 0..1000 {
