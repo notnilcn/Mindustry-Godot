@@ -93,11 +93,13 @@ func _rebuild() -> void:
 			_list.add(MindWidgets.label("%s %s" % [_t("@resources"), ", ".join(parts)])).grow_x_axis().pad(2)
 			_list.row()
 	clear_buttons()
+	# `LaunchLoadoutDialog.java:41`: `buttons.defaults().size(160f, 64f);
+	# buttons.button("@back", Icon.left, this::hide)` — the back entry leads the
+	# row and cancels the launch (PAR-0027).
+	add_button(_t("@back"), hide_dialog, "left", 210.0)
 	add_button(_t("@launch.text"), _confirm, "ok", 200.0)
 	var resources := add_button(_t("@resources"), _open_loadout, "edit", 200.0)
 	resources.disabled = _selected < 0
-	# `clear_buttons` also dropped the close button built in `_ready`; re-add it.
-	add_close_button()
 
 
 func _requirement_total(loadout: Dictionary) -> int:
