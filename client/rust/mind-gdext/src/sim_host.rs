@@ -25,6 +25,62 @@ use crate::settings;
 /// One belt slot as the renderer consumes it: `(item, xs, ys)` (`Conveyor.draw`
 /// item loop; `ConveyorBuild.ids/xs/ys`).
 pub type BeltItemSlot = (ItemId, f32, f32);
+
+/// One unit's full draw state (`UnitType.draw` composition; plan §3.4).
+pub struct UnitDraw {
+    /// World x.
+    pub x: f32,
+    /// World y.
+    pub y: f32,
+    /// Body rotation in degrees (`UnitCore.rotation`).
+    pub rotation: f32,
+    /// Unit type name (`UnitType.name`).
+    pub name: String,
+    /// `UnitType.flying`.
+    pub flying: bool,
+    /// `UnitType.lowAltitude`.
+    pub low_altitude: bool,
+    /// Owning team id.
+    pub team: u8,
+    /// Health fraction (`Unit.healthf()`).
+    pub healthf: f32,
+    /// Flight elevation `0..=1` (`UnitCore.elevation`).
+    pub elevation: f32,
+    /// Mech walk state (`MechComp`); `None` for non-mechs.
+    pub mech: Option<MechDraw>,
+    /// Live weapon mounts (`UnitWeapons`).
+    pub weapons: Vec<WeaponDraw>,
+}
+
+/// `MechComp` walk state resolved for drawing (`drawMech`).
+pub struct MechDraw {
+    /// Decoupled base rotation in degrees (`baseRotation`).
+    pub base_rotation: f32,
+    /// Walk-cycle timer (`walkTime`).
+    pub walk_time: f32,
+    /// `UnitType.mechStride`.
+    pub stride: f32,
+}
+
+/// One live weapon mount (`Weapon.draw` inputs).
+pub struct WeaponDraw {
+    /// Weapon region name (`Weapon.name`).
+    pub name: String,
+    /// Unit-relative mount x (`Weapon.x`).
+    pub x: f32,
+    /// Unit-relative mount y (`Weapon.y`).
+    pub y: f32,
+    /// Aiming rotation relative to the unit, degrees (`WeaponMount.rotation`).
+    pub mount_rotation: f32,
+    /// Rest rotation when `rotate` is false (`Weapon.baseRotation`).
+    pub base_rotation: f32,
+    /// Whether the mount rotates toward the target (`Weapon.rotate`).
+    pub rotate: bool,
+    /// Mirrored mount (`Weapon.flipSprite`).
+    pub flip: bool,
+    /// Visual recoil `0..1`.
+    pub recoil: f32,
+}
 use mind_core::audio::{AudioSinkRes, SharedAudioLog};
 use mind_core::command::Command;
 use mind_core::content::{
@@ -1602,6 +1658,39 @@ impl MindSimHost {
         dict
     }
 
+    /// Debug probe: `{name, x, y, team}` rows for every live unit (render
+    /// verification; companion to `tile_debug`).
+    #[func]
+    pub fn unit_debug_positions(&self) -> GString {
+        let rows: Vec<serde_json::Value> = self
+            .unit_draws_full()
+            .iter()
+            .map(|unit| {
+                serde_json::json!({
+                    "name": unit.name,
+                    "x": unit.x,
+                    "y": unit.y,
+                    "team": unit.team,
+                })
+            })
+            .collect();
+        GString::from(serde_json::Value::Array(rows).to_string().as_str())
+    }
+
+    /// Player unit world position as `[x, y]`, or empty when absent (render
+    /// verification probe).
+    #[func]
+    pub fn player_unit_pos(&self) -> PackedFloat32Array {
+        let mut out = PackedFloat32Array::new();
+        if let Some(entity) = self.sim.player_unit()
+            && let Some(pos) = self.sim.ecs.0.get::<mind_core::entities::comp::Pos>(entity)
+        {
+            out.push(pos.x);
+            out.push(pos.y);
+        }
+        out
+    }
+
     /// Whether the move axis reached the player unit
     /// (`HintsFragment.desktopMove` trigger).
     #[func]
@@ -1742,6 +1831,95 @@ impl MindSimHost {
                     def.flying,
                     def.low_altitude,
                 ))
+            })
+            .collect()
+    }
+
+    /// Full per-unit draw state (`UnitType.draw` composition; plan §3.4):
+    /// body/team/health plus mech walk state and weapon mounts. Rust-only.
+    pub fn unit_draws_full(&self) -> Vec<UnitDraw> {
+        use mind_core::entities::comp::Pos;
+        use mind_core::entities::comp::health::Health;
+        use mind_core::entities::comp::unit::comp::{MechComp, UnitCore, UnitTypeComp};
+        let Some(runtime) = self.sim.unit_runtime() else {
+            return Vec::new();
+        };
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return Vec::new();
+        };
+        runtime
+            .units
+            .iter()
+            .filter_map(|entity| {
+                let pos = self.sim.ecs.0.get::<Pos>(*entity)?;
+                let core = self.sim.ecs.0.get::<UnitCore>(*entity)?;
+                let type_comp = self.sim.ecs.0.get::<UnitTypeComp>(*entity)?;
+                let def = content.unit(type_comp.type_id)?;
+                let team = self
+                    .sim
+                    .ecs
+                    .0
+                    .get::<mind_core::entities::comp::TeamComp>(*entity)
+                    .map(|comp| comp.team)
+                    .unwrap_or(0);
+                let healthf = self
+                    .sim
+                    .ecs
+                    .0
+                    .get::<Health>(*entity)
+                    .map(Health::fraction)
+                    .unwrap_or(1.0);
+                let mech = self
+                    .sim
+                    .ecs
+                    .0
+                    .get::<MechComp>(*entity)
+                    .map(|mech| MechDraw {
+                        base_rotation: mech.base_rotation,
+                        walk_time: mech.walk_time,
+                        stride: def.mech_stride.max(0.001),
+                    });
+                let weapons = self
+                    .sim
+                    .ecs
+                    .0
+                    .get::<mind_core::weapons::UnitWeapons>(*entity)
+                    .map(|weapons| {
+                        weapons
+                            .weapons
+                            .iter()
+                            .enumerate()
+                            .map(|(index, weapon)| {
+                                let mount = weapons.mounts.get(index);
+                                WeaponDraw {
+                                    name: weapon.name.clone(),
+                                    x: weapon.x,
+                                    y: weapon.y,
+                                    mount_rotation: mount
+                                        .map(|mount| mount.rotation)
+                                        .unwrap_or(weapon.base_rotation),
+                                    base_rotation: weapon.base_rotation,
+                                    rotate: weapon.rotate,
+                                    flip: weapon.flip_sprite,
+                                    recoil: mount.map(|mount| mount.recoil).unwrap_or(0.0),
+                                }
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                Some(UnitDraw {
+                    x: pos.x,
+                    y: pos.y,
+                    rotation: core.rotation,
+                    name: def.name.clone(),
+                    flying: def.flying,
+                    low_altitude: def.low_altitude,
+                    team,
+                    healthf,
+                    elevation: core.elevation,
+                    mech,
+                    weapons,
+                })
             })
             .collect()
     }

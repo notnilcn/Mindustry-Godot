@@ -44,6 +44,7 @@ pub mod shaders;
 pub mod shadow;
 pub mod snapshot;
 pub mod trail;
+pub mod unit_draw;
 
 pub use bands::{BandEntry, BandKey, BandPlan};
 pub use block_cache::BuildingCacheGrid;
@@ -87,3 +88,4 @@ pub use shadow::{
 };
 pub use snapshot::{ScreenshotPlan, plan as plan_screenshot};
 pub use trail::Trail;
+pub use unit_draw::{cell_color, mech_leg_transform, mech_leg_transforms, mech_walk_extend};
