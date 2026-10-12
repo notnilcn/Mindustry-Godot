@@ -52,6 +52,7 @@ zoom = Vector2(2, 2)
 [node name="PlanetView" parent="Planet" instance=ExtResource("5_planetview")]
 
 [node name="Ui" type="CanvasLayer" parent="." unique_id=541018541]
+layer = 2
 
 [node name="MenuBackground" type="TextureRect" parent="Ui" unique_id=1600000001]
 anchors_preset = 15
