@@ -1655,6 +1655,8 @@ fn find_target(
         config.target_air,
         config.target_ground,
         config.target_blocks,
+        // `Turret.targetUnderBlocks` defaults true (Turret.java:107).
+        true,
     );
     let _ = e;
     if let Some(target) = state.target {

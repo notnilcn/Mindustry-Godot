@@ -361,6 +361,48 @@ fn missile_dies_at_lifetime_and_explodes() {
     );
 }
 
+/// T2: ordinary bullets fly over enemy `underBullets` buildings they were not
+/// aimed at (`BulletComp.checkUnderBuild`, BulletComp.java:212-225) — the
+/// dagger's shots cross the conveyor and hit the wall behind it.
+///
+/// The decoy is needed to aim the shot: units take precedence over buildings in
+/// `Units.closestTarget`, and a closer conveyor outranks a wall in building
+/// priority (`UnitSorts.buildingDefault`), so a dagger with only the wall and
+/// conveyor in range would target the conveyor itself.
+#[test]
+fn bullets_pass_over_enemy_conveyor() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+
+    let mut sim = live_sim(48);
+    let wall = place(&mut sim, 20, 10, "copper-wall", 1);
+    let conveyor = place(&mut sim, 15, 10, "conveyor", 1);
+    let wall_start = health(&sim, wall).expect("wall health");
+    let conveyor_start = health(&sim, conveyor).expect("conveyor health");
+    // Immobile enemy unit behind the wall: the dagger's primary target.
+    let decoy = sim
+        .spawn_live_unit("dagger", 1, 25.0 * 8.0, 10.0 * 8.0 + 4.0, 180.0)
+        .expect("decoy");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(decoy) {
+        slot.kind = AiKind::Player;
+    }
+    let _ = sim
+        .spawn_live_unit("dagger", 2, 10.0 * 8.0, 10.0 * 8.0 + 4.0, 0.0)
+        .expect("dagger");
+    for _ in 0..600 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        health(&sim, conveyor),
+        Some(conveyor_start),
+        "conveyor untouched (not the aimed tile)"
+    );
+    assert!(
+        health(&sim, wall).is_none_or(|hp| hp < wall_start),
+        "wall damaged by the bullet that passed over the conveyor: {:?}",
+        health(&sim, wall)
+    );
+}
+
 /// T1/PAR-0088: a carbide-fed `scathe` fires the `spawnUnit` carrier
 /// (`BulletType.create` spawns no bullet), the `scathe-missile` flies to the
 /// target and its shoot-on-death explosion kills it (`Blocks.java:5251-5330`).
@@ -400,6 +442,39 @@ fn scathe_launches_missile_and_kills() {
     assert!(
         sim.ecs.0.get_entity(dagger).is_err(),
         "dagger killed by the missile's death explosion"
+    );
+}
+
+/// T2: a missile flies over an enemy `underBullets` conveyor it was not aimed
+/// at (`MissileAI.java:33-36`: `build == target || !build.block.underBullets`).
+///
+/// The scathe targets the unit first (`Units.closestTarget` checks units before
+/// buildings), so the missile's target is the dagger, not the conveyor on its
+/// flight path.
+#[test]
+fn missile_ignores_conveyor_below() {
+    let mut sim = live_sim(64);
+    let scathe = place(&mut sim, 10, 10, "scathe", 1);
+    feed(&mut sim, scathe, "carbide", 10);
+    let conveyor = place(&mut sim, 15, 10, "conveyor", 2);
+    let conveyor_start = health(&sim, conveyor).expect("conveyor health");
+    let dagger = sim
+        .spawn_live_unit("dagger", 2, 10.0 * 8.0 + 240.0, 10.0 * 8.0, 180.0)
+        .expect("dagger");
+    for _ in 0..900 {
+        sim.tick().expect("tick");
+        if sim.ecs.0.get_entity(dagger).is_err() {
+            break;
+        }
+    }
+    assert_eq!(
+        health(&sim, conveyor),
+        Some(conveyor_start),
+        "missile passed over the conveyor (not its target)"
+    );
+    assert!(
+        sim.ecs.0.get_entity(dagger).is_err(),
+        "dagger killed after the missile crossed the conveyor"
     );
 }
 

@@ -160,6 +160,11 @@ pub fn create(
             world
                 .entity_mut(entity)
                 .insert(crate::ai::types::missile::MissileShooter(shooter));
+            // `BulletType.create`'s `target` argument (`mount.target` for unit
+            // weapons, `null` for turrets) seeds the contact-death branch.
+            world
+                .entity_mut(entity)
+                .insert(crate::ai::types::missile::MissileTarget(spawn.target));
         }
         // `if(killShooter && owner instanceof Healthc h && !h.dead()) h.kill();`
         if def.kill_shooter

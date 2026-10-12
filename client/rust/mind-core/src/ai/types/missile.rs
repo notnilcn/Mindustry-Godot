@@ -20,6 +20,13 @@ use crate::world::WorldGrid;
 #[derive(Component, Debug, Clone, Copy, Default)]
 pub struct MissileShooter(pub Option<Entity>);
 
+/// `AIController.target` snapshot for a missile (`BulletType.create`'s `target`
+/// argument, Java `mount.target`/turret `null`): lets the contact-death branch
+/// hit an `underBullets` block the shot was aimed at (`build == target`,
+/// `MissileAI.java:33-36`).
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct MissileTarget(pub Option<Entity>);
+
 /// `MissileAI` controller state.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct MissileAi {
@@ -134,7 +141,9 @@ pub fn update_missile(ctx: &mut AiCtx, unit: Entity, state: &mut MissileAi) -> b
         *stored = pos;
     }
 
-    // `var build = unit.buildOn();` — kill instantly on enemy building contact.
+    // `var build = unit.buildOn();` — kill instantly on enemy building contact
+    // unless the block is an `underBullets` block the missile was not aimed at
+    // (MissileAI.java:33-36).
     let tile = ctx
         .grid
         .tiles
@@ -146,9 +155,12 @@ pub fn update_missile(ctx: &mut AiCtx, unit: Entity, state: &mut MissileAi) -> b
             .map(|team| team.team)
             .unwrap_or(0);
         let build_team = ctx.world.get::<TeamComp>(build).map(|team| team.team);
-        // `(build == target || !build.block.underBullets)` — `Block.underBullets`
-        // is not on `BlockDef` yet; default false (Java `Block.underBullets`).
-        if target_ground && build_team != Some(team) {
+        let under = ctx
+            .world
+            .get::<crate::ecs::BuildingComp>(build)
+            .and_then(|comp| ctx.content.block(comp.block))
+            .is_some_and(|def| def.under_bullets);
+        if target_ground && build_team != Some(team) && (Some(build) == state.target || !under) {
             if let Some(mut health) = ctx.world.get_mut::<Health>(unit) {
                 health.health = 0.0;
                 health.dead = true;

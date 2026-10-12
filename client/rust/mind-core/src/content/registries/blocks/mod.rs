@@ -1835,6 +1835,52 @@ pub const TARGET_PRIORITY_TURRET: f32 = 1.0;
 /// `TargetPriority.core`.
 pub const TARGET_PRIORITY_CORE: f32 = 2.0;
 
+/// `Block.underBullets` for a vanilla block (`Block.java:120`).
+///
+/// Class-level assignments in the Java sources (`Conveyor.java:47`,
+/// `Duct.java:47`, `OverflowDuct.java:32`, `Junction.java:21`,
+/// `ItemBridge.java:51`, `Sorter.java:27`, `Router.java:19`,
+/// `OverflowGate.java:18`, `DuctRouter.java:37`, `DuctBridge.java:16`,
+/// `DuctJunction.java:29`, `Conduit.java:51`, `PayloadConveyor.java:39`,
+/// `BeamNode.java:45`, `TargetDummy.java:40`) plus the per-instance
+/// `underBullets = true` initializers in `Blocks.java:2234-2487`
+/// (`duct-unloader`, `surge-router`, `liquid-router`,
+/// `reinforced-liquid-router`, `reinforced-liquid-junction`,
+/// `reinforced-bridge-conduit`, `power-node`) and `:6642-6651`.
+pub fn block_under_bullets(kind: BlockKind, name: &str) -> bool {
+    matches!(
+        kind,
+        BlockKind::TargetDummy
+            | BlockKind::Conveyor
+            | BlockKind::ArmoredConveyor
+            | BlockKind::DuctBridge
+            | BlockKind::Duct
+            | BlockKind::DuctRouter
+            | BlockKind::ItemBridge
+            | BlockKind::BufferedItemBridge
+            | BlockKind::Junction
+            | BlockKind::OverflowDuct
+            | BlockKind::OverflowGate
+            | BlockKind::Router
+            | BlockKind::Sorter
+            | BlockKind::StackConveyor
+            | BlockKind::Conduit
+            | BlockKind::ArmoredConduit
+            | BlockKind::PayloadConveyor
+            | BlockKind::PayloadRouter
+            | BlockKind::BeamNode
+    ) || matches!(
+        name,
+        "duct-unloader"
+            | "surge-router"
+            | "liquid-router"
+            | "reinforced-liquid-router"
+            | "reinforced-liquid-junction"
+            | "reinforced-bridge-conduit"
+            | "power-node"
+    )
+}
+
 /// Builds a spec with the class defaults for `kind` (`BlockSpec::for_kind`).
 pub fn spec(name: &'static str, kind: BlockKind) -> BlockSpec {
     let mut spec = BlockSpec::for_kind(kind);
@@ -1968,6 +2014,9 @@ pub struct BlockDef {
     pub group: BlockGroup,
     /// Targeting priority.
     pub priority: f32,
+    /// `Block.underBullets`: bullets fly over this block unless aimed at it
+    /// (`Block.java:120`, `BulletComp.checkUnderBuild`).
+    pub under_bullets: bool,
     /// Unit cap contribution.
     pub unit_cap_modifier: i32,
     /// Special flags.
@@ -2303,6 +2352,7 @@ impl BlockDef {
             category: spec.category.unwrap_or(Category::Distribution),
             group: spec.group.unwrap_or(BlockGroup::None),
             priority: spec.priority.unwrap_or(TARGET_PRIORITY_BASE),
+            under_bullets: false,
             unit_cap_modifier: spec.unit_cap_modifier.unwrap_or(BASE_UNIT_CAP_MODIFIER),
             flags: spec.flags,
             consumes,
@@ -2399,6 +2449,13 @@ impl BlockDef {
             construct_time: spec.construct_time.unwrap_or(0.0),
             commandable: spec.commandable.unwrap_or(false),
         };
+        // `Block.init`: `if(underBullets){ priority = TargetPriority.under; }`
+        // (Block.java:1386-1387) — unconditional, so conveyors/conduits (which
+        // set the transport priority in their initializers) end up at `under`.
+        def.under_bullets = block_under_bullets(spec.kind, spec.name);
+        if def.under_bullets {
+            def.priority = TARGET_PRIORITY_UNDER;
+        }
         if let Some(generate) = generate_icons {
             def.unlock.generate_icons = generate;
         }
@@ -3192,7 +3249,10 @@ mod tests {
         assert_eq!(conveyor.group, BlockGroup::Transportation);
         assert!(conveyor.update && conveyor.has_items && !conveyor.solid);
         assert!(conveyor.accepts_items);
-        assert_eq!(conveyor.priority, TARGET_PRIORITY_TRANSPORT);
+        // `Block.init` overrides the transport priority to `under`
+        // (Block.java:1386-1387; `Conveyor.java:45` sets transport first).
+        assert!(conveyor.under_bullets);
+        assert_eq!(conveyor.priority, TARGET_PRIORITY_UNDER);
 
         let router = get("router");
         assert_eq!(router.group, BlockGroup::Transportation);
@@ -3242,7 +3302,8 @@ mod tests {
         assert_eq!(payload.group, BlockGroup::Payloads);
         assert_eq!(payload.size, 3);
         assert!(payload.update);
-        assert_eq!(payload.priority, TARGET_PRIORITY_TRANSPORT);
+        assert!(payload.under_bullets);
+        assert_eq!(payload.priority, TARGET_PRIORITY_UNDER);
 
         let power_source = get("power-source");
         assert!(power_source.outputs_power && !power_source.consumes_power);

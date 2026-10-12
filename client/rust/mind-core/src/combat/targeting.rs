@@ -51,6 +51,9 @@ impl TargetQueries {
     /// Units pass the `Turret.findTarget` gate
     /// `(e.isGrounded() || targetAir) && (!e.isGrounded() || targetGround)`;
     /// buildings need `target_ground` + `target_blocks` (plan 10 §3.8).
+    /// `allow_under_blocks` mirrors `AIController.target`'s
+    /// `targetUnderBlocks || !t.block.underBullets` building predicate
+    /// (AIController.java:282).
     #[allow(clippy::too_many_arguments)] // mirrors `Units.bestTarget`
     pub fn closest_target(
         &self,
@@ -62,6 +65,7 @@ impl TargetQueries {
         target_air: bool,
         target_ground: bool,
         target_blocks: bool,
+        allow_under_blocks: bool,
     ) -> Option<Entity> {
         if let Some(unit) =
             self.closest_unit_filtered(world, team, x, y, range, target_air, target_ground)
@@ -69,7 +73,8 @@ impl TargetQueries {
             return Some(unit);
         }
         if target_ground && target_blocks {
-            self.indexer.find_enemy_building(world, team, x, y, range)
+            self.indexer
+                .find_enemy_building(world, team, x, y, range, allow_under_blocks)
         } else {
             None
         }
@@ -188,7 +193,7 @@ mod tests {
         let (x, y) = CombatHarness::tile_center(4, 30);
         let targets = TargetQueries::build(&mut harness.build.world, &harness.build.content);
         let best = targets
-            .closest_target(&harness.build.world, 1, x, y, 400.0, true, true, true)
+            .closest_target(&harness.build.world, 1, x, y, 400.0, true, true, true, true)
             .expect("target");
         assert_eq!(best, near);
     }
@@ -202,7 +207,17 @@ mod tests {
         let targets = TargetQueries::build(&mut harness.build.world, &harness.build.content);
         assert!(
             targets
-                .closest_target(&harness.build.world, 1, x, y, 400.0, true, false, true)
+                .closest_target(
+                    &harness.build.world,
+                    1,
+                    x,
+                    y,
+                    400.0,
+                    true,
+                    false,
+                    true,
+                    true
+                )
                 .is_none(),
             "target_ground=false excludes buildings"
         );

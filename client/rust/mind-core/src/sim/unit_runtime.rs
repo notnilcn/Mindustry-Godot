@@ -883,9 +883,15 @@ pub fn unit_update_system(world: &mut World) {
                 .get::<MissileShooter>(entity)
                 .map(|shooter| shooter.0)
                 .unwrap_or(None);
+            // `AIController.target` snapshot from the shot's aimed entity
+            // (`BulletType.create` `target`; `MissileAI.java:33-36`).
+            let target = world
+                .get::<crate::ai::types::missile::MissileTarget>(entity)
+                .map(|target| target.0)
+                .unwrap_or(None);
             let mut state = MissileAi {
                 unit: Some(entity),
-                target: None,
+                target,
                 shooter,
             };
             {
@@ -926,7 +932,17 @@ pub fn unit_update_system(world: &mut World) {
                         .map(|bullet| (bullet.collides_air, bullet.collides_ground))
                         .unwrap_or((false, true));
                     let (x, y) = world.get::<Pos>(entity).map(|pos| (pos.x, pos.y))?;
-                    queries.closest_target(world, team, x, y, range, air, ground, true)
+                    queries.closest_target(
+                        world,
+                        team,
+                        x,
+                        y,
+                        range,
+                        air,
+                        ground,
+                        true,
+                        def.target_under_blocks,
+                    )
                 })
             };
             set_mount_targets(world, entity, mount_target);
@@ -1902,7 +1918,7 @@ fn acquire_target(
     let Some(pos) = world.get::<Pos>(entity).copied() else {
         return (None, None);
     };
-    let (range, target_air, target_ground) = world
+    let (range, target_air, target_ground, target_under_blocks) = world
         .get::<UnitTypeComp>(entity)
         .and_then(|comp| runtime.content.unit(comp.type_id))
         .map(|def| {
@@ -1910,9 +1926,10 @@ fn acquire_target(
                 def.range.max(def.max_range).max(TILE_SIZE),
                 def.target_air,
                 def.target_ground,
+                def.target_under_blocks,
             )
         })
-        .unwrap_or((TILE_SIZE, true, true));
+        .unwrap_or((TILE_SIZE, true, true, true));
 
     let anchor = nearest_enemy_building(world, team, pos.x, pos.y);
     let in_range = queries.closest_target(
@@ -1924,6 +1941,7 @@ fn acquire_target(
         target_air,
         target_ground,
         true,
+        target_under_blocks,
     );
     let mount_target = in_range.or_else(|| {
         anchor.filter(|target| {
