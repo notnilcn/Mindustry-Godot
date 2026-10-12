@@ -4,10 +4,12 @@
 ##
 ## Launch-loadout picker: lists the core's valid loadouts from the live
 ## `MindCampaign` read models (`Schematics.getLoadouts(core)`) and lets the
-## player pick one for the next launch. The capacity grid/item stepping is
-## `LoadoutDialog` (opened through the `@resources` button); the confirm button
-## emits `loadout_chosen(index)` which the planet dialog forwards to
-## `MindCampaign.start_sector(planet, sector, index)`.
+## player pick one for the next launch. The plan data (capacity, staged
+## resources, max recomputation, validity) comes from
+## `MindCampaign.launch_dialog_json`, a port of `LaunchLoadoutDialog.update`;
+## the capacity grid/item stepping is `LoadoutDialog` (opened through the
+## `@resources` button). The confirm button emits `loadout_chosen(index)` which
+## the planet dialog forwards to the launcher branch of `_launch`.
 
 extends MindDialog
 
@@ -16,7 +18,7 @@ signal loadout_chosen(index: int)
 
 var _list: MindTable = null
 var _selected := -1
-var _capacity := 0
+var _plan: Dictionary = {}
 
 
 func _ready() -> void:
@@ -53,66 +55,145 @@ func _selected_core() -> String:
 	return ""
 
 
+## `MindCampaign.launch_dialog_json` (`LaunchLoadoutDialog.update`); `{}` when
+## the facade is absent.
+func _launch_plan() -> Dictionary:
+	var campaign := campaign_node()
+	if campaign == null or not campaign.has_method("launch_dialog_json"):
+		return {}
+	var parsed: Variant = JSON.parse_string(str(campaign.call(
+		"launch_dialog_json",
+		str(_context.get("planet", "")),
+		int(_context.get("launcher", -1)),
+		int(_context.get("sector", -1)),
+		_selected
+	)))
+	return parsed if parsed is Dictionary else {}
+
+
+## The launcher's localized name (`Sector.name()` + the planet dialog's
+## `sector.<preset>.name` rule).
+func _localized_from() -> String:
+	var name := str(_plan.get("from", ""))
+	var preset := str(_plan.get("from_preset", ""))
+	if not preset.is_empty():
+		var key := "sector.%s.name" % preset
+		var localized := _t("@%s" % key)
+		if not localized.is_empty() and localized != key:
+			return localized
+	return name
+
+
 func _rebuild() -> void:
 	_list.clear_children()
+	_plan = _launch_plan()
 	var loadouts := campaign_section("loadouts")
-	_capacity = int(campaign_views().get("launch_capacity", 0))
+	# `launch.from`: the launcher sector's name (`LaunchLoadoutDialog.java:165`).
+	if not _plan.is_empty():
+		_list.add(MindWidgets.label(MindWidgets.markup_format("@launch.from", [_localized_from()]))) \
+			.grow_x_axis().pad(4)
+		_list.row()
 	if loadouts.is_empty():
 		_list.add(MindWidgets.label(_t("@none"))).pad(8)
 		_list.row()
-		return
-	for index in loadouts.size():
-		var loadout: Dictionary = loadouts[index]
-		# code-instantiated: loadout rows come from plan-12 Schematics.getLoadouts.
-		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", 6)
-		var button := MindWidgets.button(str(loadout.get("name", "")))
-		button.toggle_mode = true
-		button.button_pressed = int(loadout.get("index", -1)) == _selected
-		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		button.pressed.connect(_select.bind(int(loadout.get("index", -1))))
-		row.add_child(button)
-		var total := _requirement_total(loadout)
-		var over := _capacity > 0 and total > _capacity
-		row.add_child(MindWidgets.label("%d%s" % [total, "/%d" % _capacity if _capacity > 0 else ""]))
-		if over:
-			row.add_child(MindWidgets.label(_t("@sector.missingresources")))
-		_list.add(row).grow_x_axis().pad(2)
-		_list.row()
-	if _capacity > 0:
-		_list.add(MindWidgets.label(MindWidgets.markup_format("@launch.capacity", [_capacity]))).pad(4)
-		_list.row()
-	# Live launch resources (`universe.getLaunchResources`): already-selected
-	# item totals shown alongside the schematic requirement totals above.
-	var resource_totals := _launch_resource_stacks()
-	if not resource_totals.is_empty():
-		var parts := PackedStringArray()
-		for item in resource_totals:
-			parts.append("%s x%d" % [str(item), int(resource_totals[item])])
-		if not parts.is_empty():
+	else:
+		for index in loadouts.size():
+			var loadout: Dictionary = loadouts[index]
+			# code-instantiated: loadout rows come from plan-12 Schematics.getLoadouts.
+			var row := HBoxContainer.new()
+			row.add_theme_constant_override("separation", 6)
+			var button := MindWidgets.button(str(loadout.get("name", "")))
+			button.toggle_mode = true
+			button.button_pressed = int(loadout.get("index", -1)) == _selected
+			button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			button.pressed.connect(_select.bind(int(loadout.get("index", -1))))
+			row.add_child(button)
+			_list.add(row).grow_x_axis().pad(2)
+			_list.row()
+	_rebuild_items()
+	clear_buttons()
+	# `LaunchLoadoutDialog.java:41`: `buttons.defaults().size(160f, 64f)`.
+	# Java order: `@back`, (`@resources.max` toggle), `@resources`, `@launch.text`.
+	add_button(_t("@back"), hide_dialog, "left", 160.0)
+	var allow := bool(_plan.get("allow_launch_loadout", true))
+	if allow:
+		# `@resources.max`: toggles `maxresources` (`getMax` default true).
+		var max_button := add_button(_t("@resources.max"), _toggle_max, "add", 160.0)
+		max_button.toggle_mode = true
+		max_button.button_pressed = bool(_plan.get("max", true))
+		var resources := add_button(_t("@resources"), _open_loadout, "edit", 160.0)
+		resources.disabled = bool(_plan.get("max", true))
+	var launch := add_button(_t("@launch.text"), _confirm, "ok", 160.0)
+	launch.disabled = not _plan.is_empty() and not bool(_plan.get("valid", false))
+
+
+## Capacity label + item rows (`LaunchLoadoutDialog.rebuild`,
+## `LaunchLoadoutDialog.java:92-117,167`). Four items per row, Java text:
+## `(al + as) + "[gray] (" + al + " + " + as + ")"`, scarlet `have/needed`
+## when short.
+func _rebuild_items() -> void:
+	if _plan.is_empty():
+		var resource_totals := _launch_resource_stacks()
+		if not resource_totals.is_empty():
+			var parts := PackedStringArray()
+			for item in resource_totals:
+				parts.append("%s x%d" % [str(item), int(resource_totals[item])])
 			_list.add(MindWidgets.label("%s %s" % [_t("@resources"), ", ".join(parts)])).grow_x_axis().pad(2)
 			_list.row()
-	clear_buttons()
-	# `LaunchLoadoutDialog.java:41`: `buttons.defaults().size(160f, 64f);
-	# buttons.button("@back", Icon.left, this::hide)` — the back entry leads the
-	# row and cancels the launch (PAR-0027).
-	# Java order: `@back`, (`@resources.max` toggle), `@resources`, `@launch.text`,
-	# each `size(160f, 64f)` (LaunchLoadoutDialog.java:40-41,125-152).
-	add_button(_t("@back"), hide_dialog, "left", 160.0)
-	var resources := add_button(_t("@resources"), _open_loadout, "edit", 160.0)
-	resources.disabled = _selected < 0
-	add_button(_t("@launch.text"), _confirm, "ok", 160.0)
-
-
-func _requirement_total(loadout: Dictionary) -> int:
-	var total := 0
-	for requirement in loadout.get("requirements", []):
-		total += int(requirement[1])
-	return total
+		return
+	var capacity := int(_plan.get("capacity", 0))
+	if capacity > 0:
+		_list.add(MindWidgets.label(MindWidgets.markup_format("@launch.capacity", [capacity]))) \
+			.grow_x_axis().pad(4)
+		_list.row()
+	var allow := bool(_plan.get("allow_launch_loadout", false))
+	var total: Dictionary = _plan.get("total", {})
+	var requirements: Dictionary = _plan.get("requirements", {})
+	var resources: Dictionary = _plan.get("resources", {})
+	var stored: Dictionary = _plan.get("stored", {})
+	var count := 0
+	# code-instantiated: item rows are the item-id-ordered `total` map.
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 4)
+	for item in total:
+		var amount := int(total[item])
+		if amount == 0:
+			continue
+		row.add_child(MindWidgets.image("item-%s-ui" % str(item)))
+		var as_amount := int(requirements.get(item, 0))
+		var al_amount := int(resources.get(item, 0))
+		var amount_text := str(amount)
+		if allow:
+			amount_text += "[gray] (%d + %d)" % [al_amount, as_amount]
+		if int(stored.get(item, 0)) < amount:
+			amount_text = "[scarlet]%d[lightgray]/%s" % [mini(int(stored.get(item, 0)), amount), amount_text]
+		row.add_child(MindWidgets.label(MindWidgets.markup(amount_text)))
+		count += 1
+		if count % 4 == 0:
+			_list.add(row).grow_x_axis().pad(2)
+			_list.row()
+			# code-instantiated: grid row continuation for the item list.
+			row = HBoxContainer.new()
+			row.add_theme_constant_override("separation", 4)
+	if count % 4 != 0:
+		_list.add(row).grow_x_axis().pad(2)
+		_list.row()
+	if not bool(_plan.get("valid", false)):
+		_list.add(MindWidgets.label(MindWidgets.markup("@sector.missingresources"))).grow_x_axis().pad(4)
+		_list.row()
 
 
 func _select(index: int) -> void:
 	_selected = index
+	_rebuild()
+
+
+## `setMax`: writes the `maxresources` flag through the live settings store.
+func _toggle_max() -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("settings_put_flag"):
+		ui.call("settings_put_flag", "maxresources", not bool(_plan.get("max", true)))
+	_plan = {}
 	_rebuild()
 
 
@@ -135,6 +216,8 @@ func _find_selected_row() -> Dictionary:
 	return {}
 
 
+## `LaunchLoadoutDialog.@launch.text`: `universe.updateLoadout(core, selected);
+## confirm.run(); hide()` (`LaunchLoadoutDialog.java:150-152`).
 func _confirm() -> void:
 	if _selected < 0:
 		return
@@ -160,7 +243,7 @@ func _open_loadout() -> void:
 	ui.call("open_dialog", "loadout", JSON.stringify({
 		"planet": str(_context.get("planet", "")),
 		"sector": int(_context.get("sector", -1)),
-		"capacity": _capacity,
+		"capacity": int(_plan.get("capacity", 0)),
 		"index": _selected,
 		"core": _selected_core(),
 	}))

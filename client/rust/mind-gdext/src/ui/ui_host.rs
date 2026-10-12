@@ -703,6 +703,13 @@ impl MindUi {
         self.settings.get_bool(&key.to_string(), false)
     }
 
+    /// `Core.settings.getBool(key, default)` for arbitrary (campaign) flags such
+    /// as `maxresources` (default true; `LaunchLoadoutDialog.java:222-228`).
+    #[func]
+    pub fn settings_get_flag_default(&self, key: GString, default: bool) -> bool {
+        self.settings.get_bool(&key.to_string(), default)
+    }
+
     /// `Core.settings.put(key, value)` for a boolean flag.
     #[func]
     pub fn settings_put_flag(&mut self, key: GString, value: bool) -> bool {

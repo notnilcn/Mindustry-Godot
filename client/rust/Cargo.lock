@@ -1770,6 +1770,7 @@ name = "mind-gdext"
 version = "0.1.0"
 dependencies = [
  "godot",
+ "indexmap 2.14.2",
  "log",
  "mind-core",
  "mind-stdb",

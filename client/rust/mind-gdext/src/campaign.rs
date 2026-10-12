@@ -21,7 +21,8 @@ use godot::prelude::*;
 use mind_core::assets::bundle::Bundle;
 use mind_core::content::registries::planets::GeneratorKind;
 use mind_core::content::{
-    ContentRef, ContentRegistry, ContentType, MemoryBundle, PlanetId, SectorId, create_base_content,
+    ContentRef, ContentRegistry, ContentType, ItemId, MemoryBundle, PlanetId, SectorId,
+    create_base_content,
 };
 use mind_core::game::State;
 use mind_core::game::campaign_rules::CampaignRules;
@@ -40,7 +41,7 @@ use mind_core::game::saves::{
 };
 use mind_core::game::schematics::Schematics;
 use mind_core::game::tech_tree::{self, SettingsUnlockStore};
-use mind_core::game::universe::{Campaign, TurnContext};
+use mind_core::game::universe::{Campaign, TurnContext, launch_plan};
 use mind_core::game::world_reloader::HostReloader;
 use mind_core::io::FileSystem;
 use mind_core::io::fs::{NativeFs, Paths};
@@ -269,6 +270,88 @@ impl MindCampaign {
         ui.call("settings_get_flag", &[GString::from(key).to_variant()])
             .try_to::<bool>()
             .unwrap_or(fallback)
+    }
+
+    /// Live boolean setting with an explicit default (`Core.settings.getBool(key,
+    /// default)`; `LaunchLoadoutDialog.getMax` for `maxresources`, default true).
+    fn live_setting_flag_default(&self, key: &str, default: bool) -> bool {
+        let fallback = self.settings.get_bool(key, default);
+        let Some(mut ui) = self.base().get_node_or_null("/root/MindUi") else {
+            return fallback;
+        };
+        if !ui.has_method("settings_get_flag_default") {
+            return fallback;
+        }
+        ui.call(
+            "settings_get_flag_default",
+            &[GString::from(key).to_variant(), default.to_variant()],
+        )
+        .try_to::<bool>()
+        .unwrap_or(fallback)
+    }
+
+    /// Loads the schematic library (`Schematics.load`: vanilla loadouts plus
+    /// every `.msch` under the data dir's `schematics/`; Java's
+    /// `schematicDirectory` is `dataDirectory/schematics`, which the profile
+    /// import extracts).
+    fn load_schematics(&self, registry: &ContentRegistry) -> Schematics {
+        let mut schematics = Schematics::new();
+        let dir = self.paths.root().join("schematics");
+        if let Err(error) = schematics.load(&NativeFs, &dir, registry) {
+            log::warn!(
+                "failed to load schematics from `{}`: {error}",
+                dir.display()
+            );
+        }
+        schematics
+    }
+
+    /// `item.isOnPlanet(planet)` (`UnlockableContent.shownPlanets`).
+    fn item_on_planet(registry: &ContentRegistry, name: &str, planet: PlanetId) -> bool {
+        registry
+            .item_by_name(name)
+            .is_some_and(|item| item.unlock.shown_planets.contains(&planet))
+    }
+
+    /// `destination.preset.generator.map.rules().loadout` for the disallowed
+    /// branch (`LaunchLoadoutDialog.java:66-76`), filtered to items on the
+    /// launcher's planet; the map header is read through `SaveIo.getMeta`.
+    fn preset_launch_loadout(
+        registry: &ContentRegistry,
+        planet: PlanetId,
+        preset_id: SectorId,
+    ) -> indexmap::IndexMap<String, i32> {
+        let mut out = indexmap::IndexMap::new();
+        let Some(preset) = registry.sector(preset_id) else {
+            return out;
+        };
+        let owner = registry
+            .planet(preset.planet)
+            .map(|planet| planet.name.clone())
+            .unwrap_or_default();
+        let map = preset
+            .file_name
+            .clone()
+            .unwrap_or_else(|| preset.name.clone());
+        let path = std::path::PathBuf::from(crate::assets::loader::resolve_assets_dir())
+            .join("maps")
+            .join(owner)
+            .join(format!("{map}.msav"));
+        let Ok(meta) = SaveIo::get_meta(&NativeFs, &path) else {
+            return out;
+        };
+        let Ok(rules) = serde_json::from_str::<Rules>(&quote_bare_keys(&meta.rules_json)) else {
+            return out;
+        };
+        for stack in &rules.loadout {
+            let Some(name) = stack.item.as_deref() else {
+                continue;
+            };
+            if Self::item_on_planet(registry, name, planet) {
+                *out.entry(name.to_owned()).or_insert(0) += stack.amount;
+            }
+        }
+        out
     }
 
     /// Live `saveinterval` (`Core.settings.getInt`): read from the `MindUi`
@@ -1236,8 +1319,7 @@ impl MindCampaign {
         let Some(active) = active else {
             return GString::from("{}");
         };
-        let mut schematics = Schematics::new();
-        schematics.load_loadouts(registry);
+        let schematics = self.load_schematics(registry);
         let mut views = mind_core::ui::campaign::CampaignViews::from_campaign(
             campaign,
             registry,
@@ -1475,15 +1557,14 @@ impl MindCampaign {
         dict
     }
 
-    /// Lists the decoded vanilla schematics.
+    /// Lists the decoded schematics (vanilla loadouts + `schematics/*.msch`).
     #[func]
     pub fn list_schematics(&self) -> Array<VarDictionary> {
         let mut out = Array::<VarDictionary>::new();
         let Some(registry) = &self.registry else {
             return out;
         };
-        let mut schematics = Schematics::new();
-        schematics.load_loadouts(registry);
+        let schematics = self.load_schematics(registry);
         for schematic in &schematics.all {
             let mut row = VarDictionary::new();
             row.set(
@@ -2204,6 +2285,225 @@ impl MindCampaign {
         }
         self.persist();
         true
+    }
+
+    /// `LaunchLoadoutDialog.update` (`LaunchLoadoutDialog.java:58-90`): the
+    /// Configure Loadout dialog's inputs and outputs as JSON.
+    ///
+    /// `launcher`/`destination` are sector ids on `planet`; `loadout_index` is a
+    /// `Schematics.all` index (`-1`/out of range selects the launcher core's
+    /// default loadout). Output: `{"from", "from_preset", "capacity",
+    /// "allow_launch_loadout", "stored", "requirements", "resources", "max",
+    /// "valid", "total", "preset_loadout"}`. `resources` is the post-`max`
+    /// staged sequence (persisted like Java while `max` is on), so the launcher
+    /// branch of `PlanetDialog.playSelected` charges/stocks exactly it.
+    #[func]
+    pub fn launch_dialog_json(
+        &mut self,
+        planet: GString,
+        launcher: i32,
+        destination: i32,
+        loadout_index: i32,
+    ) -> GString {
+        if launcher < 0 || destination < 0 {
+            return GString::from("{}");
+        }
+        let planet_name = planet.to_string();
+        let Some(registry) = self.registry.as_ref() else {
+            return GString::from("{}");
+        };
+        let Some(planet_id) = self
+            .campaign
+            .as_ref()
+            .and_then(|campaign| campaign.planet_id_by_name(&planet_name))
+        else {
+            return GString::from("{}");
+        };
+
+        // Snapshot the sector reads before the `universe` mutable borrow.
+        let (
+            sitems,
+            destination_allow,
+            destination_preset,
+            launcher_core_name,
+            from_name,
+            from_preset,
+        ) = {
+            let Some(campaign) = self.campaign.as_ref() else {
+                return GString::from("{}");
+            };
+            let Some(planet_record) = campaign.planet(planet_id) else {
+                return GString::from("{}");
+            };
+            let Some(planet_def) = registry.planet(planet_id) else {
+                return GString::from("{}");
+            };
+            let (Some(launcher_sector), Some(destination_sector)) = (
+                planet_record.sector(launcher as u16),
+                planet_record.sector(destination as u16),
+            ) else {
+                return GString::from("{}");
+            };
+            let from_name = launcher_sector
+                .info
+                .info
+                .name
+                .clone()
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| {
+                    launcher_sector.preset_name.clone().unwrap_or_else(|| {
+                        if planet_record.sectors.len() == 1 {
+                            planet_record.name.clone()
+                        } else {
+                            launcher_sector.id.to_string()
+                        }
+                    })
+                });
+            (
+                launcher_sector.items().clone(),
+                destination_sector.allow_launch_loadout(planet_def.allow_launch_loadout),
+                destination_sector.preset,
+                launcher_sector.info.info.best_core_type.clone(),
+                from_name,
+                launcher_sector.preset_name.clone(),
+            )
+        };
+
+        let schematics = self.load_schematics(registry);
+        let core = registry
+            .block_id(&launcher_core_name)
+            .or_else(|| registry.block_id("core-shard"));
+        let default_index = core
+            .and_then(|core| schematics.get_default_loadout(core))
+            .or_else(|| core.and_then(|core| schematics.get_loadouts(core).first().copied()));
+        let selected_index = usize::try_from(loadout_index)
+            .ok()
+            .filter(|index| *index < schematics.all.len())
+            .or(default_index)
+            .unwrap_or(0);
+        let Some(selected) = schematics.all.get(selected_index) else {
+            return GString::from("{}");
+        };
+
+        // `cap = (int)(sector.planet.launchCapacityMultiplier *
+        // selected.findCore().itemCapacity)`.
+        let capacity = selected
+            .find_core(registry)
+            .and_then(|core| registry.block(core))
+            .map(|block| {
+                (registry
+                    .planet(planet_id)
+                    .map(|planet| planet.launch_capacity_multiplier)
+                    .unwrap_or(0.0)
+                    * block.item_capacity as f32) as i32
+            })
+            .unwrap_or(0);
+
+        // `ItemSeq schems = selected.requirements()`.
+        let requirement_seq = selected.requirements(registry);
+        let requirements: indexmap::IndexMap<String, i32> = registry
+            .items()
+            .iter()
+            .enumerate()
+            .filter_map(|(index, item)| {
+                let amount = requirement_seq.get(ItemId::new(index as u16));
+                (amount != 0).then(|| (item.name.clone(), amount))
+            })
+            .collect();
+
+        // `universe.getLaunchResources()`, with the `show()` on-planet filter
+        // (`launch.set(item, 0)` for items not on the launcher's planet).
+        let mut resources: indexmap::IndexMap<String, i32> = indexmap::IndexMap::new();
+        {
+            let Some(campaign) = self.campaign.as_mut() else {
+                return GString::from("{}");
+            };
+            let launch_seq = campaign.universe.get_launch_resources(&self.settings);
+            for (index, item) in registry.items().iter().enumerate() {
+                if registry
+                    .planet(planet_id)
+                    .is_some_and(|planet| planet.allow_launch_loadout)
+                    && !Self::item_on_planet(registry, &item.name, planet_id)
+                {
+                    continue;
+                }
+                let amount = launch_seq.get(index).copied().unwrap_or(0);
+                if amount != 0 {
+                    resources.insert(item.name.clone(), amount);
+                }
+            }
+        }
+
+        let preset_loadout = destination_preset
+            .map(|preset| Self::preset_launch_loadout(registry, planet_id, preset))
+            .unwrap_or_default();
+        let max = self.live_setting_flag_default("maxresources", true);
+        let all_items: Vec<String> = registry
+            .items()
+            .iter()
+            .map(|item| item.name.clone())
+            .collect();
+        let (planned, valid) = launch_plan(
+            &sitems,
+            &requirements,
+            &resources,
+            capacity,
+            max,
+            destination_allow,
+            &preset_loadout,
+            &all_items,
+        );
+
+        // `universe.updateLaunchResources(resources)`: persist the recomputed
+        // sequence so the launch path reads the same staged amounts.
+        if destination_allow
+            && max
+            && let Some(campaign) = self.campaign.as_mut()
+        {
+            let mut dense = vec![0i32; registry.items().len()];
+            for (name, amount) in &planned {
+                if let Some(index) = registry.item_id(name)
+                    && let Some(slot) = dense.get_mut(index.index())
+                {
+                    *slot = *amount;
+                }
+            }
+            if campaign
+                .universe
+                .update_launch_resources(&mut self.settings, dense)
+                .is_ok()
+            {
+                self.persist();
+            }
+        }
+
+        let mut total = requirements.clone();
+        for (item, amount) in &planned {
+            *total.entry(item.clone()).or_insert(0) += *amount;
+        }
+        let nonzero = |map: &indexmap::IndexMap<String, i32>| {
+            let mut out = serde_json::Map::new();
+            for (item, amount) in map {
+                if *amount != 0 {
+                    out.insert(item.clone(), serde_json::json!(amount));
+                }
+            }
+            out
+        };
+        let value = serde_json::json!({
+            "from": from_name,
+            "from_preset": from_preset,
+            "capacity": capacity,
+            "allow_launch_loadout": destination_allow,
+            "stored": nonzero(&sitems),
+            "requirements": nonzero(&requirements),
+            "resources": nonzero(&planned),
+            "max": max,
+            "valid": valid,
+            "total": nonzero(&total),
+            "preset_loadout": nonzero(&preset_loadout),
+        });
+        GString::from(value.to_string().as_str())
     }
 
     /// `Universe.getLastLoadout` (selected schematic file name).

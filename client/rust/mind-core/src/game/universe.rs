@@ -160,7 +160,63 @@ impl Universe {
     pub fn get_loadout(&self, settings: &SettingsStore, core_name: &str) -> String {
         settings.get_string(&format!("lastloadout-{core_name}"), "")
     }
+}
 
+/// `LaunchLoadoutDialog.update` (`LaunchLoadoutDialog.java:58-90`), item maps
+/// keyed by content name.
+///
+/// Returns the launch resources to stage (`resources.min(capacity)`, the
+/// `max` recomputation from the launcher's stored items minus the schematic
+/// cost, or the destination preset loadout when the destination forbids a
+/// launch loadout) and whether the launcher can pay `requirements +
+/// resources` (`valid`).
+#[allow(clippy::too_many_arguments)]
+pub fn launch_plan(
+    stored: &IndexMap<String, i32>,
+    requirements: &IndexMap<String, i32>,
+    resources: &IndexMap<String, i32>,
+    capacity: i32,
+    max: bool,
+    allow_launch_loadout: bool,
+    preset_loadout: &IndexMap<String, i32>,
+    all_items: &[String],
+) -> (IndexMap<String, i32>, bool) {
+    let cap = capacity.max(0);
+    // `resources.min(cap)`: the staged sequence is clamped to the capacity.
+    let mut out: IndexMap<String, i32> = resources
+        .iter()
+        .map(|(item, amount)| (item.clone(), (*amount).clamp(0, cap)))
+        .collect();
+    if !allow_launch_loadout {
+        // `resources.clear()` + the destination preset's map `rules.loadout`
+        // (filtered to items on the launcher's planet by the caller).
+        out.clear();
+        for (item, amount) in preset_loadout {
+            if *amount != 0 {
+                out.insert(item.clone(), *amount);
+            }
+        }
+    } else if max {
+        // `resources.set(item, clamp(sitems.get(item) - schems.get(item), 0, capacity))`
+        for item in all_items {
+            let stored_amount = stored.get(item).copied().unwrap_or(0);
+            let requirement = requirements.get(item).copied().unwrap_or(0);
+            let value = (stored_amount - requirement).clamp(0, cap);
+            out.insert(item.clone(), value);
+        }
+    }
+    // `total = requirements + resources`; `valid = sitems.has(total)`.
+    let mut total = requirements.clone();
+    for (item, amount) in &out {
+        *total.entry(item.clone()).or_insert(0) += *amount;
+    }
+    let valid = total
+        .iter()
+        .all(|(item, amount)| stored.get(item).copied().unwrap_or(0) >= *amount && *amount >= 0);
+    (out, valid)
+}
+
+impl Universe {
     /// Advances the fixed-step clock by `delta_ticks`; returns whether an auto
     /// turn is due (`turnCounter >= turnDuration`).
     ///
@@ -813,6 +869,67 @@ mod tests {
                 .is_none(),
             "launch-resources-seq removed"
         );
+    }
+
+    #[test]
+    fn launch_plan_max_fills_to_capacity() {
+        // `LaunchLoadoutDialog.update` with Max on: copper 3000 stored, shard
+        // cost 1000/800, capacity 2000 -> copper 2000, lead 1200, valid.
+        let stored = IndexMap::from([("copper".to_owned(), 3000), ("lead".to_owned(), 2000)]);
+        let requirements = IndexMap::from([("copper".to_owned(), 1000), ("lead".to_owned(), 800)]);
+        let resources = IndexMap::new();
+        let all_items = vec!["copper".to_owned(), "lead".to_owned()];
+        let (out, valid) = launch_plan(
+            &stored,
+            &requirements,
+            &resources,
+            2000,
+            true,
+            true,
+            &IndexMap::new(),
+            &all_items,
+        );
+        assert_eq!(out.get("copper").copied(), Some(2000));
+        assert_eq!(out.get("lead").copied(), Some(1200));
+        assert!(valid, "launcher holds requirements + resources");
+    }
+
+    #[test]
+    fn launch_plan_invalid_when_short() {
+        let requirements = IndexMap::from([("copper".to_owned(), 1000)]);
+        let (out, valid) = launch_plan(
+            &IndexMap::new(),
+            &requirements,
+            &IndexMap::new(),
+            2000,
+            true,
+            true,
+            &IndexMap::new(),
+            &["copper".to_owned()],
+        );
+        assert_eq!(out.get("copper").copied(), Some(0));
+        assert!(!valid, "empty launcher cannot pay the schematic cost");
+    }
+
+    #[test]
+    fn launch_plan_disallowed_uses_preset_loadout() {
+        // `!destination.allowLaunchLoadout()` clears the staged resources and
+        // stages the destination preset's map `rules.loadout` instead.
+        let stored = IndexMap::from([("copper".to_owned(), 500)]);
+        let preset = IndexMap::from([("copper".to_owned(), 50), ("lead".to_owned(), 0)]);
+        let (out, valid) = launch_plan(
+            &stored,
+            &IndexMap::from([("lead".to_owned(), 25)]),
+            &IndexMap::from([("copper".to_owned(), 100)]),
+            2000,
+            true,
+            false,
+            &preset,
+            &["copper".to_owned(), "lead".to_owned()],
+        );
+        assert_eq!(out.len(), 1);
+        assert_eq!(out.get("copper").copied(), Some(50));
+        assert!(!valid, "lead 25 is not stored");
     }
 
     #[test]
