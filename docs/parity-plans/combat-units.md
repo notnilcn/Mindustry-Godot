@@ -1063,6 +1063,15 @@ spawn team-1 dagger adjacent, apply `SimCommand::Payload{kind:0, target:Some(seq
 assert dagger entity gone and `UnitPayloads.stack.len()==1`, move carrier,
 `kind:2`, assert a dagger exists at the new spot.
 
+**Status 2026-10-12:** done — commit 627a093. Both slices landed:
+`UnitPayloads`/`CarriedPayload` on the carrier, `Sim::apply_payload_command`
+with `requestUnitPayload`/`requestBuildPayload`/`requestDropPayload` gates and
+the cursor fallback, `SimRuntime::pickup_building` (no refunds), drop places
+buildings through `runtime_place` and respawns units with stored health.
+Tests: `mega_picks_up_and_drops_dagger`, `mega_picks_up_and_drops_building`.
+Remaining (§11.3 step 4): `UnitPayloads` is not in the unit save chunk — a
+carried payload is lost on save/load.
+
 ---
 
 ## 12. Other gaps found (not ledger items yet; report them)
