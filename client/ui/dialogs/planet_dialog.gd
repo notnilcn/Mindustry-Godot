@@ -69,18 +69,24 @@ func shown() -> void:
 	# sector the page opens on that sector's planet, never the chooser.
 	_adopt_current_sector()
 	# A planet already chosen restores the planet view. Otherwise the first-run
-	# chooser is shown only when no planet has a base (`PlanetDialog.java:183`
-	# `!settings.getBool("campaignselect") && !content.planets().contains(p ->
-	# p.sectors.contains(Sector::hasBase))`); a returning player opens straight
-	# on the planet page (PAR-0158).
+	# chooser is shown only when no planet has a base and the player never chose
+	# (`PlanetDialog.java:183` `!settings.getBool("campaignselect") &&
+	# !content.planets().contains(p -> p.sectors.contains(Sector::hasBase))`);
+	# a returning player opens straight on the page (PAR-0158).
+	var chooser_shown := false
 	if _selected_planet.is_empty():
 		var based := _planets_with_base()
-		if based.is_empty():
+		if not _flag("campaignselect") and based.is_empty():
 			_show_select()
+			chooser_shown = true
 		else:
 			_show_planet(_boot_planet(based))
 	else:
 		_show_planet(_selected_planet)
+	# `PlanetDialog.java:216-222`: after a Serpulo remap the one-time "Campaign
+	# Changes Notice" shows, but only when the chooser branch was not taken.
+	if not chooser_shown:
+		call_deferred("_maybe_show_remap_notice")
 
 
 func hidden() -> void:
@@ -148,13 +154,47 @@ func _planets_with_base() -> Array:
 ## Planet the page opens on when the chooser is skipped (`PlanetDialog`
 ## constructor: `state.planet = settings.getString("lastplanet", "serpulo")`,
 ## then `show()` falls back to serpulo when that planet is not `selectable`).
-## The port has no GDScript accessor for the `lastplanet` key yet, so the Java
-## default (serpulo) is used when it is selectable (has a base or is the
-## always-unlocked start planet), else the first planet with a base.
+## `selectable` here: a landable planet (`accessible`) or one the player has a
+## base on; fall back to the first planet with a base, then serpulo (PAR-0158).
 func _boot_planet(based: Array) -> String:
-	if based.has("serpulo") or not _find_planet("serpulo").is_empty():
-		return "serpulo"
-	return str(based[0])
+	var last := _text("lastplanet", "serpulo")
+	var planet := _find_planet(last)
+	if not planet.is_empty() and (based.has(last) or bool(planet.get("accessible", false))):
+		return last
+	if not based.is_empty():
+		return str(based[0])
+	return "serpulo"
+
+
+## `Core.settings.getBool(key)` through the MindUi store (false when the
+## accessor is unavailable).
+func _flag(key: String) -> bool:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("settings_get_flag"):
+		return bool(ui.call("settings_get_flag", key))
+	return false
+
+
+## `Core.settings.getString(key, default)` through the MindUi store.
+func _text(key: String, default: String) -> String:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("settings_get_text"):
+		return str(ui.call("settings_get_text", key, default))
+	return default
+
+
+## `Core.settings.put(key, value)` (bool) through the MindUi store.
+func _put_flag(key: String, value: bool) -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("settings_put_flag"):
+		ui.call("settings_put_flag", key, value)
+
+
+## `Core.settings.put(key, value)` (string) through the MindUi store.
+func _put_text(key: String, value: String) -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("settings_put_text"):
+		ui.call("settings_put_text", key, value)
 
 
 ## Full-screen starfield behind the chooser (`sprites/space.png`; the live g3d
@@ -521,10 +561,39 @@ func _disc_style(planet: Dictionary) -> StyleBoxFlat:
 	return box
 
 
+## `PlanetDialog` chooser OK (`PlanetDialog.java:207-213`): `state.planet =
+## selected; selectSector(state.planet.getStartSector());
+## settings.put("campaignselect", true)`.
 func _on_select_ok() -> void:
 	if _selected_planet.is_empty():
 		return
+	_put_flag("campaignselect", true)
+	var planet := _find_planet(_selected_planet)
+	if not planet.is_empty():
+		_selected_sector = int(planet.get("start_sector", -1))
 	_show_planet(_selected_planet)
+
+
+## `PlanetDialog.java:216-222`: the one-time Serpulo remap notice
+## (`hadSerpuloRemaps && settings.getBoolOnce("serpulo-remaps-notice")`).
+## Deferred: `shown()` runs inside `MindUi.open_dialog`, which mutably binds
+## `MindUi`; a nested `open_dialog` must wait for that call to return (PAR-0066).
+func _maybe_show_remap_notice() -> void:
+	var campaign := campaign_node()
+	if campaign == null or not campaign.has_method("take_serpulo_remaps_notice"):
+		return
+	if not bool(campaign.call("take_serpulo_remaps_notice")):
+		return
+	var ui := get_node_or_null("/root/MindUi")
+	if ui == null:
+		return
+	ui.call(
+		"open_dialog", "full_text",
+		JSON.stringify({
+			"title": _t("@campaign.rework.title"),
+			"text": _tm("@campaign.rework.serpulo"),
+		})
+	)
 
 
 # --- Planet view --------------------------------------------------------------
@@ -532,6 +601,9 @@ func _on_select_ok() -> void:
 ## `PlanetDialog.setup`: globe + left planet/difficulty rail + bottom sector
 ## panel (`@sectors` readout with the in-panel action button).
 func _show_planet(planet_name: String, select_default := true) -> void:
+	# `PlanetDialog.java:247,902`: showing/switching a planet records it so the
+	# next boot reopens on it.
+	_put_text("lastplanet", planet_name)
 	_selected_planet = planet_name
 	_chooser_active = false
 	_clear_dimmed_footer()
@@ -1385,9 +1457,39 @@ func _on_sector_select_chosen(sector_id: int) -> void:
 	_open_launch_loadout(_selected_planet, sector_id)
 
 
+## The loadout row for a `Schematics.all` index, or `{}`.
+func _find_loadout_row(index: int) -> Dictionary:
+	for loadout_variant in campaign_section("loadouts"):
+		var loadout: Dictionary = loadout_variant
+		if int(loadout.get("index", -1)) == index:
+			return loadout
+	return {}
+
+
+## `PlanetDialog.playSelected`: the chosen schematic's requirements merged with
+## `universe.getLaunchResources()` (sum per item) as `[{item, amount}]` stacks.
+func _loadout_launch_stacks(row: Dictionary) -> Array:
+	var totals: Dictionary = {}
+	for requirement in row.get("requirements", []):
+		var item := str(requirement[0])
+		totals[item] = int(totals.get(item, 0)) + int(requirement[1])
+	var campaign := campaign_node()
+	if campaign != null and campaign.has_method("get_launch_resource_stacks"):
+		var parsed: Variant = JSON.parse_string(str(campaign.call("get_launch_resource_stacks")))
+		if parsed is Dictionary:
+			for item in parsed:
+				var name := str(item)
+				totals[name] = int(totals.get(name, 0)) + int(parsed[item])
+	var stacks: Array = []
+	for item in totals:
+		stacks.append({"item": str(item), "amount": int(totals[item])})
+	return stacks
+
+
 ## Enters the sector. `resume` uses the existing-base path
-## (`Control.playSector`; WS2 contract) and `loadout` selects the launch
-## schematic (`universe.updateLoadout`; WS2 contract).
+## (`Control.playSector`); `loadout >= 0` is a launcher launch with the chosen
+## schematic's requirements + launch resources (`PlanetDialog.playSelected`);
+## `loadout < 0` is the free launch (`universe.clearLoadoutInfo`).
 func _launch(planet_name: String, sector_id: int, loadout: int = -1, resume: bool = false) -> void:
 	if sector_id < 0:
 		return
@@ -1402,13 +1504,31 @@ func _launch(planet_name: String, sector_id: int, loadout: int = -1, resume: boo
 	if campaign != null:
 		if resume and campaign.has_method("play_sector"):
 			started = bool(campaign.call("play_sector", planet_name, sector_id))
+		elif loadout >= 0 and campaign.has_method("start_sector_with_loadout"):
+			# `PlanetDialog.playSelected` launcher branch (PAR-0085): the chosen
+			# schematic's build cost plus `universe.getLaunchResources()` is
+			# removed from the launcher sector and stocked into the new core.
+			var row := _find_loadout_row(loadout)
+			var stacks := _loadout_launch_stacks(row)
+			var launcher := _find_launcher(planet_name)
+			if not launcher.is_empty():
+				campaign.call(
+					"remove_sector_items",
+					planet_name,
+					int(launcher.get("id", -1)),
+					JSON.stringify(stacks)
+				)
+			started = bool(campaign.call(
+				"start_sector_with_loadout",
+				planet_name,
+				sector_id,
+				JSON.stringify({"core": str(row.get("core", "")), "stacks": stacks})
+			))
 		elif campaign.has_method("start_sector"):
-			# `MindCampaign.start_sector(planet, sector)` takes no loadout
-			# parameter, and `start_sector_with_loadout` expects item-stack JSON
-			# the dialog does not build yet. Launch without the selection instead
-			# of calling a 3-arg `start_sector` (that `callv` errored with
-			# "function has 2 parameters" and tripped break-on-error, pausing the
-			# game even though the fallback then started the sector).
+			# Free launch with no launcher: `universe.clearLoadoutInfo()` then
+			# `control.playSector(sector)` (PAR-0085/PAR-0054).
+			if campaign.has_method("clear_loadout_info"):
+				campaign.call("clear_loadout_info")
 			started = bool(campaign.call("start_sector", planet_name, sector_id))
 	_close()
 	if started:

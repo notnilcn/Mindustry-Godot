@@ -329,6 +329,10 @@ impl MindCampaign {
         if saves_result.autosaved
             && let Some(file) = self.saves.current_slot().map(|slot| slot.file.clone())
         {
+            // `SaveVersion.writeMeta` -> `state.rules.sector.saveInfo()`: the
+            // live sector record (core snapshot, items, production, wave) lands
+            // in settings next to the autosave (PAR-0153).
+            self.persist_sector_record();
             host.bind_mut()
                 .request_save(GString::from(file.to_string_lossy().as_ref()), false);
             self.saving_finish_tick = Some(tick.saturating_add(3));
@@ -579,8 +583,8 @@ impl MindCampaign {
             );
         }
 
-        // Optional launch loadout (GAP-10). A campaign launch without an
-        // explicit loadout carries an EMPTY loadout: the `Rules` default
+        // Optional launch loadout (`GAP-10`/PAR-0085). A campaign launch without
+        // an explicit loadout carries an EMPTY loadout: the `Rules` default
         // (`copper x100`) is the custom-game default and must not stock a
         // campaign core. Java's reference Ground Zero resume save stores
         // `loadout:[]` (runs/20261009-065416-ref-ground-zero/checkpoints/
@@ -589,10 +593,7 @@ impl MindCampaign {
         // add nothing (PAR-0056).
         if loadout_json.to_string().trim().is_empty() {
             self.session.rules.loadout.clear();
-        } else if let Ok(stacks) = serde_json::from_str::<
-            Vec<mind_core::io::json::content_serde::JsonItemStack>,
-        >(&loadout_json.to_string())
-        {
+        } else if let Some(stacks) = parse_loadout_stacks(&loadout_json.to_string()) {
             self.session.rules.loadout = stacks;
         }
 
@@ -692,6 +693,28 @@ impl MindCampaign {
             && !host.bind_mut().spawn_player_unit()
         {
             log::warn!("start_sector: player unit spawn failed");
+        }
+
+        // `Trigger.newGame` (`Control.java:198-222`): the core drops in with the
+        // 160-tick landing cutscene unless `skipcoreanimation` or a PvP rule set
+        // (PAR-0131). The scaled core sprite/fade/announce ride the camera's
+        // `get_land_time_in` from the UI; the core block name is unused until
+        // that draw lands.
+        if installed
+            && !self.settings.get_bool("skipcoreanimation", false)
+            && !self.session.rules.pvp
+            && let Some(host) = self.host()
+            && let Some((core_x, core_y)) = host.bind().best_core_position()
+            && let Some(mut camera) = self.base().get_node_or_null("/root/Spine/World/Camera2D")
+        {
+            camera.call(
+                "show_landing",
+                &[
+                    core_x.to_variant(),
+                    core_y.to_variant(),
+                    GString::new().to_variant(),
+                ],
+            );
         }
 
         self.registry = Some(registry);
@@ -1687,6 +1710,24 @@ impl MindCampaign {
         }
     }
 
+    /// `Vars.hadSerpuloRemaps && settings.getBoolOnce("serpulo-remaps-notice")`:
+    /// Java shows the one-time "Campaign Changes Notice" dialog after a Serpulo
+    /// remap (`PlanetDialog.java:216-222`). `had_serpulo_remaps` is only true in
+    /// the boot that performed the remap (same as Java's static flag), so this
+    /// consumes the notice flag once and reports whether to show it.
+    #[func]
+    pub fn take_serpulo_remaps_notice(&mut self) -> bool {
+        if !self.saves.had_serpulo_remaps || self.settings.get_bool("serpulo-remaps-notice", false)
+        {
+            return false;
+        }
+        self.settings.put_bool("serpulo-remaps-notice", true);
+        if let Err(error) = self.settings.force_save(&NativeFs, &self.paths) {
+            log::warn!("remap notice flush failed: {error}");
+        }
+        true
+    }
+
     /// The live runtime's sector record when a host is attached, else the
     /// facade copy's record.
     fn runtime_or_facade_record(
@@ -2078,6 +2119,36 @@ impl MindCampaign {
         out
     }
 
+    /// `Universe.getLaunchResources` as a `{item name: amount}` JSON object for
+    /// the launch dialogs (`LaunchLoadoutDialog` merges it with the schematic
+    /// requirements; PAR-0085). Only nonzero entries are reported.
+    #[func]
+    pub fn get_launch_resource_stacks(&mut self) -> GString {
+        let resources = self
+            .campaign
+            .as_mut()
+            .map(|campaign| {
+                campaign
+                    .universe
+                    .get_launch_resources(&self.settings)
+                    .to_vec()
+            })
+            .unwrap_or_default();
+        let Some(registry) = self.registry.as_ref() else {
+            return GString::from("{}");
+        };
+        let mut out = serde_json::Map::new();
+        for (index, item) in registry.items().iter().enumerate() {
+            let Some(amount) = resources.get(index).copied() else {
+                break;
+            };
+            if amount > 0 {
+                out.insert(item.name.clone(), serde_json::json!(amount));
+            }
+        }
+        GString::from(serde_json::Value::Object(out).to_string().as_str())
+    }
+
     /// `Universe.updateLaunchResources` from a JSON `[n, ...]` sequence.
     #[func]
     pub fn update_launch_resources_json(&mut self, json: GString) -> bool {
@@ -2120,6 +2191,55 @@ impl MindCampaign {
         campaign
             .universe
             .update_loadout(&mut self.settings, &core.to_string(), file_name);
+        self.persist();
+        true
+    }
+
+    /// `Universe.clearLoadoutInfo`: a free launch (no launcher sector) drops
+    /// the stored loadout + launch resources (`PlanetDialog.playSelected`).
+    #[func]
+    pub fn clear_loadout_info(&mut self) -> bool {
+        let Some(campaign) = self.campaign.as_mut() else {
+            return false;
+        };
+        campaign.universe.clear_loadout_info(&mut self.settings);
+        self.persist();
+        true
+    }
+
+    /// `Sector.removeItems`: subtracts `[{item, amount}]` stacks from a
+    /// sector's stored items (clamped at 0) and persists (PAR-0085 launch
+    /// cost, applied to the launcher sector before the launch).
+    #[func]
+    pub fn remove_sector_items(
+        &mut self,
+        planet: GString,
+        sector: i32,
+        stacks_json: GString,
+    ) -> bool {
+        if sector < 0 {
+            return false;
+        }
+        let Ok(stacks) = serde_json::from_str::<
+            Vec<mind_core::io::json::content_serde::JsonItemStack>,
+        >(&stacks_json.to_string()) else {
+            return false;
+        };
+        let planet_name = planet.to_string();
+        let Some(campaign) = self.campaign.as_mut() else {
+            return false;
+        };
+        let Some(planet_id) = campaign.planet_id_by_name(&planet_name) else {
+            return false;
+        };
+        let Some(record) = campaign.sector_mut(planet_id, sector as u16) else {
+            return false;
+        };
+        record.remove_items(
+            stacks
+                .iter()
+                .filter_map(|stack| stack.item.clone().map(|item| (item, stack.amount))),
+        );
         self.persist();
         true
     }
@@ -2406,6 +2526,17 @@ fn sanitize_slot_name(name: &str) -> String {
     name.chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_' || *c == '.')
         .collect()
+}
+
+/// Parses a launch-loadout payload: the dialog envelope
+/// `{"core": ..., "stacks": [...]}` (`PlanetDialog.playSelected`) or the legacy
+/// bare `[{item, amount}]` array.
+fn parse_loadout_stacks(
+    json: &str,
+) -> Option<Vec<mind_core::io::json::content_serde::JsonItemStack>> {
+    let value: serde_json::Value = serde_json::from_str(json).ok()?;
+    let stacks = value.get("stacks").cloned().unwrap_or(value);
+    serde_json::from_value(stacks).ok()
 }
 
 /// Clears one campaign sector's persisted base/items

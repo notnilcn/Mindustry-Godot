@@ -167,6 +167,21 @@ screenshot; compare a node with partial progress in the Java profile, e.g.
 Acceptance: the lancer node shows 1900 silicon already paid. If not, the bug
 is in `mind-core/src/game/tech_tree.rs:229` load path; report it.
 
+**Status 2026-10-12:** A1.1 **pass** — slot 3 (sandbox) loads and renders; the
+plan's named map "Ancient Caldera" wave 16 is actually slot **7**, which loads
+with 40 buildings (core-acropolis + 4 power sources, wave 16 in state);
+`runs/20261012-session5/slot3-loaded.png`, `slot7-ancient-caldera.png`. A1.2
+**fail** (filed as a new gap, not fixed inside A): lancer is already unlocked in
+the imported profile, and the read model carries no requirement data at all for
+it (`requirements: []`, `finished: []`); 374 of 375 nodes have empty
+`requirements` because `TechTreeBuilder` never materializes
+`content.researchRequirements()` (only `tech_tree::effective_requirements()` at
+spend/complete time loads `req-` progress), so the research dialog cannot show
+costs or partial payments for any node. The dialog also renders the raw
+`techtree.<null>` key. Evidence: `research-before.png`; compare
+`python3 -I /tmp/s5/arcset.py /tmp/s5/prof/settings.bin '^req-lancer'`
+(silicon 1900 / lead 2200 / copper 1900 / titanium 900).
+
 #### A2. Legacy remap residuals (new gaps)
 
 Symptom 1: after the remap the planet camera still looks at legacy cell 15
@@ -217,6 +232,16 @@ the planet page -> notice appears once; close, reopen the page -> no notice;
 restart (`tools/session-play.sh 5`) -> no notice. Screenshot
 `runs/20261012-session5/remap-notice.png`.
 Commit: `Planet page: one-time Serpulo remap notice (hadSerpuloRemaps)`.
+
+**Status 2026-10-12:** done — commit `fcc5c12`. Verified by re-extracting the
+zip's `saves/sector-serpulo-15.msav` while the game was stopped, so a live boot
+(rather than the importing process, which remaps and quits) performed the remap
+and could open the planet page: the notice shows once
+(`runs/20261012-session5/remap-notice.png`), reopening the page and a fresh
+restart show no notice, `serpulo-remaps-notice=true` on disk. Note: the
+MindUi/MindCampaign store fan-out (§H gap 1) means a `settings_put_flag` from
+MindUi does not reset MindCampaign's in-memory copy, so the dialog test needs a
+boot whose settings file carries the key.
 
 ---
 
@@ -289,6 +314,16 @@ Tests: in `mind-core/src/game/saves.rs` tests add
 `2 * 60` -> autosaved. (`cargo test -p mind-core --lib saves`.)
 Commit: `Fixes PAR-0153: campaign sector autosave runs on the saveinterval cadence`.
 
+**Status 2026-10-12:** done — commit `3a948bb`. Step 1 passed on the pre-existing
+seconds fix (`saveinterval=10`: `autosave queued` every ~10 s,
+`io_pending()==0`), so only step 4 was needed: `persist_sector_record()` now
+runs with every autosave. In-engine after the fix: `sector-serpulo-170.msav` and
+`config/settings.bin` mtimes advance together each autosave, and a marker wall
+placed at (131,54) survives `--play` restart + resume (hasCore, wave 1);
+evidence `runs/20261012-session5/sector-autosave-resume.png`. New test
+`update_policy_interval_is_seconds`; `cargo test -p mind-core --lib` = 1867
+passed.
+
 ---
 
 ### C. PAR-0158 — "Select Starting Campaign" chooser reappears
@@ -351,6 +386,16 @@ fresh profile (`tools/session-play.sh 5` after moving `$U` aside —
 `mv $U $U.bak`, restore with `mv $U.bak $U`) the key is set:
 `python3 -I /tmp/s5/mgst.py $U/config/settings.bin '^campaignselect|^lastplanet'`.
 Commit: `Fixes PAR-0158: honor campaignselect and lastplanet on the planet page`.
+
+**Status 2026-10-12:** done — commit `bb0e8df`. All three acceptance cases pass:
+(1) imported profile (`campaignselect=true`, `lastplanet=serpulo`) opens the
+page on Serpulo with no chooser (`chooser-skipped-serpulo.png`); (3)
+`_switch_planet("erekir")` writes `lastplanet=erekir` and the next boot reopens
+on Erekir (`planet-erekir.png`, `planet-erekir-after-restart.png`); (2) on a
+fresh profile (moved `$U` aside) the chooser shows (`chooser-fresh.png`), OK
+selects Serpulo's start sector 170 and writes `campaignselect=true` to
+settings.bin, and the next boot skips the chooser
+(`chooser-after-ok-restart.png`). Profile restored from `$U.bak` afterwards.
 
 ---
 
@@ -469,6 +514,27 @@ Pitfall: capturing Ground Zero mutates the session profile; re-import
 Commits: `Fixes PAR-0085: launch with the chosen loadout and launch resources`;
 separate commit for the PAR-0025/26/27 dialog-button parity.
 
+**Status 2026-10-12:** done — commits `abcb17e` (PAR-0085) and `27b59e4`
+(PAR-0025/0026/0027). Steps 1-4 landed; **step 5 (schematic core block) is the
+recorded remainder** of PAR-0085. In-engine fixture: captured Ground Zero,
+gave it 1200 stored copper, launched frozenForest with basicShard (copper 1000
++ lead 800) through Configure Loadout -> Launch; the new core's items are
+exactly `{"copper":1000,"lead":800}`, the launcher's stored copper dropped to
+200, `lastloadout-core-shard` was written (empty string: vanilla loadouts carry
+no `file`, matching Java's `schem.file == null` branch -
+`get_launch_resource_stacks` feeds the resource summary), and Resources opened
+the loadout dialog. Evidence: `launch-loadout.png`,
+`launch-resources-dialog.png`, `frozenforest-launch-loadout.png`. Also needed:
+`play.rs`/`runtime.rs` share `launch_loadout_applies()` because the port has no
+generator loadout seam (`Schematics.placeLaunchLoadout` in Java) and the
+live-core mirror still had the old `Logic.play` gate. Observed but not fixed
+(remainder/gaps): `launch_capacity` is absent from the campaign read model so
+the dialogs show capacity 0; `campaign_views_json` loads only vanilla loadouts
+(`Schematics.load_loadouts`), so imported `user://schematics/*.msch` never
+appear as rows with file names; PAR-0054 is closed by construction (`_launch`
+calls the 2-arg `start_sector`/`start_sector_with_loadout`, no 3-arg arity
+error). Profile was re-imported after the fixture.
+
 ---
 
 ### E. PAR-0131 — no landing cutscene
@@ -539,6 +605,20 @@ Verify: enter Ground Zero, take screenshots at +0.5 s, +1.5 s, +3 s
 Pitfall: `sleep` granularity — gmcp calls take ~1 s each; pause the sim
 (`get_node("/root/Spine/SimHost").set_paused(true)`) to freeze a frame if needed.
 Commit: `Fixes PAR-0131: core landing cutscene (zoom, drop-in, fade, announce)`.
+
+**Status 2026-10-12:** **partial** — commit `bdc29ec` (camera zoom slice).
+Landed: `CoreLandAnimator` (160 ticks, `pow3(0.02, 4)`, push-driven
+`set_land_time_in`), tick-correct `Cutscene` clock, `MindCamera2D` owning the
+cutscene with `show_landing`/`is_cutscene`/`get_land_time_in` and replace-scale
+semantics (the plan's "multiply" would end at 4x the normal zoom; Java replaces
+the display scale, `Renderer.java:186,198`), and the `start_sector_with_loadout`
+trigger (`skipcoreanimation`/pvp gated) for fresh and resume. Verified in-engine:
+`cutscene-t1.png` right after `start_sector` shows the far `landZoomFrom 0.02`
+view (core a speck), `cutscene-t2/t3.png` the normal view after 160 ticks;
+`render::cutscene::tests::core_land_animator_zoom_runs_from_to`. **Remainder:**
+the scaled/rotated core drop-in sprite, the white fade overlay, the landing
+announce (`MindUi.announce` seam exists at `ui_host.rs:339`), and hiding the
+real core sprite while `is_cutscene`.
 
 ---
 

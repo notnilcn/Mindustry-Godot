@@ -18,6 +18,7 @@ use godot::prelude::*;
 use mind_core::config::TILESIZE;
 use mind_core::fx::FxEvent;
 use mind_core::input::{CameraState, MinimapRegion};
+use mind_core::render::cutscene::{CoreLandAnimator, Cutscene};
 
 use crate::input::MindInput;
 use crate::sim_host::MindSimHost;
@@ -54,6 +55,9 @@ pub struct MindCamera2D {
     world_loads: u64,
     /// Smooth-follow target (`None` = detached; manual pan clears it).
     follow_target: Option<(f32, f32)>,
+    /// `Renderer` launch/land cutscene (`landTime`/`camerascale`); drives the
+    /// camera scale while `is_cutscene()` (PAR-0131).
+    cutscene: Cutscene,
 }
 
 #[godot_api]
@@ -71,6 +75,7 @@ impl ICamera2D for MindCamera2D {
             input: None,
             world_dims: (0, 0),
             world_loads: 0,
+            cutscene: Cutscene::new(1.0),
             follow_target: None,
         }
     }
@@ -150,7 +155,20 @@ impl ICamera2D for MindCamera2D {
         self.camera
             .update(delta_frames, self.screenshake, self.view_tick);
 
-        let zoom = self.camera.camerascale.max(0.01);
+        // `Renderer.update` (PAR-0131): a landing cutscene replaces the display
+        // scale with the animator's `zoomLaunch()` (0.02 -> 4, ending at the
+        // normal scale, `Renderer.java:186,198`); otherwise the rig's own scale.
+        let sim_paused = self
+            .host
+            .as_ref()
+            .map(|host| host.bind().is_paused())
+            .unwrap_or(false);
+        self.cutscene.update(delta_frames, sim_paused);
+        let zoom = if self.cutscene.is_cutscene() {
+            self.cutscene.land_scale().max(0.01)
+        } else {
+            self.camera.camerascale.max(0.01)
+        };
         if zoom != self.shadow_scale {
             // Java/Arc projects world `+y` to screen-up (`Camera.unproject`
             // flips the y axis); Godot 2D maps `+y` to screen-down. The world
@@ -180,6 +198,34 @@ impl ICamera2D for MindCamera2D {
 
 #[godot_api]
 impl MindCamera2D {
+    /// `Renderer.showLanding(core)` + `Trigger.newGame` (`Renderer.java:567-574`,
+    /// `Control.java:198-222`; PAR-0131): center the camera on the dropped core
+    /// and run the 160-tick `CoreLandAnimator` zoom. `core_x`/`core_y` are world
+    /// coordinates (`MindSimHost.best_core_position`); `core_block` names the
+    /// dropped core (used by the renderer's scaled-sprite draw).
+    #[func]
+    pub fn show_landing(&mut self, core_x: f32, core_y: f32, core_block: GString) -> bool {
+        let _ = core_block;
+        self.camera.position = (core_x, core_y);
+        self.follow_target = Some((core_x, core_y));
+        self.cutscene = Cutscene::new(self.camera.camerascale.max(0.01));
+        self.cutscene
+            .show_landing(Box::new(CoreLandAnimator::new()));
+        true
+    }
+
+    /// `Renderer.isCutscene()` (landing/launch animation running).
+    #[func]
+    pub fn is_cutscene(&self) -> bool {
+        self.cutscene.is_cutscene()
+    }
+
+    /// `Renderer.getLandTimeIn()` (`0..1` through the landing).
+    #[func]
+    pub fn get_land_time_in(&self) -> f32 {
+        self.cutscene.get_land_time_in()
+    }
+
     /// Rebuilds the rig's Godot-derived state (runs from `ready()` and on
     /// `EXTENSION_RELOADED`, which does not re-run `ready()`).
     fn bootstrap(&mut self) {

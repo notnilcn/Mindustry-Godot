@@ -695,6 +695,42 @@ impl MindUi {
         true
     }
 
+    /// `Core.settings.getBool(key, false)` for arbitrary (campaign) flags such
+    /// as `campaignselect` (`PlanetDialog.java:183`). The store merges only
+    /// changed keys on save (`e0b6089`), so facade reads stay consistent.
+    #[func]
+    pub fn settings_get_flag(&self, key: GString) -> bool {
+        self.settings.get_bool(&key.to_string(), false)
+    }
+
+    /// `Core.settings.put(key, value)` for a boolean flag.
+    #[func]
+    pub fn settings_put_flag(&mut self, key: GString, value: bool) -> bool {
+        self.settings.put_bool(&key.to_string(), value);
+        self.persist_settings();
+        true
+    }
+
+    /// `Core.settings.getString(key, default)` for arbitrary keys such as
+    /// `lastplanet` (`PlanetDialog.java:84`).
+    #[func]
+    pub fn settings_get_text(&self, key: GString, default: GString) -> GString {
+        GString::from(
+            self.settings
+                .get_string(&key.to_string(), &default.to_string())
+                .as_str(),
+        )
+    }
+
+    /// `Core.settings.put(key, value)` for a string value.
+    #[func]
+    pub fn settings_put_text(&mut self, key: GString, value: GString) -> bool {
+        self.settings
+            .put_string(&key.to_string(), &value.to_string());
+        self.persist_settings();
+        true
+    }
+
     /// `Control.java:640` `uiscalechanged`: whether the UI scale was changed
     /// since the last confirmed boot.
     #[func]

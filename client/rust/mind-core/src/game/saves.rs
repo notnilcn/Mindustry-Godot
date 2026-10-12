@@ -704,6 +704,42 @@ mod tests {
     }
 
     #[test]
+    fn update_policy_interval_is_seconds() {
+        // `saveinterval` is seconds (`SettingsMenuDialog`: min 10, step 10);
+        // 9 s must not cross a 10 s interval and +2 s must
+        // (`Saves.java:219` `time > saveinterval * 60` in ticks).
+        let mut settings = SettingsStore::new();
+        settings.put_i32(KEY_SAVE_INTERVAL, 10);
+        let mut saves = Saves::new();
+        saves
+            .slots
+            .push(SaveSlot::new(PathBuf::from("/data/saves/0.msav")));
+        saves.current = Some(0);
+        saves.slots[0].set_autosave(&mut settings, true);
+        let update = SavesUpdate {
+            delta_ticks: 9 * 60,
+            is_game: true,
+            paused_with_dialog: false,
+            game_over: false,
+            is_campaign: true,
+        };
+        let interval = settings.get_i32(KEY_SAVE_INTERVAL, DEFAULT_SAVE_INTERVAL_SECONDS);
+        assert!(!saves.update_policy(update, &settings, interval).autosaved);
+        let crossed = saves.update_policy(
+            SavesUpdate {
+                delta_ticks: 2 * 60,
+                ..update
+            },
+            &settings,
+            interval,
+        );
+        assert!(crossed.autosaved);
+        assert!(saves.is_saving());
+        saves.finish_saving();
+        assert!(!saves.is_saving());
+    }
+
+    #[test]
     fn update_policy_accrues_playtime_and_suspends_while_paused() {
         let mut settings = SettingsStore::new();
         settings.put_i32(KEY_SAVE_INTERVAL, 1);
