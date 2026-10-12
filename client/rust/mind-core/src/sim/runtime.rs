@@ -1075,7 +1075,14 @@ impl Sim {
             .ecs
             .0
             .iter_entities()
-            .filter(|entity| entity.contains::<crate::ecs::EntitySeq>())
+            .filter(|entity| {
+                // Sim entities plus the fires/puddles that carry no
+                // `EntitySeq` (`Groups.clear` drops every group on a world
+                // reset; PAR-0090).
+                entity.contains::<crate::ecs::EntitySeq>()
+                    || entity.contains::<crate::combat::fires::FireState>()
+                    || entity.contains::<crate::combat::puddles::PuddleState>()
+            })
             .map(|entity| entity.id())
             .collect();
         for entity in entities {
