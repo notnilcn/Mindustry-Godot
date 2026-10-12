@@ -28,6 +28,9 @@ var _root: MindTable = null
 var _selected_planet: String = ""
 var _selected_sector: int = -1
 var _ok_button: Button = null
+## Last `lastplanet` value written this session (T9: the settings write is a
+## full read-merge-write, so only write when the planet actually changes).
+var _last_planet_written: String = ""
 ## True while the first-run chooser is up (`_show_select`): the Java chooser is
 ## modal and has no close path — ESC/back must not dismiss it (PAR-0013).
 var _chooser_active := false
@@ -602,8 +605,11 @@ func _maybe_show_remap_notice() -> void:
 ## panel (`@sectors` readout with the in-panel action button).
 func _show_planet(planet_name: String, select_default := true) -> void:
 	# `PlanetDialog.java:247,902`: showing/switching a planet records it so the
-	# next boot reopens on it.
-	_put_text("lastplanet", planet_name)
+	# next boot reopens on it. Writing `lastplanet` is a full settings.bin
+	# read-merge-write, so only write when the value changes (T9).
+	if _last_planet_written != planet_name:
+		_put_text("lastplanet", planet_name)
+		_last_planet_written = planet_name
 	_selected_planet = planet_name
 	_chooser_active = false
 	_clear_dimmed_footer()
