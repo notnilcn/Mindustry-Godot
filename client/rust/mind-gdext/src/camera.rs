@@ -349,6 +349,14 @@ impl MindCamera2D {
         )
     }
 
+    /// Viewport position → world pixels (`Camera.unproject`; the exact cursor
+    /// point `InputHandler.mouseWorldX/Y` hands to `Units.closestOverlap`).
+    #[func]
+    pub fn screen_to_world(&self, x: f64, y: f64) -> Vector2 {
+        let canvas = self.base().get_canvas_transform();
+        canvas.affine_inverse() * Vector2::new(x as f32, y as f32)
+    }
+
     /// Tile `(x, y)` → its **center** in viewport coordinates.
     ///
     /// This is the exact point to feed `godot_input mouse_button` with

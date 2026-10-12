@@ -152,7 +152,15 @@ func _update_top_table() -> void:
 		if display == "air" or display == "remove-wall" or display == "remove-ore":
 			display = ""
 	var hover: Dictionary = {}
-	if display.is_empty() and host != null and host.has_method("hover_info"):
+	if display.is_empty() and host != null and host.has_method("hover_info_world"):
+		# `PlacementFragment.hovered`: the world unit test uses the cursor's
+		# world position (`Core.input.mouseWorldX/Y`), not the tile centre (T5).
+		var world: Variant = _mouse_world()
+		if world != null:
+			var info: Variant = host.call("hover_info_world", world.x, world.y)
+			if info is Dictionary and not str((info as Dictionary).get("kind", "")).is_empty():
+				hover = info
+	elif display.is_empty() and host != null and host.has_method("hover_info"):
 		var tile: Variant = _mouse_tile()
 		if tile != null:
 			var info: Variant = host.call("hover_info", int(tile.x), int(tile.y))
@@ -195,6 +203,20 @@ func _mouse_tile() -> Variant:
 		return null
 	var mouse := get_viewport().get_mouse_position()
 	return camera.call("screen_to_tile", mouse.x, mouse.y)
+
+
+## The cursor in world pixels (`Core.input.mouseWorldX/Y`), or `null` while any
+## UI holds the mouse (same guard as `_mouse_tile`). T5: the hover unit test
+## must use this point, not the tile centre.
+func _mouse_world() -> Variant:
+	var hovered := get_tree().root.gui_get_hovered_control()
+	if hovered != null and hovered.mouse_filter == Control.MOUSE_FILTER_STOP:
+		return null
+	var camera := get_node_or_null("/root/Spine/World/Camera2D")
+	if camera == null or not camera.has_method("screen_to_world"):
+		return null
+	var mouse := get_viewport().get_mouse_position()
+	return camera.call("screen_to_world", mouse.x, mouse.y)
 
 
 ## Rebuilds the header + rows for a state change (`topTable.clear()` path).

@@ -46,6 +46,8 @@ pub struct UnitDraw {
     pub healthf: f32,
     /// Flight elevation `0..=1` (`UnitCore.elevation`).
     pub elevation: f32,
+    /// Unit hit radius (`UnitType.hitSize`); `Units.closestOverlap` adds half.
+    pub hit_size: f32,
     /// Mech walk state (`MechComp`); `None` for non-mechs.
     pub mech: Option<MechDraw>,
     /// Live weapon mounts (`UnitWeapons`).
@@ -2182,6 +2184,7 @@ impl MindSimHost {
                     team,
                     healthf,
                     elevation: core.elevation,
+                    hit_size: def.hit_size,
                     mech,
                     weapons,
                 })
@@ -2746,6 +2749,44 @@ impl MindSimHost {
         out
     }
 
+    /// Cursor hover at world pixels (`PlacementFragment.hovered`):
+    /// `Units.closestOverlap(player.team(), Core.input.mouseWorldX/Y, 5f,
+    /// u -> !u.isLocal() && u.displayable())` — the distance test adds half
+    /// the hit size, and the cursor position (not the tile centre) is used.
+    #[func]
+    pub fn hover_info_world(&self, wx: f32, wy: f32) -> Dictionary<GString, Variant> {
+        let size = mind_core::config::TILESIZE as f32;
+        let team = self.player_team();
+        let own = self.sim.player_unit_position();
+        let unit = self
+            .unit_draws_full()
+            .into_iter()
+            .filter(|unit| unit.team == team)
+            .filter(|unit| own != Some((unit.x, unit.y)))
+            .find(|unit| (unit.x - wx).hypot(unit.y - wy) <= 5.0 + unit.hit_size / 2.0)
+            .map(|unit| unit.name);
+        if let Some(name) = unit {
+            let mut out = Dictionary::new();
+            out.set("kind", &"unit".to_variant());
+            out.set("name", &GString::from(name.as_str()).to_variant());
+            out.set(
+                "icon",
+                &GString::from(format!("unit-{name}-ui").as_str()).to_variant(),
+            );
+            out.set(
+                "label",
+                &GString::from(format!("unit.{name}.name").as_str()).to_variant(),
+            );
+            return out;
+        }
+        // `world.tileWorld`/`screenToTile` fallback (Java recomputes the tile
+        // from the mouse world position).
+        self.hover_tile(
+            ((wx + size / 2.0) / size).floor() as i32,
+            ((wy + size / 2.0) / size).floor() as i32,
+        )
+    }
+
     /// Hover target at tile `(x, y)` (`PlacementFragment.hovered`): a unit
     /// within 5 world px of the tile centre, else the tile's building, else the
     /// tile's displayable drop (`Tile.displayable`/`Tile.display`).
@@ -2753,9 +2794,6 @@ impl MindSimHost {
     #[func]
     pub fn hover_info(&self, x: i32, y: i32) -> Dictionary<GString, Variant> {
         let mut out = Dictionary::new();
-        let Some(content) = self.content_snapshot.as_ref() else {
-            return out;
-        };
         let size = mind_core::config::TILESIZE as f32;
         let cx = x as f32 * size;
         let cy = y as f32 * size;
@@ -2785,6 +2823,16 @@ impl MindSimHost {
             );
             return out;
         }
+        // `world.tileWorld` is null off the map handled by `hover_tile`.
+        self.hover_tile(x, y)
+    }
+
+    /// Tile hover rows only (`hover_info` minus the unit test).
+    fn hover_tile(&self, x: i32, y: i32) -> Dictionary<GString, Variant> {
+        let mut out = Dictionary::new();
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return out;
+        };
         // `world.tileWorld` is null off the map: no hover info.
         if !self.sim.grid.tiles.in_bounds(x, y) {
             return out;
