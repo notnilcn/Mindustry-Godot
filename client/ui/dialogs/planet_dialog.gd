@@ -69,13 +69,13 @@ func shown() -> void:
 	# sector the page opens on that sector's planet, never the chooser.
 	_adopt_current_sector()
 	# A planet already chosen restores the planet view. Otherwise the first-run
-	# chooser is shown only when no planet has a base (`PlanetDialog.java:183`
-	# `!settings.getBool("campaignselect") && !content.planets().contains(p ->
-	# p.sectors.contains(Sector::hasBase))`); a returning player opens straight
-	# on the planet page (PAR-0158).
+	# chooser is shown only when no planet has a base and the player never chose
+	# (`PlanetDialog.java:183` `!settings.getBool("campaignselect") &&
+	# !content.planets().contains(p -> p.sectors.contains(Sector::hasBase))`);
+	# a returning player opens straight on the page (PAR-0158).
 	if _selected_planet.is_empty():
 		var based := _planets_with_base()
-		if based.is_empty():
+		if not _flag("campaignselect") and based.is_empty():
 			_show_select()
 		else:
 			_show_planet(_boot_planet(based))
@@ -148,13 +148,47 @@ func _planets_with_base() -> Array:
 ## Planet the page opens on when the chooser is skipped (`PlanetDialog`
 ## constructor: `state.planet = settings.getString("lastplanet", "serpulo")`,
 ## then `show()` falls back to serpulo when that planet is not `selectable`).
-## The port has no GDScript accessor for the `lastplanet` key yet, so the Java
-## default (serpulo) is used when it is selectable (has a base or is the
-## always-unlocked start planet), else the first planet with a base.
+## `selectable` here: a landable planet (`accessible`) or one the player has a
+## base on; fall back to the first planet with a base, then serpulo (PAR-0158).
 func _boot_planet(based: Array) -> String:
-	if based.has("serpulo") or not _find_planet("serpulo").is_empty():
-		return "serpulo"
-	return str(based[0])
+	var last := _text("lastplanet", "serpulo")
+	var planet := _find_planet(last)
+	if not planet.is_empty() and (based.has(last) or bool(planet.get("accessible", false))):
+		return last
+	if not based.is_empty():
+		return str(based[0])
+	return "serpulo"
+
+
+## `Core.settings.getBool(key)` through the MindUi store (false when the
+## accessor is unavailable).
+func _flag(key: String) -> bool:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("settings_get_flag"):
+		return bool(ui.call("settings_get_flag", key))
+	return false
+
+
+## `Core.settings.getString(key, default)` through the MindUi store.
+func _text(key: String, default: String) -> String:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("settings_get_text"):
+		return str(ui.call("settings_get_text", key, default))
+	return default
+
+
+## `Core.settings.put(key, value)` (bool) through the MindUi store.
+func _put_flag(key: String, value: bool) -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("settings_put_flag"):
+		ui.call("settings_put_flag", key, value)
+
+
+## `Core.settings.put(key, value)` (string) through the MindUi store.
+func _put_text(key: String, value: String) -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("settings_put_text"):
+		ui.call("settings_put_text", key, value)
 
 
 ## Full-screen starfield behind the chooser (`sprites/space.png`; the live g3d
@@ -521,9 +555,16 @@ func _disc_style(planet: Dictionary) -> StyleBoxFlat:
 	return box
 
 
+## `PlanetDialog` chooser OK (`PlanetDialog.java:207-213`): `state.planet =
+## selected; selectSector(state.planet.getStartSector());
+## settings.put("campaignselect", true)`.
 func _on_select_ok() -> void:
 	if _selected_planet.is_empty():
 		return
+	_put_flag("campaignselect", true)
+	var planet := _find_planet(_selected_planet)
+	if not planet.is_empty():
+		_selected_sector = int(planet.get("start_sector", -1))
 	_show_planet(_selected_planet)
 
 
@@ -532,6 +573,9 @@ func _on_select_ok() -> void:
 ## `PlanetDialog.setup`: globe + left planet/difficulty rail + bottom sector
 ## panel (`@sectors` readout with the in-panel action button).
 func _show_planet(planet_name: String, select_default := true) -> void:
+	# `PlanetDialog.java:247,902`: showing/switching a planet records it so the
+	# next boot reopens on it.
+	_put_text("lastplanet", planet_name)
 	_selected_planet = planet_name
 	_chooser_active = false
 	_clear_dimmed_footer()
