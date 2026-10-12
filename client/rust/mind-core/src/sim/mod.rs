@@ -379,12 +379,15 @@ impl Sim {
     /// [`resolve_wire_target`] (a packed unit id in `x`, else a world-pixel
     /// position) and lands on the member's move target
     /// (`ControllerSlot.target`). Only default-team units whose controller is
-    /// `CommandAI` accept (`isCommandable`). Non-move commands and stances are
-    /// not applied to live units yet (PAR-0140).
+    /// `CommandAI` accept (`isCommandable`) and only commands the unit type
+    /// allows (`CommandAI.command`, CommandAI.java:57-64).
+    ///
+    /// Every registered command id is accepted and stored on the unit
+    /// ([`crate::ai::controller::UnitCommandComp`]); non-move commands clear
+    /// the move target and wait for their controller dispatch
+    /// (`CommandAI.updateUnit`'s `commandController`, ported with the AI kinds).
     fn apply_live_unit_command(&mut self, ids: &[i32], command: u16, x: f32, y: f32) -> usize {
-        if command != MOVE_COMMAND.raw() {
-            return 0;
-        }
+        let command_id = crate::content::UnitCommandId::new(command);
         let Some(runtime) = self
             .ecs
             .0
@@ -395,6 +398,11 @@ impl Sim {
         if runtime.units.is_empty() {
             return 0;
         }
+        // `CommandAI.command` ignores ids that are not registered.
+        if runtime.content.unit_command(command_id).is_none() {
+            return 0;
+        }
+        let is_move = command == MOVE_COMMAND.raw();
         let default_team = self.live_default_team();
         let target = resolve_wire_target(x, y);
         let tile = match target {
@@ -421,10 +429,7 @@ impl Sim {
                 }),
             crate::input::action::CommandTarget::Building(pos) => Some(pos),
         };
-        let Some(tile) = tile else {
-            return 0;
-        };
-        let mut orders: Vec<(Entity, TilePos)> = Vec::new();
+        let mut orders: Vec<(Entity, Option<TilePos>)> = Vec::new();
         for &id in ids {
             let Some(&entity) = runtime.units.iter().find(|&&entity| {
                 self.ecs
@@ -450,16 +455,44 @@ impl Sim {
             if team != default_team || !commandable {
                 continue;
             }
-            orders.push((entity, tile));
+            // `CommandAI.command`: only unit-typed commands are accepted.
+            let allowed = self
+                .ecs
+                .0
+                .get::<crate::entities::comp::unit::comp::UnitTypeComp>(entity)
+                .and_then(|comp| runtime.content.unit(comp.type_id))
+                .is_some_and(|def| {
+                    crate::ai::unit_command_runtime::allows_command(def, command_id)
+                });
+            if !allowed {
+                continue;
+            }
+            // Move orders need a resolvable target; other commands only switch
+            // the active command.
+            let order = if is_move {
+                let Some(tile) = tile else {
+                    continue;
+                };
+                Some(tile)
+            } else {
+                None
+            };
+            orders.push((entity, order));
         }
         let mut ordered = 0usize;
-        for (entity, tile) in orders {
+        for (entity, order) in orders {
+            // `CommandAI.command`: `this.command = command` (CommandAI.java:62);
+            // the move target is cleared when switching away from move.
+            self.ecs
+                .0
+                .entity_mut(entity)
+                .insert(crate::ai::controller::UnitCommandComp(command));
             if let Some(mut slot) = self
                 .ecs
                 .0
                 .get_mut::<crate::ai::controller::ControllerSlot>(entity)
             {
-                slot.target = Some(tile);
+                slot.target = order;
                 ordered += 1;
             }
         }

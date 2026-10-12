@@ -938,6 +938,78 @@ fn destroyed_coal_container_starts_fire() {
     );
 }
 
+/// PAR-0140: every registered command id is accepted for a commandable unit
+/// and stored on it (`CommandAI.command`, CommandAI.java:57-64); move orders
+/// keep the tile path.
+#[test]
+fn live_unit_command_switch_is_stored() {
+    use crate::ai::controller::{AiKind, ControllerSlot, UnitCommandComp};
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+
+    let mut sim = live_sim(48);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let session = PlaySession::new(Rules {
+        default_team: 1,
+        ..Rules::default()
+    });
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+
+    let unit = sim
+        .spawn_live_unit("poly", 1, 100.0, 100.0, 0.0)
+        .expect("poly");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(unit) {
+        slot.kind = AiKind::Command;
+    }
+    let id = sim.ecs.0.get::<crate::ecs::EntitySeq>(unit).expect("seq").0 as i32;
+    let (repair_id, poly_allows) = {
+        let runtime = sim.unit_runtime().expect("rt");
+        let repair = runtime
+            .content
+            .unit_command_by_name("repair")
+            .expect("repair command");
+        let allows = runtime
+            .content
+            .unit_id("poly")
+            .and_then(|id| runtime.content.unit(id))
+            .is_some_and(|def| crate::ai::unit_command_runtime::allows_command(def, repair.id));
+        (repair.id.raw(), allows)
+    };
+    assert!(poly_allows, "poly lists the repair command");
+    assert_eq!(
+        sim.apply_live_unit_command(&[id], repair_id, 0.0, 0.0),
+        1,
+        "the repair command is accepted"
+    );
+    assert_eq!(
+        sim.ecs.0.get::<UnitCommandComp>(unit).copied(),
+        Some(UnitCommandComp(repair_id)),
+        "the active command is stored on the unit"
+    );
+    // A move order keeps the ordered tile (and clears nothing else).
+    assert_eq!(
+        sim.apply_live_unit_command(&[id], crate::sim::command::MOVE_COMMAND.raw(), 200.0, 100.0),
+        1,
+        "move order accepted"
+    );
+    assert!(
+        sim.ecs
+            .0
+            .get::<ControllerSlot>(unit)
+            .and_then(|slot| slot.target)
+            .is_some(),
+        "move target set"
+    );
+}
+
 /// NEW-1: a status applied through the live applier ticks damage every tick
 /// (`StatusComp.update` in the live unit loop).
 #[test]
