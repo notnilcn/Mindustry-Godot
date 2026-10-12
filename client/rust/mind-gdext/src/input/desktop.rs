@@ -1067,6 +1067,26 @@ impl DesktopBridge {
     /// `tileTapped` (`InputHandler.java:1973`): a left tap on a placed building
     /// opens its config UI, or its inventory when it stores items.
     fn tile_tapped(&mut self, x: i32, y: i32) {
+        // `SwitchBlock.SwitchBuild.configTapped`: a tap toggles `enabled` and
+        // returns false, so no panel opens (PAR-0108).
+        if self.block_kind_at(x, y) == Some(BlockKind::SwitchBlock) {
+            let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+                return;
+            };
+            let Some(host) = self.host.clone() else {
+                return;
+            };
+            let enabled = match host.bind().building_enabled(x, y).try_to::<bool>() {
+                Ok(enabled) => enabled,
+                Err(_) => return,
+            };
+            self.emit_action(RemoteAction::Configure {
+                x: tx,
+                y: ty,
+                value: mind_core::world::config::ConfigValue::Bool(!enabled),
+            });
+            return;
+        }
         if let Some(spec) = self.config_spec(x, y) {
             self.effects.push(Effect::OpenBlockConfig {
                 x,
@@ -1377,6 +1397,18 @@ impl DesktopBridge {
 
     // ---- world queries ----
 
+    /// Block kind at a tile (`None` out of bounds/unloaded).
+    pub fn block_kind_at(&self, x: i32, y: i32) -> Option<BlockKind> {
+        let host = self.host.clone()?;
+        let guard = host.bind();
+        let content = guard.content_registry()?;
+        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+            return None;
+        };
+        let block = guard.grid().block_at(TilePos::new(tx, ty))?;
+        content.block(block).map(|def| def.kind)
+    }
+
     /// Block name at a tile (`None` out of bounds/unloaded).
     pub fn block_name_at(&self, x: i32, y: i32) -> Option<String> {
         let host = self.host.clone()?;
@@ -1400,6 +1432,10 @@ impl DesktopBridge {
         let block = guard.grid().block_at(TilePos::new(tx, ty))?;
         let def = content.block(block)?;
         if !def.configurable {
+            return None;
+        }
+        // `SwitchBlock.configTapped` toggles on tap; it never opens a panel.
+        if def.kind == BlockKind::SwitchBlock {
             return None;
         }
         let mut options: Vec<serde_json::Value> = Vec::new();

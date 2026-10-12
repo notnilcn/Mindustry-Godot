@@ -66,3 +66,41 @@ impl BuildingBehavior for SwitchBehavior {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::world::TilePos;
+
+    /// PAR-0108: the boolean config is the inherited `enabled` flag.
+    #[test]
+    fn switch_config_toggles_enabled() {
+        let mut world = World::new();
+        let entity = world
+            .spawn((
+                Building::new(TilePos::new(2, 2), crate::content::BlockId::AIR, 0),
+                crate::entities::comp::TeamComp { team: 0 },
+            ))
+            .id();
+        assert_eq!(
+            SwitchBehavior.config(&world, entity),
+            ConfigValue::Bool(true)
+        );
+        SwitchBehavior.configured(&mut world, entity, None, ConfigValue::Bool(false));
+        assert_eq!(
+            SwitchBehavior.config(&world, entity),
+            ConfigValue::Bool(false)
+        );
+        SwitchBehavior.configured(&mut world, entity, None, ConfigValue::Bool(true));
+        assert_eq!(
+            SwitchBehavior.config(&world, entity),
+            ConfigValue::Bool(true)
+        );
+        // Non-boolean configs are ignored.
+        SwitchBehavior.configured(&mut world, entity, None, ConfigValue::None);
+        assert_eq!(
+            SwitchBehavior.config(&world, entity),
+            ConfigValue::Bool(true)
+        );
+    }
+}

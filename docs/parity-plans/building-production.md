@@ -562,6 +562,15 @@ round-trip entry) lowers to `WorldConfigValue::String` in `resolve_config`;
   `building_enabled` flips. Add a Rust unit test for `SwitchBehavior` configured Bool
   (it may already exist).
 
+**Status 2026-10-12:** done — `tile_tapped` toggles a `SwitchBlock` through
+`RemoteAction::Configure{Bool(!enabled)}` and returns before the panel logic, and `config_spec`
+returns `None` for switches (`configTapped` opens nothing). New `block_kind_at(x,y)` query on the
+desktop bridge. Test: `logic::blocks::switch::tests::switch_config_toggles_enabled`. In-engine on
+Ground Zero 170: a real injected left click (`Input.parse_input_event` at
+`Camera2D.tile_to_screen(140,60)`) flipped a placed switch `true -> false` and a second click
+`false -> true`, with `building_config_json` reading back `true`. Evidence:
+`runs/20261012-session4/PAR-0108-evidence.json`.
+
 ### 7.2 PAR-0093: message and illuminator
 - **Message, Java:** `J/world/blocks/logic/MessageBlock.java:41-60` (`config(String)`:
   length <= `maxTextLength`=400, newlines <= `maxNewlines`=24) and `:109`

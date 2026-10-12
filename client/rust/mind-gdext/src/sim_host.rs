@@ -2336,7 +2336,8 @@ fn block_items_json(sim: &Sim, content: &ContentRegistry, x: i32, y: i32) -> Opt
 
 /// Resolves a Godot `user://` / `res://` path to a native path for plan-04
 /// `NativeFs` (the `SimIoHandler` runs in Godot-free `mind-core`).
-fn globalize(path: &GString) -> std::path::PathBuf {    let requested = path.to_string();
+fn globalize(path: &GString) -> std::path::PathBuf {
+    let requested = path.to_string();
     std::path::PathBuf::from(
         ProjectSettings::singleton()
             .globalize_path(&requested)
