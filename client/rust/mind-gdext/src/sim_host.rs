@@ -1955,6 +1955,44 @@ impl MindSimHost {
         }
     }
 
+    /// Debug/playtest seam: adds `amount` of `item` to the building at (x, y)
+    /// (clamped to `Block.itemCapacity`); returns the amount accepted.
+    #[func]
+    pub fn debug_add_building_items(&mut self, x: i32, y: i32, item: GString, amount: i64) -> i64 {
+        let Ok(amount) = i32::try_from(amount) else {
+            return 0;
+        };
+        let Some(entity) = self.sim.grid.tiles.getn(x, y).and_then(|tile| tile.build) else {
+            return 0;
+        };
+        let Some(item) = self
+            .content_snapshot
+            .as_ref()
+            .and_then(|content| content.item_id(&item.to_string()))
+        else {
+            return 0;
+        };
+        let block = self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::entities::comp::Building>(entity)
+            .map(|building| building.block);
+        let capacity = block
+            .and_then(|block| {
+                self.sim
+                    .ecs
+                    .0
+                    .get_resource::<mind_core::world::block::BlockTable>()
+                    .and_then(|table| table.get(block).map(|inst| inst.def.item_capacity))
+            })
+            .unwrap_or(0);
+        match self.sim.ecs.0.get_mut::<ItemModule>(entity) {
+            Some(mut module) => i64::from(module.add(item, amount, capacity)),
+            None => 0,
+        }
+    }
+
     /// The player unit's build-plan queue as JSON (`BuilderComp.plans`, head
     /// = active): `[{x, y, rotation, block, breaking, progress, stuck}]`.
     #[func]
@@ -2160,6 +2198,18 @@ impl MindSimHost {
     pub fn block_items_json(&self, x: i32, y: i32) -> Option<String> {
         let content = self.content_snapshot.as_ref()?;
         block_items_json(&self.sim, content, x, y)
+    }
+
+    /// Item counts of the building at `(x, y)` as JSON (`{item-name: amount}`),
+    /// `{}` when the tile holds no item-capable building. MCP-facing wrapper
+    /// over [`Self::block_items_json`] (T0 inventory playtest seam).
+    #[func]
+    pub fn building_items_json(&self, x: i32, y: i32) -> GString {
+        GString::from(
+            self.block_items_json(x, y)
+                .unwrap_or_else(|| "{}".to_string())
+                .as_str(),
+        )
     }
 
     /// Installs the opt-in live block runtime (plan-07 `BlockTable` + behaviors)
