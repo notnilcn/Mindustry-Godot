@@ -18,7 +18,9 @@ use super::minitoml::{Document, Value, parse};
 pub struct Row {
     /// Upstream test id, e.g. `ApplicationTests.sorterOutputCorrect`.
     pub upstream: String,
-    /// Owning plan file, e.g. `08_LOGISTICS_IMPLEMENTATION_PLAN.md`.
+    /// Historical owning-plan label, e.g. `08_LOGISTICS_IMPLEMENTATION_PLAN.md`.
+    /// The `plans/` tree was retired on 2026-10-12; the label is provenance
+    /// only and is no longer checked against the filesystem.
     pub owner: String,
     /// Phase key (`P0`..`P8`).
     pub phase: String,
@@ -93,8 +95,8 @@ const VALID_STATUSES: &[&str] = &[
     "tbd",
 ];
 
-/// Structural validation against repo/plan files.
-pub fn check(rows: &[Row], repo: &Path, test_names: Option<&BTreeSet<String>>) -> Vec<String> {
+/// Structural validation of the registry rows.
+pub fn check(rows: &[Row], test_names: Option<&BTreeSet<String>>) -> Vec<String> {
     let mut problems = Vec::new();
 
     let mut primaries: BTreeMap<&str, usize> = BTreeMap::new();
@@ -110,11 +112,6 @@ pub fn check(rows: &[Row], repo: &Path, test_names: Option<&BTreeSet<String>>) -
         }
         if row.owner.is_empty() {
             problems.push(format!("{label}: empty `owner`"));
-        } else if crate::paths::resolve_plan_file(repo, &row.owner).is_none() {
-            problems.push(format!(
-                "{label}: owner plan `{}` does not exist",
-                row.owner
-            ));
         }
         if row.phase.is_empty() {
             problems.push(format!("{label}: empty `phase`"));
@@ -258,21 +255,19 @@ mod tests {
             upstream: "A.test".into(),
             ..rows[0].clone()
         });
-        let repo = crate::paths::find_repo_root(None).expect("repo root");
-        let problems = check(&rows, &repo, None);
+        let problems = check(&rows, None);
         assert!(problems.iter().any(|p| p.contains("2 `primary = true`")));
     }
 
     #[test]
     fn landed_rows_must_resolve_when_list_supplied() {
         let rows = sample();
-        let repo = crate::paths::find_repo_root(None).expect("repo root");
         let mut names = BTreeSet::new();
         names.insert("foo::tests::bar".to_owned());
-        assert!(check(&rows, &repo, Some(&names)).is_empty());
+        assert!(check(&rows, Some(&names)).is_empty());
 
         names.clear();
-        let problems = check(&rows, &repo, Some(&names));
+        let problems = check(&rows, Some(&names));
         assert!(problems.iter().any(|p| p.contains("not found")));
     }
 

@@ -221,7 +221,7 @@ pub fn collect(repo: &Path, tests: Option<&BTreeSet<String>>) -> Result<CheckOut
         };
         let mut result = CheckResult::new(
             "matrix",
-            matrix::check(&matrix_rows, repo, tests),
+            matrix::check(&matrix_rows, tests),
             Some(matrix_rows.len()),
         );
         if let Some(note) = note {
@@ -234,7 +234,7 @@ pub fn collect(repo: &Path, tests: Option<&BTreeSet<String>>) -> Result<CheckOut
         let registry = ChecksumRegistry::load(&repo.join("parity/checksum_registry.json"))?;
         checks.push(CheckResult::new(
             "checksum_registry",
-            registry.check(repo),
+            registry.check(),
             Some(registry.contributors.len()),
         ));
     }

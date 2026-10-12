@@ -67,8 +67,8 @@ impl ChecksumRegistry {
         serde_json::from_str(&text).with_context(|| format!("parsing `{}`", path.display()))
     }
 
-    /// Validates the registry against the crate constant and repo layout.
-    pub fn check(&self, repo: &Path) -> Vec<String> {
+    /// Validates the registry against the crate constant and its own invariants.
+    pub fn check(&self) -> Vec<String> {
         let mut problems = Vec::new();
         if self.format != 1 {
             problems.push(format!("checksum registry: format {} != 1", self.format));
@@ -84,12 +84,6 @@ impl ChecksumRegistry {
             problems.push(format!(
                 "checksum registry: algorithm `{}` != `{CANONICAL_ALGORITHM}`",
                 self.algorithm
-            ));
-        }
-        if crate::paths::resolve_plan_file(repo, &self.owner).is_none() {
-            problems.push(format!(
-                "checksum registry: owner plan `{}` does not exist",
-                self.owner
             ));
         }
         let mut seen = BTreeSet::new();
@@ -158,11 +152,10 @@ mod tests {
     #[test]
     fn committed_registry_matches_core_constant() {
         let registry = ChecksumRegistry::load(&registry_path()).expect("registry");
-        let repo = crate::paths::find_repo_root(None).expect("repo root");
         assert!(
-            registry.check(&repo).is_empty(),
+            registry.check().is_empty(),
             "registry problems: {:?}",
-            registry.check(&repo)
+            registry.check()
         );
         assert!(registry.active_ids().contains(&"game_state"));
     }
@@ -171,10 +164,9 @@ mod tests {
     fn version_mismatch_is_flagged() {
         let mut registry = ChecksumRegistry::load(&registry_path()).expect("registry");
         registry.checksum_version = registry.checksum_version.wrapping_add(1);
-        let repo = crate::paths::find_repo_root(None).expect("repo root");
         assert!(
             registry
-                .check(&repo)
+                .check()
                 .iter()
                 .any(|p| p.contains("checksum_version"))
         );
@@ -183,18 +175,17 @@ mod tests {
     #[test]
     fn fold_order_must_match_active_contributors() {
         let registry = ChecksumRegistry::load(&registry_path()).expect("registry");
-        let repo = crate::paths::find_repo_root(None).expect("repo root");
         assert!(
-            registry.check(&repo).is_empty(),
+            registry.check().is_empty(),
             "committed fold_order: {:?}",
-            registry.check(&repo)
+            registry.check()
         );
 
         let mut missing = registry.clone();
         missing.fold_order.retain(|id| id != "groups");
         assert!(
             missing
-                .check(&repo)
+                .check()
                 .iter()
                 .any(|p| p.contains("missing from fold_order")),
             "a dropped active contributor must be flagged"
@@ -204,7 +195,7 @@ mod tests {
         unknown.fold_order.push("rules".to_owned());
         assert!(
             unknown
-                .check(&repo)
+                .check()
                 .iter()
                 .any(|p| p.contains("not an active contributor")),
             "a non-active fold_order id must be flagged"

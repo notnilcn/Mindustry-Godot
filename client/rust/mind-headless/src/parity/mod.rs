@@ -205,7 +205,7 @@ fn cmd_matrix(
         None => rows.iter().collect(),
     };
     let owned: Vec<matrix::Row> = scope.iter().map(|row| (*row).clone()).collect();
-    let problems = matrix::check(&owned, &repo, names.as_ref());
+    let problems = matrix::check(&owned, names.as_ref());
     if json {
         let value = serde_json::json!({
             "format": 1,
@@ -236,7 +236,7 @@ fn cmd_matrix(
 fn cmd_registry(json: bool, repo: Option<&Path>) -> Result<i32> {
     let repo = find_repo(repo)?;
     let registry = ChecksumRegistry::load(&repo.join("parity/checksum_registry.json"))?;
-    let problems = registry.check(&repo);
+    let problems = registry.check();
     if json {
         let value = serde_json::json!({
             "format": 1,
