@@ -163,6 +163,13 @@ pub trait BuildingBehavior: Send + Sync {
         true
     }
 
+    /// `ItemBridge.linkValid(tile, other, true)` for bridge families; `false`
+    /// for every other block (T11 bridge chaining).
+    fn link_valid_between(&self, world: &World, e: Entity, other: Entity) -> bool {
+        let _ = (world, e, other);
+        false
+    }
+
     /// Inserts family state components at spawn.
     fn create_state(&self, world: &mut World, e: Entity) {
         let _ = (world, e);

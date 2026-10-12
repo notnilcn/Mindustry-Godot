@@ -297,6 +297,12 @@ fn relative_to(origin: TilePos, other: TilePos) -> i8 {
 }
 
 impl BuildingBehavior for ItemBridgeBehavior {
+    /// `ItemBridge.linkValid(tile, other)` (`ItemBridge.java:180-186` uses the
+    /// two-argument form in `findLink`/`playerPlaced`; T11 bridge chaining).
+    fn link_valid_between(&self, world: &World, e: Entity, other: Entity) -> bool {
+        self.link_valid(world, e, other, true)
+    }
+
     fn update_batch(
         &self,
         world: &mut bevy_ecs::world::World,

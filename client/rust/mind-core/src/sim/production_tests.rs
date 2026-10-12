@@ -970,6 +970,69 @@ fn reconstructor_applies_command() {
     assert_eq!(command, Some(rebuild), "configured command applied");
 }
 
+/// T11 (`PowerNode.placed`, `PowerNode.java:400-411`): a freshly placed power
+/// node grabs its potential links (the adjacent generator).
+#[test]
+fn node_autolinks_on_place() {
+    let mut sim = runtime_sim();
+    let generator = place(&mut sim, "combustion-generator", 5, 5);
+    let node = place(&mut sim, "power-node", 9, 5);
+    let generator_pack = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::Building>(generator)
+        .map(|building| building.tile.pack())
+        .expect("generator building");
+    let links = sim
+        .ecs
+        .0
+        .get::<crate::world::modules::PowerModule>(node)
+        .map(|module| module.links.clone())
+        .unwrap_or_default();
+    assert!(
+        links.contains(&generator_pack),
+        "node linked to the generator: {links:?}"
+    );
+}
+
+/// T11 (`BuildingComp.placed`, `BuildingComp.java:1359-1370`): a consumer placed
+/// inside a node's laser range links that node to it (`getNodeLinks`) and the
+/// two graphs merge.
+#[test]
+fn consumer_autolinks_to_node_in_range() {
+    let mut sim = runtime_sim();
+    set_floor(&mut sim, 9, 5, "ore-copper");
+    let node = place(&mut sim, "power-node", 5, 5);
+    let drill = place(&mut sim, "laser-drill", 9, 5);
+    let drill_pack = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::Building>(drill)
+        .map(|building| building.tile.pack())
+        .expect("drill building");
+    let links = sim
+        .ecs
+        .0
+        .get::<crate::world::modules::PowerModule>(node)
+        .map(|module| module.links.clone())
+        .unwrap_or_default();
+    assert!(
+        links.contains(&drill_pack),
+        "node linked to the consumer: {links:?}"
+    );
+    let node_graph = sim
+        .ecs
+        .0
+        .get::<crate::world::modules::PowerModule>(node)
+        .map(|module| module.graph);
+    let drill_graph = sim
+        .ecs
+        .0
+        .get::<crate::world::modules::PowerModule>(drill)
+        .map(|module| module.graph);
+    assert_eq!(node_graph, drill_graph, "graphs merged");
+}
+
 /// Whether a unit of type `unit` exists in the sim.
 fn spawned_unit(sim: &Sim, unit: crate::content::UnitTypeId) -> bool {
     sim.ecs.0.iter_entities().any(|entity| {

@@ -34,7 +34,7 @@ use crate::determinism::{Checksum, Checksummer, CommandError};
 use crate::ecs::{BuildingComp, TeamId};
 use crate::world::block::{BlockError, BlockTable};
 use crate::world::blocks::power::{
-    PowerGrids, PowerNodeConfig, power_graph_removed, update_power_graph,
+    PowerGrids, PowerNodeConfig, power_graph_removed, read_power_info, update_power_graph,
 };
 use crate::world::building_io::{self, DecodedBase};
 use crate::world::config::ConfigValue as WorldConfigValue;
@@ -247,7 +247,94 @@ impl SimRuntime {
             return false;
         }
         self.set_block_raw(world, grid, x, y, block, rot, team);
+        // Instant placement runs the `placed()` hooks too (T11: the plan's
+        // acceptance uses `place_block`, and Java's non-construction placement
+        // sites - `BaseGenerator` - call `placed()` explicitly).
+        if let Some(entity) = grid.entity_at(TilePos::new(x, y)) {
+            let grid_ref: &WorldGrid = grid;
+            self.placed_hooks(world, grid_ref, entity);
+        }
         true
+    }
+
+    /// `BuildingComp.placed()` + `PowerNode.placed()` (T11).
+    ///
+    /// Runs the behavior hook, then the two power auto-link halves:
+    /// `BuildingComp.java:1359-1370` (a power block links each node in range to
+    /// itself) and `PowerNode.java:400-411` (a fresh node with no links grabs
+    /// its potential links). Never called for map materialization or for the
+    /// construct block itself.
+    pub(crate) fn placed_hooks(&mut self, world: &mut World, grid: &WorldGrid, entity: Entity) {
+        if let Some(behavior) = world.get_resource::<BlockTable>().and_then(|table| {
+            world
+                .get::<crate::entities::comp::Building>(entity)
+                .and_then(|building| table.instance(building.block))
+                .map(|inst| inst.behavior.clone())
+        }) {
+            behavior.placed(world, entity);
+        }
+
+        // `BuildingComp.placed`: `(consumesPower || outputsPower) && hasPower
+        // && connectedPower` (`connectedPower` defaults true and is not modeled).
+        if let Some(params) = read_power_info(world, entity)
+            && params.has_power
+            && (params.consumes || params.outputs)
+        {
+            let Some(mut graphs) = world.remove_resource::<PowerGrids>() else {
+                return;
+            };
+            let mut nodes: Vec<Entity> = Vec::new();
+            crate::world::blocks::power::nodes::get_node_links(world, grid, entity, &mut nodes);
+            let pack = crate::world::blocks::power::module::pack(world, entity);
+            for node in nodes {
+                let already = world
+                    .get::<PowerModule>(node)
+                    .is_some_and(|module| module.links.contains(&pack));
+                if !already {
+                    crate::world::blocks::power::nodes::configure_link(
+                        &mut graphs,
+                        world,
+                        grid,
+                        node,
+                        pack,
+                    );
+                }
+            }
+            world.insert_resource(graphs);
+        }
+
+        // `PowerNode.placed`: `!client && power.links.size == 0`.
+        let Some(config) = world.get::<PowerNodeConfig>(entity) else {
+            return;
+        };
+        let links = world
+            .get::<PowerModule>(entity)
+            .map(|module| module.links.len())
+            .unwrap_or(0);
+        if links > 0 || !config.autolink {
+            return;
+        }
+        let Some(mut graphs) = world.remove_resource::<PowerGrids>() else {
+            return;
+        };
+        let mut candidates: Vec<Entity> = Vec::new();
+        crate::world::blocks::power::nodes::get_potential_links(
+            world,
+            grid,
+            entity,
+            &mut candidates,
+        );
+        for other in candidates {
+            let pack = crate::world::blocks::power::module::pack(world, other);
+            crate::world::blocks::power::nodes::configure_link(
+                &mut graphs,
+                world,
+                grid,
+                entity,
+                pack,
+            );
+        }
+        world.insert_resource(graphs);
     }
 
     /// `Build.validPlace` plus the visibility/unlock gate

@@ -26,15 +26,16 @@ use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
-use crate::content::{BlockId, ContentRegistry};
+use crate::content::{BlockId, BlockKind, ContentRegistry};
 use crate::ecs::{BuildingComp, EntitySeq};
 use crate::entities::comp::unit::comp::{HitboxComp, PhysicsComp, StatusComp, UnitTypeComp};
 use crate::entities::comp::{Building, Pos, TeamComp};
 use crate::event::{BlockBrokenEvent, BlockPlacedEvent, SimEvent};
+use crate::world::blocks::distribution::item_bridge::ItemBridgeBuild;
 use crate::world::blocks::storage::core_block::CoreBuild;
 use crate::world::construct::{BuildEconomy, CoreInventory};
 use crate::world::modules::ItemModule;
-use crate::world::{ConstructState, TilePos, WorldGrid};
+use crate::world::{BlockTable, ConstructState, TilePos, WorldGrid};
 
 use super::Sim;
 use super::runtime::SimRuntime;
@@ -101,6 +102,8 @@ pub struct BuilderPlans {
     /// `BuilderComp.updateBuilding`: whether the queue advances at all
     /// (`BuilderComp.updateBuildLogic` returns early when false; PAR-0098 §2b).
     pub update_building: bool,
+    /// `ItemBridge.lastBuild`: the last bridge this builder placed (T11).
+    pub last_bridge: Option<(BlockId, TilePos)>,
 }
 
 impl Default for BuilderPlans {
@@ -110,6 +113,7 @@ impl Default for BuilderPlans {
             build_counter: 0.0,
             // `BuilderComp.updateBuilding = true` upstream.
             update_building: true,
+            last_bridge: None,
         }
     }
 }
@@ -332,6 +336,57 @@ struct BuilderOutcome {
     /// The grid changed (construct begun/finished/removed or rotated).
     changed: bool,
     events: Vec<SimEvent>,
+}
+
+/// `ItemBridge.playerPlaced` (`ItemBridge.java:224-233`; T11): the previously
+/// placed bridge of the same block links itself to the newly built bridge
+/// (`findLink` requires the old bridge to be still unlinked and in range).
+///
+/// Only `ItemBridge`/`BufferedItemBridge` chain; Java's `LiquidBridge` has no
+/// `playerPlaced`/`findLink`.
+fn chain_bridge(
+    world: &mut World,
+    grid: &WorldGrid,
+    runtime: &SimRuntime,
+    placed: Entity,
+    plans: &mut BuilderPlans,
+    block: BlockId,
+    pos: TilePos,
+) {
+    let Some(def) = runtime.content().block(block) else {
+        return;
+    };
+    if !matches!(
+        def.kind,
+        BlockKind::ItemBridge | BlockKind::BufferedItemBridge
+    ) {
+        return;
+    }
+    let previous = plans.last_bridge.filter(|(last_block, last_pos)| {
+        *last_block == block
+            && *last_pos != pos
+            && grid.entity_at(*last_pos).is_some_and(|entity| {
+                world
+                    .get::<ItemBridgeBuild>(entity)
+                    .is_some_and(|bridge| bridge.link == -1)
+            })
+    });
+    if let Some((_, last_pos)) = previous
+        && let Some(last_entity) = grid.entity_at(last_pos)
+        && let Some(table) = world.get_resource::<BlockTable>()
+        && let Some(inst) = table.instance(block)
+        && inst.behavior.link_valid_between(world, placed, last_entity)
+    {
+        // `link.build.configure(tile.pos())`: the old bridge points at the new
+        // one (packed absolute position, the `Number` config path).
+        inst.behavior.configured(
+            world,
+            last_entity,
+            None,
+            crate::world::config::ConfigValue::Number(f64::from(pos.pack())),
+        );
+    }
+    plans.last_bridge = Some((block, pos));
 }
 
 /// `BuilderComp.updateBuildLogic` for one builder unit.
@@ -642,7 +697,8 @@ fn update_builder(
                         }));
                 }
             } else {
-                // `ConstructBlock.constructFinish` -> `tile.setBlock(block, team, rotation)`.
+                // `ConstructBlock.constructFinish` -> `tile.setBlock(block, team, rotation)`
+                // then `tile.build.placed()` (`ConstructBlock.java:151-156`).
                 runtime.set_block_raw(
                     world,
                     grid,
@@ -652,6 +708,19 @@ fn update_builder(
                     rotation,
                     team,
                 );
+                if let Some(placed) = grid.entity_at(anchor) {
+                    let grid_ref: &WorldGrid = grid;
+                    runtime.placed_hooks(world, grid_ref, placed);
+                    chain_bridge(
+                        world,
+                        grid_ref,
+                        runtime,
+                        placed,
+                        plans,
+                        state.current,
+                        anchor,
+                    );
+                }
                 out.events
                     .push(SimEvent::BlockPlacedEvent(BlockPlacedEvent {
                         x: anchor.x(),
@@ -1142,6 +1211,73 @@ mod tests {
         }
         assert_ne!(sim.grid.block_at(TilePos::new(14, 10)), Some(wall));
         assert_eq!(sim.player_build_plans().len(), 1, "plan stays queued");
+    }
+
+    /// T11 (`ItemBridge.playerPlaced`, `ItemBridge.java:224-233`): two
+    /// player-built bridge-conveyors 3 tiles apart chain on construction.
+    #[test]
+    fn bridges_chain_when_player_placed() {
+        let (mut sim, _unit, _core, _wall) = sim_with_player();
+        set_core_copper(&mut sim, 10_000);
+        // bridge-conveyor needs lead 6 + copper 6 (`registries/blocks/distribution.rs`).
+        let lead = sim
+            .block_runtime()
+            .expect("runtime")
+            .content()
+            .item_id("lead")
+            .expect("lead");
+        let core = team_core(&sim.ecs.0, 1).expect("core");
+        if let Some(mut items) = sim.ecs.0.get_mut::<ItemModule>(core) {
+            items.add(lead, 1_000, 100_000);
+        }
+        let bridge = BlockId::new(
+            sim.world_block_id("bridge-conveyor")
+                .expect("bridge-conveyor"),
+        );
+        assert!(
+            sim.queue_player_place(20, 20, bridge, 0),
+            "first bridge queued"
+        );
+        assert!(
+            sim.queue_player_place(23, 20, bridge, 0),
+            "second bridge queued"
+        );
+        for _ in 0..600 {
+            sim.tick().expect("tick");
+            let finished = sim
+                .grid
+                .entity_at(TilePos::new(23, 20))
+                .is_some_and(|entity| sim.ecs.0.get::<ItemBridgeBuild>(entity).is_some());
+            if finished {
+                break;
+            }
+        }
+        let first = sim
+            .grid
+            .entity_at(TilePos::new(20, 20))
+            .expect("first bridge built");
+        let second = sim
+            .grid
+            .entity_at(TilePos::new(23, 20))
+            .expect("second bridge built");
+        let link = sim
+            .ecs
+            .0
+            .get::<ItemBridgeBuild>(first)
+            .map(|bridge| bridge.link)
+            .unwrap_or(-1);
+        assert_eq!(
+            link,
+            TilePos::new(23, 20).pack(),
+            "the first bridge links to the second"
+        );
+        let second_link = sim
+            .ecs
+            .0
+            .get::<ItemBridgeBuild>(second)
+            .map(|bridge| bridge.link)
+            .unwrap_or(-1);
+        assert_eq!(second_link, -1, "the second waits for a later bridge");
     }
 
     #[test]
