@@ -603,6 +603,21 @@ Ground Zero 170: a real injected left click (`Input.parse_input_event` at
   `MindSimHost::light_color(x,y)`.
 - **Tests:** message `Text` round-trip (§7.0); `LightBehavior` configured/config round-trip.
 
+**Status 2026-10-12:** done — `MessageDef` now carries Java's `maxTextLength = 400`/`maxNewlines = 24`
+(the port defaulted to 0, so every non-empty message was rejected); `config_spec` marks
+`text`/`multiline` for `MessageBlock`, `color` for `LightBlock` (with `options` cleared) and emits the
+`current` readback (message text via `building_config_string`, color via the new
+`MindSimHost::light_color`); `configure_building` accepts unsigned 32-bit `"int"` values (colors are
+negative i32 in Java). New `core/world/behavior/light.rs`: `LightBehavior`/`LightState` (default
+`Pal.accent.rgba()` = `0xffd37fff`, `configured(Number)`, `config_kinds = [Number]`, revision-0
+`write`/`read` mirroring `LightBuild`), mapped in `default_behavior`. The fragment's text editor
+prefills `current`, uses a `TextEdit` for messages and gained a `ColorPickerButton` that submits
+`("int", str(color.to_rgba32()))`. Tests: `world::behavior::light::tests::{light_config_round_trip,
+light_color_round_trips_through_io}`. In-engine on Ground Zero 170: a placed illuminator shows the
+color spec (`current` 4292050943) and accepts `configure_building(...,"int","4278190335")`
+(`light_color` = 4278190335); a placed message shows `text`/`multiline` with its `current` text
+prefilled. Evidence: `runs/20261012-session4/PAR-0093-evidence.json`.
+
 ### 7.3 PAR-0092: unit factories, reconstructors and payload blocks
 - **Java:**
   - `J/world/blocks/units/UnitFactory.java:58-82`: `config(Integer)` sets the plan index,

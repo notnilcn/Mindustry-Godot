@@ -1466,18 +1466,43 @@ impl DesktopBridge {
                 }
             }
         }
-        let text = def.kind == BlockKind::LogicBlock;
-        Some(
-            serde_json::json!({
-                "title": format!("block.{}.name", def.name),
-                "block": def.name,
-                "x": x,
-                "y": y,
-                "text": text,
-                "options": options,
-            })
-            .to_string(),
-        )
+        let text = matches!(def.kind, BlockKind::LogicBlock | BlockKind::MessageBlock);
+        let multiline = def.kind == BlockKind::MessageBlock;
+        let color = def.kind == BlockKind::LightBlock;
+        // Current value readbacks (`MessageBlock.message` / `LightBuild.color`).
+        let current_text = if text {
+            guard
+                .building_config_string(x, y)
+                .try_to::<String>()
+                .ok()
+                .filter(|text| !text.is_empty())
+        } else {
+            None
+        };
+        let current_color = if color {
+            Some(guard.light_color(x, y).try_to::<i64>().unwrap_or_default())
+        } else {
+            None
+        };
+        let mut spec = serde_json::json!({
+            "title": format!("block.{}.name", def.name),
+            "block": def.name,
+            "x": x,
+            "y": y,
+            "text": text,
+            "multiline": multiline,
+            "color": color,
+            "options": options,
+        });
+        if let Some(current) = current_text {
+            spec["current"] = serde_json::Value::from(current);
+        }
+        if let Some(current) = current_color {
+            // The color picker replaces the option grid entirely.
+            spec["current"] = serde_json::Value::from(current);
+            spec["options"] = serde_json::Value::Array(Vec::new());
+        }
+        Some(spec.to_string())
     }
 
     fn enqueue_commands(&self, commands: &[SimCommand]) {

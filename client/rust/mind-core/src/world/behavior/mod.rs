@@ -28,6 +28,7 @@ pub mod defense;
 pub mod environment;
 pub mod helpers;
 pub mod legacy;
+pub mod light;
 pub mod production;
 pub mod sandbox;
 
@@ -596,6 +597,8 @@ pub fn default_behavior(def: &BlockDef) -> Arc<dyn BuildingBehavior> {
             Arc::new(crate::logic::blocks::DisplayBehavior)
         }
         K::CanvasBlock => Arc::new(crate::logic::blocks::CanvasBehavior),
+        // Illuminator (PAR-0093): integer color config + revision-0 IO.
+        K::LightBlock => Arc::new(light::LightBehavior),
         // Sandbox sources/sinks (PAR-0077): per-kind behaviors so `config_kinds`
         // and the accept/dump overrides match each Java inner class.
         K::ItemSource => Arc::new(sandbox::ItemSourceBehavior),

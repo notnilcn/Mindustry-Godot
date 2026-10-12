@@ -742,6 +742,30 @@ impl MindSimHost {
         }
     }
 
+    /// Packed RGBA color of a `LightBlock` at `(x, y)` (`nil` when absent).
+    #[func]
+    pub fn light_color(&self, x: i32, y: i32) -> Variant {
+        let entity = self
+            .sim
+            .grid
+            .tiles
+            .in_bounds(x, y)
+            .then(|| self.sim.grid.tile(x, y).build)
+            .flatten();
+        let Some(entity) = entity else {
+            return Variant::nil();
+        };
+        match self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::world::behavior::light::LightState>(entity)
+        {
+            Some(state) => Variant::from(i64::from(state.color)),
+            None => Variant::nil(),
+        }
+    }
+
     /// `Building.enabled` at `(x, y)` (`nil` when the tile has no building).
     #[func]
     pub fn building_enabled(&self, x: i32, y: i32) -> Variant {

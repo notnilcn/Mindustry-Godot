@@ -899,8 +899,11 @@ impl MindInput {
         };
         let direct = match kind.as_str() {
             "string" => Some(mind_core::determinism::ConfigValue::Text(value.clone())),
-            "int" => match value.parse::<i32>() {
-                Ok(number) => Some(mind_core::determinism::ConfigValue::Int(number)),
+            "int" => match value.parse::<i64>() {
+                // Java carries raw 32-bit ints (colors are negative when the
+                // high bit is set); the picking UI submits the unsigned
+                // decimal, so wrap into the wire `Int(i32)`.
+                Ok(number) => Some(mind_core::determinism::ConfigValue::Int(number as i32)),
                 Err(_) => return false,
             },
             _ => None,

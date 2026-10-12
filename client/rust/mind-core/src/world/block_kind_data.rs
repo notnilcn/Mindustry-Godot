@@ -625,7 +625,12 @@ impl BlockKindData {
             BlockKind::LogicBlock => BlockKindData::Logic(LogicBlockDef::default()),
             BlockKind::MemoryBlock => BlockKindData::Memory(MemoryDef::default()),
             BlockKind::SwitchBlock => BlockKindData::Switch(SwitchDef::default()),
-            BlockKind::MessageBlock => BlockKindData::Message(MessageDef::default()),
+            // `MessageBlock.maxTextLength = 400`, `maxNewlines = 24`.
+            BlockKind::MessageBlock => BlockKindData::Message(MessageDef {
+                max_text: 400,
+                max_newlines: 24,
+                privileged: false,
+            }),
             BlockKind::LogicDisplay => BlockKindData::Display(DisplayDef::default()),
             BlockKind::TileableLogicDisplay => {
                 BlockKindData::TileableDisplay(TileableDisplayDef::default())
