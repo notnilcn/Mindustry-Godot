@@ -311,34 +311,26 @@ impl MindInput {
     /// (`Core.scene.hasScroll()`; PAR-0100). Walks the hovered control's
     /// ancestors, ignoring `mouse_filter`.
     fn ui_scroll_at(&self, x: f32, y: f32) -> bool {
-        let tree = self.base().get_tree();
-        let root = tree.get_root();
-        let controls = root.find_children_ex("*").owned(false).done();
-        let point = Vector2::new(x, y);
-        for index in (0..controls.len()).rev() {
-            let Some(node) = controls.get(index) else {
-                continue;
-            };
-            let Ok(control) = node.clone().try_cast::<Control>() else {
-                continue;
-            };
-            if !control.is_visible_in_tree() {
-                continue;
+        // `Scene.hasScroll()`: only the *hovered* control chain is walked
+        // (`gui_get_hovered_control` + ancestors), never the whole scene tree
+        // (T8).
+        let _ = (x, y);
+        let Some(viewport) = self.base().get_viewport() else {
+            return false;
+        };
+        let Some(control) = viewport.gui_get_hovered_control() else {
+            return false;
+        };
+        let mut current: Option<Gd<Node>> = Some(control.upcast());
+        while let Some(node) = current {
+            if node
+                .clone()
+                .try_cast::<godot::classes::ScrollContainer>()
+                .is_ok()
+            {
+                return true;
             }
-            if !control.get_global_rect().contains_point(point) {
-                continue;
-            }
-            let mut current: Option<Gd<Node>> = Some(control.upcast());
-            while let Some(node) = current {
-                if node
-                    .clone()
-                    .try_cast::<godot::classes::ScrollContainer>()
-                    .is_ok()
-                {
-                    return true;
-                }
-                current = node.get_parent();
-            }
+            current = node.get_parent();
         }
         false
     }
