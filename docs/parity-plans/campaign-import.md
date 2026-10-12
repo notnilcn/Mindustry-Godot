@@ -167,6 +167,21 @@ screenshot; compare a node with partial progress in the Java profile, e.g.
 Acceptance: the lancer node shows 1900 silicon already paid. If not, the bug
 is in `mind-core/src/game/tech_tree.rs:229` load path; report it.
 
+**Status 2026-10-12:** A1.1 **pass** — slot 3 (sandbox) loads and renders; the
+plan's named map "Ancient Caldera" wave 16 is actually slot **7**, which loads
+with 40 buildings (core-acropolis + 4 power sources, wave 16 in state);
+`runs/20261012-session5/slot3-loaded.png`, `slot7-ancient-caldera.png`. A1.2
+**fail** (filed as a new gap, not fixed inside A): lancer is already unlocked in
+the imported profile, and the read model carries no requirement data at all for
+it (`requirements: []`, `finished: []`); 374 of 375 nodes have empty
+`requirements` because `TechTreeBuilder` never materializes
+`content.researchRequirements()` (only `tech_tree::effective_requirements()` at
+spend/complete time loads `req-` progress), so the research dialog cannot show
+costs or partial payments for any node. The dialog also renders the raw
+`techtree.<null>` key. Evidence: `research-before.png`; compare
+`python3 -I /tmp/s5/arcset.py /tmp/s5/prof/settings.bin '^req-lancer'`
+(silicon 1900 / lead 2200 / copper 1900 / titanium 900).
+
 #### A2. Legacy remap residuals (new gaps)
 
 Symptom 1: after the remap the planet camera still looks at legacy cell 15
@@ -288,6 +303,16 @@ Tests: in `mind-core/src/game/saves.rs` tests add
 + autosave, `update_policy` with `delta_ticks = 9 * 60` -> not autosaved, then
 `2 * 60` -> autosaved. (`cargo test -p mind-core --lib saves`.)
 Commit: `Fixes PAR-0153: campaign sector autosave runs on the saveinterval cadence`.
+
+**Status 2026-10-12:** done — commit `3a948bb`. Step 1 passed on the pre-existing
+seconds fix (`saveinterval=10`: `autosave queued` every ~10 s,
+`io_pending()==0`), so only step 4 was needed: `persist_sector_record()` now
+runs with every autosave. In-engine after the fix: `sector-serpulo-170.msav` and
+`config/settings.bin` mtimes advance together each autosave, and a marker wall
+placed at (131,54) survives `--play` restart + resume (hasCore, wave 1);
+evidence `runs/20261012-session5/sector-autosave-resume.png`. New test
+`update_policy_interval_is_seconds`; `cargo test -p mind-core --lib` = 1867
+passed.
 
 ---
 
