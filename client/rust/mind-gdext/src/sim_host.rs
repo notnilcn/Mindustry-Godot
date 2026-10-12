@@ -2424,7 +2424,7 @@ impl MindSimHost {
     /// `Conveyor`/`ArmoredConveyor` (`Conveyor.draw` item loop). `None` when
     /// the tile holds no belt. Rust-only seam for the block renderer.
     pub fn conveyor_items(&self, x: i32, y: i32) -> Option<(u8, Vec<BeltItemSlot>)> {
-        let entity = self.sim.grid.tile(x, y).build?;
+        let entity = self.sim.grid.tiles.getn(x, y)?.build?;
         let rot = self
             .sim
             .ecs
@@ -2636,7 +2636,7 @@ impl MindSimHost {
     /// `ConstructBuild` draw state at `(x, y)`: `(current block, progress)`.
     /// Rust-only seam for the construct-site sprite (`ConstructBuild.draw`).
     pub fn construct_draw(&self, x: i32, y: i32) -> Option<(mind_core::content::BlockId, f32)> {
-        let entity = self.sim.grid.tile(x, y).build?;
+        let entity = self.sim.grid.tiles.getn(x, y)?.build?;
         self.sim
             .ecs
             .0
@@ -2650,7 +2650,9 @@ impl MindSimHost {
     #[func]
     pub fn tile_debug(&self, x: i32, y: i32) -> Dictionary<GString, Variant> {
         let mut d = Dictionary::new();
-        let tile = self.sim.grid.tile(x, y);
+        let Some(tile) = self.sim.grid.tiles.getn(x, y) else {
+            return d;
+        };
         let def = self
             .content_snapshot
             .as_ref()
@@ -2689,7 +2691,7 @@ impl MindSimHost {
     /// Construct block state at `(x, y)` as `(current block, progress,
     /// deconstructing)` (`ConstructBuild`; render seam).
     pub fn construct_at(&self, x: i32, y: i32) -> Option<(BlockId, f32, bool)> {
-        let entity = self.sim.grid.tile(x, y).build?;
+        let entity = self.sim.grid.tiles.getn(x, y)?.build?;
         let state = self
             .sim
             .ecs
@@ -2702,7 +2704,7 @@ impl MindSimHost {
     /// tile has no building). Rust-only seam for the block renderer's team
     /// overlays (`Block.drawTeamOverlay`).
     pub fn building_team(&self, x: i32, y: i32) -> Option<u8> {
-        let entity = self.sim.grid.tile(x, y).build?;
+        let entity = self.sim.grid.tiles.getn(x, y)?.build?;
         self.sim
             .ecs
             .0
