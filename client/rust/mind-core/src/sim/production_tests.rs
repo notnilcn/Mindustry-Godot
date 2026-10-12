@@ -1033,6 +1033,79 @@ fn consumer_autolinks_to_node_in_range() {
     assert_eq!(node_graph, drill_graph, "graphs merged");
 }
 
+/// T7 (`SolidPump.updateTile`, `SolidPump.java:116-135`; `Blocks.java:2941-2948`):
+/// the water extractor's yield is `pumpAmount * (validTiles + boost)` where
+/// `validTiles = 1` on any pumpable floor (`baseEfficiency = 1`) and `boost` is
+/// the footprint water attribute / size². Four `mud` tiles (`water = 1`) double
+/// the rate.
+#[test]
+fn water_extractor_scales_with_floor() {
+    let mut sim = runtime_sim();
+    let _plain_source = place(&mut sim, "power-source", 4, 5);
+    let _wet_source = place(&mut sim, "power-source", 11, 5);
+    let plain = place(&mut sim, "water-extractor", 5, 5);
+    for (x, y) in [(12, 5), (13, 5), (12, 6), (13, 6)] {
+        set_floor(&mut sim, x, y, "mud");
+    }
+    let wet = place(&mut sim, "water-extractor", 12, 5);
+    for _ in 0..60 {
+        sim.tick().expect("tick");
+    }
+    let water = liquid(&sim, "water");
+    let plain_amount = stored_liquid(&sim, plain, water);
+    let wet_amount = stored_liquid(&sim, wet, water);
+    assert!(plain_amount > 0.0, "plain extractor pumped {plain_amount}");
+    assert!(
+        (wet_amount / plain_amount - 2.0).abs() < 0.1,
+        "wet {wet_amount} vs plain {plain_amount}: the water attribute doubles it"
+    );
+}
+
+/// T7 (`SolidPump.canPlaceOn`/`updateTile`, `SolidPump.java:68-75`, `:116-135`;
+/// `Blocks.java:2985-2992`): the oil extractor has `baseEfficiency = 0`, so it
+/// cannot be placed on attribute-less floors and its yield is the oil affinity
+/// (`sand-floor = 0.7`) times `pumpAmount` (0.25).
+#[test]
+fn oil_extractor_needs_oil_floor() {
+    let mut sim = runtime_sim();
+    let oil_id = sim.world_block_id("oil-extractor").expect("oil-extractor");
+    let _ = sim.command(SimCommand::Place {
+        x: 5,
+        y: 5,
+        block: oil_id,
+        rotation: 0,
+        team: 1,
+        player: None,
+    });
+    assert!(
+        sim.grid.entity_at(TilePos::new(5, 5)).is_none(),
+        "no oil affinity and baseEfficiency 0 -> canPlaceOn rejects the block"
+    );
+    for x in 4..=6 {
+        for y in 4..=6 {
+            set_floor(&mut sim, x, y, "sand-floor");
+        }
+    }
+    let _source = place(&mut sim, "power-source", 3, 5);
+    let extractor = place(&mut sim, "oil-extractor", 5, 5);
+    {
+        let (sand, water) = (item(&sim, "sand"), liquid(&sim, "water"));
+        let world = &mut sim.ecs.0;
+        if let Some(mut items) = world.get_mut::<crate::world::modules::ItemModule>(extractor) {
+            items.add(sand, 10, 10);
+        }
+        if let Some(mut liquids) = world.get_mut::<crate::world::modules::LiquidModule>(extractor) {
+            liquids.add(water, 20.0, 40.0);
+        }
+    }
+    for _ in 0..60 {
+        sim.tick().expect("tick");
+    }
+    let oil = stored_liquid(&sim, extractor, liquid(&sim, "oil"));
+    // `pumpAmount` 0.25 * (0 + 9 * 0.7 / 9) = 0.175 per tick.
+    assert!((oil - 10.5).abs() < 1.5, "oil pumped {oil}");
+}
+
 /// Whether a unit of type `unit` exists in the sim.
 fn spawned_unit(sim: &Sim, unit: crate::content::UnitTypeId) -> bool {
     sim.ecs.0.iter_entities().any(|entity| {

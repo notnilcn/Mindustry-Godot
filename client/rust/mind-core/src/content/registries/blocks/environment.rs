@@ -292,23 +292,43 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
 
     sink.push(spec("crater-stone", BlockKind::Floor))?;
 
-    sink.push(spec("char", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        // `Blocks.java`: floor attribute affinities (T7).
+        attributes: vec![("water", -0.25f32)],
+        ..spec("char", BlockKind::Floor)
+    })?;
 
-    sink.push(spec("basalt", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        // `Blocks.java`: floor attribute affinities (T7).
+        attributes: vec![("water", -0.25f32)],
+        ..spec("basalt", BlockKind::Floor)
+    })?;
 
-    sink.push(spec("hotrock", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        // `Blocks.java`: floor attribute affinities (T7).
+        attributes: vec![("water", -0.5f32)],
+        ..spec("hotrock", BlockKind::Floor)
+    })?;
 
-    sink.push(spec("magmarock", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        // `Blocks.java`: floor attribute affinities (T7).
+        attributes: vec![("water", -0.75f32)],
+        ..spec("magmarock", BlockKind::Floor)
+    })?;
 
     sink.push(BlockSpec {
         player_unmineable: Some(true),
         item_drop: Some("sand"),
+        // `Blocks.java`: floor attribute affinities (T7).
+        attributes: vec![("oil", 0.7f32)],
         ..spec("sand-floor", BlockKind::Floor)
     })?;
 
     sink.push(BlockSpec {
         player_unmineable: Some(true),
         item_drop: Some("sand"),
+        // `Blocks.java`: floor attribute affinities (T7).
+        attributes: vec![("oil", 1.5f32)],
         ..spec("darksand", BlockKind::Floor)
     })?;
 
@@ -316,26 +336,60 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
 
     sink.push(BlockSpec {
         speed_multiplier: Some(0.6),
+        // `Blocks.java`: floor attribute affinities (T7).
+        attributes: vec![("water", 1.0f32)],
         ..spec("mud", BlockKind::Floor)
     })?;
 
     sink.push(spec("dacite", BlockKind::Floor))?;
 
-    sink.push(spec("rhyolite", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        // `Blocks.java`: floor attribute affinities (T7).
+        attributes: vec![("water", -1.0f32)],
+        ..spec("rhyolite", BlockKind::Floor)
+    })?;
 
-    sink.push(spec("rhyolite-crater", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        // `Blocks.java`: floor attribute affinities (T7).
+        attributes: vec![("water", -1.0f32)],
+        ..spec("rhyolite-crater", BlockKind::Floor)
+    })?;
 
-    sink.push(spec("rough-rhyolite", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        // `Blocks.java`: floor attribute affinities (T7).
+        attributes: vec![("water", -1.0f32)],
+        ..spec("rough-rhyolite", BlockKind::Floor)
+    })?;
 
-    sink.push(spec("regolith", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        // `Blocks.java`: floor attribute affinities (T7).
+        attributes: vec![("water", -1.0f32)],
+        ..spec("regolith", BlockKind::Floor)
+    })?;
 
-    sink.push(spec("yellow-stone", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        // `Blocks.java`: floor attribute affinities (T7).
+        attributes: vec![("water", -1.0f32)],
+        ..spec("yellow-stone", BlockKind::Floor)
+    })?;
 
-    sink.push(spec("carbon-stone", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        // `Blocks.java`: floor attribute affinities (T7).
+        attributes: vec![("water", -1.0f32)],
+        ..spec("carbon-stone", BlockKind::Floor)
+    })?;
 
-    sink.push(spec("ferric-stone", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        // `Blocks.java`: floor attribute affinities (T7).
+        attributes: vec![("water", -1.0f32)],
+        ..spec("ferric-stone", BlockKind::Floor)
+    })?;
 
-    sink.push(spec("ferric-craters", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        // `Blocks.java`: floor attribute affinities (T7).
+        attributes: vec![("water", -1.0f32)],
+        ..spec("ferric-craters", BlockKind::Floor)
+    })?;
 
     sink.push(spec("beryllic-stone", BlockKind::Floor))?;
 
@@ -345,12 +399,22 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
 
     sink.push(spec("yellow-stone-plates", BlockKind::Floor))?;
 
-    sink.push(spec("red-stone", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        // `Blocks.java`: floor attribute affinities (T7).
+        attributes: vec![("water", -1.0f32)],
+        ..spec("red-stone", BlockKind::Floor)
+    })?;
 
-    sink.push(spec("dense-red-stone", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        // `Blocks.java`: floor attribute affinities (T7).
+        attributes: vec![("water", -1.0f32)],
+        ..spec("dense-red-stone", BlockKind::Floor)
+    })?;
 
     sink.push(BlockSpec {
         speed_multiplier: Some(0.9),
+        // `Blocks.java`: floor attribute affinities (T7).
+        attributes: vec![("water", 0.4f32)],
         ..spec("red-ice", BlockKind::Floor)
     })?;
 
@@ -416,20 +480,42 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
 
     sink.push(spec("bluemat", BlockKind::Floor))?;
 
-    sink.push(spec("grass", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        // `Blocks.java`: floor attribute affinities (T7).
+        attributes: vec![("water", 0.1f32)],
+        ..spec("grass", BlockKind::Floor)
+    })?;
 
-    sink.push(spec("salt", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        // `Blocks.java`: floor attribute affinities (T7).
+        attributes: vec![("water", -0.3f32), ("oil", 0.3f32)],
+        ..spec("salt", BlockKind::Floor)
+    })?;
 
-    sink.push(spec("snow", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        // `Blocks.java`: floor attribute affinities (T7).
+        attributes: vec![("water", 0.2f32)],
+        ..spec("snow", BlockKind::Floor)
+    })?;
 
     sink.push(BlockSpec {
         speed_multiplier: Some(0.9),
+        // `Blocks.java`: floor attribute affinities (T7).
+        attributes: vec![("water", 0.4f32)],
         ..spec("ice", BlockKind::Floor)
     })?;
 
-    sink.push(spec("ice-snow", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        // `Blocks.java`: floor attribute affinities (T7).
+        attributes: vec![("water", 0.3f32)],
+        ..spec("ice-snow", BlockKind::Floor)
+    })?;
 
-    sink.push(spec("shale", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        // `Blocks.java`: floor attribute affinities (T7).
+        attributes: vec![("oil", 2.0f32)],
+        ..spec("shale", BlockKind::Floor)
+    })?;
 
     sink.push(spec("moss", BlockKind::Floor))?;
 

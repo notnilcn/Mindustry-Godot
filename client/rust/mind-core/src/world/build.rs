@@ -264,6 +264,34 @@ pub fn valid_place_at(
                 return false;
             }
         }
+        // `SolidPump.canPlaceOn` (`SolidPump.java:68-75`; T7): the footprint sum
+        // `(canPump ? baseEfficiency + attribute : 0)` must exceed `0.00001`.
+        Some(crate::world::BlockKindData::SolidPump(pump))
+            if !solid_pump_can_place_on(
+                content,
+                grid,
+                size,
+                x,
+                y,
+                &pump.attribute,
+                pump.base_efficiency,
+            ) =>
+        {
+            return false;
+        }
+        Some(crate::world::BlockKindData::Fracker(fracker))
+            if !solid_pump_can_place_on(
+                content,
+                grid,
+                size,
+                x,
+                y,
+                &fracker.attribute,
+                fracker.base_efficiency,
+            ) =>
+        {
+            return false;
+        }
         _ => {}
     }
     let _ = (table, can_place_on);
@@ -305,6 +333,48 @@ fn pump_can_place_on(
         }
     }
     last.is_some()
+}
+
+/// `SolidPump.canPlaceOn` (`SolidPump.java:68-75`; T7): the footprint sum
+/// `Σ (canPump(t) ? baseEfficiency + attribute(t) : 0)` must exceed `0.00001`.
+fn solid_pump_can_place_on(
+    content: &ContentRegistry,
+    grid: &WorldGrid,
+    size: i32,
+    x: i32,
+    y: i32,
+    attribute: &str,
+    base_efficiency: f32,
+) -> bool {
+    let offset = -(size - 1) / 2;
+    let mut sum = 0.0f32;
+    for dx in 0..size {
+        for dy in 0..size {
+            let (tx, ty) = (x + offset + dx, y + offset + dy);
+            if !grid.tiles.in_bounds(tx, ty) {
+                continue;
+            }
+            let Some(floor) = content.block(grid.tile(tx, ty).floor) else {
+                continue;
+            };
+            // `canPump(tile) = !tile.floor().isLiquid`.
+            if floor.is_liquid {
+                continue;
+            }
+            let affinity = if attribute.is_empty() {
+                0.0
+            } else {
+                floor
+                    .attributes
+                    .iter()
+                    .find(|(name, _)| name == attribute)
+                    .map(|(_, value)| *value)
+                    .unwrap_or(0.0)
+            };
+            sum += base_efficiency + affinity;
+        }
+    }
+    sum > 0.00001
 }
 
 /// `Build.contactsGround` — whether a block footprint touches solid ground.

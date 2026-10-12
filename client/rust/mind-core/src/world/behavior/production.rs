@@ -587,7 +587,10 @@ pub fn refresh_drill_ore(
     };
     let tile = building.tile;
     let size = inst.def.size.max(1);
-    if matches!(inst.kind_data, BlockKindData::Pump(_)) {
+    if matches!(
+        inst.kind_data,
+        BlockKindData::Pump(_) | BlockKindData::SolidPump(_) | BlockKindData::Fracker(_)
+    ) {
         refresh_pump_floor(world, grid, content, e, tile, size);
         return;
     }
@@ -666,8 +669,25 @@ fn refresh_pump_floor(
     size: i32,
 ) {
     let lo = -((size - 1) / 2);
+    // `SolidPump.onProximityUpdate` (`SolidPump.java:150-160`) and
+    // `Block.sumAttribute` (`Block.java:582-588`): the attribute name and
+    // `baseEfficiency` come from the block; `canPump` is `!floor.isLiquid` and
+    // deep floors contribute no attribute unless the block floats.
+    let (attribute, base_efficiency) = instance(world, e)
+        .map(|inst| match &inst.kind_data {
+            BlockKindData::SolidPump(def) => (def.attribute.clone(), def.base_efficiency),
+            BlockKindData::Fracker(def) => (def.attribute.clone(), def.base_efficiency),
+            _ => (String::new(), 0.0),
+        })
+        .unwrap_or_default();
+    let (floating, placeable_liquid) = instance(world, e)
+        .map(|inst| (inst.def.floating, inst.def.placeable_liquid))
+        .unwrap_or((false, false));
+    let area = (size * size) as f32;
     let mut drop = None;
     let mut amount = 0.0f32;
+    let mut valid_tiles = 0.0f32;
+    let mut boost = 0.0f32;
     for dx in lo..lo + size {
         for dy in lo..lo + size {
             let (tx, ty) = (i32::from(tile.x()) + dx, i32::from(tile.y()) + dy);
@@ -681,11 +701,26 @@ fn refresh_pump_floor(
                 drop = Some(liquid);
                 amount += floor.liquid_multiplier;
             }
+            if floor.is_liquid {
+                continue;
+            }
+            valid_tiles += base_efficiency / area;
+            if !(!floating && !placeable_liquid && floor.is_deep) && !attribute.is_empty() {
+                boost += floor
+                    .attributes
+                    .iter()
+                    .find(|(name, _)| name == &attribute)
+                    .map(|(_, value)| *value)
+                    .unwrap_or(0.0);
+            }
         }
     }
+    boost /= area;
     if let Some(mut state) = world.get_mut::<PumpState>(e) {
         state.liquid_drop = drop;
         state.amount = amount;
+        state.valid_tiles = valid_tiles;
+        state.boost = boost;
     }
 }
 
@@ -1280,16 +1315,22 @@ impl BuildingBehavior for SolidPumpBehavior {
             state.warmup = approach(state.warmup, if efficiency > 0.0 { 1.0 } else { 0.0 }, 0.02);
         }
         let liquid = result.map(LiquidId::new).unwrap_or(LiquidId::WATER);
-        if efficiency > 0.0 {
-            let capacity = liquid_capacity(world, e);
-            let warmup = world.get::<PumpState>(e).map(|s| s.warmup).unwrap_or(1.0);
-            produce_liquid(
-                world,
-                e,
-                liquid,
-                amount * edelta(world, e) * warmup,
-                capacity,
-            );
+        // `SolidPump.updateTile`: `fraction = max(validTiles + boost +
+        // attribute.env(), 0)`; the port ignores `attribute.env()`, which is 0
+        // on Serpulo (T7).
+        let (valid_tiles, boost) = world
+            .get::<PumpState>(e)
+            .map(|state| (state.valid_tiles, state.boost))
+            .unwrap_or((0.0, 0.0));
+        let fraction = (valid_tiles + boost).max(0.0);
+        let capacity = liquid_capacity(world, e);
+        let stored = world
+            .get::<LiquidModule>(e)
+            .map(|module| module.get(liquid))
+            .unwrap_or(0.0);
+        if efficiency > 0.0 && stored < capacity - 0.001 {
+            let max_pump = (capacity - stored).min(amount * edelta(world, e) * fraction);
+            produce_liquid(world, e, liquid, max_pump, capacity);
         }
         // `SolidPumpBuild.updateTile`: `dumpLiquid(result)` every tick.
         crate::world::blocks::liquid::movement::dump_liquid_proximity(world, e, liquid, 2.0, -1);

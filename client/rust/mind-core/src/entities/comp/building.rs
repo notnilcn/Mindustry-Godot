@@ -222,6 +222,10 @@ pub struct PumpState {
     pub liquid_drop: Option<crate::content::LiquidId>,
     /// `PumpBuild.amount`: summed `Floor.liquidMultiplier` of pumpable tiles.
     pub amount: f32,
+    /// `SolidPumpBuild.validTiles`: pumpable tiles * `baseEfficiency / size²`.
+    pub valid_tiles: f32,
+    /// `SolidPumpBuild.boost`: summed footprint attribute / size².
+    pub boost: f32,
 }
 
 /// `Accelerator`/`LandingPad`/`LaunchPad` build state.
