@@ -1144,6 +1144,36 @@ mod tests {
             .expect("content boot")
     }
 
+    /// T4: the reconstructor's command panel submits `("content", "<command>")`;
+    /// `resolve_config` must lower the name to the typed `UnitCommand` content
+    /// value (`Reconstructor.config(UnitCommand.class, ...)`).
+    #[test]
+    fn content_config_resolves_unit_commands() {
+        let mut sim = Sim::new(1, 8, 8, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("runtime");
+        let value = sim
+            .block_runtime()
+            .expect("runtime")
+            .resolve_config(&crate::determinism::ConfigValue::Content(
+                "rebuild".to_owned(),
+            ))
+            .expect("resolve");
+        match value {
+            crate::world::config::ConfigValue::Content(
+                crate::content::ContentType::UnitCommand,
+                id,
+            ) => assert_eq!(
+                sim.block_runtime()
+                    .expect("runtime")
+                    .content()
+                    .get_by_name(crate::content::ContentType::UnitCommand, "rebuild")
+                    .map(|reference| reference.id),
+                Some(id)
+            ),
+            other => panic!("expected a unit command, got {other:?}"),
+        }
+    }
+
     /// `CoreBlock.handleItem` bumps `stats.coreItemCount` for default-team
     /// intakes (belt/dump transfers), while `handleStack` (the player offload
     /// path) does not.

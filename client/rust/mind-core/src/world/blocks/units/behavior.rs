@@ -465,10 +465,9 @@ impl BuildingBehavior for ReconstructorBehavior {
     }
 
     fn config_kinds(&self) -> &'static [ConfigKind] {
-        // `Reconstructor.config(UnitCommand.class, ...)` builds a *dynamic* list
-        // from the held payload's output unit type; the static kinds table can
-        // not express it, so the panel stays closed (see the plan note).
-        &[]
+        // `Reconstructor.config(UnitCommand.class, ...)`: the panel lists the
+        // unit commands (`Reconstructor.java:215-240`; T4).
+        &[ConfigKind::Content]
     }
 
     fn config(&self, world: &World, e: Entity) -> ConfigValue {
