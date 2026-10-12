@@ -1738,6 +1738,24 @@ impl MindSimHost {
             .unwrap_or(Vector2::new(-1.0, -1.0))
     }
 
+    /// Block name of the player's best core (`Player.bestCore().block.name`,
+    /// the `block-<name>-full` region the landing cutscene draws); empty before
+    /// content boot or on a core-less map.
+    pub fn best_core_block(&self) -> GString {
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return GString::new();
+        };
+        self.sim
+            .grid
+            .iter_row_major()
+            .find_map(|(_, index)| {
+                let def = content.block(self.sim.grid.block_id_at(index))?;
+                (def.kind == BlockKind::CoreBlock).then(|| def.name.clone())
+            })
+            .map(|name| GString::from(name.as_str()))
+            .unwrap_or_default()
+    }
+
     /// Binding-driven move axis from the sibling `Input`. `MindInput.pan_axis`
     /// is the shared `move_x`/`move_y` axis; with a player unit it drives the
     /// unit instead of the camera (`DesktopInput.updateMovement`).

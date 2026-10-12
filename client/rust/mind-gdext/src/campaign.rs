@@ -835,9 +835,12 @@ impl MindCampaign {
             // Read the core position in its own statement: a `host.bind()`
             // temporary in the let-chain would stay borrowed across the camera
             // call below (re-entrant `bind_mut` panic).
-            && let Some((core_x, core_y)) = self
-                .host()
-                .and_then(|host| host.bind().best_core_position_px())
+            && let Some((core_x, core_y, core_block)) = self.host().and_then(|host| {
+                let guard = host.bind();
+                guard
+                    .best_core_position_px()
+                    .map(|(x, y)| (x, y, guard.best_core_block()))
+            })
             && let Some(mut camera) = self.base().get_node_or_null("/root/Spine/World/Camera2D")
         {
             camera.call(
@@ -845,7 +848,7 @@ impl MindCampaign {
                 &[
                     core_x.to_variant(),
                     core_y.to_variant(),
-                    GString::new().to_variant(),
+                    core_block.to_variant(),
                 ],
             );
         }
@@ -900,7 +903,34 @@ impl MindCampaign {
         rules.mode_name = Some(name.to_string());
         rules.sector = None;
         let events = play_map(&mut self.session, rules, None, |_| false, &mut self.epoch);
-        !events.is_empty()
+        let started = !events.is_empty();
+        // `Control.playMap` fires `Trigger.newGame` like `playNewSector`
+        // (`Control.java:415,589`): the core drops in unless
+        // `skipcoreanimation` or a PvP rule set.
+        if started
+            && events
+                .iter()
+                .any(|event| matches!(event, mind_core::game::play::PlayEvent::NewGame))
+            && !self.live_setting_flag("skipcoreanimation")
+            && !self.session.rules.pvp
+            && let Some((core_x, core_y, core_block)) = self.host().and_then(|host| {
+                let guard = host.bind();
+                guard
+                    .best_core_position_px()
+                    .map(|(x, y)| (x, y, guard.best_core_block()))
+            })
+            && let Some(mut camera) = self.base().get_node_or_null("/root/Spine/World/Camera2D")
+        {
+            camera.call(
+                "show_landing",
+                &[
+                    core_x.to_variant(),
+                    core_y.to_variant(),
+                    core_block.to_variant(),
+                ],
+            );
+        }
+        started
     }
 
     /// Forces sector capture (`Logic.sectorCapture`), routing through the live

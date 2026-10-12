@@ -151,6 +151,18 @@ impl Cutscene {
         fin
     }
 
+    /// `CoreBlock.drawLanding` sprite math (`CoreBlock.java:480-538`):
+    /// `scale = 3.6 * Interp.pow2Out(fout)` and
+    /// `rotation = 135 * Interp.pow2In(fout)` with `fout = 1 - fin`.
+    /// At `fin = 0` the core is 3.6x, rotated 135 degrees; at `fin = 1` it has
+    /// shrunk to nothing at rotation 0 (the real core takes over).
+    pub fn landing_sprite(fin: f32) -> (f32, f32) {
+        let fout = 1.0 - fin.clamp(0.0, 1.0);
+        let scale = 3.6 * (1.0 - (1.0 - fout) * (1.0 - fout));
+        let rotation = fout * fout * 135.0;
+        (scale, rotation)
+    }
+
     /// `Renderer.showLanding(landCore)`.
     pub fn show_landing(&mut self, mut anim: Box<dyn LaunchAnimator>) {
         let duration = anim.launch_duration();
@@ -252,6 +264,29 @@ mod tests {
             began: false,
             ended: false,
         }
+    }
+
+    #[test]
+    fn landing_sprite_formula_matches_java() {
+        let (scale, rotation) = Cutscene::landing_sprite(0.0);
+        assert!(
+            (scale - 3.6).abs() < 1e-6,
+            "start scale is 3.6x, got {scale}"
+        );
+        assert!(
+            (rotation - 135.0).abs() < 1e-6,
+            "start rotation is 135 degrees, got {rotation}"
+        );
+        let (scale, rotation) = Cutscene::landing_sprite(1.0);
+        assert!(scale.abs() < 1e-6, "end scale is 0, got {scale}");
+        assert!(rotation.abs() < 1e-6, "end rotation is 0, got {rotation}");
+        // Halfway: pow2Out(0.5) = 0.75, pow2In(0.5) = 0.25.
+        let (scale, rotation) = Cutscene::landing_sprite(0.5);
+        assert!((scale - 2.7).abs() < 1e-6, "mid scale 2.7, got {scale}");
+        assert!(
+            (rotation - 33.75).abs() < 1e-6,
+            "mid rotation 33.75, got {rotation}"
+        );
     }
 
     #[test]

@@ -14,3 +14,13 @@ func start(duration: float = 0.5) -> void:
 	var tween := create_tween()
 	tween.tween_property(self, "color:a", 0.0, duration)
 	tween.tween_callback(func() -> void: visible = false)
+
+
+## `CoreBlock.beginLaunch(false)`: a full-screen white cover with alpha 1 fading
+## out over 35 ticks (`CoreBlock.java:392-396`), used by the landing cutscene.
+func start_white(duration: float = 35.0 / 60.0) -> void:
+	color = Color(1.0, 1.0, 1.0, 1.0)
+	visible = true
+	var tween := create_tween()
+	tween.tween_property(self, "color:a", 0.0, duration)
+	tween.tween_callback(func() -> void: visible = false)

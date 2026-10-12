@@ -83,6 +83,12 @@ func _process(delta: float) -> void:
 	visible = active and not _current.is_empty()
 	if not active:
 		return
+	# `HintsFragment.java:59,112`: no hints while `renderer.isCutscene()` (the
+	# landing cutscene must not trigger or advance a hint).
+	var camera := get_node_or_null("/root/Spine/World/Camera2D")
+	if camera != null and camera.has_method("is_cutscene") and bool(camera.call("is_cutscene")):
+		visible = false
+		return
 	if _is_paused():
 		# `desktopPause` completes on the pause key (`Binding.pause`).
 		if _current == "desktopPause":

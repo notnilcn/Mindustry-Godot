@@ -58,6 +58,11 @@ pub struct MindCamera2D {
     /// `Renderer` launch/land cutscene (`landTime`/`camerascale`); drives the
     /// camera scale while `is_cutscene()` (PAR-0131).
     cutscene: Cutscene,
+    /// World position of the dropping core (`show_landing`), for the
+    /// `landing_draw_json` sprite seam.
+    landing_core: Option<(f32, f32)>,
+    /// Block name of the dropping core (`block-<name>-full` region).
+    landing_block: String,
     /// Whether the `MindInput` cutscene lock is currently raised.
     cutscene_locked: bool,
 }
@@ -78,6 +83,8 @@ impl ICamera2D for MindCamera2D {
             world_dims: (0, 0),
             world_loads: 0,
             cutscene: Cutscene::new(1.0),
+            landing_core: None,
+            landing_block: String::new(),
             cutscene_locked: false,
             follow_target: None,
         }
@@ -105,7 +112,10 @@ impl ICamera2D for MindCamera2D {
         }
         self.follow_world();
 
-        let delta_frames = (delta * 60.0) as f32;
+        // Java clamps its global `Time.delta` to `[0.0001, maxDeltaClient]`
+        // (`ClientLauncher.java:84-87`, `Vars.java:181`); the port applies the
+        // same clamp to the camera rig's frame delta (T3 step 1).
+        let delta_frames = ((delta * 60.0) as f32).clamp(0.0001, 4.0);
         // Possessed unit: the move axis drives the unit (`MindSimHost` uploads
         // it each tick) and the camera follows the unit instead of panning
         // (`DesktopInput.updateMovement` / `:283-289`).
@@ -219,9 +229,10 @@ impl MindCamera2D {
     /// dropped core (used by the renderer's scaled-sprite draw).
     #[func]
     pub fn show_landing(&mut self, core_x: f32, core_y: f32, core_block: GString) -> bool {
-        let _ = core_block;
         self.camera.position = (core_x, core_y);
         self.follow_target = Some((core_x, core_y));
+        self.landing_core = Some((core_x, core_y));
+        self.landing_block = core_block.to_string();
         self.cutscene = Cutscene::new(self.camera.camerascale.max(0.01));
         self.cutscene
             .show_landing(Box::new(CoreLandAnimator::new()));
@@ -229,6 +240,23 @@ impl MindCamera2D {
         // The input lock follows in `process` (no sim-host borrow from here:
         // callers may hold one).
         true
+    }
+
+    /// `CoreBlock.drawLanding` inputs for the world-space core sprite
+    /// (`landing_core.gd`): `{"active", "x", "y", "block", "fin"}`. The white
+    /// fade-in and the sector announce are driven from the same state by the
+    /// fragment.
+    #[func]
+    pub fn landing_draw_json(&self) -> GString {
+        let (x, y) = self.landing_core.unwrap_or((0.0, 0.0));
+        let value = serde_json::json!({
+            "active": self.cutscene.is_cutscene(),
+            "x": x,
+            "y": y,
+            "block": self.landing_block,
+            "fin": self.cutscene.get_land_time_in(),
+        });
+        GString::from(value.to_string().as_str())
     }
 
     /// `Renderer.isCutscene()` (landing/launch animation running).
