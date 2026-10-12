@@ -2476,6 +2476,10 @@ impl MindSimHost {
             );
             return out;
         }
+        // `world.tileWorld` is null off the map: no hover info.
+        if !self.sim.grid.tiles.in_bounds(x, y) {
+            return out;
+        }
         let tile = self.sim.grid.tile(x, y);
         // `hoverTile.build.displayable()`: any live building.
         if let Some(entity) = tile.build {
