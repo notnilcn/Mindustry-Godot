@@ -42,6 +42,9 @@ var _bar_campaign := false
 ## Last rendered top-table state (`b:<block>` or `h:<kind>:<name>`); the header
 ## rebuilds only when it changes (`PlacementFragment.lastDisplayState`).
 var _top_state := ""
+## One-shot warning when the `block_select_01..10` binds are not all displayable
+## (the key combo line is silently dropped otherwise).
+var _warned_block_select := false
 ## Requirement amount labels + their `(have, amount)` pairs, refreshed per frame.
 var _top_amounts: Array[RichTextLabel] = []
 var _top_requirements: Array[Dictionary] = []
@@ -193,8 +196,13 @@ func _build_block_header(display: String) -> void:
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	header.add_child(icon)
 	var label := MindRichLabel.new()
+	# Java `labelWrap(...).left().width(190f).padLeft(5)` (PlacementFragment
+	# .java:371-395): the 190px label must fit both lines (name + key combo)
+	# instead of clipping them; only the spacer expands.
+	label.fit_content = true
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	label.custom_minimum_size = Vector2(190, 0)
-	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label.size_flags_horizontal = Control.SIZE_FILL
 	label.text = MindWidgets.markup("@block.%s.name" % display) + _key_combo(display)
 	header.add_child(label)
 	var spacer := Control.new()
@@ -324,15 +332,29 @@ func _key_combo(display: String) -> String:
 	if index < 0:
 		return ""
 	var binds := _block_select_displays()
-	if binds.size() < 10:
+	var displayable := 0
+	for bind in binds:
+		if not bind.is_empty():
+			displayable += 1
+	if displayable < 10:
+		if not _warned_block_select:
+			_warned_block_select = true
+			push_warning(
+				"placement: block_select_01..10 keybinds incomplete (%d/10 displayable); key combo line omitted"
+				% displayable
+			)
 		return ""
 	var ordinal := int(category.get("ordinal", 0))
 	var category_key: String = binds[mini(ordinal, 9)]
-	var units: String = binds[index % 10]
-	var combo := "%s,%s" % [category_key, units]
+	# `Core.bundle.format("placement.blockselectkeys", categoryKey)` +
+	# `(i < 10 ? "" : blockSelect[(i + 1) / 10 - 1] + ",") + blockSelect[i % 10]
+	# + "]"` (PlacementFragment.java:371-395).
+	var fmt := _bundle("placement.blockselectkeys", "\n[lightgray]Key: [{0},")
+	var combo := fmt.replace("{0}", category_key)
 	if index >= 10:
-		combo = "%s,%s" % [category_key, "%s,%s" % [binds[mini((index + 1) / 10 - 1, 9)], units]]
-	return "[color=#9a9a9a]\nKey: [%s][/color]" % combo
+		combo += "%s," % binds[mini((index + 1) / 10 - 1, 9)]
+	combo += "%s]" % binds[index % 10]
+	return MindWidgets.markup(combo)
 
 
 ## `block_select_01..10` key display strings from the input binding registry.
