@@ -280,6 +280,8 @@ for(int i = 0; i < len; i++){
 
 **Tests.** mind-core pure helper for the requirement colour: `fn requirement_color(have: i32, need: i32) -> &'static str` (`"scarlet"|"accent"|"white"`), unit-tested at boundaries (`have < need/2`, `have < need`, `>=`).
 **Verify.** Hover ore: `godot_input mouse_motion` to the screen point of an ore tile (`Camera2D.tile_to_screen(x,y)` → viewport coords), screenshot; select conveyor via `get_node("/root/Spine/Input").select_block_by_name("conveyor")`, screenshot.
+
+**Status 2026-10-12:** done — commit `9e450a1`. `hover_info` + `block_requirements_json` seams, `requirement_color` (+tests), `BlockCategoryView.ordinal`, `TopTable`/`TopDivider` scene nodes and the fragment's per-frame top table. Verified: conveyor shows "Key: [3,1]" + "Copper 0/1" scarlet (`par0094-d-selected.png`); ore hover shows the copper icon + "Copper" (`par0094-c4-hover.png`). Notes: the `[accent]/[white]` colours and infinite-resources `*/n` path are not reachable in Ground Zero (fresh core); the `?` opens the `content` dialog; unit-hover path untested in-engine (no enemy unit in range). The top table reuses `mouse_filter == STOP` (not raw `gui_get_hovered_control != null`) because the HUD fragment root is a full-rect PASS control.
 **Pitfalls.** `gui_get_hovered_control` must be read from the root viewport (`get_tree().root.gui_get_hovered_control()`); the top table itself must not count as "UI has mouse" when the cursor is over the world. The fragment root has `mouse_filter` ignore regions — do not block world clicks.
 
 ---
