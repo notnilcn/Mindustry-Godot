@@ -70,6 +70,8 @@ pub struct Bullet {
     pub damage: f32,
     /// Multiplier vs buildings (`BulletType.buildingDamageMultiplier`).
     pub building_damage_multiplier: f32,
+    /// Owning entity (`Bullet.owner`; healed by `BulletType.lifesteal`).
+    pub owner: Option<Entity>,
     /// Typed payload.
     pub data: BulletData,
     /// Effect parameter (`Bullet.fdata`).
@@ -1318,6 +1320,19 @@ pub fn hit_entity(ctx: &mut CombatCtx<'_>, bullet: Entity, unit: Entity, health:
     } else {
         health += shield;
     }
+    // `if(lifesteal > 0f && b.owner instanceof Healthc o) o.heal(result *
+    // lifesteal)` with `result = max(min(h.health(), damage), 0)` — the
+    // pre-damage health (`BulletType.java:502-505`).
+    let lifesteal_heal = if def.lifesteal > 0.0 {
+        match (state.owner, ctx.world.get::<Health>(unit).map(|h| h.health)) {
+            (Some(owner), Some(target_health)) => {
+                Some((owner, target_health.min(damage).max(0.0) * def.lifesteal))
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
     let _ = super::damage::area::damage_entity(
         ctx.world,
         ctx.content,
@@ -1326,6 +1341,9 @@ pub fn hit_entity(ctx: &mut CombatCtx<'_>, bullet: Entity, unit: Entity, health:
         pierce_armor,
         armor_mult,
     );
+    if let Some((owner, amount)) = lifesteal_heal {
+        super::damage::area::heal_health(ctx.world, owner, amount);
+    }
     // Knockback impulse (`unit.impulse(v)`: `vel += v / mass`, `mass = hitSize² π`).
     let type_def = ctx
         .world

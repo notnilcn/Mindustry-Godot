@@ -697,6 +697,75 @@ fn mega_pickup_falls_back_to_building_under_carrier() {
     );
 }
 
+/// T15: `BulletType.lifesteal` heals the bullet owner by
+/// `min(target_health, damage) * lifesteal` before damage is applied
+/// (`BulletType.java:502-505`).
+#[test]
+fn lifesteal_bullet_heals_owner() {
+    use crate::content::BulletKind;
+    use crate::content::registries::bullets::BulletDef;
+
+    let mut sim = live_sim(32);
+    let owner = sim
+        .spawn_live_unit("dagger", 1, 100.0, 100.0, 0.0)
+        .expect("owner");
+    let target = sim
+        .spawn_live_unit("dagger", 2, 120.0, 100.0, 0.0)
+        .expect("target");
+    if let Some(mut health) = sim.ecs.0.get_mut::<Health>(owner) {
+        health.health = 50.0;
+    }
+    {
+        let world = &mut sim.ecs.0;
+        let mut runtime = world
+            .remove_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+            .expect("runtime");
+        let mut def = BulletDef::new(BulletKind::Basic);
+        def.speed = 0.0;
+        def.lifetime = 100.0;
+        def.damage = 40.0;
+        def.lifesteal = 0.5;
+        let id = runtime.content.add_bullet(def).expect("add bullet");
+        let audio = crate::audio::AudioSinkRes::noop();
+        let mut spawned = Vec::new();
+        {
+            let crate::sim::unit_runtime::UnitRuntime {
+                content,
+                grid,
+                rng,
+                fx,
+                seq,
+                ..
+            } = &mut runtime;
+            let mut ctx = crate::combat::bullet::CombatCtx {
+                world,
+                content,
+                grid,
+                rng,
+                fx: fx.as_ref(),
+                audio: &audio,
+                seq,
+                spawned: &mut spawned,
+            };
+            let spawn = crate::combat::BulletSpawn {
+                def: id,
+                owner: Some(owner),
+                x: 100.0,
+                y: 100.0,
+                ..crate::combat::BulletSpawn::default()
+            };
+            let entity = ctx.spawn(&spawn).expect("bullet");
+            crate::combat::bullet::hit_entity(&mut ctx, entity, target, 150.0);
+        }
+        world.insert_non_send(runtime);
+    }
+    let owner_health = health(&sim, owner).expect("owner health");
+    assert!(
+        (owner_health - 70.0).abs() < 0.5,
+        "owner healed by 40 * 0.5 = 20 (50 -> {owner_health})"
+    );
+}
+
 /// NEW-1: a status applied through the live applier ticks damage every tick
 /// (`StatusComp.update` in the live unit loop).
 #[test]

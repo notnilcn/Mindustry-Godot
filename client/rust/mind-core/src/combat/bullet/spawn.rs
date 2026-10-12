@@ -241,6 +241,7 @@ pub fn create(
         def: spawn.def,
         damage,
         building_damage_multiplier: def.building_damage_multiplier,
+        owner: spawn.owner,
         data: spawn.data,
         fdata: 0.0,
         rotation: angle,
