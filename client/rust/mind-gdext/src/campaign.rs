@@ -329,6 +329,10 @@ impl MindCampaign {
         if saves_result.autosaved
             && let Some(file) = self.saves.current_slot().map(|slot| slot.file.clone())
         {
+            // `SaveVersion.writeMeta` -> `state.rules.sector.saveInfo()`: the
+            // live sector record (core snapshot, items, production, wave) lands
+            // in settings next to the autosave (PAR-0153).
+            self.persist_sector_record();
             host.bind_mut()
                 .request_save(GString::from(file.to_string_lossy().as_ref()), false);
             self.saving_finish_tick = Some(tick.saturating_add(3));
