@@ -181,10 +181,104 @@ fn is_closer(best: Option<(f32, Entity)>, dist2: f32, entity: Entity) -> bool {
     })
 }
 
+/// `Predict.intercept` (`Predict.java:26-52`): lead a moving target for a bullet
+/// of speed `v`. `dst_vel` is the target's per-tick velocity (the shooter's
+/// velocity is subtracted by the caller when the bullet keeps velocity).
+///
+/// Returns the target position when no positive intercept time exists (like
+/// upstream's `quad` returning null).
+pub fn intercept(src: (f32, f32), dst: (f32, f32), dst_vel: (f32, f32), v: f32) -> (f32, f32) {
+    // `dstvx /= Time.delta` — one tick of delta is 1 in this port.
+    let (vx, vy) = dst_vel;
+    let (tx, ty) = (dst.0 - src.0, dst.1 - src.1);
+    let a = vx * vx + vy * vy - v * v;
+    let b = 2.0 * (vx * tx + vy * ty);
+    let c = tx * tx + ty * ty;
+    let Some((t0, t1)) = quad(a, b, c) else {
+        return dst;
+    };
+    let mut t = t0.min(t1);
+    if t < 0.0 {
+        t = t0.max(t1);
+    }
+    if t > 0.0 {
+        (dst.0 + vx * t, dst.1 + vy * t)
+    } else {
+        dst
+    }
+}
+
+/// `Predict.quad` (`Predict.java:84-101`): both quadratic roots, or null.
+fn quad(a: f32, b: f32, c: f32) -> Option<(f32, f32)> {
+    if a.abs() < 1e-6 {
+        if b.abs() < 1e-6 {
+            if c.abs() < 1e-6 {
+                Some((0.0, 0.0))
+            } else {
+                None
+            }
+        } else {
+            let t = -c / b;
+            Some((t, t))
+        }
+    } else {
+        let disc = b * b - 4.0 * a * c;
+        if disc >= 0.0 {
+            let disc = disc.sqrt();
+            let a = 2.0 * a;
+            Some(((-b - disc) / a, (-b + disc) / a))
+        } else {
+            None
+        }
+    }
+}
+
+/// `Predict.intercept(Position src, Position dst, float offsetx, float offsety,
+/// boolean useSrcVelocity, float v)` (`Predict.java:70-77`): adds the target
+/// velocity and (optionally) subtracts the shooter's.
+pub fn intercept_positions(
+    src: (f32, f32),
+    src_vel: (f32, f32),
+    dst: (f32, f32),
+    dst_vel: (f32, f32),
+    use_src_velocity: bool,
+    v: f32,
+) -> (f32, f32) {
+    let ddx = if use_src_velocity {
+        dst_vel.0 - src_vel.0
+    } else {
+        dst_vel.0
+    };
+    let ddy = if use_src_velocity {
+        dst_vel.1 - src_vel.1
+    } else {
+        dst_vel.1
+    };
+    intercept(src, dst, (ddx, ddy), v)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::combat::harness::CombatHarness;
+
+    /// T12: `Predict.intercept` leads a moving target (`Predict.java:26-52`).
+    #[test]
+    fn intercept_leads_a_moving_target() {
+        // Shooter at the origin; target 100 px +x moving +y at 2 px/tick;
+        // bullet speed 4 px/tick.
+        let aim = intercept((0.0, 0.0), (100.0, 0.0), (0.0, 2.0), 4.0);
+        assert!(aim.1 > 0.0, "aim leads the target: {aim:?}");
+        let t = (aim.0 * aim.0 + aim.1 * aim.1).sqrt() / 4.0;
+        assert!(
+            (aim.1 - 2.0 * t).abs() < 0.01,
+            "bullet and target meet at the intercept: {aim:?} at t={t}"
+        );
+        // Slow bullets against a faster perpendicular target have no solution:
+        // the target position is returned unchanged.
+        let aim = intercept((0.0, 0.0), (100.0, 0.0), (0.0, 3.0), 2.0);
+        assert_eq!(aim, (100.0, 0.0));
+    }
 
     #[test]
     fn closest_target_prefers_nearest_enemy() {

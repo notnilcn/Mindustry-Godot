@@ -1010,6 +1010,45 @@ fn live_unit_command_switch_is_stored() {
     );
 }
 
+/// T12: the live AI aims with the `Predict.intercept` lead
+/// (`AIController.updateWeapons`, AIController.java:231): a slow shooter
+/// connects with a target moving perpendicular at full speed.
+#[test]
+fn mace_leads_a_moving_dagger() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::world::TilePos;
+
+    let mut sim = live_sim(64);
+    let shooter = sim
+        .spawn_live_unit("mace", 1, 100.0, 100.0, 0.0)
+        .expect("mace");
+    let target = sim
+        .spawn_live_unit("dagger", 2, 140.0, 100.0, 0.0)
+        .expect("target");
+    // Walk the target straight down (-y) at full speed.
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(target) {
+        slot.kind = AiKind::Command;
+        slot.target = Some(TilePos::new(17, 20));
+    }
+    let target_start = health(&sim, target).expect("target health");
+    let mut killed = false;
+    for _ in 0..600 {
+        sim.tick().expect("tick");
+        if sim.ecs.0.get_entity(target).is_err() {
+            killed = true;
+            break;
+        }
+    }
+    let target_end = health(&sim, target);
+    // The mace (74 damage) kills a 150 hp dagger in 3 connected shots; a
+    // no-lead aim hits nothing once the target has moved a bullet-flight away.
+    assert!(
+        killed || target_end.is_some_and(|hp| hp <= target_start - 3.0 * 74.0),
+        "the lead lets the mace connect (start {target_start}, end {target_end:?}, shooter {:?})",
+        health(&sim, shooter)
+    );
+}
+
 /// NEW-1: a status applied through the live applier ticks damage every tick
 /// (`StatusComp.update` in the live unit loop).
 #[test]

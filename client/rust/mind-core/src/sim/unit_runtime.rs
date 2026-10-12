@@ -43,7 +43,7 @@ use crate::ecs::{BuildingComp, EntitySeq};
 use crate::entities::comp::unit::comp::{PhysicsComp, TimedKillComp, UnitCore, UnitTypeComp};
 use crate::entities::comp::unit::lifecycle::{spawn_unit, spawn_unit_def, sync_weapon_state};
 use crate::entities::comp::unit::movement;
-use crate::entities::comp::{Building, Health, Pos, TeamComp};
+use crate::entities::comp::{Building, Health, Pos, TeamComp, Vel};
 use crate::game::runtime::CampaignRuntime;
 use crate::game::spawn_group::SpawnGroup;
 use crate::game::waves::Waves;
@@ -1156,7 +1156,7 @@ pub fn unit_update_system(world: &mut World) {
             // follows an explicit order (`targetPos`); with none the unit
             // idles in place instead of walking to the core anchor.
             let (_, mount_target) = acquire_target(world, &runtime, &queries, entity, team);
-            set_mount_targets(world, entity, mount_target);
+            set_mount_targets(world, &runtime.content, entity, mount_target);
             match slot.target {
                 Some(target) => {
                     let flying = world
@@ -1263,14 +1263,14 @@ pub fn unit_update_system(world: &mut World) {
                     )
                 })
             };
-            set_mount_targets(world, entity, mount_target);
+            set_mount_targets(world, &runtime.content, entity, mount_target);
         } else {
             // `GroundAI.updateMovement`/`FlyingAI`: pick a core/building anchor
             // and an in-range mount target. Spawned wave units have no command,
             // so the anchor supplies their move target.
             let (anchor_tile, mount_target) =
                 acquire_target(world, &runtime, &queries, entity, team);
-            set_mount_targets(world, entity, mount_target);
+            set_mount_targets(world, &runtime.content, entity, mount_target);
 
             let move_target = slot.target.or(anchor_tile);
             if let Some(target) = move_target {
@@ -2419,7 +2419,31 @@ fn face_target(
     let speed_mult = world
         .get::<crate::entities::comp::unit::comp::StatusComp>(entity)
         .map_or(1.0, |status| status.speed_multiplier);
-    let angle = (tpos.y - pos.y).atan2(tpos.x - pos.x).to_degrees();
+    // `Predict.intercept(unit, target, unit.type.weapons.first().bullet)`
+    // (AIController.java:124).
+    let src_vel = world
+        .get::<Vel>(entity)
+        .copied()
+        .unwrap_or(Vel { x: 0.0, y: 0.0 });
+    let dst_vel = world
+        .get::<Vel>(target)
+        .copied()
+        .unwrap_or(Vel { x: 0.0, y: 0.0 });
+    let (bullet_speed, keep_velocity) = def
+        .weapons
+        .first()
+        .and_then(|weapon| content.bullet(weapon.bullet.id))
+        .map(|bullet| (bullet.speed, bullet.keep_velocity))
+        .unwrap_or((0.0, true));
+    let aim = crate::combat::targeting::intercept_positions(
+        (pos.x, pos.y),
+        (src_vel.x, src_vel.y),
+        (tpos.x, tpos.y),
+        (dst_vel.x, dst_vel.y),
+        keep_velocity,
+        bullet_speed,
+    );
+    let angle = (aim.1 - pos.y).atan2(aim.0 - pos.x).to_degrees();
     if let Some(mut core) = world.get_mut::<UnitCore>(entity) {
         core.rotation = crate::ai::types::missile::move_toward_angle(
             core.rotation,
@@ -2430,8 +2454,41 @@ fn face_target(
 }
 
 /// `AIController.target`: stores the mount target/aim and gates firing.
-fn set_mount_targets(world: &mut World, entity: Entity, target: Option<Entity>) {
-    let aim = target.and_then(|target| world.get::<Pos>(target).map(|pos| (pos.x, pos.y)));
+///
+/// The aim point is the `Predict.intercept(unit, target, weapon.bullet)` lead
+/// of the first weapon (`AIController.updateWeapons`, AIController.java:231).
+fn set_mount_targets(
+    world: &mut World,
+    content: &ContentRegistry,
+    entity: Entity,
+    target: Option<Entity>,
+) {
+    let aim = target.and_then(|target| {
+        let src = world.get::<Pos>(entity).copied()?;
+        let dst = world.get::<Pos>(target).copied()?;
+        let src_vel = world
+            .get::<Vel>(entity)
+            .copied()
+            .unwrap_or(Vel { x: 0.0, y: 0.0 });
+        let dst_vel = world
+            .get::<Vel>(target)
+            .copied()
+            .unwrap_or(Vel { x: 0.0, y: 0.0 });
+        let (bullet_speed, keep_velocity) = world
+            .get::<UnitWeapons>(entity)
+            .and_then(|weapons| weapons.weapons.first())
+            .and_then(|weapon| content.bullet(weapon.bullet.id))
+            .map(|bullet| (bullet.speed, bullet.keep_velocity))
+            .unwrap_or((0.0, true));
+        Some(crate::combat::targeting::intercept_positions(
+            (src.x, src.y),
+            (src_vel.x, src_vel.y),
+            (dst.x, dst.y),
+            (dst_vel.x, dst_vel.y),
+            keep_velocity,
+            bullet_speed,
+        ))
+    });
     let Some(mut weapons) = world.get_mut::<UnitWeapons>(entity) else {
         return;
     };
