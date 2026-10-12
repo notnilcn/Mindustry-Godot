@@ -98,6 +98,11 @@ impl BlockRenderer {
         }
 
         let mut groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<UnitQuad>)> = BTreeMap::new();
+        // Belt items are collected separately and appended to their page after
+        // every block quad is in place, so a later belt can never cover an item
+        // drawn earlier: `Conveyor.draw` runs its item loop at
+        // `Layer.block - 0.1`, above all belts (drawn at `Layer.block - 0.2`).
+        let mut item_groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<UnitQuad>)> = BTreeMap::new();
         let mut seen = HashSet::new();
         let mut dynamic = 0i64;
         let mut animating = false;
@@ -233,7 +238,19 @@ impl BlockRenderer {
                                 else {
                                     continue;
                                 };
-                                push(&region, ix, iy, ITEM_SIZE, ITEM_SIZE, 0.0, 0xffff_ffff, 1.0);
+                                let entry = item_groups
+                                    .entry(region.page)
+                                    .or_insert((region.texture.clone(), Vec::new()));
+                                let [u0, v0, u1, v1] = region.uv;
+                                entry.1.push(UnitQuad {
+                                    cx: ix,
+                                    cy: iy,
+                                    w: ITEM_SIZE,
+                                    h: ITEM_SIZE,
+                                    rot: 0.0,
+                                    uv: [u0, v0, u1, v1],
+                                    color: 0xffff_ffff,
+                                });
                             }
                             // Items move without a world-revision bump: keep
                             // rebuilding while any visible belt carries some.
@@ -282,6 +299,12 @@ impl BlockRenderer {
             }
         }
         self.animating = animating;
+
+        // Items on top of every block quad of their page.
+        for (page, (texture, quads)) in item_groups {
+            let entry = groups.entry(page).or_insert((texture, Vec::new()));
+            entry.1.extend(quads);
+        }
 
         self.apply_groups(groups);
         self.stats.dynamic_sprites = dynamic;
