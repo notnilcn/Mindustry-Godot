@@ -27,7 +27,7 @@
       "kind": "oracle",
       "path": "parity/golden_content.json",
       "owner_plan": "02",
-      "sha256": "234fb18c79c50e4c0b910367123529188f87a380cacd32f1259a1aee41764e42",
+      "sha256": "3b161c77450b2a990dc87d2726a8a2034b52062497045e679420961f5646188a",
       "regen": "cargo run -p mind-headless -- content dump"
     },
     {
@@ -477,7 +477,7 @@
       "kind": "harness",
       "path": "client/rust/mind-core/tests/goldens/ui/campaign.json",
       "owner_plan": "14",
-      "sha256": "241b9ff062a92bded899c807086891b363660d466e5d8ab764017a50445894f7"
+      "sha256": "020287ab5d1cf77a15cee3fe4d061c4ad4ecdf6d3f3e759cb05b095358fafc06"
     },
     {
       "id": "harness_ui_chat_console",

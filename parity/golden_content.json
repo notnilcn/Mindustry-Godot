@@ -18202,7 +18202,16 @@
           "content": "core-shard",
           "parent": null,
           "depth": 0,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              42000
+            ],
+            [
+              "lead",
+              33000
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18210,7 +18219,12 @@
           "content": "conveyor",
           "parent": "core-shard",
           "depth": 1,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              5
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18218,7 +18232,12 @@
           "content": "junction",
           "parent": "conveyor",
           "depth": 2,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              100
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18226,7 +18245,12 @@
           "content": "router",
           "parent": "junction",
           "depth": 3,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              100
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18234,7 +18258,24 @@
           "content": "advanced-launch-pad",
           "parent": "router",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              13000
+            ],
+            [
+              "silicon",
+              9200
+            ],
+            [
+              "lead",
+              11000
+            ],
+            [
+              "titanium",
+              7200
+            ]
+          ],
           "objectives": [
             "sector-complete:extractionOutpost"
           ]
@@ -18244,7 +18285,20 @@
           "content": "landing-pad",
           "parent": "advanced-launch-pad",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              7200
+            ],
+            [
+              "graphite",
+              3300
+            ],
+            [
+              "titanium",
+              3300
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18252,7 +18306,32 @@
           "content": "interplanetary-accelerator",
           "parent": "landing-pad",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              92000
+            ],
+            [
+              "silicon",
+              61000
+            ],
+            [
+              "thorium",
+              73000
+            ],
+            [
+              "titanium",
+              67000
+            ],
+            [
+              "surge-alloy",
+              31000
+            ],
+            [
+              "phase-fabric",
+              25000
+            ]
+          ],
           "objectives": [
             "sector-complete:planetaryTerminal"
           ]
@@ -18262,7 +18341,16 @@
           "content": "distributor",
           "parent": "router",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "lead",
+              100
+            ],
+            [
+              "copper",
+              100
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18270,7 +18358,16 @@
           "content": "sorter",
           "parent": "router",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "lead",
+              100
+            ],
+            [
+              "copper",
+              100
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18278,7 +18375,16 @@
           "content": "inverted-sorter",
           "parent": "sorter",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "lead",
+              100
+            ],
+            [
+              "copper",
+              100
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18286,7 +18392,16 @@
           "content": "overflow-gate",
           "parent": "sorter",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "lead",
+              100
+            ],
+            [
+              "copper",
+              100
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18294,7 +18409,16 @@
           "content": "underflow-gate",
           "parent": "overflow-gate",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "lead",
+              100
+            ],
+            [
+              "copper",
+              100
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18302,7 +18426,12 @@
           "content": "container",
           "parent": "router",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "titanium",
+              3300
+            ]
+          ],
           "objectives": [
             "sector-complete:biomassFacility"
           ]
@@ -18312,7 +18441,16 @@
           "content": "unloader",
           "parent": "container",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "titanium",
+              700
+            ],
+            [
+              "silicon",
+              900
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18320,7 +18458,16 @@
           "content": "vault",
           "parent": "container",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "titanium",
+              9200
+            ],
+            [
+              "thorium",
+              4300
+            ]
+          ],
           "objectives": [
             "sector-complete:stainedMountains"
           ]
@@ -18330,7 +18477,16 @@
           "content": "bridge-conveyor",
           "parent": "router",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "lead",
+              200
+            ],
+            [
+              "copper",
+              200
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18338,7 +18494,20 @@
           "content": "titanium-conveyor",
           "parent": "bridge-conveyor",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              80
+            ],
+            [
+              "lead",
+              80
+            ],
+            [
+              "titanium",
+              80
+            ]
+          ],
           "objectives": [
             "sector-complete:crateredBattleground"
           ]
@@ -18348,7 +18517,24 @@
           "content": "mass-driver",
           "parent": "titanium-conveyor",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "titanium",
+              4300
+            ],
+            [
+              "silicon",
+              2400
+            ],
+            [
+              "lead",
+              4300
+            ],
+            [
+              "thorium",
+              1500
+            ]
+          ],
           "objectives": [
             "sector-complete:tarFields"
           ]
@@ -18358,7 +18544,24 @@
           "content": "phase-conveyor",
           "parent": "mass-driver",
           "depth": 7,
-          "requirements": [],
+          "requirements": [
+            [
+              "phase-fabric",
+              100
+            ],
+            [
+              "silicon",
+              200
+            ],
+            [
+              "lead",
+              300
+            ],
+            [
+              "graphite",
+              300
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18366,7 +18569,16 @@
           "content": "payload-conveyor",
           "parent": "titanium-conveyor",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "graphite",
+              300
+            ],
+            [
+              "copper",
+              300
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18374,7 +18586,16 @@
           "content": "payload-router",
           "parent": "payload-conveyor",
           "depth": 7,
-          "requirements": [],
+          "requirements": [
+            [
+              "graphite",
+              400
+            ],
+            [
+              "copper",
+              300
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18382,7 +18603,20 @@
           "content": "plastanium-conveyor",
           "parent": "titanium-conveyor",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "plastanium",
+              80
+            ],
+            [
+              "silicon",
+              80
+            ],
+            [
+              "graphite",
+              80
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18390,7 +18624,20 @@
           "content": "armored-conveyor",
           "parent": "plastanium-conveyor",
           "depth": 7,
-          "requirements": [],
+          "requirements": [
+            [
+              "plastanium",
+              80
+            ],
+            [
+              "thorium",
+              80
+            ],
+            [
+              "metaglass",
+              80
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18398,7 +18645,20 @@
           "content": "core-foundation",
           "parent": "core-shard",
           "depth": 1,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              10000
+            ],
+            [
+              "lead",
+              10000
+            ],
+            [
+              "silicon",
+              6400
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18406,7 +18666,24 @@
           "content": "core-nucleus",
           "parent": "core-foundation",
           "depth": 2,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              47000
+            ],
+            [
+              "lead",
+              47000
+            ],
+            [
+              "silicon",
+              28000
+            ],
+            [
+              "thorium",
+              21000
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18414,7 +18691,12 @@
           "content": "mechanical-drill",
           "parent": "core-shard",
           "depth": 1,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              10
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18422,7 +18704,16 @@
           "content": "mechanical-pump",
           "parent": "mechanical-drill",
           "depth": 2,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              400
+            ],
+            [
+              "metaglass",
+              300
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18430,7 +18721,12 @@
           "content": "conduit",
           "parent": "mechanical-pump",
           "depth": 3,
-          "requirements": [],
+          "requirements": [
+            [
+              "metaglass",
+              80
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18438,7 +18734,16 @@
           "content": "liquid-junction",
           "parent": "conduit",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "graphite",
+              100
+            ],
+            [
+              "metaglass",
+              200
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18446,7 +18751,16 @@
           "content": "liquid-router",
           "parent": "liquid-junction",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "graphite",
+              100
+            ],
+            [
+              "metaglass",
+              100
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18454,7 +18768,16 @@
           "content": "liquid-container",
           "parent": "liquid-router",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "titanium",
+              300
+            ],
+            [
+              "metaglass",
+              400
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18462,7 +18785,16 @@
           "content": "liquid-tank",
           "parent": "liquid-container",
           "depth": 7,
-          "requirements": [],
+          "requirements": [
+            [
+              "titanium",
+              900
+            ],
+            [
+              "metaglass",
+              1200
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18470,7 +18802,16 @@
           "content": "bridge-conduit",
           "parent": "liquid-router",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "graphite",
+              100
+            ],
+            [
+              "metaglass",
+              200
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18478,7 +18819,16 @@
           "content": "pulse-conduit",
           "parent": "liquid-router",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "titanium",
+              100
+            ],
+            [
+              "metaglass",
+              80
+            ]
+          ],
           "objectives": [
             "sector-complete:windsweptIslands"
           ]
@@ -18488,7 +18838,24 @@
           "content": "phase-conduit",
           "parent": "pulse-conduit",
           "depth": 7,
-          "requirements": [],
+          "requirements": [
+            [
+              "phase-fabric",
+              100
+            ],
+            [
+              "silicon",
+              200
+            ],
+            [
+              "metaglass",
+              600
+            ],
+            [
+              "titanium",
+              300
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18496,7 +18863,20 @@
           "content": "plated-conduit",
           "parent": "pulse-conduit",
           "depth": 7,
-          "requirements": [],
+          "requirements": [
+            [
+              "thorium",
+              100
+            ],
+            [
+              "metaglass",
+              80
+            ],
+            [
+              "plastanium",
+              80
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18504,7 +18884,24 @@
           "content": "rotary-pump",
           "parent": "pulse-conduit",
           "depth": 7,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              2200
+            ],
+            [
+              "metaglass",
+              1500
+            ],
+            [
+              "silicon",
+              600
+            ],
+            [
+              "titanium",
+              1000
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18512,7 +18909,28 @@
           "content": "impulse-pump",
           "parent": "rotary-pump",
           "depth": 8,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              2600
+            ],
+            [
+              "metaglass",
+              3000
+            ],
+            [
+              "silicon",
+              900
+            ],
+            [
+              "titanium",
+              1200
+            ],
+            [
+              "thorium",
+              1000
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18520,7 +18938,16 @@
           "content": "graphite-press",
           "parent": "mechanical-drill",
           "depth": 2,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              2400
+            ],
+            [
+              "lead",
+              900
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18528,7 +18955,16 @@
           "content": "pneumatic-drill",
           "parent": "graphite-press",
           "depth": 3,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              500
+            ],
+            [
+              "graphite",
+              300
+            ]
+          ],
           "objectives": [
             "sector-complete:frozenForest"
           ]
@@ -18538,7 +18974,20 @@
           "content": "cultivator",
           "parent": "pneumatic-drill",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              700
+            ],
+            [
+              "lead",
+              700
+            ],
+            [
+              "silicon",
+              300
+            ]
+          ],
           "objectives": [
             "sector-complete:biomassFacility"
           ]
@@ -18548,7 +18997,24 @@
           "content": "laser-drill",
           "parent": "pneumatic-drill",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              1000
+            ],
+            [
+              "graphite",
+              900
+            ],
+            [
+              "silicon",
+              900
+            ],
+            [
+              "titanium",
+              600
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18556,7 +19022,24 @@
           "content": "blast-drill",
           "parent": "laser-drill",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              2100
+            ],
+            [
+              "silicon",
+              1900
+            ],
+            [
+              "titanium",
+              1500
+            ],
+            [
+              "thorium",
+              2400
+            ]
+          ],
           "objectives": [
             "sector-complete:nuclearComplex"
           ]
@@ -18566,7 +19049,24 @@
           "content": "water-extractor",
           "parent": "laser-drill",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "metaglass",
+              900
+            ],
+            [
+              "graphite",
+              900
+            ],
+            [
+              "lead",
+              900
+            ],
+            [
+              "copper",
+              900
+            ]
+          ],
           "objectives": [
             "sector-complete:saltFlats"
           ]
@@ -18576,7 +19076,28 @@
           "content": "oil-extractor",
           "parent": "water-extractor",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              5200
+            ],
+            [
+              "graphite",
+              6200
+            ],
+            [
+              "lead",
+              3900
+            ],
+            [
+              "thorium",
+              3900
+            ],
+            [
+              "silicon",
+              2400
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18584,7 +19105,16 @@
           "content": "pyratite-mixer",
           "parent": "graphite-press",
           "depth": 3,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              1500
+            ],
+            [
+              "lead",
+              700
+            ]
+          ],
           "objectives": [
             "sector-complete:crateredBattleground"
           ]
@@ -18594,7 +19124,16 @@
           "content": "blast-mixer",
           "parent": "pyratite-mixer",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "lead",
+              900
+            ],
+            [
+              "titanium",
+              600
+            ]
+          ],
           "objectives": [
             "sector-complete:facility32m"
           ]
@@ -18604,7 +19143,16 @@
           "content": "silicon-smelter",
           "parent": "graphite-press",
           "depth": 3,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              900
+            ],
+            [
+              "lead",
+              700
+            ]
+          ],
           "objectives": [
             "sector-complete:frozenForest"
           ]
@@ -18614,7 +19162,16 @@
           "content": "spore-press",
           "parent": "silicon-smelter",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "lead",
+              1000
+            ],
+            [
+              "silicon",
+              900
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18622,7 +19179,20 @@
           "content": "coal-centrifuge",
           "parent": "spore-press",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "titanium",
+              600
+            ],
+            [
+              "graphite",
+              1200
+            ],
+            [
+              "lead",
+              900
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18630,7 +19200,24 @@
           "content": "multi-press",
           "parent": "coal-centrifuge",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "titanium",
+              3300
+            ],
+            [
+              "silicon",
+              700
+            ],
+            [
+              "lead",
+              3300
+            ],
+            [
+              "graphite",
+              1500
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18638,7 +19225,24 @@
           "content": "silicon-crucible",
           "parent": "multi-press",
           "depth": 7,
-          "requirements": [],
+          "requirements": [
+            [
+              "titanium",
+              4100
+            ],
+            [
+              "metaglass",
+              2600
+            ],
+            [
+              "plastanium",
+              1000
+            ],
+            [
+              "silicon",
+              1900
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18646,7 +19250,24 @@
           "content": "plastanium-compressor",
           "parent": "spore-press",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              2600
+            ],
+            [
+              "lead",
+              3900
+            ],
+            [
+              "graphite",
+              1900
+            ],
+            [
+              "titanium",
+              2600
+            ]
+          ],
           "objectives": [
             "sector-complete:windsweptIslands"
           ]
@@ -18656,7 +19277,20 @@
           "content": "phase-weaver",
           "parent": "plastanium-compressor",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              4500
+            ],
+            [
+              "lead",
+              4100
+            ],
+            [
+              "thorium",
+              2400
+            ]
+          ],
           "objectives": [
             "sector-complete:impact0078"
           ]
@@ -18666,7 +19300,20 @@
           "content": "kiln",
           "parent": "silicon-smelter",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              1900
+            ],
+            [
+              "graphite",
+              900
+            ],
+            [
+              "lead",
+              900
+            ]
+          ],
           "objectives": [
             "on-sector:crateredBattleground"
           ]
@@ -18676,7 +19323,16 @@
           "content": "pulverizer",
           "parent": "kiln",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              900
+            ],
+            [
+              "lead",
+              700
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18684,7 +19340,16 @@
           "content": "incinerator",
           "parent": "pulverizer",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "graphite",
+              100
+            ],
+            [
+              "lead",
+              400
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18692,7 +19357,20 @@
           "content": "melter",
           "parent": "incinerator",
           "depth": 7,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              900
+            ],
+            [
+              "lead",
+              1000
+            ],
+            [
+              "graphite",
+              1400
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18700,7 +19378,20 @@
           "content": "surge-smelter",
           "parent": "melter",
           "depth": 8,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              2600
+            ],
+            [
+              "lead",
+              2600
+            ],
+            [
+              "thorium",
+              2200
+            ]
+          ],
           "objectives": [
             "sector-complete:coastline"
           ]
@@ -18710,7 +19401,16 @@
           "content": "separator",
           "parent": "melter",
           "depth": 8,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              900
+            ],
+            [
+              "titanium",
+              700
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18718,7 +19418,24 @@
           "content": "disassembler",
           "parent": "separator",
           "depth": 9,
-          "requirements": [],
+          "requirements": [
+            [
+              "plastanium",
+              1200
+            ],
+            [
+              "titanium",
+              3300
+            ],
+            [
+              "silicon",
+              5200
+            ],
+            [
+              "thorium",
+              2600
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18726,7 +19443,20 @@
           "content": "cryofluid-mixer",
           "parent": "melter",
           "depth": 8,
-          "requirements": [],
+          "requirements": [
+            [
+              "lead",
+              2100
+            ],
+            [
+              "silicon",
+              1200
+            ],
+            [
+              "titanium",
+              1900
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18734,7 +19464,20 @@
           "content": "micro-processor",
           "parent": "silicon-smelter",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              3000
+            ],
+            [
+              "lead",
+              1500
+            ],
+            [
+              "silicon",
+              1500
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18742,7 +19485,16 @@
           "content": "switch",
           "parent": "micro-processor",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "graphite",
+              100
+            ],
+            [
+              "copper",
+              100
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18750,7 +19502,16 @@
           "content": "message",
           "parent": "switch",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "graphite",
+              100
+            ],
+            [
+              "copper",
+              100
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18758,7 +19519,20 @@
           "content": "logic-display",
           "parent": "message",
           "depth": 7,
-          "requirements": [],
+          "requirements": [
+            [
+              "lead",
+              3300
+            ],
+            [
+              "silicon",
+              1500
+            ],
+            [
+              "metaglass",
+              1500
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18766,7 +19540,24 @@
           "content": "large-logic-display",
           "parent": "logic-display",
           "depth": 8,
-          "requirements": [],
+          "requirements": [
+            [
+              "lead",
+              7200
+            ],
+            [
+              "silicon",
+              5200
+            ],
+            [
+              "metaglass",
+              3300
+            ],
+            [
+              "phase-fabric",
+              2400
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18774,7 +19565,24 @@
           "content": "tile-logic-display",
           "parent": "logic-display",
           "depth": 8,
-          "requirements": [],
+          "requirements": [
+            [
+              "lead",
+              200
+            ],
+            [
+              "silicon",
+              200
+            ],
+            [
+              "metaglass",
+              200
+            ],
+            [
+              "phase-fabric",
+              100
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18782,7 +19590,20 @@
           "content": "memory-cell",
           "parent": "message",
           "depth": 7,
-          "requirements": [],
+          "requirements": [
+            [
+              "graphite",
+              900
+            ],
+            [
+              "silicon",
+              900
+            ],
+            [
+              "copper",
+              900
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18790,7 +19611,24 @@
           "content": "memory-bank",
           "parent": "memory-cell",
           "depth": 8,
-          "requirements": [],
+          "requirements": [
+            [
+              "graphite",
+              2600
+            ],
+            [
+              "silicon",
+              2600
+            ],
+            [
+              "phase-fabric",
+              900
+            ],
+            [
+              "copper",
+              900
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18798,7 +19636,24 @@
           "content": "logic-processor",
           "parent": "switch",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "lead",
+              12000
+            ],
+            [
+              "silicon",
+              2600
+            ],
+            [
+              "graphite",
+              1900
+            ],
+            [
+              "thorium",
+              1500
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18806,7 +19661,24 @@
           "content": "hyper-processor",
           "parent": "logic-processor",
           "depth": 7,
-          "requirements": [],
+          "requirements": [
+            [
+              "lead",
+              17000
+            ],
+            [
+              "silicon",
+              5200
+            ],
+            [
+              "thorium",
+              2400
+            ],
+            [
+              "surge-alloy",
+              1500
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18814,7 +19686,20 @@
           "content": "illuminator",
           "parent": "silicon-smelter",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "graphite",
+              300
+            ],
+            [
+              "silicon",
+              200
+            ],
+            [
+              "lead",
+              200
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18822,7 +19707,16 @@
           "content": "combustion-generator",
           "parent": "mechanical-drill",
           "depth": 2,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              700
+            ],
+            [
+              "lead",
+              400
+            ]
+          ],
           "objectives": [
             "research:coal"
           ]
@@ -18832,7 +19726,16 @@
           "content": "power-node",
           "parent": "combustion-generator",
           "depth": 3,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              100
+            ],
+            [
+              "lead",
+              200
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18840,7 +19743,20 @@
           "content": "power-node-large",
           "parent": "power-node",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "titanium",
+              100
+            ],
+            [
+              "lead",
+              300
+            ],
+            [
+              "silicon",
+              100
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18848,7 +19764,20 @@
           "content": "diode",
           "parent": "power-node-large",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              300
+            ],
+            [
+              "plastanium",
+              100
+            ],
+            [
+              "metaglass",
+              300
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18856,7 +19785,24 @@
           "content": "surge-tower",
           "parent": "diode",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "titanium",
+              200
+            ],
+            [
+              "lead",
+              300
+            ],
+            [
+              "silicon",
+              400
+            ],
+            [
+              "surge-alloy",
+              400
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18864,7 +19810,16 @@
           "content": "battery",
           "parent": "power-node",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              100
+            ],
+            [
+              "lead",
+              600
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18872,7 +19827,20 @@
           "content": "battery-large",
           "parent": "battery",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "titanium",
+              600
+            ],
+            [
+              "lead",
+              1500
+            ],
+            [
+              "silicon",
+              900
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18880,7 +19848,16 @@
           "content": "mender",
           "parent": "power-node",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "lead",
+              900
+            ],
+            [
+              "copper",
+              700
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18888,7 +19865,24 @@
           "content": "mend-projector",
           "parent": "mender",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "lead",
+              3300
+            ],
+            [
+              "titanium",
+              700
+            ],
+            [
+              "silicon",
+              1200
+            ],
+            [
+              "copper",
+              1500
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18896,7 +19890,20 @@
           "content": "force-projector",
           "parent": "mend-projector",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "lead",
+              3300
+            ],
+            [
+              "titanium",
+              2400
+            ],
+            [
+              "silicon",
+              4300
+            ]
+          ],
           "objectives": [
             "sector-complete:impact0078"
           ]
@@ -18906,7 +19913,24 @@
           "content": "overdrive-projector",
           "parent": "force-projector",
           "depth": 7,
-          "requirements": [],
+          "requirements": [
+            [
+              "lead",
+              3300
+            ],
+            [
+              "titanium",
+              2400
+            ],
+            [
+              "silicon",
+              2400
+            ],
+            [
+              "plastanium",
+              900
+            ]
+          ],
           "objectives": [
             "sector-complete:impact0078"
           ]
@@ -18916,7 +19940,28 @@
           "content": "overdrive-dome",
           "parent": "overdrive-projector",
           "depth": 8,
-          "requirements": [],
+          "requirements": [
+            [
+              "lead",
+              7200
+            ],
+            [
+              "titanium",
+              4500
+            ],
+            [
+              "silicon",
+              4500
+            ],
+            [
+              "plastanium",
+              2600
+            ],
+            [
+              "surge-alloy",
+              4100
+            ]
+          ],
           "objectives": [
             "sector-complete:desolateRift"
           ]
@@ -18926,7 +19971,20 @@
           "content": "repair-point",
           "parent": "mend-projector",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "lead",
+              900
+            ],
+            [
+              "copper",
+              900
+            ],
+            [
+              "silicon",
+              600
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18934,7 +19992,20 @@
           "content": "repair-turret",
           "parent": "repair-point",
           "depth": 7,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              3000
+            ],
+            [
+              "thorium",
+              2600
+            ],
+            [
+              "plastanium",
+              1900
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18942,7 +20013,24 @@
           "content": "steam-generator",
           "parent": "power-node",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              1000
+            ],
+            [
+              "graphite",
+              700
+            ],
+            [
+              "lead",
+              1200
+            ],
+            [
+              "silicon",
+              900
+            ]
+          ],
           "objectives": [
             "sector-complete:crateredBattleground"
           ]
@@ -18952,7 +20040,28 @@
           "content": "thermal-generator",
           "parent": "steam-generator",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              1200
+            ],
+            [
+              "graphite",
+              1000
+            ],
+            [
+              "lead",
+              1500
+            ],
+            [
+              "silicon",
+              1000
+            ],
+            [
+              "metaglass",
+              1200
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18960,7 +20069,28 @@
           "content": "differential-generator",
           "parent": "thermal-generator",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              2200
+            ],
+            [
+              "titanium",
+              1500
+            ],
+            [
+              "lead",
+              3300
+            ],
+            [
+              "silicon",
+              2100
+            ],
+            [
+              "metaglass",
+              1500
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18968,7 +20098,28 @@
           "content": "thorium-reactor",
           "parent": "differential-generator",
           "depth": 7,
-          "requirements": [],
+          "requirements": [
+            [
+              "lead",
+              11000
+            ],
+            [
+              "silicon",
+              7200
+            ],
+            [
+              "graphite",
+              5200
+            ],
+            [
+              "thorium",
+              5200
+            ],
+            [
+              "metaglass",
+              1500
+            ]
+          ],
           "objectives": [
             "research:cryofluid",
             "on-sector:nuclearComplex"
@@ -18979,7 +20130,32 @@
           "content": "impact-reactor",
           "parent": "thorium-reactor",
           "depth": 8,
-          "requirements": [],
+          "requirements": [
+            [
+              "lead",
+              19000
+            ],
+            [
+              "silicon",
+              11000
+            ],
+            [
+              "graphite",
+              15000
+            ],
+            [
+              "thorium",
+              3300
+            ],
+            [
+              "surge-alloy",
+              9200
+            ],
+            [
+              "metaglass",
+              9200
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18987,7 +20163,28 @@
           "content": "rtg-generator",
           "parent": "thorium-reactor",
           "depth": 8,
-          "requirements": [],
+          "requirements": [
+            [
+              "lead",
+              3300
+            ],
+            [
+              "silicon",
+              2400
+            ],
+            [
+              "phase-fabric",
+              700
+            ],
+            [
+              "plastanium",
+              2400
+            ],
+            [
+              "thorium",
+              1500
+            ]
+          ],
           "objectives": []
         },
         {
@@ -18995,7 +20192,16 @@
           "content": "solar-panel",
           "parent": "power-node",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "lead",
+              300
+            ],
+            [
+              "silicon",
+              200
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19003,7 +20209,20 @@
           "content": "solar-panel-large",
           "parent": "solar-panel",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "lead",
+              1900
+            ],
+            [
+              "silicon",
+              2200
+            ],
+            [
+              "phase-fabric",
+              400
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19011,7 +20230,12 @@
           "content": "duo",
           "parent": "core-shard",
           "depth": 1,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              50
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19019,7 +20243,12 @@
           "content": "copper-wall",
           "parent": "duo",
           "depth": 2,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              20
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19027,7 +20256,12 @@
           "content": "copper-wall-large",
           "parent": "copper-wall",
           "depth": 3,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              700
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19035,7 +20269,12 @@
           "content": "scrap-wall",
           "parent": "copper-wall-large",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "scrap",
+              200
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19043,7 +20282,12 @@
           "content": "scrap-wall-large",
           "parent": "scrap-wall",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "scrap",
+              700
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19051,7 +20295,12 @@
           "content": "scrap-wall-huge",
           "parent": "scrap-wall-large",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "scrap",
+              1700
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19059,7 +20308,12 @@
           "content": "scrap-wall-gigantic",
           "parent": "scrap-wall-huge",
           "depth": 7,
-          "requirements": [],
+          "requirements": [
+            [
+              "scrap",
+              3200
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19067,7 +20321,12 @@
           "content": "titanium-wall",
           "parent": "copper-wall-large",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "titanium",
+              200
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19075,7 +20334,12 @@
           "content": "titanium-wall-large",
           "parent": "titanium-wall",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "titanium",
+              700
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19083,7 +20347,16 @@
           "content": "door",
           "parent": "titanium-wall",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "titanium",
+              200
+            ],
+            [
+              "silicon",
+              100
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19091,7 +20364,16 @@
           "content": "door-large",
           "parent": "door",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "titanium",
+              700
+            ],
+            [
+              "silicon",
+              400
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19099,7 +20381,16 @@
           "content": "plastanium-wall",
           "parent": "titanium-wall",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "plastanium",
+              100
+            ],
+            [
+              "metaglass",
+              100
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19107,7 +20398,16 @@
           "content": "plastanium-wall-large",
           "parent": "plastanium-wall",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "plastanium",
+              600
+            ],
+            [
+              "metaglass",
+              200
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19115,7 +20415,12 @@
           "content": "thorium-wall",
           "parent": "titanium-wall",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "thorium",
+              200
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19123,7 +20428,12 @@
           "content": "thorium-wall-large",
           "parent": "thorium-wall",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "thorium",
+              700
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19131,7 +20441,12 @@
           "content": "surge-wall",
           "parent": "thorium-wall",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "surge-alloy",
+              200
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19139,7 +20454,12 @@
           "content": "surge-wall-large",
           "parent": "surge-wall",
           "depth": 7,
-          "requirements": [],
+          "requirements": [
+            [
+              "surge-alloy",
+              700
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19147,7 +20467,12 @@
           "content": "phase-wall",
           "parent": "surge-wall",
           "depth": 7,
-          "requirements": [],
+          "requirements": [
+            [
+              "phase-fabric",
+              200
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19155,7 +20480,12 @@
           "content": "phase-wall-large",
           "parent": "phase-wall",
           "depth": 8,
-          "requirements": [],
+          "requirements": [
+            [
+              "phase-fabric",
+              700
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19163,7 +20493,16 @@
           "content": "scatter",
           "parent": "duo",
           "depth": 2,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              100
+            ],
+            [
+              "lead",
+              70
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19171,7 +20510,16 @@
           "content": "hail",
           "parent": "scatter",
           "depth": 3,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              1200
+            ],
+            [
+              "graphite",
+              500
+            ]
+          ],
           "objectives": [
             "sector-complete:crateredBattleground"
           ]
@@ -19181,7 +20529,20 @@
           "content": "salvo",
           "parent": "hail",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              3300
+            ],
+            [
+              "graphite",
+              2600
+            ],
+            [
+              "titanium",
+              1500
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19189,7 +20550,24 @@
           "content": "swarmer",
           "parent": "salvo",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "graphite",
+              1000
+            ],
+            [
+              "titanium",
+              1000
+            ],
+            [
+              "plastanium",
+              1400
+            ],
+            [
+              "silicon",
+              900
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19197,7 +20575,20 @@
           "content": "cyclone",
           "parent": "swarmer",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              7200
+            ],
+            [
+              "titanium",
+              4300
+            ],
+            [
+              "plastanium",
+              2600
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19205,7 +20596,28 @@
           "content": "spectre",
           "parent": "cyclone",
           "depth": 7,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              38000
+            ],
+            [
+              "graphite",
+              11000
+            ],
+            [
+              "surge-alloy",
+              9200
+            ],
+            [
+              "plastanium",
+              6200
+            ],
+            [
+              "thorium",
+              9200
+            ]
+          ],
           "objectives": [
             "sector-complete:nuclearComplex"
           ]
@@ -19215,7 +20627,20 @@
           "content": "ripple",
           "parent": "salvo",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              5200
+            ],
+            [
+              "graphite",
+              4600
+            ],
+            [
+              "titanium",
+              1900
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19223,7 +20648,20 @@
           "content": "fuse",
           "parent": "ripple",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              8200
+            ],
+            [
+              "graphite",
+              8200
+            ],
+            [
+              "thorium",
+              3300
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19231,7 +20669,16 @@
           "content": "arc",
           "parent": "duo",
           "depth": 2,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              500
+            ],
+            [
+              "lead",
+              500
+            ]
+          ],
           "objectives": [
             "on-sector:frozenForest"
           ]
@@ -19241,7 +20688,16 @@
           "content": "scorch",
           "parent": "arc",
           "depth": 3,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              700
+            ],
+            [
+              "graphite",
+              600
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19249,7 +20705,20 @@
           "content": "wave",
           "parent": "scorch",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "metaglass",
+              1400
+            ],
+            [
+              "lead",
+              2400
+            ],
+            [
+              "copper",
+              700
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19257,7 +20726,20 @@
           "content": "parallax",
           "parent": "wave",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              5600
+            ],
+            [
+              "titanium",
+              3700
+            ],
+            [
+              "graphite",
+              1500
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19265,7 +20747,24 @@
           "content": "segment",
           "parent": "parallax",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              4500
+            ],
+            [
+              "thorium",
+              2600
+            ],
+            [
+              "phase-fabric",
+              1200
+            ],
+            [
+              "titanium",
+              1200
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19273,7 +20772,24 @@
           "content": "tsunami",
           "parent": "wave",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "metaglass",
+              3300
+            ],
+            [
+              "lead",
+              15000
+            ],
+            [
+              "titanium",
+              9200
+            ],
+            [
+              "thorium",
+              3300
+            ]
+          ],
           "objectives": [
             "sector-complete:navalFortress"
           ]
@@ -19283,7 +20799,24 @@
           "content": "lancer",
           "parent": "scorch",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              1900
+            ],
+            [
+              "lead",
+              2200
+            ],
+            [
+              "silicon",
+              1900
+            ],
+            [
+              "titanium",
+              900
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19291,7 +20824,28 @@
           "content": "meltdown",
           "parent": "lancer",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              52000
+            ],
+            [
+              "lead",
+              13000
+            ],
+            [
+              "graphite",
+              11000
+            ],
+            [
+              "surge-alloy",
+              12000
+            ],
+            [
+              "silicon",
+              12000
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19299,7 +20853,28 @@
           "content": "foreshadow",
           "parent": "meltdown",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              42000
+            ],
+            [
+              "metaglass",
+              24000
+            ],
+            [
+              "surge-alloy",
+              11000
+            ],
+            [
+              "plastanium",
+              7200
+            ],
+            [
+              "silicon",
+              24000
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19307,7 +20882,16 @@
           "content": "shock-mine",
           "parent": "lancer",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "lead",
+              700
+            ],
+            [
+              "silicon",
+              300
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19315,7 +20899,20 @@
           "content": "ground-factory",
           "parent": "core-shard",
           "depth": 1,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              700
+            ],
+            [
+              "lead",
+              2000
+            ],
+            [
+              "silicon",
+              1300
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19323,7 +20920,16 @@
           "content": "dagger",
           "parent": "ground-factory",
           "depth": 2,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              5
+            ],
+            [
+              "lead",
+              5
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19331,7 +20937,16 @@
           "content": "mace",
           "parent": "dagger",
           "depth": 3,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              2000
+            ],
+            [
+              "graphite",
+              2000
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19339,7 +20954,20 @@
           "content": "fortress",
           "parent": "mace",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              6500
+            ],
+            [
+              "titanium",
+              4000
+            ],
+            [
+              "metaglass",
+              2000
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19347,7 +20975,20 @@
           "content": "scepter",
           "parent": "fortress",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              42000
+            ],
+            [
+              "titanium",
+              37000
+            ],
+            [
+              "plastanium",
+              32000
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19355,7 +20996,24 @@
           "content": "reign",
           "parent": "scepter",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              50000
+            ],
+            [
+              "plastanium",
+              30000
+            ],
+            [
+              "surge-alloy",
+              25000
+            ],
+            [
+              "phase-fabric",
+              17000
+            ]
+          ],
           "objectives": [
             "sector-complete:desolateRift"
           ]
@@ -19365,7 +21023,20 @@
           "content": "nova",
           "parent": "dagger",
           "depth": 3,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              1500
+            ],
+            [
+              "lead",
+              1000
+            ],
+            [
+              "titanium",
+              1000
+            ]
+          ],
           "objectives": [
             "sector-complete:fungalPass"
           ]
@@ -19375,7 +21046,16 @@
           "content": "pulsar",
           "parent": "nova",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              2000
+            ],
+            [
+              "graphite",
+              2000
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19383,7 +21063,20 @@
           "content": "quasar",
           "parent": "pulsar",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              6500
+            ],
+            [
+              "titanium",
+              4000
+            ],
+            [
+              "metaglass",
+              2000
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19391,7 +21084,20 @@
           "content": "vela",
           "parent": "quasar",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              42000
+            ],
+            [
+              "titanium",
+              37000
+            ],
+            [
+              "plastanium",
+              32000
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19399,7 +21105,24 @@
           "content": "corvus",
           "parent": "vela",
           "depth": 7,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              50000
+            ],
+            [
+              "plastanium",
+              30000
+            ],
+            [
+              "surge-alloy",
+              25000
+            ],
+            [
+              "phase-fabric",
+              17000
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19424,7 +21147,16 @@
           "content": "atrax",
           "parent": "crawler",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              2000
+            ],
+            [
+              "graphite",
+              2000
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19432,7 +21164,20 @@
           "content": "spiroct",
           "parent": "atrax",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              6500
+            ],
+            [
+              "titanium",
+              4000
+            ],
+            [
+              "metaglass",
+              2000
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19440,7 +21185,20 @@
           "content": "arkyid",
           "parent": "spiroct",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              42000
+            ],
+            [
+              "titanium",
+              37000
+            ],
+            [
+              "plastanium",
+              32000
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19448,7 +21206,24 @@
           "content": "toxopid",
           "parent": "arkyid",
           "depth": 7,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              50000
+            ],
+            [
+              "plastanium",
+              30000
+            ],
+            [
+              "surge-alloy",
+              25000
+            ],
+            [
+              "phase-fabric",
+              17000
+            ]
+          ],
           "objectives": [
             "sector-complete:mycelialBastion"
           ]
@@ -19458,7 +21233,20 @@
           "content": "air-factory",
           "parent": "ground-factory",
           "depth": 2,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              900
+            ],
+            [
+              "lead",
+              1100
+            ],
+            [
+              "silicon",
+              900
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19466,7 +21254,12 @@
           "content": "flare",
           "parent": "air-factory",
           "depth": 3,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              7
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19474,7 +21267,16 @@
           "content": "horizon",
           "parent": "flare",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              2000
+            ],
+            [
+              "graphite",
+              2000
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19482,7 +21284,20 @@
           "content": "zenith",
           "parent": "horizon",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              6500
+            ],
+            [
+              "titanium",
+              4000
+            ],
+            [
+              "metaglass",
+              2000
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19490,7 +21305,20 @@
           "content": "antumbra",
           "parent": "zenith",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              42000
+            ],
+            [
+              "titanium",
+              37000
+            ],
+            [
+              "plastanium",
+              32000
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19498,7 +21326,24 @@
           "content": "eclipse",
           "parent": "antumbra",
           "depth": 7,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              50000
+            ],
+            [
+              "plastanium",
+              30000
+            ],
+            [
+              "surge-alloy",
+              25000
+            ],
+            [
+              "phase-fabric",
+              17000
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19506,7 +21351,16 @@
           "content": "mono",
           "parent": "flare",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              1500
+            ],
+            [
+              "lead",
+              700
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19514,7 +21368,16 @@
           "content": "poly",
           "parent": "mono",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              2000
+            ],
+            [
+              "graphite",
+              2000
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19522,7 +21385,20 @@
           "content": "mega",
           "parent": "poly",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              6500
+            ],
+            [
+              "titanium",
+              4000
+            ],
+            [
+              "metaglass",
+              2000
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19530,7 +21406,20 @@
           "content": "quad",
           "parent": "mega",
           "depth": 7,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              42000
+            ],
+            [
+              "titanium",
+              37000
+            ],
+            [
+              "plastanium",
+              32000
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19538,7 +21427,24 @@
           "content": "oct",
           "parent": "quad",
           "depth": 8,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              50000
+            ],
+            [
+              "plastanium",
+              30000
+            ],
+            [
+              "surge-alloy",
+              25000
+            ],
+            [
+              "phase-fabric",
+              17000
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19546,7 +21452,20 @@
           "content": "naval-factory",
           "parent": "air-factory",
           "depth": 3,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              5200
+            ],
+            [
+              "lead",
+              4500
+            ],
+            [
+              "metaglass",
+              4100
+            ]
+          ],
           "objectives": [
             "sector-complete:ruinousShores"
           ]
@@ -19556,7 +21475,16 @@
           "content": "risso",
           "parent": "naval-factory",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              1000
+            ],
+            [
+              "metaglass",
+              1700
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19564,7 +21492,16 @@
           "content": "minke",
           "parent": "risso",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              2000
+            ],
+            [
+              "graphite",
+              2000
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19572,7 +21509,20 @@
           "content": "bryde",
           "parent": "minke",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              6500
+            ],
+            [
+              "titanium",
+              4000
+            ],
+            [
+              "metaglass",
+              2000
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19580,7 +21530,20 @@
           "content": "sei",
           "parent": "bryde",
           "depth": 7,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              42000
+            ],
+            [
+              "titanium",
+              37000
+            ],
+            [
+              "plastanium",
+              32000
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19588,7 +21551,24 @@
           "content": "omura",
           "parent": "sei",
           "depth": 8,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              50000
+            ],
+            [
+              "plastanium",
+              30000
+            ],
+            [
+              "surge-alloy",
+              25000
+            ],
+            [
+              "phase-fabric",
+              17000
+            ]
+          ],
           "objectives": [
             "sector-complete:littoralShipyard"
           ]
@@ -19598,7 +21578,16 @@
           "content": "retusa",
           "parent": "risso",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              700
+            ],
+            [
+              "titanium",
+              1000
+            ]
+          ],
           "objectives": [
             "sector-complete:windsweptIslands"
           ]
@@ -19608,7 +21597,16 @@
           "content": "oxynoe",
           "parent": "retusa",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              2000
+            ],
+            [
+              "graphite",
+              2000
+            ]
+          ],
           "objectives": [
             "sector-complete:coastline"
           ]
@@ -19618,7 +21616,20 @@
           "content": "cyerce",
           "parent": "oxynoe",
           "depth": 7,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              6500
+            ],
+            [
+              "titanium",
+              4000
+            ],
+            [
+              "metaglass",
+              2000
+            ]
+          ],
           "objectives": [
             "sector-complete:perilousHarbor"
           ]
@@ -19628,7 +21639,20 @@
           "content": "aegires",
           "parent": "cyerce",
           "depth": 8,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              42000
+            ],
+            [
+              "titanium",
+              37000
+            ],
+            [
+              "plastanium",
+              32000
+            ]
+          ],
           "objectives": []
         },
         {
@@ -19636,7 +21660,24 @@
           "content": "navanax",
           "parent": "aegires",
           "depth": 9,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              50000
+            ],
+            [
+              "plastanium",
+              30000
+            ],
+            [
+              "surge-alloy",
+              25000
+            ],
+            [
+              "phase-fabric",
+              17000
+            ]
+          ],
           "objectives": [
             "sector-complete:navalFortress"
           ]
@@ -19646,7 +21687,20 @@
           "content": "additive-reconstructor",
           "parent": "ground-factory",
           "depth": 2,
-          "requirements": [],
+          "requirements": [
+            [
+              "copper",
+              7200
+            ],
+            [
+              "lead",
+              4100
+            ],
+            [
+              "silicon",
+              3000
+            ]
+          ],
           "objectives": [
             "sector-complete:fungalPass"
           ]
@@ -19656,7 +21710,24 @@
           "content": "multiplicative-reconstructor",
           "parent": "additive-reconstructor",
           "depth": 3,
-          "requirements": [],
+          "requirements": [
+            [
+              "lead",
+              26000
+            ],
+            [
+              "silicon",
+              17000
+            ],
+            [
+              "titanium",
+              13000
+            ],
+            [
+              "thorium",
+              26000
+            ]
+          ],
           "objectives": [
             "sector-complete:frontier"
           ]
@@ -19666,7 +21737,32 @@
           "content": "exponential-reconstructor",
           "parent": "multiplicative-reconstructor",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "lead",
+              92000
+            ],
+            [
+              "silicon",
+              42000
+            ],
+            [
+              "titanium",
+              92000
+            ],
+            [
+              "thorium",
+              31000
+            ],
+            [
+              "plastanium",
+              17000
+            ],
+            [
+              "phase-fabric",
+              24000
+            ]
+          ],
           "objectives": [
             "sector-complete:overgrowth"
           ]
@@ -19676,7 +21772,32 @@
           "content": "tetrative-reconstructor",
           "parent": "exponential-reconstructor",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "lead",
+              199000
+            ],
+            [
+              "silicon",
+              144000
+            ],
+            [
+              "thorium",
+              42000
+            ],
+            [
+              "plastanium",
+              24000
+            ],
+            [
+              "phase-fabric",
+              24000
+            ],
+            [
+              "surge-alloy",
+              33000
+            ]
+          ],
           "objectives": [
             "sector-complete:mycelialBastion"
           ]
@@ -20303,7 +22424,20 @@
           "content": "core-bastion",
           "parent": null,
           "depth": 0,
-          "requirements": [],
+          "requirements": [
+            [
+              "graphite",
+              2610
+            ],
+            [
+              "silicon",
+              2610
+            ],
+            [
+              "beryllium",
+              2070
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20311,7 +22445,12 @@
           "content": "duct",
           "parent": "core-bastion",
           "depth": 1,
-          "requirements": [],
+          "requirements": [
+            [
+              "beryllium",
+              4
+            ]
+          ],
           "objectives": [
             "on-planet:1"
           ]
@@ -20321,7 +22460,12 @@
           "content": "duct-router",
           "parent": "duct",
           "depth": 2,
-          "requirements": [],
+          "requirements": [
+            [
+              "beryllium",
+              27
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20329,7 +22473,12 @@
           "content": "duct-bridge",
           "parent": "duct-router",
           "depth": 3,
-          "requirements": [],
+          "requirements": [
+            [
+              "beryllium",
+              90
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20337,7 +22486,16 @@
           "content": "armored-duct",
           "parent": "duct-bridge",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "beryllium",
+              270
+            ],
+            [
+              "tungsten",
+              90
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20345,7 +22503,16 @@
           "content": "surge-conveyor",
           "parent": "armored-duct",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "surge-alloy",
+              27
+            ],
+            [
+              "tungsten",
+              72
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20353,7 +22520,16 @@
           "content": "surge-router",
           "parent": "surge-conveyor",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "surge-alloy",
+              90
+            ],
+            [
+              "tungsten",
+              72
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20361,7 +22537,20 @@
           "content": "unit-cargo-loader",
           "parent": "duct-bridge",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              2250
+            ],
+            [
+              "surge-alloy",
+              18
+            ],
+            [
+              "oxide",
+              27
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20369,7 +22558,16 @@
           "content": "unit-cargo-unload-point",
           "parent": "unit-cargo-loader",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              2700
+            ],
+            [
+              "oxide",
+              18
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20377,7 +22575,16 @@
           "content": "overflow-duct",
           "parent": "duct-router",
           "depth": 3,
-          "requirements": [],
+          "requirements": [
+            [
+              "graphite",
+              270
+            ],
+            [
+              "beryllium",
+              270
+            ]
+          ],
           "objectives": [
             "on-sector:aegis"
           ]
@@ -20387,7 +22594,16 @@
           "content": "underflow-duct",
           "parent": "overflow-duct",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "graphite",
+              270
+            ],
+            [
+              "beryllium",
+              270
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20395,7 +22611,16 @@
           "content": "reinforced-container",
           "parent": "overflow-duct",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "tungsten",
+              810
+            ],
+            [
+              "graphite",
+              1080
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20403,7 +22628,20 @@
           "content": "duct-unloader",
           "parent": "reinforced-container",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "graphite",
+              540
+            ],
+            [
+              "silicon",
+              540
+            ],
+            [
+              "tungsten",
+              270
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20411,7 +22649,20 @@
           "content": "reinforced-vault",
           "parent": "reinforced-container",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "tungsten",
+              3870
+            ],
+            [
+              "thorium",
+              1980
+            ],
+            [
+              "beryllium",
+              2970
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20419,7 +22670,16 @@
           "content": "reinforced-message",
           "parent": "duct-router",
           "depth": 3,
-          "requirements": [],
+          "requirements": [
+            [
+              "graphite",
+              270
+            ],
+            [
+              "beryllium",
+              90
+            ]
+          ],
           "objectives": [
             "on-sector:aegis"
           ]
@@ -20429,7 +22689,16 @@
           "content": "canvas",
           "parent": "reinforced-message",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              270
+            ],
+            [
+              "beryllium",
+              270
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20437,7 +22706,20 @@
           "content": "large-canvas",
           "parent": "canvas",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              360
+            ],
+            [
+              "beryllium",
+              360
+            ],
+            [
+              "surge-alloy",
+              90
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20445,7 +22727,12 @@
           "content": "reinforced-payload-conveyor",
           "parent": "duct",
           "depth": 2,
-          "requirements": [],
+          "requirements": [
+            [
+              "tungsten",
+              1080
+            ]
+          ],
           "objectives": [
             "on-sector:atlas"
           ]
@@ -20455,7 +22742,20 @@
           "content": "payload-mass-driver",
           "parent": "reinforced-payload-conveyor",
           "depth": 3,
-          "requirements": [],
+          "requirements": [
+            [
+              "tungsten",
+              1080
+            ],
+            [
+              "silicon",
+              1350
+            ],
+            [
+              "graphite",
+              540
+            ]
+          ],
           "objectives": [
             "research:silicon-arc-furnace",
             "on-sector:split"
@@ -20466,7 +22766,20 @@
           "content": "payload-loader",
           "parent": "payload-mass-driver",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "graphite",
+              2340
+            ],
+            [
+              "silicon",
+              5040
+            ],
+            [
+              "tungsten",
+              2700
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20474,7 +22787,20 @@
           "content": "payload-unloader",
           "parent": "payload-loader",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "graphite",
+              4320
+            ],
+            [
+              "silicon",
+              7200
+            ],
+            [
+              "tungsten",
+              5760
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20482,7 +22808,28 @@
           "content": "large-payload-mass-driver",
           "parent": "payload-unloader",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "phase-fabric",
+              270
+            ],
+            [
+              "tungsten",
+              3690
+            ],
+            [
+              "silicon",
+              4680
+            ],
+            [
+              "graphite",
+              1710
+            ],
+            [
+              "oxide",
+              810
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20490,7 +22837,20 @@
           "content": "constructor",
           "parent": "payload-mass-driver",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              1350
+            ],
+            [
+              "beryllium",
+              2160
+            ],
+            [
+              "tungsten",
+              1080
+            ]
+          ],
           "objectives": [
             "on-sector:split"
           ]
@@ -20500,7 +22860,24 @@
           "content": "small-deconstructor",
           "parent": "constructor",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "beryllium",
+              1980
+            ],
+            [
+              "silicon",
+              1980
+            ],
+            [
+              "oxide",
+              630
+            ],
+            [
+              "graphite",
+              1350
+            ]
+          ],
           "objectives": [
             "on-sector:peaks"
           ]
@@ -20510,7 +22887,24 @@
           "content": "large-constructor",
           "parent": "small-deconstructor",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              4680
+            ],
+            [
+              "oxide",
+              2970
+            ],
+            [
+              "tungsten",
+              6480
+            ],
+            [
+              "thorium",
+              2340
+            ]
+          ],
           "objectives": [
             "on-sector:siege"
           ]
@@ -20520,7 +22914,24 @@
           "content": "deconstructor",
           "parent": "small-deconstructor",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "beryllium",
+              8280
+            ],
+            [
+              "oxide",
+              2970
+            ],
+            [
+              "silicon",
+              8280
+            ],
+            [
+              "carbide",
+              1350
+            ]
+          ],
           "objectives": [
             "on-sector:siege"
           ]
@@ -20530,7 +22941,12 @@
           "content": "reinforced-payload-router",
           "parent": "reinforced-payload-conveyor",
           "depth": 3,
-          "requirements": [],
+          "requirements": [
+            [
+              "tungsten",
+              1620
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20538,7 +22954,12 @@
           "content": "plasma-bore",
           "parent": "core-bastion",
           "depth": 1,
-          "requirements": [],
+          "requirements": [
+            [
+              "beryllium",
+              9
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20546,7 +22967,20 @@
           "content": "impact-drill",
           "parent": "plasma-bore",
           "depth": 2,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              990
+            ],
+            [
+              "beryllium",
+              1350
+            ],
+            [
+              "graphite",
+              810
+            ]
+          ],
           "objectives": [
             "on-sector:aegis"
           ]
@@ -20556,7 +22990,24 @@
           "content": "large-plasma-bore",
           "parent": "impact-drill",
           "depth": 3,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              1350
+            ],
+            [
+              "oxide",
+              180
+            ],
+            [
+              "beryllium",
+              2700
+            ],
+            [
+              "tungsten",
+              1080
+            ]
+          ],
           "objectives": [
             "on-sector:caldera-erekir"
           ]
@@ -20566,7 +23017,24 @@
           "content": "eruption-drill",
           "parent": "large-plasma-bore",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              9900
+            ],
+            [
+              "oxide",
+              540
+            ],
+            [
+              "tungsten",
+              8280
+            ],
+            [
+              "thorium",
+              4680
+            ]
+          ],
           "objectives": [
             "on-sector:stronghold"
           ]
@@ -20576,7 +23044,24 @@
           "content": "large-cliff-crusher",
           "parent": "large-plasma-bore",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              2340
+            ],
+            [
+              "surge-alloy",
+              360
+            ],
+            [
+              "beryllium",
+              2970
+            ],
+            [
+              "tungsten",
+              1350
+            ]
+          ],
           "objectives": [
             "on-sector:stronghold"
           ]
@@ -20586,7 +23071,12 @@
           "content": "turbine-condenser",
           "parent": "core-bastion",
           "depth": 1,
-          "requirements": [],
+          "requirements": [
+            [
+              "beryllium",
+              13
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20594,7 +23084,12 @@
           "content": "beam-node",
           "parent": "turbine-condenser",
           "depth": 2,
-          "requirements": [],
+          "requirements": [
+            [
+              "beryllium",
+              4
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20602,7 +23097,16 @@
           "content": "vent-condenser",
           "parent": "beam-node",
           "depth": 3,
-          "requirements": [],
+          "requirements": [
+            [
+              "graphite",
+              540
+            ],
+            [
+              "beryllium",
+              1710
+            ]
+          ],
           "objectives": [
             "on-sector:aegis"
           ]
@@ -20612,7 +23116,24 @@
           "content": "chemical-combustion-chamber",
           "parent": "vent-condenser",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "graphite",
+              1800
+            ],
+            [
+              "tungsten",
+              900
+            ],
+            [
+              "oxide",
+              9
+            ],
+            [
+              "silicon",
+              1350
+            ]
+          ],
           "objectives": [
             "on-sector:basin"
           ]
@@ -20622,7 +23143,24 @@
           "content": "pyrolysis-generator",
           "parent": "chemical-combustion-chamber",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "graphite",
+              1170
+            ],
+            [
+              "carbide",
+              630
+            ],
+            [
+              "oxide",
+              630
+            ],
+            [
+              "silicon",
+              1170
+            ]
+          ],
           "objectives": [
             "on-sector:crevice"
           ]
@@ -20632,7 +23170,28 @@
           "content": "flux-reactor",
           "parent": "pyrolysis-generator",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "graphite",
+              7920
+            ],
+            [
+              "carbide",
+              1710
+            ],
+            [
+              "oxide",
+              2340
+            ],
+            [
+              "silicon",
+              16200
+            ],
+            [
+              "surge-alloy",
+              3690
+            ]
+          ],
           "objectives": [
             "on-sector:crossroads",
             "research:cyanogen-synthesizer"
@@ -20643,7 +23202,32 @@
           "content": "neoplasia-reactor",
           "parent": "flux-reactor",
           "depth": 7,
-          "requirements": [],
+          "requirements": [
+            [
+              "tungsten",
+              27900
+            ],
+            [
+              "carbide",
+              9900
+            ],
+            [
+              "oxide",
+              4680
+            ],
+            [
+              "silicon",
+              17100
+            ],
+            [
+              "phase-fabric",
+              4680
+            ],
+            [
+              "surge-alloy",
+              6480
+            ]
+          ],
           "objectives": [
             "on-sector:karst"
           ]
@@ -20653,7 +23237,20 @@
           "content": "beam-tower",
           "parent": "beam-node",
           "depth": 3,
-          "requirements": [],
+          "requirements": [
+            [
+              "beryllium",
+              810
+            ],
+            [
+              "oxide",
+              270
+            ],
+            [
+              "silicon",
+              270
+            ]
+          ],
           "objectives": [
             "on-sector:peaks"
           ]
@@ -20663,7 +23260,32 @@
           "content": "beam-link",
           "parent": "beam-tower",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "beryllium",
+              8280
+            ],
+            [
+              "silicon",
+              8280
+            ],
+            [
+              "oxide",
+              4680
+            ],
+            [
+              "carbide",
+              2160
+            ],
+            [
+              "surge-alloy",
+              2160
+            ],
+            [
+              "phase-fabric",
+              2160
+            ]
+          ],
           "objectives": [
             "on-sector:crossroads"
           ]
@@ -20673,7 +23295,24 @@
           "content": "regen-projector",
           "parent": "beam-node",
           "depth": 3,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              2340
+            ],
+            [
+              "tungsten",
+              1710
+            ],
+            [
+              "oxide",
+              1080
+            ],
+            [
+              "beryllium",
+              2340
+            ]
+          ],
           "objectives": [
             "on-sector:peaks"
           ]
@@ -20683,7 +23322,20 @@
           "content": "build-tower",
           "parent": "regen-projector",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              4680
+            ],
+            [
+              "oxide",
+              1080
+            ],
+            [
+              "thorium",
+              1710
+            ]
+          ],
           "objectives": [
             "on-sector:stronghold"
           ]
@@ -20693,7 +23345,24 @@
           "content": "shockwave-tower",
           "parent": "build-tower",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "surge-alloy",
+              1350
+            ],
+            [
+              "silicon",
+              4680
+            ],
+            [
+              "oxide",
+              810
+            ],
+            [
+              "tungsten",
+              2970
+            ]
+          ],
           "objectives": [
             "on-sector:siege"
           ]
@@ -20703,7 +23372,12 @@
           "content": "reinforced-conduit",
           "parent": "turbine-condenser",
           "depth": 2,
-          "requirements": [],
+          "requirements": [
+            [
+              "beryllium",
+              270
+            ]
+          ],
           "objectives": [
             "on-sector:aegis"
           ]
@@ -20713,7 +23387,20 @@
           "content": "reinforced-pump",
           "parent": "reinforced-conduit",
           "depth": 3,
-          "requirements": [],
+          "requirements": [
+            [
+              "beryllium",
+              1080
+            ],
+            [
+              "tungsten",
+              810
+            ],
+            [
+              "silicon",
+              540
+            ]
+          ],
           "objectives": [
             "on-sector:basin"
           ]
@@ -20723,7 +23410,16 @@
           "content": "reinforced-liquid-junction",
           "parent": "reinforced-conduit",
           "depth": 3,
-          "requirements": [],
+          "requirements": [
+            [
+              "graphite",
+              90
+            ],
+            [
+              "beryllium",
+              180
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20731,7 +23427,16 @@
           "content": "reinforced-bridge-conduit",
           "parent": "reinforced-liquid-junction",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "graphite",
+              180
+            ],
+            [
+              "beryllium",
+              540
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20739,7 +23444,16 @@
           "content": "reinforced-liquid-router",
           "parent": "reinforced-liquid-junction",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "graphite",
+              630
+            ],
+            [
+              "beryllium",
+              360
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20747,7 +23461,16 @@
           "content": "reinforced-liquid-container",
           "parent": "reinforced-liquid-router",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "tungsten",
+              1080
+            ],
+            [
+              "beryllium",
+              1710
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20755,7 +23478,16 @@
           "content": "reinforced-liquid-tank",
           "parent": "reinforced-liquid-container",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "tungsten",
+              1080
+            ],
+            [
+              "beryllium",
+              1350
+            ]
+          ],
           "objectives": [
             "sector-complete:intersect"
           ]
@@ -20765,7 +23497,16 @@
           "content": "cliff-crusher",
           "parent": "turbine-condenser",
           "depth": 2,
-          "requirements": [],
+          "requirements": [
+            [
+              "beryllium",
+              90
+            ],
+            [
+              "graphite",
+              36
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20773,7 +23514,16 @@
           "content": "silicon-arc-furnace",
           "parent": "cliff-crusher",
           "depth": 3,
-          "requirements": [],
+          "requirements": [
+            [
+              "beryllium",
+              135
+            ],
+            [
+              "graphite",
+              45
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20781,7 +23531,24 @@
           "content": "electrolyzer",
           "parent": "silicon-arc-furnace",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              1710
+            ],
+            [
+              "graphite",
+              1350
+            ],
+            [
+              "beryllium",
+              4860
+            ],
+            [
+              "tungsten",
+              2790
+            ]
+          ],
           "objectives": [
             "on-sector:atlas"
           ]
@@ -20791,7 +23558,24 @@
           "content": "oxidation-chamber",
           "parent": "electrolyzer",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "tungsten",
+              4050
+            ],
+            [
+              "graphite",
+              2610
+            ],
+            [
+              "silicon",
+              3330
+            ],
+            [
+              "beryllium",
+              4050
+            ]
+          ],
           "objectives": [
             "research:tank-refabricator",
             "on-sector:marsh"
@@ -20802,7 +23586,24 @@
           "content": "surge-crucible",
           "parent": "oxidation-chamber",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              2970
+            ],
+            [
+              "graphite",
+              2340
+            ],
+            [
+              "tungsten",
+              2340
+            ],
+            [
+              "oxide",
+              2340
+            ]
+          ],
           "objectives": [
             "on-sector:ravine"
           ]
@@ -20812,7 +23613,16 @@
           "content": "heat-redirector",
           "parent": "oxidation-chamber",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "tungsten",
+              2790
+            ],
+            [
+              "graphite",
+              2790
+            ]
+          ],
           "objectives": [
             "on-sector:ravine"
           ]
@@ -20822,7 +23632,20 @@
           "content": "electric-heater",
           "parent": "heat-redirector",
           "depth": 7,
-          "requirements": [],
+          "requirements": [
+            [
+              "tungsten",
+              3330
+            ],
+            [
+              "oxide",
+              3330
+            ],
+            [
+              "beryllium",
+              3330
+            ]
+          ],
           "objectives": [
             "on-sector:ravine",
             "research:afflict"
@@ -20833,7 +23656,20 @@
           "content": "slag-heater",
           "parent": "electric-heater",
           "depth": 8,
-          "requirements": [],
+          "requirements": [
+            [
+              "tungsten",
+              1080
+            ],
+            [
+              "oxide",
+              810
+            ],
+            [
+              "beryllium",
+              2160
+            ]
+          ],
           "objectives": [
             "on-sector:caldera-erekir"
           ]
@@ -20843,7 +23679,20 @@
           "content": "atmospheric-concentrator",
           "parent": "electric-heater",
           "depth": 8,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              1800
+            ],
+            [
+              "oxide",
+              810
+            ],
+            [
+              "beryllium",
+              2160
+            ]
+          ],
           "objectives": [
             "on-sector:caldera-erekir"
           ]
@@ -20853,7 +23702,24 @@
           "content": "cyanogen-synthesizer",
           "parent": "atmospheric-concentrator",
           "depth": 9,
-          "requirements": [],
+          "requirements": [
+            [
+              "carbide",
+              2340
+            ],
+            [
+              "silicon",
+              3690
+            ],
+            [
+              "beryllium",
+              4320
+            ],
+            [
+              "oxide",
+              1080
+            ]
+          ],
           "objectives": [
             "on-sector:siege"
           ]
@@ -20863,7 +23729,20 @@
           "content": "carbide-crucible",
           "parent": "electric-heater",
           "depth": 8,
-          "requirements": [],
+          "requirements": [
+            [
+              "tungsten",
+              3330
+            ],
+            [
+              "thorium",
+              4680
+            ],
+            [
+              "oxide",
+              1710
+            ]
+          ],
           "objectives": [
             "on-sector:crevice"
           ]
@@ -20873,7 +23752,24 @@
           "content": "phase-synthesizer",
           "parent": "carbide-crucible",
           "depth": 9,
-          "requirements": [],
+          "requirements": [
+            [
+              "carbide",
+              2700
+            ],
+            [
+              "silicon",
+              2970
+            ],
+            [
+              "thorium",
+              2970
+            ],
+            [
+              "tungsten",
+              6480
+            ]
+          ],
           "objectives": [
             "on-sector:karst"
           ]
@@ -20883,7 +23779,20 @@
           "content": "phase-heater",
           "parent": "phase-synthesizer",
           "depth": 10,
-          "requirements": [],
+          "requirements": [
+            [
+              "oxide",
+              810
+            ],
+            [
+              "carbide",
+              810
+            ],
+            [
+              "beryllium",
+              810
+            ]
+          ],
           "objectives": [
             "research:phase-synthesizer"
           ]
@@ -20893,7 +23802,16 @@
           "content": "heat-router",
           "parent": "electric-heater",
           "depth": 8,
-          "requirements": [],
+          "requirements": [
+            [
+              "tungsten",
+              4140
+            ],
+            [
+              "graphite",
+              2790
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20901,7 +23819,16 @@
           "content": "small-heat-redirector",
           "parent": "heat-router",
           "depth": 9,
-          "requirements": [],
+          "requirements": [
+            [
+              "surge-alloy",
+              180
+            ],
+            [
+              "graphite",
+              2610
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20909,7 +23836,12 @@
           "content": "slag-incinerator",
           "parent": "electrolyzer",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "tungsten",
+              360
+            ]
+          ],
           "objectives": [
             "on-sector:basin"
           ]
@@ -20919,7 +23851,20 @@
           "content": "breach",
           "parent": "core-bastion",
           "depth": 1,
-          "requirements": [],
+          "requirements": [
+            [
+              "beryllium",
+              180
+            ],
+            [
+              "silicon",
+              180
+            ],
+            [
+              "graphite",
+              180
+            ]
+          ],
           "objectives": [
             "research:silicon-arc-furnace",
             "research:tank-fabricator"
@@ -20930,7 +23875,12 @@
           "content": "beryllium-wall",
           "parent": "breach",
           "depth": 2,
-          "requirements": [],
+          "requirements": [
+            [
+              "beryllium",
+              180
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20938,7 +23888,12 @@
           "content": "beryllium-wall-large",
           "parent": "beryllium-wall",
           "depth": 3,
-          "requirements": [],
+          "requirements": [
+            [
+              "beryllium",
+              630
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20946,7 +23901,12 @@
           "content": "tungsten-wall",
           "parent": "beryllium-wall",
           "depth": 3,
-          "requirements": [],
+          "requirements": [
+            [
+              "tungsten",
+              180
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20954,7 +23914,12 @@
           "content": "tungsten-wall-large",
           "parent": "tungsten-wall",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "tungsten",
+              630
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20962,7 +23927,16 @@
           "content": "blast-door",
           "parent": "tungsten-wall-large",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "tungsten",
+              630
+            ],
+            [
+              "silicon",
+              630
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20970,7 +23944,16 @@
           "content": "reinforced-surge-wall",
           "parent": "tungsten-wall",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "surge-alloy",
+              18
+            ],
+            [
+              "tungsten",
+              90
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20978,7 +23961,16 @@
           "content": "reinforced-surge-wall-large",
           "parent": "reinforced-surge-wall",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "surge-alloy",
+              36
+            ],
+            [
+              "tungsten",
+              180
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20986,7 +23978,20 @@
           "content": "shielded-wall",
           "parent": "reinforced-surge-wall-large",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "phase-fabric",
+              540
+            ],
+            [
+              "surge-alloy",
+              270
+            ],
+            [
+              "beryllium",
+              270
+            ]
+          ],
           "objectives": []
         },
         {
@@ -20994,7 +23999,16 @@
           "content": "carbide-wall",
           "parent": "tungsten-wall",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "thorium",
+              180
+            ],
+            [
+              "carbide",
+              180
+            ]
+          ],
           "objectives": []
         },
         {
@@ -21002,7 +24016,16 @@
           "content": "carbide-wall-large",
           "parent": "carbide-wall",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "thorium",
+              630
+            ],
+            [
+              "carbide",
+              630
+            ]
+          ],
           "objectives": []
         },
         {
@@ -21010,7 +24033,24 @@
           "content": "diffuse",
           "parent": "breach",
           "depth": 2,
-          "requirements": [],
+          "requirements": [
+            [
+              "beryllium",
+              4680
+            ],
+            [
+              "silicon",
+              6480
+            ],
+            [
+              "graphite",
+              6480
+            ],
+            [
+              "tungsten",
+              1350
+            ]
+          ],
           "objectives": [
             "on-sector:lake"
           ]
@@ -21020,7 +24060,24 @@
           "content": "sublimate",
           "parent": "diffuse",
           "depth": 3,
-          "requirements": [],
+          "requirements": [
+            [
+              "tungsten",
+              360
+            ],
+            [
+              "silicon",
+              360
+            ],
+            [
+              "oxide",
+              72
+            ],
+            [
+              "beryllium",
+              720
+            ]
+          ],
           "objectives": [
             "on-sector:marsh"
           ]
@@ -21030,7 +24087,24 @@
           "content": "afflict",
           "parent": "sublimate",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "surge-alloy",
+              90
+            ],
+            [
+              "silicon",
+              180
+            ],
+            [
+              "graphite",
+              270
+            ],
+            [
+              "oxide",
+              45
+            ]
+          ],
           "objectives": [
             "on-sector:ravine"
           ]
@@ -21040,7 +24114,20 @@
           "content": "titan",
           "parent": "afflict",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "tungsten",
+              8280
+            ],
+            [
+              "silicon",
+              9900
+            ],
+            [
+              "thorium",
+              13500
+            ]
+          ],
           "objectives": [
             "on-sector:stronghold"
           ]
@@ -21050,7 +24137,24 @@
           "content": "lustre",
           "parent": "titan",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              8280
+            ],
+            [
+              "graphite",
+              6480
+            ],
+            [
+              "oxide",
+              1350
+            ],
+            [
+              "carbide",
+              2700
+            ]
+          ],
           "objectives": [
             "on-sector:crevice"
           ]
@@ -21060,7 +24164,28 @@
           "content": "smite",
           "parent": "lustre",
           "depth": 7,
-          "requirements": [],
+          "requirements": [
+            [
+              "oxide",
+              6480
+            ],
+            [
+              "surge-alloy",
+              13500
+            ],
+            [
+              "silicon",
+              29700
+            ],
+            [
+              "carbide",
+              17100
+            ],
+            [
+              "phase-fabric",
+              9900
+            ]
+          ],
           "objectives": [
             "on-sector:karst"
           ]
@@ -21070,7 +24195,24 @@
           "content": "disperse",
           "parent": "diffuse",
           "depth": 3,
-          "requirements": [],
+          "requirements": [
+            [
+              "thorium",
+              1350
+            ],
+            [
+              "oxide",
+              1350
+            ],
+            [
+              "silicon",
+              6480
+            ],
+            [
+              "beryllium",
+              11700
+            ]
+          ],
           "objectives": [
             "on-sector:stronghold"
           ]
@@ -21080,7 +24222,28 @@
           "content": "scathe",
           "parent": "disperse",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              15300
+            ],
+            [
+              "graphite",
+              13500
+            ],
+            [
+              "tungsten",
+              17100
+            ],
+            [
+              "oxide",
+              2970
+            ],
+            [
+              "carbide",
+              6480
+            ]
+          ],
           "objectives": [
             "on-sector:siege"
           ]
@@ -21090,7 +24253,28 @@
           "content": "malign",
           "parent": "scathe",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "carbide",
+              6480
+            ],
+            [
+              "beryllium",
+              37800
+            ],
+            [
+              "silicon",
+              17100
+            ],
+            [
+              "graphite",
+              17100
+            ],
+            [
+              "phase-fabric",
+              6480
+            ]
+          ],
           "objectives": [
             "sector-complete:karst"
           ]
@@ -21100,7 +24284,16 @@
           "content": "radar",
           "parent": "breach",
           "depth": 2,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              63
+            ],
+            [
+              "graphite",
+              63
+            ]
+          ],
           "objectives": [
             "research:beam-node",
             "research:turbine-condenser",
@@ -21113,7 +24306,24 @@
           "content": "core-citadel",
           "parent": "core-bastion",
           "depth": 1,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              14400
+            ],
+            [
+              "beryllium",
+              29700
+            ],
+            [
+              "tungsten",
+              21600
+            ],
+            [
+              "oxide",
+              6480
+            ]
+          ],
           "objectives": [
             "sector-complete:peaks"
           ]
@@ -21123,7 +24333,28 @@
           "content": "core-acropolis",
           "parent": "core-citadel",
           "depth": 2,
-          "requirements": [],
+          "requirements": [
+            [
+              "beryllium",
+              27900
+            ],
+            [
+              "silicon",
+              9000
+            ],
+            [
+              "tungsten",
+              22500
+            ],
+            [
+              "carbide",
+              12600
+            ],
+            [
+              "oxide",
+              12600
+            ]
+          ],
           "objectives": [
             "sector-complete:siege"
           ]
@@ -21133,7 +24364,20 @@
           "content": "tank-fabricator",
           "parent": "core-bastion",
           "depth": 1,
-          "requirements": [],
+          "requirements": [
+            [
+              "beryllium",
+              180
+            ],
+            [
+              "graphite",
+              72
+            ],
+            [
+              "silicon",
+              72
+            ]
+          ],
           "objectives": [
             "research:silicon-arc-furnace",
             "research:plasma-bore",
@@ -21153,7 +24397,20 @@
           "content": "unit-repair-tower",
           "parent": "tank-fabricator",
           "depth": 2,
-          "requirements": [],
+          "requirements": [
+            [
+              "graphite",
+              2700
+            ],
+            [
+              "silicon",
+              2700
+            ],
+            [
+              "tungsten",
+              2340
+            ]
+          ],
           "objectives": [
             "on-sector:ravine",
             "research:mech-refabricator"
@@ -21164,7 +24421,16 @@
           "content": "ship-fabricator",
           "parent": "tank-fabricator",
           "depth": 2,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              4140
+            ],
+            [
+              "beryllium",
+              3240
+            ]
+          ],
           "objectives": [
             "on-sector:lake"
           ]
@@ -21182,7 +24448,20 @@
           "content": "mech-fabricator",
           "parent": "ship-fabricator",
           "depth": 3,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              4140
+            ],
+            [
+              "beryllium",
+              5400
+            ],
+            [
+              "tungsten",
+              180
+            ]
+          ],
           "objectives": [
             "on-sector:intersect"
           ]
@@ -21200,7 +24479,20 @@
           "content": "tank-refabricator",
           "parent": "mech-fabricator",
           "depth": 4,
-          "requirements": [],
+          "requirements": [
+            [
+              "beryllium",
+              4860
+            ],
+            [
+              "tungsten",
+              1710
+            ],
+            [
+              "silicon",
+              2250
+            ]
+          ],
           "objectives": [
             "on-sector:atlas"
           ]
@@ -21218,7 +24510,20 @@
           "content": "mech-refabricator",
           "parent": "tank-refabricator",
           "depth": 5,
-          "requirements": [],
+          "requirements": [
+            [
+              "beryllium",
+              6210
+            ],
+            [
+              "tungsten",
+              4140
+            ],
+            [
+              "silicon",
+              3510
+            ]
+          ],
           "objectives": [
             "on-sector:basin"
           ]
@@ -21228,7 +24533,16 @@
           "content": "cleroi",
           "parent": "mech-refabricator",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              450
+            ],
+            [
+              "tungsten",
+              360
+            ]
+          ],
           "objectives": []
         },
         {
@@ -21236,7 +24550,24 @@
           "content": "ship-refabricator",
           "parent": "mech-refabricator",
           "depth": 6,
-          "requirements": [],
+          "requirements": [
+            [
+              "beryllium",
+              450
+            ],
+            [
+              "tungsten",
+              180
+            ],
+            [
+              "silicon",
+              270
+            ],
+            [
+              "oxide",
+              72
+            ]
+          ],
           "objectives": [
             "on-sector:peaks"
           ]
@@ -21246,7 +24577,16 @@
           "content": "avert",
           "parent": "ship-refabricator",
           "depth": 7,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              540
+            ],
+            [
+              "tungsten",
+              360
+            ]
+          ],
           "objectives": []
         },
         {
@@ -21254,7 +24594,24 @@
           "content": "prime-refabricator",
           "parent": "ship-refabricator",
           "depth": 7,
-          "requirements": [],
+          "requirements": [
+            [
+              "thorium",
+              1620
+            ],
+            [
+              "oxide",
+              6480
+            ],
+            [
+              "tungsten",
+              6480
+            ],
+            [
+              "silicon",
+              13500
+            ]
+          ],
           "objectives": [
             "on-sector:stronghold"
           ]
@@ -21272,7 +24629,16 @@
           "content": "anthicus",
           "parent": "prime-refabricator",
           "depth": 8,
-          "requirements": [],
+          "requirements": [
+            [
+              "thorium",
+              720
+            ],
+            [
+              "silicon",
+              900
+            ]
+          ],
           "objectives": []
         },
         {
@@ -21280,7 +24646,16 @@
           "content": "obviate",
           "parent": "prime-refabricator",
           "depth": 8,
-          "requirements": [],
+          "requirements": [
+            [
+              "thorium",
+              720
+            ],
+            [
+              "silicon",
+              900
+            ]
+          ],
           "objectives": []
         },
         {
@@ -21288,7 +24663,24 @@
           "content": "tank-assembler",
           "parent": "ship-refabricator",
           "depth": 7,
-          "requirements": [],
+          "requirements": [
+            [
+              "thorium",
+              7110
+            ],
+            [
+              "oxide",
+              1890
+            ],
+            [
+              "carbide",
+              900
+            ],
+            [
+              "silicon",
+              9000
+            ]
+          ],
           "objectives": [
             "on-sector:siege",
             "research:constructor",
@@ -21300,7 +24692,20 @@
           "content": "vanquish",
           "parent": "tank-assembler",
           "depth": 8,
-          "requirements": [],
+          "requirements": [
+            [
+              "silicon",
+              1800
+            ],
+            [
+              "beryllium",
+              1440
+            ],
+            [
+              "tungsten",
+              2160
+            ]
+          ],
           "objectives": []
         },
         {
@@ -21308,7 +24713,28 @@
           "content": "conquer",
           "parent": "vanquish",
           "depth": 9,
-          "requirements": [],
+          "requirements": [
+            [
+              "thorium",
+              4320
+            ],
+            [
+              "silicon",
+              4860
+            ],
+            [
+              "beryllium",
+              2160
+            ],
+            [
+              "tungsten",
+              1620
+            ],
+            [
+              "carbide",
+              4320
+            ]
+          ],
           "objectives": [
             "on-sector:karst"
           ]
@@ -21318,7 +24744,28 @@
           "content": "ship-assembler",
           "parent": "tank-assembler",
           "depth": 8,
-          "requirements": [],
+          "requirements": [
+            [
+              "carbide",
+              2970
+            ],
+            [
+              "oxide",
+              6480
+            ],
+            [
+              "tungsten",
+              19800
+            ],
+            [
+              "silicon",
+              34200
+            ],
+            [
+              "thorium",
+              13500
+            ]
+          ],
           "objectives": [
             "on-sector:crossroads"
           ]
@@ -21336,7 +24783,28 @@
           "content": "disrupt",
           "parent": "quell",
           "depth": 10,
-          "requirements": [],
+          "requirements": [
+            [
+              "graphite",
+              2700
+            ],
+            [
+              "thorium",
+              4320
+            ],
+            [
+              "silicon",
+              7020
+            ],
+            [
+              "tungsten",
+              2160
+            ],
+            [
+              "carbide",
+              4320
+            ]
+          ],
           "objectives": [
             "on-sector:karst"
           ]
@@ -21346,7 +24814,28 @@
           "content": "mech-assembler",
           "parent": "tank-assembler",
           "depth": 8,
-          "requirements": [],
+          "requirements": [
+            [
+              "carbide",
+              6480
+            ],
+            [
+              "thorium",
+              21600
+            ],
+            [
+              "oxide",
+              6480
+            ],
+            [
+              "tungsten",
+              19800
+            ],
+            [
+              "silicon",
+              37800
+            ]
+          ],
           "objectives": [
             "on-sector:crossroads"
           ]
@@ -21364,7 +24853,28 @@
           "content": "collaris",
           "parent": "tecta",
           "depth": 10,
-          "requirements": [],
+          "requirements": [
+            [
+              "thorium",
+              4320
+            ],
+            [
+              "silicon",
+              6480
+            ],
+            [
+              "beryllium",
+              2700
+            ],
+            [
+              "tungsten",
+              2160
+            ],
+            [
+              "carbide",
+              4320
+            ]
+          ],
           "objectives": [
             "on-sector:karst"
           ]
@@ -21374,7 +24884,24 @@
           "content": "basic-assembler-module",
           "parent": "tank-assembler",
           "depth": 8,
-          "requirements": [],
+          "requirements": [
+            [
+              "carbide",
+              7560
+            ],
+            [
+              "thorium",
+              12600
+            ],
+            [
+              "oxide",
+              6210
+            ],
+            [
+              "phase-fabric",
+              9900
+            ]
+          ],
           "objectives": [
             "sector-complete:karst"
           ]

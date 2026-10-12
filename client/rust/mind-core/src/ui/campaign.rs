@@ -856,7 +856,10 @@ pub fn research_views(registry: &ContentRegistry, planet: Option<PlanetId>) -> V
                 index: index as u32,
                 content: node.content_name.clone(),
                 depth: node.depth,
-                root: node.name.clone(),
+                root: node
+                    .tree
+                    .and_then(|tree| tech.tree(tree))
+                    .map(|tree| tree.name.clone()),
                 tree: node.tree.map(|tree| tree.index() as u32),
                 planet: node.planet.map(|id| planet_name(registry, id)),
                 unlocked,
@@ -1258,6 +1261,28 @@ mod tests {
         assert!(
             views.research.iter().any(|node| node.depth == 0),
             "tree roots present"
+        );
+    }
+
+    /// Every row carries its tree root name (`ResearchDialog` groups the node
+    /// list by it); only the root node is named in `TechTree` itself.
+    #[test]
+    fn research_rows_carry_tree_root() {
+        let views = CampaignViews::vanilla_fixture();
+        assert!(
+            views
+                .research
+                .iter()
+                .any(|node| node.depth > 0 && node.root.as_deref() == Some("serpulo")),
+            "non-root nodes carry their tree name"
+        );
+        assert!(
+            views
+                .research
+                .iter()
+                .filter(|node| node.planet.as_deref() == Some("serpulo"))
+                .all(|node| node.root.as_deref() == Some("serpulo")),
+            "every serpulo row groups under the serpulo root"
         );
     }
 

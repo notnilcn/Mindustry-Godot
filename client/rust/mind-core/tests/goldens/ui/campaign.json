@@ -234,37 +234,37 @@
     }
   },
   "sample_research": {
-    "index": 143,
-    "content": "crawler",
-    "depth": 3,
-    "root": null,
+    "index": 0,
+    "content": "core-shard",
+    "depth": 0,
+    "root": "serpulo",
     "tree": 0,
     "planet": "serpulo",
-    "unlocked": false,
-    "dependencies_met": false,
+    "unlocked": true,
+    "dependencies_met": true,
     "requirements_met": false,
     "requirements": [
       [
-        "silicon",
-        400
+        "copper",
+        42000
       ],
       [
-        "graphite",
-        400
+        "lead",
+        33000
       ]
     ],
     "finished": [
       [
-        "silicon",
+        "copper",
         0
       ],
       [
-        "graphite",
+        "lead",
         0
       ]
     ],
     "objectives": [],
-    "children": 1
+    "children": 7
   },
   "complete": {
     "planet": "serpulo",
@@ -275,5 +275,5 @@
     "waves_lasted": 12,
     "next_planet": "erekir"
   },
-  "checksum": "b94d564ad040dae5"
+  "checksum": "1160c4562864ad29"
 }

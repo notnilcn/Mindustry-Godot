@@ -576,6 +576,60 @@ pub fn content_research_requirements(
     }
 }
 
+/// Materializes `TechNode.requirements`/`finished_requirements` for every node
+/// whose generated data left the list empty.
+///
+/// Upstream `TechTree.TechNode`'s constructor fills `requirements` from
+/// `content.researchRequirements()` and loads the partial payments from the
+/// `req-<content>-<item>` settings keys (`TechTree.java:160-176,173`); the
+/// generated vanilla trees here stored no list, so the port fills it once every
+/// registry exists (units derive their cost from blocks, so this must run after
+/// both waves). Nodes with an explicit list are untouched, and
+/// [`content_research_requirements`] keeps the derivation for content that
+/// produces no list at all (items, liquids, presets).
+pub fn materialize_requirements(registry: &mut ContentRegistry, store: &dyn UnlockStore) {
+    use crate::game::tech_tree::effective_requirements;
+
+    // The computation borrows the registry immutably; collect the writes first
+    // so the loop below can take it mutably.
+    let mut computed: Vec<(TechNodeRef, Vec<ItemStack>)> = Vec::new();
+    for index in 0..registry.tech.nodes.len() {
+        let node_ref = TechNodeRef(index as u32);
+        let Some(node) = registry.tech.node(node_ref) else {
+            continue;
+        };
+        if !node.requirements.is_empty() || node.content.is_none() {
+            continue;
+        }
+        let requirements = effective_requirements(registry, node_ref);
+        if !requirements.is_empty() {
+            computed.push((node_ref, requirements));
+        }
+    }
+    for (node_ref, requirements) in computed {
+        let content_name = match registry.tech.node(node_ref) {
+            Some(node) => node.content_name.clone(),
+            None => continue,
+        };
+        // `TechNode.setupRequirements`: `req-<content>-<item>` per requirement.
+        let finished: Vec<ItemStack> = requirements
+            .iter()
+            .map(|stack| {
+                let item_name = registry
+                    .item(stack.item)
+                    .map(|item| item.name.as_str())
+                    .unwrap_or("<unknown>");
+                let key = TechNode::requirement_key(&content_name, item_name);
+                ItemStack::new(stack.item, store.get_i32(&key))
+            })
+            .collect();
+        if let Some(node) = registry.tech.node_mut(node_ref) {
+            node.requirements = requirements;
+            node.finished_requirements = finished;
+        }
+    }
+}
+
 /// Applies `f` to the unlock fields of a mappable, unlockable content record.
 pub(crate) fn with_unlock_fields(
     registry: &mut ContentRegistry,
@@ -746,6 +800,55 @@ mod tests {
         assert_eq!(round_to_10(4.9), 0);
         assert_eq!(round_to_10(5.0), 10);
         assert_eq!(round_to_10(1234.5), 1230);
+    }
+
+    /// `materialize_requirements` fills the empty generated lists from
+    /// `content.researchRequirements()` (`TechTree.java:160-176`).
+    #[test]
+    fn materialized_requirements_match_block_research_cost() {
+        let bundle = MemoryBundle::new();
+        let store = MemoryUnlockStore::new();
+        let registry = create_base_content(&bundle, &store, true).unwrap();
+
+        let duo_node = registry
+            .tech
+            .nodes
+            .iter()
+            .find(|node| node.content_name == "duo")
+            .expect("duo tech node");
+        assert!(!duo_node.requirements.is_empty(), "duo has a cost");
+        assert_eq!(
+            duo_node.requirements,
+            registry
+                .block_by_name("duo")
+                .expect("duo block")
+                .research_requirements(),
+            "the node carries the block's research cost"
+        );
+    }
+
+    /// `finished_requirements` loads the imported partial payments from the
+    /// `req-<content>-<item>` settings keys (`TechTree.java:173`).
+    #[test]
+    fn finished_requirements_load_req_keys() {
+        let bundle = MemoryBundle::new();
+        let mut store = MemoryUnlockStore::new();
+        store.set_i32("req-duo-copper", 120);
+        let registry = create_base_content(&bundle, &store, true).unwrap();
+
+        let duo_node = registry
+            .tech
+            .nodes
+            .iter()
+            .find(|node| node.content_name == "duo")
+            .expect("duo tech node");
+        let copper = registry.item_id("copper").expect("copper item");
+        let finished = duo_node
+            .finished_requirements
+            .iter()
+            .find(|stack| stack.item == copper)
+            .expect("duo requires copper");
+        assert_eq!(finished.amount, 120);
     }
 
     /// `content_research_requirements` dispatches to the block formula and the
