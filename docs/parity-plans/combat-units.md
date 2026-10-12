@@ -445,6 +445,19 @@ then `apply_sim_command_json` `spawn_unit` at px 1160, py 396; poll
   that logic working when you add shoot-on-death (bullets, not units).
 - Determinism: no `HashMap`; sort adopted units by seq.
 
+**Status 2026-10-12:** done — commit 1019d4f. `spawnUnit` bullets spawn the
+missile (`BulletType.create` branch + `SpawnedByBullet` adoption), `TimedKillComp`
+counts up to the type lifetime, live `AiKind::Missile` dispatch steers at the
+shooter's aim and dies on enemy building contact, and `resolve_deaths` runs
+`shootOnDeath` before removal. `ExplosionBulletType` defaults added (golden
+regenerated for bullets 93/105/107, matching the JVM golden); `createPuddles` /
+`createIncend` / `createUnits` wired into `hit`/`despawned`. Tests:
+`spawn_unit_bullet_spawns_missile`, `timed_kill_counts_up`,
+`missile_dies_at_lifetime_and_explodes`, updated `missile_homes_toward_shooter_aim`.
+In-engine evidence in `runs/20261012-session2/PAR-0088-ingame.txt`.
+Scathe missile unit specs (step 9, optional) not done — section 11 blocker note
+still applies.
+
 ---
 
 ## 4. NEW-1 — live unit statuses and abilities never update
