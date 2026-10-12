@@ -508,8 +508,10 @@ pub fn refresh_drill_ore(
     let (item, count) = count_ore(
         content,
         grid,
-        tile.x() as i32,
-        tile.y() as i32,
+        // `Tile.getLinkedTilesAs(this, ...)`: the footprint is offset by
+        // `-(size-1)/2` from the centre tile (Java `x + i - (size-1)/2`).
+        i32::from(tile.x()) - (size - 1) / 2,
+        i32::from(tile.y()) - (size - 1) / 2,
         size,
         tier,
         &blocked,
@@ -592,13 +594,28 @@ pub fn count_ore(
     }
     let mut best: Option<(u16, u16)> = None;
     for (item, count) in counts {
+        // `Drill.countOre` sorts by (`lowPriority` ASC, amount ASC, id ASC) and
+        // takes the last: prefer non-low-priority items, then the highest
+        // amount, then the highest id.
+        let low_priority = |raw: u16| {
+            content
+                .item(ItemId::new(raw))
+                .is_some_and(|def| def.low_priority)
+        };
         best = match best {
-            Some((best_item, best_count))
-                if count < best_count || (count == best_count && item > best_item) =>
-            {
-                Some((best_item, best_count))
+            Some((best_item, best_count)) => {
+                let wins = match (low_priority(item), low_priority(best_item)) {
+                    (false, true) => true,
+                    (true, false) => false,
+                    _ => count > best_count || (count == best_count && item > best_item),
+                };
+                if wins {
+                    Some((item, count))
+                } else {
+                    Some((best_item, best_count))
+                }
             }
-            _ => Some((item, count)),
+            None => Some((item, count)),
         };
     }
     match best {

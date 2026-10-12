@@ -564,6 +564,11 @@ pub fn update_generator_with(
         if let Some(mut module) = world.get_mut::<LiquidModule>(entity) {
             module.add(liquid, added.max(0.0), capacity);
         }
+        // `ConsumeGeneratorBuild.updateTile`: `dumpLiquid(outputLiquid.liquid)`
+        // right after the add (`dumpLiquid(liquid, 2f, -1)`).
+        crate::world::blocks::liquid::movement::dump_liquid_proximity(
+            world, entity, liquid, 2.0, -1,
+        );
         if config.explode_on_full {
             let full = world
                 .get::<LiquidModule>(entity)

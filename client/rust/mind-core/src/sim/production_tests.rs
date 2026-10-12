@@ -325,3 +325,56 @@ fn power_source_powers_consumer() {
         .unwrap_or(0.0);
     assert!(efficiency > 0.0, "drill became efficient: {efficiency}");
 }
+
+/// §10 sweep (laser/airblast drills): the ore footprint is centred on
+/// `Building.tile` (`Drill.countOre` over `Tile.getLinkedTilesAs`, offset
+/// `-(size-1)/2`), so ore under the left column of a 3x3 counts and a tile
+/// outside the footprint does not (the old scan ran `x..x+size` from the
+/// centre tile).
+#[test]
+fn laser_drill_counts_centered_footprint() {
+    let mut sim = runtime_sim();
+    for y in 7..=9 {
+        set_floor(&mut sim, 7, y, "ore-copper");
+    }
+    // Outside the footprint; the old `x..x+size` scan would have counted it.
+    set_floor(&mut sim, 10, 8, "ore-copper");
+    let drill = place(&mut sim, "laser-drill", 8, 8);
+    let (dominant, count) = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::DrillState>(drill)
+        .map(|state| (state.dominant_item, state.dominant_items))
+        .expect("drill state");
+    assert_eq!(count, 3, "only the left column is ore");
+    assert_eq!(dominant, Some(item(&sim, "copper")));
+}
+
+/// §10 sweep (generators with `outputLiquid`): `ConsumeGeneratorBuild.updateTile`
+/// calls `dumpLiquid(outputLiquid.liquid)` right after the output add, so a
+/// conduit next to the generator receives the produced liquid.
+#[test]
+fn generator_dumps_output_liquid() {
+    let mut sim = runtime_sim();
+    let generator = place(&mut sim, "pyrolysis-generator", 5, 5);
+    let conduit = place(&mut sim, "conduit", 7, 5);
+    let (slag, arkycite, water) = (
+        liquid(&sim, "slag"),
+        liquid(&sim, "arkycite"),
+        liquid(&sim, "water"),
+    );
+    {
+        let world = &mut sim.ecs.0;
+        if let Some(mut module) = world.get_mut::<crate::world::modules::LiquidModule>(generator) {
+            module.add(slag, 50.0, 150.0);
+            module.add(arkycite, 50.0, 150.0);
+        }
+    }
+    for _ in 0..120 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        stored_liquid(&sim, conduit, water) > 0.0,
+        "conduit received the dumped output liquid"
+    );
+}

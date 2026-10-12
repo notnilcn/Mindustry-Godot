@@ -781,6 +781,19 @@ New gaps found during this work (not in the ledger yet; report them):
    tutorial, but means construction now really requires mining first. Expect players and
    tests to need `debug_add_core_items`.
 
+**Status 2026-10-12:** done — `refresh_drill_ore` now offsets the ore scan by `-(size-1)/2`
+(Java `Tile.getLinkedTilesAs`), `count_ore` applies Java's `Drill.countOre` ordering
+(`lowPriority` ASC, amount ASC, id ASC, last wins), and the `ConsumeGenerator` behavior dumps its
+`output_liquid` after the add (`dumpLiquid(liquid, 2f, -1)`). Tests:
+`sim::production_tests::laser_drill_counts_centered_footprint` (ore only under the left column of a
+3x3 laser drill at (8,8) counts 3; a tile the old `x..x+size` scan would have counted is ignored)
+and `sim::production_tests::generator_dumps_output_liquid` (a fed pyrolysis generator fills an
+adjacent conduit). In-engine on Ground Zero 170: a pyrolysis generator fed by slag + arkycite
+liquid sources ran at efficiency 1.0 and its conduit grew water (0.083 -> 0.25). Evidence:
+`runs/20261012-session4/section10-drill-generator-evidence.json`. Also found while here: drills have
+no `canPlaceOn` ore requirement in the port (`world/build.rs::can_place_on` is a stub), and
+`content/registries/blocks/*` never sets `destructible` for blocks that Java marks destructible-only.
+
 ---
 
 ## 11. Execution order
