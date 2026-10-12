@@ -398,6 +398,41 @@ impl Sim {
                 // `UnitComp.destroy()` fires `shootOnDeath` mounts first
                 // (PAR-0088); spawned bullets join the live list.
                 run_shoot_on_death(world, &mut runtime, entity);
+                // `UnitComp.destroy` crash damage (`UnitComp.java:921-928`): a
+                // flying unit with `createWreck`, not spawned by a core, crashes
+                // with area damage when `rules.unitCrashDamage(team) > 0`.
+                {
+                    let team = world.get::<TeamComp>(entity).map(|t| t.team).unwrap_or(0);
+                    let pos = world.get::<Pos>(entity).map(|p| (p.x, p.y));
+                    let def = world
+                        .get::<UnitTypeComp>(entity)
+                        .and_then(|comp| runtime.content.unit(comp.type_id));
+                    if let (Some((x, y)), Some(def)) = (pos, def) {
+                        let rules = world
+                            .get_resource::<CampaignRuntime>()
+                            .map(|runtime| runtime.session.rules.clone())
+                            .unwrap_or_default();
+                        let crash = rules.unit_crash_damage(team);
+                        let core_spawned = world
+                            .get::<UnitCore>(entity)
+                            .is_some_and(|core| core.spawned_by_core);
+                        if def.flying && !core_spawned && def.create_wreck && crash > 0.0 {
+                            let damage =
+                                def.hit_size.powf(0.75) * def.crash_damage_multiplier * 2.5 * crash;
+                            let radius = def.hit_size.powf(0.94) * 1.25;
+                            let _ = crate::combat::damage::area::damage_area(
+                                world,
+                                &runtime.content,
+                                Some(team),
+                                x,
+                                y,
+                                radius,
+                                damage,
+                                crate::combat::damage::area::DamageOptions::default(),
+                            );
+                        }
+                    }
+                }
                 let UnitRuntime {
                     content,
                     grid,
