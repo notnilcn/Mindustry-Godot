@@ -675,6 +675,12 @@ impl MindSimHost {
                 Variant::from(f64::from(building.optional_efficiency)),
             );
             put("time_scale", Variant::from(f64::from(building.time_scale)));
+            // Item module contents for `has_items` blocks (`{item: amount}`).
+            if let Some(content) = self.content_snapshot.as_ref()
+                && let Some(json) = block_items_json(&self.sim, content, x, y)
+            {
+                put("items_json", Variant::from(json.as_str()));
+            }
             if let Some(state) = world.get::<mind_core::entities::comp::SandboxState>(entity) {
                 put(
                     "sandbox_item",

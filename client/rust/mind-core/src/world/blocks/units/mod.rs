@@ -188,6 +188,9 @@ pub struct Reconstructor {
     pub upgrades: Vec<(UnitTypeId, UnitTypeId)>,
     /// Construct time in ticks.
     pub construct_time: f32,
+    /// `Reconstructor.capacities`: per-item max, `2x` the `ConsumeItems` stack
+    /// (`Reconstructor.initCapacities`).
+    pub capacities: Vec<i32>,
 }
 
 impl Reconstructor {
@@ -196,7 +199,19 @@ impl Reconstructor {
         Self {
             upgrades,
             construct_time,
+            capacities: Vec::new(),
         }
+    }
+
+    /// `Reconstructor.capacities[item.id]` (`getMaximumAccepted` base value).
+    pub fn capacity(&self, item: ItemId) -> i32 {
+        self.capacities.get(item.index()).copied().unwrap_or(0)
+    }
+
+    /// Whether the configured `ConsumeItems` stacks include `item`
+    /// (`Block.consumesItem`).
+    pub fn accepts(&self, item: ItemId) -> bool {
+        self.capacity(item) > 0
     }
 
     /// `ReconstructorBuild.payload` validation: whether `unit` can upgrade.
@@ -232,17 +247,27 @@ impl ReconstructorBuild {
     }
 
     /// `ReconstructorBuild.updateTile`: advance the upgrade; on completion returns
-    /// the upgraded unit type.
-    pub fn update(&mut self, reconstructor: &Reconstructor, time_scale: f32) -> Option<UnitTypeId> {
+    /// the upgraded unit type and keeps `progress %= 1f` (Java does not reset).
+    pub fn update(
+        &mut self,
+        reconstructor: &Reconstructor,
+        delta_progress: f32,
+    ) -> Option<UnitTypeId> {
         let current = self.payload?;
         let target = reconstructor.can_upgrade(current)?;
-        self.progress += time_scale;
+        self.progress += delta_progress;
         if self.progress < reconstructor.construct_time {
             return None;
         }
         self.payload = None;
-        self.progress = 0.0;
+        self.progress %= 1.0;
         Some(target)
+    }
+
+    /// `ReconstructorBuild.constructing()`: a payload with a valid upgrade.
+    pub fn constructing(&self, reconstructor: &Reconstructor) -> bool {
+        self.payload
+            .is_some_and(|payload| reconstructor.can_upgrade(payload).is_some())
     }
 }
 

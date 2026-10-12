@@ -380,6 +380,26 @@ The core loop is done. The following items remain, in priority order.
   unloaders cannot see them. Do **not** copy that pattern. Use `ItemModule` for the
   reconstructor. Migrating the unit factory to `ItemModule` is a follow-up (§10).
 
+**Status 2026-10-12:** done — `BlockDef` gained `construct_time` (`Reconstructor.constructTime`:
+additive 600, multiplicative 1800, exponential 5400, tetrative 14400; Erekir refabricators
+1800/3000/2700/3600) and the reconstructor specs gained Java's `itemCapacity` values
+(`initCapacities`: 80/260/1700/2000 and 80/120/100/200); `Consume::Items` consumers now set
+`has_items`/`accepts_items` in `init_self` (Java `ConsumeItems.apply`). `ReconstructorBehavior`
+computes `capacities` like `initCapacities`, implements `accept_item`/`get_maximum_accepted`
+(`capacities[item] * rules.unitCost(team)`)/`handle_item`/`accept_stack`/`handle_stack`, and its
+`update_tile` advances `edelta * rules.unitBuildSpeed(team)` only while a valid payload is held,
+removes the `ConsumeItems` stacks (`trigger` with the `unitCost` multiplier) and spawns the upgrade;
+`ReconstructorBuild::update` takes the delta and keeps `progress %= 1f`. `parity/golden_content.json`
+regenerated (9 entries: `has_items` for neoplasia-reactor + the 8 reconstructors, `item_capacity`
+for the reconstructors) and audit-verified. Tests:
+`sim::production_tests::reconstructor_needs_items_and_time` (no items -> payload waits 700 ticks;
+40/40 + power-source -> mace in the 600..700 window and items consumed to 0) and
+`world::blocks::units::behavior::tests::additive_reconstructor_accepts_only_its_items`. In-engine
+Ground Zero 170: an item source feeding an additive reconstructor is rejected for copper and fills
+silicon to exactly 80 (2x the requirement) and stops. Evidence:
+`runs/20261012-session4/PAR-0076-evidence.json`. The payload-to-mace half is headless-only (no
+in-engine seam loads a unit payload into a reconstructor).
+
 ---
 
 ## 5. PAR-0079: Erekir plasma-bore and cliff-crusher never produce

@@ -105,6 +105,9 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         configurable: Some(true),
+        // `tankRefabricator`: `itemCapacity = 80`, `constructTime = 60 * 30`.
+        item_capacity: Some(80),
+        construct_time: Some(1800.0),
         upgrades: vec![("stell", "locus")],
         consumes: vec![
             consume_power(3.0f32),
@@ -133,6 +136,9 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         configurable: Some(true),
+        // `shipRefabricator`: `itemCapacity = 120`, `constructTime = 60 * 50`.
+        item_capacity: Some(120),
+        construct_time: Some(3000.0),
         upgrades: vec![("elude", "avert")],
         consumes: vec![
             consume_power(2.5f32),
@@ -155,6 +161,9 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         configurable: Some(true),
+        // `mechRefabricator`: `itemCapacity = 100`, `constructTime = 60 * 45`.
+        item_capacity: Some(100),
+        construct_time: Some(2700.0),
         upgrades: vec![("merui", "cleroi")],
         consumes: vec![
             consume_power(2.5f32),
@@ -178,6 +187,9 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         configurable: Some(true),
+        // `primeRefabricator`: `itemCapacity = 200`, `constructTime = 60 * 60`.
+        item_capacity: Some(200),
+        construct_time: Some(3600.0),
         upgrades: vec![
             ("locus", "precept"),
             ("cleroi", "anthicus"),

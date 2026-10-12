@@ -378,3 +378,105 @@ fn generator_dumps_output_liquid() {
         "conduit received the dumped output liquid"
     );
 }
+
+/// PAR-0076: an additive reconstructor only upgrades a payload with power and
+/// its 40 silicon + 40 graphite, after `constructTime` (600) ticks, and consumes
+/// those items on completion.
+#[test]
+fn reconstructor_needs_items_and_time() {
+    let mut sim = runtime_sim();
+    let _source = place(&mut sim, "power-source", 3, 5);
+    let rig = place(&mut sim, "additive-reconstructor", 5, 5);
+    let (silicon, graphite) = (item(&sim, "silicon"), item(&sim, "graphite"));
+    let dagger = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .unit_id("dagger")
+        .expect("dagger");
+    let mace = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .unit_id("mace")
+        .expect("mace");
+
+    // Load a dagger payload through the behavior hook (`acceptPayload`).
+    let inst = sim
+        .ecs
+        .0
+        .resource::<crate::world::block::BlockTable>()
+        .instance(
+            sim.ecs
+                .0
+                .get::<crate::entities::comp::Building>(rig)
+                .expect("building")
+                .block,
+        )
+        .expect("instance");
+    inst.behavior.handle_payload(
+        &mut sim.ecs.0,
+        rig,
+        rig,
+        crate::world::behavior::PayloadRef {
+            entity: None,
+            content: dagger.raw(),
+            is_block: false,
+        },
+    );
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<crate::world::blocks::units::ReconstructorBuild>(rig)
+            .and_then(|state| state.payload),
+        Some(dagger)
+    );
+
+    // No items: the payload waits, nothing spawns.
+    for _ in 0..700 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<crate::world::blocks::units::ReconstructorBuild>(rig)
+            .and_then(|state| state.payload),
+        Some(dagger),
+        "payload waits without items"
+    );
+    assert!(!spawned_unit(&sim, mace), "no upgrade without items");
+
+    // Feed the required stacks: the upgrade lands after constructTime ticks.
+    {
+        let world = &mut sim.ecs.0;
+        if let Some(mut items) = world.get_mut::<crate::world::modules::ItemModule>(rig) {
+            items.add(silicon, 40, 80);
+            items.add(graphite, 40, 80);
+        }
+    }
+    let start = sim.tick_count();
+    for _ in 0..900 {
+        sim.tick().expect("tick");
+        if spawned_unit(&sim, mace) {
+            break;
+        }
+    }
+    let elapsed = sim.tick_count() - start;
+    assert!(spawned_unit(&sim, mace), "upgraded to a mace");
+    assert!(
+        (600..=700).contains(&elapsed),
+        "construct time {elapsed} ticks"
+    );
+    assert_eq!(stored_item(&sim, rig, silicon), 0, "silicon consumed");
+    assert_eq!(stored_item(&sim, rig, graphite), 0, "graphite consumed");
+}
+
+/// Whether a unit of type `unit` exists in the sim.
+fn spawned_unit(sim: &Sim, unit: crate::content::UnitTypeId) -> bool {
+    sim.ecs.0.iter_entities().any(|entity| {
+        entity
+            .get::<crate::entities::comp::unit::UnitTypeComp>()
+            .map(|comp| comp.type_id)
+            == Some(unit)
+    })
+}

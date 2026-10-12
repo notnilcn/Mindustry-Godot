@@ -203,7 +203,20 @@ pub struct ReconstructorBehavior {
 impl ReconstructorBehavior {
     /// Builds a behavior from a block's resolved metadata.
     pub fn from_def(def: &crate::content::BlockDef, content: &ContentRegistry) -> Self {
-        let reconstructor = Reconstructor::new(def.reconstructor_upgrades.clone(), 120.0);
+        let mut reconstructor =
+            Reconstructor::new(def.reconstructor_upgrades.clone(), def.construct_time);
+        // `Reconstructor.initCapacities`: every `ConsumeItems` stack's `2x`
+        // amount becomes the item's capacity.
+        reconstructor.capacities = vec![0; content.items().len()];
+        for consumer in &def.consumes {
+            if let crate::content::Consume::Items(stacks) = &consumer.consume {
+                for stack in stacks {
+                    if let Some(slot) = reconstructor.capacities.get_mut(stack.item.index()) {
+                        *slot = (*slot).max(stack.amount * 2);
+                    }
+                }
+            }
+        }
         let units = resolve_units(
             content,
             def.reconstructor_upgrades.iter().map(|(_, to)| *to),
@@ -212,6 +225,47 @@ impl ReconstructorBehavior {
             reconstructor,
             units,
         }
+    }
+
+    /// `getMaximumAccepted(item) = round(capacities[item] * rules.unitCost(team))`.
+    fn maximum_accepted(&self, world: &World, e: Entity, item: ItemId) -> i32 {
+        let team = world.get::<TeamComp>(e).map(|t| t.team).unwrap_or(0);
+        (self.reconstructor.capacity(item) as f32 * unit_cost(world, team)).round() as i32
+    }
+}
+
+/// `Rules.unitBuildSpeed(team)` (1.0 outside a campaign).
+fn unit_build_speed(world: &World, team: u8) -> f32 {
+    world
+        .get_resource::<crate::game::runtime::CampaignRuntime>()
+        .map(|runtime| runtime.session.rules.unit_build_speed(team))
+        .unwrap_or(1.0)
+}
+
+/// `Rules.unitCost(team)` (1.0 outside a campaign).
+fn unit_cost(world: &World, team: u8) -> f32 {
+    world
+        .get_resource::<crate::game::runtime::CampaignRuntime>()
+        .map(|runtime| runtime.session.rules.unit_cost(team))
+        .unwrap_or(1.0)
+}
+
+/// `ConsumeItems.trigger` with the reconstructor's `unitCost` multiplier: removes
+/// `round(stack.amount * unitCost(team))` of each configured item.
+fn consume_items(world: &mut World, e: Entity, reconstructor: &Reconstructor) {
+    let team = world.get::<TeamComp>(e).map(|t| t.team).unwrap_or(0);
+    let cost = unit_cost(world, team);
+    let Some(mut items) = world.get_mut::<ItemModule>(e) else {
+        return;
+    };
+    for index in 0..reconstructor.capacities.len() {
+        let capacity = reconstructor.capacities[index];
+        if capacity <= 0 {
+            continue;
+        }
+        // `capacities = 2 * amount` -> `amount = capacity / 2`.
+        let amount = ((capacity / 2) as f32 * cost).round() as i32;
+        items.remove(ItemId::new(index as u16), amount);
     }
 }
 
@@ -224,12 +278,63 @@ impl BuildingBehavior for ReconstructorBehavior {
         let Some(mut state) = world.entity_mut(e).take::<ReconstructorBuild>() else {
             return;
         };
-        if let Some(target) = state.update(&self.reconstructor, 1.0)
-            && let Some(def) = self.units.get(&target.raw())
-        {
-            spawn_output_unit(world, e, def);
+        // `progress += edelta() * unitBuildSpeed(team)` (0 while `efficiency` 0).
+        let team = world.get::<TeamComp>(e).map(|t| t.team).unwrap_or(0);
+        let delta_progress = crate::world::update::edelta(world, e) * unit_build_speed(world, team);
+        if let Some(target) = state.update(&self.reconstructor, delta_progress) {
+            // `consume()` then `Events.fire(new UnitCreateEvent(...))`.
+            consume_items(world, e, &self.reconstructor);
+            if let Some(def) = self.units.get(&target.raw()) {
+                spawn_output_unit(world, e, def);
+            }
         }
         world.entity_mut(e).insert(state);
+    }
+
+    fn accept_item(&self, world: &World, e: Entity, _src: Entity, item: ItemId) -> bool {
+        // Java default: `block.consumesItem(item) && items.get(item) < getMaximumAccepted(item)`.
+        if !self.reconstructor.accepts(item) {
+            return false;
+        }
+        let held = world
+            .get::<ItemModule>(e)
+            .map(|items| items.get(item))
+            .unwrap_or(0);
+        held < self.maximum_accepted(world, e, item)
+    }
+
+    fn get_maximum_accepted(&self, world: &World, e: Entity, item: ItemId) -> i32 {
+        self.maximum_accepted(world, e, item)
+    }
+
+    fn handle_item(&self, world: &mut World, e: Entity, _src: Entity, item: ItemId) {
+        crate::world::blocks::distribution::transfer::default_handle_item(world, e, e, item);
+    }
+
+    fn accept_stack(
+        &self,
+        world: &World,
+        e: Entity,
+        item: ItemId,
+        amount: i32,
+        _source: Option<Entity>,
+    ) -> i32 {
+        if !self.accept_item(world, e, Entity::PLACEHOLDER, item) {
+            return 0;
+        }
+        let held = world
+            .get::<ItemModule>(e)
+            .map(|items| items.get(item))
+            .unwrap_or(0);
+        let free = (self.maximum_accepted(world, e, item) - held).max(0);
+        free.min(amount)
+    }
+
+    fn handle_stack(&self, world: &mut World, e: Entity, item: ItemId, amount: i32) {
+        let capacity = self.maximum_accepted(world, e, item);
+        if let Some(mut items) = world.get_mut::<ItemModule>(e) {
+            items.add(item, amount, capacity.max(0));
+        }
     }
 
     fn accept_payload(
@@ -723,6 +828,61 @@ mod tests {
             }
         }
         assert!(spawned, "tank-assembler produced vanquish");
+    }
+
+    /// PAR-0076: the additive reconstructor accepts its configured
+    /// `ConsumeItems` stacks up to `2x` the requirement (`getMaximumAccepted`)
+    /// and rejects every other item.
+    #[test]
+    fn additive_reconstructor_accepts_only_its_items() {
+        let content = content();
+        let table = BlockTable::build_default(&content).expect("table");
+        let inst = table
+            .get_named("additive-reconstructor")
+            .expect("additive-reconstructor")
+            .clone();
+        let mut world = World::new();
+        world.insert_resource(BuildRules::default());
+        world.insert_resource(table);
+        let entity = inst.spawn(
+            &mut world,
+            1,
+            crate::world::TilePos::new(4, 4),
+            0,
+            0,
+            content.items().len(),
+            content.liquids().len(),
+        );
+        let silicon = content.item_id("silicon").expect("silicon");
+        let graphite = content.item_id("graphite").expect("graphite");
+        let copper = content.item_id("copper").expect("copper");
+
+        assert!(inst.behavior.accept_item(&world, entity, entity, silicon));
+        assert!(inst.behavior.accept_item(&world, entity, entity, graphite));
+        assert!(
+            !inst.behavior.accept_item(&world, entity, entity, copper),
+            "rejects copper"
+        );
+        assert_eq!(
+            inst.behavior.get_maximum_accepted(&world, entity, silicon),
+            80,
+            "2x the silicon requirement"
+        );
+
+        // Filled to capacity: no more accepted; other stacks still are.
+        if let Some(mut items) = world.get_mut::<ItemModule>(entity) {
+            items.add(silicon, 80, 80);
+        }
+        assert!(!inst.behavior.accept_item(&world, entity, entity, silicon));
+        assert_eq!(
+            inst.behavior.accept_stack(&world, entity, silicon, 5, None),
+            0
+        );
+        assert_eq!(
+            inst.behavior
+                .accept_stack(&world, entity, graphite, 7, None),
+            7
+        );
     }
 
     /// gap5 GAP-4 / K-4: `basic-assembler-module` registers its tier with the
