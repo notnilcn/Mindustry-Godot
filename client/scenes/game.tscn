@@ -5,6 +5,7 @@
 [ext_resource type="PackedScene" path="res://scenes/editor/map_editor_dialog.tscn" id="3_editor"]
 [ext_resource type="Script" path="res://ui/menu_background.gd" id="4_menubg"]
 [ext_resource type="PackedScene" path="res://scenes/ui/planet_view.tscn" id="5_planetview"]
+[ext_resource type="Script" path="res://scenes/landing_core.gd" id="6_landing"]
 
 [node name="Spine" type="Node" unique_id=1959762537]
 
@@ -24,6 +25,9 @@ position = Vector2(128, 128)
 zoom = Vector2(2, 2)
 
 [node name="Renderer" type="MindWorldRenderer" parent="World" unique_id=1055646708]
+
+[node name="LandingCore" type="Node2D" parent="World" unique_id=1600000021]
+script = ExtResource("6_landing")
 
 [node name="Bloom" type="Node2D" parent="World" unique_id=1685205082]
 

@@ -540,6 +540,31 @@ impl Sim {
         }
     }
 
+    /// `Schematics.placeLoadout` for the live runtime (launcher loadouts,
+    /// `game/Schematics.java:465-500`): places `schem` centered on its core
+    /// tile at `(x, y)` for `team`, replacing whatever occupies the footprints
+    /// (`check` clears non-core blockers first). Returns the placed core
+    /// entities; empty when the runtime is not installed or the schematic has
+    /// no core.
+    pub fn place_loadout(
+        &mut self,
+        schem: &crate::game::schematic::Schematic,
+        x: i16,
+        y: i16,
+        team: u8,
+        check: bool,
+    ) -> Vec<Entity> {
+        let Some(runtime) = self.block_runtime.as_mut() else {
+            return Vec::new();
+        };
+        let cores =
+            runtime.place_schematic(&mut self.ecs.0, &mut self.grid, schem, x, y, team, check);
+        if !cores.is_empty() {
+            self.refresh_unit_runtime();
+        }
+        cores
+    }
+
     /// Breaks through the opt-in live runtime; `false` when absent or rejected.
     fn runtime_break(&mut self, x: i16, y: i16) -> bool {
         let Some(runtime) = self.block_runtime.as_mut() else {

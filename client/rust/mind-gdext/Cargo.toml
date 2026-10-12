@@ -16,6 +16,7 @@ godot.workspace = true
 mind-core = { path = "../mind-core", features = ["msav-import"] }
 mind-stdb = { path = "../mind-stdb" }
 serde_json.workspace = true
+indexmap.workspace = true
 smallvec.workspace = true
 log.workspace = true
 

@@ -28,6 +28,9 @@ var _root: MindTable = null
 var _selected_planet: String = ""
 var _selected_sector: int = -1
 var _ok_button: Button = null
+## Last `lastplanet` value written this session (T9: the settings write is a
+## full read-merge-write, so only write when the planet actually changes).
+var _last_planet_written: String = ""
 ## True while the first-run chooser is up (`_show_select`): the Java chooser is
 ## modal and has no close path — ESC/back must not dismiss it (PAR-0013).
 var _chooser_active := false
@@ -592,6 +595,8 @@ func _maybe_show_remap_notice() -> void:
 		JSON.stringify({
 			"title": _t("@campaign.rework.title"),
 			"text": _tm("@campaign.rework.serpulo"),
+			"ok": true,
+			"keep_previous": true,
 		})
 	)
 
@@ -602,8 +607,11 @@ func _maybe_show_remap_notice() -> void:
 ## panel (`@sectors` readout with the in-panel action button).
 func _show_planet(planet_name: String, select_default := true) -> void:
 	# `PlanetDialog.java:247,902`: showing/switching a planet records it so the
-	# next boot reopens on it.
-	_put_text("lastplanet", planet_name)
+	# next boot reopens on it. Writing `lastplanet` is a full settings.bin
+	# read-merge-write, so only write when the value changes (T9).
+	if _last_planet_written != planet_name:
+		_put_text("lastplanet", planet_name)
+		_last_planet_written = planet_name
 	_selected_planet = planet_name
 	_chooser_active = false
 	_clear_dimmed_footer()
@@ -1423,9 +1431,11 @@ func _open_launch_loadout(planet_name: String, sector_id: int) -> void:
 		return
 	if not dialog.loadout_chosen.is_connected(_on_loadout_chosen):
 		dialog.loadout_chosen.connect(_on_loadout_chosen)
+	var launcher := _find_launcher(planet_name)
 	ui.call("open_dialog", "launch_loadout", JSON.stringify({
 		"planet": planet_name,
 		"sector": sector_id,
+		"launcher": int(launcher.get("id", -1)),
 	}))
 
 
@@ -1467,18 +1477,29 @@ func _find_loadout_row(index: int) -> Dictionary:
 
 
 ## `PlanetDialog.playSelected` launch cost: the chosen schematic's
-## requirements (`from.removeItems(loadout.requirements())`) plus
-## `universe.getLaunchResources()` (sum per item) as `[{item, amount}]` stacks,
-## removed from the launcher sector.
-func _loadout_launch_stacks(row: Dictionary) -> Array:
+## requirements (`from.removeItems(loadout.requirements())`) plus the staged
+## launch resources (sum per item) as `[{item, amount}]` stacks, removed from
+## the launcher sector.
+func _loadout_launch_stacks(row: Dictionary, resources: Dictionary) -> Array:
 	var totals: Dictionary = {}
 	for requirement in row.get("requirements", []):
 		var item := str(requirement[0])
 		totals[item] = int(totals.get(item, 0)) + int(requirement[1])
-	var resources := _launch_resource_totals()
 	for item in resources:
 		totals[item] = int(totals.get(item, 0)) + int(resources[item])
 	return _stacks_of(totals)
+
+
+## `MindCampaign.launch_dialog_json` (`LaunchLoadoutDialog.update`) for the
+## launcher launch; `{}` without the facade.
+func _launch_plan(planet_name: String, launcher: int, sector_id: int, loadout: int) -> Dictionary:
+	var campaign := campaign_node()
+	if campaign == null or not campaign.has_method("launch_dialog_json"):
+		return {}
+	var parsed: Variant = JSON.parse_string(str(campaign.call(
+		"launch_dialog_json", planet_name, launcher, sector_id, loadout
+	)))
+	return parsed if parsed is Dictionary else {}
 
 
 ## `universe.getLaunchResources()` as `{item: amount}`.
@@ -1518,27 +1539,38 @@ func _launch(planet_name: String, sector_id: int, loadout: int = -1, resume: boo
 			started = bool(campaign.call("play_sector", planet_name, sector_id))
 		elif loadout >= 0 and campaign.has_method("start_sector_with_loadout"):
 			# `PlanetDialog.playSelected` launcher branch (PAR-0085): the chosen
-			# schematic's build cost plus `universe.getLaunchResources()` is
-			# removed from the launcher sector and stocked into the new core.
-			var row := _find_loadout_row(loadout)
-			var cost := _loadout_launch_stacks(row)
+			# schematic's build cost plus the staged resources is removed from
+			# the launcher sector and stocked into the new core. The staged
+			# resources come from `LaunchLoadoutDialog.update` (`launch_plan`)
+			# so the Max computation and capacity clamp apply.
 			var launcher := _find_launcher(planet_name)
-			if not launcher.is_empty():
+			var launcher_id := int(launcher.get("id", -1))
+			var plan := _launch_plan(planet_name, launcher_id, sector_id, loadout)
+			var resources: Dictionary = plan.get("resources", {})
+			if resources.is_empty():
+				resources = _launch_resource_totals()
+			var row := _find_loadout_row(loadout)
+			var cost := _loadout_launch_stacks(row, resources)
+			if launcher_id >= 0:
 				campaign.call(
 					"remove_sector_items",
 					planet_name,
-					int(launcher.get("id", -1)),
+					launcher_id,
 					JSON.stringify(cost)
 				)
 			# `Schematics.placeLaunchLoadout`: the placed core holds only the
 			# launch resources; the schematic requirements are its build cost
 			# (paid by the launcher above), not core contents.
-			var core_stacks := _stacks_of(_launch_resource_totals())
+			var core_stacks := _stacks_of(resources)
 			started = bool(campaign.call(
 				"start_sector_with_loadout",
 				planet_name,
 				sector_id,
-				JSON.stringify({"core": str(row.get("core", "")), "stacks": core_stacks})
+				JSON.stringify({
+					"core": str(row.get("core", "")),
+					"schematic": loadout,
+					"stacks": core_stacks,
+				})
 			))
 		elif campaign.has_method("start_sector"):
 			# Free launch with no launcher: `universe.clearLoadoutInfo()` then

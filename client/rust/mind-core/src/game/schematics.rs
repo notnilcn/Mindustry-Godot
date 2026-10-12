@@ -538,6 +538,16 @@ impl Schematics {
             }
         }
         self.all.sort_by(|a, b| a.compare_to(b));
+        // Java keys `loadouts`/`defaultLoadouts` by `CoreBlock` object reference
+        // and sorts `all` afterwards, so the sort never invalidates them; the
+        // port stores `all` indices, so re-register every schematic in sorted
+        // order (vanilla loadouts carry no `file`; everything else is custom).
+        self.loadouts.clear();
+        self.default_loadouts.clear();
+        for index in 0..self.all.len() {
+            let vanilla = self.all[index].file.is_none();
+            self.check_loadout(index, !vanilla, registry);
+        }
         Ok(())
     }
 
@@ -581,7 +591,6 @@ impl Schematics {
         let index = self.all.len();
         self.all.push(schem);
         self.check_loadout(index, true, registry);
-        self.all.sort_by(|a, b| a.compare_to(b));
         Ok(index)
     }
 
@@ -973,6 +982,49 @@ mod tests {
         assert_eq!(back.tiles.len(), schem.tiles.len());
     }
 
+    /// `Schematics.load` re-indexes `loadouts`/`default_loadouts` after the
+    /// final name sort (Java keys by `CoreBlock` reference; the port stores
+    /// indices into the sorted `all`).
+    #[test]
+    fn load_reindexes_loadouts_after_sort() {
+        use crate::io::fs::MockFs;
+        let registry = registry();
+        let fs = MockFs::new();
+        let dir = Path::new("/schematics");
+        // A custom schematic named to sort before the vanilla `basic*` loadouts.
+        let mut schem = sample(&registry);
+        schem.tags.insert("name".to_owned(), "aaa-base".to_owned());
+        let bytes = write(&schem, &registry).unwrap();
+        fs.write(&dir.join("aaa.msch"), &bytes).unwrap();
+
+        let mut schematics = Schematics::new();
+        schematics.load(&fs, dir, &registry).unwrap();
+
+        assert_eq!(schematics.all.len(), 5, "4 vanilla + 1 custom");
+        assert_eq!(schematics.all[0].name(), "aaa-base", "sorted by name");
+        assert!(
+            schematics.all.iter().any(|schem| schem.file.is_some()),
+            "custom schematic loaded"
+        );
+        // Every recorded index must point at a schematic with that core.
+        for (core, indices) in &schematics.loadouts {
+            for index in indices {
+                assert_eq!(
+                    schematics.all[*index].find_core(&registry).map(|c| c.raw()),
+                    Some(*core),
+                    "loadout index {index} must point at core {core}"
+                );
+            }
+        }
+        for (core, index) in &schematics.default_loadouts {
+            assert_eq!(
+                schematics.all[*index].find_core(&registry).map(|c| c.raw()),
+                Some(*core),
+                "default loadout index {index} must point at core {core}"
+            );
+        }
+    }
+
     #[test]
     fn vanilla_loadouts_decode() {
         let registry = registry();
@@ -1095,6 +1147,36 @@ mod tests {
         assert_eq!(harness.block_at(8, 8), core);
         let building = harness.world.get::<Building>(cores[0]).unwrap();
         assert_eq!(building.block, core);
+    }
+
+    /// `placeLaunchLoadout`: the loadout schematic's core replaces the map's
+    /// core at the launcher tile (PAR-0085 step 5).
+    #[test]
+    fn place_loadout_replaces_core_block() {
+        let mut harness = crate::world::harness::BuildHarness::new(32, 32, 7);
+        let shard = harness.content.block_id("core-shard").unwrap();
+        let foundation = harness.content.block_id("core-foundation").unwrap();
+        // The map's own core at (10, 10): a 3x3 shard.
+        assert!(harness.place(10, 10, shard, 0, true), "map core placed");
+        let mut schematics = Schematics::new();
+        schematics.load_loadouts(&harness.content);
+        let index = schematics
+            .get_default_loadout(foundation)
+            .expect("core-foundation loadout");
+        let schem = schematics.all[index].clone();
+
+        let cores = harness.with_ctx(|ctx| place_loadout(ctx, &schem, 10, 10, 0, true));
+        assert_eq!(cores.len(), 1, "one replacement core placed");
+        assert_eq!(
+            harness.block_at(10, 10),
+            foundation,
+            "the schematic's core replaced the map core at the anchor tile"
+        );
+        assert_eq!(
+            harness.content.block(foundation).unwrap().size,
+            4,
+            "core-foundation is a 4x4 core"
+        );
     }
 
     #[test]

@@ -600,9 +600,9 @@ mod tests {
         assert_eq!(store.get_i32(&expected), need);
     }
 
-    /// Vanilla nodes carry no materialized `requirements`; spend/gating derive
-    /// the real `UnlockableContent.researchRequirements()` on demand and consume
-    /// exactly those items (plan-02 gap reconciliation).
+    /// Vanilla nodes carry their materialized `requirements` (the constructor
+    /// gap is fixed by `materialize_requirements`); spend/gating consume exactly
+    /// those items.
     #[test]
     fn vanilla_research_uses_content_requirements() {
         let (mut registry, mut store) = registry();
@@ -610,7 +610,7 @@ mod tests {
             .find_map(|index| {
                 let node_ref = TechNodeRef(index as u32);
                 let node = registry.tech().node(node_ref)?;
-                if node.content.is_none() || !node.requirements.is_empty() {
+                if node.content.is_none() || node.requirements.is_empty() {
                     return None;
                 }
                 let effective = effective_requirements(&registry, node_ref);
@@ -619,15 +619,11 @@ mod tests {
                 }
                 Some((node_ref, node.parent?, effective))
             })
-            .expect("a vanilla node with derived research requirements");
-        assert!(
-            registry
-                .tech()
-                .node(node_ref)
-                .unwrap()
-                .requirements
-                .is_empty(),
-            "generated tree did not materialize the list"
+            .expect("a vanilla node with materialized research requirements");
+        assert_eq!(
+            registry.tech().node(node_ref).unwrap().requirements,
+            effective,
+            "the tree materialized the content-derived list"
         );
 
         let _ = unlock(&mut registry, parent_ref, &mut store);

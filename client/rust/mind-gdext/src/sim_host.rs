@@ -1812,8 +1812,35 @@ impl MindSimHost {
     /// Player best-core camera target for a world load (`Control.WorldLoadEvent`
     /// → `camera.position.set(player.bestCore())`), in world pixels. `None`
     /// before content boot or on a core-less map.
-    pub fn best_core_position(&self) -> Option<(f32, f32)> {
+    pub fn best_core_position_px(&self) -> Option<(f32, f32)> {
         first_core_position(&self.sim.grid, self.content_snapshot.as_ref()?)
+    }
+
+    /// [`best_core_position_px`](Self::best_core_position_px) for GDScript;
+    /// `(-1, -1)` before content boot or on a core-less map.
+    #[func]
+    pub fn best_core_position(&self) -> Vector2 {
+        self.best_core_position_px()
+            .map(|(x, y)| Vector2::new(x, y))
+            .unwrap_or(Vector2::new(-1.0, -1.0))
+    }
+
+    /// Block name of the player's best core (`Player.bestCore().block.name`,
+    /// the `block-<name>-full` region the landing cutscene draws); empty before
+    /// content boot or on a core-less map.
+    pub fn best_core_block(&self) -> GString {
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return GString::new();
+        };
+        self.sim
+            .grid
+            .iter_row_major()
+            .find_map(|(_, index)| {
+                let def = content.block(self.sim.grid.block_id_at(index))?;
+                (def.kind == BlockKind::CoreBlock).then(|| def.name.clone())
+            })
+            .map(|name| GString::from(name.as_str()))
+            .unwrap_or_default()
     }
 
     /// Binding-driven move axis from the sibling `Input`. `MindInput.pan_axis`
@@ -1887,7 +1914,7 @@ impl MindSimHost {
         if self.sim.player_unit_position().is_some() {
             return true;
         }
-        let Some((x, y)) = self.best_core_position() else {
+        let Some((x, y)) = self.best_core_position_px() else {
             log::warn!("spawn_player_unit: no core in the loaded sector");
             return false;
         };
@@ -2078,6 +2105,99 @@ impl MindSimHost {
             Some(mut module) => i64::from(module.add(item, amount, capacity)),
             None => 0,
         }
+    }
+
+    /// `Schematics.placeLaunchLoadout` (`game/Schematics.java:465-469`) for the
+    /// launcher branch: replaces the default team's core at its tile with the
+    /// chosen loadout schematic (core placed first, non-core footprints cleared
+    /// - `placeLoadout(..., check = true)`), then stocks the new core with
+    /// `stacks_json` (`[{item, amount}]`, the launch resources).
+    #[func]
+    pub fn place_launch_loadout(&mut self, schematic_index: i32, stacks_json: GString) -> bool {
+        use mind_core::game::schematics::Schematics;
+        if schematic_index < 0 {
+            return false;
+        }
+        let Some(registry) = self.content_snapshot.as_ref() else {
+            return false;
+        };
+        // Java's `schematicDirectory` is `dataDirectory/schematics`; `user://`
+        // globalizes to the same data root the campaign facade loads from.
+        let paths = mind_core::io::fs::Paths::new(
+            ProjectSettings::singleton()
+                .globalize_path("user://")
+                .to_string(),
+        );
+        let mut schematics = Schematics::new();
+        if let Err(error) = schematics.load(
+            &mind_core::io::fs::NativeFs,
+            &paths.root().join("schematics"),
+            registry,
+        ) {
+            log::warn!("place_launch_loadout: schematic load failed: {error}");
+        }
+        let Some(schem) = schematics.all.get(schematic_index as usize).cloned() else {
+            log::warn!("place_launch_loadout: no schematic at index {schematic_index}");
+            return false;
+        };
+        let team = self.player_team();
+        let Some((core_x, core_y)) = self.player_core_tile(team) else {
+            log::warn!("place_launch_loadout: no default-team core to replace");
+            return false;
+        };
+        let cores = self.sim.place_loadout(&schem, core_x, core_y, team, true);
+        let Some(entity) = cores.first().copied() else {
+            log::warn!("place_launch_loadout: schematic placement produced no core");
+            return false;
+        };
+        // `placeLaunchLoadout`: `tile.build.items.add(universe.getLaunchResources())`
+        // on the freshly placed core (empty inventory).
+        let stacks: Vec<mind_core::io::json::content_serde::JsonItemStack> =
+            serde_json::from_str(&stacks_json.to_string()).unwrap_or_default();
+        let capacity = self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::world::blocks::storage::core_block::CoreBuild>(entity)
+            .map(|core| core.storage_capacity)
+            .unwrap_or(i32::MAX);
+        if let Some(mut module) = self.sim.ecs.0.get_mut::<ItemModule>(entity) {
+            module.clear();
+            for stack in &stacks {
+                let Some(name) = stack.item.as_deref() else {
+                    continue;
+                };
+                if let Some(item) = registry.item_id(name) {
+                    module.add(item, stack.amount, capacity);
+                }
+            }
+        }
+        self.world_dirty = true;
+        self.emit_state();
+        self.emit_world_changed();
+        log::info!(
+            "place_launch_loadout: `{}` core at ({core_x}, {core_y}) stocked from {} stack(s)",
+            schem.name(),
+            stacks.len()
+        );
+        true
+    }
+
+    /// The default team's core anchor tile in the live world (`Player.bestCore`
+    /// position; `BuildingComp.pos` is the anchor tile).
+    fn player_core_tile(&self, team: u8) -> Option<(i16, i16)> {
+        let content = self.content_snapshot.as_ref()?;
+        self.sim
+            .ecs
+            .entities_by_seq()
+            .into_iter()
+            .find_map(|(_, _, comp)| {
+                (comp.team.0 == team
+                    && content
+                        .block(comp.block)
+                        .is_some_and(|def| def.kind == BlockKind::CoreBlock))
+                .then_some((comp.pos.0, comp.pos.1))
+            })
     }
 
     /// The player unit's build-plan queue as JSON (`BuilderComp.plans`, head

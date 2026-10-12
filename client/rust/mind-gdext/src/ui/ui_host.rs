@@ -190,7 +190,19 @@ impl MindUi {
             log::warn!("[ui] open_dialog: unknown dialog '{key}'");
             return false;
         };
-        if let Some(top) = self.stack.last().cloned()
+        // `PlanetDialog.showChangesNotice` overlays the still-visible planet
+        // page (Java `BaseDialog` does not hide its parent): a `keep_previous`
+        // context key suppresses the auto-hide of the current top dialog.
+        let keep_previous = serde_json::from_str::<serde_json::Value>(&ctx_json.to_string())
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("keep_previous")
+                    .and_then(serde_json::Value::as_bool)
+            })
+            .unwrap_or(false);
+        if !keep_previous
+            && let Some(top) = self.stack.last().cloned()
             && top != key
             && let Some(mut previous) = self.dialogs.get(&top).cloned()
             && previous.has_method("hide_dialog")
@@ -701,6 +713,13 @@ impl MindUi {
     #[func]
     pub fn settings_get_flag(&self, key: GString) -> bool {
         self.settings.get_bool(&key.to_string(), false)
+    }
+
+    /// `Core.settings.getBool(key, default)` for arbitrary (campaign) flags such
+    /// as `maxresources` (default true; `LaunchLoadoutDialog.java:222-228`).
+    #[func]
+    pub fn settings_get_flag_default(&self, key: GString, default: bool) -> bool {
+        self.settings.get_bool(&key.to_string(), default)
     }
 
     /// `Core.settings.put(key, value)` for a boolean flag.

@@ -82,6 +82,12 @@ pub fn create_base_content(
     }
     registry.push_tech_report("erekir", erekir_report);
 
+    // `TechTree.TechNode`'s constructor materializes the content-derived research
+    // cost once every registry exists (`TechTree.java:160-176`). The generated
+    // trees stored no list, so the port fills it before any caller sees the
+    // registry; `init`/`post_init` do not mutate `researchRequirements`.
+    super::tech::materialize_requirements(&mut registry, store);
+
     Ok(registry)
 }
 

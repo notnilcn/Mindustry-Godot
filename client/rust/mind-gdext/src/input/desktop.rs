@@ -612,7 +612,14 @@ impl DesktopBridge {
                 self.fire_hotkey(name);
             }
             "pause" => {
-                if let Some(mut host) = self.host.clone() {
+                // `Control.java:730-734`: the pause key is ignored while
+                // `renderer.isCutscene()` (landing/launch).
+                let cutscene = self
+                    .camera
+                    .clone()
+                    .map(|camera| camera.bind().is_cutscene())
+                    .unwrap_or(false);
+                if !cutscene && let Some(mut host) = self.host.clone() {
                     let paused = host.bind().is_paused();
                     host.bind_mut().set_paused(!paused);
                 }
