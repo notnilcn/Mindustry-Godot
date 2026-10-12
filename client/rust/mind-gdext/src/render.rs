@@ -52,6 +52,7 @@ mod overlays;
 mod pixelate;
 mod shaders;
 mod shadow;
+mod status;
 mod units;
 
 pub use blocks::BlockRenderer;
@@ -228,6 +229,8 @@ pub struct MindWorldRenderer {
     shadow: Option<ShadowRenderer>,
     light: Option<LightRenderer>,
     debug: Option<DebugCollisionRenderer>,
+    /// F6 status markers (`Layer.power` band; T14/PAR-0097).
+    status: Option<Gd<status::StatusRenderer>>,
     env: Option<EnvRenderer>,
     fog: Option<FogRenderer>,
     overlays: Option<OverlayRenderer>,
@@ -265,6 +268,7 @@ impl INode2D for MindWorldRenderer {
             shadow: None,
             light: None,
             debug: None,
+            status: None,
             env: None,
             fog: None,
             overlays: None,
@@ -499,6 +503,14 @@ impl MindWorldRenderer {
         ));
         if let Some(light_band) = self.band_node_at(BandKey::base(Layer::Light)) {
             self.light = Some(LightRenderer::new(host.clone(), light_band, &self.shaders));
+        }
+        // F6 status markers under `Layer.power` (`BuildingComp.drawStatus`).
+        if let Some(power_band) = self.band_node_at(BandKey::base(Layer::Power)) {
+            let node = status::StatusRenderer::new_alloc();
+            // code-instantiated: one marker pass over the power band; the node
+            // count is fixed by the pipeline, not by content.
+            power_band.clone().add_child(&node);
+            self.status = Some(node.clone());
         }
         if let Some(light_band) = self.band_node_at(BandKey::base(Layer::Light)) {
             self.env = Some(EnvRenderer::new(light_band));
@@ -754,6 +766,13 @@ impl MindWorldRenderer {
     #[func]
     pub fn get_stats(&self) -> VarDictionary {
         self.stats.to_dict()
+    }
+
+    /// `Lod.l2` from the last frame (`BlockRenderer` gates the F6 status
+    /// markers on it, `BlockRenderer.java:825-833`).
+    #[func]
+    pub fn stats_lod_l2(&self) -> bool {
+        self.stats.lod_l2
     }
 
     /// Whether the nullable `shield` shader resolved (plan 16 §3.9,

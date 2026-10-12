@@ -56,7 +56,27 @@ func _ready() -> void:
 		if _hud.has_signal("sector_event"):
 			_hud.connect("sector_event", _on_sector_event)
 	_connect_minimap()
+	# `DesktopInput.java:455-457`: F6 toggles the `blockstatus` setting (the
+	# input layer only emits the hotkey; the HUD owns the setting write).
+	var input := get_node_or_null("/root/Spine/Input")
+	if (
+		input != null
+		and input.has_signal("hotkey")
+		and not input.is_connected("hotkey", Callable(self, "_on_hotkey"))
+	):
+		input.connect("hotkey", Callable(self, "_on_hotkey"))
 	refresh()
+
+
+## View-toggle hotkeys owned by the HUD fragment (`Renderer.drawStatus`).
+func _on_hotkey(action: String) -> void:
+	if action != "toggle_block_status":
+		return
+	var ui := get_node_or_null("/root/MindUi")
+	if ui == null or not ui.has_method("settings_get_bool"):
+		return
+	var current := bool(ui.call("settings_get_bool", "blockstatus"))
+	ui.call("settings_set", "blockstatus", not current)
 
 
 ## `HudFragment.java:336-351`: the embedded minimap pans/zooms the camera and

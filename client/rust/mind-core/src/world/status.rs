@@ -19,6 +19,10 @@ pub enum BlockStatus {
     NoInput,
     /// No output (yellow).
     NoOutput,
+    /// Disabled by logic (`logicDisable`).
+    LogicDisable,
+    /// Inactive (`inactive`).
+    Inactive,
 }
 
 impl BlockStatus {
@@ -29,6 +33,22 @@ impl BlockStatus {
             BlockStatus::Active => 0xffff_ffff,
             BlockStatus::NoInput => 0xff1d1d,
             BlockStatus::NoOutput => 0xffd37f,
+            BlockStatus::LogicDisable => 0x8a73c6,
+            BlockStatus::Inactive => 0xbfbfbf,
+        }
+    }
+
+    /// The Java `BlockStatus` F6-marker colours (`world/meta/BlockStatus.java`)
+    /// as `0xRRGGBBAA`: active `#5ce677`, noOutput `Color.orange` `#ffa500`,
+    /// noInput `Pal.remove` `#e55454`, logicDisable `#8a73c6`, inactive and
+    /// absent status `Color.lightGray` `#bfbfbf`.
+    pub const fn java_color(self) -> u32 {
+        match self {
+            BlockStatus::Active => 0x5ce6_77ff,
+            BlockStatus::NoOutput => 0xffa5_00ff,
+            BlockStatus::NoInput => 0xe554_54ff,
+            BlockStatus::LogicDisable => 0x8a73_c6ff,
+            BlockStatus::Inactive | BlockStatus::None => 0xbfbf_bfff,
         }
     }
 }
@@ -69,5 +89,16 @@ mod tests {
     fn status_colors_match_upstream() {
         assert_eq!(BlockStatus::NoInput.color(), 0xff1d1d);
         assert_eq!(BlockStatus::NoOutput.color(), 0xffd37f);
+    }
+
+    /// The F6 marker colours are the Java `BlockStatus` values (T14/PAR-0097).
+    #[test]
+    fn java_marker_colors_match_blockstatus() {
+        assert_eq!(BlockStatus::Active.java_color(), 0x5ce6_77ff);
+        assert_eq!(BlockStatus::NoOutput.java_color(), 0xffa5_00ff);
+        assert_eq!(BlockStatus::NoInput.java_color(), 0xe554_54ff);
+        assert_eq!(BlockStatus::LogicDisable.java_color(), 0x8a73_c6ff);
+        assert_eq!(BlockStatus::Inactive.java_color(), 0xbfbf_bfff);
+        assert_eq!(BlockStatus::None.java_color(), 0xbfbf_bfff);
     }
 }

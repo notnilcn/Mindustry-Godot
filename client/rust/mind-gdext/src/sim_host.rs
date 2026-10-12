@@ -2559,6 +2559,62 @@ impl MindSimHost {
         Some((state.rotation, dx, dy, state.heat))
     }
 
+    /// F6 status markers (`BuildingComp.drawStatus`/`status()`): one row per
+    /// player-team building with a non-empty `consumes` —
+    /// `(center tile x, center tile y, world x, world y, size, java_color)`.
+    /// Rust-only seam for the status pass (T14/PAR-0097).
+    pub fn building_statuses(&self) -> Vec<(i32, i32, f32, f32, i32, u32)> {
+        use mind_core::world::status::BlockStatus;
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return Vec::new();
+        };
+        let team = self.player_team();
+        let mut out = Vec::new();
+        for entity in self.sim.ecs.0.iter_entities() {
+            let Some(building) = entity.get::<mind_core::entities::comp::Building>() else {
+                continue;
+            };
+            let Some(comp) = entity.get::<mind_core::ecs::BuildingComp>() else {
+                continue;
+            };
+            if comp.team.0 != team {
+                continue;
+            }
+            let Some(def) = content.block(building.block) else {
+                continue;
+            };
+            if def.consumes.is_empty() {
+                continue;
+            }
+            // `BlockStatus.forBlock`: `!enabled` -> logicDisable, efficiency
+            // `<= 0` -> noInput, else active. Java's pulse condition
+            // `((state.tick / 30) % 1) < efficiency` is always true (integer
+            // modulo 1), so the marker is simply `active`
+            // (`BuildingComp.java:638-652`).
+            let status = if !building.enabled {
+                BlockStatus::LogicDisable
+            } else if building.efficiency <= 0.0 {
+                BlockStatus::NoInput
+            } else {
+                BlockStatus::Active
+            };
+            let size = def.size.max(1);
+            // `Building.tile` is the center tile; `Block.offset` recentres the
+            // even-size sprites (same convention as `blocks.rs`).
+            let cx = f32::from(building.tile.x()) * 8.0 + def.offset;
+            let cy = f32::from(building.tile.y()) * 8.0 + def.offset;
+            out.push((
+                i32::from(building.tile.x()),
+                i32::from(building.tile.y()),
+                cx,
+                cy,
+                size,
+                status.java_color(),
+            ));
+        }
+        out
+    }
+
     /// Hover target at tile `(x, y)` (`PlacementFragment.hovered`): a unit
     /// within 5 world px of the tile centre, else the tile's building, else the
     /// tile's displayable drop (`Tile.displayable`/`Tile.display`).
