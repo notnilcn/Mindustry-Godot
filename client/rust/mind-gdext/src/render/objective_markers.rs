@@ -176,12 +176,7 @@ impl INode2D for MindObjectiveMarkers {
                     let origin = Vector2::new(x, top.y + ascent);
                     let text = GString::from(run.text.as_str());
                     let color = run.color.map_or(Color::WHITE, |c| {
-                        Color::from_rgba8(
-                            (c >> 24) as u8,
-                            (c >> 16) as u8,
-                            (c >> 8) as u8,
-                            c as u8,
-                        )
+                        Color::from_rgba8((c >> 24) as u8, (c >> 16) as u8, (c >> 8) as u8, c as u8)
                     });
                     self.base_mut()
                         .draw_string_outline_ex(&font, origin, &text)

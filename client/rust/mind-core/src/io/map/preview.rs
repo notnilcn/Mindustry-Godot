@@ -633,7 +633,10 @@ mod tests {
         assert_eq!(palette.map_color(1), 0x112233ff);
         assert_ne!(before, 0x112233ff);
         // `0`/`255` entries keep the registry colour.
-        assert_eq!(palette.map_color(0), BlockPalette::of(&registry).map_color(0));
+        assert_eq!(
+            palette.map_color(0),
+            BlockPalette::of(&registry).map_color(0)
+        );
     }
 
     #[test]

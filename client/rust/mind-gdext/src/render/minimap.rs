@@ -47,7 +47,11 @@ fn load_block_colors() -> Vec<u32> {
         return Vec::new();
     }
     (0..image.get_width())
-        .map(|x| image.get_pixel(x, 0).to_u32(godot::builtin::ColorChannelOrder::RGBA))
+        .map(|x| {
+            image
+                .get_pixel(x, 0)
+                .to_u32(godot::builtin::ColorChannelOrder::RGBA)
+        })
         .collect()
 }
 
@@ -286,7 +290,14 @@ impl MindMinimap {
             .try_get_node_as::<godot::classes::Camera2D>("../Camera2D")
             .map(|camera| camera.get_position())
             .unwrap_or_default();
-        region_for_camera(camera.x, camera.y, TILESIZE as f32, width, height, self.zoom)
+        region_for_camera(
+            camera.x,
+            camera.y,
+            TILESIZE as f32,
+            width,
+            height,
+            self.zoom,
+        )
     }
 }
 

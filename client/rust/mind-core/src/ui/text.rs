@@ -433,7 +433,10 @@ mod tests {
     #[test]
     fn markup_runs_split_colors_and_icons() {
         let iconc = Iconc::from_properties("63000=ore-copper|block-ore-copper-ui\n");
-        let runs = markup_runs("Move near the :ore-copper: [accent]copper ore[] on [[x]", &iconc);
+        let runs = markup_runs(
+            "Move near the :ore-copper: [accent]copper ore[] on [[x]",
+            &iconc,
+        );
         let icon = char::from_u32(63000).unwrap();
         assert_eq!(runs.len(), 3);
         assert_eq!(runs[0].text, format!("Move near the {icon} "));
