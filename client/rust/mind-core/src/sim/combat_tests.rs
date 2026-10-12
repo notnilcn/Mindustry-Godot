@@ -766,6 +766,59 @@ fn lifesteal_bullet_heals_owner() {
     );
 }
 
+/// T16: destroying a rebuildable block pushes a ghost plan onto its team's
+/// queue (`Logic`'s `BlockDestroyEvent` -> `BuildingComp.addPlan(true)`,
+/// Logic.java:42-50).
+#[test]
+fn destroyed_building_leaves_rebuild_plan() {
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+
+    let mut sim = live_sim(32);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let mut session = PlaySession::new(Rules {
+        default_team: 1,
+        ..Rules::default()
+    });
+    session.phase = crate::game::State::Playing;
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+
+    let wall_block = block(&sim, "copper-wall");
+    let wall = place(&mut sim, 10, 10, "copper-wall", 1);
+    sim.ecs
+        .0
+        .get_mut::<Health>(wall)
+        .expect("wall health")
+        .health = 0.0;
+    sim.tick().expect("tick");
+
+    let campaign = sim
+        .ecs
+        .0
+        .get_resource::<CampaignRuntime>()
+        .expect("campaign");
+    let plans = &campaign
+        .session
+        .teams
+        .get_or_null(crate::ecs::TeamId(1))
+        .expect("team 1")
+        .plans;
+    assert!(
+        plans
+            .front()
+            .is_some_and(|plan| plan.block.raw() == wall_block && plan.x == 10 && plan.y == 10),
+        "ghost plan queued for the dead wall: {plans:?}"
+    );
+}
+
 /// NEW-1: a status applied through the live applier ticks damage every tick
 /// (`StatusComp.update` in the live unit loop).
 #[test]

@@ -503,12 +503,60 @@ impl Sim {
                         )
                     })
                     .unwrap_or(((0.0, 0.0), 1));
+                // `Logic`'s `BlockDestroyEvent` handler: a rebuildable dead
+                // block appends a ghost plan to its team's queue
+                // (`tile.build.addPlan(true)`, Logic.java:42-50;
+                // `BuildingComp.addPlan`, BuildingComp.java:335-374).
+                let plan = self
+                    .ecs
+                    .0
+                    .get::<crate::entities::comp::Building>(entity)
+                    .map(|building| (building.tile, building.rotation as i8, building.block));
+                let ghost = {
+                    let rebuildable = plan
+                        .and_then(|(_, _, block)| {
+                            self.unit_runtime()
+                                .and_then(|runtime| runtime.content.block(block))
+                                .map(|def| def.rebuildable)
+                        })
+                        .unwrap_or(true);
+                    let ghost_blocks = self
+                        .ecs
+                        .0
+                        .get_resource::<CampaignRuntime>()
+                        .map(|campaign| campaign.session.rules.ghost_blocks)
+                        .unwrap_or(true);
+                    ghost_blocks && rebuildable
+                };
+                let team = self
+                    .ecs
+                    .0
+                    .get::<TeamComp>(entity)
+                    .map(|team| team.team)
+                    .unwrap_or(0);
                 let Some(runtime) = self.block_runtime.as_mut() else {
                     break;
                 };
                 if let Some((x, y, block)) =
                     runtime.destroy_building(&mut self.ecs.0, &mut self.grid, entity)
                 {
+                    if ghost
+                        && let Some((tile, rotation, plan_block)) = plan
+                        && let Some(mut campaign) = self.ecs.0.get_resource_mut::<CampaignRuntime>()
+                    {
+                        let data = campaign.session.teams.get(crate::ecs::TeamId(team));
+                        // `checkPrevious`: drop existing plans on this tile.
+                        data.plans
+                            .retain(|plan| plan.x != tile.x() || plan.y != tile.y());
+                        data.plans.push_front(crate::game::teams::BlockPlan {
+                            x: tile.x(),
+                            y: tile.y(),
+                            rotation,
+                            block: plan_block,
+                            config: None,
+                            removed: false,
+                        });
+                    }
                     destroyed += 1;
                     log::debug!("building destroyed at ({x}, {y}) block {}", block.raw());
                     self.push_event(crate::event::SimEvent::BlockBrokenEvent(

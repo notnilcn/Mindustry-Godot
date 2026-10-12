@@ -2017,6 +2017,9 @@ pub struct BlockDef {
     /// `Block.underBullets`: bullets fly over this block unless aimed at it
     /// (`Block.java:120`, `BulletComp.checkUnderBuild`).
     pub under_bullets: bool,
+    /// `Block.rebuildable`: dead blocks leave a rebuild ghost
+    /// (`Block.java:148`, `Logic.java:42-50`).
+    pub rebuildable: bool,
     /// Unit cap contribution.
     pub unit_cap_modifier: i32,
     /// Special flags.
@@ -2353,6 +2356,12 @@ impl BlockDef {
             group: spec.group.unwrap_or(BlockGroup::None),
             priority: spec.priority.unwrap_or(TARGET_PRIORITY_BASE),
             under_bullets: false,
+            // `rebuildable = false` classes: `BaseShield` (BaseShield.java:64),
+            // `NuclearReactor` (:60), `VariableReactor` (VariableReactor.java:39).
+            rebuildable: !matches!(
+                spec.kind,
+                BlockKind::BaseShield | BlockKind::NuclearReactor | BlockKind::VariableReactor
+            ),
             unit_cap_modifier: spec.unit_cap_modifier.unwrap_or(BASE_UNIT_CAP_MODIFIER),
             flags: spec.flags,
             consumes,
