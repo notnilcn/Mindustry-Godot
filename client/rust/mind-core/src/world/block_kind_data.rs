@@ -153,8 +153,8 @@ pub struct FrackerDef {
 pub struct WallCrafterDef {
     /// `WallCrafter.drillTime`.
     pub drill_time: f32,
-    /// `WallCrafter.attribute` index, `-1` = none.
-    pub attribute: i16,
+    /// `WallCrafter.attribute` name (Java `Attribute.sand`).
+    pub attribute: String,
     /// Item output (`WallCrafter.output`).
     pub output: Option<u16>,
 }
@@ -972,7 +972,9 @@ impl BlockKindData {
         if let BlockKindData::WallCrafter(def) = self {
             def.drill_time = drill_time;
             def.output = output;
-            def.attribute = -1;
+            // `WallCrafter.attribute = Attribute.sand` (the name-keyed form the
+            // port's `BlockDef.attributes` uses).
+            def.attribute = "sand".to_owned();
         }
     }
 

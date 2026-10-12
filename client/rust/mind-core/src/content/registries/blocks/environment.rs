@@ -443,6 +443,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
     sink.push(BlockSpec {
         solid: Some(true),
         placeable_liquid: Some(true),
+        attributes: vec![("sand", 1f32)],
         ..spec("stone-wall", BlockKind::StaticWall)
     })?;
 
@@ -479,42 +480,49 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
     sink.push(BlockSpec {
         solid: Some(true),
         placeable_liquid: Some(true),
+        attributes: vec![("sand", 2f32)],
         ..spec("dune-wall", BlockKind::StaticWall)
     })?;
 
     sink.push(BlockSpec {
         solid: Some(true),
         placeable_liquid: Some(true),
+        attributes: vec![("sand", 1f32)],
         ..spec("regolith-wall", BlockKind::StaticWall)
     })?;
 
     sink.push(BlockSpec {
         solid: Some(true),
         placeable_liquid: Some(true),
+        attributes: vec![("sand", 1.5f32)],
         ..spec("yellow-stone-wall", BlockKind::StaticWall)
     })?;
 
     sink.push(BlockSpec {
         solid: Some(true),
         placeable_liquid: Some(true),
+        attributes: vec![("sand", 1f32)],
         ..spec("rhyolite-wall", BlockKind::StaticWall)
     })?;
 
     sink.push(BlockSpec {
         solid: Some(true),
         placeable_liquid: Some(true),
+        attributes: vec![("sand", 0.7f32)],
         ..spec("carbon-wall", BlockKind::StaticWall)
     })?;
 
     sink.push(BlockSpec {
         solid: Some(true),
         placeable_liquid: Some(true),
+        attributes: vec![("sand", 0.5f32)],
         ..spec("ferric-stone-wall", BlockKind::StaticWall)
     })?;
 
     sink.push(BlockSpec {
         solid: Some(true),
         placeable_liquid: Some(true),
+        attributes: vec![("sand", 1.2f32)],
         ..spec("beryllic-stone-wall", BlockKind::StaticWall)
     })?;
 
@@ -539,6 +547,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
     sink.push(BlockSpec {
         solid: Some(true),
         placeable_liquid: Some(true),
+        attributes: vec![("sand", 1.5f32)],
         ..spec("red-stone-wall", BlockKind::StaticWall)
     })?;
 
@@ -551,6 +560,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
     sink.push(BlockSpec {
         solid: Some(true),
         placeable_liquid: Some(true),
+        attributes: vec![("sand", 2f32)],
         ..spec("sand-wall", BlockKind::StaticWall)
     })?;
 

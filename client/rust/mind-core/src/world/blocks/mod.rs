@@ -13,6 +13,7 @@ pub mod heat;
 pub mod liquid;
 pub mod payloads;
 pub mod power;
+pub mod production;
 pub mod storage;
 pub mod tile_bitmask;
 pub mod units;
@@ -30,6 +31,7 @@ pub fn default_registry(content: &ContentRegistry) -> BehaviorRegistry {
     heat::register(&mut registry, content);
     power::register(&mut registry, content);
     units::behavior::register(&mut registry, content);
+    production::register(&mut registry, content);
     defense::register(&mut registry, content);
     registry
 }

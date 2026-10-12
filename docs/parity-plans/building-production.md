@@ -510,6 +510,27 @@ in-engine seam loads a unit payload into a reconstructor).
 - **In-engine:** blocked. The imported profile has no launchable Erekir sector (ledger
   note). Verify headless only.
 
+**Status 2026-10-12:** done (headless per the plan). `refresh_drill_ore` gained the facing
+scans: `beam_facing_scan` (Java `BeamDrill.updateFacing`: copy the facing edge via
+`Tile.nearbySide`, step `range`, take the first solid wall's `wallDrop` with
+`hardness <= tier` and not blocked) and `wall_crafter_efficiency` (Java
+`WallCrafter.getEfficiency`: the summed named attribute of the tiles directly in front),
+stored on `DrillState.facing_amount`/`facing_item`/`facing_drops`. `BeamDrillBehavior::update_tile`
+ports `BeamDrill.updateTile` (progress = `edelta * lerp(1, 2.5, optionalEfficiency)`, one item per
+valid facing edge per `drillTime`, dump timer) and the new `WallCrafterBehavior` ports
+`WallCrafter.updateTile` (progress = `edelta * eff`, `offload`/`dump` per `drillTime`).
+`valid_place_at` applies both `canPlaceOn` checks, `SimCommand::Rotate` re-runs
+`refresh_drill_ore`, and `world/blocks/production.rs::register` supplies the item-hardness table to
+the plasma bores. Two content gaps surfaced by the tests: the four `ore-wall-*` blocks were missing
+Java `StaticWall.solid` (so no facing scan could ever see them) and the vanilla walls were missing
+`Attribute.sand` (`stone-wall` 1, `dune-wall` 2, `sand-wall` 2, …); both are now ported and the
+golden was regenerated for the 4 `solid` flags (audit-verified). Tests:
+`sim::production_tests::plasma_bore_mines_wall_ore` and
+`sim::production_tests::cliff_crusher_makes_sand_from_sand_walls`. Evidence:
+`runs/20261012-session4/PAR-0079-evidence.json`. Deviation recorded: Java rescans the facing tiles
+every tick; the port scans at placement/rotation (`refresh_drill_ore`) and reads the cached facing
+state in `update_tile`.
+
 ---
 
 ## 6. PAR-0089: sublimate fires on any trace of fuel and never consumes it

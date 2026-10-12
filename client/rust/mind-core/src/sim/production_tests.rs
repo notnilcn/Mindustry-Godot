@@ -570,6 +570,93 @@ fn unit_factory_config_selects_plan() {
     assert!(spawned_unit(&sim, content_flare), "flare produced");
 }
 
+/// PAR-0079: a plasma bore mines the Erekir wall ore in front of it
+/// (`BeamDrill.updateFacing` + `canPlaceOn` scan the facing edge, not the
+/// footprint).
+#[test]
+fn plasma_bore_mines_wall_ore() {
+    let mut sim = runtime_sim();
+    // `ore-wall-beryllium` two tiles in front of the facing edge (rotation 0);
+    // `BeamDrill.canPlaceOn` requires it before the block can be placed.
+    let ore =
+        crate::content::BlockId::new(sim.world_block_id("ore-wall-beryllium").expect("ore wall"));
+    sim.grid.tiles.get_mut(9, 5).block = ore;
+    sim.grid.tiles.get_mut(9, 6).block = ore;
+    let _source = place(&mut sim, "power-source", 4, 5);
+    let bore = place(&mut sim, "plasma-bore", 5, 5);
+    {
+        let crate::sim::Sim {
+            grid,
+            ecs,
+            block_runtime,
+            ..
+        } = &mut sim;
+        let content = block_runtime.as_ref().expect("runtime").content();
+        crate::world::behavior::production::refresh_drill_ore(&mut ecs.0, grid, content, bore);
+    }
+    let state = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::DrillState>(bore)
+        .expect("drill state");
+    assert_eq!(
+        state.facing_amount, 2.0,
+        "two facing edges see the wall ore"
+    );
+
+    let beryllium = item(&sim, "beryllium");
+    for _ in 0..400 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        stored_item(&sim, bore, beryllium) > 0,
+        "plasma bore produced beryllium"
+    );
+}
+
+/// PAR-0079: a cliff crusher turns the sand attribute of the walls in front into
+/// sand (`WallCrafter.getEfficiency`/`updateTile`).
+#[test]
+fn cliff_crusher_makes_sand_from_sand_walls() {
+    let mut sim = runtime_sim();
+    // `sand-wall` carries `Attribute.sand = 2` (Java Blocks.java);
+    // `WallCrafter.canPlaceOn` requires it before the block can be placed.
+    let wall = crate::content::BlockId::new(sim.world_block_id("sand-wall").expect("sand-wall"));
+    sim.grid.tiles.get_mut(7, 5).block = wall;
+    sim.grid.tiles.get_mut(7, 6).block = wall;
+    let _source = place(&mut sim, "power-source", 4, 5);
+    let crusher = place(&mut sim, "cliff-crusher", 5, 5);
+    {
+        let crate::sim::Sim {
+            grid,
+            ecs,
+            block_runtime,
+            ..
+        } = &mut sim;
+        let content = block_runtime.as_ref().expect("runtime").content();
+        crate::world::behavior::production::refresh_drill_ore(&mut ecs.0, grid, content, crusher);
+    }
+    let eff = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::DrillState>(crusher)
+        .map(|state| state.facing_amount)
+        .unwrap_or(0.0);
+    assert_eq!(eff, 4.0, "two facing edges * sand 2");
+
+    let sand = item(&sim, "sand");
+    for _ in 0..40 {
+        sim.tick().expect("tick");
+    }
+    for _ in 0..400 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        stored_item(&sim, crusher, sand) > 0,
+        "cliff crusher produced sand"
+    );
+}
+
 /// Whether a unit of type `unit` exists in the sim.
 fn spawned_unit(sim: &Sim, unit: crate::content::UnitTypeId) -> bool {
     sim.ecs.0.iter_entities().any(|entity| {

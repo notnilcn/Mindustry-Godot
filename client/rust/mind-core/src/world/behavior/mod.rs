@@ -580,8 +580,11 @@ pub fn default_behavior(def: &BlockDef) -> Arc<dyn BuildingBehavior> {
         | K::AttributeCrafter
         | K::Separator
         | K::ItemIncinerator => Arc::new(production::CrafterBehavior),
-        K::Drill | K::BurstDrill | K::WallCrafter => Arc::new(production::DrillBehavior),
-        K::BeamDrill => Arc::new(production::BeamDrillBehavior),
+        K::Drill | K::BurstDrill => Arc::new(production::DrillBehavior),
+        // Erekir wall miners (PAR-0079): the vanilla plasma bores are registered
+        // with the item-hardness table in `blocks::default_registry`.
+        K::BeamDrill => Arc::new(production::BeamDrillBehavior::default()),
+        K::WallCrafter => Arc::new(production::WallCrafterBehavior),
         K::Pump => Arc::new(production::PumpBehavior),
         K::SolidPump | K::Fracker => Arc::new(production::SolidPumpBehavior),
         K::Incinerator => Arc::new(production::IncineratorBehavior),

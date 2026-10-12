@@ -783,6 +783,17 @@ impl Sim {
                     building.rotation = new_rot;
                 }
                 crate::world::update::no_sleep(&mut self.ecs.0, entity);
+                // Rotation matters for the facing scans (`BeamDrill.updateFacing`
+                // / `WallCrafter.getEfficiency`; PAR-0079 §5).
+                if let Some(runtime) = self.block_runtime.as_ref() {
+                    let content = runtime.content();
+                    crate::world::behavior::production::refresh_drill_ore(
+                        &mut self.ecs.0,
+                        &self.grid,
+                        content,
+                        entity,
+                    );
+                }
                 self.commands_applied = self.commands_applied.wrapping_add(1);
                 return Ok(());
             }

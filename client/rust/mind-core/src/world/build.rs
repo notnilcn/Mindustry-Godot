@@ -229,8 +229,50 @@ pub fn valid_place_at(
     {
         return false;
     }
+    // `BeamDrill.canPlaceOn` / `WallCrafter.canPlaceOn` (PAR-0079): at least one
+    // facing edge must find wall ore in range / a sand-attribute wall in front.
+    match kind_data_for(table, block) {
+        Some(crate::world::BlockKindData::BeamDrill(beam)) => {
+            let hardness = |item: crate::content::ItemId| {
+                content.item(item).map(|item| item.hardness).unwrap_or(0)
+            };
+            let (_, amount, _) = crate::world::behavior::production::beam_facing_scan(
+                table,
+                grid,
+                crate::world::TilePos::new(x as i16, y as i16),
+                size,
+                rot,
+                beam.range,
+                beam.tier,
+                &beam.blocked_items,
+                hardness,
+            );
+            if amount == 0 {
+                return false;
+            }
+        }
+        Some(crate::world::BlockKindData::WallCrafter(crafter)) => {
+            let eff = crate::world::behavior::production::wall_crafter_efficiency(
+                table,
+                grid,
+                crate::world::TilePos::new(x as i16, y as i16),
+                size,
+                rot,
+                &crafter.attribute,
+            );
+            if eff <= 0.0 {
+                return false;
+            }
+        }
+        _ => {}
+    }
     let _ = (table, can_place_on);
     true
+}
+
+/// Resolved family knobs for placement checks (`None` without a table entry).
+fn kind_data_for(table: &BlockTable, block: BlockId) -> Option<crate::world::BlockKindData> {
+    table.get(block).map(|instance| instance.kind_data.clone())
 }
 
 /// `Pump.canPlaceOn`: every pumpable tile of the footprint drops the same
