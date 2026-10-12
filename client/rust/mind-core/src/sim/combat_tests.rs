@@ -547,3 +547,182 @@ fn commanded_dagger_reaches_target() {
         "commanded dagger reached the target ({dist} px)"
     );
 }
+
+/// PAR-0091: a deposited water puddle applies `wet` to a unit standing in it
+/// and evaporates to nothing on a dry floor (live `update_puddles`).
+#[test]
+fn live_puddle_evaporates() {
+    use crate::combat::puddles;
+    let mut sim = live_sim(16);
+    let (water, wet) = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        (
+            content.liquid_id("water").expect("water"),
+            content.status_id("wet").expect("wet"),
+        )
+    };
+    {
+        let world = &mut sim.ecs.0;
+        let mut runtime = world
+            .remove_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+            .expect("runtime");
+        let entity = puddles::deposit(
+            world,
+            &sim.grid.tiles,
+            &runtime.content,
+            5,
+            5,
+            water,
+            50.0,
+            &mut runtime.rng,
+        );
+        assert!(entity.is_some(), "water deposited");
+        world.insert_non_send(runtime);
+    }
+    let dagger = sim
+        .spawn_live_unit("dagger", 1, 42.0, 42.0, 0.0)
+        .expect("dagger");
+    for _ in 0..40 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        sim.ecs
+            .0
+            .get::<crate::entities::comp::unit::comp::StatusComp>(dagger)
+            .is_some_and(|status| status.has_effect_of(wet)),
+        "the puddle applied `wet` to the unit standing in it"
+    );
+    for _ in 0..2000 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        puddles::find_at(&sim.ecs.0, 5, 5).is_none(),
+        "the water puddle evaporated"
+    );
+}
+
+/// PAR-0091: a fire damages the building on its tile and burns out live
+/// (`update_fires` in the tick).
+#[test]
+fn live_fire_burns_building() {
+    let mut sim = live_sim(16);
+    let wall = place(&mut sim, 5, 5, "copper-wall", 1);
+    let start = health(&sim, wall).expect("wall health");
+    let mut rng = crate::determinism::SimRng::new(3);
+    assert!(
+        crate::combat::fires::create(&mut sim.ecs.0, 5, 5, &mut rng).is_some(),
+        "fire created"
+    );
+    for _ in 0..300 {
+        sim.tick().expect("tick");
+    }
+    let end = health(&sim, wall);
+    assert!(
+        end.is_none_or(|hp| hp < start),
+        "the fire damaged the wall ({start} -> {end:?})"
+    );
+}
+
+/// PAR-0091: an `incendChance` bullet hit creates a fire at the hit tile
+/// (`BulletType.createIncend` via `hit_bullet`).
+#[test]
+fn incend_bullet_creates_fire() {
+    use crate::content::BulletKind;
+    use crate::content::registries::bullets::BulletDef;
+    let mut sim = live_sim(16);
+    {
+        let world = &mut sim.ecs.0;
+        let mut runtime = world
+            .remove_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+            .expect("runtime");
+        let mut def = BulletDef::new(BulletKind::Basic);
+        def.speed = 0.0;
+        def.lifetime = 100.0;
+        def.incend_chance = 1.0;
+        def.incend_amount = 1;
+        def.incend_spread = 0.0;
+        let id = runtime.content.add_bullet(def).expect("add bullet");
+        let audio = crate::audio::AudioSinkRes::noop();
+        let mut spawned = Vec::new();
+        {
+            let crate::sim::unit_runtime::UnitRuntime {
+                content,
+                grid,
+                rng,
+                fx,
+                seq,
+                ..
+            } = &mut runtime;
+            let mut ctx = crate::combat::bullet::CombatCtx {
+                world,
+                content,
+                grid,
+                rng,
+                fx: fx.as_ref(),
+                audio: &audio,
+                seq,
+                spawned: &mut spawned,
+            };
+            let spawn = crate::combat::BulletSpawn {
+                def: id,
+                x: 42.0,
+                y: 42.0,
+                angle: 0.0,
+                ..crate::combat::BulletSpawn::default()
+            };
+            let entity = ctx.spawn(&spawn).expect("bullet");
+            crate::combat::bullet::hit_bullet(&mut ctx, entity, 42.0, 42.0, false);
+        }
+        world.insert_non_send(runtime);
+    }
+    assert!(
+        crate::combat::fires::find_at(&sim.ecs.0, 5, 5).is_some(),
+        "the incend bullet left a fire on the hit tile"
+    );
+}
+
+/// PAR-0091: a destroyed liquid container spills its contents as puddles
+/// (`BuildingComp.splashLiquid` via `resolve_deaths`, `damageExplosions` on).
+#[test]
+fn live_destroyed_liquid_container_splashes() {
+    let mut sim = live_sim(24);
+    let tank = place(&mut sim, 10, 10, "liquid-tank", 1);
+    let water = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .liquid_id("water")
+        .expect("water");
+    {
+        let Some(mut module) = sim
+            .ecs
+            .0
+            .get_mut::<crate::world::modules::LiquidModule>(tank)
+        else {
+            return; // no liquid module fixture
+        };
+        module.liquids[water.index()] = 40.0;
+        module.current_amount = 40.0;
+    }
+    sim.ecs
+        .0
+        .get_mut::<Health>(tank)
+        .expect("tank health")
+        .health = 0.0;
+    sim.tick().expect("tick");
+    assert!(
+        sim.ecs.0.get_entity(tank).is_err(),
+        "the tank was destroyed"
+    );
+    let puddles = sim
+        .ecs
+        .0
+        .iter_entities()
+        .filter(|entity| {
+            entity
+                .get::<crate::combat::puddles::PuddleState>()
+                .is_some()
+        })
+        .count();
+    assert!(puddles > 0, "the tank spilled water puddles ({puddles})");
+}

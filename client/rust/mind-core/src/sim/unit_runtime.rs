@@ -453,6 +453,56 @@ impl Sim {
                 .collect();
             dead.sort_unstable_by_key(|(seq, entity)| (*seq, entity.index()));
             for (_, entity) in dead {
+                // `BuildingComp.onDestroyed` -> `splashLiquid`: a liquid
+                // container spills `(amount/4).clamp(0,10)` per deposit, up to
+                // `(amount/5).clamp(0,30)` deposits scattered over the block
+                // footprint (`rules.damageExplosions` gate).
+                let damage_explosions = self
+                    .ecs
+                    .0
+                    .get_resource::<CampaignRuntime>()
+                    .map(|campaign| campaign.session.rules.damage_explosions)
+                    .unwrap_or(true);
+                let spill: Vec<(crate::content::LiquidId, f32)> = if damage_explosions {
+                    self.ecs
+                        .0
+                        .get::<crate::world::modules::LiquidModule>(entity)
+                        .map(|module| {
+                            module
+                                .liquids
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, amount)| **amount > 0.0)
+                                .map(|(id, amount)| {
+                                    (crate::content::LiquidId::new(id as u16), *amount)
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+                let (center, size) = self
+                    .ecs
+                    .0
+                    .get::<crate::entities::comp::Building>(entity)
+                    .map(|building| {
+                        let size = self
+                            .ecs
+                            .0
+                            .get_resource::<crate::world::BlockTable>()
+                            .and_then(|table| table.instance(building.block))
+                            .map(|instance| instance.def.size)
+                            .unwrap_or(1);
+                        (
+                            crate::world::BuildHarness::tile_center(
+                                building.tile.x() as i32,
+                                building.tile.y() as i32,
+                            ),
+                            size,
+                        )
+                    })
+                    .unwrap_or(((0.0, 0.0), 1));
                 let Some(runtime) = self.block_runtime.as_mut() else {
                     break;
                 };
@@ -464,6 +514,40 @@ impl Sim {
                     self.push_event(crate::event::SimEvent::BlockBrokenEvent(
                         crate::event::BlockBrokenEvent { x, y, block },
                     ));
+                    if !spill.is_empty()
+                        && let Some(mut unit_runtime) = self.ecs.0.remove_non_send::<UnitRuntime>()
+                    {
+                        let spread = size as f32 * 4.0;
+                        for (liquid, amount) in &spill {
+                            let splash = (amount / 4.0).clamp(0.0, 10.0);
+                            let count = (amount / 5.0).clamp(0.0, 30.0) as i32;
+                            for _ in 0..count {
+                                let px = center.0
+                                    + unit_runtime.rng.range(
+                                        crate::determinism::RngStream::Sim,
+                                        -spread,
+                                        spread,
+                                    );
+                                let py = center.1
+                                    + unit_runtime.rng.range(
+                                        crate::determinism::RngStream::Sim,
+                                        -spread,
+                                        spread,
+                                    );
+                                let _ = crate::combat::puddles::deposit(
+                                    &mut self.ecs.0,
+                                    &self.grid.tiles,
+                                    &unit_runtime.content,
+                                    crate::world::WorldGrid::to_tile(px) as i16,
+                                    crate::world::WorldGrid::to_tile(py) as i16,
+                                    *liquid,
+                                    splash,
+                                    &mut unit_runtime.rng,
+                                );
+                            }
+                        }
+                        self.ecs.0.insert_non_send(unit_runtime);
+                    }
                 }
             }
             if destroyed > 0 {
@@ -541,6 +625,35 @@ impl Sim {
             return;
         };
         runtime.refresh_grid(&grid);
+    }
+
+    /// `Groups.fires`/`Groups.puddles` update half of `Logic.updateEntities`:
+    /// advances every live fire and puddle one tick against the authoritative
+    /// tile grid (`Sim.grid`; the runtime snapshot is not on this path).
+    ///
+    /// `water_attr` is `state.envAttrs.get(Attribute.water)` (plan 12); `0.0`
+    /// until weather lands (PAR-0127).
+    pub fn update_fires_and_puddles(&mut self) {
+        let Some(mut runtime) = self.ecs.0.remove_non_send::<UnitRuntime>() else {
+            return;
+        };
+        let fx = runtime.fx.clone();
+        crate::combat::fires::update_fires(
+            &mut self.ecs.0,
+            &mut self.grid.tiles,
+            &runtime.content,
+            &mut runtime.rng,
+            fx.as_ref(),
+            0.0,
+        );
+        crate::combat::puddles::update_puddles(
+            &mut self.ecs.0,
+            &mut self.grid.tiles,
+            &runtime.content,
+            &mut runtime.rng,
+            fx.as_ref(),
+        );
+        self.ecs.0.insert_non_send(runtime);
     }
 
     /// Deterministic digest of the live unit runtime; empty when not installed.

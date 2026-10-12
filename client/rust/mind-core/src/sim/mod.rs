@@ -531,6 +531,10 @@ impl Sim {
         self.pump_io(IoSet::Apply);
         self.triggers.fire(Trigger::Update, &mut self.ecs.0);
         self.schedule.run(&mut self.ecs.0);
+        // `Groups.fires`/`Groups.puddles.update()` (`Logic.updateEntities`):
+        // fires burn/spread and puddles evaporate/apply statuses every tick
+        // (PAR-0091). Damage they deal is picked up by `resolve_deaths` below.
+        self.update_fires_and_puddles();
         // `BuilderComp.update` (PAR-0098): player build plans drive the
         // construct blocks after the entity update pass.
         self.update_builders();

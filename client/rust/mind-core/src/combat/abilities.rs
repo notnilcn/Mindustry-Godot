@@ -1155,6 +1155,7 @@ mod tests {
             accepting: 0.0,
             update_time: 0.0,
             last_ripple: 0.0,
+            effect_time: 0.0,
         });
         update_unit_abilities(&mut harness.build.world, &harness.build.content, unit);
         let health = harness.build.world.get::<Health>(unit).unwrap().health;
