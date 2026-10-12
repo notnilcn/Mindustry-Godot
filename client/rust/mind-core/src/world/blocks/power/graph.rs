@@ -185,7 +185,8 @@ impl PowerGraph {
             let requested = if params.buffered {
                 (1.0 - status) * params.capacity
             } else {
-                params.usage * if params.enabled { 1.0 } else { 0.0 }
+                // `ConsumePower.requestedPower`: `usage * (entity.shouldConsume() ? 1 : 0)`.
+                params.usage * if params.should_consume { 1.0 } else { 0.0 }
             };
             needed += requested * (delta * params.time_scale);
         }

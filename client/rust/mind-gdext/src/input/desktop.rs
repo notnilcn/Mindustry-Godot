@@ -1110,10 +1110,41 @@ impl DesktopBridge {
                 Ok(enabled) => enabled,
                 Err(_) => return,
             };
+            // `SwitchBlock.SwitchBuild.clickSound.at(this)`
+            // (`SwitchBlock.java:58-62`; T9): the UI click goes through the
+            // `MindUi` signal like every other UI sound (plan 18).
+            if let Some(mut ui) = host.try_get_node_as::<godot::classes::Node>("/root/MindUi") {
+                let name = GString::from("click");
+                ui.call("play_ui_sound", &[name.to_variant()]);
+            }
             self.emit_action(RemoteAction::Configure {
                 x: tx,
                 y: ty,
                 value: mind_core::world::config::ConfigValue::Bool(!enabled),
+            });
+            return;
+        }
+        // `Door.tapped` (`Door.java:148-154`, T13): a tap toggles unless a unit
+        // stands in an open door; `Door.configurable` is false upstream, so no
+        // panel opens. The 60-tick throttle lives in `DoorBehavior::configured`.
+        if matches!(
+            self.block_kind_at(x, y),
+            Some(BlockKind::Door | BlockKind::AutoDoor)
+        ) {
+            let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+                return;
+            };
+            let Some(host) = self.host.clone() else {
+                return;
+            };
+            let open = host.bind().building_config_json(x, y) == "true";
+            if open && host.bind().building_has_unit_overlap(x, y) {
+                return;
+            }
+            self.emit_action(RemoteAction::Configure {
+                x: tx,
+                y: ty,
+                value: mind_core::world::config::ConfigValue::Bool(!open),
             });
             return;
         }
@@ -1468,14 +1499,21 @@ impl DesktopBridge {
         if def.kind == BlockKind::SwitchBlock {
             return None;
         }
-        // `Reconstructor.buildConfiguration` lists the *held payload's* output
-        // unit commands; the static kinds table cannot express it, so no panel
-        // opens (the command is still configurable through
-        // `configure_building(x, y, "content", "<command>")`).
-        if def.kind == BlockKind::Reconstructor {
-            return None;
-        }
+        // `Reconstructor.buildConfiguration` (`Reconstructor.java:215-240`):
+        // with `showAllCommands = true` it lists every unit command (the held
+        // payload's command subset needs a payload-model this panel cannot see).
+        let reconstructor = def.kind == BlockKind::Reconstructor;
         let mut options: Vec<serde_json::Value> = Vec::new();
+        if reconstructor {
+            for entry in content.entries(ContentType::UnitCommand) {
+                if let Some(name) = entry.name {
+                    options.push(serde_json::json!({
+                        "name": name,
+                        "label": format!("command.{name}"),
+                    }));
+                }
+            }
+        }
         // A behavior that declares its config kinds (`Block.config(...)`) owns
         // the picker; undeclared blocks keep the item/liquid-container fallback.
         let declared = guard.block_config_kinds(block);
@@ -1574,6 +1612,24 @@ impl DesktopBridge {
         } else {
             None
         };
+        // Reconstructor current command (`command == item` checked state,
+        // `Reconstructor.java:237-240`): the content config id resolved to a name.
+        let current_command = if reconstructor {
+            serde_json::from_str::<serde_json::Value>(&guard.building_config_json(x, y).to_string())
+                .ok()
+                .filter(|value| value.get("type").and_then(|kind| kind.as_str()) == Some("content"))
+                .and_then(|value| value.get("id").and_then(|id| id.as_u64()))
+                .and_then(|id| {
+                    content
+                        .entries(ContentType::UnitCommand)
+                        .into_iter()
+                        .find(|entry| u64::from(entry.id) == id)
+                        .and_then(|entry| entry.name)
+                        .map(str::to_owned)
+                })
+        } else {
+            None
+        };
         let mut spec = serde_json::json!({
             "title": format!("block.{}.name", def.name),
             "block": def.name,
@@ -1585,6 +1641,9 @@ impl DesktopBridge {
             "options": options,
         });
         if let Some(current) = current_text {
+            spec["current"] = serde_json::Value::from(current);
+        }
+        if let Some(current) = current_command {
             spec["current"] = serde_json::Value::from(current);
         }
         if let Some(current) = current_color {

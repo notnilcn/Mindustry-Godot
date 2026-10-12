@@ -495,6 +495,7 @@ fn message_block_accepts_text_config() {
 #[test]
 fn unit_factory_config_selects_plan() {
     let mut sim = runtime_sim();
+    let _source = place(&mut sim, "power-source", 3, 5);
     let factory = place(&mut sim, "air-factory", 5, 5);
     let silicon = item(&sim, "silicon");
     let content_flare = sim
@@ -665,6 +666,520 @@ fn cliff_crusher_makes_sand_from_sand_walls() {
         stored_item(&sim, crusher, sand) > 0,
         "cliff crusher produced sand"
     );
+}
+
+/// T1 (`Reconstructor.shouldConsume`, `Reconstructor.java:376-379` + the power
+/// half of `BuildingComp.updateConsumption`, `BuildingComp.java:1955-2005`): a
+/// reconstructor with items loaded but no payload draws no power; once a payload
+/// is handed over it requests its `consumePower(3f)` per tick
+/// (`ConsumePower.usage` is per tick in Java).
+#[test]
+fn reconstructor_idle_requests_no_power() {
+    let mut sim = runtime_sim();
+    let _source = place(&mut sim, "power-source", 3, 5);
+    let rig = place(&mut sim, "additive-reconstructor", 5, 5);
+    let (silicon, graphite) = (item(&sim, "silicon"), item(&sim, "graphite"));
+    {
+        let world = &mut sim.ecs.0;
+        if let Some(mut items) = world.get_mut::<crate::world::modules::ItemModule>(rig) {
+            items.add(silicon, 40, 80);
+            items.add(graphite, 40, 80);
+        }
+    }
+    for _ in 0..10 {
+        sim.tick().expect("tick");
+    }
+    let (efficiency, should) = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::Building>(rig)
+        .map(|building| (building.efficiency, building.should_consume))
+        .expect("building");
+    assert!(!should, "no payload -> shouldConsume false");
+    assert_eq!(efficiency, 0.0, "idle reconstructor efficiency");
+
+    let graph = sim
+        .ecs
+        .0
+        .get::<crate::world::modules::PowerModule>(rig)
+        .map(|module| module.graph)
+        .unwrap_or_default();
+    let needed = sim
+        .ecs
+        .0
+        .resource::<crate::world::blocks::power::PowerGrids>()
+        .graph(graph)
+        .map(|graph| graph.get_power_needed(&sim.ecs.0, 1.0))
+        .unwrap_or(-1.0);
+    assert_eq!(needed, 0.0, "idle reconstructor requests no power");
+
+    // Hand over a dagger payload; the graph then requests 3/tick.
+    let dagger = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .unit_id("dagger")
+        .expect("dagger");
+    let inst = sim
+        .ecs
+        .0
+        .resource::<crate::world::block::BlockTable>()
+        .instance(
+            sim.ecs
+                .0
+                .get::<crate::entities::comp::Building>(rig)
+                .expect("building")
+                .block,
+        )
+        .expect("instance");
+    inst.behavior.handle_payload(
+        &mut sim.ecs.0,
+        rig,
+        rig,
+        crate::world::behavior::PayloadRef {
+            entity: None,
+            content: dagger.raw(),
+            is_block: false,
+        },
+    );
+    for _ in 0..10 {
+        sim.tick().expect("tick");
+    }
+    let should = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::Building>(rig)
+        .map(|building| building.should_consume)
+        .unwrap_or(false);
+    assert!(should, "payload -> shouldConsume true");
+    let needed = sim
+        .ecs
+        .0
+        .resource::<crate::world::blocks::power::PowerGrids>()
+        .graph(graph)
+        .map(|graph| graph.get_power_needed(&sim.ecs.0, 1.0))
+        .unwrap_or(-1.0);
+    assert_eq!(needed, 3.0, "constructing reconstructor requests 3/tick");
+}
+
+/// T1 (`GenericCrafter.shouldConsume`, `GenericCrafter.java:205-235`): a
+/// graphite press with 10/10 graphite stored keeps its 4 coal (before the fix
+/// the press kept crafting and consuming coal).
+#[test]
+fn full_crafter_stops_consuming() {
+    let mut sim = runtime_sim();
+    let press = place(&mut sim, "graphite-press", 5, 5);
+    let (graphite, coal) = (item(&sim, "graphite"), item(&sim, "coal"));
+    {
+        let world = &mut sim.ecs.0;
+        if let Some(mut items) = world.get_mut::<crate::world::modules::ItemModule>(press) {
+            items.add(graphite, 10, 10);
+            items.add(coal, 4, 10);
+        }
+    }
+    for _ in 0..200 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        stored_item(&sim, press, coal),
+        4,
+        "coal untouched while the output is full"
+    );
+    let should = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::Building>(press)
+        .map(|building| building.should_consume)
+        .unwrap_or(true);
+    assert!(!should, "full output -> shouldConsume false");
+}
+
+/// T1 (`Drill.shouldConsume`, `Drill.java:246-249`): a mechanical drill with a
+/// full 10-item buffer idles (efficiency 0) even though it has ore to mine.
+#[test]
+fn full_drill_stops() {
+    let mut sim = runtime_sim();
+    set_floor(&mut sim, 5, 5, "ore-copper");
+    set_floor(&mut sim, 6, 5, "ore-copper");
+    let drill = place(&mut sim, "mechanical-drill", 5, 5);
+    let copper = item(&sim, "copper");
+    {
+        let world = &mut sim.ecs.0;
+        if let Some(mut items) = world.get_mut::<crate::world::modules::ItemModule>(drill) {
+            items.add(copper, 10, 10);
+        }
+    }
+    for _ in 0..30 {
+        sim.tick().expect("tick");
+    }
+    let (efficiency, should, total) = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::Building>(drill)
+        .map(|building| (building.efficiency, building.should_consume, 0))
+        .expect("building");
+    assert!(!should, "full buffer -> shouldConsume false");
+    assert_eq!(efficiency, 0.0, "full drill efficiency");
+    assert_eq!(stored_item(&sim, drill, copper), 10, "buffer stays full");
+    let _ = total;
+}
+
+/// T2 (`UnitFactory.updateTile`, `UnitFactory.java:400-450`): an unpowered
+/// ground factory produces nothing even with the plan's items loaded; powered,
+/// one dagger completes in the plan's 900 ticks and consumes 10 silicon + 10
+/// lead (`Blocks.java:6305`).
+#[test]
+fn unit_factory_needs_power() {
+    let mut sim = runtime_sim();
+    let factory = place(&mut sim, "ground-factory", 5, 5);
+    let (silicon, lead) = (item(&sim, "silicon"), item(&sim, "lead"));
+    {
+        let world = &mut sim.ecs.0;
+        if let Some(mut items) = world.get_mut::<crate::world::modules::ItemModule>(factory) {
+            items.add(silicon, 10, 60);
+            items.add(lead, 10, 60);
+        }
+    }
+    for _ in 0..3000 {
+        sim.tick().expect("tick");
+    }
+    let dagger = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .unit_id("dagger")
+        .expect("dagger");
+    assert!(
+        !spawned_unit(&sim, dagger),
+        "unpowered factory produces nothing"
+    );
+    assert_eq!(stored_item(&sim, factory, silicon), 10, "items untouched");
+
+    let _source = place(&mut sim, "power-source", 3, 5);
+    let start = sim.tick_count();
+    for _ in 0..1500 {
+        sim.tick().expect("tick");
+        if spawned_unit(&sim, dagger) {
+            break;
+        }
+    }
+    let elapsed = sim.tick_count() - start;
+    assert!(
+        spawned_unit(&sim, dagger),
+        "powered factory built the dagger"
+    );
+    assert!(
+        (900..=1000).contains(&elapsed),
+        "dagger build time {elapsed} ticks (plan time 900)"
+    );
+    assert_eq!(stored_item(&sim, factory, silicon), 0, "silicon consumed");
+    assert_eq!(stored_item(&sim, factory, lead), 0, "lead consumed");
+}
+
+/// T3 (`Reconstructor.java:346-352`): the command configured on a
+/// reconstructor is given to the upgraded unit's command state; without one the
+/// unit falls back to its type's `defaultCommand`.
+#[test]
+fn reconstructor_applies_command() {
+    let mut sim = runtime_sim();
+    // Player-team units take the `Command` controller (`select_team_controller`).
+    if let Some(mut rules) = sim
+        .ecs
+        .0
+        .get_resource_mut::<crate::world::limits::BuildRules>()
+    {
+        rules.default_team = 1;
+    }
+    let _source = place(&mut sim, "power-source", 3, 5);
+    let rig = place(&mut sim, "additive-reconstructor", 5, 5);
+    let rebuild = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .get_by_name(crate::content::ContentType::UnitCommand, "rebuild")
+        .map(|reference| crate::content::UnitCommandId::new(reference.id))
+        .expect("rebuild command");
+    configure(
+        &mut sim,
+        5,
+        5,
+        crate::determinism::ConfigValue::Content("rebuild".to_owned()),
+    );
+
+    let dagger = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .unit_id("dagger")
+        .expect("dagger");
+    let mace = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .unit_id("mace")
+        .expect("mace");
+    let inst = sim
+        .ecs
+        .0
+        .resource::<crate::world::block::BlockTable>()
+        .instance(
+            sim.ecs
+                .0
+                .get::<crate::entities::comp::Building>(rig)
+                .expect("building")
+                .block,
+        )
+        .expect("instance");
+    inst.behavior.handle_payload(
+        &mut sim.ecs.0,
+        rig,
+        rig,
+        crate::world::behavior::PayloadRef {
+            entity: None,
+            content: dagger.raw(),
+            is_block: false,
+        },
+    );
+    {
+        let (silicon, graphite) = (item(&sim, "silicon"), item(&sim, "graphite"));
+        let world = &mut sim.ecs.0;
+        if let Some(mut items) = world.get_mut::<crate::world::modules::ItemModule>(rig) {
+            items.add(silicon, 40, 80);
+            items.add(graphite, 40, 80);
+        }
+    }
+    let mut spawned = None;
+    for _ in 0..1500 {
+        sim.tick().expect("tick");
+        spawned = sim.ecs.0.iter_entities().find_map(|entity| {
+            entity
+                .get::<crate::entities::comp::unit::UnitTypeComp>()
+                .filter(|comp| comp.type_id == mace)
+                .map(|_| entity.id())
+        });
+        if spawned.is_some() {
+            break;
+        }
+    }
+    let entity = spawned.expect("mace spawned");
+    let command = sim
+        .ecs
+        .0
+        .get::<crate::ai::ControllerSlot>(entity)
+        .and_then(|slot| slot.command);
+    assert_eq!(command, Some(rebuild), "configured command applied");
+}
+
+/// T11 (`PowerNode.placed`, `PowerNode.java:400-411`): a freshly placed power
+/// node grabs its potential links (the adjacent generator).
+#[test]
+fn node_autolinks_on_place() {
+    let mut sim = runtime_sim();
+    let generator = place(&mut sim, "combustion-generator", 5, 5);
+    let node = place(&mut sim, "power-node", 9, 5);
+    let generator_pack = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::Building>(generator)
+        .map(|building| building.tile.pack())
+        .expect("generator building");
+    let links = sim
+        .ecs
+        .0
+        .get::<crate::world::modules::PowerModule>(node)
+        .map(|module| module.links.clone())
+        .unwrap_or_default();
+    assert!(
+        links.contains(&generator_pack),
+        "node linked to the generator: {links:?}"
+    );
+}
+
+/// T11 (`BuildingComp.placed`, `BuildingComp.java:1359-1370`): a consumer placed
+/// inside a node's laser range links that node to it (`getNodeLinks`) and the
+/// two graphs merge.
+#[test]
+fn consumer_autolinks_to_node_in_range() {
+    let mut sim = runtime_sim();
+    set_floor(&mut sim, 9, 5, "ore-copper");
+    let node = place(&mut sim, "power-node", 5, 5);
+    let drill = place(&mut sim, "laser-drill", 9, 5);
+    let drill_pack = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::Building>(drill)
+        .map(|building| building.tile.pack())
+        .expect("drill building");
+    let links = sim
+        .ecs
+        .0
+        .get::<crate::world::modules::PowerModule>(node)
+        .map(|module| module.links.clone())
+        .unwrap_or_default();
+    assert!(
+        links.contains(&drill_pack),
+        "node linked to the consumer: {links:?}"
+    );
+    let node_graph = sim
+        .ecs
+        .0
+        .get::<crate::world::modules::PowerModule>(node)
+        .map(|module| module.graph);
+    let drill_graph = sim
+        .ecs
+        .0
+        .get::<crate::world::modules::PowerModule>(drill)
+        .map(|module| module.graph);
+    assert_eq!(node_graph, drill_graph, "graphs merged");
+}
+
+/// T7 (`SolidPump.updateTile`, `SolidPump.java:116-135`; `Blocks.java:2941-2948`):
+/// the water extractor's yield is `pumpAmount * (validTiles + boost)` where
+/// `validTiles = 1` on any pumpable floor (`baseEfficiency = 1`) and `boost` is
+/// the footprint water attribute / size². Four `mud` tiles (`water = 1`) double
+/// the rate.
+#[test]
+fn water_extractor_scales_with_floor() {
+    let mut sim = runtime_sim();
+    let _plain_source = place(&mut sim, "power-source", 4, 5);
+    let _wet_source = place(&mut sim, "power-source", 11, 5);
+    let plain = place(&mut sim, "water-extractor", 5, 5);
+    for (x, y) in [(12, 5), (13, 5), (12, 6), (13, 6)] {
+        set_floor(&mut sim, x, y, "mud");
+    }
+    let wet = place(&mut sim, "water-extractor", 12, 5);
+    for _ in 0..60 {
+        sim.tick().expect("tick");
+    }
+    let water = liquid(&sim, "water");
+    let plain_amount = stored_liquid(&sim, plain, water);
+    let wet_amount = stored_liquid(&sim, wet, water);
+    assert!(plain_amount > 0.0, "plain extractor pumped {plain_amount}");
+    assert!(
+        (wet_amount / plain_amount - 2.0).abs() < 0.1,
+        "wet {wet_amount} vs plain {plain_amount}: the water attribute doubles it"
+    );
+}
+
+/// T7 (`SolidPump.canPlaceOn`/`updateTile`, `SolidPump.java:68-75`, `:116-135`;
+/// `Blocks.java:2985-2992`): the oil extractor has `baseEfficiency = 0`, so it
+/// cannot be placed on attribute-less floors and its yield is the oil affinity
+/// (`sand-floor = 0.7`) times `pumpAmount` (0.25).
+#[test]
+fn oil_extractor_needs_oil_floor() {
+    let mut sim = runtime_sim();
+    let oil_id = sim.world_block_id("oil-extractor").expect("oil-extractor");
+    let _ = sim.command(SimCommand::Place {
+        x: 5,
+        y: 5,
+        block: oil_id,
+        rotation: 0,
+        team: 1,
+        player: None,
+    });
+    assert!(
+        sim.grid.entity_at(TilePos::new(5, 5)).is_none(),
+        "no oil affinity and baseEfficiency 0 -> canPlaceOn rejects the block"
+    );
+    for x in 4..=6 {
+        for y in 4..=6 {
+            set_floor(&mut sim, x, y, "sand-floor");
+        }
+    }
+    let _source = place(&mut sim, "power-source", 3, 5);
+    let extractor = place(&mut sim, "oil-extractor", 5, 5);
+    {
+        let (sand, water) = (item(&sim, "sand"), liquid(&sim, "water"));
+        let world = &mut sim.ecs.0;
+        if let Some(mut items) = world.get_mut::<crate::world::modules::ItemModule>(extractor) {
+            items.add(sand, 10, 10);
+        }
+        if let Some(mut liquids) = world.get_mut::<crate::world::modules::LiquidModule>(extractor) {
+            liquids.add(water, 20.0, 40.0);
+        }
+    }
+    for _ in 0..60 {
+        sim.tick().expect("tick");
+    }
+    let oil = stored_liquid(&sim, extractor, liquid(&sim, "oil"));
+    // `pumpAmount` 0.25 * (0 + 9 * 0.7 / 9) = 0.175 per tick.
+    assert!((oil - 10.5).abs() < 1.5, "oil pumped {oil}");
+}
+
+/// T5 (`BeamDrill.updateFacing`, `BeamDrill.java:237-266`): the facing scan runs
+/// every tick, so removing the wall ore in front stops production; the port
+/// cached the scan at placement.
+#[test]
+fn plasma_bore_stops_when_ore_removed() {
+    let mut sim = runtime_sim();
+    let ore =
+        crate::content::BlockId::new(sim.world_block_id("ore-wall-beryllium").expect("ore wall"));
+    let wall = crate::content::BlockId::new(
+        sim.world_block_id("beryllic-stone-wall")
+            .expect("static wall"),
+    );
+    for y in [5, 6] {
+        let tile = sim.grid.tiles.get_mut(9, y);
+        tile.block = wall;
+        tile.overlay = ore;
+    }
+    let _source = place(&mut sim, "power-source", 4, 5);
+    let bore = place(&mut sim, "plasma-bore", 5, 5);
+    let beryllium = item(&sim, "beryllium");
+    for _ in 0..400 {
+        sim.tick().expect("tick");
+    }
+    let produced = stored_item(&sim, bore, beryllium);
+    assert!(produced > 0, "bore produced before removal: {produced}");
+
+    // Remove the ore overlay; within one tick the facing scan reports nothing.
+    for y in [5, 6] {
+        sim.grid.tiles.get_mut(9, y).overlay = crate::content::BlockId::AIR;
+    }
+    sim.tick().expect("tick");
+    let facing = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::DrillState>(bore)
+        .map(|state| state.facing_amount)
+        .unwrap_or(-1.0);
+    assert_eq!(facing, 0.0, "facing rescan dropped the removed ore");
+    let before = stored_item(&sim, bore, beryllium);
+    for _ in 0..400 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        stored_item(&sim, bore, beryllium),
+        before,
+        "no production once the ore is gone"
+    );
+}
+
+/// T13 (`Door.tapped`, `Door.java:148-154`): a tap toggles `open`; a second tap
+/// within 60 ticks is ignored (`origin().timer(timerToggle, 60f)`).
+#[test]
+fn door_toggles_and_throttles() {
+    let mut sim = runtime_sim();
+    let door = place(&mut sim, "door", 5, 5);
+    let is_open = |sim: &Sim| {
+        sim.ecs
+            .0
+            .get::<crate::entities::comp::DoorState>(door)
+            .map(|state| state.open)
+            .unwrap_or(false)
+    };
+    configure(&mut sim, 5, 5, crate::determinism::ConfigValue::Bool(true));
+    assert!(is_open(&sim), "opened on the first tap");
+    for _ in 0..10 {
+        sim.tick().expect("tick");
+    }
+    configure(&mut sim, 5, 5, crate::determinism::ConfigValue::Bool(false));
+    assert!(is_open(&sim), "second toggle within 60 ticks ignored");
+    for _ in 0..60 {
+        sim.tick().expect("tick");
+    }
+    configure(&mut sim, 5, 5, crate::determinism::ConfigValue::Bool(false));
+    assert!(!is_open(&sim), "closed after the throttle");
 }
 
 /// Whether a unit of type `unit` exists in the sim.

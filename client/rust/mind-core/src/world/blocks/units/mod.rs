@@ -17,6 +17,7 @@
 //! Changelog.
 
 use crate::content::{ItemId, UnitTypeId};
+use crate::world::modules::ItemModule;
 
 pub mod behavior;
 
@@ -125,14 +126,15 @@ impl UnitFactory {
         self.plans.iter().any(|plan| plan.requirement(item) > 0)
     }
 
-    /// Whether the factory should consume items (`shouldConsume`).
-    pub fn should_consume(&self, items: &[i32], plan_index: usize) -> bool {
+    /// Whether the plan's requirements are held (`ConsumeItemDynamic` trigger
+    /// gate; `UnitFactory.java:84`).
+    pub fn should_consume(&self, items: &ItemModule, plan_index: usize) -> bool {
         let Some(plan) = self.plans.get(plan_index) else {
             return false;
         };
         plan.requirements
             .iter()
-            .all(|(item, amount)| items.get(item.index()).copied().unwrap_or(0) >= *amount)
+            .all(|(item, amount)| items.get(*item) >= *amount)
     }
 }
 
@@ -143,42 +145,51 @@ pub struct UnitFactoryBuild {
     pub current_plan: i32,
     /// Accumulated build time.
     pub progress: f32,
-    /// Stored item counts indexed by item id.
-    pub items: Vec<i32>,
 }
 
 impl UnitFactoryBuild {
-    /// Creates a build for `plan_count` plans and `item_count` items.
-    pub fn new(_plan_count: usize, item_count: usize) -> Self {
+    /// Creates an unconfigured build (`currentPlan = -1`, `progress = 0`).
+    pub fn new() -> Self {
         Self {
             current_plan: -1,
             progress: 0.0,
-            items: vec![0; item_count],
         }
     }
 
-    /// `UnitFactoryBuild.updateTile`: advance progress and produce a unit when
-    /// the plan completes and its requirements are held.
+    /// `UnitFactoryBuild.updateTile` progress half: advance progress by
+    /// `delta_progress` (`edelta() * unitBuildSpeed`; the caller already applied
+    /// `efficiency > 0`) and return the produced unit when the plan completes
+    /// and its requirements are held in `items`.
     ///
-    /// Returns the produced unit and resets progress. `None` while no plan is
-    /// selected (`currentPlan == -1`).
-    pub fn update(&mut self, factory: &UnitFactory, time_scale: f32) -> Option<UnitTypeId> {
-        let index = usize::try_from(self.current_plan).ok()?;
-        let plan = factory.plans.get(index)?;
-        if !factory.should_consume(&self.items, index) {
-            // Requirements not met: hold progress (upstream blocks consumption).
+    /// On completion `progress %= 1` (the caller consumes the requirements from
+    /// `ItemModule`); with no plan or missing requirements `progress` is held
+    /// clamped to `0..=plan.time` (`UnitFactory.java:406-450`).
+    pub fn update(
+        &mut self,
+        factory: &UnitFactory,
+        delta_progress: f32,
+        items: &ItemModule,
+    ) -> Option<UnitTypeId> {
+        let Some(index) = usize::try_from(self.current_plan).ok() else {
+            // `currentPlan == -1` -> the Java else branch resets progress.
+            self.progress = 0.0;
+            return None;
+        };
+        let Some(plan) = factory.plans.get(index) else {
+            self.progress = 0.0;
+            return None;
+        };
+        if delta_progress <= 0.0 || !factory.should_consume(items, index) {
+            // Requirements not met (or idle): hold progress, clamped.
+            self.progress = self.progress.clamp(0.0, plan.time.max(0.0));
             return None;
         }
-        self.progress += time_scale;
+        self.progress += delta_progress;
         if self.progress < plan.time {
+            self.progress = self.progress.clamp(0.0, plan.time.max(0.0));
             return None;
         }
-        for (item, amount) in &plan.requirements {
-            if let Some(slot) = self.items.get_mut(item.index()) {
-                *slot -= *amount;
-            }
-        }
-        self.progress = 0.0;
+        self.progress %= 1.0;
         Some(plan.unit)
     }
 }
@@ -234,6 +245,11 @@ pub struct ReconstructorBuild {
     pub progress: f32,
     /// Configured output command (`ReconstructorBuild.command`).
     pub command: Option<u16>,
+    /// Payload travel to the centre, `0..1` (`PayloadBlock.moveInPayload`).
+    ///
+    /// The port approximates `payloadSpeed = 0.7` px/tick over ~14 px with
+    /// `+edelta/20` per tick (about 20 ticks). Transient: not serialized.
+    pub move_in: f32,
 }
 
 impl ReconstructorBuild {
@@ -247,18 +263,28 @@ impl ReconstructorBuild {
         }
         self.payload = Some(unit);
         self.progress = 0.0;
+        self.move_in = 0.0;
         true
     }
 
-    /// `ReconstructorBuild.updateTile`: advance the upgrade; on completion returns
-    /// the upgraded unit type and keeps `progress %= 1f` (Java does not reset).
+    /// `ReconstructorBuild.updateTile`: advance the payload travel, then the
+    /// upgrade; on completion returns the upgraded unit type and keeps
+    /// `progress %= 1f` (Java does not reset).
+    ///
+    /// `progress` only counts once `move_in` reaches 1
+    /// (`Reconstructor.updateTile` -> `moveInPayload()` gate).
     pub fn update(
         &mut self,
         reconstructor: &Reconstructor,
         delta_progress: f32,
+        edelta: f32,
     ) -> Option<UnitTypeId> {
         let current = self.payload?;
         let target = reconstructor.can_upgrade(current)?;
+        if self.move_in < 1.0 {
+            self.move_in = (self.move_in + edelta / 20.0).min(1.0);
+            return None;
+        }
         self.progress += delta_progress;
         if self.progress < reconstructor.construct_time {
             return None;
@@ -642,13 +668,16 @@ mod tests {
         assert_eq!(factory.capacity(copper), 20);
         assert!(factory.accepts(copper));
 
-        let mut build = UnitFactoryBuild::new(1, factory.capacities.len());
+        let mut items = ItemModule::with_items(content.items().len());
+        items.add(copper, 20, 20);
+        let mut build = UnitFactoryBuild::new();
         build.current_plan = 0;
-        build.items[copper.index()] = 20;
-        // Not enough time yet.
-        assert_eq!(build.update(&factory, 30.0), None);
-        assert_eq!(build.update(&factory, 30.0), Some(dagger));
-        assert_eq!(build.items[copper.index()], 10, "requirements consumed");
+        // Not enough time yet; requirements gate the progress.
+        assert_eq!(build.update(&factory, 30.0, &items), None);
+        assert_eq!(build.update(&factory, 30.0, &items), Some(dagger));
+        // The caller consumes the requirements (`UnitFactory.updateTile`).
+        assert_eq!(items.remove(copper, 10), 10, "requirements consumed");
+        assert_eq!(items.get(copper), 10);
     }
 
     #[test]
@@ -667,8 +696,10 @@ mod tests {
         );
         assert!(build.accept_payload(&recon, dagger));
         assert!(!build.accept_payload(&recon, dagger), "already occupied");
-        assert_eq!(build.update(&recon, 60.0), None);
-        assert_eq!(build.update(&recon, 60.0), Some(mace));
+        // `moveInPayload()`: the first tick only advances the payload travel.
+        assert_eq!(build.update(&recon, 0.0, 100.0), None);
+        assert_eq!(build.update(&recon, 60.0, 1.0), None);
+        assert_eq!(build.update(&recon, 60.0, 1.0), Some(mace));
     }
 
     #[test]

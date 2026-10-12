@@ -34,7 +34,7 @@ use crate::determinism::{Checksum, Checksummer, CommandError};
 use crate::ecs::{BuildingComp, TeamId};
 use crate::world::block::{BlockError, BlockTable};
 use crate::world::blocks::power::{
-    PowerGrids, PowerNodeConfig, power_graph_removed, update_power_graph,
+    PowerGrids, PowerNodeConfig, power_graph_removed, read_power_info, update_power_graph,
 };
 use crate::world::building_io::{self, DecodedBase};
 use crate::world::config::ConfigValue as WorldConfigValue;
@@ -149,6 +149,9 @@ pub struct SimRuntime {
     hooks: SimHooks,
     log: WorldEventLog,
     render: NoopRenderHooks,
+    /// Entities whose facing edge is rescanned every tick (`BeamDrill`/
+    /// `WallCrafter`; T5). Stale entries are dropped by the refresh pass.
+    facing_drills: Vec<Entity>,
 }
 
 impl SimRuntime {
@@ -247,7 +250,94 @@ impl SimRuntime {
             return false;
         }
         self.set_block_raw(world, grid, x, y, block, rot, team);
+        // Instant placement runs the `placed()` hooks too (T11: the plan's
+        // acceptance uses `place_block`, and Java's non-construction placement
+        // sites - `BaseGenerator` - call `placed()` explicitly).
+        if let Some(entity) = grid.entity_at(TilePos::new(x, y)) {
+            let grid_ref: &WorldGrid = grid;
+            self.placed_hooks(world, grid_ref, entity);
+        }
         true
+    }
+
+    /// `BuildingComp.placed()` + `PowerNode.placed()` (T11).
+    ///
+    /// Runs the behavior hook, then the two power auto-link halves:
+    /// `BuildingComp.java:1359-1370` (a power block links each node in range to
+    /// itself) and `PowerNode.java:400-411` (a fresh node with no links grabs
+    /// its potential links). Never called for map materialization or for the
+    /// construct block itself.
+    pub(crate) fn placed_hooks(&mut self, world: &mut World, grid: &WorldGrid, entity: Entity) {
+        if let Some(behavior) = world.get_resource::<BlockTable>().and_then(|table| {
+            world
+                .get::<crate::entities::comp::Building>(entity)
+                .and_then(|building| table.instance(building.block))
+                .map(|inst| inst.behavior.clone())
+        }) {
+            behavior.placed(world, entity);
+        }
+
+        // `BuildingComp.placed`: `(consumesPower || outputsPower) && hasPower
+        // && connectedPower` (`connectedPower` defaults true and is not modeled).
+        if let Some(params) = read_power_info(world, entity)
+            && params.has_power
+            && (params.consumes || params.outputs)
+        {
+            let Some(mut graphs) = world.remove_resource::<PowerGrids>() else {
+                return;
+            };
+            let mut nodes: Vec<Entity> = Vec::new();
+            crate::world::blocks::power::nodes::get_node_links(world, grid, entity, &mut nodes);
+            let pack = crate::world::blocks::power::module::pack(world, entity);
+            for node in nodes {
+                let already = world
+                    .get::<PowerModule>(node)
+                    .is_some_and(|module| module.links.contains(&pack));
+                if !already {
+                    crate::world::blocks::power::nodes::configure_link(
+                        &mut graphs,
+                        world,
+                        grid,
+                        node,
+                        pack,
+                    );
+                }
+            }
+            world.insert_resource(graphs);
+        }
+
+        // `PowerNode.placed`: `!client && power.links.size == 0`.
+        let Some(config) = world.get::<PowerNodeConfig>(entity) else {
+            return;
+        };
+        let links = world
+            .get::<PowerModule>(entity)
+            .map(|module| module.links.len())
+            .unwrap_or(0);
+        if links > 0 || !config.autolink {
+            return;
+        }
+        let Some(mut graphs) = world.remove_resource::<PowerGrids>() else {
+            return;
+        };
+        let mut candidates: Vec<Entity> = Vec::new();
+        crate::world::blocks::power::nodes::get_potential_links(
+            world,
+            grid,
+            entity,
+            &mut candidates,
+        );
+        for other in candidates {
+            let pack = crate::world::blocks::power::module::pack(world, other);
+            crate::world::blocks::power::nodes::configure_link(
+                &mut graphs,
+                world,
+                grid,
+                entity,
+                pack,
+            );
+        }
+        world.insert_resource(graphs);
     }
 
     /// `Build.validPlace` plus the visibility/unlock gate
@@ -340,6 +430,11 @@ impl SimRuntime {
                 entity,
             );
             self.merge_power_graph(world, grid, entity);
+            // Facing drills rescan every tick (`BeamDrill.updateFacing` /
+            // `WallCrafter.getEfficiency`; T5).
+            if self.is_facing_drill(world, entity) && !self.facing_drills.contains(&entity) {
+                self.facing_drills.push(entity);
+            }
         }
         if let Some(mut counter) = world.get_resource_mut::<BlockCounter>() {
             counter.add(team, block, 1);
@@ -569,6 +664,25 @@ impl SimRuntime {
     }
 
     /// Shared `Tile.remove` half of break/destroy.
+    /// `BeamDrill.updateFacing`/`WallCrafter.getEfficiency` (T5): whether this
+    /// building's facing edge is rescanned every tick.
+    fn is_facing_drill(&self, world: &World, entity: Entity) -> bool {
+        world
+            .get::<crate::entities::comp::Building>(entity)
+            .and_then(|building| {
+                world
+                    .get_resource::<BlockTable>()
+                    .and_then(|table| table.get(building.block))
+            })
+            .is_some_and(|inst| {
+                matches!(
+                    inst.kind_data,
+                    crate::world::BlockKindData::BeamDrill(_)
+                        | crate::world::BlockKindData::WallCrafter(_)
+                )
+            })
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn remove_building(
         &mut self,
@@ -582,6 +696,7 @@ impl SimRuntime {
     ) {
         let _ = remove_from_proximity(world, entity, &self.content);
         self.remove_power_graph(world, grid, entity);
+        self.facing_drills.retain(|drill| *drill != entity);
         {
             let mut ctx = WorldCtx {
                 grid: &mut *grid,
@@ -675,6 +790,12 @@ impl SimRuntime {
         }
         for entity in &spawned {
             self.merge_power_graph(ecs, grid, *entity);
+        }
+        // Materialized facing drills join the per-tick rescan (T5).
+        for entity in &spawned {
+            if self.is_facing_drill(ecs, *entity) && !self.facing_drills.contains(entity) {
+                self.facing_drills.push(*entity);
+            }
         }
         spawned.len()
     }
@@ -812,6 +933,41 @@ impl Sim {
         self.block_runtime.as_mut()
     }
 
+    /// `BeamDrill.updateFacing`/`WallCrafter.getEfficiency` (T5): rescans the
+    /// facing edge of every registered facing drill once per tick.
+    ///
+    /// The behaviors cannot see the grid (`update_tile` takes only `&mut World`),
+    /// so `Sim::tick` runs this pass after the scheduled systems and before the
+    /// builder pass.
+    pub(crate) fn refresh_facing_drills(&mut self) {
+        let Some(runtime) = self.block_runtime.as_mut() else {
+            return;
+        };
+        if runtime.facing_drills.is_empty() {
+            return;
+        }
+        let drills = std::mem::take(&mut runtime.facing_drills);
+        for entity in drills {
+            if self
+                .ecs
+                .0
+                .get::<crate::entities::comp::Building>(entity)
+                .is_none()
+            {
+                continue;
+            }
+            if runtime.is_facing_drill(&self.ecs.0, entity) {
+                crate::world::behavior::production::refresh_drill_ore(
+                    &mut self.ecs.0,
+                    &self.grid,
+                    runtime.content(),
+                    entity,
+                );
+                runtime.facing_drills.push(entity);
+            }
+        }
+    }
+
     /// Installs the live building runtime with default configuration (no
     /// placement gate). Content is booted from the vanilla registry.
     pub fn install_block_runtime(&mut self) -> Result<(), RuntimeError> {
@@ -885,6 +1041,7 @@ impl Sim {
             },
             log: WorldEventLog::default(),
             render: NoopRenderHooks,
+            facing_drills: Vec::new(),
         });
         // A host may install the runtime after loading a grid with pre-placed
         // power buildings (`World.endMapLoad` rebuild).
@@ -1142,6 +1299,36 @@ mod tests {
     fn registry() -> ContentRegistry {
         create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
             .expect("content boot")
+    }
+
+    /// T4: the reconstructor's command panel submits `("content", "<command>")`;
+    /// `resolve_config` must lower the name to the typed `UnitCommand` content
+    /// value (`Reconstructor.config(UnitCommand.class, ...)`).
+    #[test]
+    fn content_config_resolves_unit_commands() {
+        let mut sim = Sim::new(1, 8, 8, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("runtime");
+        let value = sim
+            .block_runtime()
+            .expect("runtime")
+            .resolve_config(&crate::determinism::ConfigValue::Content(
+                "rebuild".to_owned(),
+            ))
+            .expect("resolve");
+        match value {
+            crate::world::config::ConfigValue::Content(
+                crate::content::ContentType::UnitCommand,
+                id,
+            ) => assert_eq!(
+                sim.block_runtime()
+                    .expect("runtime")
+                    .content()
+                    .get_by_name(crate::content::ContentType::UnitCommand, "rebuild")
+                    .map(|reference| reference.id),
+                Some(id)
+            ),
+            other => panic!("expected a unit command, got {other:?}"),
+        }
     }
 
     /// `CoreBlock.handleItem` bumps `stats.coreItemCount` for default-team

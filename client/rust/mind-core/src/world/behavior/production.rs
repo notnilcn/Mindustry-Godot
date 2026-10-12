@@ -206,6 +206,61 @@ impl BuildingBehavior for CrafterBehavior {
         }
     }
 
+    /// `GenericCrafter.shouldConsume` (`GenericCrafter.java:205-235`) and the
+    /// `Separator` override (`Separator.java:92-100`): a crafter whose outputs
+    /// have no room idles (T1).
+    fn should_consume(&self, world: &World, e: Entity) -> bool {
+        let Some(inst) = instance(world, e) else {
+            return true;
+        };
+        let item_capacity = inst.def.item_capacity;
+        let Some(crafter) = crafter_knobs(&inst.kind_data) else {
+            return true;
+        };
+        // Separator: `items.total() < itemCapacity`, where the still-live input
+        // stacks are subtracted from the total (`consItems`).
+        if matches!(inst.kind_data, BlockKindData::Separator(_)) {
+            let Some(items) = world.get::<ItemModule>(e) else {
+                return true;
+            };
+            let mut total = items.total();
+            for consumer in &inst.consumers.all {
+                if let crate::world::consumers::ConsumeInstanceKind::Items(stacks) = &consumer.kind
+                {
+                    for stack in stacks {
+                        total -= items.get(stack.item);
+                    }
+                }
+            }
+            return total < item_capacity;
+        }
+        for (item, amount) in &crafter.output_items {
+            if transfer::item_count(world, e, ItemId::new(*item)) + *amount > item_capacity {
+                return false;
+            }
+        }
+        if !crafter.output_liquids.is_empty() && !crafter.ignore_liquid_fullness {
+            // The port carries no `dumpExtraLiquid` knob; Java's default for it is
+            // `false`, so a full output liquid returns false here.
+            let capacity = liquid_capacity(world, e);
+            let mut all_full = true;
+            for (liquid, _) in &crafter.output_liquids {
+                let stored = world
+                    .get::<LiquidModule>(e)
+                    .map(|module| module.get(LiquidId::new(*liquid)))
+                    .unwrap_or(0.0);
+                if stored >= capacity - 0.001 {
+                    return false;
+                }
+                all_full = false;
+            }
+            if all_full {
+                return false;
+            }
+        }
+        true
+    }
+
     /// `BuildingComp.acceptItem`: `block.consumesItem(item) && items.get(item) <
     /// getMaximumAccepted(item)`.
     fn accept_item(&self, world: &World, e: Entity, _src: Entity, item: ItemId) -> bool {
@@ -458,6 +513,41 @@ impl BuildingBehavior for DrillBehavior {
         }
     }
 
+    /// `Drill.shouldConsume` (`Drill.java:246-249`), `BurstDrill.shouldConsume`
+    /// (`BurstDrill.java:127-130`) and `WallCrafter.shouldConsume`
+    /// (`WallCrafter.java:225-228`): a drill whose buffer is full (or has no
+    /// dominant ore) idles (T1).
+    fn should_consume(&self, world: &World, e: Entity) -> bool {
+        let Some(inst) = instance(world, e) else {
+            return true;
+        };
+        let item_capacity = inst.def.item_capacity;
+        let total = world
+            .get::<ItemModule>(e)
+            .map(ItemModule::total)
+            .unwrap_or(0);
+        match &inst.kind_data {
+            BlockKindData::Drill(_) => {
+                let dominant = world
+                    .get::<DrillState>(e)
+                    .and_then(|state| state.dominant_item);
+                total < item_capacity && dominant.is_some()
+            }
+            BlockKindData::BurstDrill(_) => {
+                let dominant = world
+                    .get::<DrillState>(e)
+                    .map(|state| state.dominant_items)
+                    .unwrap_or(0);
+                total <= item_capacity - dominant as i32
+            }
+            BlockKindData::WallCrafter(def) => def
+                .output
+                .map(|item| transfer::item_count(world, e, ItemId::new(item)) < item_capacity)
+                .unwrap_or(false),
+            _ => true,
+        }
+    }
+
     fn version(&self, _world: &World, _e: Entity) -> u8 {
         1
     }
@@ -497,7 +587,10 @@ pub fn refresh_drill_ore(
     };
     let tile = building.tile;
     let size = inst.def.size.max(1);
-    if matches!(inst.kind_data, BlockKindData::Pump(_)) {
+    if matches!(
+        inst.kind_data,
+        BlockKindData::Pump(_) | BlockKindData::SolidPump(_) | BlockKindData::Fracker(_)
+    ) {
         refresh_pump_floor(world, grid, content, e, tile, size);
         return;
     }
@@ -576,8 +669,25 @@ fn refresh_pump_floor(
     size: i32,
 ) {
     let lo = -((size - 1) / 2);
+    // `SolidPump.onProximityUpdate` (`SolidPump.java:150-160`) and
+    // `Block.sumAttribute` (`Block.java:582-588`): the attribute name and
+    // `baseEfficiency` come from the block; `canPump` is `!floor.isLiquid` and
+    // deep floors contribute no attribute unless the block floats.
+    let (attribute, base_efficiency) = instance(world, e)
+        .map(|inst| match &inst.kind_data {
+            BlockKindData::SolidPump(def) => (def.attribute.clone(), def.base_efficiency),
+            BlockKindData::Fracker(def) => (def.attribute.clone(), def.base_efficiency),
+            _ => (String::new(), 0.0),
+        })
+        .unwrap_or_default();
+    let (floating, placeable_liquid) = instance(world, e)
+        .map(|inst| (inst.def.floating, inst.def.placeable_liquid))
+        .unwrap_or((false, false));
+    let area = (size * size) as f32;
     let mut drop = None;
     let mut amount = 0.0f32;
+    let mut valid_tiles = 0.0f32;
+    let mut boost = 0.0f32;
     for dx in lo..lo + size {
         for dy in lo..lo + size {
             let (tx, ty) = (i32::from(tile.x()) + dx, i32::from(tile.y()) + dy);
@@ -591,11 +701,26 @@ fn refresh_pump_floor(
                 drop = Some(liquid);
                 amount += floor.liquid_multiplier;
             }
+            if floor.is_liquid {
+                continue;
+            }
+            valid_tiles += base_efficiency / area;
+            if !(!floating && !placeable_liquid && floor.is_deep) && !attribute.is_empty() {
+                boost += floor
+                    .attributes
+                    .iter()
+                    .find(|(name, _)| name == &attribute)
+                    .map(|(_, value)| *value)
+                    .unwrap_or(0.0);
+            }
         }
     }
+    boost /= area;
     if let Some(mut state) = world.get_mut::<PumpState>(e) {
         state.liquid_drop = drop;
         state.amount = amount;
+        state.valid_tiles = valid_tiles;
+        state.boost = boost;
     }
 }
 
@@ -855,6 +980,23 @@ impl BuildingBehavior for BeamDrillBehavior {
         DrillBehavior.create_state(world, e);
     }
 
+    /// `BeamDrill.shouldConsume` (`BeamDrill.java:269-271`): full buffer or no
+    /// facing wall drop → idle (T1).
+    fn should_consume(&self, world: &World, e: Entity) -> bool {
+        let Some(inst) = instance(world, e) else {
+            return true;
+        };
+        let total = world
+            .get::<ItemModule>(e)
+            .map(ItemModule::total)
+            .unwrap_or(0);
+        let facing = world
+            .get::<DrillState>(e)
+            .map(|state| state.facing_amount)
+            .unwrap_or(0.0);
+        total < inst.def.item_capacity && facing > 0.0
+    }
+
     fn update_tile(&self, world: &mut World, e: Entity) {
         let Some(inst) = instance(world, e) else {
             return;
@@ -943,6 +1085,21 @@ impl BuildingBehavior for WallCrafterBehavior {
         }
     }
 
+    /// `WallCrafter.shouldConsume` (`WallCrafter.java:225-228`): the output item
+    /// buffer full → idle (T1).
+    fn should_consume(&self, world: &World, e: Entity) -> bool {
+        let Some(inst) = instance(world, e) else {
+            return true;
+        };
+        let output = match &inst.kind_data {
+            BlockKindData::WallCrafter(def) => def.output,
+            _ => return true,
+        };
+        output
+            .map(|item| transfer::item_count(world, e, ItemId::new(item)) < inst.def.item_capacity)
+            .unwrap_or(false)
+    }
+
     fn update_tile(&self, world: &mut World, e: Entity) {
         let Some(inst) = instance(world, e) else {
             return;
@@ -1017,6 +1174,22 @@ impl BuildingBehavior for PumpBehavior {
         if world.get::<PumpState>(e).is_none() {
             world.entity_mut(e).insert(PumpState::default());
         }
+    }
+
+    /// `Pump.shouldConsume` (`Pump.java:155-157`): no floor liquid or a full
+    /// buffer → idle (T1).
+    fn should_consume(&self, world: &World, e: Entity) -> bool {
+        let Some(drop) = world
+            .get::<PumpState>(e)
+            .and_then(|state| state.liquid_drop)
+        else {
+            return false;
+        };
+        let stored = world
+            .get::<LiquidModule>(e)
+            .map(|module| module.get(drop))
+            .unwrap_or(0.0);
+        stored < liquid_capacity(world, e) - 0.01
     }
 
     /// `PumpBuild.updateTile`: pump the floor's `liquidDrop` at
@@ -1103,6 +1276,25 @@ impl BuildingBehavior for SolidPumpBehavior {
         }
     }
 
+    /// `SolidPump.shouldConsume` (`SolidPump.java:116-119`): a full result
+    /// buffer → idle (T1). `Fracker` resolves its `result`; a plain solid pump
+    /// defaults to water, exactly as `update_tile` above.
+    fn should_consume(&self, world: &World, e: Entity) -> bool {
+        let Some(inst) = instance(world, e) else {
+            return true;
+        };
+        let liquid = match &inst.kind_data {
+            BlockKindData::Fracker(def) => def.result.map(LiquidId::new).unwrap_or(LiquidId::WATER),
+            BlockKindData::SolidPump(_) => LiquidId::WATER,
+            _ => return true,
+        };
+        let stored = world
+            .get::<LiquidModule>(e)
+            .map(|module| module.get(liquid))
+            .unwrap_or(0.0);
+        stored < liquid_capacity(world, e) - 0.01
+    }
+
     fn update_tile(&self, world: &mut World, e: Entity) {
         let Some(inst) = instance(world, e) else {
             return;
@@ -1123,16 +1315,22 @@ impl BuildingBehavior for SolidPumpBehavior {
             state.warmup = approach(state.warmup, if efficiency > 0.0 { 1.0 } else { 0.0 }, 0.02);
         }
         let liquid = result.map(LiquidId::new).unwrap_or(LiquidId::WATER);
-        if efficiency > 0.0 {
-            let capacity = liquid_capacity(world, e);
-            let warmup = world.get::<PumpState>(e).map(|s| s.warmup).unwrap_or(1.0);
-            produce_liquid(
-                world,
-                e,
-                liquid,
-                amount * edelta(world, e) * warmup,
-                capacity,
-            );
+        // `SolidPump.updateTile`: `fraction = max(validTiles + boost +
+        // attribute.env(), 0)`; the port ignores `attribute.env()`, which is 0
+        // on Serpulo (T7).
+        let (valid_tiles, boost) = world
+            .get::<PumpState>(e)
+            .map(|state| (state.valid_tiles, state.boost))
+            .unwrap_or((0.0, 0.0));
+        let fraction = (valid_tiles + boost).max(0.0);
+        let capacity = liquid_capacity(world, e);
+        let stored = world
+            .get::<LiquidModule>(e)
+            .map(|module| module.get(liquid))
+            .unwrap_or(0.0);
+        if efficiency > 0.0 && stored < capacity - 0.001 {
+            let max_pump = (capacity - stored).min(amount * edelta(world, e) * fraction);
+            produce_liquid(world, e, liquid, max_pump, capacity);
         }
         // `SolidPumpBuild.updateTile`: `dumpLiquid(result)` every tick.
         crate::world::blocks::liquid::movement::dump_liquid_proximity(world, e, liquid, 2.0, -1);

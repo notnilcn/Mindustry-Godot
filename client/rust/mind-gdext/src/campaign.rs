@@ -1572,6 +1572,10 @@ impl MindCampaign {
         };
         let mut placed = false;
         let mut host = host.bind_mut();
+        // With a live player unit the tiles queue as construction plans
+        // (`InputHandler` placement path); otherwise they place instantly
+        // (editor/preview worlds, T18).
+        let player_plans = host.player_can_build();
         for stile in &schematic.tiles {
             if stile.block == mind_core::content::BlockId::AIR {
                 continue;
@@ -1582,7 +1586,11 @@ impl MindCampaign {
             let Ok(tile_y) = i16::try_from(y + stile.y as i32) else {
                 continue;
             };
-            placed |= host.place_block_at(tile_x, tile_y, stile.block, stile.rotation);
+            placed |= if player_plans {
+                host.queue_player_place_at(tile_x, tile_y, stile.block, stile.rotation)
+            } else {
+                host.place_block_at(tile_x, tile_y, stile.block, stile.rotation)
+            };
         }
         placed
     }

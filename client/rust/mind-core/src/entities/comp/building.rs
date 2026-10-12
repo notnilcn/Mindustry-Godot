@@ -43,6 +43,9 @@ pub struct Building {
     pub potential_efficiency: f32,
     /// Whether the power consumer should run (`shouldConsumePower`).
     pub should_consume_power: bool,
+    /// `Building.shouldConsume()` computed by the last consumption pass
+    /// (transient: not serialized; T1).
+    pub should_consume: bool,
     /// Overdrive time scale (`timeScale`).
     pub time_scale: f32,
     /// Remaining time-scale duration in ticks (`timeScaleDuration`).
@@ -88,6 +91,7 @@ impl Building {
             optional_efficiency: 1.0,
             potential_efficiency: 1.0,
             should_consume_power: true,
+            should_consume: true,
             time_scale: 1.0,
             time_scale_duration: 0.0,
             proximity: SmallVec::new(),
@@ -185,6 +189,8 @@ pub struct DoorState {
     pub open: bool,
     /// Connected doors (`DoorBuild.chained`); unused by `AutoDoor`.
     pub chained: SmallVec<[Entity; 6]>,
+    /// Last accepted tap time in sim ticks (`timerToggle`; `None` = never).
+    pub last_toggle: Option<f32>,
 }
 
 /// `Radar` build state.
@@ -218,6 +224,10 @@ pub struct PumpState {
     pub liquid_drop: Option<crate::content::LiquidId>,
     /// `PumpBuild.amount`: summed `Floor.liquidMultiplier` of pumpable tiles.
     pub amount: f32,
+    /// `SolidPumpBuild.validTiles`: pumpable tiles * `baseEfficiency / size²`.
+    pub valid_tiles: f32,
+    /// `SolidPumpBuild.boost`: summed footprint attribute / size².
+    pub boost: f32,
 }
 
 /// `Accelerator`/`LandingPad`/`LaunchPad` build state.

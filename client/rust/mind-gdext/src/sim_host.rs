@@ -1701,7 +1701,22 @@ impl MindSimHost {
     /// `Sim::apply` path carries rotation `0` only; rotated schematics degrade
     /// to unrotated until the rotate relay command lands (I-2).
     pub fn place_block_at(&mut self, x: i16, y: i16, block: BlockId, rot: i8) -> bool {
-        let _ = rot;
+        // The live runtime carries rotation/team and routes through the real
+        // tile ops (`SimCommand::Place`); the P0 command has no rotation and is
+        // kept for runtime-less worlds (T18).
+        if self.sim.has_block_runtime() {
+            let rotation = rot.rem_euclid(4);
+            self.pending_commands.push_back(SimCommand::Place {
+                x,
+                y,
+                block: block.raw(),
+                rotation,
+                team: self.player_team(),
+                player: None,
+            });
+            self.world_dirty = true;
+            return true;
+        }
         match self.sim.apply(Command::Place { x, y, block }) {
             Ok(()) => {
                 self.world_dirty = true;
@@ -1712,6 +1727,18 @@ impl MindSimHost {
                 false
             }
         }
+    }
+
+    /// Whether player construction plans are accepted (`Sim::player_can_build`;
+    /// T18 schematic placement).
+    pub fn player_can_build(&self) -> bool {
+        self.sim.player_can_build()
+    }
+
+    /// Queues a player construction plan (`Sim::queue_player_place`; T18).
+    pub fn queue_player_place_at(&mut self, x: i16, y: i16, block: BlockId, rot: i8) -> bool {
+        let rotation = u8::try_from(rot).unwrap_or(0).rem_euclid(4);
+        self.sim.queue_player_place(x, y, block, rotation)
     }
 
     /// Name of the currently selected block.
@@ -2015,6 +2042,44 @@ impl MindSimHost {
         }
     }
 
+    /// Debug/playtest seam: adds `amount` of `item` to the building at (x, y)
+    /// (clamped to `Block.itemCapacity`); returns the amount accepted.
+    #[func]
+    pub fn debug_add_building_items(&mut self, x: i32, y: i32, item: GString, amount: i64) -> i64 {
+        let Ok(amount) = i32::try_from(amount) else {
+            return 0;
+        };
+        let Some(entity) = self.sim.grid.tiles.getn(x, y).and_then(|tile| tile.build) else {
+            return 0;
+        };
+        let Some(item) = self
+            .content_snapshot
+            .as_ref()
+            .and_then(|content| content.item_id(&item.to_string()))
+        else {
+            return 0;
+        };
+        let block = self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::entities::comp::Building>(entity)
+            .map(|building| building.block);
+        let capacity = block
+            .and_then(|block| {
+                self.sim
+                    .ecs
+                    .0
+                    .get_resource::<mind_core::world::block::BlockTable>()
+                    .and_then(|table| table.get(block).map(|inst| inst.def.item_capacity))
+            })
+            .unwrap_or(0);
+        match self.sim.ecs.0.get_mut::<ItemModule>(entity) {
+            Some(mut module) => i64::from(module.add(item, amount, capacity)),
+            None => 0,
+        }
+    }
+
     /// The player unit's build-plan queue as JSON (`BuilderComp.plans`, head
     /// = active): `[{x, y, rotation, block, breaking, progress, stuck}]`.
     #[func]
@@ -2222,6 +2287,38 @@ impl MindSimHost {
     pub fn block_items_json(&self, x: i32, y: i32) -> Option<String> {
         let content = self.content_snapshot.as_ref()?;
         block_items_json(&self.sim, content, x, y)
+    }
+
+    /// Item counts of the building at `(x, y)` as JSON (`{item-name: amount}`),
+    /// `{}` when the tile holds no item-capable building. MCP-facing wrapper
+    /// over [`Self::block_items_json`] (T0 inventory playtest seam).
+    #[func]
+    pub fn building_items_json(&self, x: i32, y: i32) -> GString {
+        GString::from(
+            self.block_items_json(x, y)
+                .unwrap_or_else(|| "{}".to_string())
+                .as_str(),
+        )
+    }
+
+    /// `Units.anyEntities(tile)` for the door tap gate (`Door.java:148-154`;
+    /// T13): whether a ground unit overlaps the building at `(x, y)`.
+    #[func]
+    pub fn building_has_unit_overlap(&self, x: i32, y: i32) -> bool {
+        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+            return false;
+        };
+        if !self.sim.grid.tiles.in_bounds(x, y) {
+            return false;
+        }
+        let pos = mind_core::world::TilePos::new(tx, ty);
+        let Some(block) = self.sim.grid.block_at(pos) else {
+            return false;
+        };
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return false;
+        };
+        mind_core::sim::builder::unit_overlap_at(&self.sim.ecs.0, content, pos, block)
     }
 
     /// Installs the opt-in live block runtime (plan-07 `BlockTable` + behaviors)

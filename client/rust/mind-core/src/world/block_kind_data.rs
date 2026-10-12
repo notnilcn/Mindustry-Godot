@@ -129,8 +129,8 @@ pub struct PumpDef {
 pub struct SolidPumpDef {
     /// `SolidPump.pumpAmount`.
     pub pump_amount: f32,
-    /// `SolidPump.attribute` index, `-1` = none.
-    pub attribute: i16,
+    /// `SolidPump.attribute` name (`""` = none).
+    pub attribute: String,
     /// `SolidPump.baseEfficiency`.
     pub base_efficiency: f32,
 }
@@ -144,8 +144,10 @@ pub struct FrackerDef {
     pub pump_amount: f32,
     /// Resulting liquid, if any.
     pub result: Option<u16>,
-    /// `Fracker.attribute` index, `-1` = none.
-    pub attribute: i16,
+    /// `SolidPump.attribute` name (`""` = none).
+    pub attribute: String,
+    /// `SolidPump.baseEfficiency`.
+    pub base_efficiency: f32,
 }
 
 /// `WallCrafter` family knobs.
@@ -861,7 +863,9 @@ impl BlockKindData {
             "water-extractor" => {
                 if let BlockKindData::SolidPump(def) = self {
                     def.pump_amount = 0.11;
-                    def.attribute = -1;
+                    // `Blocks.java:2941-2948`: `attribute = Attribute.water`,
+                    // `baseEfficiency = 1f` (the `SolidPump` field default).
+                    def.attribute = String::from("water");
                     def.base_efficiency = 1.0;
                 }
             }
@@ -870,7 +874,10 @@ impl BlockKindData {
                     def.pump_amount = 0.25;
                     def.item_use_time = 60.0;
                     def.result = Some(liquid("oil"));
-                    def.attribute = -1;
+                    // `Blocks.java:2985-2992`: `attribute = Attribute.oil`,
+                    // `baseEfficiency = 0f`.
+                    def.attribute = String::from("oil");
+                    def.base_efficiency = 0.0;
                 }
             }
             "cultivator" => {

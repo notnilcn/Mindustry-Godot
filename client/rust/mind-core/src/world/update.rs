@@ -369,6 +369,9 @@ pub fn building_update_no_consumers(world: &mut World, entity: Entity, inst: &Bl
         building.efficiency = efficiency;
         building.optional_efficiency = efficiency;
         building.should_consume_power = true;
+        // Families on this path declare no `shouldConsume` override, so the
+        // default (`enabled`, i.e. `true` once past the fast-path contract) holds.
+        building.should_consume = true;
     }
     #[cfg(feature = "profile-build")]
     if let Some(t) = _t_consume {
@@ -412,13 +415,16 @@ pub fn update_consumption(world: &mut World, entity: Entity, inst: &BlockInstanc
     };
     let scale = inst.behavior.efficiency_scale(world, entity);
     let delta = time_scale;
+    // `Building.shouldConsume()` is read once per pass (T1). The caller has
+    // already gated on `enabled` below.
+    let should = inst.behavior.should_consume(world, entity);
 
     // No consumers: `cheat` does not change the result, so the `BuildRules`
     // resource lookup is skipped on this (belt/router/wall) hot path.
     if inst.consumers.is_empty() {
         let potential = if enabled { 1.0 } else { 0.0 };
-        let eff = potential * scale;
-        set_efficiency(world, entity, potential, eff, eff, true);
+        let eff = if should { potential * scale } else { 0.0 };
+        set_efficiency(world, entity, potential, eff, eff, true, should);
         return;
     }
 
@@ -428,13 +434,13 @@ pub fn update_consumption(world: &mut World, entity: Entity, inst: &BlockInstanc
 
     if cheating {
         let potential = if enabled { 1.0 } else { 0.0 };
-        let eff = potential * scale;
-        set_efficiency(world, entity, potential, eff, eff, true);
+        let eff = if should { potential * scale } else { 0.0 };
+        set_efficiency(world, entity, potential, eff, eff, true, should);
         return;
     }
 
     if !enabled {
-        set_efficiency(world, entity, 0.0, 0.0, 0.0, false);
+        set_efficiency(world, entity, 0.0, 0.0, 0.0, false, should);
         return;
     }
 
@@ -463,7 +469,7 @@ pub fn update_consumption(world: &mut World, entity: Entity, inst: &BlockInstanc
     let mut optional = optional_efficiency.min(min_efficiency);
     let potential = efficiency;
 
-    let update = true;
+    let update = should;
     if !update {
         efficiency = 0.0;
         optional = 0.0;
@@ -486,6 +492,7 @@ pub fn update_consumption(world: &mut World, entity: Entity, inst: &BlockInstanc
         efficiency,
         optional,
         should_consume_power,
+        should,
     );
 }
 
@@ -496,12 +503,14 @@ fn set_efficiency(
     efficiency: f32,
     optional: f32,
     should_consume_power: bool,
+    should_consume: bool,
 ) {
     if let Some(mut building) = world.get_mut::<Building>(entity) {
         building.potential_efficiency = potential;
         building.efficiency = efficiency;
         building.optional_efficiency = optional;
         building.should_consume_power = should_consume_power;
+        building.should_consume = should_consume;
     }
 }
 

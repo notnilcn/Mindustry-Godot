@@ -29,6 +29,7 @@ use crate::content::registries::units::weapon::ShootPatternSpec;
 use crate::content::{BulletId, BulletKind, ContentRegistry, LiquidId, StatusId};
 use crate::entities::comp::{Health, Pos, TeamComp, Vel};
 use crate::world::blocks::payloads::PayloadKind;
+use crate::world::modules::LiquidModule;
 
 use super::{
     BeamEntry, ItemAmmo, LiquidAmmo, PayloadAmmo, PayloadContent, TurretAmmo, TurretConfig,
@@ -1028,6 +1029,7 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
 pub fn base_config(kind: TurretKind, ammo: TurretAmmo) -> TurretConfig {
     TurretConfig {
         ammo,
+        liquid_consumed: 1.0 / 60.0,
         range: 0.0,
         reload: 10.0,
         max_ammo: 0,
@@ -1602,6 +1604,8 @@ pub fn config_for(
             c.shoot_y = 8.0;
             c.shoot_cone = 15.0;
             c.scale_damage_efficiency = true;
+            // `Blocks.java:4620`: `liquidConsumed = 18f / 60f`.
+            c.liquid_consumed = 18.0 / 60.0;
             Some(c)
         }
         // `scathe` (`ItemTurret`, Erekir missile launcher). `predictTarget=false`
@@ -1913,6 +1917,33 @@ pub fn update_continuous(
     eff: f32,
     targets: &TargetQueries,
 ) {
+    // `ContinuousLiquidTurretBuild.updateTile` (`ContinuousLiquidTurret.java:82-92`;
+    // T14): the four-tick activation latch, and the per-tick fuel drain the
+    // `ConsumeLiquidFilter` consumer performs while activated.
+    if matches!(config.ammo, TurretAmmo::Liquid(_)) {
+        let consumed = config.liquid_consumed;
+        if let Some(mut liquids) = ctx.world.get_mut::<LiquidModule>(e) {
+            let current = super::current_ammo_liquid(&liquids, config);
+            if state.activated
+                && eff > 0.0
+                && let Some(liquid) = current
+            {
+                liquids.remove(liquid, consumed * eff);
+            }
+            let amount: f32 = match &config.ammo {
+                TurretAmmo::Liquid(ammo) => {
+                    ammo.iter().map(|entry| liquids.get(entry.liquid)).sum()
+                }
+                _ => 0.0,
+            };
+            if amount >= consumed * 4.0 {
+                state.activated = true;
+            } else if amount < consumed {
+                state.activated = false;
+            }
+        }
+    }
+
     // Drop dead/foreign beams (`bullets.removeAll(...)`).
     state
         .bullets
@@ -2375,6 +2406,69 @@ mod tests {
             !state.bullets.is_empty(),
             "sublimate beam is alive with ozone"
         );
+    }
+
+    /// T14 (`ContinuousLiquidTurret.java:82-126`): the four-tick activation
+    /// latch gates firing and the fuel drains by `liquidConsumed` (18/60) each
+    /// active tick.
+    #[test]
+    fn sublimate_activation_window() {
+        let mut harness = CombatHarness::new(48, 16, 7);
+        let (turret, _) = turret_at(&mut harness, "sublimate");
+        let ozone = harness.content().liquid_id("ozone").expect("ozone");
+        let consumed = 18.0f32 / 60.0;
+        let module = |harness: &CombatHarness| {
+            harness
+                .build
+                .world
+                .get::<LiquidModule>(turret)
+                .map(|liquids| liquids.get(ozone))
+                .unwrap_or(0.0)
+        };
+        let activated = |harness: &CombatHarness| {
+            harness
+                .build
+                .world
+                .get::<TurretState>(turret)
+                .is_some_and(|state| state.activated)
+        };
+
+        // 0.5 ozone is below `liquidConsumed * 4`: no latch, no beam, no drain.
+        super::super::handle_liquid(&mut harness.build.world, turret, ozone, 0.5);
+        for _ in 0..30 {
+            harness.tick();
+        }
+        let state = harness.build.world.get::<TurretState>(turret).unwrap();
+        assert!(state.bullets.is_empty(), "below the threshold: no beam");
+        assert_eq!(module(&harness), 0.5, "no drain while inactive");
+
+        // Fill to 4.0: the latch activates, then the fuel drains per tick.
+        super::super::handle_liquid(&mut harness.build.world, turret, ozone, 3.5);
+        harness.tick();
+        assert!(activated(&harness), "4.0 >= 4 * liquidConsumed activates");
+        let before = module(&harness);
+        harness.tick();
+        let after = module(&harness);
+        assert!(
+            (before - after - consumed).abs() < 1e-4,
+            "drained {consumed} per tick ({before} -> {after})"
+        );
+        let state = harness.build.world.get::<TurretState>(turret).unwrap();
+        assert!(!state.bullets.is_empty(), "beam alive once activated");
+
+        // Drop below `liquidConsumed`: the latch clears and the drain stops.
+        if let Some(mut liquids) = harness.build.world.get_mut::<LiquidModule>(turret) {
+            liquids.remove(ozone, f32::MAX);
+            liquids.add(ozone, consumed * 0.5, 100.0);
+        }
+        harness.tick();
+        assert!(
+            !activated(&harness),
+            "below liquidConsumed clears the latch"
+        );
+        let drained = module(&harness);
+        harness.tick();
+        assert_eq!(module(&harness), drained, "no drain once inactive");
     }
 
     #[test]

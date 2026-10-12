@@ -155,6 +155,21 @@ pub trait BuildingBehavior: Send + Sync {
         false
     }
 
+    /// `Building.shouldConsume()` (default `enabled`; the caller already gated
+    /// on `enabled`, so the default returns `true`). Overrides read ECS state
+    /// only (deterministic; T1).
+    fn should_consume(&self, world: &World, e: Entity) -> bool {
+        let _ = (world, e);
+        true
+    }
+
+    /// `ItemBridge.linkValid(tile, other, true)` for bridge families; `false`
+    /// for every other block (T11 bridge chaining).
+    fn link_valid_between(&self, world: &World, e: Entity, other: Entity) -> bool {
+        let _ = (world, e, other);
+        false
+    }
+
     /// Inserts family state components at spawn.
     fn create_state(&self, world: &mut World, e: Entity) {
         let _ = (world, e);

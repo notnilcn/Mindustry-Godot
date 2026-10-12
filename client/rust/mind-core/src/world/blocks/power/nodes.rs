@@ -313,6 +313,112 @@ pub fn get_potential_links(world: &World, grid: &WorldGrid, tile: Entity, out: &
     out.extend(candidates.into_iter().take(config.max_nodes as usize));
 }
 
+/// `PowerNode.getNodeLinks` (`PowerNode.java:278-330`): every autolinking power
+/// node whose laser range covers the building at `placed` and that still has
+/// link capacity, sorted nodes-first by distance.
+///
+/// `Building.placed()` uses this to have each nearby node link itself to the
+/// newly placed block (`node.configureAny(pos)`); the port's
+/// [`configure_link`] performs that toggle.
+pub fn get_node_links(world: &World, grid: &WorldGrid, placed: Entity, out: &mut Vec<Entity>) {
+    out.clear();
+    let Some(placed_building) = world.get::<Building>(placed) else {
+        return;
+    };
+    let Some(placed_params) = read_power_info(world, placed) else {
+        return;
+    };
+    let team = placed_params.team;
+
+    // Exclude graphs already represented by adjacent ties (Java `graphs` set).
+    let mut represented: Vec<PowerGraphId> = Vec::new();
+    if let Some(module) = world.get::<PowerModule>(placed) {
+        represented.push(module.graph);
+    }
+    for offset in crate::world::edges::edges(block_size(world, placed).unwrap_or(1)) {
+        let p = TilePos::new(
+            placed_building.tile.x() + offset.x(),
+            placed_building.tile.y() + offset.y(),
+        );
+        if let Some(other) = grid.entity_at(p)
+            && let Some(module) = world.get::<PowerModule>(other)
+            && !represented.contains(&module.graph)
+        {
+            represented.push(module.graph);
+        }
+    }
+
+    let mut candidates: Vec<Entity> = Vec::new();
+    for entity_ref in world.iter_entities() {
+        let other = entity_ref.id();
+        if other == placed {
+            continue;
+        }
+        let Some(config) = world.get::<PowerNodeConfig>(other) else {
+            continue;
+        };
+        if !config.autolink {
+            continue;
+        }
+        let links = world
+            .get::<PowerModule>(other)
+            .map(|module| module.links.len())
+            .unwrap_or(0);
+        if links >= config.max_nodes as usize {
+            continue;
+        }
+        let Some(other_params) = read_power_info(world, other) else {
+            continue;
+        };
+        if other_params.team != team {
+            continue;
+        }
+        if let Some(module) = world.get::<PowerModule>(other)
+            && represented.contains(&module.graph)
+        {
+            continue;
+        }
+        if !overlaps(world, other, placed, config.laser_range * TILE_SIZE) {
+            continue;
+        }
+        let Some(other_building) = world.get::<Building>(other) else {
+            continue;
+        };
+        if insulated(world, grid, other_building.tile, placed_building.tile) {
+            continue;
+        }
+        // Do not link to adjacent buildings.
+        let adjacent = crate::world::edges::edges(block_size(world, placed).unwrap_or(1))
+            .iter()
+            .any(|offset| {
+                let p = TilePos::new(
+                    placed_building.tile.x() + offset.x(),
+                    placed_building.tile.y() + offset.y(),
+                );
+                grid.entity_at(p) == Some(other)
+            });
+        if adjacent {
+            continue;
+        }
+        candidates.push(other);
+    }
+
+    let dist2 = |entity: Entity| -> f32 {
+        let Some(building) = world.get::<Building>(entity) else {
+            return f32::MAX;
+        };
+        let dx = building.tile.x() as f32 - placed_building.tile.x() as f32;
+        let dy = building.tile.y() as f32 - placed_building.tile.y() as f32;
+        dx * dx + dy * dy
+    };
+    candidates.sort_by(|a, b| {
+        dist2(*a)
+            .total_cmp(&dist2(*b))
+            .then_with(|| a.index().cmp(&b.index()))
+    });
+    out.extend(candidates);
+}
+
 /// Node `Integer` config: link when absent, unlink + reflow when present.
 pub fn configure_link(
     graphs: &mut PowerGrids,

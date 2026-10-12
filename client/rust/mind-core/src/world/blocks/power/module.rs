@@ -49,6 +49,8 @@ pub struct PowerParams {
     pub time_scale: f32,
     /// `Building.shouldConsumePower` (`updateConsumption` output).
     pub should_consume_power: bool,
+    /// `Building.shouldConsume()` (T1; read by `requestedPower`).
+    pub should_consume: bool,
     /// `getPowerProduction()` (behavior-supplied via [`PowerProduction`]).
     pub production: f32,
     /// Owning graph handle stored on the module.
@@ -121,6 +123,7 @@ pub fn read_power_info(world: &World, entity: Entity) -> Option<PowerParams> {
         team,
         time_scale: building.time_scale,
         should_consume_power: building.should_consume_power,
+        should_consume: building.should_consume,
         production,
         graph: module.graph,
         init: module.init,

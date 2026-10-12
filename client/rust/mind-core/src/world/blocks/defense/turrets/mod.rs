@@ -153,6 +153,8 @@ pub enum TurretKind {
 pub struct TurretConfig {
     /// Ammo family.
     pub ammo: TurretAmmo,
+    /// `ContinuousLiquidTurret.liquidConsumed` (per-tick fuel drain; T14).
+    pub liquid_consumed: f32,
     /// `BaseTurret.range`.
     pub range: f32,
     /// `ReloadTurret.reload` (ticks between shots).
@@ -318,6 +320,8 @@ pub struct TurretState {
     pub is_shooting: bool,
     /// `BaseTurretBuild.activationTimer`.
     pub activation_timer: f32,
+    /// `ContinuousLiquidTurretBuild.activated` (T14): the four-tick fuel latch.
+    pub activated: bool,
     /// `TurretBuild.logicControlTime`.
     pub logic_control_time: f32,
     /// `TurretBuild.logicShooting`.
@@ -419,6 +423,7 @@ impl TurretState {
             was_shooting: false,
             is_shooting: false,
             activation_timer: activation,
+            activated: false,
             logic_control_time: -1.0,
             logic_shooting: false,
             bullets: SmallVec::new(),
@@ -641,6 +646,7 @@ fn config_for_inner(
             let silicon = item_ammo("silicon", "duo_silicon")?;
             Some(TurretConfig {
                 ammo: TurretAmmo::Item(vec![copper, graphite, silicon]),
+                liquid_consumed: 1.0 / 60.0,
                 range: 160.0,
                 reload: 20.0,
                 max_ammo: 30,
@@ -699,6 +705,7 @@ fn config_for_inner(
             let copper = item_ammo("copper", "duo_copper")?;
             Some(TurretConfig {
                 ammo: TurretAmmo::Item(vec![copper]),
+                liquid_consumed: 1.0 / 60.0,
                 range: 120.0,
                 reload: 10.0,
                 max_ammo: 30,
@@ -757,6 +764,7 @@ fn config_for_inner(
             let water = liquid_ammo("water", "fuse")?;
             Some(TurretConfig {
                 ammo: TurretAmmo::Liquid(vec![water]),
+                liquid_consumed: 1.0 / 60.0,
                 range: 120.0,
                 reload: 5.0,
                 max_ammo: 0,
@@ -815,6 +823,7 @@ fn config_for_inner(
             let bullet = bullet("fuse")?;
             Some(TurretConfig {
                 ammo: TurretAmmo::Power(bullet),
+                liquid_consumed: 1.0 / 60.0,
                 range: 120.0,
                 reload: 10.0,
                 max_ammo: 0,
@@ -974,6 +983,13 @@ fn has_ammo_state(state: &TurretState, world: &World, e: Entity) -> bool {
             let Some(liquids) = world.get::<LiquidModule>(e) else {
                 return false;
             };
+            // `ContinuousLiquidTurret.hasAmmo` (`:124-126`; T14): the activated
+            // latch plus a correct, non-empty current liquid.
+            if state.config.kind == TurretKind::Continuous {
+                return state.activated
+                    && current_ammo_liquid(liquids, &state.config)
+                        .is_some_and(|liquid| liquids.get(liquid) > 0.0);
+            }
             ammo.iter()
                 .any(|entry| liquids.get(entry.liquid) >= 1.0 / entry.ammo_multiplier)
         }
@@ -985,6 +1001,26 @@ fn has_ammo_state(state: &TurretState, world: &World, e: Entity) -> bool {
                 .any(|stack| stack.content == entry.content && stack.count > 0)
         }),
     }
+}
+
+/// `LiquidModule.current`: the ammo liquid with the largest stored amount
+/// (`ContinuousLiquidTurret` reads `liquids.current()`/`currentAmount`, T14).
+fn current_ammo_liquid(
+    liquids: &LiquidModule,
+    config: &TurretConfig,
+) -> Option<crate::content::LiquidId> {
+    let TurretAmmo::Liquid(ammo) = &config.ammo else {
+        return None;
+    };
+    ammo.iter()
+        .map(|entry| entry.liquid)
+        .filter(|liquid| liquids.get(*liquid) > 0.0)
+        .max_by(|a, b| {
+            liquids
+                .get(*a)
+                .partial_cmp(&liquids.get(*b))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
 }
 
 /// `TurretBuild.canConsume`: power/heat gates (item/liquid gate handled by

@@ -564,6 +564,9 @@ impl Sim {
         self.pump_io(IoSet::Apply);
         self.triggers.fire(Trigger::Update, &mut self.ecs.0);
         self.schedule.run(&mut self.ecs.0);
+        // `BeamDrill.updateFacing`/`WallCrafter.getEfficiency` (T5): the facing
+        // rescan needs the grid, so it runs outside the scheduled behaviors.
+        self.refresh_facing_drills();
         // `Groups.fires`/`Groups.puddles.update()` (`Logic.updateEntities`):
         // fires burn/spread and puddles evaporate/apply statuses every tick
         // (PAR-0091). Damage they deal is picked up by `resolve_deaths` below.
