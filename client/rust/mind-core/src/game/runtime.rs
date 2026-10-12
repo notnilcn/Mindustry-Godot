@@ -844,14 +844,7 @@ pub fn weather_system(world: &mut World) {
         .rules
         .weather
         .retain(|entry| runtime.content.weather_by_name(&entry.weather).is_some());
-    if !campaign.session.rules.weather.is_empty()
-        && campaign
-            .session
-            .rules
-            .weather
-            .iter()
-            .all(|entry| entry.cooldown == 0.0)
-    {
+    if !campaign.session.rules.weather.is_empty() && campaign.session.weather_reset_pending {
         // `PlayEvent`: shuffle then `cooldown = sum + random(maxFrequency)`.
         let mut order: Vec<usize> = (0..campaign.session.rules.weather.len()).collect();
         for i in (1..order.len()).rev() {
@@ -871,6 +864,7 @@ pub fn weather_system(world: &mut World) {
             campaign.session.rules.weather[index].cooldown = cooldown;
             sum += cooldown;
         }
+        campaign.session.weather_reset_pending = false;
     }
 
     for index in 0..campaign.session.rules.weather.len() {
@@ -1365,6 +1359,79 @@ mod tests {
             after > before,
             "ordered unit moves toward the core ({before} -> {after})"
         );
+    }
+
+    /// PAR-0127: every `logic_play` re-arms the weather cooldowns (`PlayEvent`
+    /// shuffle + cumulative assignment, Logic.java:90-99) instead of only when
+    /// all of them read zero, so a loaded save with pending cooldowns still
+    /// re-shuffles exactly like Ctrl+Shift+F9/new game.
+    #[test]
+    fn weather_cooldowns_reset_on_play() {
+        use crate::game::play::logic_play;
+        use crate::game::rules::WeatherEntry;
+        use crate::sim::unit_runtime::UnitRuntime;
+        use crate::world::WorldGrid;
+
+        let registry = {
+            let mut registry = content();
+            registry.init().expect("init");
+            registry
+        };
+        let grid = WorldGrid::new(32, 32);
+        let runtime_content = {
+            let mut content = content();
+            content.init().expect("init");
+            content
+        };
+        let mut world = World::new();
+        world.insert_non_send(UnitRuntime::new(runtime_content, &grid, 2));
+
+        let campaign = campaign(&registry);
+        let mut session = PlaySession::new(Rules {
+            weather: vec![
+                WeatherEntry {
+                    weather: String::from("rain"),
+                    cooldown: 9999.0,
+                    max_frequency: 600.0,
+                    ..WeatherEntry::default()
+                },
+                WeatherEntry {
+                    weather: String::from("snowing"),
+                    cooldown: 9999.0,
+                    max_frequency: 600.0,
+                    ..WeatherEntry::default()
+                },
+            ],
+            ..Rules::default()
+        });
+        session.phase = State::Playing;
+        world.insert_resource(CampaignRuntime::new(session, campaign));
+
+        {
+            let mut runtime = world
+                .remove_resource::<CampaignRuntime>()
+                .expect("campaign runtime");
+            logic_play(&mut runtime.session);
+            world.insert_resource(runtime);
+        }
+        weather_system(&mut world);
+
+        let runtime = world
+            .remove_resource::<CampaignRuntime>()
+            .expect("campaign runtime");
+        assert!(
+            !runtime.session.weather_reset_pending,
+            "the reset flag is consumed by the first weather tick"
+        );
+        for entry in &runtime.session.rules.weather {
+            assert!(
+                entry.cooldown < 9999.0,
+                "{} cooldown re-armed: {}",
+                entry.weather,
+                entry.cooldown
+            );
+        }
+        world.insert_resource(runtime);
     }
 
     #[test]

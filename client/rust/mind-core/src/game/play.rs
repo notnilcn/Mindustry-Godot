@@ -133,6 +133,9 @@ pub struct PlaySession {
     pub allow_launch_loadout: bool,
     /// Whether the sector preset adds starting items.
     pub add_starting_items: bool,
+    /// `PlayEvent` weather cooldown re-shuffle pending (`Logic.java:90-99`):
+    /// set by every `logic_play` and consumed once by `weather_system`.
+    pub weather_reset_pending: bool,
 }
 
 impl Default for PlaySession {
@@ -164,6 +167,7 @@ impl PlaySession {
             difficulty_wave_time_multiplier: 1.0,
             allow_launch_loadout: false,
             add_starting_items: false,
+            weather_reset_pending: false,
         }
     }
 
@@ -493,6 +497,9 @@ pub fn logic_play(session: &mut PlaySession) -> Vec<PlayEvent> {
     session.stats.reset();
     // Map objectives load with the map (`state.rules.objectives`).
     session.objectives = MapObjectivesRuntime::from_rules(&session.rules);
+    // `PlayEvent` weather reset (`Logic.java:90-99`): re-shuffled once per play,
+    // including save loads, rather than only when every cooldown reads zero.
+    session.weather_reset_pending = true;
     vec![PlayEvent::Play]
 }
 
