@@ -2885,6 +2885,19 @@ impl MindSimHost {
             "construct",
             &self.construct_draw(x, y).is_some().to_variant(),
         );
+        // `Rules.limitMapArea` play area (`World.getDarkness` border half);
+        // `null` when unrestricted.
+        match self.sim.grid.limit_area {
+            Some((lx, ly, lw, lh)) => {
+                let mut area = PackedInt32Array::new();
+                area.push(lx);
+                area.push(ly);
+                area.push(lw);
+                area.push(lh);
+                d.set("limit_area", &area.to_variant());
+            }
+            None => d.set("limit_area", &Variant::nil()),
+        }
         d
     }
 
