@@ -23,6 +23,7 @@ use godot::classes::{Control, INode, Node};
 use godot::obj::Base;
 use godot::prelude::*;
 
+use mind_core::determinism::SimCommand;
 use mind_core::input::{
     BindingState, BindingValue, FocusState, InputLocks, KeyBindTable, RawEvent, ids,
     key_display_name,
@@ -885,12 +886,36 @@ impl MindInput {
 
     /// Submits a building config (`tileConfig`) through the sim command queue.
     ///
-    /// `kind` is `none`/`string`/`content`/`item`/`number`/`bool`; content-ish
-    /// kinds carry the content name in `value`.
+    /// `kind` is `none`/`string`/`int`/`content`/`item`/`number`/`bool`;
+    /// content-ish kinds carry the content name in `value`. `string` and `int`
+    /// bypass `RemoteAction` (its `to_sim_config` collapses `String` to the
+    /// content wire) and enqueue the wire `Text`/`Int` value directly.
     #[func]
     pub fn configure_building(&mut self, x: i32, y: i32, kind: GString, value: GString) -> bool {
         let kind = kind.to_string();
         let value = value.to_string();
+        let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
+            return false;
+        };
+        let direct = match kind.as_str() {
+            "string" => Some(mind_core::determinism::ConfigValue::Text(value.clone())),
+            "int" => match value.parse::<i32>() {
+                Ok(number) => Some(mind_core::determinism::ConfigValue::Int(number)),
+                Err(_) => return false,
+            },
+            _ => None,
+        };
+        if let Some(config) = direct {
+            let Some(mut host) = self.bridge.host.clone() else {
+                return false;
+            };
+            host.bind_mut().enqueue_sim_command(SimCommand::Configure {
+                x,
+                y,
+                value: config,
+            });
+            return true;
+        }
         let config = match kind.as_str() {
             "none" => ConfigValue::None,
             "number" => match value.parse::<f64>() {
@@ -899,9 +924,6 @@ impl MindInput {
             },
             "bool" => ConfigValue::Bool(value == "true" || value == "1"),
             _ => ConfigValue::String(value),
-        };
-        let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
-            return false;
         };
         self.bridge
             .emit_action(mind_core::input::RemoteAction::Configure {

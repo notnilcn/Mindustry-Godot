@@ -205,6 +205,7 @@ impl SimRuntime {
             Wire::Int(value) => WorldConfigValue::Number(f64::from(*value)),
             Wire::Float(value) => WorldConfigValue::Number(f64::from(*value)),
             Wire::Bytes(bytes) => WorldConfigValue::Bytes(bytes.iter().copied().collect()),
+            Wire::Text(text) => WorldConfigValue::String(text.clone()),
             Wire::Content(name) => match self.content.by_name(name) {
                 Some(reference) => match reference.type_ {
                     ContentType::Item => WorldConfigValue::Item(ItemId::new(reference.id)),

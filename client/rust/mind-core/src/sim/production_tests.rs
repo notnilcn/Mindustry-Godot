@@ -471,6 +471,24 @@ fn reconstructor_needs_items_and_time() {
     assert_eq!(stored_item(&sim, rig, graphite), 0, "graphite consumed");
 }
 
+/// §7.0 (config prerequisite): free text reaches a building through the wire
+/// `Text` value and reads back as the behavior's `String` config.
+#[test]
+fn message_block_accepts_text_config() {
+    let mut sim = runtime_sim();
+    let message = place(&mut sim, "message", 5, 5);
+    sim.command(SimCommand::Configure {
+        x: 5,
+        y: 5,
+        value: crate::determinism::ConfigValue::Text("hello\nworld".to_owned()),
+    })
+    .expect("configure");
+    assert_eq!(
+        crate::world::config::read_config(&sim.ecs.0, message),
+        crate::world::config::ConfigValue::String("hello\nworld".to_owned())
+    );
+}
+
 /// Whether a unit of type `unit` exists in the sim.
 fn spawned_unit(sim: &Sim, unit: crate::content::UnitTypeId) -> bool {
     sim.ecs.0.iter_entities().any(|entity| {

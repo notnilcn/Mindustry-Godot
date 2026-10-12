@@ -703,6 +703,69 @@ impl MindSimHost {
         out
     }
 
+    /// Building config readback (`Building.config()`) as JSON, for config-UI
+    /// verification (`{"type":"string","value":...}`, `{"type":"item","id":..}`,
+    /// `null` for no config).
+    #[func]
+    pub fn building_config_json(&self, x: i32, y: i32) -> GString {
+        let entity = self
+            .sim
+            .grid
+            .tiles
+            .in_bounds(x, y)
+            .then(|| self.sim.grid.tile(x, y).build)
+            .flatten();
+        let Some(entity) = entity else {
+            return GString::from("null");
+        };
+        let config = mind_core::world::config::read_config(&self.sim.ecs.0, entity);
+        let value = config_to_json(&config);
+        GString::from(value.to_string().as_str())
+    }
+
+    /// Building config readback as a plain string (`nil` for non-string configs).
+    #[func]
+    pub fn building_config_string(&self, x: i32, y: i32) -> Variant {
+        let entity = self
+            .sim
+            .grid
+            .tiles
+            .in_bounds(x, y)
+            .then(|| self.sim.grid.tile(x, y).build)
+            .flatten();
+        let Some(entity) = entity else {
+            return Variant::nil();
+        };
+        match mind_core::world::config::read_config(&self.sim.ecs.0, entity) {
+            mind_core::world::config::ConfigValue::String(text) => Variant::from(text.as_str()),
+            _ => Variant::nil(),
+        }
+    }
+
+    /// `Building.enabled` at `(x, y)` (`nil` when the tile has no building).
+    #[func]
+    pub fn building_enabled(&self, x: i32, y: i32) -> Variant {
+        let entity = self
+            .sim
+            .grid
+            .tiles
+            .in_bounds(x, y)
+            .then(|| self.sim.grid.tile(x, y).build)
+            .flatten();
+        let Some(entity) = entity else {
+            return Variant::nil();
+        };
+        match self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::entities::comp::Building>(entity)
+        {
+            Some(building) => Variant::from(building.enabled),
+            None => Variant::nil(),
+        }
+    }
+
     /// Power network values at `(x, y)` (`{graph_id, status, stored, init}`).
     #[func]
     pub fn power_debug(&self, x: i32, y: i32) -> Dictionary<GString, f64> {
@@ -2218,6 +2281,32 @@ fn core_items_json(sim: &Sim, content: &ContentRegistry) -> String {
 /// Item counts for the building at `(x, y)` as JSON; `None` when the tile has
 /// no item-capable building or its items total zero. See
 /// [`MindSimHost::block_items_json`].
+/// JSON view of a building's `config()` for the config-UI seams.
+fn config_to_json(value: &mind_core::world::config::ConfigValue) -> serde_json::Value {
+    use mind_core::world::config::ConfigValue as V;
+    use serde_json::json;
+    match value {
+        V::None => serde_json::Value::Null,
+        V::Item(id) => json!({"type": "item", "id": id.raw()}),
+        V::Liquid(id) => json!({"type": "liquid", "id": id.raw()}),
+        V::Block(id) => json!({"type": "block", "id": id.raw()}),
+        V::Unit(id) => json!({"type": "unit", "id": id.raw()}),
+        V::Content(type_, id) => json!({"type": "content", "content": type_.name(), "id": id}),
+        V::Point2(x, y) => json!({"type": "point", "x": x, "y": y}),
+        V::Point2Array(points) => json!({
+            "type": "point_array",
+            "points": points.iter().collect::<Vec<_>>()
+        }),
+        V::Number(number) => serde_json::Number::from_f64(*number)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
+        V::Bool(flag) => serde_json::Value::Bool(*flag),
+        V::Building(_) => json!({"type": "building"}),
+        V::Bytes(bytes) => json!({"type": "bytes", "len": bytes.len()}),
+        V::String(text) => json!({"type": "string", "value": text}),
+    }
+}
+
 fn block_items_json(sim: &Sim, content: &ContentRegistry, x: i32, y: i32) -> Option<String> {
     let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
         return None;
@@ -2247,8 +2336,7 @@ fn block_items_json(sim: &Sim, content: &ContentRegistry, x: i32, y: i32) -> Opt
 
 /// Resolves a Godot `user://` / `res://` path to a native path for plan-04
 /// `NativeFs` (the `SimIoHandler` runs in Godot-free `mind-core`).
-fn globalize(path: &GString) -> std::path::PathBuf {
-    let requested = path.to_string();
+fn globalize(path: &GString) -> std::path::PathBuf {    let requested = path.to_string();
     std::path::PathBuf::from(
         ProjectSettings::singleton()
             .globalize_path(&requested)

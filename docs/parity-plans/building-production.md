@@ -534,6 +534,16 @@ How the config UI works today:
 5. Test: `core/sim` test: configure a `message` block with `Text("hello\nworld")` and
    assert `MessageBehavior::config` returns `String("hello\nworld")`.
 
+**Status 2026-10-12:** done — wire `ConfigValue::Text(String)` (encode tag 6, decode 6, log
+round-trip entry) lowers to `WorldConfigValue::String` in `resolve_config`;
+`MindInput.configure_building` routes `"string"`/`"int"` straight into the command queue
+(`SimCommand::Configure` with the wire value) instead of collapsing through
+`RemoteAction`/`to_sim_config`. New `MindSimHost` seams: `building_config_json`,
+`building_config_string` and `building_enabled`. Test:
+`sim::production_tests::message_block_accepts_text_config`. In-engine on Ground Zero 170:
+`configure_building(145,65,"string","hello\nworld")` on a placed `message` block reads back
+`building_config_json` = `{"type":"string","value":"hello\nworld"}`.
+
 ### 7.1 PAR-0108: switch toggle
 - **Java:** `J/world/blocks/logic/SwitchBlock.java:28` `config(Boolean.class, ...)` and
   `:58-62` `configTapped(){ configure(!enabled); clickSound.at(this); return false; }`.
