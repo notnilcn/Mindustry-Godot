@@ -377,6 +377,16 @@ fresh profile (`tools/session-play.sh 5` after moving `$U` aside —
 `python3 -I /tmp/s5/mgst.py $U/config/settings.bin '^campaignselect|^lastplanet'`.
 Commit: `Fixes PAR-0158: honor campaignselect and lastplanet on the planet page`.
 
+**Status 2026-10-12:** done — commit `bb0e8df`. All three acceptance cases pass:
+(1) imported profile (`campaignselect=true`, `lastplanet=serpulo`) opens the
+page on Serpulo with no chooser (`chooser-skipped-serpulo.png`); (3)
+`_switch_planet("erekir")` writes `lastplanet=erekir` and the next boot reopens
+on Erekir (`planet-erekir.png`, `planet-erekir-after-restart.png`); (2) on a
+fresh profile (moved `$U` aside) the chooser shows (`chooser-fresh.png`), OK
+selects Serpulo's start sector 170 and writes `campaignselect=true` to
+settings.bin, and the next boot skips the chooser
+(`chooser-after-ok-restart.png`). Profile restored from `$U.bak` afterwards.
+
 ---
 
 ### D. Launch loadout — PAR-0085 (+ PAR-0054, PAR-0025/0026/0027)
