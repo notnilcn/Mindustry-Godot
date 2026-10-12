@@ -52,6 +52,7 @@ mod overlays;
 mod pixelate;
 mod shaders;
 mod shadow;
+mod shields;
 mod status;
 mod units;
 
@@ -231,6 +232,8 @@ pub struct MindWorldRenderer {
     debug: Option<DebugCollisionRenderer>,
     /// F6 status markers (`Layer.power` band; T14/PAR-0097).
     status: Option<Gd<status::StatusRenderer>>,
+    /// Shield domes/bubbles (`Layer.shields` band; T13/PAR-0129).
+    shields: Option<Gd<shields::ShieldRenderer>>,
     env: Option<EnvRenderer>,
     fog: Option<FogRenderer>,
     overlays: Option<OverlayRenderer>,
@@ -269,6 +272,7 @@ impl INode2D for MindWorldRenderer {
             light: None,
             debug: None,
             status: None,
+            shields: None,
             env: None,
             fog: None,
             overlays: None,
@@ -511,6 +515,14 @@ impl MindWorldRenderer {
             // count is fixed by the pipeline, not by content.
             power_band.clone().add_child(&node);
             self.status = Some(node.clone());
+        }
+        // Shield domes/bubbles at `Layer.shields` (`ForceProjector.drawShield`).
+        if let Some(shield_band) = self.band_node_at(BandKey::base(Layer::Shields)) {
+            let node = shields::ShieldRenderer::new_alloc();
+            // code-instantiated: one shield pass; the node count is fixed by
+            // the pipeline, not by content.
+            shield_band.clone().add_child(&node);
+            self.shields = Some(node.clone());
         }
         if let Some(light_band) = self.band_node_at(BandKey::base(Layer::Light)) {
             self.env = Some(EnvRenderer::new(light_band));

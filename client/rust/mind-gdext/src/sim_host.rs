@@ -2559,6 +2559,90 @@ impl MindSimHost {
         Some((state.rotation, dx, dy, state.heat))
     }
 
+    /// Force-projector domes: `(x, y, real radius, sides, rotation degrees,
+    /// team, hit)` for every unbroken projector (`ForceProjector.drawShield`,
+    /// `ForceProjector.java:308-330`). Rust-only seam for the shield pass
+    /// (T13/PAR-0129).
+    pub fn force_shields(&self) -> Vec<(f32, f32, f32, u8, f32, u8, f32)> {
+        use mind_core::world::blocks::defense::shields::ForceProjectorState;
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for entity in self.sim.ecs.0.iter_entities() {
+            let Some(state) = entity.get::<ForceProjectorState>() else {
+                continue;
+            };
+            if state.broken {
+                continue;
+            }
+            let Some(building) = entity.get::<mind_core::entities::comp::Building>() else {
+                continue;
+            };
+            let Some(comp) = entity.get::<mind_core::ecs::BuildingComp>() else {
+                continue;
+            };
+            let Some(def) = content.block(building.block) else {
+                continue;
+            };
+            // `realRadius()` (the state method mirrors the Java formula).
+            let radius = state.real_radius();
+            if radius <= 0.001 {
+                continue;
+            }
+            out.push((
+                f32::from(building.tile.x()) * 8.0 + def.offset,
+                f32::from(building.tile.y()) * 8.0 + def.offset,
+                radius,
+                state.sides.clamp(3, 300) as u8,
+                state.shield_rotation,
+                comp.team.0,
+                state.hit,
+            ));
+        }
+        out
+    }
+
+    /// Unit shield bubbles: `(x, y, radius, alpha, team, hit)` for every unit
+    /// with a `ShieldComp` (`UnitType.drawShield`: radius `hitSize * 1.3`,
+    /// colour `shieldColor.lerp(white, clamp(hitTime/2)).a(0.7 * shieldAlpha)`;
+    /// the port has no `hitTime`, so hit is 0). Rust-only seam (T13).
+    pub fn unit_shields(&self) -> Vec<(f32, f32, f32, f32, u8, f32)> {
+        use mind_core::entities::comp::Pos;
+        use mind_core::entities::comp::unit::comp::{ShieldComp, UnitTypeComp};
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for entity in self.sim.ecs.0.iter_entities() {
+            let Some(_shield) = entity.get::<ShieldComp>() else {
+                continue;
+            };
+            let Some(pos) = entity.get::<Pos>() else {
+                continue;
+            };
+            let Some(type_comp) = entity.get::<UnitTypeComp>() else {
+                continue;
+            };
+            let Some(def) = content.unit(type_comp.type_id) else {
+                continue;
+            };
+            let team = entity
+                .get::<mind_core::entities::comp::TeamComp>()
+                .map(|comp| comp.team)
+                .unwrap_or(0);
+            out.push((
+                pos.x,
+                pos.y,
+                def.hit_size * 1.3,
+                0.55, // `shieldAlpha` default (`UnitType.shieldAlpha`)
+                team,
+                0.0,
+            ));
+        }
+        out
+    }
+
     /// F6 status markers (`BuildingComp.drawStatus`/`status()`): one row per
     /// player-team building with a non-empty `consumes` —
     /// `(center tile x, center tile y, world x, world y, size, java_color)`.
