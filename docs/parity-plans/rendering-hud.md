@@ -209,6 +209,8 @@ Crop `(440,340)-(720,500)` to compare. Java reference for belt/turret look: `run
 - `BlockRenderer::needs_rebuild` early-outs on camera key + `world_revision`; the WIP keeps rebuilding while construct sites are visible (`animating`). Conveyor animation (`frame = (int)(Time.time*speed*8*timeScale*efficiency) % 4`) also needs per-frame rebuilds — gate on "any animated block visible".
 - The y-flip camera: `build_unit_mesh` maps the quad's world-bottom edge to `v1`. A rotation of `+90°` is CCW in world space. Java conveyor rotation 0 = facing +x.
 
+**Status 2026-10-12:** done — commit `3a25763`. Diagnosis: the base `-full` chain resolved fine; the placeholder was the team overlay drawing `resolve`'s `error` fallback for every block without a `<name>-team` region, plus an `air` floor painting one permanent miss. Verified in Ground Zero: five `place_block` calls → `missing_regions: 0`, real belt/wall/drill/duo sprites. Step 4 (blockbuild shader for construct sites) stays open — Ground Zero placement is instant (`tile_debug.construct == false`), so sites are unreachable there; the WIP accent-ghost remains.
+
 ---
 
 ### 3.2 PAR-0130 — items on conveyors are invisible
