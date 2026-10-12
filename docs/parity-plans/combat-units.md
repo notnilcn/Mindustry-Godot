@@ -982,6 +982,13 @@ Weather sectors (Frozen Forest) need a fresh profile; just verify with
 `get_group_counts()["weather"]` after editing rules is not possible from UI —
 rely on the unit test. Report the in-engine check as blocked by profile.
 
+**Status 2026-10-12:** done — commit 5eacb5e. `weather_system` (`Logic.updateWeather`
++ the `PlayEvent` cooldown seeding) runs in `TickSet::WeatherAndAi` before
+`team_ai_system`; the unit runtime rng drives durations/frequencies/wind,
+`group_counts()["weather"]` counts live weather, and `weather_water_attr` feeds
+the fire update. Test `weather_rain_spawns_and_wets_units`. In-engine check
+blocked by profile, as §10.5 expects.
+
 ---
 
 ## 11. PAR-0138 — payload carrier pickup/drop is a no-op
