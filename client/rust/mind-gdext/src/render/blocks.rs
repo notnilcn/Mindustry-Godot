@@ -26,7 +26,8 @@ use super::units::{UnitQuad, build_unit_mesh};
 
 /// `Pal.accent` (construct-site tint, `Draw.color(Pal.accent, ...)`).
 const ACCENT: u32 = 0xffd3_7fff;
-
+/// `Vars.itemSize` — belt item icons draw at 5 world px (`Conveyor.draw`).
+const ITEM_SIZE: f32 = 5.0;
 
 /// Block-renderer counters mirrored into `MindWorldRenderer`'s stats.
 #[derive(Clone, Copy, Debug, Default)]
@@ -127,18 +128,25 @@ impl BlockRenderer {
                 let anchor_x = (tile.x + (def.size - 1) / 2) as f32 * size + def.offset;
                 let anchor_y = (tile.y + (def.size - 1) / 2) as f32 * size + def.offset;
                 let rotation = host.building_rotation(tile.x, tile.y);
-                let mut push = |region: &ResolvedRegion, rot: f32, color: u32, frac: f32| {
+                let mut push = |region: &ResolvedRegion,
+                                cx: f32,
+                                cy: f32,
+                                quad_w: f32,
+                                quad_h: f32,
+                                rot: f32,
+                                color: u32,
+                                frac: f32| {
                     let entry = groups
                         .entry(region.page)
                         .or_insert((region.texture.clone(), Vec::new()));
                     let [u0, v0, u1, v1] = region.uv;
                     // `frac < 1`: bottom-up reveal (world y-up; v1 is the
                     // sprite's bottom row through the y-flip camera).
-                    let h = w * frac;
+                    let h = quad_h * frac;
                     entry.1.push(UnitQuad {
-                        cx: anchor_x,
-                        cy: anchor_y - (w - h) / 2.0,
-                        w,
+                        cx,
+                        cy: cy - (quad_h - h) / 2.0,
+                        w: quad_w,
                         h,
                         rot,
                         uv: [u0, v1 - (v1 - v0) * frac, u1, v1],
@@ -159,10 +167,28 @@ impl BlockRenderer {
                         } else {
                             0.0
                         };
-                        push(&region, rot, (ACCENT & !0xff) | 0x70, 1.0);
+                        push(
+                            &region,
+                            anchor_x,
+                            anchor_y,
+                            w,
+                            w,
+                            rot,
+                            (ACCENT & !0xff) | 0x70,
+                            1.0,
+                        );
                         let progress = progress.clamp(0.0, 1.0);
                         if progress > 0.0 {
-                            push(&region, rot, 0xffff_ffff, progress);
+                            push(
+                                &region,
+                                anchor_x,
+                                anchor_y,
+                                w,
+                                w,
+                                rot,
+                                0xffff_ffff,
+                                progress,
+                            );
                         }
                         animating = true;
                         dynamic += 1;
@@ -176,33 +202,72 @@ impl BlockRenderer {
                     0.0
                 };
                 match self.block_region(def) {
-                    Some(region) => push(&region, rot, 0xffff_ffff, 1.0),
+                    Some(region) => {
+                        push(&region, anchor_x, anchor_y, w, w, rot, 0xffff_ffff, 1.0);
+                        // `Conveyor.draw` item loop (`Draw.z(Layer.block -
+                        // 0.1)`, above the belt): `Vars.itemSize` world-px
+                        // `item-<name>` quads at their belt positions.
+                        if matches!(def.kind, BlockKind::Conveyor | BlockKind::ArmoredConveyor)
+                            && let Some((belt_rot, items)) = host.conveyor_items(tile.x, tile.y)
+                            && !items.is_empty()
+                        {
+                            let xs: Vec<f32> = items.iter().map(|(_, xs, _)| *xs).collect();
+                            let ys: Vec<f32> = items.iter().map(|(_, _, ys)| *ys).collect();
+                            let positions = mind_core::render::belt_item_positions(
+                                anchor_x, anchor_y, belt_rot, &xs, &ys,
+                            );
+                            for ((item, _, _), (ix, iy)) in items.iter().zip(positions) {
+                                let Some(item_def) = content.item(*item) else {
+                                    continue;
+                                };
+                                let Some(region) =
+                                    self.resolver.find(&format!("item-{}", item_def.name))
+                                else {
+                                    continue;
+                                };
+                                push(&region, ix, iy, ITEM_SIZE, ITEM_SIZE, 0.0, 0xffff_ffff, 1.0);
+                            }
+                            // Items move without a world-revision bump: keep
+                            // rebuilding while any visible belt carries some.
+                            animating = true;
+                        }
+                    }
                     None => {
+                        // All three candidates missed (no `-full`, no
+                        // `def.region`, no `<name>-0-0`): fall back to the
+                        // `error` placeholder; the resolver logs the miss.
                         if let Some(region) = self.resolver.resolve(&def.region) {
-                            push(&region, rot, 0xffff_ffff, 1.0);
+                            push(&region, anchor_x, anchor_y, w, w, rot, 0xffff_ffff, 1.0);
                         }
                     }
                 }
-                // `Block.drawTeamOverlay` -> `Building.drawTeam`: the per-team
-                // pre-coloured region (`<name>-team-<team>`) over the base
-                // sprite, else the `<name>-team` mask tinted with the team
-                // colour (`BlockRenderer` draws it after the base).
+                // `Building.draw() -> drawTeamTop()`: the per-team region over
+                // the base sprite, only when the block actually loads one
+                // (`Block.teamRegion.found()`): the pre-coloured
+                // `<name>-team-<team>` region when present, else the
+                // `<name>-team` mask tinted with the team colour. Blocks with
+                // no team region (conveyors, turrets) draw nothing — never the
+                // `error` fallback that `resolve` would hand back.
                 if def.draw_team_overlay
                     && let Some(team) = host.building_team(tile.x, tile.y)
                 {
                     let team_name = mind_core::game::team::Team::get(team).name.clone();
-                    let (resolved, tint) = match self
+                    if let Some(region) = self
                         .resolver
-                        .resolve(&format!("{}-team-{}", def.name, team_name))
+                        .find(&format!("{}-team-{}", def.name, team_name))
                     {
-                        Some(region) => (Some(region), 0xffff_ffff),
-                        None => (
-                            self.resolver.resolve(&format!("{}-team", def.name)),
+                        push(&region, anchor_x, anchor_y, w, w, 0.0, 0xffff_ffff, 1.0);
+                    } else if let Some(region) = self.resolver.find(&format!("{}-team", def.name)) {
+                        push(
+                            &region,
+                            anchor_x,
+                            anchor_y,
+                            w,
+                            w,
+                            0.0,
                             mind_core::game::team::Team::get(team).color.to_rgba8888(),
-                        ),
-                    };
-                    if let Some(region) = resolved {
-                        push(&region, 0.0, tint, 1.0);
+                            1.0,
+                        );
                     }
                 }
                 dynamic += 1;
@@ -221,11 +286,11 @@ impl BlockRenderer {
     /// generated icon (base + top layers, e.g. turret base + barrel, drill
     /// rotator/top) when the generator emitted one, else `Block.region`, else
     /// the `Conveyor.regions[0][0]` frame. `None` when nothing is packed.
+    /// The candidate chain itself lives in `mind_core::render`.
     fn block_region(&mut self, def: &BlockDef) -> Option<ResolvedRegion> {
-        self.resolver
-            .find(&format!("block-{}-full", def.name))
-            .or_else(|| self.resolver.find(&def.region))
-            .or_else(|| self.resolver.find(&format!("{}-0-0", def.name)))
+        mind_core::render::block_region_candidates(&def.name, &def.region)
+            .into_iter()
+            .find_map(|name| self.resolver.find(&name))
     }
 
     fn apply_groups(&mut self, groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<UnitQuad>)>) {

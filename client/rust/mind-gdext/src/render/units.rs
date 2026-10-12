@@ -12,8 +12,8 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use godot::classes::mesh::PrimitiveType;
-use godot::classes::{ArrayMesh, Mesh, MeshInstance2D, Node2D, SurfaceTool, Texture2D};
-use godot::obj::NewGd;
+use godot::classes::{ArrayMesh, Mesh, MeshInstance2D, Node2D, SurfaceTool, Texture2D, Time};
+use godot::obj::{NewGd, Singleton};
 use godot::prelude::*;
 
 use crate::sim_host::MindSimHost;
@@ -88,34 +88,158 @@ impl UnitRenderer {
     }
 
     /// Rebuilds the per-bucket unit meshes; called once per frame.
+    ///
+    /// Composition follows `UnitType.draw` (`:1471-1560`): `drawSoftShadow`,
+    /// `drawMech` legs, outline, body, `drawCell`, `drawWeapons`.
     pub fn update(&mut self) {
-        let draws = self.host.clone().bind().unit_draws();
+        let draws = self.host.clone().bind().unit_draws_full();
+        let time = Time::singleton().get_ticks_msec() as f32 / 1000.0;
         let mut groups: BTreeMap<(usize, i32), UnitBucket> = BTreeMap::new();
         let mut sprites = 0i64;
-        for (x, y, rotation, region, flying, low_altitude) in draws {
-            let bucket = if low_altitude {
+        for unit in draws {
+            let bucket = if unit.low_altitude {
                 1
-            } else if flying {
+            } else if unit.flying {
                 2
             } else {
                 0
             };
-            let Some(resolved) = self.resolver.resolve(&region) else {
+            let Some(body) = self.resolver.resolve(&unit.name) else {
                 continue;
             };
-            let entry = groups
-                .entry((bucket, resolved.page))
-                .or_insert((resolved.texture.clone(), Vec::new()));
-            entry.1.push(UnitQuad {
-                cx: x,
-                cy: y,
-                w: resolved.w * self.sprite_scale,
-                h: resolved.h * self.sprite_scale,
-                rot: rotation,
-                uv: resolved.uv,
-                color: 0xffff_ffff,
-            });
-            sprites += 1;
+            // `drawSoftShadow`: `max(region.w, region.h) * region.scl() *
+            // softShadowScl * 1.6`, colour `(0,0,0,0.4)`.
+            if let Some(shadow) = self.resolver.find("circle-shadow") {
+                let size = body.w.max(body.h) * self.sprite_scale;
+                let entry = groups
+                    .entry((bucket, shadow.page))
+                    .or_insert((shadow.texture.clone(), Vec::new()));
+                entry.1.push(UnitQuad {
+                    cx: unit.x,
+                    cy: unit.y,
+                    w: size * 1.6,
+                    h: size * 1.6,
+                    rot: 0.0,
+                    uv: shadow.uv,
+                    color: 0x0000_0066,
+                });
+                sprites += 1;
+            }
+            // `drawMech`: two mirrored `<name>-leg` quads (`Mathf.signs`).
+            if let Some(mech) = &unit.mech
+                && let Some(leg) = self.resolver.find(&format!("{}-leg", unit.name))
+            {
+                let transforms = mind_core::render::mech_leg_transforms(
+                    mech.base_rotation,
+                    mech.walk_time,
+                    mech.stride,
+                    unit.elevation,
+                );
+                let extension =
+                    mind_core::render::mech_walk_extend(mech.walk_time, mech.stride, false)
+                        * (1.0 - unit.elevation);
+                for (index, (dx, dy, sx, sy, rot)) in transforms.iter().enumerate() {
+                    let sign = if index == 0 { -1.0 } else { 1.0 };
+                    let tint = mind_core::render::to_bits(mind_core::render::pal::DARK_METAL);
+                    let alpha = (sign * extension / mech.stride.max(0.001)).clamp(0.0, 1.0);
+                    let [u0, v0, u1, v1] = leg.uv;
+                    let uv = if *sx < 0.0 {
+                        [u1, v0, u0, v1]
+                    } else {
+                        [u0, v0, u1, v1]
+                    };
+                    let entry = groups
+                        .entry((bucket, leg.page))
+                        .or_insert((leg.texture.clone(), Vec::new()));
+                    entry.1.push(UnitQuad {
+                        cx: unit.x + dx,
+                        cy: unit.y + dy,
+                        w: leg.w * self.sprite_scale,
+                        h: leg.h * self.sprite_scale * *sy,
+                        rot: *rot,
+                        uv,
+                        color: mix_rgba(0xffff_ffff, tint, alpha),
+                    });
+                    sprites += 1;
+                }
+            }
+            // `drawBody` (`rotation - 90`; the port draws trimmed sizes, which
+            // is what Arc's `Draw.rect(region, x, y)` does for centered trims).
+            {
+                let entry = groups
+                    .entry((bucket, body.page))
+                    .or_insert((body.texture.clone(), Vec::new()));
+                entry.1.push(UnitQuad {
+                    cx: unit.x,
+                    cy: unit.y,
+                    w: body.w * self.sprite_scale,
+                    h: body.h * self.sprite_scale,
+                    rot: unit.rotation - 90.0,
+                    uv: body.uv,
+                    color: 0xffff_ffff,
+                });
+                sprites += 1;
+            }
+            // `drawCell`: `<name>-cell` else `power-cell`, tinted by
+            // `UnitType.cellColor`.
+            let cell = self
+                .resolver
+                .find(&format!("{}-cell", unit.name))
+                .or_else(|| self.resolver.find("power-cell"));
+            if let Some(cell) = cell {
+                let team = mind_core::game::team::Team::get(unit.team)
+                    .color
+                    .to_rgba8888();
+                let entry = groups
+                    .entry((bucket, cell.page))
+                    .or_insert((cell.texture.clone(), Vec::new()));
+                entry.1.push(UnitQuad {
+                    cx: unit.x,
+                    cy: unit.y,
+                    w: cell.w * self.sprite_scale,
+                    h: cell.h * self.sprite_scale,
+                    rot: unit.rotation - 90.0,
+                    uv: cell.uv,
+                    color: mind_core::render::cell_color(team, unit.healthf, time),
+                });
+                sprites += 1;
+            }
+            // `drawWeapons` (`Weapon.draw` mount transform + flip mirror).
+            for weapon in &unit.weapons {
+                let Some(region) = self.resolver.find(&weapon.name) else {
+                    continue;
+                };
+                let (wx, wy, wr) = mind_core::render::unit_draw::weapon_mount_transform(
+                    unit.x,
+                    unit.y,
+                    unit.rotation,
+                    weapon.x,
+                    weapon.y,
+                    weapon.rotate,
+                    weapon.mount_rotation,
+                    weapon.base_rotation,
+                    weapon.recoil,
+                );
+                let [u0, v0, u1, v1] = region.uv;
+                let uv = if weapon.flip {
+                    [u1, v0, u0, v1]
+                } else {
+                    [u0, v0, u1, v1]
+                };
+                let entry = groups
+                    .entry((bucket, region.page))
+                    .or_insert((region.texture.clone(), Vec::new()));
+                entry.1.push(UnitQuad {
+                    cx: wx,
+                    cy: wy,
+                    w: region.w * self.sprite_scale,
+                    h: region.h * self.sprite_scale,
+                    rot: wr,
+                    uv,
+                    color: 0xffff_ffff,
+                });
+                sprites += 1;
+            }
         }
 
         let live: HashSet<(usize, i32)> = groups.keys().copied().collect();
@@ -153,6 +277,17 @@ impl UnitRenderer {
         self.stats.sprites = sprites;
         self.stats.missing_regions = self.resolver.missing();
     }
+}
+
+/// `Draw.mixcol(color, alpha)`: lerp an RGBA8888 toward `target`'s RGB.
+fn mix_rgba(base: u32, target: u32, t: f32) -> u32 {
+    let t = t.clamp(0.0, 1.0);
+    let channel = |shift: u32| {
+        let from = ((base >> shift) & 0xff) as f32;
+        let to = ((target >> shift) & 0xff) as f32;
+        (from + (to - from) * t) as u32
+    };
+    (channel(24) << 24) | (channel(16) << 16) | (channel(8) << 8) | 0xff
 }
 
 /// Builds an `ArrayMesh` from rotated quads (two triangles each).

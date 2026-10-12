@@ -209,6 +209,8 @@ Crop `(440,340)-(720,500)` to compare. Java reference for belt/turret look: `run
 - `BlockRenderer::needs_rebuild` early-outs on camera key + `world_revision`; the WIP keeps rebuilding while construct sites are visible (`animating`). Conveyor animation (`frame = (int)(Time.time*speed*8*timeScale*efficiency) % 4`) also needs per-frame rebuilds — gate on "any animated block visible".
 - The y-flip camera: `build_unit_mesh` maps the quad's world-bottom edge to `v1`. A rotation of `+90°` is CCW in world space. Java conveyor rotation 0 = facing +x.
 
+**Status 2026-10-12:** done — commit `3a25763`. Diagnosis: the base `-full` chain resolved fine; the placeholder was the team overlay drawing `resolve`'s `error` fallback for every block without a `<name>-team` region, plus an `air` floor painting one permanent miss. Verified in Ground Zero: five `place_block` calls → `missing_regions: 0`, real belt/wall/drill/duo sprites. Step 4 (blockbuild shader for construct sites) stays open — Ground Zero placement is instant (`tile_debug.construct == false`), so sites are unreachable there; the WIP accent-ghost remains.
+
 ---
 
 ### 3.2 PAR-0130 — items on conveyors are invisible
@@ -247,6 +249,8 @@ for(int i = 0; i < len; i++){
 **Verify.** `get_stats().dynamic_sprites` increases by the number of belt items; screenshot shows icons.
 **Pitfalls.** Item ids → names need the content registry (`content.item(id)`); the band for items is `Layer.block - 0.1` which is the same `Layer::Block` band — order inside the mesh decides overlap.
 
+**Status 2026-10-12:** done — commit `4c813b0`. `belt_item_positions` + the `conveyor_items` seam; item quads draw above the belt and the pass rebuilds while items are visible. Verified with a drill on `ore-copper` feeding a nine-belt line (`par0130-n1.png` vs `par0130-n3.png`). Duct/stack-conveyor items not done (their `current`/segment state is separate); belt frame animation (`regions[b][frame]`) still static frame 0.
+
 ---
 
 ### 3.3 Hover info (ore "Copper" popup) + PAR-0094 block info panel
@@ -276,6 +280,8 @@ for(int i = 0; i < len; i++){
 
 **Tests.** mind-core pure helper for the requirement colour: `fn requirement_color(have: i32, need: i32) -> &'static str` (`"scarlet"|"accent"|"white"`), unit-tested at boundaries (`have < need/2`, `have < need`, `>=`).
 **Verify.** Hover ore: `godot_input mouse_motion` to the screen point of an ore tile (`Camera2D.tile_to_screen(x,y)` → viewport coords), screenshot; select conveyor via `get_node("/root/Spine/Input").select_block_by_name("conveyor")`, screenshot.
+
+**Status 2026-10-12:** done — commit `9e450a1`. `hover_info` + `block_requirements_json` seams, `requirement_color` (+tests), `BlockCategoryView.ordinal`, `TopTable`/`TopDivider` scene nodes and the fragment's per-frame top table. Verified: conveyor shows "Key: [3,1]" + "Copper 0/1" scarlet (`par0094-d-selected.png`); ore hover shows the copper icon + "Copper" (`par0094-c4-hover.png`). Notes: the `[accent]/[white]` colours and infinite-resources `*/n` path are not reachable in Ground Zero (fresh core); the `?` opens the `content` dialog; unit-hover path untested in-engine (no enemy unit in range). The top table reuses `mouse_filter == STOP` (not raw `gui_get_hovered_control != null`) because the HUD fragment root is a full-rect PASS control.
 **Pitfalls.** `gui_get_hovered_control` must be read from the root viewport (`get_tree().root.gui_get_hovered_control()`); the top table itself must not count as "UI has mouse" when the cursor is over the world. The fragment root has `mouse_filter` ignore regions — do not block world clicks.
 
 ---
@@ -314,6 +320,8 @@ for(int i = 0; i < len; i++){
 
 **Tests.** mind-core pure helpers in `client/rust/mind-core/src/render/unit_draw.rs`: `mech_leg_transforms(base_rot, extension, sin, elevation) -> [(dx, dy, sx, sy, rot); 2]` and `cell_color(team_rgba, healthf, time) -> u32`, with tests at `extension = 0` (legs at the centre) and `healthf = 1` (cell = team colour).
 **Verify.** `get_stats().unit_sprites` rises from 1 to ~5 per unit; screenshot the player after `godot_input` key `W` held.
+
+**Status 2026-10-12:** done (partial evidence) — commit `8ce2941`. `unit_draw.rs` helpers + tests, `unit_draws_full`/`UnitDraw`/`WeaponDraw`, and the composed pass (soft shadow, legs, body, cell, weapons) in `units.rs`. Alpha verified in-engine (body + team cell + soft shadow, `par0126-offcore.png`); the alpha has no `<name>-leg` region in vanilla (`assets-raw/sprites/units` has only `alpha.png`/`alpha-cell.png`), so "alpha legs" in the acceptance is upstream-inaccurate. Dagger legs/weapons not framed in-engine: wave enemies spawn ~175 tiles away, are inert (units/AI gap owned elsewhere), and the campaign camera re-centers on the player each frame, so `center_on_tile`/`spectate` do not stick. Step 3 (packer `-outline` generation + repack) is skipped: no unit/weapon `-outline` regions ship and the acceptance does not gate on outlines. `unit_debug_positions` kept as a debug probe.
 **Pitfalls.** The atlas is the 4× sprite set — always multiply region px by `sprite_scale` (already computed from `scale_marker`). Stripped regions need the offsets fix described in §3.1 step 5 (bodies are stripped: `dagger` 48×32 is not square). The units band nodes are per (layer bucket, page) — legs/body/weapons of one unit can be on different pages; order across pages is then by node order, so keep a single page where possible (all unit sprites are on page 0 today).
 
 ---

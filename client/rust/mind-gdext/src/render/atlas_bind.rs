@@ -133,9 +133,13 @@ impl RegionResolver {
         let assets = assets.bind();
         let mut geometry = region_geometry_with_variants(&assets, name);
         if geometry.is_empty() && !fallback {
+            // Optional region (team overlay, outline, ...): callers walk a
+            // chain, so a miss is normal and only interesting when debugging.
+            log::debug!("atlas find miss: `{name}`");
             return None;
         }
         if geometry.is_empty() && name != ERROR_REGION {
+            log::warn!("atlas error fallback: `{name}`");
             self.missing += 1;
             geometry = assets.region_geometry(GString::from(ERROR_REGION));
             if geometry.is_empty() {

@@ -306,6 +306,10 @@ pub struct BlockEntryView {
 pub struct BlockCategoryView {
     /// `Category.name()`.
     pub name: &'static str,
+    /// `Category.ordinal()` — the category hotkey digit derives from it
+    /// (`blockSelect[ordinal]` in `PlacementFragment`). Appended field; the
+    /// JSON contract stays append-only.
+    pub ordinal: usize,
     /// Localized label bundle key (`database-tag.<name>`).
     pub label: String,
     /// Buildable blocks in content order.
@@ -411,8 +415,10 @@ fn block_catalog_with(store: Option<&dyn UnlockStore>, planet: Option<&str>) -> 
         .or_else(|| registry.planet_id("serpulo"));
     let mut categories: Vec<BlockCategoryView> = Category::ALL
         .iter()
-        .map(|category| BlockCategoryView {
+        .enumerate()
+        .map(|(ordinal, category)| BlockCategoryView {
             name: category.name(),
+            ordinal,
             label: format!("database-tag.{}", category.name()),
             blocks: Vec::new(),
         })

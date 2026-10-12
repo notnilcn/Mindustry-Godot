@@ -21,6 +21,66 @@ use godot::prelude::*;
 use crate::camera::MindCamera2D;
 use crate::input::MindInput;
 use crate::settings;
+
+/// One belt slot as the renderer consumes it: `(item, xs, ys)` (`Conveyor.draw`
+/// item loop; `ConveyorBuild.ids/xs/ys`).
+pub type BeltItemSlot = (ItemId, f32, f32);
+
+/// One unit's full draw state (`UnitType.draw` composition; plan §3.4).
+pub struct UnitDraw {
+    /// World x.
+    pub x: f32,
+    /// World y.
+    pub y: f32,
+    /// Body rotation in degrees (`UnitCore.rotation`).
+    pub rotation: f32,
+    /// Unit type name (`UnitType.name`).
+    pub name: String,
+    /// `UnitType.flying`.
+    pub flying: bool,
+    /// `UnitType.lowAltitude`.
+    pub low_altitude: bool,
+    /// Owning team id.
+    pub team: u8,
+    /// Health fraction (`Unit.healthf()`).
+    pub healthf: f32,
+    /// Flight elevation `0..=1` (`UnitCore.elevation`).
+    pub elevation: f32,
+    /// Mech walk state (`MechComp`); `None` for non-mechs.
+    pub mech: Option<MechDraw>,
+    /// Live weapon mounts (`UnitWeapons`).
+    pub weapons: Vec<WeaponDraw>,
+}
+
+/// `MechComp` walk state resolved for drawing (`drawMech`).
+pub struct MechDraw {
+    /// Decoupled base rotation in degrees (`baseRotation`).
+    pub base_rotation: f32,
+    /// Walk-cycle timer (`walkTime`).
+    pub walk_time: f32,
+    /// `UnitType.mechStride`.
+    pub stride: f32,
+}
+
+/// One live weapon mount (`Weapon.draw` inputs).
+pub struct WeaponDraw {
+    /// Weapon region name (`Weapon.name`).
+    pub name: String,
+    /// Unit-relative mount x (`Weapon.x`).
+    pub x: f32,
+    /// Unit-relative mount y (`Weapon.y`).
+    pub y: f32,
+    /// Aiming rotation relative to the unit, degrees (`WeaponMount.rotation`).
+    pub mount_rotation: f32,
+    /// Rest rotation when `rotate` is false (`Weapon.baseRotation`).
+    pub base_rotation: f32,
+    /// Whether the mount rotates toward the target (`Weapon.rotate`).
+    pub rotate: bool,
+    /// Mirrored mount (`Weapon.flipSprite`).
+    pub flip: bool,
+    /// Visual recoil `0..1`.
+    pub recoil: f32,
+}
 use mind_core::audio::{AudioSinkRes, SharedAudioLog};
 use mind_core::command::Command;
 use mind_core::content::{
@@ -1603,6 +1663,39 @@ impl MindSimHost {
         dict
     }
 
+    /// Debug probe: `{name, x, y, team}` rows for every live unit (render
+    /// verification; companion to `tile_debug`).
+    #[func]
+    pub fn unit_debug_positions(&self) -> GString {
+        let rows: Vec<serde_json::Value> = self
+            .unit_draws_full()
+            .iter()
+            .map(|unit| {
+                serde_json::json!({
+                    "name": unit.name,
+                    "x": unit.x,
+                    "y": unit.y,
+                    "team": unit.team,
+                })
+            })
+            .collect();
+        GString::from(serde_json::Value::Array(rows).to_string().as_str())
+    }
+
+    /// Player unit world position as `[x, y]`, or empty when absent (render
+    /// verification probe).
+    #[func]
+    pub fn player_unit_pos(&self) -> PackedFloat32Array {
+        let mut out = PackedFloat32Array::new();
+        if let Some(entity) = self.sim.player_unit()
+            && let Some(pos) = self.sim.ecs.0.get::<mind_core::entities::comp::Pos>(entity)
+        {
+            out.push(pos.x);
+            out.push(pos.y);
+        }
+        out
+    }
+
     /// Whether the move axis reached the player unit
     /// (`HintsFragment.desktopMove` trigger).
     #[func]
@@ -1743,6 +1836,95 @@ impl MindSimHost {
                     def.flying,
                     def.low_altitude,
                 ))
+            })
+            .collect()
+    }
+
+    /// Full per-unit draw state (`UnitType.draw` composition; plan §3.4):
+    /// body/team/health plus mech walk state and weapon mounts. Rust-only.
+    pub fn unit_draws_full(&self) -> Vec<UnitDraw> {
+        use mind_core::entities::comp::Pos;
+        use mind_core::entities::comp::health::Health;
+        use mind_core::entities::comp::unit::comp::{MechComp, UnitCore, UnitTypeComp};
+        let Some(runtime) = self.sim.unit_runtime() else {
+            return Vec::new();
+        };
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return Vec::new();
+        };
+        runtime
+            .units
+            .iter()
+            .filter_map(|entity| {
+                let pos = self.sim.ecs.0.get::<Pos>(*entity)?;
+                let core = self.sim.ecs.0.get::<UnitCore>(*entity)?;
+                let type_comp = self.sim.ecs.0.get::<UnitTypeComp>(*entity)?;
+                let def = content.unit(type_comp.type_id)?;
+                let team = self
+                    .sim
+                    .ecs
+                    .0
+                    .get::<mind_core::entities::comp::TeamComp>(*entity)
+                    .map(|comp| comp.team)
+                    .unwrap_or(0);
+                let healthf = self
+                    .sim
+                    .ecs
+                    .0
+                    .get::<Health>(*entity)
+                    .map(Health::fraction)
+                    .unwrap_or(1.0);
+                let mech = self
+                    .sim
+                    .ecs
+                    .0
+                    .get::<MechComp>(*entity)
+                    .map(|mech| MechDraw {
+                        base_rotation: mech.base_rotation,
+                        walk_time: mech.walk_time,
+                        stride: def.mech_stride.max(0.001),
+                    });
+                let weapons = self
+                    .sim
+                    .ecs
+                    .0
+                    .get::<mind_core::weapons::UnitWeapons>(*entity)
+                    .map(|weapons| {
+                        weapons
+                            .weapons
+                            .iter()
+                            .enumerate()
+                            .map(|(index, weapon)| {
+                                let mount = weapons.mounts.get(index);
+                                WeaponDraw {
+                                    name: weapon.name.clone(),
+                                    x: weapon.x,
+                                    y: weapon.y,
+                                    mount_rotation: mount
+                                        .map(|mount| mount.rotation)
+                                        .unwrap_or(weapon.base_rotation),
+                                    base_rotation: weapon.base_rotation,
+                                    rotate: weapon.rotate,
+                                    flip: weapon.flip_sprite,
+                                    recoil: mount.map(|mount| mount.recoil).unwrap_or(0.0),
+                                }
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                Some(UnitDraw {
+                    x: pos.x,
+                    y: pos.y,
+                    rotation: core.rotation,
+                    name: def.name.clone(),
+                    flying: def.flying,
+                    low_altitude: def.low_altitude,
+                    team,
+                    healthf,
+                    elevation: core.elevation,
+                    mech,
+                    weapons,
+                })
             })
             .collect()
     }
@@ -2037,6 +2219,198 @@ impl MindSimHost {
         Vec::new()
     }
 
+    /// Belt items at `(x, y)`: `(rotation, [(item, xs, ys); len])` for a
+    /// `Conveyor`/`ArmoredConveyor` (`Conveyor.draw` item loop). `None` when
+    /// the tile holds no belt. Rust-only seam for the block renderer.
+    pub fn conveyor_items(&self, x: i32, y: i32) -> Option<(u8, Vec<BeltItemSlot>)> {
+        let entity = self.sim.grid.tile(x, y).build?;
+        let rot = self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::ecs::BuildingComp>(entity)?
+            .rot;
+        let belt = self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::world::blocks::distribution::ConveyorBuild>(entity)?;
+        let mut items = Vec::with_capacity(belt.len as usize);
+        for i in 0..belt.len as usize {
+            items.push((belt.ids[i], belt.xs[i], belt.ys[i]));
+        }
+        Some((rot, items))
+    }
+
+    /// Hover target at tile `(x, y)` (`PlacementFragment.hovered`): a unit
+    /// within 5 world px of the tile centre, else the tile's building, else the
+    /// tile's displayable drop (`Tile.displayable`/`Tile.display`).
+    /// `{kind, name, icon, label, team}`; empty when nothing is hovered.
+    #[func]
+    pub fn hover_info(&self, x: i32, y: i32) -> Dictionary<GString, Variant> {
+        let mut out = Dictionary::new();
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return out;
+        };
+        let size = mind_core::config::TILESIZE as f32;
+        let cx = x as f32 * size;
+        let cy = y as f32 * size;
+        // `Units.closestOverlap(player.team(), mouseWorld, 5f, ...)`: a unit
+        // under the cursor wins over the tile.
+        let unit = self
+            .unit_draws()
+            .into_iter()
+            .filter(|(ux, uy, ..)| (ux - cx).hypot(*uy - cy) <= 5.0)
+            .map(|(_, _, _, name, ..)| name)
+            .next();
+        if let Some(name) = unit {
+            out.set("kind", &"unit".to_variant());
+            out.set("name", &GString::from(name.as_str()).to_variant());
+            out.set(
+                "icon",
+                &GString::from(format!("unit-{name}-ui").as_str()).to_variant(),
+            );
+            out.set(
+                "label",
+                &GString::from(format!("unit.{name}.name").as_str()).to_variant(),
+            );
+            return out;
+        }
+        let tile = self.sim.grid.tile(x, y);
+        // `hoverTile.build.displayable()`: any live building.
+        if let Some(entity) = tile.build {
+            let build = self
+                .sim
+                .ecs
+                .0
+                .get::<mind_core::ecs::BuildingComp>(entity)
+                .and_then(|comp| content.block(comp.block));
+            if let Some(def) = build {
+                out.set("kind", &"building".to_variant());
+                out.set("name", &GString::from(def.name.as_str()).to_variant());
+                out.set(
+                    "icon",
+                    &GString::from(format!("block-{}-ui", def.name).as_str()).to_variant(),
+                );
+                out.set(
+                    "label",
+                    &GString::from(format!("block.{}.name", def.name).as_str()).to_variant(),
+                );
+                return out;
+            }
+        }
+        // `Tile.displayable()`: `(drop() != null && block == air) ||
+        // wallDrop() != null || (floor().liquidDrop != null && block == air)`.
+        let block = content.block(tile.block);
+        let overlay = content.block(tile.overlay);
+        let floor = content.block(tile.floor);
+        let air = tile.block == BlockId::AIR;
+        let drop = overlay
+            .and_then(|def| def.item_drop)
+            .or_else(|| floor.and_then(|def| def.item_drop));
+        let wall_drop = block
+            .filter(|def| def.solid)
+            .and_then(|def| def.item_drop)
+            .or_else(|| {
+                overlay
+                    .filter(|def| !air && def.wall_ore)
+                    .and_then(|def| def.item_drop)
+            });
+        let liquid_drop = floor.is_some_and(|def| def.liquid_drop.is_some());
+        if !((drop.is_some() && air) || wall_drop.is_some() || (liquid_drop && air)) {
+            return out;
+        }
+        // `Tile.display`: block drop -> overlay drop/wall drop -> floor.
+        let displayed = if block.is_some_and(|def| def.item_drop.is_some()) {
+            block
+        } else if overlay.is_some_and(|def| def.item_drop.is_some()) || wall_drop.is_some() {
+            overlay
+        } else {
+            floor
+        };
+        let Some(displayed) = displayed else {
+            return out;
+        };
+        out.set("kind", &"tile".to_variant());
+        // `OreBlock` carries the ore item's localized name and displays the
+        // item icon; plain walls/floors display their own ui icon.
+        if displayed.kind == BlockKind::OreBlock
+            && let Some(item_def) = displayed.item_drop.and_then(|item| content.item(item))
+        {
+            out.set("name", &GString::from(item_def.name.as_str()).to_variant());
+            out.set(
+                "icon",
+                &GString::from(format!("item-{}-ui", item_def.name).as_str()).to_variant(),
+            );
+            out.set(
+                "label",
+                &GString::from(format!("item.{}.name", item_def.name).as_str()).to_variant(),
+            );
+            return out;
+        }
+        out.set("name", &GString::from(displayed.name.as_str()).to_variant());
+        out.set(
+            "icon",
+            &GString::from(format!("block-{}-ui", displayed.name).as_str()).to_variant(),
+        );
+        out.set(
+            "label",
+            &GString::from(format!("block.{}.name", displayed.name).as_str()).to_variant(),
+        );
+        out
+    }
+
+    /// Build requirements of block `name` for the placement info table
+    /// (`PlacementFragment` requirement rows): JSON
+    /// `[{item, amount, have}]` — amount scaled by `Rules.buildCostMultiplier`
+    /// (`Math.round(stack.amount * multiplier)`) and `have` from the player's
+    /// first core (`player.core().items`).
+    #[func]
+    pub fn block_requirements_json(&self, name: GString) -> GString {
+        let empty = GString::from("[]");
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return empty;
+        };
+        let Some(def) = content.block_id(&name.to_string()) else {
+            return empty;
+        };
+        let Some(def) = content.block(def) else {
+            return empty;
+        };
+        let multiplier = self
+            .sim
+            .ecs
+            .0
+            .get_resource::<CampaignRuntime>()
+            .map(|runtime| runtime.session.rules.build_cost_multiplier)
+            .filter(|value| *value > 0.0)
+            .unwrap_or(1.0);
+        let team = self
+            .sim
+            .ecs
+            .0
+            .get_resource::<CampaignRuntime>()
+            .map(|runtime| runtime.session.rules.default_team)
+            .unwrap_or(0);
+        let core_items: std::collections::HashMap<String, i32> =
+            self.player_core_items(team).into_iter().collect();
+        let rows: Vec<serde_json::Value> = def
+            .requirements
+            .iter()
+            .filter_map(|stack| {
+                let item = content.item(stack.item)?;
+                let amount = (stack.amount as f32 * multiplier + 0.5).floor() as i32;
+                let have = core_items.get(&item.name).copied().unwrap_or(0);
+                Some(serde_json::json!({
+                    "item": item.name,
+                    "amount": amount,
+                    "have": have,
+                }))
+            })
+            .collect();
+        GString::from(serde_json::Value::Array(rows).to_string().as_str())
+    }
+
     /// Building rotation (`Building.rotation`, quarter turns) at `(x, y)`;
     /// `0` without a building. Rust-only seam for rotated block sprites.
     pub fn building_rotation(&self, x: i32, y: i32) -> u8 {
@@ -2063,6 +2437,48 @@ impl MindSimHost {
             .0
             .get::<mind_core::world::construct::ConstructState>(entity)
             .map(|state| (state.current, state.progress))
+    }
+
+    /// Debug probe (PAR-0152): block name/kind at a tile and whether the tile
+    /// holds a `ConstructState`. `sim_name` reads the sim's own content table
+    /// and `construct` the render seam, so a mismatch between them is visible.
+    #[func]
+    pub fn tile_debug(&self, x: i32, y: i32) -> Dictionary<GString, Variant> {
+        let mut d = Dictionary::new();
+        let tile = self.sim.grid.tile(x, y);
+        let def = self
+            .content_snapshot
+            .as_ref()
+            .and_then(|c| c.block(tile.block));
+        let name = def
+            .map(|def| def.name.clone())
+            .unwrap_or_else(|| "?".into());
+        let kind = def.map(|def| format!("{:?}", def.kind)).unwrap_or_default();
+        let sim_name = self.sim.block_name_of(tile.block);
+        let floor = self
+            .content_snapshot
+            .as_ref()
+            .and_then(|c| c.block(tile.floor))
+            .map(|def| def.name.clone())
+            .unwrap_or_default();
+        let overlay = self
+            .content_snapshot
+            .as_ref()
+            .and_then(|c| c.block(tile.overlay))
+            .map(|def| def.name.clone())
+            .unwrap_or_default();
+        d.set("raw", &(tile.block.raw() as i64).to_variant());
+        d.set("name", &GString::from(name.as_str()).to_variant());
+        d.set("kind", &GString::from(kind.as_str()).to_variant());
+        d.set("sim_name", &GString::from(sim_name.as_str()).to_variant());
+        d.set("floor", &GString::from(floor.as_str()).to_variant());
+        d.set("overlay", &GString::from(overlay.as_str()).to_variant());
+        d.set("has_build", &tile.build.is_some().to_variant());
+        d.set(
+            "construct",
+            &self.construct_draw(x, y).is_some().to_variant(),
+        );
+        d
     }
 
     /// Construct block state at `(x, y)` as `(current block, progress,
