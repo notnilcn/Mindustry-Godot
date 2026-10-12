@@ -605,6 +605,12 @@ multiplier still applies.
 - Ground pathing treats deep water as solid for most ground units; that is
   correct Java behavior.
 
+**Status 2026-10-12:** done — commit c13ccb1. `movement::unit_speed` ports
+`UnitComp.speed()`/`floorSpeedMultiplier()` plus the crawl/tank overrides and is
+used by ground/flying/command/player AI and `AiCtx::pref_speed`. Test
+`dagger_slowed_on_deep_water` (stone 30 px vs deep-water 6 px over 60 ticks;
+flares unaffected by the floor).
+
 ---
 
 ## 6. PAR-0140 — RTS selection and orders do nothing in-engine
