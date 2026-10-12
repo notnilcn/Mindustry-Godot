@@ -19,7 +19,7 @@
       "kind": "oracle",
       "path": "parity/bundle_keys.json",
       "owner_plan": "02/03",
-      "sha256": "59cf4d5d8314edc9cd86048627a5f28023140e1fe39072eb10863a2041cf31e1",
+      "sha256": "ec84fe4abb2b80dd8596e8c91e68b7a80161c2e77dc5968bf76636c9b13ba6bd",
       "regen": "mind-tools pack (bundle index)"
     },
     {
@@ -27,7 +27,7 @@
       "kind": "oracle",
       "path": "parity/golden_content.json",
       "owner_plan": "02",
-      "sha256": "70e2c62d7b4325297710d22308bd31546adf07f343aee248a6e042668d91bd7a",
+      "sha256": "e54e4be3749fd621f276819e5429cc91a402b9c1d76bd5ae79712df716823394",
       "regen": "cargo run -p mind-headless -- content dump"
     },
     {
