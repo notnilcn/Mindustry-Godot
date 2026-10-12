@@ -166,6 +166,16 @@ impl BuildingBehavior for UnitFactoryBehavior {
         world.entity_mut(e).insert(state);
     }
 
+    /// `UnitFactory.shouldConsume` (`UnitFactory.java:453-456`): `currentPlan !=
+    /// -1 && enabled && payload == null`. The port has no payload slot, so the
+    /// payload term is skipped (T1).
+    fn should_consume(&self, world: &World, e: Entity) -> bool {
+        world
+            .get::<UnitFactoryBuild>(e)
+            .map(|state| state.current_plan >= 0)
+            .unwrap_or(false)
+    }
+
     fn config_kinds(&self) -> &'static [ConfigKind] {
         // `UnitFactory.config(UnitType.class, ...)`.
         &[ConfigKind::Unit]
@@ -383,6 +393,15 @@ fn consume_items(world: &mut World, e: Entity, reconstructor: &Reconstructor) {
 impl BuildingBehavior for ReconstructorBehavior {
     fn create_state(&self, world: &mut World, e: Entity) {
         world.entity_mut(e).insert(ReconstructorBuild::default());
+    }
+
+    /// `Reconstructor.shouldConsume` (`Reconstructor.java:376-379`):
+    /// `constructing && enabled` (T1).
+    fn should_consume(&self, world: &World, e: Entity) -> bool {
+        world
+            .get::<ReconstructorBuild>(e)
+            .map(|state| state.constructing(&self.reconstructor))
+            .unwrap_or(false)
     }
 
     fn update_tile(&self, world: &mut World, e: Entity) {

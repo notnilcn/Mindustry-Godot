@@ -667,6 +667,162 @@ fn cliff_crusher_makes_sand_from_sand_walls() {
     );
 }
 
+/// T1 (`Reconstructor.shouldConsume`, `Reconstructor.java:376-379` + the power
+/// half of `BuildingComp.updateConsumption`, `BuildingComp.java:1955-2005`): a
+/// reconstructor with items loaded but no payload draws no power; once a payload
+/// is handed over it requests its `consumePower(3f)` per tick
+/// (`ConsumePower.usage` is per tick in Java).
+#[test]
+fn reconstructor_idle_requests_no_power() {
+    let mut sim = runtime_sim();
+    let _source = place(&mut sim, "power-source", 3, 5);
+    let rig = place(&mut sim, "additive-reconstructor", 5, 5);
+    let (silicon, graphite) = (item(&sim, "silicon"), item(&sim, "graphite"));
+    {
+        let world = &mut sim.ecs.0;
+        if let Some(mut items) = world.get_mut::<crate::world::modules::ItemModule>(rig) {
+            items.add(silicon, 40, 80);
+            items.add(graphite, 40, 80);
+        }
+    }
+    for _ in 0..10 {
+        sim.tick().expect("tick");
+    }
+    let (efficiency, should) = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::Building>(rig)
+        .map(|building| (building.efficiency, building.should_consume))
+        .expect("building");
+    assert!(!should, "no payload -> shouldConsume false");
+    assert_eq!(efficiency, 0.0, "idle reconstructor efficiency");
+
+    let graph = sim
+        .ecs
+        .0
+        .get::<crate::world::modules::PowerModule>(rig)
+        .map(|module| module.graph)
+        .unwrap_or_default();
+    let needed = sim
+        .ecs
+        .0
+        .resource::<crate::world::blocks::power::PowerGrids>()
+        .graph(graph)
+        .map(|graph| graph.get_power_needed(&sim.ecs.0, 1.0))
+        .unwrap_or(-1.0);
+    assert_eq!(needed, 0.0, "idle reconstructor requests no power");
+
+    // Hand over a dagger payload; the graph then requests 3/tick.
+    let dagger = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .unit_id("dagger")
+        .expect("dagger");
+    let inst = sim
+        .ecs
+        .0
+        .resource::<crate::world::block::BlockTable>()
+        .instance(
+            sim.ecs
+                .0
+                .get::<crate::entities::comp::Building>(rig)
+                .expect("building")
+                .block,
+        )
+        .expect("instance");
+    inst.behavior.handle_payload(
+        &mut sim.ecs.0,
+        rig,
+        rig,
+        crate::world::behavior::PayloadRef {
+            entity: None,
+            content: dagger.raw(),
+            is_block: false,
+        },
+    );
+    for _ in 0..10 {
+        sim.tick().expect("tick");
+    }
+    let should = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::Building>(rig)
+        .map(|building| building.should_consume)
+        .unwrap_or(false);
+    assert!(should, "payload -> shouldConsume true");
+    let needed = sim
+        .ecs
+        .0
+        .resource::<crate::world::blocks::power::PowerGrids>()
+        .graph(graph)
+        .map(|graph| graph.get_power_needed(&sim.ecs.0, 1.0))
+        .unwrap_or(-1.0);
+    assert_eq!(needed, 3.0, "constructing reconstructor requests 3/tick");
+}
+
+/// T1 (`GenericCrafter.shouldConsume`, `GenericCrafter.java:205-235`): a
+/// graphite press with 10/10 graphite stored keeps its 4 coal (before the fix
+/// the press kept crafting and consuming coal).
+#[test]
+fn full_crafter_stops_consuming() {
+    let mut sim = runtime_sim();
+    let press = place(&mut sim, "graphite-press", 5, 5);
+    let (graphite, coal) = (item(&sim, "graphite"), item(&sim, "coal"));
+    {
+        let world = &mut sim.ecs.0;
+        if let Some(mut items) = world.get_mut::<crate::world::modules::ItemModule>(press) {
+            items.add(graphite, 10, 10);
+            items.add(coal, 4, 10);
+        }
+    }
+    for _ in 0..200 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        stored_item(&sim, press, coal),
+        4,
+        "coal untouched while the output is full"
+    );
+    let should = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::Building>(press)
+        .map(|building| building.should_consume)
+        .unwrap_or(true);
+    assert!(!should, "full output -> shouldConsume false");
+}
+
+/// T1 (`Drill.shouldConsume`, `Drill.java:246-249`): a mechanical drill with a
+/// full 10-item buffer idles (efficiency 0) even though it has ore to mine.
+#[test]
+fn full_drill_stops() {
+    let mut sim = runtime_sim();
+    set_floor(&mut sim, 5, 5, "ore-copper");
+    set_floor(&mut sim, 6, 5, "ore-copper");
+    let drill = place(&mut sim, "mechanical-drill", 5, 5);
+    let copper = item(&sim, "copper");
+    {
+        let world = &mut sim.ecs.0;
+        if let Some(mut items) = world.get_mut::<crate::world::modules::ItemModule>(drill) {
+            items.add(copper, 10, 10);
+        }
+    }
+    for _ in 0..30 {
+        sim.tick().expect("tick");
+    }
+    let (efficiency, should, total) = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::Building>(drill)
+        .map(|building| (building.efficiency, building.should_consume, 0))
+        .expect("building");
+    assert!(!should, "full buffer -> shouldConsume false");
+    assert_eq!(efficiency, 0.0, "full drill efficiency");
+    assert_eq!(stored_item(&sim, drill, copper), 10, "buffer stays full");
+    let _ = total;
+}
+
 /// Whether a unit of type `unit` exists in the sim.
 fn spawned_unit(sim: &Sim, unit: crate::content::UnitTypeId) -> bool {
     sim.ecs.0.iter_entities().any(|entity| {

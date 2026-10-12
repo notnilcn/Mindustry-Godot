@@ -43,6 +43,9 @@ pub struct Building {
     pub potential_efficiency: f32,
     /// Whether the power consumer should run (`shouldConsumePower`).
     pub should_consume_power: bool,
+    /// `Building.shouldConsume()` computed by the last consumption pass
+    /// (transient: not serialized; T1).
+    pub should_consume: bool,
     /// Overdrive time scale (`timeScale`).
     pub time_scale: f32,
     /// Remaining time-scale duration in ticks (`timeScaleDuration`).
@@ -88,6 +91,7 @@ impl Building {
             optional_efficiency: 1.0,
             potential_efficiency: 1.0,
             should_consume_power: true,
+            should_consume: true,
             time_scale: 1.0,
             time_scale_duration: 0.0,
             proximity: SmallVec::new(),
