@@ -26,6 +26,10 @@ use super::units::{UnitQuad, build_unit_mesh};
 
 /// `Pal.accent` (construct-site tint, `Draw.color(Pal.accent, ...)`).
 const ACCENT: u32 = 0xffd3_7fff;
+/// `Drill.rotateSpeed` (`Drill.java:59`): rotator degrees per `timeDrilled`.
+const DRILL_ROTATE_SPEED: f32 = 2.0;
+/// `Turret.heatColor = Pal.turretHeat` (`ab3400`); the alpha carries heat.
+const HEAT_COLOR: u32 = 0xab34_00ff;
 /// `Vars.itemSize` — belt item icons draw at 5 world px (`Conveyor.draw`).
 const ITEM_SIZE: f32 = 5.0;
 
@@ -215,6 +219,79 @@ impl BlockRenderer {
                     // `ConveyorBuild.draw` runs every frame: a visible belt
                     // keeps the pass rebuilding (items + the frame scroll).
                     animating = true;
+                }
+                // `Drill.DrillBuild.draw` (T10): base `region` + spinning
+                // `-rotator` (`timeDrilled * rotateSpeed`) + `-top`, instead of
+                // the composed `-full` icon.
+                if def.kind == BlockKind::Drill {
+                    if let Some(time_drilled) = host.drill_draw(tile.x, tile.y) {
+                        if let Some(base) = self.resolver.find(&def.region) {
+                            push(&base, base.uv, anchor_x, anchor_y, w, w, 0.0, 0xffff_ffff, 1.0);
+                        }
+                        if let Some(rotator) = self.resolver.find(&format!("{}-rotator", def.name))
+                        {
+                            push(
+                                &rotator,
+                                rotator.uv,
+                                anchor_x,
+                                anchor_y,
+                                w,
+                                w,
+                                time_drilled * DRILL_ROTATE_SPEED,
+                                0xffff_ffff,
+                                1.0,
+                            );
+                        }
+                        if let Some(top) = self.resolver.find(&format!("{}-top", def.name)) {
+                            push(&top, top.uv, anchor_x, anchor_y, w, w, 0.0, 0xffff_ffff, 1.0);
+                        }
+                        dynamic += 1;
+                        animating = true;
+                    }
+                    continue;
+                }
+                // `DrawTurret.draw` (T10): `<basePrefix>block-<size>` base, then
+                // the barrel `region` and `-top` at the recoil offset, rotation
+                // `drawrot() = rotation - 90` (heat overlays when hot).
+                if matches!(
+                    def.kind,
+                    BlockKind::ItemTurret | BlockKind::PowerTurret | BlockKind::LiquidTurret
+                ) {
+                    if let Some((rotation, recoil_x, recoil_y, heat)) =
+                        host.turret_draw(tile.x, tile.y)
+                    {
+                        if let Some(base) = self.resolver.find(&format!("block-{}", def.size)) {
+                            push(&base, base.uv, anchor_x, anchor_y, w, w, 0.0, 0xffff_ffff, 1.0);
+                        }
+                        let rot = rotation - 90.0;
+                        let bx = anchor_x + recoil_x;
+                        let by = anchor_y + recoil_y;
+                        if let Some(barrel) = self.resolver.find(&def.region) {
+                            push(&barrel, barrel.uv, bx, by, w, w, rot, 0xffff_ffff, 1.0);
+                        }
+                        if let Some(top) = self.resolver.find(&format!("{}-top", def.name)) {
+                            push(&top, top.uv, bx, by, w, w, rot, 0xffff_ffff, 1.0);
+                        }
+                        if heat > 0.00001
+                            && let Some(heat_region) =
+                                self.resolver.find(&format!("{}-heat", def.name))
+                        {
+                            push(
+                                &heat_region,
+                                heat_region.uv,
+                                bx,
+                                by,
+                                w,
+                                w,
+                                rot,
+                                (HEAT_COLOR & !0xff) | ((heat.clamp(0.0, 1.0) * 255.0) as u32),
+                                1.0,
+                            );
+                        }
+                        dynamic += 1;
+                        animating = true;
+                    }
+                    continue;
                 }
                 // `ConveyorBuild.draw`: `regions[blendbits][frame]` with the
                 // autotile scales from `Autotiler.buildBlending` (cached by

@@ -2529,6 +2529,36 @@ impl MindSimHost {
         Some((blend_bits, sclx, scly, frame))
     }
 
+    /// Drill draw state at `(x, y)`: `timeDrilled` (`Drill.DrillBuild.draw`
+    /// rotator angle = `timeDrilled * rotateSpeed`; `Drill.rotateSpeed = 2`).
+    /// `None` when the tile holds no drill. Rust-only seam for the block
+    /// renderer.
+    pub fn drill_draw(&self, x: i32, y: i32) -> Option<f32> {
+        let entity = self.tile_at(x, y)?.build?;
+        self.sim
+            .ecs
+            .0
+            .get::<mind_core::entities::comp::DrillState>(entity)
+            .map(|state| state.time_drilled)
+    }
+
+    /// Turret draw state at `(x, y)`: `(rotation degrees, recoil offset x,
+    /// recoil offset y, heat)` (`DrawTurret.draw`: `recoilOffset =
+    /// trns(rotation, -pow(curRecoil, recoilPow) * recoil)`, barrel rotation
+    /// `drawrot() = rotation - 90`). `None` without a turret.
+    pub fn turret_draw(&self, x: i32, y: i32) -> Option<(f32, f32, f32, f32)> {
+        let entity = self.tile_at(x, y)?.build?;
+        let state = self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::world::blocks::defense::turrets::TurretState>(entity)?;
+        let len =
+            -state.cur_recoil.max(0.0).powf(state.config.recoil_pow) * state.config.recoil;
+        let (dx, dy) = mind_core::render::conveyor_items::trns(state.rotation, len, 0.0);
+        Some((state.rotation, dx, dy, state.heat))
+    }
+
     /// Hover target at tile `(x, y)` (`PlacementFragment.hovered`): a unit
     /// within 5 world px of the tile centre, else the tile's building, else the
     /// tile's displayable drop (`Tile.displayable`/`Tile.display`).
