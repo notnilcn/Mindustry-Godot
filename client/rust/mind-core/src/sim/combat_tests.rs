@@ -854,6 +854,90 @@ fn destroyed_building_leaves_rebuild_plan() {
     );
 }
 
+/// T5: a destroyed container full of blast compound explodes with wave damage
+/// (`BuildingComp.onDestroyed` -> `Damage.dynamicExplosion`,
+/// BuildingComp.java:1490-1518).
+#[test]
+fn destroyed_blast_container_damages_neighbours() {
+    let mut sim = live_sim(48);
+    let container = place(&mut sim, 10, 10, "container", 1);
+    let wall = place(&mut sim, 12, 10, "copper-wall", 1);
+    let wall_start = health(&sim, wall).expect("wall health");
+    let blast = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .item_id("blast-compound")
+        .expect("blast-compound");
+    {
+        let Some(mut module) = sim
+            .ecs
+            .0
+            .get_mut::<crate::world::modules::ItemModule>(container)
+        else {
+            return; // no item module fixture
+        };
+        module.items[blast.index()] = 300;
+        module.total = 300;
+    }
+    sim.ecs
+        .0
+        .get_mut::<Health>(container)
+        .expect("container health")
+        .health = 0.0;
+    sim.tick().expect("tick");
+    assert!(
+        sim.ecs.0.get_entity(container).is_err(),
+        "the container was destroyed"
+    );
+    assert!(
+        health(&sim, wall).is_none_or(|hp| hp < wall_start),
+        "the explosion damaged the wall 2 tiles away: {:?}",
+        health(&sim, wall)
+    );
+}
+
+/// T5: a destroyed container full of flammable items leaves a fire
+/// (`fire = true` on the building-destroy explosion path).
+#[test]
+fn destroyed_coal_container_starts_fire() {
+    let mut sim = live_sim(48);
+    let container = place(&mut sim, 10, 10, "container", 1);
+    let coal = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .item_id("coal")
+        .expect("coal");
+    {
+        let Some(mut module) = sim
+            .ecs
+            .0
+            .get_mut::<crate::world::modules::ItemModule>(container)
+        else {
+            return;
+        };
+        module.items[coal.index()] = 300;
+        module.total = 300;
+    }
+    sim.ecs
+        .0
+        .get_mut::<Health>(container)
+        .expect("container health")
+        .health = 0.0;
+    sim.tick().expect("tick");
+    assert!(
+        sim.ecs.0.get_entity(container).is_err(),
+        "the container was destroyed"
+    );
+    let fire = (10..=11)
+        .any(|tx| (10..=11).any(|ty| crate::combat::fires::find_at(&sim.ecs.0, tx, ty).is_some()));
+    assert!(
+        fire,
+        "the coal explosion left a fire at the container tile (`World.toTile` of the block centre (84,84) rounds to (11,11) like Java's `Math.round`)"
+    );
+}
+
 /// NEW-1: a status applied through the live applier ticks damage every tick
 /// (`StatusComp.update` in the live unit loop).
 #[test]

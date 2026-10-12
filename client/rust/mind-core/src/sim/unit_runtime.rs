@@ -547,6 +547,16 @@ impl Sim {
                     .0
                     .get::<crate::entities::comp::Building>(entity)
                     .map(|building| (building.tile, building.rotation as i8, building.block));
+                // `BuildingComp.onDestroyed` explosion terms
+                // (BuildingComp.java:1491-1508), read before the modules are
+                // removed with the building.
+                let explosion_terms = plan
+                    .and_then(|(_, _, block)| {
+                        let content = &self.unit_runtime()?.content;
+                        let def = content.block(block)?;
+                        Some(building_explosion_terms(&self.ecs.0, content, entity, def))
+                    })
+                    .unwrap_or((0.0, 0.0, 0.0));
                 let ghost = {
                     let rebuildable = plan
                         .and_then(|(_, _, block)| {
@@ -632,6 +642,30 @@ impl Sim {
                             }
                         }
                         self.ecs.0.insert_non_send(unit_runtime);
+                    }
+                    // `BuildingComp.onDestroyed` -> `Damage.dynamicExplosion`
+                    // (BuildingComp.java:1518; fire comes from the 8-arg
+                    // overload, Damage.java:78-82).
+                    if damage_explosions {
+                        let (flammability, explosiveness, power) = explosion_terms;
+                        if let Some(mut unit_runtime) = self.ecs.0.remove_non_send::<UnitRuntime>()
+                        {
+                            crate::combat::damage::explosion::dynamic_explosion(
+                                &mut self.ecs.0,
+                                &unit_runtime.content,
+                                &mut unit_runtime.rng,
+                                center.0,
+                                center.1,
+                                flammability,
+                                explosiveness,
+                                power,
+                                size as f32 * crate::config::TILESIZE as f32 / 2.0,
+                                true,
+                                true,
+                                None,
+                            );
+                            self.ecs.0.insert_non_send(unit_runtime);
+                        }
                     }
                 }
             }
@@ -882,6 +916,63 @@ impl Sim {
 /// kind kinematics and the weapon pass (`Groups.unit.update()`).
 ///
 /// No-op unless the unit runtime is installed, so the P0 path is untouched.
+/// `BuildingComp.onDestroyed` explosion terms (`BuildingComp.java:1491-1508`):
+/// `(flammability, explosiveness, power)` summed over the live item/liquid/power
+/// modules. `explosionItemCap` caps item amounts at `item_capacity`; liquids
+/// count half; buffered power uses `power.status * capacity`. The per-block
+/// `baseExplosiveness`/`flammabilityScale`/`explosivenessScale` fields are not
+/// modelled by `BlockDef` yet (defaults 0/1 would apply).
+fn building_explosion_terms(
+    world: &World,
+    content: &ContentRegistry,
+    entity: Entity,
+    def: &crate::content::registries::blocks::BlockDef,
+) -> (f32, f32, f32) {
+    let mut explosiveness = 0.0f32;
+    let mut flammability = 0.0f32;
+    let mut power = 0.0f32;
+    if def.has_items
+        && let Some(module) = world.get::<crate::world::modules::ItemModule>(entity)
+    {
+        let cap = def.item_capacity.max(0);
+        for (index, amount) in module.items.iter().enumerate() {
+            // `Math.min(items.get(item), explosionItemCap())`.
+            let amount = (*amount).min(cap) as f32;
+            if amount <= 0.0 {
+                continue;
+            }
+            if let Some(item) = content.items().get(index) {
+                explosiveness += item.explosiveness * amount;
+                flammability += item.flammability * amount;
+                power += item.charge * amount.powf(1.1) * 150.0;
+            }
+        }
+    }
+    if def.has_liquids
+        && let Some(module) = world.get::<crate::world::modules::LiquidModule>(entity)
+    {
+        for (index, amount) in module.liquids.iter().enumerate() {
+            if *amount <= 0.0 {
+                continue;
+            }
+            if let Some(liquid) = content.liquids().get(index) {
+                flammability += liquid.flammability * *amount / 2.0;
+                explosiveness += liquid.explosiveness * *amount / 2.0;
+            }
+        }
+    }
+    if let Some(index) = def.cons_power
+        && let Some(consumer) = def.consumes.get(index)
+        && let crate::content::registries::blocks::Consume::Power { buffered, .. } =
+            consumer.consume
+        && buffered > 0.0
+        && let Some(module) = world.get::<crate::world::modules::PowerModule>(entity)
+    {
+        power += module.status * buffered;
+    }
+    (flammability, explosiveness, power)
+}
+
 /// One unit body for [`unit_physics_system`] (`PhysicsProcess.PhysicsBody`).
 struct PhysicsBody {
     entity: Entity,

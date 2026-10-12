@@ -308,16 +308,21 @@ impl BulletBehavior for MassDriverBehavior {
         }
         let _ = flammability;
         let team = ctx.team(b);
+        // `Damage.dynamicExplosion(x, y, flammability, explosiveness, power,
+        // radius, damage, fire, team)` with the payload's summed item stats.
         crate::combat::damage::explosion::dynamic_explosion(
             ctx.world,
             ctx.content,
-            Some(team),
+            ctx.rng,
             x,
             y,
-            1.0,
+            flammability,
             explosiveness / 10.0,
             power,
+            1.0,
+            true,
             false,
+            Some(team),
         );
     }
 }
