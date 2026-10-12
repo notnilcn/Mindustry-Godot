@@ -909,6 +909,14 @@ via the same path the existing save/load round-trip test in `sim_io.rs` uses
 (find with `grep -n "fn .*round" mind-core/src/io/sim_io.rs`), load into a
 fresh sim, assert one `FireState` and one `PuddleState` with equal fields.
 
+**Status 2026-10-12:** done — commit 63b39b5. Fires/puddles get reserved class
+ids (`0xF1`/`0xF2`), are counted and written after units in tile order, decode
+into `DecodedFire`/`DecodedPuddle`, and respawn on load with zeroed transient
+accumulators. `clear_world_for_load` now also clears fires/puddles so a load
+cannot leak the previous world's spills. Test:
+`live_sim_save_keeps_fires_and_puddles` (fire at (7,7) + water puddle at
+(9,9) round-trip). `mind-headless io roundtrip` still passes.
+
 ---
 
 ## 10. PAR-0127 — weather never happens
