@@ -24,6 +24,7 @@ use super::modules::PowerGraphId;
 use super::stats::Stats;
 
 pub mod campaign;
+pub mod construct;
 pub mod defense;
 pub mod environment;
 pub mod helpers;
@@ -497,6 +498,8 @@ pub fn resolve_behavior(def: &BlockDef, registry: &BehaviorRegistry) -> Arc<dyn 
 pub fn default_behavior(def: &BlockDef) -> Arc<dyn BuildingBehavior> {
     use crate::content::BlockKind as K;
     match def.kind {
+        // Construct blocks: IO only (`ConstructBuild.write`/`read`, PAR-0098 §2d).
+        K::ConstructBlock => Arc::new(construct::ConstructBehavior),
         K::Door => Arc::new(defense::DoorBehavior),
         K::AutoDoor => Arc::new(defense::AutoDoorBehavior),
         K::Wall | K::ShieldWall => Arc::new(defense::WallBehavior),

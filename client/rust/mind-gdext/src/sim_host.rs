@@ -675,6 +675,25 @@ impl MindSimHost {
                 Variant::from(f64::from(building.optional_efficiency)),
             );
             put("time_scale", Variant::from(f64::from(building.time_scale)));
+            // In-progress construction (`ConstructBuild`; PAR-0098 §2d).
+            if let Some(state) = world.get::<mind_core::world::construct::ConstructState>(entity) {
+                put(
+                    "construct_current",
+                    Variant::from(i64::from(state.current.raw())),
+                );
+                put(
+                    "construct_previous",
+                    Variant::from(i64::from(state.previous.raw())),
+                );
+                put(
+                    "construct_progress",
+                    Variant::from(f64::from(state.progress)),
+                );
+                put(
+                    "construct_deconstruct",
+                    Variant::from(state.active_deconstruct),
+                );
+            }
             // Item module contents for `has_items` blocks (`{item: amount}`).
             if let Some(content) = self.content_snapshot.as_ref()
                 && let Some(json) = block_items_json(&self.sim, content, x, y)

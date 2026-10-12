@@ -197,6 +197,27 @@ Divergence to record: the port has no boost/elevation state, so the filter is th
 - **Test:** an IO round-trip of a sim mid-construction (look at existing tests in
   `core/world/building_io.rs` for the pattern) keeps `progress` and `current`.
 
+**Status 2026-10-12:** done (behavior IO) — new `core/world/behavior/construct.rs`
+(`ConstructBehavior`, `version() = 1`) writes/reads Java `ConstructBuild.write`/`read` exactly:
+`progress` (f32), `previous.id`/`current.id` (shorts), then the `accumulator`/`totalAccumulator`/
+`itemsLeft` triplets behind a count byte (`-1` when unset; `itemsLeft` revision >= 1). On read it
+inserts a `ConstructState` and rebuilds the economy through `set_construct`/`set_deconstruct`
+(the target block's `build_time`/`requirements`, `BuildRules.build_cost_multiplier`), keeping
+`current == previous` as the deconstruct signal, then restores `progress`/accumulators. Mapped in
+`default_behavior` (`K::ConstructBlock`). Tests:
+`world::behavior::construct::tests::construct_state_round_trips` and
+`world::building_io::tests::construct_block_progress_round_trips` (a `BuildingCodec` round-trip keeps
+progress 0.4, the target block and the rebuilt `items_left`).
+
+**Blocker found (needs a follow-up, outside this item's change list):** the save *reader* used by
+`load_sector`/`load_grid_file` is `EditorContext::read_building`, which decodes only `DecodedBase`
+and never calls the behavior `read`; the tile-entity chunk is length-prefixed so every per-kind body
+is silently skipped. In-engine: a construct block paused at progress 0.0417 before
+`MindCampaign.run_exit_save()` survives the reload as a tile/entity but comes back without its
+`ConstructState` (`construct_progress` absent). The same applies to turret ammo, crafter warmup,
+drill state and every other per-kind body. Evidence:
+`runs/20261012-session4/section2d-evidence.json`.
+
 ### 2e. Plan/queue drawing and build beam (coordinate with the rendering agent)
 - **Gap:** queued plans (`player_build_plans_json`) and the placement preview
   (`MindInput.placement_preview_json`, `gdext/input/mod.rs:748`) are not drawn
