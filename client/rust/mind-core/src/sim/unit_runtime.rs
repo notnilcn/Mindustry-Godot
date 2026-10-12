@@ -1016,15 +1016,14 @@ pub fn unit_update_system(world: &mut World) {
 /// list. Call after any pass that can create bullets; ordering is
 /// `(EntitySeq, entity.index())`.
 fn adopt_spawned_units(world: &mut World, runtime: &mut UnitRuntime) {
-    let mut found: Vec<(u64, Entity)> = world
-        .iter_entities()
-        .filter(|entity| entity.contains::<crate::combat::bullet::spawn::SpawnedByBullet>())
-        .map(|entity| {
-            (
-                entity.get::<EntitySeq>().map_or(u64::MAX, |seq| seq.0),
-                entity.id(),
-            )
-        })
+    // T9: query only the `SpawnedByBullet` archetype instead of scanning every
+    // entity in the world. Ordering is restored by the sort below.
+    use bevy_ecs::query::With;
+    let mut query = world
+        .query_filtered::<(Entity, Option<&EntitySeq>), With<bullet::spawn::SpawnedByBullet>>();
+    let mut found: Vec<(u64, Entity)> = query
+        .iter(world)
+        .map(|(entity, seq)| (seq.map_or(u64::MAX, |seq| seq.0), entity))
         .collect();
     found.sort_unstable_by_key(|(seq, entity)| (*seq, entity.index()));
     for (_, entity) in found {
