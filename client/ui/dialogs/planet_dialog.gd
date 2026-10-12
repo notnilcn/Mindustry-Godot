@@ -73,14 +73,20 @@ func shown() -> void:
 	# (`PlanetDialog.java:183` `!settings.getBool("campaignselect") &&
 	# !content.planets().contains(p -> p.sectors.contains(Sector::hasBase))`);
 	# a returning player opens straight on the page (PAR-0158).
+	var chooser_shown := false
 	if _selected_planet.is_empty():
 		var based := _planets_with_base()
 		if not _flag("campaignselect") and based.is_empty():
 			_show_select()
+			chooser_shown = true
 		else:
 			_show_planet(_boot_planet(based))
 	else:
 		_show_planet(_selected_planet)
+	# `PlanetDialog.java:216-222`: after a Serpulo remap the one-time "Campaign
+	# Changes Notice" shows, but only when the chooser branch was not taken.
+	if not chooser_shown:
+		call_deferred("_maybe_show_remap_notice")
 
 
 func hidden() -> void:
@@ -566,6 +572,28 @@ func _on_select_ok() -> void:
 	if not planet.is_empty():
 		_selected_sector = int(planet.get("start_sector", -1))
 	_show_planet(_selected_planet)
+
+
+## `PlanetDialog.java:216-222`: the one-time Serpulo remap notice
+## (`hadSerpuloRemaps && settings.getBoolOnce("serpulo-remaps-notice")`).
+## Deferred: `shown()` runs inside `MindUi.open_dialog`, which mutably binds
+## `MindUi`; a nested `open_dialog` must wait for that call to return (PAR-0066).
+func _maybe_show_remap_notice() -> void:
+	var campaign := campaign_node()
+	if campaign == null or not campaign.has_method("take_serpulo_remaps_notice"):
+		return
+	if not bool(campaign.call("take_serpulo_remaps_notice")):
+		return
+	var ui := get_node_or_null("/root/MindUi")
+	if ui == null:
+		return
+	ui.call(
+		"open_dialog", "full_text",
+		JSON.stringify({
+			"title": _t("@campaign.rework.title"),
+			"text": _tm("@campaign.rework.serpulo"),
+		})
+	)
 
 
 # --- Planet view --------------------------------------------------------------

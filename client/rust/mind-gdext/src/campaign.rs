@@ -1691,6 +1691,24 @@ impl MindCampaign {
         }
     }
 
+    /// `Vars.hadSerpuloRemaps && settings.getBoolOnce("serpulo-remaps-notice")`:
+    /// Java shows the one-time "Campaign Changes Notice" dialog after a Serpulo
+    /// remap (`PlanetDialog.java:216-222`). `had_serpulo_remaps` is only true in
+    /// the boot that performed the remap (same as Java's static flag), so this
+    /// consumes the notice flag once and reports whether to show it.
+    #[func]
+    pub fn take_serpulo_remaps_notice(&mut self) -> bool {
+        if !self.saves.had_serpulo_remaps || self.settings.get_bool("serpulo-remaps-notice", false)
+        {
+            return false;
+        }
+        self.settings.put_bool("serpulo-remaps-notice", true);
+        if let Err(error) = self.settings.force_save(&NativeFs, &self.paths) {
+            log::warn!("remap notice flush failed: {error}");
+        }
+        true
+    }
+
     /// The live runtime's sector record when a host is attached, else the
     /// facade copy's record.
     fn runtime_or_facade_record(
