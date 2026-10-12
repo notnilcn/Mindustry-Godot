@@ -53,10 +53,8 @@ fn next_unit_seq(world: &mut World) -> u64 {
 /// The spawned entity is adopted into the live [`UnitRuntime`] list (the same
 /// bookkeeping `UnitRuntime::spawn`/`SpawnedByBullet` do), so factory output
 /// updates, fights and is selectable instead of sitting inert.
-fn spawn_output_unit(world: &mut World, e: Entity, def: &UnitTypeDef) {
-    let Some(pos) = world.get::<Pos>(e).copied() else {
-        return;
-    };
+fn spawn_output_unit(world: &mut World, e: Entity, def: &UnitTypeDef) -> Option<Entity> {
+    let pos = world.get::<Pos>(e).copied()?;
     let team = world.get::<TeamComp>(e).map(|t| t.team).unwrap_or(0);
     let seq = next_unit_seq(world);
     let entity = spawn_unit_def(world, seq, def, team, pos.x, pos.y, 90.0);
@@ -64,6 +62,25 @@ fn spawn_output_unit(world: &mut World, e: Entity, def: &UnitTypeDef) {
         runtime.units.push(entity);
         runtime.units_created += 1;
     }
+    Some(entity)
+}
+
+/// `Reconstructor.java:346-352`: spawns the upgraded unit and gives it the
+/// configured command (or the type's `defaultCommand`) when it is commandable.
+fn spawn_output_unit_with_command(
+    world: &mut World,
+    e: Entity,
+    def: &UnitTypeDef,
+    command: Option<UnitCommandId>,
+) -> Option<Entity> {
+    let entity = spawn_output_unit(world, e, def)?;
+    if let Some(mut slot) = world.get_mut::<crate::ai::ControllerSlot>(entity)
+        && slot.kind == crate::ai::AiKind::Command
+        && let Some(command) = command.or(def.default_command)
+    {
+        slot.command = Some(command);
+    }
+    Some(entity)
 }
 
 /// Resolves every produced unit's [`UnitTypeDef`] from content.
@@ -272,7 +289,9 @@ impl BuildingBehavior for UnitFactoryBehavior {
                 }
             }
             if let Some(def) = self.units.get(&unit.raw()) {
-                spawn_output_unit(world, e, def);
+                // The port has no factory command config, so the spawn applies
+                // the type's `defaultCommand` (`UnitFactory.java:425-433`).
+                spawn_output_unit_with_command(world, e, def, None);
             }
         }
         world.entity_mut(e).insert(state);
@@ -414,12 +433,20 @@ impl BuildingBehavior for ReconstructorBehavior {
         };
         // `progress += edelta() * unitBuildSpeed(team)` (0 while `efficiency` 0).
         let team = world.get::<TeamComp>(e).map(|t| t.team).unwrap_or(0);
-        let delta_progress = crate::world::update::edelta(world, e) * unit_build_speed(world, team);
-        if let Some(target) = state.update(&self.reconstructor, delta_progress) {
-            // `consume()` then `Events.fire(new UnitCreateEvent(...))`.
+        let edelta = crate::world::update::edelta(world, e);
+        let delta_progress = edelta * unit_build_speed(world, team);
+        if let Some(target) = state.update(&self.reconstructor, delta_progress, edelta) {
+            // `consume()` then `Events.fire(new UnitCreateEvent(...))`, with the
+            // configured command applied to the upgraded unit
+            // (`Reconstructor.java:346-352`).
             consume_items(world, e, &self.reconstructor);
             if let Some(def) = self.units.get(&target.raw()) {
-                spawn_output_unit(world, e, def);
+                spawn_output_unit_with_command(
+                    world,
+                    e,
+                    def,
+                    state.command.map(UnitCommandId::new),
+                );
             }
         }
         world.entity_mut(e).insert(state);

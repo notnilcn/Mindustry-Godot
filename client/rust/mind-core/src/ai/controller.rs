@@ -13,6 +13,7 @@
 use bevy_ecs::component::Component;
 use bevy_ecs::world::World;
 
+use crate::content::UnitCommandId;
 use crate::content::registries::units::{AiControllerKind, UnitTypeDef};
 use crate::world::TilePos;
 
@@ -93,6 +94,9 @@ pub struct ControllerSlot {
     pub target: Option<TilePos>,
     /// Stuck/progress timer in ticks (`stuckTimer`-adjacent; M3 uses it).
     pub timer: f32,
+    /// Active command id (`CommandAI.command`), set by unit producers
+    /// (`Reconstructor.java:346-352`) or later command application. Transient.
+    pub command: Option<UnitCommandId>,
 }
 
 impl ControllerSlot {
@@ -102,6 +106,7 @@ impl ControllerSlot {
             kind,
             target: None,
             timer: 0.0,
+            command: None,
         }
     }
 }

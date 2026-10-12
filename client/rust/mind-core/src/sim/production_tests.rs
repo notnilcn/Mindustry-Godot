@@ -876,6 +876,100 @@ fn unit_factory_needs_power() {
     assert_eq!(stored_item(&sim, factory, lead), 0, "lead consumed");
 }
 
+/// T3 (`Reconstructor.java:346-352`): the command configured on a
+/// reconstructor is given to the upgraded unit's command state; without one the
+/// unit falls back to its type's `defaultCommand`.
+#[test]
+fn reconstructor_applies_command() {
+    let mut sim = runtime_sim();
+    // Player-team units take the `Command` controller (`select_team_controller`).
+    if let Some(mut rules) = sim
+        .ecs
+        .0
+        .get_resource_mut::<crate::world::limits::BuildRules>()
+    {
+        rules.default_team = 1;
+    }
+    let _source = place(&mut sim, "power-source", 3, 5);
+    let rig = place(&mut sim, "additive-reconstructor", 5, 5);
+    let rebuild = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .get_by_name(crate::content::ContentType::UnitCommand, "rebuild")
+        .map(|reference| crate::content::UnitCommandId::new(reference.id))
+        .expect("rebuild command");
+    configure(
+        &mut sim,
+        5,
+        5,
+        crate::determinism::ConfigValue::Content("rebuild".to_owned()),
+    );
+
+    let dagger = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .unit_id("dagger")
+        .expect("dagger");
+    let mace = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .unit_id("mace")
+        .expect("mace");
+    let inst = sim
+        .ecs
+        .0
+        .resource::<crate::world::block::BlockTable>()
+        .instance(
+            sim.ecs
+                .0
+                .get::<crate::entities::comp::Building>(rig)
+                .expect("building")
+                .block,
+        )
+        .expect("instance");
+    inst.behavior.handle_payload(
+        &mut sim.ecs.0,
+        rig,
+        rig,
+        crate::world::behavior::PayloadRef {
+            entity: None,
+            content: dagger.raw(),
+            is_block: false,
+        },
+    );
+    {
+        let (silicon, graphite) = (item(&sim, "silicon"), item(&sim, "graphite"));
+        let world = &mut sim.ecs.0;
+        if let Some(mut items) = world.get_mut::<crate::world::modules::ItemModule>(rig) {
+            items.add(silicon, 40, 80);
+            items.add(graphite, 40, 80);
+        }
+    }
+    let mut spawned = None;
+    for _ in 0..1500 {
+        sim.tick().expect("tick");
+        spawned = sim.ecs.0.iter_entities().find_map(|entity| {
+            entity
+                .get::<crate::entities::comp::unit::UnitTypeComp>()
+                .filter(|comp| comp.type_id == mace)
+                .map(|_| entity.id())
+        });
+        if spawned.is_some() {
+            break;
+        }
+    }
+    let entity = spawned.expect("mace spawned");
+    let command = sim
+        .ecs
+        .0
+        .get::<crate::ai::ControllerSlot>(entity)
+        .and_then(|slot| slot.command);
+    assert_eq!(command, Some(rebuild), "configured command applied");
+}
+
 /// Whether a unit of type `unit` exists in the sim.
 fn spawned_unit(sim: &Sim, unit: crate::content::UnitTypeId) -> bool {
     sim.ecs.0.iter_entities().any(|entity| {

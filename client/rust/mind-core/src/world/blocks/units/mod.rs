@@ -245,6 +245,11 @@ pub struct ReconstructorBuild {
     pub progress: f32,
     /// Configured output command (`ReconstructorBuild.command`).
     pub command: Option<u16>,
+    /// Payload travel to the centre, `0..1` (`PayloadBlock.moveInPayload`).
+    ///
+    /// The port approximates `payloadSpeed = 0.7` px/tick over ~14 px with
+    /// `+edelta/20` per tick (about 20 ticks). Transient: not serialized.
+    pub move_in: f32,
 }
 
 impl ReconstructorBuild {
@@ -258,18 +263,28 @@ impl ReconstructorBuild {
         }
         self.payload = Some(unit);
         self.progress = 0.0;
+        self.move_in = 0.0;
         true
     }
 
-    /// `ReconstructorBuild.updateTile`: advance the upgrade; on completion returns
-    /// the upgraded unit type and keeps `progress %= 1f` (Java does not reset).
+    /// `ReconstructorBuild.updateTile`: advance the payload travel, then the
+    /// upgrade; on completion returns the upgraded unit type and keeps
+    /// `progress %= 1f` (Java does not reset).
+    ///
+    /// `progress` only counts once `move_in` reaches 1
+    /// (`Reconstructor.updateTile` -> `moveInPayload()` gate).
     pub fn update(
         &mut self,
         reconstructor: &Reconstructor,
         delta_progress: f32,
+        edelta: f32,
     ) -> Option<UnitTypeId> {
         let current = self.payload?;
         let target = reconstructor.can_upgrade(current)?;
+        if self.move_in < 1.0 {
+            self.move_in = (self.move_in + edelta / 20.0).min(1.0);
+            return None;
+        }
         self.progress += delta_progress;
         if self.progress < reconstructor.construct_time {
             return None;
@@ -681,8 +696,10 @@ mod tests {
         );
         assert!(build.accept_payload(&recon, dagger));
         assert!(!build.accept_payload(&recon, dagger), "already occupied");
-        assert_eq!(build.update(&recon, 60.0), None);
-        assert_eq!(build.update(&recon, 60.0), Some(mace));
+        // `moveInPayload()`: the first tick only advances the payload travel.
+        assert_eq!(build.update(&recon, 0.0, 100.0), None);
+        assert_eq!(build.update(&recon, 60.0, 1.0), None);
+        assert_eq!(build.update(&recon, 60.0, 1.0), Some(mace));
     }
 
     #[test]
