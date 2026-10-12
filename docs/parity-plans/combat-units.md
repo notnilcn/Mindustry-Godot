@@ -853,6 +853,15 @@ a tile damages a building there and burns out; `incendChance` bullets create fir
   incend_amount = 1, incend_spread = 0` hitting at (5,5) leaves a fire there
   (use `fires::has(&world, 5, 5)` right after the hit).
 
+**Status 2026-10-12:** done — commit 1e74c4d. `Sim::update_fires_and_puddles`
+runs both live passes against `Sim.grid.tiles` from `Sim::tick` (before
+`resolve_deaths`); the `PuddleComp` effects branch (liquid status to units in
+the rect, hot-liquid ignition, 40-tick re-arm) and `BuildingComp.splashLiquid`
+(destroyed liquid containers, `damageExplosions`) are ported. Tests:
+`live_puddle_evaporates` (wet + evaporation), `live_fire_burns_building`,
+`incend_bullet_creates_fire`, `live_destroyed_liquid_container_splashes`.
+`Damage.dynamicExplosion` for explosive contents still unported (noted in §12).
+
 ---
 
 ## 9. PAR-0090 — save/load drops fires and puddles
