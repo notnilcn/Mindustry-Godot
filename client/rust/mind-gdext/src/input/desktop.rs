@@ -1104,6 +1104,13 @@ impl DesktopBridge {
                 Ok(enabled) => enabled,
                 Err(_) => return,
             };
+            // `SwitchBlock.SwitchBuild.clickSound.at(this)`
+            // (`SwitchBlock.java:58-62`; T9): the UI click goes through the
+            // `MindUi` signal like every other UI sound (plan 18).
+            if let Some(mut ui) = host.try_get_node_as::<godot::classes::Node>("/root/MindUi") {
+                let name = GString::from("click");
+                ui.call("play_ui_sound", &[name.to_variant()]);
+            }
             self.emit_action(RemoteAction::Configure {
                 x: tx,
                 y: ty,
