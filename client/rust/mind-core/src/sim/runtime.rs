@@ -149,6 +149,9 @@ pub struct SimRuntime {
     hooks: SimHooks,
     log: WorldEventLog,
     render: NoopRenderHooks,
+    /// Entities whose facing edge is rescanned every tick (`BeamDrill`/
+    /// `WallCrafter`; T5). Stale entries are dropped by the refresh pass.
+    facing_drills: Vec<Entity>,
 }
 
 impl SimRuntime {
@@ -427,6 +430,11 @@ impl SimRuntime {
                 entity,
             );
             self.merge_power_graph(world, grid, entity);
+            // Facing drills rescan every tick (`BeamDrill.updateFacing` /
+            // `WallCrafter.getEfficiency`; T5).
+            if self.is_facing_drill(world, entity) && !self.facing_drills.contains(&entity) {
+                self.facing_drills.push(entity);
+            }
         }
         if let Some(mut counter) = world.get_resource_mut::<BlockCounter>() {
             counter.add(team, block, 1);
@@ -656,6 +664,25 @@ impl SimRuntime {
     }
 
     /// Shared `Tile.remove` half of break/destroy.
+    /// `BeamDrill.updateFacing`/`WallCrafter.getEfficiency` (T5): whether this
+    /// building's facing edge is rescanned every tick.
+    fn is_facing_drill(&self, world: &World, entity: Entity) -> bool {
+        world
+            .get::<crate::entities::comp::Building>(entity)
+            .and_then(|building| {
+                world
+                    .get_resource::<BlockTable>()
+                    .and_then(|table| table.get(building.block))
+            })
+            .is_some_and(|inst| {
+                matches!(
+                    inst.kind_data,
+                    crate::world::BlockKindData::BeamDrill(_)
+                        | crate::world::BlockKindData::WallCrafter(_)
+                )
+            })
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn remove_building(
         &mut self,
@@ -669,6 +696,7 @@ impl SimRuntime {
     ) {
         let _ = remove_from_proximity(world, entity, &self.content);
         self.remove_power_graph(world, grid, entity);
+        self.facing_drills.retain(|drill| *drill != entity);
         {
             let mut ctx = WorldCtx {
                 grid: &mut *grid,
@@ -762,6 +790,12 @@ impl SimRuntime {
         }
         for entity in &spawned {
             self.merge_power_graph(ecs, grid, *entity);
+        }
+        // Materialized facing drills join the per-tick rescan (T5).
+        for entity in &spawned {
+            if self.is_facing_drill(ecs, *entity) && !self.facing_drills.contains(entity) {
+                self.facing_drills.push(*entity);
+            }
         }
         spawned.len()
     }
@@ -899,6 +933,41 @@ impl Sim {
         self.block_runtime.as_mut()
     }
 
+    /// `BeamDrill.updateFacing`/`WallCrafter.getEfficiency` (T5): rescans the
+    /// facing edge of every registered facing drill once per tick.
+    ///
+    /// The behaviors cannot see the grid (`update_tile` takes only `&mut World`),
+    /// so `Sim::tick` runs this pass after the scheduled systems and before the
+    /// builder pass.
+    pub(crate) fn refresh_facing_drills(&mut self) {
+        let Some(runtime) = self.block_runtime.as_mut() else {
+            return;
+        };
+        if runtime.facing_drills.is_empty() {
+            return;
+        }
+        let drills = std::mem::take(&mut runtime.facing_drills);
+        for entity in drills {
+            if self
+                .ecs
+                .0
+                .get::<crate::entities::comp::Building>(entity)
+                .is_none()
+            {
+                continue;
+            }
+            if runtime.is_facing_drill(&self.ecs.0, entity) {
+                crate::world::behavior::production::refresh_drill_ore(
+                    &mut self.ecs.0,
+                    &self.grid,
+                    runtime.content(),
+                    entity,
+                );
+                runtime.facing_drills.push(entity);
+            }
+        }
+    }
+
     /// Installs the live building runtime with default configuration (no
     /// placement gate). Content is booted from the vanilla registry.
     pub fn install_block_runtime(&mut self) -> Result<(), RuntimeError> {
@@ -972,6 +1041,7 @@ impl Sim {
             },
             log: WorldEventLog::default(),
             render: NoopRenderHooks,
+            facing_drills: Vec::new(),
         });
         // A host may install the runtime after loading a grid with pre-placed
         // power buildings (`World.endMapLoad` rebuild).

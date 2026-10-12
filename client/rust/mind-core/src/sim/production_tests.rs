@@ -1106,6 +1106,55 @@ fn oil_extractor_needs_oil_floor() {
     assert!((oil - 10.5).abs() < 1.5, "oil pumped {oil}");
 }
 
+/// T5 (`BeamDrill.updateFacing`, `BeamDrill.java:237-266`): the facing scan runs
+/// every tick, so removing the wall ore in front stops production; the port
+/// cached the scan at placement.
+#[test]
+fn plasma_bore_stops_when_ore_removed() {
+    let mut sim = runtime_sim();
+    let ore =
+        crate::content::BlockId::new(sim.world_block_id("ore-wall-beryllium").expect("ore wall"));
+    let wall = crate::content::BlockId::new(
+        sim.world_block_id("beryllic-stone-wall")
+            .expect("static wall"),
+    );
+    for y in [5, 6] {
+        let tile = sim.grid.tiles.get_mut(9, y);
+        tile.block = wall;
+        tile.overlay = ore;
+    }
+    let _source = place(&mut sim, "power-source", 4, 5);
+    let bore = place(&mut sim, "plasma-bore", 5, 5);
+    let beryllium = item(&sim, "beryllium");
+    for _ in 0..400 {
+        sim.tick().expect("tick");
+    }
+    let produced = stored_item(&sim, bore, beryllium);
+    assert!(produced > 0, "bore produced before removal: {produced}");
+
+    // Remove the ore overlay; within one tick the facing scan reports nothing.
+    for y in [5, 6] {
+        sim.grid.tiles.get_mut(9, y).overlay = crate::content::BlockId::AIR;
+    }
+    sim.tick().expect("tick");
+    let facing = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::DrillState>(bore)
+        .map(|state| state.facing_amount)
+        .unwrap_or(-1.0);
+    assert_eq!(facing, 0.0, "facing rescan dropped the removed ore");
+    let before = stored_item(&sim, bore, beryllium);
+    for _ in 0..400 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        stored_item(&sim, bore, beryllium),
+        before,
+        "no production once the ore is gone"
+    );
+}
+
 /// Whether a unit of type `unit` exists in the sim.
 fn spawned_unit(sim: &Sim, unit: crate::content::UnitTypeId) -> bool {
     sim.ecs.0.iter_entities().any(|entity| {
