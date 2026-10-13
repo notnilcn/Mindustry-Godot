@@ -1763,3 +1763,45 @@ fn overdrive_does_not_boost_enemy() {
         "the enemy press is not boosted"
     );
 }
+
+/// G06 T1 (PAR-0106): the live sim refreshes the logic globals every tick
+/// before entity updates, so `@tick` equals the tick the instruction runs in.
+#[test]
+fn live_tick_global_advances() {
+    let mut sim = runtime_sim();
+    let globals = {
+        let content = sim.block_runtime().expect("runtime").content();
+        crate::logic::globals::GlobalVars::with_content(content)
+    };
+    sim.ecs.0.insert_resource(globals);
+    let id = sim.world_block_id("micro-processor").expect("block");
+    sim.command(SimCommand::Place {
+        x: 10,
+        y: 10,
+        block: id,
+        rotation: 0,
+        team: 1,
+        player: None,
+    })
+    .expect("placed");
+    let processor = sim.grid.entity_at(TilePos::new(10, 10)).expect("entity");
+    let bytes = crate::logic::blocks::logic_block::compress("set t @tick\n", &[]);
+    configure(
+        &mut sim,
+        10,
+        10,
+        crate::determinism::ConfigValue::Bytes(bytes),
+    );
+    for _ in 0..30 {
+        sim.tick().expect("tick");
+    }
+    let state = sim
+        .ecs
+        .0
+        .get::<crate::logic::blocks::LogicBlockState>(processor)
+        .expect("state");
+    let t = state.executor.optional_var("t").expect("t");
+    // `set` runs as the first of the micro-processor's 2 ipt each tick, in the
+    // tick where `@tick = state.tick + 1` (Logic.java:526-546).
+    assert_eq!(state.executor.arena.get(t).num(), 30.0);
+}

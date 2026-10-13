@@ -22,7 +22,7 @@ use crate::entities::comp::{Building, Pos, TeamComp};
 use crate::io::entity::{EntityReader, EntityWriter};
 use crate::logic::assembler::Assembler;
 use crate::logic::executor::{Executor, Instruction};
-use crate::logic::value::{LogicObject, VarRef, conv};
+use crate::logic::value::{LogicObject, VarRef};
 use crate::world::behavior::BuildingBehavior;
 use crate::world::config::ConfigValue;
 use crate::world::update::edelta;
@@ -194,10 +194,15 @@ impl LogicBlockState {
                 .set_const(Some(LogicObject::Building(e)));
         }
         if let Some(building) = world.get::<Building>(e) {
-            let tx = building.tile.x() as f32;
-            let ty = building.tile.y() as f32;
-            asm.put_num_const("@thisx", conv(tx) as f64);
-            asm.put_num_const("@thisy", conv(ty) as f64);
+            let tx = building.tile.x();
+            let ty = building.tile.y();
+            // Java `LogicBuild.updateCode`: `asm.putConst("@thisx", World.conv(x))`
+            // with the building centre `x = tile.x * tilesize + block.offset`,
+            // `offset = ((size + 1) % 2) * tilesize / 2` (Block.java:774).
+            let size = block_size_of(world, e).unwrap_or(1);
+            let offset = ((size + 1) % 2) as f64 * 4.0;
+            asm.put_num_const("@thisx", tx as f64 + offset / 8.0);
+            asm.put_num_const("@thisy", ty as f64 + offset / 8.0);
         }
 
         self.executor.build = Some(e);

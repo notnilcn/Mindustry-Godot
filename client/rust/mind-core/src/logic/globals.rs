@@ -75,6 +75,10 @@ pub struct GlobalUpdate {
     pub client: bool,
     /// `player.locale()`.
     pub client_locale: Option<String>,
+    /// `player.unit()`.
+    pub client_unit: Option<bevy_ecs::entity::Entity>,
+    /// `player.name()`.
+    pub client_name: Option<String>,
     /// `player.team().id`.
     pub client_team: u8,
     /// `mobile`.
@@ -193,7 +197,6 @@ impl GlobalVars {
         self.put_num("@second", 0.0, false);
         self.put_num("@minute", 0.0, false);
         self.put_num("@waveNumber", 0.0, false);
-        self.put_num("@wave", 0.0, false);
         self.put_num("@waveTime", 0.0, false);
         self.put_num("@mapw", 0.0, false);
         self.put_num("@maph", 0.0, false);
@@ -273,8 +276,26 @@ impl GlobalVars {
         ] {
             for entry in content.entries(type_) {
                 let Some(name) = entry.name else { continue };
-                if type_ == ContentType::Block
-                    && content.get_by_name(ContentType::Item, name).is_some()
+                if type_ == ContentType::Block {
+                    if content.get_by_name(ContentType::Item, name).is_some() {
+                        continue;
+                    }
+                    // `GlobalVars.init` skips `LegacyBlock`s (the three legacy
+                    // block kinds registered in `blocks/legacy.rs`).
+                    if content.block_by_name(name).is_some_and(|def| {
+                        matches!(
+                            def.kind,
+                            crate::content::registries::blocks::BlockKind::LegacyMechPad
+                                | crate::content::registries::blocks::BlockKind::LegacyUnitFactory
+                                | crate::content::registries::blocks::BlockKind::LegacyCommandCenter
+                        )
+                    }) {
+                        continue;
+                    }
+                }
+                // `GlobalVars.init` skips `type.internal` units.
+                if type_ == ContentType::Unit
+                    && content.unit_by_name(name).is_some_and(|def| def.internal)
                 {
                     continue;
                 }
@@ -358,7 +379,8 @@ impl GlobalVars {
         self.set_num_raw("@second", update.tick as f64 / 60.0);
         self.set_num_raw("@minute", update.tick as f64 / 3600.0);
         self.set_num_raw("@waveNumber", update.wave as f64);
-        self.set_num_raw("@wave", update.wave as f64);
+        // `@wave` is not a Java constant (only `@waveNumber` is; GlobalVars.java
+        // has no `put("@wave", ...)` call).
         self.set_num_raw("@waveTime", update.wavetime as f64 / 60.0);
         self.set_num_raw("@mapw", update.map_width as f64);
         self.set_num_raw("@maph", update.map_height as f64);
@@ -367,6 +389,11 @@ impl GlobalVars {
         self.set_obj_raw(
             "@clientLocale",
             update.client_locale.clone().map(LogicObject::Str),
+        );
+        self.set_obj_raw("@clientUnit", update.client_unit.map(LogicObject::Unit));
+        self.set_obj_raw(
+            "@clientName",
+            update.client_name.clone().map(LogicObject::Str),
         );
         self.set_num_raw("@clientTeam", update.client_team as f64);
         self.set_num_raw(
@@ -585,6 +612,10 @@ mod tests {
         assert!(g.get("@rain", false).is_some());
         assert!(g.get("@status-wet", false).is_some());
         assert!(g.get("@sharded", false).is_some());
+        // `GlobalVars.init`: legacy blocks and internal units do not register.
+        assert!(g.get("@legacy-mech-pad", false).is_none());
+        assert!(g.get("@block", false).is_none());
+        assert!(g.get("@dummy", false).is_none());
         // Deviation 9: no `@<type>Count` constants without `logicids.dat`.
         assert!(g.get("@itemCount", false).is_none());
     }
@@ -607,7 +638,8 @@ mod tests {
         assert_eq!(g.get("@second", false).unwrap().num, 3.0);
         assert_eq!(g.get("@minute", false).unwrap().num, 0.05);
         assert_eq!(g.get("@waveNumber", false).unwrap().num, 4.0);
-        assert_eq!(g.get("@wave", false).unwrap().num, 4.0);
+        // `@wave` is not a Java global (only `@waveNumber`).
+        assert!(g.get("@wave", false).is_none());
         assert_eq!(g.get("@waveTime", false).unwrap().num, 5.0);
         assert_eq!(g.get("@mapw", false).unwrap().num, 16.0);
         assert_eq!(g.get("@maph", false).unwrap().num, 24.0);

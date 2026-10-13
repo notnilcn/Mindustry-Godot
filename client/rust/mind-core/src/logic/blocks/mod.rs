@@ -707,4 +707,36 @@ mod integration_tests {
         names.sort();
         assert_eq!(names, vec!["cell1".to_string(), "cell2".to_string()]);
     }
+
+    #[test]
+    fn thisx_matches_java_conv() {
+        // `@thisx = World.conv(building.x)` with the centre
+        // `tile.x * 8 + ((size + 1) % 2) * 4` (Block.java:774): a 2x2 processor
+        // anchored at tile 4 reads 4.5, a 1x1 micro reads the whole tile.
+        let mut harness = BuildHarness::new(16, 16, 1);
+        let processor = harness
+            .content()
+            .block_id("logic-processor")
+            .expect("logic-processor");
+        let micro = harness
+            .content()
+            .block_id("micro-processor")
+            .expect("micro-processor");
+        assert!(harness.place(4, 4, processor, 0, true));
+        assert!(harness.place(8, 8, micro, 0, true));
+        // `@thisx/@thisy` are written by `updateCode`, which runs on config.
+        let empty = ConfigValue::Bytes(logic_block::compress("", &[]).into());
+        assert!(harness.configure(4, 4, empty.clone()));
+        assert!(harness.configure(8, 8, empty));
+        let pe = harness.build_at(4, 4).expect("processor");
+        let me = harness.build_at(8, 8).expect("micro");
+        let state = harness.world.get::<LogicBlockState>(pe).expect("state");
+        let x = state.executor.arena.get_id("@thisx").expect("@thisx");
+        let y = state.executor.arena.get_id("@thisy").expect("@thisy");
+        assert_eq!(state.executor.arena.get(x).num, 4.5);
+        assert_eq!(state.executor.arena.get(y).num, 4.5);
+        let state = harness.world.get::<LogicBlockState>(me).expect("state");
+        let x = state.executor.arena.get_id("@thisx").expect("@thisx");
+        assert_eq!(state.executor.arena.get(x).num, 8.0);
+    }
 }

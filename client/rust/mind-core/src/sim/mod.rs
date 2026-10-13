@@ -687,6 +687,9 @@ impl Sim {
         // mutate the world mid-tick.
         self.pump_io(IoSet::Apply);
         self.triggers.fire(Trigger::Update, &mut self.ecs.0);
+        // `Logic.update` -> `logicVars.update()` (Logic.java:546) runs before
+        // the entity update pass so processors observe the incremented tick.
+        self.update_logic_globals();
         self.schedule.run(&mut self.ecs.0);
         // `BeamDrill.updateFacing`/`WallCrafter.getEfficiency` (T5): the facing
         // rescan needs the grid, so it runs outside the scheduled behaviors.
@@ -717,6 +720,59 @@ impl Sim {
         // `IoSet::Capture` is the post-update boundary.
         self.pump_io(IoSet::Capture);
         Ok(())
+    }
+
+    /// `Logic.update` -> `logicVars.update()` (Logic.java:546), before entity
+    /// updates: processors observe the already-incremented tick.
+    fn update_logic_globals(&mut self) {
+        if self
+            .ecs
+            .0
+            .get_resource::<crate::logic::globals::GlobalVars>()
+            .is_none()
+        {
+            return;
+        }
+        let (wave, wavetime) = self
+            .ecs
+            .0
+            .get_resource::<crate::game::runtime::CampaignRuntime>()
+            .map(|rt| (rt.session.wave, rt.session.wavetime))
+            .unwrap_or((1, 0.0));
+        // Same chain as `gdext/sim_host.rs` `player_team`.
+        let client_team = self
+            .ecs
+            .0
+            .get_resource::<crate::game::runtime::CampaignRuntime>()
+            .map(|rt| rt.session.rules.default_team)
+            .or_else(|| {
+                self.ecs
+                    .0
+                    .get_resource::<crate::world::limits::BuildRules>()
+                    .map(|rules| rules.default_team)
+            })
+            .unwrap_or(crate::ecs::TeamId::SHARDED.0);
+        let update = crate::logic::globals::GlobalUpdate {
+            // Java increments `state.tick` before `logicVars.update()`
+            // (Logic.java:526-546), so processors see tick N during tick N.
+            tick: self.state.tick + 1,
+            wave,
+            wavetime,
+            map_width: self.grid.width(),
+            map_height: self.grid.height(),
+            server: true,
+            client: false,
+            // The port has no player-name/locale settings in core; Java reads
+            // `player.locale()` / `player.name()` (GlobalVars.java:211-216).
+            client_locale: Some("en".to_owned()),
+            client_name: Some("player".to_owned()),
+            client_team,
+            client_mobile: false,
+            client_music_playing: false,
+            client_current_music: None,
+            client_unit: self.player_unit(),
+        };
+        crate::logic::globals::GlobalVars::update_world(&mut self.ecs.0, &update);
     }
 
     /// Monotonic update counter (`GameState.updateId`).
